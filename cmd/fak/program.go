@@ -22,12 +22,22 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/programreport"
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 func cmdProgram(argv []string) {
-	dispatchSubcommands("program", "report", argv,
+	dispatchSubcommands("program", "report | selfcheck", argv,
 		subcommand{"report", runProgramReport},
+		subcommand{"selfcheck", runProgramSelfcheck},
 	)
+}
+
+// runProgramSelfcheck runs the deterministic source-level page-vs-act proof for
+// the program report — no key, no network, no fixtures.
+func runProgramSelfcheck(stdout, stderr io.Writer, argv []string) int {
+	return runReportSelfcheck(stdout, stderr, argv, "program", programreport.TriageSelfcheck,
+		"SELFCHECK OK -- decenter-the-human at the program gate: an incomplete report with a "+
+			"runnable rerun routes to the fleet; one that names authority still pages.")
 }
 
 // runProgramReport collects the two ongoing-program frontier signals, folds them,
@@ -102,7 +112,10 @@ func runProgramReport(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *check {
-		code, message := programreport.CheckGate(report)
+		// Decenter the human at the source: under FAK_PROGRAM_TRIAGE_GATE=enforce an
+		// incomplete report whose NextAction is a runnable rerun routes to the fleet
+		// instead of paging. Default ("", "warn") is the unchanged advisory gate.
+		code, message := programreport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_PROGRAM_TRIAGE_GATE")))
 		if *asJSON {
 			_ = writeIndentedJSONNoEscape(stdout, report.WithGate(code, message))
 		} else {

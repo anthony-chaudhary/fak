@@ -20,11 +20,17 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 func cmdCadence(argv []string) { os.Exit(runCadence(os.Stdout, os.Stderr, argv)) }
 
 func runCadence(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "selfcheck" {
+		return runReportSelfcheck(stdout, stderr, argv[1:], "cadence", cadencereport.TriageSelfcheck,
+			"SELFCHECK OK -- decenter-the-human at the cadence gate: an incomplete report with a "+
+				"runnable rerun routes to the fleet; one that names authority still pages.")
+	}
 	fs := flag.NewFlagSet("cadence", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
@@ -107,7 +113,10 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *check {
-		code, message := cadencereport.CheckGate(report)
+		// Decenter the human at the source: under FAK_CADENCE_TRIAGE_GATE=enforce an
+		// incomplete report whose NextAction is a runnable rerun routes to the fleet
+		// instead of paging. Default ("", "warn") is the unchanged advisory gate.
+		code, message := cadencereport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_CADENCE_TRIAGE_GATE")))
 		if *asJSON {
 			emitCadenceJSON(stdout, report.WithGate(code, message))
 		} else {

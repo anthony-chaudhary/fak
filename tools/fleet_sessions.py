@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-r"""fleet_sessions — the cross-account "what stopped, why, and how to resume" index.
+r"""fleet_sessions â€” the cross-account "what stopped, why, and how to resume" index.
 
 The problem this kills: with N Claude Code accounts under ``<home>/.claude*``,
 when a headless worker stops you otherwise have to GUESS which account owns it,
 whether it really stopped or is just idle, why it stopped, and whether its
 account is rate-limited. Resuming under the wrong account fails with
 "No conversation found with session ID". This tool answers all of that
-deterministically from the on-disk transcripts — no guessing.
+deterministically from the on-disk transcripts â€” no guessing.
 
 Signals (transcript format v2.1.x):
   throttle  : a `<synthetic>` assistant message ".. limit . resets <when>"
@@ -42,6 +42,10 @@ import fleet_session_signals  # noqa: E402
 USER = os.environ.get("FLEET_USER_HOME", os.path.expanduser("~"))
 NOW = dt.datetime.now(dt.timezone.utc)
 LIVE_MIN = 4.0
+# read_tail's window. A transcript at or below it is read WHOLE, so "the model never
+# emitted a real assistant turn" (NEVER_STARTED) is authoritative rather than a tail
+# artifact -- a session that truly never started is a few KB, far under this.
+NEVER_STARTED_MAX_BYTES = 512 * 1024
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DONE_RE = re.compile(r"\b(complete|completed|shipped|pushed|committed|delivered|"
                      r"lease released|all checks|all set|terminated cleanly|"
@@ -136,6 +140,7 @@ CATEGORY = {
     "STOPPED_CONTEXT_EXHAUSTED": ("INFRA", "context_exhausted"),
     "INFRA_AUTH":    ("INFRA",   "auth"),
     "INFRA_ORG_DISABLED": ("INFRA", "org_disabled"),
+    "NEVER_STARTED": ("AGENT",   "never_started"),
     "PARKED_WAIT":   ("HANGING", "parked_on_task"),
     "STOPPED_QUIET": ("HANGING", "ambiguous_quiet"),
 }
@@ -231,6 +236,7 @@ def classify(path):
     pending = None          # an assistant tool_use still awaiting its tool_result
     last = None             # summary of the last meaningful user/assistant record
     last_kind = None        # nature of that final record (drives DONE vs DEAD vs USER_CLOSED)
+    saw_assistant = False   # did the MODEL ever emit a real (non-synthetic) assistant turn?
     for ln in read_tail(path):
         ln = ln.strip()
         if not ln:
@@ -256,6 +262,8 @@ def classify(path):
         last = {"role": m.get("role", o.get("type")), "txt": txt,
                 "syn": m.get("model") == "<synthetic>", "stop": m.get("stop_reason")}
         if o.get("type") == "assistant":
+            if m.get("model") != "<synthetic>":
+                saw_assistant = True     # a genuine model turn (not a harness banner)
             n = last_tooluse(c)
             if n:
                 pending = n
@@ -322,6 +330,14 @@ def classify(path):
         disp, reason = "USER_CLOSED", "ended on %s (user intentionally stopped it)" % last_kind
     elif pending:
         disp, reason = "DEAD_MIDTOOL", "died mid tool_use (%s) with no tool_result" % pending
+    elif not saw_assistant and st.st_size <= NEVER_STARTED_MAX_BYTES:
+        # Launched (a goal/prompt was written) but the model never emitted a single
+        # real assistant turn, and the session is past LIVE_MIN. This is a launch/dispatch
+        # non-start, NOT a mid-work hang: on 2026-07-09 it was 98/114 "HANGING" rows, 57 of
+        # them born in one 3-minute dispatch wave. Split out so the HANGING headline stops
+        # conflating never-started, cleanly-parked, and genuinely-hung. Resumable (there is
+        # no partial work to lose) -> decide() re-launches an autonomous one.
+        disp, reason = "NEVER_STARTED", "launched but produced no assistant turn (never started)"
     elif PARK_RE.search(lt):
         disp, reason = "PARKED_WAIT", "parked awaiting a background task"
     elif last_kind == "assistant_end" or (last and last.get("role") == "assistant" and DONE_RE.search(lt)):
@@ -333,7 +349,7 @@ def classify(path):
     else:
         disp, reason = "STOPPED_QUIET", "quiet; no completion/crash/close signal"
     category, cause = CATEGORY.get(disp, ("HANGING", "unknown"))
-    # autonomy / ownership — parse the HEAD RECORDS (the session's own directive),
+    # autonomy / ownership â€” parse the HEAD RECORDS (the session's own directive),
     # not a content blob. A session is autonomous only if it was actually launched
     # with /goal|/loop|/dispatch|/fanout|/next-up, or a Stop-hook goal was installed,
     # or it carries the supervised-worker marker. This avoids flagging interactive
@@ -556,7 +572,7 @@ INFRA_RESUMABLE = ("STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_ORG_DISABLED")
 # (a resume re-hits the same 409 wall) and not STOPLIKE (so decide() never stamps a
 # resume_cmd for it -- the recovery is a FRESH continuation, not `claude --resume`).
 STOPLIKE = DEAD | set(INFRA_RESUMABLE) | {"STOPPED_QUIET", "INFRA_AUTH",
-                   "USER_CLOSED", "PARKED_WAIT"}
+                   "USER_CLOSED", "PARKED_WAIT", "NEVER_STARTED"}
 REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"))
 RESUME_PROMPT = ("Resume where you left off; re-establish any /goal or /loop "
                  "and continue toward it.")
@@ -878,7 +894,9 @@ def _resumable_disp(r):
     interactive chat the human walked away from after a crash is not relaunched."""
     if r["disp"] in INFRA_RESUMABLE:
         return True
-    return bool(r.get("autonomous")) and r["disp"] in DEAD
+    # NEVER_STARTED joins the autonomy-gated resumable set: an autonomous goal that never
+    # produced a turn has no partial work, so re-launching it is the lowest-risk resume.
+    return bool(r.get("autonomous")) and (r["disp"] in DEAD or r["disp"] == "NEVER_STARTED")
 
 
 def _dedup_defer(rows, reg_dir=None):
@@ -1033,9 +1051,9 @@ def decide(rows, throttle, availability=None):
         elif r["disp"] == "LIVE":
             r["action"] = "SKIP_LIVE"
         elif r["disp"] == "DONE":
-            r["action"] = "SKIP_DONE"               # finished cleanly — do NOT resume
+            r["action"] = "SKIP_DONE"               # finished cleanly â€” do NOT resume
         elif r["disp"] == "USER_CLOSED":
-            r["action"] = "SKIP_USER_CLOSED"        # user stopped it on purpose — honor it
+            r["action"] = "SKIP_USER_CLOSED"        # user stopped it on purpose â€” honor it
         elif r["disp"] == "PARKED_WAIT":
             r["action"] = "SKIP_PARKED"
         elif r["supervised"]:
@@ -1126,8 +1144,13 @@ def decide(rows, throttle, availability=None):
         elif r["disp"] in DEAD and r["autonomous"]:
             # AGENT crash, autonomous -> resume; escalate to another seat if it keeps dying here.
             _resume_inplace_or_escalate(r, availability, assigned, inplace_counts)
-        elif r["disp"] in DEAD or r["disp"] == "STOPPED_QUIET":
-            r["action"] = "SURFACE"                 # agent crash / quiet stop but interactive -> human
+        elif r["disp"] == "NEVER_STARTED" and r["autonomous"]:
+            # Launched autonomous goal that never produced a turn -> re-launch it (no partial
+            # work to lose). Same escalation machinery as a crash: if it keeps failing to
+            # start on this seat it moves to a fresh one after RESUME_ESCALATE_AFTER tries.
+            _resume_inplace_or_escalate(r, availability, assigned, inplace_counts)
+        elif r["disp"] in DEAD or r["disp"] in ("STOPPED_QUIET", "NEVER_STARTED"):
+            r["action"] = "SURFACE"                 # agent crash / quiet stop / non-auton non-start -> human
         else:
             r["action"] = "SKIP"
         r["resume_cmd"] = resume_cmd(r) if r["disp"] in STOPLIKE else None
@@ -1190,7 +1213,7 @@ def plan_entry(r):
 # ---- observability: storm + per-account health summary (registry `summary` block) ----
 # A first-class, pre-aggregated view of the registry so every downstream consumer
 # (dispatch preflight, the Prometheus/Grafana sink, operators) sees the crash-loop
-# STORM and per-account health WITHOUT re-deriving it from thousands of raw rows —
+# STORM and per-account health WITHOUT re-deriving it from thousands of raw rows â€”
 # the exact blindness that let a bloated 23k-row registry read as "saturated" when the
 # fleet was actually 0/24 with every account rate-limited. The recency buckets
 # (15/30/60m) turn a slow whole-window count into a rate the dashboard graphs over time.
@@ -1374,14 +1397,14 @@ def main():
         auto = [r for r in rows if r["action"] == "AUTO_RESUME"]
         surf = [r for r in rows if r["action"] == "SURFACE"]
         print_accounts(throttle, rows, auth)
-        print("# AUTO-RESUMABLE (autonomous, dead, account available) — safe to run:\n")
+        print("# AUTO-RESUMABLE (autonomous, dead, account available) â€” safe to run:\n")
         for r in auto:
             print(f"# [{r['disp']}] {r['project']} ({r['git']})  age={r['age_min']}m")
             print(r["resume_cmd"])
             print()
         if not auto:
             print("# (none right now)\n")
-        print("# SURFACE — stopped but interactive; resume only if you mean to:\n")
+        print("# SURFACE â€” stopped but interactive; resume only if you mean to:\n")
         for r in surf:
             print(f"# [{r['disp']}] {r['project']} age={r['age_min']}m  -- {r['last'][:70]}")
             print(r["resume_cmd"])
@@ -1401,7 +1424,7 @@ def main():
         print()
     order = ["STOPPED_LIMIT", "STOPPED_APIERR", "STOPPED_CONTEXT_EXHAUSTED",
              "INFRA_AUTH", "INFRA_ORG_DISABLED",
-             "DEAD_MIDTOOL", "DEAD_KILLED",
+             "DEAD_MIDTOOL", "DEAD_KILLED", "NEVER_STARTED",
              "USER_CLOSED", "STOPPED_QUIET", "PARKED_WAIT", "LIVE", "DONE"]
     counts, acts, cats = {}, {}, {}
     for r in rows:

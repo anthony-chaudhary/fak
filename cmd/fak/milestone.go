@@ -29,19 +29,29 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/milestonepost"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 func cmdMilestone(argv []string) {
-	dispatchSubcommands("milestone", "report | post | status-doc", argv,
+	dispatchSubcommands("milestone", "report | post | status-doc | selfcheck", argv,
 		subcommand{"report", runMilestoneReport},
 		subcommand{"post", runMilestonePost},
 		subcommand{"status-doc", runMilestoneStatusDoc},
+		subcommand{"selfcheck", runMilestoneSelfcheck},
 	)
 }
 
 // runMilestoneReport folds the two dimensions, attaches the per-tick trend vs the
 // durable ledger, optionally appends the tick, and renders/JSON/gates -- the milestone
 // twin of runCadence.
+// runMilestoneSelfcheck runs the deterministic source-level page-vs-act proof for
+// the milestone report — no key, no network, no fixtures.
+func runMilestoneSelfcheck(stdout, stderr io.Writer, argv []string) int {
+	return runReportSelfcheck(stdout, stderr, argv, "milestone", milestonereport.TriageSelfcheck,
+		"SELFCHECK OK -- decenter-the-human at the milestone gate: an incomplete report with a "+
+			"runnable regenerate routes to the fleet; one that names authority still pages.")
+}
+
 func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("milestone report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -125,7 +135,10 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *check {
-		code, message := milestonereport.CheckGate(report)
+		// Decenter the human at the source: under FAK_MILESTONE_TRIAGE_GATE=enforce an
+		// incomplete report whose NextAction is a runnable regenerate routes to the
+		// fleet instead of paging. Default ("", "warn") is the unchanged advisory gate.
+		code, message := milestonereport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_MILESTONE_TRIAGE_GATE")))
 		if *asJSON {
 			_ = writeIndentedJSONNoEscape(stdout, report.WithGate(code, message))
 		} else {

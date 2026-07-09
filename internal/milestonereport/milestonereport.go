@@ -723,6 +723,19 @@ func CheckGate(r Report) (int, string) {
 	return v.Exit, v.Message
 }
 
+// CheckGateTriaged is CheckGate with the decenter-the-human fold applied at the
+// source: an INCOMPLETE report whose NextAction is a runnable regenerate routes to
+// the fleet instead of paging. Soaks behind enforce (the CLI reads
+// FAK_MILESTONE_TRIAGE_GATE); enforce=false is byte-for-byte CheckGate.
+func CheckGateTriaged(r Report, enforce bool) (int, string) {
+	v := trendreport.AdvisoryGateTriaged("MILESTONE", r.Finding, r.Reason, r.NextAction, "milestone_unmeasured", enforce)
+	return v.Exit, v.Message
+}
+
+// TriageSelfcheck proves the milestone report's source-level page-vs-act fold with
+// no I/O, delegating to the shared trendreport proof.
+func TriageSelfcheck() error { return trendreport.TriageSelfcheck() }
+
 // WithGate returns a copy reconciled to a CheckGate decision, for --check --json.
 func (r Report) WithGate(code int, message string) Report {
 	r.Envelope = r.Envelope.WithGate(trendreport.GateVerdict{Exit: code, Message: message})

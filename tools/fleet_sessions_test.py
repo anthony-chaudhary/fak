@@ -551,6 +551,97 @@ class OperatorStopContextExhaustedTest(unittest.TestCase):
         self.assertIn("claude --resume", rows[0]["resume_cmd"])
 
 
+class NeverStartedTest(unittest.TestCase):
+    """A session that was launched (a goal/prompt was written) but whose model never
+    emitted a single real assistant turn is a launch NON-START, not a mid-work hang.
+    classify() must split it out of the HANGING bucket (98/114 rows on 2026-07-09), and
+    decide() must re-launch an autonomous one (no partial work to lose) rather than
+    dumping it on a human as an ambiguous quiet stop."""
+
+    def setUp(self):
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def _aged(self, recs, sid="ab345800-2222-3333-4444-999999999999"):
+        """Write recs to a transcript and age it past LIVE_MIN (else it reads LIVE)."""
+        proj = os.path.join(self._tmp, "projects", "C--work-fleet")
+        os.makedirs(proj, exist_ok=True)
+        path = os.path.join(proj, sid + ".jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for rec in recs:
+                fh.write(json.dumps(rec) + "\n")
+        old = __import__("time").time() - 3600     # 60 min old -> well past LIVE_MIN
+        os.utime(path, (old, old))
+        return path
+
+    def _user(self, text, sid):
+        return {"type": "user", "sessionId": sid, "cwd": os.getcwd(),
+                "message": {"role": "user", "content": text}}
+
+    def test_classify_goal_only_is_never_started(self) -> None:
+        sid = "ab345800-2222-3333-4444-000000000001"
+        r = fleet_sessions.classify(self._aged([self._user("work on issue #123", sid)], sid))
+        self.assertEqual(r["disp"], "NEVER_STARTED")
+        self.assertEqual(r["category"], "AGENT")
+        self.assertEqual(r["cause"], "never_started")
+
+    def test_classify_all_user_records_never_started(self) -> None:
+        # the observed cluster: three user records (goal + wrappers + stop-hook notice),
+        # zero assistant turns -- one dispatch wave that wedged at launch.
+        sid = "ab345800-2222-3333-4444-000000000002"
+        recs = [self._user("goal directive", sid), self._user("<system-reminder>", sid),
+                self._user("A session-scoped Stop hook is now active", sid)]
+        r = fleet_sessions.classify(self._aged(recs, sid))
+        self.assertEqual(r["disp"], "NEVER_STARTED")
+
+    def test_classify_synthetic_assistant_only_still_never_started(self) -> None:
+        # a harness banner (model=<synthetic>) is NOT the model running -> still never-started.
+        sid = "ab345800-2222-3333-4444-000000000003"
+        recs = [self._user("goal", sid),
+                {"type": "assistant", "sessionId": sid, "cwd": os.getcwd(),
+                 "message": {"role": "assistant", "model": "<synthetic>",
+                             "content": [{"type": "text", "text": "No response requested."}],
+                             "stop_reason": "stop_sequence"}}]
+        r = fleet_sessions.classify(self._aged(recs, sid))
+        self.assertEqual(r["disp"], "NEVER_STARTED")
+
+    def test_classify_real_assistant_then_quiet_is_not_never_started(self) -> None:
+        # produced a genuine assistant turn, then went quiet: that IS an ambiguous quiet
+        # stop (STOPPED_QUIET), distinct from a never-start. Guards the saw_assistant gate.
+        sid = "ab345800-2222-3333-4444-000000000004"
+        recs = [self._user("goal", sid),
+                {"type": "assistant", "sessionId": sid, "cwd": os.getcwd(),
+                 "message": {"role": "assistant", "model": "claude-opus-4-8",
+                             "content": [{"type": "text", "text": "starting the work"}],
+                             "stop_reason": "tool_use"}},
+                self._user("some follow-up context", sid)]
+        r = fleet_sessions.classify(self._aged(recs, sid))
+        self.assertNotEqual(r["disp"], "NEVER_STARTED")
+        self.assertEqual(r["disp"], "STOPPED_QUIET")
+
+    def test_decide_autonomous_never_started_relaunches(self) -> None:
+        rows = [_row(".claude-good-acct", "NEVER_STARTED", autonomous=True)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "AUTO_RESUME")
+        self.assertIn("claude --resume", rows[0]["resume_cmd"])
+
+    def test_decide_nonautonomous_never_started_surfaces(self) -> None:
+        rows = [_row(".claude-good-acct", "NEVER_STARTED", autonomous=False)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "SURFACE")
+
+    def test_resumable_disp_gates_on_autonomy(self) -> None:
+        self.assertTrue(fleet_sessions._resumable_disp(
+            _row("a", "NEVER_STARTED", autonomous=True)))
+        self.assertFalse(fleet_sessions._resumable_disp(
+            _row("a", "NEVER_STARTED", autonomous=False)))
+
+
 class DedupTaskTest(unittest.TestCase):
     """Identical repeating autonomous tasks (same task_sig across sids) resume ONE
     primary; the rest defer so they never stampede a healthy seat."""
