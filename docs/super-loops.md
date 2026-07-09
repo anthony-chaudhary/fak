@@ -220,6 +220,9 @@ fak superloop explain <name>        the five-property differentiation, super vs 
 fak superloop walk <name> [--json]  walk the members' status, fold the worst-first plan
 fak superloop drive <name> [--lane] walk, ENTER the one worst-first member through the
                                     same admission gate any spawn passes, then re-fold
+fak superloop drive <name> --batch N  ENTER up to N worst-first members whose regions
+                                    are mutually disjoint (and disjoint from live
+                                    leases), through the SAME gate; N<=0 = every member
 ```
 
 ## The drive rung
@@ -236,6 +239,22 @@ band-ladder discipline: B6 reaches the world only through B4's gates): a refused
 recorded on the loop ledger with the standing witness vocabulary
 (`admitted`/`refused`), and the drive **re-walks and folds** — the aggregate re-fold is
 the exit check, so a driven-but-unwitnessed member can never satisfy the intent.
+
+**Batch drive (`--batch N`).** `Drive` returns one member; `Walk` already produces a
+*fully-ranked* worklist, so a single invocation leaves the rest of the ranked work on
+the table. `--batch N` (`internal/superloop.DriveBatch`) offers the **top-N worst-first
+members** and admits each through the **same gate**, under a **member-scoped lease
+identity** so N holds coexist. Because each admitted lease stays held while the next is
+gated, the gate itself enforces the batch's **mutual disjointness** — a later member
+whose region overlaps one already admitted this batch refuses `COLLISION_RISK`, exactly
+as it refuses overlap with a live peer lease — so **throughput scales with the available
+non-colliding work** instead of one member per invocation. With no `--lane`/`--tree`,
+each member is scoped to its own region (distinct members run concurrently; a peer
+entering the *same* member is refused); an explicit operator region fences the whole
+batch to one tree (members serialize on it, by the operator's choice). Refused members
+**surface their token and are skipped** (no private spawn path); the drive **re-folds
+once** over the whole intent as the exit check. `--batch 1` (the default) is the
+historical single-member drive, unchanged.
 
 Honest fence: the drive keeps the **interior-node** property — it mutates nothing at
 its own altitude. The single action it takes is **surfacing the member's own front
