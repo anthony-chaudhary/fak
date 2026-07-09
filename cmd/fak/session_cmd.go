@@ -682,26 +682,44 @@ func (c *sessionClient) req(method, path string, body any, out any) error {
 
 // httpStatusError maps a non-2xx response to an operator-actionable error, reading
 // the OpenAI-style error envelope the gateway emits for the message text.
+// sessionHTTPError is the typed transport error the session client returns for a non-2xx
+// response. It carries the raw HTTP Status and the closed reason Code (empty when the body
+// names none) alongside the rendered message, so a programmatic caller — e.g. `fak doomloop
+// drain --deliver` deciding delivered-vs-refused — can branch on the ADJUDICATION outcome
+// via errors.As instead of string-matching a human line. Existing callers that only print
+// %v/.Error() are unaffected: Error() returns the same rendered text as before.
+type sessionHTTPError struct {
+	Status int
+	Code   string
+	msg    string
+}
+
+func (e *sessionHTTPError) Error() string { return e.msg }
+
 func httpStatusError(resp *http.Response) error {
 	msg, code := readErrEnvelope(resp.Body)
-	// A route that names a closed reason code gets a reason-specific, truthful line first:
-	// the generic status text below can be actively misleading (a 409 STEER_NO_OWNED_LOOP is
-	// NOT a stale-rev conflict — the session is fine, the steer simply has no owned loop to
-	// land in), and the whole point of the honest-steer contract (#3528) is to not lie about
-	// what happened.
+	return &sessionHTTPError{Status: resp.StatusCode, Code: code, msg: renderStatusMessage(resp.StatusCode, code, msg)}
+}
+
+// renderStatusMessage builds the human line for a non-2xx session response. A route that
+// names a closed reason code gets a reason-specific, truthful line first: the generic status
+// text below can be actively misleading (a 409 STEER_NO_OWNED_LOOP is NOT a stale-rev
+// conflict — the session is fine, the steer simply has no owned loop to land in), and the
+// whole point of the honest-steer contract (#3528) is to not lie about what happened.
+func renderStatusMessage(status int, code, msg string) string {
 	switch code {
 	case "steer_no_owned_loop":
-		return fmt.Errorf("steer not applied (STEER_NO_OWNED_LOOP): %s", msg)
+		return fmt.Sprintf("steer not applied (STEER_NO_OWNED_LOOP): %s", msg)
 	}
-	switch resp.StatusCode {
+	switch status {
 	case http.StatusConflict:
-		return fmt.Errorf("refused (409): the session is stopped (terminal) or changed under you — re-read and retry: %s", msg)
+		return fmt.Sprintf("refused (409): the session is stopped (terminal) or changed under you — re-read and retry: %s", msg)
 	case http.StatusNotFound:
-		return fmt.Errorf("not found (404): the session-control routes are not enabled on this gateway: %s", msg)
+		return fmt.Sprintf("not found (404): the session-control routes are not enabled on this gateway: %s", msg)
 	case http.StatusUnauthorized:
-		return fmt.Errorf("unauthorized (401): pass --key (or set $FAK_KEY) for a gateway with --require-key: %s", msg)
+		return fmt.Sprintf("unauthorized (401): pass --key (or set $FAK_KEY) for a gateway with --require-key: %s", msg)
 	default:
-		return fmt.Errorf("gateway returned %d: %s", resp.StatusCode, msg)
+		return fmt.Sprintf("gateway returned %d: %s", status, msg)
 	}
 }
 

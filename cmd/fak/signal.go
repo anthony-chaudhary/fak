@@ -128,8 +128,18 @@ func resolveSteerText(stdin *bool, text *string, stderr io.Writer) (string, int)
 // enqueues it; a refused (tainted/over-scoped) steer comes back as a 422, surfaced by
 // httpStatusError. The 202 response body is decoded into a small ack.
 func (c *sessionClient) steer(id, text string) (steerAck, error) {
+	return c.steerAs(id, text, "")
+}
+
+// steerAs is steer with an explicit source attribution: principal names a non-operator
+// steer source (e.g. "doomloop-guard" for a machine re-anchor nudge, #3529). Empty principal
+// ⇒ the human "operator" default. The principal is attribution only and never elevates trust
+// (the a2achan floor gates on caps+taint+scope, not the from-string), so it is safe for the
+// CLI to name a machine source without buying the input more authority than an operator steer.
+func (c *sessionClient) steerAs(id, text, principal string) (steerAck, error) {
 	var ack steerAck
-	err := c.req(http.MethodPost, "/v1/fak/session/"+url.PathEscape(id)+"/steer", gateway.SteerRequest{Text: text}, &ack)
+	err := c.req(http.MethodPost, "/v1/fak/session/"+url.PathEscape(id)+"/steer",
+		gateway.SteerRequest{Text: text, Principal: principal}, &ack)
 	return ack, err
 }
 

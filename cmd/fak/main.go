@@ -1157,13 +1157,21 @@ func controlSession(ctx context.Context, traceID, verb string, req gateway.Sessi
 // input is untrusted, screened on ingress). A tainted/over-scoped/uncapped Send is refused
 // by the SAME default-deny floor that gates a tool call; that deny-as-value becomes the
 // error the route maps to 422 — "a tainted/over-scoped steer is refused", mechanically.
-func steerSession(ctx context.Context, traceID, text string) error {
+func steerSession(ctx context.Context, traceID, principal, text string) error {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
 		return errors.New("trace_id is required")
 	}
+	// `from` is the attribution of the steer source, not a trust grant: the a2achan floor
+	// gates on caps+taint+scope (Shared ⇒ Tainted/ScopeFleet), never on the from-string, so
+	// naming a machine principal (e.g. "doomloop-guard", #3529) truthfully labels the source
+	// without buying it more authority than an operator steer. Empty ⇒ the human default.
+	from := strings.TrimSpace(principal)
+	if from == "" {
+		from = "operator"
+	}
 	key := a2achan.ChannelKey{Locale: a2achan.Session, ID: traceID}
-	v := a2achan.Default.Send(ctx, "operator", key, a2achan.Shared([]byte(text)), a2achan.CapA2ASend)
+	v := a2achan.Default.Send(ctx, from, key, a2achan.Shared([]byte(text)), a2achan.CapA2ASend)
 	if v.Kind != abi.VerdictAllow {
 		return fmt.Errorf("a2a floor refused (%s)", abi.ReasonName(v.Reason))
 	}

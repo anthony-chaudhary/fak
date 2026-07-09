@@ -94,6 +94,9 @@ func (s State) Calibrate() CalibrationReport {
 		if row.Method == GroundTruthMethod {
 			continue // the ground truth cannot calibrate against itself
 		}
+		if row.Method == MetaScorerMethod {
+			continue // the meta scorer is never its own repair target — the one-level fence (#2567)
+		}
 		if !haveOutcome[row.ObjectiveID] {
 			continue // no witnessed outcome to correlate this objective against
 		}

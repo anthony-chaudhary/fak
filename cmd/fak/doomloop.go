@@ -6,11 +6,14 @@ package main
 // pure classifier folds (effort spent vs verified forward progress), maintains a
 // durable per-worker sample history, classifies each worker, records every
 // decision to an accountability ledger, and - when asked - QUEUES a soft,
-// reversible re-anchor nudge to the worker's steer outbox. Queuing, NOT
-// delivering: no transport drains that outbox yet, so a correction here is
-// recorded-and-queued, not applied, until a drainer is wired (see below). The
-// destructive rung (kill/replace) is not here by design; the ladder tops out at
-// an operator escalation record.
+// reversible re-anchor nudge to the worker's steer outbox. Queuing is decoupled
+// from delivery: the classifier only ever writes the reversible artifact, and
+// `drain --deliver` is the wired drainer that POSTs each queued nudge onto the
+// SAME adjudicated steer bus an operator steer uses — attributed to a distinct
+// "doomloop-guard" machine principal, and failing closed per nudge when the
+// target owns no loop (#3528) or the floor refuses (#3529). The destructive rung
+// (kill/replace) is not here by design; the ladder tops out at an operator
+// escalation record.
 //
 // The SAMPLING seam is deliberately explicit. `tick` takes the effort/progress
 // counters from its caller rather than reading transcripts or git itself, so the
@@ -26,13 +29,16 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/doomloop"
@@ -42,6 +48,8 @@ const doomloopUsage = `fak doomloop - two-axis doom-loop guard (effort vs verifi
 
   tick      ingest one observation for a worker, classify its history, record the decision
   scan      fold the store into a fleet verdict table (one row per worker)
+  drain     output drainer: report queued re-anchor nudges (observe-only by default);
+            --deliver POSTs each onto the adjudicated steer bus (fails closed per nudge)
   classify  one-shot: classify a samples JSONL stream from --file or stdin
 
 Common flags:
@@ -70,6 +78,8 @@ func runDoomloop(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 		return runDoomloopTick(stdout, stderr, argv[1:])
 	case "scan":
 		return runDoomloopScan(stdout, stderr, argv[1:])
+	case "drain":
+		return runDoomloopDrain(stdout, stderr, argv[1:])
 	case "classify":
 		return runDoomloopClassify(stdout, stderr, stdin, argv[1:])
 	case "-h", "--help", "help":
@@ -380,6 +390,242 @@ func runDoomloopScan(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "%-24s %-10s %-10s streak=%d\n", r.Session, r.Result.Verdict, r.Result.Correction, r.Result.BurningFlatStreak)
 	}
 	return 0
+}
+
+// ---- drain (the correction output drainer) ----------------------------------
+//
+// drain is the read side of the correction transport. The classifier queues a
+// reversible re-anchor nudge to <store>/outbox/; drain enumerates those queued
+// packets and, by default, reports each one alongside the steer endpoint it
+// would post to — OBSERVE-only: it delivers nothing and removes nothing, so the
+// outbox stays an auditable record of what the guard would inject. The actual
+// POST is gated behind --deliver (#3529), which enacts each nudge onto the SAME
+// adjudicated steer bus an operator steer uses and fails closed per nudge when
+// the target owns no loop (#3528) or the floor refuses — the ladder never
+// silently injects text, and never claims a delivery the bus did not accept.
+// This mirrors `fak loop reap`: report by default, the outward rung behind an
+// explicit opt-in.
+
+// doomloopSteerPrincipal is the attribution a delivered nudge carries onto the steer bus.
+// It is deliberately NOT "operator": the nudge is a machine correction, and the a2achan
+// floor gates on caps+taint+scope (Shared ⇒ Tainted/ScopeFleet) rather than the from-string,
+// so naming a distinct machine principal is truthful attribution that buys no extra trust.
+const doomloopSteerPrincipal = "doomloop-guard"
+
+type drainRow struct {
+	File        string `json:"file"`
+	Session     string `json:"session"`
+	Kind        string `json:"kind"`
+	Reason      string `json:"reason"`
+	Streak      int    `json:"burning_flat_streak"`
+	Reversible  bool   `json:"reversible"`
+	Destination string `json:"destination"`
+	// Delivery outcome — populated only on --deliver. Outcome is one of "delivered",
+	// "delivered-not-archived", "refused-no-owned-loop", "refused-floor", "error"; Detail
+	// carries the refusal/error text so a refusal is never rendered as a silent success.
+	Delivered bool   `json:"delivered,omitempty"`
+	Outcome   string `json:"outcome,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+type drainReport struct {
+	Schema    string     `json:"schema"`
+	Pending   int        `json:"pending"`
+	Delivered int        `json:"delivered,omitempty"`
+	Refused   int        `json:"refused,omitempty"`
+	Nudges    []drainRow `json:"nudges"`
+}
+
+// steerDestination is the endpoint a drainer POSTs a queued nudge to. Kept as a pure string
+// builder so the observe path can report the intended target without opening a transport.
+func steerDestination(session string) string {
+	return "POST /v1/fak/session/" + session + "/steer"
+}
+
+// nudgeItem is one decoded outbox packet paired with its filename, so the deliver path can
+// archive the exact file it enacted.
+type nudgeItem struct {
+	file string
+	pkt  nudgePacket
+}
+
+// readOutboxNudges enumerates and decodes every queued nudge packet in dir, sorted by
+// filename for stable output. A missing dir returns (nil, os.ErrNotExist) so the caller can
+// treat "no outbox yet" as an empty queue.
+func readOutboxNudges(dir string) ([]nudgeItem, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var items []nudgeItem
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
+		}
+		var pkt nudgePacket
+		if err := json.Unmarshal(raw, &pkt); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", e.Name(), err)
+		}
+		items = append(items, nudgeItem{file: e.Name(), pkt: pkt})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].file < items[j].file })
+	return items, nil
+}
+
+func runDoomloopDrain(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("doomloop drain", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	store := fs.String("store", "", "state root (default: .dos/doomloop)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	deliver := fs.Bool("deliver", false, "DELIVER: POST each queued nudge onto the adjudicated steer bus (fails closed per nudge if the target owns no loop or the floor refuses)")
+	addr := fs.String("addr", defaultSessionAddr(), "gateway base URL (for --deliver)")
+	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential (for --deliver, only if the gateway sets --require-key)")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+
+	st := doomloopStore(*store)
+	dir := filepath.Join(st, "outbox")
+	items, err := readOutboxNudges(dir)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "fak doomloop drain: %v\n", err)
+		return 1
+	}
+
+	if *deliver {
+		return runDoomloopDeliver(stdout, stderr, st, dir, items, *asJSON, *addr, *key)
+	}
+
+	// ---- observe path (report the queue; deliver and remove nothing) ----
+	rows := make([]drainRow, 0, len(items))
+	for _, it := range items {
+		rows = append(rows, drainRow{
+			File: it.file, Session: it.pkt.Session, Kind: it.pkt.Kind, Reason: it.pkt.Reason,
+			Streak: it.pkt.Streak, Reversible: it.pkt.Reversible, Destination: steerDestination(it.pkt.Session),
+		})
+	}
+
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr,
+			drainReport{Schema: "fak-doomloop-drain/1", Pending: len(rows), Nudges: rows}, "fak doomloop drain")
+	}
+
+	if len(rows) == 0 {
+		fmt.Fprintf(stdout, "fak doomloop drain: outbox empty (%s) - nothing queued\n", dir)
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak doomloop drain: %d queued nudge(s) in %s (observe-only; nothing delivered or removed)\n\n", len(rows), dir)
+	tw := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "SESSION\tKIND\tREASON\tSTREAK\tREVERSIBLE\tWOULD-DELIVER-TO")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%v\t%s\n", r.Session, r.Kind, r.Reason, r.Streak, r.Reversible, r.Destination)
+	}
+	_ = tw.Flush()
+	fmt.Fprintln(stdout, "\nnote: observe-only. Run --deliver to POST these onto the adjudicated steer bus (each fails closed if the target owns no loop or the floor refuses).")
+	// A pending queue is actionable-but-not-enacted -> exit 3, so a scheduler can gate on
+	// "is the correction outbox drained?" without parsing output. Mirrors `fak loop reap`.
+	return 3
+}
+
+// runDoomloopDeliver is the wired drainer (#3529): it POSTs each queued nudge onto the SAME
+// adjudicated /steer bus an operator steer uses, attributed to the doomloop-guard machine
+// principal. Delivery is honest per nudge: a 202 archives the packet to <store>/delivered/
+// (so a re-drain never re-injects); a 409 STEER_NO_OWNED_LOOP (target owns no loop, #3528) or
+// a 422 floor refusal leaves the packet in the outbox and is reported as refused, never as a
+// silent success. Exit 3 if any nudge remains undelivered (residual), else 0.
+func runDoomloopDeliver(stdout, stderr io.Writer, store, dir string, items []nudgeItem, asJSON bool, addr, key string) int {
+	client := &sessionClient{base: strings.TrimRight(addr, "/"), key: key, hc: &http.Client{Timeout: 15 * time.Second}}
+	deliveredDir := filepath.Join(store, "delivered")
+
+	rows := make([]drainRow, 0, len(items))
+	delivered, refused := 0, 0
+	for _, it := range items {
+		row := drainRow{
+			File: it.file, Session: it.pkt.Session, Kind: it.pkt.Kind, Reason: it.pkt.Reason,
+			Streak: it.pkt.Streak, Reversible: it.pkt.Reversible, Destination: steerDestination(it.pkt.Session),
+		}
+		_, err := client.steerAs(it.pkt.Session, it.pkt.Message, doomloopSteerPrincipal)
+		if err == nil {
+			row.Delivered, row.Outcome = true, "delivered"
+			if mvErr := archiveNudge(deliveredDir, dir, it.file); mvErr != nil {
+				// Delivered, but the packet is still in the outbox: report the exact seam so a
+				// re-drain that re-injects is a known risk, not a surprise. Still counts as
+				// delivered (the steer DID land), but flagged so the operator can clean up.
+				row.Outcome, row.Detail = "delivered-not-archived", mvErr.Error()
+			}
+			delivered++
+			rows = append(rows, row)
+			continue
+		}
+		refused++
+		row.Outcome, row.Detail = classifyDeliverErr(err)
+		rows = append(rows, row)
+	}
+
+	// Residual undelivered corrections -> exit 3 (same gate as the observe path), so a
+	// scheduler can tell "outbox fully drained" (0) from "some nudges still queued" (3)
+	// without parsing output. This is applied in BOTH output modes.
+	exit := 0
+	if refused > 0 {
+		exit = 3
+	}
+
+	if asJSON {
+		if rc := encodeJSONOrFail(stdout, stderr, drainReport{
+			Schema: "fak-doomloop-drain/1", Pending: refused, Delivered: delivered, Refused: refused, Nudges: rows,
+		}, "fak doomloop drain"); rc != 0 {
+			return rc // encode failure dominates
+		}
+		return exit
+	}
+
+	if len(items) == 0 {
+		fmt.Fprintf(stdout, "fak doomloop drain --deliver: outbox empty (%s) - nothing to deliver\n", dir)
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak doomloop drain --deliver: delivered %d of %d nudge(s) onto the adjudicated steer bus as %q (%d refused)\n\n",
+		delivered, len(items), doomloopSteerPrincipal, refused)
+	tw := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "SESSION\tKIND\tREASON\tSTREAK\tOUTCOME\tDETAIL")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", r.Session, r.Kind, r.Reason, r.Streak, r.Outcome, r.Detail)
+	}
+	_ = tw.Flush()
+	if refused > 0 {
+		fmt.Fprintf(stdout, "\nnote: %d nudge(s) not delivered remain in %s (a proxy-served target owns no loop, or the floor refused). Re-drain against a --native serve, or drop the packet.\n", refused, dir)
+	}
+	return exit
+}
+
+// classifyDeliverErr maps a steer transport error to a truthful outcome token. A typed
+// sessionHTTPError lets us branch on the ADJUDICATION (no owned loop / floor refused / other)
+// rather than string-matching the human line; a bare transport error is just "error".
+func classifyDeliverErr(err error) (outcome, detail string) {
+	var he *sessionHTTPError
+	if errors.As(err, &he) {
+		switch {
+		case he.Code == "steer_no_owned_loop":
+			return "refused-no-owned-loop", he.Error()
+		case he.Status == http.StatusUnprocessableEntity:
+			return "refused-floor", he.Error()
+		default:
+			return "error", he.Error()
+		}
+	}
+	return "error", err.Error()
+}
+
+// archiveNudge moves a delivered packet out of the outbox into <store>/delivered/, so the
+// enacted correction leaves an auditable record and a re-drain is idempotent.
+func archiveNudge(deliveredDir, outboxDir, file string) error {
+	if err := os.MkdirAll(deliveredDir, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(filepath.Join(outboxDir, file), filepath.Join(deliveredDir, file))
 }
 
 // ---- classify (one-shot over a samples stream) ------------------------------

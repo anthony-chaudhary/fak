@@ -18,7 +18,7 @@ func TestSteerSessionEnqueuesToSessionBus(t *testing.T) {
 	ctx := context.Background()
 	const trace = "steer-enqueue-1"
 
-	if err := steerSession(ctx, trace, "switch to plan B"); err != nil {
+	if err := steerSession(ctx, trace, "", "switch to plan B"); err != nil {
 		t.Fatalf("steerSession returned error: %v", err)
 	}
 
@@ -35,12 +35,35 @@ func TestSteerSessionEnqueuesToSessionBus(t *testing.T) {
 		t.Fatalf("received steer body = %q, want 'switch to plan B'", msg.Body.Inline)
 	}
 	if msg.From != "operator" {
-		t.Fatalf("steer From = %q, want 'operator'", msg.From)
+		t.Fatalf("steer From = %q, want 'operator' (empty principal ⇒ the human default)", msg.From)
+	}
+}
+
+// TestSteerSessionAttributesMachinePrincipal proves the #3529 attribution seam: a non-empty
+// principal rides onto the bus as the message From (a machine guard naming itself), while the
+// body stays the same Shared/Tainted cross-principal ref — attribution without a trust grant.
+func TestSteerSessionAttributesMachinePrincipal(t *testing.T) {
+	ctx := context.Background()
+	const trace = "steer-enqueue-machine"
+
+	if err := steerSession(ctx, trace, "doomloop-guard", "re-anchor: step back"); err != nil {
+		t.Fatalf("steerSession (machine principal) returned error: %v", err)
+	}
+	key := a2achan.ChannelKey{Locale: a2achan.Session, ID: trace}
+	msg, v, ok := a2achan.Default.TryRecv(ctx, key, a2achan.CapA2ARecv)
+	if !ok {
+		t.Fatal("machine steer was not enqueued onto the session bus")
+	}
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("machine steer verdict = %v, want Allow (Shared/Tainted body is admitted, principal is attribution only)", v.Kind)
+	}
+	if msg.From != "doomloop-guard" {
+		t.Fatalf("machine steer From = %q, want 'doomloop-guard' (truthful attribution)", msg.From)
 	}
 }
 
 func TestSteerSessionRejectsEmptyTrace(t *testing.T) {
-	if err := steerSession(context.Background(), "   ", "x"); err == nil {
+	if err := steerSession(context.Background(), "   ", "", "x"); err == nil {
 		t.Fatal("steerSession accepted an empty trace id, want an error")
 	}
 }

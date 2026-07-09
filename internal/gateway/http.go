@@ -1408,7 +1408,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 						"to the harness that owns this session's turn loop")
 				return
 			}
-			if err := s.steerSession(r.Context(), traceID, sr.Text); err != nil {
+			if err := s.steerSession(r.Context(), traceID, sr.Principal, sr.Text); err != nil {
 				writeErr(w, http.StatusUnprocessableEntity, "steer refused: "+err.Error())
 				return
 			}

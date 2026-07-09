@@ -20,9 +20,9 @@ import (
 func TestSteerRouteEnqueuesCleanSteer(t *testing.T) {
 	srv := newTestServer(t)
 	srv.native = true // this serve owns a RunArm loop that drains the steer bus (#3528)
-	gotTrace, gotText := "", ""
-	srv.steerSession = func(_ context.Context, traceID, text string) error {
-		gotTrace, gotText = traceID, text
+	gotTrace, gotPrincipal, gotText := "", "unset", ""
+	srv.steerSession = func(_ context.Context, traceID, principal, text string) error {
+		gotTrace, gotPrincipal, gotText = traceID, principal, text
 		return nil
 	}
 	ts := httptest.NewServer(srv.Handler())
@@ -40,12 +40,43 @@ func TestSteerRouteEnqueuesCleanSteer(t *testing.T) {
 	if gotTrace != "sess-7" || gotText != "switch to plan B" {
 		t.Fatalf("steer delivered trace=%q text=%q, want sess-7 / 'switch to plan B'", gotTrace, gotText)
 	}
+	if gotPrincipal != "" {
+		t.Fatalf("an operator steer (no principal field) must reach steerSession with an empty principal, got %q", gotPrincipal)
+	}
+}
+
+// TestSteerRouteThreadsMachinePrincipal proves the #3529 seam: a SteerRequest.Principal is
+// carried through to steerSession as the `from` attribution (a machine guard naming itself),
+// so a doomloop nudge is not misattributed to the human "operator".
+func TestSteerRouteThreadsMachinePrincipal(t *testing.T) {
+	srv := newTestServer(t)
+	srv.native = true
+	gotPrincipal := ""
+	srv.steerSession = func(_ context.Context, _, principal, _ string) error {
+		gotPrincipal = principal
+		return nil
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(SteerRequest{Text: "re-anchor: step back", Principal: "doomloop-guard"})
+	r, err := http.Post(ts.URL+"/v1/fak/session/sess-dl/steer", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusAccepted {
+		t.Fatalf("machine steer status = %d, want 202", r.StatusCode)
+	}
+	if gotPrincipal != "doomloop-guard" {
+		t.Fatalf("machine principal not threaded to steerSession: got %q, want doomloop-guard", gotPrincipal)
+	}
 }
 
 func TestSteerRouteRefusalMapsTo422(t *testing.T) {
 	srv := newTestServer(t)
 	srv.native = true // reach the floor Send: the 422 is the floor's deny, not the owned-loop 409
-	srv.steerSession = func(_ context.Context, _, _ string) error {
+	srv.steerSession = func(_ context.Context, _, _, _ string) error {
 		return errors.New("a2a floor refused (TRUST_VIOLATION)")
 	}
 	ts := httptest.NewServer(srv.Handler())
@@ -73,7 +104,7 @@ func TestSteerRouteRefusalMapsTo422(t *testing.T) {
 func TestSteerRouteProxyServedRefusesNoOwnedLoop(t *testing.T) {
 	srv := newTestServer(t) // native defaults to false: proxy serve, no owned loop
 	delivered := false
-	srv.steerSession = func(_ context.Context, _, _ string) error {
+	srv.steerSession = func(_ context.Context, _, _, _ string) error {
 		delivered = true
 		return nil
 	}
@@ -112,7 +143,7 @@ func TestSteerRouteProxyServedRefusesNoOwnedLoop(t *testing.T) {
 // malformed request is never masked by the 409.
 func TestSteerRouteEmptyTextIs400EvenOnProxy(t *testing.T) {
 	srv := newTestServer(t) // native=false
-	srv.steerSession = func(_ context.Context, _, _ string) error { return nil }
+	srv.steerSession = func(_ context.Context, _, _, _ string) error { return nil }
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -146,7 +177,7 @@ func TestSteerRouteNilInjectionIs404(t *testing.T) {
 
 func TestSteerRouteEmptyTextIs400(t *testing.T) {
 	srv := newTestServer(t)
-	srv.steerSession = func(_ context.Context, _, _ string) error { return nil }
+	srv.steerSession = func(_ context.Context, _, _, _ string) error { return nil }
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

@@ -71,6 +71,11 @@ type Objective struct {
 	Scorers   []string        `json:"scorers,omitempty"`
 	Budget    Budget          `json:"budget,omitempty"`
 	Status    ObjectiveStatus `json:"status"`
+	// Meta, when set, marks this as a scorer-improvement (meta-loop) objective:
+	// its progress is the calibration meter's delta for the named base scorer
+	// (see metaloop.go, #2567). The one-level fence forbids Meta.Method naming the
+	// meta scorer itself, so the doctrine cannot recurse into scoring-the-scorer.
+	Meta *MetaTarget `json:"meta,omitempty"`
 }
 
 // EvidenceRef is a pointer to the witness behind a score. For W3 commit progress,
@@ -248,6 +253,11 @@ func validateObjective(o Objective) error {
 			return fmt.Errorf("trajctl: duplicate plan phase %q", phase.ID)
 		}
 		seen[phase.ID] = true
+	}
+	if o.Meta != nil {
+		if err := validateMetaTarget(*o.Meta); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -851,6 +851,13 @@ type SessionControlFunc func(ctx context.Context, traceID, verb string, req Sess
 // of Claude Code #21419.
 type SteerRequest struct {
 	Text string `json:"text"`
+	// Principal OPTIONALLY names a non-operator steer source (e.g. the machine guard
+	// "doomloop-guard" delivering a re-anchor nudge, #3529). Empty ⇒ the human "operator"
+	// default. It is an ATTRIBUTION label only and cannot elevate trust: the a2achan floor
+	// gates a steer on caps+taint+scope, never on the `from` string, and the steer body is
+	// always Tainted/ScopeFleet — so a client-supplied principal only truthfully names a
+	// machine source, it never buys the input more authority than an operator steer has.
+	Principal string `json:"principal,omitempty"`
 }
 
 // SteerSessionFunc is injected by the host CLI so the gateway can enqueue an operator
@@ -859,7 +866,7 @@ type SteerRequest struct {
 // (tainted / over-scoped / uncapped body), which the route maps to 422 — the same
 // default-deny floor that gates a tool call, here gating operator input. nil hook ⇒ the
 // steer route is not configured (404).
-type SteerSessionFunc func(ctx context.Context, traceID, text string) error
+type SteerSessionFunc func(ctx context.Context, traceID, principal, text string) error
 
 // SessionVerdict is the gateway wire-neutral projection of session.Verdict. The
 // gateway intentionally carries only primitive fields so it stays decoupled from
