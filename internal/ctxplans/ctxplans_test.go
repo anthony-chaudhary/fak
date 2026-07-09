@@ -27,8 +27,12 @@ func TestScanFixture(t *testing.T) {
 	if rep.Debt != 3 {
 		t.Errorf("Debt = %d, want 3 (headroom, recall, ctx-overlay)", rep.Debt)
 	}
-	if len(rep.Surfaces) != 6 {
-		t.Fatalf("len(Surfaces) = %d, want 6: %+v", len(rep.Surfaces), rep.Surfaces)
+	// Partition invariant: every surface is either a declared verb or debt, so the
+	// surface count is exactly DeclaredVerbs+Debt (3+3=6 for this fixture, which holds
+	// no declared skills). This is the relation the frozen magic count stood for.
+	if len(rep.Surfaces) != rep.DeclaredVerbs+rep.Debt {
+		t.Fatalf("len(Surfaces) = %d, want DeclaredVerbs+Debt = %d+%d = %d: %+v",
+			len(rep.Surfaces), rep.DeclaredVerbs, rep.Debt, rep.DeclaredVerbs+rep.Debt, rep.Surfaces)
 	}
 
 	got := map[string]Surface{}
