@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -31,6 +32,20 @@ const EnvPath = "FAK_VCACHE_SNAPSHOT"
 // witness. It lets `fak vcache score` compose the ordinary provider-cache window with
 // a no-key guard replay artifact without overwriting the provider snapshot.
 const EnvContextPath = "FAK_VCACHE_CONTEXT_SNAPSHOT"
+
+// EnvWindow optionally overrides the bounded live-window size (in turns) the automatic
+// guard/serve writer retains. A missing, non-numeric, or non-positive value keeps
+// DefaultWindowTurns; set it larger to retain a wider window, or to a small value to
+// tighten it. It does NOT re-enable persistence — EnvPath=off still suppresses the writer.
+const EnvWindow = "FAK_VCACHE_SNAPSHOT_WINDOW"
+
+// DefaultWindowTurns bounds the automatic guard/serve snapshot to the most recent N
+// observed turns, so default persistence leaves a bounded live window rather than an
+// unbounded per-session log (#1524). The score reads the realized recent window; turns
+// older than the bound fall out of it. Chosen to comfortably hold an ordinary session's
+// window while capping a pathologically long one — override with EnvWindow if an operator
+// needs a wider or tighter live window.
+const DefaultWindowTurns = 512
 
 // DefaultRel is the per-user default snapshot path's basename under the config dir.
 const DefaultRel = "vcache-turns.jsonl"
@@ -86,14 +101,41 @@ func ConfiguredPath() (string, bool) {
 	return path, true
 }
 
-// WriteConfigured writes the automatic guard/serve snapshot to ConfiguredPath. The
-// returned bool is false only when FAK_VCACHE_SNAPSHOT=off disabled the writer.
+// WindowTurns resolves the configured bounded live-window size, honoring EnvWindow and
+// falling back to DefaultWindowTurns. A non-numeric or non-positive override is ignored so
+// a fat-fingered env value can never turn the bound off (that path stays unbounded-unsafe).
+func WindowTurns() int {
+	raw := strings.TrimSpace(os.Getenv(EnvWindow))
+	if raw == "" {
+		return DefaultWindowTurns
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return DefaultWindowTurns
+	}
+	return n
+}
+
+// boundWindow returns the most recent n turns — the bounded live window. A non-positive n
+// or a slice already within the bound is returned unchanged; otherwise it keeps the tail,
+// because the score wants the REALIZED recent window, not the session's cold prefix.
+func boundWindow(turns []vcacheobserve.Turn, n int) []vcacheobserve.Turn {
+	if n <= 0 || len(turns) <= n {
+		return turns
+	}
+	return turns[len(turns)-n:]
+}
+
+// WriteConfigured writes the automatic guard/serve snapshot to ConfiguredPath, bounded to
+// the most recent WindowTurns turns so a finished session leaves a BOUNDED replayable live
+// window with no operator flag (#1524). The returned bool is false only when
+// FAK_VCACHE_SNAPSHOT=off disabled the writer.
 func WriteConfigured(turns []vcacheobserve.Turn) (string, bool, error) {
 	path, ok := ConfiguredPath()
 	if !ok {
 		return "", false, nil
 	}
-	return path, true, Write(path, turns)
+	return path, true, Write(path, boundWindow(turns, WindowTurns()))
 }
 
 // Write replaces the snapshot at path with one JSONL row per turn (truncating any prior

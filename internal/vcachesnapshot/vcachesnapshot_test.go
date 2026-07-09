@@ -123,6 +123,74 @@ func TestWriteConfiguredUsesEnvPath(t *testing.T) {
 	}
 }
 
+// A finished session with more turns than the bound must persist ONLY the most recent
+// DefaultWindowTurns — a bounded, replayable live window — with no flag set (#1524). This
+// is the invariant the guard/serve default writers now depend on: default persistence
+// must not become an unbounded per-session log.
+func TestWriteConfiguredBoundsToDefaultWindow(t *testing.T) {
+	t.Setenv(EnvWindow, "") // no operator override: prove the DEFAULT bound, no extra flag
+	path := filepath.Join(t.TempDir(), DefaultRel)
+	t.Setenv(EnvPath, path)
+
+	over := DefaultWindowTurns + 37
+	in := make([]vcacheobserve.Turn, over)
+	for i := range in {
+		in[i] = vcacheobserve.Turn{Family: "provider", UnixMillis: int64(i + 1), CacheRead: int64(i)}
+	}
+	if _, ok, err := WriteConfigured(in); err != nil || !ok {
+		t.Fatalf("WriteConfigured() ok=%v err=%v, want a written window", ok, err)
+	}
+
+	out, ok, err := Read(path)
+	if err != nil || !ok {
+		t.Fatalf("Read() ok=%v err=%v, want a replayable window", ok, err)
+	}
+	if len(out) != DefaultWindowTurns {
+		t.Fatalf("persisted %d turns, want the bounded %d", len(out), DefaultWindowTurns)
+	}
+	// The retained window is the TAIL — the realized recent turns, not the cold prefix.
+	if got, want := out[0].UnixMillis, int64(over-DefaultWindowTurns+1); got != want {
+		t.Fatalf("bounded window kept the wrong end: first turn unix_millis=%d, want tail start %d", got, want)
+	}
+	if got, want := out[len(out)-1].UnixMillis, int64(over); got != want {
+		t.Fatalf("bounded window dropped the newest turn: last unix_millis=%d, want %d", got, want)
+	}
+}
+
+// A shorter session persists every turn — the bound only ever trims, never pads or drops
+// a within-bound window.
+func TestWriteConfiguredKeepsWithinBoundWindowWhole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DefaultRel)
+	t.Setenv(EnvPath, path)
+
+	in := []vcacheobserve.Turn{
+		{Family: "provider", UnixMillis: 1, CacheRead: 10},
+		{Family: "provider", UnixMillis: 2, CacheRead: 20},
+	}
+	if _, _, err := WriteConfigured(in); err != nil {
+		t.Fatalf("WriteConfigured() error = %v", err)
+	}
+	out, ok, err := Read(path)
+	if err != nil || !ok || len(out) != len(in) {
+		t.Fatalf("within-bound window not preserved: ok=%v err=%v got %d want %d", ok, err, len(out), len(in))
+	}
+}
+
+// An operator override tightens (or widens) the live window; a bogus value falls back to
+// the default bound rather than silently disabling it.
+func TestWindowTurnsHonorsOverrideAndIgnoresJunk(t *testing.T) {
+	t.Setenv(EnvWindow, "8")
+	if got := WindowTurns(); got != 8 {
+		t.Fatalf("WindowTurns() with override = %d, want 8", got)
+	}
+	for _, junk := range []string{"", "0", "-5", "not-a-number"} {
+		t.Setenv(EnvWindow, junk)
+		if got := WindowTurns(); got != DefaultWindowTurns {
+			t.Fatalf("WindowTurns() with %q = %d, want default %d", junk, got, DefaultWindowTurns)
+		}
+	}
+}
+
 func TestWriteConfiguredOffSkipsAutomaticSnapshot(t *testing.T) {
 	t.Setenv(EnvPath, "off")
 
