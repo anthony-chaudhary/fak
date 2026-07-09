@@ -45,6 +45,31 @@ func TestParseNvidiaSMIStatsSkipsUnreadableRows(t *testing.T) {
 	}
 }
 
+func TestHarnessGPUVRAM(t *testing.T) {
+	const mib = 1 << 20
+	smi := []GPUStat{{Index: 0, VRAMUsedBytes: 6 << 30, VRAMTotalBytes: 24 << 30, UtilizationPct: 73}}
+
+	// Device handle known → preferred; used = total - free, smi ignored.
+	if used, total, ok := HarnessGPUVRAM(24<<30, 18<<30, true, smi); !ok || used != 6<<30 || total != 24<<30 {
+		t.Errorf("device-known = used %d total %d ok %v, want 6GiB/24GiB from the handle", used, total, ok)
+	}
+	// Device handle unknown → fall back to the nvidia-smi aggregate.
+	if used, total, ok := HarnessGPUVRAM(0, 0, false, smi); !ok || used != 6<<30 || total != 24<<30 {
+		t.Errorf("device-unknown = used %d total %d ok %v, want the smi aggregate", used, total, ok)
+	}
+	// Neither source usable → honest absence.
+	if _, _, ok := HarnessGPUVRAM(0, 0, false, nil); ok {
+		t.Errorf("no device + no smi must report ok=false (axis stays n/a)")
+	}
+	// A transient free>total (or negative free) clamps used into [0,total], never underflows.
+	if used, total, ok := HarnessGPUVRAM(8*mib, 9*mib, true, nil); !ok || used != 0 || total != 8*mib {
+		t.Errorf("free>total = used %d total %d ok %v, want used clamped to 0", used, total, ok)
+	}
+	if used, _, ok := HarnessGPUVRAM(8*mib, -1, true, nil); !ok || used != 0 {
+		t.Errorf("negative free = used %d ok %v, want used clamped to 0", used, ok)
+	}
+}
+
 func TestNvidiaGPUStatsFailSoft(t *testing.T) {
 	// No nvidia-smi (or any exec error) => present=false, honest n/a — never a fabricated 0.
 	if _, present := nvidiaGPUStats(func(ctx context.Context, args ...string) (string, error) {

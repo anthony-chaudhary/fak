@@ -125,3 +125,29 @@ func AggregateGPUStats(stats []GPUStat) (usedBytes, totalBytes uint64, utilPct f
 	}
 	return usedBytes, totalBytes, utilPct, true
 }
+
+// HarnessGPUVRAM selects the VRAM reading for the harness-resource sampler (#2052).
+// It PREFERS the in-kernel backend's own device handle — deviceTotal/deviceFree/
+// deviceKnown exactly as DeviceMemoryInfo returns them — because that is the memory
+// the live backend actually sees; it falls back to the nvidia-smi aggregate (summed
+// across devices) only when the handle cannot report (deviceKnown=false or a
+// non-positive total), which is the "hosts where only nvidia-smi is available" case
+// the issue names. used is clamped into [0, total] so a transient free>total or a
+// negative free never underflows the unsigned axis. ok is false when neither source
+// has a usable reading, so the sampler keeps the VRAM axis honestly n/a.
+func HarnessGPUVRAM(deviceTotal, deviceFree int64, deviceKnown bool, smi []GPUStat) (used, total uint64, ok bool) {
+	if deviceKnown && deviceTotal > 0 {
+		u := deviceTotal - deviceFree
+		if deviceFree < 0 || u < 0 {
+			u = 0
+		}
+		if u > deviceTotal {
+			u = deviceTotal
+		}
+		return uint64(u), uint64(deviceTotal), true
+	}
+	if u, t, _, aok := AggregateGPUStats(smi); aok {
+		return u, t, true
+	}
+	return 0, 0, false
+}

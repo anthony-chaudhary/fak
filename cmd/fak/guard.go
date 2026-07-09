@@ -1014,21 +1014,17 @@ func cmdGuard(argv []string) {
 		// Feed the GPU/accelerator VRAM axis when a model runs IN-KERNEL (--gguf/--backend):
 		// the harness's hardware footprint then includes the device. The default proxy path
 		// has no local GPU, so the provider reports ok=false and the axis stays honestly n/a
-		// (#2052). Sourced from the same compute HAL the serve capacity checks use.
+		// (#2052). VRAM PREFERS the same compute HAL the serve capacity checks use (the
+		// in-kernel backend's own device handle); it falls back to nvidia-smi only on a host
+		// where the handle cannot report — the fail-soft fallback the issue names.
 		if chatBackend != nil {
 			resSampler.SetGPUProvider(func() (used, total uint64, ok bool) {
 				t, free, known := compute.DeviceMemoryInfo(chatBackend)
+				var smi []compute.GPUStat
 				if !known || t <= 0 {
-					return 0, 0, false
+					smi, _ = compute.NvidiaGPUStats() // fail-soft; nil → axis stays n/a
 				}
-				u := t - free
-				if free < 0 || u < 0 {
-					u = 0
-				}
-				if u > t {
-					u = t
-				}
-				return uint64(u), uint64(t), true
+				return compute.HarnessGPUVRAM(t, free, known, smi)
 			})
 			// Feed the GPU utilization axis. The in-kernel device-handle seam
 			// (DeviceMemoryInfo) reports memory only — there is no utilization on it — so
