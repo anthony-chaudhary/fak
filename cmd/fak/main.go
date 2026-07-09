@@ -214,6 +214,8 @@ func main() {
 		cmdTraj(os.Args[2:])
 	case "shadowgit":
 		cmdShadowGit(os.Args[2:])
+	case "signals":
+		cmdSignals(os.Args[2:])
 	case "dup":
 		cmdDup(os.Args[2:])
 	case "dream":
