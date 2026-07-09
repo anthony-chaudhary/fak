@@ -775,7 +775,7 @@ see_also = ["fak/internal/architest/architest_test.go", "fak/ARCHITECTURE.md", "
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "a git command would rewrite shared trunk history -- commit --amend, rebase, pull --rebase, or force-push -- risking permanent loss of a peer's witnessed commit."
-fix      = "Do not amend, rebase, or force-push in the shared tree. Make a new path-scoped commit, or fetch and merge the configured trunk in place; push only with a plain fast-forward push. Floor: internal/gitgate refuses the argv-decidable shapes before the command runs."
+fix      = "Make a new path-scoped commit, or fetch and merge the configured trunk in place, and push only with a plain fast-forward push -- never amend, rebase, or force-push in the shared tree. Floor: internal/gitgate refuses the argv-decidable shapes before the command runs."
 see_also = ["internal/gitgate", "AGENTS.md", "tools/githooks/pre-push", "tools/githooks/reference-transaction"]
 
 [reasons.OUT_OF_DIRECTION]
@@ -827,7 +827,7 @@ see_also = ["internal/hooks/gate_freshdeletion.go", "fak/AGENTS.md", "issue #232
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "a safecommit operation created a commit whose landed subject/body does not match the requested message -- a concurrent writer or hook path mis-bound the witness message"
-fix      = "do not push the commit. Leave it intact for review, recover the intended message in a follow-up witnessed commit or operator maintenance path, and avoid raw git commit on the shared tree. Floor: internal/safecommit post-commit message assertion."
+fix      = "Leave the commit intact for review and recover the intended message in a follow-up witnessed commit or operator maintenance path -- do not push it, and avoid raw git commit on the shared tree. Floor: internal/safecommit post-commit message assertion."
 see_also = ["internal/safecommit/safecommit.go", "issue #2196"]
 
 # Hard-self core-lock enforcement (#1683): the commit path refuses an in-agent edit
@@ -838,7 +838,7 @@ see_also = ["internal/safecommit/safecommit.go", "issue #2196"]
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "a pathspec commit touches hard-self core-lock machinery -- a surface that can weaken the admission, witness, or ship-grade machinery that would catch its own bad edit"
-fix      = "do not clear this by self-report. Use an operator/release maintenance path, or rerun `fak commit` with `--core-lock-maintenance-witness <claim>` only after an independent witness resolver confirms the maintenance claim. The accepted commit records the confirmed witness on refs/notes/fak/decisions."
+fix      = "Use an operator/release maintenance path, or rerun `fak commit` with `--core-lock-maintenance-witness <claim>` only after an independent witness resolver confirms the maintenance claim -- do not clear this by self-report. The accepted commit records the confirmed witness on refs/notes/fak/decisions."
 see_also = ["internal/corelocks", "internal/corelockaudit", "internal/safecommit/corelock.go", "dos commit-audit"]
 
 # FrontierSWE score-parity gate (#1717): the typed refusal emitted when a fak
@@ -946,7 +946,7 @@ see_also = ["internal/repoguard/sleepwait.go", "cmd/repoguard/main.go", ".claude
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "a Read targets tasks/<id>.output for a Monitor that is still live; Monitor output files are not materialized until the stream ends, so polling the path produces bare ENOENT loops"
-fix      = "do not Read-poll the output file while the Monitor is live. Consume the pushed Monitor events and wait for the completion notification; tasks/<id>.output appears only after the stream ends. Floor: cmd/repoguard (PreToolUse hook) plus the live toolproc journal."
+fix      = "Consume the pushed Monitor events and wait for the completion notification instead of Read-polling the output file while the Monitor is live; tasks/<id>.output appears only after the stream ends. Floor: cmd/repoguard (PreToolUse hook) plus the live toolproc journal."
 see_also = ["internal/repoguard/monitor_read.go", "cmd/repoguard/main.go", "internal/toolproc", ".claude/settings.json"]
 
 # Drive-stripped workspace `cd` (worker path-mapping): a headless worker's shell
@@ -987,7 +987,7 @@ see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "L3-DISAGGRE
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "G1 verify rung: the bytes the L3 get returned do not hash to the digest the page CLAIMS (Ref.Digest) -- a hash collision or a mis-tag the semantics-free store cannot detect. Refused for EVERY reader, same-tenant included: a corrupt/ambiguous page is served to no one. A full-content digest recompute, not a truncated locality hash."
-fix      = "do not admit the page -- the content address does not match its bytes. Re-fetch / re-key at the store, or re-mint the page so its Ref.Digest is the true hex(sha256) of its content. Floor: go test ./internal/gateway -run TestL3Share_DigestMismatch."
+fix      = "Re-fetch / re-key at the store, or re-mint the page so its Ref.Digest is the true hex(sha256) of its content -- do not admit the page as-is, since the content address does not match its bytes. Floor: go test ./internal/gateway -run TestL3Share_DigestMismatch."
 see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "internal/model/evict_test.go"]
 
 # L3 producer-side fleet-stamp gate (#2508): the read-side G1/G4 gates above trust the
