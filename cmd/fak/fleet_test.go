@@ -143,14 +143,24 @@ func TestFleetCapacityPreflightJSON(t *testing.T) {
 	mkClaudeFleetFixture(t, home, ".claude", "uuid-default", "default@example.test", true)
 	mkClaudeFleetFixture(t, home, ".claude-gem8-acct", "uuid-gem8", "gem8@example.test", true)
 	mkClaudeFleetFixture(t, home, ".claude-needslogin-acct", "uuid-needs", "needs@example.test", false)
+	// The throttle strings carry an explicit year, which the reset parser's yearless
+	// grammar ("Jan 2, 3:04pm" / "Jan 2, 3pm" / "3:04pm" / "3pm") can never parse —
+	// an unparseable reset is nil, and both throttleIsActive and the weekly rung
+	// treat a not-provably-past throttle as active (the documented fail-closed
+	// default). That keeps gem8 blocked on every wall-clock date, so the fixture
+	// never expires the way a bare "Jul 8, 9am" did once July 8 passed.
 	mustWriteFleetFixture(t, filepath.Join(regDir, "sessions.json"),
 		`{"generated_utc":"2026-07-01T12:00:00Z",`+
-			`"throttle":{".claude-gem8-acct":{"reset":"Jul 8, 9am","weekly":"Jul 8"}},`+
+			`"throttle":{".claude-gem8-acct":{"reset":"Dec 31, 2099, 9am","weekly":"Dec 31, 2099"}},`+
 			`"auth":{},"sessions":[]}`)
 	t.Setenv("FLEET_USER_HOME", home)
 	t.Setenv("FLEET_CONFIG_HOME", cfg)
 	t.Setenv("FLEET_REG_DIR", regDir)
 	t.Setenv("FLEET_POLICY_PATH", policyPath)
+	// Pin the per-account session budget: the 4/4/4 seat assertions below assume the
+	// default cap, and an ambient FAK_SESSIONS_PER_ACCOUNT on the host (e.g. 6) would
+	// otherwise skew every seat count and flip the verdict to OK.
+	t.Setenv(fleetaccounts.SessionsPerAccountEnv, "4")
 
 	var out, errb bytes.Buffer
 	code := runFleetCapacity(&out, &errb, []string{"--json", "--require", "5"})
@@ -174,8 +184,8 @@ func TestFleetCapacityPreflightJSON(t *testing.T) {
 	if states[".claude-needslogin-acct"].State != fleetaccounts.CapacityStale {
 		t.Fatalf("needslogin = %+v, want stale", states[".claude-needslogin-acct"])
 	}
-	if got := states[".claude-gem8-acct"]; got.State != fleetaccounts.CapacityBlockedUntil || got.BlockedUntil != "Jul 8" {
-		t.Fatalf("gem8 = %+v, want blocked-until Jul 8", got)
+	if got := states[".claude-gem8-acct"]; got.State != fleetaccounts.CapacityBlockedUntil || got.BlockedUntil != "Dec 31, 2099" {
+		t.Fatalf("gem8 = %+v, want blocked-until Dec 31, 2099", got)
 	}
 }
 
