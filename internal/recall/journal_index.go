@@ -112,12 +112,28 @@ type JournalRow struct {
 	Provenance Provenance // the adjudicated trust tier
 }
 
+// defaultMaxJournalRows bounds how many rows a JournalIndex retains. A long-lived
+// cross-session index that Adds a row per adjudicated journal decision would grow
+// both rows AND the postings map without limit; the bound keeps the index to its
+// most RECENT window (the recency-demotion axis already prefers recent rows, so
+// aging out the oldest is aligned with the ranker). Below the bound Recall is
+// byte-identical; only once the window overflows do the oldest rows drop.
+const defaultMaxJournalRows = 1024
+
 // JournalIndex is an FTS-style inverted index over a set of adjudicated journal rows,
 // keyed by token, for provenance-aware recall. It is append-only and deterministic: the
 // same rows added in the same order always produce the same ranking.
+//
+// The retained rows are bounded to a recent window (defaultMaxJournalRows): once the
+// window overflows, the oldest rows are dropped and the postings map — whose values
+// are absolute row indices that all shift on a trim — is rebuilt over the survivors,
+// so it can never grow without limit alongside the rows.
 type JournalIndex struct {
 	rows     []JournalRow
 	postings map[string][]int // token -> indices of rows that contain it (the inverted index)
+	// maxRows bounds the retained window: 0 = the default cap; <0 = unbounded; >0 =
+	// a custom cap. See rowCap.
+	maxRows int
 }
 
 // NewJournalIndex returns an empty index ready for Add.
@@ -125,12 +141,38 @@ func NewJournalIndex() *JournalIndex {
 	return &JournalIndex{postings: map[string][]int{}}
 }
 
+// rowCap resolves the effective retained-row cap: (cap, true) when bounded,
+// (_, false) when the caller disabled the bound (maxRows<0).
+func (idx *JournalIndex) rowCap() (max int, bounded bool) {
+	switch {
+	case idx.maxRows < 0:
+		return 0, false
+	case idx.maxRows == 0:
+		return defaultMaxJournalRows, true
+	default:
+		return idx.maxRows, true
+	}
+}
+
 // Add indexes one journal row, posting each distinct token it contains. The token floor
 // is applied at query time by Recall (the same length floor the page-side overlap uses),
 // so the index and the live Recall() ranker share one relevance notion.
+//
+// Retention is applied here: the rows are held to a recent window bounded by rowCap.
+// A high-water of 2×cap is allowed before a trim so the O(cap) postings rebuild is
+// amortized to O(1) per Add — nothing is dropped until the window exceeds 2×cap, so
+// Recall is unchanged for any index below that.
 func (idx *JournalIndex) Add(row JournalRow) {
-	i := len(idx.rows)
 	idx.rows = append(idx.rows, row)
+	if max, bounded := idx.rowCap(); bounded && len(idx.rows) > 2*max {
+		// Drop the oldest rows down to the cap; postings hold absolute row indices
+		// that all shift when the front is trimmed, so rebuild the inverted index.
+		idx.rows = append([]JournalRow(nil), idx.rows[len(idx.rows)-max:]...)
+		idx.reindex()
+		return
+	}
+	// Fast path: post only the new row's tokens at its index.
+	i := len(idx.rows) - 1
 	seen := map[string]bool{}
 	for _, t := range tokenize(row.Text) {
 		if seen[t] {
@@ -138,6 +180,22 @@ func (idx *JournalIndex) Add(row JournalRow) {
 		}
 		seen[t] = true
 		idx.postings[t] = append(idx.postings[t], i)
+	}
+}
+
+// reindex rebuilds the postings map from scratch over the current rows — used after
+// a retention trim shifts every row index. O(total tokens in the retained window).
+func (idx *JournalIndex) reindex() {
+	idx.postings = make(map[string][]int, len(idx.postings))
+	for i, r := range idx.rows {
+		seen := map[string]bool{}
+		for _, t := range tokenize(r.Text) {
+			if seen[t] {
+				continue
+			}
+			seen[t] = true
+			idx.postings[t] = append(idx.postings[t], i)
+		}
 	}
 }
 

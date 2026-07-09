@@ -1,6 +1,9 @@
 package recall
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // Issue #2840 done condition, made a test: a recall query returns rows tagged with
 // provenance (witnessed/kept/unverified), ranked so witnessed rows outrank un-witnessed
@@ -96,6 +99,54 @@ func TestJournalIndexRelevanceGate(t *testing.T) {
 	}
 	if hits[0].Seq != 2 {
 		t.Fatalf("an off-topic witnessed row must not be resurrected by provenance; got Seq=%d", hits[0].Seq)
+	}
+}
+
+// TestJournalIndexRetentionBounded proves the cross-session index does not grow
+// without limit: with a small row cap, adding far more rows than the 2×cap
+// high-water holds the retained rows within the window AND — the load-bearing part
+// — rebuilds the postings map over the survivors, so Recall still resolves correct
+// row indices (a stale posting would index out of range or mis-rank). The oldest
+// rows age out; the most recent stay recallable.
+func TestJournalIndexRetentionBounded(t *testing.T) {
+	idx := NewJournalIndex()
+	idx.maxRows = 4 // white-box: shrink the window so the test stays small.
+
+	const n = 100
+	for i := 0; i < n; i++ {
+		// Every row shares "widget" (one query matches all) plus a unique token.
+		idx.Add(JournalRow{
+			Seq:        i,
+			Text:       fmt.Sprintf("widget marker%d resident", i),
+			Provenance: ProvWitnessed,
+		})
+	}
+
+	// Rows are held within the 2×cap high-water window, never all n.
+	if len(idx.rows) > 2*idx.maxRows {
+		t.Fatalf("retained rows = %d, want <= 2*cap (%d): the index grew unbounded", len(idx.rows), 2*idx.maxRows)
+	}
+
+	// Recall must not panic and must return only retained (recent) rows — proof the
+	// postings were reindexed against the trimmed rows (Seq == insertion index, so
+	// the retained rows are exactly the most-recent len(rows) by Seq).
+	hits := idx.Recall("widget", n)
+	if len(hits) == 0 || len(hits) > len(idx.rows) {
+		t.Fatalf("Recall returned %d hits over %d retained rows", len(hits), len(idx.rows))
+	}
+	minRetained := n - len(idx.rows)
+	for _, h := range hits {
+		if h.Seq < minRetained {
+			t.Errorf("hit Seq=%d is below the retained window start %d — a stale row survived a trim", h.Seq, minRetained)
+		}
+	}
+
+	// The most-recent unique token still recalls its row; a long-evicted one is gone.
+	if got := idx.Recall(fmt.Sprintf("marker%d", n-1), 10); len(got) != 1 || got[0].Seq != n-1 {
+		t.Fatalf("most-recent unique token must recall exactly its row, got %+v", got)
+	}
+	if got := idx.Recall("marker0", 10); len(got) != 0 {
+		t.Errorf("evicted oldest row must not be recallable, got %+v", got)
 	}
 }
 
