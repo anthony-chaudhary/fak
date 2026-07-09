@@ -527,3 +527,55 @@ func TestControlRefusalVocabularyComplete(t *testing.T) {
 		}
 	}
 }
+
+// TestControlWitnessTableBindsVocabSpine binds this #2766 witness table (the loop-side
+// proof of what each op DOES) to the #2754 vocabulary spine (internal/sessionctl, the
+// declarative op contract). Without this, the two authoritative op tables live in
+// separate packages and can silently drift — a 9th op could ship in one and be
+// forgotten in the other while every per-package test stays green. Here the spine's
+// op set, and each op's declared refusal tokens, are checked against what this table
+// actually proves, so a newly-shipped op cannot land in one without the other going red.
+func TestControlWitnessTableBindsVocabSpine(t *testing.T) {
+	witnessed := map[string]controlOpWitness{}
+	for _, w := range controlOpWitnesses() {
+		witnessed[w.op] = w
+	}
+	spine := map[string]bool{}
+	for _, op := range sessionctl.Ops() {
+		spine[string(op)] = true
+	}
+	// 1. Op-set equality (as sets, in both directions).
+	if len(witnessed) != len(spine) {
+		t.Fatalf("op-set size drift: #2766 witnesses %d ops, sessionctl spine registers %d", len(witnessed), len(spine))
+	}
+	for op := range witnessed {
+		if !spine[op] {
+			t.Fatalf("op %q is proven by the #2766 table but not registered in the sessionctl spine", op)
+		}
+	}
+	for op := range spine {
+		if _, ok := witnessed[op]; !ok {
+			t.Fatalf("op %q is registered in the sessionctl spine but has no #2766 witness row", op)
+		}
+	}
+	// 2. Per-op token binding: every refusal token this table PROVES an op can emit
+	//    must be declared by the spine's spec for that op (the spine may declare more —
+	//    e.g. a race token an "always terminal" row does not exercise — but never fewer).
+	for op, w := range witnessed {
+		spec, ok := sessionctl.Spec(sessionctl.ControlOp(op))
+		if !ok {
+			t.Fatalf("no spine spec for proven op %q", op)
+		}
+		for _, tok := range w.tokens {
+			if !slices.Contains(spec.RefusalReasons, tok) {
+				t.Fatalf("op %q proves refusal token %q but the spine spec omits it (declares %v)", op, tok, spec.RefusalReasons)
+			}
+		}
+	}
+	// 3. steer's spine witness IS the splice kind — and this table's steer/applied path
+	//    (RunArm observing "steer marker 2766" spliced into the turn input) is the proof
+	//    that names. The #2754 acceptance ties steer's witness to that existing evidence.
+	if s, _ := sessionctl.Spec(sessionctl.OpSteer); s.Witness != sessionctl.WitnessSplice {
+		t.Fatalf("steer spine witness = %q, want the splice kind proven by steer/applied here", s.Witness)
+	}
+}
