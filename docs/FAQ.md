@@ -109,6 +109,14 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
     },
     {
       "@type": "Question",
+      "name": "Is fak a CDC or Debezium tool? Does it replicate my database?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. fak is not a database-replication CDC tool, and it is not Debezium. It does not tail your Postgres or MySQL WAL, it does not replicate your tables into Kafka, and there is no Flink or streaming-SQL layer. What fak does ship is the change-data-capture pattern applied to the agent loop: its wire feeds — the coherence bus, the hash-chained journal, and the drive-state stream — are bounded, cursor-ordered, tombstone-carrying changelogs of agent, cache, and session state, which a data engineer already knows how to consume (/v1/fak/changes + /v1/fak/events, drained by cursor). The load-bearing fence is source, not sink: fak is a change source for agent work, never a replica of your database, and it captures agent state, not your tables. If you need to replicate a relational database, Debezium is the answer; fak captures a different changelog. The full mapping (CDC↔fak, the source-not-sink fence, how to consume the feed) is in change data capture for agents."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Is fak novel? What did the prior-art audit find?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -1813,6 +1821,21 @@ The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it
 (~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (only **1.0–1.1× vs a tuned per-agent-KV stack**) — modeled, not a wall-clock. The reuse win is **self-host only**. An app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
 commit and artifact in the [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
+
+## Is fak a CDC or Debezium tool? Does it replicate my database?
+
+No. `fak` is **not** a database-replication CDC tool, and it is not Debezium. It does
+not tail your Postgres or MySQL WAL, it does not replicate your tables into Kafka, and
+there is no Flink or streaming-SQL layer. What `fak` *does* ship is the change-data-capture
+*pattern* applied to the agent loop: its wire feeds — the coherence bus, the hash-chained
+journal, and the drive-state stream — are bounded, cursor-ordered, tombstone-carrying
+changelogs of **agent, cache, and session state**, which a data engineer already knows how
+to consume (`/v1/fak/changes` + `/v1/fak/events`, drained by cursor). The load-bearing fence
+is **source, not sink**: `fak` is a change *source* for agent work, never a replica of your
+database, and it captures agent state, not your tables. If you need to replicate a relational
+database, Debezium is the answer; `fak` captures a different changelog. The full mapping
+(CDC↔fak, the source-not-sink fence, how to consume the feed) is in
+[change data capture for agents](explainers/change-data-capture-for-agents.md).
 
 ## Is fak novel? What did the prior-art audit find?
 

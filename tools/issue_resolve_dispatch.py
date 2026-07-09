@@ -2380,6 +2380,34 @@ def _log_is_cap_banner(log: Path) -> bool:
     return _cap_hit_from_text(_log_tail_text(log)) is not None
 
 
+# A PERMANENT auth gap is a different death than a transient credit wall. A backend with
+# no API key / no resolved subscription login (e.g. codex: "provider env $OPENAI_API_KEY
+# is empty and no ChatGPT subscription auth.json was resolved. Run `codex login`…") dies
+# IDENTICALLY on every spawn and cannot recover without an operator. _BACKEND_REPROBE_MIN
+# assumes the wall lifts on its own (codex resets nightly), so applied to an auth gap the
+# re-probe burns one worker SEAT every 30 min forever — hundreds of doomed spawns +
+# BACKEND_UNHEALTHY refusals per day, and the hold's "detecting recovery" framing is a lie
+# (a missing key never self-heals). Detect the auth-gap signature so the health gate makes
+# the hold STICKY (an unauthenticated backend we simply stopped spawning leaves an empty
+# window, which must NOT read as recovery) and backs the re-probe WAY off. FAIL-CLOSED to
+# "not an auth gap" on any doubt — a false positive would wedge a recoverable backend — so
+# match only unambiguous, operator-only phrases the guard/provider preflight emits.
+_AUTH_GAP_RE = re.compile(
+    r"API_KEY is empty"
+    r"|no ChatGPT subscription auth\.json"
+    r"|no auth\.json was resolved"
+    r"|Run `(?:codex|claude) login`",
+    re.IGNORECASE)
+
+
+def _log_is_auth_gap(log: Path) -> bool:
+    """True when a stub log's tail is the PERMANENT auth-gap banner (missing API key / no
+    resolved login), as opposed to a transient credit wall (``_log_is_cap_banner``). Such
+    a death cannot self-heal without an operator, so the health gate holds it stickily and
+    stops re-probing it at the credit-wall cadence."""
+    return bool(_AUTH_GAP_RE.search(_log_tail_text(log)))
+
+
 def _cap_hit_from_text(text: str, *, evidence_log: str = "") -> dict[str, Any] | None:
     """Parse a quota/rate-limit hit from already-captured worker text."""
     if not _CAP_BANNER_RE.search(text or ""):
@@ -2622,7 +2650,7 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
 # a backend that IS producing turns.
 #
 # check_backend_health() is the sibling gate, shaped exactly like check_weekly_cap:
-# a fast on-disk signal (a STREAK of stub logs for this backend) declares it DEAD,
+# a fast on-disk signal (a MAJORITY of stub logs for this backend) declares it DEAD,
 # persisted in backend-health-<product>.json with the same write/honor/expire and
 # FAIL-OPEN discipline (any error -> healthy, so the gate can only ever ADD a hold).
 # The dead backend self-suppresses (BACKEND_UNHEALTHY) but lets ONE re-probe worker
@@ -2633,14 +2661,21 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
 # or a banner-only (~32-byte) exit. A real turn streams kilobytes. Matches the size
 # floor the weekly-cap banner scanner already trusts (_scan_recent_cap_banner: 512).
 _STUB_LOG_MAX_BYTES = 512
-# DEAD only on a sustained streak — the last N attempted spawns for this backend ALL
-# stubs — never a single blip (a real worker can rarely exit early for benign
-# reasons). N is small so the gate reacts within a few ticks, not hours.
+# The sample floor for the majority-stub verdict: fewer than N classified logs in the
+# window is not enough evidence to call a backend dead, so a single blip (a real worker
+# can rarely exit early for benign reasons) never trips the gate. N is small so the gate
+# reacts within a few ticks, not hours.
 _BACKEND_DEAD_STREAK = 3
 # How long a DEAD hold suppresses spawns before letting one re-probe worker through.
 # A credit wall lifts on its own (codex resets nightly); the re-probe is how the
 # backend earns its budget back without an operator.
 _BACKEND_REPROBE_MIN = 30
+# A backend held dead by a PERMANENT auth gap (no API key / no login) must not re-probe on
+# the credit-wall cadence: every re-probe is a doomed spawn that burns a seat and dies on
+# the same missing key. Back it off to a slow heartbeat — enough that the backend still
+# auto-recovers within a few hours of an operator fixing auth, without the 30-min churn.
+# (See _AUTH_GAP_RE / _log_is_auth_gap.)
+_BACKEND_AUTHGAP_REPROBE_MIN = 360
 
 
 def _classify_backend_logs(runs_dir: Path, *, product: str, lookback_min: int,
@@ -2692,12 +2727,16 @@ def check_backend_health(runs_dir: Path, *, product: str, lane: str | None = Non
                          alive: set[int] | None = None,
                          probe: Any | None = None) -> dict[str, Any]:
     """Is ``product`` producing real turns right now, or spinning dead? Reads the
-    backend's recent worker logs: the last ``_BACKEND_DEAD_STREAK`` attempts all
-    stubs (banner-only/0-byte over a dead pid) -> DEAD; any productive log in the
-    window breaks the streak -> HEALTHY (and clears a stale hold). Persists a hold in
-    ``backend-health-<product>.json`` so it survives the ticks after spawns stop, and
-    gates ONE re-probe spawn per ``_BACKEND_REPROBE_MIN`` so a dead backend can earn
-    its budget back. Returns ``{state, ...}``. FAIL-OPEN: any error -> healthy."""
+    backend's recent worker logs: over the lookback window, MORE stubs (banner-only/
+    0-byte over a dead pid) than productive logs -> DEAD; a window it is not mostly
+    stubbing -> HEALTHY (and a productive log there clears a stale hold). The
+    majority-stub rule is the same ``stub > productive`` rollup the status card shows
+    (dispatch_status.backend_stub_rates), so the card and this spawn gate agree (#3247);
+    a sample floor of ``_BACKEND_DEAD_STREAK`` logs keeps a thin window from tripping it.
+    Persists a hold in ``backend-health-<product>.json`` so it survives the ticks after
+    spawns stop, and gates ONE re-probe spawn per ``_BACKEND_REPROBE_MIN`` so a dead
+    backend can earn its budget back. Returns ``{state, ...}``. FAIL-OPEN: any error ->
+    healthy."""
     try:
         import time
         now_ts = time.time() if now_ts is None else now_ts
@@ -2711,28 +2750,56 @@ def check_backend_health(runs_dir: Path, *, product: str, lane: str | None = Non
                 alive = None  # cannot prove a pid dead -> classify no stubs (no false death)
         logs = _classify_backend_logs(runs_dir, product=product, lookback_min=lookback_min,
                                       now_ts=now_ts, alive=alive, probe=probe)
-        recent = logs[:_BACKEND_DEAD_STREAK]
-        # A productive log anywhere in the window means the backend HAS landed a turn
-        # recently -> healthy, clear any stale hold (the witnessed restore: a real
-        # turn is the slow-layer confirmation a re-probe worked).
-        if any(r["productive"] for r in logs):
-            if state_path.exists():
-                try:
-                    state_path.unlink()
-                except OSError:
-                    pass
-            return {"state": "healthy", "source": "productive"}
-        dead = (len(recent) >= _BACKEND_DEAD_STREAK
-                and all(not r["productive"] for r in recent))
-        if not dead:
-            return {"state": "healthy", "source": "no-streak"}
-        # DEAD. Honor an existing hold (keep its since/lane); otherwise open one.
+        productive = sum(1 for r in logs if r["productive"])
+        stub = len(logs) - productive
+        # Read any persisted hold up FRONT: a sticky auth-gap hold must survive its doomed
+        # stubs aging out of the window (below), so the prior state is needed before the
+        # majority-stub decision, not only after it.
         prior: dict[str, Any] = {}
         if state_path.exists():
             try:
                 prior = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 prior = {}
+        prior_auth_gap = prior.get("state") == "dead" and bool(prior.get("auth_gap"))
+        # Is THIS window's death a permanent auth gap? Only when the stub logs are
+        # DOMINATED by the auth-gap banner (fail-closed: a lone match never flips it).
+        stub_logs = [r["log"] for r in logs if not r["productive"]]
+        authgap_stub = sum(1 for name in stub_logs if _log_is_auth_gap(runs_dir / name))
+        authgap_now = authgap_stub * 2 > len(stub_logs) and authgap_stub > 0
+        # DEAD = the backend stubs MOST of its recent spawns (#3247). This is the same
+        # `stub > productive` rollup the status card computes (dispatch_status.
+        # backend_stub_rates), so the card and this spawn gate can never disagree: the
+        # card used to read "majority-stub [codex=4/4 stub]" while the gate read healthy
+        # off a single productive log, and the codex cron kept feeding seats to a
+        # backend that returned nothing. The sample floor keeps a thin window (one or
+        # two logs) from tripping the gate on noise -- reuses the streak constant, so
+        # a 3-stub/0-productive window is still exactly as dead as it was before.
+        majority_stub = len(logs) >= _BACKEND_DEAD_STREAK and stub > productive
+        # A sticky auth-gap hold keeps the backend dead even once its doomed stubs age out
+        # of the lookback: we STOPPED spawning it, so the empty window is not recovery
+        # evidence — only a productive log (an operator fixed auth and something ran) may
+        # clear it. A transient credit wall is NOT sticky (prior_auth_gap is False for it),
+        # so it still ages out to healthy exactly as before and #3247's auto-recovery holds.
+        sticky_auth_gap = prior_auth_gap and productive == 0
+        if not (majority_stub or sticky_auth_gap):
+            # A productive log in a window the backend is NOT mostly stubbing is the
+            # witnessed restore -- clear any stale hold so spawns resume with no
+            # operator. Stub logs age out of the lookback on their own, so a recovered
+            # backend crosses back over the majority line within one window.
+            if productive and state_path.exists():
+                try:
+                    state_path.unlink()
+                except OSError:
+                    pass
+            return {"state": "healthy",
+                    "source": "productive" if productive else "no-streak"}
+        # DEAD. auth_gap LATCHES once seen and is only cleared by a productive log (the
+        # `not (majority_stub or sticky_auth_gap)` branch above), so a backend that dies on
+        # a missing key stays held even after its stubs scroll out of the window.
+        auth_gap = authgap_now or prior_auth_gap
+        reprobe_min = _BACKEND_AUTHGAP_REPROBE_MIN if auth_gap else _BACKEND_REPROBE_MIN
+        # Honor an existing hold (keep its since/lane); otherwise open one.
         since = prior.get("since") if prior.get("state") == "dead" else None
         since = since or (now_utc.isoformat() + "Z")
         # The lane this backend would otherwise own — recorded so the healthy tick can
@@ -2740,14 +2807,23 @@ def check_backend_health(runs_dir: Path, *, product: str, lane: str | None = Non
         abandoned = lane or prior.get("abandoned_lane") or ""
         last_probe = _iso_to_utc(prior.get("last_reprobe") or "") if prior else None
         due = (last_probe is None
-               or now_utc - last_probe >= dt.timedelta(minutes=_BACKEND_REPROBE_MIN))
+               or now_utc - last_probe >= dt.timedelta(minutes=reprobe_min))
+        # The stub logs are the evidence (newest first) — the spawns this backend burned.
+        # On a sticky hold whose stubs already aged out, keep the prior evidence so the
+        # surface still names the cause.
+        evidence = (stub_logs[:_BACKEND_DEAD_STREAK]
+                    or list(prior.get("evidence_logs") or []))
+        stub_rate = round(stub / len(logs), 3) if logs else (prior.get("stub_rate") or 1.0)
         state = {
             "product": product, "state": "dead", "since": since,
             "abandoned_lane": abandoned,
-            "evidence_logs": [r["log"] for r in recent],
+            "auth_gap": auth_gap,
+            "evidence_logs": evidence,
+            "stub": stub, "productive": productive,
+            "stub_rate": stub_rate,
             "detected": now_utc.isoformat() + "Z",
             "last_reprobe": (now_utc.isoformat() + "Z") if due else prior.get("last_reprobe"),
-            "reprobe_min": _BACKEND_REPROBE_MIN,
+            "reprobe_min": reprobe_min,
         }
         try:
             runs_dir.mkdir(parents=True, exist_ok=True)
@@ -2757,8 +2833,10 @@ def check_backend_health(runs_dir: Path, *, product: str, lane: str | None = Non
         # reprobe_due: caller (the DEAD backend's own tick) may let ONE worker through
         # to test recovery. We stamped last_reprobe above so the next tick holds again.
         return {"state": "dead", "since": since, "abandoned_lane": abandoned,
-                "reprobe_due": bool(due), "evidence_logs": state["evidence_logs"],
-                "source": "streak"}
+                "reprobe_due": bool(due), "evidence_logs": evidence,
+                "stub": stub, "productive": productive, "auth_gap": auth_gap,
+                "reprobe_min": reprobe_min, "stub_rate": stub_rate,
+                "source": "auth-gap" if auth_gap else "majority-stub"}
     except Exception:
         return {"state": "healthy", "source": "error"}
 
@@ -4376,6 +4454,29 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # come back. Fail-open: check_backend_health returns dead only on positive
     # streak evidence. (own_health was read above for the realloc no-op decision.)
     if pre_ok and own_health.get("state") == "dead" and not own_health.get("reprobe_due"):
+        _lane = own_health.get("abandoned_lane") or "?"
+        if own_health.get("auth_gap"):
+            # A permanent auth gap, not a recoverable credit wall: naming the operator
+            # fix (and the backed-off re-probe) stops the "detecting recovery" framing from
+            # implying this self-heals — it does not until credentials are set.
+            _reason = (f"backend '{backend}' is UNAUTHENTICATED — every spawn dies instantly "
+                       f"on a missing API key / no resolved login (see its evidence logs) "
+                       f"since {own_health.get('since')}; planning 0 spawns. Set the backend's "
+                       f"credentials (e.g. export OPENAI_API_KEY / `codex login`) or drop it "
+                       f"from the backend rotation; its lane '{_lane}' is reallocated to a "
+                       f"healthy backend, and a re-probe is admitted only every "
+                       f"{own_health.get('reprobe_min')} min (not {_BACKEND_REPROBE_MIN}) "
+                       f"because a missing key cannot self-heal")
+        else:
+            _reason = (f"backend '{backend}' is majority-stub "
+                       f"({own_health.get('stub')}/"
+                       f"{(own_health.get('stub') or 0) + (own_health.get('productive') or 0)}"
+                       f" recent spawns banner-only/0-byte, stub_rate="
+                       f"{own_health.get('stub_rate')}) since {own_health.get('since')}; "
+                       f"planning 0 spawns — its lane "
+                       f"'{_lane}' is reallocated "
+                       f"to a healthy backend, and one re-probe worker is admitted every "
+                       f"{_BACKEND_REPROBE_MIN} min to detect recovery")
         return finish({
             "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
             "max_workers": max_workers, "registry_refresh": reg,
@@ -4383,12 +4484,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "preflight": _preflight_public(pre),
             "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
             "backend_health": own_health, "ok": False, "action": "backend_unhealthy",
-            "verdict": "BACKEND_UNHEALTHY",
-            "reason": (f"backend '{backend}' is spinning dead (banner-only/0-byte "
-                       f"streak since {own_health.get('since')}); holding spawn — its "
-                       f"lane '{own_health.get('abandoned_lane') or '?'}' is reallocated "
-                       f"to a healthy backend, and one re-probe worker is admitted every "
-                       f"{_BACKEND_REPROBE_MIN} min to detect recovery"),
+            "verdict": "BACKEND_UNHEALTHY", "reason": _reason,
         })
 
     # Healthy backend: claim any lane a dead sibling abandoned. Dropping the freed

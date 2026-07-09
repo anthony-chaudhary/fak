@@ -3312,9 +3312,10 @@ class WaveMembershipTest(unittest.TestCase):
 
 
 class BackendHealthTest(unittest.TestCase):
-    """The backend-health reallocation gate: a STREAK of stub (banner-only/0-byte,
-    dead-pid) logs for a backend declares it dead; a productive log breaks the streak
-    and clears the hold; a still-running stub is never counted."""
+    """The backend-health reallocation gate: a MAJORITY of stub (banner-only/0-byte,
+    dead-pid) logs over the lookback window declares a backend dead — the same signal
+    the status card shows (#3247); a productive log in a window it is not mostly
+    stubbing clears the hold; a still-running stub is never counted."""
 
     def _mk(self, runs: Path, issue: int, stamp: str, *, backend: str, size: int,
             pid: int | None, mtime: float) -> None:
@@ -3365,6 +3366,75 @@ class BackendHealthTest(unittest.TestCase):
                                            now_ts=now, alive=set(), probe=self._dead_probe())
             self.assertEqual(out["state"], "healthy")
             self.assertFalse((runs / "backend-health-opencode.json").exists())  # hold cleared
+
+    def test_majority_stub_window_declares_dead_despite_one_productive_log(self) -> None:
+        # #3247: the gate must agree with the status card's majority-stub signal. A
+        # single productive log in the 90-min window must NOT resurrect a backend that
+        # is otherwise stubbing 4-out-of-5 spawns -- that short-circuit is what let the
+        # codex cron keep feeding seats to a majority-stub backend every tick.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i in range(4):  # 4 dead-pid stubs, newest first
+                self._mk(runs, 900 + i, f"20260708-05000{i}", backend="codex",
+                         size=32, pid=500 + i, mtime=now - (i + 1) * 60)
+            # ...and ONE real turn, still inside the 90-min lookback.
+            self._mk(runs, 910, "20260708-043000", backend="codex",
+                     size=5000, pid=510, mtime=now - 80 * 60)
+            out = mod.check_backend_health(runs, product="codex", lane="tools",
+                                           now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "dead")  # was "healthy" (source="productive")
+            self.assertEqual(out["source"], "majority-stub")
+            self.assertEqual((out["stub"], out["productive"]), (4, 1))
+            self.assertTrue((runs / "backend-health-codex.json").exists())
+
+    def test_gate_and_status_card_agree_on_majority_stub(self) -> None:
+        # The two health computations are independent (the card reads logs, the gate
+        # reads logs + a sidecar). #3247 was exactly their disagreement: the card said
+        # "majority-stub [codex=4/4 stub]" while the gate said healthy and kept spawning.
+        import tempfile
+        mod = load()
+        try:
+            import dispatch_status  # noqa: F401
+        except ImportError:  # pragma: no cover - status card is optional here
+            self.skipTest("dispatch_status not importable")
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i in range(4):
+                self._mk(runs, 920 + i, f"20260708-06000{i}", backend="codex",
+                         size=32, pid=600 + i, mtime=now - (i + 1) * 60)
+            self._mk(runs, 930, "20260708-050000", backend="codex",
+                     size=5000, pid=610, mtime=now - 80 * 60)
+            card = dispatch_status.backend_stub_rates(runs, now_ts=now, alive=set())
+            row = next(r for r in card if r["product"] == "codex")
+            gate = mod.check_backend_health(runs, product="codex", now_ts=now,
+                                            alive=set(), probe=self._dead_probe())
+            self.assertTrue(row["majority_stub"])
+            self.assertEqual(gate["state"], "dead")  # the card and the gate now agree
+
+    def test_stub_rate_recovery_restores_spawns_automatically(self) -> None:
+        # The other half of #3247's acceptance: once the stub logs age out of the
+        # lookback window and a real turn lands, the hold clears with no operator.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            (runs / "backend-health-codex.json").write_text(
+                '{"product":"codex","state":"dead","since":"x","abandoned_lane":"tools"}',
+                encoding="utf-8")
+            for i in range(4):  # stale stubs, OUTSIDE the 90-min lookback
+                self._mk(runs, 940 + i, f"20260708-01000{i}", backend="codex",
+                         size=32, pid=700 + i, mtime=now - (120 + i) * 60)
+            self._mk(runs, 950, "20260708-055000", backend="codex",
+                     size=5000, pid=710, mtime=now - 60)  # a fresh real turn
+            out = mod.check_backend_health(runs, product="codex", now_ts=now,
+                                           alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "healthy")
+            self.assertFalse((runs / "backend-health-codex.json").exists())  # hold cleared
 
     def test_live_stub_pid_is_not_counted_dead(self) -> None:
         # A claude -p worker streams nothing until its final message: a 0-byte log with
@@ -3421,6 +3491,112 @@ class BackendHealthTest(unittest.TestCase):
                 now_ts=now + (mod._BACKEND_REPROBE_MIN + 1) * 60, alive=set(),
                 probe=self._dead_probe())
             self.assertTrue(later["reprobe_due"])
+
+    # --- permanent auth gap: a missing API key / no login is not a credit wall ---
+    # The real codex banner: a doomed spawn dies on this every time, unchanged by any
+    # nightly reset. It clears no byte floor games — it is a small stub — but it must be
+    # classified as a PERMANENT gap so the hold stops the 30-min re-probe churn.
+    AUTHGAP = (
+        "# fak-spawn backend=codex issue=1350\n"
+        "fak guard: Codex provider env $OPENAI_API_KEY is empty and no ChatGPT "
+        "subscription auth.json was resolved. Run `codex login`, export "
+        "OPENAI_API_KEY, or pass --api-key-env VAR.\n"
+    )
+
+    def _mk_body(self, runs: Path, issue: int, stamp: str, body: str, *,
+                 backend: str, pid: int | None, mtime: float) -> None:
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text(body, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+        log.with_suffix(".backend").write_text(backend, encoding="utf-8")
+        if pid is not None:
+            pidf = log.with_suffix(".pid")
+            pidf.write_text(str(pid), encoding="utf-8")
+            os.utime(pidf, (mtime, mtime))
+
+    def test_authgap_stubs_declare_dead_with_backed_off_reprobe(self) -> None:
+        # A streak of auth-gap deaths is DEAD like any stub streak, but flagged auth_gap
+        # so the re-probe backs off from 30 min to _BACKEND_AUTHGAP_REPROBE_MIN — a doomed
+        # spawn every 30 min forever was the churn this fixes.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i, iss in enumerate((1350, 1351, 1352)):
+                self._mk_body(runs, iss, f"20260708-05000{i}", self.AUTHGAP,
+                              backend="codex", pid=800 + i, mtime=now - (i + 1) * 60)
+            out = mod.check_backend_health(runs, product="codex", lane="gateway",
+                                           now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "dead")
+            self.assertTrue(out["auth_gap"])
+            self.assertEqual(out["source"], "auth-gap")
+            self.assertEqual(out["reprobe_min"], mod._BACKEND_AUTHGAP_REPROBE_MIN)
+
+    def test_authgap_reprobe_backed_off_vs_credit_wall_cadence(self) -> None:
+        # The 30-min credit-wall re-probe would let a doomed worker through 12x/6h; the
+        # auth-gap hold admits at most one until _BACKEND_AUTHGAP_REPROBE_MIN elapses.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i, iss in enumerate((1350, 1351, 1352)):
+                self._mk_body(runs, iss, f"20260708-05000{i}", self.AUTHGAP,
+                              backend="codex", pid=800 + i, mtime=now - (i + 1) * 60)
+            first = mod.check_backend_health(runs, product="codex", lane="gateway",
+                                             now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertTrue(first["reprobe_due"])
+            # +31 min: a credit wall would re-probe here; an auth gap still holds.
+            soon = mod.check_backend_health(
+                runs, product="codex", lane="gateway",
+                now_ts=now + (mod._BACKEND_REPROBE_MIN + 1) * 60, alive=set(),
+                probe=self._dead_probe())
+            self.assertFalse(soon["reprobe_due"])
+            later = mod.check_backend_health(
+                runs, product="codex", lane="gateway",
+                now_ts=now + (mod._BACKEND_AUTHGAP_REPROBE_MIN + 1) * 60, alive=set(),
+                probe=self._dead_probe())
+            self.assertTrue(later["reprobe_due"])
+
+    def test_authgap_hold_is_sticky_after_stubs_age_out(self) -> None:
+        # The crux: an unauthenticated backend we STOPPED spawning leaves an empty window.
+        # A transient credit wall reads that as recovery (#3247) — but a missing key has
+        # NOT recovered, so an auth_gap hold must persist with no productive log to clear it.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            (runs / "backend-health-codex.json").write_text(
+                '{"product":"codex","state":"dead","since":"x","abandoned_lane":"gateway",'
+                '"auth_gap":true,"evidence_logs":["resolve-1350-x.log"]}',
+                encoding="utf-8")
+            # No logs at all in the window (spawns stopped) and NO productive turn.
+            out = mod.check_backend_health(runs, product="codex", now_ts=now,
+                                           alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "dead")   # sticky — NOT healthy no-streak
+            self.assertTrue(out["auth_gap"])
+            self.assertEqual(out["evidence_logs"], ["resolve-1350-x.log"])  # cause retained
+
+    def test_authgap_hold_cleared_by_productive_log(self) -> None:
+        # Recovery path: an operator sets the key and a real turn lands -> the sticky hold
+        # clears with no operator touching the sidecar, same as any witnessed restore.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            (runs / "backend-health-codex.json").write_text(
+                '{"product":"codex","state":"dead","since":"x","abandoned_lane":"gateway",'
+                '"auth_gap":true}', encoding="utf-8")
+            self._mk_body(runs, 1360, "20260708-060000", "x" * 5000,  # a real turn
+                          backend="codex", pid=900, mtime=now)
+            out = mod.check_backend_health(runs, product="codex", now_ts=now,
+                                           alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "healthy")
+            self.assertFalse((runs / "backend-health-codex.json").exists())  # hold cleared
 
     def test_read_dead_backends_excludes_self_and_healthy(self) -> None:
         import tempfile
