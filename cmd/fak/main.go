@@ -126,6 +126,8 @@ func main() {
 		cmdAgent(os.Args[2:])
 	case "api-host":
 		cmdAPIHost(os.Args[2:])
+	case "question-ledger":
+		cmdQuestionLedger(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
 	case "recover":

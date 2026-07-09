@@ -87,17 +87,17 @@ not a question — it is work. It does not earn a row.
 ### Enforced, not just documented
 
 The schema above is not honor-system prose — it is machine-checked by
-[`tools/question_ledger.py`](../../tools/question_ledger.py), the labeling
-authority both loops defer to (tests: `tools/question_ledger_test.py`, auto-run by
-`make ci`). It refuses an unknown category or status, a malformed or duplicate id,
-a `ticketed` row without a positive-int `ticket` (or a non-ticketed row that has
-one), a non-question (no `?`), and an absolute-path/host/email leak:
+`fak question-ledger` (Go leaf `internal/questionledger`, the labeling authority
+both loops defer to; tests auto-run by `make ci`). It refuses an unknown category
+or status, a malformed or duplicate id, a `ticketed` row without a positive-int
+`ticket` (or a non-ticketed row that has one), a non-question (no `?`), and an
+absolute-path/host/email leak:
 
 ```
-python tools/question_ledger.py next-id                 # continue today's Q-…-NNN
-python tools/question_ledger.py dedupe-check --question "…"
-python tools/question_ledger.py lint                    # exit 1 on any violation
-python tools/question_ledger.py stats                   # counts by category/status
+fak question-ledger next-id                 # continue today's Q-…-NNN
+fak question-ledger dedupe-check --question "…"
+fak question-ledger lint                    # exit 1 on any violation
+fak question-ledger stats                   # counts by category/status
 ```
 
 ## The GitHub label — `question-loop`

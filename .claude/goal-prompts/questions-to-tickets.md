@@ -43,7 +43,7 @@ Lint first — a `ticketed` row must carry a positive-int `ticket`, an `open`/`d
 row must not; the tool enforces exactly that:
 
 ```
-python tools/question_ledger.py lint    # exit 1 = fix the row it names, then re-lint
+fak question-ledger lint    # exit 1 = fix the row it names, then re-lint
 fak commit --path docs/questions/asked.jsonl -m "questions: resolve <id> (<fate>) (fak questions)"
 ```
 

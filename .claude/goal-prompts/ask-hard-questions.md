@@ -31,8 +31,8 @@ thoughtful maintainer stop and think, not ones with an obvious answer.
 1. Read cheaply and widely. Do NOT run the fleet, launch workers, or mutate code.
 2. Get ids and check dedup with the ledger tool (the labeling authority — don't
    hand-guess an id):
-   - next id: `python tools/question_ledger.py next-id`  (continues today's `Q-…-NNN`)
-   - before writing one: `python tools/question_ledger.py dedupe-check --question "<q>"`
+   - next id: `fak question-ledger next-id`  (continues today's `Q-…-NNN`)
+   - before writing one: `fak question-ledger dedupe-check --question "<q>"`
      (skip anything it flags DUPLICATE; also skip a question already asked for the
      same `target` + intent that it can't catch).
 3. Append 5–10 rows, one JSON object per line, to `docs/questions/asked.jsonl`:
@@ -49,7 +49,7 @@ thoughtful maintainer stop and think, not ones with an obvious answer.
 4. Lint before you commit — the ledger must stay clean:
 
    ```
-   python tools/question_ledger.py lint    # exit 1 = fix the row it names, then re-lint
+   fak question-ledger lint    # exit 1 = fix the row it names, then re-lint
    ```
 
    Then commit ONLY the ledger, on the trunk, by explicit path:

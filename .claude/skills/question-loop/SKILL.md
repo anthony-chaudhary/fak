@@ -93,9 +93,9 @@ rather than piling up. Preview an unattended launch with `-PlanOnly` first.
 ## Labeling the output (enforced, not just asked-for)
 
 The ledger's ids, categories, statuses, and public-safety are machine-checked by
-[`tools/question_ledger.py`](../../../tools/question_ledger.py) (`next-id`,
-`dedupe-check`, `lint`, `stats`; tests auto-run by `make ci`) — the labeling
-authority both loops call, so "very careful about labeling" is a gate, not a hope.
+`fak question-ledger` (`next-id`, `dedupe-check`, `lint`, `stats`; tests auto-run
+by `make ci`) — the labeling authority both loops call, so "very careful about
+labeling" is a gate, not a hope.
 
 A ticketed question gets the **`question-loop`** label as **provenance** ("this
 work came from a witnessed question") plus real priority/area/class — it's meant
