@@ -473,6 +473,9 @@ fak slack outbox status [--json]   # pending/posted/dead/refused counts + ages (
 fak slack outbox drain [--dry-run] # run one serialized drain pass now (dry-run: plan only)
 fak slack outbox retry --all|--nonce N [--dry-run]  # re-arm dead rows for the next drain
 fak slack outbox dead [--json]     # list dead rows with their structured reasons
+fak slack outbox compact [--dry-run] [--json] [--retain D] [--retain-dead D]  # fold old settled/dead rows + heartbeats out of the spool
+fak slack outbox limits [--json]   # effective retention windows + live occupancy (terminal/droppable rows, pass-due)
+fak slack outbox calls [--json]    # per-source Slack API-call spend vs saved (rate-limit gauge; before/after noise baseline)
 ```
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
