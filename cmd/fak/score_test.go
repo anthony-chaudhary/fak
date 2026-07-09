@@ -20,6 +20,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"loop",
 		"loop-index",
 		"milestone",
+		"negframe",
 		"product",
 		"propagation",
 		"repo-hygiene",
