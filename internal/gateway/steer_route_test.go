@@ -19,6 +19,7 @@ import (
 
 func TestSteerRouteEnqueuesCleanSteer(t *testing.T) {
 	srv := newTestServer(t)
+	srv.native = true // this serve owns a RunArm loop that drains the steer bus (#3528)
 	gotTrace, gotText := "", ""
 	srv.steerSession = func(_ context.Context, traceID, text string) error {
 		gotTrace, gotText = traceID, text
@@ -43,6 +44,7 @@ func TestSteerRouteEnqueuesCleanSteer(t *testing.T) {
 
 func TestSteerRouteRefusalMapsTo422(t *testing.T) {
 	srv := newTestServer(t)
+	srv.native = true // reach the floor Send: the 422 is the floor's deny, not the owned-loop 409
 	srv.steerSession = func(_ context.Context, _, _ string) error {
 		return errors.New("a2a floor refused (TRUST_VIOLATION)")
 	}
@@ -61,6 +63,67 @@ func TestSteerRouteRefusalMapsTo422(t *testing.T) {
 	raw, _ := io.ReadAll(r.Body)
 	if !strings.Contains(string(raw), "refused") {
 		t.Fatalf("422 body = %q, want it to mention the refusal", raw)
+	}
+}
+
+// TestSteerRouteProxyServedRefusesNoOwnedLoop is the honest-refusal keystone (#3528): a
+// serve process that owns no agent loop (the default proxy path, native=false) refuses a
+// well-formed steer with 409 STEER_NO_OWNED_LOOP and NEVER calls steerSession — no phantom
+// enqueue onto a bus nothing drains, and no false 202 "delivered" ack.
+func TestSteerRouteProxyServedRefusesNoOwnedLoop(t *testing.T) {
+	srv := newTestServer(t) // native defaults to false: proxy serve, no owned loop
+	delivered := false
+	srv.steerSession = func(_ context.Context, _, _ string) error {
+		delivered = true
+		return nil
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(SteerRequest{Text: "switch to plan B"})
+	r, err := http.Post(ts.URL+"/v1/fak/session/sess-proxy/steer", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusConflict {
+		t.Fatalf("proxy-served steer status = %d, want 409 (fail-closed, no owned loop)", r.StatusCode)
+	}
+	if delivered {
+		t.Fatal("proxy-served steer must NOT reach steerSession: no owned loop to consume it")
+	}
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	raw, _ := io.ReadAll(r.Body)
+	if json.Unmarshal(raw, &env) != nil || env.Error.Code != "steer_no_owned_loop" {
+		t.Fatalf("409 body should carry code=steer_no_owned_loop; got %q", raw)
+	}
+	if !strings.Contains(env.Error.Message, "STEER_NO_OWNED_LOOP") || !strings.Contains(env.Error.Message, "--native") {
+		t.Fatalf("409 message should name the reason and the native remedy; got %q", env.Error.Message)
+	}
+}
+
+// TestSteerRouteEmptyTextIs400EvenOnProxy proves request-shape checks win over the
+// owned-loop gate: an empty steer is a 400 whether or not the process owns a loop, so a
+// malformed request is never masked by the 409.
+func TestSteerRouteEmptyTextIs400EvenOnProxy(t *testing.T) {
+	srv := newTestServer(t) // native=false
+	srv.steerSession = func(_ context.Context, _, _ string) error { return nil }
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(SteerRequest{Text: "   "})
+	r, err := http.Post(ts.URL+"/v1/fak/session/sess-11/steer", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty steer on proxy status = %d, want 400 (shape check before owned-loop gate)", r.StatusCode)
 	}
 }
 

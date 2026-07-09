@@ -1132,6 +1132,33 @@ type Server struct {
 	// same trace does not reset the "same quarantined result replayed again" run.
 	resultLivelockMu sync.Mutex
 	resultLivelock   *guardrsi.LivelockDetector
+	// resultLivelockObserved is the REPLAY GATE for the result-side detector, guarded by
+	// resultLivelockMu. The client replays the full transcript every turn, so
+	// admitInboundResults re-quarantines the SAME held result on every subsequent turn;
+	// without this gate the detector would re-count an unchanged held result each turn and
+	// trip a livelock the agent never caused (a false positive). Keyed by trace -> set of
+	// stable per-result keys (resultNoteKey: tool_call_id, or Tool|Reason when idless): a
+	// key is observed at most once, so passive replay is filtered while a genuinely
+	// RE-ISSUED call — which the client stamps with a NEW tool_call_id — is a new key and
+	// still climbs toward a real trip. Bounded by maxResetHealthSessions (same reaper as
+	// notedResults/turnSafety).
+	resultLivelockObserved map[string]map[string]struct{}
+	// resultLivelockRecorded dedups the DURABLE side effects of a real trip — the
+	// AppendLivelock journal row and the fleet-observation JSONL line — to at most once per
+	// (trace, failure_hash), guarded by resultLivelockMu. A persistent loop re-fires the
+	// envelope on each new re-issue; recording every fire would spam the journal and the
+	// fleet-correlation feed, so the shared cause is recorded once per session and the
+	// cross-trace breadth is what the correlator counts. Bounded like resultLivelockObserved.
+	resultLivelockRecorded map[string]map[string]struct{}
+	// fleetObsPathOverride and fleetObsMu drive the cross-trace fleet-observation feed. On a
+	// real result-side trip the gateway appends one guardrsi.FleetObservation JSONL line
+	// (deduped per (trace, failure_hash) by resultLivelockRecorded) that `fak knownbad
+	// correlate` folds across traces into a shared-cause candidate. The sink path comes from
+	// FAK_FLEET_OBS_PATH (set on the guarded session by the launcher), or this override in
+	// tests; empty ⇒ the feed is off and only the durable LIVELOCK journal row is written.
+	// fleetObsMu serializes appends from concurrent traces.
+	fleetObsPathOverride string
+	fleetObsMu           sync.Mutex
 
 	// prunedToolDefs remembers, per served trace, tool definitions fak removed from the
 	// advertised Anthropic tools[] because the capability floor could never admit them. If

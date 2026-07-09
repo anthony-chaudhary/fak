@@ -23,7 +23,9 @@ type signalStub struct {
 	lastRun     string
 	lastReason  string
 	lastSteer   gateway.SteerRequest
-	steerStatus int // override the steer response status (0 -> 202 accepted)
+	steerStatus int    // override the steer response status (0 -> 202 accepted)
+	steerCode   string // override the steer error envelope's OpenAI code (e.g. steer_no_owned_loop)
+	steerMsg    string // override the steer error envelope's message
 }
 
 func (g *signalStub) handler() http.Handler {
@@ -39,8 +41,12 @@ func (g *signalStub) handler() http.Handler {
 		if verb == "steer" {
 			_ = json.NewDecoder(r.Body).Decode(&g.lastSteer)
 			if g.steerStatus != 0 {
+				msg := g.steerMsg
+				if msg == "" {
+					msg = "steer refused: a2a floor refused (TRUST_VIOLATION)"
+				}
 				writeTestJSON(w, g.steerStatus, map[string]any{
-					"error": map[string]any{"message": "steer refused: a2a floor refused (TRUST_VIOLATION)"},
+					"error": map[string]any{"message": msg, "code": g.steerCode},
 				})
 				return
 			}
@@ -126,6 +132,33 @@ func TestSignalSteerRefusedSurfacesError(t *testing.T) {
 	}
 	if !strings.Contains(errb, "refused") {
 		t.Fatalf("refused steer stderr = %q, want it to mention 'refused'", errb)
+	}
+}
+
+// TestSignalSteerProxyRefusalIsHonest proves the CLI half of #3528: when the gateway
+// refuses a steer with 409 STEER_NO_OWNED_LOOP (a proxy-served target), the operator sees a
+// truthful, reason-specific line — NOT the misleading generic-409 "session is stopped /
+// changed under you" text, and NEVER a false "delivered" claim.
+func TestSignalSteerProxyRefusalIsHonest(t *testing.T) {
+	g := &signalStub{
+		steerStatus: http.StatusConflict,
+		steerCode:   "steer_no_owned_loop",
+		steerMsg:    "STEER_NO_OWNED_LOOP: this serve process forwards proxy turns and owns no agent loop; start the gateway with --native",
+	}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+	out, errb, code := runSignalAt(ts.URL, "steer", "sess-proxy", "--text", "switch to plan B")
+	if code != 1 {
+		t.Fatalf("proxy-refused steer exit = %d, want 1 (out=%q err=%q)", code, out, errb)
+	}
+	if strings.Contains(out, "delivered") || strings.Contains(out, "steered") {
+		t.Fatalf("proxy-refused steer must not claim delivery; stdout=%q", out)
+	}
+	if !strings.Contains(errb, "STEER_NO_OWNED_LOOP") {
+		t.Fatalf("refusal should name the reason; stderr=%q", errb)
+	}
+	if strings.Contains(errb, "stopped (terminal) or changed under you") {
+		t.Fatalf("refusal must not use the misleading generic-409 text; stderr=%q", errb)
 	}
 }
 

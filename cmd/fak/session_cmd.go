@@ -683,7 +683,16 @@ func (c *sessionClient) req(method, path string, body any, out any) error {
 // httpStatusError maps a non-2xx response to an operator-actionable error, reading
 // the OpenAI-style error envelope the gateway emits for the message text.
 func httpStatusError(resp *http.Response) error {
-	msg := readErrMessage(resp.Body)
+	msg, code := readErrEnvelope(resp.Body)
+	// A route that names a closed reason code gets a reason-specific, truthful line first:
+	// the generic status text below can be actively misleading (a 409 STEER_NO_OWNED_LOOP is
+	// NOT a stale-rev conflict — the session is fine, the steer simply has no owned loop to
+	// land in), and the whole point of the honest-steer contract (#3528) is to not lie about
+	// what happened.
+	switch code {
+	case "steer_no_owned_loop":
+		return fmt.Errorf("steer not applied (STEER_NO_OWNED_LOOP): %s", msg)
+	}
 	switch resp.StatusCode {
 	case http.StatusConflict:
 		return fmt.Errorf("refused (409): the session is stopped (terminal) or changed under you — re-read and retry: %s", msg)
@@ -696,19 +705,22 @@ func httpStatusError(resp *http.Response) error {
 	}
 }
 
-// readErrMessage best-effort extracts {"error":{"message":...}} from a body, falling
-// back to the raw (bounded) text so a non-JSON error page is still legible.
-func readErrMessage(r io.Reader) string {
+// readErrEnvelope best-effort extracts {"error":{"message":...,"code":...}} from a body,
+// falling back to the raw (bounded) text as the message so a non-JSON error page is still
+// legible. The code (empty when absent) lets the caller render a reason-specific line
+// instead of the coarse HTTP-status text.
+func readErrEnvelope(r io.Reader) (msg, code string) {
 	raw, _ := io.ReadAll(io.LimitReader(r, 8<<10))
 	var env struct {
 		Error struct {
 			Message string `json:"message"`
+			Code    string `json:"code"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &env) == nil && env.Error.Message != "" {
-		return env.Error.Message
+		return env.Error.Message, env.Error.Code
 	}
-	return string(bytes.TrimSpace(raw))
+	return string(bytes.TrimSpace(raw)), ""
 }
 
 // defaultSessionAddr is the gateway base URL the CLI talks to: $FAK_ADDR if set, else

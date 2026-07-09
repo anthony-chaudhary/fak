@@ -639,6 +639,13 @@ summary  = "A live worker is spending effort (burning transcript/turns/tokens) w
 fix      = "Deliver the graduated correction the classifier recommends: a soft re-anchor NUDGE to the session steer channel first (reversible), then an operator ESCALATE if the doom persists. Never auto-teardown. Floor: `fak doomloop scan` / `internal/doomloop`."
 see_also = ["fak doomloop", "internal/doomloop", "dos status", "docs/goal-spec.md"]
 
+[reasons.STEER_NO_OWNED_LOOP]
+category = "MISROUTE"
+refusal  = true
+summary  = "A steer (operator or machine input) was posted to a session served on the default PROXY path, which forwards a single upstream turn and owns no agent loop to drain the steer bus -- so the input could never be consumed. Refused at ingress rather than falsely acked as delivered, so the caller learns the steer will not land instead of trusting a phantom 202."
+fix      = "Deliver the steer to a session driven by an owned native loop (`fak serve --native`, which runs agent.RunArm and drains the a2achan Session bus at each turn boundary -- drainSteer, #850), or hand the input to the harness that owns this session's turn loop."
+see_also = ["internal/agent/loop_session.go", "cmd/fak/signal.go", "internal/gateway/http.go", "fak signal steer"]
+
 [reasons.LOOP_DONE_UNWITNESSED]
 category = "STALE_CLAIM"
 refusal  = true
