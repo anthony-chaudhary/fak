@@ -1,0 +1,227 @@
+{
+ "meta": {
+  "as_of": "2026-07-09",
+  "_doc": "Coverage-closing pass: positions the confusable tokens the scorecard discovered in the tree but that no row yet claimed (guard-gate colorize/gatedscore/shortcount, plan cmdgodsplitplan/planstep, session-runtime setsessionfleetprovider/sessionsteer, context-ctx freshcontext, loop looporphan, render-materialize renderinfocacheablationrows). Each row is grounded on a real production identifier and draws an explicit line against its family siblings. Verdict 'defined' (distinction drawn, not yet glossary-anchored)."
+ },
+ "rows": [
+  {
+   "id": "x-cov-guard-gate-colorizeguardinfoblock",
+   "canonical": "colorizeGuardInfoBlock (guard-info TTY colorizer)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak function that layers ANSI TTY color onto an ALREADY-assembled, already-width-capped guard info block, preserving the exact display width (info_color.go).",
+   "distinction": "It only PAINTS an existing block and draws no admission decision - not a guard/gate adjudicator like acceptancegate, not guardInfoShortCount which FORMATS a single number, and not renderInfoCacheAblationRows which BUILDS the rows it later colors.",
+   "distinct_from": [
+    "x-cov-guard-gate-guardinfoshortcount",
+    "x-cov-render-materialize-renderinfocacheablationrows",
+    "x-ci-coverage-guard-gate-acceptancegate"
+   ],
+   "aliases": [
+    "colorizeguardinfoblock",
+    "colorizeGuardInfoBlock"
+   ],
+   "grounding": "colorizeGuardInfoBlock",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-guard-gate-gatedscoreanticheat",
+   "canonical": "GatedScoreAntiCheat (anti-cheat score zeroing)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/frontierswe function that applies anti-cheat zeroing on top of GatedScore: a trial flagged in scoring/anticheat.json scores 0 regardless of its raw gated value (score.go).",
+   "distinction": "It is the anti-cheat WRAPPER over GatedScore (the raw correctness x speedup gate), not GatedScore itself, and its 'gate' is a score penalty - not a git-hook gate or a pre-call guard adjudicator like acceptancegate/evaluateprocguard.",
+   "distinct_from": [
+    "x-ci-coverage-guard-gate-acceptancegate",
+    "x-ci-coverage-guard-gate-evaluateprocguard"
+   ],
+   "aliases": [
+    "gatedscoreanticheat",
+    "GatedScoreAntiCheat"
+   ],
+   "grounding": "GatedScoreAntiCheat",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-guard-gate-guardinfoshortcount",
+   "canonical": "guardInfoShortCount (guard-panel count formatter)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak helper that renders an integer compactly for a budget cell in the guard info panel (950 -> '950', larger values abbreviated) so a count fits its column.",
+   "distinction": "It is a display FORMATTER for one number in the guard panel, not a guard/gate that admits or refuses anything, and not colorizeGuardInfoBlock which colors the whole assembled block.",
+   "distinct_from": [
+    "x-cov-guard-gate-colorizeguardinfoblock",
+    "x-ci-coverage-guard-gate-acceptancegate"
+   ],
+   "aliases": [
+    "guardinfoshortcount",
+    "guardInfoShortCount"
+   ],
+   "grounding": "guardInfoShortCount",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-plan-cmdgodsplitplan",
+   "canonical": "cmdGodsplitPlan (godsplit-plan CLI shell)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "The cmd/fak thin shell over internal/godsplitplan: the read-only entrypoint that renders the god-file split plan a person runs from the CLI (godsplitplan.go).",
+   "distinction": "It is the CLI SHELL that prints a godsplit plan, not the plan data itself and not a runtime dispatchPlan or blockPlan - it decides nothing, it only projects the core's plan.",
+   "distinct_from": [
+    "x-ci-coverage-plan-dispatchplan",
+    "x-cov-plan-planstep"
+   ],
+   "aliases": [
+    "cmdgodsplitplan",
+    "cmdGodsplitPlan"
+   ],
+   "grounding": "cmdGodsplitPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-plan-planstep",
+   "canonical": "PlanStep (memq explain-plan stage)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "The internal/memq struct describing one explained stage of a memory query - what the op does and whether it is an estimate - the unit a recall EXPLAIN plan is built from (plan.go).",
+   "distinction": "It is one STAGE inside a memq explain plan, not the whole plan and not a dispatch/block plan; it is also NOT the identically-named glm52prefillsweep.PlanStep (a prefill request/land pair), a true homonym to keep separate.",
+   "distinct_from": [
+    "x-ci-coverage-plan-dispatchplan",
+    "x-ci-coverage-plan-blockplan"
+   ],
+   "aliases": [
+    "planstep",
+    "PlanStep"
+   ],
+   "grounding": "PlanStep",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-session-runtime-setsessionfleetprovider",
+   "canonical": "SetSessionFleetProvider (fleet-pane provider seam)",
+   "family": "session-runtime",
+   "kind": "symbol",
+   "definition": "The internal/gateway Server method that installs the pull source for the live cross-machine SessionFleet, the seam the fleet pane reads through (session_fleet.go).",
+   "distinction": "It is the INSTALLER/setter for the fleet provider, not the SessionFleet snapshot it yields and not a scheduler; it sits beside the sibling seams SetSessionEndpointsProvider / SetSessionHarnessProvider, each installing a different pull source.",
+   "distinct_from": [
+    "x2-session-runtime-withsessiongate",
+    "x-cov-session-runtime-sessionsteer"
+   ],
+   "aliases": [
+    "setsessionfleetprovider",
+    "SetSessionFleetProvider"
+   ],
+   "grounding": "SetSessionFleetProvider",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-session-runtime-sessionsteer",
+   "canonical": "sessionsteer (context-steering admission core)",
+   "family": "session-runtime",
+   "kind": "subsystem",
+   "definition": "The internal/sessionsteer package: the pure decision core of the zero-knob automatic-context doctrine that, given a content-free context-value snapshot, emits one typed directive the guard hooks turn into a SessionStart RULE and a Stop-hook PERSIST decision (epic #2198).",
+   "distinction": "It only DIRECTS the harness - it does not rotate context and is not the Session drive record nor the Scheduler; it sits below the relay rotation driver and hands the guard hooks a directive, not a mutation.",
+   "distinct_from": [
+    "x2-session-runtime-sessionobs",
+    "x2-session-runtime-withsessiongate"
+   ],
+   "aliases": [
+    "sessionsteer"
+   ],
+   "grounding": "sessionsteer",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-context-ctx-freshcontext",
+   "canonical": "FreshContext (choicetriage disposition)",
+   "family": "context-ctx",
+   "kind": "symbol",
+   "definition": "The internal/choicetriage Disposition value 'FRESH_CONTEXT': the default routing for an operator-directed note that is knowable but not obvious - evaluate it in a fresh sub-context rather than paging the current one (choicetriage.go).",
+   "distinction": "It is a triage DISPOSITION enum value that routes a decision to a fresh sub-context, not a stdlib context.Context and not a BaseContextPlan (a sysprompt assembly plan) - it names WHERE to answer, not the answer's plumbing.",
+   "distinct_from": [
+    "x2-context-ctx-basecontextplan",
+    "x2-context-ctx-commandcontext"
+   ],
+   "aliases": [
+    "freshcontext",
+    "FreshContext"
+   ],
+   "grounding": "FreshContext",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-loop-looporphan",
+   "canonical": "looporphan (duplicate-supervisor reaper core)",
+   "family": "loop",
+   "kind": "subsystem",
+   "definition": "The internal/looporphan package: the pure duplicate-loop-supervisor reaper core that folds a process census of loop/drainer SUPERVISORS into a closed keep/reap plan that never strands live work.",
+   "distinction": "It reaps duplicate SUPERVISOR processes via a keep/reap plan, not the loop runner itself and not the crashloop restart fence; the impure census and liveness probe live in the cmd/fak shell that hands this core plain data.",
+   "distinct_from": [
+    "loop-crashloop",
+    "loop-cmd-loopscore"
+   ],
+   "aliases": [
+    "looporphan"
+   ],
+   "grounding": "looporphan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-cov-render-materialize-renderinfocacheablationrows",
+   "canonical": "renderInfoCacheAblationRows (cache-tab row projector)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "The cmd/fak function that projects the live CacheAttribution block into the Cache tab's TUI rows (info_cache_ablation.go).",
+   "distinction": "It BUILDS the cache-ablation rows from an attribution block, not a generic renderer and not colorizeGuardInfoBlock which only colors an already-assembled block downstream.",
+   "distinct_from": [
+    "x2-render-materialize-renderer",
+    "x-cov-guard-gate-colorizeguardinfoblock"
+   ],
+   "aliases": [
+    "renderinfocacheablationrows",
+    "renderInfoCacheAblationRows"
+   ],
+   "grounding": "renderInfoCacheAblationRows",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}
