@@ -183,6 +183,85 @@ func TestLiveKVSpanEvictionBitExact(t *testing.T) {
 	t.Logf("LIVE #579: poison span evicted (%d positions) on the real in-kernel path; cache bit-exact to never-saw", freed)
 }
 
+// recordingSpanEvictor wraps a REAL agent.InKernelPlanner and records the (freed, exact)
+// outcome of every EvictKVSpan the GATEWAY drives, so a test can observe the served entrypoint's
+// OWN eviction rather than re-invoking EvictKVSpan directly. It embeds the planner, so it still
+// satisfies agent.Planner (promoted Complete/Model) and the real model.KVCache.Evict still runs;
+// the override only records the result the gateway saw. The gateway type-asserts s.planner to
+// agent.KVSpanEvictor, so it calls THIS method (not the promoted one) — capturing exactly what
+// admitInboundResults -> evictInKernelPoison drove.
+type recordingSpanEvictor struct {
+	*agent.InKernelPlanner
+	calls []spanEvictCall
+}
+
+type spanEvictCall struct {
+	throughIdx int
+	freed      int
+	exact      bool
+}
+
+func (r *recordingSpanEvictor) EvictKVSpan(messages []agent.Message, throughIdx int, tools []agent.ToolDef) (int, bool) {
+	freed, exact := r.InKernelPlanner.EvictKVSpan(messages, throughIdx, tools)
+	r.calls = append(r.calls, spanEvictCall{throughIdx: throughIdx, freed: freed, exact: exact})
+	return freed, exact
+}
+
+// TestServedPathDrivesLiveKVSpanEviction is the #1312 residual witness: it closes the exact gap
+// the issue words — "a quarantine verdict on a real served tool result does not mechanically evict
+// its K/V span" — by proving the opposite through the served entrypoint ITSELF. Where
+// TestLiveKVSpanEvictionBitExact asserts bit-exactness via a SEPARATE, hand-driven EvictKVSpan
+// call, this observes the eviction the gateway's own admitInboundResults -> evictInKernelPoison
+// path drove: a poisoned tool result admitted through the live serve path mechanically produces a
+// real model.KVCache.Evict of that result's span (freed > 0) whose reposition is bit-exact to
+// never-having-seen the poison. No direct EvictKVSpan call — the served path is the only driver.
+func TestServedPathDrivesLiveKVSpanEviction(t *testing.T) {
+	srv := newKVMMUResultStackServer(t)
+	rec := &recordingSpanEvictor{InKernelPlanner: liveInKernelPlanner(t)}
+	srv.planner = rec
+
+	const secret = "sk-abcdef0123456789abcdef0123"
+	poison := `{"page":"config loaded. api_key=` + secret + ` was found in env"}`
+	messages := []agent.Message{
+		{Role: agent.RoleSystem, Content: "you are a helper"},
+		{Role: agent.RoleUser, Content: "look up the config"},
+		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: poison},
+	}
+
+	admissions, err := srv.admitInboundResults(context.Background(), messages, nil, "trace-served-1312")
+	if err != nil {
+		t.Fatalf("admitInboundResults (served path): %v", err)
+	}
+	quarantined := false
+	for _, a := range admissions {
+		if a.Verdict.Kind == "QUARANTINE" {
+			quarantined = true
+		}
+	}
+	if !quarantined {
+		t.Fatalf("expected a QUARANTINE admission on the served path, got %+v", admissions)
+	}
+
+	// The gateway — and ONLY the gateway — drove the eviction. Assert its own call fired once, on
+	// the quarantined tool result, and mechanically produced a real, bit-exact K/V eviction.
+	if len(rec.calls) != 1 {
+		t.Fatalf("served path drove EvictKVSpan %d times, want exactly 1 (the quarantined tool result)", len(rec.calls))
+	}
+	if rec.calls[0].throughIdx != 2 {
+		t.Fatalf("served path evicted through msg=%d, want the quarantined tool result at index 2", rec.calls[0].throughIdx)
+	}
+	if rec.calls[0].freed <= 0 {
+		t.Fatalf("served-path EvictKVSpan freed %d positions, want > 0 — admitInboundResults did NOT mechanically evict the poison span", rec.calls[0].freed)
+	}
+	if !rec.calls[0].exact {
+		t.Fatalf("served-path eviction was not bit-exact to never-saw — the live reposition invariant failed end-to-end from admitInboundResults")
+	}
+	if strings.Contains(messages[2].Content, secret) {
+		t.Errorf("model-facing content still leaks the secret (should be paged out): %q", messages[2].Content)
+	}
+	t.Logf("SERVED #1312: admitInboundResults mechanically drove a real KVCache.Evict (%d positions) on the quarantined tool result; cache bit-exact to never-saw", rec.calls[0].freed)
+}
+
 // TestLiveKVSpanEvictionDefaultOff is the posture guard: with the bridge flag OFF (the
 // default), the SAME live planner does NOT drive a KVCache.Evict — the served path is
 // byte-for-byte the pre-bridge behavior until an operator opts in.
