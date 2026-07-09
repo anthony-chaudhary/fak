@@ -1030,6 +1030,20 @@ func cmdGuard(argv []string) {
 				}
 				return uint64(u), uint64(t), true
 			})
+			// Feed the GPU utilization axis. The in-kernel device-handle seam
+			// (DeviceMemoryInfo) reports memory only — there is no utilization on it — so
+			// this is the nvidia-smi fallback the issue names: per-device VRAM+util folded
+			// to the busiest device's percent. Fail-soft (no nvidia-smi / timeout /
+			// unparseable → ok=false), so the util axis stays honestly n/a rather than a
+			// fabricated 0 on a host that lacks the tool (#2052).
+			resSampler.SetGPUUtilProvider(func() (pct float64, ok bool) {
+				stats, present := compute.NvidiaGPUStats()
+				if !present {
+					return 0, false
+				}
+				_, _, util, aok := compute.AggregateGPUStats(stats)
+				return util, aok
+			})
 		}
 		resSampler.Start(guardResourceSampleInterval)
 		// Expose the live harness resource snapshot on the gateway's /metrics as the
