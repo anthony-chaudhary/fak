@@ -54,6 +54,10 @@ type Options struct {
 	// Now is the reference time for the live-window check (injectable for tests). Zero =>
 	// time.Now() at call.
 	Now time.Time
+	// WIP carries the optional build/owner probes for the untracked-WIP inventory. Its zero
+	// value inventories age only (no build probe, owner undiscoverable) — still enough to
+	// classify live vs abandoned. Diagnose always runs the inventory; it is read-only.
+	WIP WIPOptions
 }
 
 // DefaultLiveWindow: a worktree touched within this long is assumed to belong to a live
@@ -123,6 +127,10 @@ type Report struct {
 	Lock        LockState          `json:"lock"`
 	LockResidue []LockResidueState `json:"lock_residue,omitempty"`
 	Worktrees   []WorktreeState    `json:"worktrees"`
+	// WIP is the untracked-source inventory: crashed-worker residue and unlanded WIP,
+	// classified for land-or-park. Read-only — Sweep never touches it (a load-bearing
+	// unlanded file is byte-indistinguishable from cruft, so acting on it is a human's call).
+	WIP []WIPFile `json:"wip,omitempty"`
 }
 
 // StaleLockWedged reports whether the commit lock is currently wedged by a dead holder.
@@ -150,6 +158,30 @@ func (r Report) SweepableLockResidue() []LockResidueState {
 	return out
 }
 
+// LandOrParkWIP returns the untracked source surfaced for a human to land or park (build
+// poison or aged-and-unowned). Sweep never acts on these — the surface is read-only.
+func (r Report) LandOrParkWIP() []WIPFile {
+	var out []WIPFile
+	for _, f := range r.WIP {
+		if f.LandOrPark {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// PoisonWIP returns the untracked source whose package will not compile — the shared-trunk
+// build poison that crash-loops peers on rebuild.
+func (r Report) PoisonWIP() []WIPFile {
+	var out []WIPFile
+	for _, f := range r.WIP {
+		if f.Poison {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // Diagnose inspects the tree read-only: the commit lock's staleness and every worktree's
 // prune classification. It never mutates anything.
 func Diagnose(ctx context.Context, run Runner, opts Options) Report {
@@ -169,6 +201,7 @@ func Diagnose(ctx context.Context, run Runner, opts Options) Report {
 	rep := Report{Lock: diagnoseLock(opts.RepoRoot)}
 	rep.LockResidue = diagnoseLockResidue(opts.RepoRoot, window, now)
 	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now)
+	rep.WIP = diagnoseWIP(ctx, run, opts.RepoRoot, window, now, opts.WIP)
 	return rep
 }
 

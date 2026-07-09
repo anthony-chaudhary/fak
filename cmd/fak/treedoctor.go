@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -35,6 +36,8 @@ func cmdTreeDoctor(argv []string) {
 	asJSON := fs.Bool("json", false, "emit a machine-readable diagnosis/action report")
 	root := fs.String("root", "", "repo root to inspect (default: discover from cwd)")
 	trunk := fs.String("trunk", "", "merge target a worktree must be folded into to be prunable (default: origin/main)")
+	build := fs.Bool("build", false, "probe each untracked file's package with `go build` to flag build poison (opt-in: spawns go, adds host load)")
+	abandonAfter := fs.Duration("abandon-after", treedoctor.DefaultAbandonAfter, "an untracked source file older than this and not held by a live owner is surfaced as an abandonment candidate")
 	_ = fs.Parse(argv)
 
 	repoRoot := strings.TrimSpace(*root)
@@ -46,7 +49,14 @@ func cmdTreeDoctor(argv []string) {
 		os.Exit(2)
 	}
 
-	opts := treedoctor.Options{RepoRoot: repoRoot, Trunk: *trunk}
+	wopts := treedoctor.WIPOptions{AbandonAfter: *abandonAfter}
+	if *build {
+		// Opt-in: `go build ./<pkg>/` per untracked file's package flags the shared-trunk
+		// build poison that crash-loops peers. Gated because it spawns go (host load) and a
+		// whole-package compile is not free — the age/owner inventory works without it.
+		wopts.BuildProbe = goBuildProber(repoRoot)
+	}
+	opts := treedoctor.Options{RepoRoot: repoRoot, Trunk: *trunk, WIP: wopts}
 	rep, actions := treedoctor.Sweep(context.Background(), gitRunner, opts, *apply)
 	if *asJSON {
 		jsonRep := rep
@@ -134,6 +144,8 @@ func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, 
 		fmt.Fprintln(w, "tree is clean — nothing to reclaim")
 	}
 
+	renderWIPText(w, rep.WIP)
+
 	if len(actions) > 0 {
 		verb := "planned"
 		if apply {
@@ -146,6 +158,78 @@ func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, 
 		if !apply {
 			fmt.Fprintln(w, "\nrun with --apply to perform these.")
 		}
+	}
+}
+
+// renderWIPText prints the untracked-source land-or-park inventory: the crash-loop culprits
+// (build poison) and aged-unowned residue first, each surfaced for a human to LAND (commit)
+// or PARK (move aside) — never removed by tree-doctor itself. A short summary line accounts
+// for the live/resident files that are correctly left alone.
+func renderWIPText(w io.Writer, wip []treedoctor.WIPFile) {
+	if len(wip) == 0 {
+		return
+	}
+	var landOrPark, live, resident int
+	for _, f := range wip {
+		switch {
+		case f.LandOrPark:
+			landOrPark++
+		case f.Live:
+			live++
+		default:
+			resident++
+		}
+	}
+	fmt.Fprintf(w, "\nuntracked source WIP: %d file(s) — %d land-or-park, %d live, %d resident\n",
+		len(wip), landOrPark, live, resident)
+	for _, f := range wip {
+		if !f.LandOrPark {
+			continue
+		}
+		reason := "aged, no live owner"
+		if f.Poison {
+			reason = "BUILD POISON — package won't compile"
+		}
+		owner := f.Owner
+		if owner == "" {
+			owner = "unknown"
+		}
+		fmt.Fprintf(w, "  %-9s %s (age %s, owner %s) — %s\n",
+			strings.ToUpper(f.Class), f.Path, compactAge(f.AgeSeconds), owner, reason)
+	}
+	if landOrPark > 0 {
+		fmt.Fprintln(w, "  → land (commit by path) or park (move aside); tree-doctor never removes untracked source.")
+	}
+}
+
+// compactAge renders a second count as a compact h/m/s string for the WIP listing.
+func compactAge(sec int64) string {
+	switch {
+	case sec >= 3600:
+		return fmt.Sprintf("%dh%dm", sec/3600, (sec%3600)/60)
+	case sec >= 60:
+		return fmt.Sprintf("%dm", sec/60)
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+}
+
+// goBuildProber returns a treedoctor build probe that reports whether a package directory
+// (repo-relative, forward slashes) compiles via `go build ./<dir>/` run at repoRoot. A build
+// error — the shared-trunk poison signal — returns false. Bounded by a context timeout so a
+// wedged compile cannot stall the doctor.
+func goBuildProber(repoRoot string) func(string) bool {
+	return func(pkgDir string) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		target := "./"
+		if pkgDir != "" && pkgDir != "." {
+			target = "./" + pkgDir + "/"
+		}
+		cmd := exec.CommandContext(ctx, "go", "build", target)
+		cmd.Dir = repoRoot
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Run() == nil
 	}
 }
 
