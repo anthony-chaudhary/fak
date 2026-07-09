@@ -20,6 +20,40 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// lcbParityFlag documents one default-runner flag and the upstream
+// lcb_runner.runner.main analog it mirrors (#2109). The same slice both
+// registers the flags and drives their `--help` text, so the usage the runner
+// prints is the single source of truth for parity — a flag cannot drift from
+// the documented upstream analog.
+type lcbParityFlag struct {
+	name     string // fak runner flag name
+	upstream string // the lcb_runner.runner.main flag it mirrors
+	help     string // one-line purpose
+}
+
+var lcbParityFlags = []lcbParityFlag{
+	{"model", "--model", "model identity to run"},
+	{"scenario", "--scenario", "LCB scenario to run (codegeneration|selfrepair|testoutputprediction|codeexecution); empty runs every fixture scenario"},
+	{"evaluate", "--evaluate", "grade after generating; fak defers grading to the official lcb_runner, so a local run never self-claims a score"},
+	{"release-version", "--release_version", "LCB dataset release to pin (release_v1..release_v6|release_latest)"},
+	{"n", "-n", "samples to generate per problem"},
+	{"temperature", "--temperature", "sampling temperature"},
+	{"use-cache", "--use_cache", "reuse cached generations instead of regenerating"},
+}
+
+func (f lcbParityFlag) usage() string {
+	return fmt.Sprintf("%s (upstream lcb_runner.runner.main %s)", f.help, f.upstream)
+}
+
+func parityUsage(name string) string {
+	for _, f := range lcbParityFlags {
+		if f.name == name {
+			return f.usage()
+		}
+	}
+	return ""
+}
+
 func run(argv []string) int {
 	if len(argv) > 0 && argv[0] == "export" {
 		return runExport(argv[1:])
@@ -29,6 +63,9 @@ func run(argv []string) int {
 	}
 	if len(argv) > 0 && argv[0] == "contract" {
 		return runContract(argv[1:])
+	}
+	if len(argv) > 0 && argv[0] == "report" {
+		return runReport(argv[1:])
 	}
 
 	fs := flag.NewFlagSet("livecodebench", flag.ContinueOnError)
@@ -42,6 +79,18 @@ func run(argv []string) int {
 	probeGateway := fs.Bool("probe-gateway", false, "in --preflight, GET the fak gateway /models endpoint to check it is reachable")
 	sandboxCmd := fs.String("sandbox-cmd", "docker", "executable on PATH the preflight treats as the code-execution sandbox")
 	issueRef := fs.String("issue", "#2111", "issue reference recorded in the preflight artifact")
+	// lcb_runner.runner.main-parity flags (#2109). They mirror the upstream
+	// runner's surface so an operator who knows lcb_runner can drive the fak
+	// runner unchanged; the honesty fence holds regardless of their values —
+	// result_claim_allowed stays false until the official grader runs.
+	model := fs.String("model", "", parityUsage("model"))
+	scenario := fs.String("scenario", "", parityUsage("scenario"))
+	evaluate := fs.Bool("evaluate", false, parityUsage("evaluate"))
+	releaseVersion := fs.String("release-version", "", parityUsage("release-version"))
+	nSamples := fs.Int("n", 1, parityUsage("n"))
+	temperature := fs.Float64("temperature", 0.2, parityUsage("temperature"))
+	useCache := fs.Bool("use-cache", false, parityUsage("use-cache"))
+	out := fs.String("out", "", "write the run report JSON to this path (default: stdout as text/JSON)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -57,12 +106,50 @@ func run(argv []string) int {
 		fmt.Fprintf(os.Stderr, "livecodebench: %v\n", err)
 		return 1
 	}
+	if s := strings.TrimSpace(*scenario); s != "" {
+		filtered := make([]livecodebench.FixtureItem, 0, len(f.Items))
+		for _, it := range f.Items {
+			if it.Scenario == s {
+				filtered = append(filtered, it)
+			}
+		}
+		if len(filtered) == 0 {
+			fmt.Fprintf(os.Stderr, "livecodebench: no fixture items for scenario %q\n", s)
+			return 1
+		}
+		f.Items = filtered
+	}
+	// Echo the lcb_runner-parity run config (#2109). It records the requested
+	// generation parameters; --evaluate never promotes a local run into a
+	// claimable score — the report's result_claim_allowed stays false until the
+	// official lcb_runner grades the exported generations.
+	fmt.Fprintf(os.Stderr, "livecodebench run: model=%q scenario=%q n=%d temperature=%v release=%q use_cache=%v evaluate=%v\n",
+		*model, *scenario, *nSamples, *temperature, *releaseVersion, *useCache, *evaluate)
+	if *evaluate {
+		fmt.Fprintln(os.Stderr, "livecodebench run: --evaluate defers to official lcb_runner grading (`python -m lcb_runner.runner.custom_evaluator`); a local run never self-claims a score")
+	}
 	report := livecodebench.SmokeReport(f)
 	if *check {
 		if err := livecodebench.ValidateSmokeReport(report); err != nil {
 			fmt.Fprintf(os.Stderr, "livecodebench: %v\n", err)
 			return 1
 		}
+	}
+	if strings.TrimSpace(*out) != "" {
+		file, err := os.Create(*out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench: %v\n", err)
+			return 1
+		}
+		defer file.Close()
+		enc := json.NewEncoder(file)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "livecodebench run: wrote report to %s (result_claim_allowed=%v)\n", *out, report.ResultClaimAllowed)
+		return 0
 	}
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -300,6 +387,80 @@ func runContract(argv []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "livecodebench contract: status %s, release %s, scenario %s, result_claim_allowed=%t\n",
 		contract.Status, contract.Constants.ReleaseVersion, contract.Constants.Scenario, contract.ResultClaimAllowed)
+	return 0
+}
+
+// runReport implements `livecodebench report`: it renders a run report over a
+// normalized suite in both machine JSON (--out) and human markdown (--md). The
+// report is the honest, unpromoted scaffold NewReport builds — local-ungraded
+// evidence, no result claim — carrying one per-problem verdict row per suite
+// problem so the markdown links every question_id to its (ungraded) verdict and
+// evidence id. Grading the saved generations with the official checker is what
+// later replaces the ungraded rows and promotes the evidence class (#2112).
+func runReport(argv []string) int {
+	fs := flag.NewFlagSet("livecodebench report", flag.ContinueOnError)
+	suitePath := fs.String("suite", "", "normalized suite JSON to build the report over (required)")
+	out := fs.String("out", "", "write the report JSON to this path (default: stdout)")
+	mdPath := fs.String("md", "", "also write the report markdown to this path")
+	generatedAt := fs.String("generated-at", "", "RFC3339 report timestamp to record (default: now)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "livecodebench report: unexpected positional arguments")
+		return 2
+	}
+	if strings.TrimSpace(*suitePath) == "" {
+		fmt.Fprintln(os.Stderr, "livecodebench report: --suite is required")
+		return 2
+	}
+	suite, err := livecodebench.LoadSuiteFile(*suitePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench report: %v\n", err)
+		return 1
+	}
+	stamp := time.Now().UTC()
+	if s := strings.TrimSpace(*generatedAt); s != "" {
+		parsed, perr := time.Parse(time.RFC3339, s)
+		if perr != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench report: --generated-at %q is not RFC3339: %v\n", s, perr)
+			return 2
+		}
+		stamp = parsed
+	}
+
+	report := livecodebench.NewReport(suite, stamp)
+	report.Problems = livecodebench.ProblemRowsFromSuite(suite)
+	if err := report.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench report: %v\n", err)
+		return 1
+	}
+
+	if p := strings.TrimSpace(*mdPath); p != "" {
+		if err := os.WriteFile(p, []byte(livecodebench.RenderReportMarkdown(report)), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench report: %v\n", err)
+			return 1
+		}
+	}
+
+	w := io.Writer(os.Stdout)
+	if p := strings.TrimSpace(*out); p != "" {
+		file, cerr := os.Create(p)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "livecodebench report: %v\n", cerr)
+			return 1
+		}
+		defer file.Close()
+		w = file
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report); err != nil {
+		fmt.Fprintf(os.Stderr, "livecodebench report: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "livecodebench report: %d problem(s), evidence %s, result_claim_allowed=%t\n",
+		report.Summary.Problems, report.EvidenceClass, report.ResultClaimAllowed)
 	return 0
 }
 

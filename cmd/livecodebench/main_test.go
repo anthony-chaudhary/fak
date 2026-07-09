@@ -30,6 +30,77 @@ func TestRunFixtureSmokeJSONClaimDisallowed(t *testing.T) {
 	}
 }
 
+// TestRunParityFlagsDocumentedAndWriteReport pins #2109: the default runner
+// exposes the lcb_runner.runner.main-parity flags, each `--help` string names
+// its upstream analog, and a default invocation runs the committed fixture
+// end-to-end and writes a result-claim-gated report.
+func TestRunParityFlagsDocumentedAndWriteReport(t *testing.T) {
+	wantUpstream := map[string]string{
+		"model":           "--model",
+		"scenario":        "--scenario",
+		"evaluate":        "--evaluate",
+		"release-version": "--release_version",
+		"n":               "-n",
+		"temperature":     "--temperature",
+		"use-cache":       "--use_cache",
+	}
+	seen := map[string]bool{}
+	for _, f := range lcbParityFlags {
+		if !strings.Contains(f.usage(), "lcb_runner.runner.main") {
+			t.Fatalf("flag %q usage does not name the upstream module: %q", f.name, f.usage())
+		}
+		up, ok := wantUpstream[f.name]
+		if !ok {
+			t.Fatalf("unexpected parity flag %q", f.name)
+		}
+		if !strings.Contains(f.usage(), up) {
+			t.Fatalf("flag %q usage missing upstream analog %q: %q", f.name, up, f.usage())
+		}
+		seen[f.name] = true
+	}
+	for name := range wantUpstream {
+		if !seen[name] {
+			t.Fatalf("missing lcb_runner-parity flag %q", name)
+		}
+	}
+
+	fixture := filepath.Join("..", "..", "internal", "livecodebench", "testdata", "fixture.json")
+	dir := t.TempDir()
+	out := filepath.Join(dir, "report.json")
+	code := run([]string{
+		"--fixture", fixture,
+		"--model", "glm-5.2",
+		"--scenario", "codegeneration",
+		"-n", "1",
+		"--temperature", "0.2",
+		"--release-version", "release_v6",
+		"--use-cache",
+		"--evaluate",
+		"--out", out,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read report output: %v", err)
+	}
+	var report struct {
+		Schema             string `json:"schema"`
+		ResultClaimAllowed bool   `json:"result_claim_allowed"`
+		Questions          int    `json:"questions"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("report output not valid JSON: %v\n%s", err, raw)
+	}
+	if report.ResultClaimAllowed {
+		t.Fatal("result_claim_allowed must be false even with --evaluate (honesty fence)")
+	}
+	if report.Questions == 0 {
+		t.Fatal("scenario-filtered run wrote a report with no questions")
+	}
+}
+
 // TestRunExportCustomEvaluatorWritesGradeableInput pins #2102: `livecodebench
 // export --format custom-evaluator` must emit the exact
 // [{question_id, code_list}] shape lcb_runner.runner.custom_evaluator
