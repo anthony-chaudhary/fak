@@ -104,6 +104,32 @@ No private bridge/control details are committed. In generic terms:
   If confirmed, the baseline needs a Hopper+ node or an engine-provided
   non-DSA / dense-attention fallback.
 
+### Which node can actually serve V4 — the honest floor
+
+The floor above is **confirmed**, not hypothetical, for this repo's fleet:
+
+- **sm_80 (Ampere, 8×80 GB-class node) is BELOW the stock V4 floor.** The FP4
+  expert / FP8 / FP4-indexer / DSA stack has no stock sm_80 resident path
+  (the same wall that forces GLM-5.2 onto a llama.cpp CPU-offload path on sm_80,
+  vLLM #35021). **Unlike GLM-5.2, V4 has no sm_80 fallback in fak today**: there
+  is no fak-native V4 kernel yet (that is the deferred native track,
+  [#3016](https://github.com/anthony-chaudhary/fak/issues/3016)–[#3019](https://github.com/anthony-chaudhary/fak/issues/3019),
+  planned in [`docs/deepseek/`](../deepseek/)) and no llama.cpp path for the FP4
+  checkpoint. So an sm_80 node **cannot serve V4 live** with current tooling —
+  `scripts/dgx-deepseek-serve.sh` correctly **refuses** below sm_90.
+- **The two paths that work today:**
+  1. **Route to a hosted V4 endpoint through fak** — proven live this session
+     (see [Live witness](#live-witness--wire-proven-on-a-real-v4-endpoint)). The
+     model runs hosted; fak governs the wire. This is the "V4 usable now" answer
+     for any environment, including one whose local GPUs are below the floor.
+  2. **Provision an sm_90+ node (Hopper/Blackwell) and self-host.** This repo's
+     GCP idiom (`scripts/gcp-glm-serve.sh` + the `tools/gcp_accel.py` tier
+     registry, e.g. `GCP_TIER=a3-ultra-h200` for Hopper or `a4-b200` for
+     Blackwell's native FP4) provisions such a node and reaches it via
+     tunnel/tailscale → `fak serve`. Run `scripts/dgx-deepseek-serve.sh` on that
+     node for the gated bring-up + wire witness. Blackwell (sm_100) is the
+     intended V4-Pro home; Hopper (sm_90) serves V4-Flash with FP4 via emulation.
+
 ## Minimum evidence for a "supported self-hosted route"
 
 The optional live smoke collects, in order, exactly these rungs:
