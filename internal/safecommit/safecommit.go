@@ -194,6 +194,19 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	return CommitWith(ctx, realRunner, realLock, opts)
 }
 
+// buildCommitArgs assembles the `git commit` argv: verbatim cleanup, an optional -s sign-off,
+// the message file, and the explicit pathspec. Split out of CommitWith as a pure arg-assembly
+// phase — no git, no I/O.
+func buildCommitArgs(signOff bool, msgPath string, paths []string) []string {
+	commitArgs := []string{"commit", "--cleanup=verbatim"}
+	if signOff {
+		commitArgs = append(commitArgs, "-s")
+	}
+	commitArgs = append(commitArgs, "-F", msgPath, "--")
+	commitArgs = append(commitArgs, paths...)
+	return commitArgs
+}
+
 // CommitWith is the testable core: every effect goes through the injected run and lock, so
 // a fake Runner + fake LockFunc exercise the whole step-ordered algorithm — including the
 // race remedy — with no git and no repo. See the package doc for the discipline it encodes.
@@ -325,12 +338,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 	defer cleanup()
 
-	commitArgs := []string{"commit", "--cleanup=verbatim"}
-	if opts.SignOff {
-		commitArgs = append(commitArgs, "-s")
-	}
-	commitArgs = append(commitArgs, "-F", msgPath, "--")
-	commitArgs = append(commitArgs, paths...)
+	commitArgs := buildCommitArgs(opts.SignOff, msgPath, paths)
 	if out, code, cerr := runRidingLockContention(ctx, run, opts.Dir, commitArgs...); cerr != nil {
 		return res, fmt.Errorf("safecommit: git not executable: %w", cerr)
 	} else if code != 0 {
@@ -418,6 +426,15 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// safesync.SafePush so transient transport/non-ff races get the same retry and
 	// integrate-through-`fak sync apply` guidance as `fak sync push`. We never pull --rebase
 	// --autostash (it strands .git/rebase-merge).
+	return applyVerifiedPush(ctx, run, opts, trunk, res)
+}
+
+// applyVerifiedPush performs step (8): the optional push of the already-verified commit. It
+// pushes only when opts.Push is set, by exact SHA refspec through pushVerifiedCommit, and maps
+// a rejected push to ReasonPushRejected (a value, never a force-push). Extracted verbatim from
+// CommitWith so the executor core stays under its ceiling; the returned Result/err on every
+// branch are exactly what CommitWith previously returned.
+func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk string, res Result) (Result, error) {
 	if opts.Push {
 		pushed, err := pushVerifiedCommit(ctx, run, opts.Dir, trunk, res.SHA)
 		if err != nil {
