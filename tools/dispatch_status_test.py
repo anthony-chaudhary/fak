@@ -367,15 +367,52 @@ class LabReadinessTest(unittest.TestCase):
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             rec = mod.read_lab_readiness(Path(d) / "missing.json")
-        self.assertEqual(rec["schema"], mod.LAB_READINESS_SCHEMA)
-        self.assertEqual(rec["status"], "INDETERMINATE")
-        self.assertFalse(rec["admit_lab_dispatch"])
+        self.assertEqual(rec["schema"], mod.LINK_STATE_SCHEMA)
+        self.assertEqual(rec["phase"], "WAITING")
+        self.assertEqual(rec["detail"], "indeterminate")
+        self.assertFalse(rec["admit_dispatch"])
         self.assertEqual(rec["next_action"], "publish-lab-readiness")
         self.assertEqual(rec["evidence"], "no-readiness-record")
         self.assertFalse(rec["present"])
-        self.assertIn("--write-default", rec["commands"]["mark_ready"])
+        self.assertIn("--write-default", rec["commands"]["mark_clear"])
 
-    def test_ready_record_derives_admit_bit_and_rejects_private_fields(self) -> None:
+    def test_native_record_derives_admit_bit_and_rejects_private_fields(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "lab-readiness.json"
+            # A native fak.link_state/v1 record with a LYING admit_dispatch=False on a
+            # CLEAR phase: the reader must re-derive the bit from the phase, not trust it.
+            path.write_text(json.dumps({
+                "schema": mod.LINK_STATE_SCHEMA,
+                "subject": "gpu-server",
+                "checked_at": "2026-07-04T14:00:00Z",
+                "phase": "CLEAR",
+                "detail": "ready",
+                "next_action": "admit-dispatch",
+                "evidence": "scrubbed-private-readback",
+                "admit_dispatch": False,
+            }), encoding="utf-8")
+            rec = mod.read_lab_readiness(path)
+            self.assertEqual(rec["phase"], "CLEAR")
+            self.assertTrue(rec["admit_dispatch"])
+
+            path.write_text(json.dumps({
+                "schema": mod.LINK_STATE_SCHEMA,
+                "subject": "gpu-server",
+                "phase": "CLEAR",
+                "detail": "ready",
+                "next_action": "admit-dispatch",
+                "evidence": "scrubbed-private-readback",
+                "raw_thread": "secret",
+            }), encoding="utf-8")
+            bad = mod.read_lab_readiness(path)
+            self.assertEqual(bad["phase"], "WAITING")
+            self.assertEqual(bad["evidence"], "invalid-readiness-record")
+            self.assertIn("unknown field", bad["_error"])
+
+    def test_legacy_record_read_shim_coarsens_onto_phase(self) -> None:
+        # Rollover safety: a legacy fak.lab_readiness/v1 record (the private bridge may
+        # keep emitting it for one cycle) is still accepted and coarsened onto a phase.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "lab-readiness.json"
@@ -386,60 +423,69 @@ class LabReadinessTest(unittest.TestCase):
                 "status": "READY_FOR_DEV_WORK",
                 "next_action": "admit-lab-backed-dispatch",
                 "evidence": "scrubbed-private-readback",
-                "admit_lab_dispatch": False,
+                "admit_lab_dispatch": True,
             }), encoding="utf-8")
-            rec = mod.read_lab_readiness(path)
-            self.assertTrue(rec["admit_lab_dispatch"])
+            ready = mod.read_lab_readiness(path)
+            self.assertEqual(ready["schema"], mod.LINK_STATE_SCHEMA)
+            self.assertEqual(ready["phase"], "CLEAR")
+            self.assertEqual(ready["detail"], "ready")
+            self.assertTrue(ready["admit_dispatch"])
 
+            # A legacy not-ready status coarsens to WAITING with the mapped detail, and
+            # a lying admit_lab_dispatch=True can never re-open the gate.
             path.write_text(json.dumps({
                 "schema": mod.LAB_READINESS_SCHEMA,
                 "machine_class": "gpu-server",
-                "status": "READY_FOR_DEV_WORK",
-                "next_action": "admit-lab-backed-dispatch",
+                "status": "WAIT_PRIVATE_RECOVERY",
+                "next_action": "confirm-private-control-session",
                 "evidence": "scrubbed-private-readback",
-                "raw_thread": "secret",
+                "admit_lab_dispatch": True,
             }), encoding="utf-8")
-            bad = mod.read_lab_readiness(path)
-            self.assertEqual(bad["status"], "INDETERMINATE")
-            self.assertEqual(bad["evidence"], "invalid-readiness-record")
-            self.assertIn("unknown field", bad["_error"])
+            wait = mod.read_lab_readiness(path)
+            self.assertEqual(wait["phase"], "WAITING")
+            self.assertEqual(wait["detail"], "private-recovery")
+            self.assertFalse(wait["admit_dispatch"])
 
     def test_lab_hold_reaches_payload_render_and_slack_action(self) -> None:
         mod = load()
         lab = {
-            "schema": mod.LAB_READINESS_SCHEMA,
-            "machine_class": "gpu-server",
+            "schema": mod.LINK_STATE_SCHEMA,
+            "subject": "gpu-server",
             "checked_at": "2026-07-04T14:00:00Z",
-            "status": "WAIT_PRIVATE_RECOVERY",
+            "phase": "WAITING",
+            "detail": "private-recovery",
             "next_action": "confirm-private-control-session",
             "evidence": "scrubbed-private-readback",
-            "admit_lab_dispatch": False,
+            "admit_dispatch": False,
+            "commands": mod._lab_readiness_commands(),
         }
         p = build(mod, lab_readiness=lab)
-        self.assertEqual(p["lab_readiness"]["status"], "WAIT_PRIVATE_RECOVERY")
-        self.assertTrue(any("lab readiness: WAIT_PRIVATE_RECOVERY" in r for r in p["reasons"]))
-        self.assertIn("lab       : WAIT_PRIVATE_RECOVERY", mod.render(p))
+        self.assertEqual(p["lab_readiness"]["phase"], "WAITING")
+        self.assertTrue(any("lab readiness: WAITING/private-recovery" in r for r in p["reasons"]))
+        self.assertIn("lab       : WAITING/private-recovery", mod.render(p))
         self.assertIn("lab cmd", mod.render(p))
         slack = mod.slack_text(p)
         self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
-        self.assertIn("lab readiness WAIT_PRIVATE_RECOVERY", slack)
+        self.assertIn("lab readiness WAITING/private-recovery", slack)
         self.assertIn("lab-backed dispatch held", slack)
-        self.assertIn("fak lab readiness --status READY_FOR_DEV_WORK --write-default --json", slack)
+        self.assertIn("fak lab readiness --phase CLEAR --write-default --json", slack)
 
     def test_ready_lab_record_is_expected_not_action(self) -> None:
         mod = load()
         lab = {
-            "schema": mod.LAB_READINESS_SCHEMA,
-            "machine_class": "gpu-server",
+            "schema": mod.LINK_STATE_SCHEMA,
+            "subject": "gpu-server",
             "checked_at": "2026-07-04T14:00:00Z",
-            "status": "READY_FOR_DEV_WORK",
-            "next_action": "admit-lab-backed-dispatch",
+            "phase": "CLEAR",
+            "detail": "ready",
+            "next_action": "admit-dispatch",
             "evidence": "scrubbed-private-readback",
-            "admit_lab_dispatch": True,
+            "admit_dispatch": True,
+            "commands": mod._lab_readiness_commands(),
         }
         p = build(mod, lab_readiness=lab)
         slack = mod.slack_text(p)
-        self.assertIn("lab readiness READY_FOR_DEV_WORK", slack)
+        self.assertIn("lab readiness CLEAR", slack)
         self.assertNotIn("lab-backed dispatch held", slack)
 
 
@@ -745,12 +791,14 @@ class ResolverTickTest(unittest.TestCase):
     def test_lab_hold_is_a_utilization_blocker(self) -> None:
         mod = load()
         lab = {
-            "schema": mod.LAB_READINESS_SCHEMA,
-            "machine_class": "gpu-server",
-            "status": "INDETERMINATE",
+            "schema": mod.LINK_STATE_SCHEMA,
+            "subject": "gpu-server",
+            "phase": "WAITING",
+            "detail": "indeterminate",
             "next_action": "publish-lab-readiness",
             "evidence": "no-readiness-record",
-            "admit_lab_dispatch": False,
+            "admit_dispatch": False,
+            "commands": mod._lab_readiness_commands(),
         }
         p = build(mod, resolve_ticks=resolver_tick(), lab_readiness=lab)
         blockers = {b["code"]: b for b in p["utilization"]["blockers"]}
@@ -1326,6 +1374,96 @@ class SilentWorkersScanTest(unittest.TestCase):
         ird = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ird)
         self.assertEqual(mod._STUB_LOG_MAX_BYTES, ird._STUB_LOG_MAX_BYTES)
+
+
+class RouteHealthFoldTest(unittest.TestCase):
+    """route_health_status() (#3035) — hermetic latest-per-route fold over a tmp
+    route-health.jsonl: last probe age, typed failure class, cooldown remaining,
+    and the exact recheck command; a failing route is suppressed without touching
+    its healthy sibling on the same provider."""
+
+    _RECHECK = ("fak dispatch route-health probe --base-url https://nim.example/v1 "
+                "--model deepseek-chat --provider nim")
+
+    def _write(self, runs: Path, rows: list[dict], *, tail: str = "") -> None:
+        runs.mkdir(parents=True, exist_ok=True)
+        (runs / "route-health.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows) + tail, encoding="utf-8")
+
+    def test_missing_ledger_is_empty_fold(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.route_health_status(Path(d) / "no-such-runs")
+        self.assertEqual(out, {"probed": 0, "suppressed": 0, "routes": []})
+
+    def test_suppresses_only_failing_route_and_carries_recheck(self) -> None:
+        mod = load()
+        now = 1_700_000_000
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write(runs, [
+                # stale healthy row for the failing route: the later timeout row wins
+                {"route": "nim/seat1/deepseek-chat", "class": "healthy",
+                 "probed_at_unix": now - 600, "recheck": self._RECHECK},
+                {"route": "nim/seat1/deepseek-chat", "class": "timeout",
+                 "probed_at_unix": now - 120, "cooldown_until_unix": now + 480,
+                 "recheck": self._RECHECK},
+                {"route": "nim/seat1/kimi-k2", "class": "healthy",
+                 "probed_at_unix": now - 60,
+                 "recheck": "fak dispatch route-health probe --base-url "
+                            "https://nim.example/v1 --model kimi-k2 --provider nim"},
+            ])
+            out = mod.route_health_status(runs, now_ts=now)
+        self.assertEqual(out["probed"], 2)
+        self.assertEqual(out["suppressed"], 1)
+        rows = {r["route"]: r for r in out["routes"]}
+        bad = rows["nim/seat1/deepseek-chat"]
+        self.assertTrue(bad["suppressed"])
+        self.assertEqual(bad["class"], "timeout")
+        self.assertEqual(bad["probe_age_secs"], 120)
+        self.assertEqual(bad["cooldown_remaining_secs"], 480)
+        self.assertEqual(bad["recheck"], self._RECHECK)
+        sibling = rows["nim/seat1/kimi-k2"]
+        self.assertFalse(sibling["suppressed"])
+        self.assertEqual(sibling["class"], "healthy")
+
+    def test_elapsed_cooldown_and_corrupt_row_do_not_suppress(self) -> None:
+        mod = load()
+        now = 1_700_000_000
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write(runs, [
+                {"route": "nim/seat1/deepseek-chat", "class": "rate_limited",
+                 "probed_at_unix": now - 3600, "cooldown_until_unix": now - 60,
+                 "recheck": self._RECHECK},
+            ], tail="{not json}\n")
+            out = mod.route_health_status(runs, now_ts=now)
+        self.assertEqual(out["probed"], 1)
+        self.assertEqual(out["suppressed"], 0)
+        self.assertFalse(out["routes"][0]["suppressed"])
+
+    def test_payload_threading_and_render_line(self) -> None:
+        mod = load()
+        rh = {"probed": 2, "suppressed": 1, "routes": [
+            {"route": "nim/seat1/deepseek-chat", "class": "timeout",
+             "probe_age_secs": 120, "suppressed": True,
+             "cooldown_remaining_secs": 480, "recheck": self._RECHECK},
+            {"route": "nim/seat1/kimi-k2", "class": "healthy",
+             "probe_age_secs": 60, "suppressed": False,
+             "cooldown_remaining_secs": 0, "recheck": ""},
+        ]}
+        p = build(mod, route_health=rh)
+        self.assertEqual(p["route_health"], rh)
+        text = mod.render(p)
+        self.assertIn("routes    : 2 probed, 1 suppressed", text)
+        self.assertIn("nim/seat1/deepseek-chat=timeout", text)
+        self.assertIn("cooldown=480s left", text)
+        self.assertIn("recheck   : " + self._RECHECK, text)
+
+    def test_no_probes_emits_no_render_line(self) -> None:
+        mod = load()
+        p = build(mod, route_health={"probed": 0, "suppressed": 0, "routes": []})
+        self.assertNotIn("routes    :", mod.render(p))
 
 
 class BackendStubRateScanTest(unittest.TestCase):

@@ -67,27 +67,55 @@ from lane_yield import (  # noqa: E402  (shared low-yield fold, #2062)
 )
 
 SCHEMA = "fleet-dispatch-status/1"
-LAB_READINESS_SCHEMA = "fak.lab_readiness/v1"
-LAB_READY_FOR_DEV_WORK = "READY_FOR_DEV_WORK"
-LAB_READINESS_STATUSES = {
-    LAB_READY_FOR_DEV_WORK,
+# The native readiness schema written today is the general three-phase link-state
+# record (internal/linkstate). The older lab-specific schema is still ACCEPTED on
+# read for one rollover cycle — the uncommittable private bridge may keep emitting it
+# until its local mirror updates — and coarsened onto a phase (see _coarsen_legacy_status).
+LINK_STATE_SCHEMA = "fak.link_state/v1"
+LAB_READINESS_SCHEMA = "fak.lab_readiness/v1"  # LEGACY: accepted on read, never written
+
+# Primary three-phase vocabulary. CLEAR is the ONLY phase that admits dispatch.
+LINK_CLEAR = "CLEAR"
+LINK_WAITING = "WAITING"
+LINK_WORKING = "WORKING"
+LINK_PHASES = {LINK_CLEAR, LINK_WAITING, LINK_WORKING}
+
+# The closed `detail` sub-vocabulary (the demoted fine cause). Mirrors internal/linkstate.
+DETAIL_READY = "ready"                       # CLEAR
+DETAIL_JOB_IN_FLIGHT = "job-in-flight"       # WORKING
+DETAIL_GATEWAY_DOWN = "gateway-unreachable"  # WAITING
+DETAIL_AUTH_BLOCKED = "auth-or-channel-blocked"  # WAITING
+DETAIL_PRIVATE_RECOVERY = "private-recovery"  # WAITING
+DETAIL_INDETERMINATE = "indeterminate"       # WAITING
+LINK_DETAILS = {
+    DETAIL_READY, DETAIL_JOB_IN_FLIGHT, DETAIL_GATEWAY_DOWN,
+    DETAIL_AUTH_BLOCKED, DETAIL_PRIVATE_RECOVERY, DETAIL_INDETERMINATE,
+}
+
+# Legacy five-state status vocabulary (accepted on read, coarsened to a phase).
+LEGACY_LAB_STATUSES = {
+    "READY_FOR_DEV_WORK",
     "WAIT_PRIVATE_RECOVERY",
     "GATEWAY_UNREACHABLE",
     "AUTH_OR_CHANNEL_BLOCKED",
     "INDETERMINATE",
 }
-LAB_READINESS_KEYS = {
-    "schema",
-    "machine_class",
-    "checked_at",
-    "status",
-    "next_action",
-    "evidence",
-    "admit_lab_dispatch",
+
+# The decode superset: native link-state keys PLUS legacy lab keys, so a record in
+# EITHER schema passes the unknown-field scrub while a foreign/private field is refused.
+_LINK_STATE_KEYS = {
+    "schema", "subject", "checked_at", "phase", "detail",
+    "next_action", "evidence", "admit_dispatch",
 }
+_LEGACY_LAB_KEYS = {
+    "schema", "machine_class", "checked_at", "status",
+    "next_action", "evidence", "admit_lab_dispatch",
+}
+LAB_READINESS_KEYS = _LINK_STATE_KEYS | _LEGACY_LAB_KEYS | {"commands"}
 _GENERIC_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-_LAB_MARK_READY_COMMAND = "fak lab readiness --status READY_FOR_DEV_WORK --write-default --json"
-_LAB_MARK_WAIT_COMMAND = "fak lab readiness --status WAIT_PRIVATE_RECOVERY --write-default --json"
+_LAB_MARK_CLEAR_COMMAND = "fak lab readiness --phase CLEAR --write-default --json"
+_LAB_MARK_WAITING_COMMAND = "fak lab readiness --phase WAITING --write-default --json"
+_LAB_MARK_WORKING_COMMAND = "fak lab readiness --phase WORKING --write-default --json"
 # The guarded always-on tick (tools/register_issue_dispatch.ps1). The older
 # FleetDOSDispatchWatchdog keeps the un-gated kernel supervisor alive; this card
 # tracks the DoS-safe issue dispatcher, so it reports the guarded task.
@@ -251,16 +279,46 @@ def _lab_readiness_default_path() -> Path:
     return base / "fak" / "fleet" / "lab-readiness.json"
 
 
+def _coarsen_legacy_status(status: str) -> tuple[str, str]:
+    """Fold a legacy five-state status onto the (phase, detail) it maps to. Any
+    status that is not the single ready state — including an unrecognized one —
+    coarsens to WAITING, so a stale legacy record can never re-open the gate.
+    Mirrors linkstate.Coarsen."""
+    return {
+        "READY_FOR_DEV_WORK": (LINK_CLEAR, DETAIL_READY),
+        "WAIT_PRIVATE_RECOVERY": (LINK_WAITING, DETAIL_PRIVATE_RECOVERY),
+        "GATEWAY_UNREACHABLE": (LINK_WAITING, DETAIL_GATEWAY_DOWN),
+        "AUTH_OR_CHANNEL_BLOCKED": (LINK_WAITING, DETAIL_AUTH_BLOCKED),
+    }.get(status, (LINK_WAITING, DETAIL_INDETERMINATE))
+
+
+def _phase_for_detail(detail: str) -> str:
+    if detail == DETAIL_READY:
+        return LINK_CLEAR
+    if detail == DETAIL_JOB_IN_FLIGHT:
+        return LINK_WORKING
+    return LINK_WAITING
+
+
+def _default_detail(phase: str) -> str:
+    if phase == LINK_CLEAR:
+        return DETAIL_READY
+    if phase == LINK_WORKING:
+        return DETAIL_JOB_IN_FLIGHT
+    return DETAIL_INDETERMINATE
+
+
 def _lab_readiness_indeterminate(*, next_action: str, evidence: str,
                                  error: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "schema": LAB_READINESS_SCHEMA,
-        "machine_class": "gpu-server",
+        "schema": LINK_STATE_SCHEMA,
+        "subject": "gpu-server",
         "checked_at": None,
-        "status": "INDETERMINATE",
+        "phase": LINK_WAITING,
+        "detail": DETAIL_INDETERMINATE,
         "next_action": next_action,
         "evidence": evidence,
-        "admit_lab_dispatch": False,
+        "admit_dispatch": False,
         "present": False,
         "valid": error is None,
         "commands": _lab_readiness_commands(),
@@ -274,13 +332,28 @@ def _lab_readiness_problem(doc: dict[str, Any]) -> str | None:
     unknown = sorted(set(doc) - LAB_READINESS_KEYS)
     if unknown:
         return "unknown field(s): " + ", ".join(unknown[:6])
-    if doc.get("schema") not in (None, "", LAB_READINESS_SCHEMA):
+    if doc.get("schema") not in (None, "", LINK_STATE_SCHEMA, LAB_READINESS_SCHEMA):
         return f"unsupported schema {doc.get('schema')!r}"
-    status = str(doc.get("status") or "")
-    if status not in LAB_READINESS_STATUSES:
-        return f"unknown status {status!r}"
-    for key in ("machine_class", "next_action", "evidence"):
-        value = str(doc.get(key) or "")
+    # A native record carries `phase`; a legacy record carries `status`. Validate the
+    # one that is present against its closed vocabulary.
+    phase = str(doc.get("phase") or "")
+    if phase:
+        if phase not in LINK_PHASES:
+            return f"unknown phase {phase!r}"
+        detail = str(doc.get("detail") or "")
+        if detail:
+            if detail not in LINK_DETAILS:
+                return f"unknown detail {detail!r}"
+            if _phase_for_detail(detail) != phase:
+                return f"detail {detail!r} inconsistent with phase {phase!r}"
+    else:
+        status = str(doc.get("status") or "")
+        if status not in LEGACY_LAB_STATUSES:
+            return f"unknown status {status!r}"
+    subject = str(doc.get("subject") or doc.get("machine_class") or "")
+    for key, value in (("subject", subject),
+                       ("next_action", str(doc.get("next_action") or "")),
+                       ("evidence", str(doc.get("evidence") or ""))):
         if not _GENERIC_TOKEN_RE.match(value):
             return f"{key} must be a generic token-like value"
     return None
@@ -288,17 +361,32 @@ def _lab_readiness_problem(doc: dict[str, Any]) -> str | None:
 
 def _lab_readiness_commands() -> dict[str, str]:
     return {
-        "mark_ready": _LAB_MARK_READY_COMMAND,
-        "mark_wait_private_recovery": _LAB_MARK_WAIT_COMMAND,
+        "mark_clear": _LAB_MARK_CLEAR_COMMAND,
+        "mark_waiting": _LAB_MARK_WAITING_COMMAND,
+        "mark_working": _LAB_MARK_WORKING_COMMAND,
     }
 
 
-def read_lab_readiness(path: Path | None = None) -> dict[str, Any]:
-    """Read the public fak.lab_readiness/v1 dispatch gate.
+def _lab_link_label(lab: dict[str, Any]) -> str:
+    """Render a readiness record's phase as ``PHASE/detail`` for the card, slack, and
+    reasons — e.g. ``CLEAR/ready`` or ``WAITING/private-recovery``. The detail is
+    dropped when it is the phase's default (a bare ``WORKING`` reads cleaner)."""
+    phase = str(lab.get("phase") or LINK_WAITING)
+    detail = str(lab.get("detail") or "")
+    if detail and detail != _default_detail(phase):
+        return f"{phase}/{detail}"
+    return phase
 
-    This intentionally does not run dgxbridge or print the source path. The private
-    bridge publishes a scrubbed record; the status card only consumes that public
-    yes/no gate and fails closed when it is absent or malformed.
+
+def read_lab_readiness(path: Path | None = None) -> dict[str, Any]:
+    """Read the public link-state dispatch gate.
+
+    Accepts EITHER the native fak.link_state/v1 record or a legacy fak.lab_readiness/v1
+    record (coarsened onto a phase for one rollover cycle), and normalizes both onto the
+    phase shape. This intentionally does not run dgxbridge or print the source path. The
+    private bridge publishes a scrubbed record; the status card only consumes that public
+    yes/no gate (admit_dispatch, re-derived from the phase) and fails closed when it is
+    absent or malformed.
     """
     p = path or _lab_readiness_default_path()
     try:
@@ -328,15 +416,25 @@ def read_lab_readiness(path: Path | None = None) -> dict[str, Any]:
             evidence="invalid-readiness-record",
             error=problem,
         )
-    status = str(doc.get("status") or "INDETERMINATE")
+    # Normalize EITHER schema onto the native phase shape. A record is legacy when it
+    # declares the legacy schema or simply carries no `phase` (a pre-migration mirror);
+    # fold its old status onto a phase+detail. admit_dispatch is ALWAYS re-derived from
+    # the phase, never trusted from the file.
+    phase = str(doc.get("phase") or "")
+    legacy = doc.get("schema") == LAB_READINESS_SCHEMA or not phase
+    if legacy:
+        phase, detail = _coarsen_legacy_status(str(doc.get("status") or ""))
+    else:
+        detail = str(doc.get("detail") or "") or _default_detail(phase)
     return {
-        "schema": LAB_READINESS_SCHEMA,
-        "machine_class": str(doc.get("machine_class") or "gpu-server"),
+        "schema": LINK_STATE_SCHEMA,
+        "subject": str(doc.get("subject") or doc.get("machine_class") or "gpu-server"),
         "checked_at": doc.get("checked_at"),
-        "status": status,
+        "phase": phase,
+        "detail": detail,
         "next_action": str(doc.get("next_action") or ""),
         "evidence": str(doc.get("evidence") or ""),
-        "admit_lab_dispatch": status == LAB_READY_FOR_DEV_WORK,
+        "admit_dispatch": phase == LINK_CLEAR,
         "present": True,
         "valid": True,
         "commands": _lab_readiness_commands(),
@@ -681,12 +779,12 @@ def utilization_state(*, live: int | None, cap: int | None, host_safe: bool,
                             "planner",
                             str(latest.get("next_action") or "inspect-last-resolve-tick"))
 
-    if (lab_readiness or {}).get("schema") and not lab_readiness.get("admit_lab_dispatch"):
+    if (lab_readiness or {}).get("schema") and not lab_readiness.get("admit_dispatch"):
         lab_commands = lab_readiness.get("commands") or {}
         add_blocker("LAB_READINESS_HELD", "lab",
                     str(lab_readiness.get("next_action") or "publish-lab-readiness"),
-                    str(lab_commands.get("mark_ready")
-                        or lab_readiness.get("status") or "INDETERMINATE"))
+                    str(lab_commands.get("mark_clear")
+                        or lab_readiness.get("phase") or LINK_WAITING))
 
     out = {
         "schema": _UTILIZATION_SCHEMA,
@@ -2203,6 +2301,10 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     # Backlog arrival-vs-service rate (#2634): numeric supply/demand meter folded
     # from the same trailing progress window. Pure-local read, informational only.
     backlog_rate = backlog_rates(progress_records, now_ts=now_ts)
+    # Selected-route smoke gate (#3035): last probe age, typed failure class,
+    # cooldown remaining, and the exact recheck command per route. Pure-local
+    # ledger read, so --fast keeps it.
+    route_health = route_health_status(root / RUNS_DIRNAME, now_ts=now_ts)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -2215,7 +2317,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          lab_readiness=lab_readiness, resolve_ticks=resolve_ticks,
                          resolver_preflight=resolver_preflight,
                          low_yield=low_yield, ships=ships, watch=watch,
-                         backlog_rate=backlog_rate)
+                         backlog_rate=backlog_rate, route_health=route_health)
 
 
 # ---------------------------------------------------------------------------
@@ -2235,6 +2337,11 @@ def collect(root: Path, *, max_workers: int, fast: bool,
 WATCH_DECISION_SCHEMA = "fleet-watch-decision/1"
 WATCH_DEFAULT_WINDOW_HOURS = 6.0
 PROGRESS_LOG = "progress.jsonl"
+
+# Selected-route smoke-gate ledger (#3035): `fak dispatch route-health probe` appends
+# one fak-route-health/1 row per probe here; this card's fold mirrors the Go
+# `fak dispatch route-health status` snapshot (latest row per route).
+ROUTE_HEALTH_LOG = "route-health.jsonl"
 
 # Backlog arrival-vs-service rate (#2634). The watch verdict above (#2642) names
 # the trend qualitatively; this fold quantifies it — a numeric service rate
@@ -2290,6 +2397,61 @@ def read_dispatch_progress(root: Path) -> list[dict[str, Any]]:
     except OSError:
         return []
     return out
+
+
+def route_health_status(runs_dir: Path, *, now_ts: float | None = None) -> dict[str, Any]:
+    """Latest-per-route fold of ``.dispatch-runs/route-health.jsonl`` (#3035) — the
+    pure mirror of ``fak dispatch route-health status``: last probe age, typed
+    failure class, live-cooldown remaining, and the exact recheck command per
+    route/model/account key. Suppression stays per-route: a failing sibling never
+    marks the whole provider family. A missing ledger is an empty fold (an
+    unprobed fleet must never fail the card) and one corrupt row is skipped, not
+    fatal. Pure-local, so --fast keeps it."""
+    now = time.time() if now_ts is None else now_ts
+    log = runs_dir / ROUTE_HEALTH_LOG
+    try:
+        text = log.read_text(encoding="utf-8")
+    except OSError:
+        return {"probed": 0, "suppressed": 0, "routes": []}
+    latest: dict[str, dict[str, Any]] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        route = str(rec.get("route") or "")
+        if not route:
+            continue
+        prev = latest.get(route)
+        if prev is None or (_int(rec.get("probed_at_unix"), 0) or 0) >= (
+                _int(prev.get("probed_at_unix"), 0) or 0):
+            latest[route] = rec
+    routes: list[dict[str, Any]] = []
+    suppressed = 0
+    for route in sorted(latest):
+        rec = latest[route]
+        cls = str(rec.get("class") or "")
+        probed_at = _int(rec.get("probed_at_unix"), 0) or 0
+        cooldown_until = _int(rec.get("cooldown_until_unix"), 0) or 0
+        row: dict[str, Any] = {
+            "route": route,
+            "class": cls,
+            "probe_age_secs": int(now - probed_at),
+            "suppressed": False,
+            "cooldown_remaining_secs": 0,
+            "recheck": str(rec.get("recheck") or ""),
+        }
+        if cls != "healthy" and cooldown_until > now:
+            row["suppressed"] = True
+            row["cooldown_remaining_secs"] = int(cooldown_until - now)
+            suppressed += 1
+        routes.append(row)
+    return {"probed": len(routes), "suppressed": suppressed, "routes": routes}
 
 
 def _classify_sched_task(sched: dict[str, Any] | None) -> str:
@@ -2617,7 +2779,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   low_yield: dict[str, Any] | None = None,
                   ships: dict[str, Any] | None = None,
                   watch: dict[str, Any] | None = None,
-                  backlog_rate: dict[str, Any] | None = None) -> dict[str, Any]:
+                  backlog_rate: dict[str, Any] | None = None,
+                  route_health: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -2932,12 +3095,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     if lab_readiness.get("schema") and not lab_readiness.get("commands"):
         lab_readiness = {**lab_readiness, "commands": _lab_readiness_commands()}
     if lab_readiness.get("schema"):
-        status = lab_readiness.get("status")
+        link = _lab_link_label(lab_readiness)
         action = lab_readiness.get("next_action") or "publish-lab-readiness"
-        if lab_readiness.get("admit_lab_dispatch"):
-            reasons.append(f"lab readiness: {status} — lab-backed dispatch may be admitted")
+        if lab_readiness.get("admit_dispatch"):
+            reasons.append(f"lab readiness: {link} — lab-backed dispatch may be admitted")
         else:
-            reasons.append(f"lab readiness: {status}; next action: {action}; no lab-backed dispatch")
+            reasons.append(f"lab readiness: {link}; next action: {action}; no lab-backed dispatch")
 
     limiter = _dispatch_limiter(pre, backlog, closure, leases)
     utilization = utilization_state(
@@ -3004,6 +3167,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         },
         "watch_decision": watch or {},
         "backlog_rate": backlog_rate or {},
+        "route_health": route_health or {},
         "workers": {
             "silent_count": len(silent),
             "silent": silent,
@@ -3146,11 +3310,11 @@ def render(p: dict[str, Any]) -> str:
         lines.append("║ seats     : " + seat_line.removeprefix("seat inventory: "))
     lab = p.get("lab_readiness") or {}
     if lab.get("schema"):
-        gate = "admit" if lab.get("admit_lab_dispatch") else "hold"
+        gate = "admit" if lab.get("admit_dispatch") else "hold"
         lines.append(
-            f"║ lab       : {lab.get('status')} ({gate}; next={lab.get('next_action') or '-'})")
-        if not lab.get("admit_lab_dispatch"):
-            cmd = (lab.get("commands") or {}).get("mark_ready")
+            f"║ lab       : {_lab_link_label(lab)} ({gate}; next={lab.get('next_action') or '-'})")
+        if not lab.get("admit_dispatch"):
+            cmd = (lab.get("commands") or {}).get("mark_clear")
             if cmd:
                 lines.append(f"║ lab cmd   : {cmd}")
     preflight_blocker = _current_preflight_launch_blocker(
@@ -3233,6 +3397,20 @@ def render(p: dict[str, Any]) -> str:
             f"{br.get('service_rate_per_hour')}/h over {br.get('span_hours')}h "
             f"({br.get('consecutive_outpaced_windows')}/{br.get('k_consecutive')} "
             f"consecutive @ {br.get('window_hours'):g}h)")
+    rh = p.get("route_health") or {}
+    if rh.get("probed"):
+        flagged = [r for r in (rh.get("routes") or []) if r.get("suppressed")]
+        bits = ", ".join(
+            f"{r.get('route')}={r.get('class')} "
+            f"age={_age_text((r.get('probe_age_secs') or 0) / 60)} "
+            f"cooldown={r.get('cooldown_remaining_secs')}s left"
+            for r in flagged[:3])
+        lines.append(
+            f"║ routes    : {rh.get('probed')} probed, {rh.get('suppressed')} suppressed"
+            + (f" [{bits}]" if bits else "") + " (#3035)")
+        for r in flagged[:2]:
+            if r.get("recheck"):
+                lines.append(f"║ recheck   : {r.get('recheck')}")
     w = p.get("workers") or {}
     sc = w.get("silent_count") or 0
     if sc:
@@ -3375,12 +3553,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         out.append(f"- **seat inventory**: {seat_line.removeprefix('seat inventory: ')}")
     lab = payload.get("lab_readiness") or {}
     if lab.get("schema"):
-        gate = "admit" if lab.get("admit_lab_dispatch") else "hold"
+        gate = "admit" if lab.get("admit_dispatch") else "hold"
         out.append(
-            f"- **lab readiness**: `{lab.get('status')}` ({gate}; "
+            f"- **lab readiness**: `{_lab_link_label(lab)}` ({gate}; "
             f"next `{lab.get('next_action') or '-'}`)")
-        if not lab.get("admit_lab_dispatch"):
-            cmd = (lab.get("commands") or {}).get("mark_ready")
+        if not lab.get("admit_dispatch"):
+            cmd = (lab.get("commands") or {}).get("mark_clear")
             if cmd:
                 out.append(f"- **lab publish command**: `{cmd}`")
     preflight_blocker = _current_preflight_launch_blocker(
@@ -3976,15 +4154,15 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
         buckets["action"].append(double_booked_action)
     lab = payload.get("lab_readiness") or {}
     if lab.get("schema"):
-        status = lab.get("status") or "INDETERMINATE"
+        link = _lab_link_label(lab)
         action = lab.get("next_action") or "publish-lab-readiness"
-        if lab.get("admit_lab_dispatch"):
-            buckets["expected"].append(f"lab readiness {status}; lab-backed dispatch may be admitted")
+        if lab.get("admit_dispatch"):
+            buckets["expected"].append(f"lab readiness {link}; lab-backed dispatch may be admitted")
         else:
-            cmd = (lab.get("commands") or {}).get("mark_ready")
-            suffix = f"; publish ready with `{cmd}`" if cmd else ""
+            cmd = (lab.get("commands") or {}).get("mark_clear")
+            suffix = f"; publish clear with `{cmd}`" if cmd else ""
             buckets["action"].append(
-                f"lab readiness {status}; {action}; lab-backed dispatch held{suffix}")
+                f"lab readiness {link}; {action}; lab-backed dispatch held{suffix}")
     resolver_pre = payload.get("resolver_preflight") or {}
     preflight_launch_blocker = _current_preflight_launch_blocker(preflight, resolver_pre)
     resolver = payload.get("resolver") or {}
