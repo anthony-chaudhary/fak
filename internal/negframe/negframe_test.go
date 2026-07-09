@@ -1,0 +1,157 @@
+package negframe
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestClassifyMechanicalReframes pins the high-precision idiom rules: each fixed negative idiom
+// classifies to the right category AND yields its unambiguous positive rewrite.
+func TestClassifyMechanicalReframes(t *testing.T) {
+	cases := []struct {
+		line    string
+		wantCat Category
+		wantSug string
+	}{
+		{"Don't forget to stamp the commit.", Prohibition, "remember to stamp"},
+		{"Do not forget to close the lease.", Prohibition, "remember to close"},
+		{"Don't hesitate to ask for a review.", Prohibition, "feel free to ask"},
+		{"No need to rebuild the whole tree.", Absence, "you can skip rebuild"},
+		{"The output is not unreadable.", Hedge, "readable"},
+	}
+	for _, c := range cases {
+		fs := Classify("t.md", c.line)
+		if len(fs) == 0 {
+			t.Fatalf("%q: no finding", c.line)
+		}
+		f := fs[0]
+		if f.Category != c.wantCat {
+			t.Errorf("%q: category = %q, want %q", c.line, f.Category, c.wantCat)
+		}
+		if !f.Mechanical() {
+			t.Errorf("%q: expected mechanical (a suggestion), got judgement", c.line)
+		}
+		if !strings.Contains(f.Suggest, c.wantSug) {
+			t.Errorf("%q: suggest = %q, want to contain %q", c.line, f.Suggest, c.wantSug)
+		}
+	}
+}
+
+// TestClassifyJudgementTier pins that broad negatives are detected and classified but carry a
+// category hint rather than a mechanical rewrite (SOFT, never gating).
+func TestClassifyJudgementTier(t *testing.T) {
+	cases := []struct {
+		line    string
+		wantCat Category
+	}{
+		{"Never merge without a green build.", Prohibition},
+		{"Avoid touching the generated files.", Prohibition},
+		{"This path is forbidden for workers.", Refusal},
+		{"You may not skip the lease.", Refusal},
+		{"It fails to record the SHA.", Absence},
+	}
+	for _, c := range cases {
+		fs := Classify("t.md", c.line)
+		if len(fs) == 0 {
+			t.Fatalf("%q: no finding", c.line)
+		}
+		// The first finding left-to-right should be the expected category.
+		f := fs[0]
+		if f.Category != c.wantCat {
+			t.Errorf("%q: category = %q, want %q (findings=%+v)", c.line, f.Category, c.wantCat, fs)
+		}
+		if f.Mechanical() {
+			t.Errorf("%q: expected judgement tier, got mechanical suggestion %q", c.line, f.Suggest)
+		}
+		if f.Hint == "" {
+			t.Errorf("%q: judgement finding must carry a category hint", c.line)
+		}
+	}
+}
+
+// TestSpecificRuleBeatsGeneric proves "don't forget to X" is reported once as the mechanical
+// reframe, not also double-counted as a bare "don't" prohibition.
+func TestSpecificRuleBeatsGeneric(t *testing.T) {
+	fs := Classify("t.md", "Don't forget to push the branch.")
+	if len(fs) != 1 {
+		t.Fatalf("want exactly one finding (no double-count), got %d: %+v", len(fs), fs)
+	}
+	if !fs[0].Mechanical() {
+		t.Fatalf("want the mechanical reframe to win, got judgement")
+	}
+}
+
+// TestCodeFenceSkipped proves fenced code blocks are not gardened -- a "don't" inside a sample
+// is not a prose finding.
+func TestCodeFenceSkipped(t *testing.T) {
+	text := "Prose here is clean.\n\n```\nif !ok { // don't do this\n}\n```\n\nMore clean prose."
+	fs := Classify("t.md", text)
+	if len(fs) != 0 {
+		t.Fatalf("code fence should be skipped, got findings: %+v", fs)
+	}
+}
+
+// TestClassifyLineNumbers pins that findings carry the 1-based line they were found on.
+func TestClassifyLineNumbers(t *testing.T) {
+	text := "line one clean\nDon't forget to sign.\nline three clean"
+	fs := Classify("t.md", text)
+	if len(fs) != 1 {
+		t.Fatalf("want one finding, got %d", len(fs))
+	}
+	if fs[0].Line != 2 {
+		t.Errorf("line = %d, want 2", fs[0].Line)
+	}
+	if fs[0].Path != "t.md" {
+		t.Errorf("path = %q, want t.md", fs[0].Path)
+	}
+}
+
+// TestScoreDocTiers pins the per-doc mechanical/judgement split.
+func TestScoreDocTiers(t *testing.T) {
+	text := "Don't forget to stamp.\nNever merge broken code.\nAvoid the shortcut."
+	d := ScoreDoc("t.md", text)
+	if d.Mechanical != 1 {
+		t.Errorf("mechanical = %d, want 1", d.Mechanical)
+	}
+	if d.Judgement != 2 {
+		t.Errorf("judgement = %d, want 2", d.Judgement)
+	}
+	if d.Negatives() != 3 {
+		t.Errorf("negatives = %d, want 3", d.Negatives())
+	}
+}
+
+// TestNewFindingsRatchet pins the diff primitive: only NEWLY introduced mechanical negatives are
+// returned; a pre-existing one (even moved to a new line) is not.
+func TestNewFindingsRatchet(t *testing.T) {
+	before := "Intro line.\nDon't forget to stamp.\n"
+	// after: the pre-existing "don't forget to stamp" moved down a line, plus a brand-new one.
+	after := "Intro line.\nA new middle line.\nDon't forget to stamp.\nNo need to poll the queue.\n"
+	nf := NewFindings("t.md", before, after)
+	if len(nf) != 1 {
+		t.Fatalf("want exactly the one NEW mechanical negative, got %d: %+v", len(nf), nf)
+	}
+	if !strings.Contains(strings.ToLower(nf[0].Text), "no need to poll") {
+		t.Errorf("new finding = %q, want the 'no need to poll' one", nf[0].Text)
+	}
+}
+
+// TestNewFindingsIgnoresJudgement proves the ratchet gates on mechanical wins only: a newly
+// added judgement-tier negative is not returned (it is advisory, never a gate).
+func TestNewFindingsIgnoresJudgement(t *testing.T) {
+	before := "Intro.\n"
+	after := "Intro.\nNever do the risky thing.\n"
+	if nf := NewFindings("t.md", before, after); len(nf) != 0 {
+		t.Fatalf("judgement negatives must not ratchet, got %+v", nf)
+	}
+}
+
+// TestHintCoversEveryCategory guards against a category with no reframe hint (an empty hint
+// would render a bare "[category: ]" in the soft work-list).
+func TestHintCoversEveryCategory(t *testing.T) {
+	for _, c := range Categories {
+		if Hint(c) == "" {
+			t.Errorf("category %q has no reframe hint", c)
+		}
+	}
+}
