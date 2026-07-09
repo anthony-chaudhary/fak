@@ -1,6 +1,10 @@
 package scorecard
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"sort"
+)
 
 // This file defines the four cache-value sub-aspect scores of epic #2783's workstream D
 // ("Score + RSI") and composes them into the D1 headline. Each sub-aspect is a pure 0..1
@@ -418,4 +422,201 @@ func CacheValueGateBlocks(baseline CacheValueBaseline, candidate CacheValueFacts
 // its own debt key (cachevalue_debt / cachevalue_gate_debt).
 func CacheValueControlPaneMembers(baseline CacheValueBaseline, candidate CacheValueFacts) []Payload {
 	return []Payload{ComposeD1(candidate), ComposeD2(baseline, candidate)}
+}
+
+// --- D3: the cache-value ACCURACY-debt scorer (issue #2814, epic #2783 workstream D) ---
+//
+// D1 (ComposeD1) SCORES each cache-value sub-aspect as a 0..1 quality fraction; D2 (ComposeD2)
+// GATES a change against a pinned baseline. D3 is the third sibling: it AGGREGATES the accuracy
+// signals into a single deterministic INTEGER debt plus a worst-first worklist, so the largest
+// accuracy debt is triaged first. It answers "how untrue is the reported number, and which
+// untruth is heaviest?" -- truth-of-the-number as a retirable debt count (issue #2814).
+//
+// The debt rises with exactly the three accuracy classes the issue names:
+//   - gross_net_divergence:          |gross - net| past the reward-hack alarm, in whole
+//                                     threshold-widths (a bigger gap is heavier debt),
+//   - unlabeled_valuation_basis:      one unit per fak $ figure emitted with no valuation_basis,
+//   - missing_time_of_event_witness:  one unit per A-theme (time-of-event) witness a fire failed
+//                                     to capture.
+//
+// ablation_coverage (a C-theme WIRING signal, not an accuracy-of-the-number signal) is
+// deliberately NOT a D3 accuracy class: D3 scores whether the reported number is TRUE, not
+// whether every ablation arm is wired. Each unit is individually retirable by adding the real
+// thing (converge net->gross honestly / label the basis / capture the witness); a clean corpus
+// scores 0 with an empty worklist.
+//
+// Like D1/D2 this is pure over caller-supplied CacheValueFacts and reaches up into no shell, so it
+// stays deterministic and unit-testable with fixtures (importing nothing but fmt/math/sort).
+// Registering D3 into the scorecard/conceptbench control pane or gating merges on it is the
+// SIBLING #2820's job -- D3 here is the scorer + its worklist only, and CacheValueControlPaneMembers
+// stays the D1 score + D2 gate.
+
+// CacheValueAccuracyDebtSchema tags the D3 ACCURACY-debt card (ComposeD3), distinct from the D1
+// score schema and D2 gate schema so a roster/consumer reads all three cards apart.
+const CacheValueAccuracyDebtSchema = "fak-cachevalue-accuracy/1"
+
+// The three accuracy-debt classes #2814 names. A worklist row is keyed by one of these; the
+// canonical order below also breaks ties when two classes carry equal integer debt, so the
+// worst-first ordering is fully deterministic.
+const (
+	AccuracyClassGrossNetDivergence = "gross_net_divergence"
+	AccuracyClassUnlabeledBasis     = "unlabeled_valuation_basis"
+	AccuracyClassMissingWitness     = "missing_time_of_event_witness"
+)
+
+// CacheValueAccuracyClasses is the canonical, ordered accuracy-debt class set -- the same
+// exported-canonical-list treatment CacheValueSubAspectKeys / AThemeWitnesses get. It is the
+// deterministic tie-break order (used when two classes carry equal debt) AND the enumeration a
+// consumer iterates to address each accuracy class standalone.
+var CacheValueAccuracyClasses = []string{
+	AccuracyClassGrossNetDivergence,
+	AccuracyClassUnlabeledBasis,
+	AccuracyClassMissingWitness,
+}
+
+// AccuracyDebtRow is one accuracy-debt class's contribution to the D3 worklist: the class key,
+// its integer debt, and a human detail. The worklist is these rows with Debt > 0, sorted
+// worst-first (largest Debt first, CacheValueAccuracyClasses order breaking ties).
+type AccuracyDebtRow struct {
+	Class  string `json:"class"`
+	Debt   int    `json:"debt"`
+	Detail string `json:"detail"`
+}
+
+// divergenceDebtUnits converts a gross-vs-net divergence into whole integer debt units: 0 while
+// the divergence stays within the healthy band (<= DivergenceDefectThreshold, the same alarm D1
+// uses), then one unit per whole threshold-width the divergence exceeds the alarm by. So a
+// divergence at or below the alarm books 0 (clean), and the ~0.226 gap #2783 found books
+// ceil((0.226-0.05)/0.05) = 4 units -- debt that RISES with the gap and retires to 0 when gross
+// and net reconverge into the healthy band.
+func divergenceDebtUnits(divergence float64) int {
+	if divergence <= DivergenceDefectThreshold+gateEps {
+		return 0
+	}
+	return int(math.Ceil((divergence - DivergenceDefectThreshold) / DivergenceDefectThreshold))
+}
+
+// unlabeledBasisUnits counts fak $ figures emitted with no valuation_basis label -- one debt unit
+// per unlabeled figure, never negative if the caller over-reports labelled figures.
+func unlabeledBasisUnits(figures, withBasis int) int {
+	if u := figures - withBasis; u > 0 {
+		return u
+	}
+	return 0
+}
+
+// missingWitnessUnits counts, over every fire, how many A-theme (time-of-event) witnesses that
+// fire failed to capture -- one debt unit per missing capture. A fire that over-reports (present
+// > len(AThemeWitnesses)) contributes 0, never negative debt.
+func missingWitnessUnits(fireWitnessCounts []int) int {
+	perFire := len(AThemeWitnesses)
+	total := 0
+	for _, present := range fireWitnessCounts {
+		if missing := perFire - present; missing > 0 {
+			total += missing
+		}
+	}
+	return total
+}
+
+// CacheValueAccuracyDebt is the D3 core: it folds the caller-supplied facts into a single
+// deterministic INTEGER accuracy debt (the weighted sum of the three classes) and a worst-first
+// worklist (rows with debt > 0, largest first, CacheValueAccuracyClasses order breaking ties).
+// A fully honest corpus -- gross ~= net, every figure labelled, every witness captured -- scores
+// 0 with an empty worklist. This is the issue #2814 deliverable: truth-of-the-number as a
+// retirable integer with a deterministic triage order.
+func CacheValueAccuracyDebt(f CacheValueFacts) (int, []AccuracyDebtRow) {
+	divergence := GrossNetDivergence(f.FakShareGross, f.FakShareNet)
+	divUnits := divergenceDebtUnits(divergence)
+	basisUnits := unlabeledBasisUnits(f.DollarFigures, f.DollarFiguresWithBasis)
+	witnessUnits := missingWitnessUnits(f.FireWitnessCounts)
+
+	byClass := map[string]AccuracyDebtRow{
+		AccuracyClassGrossNetDivergence: {
+			Class:  AccuracyClassGrossNetDivergence,
+			Debt:   divUnits,
+			Detail: fmt.Sprintf("|gross %.4f - net %.4f| = %.4f divergence, %d unit(s) past the %.2f alarm", f.FakShareGross, f.FakShareNet, divergence, divUnits, DivergenceDefectThreshold),
+		},
+		AccuracyClassUnlabeledBasis: {
+			Class:  AccuracyClassUnlabeledBasis,
+			Debt:   basisUnits,
+			Detail: fmt.Sprintf("%d of %d fak $ figure(s) carry no valuation_basis label", basisUnits, f.DollarFigures),
+		},
+		AccuracyClassMissingWitness: {
+			Class:  AccuracyClassMissingWitness,
+			Debt:   witnessUnits,
+			Detail: fmt.Sprintf("%d A-theme time-of-event witness capture(s) missing across %d fire(s) (of %d/fire)", witnessUnits, len(f.FireWitnessCounts), len(AThemeWitnesses)),
+		},
+	}
+
+	total := divUnits + basisUnits + witnessUnits
+
+	// worst-first worklist: only classes actually in debt, largest first, CacheValueAccuracyClasses
+	// order breaking ties so the ordering is fully deterministic.
+	rank := map[string]int{}
+	for i, c := range CacheValueAccuracyClasses {
+		rank[c] = i
+	}
+	worklist := make([]AccuracyDebtRow, 0, len(CacheValueAccuracyClasses))
+	for _, c := range CacheValueAccuracyClasses {
+		if r := byClass[c]; r.Debt > 0 {
+			worklist = append(worklist, r)
+		}
+	}
+	sort.SliceStable(worklist, func(i, j int) bool {
+		if worklist[i].Debt != worklist[j].Debt {
+			return worklist[i].Debt > worklist[j].Debt
+		}
+		return rank[worklist[i].Class] < rank[worklist[j].Class]
+	})
+	return total, worklist
+}
+
+// accuracyKPI builds the D3 KPI for one accuracy class. Its Score is the matching D1 quality
+// fraction (so the D3 headline degrades with the same sub-aspect quality D1 reports); a class in
+// debt owns exactly one Defect string so Fold's ok/verdict flips iff any class is in debt.
+func accuracyKPI(class string, score float64, worklist []AccuracyDebtRow) KPI {
+	k := KPI{Key: class, Group: "D3_accuracy", Score: score}
+	for _, r := range worklist {
+		if r.Class == class {
+			k.Detail = r.Detail
+			k.Defects = []string{fmt.Sprintf("%s: %s -- retire it (%d debt unit(s))", class, r.Detail, r.Debt)}
+			return k
+		}
+	}
+	k.Detail = fmt.Sprintf("%s: clean (0 accuracy debt)", class)
+	return k
+}
+
+// ComposeD3 folds the D3 accuracy debt into the cache-value family's control-pane payload shape
+// (symmetric with ComposeD1/ComposeD2) so the accuracy debt can be snapshot-pinned and read beside
+// the score and gate cards. corpus["cachevalue_accuracy_debt"] is the deterministic WEIGHTED
+// INTEGER debt (whole threshold-widths of divergence + unlabeled figures + missing witnesses),
+// overriding Fold's raw defect count; corpus["accuracy_worklist"] is the worst-first triage order;
+// ok == (debt == 0).
+//
+// NOTE: producing this payload is NOT registering D3 into the scorecard/conceptbench control pane
+// or gating merges on it -- that wiring is the sibling #2820, so CacheValueControlPaneMembers stays
+// the D1 score + D2 gate only (issue #2814 in-scope is the scorer + its worklist).
+func ComposeD3(f CacheValueFacts) Payload {
+	total, worklist := CacheValueAccuracyDebt(f)
+	divergence := GrossNetDivergence(f.FakShareGross, f.FakShareNet)
+	kpis := []KPI{
+		accuracyKPI(AccuracyClassGrossNetDivergence, 100*(1-divergence), worklist),
+		accuracyKPI(AccuracyClassUnlabeledBasis, 100*ValuationBasisHonesty(f.DollarFigures, f.DollarFiguresWithBasis), worklist),
+		accuracyKPI(AccuracyClassMissingWitness, 100*ObservationCompleteness(f.FireWitnessCounts), worklist),
+	}
+	return Fold(CacheValueAccuracyDebtSchema, kpis, "cachevalue_accuracy_debt", nil, Messages{
+		Finding:         "cache-value ACCURACY debt: the reported number is not yet true -- gross diverges from net, a figure is unlabeled, or a time-of-event witness is missing",
+		FindingClean:    "cache-value accuracy clean: gross tracks net, every fak $ figure is labelled, and every time-of-event witness was captured",
+		NextAction:      "retire the heaviest accuracy debt worst-first: converge net->gross honestly / label the valuation_basis / capture the missing A-theme witness",
+		NextActionClean: "hold the line; the reported cache-value number is honest",
+		Grade:           GradeStrict,
+		ExtraCorpus: map[string]any{
+			// the issue's weighted INTEGER debt, overriding Fold's raw defect-string count
+			"cachevalue_accuracy_debt": total,
+			"accuracy_worklist":        worklist,
+			"gross_net_divergence":     Round3(divergence),
+		},
+	})
 }

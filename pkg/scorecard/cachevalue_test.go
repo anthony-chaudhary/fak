@@ -408,6 +408,195 @@ func TestCacheValueControlPaneMembersRegistersBothScoreAndGate(t *testing.T) {
 	}
 }
 
+// --- D3: the cache-value ACCURACY-debt scorer (issue #2814) ---
+
+// A fully honest corpus -- gross == net, every $ figure labelled, every A-theme witness captured
+// every fire -- carries ZERO accuracy debt and an empty worklist. This is the "clean record
+// scores 0" half of the #2814 acceptance.
+func TestCacheValueAccuracyDebtCleanScoresZero(t *testing.T) {
+	n := len(AThemeWitnesses)
+	total, worklist := CacheValueAccuracyDebt(CacheValueFacts{
+		FireWitnessCounts:      []int{n, n, n},
+		DollarFigures:          5,
+		DollarFiguresWithBasis: 5,
+		FakShareGross:          0.034,
+		FakShareNet:            0.034,
+	})
+	if total != 0 {
+		t.Errorf("clean corpus accuracy debt=%d want 0", total)
+	}
+	if len(worklist) != 0 {
+		t.Errorf("clean corpus worklist=%v want empty", worklist)
+	}
+}
+
+// THE #2814 WITNESS + committed snapshot: a valuation record with a known gross-net divergence,
+// unlabeled valuation_basis figures, AND dropped A-theme witnesses produces a deterministic
+// non-zero integer debt and a worst-first worklist pinned to exact values here. This test does
+// not compile before CacheValueAccuracyDebt exists (fails-before / passes-after).
+func TestCacheValueAccuracyDebtSnapshotAndWorstFirst(t *testing.T) {
+	// gross 0.26 vs net 0.034 -> divergence 0.226 -> ceil((0.226-0.05)/0.05) = 4 units.
+	// 4 figures, 1 based -> 3 unlabeled units. fires [3,5] over 5 witnesses -> (5-3)+0 = 2 units.
+	total, worklist := CacheValueAccuracyDebt(CacheValueFacts{
+		FireWitnessCounts:      []int{3, 5},
+		DollarFigures:          4,
+		DollarFiguresWithBasis: 1,
+		FakShareGross:          0.26,
+		FakShareNet:            0.034,
+	})
+	// pinned deterministic integer debt
+	if total != 9 {
+		t.Fatalf("accuracy debt=%d want 9 (4 divergence + 3 basis + 2 witness)", total)
+	}
+	// pinned worst-first worklist: divergence(4) > basis(3) > witness(2)
+	wantClass := []string{AccuracyClassGrossNetDivergence, AccuracyClassUnlabeledBasis, AccuracyClassMissingWitness}
+	wantDebt := []int{4, 3, 2}
+	if len(worklist) != len(wantClass) {
+		t.Fatalf("worklist len=%d want %d: %v", len(worklist), len(wantClass), worklist)
+	}
+	for i := range wantClass {
+		if worklist[i].Class != wantClass[i] || worklist[i].Debt != wantDebt[i] {
+			t.Errorf("worklist[%d]=%s/%d want %s/%d", i, worklist[i].Class, worklist[i].Debt, wantClass[i], wantDebt[i])
+		}
+	}
+}
+
+// Each accuracy class is INDIVIDUALLY RETIRABLE: degrade exactly one and only that class carries
+// debt, so total == that class's units and the worklist is the single row.
+func TestCacheValueAccuracyDebtIndividuallyRetirable(t *testing.T) {
+	n := len(AThemeWitnesses)
+	clean := CacheValueFacts{
+		FireWitnessCounts:      []int{n},
+		DollarFigures:          4,
+		DollarFiguresWithBasis: 4,
+		FakShareGross:          0.10,
+		FakShareNet:            0.10,
+	}
+	cases := []struct {
+		name      string
+		mutate    func(f *CacheValueFacts)
+		wantClass string
+		wantDebt  int
+	}{
+		{"only divergence", func(f *CacheValueFacts) { f.FakShareGross = 0.26; f.FakShareNet = 0.034 }, AccuracyClassGrossNetDivergence, 4},
+		{"only unlabeled basis", func(f *CacheValueFacts) { f.DollarFiguresWithBasis = 1 }, AccuracyClassUnlabeledBasis, 3},
+		{"only missing witness", func(f *CacheValueFacts) { f.FireWitnessCounts = []int{n, n - 2, n - 1} }, AccuracyClassMissingWitness, 3},
+	}
+	for _, c := range cases {
+		f := clean
+		c.mutate(&f)
+		total, worklist := CacheValueAccuracyDebt(f)
+		if total != c.wantDebt {
+			t.Errorf("%s: total=%d want %d", c.name, total, c.wantDebt)
+		}
+		if len(worklist) != 1 || worklist[0].Class != c.wantClass || worklist[0].Debt != c.wantDebt {
+			t.Errorf("%s: worklist=%v want single [%s/%d]", c.name, worklist, c.wantClass, c.wantDebt)
+		}
+	}
+}
+
+// A sub-threshold gross-vs-net gap is within the healthy band and books NO divergence debt --
+// the |gross-net| alarm (DivergenceDefectThreshold) is the same one D1 uses, so a healthy report
+// stays clean here too (and the penalty is on |gross-net|, symmetric: net exceeding gross also
+// diverges).
+func TestCacheValueAccuracyDivergenceBandAndSymmetry(t *testing.T) {
+	// within the alarm -> clean
+	if u := divergenceDebtUnits(GrossNetDivergence(0.10, 0.06)); u != 0 { // gap 0.04 <= 0.05
+		t.Errorf("sub-threshold gap booked %d divergence units want 0", u)
+	}
+	// net exceeding gross is still a divergence (|gross-net|), not a reward
+	over, _ := CacheValueAccuracyDebt(CacheValueFacts{FakShareGross: 0.034, FakShareNet: 0.26, DollarFigures: 1, DollarFiguresWithBasis: 1, FireWitnessCounts: []int{len(AThemeWitnesses)}})
+	if over != 4 {
+		t.Errorf("net-exceeds-gross divergence debt=%d want 4 (|gross-net| is symmetric)", over)
+	}
+}
+
+// Ties break by the canonical CacheValueAccuracyClasses order so the worst-first ordering is fully
+// deterministic even when two classes carry equal debt.
+func TestCacheValueAccuracyDebtTieBreakIsCanonical(t *testing.T) {
+	// basis 2, witness 2, divergence 0 -> both tie at 2; canonical order puts basis before witness.
+	n := len(AThemeWitnesses)
+	_, worklist := CacheValueAccuracyDebt(CacheValueFacts{
+		FireWitnessCounts:      []int{n - 2},
+		DollarFigures:          4,
+		DollarFiguresWithBasis: 2,
+		FakShareGross:          0.10,
+		FakShareNet:            0.10,
+	})
+	if len(worklist) != 2 || worklist[0].Class != AccuracyClassUnlabeledBasis || worklist[1].Class != AccuracyClassMissingWitness {
+		t.Errorf("tie worklist=%v want [unlabeled_valuation_basis, missing_time_of_event_witness]", worklist)
+	}
+}
+
+// ComposeD3 folds the accuracy debt into the family payload shape: the WEIGHTED integer debt is
+// stamped under corpus["cachevalue_accuracy_debt"] (overriding Fold's raw defect count), the
+// worklist is carried, and ok flips iff any class is in debt. The D3 payload is NOT a registered
+// control-pane member -- CacheValueControlPaneMembers stays the D1 score + D2 gate (#2820).
+func TestComposeD3PayloadStampsWeightedIntegerAndWorklist(t *testing.T) {
+	dirty := ComposeD3(CacheValueFacts{
+		FireWitnessCounts:      []int{3, 5},
+		DollarFigures:          4,
+		DollarFiguresWithBasis: 1,
+		FakShareGross:          0.26,
+		FakShareNet:            0.034,
+	})
+	if dirty.Schema != CacheValueAccuracyDebtSchema {
+		t.Errorf("schema=%q want %q", dirty.Schema, CacheValueAccuracyDebtSchema)
+	}
+	if dirty.OK || dirty.Verdict != "ACTION" {
+		t.Errorf("dirty corpus must be !ok/ACTION, got ok=%v verdict=%q", dirty.OK, dirty.Verdict)
+	}
+	if got := dirty.Corpus["cachevalue_accuracy_debt"]; got != 9 {
+		t.Errorf("cachevalue_accuracy_debt=%v want 9 (weighted integer, not the 3-class defect count)", got)
+	}
+	wl, ok := dirty.Corpus["accuracy_worklist"].([]AccuracyDebtRow)
+	if !ok || len(wl) != 3 || wl[0].Class != AccuracyClassGrossNetDivergence {
+		t.Errorf("accuracy_worklist=%v want 3 rows worst-first (divergence first)", dirty.Corpus["accuracy_worklist"])
+	}
+
+	clean := ComposeD3(CacheValueFacts{
+		FireWitnessCounts:      []int{len(AThemeWitnesses)},
+		DollarFigures:          2,
+		DollarFiguresWithBasis: 2,
+		FakShareGross:          0.034,
+		FakShareNet:            0.034,
+	})
+	if !clean.OK || clean.Verdict != "OK" {
+		t.Errorf("clean corpus must be ok/OK, got ok=%v verdict=%q", clean.OK, clean.Verdict)
+	}
+	if got := clean.Corpus["cachevalue_accuracy_debt"]; got != 0 {
+		t.Errorf("clean cachevalue_accuracy_debt=%v want 0", got)
+	}
+
+	// D3 must NOT have been registered as a control-pane member: that is #2820, so the roster
+	// stays the D1 score + D2 gate (two members), never three.
+	facts := CacheValueFacts{FireWitnessCounts: []int{len(AThemeWitnesses)}, DollarFigures: 2, DollarFiguresWithBasis: 2, AblationArmsWired: len(CThemeArms), FakShareGross: 0.034, FakShareNet: 0.034}
+	if members := CacheValueControlPaneMembers(BaselineFromFacts(facts), facts); len(members) != 2 {
+		t.Errorf("control-pane members=%d want 2 (D3 accuracy scorer is not registered -- that is #2820)", len(members))
+	}
+}
+
+// Two folds at the same facts must be identical -- the determinism law, extended to D3.
+func TestCacheValueAccuracyDebtDeterministic(t *testing.T) {
+	f := CacheValueFacts{
+		FireWitnessCounts:      []int{3, 4, 5},
+		DollarFigures:          7,
+		DollarFiguresWithBasis: 5,
+		FakShareGross:          0.20,
+		FakShareNet:            0.05,
+	}
+	t1, w1 := CacheValueAccuracyDebt(f)
+	t2, w2 := CacheValueAccuracyDebt(f)
+	if t1 != t2 || len(w1) != len(w2) {
+		t.Fatalf("non-deterministic accuracy fold: total %d/%d worklist %d/%d", t1, t2, len(w1), len(w2))
+	}
+	for i := range w1 {
+		if w1[i] != w2[i] {
+			t.Errorf("worklist row %d differs: %v vs %v", i, w1[i], w2[i])
+		}
+	}
+}
+
 // Two folds at the same baseline+facts must be identical -- the determinism law, extended to D2.
 func TestComposeD2Deterministic(t *testing.T) {
 	b := CacheValueBaseline{FakShareGross: 0.2, FakShareNet: 0.05, ValuationBasisHonesty: 0.9}
