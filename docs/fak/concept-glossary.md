@@ -186,6 +186,15 @@ different sense entirely:
   prefilter (refuse force-push / `--no-verify`). Three different "guards", three
   different surfaces.
 
+- **guardaccuracy** (`internal/guardaccuracy`) - NOT a guard and NOT a gate: the
+  labeled command corpus (`testdata/corpus.json`, schema `fak-guard-accuracy-corpus/1`)
+  that MEASURES how well a gate decides. Each row is a `(tool, args)` command paired
+  with the reversibility preview class the guard MUST assign; a benign row escalated is
+  a false POSITIVE, a dangerous row left reversible a false NEGATIVE. A guard is the
+  system and a gate DECIDES a call; guardaccuracy scores that decision's
+  false-positive / false-negative RATE against ground truth. Grown as a ratchet - every
+  wild misfire becomes a permanent row, never just a local test patch.
+
 ### adjudication gate vs model gate - the headline collision
 
 The word **gate** names two COMPLETELY UNRELATED things in this repo. They share only

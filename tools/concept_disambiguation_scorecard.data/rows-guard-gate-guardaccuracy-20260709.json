@@ -1,0 +1,20 @@
+{
+ "rows": [
+  {
+   "id": "guard-gate-guardaccuracy",
+   "canonical": "guardaccuracy (guard-classifier accuracy corpus)",
+   "family": "guard-gate",
+   "kind": "subsystem",
+   "definition": "The internal/guardaccuracy package: a labeled command corpus (testdata/corpus.json, schema fak-guard-accuracy-corpus/1) that measures the guard reversibility preview classifier's accuracy. Each row pairs a (tool, args) command with the reversibility class the guard MUST assign, so a benign row escalated counts as a false positive and a dangerous row left reversible as a false negative; the corpus is grown as a ratchet - every wild misfire becomes a permanent row, never just a local test patch.",
+   "distinction": "guardaccuracy is neither the guard (the system) nor a gate (a decision point) - it is the ground-truth corpus that SCORES a gate's decision, yielding the classifier's false-positive / false-negative RATE. A guard runs the decision chain and a gate decides a single call; guardaccuracy measures how OFTEN that decision is right.",
+   "distinct_from": ["x2-guard-gate-cmdguard"],
+   "aliases": ["guard-accuracy", "guard accuracy corpus", "reversibility classifier accuracy"],
+   "grounding": "guardaccuracy",
+   "grounding_kind": "path",
+   "glossary_anchor": "docs/fak/concept-glossary.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  }
+ ]
+}
