@@ -93,6 +93,87 @@ func TestDriveEmptyWorklistUnsatisfiedNotClean(t *testing.T) {
 	}
 }
 
+// TestDriveBatchSelectsTopKWorstFirst pins the batch SELECT contract: DriveBatch
+// offers the top-K worst-first members (the ranked worklist head prefix) in rank
+// order, and no more than K. Here the two highest-debt scorecards must be offered,
+// worst-first, and the third (lowest debt) left out of a k=2 batch.
+func TestDriveBatchSelectsTopKWorstFirst(t *testing.T) {
+	rep := walkOf(t, "sweep-surfaces", []MemberStatus{
+		{Member: Member{Kind: KindScorecard, Ref: "code", Enter: "/quality-score"}, Measured: true, Debt: 3},
+		{Member: Member{Kind: KindScorecard, Ref: "slop", Enter: "/slop-score"}, Measured: true, Debt: 9},
+		{Member: Member{Kind: KindScorecard, Ref: "appeal", Enter: "/appeal-score"}, Measured: true, Debt: 5},
+	})
+
+	dec := DriveBatch(rep, 2)
+	if !dec.Enter {
+		t.Fatalf("a walk with debt must offer members; reason=%s", dec.Reason)
+	}
+	if len(dec.Members) != 2 {
+		t.Fatalf("k=2 must offer exactly two members, got %d", len(dec.Members))
+	}
+	if dec.Members[0].Member.Ref != "slop" || dec.Members[0].Rank != 1 {
+		t.Errorf("head must be worst-first slop@rank1, got %q@rank%d", dec.Members[0].Member.Ref, dec.Members[0].Rank)
+	}
+	if dec.Members[1].Member.Ref != "appeal" || dec.Members[1].Rank != 2 {
+		t.Errorf("second must be appeal@rank2, got %q@rank%d", dec.Members[1].Member.Ref, dec.Members[1].Rank)
+	}
+	for _, m := range dec.Members {
+		if !m.Enter || m.Action == "" {
+			t.Errorf("every offered member must be an entered decision carrying its action, got %+v", m)
+		}
+	}
+}
+
+// TestDriveBatchClampsAndDefaultsToAll pins the clamp rules: k larger than the
+// worklist is clamped to the worklist length, and k <= 0 means "every member".
+// The batch head must still equal the single Drive's head — the two rungs share
+// the same worst-first selection.
+func TestDriveBatchClampsAndDefaultsToAll(t *testing.T) {
+	rep := walkOf(t, "sweep-surfaces", []MemberStatus{
+		{Member: Member{Kind: KindScorecard, Ref: "code"}, Measured: true, Debt: 3},
+		{Member: Member{Kind: KindScorecard, Ref: "slop"}, Measured: true, Debt: 9},
+	})
+	if got := DriveBatch(rep, 99); len(got.Members) != len(rep.Worklist) {
+		t.Errorf("k over the worklist must clamp to %d, got %d", len(rep.Worklist), len(got.Members))
+	}
+	all := DriveBatch(rep, 0)
+	if len(all.Members) != len(rep.Worklist) {
+		t.Errorf("k<=0 must offer every worklist member (%d), got %d", len(rep.Worklist), len(all.Members))
+	}
+	if head := Drive(rep); all.Members[0].Member.Ref != head.Member.Ref {
+		t.Errorf("batch head %q must equal single-drive head %q", all.Members[0].Member.Ref, head.Member.Ref)
+	}
+}
+
+// TestDriveBatchEmptyWorklistMirrorsDriveHonesty pins that a batch over an empty
+// worklist carries the SAME clean-vs-unmet-headline honesty as Drive (#3147): a
+// satisfied walk reads clean; an unsatisfied empty worklist (issue shortfall)
+// enters nothing but is NOT clean and carries the shortfall magnitude.
+func TestDriveBatchEmptyWorklistMirrorsDriveHonesty(t *testing.T) {
+	clean := walkOf(t, "sweep-surfaces", []MemberStatus{
+		{Member: Member{Kind: KindScorecard, Ref: "code"}, Measured: true, Debt: 0},
+		{Member: Member{Kind: KindScorecard, Ref: "slop"}, Measured: true, Debt: 0},
+	})
+	if dec := DriveBatch(clean, 3); dec.Enter || !dec.Satisfied || len(dec.Members) != 0 {
+		t.Errorf("a satisfied walk offers nothing and reads clean, got %+v", dec)
+	}
+
+	shortfall := WalkReport{Name: "run-the-night", IssueTarget: 200, IssueShortfall: 200, Satisfied: false}
+	dec := DriveBatch(shortfall, 3)
+	if dec.Enter {
+		t.Fatalf("an empty worklist offers nothing, got %d members", len(dec.Members))
+	}
+	if dec.Satisfied {
+		t.Error("an unmet headline leaves the batch UNSATISFIED")
+	}
+	if dec.IssueShortfall != 200 || !strings.Contains(dec.Reason, "200") {
+		t.Errorf("the batch must carry the shortfall magnitude 200, got shortfall=%d reason=%q", dec.IssueShortfall, dec.Reason)
+	}
+	if strings.Contains(dec.Reason, "reads clean") {
+		t.Errorf("an unsatisfied batch must not claim clean; reason=%q", dec.Reason)
+	}
+}
+
 // TestDriveDarkMemberIsWorstFirst pins that a DARK loop member outranks a debt-bearing
 // scorecard — a gone-dark member is the most urgent thing to enter (tier 0).
 func TestDriveDarkMemberIsWorstFirst(t *testing.T) {

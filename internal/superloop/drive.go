@@ -77,7 +77,14 @@ func Drive(rep WalkReport) DriveDecision {
 				rep.Name, rep.TotalDebt, rep.Floor),
 		}
 	}
-	it := rep.Worklist[0]
+	return enteredDecision(rep, rep.Worklist[0])
+}
+
+// enteredDecision builds the entered [DriveDecision] for one worst-first worklist
+// member. It is the single place the "enter this member" verdict is shaped, so
+// [Drive] (the head) and [DriveBatch] (the top-K) can never drift in what an
+// entered decision carries. Pure and total over the item.
+func enteredDecision(rep WalkReport, it WorkItem) DriveDecision {
 	return DriveDecision{
 		Intent:         rep.Name,
 		Enter:          true,
@@ -90,5 +97,84 @@ func Drive(rep WalkReport) DriveDecision {
 		Dark:           it.Dark,
 		Container:      it.Container,
 		Reason:         fmt.Sprintf("worst-first: enter %s %s", it.Member.Kind, it.Member.Ref),
+	}
+}
+
+// BatchDriveSchema is the versioned payload tag a batch drive emits.
+const BatchDriveSchema = "fak.superloop-drive-batch.v1"
+
+// BatchDriveDecision is [Drive] widened from one member to a bounded worst-first
+// fan-out: the top-K members the SELECT step offers this invocation, so throughput
+// scales with available non-colliding work instead of one member per walk.
+//
+// Members is the worst-first PREFIX of the walk's already-ranked worklist (length
+// min(K, len(worklist))); each entry is the SAME entered [DriveDecision] [Drive]
+// returns for the head, in worst-first (rank) order. This is a PURE SELECTION: it
+// reads no leases and admits nothing. The impure shell passes each selected member
+// through the SAME admission gate any single drive passes (region admission over
+// the live lease fabric — COLLISION_RISK on lease overlap); so "trees mutually
+// disjoint (and disjoint from live leases)" is ENFORCED by the gate, member by
+// member, never asserted here. A member the gate refuses is simply not entered.
+//
+// Enter/Satisfied/IssueShortfall carry the SAME honesty as [Drive] when there is
+// nothing to enter (an empty worklist): a satisfied walk reads clean, an
+// unsatisfied empty worklist is an unmet headline gate (#3147), never clean.
+type BatchDriveDecision struct {
+	Intent         string          `json:"intent"`
+	Enter          bool            `json:"enter"`
+	Requested      int             `json:"requested"`
+	Members        []DriveDecision `json:"members,omitempty"`
+	Satisfied      bool            `json:"satisfied"`
+	IssueShortfall int             `json:"issue_shortfall,omitempty"`
+	Reason         string          `json:"reason"`
+}
+
+// DriveBatch reduces a completed walk's worst-first worklist to the top-K members
+// to offer this invocation — the SELECT step widened from one member (see [Drive])
+// to a bounded fan-out. The worklist is already sorted worst-first by [Walk], so
+// the top-K are its head prefix. k <= 0 means "every worklist member" (no cap);
+// k larger than the worklist is clamped to the worklist length. An empty worklist
+// enters nothing with the SAME clean-vs-unmet-headline honesty as [Drive] (#3147).
+//
+// DriveBatch is a pure fold: it reads no files, no clock, and no lease fabric, and
+// takes no admission action. The shell gates each returned member through the
+// shared region-admission gate and enters only those the gate admits — so the pure
+// layer never has to know the live lease geometry to stay honest.
+func DriveBatch(rep WalkReport, k int) BatchDriveDecision {
+	total := len(rep.Worklist)
+	if total == 0 {
+		// Reuse Drive's exact empty-worklist verdict (satisfied clean vs. unmet
+		// headline shortfall) so the two rungs cannot diverge on the honesty gate.
+		d := Drive(rep)
+		req := k
+		if req <= 0 {
+			req = 0
+		}
+		return BatchDriveDecision{
+			Intent:         rep.Name,
+			Enter:          false,
+			Requested:      req,
+			Satisfied:      d.Satisfied,
+			IssueShortfall: d.IssueShortfall,
+			Reason:         d.Reason,
+		}
+	}
+	n := k
+	if n <= 0 || n > total {
+		n = total
+	}
+	members := make([]DriveDecision, 0, n)
+	for i := 0; i < n; i++ {
+		members = append(members, enteredDecision(rep, rep.Worklist[i]))
+	}
+	return BatchDriveDecision{
+		Intent:         rep.Name,
+		Enter:          true,
+		Requested:      n,
+		Members:        members,
+		Satisfied:      rep.Satisfied,
+		IssueShortfall: rep.IssueShortfall,
+		Reason: fmt.Sprintf("worst-first batch: %d of %d worklist member(s) offered (k=%d) — the shell admits each through the shared gate",
+			len(members), total, k),
 	}
 }
