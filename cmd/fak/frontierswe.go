@@ -54,6 +54,8 @@ func runFrontierswe(stdout, stderr io.Writer, argv []string) int {
 		return runFrontiersweRun(stdout, stderr, rest)
 	case "eval", "grade":
 		return runFrontiersweEval(stdout, stderr, rest)
+	case "compare":
+		return runFrontiersweCompare(stdout, stderr, rest)
 	case "cache-witness":
 		return runFrontiersweCacheWitness(stdout, stderr, rest)
 	case "env-adapter", "environment":
@@ -115,6 +117,18 @@ usage:
         traceability. Absent a reward.json it stands the verifier up where this
         host is capable, and otherwise prints an honest GATED result with the exact
         remote command — never a fabricated score.
+
+  fak frontierswe compare --raw FILE --fak FILE [--task NAME] [--tolerance T]
+                          [--out DIR] [--json]
+        Fold a raw arm and a fak arm (each a graded-trials JSON: {"trials":[...]} or
+        a bare array of {score,trace,mocked}) into the governed raw-vs-fak table. It
+        enforces the runbook order in code: the C11 score-parity gate FIRST (fak must
+        not regress raw's score distribution), then the C14 time-to-solution ratio
+        T_fak/T_raw, and only from SOLVED trials under a passing gate. The verdict
+        carries its own provenance — a mocked run's PROJECTED floor is a
+        PROJECTED_WIN, never a MEASURED_WIN — so a projected number can't be quoted
+        as a measured win. Exit 1 only on PARITY_FAILED (a regression to fix); WIN /
+        NO_WIN / GATED are honest states. Non-zero exit gates a CI check.
 
   fak frontierswe cache-witness [--metrics-dir DIR | --metrics-files A,B,...
                                 | --gateway URL --interval SEC --samples N]

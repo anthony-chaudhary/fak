@@ -1,0 +1,9 @@
+{
+  "trials": [
+    {
+      "score": { "id": "raw-1", "task": "git-to-zig", "correctness": 1.0, "score": 1.0 },
+      "trace": { "schema": "fak.frontierswe.tts-trace.v1", "turns": 200, "total_wall_sec": 60000 },
+      "mocked": true
+    }
+  ]
+}
