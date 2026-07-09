@@ -105,6 +105,16 @@ type InKernelPlanner struct {
 	// radixkv prefix-cache eviction above — that drops a reusable PREFIX node; this evicts
 	// the per-session SPAN and is the model-independent KV-MMU floor.
 	kvSpanEvict bool
+
+	// batchDecode routes a request's decode through the continuous-batch
+	// BatchSession.StepBatchActive machinery (as a batch of one on the resident chat serve)
+	// instead of the serial Session.Step loop. It is the OPT-IN wiring seam
+	// (FAK_INKERNEL_BATCH=on) that lets a future cross-request coalescer co-batch concurrent
+	// chat turns onto the shared weight stream. DEFAULT OFF: unset, the decode path is the
+	// byte-identical pre-seam serial loop, and even ON at B=1 StepBatchActive is exactly
+	// Seqs[0].Step, so the served tokens are unchanged — the batched glm_moe_dsa GEMM that
+	// yields throughput is the separate, box-gated lever, not this flag.
+	batchDecode bool
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -170,6 +180,13 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_KVMMU"))) {
 	case "on", "1", "true", "yes":
 		p.kvSpanEvict = backend == nil
+	}
+	// Opt-in continuous-batch decode wiring (#401, L2). Default off keeps the serial
+	// Session.Step loop; on routes decode through BatchSession.StepBatchActive (a batch of
+	// one per request today, bit-identical to serial — see the batchDecode field note).
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_BATCH"))) {
+	case "on", "1", "true", "yes":
+		p.batchDecode = true
 	}
 	return p
 }
@@ -1163,7 +1180,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		p.mu.Unlock()
 	}
 
-	// 4) Decode.
+	// 4) Decode. The per-token step (sample → token-ID stop → penalty count → string-suffix
+	// emit → the maxNew-1 skip-the-unused-final-Step) is factored into decodeLane.decodeOne so
+	// the SAME step drives both the serial forward (Session.Step, the default) and the opt-in
+	// multi-lane batched forward (BatchSession.StepBatchActive). The forward is the ONLY
+	// difference between the two drivers, and model.StepBatchActive is bit-for-bit identical to
+	// serial Session.Step per lane, so an unset FAK_INKERNEL_BATCH decodes byte-identically to
+	// the pre-seam loop (the #401 wiring seam; the batched glm_moe_dsa GEMM is a separate lever).
 	rng := rand.New(rand.NewSource(p.seed))
 	// counts is the per-token generation histogram this turn's frequency/presence
 	// penalty is computed from (#1705): counts[t] is how many times token t has
@@ -1174,38 +1197,161 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
 	}
-	td := time.Now()
-	for gen = 0; gen < maxNew; gen++ {
-		if err = ctx.Err(); err != nil {
-			break
-		}
-		next := sampleLogitsWithPenalty(logits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng)
-		if next < 0 || stops[next] {
-			stopped = true
-			break
-		}
-		if counts != nil && next < len(counts) {
-			counts[next]++
-		}
-		if emit != nil && emit(next) {
-			gen++ // this token WAS generated; count it before exiting the loop
-			stopped = true
-			break
-		}
-		if emit != nil {
-			if err = ctx.Err(); err != nil {
-				gen++ // this token was emitted before cancellation became visible
-				break
-			}
-		}
-		if gen == maxNew-1 {
-			gen++ // this token was generated; avoid computing unused next-token logits.
-			break
-		}
-		logits = s.Step(next)
+	ln := &decodeLane{
+		s:           s,
+		logits:      logits,
+		counts:      counts,
+		rng:         rng,
+		emit:        emit,
+		stops:       stops,
+		temp:        temp,
+		topP:        topP,
+		topK:        topK,
+		logitBias:   logitBias,
+		freqPenalty: freqPenalty,
+		presPenalty: presPenalty,
+		maxNew:      maxNew,
 	}
+	td := time.Now()
+	if p.batchDecode {
+		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
+		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged; this is
+		// the wiring a cross-request coalescer builds on (aggregate throughput is box-gated).
+		inKernelDecodeLanesBatched(ctx, []*decodeLane{ln}, p.m, p.quant)
+	} else {
+		inKernelDecodeSerial(ctx, ln)
+	}
+	gen, stopped, err = ln.gen, ln.stopped, ln.err
 	decodeS = time.Since(td).Seconds()
 	return
+}
+
+// decodeLane is one request's live decode state. decodeOne runs one token's worth of the
+// decode loop body EXCEPT the model forward, so the serial driver (Session.Step) and the
+// opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
+// the property that makes the two paths bit-for-bit equivalent.
+type decodeLane struct {
+	s      *model.Session
+	logits []float32
+	counts []int32
+	rng    *rand.Rand
+	emit   func(int) bool
+	stops  map[int]bool
+
+	temp        float64
+	topP        float64
+	topK        int
+	logitBias   model.LogitBias
+	freqPenalty float64
+	presPenalty float64
+	maxNew      int
+
+	gen     int
+	stopped bool
+	done    bool
+	err     error
+}
+
+// decodeOne runs one decode iteration for a lane EXCEPT the forward step. It mirrors the body
+// of the pre-seam serial decode loop exactly — the ctx check, the sample, the token-ID stop,
+// the per-token count, the string-suffix emit, the emit-time cancel, and the maxNew-1
+// skip-the-unused-final-Step — updating the lane's gen/stopped/err/done. It returns the
+// sampled token and whether the caller should advance the lane with a forward. advance==false
+// means the lane is finished this step and must not be stepped again (the caller drops it from
+// the batch's active set). The gen accounting is identical to the old loop: gen counts exactly
+// the tokens that passed the stop check and were emitted.
+func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
+	if err := ctx.Err(); err != nil {
+		ln.err, ln.done = err, true
+		return 0, false
+	}
+	next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
+	if next < 0 || ln.stops[next] {
+		ln.stopped, ln.done = true, true
+		return 0, false
+	}
+	if ln.counts != nil && next < len(ln.counts) {
+		ln.counts[next]++
+	}
+	if ln.emit != nil && ln.emit(next) {
+		ln.gen++ // this token WAS generated; count it before finishing
+		ln.stopped, ln.done = true, true
+		return 0, false
+	}
+	if ln.emit != nil {
+		if err := ctx.Err(); err != nil {
+			ln.gen++ // this token was emitted before cancellation became visible
+			ln.err, ln.done = err, true
+			return 0, false
+		}
+	}
+	if ln.gen == ln.maxNew-1 {
+		ln.gen++ // this token was generated; avoid computing unused next-token logits.
+		ln.done = true
+		return 0, false
+	}
+	ln.gen++ // matches the serial loop's post-increment before the next Step.
+	return next, true
+}
+
+// inKernelDecodeSerial is the DEFAULT per-request decode: one lane advanced by Session.Step,
+// byte-identical to the pre-seam decode loop (the gen<maxNew guard preserves the maxNew<=0
+// no-token contract). It is the path an unset FAK_INKERNEL_BATCH takes.
+func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
+	for ln.gen < ln.maxNew {
+		next, advance := ln.decodeOne(ctx)
+		if !advance {
+			return
+		}
+		ln.logits = ln.s.Step(next)
+	}
+}
+
+// inKernelDecodeLanesBatched advances every lane in lockstep through ONE shared
+// BatchSession.StepBatchActive per step: each still-running lane samples its next token via the
+// shared decodeOne, then a single StepBatchActive forwards exactly the active lanes (each over
+// its own Session/KV) and scatters the per-lane logits back. Because StepBatchActive is
+// bit-for-bit identical to serial Session.Step for every active lane, each lane's emitted token
+// sequence is identical to inKernelDecodeSerial on the same prompt/seed/sampler — the
+// continuous-batching WIRING, correctness-equivalent and GPU-free. A lane that finishes (a
+// token-ID stop, a string-suffix stop, or maxNew) simply drops out of the active mask while the
+// others keep batching. Each lane owns its own *Session, so per-lane KV is never shared.
+func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *model.Model, quant bool) {
+	if len(lanes) == 0 {
+		return
+	}
+	seqs := make([]*model.Session, len(lanes))
+	for i, ln := range lanes {
+		seqs[i] = ln.s
+	}
+	bs := &model.BatchSession{M: m, Seqs: seqs, Quant: quant}
+	ids := make([]int, len(lanes))
+	active := make([]bool, len(lanes))
+	for {
+		anyActive := false
+		for i, ln := range lanes {
+			active[i] = false
+			if ln.done || ln.gen >= ln.maxNew {
+				continue // finished lane: dropped from the active set, never re-stepped.
+			}
+			next, advance := ln.decodeOne(ctx)
+			if !advance {
+				continue
+			}
+			ids[i] = next
+			active[i] = true
+			anyActive = true
+		}
+		if !anyActive {
+			return
+		}
+		out := bs.StepBatchActive(ids, active)
+		for i := range lanes {
+			if active[i] {
+				lanes[i].logits = out[i]
+			}
+		}
+	}
 }
 
 func (p *InKernelPlanner) sessionFromPrefixClone(prefix *model.KVCache) *model.Session {
