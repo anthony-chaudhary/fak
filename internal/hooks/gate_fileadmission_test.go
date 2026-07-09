@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +81,31 @@ func TestFileAdmission_OpsLooseDoc(t *testing.T) {
 		if got := opsLooseDoc(c.rel); got != c.want {
 			t.Errorf("opsLooseDoc(%q) = %v, want %v", c.rel, got, c.want)
 		}
+	}
+}
+
+// TestFileAdmission_OversizedBlobCap pins the size cap's decision boundary: a blob at or under
+// the ceiling is admitted, one byte over is refused as an oversized blob. The ceiling is
+// overridden to a tiny value here (save/restore) so the test never has to materialize a 25 MiB
+// fixture — the wiring under test is the > fileAdmissionMaxBytes comparison, not the constant.
+func TestFileAdmission_OversizedBlobCap(t *testing.T) {
+	orig := fileAdmissionMaxBytes
+	t.Cleanup(func() { fileAdmissionMaxBytes = orig })
+	fileAdmissionMaxBytes = 8 // bytes
+
+	// mapReader.Size returns len(body), so body length is the blob size.
+	atCap := mapReader{"assets/blob.bin": "12345678"}    // exactly 8 bytes -> admitted
+	overCap := mapReader{"assets/blob.bin": "123456789"} // 9 bytes -> refused
+
+	if why := classifyFileWith(atCap, "assets/blob.bin"); why != "" {
+		t.Errorf("blob at the cap must be admitted, got refusal: %q", why)
+	}
+	why := classifyFileWith(overCap, "assets/blob.bin")
+	if why == "" {
+		t.Fatalf("blob over the cap must be refused, got admission")
+	}
+	if !strings.Contains(why, "oversized blob") {
+		t.Errorf("oversized blob refusal wording drifted: %q", why)
 	}
 }
 

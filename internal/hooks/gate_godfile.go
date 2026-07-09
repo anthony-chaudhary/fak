@@ -14,32 +14,77 @@ import (
 //
 // Hermes' core is concentrated in god-files (`gateway/run.py` is 20,320 lines; `cli.py`
 // 16,128) and its own rubric begs for refactors — the monoliths accrete faster than they
-// are paid down because nothing REFUSES the next line of growth. fak already names the
-// ceilings (tools/code_quality_scorecard.py: FILE_HARD_MAX=1500 / FUNC_HARD_MAX=200 are
-// "hard debt") and already owns the paydown loop (/modularize, tools/godsplit_plan.py);
-// this gate turns the doctrine preventive. Full write-up:
-// docs/explainers/god-file-growth-gate.md.
+// are paid down because nothing REFUSES the next line of growth. fak owns the paydown loop
+// (/modularize, tools/godsplit_plan.py); this gate turns the doctrine preventive. Full
+// write-up: docs/explainers/god-file-growth-gate.md.
+//
+// TWO SIBLING GATES, ONE FILE LINE. This gate is the FUNCTION-and-file GROWTH ratchet; its
+// file-only sibling internal/godfileceiling (#2898) is the hard "NO NEW GOD-FILE" ceiling at a
+// non-tunable const 1500. On the FILE dimension they deliberately agree at 1500 — a brand-new
+// file monolith is the thing you most want to refuse, so the file line is held firm, not
+// loosened. This gate's UNIQUE contribution is the FUNCTION dimension (godfileceiling has none)
+// plus a growth ratchet over grandfathered offenders. Raising godFileMaxLines alone would be
+// dead code — godfileceiling shadows it at 1500 — so it stays at 1500 and only godFuncMaxLines
+// is set loose.
+//
+// MEASURE STRICT, BLOCK LOOSE (functions). The scorecard (tools/code_quality_scorecard.py:
+// FUNC_HARD_MAX=200) MEASURES function debt at the tight line so the dashboard stays honest.
+// The FUNCTION blocking ceiling here sits DELIBERATELY higher (godFuncMaxLines default 400) so
+// the gate only reds on an *egregious* new function, never on a legitimately large-but-bounded
+// one — a dashboard that flags a 250-line function is useful; a build that REFUSES it is a false
+// block. Both ceilings are operator-tunable (FAK_GODFILE_MAX_LINES / FAK_GODFUNC_MAX_LINES) and
+// the whole gate has an escape hatch (ALLOW_GOD_FILE) for the genuine one-off.
 //
 // The ratchet, pythongate-style: every tracked non-test .go file already over a ceiling
 // when the gate shipped is GRANDFATHERED at its then-size (godfile_baseline.go). The gate
-// refuses (a) a NEW file/function crossing its ceiling and (b) any GROWTH of a
-// grandfathered offender past its frozen size. Shrinking is always clean, and the
-// baseline may only ever shrink or lose entries — never grow — so the god-code surface
-// is monotonically non-increasing. Enforced twice: here in `fak hygiene` (pre-push,
-// before the trunk goes red) and by TestGodfileGate_LiveTreeClean under `make ci`.
+// refuses (a) a NEW file/function crossing its ceiling and (b) GROWTH of a grandfathered
+// offender past its frozen size PLUS a bounded slack band (godGrowthSlackPct, default 20%;
+// FAK_GODFILE_GROWTH_SLACK_PCT=0 restores the strict ratchet). Shrinking is always clean, and
+// the frozen anchor may only ever shrink or lose entries on regen — never grow. So the surface
+// is BOUNDED rather than strictly monotonic: a grandfathered offender may drift within its slack
+// band, but a runaway still reds and the anchor never ratchets upward. That slack is what keeps
+// an ordinary edit to an already-large function from false-blocking a busy shared trunk (the
+// concrete case: cmd/fak/guard.go:cmdGuard, frozen at 1181, which a one-line peer edit used to
+// red). Enforced twice: here in `fak hygiene` (pre-push, before the trunk goes red) and by
+// TestGodfileGate_LiveTreeClean under `make ci`.
 
 // reasonGodFileGrowth is the closed-vocabulary refusal code for god-file / god-function
 // growth: a new file or function over the hard ceiling, or a grandfathered one that grew
 // past its frozen size. One token covers both classes; the Detail names which.
 const reasonGodFileGrowth = "GOD_FILE_GROWTH"
 
-// The hard ceilings mirror tools/code_quality_scorecard.py (FILE_HARD_MAX / FUNC_HARD_MAX):
-// the sizes the code-quality scorecard already counts as hard architecture debt. The gate
-// refuses growth past them; the scorecard keeps scoring the grandfathered stock.
-const (
-	godFileMaxLines = 1500 // a tracked non-test .go file over this is a god-file
-	godFuncMaxLines = 200  // a declared function/method spanning more lines is a god-function
+// The BLOCKING ceilings — the sizes the gate reds a build on. The FILE ceiling stays at the
+// scorecard debt line (1500), aligned with the sibling godfileceiling gate; the FUNCTION
+// ceiling sits above the scorecard's 200 so the gate refuses only an egregious new function,
+// not every large one (see the "TWO SIBLING GATES" note above). Operator-tunable: a fleet that
+// wants a tighter or looser floor moves it with an env var, no code change. A zero/negative/
+// garbage value falls back to the default (that is what ALLOW_GOD_FILE is for, not a 0 ceiling).
+var (
+	// File ceiling: held at the scorecard's debt line (1500), NOT loosened, because the
+	// sibling gate internal/godfileceiling (#2898) is the hard "NO NEW GOD-FILE" ratchet at a
+	// non-tunable const 1500 — raising this alone would be dead (godfileceiling shadows it) and
+	// desync two gates the tree deliberately keeps aligned on files. The FUNCTION dimension,
+	// which godfileceiling has no equivalent for, is where this gate loosens (see below).
+	godFileMaxLines = gateEnvInt("FAK_GODFILE_MAX_LINES", 1500) // a tracked non-test .go file over this is a god-file
+	godFuncMaxLines = gateEnvInt("FAK_GODFUNC_MAX_LINES", 400)  // a declared function/method spanning more lines is a god-function
 )
+
+// godGrowthSlackPct is the BOUNDED-DRIFT allowance for grandfathered offenders. Raising the
+// ceilings only helps NEW code; a function already frozen far above the ceiling (cmd/fak/guard.go
+// :cmdGuard was frozen at 1181) still reds the build the moment a peer adds a line to it — the
+// commonest false block on a busy shared trunk, and the one that forces a mid-flight split of a
+// function nobody set out to refactor. So a grandfathered offender may drift up to this percentage
+// above its frozen size before the gate re-engages. The surface is therefore BOUNDED (a runaway
+// function still reds past the band) rather than strictly monotonic — a deliberate trade of the
+// last increment of strictness for far fewer false blocks. Set FAK_GODFILE_GROWTH_SLACK_PCT=0 to
+// restore the strict ratchet. The frozen anchor itself only ever tightens (regen refuses to raise
+// it), so slack gives runway above the anchor without ever ratcheting the anchor upward.
+var godGrowthSlackPct = gateEnvNonNegInt("FAK_GODFILE_GROWTH_SLACK_PCT", 20)
+
+// godFileGateEscapeEnv opts a single run out of GOD_FILE_GROWTH entirely — the same escape-hatch
+// idiom the pre-commit gate set carries (hooks.go EscapeEnv). For the legitimate large file the
+// ceilings still refuse, an operator sets this rather than being forced off-trunk.
+const godFileGateEscapeEnv = "ALLOW_GOD_FILE"
 
 // godScan is one scanned file: its line count plus the functions found over the ceiling.
 type godScan struct {
@@ -63,7 +108,20 @@ type godFunc struct {
 // is compiled into this package (godfile_baseline.go), so there is no unreadable source
 // of truth to fail open on; an unparseable file simply skips the function scan.
 func gateGodFileGrowthTree(t *TrackedTree) ([]Finding, error) {
-	return godGrowthOffenses(godfileScanTree(t), godfileGrandfathered, godfuncGrandfathered), nil
+	// Escape hatch: an operator can admit a run that the ceilings would otherwise refuse,
+	// so a legitimate large file never forces the author off-trunk (#goal: gates that
+	// over-refuse must have a witnessed override, not a hard wall).
+	if gateEnvTruthy(godFileGateEscapeEnv) {
+		return nil, nil
+	}
+	return godGrowthOffenses(godfileScanTree(t), godfileGrandfathered, godfuncGrandfathered, godGrowthSlackPct), nil
+}
+
+// godSlackCeiling is the effective ceiling a grandfathered offender may reach before it reds:
+// its frozen anchor plus slackPct percent of that anchor (floored to whole lines). slackPct==0
+// reproduces the strict ratchet (effective == frozen).
+func godSlackCeiling(frozen, slackPct int) int {
+	return frozen + frozen*slackPct/100
 }
 
 // godfileScanTree folds the tracked tree into the per-file scans the ratchet core
@@ -178,8 +236,9 @@ func recvTypeString(e ast.Expr) string {
 // godGrowthOffenses is the pure ratchet core, split out so it can be unit-tested on a
 // synthetic corpus + baselines: one Finding per file over the file ceiling and per
 // function over the function ceiling, unless the frozen baseline grandfathers it at or
-// above its current size. Sorted by (file, line) for stable output.
-func godGrowthOffenses(scans []godScan, fileBase, funcBase map[string]int) []Finding {
+// within slackPct percent of its frozen size. slackPct==0 is the strict ratchet (no drift
+// above the frozen anchor). Sorted by (file, line) for stable output.
+func godGrowthOffenses(scans []godScan, fileBase, funcBase map[string]int, slackPct int) []Finding {
 	var findings []Finding
 	for _, s := range scans {
 		if s.lines > godFileMaxLines {
@@ -190,12 +249,12 @@ func godGrowthOffenses(scans []godScan, fileBase, funcBase map[string]int) []Fin
 					Detail: fmt.Sprintf("NEW god-file: %s is %d lines (> %d). %s",
 						s.path, s.lines, godFileMaxLines, godfileFixHint),
 				})
-			} else if s.lines > frozen {
+			} else if ceiling := godSlackCeiling(frozen, slackPct); s.lines > ceiling {
 				findings = append(findings, Finding{
 					Gate: reasonGodFileGrowth,
 					File: s.path,
-					Detail: fmt.Sprintf("grandfathered god-file GREW: %s is %d lines, frozen ceiling %d. %s",
-						s.path, s.lines, frozen, godfileFixHint),
+					Detail: fmt.Sprintf("grandfathered god-file GREW: %s is %d lines, past its frozen ceiling %d (+%d%% growth slack = %d). %s",
+						s.path, s.lines, frozen, slackPct, ceiling, godfileFixHint),
 				})
 			}
 		}
@@ -208,13 +267,13 @@ func godGrowthOffenses(scans []godScan, fileBase, funcBase map[string]int) []Fin
 					Detail: fmt.Sprintf("NEW god-function: %s spans %d lines (> %d). %s",
 						fn.key, fn.span, godFuncMaxLines, godfileFixHint),
 				})
-			} else if fn.span > frozen {
+			} else if ceiling := godSlackCeiling(frozen, slackPct); fn.span > ceiling {
 				findings = append(findings, Finding{
 					Gate: reasonGodFileGrowth,
 					File: s.path,
 					Line: fn.line,
-					Detail: fmt.Sprintf("grandfathered god-function GREW: %s spans %d lines, frozen ceiling %d. %s",
-						fn.key, fn.span, frozen, godfileFixHint),
+					Detail: fmt.Sprintf("grandfathered god-function GREW: %s spans %d lines, past its frozen ceiling %d (+%d%% growth slack = %d). %s",
+						fn.key, fn.span, frozen, slackPct, ceiling, godfileFixHint),
 				})
 			}
 		}
@@ -229,10 +288,14 @@ func godGrowthOffenses(scans []godScan, fileBase, funcBase map[string]int) []Fin
 }
 
 // godfileFixHint is the recover-by line every GOD_FILE_GROWTH finding carries: split,
-// don't grow — and tighten the baseline only after a genuine split.
+// don't grow — and tighten the baseline only after a genuine split. It also names the two
+// operator overrides, so an author who hits a false block on a legitimately large file has
+// the witnessed way out in front of them instead of reaching for a feature branch.
 const godfileFixHint = "Split along concern seams instead of growing the monolith — " +
 	"/modularize owns the recipe (tools/godsplit_plan.py plans the boundaries); see " +
 	"docs/explainers/god-file-growth-gate.md (Hermes' 20,320-line gateway/run.py is what " +
 	"accretes without this gate). After a genuine split lands, regenerate " +
 	"internal/hooks/godfile_baseline.go (FAK_GODFILE_BASELINE_REGEN=1) — entries may only " +
-	"shrink or disappear, never grow."
+	"shrink or disappear, never grow. If the size is legitimate, widen the growth slack or raise " +
+	"the ceiling for the run (FAK_GODFILE_GROWTH_SLACK_PCT / FAK_GODFILE_MAX_LINES / " +
+	"FAK_GODFUNC_MAX_LINES) or admit it with ALLOW_GOD_FILE=1."

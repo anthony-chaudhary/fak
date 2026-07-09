@@ -7,7 +7,13 @@ import "regexp"
 // junk, regenerable logs/temp, and oversized blobs. The CLASSIFICATION ORDER is load-bearing
 // (check_committed_files.py _classify L127-150) and is reproduced exactly.
 
-const fileAdmissionMaxBytes = 10 * 1024 * 1024 // DEFAULT_MAX_BYTES (10 MiB), L37
+// fileAdmissionMaxBytes is the oversized-blob ceiling: a committed file bigger than this is
+// refused as build junk / an accidental blob. Raised from the original 10 MiB to 25 MiB (a
+// legitimate committed asset — a model card, a fixture corpus, a demo capture — routinely
+// clears 10 MiB, and refusing it was a false block, not a caught mistake) and made
+// operator-tunable via FAK_MAX_FILE_BYTES. Kept in lockstep with check_committed_files.py
+// DEFAULT_MAX_BYTES so the local Go gate and the CI Python checker never disagree.
+var fileAdmissionMaxBytes = int64(gateEnvInt("FAK_MAX_FILE_BYTES", 25*1024*1024))
 
 // patternReason pairs a path regex with the human-readable reason it is refused —
 // the shared shape of the secretFiles and privateOnly classification tables.

@@ -25,7 +25,9 @@ func TestGodfileGate_RatchetCore(t *testing.T) {
 	}
 
 	// No baseline: both offenders fire, sorted by file, carrying the reason token.
-	findings := godGrowthOffenses(corpus, map[string]int{}, map[string]int{})
+	// slackPct=0 pins the STRICT ratchet — the drift band is exercised in
+	// TestGodfileGate_GrowthSlack.
+	findings := godGrowthOffenses(corpus, map[string]int{}, map[string]int{}, 0)
 	if len(findings) != 2 {
 		t.Fatalf("empty baseline: want 2 findings, got %d: %+v", len(findings), findings)
 	}
@@ -40,7 +42,7 @@ func TestGodfileGate_RatchetCore(t *testing.T) {
 	// Grandfathered at current size: clean.
 	fileBase := map[string]int{"cmd/big.go": godFileMaxLines + 1}
 	funcBase := map[string]int{"internal/x/long.go:(*T).Run": godFuncMaxLines + 1}
-	if f := godGrowthOffenses(corpus, fileBase, funcBase); len(f) != 0 {
+	if f := godGrowthOffenses(corpus, fileBase, funcBase, 0); len(f) != 0 {
 		t.Fatalf("grandfathered-at-size corpus should be clean, got %+v", f)
 	}
 
@@ -51,7 +53,7 @@ func TestGodfileGate_RatchetCore(t *testing.T) {
 			{key: "internal/x/long.go:(*T).Run", line: 10, span: godFuncMaxLines + 2},
 		}},
 	}
-	findings = godGrowthOffenses(grown, fileBase, funcBase)
+	findings = godGrowthOffenses(grown, fileBase, funcBase, 0)
 	if len(findings) != 2 ||
 		!strings.Contains(findings[0].Detail, "god-file GREW") ||
 		!strings.Contains(findings[1].Detail, "god-function GREW") {
@@ -60,8 +62,57 @@ func TestGodfileGate_RatchetCore(t *testing.T) {
 
 	// Shrunk below the hard max: clean even though the baseline still lists them.
 	shrunk := []godScan{{path: "cmd/big.go", lines: godFileMaxLines}}
-	if f := godGrowthOffenses(shrunk, fileBase, funcBase); len(f) != 0 {
+	if f := godGrowthOffenses(shrunk, fileBase, funcBase, 0); len(f) != 0 {
 		t.Fatalf("shrunk corpus should be clean, got %+v", f)
+	}
+}
+
+// TestGodfileGate_GrowthSlack pins the bounded-drift band: a grandfathered offender may grow up
+// to slackPct percent above its frozen anchor and stay clean, but a byte past the band reds and
+// names the effective ceiling. This is the false-block relief for a busy shared trunk — an
+// ordinary edit to an already-large function no longer breaks the build — while a runaway still
+// trips. slackPct=0 (covered by TestGodfileGate_RatchetCore) is the strict ratchet.
+func TestGodfileGate_GrowthSlack(t *testing.T) {
+	// File frozen ABOVE the file ceiling (the file-growth branch only runs for files over
+	// godFileMaxLines) so the band is actually exercised; function frozen at a plain 1000.
+	const fileFrozen, funcFrozen = 3000, 1000
+	fileBase := map[string]int{"cmd/big.go": fileFrozen}
+	funcBase := map[string]int{"internal/x/long.go:(*T).Run": funcFrozen}
+	// 20% slack -> effective ceilings 3600 / 1200. Assert godSlackCeiling agrees so the band is
+	// not silently miscomputed.
+	if got := godSlackCeiling(fileFrozen, 20); got != 3600 {
+		t.Fatalf("godSlackCeiling(%d, 20) = %d, want 3600", fileFrozen, got)
+	}
+	if got := godSlackCeiling(funcFrozen, 20); got != 1200 {
+		t.Fatalf("godSlackCeiling(%d, 20) = %d, want 1200", funcFrozen, got)
+	}
+
+	within := []godScan{
+		{path: "cmd/big.go", lines: 3600}, // exactly at the band edge: clean
+		{path: "internal/x/long.go", lines: 300, funcs: []godFunc{
+			{key: "internal/x/long.go:(*T).Run", line: 10, span: 1200}, // exactly at the band edge: clean
+		}},
+	}
+	if f := godGrowthOffenses(within, fileBase, funcBase, 20); len(f) != 0 {
+		t.Fatalf("drift within the 20%% band must be clean, got %+v", f)
+	}
+
+	beyond := []godScan{
+		{path: "cmd/big.go", lines: 3601}, // one line past the band: reds
+		{path: "internal/x/long.go", lines: 300, funcs: []godFunc{
+			{key: "internal/x/long.go:(*T).Run", line: 10, span: 1201},
+		}},
+	}
+	f := godGrowthOffenses(beyond, fileBase, funcBase, 20)
+	if len(f) != 2 {
+		t.Fatalf("drift past the band must refuse both, got %d: %+v", len(f), f)
+	}
+	// Sorted by file: the file finding first, then the function.
+	if !strings.Contains(f[0].Detail, "growth slack = 3600") {
+		t.Errorf("file finding should name effective ceiling 3600: %q", f[0].Detail)
+	}
+	if !strings.Contains(f[1].Detail, "growth slack = 1200") {
+		t.Errorf("func finding should name effective ceiling 1200: %q", f[1].Detail)
 	}
 }
 
@@ -143,6 +194,39 @@ func TestGodfileGate_FiresEndToEnd(t *testing.T) {
 	}
 	if HygieneGateByName("GOD_FILE_GROWTH") == nil {
 		t.Fatal("GOD_FILE_GROWTH is not registered in HygieneGates()")
+	}
+}
+
+// TestGodfileGate_EscapeHatch proves ALLOW_GOD_FILE=1 admits a run the ceilings would refuse:
+// the same synthetic bloated tree that fires exactly one finding in TestGodfileGate_FiresEndToEnd
+// yields ZERO when the escape hatch is set. This is the witnessed override an author reaches for
+// on a legitimate large file instead of being forced off-trunk.
+func TestGodfileGate_EscapeHatch(t *testing.T) {
+	root := t.TempDir()
+	rel := "internal/synthetic/godfile_escape_bloat.go"
+	p := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "package synthetic\n" + strings.Repeat("// filler\n", godFileMaxLines)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree := &TrackedTree{Root: root, Paths: []string{rel}, fileCache: map[string]fileEntry{}}
+
+	// Baseline: without the hatch, the synthetic god-file fires.
+	if findings, err := gateGodFileGrowthTree(tree); err != nil || len(findings) != 1 {
+		t.Fatalf("without hatch: want 1 finding and no error, got %d findings err=%v", len(findings), err)
+	}
+
+	// With the hatch: the gate is a no-op.
+	t.Setenv(godFileGateEscapeEnv, "1")
+	findings, err := gateGodFileGrowthTree(tree)
+	if err != nil {
+		t.Fatalf("gate error under escape hatch: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("ALLOW_GOD_FILE=1 must admit the run, got %d findings: %+v", len(findings), findings)
 	}
 }
 
