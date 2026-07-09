@@ -59,6 +59,10 @@ const (
 	SinkDispatchRuns    SinkKind = "dispatch_runs"
 	SinkUsageLog        SinkKind = "usage_log"
 	SinkGatewayUsageLog SinkKind = "gateway_usage_log"
+	// SinkVault is the central log-vault (internal/logvault, #2455): the durable
+	// backup of every other sink. It is hash-chained AND mirror-verified, so its
+	// Chain is verified/broken from a real Verify pass, not presence alone.
+	SinkVault SinkKind = "logvault"
 )
 
 // Chain describes a sink's tamper-evidence status.
@@ -162,6 +166,24 @@ type UsageRollup struct {
 	Errors int    `json:"errors"`
 }
 
+// VaultRollup summarizes the central log-vault's health (#2455): is my backup
+// current and intact? WITNESSED: every number is folded from logvault's own
+// hash-chained manifest, and VerifyMismatches / ChainBroken come from re-hashing
+// the mirrors against that manifest — not a self-reported "backup ok" flag.
+type VaultRollup struct {
+	Basis            string `json:"basis"`
+	Present          bool   `json:"present"`
+	Sources          int    `json:"sources"`
+	Files            int    `json:"files"`
+	Bytes            int64  `json:"bytes"`
+	Rows             int    `json:"rows"`
+	Errors           int    `json:"errors"` // skip-error rows: files that could not be read into the vault
+	LastCaptureNano  int64  `json:"last_capture_unix_nano"`
+	VerifyChecked    int    `json:"verify_checked"`
+	VerifyMismatches int    `json:"verify_mismatches"`
+	ChainBroken      bool   `json:"chain_broken"`
+}
+
 // Report is the full PURE fold output.
 type Report struct {
 	Schema      string     `json:"schema"`
@@ -179,6 +201,7 @@ type Report struct {
 	Cache    CacheRollup    `json:"cache"`
 	Gateway  GatewayRollup  `json:"gateway"`
 	Usage    UsageRollup    `json:"usage"`
+	Vault    VaultRollup    `json:"vault"`
 }
 
 // DecisionJournalInput is the shell's already-executed read + chain-verification
@@ -234,6 +257,26 @@ type DispatchRunsInput struct {
 	Workers []dispatchaudit.Worker
 }
 
+// VaultInput is the shell's already-executed fold of the log-vault manifest
+// (logvault.Footprint) plus a Verify pass. Kept as plain fields so this package
+// never imports internal/logvault — the CLI shell owns every disk read, hash,
+// and clock, matching the honesty fence the other sinks use. Present is false for
+// a box that never captured (valid-empty, not an error).
+type VaultInput struct {
+	Path             string
+	Present          bool
+	Sources          int
+	Files            int
+	Bytes            int64
+	Rows             int
+	Errors           int
+	LastCaptureNano  int64
+	VerifyChecked    int
+	VerifyMismatches int
+	ChainBroken      bool
+	ChainErr         string
+}
+
 // Input is everything Fold needs, already read from disk by the CLI shell.
 type Input struct {
 	Now   time.Time
@@ -245,6 +288,7 @@ type Input struct {
 	CacheValue      CacheValueInput
 	LoopLedger      LoopLedgerInput
 	DispatchRuns    DispatchRunsInput
+	Vault           VaultInput
 }
 
 func withinSince(ts time.Time, since time.Time) bool {
@@ -331,6 +375,24 @@ func Fold(in Input) Report {
 	}
 	rep.Sinks = append(rep.Sinks, dr)
 	rep.Dispatch = foldDispatch(in.DispatchRuns.Workers)
+
+	vault := SinkHealth{Kind: SinkVault, Path: in.Vault.Path, Present: in.Vault.Present, RowCount: in.Vault.Rows}
+	switch {
+	case !in.Vault.Present:
+		vault.Chain = ChainAbsent
+	case in.Vault.ChainBroken:
+		vault.Chain = ChainBroken
+		vault.BrokenReason = in.Vault.ChainErr
+	case in.Vault.VerifyMismatches > 0:
+		// A verified chain over corrupted mirrors is still NOT intact — surface it
+		// as a finding so a silent backup corruption cannot hide behind a sound chain.
+		vault.Chain = ChainBroken
+		vault.BrokenReason = fmt.Sprintf("%d vault mirror/anchor mismatch(es) at last verify", in.Vault.VerifyMismatches)
+	default:
+		vault.Chain = ChainVerified
+	}
+	rep.Sinks = append(rep.Sinks, vault)
+	rep.Vault = foldVault(in.Vault)
 
 	for _, s := range rep.Sinks {
 		if s.Chain == ChainBroken {
@@ -463,6 +525,24 @@ func foldLoop(events []loopmgr.Event, since, now time.Time) LoopRollup {
 		l.WitnessUnavailable += int64(s.WitnessUnavailable)
 	}
 	return l
+}
+
+// foldVault projects the shell's vault fold into the rollup. WITNESSED: the whole
+// vault is fak's own hash-chained manifest re-hashed against its mirrors.
+func foldVault(in VaultInput) VaultRollup {
+	return VaultRollup{
+		Basis:            "witnessed",
+		Present:          in.Present,
+		Sources:          in.Sources,
+		Files:            in.Files,
+		Bytes:            in.Bytes,
+		Rows:             in.Rows,
+		Errors:           in.Errors,
+		LastCaptureNano:  in.LastCaptureNano,
+		VerifyChecked:    in.VerifyChecked,
+		VerifyMismatches: in.VerifyMismatches,
+		ChainBroken:      in.ChainBroken,
+	}
 }
 
 func foldDispatch(workers []dispatchaudit.Worker) DispatchRollup {
