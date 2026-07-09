@@ -108,6 +108,37 @@ func TokenizerCost(tok Tokenizer) CostModel {
 // Tokens no matter how many turns the session runs.
 type Budget struct {
 	Tokens int `json:"tokens"`
+	// Backpressure selects what the plan does when the budget is under pressure — when a
+	// span cannot be admitted because the resident cap is full. "" or "drop" (the default)
+	// is best-effort partial admit: keep the prefix that fits and elide the over-budget
+	// tail recoverably (today's never-raise behavior, byte-identical). "wait_for_space"
+	// raises a Backpressure signal on the plan so the producer can block/backpressure until
+	// the budget frees rather than accept the drop. The planner itself never blocks — it is
+	// a pure, deterministic function; WAIT_FOR_SPACE surfaces the wait decision to the
+	// producer (the only tier that can actually stall a writer), it does not enact it here.
+	Backpressure string `json:"backpressure,omitempty"`
+}
+
+// Backpressure policies for budget-pressure admission (#3381 — the DROP-vs-WAIT knob).
+const (
+	// BackpressureDrop is the default: best-effort partial admit. The over-budget tail is
+	// elided cold (ElideOverBudget, recoverable) and nothing raises — the never-raise
+	// behavior fak shipped before this knob existed.
+	BackpressureDrop = "drop"
+	// BackpressureWaitForSpace signals the producer to wait for the budget to free instead
+	// of accepting the recoverable drop. The plan carries the signal (Plan.Backpressure);
+	// the producer decides whether to stall — the pure planner never blocks.
+	BackpressureWaitForSpace = "wait_for_space"
+)
+
+// normBackpressure maps an empty/unknown policy to the default DROP. An unrecognized value
+// is treated as DROP (fail-safe to never-raise), so a typo can never silently stall a
+// producer.
+func normBackpressure(policy string) string {
+	if policy == BackpressureWaitForSpace {
+		return BackpressureWaitForSpace
+	}
+	return BackpressureDrop
 }
 
 // Selection is one span the plan keeps resident, carried in RENDER order (step ascending,
@@ -193,6 +224,13 @@ type Plan struct {
 	BindingConstraint     string      `json:"binding_constraint,omitempty"`
 	Benefit               float64     `json:"benefit"`     // sum of selected benefits — the objective achieved
 	OverBudget            bool        `json:"over_budget"` // pins alone exceeded the budget (they stay; nothing else fits)
+	// Backpressure is the producer-facing wait signal (#3381). It is set to
+	// BackpressureWaitForSpace only when the budget's Backpressure policy is
+	// WAIT_FOR_SPACE AND budget pressure actually forced a span cold — an over_budget
+	// elision, or pins/floor overrunning the budget. Empty under the default DROP policy,
+	// and empty under WAIT_FOR_SPACE when everything fit (nothing to wait for). The
+	// producer reads it to decide whether to stall a writer until the budget frees.
+	Backpressure string `json:"backpressure,omitempty"`
 }
 
 // Optimize is the planner: it chooses the resident view that maximizes total benefit
@@ -391,6 +429,21 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	}
 	finalize(&p, used)
 	return p
+}
+
+// applyBackpressure sets the plan's producer-facing wait signal per the budget policy.
+// Under the default DROP policy it is a no-op — the never-raise behavior is unchanged.
+// Under WAIT_FOR_SPACE it raises Backpressure ONLY when budget pressure actually forced a
+// span cold (an over_budget elision, or pins/floor overrunning the budget), so a plan that
+// fit under budget never asks the producer to wait. It reads the plan's own elision
+// bookkeeping, so it must run after every elision is recorded (just before finalize).
+func applyBackpressure(p *Plan, policy string) {
+	if normBackpressure(policy) != BackpressureWaitForSpace {
+		return
+	}
+	if p.OverBudget || hasOverBudgetElision(*p) {
+		p.Backpressure = BackpressureWaitForSpace
+	}
 }
 
 // finalize sets the cost accounting and sorts Selected into RENDER order (step asc, then
