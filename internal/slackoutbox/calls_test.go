@@ -60,6 +60,42 @@ func TestCallStatsDerivesPerSourceFromLog(t *testing.T) {
 	}
 }
 
+// TestCallStatsCountsSuppressedAsSaved pins the Layer-B accounting: a card edited to the
+// same body it already carries is dropped pre-send, and CallStats must attribute that to
+// the source as a SAVED suppression — never miscount it as a pending, still-owed delivery.
+func TestCallStatsCountsSuppressedAsSaved(t *testing.T) {
+	o := testOutbox(t)
+	w := newFakeWire()
+	// First edit ships; a second identical edit (fresh nonce, same card) is suppressed.
+	for range []int{0, 1} {
+		if _, err := o.Enqueue(Row{Channel: "C1", Text: "turns=1", UpdateTS: "7.7", Source: "guard-session:status"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := o.Drain(context.Background(), w, drainOpts(nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cs, err := o.CallStats(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g SourceCalls
+	for _, sc := range cs.Sources {
+		if sc.Source == "guard-session:status" {
+			g = sc
+		}
+	}
+	if g.Updates != 1 || g.Suppressed != 1 || g.Pending != 0 {
+		t.Fatalf("suppressed no-op mis-attributed: %+v (want updates=1 suppressed=1 pending=0)", g)
+	}
+	if g.Sent() != 1 || g.Saved() != 1 {
+		t.Fatalf("spent-vs-saved split wrong: sent=%d saved=%d (want 1/1)", g.Sent(), g.Saved())
+	}
+	if cs.TotalSent != 1 || cs.TotalSaved != 1 {
+		t.Fatalf("totals wrong: sent=%d saved=%d (want 1/1)", cs.TotalSent, cs.TotalSaved)
+	}
+}
+
 // TestCallStatsSortsLoudestFirst pins the ordering contract: surfaces sort by calls SENT
 // (descending), ties broken by name, so the biggest rate-limit spender floats to the top.
 func TestCallStatsSortsLoudestFirst(t *testing.T) {

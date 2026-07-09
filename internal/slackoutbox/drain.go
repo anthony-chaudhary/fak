@@ -80,6 +80,7 @@ type DrainReport struct {
 	Recovered  int `json:"recovered"` // resolved from the nonce probe without re-sending
 	Refused    int `json:"refused"`
 	Superseded int `json:"superseded"`
+	Unchanged  int `json:"unchanged"` // no-op update edits suppressed pre-send (body == card's last posted body)
 	Failed     int `json:"failed"` // transient failures recorded this pass (still pending)
 	Dead       int `json:"dead"`
 	Remaining  int `json:"remaining"` // rows still owed after this pass
@@ -270,6 +271,21 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 			}
 		}
 
+		// No-op suppression: an update whose payload is byte-identical to the card's last
+		// posted body would change nothing on Slack, so drop it (terminal `unchanged`)
+		// instead of spending a chat.update. Keyed by CardKey so a fresh nonce re-editing
+		// the same card — the guard live-card enqueues one per tick — is caught; a first
+		// edit or a genuine change differs in bytes and falls through to the send below.
+		if item.Action == "update" {
+			if h := payloadHash(item.Row); h != "" && h == snap.CardHashes[item.Row.CardKey] {
+				if err := o.appendState(transition{Nonce: item.Row.Nonce, State: stateUnchanged, Reason: "identical to last posted body"}); err != nil {
+					return rep, err
+				}
+				rep.Unchanged++
+				continue
+			}
+		}
+
 		// Pace consecutive sends into the same channel.
 		if sentInChannel[ch] {
 			if err := opts.Sleep(ctx, opts.Gap); err != nil {
@@ -298,7 +314,11 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 		}
 
 		if sendErr == nil {
-			if err := o.appendState(transition{Nonce: item.Row.Nonce, State: statePosted, TS: postedTS}); err != nil {
+			posted := transition{Nonce: item.Row.Nonce, State: statePosted, TS: postedTS}
+			if item.Action == "update" {
+				posted.Hash = payloadHash(item.Row) // records the card's live body so the next identical edit self-suppresses
+			}
+			if err := o.appendState(posted); err != nil {
 				return rep, err
 			}
 			if item.Action == "update" {

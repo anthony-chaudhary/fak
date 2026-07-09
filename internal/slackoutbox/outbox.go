@@ -2,6 +2,8 @@ package slackoutbox
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -70,6 +72,7 @@ const (
 	stateDead        = "dead"
 	stateRefused     = "refused"
 	stateSuperseded  = "superseded"
+	stateUnchanged   = "unchanged"    // no-op update (identical to the card's last posted body), suppressed pre-send
 	stateRetry       = "retry"        // operator re-arm transition (dead -> pending)
 	stateDrainPass   = "drain_pass"   // heartbeat transition (Nonce == "")
 	stateCompactPass = "compact_pass" // heartbeat transition marking the last Compact (Nonce == "")
@@ -85,6 +88,7 @@ type transition struct {
 	Attempts  int    `json:"attempts,omitempty"`
 	Ambiguous bool   `json:"ambiguous,omitempty"` // the attempt may have half-succeeded (transport error after send)
 	At        string `json:"at,omitempty"`        // RFC3339 UTC
+	Hash      string `json:"hash,omitempty"`      // payload hash on a posted UPDATE — feeds no-op suppression
 }
 
 // rowState is the folded effective state of one nonce after replaying its transitions.
@@ -97,13 +101,14 @@ type rowState struct {
 	Attempts  int
 	Ambiguous bool
 	At        time.Time
+	Hash      string // payload hash carried on a posted UPDATE (see transition.Hash)
 }
 
 // terminal reports whether the state accepts no further sends. dead counts as terminal
 // here because only an explicit Retry transition (not a drain) may move it.
 func (s rowState) terminal() bool {
 	switch s.State {
-	case statePosted, stateDead, stateRefused, stateSuperseded:
+	case statePosted, stateDead, stateRefused, stateSuperseded, stateUnchanged:
 		return true
 	}
 	return false
@@ -128,7 +133,7 @@ func (s rowState) apply(t transition) rowState {
 		s.Ambiguous = t.Ambiguous
 		s.At = at
 		return s
-	case statePosted, stateDead, stateRefused, stateSuperseded:
+	case statePosted, stateDead, stateRefused, stateSuperseded, stateUnchanged:
 		s.State = t.State
 		s.TS = t.TS
 		s.Reason = t.Reason
@@ -136,6 +141,7 @@ func (s rowState) apply(t transition) rowState {
 			s.Attempts = t.Attempts
 		}
 		s.At = at
+		s.Hash = t.Hash // non-empty only on a posted UPDATE; feeds Snapshot.CardHashes
 		return s
 	}
 	return s // unknown transition kinds are ignored (forward compatibility)
@@ -185,6 +191,23 @@ func NewNonce() string {
 	// crypto/rand failing is a broken host; fall back to a time-derived nonce
 	// rather than refusing to enqueue a durable message.
 	return fmt.Sprintf("t-%d", time.Now().UnixNano())
+}
+
+// payloadHash is a stable fingerprint of a row's VISIBLE payload — the fallback text plus
+// any block payload. Two rows with the same hash render identically in Slack, so an update
+// whose hash equals its card's last posted body is a no-op the drain can drop without a
+// chat.update. Content-only by design: nonce, ts, and enqueue time are excluded so the same
+// card content always hashes the same across the fresh nonce each tick enqueues.
+func payloadHash(r Row) string {
+	h := sha256.New()
+	h.Write([]byte(r.Text))
+	h.Write([]byte{0}) // domain separator between text and blocks
+	if len(r.Blocks) > 0 {
+		if b, err := json.Marshal(r.Blocks); err == nil {
+			h.Write(b)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16]) // 128-bit prefix — collisions are not a practical risk
 }
 
 // Enqueue validates the row, stamps nonce/card-key/enqueued-at defaults, and appends it
@@ -263,6 +286,11 @@ type Snapshot struct {
 	States  map[string]rowState // by nonce; missing key = pending with zero attempts
 	Corrupt int                 // unparseable lines across both files (counted, never fatal)
 
+	// CardHashes is the payload hash of the LATEST posted update per CardKey — the read the
+	// drain uses to suppress a no-op edit (an update whose body equals the card's last posted
+	// body). Empty for any card that has never had a hash-carrying posted update.
+	CardHashes map[string]string
+
 	LastDrainAt   time.Time // zero when no drain_pass heartbeat exists yet
 	LastCompactAt time.Time // zero when Compact has never run (no compact_pass heartbeat)
 
@@ -293,7 +321,8 @@ func (o *Outbox) Load() (*Snapshot, error) {
 // newest, into one snapshot. Load folds all three layers; Compact folds archive+seal only
 // (the segments it is about to rewrite), leaving the live head to keep accumulating.
 func (o *Outbox) foldFiles(spoolNames, stateNames []string) (*Snapshot, error) {
-	snap := &Snapshot{States: map[string]rowState{}}
+	snap := &Snapshot{States: map[string]rowState{}, CardHashes: map[string]string{}}
+	byNonce := map[string]Row{} // nonce -> row, to join a posted transition back to its CardKey
 
 	// Spool: fold archive → seal → head. A repeated nonce WITHIN a segment is the
 	// double-send signal (counted corrupt, first write wins); the same nonce ACROSS
@@ -318,6 +347,7 @@ func (o *Outbox) foldFiles(spoolNames, stateNames []string) (*Snapshot, error) {
 			}
 			seen[r.Nonce] = true
 			snap.Rows = append(snap.Rows, r)
+			byNonce[r.Nonce] = r
 		})
 		if err != nil {
 			return nil, err
@@ -350,6 +380,13 @@ func (o *Outbox) foldFiles(spoolNames, stateNames []string) (*Snapshot, error) {
 				return
 			}
 			snap.States[t.Nonce] = snap.States[t.Nonce].apply(t)
+			// Track the latest posted-update body hash per card key (state file order =
+			// newest last), so the drain can drop a byte-identical re-edit without a call.
+			if t.State == statePosted && t.Hash != "" {
+				if ck := byNonce[t.Nonce].CardKey; ck != "" {
+					snap.CardHashes[ck] = t.Hash
+				}
+			}
 		})
 		if err != nil {
 			return nil, err
@@ -398,6 +435,7 @@ type Status struct {
 	Dead              int       `json:"dead"`
 	Refused           int       `json:"refused"`
 	Superseded        int       `json:"superseded"`
+	Suppressed        int       `json:"suppressed,omitempty"` // no-op update edits dropped pre-send (see `outbox calls`)
 	Corrupt           int       `json:"corrupt"`
 	OldestPendingAgeS int64     `json:"oldest_pending_age_s"` // -1 when nothing is pending
 	LastDrainAgeS     int64     `json:"last_drain_age_s"`     // -1 when no drain has ever run
@@ -426,6 +464,8 @@ func (o *Outbox) Status(now time.Time) (*Status, error) {
 			st.Refused++
 		case stateSuperseded:
 			st.Superseded++
+		case stateUnchanged:
+			st.Suppressed++ // terminal no-op edit — not owed a delivery, not a real post
 		default: // pending / sending / failed — all still owed a delivery
 			st.Pending++
 			if at, err := time.Parse(time.RFC3339, r.EnqueuedAt); err == nil {

@@ -21,21 +21,22 @@ import (
 
 // SourceCalls is one producing surface's Slack API-call footprint.
 type SourceCalls struct {
-	Source    string `json:"source"`
-	Posts     int    `json:"posts"`     // chat.postMessage calls that reached the wire
-	Updates   int    `json:"updates"`   // chat.update calls that reached the wire
-	Coalesced int    `json:"coalesced"` // edits collapsed into a newer one (calls the outbox saved)
-	Refused   int    `json:"refused"`   // bodies the leak fence blocked (calls the outbox saved)
-	Dead      int    `json:"dead"`      // rows dead-lettered after exhausting retries
-	Pending   int    `json:"pending"`   // rows still owed a delivery (no call spent yet)
+	Source     string `json:"source"`
+	Posts      int    `json:"posts"`      // chat.postMessage calls that reached the wire
+	Updates    int    `json:"updates"`    // chat.update calls that reached the wire
+	Coalesced  int    `json:"coalesced"`  // edits collapsed into a newer one (calls the outbox saved)
+	Suppressed int    `json:"suppressed"` // no-op edits dropped pre-send, body == last posted (calls the outbox saved)
+	Refused    int    `json:"refused"`    // bodies the leak fence blocked (calls the outbox saved)
+	Dead       int    `json:"dead"`       // rows dead-lettered after exhausting retries
+	Pending    int    `json:"pending"`    // rows still owed a delivery (no call spent yet)
 }
 
 // Sent is the API calls this surface actually spent against the rate limit.
 func (s SourceCalls) Sent() int { return s.Posts + s.Updates }
 
-// Saved is the API calls the outbox avoided for this surface (coalesced duplicate edits plus
-// fence refusals) — the noise it already suppresses.
-func (s SourceCalls) Saved() int { return s.Coalesced + s.Refused }
+// Saved is the API calls the outbox avoided for this surface (coalesced duplicate edits,
+// suppressed no-op re-edits, and fence refusals) — the noise it already suppresses.
+func (s SourceCalls) Saved() int { return s.Coalesced + s.Suppressed + s.Refused }
 
 // CallStats is the whole spool's call-volume fold: per source, sorted loudest-first, plus
 // totals and the retention-window floor the counts cover.
@@ -78,6 +79,8 @@ func (o *Outbox) CallStats(now time.Time) (*CallStats, error) {
 			}
 		case stateSuperseded:
 			sc.Coalesced++
+		case stateUnchanged:
+			sc.Suppressed++
 		case stateRefused:
 			sc.Refused++
 		case stateDead:
@@ -110,6 +113,6 @@ func CallStatsReportLine(cs *CallStats) string {
 	if cs.LastCompactAgeS >= 0 {
 		window = "since last compaction " + (time.Duration(cs.LastCompactAgeS) * time.Second).String() + " ago"
 	}
-	return fmt.Sprintf("sent %d call(s) (chat.postMessage+chat.update), saved %d (coalesced+refused) across %d source(s) — %s",
+	return fmt.Sprintf("sent %d call(s) (chat.postMessage+chat.update), saved %d (coalesced+suppressed+refused) across %d source(s) — %s",
 		cs.TotalSent, cs.TotalSaved, len(cs.Sources), window)
 }

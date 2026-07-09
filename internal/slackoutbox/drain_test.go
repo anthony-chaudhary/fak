@@ -326,6 +326,64 @@ func TestDrainCoalescesUpdatesToNewestState(t *testing.T) {
 	}
 }
 
+// TestDrainSuppressesNoOpUpdateEdits is the no-op-suppression witness — the Slack
+// rate-limit fix. Once a card's body is on the wire, a fresh update row carrying a
+// BYTE-IDENTICAL body is dropped as terminal stateUnchanged and spends no chat.update,
+// while a genuinely changed body still ships. That is what collapses an idle guard
+// session's every-20s edits into keepalive-only traffic without ever stranding a real
+// change behind the gate.
+func TestDrainSuppressesNoOpUpdateEdits(t *testing.T) {
+	o := testOutbox(t)
+	w := newFakeWire()
+
+	// 1. First edit of the card reaches the wire and records its body hash.
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "90%", UpdateTS: "7.7", Source: "guard"}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Updated != 1 || rep.Unchanged != 0 || len(w.posts) != 1 {
+		t.Fatalf("first edit must send: %+v posts=%v", rep, w.posts)
+	}
+
+	// 2. A fresh nonce re-editing the same card to the IDENTICAL body is suppressed:
+	//    terminal stateUnchanged, and NOT one more call against the shared rate bucket.
+	noop, err := o.Enqueue(Row{Channel: "C1", Text: "90%", UpdateTS: "7.7", Source: "guard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err = o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Unchanged != 1 || rep.Updated != 0 {
+		t.Fatalf("identical edit must suppress: %+v", rep)
+	}
+	if len(w.posts) != 1 {
+		t.Fatalf("suppressed edit spent a wire call: posts=%v", w.posts)
+	}
+	if snap, _ := o.Load(); snap.state(noop).State != stateUnchanged {
+		t.Fatalf("no-op not recorded as unchanged: %+v", snap.state(noop))
+	}
+
+	// 3. A genuinely changed body still ships — the gate never drops a real change.
+	if _, err := o.Enqueue(Row{Channel: "C1", Text: "91%", UpdateTS: "7.7", Source: "guard"}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = o.Drain(context.Background(), w, drainOpts(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Updated != 1 || rep.Unchanged != 0 {
+		t.Fatalf("changed body must send: %+v", rep)
+	}
+	if len(w.posts) != 2 || w.posts[1] != "C1/update:7.7:91%" {
+		t.Fatalf("changed edit did not reach the wire: %v", w.posts)
+	}
+}
+
 func TestDrainLeakFenceRefusesRowTerminally(t *testing.T) {
 	o := testOutbox(t)
 	needle := "node-" + "windows-a" // base PUBLIC_LEAK needle, assembled at runtime

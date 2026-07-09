@@ -113,6 +113,41 @@ func TestCompactDropsPostedOnlyPastSafeWindow(t *testing.T) {
 	}
 }
 
+func TestCompactDropsDeadOnlyPastLongWindow(t *testing.T) {
+	base := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+
+	// A dead row well past the 48h posted window is STILL kept — an operator may retry it.
+	o := noSleepOutbox(t, base)
+	n, _ := o.Enqueue(Row{Channel: "C1", Text: "dead"})
+	setState(t, o, n, stateDead, "", base)
+	if rep, err := o.Compact(CompactOpts{Now: base.Add(13 * 24 * time.Hour)}); err != nil || rep.DroppedDead != 0 {
+		t.Fatalf("dead within window dropped: rep=%+v err=%v", rep, err)
+	}
+	if !hasNonce(mustLoad(t, o), n) {
+		t.Fatal("dead row within the 14d window must survive so it stays retryable")
+	}
+
+	// Past the 14d window a dead row nobody re-armed is finally dropped — the retention
+	// exception that keeps a steadily dead-lettering fleet's spool bounded.
+	o2 := noSleepOutbox(t, base)
+	n2, _ := o2.Enqueue(Row{Channel: "C1", Text: "dead"})
+	setState(t, o2, n2, stateDead, "", base)
+	if rep, err := o2.Compact(CompactOpts{Now: base.Add(15 * 24 * time.Hour)}); err != nil || rep.DroppedDead != 1 {
+		t.Fatalf("dead past window not dropped: rep=%+v err=%v", rep, err)
+	}
+	if hasNonce(mustLoad(t, o2), n2) {
+		t.Fatal("dead row past the 14d window must be dropped")
+	}
+
+	// A custom --retain-dead window is honored.
+	o3 := noSleepOutbox(t, base)
+	n3, _ := o3.Enqueue(Row{Channel: "C1", Text: "dead"})
+	setState(t, o3, n3, stateDead, "", base)
+	if rep, err := o3.Compact(CompactOpts{Now: base.Add(2 * time.Hour), RetainDead: time.Hour}); err != nil || rep.DroppedDead != 1 {
+		t.Fatalf("custom dead window not honored: rep=%+v err=%v", rep, err)
+	}
+}
+
 func TestCompactCollapsesDrainPassHeartbeats(t *testing.T) {
 	base := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	o := noSleepOutbox(t, base)

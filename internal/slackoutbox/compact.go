@@ -16,10 +16,11 @@ import (
 // transitions and a heartbeat, so a busy fleet's state.jsonl outgrows its live queue by
 // orders of magnitude within a day — the fold stays correct but the read cost and disk
 // footprint do not. Compaction folds the accumulated segments down to *only what a future
-// reader still needs*: rows still owed a delivery, dead rows an operator may retry, and
-// recently-settled rows kept briefly so a deferred producer's PostedTS probe still
-// resolves. Everything older is dropped, the per-nonce transition history collapses to one
-// line, and the heartbeat storm collapses to a single drain_pass.
+// reader still needs*: rows still owed a delivery, dead rows an operator may still retry
+// (kept for a long but bounded window), and recently-settled rows kept briefly so a
+// deferred producer's PostedTS probe still resolves. Everything older is dropped, the
+// per-nonce transition history collapses to one line, and the heartbeat storm collapses to
+// a single drain_pass.
 //
 // The mechanism is seal-quiesce-rewrite, not truncate-in-place: the live head is renamed
 // to a transient seal segment so it can be read without racing a lock-free appender, the
@@ -32,11 +33,15 @@ import (
 // Retention windows: how long a terminal row survives compaction past its final
 // transition. Settled (superseded/refused) rows are kept briefly for diagnostics; posted
 // rows are kept long enough that a deferred producer resuming after a guard session can
-// still resolve their PostedTS; dead rows are never dropped (an operator may retry them).
+// still resolve their PostedTS; dead rows are kept far longer — an operator may retry them
+// (fak slack outbox dead/retry) — but no longer FOREVER: a dead row nobody re-armed within
+// the window is abandoned, so a fleet that steadily dead-letters can no longer grow the
+// state spool without bound.
 const (
-	DefaultRetainSettled = time.Hour      // superseded / refused
-	DefaultRetainPosted  = 48 * time.Hour // posted (past any guard session's PostedTS probes)
-	DefaultRetainCards   = 48 * time.Hour // finalized <dir>/cards/*.json run-card state
+	DefaultRetainSettled = time.Hour           // superseded / refused
+	DefaultRetainPosted  = 48 * time.Hour      // posted (past any guard session's PostedTS probes)
+	DefaultRetainDead    = 14 * 24 * time.Hour // dead (operator-retryable; two weeks to notice before GC)
+	DefaultRetainCards   = 48 * time.Hour      // finalized <dir>/cards/*.json run-card state
 
 	// CompactRowThreshold and CompactMinInterval gate the automatic post-drain
 	// compaction: run when the fold carries more terminal rows than the threshold, or a
@@ -59,6 +64,7 @@ const (
 type CompactOpts struct {
 	RetainSettled time.Duration       // superseded/refused window; <=0 => DefaultRetainSettled
 	RetainPosted  time.Duration       // posted window; <=0 => DefaultRetainPosted
+	RetainDead    time.Duration       // dead window; <=0 => DefaultRetainDead
 	RetainCards   time.Duration       // finalized run-card window; <=0 => DefaultRetainCards
 	Now           time.Time           // reference clock; zero => o.now()
 	Sleep         func(time.Duration) // seal-quiesce wait seam; nil => o's compactSleep, then time.Sleep
@@ -73,6 +79,9 @@ func (c CompactOpts) norm(o *Outbox) CompactOpts {
 	}
 	if c.RetainPosted <= 0 {
 		c.RetainPosted = DefaultRetainPosted
+	}
+	if c.RetainDead <= 0 {
+		c.RetainDead = DefaultRetainDead
 	}
 	if c.RetainCards <= 0 {
 		c.RetainCards = DefaultRetainCards
@@ -97,7 +106,9 @@ type CompactReport struct {
 	KeptRows           int   `json:"kept_rows"`            // survivors written back to the archive
 	DroppedPosted      int   `json:"dropped_posted"`       // posted rows past RetainPosted
 	DroppedSuperseded  int   `json:"dropped_superseded"`   // superseded rows past RetainSettled
+	DroppedUnchanged   int   `json:"dropped_unchanged"`    // no-op (unchanged) rows past RetainSettled
 	DroppedRefused     int   `json:"dropped_refused"`      // refused rows past RetainSettled
+	DroppedDead        int   `json:"dropped_dead"`         // dead rows past RetainDead (unretried)
 	CollapsedDrainPass int   `json:"collapsed_drain_pass"` // drain_pass heartbeats folded to one
 	DroppedCards       int   `json:"dropped_cards"`        // finalized run-card files removed
 	SpoolBytesBefore   int64 `json:"spool_bytes_before"`   // archive+seal spool bytes folded
@@ -245,8 +256,12 @@ func (o *Outbox) rewriteArchive(opts CompactOpts, rep *CompactReport) (int, erro
 					rep.DroppedPosted++
 				case stateSuperseded:
 					rep.DroppedSuperseded++
+				case stateUnchanged:
+					rep.DroppedUnchanged++
 				case stateRefused:
 					rep.DroppedRefused++
+				case stateDead:
+					rep.DroppedDead++
 				}
 			}
 			continue
@@ -291,8 +306,9 @@ func (o *Outbox) rewriteArchive(opts CompactOpts, rep *CompactReport) (int, erro
 }
 
 // keepRow decides whether a folded row survives compaction. Non-terminal rows (still owed
-// a delivery) and dead rows (operator-actionable) always survive; a settled row survives
-// until it is older than its retention window. class is the drop bucket when keep is false.
+// a delivery) always survive; a terminal row survives until it is older than its retention
+// window — dead rows get a far longer window than settled/posted because an operator may
+// still retry them, but not an unbounded one. class is the drop bucket when keep is false.
 // An unparseable timestamp (zero At) keeps the row — compaction never drops on a guess.
 func keepRow(s rowState, opts CompactOpts) (keep bool, class string) {
 	switch s.State {
@@ -306,12 +322,22 @@ func keepRow(s rowState, opts CompactOpts) (keep bool, class string) {
 			return true, ""
 		}
 		return false, stateSuperseded
+	case stateUnchanged:
+		if s.At.IsZero() || opts.Now.Sub(s.At) < opts.RetainSettled {
+			return true, ""
+		}
+		return false, stateUnchanged
 	case stateRefused:
 		if s.At.IsZero() || opts.Now.Sub(s.At) < opts.RetainSettled {
 			return true, ""
 		}
 		return false, stateRefused
-	default: // pending / sending / failed / dead / unknown — all still needed
+	case stateDead:
+		if s.At.IsZero() || opts.Now.Sub(s.At) < opts.RetainDead {
+			return true, ""
+		}
+		return false, stateDead
+	default: // pending / sending / failed / unknown — all still owed a delivery
 		return true, ""
 	}
 }
@@ -326,6 +352,7 @@ func collapse(nonce string, s rowState) transition {
 		Reason:    s.Reason,
 		Attempts:  s.Attempts,
 		Ambiguous: s.Ambiguous,
+		Hash:      s.Hash, // preserve the posted-update body hash so CardHashes survives compaction
 	}
 	if !s.At.IsZero() {
 		t.At = s.At.UTC().Format(time.RFC3339)
@@ -353,8 +380,12 @@ func (o *Outbox) compactPreview(opts CompactOpts) (*CompactReport, error) {
 			rep.DroppedPosted++
 		case stateSuperseded:
 			rep.DroppedSuperseded++
+		case stateUnchanged:
+			rep.DroppedUnchanged++
 		case stateRefused:
 			rep.DroppedRefused++
+		case stateDead:
+			rep.DroppedDead++
 		}
 	}
 	dropped, err := o.gcCards(opts, true)
@@ -495,8 +526,8 @@ func CompactReportLine(rep *CompactReport) string {
 		verb = "would compact"
 	}
 	return fmt.Sprintf(
-		"%s: scanned %d  kept %d  dropped(posted %d superseded %d refused %d)  cards %d  drain_pass→1 (from %d)  spool %d→%dB  state %d→%dB",
+		"%s: scanned %d  kept %d  dropped(posted %d superseded %d refused %d dead %d)  cards %d  drain_pass→1 (from %d)  spool %d→%dB  state %d→%dB",
 		verb, rep.ScannedRows, rep.KeptRows, rep.DroppedPosted, rep.DroppedSuperseded, rep.DroppedRefused,
-		rep.DroppedCards, rep.CollapsedDrainPass, rep.SpoolBytesBefore, rep.SpoolBytesAfter,
+		rep.DroppedDead, rep.DroppedCards, rep.CollapsedDrainPass, rep.SpoolBytesBefore, rep.SpoolBytesAfter,
 		rep.StateBytesBefore, rep.StateBytesAfter)
 }
