@@ -133,6 +133,7 @@ CATEGORY = {
     "USER_CLOSED":   ("USER",    "user_stopped"),
     "STOPPED_LIMIT": ("INFRA",   "rate_limit"),
     "STOPPED_APIERR":("INFRA",   "api_error"),
+    "STOPPED_CONTEXT_EXHAUSTED": ("INFRA", "context_exhausted"),
     "INFRA_AUTH":    ("INFRA",   "auth"),
     "INFRA_ORG_DISABLED": ("INFRA", "org_disabled"),
     "PARKED_WAIT":   ("HANGING", "parked_on_task"),
@@ -145,7 +146,14 @@ def args_get(flag, default):
     return default
 
 MODE = next((a for a in sys.argv[1:] if not a.startswith("-")), "summary")
-WINDOW_H = float(args_get("--window", "10"))
+# Default scan window. The registry WRITERS (dispatch preflight, resume watchdog)
+# invoke `registry` with no --window, so this default is what they scan. classify()
+# tails every transcript touched inside the window; under a crash-loop that produces
+# thousands of STOPPED_APIERR corpses/hour, a 10h window made the preflight scan
+# 22k+ files (6GB+) and blow past its 120s timeout -> a spurious REFUSE_NO_ACCOUNT.
+# 3h keeps every LIVE (<=4min) and recently-stopped/resumable session while cutting
+# the scan ~3x. Widen with --window or FLEET_WINDOW_H when triaging older sessions.
+WINDOW_H = float(args_get("--window", os.environ.get("FLEET_WINDOW_H", "3")))
 MAX_AGE = float(args_get("--max-age", "1e9"))
 # Active probing: --probe[=blocked|stale|all|none]. Default none keeps the fast passive
 # path untouched. A bare --probe means "blocked". Probe rows are appended to the scanned
@@ -277,6 +285,7 @@ def classify(path):
     #   USER_CLOSED = user intentionally interrupted/closed it       -> never resume   [USER]
     #   DEAD_*      = crashed/killed mid-work                        -> resume if auton [AGENT]
     #   STOPPED_LIMIT / STOPPED_APIERR / INFRA_AUTH                  -> infra, retry    [INFRA]
+    #   STOPPED_CONTEXT_EXHAUSTED = operator-stop/context wall       -> fresh continuation, NEVER resume-in-place [INFRA]
     #   PARKED_WAIT / STOPPED_QUIET                                  -> hanging/orphan  [HANGING]
     throttle_current = bool(throttle and last and last.get("syn"))
     if throttle_current:
@@ -296,6 +305,15 @@ def classify(path):
             disp, reason = "INFRA_AUTH", "stopped on account credit/billing state"
         else:
             disp, reason = "INFRA_AUTH", "stopped on an auth/login requirement (needs re-login)"
+    elif fleet_session_signals.is_operator_stop(lt) and last_kind != "assistant_end":
+        # #3458: the gateway's operator-stop / BUDGET_CONTEXT_EXHAUSTED wall. It rides
+        # in on the "API Error:" prefix but is TERMINAL for this transcript: a raw
+        # `claude --resume` reloads the exhausted context and is refused with the same
+        # 409 forever (the amnesia loop). Checked BEFORE is_api_error so it can never
+        # fold into the transient STOPPED_APIERR retry path.
+        disp, reason = ("STOPPED_CONTEXT_EXHAUSTED",
+                        "stopped on an operator-stop/context-exhausted wall "
+                        "(needs a fresh continuation, not a resume)")
     elif fleet_session_signals.is_api_error(lt) and last_kind != "assistant_end":
         disp, reason = "STOPPED_APIERR", "stopped on an API/transport error (transient infra)"
     elif age <= LIVE_MIN:
@@ -534,6 +552,9 @@ DEAD = {"DEAD_MIDTOOL", "DEAD_KILLED"}              # crashed/killed mid-work ->
 # (USER_CLOSED / DONE stay excluded -- those ARE intentional human stops; INFRA_AUTH stays
 # excluded -- it needs a human re-login, not a resume.)
 INFRA_RESUMABLE = ("STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_ORG_DISABLED")
+# #3458: STOPPED_CONTEXT_EXHAUSTED is deliberately in NEITHER set: not INFRA_RESUMABLE
+# (a resume re-hits the same 409 wall) and not STOPLIKE (so decide() never stamps a
+# resume_cmd for it -- the recovery is a FRESH continuation, not `claude --resume`).
 STOPLIKE = DEAD | set(INFRA_RESUMABLE) | {"STOPPED_QUIET", "INFRA_AUTH",
                    "USER_CLOSED", "PARKED_WAIT"}
 REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"))
@@ -1019,6 +1040,15 @@ def decide(rows, throttle, availability=None):
             r["action"] = "SKIP_PARKED"
         elif r["supervised"]:
             r["action"] = "SUPERVISED"              # run_supervise_loop owns it
+        elif r["disp"] == "STOPPED_CONTEXT_EXHAUSTED":
+            # #3458: the operator-stop/BUDGET_CONTEXT_EXHAUSTED wall is bound to the
+            # TRANSCRIPT (its context is exhausted), not to the seat -- resuming the
+            # same transcript in place OR re-homed re-hits the identical 409, so it
+            # must never enter _resume_inplace_or_escalate / AUTO_RESUME. Escalate to
+            # a fresh continuation (the gateway's restart_fresh_session directive)
+            # instead. Placed before the throttle branch: a throttled owner does not
+            # make this transcript any more resumable.
+            r["action"] = "ESCALATE_FRESH_CONTINUATION"
         elif r["disp"] == "STOPPED_LIMIT" or r["account"] in throttle:
             # Owning account is rate-limited. Re-home an autonomous, resumable
             # session to a healthy account rather than waiting for the reset.
@@ -1157,6 +1187,62 @@ def plan_entry(r):
             "session": r["session"], "cwd": r["cwd"], "project": r["project"],
             "disp": r["disp"], "resume_cmd": r["resume_cmd"]}
 
+# ---- observability: storm + per-account health summary (registry `summary` block) ----
+# A first-class, pre-aggregated view of the registry so every downstream consumer
+# (dispatch preflight, the Prometheus/Grafana sink, operators) sees the crash-loop
+# STORM and per-account health WITHOUT re-deriving it from thousands of raw rows —
+# the exact blindness that let a bloated 23k-row registry read as "saturated" when the
+# fleet was actually 0/24 with every account rate-limited. The recency buckets
+# (15/30/60m) turn a slow whole-window count into a rate the dashboard graphs over time.
+STORM_BUCKETS_MIN = (15, 30, 60)
+
+def _recent_age(age_min):
+    """Normalize a row's age for recency bucketing: None -> not countable; a small
+    negative (clock skew on a just-written transcript) -> 0.0 (as fresh as possible)."""
+    if age_min is None:
+        return None
+    a = float(age_min)
+    return 0.0 if a < 0 else a
+
+def session_storm_summary(session_rows, throttle):
+    """Pre-aggregate the registry into {counts_by_disp, storm, accounts}. Pure over its
+    inputs so both write_registry and the operator summary share one computation."""
+    throttle = throttle or {}
+    counts_by_disp = {}
+    apierr = {w: 0 for w in STORM_BUCKETS_MIN}
+    total = {w: 0 for w in STORM_BUCKETS_MIN}
+    accts = {}
+    for r in session_rows:
+        d = r.get("disp") or "?"
+        counts_by_disp[d] = counts_by_disp.get(d, 0) + 1
+        a = _recent_age(r.get("age_min"))
+        is_err = d == "STOPPED_APIERR"
+        if a is not None:
+            for w in STORM_BUCKETS_MIN:
+                if a <= w:
+                    total[w] += 1
+                    if is_err:
+                        apierr[w] += 1
+        acc = r.get("account")
+        if acc:
+            h = accts.setdefault(acc, {"newest_disp": None, "newest_age_min": None,
+                                       "apierr_30m": 0, "live": 0})
+            if a is not None and (h["newest_age_min"] is None or a < h["newest_age_min"]):
+                h["newest_age_min"], h["newest_disp"] = a, d
+            if is_err and a is not None and a <= 30:
+                h["apierr_30m"] += 1
+            if d == "LIVE":
+                h["live"] += 1
+    storm = {f"apierr_{w}m": apierr[w] for w in STORM_BUCKETS_MIN}
+    storm.update({f"total_{w}m": total[w] for w in STORM_BUCKETS_MIN})
+    storm["apierr_per_min_30m"] = round(apierr[30] / 30.0, 3)
+    storm["apierr_frac_30m"] = round(apierr[30] / total[30], 3) if total[30] else 0.0
+    for acc, h in accts.items():
+        t = throttle.get(acc)
+        h["throttled"] = bool(t)
+        h["throttle_reset"] = (t.get("reset") if isinstance(t, dict) else t) if t else None
+    return {"counts_by_disp": counts_by_disp, "storm": storm, "accounts": accts}
+
 def write_registry(rows, throttle, auth, probes=None):
     if not os.path.isdir(REG_DIR):
         os.makedirs(REG_DIR, exist_ok=True)
@@ -1174,6 +1260,7 @@ def write_registry(rows, throttle, auth, probes=None):
                           "http_status": r.get("http_status"),
                           "initiated_by": r.get("initiated_by", "user")}
                         for r in session_rows]}
+    reg["summary"] = session_storm_summary(session_rows, throttle)
     if probes:
         reg["probes"] = probes  # raw active-probe verdicts (evidence for the operator/UI)
     sessions_path = os.path.join(REG_DIR, "sessions.json")
@@ -1239,6 +1326,21 @@ def run_probes(rows, selector):
     return probe_rows, verdicts
 
 
+def registry_summary(sp, pp, nsess, n, probe_verdicts):
+    """The machine-readable summary emitted as the LAST stdout line of `registry`
+    mode. The Go dispatch tick (cmd/fak/dispatch_tick.go dispatchRunJSON) parses
+    this helper's combined output with lastJSONObject(); without a trailing JSON
+    object it reports a SUCCESSFUL refresh -- the two files were already written --
+    as "no JSON object in helper output" -> registry_refresh.ok=false, a
+    false-failure that masks the real refresh state on every tick and misleads
+    diagnosis. dispatchRefreshRegistry recomputes ok from _error, so a run that
+    reaches here (no exception) is reported ok=true. Kept pure + module-level so
+    the cross-language contract shape is unit-testable without a full fleet scan."""
+    return {"ok": True, "mode": "registry", "sessions": nsess,
+            "auto_resume": n, "probed": len(probe_verdicts),
+            "wrote": [str(sp), str(pp)]}
+
+
 def main():
     rows, throttle = scan()
     probe_rows, probe_verdicts = run_probes(rows, PROBE_SELECTOR)
@@ -1261,6 +1363,8 @@ def main():
         probed = f", {len(probe_verdicts)} probed" if probe_verdicts else ""
         print(f"wrote {sp} ({nsess} sessions{probed})")
         print(f"wrote {pp} ({n} AUTO_RESUME)")
+        # Machine-readable summary as the LAST stdout line -- see registry_summary().
+        print(json.dumps(registry_summary(sp, pp, nsess, n, probe_verdicts)))
         return
     if MODE == "plan":  # machine-readable AUTO_RESUME set for the watchdog
         plan = [plan_entry(r) for r in rows if r["action"] == "AUTO_RESUME"]
@@ -1295,7 +1399,8 @@ def main():
                 line += f"  | weekly {weekly}"
             print(line)
         print()
-    order = ["STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_AUTH", "INFRA_ORG_DISABLED",
+    order = ["STOPPED_LIMIT", "STOPPED_APIERR", "STOPPED_CONTEXT_EXHAUSTED",
+             "INFRA_AUTH", "INFRA_ORG_DISABLED",
              "DEAD_MIDTOOL", "DEAD_KILLED",
              "USER_CLOSED", "STOPPED_QUIET", "PARKED_WAIT", "LIVE", "DONE"]
     counts, acts, cats = {}, {}, {}
@@ -1311,6 +1416,12 @@ def main():
     print("action:   " + "  ".join(f"{k}={acts[k]}" for k in sorted(acts)))
     # who started these sessions: agent-driven (/goal,/loop,supervised) vs interactive.
     print(f"initiated: agent={n_agent}  user={len(rows) - n_agent}")
+    # storm line: the crash-loop signal at a glance (recency-bucketed, so a spike is
+    # visible without reading the per-disp table). Mirrors the registry `summary.storm`.
+    st = session_storm_summary([r for r in rows if r.get("project") != "_probe"], throttle)["storm"]
+    flag = "  <-- STORM" if st["apierr_per_min_30m"] >= 1.0 else ""
+    print(f"storm:     apierr 15m={st['apierr_15m']} 30m={st['apierr_30m']} 60m={st['apierr_60m']}  "
+          f"rate={st['apierr_per_min_30m']}/min  frac30m={st['apierr_frac_30m']}{flag}")
     print()
     CAP = 40
     for disp in order:
@@ -1321,6 +1432,7 @@ def main():
         for r in grp[:CAP]:
             thr = "  [THROTTLED]" if r["account"] in throttle else ""
             mark = {"AUTO_RESUME": " *AUTO", "SURFACE": " surface", "SUPERVISED": " (sup)",
+                    "ESCALATE_FRESH_CONTINUATION": " fresh-cont",
                     "DEFER_THROTTLED": " defer", "DEFER_NO_USAGE": " defer-no-usage",
                     "DEFER_DUPLICATE_TASK": " dup-task", "BLOCKED_AUTH": " blocked-auth",
                     "SKIP_DONE": " done",

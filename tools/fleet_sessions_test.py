@@ -7,6 +7,7 @@ onto a healthy account (AUTO_RESUME + rehomed) when one exists, and must fall ba
 to DEFER_THROTTLED only when no healthy Claude worker account is available."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -467,6 +468,89 @@ class InfraStrandRegardlessOfAutonomyTest(unittest.TestCase):
         self.assertFalse(fleet_sessions._resumable_disp(_row("a", "USER_CLOSED", autonomous=False)))
 
 
+class OperatorStopContextExhaustedTest(unittest.TestCase):
+    """#3458: an operator-stop / BUDGET_CONTEXT_EXHAUSTED tail is a TERMINAL wall for
+    the TRANSCRIPT -- a raw `claude --resume` reloads the exhausted context and is
+    refused with the same 409 forever (the amnesia loop). classify() must give it a
+    distinct disposition (never the transient STOPPED_APIERR) and decide() must route
+    it away from AUTO_RESUME-in-place with no resume_cmd."""
+
+    OPERATOR_STOP_TAIL = (
+        "API Error: 409 session f8d84269 is stopped (operator control); "
+        "request refused: BUDGET_CONTEXT_EXHAUSTED")
+
+    def setUp(self):
+        # isolate the ledger reads (_ledger_inplace_attempts / _ledger_blocked_sids)
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def _transcript(self, tail_text, sid="ab345800-2222-3333-4444-555555555555"):
+        """A minimal transcript whose final record is a synthetic assistant banner."""
+        proj = os.path.join(self._tmp, "projects", "C--work-fleet")
+        os.makedirs(proj, exist_ok=True)
+        path = os.path.join(proj, sid + ".jsonl")
+        recs = [
+            {"type": "user", "sessionId": sid, "cwd": os.getcwd(),
+             "message": {"role": "user", "content": "continue the migration"}},
+            {"type": "assistant", "sessionId": sid, "cwd": os.getcwd(),
+             "message": {"role": "assistant", "model": "<synthetic>",
+                         "content": [{"type": "text", "text": tail_text}],
+                         "stop_reason": "stop_sequence"}},
+        ]
+        with open(path, "w", encoding="utf-8") as fh:
+            for rec in recs:
+                fh.write(json.dumps(rec) + "\n")
+        return path
+
+    def test_classify_operator_stop_tail_gets_distinct_disposition(self) -> None:
+        # the exact loop signature: 409 + operator control + BUDGET_CONTEXT_EXHAUSTED
+        r = fleet_sessions.classify(self._transcript(self.OPERATOR_STOP_TAIL))
+        self.assertEqual(r["disp"], "STOPPED_CONTEXT_EXHAUSTED")
+        self.assertEqual(r["category"], "INFRA")
+        self.assertEqual(r["cause"], "context_exhausted")
+
+    def test_classify_plain_500_still_apierr(self) -> None:
+        # regression: a genuinely transient transport error keeps the retry path.
+        r = fleet_sessions.classify(self._transcript(
+            "API Error: 500 Internal Server Error",
+            sid="cd345801-2222-3333-4444-555555555555"))
+        self.assertEqual(r["disp"], "STOPPED_APIERR")
+
+    def test_decide_never_resumes_in_place(self) -> None:
+        # healthy owner (the case _resume_inplace_or_escalate would have grabbed):
+        # no AUTO_RESUME, no resume_cmd, no re-home -- escalate to a fresh continuation.
+        rows = [_row(".claude-good-acct", "STOPPED_CONTEXT_EXHAUSTED")]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        r = rows[0]
+        self.assertEqual(r["action"], "ESCALATE_FRESH_CONTINUATION")
+        self.assertIsNone(r["resume_cmd"])
+        self.assertFalse(r["rehomed"])
+
+    def test_decide_throttled_owner_still_escalates_fresh(self) -> None:
+        # the wall is bound to the transcript, not the seat: a throttled owner must not
+        # divert it into the DEFER_THROTTLED/re-home ladder (a re-home re-hits the 409).
+        rows = [_row(".claude-gem8-acct", "STOPPED_CONTEXT_EXHAUSTED")]
+        throttle = {".claude-gem8-acct": {"reset": "Jun 24, 8pm"}}
+        availability = [_avail(".claude-gem8-acct", available=False),
+                        _avail(".claude-good-acct", available=True)]
+        fleet_sessions.decide(rows, throttle, availability)
+        self.assertEqual(rows[0]["action"], "ESCALATE_FRESH_CONTINUATION")
+        self.assertIsNone(rows[0]["resume_cmd"])
+        self.assertFalse(rows[0]["rehomed"])
+
+    def test_decide_apierr_regression_keeps_resume(self) -> None:
+        # the transient path is untouched: STOPPED_APIERR still AUTO_RESUMEs with a cmd.
+        rows = [_row(".claude-good-acct", "STOPPED_APIERR")]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "AUTO_RESUME")
+        self.assertIn("claude --resume", rows[0]["resume_cmd"])
+
+
 class DedupTaskTest(unittest.TestCase):
     """Identical repeating autonomous tasks (same task_sig across sids) resume ONE
     primary; the rest defer so they never stampede a healthy seat."""
@@ -894,6 +978,43 @@ class TaskSigClassifyTest(unittest.TestCase):
             {"type": "user", "message": {"content": "actually do the real work here"}},
         ]
         self.assertEqual(fleet_sessions._first_instruction(head), "actually do the real work here")
+
+
+class RegistrySummaryContractTest(unittest.TestCase):
+    """The `registry` mode must emit a JSON OBJECT as its last stdout line, the
+    cross-language contract the Go dispatch tick's lastJSONObject() parser depends
+    on (dispatch_tick.go dispatchRunJSON / dispatchRefreshRegistry). Left untested,
+    the helper silently drifted to human-text-only output, so a SUCCESSFUL refresh
+    was reported registry_refresh.ok=false on every tick -- a false-failure that
+    masked the real state. These lock the shape without a full fleet scan."""
+
+    def test_registry_summary_is_json_object_with_required_keys(self) -> None:
+        summary = fleet_sessions.registry_summary(
+            "a/sessions.json", "b/resume_plan.json", nsess=5, n=2, probe_verdicts=[])
+        # must round-trip through json as an OBJECT (dict), not a bare scalar/list --
+        # lastJSONObject() only accepts a trailing {...}.
+        obj = json.loads(json.dumps(summary))
+        self.assertIsInstance(obj, dict)
+        for key in ("ok", "mode", "sessions", "auto_resume", "probed", "wrote"):
+            self.assertIn(key, obj)
+        self.assertEqual(obj["mode"], "registry")
+        self.assertTrue(obj["ok"])
+        self.assertEqual(obj["sessions"], 5)
+        self.assertEqual(obj["auto_resume"], 2)
+        self.assertEqual(obj["wrote"], ["a/sessions.json", "b/resume_plan.json"])
+
+    def test_probed_count_reflects_verdicts(self) -> None:
+        summary = fleet_sessions.registry_summary(
+            "s.json", "p.json", nsess=9, n=0, probe_verdicts=[{"a": 1}, {"b": 2}])
+        self.assertEqual(summary["probed"], 2)
+
+    def test_path_values_are_json_safe_strings(self) -> None:
+        # sp/pp arrive as pathlib.Path in production; str() keeps json.dumps happy.
+        summary = fleet_sessions.registry_summary(
+            Path("x") / "sessions.json", Path("y") / "resume_plan.json",
+            nsess=1, n=1, probe_verdicts=[])
+        obj = json.loads(json.dumps(summary))  # must not raise on Path inputs
+        self.assertTrue(all(isinstance(w, str) for w in obj["wrote"]))
 
 
 if __name__ == "__main__":
