@@ -240,6 +240,7 @@ var verbManifest = []Verb{
 	{Name: "rungstats", Synopsis: "stats over the verification-ladder rungs", Lane: "cmd"},
 	{Name: "savings", Synopsis: "audit, gate, and lint the Track-2 OBSERVED-$ cache-savings ledger", Lane: "cmd"},
 	{Name: "savings-vector", Synopsis: "the savings-vector report: realized token/cost savings by lever", Lane: "cmd"},
+	{Name: "schedscan", Synopsis: "fleet scheduled-task health: decode each Windows LastTaskResult to meaning + fix; surface failing tasks first", Lane: "cmd"},
 	{Name: "score", Synopsis: "parent verb over the meta-scorecards / RSI loops: `fak score <name>` routes to each legacy scorecard handler", Lane: "cmd"},
 	{Name: "scoreboard", Synopsis: "the scoreboard Slack surface for #scoreboard", Lane: "cmd"},
 	{Name: "scorecard", Synopsis: "the scorecard control pane: every metric's debt + grade + trend", Lane: "cmd"},
