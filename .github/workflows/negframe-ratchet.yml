@@ -1,0 +1,73 @@
+# negframe-ratchet: the diff-scoped negation-framing gate (issue #3545, epic behind
+# internal/negframe + `fak score negframe`).
+#
+# WHAT IT GATES: it runs `fak score negframe --since <base>` over the agent-steer
+# prose corpus (AGENTS.md, CLAUDE.md, the skills) and reds when a change INTRODUCES a
+# new MECHANICAL negative — a negatively-framed directive that carries an unambiguous
+# positive reframe ("don't forget to X" -> "remember to X"). It never gates on the
+# pre-existing debt (that is the scorecard's job), only on newly-added reframable
+# negatives, so a change is blocked only by the negativity it itself adds.
+#
+# POSTURE: advisory. This is NOT wired as a required status check, so a red run is a
+# visible signal to reframe before landing, not a hard merge block — matching the
+# other *-signal workflows. Promote it to a required check (branch protection) once
+# the steer-prose corpus is reframed clean (issues #3541/#3543).
+#
+# CONTRACT / consumers: none. This is a new, self-contained workflow — nothing reads
+# its conclusion (release_decide keys on ci-fast/ci.yml, not this). Adding it migrates
+# no existing consumer.
+name: negframe-ratchet
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  negframe-ratchet:
+    name: negframe ratchet (no new mechanical negatives)
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so `git show <base>:<path>` can read the prior copy of each
+          # steer-prose doc the ratchet diffs against.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: Resolve base ref
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          echo "ref=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Ratchet — no new mechanical negatives since base
+        run: |
+          base='${{ steps.base.outputs.ref }}'
+          # An empty or all-zeros base (a brand-new branch's first push) has no prior
+          # tip to diff against — there is nothing a change could have "introduced",
+          # so the ratchet passes by construction.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "negframe-ratchet: no base ref to diff against — nothing introduced, passing."
+            exit 0
+          fi
+          # `fak score negframe --since <base>` exits 1 iff a tracked steer-prose doc
+          # gained a new mechanical (confidently reframable) negative vs the base.
+          go run ./cmd/fak score negframe --since "$base"
