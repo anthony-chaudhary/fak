@@ -372,6 +372,7 @@ var tier = map[string]int{
 	"atif":                  3,
 	"brittleness":           1,
 	"codegraph":             1,
+	"codesearch":            4, // composes selfquery(3)+trigram/astquery/codegraph(1) into the `fak dev codesearch` engine (#3434 dogfood wiring)
 	"dsparity":              1,
 	"shadowgit":             1,
 	"signals":               1,
