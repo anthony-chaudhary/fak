@@ -1,0 +1,50 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "Edit",
+    "Glob",
+    "Grep",
+    "LS",
+    "Read",
+    "Write"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "self_modify_globs": [
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/policy/",
+    ".git/",
+    ".dos/"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ],
+  "arg_rules": [
+    {
+      "tool": "Write",
+      "arg": "file_path",
+      "allow_glob": "workspace/**",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the declared region (workspace/), or ask the operator to widen the region in the manifest"
+    },
+    {
+      "tool": "Edit",
+      "arg": "file_path",
+      "allow_glob": "workspace/**",
+      "reason": "POLICY_BLOCK",
+      "fix": "edit inside the declared region (workspace/), or ask the operator to widen the region in the manifest"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "Glob",
+    "Grep",
+    "LS",
+    "Read"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}

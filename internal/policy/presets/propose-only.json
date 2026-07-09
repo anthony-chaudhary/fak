@@ -1,0 +1,36 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "ExitPlanMode",
+    "Glob",
+    "Grep",
+    "LS",
+    "Read",
+    "diff_infra",
+    "plan_deploy",
+    "validate_terraform"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "describe_",
+    "dryrun_"
+  ],
+  "deny": {
+    "deploy_production": "POLICY_BLOCK",
+    "git_apply": "POLICY_BLOCK",
+    "git_push": "POLICY_BLOCK",
+    "terraform_apply": "POLICY_BLOCK"
+  },
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}
