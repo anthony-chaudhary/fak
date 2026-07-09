@@ -376,7 +376,6 @@ var tier = map[string]int{
 	"conformance":           2, // standalone third-party-runnable fak safety-conformance suite (#453): pins the guarantees a fork/auditor must verify independently of the kernel's own tests; composes abi(0)+adjudicator(2)+policy(2), so it declares at the lowest layer its imports allow (tier 2, alongside shipgate), off the hot path.
 	"doomloop":              1, // two-axis doom-loop classifier (#doomloop): folds a live worker's effort-vs-verified-progress sample window into a closed verdict + a graduated, reversible-first correction (observe->nudge->escalate, never an auto-teardown); the missing enforcement half of fleetmon/trajctl/relay/loopmgr detection. Pure, stdlib-only, off the hot path.
 	"looporphan":            1, // duplicate-loop-supervisor reaper core (#resume-consolidate-duplicate-loops): pure fold of a loop-supervisor process census into a closed KEEP/REAP/COLLISION/UNKNOWN plan that keeps the one parenting live work and reaps idle orphans/duplicates; fail-closed (no start-fence or unknown parent -> UNKNOWN, never REAP). Imports nothing internal, off the hot path.
-	"looporphanscan":        2, // impure gather half of the loop reaper: turns a real procguard census into looporphan's plain Supervisor input (supervisor-by-cmdline match, lane parse, parent liveness, subtree worker count) + re-fences a PID's start before kill; imports procguard(1)+looprecover(1)+looporphan(1), off the hot path.
 	"cvregress":             2,
 	"antipattern":           4,
 	"astquery":              1,
