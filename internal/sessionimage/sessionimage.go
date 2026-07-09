@@ -143,6 +143,7 @@ type Migration struct {
 type Meta struct {
 	Version     string            `json:"version"`
 	SessionID   string            `json:"session_id"`
+	ParentID    string            `json:"parent_id,omitempty"` // set on a branch: the id of the session this image was forked from (#1200)
 	CreatedUnix int64             `json:"created_unix"`
 	UpdatedUnix int64             `json:"updated_unix"`
 	AppVersion  string            `json:"app_version"`
