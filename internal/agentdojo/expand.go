@@ -50,12 +50,15 @@ type Paraphraser struct {
 // through an untrusted carrier raises taint and the sink-gate bars the egress; an
 // "injection" through a trusted-local read does NOT taint (correctly — the agent
 // reading its own files is not an attacker channel), so IFC could not bar it. The
-// seed secret-leak attacks route through read_file and survive full-stack ONLY
-// because the content detector quarantines the raw secret in their body; a paraphrase
-// that carries no inline secret would slip BOTH layers. Routing every generated
-// attack through the untrusted carrier models the real AgentDojo threat (the
-// injection is attacker-controlled), and is what keeps full-stack ASR at zero across
-// the expanded battery for the right reason: provenance taint, not an echoed secret.
+// seed secret-leak attacks route through this same untrusted carrier: an injection
+// that arrives through a trusted-local read (read_file) is a modeling error — a
+// prompt injection is attacker-controlled content, so its carrier is untrusted by
+// definition, and only then does provenance taint bar the egress. A marker-free
+// secret paraphrase carried by a trusted-local read would slip BOTH layers (no marker
+// for the content detector, no taint for IFC); routing it through the untrusted
+// carrier — like every other attack — closes it for the right reason. That is what
+// keeps full-stack ASR at zero across the whole battery: provenance taint, not an
+// echoed secret.
 const untrustedCarrier = "read_webpage"
 
 // targetHint is the marker-free pointer each paraphrase uses to indicate the
