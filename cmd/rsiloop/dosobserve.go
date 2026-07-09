@@ -21,6 +21,7 @@ package main
 // only a genuine spawn failure is.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/rsiloop"
 )
@@ -92,19 +94,44 @@ func dosImproveArgs(workspace string, maxReverts int, r rsiloop.Row) []string {
 // row dos writes, so the command's own stdout/stderr is discarded; a verdict exit code
 // is expected and ignored, and only a real spawn failure is surfaced (never silently
 // swallowed).
+// dosObserveTimeout bounds one `dos improve --observe` receipt spawn (#3486/#3153). The
+// Observer is called SYNCHRONOUSLY inside rsiloop's per-cycle loop, so a wedged dos (a
+// held lease, a stuck git under the hood) with no deadline would freeze the ENTIRE loop
+// indefinitely. dos improve is a ~seconds journal write, so this ceiling degrades a hung
+// dos to a missed receipt instead of a frozen loop — the file's own "loop unaffected"
+// philosophy. A var (not const) so a test can shrink it to witness the bound.
+var dosObserveTimeout = 30 * time.Second
+
+// dosObserveExec runs one receipt command under ctx and discards its output. A package
+// var so a test can substitute a runner that blocks until ctx is cancelled and witness
+// the deadline WITHOUT spawning a real dos (deterministic, no subprocess or PATH).
+var dosObserveExec = func(ctx context.Context, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	return cmd.Run()
+}
+
 func dosObserveReceipt(workspace string, maxReverts int) rsiloop.Observer {
 	dosPath, err := exec.LookPath("dos")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rsiloop -dos-observe: 'dos' not on PATH — emitting no receipts (loop unaffected)")
 		return nil
 	}
+	return newDosObserveReceipt(dosPath, workspace, maxReverts)
+}
+
+// newDosObserveReceipt builds the per-cycle Observer for an already-resolved dos path.
+// Split from the PATH lookup so the per-spawn deadline / silent-degrade behavior is
+// unit-testable without a real dos on PATH.
+func newDosObserveReceipt(dosPath, workspace string, maxReverts int) rsiloop.Observer {
 	return func(r rsiloop.Row) {
-		cmd := exec.Command(dosPath, dosImproveArgs(workspace, maxReverts, r)...)
-		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-		if runErr := cmd.Run(); runErr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), dosObserveTimeout)
+		defer cancel()
+		if runErr := dosObserveExec(ctx, dosPath, dosImproveArgs(workspace, maxReverts, r)...); runErr != nil {
 			var exitErr *exec.ExitError
 			if !errors.As(runErr, &exitErr) {
-				// Not a verdict exit code (3/4) — a genuine failure to run the tool.
+				// Not a verdict exit code (3/4) — a genuine failure to run the tool
+				// (a deadline kill lands here too, surfaced as the missed receipt it is).
 				fmt.Fprintf(os.Stderr, "rsiloop -dos-observe: dos improve did not run for cycle %d: %v\n", r.Cycle, runErr)
 			}
 		}
