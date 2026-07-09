@@ -1,0 +1,37 @@
+# Alertmanager config for the fak fleet stack.
+#
+# Prometheus (prometheus.yml `alerting:` block) hands firing alerts here; Alertmanager
+# groups/dedups/repeats them and POSTs a v4 webhook to the fak receiver, which folds each
+# payload into a Slack card and delivers it through the durable Slack outbox:
+#
+#   Prometheus → Alertmanager → webhook → `fak slack alert --serve` → slackoutbox → Slack
+#
+# Run the receiver on the HOST (it needs the bot token from .env.slack.local):
+#   ./fak slack alert --serve --addr 127.0.0.1:9096
+#
+# From inside this container, the host receiver is reachable at host.docker.internal
+# (Docker Desktop) — set by the compose extra_hosts. On a Linux host-networking stack,
+# change the url below to http://localhost:9096/alerts.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  # Group alerts by their name + severity so one card carries the whole burst.
+  group_by: ["alertname", "severity"]
+  group_wait: 30s        # wait to batch the first alerts of a new group
+  group_interval: 5m     # how long before a NEW alert in an existing group is sent
+  repeat_interval: 4h    # re-notify an already-firing group at most this often
+  receiver: fak-webhook
+
+receivers:
+  - name: fak-webhook
+    webhook_configs:
+      # The fak receiver on the host. send_resolved posts a ✅ card when an alert clears.
+      - url: "http://host.docker.internal:9096/alerts"
+        send_resolved: true
+        max_alerts: 0     # 0 = no Alertmanager-side truncation; the receiver caps per card
+
+# Optional: silence a resolved-only flap or route criticals to a second receiver by adding
+# child routes under route.routes and more entries under receivers.
+inhibit_rules: []

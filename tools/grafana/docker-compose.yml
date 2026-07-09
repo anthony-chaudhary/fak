@@ -5,6 +5,7 @@
 # Network path (default):
 #   Grafana → http://prometheus:9091 → Prometheus → host.docker.internal:9095 → fleet_bottleneck.py
 #   Grafana → http://prometheus:9091 → Prometheus → host.docker.internal:8080 → fak serve
+#   Prometheus → alertmanager:9093 → host.docker.internal:9096 → fak slack alert (→ Slack outbox)
 #
 # Start the metrics sources first (on the host):
 #   python tools/fleet_bottleneck.py serve --port 9095
@@ -28,6 +29,8 @@ services:
       - "9091:9091"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - alertmanager
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus-alerts.yml:/etc/prometheus/prometheus-alerts.yml:ro
@@ -37,6 +40,24 @@ services:
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
       - "--web.listen-address=:9091"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: fleet-alertmanager
+    restart: unless-stopped
+    # network_mode: host  # [LINUX] uncomment; comment ports/extra_hosts below AND change
+    #                     # alertmanager.yml webhook url → http://localhost:9096/alerts
+    ports:
+      - "9093:9093"
+    extra_hosts:
+      # Lets Alertmanager POST the webhook to `fak slack alert --serve` on the host.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - fleet-alertmanager-data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--web.listen-address=:9093"
 
   grafana:
     image: grafana/grafana:11.5.2
@@ -61,4 +82,5 @@ services:
 
 volumes:
   fleet-prometheus-data:
+  fleet-alertmanager-data:
   fleet-grafana-data:

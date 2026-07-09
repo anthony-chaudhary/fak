@@ -71,6 +71,7 @@ var slackSurfaces = []slackSurface{
 	{"scoreboard", "scorecard / score / run-event status", "FAK_SCOREBOARD_TOKEN", "FAK_SCOREBOARD_CHANNEL", "", false},
 	{"product", "product direction / persona findings", "", "FAK_PRODUCT_CHANNEL", "", false},
 	{"grafana", "grafana snapshots + dashboard/debug links", "FAK_GRAFANA_TOKEN", "FAK_GRAFANA_CHANNEL", grafanapost.ChannelDefault, false},
+	{"alerts", "Prometheus/Alertmanager alerts (fak slack alert receiver)", "", alertsChannelEnv, grafanapost.ChannelDefault, false},
 	{"blockers", "fleet blockers (status vs operator page)", "FAK_BLOCKERS_TOKEN", "FAK_BLOCKERS_CHANNEL", blockerpost.ChannelDefault, false},
 	{"cachevalue", "cache-value P&L roll-up (WITNESSED kernel reuse trend)", "FAK_CACHEVALUE_TOKEN", "FAK_CACHEVALUE_CHANNEL", cachevaluepost.ChannelDefault, false},
 	{"bench", "benchmark rollups / run-requests", "FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL", benchpost.ChannelDefault, false},
@@ -149,13 +150,14 @@ func cmdSlack(argv []string) {
 	if len(argv) == 0 {
 		os.Exit(runSlackCheck(os.Stdout, os.Stderr, nil))
 	}
-	dispatchSubcommands("slack", "check | health | beat | walk | refresh | send | outbox", argv,
+	dispatchSubcommands("slack", "check | health | beat | walk | refresh | send | alert | outbox", argv,
 		subcommand{"check", runSlackCheck},
 		subcommand{"health", runSlackHealth},
 		subcommand{"beat", runSlackBeat},
 		subcommand{"walk", runSlackWalk},
 		subcommand{"refresh", runSlackRefresh},
 		subcommand{"send", runSlackSend},
+		subcommand{"alert", runSlackAlert},
 		subcommand{"outbox", runSlackOutbox},
 	)
 }

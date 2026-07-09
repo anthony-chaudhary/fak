@@ -444,6 +444,20 @@ first, and a hit refuses the row terminally with the finding as its structured r
 `fak slack health` gains an `outbox` rung: dead rows or a pending backlog older than 2h grade
 the surface non-OK, so a wedged drain pages instead of rotting.
 
+`fak slack alert` is the **Prometheus-alerts→Slack receiver** — the inbound producer that
+turns a firing alert into a durable outbox row. Prometheus (`tools/grafana/prometheus.yml`
+`alerting:` block) hands firing rules to Alertmanager, which groups/routes them and POSTs a v4
+webhook to this verb; it folds the payload through `internal/promalert` (severity emoji,
+firing/resolved status, per-alert summary/description/labels/runbook link) and ENQUEUES the
+card on the alerts channel (`FAK_ALERTS_CHANNEL`, else the public `#grafana` default). Reusing
+the outbox — not Alertmanager's built-in `slack_config` — is deliberate: the built-in Slack
+receiver needs an *incoming-webhook URL*, but every fak surface authenticates with the shared
+**bot token**, and the outbox makes each alert crash-durable and witnessable
+(`fak slack outbox status | calls`). Run it one-shot (`< payload.json`, or `--dry-run` to
+render only) or as the long-running HTTP receiver Alertmanager targets
+(`--serve --addr 127.0.0.1:9096`); see [`tools/grafana/README.md`](../tools/grafana/README.md)
+for the compose wiring.
+
 **Triaging a `slack-watchdog` issue.** When the watchdog files its once-a-day deduped issue
 (labelled `slack-watchdog`, `triage-only` — e.g. [#1855](https://github.com/anthony-chaudhary/fak/issues/1855)),
 the fix is *operational* (host token / channel env / feeder cron), not a repo code change — that
@@ -469,6 +483,9 @@ fak slack health --json  # machine-readable verdict for the watchdog / a dashboa
 fak slack beat           # post a one-line liveness pulse even when nothing else posted
 fak slack beat --dry-run # render the pulse, resolve channel/token, post nothing (fork-safe)
 fak slack send --durable --channel C… --text "…"   # enqueue-then-drain: survives a dead wire
+fak slack alert --file payload.json    # fold an Alertmanager webhook → durable outbox row → Slack
+fak slack alert --dry-run < payload.json           # render the alert card only; touch nothing
+fak slack alert --serve --addr 127.0.0.1:9096      # HTTP receiver Alertmanager POSTs webhooks to
 fak slack outbox status [--json]   # pending/posted/dead/refused counts + ages (watchdog food)
 fak slack outbox drain [--dry-run] # run one serialized drain pass now (dry-run: plan only)
 fak slack outbox retry --all|--nonce N [--dry-run]  # re-arm dead rows for the next drain

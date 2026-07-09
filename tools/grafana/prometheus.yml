@@ -5,6 +5,15 @@ global:
 rule_files:
   - "prometheus-alerts.yml"
 
+# Where firing alerts go. Prometheus evaluates prometheus-alerts.yml and hands firing
+# alerts to Alertmanager, which groups/routes them and POSTs a webhook to the fak
+# receiver (`fak slack alert --serve`), which delivers into the durable Slack outbox.
+# See alertmanager.yml for the route + webhook target, and tools/grafana/README.md.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: fleet_bottleneck
     # fleet_bottleneck.py serves the Prometheus exposition at :9095/metrics
