@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Runner executes a git invocation and returns its stdout. It is injectable so the
@@ -64,6 +66,7 @@ type ExecRunner struct{}
 // Run implements Runner over os/exec.
 func (ExecRunner) Run(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd) // no console flash when a windowless Windows parent runs git
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
