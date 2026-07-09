@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/anthony-chaudhary/fak/internal/atif"
 	"github.com/anthony-chaudhary/fak/internal/simhash"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
 	"github.com/anthony-chaudhary/fak/internal/trajhook"
@@ -56,7 +57,7 @@ func trajUsage() {
 	fmt.Fprintln(os.Stderr, "       fak traj cluster --corpus <turns.jsonl> [--threshold 0.9]         (group near-duplicate queries)")
 	fmt.Fprintln(os.Stderr, "       fak traj score   --corpus <turns.jsonl> [--json]                  (run scorers; findings worst-first)")
 	fmt.Fprintln(os.Stderr, "       fak traj gc      --corpus <turns.jsonl> [--threshold 0.92]        (propose prune candidates)")
-	fmt.Fprintln(os.Stderr, "       fak traj export  --corpus <turns.jsonl>                           (re-emit normalized JSONL)")
+	fmt.Fprintln(os.Stderr, "       fak traj export  --corpus <turns.jsonl> [--format jsonl|atif]      (re-emit; atif = portable trajectory.json)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "A corpus is the JSONL a trajectory.Recorder exports. fak ships the data + similarity +")
 	fmt.Fprintln(os.Stderr, "scorer seam; build your own trajectory analysis on top (see docs/observability/trajectory.md).")
@@ -227,17 +228,38 @@ func cmdTrajGC(args []string) {
 	}
 }
 
-// cmdTrajExport re-emits the corpus as normalized JSONL on stdout — a sound copy that
-// has been parsed and re-serialized (drops malformed lines, stable field order).
+// cmdTrajExport re-emits the corpus. With --format jsonl (the default) it writes a
+// normalized copy of fak's own analysis JSONL (parsed + re-serialized: drops malformed
+// lines, stable field order). With --format atif it emits a portable ATIF
+// trajectory.json (Agent Trajectory Interchange Format, fak profile) that eval / SFT-RL
+// pipelines consume — traces become trajectories, subagents nest under the step that
+// spawned them. ATIF export is REDACTED by default (structural identity only); pass
+// --full-fidelity to include the human query text and producer labels — a conscious
+// operator choice, since fak redaction is a security boundary.
 func cmdTrajExport(args []string) {
 	fs := flag.NewFlagSet("traj export", flag.ExitOnError)
 	corpus := fs.String("corpus", "", "trajectory JSONL corpus file")
+	format := fs.String("format", "jsonl", "output format: jsonl (fak analysis JSONL) | atif (portable ATIF trajectory.json)")
+	fullFidelity := fs.Bool("full-fidelity", false, "atif: include query text + labels (default redacts them); no effect on jsonl")
+	agent := fs.String("agent", "", "atif: label the emitting agent (e.g. a model id) on each trajectory")
 	_ = fs.Parse(args)
 
 	r := loadCorpus("export", *corpus)
-	if _, err := r.ExportTo(os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "fak traj export: %v\n", err)
-		os.Exit(1)
+	switch *format {
+	case "jsonl":
+		if _, err := r.ExportTo(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "fak traj export: %v\n", err)
+			os.Exit(1)
+		}
+	case "atif":
+		bundle := atif.FromTurns(r.Turns(), atif.Options{FullFidelity: *fullFidelity, Agent: *agent})
+		if err := atif.WriteBundle(os.Stdout, bundle); err != nil {
+			fmt.Fprintf(os.Stderr, "fak traj export: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "fak traj export: unknown --format %q (want jsonl|atif)\n", *format)
+		os.Exit(2)
 	}
 }
 
