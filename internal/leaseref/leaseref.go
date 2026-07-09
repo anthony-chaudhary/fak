@@ -342,17 +342,21 @@ type ArbiterLease struct {
 // honest mapping decision lives in one place.
 const arbiterLaneKind = "cluster"
 
-// LiveLeases reads the non-expired records under refs/fak/locks/* and projects
+// LiveLeases reads the genuinely-held records under refs/fak/locks/* and projects
 // each into the arbiter's live_leases shape. This is the read side of the
 // cross-machine substrate: after an ordinary `git fetch`, a peer's pushed lease
-// is in the local ref store, Live reads it, and this projection hands it to an
-// admission kernel as a live lease it must respect. EXPIRED records are dropped
-// (they are reapable, not blocking — see Live), so the arbiter never refuses on
-// a crashed holder's lapsed lease. The slice is non-nil-and-empty when nothing
-// is live, so a JSON encoder emits `[]`, the empty live_leases an arbiter reads
-// as "nothing held".
+// is in the local ref store, LiveRegistrations reads it, and this projection hands
+// it to an admission kernel as a live lease it must respect. TWO classes are
+// dropped, so the arbiter never refuses on a lane nobody holds: EXPIRED records
+// (reapable on their own TTL — see Live) and records CASCADED out because their
+// owning worker's session is provably dead (cascade.go, #3372) — the latter being
+// the only rule that can clear a TTLSeconds == 0 registration, which no TTL can
+// ever expire. A lease whose owning session is merely ABSENT is RETAINED: absence
+// is not proof of death (the fail-closed rule, liveness.go). The slice is
+// non-nil-and-empty when nothing is live, so a JSON encoder emits `[]`, the empty
+// live_leases an arbiter reads as "nothing held".
 func (s *Store) LiveLeases(ctx context.Context, now time.Time) ([]ArbiterLease, error) {
-	live, _, err := s.Live(ctx, now)
+	live, _, err := s.LiveRegistrations(ctx, now)
 	if err != nil {
 		return nil, err
 	}

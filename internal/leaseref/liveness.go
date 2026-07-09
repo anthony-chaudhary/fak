@@ -117,13 +117,9 @@ func (s *Store) ClassifyLive(ctx context.Context, selfSession string, now time.T
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := s.ListSessions(ctx)
+	byID, err := s.sessionsByID(ctx)
 	if err != nil {
 		return nil, err
-	}
-	byID := make(map[string]SessionDescriptor, len(sessions))
-	for _, d := range sessions {
-		byID[d.ID] = d
 	}
 	out := make([]ClassifiedLease, 0, len(live))
 	for _, r := range live {
