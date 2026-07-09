@@ -320,6 +320,40 @@ func guardClaudeAutoCompactWindowInjection(provider, guardModel string, command 
 	return [][2]string{{guardClaudeAutoCompactWindowEnv, guardClaudeOneMillionCompactWindow}}
 }
 
+// guardGitNonInteractiveEnv makes editor/pager-opening git forms FAIL FAST instead of
+// silently wedging a headless worker. A `git commit` with no message source — including
+// the observed dominant shape where a `-m "msg"` is placed AFTER the `--` pathspec
+// separator, so git never parses it as the message flag — falls back to $EDITOR; with no
+// TTY that is a hang until the ~2-min turn timeout. The trajectory audit (#2365) measured
+// this as the single most expensive recurring worker stall (15 hangs / 12 sessions, one
+// $96 session hit it 3x). The repo-guard PreToolUse rung already DETECTS these forms
+// (internal/repoguard: INTERACTIVE_HANG) but only warns, so git still runs and hangs —
+// the repo's own "detection without enforcement" anti-pattern. Injecting GIT_EDITOR=true /
+// GIT_SEQUENCE_EDITOR=: / GIT_PAGER=cat turns the same form into an immediate
+// "Aborting commit due to empty commit message" the model recovers from in the same turn,
+// for every argument ordering, since the child agent's env propagates to its Bash-tool
+// git subprocesses.
+//
+// Scoped to HEADLESS children only (guardChildInteractive == false): an attended human
+// `fak guard -- claude` keeps its real editor and pager. An explicit inherited value is
+// never overridden — the operator/author already routed around the editor.
+func guardGitNonInteractiveEnv(command []string, getenv func(string) string) [][2]string {
+	if guardChildInteractive(command) {
+		return nil
+	}
+	var pairs [][2]string
+	for _, kv := range [][2]string{
+		{"GIT_EDITOR", "true"},
+		{"GIT_SEQUENCE_EDITOR", ":"},
+		{"GIT_PAGER", "cat"},
+	} {
+		if strings.TrimSpace(getenv(kv[0])) == "" {
+			pairs = append(pairs, kv)
+		}
+	}
+	return pairs
+}
+
 func guardStaticClaudeModel(guardModel string, command []string) string {
 	if model := strings.TrimSpace(guardModel); model != "" {
 		return model

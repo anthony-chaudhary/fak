@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/logvault"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -151,6 +152,7 @@ func cmdGuard(argv []string) {
 	denyAllWarn := fs.Int("deny-all-warn", guardStopHookDefaultWarn, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the auto-continue guidance escalates from a gentle nudge to a relevance-decision WARNING (asks the agent whether the remaining work is reachable under the floor, and to declare BLOCKED and stop cleanly if not). Clamped to <= --deny-all-final <= --deny-all-max.")
 	toolprocHooks := fs.String("toolproc-hooks", guardToolprocModeObserve, "Claude Code tool-process observation hooks (off|observe, observe by default): PreToolUse/PostToolUse/SessionEnd append spawn/exit/session_end rows to the workspace toolproc journal (fail-open; `fak toolproc ps --events .fak/toolproc/journal.jsonl` reads the live table). Claude children only.")
 	denyAllFinal := fs.Int("deny-all-final", guardStopHookDefaultFinal, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the guidance escalates to a FINAL warning, the last attempts before the hard give-up at --deny-all-max.")
+	denyAllSameStop := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "with --deny-all-continue=enforce (current gateways): the SAME-ISSUE give-up depth — end the session only after this many CONSECUTIVE deny-all turns proposing the IDENTICAL refused action (same tool+reason), default 6. A session hitting a DIFFERENT block each turn (exploring for an allowed path) never reaches it and is never given up; --deny-all-max is the legacy blind bound used only against a gateway that does not emit the same-issue gauge.")
 	taskHandoffMode := fs.String("task-handoff", guardPreCompactModeEnforce, "Claude Code Stop hook completion handoff gate: off|shadow|enforce. ENFORCE by default: on a clean stop, require a valid fak.task-handoff.v1 JSON with witnessed done + current state + 1-2 next steps or no-next-step reason. The path is exposed as FAK_TASK_HANDOFF_FILE.")
 	taskHandoffFile := fs.String("task-handoff-file", "", "path the wrapped agent must write with fak.task-handoff.v1 before a clean stop (default: a private temp file for this guard session)")
 	taskHandoffRepo := fs.String("task-handoff-repo", "", "owner/repo for optional live handoff issue sync (passed to fak task handoff --live)")
@@ -164,6 +166,7 @@ func cmdGuard(argv []string) {
 	compactAnchorHead := fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything (see the 'anchor-starved' diagnostic). DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (the suffix re-bills cold that turn anyway, so the cut is penalty-free — the long-session firing path a plain `fak guard -- claude` actually hits). Pass =false to pin the old warm-only first-breakpoint anchor.")
 	assumeSessionTurns := fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired — the common `fak guard -- claude` case, where the wrapped harness owns the turn loop and hands the gateway no Budget.TurnsLeft. It lets a WARM continuously-active long session shed early instead of waiting to OBSERVABLY idle past the message-span cache TTL: the gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns, fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
+	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. Anthropic passthrough only.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist: high|medium|none|off. Off by default; use --session-pressure-days/--session-pressure-max to size the window.")
 	sessionPressureDays := fs.Float64("session-pressure-days", 7, "with --session-pressure-gate, audit transcripts modified within N days for the current workspace namespace")
@@ -936,6 +939,12 @@ func cmdGuard(argv []string) {
 		// outbound Anthropic wire (maybeUpgradeAnthropicCacheTTL1H). Resolved above from
 		// the session's billing posture; witnessed on /metrics per turn.
 		CacheTTL1H: mcache.active,
+		// M2 star-anchor pre-flight gate (#1493): DEFAULT-ON (--vcache-anchor). On the
+		// Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile
+		// system blocks behind a byte-stable anchor and splice a cache_control breakpoint the
+		// caller did NOT send — DECOUPLED from CompactHistoryBudget so --compact-history-budget=0
+		// no longer takes anchoring down with it. Fail-safe identity on any ambiguity.
+		VCacheAnchor: *vcacheAnchor,
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
 		// behavior-preserving by construction (a pruned tool stays DEFAULT_DENY at the kernel),
@@ -1052,6 +1061,26 @@ func cmdGuard(argv []string) {
 		srv.SetSessionHarnessProvider(func() gateway.SessionHarness { return guardHarnessToSession(resSampler.Snapshot()) })
 	}
 
+	// Vault observability (#2455): expose the three fak_logvault_* gauges on the
+	// gateway's /metrics when a capture vault exists on this box, so an operator can
+	// see last-capture age, footprint, and verify mismatches where they already
+	// scrape — and a forced verify mismatch surfaces within one capture cycle. Each
+	// value is WITNESSED (folded from logvault's own hash-chained manifest + a
+	// bounded mirror re-hash); pull-only, rendered per scrape. Wired only when a
+	// vault manifest is present so boxes without a vault emit no phantom family.
+	if vaultDir := resolveLogvaultDir(repoRoot()); vaultDir != "" {
+		if _, statErr := os.Stat(filepath.Join(vaultDir, logvault.ManifestName)); statErr == nil {
+			lv := &logvault.Vault{Dir: vaultDir}
+			srv.SetLogvaultMetricsProvider(func() string {
+				text, err := lv.MetricsText(logvaultMetricsVerifySample, time.Now().UnixNano())
+				if err != nil {
+					return "" // unreadable manifest: emit nothing rather than a broken family
+				}
+				return text
+			})
+		}
+	}
+
 	// Deferred session durability (#1833): only now — after the gateway is bound and
 	// ready, off the critical path to the agent exec — do the git-spawning setup for an
 	// opted-in durable session (guardDurabilityWanted, decided above from --session-id /
@@ -1142,7 +1171,7 @@ func cmdGuard(argv []string) {
 	handoffCfg := guardTaskHandoffConfig{Mode: handoffMode, File: handoffFile, Repo: *taskHandoffRepo, Live: *taskHandoffLive}
 	var stopHookInstall guardStopHookInstall
 	var stopHookEnv [][2]string
-	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, handoffCfg)
+	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, *denyAllSameStop, handoffCfg)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook setup failed: %v\n", err)
@@ -1199,6 +1228,11 @@ func cmdGuard(argv []string) {
 	}
 	injected = append(injected, codexAuthEnv...)
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
+	// Headless workers: make editor/pager-opening git forms (a `git commit` with no message
+	// source, incl. a `-m` after `--`; `git rebase -i`) fail fast instead of hanging on a
+	// TTY-less $EDITOR — the top recurring stall in the trajectory audit (#2365). No-op for an
+	// attended interactive child; never overrides an inherited value. See guard_provider.go.
+	injected = append(injected, guardGitNonInteractiveEnv(command, os.Getenv)...)
 	// Live discovery (#1499): register fak's fak_index_*/fak_memory_*/fak_tools_search
 	// MCP tools into the wrapped Claude child by default, so a default `fak guard --
 	// claude` session can reach them with no manual .mcp.json setup.

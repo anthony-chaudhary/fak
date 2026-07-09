@@ -418,6 +418,49 @@ func TestGuardClaudeAutoCompactWindowInjectionKeepsOperatorEnv(t *testing.T) {
 	}
 }
 
+func TestGuardGitNonInteractiveEnv(t *testing.T) {
+	none := func(string) string { return "" }
+	full := [][2]string{{"GIT_EDITOR", "true"}, {"GIT_SEQUENCE_EDITOR", ":"}, {"GIT_PAGER", "cat"}}
+
+	cases := []struct {
+		name    string
+		command []string
+		getenv  func(string) string
+		want    [][2]string
+	}{
+		{
+			name:    "headless -p worker gets the non-interactive git env",
+			command: []string{"claude", "-p"},
+			getenv:  none,
+			want:    full,
+		},
+		{
+			name:    "headless --print worker gets the non-interactive git env",
+			command: []string{"claude", "--print"},
+			getenv:  none,
+			want:    full,
+		},
+		{
+			name:    "attended interactive child is left untouched",
+			command: []string{"claude"},
+			getenv:  none,
+			want:    nil,
+		},
+		{
+			name:    "an inherited GIT_EDITOR is never overridden",
+			command: []string{"claude", "-p"},
+			getenv:  func(k string) string { return map[string]string{"GIT_EDITOR": "code --wait"}[k] },
+			want:    [][2]string{{"GIT_SEQUENCE_EDITOR", ":"}, {"GIT_PAGER", "cat"}},
+		},
+	}
+	for _, tc := range cases {
+		got := guardGitNonInteractiveEnv(tc.command, tc.getenv)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: env = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestNormalizeRemoteServe(t *testing.T) {
 	ok := []struct {
 		in   string
