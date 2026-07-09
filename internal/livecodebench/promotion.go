@@ -44,6 +44,11 @@ func (r *Report) MarkOfficiallyGraded() error {
 		return fmt.Errorf("livecodebench report: cannot mark officially graded: no arm carries graded results")
 	}
 	r.EvidenceClass = EvidenceOfficialLCBRunner
+	r.OfficialHarness = OfficialHarness{
+		Required:  true,
+		Available: true,
+		Reason:    "official lcb_runner checker graded the exact saved generations",
+	}
 	r.ResultClaimAllowed = true
 	return r.Validate()
 }

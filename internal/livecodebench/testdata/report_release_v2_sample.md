@@ -4,6 +4,7 @@
 - Benchmark: `livecodebench`
 - Release: `release_v2`
 - Evidence class: `local-ungraded`
+- Official harness: required=true available=false (this report covers local generations only; the official lcb_runner checker has not graded these generations, so no pass-rate is claimable)
 - Result claim allowed: `false`
 - Claim boundary: Local generations only: the same saved generations must be graded by the official lcb_runner checker before any pass-rate is claimable.
 

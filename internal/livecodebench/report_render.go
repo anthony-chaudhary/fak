@@ -74,6 +74,11 @@ func RenderReportMarkdown(r Report) string {
 		fmt.Fprintf(&b, "- Date window: `%s .. %s`\n", orPlaceholder(r.StartDate, "-"), orPlaceholder(r.EndDate, "-"))
 	}
 	fmt.Fprintf(&b, "- Evidence class: `%s`\n", orPlaceholder(r.EvidenceClass, "-"))
+	fmt.Fprintf(&b, "- Official harness: required=%t available=%t", r.OfficialHarness.Required, r.OfficialHarness.Available)
+	if r.OfficialHarness.Reason != "" {
+		fmt.Fprintf(&b, " (%s)", r.OfficialHarness.Reason)
+	}
+	fmt.Fprintf(&b, "\n")
 	fmt.Fprintf(&b, "- Result claim allowed: `%t`\n", r.ResultClaimAllowed)
 	if r.ClaimBoundary != "" {
 		fmt.Fprintf(&b, "- Claim boundary: %s\n", r.ClaimBoundary)

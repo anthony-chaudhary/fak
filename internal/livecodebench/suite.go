@@ -155,9 +155,23 @@ type Report struct {
 	// report traces to gradeable evidence. Empty for a summary-only report.
 	Problems              []ProblemVerdict `json:"problems,omitempty"`
 	Summary               Summary          `json:"summary"`
+	OfficialHarness       OfficialHarness  `json:"official_harness"`
 	PromotionRequirements []string         `json:"promotion_requirements,omitempty"`
 	ResultClaimAllowed    bool             `json:"result_claim_allowed"`
 	ClaimBoundary         string           `json:"claim_boundary,omitempty"`
+}
+
+// OfficialHarness mirrors terminalbench's official-harness gate (#2113):
+// Required is always true for LiveCodeBench — only the official lcb_runner
+// checker grading the exact saved generations is result-bearing — and
+// Available reports whether that grading actually backs this report. A
+// local-only run carries Available=false, and Validate refuses
+// result_claim_allowed=true unless Required and Available are both true, so
+// forging the evidence class alone can never flip the flag.
+type OfficialHarness struct {
+	Required  bool   `json:"required"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason"`
 }
 
 // ArmResult is one (arm, scenario) result cell: raw vs fak, per scenario.
@@ -267,8 +281,14 @@ func NewReport(s Suite, generatedAt time.Time) Report {
 		Benchmark:             s.Benchmark,
 		Model:                 s.Model,
 		ReleaseVersion:        s.ReleaseVersion,
-		EvidenceClass:         EvidenceLocalUngraded,
-		Summary:               Summary{Problems: len(s.Problems), Scenarios: scenarios},
+		EvidenceClass: EvidenceLocalUngraded,
+		Summary:       Summary{Problems: len(s.Problems), Scenarios: scenarios},
+		OfficialHarness: OfficialHarness{
+			Required:  true,
+			Available: false,
+			Reason: "this report covers local generations only; the official lcb_runner checker " +
+				"has not graded these generations, so no pass-rate is claimable",
+		},
 		PromotionRequirements: PromotionRequirements(),
 		ResultClaimAllowed:    false,
 		ClaimBoundary: "Local generations only: the same saved generations must be graded by the " +
@@ -315,6 +335,9 @@ func (r Report) Validate() error {
 	}
 	if r.ResultClaimAllowed && r.EvidenceClass != EvidenceOfficialLCBRunner {
 		return fmt.Errorf("livecodebench report: result_claim_allowed requires evidence_class %q, have %q", EvidenceOfficialLCBRunner, r.EvidenceClass)
+	}
+	if r.ResultClaimAllowed && !(r.OfficialHarness.Required && r.OfficialHarness.Available) {
+		return fmt.Errorf("livecodebench report: result_claim_allowed requires official_harness required=true available=true, have required=%t available=%t (only the official lcb_runner grading may flip the claim)", r.OfficialHarness.Required, r.OfficialHarness.Available)
 	}
 	if r.ResultClaimAllowed && !results {
 		return fmt.Errorf("livecodebench report: result_claim_allowed requires graded results")

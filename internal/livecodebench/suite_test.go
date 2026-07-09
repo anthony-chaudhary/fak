@@ -198,7 +198,15 @@ func TestReportClaimRequiresOfficialGrading(t *testing.T) {
 		t.Fatalf("err = %v, want official-grading refusal", err)
 	}
 
+	// Forging the evidence class alone is not enough (#2113): the
+	// official_harness block must also witness the official grading.
 	rep.EvidenceClass = EvidenceOfficialLCBRunner
+	err = rep.Validate()
+	if err == nil || !strings.Contains(err.Error(), "official_harness") {
+		t.Fatalf("err = %v, want official_harness refusal", err)
+	}
+
+	rep.OfficialHarness = OfficialHarness{Required: true, Available: true, Reason: "official lcb_runner grading recorded"}
 	if err := rep.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +215,38 @@ func TestReportClaimRequiresOfficialGrading(t *testing.T) {
 	err = rep.Validate()
 	if err == nil || !strings.Contains(err.Error(), "graded results") {
 		t.Fatalf("err = %v, want graded-results refusal", err)
+	}
+}
+
+// TestLocalOnlyRunCannotFlipResultClaim pins #2113's honesty fence: every
+// scaffolded report carries the official_harness block (required=true,
+// available=false) plus a claim boundary saying what is and is not claimed,
+// and a local-only run cannot flip result_claim_allowed — validation refuses
+// the flip while the official lcb_runner grading is unavailable.
+func TestLocalOnlyRunCannotFlipResultClaim(t *testing.T) {
+	rep := NewReport(validSuite(), time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	if !rep.OfficialHarness.Required || rep.OfficialHarness.Available {
+		t.Fatalf("official harness gate wrong: %+v", rep.OfficialHarness)
+	}
+	if !strings.Contains(rep.OfficialHarness.Reason, "lcb_runner") {
+		t.Fatalf("official_harness.reason must name the official checker: %q", rep.OfficialHarness.Reason)
+	}
+	if !strings.Contains(rep.ClaimBoundary, "lcb_runner") {
+		t.Fatalf("claim boundary must state what still gates a claim: %q", rep.ClaimBoundary)
+	}
+
+	rep.ResultClaimAllowed = true
+	if err := rep.Validate(); err == nil {
+		t.Fatal("local-only report with result_claim_allowed=true must be refused")
+	}
+
+	// Even with the official evidence class and graded arm results forged, an
+	// unavailable official harness still refuses the claim.
+	rep.EvidenceClass = EvidenceOfficialLCBRunner
+	rep.Arms = []ArmResult{{Arm: "fak", Scenario: ScenarioCodeGeneration, Problems: 1, Generations: 5, Graded: 5, Pass1: 0.6}}
+	err := rep.Validate()
+	if err == nil || !strings.Contains(err.Error(), "official_harness") {
+		t.Fatalf("err = %v, want official_harness refusal", err)
 	}
 }
 
