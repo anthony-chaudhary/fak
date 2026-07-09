@@ -62,6 +62,8 @@ import (
 //	fak hooks pre-push --json        # machine result (schema fak.trunk_build.v1)
 //	fak hooks pre-push --base R      # override the base ref the range is computed against
 //	fak hooks pre-push --budget 60s  # GATE_LATENCY_REGRESSION advisory over this build time
+//	fak hooks pre-push --advisory    # warn-mode single-flight: SKIPPED_CONTENDED (exit 0) when a
+//	                                 # peer build is already running on this host (skip == allow)
 
 // Seams (overridable in tests) over the impure git/go steps. Helpers are defined LOCAL to this
 // file (prepushGitRevParse / prepushArchiveTip) rather than borrowed from ci_preflight.go so the
@@ -77,6 +79,62 @@ var (
 	prepushNow          = time.Now
 )
 
+// Host-wide advisory single-flight for the expensive trunk-build gate.
+//
+// The gate's whole-repo `git archive | tar -x` + `go list` + importer-cone `go build` is the
+// heaviest push-seam step, and in the default FLEET_BUILD_GUARD=warn mode its verdict is
+// ADVISORY — it never blocks the push (warn = allow). When many peers push at once, running
+// that full build concurrently in every clone reproduces the SAME advisory N times while piling
+// onto the CPU/disk/git contention that is what actually slows the fleet. So under advisory mode
+// exactly one gate builds and the rest report SKIPPED_CONTENDED (exit 0 = allowed, IDENTICAL to
+// warn's own outcome — no verdict is lost that warn would have acted on). The marker lives in the
+// host TempDir because the contention is host-wide, not per-clone. O_EXCL makes the winner unique;
+// a marker older than prepushBuildSlotStale (a crashed gate) is stolen so the check can never be
+// wedged off. Block mode (advisory=false) NEVER skips — it always builds, so a hard-enforced push
+// is never let through unbuilt.
+var (
+	prepushBuildSlotPath    = filepath.Join(os.TempDir(), "fak-prepush-build.slot")
+	prepushBuildSlotStale   = 3 * time.Minute
+	prepushAcquireBuildSlot = tryAcquireBuildSlot
+
+	prepushSlotStat   = os.Stat
+	prepushSlotRemove = os.Remove
+	prepushSlotNow    = time.Now
+	prepushSlotCreate = func(path string) error {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(f, "pid=%d\n", os.Getpid())
+		return f.Close()
+	}
+)
+
+// tryAcquireBuildSlot decides whether THIS gate runs the expensive build now.
+//   - advisory=false (FLEET_BUILD_GUARD=block): always run — a blocking gate is never skipped, so
+//     a hard-enforced push is never allowed through unbuilt. The marker seams are not touched.
+//   - advisory=true (warn, the default): non-blocking single-flight. run=true iff this process wins
+//     the O_EXCL marker (no fresh peer build in flight); otherwise run=false and the caller reports
+//     SKIPPED_CONTENDED. A marker older than prepushBuildSlotStale is stolen first so a crashed gate
+//     cannot disable the check permanently.
+//
+// The returned release removes the marker; it is a no-op when run=false or in block mode.
+func tryAcquireBuildSlot(advisory bool) (run bool, release func()) {
+	noop := func() {}
+	if !advisory {
+		return true, noop
+	}
+	if fi, err := prepushSlotStat(prepushBuildSlotPath); err == nil {
+		if prepushSlotNow().Sub(fi.ModTime()) >= prepushBuildSlotStale {
+			_ = prepushSlotRemove(prepushBuildSlotPath) // stale holder (crashed gate) → steal it
+		}
+	}
+	if err := prepushSlotCreate(prepushBuildSlotPath); err != nil {
+		return false, noop // a peer holds a fresh marker → skip the redundant advisory build
+	}
+	return true, func() { _ = prepushSlotRemove(prepushBuildSlotPath) }
+}
+
 // trunkBuildResult is the JSON-stable verdict for agents / the shell rung.
 type trunkBuildResult struct {
 	Schema           string   `json:"schema"`           // fak.trunk_build.v1
@@ -88,7 +146,7 @@ type trunkBuildResult struct {
 	SelectedPackages []string `json:"selected_packages"` // changed + importer closure — what was built
 	Detail           string   `json:"detail,omitempty"`  // trimmed `go build` output on a break
 	ElapsedMS        int64    `json:"elapsed_ms"`
-	Verdict          string   `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | GATE_LATENCY_REGRESSION | COULD_NOT_RUN
+	Verdict          string   `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | GATE_LATENCY_REGRESSION | COULD_NOT_RUN | SKIPPED_CONTENDED
 }
 
 func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
@@ -99,6 +157,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	base := fs.String("base", "", "override the base ref the push range is computed against (default: origin/<branch>→origin/main→origin/master)")
 	budget := fs.Duration("budget", 60*time.Second, "report GATE_LATENCY_REGRESSION if the build exceeds this (still exits 0 when green)")
 	report := fs.String("report", "", "write the JSON result to this path in addition to stdout")
+	advisory := fs.Bool("advisory", false, "advisory mode (FLEET_BUILD_GUARD=warn): single-flight the build — skip with SKIPPED_CONTENDED when a peer build is already running on this host, rather than run a redundant concurrent full build (skip == push allowed)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -110,7 +169,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	res, code := evaluatePrePushBuild(r, *base, *budget)
+	res, code := evaluatePrePushBuild(r, *base, *budget, *advisory)
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -128,9 +187,13 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 }
 
 // evaluatePrePushBuild runs the gate over repo r and returns the verdict plus the DETECTOR
-// exit code: 0 clean/NOOP/latency-advisory, 1 TRUNK_WOULD_NOT_COMPILE, 2 could-not-run
-// (fail-open). Mode (block/warn/off) is the shell's job, not this function's.
-func evaluatePrePushBuild(r, baseOverride string, budget time.Duration) (trunkBuildResult, int) {
+// exit code: 0 clean/NOOP/latency-advisory/skipped, 1 TRUNK_WOULD_NOT_COMPILE, 2 could-not-run
+// (fail-open). Mode (block/warn/off) is the shell's job, not this function's, but `advisory`
+// (true iff the shell is in FLEET_BUILD_GUARD=warn) lets the gate single-flight under host
+// contention: when a peer's build is already running, an advisory invocation returns
+// SKIPPED_CONTENDED instead of running a redundant concurrent full build. Block mode
+// (advisory=false) never skips.
+func evaluatePrePushBuild(r, baseOverride string, budget time.Duration, advisory bool) (trunkBuildResult, int) {
 	res := trunkBuildResult{Schema: "fak.trunk_build.v1"}
 
 	tip, err := prepushRevParse(r, "HEAD")
@@ -156,6 +219,18 @@ func evaluatePrePushBuild(r, baseOverride string, budget time.Duration) (trunkBu
 		res.OK, res.Verdict = true, "NOOP"
 		return res, 0
 	}
+
+	// A real Go delta needs the EXPENSIVE steps below (archive tip + go list + importer-cone
+	// build). In advisory mode, single-flight them: if a peer's build is already running on this
+	// host, skip rather than pile a redundant concurrent full build onto the contention. Skip ==
+	// warn's own outcome (exit 0, push allowed), so no verdict warn would have enforced is lost.
+	// Block mode always runs (advisory=false → prepushAcquireBuildSlot returns run=true).
+	run, releaseSlot := prepushAcquireBuildSlot(advisory)
+	if !run {
+		res.OK, res.Verdict = true, "SKIPPED_CONTENDED"
+		return res, 0
+	}
+	defer releaseSlot()
 
 	dir, err := prepushExtractTip(r, tip)
 	if err != nil {
@@ -301,6 +376,8 @@ func renderPrePushBuild(w io.Writer, res trunkBuildResult) {
 	case "GATE_LATENCY_REGRESSION":
 		fmt.Fprintf(w, "trunk-build-gate OK (slow) — pushed tip %s builds but took %dms over budget (%d package(s))\n",
 			short(res.Ref), res.ElapsedMS, len(res.SelectedPackages))
+	case "SKIPPED_CONTENDED":
+		fmt.Fprintln(w, "trunk-build-gate: SKIPPED_CONTENDED — a peer build is already running on this host; redundant advisory build skipped (push allowed)")
 	case "COULD_NOT_RUN":
 		fmt.Fprintf(w, "trunk-build-gate could-not-run (push allowed): %s\n", res.Detail)
 	case "TRUNK_WOULD_NOT_COMPILE":

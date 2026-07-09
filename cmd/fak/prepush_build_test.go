@@ -65,7 +65,7 @@ func setupHappyPrepushSeams(t *testing.T) {
 
 func TestEvaluatePrePushBuildOK(t *testing.T) {
 	setupHappyPrepushSeams(t)
-	res, code := evaluatePrePushBuild("/repo", "", time.Minute)
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 0 || res.Verdict != "OK" || !res.OK {
 		t.Fatalf("want OK/exit0, got verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
 	}
@@ -81,7 +81,7 @@ func TestEvaluatePrePushBuildWouldNotCompile(t *testing.T) {
 	prepushBuild = func(string, []string) (string, bool) {
 		return "internal/p/p.go:7:9: undefined: q.X", false
 	}
-	res, code := evaluatePrePushBuild("/repo", "", time.Minute)
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" || res.OK {
 		t.Fatalf("want TRUNK_WOULD_NOT_COMPILE/exit1, got verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
 	}
@@ -93,7 +93,7 @@ func TestEvaluatePrePushBuildWouldNotCompile(t *testing.T) {
 func TestEvaluatePrePushBuildNoChangeIsNoop(t *testing.T) {
 	setupHappyPrepushSeams(t)
 	prepushChangedFiles = func(string, string) ([]string, error) { return nil, nil }
-	res, code := evaluatePrePushBuild("/repo", "", time.Minute)
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 0 || res.Verdict != "NOOP" || !res.OK {
 		t.Fatalf("want NOOP/exit0, got verdict=%s code=%d", res.Verdict, code)
 	}
@@ -105,7 +105,7 @@ func TestEvaluatePrePushBuildEmptySelectionIsNoop(t *testing.T) {
 	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
 		return map[string]string{}, map[string][]string{}, 1, nil
 	}
-	res, code := evaluatePrePushBuild("/repo", "", time.Minute)
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 0 || res.Verdict != "NOOP" {
 		t.Fatalf("want NOOP/exit0 for empty selection, got verdict=%s code=%d", res.Verdict, code)
 	}
@@ -123,7 +123,7 @@ func TestEvaluatePrePushBuildLatencyIsAdvisoryNotBlock(t *testing.T) {
 		}
 		return base.Add(90 * time.Second)
 	}
-	res, code := evaluatePrePushBuild("/repo", "", 60*time.Second)
+	res, code := evaluatePrePushBuild("/repo", "", 60*time.Second, false)
 	if code != 0 || res.Verdict != "GATE_LATENCY_REGRESSION" || !res.OK {
 		t.Fatalf("a slow-but-green build must advise not block: verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
 	}
@@ -134,7 +134,7 @@ func TestEvaluatePrePushBuildCouldNotRunFailsOpen(t *testing.T) {
 	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
 		return nil, nil, 0, os.ErrNotExist
 	}
-	res, code := evaluatePrePushBuild("/repo", "", time.Minute)
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 2 || res.Verdict != "COULD_NOT_RUN" {
 		t.Fatalf("a could-not-run gate must fail open (exit 2): verdict=%s code=%d", res.Verdict, code)
 	}
@@ -143,7 +143,7 @@ func TestEvaluatePrePushBuildCouldNotRunFailsOpen(t *testing.T) {
 func TestEvaluatePrePushBuildRevParseFailureFailsOpen(t *testing.T) {
 	setupHappyPrepushSeams(t)
 	prepushRevParse = func(string, string) (string, error) { return "", os.ErrNotExist }
-	_, code := evaluatePrePushBuild("/repo", "", time.Minute)
+	_, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 2 {
 		t.Fatalf("HEAD-unresolvable must fail open (exit 2), got code=%d", code)
 	}
@@ -187,7 +187,7 @@ func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	writeFile(t, repo, "a/a.go", "package a\n\nfunc X() int { return 1 }\n\n// W is additive; harmless.\nfunc W() int { return 2 }\n")
 	gitFixture(t, repo, "add", "a/a.go")
 	gitFixture(t, repo, "commit", "-q", "-m", "feat(a): additive W")
-	res, code := evaluatePrePushBuild(repo, baseSha, time.Minute)
+	res, code := evaluatePrePushBuild(repo, baseSha, time.Minute, false)
 	if code != 0 || res.Verdict != "OK" {
 		t.Fatalf("additive green change must pass: verdict=%s code=%d detail=%q", res.Verdict, code, res.Detail)
 	}
@@ -200,7 +200,7 @@ func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	writeFile(t, repo, "a/a.go", "package a\n\n// X removed — b still calls it.\nfunc W() int { return 2 }\n")
 	gitFixture(t, repo, "add", "a/a.go")
 	gitFixture(t, repo, "commit", "-q", "-m", "refactor(a): drop X")
-	res, code = evaluatePrePushBuild(repo, base2, time.Minute)
+	res, code = evaluatePrePushBuild(repo, base2, time.Minute, false)
 	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" {
 		t.Fatalf("removing an imported symbol must be caught: verdict=%s code=%d", res.Verdict, code)
 	}
@@ -218,7 +218,7 @@ func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	gitFixture(t, repo, "add", "README.md")
 	gitFixture(t, repo, "commit", "-q", "-m", "docs: readme")
 	_ = base3
-	res, code = evaluatePrePushBuild(repo, base4, time.Minute)
+	res, code = evaluatePrePushBuild(repo, base4, time.Minute, false)
 	if code != 0 || res.Verdict != "NOOP" {
 		t.Fatalf("docs-only push must be NOOP, got verdict=%s code=%d", res.Verdict, code)
 	}
