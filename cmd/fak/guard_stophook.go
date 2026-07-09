@@ -364,6 +364,13 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	// ledger env. Deliberately BEFORE the deny-all mode gate: sampling cadence is independent
 	// of whether auto-continue is off, and it can never change this hook's exit code.
 	scoreTurnEndFailOpen(stderr, trajctl.Stamp{SessionID: rec.Session}, time.Now().UnixMilli())
+	// Managed-context step-advice carryover: capture the last live step-advice decision to
+	// a durable per-session stamp while the trace is still alive, so a resume can read what
+	// the window pressure WAS (internal/stepbaton, internal/stepbatoncapture). Same
+	// guard-wired gate and fail-open/bounded posture as the sampling above, and likewise
+	// BEFORE the deny-all mode gate: the carryover is independent of whether auto-continue
+	// is off, and can never change this hook's exit code.
+	stampStepAdviceFailOpen(stderr, rec.Session, os.Getenv("ANTHROPIC_BASE_URL"))
 	mode, err := normalizeGuardStopHookMode(*modeFlag)
 	if err != nil {
 		rec.Disposition = string(stopDispFailOpenBadMode)

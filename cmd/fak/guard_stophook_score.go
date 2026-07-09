@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/stepbatoncapture"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
@@ -171,4 +173,54 @@ func parseHookSessionID(payload []byte) string {
 		return ""
 	}
 	return p.SessionID
+}
+
+// guardStepAdviceDeadline bounds the whole managed-context capture (ctxvalue fetch +
+// project + atomic write) so the Stop hook stays latency-bounded no matter how slow or
+// wedged the gateway is. On a timeout the pass is abandoned fail-open — a partially
+// written stamp is impossible (stepbaton.Write renames atomically), so a prior good stamp
+// is never torn.
+const guardStepAdviceDeadline = 300 * time.Millisecond
+
+// stampStepAdviceFailOpen captures the LAST live managed-context step-advice decision to a
+// durable per-session stamp while the trace is still alive, so a resuming successor can
+// read what the window pressure WAS before the trace rotated (the resume-boundary break
+// internal/stepbaton exists to close). It is the capture twin of scoreTurnEndFailOpen:
+// gated on the SAME guard-wired ledger signal (so a bare invocation or unrelated hook test
+// is a total no-op), co-located in the ledger's own directory (no new env to inject), and
+// STRICTLY BOUNDED + FAIL-OPEN — any timeout, unreachable gateway, or panic costs at most
+// this stamp, never the hook's exit code. It writes on every turn end (overwriting the
+// prior stamp) so a stale checkpoint can never outlive the pressure that produced it; the
+// resume consumer decides via Stamp.ShouldCarry() whether the carried class is worth
+// injecting. baseURL is the gateway base (ANTHROPIC_BASE_URL); an empty base fails open.
+func stampStepAdviceFailOpen(stderr io.Writer, sessionID, baseURL string) {
+	ledger := guardTrajctlLedgerConfigured()
+	if ledger == "" {
+		return // not a guard-wired session — same gate as the trajctl sampling
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), guardStepAdviceDeadline)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panic: %v", r)
+			}
+		}()
+		_, _, err := stepbatoncapture.CaptureAndWrite(ctx, stepbatoncapture.Options{
+			BaseURL:   baseURL,
+			TraceHint: sessionID,
+			Dir:       filepath.Dir(ledger),
+			SessionID: sessionID,
+		})
+		done <- err
+	}()
+	select {
+	case <-ctx.Done():
+		fmt.Fprintf(stderr, "fak guard: step-advice capture timed out (>%s); continuing fail-open\n", guardStepAdviceDeadline)
+	case err := <-done:
+		if err != nil {
+			fmt.Fprintf(stderr, "fak guard: step-advice capture skipped (fail-open): %v\n", err)
+		}
+	}
 }
