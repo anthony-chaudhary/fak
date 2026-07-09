@@ -228,23 +228,33 @@ going.
 1. **It's counted separately.** Hard deny-all turns increment
    `fak_guard_deny_all_stops_total` and the live `fak_guard_deny_all_consecutive` gauge on
    `/metrics`; retryable tool-feedback turns increment
-   `fak_guard_tool_feedback_turns_total` and `fak_guard_tool_feedback_consecutive`. The exit
-   summary prints separate lines, so "the floor refused a tool" does not read as "the
+   `fak_guard_tool_feedback_turns_total` and `fak_guard_tool_feedback_consecutive`. A third
+   gauge, `fak_guard_deny_all_same_consecutive`, counts consecutive deny-all turns proposing
+   the **identical** refused action (same tool + same reason) — it climbs only when the model
+   re-proposes the *same* blocked call and re-seeds to 1 the moment the refusal changes. The
+   exit summary prints separate lines, so "the floor refused a tool" does not read as "the
    session stopped."
-2. **It's auto-resumed.** guard installs a Claude Code **`Stop` hook** that reads that gauge
+2. **It's auto-resumed.** guard installs a Claude Code **`Stop` hook** that reads those gauges
    and, when the last turn was a hard deny-all, **blocks the stop and re-prompts the agent**
    with *"pick an allowed alternative and continue"* — so the loop keeps going instead of
    halting.
-   It is **on by default** (`--deny-all-continue=enforce`) and **bounded**
-   (`--deny-all-max`, default 3 consecutive continues) so a model that keeps re-proposing a
-   refused call cannot loop forever; once the model does something allowed, the counter
-   resets and the next real completion stops normally.
+   It is **on by default** (`--deny-all-continue=enforce`). The give-up is keyed on the
+   **same-issue** gauge, not the raw deny-all count: the hook only stands down after
+   `--same-stop` (default 6) consecutive turns proposing the *identical* refused action, so a
+   session that hits a **different** block each turn (exploring for an allowed path) is never
+   given up, while one genuinely spinning on one refusal still stops. Its guidance also firms
+   up over the last few identical repeats — naming the repeat and telling the model to change
+   tack rather than retry. Once the model does something allowed, the counter resets and the
+   next real completion stops normally. (Against an older gateway that does not emit the
+   same-issue gauge, the hook falls back to the legacy blind bound `--deny-all-max`, default
+   3 consecutive continues.)
 
 ```bash
-fak guard -- claude                          # auto-continue ON (enforce), max 3
+fak guard -- claude                          # auto-continue ON (enforce); give up after 6 identical repeats
 fak guard --deny-all-continue=shadow -- claude   # log the would-continue, still stop (observe first)
 fak guard --deny-all-continue=off -- claude      # restore the bare end_turn stop
-fak guard --deny-all-max 5 -- claude             # allow up to 5 consecutive auto-continues
+fak guard --same-stop 10 -- claude               # tolerate up to 10 identical repeats before standing down
+fak guard --deny-all-max 5 -- claude             # legacy blind bound (older gateways without the same-issue gauge)
 ```
 
 The Stop hook is merged into the **same** `--settings` file as the PreCompact hook (a single
