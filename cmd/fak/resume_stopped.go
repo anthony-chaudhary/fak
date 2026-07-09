@@ -44,6 +44,11 @@ var stoppedUUIDStemRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}
 // runResumeStopped classifies and triages the recently-stopped sessions. Exit codes:
 // 0 ok, 1 runtime error, 2 usage error.
 func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "selfcheck" {
+		return runReportSelfcheck(stdout, stderr, argv[1:], "resume stopped", stopped.TriageSelfcheck,
+			"SELFCHECK OK -- decenter-the-human at resume-stopped: an auth/subscription wall "+
+				"waits on a person; an account/session throttle clears on its own and the fleet waits.")
+	}
 	fs := flag.NewFlagSet("resume stopped", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	windowH := fs.Float64("window-h", 10, "only sessions whose transcript changed within N hours")
@@ -127,7 +132,12 @@ func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
 			"rows":             d.Rows,
 		}, "fak resume stopped")
 	}
-	renderResumeStopped(stdout, d, now, *windowH)
+	// Decenter the human in the human render: under FAK_RESUME_TRIAGE_GATE=enforce the
+	// DEFER bucket splits into the rows that genuinely need a person (an auth wall) and
+	// the throttle/limit rows that clear on their own — so an operator is not told to
+	// babysit a wall that would have cleared without them. Default ("", "warn") keeps
+	// the single DEFER section so the change can soak.
+	renderResumeStopped(stdout, d, now, *windowH, stopped.TriageEnforced(os.Getenv("FAK_RESUME_TRIAGE_GATE")))
 	return 0
 }
 
@@ -329,7 +339,7 @@ func stoppedContentFacts(raw json.RawMessage) (text, lastToolUse string, hasTool
 
 // renderResumeStopped prints the operator triage: the counts, the account throttles, and
 // the three action buckets with the reason each deferred row is blocked.
-func renderResumeStopped(w io.Writer, d stopped.Decisions, now time.Time, windowH float64) {
+func renderResumeStopped(w io.Writer, d stopped.Decisions, now time.Time, windowH float64, triage bool) {
 	fmt.Fprintf(w, "resume stopped %s  window=%.0fh  resume=%d defer=%d skip=%d\n",
 		now.Format("2006-01-02T15:04:05Z"), windowH, len(d.Resume), len(d.Defer), len(d.Skip))
 	if len(d.AccountThrottle) > 0 {
@@ -354,7 +364,16 @@ func renderResumeStopped(w io.Writer, d stopped.Decisions, now time.Time, window
 		}
 	}
 	section("RESUME (safe to resume headlessly now)", d.Resume)
-	section("DEFER (blocked; resume after the named wall clears)", d.Defer)
+	if triage {
+		// Split the DEFER bucket: an auth/subscription wall genuinely needs a person;
+		// a throttle/limit/structural wall clears on its own and the fleet waits behind
+		// it, so it is not an operator page.
+		need, wait := stopped.PartitionDefer(d)
+		section("DEFER — NEEDS YOU (auth/subscription wall; a person must clear it)", need)
+		section("DEFER — auto-clears (throttle/limit/structural; the fleet waits, no page)", wait)
+	} else {
+		section("DEFER (blocked; resume after the named wall clears)", d.Defer)
+	}
 	section("SKIP (live / parked / done / duplicate-of-live — leave alone)", d.Skip)
 	if len(d.Rows) == 0 {
 		fmt.Fprintln(w, "  (no stopped sessions in window)")
