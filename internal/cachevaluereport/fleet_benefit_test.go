@@ -27,7 +27,7 @@ func TestFoldFleetBenefitAggregatesUsageSavingsAndExtension(t *testing.T) {
 		},
 	}
 	usage := []gatewayusageledger.Row{
-		gatewayusageledger.NewRow("exit", "guard", "claude", "g-1", 90*time.Second, gatewayusageledger.Counters{
+		gatewayusageledger.NewRow("exit", "guard", "claude", "g-1", 90*time.Second, nil, gatewayusageledger.Counters{
 			Total:                12,
 			Allowed:              8,
 			Denied:               2,

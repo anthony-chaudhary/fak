@@ -2,6 +2,7 @@ package cachevaluereport
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -235,5 +236,68 @@ func TestGateSavingsLosslessOrBetter(t *testing.T) {
 	g := GateSavings(worse, SLOLosslessOrBetter, 1_000_000, mustDay(t, "2026-07-10"))
 	if g.Pass || len(g.Violations) != 1 {
 		t.Fatalf("recoverable fidelity should FAIL with one violation, got %+v", g)
+	}
+}
+
+// healthyCacheRow is a warm provider-cache session: ~94% hit-rate, write-amp ~0.04.
+func healthyCacheRow(genAt string) SavingsRow {
+	return SavingsRow{
+		Schema: SavingsLedgerSchema, Date: "2026-07-01", GeneratedAt: genAt,
+		Provider: "anthropic", Mechanism: "provider_prompt_cache",
+		InputTokens: 1000, CacheReadTokens: 50000, CacheCreationTokens: 2000,
+	}
+}
+
+func TestFoldAuditFlagsPerSessionEfficiencyRegressions(t *testing.T) {
+	// Three healthy sessions set the session-median norm (~94% hit). One churny session
+	// re-writes the cache far faster than it reuses it (100 read vs 100k creation) — the
+	// low-hit / high-write-amp outlier the issue says currently passes silently (#1992).
+	churny := SavingsRow{
+		Schema: SavingsLedgerSchema, Date: "2026-07-01", GeneratedAt: "2026-07-01T14:07:00Z",
+		Provider: "anthropic", Mechanism: "provider_prompt_cache",
+		InputTokens: 1000, CacheReadTokens: 100, CacheCreationTokens: 100000,
+	}
+	rows := []SavingsRow{
+		healthyCacheRow("2026-07-01T12:57:00Z"),
+		healthyCacheRow("2026-07-01T13:17:00Z"),
+		healthyCacheRow("2026-07-01T13:37:00Z"),
+		churny,
+	}
+
+	rep := FoldAudit(rows, mustDay(t, "2026-07-02"))
+	if len(rep.EfficiencyOutliers) != 1 {
+		t.Fatalf("want exactly 1 efficiency outlier (the churny session), got %d: %+v",
+			len(rep.EfficiencyOutliers), rep.EfficiencyOutliers)
+	}
+	got := rep.EfficiencyOutliers[0]
+	if got.GeneratedAt != churny.GeneratedAt {
+		t.Errorf("flagged the wrong session: got %s want %s", got.GeneratedAt, churny.GeneratedAt)
+	}
+	if got.HitRatePct > 1.0 {
+		t.Errorf("churny hit-rate should be ~0%%, got %.2f%%", got.HitRatePct)
+	}
+	if got.WriteAmp < sessionWriteAmpCeiling {
+		t.Errorf("churny write-amp should exceed the ceiling %.2f, got %.2f", sessionWriteAmpCeiling, got.WriteAmp)
+	}
+	if !strings.Contains(got.Reason, "hit-rate") || !strings.Contains(got.Reason, "write-amp") {
+		t.Errorf("reason should name both tripwires, got %q", got.Reason)
+	}
+	// The signal must actually surface, not stay silent: next-action and the rendered
+	// table both carry the regression.
+	if !strings.Contains(rep.NextAction, "cache-efficiency regression") {
+		t.Errorf("NextAction should surface the regression, got %q", rep.NextAction)
+	}
+	if out := RenderAudit(rep); !strings.Contains(out, "cache-efficiency outliers") {
+		t.Errorf("RenderAudit should include the outliers section:\n%s", out)
+	}
+
+	// Negative control: an all-healthy window flags nothing (no false positives) and the
+	// rendered table omits the outliers section entirely.
+	clean := FoldAudit(rows[:3], mustDay(t, "2026-07-02"))
+	if len(clean.EfficiencyOutliers) != 0 {
+		t.Errorf("all-healthy window should have no outliers, got %+v", clean.EfficiencyOutliers)
+	}
+	if strings.Contains(RenderAudit(clean), "cache-efficiency outliers") {
+		t.Errorf("clean render should not mention outliers")
 	}
 }

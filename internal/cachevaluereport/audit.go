@@ -218,6 +218,13 @@ type AuditReport struct {
 	MechanismSplit []AuditMechanismRow `json:"mechanism_split"`
 	FidelitySplit  []AuditFidelityRow  `json:"fidelity_split"`
 
+	// EfficiencyOutliers are per-session cache-efficiency regressions (#1992): provider-
+	// cache sessions whose token hit-rate falls well below the window's session-median or
+	// whose write-amplification is high, so a churny session (prefix instability) cannot
+	// hide inside a healthy day-aggregate hit-rate. Empty (and omitted) when every session
+	// tracks the baseline.
+	EfficiencyOutliers []SessionEfficiency `json:"efficiency_outliers,omitempty"`
+
 	// NetReconciliationDriftUSD is Σ(stored NetUSD − re-derived NetUSDComputed) across
 	// all rows: it must be ~0, and a non-zero value means a producer wrote a NET that
 	// does not equal its own component dollars — an honesty tripwire, not a metric.
@@ -322,6 +329,7 @@ func FoldAudit(rows []SavingsRow, now time.Time) AuditReport {
 	}
 	cum.derive()
 	rep.Cumulative = cum
+	rep.EfficiencyOutliers = foldSessionOutliers(rows)
 
 	rep.MechanismSplit = sortedMechanismSplit(mechAgg)
 	rep.FidelitySplit = sortedFidelitySplit(fidAgg)
@@ -348,6 +356,16 @@ func (rep *AuditReport) finalize() {
 	if c.DollarBlindRows > 0 {
 		rep.NextAction = fmt.Sprintf("%d dollar-blind row(s) (%.0f saved-token-equiv) are excluded from the $ reduction; configure a trusted base price to value them",
 			c.DollarBlindRows, c.DollarBlindSavedTokenEquiv)
+	}
+	if n := len(rep.EfficiencyOutliers); n > 0 {
+		w := rep.EfficiencyOutliers[0]
+		msg := fmt.Sprintf("%d session(s) flagged for cache-efficiency regression (worst %.1f%% hit-rate on %s); see efficiency_outliers",
+			n, w.HitRatePct, w.Date)
+		if rep.NextAction == "" {
+			rep.NextAction = msg
+		} else {
+			rep.NextAction += "; " + msg
+		}
 	}
 }
 
@@ -547,6 +565,124 @@ func GateSavings(rows []SavingsRow, slo string, compactionBudgetTokens uint64, n
 	return rep
 }
 
+// --- Session efficiency (#1992) ----------------------------------------------------
+
+// Per-session cache-efficiency tripwires (#1992). The hit-rate flag is RELATIVE: a
+// session is churny when its token hit-rate falls sessionHitRegressionPts points below
+// the window's own session-median hit-rate, so a fleet running at 98% flags its 80%
+// outlier while a fleet genuinely at 80% does not false-positive. The median (not the
+// prompt-weighted mean) is the baseline so one pathological high-volume cold session
+// cannot drag the reference down and mask milder regressions. The write-amp flag is
+// ABSOLUTE: cache_creation exceeding sessionWriteAmpCeiling of cache_read means the
+// prefix churned enough to re-write a large share of what it reused (prefix instability),
+// independent of the baseline. sessionMinPromptTokens drops trivially small sessions
+// whose ratios are noise.
+const (
+	sessionHitRegressionPts = 15.0
+	sessionWriteAmpCeiling  = 0.5
+	sessionMinPromptTokens  = 1000
+)
+
+// SessionEfficiency is one savings row scored on its own cache efficiency, so a churny
+// session cannot hide inside a healthy day-aggregate hit-rate (#1992). HitRatePct and
+// WriteAmp are token ratios — pricing-independent, so a dollar-blind row is still
+// scored — and Reason names the tripwire(s) that flagged the session.
+type SessionEfficiency struct {
+	Date         string  `json:"date"`
+	GeneratedAt  string  `json:"generated_at,omitempty"`
+	Provider     string  `json:"provider,omitempty"`
+	PromptTokens uint64  `json:"prompt_tokens"`
+	HitRatePct   float64 `json:"hit_rate_pct"` // 100 * cache_read / (input + cache_read + cache_creation)
+	WriteAmp     float64 `json:"write_amp"`    // cache_creation / cache_read (0 when no reuse)
+	Reason       string  `json:"reason"`
+}
+
+// foldSessionOutliers scores each dated provider-cache row on its per-session hit-rate
+// and write-amp, then returns only the regressions, worst-first. The hit-rate tripwire
+// is measured against the window's session-median hit-rate, so "regression" means "below
+// this fleet's own norm" rather than an arbitrary absolute floor. Pure and deterministic:
+// the sort is total (hit-rate, then write-amp, then generated_at, then date).
+func foldSessionOutliers(rows []SavingsRow) []SessionEfficiency {
+	scored := make([]SessionEfficiency, 0, len(rows))
+	hits := make([]float64, 0, len(rows))
+	for _, r := range rows {
+		normalizeSavingsDimensions(&r)
+		if _, err := time.Parse("2006-01-02", r.Date); err != nil {
+			continue
+		}
+		if r.Mechanism != "provider_prompt_cache" {
+			continue // hit-rate / write-amp are provider prompt-cache concepts
+		}
+		prompt := r.InputTokens + r.CacheReadTokens + r.CacheCreationTokens
+		if prompt < sessionMinPromptTokens {
+			continue
+		}
+		hitPct := 100 * float64(r.CacheReadTokens) / float64(prompt)
+		var writeAmp float64
+		if r.CacheReadTokens > 0 {
+			writeAmp = float64(r.CacheCreationTokens) / float64(r.CacheReadTokens)
+		}
+		scored = append(scored, SessionEfficiency{
+			Date:         r.Date,
+			GeneratedAt:  r.GeneratedAt,
+			Provider:     r.Provider,
+			PromptTokens: prompt,
+			HitRatePct:   hitPct,
+			WriteAmp:     writeAmp,
+		})
+		hits = append(hits, hitPct)
+	}
+	if len(scored) == 0 {
+		return nil
+	}
+	baseline := medianFloats(hits)
+
+	var out []SessionEfficiency
+	for _, s := range scored {
+		var reasons []string
+		if s.HitRatePct < baseline-sessionHitRegressionPts {
+			reasons = append(reasons, fmt.Sprintf("hit-rate %.1f%% is %.1f pts below the session-median baseline %.1f%%",
+				s.HitRatePct, baseline-s.HitRatePct, baseline))
+		}
+		if s.WriteAmp > sessionWriteAmpCeiling {
+			reasons = append(reasons, fmt.Sprintf("write-amp %.2f exceeds %.2f (cache re-written faster than reused)",
+				s.WriteAmp, sessionWriteAmpCeiling))
+		}
+		if len(reasons) == 0 {
+			continue
+		}
+		s.Reason = strings.Join(reasons, "; ")
+		out = append(out, s)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].HitRatePct != out[j].HitRatePct {
+			return out[i].HitRatePct < out[j].HitRatePct
+		}
+		if out[i].WriteAmp != out[j].WriteAmp {
+			return out[i].WriteAmp > out[j].WriteAmp
+		}
+		if out[i].GeneratedAt != out[j].GeneratedAt {
+			return out[i].GeneratedAt < out[j].GeneratedAt
+		}
+		return out[i].Date < out[j].Date
+	})
+	return out
+}
+
+// medianFloats returns the median of xs without mutating it. Empty input yields 0.
+func medianFloats(xs []float64) float64 {
+	n := len(xs)
+	if n == 0 {
+		return 0
+	}
+	s := append([]float64(nil), xs...)
+	sort.Float64s(s)
+	if n%2 == 1 {
+		return s[n/2]
+	}
+	return (s[n/2-1] + s[n/2]) / 2
+}
+
 // --- Renderers ---------------------------------------------------------------------
 
 // RenderAudit renders the reconciliation as a compact, deterministic terminal table.
@@ -590,6 +726,15 @@ func RenderAudit(r AuditReport) string {
 		for _, m := range r.MechanismSplit {
 			fmt.Fprintf(&sb, "  %-22s  %-10s  %5d  %16.0f  %12.2f  %6d\n",
 				m.Mechanism, m.Fidelity, m.Rows, m.SavedTokenEquiv, m.NetUSD, m.DollarBlindRows)
+		}
+	}
+	if len(r.EfficiencyOutliers) > 0 {
+		fmt.Fprintf(&sb, "\n  cache-efficiency outliers (per-session hit-rate/write-amp regressions)\n")
+		fmt.Fprintf(&sb, "  %-10s  %-20s  %-16s  %8s  %9s  %s\n",
+			"date", "generated_at", "provider", "hit%", "write_amp", "reason")
+		for _, e := range r.EfficiencyOutliers {
+			fmt.Fprintf(&sb, "  %-10s  %-20s  %-16s  %8.1f  %9.2f  %s\n",
+				e.Date, e.GeneratedAt, e.Provider, e.HitRatePct, e.WriteAmp, e.Reason)
 		}
 	}
 	return sb.String()
