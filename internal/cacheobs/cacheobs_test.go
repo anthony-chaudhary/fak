@@ -138,6 +138,71 @@ func TestObserveSaturatesInsteadOfWrapping(t *testing.T) {
 	}
 }
 
+// #3367: the per-turn reuse-ratio histogram must expose the SHAPE of the partial
+// range that the single o.partial scalar collapses — a bimodal run (turns piled at
+// ~0.2 and ~0.8) must land in distinct buckets, not one lump.
+func TestReuseHistogramSeparatesBimodalShape(t *testing.T) {
+	o := New()
+	for i := 0; i < 3; i++ {
+		o.Observe(100, 15) // 0.15 -> le=0.2 bucket
+	}
+	for i := 0; i < 5; i++ {
+		o.Observe(100, 75) // 0.75 -> le=0.8 bucket
+	}
+	s := o.Snapshot()
+	if s.PartialTurns != 8 {
+		t.Fatalf("partial turns = %d, want 8 (regime counter unchanged by histogram)", s.PartialTurns)
+	}
+	var want [len(ReuseRatioBuckets)]uint64
+	want[1] = 3 // le=0.2
+	want[7] = 5 // le=0.8
+	if s.ReuseHistTurns != want {
+		t.Fatalf("hist = %v, want %v (bimodal shape must be visible)", s.ReuseHistTurns, want)
+	}
+}
+
+// #3367: bucket edges follow Prometheus `le` (<=) semantics, every observed turn is
+// counted exactly once, and cold keeps its own strict (< ColdCeil) counter — a turn
+// at exactly ColdCeil is le=0.1 in the histogram but NOT cold.
+func TestReuseHistogramBoundariesAndColdCounter(t *testing.T) {
+	o := New()
+	o.Observe(100, 0)   // 0.00 -> le=0.1, cold
+	o.Observe(100, 10)  // 0.10 == ColdCeil -> le=0.1, NOT cold (partial)
+	o.Observe(100, 11)  // 0.11 -> le=0.2
+	o.Observe(100, 90)  // 0.90 -> le=0.9, frozen
+	o.Observe(100, 91)  // 0.91 -> le=1.0
+	o.Observe(100, 100) // 1.00 -> le=1.0
+	s := o.Snapshot()
+	var want [len(ReuseRatioBuckets)]uint64
+	want[0] = 2 // le=0.1: the cold turn + the exactly-ColdCeil turn
+	want[1] = 1
+	want[8] = 1
+	want[9] = 2
+	if s.ReuseHistTurns != want {
+		t.Fatalf("hist = %v, want %v", s.ReuseHistTurns, want)
+	}
+	if s.ColdTurns != 1 {
+		t.Fatalf("cold turns = %d, want 1 (cold stays strictly < ColdCeil)", s.ColdTurns)
+	}
+	var sum uint64
+	for _, n := range s.ReuseHistTurns {
+		sum += n
+	}
+	if sum != s.Turns {
+		t.Fatalf("histogram total = %d, want Turns = %d (every turn counted once)", sum, s.Turns)
+	}
+}
+
+// #3367: a saturated bucket must stick at MaxUint64, matching the other accumulators.
+func TestReuseHistogramSaturates(t *testing.T) {
+	o := New()
+	o.reuseHist[len(ReuseRatioBuckets)-1] = math.MaxUint64
+	o.Observe(100, 100) // ratio 1.0 -> the already-saturated le=1.0 bucket
+	if got := o.Snapshot().ReuseHistTurns[len(ReuseRatioBuckets)-1]; got != math.MaxUint64 {
+		t.Fatalf("le=1.0 bucket = %d, want saturated at MaxUint64", got)
+	}
+}
+
 func TestConcurrentObserveIsRace_free(t *testing.T) {
 	o := New()
 	var wg sync.WaitGroup

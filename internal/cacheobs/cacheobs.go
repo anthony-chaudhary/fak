@@ -35,6 +35,15 @@ const (
 	ColdCeil    = 0.10
 )
 
+// ReuseRatioBuckets are the per-turn reuse-ratio histogram upper bounds (Prometheus
+// `le` semantics: a turn lands in the first bucket whose bound is >= its ratio). The
+// three-regime counters show WHEN turns leave the frozen regime; these buckets show
+// the SHAPE of the partial range (bimodal vs uniform, #963) that a single scalar
+// hides. Every observed turn is recorded — cumulative counts and an +Inf bucket equal
+// to Turns fall out for free — while cold keeps its own strict (< ColdCeil) counter,
+// so the le=0.1 bucket differs from ColdTurns only by turns at exactly ColdCeil.
+var ReuseRatioBuckets = [...]float64{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
+
 // Default is the process-global observer the in-kernel planner feeds and the gateway
 // scrapes. One per process, like blob.Default / vdso.Default.
 var Default = New()
@@ -49,6 +58,10 @@ type Observer struct {
 	frozen       uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
 	partial      uint64 // turns between ColdCeil and FrozenFloor
 	cold         uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
+	// reuseHist[i] counts turns whose ratio fell in (ReuseRatioBuckets[i-1],
+	// ReuseRatioBuckets[i]] — per-bucket (non-cumulative) so each increment touches
+	// one slot; a renderer accumulates left-to-right to emit `le` lines.
+	reuseHist [len(ReuseRatioBuckets)]uint64
 }
 
 // New returns a fresh observer (tests use it for isolation; production uses Default).
@@ -82,6 +95,14 @@ func (o *Observer) Observe(promptTokens, reusedPrefixTokens int) {
 	default:
 		o.partial = saturatingAddU64(o.partial, 1)
 	}
+	idx := len(ReuseRatioBuckets) - 1 // ratio is clamped to [0,1], so le=1.0 always catches
+	for i, le := range ReuseRatioBuckets {
+		if ratio <= le {
+			idx = i
+			break
+		}
+	}
+	o.reuseHist[idx] = saturatingAddU64(o.reuseHist[idx], 1)
 	o.mu.Unlock()
 }
 
@@ -109,6 +130,10 @@ type Stats struct {
 	// turns. 0 when no turns have prompt tokens yet (an idle process never reports a
 	// phantom ratio).
 	ReuseRatio float64
+	// ReuseHistTurns[i] counts turns whose per-turn ratio fell in
+	// (ReuseRatioBuckets[i-1], ReuseRatioBuckets[i]] (per-bucket, non-cumulative).
+	// Every observed turn is counted, so the values sum to Turns.
+	ReuseHistTurns [len(ReuseRatioBuckets)]uint64
 }
 
 // Snapshot returns the current accumulated stats. The ratio is derived under the lock so
@@ -120,12 +145,13 @@ func (o *Observer) Snapshot() Stats {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	s := Stats{
-		Turns:        o.turns,
-		PromptTokens: o.promptTokens,
-		ReusedTokens: o.reusedTokens,
-		FrozenTurns:  o.frozen,
-		PartialTurns: o.partial,
-		ColdTurns:    o.cold,
+		Turns:          o.turns,
+		PromptTokens:   o.promptTokens,
+		ReusedTokens:   o.reusedTokens,
+		FrozenTurns:    o.frozen,
+		PartialTurns:   o.partial,
+		ColdTurns:      o.cold,
+		ReuseHistTurns: o.reuseHist,
 	}
 	if o.promptTokens > 0 {
 		s.ReuseRatio = float64(o.reusedTokens) / float64(o.promptTokens)
