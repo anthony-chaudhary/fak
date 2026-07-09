@@ -126,6 +126,113 @@ func TestClassify_TopProcessAttribution(t *testing.T) {
 	}
 }
 
+func TestClassify_HandleLeak_raisesCalmToElevated(t *testing.T) {
+	// Live capture (2026-07-08..11): an otherwise CALM box — low faults, RAM free,
+	// disk idle — but WindowsTerminal has accreted 33,418 handles (climbing across
+	// days). A leak is a slow-burn warning, so the verdict is ELEVATED (not a
+	// stall) with cause handle_leak, and the culprit is named.
+	s := Sample{
+		TotalFaultsPerSec: 22000,
+		HardFaultsPerSec:  10,
+		AvailableMB:       135000,
+		DiskQueueLen:      0,
+		SystemHandleTotal: 510974,
+		TopHandles: []ProcHandles{
+			{PID: 17836, Name: "WindowsTerminal.exe", Handles: 33418},
+			{PID: 4, Name: "System", Handles: 19005},
+			{PID: 8492, Name: "svchost.exe", Handles: 14135},
+		},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelElevated {
+		t.Fatalf("level = %q, want elevated (reasons: %v)", v.Level, v.Reasons)
+	}
+	if v.Cause != CauseHandleLeak {
+		t.Fatalf("cause = %q, want %q", v.Cause, CauseHandleLeak)
+	}
+	if v.HandleLeakProcess != "WindowsTerminal.exe" || v.HandleLeakPID != 17836 || v.HandleLeakCount != 33418 {
+		t.Fatalf("leak attribution = %q/%d/%d, want WindowsTerminal.exe/17836/33418",
+			v.HandleLeakProcess, v.HandleLeakPID, v.HandleLeakCount)
+	}
+}
+
+func TestClassify_HandleLeak_attributedUnderChurnStall(t *testing.T) {
+	// A soft-fault churn stall AND a handle leak at once (the real live frame).
+	// The freeze cause wins the Level/Cause (it is the urgent one), but the leak
+	// must still be attributed so the operator sees both problems.
+	s := Sample{
+		TotalFaultsPerSec:      1241214,
+		HardFaultsPerSec:       39,
+		DemandZeroFaultsPerSec: 554729,
+		TransitionFaultsPerSec: 217729,
+		ContextSwitchesPerSec:  484244,
+		SystemCallsPerSec:      1806032,
+		AvailableMB:            135331,
+		DiskQueueLen:           0,
+		TopHandles:             []ProcHandles{{PID: 17836, Name: "WindowsTerminal.exe", Handles: 33418}},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelStall || v.Cause != CauseSoftFault {
+		t.Fatalf("got level=%q cause=%q, want stall/soft_fault_churn (freeze wins)", v.Level, v.Cause)
+	}
+	if v.HandleLeakProcess != "WindowsTerminal.exe" || v.HandleLeakCount != 33418 {
+		t.Fatalf("leak not attributed under stall: %q/%d", v.HandleLeakProcess, v.HandleLeakCount)
+	}
+}
+
+func TestClassify_HandleBelowThreshold_noLeak(t *testing.T) {
+	// The top holder is under the 10k line — a normal busy process, not a leak.
+	// No attribution, and the box stays calm.
+	s := Sample{
+		TotalFaultsPerSec: 22000,
+		AvailableMB:       135000,
+		TopHandles:        []ProcHandles{{PID: 100, Name: "fak.exe", Handles: 3241}},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelCalm {
+		t.Fatalf("level = %q, want calm", v.Level)
+	}
+	if v.HandleLeakProcess != "" {
+		t.Fatalf("unexpected leak attribution %q for a 3241-handle process", v.HandleLeakProcess)
+	}
+}
+
+func TestClassify_SystemHandleHigh_elevatesCalm(t *testing.T) {
+	// No single-process leak, but the system-wide handle total crosses the coarse
+	// ceiling — a calm box is raised to elevated with cause handle_leak.
+	s := Sample{
+		TotalFaultsPerSec: 22000,
+		AvailableMB:       135000,
+		SystemHandleTotal: 1_050_000,
+		TopHandles:        []ProcHandles{{PID: 4, Name: "System", Handles: 9000}}, // below per-proc line
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelElevated || v.Cause != CauseHandleLeak {
+		t.Fatalf("got level=%q cause=%q, want elevated/handle_leak", v.Level, v.Cause)
+	}
+	if v.HandleLeakProcess != "" {
+		t.Fatalf("no per-process suspect expected, got %q", v.HandleLeakProcess)
+	}
+}
+
+func TestWorstHandleHog_picksMaxAtOrAboveThreshold(t *testing.T) {
+	in := []ProcHandles{
+		{PID: 1, Name: "a", Handles: 9000},  // below
+		{PID: 2, Name: "b", Handles: 33418}, // worst
+		{PID: 3, Name: "c", Handles: 12000},
+	}
+	got, ok := worstHandleHog(in, 10000)
+	if !ok || got.PID != 2 || got.Handles != 33418 {
+		t.Fatalf("got %+v ok=%v, want b/33418", got, ok)
+	}
+	if _, ok := worstHandleHog(in, 0); ok {
+		t.Fatalf("threshold 0 must disable the rule")
+	}
+	if _, ok := worstHandleHog([]ProcHandles{{PID: 1, Handles: 500}}, 10000); ok {
+		t.Fatalf("no process above threshold must return ok=false")
+	}
+}
+
 func TestSortTopIO_capsAndOrders(t *testing.T) {
 	in := []ProcIO{
 		{PID: 1, Name: "a", Ops: 10},

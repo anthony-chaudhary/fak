@@ -51,6 +51,14 @@ type Sample struct {
 	AvailableMB  int     `json:"available_mb"`   // free RAM; rules OUT memory exhaustion as the cause
 	DiskQueueLen float64 `json:"disk_queue_len"` // current physical-disk queue; rules OUT disk saturation
 
+	// Handle census. A per-process handle count that climbs unbounded is a
+	// classic Windows leak (Russinovich's rule of thumb: >10k handles/proc is a
+	// likely leak). On this box the terminal emulator has been the top holder,
+	// climbing across days — a slow-burn precursor to pool exhaustion that no
+	// fault/scheduler counter reveals. Zero = not observed (never trips a rule).
+	SystemHandleTotal int           `json:"system_handle_total,omitempty"` // sum of all processes' open handles
+	TopHandles        []ProcHandles `json:"top_handles,omitempty"`         // top handle holders at sample time
+
 	// Top offenders by I/O operations/sec at this instant (already sorted or not).
 	TopIO []ProcIO `json:"top_io,omitempty"`
 }
@@ -60,6 +68,13 @@ type ProcIO struct {
 	PID  int     `json:"pid"`
 	Name string  `json:"name"`
 	Ops  float64 `json:"ops_per_sec"`
+}
+
+// ProcHandles is one process's open-handle count at sample time.
+type ProcHandles struct {
+	PID     int    `json:"pid"`
+	Name    string `json:"name"`
+	Handles int    `json:"handles"`
 }
 
 // Level is the coarse severity band.
@@ -81,6 +96,7 @@ const (
 	CauseSchedThrash Cause = "scheduler_thrash" // context-switch/syscall storm without a clear spawn burst
 	CauseDiskIO      Cause = "disk_io"          // genuine disk-backed pressure (hard faults / disk queue)
 	CauseMemPressure Cause = "memory_pressure"  // low available RAM (the classic case, here to distinguish it)
+	CauseHandleLeak  Cause = "handle_leak"      // a process's open-handle count climbing unbounded (slow-burn)
 )
 
 // Thresholds are the decision boundaries. They are exported and defaulted so a
@@ -103,6 +119,15 @@ type Thresholds struct {
 	// Genuine-resource guards (to correctly ATTRIBUTE, not to gate stalls).
 	MemLowMB      int     // available RAM below this = memory pressure (default 2048)
 	DiskQueueBusy float64 // disk queue at/above this = real disk pressure (default 4)
+
+	// Handle-leak detection. A single process at/above HandleLeakProc handles is
+	// a leak suspect (default 10000, Russinovich's line). This is a WARNING axis,
+	// not a freeze axis: a leak suspect raises a calm box to *elevated* and names
+	// the culprit, but never fabricates a stall — the box runs for days with a
+	// leaking terminal before any pool exhausts. SystemHandleHigh is a coarse
+	// system-wide informational ceiling (default 1_000_000). Zero disables either.
+	HandleLeakProc   int // per-process handle count that flags a leak suspect (default 10000)
+	SystemHandleHigh int // system-wide handle total worth flagging as elevated (default 1_000_000)
 }
 
 // DefaultThresholds returns the calibrated defaults.
@@ -116,6 +141,8 @@ func DefaultThresholds() Thresholds {
 		SpawnBurstStall:    8,
 		MemLowMB:           2048,
 		DiskQueueBusy:      4,
+		HandleLeakProc:     10000,
+		SystemHandleHigh:   1000000,
 	}
 }
 
@@ -128,6 +155,13 @@ type Verdict struct {
 	TopProcess string  `json:"top_process,omitempty"`
 	TopPID     int     `json:"top_pid,omitempty"`
 	TopOps     float64 `json:"top_ops_per_sec,omitempty"`
+
+	// Handle-leak attribution: the worst per-process handle hog, if any crossed
+	// HandleLeakProc. Populated regardless of Level (so an operator sees the
+	// leaking process even when a churn stall dominates the Cause).
+	HandleLeakProcess string `json:"handle_leak_process,omitempty"`
+	HandleLeakPID     int    `json:"handle_leak_pid,omitempty"`
+	HandleLeakCount   int    `json:"handle_leak_count,omitempty"`
 }
 
 // hardFraction is the share of total faults that actually hit disk. A tiny
@@ -154,6 +188,15 @@ func Classify(s Sample, t Thresholds) Verdict {
 	if len(s.TopIO) > 0 {
 		top := topByOps(s.TopIO)
 		v.TopProcess, v.TopPID, v.TopOps = top.Name, top.PID, top.Ops
+	}
+
+	// Attribute the worst per-process handle hog regardless of level, so the
+	// operator always sees a leaking process — even when a churn stall owns the
+	// Cause. A leak is a slow-burn WARNING that rides alongside whatever else is
+	// happening; it only raises level below (calm -> elevated), never a stall.
+	leak, hasLeak := worstHandleHog(s.TopHandles, t.HandleLeakProc)
+	if hasLeak {
+		v.HandleLeakProcess, v.HandleLeakPID, v.HandleLeakCount = leak.Name, leak.PID, leak.Handles
 	}
 
 	// --- Genuine-resource explanations first (highest priority) ---
@@ -217,6 +260,17 @@ func Classify(s Sample, t Thresholds) Verdict {
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f syscalls/sec (>= %0.f)", s.SystemCallsPerSec, t.SysCallStall))
 	}
 
+	// Handle signals are WARNINGS, not freezes: append their reasons now so they
+	// surface even under a churn stall, but do NOT set `stall` — a leaking
+	// terminal runs for days before any pool exhausts.
+	if hasLeak {
+		v.Reasons = append(v.Reasons, fmt.Sprintf("%s (pid %d) holds %d handles (>= %d — leak suspect)", leak.Name, leak.PID, leak.Handles, t.HandleLeakProc))
+	}
+	systemHandleHigh := t.SystemHandleHigh > 0 && s.SystemHandleTotal >= t.SystemHandleHigh
+	if systemHandleHigh {
+		v.Reasons = append(v.Reasons, fmt.Sprintf("%d handles system-wide (>= %d)", s.SystemHandleTotal, t.SystemHandleHigh))
+	}
+
 	if stall {
 		v.Level = LevelStall
 		return v
@@ -230,7 +284,35 @@ func Classify(s Sample, t Thresholds) Verdict {
 		}
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f faults/sec (elevated >= %0.f)", s.TotalFaultsPerSec, t.SoftFaultElevated))
 	}
+	// A handle-leak suspect (or a system-wide handle ceiling) raises a calm box
+	// to elevated and owns the cause if nothing else claimed it.
+	if v.Level == LevelCalm && (hasLeak || systemHandleHigh) {
+		v.Level = LevelElevated
+		if v.Cause == CauseNone {
+			v.Cause = CauseHandleLeak
+		}
+	}
 	return v
+}
+
+// worstHandleHog returns the single process with the most open handles among
+// those at/above threshold, and ok=false if none qualify (or threshold<=0). Pure
+// and non-mutating, like topByOps.
+func worstHandleHog(in []ProcHandles, threshold int) (ProcHandles, bool) {
+	if threshold <= 0 {
+		return ProcHandles{}, false
+	}
+	worst := ProcHandles{}
+	found := false
+	for _, p := range in {
+		if p.Handles < threshold {
+			continue
+		}
+		if !found || p.Handles > worst.Handles || (p.Handles == worst.Handles && p.PID < worst.PID) {
+			worst, found = p, true
+		}
+	}
+	return worst, found
 }
 
 // topByOps returns the highest-ops entry (stable on ties by PID for determinism).

@@ -185,6 +185,13 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 		s.DemandZeroFaultsPerSec, s.TransitionFaultsPerSec)
 	fmt.Fprintf(w, "scheduler   : %0.f ctx-switch/sec, %0.f syscall/sec\n", s.ContextSwitchesPerSec, s.SystemCallsPerSec)
 	fmt.Fprintf(w, "census      : %d procs, %d threads (delta %+d)\n", s.ProcessCount, s.ThreadCount, s.ProcessDelta)
+	if s.SystemHandleTotal > 0 {
+		fmt.Fprintf(w, "handles     : %d system-wide", s.SystemHandleTotal)
+		if v.HandleLeakProcess != "" {
+			fmt.Fprintf(w, "  — LEAK SUSPECT: %s pid %d holds %d handles", v.HandleLeakProcess, v.HandleLeakPID, v.HandleLeakCount)
+		}
+		fmt.Fprintf(w, "\n")
+	}
 	fmt.Fprintf(w, "not-the-cause: %d MB RAM free, disk queue %.1f\n", s.AvailableMB, s.DiskQueueLen)
 	if len(v.Reasons) > 0 {
 		fmt.Fprintf(w, "reasons     : %s\n", stallJoinReasons(v.Reasons))
