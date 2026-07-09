@@ -46,6 +46,11 @@ type debugVarsResponse struct {
 	// /debug/vars twin of the /metrics-only fak_harness_* family, so the pane can show
 	// live what the exit summary prints. Nil/omitted until the host samples a session.
 	Harness *SessionHarness `json:"harness,omitempty"`
+	// Fleet is the live cross-MACHINE fleet aggregate — how many operator boxes published
+	// snapshots, the stale/action split, and rolled-up totals — so the pane shows the
+	// fleet-of-machines health beside the session-local blocks. Nil/omitted unless the
+	// host set a provider (SetSessionFleetProvider) that reports a non-empty fleet.
+	Fleet *SessionFleet `json:"fleet,omitempty"`
 	// StartupReport is the full human-readable startup report the host recorded at boot
 	// (fak guard's banner + hook/auth notes) — what `fak info --startup` prints when an
 	// attended launch kept the terminal banner compact. Omitted when the host set none.
@@ -457,6 +462,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Endpoints:        s.debugEndpoints(),
 		Adjudication:     s.debugAdjudication(),
 		Harness:          s.debugHarness(),
+		Fleet:            s.debugFleet(),
 		StartupReport:    s.startupReportText(),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
@@ -614,6 +620,17 @@ func (s *Server) debugHarness() *SessionHarness {
 		return nil
 	}
 	return &h
+}
+
+// debugFleet projects the host-supplied cross-machine fleet provider into the
+// /debug/vars "fleet" block, or nil when no provider is set / the fleet is empty (the
+// block is then omitted). See session_fleet.go.
+func (s *Server) debugFleet() *SessionFleet {
+	f, ok := s.sessionFleet()
+	if !ok {
+		return nil
+	}
+	return &f
 }
 
 func (s *Server) debugAssumptions(ctx context.Context) []SessionAssumption {

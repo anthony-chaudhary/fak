@@ -953,6 +953,15 @@ type Server struct {
 	harnessSnapshotMu       sync.Mutex
 	harnessSnapshotProvider func() SessionHarness
 
+	// sessionFleetProvider is the optional pull source for the live cross-machine fleet
+	// block on /debug/vars (the "fleet" block). fak guard wires it to its TTL-cached
+	// snapshot fold (see cmd/fak/guard_fleet.go); nil on the default serve path. Unlike the
+	// endpoints provider it reports its own ok. Distinct from the worker-membership fleet
+	// above: this is the fleet-of-MACHINES display aggregate, not the router's live view.
+	// Guarded by sessionFleetMu. See session_fleet.go.
+	sessionFleetMu       sync.Mutex
+	sessionFleetProvider func() (SessionFleet, bool)
+
 	// accountRehomeFn is the optional operator seat-switch function behind
 	// POST /v1/fak/account/rehome. fak guard wires it to its account-failover state
 	// (see cmd/fak/guard_account_failover.go); nil everywhere else keeps the route
