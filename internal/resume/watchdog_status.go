@@ -30,13 +30,19 @@ const (
 // WatchdogStatusInput is the pure input to FoldWatchdogStatus. Events are typed facts
 // parsed from the durable resume ledger; Plan is the current AUTO_RESUME plan.
 type WatchdogStatusInput struct {
-	Mode            string                `json:"mode"`
-	NowUnix         int64                 `json:"now_unix"`
-	SilentSeconds   int64                 `json:"silent_seconds"`
-	UnprovenSeconds int64                 `json:"unproven_seconds,omitempty"`
-	MonotonicTicks  int                   `json:"monotonic_ticks"`
-	Plan            []WatchdogPlanRow     `json:"plan,omitempty"`
-	Events          []WatchdogStatusEvent `json:"events,omitempty"`
+	Mode            string `json:"mode"`
+	NowUnix         int64  `json:"now_unix"`
+	SilentSeconds   int64  `json:"silent_seconds"`
+	UnprovenSeconds int64  `json:"unproven_seconds,omitempty"`
+	// LaunchStaleSeconds arms the "auto-resume not launching" alarm (#3460): when the
+	// plan carries queued sessions but the durable ledger shows no launch within this
+	// many seconds, the resume layer is queuing work it never launches — the dead-but-
+	// silent failure a fabricated "resumed just now" would otherwise mask. 0 disables it
+	// (the pure default; the CLI arms it).
+	LaunchStaleSeconds int64                 `json:"launch_stale_seconds,omitempty"`
+	MonotonicTicks     int                   `json:"monotonic_ticks"`
+	Plan               []WatchdogPlanRow     `json:"plan,omitempty"`
+	Events             []WatchdogStatusEvent `json:"events,omitempty"`
 }
 
 // WatchdogStatusEvent is one ledger fact the drain steward can trust without reading
@@ -123,6 +129,12 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	}
 	hasCurrentPlan := in.Plan != nil
 
+	// lastLedgerLaunchUnix is the newest real launch/resume event across all sessions —
+	// the ground truth for "is auto-resume actually launching?" (#3460). lastTickMode is
+	// the mode of the newest real TICK the watchdog recorded, i.e. the INSTALLED task's
+	// mode — distinct from in.Mode, which only echoes this side-effect-free --status read.
+	var lastLedgerLaunchUnix int64
+	lastTickMode := ""
 	events := append([]WatchdogStatusEvent(nil), in.Events...)
 	sort.SliceStable(events, func(i, j int) bool { return events[i].UnixSeconds < events[j].UnixSeconds })
 	for _, e := range events {
@@ -131,6 +143,7 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		if phase == "status" || phase == "tick" || phase == "snapshot" {
 			depthSamples = append(depthSamples, watchdogDepthSample{at: at, mode: normalizeWatchdogMode(firstNonEmpty(e.Mode, mode)), depth: e.AutoResumeDepth})
 			currentDepth = e.AutoResumeDepth
+			lastTickMode = normalizeWatchdogMode(firstNonEmpty(e.Mode, mode))
 		}
 		if e.Session == "" {
 			continue
@@ -143,7 +156,11 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		case "queued", "detected", "auto_resume":
 			watchdogFoldFor(bySession, e.Session).beginCycle(e.UnixSeconds)
 		case "launched", "resumed":
-			watchdogFoldFor(bySession, e.Session).recordLaunch(firstNonZero(e.ResumedUnix, e.UnixSeconds))
+			launchAt := firstNonZero(e.ResumedUnix, e.UnixSeconds)
+			watchdogFoldFor(bySession, e.Session).recordLaunch(launchAt)
+			if launchAt > lastLedgerLaunchUnix {
+				lastLedgerLaunchUnix = launchAt
+			}
 		case "settled", "operator_settled", "consolidated":
 			watchdogFoldFor(bySession, e.Session).close()
 		}
@@ -168,8 +185,13 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 			continue
 		}
 		f := watchdogFoldFor(bySession, row.Session)
-		if f.closed || f.detectedAt == 0 || f.recovered() {
-			f.beginCycle(now)
+		// A session in the live plan must render as a row, but its detected/resumed times
+		// come only from real ledger events — never fabricated from `now` (#3460): a plan-
+		// only session with no ledger record reads detected=—/resumed=—, and a settled or
+		// recovered session that re-appears reopens as a bare queued row with an unknown
+		// detection time until a real queued/detected/launch row supplies it.
+		if f.closed || f.recovered() {
+			f.reopenQueued()
 		}
 	}
 	if hasCurrentPlan && now > 0 {
@@ -182,6 +204,7 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	var maxUnproven int64
 	staleUnproven := 0
 	authBlocked := 0
+	queuedPending := 0
 	for _, f := range bySession {
 		if f.closed {
 			continue
@@ -195,6 +218,11 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 			row.UnprovenSeconds = 0
 			row.Evidence = "plan_disp:" + strings.Join(uniqueNonEmpty(planDisps[f.session]), ",")
 			authBlocked++
+		}
+		// A queued row is one auto-resume has NOT launched this cycle (resumedAt==0, and
+		// not auth-blocked): the population the staleness alarm watches (#3460).
+		if row.Status == WatchdogMTTRQueued {
+			queuedPending++
 		}
 		if row.SilentSeconds > maxSilent {
 			maxSilent = row.SilentSeconds
@@ -229,8 +257,23 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	if authBlocked > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d AUTO_RESUME row(s) require auth/login before resume", authBlocked))
 	}
-	if mode == "DRY-RUN" && currentDepth > 0 {
-		reasons = append(reasons, "watchdog is DRY-RUN with queued AUTO_RESUME rows")
+	// The installed watchdog's mode is the mode of the last real TICK the ledger recorded
+	// — never in.Mode, which merely echoes THIS side-effect-free --status read (always dry
+	// by nature). Only flag DRY-RUN when the actual watchdog last ticked dry (the installed
+	// task lacks -Live, #3321), not because a status read is dry (#3460). With no recorded
+	// tick we cannot prove the installed mode, so we stay silent rather than cry wolf.
+	if lastTickMode == "DRY-RUN" && currentDepth > 0 {
+		reasons = append(reasons, "installed watchdog last ticked DRY-RUN with queued AUTO_RESUME rows (reinstall with -Live)")
+	}
+	// RED headline (#3460): a live plan with queued sessions but no ledger launch within the
+	// window means auto-resume is queuing work it never launches — the dead-but-silent
+	// failure a fabricated "resumed just now" would mask. Prepend so it leads the reasons.
+	if in.LaunchStaleSeconds > 0 && len(in.Plan) > 0 && queuedPending > 0 {
+		if lastLedgerLaunchUnix <= 0 {
+			reasons = append([]string{fmt.Sprintf("AUTO-RESUME NOT LAUNCHING: no ledger launch on record, %d queued", queuedPending)}, reasons...)
+		} else if age := now - lastLedgerLaunchUnix; age >= in.LaunchStaleSeconds {
+			reasons = append([]string{fmt.Sprintf("AUTO-RESUME NOT LAUNCHING: last ledger launch %s ago, %d queued", watchdogAge(age), queuedPending)}, reasons...)
+		}
 	}
 
 	verdict := WatchdogDrainGreen
@@ -301,6 +344,17 @@ func (f *watchdogSessionFold) close() {
 	f.launches = nil
 	f.progresses = nil
 	f.closed = true
+}
+
+// reopenQueued clears a closed/recovered fold back to a bare queued state WITHOUT
+// inventing a detection time (#3460): the row still renders (its session is in the
+// live plan) but its detected/resumed columns stay — until a real ledger event
+// supplies them, instead of reading "resumed just now" off a week-dead ledger.
+func (f *watchdogSessionFold) reopenQueued() {
+	f.detectedAt = 0
+	f.launches = nil
+	f.progresses = nil
+	f.closed = false
 }
 
 func (f watchdogSessionFold) recovered() bool {
@@ -451,6 +505,20 @@ func uniqueNonEmpty(vals []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// watchdogAge renders a staleness age compactly for the "not launching" headline:
+// days past a day, hours past an hour, else whole minutes — enough scale for a
+// week-dead ledger to read as "7.0d ago", not "168.0h ago".
+func watchdogAge(sec int64) string {
+	switch {
+	case sec >= 86400:
+		return fmt.Sprintf("%.1fd", float64(sec)/86400)
+	case sec >= 3600:
+		return fmt.Sprintf("%.1fh", float64(sec)/3600)
+	default:
+		return fmt.Sprintf("%.0fm", float64(sec)/60)
+	}
 }
 
 func firstNonZero(vals ...int64) int64 {

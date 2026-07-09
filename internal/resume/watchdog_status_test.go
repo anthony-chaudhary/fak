@@ -198,9 +198,100 @@ func TestFoldWatchdogStatusCurrentPlanReopensRecoveredSession(t *testing.T) {
 		},
 	})
 
+	// A recovered session re-appearing in the live plan reopens as queued, but its
+	// detected/resumed times are NOT fabricated from now (#3460) — they stay 0 (—) until
+	// a fresh ledger row lands, so a week-dead ledger can never read "resumed just now".
 	row := watchdogTestRow(got.MTTRSessions, "sid-reopened")
-	if row.Status != WatchdogMTTRQueued || row.DetectedAt != 3_000 {
-		t.Fatalf("reopened row = %+v, want current plan to reopen as queued at now", row)
+	if row.Status != WatchdogMTTRQueued || row.DetectedAt != 0 || row.ResumedAt != 0 {
+		t.Fatalf("reopened row = %+v, want queued with no fabricated detected/resumed time", row)
+	}
+}
+
+// TestFoldWatchdogStatusStalePlanNoLaunchIsRedHeadline pins acceptance #2 of #3460:
+// a non-empty plan whose sessions were never launched (empty ledger) turns RED with an
+// "AUTO-RESUME NOT LAUNCHING" headline naming the queue depth — instead of reading
+// healthy — and the queued rows carry NO fabricated detected/resumed times (acceptance #1).
+func TestFoldWatchdogStatusStalePlanNoLaunchIsRedHeadline(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:               "DRY-RUN", // a --status read is dry by nature; must not be the reason
+		NowUnix:            1_000_000,
+		SilentSeconds:      7200,
+		LaunchStaleSeconds: 1800,
+		MonotonicTicks:     3,
+		Plan: []WatchdogPlanRow{
+			{Session: "sid-q1", Account: ".claude-a"},
+			{Session: "sid-q2", Account: ".claude-a"},
+			{Session: "sid-q3", Account: ".claude-a"},
+		},
+	})
+
+	if got.Verdict != WatchdogDrainRed {
+		t.Fatalf("verdict = %s, want red for a queued-but-never-launched plan: %+v", got.Verdict, got)
+	}
+	if len(got.Reasons) == 0 || !strings.Contains(got.Reasons[0], "AUTO-RESUME NOT LAUNCHING") {
+		t.Fatalf("reasons[0] must be the not-launching headline, got %q", got.Reasons)
+	}
+	if !strings.Contains(got.Reasons[0], "3 queued") {
+		t.Fatalf("headline must name the queue depth, got %q", got.Reasons[0])
+	}
+	for _, row := range got.MTTRSessions {
+		if row.DetectedAt != 0 || row.ResumedAt != 0 {
+			t.Fatalf("queued row carries fabricated times: %+v", row)
+		}
+	}
+}
+
+// TestFoldWatchdogStatusStalePlanOldLaunchNamesAge proves the headline reports the age of
+// the last REAL launch when one exists but is far in the past (a week-dead ledger), and
+// that a launch for a since-settled, out-of-plan session still counts as the last launch.
+func TestFoldWatchdogStatusStalePlanOldLaunchNamesAge(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:               "DRY-RUN",
+		NowUnix:            1_000 + 8*86400, // 8 days after the last launch
+		LaunchStaleSeconds: 1800,
+		Plan:               []WatchdogPlanRow{{Session: "sid-fresh", Account: ".claude-a"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 900, Session: "sid-old", Phase: "launched", Mode: "LIVE"},
+			{UnixSeconds: 1_000, Session: "sid-old", Phase: "settled", Mode: "LIVE"},
+		},
+	})
+
+	if got.Verdict != WatchdogDrainRed {
+		t.Fatalf("verdict = %s, want red: %+v", got.Verdict, got)
+	}
+	if len(got.Reasons) == 0 || !strings.Contains(got.Reasons[0], "AUTO-RESUME NOT LAUNCHING") ||
+		!strings.Contains(got.Reasons[0], "8.0d ago") || !strings.Contains(got.Reasons[0], "1 queued") {
+		t.Fatalf("headline must name last-launch age and depth, got %q", got.Reasons)
+	}
+}
+
+// TestFoldWatchdogStatusInstalledDryRunReasonFromLastTick proves the DRY-RUN reason keys
+// off the INSTALLED watchdog's last real tick mode, not the --status invocation mode: a
+// dry read of a LIVE-installed watchdog must NOT emit the DRY-RUN reason (the spurious one
+// the audit skill warns about), while a genuinely DRY-RUN-installed watchdog must.
+func TestFoldWatchdogStatusInstalledDryRunReasonFromLastTick(t *testing.T) {
+	liveInstalled := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:    "DRY-RUN", // the --status read is dry
+		NowUnix: 5_000,
+		Plan:    []WatchdogPlanRow{{Session: "sid-1", Account: ".claude-a"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 4_000, Phase: "status", Mode: "LIVE", AutoResumeDepth: 1}, // installed watchdog ticks LIVE
+		},
+	})
+	if joined := strings.Join(liveInstalled.Reasons, "\n"); strings.Contains(joined, "DRY-RUN") {
+		t.Fatalf("a dry --status read of a LIVE-installed watchdog must not emit a DRY-RUN reason, got %q", joined)
+	}
+
+	dryInstalled := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:    "DRY-RUN",
+		NowUnix: 5_000,
+		Plan:    []WatchdogPlanRow{{Session: "sid-1", Account: ".claude-a"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 4_000, Phase: "status", Mode: "DRY-RUN", AutoResumeDepth: 1}, // installed watchdog ticks DRY-RUN
+		},
+	})
+	if joined := strings.Join(dryInstalled.Reasons, "\n"); !strings.Contains(joined, "DRY-RUN") || !strings.Contains(joined, "-Live") {
+		t.Fatalf("a DRY-RUN-installed watchdog with queued rows must flag it, got %q", joined)
 	}
 }
 

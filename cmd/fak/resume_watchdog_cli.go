@@ -82,20 +82,13 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	silentHours := fs.Float64("silent-hours", rwEnvFloat("FAK_RESUME_SILENT_HOURS", 2), "with --status, mark red when any unrecovered queued row is silent this many hours (env FAK_RESUME_SILENT_HOURS)")
 	unprovenMinutes := fs.Float64("unproven-minutes", rwEnvFloat("FAK_RESUME_UNPROVEN_MINUTES", 10), "with --status, mark red when a launched resume has no progress witness for this many minutes (env FAK_RESUME_UNPROVEN_MINUTES; 0 disables)")
 	monotonicTicks := fs.Int("monotonic-ticks", rwEnvInt("FAK_RESUME_MONOTONIC_TICKS", 3), "with --status, mark red when AUTO_RESUME depth grows for this many consecutive ticks (env FAK_RESUME_MONOTONIC_TICKS)")
+	launchStaleMinutes := fs.Float64("launch-stale-minutes", rwEnvFloat("FAK_RESUME_LAUNCH_STALE_MIN", 30), "with --status, mark red when the plan carries queued sessions but the durable ledger has had no launch for this many minutes — the dead-but-silent auto-resume the status view used to mask off fabricated timestamps (#3460; env FAK_RESUME_LAUNCH_STALE_MIN; 0 disables)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 
 	regDir := resolveSweepRegDir(*regDirFlag)
-	logDir := *logDirFlag
-	if logDir == "" {
-		if v := strings.TrimSpace(os.Getenv("FAK_WATCHDOG_LOG_DIR")); v != "" {
-			logDir = v
-		} else {
-			cwd, _ := os.Getwd()
-			logDir = filepath.Join(findRepoRoot(cwd), "tools", "_watchdog")
-		}
-	}
+	logDir := resolveWatchdogLogDir(*logDirFlag)
 	_ = os.MkdirAll(logDir, 0o755)
 	note := func(format string, a ...any) { rwNote(logDir, stdout, fmt.Sprintf(format, a...)) }
 
@@ -158,27 +151,8 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	statusEvents := rwLoadWatchdogStatusEvents(ledgerPath)
 	statusEvents = append(statusEvents, rwLoadWatchdogStatusEvents(statusLedgerPath)...)
 	if *statusOnly {
-		rep := resume.FoldWatchdogStatus(resume.WatchdogStatusInput{
-			Mode:            tickMode,
-			NowUnix:         time.Now().Unix(),
-			SilentSeconds:   int64(*silentHours * 3600),
-			UnprovenSeconds: int64(*unprovenMinutes * 60),
-			MonotonicTicks:  *monotonicTicks,
-			Plan:            plan,
-			Events:          statusEvents,
-		})
-		if *asJSON {
-			code := encodeJSONOrFail(stdout, stderr, rep, "fak resume watchdog --status")
-			if code != 0 {
-				return code
-			}
-		} else {
-			renderResumeWatchdogStatus(stdout, rep)
-		}
-		if rep.Verdict == resume.WatchdogDrainRed {
-			return 3
-		}
-		return 0
+		return reportResumeWatchdogStatus(stdout, stderr, tickMode, plan, statusEvents,
+			watchdogStatusThresholds{silentHours: *silentHours, unprovenMinutes: *unprovenMinutes, monotonicTicks: *monotonicTicks, launchStaleMinutes: *launchStaleMinutes}, *asJSON)
 	}
 	note("TICK %s plan=%d window=%gh cap=%d", tickMode, len(plan), *windowH, *maxPerTick)
 	rwRecordWatchdogStatusTick(statusLedgerPath, tickMode, plan, statusEvents)
@@ -335,6 +309,58 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 
 // The pre-gate screens (self-resume guard, worker-account policy) and the probe-mode
 // resolution live in the pure leaf: resume.DecideWatchdogRow / ResolveWatchdogProbeMode.
+
+// resolveWatchdogLogDir resolves the watchdog log dir from the --log-dir flag, then
+// $FAK_WATCHDOG_LOG_DIR, then <repo>/tools/_watchdog.
+func resolveWatchdogLogDir(logDirFlag string) string {
+	logDir := logDirFlag
+	if logDir == "" {
+		if v := strings.TrimSpace(os.Getenv("FAK_WATCHDOG_LOG_DIR")); v != "" {
+			logDir = v
+		} else {
+			cwd, _ := os.Getwd()
+			logDir = filepath.Join(findRepoRoot(cwd), "tools", "_watchdog")
+		}
+	}
+	return logDir
+}
+
+// watchdogStatusThresholds groups the --status red-flag thresholds so the status reporter
+// does not take a wide positional parameter list.
+type watchdogStatusThresholds struct {
+	silentHours        float64
+	unprovenMinutes    float64
+	monotonicTicks     int
+	launchStaleMinutes float64
+}
+
+// reportResumeWatchdogStatus renders the read-only drain status (--status): fold the plan +
+// status events into a verdict, print it (JSON with --json, else the table), and return the
+// exit code (3 when the drain is red, else 0; a JSON encode failure returns its own code).
+func reportResumeWatchdogStatus(stdout, stderr io.Writer, tickMode string, plan []resume.WatchdogPlanRow, statusEvents []resume.WatchdogStatusEvent, th watchdogStatusThresholds, asJSON bool) int {
+	rep := resume.FoldWatchdogStatus(resume.WatchdogStatusInput{
+		Mode:               tickMode,
+		NowUnix:            time.Now().Unix(),
+		SilentSeconds:      int64(th.silentHours * 3600),
+		UnprovenSeconds:    int64(th.unprovenMinutes * 60),
+		LaunchStaleSeconds: int64(th.launchStaleMinutes * 60),
+		MonotonicTicks:     th.monotonicTicks,
+		Plan:               plan,
+		Events:             statusEvents,
+	})
+	if asJSON {
+		code := encodeJSONOrFail(stdout, stderr, rep, "fak resume watchdog --status")
+		if code != 0 {
+			return code
+		}
+	} else {
+		renderResumeWatchdogStatus(stdout, rep)
+	}
+	if rep.Verdict == resume.WatchdogDrainRed {
+		return 3
+	}
+	return 0
+}
 
 type rwResumeProgress struct {
 	Outcome      resume.Outcome
