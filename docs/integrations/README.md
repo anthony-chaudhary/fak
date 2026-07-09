@@ -84,6 +84,12 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Windsurf** (Cascade agent — OpenAI-compatible proxy) | [`windsurf.md`](windsurf.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
 
+**On a Claude Pro/Max subscription?** [`fable5-more-usage-for-free.md`](fable5-more-usage-for-free.md)
+is the honest, dogfood-witnessed case for how `fak guard -- claude` stretches the seat you
+already pay for — the pure-fak, native-cache-excluded slice (context shedding + KV-prefix
+reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable 5 fallover),
+with every number labeled by provenance and the shed-per-fire double-count fence carried in full.
+
 **All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
 
 **Adopting from outside the repo?** The [adopter playbook](adopter-playbook.md) is the
@@ -271,6 +277,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 
 - [What fak supports](../supported/README.md) — the dedicated capability pages: [models](../supported/models.md), [clouds & hosted providers](../supported/clouds.md), [APIs, wires & MCP](../supported/apis-and-protocols.md), [agent harnesses & frameworks](../supported/agent-harnesses.md), and [serving engines](../supported/engines.md).
 - [Two runtimes, one binary: gateway vs agent runtime vs client](../explainers/runtime-vs-client.md) — the first-decision naming behind "put fak in front of your agent": `fak serve` (the gateway runtime that governs model traffic) vs `fak serve --native` (the agent application runtime that owns the loop) vs a harness wrapped by `fak guard` (a governed client). `serve` and `guard` are a runtime and a client, not two versions of one thing.
+- [More Fable 5 (and every model) out of your Claude seat](fable5-more-usage-for-free.md) — the reader-facing "more usage for free" case for `fak guard -- claude`, reporting only fak's own authored slice (native prompt cache excluded on purpose): 69.7% WITNESSED KV-prefix reuse, ~37k tokens shed per compaction fire, the capped-Opus → Fable 5 fallover, and the honest fences on what "for free" and "Fable-specific" actually mean.
 - [Harness integration acceptance checklist](harness-acceptance-checklist.md) — the model-wire, host-tool dialect, argument-field, deny-behavior, and replay fixture contract for first-class launchers.
 - [Reusable harness-loop playbook](harness-loop-playbook.md) — apply the selector/executor/witness/stop pattern to customer workflows such as support queues, data QA, and eval runs.
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
