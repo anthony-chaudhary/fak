@@ -147,8 +147,20 @@ func resetIsFuture(reset string, now time.Time) *bool {
 }
 
 func throttleIsActive(info map[string]any) bool {
+	now := time.Now().UTC()
+	// Mirror fleet_accounts.throttle_is_active: a WEEKLY cap that is not provably
+	// past keeps the throttle active on its own, independent of the daily reset. A
+	// present weekly whose reset is still future — or unparseable (nil), e.g. a bare
+	// "Jul 8" with no time — counts as active; only a weekly proven to be in the past
+	// falls through to the daily-reset check. Dropping this branch let a seat whose
+	// daily window had rolled over reopen while its weekly cap was still closed.
+	if weekly := asString(info["weekly"]); weekly != "" {
+		if state := resetIsFuture(weekly, now); state == nil || *state {
+			return true
+		}
+	}
 	reset := resetText(info)
-	state := resetIsFuture(reset, time.Now().UTC())
+	state := resetIsFuture(reset, now)
 	if state != nil && !*state {
 		return false
 	}
@@ -260,6 +272,45 @@ type RuntimeStatus struct {
 // identity fold that decides whether a carried weekly cap still belongs to the seat's
 // CURRENT login before a fresh OK is allowed to reopen it (see
 // throttleMatchesCurrentIdentity); "" simply skips the current-config identity candidate.
+// scanProbeRows folds an account's _probe sessions into the two signals
+// computeRuntimeStatus needs: whether any probe is fresh-OK (an OK ProbeStatus, or a
+// LIVE session with no explicit status) and the first non-OK probe session (the block
+// witness), if any. Extracted verbatim so computeRuntimeStatus stays under the
+// god-function ceiling — no behavior change.
+func scanProbeRows(acct []Session) (freshProbeOK bool, freshProbeBlock *Session) {
+	var probeRows []Session
+	for _, s := range acct {
+		if s.Project == "_probe" {
+			probeRows = append(probeRows, s)
+		}
+	}
+	for i := range probeRows {
+		s := probeRows[i]
+		ps := strings.ToUpper(s.ProbeStatus)
+		if ps == "OK" || (s.Disp == "LIVE" && s.ProbeStatus == "") {
+			freshProbeOK = true
+		}
+		if ps != "" && ps != "OK" && freshProbeBlock == nil {
+			freshProbeBlock = &probeRows[i]
+		}
+	}
+	return freshProbeOK, freshProbeBlock
+}
+
+// countActiveLive tallies an account's sessions: active = not terminal (DONE/USER_CLOSED),
+// live = currently LIVE. Split out of computeRuntimeStatus as a self-contained counting phase.
+func countActiveLive(acct []Session) (active, live int) {
+	for _, s := range acct {
+		if s.Disp != "DONE" && s.Disp != "USER_CLOSED" {
+			active++
+		}
+		if s.Disp == "LIVE" {
+			live++
+		}
+	}
+	return active, live
+}
+
 func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 	throttleMap := normalizeThrottle(reg.Throttle)
 	authMap := reg.Auth
@@ -272,34 +323,9 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		}
 	}
 
-	var probeRows []Session
-	for _, s := range acct {
-		if s.Project == "_probe" {
-			probeRows = append(probeRows, s)
-		}
-	}
-	freshProbeOK := false
-	var freshProbeBlock *Session
-	for i := range probeRows {
-		s := probeRows[i]
-		ps := strings.ToUpper(s.ProbeStatus)
-		if ps == "OK" || (s.Disp == "LIVE" && s.ProbeStatus == "") {
-			freshProbeOK = true
-		}
-		if ps != "" && ps != "OK" && freshProbeBlock == nil {
-			freshProbeBlock = &probeRows[i]
-		}
-	}
+	freshProbeOK, freshProbeBlock := scanProbeRows(acct)
 
-	active, live := 0, 0
-	for _, s := range acct {
-		if s.Disp != "DONE" && s.Disp != "USER_CLOSED" {
-			active++
-		}
-		if s.Disp == "LIVE" {
-			live++
-		}
-	}
+	active, live := countActiveLive(acct)
 
 	var authBlocked []Session
 	for _, s := range acct {
