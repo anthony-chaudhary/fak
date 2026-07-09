@@ -2,6 +2,7 @@ package loopmgr
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -183,10 +184,11 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 	// acquired within the budget — on timeout we fail (ErrLedgerBusy), never proceed.
 	var out Event
 	err := withLedgerLock(path, appendLockWait, func() error {
-		// Fast path: derive the tail (next seq, prev_hash) from the O(1) size-validated
-		// sidecar instead of re-parsing + hash-verifying the whole ledger on every
-		// append. Full-chain verification now lives on the read side (Load / `fak loop
-		// verify`), per issue #3462.
+		// Fast path: derive the tail (next seq, prev_hash) from the O(1) sidecar instead
+		// of re-parsing + hash-verifying the whole ledger on every append. fastTail
+		// size-checks the sidecar AND re-hashes the final line, so it trusts the recorded
+		// tip only when the tail is byte-intact; full-chain verification of the earlier
+		// prefix lives on the read side (the strict Load reader), per issue #3462.
 		nextSeq, prevHash, ok := fastTail(path)
 		if !ok {
 			// Slow path: the tail sidecar is absent, stale, or no longer matches the
@@ -257,13 +259,17 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 const tailSuffix = ".tail"
 
 // tailCache is the sidecar payload: the ledger's last committed seq + hash and the
-// exact file size at which they were true. Append trusts it ONLY when the current
-// file size still equals Size. Because Append is the sole writer and refreshes the
-// sidecar inside the same locked section as the line write, size-equality holds iff
-// the file is byte-for-byte as the last successful Append left it. Any divergence
-// (crashed writer, rotation, external edit, first append after upgrade, an empty
-// zero-value sidecar) fails the size guard and routes the append through the full
-// LoadPrefix scan, which repairs and rewrites the sidecar. So the sidecar can only
+// exact file size at which they were true. Append trusts it ONLY when the current file
+// size still equals Size AND the final line still re-hashes to Hash (see fastTail).
+// Size-equality alone is NOT a proof of tail-integrity: a same-size in-place edit
+// changes content without changing size, and a crash can persist the file's size
+// metadata (and the sidecar) while the final line's data bytes are lost — the NTFS
+// ValidDataLength window for an un-fsync'd extending write, or ext4 data=writeback.
+// Trusting size alone there would chain the next event onto a zeroed/forged tip and
+// silently fork the chain. Re-hashing the last line closes that gap: any divergence
+// (crashed writer, torn/zeroed tail, rotation, external edit, first append after
+// upgrade, an empty zero-value sidecar) fails a guard and routes the append through the
+// full LoadPrefix scan, which repairs and rewrites the sidecar. So the sidecar can only
 // ever speed Append up, never make it wrong.
 type tailCache struct {
 	Seq  uint64 `json:"seq"`
@@ -272,10 +278,19 @@ type tailCache struct {
 }
 
 // fastTail returns the next seq and prev_hash for an append in O(1) via the tail
-// sidecar, or ok=false when the sidecar is missing/unreadable or no longer matches
-// the file size — in which case the caller must fall back to the full LoadPrefix
-// scan (which also repairs a broken tail). Any error is folded into ok=false: the
-// slow path re-opens the file and surfaces a genuine fault properly.
+// sidecar, or ok=false when the sidecar is missing/unreadable, no longer matches the
+// file size, or whose recorded tip no longer matches the ledger's final line — in which
+// case the caller must fall back to the full LoadPrefix scan (which also repairs a
+// broken tail). Any error is folded into ok=false: the slow path re-opens the file and
+// surfaces a genuine fault properly.
+//
+// The size guard is a necessary cheap filter but not sufficient on its own: a same-size
+// in-place edit, or a crash that persists the file size ahead of the tail data bytes
+// (NTFS ValidDataLength / ext4 writeback), keeps the size while corrupting the tip. So
+// after the size check passes we re-hash the actual last line and require it to equal
+// the recorded hash before trusting it. Reading one trailing line stays O(1) in the
+// ledger length, so this preserves the amortized-O(1) append while closing the
+// silent-fork hole trusting size alone would leave.
 func fastTail(path string) (nextSeq uint64, prevHash string, ok bool) {
 	tc, have := readTailCache(path)
 	if !have {
@@ -285,7 +300,61 @@ func fastTail(path string) (nextSeq uint64, prevHash string, ok bool) {
 	if err != nil || fi.Size() != tc.Size {
 		return 0, "", false
 	}
+	if !tailLineMatches(path, fi.Size(), tc.Hash) {
+		return 0, "", false
+	}
 	return tc.Seq + 1, tc.Hash, true
+}
+
+// tailWindow bounds how many trailing bytes tailLineMatches reads to isolate the final
+// ledger line. A single loop event serializes to well under this; if a line ever
+// exceeds it, tailLineMatches conservatively returns false (routing to the slow scan),
+// so the bound only ever costs a re-scan, never correctness.
+const tailWindow = 64 << 10
+
+// tailLineMatches reports whether the ledger's final line decodes to an event whose
+// RECOMPUTED hash equals want. It reads only a bounded window at the end of the file,
+// so it is O(1) in the ledger length. It recomputes hashEvent rather than trusting the
+// line's stored hash field, so a same-size content edit (which leaves that field
+// untouched) is caught; and any read or decode failure — including the zeroed or torn
+// tail a crash can leave behind — returns false, routing Append to the safe full-scan
+// slow path instead of chaining onto an unverified tip.
+func tailLineMatches(path string, size int64, want string) bool {
+	if size <= 0 {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	start := size - tailWindow
+	if start < 0 {
+		start = 0
+	}
+	buf := make([]byte, size-start)
+	if _, err := f.ReadAt(buf, start); err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	// Isolate the last complete line: drop the trailing record terminator, then take
+	// the bytes after the preceding newline.
+	b := bytes.TrimRight(buf, "\r\n")
+	if i := bytes.LastIndexByte(b, '\n'); i >= 0 {
+		b = b[i+1:]
+	} else if start > 0 {
+		// The window held no line boundary, so the final line is longer than tailWindow
+		// (or the tail is one run of non-newline bytes). We cannot isolate a whole line
+		// from it — fail the guard and let the slow path read the file properly.
+		return false
+	}
+	if len(b) == 0 {
+		return false
+	}
+	var ev Event
+	if err := json.Unmarshal(b, &ev); err != nil {
+		return false
+	}
+	return hashEvent(ev) == want
 }
 
 // readTailCache loads and sanity-checks the sidecar. A missing, truncated, or

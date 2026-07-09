@@ -272,11 +272,13 @@ func TestAppendFastPathWritesAndUsesTailSidecar(t *testing.T) {
 }
 
 // TestAppendTailPathSkipsFullChainVerify pins the deliberate trade the fast path
-// makes for O(1): Append derives the tail from the size-validated sidecar and does
-// NOT re-verify the whole chain, so a same-size corruption of an EARLIER line (which
-// leaves the file size — and thus the sidecar's size guard — intact) does not block
-// the append. The corruption is still caught on the read side (Load / `fak loop
-// verify`), which is where full-chain verification now lives (issue #3462).
+// makes for O(1): Append verifies the tip it extends (size + last-line re-hash) but
+// does NOT re-verify the whole chain, so a same-size corruption of an EARLIER line
+// (which leaves the file size and the intact final line — and thus both fast-path
+// guards — untouched) does not block the append. The corruption is still caught on
+// the read side by the strict Load reader, which is where full-chain verification
+// now lives (issue #3462). Its tail-line sibling is caught at append time by
+// TestAppendTailCorruptionRoutesToSlowPath.
 func TestAppendTailPathSkipsFullChainVerify(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "loops.jsonl")
 	for i := 0; i < 3; i++ {
@@ -311,6 +313,56 @@ func TestAppendTailPathSkipsFullChainVerify(t *testing.T) {
 	// The corruption is still real: the strict reader must reject the chain.
 	if _, lerr := Load(path); lerr == nil {
 		t.Fatalf("Load accepted a corrupted chain; read-side verify must reject it")
+	}
+}
+
+// TestAppendTailCorruptionRoutesToSlowPath is the regression guard for the O(1) fast
+// path's silent-fork hole (issue #3462 review follow-up): a SAME-SIZE corruption of the
+// FINAL line leaves the file size — and thus the sidecar's size guard — intact, so only
+// fastTail's re-hash of the last line can notice it. This models the crash-durability
+// case where the file size and sidecar persist but the tail data bytes are lost/forged
+// (NTFS ValidDataLength / ext4 writeback) as well as plain tail bit-rot. Trusting size
+// alone, Append would chain the next event onto a tip that no longer hashes to the
+// recorded hash — a permanent fork. It must instead route to the slow path and fail
+// closed on the tail hash break, never silently extend the fork.
+func TestAppendTailCorruptionRoutesToSlowPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	for i := 0; i < 3; i++ {
+		if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", RunID: strconv.Itoa(i)}); err != nil {
+			t.Fatalf("seed #%d: %v", i, err)
+		}
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Same-length edit of the LAST line's payload (run_id "2" -> "Z", unique to line 3):
+	// file size (and the size guard) unchanged, but the tail no longer hashes to the
+	// sidecar. The stored hash field is left untouched, so only recomputing hashEvent
+	// over the line catches it — the exact check the fast path must perform.
+	corrupt := strings.Replace(string(body), `"run_id":"2"`, `"run_id":"Z"`, 1)
+	if len(corrupt) != len(body) {
+		t.Fatalf("corruption changed length %d->%d; test needs a same-size edit", len(body), len(corrupt))
+	}
+	if corrupt == string(body) {
+		t.Fatalf("corruption was a no-op; tail run_id token not found")
+	}
+	if err := os.WriteFile(path, []byte(corrupt), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The sidecar still records the pre-corruption size, so the size guard passes; only
+	// the last-line re-hash can catch the corrupted tip. Append must fail closed here.
+	if _, err := Append(path, Event{LoopID: "l", Kind: EventEnd, Source: "s", RunID: "after"}); err == nil {
+		t.Fatal("Append trusted a same-size-corrupted tail (silent fork); want a fail-closed integrity error")
+	} else if !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("Append over corrupted tail err = %v, want a tail hash break", err)
+	}
+
+	// And no forked 4th line was written: the ledger still holds exactly the 3 seeded
+	// (now-corrupt) lines, so the strict reader rejects it rather than a longer fork.
+	if _, lerr := Load(path); lerr == nil {
+		t.Fatal("Load accepted the corrupted tail; the break must remain visible")
 	}
 }
 
