@@ -110,3 +110,52 @@ func d() { a() }
 		t.Errorf("Dependents(c) = %v, want [a b d]", got)
 	}
 }
+
+// TestBuildCallGraphMethods is the dogfood-driven regression (#3439): real Go is
+// method-heavy, and the first version registered only free functions — so it built
+// an EMPTY graph on a method-based file. Methods must be nodes and edge endpoints.
+func TestBuildCallGraphMethods(t *testing.T) {
+	src := `package p
+
+type T struct{}
+
+func (t *T) Search()     { t.candidates() }
+func (t *T) candidates() { helper() }
+func helper()            {}
+`
+	g, err := BuildCallGraphFiles(src)
+	if err != nil {
+		t.Fatalf("BuildCallGraphFiles: %v", err)
+	}
+	// Methods are nodes, qualified by receiver so they never collide with a
+	// free function of the same name.
+	if got := g.NodesByName("Search"); !reflect.DeepEqual(got, []NodeID{"(*T).Search"}) {
+		t.Fatalf("NodesByName(Search) = %v, want [(*T).Search]", got)
+	}
+	// The method call chain resolves: Search -> candidates (1) -> helper (2).
+	reach := g.Reaches("(*T).Search")
+	dist := map[NodeID]int{}
+	for _, h := range reach {
+		dist[h.ID] = h.Dist
+	}
+	if dist["(*T).candidates"] != 1 || dist["helper"] != 2 {
+		t.Fatalf("Reaches((*T).Search) = %+v, want candidates@1 helper@2", reach)
+	}
+	// helper's dependents: the method that calls it (1) and Search transitively (2).
+	if got := len(g.Dependents("helper")); got != 2 {
+		t.Errorf("Dependents(helper) count = %d, want 2", got)
+	}
+}
+
+// TestMultiFilePackageGraph proves edges resolve ACROSS files of one package.
+func TestMultiFilePackageGraph(t *testing.T) {
+	fileA := "package p\nfunc A() { B() }\n"
+	fileB := "package p\nfunc B() {}\n"
+	g, err := BuildCallGraphFiles(fileA, fileB)
+	if err != nil {
+		t.Fatalf("BuildCallGraphFiles: %v", err)
+	}
+	if got := hitIDs(g.Reaches("A")); !reflect.DeepEqual(got, []NodeID{"B"}) {
+		t.Errorf("cross-file Reaches(A) = %v, want [B]", got)
+	}
+}

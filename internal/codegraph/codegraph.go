@@ -13,6 +13,7 @@
 package codegraph
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -25,7 +26,8 @@ type NodeID string
 // Node is one entity in the graph.
 type Node struct {
 	ID   NodeID
-	Kind string // "func", "file", "package", ...
+	Kind string // "func", "method", "file", "package", ...
+	Name string // the simple entity name (call resolution key); defaults to ID
 }
 
 // Edge is a typed directed relation from one entity to another.
@@ -51,8 +53,44 @@ func NewGraph() *Graph {
 	}
 }
 
-// AddNode records an entity. Re-adding updates its kind.
-func (g *Graph) AddNode(id NodeID, kind string) { g.nodes[id] = Node{ID: id, Kind: kind} }
+// AddNode records an entity. Re-adding updates its kind; the name defaults to the
+// id for hand-built graphs (BuildCallGraph sets a distinct simple name).
+func (g *Graph) AddNode(id NodeID, kind string) {
+	n := g.nodes[id]
+	n.ID, n.Kind = id, kind
+	if n.Name == "" {
+		n.Name = string(id)
+	}
+	g.nodes[id] = n
+}
+
+// addNamed records an entity with an explicit simple name (the call-resolution key).
+func (g *Graph) addNamed(id NodeID, kind, name string) {
+	g.nodes[id] = Node{ID: id, Kind: kind, Name: name}
+}
+
+// Nodes returns every entity, ordered by id — the enumeration a caller needs to
+// resolve a simple name (e.g. "Search") to its qualified node id ("(*Index).Search").
+func (g *Graph) Nodes() []Node {
+	out := make([]Node, 0, len(g.nodes))
+	for _, n := range g.nodes {
+		out = append(out, n)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// NodesByName returns the ids of every entity whose simple name matches — a call to
+// "Search" may resolve to several methods named Search on different types.
+func (g *Graph) NodesByName(name string) []NodeID {
+	var out []NodeID
+	for _, n := range g.Nodes() {
+		if n.Name == name {
+			out = append(out, n.ID)
+		}
+	}
+	return out
+}
 
 // AddEdge records a typed relation, auto-creating either endpoint that is not yet a
 // node (with an empty kind) so a graph can be built edges-first.
@@ -188,43 +226,119 @@ func (g *Graph) Dependents(start NodeID, kinds ...string) []Hit {
 	return g.BFS(start, Traversal{EdgeKinds: kinds, Reverse: true})
 }
 
-// BuildCallGraph parses a single Go source file and returns its intra-file call
-// graph: a "func" node per top-level function, and a "calls" edge from a caller to
-// each top-level function it invokes by bare name. It is intentionally scoped to
-// same-file, same-name resolution — enough to demonstrate the graph end-to-end
-// without a type checker.
-func BuildCallGraph(src string) (*Graph, error) {
+// BuildCallGraph parses a single Go source file and returns its call graph. See
+// BuildCallGraphFiles for the details; this is the one-file convenience.
+func BuildCallGraph(src string) (*Graph, error) { return BuildCallGraphFiles(src) }
+
+// BuildCallGraphFiles parses one or more Go source files (a package) and returns
+// their call graph: a node per function AND per method, and a "calls" edge from a
+// caller to each function/method it invokes by name. Resolution is syntactic and
+// name-based — enough to be useful across a real, method-heavy package without a
+// type checker:
+//
+//   - Free functions are keyed by name ("Foo"); methods by "(Recv).Method"
+//     ("(*Index).Search"), so the two never collide in the node set.
+//   - A bare call `foo()` resolves to every node named foo; a selector call
+//     `x.Bar()` resolves to every method named Bar (the receiver type is not
+//     checked — a documented syntactic approximation, not a type resolver).
+//   - Self-recursion is not emitted as an edge.
+//
+// The earlier free-functions-only version produced an EMPTY graph on real Go
+// (which is mostly methods); this is the dogfood-driven fix (#3439).
+func BuildCallGraphFiles(srcs ...string) (*Graph, error) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "src.go", src, 0)
-	if err != nil {
-		return nil, err
-	}
 	g := NewGraph()
-	// First pass: register every top-level function as a node.
-	funcs := map[string]bool{}
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
-			funcs[fn.Name.Name] = true
-			g.AddNode(NodeID(fn.Name.Name), "func")
+
+	type fnDecl struct {
+		id   NodeID
+		body *ast.BlockStmt
+	}
+	var decls []fnDecl
+	nameIndex := map[string][]NodeID{} // simple name -> node ids (call resolution)
+
+	// Pass 1: register every function and method as a node.
+	for i, src := range srcs {
+		file, err := parser.ParseFile(fset, fmt.Sprintf("src%d.go", i), src, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			name := fd.Name.Name
+			id := NodeID(name)
+			kind := "func"
+			if fd.Recv != nil {
+				id = NodeID("(" + receiverTypeName(fd.Recv) + ")." + name)
+				kind = "method"
+			}
+			g.addNamed(id, kind, name)
+			nameIndex[name] = append(nameIndex[name], id)
+			decls = append(decls, fnDecl{id: id, body: fd.Body})
 		}
 	}
-	// Second pass: an edge per call to a known top-level function.
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || fn.Body == nil {
+
+	// Pass 2: an edge per call to a known function/method.
+	seen := map[string]bool{}
+	for _, d := range decls {
+		if d.body == nil {
 			continue
 		}
-		caller := NodeID(fn.Name.Name)
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
+		ast.Inspect(d.body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
-			if id, ok := call.Fun.(*ast.Ident); ok && funcs[id.Name] {
-				g.AddEdge(caller, NodeID(id.Name), "calls")
+			var callee string
+			switch fn := call.Fun.(type) {
+			case *ast.Ident:
+				callee = fn.Name
+			case *ast.SelectorExpr:
+				callee = fn.Sel.Name
+			}
+			if callee == "" {
+				return true
+			}
+			for _, tgt := range nameIndex[callee] {
+				if tgt == d.id {
+					continue // ignore self-recursion
+				}
+				key := string(d.id) + "\x00" + string(tgt)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				g.AddEdge(d.id, tgt, "calls")
 			}
 			return true
 		})
 	}
 	return g, nil
+}
+
+// receiverTypeName renders a method receiver's type for the node id: "T", "*T", or
+// the base of a generic receiver "T[P]".
+func receiverTypeName(recv *ast.FieldList) string {
+	if recv == nil || len(recv.List) == 0 {
+		return "?"
+	}
+	switch t := recv.List[0].Type.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return "*" + id.Name
+		}
+	case *ast.IndexExpr: // generic receiver T[P]
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name + "[]"
+		}
+	case *ast.IndexListExpr: // generic receiver T[P, Q]
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name + "[]"
+		}
+	}
+	return "?"
 }
