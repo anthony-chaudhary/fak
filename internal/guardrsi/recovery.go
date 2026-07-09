@@ -239,7 +239,7 @@ func RenderRecovery(rep RecoveryReport) string {
 	}
 	worst := rep.ByReason[0]
 	if worst.WastedRows > 0 {
-		lines = append(lines, "  worst: "+worst.Reason+" — its refusals are re-attempted verbatim and re-denied; the cited fix is not landing (improve the law text / the fix hint for this token)")
+		lines = append(lines, "  worst: "+worst.Reason+" — improve the law text / the fix hint for this token: its refusals are re-attempted verbatim and re-denied, so the cited fix is not landing")
 	}
 	lines = append(lines, "  limit: identity is (tool, args-digest) within one session journal; a repaired call (changed args) and an abandoned task both land in no-retry — only exact re-attempts are decided")
 	return strings.Join(lines, "\n")
