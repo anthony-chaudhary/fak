@@ -216,8 +216,11 @@ func TestFromSnapshotAllSilentIsVisibilityGapNotOutage(t *testing.T) {
 	if !strings.Contains(lines, "reporting: 0/2") {
 		t.Fatalf("expected a 0/N reporting line, got: %s", lines)
 	}
-	if !strings.Contains(lines, "populate liveness") {
-		t.Fatalf("expected the populate-liveness guidance, got: %s", lines)
+	// The populate-liveness guidance rides the dedicated NextStep field (added in
+	// 0cc5161ad), not the stat Lines — matches the pattern already applied to the
+	// other FromSnapshot tests in this file.
+	if !strings.Contains(up.NextStep, "populate liveness") {
+		t.Fatalf("expected the populate-liveness guidance in NextStep, got: %q", up.NextStep)
 	}
 }
 
