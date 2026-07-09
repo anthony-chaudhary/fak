@@ -44,6 +44,11 @@ type FeatureCard struct {
 	RequiresCap string   `json:"requires_cap,omitempty"`
 	Source      string   `json:"source"`
 	Witness     string   `json:"witness"`
+	// Root is the source repo root this card was loaded from (#3435, epic
+	// #3434). Empty on the single-root path (Load/Query), so single-root JSON
+	// and SummaryDigest stay byte-identical; LoadMany stamps it so a merged
+	// cross-repo result stays attributable to the checkout it came from.
+	Root string `json:"root,omitempty"`
 	// Freshness is an advisory currency rung on a query-result card, distinct
 	// from Witness (which proves WHICH bytes). Empty means not applicable /
 	// unknown; otherwise FreshnessFresh, FreshnessSupersededPrefix+<name of the
@@ -646,7 +651,13 @@ func cardLess(a, b FeatureCard) bool {
 	if a.Kind != b.Kind {
 		return a.Kind < b.Kind
 	}
-	return a.Name < b.Name
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+	// Root is the final tiebreak so a cross-repo merge (#3435) is deterministic
+	// when two checkouts carry a same-named card. Back-compat: single-root cards
+	// all have Root=="" so this branch never fires on the single-root path.
+	return a.Root < b.Root
 }
 
 func cleanTags(in []string) []string {
