@@ -28,19 +28,65 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
+// defaultMaxCorpusRows bounds how many rows a Corpus retains by default. A
+// Harvester attached to a live kernel folds a row per adjudication for as long as
+// it stays registered; without a bound the rows slice grows without limit. The
+// default holds the corpus to its most RECENT window. A batch caller that needs
+// the FULL corpus for a digest or export (e.g. the red-team bench over a fixed
+// battery) opts out with SetMaxRows(-1); a long-lived attach point leaves the
+// default in place. Below the bound every accessor is byte-identical.
+const defaultMaxCorpusRows = 1024
+
 // Corpus is the accumulated labeled training data — a thread-safe append log of
-// abi.LabelRow, the frozen supervised signal.
+// abi.LabelRow, the frozen supervised signal. Retention is bounded to a recent
+// window by default (defaultMaxCorpusRows); see SetMaxRows to tune or disable it.
 type Corpus struct {
 	mu   sync.Mutex
 	rows []abi.LabelRow
+	// maxRows bounds the retained window: 0 = the default cap; <0 = unbounded; >0 =
+	// a custom cap. See rowCap.
+	maxRows int
 }
 
 // NewCorpus returns an empty thread-safe corpus ready to collect LabelRows.
 func NewCorpus() *Corpus { return &Corpus{} }
 
+// rowCap resolves the effective retained-row cap: (cap, true) when bounded,
+// (_, false) when the caller disabled the bound (maxRows<0). Caller holds the lock.
+func (c *Corpus) rowCap() (max int, bounded bool) {
+	switch {
+	case c.maxRows < 0:
+		return 0, false
+	case c.maxRows == 0:
+		return defaultMaxCorpusRows, true
+	default:
+		return c.maxRows, true
+	}
+}
+
+// SetMaxRows bounds the corpus to at most n retained rows, evicting the OLDEST
+// beyond n as new rows arrive (a recent-window corpus). n<0 disables the bound
+// (unbounded — every row retained), n==0 restores the default. A batch caller that
+// needs the FULL corpus for a digest/export calls SetMaxRows(-1) before collecting;
+// a long-lived attach point leaves the default so the collector cannot grow without
+// limit. Re-applies the bound immediately, so lowering it trims existing rows.
+// Concurrency-safe.
+func (c *Corpus) SetMaxRows(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.maxRows = n
+	if max, bounded := c.rowCap(); bounded && len(c.rows) > max {
+		c.rows = c.rows[len(c.rows)-max:]
+	}
+}
+
 func (c *Corpus) add(r abi.LabelRow) {
 	c.mu.Lock()
 	c.rows = append(c.rows, r)
+	if max, bounded := c.rowCap(); bounded && len(c.rows) > max {
+		// Drop the oldest rows beyond the window (recent-window retention).
+		c.rows = c.rows[len(c.rows)-max:]
+	}
 	c.mu.Unlock()
 }
 

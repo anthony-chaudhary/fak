@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -160,5 +161,38 @@ func TestCompiledLoopDataPath(t *testing.T) {
 	}
 	if by := corpus.ByReason(); len(by) == 0 {
 		t.Fatal("the corpus must tally catches by reason")
+	}
+}
+
+// TestCorpusRetentionBounded proves the collector does not grow without limit: with
+// a small row cap, folding far more rows than the cap holds Len() at the cap (the
+// OLDEST rows drop — recent-window retention), while below the cap every row stays.
+func TestCorpusRetentionBounded(t *testing.T) {
+	c := NewCorpus()
+	c.SetMaxRows(4)
+
+	for i := 0; i < 100; i++ {
+		c.add(abi.LabelRow{CallHash: fmt.Sprintf("call-%d", i), Verdict: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock})
+	}
+	if c.Len() != 4 {
+		t.Fatalf("Len() = %d, want capped at 4 (the corpus grew unbounded)", c.Len())
+	}
+	rows := c.Rows()
+	if rows[0].CallHash != "call-96" || rows[len(rows)-1].CallHash != "call-99" {
+		t.Fatalf("retained window = [%s .. %s], want [call-96 .. call-99]", rows[0].CallHash, rows[len(rows)-1].CallHash)
+	}
+}
+
+// TestCorpusUnboundedOptOut proves SetMaxRows(-1) disables the bound — the batch
+// caller (a digest/export over a fixed battery) keeps every row.
+func TestCorpusUnboundedOptOut(t *testing.T) {
+	c := NewCorpus()
+	c.SetMaxRows(-1)
+	const n = defaultMaxCorpusRows + 25
+	for i := 0; i < n; i++ {
+		c.add(abi.LabelRow{CallHash: fmt.Sprintf("call-%d", i), Verdict: abi.VerdictAllow})
+	}
+	if c.Len() != n {
+		t.Fatalf("unbounded corpus retained %d, want all %d", c.Len(), n)
 	}
 }
