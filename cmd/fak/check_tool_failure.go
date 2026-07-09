@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/auditreason"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdCheckToolFailure(argv []string) {
@@ -27,6 +28,7 @@ func runCheckToolFailure(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 
 	switch {
 	case *resume:
