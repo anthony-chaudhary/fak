@@ -106,6 +106,35 @@ func TestServeWiringMarkdownRenders(t *testing.T) {
 	}
 }
 
+// TestServeWiringSteerRowIsHonest pins the steersession row to the SHIPPED wiring: the
+// consumer half #760 deferred is now the native drainSteer splice (#850), and the row must
+// name why it is only PARTIAL (the proxy serve owns no loop). It fails if the row regresses
+// to the stale "TryRecv splice is deferred (#760)" claim that outlived its own fix (#3527).
+func TestServeWiringSteerRowIsHonest(t *testing.T) {
+	var row *wiringRow
+	for i := range servewiringData {
+		if servewiringData[i].Feature == "steersession" {
+			row = &servewiringData[i]
+			break
+		}
+	}
+	if row == nil {
+		t.Fatal("steersession row missing from the audited baseline")
+	}
+	blob := row.CallSite + " " + row.Note
+	if strings.Contains(blob, "deferred (#760)") || strings.Contains(blob, "TryRecv") {
+		t.Fatalf("steersession row still carries the stale deferred-#760 claim: %q", blob)
+	}
+	for _, want := range []string{"drainSteer", "#850", "proxy"} {
+		if !strings.Contains(blob, want) {
+			t.Fatalf("steersession row missing %q; got: %q", want, blob)
+		}
+	}
+	if !strings.Contains(row.CallSite, "loop_session.go") {
+		t.Fatalf("steersession call-site should point at the drainSteer consumer; got %q", row.CallSite)
+	}
+}
+
 // repoRootFromTest walks up from the test's working dir to the module root (the dir holding
 // go.mod), so the test is independent of repoRoot()'s git assumptions.
 func repoRootFromTest(t *testing.T) string {

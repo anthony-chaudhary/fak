@@ -96,7 +96,7 @@ var servewiringData = []wiringRow{
 	{"cpuoffloadexperts", "--cpu-offload-experts", "CPUOffloadExperts", verdictOffByDefault, "internal/agent/inkernel_planner.go:282", "with --gguf --backend, keeps MoE expert GEMMs on host RAM while dense/router/attention run on the device; off by default"},
 	{"metal", "--metal", "Metal", verdictWired, "internal/agent/inkernel_planner.go:1067", "with --gguf (no --backend), auto-selects the Apple-Silicon metalgemm GPU when Apple-Silicon+cgo+a device are available; --metal/FAK_METAL=1 requires that path fail-loud; dense-Qwen Q8 only; CPU fallback on non-Metal builds or unavailable devices"},
 	{"expertparallel", "--expert-parallel", "ExpertParallelRanks", verdictOffByDefault, "internal/gateway/gateway.go:817", "sets expert-parallel MoE ranks on the in-kernel model before planner construction; 0/1 leave the monolith path unchanged"},
-	{"steersession", "(host func, default-on)", "SteerSession", verdictPartial, "internal/gateway/http.go:951", "POST /session/{id}/steer sends onto a2achan; the running-session TryRecv splice is deferred (#760)"},
+	{"steersession", "(host func, default-on)", "SteerSession", verdictPartial, "internal/agent/loop_session.go:297 (drainSteer)", "POST /session/{id}/steer enqueues onto the a2achan Session bus; the native RunArm loop drains it at its turn boundary and folds it into the next turn as a user message (drainSteer, #850 — the consumer half #760 deferred). PARTIAL because only the native serve path owns that loop: the default proxy serve forwards a single upstream turn and owns none, so a steer to a proxy-served session has no loop to consume it."},
 }
 
 func runServeWiring(stdout, stderr io.Writer, argv []string) int {
