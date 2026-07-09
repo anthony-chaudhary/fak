@@ -1,6 +1,6 @@
 ---
 title: "RFC: the fak Multi-Agent Coordination Protocol (D-007)"
-description: "The single normative spec for agent-to-agent coordination in fak: the message format, the shared-state API, and the coordination primitives — all carried over the same default-deny capability floor that gates a tool call. Binds the three shipped pillars (a2achan, sharedtask, comm) under one protocol and maps issue #241's acceptance to its shipped artifacts + test witnesses."
+description: "The single normative spec for agent-to-agent coordination in fak: the message format, the shared-state API, and the coordination primitives — all carried over the same default-deny capability floor that gates a tool call. Binds the three pillars (a2achan and comm ship as tested packages; the shared-state rung ships its contract, schemas, and fixtures, with the sharedtask runtime fold the named next rung) under one protocol and maps issue #241's acceptance to its artifacts + witnesses."
 ---
 
 # RFC: the fak Multi-Agent Coordination Protocol
@@ -41,12 +41,15 @@ value from agent A to a different agent B. This protocol is the missing whole, a
 from the existing currency (`Ref` provenance) and the existing registries (the
 adjudicator + result-admitter chains).
 
-The protocol has three layers, each a shipped package:
+The protocol has three layers. §3 and §5 ship as tested packages today; §4's
+normative contract and worked fixtures ship as versioned data, with the in-memory
+runtime fold (`internal/sharedtask`) the named next rung — not yet wired into the
+live tree (see [`shared-task-record-contract.md`](shared-task-record-contract.md)):
 
-| Layer | What it carries | Package | Try it |
+| Layer | What it carries | Ships today | Try it |
 |---|---|---|---|
 | **§3 Message passing** | one addressed value, now, A→B | [`internal/a2achan`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/a2achan.go) | `go run ./cmd/a2ademo` |
-| **§4 Shared state** | a named record / KV space many agents co-edit | [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask) | `go test ./internal/sharedtask -run TestContractSequenceFixtureValidates` |
+| **§4 Shared state** | a named record / KV space many agents co-edit | [`shared-task-record-contract.md`](shared-task-record-contract.md) + [`tools/schemas/shared-*.json`](https://github.com/anthony-chaudhary/fak/tree/main/tools/schemas) + [`examples/shared-task-record/`](https://github.com/anthony-chaudhary/fak/tree/main/examples/shared-task-record) | inspect the versioned envelopes + fixtures (self-validating as data; runtime fold not yet wired) |
 | **§5 Coordination primitives** | broadcast / scatter / gather / barrier over a wave | [`internal/comm`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/comm.go), [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/agenttopo.go) | `go test ./internal/comm` |
 
 ---
@@ -210,10 +213,13 @@ reader's scope, so a tenant-scoped reader never sees a fleet-scoped body.
   this RFC governs the *coordination* and *provenance* of shared bytes, not the cache
   arithmetic (see the cache docs for the measured reuse).
 
-**Witness:** `internal/sharedtask/sharedtask_test.go`, `internal/sharedtask/live_test.go`;
-the executable contract validator `internal/sharedtask/contract.go`
-(`go test ./internal/sharedtask -run TestContract`) over
-`examples/shared-task-record`.
+**Witness (today):** the versioned envelope schemas (`tools/schemas/shared-*.json`) and
+the worked fixtures under `examples/shared-task-record/` and
+`examples/shared-task-record-verdicts/`, each declaring its `schema` and self-validating
+as data (per-schema counts pinned in each example's `EXAMPLE-OUTPUT.md`). The executable
+runtime validator (`internal/sharedtask/contract.go`,
+`go test ./internal/sharedtask -run TestContract` over `examples/shared-task-record`) is
+the intended witness once the fold is wired; it is not runnable in the live tree yet.
 
 ---
 
@@ -263,12 +269,15 @@ transport a message.
 ## 6. Conformance — issue #241 acceptance mapping
 
 A conforming claim for D-007 is *evidence-backed*: each acceptance item maps to a shipped
-artifact and a runnable witness, not to prose.
+artifact and a witness, not to prose. Three of the four rungs have a runnable Go witness
+today; the shared-state rung ships its contract, versioned schemas, and self-validating
+fixtures as data, with the `internal/sharedtask` runtime fold — and its `go test` witness —
+the named next rung, not yet wired into the live tree.
 
 | Acceptance item | Shipped artifact | Witness |
 |---|---|---|
 | **Message passing between agents** | `internal/a2achan` — `Send`/`Recv`/`TryRecv`, `Publish`/`Subscribe`, three locales, the capability floor | `go test -race ./internal/a2achan`; `go run ./cmd/a2ademo` |
-| **Shared KV/cache space** | `internal/sharedtask` shared record + scoped/taint-tracked refs + journal; cross-agent prefix-cache reuse | `go test ./internal/sharedtask` (incl. `TestContractSequenceFixtureValidates` over `examples/shared-task-record`) |
+| **Shared KV/cache space** | shared-task record contract (`shared-task-record-contract.md`) + versioned schemas (`tools/schemas/shared-*.json`) + worked fixtures (`examples/shared-task-record/`); the `internal/sharedtask` runtime fold is the named next rung, not yet wired. Cross-agent prefix-cache reuse ships separately | schemas + fixtures self-validate as data (counts pinned in each `EXAMPLE-OUTPUT.md`); `go test ./internal/sharedtask -run TestContractSequenceFixtureValidates` over `examples/shared-task-record` is the intended runtime witness, not yet runnable |
 | **Coordination primitives** | `internal/comm` Group collectives (broadcast/scatter/gather/barrier/split/spawn) + `internal/agenttopo` declared topology DAG | `go test ./internal/comm ./internal/agenttopo` |
 | **RFC/spec document** | **this document** | renders + link-clean; binds the three pillars under the §2 invariant |
 
@@ -277,9 +286,11 @@ artifact and a runnable witness, not to prose.
 ## 7. Honest scope, non-goals, and the roadmap
 
 **Shipped (in-process):** the `InKernel` message locale, the message capability floor,
-pub/sub fan-out, the `sharedtask` patch fold + scoped views + materialized journal, and
-the `comm` adjudicated collectives + `agenttopo` declared topology — all race/contract
-tested.
+pub/sub fan-out, and the `comm` adjudicated collectives + `agenttopo` declared topology —
+all race/contract tested. The shared-state rung (§4) ships as its normative contract,
+versioned schemas, and self-validating fixtures; its in-memory `sharedtask` patch fold +
+scoped views + materialized journal is the named next rung — not yet wired into the live
+tree (see [`shared-task-record-contract.md`](shared-task-record-contract.md)).
 
 **Not claimed here:**
 
@@ -314,7 +325,8 @@ model/tool/context boundary; it is not the peer-agent channel.
   [`internal/a2achan/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/doc.go)
 - **Shared state:** [`shared-state-ladder.md`](shared-state-ladder.md) ·
   [`shared-task-record-contract.md`](shared-task-record-contract.md) ·
-  [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask)
+  [`tools/schemas/shared-*.json`](https://github.com/anthony-chaudhary/fak/tree/main/tools/schemas) ·
+  [`examples/shared-task-record/`](https://github.com/anthony-chaudhary/fak/tree/main/examples/shared-task-record)
 - **Coordination primitives:** [`comm-as-mpi-split.md`](comm-as-mpi-split.md) ·
   [`internal/comm/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/doc.go) ·
   [`internal/agenttopo/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/doc.go)
