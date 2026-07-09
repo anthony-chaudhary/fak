@@ -245,6 +245,54 @@ func TestRunInfoOverlayTTYRedrawsInPlace(t *testing.T) {
 	}
 }
 
+// TestRunInfoOverlayMaxIdleExitsWhenGatewayNeverAnswers proves issue #2340's self-terminating
+// backstop: a watch pane pointed at a gateway that NEVER becomes healthy (the leak case — a pane
+// auto-spawned beside a guard that failed to start, or aimed at a URL that never comes up) exits
+// on its own after --max-idle worth of unreachable ticks, printing the idle-backstop closing
+// line, instead of polling a dead URL forever. serveHealthy=0 means sawHealthy is never set, so
+// the existing "session ended" close (which requires a prior healthy gateway) can never fire —
+// only the new backstop can end this loop, and the test returning at all IS the termination proof.
+func TestRunInfoOverlayMaxIdleExitsWhenGatewayNeverAnswers(t *testing.T) {
+	c := healthyThenGoneClient(t, 0) // every poll fails; the gateway is never once healthy
+	var stdout, stderr bytes.Buffer
+	// interval 1ms + max-idle 3ms => a 3-tick budget: the loop gives up after 3 unreachable polls.
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/, 0 /*height*/, "line", 3*time.Millisecond)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "exiting (idle backstop)") {
+		t.Fatalf("must end on the idle-backstop closing line:\n%s", out)
+	}
+	// The never-healthy exit must NOT masquerade as the healthy-session close.
+	if strings.Contains(out, "gateway closed") {
+		t.Fatalf("never-healthy exit must not use the 'session ended' line:\n%s", out)
+	}
+}
+
+// TestRunInfoOverlayMaxIdleDefersToHealthyClose proves the ordering guarantee in emit(): when a
+// gateway WAS healthy and then goes away, the loop exits with the friendlier "session ended" line
+// even though a generous --max-idle is also set — the sawHealthy close is checked first, so the
+// idle backstop only ever speaks for the never-healthy leak case it exists for. This also stands
+// in as the negative control: the backstop line must not appear when the healthy-close applies.
+func TestRunInfoOverlayMaxIdleDefersToHealthyClose(t *testing.T) {
+	c := healthyThenGoneClient(t, 1) // one healthy poll, then unreachable — the "session ended" arc
+	var stdout, stderr bytes.Buffer
+	// max-idle 1s is ~1000 ticks at a 1ms interval, far larger than the 3-miss healthy-close budget,
+	// so the healthy-close path must win the race and the loop still terminates on its own (~3ms).
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, false, 0, 0, "line", time.Second)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "fak info: gateway closed") {
+		t.Fatalf("a once-healthy gateway that dies must exit via the session-ended line:\n%s", out)
+	}
+	if strings.Contains(out, "idle backstop") {
+		t.Fatalf("idle backstop must not fire when the healthy-close path applies:\n%s", out)
+	}
+}
+
 func TestRunInfoJSONSnapshot(t *testing.T) {
 	srv := debugVarsStub(t)
 	defer srv.Close()

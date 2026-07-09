@@ -284,6 +284,15 @@ func guardInfoFetchErrorLine(base string, err error) string {
 	return fmt.Sprintf("fak info: %v", err)
 }
 
+// guardInfoIdleExitLine is the closing line for the #2340 --max-idle backstop: the gateway never
+// answered within the idle budget, so the (typically auto-spawned) pane exits itself rather than
+// polling a dead URL forever. It names the URL and the budget so an operator who finds the line in
+// a scrollback knows which pane gave up and why — distinct from the "session ended" close, which
+// only fires once a gateway HAD been healthy.
+func guardInfoIdleExitLine(base string, maxIdle time.Duration) string {
+	return fmt.Sprintf("fak info: no gateway answered at %s within %s — exiting (idle backstop)", base, maxIdle)
+}
+
 func runInfo(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -294,6 +303,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	once := fs.Bool("once", false, "print one snapshot line and exit (no watch loop)")
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
+	maxIdle := fs.Duration("max-idle", 0, "issue #2340: in watch mode, self-exit (with a closing line) after the gateway has been unreachable for about this long WITHOUT ever answering — a self-terminating backstop so an auto-spawned pane (e.g. from `fak guard --split`) whose gateway never comes up cannot poll a dead URL forever and leak a terminal pane. 0 (default) polls indefinitely, the manual-run behavior. Ignored with --once/--json. Rounds up to a whole --interval tick.")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
 	fromFixture := fs.String("from-fixture", "", "render the overlay OFFLINE from a recorded /debug/vars JSON snapshot (the shape `fak info --json` emits) instead of polling a live gateway — no gateway needed. The deterministic capture path (the twin of `fak console guard --journal`): pairs with --tab and --frame to draw a single static frame for docs/media. See visuals/info-overlay-capture.md.")
 	tab := fs.String("tab", "cache", "with --from-fixture: which tab to render — overview, agents, accounts, cache, or safety")
@@ -380,7 +390,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 	}
-	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style)
+	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style, *maxIdle)
 }
 
 // prefixTranscriptTurnResult is one line of `fak info --prefix-transcript` output: the
@@ -536,7 +546,23 @@ func loadPrefixTranscriptTurns(path string) ([][]cachemeta.PromptSegment, error)
 // gateway was torn down — so the overlay prints a closing line and exits 0, which lets the
 // pane close itself rather than spin forever on a dead port. --once (once=true) is a scripted
 // one-shot: it prints a single line with no header/legend and exits non-zero on a failed fetch.
-func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string) int {
+func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string, maxIdleOpt ...time.Duration) int {
+	// maxIdle is an OPTIONAL trailing arg (variadic) so the existing call sites — and the non-watch
+	// one-shots — stay byte-for-byte unchanged; only the real watch launch (runInfo) and the focused
+	// #2340 tests pass it. idleLimit lowers that duration to a consecutive-unreachable tick budget,
+	// the same unit the sawHealthy/misses close path already speaks. 0 (default) disables the
+	// backstop: the overlay polls a never-answering gateway forever, as before.
+	var maxIdle time.Duration
+	if len(maxIdleOpt) > 0 {
+		maxIdle = maxIdleOpt[0]
+	}
+	idleLimit := 0
+	if maxIdle > 0 && interval > 0 {
+		idleLimit = int((maxIdle + interval - 1) / interval) // ceil(maxIdle/interval), so a sub-interval budget still bites
+		if idleLimit < 1 {
+			idleLimit = 1
+		}
+	}
 	// --once is a scripted one-shot probe: print ONE line (or fail), no header, no legend —
 	// the standing header is noise when there is no watch loop to head.
 	if once {
@@ -687,6 +713,15 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			misses++
 			if sawHealthy && misses >= 3 {
 				writeNote(stdout, "fak info: gateway closed — guarded session ended")
+				return false, true
+			}
+			// #2340 idle backstop: exit even if the gateway NEVER answered — a pane auto-spawned
+			// beside a guard that failed to start, or pointed at a URL that never comes up, would
+			// otherwise poll forever and leak a terminal pane. Checked AFTER the sawHealthy path so a
+			// normal session that ends still gets the friendlier "session ended" line whenever the
+			// idle budget is the usual several ticks. idleLimit==0 (default) skips this entirely.
+			if idleLimit > 0 && misses >= idleLimit {
+				writeNote(stdout, guardInfoIdleExitLine(c.base, maxIdle))
 				return false, true
 			}
 			writeNote(stderr, guardInfoFetchErrorLine(c.base, err))
