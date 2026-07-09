@@ -276,13 +276,13 @@ func NewReport(s Suite, generatedAt time.Time) Report {
 		scenarios = append(scenarios, ScenarioReport{Scenario: name, Questions: counts[name]})
 	}
 	return Report{
-		Schema:                ReportSchema,
-		GeneratedAt:           generatedAt.UTC().Format(time.RFC3339),
-		Benchmark:             s.Benchmark,
-		Model:                 s.Model,
-		ReleaseVersion:        s.ReleaseVersion,
-		EvidenceClass: EvidenceLocalUngraded,
-		Summary:       Summary{Problems: len(s.Problems), Scenarios: scenarios},
+		Schema:         ReportSchema,
+		GeneratedAt:    generatedAt.UTC().Format(time.RFC3339),
+		Benchmark:      s.Benchmark,
+		Model:          s.Model,
+		ReleaseVersion: s.ReleaseVersion,
+		EvidenceClass:  EvidenceLocalUngraded,
+		Summary:        Summary{Problems: len(s.Problems), Scenarios: scenarios},
 		OfficialHarness: OfficialHarness{
 			Required:  true,
 			Available: false,
