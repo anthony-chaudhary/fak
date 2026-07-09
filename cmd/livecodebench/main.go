@@ -67,6 +67,9 @@ func run(argv []string) int {
 	if len(argv) > 0 && argv[0] == "report" {
 		return runReport(argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "raw" {
+		return runRaw(argv[1:])
+	}
 
 	fs := flag.NewFlagSet("livecodebench", flag.ContinueOnError)
 	fixture := fs.String("fixture", "internal/livecodebench/testdata/fixture.json", "path to committed LiveCodeBench smoke fixture")

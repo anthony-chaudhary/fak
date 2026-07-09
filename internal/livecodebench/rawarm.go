@@ -1,0 +1,158 @@
+package livecodebench
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+)
+
+// rawarm.go is the "raw" A/B arm (#2104, epic #2085): LCB prompts sent to the
+// fak OpenAI-compatible gateway /v1/chat/completions UNADJUDICATED, collecting
+// n samples per problem with bounded concurrency that mirrors the closed-API
+// lcb_runner --multiprocess fan-out. The fan-out and the report are pure here so
+// they are unit-tested without a network; the CLI (cmd/livecodebench raw) injects
+// the real gateway sampler. The report records the run identity the acceptance
+// criteria demand — model id, endpoint, n, temperature — and folds provider-cache
+// accounting through the NORMALIZED agent.Usage.CachedPromptTokens() accessor, not
+// the Anthropic-specific cache_read_input_tokens field.
+
+// RawArmConfig pins the raw arm's run identity and its fan-out width.
+type RawArmConfig struct {
+	Model       string  // model id recorded in the report and sent on each request
+	Endpoint    string  // gateway base URL (…/v1) the completions are POSTed to
+	N           int     // samples per problem (mirrors lcb_runner -n)
+	Temperature float64 // sampling temperature recorded and sent
+	Concurrency int     // max in-flight requests (mirrors closed-API --multiprocess)
+}
+
+// RawArmSampler produces ONE completion for problem p at sample index i. The real
+// implementation POSTs to the gateway's /v1/chat/completions; tests inject a
+// deterministic stub. Returning the raw agent.Usage lets RunRawArm fold provider
+// cache accounting through Usage.CachedPromptTokens() rather than any single
+// provider's field.
+type RawArmSampler func(ctx context.Context, p Problem, i int) (content string, u agent.Usage, err error)
+
+// RawArmReport is the machine-readable result of the raw arm: the run identity
+// (model / endpoint / n / temperature) plus per-problem completions and the folded
+// provider-cache-aware token usage.
+type RawArmReport struct {
+	Arm         string          `json:"arm"` // always "raw"
+	Model       string          `json:"model"`
+	Endpoint    string          `json:"endpoint"`
+	N           int             `json:"n"`
+	Temperature float64         `json:"temperature"`
+	Concurrency int             `json:"concurrency"`
+	Problems    []RawArmProblem `json:"problems"`
+	Usage       RawArmUsage     `json:"usage"`
+}
+
+// RawArmProblem holds the n completions collected for one problem, in sample order.
+type RawArmProblem struct {
+	QuestionID  string   `json:"question_id"`
+	Completions []string `json:"completions"`
+}
+
+// RawArmUsage is the run's token accounting folded across every sample. CachedPromptTokens
+// is summed from the normalized agent.Usage.CachedPromptTokens() so a provider-cache hit
+// is counted the same way on OpenAI-compatible, DeepSeek, and Anthropic-shaped usage.
+type RawArmUsage struct {
+	Samples            int `json:"samples"`
+	PromptTokens       int `json:"prompt_tokens"`
+	CompletionTokens   int `json:"completion_tokens"`
+	CachedPromptTokens int `json:"cached_prompt_tokens"`
+}
+
+// RunRawArm fans the sampler out over every (problem, sample) pair with at most
+// cfg.Concurrency requests in flight, then assembles a deterministic report. The
+// first sampler error aborts the run (the context is cancelled so in-flight
+// siblings stop) and is returned. Completions are ordered by problem then sample
+// index regardless of completion order, so the report is reproducible.
+func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample RawArmSampler) (RawArmReport, error) {
+	if sample == nil {
+		return RawArmReport{}, fmt.Errorf("livecodebench raw arm: sampler is required")
+	}
+	if cfg.N < 1 {
+		return RawArmReport{}, fmt.Errorf("livecodebench raw arm: n must be >= 1, got %d", cfg.N)
+	}
+	conc := cfg.Concurrency
+	if conc < 1 {
+		conc = 1
+	}
+
+	report := RawArmReport{
+		Arm:         "raw",
+		Model:       cfg.Model,
+		Endpoint:    cfg.Endpoint,
+		N:           cfg.N,
+		Temperature: cfg.Temperature,
+		Concurrency: conc,
+		Problems:    make([]RawArmProblem, len(problems)),
+	}
+
+	type slot struct {
+		content string
+		usage   agent.Usage
+	}
+	slots := make([][]slot, len(problems))
+	for pi := range problems {
+		slots[pi] = make([]slot, cfg.N)
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, conc)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	for pi := range problems {
+		for si := 0; si < cfg.N; si++ {
+			mu.Lock()
+			stop := firstErr != nil
+			mu.Unlock()
+			if stop || ctx.Err() != nil {
+				break
+			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(pi, si int) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				content, u, err := sample(ctx, problems[pi], si)
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("livecodebench raw arm: problem %q sample %d: %w", problems[pi].QuestionID, si, err)
+					}
+					mu.Unlock()
+					cancel()
+					return
+				}
+				slots[pi][si] = slot{content: content, usage: u}
+			}(pi, si)
+		}
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return RawArmReport{}, firstErr
+	}
+
+	for pi := range problems {
+		comps := make([]string, cfg.N)
+		for si := 0; si < cfg.N; si++ {
+			comps[si] = slots[pi][si].content
+			u := slots[pi][si].usage
+			report.Usage.Samples++
+			report.Usage.PromptTokens += u.PromptTokens
+			report.Usage.CompletionTokens += u.CompletionTokens
+			report.Usage.CachedPromptTokens += u.CachedPromptTokens()
+		}
+		report.Problems[pi] = RawArmProblem{QuestionID: problems[pi].QuestionID, Completions: comps}
+	}
+
+	return report, nil
+}
