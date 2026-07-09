@@ -49,45 +49,13 @@ import (
 
 func main() {
 	start := time.Now()
-	var verb string
-	var argv []string
-	if len(os.Args) >= 2 {
-		verb = os.Args[1]
-	}
-	if len(os.Args) > 2 {
-		argv = os.Args[2:]
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			recordUsage(verb, argv, 2, start)
-			panic(r)
-		}
-	}()
-
-	if len(os.Args) < 2 {
-		usage()
-		recordUsage(verb, argv, 2, start)
-		os.Exit(2)
-	}
-	// C2 of epic #2228 (#2231): `fak dev <verb>` is the canonical namespace of the
-	// dev tier. It resolves BEFORE the dispatch switch by rewriting os.Args to the
-	// underlying verb, so the very same case arm runs — byte-identical dispatch, no
-	// re-exec — and the 200-case switch (plus the devindex scanner keyed on its
-	// `switch os.Args[1]` header) stays untouched. The usage journal records the
-	// composite verb ("dev commit" vs bare "commit"): the bare-vs-namespaced
-	// adoption evidence the C5 enforcement flip is gated on.
-	if os.Args[1] == "dev" {
-		v, rest, code := resolveDevVerb(os.Args[2:], os.Stdout, os.Stderr)
-		if code >= 0 {
-			recordUsage(verb, argv, code, start)
-			os.Exit(code)
-		}
-		verb = "dev " + v
-		argv = rest
-		if dispatchDevOnlyVerb(v, rest) {
-			return
-		}
-		os.Args = append([]string{os.Args[0], v}, rest...)
+	verb, argv := parseVerbArgv()
+	defer recoverUsage(&verb, &argv, start)
+	// The two pre-switch gates (empty verb, `fak dev <verb>` namespace) live in
+	// resolveEarlyDispatch so main() stays at the routing table; a true return means
+	// the call was fully handled there.
+	if resolveEarlyDispatch(&verb, &argv, start) {
+		return
 	}
 	switch os.Args[1] {
 	case "run":
@@ -148,10 +116,7 @@ func main() {
 	case "ablate":
 		cmdAblate(os.Args[2:])
 	case "ablate-arm":
-		// Hidden: the rung-2 arm-mode child `fak ablate` re-execs (one fresh process per
-		// env-gated arm, each reading its own FAK_* at start). Reads an arm request on
-		// stdin, writes one AblationRun on stdout. Not listed in usage() — an internal seam
-		// of the ablate subprocess fan-out.
+		// Hidden internal seam: the ablate arm-mode re-exec child (see cmdAblateArm).
 		cmdAblateArm(os.Args[2:])
 	case "turntax":
 		cmdTurnTax(os.Args[2:])
@@ -179,12 +144,16 @@ func main() {
 		cmdDispatch(os.Args[2:])
 	case "dispatch-conservation":
 		cmdDispatchConservation(os.Args[2:])
+	case "dispatch-aging":
+		cmdDispatchAging(os.Args[2:])
 	case "knownbad":
 		cmdKnownBad(os.Args[2:])
 	case "process-guard":
 		cmdProcessGuard(os.Args[2:])
 	case "windowgate":
 		cmdWindowgate(os.Args[2:])
+	case "conpty":
+		cmdConPTY(os.Args[2:])
 	case "ps":
 		cmdPS(os.Args[2:])
 	case "top":
@@ -243,6 +212,8 @@ func main() {
 		cmdSnapshot(os.Args[2:])
 	case "traj":
 		cmdTraj(os.Args[2:])
+	case "shadowgit":
+		cmdShadowGit(os.Args[2:])
 	case "dup":
 		cmdDup(os.Args[2:])
 	case "dream":
@@ -260,9 +231,9 @@ func main() {
 		// eve's MCP/OpenAPI connections (#2602). See cmd/fak/eve.go.
 		cmdEve(os.Args[2:])
 	case "doomloop":
-		// The two-axis doom-loop guard (#doomloop): classifies a live worker on effort
-		// spent vs verified forward progress and delivers a graduated, reversible-first
-		// correction. See cmd/fak/doomloop.go + internal/doomloop.
+		// The two-axis doom-loop guard: classifies live workers on effort vs
+		// verified progress and wires the reversible-first correction. See
+		// cmd/fak/doomloop.go and internal/doomloop.
 		cmdDoomloop(os.Args[2:])
 	case "lint":
 		cmdLint(os.Args[2:])
@@ -307,9 +278,7 @@ func main() {
 	case "watchdog":
 		cmdWatchdog(os.Args[2:])
 	case "micro":
-		// The native in-process Go microagent runtime front door (#2029, epic #2000
-		// M30): `fak micro` runs one hosted agent on Mock, `fak micro host` boots the
-		// in-process host (M2), and `--dry-run` prints the resolved plan without spend.
+		// The native in-process Go microagent runtime front door (see cmdMicro).
 		cmdMicro(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
@@ -323,29 +292,22 @@ func main() {
 		// pane `fak guard --split` opens; also runnable by hand in a second pane.
 		cmdInfo(os.Args[2:])
 	case "demo":
-		// The zero-flag 60-second proof: run fak's canonical offline scenario through the
-		// REAL kernel and narrate one verdict per call class — a safe read ALLOWED, an
-		// irreversible call DENIED, a poisoned tool result QUARANTINED. Every verdict is a
-		// live kernel decision, not a scripted string. Launches no agent, needs no key.
+		// The zero-flag 60-second proof: fak's offline scenario through the REAL kernel,
+		// one live verdict per call class (see cmdDemo). No agent, no key.
 		cmdDemo(os.Args[2:])
 	case "guard-precompact":
 		// Hidden: Claude Code PreCompact hook actuator installed by `fak guard`.
 		cmdGuardPreCompact(os.Args[2:])
 	case "guard-stophook":
-		// Hidden: Claude Code Stop hook actuator installed by `fak guard`. Reads the
-		// gateway's deny-all consecutive gauge and, in enforce mode, blocks an unchosen
-		// end_turn so the agent auto-continues past a fully-refused turn (bounded).
+		// Hidden: Claude Code Stop hook actuator installed by `fak guard` (see
+		// cmdGuardStopHook: blocks an unchosen end_turn past a fully-refused turn).
 		cmdGuardStopHook(os.Args[2:])
 	case "guard-sessionstart":
-		// Hidden: Claude Code SessionStart hook actuator installed by `fak guard`. Injects a
-		// one-line affordance naming fak's MCP entry verbs into the first turn, so the agent
-		// reaches past the deferred-tool wall instead of running as a generic coder (#3092).
+		// Hidden: Claude Code SessionStart hook actuator installed by `fak guard` (#3092).
 		cmdGuardSessionStart(os.Args[2:])
 	case guard.TrampolineVerb:
-		// Hidden: the Landlock hook-floor re-exec trampoline (Linux). `fak guard
-		// --landlock-hooks` re-execs itself into this verb, which applies the
-		// read-only-.git/hooks ruleset to itself and then execs the real agent. Not
-		// listed in usage() — an internal implementation detail of the spawn seam.
+		// Hidden internal seam: the Landlock hook-floor re-exec trampoline, Linux (see
+		// guard.LandlockTrampoline).
 		if err := guard.LandlockTrampoline(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "fak: %v\n", err)
 			os.Exit(127)
@@ -466,6 +428,10 @@ func main() {
 		cmdUnwiredScorecard(os.Args[2:])
 	case "unwired-debt-dispatch":
 		cmdUnwiredDebtDispatch(os.Args[2:])
+	case "antipattern-scorecard":
+		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
+		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
+		cmdAntipatternScorecard(os.Args[2:])
 	case "maturity":
 		cmdMaturity(os.Args[2:])
 	case "token-defaults-scorecard":
