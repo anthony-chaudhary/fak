@@ -307,6 +307,26 @@ class ReportScopeAndMixTest(unittest.TestCase):
         self.assertIn("re-run with `--include-subagents`", md)
         self.assertIn("+2,000 output tok", md)
 
+    def test_hang_gate_exits_nonzero_over_threshold(self) -> None:
+        # record→view→gate (#2365 d3): --gate-hangs turns the hang counter into a CI
+        # regression gate. One transcript carries a no-TTY wedge; gate 0 must fail (exit
+        # 3), gate 1 must pass. Absent the flag the gate is inert (other tests unaffected).
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(
+                d, "C--work-fak", "session-h.jsonl",
+                [_assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1"),
+                 _user_result("t1", "INTERACTIVE_HANG: this command waits for a human "
+                                    "and this session has no TTY")])
+            base = dict(root=[d], since_days=None, ns_prefix="", all=True,
+                        include_subagents=False, max=None, md=None, json=None)
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    sa.cmd_audit(SimpleNamespace(**base, gate_hangs=0))
+                self.assertEqual(cm.exception.code, 3)
+                sa.cmd_audit(SimpleNamespace(**base, gate_hangs=1))  # within budget: no raise
+
     def test_model_mix_kpi_reports_output_and_cost_shares(self) -> None:
         sa = load()
         with tempfile.TemporaryDirectory() as d:
@@ -424,6 +444,49 @@ class BehavioralLensTest(unittest.TestCase):
             _user_result("t3", "Request timed out"),   # non-shell: not a harness kill
         ])
         self.assertEqual(s["behavior"]["timeout_kills"], 2)
+
+    def test_interactive_hang_keys_on_exact_emission(self) -> None:
+        # #2365 d3: the wedge is counted only on the repo-guard's EXACT emission, so
+        # prose that merely mentions an editor does NOT inflate it (the loose-substring
+        # form counted 68 where the real figure was 15).
+        _, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1"),
+            _user_result("t1", "INTERACTIVE_HANG: this command waits for a human and "
+                               "this session has no TTY — a silent hang or EOF'd no-op."),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t2"),
+            _user_result("t2", "I opened the editor to fix the commit message"),  # prose only
+        ])
+        self.assertEqual(s["behavior"]["interactive_hangs"], 1,
+                         "exact emission counts; 'opened the editor' prose does not")
+
+    def test_shell_error_classes_split_and_honest_rate(self) -> None:
+        # #2365 finding 2: the raw shell error rate conflates guard refusals + no-TTY
+        # hangs (neither the shell failing) with genuine command failures. The breakdown
+        # sub-classifies by cause; the aggregate's genuine rate strips the two discounts.
+        sa, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1"),
+            _user_result("t1", "[fak] refused 1 tool call(s): Bash (POLICY_BLOCK/TERMINAL)"),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t2"),
+            _user_result("t2", "INTERACTIVE_HANG: this command waits for a human and "
+                               "this session has no TTY"),
+            _assistant("m3", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t3"),
+            _user_result("t3", "Command timed out after 2m 0.0s"),
+            _assistant("m4", out=10, cread=0, ccreate=0, tool="PowerShell", tool_id="t4"),
+            _user_result("t4", "The term 'gti' is not recognized as the name of a cmdlet"),
+            _assistant("m5", out=10, cread=0, ccreate=0, tool="PowerShell", tool_id="t5"),
+            _user_result("t5", "go test ./...\nExit code: 2\nFAIL"),
+            _assistant("m6", out=10, cread=0, ccreate=0, tool="PowerShell", tool_id="t6"),
+            _user_result("t6", "ok", is_error=False),   # a clean shell call
+        ])
+        self.assertEqual(s["behavior"]["shell_error_classes"], {
+            "policy_refusal": 1, "interactive_hang": 1, "timeout_kill": 1,
+            "not_found": 1, "nonzero_exit": 1})
+        se = sa.aggregate([s])["behavior"]["shell_errors"]
+        self.assertEqual(se["shell_calls"], 6)
+        self.assertEqual(se["raw_errors"], 5)
+        # genuine drops the guard refusal + the now-fixed hang: 5 - 2 = 3 over 6 calls.
+        self.assertEqual(se["genuine_errors"], 3)
+        self.assertEqual(se["genuine_rate"], 0.5)
 
     def test_sleep_poll_prefix_foreground_only(self) -> None:
         _, s = self._one([

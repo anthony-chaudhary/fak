@@ -114,6 +114,37 @@ TIMEOUT_KILL_RE = re.compile(r"exit (?:code|status)\W{0,3}143\b|timed out",
 # A foreground shell call whose command *starts* with a sleep is a poll — the
 # turn is blocked doing nothing (background sleeps are fine, they don't block).
 SLEEP_POLL_RE = re.compile(r"^\s*(?:sleep|start-sleep)\b", re.IGNORECASE)
+# INTERACTIVE_HANG (#2365 detector 3): a shell call that opened an editor/pager with
+# no TTY and wedged until the turn deadline — the top recurring stall in the trajectory
+# audit (15 hangs / 12 sessions). Keyed on the repo-guard's EXACT emission (the reason
+# token, or its distinctive verbatim phrase), NOT a loose "editor"/"hang" substring: the
+# loose form conflated this class up from 15 to 68 by catching prose that merely
+# mentioned an editor. Mirrors internal/repoguard ReasonInteractiveHang.
+INTERACTIVE_HANG_RE = re.compile(
+    r"\bINTERACTIVE_HANG\b|waits for a human and this session has no TTY",
+    re.IGNORECASE)
+# A fak capability-floor refusal surfaced in a tool_result: the guard SET ASIDE the
+# call (POLICY_BLOCK / REQUIRE_WITNESS / a preview-confirm gate). This is the guard
+# doing its job, NOT the shell or the agent's command failing — folding it into the raw
+# shell error rate is the conflation that inflated the headline PowerShell number (#2365
+# finding 2). Anchored on the in-band "[fak] refused" note and the reason tokens.
+POLICY_REFUSAL_RE = re.compile(
+    r"\[fak\] refused\b|\bPOLICY_BLOCK\b|\bREQUIRE_WITNESS\b|preview-confirm gate",
+    re.IGNORECASE)
+# A usage error: the command or a path did not exist (a typo / wrong-shell mistake),
+# across bash ("command not found", "No such file or directory") and PowerShell/cmd
+# ("is not recognized as the name of…"/"…an internal or external command",
+# CommandNotFoundException). Distinct from a command that RAN and exited nonzero.
+SHELL_NOT_FOUND_RE = re.compile(
+    r"command not found"
+    r"|is not recognized as (?:the name of|an internal or external)"
+    r"|CommandNotFound"
+    r"|No such file or directory",
+    re.IGNORECASE)
+# A command that RAN and exited nonzero (the residual "genuine downstream failure"
+# bucket) — an explicit nonzero exit-code/status phrasing, excluding the 143 deadline
+# kill TIMEOUT_KILL_RE already owns.
+SHELL_NONZERO_RE = re.compile(r"exit (?:code|status)\W{0,3}([0-9]+)", re.IGNORECASE)
 # Edit/Write churn: mutation calls wasted on read-before-write discipline.
 EDIT_CHURN_SIGNATURES = {
     "not_read":   "File has not been read yet",
@@ -224,6 +255,8 @@ class BehaviorLens:
     def __init__(self):
         self.errors = collections.Counter()        # tool -> errored results
         self.timeout_kills = 0
+        self.interactive_hangs = 0                 # editor/pager-no-TTY wedges (#2365 d3)
+        self.shell_error_classes = collections.Counter()  # shell err cause breakdown (#2365 finding 2)
         self.sleep_polls = 0
         self.edit_churn = collections.Counter()    # not_read / stale_read
         self.not_read_classes = collections.Counter()  # post_resume/self_dup/true (#2375 d1)
@@ -278,6 +311,30 @@ class BehaviorLens:
             return "post_resume"
         return "true_never_read"
 
+    def _classify_shell_error(self, text):
+        """Sub-classify a SHELL_TOOLS error by surface cause (#2365 finding 2). The raw
+        per-tool error rate conflates guard refusals and turn-deadline hangs (NOT the
+        shell being flaky) with genuine command failures; this breakdown makes the number
+        honest and actionable. Precedence, most-specific first:
+          policy_refusal  — the capability floor set the call aside (guard did its job).
+          interactive_hang— an editor/pager opened with no TTY and wedged (#2365 d3).
+          timeout_kill    — the harness deadline (SIGTERM 143 / "timed out") fired.
+          not_found       — command/path did not exist (a typo / wrong-shell usage error).
+          nonzero_exit    — the command RAN and exited nonzero: a real downstream failure.
+          other           — an errored result matching none of the above shapes."""
+        if POLICY_REFUSAL_RE.search(text):
+            return "policy_refusal"
+        if INTERACTIVE_HANG_RE.search(text):
+            return "interactive_hang"
+        if TIMEOUT_KILL_RE.search(text):
+            return "timeout_kill"
+        if SHELL_NOT_FOUND_RE.search(text):
+            return "not_found"
+        m = SHELL_NONZERO_RE.search(text)
+        if m and m.group(1) != "0":
+            return "nonzero_exit"
+        return "other"
+
     def see_tool_result(self, tool, is_error, text, args_key=None, path=None):
         if not is_error:
             # A success establishes read-state / a prior write for the path — the
@@ -291,8 +348,13 @@ class BehaviorLens:
         self.errors[tool] += 1
         if tool in SUCCESS_LOOP_TOOLS and args_key is not None:
             self.err_sig_counts[(tool, args_key)] += 1   # not a SUCCESSFUL call (#2375 d2)
-        if tool in SHELL_TOOLS and TIMEOUT_KILL_RE.search(text):
-            self.timeout_kills += 1
+        if tool in SHELL_TOOLS:
+            cls = self._classify_shell_error(text)
+            self.shell_error_classes[cls] += 1           # honest error breakdown (#2365 finding 2)
+            if cls == "timeout_kill":
+                self.timeout_kills += 1
+        if INTERACTIVE_HANG_RE.search(text):
+            self.interactive_hangs += 1                  # editor/pager-no-TTY wedge (#2365 d3)
         for key, sig in EDIT_CHURN_SIGNATURES.items():
             if sig in text:
                 self.edit_churn[key] += 1
@@ -349,6 +411,8 @@ class BehaviorLens:
         return {
             "tool_errors": dict(self.errors),
             "timeout_kills": self.timeout_kills,
+            "interactive_hangs": self.interactive_hangs,
+            "shell_error_classes": dict(self.shell_error_classes),
             "sleep_polls": self.sleep_polls,
             "edit_churn": dict(self.edit_churn),
             "not_read_classes": dict(self.not_read_classes),
@@ -712,7 +776,8 @@ def aggregate(sessions):
     beh_errors = collections.Counter()
     beh_churn = collections.Counter()
     beh_not_read = collections.Counter()   # #2375 d1: not_read sub-classes
-    beh_timeouts = beh_sleeps = 0
+    beh_shell_err = collections.Counter()  # #2365 finding 2: shell err cause breakdown
+    beh_timeouts = beh_sleeps = beh_hangs = 0
     stall_sessions = 0
     max_gap_s = 0.0
     repeat_rows, filechurn_rows, mass_rows, successloop_rows = [], [], [], []
@@ -721,7 +786,9 @@ def aggregate(sessions):
         beh_errors.update(b.get("tool_errors", {}))
         beh_churn.update(b.get("edit_churn", {}))
         beh_not_read.update(b.get("not_read_classes", {}))
+        beh_shell_err.update(b.get("shell_error_classes", {}))
         beh_timeouts += b.get("timeout_kills", 0)
+        beh_hangs += b.get("interactive_hangs", 0)
         beh_sleeps += b.get("sleep_polls", 0)
         if b.get("stall_gaps", 0):
             stall_sessions += 1
@@ -740,9 +807,29 @@ def aggregate(sessions):
                         "error_rate": (beh_errors.get(t, 0) / tot_tools[t])
                                       if tot_tools.get(t) else None}
                     for t in set(tot_tools) | set(beh_errors)}
+    # Honest shell error rate (#2365 finding 2): the raw per-tool rate conflates guard
+    # refusals and turn-deadline hangs — neither the shell nor the agent's command
+    # failing — with genuine command failures. "genuine" strips policy_refusal (the
+    # capability floor doing its job) and interactive_hang (now fixed at the guard) so
+    # the reported rate reflects errors a shell change could actually move.
+    shell_calls = sum(tot_tools.get(t, 0) for t in SHELL_TOOLS)
+    shell_err_raw = sum(beh_shell_err.values())
+    shell_err_discounted = beh_shell_err.get("policy_refusal", 0) \
+        + beh_shell_err.get("interactive_hang", 0)
+    shell_err_genuine = shell_err_raw - shell_err_discounted
+    shell_errors = {
+        "shell_calls": shell_calls,
+        "classes": dict(beh_shell_err.most_common()),
+        "raw_errors": shell_err_raw,
+        "raw_rate": round(shell_err_raw / shell_calls, 3) if shell_calls else None,
+        "genuine_errors": shell_err_genuine,
+        "genuine_rate": round(shell_err_genuine / shell_calls, 3) if shell_calls else None,
+    }
     behavior = {
         "per_tool": per_tool_beh,
         "timeout_kills": beh_timeouts,
+        "interactive_hangs": beh_hangs,
+        "shell_errors": shell_errors,
         "sleep_polls": beh_sleeps,
         "edit_churn": dict(beh_churn),
         "not_read_classes": dict(beh_not_read),
@@ -952,6 +1039,23 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append("")
         L.append(f"- **Timeout kills (shell result matched exit-143 / \"timed out\"):** "
                  f"{fmt_int(beh.get('timeout_kills', 0))}")
+        # #2365 d3 — the editor/pager-no-TTY wedge, keyed on the repo-guard's exact
+        # INTERACTIVE_HANG emission (fixed at the guard for headless children).
+        L.append(f"- **Interactive-editor/pager hangs (no-TTY wedge, INTERACTIVE_HANG):** "
+                 f"{fmt_int(beh.get('interactive_hangs', 0))}")
+        # #2365 finding 2 — the raw shell error rate is a mix; the genuine rate strips
+        # guard refusals (the floor working) and now-fixed hangs.
+        se = beh.get("shell_errors") or {}
+        if se.get("shell_calls"):
+            cls = se.get("classes", {})
+            breakdown = " · ".join(f"{k} {v}" for k, v in cls.items()) or "—"
+            L.append(f"- **Shell error rate (Bash+PowerShell):** raw "
+                     f"{fmt_pct(se.get('raw_rate'))} ({fmt_int(se.get('raw_errors', 0))}"
+                     f"/{fmt_int(se['shell_calls'])}) → **genuine "
+                     f"{fmt_pct(se.get('genuine_rate'))}** "
+                     f"({fmt_int(se.get('genuine_errors', 0))}, after dropping guard "
+                     f"refusals + fixed hangs)")
+            L.append(f"  - **by cause:** {breakdown}")
         L.append(f"- **Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** "
                  f"{fmt_int(beh.get('sleep_polls', 0))}")
         nrc = beh.get("not_read_classes", {})
@@ -1108,6 +1212,17 @@ def cmd_audit(a):
         json.dump(slim, open(a.json, "w", encoding="utf-8"), indent=2)
         print(f"wrote {a.json}", file=sys.stderr)
     print(md)
+    # record→view→gate (#2365 d3): fail the run when the no-TTY hang regresses past the
+    # threshold, so the guard fix stays enforced in CI. Off unless --gate-hangs is given.
+    gate = getattr(a, "gate_hangs", None)
+    if gate is not None:
+        hangs = (agg.get("behavior") or {}).get("interactive_hangs", 0)
+        if hangs > gate:
+            print(f"::gate:: INTERACTIVE_HANG regression — {hangs} hang(s) across "
+                  f"{len(sess)} sessions exceeds --gate-hangs {gate}", file=sys.stderr)
+            raise SystemExit(3)
+        print(f"gate ok: {hangs} interactive hang(s) ≤ --gate-hangs {gate}",
+              file=sys.stderr)
 
 def _iso_bucket(ts, mode):
     # ts like 2026-06-16T21:19:39.123Z
@@ -1235,6 +1350,7 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
         s = lens.summary()
         B["tool_errors"].update(s["tool_errors"])
         B["beh"]["timeout_kills"] += s["timeout_kills"]
+        B["beh"]["interactive_hangs"] += s.get("interactive_hangs", 0)  # #2365 d3
         B["beh"]["sleep_polls"] += s["sleep_polls"]
         B["beh"]["edit_churn"] += sum(s["edit_churn"].values())
         if s["max_repeat_failure"] >= REPEAT_FAILURE_MIN:
@@ -1255,7 +1371,7 @@ def cmd_trend(a):
     print(f"# Trend — {n} transcripts, bucket={a.bucket}, ns_prefix={nsp or '(all)'}\n")
     print(f"{'bucket':10} {'files':>6} {'turns':>7} {'out_tok':>12} {'cacheRead':>14} "
           f"{'cacheHit%':>9} {'I:O':>7} {'cost$':>10} {'err%':>5} {'t/o':>4} "
-          f"{'slp':>4} {'chrn':>5}  top_model / top_tool")
+          f"{'hang':>4} {'slp':>4} {'chrn':>5}  top_model / top_tool")
     rows = []
     for b in sorted(buckets):
         B = buckets[b]
@@ -1273,8 +1389,8 @@ def cmd_trend(a):
         beh = B["beh"]
         print(f"{b:10} {B['files']:>6} {B['assist_turns']:>7} {t['output']:>12,} "
               f"{t['cache_read']:>14,} {chf:>8.1f}% {io:>7.0f} {B['cost']:>10,.0f} "
-              f"{errp:>4.0f}% {beh['timeout_kills']:>4} {beh['sleep_polls']:>4} "
-              f"{beh['edit_churn']:>5}  {tmn} / {ttn}")
+              f"{errp:>4.0f}% {beh['timeout_kills']:>4} {beh['interactive_hangs']:>4} "
+              f"{beh['sleep_polls']:>4} {beh['edit_churn']:>5}  {tmn} / {ttn}")
         rows.append({"bucket": b, "files": B["files"], "turns": B["assist_turns"],
                      "tok": dict(t), "io_ratio": round(io, 1), "cache_hit_pct": round(chf, 1),
                      "cost_usd": round(B["cost"], 2),
@@ -1283,7 +1399,8 @@ def cmd_trend(a):
                      "behavior": {"tool_errors": dict(B["tool_errors"].most_common()),
                                   "tool_error_pct": round(errp, 1),
                                   **{k: beh[k] for k in
-                                     ("timeout_kills", "sleep_polls", "edit_churn",
+                                     ("timeout_kills", "interactive_hangs",
+                                      "sleep_polls", "edit_churn",
                                       "repeat_failure_files", "file_churn_files",
                                       "success_loop_files")}}})
     if a.json:
@@ -1310,7 +1427,9 @@ def cmd_deep(a):
     print(f"tools={s['tools']}")
     b = s["behavior"]
     print(f"behavior: tool_errors={sum(b['tool_errors'].values())} {b['tool_errors']} "
-          f"timeout_kills={b['timeout_kills']} sleep_polls={b['sleep_polls']} "
+          f"timeout_kills={b['timeout_kills']} interactive_hangs={b.get('interactive_hangs', 0)} "
+          f"shell_error_classes={b.get('shell_error_classes', {})} "
+          f"sleep_polls={b['sleep_polls']} "
           f"edit_churn={b['edit_churn']} not_read_classes={b.get('not_read_classes', {})} "
           f"max_repeat_failure={b['max_repeat_failure']} "
           f"max_file_churn={b['max_file_churn']} "
@@ -1348,6 +1467,10 @@ def main():
             q.add_argument("--md", default=None)
             q.add_argument("--include-subagents", action="store_true",
                            help="also fold in subagent/workflow transcripts (separate files)")
+            q.add_argument("--gate-hangs", type=int, default=None, metavar="N",
+                           help="exit 3 if interactive-editor/pager hangs (#2365 d3) "
+                                "across the scanned window exceed N — a CI regression "
+                                "gate on the guard fix (e.g. --gate-hangs 0)")
     qt = sub.add_parser("trend")
     qt.add_argument("--root", action="append")
     qt.add_argument("--ns-prefix", default=NS_INCLUDE_PREFIX)
