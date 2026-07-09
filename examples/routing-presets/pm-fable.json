@@ -1,0 +1,69 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "fable",
+        "role": "primary"
+      }
+    ],
+    "scout": "fable",
+    "reason": "project management is high-volume, low-stakes coordination work (issue triage, next-up ranking, milestone scoring, status rollups, backlog dedup) so fable is the default tier; only genuinely-hard planning judgment or an irreversible close escalates to opus-4.8. A wrong triage costs a re-run, not a bad production write."
+  },
+  "rules": [
+    {
+      "name": "pm-irreversible-close-verify",
+      "match": {
+        "aspect": "state",
+        "labels": {
+          "move": "contraction",
+          "work_kind": "project_management"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "opus-4.8",
+            "role": "primary"
+          }
+        ],
+        "reason": "an irreversible coordination action (close or cancel an issue, milestone, or plan) is low-stakes-but-irreversible: the strong model verifies the close so a dormant-but-real item is not swept, and this floor never drops to the cheap tier however routine the close looks. Placed first so a contraction escalates even when it is also flagged high-complexity."
+      }
+    },
+    {
+      "name": "pm-hard-judgment-opus",
+      "match": {
+        "min_complexity": "high",
+        "labels": {
+          "work_kind": "project_management"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "opus-4.8",
+            "role": "primary"
+          }
+        ],
+        "reason": "hard planning judgment (decomposing an oversized epic into a coherent sub-issue tree, a cross-cutting replan, or a milestone re-scope) is genuine reasoning work: escalate to opus-4.8 when the scout flags high complexity, placed before the routine rule so a hard-flagged aspect escalates even under the project_management label."
+      }
+    },
+    {
+      "name": "pm-routine-fable",
+      "match": {
+        "labels": {
+          "work_kind": "project_management"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "fable",
+            "role": "primary"
+          }
+        ],
+        "reason": "the steady-state project-management pass (triage, next-up ranking, milestone scoring, status rollups, label proposals, backlog dedup) is high-volume, low-stakes coordination: fable is fast and adequate, and a wrong call costs a re-run, not a bad production write."
+      }
+    }
+  ]
+}
