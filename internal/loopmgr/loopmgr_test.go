@@ -233,6 +233,87 @@ func TestAppendRepairsDuplicateSeqTail(t *testing.T) {
 	}
 }
 
+// TestAppendFastPathWritesAndUsesTailSidecar proves the O(1) tail cache: a normal
+// append writes a <path>.tail sidecar recording the last seq/hash and the exact file
+// size, and the next append derives its seq/prev_hash from that sidecar (the chain
+// stays contiguous under the strict reader) rather than re-scanning the whole file.
+func TestAppendFastPathWritesAndUsesTailSidecar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	first, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", RunID: "0"})
+	if err != nil {
+		t.Fatalf("Append #1: %v", err)
+	}
+
+	tc, ok := readTailCache(path)
+	if !ok {
+		t.Fatalf("tail sidecar missing after append")
+	}
+	if tc.Seq != 1 || tc.Hash != first.Hash {
+		t.Fatalf("sidecar = %+v, want seq 1 hash %s", tc, first.Hash)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if tc.Size != fi.Size() {
+		t.Fatalf("sidecar size %d != file size %d", tc.Size, fi.Size())
+	}
+
+	second, err := Append(path, Event{LoopID: "l", Kind: EventAdmit, Source: "s", RunID: "1"})
+	if err != nil {
+		t.Fatalf("Append #2: %v", err)
+	}
+	if second.Seq != 2 || second.PrevHash != first.Hash {
+		t.Fatalf("second = seq %d prev %q, want seq 2 prev %q", second.Seq, second.PrevHash, first.Hash)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load after fast-path appends: %v", err)
+	}
+}
+
+// TestAppendTailPathSkipsFullChainVerify pins the deliberate trade the fast path
+// makes for O(1): Append derives the tail from the size-validated sidecar and does
+// NOT re-verify the whole chain, so a same-size corruption of an EARLIER line (which
+// leaves the file size — and thus the sidecar's size guard — intact) does not block
+// the append. The corruption is still caught on the read side (Load / `fak loop
+// verify`), which is where full-chain verification now lives (issue #3462).
+func TestAppendTailPathSkipsFullChainVerify(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	for i := 0; i < 3; i++ {
+		if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", RunID: strconv.Itoa(i)}); err != nil {
+			t.Fatalf("seed #%d: %v", i, err)
+		}
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Same-length edit of line 1's payload => file size (and the size guard) unchanged.
+	corrupt := strings.Replace(string(body), `"run_id":"0"`, `"run_id":"Z"`, 1)
+	if len(corrupt) != len(body) {
+		t.Fatalf("corruption changed length %d->%d; test needs a same-size edit", len(body), len(corrupt))
+	}
+	if corrupt == string(body) {
+		t.Fatalf("corruption was a no-op; run_id token not found")
+	}
+	if err := os.WriteFile(path, []byte(corrupt), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	appended, err := Append(path, Event{LoopID: "l", Kind: EventEnd, Source: "s", RunID: "after"})
+	if err != nil {
+		t.Fatalf("fast-path Append over same-size early corruption: %v", err)
+	}
+	if appended.Seq != 4 {
+		t.Fatalf("appended seq = %d, want 4", appended.Seq)
+	}
+
+	// The corruption is still real: the strict reader must reject the chain.
+	if _, lerr := Load(path); lerr == nil {
+		t.Fatalf("Load accepted a corrupted chain; read-side verify must reject it")
+	}
+}
+
 func TestAppendDoesNotRepairTamperedHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "loops.jsonl")
 	if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", Principal: "p", RunID: "before"}); err != nil {
@@ -296,5 +377,32 @@ func TestAppendBusyFailsClosed(t *testing.T) {
 	}
 	if len(loaded) != 1 {
 		t.Fatalf("ledger has %d events, want 1 (busy Append must not write)", len(loaded))
+	}
+}
+
+// BenchmarkAppendTailLatency is the O(1)-amortized proof for issue #3462: it seeds
+// ledgers of increasing size (untimed) and benchmarks single appends onto each. With
+// the tail sidecar every append derives seq/prev_hash from an O(1) size-checked read
+// instead of re-parsing + hash-verifying the whole file, so ns/op is FLAT across the
+// seed sizes. Pre-fix (LoadPrefix per append) ns/op grew ~linearly with the seed —
+// run this against the two implementations to see the old cost climb and the new
+// cost hold. (Benchmarks are not run by the default `go test`/CI, so the untimed
+// seeding cost never lands on the CI clock.)
+func BenchmarkAppendTailLatency(b *testing.B) {
+	for _, seed := range []int{100, 2000, 20000} {
+		b.Run("seed="+strconv.Itoa(seed), func(b *testing.B) {
+			path := filepath.Join(b.TempDir(), "loops.jsonl")
+			for i := 0; i < seed; i++ {
+				if _, err := Append(path, Event{LoopID: "bench/loop", Kind: EventHeartbeat, Source: "s", RunID: strconv.Itoa(i)}); err != nil {
+					b.Fatalf("seed append #%d: %v", i, err)
+				}
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := Append(path, Event{LoopID: "bench/loop", Kind: EventHeartbeat, Source: "s", RunID: "b" + strconv.Itoa(i)}); err != nil {
+					b.Fatalf("bench append: %v", err)
+				}
+			}
+		})
 	}
 }

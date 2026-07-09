@@ -183,26 +183,39 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 	// acquired within the budget — on timeout we fail (ErrLedgerBusy), never proceed.
 	var out Event
 	err := withLedgerLock(path, appendLockWait, func() error {
-		existing, integ, err := LoadPrefix(path)
-		if err != nil {
-			return err
-		}
-		if integ.Broken {
-			if !repairableAppendBreak(integ) {
-				return integrityError(integ)
+		// Fast path: derive the tail (next seq, prev_hash) from the O(1) size-validated
+		// sidecar instead of re-parsing + hash-verifying the whole ledger on every
+		// append. Full-chain verification now lives on the read side (Load / `fak loop
+		// verify`), per issue #3462.
+		nextSeq, prevHash, ok := fastTail(path)
+		if !ok {
+			// Slow path: the tail sidecar is absent, stale, or no longer matches the
+			// file size (first append after upgrade, a crashed writer, a rotation, or
+			// an external edit). Fall back to the full tolerant scan — which also
+			// repairs a broken tail — then refresh the sidecar after the write.
+			existing, integ, err := LoadPrefix(path)
+			if err != nil {
+				return err
 			}
-			if err := os.Truncate(path, integ.ValidBytes); err != nil {
-				return fmt.Errorf("repair loop ledger tail: %w", err)
+			if integ.Broken {
+				if !repairableAppendBreak(integ) {
+					return integrityError(integ)
+				}
+				if err := os.Truncate(path, integ.ValidBytes); err != nil {
+					return fmt.Errorf("repair loop ledger tail: %w", err)
+				}
+			}
+			nextSeq = uint64(len(existing) + 1)
+			prevHash = ""
+			if len(existing) > 0 {
+				prevHash = existing[len(existing)-1].Hash
 			}
 		}
 
 		ev.Schema = SchemaEvent
-		ev.Seq = uint64(len(existing) + 1)
+		ev.Seq = nextSeq
 		ev.TSUnixNano = cfg.clock().UTC().UnixNano()
-		ev.PrevHash = ""
-		if len(existing) > 0 {
-			ev.PrevHash = existing[len(existing)-1].Hash
-		}
+		ev.PrevHash = prevHash
 		ev.Hash = hashEvent(ev)
 
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -218,6 +231,15 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 		if _, err := f.Write(append(line, '\n')); err != nil {
 			return fmt.Errorf("append loop event: %w", err)
 		}
+		// Refresh the O(1) tail sidecar from the true post-write size so the next
+		// append can skip the full re-scan. Best-effort: the line is already durably
+		// appended, so a sidecar write failure must not fail the append — on a stat
+		// fault we drop the sidecar instead, forcing the safe slow path next time.
+		if fi, serr := f.Stat(); serr == nil {
+			writeTailCache(path, tailCache{Seq: ev.Seq, Hash: ev.Hash, Size: fi.Size()})
+		} else {
+			_ = os.Remove(path + tailSuffix)
+		}
 		out = ev
 		return nil
 	})
@@ -225,6 +247,75 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 		return Event{}, err
 	}
 	return out, nil
+}
+
+// tailSuffix names the O(1) tail sidecar Append uses to derive the next seq /
+// prev_hash without re-reading the whole ledger. It is deliberately NOT a
+// *.jsonl/.log/.err name so growthgate's candidate filter skips it: unlike the
+// append-only ledger it caches, the sidecar is a fixed tiny file overwritten in
+// place, never a grower.
+const tailSuffix = ".tail"
+
+// tailCache is the sidecar payload: the ledger's last committed seq + hash and the
+// exact file size at which they were true. Append trusts it ONLY when the current
+// file size still equals Size. Because Append is the sole writer and refreshes the
+// sidecar inside the same locked section as the line write, size-equality holds iff
+// the file is byte-for-byte as the last successful Append left it. Any divergence
+// (crashed writer, rotation, external edit, first append after upgrade, an empty
+// zero-value sidecar) fails the size guard and routes the append through the full
+// LoadPrefix scan, which repairs and rewrites the sidecar. So the sidecar can only
+// ever speed Append up, never make it wrong.
+type tailCache struct {
+	Seq  uint64 `json:"seq"`
+	Hash string `json:"hash"`
+	Size int64  `json:"size"`
+}
+
+// fastTail returns the next seq and prev_hash for an append in O(1) via the tail
+// sidecar, or ok=false when the sidecar is missing/unreadable or no longer matches
+// the file size — in which case the caller must fall back to the full LoadPrefix
+// scan (which also repairs a broken tail). Any error is folded into ok=false: the
+// slow path re-opens the file and surfaces a genuine fault properly.
+func fastTail(path string) (nextSeq uint64, prevHash string, ok bool) {
+	tc, have := readTailCache(path)
+	if !have {
+		return 0, "", false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() != tc.Size {
+		return 0, "", false
+	}
+	return tc.Seq + 1, tc.Hash, true
+}
+
+// readTailCache loads and sanity-checks the sidecar. A missing, truncated, or
+// zero-value sidecar (Seq 0 / empty Hash — impossible for a real event, whose seqs
+// start at 1) is reported as absent so the caller takes the safe slow path.
+func readTailCache(path string) (tailCache, bool) {
+	b, err := os.ReadFile(path + tailSuffix)
+	if err != nil {
+		return tailCache{}, false
+	}
+	var tc tailCache
+	if err := json.Unmarshal(b, &tc); err != nil {
+		return tailCache{}, false
+	}
+	if tc.Seq == 0 || tc.Hash == "" {
+		return tailCache{}, false
+	}
+	return tc, true
+}
+
+// writeTailCache overwrites the sidecar in place. The payload is a single tiny
+// write, so a torn write just fails the next Unmarshal and degrades to the slow
+// path — no atomic-rename dance is needed (and rename-over is not atomic on
+// Windows anyway). Callers invoke this while holding the ledger lock.
+func writeTailCache(path string, tc tailCache) {
+	b, err := json.Marshal(tc)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path+tailSuffix, b, 0o644)
 }
 
 // withLedgerLock runs fn while holding an exclusive cross-process advisory lock on
