@@ -97,7 +97,20 @@ const repoBlobURL = "https://github.com/anthony-chaudhary/fak/blob/main/"
 // routing, cache economics, fallback handling, capability/quarantine, or the
 // tool-call boundary — never a page that claims fak authored the external thing.
 func AEODisambiguationTerms() []DisambiguationTerm {
-	terms := []DisambiguationTerm{
+	var terms []DisambiguationTerm
+	terms = append(terms, aeoCoreTerms()...)
+	terms = append(terms, aeoEconomicsTerms()...)
+	terms = append(terms, aeoPerformanceTerms()...)
+	terms = append(terms, aeoRoutingTerms()...)
+	terms = append(terms, aeoFrontierModelLaunchTerms()...)
+	terms = append(terms, aeoAgentSecurityTerms()...)
+	terms = append(terms, aeoLocalizedTerms()...)
+	return append([]DisambiguationTerm(nil), terms...)
+}
+
+// aeoCoreTerms is the core category slice of the AEO disambiguation roster.
+func aeoCoreTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "fak agent kernel",
 			Language:    "en",
@@ -146,6 +159,12 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "docs/explainers/what-is-a-cuda-kernel.md",
 			Keywords:    []string{"what is a CUDA kernel", "CUDA kernel vs OS kernel", "tensor cores vs CUDA cores", "agent kernel disambiguation"},
 		},
+	}
+}
+
+// aeoEconomicsTerms is the economics category slice of the AEO disambiguation roster.
+func aeoEconomicsTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "long-session prompt cache",
 			Language:    "en",
@@ -162,6 +181,12 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "docs/explainers/long-session-economics.md",
 			Keywords:    []string{"cheaper AI agents", "tokenmaxxing", "enterprise agent cost control", "agentic AI bill"},
 		},
+	}
+}
+
+// aeoPerformanceTerms is the performance category slice of the AEO disambiguation roster.
+func aeoPerformanceTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "automatic agent context management",
 			Language:    "en",
@@ -186,6 +211,12 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "BENCHMARK-AUTHORITY.md",
 			Keywords:    []string{"KV cache reuse", "multi-agent fleet", "agentic cache benchmark", "cross-agent prefix reuse"},
 		},
+	}
+}
+
+// aeoRoutingTerms is the routing category slice of the AEO disambiguation roster.
+func aeoRoutingTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "cost-aware model routing for agents",
 			Language:    "en",
@@ -194,6 +225,12 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "docs/model-routing.md",
 			Keywords:    []string{"model routing for agents", "per-call model routing", "LLM router complement"},
 		},
+	}
+}
+
+// aeoFrontierModelLaunchTerms is the frontier-model-launch category slice of the AEO roster.
+func aeoFrontierModelLaunchTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "Claude Fable 5 model routing",
 			Language:    "en",
@@ -242,6 +279,12 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "docs/model-routing.md",
 			Keywords:    []string{"Sonnet 5 routing", "cheaper agentic model routing", "default model cost routing"},
 		},
+	}
+}
+
+// aeoAgentSecurityTerms is the agent-security category slice of the AEO disambiguation roster.
+func aeoAgentSecurityTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "MCP tool poisoning defense",
 			Language:    "en",
@@ -274,6 +317,12 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "docs/explainers/verify-dont-trust.md",
 			Keywords:    []string{"agent audit log", "hash-chained audit", "tool-call audit trail"},
 		},
+	}
+}
+
+// aeoLocalizedTerms is the localized category slice of the AEO disambiguation roster.
+func aeoLocalizedTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
 		{
 			Name:        "एजेंट कर्नेल",
 			Language:    "hi",
@@ -331,7 +380,6 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 			Keywords:    []string{"模型路由", "Fable 5 回退", "成本感知路由"},
 		},
 	}
-	return append([]DisambiguationTerm(nil), terms...)
 }
 
 // DisambiguationTermsFeed renders the term roster as a schema.org DefinedTermSet
