@@ -23,12 +23,14 @@ import (
 // grade_debt, and emits the ratchet verdict.
 func cmdScorecardPane(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: fak scorecard control-pane [--json|--check|--pin]")
+		fmt.Fprintln(os.Stderr, "usage: fak scorecard control-pane [--json|--check|--pin] | qa-dogfood [--json|--existing-json PATH]")
 		os.Exit(2)
 	}
 	switch argv[0] {
 	case "control-pane":
 		os.Exit(runScorecardControlPane(os.Stdout, os.Stderr, argv[1:]))
+	case "qa-dogfood":
+		os.Exit(runScorecardQADogfood(os.Stdout, os.Stderr, argv[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "fak scorecard: unknown subcommand %q\n", argv[0])
 		os.Exit(2)
