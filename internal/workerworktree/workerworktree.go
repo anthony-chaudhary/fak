@@ -54,7 +54,14 @@ const (
 	// so the switch is never overloaded as a path). The Python module reuses
 	// FLEET_WORKER_WORKTREE as the path marker; the Go wiring keeps them separate.
 	WorktreeDirEnv = "FLEET_WORKER_WORKTREE_DIR"
-	keyHashLen     = 12
+	// LandReadbackEnv, when truthy, makes Land re-read trunk HEAD after a
+	// path-scoped commit and confirm it actually carries the worker's intended
+	// paths — turning the silent shared-index-race false-success (#3547) into an
+	// honest LAND_READBACK_MISMATCH refusal. DEFAULT OFF so the baseline land path
+	// is byte-for-byte unchanged (the #3165 opt-in, fail-open, A/B-able doctrine);
+	// the epic owner flips it on to measure the false-refuse rate under real load.
+	LandReadbackEnv = "FAK_LAND_READBACK_VERIFY"
+	keyHashLen      = 12
 )
 
 // GitRunner runs one `git` subcommand under root and returns (rc, stdout). It
@@ -347,7 +354,18 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		commitArgs = append(commitArgs, paths...)
 	}
 	rc, out := run(git, root, commitArgs)
-	return Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300)}
+	res := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300)}
+	// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
+	// actually carries our intended paths. A missing path means our staged change
+	// was swept into a concurrent commit on the shared index (#3547); refuse rather
+	// than return a false success. FAIL-OPEN — only a positive mismatch flips OK.
+	if rc == 0 && len(paths) > 0 && landReadbackEnabled() {
+		if ok, reason := landReadbackVerify(root, paths, git); !ok {
+			res.OK = false
+			res.Reason = reason
+		}
+	}
+	return res
 }
 
 // resolveMsgFile returns a commit-message file path and a cleanup func. A non-empty
@@ -401,6 +419,71 @@ func gitApply(root, diff string, git GitRunner) Result {
 	f.Close()
 	rc, out := run(git, root, []string{"apply", "--whitespace=nowarn", patch})
 	return Result{OK: rc == 0, Detail: tail(out, 300)}
+}
+
+// landReadbackEnabled reports whether the opt-in post-commit readback (LandReadbackEnv)
+// is on. Truthy = any value other than "", "0", "false", "off" (case-insensitive).
+func landReadbackEnabled() bool {
+	v := strings.TrimSpace(os.Getenv(LandReadbackEnv))
+	return v != "" && v != "0" && !strings.EqualFold(v, "false") && !strings.EqualFold(v, "off")
+}
+
+// landReadbackVerify confirms trunk HEAD, right after a path-scoped commit, carries
+// EVERY intended path. A missing path means the worker's staged change was swept
+// into a concurrent commit on the shared index (the #3547 race) — reported as a
+// LAND_READBACK_MISMATCH refusal. FAIL-OPEN: any git error yields ok=true, so a
+// readback that cannot run never manufactures a refusal. A directory pathspec is
+// satisfied by any committed file beneath it.
+func landReadbackVerify(root string, paths []string, git GitRunner) (bool, string) {
+	rc, head := run(git, root, []string{"rev-parse", "HEAD"})
+	if rc != 0 {
+		return true, ""
+	}
+	sha := strings.TrimSpace(head)
+	rc, out := run(git, root, []string{"diff-tree", "--no-commit-id", "--name-only", "-r", sha})
+	if rc != 0 {
+		return true, ""
+	}
+	committed := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if p := normalizeSlash(strings.TrimSpace(line)); p != "" {
+			committed[p] = true
+		}
+	}
+	var missing []string
+	for _, p := range paths {
+		want := normalizeSlash(strings.TrimSpace(p))
+		if want == "" {
+			continue
+		}
+		found := committed[want]
+		if !found {
+			for c := range committed {
+				if strings.HasPrefix(c, want+"/") {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) > 0 {
+		return false, "LAND_READBACK_MISMATCH: trunk HEAD " + shortSHA(sha) +
+			" does not carry intended path(s) " + strings.Join(missing, ", ") +
+			" after commit — shared-index race, land not trusted (#3547)"
+	}
+	return true, ""
+}
+
+func normalizeSlash(p string) string { return strings.ReplaceAll(p, "\\", "/") }
+
+func shortSHA(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }
 
 // Count enumerates the live per-worker worktrees from `git worktree list` — the

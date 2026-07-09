@@ -380,6 +380,73 @@ func TestLandDerivesMsgFromWorktreeTipWhenNoFile(t *testing.T) {
 	}
 }
 
+// ---- Land: opt-in post-commit readback (#3547 shared-index race) ---------- //
+
+func TestLandReadbackVerifyPassesWhenTrunkCarriesPaths(t *testing.T) {
+	t.Setenv(LandReadbackEnv, "1")
+	g := newFakeGit().
+		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+		reply("apply", 0, "").
+		reply("commit", 0, "[main abc] msg").
+		reply("rev-parse", 0, "abc123def4567\n").
+		reply("diff-tree", 0, "x\n")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+	if !res.OK || !res.Committed {
+		t.Fatalf("readback should pass when trunk HEAD carries the intended path: %+v", res)
+	}
+}
+
+func TestLandReadbackVerifyRefusesWhenPathSweptByRace(t *testing.T) {
+	t.Setenv(LandReadbackEnv, "1")
+	// commit succeeded, but trunk HEAD carries a DIFFERENT file — our `x` was swept
+	// into a concurrent commit on the shared index (the #3547 failure).
+	g := newFakeGit().
+		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+		reply("apply", 0, "").
+		reply("commit", 0, "[main abc] msg").
+		reply("rev-parse", 0, "deadbeef12345\n").
+		reply("diff-tree", 0, "some/other/file.go\n")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+	if res.OK {
+		t.Fatalf("readback must refuse a false-success when the intended path is missing: %+v", res)
+	}
+	if !strings.Contains(res.Reason, "LAND_READBACK_MISMATCH") || !strings.Contains(res.Reason, "3547") {
+		t.Fatalf("refusal must name LAND_READBACK_MISMATCH and cite #3547: %q", res.Reason)
+	}
+}
+
+func TestLandReadbackDefaultOffLeavesBaselineUnchanged(t *testing.T) {
+	t.Setenv(LandReadbackEnv, "0") // explicit off — baseline path
+	// A diff-tree that WOULD fail the check must never be consulted when off.
+	g := newFakeGit().
+		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+		reply("apply", 0, "").
+		reply("commit", 0, "[main abc] msg").
+		reply("diff-tree", 0, "totally/unrelated.go\n")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+	if !res.OK || !res.Committed {
+		t.Fatalf("baseline (readback off) must land regardless of trunk contents: %+v", res)
+	}
+	if len(g.callsWithPrefix("diff-tree")) != 0 {
+		t.Fatalf("readback OFF must not consult diff-tree: %v", g.calls)
+	}
+}
+
+func TestLandReadbackFailsOpenOnGitError(t *testing.T) {
+	t.Setenv(LandReadbackEnv, "1")
+	// HEAD unreadable — the readback cannot run, so it must NOT manufacture a
+	// refusal; the commit's own verdict stands (fail-open, the module invariant).
+	g := newFakeGit().
+		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+		reply("apply", 0, "").
+		reply("commit", 0, "[main abc] msg").
+		reply("rev-parse", 127, "")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+	if !res.OK || !res.Committed {
+		t.Fatalf("readback must FAIL OPEN on a git error, never refuse: %+v", res)
+	}
+}
+
 // ---- Count ---------------------------------------------------------------- //
 
 func TestCountOnlyCountsOurWorktrees(t *testing.T) {
