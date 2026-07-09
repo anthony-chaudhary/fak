@@ -96,8 +96,9 @@ func NewFeed(capacity int) *Feed {
 // change and true. If a change with the same key() was already appended, Append
 // is a no-op returning the previously-stamped change and false — so a producer
 // that replays a commit or a flip cannot double-publish it. Retention is applied
-// after the append: the oldest entries beyond cap are evicted from the ring, but
-// their keys remain in seen so a late replay still dedupes.
+// after the append: the oldest entries beyond cap are evicted from the ring, and
+// the idempotency map is pruned to a wider retention window (pruneSeen), so a late
+// replay of any change still within that window dedupes while seen stays bounded.
 func (f *Feed) Append(c WorkChange) (WorkChange, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -120,8 +121,40 @@ func (f *Feed) Append(c WorkChange) (WorkChange, bool) {
 	f.ring = append(f.ring, c)
 	if f.cap > 0 && len(f.ring) > f.cap {
 		f.ring = f.ring[len(f.ring)-f.cap:]
+		f.pruneSeen()
 	}
 	return c, true
+}
+
+// seenRetentionFactor sets how much longer the idempotency map retains a key than
+// the payload ring: seen keys survive for seenRetentionFactor× the ring window, so
+// a late replay of a change whose PAYLOAD has aged out of the ring still dedupes,
+// while the map cannot grow without bound alongside a long-lived feed.
+const seenRetentionFactor = 8
+
+// pruneSeen bounds the idempotency map when retention is on (f.cap > 0). Called
+// under the lock after the ring is trimmed. seen keys are kept for
+// seenRetentionFactor× the ring window; keys older than that (Seq far enough below
+// head that no in-window replay can still reference them) are dropped in a batch.
+// Every key whose Seq is still in the ring is always retained — the cutoff sits
+// well below the ring's oldest Seq — so dedup of a replay of any change still in
+// the window is never weakened; only replays of very old, long-evicted changes may
+// lapse, which is the same bounded-retention tradeoff the ring itself makes.
+func (f *Feed) pruneSeen() {
+	seenCap := f.cap * seenRetentionFactor
+	// Prune with a full-ring of slack so the sweep is amortized O(1) per Append:
+	// let seen grow one ring beyond seenCap before compacting it back down.
+	if len(f.seen) <= seenCap+f.cap {
+		return
+	}
+	// Guarded by the length check above: len(seen) distinct keys means seq has
+	// advanced past seenCap+cap, so this subtraction cannot underflow.
+	cutoff := f.seq - uint64(seenCap)
+	for k, s := range f.seen {
+		if s <= cutoff {
+			delete(f.seen, k)
+		}
+	}
 }
 
 // Drain returns every retained change with Seq > sinceSeq that is VISIBLE to the

@@ -1,6 +1,9 @@
 package worklog
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // TestAppendStampsMonotonicSeq: the feed, not the producer, assigns the cursor,
 // and it is strictly increasing across kinds.
@@ -138,5 +141,40 @@ func TestFoldLatestVerdict(t *testing.T) {
 	}
 	if _, ok := got["ccc"]; ok {
 		t.Errorf("ccc carries no verdict and must be absent from the read-model")
+	}
+}
+
+// TestSeenMapBounded proves the idempotency map does not grow without limit on a
+// bounded feed: appending far more distinct changes than the seen-retention window
+// keeps len(seen) at O(cap), NOT O(total-appended). The load-bearing invariant is
+// preserved — a change whose payload is still in the ring always dedupes — and a
+// change within the wider retention window still dedupes too; only very old,
+// long-evicted keys are allowed to lapse (the same bounded-retention tradeoff the
+// payload ring itself makes).
+func TestSeenMapBounded(t *testing.T) {
+	f := NewFeed(4) // ring cap 4 -> seen retention 4*seenRetentionFactor keys.
+	const n = 500
+	for i := 0; i < n; i++ {
+		if _, ok := f.Append(WorkChange{Kind: KindCommit, SHA: fmt.Sprintf("sha-%d", i)}); !ok {
+			t.Fatalf("append %d of a distinct change must be accepted", i)
+		}
+	}
+	// seen is bounded to O(cap), not O(n).
+	if bound := f.cap*seenRetentionFactor + f.cap; len(f.seen) > bound {
+		t.Fatalf("len(seen) = %d after %d distinct appends, want <= %d (the map grew unbounded)", len(f.seen), n, bound)
+	}
+	// INVARIANT: a change still in the ring MUST still dedupe (must never regress).
+	ringHead := fmt.Sprintf("sha-%d", n-1)
+	if _, ok := f.Append(WorkChange{Kind: KindCommit, SHA: ringHead}); ok {
+		t.Errorf("replay of a still-ringed change %q must dedupe", ringHead)
+	}
+	// A ring-evicted change still inside the seen-retention window also dedupes.
+	recent := fmt.Sprintf("sha-%d", n-2*f.cap)
+	if _, ok := f.Append(WorkChange{Kind: KindCommit, SHA: recent}); ok {
+		t.Errorf("replay of a within-retention change %q must still dedupe", recent)
+	}
+	// A very old, long-evicted change is allowed to lapse (proof the map was pruned).
+	if _, ok := f.Append(WorkChange{Kind: KindCommit, SHA: "sha-0"}); !ok {
+		t.Errorf("the oldest change should have aged out of seen (bounded retention), but it still deduped")
 	}
 }
