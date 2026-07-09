@@ -12,12 +12,14 @@
 //
 // The doctrine treedoctor enforces is the one that session learned the hard way: in an
 // always-on tree you must NEVER delete a peer's live work. So treedoctor only ever reclaims
-// the things that are provably safe — a lockfile whose holder PID is dead; a worktree whose
-// HEAD is an ancestor of the trunk (already merged) AND has not been touched recently; and an
-// orphaned per-worker isolation worktree (its dir carries WorkerWorktreeMarker,
-// `fak-worker-wt-*`) that is not live — disposable editing space whose only durable output
-// already landed on the trunk, so a crashed worker's leaked tree is reclaimed even when its
-// in-worktree commit left HEAD off the trunk. Everything else is reported, never removed.
+// the things that are provably safe — a lockfile whose holder PID is dead; a renamed-aside
+// orphan lock residue file (its `.lock.orphan` name is by construction not an active lock,
+// so it never races a live git op) aged past the live window; a worktree whose HEAD is an
+// ancestor of the trunk (already merged) AND has not been touched recently; and an orphaned
+// per-worker isolation worktree (its dir carries WorkerWorktreeMarker, `fak-worker-wt-*`)
+// that is not live — disposable editing space whose only durable output already landed on
+// the trunk, so a crashed worker's leaked tree is reclaimed even when its in-worktree commit
+// left HEAD off the trunk. Everything else is reported, never removed.
 //
 // Like safecommit, every git effect goes through an injected Runner so the whole decision
 // tree is testable with no git and no repo. Diagnose is read-only; Sweep performs the
@@ -89,6 +91,20 @@ type LockState struct {
 	Stale     bool   `json:"stale"` // a dead holder still owns it — wedges the commit lane
 }
 
+// LockResidueState is a renamed-aside git lock file a lock-recovery mechanism left in the
+// git common dir (e.g. `HEAD.lock.orphan-recovered-<n>`, `packed-refs.lock.orphan-<n>`).
+// The `.lock.orphan` infix in its name is the load-bearing safety marker: an ACTIVE git
+// lock ends in exactly `.lock` (`HEAD.lock`, `packed-refs.lock`, `index.lock`, …), so a
+// name carrying `.lock.orphan` is provably NOT a lock git is currently holding — removing
+// it can never race a live transaction. Left unswept, this residue accumulates in the hot
+// shared `.git`. It is swept only once aged past the live window (a just-created one might
+// belong to an in-flight recovery, so it is reported but kept).
+type LockResidueState struct {
+	Path       string `json:"path"`
+	AgeSeconds int64  `json:"age_seconds"`
+	Sweepable  bool   `json:"sweepable"` // aged past the live window — safe to remove
+}
+
 // WorktreeState classifies one worktree for the prune decision.
 type WorktreeState struct {
 	Path     string `json:"path"`
@@ -104,8 +120,9 @@ type WorktreeState struct {
 
 // Report is the full read-only diagnosis.
 type Report struct {
-	Lock      LockState       `json:"lock"`
-	Worktrees []WorktreeState `json:"worktrees"`
+	Lock        LockState          `json:"lock"`
+	LockResidue []LockResidueState `json:"lock_residue,omitempty"`
+	Worktrees   []WorktreeState    `json:"worktrees"`
 }
 
 // StaleLockWedged reports whether the commit lock is currently wedged by a dead holder.
@@ -117,6 +134,17 @@ func (r Report) PrunableWorktrees() []WorktreeState {
 	for _, w := range r.Worktrees {
 		if w.Prunable {
 			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// SweepableLockResidue returns the orphan lock residue files Sweep would remove.
+func (r Report) SweepableLockResidue() []LockResidueState {
+	var out []LockResidueState
+	for _, f := range r.LockResidue {
+		if f.Sweepable {
+			out = append(out, f)
 		}
 	}
 	return out
@@ -139,6 +167,7 @@ func Diagnose(ctx context.Context, run Runner, opts Options) Report {
 	}
 
 	rep := Report{Lock: diagnoseLock(opts.RepoRoot)}
+	rep.LockResidue = diagnoseLockResidue(opts.RepoRoot, window, now)
 	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now)
 	return rep
 }
@@ -157,6 +186,19 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 			}
 		} else {
 			actions = append(actions, "would reap stale commit lock (dead PID "+strconv.Itoa(rep.Lock.HolderPID)+")")
+		}
+	}
+
+	for _, f := range rep.LockResidue {
+		if !f.Sweepable {
+			continue
+		}
+		if apply {
+			if err := os.Remove(f.Path); err == nil {
+				actions = append(actions, "swept orphan lock residue "+f.Path)
+			}
+		} else {
+			actions = append(actions, "would sweep orphan lock residue "+f.Path)
 		}
 	}
 
@@ -191,6 +233,38 @@ func diagnoseLock(repoRoot string) LockState {
 		HolderPID: p.HolderPID,
 		Stale:     p.Stale,
 	}
+}
+
+// lockResidueGlob matches the renamed-aside lock files a recovery mechanism leaves in the
+// git common dir. Its `*` never crosses a path separator, so only files directly in `.git`
+// are considered — the same depth git's own top-level locks live at.
+const lockResidueGlob = "*.lock.orphan*"
+
+// diagnoseLockResidue lists orphan lock residue in <repoRoot>/.git, marking as Sweepable
+// each file aged past the live window. It never removes anything — Sweep does, and only for
+// the Sweepable ones. A missing/unglobbable dir yields an empty result (the fail-safe read).
+func diagnoseLockResidue(repoRoot string, window time.Duration, now time.Time) []LockResidueState {
+	matches, err := filepath.Glob(filepath.Join(repoRoot, ".git", lockResidueGlob))
+	if err != nil {
+		return nil
+	}
+	var out []LockResidueState
+	for _, path := range matches {
+		info, serr := os.Stat(path)
+		if serr != nil || info.IsDir() {
+			continue
+		}
+		var ageSec int64
+		if age := now.Sub(info.ModTime()); age > 0 {
+			ageSec = int64(age / time.Second)
+		}
+		out = append(out, LockResidueState{
+			Path:       path,
+			AgeSeconds: ageSec,
+			Sweepable:  now.Sub(info.ModTime()) >= window,
+		})
+	}
+	return out
 }
 
 func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, window time.Duration, now time.Time) []WorktreeState {

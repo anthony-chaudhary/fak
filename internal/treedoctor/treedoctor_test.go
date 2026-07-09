@@ -253,3 +253,81 @@ func writeAt(t *testing.T, path string, mod time.Time) {
 		t.Fatal(err)
 	}
 }
+
+func TestDiagnoseClassifiesLockResidue(t *testing.T) {
+	main := t.TempDir()
+	gitDir := filepath.Join(main, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	// Two renamed-aside orphan residue files (one aged, one fresh) alongside a genuine
+	// ACTIVE lock name — which ends in exactly `.lock` and must NEVER be seen as residue.
+	writeAt(t, filepath.Join(gitDir, "HEAD.lock.orphan-recovered-06344"), now.Add(-time.Hour))
+	writeAt(t, filepath.Join(gitDir, "packed-refs.lock.orphan-1437010601"), now)
+	writeAt(t, filepath.Join(gitDir, "index.lock"), now.Add(-time.Hour))
+
+	rep := Diagnose(context.Background(), (&fakeGit{}).run, Options{RepoRoot: main, Now: now})
+
+	sweepable := map[string]bool{}
+	for _, r := range rep.LockResidue {
+		sweepable[filepath.Base(r.Path)] = r.Sweepable
+	}
+	if _, seen := sweepable["index.lock"]; seen {
+		t.Fatalf("active lock index.lock misclassified as orphan residue: %+v", rep.LockResidue)
+	}
+	if sw, ok := sweepable["HEAD.lock.orphan-recovered-06344"]; !ok || !sw {
+		t.Fatalf("aged residue not marked sweepable: %+v", rep.LockResidue)
+	}
+	if fr, ok := sweepable["packed-refs.lock.orphan-1437010601"]; !ok || fr {
+		t.Fatalf("fresh residue should be reported but NOT sweepable: %+v", rep.LockResidue)
+	}
+	if n := len(rep.SweepableLockResidue()); n != 1 {
+		t.Fatalf("SweepableLockResidue() = %d, want 1", n)
+	}
+}
+
+func TestSweepApplyRemovesAgedLockResidueOnly(t *testing.T) {
+	main := t.TempDir()
+	gitDir := filepath.Join(main, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	aged := filepath.Join(gitDir, "HEAD.lock.orphan-recovered-1")
+	fresh := filepath.Join(gitDir, "config.lock.orphan-2")
+	writeAt(t, aged, now.Add(-time.Hour))
+	writeAt(t, fresh, now)
+
+	_, actions := Sweep(context.Background(), (&fakeGit{}).run, Options{RepoRoot: main, Now: now}, true)
+
+	if _, err := os.Stat(aged); !os.IsNotExist(err) {
+		t.Fatalf("aged residue not removed: err=%v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("fresh residue wrongly removed: %v", err)
+	}
+	if joined := strings.Join(actions, "\n"); !strings.Contains(joined, "swept orphan lock residue") {
+		t.Fatalf("no sweep action recorded: %v", actions)
+	}
+}
+
+func TestSweepDryRunKeepsLockResidue(t *testing.T) {
+	main := t.TempDir()
+	gitDir := filepath.Join(main, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	aged := filepath.Join(gitDir, "HEAD.lock.orphan-recovered-9")
+	writeAt(t, aged, now.Add(-time.Hour))
+
+	_, actions := Sweep(context.Background(), (&fakeGit{}).run, Options{RepoRoot: main, Now: now}, false)
+
+	if _, err := os.Stat(aged); err != nil {
+		t.Fatalf("dry-run removed residue: %v", err)
+	}
+	if joined := strings.Join(actions, "\n"); !strings.Contains(joined, "would sweep orphan lock residue") {
+		t.Fatalf("dry-run did not plan a sweep: %v", actions)
+	}
+}

@@ -15,11 +15,14 @@ import (
 )
 
 // cmdTreeDoctor — `fak tree-doctor`: diagnose and (with --apply) repair a fak working tree
-// that has gone un-tidy under the always-on agent fleet. It reports two reclaimable
+// that has gone un-tidy under the always-on agent fleet. It reports three reclaimable
 // hazards and, on --apply, fixes only the provably-safe ones:
 //
 //   - a STALE commit lock: .git/fak-commit.lock still owned by a DEAD process, which on
 //     Windows can wedge the WHOLE shared-trunk commit lane (the 2026-06-28 56-minute stall);
+//   - ORPHAN lock residue: renamed-aside `.git/*.lock.orphan*` files a lock-recovery step
+//     left behind (never an active lock name, so never a live-op race), aged past the live
+//     window — cruft that otherwise accumulates in the hot shared .git;
 //   - MERGED, not-live worktrees: left over from prior multi-agent runs, already folded into
 //     the trunk and untouched recently.
 //
@@ -93,7 +96,7 @@ func treeDoctorTrunk(trunk string) string {
 }
 
 func treeDoctorNeedsAction(rep treedoctor.Report) bool {
-	return rep.Lock.Stale || len(rep.PrunableWorktrees()) > 0
+	return rep.Lock.Stale || len(rep.SweepableLockResidue()) > 0 || len(rep.PrunableWorktrees()) > 0
 }
 
 func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, apply bool) {
@@ -105,6 +108,15 @@ func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, 
 		}
 	} else {
 		fmt.Fprintln(w, "commit lock: none")
+	}
+	residue := 0
+	for _, f := range rep.LockResidue {
+		if f.Sweepable {
+			residue++
+			fmt.Fprintf(w, "lock residue SWEEPABLE: %s (aged %ds)\n", f.Path, f.AgeSeconds)
+		} else {
+			fmt.Fprintf(w, "lock residue keep:      %s (fresh — within live window)\n", f.Path)
+		}
 	}
 	prunable := 0
 	for _, wt := range rep.Worktrees {
@@ -118,7 +130,7 @@ func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, 
 			fmt.Fprintf(w, "worktree keep:     %s (%s)\n", wt.Path, wt.Keep)
 		}
 	}
-	if prunable == 0 && !rep.Lock.Stale {
+	if prunable == 0 && residue == 0 && !rep.Lock.Stale {
 		fmt.Fprintln(w, "tree is clean — nothing to reclaim")
 	}
 
