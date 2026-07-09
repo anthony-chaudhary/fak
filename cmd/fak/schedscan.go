@@ -47,7 +47,7 @@ type schedResultMeaning struct {
 	Code     uint32 `json:"code"`
 	Hex      string `json:"hex"`
 	Message  string `json:"message"`
-	Severity string `json:"severity"` // ok | running | info | warn | fail | unknown
+	Severity string `json:"severity"` // ok | running | info | warn | fail
 	Hint     string `json:"hint,omitempty"`
 }
 
@@ -64,16 +64,22 @@ type schedResultEntry struct {
 // an operator sees in taskschd.msc. Anything not listed falls through to the
 // generic HRESULT classifier in decodeSchedTaskResult.
 var schedResultTable = map[uint32]schedResultEntry{
-	0x0:        {"The operation completed successfully.", "ok", ""},
-	0x1:        {"Incorrect function — the task's action exited 1 (generic failure).", "fail", "inspect the task's program/script exit path"},
-	0x2:        {"The system cannot find the file specified.", "fail", "the task Action's program path is wrong or missing"},
-	0xA:        {"The environment is incorrect.", "fail", ""},
-	0x41300:    {"The task is ready to run at its next scheduled time.", "ok", ""},
-	0x41301:    {"The task is currently running.", "running", ""},
-	0x41302:    {"The task is disabled.", "warn", "re-enable with Enable-ScheduledTask"},
-	0x41303:    {"The task has not yet run.", "info", ""},
-	0x41304:    {"There are no more runs scheduled for this task.", "warn", "the trigger has expired; re-arm the schedule"},
-	0x41306:    {"The last run of the task was terminated by the user.", "warn", ""},
+	0x0:     {"The operation completed successfully.", "ok", ""},
+	0x1:     {"Incorrect function — the task's action exited 1 (generic failure).", "fail", "inspect the task's program/script exit path"},
+	0x2:     {"The system cannot find the file specified.", "fail", "the task Action's program path is wrong or missing"},
+	0xA:     {"The environment is incorrect.", "fail", ""},
+	0x41300: {"The task is ready to run at its next scheduled time.", "ok", ""},
+	0x41301: {"The task is currently running.", "running", ""},
+	0x41302: {"The task is disabled.", "warn", "re-enable with Enable-ScheduledTask"},
+	0x41303: {"The task has not yet run.", "info", ""},
+	0x41304: {"There are no more runs scheduled for this task.", "warn", "the trigger has expired; re-arm the schedule"},
+	0x41305: {"One or more of the properties needed to run this task on a schedule have not been set.", "warn", "the task has no active schedule; re-arm its trigger"},
+	0x41306: {"The last run of the task was terminated by the user.", "warn", ""},
+	0x41307: {"Either the task has no triggers or the existing triggers are disabled or not set.", "warn", "add or enable a trigger; the task will not fire on its own"},
+	0x4131B: {"The task is registered, but not all specified triggers will start the task.", "warn", "one or more triggers are invalid; review the schedule"},
+	0x4131C: {"The task is registered, but may fail to start. Batch logon privilege needs to be enabled for the task principal.", "warn",
+		"grant the run-as principal 'Log on as a batch job', or migrate the task to S4U"},
+	0x41325:    {"The Task Scheduler service has asked the task to run.", "info", ""},
 	0x8004131F: {"An instance of this task is already running.", "info", "usually benign — a prior run overlapped this trigger"},
 	0x80070002: {"The system cannot find the file specified.", "fail", "the task Action's program path is wrong or missing"},
 	0x80070005: {"Access is denied.", "fail", "the run-as principal lacks rights (e.g. 'Log on as a batch job')"},
@@ -85,16 +91,24 @@ var schedResultTable = map[uint32]schedResultEntry{
 // normalizeSchedResult folds a raw LastTaskResult into an unsigned 32-bit code.
 // Get-ScheduledTaskInfo hands the field back as a signed Int32 in some PowerShell
 // builds and an unsigned UInt32 in others, so 0x800710E0 arrives as either
-// 2147943136 or -2147024160 (and 0xFFFFFFFF as -1). Masking to 32 bits collapses
+// 2147946720 or -2147020576 (and 0xFFFFFFFF as -1). Masking to 32 bits collapses
 // both spellings onto the same key the decode table uses.
 func normalizeSchedResult(raw int64) uint32 {
 	return uint32(raw & 0xFFFFFFFF)
 }
 
 // decodeSchedTaskResult resolves a raw result code to its meaning. Known codes
-// come from schedResultTable; unknown codes are classified structurally — 0 is
-// success, the SCHED_S_* success facility (0x0004130x) is informational, and any
-// code with the HRESULT failure bit set (>= 0x80000000) is a failure.
+// come from schedResultTable; unknown codes are classified structurally:
+//   - 0 is success.
+//   - The SCHED_S_* success facility (0x00041300–0x0004132F) is informational.
+//   - Any code with the HRESULT failure bit set (>= 0x80000000) is a failure.
+//   - Any OTHER non-zero code is a failure too: Task Scheduler stores the task
+//     action's process exit code in this field, and a non-zero exit is a failed
+//     run (the 0=success convention every fleet Fak*/Fleet*/User* action follows).
+//     Treating it as fail is what keeps the health rollup and --strict from reading
+//     a broken task as healthy-idle — the whole reason schedscan exists. (A few
+//     tools, e.g. robocopy, use small non-zero codes to mean success; that only
+//     matters under --all, never the default fleet filter.)
 func decodeSchedTaskResult(raw int64) schedResultMeaning {
 	code := normalizeSchedResult(raw)
 	hex := fmt.Sprintf("0x%X", code)
@@ -104,13 +118,14 @@ func decodeSchedTaskResult(raw int64) schedResultMeaning {
 	switch {
 	case code == 0:
 		return schedResultMeaning{Code: code, Hex: hex, Message: "The operation completed successfully.", Severity: "ok"}
-	case code >= 0x41300 && code <= 0x4130F:
+	case code >= 0x41300 && code <= 0x4132F:
 		return schedResultMeaning{Code: code, Hex: hex, Message: "Task Scheduler status " + hex + " (informational).", Severity: "info"}
 	case code >= 0x80000000:
 		return schedResultMeaning{Code: code, Hex: hex, Message: "Failure HRESULT " + hex + " (unmapped).", Severity: "fail",
 			Hint: "look up " + hex + " in the Windows error reference"}
 	default:
-		return schedResultMeaning{Code: code, Hex: hex, Message: "Unmapped result code " + hex + ".", Severity: "unknown"}
+		return schedResultMeaning{Code: code, Hex: hex, Message: "The task action exited with a non-zero result (" + hex + ") — its last run likely failed.", Severity: "fail",
+			Hint: "inspect the task action's exit path; a non-zero exit usually means the last run failed"}
 	}
 }
 
@@ -146,18 +161,22 @@ type schedScanTaskReport struct {
 }
 
 // classifySchedTask rolls a task's live State and decoded result into one health
-// bucket. A failure result dominates (that is the whole point — a task can report
-// State=Ready while its last run was refused with 0x800710E0), then the explicit
-// disabled/running states, then idle/healthy.
+// bucket. An operator-disabled task drops out of the health/strict signal FIRST,
+// even if its last recorded run failed: LastTaskResult is stale history the task
+// will not re-run, so a deliberately-disabled task must not latch --strict. After
+// that a failure result dominates the live State (that is the whole point — a task
+// can report State=Ready while its last run was refused with 0x800710E0), then the
+// explicit running state, then idle/healthy.
 func classifySchedTask(state string, r schedResultMeaning) (status string, failing bool) {
+	st := strings.ToLower(strings.TrimSpace(state))
+	if st == "disabled" || (r.Severity == "warn" && r.Code == 0x41302) {
+		return "disabled", false
+	}
 	switch r.Severity {
 	case "fail":
 		return "failing", true
 	}
-	st := strings.ToLower(strings.TrimSpace(state))
 	switch {
-	case st == "disabled" || r.Severity == "warn" && r.Code == 0x41302:
-		return "disabled", false
 	case st == "running" || r.Severity == "running":
 		return "running", false
 	case r.Severity == "warn":
@@ -291,6 +310,10 @@ func cmdSchedScan(argv []string) {
 	os.Exit(runSchedScan(os.Stdout, os.Stderr, argv))
 }
 
+// runSchedScan is the testable core. Exit codes mirror the sibling stallscan
+// convention so a cron/watchdog gate can separate "a task is failing" from "the
+// scan itself broke": 0 clean, 1 runtime error (live query / parse / encode), 2
+// usage, 3 a failing task was found under --strict.
 func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("schedscan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -299,8 +322,8 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 	filterExpr := fs.String("filter", schedScanDefaultFilter, "case-insensitive regexp matched against the task name")
 	all := fs.Bool("all", false, "scan every scheduled task (ignore --filter)")
 	from := fs.String("from", "", "read Get-ScheduledTaskInfo JSON from a file instead of a live query (works off-Windows)")
-	failingOnly := fs.Bool("failing-only", false, "show only failing tasks")
-	strict := fs.Bool("strict", false, "exit 1 if any task is failing")
+	failingOnly := fs.Bool("failing-only", false, "show only failing tasks (table rows and the JSON task list)")
+	strict := fs.Bool("strict", false, "exit 3 if any task is failing (1=runtime error, 2=usage)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -316,6 +339,7 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	var raw, source string
+	var liveErr error
 	if *from != "" {
 		b, err := os.ReadFile(*from)
 		if err != nil {
@@ -335,18 +359,38 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak schedscan: live query failed: %v\n", err)
 			return 1
 		}
-		raw, source = out, "live"
+		// A non-empty stream with a non-nil err is a noisy-but-usable run; keep the
+		// err so that if the payload fails to parse we surface the real PowerShell
+		// error (which embeds the combined output) instead of the generic parse error.
+		raw, source, liveErr = out, "live", err
 	}
 
 	rows, err := parseSchedTaskJSON(raw)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak schedscan: parse task JSON: %v\n", err)
+		if liveErr != nil {
+			fmt.Fprintf(stderr, "fak schedscan: live query failed: %v\n", liveErr)
+		} else {
+			fmt.Fprintf(stderr, "fak schedscan: parse task JSON: %v\n", err)
+		}
 		return 1
 	}
 
 	doc := buildSchedScanDoc(rows, filter, source, time.Now().UTC().Format(time.RFC3339))
 
 	if *jsonOut {
+		// Honor --failing-only in JSON too (the table honors it via renderSchedScanTable):
+		// prune the task list to failures. FailingCount and Counts stay the full-fleet
+		// rollup so the fleet context is not lost.
+		if *failingOnly {
+			kept := make([]schedScanTaskReport, 0, doc.FailingCount)
+			for _, t := range doc.Tasks {
+				if t.Failing {
+					kept = append(kept, t)
+				}
+			}
+			doc.Tasks = kept
+			doc.Count = len(kept)
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(doc); err != nil {
@@ -358,7 +402,7 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *strict && doc.FailingCount > 0 {
-		return 1
+		return 3
 	}
 	return 0
 }
@@ -435,8 +479,16 @@ func schedScanShortTime(s string) string {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.Format("2006-01-02 15:04")
 	}
+	// Non-RFC3339 fallback (only reachable via a hand-crafted --from snapshot): keep
+	// the leading date+time, but trim by rune so a multibyte rune straddling the cut
+	// is never split into invalid UTF-8. For the ASCII ISO strings the live probe
+	// emits this is byte-identical to the old s[:16].
 	if len(s) >= 16 {
-		return strings.Replace(s[:16], "T", " ", 1)
+		r := []rune(s)
+		if len(r) > 16 {
+			r = r[:16]
+		}
+		return strings.Replace(string(r), "T", " ", 1)
 	}
 	return s
 }

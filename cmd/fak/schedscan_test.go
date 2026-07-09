@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestNormalizeSchedResult proves the signed/unsigned fold: Get-ScheduledTaskInfo
@@ -60,13 +61,35 @@ func TestDecodeSchedTaskResult(t *testing.T) {
 	if got := decodeSchedTaskResult(0x41301); got.Severity != "running" {
 		t.Errorf("0x41301 severity = %q, want running", got.Severity)
 	}
-	// An unmapped HRESULT failure still classifies as fail via the structural fallback.
+	// An unmapped HRESULT failure classifies as fail via the structural fallback,
+	// and carries a hex-bearing message + a lookup hint so the table's remediation
+	// line is never blank for a failing task.
 	if got := decodeSchedTaskResult(0x80070057); got.Severity != "fail" {
 		t.Errorf("unmapped 0x80070057 severity = %q, want fail", got.Severity)
+	} else {
+		if !strings.Contains(got.Message, "0x80070057") {
+			t.Errorf("unmapped-HRESULT message = %q, want the hex in it", got.Message)
+		}
+		if strings.TrimSpace(got.Hint) == "" {
+			t.Errorf("unmapped-HRESULT hint is empty; the table would print no remediation")
+		}
 	}
 	// An unmapped SCHED_S_* status is informational, not a failure.
 	if got := decodeSchedTaskResult(0x4130A); got.Severity != "info" {
 		t.Errorf("unmapped 0x4130A severity = %q, want info", got.Severity)
+	}
+	// The batch-logon status (SCHED_S_BATCH_LOGON_PROBLEM) is a warn on the leaf's
+	// own S4U theme, not a silent info — it must surface as "degraded", not "idle".
+	if got := decodeSchedTaskResult(0x4131C); got.Severity != "warn" || !strings.Contains(strings.ToUpper(got.Hint), "S4U") {
+		t.Errorf("0x4131C => severity %q hint %q, want warn + S4U remediation", got.Severity, got.Hint)
+	}
+	// The core correctness guard: a task action that exited with a small non-zero
+	// code (e.g. 3, 255) is a FAILED run, never an "unknown"/healthy status — this
+	// is the whole reason schedscan does not trust State=Ready.
+	for _, code := range []int64{3, 255, 0x420} {
+		if got := decodeSchedTaskResult(code); got.Severity != "fail" {
+			t.Errorf("non-zero exit 0x%X severity = %q, want fail", code, got.Severity)
+		}
 	}
 }
 
@@ -84,6 +107,20 @@ func TestClassifySchedTask(t *testing.T) {
 	}
 	if status, _ := classifySchedTask("Disabled", decodeSchedTaskResult(0x41302)); status != "disabled" {
 		t.Errorf("disabled => %q, want disabled", status)
+	}
+	// A task action that exited non-zero (here 3) while State=Ready must roll up as
+	// failing so --strict catches it — not "idle".
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(3)); status != "failing" || !failing {
+		t.Errorf("Ready+exit-3 => (%q,%v), want (failing,true)", status, failing)
+	}
+	// A warn-severity status (batch-logon) surfaces as degraded, not idle.
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x4131C)); status != "degraded" || failing {
+		t.Errorf("Ready+0x4131C => (%q,%v), want (degraded,false)", status, failing)
+	}
+	// An operator-disabled task with a STALE hard-failure last result must not latch
+	// --strict: intentional-off dominates stale history.
+	if status, failing := classifySchedTask("Disabled", decodeSchedTaskResult(0x800710E0)); status != "disabled" || failing {
+		t.Errorf("Disabled+stale-fail => (%q,%v), want (disabled,false)", status, failing)
 	}
 }
 
@@ -170,10 +207,12 @@ func TestRunSchedScan_StrictExit(t *testing.T) {
 	if err := os.WriteFile(path, []byte(schedScanFixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// --strict exits 1 when any task is failing.
+	// --strict exits 3 (the stallscan-aligned "detection" code) when any task is
+	// failing — distinct from 1 (runtime error) / 2 (usage) so a cron gate can tell
+	// "a task failed" from "the scan broke".
 	var out, errb bytes.Buffer
-	if code := runSchedScan(&out, &errb, []string{"--from", path, "--json", "--strict"}); code != 1 {
-		t.Errorf("strict exit = %d, want 1", code)
+	if code := runSchedScan(&out, &errb, []string{"--from", path, "--json", "--strict"}); code != 3 {
+		t.Errorf("strict exit = %d, want 3", code)
 	}
 	// Filtered to only the healthy janitor, --strict is clean.
 	out.Reset()
@@ -204,5 +243,123 @@ func TestRunSchedScan_TableFailingOnly(t *testing.T) {
 	// The S4U remediation hint travels with the finding.
 	if !strings.Contains(strings.ToUpper(s), "S4U") {
 		t.Errorf("table missing the S4U remediation hint:\n%s", s)
+	}
+}
+
+// TestRunSchedScan_AllDropsFilter pins the --all escape hatch: it must include the
+// non-fleet task and clear the filter. Without this, a regressed no-op --all (filter
+// still applied) would be invisible — every other test runs with a filter.
+func TestRunSchedScan_AllDropsFilter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snap.json")
+	if err := os.WriteFile(path, []byte(schedScanFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runSchedScan(&out, &errb, []string{"--from", path, "--json", "--all"}); code != 0 {
+		t.Fatalf("exit = %d; stderr=%s", code, errb.String())
+	}
+	var doc schedScanDoc
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Count != 4 {
+		t.Errorf("--all count = %d, want 4 (non-fleet task INCLUDED)", doc.Count)
+	}
+	if doc.Filter != "" {
+		t.Errorf("--all filter = %q, want empty", doc.Filter)
+	}
+	var names []string
+	for _, tk := range doc.Tasks {
+		names = append(names, tk.Name)
+	}
+	if !strings.Contains(strings.Join(names, ","), "GoogleUpdaterTaskSystem") {
+		t.Errorf("--all dropped the non-fleet task: %v", names)
+	}
+}
+
+// TestRunSchedScan_JSONFailingOnly pins that --failing-only prunes the JSON task
+// list (previously a silent no-op in JSON mode) while the FailingCount fleet rollup
+// is preserved.
+func TestRunSchedScan_JSONFailingOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snap.json")
+	if err := os.WriteFile(path, []byte(schedScanFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runSchedScan(&out, &errb, []string{"--from", path, "--json", "--failing-only"}); code != 0 {
+		t.Fatalf("exit = %d; stderr=%s", code, errb.String())
+	}
+	var doc schedScanDoc
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Count != 1 || len(doc.Tasks) != 1 {
+		t.Fatalf("failing-only JSON count = %d, tasks = %d, want 1/1", doc.Count, len(doc.Tasks))
+	}
+	if doc.Tasks[0].Name != "FleetResumeWatchdog" || !doc.Tasks[0].Failing {
+		t.Errorf("failing-only JSON task = %q failing=%v, want FleetResumeWatchdog failing", doc.Tasks[0].Name, doc.Tasks[0].Failing)
+	}
+	if doc.FailingCount != 1 {
+		t.Errorf("failing_count = %d, want 1 (fleet rollup preserved)", doc.FailingCount)
+	}
+}
+
+// schedScanMultiFailFixture has TWO tasks failing for the SAME reason (0x800710E0)
+// plus one failing for a DIFFERENT reason (0x2), so the table's hint-dedup and
+// multi-failing-row render — the fleet-wide-refusal scenario — get a witness.
+const schedScanMultiFailFixture = `[
+  {"TaskName":"FleetResumeWatchdog","State":"Ready","LogonType":"Interactive","LastTaskResult":-2147020576},
+  {"TaskName":"FleetUserResumeWatchdog","State":"Ready","LogonType":"Interactive","LastTaskResult":-2147020576},
+  {"TaskName":"FakBadPath","State":"Ready","LogonType":"S4U","LastTaskResult":2}
+]`
+
+func TestRunSchedScan_TableDedupsHints(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snap.json")
+	if err := os.WriteFile(path, []byte(schedScanMultiFailFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runSchedScan(&out, &errb, []string{"--from", path}); code != 0 {
+		t.Fatalf("exit = %d; stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	// The shared 0x800710E0 remediation prints exactly once despite two failing tasks.
+	if n := strings.Count(s, "migrate it to S4U"); n != 1 {
+		t.Errorf("shared S4U hint printed %d times, want exactly 1 (dedup):\n%s", n, s)
+	}
+	// The distinct 0x2 hint is not collapsed away.
+	if !strings.Contains(s, "program path is wrong") {
+		t.Errorf("distinct 0x2 hint missing (over-dedup?):\n%s", s)
+	}
+	// Both failing rows render.
+	if !strings.Contains(s, "FleetResumeWatchdog") || !strings.Contains(s, "FleetUserResumeWatchdog") || !strings.Contains(s, "FakBadPath") {
+		t.Errorf("a failing row is missing from the table:\n%s", s)
+	}
+}
+
+// TestSchedScanShortTime covers the three fallback branches plus rune-safety of the
+// non-RFC3339 truncation.
+func TestSchedScanShortTime(t *testing.T) {
+	// Branch 1: a real RFC3339 stamp renders to minute precision.
+	if got := schedScanShortTime("2026-07-09T04:00:00.0000000-07:00"); got != "2026-07-09 04:00" {
+		t.Errorf("RFC3339 => %q, want 2026-07-09 04:00", got)
+	}
+	// Branch 3: empty renders as a dash.
+	if got := schedScanShortTime(""); got != "-" {
+		t.Errorf("empty => %q, want -", got)
+	}
+	// Branch 2: a non-RFC3339 string of length >= 16 keeps its leading date+time and
+	// turns the ISO 'T' into a space.
+	if got := schedScanShortTime("20260709T040000ZZ"); got != "20260709 040000Z" {
+		t.Errorf("non-RFC3339 => %q, want 20260709 040000Z", got)
+	}
+	// Rune-safety: a multibyte rune straddling the 16-byte cut must not be split into
+	// invalid UTF-8 (the old byte-slice s[:16] produced mojibake here).
+	got := schedScanShortTime("aaaaaaaaaaaaaaaébbb")
+	if !utf8.ValidString(got) {
+		t.Errorf("multibyte fallback produced invalid UTF-8: %q", got)
 	}
 }
