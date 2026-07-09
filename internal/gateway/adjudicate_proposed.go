@@ -90,6 +90,17 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			pass = append(pass, tc) // miss -> normal adjudication path, unchanged
 			continue
 		}
+		// Operator TTL ceiling (#1349): if this tool has a configured max-age and the
+		// tier-2 hit is OLDER than it, decline the inline serve and let the call run fresh.
+		// This is the deterministic counterpart to the model-driven _fak_fresh above — the
+		// operator sets a hard per-tool freshness bound; the model judges per-call. Sound
+		// for the same reason: it only ever turns a would-be served hit into a normal
+		// tool_use, byte-identical to a cache MISS (the already-tested fall-through). It is
+		// the first ENFORCED consumer of abi.ConsistencyBoundedStale's staleness bound.
+		if s.servedHitOverMaxAge(tool, res.Meta) {
+			pass = append(pass, tc)
+			continue
+		}
 		body := resolveBytes(ctx, res.Payload)
 		// Never fold a poisoned cache entry into context as prose. If the served bytes
 		// trip the screen, drop the served hit and let the call go through normal
@@ -165,6 +176,47 @@ func cacheAgeLabel(meta map[string]string) (string, bool) {
 	default:
 		return strconv.Itoa(int(d.Hours())) + "h", true
 	}
+}
+
+// SetToolMaxAge sets the operator's served-read freshness ceiling for one tool (#1349):
+// a vDSO tier-2 hit older than d is declined inline and runs fresh (see
+// servedHitOverMaxAge). A zero/negative d removes the ceiling. It is a wiring-time seam
+// (the same inject-after-New posture as the other host-set knobs) — set it before Serve
+// accepts turns; the served path reads maxAgeByTool without a lock.
+func (s *Server) SetToolMaxAge(tool string, d time.Duration) {
+	if s == nil || tool == "" {
+		return
+	}
+	if d <= 0 {
+		delete(s.maxAgeByTool, tool)
+		return
+	}
+	if s.maxAgeByTool == nil {
+		s.maxAgeByTool = map[string]time.Duration{}
+	}
+	s.maxAgeByTool[tool] = d
+}
+
+// servedHitOverMaxAge reports whether a tier-2 served hit for tool exceeds the tool's
+// configured max-age ceiling (#1349) — the deterministic gate adjudicateProposedServed
+// uses to decline an over-age inline serve. It is fail-open by construction: no config
+// for the tool, a non-positive ceiling, or a hit that carries no age (tier-1 pure /
+// tier-3 static, which recompute every hit and so have no staleness) all return false,
+// leaving the served path byte-identical to today. Only a tool WITH a positive ceiling
+// AND a hit whose age_ms strictly exceeds it declines the serve.
+func (s *Server) servedHitOverMaxAge(tool string, meta map[string]string) bool {
+	if s == nil || len(s.maxAgeByTool) == 0 {
+		return false
+	}
+	max, ok := s.maxAgeByTool[tool]
+	if !ok || max <= 0 {
+		return false
+	}
+	ms, err := strconv.ParseInt(meta["age_ms"], 10, 64)
+	if err != nil || ms < 0 {
+		return false // no age surfaced (tier-1/3, or a non-vdso hit) ⇒ no ceiling applies
+	}
+	return time.Duration(ms)*time.Millisecond > max
 }
 
 // callRequestsFresh reports whether the proposed call's JSON args set _fak_fresh truthy —

@@ -579,6 +579,19 @@ type Config struct {
 	// resource reach fak (proxy-closed world), so it is an explicit operator opt-in.
 	// Set by `fak serve --vdso-proxy-fill`. Inert (zero behavior change) when false.
 	VDSOProxyFill bool
+
+	// ToolMaxAge is the per-tool served-read freshness CEILING (#1349): the operator's
+	// deterministic counterpart to the model-driven `_fak_fresh` opt-out. A positive
+	// duration for a tool name means a vDSO tier-2 hit OLDER than it is NOT served inline
+	// — the read declines the cache and passes through to the client to run fresh (the
+	// same already-tested fall-through as a cache miss / `_fak_fresh`). This is the first
+	// ENFORCED (not forensic-only) staleness bound behind abi.ConsistencyBoundedStale:
+	// BOUNDED_STALE declares a call ACCEPTS a bounded-age read; this map supplies the
+	// bound. An absent tool (or a zero/negative duration) has NO ceiling — behavior is
+	// byte-identical to today. Only tier-2 hits carry an age (age_ms), so tier-1 pure /
+	// tier-3 static hits are never gated. Set at wiring time (before Serve) directly or
+	// via SetToolMaxAge.
+	ToolMaxAge map[string]time.Duration
 }
 
 // DefaultNativeMaxTurns bounds the native serve loop's model round-trips per request
@@ -1240,6 +1253,13 @@ type Server struct {
 	// tool_result blocks (Config.VDSOProxyFill). Default false. See admitInboundResults.
 	vdsoProxyFill bool
 
+	// maxAgeByTool mirrors Config.ToolMaxAge: the per-tool served-read freshness ceiling
+	// (#1349) adjudicateProposedServed enforces after a tier-2 hit. Set at New from the
+	// config and mutable at wiring time via SetToolMaxAge; read on request goroutines
+	// without a lock, so it must not be mutated once Serve is accepting turns. nil/empty
+	// ⇒ no tool has a ceiling ⇒ the served path is byte-identical to today.
+	maxAgeByTool map[string]time.Duration
+
 	// fleet is the host-injected live worker membership/health/drain/failover loop
 	// (fleet_membership.go) — the live fleet view the router reads. The metrics surface
 	// DRAINS its transition log onto /metrics with a per-worker label (#42) via the
@@ -1501,6 +1521,7 @@ func New(cfg Config) (*Server, error) {
 		native:                     cfg.Native,
 		nativeMaxTurns:             nativeMaxTurnsOr(cfg.NativeMaxTurns),
 		vdsoProxyFill:              cfg.VDSOProxyFill,
+		maxAgeByTool:               cfg.ToolMaxAge,
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
