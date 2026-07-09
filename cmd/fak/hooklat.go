@@ -113,9 +113,9 @@ func discoverHookObservationStreams(root string) []string {
 // (rollup in, string out) so the table shape is unit-testable.
 func formatHookLatencyTable(r turntaxmeter.HookLatencyRollup) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-9s %6s %9s %9s %9s %9s %9s\n", "verb", "n", "mean", "p50", "p90", "p99", "max")
+	fmt.Fprintf(&b, "%-19s %7s %9s %9s %9s %9s %9s\n", "verb", "n", "mean", "p50", "p90", "p99", "max")
 	row := func(s turntaxmeter.HookLatencyStats, label string) {
-		fmt.Fprintf(&b, "%-9s %6d %8.1fms %8.1fms %8.1fms %8.1fms %8.1fms\n",
+		fmt.Fprintf(&b, "%-19s %7d %8.1fms %8.1fms %8.1fms %8.1fms %8.1fms\n",
 			label, s.Count, s.MeanMS, s.P50MS, s.P90MS, s.P99MS, s.MaxMS)
 	}
 	for _, s := range r.ByVerb {
@@ -125,6 +125,15 @@ func formatHookLatencyTable(r turntaxmeter.HookLatencyRollup) string {
 		row(r.Total, "all")
 	} else {
 		b.WriteString("(no measured hook observations)\n")
+	}
+	// By-rung attribution: the pretool tail lives in a rung, not the verb, so
+	// split the rung-bearing rows out below the verb table. A slow "pretool" is
+	// uninterpretable until you can see the admission rung is what's slow.
+	if len(r.ByRung) > 0 {
+		b.WriteString("\nby rung (pretool adjudication ladder):\n")
+		for _, s := range r.ByRung {
+			row(s, s.Verb+"/"+s.Rung)
+		}
 	}
 	return b.String()
 }
@@ -169,6 +178,14 @@ func formatGuardHookLatencyLine(r turntaxmeter.HookLatencyRollup, v turntaxmeter
 	b.WriteString(guardRow("n="+fmt.Sprintf("%d", r.Total.Count),
 		fmt.Sprintf("p50=%.0fms p90=%.0fms p99=%.0fms max=%.0fms", r.Total.P50MS, r.Total.P90MS, r.Total.P99MS, r.Total.MaxMS)))
 	b.WriteString(guardRow("basis", "per hook firing, pre+post per tool call ("+windowLabel+")"))
+	// Attribute the tail to its rung: "pretool is slow" is the symptom, "the
+	// admission rung is" is the cause the operator can act on. Shown whenever a
+	// rung was folded — one row naming where the cost concentrates, so a breach
+	// points at a fixable rung instead of a whole verb.
+	if tail, ok := r.TailRung(); ok {
+		b.WriteString(guardRow("tail rung",
+			fmt.Sprintf("%s/%s p99=%.0fms max=%.0fms (n=%d)", tail.Verb, tail.Rung, tail.P99MS, tail.MaxMS, tail.Count)))
+	}
 	b.WriteString(guardRow("verdict", state))
 	return b.String()
 }

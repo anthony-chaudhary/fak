@@ -24,6 +24,20 @@ func hookRollupFixture() turntaxmeter.HookLatencyRollup {
 	return turntaxmeter.FoldHookLatency(obs)
 }
 
+// hookRollupRungFixture folds a rung-bearing stream: a slow pretool admission
+// tail and a fast provenance one, so the by-rung split and tail attribution have
+// something to render.
+func hookRollupRungFixture() turntaxmeter.HookLatencyRollup {
+	obs := make([]turntaxmeter.HookObservation, 0, 20)
+	for i := 0; i < 10; i++ {
+		obs = append(obs, turntaxmeter.HookObservation{Verb: "pretool", Rung: "admission", LatencyMS: 900 + float64(i)})
+	}
+	for i := 0; i < 10; i++ {
+		obs = append(obs, turntaxmeter.HookObservation{Verb: "pretool", Rung: "provenance", LatencyMS: 20 + float64(i)})
+	}
+	return turntaxmeter.FoldHookLatency(obs)
+}
+
 func TestFormatHookLatencyTable(t *testing.T) {
 	got := formatHookLatencyTable(hookRollupFixture())
 	for _, want := range []string{"verb", "pretool", "posttool", "all", "p99"} {
@@ -33,6 +47,19 @@ func TestFormatHookLatencyTable(t *testing.T) {
 	}
 	if !strings.Contains(got, "13") {
 		t.Fatalf("table missing the folded n=13 total:\n%s", got)
+	}
+	// A rung-less fold prints no by-rung section (zero-noise).
+	if strings.Contains(got, "by rung") {
+		t.Fatalf("rung-less rollup must not print a by-rung section:\n%s", got)
+	}
+}
+
+func TestFormatHookLatencyTableByRung(t *testing.T) {
+	got := formatHookLatencyTable(hookRollupRungFixture())
+	for _, want := range []string{"by rung", "pretool/admission", "pretool/provenance"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("by-rung table missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -80,6 +107,26 @@ func TestFormatGuardHookLatencyLine(t *testing.T) {
 	empty := turntaxmeter.FoldHookLatency(nil)
 	if got := formatGuardHookLatencyLine(empty, turntaxmeter.JudgeHookLatency(empty.Total, 250), "session window"); got != "" {
 		t.Fatalf("no-observation line must be empty, got %q", got)
+	}
+}
+
+// TestFormatGuardHookLatencyLineTailRung proves the exit summary attributes the
+// tail to its rung when a rung dominates — the admission rung is the cause an
+// operator can act on, not just the "pretool p99" symptom.
+func TestFormatGuardHookLatencyLineTailRung(t *testing.T) {
+	r := hookRollupRungFixture()
+	v := turntaxmeter.JudgeHookLatency(r.Total, turntaxmeter.DefaultHookP99BudgetMS)
+	got := formatGuardHookLatencyLine(r, v, "session window")
+	for _, want := range []string{"tail rung", "pretool/admission"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("exit-summary tail-rung row missing %q:\n%s", want, got)
+		}
+	}
+	// A rung-less rollup keeps the line but omits the tail-rung row.
+	plain := hookRollupFixture()
+	pv := turntaxmeter.JudgeHookLatency(plain.Total, turntaxmeter.DefaultHookP99BudgetMS)
+	if got := formatGuardHookLatencyLine(plain, pv, "session window"); strings.Contains(got, "tail rung") {
+		t.Fatalf("rung-less rollup must omit the tail-rung row:\n%s", got)
 	}
 }
 
