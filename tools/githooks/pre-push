@@ -103,11 +103,16 @@ fi
 # Fail-open by design: if `fak`/`go` is unavailable or the gate could-not-run, the push is allowed.
 build_mode="${FLEET_BUILD_GUARD:-warn}"
 if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
+	# In warn (advisory) mode the verdict never blocks, so a redundant concurrent full build is
+	# pure contention: pass --advisory to single-flight it (one gate builds; peers skip with
+	# SKIPPED_CONTENDED, exit 0 = allowed). Block mode omits the flag and always builds.
+	build_adv=""
+	[ "$build_mode" = "warn" ] && build_adv="--advisory"
 	if command -v fak >/dev/null 2>&1; then
-		build_out="$(fak hooks pre-push --root "$root" 2>&1)"
+		build_out="$(fak hooks pre-push --root "$root" $build_adv 2>&1)"
 		build_status=$?
 	elif command -v go >/dev/null 2>&1; then
-		build_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" 2>&1)"
+		build_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" $build_adv 2>&1)"
 		build_status=$?
 	else
 		build_out="neither 'fak' nor 'go' is on PATH"
