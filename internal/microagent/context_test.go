@@ -23,7 +23,7 @@ func TestContextBoundedTokenCapAcrossLongRun(t *testing.T) {
 
 	rng := rand.New(rand.NewSource(1)) // fixed seed: the "run" is deterministic
 	const steps = 20000
-	var totalEvicted, everEvictedTurns, maxTokens, maxLen int
+	var totalEvicted, everEvictedTurns, maxTokens, maxLen, maxBytes int
 
 	for i := 0; i < steps; i++ {
 		// Bounded per-message content (1..200 chars) — comfortably smaller than the
@@ -51,6 +51,20 @@ func TestContextBoundedTokenCapAcrossLongRun(t *testing.T) {
 		if n := ctx.Len(); n > maxLen {
 			maxLen = n
 		}
+
+		// #2004 acceptance (verbatim): "history bytes never exceed the configured
+		// cap across a long synthetic run." The cap is priced in tokens, so the
+		// direct BYTE witness is that the serialized history stays O(cap) — bounded
+		// by a constant independent of run length. Measured on every step: an
+		// unbounded linear history of 20k turns would serialize to >1MB; a capped
+		// one never approaches that.
+		enc, err := ctx.Encode()
+		if err != nil {
+			t.Fatalf("step %d: Encode: %v", i, err)
+		}
+		if n := len(enc); n > maxBytes {
+			maxBytes = n
+		}
 	}
 
 	// The run must actually have hit the cap and evicted — otherwise the test is
@@ -62,8 +76,15 @@ func TestContextBoundedTokenCapAcrossLongRun(t *testing.T) {
 	if maxLen >= steps/10 {
 		t.Fatalf("retained history grew to %d messages over %d steps — not O(cap)", maxLen, steps)
 	}
-	t.Logf("cap=%d tok · %d steps · evicted %d msgs across %d evicting appends · peak resident %d tok / %d msgs",
-		cap, steps, totalEvicted, everEvictedTurns, maxTokens, maxLen)
+	// Byte residency is O(cap), independent of run length: the serialized history
+	// peaked within a small multiple of the cap and never grew with the 20k steps
+	// (an unbounded history would exceed 1MB). This is the "history bytes" half of
+	// the #2004 acceptance, distinct from the token bound checked per step above.
+	if maxBytes >= 40*cap {
+		t.Fatalf("serialized history peaked at %d bytes — not O(cap=%d tok); byte residency must not grow with run length", maxBytes, cap)
+	}
+	t.Logf("cap=%d tok · %d steps · evicted %d msgs across %d evicting appends · peak resident %d tok / %d msgs / %d bytes",
+		cap, steps, totalEvicted, everEvictedTurns, maxTokens, maxLen, maxBytes)
 }
 
 // TestContextEncodeDecodeRoundTripIdentical is the #2004 acceptance witness for
