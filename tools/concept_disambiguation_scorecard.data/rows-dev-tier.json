@@ -1,0 +1,93 @@
+{
+  "rows": [
+    {
+      "id": "dev-tier-frontdoor-verb",
+      "canonical": "frontdoor verb",
+      "family": "dev-tier",
+      "kind": "concept",
+      "definition": "A top-level `fak` verb classified TierFrontdoor by internal/devindex: the product surface an operator FACES (what `fak help` lists), and the headline heaviness input counted by the frontdoor_verbs meter.",
+      "distinction": "The product front door - NOT a dev verb (the fak dev tooling tier, TierDev, counted separately in dev_verbs), NOT the `fak dev` namespace (the command that gates the dev tier), NOT devindex (the catalog that ASSIGNS the tier), and NOT TierHidden (internal re-exec seams, never a user verb).",
+      "distinct_from": [
+        "dev-tier-dev-verb",
+        "dev-tier-fak-dev-namespace",
+        "dev-tier-devindex"
+      ],
+      "aliases": [
+        "frontdoor tier verb",
+        "TierFrontdoor"
+      ],
+      "grounding": "TierFrontdoor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "dev-tier-dev-verb",
+      "canonical": "dev verb",
+      "family": "dev-tier",
+      "kind": "concept",
+      "definition": "A top-level verb NOT classified frontdoor (TierDev): the `fak dev <verb>` tooling tier - repo-workflow verbs, scorecards, RSI. It stays MEASURED in the dev_verbs meter even after its bare spelling is gated behind `fak dev` (the honesty fence: hidden from the front door, not from the meter).",
+      "distinction": "The tooling tier that stays on the meter - NOT a frontdoor verb (the product surface, TierFrontdoor, the headline heaviness input), NOT the `fak dev` namespace (one dev verb is an entry; the namespace groups them), and NOT TierHidden (internal seams, never surfaced as a user verb at all).",
+      "distinct_from": [
+        "dev-tier-frontdoor-verb",
+        "dev-tier-fak-dev-namespace"
+      ],
+      "aliases": [
+        "dev tier verb",
+        "TierDev"
+      ],
+      "grounding": "TierDev",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "dev-tier-fak-dev-namespace",
+      "canonical": "fak dev (namespace)",
+      "family": "dev-tier",
+      "kind": "concept",
+      "definition": "The CLI namespace that dispatches the dev-tier verbs (resolveDevVerb, cmd/fak/dev.go) and behind which the bare dev spellings are gated - a COMMAND surface that reads devindex to decide what is dev-tier.",
+      "distinction": "A command namespace - NOT dev-ex (a GitHub developer-experience routing LABEL an issue carries, not a command), NOT devindex (the catalog package it reads to decide tiers), and NOT a dev verb (a single entry, vs the namespace that groups them).",
+      "distinct_from": [
+        "dev-tier-devindex",
+        "dev-tier-dev-verb"
+      ],
+      "aliases": [
+        "fak dev namespace",
+        "dev namespace"
+      ],
+      "grounding": "resolveDevVerb",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "dev-tier-devindex",
+      "canonical": "devindex",
+      "family": "dev-tier",
+      "kind": "subsystem",
+      "definition": "internal/devindex: the CATALOG that classifies every verb's tier (TierFrontdoor / TierDev / TierHidden) from the live dispatch switch - the WITNESSED source the two operator-heaviness meters read to split frontdoor_verbs from dev_verbs.",
+      "distinction": "The tier catalog - NOT the `fak dev` namespace (the CLI surface that CONSUMES this catalog), NOT dev-ex (a GitHub routing label; same dev root, a catalog package vs an issue tag), and NOT a verb of either tier (it assigns the tier, it is not itself a surfaced verb).",
+      "distinct_from": [
+        "dev-tier-fak-dev-namespace",
+        "dev-tier-frontdoor-verb"
+      ],
+      "aliases": [
+        "dev index",
+        "verb-tier catalog"
+      ],
+      "grounding": "devindex",
+      "grounding_kind": "path",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

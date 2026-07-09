@@ -546,6 +546,48 @@ positioning is [the trajectory-control page](../observability/trajectory-control
 
 ---
 
+## The dev-tier / operator-surface family
+
+The `dev` root spans a CLI namespace, a GitHub label, a catalog package, and two
+verb tiers - the confusable class #1420 tracks and epic #2228 (C6, #2235) splits.
+The operator-heaviness meter now partitions the flat top-level verb surface into two
+tiers by construction (`frontdoor_verbs + dev_verbs` == the old flat count, the
+continuity witness), classified from the live dispatch switch via `internal/devindex`.
+These are the names for that split and its neighbors.
+
+- **frontdoor verb** - a top-level `fak` verb classified `devindex.TierFrontdoor`:
+  the product surface an operator FACES (what `fak help` lists), and the headline
+  heaviness input (the `frontdoor_verbs` meter). *Not* a **dev verb** (the tooling
+  tier), *not* the **`fak dev`** namespace (the command that gates the dev tier), and
+  *not* **devindex** (the catalog that ASSIGNS the tier).
+
+- **dev verb** - a top-level verb NOT classified frontdoor (`devindex.TierDev`): the
+  `fak dev <verb>` tooling tier - repo-workflow verbs, scorecards, RSI. It stays
+  MEASURED in the `dev_verbs` meter even after its bare spelling is gated behind
+  `fak dev` (the honesty fence: a gated verb is hidden from the front door, not from
+  the meter, so the heaviness drop comes from the frontdoor meter only). *Not* a
+  **frontdoor verb**, and *not* `TierHidden` (internal re-exec seams, never a user
+  verb).
+
+- **`fak dev` (namespace)** - the CLI namespace that dispatches the dev-tier verbs
+  (`resolveDevVerb`, `cmd/fak/dev.go`) and behind which the bare dev spellings are
+  gated. A COMMAND surface. *Not* **dev-ex** (a GitHub developer-experience routing
+  LABEL an issue carries, not a command), *not* **devindex** (the catalog it reads to
+  decide what is dev-tier), and *not* a single **dev verb** (one entry, vs the
+  namespace that groups them).
+
+- **dev-ex** - the `dev-ex` GitHub issue LABEL (developer-experience routing on the
+  dispatch board). A tag an issue carries, *not* the **`fak dev`** command namespace
+  and *not* **devindex** the package; same `dev` root, an issue-routing label vs a CLI
+  surface vs a catalog.
+
+- **devindex** - `internal/devindex`, the CATALOG that classifies every verb's tier
+  (`TierFrontdoor` / `TierDev` / `TierHidden`) from the live dispatch switch - the
+  WITNESSED source the two heaviness meters read. *Not* the **`fak dev`** namespace
+  (the CLI surface that consumes this catalog) and *not* **dev-ex** (the label).
+
+---
+
 ## Cross-cluster canonical-name collisions
 
 The worst confusability is one TOKEN that names two unrelated things in two unrelated

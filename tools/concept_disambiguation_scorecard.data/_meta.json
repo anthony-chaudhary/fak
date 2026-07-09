@@ -191,6 +191,14 @@
       "ignore": [],
       "min_files": 99,
       "note": "The trajectory-control (trajctl) vocabulary from epic #2533 (docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md + docs/observability/trajectory-control.md): the LIVE forward-progress control plane over declared objectives, positioned against five near-siblings it is systematically confused with - fak traj (the RETROSPECTIVE corpus toolkit; trajhook scores a past turn's notability, trajctl scores a live objective's progress), the scorecard family (repo-surface debt, not runs), score-signal (the CI-regression feeder), fak signal steer (one actuator rung trajctl uses), and loopdrive's GOAL.md witness (the binary done-bit trajctl stretches into a curve). roots is empty BY DESIGN, same as vfs: a 'trajctl'/'trajectory' discovery root would swallow the internal/trajectory corpus toolkit's tokens (the very sibling this family disambiguates against) and flood coverage with non-confusable identifiers; each concept is instead grounded in a distinct shipped symbol (trajctl, ScoreRow, witnessStrength, SignalHealthy, SignalDetourOverrun)."
+    },
+    {
+      "id": "dev-tier",
+      "name": "Dev-tier / operator-surface family",
+      "roots": [],
+      "ignore": [],
+      "min_files": 99,
+      "note": "The dev-tier / operator-surface vocabulary from epic #2228 (C6, #2235): the operator-heaviness meter now partitions the flat top-level verb surface into frontdoor_verbs + dev_verbs by construction (the continuity witness), classified from the live dispatch switch via internal/devindex. These are the names for that split and its near-siblings under the shared 'dev' root - a frontdoor verb (the product surface, TierFrontdoor) vs a dev verb (the fak dev tooling tier, TierDev) vs the 'fak dev' CLI namespace that gates them vs the dev-ex GitHub routing label vs devindex the catalog that assigns the tier. roots is empty BY DESIGN, same as vfs and trajectory-control: a 'dev' discovery root would swallow hundreds of unrelated identifiers (development, devsession, devbenefit ...) and flood coverage with non-confusable tokens; each concept is instead grounded in a distinct shipped symbol (TierFrontdoor, TierDev, resolveDevVerb, devindex). The honesty fence: a dev verb stays MEASURED in dev_verbs even after its bare spelling is gated behind 'fak dev' - hidden from the front door, not from the meter."
     }
   ]
 }
