@@ -70,10 +70,11 @@ func mcpCompactID(id json.RawMessage) string {
 // cancelled), call id -> seen count (for respawn-suffix uniqueness within this
 // process's journal writes).
 type mcpToolprocState struct {
-	mu      sync.Mutex
-	byRPC   map[string]string
-	rpcFIFO []string
-	spawned map[string]int
+	mu        sync.Mutex
+	byRPC     map[string]string
+	rpcFIFO   []string
+	spawned   map[string]int
+	spawnFIFO []string // insertion order of live spawned keys, for the cap eviction
 }
 
 var mcpTP = &mcpToolprocState{byRPC: map[string]string{}, spawned: map[string]int{}}
@@ -85,6 +86,7 @@ func mcpToolprocReset() {
 	mcpTP.byRPC = map[string]string{}
 	mcpTP.rpcFIFO = nil
 	mcpTP.spawned = map[string]int{}
+	mcpTP.spawnFIFO = nil
 }
 
 // mcpToolprocSpawn journals the spawn row for a brokered kernel call and
@@ -97,6 +99,23 @@ func mcpToolprocSpawn(ctx context.Context, traceID, tool string) string {
 		return ""
 	}
 	mcpTP.mu.Lock()
+	// Bound spawned the same way byRPC is bounded below: FIFO-track each NEW trace id
+	// and, past mcpToolprocMaxLive live entries, evict the oldest counter. A brokered
+	// gateway mints a fresh process-unique trace per call when no default trace is
+	// pinned, so without this cap the map grows for the whole process lifetime (#3287).
+	// The bound is exact — a key holds at most one live FIFO entry (a key is only
+	// re-appended after eviction deletes it), so len(spawned) == len(spawnFIFO) <=
+	// mcpToolprocMaxLive. Eviction only costs a trace re-used after 4096 others its @N
+	// journal suffix (its counter restarts at @1) and drops a late progress pulse for a
+	// long-dead call — both already true for byRPC's FIFO, and both best-effort by the
+	// notification protocol contract.
+	if _, live := mcpTP.spawned[traceID]; !live {
+		if len(mcpTP.spawnFIFO) >= mcpToolprocMaxLive {
+			delete(mcpTP.spawned, mcpTP.spawnFIFO[0])
+			mcpTP.spawnFIFO = mcpTP.spawnFIFO[1:]
+		}
+		mcpTP.spawnFIFO = append(mcpTP.spawnFIFO, traceID)
+	}
 	mcpTP.spawned[traceID]++
 	n := mcpTP.spawned[traceID]
 	callID := traceID

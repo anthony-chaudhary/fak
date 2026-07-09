@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
@@ -163,5 +164,60 @@ func TestMCPReusedTraceGetsGeneration(t *testing.T) {
 	tab := foldTestJournal(t, journal)
 	if len(tab.Procs) != 2 || tab.Counts.Done != 2 {
 		t.Errorf("table = %+v, want two DONE generations", tab.Counts)
+	}
+}
+
+// The respawn-counter map is bounded like its byRPC sibling: a gateway brokering
+// fak_syscall across many unique trace ids (a fresh process-unique trace per call
+// when no default trace is pinned) must not grow mcpTP.spawned for the process
+// lifetime (#3287). Spawning well past the cap holds the map at mcpToolprocMaxLive,
+// evicting oldest-first — so a re-used-after-eviction trace restarts its generation
+// suffix while a still-live recent trace keeps incrementing. Journal is off: this
+// pins the in-memory bound only, with no per-spawn disk I/O.
+func TestMCPSpawnCounterMapIsBounded(t *testing.T) {
+	t.Setenv(mcpToolprocEnvJournal, "off")
+	mcpToolprocReset()
+	t.Cleanup(mcpToolprocReset)
+	ctx := context.Background()
+
+	// The very first trace is the eviction victim once the cap overflows.
+	const oldest = "trace-oldest"
+	mcpToolprocSpawn(ctx, oldest, "tool")
+	for i := 1; i < mcpToolprocMaxLive; i++ { // fill exactly to the cap
+		mcpToolprocSpawn(ctx, "trace-"+strconv.Itoa(i), "tool")
+	}
+	mcpTP.mu.Lock()
+	atCap := len(mcpTP.spawned)
+	mcpTP.mu.Unlock()
+	if atCap != mcpToolprocMaxLive {
+		t.Fatalf("map size at fill = %d, want the cap %d", atCap, mcpToolprocMaxLive)
+	}
+
+	// Overflow with a full cap of fresh traces: the map must stay pinned, never grow.
+	for i := 0; i < mcpToolprocMaxLive; i++ {
+		mcpToolprocSpawn(ctx, "overflow-"+strconv.Itoa(i), "tool")
+	}
+	mcpTP.mu.Lock()
+	bounded, fifo := len(mcpTP.spawned), len(mcpTP.spawnFIFO)
+	_, oldestLive := mcpTP.spawned[oldest]
+	mcpTP.mu.Unlock()
+	if bounded != mcpToolprocMaxLive {
+		t.Fatalf("map size after overflow = %d, want it pinned at %d", bounded, mcpToolprocMaxLive)
+	}
+	if fifo != mcpToolprocMaxLive {
+		t.Fatalf("FIFO length = %d, want == cap %d (one live entry per key)", fifo, mcpToolprocMaxLive)
+	}
+	if oldestLive {
+		t.Errorf("oldest trace %q survived; the FIFO must evict oldest-first", oldest)
+	}
+
+	// The evicted oldest, re-spawned, restarts at generation 1 (bare id); a still-live
+	// recent trace advances to @2 — the counter semantics survive the bounding.
+	if got := mcpToolprocSpawn(ctx, oldest, "tool"); got != oldest {
+		t.Errorf("re-spawned evicted trace id = %q, want bare %q (counter reset)", got, oldest)
+	}
+	recent := "overflow-" + strconv.Itoa(mcpToolprocMaxLive-1)
+	if got := mcpToolprocSpawn(ctx, recent, "tool"); got != recent+"@2" {
+		t.Errorf("re-spawned live trace id = %q, want %q (counter advanced)", got, recent+"@2")
 	}
 }
