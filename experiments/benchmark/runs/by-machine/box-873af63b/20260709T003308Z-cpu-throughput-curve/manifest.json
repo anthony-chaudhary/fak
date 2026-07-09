@@ -1,0 +1,44 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "box-873af63b-cpu-throughput-curve-20260709T003308Z",
+  "machine_id": "box-873af63b",
+  "timestamp": "2026-07-09T00:33:08Z",
+  "git": {
+    "rev": "1b3d9725c",
+    "branch": "main",
+    "dirty": true
+  },
+  "harness": {
+    "name": "fak-native-cpu-serve-throughput",
+    "version": "1"
+  },
+  "method": "single-stream /v1/chat/completions against a local fak serve (engine=inkernel, empty --backend = CPU reference path). Decode tok/s = 1/slope of per-length MIN wall vs completion_tokens (min = least-contended); prefill tok/s = prompt_tokens/intercept (intercept absorbs fixed per-request overhead, so a floor). Streaming TTFT is unusable here: fak buffers the completion so time-to-first-token == wall.",
+  "box": {
+    "gpu": "none",
+    "ram_gb": 253.6,
+    "fit_budget_gib_at_run": 178,
+    "note": "high-RAM CPU-only Windows workstation; ~75 GiB in use by concurrent sessions at run time, so fak's capacity pre-check saw ~178 GiB free"
+  },
+  "findings": [
+    "gemma4-coding-Q4_K_M and Qwen3.6-27B-Q4_K_M (262144-token windows) are REFUSED at load without --context-budget-tokens: auto-sized KV needs ~164-172 GiB and overflows the ~178 GiB fit budget (typed FitTooBig, not an OOM crash). Capping to 8192 tokens shrinks KV to a few GiB and both serve. The Qwen2.5 models (32k window) fit unaided."
+  ],
+  "config": {
+    "engine": "inkernel",
+    "backend": "cpu",
+    "temperature": 0.0,
+    "prompt_tokens": 39,
+    "advertised_model_id": "mock \u2014 this is the default --model /v1/models LABEL only (no --model passed); the real weights are the --gguf loaded into the in-kernel engine, decoded on the CPU reference path (serve.go:146,165)",
+    "context_budget_tokens": {
+      "qwen2.5-*": "default (~32k window)",
+      "gemma4/qwen3.6-27b": 8192
+    }
+  },
+  "tags": [
+    "cpu-only",
+    "no-gpu",
+    "fak-native",
+    "throughput",
+    "single-stream",
+    "box-873af63b-first"
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "$schema": "benchmark/run-result.v1",
+  "run_id": "box-873af63b-cpu-throughput-curve-20260709T003308Z",
+  "machine_id": "box-873af63b",
+  "timestamp": "2026-07-09T00:33:08Z",
+  "summary": "fak-native CPU serve single-stream decode/prefill throughput vs model size on a high-RAM no-GPU workstation",
+  "curve": [
+    {
+      "label": "qwen2.5-1.5b-q8",
+      "family": "qwen2",
+      "params": "1.5B",
+      "precision": "q8",
+      "gguf": "Qwen2.5-1.5B-Instruct.Q8_0.gguf",
+      "load_gb_s": 0.91,
+      "status": "collected",
+      "decode_tok_s": 8.745,
+      "prefill_tok_s": 14.43,
+      "prefill_time_s": 2.7034,
+      "points": [
+        {
+          "completion_tokens": 16,
+          "min_wall_s": 4.7275,
+          "e2e_tok_s": 3.384
+        },
+        {
+          "completion_tokens": 32,
+          "min_wall_s": 6.0002,
+          "e2e_tok_s": 5.333
+        },
+        {
+          "completion_tokens": 64,
+          "min_wall_s": 10.0442,
+          "e2e_tok_s": 6.372
+        },
+        {
+          "completion_tokens": 128,
+          "min_wall_s": 17.776,
+          "e2e_tok_s": 7.201
+        },
+        {
+          "completion_tokens": 168,
+          "min_wall_s": 21.6246,
+          "e2e_tok_s": 7.769
+        }
+      ],
+      "real_decode_witness": true
+    },
+    {
+      "label": "qwen2.5-3b-q8",
+      "family": "qwen2",
+      "params": "3B",
+      "precision": "q8",
+      "gguf": "Qwen2.5-3B-Instruct-Q8_0.gguf",
+      "load_gb_s": 0.95,
+      "status": "collected",
+      "decode_tok_s": 5.971,
+      "prefill_tok_s": null,
+      "prefill_time_s": -0.1168,
+      "points": [
+        {
+          "completion_tokens": 16,
+          "min_wall_s": 2.6283,
+          "e2e_tok_s": 6.088
+        },
+        {
+          "completion_tokens": 64,
+          "min_wall_s": 10.4726,
+          "e2e_tok_s": 6.111
+        },
+        {
+          "completion_tokens": 113,
+          "min_wall_s": 18.8726,
+          "e2e_tok_s": 5.988
+        }
+      ],
+      "real_decode_witness": true
+    },
+    {
+      "label": "qwen2.5-7b-q8",
+      "family": "qwen2",
+      "params": "7B",
+      "precision": "q8",
+      "gguf": "Qwen2.5-7B-Instruct-Q8_0.gguf",
+      "load_gb_s": 0.95,
+      "status": "collected",
+      "decode_tok_s": 3.542,
+      "prefill_tok_s": null,
+      "prefill_time_s": -0.241,
+      "points": [
+        {
+          "completion_tokens": 16,
+          "min_wall_s": 4.2777,
+          "e2e_tok_s": 3.74
+        },
+        {
+          "completion_tokens": 64,
+          "min_wall_s": 17.8254,
+          "e2e_tok_s": 3.59
+        },
+        {
+          "completion_tokens": 91,
+          "min_wall_s": 25.4544,
+          "e2e_tok_s": 3.575
+        }
+      ],
+      "real_decode_witness": true
+    },
+    {
+      "label": "gemma4-coding-q4km",
+      "family": "gemma",
+      "params": "coding",
+      "precision": "q4_k_m",
+      "gguf": "gemma4-coding-Q4_K_M.gguf",
+      "load_gb_s": 0.58,
+      "status": "failed",
+      "error": "decode panic: model: qk-norm weight length does not match head_dim or projection width"
+    },
+    {
+      "label": "qwen3.6-27b-q4km",
+      "family": "qwen3",
+      "params": "27B",
+      "precision": "q4_k_m",
+      "gguf": "Qwen3.6-27B-Q4_K_M.gguf",
+      "load_gb_s": 0.53,
+      "status": "collected",
+      "decode_tok_s": 0.868,
+      "prefill_tok_s": null,
+      "prefill_time_s": -1.9869,
+      "points": [
+        {
+          "completion_tokens": 8,
+          "min_wall_s": 7.4674,
+          "e2e_tok_s": 1.071
+        },
+        {
+          "completion_tokens": 32,
+          "min_wall_s": 34.4573,
+          "e2e_tok_s": 0.929
+        },
+        {
+          "completion_tokens": 64,
+          "min_wall_s": 71.9164,
+          "e2e_tok_s": 0.89
+        }
+      ],
+      "real_decode_witness": true
+    }
+  ]
+}
