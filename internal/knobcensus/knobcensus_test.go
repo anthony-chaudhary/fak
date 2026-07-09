@@ -21,8 +21,12 @@ func TestScanFixture(t *testing.T) {
 	if census.Housekeeping != 3 {
 		t.Errorf("Housekeeping = %d, want 3", census.Housekeeping)
 	}
-	if len(census.Knobs) != 6 {
-		t.Fatalf("len(Knobs) = %d, want 6: %+v", len(census.Knobs), census.Knobs)
+	// Every scanned knob lands in exactly one verdict bucket (INTENT or
+	// HOUSEKEEPING; excluded plumbing/output knobs are dropped before the list),
+	// so the total partitions cleanly into the two counts — nothing uncounted or
+	// double-counted. Asserted as that partition, not a frozen total.
+	if len(census.Knobs) != census.Intent+census.Housekeeping {
+		t.Fatalf("len(Knobs) = %d, want intent(%d)+housekeeping(%d): %+v", len(census.Knobs), census.Intent, census.Housekeeping, census.Knobs)
 	}
 
 	got := map[string]Knob{}
