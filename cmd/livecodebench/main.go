@@ -234,6 +234,7 @@ func runContract(argv []string) int {
 	startDate := fs.String("start-date", "", "contest-date window start (YYYY-MM-DD); the contamination boundary")
 	endDate := fs.String("end-date", "", "contest-date window end (YYYY-MM-DD)")
 	model := fs.String("model", "", "model identity shared by raw and fak arms")
+	engine := fs.String("engine", "", "serving engine id: inkernel for fak's own decode (the pure-kernel arm, no external engine in the path), otherwise sglang|vllm|the hosted proxy")
 	servingBackend := fs.String("serving-backend", "", "serving engine + quantization the run is served through (e.g. SGLang W4AFP8)")
 	gateway := fs.String("gateway", "http://127.0.0.1:8080/v1", "local fak gateway base URL both arms target")
 	runDir := fs.String("run-dir", "experiments/livecodebench/<run-id>", "LCB_OUT run directory referenced by the arm and grading commands")
@@ -258,6 +259,7 @@ func runContract(argv []string) int {
 		StartDate:       *startDate,
 		EndDate:         *endDate,
 		Model:           *model,
+		Engine:          *engine,
 		ServingBackend:  *servingBackend,
 		Gateway:         *gateway,
 		RunDir:          *runDir,

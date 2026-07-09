@@ -16,6 +16,7 @@ func readyContractInput() OfficialRunContractInput {
 		StartDate:       "2025-01-01",
 		EndDate:         "2025-06-30",
 		Model:           "glm-5.2",
+		Engine:          "sglang",
 		ServingBackend:  "SGLang W4AFP8",
 		Gateway:         "http://127.0.0.1:8080/v1",
 		RunDir:          "experiments/livecodebench/glm52-run",
@@ -234,4 +235,92 @@ func gateOK(c OfficialRunContract, name string) bool {
 		}
 	}
 	return false
+}
+
+// #2107: the pure-kernel codegen arm — LCB codegen served by `fak serve --gguf
+// --engine inkernel`, fak's own decode with no external engine in the path. The
+// contract must RECORD engine=inkernel alongside the backend, and it must fence
+// the result: pass@1/pass@5 stay `pending GPU run` until a real GPU run through
+// the in-kernel path is graded officially.
+func TestOfficialRunContractRecordsInKernelPureKernelArm(t *testing.T) {
+	in := readyContractInput()
+	in.Engine = EngineInKernel
+	in.ServingBackend = "cuda q4_k_m"
+	c := BuildOfficialRunContract(in)
+
+	if c.Constants.Engine != EngineInKernel {
+		t.Fatalf("constants.engine = %q, want %q", c.Constants.Engine, EngineInKernel)
+	}
+	if c.Constants.ServingBackend != "cuda q4_k_m" {
+		t.Fatalf("constants.serving_backend = %q, want the recorded backend", c.Constants.ServingBackend)
+	}
+	if !c.PureKernel {
+		t.Fatal("engine=inkernel must mark the contract pure_kernel")
+	}
+	if c.PureKernelResultStatus != PendingGPURun {
+		t.Fatalf("pure_kernel_result_status = %q, want %q", c.PureKernelResultStatus, PendingGPURun)
+	}
+	// The load-bearing fence: a landed serving path is never a pass rate.
+	if c.ResultClaimAllowed {
+		t.Fatal("a pure-kernel arm must not allow a result claim")
+	}
+	var fenced bool
+	for _, req := range c.RequiredBeforeClaim {
+		if strings.Contains(req, PendingGPURun) && strings.Contains(req, EngineInKernel) {
+			fenced = true
+		}
+	}
+	if !fenced {
+		t.Fatalf("required_before_claim must fence the pure-kernel pass rate behind a GPU run: %v", c.RequiredBeforeClaim)
+	}
+	if !gateOK(c, "engine_recorded") {
+		t.Fatal("engine_recorded gate must be OK once the engine is recorded")
+	}
+	if c.Status != ContractReady {
+		t.Fatalf("status = %q, want %q", c.Status, ContractReady)
+	}
+
+	md := RenderOfficialRunContractMarkdown(c)
+	for _, want := range []string{"| Engine | `inkernel` |", "Pure-kernel arm", PendingGPURun} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q\n---\n%s", want, md)
+		}
+	}
+}
+
+// An external serving engine is NOT the pure-kernel arm, and must not inherit
+// its fence line or its pure_kernel marker.
+func TestOfficialRunContractExternalEngineIsNotPureKernel(t *testing.T) {
+	c := BuildOfficialRunContract(readyContractInput()) // Engine: "sglang"
+	if c.PureKernel {
+		t.Fatal("engine=sglang must not be marked pure_kernel")
+	}
+	if c.PureKernelResultStatus != "" {
+		t.Fatalf("pure_kernel_result_status = %q, want empty for an external engine", c.PureKernelResultStatus)
+	}
+	if !gateOK(c, "engine_recorded") {
+		t.Fatal("engine_recorded gate must be OK for a recorded external engine")
+	}
+	for _, req := range c.RequiredBeforeClaim {
+		if strings.Contains(req, PendingGPURun) {
+			t.Fatalf("external-engine contract must not carry the pure-kernel GPU fence: %q", req)
+		}
+	}
+}
+
+// An unrecorded engine leaves the run un-pinned: the contract cannot say whether
+// fak's own decode or an external engine served it.
+func TestOfficialRunContractGatesUnrecordedEngine(t *testing.T) {
+	in := readyContractInput()
+	in.Engine = ""
+	c := BuildOfficialRunContract(in)
+	if gateOK(c, "engine_recorded") {
+		t.Fatal("engine_recorded gate must fail when no engine is recorded")
+	}
+	if c.Status != ContractIncomplete {
+		t.Fatalf("status = %q, want %q when the engine is unrecorded", c.Status, ContractIncomplete)
+	}
+	if c.PureKernel {
+		t.Fatal("an unrecorded engine must never be assumed pure-kernel")
+	}
 }

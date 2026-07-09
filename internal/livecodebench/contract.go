@@ -24,6 +24,18 @@ const (
 	ContractReady      = "READY_FOR_OFFICIAL_RUN"
 )
 
+// EngineInKernel is the engine id of fak's own decode — the pure-kernel serving
+// path (`fak serve --gguf --engine inkernel`), with no external serving engine
+// (SGLang / vLLM / a hosted proxy) anywhere in the request path (#2107).
+const EngineInKernel = "inkernel"
+
+// PendingGPURun is the only value a pure-kernel pass rate may carry until a real
+// GPU run through the in-kernel path returns a number from the official
+// evaluator. The device kernels are argmax-exact and `fak serve --engine
+// inkernel` is a landed serving path, but neither fact is an LCB codegen pass
+// rate (#2107).
+const PendingGPURun = "pending GPU run"
+
 // OfficialRunContractInput carries the campaign coordinates the contract pins.
 // Suite is optional: when supplied, its question_ids for the chosen scenario
 // become the candidate problem selection so raw and fak arms provably score the
@@ -39,6 +51,7 @@ type OfficialRunContractInput struct {
 	StartDate       string
 	EndDate         string
 	Model           string
+	Engine          string
 	ServingBackend  string
 	Gateway         string
 	RunDir          string
@@ -64,6 +77,15 @@ type OfficialRunContract struct {
 	CompareMetrics      []string                 `json:"compare_metrics"`
 	RequiredBeforeClaim []string                 `json:"required_before_claim"`
 	ResultClaimAllowed  bool                     `json:"result_claim_allowed"`
+
+	// PureKernel reports whether the recorded engine is fak's own in-kernel
+	// decode, i.e. no external serving engine sits in the path.
+	PureKernel bool `json:"pure_kernel"`
+	// PureKernelResultStatus is `pending GPU run` for a pure-kernel arm and
+	// empty otherwise. It is the machine-readable form of the honest fence: a
+	// pure-kernel LCB codegen pass rate exists only once a real GPU run
+	// through the in-kernel path is graded by the official evaluator (#2107).
+	PureKernelResultStatus string `json:"pure_kernel_result_status,omitempty"`
 }
 
 // ContractConstants are the run identities that must be pinned before any
@@ -75,6 +97,7 @@ type ContractConstants struct {
 	StartDate       string `json:"start_date"`
 	EndDate         string `json:"end_date"`
 	Model           string `json:"model"`
+	Engine          string `json:"engine,omitempty"`
 	ServingBackend  string `json:"serving_backend,omitempty"`
 	Gateway         string `json:"gateway,omitempty"`
 	RunDir          string `json:"run_dir"`
@@ -139,6 +162,8 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 		scenario = ScenarioCodeGeneration
 	}
 	model := strings.TrimSpace(in.Model)
+	engine := strings.TrimSpace(in.Engine)
+	pureKernel := strings.EqualFold(engine, EngineInKernel)
 	gateway := strings.TrimSpace(in.Gateway)
 	runDir := strings.TrimSpace(in.RunDir)
 	if runDir == "" {
@@ -198,6 +223,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 		{Name: "scenario_known", OK: KnownScenario(scenario), Detail: string(scenario)},
 		{Name: "date_window_recorded", OK: windowOK, Detail: windowDetail},
 		{Name: "model_recorded", OK: model != "", Detail: modelGateDetail(model)},
+		{Name: "engine_recorded", OK: engine != "", Detail: engineGateDetail(engine)},
 		{Name: "serving_backend_recorded", OK: strings.TrimSpace(in.ServingBackend) != "", Detail: servingBackendDetail(in.ServingBackend)},
 		{Name: "fak_gateway_recorded", OK: gateway != "", Detail: gatewayGateDetail(gateway)},
 		{Name: "candidate_problem_ids", OK: len(problemIDs) > 0, Detail: problemIDsDetail(len(problemIDs))},
@@ -205,6 +231,31 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 		{Name: "same_prompt_hash_required", OK: true, Detail: "raw and fak arms must send the identical rendered prompt per problem (SamePromptHash)"},
 		{Name: "same_release_required", OK: true, Detail: "both arms must use the identical release_version"},
 		{Name: "official_grading_required", OK: true, Detail: "the exact saved generations must be graded by the official lcb_runner evaluator before any claim"},
+	}
+
+	requiredBeforeClaim := []string{
+		"release_version, scenario, start_date, and end_date recorded",
+		"model identity, serving engine, serving backend, and model training-cutoff statement or explicit residual",
+		"raw-arm saved generations + SHA256 digest",
+		"fak-arm saved generations + SHA256 digest",
+		"SameProblemIDs and SamePromptHash asserted between raw and fak arms over the same release",
+		"official grading command + eval_all artifact digest for each arm",
+		"result_claim_allowed flips true only after official grading (#2113); LIVECODEBENCH-RESULTS.md cells filled for both arms",
+	}
+	// The pure-kernel fence (#2107): a landed in-kernel serving path and
+	// argmax-exact device kernels are not a pass rate. Only a real GPU run
+	// through fak's own decode, graded officially, can retire `pending GPU run`.
+	if pureKernel {
+		requiredBeforeClaim = append(requiredBeforeClaim,
+			"pure-kernel arm (engine="+EngineInKernel+"): pass@1 / pass@5 stay `"+PendingGPURun+
+				"` until a real GPU run through fak's own decode is graded by the official evaluator (#2107)")
+	}
+
+	// ResultClaimAllowed is unconditionally false here, so a pure-kernel arm is
+	// always still awaiting its GPU run at contract time.
+	pureKernelStatus := ""
+	if pureKernel {
+		pureKernelStatus = PendingGPURun
 	}
 
 	return OfficialRunContract{
@@ -222,6 +273,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 			StartDate:       start,
 			EndDate:         end,
 			Model:           model,
+			Engine:          engine,
 			ServingBackend:  strings.TrimSpace(in.ServingBackend),
 			Gateway:         gateway,
 			RunDir:          runDir,
@@ -252,16 +304,10 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 			"same_prompt_hash",
 			"fak_gateway_model_http_success",
 		},
-		RequiredBeforeClaim: []string{
-			"release_version, scenario, start_date, and end_date recorded",
-			"model identity, serving backend, and model training-cutoff statement or explicit residual",
-			"raw-arm saved generations + SHA256 digest",
-			"fak-arm saved generations + SHA256 digest",
-			"SameProblemIDs and SamePromptHash asserted between raw and fak arms over the same release",
-			"official grading command + eval_all artifact digest for each arm",
-			"result_claim_allowed flips true only after official grading (#2113); LIVECODEBENCH-RESULTS.md cells filled for both arms",
-		},
-		ResultClaimAllowed: false,
+		RequiredBeforeClaim:    requiredBeforeClaim,
+		ResultClaimAllowed:     false,
+		PureKernel:             pureKernel,
+		PureKernelResultStatus: pureKernelStatus,
 	}
 }
 
@@ -388,6 +434,18 @@ func modelGateDetail(model string) string {
 	return model
 }
 
+func engineGateDetail(engine string) string {
+	engine = strings.TrimSpace(engine)
+	if engine == "" {
+		return "record the serving engine id: " + EngineInKernel +
+			" for fak's own decode (the pure-kernel arm, no external engine in the path), otherwise sglang / vllm / the hosted proxy"
+	}
+	if strings.EqualFold(engine, EngineInKernel) {
+		return "engine=" + EngineInKernel + " (pure-kernel: fak's own decode, no external engine in the path)"
+	}
+	return engine
+}
+
 func servingBackendDetail(backend string) string {
 	if strings.TrimSpace(backend) == "" {
 		return "record the serving engine + quantization (e.g. SGLang W4AFP8) and a training-cutoff statement"
@@ -435,6 +493,10 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	fmt.Fprintf(&b, "- Status: `%s`\n", c.Status)
 	fmt.Fprintf(&b, "- Evidence class: `%s`\n", c.EvidenceClass)
 	fmt.Fprintf(&b, "- Result claim allowed: `%t`\n", c.ResultClaimAllowed)
+	if c.PureKernel {
+		fmt.Fprintf(&b, "- Pure-kernel arm: `engine=%s` (fak's own decode, no external engine in the path); pass@1 / pass@5 stay `%s`\n",
+			EngineInKernel, c.PureKernelResultStatus)
+	}
 	fmt.Fprintf(&b, "- Boundary: %s\n\n", c.ClaimBoundary)
 
 	fmt.Fprintf(&b, "## Constants\n\n")
@@ -443,6 +505,7 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	fmt.Fprintf(&b, "| Scenario | `%s` |\n", c.Constants.Scenario)
 	fmt.Fprintf(&b, "| Date window | `%s .. %s` |\n", orPlaceholder(c.Constants.StartDate, "-"), orPlaceholder(c.Constants.EndDate, "-"))
 	fmt.Fprintf(&b, "| Model | `%s` |\n", orPlaceholder(c.Constants.Model, "-"))
+	fmt.Fprintf(&b, "| Engine | `%s` |\n", orPlaceholder(c.Constants.Engine, "-"))
 	fmt.Fprintf(&b, "| Serving backend | `%s` |\n", orPlaceholder(c.Constants.ServingBackend, "-"))
 	fmt.Fprintf(&b, "| Gateway | `%s` |\n", orPlaceholder(c.Constants.Gateway, "-"))
 	fmt.Fprintf(&b, "| Run dir | `%s` |\n\n", c.Constants.RunDir)

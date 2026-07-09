@@ -165,6 +165,24 @@ fak livecodebench generate \
   --out "$LCB_OUT/fak-inkernel/codegeneration"
 ```
 
+Pin the arm in the machine-readable run contract, which records the engine alongside the
+backend and marks the arm pure-kernel:
+
+```bash
+go run ./cmd/livecodebench contract \
+  --release-version "$LCB_RELEASE" \
+  --scenario codegeneration \
+  --start-date "$LCB_START_DATE" \
+  --end-date "$LCB_END_DATE" \
+  --model "$LCB_MODEL" \
+  --engine inkernel \
+  --serving-backend "cuda q4_k_m" \
+  --out "$LCB_OUT/fak-inkernel/contract.json"
+```
+
+That emits `constants.engine = "inkernel"`, `pure_kernel: true`, and
+`pure_kernel_result_status: "pending GPU run"`, with `result_claim_allowed: false`.
+
 The saved generations then flow through the same official grading handoff (§4–§5). Record
 `engine=inkernel` and the serving `backend` on the [results page](LIVECODEBENCH-RESULTS.md)
 alongside the generation-artifact digest.
