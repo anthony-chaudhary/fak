@@ -54,6 +54,7 @@ status follows the witnessed [claims ledger](https://github.com/anthony-chaudhar
 | [Models](models.md) | Any model you front through the gateway, plus the architectures the in-kernel engine runs and proves bit-exact (Llama, Qwen2/Qwen3, Gemma, GLM-MoE, GPT-OSS, SmolLM2). |
 | [Features](features.md) | Every capability grouped by subsystem with its honest status — shipped, simulated, or stub — mirroring the claims ledger. |
 | [Clouds & hosted providers](clouds.md) | Anthropic, OpenAI, Gemini, and xAI as native provider wires, plus AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenRouter, Together, Groq, and Fireworks over the OpenAI-compatible wire. |
+| [DeepSeek V4](deepseek.md) | The three DeepSeek V4 routes (hosted OpenAI-compatible, Anthropic-compatible, self-hosted vLLM/SGLang/NIM), the thinking-mode caveats, the self-hosted GPU-node bring-up path, and the `deepseek-chat`/`deepseek-reasoner` alias-retirement warning. |
 | [APIs, wires & MCP](apis-and-protocols.md) | OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini, xAI; MCP over stdio and HTTP; the fak-native endpoints; and the honest interop stance on A2A, AG-UI, ACP, ANP. |
 | [Agent harnesses & frameworks](agent-harnesses.md) | Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo, Goose, Zed, and frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, and the Vercel AI SDK. |
 | [Serving engines](engines.md) | The token engines fak fronts — Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio — and the in-kernel reference engine. |

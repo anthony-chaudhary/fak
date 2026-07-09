@@ -34,6 +34,7 @@ Each cloud below serves tokens behind an OpenAI Chat Completions endpoint. You f
 | Together AI | `--provider openai --base-url https://api.together.xyz/v1` | Yes | OpenAI-compatible chat / completions / embeddings. See the [matrix row](../integrations/compatibility-matrix.md). |
 | Groq | `--provider openai --base-url https://api.groq.com/openai/v1` | Yes | OpenAI Chat Completions. See the [matrix row](../integrations/compatibility-matrix.md). |
 | Fireworks AI | `--provider openai --base-url https://api.fireworks.ai/inference/v1` | Yes | OpenAI Chat Completions. See the [matrix row](../integrations/compatibility-matrix.md). |
+| DeepSeek (V4) | `--provider openai --base-url https://api.deepseek.com` (or `--provider anthropic --base-url https://api.deepseek.com/anthropic`) | Yes | Reasoning model: `thinking` is default-on and `reasoning_effort` takes only `high`/`max`. See the dedicated [DeepSeek V4 page](deepseek.md) for all three routes and the alias-retirement warning. |
 
 Bedrock and Vertex are marked **Partial** because the repoint is templated and the auth is not a plain static key, exactly as the matrix caveats state. The other five expose a custom base URL outright.
 

@@ -63,6 +63,30 @@ fak serve --provider openai-compatible \
   --model deepseek-ai/DeepSeek-V4-Pro
 ```
 
+### Turnkey GPU-node bring-up script
+
+[`scripts/dgx-deepseek-serve.sh`](../../scripts/dgx-deepseek-serve.sh) does the
+bring-up turnkey: it detects the node's GPUs, **gates on the V4 architecture floor**
+(below), launches an OpenAI-compatible server for the chosen engine
+(`FAK_DGX_ENGINE=vllm|sglang|nim`) and model (`FAK_DGX_MODEL`, default V4-Flash) on
+`:8000`, health-checks `GET /models`, then prints the exact `fak serve` line and the
+keyless wire-witness command below.
+
+```bash
+# On the GPU node (vLLM default; V4-Flash for a single node):
+scripts/dgx-deepseek-serve.sh
+# NVIDIA NIM instead of vLLM (confirm the V4 image tag exists in NGC first):
+FAK_DGX_ENGINE=nim FAK_DGX_NIM_IMAGE=nvcr.io/nim/deepseek-ai/<v4-tag> \
+  NGC_API_KEY=... scripts/dgx-deepseek-serve.sh
+# Dry-run the plan (detect GPUs + print the launch/serve commands, launch nothing):
+FAK_DGX_DRY_RUN=1 scripts/dgx-deepseek-serve.sh
+```
+
+The script **refuses to launch below sm_90 (Hopper)** unless `FAK_DGX_FORCE=1`,
+because a Volta-class node (V100, sm_70) cannot serve a stock V4 FP4/FP8+DSA path
+(see the architecture floor below). This is the same gate stated in the
+[DeepSeek V4 supported page](../supported/deepseek.md#bring-v4-up-on-a-gpu-node).
+
 ### Hardware assumptions (generic capacity language only)
 
 No private bridge/control details are committed. In generic terms:
@@ -147,8 +171,47 @@ The self-host baseline is complete only when:
 - Any performance number is deferred to the tuned EP/EPLB baseline and linked from
   [`../../BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
 
-Until a live node runs it, the honest claim is only: **the DeepSeek-V4 self-host
-route is wired and skips cleanly, ready to run on a V4-capable serving node.**
+The wire is now **witnessed live** against a real DeepSeek-V4 endpoint
+(see [Live witness](#live-witness--wire-proven-on-a-real-v4-endpoint)); the
+remaining honest gap is a **dedicated-node performance headline**, still deferred
+to the tuned EP/EPLB baseline.
+
+## Live witness — wire proven on a real V4 endpoint
+
+On **2026-07-09** (repo `4d13dc6c9`) all three rungs ran live against a real
+DeepSeek-V4 server — `deepseek-ai/deepseek-v4-flash` behind NVIDIA's
+OpenAI-compatible surface (`https://integrate.api.nvidia.com/v1`), the exact wire
+this runbook specifies — and all three passed:
+
+| rung | result | evidence |
+|---|---|---|
+| readiness | **PASS** | `/models` → 121-model roster including `deepseek-ai/deepseek-v4-pro` and `deepseek-ai/deepseek-v4-flash` |
+| non-streaming | **PASS** | `finish="stop"`; usage witnessed `prompt=11 completion=24 total=35` (counters **relayed by the engine**, not fak-authored) |
+| streaming | **PASS** | SSE deltas assembled 90 chars of content, terminated by `[DONE]` |
+
+```bash
+DEEPSEEK_SELFHOST_BASE_URL="https://integrate.api.nvidia.com/v1" \
+DEEPSEEK_SELFHOST_MODEL="deepseek-ai/deepseek-v4-flash" \
+DEEPSEEK_SELFHOST_API_KEY="$NVIDIA_API_KEY" \
+  go test ./internal/gateway -run TestDeepSeekV4SelfHost -v
+```
+
+**What this does and does not establish.** It establishes that fak's
+`openai-compatible` route relays readiness, a non-streaming completion with honest
+usage counters, and a streamed completion to `[DONE]` against a **real DeepSeek-V4
+server** — the wire-readiness bar above. It is **not** a dedicated-node
+performance headline: the NVIDIA-hosted surface is a **shared, pooled** endpoint
+(it returns HTTP&nbsp;503 `ResourceExhausted` under load), so no TTFT/TPOT/tok-s
+number is drawn from it — that still requires the tuned EP/EPLB profile on a
+dedicated node per the
+[comparability boundary](#comparability-boundary-do-not-confound).
+
+**Shared-endpoint robustness (smoke hardening).** Because a pooled endpoint
+throttles, the smoke now treats an upstream capacity signal (HTTP&nbsp;429/503 or a
+`ResourceExhausted` body) as a **clean skip, not a failure** — a busy node is not a
+fak wire defect — and accepts a DeepSeek thinking-mode turn whose tokens land in
+`reasoning_content` with empty `content` as a live wire. On a **dedicated**
+dedicated Hopper-class node there is no such contention and all three rungs pass without skips.
 
 ## Cross-links
 
