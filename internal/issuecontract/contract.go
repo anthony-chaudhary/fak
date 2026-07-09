@@ -34,16 +34,18 @@ const (
 	TriageOnly   = "triage_only"
 	Refused      = "refused"
 
-	ReasonScopeIncomplete     = "ISSUE_SCOPE_INCOMPLETE"
-	ReasonUnrouted            = "ISSUE_UNROUTED"
-	ReasonPrivateBoundary     = "ISSUE_PRIVATE_BOUNDARY"
-	ReasonLiveUnarmored       = "ISSUE_LIVE_UNARMORED"
-	ReasonNotDispatchLeaf     = "ISSUE_NOT_DISPATCH_LEAF"
-	ReasonOversizedSteps      = "ISSUE_OVERSIZED_EXPECTED_STEPS"
-	ReasonNoiseIncomplete     = "ISSUE_NOISE_CONTROL_INCOMPLETE"
-	ReasonAgentIncomplete     = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
-	ReasonUnexpandedTemplate  = "ISSUE_UNEXPANDED_TEMPLATE"
-	ReasonModelTierIncomplete = "ISSUE_MODEL_TIER_INCOMPLETE"
+	ReasonScopeIncomplete      = "ISSUE_SCOPE_INCOMPLETE"
+	ReasonUnrouted             = "ISSUE_UNROUTED"
+	ReasonPrivateBoundary      = "ISSUE_PRIVATE_BOUNDARY"
+	ReasonLiveUnarmored        = "ISSUE_LIVE_UNARMORED"
+	ReasonNotDispatchLeaf      = "ISSUE_NOT_DISPATCH_LEAF"
+	ReasonOversizedSteps       = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	ReasonNoiseIncomplete      = "ISSUE_NOISE_CONTROL_INCOMPLETE"
+	ReasonAgentIncomplete      = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
+	ReasonUnexpandedTemplate   = "ISSUE_UNEXPANDED_TEMPLATE"
+	ReasonModelTierIncomplete  = "ISSUE_MODEL_TIER_INCOMPLETE"
+	ReasonScaleUndeclared      = "ISSUE_SCALE_UNDECLARED"
+	ReasonWitnessScaleMismatch = "ISSUE_WITNESS_SCALE_MISMATCH"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -55,18 +57,6 @@ var issueReferenceRE = regexp.MustCompile(`#([1-9][0-9]*)`)
 var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
 var unexpandedIssueTemplateRE = regexp.MustCompile(`(?m)(\$\(@\{|System\.Collections|System\.Management\.Automation|\$\(System\.|\bSource:\s*\$source\b)`)
 var unexpandedIssueTemplateMarkerRE = regexp.MustCompile(`(?m)\$\(@\{[^)\r\n]*\}\.[A-Za-z0-9_]+\)|\$\((?:System\.Collections|System\.Management\.Automation)[^)\r\n]*\)|^\s*(?:[-*]\s*)?Source:\s*\$source[^\r\n]*`)
-
-// modelTierLabelRE matches a namespaced model-tier label such as
-// tier/T1-required or tier/T0-optimal (case-insensitive). Group 1 is the tier
-// number, group 2 is the role. A priority label like priority/P1 does NOT match
-// — that is the "Priority/P1 is not model tier T1" disambiguation baked into the
-// grammar itself.
-var modelTierLabelRE = regexp.MustCompile(`^tier/t([0-9]+)-(required|optimal)$`)
-
-// modelTierTokenRE finds a T<N> tier token inside a body field value like
-// "`tier/T1-required`" or "T1". "tier"/"priority" prefixes never match because a
-// digit must follow the t; "P1" never matches because the letter is not t.
-var modelTierTokenRE = regexp.MustCompile(`t([0-9]+)`)
 
 // IssueLabel is the subset of a GitHub label row used by IssueDraft.
 type IssueLabel struct {
@@ -109,36 +99,41 @@ type DependencyRef struct {
 // Candidate is the pure input shape a producer can review before rendering or
 // syncing a public GitHub issue.
 type Candidate struct {
-	Schema          string          `json:"schema,omitempty"`
-	IssueNumber     int             `json:"issue_number,omitempty"`
-	Key             string          `json:"key"`
-	Title           string          `json:"title"`
-	Generation      string          `json:"generation,omitempty"`
-	ParentRef       string          `json:"parent_ref,omitempty"`
-	CurrentState    string          `json:"current_state,omitempty"`
-	WhyNow          string          `json:"why_now,omitempty"`
-	WorkingSpine    string          `json:"working_spine,omitempty"`
-	PriorityContext string          `json:"priority_context,omitempty"`
-	WorkUnit        string          `json:"work_unit,omitempty"`
-	ExpectedSteps   int             `json:"expected_steps,omitempty"`
-	Assumptions     []string        `json:"assumptions,omitempty"`
-	ConfusionRisks  []string        `json:"confusion_risks,omitempty"`
-	Coordination    []string        `json:"coordination,omitempty"`
-	Trigger         string          `json:"trigger,omitempty"`
-	BatchPolicy     string          `json:"batch_policy,omitempty"`
-	InScope         string          `json:"in_scope,omitempty"`
-	OutOfScope      string          `json:"out_of_scope,omitempty"`
-	DoneCondition   string          `json:"done_condition,omitempty"`
-	Witness         string          `json:"witness,omitempty"`
-	AcceptanceGate  string          `json:"acceptance_gate,omitempty"`
-	Lane            string          `json:"lane,omitempty"`
-	Paths           []string        `json:"paths,omitempty"`
-	Dependencies    []DependencyRef `json:"dependencies,omitempty"`
-	Labels          []string        `json:"labels,omitempty"`
-	Priority        string          `json:"priority,omitempty"`
-	BoundaryNotes   []string        `json:"boundary_notes,omitempty"`
-	Private         bool            `json:"private,omitempty"`
-	ClosureBinding  string          `json:"closure_binding,omitempty"`
+	Schema          string `json:"schema,omitempty"`
+	IssueNumber     int    `json:"issue_number,omitempty"`
+	Key             string `json:"key"`
+	Title           string `json:"title"`
+	Generation      string `json:"generation,omitempty"`
+	ParentRef       string `json:"parent_ref,omitempty"`
+	CurrentState    string `json:"current_state,omitempty"`
+	WhyNow          string `json:"why_now,omitempty"`
+	WorkingSpine    string `json:"working_spine,omitempty"`
+	PriorityContext string `json:"priority_context,omitempty"`
+	WorkUnit        string `json:"work_unit,omitempty"`
+	ExpectedSteps   int    `json:"expected_steps,omitempty"`
+	// Scale is the declared ORDER-OF-MAGNITUDE work size (S0..S4, or a tier name
+	// like leaf/feature/epic). It is optional and, when absent, derived from
+	// ExpectedSteps / WorkUnit — see scaleFit. It exists so "done" can be typed to
+	// the size of the thing instead of reusing one word across every magnitude.
+	Scale          string          `json:"scale,omitempty"`
+	Assumptions    []string        `json:"assumptions,omitempty"`
+	ConfusionRisks []string        `json:"confusion_risks,omitempty"`
+	Coordination   []string        `json:"coordination,omitempty"`
+	Trigger        string          `json:"trigger,omitempty"`
+	BatchPolicy    string          `json:"batch_policy,omitempty"`
+	InScope        string          `json:"in_scope,omitempty"`
+	OutOfScope     string          `json:"out_of_scope,omitempty"`
+	DoneCondition  string          `json:"done_condition,omitempty"`
+	Witness        string          `json:"witness,omitempty"`
+	AcceptanceGate string          `json:"acceptance_gate,omitempty"`
+	Lane           string          `json:"lane,omitempty"`
+	Paths          []string        `json:"paths,omitempty"`
+	Dependencies   []DependencyRef `json:"dependencies,omitempty"`
+	Labels         []string        `json:"labels,omitempty"`
+	Priority       string          `json:"priority,omitempty"`
+	BoundaryNotes  []string        `json:"boundary_notes,omitempty"`
+	Private        bool            `json:"private,omitempty"`
+	ClosureBinding string          `json:"closure_binding,omitempty"`
 	// RequiredModelTier / OptimalModelTier are the body-field FALLBACK for an
 	// issue whose namespaced tier/T?-required|optimal labels are unavailable
 	// (the issue's own stated assumption). A namespaced label always wins over
@@ -160,6 +155,13 @@ type Options struct {
 	// ModelTier flags are always computed, but they do not change
 	// dispatchability unless strict mode is requested.
 	StrictModelTier bool
+	// StrictScale escalates an undeclared/underived work size or a witness that
+	// is smaller than the work into a dispatch hold (ISSUE_SCALE_UNDECLARED /
+	// ISSUE_WITNESS_SCALE_MISMATCH, triage-only). Default is advisory: the
+	// ScaleFit readout is always computed, but it does not change
+	// dispatchability unless strict mode is requested — the same advisory→hold
+	// discipline as StrictModelTier.
+	StrictScale bool
 }
 
 // Score explains the spine-first readiness score. The four axes are intentionally
@@ -198,42 +200,6 @@ type AgentContext struct {
 	Total        int `json:"total"`
 }
 
-// GenerationFit is an advisory grooming score. It checks whether generation
-// labels match the issue body, proof, and time-horizon cues. It is intentionally
-// not part of dispatchability: a label mismatch needs operator review, not a
-// silent refusal of otherwise scoped work.
-type GenerationFit struct {
-	Stream        string   `json:"stream,omitempty"`
-	LabelStream   string   `json:"label_stream,omitempty"`
-	BodyStream    string   `json:"body_stream,omitempty"`
-	Label         int      `json:"label"`
-	Body          int      `json:"body"`
-	Horizon       int      `json:"horizon"`
-	Evidence      int      `json:"evidence"`
-	Orthogonality int      `json:"orthogonality"`
-	Total         int      `json:"total"`
-	Flags         []string `json:"flags,omitempty"`
-	NextAction    string   `json:"next_action,omitempty"`
-}
-
-// ModelTier is the parsed required/optimal model-tier metadata for an issue,
-// the admission point for tier-aware dispatch (#3041). required is the
-// capability FLOOR the work needs; optimal is the recommended tier. Tiers use
-// the repo's WorkTier numbering (internal/modelroute): T0 is the MOST demanding,
-// so a HIGHER number is LESS capable — optimal must be at least as demanding as
-// required or the tags contradict. Source is "label" (a namespaced
-// tier/T?-required|optimal label) or "body" (a Required/Optimal model tier
-// field), with the label preferred and the body the stated fallback. Flags name
-// missing, invalid, or contradictory metadata from a closed vocabulary. This is
-// advisory by default; Options.StrictModelTier turns a flagged issue triage-only.
-type ModelTier struct {
-	Required       string   `json:"required,omitempty"`
-	Optimal        string   `json:"optimal,omitempty"`
-	RequiredSource string   `json:"required_source,omitempty"`
-	OptimalSource  string   `json:"optimal_source,omitempty"`
-	Flags          []string `json:"flags,omitempty"`
-}
-
 // Review is the closed-vocabulary verdict over a Candidate.
 type Review struct {
 	Schema          string          `json:"schema"`
@@ -260,6 +226,7 @@ type Review struct {
 	AgentContext    AgentContext    `json:"agent_context"`
 	GenerationFit   GenerationFit   `json:"generation_fit"`
 	ModelTier       ModelTier       `json:"model_tier"`
+	Scale           ScaleFit        `json:"scale"`
 }
 
 // ReviewCandidate grades c. OK means the candidate is safe to sync as a
@@ -309,6 +276,23 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.StrictModelTier && len(modelTier.Flags) > 0 {
 		reasons.add(ReasonModelTierIncomplete)
 	}
+	scaleReadout := scaleFit(c)
+	// A feature/epic/program-scale unit (S2+) is structurally not a dispatch leaf:
+	// it must decompose before a worker runs it. This is the same always-on gate as
+	// an oversized step budget (ReasonOversizedSteps), now also catching a
+	// declared/derived large scale — e.g. a WorkUnit "feature" with a small step
+	// budget — that the leaf shape check would otherwise let through.
+	if scaleRank(scaleReadout.Effective) >= scaleRank(ScaleFeature) {
+		reasons.add(ReasonNotDispatchLeaf)
+	}
+	if opt.StrictScale {
+		if containsString(scaleReadout.Flags, flagScaleUndeclared) || containsString(scaleReadout.Flags, flagScaleDeclaredInvalid) {
+			reasons.add(ReasonScaleUndeclared)
+		}
+		if containsString(scaleReadout.Flags, flagWitnessUnderScale) {
+			reasons.add(ReasonWitnessScaleMismatch)
+		}
+	}
 
 	score := score(c, routeOK)
 	spinePriority := spinePriority(c)
@@ -335,6 +319,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		AgentContext:   agentContext,
 		GenerationFit:  generationFit,
 		ModelTier:      modelTier,
+		Scale:          scaleReadout,
 	}
 	out.OK = len(out.Reasons) == 0
 	switch {
@@ -614,6 +599,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		PriorityContext: section("Priority context", "Spine priority", "Importance"),
 		WorkUnit:        section("Work unit", "Work-unit shape", "Issue shape"),
 		ExpectedSteps:   parseExpectedSteps(section("Expected steps", "Step budget")),
+		Scale:           agentSectionValue(section("Work scale", "Scale", "Size tier", "Work size")),
 		Assumptions:     issueDraftAgentNotes(section("Assumptions")),
 		ConfusionRisks:  issueDraftAgentNotes(section("Confusion risks", "Known confusion", "Unknowns")),
 		Coordination:    issueDraftAgentNotes(section("Coordination", "Coordination notes", "Handoff notes")),
@@ -903,6 +889,7 @@ func normalize(c Candidate) Candidate {
 	c.WorkingSpine = strings.TrimSpace(c.WorkingSpine)
 	c.PriorityContext = strings.TrimSpace(c.PriorityContext)
 	c.WorkUnit = strings.TrimSpace(c.WorkUnit)
+	c.Scale = strings.TrimSpace(c.Scale)
 	c.Assumptions = compact(c.Assumptions)
 	c.ConfusionRisks = compact(c.ConfusionRisks)
 	c.Coordination = compact(c.Coordination)
@@ -1138,338 +1125,6 @@ func agentContext(c Candidate) AgentContext {
 	a.NoiseControl = points(25, c.Trigger != "", c.BatchPolicy != "")
 	a.Total = a.Shape + a.Assumptions + a.Coordination + a.NoiseControl
 	return a
-}
-
-func generationFit(c Candidate) GenerationFit {
-	labelStream, labelFlags := generationStreamFromLabels(c.Labels)
-	bodyStream := generationStreamFromCandidate(c)
-	stream := firstNonEmpty(labelStream, bodyStream)
-	flags := append([]string(nil), labelFlags...)
-	if labelStream != "" && bodyStream != "" && labelStream != bodyStream {
-		flags = append(flags, "generation_body_mismatch")
-	}
-	if labelStream == "" && bodyStream != "" {
-		flags = append(flags, "generation_label_missing")
-	}
-
-	text := generationCandidateText(c)
-	lower := strings.ToLower(text)
-	// Conflation flags fire only when the anti-pattern is ADVOCATED. Correct
-	// grooming guidance names the same phrase to forbid it ("do not create a
-	// branch per generation"), so a nearby prohibition cue must suppress the
-	// flag — otherwise the cleanest issue trips it.
-	if advocates(lower, "branch per generation", "feature branch per generation", "generation branch") {
-		flags = append(flags, "generation_branch_conflation")
-	}
-	if advocates(lower, "future is lower priority", "future as lower priority", "future lower priority") {
-		flags = append(flags, "generation_priority_conflation")
-	}
-	if advocates(lower, "gen/next flag", "gen/future flag", "generation label enables", "generation label decides exposure") {
-		flags = append(flags, "generation_runtime_gate_conflation")
-	}
-
-	g := GenerationFit{
-		Stream:      stream,
-		LabelStream: labelStream,
-		BodyStream:  bodyStream,
-		Flags:       flags,
-	}
-	if labelStream != "" && !containsString(g.Flags, "generation_label_multiple") && !containsString(g.Flags, "generation_parent_label_missing") {
-		g.Label = 20
-	}
-	if bodyStream != "" && (labelStream == "" || bodyStream == labelStream) {
-		g.Body = 20
-	}
-	if stream != "" && generationHorizonMatches(stream, lower) {
-		g.Horizon = 20
-	} else if stream != "" {
-		g.Flags = append(g.Flags, "generation_horizon_cue_missing")
-	}
-	ev := generationEvidence(c, lower)
-	if ev.complete() {
-		g.Evidence = 20
-	} else if stream != "" {
-		// Name WHICH evidence kind is missing, not a single opaque flag. The
-		// acceptance criteria require promotion, demotion/retirement, and an
-		// invalidating assumption as three distinct nameables; an operator (or a
-		// future agent) reading the readout must see exactly which one is absent to
-		// continue without rereading the generation epic's evidence rubric.
-		g.Flags = append(g.Flags, ev.missingFlags()...)
-	}
-	if generationOrthogonalityNamed(lower) {
-		g.Orthogonality = 20
-	} else if stream != "" {
-		g.Flags = append(g.Flags, "generation_orthogonality_missing")
-	}
-	g.Total = g.Label + g.Body + g.Horizon + g.Evidence + g.Orthogonality
-	if len(g.Flags) > 0 {
-		g.Flags = compact(g.Flags)
-		g.NextAction = "review generation label, body horizon, promotion evidence, demotion evidence, and priority/trunk/runtime-gate separation"
-	}
-	return g
-}
-
-func issueDraftGeneration(d IssueDraft, generationSection string) string {
-	if s := generationStreamFromText(generationSection); s != "" {
-		return s
-	}
-	if s := generationStreamFromText(d.Title); s != "" {
-		return s
-	}
-	return ""
-}
-
-func generationStreamFromCandidate(c Candidate) string {
-	if s := generationStreamFromText(c.Generation); s != "" {
-		return s
-	}
-	return generationStreamFromText(c.Title)
-}
-
-func generationStreamFromLabels(labels []string) (string, []string) {
-	var streams []string
-	hasGenerationLabel := false
-	for _, label := range labels {
-		label = strings.ToLower(strings.TrimSpace(label))
-		if label == "generation" {
-			hasGenerationLabel = true
-		}
-		if isGenerationStream(label) {
-			streams = append(streams, label)
-		}
-	}
-	streams = compact(streams)
-	var flags []string
-	if len(streams) > 1 {
-		flags = append(flags, "generation_label_multiple")
-	}
-	if len(streams) == 1 && !hasGenerationLabel {
-		flags = append(flags, "generation_parent_label_missing")
-	}
-	if len(streams) == 0 && hasGenerationLabel {
-		flags = append(flags, "generation_stream_label_missing")
-	}
-	if len(streams) != 1 {
-		return "", flags
-	}
-	return streams[0], flags
-}
-
-func generationStreamFromText(text string) string {
-	text = strings.ToLower(text)
-	checks := []struct {
-		stream  string
-		needles []string
-	}{
-		{"gen/second-next", []string{"gen/second-next", "gen=second-next", "generation(second-next)", "generation: second-next", "generation: gen/second-next"}},
-		{"gen/future", []string{"gen/future", "gen=future", "generation(future)", "generation: future", "generation: gen/future"}},
-		{"gen/next", []string{"gen/next", "gen=next", "generation(next)", "generation: next", "generation: gen/next"}},
-		{"gen/now", []string{"gen/now", "gen=now", "generation(now)", "generation: now", "generation: gen/now"}},
-	}
-	for _, check := range checks {
-		if hasAny(text, check.needles...) {
-			return check.stream
-		}
-	}
-	return ""
-}
-
-func isGenerationStream(label string) bool {
-	switch label {
-	case "gen/now", "gen/next", "gen/second-next", "gen/future":
-		return true
-	default:
-		return false
-	}
-}
-
-func generationCandidateText(c Candidate) string {
-	parts := []string{
-		c.Generation, c.Title, c.ParentRef, c.CurrentState, c.WhyNow, c.WorkingSpine,
-		c.PriorityContext, c.WorkUnit, c.Trigger, c.BatchPolicy, c.InScope, c.OutOfScope,
-		c.DoneCondition, c.Witness, c.AcceptanceGate, c.ClosureBinding,
-	}
-	parts = append(parts, c.Assumptions...)
-	parts = append(parts, c.ConfusionRisks...)
-	parts = append(parts, c.Coordination...)
-	parts = append(parts, c.BoundaryNotes...)
-	parts = append(parts, c.Labels...)
-	return strings.Join(parts, "\n")
-}
-
-func generationHorizonMatches(stream, text string) bool {
-	switch stream {
-	case "gen/now":
-		return hasAny(text, "current product", "current path", "immediate", "now", "today", "default path", "direct witness")
-	case "gen/next":
-		return hasAny(text, "next gen", "next-generation", "near-term", "foundation", "gate", "handoff", "dogfood", "operator visibility", "agent-runnable", "runnable soon")
-	case "gen/second-next":
-		return hasAny(text, "second-next", "architecture", "compatibility", "simulation", "dependency", "option", "adapter")
-	case "gen/future":
-		return hasAny(text, "future", "research", "long-horizon", "market", "standards", "narrative", "option value")
-	default:
-		return false
-	}
-}
-
-// generationEvidenceParts records, per evidence kind, whether the candidate names
-// it. The acceptance criteria treat promotion, demotion/retirement, and an
-// invalidating assumption as three separately-required nameables (plus a witness),
-// so the fit score reports each independently instead of collapsing them into one
-// boolean — that is what lets the readout name the specific gap.
-type generationEvidenceParts struct {
-	promotion    bool
-	demotion     bool
-	invalidating bool
-	witness      bool
-}
-
-func generationEvidence(c Candidate, text string) generationEvidenceParts {
-	return generationEvidenceParts{
-		promotion:    hasAny(text, "promotion", "promote", "readiness", "dogfood", "default-on", "move toward now"),
-		demotion:     hasAny(text, "demotion", "demote", "retirement", "retire", "park", "parking"),
-		invalidating: hasAny(text, "invalidating assumption", "assumption could fail", "if this assumption fails", "recheck"),
-		witness:      strings.TrimSpace(c.Witness) != "" || hasAny(text, "witness", "captured command", "focused test", "readout"),
-	}
-}
-
-// complete reports whether all four evidence kinds are named — the unchanged rule
-// for awarding the evidence axis its full points.
-func (e generationEvidenceParts) complete() bool {
-	return e.promotion && e.demotion && e.invalidating && e.witness
-}
-
-// missingFlags names each absent evidence kind as its own flag. The promotion flag
-// keeps its original spelling (generation_promotion_evidence_missing) so an existing
-// readout string never silently disappears; the demotion/invalidating/witness flags
-// are the added granularity criterion 3 and 4 need.
-func (e generationEvidenceParts) missingFlags() []string {
-	var flags []string
-	if !e.promotion {
-		flags = append(flags, "generation_promotion_evidence_missing")
-	}
-	if !e.demotion {
-		flags = append(flags, "generation_demotion_evidence_missing")
-	}
-	if !e.invalidating {
-		flags = append(flags, "generation_invalidating_assumption_missing")
-	}
-	if !e.witness {
-		flags = append(flags, "generation_evidence_witness_missing")
-	}
-	return flags
-}
-
-func generationOrthogonalityNamed(text string) bool {
-	hasPriority := strings.Contains(text, "priority")
-	hasTrunk := hasAny(text, "shared trunk", "trunk", "main")
-	hasRuntimeGate := hasAny(text, "runtime feature gate", "feature gate", "runtime gate", "exposure gate", "default-off", "default on")
-	return hasPriority && hasTrunk && hasRuntimeGate
-}
-
-// modelTier parses the required/optimal model-tier metadata for a candidate.
-// Namespaced tier/T?-required|optimal labels are the primary source; the
-// Required/Optimal model tier body fields are the documented fallback. The flags
-// name every missing, invalid, conflicting, or contradictory condition so a
-// producer can refuse over-/under-tiered work before automated dispatch. The
-// readout is always computed; whether a flag holds dispatch is the caller's
-// StrictModelTier choice.
-func modelTier(c Candidate) ModelTier {
-	reqTier, reqSource, reqFlags := resolveModelTier(c.Labels, "required", c.RequiredModelTier)
-	optTier, optSource, optFlags := resolveModelTier(c.Labels, "optimal", c.OptimalModelTier)
-	mt := ModelTier{
-		Required:       reqTier,
-		Optimal:        optTier,
-		RequiredSource: reqSource,
-		OptimalSource:  optSource,
-	}
-	flags := append([]string(nil), reqFlags...)
-	flags = append(flags, optFlags...)
-	// Contradiction: the recommended (optimal) tier fails to meet the required
-	// floor. Because T0 is the MOST demanding tier (lowest number), "optimal is
-	// less demanding than required" is a HIGHER optimal number — you would be
-	// recommending a model that cannot even clear the stated requirement.
-	if reqTier != "" && optTier != "" && modelTierLessDemanding(optTier, reqTier) {
-		flags = append(flags, "model_tier_contradiction")
-	}
-	mt.Flags = compact(flags)
-	return mt
-}
-
-// resolveModelTier picks the tier for one role (required|optimal), preferring a
-// namespaced label over the body fallback field. A non-empty source is only
-// reported alongside a resolved tier. Two distinct labels for the same role is a
-// conflict (cannot decide); a present-but-unparseable field is invalid; an
-// entirely absent tier is missing.
-func resolveModelTier(labels []string, role, bodyField string) (tier, source string, flags []string) {
-	labelTiers := modelTierLabelValues(labels, role)
-	if len(labelTiers) == 1 {
-		return labelTiers[0], "label", nil
-	}
-	if len(labelTiers) > 1 {
-		return "", "", []string{"model_tier_" + role + "_conflict"}
-	}
-	field := strings.TrimSpace(strings.Trim(strings.TrimSpace(bodyField), "`"))
-	if field == "" {
-		return "", "", []string{"model_tier_" + role + "_missing"}
-	}
-	if t, ok := parseModelTierToken(field); ok {
-		return t, "body", nil
-	}
-	return "", "", []string{"model_tier_" + role + "_invalid"}
-}
-
-// modelTierLabelValues returns the canonical tiers (e.g. "T1") named by the
-// role's namespaced labels, deduped and sorted. A priority/P1 label never
-// contributes here — the label grammar requires a tier/ prefix and a T<N> token,
-// which keeps priority and model tier separate.
-func modelTierLabelValues(labels []string, role string) []string {
-	var out []string
-	for _, label := range labels {
-		m := modelTierLabelRE.FindStringSubmatch(strings.ToLower(strings.TrimSpace(label)))
-		if m == nil || m[2] != role {
-			continue
-		}
-		out = append(out, "T"+m[1])
-	}
-	return compact(out)
-}
-
-// parseModelTierToken extracts the canonical T<N> tier from a body-field value
-// such as "`tier/T1-required`", "tier/T1-optimal", or a bare "T1". It returns
-// false when no T<N> token is present — the case that makes a stray "P1" (a
-// priority, not a tier) an invalid tier field rather than a silent T1.
-func parseModelTierToken(s string) (string, bool) {
-	s = strings.ToLower(strings.TrimSpace(strings.Trim(s, "`")))
-	if s == "" {
-		return "", false
-	}
-	m := modelTierTokenRE.FindStringSubmatch(s)
-	if m == nil {
-		return "", false
-	}
-	return "T" + m[1], true
-}
-
-// modelTierLessDemanding reports whether tier a is strictly LESS demanding than
-// b — a higher tier number, since T0 is the most demanding. Unparseable tiers
-// are treated as non-comparable (no contradiction asserted on garbage).
-func modelTierLessDemanding(a, b string) bool {
-	an, aok := modelTierNumber(a)
-	bn, bok := modelTierNumber(b)
-	if !aok || !bok {
-		return false
-	}
-	return an > bn
-}
-
-func modelTierNumber(t string) (int, bool) {
-	t = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(t)), "t")
-	n, err := strconv.Atoi(t)
-	if err != nil || n < 0 {
-		return 0, false
-	}
-	return n, true
 }
 
 func isDispatchLeaf(c Candidate) bool {
