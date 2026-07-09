@@ -145,10 +145,11 @@ self-reporting box has written scrubbed `fak.fleet.report/v1` files with inferen
 derive and publish the gate from those reports:
 
 ```bash
-fak lab readiness --from-status --write-default --json
+fak lab readiness --from-reports --write-default --json
 ```
 
-`--from-status` admits lab-backed dispatch only when at least one healthy box reports
+`--from-reports` (formerly `--from-status`, still accepted as a deprecated alias) admits
+lab-backed dispatch only when at least one healthy box reports
 fresh `inference.ready` or `inference.degraded`; `warming`, `blocked`, stale reports,
 missing reports, and unknown inference all fail closed with a generic next action. With a
 private roster, pass that roster locally (`--roster <private-roster>`); never commit the

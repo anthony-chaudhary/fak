@@ -257,10 +257,12 @@ After reports are populated, derive the dispatch gate from the scrubbed status i
 hand-marking readiness:
 
 ```bash
-fak lab readiness --from-status --write-default --json
+fak lab readiness --from-reports --write-default --json
 ```
 
-This writes `READY_FOR_DEV_WORK` only when at least one healthy reported box has useful
+`--from-reports` derives the link-state phase (`CLEAR`/`WAITING`/`WORKING`) from the
+scrubbed lab status + inference reports; `--from-status` is still accepted as a deprecated
+alias. This writes `READY_FOR_DEV_WORK` only when at least one healthy reported box has useful
 fresh inference (`ready` or `degraded`). Warming, stale, or missing inference reports hold
 lab-backed dispatch closed.
 
