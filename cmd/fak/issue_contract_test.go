@@ -422,6 +422,77 @@ func TestIssueContractModelTierReadout(t *testing.T) {
 	}
 }
 
+func TestIssueContractScaleReadout(t *testing.T) {
+	// A dispatchable leaf carries an S1 scale readout derived from its step
+	// budget, with a matching test/gate witness and no scale flags.
+	path := writeIssueContractJSON(t, completeIssueCandidate())
+	var out, errb bytes.Buffer
+	if code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"}); code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
+	}
+	var got struct {
+		Counts struct {
+			ScaleFlagged int            `json:"scale_flagged"`
+			ByScale      map[string]int `json:"by_scale"`
+		} `json:"counts"`
+		Reviews []struct {
+			Scale struct {
+				Effective    string   `json:"effective"`
+				Source       string   `json:"source"`
+				Dispatchable bool     `json:"dispatchable"`
+				WitnessScale string   `json:"witness_scale"`
+				Flags        []string `json:"flags"`
+			} `json:"scale"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.Counts.ScaleFlagged != 0 || got.Counts.ByScale["S1"] != 1 {
+		t.Fatalf("scale counts = %+v, want one unflagged S1", got.Counts)
+	}
+	if len(got.Reviews) != 1 {
+		t.Fatalf("reviews = %d, want 1", len(got.Reviews))
+	}
+	s := got.Reviews[0].Scale
+	if s.Effective != "S1" || s.Source != "steps" || !s.Dispatchable ||
+		s.WitnessScale != "S1" || len(s.Flags) != 0 {
+		t.Fatalf("scale readout = %+v, want dispatchable S1 from steps, S1 witness, no flags", s)
+	}
+
+	// A feature-shaped unit with a leaf-sized step budget is S2 by shape: the
+	// small budget must not shrink it below its shape. S2+ is always held off
+	// dispatch (ISSUE_NOT_DISPATCH_LEAF), and its commit/test witness is smaller
+	// than the work, so witness_under_scale flags even without strict mode.
+	feature := completeIssueCandidate()
+	feature.WorkUnit = "feature"
+	feature.ExpectedSteps = 4
+	fpath := writeIssueContractJSON(t, feature)
+	out.Reset()
+	errb.Reset()
+	code := runIssue(&out, &errb, []string{"contract", "--file", fpath})
+	if code != 3 {
+		t.Fatalf("feature default exit = %d, want 3\nstdout:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), issuecontract.ReasonNotDispatchLeaf) {
+		t.Fatalf("feature output missing %s:\n%s", issuecontract.ReasonNotDispatchLeaf, out.String())
+	}
+	if !strings.Contains(out.String(), "scale=S2") || !strings.Contains(out.String(), "witness_under_scale") {
+		t.Fatalf("feature output missing S2 scale readout / under-scale flag:\n%s", out.String())
+	}
+
+	// --strict-scale additionally holds the under-scale witness with its own
+	// closed reason.
+	out.Reset()
+	errb.Reset()
+	if code := runIssue(&out, &errb, []string{"contract", "--file", fpath, "--strict-scale"}); code != 3 {
+		t.Fatalf("feature strict-scale exit = %d, want 3\nstdout:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), issuecontract.ReasonWitnessScaleMismatch) {
+		t.Fatalf("strict-scale output missing %s:\n%s", issuecontract.ReasonWitnessScaleMismatch, out.String())
+	}
+}
+
 func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "candidates.json")
 	candidates := make([]issuecontract.Candidate, 0, 3)
