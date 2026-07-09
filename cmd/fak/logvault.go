@@ -11,6 +11,7 @@ package main
 //	fak logvault verify    re-derive the manifest hash chain + re-hash mirrors
 //	fak logvault sync      scrub-gated replication to a second vault dir (-to), verified on arrival
 //	fak logvault sources   print the source registry resolved for this box
+//	fak logvault du        per-source vault footprint + capture lag, one line each (WITNESSED, folded from the manifest)
 //	fak logvault gc        propose (default) or -live apply bounded .history/ retention
 //	fak logvault adopt     bank a whole tree (-cold <dir>) as one deterministic archive
 //
@@ -25,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/logvault"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
@@ -97,6 +99,27 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 			fmt.Fprintf(w, "%-22s %s\n", s.ID, s.Root)
 			fmt.Fprintf(w, "%-22s   %s\n", "", s.Note)
 		}
+		return 0
+	case "du":
+		// Observability rung (#2455): the "is my backup current?" answer folded
+		// PURELY from the vault manifest — every number is a WITNESSED value fak
+		// recorded in its own hash chain at capture time, never a live self-report.
+		// A missing/empty manifest is the valid-empty posture, not an error.
+		rows, err := logvault.ReadManifestRows(filepath.Join(v.Dir, logvault.ManifestName))
+		if err != nil {
+			fmt.Fprintf(ew, "logvault du: read manifest: %v\n", err)
+			return 1
+		}
+		fps := logvault.Footprint(rows)
+		now := time.Now()
+		fmt.Fprintf(w, "logvault du  vault=%s\n", v.Dir)
+		for _, fp := range fps {
+			fmt.Fprintf(w, "  %-22s bytes=%-8s files=%-5d rows=%-5d errors=%-3d last-capture=%s\n",
+				fp.Source, fmtBytesLV(fp.Bytes), fp.Files, fp.ManifestRows, fp.Errors,
+				lastCaptureLV(now, fp.LastCaptureUnixNano))
+		}
+		fmt.Fprintf(w, "TOTAL bytes=%s last-capture=%s (WITNESSED: sizes stat'd + hashes computed at capture, folded from the vault manifest)\n",
+			fmtBytesLV(logvault.TotalBytes(fps)), lastCaptureLV(now, logvault.NewestCaptureUnixNano(fps)))
 		return 0
 	case "plan", "capture":
 		var stats []logvault.SourceStats
@@ -226,8 +249,36 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 		fmt.Fprintf(w, "    %s\n", rep.DeleteCmd)
 		return 0
 	default:
-		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources|gc|adopt)\n", verb)
+		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources|du|gc|adopt)\n", verb)
 		return 2
+	}
+}
+
+// lastCaptureLV renders a source's last-successful-capture time as an age
+// ("2.3h ago") or "never" when nothing has been successfully captured (a
+// skip-error-only source, or a fresh vault). now is threaded in so the render
+// stays deterministic under test.
+func lastCaptureLV(now time.Time, unixNano int64) string {
+	if unixNano <= 0 {
+		return "never"
+	}
+	return fmtAgeLV(now.Sub(time.Unix(0, unixNano))) + " ago"
+}
+
+// fmtAgeLV renders a non-negative duration compactly (days/hours/minutes/seconds).
+func fmtAgeLV(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%.1fd", d.Hours()/24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%.1fh", d.Hours())
+	case d >= time.Minute:
+		return fmt.Sprintf("%.0fm", d.Minutes())
+	default:
+		return fmt.Sprintf("%.0fs", d.Seconds())
 	}
 }
 
@@ -242,6 +293,23 @@ func fmtBytesLV(n int64) string {
 	default:
 		return fmt.Sprintf("%dB", n)
 	}
+}
+
+// logvaultMetricsVerifySample bounds how many mirrors the /metrics provider
+// re-hashes per scrape (#2455). The full manifest chain + head anchor are always
+// re-derived (cheap); this caps only the mirror re-hash so a scrape stays bounded
+// on a large vault, matching the `fak logvault verify -sample` posture. A mirror
+// outside the sample is still caught by the periodic full `fak logvault verify`.
+const logvaultMetricsVerifySample = 256
+
+// resolveLogvaultDir returns the capture vault directory for repoAbs the same way
+// the `fak logvault` verbs do: $FAK_LOG_VAULT, else <repo-parent>/fak-log-vault
+// (a sibling of the repo so the vault never lives inside a git tree it captures).
+func resolveLogvaultDir(repoAbs string) string {
+	if d := os.Getenv("FAK_LOG_VAULT"); d != "" {
+		return d
+	}
+	return filepath.Join(filepath.Dir(repoAbs), "fak-log-vault")
 }
 
 // logvaultAnchorSuffix renders the chain-head anchor for a digest line — the

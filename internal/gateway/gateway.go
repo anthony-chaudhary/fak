@@ -43,7 +43,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
-	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
@@ -71,6 +70,20 @@ import (
 // before returning, agent.CompactAnthropicHistory), so it can never net-charge more by
 // discarding a cached prefix. An explicit --compact-history-budget wins; 0 means OFF.
 const DefaultCompactHistoryBudget = 48000
+
+// DefaultVCacheAnchor is the default-on posture of the M2 star-anchor pre-flight gate
+// (#1493): on the flagship Anthropic passthrough, APPLY cachemeta.RecommendLayout before
+// send (maybeAnchorAnthropicRaw) rather than merely reporting it — hoist volatile system
+// blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto
+// the stable head a no-breakpoint caller did NOT send, so the first natural request warms
+// provider prefix caching and later siblings read it. It is DECOUPLED from
+// DefaultCompactHistoryBudget: the compaction path only placed that anchor while its own
+// budget was > 0, so --compact-history-budget=0 silently took anchoring down with it; this
+// gate fires independently. Default-on is safe by construction — the placement is fail-safe
+// identity on any ambiguity (a hoist that would change the model-visible prefix is REFUSED,
+// not applied) and idempotent with the compaction/TTL placements (a body already carrying a
+// breakpoint bails already_set). An explicit --vcache-anchor=false wins (byte-for-byte OFF).
+const DefaultVCacheAnchor = true
 
 // DefaultAssumedSessionTurns is the session length the head-anchored compaction burst gate
 // ASSUMES when no bounded turn horizon is wired (the default un-budgeted `fak guard -- claude`
@@ -120,6 +133,11 @@ const DefaultAssumedSessionTurns = 50
 // fire: a break-even that exceeds the granted headroom still refuses (a thin-middle / huge-suffix shed
 // never fires no matter how heavy the session). A wired Budget.TurnsLeft horizon still wins over the
 // whole prior, and the prior-disabled (assumeSessionTurns<=0) path is byte-for-byte unchanged.
+//
+// Cross-ref: this is the RESIDENT-VOLUME axis of the head-anchored burst gate — it lengthens the
+// presumed horizon for a heavy trace. Its turn-indexed sibling is the early-firing budget ramp
+// (earlyFireRampTurns, below), which instead moves the budget LINE by served-turn depth. Both feed
+// the SAME CacheBurstPaysBack break-even from different axes, so retuning one shifts where the other bites.
 const (
 	headHorizonHeavyResidentFloor int64 = 60000
 	headHorizonHeavyHeadroom            = 30
@@ -143,6 +161,11 @@ const (
 // horizon (assumed or wired): the conservative first-breakpoint default and the cold-only path
 // are byte-for-byte unchanged. Disabled by the same kill switches that disable early firing at
 // all (--compact-anchor-head=false or --assume-session-turns 0 with no wired horizon).
+//
+// Cross-ref: this is the TURN-DEPTH axis of the head-anchored burst gate — it moves the budget line
+// by served-turn depth. Its resident-volume sibling is the volume-aware horizon
+// (headHorizonHeavyResidentFloor, above), which instead lengthens the presumed session. Both feed the
+// SAME CacheBurstPaysBack break-even from different axes, so retuning one shifts where the other bites.
 const (
 	// earlyFireBudgetFloorFrac is the fraction of the configured compaction budget the
 	// head-anchored fire targets at served-turn depth 1, ramping linearly to the full budget by
@@ -480,6 +503,20 @@ type Config struct {
 	// 1-hour tier. It is gate-only for now; the ablation harness also enables it with
 	// FAK_ABLATE_TTL_1H=1.
 	CacheTTL1H bool
+	// VCacheAnchor, when true, arms the M2 star-anchor canonicalization as a DEFAULT-ON
+	// pre-flight gate on the flagship Anthropic PASSTHROUGH (#1493): before any other body
+	// transform, apply cachemeta.RecommendLayout (agent.PlaceAnthropicCacheBreakpointWithOutcome)
+	// so a caller that sent NO cache_control gets its volatile system blocks hoisted behind a
+	// byte-stable cacheable anchor and a breakpoint spliced onto the stable head — earning
+	// provider prefix caching by default, DECOUPLED from CompactHistoryBudget (compaction only
+	// placed the anchor while its own budget was > 0, so --compact-history-budget=0 silently took
+	// anchoring down with it). The CLI flag defaults this to true (--vcache-anchor default-on for
+	// the Anthropic path); false is the explicit opt-out. Fail-safe identity on any ambiguity — a
+	// hoist that would change model-visible semantics (a volatile-only head, no stable span) is
+	// REFUSED, not silently applied — and idempotent with the compaction/TTL placements (a body
+	// that already carries a breakpoint bails already_set). Anthropic passthrough only; a zero
+	// value leaves the pre-flight gate OFF (the compaction/TTL placements are unaffected either way).
+	VCacheAnchor bool
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
 	// every possible argument?" — true ONLY for a name the policy admits under no args
@@ -1184,6 +1221,12 @@ type Server struct {
 	// passthrough upgrades stable-head cache_control breakpoints to ttl:"1h" before forwarding.
 	cacheTTL1H bool
 
+	// vcacheAnchor mirrors Config.VCacheAnchor: when true the Anthropic passthrough runs the M2
+	// star-anchor pre-flight rewrite (maybeAnchorAnthropicRaw) by DEFAULT — hoisting volatile
+	// system blocks behind a byte-stable cacheable anchor and placing a breakpoint the caller did
+	// not send — DECOUPLED from compactHistoryBudget (#1493). false leaves the pre-flight gate off.
+	vcacheAnchor bool
+
 	// toolFloorDenies mirrors Config.ToolFloorDenies: the INBOUND-half predicate over a
 	// tool name (true ⇔ the floor DEFAULT_DENYs it for every arg). When non-nil the
 	// Anthropic passthrough prunes those provably-unreachable tool DEFINITIONS from the
@@ -1380,56 +1423,10 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	var planner agent.Planner
-	t := time.Now()
-	inKernelModelButChatIsMock := false
-	switch {
-	case len(proxyURLs) != 0 && cfg.InKernelModel != nil && cfg.Tokenizer != nil:
-		// DUAL (small local model ALONGSIDE the API upstream, dual_planner.go): a live
-		// proxy AND a loaded in-kernel model in ONE gateway. Requests addressed to the
-		// local model id (Config.LocalModelID, default "local") decode in-kernel with no
-		// upstream call; every other request — including the wrapped agent's default
-		// turns — proxies upstream byte-for-byte as the proxy-only path does.
-		// Historically the proxy silently WON this combination and the loaded weights
-		// were dead; now the combination is the alongside deployment.
-		proxy, perr := newProxyPlanner(cfg, model, proxyURLs)
-		if perr != nil {
-			return nil, perr
-		}
-		localID := localModelIDOr(cfg.LocalModelID)
-		planner, err = NewDualPlanner(proxy, newInKernelChatPlanner(cfg, localID, logf), localID)
-		if err != nil {
-			return nil, err
-		}
-		logf("gateway: dual planner — model id %q (and \"local\") decodes in-kernel; every other model id proxies upstream", localID)
-	case len(proxyURLs) != 0:
-		planner, err = newProxyPlanner(cfg, model, proxyURLs)
-		if err != nil {
-			return nil, err
-		}
-	case cfg.InKernelModel != nil && cfg.Tokenizer != nil:
-		// Serve the model fused into the kernel as the chat backend on BOTH
-		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
-		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
-		// into a Planner. Falls through to MockPlanner if the host didn't preload.
-		planner = newInKernelChatPlanner(cfg, model, logf)
-	default:
-		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
-		// chat surface silently fell back to the deterministic offline mock. Warn
-		// LOUDLY so an operator never mistakes scripted demo text for real model
-		// output — the /healthz planner:"mock" field carries the same signal to a
-		// liveness probe.
-		if cfg.InKernelModel != nil && cfg.Tokenizer == nil {
-			// #1115: kernel has real weights loaded (for fak_syscalls) but chat
-			// falls back to mock due to missing tokenizer. Flag for witness fidelity.
-			inKernelModelButChatIsMock = true
-			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. --gguf was passed but no BPE tokenizer was found (GGUF has no embedded BPE tokenizer and no --tokenizer was provided). Pass --tokenizer <dir|file> to enable real chat, or --base-url to proxy a real provider.")
-		} else {
-			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
-		}
-		planner = agent.NewMockPlanner(model)
+	planner, inKernelModelButChatIsMock, err := selectChatPlanner(cfg, model, proxyURLs, logf, startup)
+	if err != nil {
+		return nil, err
 	}
-	startup.phase("planner-init", time.Since(t))
 
 	remoteCache, err := newEngineCacheClient(cfg)
 	if err != nil {
@@ -1438,7 +1435,7 @@ func New(cfg Config) (*Server, error) {
 
 	// Select the live fleet's tier-2 invalidation granularity (process-global vDSO).
 	// Fail loud on an unknown name rather than silently degrading to a full flush.
-	t = time.Now()
+	t := time.Now()
 	if g, ok := vdso.ParseGranularity(cfg.Invalidation); ok {
 		vdso.Default.SetGranularity(g)
 	} else {
@@ -1514,6 +1511,7 @@ func New(cfg Config) (*Server, error) {
 		assumeSessionTurns:         cfg.AssumeSessionTurns,
 		elideResultBytes:           cfg.ElideResultBytes,
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
+		vcacheAnchor:               cfg.VCacheAnchor,
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		exposeAllow:                exposeAllow,
 		deferMCPTools:              cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
@@ -1556,6 +1554,66 @@ func New(cfg Config) (*Server, error) {
 	s.loops = newBgloopSupervisor(s)
 
 	return s, nil
+}
+
+// selectChatPlanner picks the chat backend for the /v1/chat/completions and
+// /v1/messages surfaces from the wired configuration — a dual (local-alongside-API)
+// planner, a proxy planner, the in-kernel chat planner, or the deterministic mock —
+// records the planner-init startup phase, and reports whether real weights are loaded
+// for syscalls but chat still falls back to the mock (missing tokenizer, #1115).
+func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, bool, error) {
+	var planner agent.Planner
+	var err error
+	t := time.Now()
+	inKernelModelButChatIsMock := false
+	switch {
+	case len(proxyURLs) != 0 && cfg.InKernelModel != nil && cfg.Tokenizer != nil:
+		// DUAL (small local model ALONGSIDE the API upstream, dual_planner.go): a live
+		// proxy AND a loaded in-kernel model in ONE gateway. Requests addressed to the
+		// local model id (Config.LocalModelID, default "local") decode in-kernel with no
+		// upstream call; every other request — including the wrapped agent's default
+		// turns — proxies upstream byte-for-byte as the proxy-only path does.
+		// Historically the proxy silently WON this combination and the loaded weights
+		// were dead; now the combination is the alongside deployment.
+		proxy, perr := newProxyPlanner(cfg, model, proxyURLs)
+		if perr != nil {
+			return nil, false, perr
+		}
+		localID := localModelIDOr(cfg.LocalModelID)
+		planner, err = NewDualPlanner(proxy, newInKernelChatPlanner(cfg, localID, logf), localID)
+		if err != nil {
+			return nil, false, err
+		}
+		logf("gateway: dual planner — model id %q (and \"local\") decodes in-kernel; every other model id proxies upstream", localID)
+	case len(proxyURLs) != 0:
+		planner, err = newProxyPlanner(cfg, model, proxyURLs)
+		if err != nil {
+			return nil, false, err
+		}
+	case cfg.InKernelModel != nil && cfg.Tokenizer != nil:
+		// Serve the model fused into the kernel as the chat backend on BOTH
+		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
+		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
+		// into a Planner. Falls through to MockPlanner if the host didn't preload.
+		planner = newInKernelChatPlanner(cfg, model, logf)
+	default:
+		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
+		// chat surface silently fell back to the deterministic offline mock. Warn
+		// LOUDLY so an operator never mistakes scripted demo text for real model
+		// output — the /healthz planner:"mock" field carries the same signal to a
+		// liveness probe.
+		if cfg.InKernelModel != nil && cfg.Tokenizer == nil {
+			// #1115: kernel has real weights loaded (for fak_syscalls) but chat
+			// falls back to mock due to missing tokenizer. Flag for witness fidelity.
+			inKernelModelButChatIsMock = true
+			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. --gguf was passed but no BPE tokenizer was found (GGUF has no embedded BPE tokenizer and no --tokenizer was provided). Pass --tokenizer <dir|file> to enable real chat, or --base-url to proxy a real provider.")
+		} else {
+			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
+		}
+		planner = agent.NewMockPlanner(model)
+	}
+	startup.phase("planner-init", time.Since(t))
+	return planner, inKernelModelButChatIsMock, nil
 }
 
 func envEnabled(name string) bool {
@@ -1855,10 +1913,10 @@ func (s *Server) KernelCounters() kernel.Counters {
 // the honest session-length signal the gateway-usage ledger records: Submits is 0 on the
 // guard proxy path (the kernel submit boundary is not on the pass-through wire), so the
 // durable turn-distribution corpus would otherwise have only CachedTurns as a proxy.
-// Safe on a nil Server (returns the zero summary with the default block posture).
+// Safe on a nil Server (returns the zero summary — a nil Server served no turns).
 func (s *Server) HarnessCoherenceSummary() HarnessCoherenceSummary {
 	if s == nil {
-		return HarnessCoherenceSummary{Posture: string(compactcohere.PostureBlock)}
+		return HarnessCoherenceSummary{}
 	}
 	return s.metrics.harnessCoherenceSummary()
 }
@@ -2768,432 +2826,6 @@ func principalFromContext(ctx context.Context) string {
 	}
 	p, _ := ctx.Value(principalCtxKey{}).(string)
 	return p
-}
-
-// admit runs a CLIENT-PRODUCED tool result through the kernel's result-side stack
-// (k.AdmitResult: the context-MMU quarantine + the IFC source-stamp that raises the
-// per-trace taint ledger). This is what arms the exfil floor on the served path: a
-// client that executes its own tool sends the RESULT back here, and a poisoned
-// result is quarantined (paged out) + the session's taint high-water mark is raised
-// before the result is admitted to context. The verdict + the admitted (possibly
-// paged-out) result are rendered for the wire. It is the explicit fak_admit verb;
-// admitOp is the shared core the auto-proxy also drives under its own op label.
-func (s *Server) admit(ctx context.Context, tool, rawResult, witness, traceID string) (wv WireVerdict, env *ResultEnvelope, err error) {
-	wv, env, err = s.admitOp(ctx, "admit", tool, rawResult, witness, traceID)
-	if err != nil {
-		return wv, env, err
-	}
-	// Native-path parity with the proxy (#411). The proxy fires the remote
-	// engine-cache reset from admitInboundResults; the native admit routes
-	// (POST /v1/fak/admit, the fak_admit MCP tool) quarantined locally but never
-	// reset the upstream serving-engine cache, so a poisoned token-sequence could
-	// survive in the provider KV/prefix cache when an agent drives fak natively
-	// instead of through /v1/chat/completions. resetEngineCacheAfterQuarantine is
-	// the SAME reset the proxy fires (a no-op when no engine cache is configured);
-	// a remote-reset failure is surfaced fail-closed, wrapped so the HTTP handler
-	// maps it to a 502 rather than a client 400.
-	if wv.Kind == "QUARANTINE" {
-		if rerr := s.resetEngineCacheAfterQuarantine(ctx, []ResultAdmission{{Verdict: wv}}); rerr != nil {
-			return wv, env, fmt.Errorf("%w: %v", errEngineCacheReset, rerr)
-		}
-	}
-	return wv, env, nil
-}
-
-// errEngineCacheReset marks an admit failure that originated in the REMOTE
-// engine-cache reset (not the local admission). handleFakAdmit maps it to a 502 —
-// the same fail-closed signal the proxy returns on a reset failure — while a local
-// build/resolver error stays a 400 client error.
-var errEngineCacheReset = errors.New("engine cache reset failed")
-
-// admitOp is the shared result-side admission core: it builds an agent-scoped call,
-// puts the result bytes into a tainted Ref, and folds the kernel's ResultAdmitter
-// chain over them (context-MMU quarantine + IFC source-stamp/taint ledger), tagged
-// with the caller's op label for metrics/logs. Both the explicit fak_admit verb
-// (op "admit") and the auto /v1/chat/completions proxy (op "proxy_admit") route
-// through it, so the result-side floor is identical on every served topology.
-func (s *Server) admitOp(ctx context.Context, operation, tool, rawResult, witness, traceID string) (wv WireVerdict, env *ResultEnvelope, err error) {
-	return s.admitOpWithSeq(ctx, operation, tool, rawResult, witness, traceID, 0)
-}
-
-func (s *Server) admitOpWithSeq(ctx context.Context, operation, tool, rawResult, witness, traceID string, callSeq uint64) (wv WireVerdict, env *ResultEnvelope, err error) {
-	start := time.Now()
-	opTrace, opTool := traceID, tool
-	defer func() {
-		dur := time.Since(start)
-		s.metrics.observeOperation(operation, wv, err, dur)
-		s.logGatewayOperation(operation, opTrace, opTool, wv, err, dur)
-	}()
-	tc, err := s.buildCall(ctx, tool, "", false, witness, traceID)
-	if err != nil {
-		return WireVerdict{}, nil, err
-	}
-	if callSeq != 0 {
-		tc.SeqNo = callSeq
-	}
-	opTrace, opTool = tc.TraceID, tc.Tool
-	body := []byte(rawResult)
-	if len(body) == 0 {
-		body = []byte("{}")
-	}
-	ref, err := abi.ActiveResolver().Put(ctx, body)
-	if err != nil {
-		return WireVerdict{}, nil, fmt.Errorf("resolver: %w", err)
-	}
-	r := &abi.Result{Call: tc, Payload: ref, Status: abi.StatusOK, Meta: map[string]string{}}
-	v := s.k.AdmitResult(ctx, tc, r)
-	env = &ResultEnvelope{
-		Status:  statusName(r.Status),
-		Content: string(resolveBytes(ctx, r.Payload)),
-		Meta:    r.Meta,
-	}
-	wv = renderVerdict(v, r.Meta)
-	return wv, env, nil
-}
-
-func (s *Server) rememberOriginSeq(traceID, tool, rawArgs string, seq uint64) {
-	if seq == 0 || traceID == "" || tool == "" {
-		return
-	}
-	s.originSeqMu.Lock()
-	if s.originSeq == nil {
-		s.originSeq = map[string]uint64{}
-	}
-	if len(s.originSeq) >= maxResetHealthSessions {
-		for k := range s.originSeq {
-			delete(s.originSeq, k)
-			break
-		}
-	}
-	s.originSeq[originSeqKey(traceID, tool, rawArgs)] = seq
-	s.originSeqMu.Unlock()
-}
-
-const gatewayOriginSeqBase uint64 = 1 << 63
-
-func (s *Server) nextOriginSeq() uint64 {
-	return gatewayOriginSeqBase | atomic.AddUint64(&s.originSeqNext, 1)
-}
-
-func (s *Server) rememberOriginSeqID(traceID, callID string, seq uint64) {
-	if seq == 0 || traceID == "" || callID == "" {
-		return
-	}
-	s.originSeqMu.Lock()
-	if s.originSeqByID == nil {
-		s.originSeqByID = map[string]uint64{}
-	}
-	if len(s.originSeqByID) >= maxResetHealthSessions {
-		for k := range s.originSeqByID {
-			delete(s.originSeqByID, k)
-			break
-		}
-	}
-	s.originSeqByID[originSeqIDKey(traceID, callID)] = seq
-	s.originSeqMu.Unlock()
-}
-
-func (s *Server) originSeqFor(traceID string, call agent.ToolCall) uint64 {
-	if traceID == "" {
-		return 0
-	}
-	s.originSeqMu.Lock()
-	if call.ID != "" {
-		if seq := s.originSeqByID[originSeqIDKey(traceID, call.ID)]; seq != 0 {
-			s.originSeqMu.Unlock()
-			return seq
-		}
-	}
-	seq := s.originSeq[originSeqKey(traceID, call.Function.Name, call.Function.Arguments)]
-	s.originSeqMu.Unlock()
-	return seq
-}
-
-func originSeqKey(traceID, tool, rawArgs string) string {
-	if rawArgs == "" {
-		rawArgs = "{}"
-	}
-	return traceID + "\x00" + tool + "\x00" + rawArgs
-}
-
-func originSeqIDKey(traceID, callID string) string {
-	return traceID + "\x00id\x00" + callID
-}
-
-// admitInboundResults arms the RESULT-side floor on the auto /v1/chat/completions
-// proxy (#7). In the OpenAI tool protocol a tool RESULT the client executed comes
-// back on the NEXT turn as a role="tool" message; before this, those results flowed
-// straight to the upstream model, so the result-side containment (context-MMU
-// quarantine + IFC source-stamp/taint ledger + eviction) was inert on the proxy —
-// armed only on the in-process Syscall/Reap path and the explicit fak_admit verb.
-//
-// Each inbound tool result is routed through k.AdmitResult keyed on the per-session
-// traceID BEFORE it reaches the model: a poisoned/secret-bearing result is PAGED
-// OUT (its forwarded content replaced with the quarantine stub, so the upstream
-// model's KV never ingests the poison), and an untrusted-source result RAISES the
-// trace's IFC taint high-water mark. That high-water mark is exactly what the
-// already-wired sink-gate (k.Decide, keyed on the SAME traceID) reads when it
-// adjudicates the calls the model then proposes — so an exfil call on a tainted
-// session is refused. messages is mutated in place (request-local). The per-result
-// admissions are returned for the fak response extension.
-func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, traceID string) ([]ResultAdmission, error) {
-	// Snapshot each message's ORIGINAL content before admission rewrites any quarantined
-	// payload in place. The in-kernel poison-eviction hook needs the original (poisoned)
-	// bytes to render the token path that was actually cached, not the paged-out form.
-	origContent := make([]string, len(messages))
-	for i := range messages {
-		origContent[i] = messages[i].Content
-	}
-	// Pair each inbound tool_result to its originating call's (tool, args): the result
-	// block carries only ToolCallID + Content, but the args live on the prior assistant
-	// tool_use whose ID == ToolCallID (decoded into Message.ToolCalls). The same index
-	// feeds optional vDSO fill and, when a real kernel sequence was recorded, the journal
-	// call_seq on result-side quarantines.
-	callByID := make(map[string]agent.ToolCall)
-	for _, m := range messages {
-		if m.Role != agent.RoleAssistant {
-			continue
-		}
-		for _, tcc := range m.ToolCalls {
-			if tcc.ID == "" {
-				continue
-			}
-			callByID[tcc.ID] = tcc
-		}
-	}
-	var admissions []ResultAdmission
-	var quarantinedIdx []int
-	for i := range messages {
-		if messages[i].Role != agent.RoleTool {
-			continue
-		}
-		tool := messages[i].Name
-		var origin agent.ToolCall
-		var hasOrigin bool
-		if messages[i].ToolCallID != "" {
-			origin, hasOrigin = callByID[messages[i].ToolCallID]
-		}
-		if tool == "" && hasOrigin {
-			tool = origin.Function.Name
-		}
-		if tool == "" {
-			// A nameless tool result is still untrusted cross-boundary input. Admit it
-			// under a placeholder so the content screen + fail-closed taint still fire
-			// (provenance treats an unregistered tool as Untrusted).
-			tool = "tool_result"
-		}
-		var originSeq uint64
-		if hasOrigin {
-			originSeq = s.originSeqFor(traceID, origin)
-		}
-		resultDigest := guardrsi.ArgsDigest(messages[i].Content)
-		wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
-		if aerr != nil {
-			// A result we cannot even admit is held out fail-closed rather than
-			// forwarded raw to the model.
-			messages[i].Content = `{"_quarantined":true,"boundary":"proxy","reason":"ADMIT_ERROR"}`
-			admissions = append(admissions, ResultAdmission{
-				ToolCallID:   messages[i].ToolCallID,
-				Tool:         tool,
-				ResultDigest: resultDigest,
-				Verdict:      WireVerdict{Kind: "QUARANTINE", Reason: "ADMIT_ERROR", Disposition: "TERMINAL"},
-			})
-			quarantinedIdx = append(quarantinedIdx, i)
-			continue
-		}
-		// On a quarantine/transform the kernel paged the bytes out and rewrote the
-		// payload in place; forward the paged-out form so the poison never reaches
-		// the model. A plain Allow leaves the content untouched.
-		if envlp != nil && (wv.Kind == "QUARANTINE" || wv.Kind == "TRANSFORM") {
-			messages[i].Content = envlp.Content
-		}
-		if wv.Kind == "QUARANTINE" {
-			quarantinedIdx = append(quarantinedIdx, i)
-		}
-		// Subagent-boundary witness (#2438): a child terminal result whose prose CLAIMS
-		// ship/create/fix but carries no artifact witness (commit SHA / file hash) is
-		// folded TAINTED, not clean — the loop-body-witness discipline
-		// (ReasonLoopBodyUnwitnessed) at the subagent fold. Only a plain ALLOW is demoted;
-		// the content is still forwarded (the parent sees it) but the admission records it
-		// visibly unverified. Placed before the vDSO fill (ALLOW-only) so a demoted, unbacked
-		// claim can never warm the cache either.
-		if demoted, ok := subagentDoneVerdict(tool, messages[i].Content, wv); ok {
-			wv = demoted
-		}
-		// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
-		// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
-		// call, fills (tool,args)->result so a later identical read is served inline.
-		// All the soundness/security guards live in fillVDSOFromResult.
-		if s.vdsoProxyFill && wv.Kind == "ALLOW" {
-			if orig, ok := callByID[messages[i].ToolCallID]; ok {
-				s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
-			}
-		}
-		adm := ResultAdmission{
-			ToolCallID:   messages[i].ToolCallID,
-			Tool:         tool,
-			ResultDigest: resultDigest,
-			Verdict:      wv,
-		}
-		admissions = append(admissions, adm)
-	}
-	s.annotateResultLivelock(traceID, admissions)
-	// Defense in depth (candidate #14): a result the kernel just quarantined may have been
-	// admitted as benign on an EARLIER turn and prefilled into the in-kernel KV cache. Drop
-	// any cached prefix that attended to it so a later turn re-prefills instead of replaying
-	// the poisoned KV. Fires on the SAME quarantine event as the external engine-cache reset.
-	s.evictInKernelPoison(messages, origContent, quarantinedIdx, tools)
-	if err := s.resetEngineCacheAfterQuarantine(ctx, admissions); err != nil {
-		return admissions, err
-	}
-	return admissions, nil
-}
-
-// fillVDSOFromResult warms the vDSO tier-2 cache from one ADMITTED inbound tool_result
-// (the opt-in proxy-fill path) so a LATER re-proposed identical read is served inline
-// instead of bounced back to the client. The caller has already confirmed the result's
-// admission verdict was a plain Allow; this function applies the remaining soundness +
-// security guards that the generic vdso.Emit fill gate (built for fak-authored
-// completions) does not enforce against a client-supplied producer:
-//
-//   - read-only-shaped tool ONLY (readOnlyPrefix); IsWriteShaped is the un-bypassable
-//     backstop. A write tool's result must never become a cached "answer".
-//   - NAMED principal ONLY: an empty principal lands the entry in the shared global
-//     slice, letting one client seed bytes an unrelated tenant reads. A client fill must
-//     be attributable to the principal that produced it.
-//   - never a Shareable tool: a Shareable entry drops the principal dimension (shared
-//     across all tenants), so a client fill into one would be a cross-tenant poison.
-//
-// On a hit the LATER read serves these bytes; ctxmmu.ScreenBytes on the serve side
-// (adjudicateProposedServed) remains the backstop, but a quarantined result never
-// reaches here because the caller gates on wv.Kind=="ALLOW". The fill is built via the
-// SAME buildCall(readOnly=true) the served probe uses, so the key matches exactly.
-func (s *Server) fillVDSOFromResult(ctx context.Context, orig agent.ToolCall, result, traceID string) {
-	tool := orig.Function.Name
-	// Trust the assistant-side tool NAME (the result block drops it on the Anthropic
-	// wire). Eligibility mirrors the served probe; IsWriteShaped is the hard backstop.
-	if !readOnlyPrefix(tool) || vdso.IsWriteShaped(tool) {
-		return
-	}
-	// A client fill must be principal-attributed (empty principal => shared global slice).
-	if principalFromContext(ctx) == "" {
-		return
-	}
-	args := orig.Function.Arguments
-	if strings.TrimSpace(args) == "" {
-		args = "{}"
-	}
-	// Build the call the SAME way the served probe does (readOnly=true => readOnlyHint+
-	// idempotentHint, principal scoping), so the fill key == the later Lookup key.
-	c, err := s.buildCall(ctx, tool, args, true /*readOnly*/, "" /*witness*/, traceID)
-	if err != nil {
-		return
-	}
-	ref, err := abi.ActiveResolver().Put(ctx, []byte(result))
-	if err != nil {
-		return
-	}
-	// Meta must NOT carry served_by=vdso (vdso.Emit refuses to re-store an already-served
-	// entry). Emit ONLY to the registered vDSO observers — NOT every EvComplete emitter,
-	// which would feed a phantom completion to the journal/rungobs counters. In production
-	// and in tests the wired *vdso.VDSO is the same instance the served probe reads via
-	// abi.FastPaths(), so the fill lands where a later Lookup will find it. vdso.Emit's own
-	// gates (Status OK, !destructive, both hints, resourceMisnamed) are the final backstop.
-	r := &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK, Meta: map[string]string{}}
-	ev := abi.Event{Kind: abi.EvComplete, Call: c, Result: r}
-	for _, em := range abi.EmittersFor(abi.EvComplete) {
-		v, ok := em.(*vdso.VDSO)
-		if !ok {
-			continue
-		}
-		// Per-instance Shareable guard: a Shareable entry drops the principal dimension
-		// (shared across all tenants), so a client-supplied result must never fill one —
-		// that would let one client poison every tenant. Checked on the SAME instance the
-		// fill targets (Shareable is registered per-vDSO), not a global default.
-		if v.Shareable(tool) {
-			continue
-		}
-		v.Emit(ev)
-	}
-}
-
-// evictInKernelPoison drives the in-kernel poison eviction when the chat backend is the
-// in-kernel planner. It drives TWO complementary seams on the SAME quarantine event, each a
-// no-op on a planner that does not implement it (proxy/mock, or the seam left off):
-//
-//   - agent.PoisonEvictor — drops the reusable RadixAttention PREFIX node along the poisoned
-//     path so a later turn re-prefills instead of replaying the poisoned KV (candidate #14).
-//   - agent.KVSpanEvictor — the model-side KV-quarantine eviction BRIDGE (issue #579): it
-//     rebuilds the transcript's per-message K/V SPANS on a fresh model.Session over the loaded
-//     model and evicts the quarantined result's span via the proven model.KVCache.Evict
-//     (re-RoPE + renumber), so the live session's attention state is bit-identical to a run
-//     that never saw the poison — the flagship guarantee, now fired by a LIVE request and not
-//     only the synthetic-model unit witness. DEFAULT OFF (FAK_INKERNEL_KVMMU opts in).
-//
-// The transcript is rendered with each message's ORIGINAL content AND the request's tool
-// schemas (tools) so the evicted token path matches what the cache actually prefilled before
-// the verdict paged the bytes out — generation rendered renderChatMLTools(messages, tools)
-// with the tool-spec folded into the leading system block, so a tools-less eviction render
-// would not be a token-prefix of the cached tool-using turn and would reclaim nothing (#612).
-func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []string, quarantinedIdx []int, tools []agent.ToolDef) {
-	if len(quarantinedIdx) == 0 {
-		return
-	}
-	prefixEv, hasPrefix := s.planner.(agent.PoisonEvictor)
-	spanEv, hasSpan := s.planner.(agent.KVSpanEvictor)
-	if !hasPrefix && !hasSpan {
-		return
-	}
-	restored := make([]agent.Message, len(messages))
-	copy(restored, messages)
-	for i := range restored {
-		if i < len(origContent) {
-			restored[i].Content = origContent[i]
-		}
-	}
-	for _, idx := range quarantinedIdx {
-		if hasPrefix {
-			if freed := prefixEv.EvictPoisoned(restored, idx, tools); freed > 0 {
-				s.logf("gateway: in-kernel KV prefix evicted on tool-result quarantine msg=%d freed=%dtok", idx, freed)
-			}
-		}
-		if hasSpan {
-			// Default-off bridge: a no-op (0,false) unless FAK_INKERNEL_KVMMU opted it in, so the
-			// served path is unchanged by default. When on, a non-zero freed span proves the live
-			// KVCache.Evict fired; reposition_exact records the bit-exact never-saw invariant.
-			if freed, exact := spanEv.EvictKVSpan(restored, idx, tools); freed > 0 {
-				s.logf("gateway: in-kernel KV span evicted on tool-result quarantine msg=%d freed=%dpos reposition_exact=%v", idx, freed, exact)
-			}
-		}
-	}
-}
-
-func (s *Server) resetEngineCacheAfterQuarantine(ctx context.Context, admissions []ResultAdmission) error {
-	if s.engineCache == nil {
-		return nil
-	}
-	for _, a := range admissions {
-		if a.Verdict.Kind != "QUARANTINE" {
-			continue
-		}
-		dirs := []cachemeta.ExternalInvalidationDirective{{
-			Kind:      cachemeta.ExternalInvalidateKVSpan,
-			Plane:     cachemeta.PlaneKVPrefix,
-			Residency: cachemeta.Residency{Tier: cachemeta.TierRemote, Owner: string(s.engineCache.Engine)},
-			Provider:  string(s.engineCache.Engine),
-			Engine:    string(s.engineCache.Engine),
-			Reason:    "proxy_tool_result_quarantine",
-		}}
-		res, err := s.engineCache.Invalidate(ctx, dirs)
-		if err != nil {
-			s.logf("gateway: engine cache reset failed after quarantined tool result: %v", err)
-			return err
-		}
-		s.logf("gateway: engine cache reset engine=%s scope=%s directives=%d endpoint=%s",
-			res.Engine, res.Scope, res.Directives, res.Endpoint)
-		return nil
-	}
-	return nil
 }
 
 // contextChange applies a requester-initiated context-control mutation to a

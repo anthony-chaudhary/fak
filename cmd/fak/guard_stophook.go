@@ -43,6 +43,11 @@ const (
 	guardStopHookEnvMax        = "FAK_GUARD_DENYALL_MAX"
 	guardStopHookEnvWarn       = "FAK_GUARD_DENYALL_WARN"
 	guardStopHookEnvFinal      = "FAK_GUARD_DENYALL_FINAL"
+	// guardStopHookEnvSameStop overrides the same-issue give-up depth: how many consecutive
+	// deny-all turns proposing the IDENTICAL refused action (same tool+reason) end the session.
+	// This is the ONLY session-ending knob on the new same-issue path; warn/final rungs derive
+	// from it. A varied session (fresh block each turn) never reaches it and is never stopped.
+	guardStopHookEnvSameStop = "FAK_GUARD_DENYALL_SAME_STOP"
 
 	guardTaskHandoffEnvMode = "FAK_GUARD_TASK_HANDOFF_MODE"
 	guardTaskHandoffEnvFile = "FAK_GUARD_TASK_HANDOFF_FILE"
@@ -61,6 +66,11 @@ const (
 	// turns (for example malformed JSON/args). These are NOT session-stop policy input; the hook
 	// uses them only to continue the turn so the model can repair the call shape.
 	guardStopHookToolFeedbackMetricName = "fak_guard_tool_feedback_consecutive"
+	// guardStopHookSameMetricName is the same-issue sibling of guardStopHookMetricName: consecutive
+	// deny-all turns proposing the IDENTICAL refused action (same tool + same reason). This is the
+	// gauge the hook now keys its give-up on — a true repeated same issue, not a blind deny-all
+	// count. An older gateway that does not emit it makes the hook fall back to the blind ladder.
+	guardStopHookSameMetricName = "fak_guard_deny_all_same_consecutive"
 	// guardStopHookFakVerbCallsMetricName is the cumulative admitted MCP fak-verb call counter.
 	// At a clean stop, 0 means fak was present but never used as a substrate (#3093).
 	guardStopHookFakVerbCallsMetricName = "fak_mcp_verb_calls_total"
@@ -83,6 +93,13 @@ const (
 	guardStopHookDefaultWarn  = 3
 	guardStopHookDefaultFinal = 7
 	guardStopHookDefaultMax   = 9
+
+	// guardStopHookSameStopDefault is the same-issue give-up depth: the number of consecutive
+	// deny-all turns proposing the IDENTICAL refused action (same tool+reason) that ends the
+	// session. Unlike the blind ladder above, the same-issue ladder has NO ceiling on variety —
+	// a session hitting a fresh block each turn pins the same-issue gauge at 1 and rides the NUDGE
+	// rung forever. Only a genuine repeat of the same refusal climbs to this depth and stops.
+	guardStopHookSameStopDefault = 6
 )
 
 // guardStopHookStage is the rung of the graduated deny-all back-off ladder the current
@@ -167,6 +184,66 @@ func guardStopHookStageFor(consecutive, warnAt, finalAt, maxN int) guardStopHook
 	}
 }
 
+// normalizeSameStop clamps the same-issue give-up depth into a sane range and derives the
+// warn/final rungs from it. The give-up depth is the single knob; warn/final are stop-3 and
+// stop-1 so the guidance firms up over the last few identical repeats before the stand-down.
+// A give-up depth below 2 (which would stop on the first deny-all, defeating the "keep going"
+// intent) falls back to the default. Returns warn <= final < stop, all >= 1.
+func normalizeSameStop(stop int) (warnAt, finalAt, stopN int) {
+	if stop < 2 {
+		stop = guardStopHookSameStopDefault
+	}
+	finalAt = stop - 1
+	warnAt = stop - 3
+	if warnAt < 1 {
+		warnAt = 1
+	}
+	if finalAt < warnAt {
+		finalAt = warnAt
+	}
+	return warnAt, finalAt, stop
+}
+
+// guardStopHookSameStageFor maps the same-issue consecutive count (identical refused action turn
+// after turn) onto its ladder rung. A clean >= ladder that stands down AT the give-up depth —
+// distinct from the blind guardStopHookStageFor (whose > maxN semantics + tests stay untouched),
+// so the two paths cannot interfere. Because any deny-all turn has same-issue count >= 1 and a
+// varied session pins it at 1, a varied session sits at NUDGE forever and is never given up.
+func guardStopHookSameStageFor(sameConsecutive, stop int) guardStopHookStage {
+	warnAt, finalAt, stopN := normalizeSameStop(stop)
+	switch {
+	case sameConsecutive <= 0:
+		return guardStopHookAllow
+	case sameConsecutive >= stopN:
+		return guardStopHookGiveUp
+	case sameConsecutive >= finalAt:
+		return guardStopHookFinal
+	case sameConsecutive >= warnAt:
+		return guardStopHookWarn
+	default:
+		return guardStopHookNudge
+	}
+}
+
+// guardStopHookSameDecision is the same-issue twin of guardStopHookDecision: given the gateway's
+// same-issue consecutive count and the give-up depth, return the exit code, whether it WOULD
+// block, and the rung. Mode gating is identical to the blind path (nudge/warn/final block the
+// stop; allow and give-up let it through; shadow always allows but reports the would-be block).
+func guardStopHookSameDecision(sameConsecutive, stop int, mode string) (exit int, block bool, stage guardStopHookStage) {
+	stage = guardStopHookSameStageFor(sameConsecutive, stop)
+	if mode == guardPreCompactModeOff {
+		return 0, false, stage
+	}
+	block = stage == guardStopHookNudge || stage == guardStopHookWarn || stage == guardStopHookFinal
+	if mode == guardPreCompactModeShadow {
+		return 0, block, stage
+	}
+	if block {
+		return 2, true, stage
+	}
+	return 0, false, stage
+}
+
 // guardStopHookStageMessage is the exact stderr text fed back to the model when the hook holds
 // the stop (exit 2) at a continue rung. Each rung is firmer than the last, and the WARN/FINAL
 // rungs name the clean wrap-up: note the blocker on one line (`no allowed path: <reason>`) and
@@ -190,6 +267,29 @@ func guardStopHookGiveUpMessage(consecutive, maxN int) string {
 	return fmt.Sprintf("fak guard Stop: standing down after %d consecutive deny-all turns (every proposed tool call set aside; %d > max %d) — allowing the stop so the loop cannot spin. To keep the agent moving, inspect why the floor sets everything aside (fak guard --dump-policy) or raise --deny-all-max; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
 }
 
+// guardStopHookSameStageMessage is the same-issue twin of guardStopHookStageMessage: the exact
+// stderr text fed back to the model (exit 2) at a same-issue continue rung. Unlike the blind
+// message it NAMES the repeat — the point is that the model keeps proposing the IDENTICAL refused
+// action, so the guidance is "a different angle," not "try again." The NUDGE rung (a shallow or
+// just-changed issue) still uses the gentle generic continue reason.
+func guardStopHookSameStageMessage(stage guardStopHookStage, sameConsecutive, stop int) string {
+	switch stage {
+	case guardStopHookWarn:
+		return fmt.Sprintf("fak guard: you have now ended %d turns in a row proposing the IDENTICAL refused action — the capability floor is setting aside the very same tool call, for the same reason, each time. Repeating it will not change the verdict. Try a genuinely different angle now: a different tool, a narrower command, or a path the floor welcomes. The in-band `[fak]` note labels the block as `Tool (REASON/DISPOSITION)` — let that reason point the way. If a protected boundary is all that's left, note it on one line (`no allowed path: <reason>`) and finish cleanly — a complete, expected outcome. (Auto-continue %d of %d identical repeats before fak lets the turn end.)", sameConsecutive, sameConsecutive, stop)
+	case guardStopHookFinal:
+		return fmt.Sprintf("fak guard: last auto-continue (%d of %d). You have proposed the IDENTICAL refused action %d turns running; one more and fak will let the session wrap up. This is a genuine repeat, not exploration — if there is an allowed way forward, take a DIFFERENT action on this turn; otherwise note what is protecting the last step on one line (`no allowed path: <reason>`) and finish cleanly now, so the stop is your own call.", sameConsecutive, stop, sameConsecutive)
+	default:
+		return guardStopHookContinueReason
+	}
+}
+
+// guardStopHookSameGiveUpMessage is the OPERATOR-facing line (exit 0, not fed to the model) when
+// the hook stands down on a true repeated same issue. It makes explicit that this is a genuine
+// spin on ONE refusal — not the old blind count — and that a varied session is never stopped here.
+func guardStopHookSameGiveUpMessage(sameConsecutive, stop int) string {
+	return fmt.Sprintf("fak guard Stop: standing down after %d turns proposing the IDENTICAL refused action (same tool + same reason; %d >= same-issue give-up %d) — a genuine repeated same issue, not exploration, so allowing the stop keeps the loop from spinning. A session hitting a FRESH block each turn is never stopped here. To keep the agent moving, inspect why the floor sets that same call aside (fak guard --dump-policy) or raise --same-stop; --deny-all-continue off disables this layer.", sameConsecutive, sameConsecutive, stop)
+}
+
 type guardStopHookInstall struct {
 	Applied      bool
 	Mode         string
@@ -198,6 +298,8 @@ type guardStopHookInstall struct {
 	WarnAt       int
 	FinalAt      int
 	Max          int
+	SameStop     int    // the same-issue give-up depth pinned into the hook (identical refused action, turn after turn)
+	StopsLedger  string // absolute path of the typed stop-decision ledger wired into the hook (empty when unresolved)
 	Reason       string
 }
 
@@ -216,7 +318,19 @@ func cmdGuardStopHook(argv []string) {
 // stop (Claude Code continues the agent with the stderr text as guidance), 0 to allow it. It
 // fails OPEN — any bad args, unknown mode, missing metrics URL, or unreachable gateway returns
 // 0 so the hook can never wedge the agent — exactly the posture guard-precompact takes.
-func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
+func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit int) {
+	// One typed, countable row per invocation (see guard_stops.go): the disposition is
+	// classified at each return below, and a single defer stamps the exit/kind and appends
+	// the row. FAIL-OPEN and gated on the wired ledger env, so recording is a no-op for any
+	// hook test that does not set it and never changes this hook's decision. The default
+	// disposition is the conservative fail-open-bad-args reading until a return reclassifies.
+	rec := guardStopRecord{Schema: guardStopRecordSchema, Ts: time.Now().UTC().Format(time.RFC3339), Disposition: string(stopDispFailOpenBadArgs)}
+	defer func() {
+		rec.Exit = exit
+		rec.Blocked = exit == 2
+		rec.Kind = string(guardStopDispositionKind(guardStopDisposition(rec.Disposition)))
+		emitGuardStopRecord(stderr, rec)
+	}()
 	fs := flag.NewFlagSet("guard-stophook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	modeFlag := fs.String("mode", os.Getenv(guardStopHookEnvMode), "off|shadow|enforce")
@@ -224,6 +338,7 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 	maxFlag := fs.Int("max", guardStopHookMaxFromEnv(), "hard give-up: max consecutive deny-all turns to auto-continue past before letting the turn end")
 	warnFlag := fs.Int("warn", guardStopHookWarnFromEnv(), "escalate the continue guidance to a relevance-decision warning at this consecutive deny-all depth")
 	finalFlag := fs.Int("final", guardStopHookFinalFromEnv(), "escalate the continue guidance to a final warning at this consecutive deny-all depth")
+	sameStopFlag := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "hard give-up depth on the SAME-ISSUE path: end the session after this many consecutive deny-all turns proposing the IDENTICAL refused action (same tool+reason). A varied session never reaches it")
 	handoffModeFlag := fs.String("task-handoff-mode", os.Getenv(guardTaskHandoffEnvMode), "completion handoff gate: off|shadow|enforce")
 	handoffFileFlag := fs.String("task-handoff-file", os.Getenv(guardTaskHandoffEnvFile), "path to fak.task-handoff.v1 JSON the agent must write before a clean stop")
 	handoffRepoFlag := fs.String("task-handoff-repo", os.Getenv(guardTaskHandoffEnvRepo), "owner/repo passed to fak task handoff --live")
@@ -238,17 +353,26 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 	// never changes any decision.
 	payload := readHookStdin(stdin)
 	active := parseStopHookActive(payload)
+	// Stamp the stop row's session/re-fire/transcript context from the SAME payload bytes.
+	// The transcript read is a bounded, fail-open tail read (guard_stops.go) that lets a
+	// give-up be told apart from a graceful "no allowed path:" wrap-up; it never gates.
+	rec.Session = parseHookSessionID(payload)
+	rec.StopHookActive = active
+	rec.Transcript = readGuardStopTranscript(parseHookTranscriptPath(payload))
 	// #2539: score-at-turn-end — the curve gains a point every turn. Runs the cheap scorer
 	// set for the session's open objectives, bounded and fail-open, gated on the guard-wired
 	// ledger env. Deliberately BEFORE the deny-all mode gate: sampling cadence is independent
 	// of whether auto-continue is off, and it can never change this hook's exit code.
-	scoreTurnEndFailOpen(stderr, trajctl.Stamp{SessionID: parseHookSessionID(payload)}, time.Now().UnixMilli())
+	scoreTurnEndFailOpen(stderr, trajctl.Stamp{SessionID: rec.Session}, time.Now().UnixMilli())
 	mode, err := normalizeGuardStopHookMode(*modeFlag)
 	if err != nil {
+		rec.Disposition = string(stopDispFailOpenBadMode)
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; %v\n", err)
 		return 0
 	}
+	rec.Mode = mode
 	if mode == guardPreCompactModeOff {
+		rec.Disposition = string(stopDispModeOff)
 		return 0
 	}
 	metricsURL := strings.TrimSpace(*metricsURLFlag)
@@ -256,27 +380,66 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		metricsURL = guardPreCompactMetricsURLFromBase(os.Getenv("ANTHROPIC_BASE_URL"))
 	}
 	if metricsURL == "" {
+		rec.Disposition = string(stopDispFailOpenNoMetricsURL)
 		fmt.Fprintln(stderr, "fak guard Stop: allowing stop; no metrics URL configured")
 		return 0
 	}
 	signals, err := fetchGuardStopHookSignals(context.Background(), metricsURL, *timeout)
 	if err != nil {
+		rec.Disposition = string(stopDispFailOpenGaugeUnavailable)
+		rec.Note = err.Error()
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; deny-all gauge unavailable: %v\n", err)
 		return 0
 	}
+	rec.DenyAllConsecutive = signals.DenyAllConsecutive
+	rec.DenyAllSameConsecutive = signals.DenyAllSameConsecutive
+	rec.ToolFeedbackConsecutive = signals.ToolFeedbackConsecutive
 	consecutive := signals.DenyAllConsecutive
 	feedbackConsecutive := signals.ToolFeedbackConsecutive
 	warnAt, finalAt, maxN := normalizeDenyAllThresholds(*warnFlag, *finalFlag, *maxFlag)
 	if consecutive <= 0 && feedbackConsecutive > 0 {
+		rec.Signal = "tool-feedback"
+		rec.Depth = feedbackConsecutive
 		if mode == guardPreCompactModeShadow {
+			rec.Disposition = string(stopDispShadow)
 			fmt.Fprintf(stderr, "fak guard Stop: shadow would auto-continue tool-feedback turn(s) (tool_feedback_consecutive=%d stop_hook_active=%v)\n", feedbackConsecutive, active)
 			return 0
 		}
+		rec.Disposition = string(stopDispToolFeedbackContinue)
 		fmt.Fprintln(stderr, guardStopHookToolFeedbackMessage(feedbackConsecutive))
 		return 2
 	}
-	exit, block, stage := guardStopHookDecision(consecutive, warnAt, finalAt, maxN, mode)
+	// Key the give-up on the SAME-ISSUE gauge when the gateway emits it (a current gateway): only a
+	// true repeated same refusal (identical tool+reason turn after turn) ever ends the session, and
+	// a varied deny-all session is never stopped. An older gateway that omits the gauge falls back
+	// to the legacy blind ladder below, so its behavior is byte-for-byte unchanged.
+	useSame := signals.DenyAllSameConsecutiveSeen
+	_, _, sameStop := normalizeSameStop(*sameStopFlag)
+	// exit is the function's named return (stamped into the stop row by the defer); block and
+	// stage are local to this decision. depth/bound select the numbers the shadow log, exit-2
+	// guidance, and operator give-up line all speak, so a single decision path drives every
+	// message.
+	var (
+		block bool
+		stage guardStopHookStage
+	)
+	depth, bound := consecutive, maxN
+	if useSame {
+		depth, bound = signals.DenyAllSameConsecutive, sameStop
+		exit, block, stage = guardStopHookSameDecision(signals.DenyAllSameConsecutive, *sameStopFlag, mode)
+	} else {
+		exit, block, stage = guardStopHookDecision(consecutive, warnAt, finalAt, maxN, mode)
+	}
+	signalName := "blind"
+	if useSame {
+		signalName = "same-issue"
+	}
+	rec.Signal = signalName
+	rec.Stage = stage.String()
+	rec.Depth = depth
+	rec.Bound = bound
 	if mode == guardPreCompactModeShadow {
+		rec.Disposition = string(stopDispShadow)
 		action := "allow stop"
 		switch {
 		case block:
@@ -284,19 +447,40 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		case stage == guardStopHookGiveUp:
 			action = "give up and allow stop"
 		}
-		fmt.Fprintf(stderr, "fak guard Stop: shadow would %s (stage=%s deny_all_consecutive=%d warn=%d final=%d max=%d stop_hook_active=%v)\n", action, stage, consecutive, warnAt, finalAt, maxN, active)
+		fmt.Fprintf(stderr, "fak guard Stop: shadow would %s (stage=%s signal=%s deny_all_consecutive=%d deny_all_same_consecutive=%d same_stop=%d warn=%d final=%d max=%d stop_hook_active=%v)\n", action, stage, signalName, consecutive, signals.DenyAllSameConsecutive, sameStop, warnAt, finalAt, maxN, active)
 		return 0
 	}
 	if exit == 2 {
 		// Exit 2 blocks the stop; stderr is shown to Claude as the reason to continue. The text
-		// escalates with the ladder rung (nudge -> warn -> final).
-		fmt.Fprintln(stderr, guardStopHookStageMessage(stage, consecutive, maxN))
+		// escalates with the ladder rung (nudge -> warn -> final); the same-issue path names the repeat.
+		if useSame {
+			rec.Disposition = string(stopDispSameIssueContinue)
+			fmt.Fprintln(stderr, guardStopHookSameStageMessage(stage, depth, bound))
+		} else {
+			rec.Disposition = string(stopDispDenyAllContinue)
+			fmt.Fprintln(stderr, guardStopHookStageMessage(stage, depth, bound))
+		}
 		return 2
 	}
 	// Allowed (exit 0). A clean completion (stage allow) is silent; a bounded stand-down is the
 	// residual false-stop — make it operator-visible (it is NOT fed to the model).
 	if stage == guardStopHookGiveUp {
-		fmt.Fprintln(stderr, guardStopHookGiveUpMessage(consecutive, maxN))
+		// A give-up whose transcript shows the agent already wrote its sanctioned
+		// "no allowed path:" wrap-up is a graceful conclusion, not a bare stand-down —
+		// record it as such (the operator messages below are unchanged either way).
+		switch {
+		case rec.Transcript != nil && rec.Transcript.NotedNoAllowedPath:
+			rec.Disposition = string(stopDispCleanWrapup)
+		case useSame:
+			rec.Disposition = string(stopDispSameIssueGiveUp)
+		default:
+			rec.Disposition = string(stopDispBlindGiveUp)
+		}
+		if useSame {
+			fmt.Fprintln(stderr, guardStopHookSameGiveUpMessage(depth, bound))
+		} else {
+			fmt.Fprintln(stderr, guardStopHookGiveUpMessage(depth, bound))
+		}
 		return 0
 	}
 	if stage == guardStopHookAllow {
@@ -304,13 +488,23 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		// the unused-substrate pathology — fak present as a passive guard but never engaged as a
 		// substrate (#3093). Emit before the handoff gate; the stop is still allowed regardless.
 		emitUnusedSubstrateAdvisory(stderr, signals)
-		return runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
+		handoffExit := runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
 			Repo: *handoffRepoFlag,
 			Live: *handoffLiveFlag,
 		})
+		switch {
+		case handoffExit == 2:
+			rec.Disposition = string(stopDispHandoffBlock)
+		case rec.Transcript != nil && rec.Transcript.NotedNoAllowedPath:
+			rec.Disposition = string(stopDispCleanWrapup)
+		default:
+			rec.Disposition = string(stopDispCleanCompletion)
+		}
+		return handoffExit
 	}
+	rec.Disposition = string(stopDispCleanCompletion)
 	return 0
 }
 
@@ -503,6 +697,10 @@ func guardStopHookFinalFromEnv() int {
 	return guardStopHookIntFromEnv(guardStopHookEnvFinal, guardStopHookDefaultFinal)
 }
 
+func guardStopHookSameStopFromEnv() int {
+	return guardStopHookIntFromEnv(guardStopHookEnvSameStop, guardStopHookSameStopDefault)
+}
+
 // guardStopHookIntFromEnv reads a positive int env override, falling back to def on any unset,
 // blank, unparseable, or non-positive value (normalization clamps the rest).
 func guardStopHookIntFromEnv(name string, def int) int {
@@ -554,12 +752,12 @@ func guardTaskHandoffConfigOrZero(configs []guardTaskHandoffConfig) guardTaskHan
 // hook is MERGED into it so a single --settings carries both (--settings is a single-value flag;
 // injecting it twice clobbers rather than merges). Otherwise it writes its own settings file and
 // injects --settings. Off mode or a non-claude child is a no-op (command returned unchanged).
-func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN, sameStop int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
 	}
-	install := guardStopHookInstall{Mode: normalized, WarnAt: warnAt, FinalAt: finalAt, Max: maxN}
+	install := guardStopHookInstall{Mode: normalized, WarnAt: warnAt, FinalAt: finalAt, Max: maxN, SameStop: sameStop}
 	if normalized == guardPreCompactModeOff {
 		install.Reason = "disabled"
 		return command, nil, install, nil
@@ -579,19 +777,20 @@ func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath st
 			return command, nil, guardStopHookInstall{}, err
 		}
 	}
-	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN, handoffConfig...)
+	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN, sameStop, handoffConfig...)
 }
 
-func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN, sameStop int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
 	}
 	// Normalize once so the install record, the banner, and the injected env all carry the SAME
 	// effective ladder the hook will use — a misconfigured flag can never present one ladder and
-	// run another.
+	// run another. The same-issue give-up depth is normalized on its own scale (warn/final derived).
 	warnAt, finalAt, maxN = normalizeDenyAllThresholds(warnAt, finalAt, maxN)
-	install := guardStopHookInstall{Mode: normalized, WarnAt: warnAt, FinalAt: finalAt, Max: maxN}
+	_, _, sameStop = normalizeSameStop(sameStop)
+	install := guardStopHookInstall{Mode: normalized, WarnAt: warnAt, FinalAt: finalAt, Max: maxN, SameStop: sameStop}
 	if normalized == guardPreCompactModeOff {
 		install.Reason = "disabled"
 		return command, nil, install, nil
@@ -632,12 +831,23 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		{guardStopHookEnvWarn, strconv.Itoa(warnAt)},
 		{guardStopHookEnvFinal, strconv.Itoa(finalAt)},
 		{guardStopHookEnvMax, strconv.Itoa(maxN)},
+		// Pin the same-issue give-up depth (default 6, --same-stop) so the installed Stop hook keys its
+		// stand-down on a true repeated same refusal rather than the blind deny-all count.
+		{guardStopHookEnvSameStop, strconv.Itoa(sameStop)},
 	}
 	// #2539: wire the trajctl ledger into the hook children so the Stop hook's turn-end
 	// scorers and the PreCompact boundary twin have a curve to append to. Unresolvable repo
 	// root injects nothing and the sampling stays a total no-op.
 	if ledger := guardTrajctlLedgerDefault(); ledger != "" {
 		env = append(env, [2]string{guardTrajctlEnvLedger, ledger})
+	}
+	// Wire the typed stop-decision ledger into the hook child so every turn-end decision
+	// (clean stops, bounded stand-downs, and the fail-open stops that are otherwise
+	// invisible) lands as a countable row `fak guard-stops` can fold. Unresolvable repo
+	// root injects nothing and recording stays a total no-op.
+	if ledger := guardStopsLedgerDefault(); ledger != "" {
+		env = append(env, [2]string{guardStopsLedgerEnv, ledger})
+		install.StopsLedger = ledger
 	}
 	env = append(env, guardTaskHandoffEnv(guardTaskHandoffConfigOrZero(handoffConfig))...)
 	return command, env, install, nil
@@ -666,7 +876,7 @@ func writeGuardStopHookSettings(path, fakBin string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }
 
 // mergeGuardStopHookIntoSettings adds (or replaces) the Stop hook in an existing guard settings
@@ -689,12 +899,19 @@ func mergeGuardStopHookIntoSettings(path, fakBin string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }
 
 type guardStopHookSignals struct {
 	DenyAllConsecutive      int
 	ToolFeedbackConsecutive int
+	// DenyAllSameConsecutive is the consecutive deny-all turns proposing the IDENTICAL refused
+	// action (fak_guard_deny_all_same_consecutive). This is the gauge the hook keys its give-up
+	// on. Absence is tolerated (older gateway): DenyAllSameConsecutiveSeen distinguishes "gauge
+	// reported 0" from "gauge not on the scrape", so the hook falls back to the blind ladder only
+	// when the gateway genuinely does not emit it.
+	DenyAllSameConsecutive     int
+	DenyAllSameConsecutiveSeen bool
 	// FakVerbCalls is the cumulative admitted MCP fak-verb call count this process
 	// (fak_mcp_verb_calls_total). 0 at a clean stop means fak was present but never used as a
 	// substrate — the #3093 unused-substrate pathology. Absence is tolerated (older gateway):
@@ -757,6 +974,9 @@ func parseGuardStopHookSignals(metrics string) (guardStopHookSignals, error) {
 		case guardStopHookMetricName:
 			out.DenyAllConsecutive = int(value)
 			foundDenyAll = true
+		case guardStopHookSameMetricName:
+			out.DenyAllSameConsecutive = int(value)
+			out.DenyAllSameConsecutiveSeen = true
 		case guardStopHookToolFeedbackMetricName:
 			out.ToolFeedbackConsecutive = int(value)
 		case guardStopHookFakVerbCallsMetricName:

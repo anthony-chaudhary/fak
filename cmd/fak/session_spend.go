@@ -73,6 +73,31 @@ func armServedSpendPricing(provider, context string) (string, bool) {
 	return source, ok
 }
 
+// guardSpendPricingContext picks the served-spend pricing context for a guard
+// session. resolveGuardUpstream first arms the meter with the agent name
+// (command[0]), which prices every Claude tier as the Opus 4.8 default. When the
+// upstream model is statically known — a `fak guard --model` override, or a
+// --model/-m in the wrapped child argv — AND that model has a known price, prefer
+// the real model id so a non-default tier bills at its own rate (e.g.
+// claude-fable-5 is 2x Opus, so an all-`claude` ledger otherwise UNDER-books a
+// fable session's spend and hides its larger cache savings). An unknown model
+// falls back to the agent name rather than going dollar-blind, so this only ever
+// CORRECTS a known misprice and never regresses today's default. An env override
+// (FAK_SPEND_*_PER_MTOK) wins inside armServedSpendPricing regardless of the
+// context returned here, so the context choice never overrides an operator price.
+func guardSpendPricingContext(provider, guardModel string, command []string) string {
+	agentName := ""
+	if len(command) > 0 {
+		agentName = command[0]
+	}
+	if m := guardStaticClaudeModel(guardModel, command); m != "" {
+		if _, _, ok := gateway.DefaultCachePricing(provider, m); ok {
+			return m
+		}
+	}
+	return agentName
+}
+
 func resolveSpendPricing(provider, context string) (gateway.CachePricing, string, bool) {
 	input, inputSet := spendPriceFromEnv(spendInputPriceEnv)
 	output, outputSet := spendPriceFromEnv(spendOutputPriceEnv)
