@@ -1,6 +1,7 @@
 package issuecatalog
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,11 +10,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+// ghRunnerTimeout bounds each real gh subprocess so a stalled network call or a
+// blocking auth prompt cannot hang the caller indefinitely (issue #3483). The
+// 10s WaitDelay is the straggler backstop for when the context kill leaves a
+// grandchild holding the output pipe open.
+const ghRunnerTimeout = 60 * time.Second
 
 // Schema is the stable schema tag stamped on the machine-readable result.
 const Schema = "fak.issue-catalog.v1"
@@ -378,12 +386,22 @@ func CohortPlan(rows []Row, opt Options) issuecohort.Plan {
 type Runner func(args []string) (stdout, stderr string, ok bool)
 
 func defaultRunner(args []string) (string, string, bool) {
-	cmd := exec.Command("gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), ghRunnerTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		if errb.Len() > 0 {
+			errb.WriteByte('\n')
+		}
+		errb.WriteString("gh timed out after " + ghRunnerTimeout.String())
+		return out.String(), errb.String(), false
+	}
 	return out.String(), errb.String(), err == nil
 }
 

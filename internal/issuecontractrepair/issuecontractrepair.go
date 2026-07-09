@@ -1,15 +1,23 @@
 package issuecontractrepair
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+// ghRunnerTimeout bounds each real gh subprocess so a stalled network call or a
+// blocking auth prompt cannot hang the caller indefinitely (issue #3483). The
+// 10s WaitDelay is the straggler backstop for when the context kill leaves a
+// grandchild holding the output pipe open.
+const ghRunnerTimeout = 60 * time.Second
 
 const (
 	Schema     = "fak.issue-contract-repair.v1"
@@ -326,11 +334,17 @@ func FetchOpenIssues(workspace string, cap int) ([]issuecontract.IssueDraft, err
 	if cap <= 0 {
 		cap = DefaultCap
 	}
-	cmd := exec.Command("gh", "issue", "list", "--state", "open", "--limit", fmt.Sprint(cap), "--json", "number,title,body,labels,url")
+	ctx, cancel := context.WithTimeout(context.Background(), ghRunnerTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "open", "--limit", fmt.Sprint(cap), "--json", "number,title,body,labels,url")
 	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	cmd.Dir = workspace
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("gh issue list timed out after %s", ghRunnerTimeout)
+		}
 		if ee, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("gh issue list failed (rc=%d): %s", ee.ExitCode(), strings.TrimSpace(string(ee.Stderr)))
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -110,12 +111,18 @@ func runGHSpamCommentsWith(stdout, stderr io.Writer, argv []string, runner ghSpa
 }
 
 func runGHForSpamComments(args []string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return out, fmt.Errorf("gh %s timed out after 60s", strings.Join(args, " "))
+		}
 		msg := strings.TrimSpace(errBuf.String())
 		if msg == "" {
 			msg = strings.TrimSpace(string(out))

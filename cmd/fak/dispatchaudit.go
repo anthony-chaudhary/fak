@@ -19,12 +19,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
 )
@@ -165,9 +167,12 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 		for _, label := range dispatchAuditIssueLabels() {
 			args = append(args, "--label", label)
 		}
-		cmd := exec.Command("gh", args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		cmd := exec.CommandContext(ctx, "gh", args...)
 		configureDispatchHelperCommand(cmd)
+		cmd.WaitDelay = 10 * time.Second
 		out, err := cmd.CombinedOutput()
+		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "file-issues: gh issue create for %s failed: %v\n%s\n", f.Fingerprint, err, out)
 			rc = 1
@@ -191,8 +196,11 @@ func dispatchAuditIssueLabels() []string {
 // a gh failure yields an empty set, never a hard error.
 func openIssueTitles(stderr io.Writer) map[string]bool {
 	out := map[string]bool{}
-	cmd := exec.Command("gh", "issue", "list", "--state", "open", "--limit", "400", "--json", "title")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "open", "--limit", "400", "--json", "title")
 	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	b, err := cmd.Output()
 	if err != nil {
 		fmt.Fprintf(stderr, "file-issues: gh issue list (dedup scan) failed; relying on markers only: %v\n", err)
