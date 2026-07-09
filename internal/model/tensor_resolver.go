@@ -140,10 +140,28 @@ func resolveSpecFor(cfg Config) resolverSpec {
 	case strings.Contains(fam, "gptoss"):
 		return gptOSSSpec(cfg)
 	case strings.Contains(fam, "deepseek"):
+		if isDeepSeekV4(cfg) {
+			return deepSeekV4Spec(cfg)
+		}
 		return deepSeekMLASpec(cfg)
 	default:
 		return identitySpec(cfg)
 	}
+}
+
+// isDeepSeekV4 distinguishes a DeepSeek-V4 checkpoint (the distinct CSA/HCA
+// two-plane tensor family) from the earlier single-plane DeepSeek MLA (V2/V3).
+// The signal is the arch key naming v4, OR a well-formed two-tier compression
+// declaration (Config.V4CompressionRates) — which only a V4 config carries.
+// Neither fires for V2/V3, so the existing deepseek-mla routing is unchanged.
+// Called only inside the deepseek branch of resolveSpecFor, so it is already
+// gated to the DeepSeek family.
+func isDeepSeekV4(cfg Config) bool {
+	if strings.Contains(cfg.archFamilyKey(), "v4") {
+		return true
+	}
+	_, _, ok := cfg.V4CompressionRates()
+	return ok
 }
 
 // ---- shared building blocks --------------------------------------------------------
@@ -467,5 +485,27 @@ func deepSeekMLASpec(cfg Config) resolverSpec {
 		globals: baseGlobals(),
 		// perLayer deliberately nil: MLA q_a/q_b/kv_a/kv_b projection names are gated by #25.
 		// See TestResolverDeepSeekMLAScaffold_Skip.
+	}
+}
+
+// deepSeekV4Spec is the DeepSeek-V4 CSA/HCA tensor family — DISTINCT from the
+// single-plane deepSeekMLASpec (V2/V3), which is the V4 attention seam map's
+// Missing seam #8 (a distinct deepseek_v4 family with two KV planes + a dual
+// indexer was unmapped). V4 carries TWO compressed KV planes — the light CSA
+// latent plane and the heavily compressed HCA block plane, driven by a shared
+// lightning indexer — so its per-layer tensor set is a SUPERSET of the MLA
+// names: the MLA q_a/q_b/kv_a/kv_b projections PLUS the second (HCA) plane's
+// compressed-KV production weights and the indexer scoring weights.
+//
+// Like deepSeekMLASpec, perLayer is deliberately nil: the exact per-layer source
+// names reconcile against a real V4 checkpoint's manifest (none exists offline),
+// and the two-plane forward that would consume them is unbuilt (Missing seams
+// #1-#3). This scaffold proves the loader ROUTES V4 to its own family and
+// resolves the shared globals; mapping the per-layer two-plane/dual-indexer names
+// is the next rung, gated on the checkpoint — it is NOT claimed here.
+func deepSeekV4Spec(cfg Config) resolverSpec {
+	return resolverSpec{
+		family:  "deepseek-v4",
+		globals: baseGlobals(),
 	}
 }
