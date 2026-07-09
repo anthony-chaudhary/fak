@@ -13,21 +13,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
-// defaultHTTPClient returns c, or an unbounded-timeout *http.Client when c is nil.
-// Every HTTP-based engine constructor (Dynamo/SGLang/vLLM) applies this same
-// nil-client fallback over its own config type.
+// Transport and SSE-idle deadlines shared by every HTTP engine adapter. Client.Timeout
+// stays 0 (a long but healthy streaming generation must not be cut off mid-body); these
+// bound the two vectors that otherwise hang forever — a peer that accepts the connection
+// but never sends headers, and a peer that goes silent mid-stream.
+const (
+	engineDialTimeout           = 15 * time.Second
+	engineTLSHandshakeTimeout   = 10 * time.Second
+	engineResponseHeaderTimeout = 30 * time.Second
+)
+
+// sseIdleTimeout bounds the gap between reads on an SSE body. A healthy generation emits
+// tokens well within this window; a peer that goes silent mid-stream is unblocked here
+// (its request context is cancelled) instead of wedging Admit/Complete and kernel.Reap
+// forever. It is a var, not a const, only so a test can lower it — production never
+// mutates it.
+var sseIdleTimeout = 120 * time.Second
+
+// defaultHTTPClient returns c, or a streaming-safe *http.Client when c is nil. Every
+// HTTP-based engine constructor (Dynamo/SGLang/vLLM/llm-d) applies this same nil-client
+// fallback over its own config type.
+//
+// Client.Timeout stays 0 so a long but healthy streaming generation is never cut off
+// mid-body, but the transport carries the bounded dial/TLS/response-header deadlines
+// documented as the "download-safe form" in internal/boundarylint/rules_http.go — so a
+// peer that never sends headers fails fast instead of wedging Admit/Complete forever.
 func defaultHTTPClient(c *http.Client) *http.Client {
 	if c != nil {
 		return c
 	}
-	return &http.Client{Timeout: 0}
+	return &http.Client{Timeout: 0, Transport: streamingTransport()}
+}
+
+// streamingTransport clones http.DefaultTransport (preserving proxy/HTTP2 defaults) and
+// pins the three deadlines that bound a dead-or-silent peer: dial, TLS handshake, and —
+// the one DefaultTransport leaves unset — the response-header wait. Client.Timeout is
+// deliberately NOT set here; the caller keeps it 0 for unbounded healthy streams.
+func streamingTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   engineDialTimeout,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	t.TLSHandshakeTimeout = engineTLSHandshakeTimeout
+	t.ResponseHeaderTimeout = engineResponseHeaderTimeout
+	return t
 }
 
 // defaultWorkerID returns id, or def when id is empty. Every engine constructor
@@ -112,6 +151,11 @@ func decodeOrEmptyJSONObject(args []byte) map[string]json.RawMessage {
 // tokens (finishing early if ctx is cancelled first). decode applies
 // engine-specific fields to the request and returns the newly observed delta text.
 func runSSEPump(ctx context.Context, body io.ReadCloser, cancel context.CancelFunc, tokens chan abi.EngineToken, finish func(*abi.Result, error), assemble func() *abi.Result, decode func(data string) (delta string, err error)) {
+	// Wrap the body so a mid-stream stall is bounded: if no byte arrives for
+	// sseIdleTimeout the request context is cancelled, which unblocks the otherwise
+	// forever-blocking sc.Scan below and lets finish/Result return so kernel.Reap
+	// completes. Client.Timeout stays 0, so this is the only bound on a healthy stream.
+	body = newIdleTimeoutReader(body, sseIdleTimeout, cancel)
 	defer body.Close()
 	defer cancel()
 	sc := bufio.NewScanner(body)
@@ -150,6 +194,45 @@ func runSSEPump(ctx context.Context, body io.ReadCloser, cancel context.CancelFu
 		return
 	}
 	finish(assemble(), nil)
+}
+
+// idleTimeoutReader bounds the gap between successive reads on an SSE body. Each Read
+// (re)arms a single timer; if idle elapses before that read returns, onIdle fires. The
+// only caller passes the request's cancel func as onIdle: cancelling the context aborts
+// the in-flight net/http body read, so the blocked read returns an error instead of
+// hanging forever. onIdle must be idempotent (cancel is), since a healthy read that
+// returns right as the timer fires may still trigger it.
+type idleTimeoutReader struct {
+	rc    io.ReadCloser
+	idle  time.Duration
+	timer *time.Timer
+}
+
+// newIdleTimeoutReader wraps rc with an idle-read deadline. A non-positive idle disables
+// the guard (rc is returned unchanged), so callers can opt out without a branch.
+func newIdleTimeoutReader(rc io.ReadCloser, idle time.Duration, onIdle func()) io.ReadCloser {
+	if idle <= 0 {
+		return rc
+	}
+	return &idleTimeoutReader{
+		rc:    rc,
+		idle:  idle,
+		timer: time.AfterFunc(idle, onIdle),
+	}
+}
+
+// Read arms the idle timer for this read, then delegates. A read that blocks past idle
+// lets the timer fire onIdle (cancelling the stream); a read that returns in time leaves
+// the timer to be re-armed by the next Read.
+func (r *idleTimeoutReader) Read(p []byte) (int, error) {
+	r.timer.Reset(r.idle)
+	return r.rc.Read(p)
+}
+
+// Close stops the idle timer and closes the underlying body.
+func (r *idleTimeoutReader) Close() error {
+	r.timer.Stop()
+	return r.rc.Close()
 }
 
 // decodeRawJSONOrBareString handles the two trivial json.RawMessage shapes shared by
