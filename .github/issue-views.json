@@ -48,6 +48,12 @@
       "note": "Auto-filed by the daily idea-scout (tools/idea_scout.py). A standing queue for the /issue-triage pass — set priority/kind/area before they become dispatchable. Often empty; that means triage is caught up."
     },
     {
+      "slug": "question-tickets",
+      "title": "Question-loop tickets (provenance)",
+      "query": "is:open label:question-loop",
+      "note": "Tickets the /question-loop next-step loop filed from a witnessed provocative question (docs/questions/asked.jsonl). The `question-loop` label is PROVENANCE, not triage-state: these are meant to be actual work and are NOT hidden from ready-leaves — this view is the traceability surface back to the originating question (`Provenance: question-loop Q-...` in each body). Distinct from `idea-scout` (external-feed ideas) and `research` (design-shaped). See .claude/skills/question-loop/SKILL.md."
+    },
+    {
       "slug": "help-wanted",
       "title": "Help wanted",
       "query": "is:open label:\"help wanted\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint",
