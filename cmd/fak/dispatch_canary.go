@@ -45,9 +45,9 @@ const canarySchema = "fak-dispatch-canary/1"
 // Closed verdict vocabulary. Each is both an exit-code class and the machine-readable
 // disposition echoed in the fak-dispatch-canary/1 payload.
 const (
-	canaryVerdictLaunched = "CANARY_LAUNCHED"           // gate passed, worker spawned
-	canaryVerdictPlanned  = "CANARY_PLANNED"            // gate passed, --dry-run: sidecars written, not spawned
-	canaryVerdictRefused  = "CANARY_REFUSED_UNHEALTHY"  // route smoke non-healthy: no live launch
+	canaryVerdictLaunched = "CANARY_LAUNCHED"          // gate passed, worker spawned
+	canaryVerdictPlanned  = "CANARY_PLANNED"           // gate passed, --dry-run: sidecars written, not spawned
+	canaryVerdictRefused  = "CANARY_REFUSED_UNHEALTHY" // route smoke non-healthy: no live launch
 )
 
 // canaryModeProofOnly runs a tiny proof prompt with no real GitHub issue; canaryModeSingleIssue
@@ -379,6 +379,7 @@ func execCanaryWorker(stdout, stderr io.Writer, plan canaryPlan) int {
 	cmd.Stdin = promptFile
 	cmd.Stdout = io.MultiWriter(stdout, transcript)
 	cmd.Stderr = stderr
+	configureDispatchSpawn(cmd)
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()
