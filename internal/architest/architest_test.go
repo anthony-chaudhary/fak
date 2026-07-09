@@ -81,6 +81,7 @@ var tier = map[string]int{
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "ghspam": 1, "issuecontractrepair": 1, "jsonlledger": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
 	"deepseekbench": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench core (#3014), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
 	"guardvars": 1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
+	"glm52prefillsweep": 1, "turnkind": 1, // glm52prefillsweep: pure GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); stdlib-only (net/http+os/exec live path), imports nothing internal. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
 	"questionledger": 1, // /question-loop ledger discipline (Go port of tools/question_ledger.py): lint/next-id/dedupe-check/stats over docs/questions/asked.jsonl; stdlib-only, off the hot path.
 	"trunkbuildprobe": 1, // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; stdlib-only, off the hot path.
 	"godsplitplan":    1, // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
@@ -753,6 +754,7 @@ var chatEndpointRole = map[string]string{
 	"eveparity":     "the off-path Eve-eval parity witness (#2605): a self-contained fixture server + client that both replays the route to prove fak-routed == raw (not a live planner)",
 	"trajctl":       "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
 	"deepseekbench": "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
+	"glm52prefillsweep": "the off-path GLM-5.2 prefill-latency sweep client (#3085/#3086): POSTs a prefill-dominant request (large prompt, max_tokens~1) at each prompt length against a fak serve endpoint to record TTFT / prefill tok/s (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
