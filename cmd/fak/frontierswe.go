@@ -52,6 +52,8 @@ func runFrontierswe(stdout, stderr io.Writer, argv []string) int {
 		return runFrontiersweDescribe(stdout, stderr, rest)
 	case "run":
 		return runFrontiersweRun(stdout, stderr, rest)
+	case "eval", "grade":
+		return runFrontiersweEval(stdout, stderr, rest)
 	case "cache-witness":
 		return runFrontiersweCacheWitness(stdout, stderr, rest)
 	case "env-adapter", "environment":
@@ -101,6 +103,18 @@ usage:
         --preds-only stops before grading (grading is C13). Where Docker/Modal
         can't stand the C7 environment up, the drive is a deterministic MOCK
         against a mocked environment and the exact remote command is printed.
+
+  fak frontierswe eval --task NAME [--tasks DIR] [--submission DIR]
+                       [--reward FILE] [--out DIR] [--anti-cheat] [--ssim T]
+                       [--json]
+        Grade a trial's submission into the leaderboard number (the analogue of
+        `+"`fak swebench eval`"+`). Given a verifier reward.json (from a prior run
+        or --reward, default <submission>/reward.json) it runs the C3 scorer into
+        correctness, speedup, and the gated leaderboard score — RUNNABLE NOW, no
+        Docker — capturing the raw reward.json + verifier logs under --out for
+        traceability. Absent a reward.json it stands the verifier up where this
+        host is capable, and otherwise prints an honest GATED result with the exact
+        remote command — never a fabricated score.
 
   fak frontierswe cache-witness [--metrics-dir DIR | --metrics-files A,B,...
                                 | --gateway URL --interval SEC --samples N]
