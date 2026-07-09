@@ -365,6 +365,16 @@ var tier = map[string]int{
 	"l3kv":                  1,
 	"worklog":               1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
 	"conformance":           2, // standalone third-party-runnable fak safety-conformance suite (#453): pins the guarantees a fork/auditor must verify independently of the kernel's own tests; composes abi(0)+adjudicator(2)+policy(2), so it declares at the lowest layer its imports allow (tier 2, alongside shipgate), off the hot path.
+	"antipattern":           4,
+	"astquery":              1,
+	"atif":                  3,
+	"brittleness":           1,
+	"codegraph":             1,
+	"dsparity":              1,
+	"shadowgit":             1,
+	"signals":               1,
+	"trajquery":             1,
+	"trigram":               1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
