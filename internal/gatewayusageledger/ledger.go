@@ -51,6 +51,18 @@ type Counters struct {
 	Escalated   uint64 `json:"escalated"`
 	Errored     uint64 `json:"errored"`
 
+	// ObservedTurns is the count of served passthrough turns this session folded through
+	// the harness coordinator (gateway.HarnessCoherenceSummary.ObservedTurns) — the REAL
+	// per-session turn count. It exists because Submits is 0 on the guard proxy path (the
+	// kernel submit boundary the *_syscall counters watch is not on the pass-through wire),
+	// so the DefaultAssumedSessionTurns calibration in internal/gateway had to lean on
+	// CachedTurns (turns that got a provider cache hit) as a session-length PROXY. Recording
+	// the observed served-turn count directly makes the turn-distribution claim recomputable
+	// from a dedicated field instead of a proxy: a corpus reader can now percentile
+	// ObservedTurns straight, and a row with ObservedTurns>0 but CachedTurns==0 (a cold
+	// session that never got a cache read) is no longer invisible to the length distribution.
+	ObservedTurns uint64 `json:"observed_turns"`
+
 	// Token / cache economy — OBSERVED (provider-relayed) except KVPrefix* which is
 	// WITNESSED (fak-authored in-kernel reuse).
 	InputTokens          uint64 `json:"input_tokens"`
@@ -99,6 +111,35 @@ type Counters struct {
 	ByReason map[string]uint64 `json:"by_reason,omitempty"`
 }
 
+// Provenance stamps the calibration-relevant config knobs (and build revision) that were
+// LIVE when a row was written. It exists so the corpus is self-describing: the constants in
+// internal/gateway (DefaultAssumedSessionTurns, the compaction budget) are calibrated FROM
+// this ledger's distribution, so a reader recomputing that calibration must be able to tell
+// which rows were produced under the standard configuration and which under an override
+// (e.g. --assume-session-turns 0, which disables the session-length prior entirely and would
+// skew a naive percentile). Every field is a plain scalar the CALLER fills from the live
+// Server's accessors + binstamp — this package stays a leaf that imports neither. The Row
+// holds it by pointer, so a caller that supplies no provenance (nil — older rows, or a test)
+// omits the whole object and stays byte-compatible with the pre-provenance schema, while a
+// caller that DOES supply it can still carry a meaningful zero (AssumeSessionTurns:0 = prior
+// disabled) distinct from "absent" — the reason the field is a pointer rather than a value.
+type Provenance struct {
+	// AssumeSessionTurns is the resolved session-length prior the head-anchored burst gate
+	// used (gateway.Config.AssumeSessionTurns; DefaultAssumedSessionTurns=50 by default,
+	// 0 = prior disabled). A recalibrating reader keys the turn-distribution fit on rows
+	// whose value matches the default, so an override session cannot silently move the p90.
+	AssumeSessionTurns int `json:"assume_session_turns,omitempty"`
+	// CompactHistoryBudget is the resident-token budget compaction fired against
+	// (gateway.Config.CompactHistoryBudget; 0 = compaction OFF). The volume-aware horizon's
+	// heavy/thin split (headHorizonHeavyResidentFloor) is only meaningful when compaction
+	// was armed, so this lets a reader exclude compaction-off rows from that analysis.
+	CompactHistoryBudget int `json:"compact_history_budget,omitempty"`
+	// BuildRevision is the VCS revision of the fak binary that produced the row (binstamp),
+	// suffixed "-dirty" for an uncommitted build. It ties a distribution shift to the code
+	// that produced it, so a recalibration can scope to rows from a known-good build.
+	BuildRevision string `json:"build_revision,omitempty"`
+}
+
 // Row is one end-of-session (or periodic, with --metrics-snapshot) counter snapshot.
 // Schema/SessionID/PID/UnixMillis identify WHEN and WHICH process/session produced
 // it; Kind distinguishes an "exit" row (the final snapshot at session close) from a
@@ -106,24 +147,28 @@ type Counters struct {
 // folding rows into a trend can choose to fold only exit rows, or watch periodic
 // rows for a crash-before-exit trail.
 type Row struct {
-	Schema      string   `json:"schema"`
-	Kind        string   `json:"kind"`              // "exit" | "periodic"
-	SessionType string   `json:"session_type"`      // "serve" | "guard"
-	Context     string   `json:"context,omitempty"` // free-form label, e.g. transport (http/stdio)
-	SessionID   string   `json:"session_id,omitempty"`
-	PID         int      `json:"pid"`
-	UnixMillis  int64    `json:"unix_millis"`
-	UptimeSecs  float64  `json:"uptime_seconds,omitempty"`
-	Counters    Counters `json:"counters"`
-	GeneratedAt string   `json:"generated_at"`
+	Schema      string      `json:"schema"`
+	Kind        string      `json:"kind"`              // "exit" | "periodic"
+	SessionType string      `json:"session_type"`      // "serve" | "guard"
+	Context     string      `json:"context,omitempty"` // free-form label, e.g. transport (http/stdio)
+	SessionID   string      `json:"session_id,omitempty"`
+	PID         int         `json:"pid"`
+	UnixMillis  int64       `json:"unix_millis"`
+	UptimeSecs  float64     `json:"uptime_seconds,omitempty"`
+	Provenance  *Provenance `json:"provenance,omitempty"`
+	Counters    Counters    `json:"counters"`
+	GeneratedAt string      `json:"generated_at"`
 }
 
 // NewRow builds a Row from a live counter snapshot at now. kind should be "exit" or
 // "periodic"; sessionType is the caller's session kind ("serve"/"guard"); context is
 // an optional free-form label (e.g. "http"/"stdio"); sessionID identifies the served
 // session/trace when the caller has one (empty is fine — PID + UnixMillis are always
-// enough to distinguish rows across restarts, matching the acceptance criteria).
-func NewRow(kind, sessionType, context, sessionID string, uptime time.Duration, c Counters, now time.Time) Row {
+// enough to distinguish rows across restarts, matching the acceptance criteria). prov
+// stamps the calibration-relevant config that was live (nil = none supplied; see
+// Provenance) — the production caller passes it from the Server's accessors, a test may
+// pass nil to stay on the pre-provenance byte shape.
+func NewRow(kind, sessionType, context, sessionID string, uptime time.Duration, prov *Provenance, c Counters, now time.Time) Row {
 	if c.ByReason == nil {
 		c.ByReason = map[string]uint64{}
 	}
@@ -136,6 +181,7 @@ func NewRow(kind, sessionType, context, sessionID string, uptime time.Duration, 
 		PID:         os.Getpid(),
 		UnixMillis:  now.UnixMilli(),
 		UptimeSecs:  uptime.Seconds(),
+		Provenance:  prov,
 		Counters:    c,
 		GeneratedAt: now.UTC().Format(time.RFC3339),
 	}

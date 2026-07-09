@@ -19,7 +19,7 @@ func TestAppendTwoSessionsProducesTwoRows(t *testing.T) {
 	dir := t.TempDir()
 	ledgerPath := filepath.Join(dir, "gateway-usage.jsonl")
 
-	session1 := NewRow("exit", "serve", "http", "gw-1", 12*time.Second, Counters{
+	session1 := NewRow("exit", "serve", "http", "gw-1", 12*time.Second, nil, Counters{
 		Submits:            10,
 		VDSOHits:           4,
 		EngineCalls:        6,
@@ -34,7 +34,7 @@ func TestAppendTwoSessionsProducesTwoRows(t *testing.T) {
 	}
 
 	// Simulate a restart: a second, independent session appends to the SAME file.
-	session2 := NewRow("exit", "serve", "http", "gw-2", 30*time.Second, Counters{
+	session2 := NewRow("exit", "serve", "http", "gw-2", 30*time.Second, nil, Counters{
 		Submits:            25,
 		VDSOHits:           12,
 		EngineCalls:        13,
@@ -88,7 +88,7 @@ func TestFoldTrendInsufficientOnFewerThanTwoRows(t *testing.T) {
 	if _, ok := FoldTrend(nil); ok {
 		t.Fatalf("FoldTrend(nil): expected ok=false")
 	}
-	one := []Row{NewRow("exit", "serve", "", "gw-1", 0, Counters{}, time.Now())}
+	one := []Row{NewRow("exit", "serve", "", "gw-1", 0, nil, Counters{}, time.Now())}
 	if _, ok := FoldTrend(one); ok {
 		t.Fatalf("FoldTrend(1 row): expected ok=false")
 	}
@@ -115,7 +115,7 @@ func TestCacheTTLUpgradeCountersRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	ledgerPath := filepath.Join(dir, "gateway-usage.jsonl")
 
-	row := NewRow("exit", "guard", "claude", "", time.Minute, Counters{
+	row := NewRow("exit", "guard", "claude", "", time.Minute, nil, Counters{
 		CacheTTLUpgradesUpgraded: 3,
 		CacheTTLUpgradeReasons:   map[string]uint64{"volatile_head": 2, "no_stable_breakpoint": 1},
 	}, time.Unix(1000, 0))
@@ -148,7 +148,7 @@ func TestCacheTTLUpgradeCountersRoundTrip(t *testing.T) {
 			t.Fatalf("serialized row missing %s:\n%s", key, raw)
 		}
 	}
-	zero := NewRow("exit", "serve", "http", "", 0, Counters{}, time.Unix(2000, 0))
+	zero := NewRow("exit", "serve", "http", "", 0, nil, Counters{}, time.Unix(2000, 0))
 	zb, err := json.Marshal(zero)
 	if err != nil {
 		t.Fatalf("marshal zero row: %v", err)
@@ -158,6 +158,69 @@ func TestCacheTTLUpgradeCountersRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(zb), "cache_ttl_upgrade_reasons") {
 		t.Fatalf("zero row must omit the empty reasons map:\n%s", zb)
+	}
+}
+
+// TestProvenanceAndObservedTurnsRoundTrip proves the two self-describing additions survive
+// Append -> ReadLedgerFile, and — the load-bearing schema guarantee — that a nil-provenance
+// row stays byte-compatible with the pre-provenance shape (no "provenance" key at all), while
+// a supplied provenance carrying a MEANINGFUL zero (AssumeSessionTurns:0 = prior disabled) is
+// preserved as present-and-zero, not collapsed to absent. That distinction is exactly why Row
+// holds Provenance by pointer.
+func TestProvenanceAndObservedTurnsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "gateway-usage.jsonl")
+
+	prov := &Provenance{AssumeSessionTurns: 50, CompactHistoryBudget: 120000, BuildRevision: "abc123-dirty"}
+	row := NewRow("exit", "guard", "claude", "g-1", time.Minute, prov, Counters{
+		ObservedTurns: 42,
+		CachedTurns:   7,
+	}, time.Unix(1000, 0))
+	if err := Append(ledgerPath, row); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	rows := ReadLedgerFile(ledgerPath)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Counters.ObservedTurns != 42 {
+		t.Fatalf("ObservedTurns did not round-trip: got %d, want 42", rows[0].Counters.ObservedTurns)
+	}
+	if rows[0].Provenance == nil {
+		t.Fatalf("provenance dropped on read")
+	}
+	if p := rows[0].Provenance; p.AssumeSessionTurns != 50 || p.CompactHistoryBudget != 120000 || p.BuildRevision != "abc123-dirty" {
+		t.Fatalf("provenance did not round-trip: %+v", p)
+	}
+
+	// observed_turns is unconditional (no omitempty) so a length-distribution reader can
+	// always percentile it; a cold session records observed_turns:0 rather than a missing key.
+	raw, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if !strings.Contains(string(raw), `"observed_turns":42`) || !strings.Contains(string(raw), `"provenance"`) {
+		t.Fatalf("serialized row missing observed_turns/provenance:\n%s", raw)
+	}
+
+	// nil provenance stays on the pre-provenance byte shape (no "provenance" key), but a
+	// SUPPLIED zero provenance is present — the pointer's whole reason for being.
+	nilProv := NewRow("exit", "serve", "http", "", 0, nil, Counters{}, time.Unix(2000, 0))
+	nb, err := json.Marshal(nilProv)
+	if err != nil {
+		t.Fatalf("marshal nil-provenance row: %v", err)
+	}
+	if strings.Contains(string(nb), "provenance") {
+		t.Fatalf("nil-provenance row must omit the provenance key entirely:\n%s", nb)
+	}
+	zeroProv := NewRow("exit", "serve", "http", "", 0, &Provenance{}, Counters{}, time.Unix(2000, 0))
+	zb, err := json.Marshal(zeroProv)
+	if err != nil {
+		t.Fatalf("marshal zero-provenance row: %v", err)
+	}
+	if !strings.Contains(string(zb), `"provenance":{}`) {
+		t.Fatalf("supplied zero provenance must serialize as present-but-empty:\n%s", zb)
 	}
 }
 

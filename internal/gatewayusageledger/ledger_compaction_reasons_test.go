@@ -17,7 +17,7 @@ import (
 func TestCompactionBailReasonsRoundTrip(t *testing.T) {
 	ledgerPath := filepath.Join(t.TempDir(), "gateway-usage.jsonl")
 
-	row := NewRow("exit", "guard", "claude", "", 90*time.Second, Counters{
+	row := NewRow("exit", "guard", "claude", "", 90*time.Second, nil, Counters{
 		CompactionBailed: 14,
 		CompactionBailReasons: map[string]uint64{
 			"under_budget":       11,
