@@ -50,6 +50,19 @@ APIERR_RE = re.compile(
     re.I,
 )
 
+# Operator-stop / context-exhaustion refusals: the session-state wall the guard writes
+# as a synthetic terminal turn ("API Error: 409 session <trace> is stopped (operator
+# control); request refused: BUDGET_CONTEXT_EXHAUSTED"). It rides in on the
+# "API Error:" prefix, but a raw resume / model switch / retry can never clear it --
+# terminal, NOT a transient transport error, so is_api_error subtracts it exactly as
+# it subtracts is_auth_error (#3457).
+OPERATOR_STOP_RE = re.compile(
+    r"BUDGET_CONTEXT_EXHAUSTED|"
+    r"\b409\b.*operator\s+(?:control|stop)|"
+    r"restart_fresh_session",
+    re.I,
+)
+
 
 def limit_resets(text: str) -> dict:
     """All usage-limit reset windows in a Claude throttle banner.
@@ -178,9 +191,20 @@ def is_auth_error(text: str) -> bool:
     return bool(AUTH_RE.search(text or ""))
 
 
+def is_operator_stop(text: str) -> bool:
+    """True for an operator-stop / context-exhaustion refusal (409 operator control /
+    BUDGET_CONTEXT_EXHAUSTED / restart_fresh_session) -- a terminal session-state wall
+    a raw resume or retry cannot clear, never a transient API error."""
+    return bool(OPERATOR_STOP_RE.search(text or ""))
+
+
 def is_api_error(text: str) -> bool:
     text = text or ""
-    return bool(APIERR_RE.search(text)) and not is_auth_error(text)
+    return (
+        bool(APIERR_RE.search(text))
+        and not is_auth_error(text)
+        and not is_operator_stop(text)
+    )
 
 
 def auth_block_kind(text: str) -> str:

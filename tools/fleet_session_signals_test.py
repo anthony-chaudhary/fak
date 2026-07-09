@@ -19,6 +19,23 @@ class FleetSessionSignalsTest(unittest.TestCase):
         self.assertFalse(fleet_session_signals.is_api_error(text))
         self.assertEqual(fleet_session_signals.auth_block_kind(text), "auth")
 
+    def test_operator_stop_409_is_terminal_not_transient_api_error(self) -> None:
+        # The guard's synthetic terminal turn on context exhaustion (#3457): it rides
+        # in on the "API Error:" prefix, but a raw resume cannot clear the wall, so it
+        # must classify as a distinct operator-stop, never a transient API error.
+        text = (
+            "API Error: 409 session f017ca75 is stopped (operator control); "
+            "request refused: BUDGET_CONTEXT_EXHAUSTED"
+        )
+
+        self.assertTrue(fleet_session_signals.is_operator_stop(text))
+        self.assertFalse(fleet_session_signals.is_api_error(text))
+        # A genuine transport/server failure keeps its transient classification.
+        self.assertTrue(
+            fleet_session_signals.is_api_error("API Error: 500 Internal Server Error"))
+        self.assertFalse(
+            fleet_session_signals.is_operator_stop("API Error: 500 Internal Server Error"))
+
     def test_http_401_authentication_required_is_auth(self) -> None:
         text = "HTTP 401 Authentication required. Please provide an API key."
 

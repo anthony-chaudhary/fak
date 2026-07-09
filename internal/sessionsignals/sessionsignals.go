@@ -69,6 +69,19 @@ const apiErrPattern = `(?i)isApiErrorMessage|API Error|overloaded_error|\boverlo
 var apiErrRE = regexp.MustCompile(apiErrPattern + `|request timed out`)
 var apiErrWithoutBareTimeoutRE = regexp.MustCompile(apiErrPattern)
 
+// operatorStopPattern names an operator-stop / context-exhaustion refusal — the
+// session-state wall the guard writes as a synthetic terminal turn ("API Error: 409
+// session <trace> is stopped (operator control); request refused:
+// BUDGET_CONTEXT_EXHAUSTED"). It rides in on the "API Error:" prefix, but a raw
+// resume / model switch / retry can never clear it: terminal, NOT a transient
+// transport error, so isAPIError subtracts it exactly as it subtracts IsAuthError
+// (#3457). Kept in lockstep with OPERATOR_STOP_RE in tools/fleet_session_signals.py.
+const operatorStopPattern = `(?i)BUDGET_CONTEXT_EXHAUSTED|` +
+	`\b409\b.*operator\s+(?:control|stop)|` +
+	`restart_fresh_session`
+
+var operatorStopRE = regexp.MustCompile(operatorStopPattern)
+
 // Resets is the set of usage-limit reset windows one throttle banner carries. Claude's
 // banner can name a short (hourly/daily) window AND a weekly one in the same message;
 // either field is empty when that window is absent.
@@ -226,8 +239,15 @@ func HTTPStatus(text string) string {
 // IsAuthError reports whether text names an auth/login/credit/access wall.
 func IsAuthError(text string) bool { return authRE.MatchString(text) }
 
+// IsOperatorStop reports whether text names an operator-stop / context-exhaustion
+// refusal (409 operator control / BUDGET_CONTEXT_EXHAUSTED / restart_fresh_session) —
+// a terminal session-state wall a raw resume or retry cannot clear, never a
+// transient API error.
+func IsOperatorStop(text string) bool { return operatorStopRE.MatchString(text) }
+
 // IsAPIError reports whether text names a transient transport/server error that is NOT
-// also an auth wall (auth outranks: a 401 is never a retry-now signal).
+// also an auth wall (auth outranks: a 401 is never a retry-now signal) and NOT an
+// operator-stop / context-exhaustion wall (terminal: a resume re-hits the same wall).
 func IsAPIError(text string) bool {
 	return isAPIError(text, apiErrRE)
 }
@@ -239,7 +259,7 @@ func IsAPIErrorWithoutBareTimeout(text string) bool {
 }
 
 func isAPIError(text string, re *regexp.Regexp) bool {
-	return re.MatchString(text) && !IsAuthError(text)
+	return re.MatchString(text) && !IsAuthError(text) && !IsOperatorStop(text)
 }
 
 // unknownModelRE names an UNKNOWN / INVALID / UNENTITLED model refusal — a startup

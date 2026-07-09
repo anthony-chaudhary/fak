@@ -176,6 +176,28 @@ func TestIsAPIErrorExcludesAuth(t *testing.T) {
 	}
 }
 
+// A 409 operator-stop / BUDGET_CONTEXT_EXHAUSTED refusal rides in on the guard's
+// "API Error:" prefix but is a session-state wall a raw resume cannot clear (#3457):
+// it must classify as a distinct terminal operator-stop, never a transient API error.
+func TestIsAPIErrorExcludesOperatorStop(t *testing.T) {
+	cases := []struct {
+		text                 string
+		apiErr, operatorStop bool
+	}{
+		{"API Error: 409 session f017ca75 is stopped (operator control); request refused: BUDGET_CONTEXT_EXHAUSTED", false, true},
+		{"API Error: 409 session f8d84269 is stopped (operator stop); restart_fresh_session", false, true},
+		{"API Error: 500 Internal Server Error", true, false},
+	}
+	for _, c := range cases {
+		if got := IsAPIError(c.text); got != c.apiErr {
+			t.Errorf("IsAPIError(%q) = %v, want %v", c.text, got, c.apiErr)
+		}
+		if got := IsOperatorStop(c.text); got != c.operatorStop {
+			t.Errorf("IsOperatorStop(%q) = %v, want %v", c.text, got, c.operatorStop)
+		}
+	}
+}
+
 func TestTerminalFailurePrecedenceAndEmpty(t *testing.T) {
 	if k, d := TerminalFailure(""); k != "" || d != "" {
 		t.Fatalf("empty error text must yield no bucket, got (%q,%q)", k, d)
