@@ -25,9 +25,10 @@ import (
 // the card and prints it without posting, matching the scoreboard/bench "safe by
 // default" idiom.
 func cmdBlockers(argv []string) {
-	dispatchSubcommands("blockers", "post | feed", argv,
+	dispatchSubcommands("blockers", "post | feed | selfcheck", argv,
 		subcommand{"post", runBlockersPost},
 		subcommand{"feed", runBlockersFeed},
+		subcommand{"selfcheck", runBlockersSelfcheck},
 	)
 }
 
@@ -96,9 +97,26 @@ func runBlockersFeed(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak blockers feed: %v\n", err)
 		return 2
 	}
-	b := blockerpost.FoldIssues(issues, *label, *repoURL)
+	// Decenter the human at the feed seam: under FAK_BLOCKERS_TRIAGE_GATE=enforce,
+	// an unowned issue only pages when it names authority a person holds; a
+	// fleet-routable backlog is recorded as background status. Default ("", "warn")
+	// keeps the ownership-only paging so the change can soak.
+	var b blockerpost.Blocker
+	if blockerpost.TriageEnforced(os.Getenv("FAK_BLOCKERS_TRIAGE_GATE")) {
+		b = blockerpost.FoldIssuesTriaged(issues, *label, *repoURL)
+	} else {
+		b = blockerpost.FoldIssues(issues, *label, *repoURL)
+	}
 	b.Source = resolveBlockerSource(*source)
 	return emitBlocker(stdout, stderr, b, *channel, *token, *dryRun)
+}
+
+// runBlockersSelfcheck runs the deterministic decenter-the-human proof for the
+// blocker feed — no key, no network, no fixtures.
+func runBlockersSelfcheck(stdout, stderr io.Writer, argv []string) int {
+	return runReportSelfcheck(stdout, stderr, argv, "blockers", blockerpost.TriageSelfcheck,
+		"SELFCHECK OK -- decenter-the-human at the blocker feed: an unowned issue that "+
+			"names authority still pages; a fleet-routable one routes to the fleet and stops paging.")
 }
 
 // loadFeedIssues reads the gh issue-list payload from a file (or stdin for "-"). An
