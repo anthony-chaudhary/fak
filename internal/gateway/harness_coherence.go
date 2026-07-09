@@ -140,6 +140,33 @@ type coordEntry struct {
 	heldPeak int64
 }
 
+// maxCoherenceSessions bounds the per-trace coordinator map. observe mints one *coordEntry per
+// served Claude Code session (trace) and, before this cap, nothing ever removed one — a long-lived
+// `fak serve` grew coords without bound (monotonic heap growth, each entry holding a live
+// *compactcohere.Coordinator with rolling state, #3450). The cap is far above any realistic live
+// working set — it matches the gateway's other per-session maps (maxResetHealthSessions /
+// maxCtxValueSessions / maxSessionPlanners, all 8192) — so a busy but healthy gateway never evicts
+// a live session; it only reclaims the long-idle tail. Same unbounded-accumulation class the
+// bounded A2A task store fixed, in the harness-coherence accumulator instead.
+const maxCoherenceSessions = 8192
+
+// evictColdestCoordLocked drops the coordinator whose last served turn is oldest — an active trace
+// is re-stamped every turn (observe sets lastTurn), so only long-idle traces are ever candidates and
+// a live session is never the victim. Ties break on trace id for determinism. The caller holds h.mu
+// and coords is known non-empty. Mirrors session_activity.go's evictColdestLocked. Evicting a trace
+// only costs it a fresh coordinator on its next turn (rolling prefix state re-primes), which for a
+// trace idle past this many newer sessions is already effectively cold.
+func (h *harnessCoherenceMetrics) evictColdestCoordLocked() {
+	var victim string
+	var best time.Time
+	for id, e := range h.coords {
+		if victim == "" || e.lastTurn.Before(best) || (e.lastTurn.Equal(best) && id < victim) {
+			victim, best = id, e.lastTurn
+		}
+	}
+	delete(h.coords, victim)
+}
+
 func newHarnessCoherenceMetrics(ttl time.Duration) *harnessCoherenceMetrics {
 	if ttl <= 0 {
 		ttl = compactcohere.DefaultProviderCacheTTL
@@ -184,6 +211,9 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 
 	entry := h.coords[trace]
 	if entry == nil {
+		if len(h.coords) >= maxCoherenceSessions {
+			h.evictColdestCoordLocked()
+		}
 		entry = &coordEntry{coord: compactcohere.NewConfig(compactcohere.Config{
 			TTL:                    h.ttl,
 			ResidentCeiling:        h.residentCeiling,
