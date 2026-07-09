@@ -132,6 +132,8 @@ func main() {
 		cmdTrunkBuildProbe(os.Args[2:])
 	case "godsplit-plan":
 		cmdGodsplitPlan(os.Args[2:])
+	case "refactor-verify":
+		cmdRefactorVerify(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
 	case "recover":
