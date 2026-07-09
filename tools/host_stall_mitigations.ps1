@@ -9,10 +9,10 @@
   bursts ride on top of:
     - AUEPMaster.exe  (AMD "Performance Profile Client" / User-Experience telemetry)
                       ~127k-250k disk ops/sec SUSTAINED. Pure telemetry; safe to stop.
-    - MsMpEng.exe     (Windows Defender realtime scan) — scans every file the other
+    - MsMpEng.exe     (Windows Defender realtime scan) -- scans every file the other
                       daemons touch, amplifying the churn. Mitigate with EXCLUSIONS,
                       never by disabling protection.
-    - CC_Engine_x64.exe (CCleaner active monitoring) — small-op disk thrasher. The
+    - CC_Engine_x64.exe (CCleaner active monitoring) -- small-op disk thrasher. The
                       "active monitoring" / "smart cleaning" background feature is
                       optional; stopping it does not affect on-demand cleaning.
 
@@ -55,15 +55,15 @@ function IsAdmin {
 
 Note ("mode: " + ($(if ($Apply) { 'APPLY' } else { 'PREVIEW (pass -Apply to act)' })))
 if ($Apply -and -not (IsAdmin)) {
-  Note 'WARNING: not elevated — service/Defender actions will likely fail. Re-run as Administrator.'
+  Note 'WARNING: not elevated -- service/Defender actions will likely fail. Re-run as Administrator.'
 }
 
 # --- 1. AMD AUEPMaster telemetry (DURABLE: kill process AND disable its launcher) ---
 Note '--- AMD AUEPMaster (Performance Profile Client telemetry) ---'
 # The RELAUNCH mechanism on this box is the `AUEPLauncher` service (StartType
-# Automatic) — it respawns AUEPMaster on every boot, so stopping the process alone
+# Automatic) -- it respawns AUEPMaster on every boot, so stopping the process alone
 # is temporary. The durable fix is to DISABLE that service. We explicitly do NOT
-# touch `AMD External Events Utility` — that is the legitimate GPU-driver service
+# touch `AMD External Events Utility` -- that is the legitimate GPU-driver service
 # (display/hotkey events), not telemetry.
 $auep = Get-Process -Name 'AUEPMaster','AUEPDU' -ErrorAction SilentlyContinue
 if ($auep) {
@@ -71,7 +71,7 @@ if ($auep) {
 } else {
   Note 'AUEPMaster not currently running (still disabling its launcher so it STAYS off)'
 }
-# The telemetry launcher service(s) — NOT the External Events Utility driver service.
+# The telemetry launcher service(s) -- NOT the External Events Utility driver service.
 $svc = Get-Service -Name 'AUEPLauncher' -ErrorAction SilentlyContinue
 if (-not $svc) {
   $svc = Get-Service -ErrorAction SilentlyContinue |
@@ -83,7 +83,7 @@ if ($Apply) {
   foreach ($s in $svc) {
     Stop-Service -Name $s.Name -Force -ErrorAction SilentlyContinue
     Set-Service -Name $s.Name -StartupType Disabled -ErrorAction SilentlyContinue
-    Note ("DISABLED launcher service '$($s.Name)' — stays off across reboots  (UNDO: Set-Service -Name '$($s.Name)' -StartupType Automatic; Start-Service '$($s.Name)')")
+    Note ("DISABLED launcher service '$($s.Name)' -- stays off across reboots  (UNDO: Set-Service -Name '$($s.Name)' -StartupType Automatic; Start-Service '$($s.Name)')")
   }
   # Any scheduled task that also relaunches it.
   Get-ScheduledTask -ErrorAction SilentlyContinue |
@@ -110,13 +110,28 @@ foreach ($d in $WorkDirs) {
     Note "WOULD: Add-MpPreference -ExclusionPath '$d'"
   }
 }
-# Also exclude the two process images that generate the most scan churn.
+# Also exclude the process images that generate the most scan churn.
 foreach ($p in @('fak.exe','claude.exe','python.exe','node.exe')) {
   if ($Apply) {
     try { Add-MpPreference -ExclusionProcess $p -ErrorAction Stop
           Note ("excluded process '$p'  (UNDO: Remove-MpPreference -ExclusionProcess '$p')") }
     catch { Note ("could not exclude process '$p': " + $_.Exception.Message) }
   } else { Note "WOULD: Add-MpPreference -ExclusionProcess '$p'" }
+}
+# -ExclusionProcess skips the files a process OPENS, but NOT the scan of the
+# process's own image on each CreateProcess. With spawn cost measured at ~1s
+# under churn (mean 1083ms for `cmd /c exit`, 2026-07-11), the per-image scan is
+# worth removing too: resolve each binary on PATH and exclude its full image
+# path. This covers binaries that live OUTSIDE the WorkDirs excluded above --
+# e.g. fak.exe in ~\bin, claude/node/python in their own install dirs.
+foreach ($p in @('fak.exe','claude.exe','python.exe','node.exe')) {
+  $img = (Get-Command $p -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+  if (-not $img) { Note "image for '$p' not on PATH -- skipping image exclusion"; continue }
+  if ($Apply) {
+    try { Add-MpPreference -ExclusionPath $img -ErrorAction Stop
+          Note ("excluded image '$img'  (UNDO: Remove-MpPreference -ExclusionPath '$img')") }
+    catch { Note ("could not exclude image '$img': " + $_.Exception.Message) }
+  } else { Note "WOULD: Add-MpPreference -ExclusionPath '$img'" }
 }
 
 # --- 3. CCleaner active monitoring (DURABLE: kill + neutralize its startup entry) --
