@@ -82,10 +82,10 @@ var tier = map[string]int{
 	"deepseekbench": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench core (#3014), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
 	"guardvars": 1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
 	"glm52prefillsweep": 1, "turnkind": 1, // glm52prefillsweep: pure GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); stdlib-only (net/http+os/exec live path), imports nothing internal. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
-	"questionledger": 1, // /question-loop ledger discipline (Go port of tools/question_ledger.py): lint/next-id/dedupe-check/stats over docs/questions/asked.jsonl; stdlib-only, off the hot path.
-	"trunkbuildprobe": 1, // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; stdlib-only, off the hot path.
-	"godsplitplan":    1, // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
-	"refactorverify":  2, // proves a god-split dropped no top-level decl (Go port of tools/refactor_verify.py): folds each touched package's decl multiset before/after via godsplitplan.Compute; imports godsplitplan, off the hot path.
+	"questionledger":       1,                // /question-loop ledger discipline (Go port of tools/question_ledger.py): lint/next-id/dedupe-check/stats over docs/questions/asked.jsonl; stdlib-only, off the hot path.
+	"trunkbuildprobe":      1,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; stdlib-only, off the hot path.
+	"godsplitplan":         1,                // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
+	"refactorverify":       2,                // proves a god-split dropped no top-level decl (Go port of tools/refactor_verify.py): folds each touched package's decl multiset before/after via godsplitplan.Compute; imports godsplitplan, off the hot path.
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
 	"evebridge":            1,                // Eve preflight connection gates (auth/allowlist/approval, #2602): pure request-shape screening for the Eve bridge; stdlib-only, imports nothing internal, off the hot path.
 	"sessionsignals":       1,                // shared closed vocabulary of terminal-turn transcript signals (limit-reset banners, auth/credit/access walls, transient API errors) ported from tools/fleet_session_signals.py; the one taxonomy the resume sweep/stopped/watchdog family classifies with. Stdlib-only, imports nothing internal, off the hot path.
@@ -393,6 +393,8 @@ var tier = map[string]int{
 	"negframe":              1, // negation-lexicon + reframe-classification card (#3539): classifies negatively-framed steer prose (prohibition/absence/refusal/hedge) and returns the mechanical positive reframe; imports pkg/scorecard only, off the hot path.
 	"stepbaton":             1, // pure step-baton stamp core; stdlib-only, imports nothing internal, off the hot path.
 	"stepbatoncapture":      1, // step-baton capture over stepbaton(1); imports only stepbaton, off the hot path.
+	"seatpark":              1, // pure bounded park-and-retry fold for the no-seat transient; stdlib-only, imports nothing internal, off the hot path.
+	"agentsindex":           1, // sectioned, fence-aware AGENTS.md loader (#3535, epic #3229): stdlib-only ATX view over AGENTS.md bytes with a resident TOC; imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -746,17 +748,17 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // witnesses may replay or benchmark the same wire. cmd/fak's help text also names it
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
-	"agent":         "the single outbound chat-completions client (HTTPPlanner)",
-	"engine":        "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
-	"gateway":       "the inbound /v1/chat/completions server route (adjudication proxy)",
-	"chatrelay":     "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
-	"webbench":      "the off-path serving-parity benchmark client (not a live planner)",
-	"guardtrace":    "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
-	"frontierswe":   "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
-	"macbench":      "the off-path Mac gateway serving-parity benchmark client against fak serve (not a live planner)",
-	"eveparity":     "the off-path Eve-eval parity witness (#2605): a self-contained fixture server + client that both replays the route to prove fak-routed == raw (not a live planner)",
-	"trajctl":       "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
-	"deepseekbench": "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
+	"agent":             "the single outbound chat-completions client (HTTPPlanner)",
+	"engine":            "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
+	"gateway":           "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"chatrelay":         "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
+	"webbench":          "the off-path serving-parity benchmark client (not a live planner)",
+	"guardtrace":        "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
+	"frontierswe":       "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
+	"macbench":          "the off-path Mac gateway serving-parity benchmark client against fak serve (not a live planner)",
+	"eveparity":         "the off-path Eve-eval parity witness (#2605): a self-contained fixture server + client that both replays the route to prove fak-routed == raw (not a live planner)",
+	"trajctl":           "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
+	"deepseekbench":     "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
 	"glm52prefillsweep": "the off-path GLM-5.2 prefill-latency sweep client (#3085/#3086): POSTs a prefill-dominant request (large prompt, max_tokens~1) at each prompt length against a fak serve endpoint to record TTFT / prefill tok/s (not a live planner)",
 }
 
