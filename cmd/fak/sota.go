@@ -35,6 +35,8 @@ func runSota(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "list", "ls":
 		return sotaList(stdout, stderr, argv[1:])
+	case "milestones", "milestone", "ladder", "ladders":
+		return sotaMilestones(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		sotaUsage(stdout)
 		return 0
@@ -50,6 +52,8 @@ usage:
   fak sota [list] [--json]   every operation: slug, title, route, SOTA stack
   fak sota <slug>            the full reference for one op (slug from the list)
   fak sota <file>            the op(s) whose kernel files match a path
+  fak sota milestones [axis] the SOTA baseline milestone ladders (attention,
+                             batching, quantization, …) and which rung fak is on
 
 Run this before hand-rolling a contraction  -  almost no op should be written
 from scratch. Each row's route says how to relate to the reference:
@@ -183,4 +187,105 @@ func sotaDetail(w io.Writer, op sotamatrix.Op) {
 			fmt.Fprintf(w, "    - %s\n", pp)
 		}
 	}
+	for _, l := range sotamatrix.LaddersForOp(op.Slug) {
+		fmt.Fprintf(w, "  milestones:  `fak sota milestones %s`", l.Axis)
+		if next, ok := l.NextRung(); ok {
+			fmt.Fprintf(w, "  (fak at %q; next rung: %s)", l.Rungs[l.FakRung].Name, next.Name)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+// sotaMilestones renders the SOTA baseline milestone ladders: with no argument, a
+// one-line-per-axis overview (where fak sits, what the next rung is); with an axis,
+// the full rung-by-rung ladder marking fak's current rung and its next target. It
+// answers "what are the obvious baseline milestones for this capability, in order?"
+func sotaMilestones(stdout, stderr io.Writer, argv []string) int {
+	asJSON := false
+	var axis string
+	for _, a := range argv {
+		switch {
+		case a == "--json" || a == "-json":
+			asJSON = true
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(stderr, "fak sota milestones: unknown flag %q\n", a)
+			return 2
+		case axis == "":
+			axis = a
+		default:
+			fmt.Fprintf(stderr, "fak sota milestones: unexpected extra argument %q\n", a)
+			return 2
+		}
+	}
+
+	if axis != "" {
+		l, ok := sotamatrix.LadderByAxis(axis)
+		if !ok {
+			fmt.Fprintf(stderr, "fak sota milestones: %q is not a known axis.\n\nAvailable axes:\n", axis)
+			for _, a := range sotamatrix.Ladders() {
+				fmt.Fprintf(stderr, "  %s\n", a.Axis)
+			}
+			return 1
+		}
+		if asJSON {
+			_ = writeIndentedJSONNoEscape(stdout, l)
+			return 0
+		}
+		sotaLadderDetail(stdout, l)
+		return 0
+	}
+
+	all := sotamatrix.Ladders()
+	if asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, all)
+		return 0
+	}
+	fmt.Fprintf(stdout, "%d SOTA baseline milestone ladders  -  the recognized rungs per capability, and which rung fak is on.\n", len(all))
+	fmt.Fprintf(stdout, "Tip: `fak sota milestones <axis>` for one ladder's full rung-by-rung detail.\n\n")
+	tw := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "AXIS\tCAPABILITY\tFAK RUNG\tNEXT MILESTONE")
+	for _, l := range all {
+		here, next := "not implemented", "-"
+		if l.FakRung >= 0 {
+			here = fmt.Sprintf("%d/%d %s", l.FakRung, len(l.Rungs)-1, l.Rungs[l.FakRung].Name)
+			if n, ok := l.NextRung(); ok {
+				next = n.Name
+			} else {
+				next = "(top rung)"
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", l.Axis, truncate(l.Title, 24), truncate(here, 28), truncate(next, 32))
+	}
+	_ = tw.Flush()
+	return 0
+}
+
+// sotaLadderDetail prints one milestone ladder rung by rung, marking fak's current
+// rung and the next one to target.
+func sotaLadderDetail(w io.Writer, l sotamatrix.Ladder) {
+	fmt.Fprintf(w, "%s milestones  [%s]\n", l.Title, l.Axis)
+	fmt.Fprintf(w, "  %s\n", l.Summary)
+	if l.OpSlug != "" {
+		fmt.Fprintf(w, "  kernel op:   %s  (`fak sota %s`)\n", l.OpSlug, l.OpSlug)
+	}
+	if l.FakRung < 0 {
+		fmt.Fprintf(w, "  fak rung:    not implemented  -  this ladder is the external landscape.\n")
+	} else {
+		fmt.Fprintf(w, "  fak rung:    %d of %d (%s)\n", l.FakRung, len(l.Rungs)-1, l.Rungs[l.FakRung].Name)
+	}
+	nextLevel := l.FakRung + 1
+	fmt.Fprintln(w)
+	for _, r := range l.Rungs {
+		marker := "  "
+		switch {
+		case r.Level == l.FakRung:
+			marker = "=>" // fak is here
+		case r.Level == nextLevel && l.FakRung >= 0:
+			marker = "->" // the next milestone to target
+		}
+		fmt.Fprintf(w, "  %s L%d  %s (%s)\n", marker, r.Level, r.Name, r.Year)
+		fmt.Fprintf(w, "        %s\n", r.Adds)
+		fmt.Fprintf(w, "        ref: %s\n", r.Ref)
+	}
+	fmt.Fprintf(w, "\n  =>  fak is here    ->  next milestone to target\n")
 }

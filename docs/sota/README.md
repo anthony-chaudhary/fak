@@ -1,6 +1,6 @@
 ---
 title: "The SOTA prior-art matrix — check known art before writing a kernel from scratch"
-description: "The maintained, load-bearing map of every compute operation fak's kernel performs to the production / SOTA stack to learn from first, the route (borrow / bind / stay-minimal), and the verification oracle. Read this before optimizing a kernel; the PRIOR_ART gate, `fak sota`, and the sota-coverage scorecard all read its source of truth."
+description: "The maintained, load-bearing map of every compute operation fak's kernel performs to the production / SOTA stack to learn from first, the route (borrow / bind / stay-minimal), and the verification oracle. Read this before optimizing a kernel; the PRIOR_ART gate, `fak sota`, and the sota-coverage scorecard all read its source of truth. Companion milestone ladders (`fak sota milestones`) map each capability — attention, batching, quantization — to its ordered SOTA baseline milestones and the rung fak is on."
 ---
 
 # The SOTA prior-art matrix
@@ -77,6 +77,44 @@ table and `fak sota <slug>` for one operation's full detail (route note, oracle,
 | GLM sparse attention (DSA) | `internal/compute/dsa.go` | [TensorRT-LLM](https://nvidia.github.io/TensorRT-LLM/) custom sparse | stay-minimal | `cpuref` (cosine ≥ 0.999) |
 | KV cache (paging / prefix reuse) | `internal/model/kv.go`, `internal/radixkv` | [vLLM PagedAttention](https://docs.vllm.ai); SGLang RadixAttention | stay-minimal | bit-identity |
 | Metal Q4_K / Q6_K GEMM | `internal/metalgemm/`, `internal/model/metal_q4k*.go` | [llama.cpp Metal](https://github.com/ggml-org/llama.cpp) / MLX | borrow | `cpuref` (GEMV cosine 1.000000) |
+
+## The milestone ladders — where fak is on each capability's SOTA arc
+
+The matrix answers a *tactical* question: "before writing THIS kernel, what reference
+already solved the contraction?" It cannot answer the *strategic* one an agent kept
+answering from memory: "for a whole capability — attention, batching, quantization — what
+are the obvious SOTA baseline milestones, in order, and which rung is fak actually on?" That
+is what the **milestone ladders** add
+([`internal/sotamatrix/ladder.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/sotamatrix/ladder.go),
+rendered by `fak sota milestones [axis]`).
+
+Each rung is **external prior art** — a named, dated, citable technique that moved the
+baseline, never a fak self-claim. The only fak-facing field is `FakRung`: the highest rung
+fak has reached, pinned conservatively to what the tree-verified matrix Op already witnesses
+(or the serving position, or `-1` when fak does not implement the axis). So the ladder tells
+you both the landscape and the *next milestone to target*.
+
+| Axis | fak rung today | Next milestone |
+|---|---|---|
+| **attention** | FlashAttention-1 (own fused online-softmax, cosine ≥ 0.999) | FlashAttention-2 (work partitioning) → FA-3 FP8 → FlashInfer paging |
+| **batching** | Dynamic, padding-aware batching (`internal/gateway/batchsched.go`) | Continuous / in-flight batching (Orca) — the batcher's own deferred rung |
+| **quantization** | INT4 PTQ (AWQ / GPTQ / gguf k-quants) | Fused INT4 Marlin kernel — the matrix's recorded gap |
+| **kv-cache** | PagedAttention + RadixAttention prefix reuse on an exact f32 cache | KV quantization / host offload |
+| **speculative-decoding** | *not implemented* (exact-decode runner) | Draft-model speculative decoding (external landscape) |
+
+```
+$ fak sota milestones attention
+  => L1  FlashAttention-1 (2022)   IO-aware tiling + online softmax; no N×N materialization
+  -> L2  FlashAttention-2 (2023)   better warp partitioning — ~2× FA-1
+     L3  FlashAttention-3 (2024)   Hopper warp-specialization + FP8
+     L4  FlashInfer (2024)         paged / variable-length + block-sparse
+```
+
+Run `fak sota milestones` for the overview across all axes, `fak sota milestones <axis>` for
+one ladder rung-by-rung, and `fak sota <slug>` on a mapped op (e.g. `fused-attention`) prints
+a pointer to its ladder. Adding a rung means adding a **real, citable** milestone — do not
+invent a rung to flatter fak's position; the `OpSlug` cross-reference is unit-tested against
+the matrix so a ladder cannot claim a fak rung the tree does not back.
 
 ## The rule the matrix encodes
 
