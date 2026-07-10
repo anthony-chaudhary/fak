@@ -198,6 +198,35 @@ const (
 	DefaultElideResultBytes = DocumentedElideResultBytes
 )
 
+// DefaultElideStaleReads arms read-lifecycle STALE elision ON by default. It is the
+// size-INDEPENDENT sibling of oversized-result elision: where DefaultElideResultBytes shrinks a
+// tool_result because it is BIG, this replaces a Read tool_result because it is SUPERSEDED — a
+// later in-session Edit/Write/MultiEdit/NotebookEdit of the same file has already changed those
+// bytes, so the pre-edit snapshot no longer reflects disk and (unlike a scrolled-past command
+// output) is actively misleading. The default-on posture rests on three legs, none of them a
+// claim this const invents:
+//
+//  1. SAFETY — it shares the oversized shrinker's fail-safe machinery VERBATIM (splices on the
+//     original bytes, re-proves the protected cache prefix byte-identical via verifySplicedBody,
+//     never touches a cache_control-bearing message, returns identity on ANY ambiguity) but with a
+//     STRICTLY MORE CONSERVATIVE predicate (a superseded read, not merely a large one) and full
+//     RESTORABILITY (the pre-edit body is stashed behind a content-addressed fak_context_restore
+//     handle, not discarded). Witnessed by internal/agent/anthropic_elide_stale_test.go
+//     (TestReadLifecycleElidesStaleKeepsFreshAndPrefix pins the byte-identical prefix) and
+//     internal/gateway/messages_elide_stale_test.go (TestMaybeElideStaleReadsRoundTrip pins the
+//     fire + restore round-trip).
+//  2. VALUE — a real-corpus prevalence scan (experiments/agent-live/
+//     elide-stale-read-prevalence-2026-07-09.json): ~11% of 600 sampled real Claude Code sessions
+//     carry at least one stale read; 565 stale reads totaling ~3.4 MB (~854K estimated tokens,
+//     bytes/4 proxy) of pre-edit snapshot content the marker replaces. A sound lower-bound
+//     motivation, the same status as the oversized-elision prevalence artifact.
+//  3. NOT gated — unlike --defer-cold-tools (whose default-off is pinned to the #3537 A/B), stale
+//     elision's prior off-by-default was purely the initial conservative posture for a lossy-but-
+//     restorable transform; there is no pending validation gate blocking the flip.
+//
+// Pass --elide-stale-reads=false to opt out.
+const DefaultElideStaleReads = true
+
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
@@ -499,6 +528,13 @@ type Config struct {
 	// shrinker for results outside the active working set. The command surfaces default this
 	// to DefaultElideResultBytes.
 	ElideResultBytes int
+	// ElideStaleReads arms the read-lifecycle STALE elision: a Read tool_result whose file was
+	// Edited/Written in a LATER in-session turn is replaced (in the same cache-safe working-set band
+	// as ElideResultBytes) by a restorable marker, the pre-edit snapshot stashed behind a
+	// fak_context_restore handle. Size-independent; lossy but restorable. The command surfaces
+	// default this ON via DefaultElideStaleReads (the safer, restorable sibling of oversized
+	// elision); pass --elide-stale-reads=false to opt out.
+	ElideStaleReads bool
 	// CacheTTL1H upgrades an existing stable-head Anthropic cache_control breakpoint to the
 	// 1-hour tier. It is gate-only for now; the ablation harness also enables it with
 	// FAK_ABLATE_TTL_1H=1.
@@ -858,6 +894,18 @@ type SteerRequest struct {
 	// always Tainted/ScopeFleet — so a client-supplied principal only truthfully names a
 	// machine source, it never buys the input more authority than an operator steer has.
 	Principal string `json:"principal,omitempty"`
+	// Class OPTIONALLY carries the scheduler class of the append (#2402): "now" (interrupt
+	// at the next safe boundary — it lands before the next tool dispatch), "next" (fold into
+	// the next querying turn — the default and the legacy behavior), or "later" (hold until
+	// the loop would otherwise idle). Empty ⇒ "next"; an unrecognized value is a 400. See
+	// SteerClass / steer_class.go.
+	Class string `json:"class,omitempty"`
+	// Query is the query bit (#2402): a nil pointer or true means the append forces a model
+	// turn (legacy steer semantics); an explicit false means "context arrived" — the append
+	// is screened, taint-stamped, and staged for the next querying turn WITHOUT scheduling a
+	// planner call of its own. This decoupling of context arrival from a spent model turn is
+	// what makes cheap continuous observation of a running loop affordable.
+	Query *bool `json:"query,omitempty"`
 }
 
 // SteerSessionFunc is injected by the host CLI so the gateway can enqueue an operator
@@ -1251,6 +1299,13 @@ type Server struct {
 	// byte-for-byte unchanged. The bounded-loss sibling of compactHistoryBudget.
 	elideResultBytes int
 
+	// elideStaleReads mirrors Config.ElideStaleReads: when true the flagship Anthropic passthrough
+	// replaces a Read tool_result superseded by a later same-file edit with a restorable marker
+	// (agent.ElideStaleReads), in the SAME cache-safe working-set band as elideResultBytes and
+	// stashing the pre-edit snapshot behind a fak_context_restore handle. false leaves the body
+	// unchanged. Size-independent; the read-lifecycle sibling of elideResultBytes.
+	elideStaleReads bool
+
 	// cacheTTL1H mirrors Config.CacheTTL1H or FAK_ABLATE_TTL_1H. When true, the Anthropic
 	// passthrough upgrades stable-head cache_control breakpoints to ttl:"1h" before forwarding.
 	cacheTTL1H bool
@@ -1544,6 +1599,7 @@ func New(cfg Config) (*Server, error) {
 		compactAnchorHead:          cfg.CompactAnchorHead,
 		assumeSessionTurns:         cfg.AssumeSessionTurns,
 		elideResultBytes:           cfg.ElideResultBytes,
+		elideStaleReads:            cfg.ElideStaleReads,
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
 		vcacheAnchor:               cfg.VCacheAnchor,
 		toolFloorDenies:            cfg.ToolFloorDenies,

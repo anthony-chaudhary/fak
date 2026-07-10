@@ -1391,6 +1391,17 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, http.StatusBadRequest, "steer text is required")
 				return
 			}
+			// Classify the append (#2402): a class ("now"/"next"/"later") decides WHEN it
+			// reaches the loop and the query bit decides WHETHER it forces a model turn. An
+			// unrecognized class is a request-shape error (400), ordered with the other shape
+			// checks and before the owned-loop gate, so a bad class fails the same way an empty
+			// body does regardless of serve mode.
+			class, classOK := sr.steerClass()
+			if !classOK {
+				writeErr(w, http.StatusBadRequest, "steer class must be one of now|next|later")
+				return
+			}
+			querying := sr.querying()
 			// Honest steer contract (#3528): a steer is only ever CONSUMED by an owned agent
 			// loop — the native RunArm loop drains the a2achan Session bus at its turn boundary
 			// (drainSteer, #850). The default PROXY serve forwards a single upstream turn and
@@ -1408,12 +1419,29 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 						"to the harness that owns this session's turn loop")
 				return
 			}
+			// Screen the append BEFORE the loop can see it (#2402): the same context screen
+			// the result-admission path uses (ctxmmu.ScreenBytes) refuses a poisonous append at
+			// ingress as a journaled quarantine stub rather than letting an observer feed inject
+			// unscreened bytes into the turn. Ordered after the owned-loop gate so only a
+			// deliverable steer is screened; a held append maps to 422 (the floor's deny), like a
+			// tainted/over-scoped body.
+			if reason, held := screenSteerText(sr.Text); held {
+				writeErrCode(w, http.StatusUnprocessableEntity, "steer_quarantined",
+					"STEER_QUARANTINED: the append tripped the context screen ("+reason+
+						"); it is held as a quarantine stub and never reaches the loop")
+				return
+			}
 			if err := s.steerSession(r.Context(), traceID, sr.Principal, sr.Text); err != nil {
 				writeErr(w, http.StatusUnprocessableEntity, "steer refused: "+err.Error())
 				return
 			}
-			s.logf("gateway: session %s steer accepted (%d bytes)", traceID, len(sr.Text))
-			writeJSON(w, http.StatusAccepted, map[string]any{"trace_id": traceID, "steered": true})
+			s.logf("gateway: session %s steer accepted (class=%s querying=%v, %d bytes)", traceID, class, querying, len(sr.Text))
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"trace_id": traceID,
+				"steered":  true,
+				"class":    class.String(),
+				"querying": querying,
+			})
 			return
 		}
 		if s.controlSession == nil {
