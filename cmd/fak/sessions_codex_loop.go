@@ -569,27 +569,7 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 		d.LastEventAt = rec.Timestamp
 		switch rec.Type {
 		case "session_meta":
-			var meta struct {
-				SessionID     string `json:"session_id"`
-				ID            string `json:"id"`
-				Timestamp     string `json:"timestamp"`
-				Originator    string `json:"originator"`
-				CLIVersion    string `json:"cli_version"`
-				ModelProvider string `json:"model_provider"`
-				Git           struct {
-					CommitHash string `json:"commit_hash"`
-					Branch     string `json:"branch"`
-				} `json:"git"`
-			}
-			if json.Unmarshal(rec.Payload, &meta) == nil {
-				d.SessionID = firstNonEmpty(meta.SessionID, meta.ID)
-				d.StartedAt = firstNonEmpty(meta.Timestamp, rec.Timestamp)
-				d.Originator = meta.Originator
-				d.CLI = meta.CLIVersion
-				d.ModelProvider = meta.ModelProvider
-				d.GitCommit = meta.Git.CommitHash
-				d.GitBranch = meta.Git.Branch
-			}
+			applyCodexLoopSessionMeta(&d, rec.Timestamp, rec.Payload)
 		case "response_item":
 			var item struct {
 				Type      string `json:"type"`
@@ -711,6 +691,37 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 		return d, err
 	}
 
+	appendCodexLoopRepeatedOutcomes(&d, outcomes)
+	appendCodexLoopLivelockNotices(&d, livelocks)
+	classifyCodexLoopDiagnosis(&d)
+	return d, nil
+}
+
+func applyCodexLoopSessionMeta(d *codexLoopDiagnosis, ts string, payload json.RawMessage) {
+	var meta struct {
+		SessionID     string `json:"session_id"`
+		ID            string `json:"id"`
+		Timestamp     string `json:"timestamp"`
+		Originator    string `json:"originator"`
+		CLIVersion    string `json:"cli_version"`
+		ModelProvider string `json:"model_provider"`
+		Git           struct {
+			CommitHash string `json:"commit_hash"`
+			Branch     string `json:"branch"`
+		} `json:"git"`
+	}
+	if json.Unmarshal(payload, &meta) == nil {
+		d.SessionID = firstNonEmpty(meta.SessionID, meta.ID)
+		d.StartedAt = firstNonEmpty(meta.Timestamp, ts)
+		d.Originator = meta.Originator
+		d.CLI = meta.CLIVersion
+		d.ModelProvider = meta.ModelProvider
+		d.GitCommit = meta.Git.CommitHash
+		d.GitBranch = meta.Git.Branch
+	}
+}
+
+func appendCodexLoopRepeatedOutcomes(d *codexLoopDiagnosis, outcomes map[codexOutcomeKey]*codexOutcomeAccum) {
 	for _, acc := range outcomes {
 		if acc.out.Count < 3 && acc.out.LongestRun < 3 {
 			continue
@@ -750,6 +761,9 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 	if len(d.RepeatedOutcomes) > 5 {
 		d.RepeatedOutcomes = d.RepeatedOutcomes[:5]
 	}
+}
+
+func appendCodexLoopLivelockNotices(d *codexLoopDiagnosis, livelocks map[string]*codexLivelockNotice) {
 	for _, n := range livelocks {
 		d.LivelockNotices = append(d.LivelockNotices, *n)
 	}
@@ -759,8 +773,6 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 		}
 		return d.LivelockNotices[i].RepeatedCall < d.LivelockNotices[j].RepeatedCall
 	})
-	classifyCodexLoopDiagnosis(&d)
-	return d, nil
 }
 
 type codexLoopTokenInfo struct {
