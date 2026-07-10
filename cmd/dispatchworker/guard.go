@@ -238,8 +238,8 @@ func measuredClaudeGuardBaseline(workspace string, env map[string]string) (int, 
 // local literal — so a model-window change lands here without touching this file.
 // An empty workspace measures nothing and falls to the floor (the hermetic default
 // preserves the shipped 124000). Mirrors dispatch_worker.claude_guard_context_budget_tokens.
-func claudeGuardContextBudgetTokens(workspace string, env map[string]string) string {
-	envelope := ctxplan.GenericTurnEnvelope()
+func claudeGuardContextBudgetTokens(workspace, workerModel string, env map[string]string) string {
+	envelope := ctxplan.EnvelopeForModel(workerModel)
 	baseline, _ := measuredClaudeGuardBaseline(workspace, env)
 	return strconv.Itoa(deriveClaudeGuardContextBudget(
 		baseline, envelope.HardContextCap, envelope.OutputReserve))
@@ -249,11 +249,11 @@ func claudeGuardContextBudgetTokens(workspace string, env map[string]string) str
 // derived context budget for the claude backend, so a launch record exposes what the
 // guard was actually seeded with — drift is a visible number in the payload, not an
 // argv int nobody reads. env defaults to the process environment when nil.
-func claudeGuardBudgetObservable(workspace string, env map[string]string) (baseline, budget int) {
+func claudeGuardBudgetObservable(workspace, workerModel string, env map[string]string) (baseline, budget int) {
 	if env == nil {
 		env = processEnvMap()
 	}
-	envelope := ctxplan.GenericTurnEnvelope()
+	envelope := ctxplan.EnvelopeForModel(workerModel)
 	baseline, _ = measuredClaudeGuardBaseline(workspace, env)
 	budget = deriveClaudeGuardContextBudget(baseline, envelope.HardContextCap, envelope.OutputReserve)
 	return baseline, budget
@@ -266,10 +266,10 @@ func claudeGuardBudgetObservable(workspace string, env map[string]string) (basel
 // here mirrors dispatch_worker.claude_guard_budget_args 1:1 (the integers are identical;
 // --session-id placement between the two blocks is a guard-parsed, order-independent
 // flag and is not pinned across languages).
-func claudeGuardArgs(workspace string, env map[string]string) []string {
+func claudeGuardArgs(workspace, workerModel string, env map[string]string) []string {
 	return []string{
 		"--precompact-hook", "enforce",
-		"--context-budget-tokens", claudeGuardContextBudgetTokens(workspace, env),
+		"--context-budget-tokens", claudeGuardContextBudgetTokens(workspace, workerModel, env),
 		"--restart-on-budget",
 		"--restart-limit", claudeGuardRestartLimit,
 		"--max-duration", claudeGuardMaxDuration(),
@@ -416,7 +416,7 @@ func randToken() string {
 //     FLEET_DOGFOOD_GUARD_BASEURL names that upstream. We refuse to misroute.
 //
 // Mirrors dispatch_worker.guard_wrap.
-func guardWrap(command []string, fakBin, lane, backend, workspace string, env map[string]string) []string {
+func guardWrap(command []string, fakBin, lane, backend, workspace, workerModel string, env map[string]string) []string {
 	if len(command) == 0 || fakBin == "" {
 		return command
 	}
@@ -424,7 +424,7 @@ func guardWrap(command []string, fakBin, lane, backend, workspace string, env ma
 	var extra []string
 	audit := guardAuditPath(workspace, lane, backend)
 	if backend == "claude" {
-		extra = append(extra, claudeGuardArgs(workspace, env)...)
+		extra = append(extra, claudeGuardArgs(workspace, workerModel, env)...)
 		extra = append(extra, "--session-id", strings.TrimSuffix(filepath.Base(audit), filepath.Ext(audit)))
 	}
 	if backend != "claude" {
@@ -459,7 +459,7 @@ func guardEnvAugment(env map[string]string) map[string]string {
 // unchanged. Returns (launchCommand, guarded) so callers can both run it and report
 // what ran. env defaults to the process environment when nil. Mirrors
 // dispatch_worker.guarded_launch_command.
-func guardedLaunchCommand(command []string, lane, backend, workspace string, env map[string]string) ([]string, bool) {
+func guardedLaunchCommand(command []string, lane, backend, workspace, workerModel string, env map[string]string) ([]string, bool) {
 	if env == nil {
 		env = processEnvMap()
 	}
@@ -470,7 +470,7 @@ func guardedLaunchCommand(command []string, lane, backend, workspace string, env
 	if fakBin == "" {
 		return command, false
 	}
-	wrapped := guardWrap(command, fakBin, lane, backend, workspace, env)
+	wrapped := guardWrap(command, fakBin, lane, backend, workspace, workerModel, env)
 	return wrapped, !slices.Equal(wrapped, command)
 }
 

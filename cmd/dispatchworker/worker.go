@@ -259,7 +259,7 @@ func buildPayload(lane, backend, workspace string, dryRun bool, result *launchRe
 	ok := errMsg == "" && (result == nil || result.ReturnCode == 0)
 	baselineTokens, budgetTokens := 0, 0
 	if backend == "claude" {
-		baselineTokens, budgetTokens = claudeGuardBudgetObservable(workspace, nil)
+		baselineTokens, budgetTokens = claudeGuardBudgetObservable(workspace, workerModelFromCommand(command), nil)
 	}
 	return payload{
 		Schema:    workerSchema,
@@ -301,4 +301,16 @@ func render(p payload) string {
 		lines = append(lines, fmt.Sprintf("returncode: %d", p.Result.ReturnCode))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func workerModelFromCommand(command []string) string {
+	for i, arg := range command {
+		if (arg == "--model" || arg == "-m") && i+1 < len(command) {
+			return command[i+1]
+		}
+		if strings.HasPrefix(arg, "--model=") {
+			return strings.TrimPrefix(arg, "--model=")
+		}
+	}
+	return ""
 }

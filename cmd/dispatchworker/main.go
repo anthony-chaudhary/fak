@@ -21,6 +21,7 @@ import (
 
 func main() {
 	lane := flag.String("lane", "", "lane to dispatch on (required)")
+	workerModel := flag.String("worker-model", "", "worker model used for context-envelope selection")
 	backendFlag := flag.String("backend", "", "worker backend (claude|opencode; default: env FLEET_WORKER_BACKEND or claude)")
 	workspaceFlag := flag.String("workspace", "", "workspace root (default: repo root above cwd)")
 	dryRun := flag.Bool("dry-run", false, "print the command instead of launching")
@@ -50,7 +51,10 @@ func main() {
 	guarded := false
 	if errMsg == "" {
 		raw, _ := buildCommand(*lane, backend)
-		command, guarded = guardedLaunchCommand(raw, *lane, backend, workspace, nil)
+		if *workerModel != "" {
+			raw = append(raw, "--model", *workerModel)
+		}
+		command, guarded = guardedLaunchCommand(raw, *lane, backend, workspace, *workerModel, nil)
 	}
 
 	if *dryRun || errMsg != "" {

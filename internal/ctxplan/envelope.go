@@ -1,5 +1,10 @@
 package ctxplan
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // envelope.go — the measured (or fallback-prior) effective-context envelope that the default
 // resident-budget path selects from. It is the code seam behind the long-context defaults
 // doctrine (docs/long-context-defaults.md): the provider's advertised context window is a hard
@@ -98,6 +103,26 @@ func (e EffectiveContextEnvelope) RawWindowTarget() bool {
 	return e.TargetResidentTokens >= ceiling
 }
 
+// EnvelopeForModel returns the routine-agent-turn envelope for model. Specific
+// ModelPattern rows are checked before the wildcard fallback.
+func EnvelopeForModel(model string) EffectiveContextEnvelope {
+	model = strings.ToLower(strings.TrimSpace(model))
+	var fallback EffectiveContextEnvelope
+	for _, e := range DefaultEnvelopes() {
+		if e.TaskClass != "routine-agent-turn" {
+			continue
+		}
+		if e.ModelPattern == "*" {
+			fallback = e
+			continue
+		}
+		if ok, _ := filepath.Match(strings.ToLower(e.ModelPattern), model); ok {
+			return e
+		}
+	}
+	return fallback
+}
+
 // DefaultEnvelopes is the conservative fallback-prior table the no-flag default path selects
 // from. Both rows are labeled MODELED (a code/doctrine-derived prior on the shipped default), not
 // WITNESSED: the targets are the currently shipped constants (the ctxplan planned view's 8K
@@ -106,6 +131,9 @@ func (e EffectiveContextEnvelope) RawWindowTarget() bool {
 // fak bench measures the exact route (docs/long-context-defaults.md).
 func DefaultEnvelopes() []EffectiveContextEnvelope {
 	return []EffectiveContextEnvelope{
+		{ModelPattern: "*fable*", TaskClass: "routine-agent-turn", HardContextCap: 64000, OutputReserve: 32000, MinViableEvidenceTokens: 2000, TargetResidentTokens: 8000, MaxEffectiveTokens: 32000, Provenance: ProvenanceModeled, Witness: "#3611 worker-model envelope"},
+		{ModelPattern: "*haiku*", TaskClass: "routine-agent-turn", HardContextCap: 96000, OutputReserve: 32000, MinViableEvidenceTokens: 2000, TargetResidentTokens: 8000, MaxEffectiveTokens: 48000, Provenance: ProvenanceModeled, Witness: "#3611 worker-model envelope"},
+		{ModelPattern: "*codex*", TaskClass: "routine-agent-turn", HardContextCap: 272000, OutputReserve: 32000, MinViableEvidenceTokens: 2000, TargetResidentTokens: 8000, MaxEffectiveTokens: 96000, Provenance: ProvenanceModeled, Witness: "#3611 worker-model envelope"},
 		{
 			ModelPattern:            "*",
 			TaskClass:               "routine-agent-turn",
@@ -135,7 +163,7 @@ func DefaultEnvelopes() []EffectiveContextEnvelope {
 // routine-agent-turn row. DefaultBudgetBounds derives its resident ceiling from this envelope's
 // Target so the seed spectrum tracks the doctrine's effective envelope rather than a bare literal.
 func GenericTurnEnvelope() EffectiveContextEnvelope {
-	env := DefaultEnvelopes()[0]
+	env := EnvelopeForModel("")
 	// The seed ceiling matches the historical 8192-token generous resident view; the envelope's
 	// 8000 target is the shipped ctxview budget. Keep the seed at the doctrine-consistent 8192 so
 	// an unconstrained caller's spectrum is unchanged while it is now sourced from the envelope.

@@ -99,7 +99,7 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 	// Empty workspace measures nothing → the baseline floors to claudeGuardBaselineTokens,
 	// so this golden pins the hermetic shipped default (124000) independent of any
 	// on-disk orientation size.
-	got, err := strconv.Atoi(claudeGuardContextBudgetTokens("", nil))
+	got, err := strconv.Atoi(claudeGuardContextBudgetTokens("", "", nil))
 	if err != nil {
 		t.Fatalf("derived budget must be a wired integer: %v", err)
 	}
@@ -136,8 +136,8 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 		"--restart-limit", "16",
 		"--max-duration", "1740s",
 	}
-	if !slices.Equal(claudeGuardArgs("", nil), want) {
-		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs("", nil), want)
+	if !slices.Equal(claudeGuardArgs("", "", nil), want) {
+		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs("", "", nil), want)
 	}
 }
 
@@ -219,7 +219,7 @@ func TestGatherLaunchConstituentBytesReadsWorkspaceAndFloors(t *testing.T) {
 
 func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 	raw, _ := buildCommand("gateway", "claude")
-	wrapped := guardWrap(raw, "/usr/bin/fak", "gateway", "claude", "C:/work/fak", map[string]string{})
+	wrapped := guardWrap(raw, "/usr/bin/fak", "gateway", "claude", "C:/work/fak", "", map[string]string{})
 	if wrapped[0] != "/usr/bin/fak" || wrapped[1] != "guard" {
 		t.Errorf("must front with `fak guard`: %v", wrapped[:2])
 	}
@@ -279,7 +279,7 @@ func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 
 func TestGuardWrapNoopWithoutFakBin(t *testing.T) {
 	raw, _ := buildCommand("docs", "claude")
-	if got := guardWrap(raw, "", "docs", "claude", ".", map[string]string{}); !sliceEqual(got, raw) {
+	if got := guardWrap(raw, "", "docs", "claude", ".", "", map[string]string{}); !sliceEqual(got, raw) {
 		t.Errorf("no fak bin -> command unchanged: %v", got)
 	}
 }
@@ -287,12 +287,11 @@ func TestGuardWrapNoopWithoutFakBin(t *testing.T) {
 func TestGuardWrapOpencodeSkipsWithoutBaseURLButWrapsWithOne(t *testing.T) {
 	raw, _ := buildCommand("recall", "opencode")
 	// No FLEET_DOGFOOD_GUARD_BASEURL -> refuse to misroute a local-upstream worker.
-	if got := guardWrap(raw, "/usr/bin/fak", "recall", "opencode", ".", map[string]string{}); !sliceEqual(got, raw) {
+	if got := guardWrap(raw, "/usr/bin/fak", "recall", "opencode", ".", "", map[string]string{}); !sliceEqual(got, raw) {
 		t.Errorf("opencode without base url must stay unwrapped: %v", got)
 	}
 	// With a base URL the operator names the local upstream and we DO front it.
-	wrapped := guardWrap(raw, "/usr/bin/fak", "recall", "opencode", ".",
-		map[string]string{"FLEET_DOGFOOD_GUARD_BASEURL": "http://127.0.0.1:8131/v1"})
+	wrapped := guardWrap(raw, "/usr/bin/fak", "recall", "opencode", ".", "", map[string]string{"FLEET_DOGFOOD_GUARD_BASEURL": "http://127.0.0.1:8131/v1"})
 	if wrapped[0] != "/usr/bin/fak" {
 		t.Errorf("opencode with base url must front with fak: %v", wrapped)
 	}
@@ -308,7 +307,7 @@ func TestGuardedLaunchCommandOptsOutWhenDisabled(t *testing.T) {
 	raw, _ := buildCommand("gateway", "claude")
 	fak := filepath.Join(t.TempDir(), "fak")
 	writeFile(t, fak, "x")
-	cmd, guarded := guardedLaunchCommand(raw, "gateway", "claude", "C:/work/fak",
+	cmd, guarded := guardedLaunchCommand(raw, "gateway", "claude", "C:/work/fak", "",
 		map[string]string{"FLEET_DOGFOOD_GUARD": "0", "FAK_BIN": fak})
 	if guarded || !sliceEqual(cmd, raw) {
 		t.Errorf("disabled -> unguarded raw command: guarded=%v cmd=%v", guarded, cmd)
@@ -319,7 +318,7 @@ func TestGuardedLaunchCommandWrapsWhenEnabledAndBinPresent(t *testing.T) {
 	raw, _ := buildCommand("gateway", "claude")
 	fak := filepath.Join(t.TempDir(), "fak")
 	writeFile(t, fak, "x")
-	cmd, guarded := guardedLaunchCommand(raw, "gateway", "claude", "C:/work/fak",
+	cmd, guarded := guardedLaunchCommand(raw, "gateway", "claude", "C:/work/fak", "",
 		map[string]string{"FAK_BIN": fak})
 	if !guarded || cmd[0] != fak || cmd[1] != "guard" {
 		t.Errorf("enabled + bin -> guarded fak-fronted command: guarded=%v cmd=%v", guarded, cmd)
@@ -352,5 +351,29 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func modelBudgetForBaseline(model string, baseline int) (int, int) {
+	e := ctxplan.EnvelopeForModel(model)
+	return baseline, deriveClaudeGuardContextBudget(baseline, e.HardContextCap, e.OutputReserve)
+}
+
+func TestClaudeGuardBudgetWorkerModelAware(t *testing.T) {
+	models := []string{"fable", "claude-3-5-haiku", "gpt-5.3-codex", "claude-opus-4-8", "unknown-model"}
+	got := map[string]int{}
+	for _, model := range models {
+		_, got[model] = modelBudgetForBaseline(model, 62000)
+	}
+	if got["fable"] == got["claude-3-5-haiku"] || got["claude-3-5-haiku"] == got["gpt-5.3-codex"] {
+		t.Fatalf("model budgets are not distinct: %v", got)
+	}
+	generic := ctxplan.GenericTurnEnvelope()
+	wantOpus := deriveClaudeGuardContextBudget(62000, generic.HardContextCap, generic.OutputReserve)
+	if got["claude-opus-4-8"] != wantOpus {
+		t.Fatalf("opus budget=%d, want historical generic %d", got["claude-opus-4-8"], wantOpus)
+	}
+	if got["unknown-model"] != wantOpus {
+		t.Fatalf("unknown budget=%d, want generic fallback %d", got["unknown-model"], wantOpus)
 	}
 }
