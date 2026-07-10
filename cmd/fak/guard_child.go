@@ -513,6 +513,21 @@ func guardAppendContinueFlag(command []string, flag string) []string {
 	return append(out, flag)
 }
 
+// guardSeedPromptFlagForAgent returns the prompt entrypoint fak knows is SAFE to inject a carryover
+// seed_text through as a fresh initial prompt on a headless/no-continue relaunch (#3056), keyed off
+// the SAME recognized-agent allowlist as guardContinueFlagForAgent (#3055 / "#A"). Claude Code is
+// the one recognized agent: --append-system-prompt reaches the child in both interactive and
+// headless `-p` modes and is additive (it never collides with a positional prompt already on the
+// command line), so the seed rides along as extra orientation rather than clobbering the invocation.
+// Any other/unrecognized binary returns ok=false — fak never guesses a foreign tool's prompt syntax,
+// so its seed is left on disk unread (a no-op relaunch) instead of being mis-injected.
+func guardSeedPromptFlagForAgent(agentName string) (flag string, ok bool) {
+	if guardAgentBaseName(agentName) == "claude" {
+		return "--append-system-prompt", true
+	}
+	return "", false
+}
+
 // guardClassifyAuthCrash decides whether a completed credential check correlates a non-zero
 // child exit with an expired subscription token. hasCredential must come from a caller-side
 // credExpiresAt(credPath) probe — check's own (fresh, refreshed) result cannot distinguish "no
@@ -849,8 +864,12 @@ type guardBudgetRestarter struct {
 	freshContextTokens int
 	limit              int
 	seedDir            string
-	stderr             io.Writer
-	events             chan guardBudgetRestartEvent
+	// seedHandback selects the #3056 headless/no-continue handback: inject the carryover
+	// seed_text as the recognized child's initial prompt on relaunch instead of the default
+	// #3055 --continue transcript reattach. Set from the --restart-seed-handback knob.
+	seedHandback bool
+	stderr       io.Writer
+	events       chan guardBudgetRestartEvent
 }
 
 func newGuardBudgetRestarter(enabled bool, freshContextTokens, limit int, seedDir string, stderr io.Writer) *guardBudgetRestarter {
@@ -988,6 +1007,73 @@ func guardRestartRelaunchCommand(command []string, agentName string) []string {
 		return guardAppendContinueFlag(command, flag)
 	}
 	return command
+}
+
+// guardSeedPromptTokenBudget is the documented ceiling on a carryover seed re-injected as a
+// relaunch prompt (#3056). Measured in guardApproxTokens' ~4-bytes/token gauge, so ~8 KB of seed
+// prose. A relaunch prompt is a task RE-ORIENTATION — the load-bearing "what were you doing"
+// carryover — not the whole transcript (reattaching that is the --continue path's job, #3055), so a
+// few thousand tokens is the ceiling; anything past it is truncated AND logged, never silently.
+const guardSeedPromptTokenBudget = 2000
+
+// guardBoundSeedPrompt truncates seed to at most tokenBudget approx-tokens (guardApproxTokens'
+// 4-bytes/token gauge), cutting on a UTF-8 rune boundary so a multi-byte rune is never split. It
+// returns the bounded text and the number of dropped approx-tokens — 0 when the seed already fit.
+// A non-zero drop is the caller's cue to LOG what was dropped: the bound is never silent (#3056).
+func guardBoundSeedPrompt(seed string, tokenBudget int) (bounded string, droppedTokens int) {
+	if tokenBudget <= 0 {
+		return seed, 0
+	}
+	total := guardApproxTokens(seed)
+	if total <= tokenBudget {
+		return seed, 0
+	}
+	keep := tokenBudget * 4 // approx-tokens back to a byte budget (guardApproxTokens is ceil(len/4))
+	if keep >= len(seed) {
+		return seed, 0
+	}
+	// Back up off any UTF-8 continuation byte (0b10xxxxxx) so the cut lands on a rune start and a
+	// multi-byte rune is never split mid-sequence.
+	for keep > 0 && seed[keep]&0xC0 == 0x80 {
+		keep--
+	}
+	bounded = seed[:keep]
+	return bounded, total - guardApproxTokens(bounded)
+}
+
+// guardSeedPromptRelaunchCommand injects the bounded carryover seed_text as the recognized child's
+// initial prompt on a headless/no-continue relaunch (#3056) — the handback the operator selects with
+// --restart-seed-handback for a deliberately fresh-session child (e.g. `claude -p`) that the #3055
+// --continue reattach does not serve. On success it returns the augmented command, the "seed-prompt"
+// handback mode, and injected=true; it LOGS the dropped approx-token/byte count whenever the seed is
+// truncated past guardSeedPromptTokenBudget. It is a NO-OP — (command, "", false) — for an
+// unrecognized agent (fak never guesses a foreign tool's prompt syntax; the seed stays on disk
+// unread) or an empty seed. Idempotent across repeated restarts: a prior injected seed VALUE is
+// replaced with the fresher one rather than stacking a second flag. The input command is never
+// mutated in place.
+func guardSeedPromptRelaunchCommand(command []string, agentName, seedText string, log io.Writer) (out []string, handback string, injected bool) {
+	seed := strings.TrimSpace(seedText)
+	flag, ok := guardSeedPromptFlagForAgent(agentName)
+	if !ok || seed == "" {
+		return command, "", false
+	}
+	bounded, droppedTokens := guardBoundSeedPrompt(seed, guardSeedPromptTokenBudget)
+	if droppedTokens > 0 && log != nil {
+		fmt.Fprintf(log, "fak guard: seed-prompt handback bounded carryover for %s to %d approx-tokens (budget %d); dropped %d approx-tokens / %d bytes — no silent truncation\n",
+			guardAgentBaseName(agentName), guardApproxTokens(bounded), guardSeedPromptTokenBudget, droppedTokens, len(seed)-len(bounded))
+	}
+	out = make([]string, len(command), len(command)+2)
+	copy(out, command)
+	// A prior restart in the same session may already carry an injected seed flag; replace its
+	// value with the fresher seed rather than appending a second --append-system-prompt.
+	for i := 1; i+1 < len(out); i++ {
+		if out[i] == flag {
+			out[i+1] = bounded
+			return out, guardRestartHandbackSeedPrompt, true
+		}
+	}
+	out = append(out, flag, bounded)
+	return out, guardRestartHandbackSeedPrompt, true
 }
 
 func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
@@ -1191,6 +1277,27 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				return
 			}
 			restarts++
+			// Decide the relaunch command AND the handback mode it represents, so the
+			// hop recorded below matches the command actually launched.
+			handback := ""
+			if restarter.seedHandback {
+				// #3056: headless/no-continue handback — inject the bounded carryover seed as the
+				// recognized child's initial prompt (--append-system-prompt) instead of reattaching
+				// the transcript. A no-op for an unrecognized agent or an empty seed, which falls
+				// through to the #3055 default below.
+				if next, hb, injected := guardSeedPromptRelaunchCommand(command, agentName, ev.SeedText, restarter.stderr); injected {
+					command, handback = next, hb
+				}
+			}
+			if handback == "" {
+				// #3055: reattach the existing transcript on relaunch. The FAK_RESET_* env vars
+				// set below are advisory only (Claude Code reads none of them), so continuity comes
+				// from the wrapped agent's own resume flag — a recognized child resumes the captured
+				// conversation instead of booting cold and losing the task. Idempotent across repeated
+				// restarts; an unrecognized agent is relaunched unchanged (handback derives to
+				// continue/ORPHANED in the hop below).
+				command = guardRestartRelaunchCommand(command, agentName)
+			}
 			// #3057: ONE correlated record per restart — a RESTART_HOP row in the
 			// guard audit journal plus a single stderr one-liner carrying the same
 			// fields (from/to trace, seed size + file, handback mode, child session,
@@ -1198,15 +1305,9 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			// be the only evidence a hidden relaunch ever happened. Queryable later
 			// via `fak guard restart-audit` and `fak session status <id>`.
 			guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID,
-				guardRestartHopFromEvent(ev, restarts, agentName))
+				guardRestartHopFromEventHandback(ev, restarts, agentName, handback))
 			srv.SetDefaultTraceID(ev.ToTraceID)
 			extraEnv = guardRestartEnv(ev)
-			// #3055: reattach the existing transcript on relaunch. The FAK_RESET_* env vars
-			// set above are advisory only (Claude Code reads none of them), so continuity comes
-			// from the wrapped agent's own resume flag — a recognized child resumes the captured
-			// conversation instead of booting cold and losing the task. Idempotent across repeated
-			// restarts; an unrecognized agent is relaunched unchanged.
-			command = guardRestartRelaunchCommand(command, agentName)
 			// Let the triggering response finish flushing to the wrapped client before
 			// stopping the process that initiated it.
 			time.Sleep(750 * time.Millisecond)

@@ -87,9 +87,22 @@ func guardApproxTokens(s string) int {
 // as FAK_SESSION_ID — recorded as its own field so a future handback that mints
 // a distinct child id (#3056) stays additive.
 func guardRestartHopFromEvent(ev guardBudgetRestartEvent, hop int, agentName string) journal.RestartHop {
-	handback := guardRestartHandbackOrphaned
-	if _, ok := guardContinueFlagForAgent(agentName); ok {
-		handback = guardRestartHandbackContinue
+	return guardRestartHopFromEventHandback(ev, hop, agentName, "")
+}
+
+// guardRestartHopFromEventHandback is guardRestartHopFromEvent with an explicit handback OVERRIDE:
+// the live relaunch path passes the mode it ACTUALLY took, so the recorded hop matches the command
+// that was launched. The #3056 seed-prompt handback needs this because a recognized child that
+// would otherwise derive "continue" is instead relaunched with its seed injected as a prompt —
+// handback "seed-prompt", status "ok" (the seed IS consumed into argv, not left inert). An empty
+// override derives the handback the legacy way (recognized→continue, else ORPHANED).
+func guardRestartHopFromEventHandback(ev guardBudgetRestartEvent, hop int, agentName, handbackOverride string) journal.RestartHop {
+	handback := strings.TrimSpace(handbackOverride)
+	if handback == "" {
+		handback = guardRestartHandbackOrphaned
+		if _, ok := guardContinueFlagForAgent(agentName); ok {
+			handback = guardRestartHandbackContinue
+		}
 	}
 	status := journal.RestartHopOK
 	switch {

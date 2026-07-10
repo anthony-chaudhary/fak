@@ -251,6 +251,7 @@ func cmdGuard(argv []string) {
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
+	restartSeedHandback := fs.Bool("restart-seed-handback", false, "with --restart-on-budget: for a recognized headless/no-continue child (e.g. a deliberately fresh-session `claude -p`), inject the carryover seed_text as the relaunch's initial prompt via --append-system-prompt INSTEAD of reattaching the prior transcript with --continue. The seed is bounded to a documented token budget and any truncation is logged (no silent drop). An unrecognized agent stays a no-op with its seed left on disk (#3056).")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session, then persist a scored vcache live row at shutdown when provider-cache telemetry exists.")
 	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Alone, the local model IS the upstream (mutually exclusive with --remote-serve); with --alongside or an explicit --base-url it serves ALONGSIDE the API upstream instead (see --alongside).")
@@ -857,6 +858,7 @@ func cmdGuard(argv []string) {
 	// above is fixed synchronously so the deferred registration publishes under the exact
 	// id the gateway is already using as DefaultTraceID.
 	restarter := newGuardBudgetRestarter(*restartOnBudget, contextBudgetLimit, *restartLimit, *restartSeedDir, os.Stderr)
+	restarter.seedHandback = *restartSeedHandback
 
 	// 3b. LOCAL in-kernel model (--gguf): resolve the alias/URI (downloading on demand),
 	//     pick the decode backend, and load the weights + tokenizer through the SAME serve

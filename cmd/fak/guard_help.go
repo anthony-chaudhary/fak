@@ -80,16 +80,17 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",
-		"elide-result-bytes", "ctx-view-budget", "managed-cache", "compress",
+		"elide-result-bytes", "elide-stale-reads", "ctx-view-budget", "managed-cache", "compress",
+		"vcache-anchor", "defer-cold-tools",
 	}},
 	{"Session lifecycle hooks (Claude Code)", []string{
 		"precompact-hook", "deny-all-continue", "deny-all-max", "deny-all-warn",
-		"deny-all-final", "toolproc-hooks", "task-handoff", "task-handoff-file",
-		"task-handoff-repo", "task-handoff-live",
+		"deny-all-final", "same-stop", "toolproc-hooks", "task-handoff", "task-handoff-file",
+		"task-handoff-repo", "task-handoff-live", "operator-directed",
 	}},
 	{"Budgets, resets & session governance", []string{
 		"context-budget-tokens", "max-duration", "budget-envelope",
-		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir",
+		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir", "restart-seed-handback",
 		"session-id", "session-pressure-gate", "session-pressure-days",
 		"session-pressure-max", "session-pressure-report", "session-pressure-justify",
 	}},
@@ -98,7 +99,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
 		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
-		"codex-loop-gate-since-hours", "mcp-register",
+		"codex-loop-gate-since-hours", "mcp-register", "pi-extension",
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",
