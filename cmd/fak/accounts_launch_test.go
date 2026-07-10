@@ -187,6 +187,11 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 	home := t.TempDir()
 	regPath, seat := launchRegistry(t, home)
 
+	// Pin the managed-cache knobs so the test exercises the UNSET default (on) deterministically,
+	// regardless of the developer's ambient FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV.
+	t.Setenv(fleetManagedCacheEnv, "")
+	t.Setenv(fleetGuardAPIKeyEnvEnv, "")
+
 	var out, errb bytes.Buffer
 	// No --name => defaults to the active-role seat. --dry-run prints the plan, no exec.
 	rc := runAccounts(&out, &errb, []string{"launch", "--dry-run", "--registry", regPath, "--home", home})
@@ -200,6 +205,8 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 		"login             = ready (can_serve=true)",
 		"guard             = on",
 		"model             = " + defaultLaunchModel,
+		// The unconfigured launch now defaults managed cache to on (operator policy).
+		"on (forces the stable-prefix 1h-TTL cache upgrade regardless of billing)",
 		"--dangerously-skip-permissions",
 		"--model " + defaultLaunchModel,
 		"dry-run",
@@ -208,9 +215,10 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 			t.Fatalf("dry-run plan missing %q:\n%s", want, gotErr)
 		}
 	}
-	// stdout echoes the scriptable command: it must be the guard wrap.
+	// stdout echoes the scriptable command: it must be the guard wrap, carrying the on-by-default
+	// managed-cache posture before `--`.
 	gotOut := strings.TrimSpace(out.String())
-	if !strings.Contains(gotOut, "guard -- claude --dangerously-skip-permissions") {
+	if !strings.Contains(gotOut, "guard --managed-cache on -- claude --dangerously-skip-permissions") {
 		t.Fatalf("dry-run stdout command = %q", gotOut)
 	}
 	if strings.Contains(gotErr, seat) {
@@ -249,6 +257,10 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 	home := t.TempDir()
 	regPath, seat := launchRegistry(t, home)
 
+	// Pin the managed-cache knobs so the seam exercises the UNSET default (on) deterministically.
+	t.Setenv(fleetManagedCacheEnv, "")
+	t.Setenv(fleetGuardAPIKeyEnvEnv, "")
+
 	var gotArgv, gotEnv []string
 	orig := accountsLaunchRun
 	accountsLaunchRun = func(_, _ io.Writer, argv, env []string) launchRunResult {
@@ -262,11 +274,15 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 	if rc != 7 {
 		t.Fatalf("launch rc=%d (want the seam's 7); stderr=%s", rc, errb.String())
 	}
-	// The guard wrap must be present, ending in the passthrough args.
-	if len(gotArgv) < 4 || gotArgv[1] != "guard" || gotArgv[2] != "--" {
+	// The guard wrap must be present, carrying the on-by-default managed-cache posture before `--`
+	// and ending in the passthrough args.
+	if len(gotArgv) < 4 || gotArgv[1] != "guard" {
 		t.Fatalf("argv not a guard wrap: %#v", gotArgv)
 	}
 	joined := strings.Join(gotArgv, " ")
+	if !strings.Contains(joined, "guard --managed-cache on --") {
+		t.Fatalf("argv missing on-by-default managed-cache posture before --: %#v", gotArgv)
+	}
 	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel + " --settings " + ultracodeSettingsArg + " --resume xyz"
 	if !strings.HasSuffix(joined, wantTail) {
 		t.Fatalf("argv tail wrong: %q", joined)

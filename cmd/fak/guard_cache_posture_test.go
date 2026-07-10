@@ -12,8 +12,8 @@ func TestNormalizeManagedCacheMode(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"", "auto", false},
-		{"  ", "auto", false},
+		{"", "on", false},   // unset defaults to ON (operator policy: best-effort managed cache everywhere)
+		{"  ", "on", false}, // whitespace-only == unset
 		{"auto", "auto", false},
 		{"AUTO", "auto", false},
 		{"on", "on", false},
@@ -50,13 +50,17 @@ func TestGuardCachePostureArgs(t *testing.T) {
 		want      []string
 	}{
 		{
-			// The unconfigured fleet: auto + no api-key-env emits NOTHING, so the guard argv
-			// stays byte-identical and guard keeps its own auto (passive on subscription OAuth).
+			// EXPLICIT auto + no api-key-env emits NOTHING, so guard keeps its own billing-gated
+			// auto (passive on subscription OAuth). Note the shaper takes an already-normalized
+			// mode; an unset knob normalizes to "on" (tested in TestFleetGuardCachePostureArgs),
+			// not "auto".
 			name: "auto no key emits nothing",
 			mode: "auto",
 			want: nil,
 		},
 		{
+			// Defensive: a stray empty mode reaching the shaper directly is treated like auto and
+			// emits nothing. normalizeManagedCacheMode never returns "" (unset -> "on").
 			name: "empty mode no key emits nothing",
 			mode: "",
 			want: nil,
@@ -104,15 +108,17 @@ func TestGuardCachePostureArgs(t *testing.T) {
 }
 
 func TestFleetGuardCachePostureArgs(t *testing.T) {
-	// auto default (env unset) => no flags. t.Setenv restores the prior value on cleanup.
+	// Unconfigured fleet (env unset) => on-by-default: unset FAK_MANAGED_CACHE normalizes to "on"
+	// (operator policy), so the shaper emits --managed-cache on even with no api-key-env. t.Setenv
+	// restores the prior value on cleanup.
 	t.Setenv(fleetManagedCacheEnv, "")
 	t.Setenv(fleetGuardAPIKeyEnvEnv, "")
 	got, err := fleetGuardCachePostureArgs()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("unconfigured fleet should emit no posture flags, got %#v", got)
+	if want := []string{"--managed-cache", "on"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unconfigured fleet should default to managed-cache on, got %#v want %#v", got, want)
 	}
 
 	// Configured API-key fleet => --api-key-env + --managed-cache on.
@@ -146,7 +152,8 @@ func TestSpliceGuardPostureArgs(t *testing.T) {
 		t.Fatalf("spliced = %#v, want %#v", got, want)
 	}
 
-	// Empty posture returns the argv unchanged (unconfigured fleet is byte-identical).
+	// A nil posture returns the argv unchanged (splice is a no-op with no flags to add — e.g. an
+	// explicit-auto launcher). An unconfigured launcher is NO LONGER nil: it carries on.
 	if got := spliceGuardPostureArgs(base, nil); !reflect.DeepEqual(got, base) {
 		t.Fatalf("nil posture must be a no-op, got %#v", got)
 	}
