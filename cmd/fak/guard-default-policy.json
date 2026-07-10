@@ -157,6 +157,8 @@
     { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK",
       "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "(?i)\\b(?:Select-Object|Get-ChildItem|Get-Content|Get-Item|Get-ItemProperty|Get-Process|Get-Command|Where-Object|ForEach-Object|Measure-Object|Sort-Object|Group-Object|Format-Table|Format-List|Out-File|Set-Content|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item|Rename-Item|Test-Path|Set-Location|Get-Location|Select-String|Write-Output|Write-Host|Invoke-WebRequest|Invoke-RestMethod)\\b", "reason": "SHELL_DIALECT",
+      "fix": "PowerShell cmdlet submitted to the Bash tool — it fails `command not found` (exit 127). Use the PowerShell tool for cmdlet pipelines, or the POSIX equivalent in Bash (Select-Object->head/sed, Where-Object->grep, Measure-Object->wc, Get-Content->cat, Get-ChildItem->ls)." },
     { "tool": "Bash", "arg": "command", "deny_regex": "\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
       "fix": "produce the destroy plan for review instead: terraform plan -destroy; applying a destroy is operator-only" },
     { "tool": "Bash", "arg": "command", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",

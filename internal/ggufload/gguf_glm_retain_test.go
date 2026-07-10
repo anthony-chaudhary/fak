@@ -44,6 +44,38 @@ func TestGLMMoeDsaSkipGGUFTensorHonorsRetainMTP(t *testing.T) {
 	}
 }
 
+// TestGLMMoeDsaSkipGGUFTensorHonorsRetainVision is the vision twin of the RetainMTP test: the
+// CLIP image tower (v.*/mm.*) is dropped from byte-accounting by default and RETAINED (counted)
+// when model.RetainVision is set (#4029). The two retention flags are independent — the vision
+// flag leaves the MTP head at its own default and never affects forward tensors.
+func TestGLMMoeDsaSkipGGUFTensorHonorsRetainVision(t *testing.T) {
+	vision := "v.blk.0.attn_q.weight"
+	proj := "mm.0.weight"
+	nextn := "blk.78.nextn.eh_proj.weight"
+	kept := "blk.0.attn_k_b.weight"
+
+	// Default (flag OFF): vision dropped, byte-identical to the historical behavior.
+	if !glmMoeDsaSkipGGUFTensor(vision) {
+		t.Fatalf("RetainVision=off: skip(%q)=false, want true (vision dropped by default)", vision)
+	}
+
+	// Flag ON: both vision namespaces retained; MTP head still at its own default; forward kept.
+	defer func() { model.RetainVision = false }()
+	model.RetainVision = true
+	if glmMoeDsaSkipGGUFTensor(vision) {
+		t.Fatalf("RetainVision=on: skip(%q)=true, want false (vision tower retained)", vision)
+	}
+	if glmMoeDsaSkipGGUFTensor(proj) {
+		t.Fatalf("RetainVision=on: skip(%q)=true, want false (projector retained)", proj)
+	}
+	if !glmMoeDsaSkipGGUFTensor(nextn) {
+		t.Fatalf("RetainVision=on: skip(%q)=false, want true (MTP head still dropped by its own flag)", nextn)
+	}
+	if glmMoeDsaSkipGGUFTensor(kept) {
+		t.Fatalf("RetainVision=on: skip(%q)=true, want false (forward tensor kept)", kept)
+	}
+}
+
 // TestGLMMoeDsaMTPOrVisionTensorIgnoresRetainMTP pins the loader-safety contract: the ungated
 // union that the materializing loaders + the CPU-offload classifier key on ALWAYS reports the
 // MTP head and vision tower, regardless of RetainMTP — because the GGUF MTP head has no canonical

@@ -192,16 +192,19 @@ func glmMoeDsaMTPOrVisionTensorForType(modelType, name string) bool {
 }
 
 // glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor should be DROPPED from load
-// byte-accounting. The vision tower is always dropped (never wired). The MTP ("nextn") head is
-// dropped by DEFAULT — llama.cpp likewise ignores it ("model has unused tensor blk.<L>.nextn.*")
-// — but is RETAINED (counted) when model.RetainMTP is set: the GLM-5.2 self-speculation substrate
-// scaffold (#3078/#3197). Retention makes the head's bytes accountable to the fit estimators;
-// materializing it into the forward is a separate, later slice. Default (flag OFF) is byte-
-// identical to the historical drop-everything behavior. Mirrors the safetensors path's
-// skipLoadTensor mtp/visual drop.
+// byte-accounting. Both non-causal-LM families it recognizes — the vision tower and the MTP
+// ("nextn") head — are dropped by DEFAULT (llama.cpp likewise ignores the nextn head, "model has
+// unused tensor blk.<L>.nextn.*"), but each is RETAINED (counted) when its retention flag is set:
+// model.RetainMTP for the self-speculation head (#3078/#3197), model.RetainVision for the CLIP
+// image tower (#4029). Retention makes the tensors' bytes ACCOUNTABLE to the fit estimators
+// WITHOUT materializing them into the text forward — the materialize path keys on the UNGATED
+// glmMoeDsaMTPOrVisionTensor (gguf_weightsource.go), so a retained vision tower is reserved fit
+// budget, never a v.* tensor fed to the text decoder. Default (both flags OFF) is byte-identical
+// to the historical drop-everything behavior. Mirrors the safetensors path's skipLoadTensor
+// mtp/visual drop.
 func glmMoeDsaSkipGGUFTensor(name string) bool {
 	if isGLMMoeDsaVisionTensor(name) {
-		return true
+		return !model.RetainVision
 	}
 	if isGLMMoeDsaMTPTensor(name) {
 		return !model.RetainMTP

@@ -262,6 +262,55 @@ func TestGuardDefaultPolicyHermesReasons(t *testing.T) {
 	}
 }
 
+// TestGuardDefaultPolicyDeniesPowerShellCmdletsInBash is the #3941 end-to-end drift
+// guard: the REAL embedded floor must DENY a PowerShell cmdlet submitted to the POSIX
+// Bash tool with reason SHELL_DIALECT (it fails `command not found`, exit 127), while
+// still ALLOWING the POSIX equivalents. This exercises the shipped JSON → recognizer →
+// structural path, so a divergence between guard-default-policy.json's deny_regex and
+// defaultShellDialectDenyRegex (which would silently drop back to the false-positive
+// raw-regex path) fails here.
+func TestGuardDefaultPolicyDeniesPowerShellCmdletsInBash(t *testing.T) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		t.Fatalf("embedded guard floor is not a valid manifest: %v", err)
+	}
+	adj := adjudicator.New(rt.Adjudicator)
+	res := abi.ActiveResolver()
+	if res == nil {
+		t.Fatal("no Ref resolver registered (internal/registrations blank import missing)")
+	}
+	decide := func(cmd string) abi.Verdict {
+		b, err := json.Marshal(map[string]string{"command": cmd})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		ref, err := res.Put(context.Background(), b)
+		if err != nil {
+			t.Fatalf("put args: %v", err)
+		}
+		return adj.Adjudicate(context.Background(), &abi.ToolCall{Tool: "Bash", Args: ref})
+	}
+
+	for _, cmd := range []string{
+		`Get-ChildItem | Select-Object -First 5`,
+		`Where-Object { $_ -gt 5 }`,
+		`cat access.log | Measure-Object -Line`,
+	} {
+		v := decide(cmd)
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonShellDialect {
+			t.Errorf("cmdlet %q: shipped floor gave %v/%s, want Deny/SHELL_DIALECT",
+				cmd, verdictName(v.Kind), abi.ReasonName(v.Reason))
+		}
+	}
+	// The POSIX equivalents the refusal points at must NOT be caught.
+	for _, cmd := range []string{`ls -la`, `head -5 file | wc -l`, `grep Select-Object src`} {
+		if v := decide(cmd); v.Kind != abi.VerdictAllow {
+			t.Errorf("benign %q: shipped floor gave %v/%s, want Allow",
+				cmd, verdictName(v.Kind), abi.ReasonName(v.Reason))
+		}
+	}
+}
+
 func TestGuardDetectProvider(t *testing.T) {
 	cases := []struct {
 		command        string
@@ -1246,6 +1295,23 @@ func TestFormatAuditSummary(t *testing.T) {
 	// not print a vacuous prune line.
 	if strings.Contains(clean, "tool-floor prune") {
 		t.Errorf("a run with no tool-floor prune must not print a prune line:\n%s", clean)
+	}
+
+	// Cold-tool deferral (the OUTBOUND 10x floor lever, --defer-cold-tools #3232): when fak deferred
+	// the cold tool tail the line names the count + turns and flags the drop as OBSERVED (provider-
+	// side), NOT a request-byte shrink like the prune above.
+	deferred := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 4, Allowed: 4, DeferColdCount: 7, DeferColdTurns: 3,
+	})
+	for _, want := range []string{"cold-tool deferral", "7 cold tool def(s)", "across 3 turn(s)", "OBSERVED on /metrics"} {
+		if !strings.Contains(deferred, want) {
+			t.Errorf("cold-tool-defer summary missing %q:\n%s", want, deferred)
+		}
+	}
+	// A run that deferred nothing (the default-off path, or an all-hot session) must not print a
+	// vacuous deferral line.
+	if strings.Contains(clean, "cold-tool deferral") {
+		t.Errorf("a run with no cold-tool deferral must not print a deferral line:\n%s", clean)
 	}
 }
 

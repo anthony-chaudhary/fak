@@ -1,9 +1,30 @@
 package model
 
 import (
+	"encoding/binary"
+	"math"
 	"strings"
 	"testing"
 )
+
+// packDecoder builds a decoder-style (manifest, raw f32 LE) pair from named tensors,
+// mirroring how Load/LoadSafetensors lay weights out — the input extractQwen35VisionTower
+// segregates a retained vision tower out of.
+func packDecoder(tensors []NamedTensorF32) (map[string]tensorMeta, []byte) {
+	man := make(map[string]tensorMeta, len(tensors))
+	var raw []byte
+	off := 0
+	for _, tsr := range tensors {
+		start := len(raw)
+		raw = append(raw, make([]byte, len(tsr.Data)*4)...)
+		for i, v := range tsr.Data {
+			binary.LittleEndian.PutUint32(raw[start+i*4:], math.Float32bits(v))
+		}
+		man[tsr.Name] = tensorMeta{Dtype: "f32", Shape: append([]int(nil), tsr.Shape...), Offset: off, Nbytes: len(tsr.Data) * 4}
+		off += len(tsr.Data) * 4
+	}
+	return man, raw
+}
 
 // vision_test.go covers the VisionTower substrate (#4029): the resident vision
 // weight stack (NewVisionTower round-trip + byte accounting) and the vision
@@ -146,5 +167,61 @@ func TestResolveVisionTensorNamesMissingErrors(t *testing.T) {
 	}
 	if want := "v.blk.0.attn_out.weight"; !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %q does not name the missing tensor %q", err, want)
+	}
+}
+
+func TestExtractQwen35VisionTower(t *testing.T) {
+	man, raw := packDecoder([]NamedTensorF32{
+		{Name: "model.embed_tokens.weight", Shape: []int{2, 2}, Data: []float32{1, 2, 3, 4}},
+		{Name: "model.visual.patch_embed.proj.weight", Shape: []int{2}, Data: []float32{5, 6}},
+		{Name: "model.visual.blocks.0.attn.q.weight", Shape: []int{2}, Data: []float32{7, 8}},
+		{Name: "model.visual.blocks.1.attn.q.weight", Shape: []int{2}, Data: []float32{9, 10}},
+	})
+	tw, err := extractQwen35VisionTower(man, raw)
+	if err != nil {
+		t.Fatalf("extractQwen35VisionTower: %v", err)
+	}
+	if tw == nil {
+		t.Fatal("nil tower for a manifest carrying model.visual.* tensors")
+	}
+	if tw.Cfg.NumLayers != 2 { // blocks.0 + blocks.1
+		t.Fatalf("NumLayers=%d, want 2 (derived from block indices)", tw.Cfg.NumLayers)
+	}
+	// The decoder tensor stays; every model.visual.* is segregated out of the manifest.
+	if _, ok := man["model.embed_tokens.weight"]; !ok {
+		t.Fatal("decoder tensor was removed from the manifest")
+	}
+	for _, n := range []string{"model.visual.patch_embed.proj.weight", "model.visual.blocks.0.attn.q.weight", "model.visual.blocks.1.attn.q.weight"} {
+		if _, ok := man[n]; ok {
+			t.Fatalf("vision tensor %s left in the decoder manifest", n)
+		}
+	}
+	// Data round-trips into the tower.
+	got := tw.tensor("model.visual.blocks.1.attn.q.weight")
+	if len(got) != 2 || got[0] != 9 || got[1] != 10 {
+		t.Fatalf("vision tensor data=%v, want [9 10]", got)
+	}
+}
+
+func TestExtractQwen35VisionTowerNoneReturnsNil(t *testing.T) {
+	man, raw := packDecoder([]NamedTensorF32{
+		{Name: "model.embed_tokens.weight", Shape: []int{1}, Data: []float32{1}},
+	})
+	tw, err := extractQwen35VisionTower(man, raw)
+	if err != nil || tw != nil {
+		t.Fatalf("want (nil, nil) for a text-only manifest, got (%v, %v)", tw, err)
+	}
+	if _, ok := man["model.embed_tokens.weight"]; !ok {
+		t.Fatal("text-only extract disturbed the decoder manifest")
+	}
+}
+
+func TestCountIndexedChildren(t *testing.T) {
+	names := []string{"m.blocks.0.w", "m.blocks.3.w", "m.blocks.1.b", "m.other", "m.blocks.x.w"}
+	if got := countIndexedChildren(names, "m.blocks."); got != 4 { // max index 3 -> count 4
+		t.Fatalf("countIndexedChildren=%d, want 4", got)
+	}
+	if got := countIndexedChildren([]string{"x.y"}, "m.blocks."); got != 0 {
+		t.Fatalf("countIndexedChildren (no match)=%d, want 0", got)
 	}
 }

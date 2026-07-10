@@ -141,6 +141,90 @@ func (t *VisionTower) tensorOptional(name string) []float32 {
 	return nil
 }
 
+// extractQwen35VisionTower segregates the retained model.visual.* tensors out of a
+// decoder manifest+raw into a standalone VisionTower — the safetensors twin of
+// ggufload's mmproj VisionTower(). materializeQwen35Tensors leaves model.visual.* in
+// man when RetainVision is set; newModel calls this immediately after (before any
+// other pass sees them) so the vision stack lives on Model.Vision and the decoder
+// manifest holds only text weights. Returns (nil, nil) when the checkpoint carries no
+// vision tensors. The tower's geometry is derived from the tensor names (block count);
+// finer vision_config geometry is pinned by the encoder slice (#4030).
+func extractQwen35VisionTower(man map[string]tensorMeta, raw []byte) (*VisionTower, error) {
+	const prefix = "model.visual."
+	var names []string
+	for n := range man {
+		if strings.HasPrefix(n, prefix) {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	sort.Strings(names)
+	tensors := make([]NamedTensorF32, 0, len(names))
+	for _, n := range names {
+		meta := man[n]
+		if meta.Nbytes%4 != 0 {
+			return nil, fmt.Errorf("model: vision tensor %s is %d bytes, not an f32 multiple", n, meta.Nbytes)
+		}
+		nf := meta.Nbytes / 4
+		if meta.Offset < 0 || meta.Offset+meta.Nbytes > len(raw) {
+			return nil, fmt.Errorf("model: vision tensor %s [%d,%d) out of raw bounds %d", n, meta.Offset, meta.Offset+meta.Nbytes, len(raw))
+		}
+		data := make([]float32, nf)
+		for i := 0; i < nf; i++ {
+			data[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[meta.Offset+i*4:]))
+		}
+		shape := append([]int(nil), meta.Shape...)
+		tensors = append(tensors, NamedTensorF32{Name: n, Shape: shape, Data: data})
+		delete(man, n)
+	}
+	cfg := VisionConfig{NumLayers: countIndexedChildren(names, prefix+"blocks."), MergeSize: 1}
+	return NewVisionTower(cfg, tensors)
+}
+
+// countIndexedChildren returns one past the highest <n> across names of the form
+// "<prefix><n>." — i.e. the block/layer count of an indexed tensor family. Names that
+// do not carry a parseable index under prefix are ignored.
+func countIndexedChildren(names []string, prefix string) int {
+	max := -1
+	for _, n := range names {
+		if !strings.HasPrefix(n, prefix) {
+			continue
+		}
+		rest := n[len(prefix):]
+		dot := strings.IndexByte(rest, '.')
+		if dot <= 0 {
+			continue
+		}
+		idx, ok := atoiStrict(rest[:dot])
+		if !ok {
+			continue
+		}
+		if idx > max {
+			max = idx
+		}
+	}
+	return max + 1
+}
+
+// atoiStrict parses a non-negative base-10 integer, rejecting empty/non-digit input
+// (so "blocks.<n>" indices are read without pulling strconv into this hot package).
+func atoiStrict(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
+}
+
 // ---- vision tensor-name resolver (the #4029 proof) ---------------------------------
 //
 // The vision tower is NOT one of the decoder families resolveSpecFor routes, so it

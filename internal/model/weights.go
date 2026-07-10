@@ -298,6 +298,19 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	if err := materializeQwen35Tensors(cfg, man); err != nil {
 		return nil, err
 	}
+	// Segregate the retained inline vision tower (model.visual.*) into Model.Vision
+	// BEFORE any other pass sees it, so the decoder manifest below holds only text
+	// weights. Only reached when RetainVision is set (the --mmproj flag, #4032);
+	// materializeQwen35Tensors drops model.visual.* otherwise, so this is nil for a
+	// default text load and the proven decoder path is unchanged.
+	var vision *VisionTower
+	if RetainVision {
+		vt, err := extractQwen35VisionTower(man, raw)
+		if err != nil {
+			return nil, err
+		}
+		vision = vt
+	}
 	if err := materializeTensorAliases(cfg, man); err != nil {
 		return nil, err
 	}
@@ -334,7 +347,7 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	if err := materializeMiniMaxSharedExperts(cfg, man); err != nil {
 		return nil, err
 	}
-	return &Model{Cfg: cfg, manifest: man, raw: raw}, nil
+	return &Model{Cfg: cfg, manifest: man, raw: raw, Vision: vision}, nil
 }
 
 // Load reads a directory produced by export_oracle.py (config.json, manifest.json,

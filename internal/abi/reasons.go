@@ -25,7 +25,8 @@ const (
 	ReasonUnknownTool                        // use a tool in the registry; this one is not
 	ReasonSecretDiscovered                   // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
 	ReasonSecretRedacted                     // a credential span in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, distinct from the SECRET_EXFIL seal
-	// 16.. reserved for additive core reasons; register out-of-tree names via
+	ReasonShellDialect                       // a command in the wrong shell dialect for the tool (a PowerShell cmdlet submitted to the POSIX Bash tool) — it fails `command not found` (exit 127) before doing anything; MODEL-FIXABLE by re-routing to the PowerShell tool or the POSIX equivalent [#3941]
+	// 17.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023
 )
@@ -46,6 +47,7 @@ var coreReasonNames = map[ReasonCode]string{
 	ReasonUnknownTool:      "UNKNOWN_TOOL",
 	ReasonSecretDiscovered: "RESULT_SECRET_DISCOVERED",
 	ReasonSecretRedacted:   "SECRET_REDACTED",
+	ReasonShellDialect:     "SHELL_DIALECT",
 }
 
 // ReasonName resolves a reason code to its stable name, consulting the closed
@@ -122,4 +124,4 @@ func sortStrings(s []string) {
 
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
 // referenced by tests asserting the closed reason set.
-const CoreReasonCount = 14
+const CoreReasonCount = 15

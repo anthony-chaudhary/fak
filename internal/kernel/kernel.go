@@ -630,11 +630,12 @@ func DenyResult(c *abi.ToolCall, v abi.Verdict) *abi.Result {
 }
 
 // Disposition derives the deny-loopback disposition (RETRYABLE / WAIT / ESCALATE /
-// TERMINAL) from the reason's category. Only MISROUTE is model-fixable
-// (RETRYABLE); the rest steer the loop without another wasted model turn.
+// TERMINAL) from the reason's category. MISROUTE and SHELL_DIALECT are model-fixable
+// (RETRYABLE — the model re-routes to the right tool/dialect); the rest steer the
+// loop without another wasted model turn.
 func Disposition(r abi.ReasonCode) string {
 	switch r {
-	case abi.ReasonMisroute, abi.ReasonMalformed:
+	case abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect:
 		return "RETRYABLE"
 	case abi.ReasonRateLimited, abi.ReasonLeaseHeld:
 		return "WAIT"

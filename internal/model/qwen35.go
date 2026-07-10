@@ -48,7 +48,10 @@ func (c Config) isLinearAttnLayer(l int) bool {
 // canonical "model." scheme the loader/forward expect. The HF checkpoint nests the LM
 // under "model.language_model.", and ships a vision tower ("model.visual.") plus a
 // multi-token-prediction head ("mtp.") that text generation never reads; we rename the LM
-// tensors and drop the rest so the standard layer-prefix lookups resolve.
+// tensors and drop the rest so the standard layer-prefix lookups resolve. The vision
+// tower is dropped by DEFAULT, but RETAINED in place (left in man for newModel to segregate
+// into Model.Vision) when RetainVision is set — the safetensors twin of the GGUF mmproj
+// retain (#4029). The MTP head is always dropped (its retention is the separate #3078 slice).
 func materializeQwen35Tensors(cfg Config, man map[string]tensorMeta) error {
 	if !cfg.IsQwen35Hybrid() {
 		return nil
@@ -60,7 +63,11 @@ func materializeQwen35Tensors(cfg Config, man map[string]tensorMeta) error {
 		switch {
 		case strings.HasPrefix(name, lm):
 			renames[name] = "model." + name[len(lm):]
-		case strings.HasPrefix(name, "model.visual."), strings.HasPrefix(name, "mtp."):
+		case strings.HasPrefix(name, "model.visual."):
+			if !RetainVision {
+				drop = append(drop, name)
+			}
+		case strings.HasPrefix(name, "mtp."):
 			drop = append(drop, name)
 		}
 	}

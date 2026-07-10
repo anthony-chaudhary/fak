@@ -1004,6 +1004,60 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				}
 				continue
 			}
+			// The OUT-OF-TREE WRITE family (-o / --output / redirect / cp-family `..`
+			// rules) is decided STRUCTURALLY, not by the raw `..`-substring regex, for
+			// the same reason as rm_rf/rce_pipe. The raw regex both false-DENIES a write
+			// that resolves IN-TREE or into the sanctioned harness scratchpad (reached
+			// via `..`) — a false POLICY_BLOCK that under `fak guard -- claude` reads as
+			// an agent-chosen end_turn and silently kills the turn — and MISSES absolute
+			// / `$HOME` escapes. outOfTreeWriteEscapes is fail-closed and purely
+			// SUBTRACTIVE: it downgrades the deny to an allow ONLY when EVERY write
+			// destination provably resolves under the workspace root or a declared
+			// scratchpad root; any escaping, unprovable ($VAR/glob), undecodable, or
+			// unidentifiable destination — or an unknown workspace root — keeps the deny.
+			// Gated on the raw match (rawMatches=true) so it never introduces a NEW deny
+			// for a command the regex would not have flagged.
+			if isOutOfTreeWriteArgRule(pr) {
+				if present {
+					canon, ok := canonicalizeArgValue(val)
+					if !ok {
+						return argMalformed(pr), true, notes
+					}
+					if pr.Re != nil && pr.Re.MatchString(canon) {
+						ws, scratch := outOfTreeRoots()
+						if outOfTreeWriteEscapes(val, ws, scratch, true) {
+							if pr.Advisory {
+								note(pr, "out_of_tree_write")
+								continue
+							}
+							return argDeny(pr, "out_of_tree_write"), true, notes
+						}
+						// proven in-tree/scratchpad: the raw regex was a false positive
+					}
+				}
+				continue
+			}
+			// The CROSS-SHELL-DIALECT rule (#3941) is decided STRUCTURALLY, not by the
+			// raw regex, for the same reason as rm_rf/rce_pipe: a raw `\bGet-Content\b`
+			// false-positives on the cmdlet name as an argument (`grep Get-Content f`)
+			// or quoted (`echo 'Get-Content'`) — a false POLICY_BLOCK that under
+			// `fak guard -- claude` reads as an agent-chosen end_turn. commandLeadsWith-
+			// PowerShellCmdlet tokenizes the command (quoted words are never a command
+			// word), unwraps sh -c / $() / ``, and matches a curated cmdlet ONLY at a
+			// stage's resolved command-word position. The refusal names the recovery
+			// (PowerShell tool, or the POSIX equivalent) so it is a redirect, not a wall.
+			if isShellDialectArgRule(pr) {
+				if present {
+					if cmdlet, ok := commandLeadsWithPowerShellCmdlet(val); ok {
+						if pr.Advisory {
+							note(pr, "shell_dialect "+cmdlet)
+							continue
+						}
+						return argDeny(pr, "shell_dialect "+cmdlet), true, notes
+					}
+				}
+				continue
+			}
 			// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
 			// arg string alone let a backslash, dot-segment, env-alias, or quote-style
 			// spelling of the same value slip a rule written against its canonical

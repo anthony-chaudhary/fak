@@ -666,10 +666,11 @@ func TestResultLadderParity(t *testing.T) {
 
 func TestDispositionMapping(t *testing.T) {
 	cases := map[abi.ReasonCode]string{
-		abi.ReasonMisroute:    "RETRYABLE",
-		abi.ReasonRateLimited: "WAIT",
-		abi.ReasonSelfModify:  "ESCALATE",
-		abi.ReasonPolicyBlock: "TERMINAL",
+		abi.ReasonMisroute:     "RETRYABLE",
+		abi.ReasonShellDialect: "RETRYABLE", // #3941: wrong-shell-dialect is model-fixable (re-route the tool)
+		abi.ReasonRateLimited:  "WAIT",
+		abi.ReasonSelfModify:   "ESCALATE",
+		abi.ReasonPolicyBlock:  "TERMINAL",
 	}
 	for r, want := range cases {
 		if got := Disposition(r); got != want {
