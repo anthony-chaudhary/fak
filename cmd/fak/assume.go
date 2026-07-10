@@ -55,9 +55,10 @@ import (
 
 func cmdAssume(argv []string) { os.Exit(runAssume(os.Stdout, os.Stderr, argv)) }
 
-const assumeUsage = `usage: fak assume <check|list>
+const assumeUsage = `usage: fak assume <check|list|loop>
   fak assume check <assumption-id> [--seat <name>] [--registry <path>] [--home <dir>] [--no-headroom] [--json]
-  fak assume list [--json]`
+  fak assume list [--json]
+  fak assume loop [--once] [--interval <dur>] [--floor <dur>] [--store <path>] [--deliver --steer-session <id>] [--json]`
 
 // runAssume is the testable core (stdout/stderr injected, exit code returned).
 func runAssume(stdout, stderr io.Writer, argv []string) int {
@@ -70,6 +71,8 @@ func runAssume(stdout, stderr io.Writer, argv []string) int {
 		return runAssumeCheck(stdout, stderr, argv[1:])
 	case "list":
 		return runAssumeList(stdout, stderr, argv[1:])
+	case "loop":
+		return runAssumeLoop(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintln(stderr, assumeUsage)
 		return 2
