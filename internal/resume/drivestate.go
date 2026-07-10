@@ -135,8 +135,18 @@ type DriveStateRow struct {
 	Reason string `json:"reason,omitempty"`
 	// Via names what wrote the row (e.g. "fak resume hold"), for provenance.
 	Via string `json:"via,omitempty"`
-	// Carry is optional so legacy hold-only rows decode unchanged.
-	Carry *DriveCarry `json:"carry,omitempty"`
+
+	// Carry fields are additive and top-level so old JSONL remains readable and
+	// producers can append a carry row without manufacturing a hold token.
+	TurnsLeft           *int64 `json:"turns_left,omitempty"`
+	TokensLeft          *int64 `json:"tokens_left,omitempty"`
+	ContextTokensLeft   *int64 `json:"context_tokens_left,omitempty"`
+	SpendMicroCentsLeft *int64 `json:"spend_micro_cents_left,omitempty"`
+	TimeLeftNanos       *int64 `json:"time_left_nanos,omitempty"`
+	Generation          *int   `json:"generation,omitempty"`
+	ObjectivePinID      string `json:"objective_pin_id,omitempty"`
+	ObjectiveText       string `json:"objective_text,omitempty"`
+	ObjectiveDigest     string `json:"objective_digest,omitempty"`
 }
 
 // FoldDriveStates folds the append-only rows into the one current drive-state per
@@ -167,10 +177,43 @@ func FoldDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
 	out := make(map[string]DriveCarry)
 	for _, row := range rows {
 		sid := strings.TrimSpace(row.Session)
-		if sid == "" || row.Carry == nil {
+		if sid == "" || !row.hasCarry() {
 			continue
 		}
-		out[sid] = *row.Carry
+		out[sid] = row.driveCarry()
 	}
 	return out
+}
+
+func (row DriveStateRow) hasCarry() bool {
+	return row.TurnsLeft != nil || row.TokensLeft != nil || row.ContextTokensLeft != nil ||
+		row.SpendMicroCentsLeft != nil || row.TimeLeftNanos != nil || row.Generation != nil ||
+		row.ObjectivePinID != "" || row.ObjectiveText != "" || row.ObjectiveDigest != ""
+}
+
+func (row DriveStateRow) driveCarry() DriveCarry {
+	carry := DriveCarry{
+		ObjectivePinID:  row.ObjectivePinID,
+		ObjectiveText:   row.ObjectiveText,
+		ObjectiveDigest: row.ObjectiveDigest,
+	}
+	if row.TurnsLeft != nil {
+		carry.TurnsLeft = *row.TurnsLeft
+	}
+	if row.TokensLeft != nil {
+		carry.TokensLeft = *row.TokensLeft
+	}
+	if row.ContextTokensLeft != nil {
+		carry.ContextTokensLeft = *row.ContextTokensLeft
+	}
+	if row.SpendMicroCentsLeft != nil {
+		carry.SpendMicroCentsLeft = *row.SpendMicroCentsLeft
+	}
+	if row.TimeLeftNanos != nil {
+		carry.TimeLeftNanos = *row.TimeLeftNanos
+	}
+	if row.Generation != nil {
+		carry.Generation = *row.Generation
+	}
+	return carry
 }
