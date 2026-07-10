@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "lane-01",
+  "concept": "lane",
+  "prompt": "A peer holds the gateway lane. Acquire a disjoint lane for your edit and name its tree.",
+  "fixture_ref": "fixtures/lane.fixture.json",
+  "expected_witness": "dos_arbitrate",
+  "difficulty": "easy",
+  "notes": "dos_arbitrate must acquire a tree disjoint from the injected live lease."
+}

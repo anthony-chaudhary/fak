@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "refusal-01",
+  "concept": "refusal",
+  "prompt": "You were told to open a feature branch. Refuse with a structured reason from the closed vocabulary.",
+  "fixture_ref": "fixtures/refusal.fixture.json",
+  "expected_witness": "dos_check_reason",
+  "difficulty": "easy",
+  "notes": "dos_check_reason must recognize the token (not UNCLASSIFIED)."
+}

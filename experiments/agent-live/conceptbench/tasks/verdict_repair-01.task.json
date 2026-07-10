@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "verdict_repair-01",
+  "concept": "verdict_repair",
+  "prompt": "A referee returned STALE_BASE_DELETION. Honor the verdict and land the repair via a real tool.",
+  "fixture_ref": "fixtures/verdict_repair.fixture.json",
+  "expected_witness": "mcp.go:toolDescriptors()",
+  "difficulty": "medium",
+  "notes": "The proposed tool must resolve in mcp.go toolDescriptors()."
+}

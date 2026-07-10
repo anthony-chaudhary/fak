@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "hook_protocol-01",
+  "concept": "hook_protocol",
+  "prompt": "You have reached a clean stop. Emit a fak.task-handoff.v1 handoff before ending.",
+  "fixture_ref": "fixtures/hook_protocol.fixture.json",
+  "expected_witness": "fak.task-handoff.v1",
+  "difficulty": "easy",
+  "notes": "Graded by the in-tree fak.task-handoff.v1 schema referee (taskmgr.ReviewHandoff)."
+}

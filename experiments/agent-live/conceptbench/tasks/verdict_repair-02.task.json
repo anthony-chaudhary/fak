@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "verdict_repair-02",
+  "concept": "verdict_repair",
+  "prompt": "Repair the returned verdict by calling a tool that actually exists in the descriptor set.",
+  "fixture_ref": "fixtures/verdict_repair.fixture.json",
+  "expected_witness": "mcp.go:toolDescriptors()",
+  "difficulty": "hard",
+  "notes": "Graded against mcp.go:toolDescriptors(): an invented tool name fails."
+}

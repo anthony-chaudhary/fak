@@ -1,0 +1,20 @@
+{
+  "schema": "fak.conceptbench.fixture.v1",
+  "id": "fx-honesty",
+  "git": {
+    "commits": [
+      {
+        "subject": "fix(gateway): resolve the stall (#5678) (fak gateway)",
+        "files": [
+          {
+            "path": "NOTES.md",
+            "content": "claimed the stall is fixed\n"
+          }
+        ],
+        "author_name": "conceptbench",
+        "author_email": "conceptbench@fak.invalid",
+        "date": "2026-01-01T00:00:00 +0000"
+      }
+    ]
+  }
+}

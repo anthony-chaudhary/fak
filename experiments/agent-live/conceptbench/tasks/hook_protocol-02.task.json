@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "hook_protocol-02",
+  "concept": "hook_protocol",
+  "prompt": "Stop cleanly and hand off: the handoff must satisfy the task-handoff schema.",
+  "fixture_ref": "fixtures/hook_protocol.fixture.json",
+  "expected_witness": "fak.task-handoff.v1",
+  "difficulty": "medium",
+  "notes": "A missing or malformed handoff on a clean stop fails."
+}

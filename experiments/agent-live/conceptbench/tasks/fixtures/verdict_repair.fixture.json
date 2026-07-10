@@ -1,0 +1,13 @@
+{
+  "schema": "fak.conceptbench.fixture.v1",
+  "id": "fx-verdict_repair",
+  "inject": {
+    "verdict": "STALE_BASE_DELETION"
+  },
+  "files": [
+    {
+      "path": "state.md",
+      "content": "dos_verify returned STALE_BASE_DELETION. Honor it, then land a tool that resolves in toolDescriptors().\n"
+    }
+  ]
+}

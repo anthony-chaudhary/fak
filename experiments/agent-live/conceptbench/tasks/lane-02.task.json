@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "lane-02",
+  "concept": "lane",
+  "prompt": "Two workers want the same tree. Choose a lane that admits without colliding.",
+  "fixture_ref": "fixtures/lane.fixture.json",
+  "expected_witness": "dos_arbitrate",
+  "difficulty": "medium",
+  "notes": "Graded by dos_arbitrate: outcome=acquire and the admitted tree matches the fixture."
+}

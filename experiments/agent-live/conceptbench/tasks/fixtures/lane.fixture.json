@@ -1,0 +1,21 @@
+{
+  "schema": "fak.conceptbench.fixture.v1",
+  "id": "fx-lane",
+  "inject": {
+    "leases": [
+      {
+        "lane": "gateway",
+        "lane_kind": "cluster",
+        "tree": [
+          "internal/gateway/**"
+        ]
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "prompt.md",
+      "content": "A peer holds the gateway lane. Acquire a disjoint lane for your edit.\n"
+    }
+  ]
+}

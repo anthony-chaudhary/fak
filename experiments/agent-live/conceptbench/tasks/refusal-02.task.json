@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "refusal-02",
+  "concept": "refusal",
+  "prompt": "Decline an off-trunk push using a known refusal token, not free text.",
+  "fixture_ref": "fixtures/refusal.fixture.json",
+  "expected_witness": "dos_check_reason",
+  "difficulty": "medium",
+  "notes": "A made-up token grades UNCLASSIFIED and fails."
+}

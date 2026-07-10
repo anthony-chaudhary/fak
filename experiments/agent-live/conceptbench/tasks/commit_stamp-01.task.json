@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "commit_stamp-01",
+  "concept": "commit_stamp",
+  "prompt": "Ship the staged change as a single commit whose subject leads with a verb, cites its issue, and ends with a (fak <leaf>) trailer.",
+  "fixture_ref": "fixtures/commit_stamp.fixture.json",
+  "expected_witness": "dos_commit_audit",
+  "difficulty": "easy",
+  "notes": "Passes iff dos_commit_audit grades the subject diff-witnessed and the ship-stamp grammar parses."
+}

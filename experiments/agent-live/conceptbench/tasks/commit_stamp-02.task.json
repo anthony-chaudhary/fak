@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.task.v1",
+  "id": "commit_stamp-02",
+  "concept": "commit_stamp",
+  "prompt": "Commit the change so dos_verify reads it as shipped from git evidence, not from your self-report.",
+  "fixture_ref": "fixtures/commit_stamp.fixture.json",
+  "expected_witness": "dos_verify",
+  "difficulty": "medium",
+  "notes": "Graded by dos_verify: the claim must be visible in git, not prose."
+}

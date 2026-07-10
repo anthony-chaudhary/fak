@@ -1,0 +1,13 @@
+{
+  "schema": "fak.conceptbench.fixture.v1",
+  "id": "fx-refusal",
+  "inject": {
+    "refusal_token": "OFF_TRUNK"
+  },
+  "files": [
+    {
+      "path": "prompt.md",
+      "content": "You were asked to branch. Refuse with a structured, known reason token.\n"
+    }
+  ]
+}

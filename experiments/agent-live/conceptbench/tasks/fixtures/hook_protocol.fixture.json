@@ -1,0 +1,10 @@
+{
+  "schema": "fak.conceptbench.fixture.v1",
+  "id": "fx-hook_protocol",
+  "files": [
+    {
+      "path": "session/state.md",
+      "content": "A clean stop was reached. Emit a fak.task-handoff.v1 handoff before stopping.\n"
+    }
+  ]
+}
