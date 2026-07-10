@@ -744,6 +744,141 @@ def test_py_and_ps1_name_the_same_posture_env_knobs():
     assert wd.FLEET_MANAGED_CACHE_ENV in ps1 and wd.FLEET_GUARD_API_KEY_ENV_ENV in ps1
 
 
+# ---- bounded artifacts (#3497): retention at the write sites --------------------
+#
+# The watchdog runs unattended under cron (~288 ticks/day), so every artifact it
+# appends must carry an inline bound: per-resume log pairs expire at the launch
+# site, the tick/notification logs rotate at a size cap, and the resume-once
+# ledger compacts past its window (which also bounds the per-tick re-parse).
+
+import json as _jsonmod
+import time as _time
+from datetime import datetime as _dtc, timezone as _tzc
+
+
+def _aged(path, days):
+    t = _time.time() - days * 86400
+    os.utime(path, (t, t))
+
+
+def _ts_days_ago(days):
+    return _dtc.fromtimestamp(_time.time() - days * 86400, tz=_tzc.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_prune_resume_logs_removes_only_expired_pairs(tmp_path):
+    wd = _reload({})
+    old_log = tmp_path / "resume-aaaa1111-1700000000.log"
+    old_err = tmp_path / "resume-aaaa1111-1700000000.log.err"
+    fresh = tmp_path / "resume-bbbb2222-1800000000.log"
+    tick_log = tmp_path / "resume_watchdog.log"  # wrong shape: rotates, never pruned
+    for p in (old_log, old_err, fresh, tick_log):
+        p.write_text("x", encoding="utf-8")
+    _aged(old_log, 20)
+    _aged(old_err, 20)
+    _aged(tick_log, 20)
+    removed = wd.prune_resume_logs(str(tmp_path), retain_days=14)
+    assert removed == 2
+    assert not old_log.exists() and not old_err.exists(), "expired pair must be pruned"
+    assert fresh.exists(), "a pair inside the window must survive"
+    assert tick_log.exists(), "the tick log is not a per-resume pair -- never pruned"
+
+
+def test_prune_resume_logs_zero_retention_disables(tmp_path):
+    wd = _reload({})
+    p = tmp_path / "resume-cccc3333-1700000000.log"
+    p.write_text("x", encoding="utf-8")
+    _aged(p, 365)
+    assert wd.prune_resume_logs(str(tmp_path), retain_days=0) == 0
+    assert p.exists()
+
+
+def test_rotate_log_caps_at_write_site(tmp_path):
+    wd = _reload({})
+    p = tmp_path / "resume_watchdog.log"
+    p.write_bytes(b"x" * 2048)
+    assert wd._rotate_log(str(p), max_bytes=1024) is True
+    assert not p.exists() and (tmp_path / "resume_watchdog.log.1").exists()
+    p.write_bytes(b"y" * 10)
+    assert wd._rotate_log(str(p), max_bytes=1024) is False, "under the cap: untouched"
+    assert p.exists()
+    # a second rotation replaces the kept generation -> on-disk total stays ~2x cap
+    p.write_bytes(b"z" * 2048)
+    assert wd._rotate_log(str(p), max_bytes=1024) is True
+    assert (tmp_path / "resume_watchdog.log.1").read_bytes()[:1] == b"z"
+
+
+def test_note_rotates_tick_log_when_capped(tmp_path, monkeypatch):
+    wd = _reload({"FAK_WATCHDOG_LOG_MAX_BYTES": "128"})
+    monkeypatch.setattr(wd, "LOG_DIR", str(tmp_path))
+    for i in range(12):
+        wd.note(f"tick filler line {i} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+    log = tmp_path / "resume_watchdog.log"
+    assert (tmp_path / "resume_watchdog.log.1").exists(), "cap passed -> rotated"
+    assert log.stat().st_size <= 128 + 100, "current log restarts near-empty after rotation"
+
+
+def test_compact_ledger_drops_expired_keeps_recent_overrides_and_unparsable(tmp_path):
+    wd = _reload({})
+    ledger = tmp_path / "resume_ledger.jsonl"
+    rows = [
+        {"ts": _ts_days_ago(40), "session": "old-dead", "phase": "launched"},
+        {"ts": _ts_days_ago(40), "session": "settled",
+         "action": "consolidate-resume-throttle-strand-2026-06-01"},
+        {"ts": _ts_days_ago(1), "session": "fresh", "phase": "launched"},
+        {"session": "no-ts", "phase": "launched"},
+    ]
+    body = "".join(_jsonmod.dumps(r) + "\n" for r in rows) + "not-json garbage line\n"
+    ledger.write_text(body, encoding="utf-8")
+    dropped = wd.compact_ledger(str(ledger), retain_days=30, compact_bytes=1)
+    assert dropped == 1, "only the expired non-override row is dropped"
+    kept = ledger.read_text(encoding="utf-8")
+    assert "old-dead" not in kept
+    assert "settled" in kept, "operator-settled rows are authoritative forever"
+    assert "fresh" in kept
+    assert "no-ts" in kept and "not-json garbage line" in kept, \
+        "rows the compactor cannot date are kept, never guessed away"
+
+
+def test_compact_ledger_below_threshold_is_untouched(tmp_path):
+    wd = _reload({})
+    ledger = tmp_path / "resume_ledger.jsonl"
+    body = _jsonmod.dumps({"ts": _ts_days_ago(400), "session": "ancient",
+                           "phase": "launched"}) + "\n"
+    ledger.write_text(body, encoding="utf-8")
+    assert wd.compact_ledger(str(ledger), retain_days=30,
+                             compact_bytes=1024 * 1024) == 0
+    assert ledger.read_text(encoding="utf-8") == body, \
+        "under the size threshold the common tick pays one getsize(), no rewrite"
+
+
+def test_compact_ledger_missing_file_is_noop(tmp_path):
+    wd = _reload({})
+    assert wd.compact_ledger(str(tmp_path / "absent.jsonl"), compact_bytes=1) == 0
+
+
+def test_compact_ledger_bounds_do_not_break_once_gate(tmp_path):
+    # End-to-end over the boundary: after compaction the surviving history still
+    # blocks a resumed-once session and still honors an operator settle.
+    wd = _reload({})
+    ledger = tmp_path / "resume_ledger.jsonl"
+    rows = [
+        {"ts": _ts_days_ago(40), "session": "sid-old", "phase": "launched", "attempt": 1},
+        {"ts": _ts_days_ago(40), "session": "sid-settled",
+         "action": "consolidate-resume-throttle-strand-2026-06-01"},
+    ]
+    ledger.write_text("".join(_jsonmod.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    wd.compact_ledger(str(ledger), retain_days=30, compact_bytes=1)
+    history = {}
+    for ln in ledger.read_text(encoding="utf-8").splitlines():
+        rec = _jsonmod.loads(ln)
+        history.setdefault(rec["session"], []).append(rec)
+    assert "sid-old" not in history, "expired attempt rows compact away"
+    blocked, why = wd.resume_blocked("sid-settled", history["sid-settled"])
+    assert blocked and "operator" in why.lower(), \
+        "an operator settle survives compaction and still gates"
+
+
 if __name__ == "__main__":
     import pytest
 

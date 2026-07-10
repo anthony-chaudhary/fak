@@ -23,6 +23,11 @@ Safety rails (faithful to the .ps1):
     all decided upstream by fleet_sessions.py when it writes the plan.
   * RESUME ONCE: ledger-gated, survives state-file loss.
   * Per-tick launch cap.
+  * BOUNDED ARTIFACTS (#3497): the tick/notification logs rotate at a size cap,
+    per-resume log pairs expire after a retention window, and the resume ledger
+    compacts past its window -- all inline at the write/read sites (this runs
+    unattended under cron ~288 ticks/day, so any unbounded append is a slow
+    disk leak and an ever-growing per-tick re-parse). No reaper process.
 
 Managed-cache posture (#2178; on-by-default 2026-07-10): a resumed child is fronted with its
 own `fak guard --managed-cache on --` by default (best-effort managed cache everywhere), so the
@@ -123,6 +128,20 @@ REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(HERE, "_registry"))
 # side-effect-free); override with FAK_PROBE=blocked|stale|all|none.
 PROBE_MODE = os.environ.get("FAK_PROBE", "auto").strip().lower()
 PROBE_MIN_INTERVAL_MIN = int(os.environ.get("FAK_PROBE_MIN_INTERVAL_MIN", "20"))
+# Retention bounds (#3497). Every artifact this watchdog appends to carries an
+# inline bound at the site that writes (or re-reads) it -- never a separate
+# reaper. 0 or negative disables the corresponding bound.
+#   * resume_watchdog.log / notifications.log rotate once past the size cap
+#     (one .1 generation kept, so the on-disk total is <= ~2x the cap each).
+#   * resume-<sid8>-<epoch>.log/.err pairs expire after LOG_RETAIN_DAYS,
+#     pruned at the launch site (the only place that creates a pair).
+#   * resume_ledger.jsonl compacts rows older than LEDGER_RETAIN_DAYS once the
+#     file passes LEDGER_COMPACT_BYTES, which also bounds the whole-ledger
+#     re-parse every tick performs to build the resume-once history.
+LOG_RETAIN_DAYS = float(os.environ.get("FAK_RESUME_LOG_RETAIN_DAYS", "14"))
+LOG_MAX_BYTES = int(os.environ.get("FAK_WATCHDOG_LOG_MAX_BYTES", str(5 * 1024 * 1024)))
+LEDGER_RETAIN_DAYS = float(os.environ.get("FAK_RESUME_LEDGER_RETAIN_DAYS", "30"))
+LEDGER_COMPACT_BYTES = int(os.environ.get("FAK_RESUME_LEDGER_COMPACT_BYTES", str(512 * 1024)))
 
 
 def resolve_probe_mode(setting: str, live: bool) -> str:
@@ -271,10 +290,127 @@ def is_resume_attempt_record(h: dict) -> bool:
     return h.get("action") in (None, "", "auto-resume")
 
 
+def _rotate_log(path: str, max_bytes: int | None = None) -> bool:
+    """Size-capped rotation at the append site (#3497): once ``path`` reaches the
+    cap, shift it to ``path + '.1'`` (replacing the previous generation) so the
+    next append starts a fresh file. One kept generation bounds the on-disk total
+    at ~2x the cap while preserving the most recent history for an operator.
+    Best-effort: a concurrent holder (Windows lock) or a vanished file must never
+    crash a tick, so every OS error reads as 'did not rotate'."""
+    limit = LOG_MAX_BYTES if max_bytes is None else max_bytes
+    if limit <= 0:
+        return False
+    try:
+        if os.path.getsize(path) < limit:
+            return False
+        os.replace(path, path + ".1")
+        return True
+    except OSError:
+        return False
+
+
+def prune_resume_logs(log_dir: str, retain_days: float | None = None,
+                      now: float | None = None) -> int:
+    """Expire per-resume ``resume-<sid8>-<epoch>.log`` / ``.log.err`` pairs older
+    than the retention window. Called at the launch site -- the only place that
+    CREATES a pair -- so the bound lives with the write and a quiet fleet does no
+    work. Only the per-resume pair prefix/suffix shape is touched (never the tick
+    log or notifications.log, which rotate instead). A file held open by a live
+    child (Windows mandatory lock) survives via the per-file skip; those are
+    recent anyway. Returns the number of files removed."""
+    days = LOG_RETAIN_DAYS if retain_days is None else retain_days
+    if days <= 0:
+        return 0
+    cutoff = (time.time() if now is None else now) - days * 86400.0
+    removed = 0
+    try:
+        entries = list(os.scandir(log_dir))
+    except OSError:
+        return 0
+    for e in entries:
+        if not (e.name.startswith("resume-")
+                and (e.name.endswith(".log") or e.name.endswith(".log.err"))):
+            continue
+        try:
+            if e.is_file() and e.stat().st_mtime < cutoff:
+                os.unlink(e.path)
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def compact_ledger(ledger_path: str, retain_days: float | None = None,
+                   compact_bytes: int | None = None, now: float | None = None) -> int:
+    """Time-windowed compaction of the resume-once ledger, applied at the read
+    site so the whole-file re-parse every tick performs stays bounded (#3497).
+
+    The ledger is the once-gate's memory, so a row is dropped ONLY when it can no
+    longer influence a decision: the AUTO_RESUME plan only ever names sessions
+    with activity inside the recent fleet window (hours), so a row older than the
+    retention window (default 30 days) gates nothing that can still be planned.
+    Two conservative keeps: operator-settled rows (consolidate/manual_override)
+    are authoritative forever and never dropped, and a row whose ts is missing or
+    unparsable is kept (never guess a row into the void). Compaction triggers
+    only once the file passes the size threshold, so the common tick pays one
+    getsize(); the rewrite is atomic (tmp + os.replace) so a crash mid-compact
+    leaves the old ledger intact. Returns the number of rows dropped."""
+    days = LEDGER_RETAIN_DAYS if retain_days is None else retain_days
+    limit = LEDGER_COMPACT_BYTES if compact_bytes is None else compact_bytes
+    if days <= 0 or limit <= 0:
+        return 0
+    try:
+        if os.path.getsize(ledger_path) < limit:
+            return 0
+    except OSError:
+        return 0
+    cutoff = (time.time() if now is None else now) - days * 86400.0
+    kept: list[str] = []
+    dropped = 0
+    try:
+        with open(ledger_path, encoding="utf-8") as fh:
+            for ln in fh:
+                if not ln.strip():
+                    continue
+                if not ln.endswith("\n"):
+                    ln += "\n"
+                try:
+                    rec = json.loads(ln)
+                    if (str(rec.get("action", "")).startswith("consolidate")
+                            or rec.get("manual_override")):
+                        kept.append(ln)
+                        continue
+                    ts = datetime.strptime(rec.get("ts", ""), "%Y-%m-%dT%H:%M:%SZ")
+                    if ts.replace(tzinfo=timezone.utc).timestamp() >= cutoff:
+                        kept.append(ln)
+                    else:
+                        dropped += 1
+                except Exception:
+                    kept.append(ln)
+    except OSError:
+        return 0
+    if not dropped:
+        return 0
+    tmp = ledger_path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.writelines(kept)
+        os.replace(tmp, ledger_path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return 0
+    return dropped
+
+
 def note(msg: str) -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
+    path = os.path.join(LOG_DIR, "resume_watchdog.log")
+    _rotate_log(path)
     line = f"{now_iso()}  {msg}"
-    with open(os.path.join(LOG_DIR, "resume_watchdog.log"), "a") as fh:
+    with open(path, "a") as fh:
         fh.write(line + "\n")
     print(line)
 
@@ -306,7 +442,9 @@ def toast(title: str, message: str, level: str = "info") -> None:
     Slack through here means every real resume and every auth wall lands in the channel
     without sprinkling post calls across main()."""
     os.makedirs(LOG_DIR, exist_ok=True)
-    with open(os.path.join(LOG_DIR, "notifications.log"), "a") as fh:
+    notif_path = os.path.join(LOG_DIR, "notifications.log")
+    _rotate_log(notif_path)
+    with open(notif_path, "a") as fh:
         fh.write(f"{now_iso()}  [{level}] {title} -- {message}\n")
     try:
         subprocess.run(
@@ -562,6 +700,10 @@ def main() -> int:
     # durable resume ledger -- grouped per session so the gate can reason about the
     # OUTCOME and attempt count of prior resumes, not merely their existence.
     ledger_path = os.path.join(REG_DIR, "resume_ledger.jsonl")
+    compacted = compact_ledger(ledger_path)
+    if compacted:
+        note(f"  ledger compacted: dropped {compacted} row(s) older than "
+             f"{LEDGER_RETAIN_DAYS:g}d (resume-once history bounded)")
     history: dict[str, list[dict]] = {}
     if os.path.exists(ledger_path):
         with open(ledger_path) as fh:
@@ -671,6 +813,9 @@ def main() -> int:
         for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                   "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION"):
             env.pop(k, None)
+        pruned = prune_resume_logs(LOG_DIR)
+        if pruned:
+            note(f"  pruned {pruned} expired resume log(s) (>{LOG_RETAIN_DAYS:g}d)")
         out = os.path.join(LOG_DIR, f"resume-{sid8}-{int(time.time())}.log")
         wd = p.get("cwd") if p.get("cwd") and os.path.isdir(p.get("cwd")) else FLEET_DIR
         spawn_kw = {}
