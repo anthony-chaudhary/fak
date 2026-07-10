@@ -1,0 +1,155 @@
+name: dispatch-session-audit-feed
+
+# Turn a DISPATCH-SESSION regression (a wasted spawn, a quota-wall, a retry-storm,
+# a banner-noop, or a log signature — hook-failure/OFF_TRUNK/panic/auth-wall) into
+# a specific, deduped, lane-routed GitHub issue the dispatch loop can resolve — the
+# dispatch-session sibling of score-/bench-/gate-signal (#3335, Track B spine of
+# epic #3327, plan: docs/DISPATCH-SESSION-OBSERVABILITY-PLAN.md). It runs the
+# EXISTING Go analyzer `fak dispatch audit --file-issues` (per-worker outcome +
+# per-backend waste rollup + log-signature findings, each with a stable fingerprint
+# and marker+open-title dedup) on a schedule — giving that analyzer its FIRST cloud
+# coverage. Until now it ran only as a host-local Windows Scheduled Task.
+#
+# ── THE SPINE DECISION: the evidence-source seam (named per #3335) ──────────────
+# `.dispatch-runs/` is HOST-LOCAL: the per-worker `resolve-<issue>-<stamp>.log`
+# sidecars are written on the fleet host and are NOT committed (only static
+# contract-overlays under `.dispatch-runs/` are tracked). A stock `ubuntu-latest`
+# runner therefore has NO live runs-dir. We resolve the seam the way every sibling
+# signal feeder resolves host-local evidence — run on `ubuntu-latest` over
+# CHECKED-OUT evidence, never a self-hosted fleet runner — in two rungs:
+#
+#   (a) CHOSEN — consume a runs-dir SOURCE named by the `runs_dir` input (default:
+#       the checked-out `.dispatch-runs/`). On a bare cloud run that source carries
+#       no live `resolve-*.log`, so the pure fold reports 0 workers / nothing to
+#       file: a safe green all-clear that still proves the feeder end-to-end (the
+#       honest dual of blockers-feed's "0 blocked -> quiet green"). The DURABLE
+#       cloud source is a fleet-host-published runs-dir ARTIFACT downloaded into
+#       `runs_dir` before the audit; that publisher is the fan-out follow-on (B4 in
+#       the plan). An operator can already point `runs_dir` at a downloaded
+#       artifact today, and the live arm files from whatever `runs_dir` resolves to.
+#
+#   (b) REJECTED — a `runs-on: self-hosted` fleet runner reading the host's live
+#       `.dispatch-runs/` directly. No sibling signal feeder takes a self-hosted
+#       runner; doing so would fork the fleet's trust boundary and the sibling
+#       idiom. Option (a) keeps this workflow a stock-runner peer of its siblings.
+#
+# SAFE BY DEFAULT: the scheduled run is DRY-RUN — it audits, surfaces the findings
+# to the step summary + an artifact, and files NOTHING. Filing is an explicit
+# operator arm: `workflow_dispatch` with `live=true`. The `issues: write` scope is
+# granted at the job but is EXERCISED only by the armed file step (gated on the
+# live `if:`), matching the bench-/gate-signal contract. The pure fold/fingerprint
+# core is proven by `go test ./internal/dispatchaudit` (run FIRST below), so a green
+# plan is a real signal — not a tool that always passes.
+on:
+  schedule:
+    # Daily 09:43 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, steering-guard 07:33,
+    # score-signal 07:41, gate-signal 07:53, bench-signal 08:03, scoreboard-feed
+    # 08:17, bench-feed 08:27, capacity-feed 08:47, blockers 09:07, trajctl 09:13).
+    - cron: "43 9 * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Actually CREATE the issues (default: dry-run plan only)"
+        type: boolean
+        default: false
+      max_issues:
+        description: "Hard cap on issues filed per run (worst-first anti-storm bound)"
+        type: string
+        default: "5"
+      runs_dir:
+        description: "Runs-dir evidence source to audit (default: the checked-out .dispatch-runs/)"
+        type: string
+        default: ".dispatch-runs"
+
+# Minimal scope: read the tree, write issues. `issues: write` is required because
+# the armed file step files gh issues in this same job — but it is exercised ONLY
+# on the live arm (the file step's live `if:` gate). The scheduled dry-run never
+# mutates.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dispatch-session-audit-feed
+  cancel-in-progress: false
+
+jobs:
+  dispatch-session-audit-feed:
+    name: dispatch-session regression -> issue
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+      RUNS_DIR: ${{ github.event.inputs.runs_dir || '.dispatch-runs' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The pure fold/fingerprint core FIRST: a planned issue below is only
+      # meaningful if the classifier that produced it is itself proven correct.
+      - name: dispatchaudit core self-test
+        run: go test ./internal/dispatchaudit
+
+      # Resolve the runs-dir evidence source (the spine seam). On a bare cloud run
+      # the checked-out .dispatch-runs/ carries no live resolve-*.log, so ensure the
+      # dir exists and let the pure fold report a clean 0-worker all-clear rather
+      # than erroring on a missing dir. (Future B4: download the fleet-host runs-dir
+      # artifact into $RUNS_DIR here before the audit.)
+      - name: resolve runs-dir evidence source
+        run: |
+          mkdir -p "$RUNS_DIR"
+          echo "auditing runs-dir: $RUNS_DIR"
+          ls -la "$RUNS_DIR" || true
+
+      # Plan the findings (dry-run) — always, so the step summary shows what WOULD
+      # be filed even on an armed run. Read-only: no --file-issues here.
+      - name: plan dispatch-session findings
+        run: |
+          go run ./cmd/fak dispatch audit --runs-dir "$RUNS_DIR" --json > dispatch-audit-plan.json
+          go run ./cmd/fak dispatch audit --runs-dir "$RUNS_DIR" > dispatch-audit-plan.txt
+          cat dispatch-audit-plan.txt
+
+      # File the issues — ONLY on an explicit workflow_dispatch arm with live=true.
+      # This is the SOLE step that exercises the issues:write scope; the worst-first
+      # --max-issues cap is the anti-storm bound on the first pass over a backlog.
+      - name: file dispatch-session issues (armed)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
+        run: |
+          go run ./cmd/fak dispatch audit --runs-dir "$RUNS_DIR" \
+            --file-issues --max-issues "$MAX_ISSUES"
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## dispatch-session-audit-feed plan"
+            armed="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' && 'LIVE (issues filed)' || 'dry-run (nothing filed)' }}"
+            echo "_Mode: ${armed}. Scheduled runs are dry-run; arm via workflow_dispatch with live=true. Evidence source: \`${RUNS_DIR}\` — host-local .dispatch-runs is not committed, so a bare cloud run is a clean all-clear (see the header seam note)._"
+            echo '```'
+            cat dispatch-audit-plan.txt 2>/dev/null || echo "(no plan)"
+            echo '```'
+            echo '<details><summary>machine plan (JSON)</summary>'
+            echo
+            echo '```json'
+            cat dispatch-audit-plan.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-audit-plan
+          path: |
+            dispatch-audit-plan.json
+            dispatch-audit-plan.txt
+          if-no-files-found: ignore
