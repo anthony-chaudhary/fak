@@ -30,6 +30,7 @@ func runMCPFootprint(out, errw io.Writer, argv []string) int {
 	top := fs.Int("top", 0, "show only the N heaviest tools (0 = all)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	ab := fs.Bool("ab", false, "run the #3532 cold-tool-deferral A/B token-delta scorecard")
+	heldAcc := fs.Bool("held-accuracy", false, "run the #3533 cold-tool-deferral held-accuracy fault-in-recall eval")
 	flagArgs, _ := partitionArgs(argv, map[string]bool{"top": true})
 	if err := fs.Parse(flagArgs); err != nil {
 		fmt.Fprintln(errw, err)
@@ -39,6 +40,9 @@ func runMCPFootprint(out, errw io.Writer, argv []string) int {
 
 	if *ab {
 		return runFootprintAB(out, errw, *asJSON)
+	}
+	if *heldAcc {
+		return runFootprintHeldAccuracy(out, errw, *asJSON)
 	}
 
 	fp := mcpfootprint.Price(gateway.MCPFloorToolDefs())
@@ -96,6 +100,7 @@ agent request footprint uses, so it never drifts from EstimateAnthropicTokens.
   --top N   show only the N heaviest tools (0 = all)
   --json    emit machine-readable JSON (schema fak-mcp-footprint/1)
   --ab      cold-tool-deferral A/B scorecard (#3532, schema fak-footprint-ab/1)
+  --held-accuracy  cold-tool-deferral fault-in-recall eval (#3533, schema fak-footprint-held-accuracy/1)
 
 The measurement foundation of epic #3229: run before/after a deferral change
 (#3231, #3232) to witness the reduction. Baseline: docs/context-budget/mcp-tool-floor.md.
