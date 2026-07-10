@@ -186,6 +186,8 @@ func main() {
 		cmdDone(os.Args[2:])
 	case "profile":
 		cmdProfile(os.Args[2:])
+	case "multisubmit":
+		cmdMultiSubmit(os.Args[2:])
 	case "c":
 		cmdTUI(append([]string{"agent"}, os.Args[2:]...))
 	case "console":
