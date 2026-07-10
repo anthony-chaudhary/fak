@@ -36,6 +36,7 @@ type guardStartupView struct {
 	stopHookInstall      guardStopHookInstall
 	handoffCfg           guardTaskHandoffConfig
 	codexInstall         guardCodexInstall
+	piInstall            guardPiInstall
 	mcpInstall           guardMCPInstall
 	debugStatsStderr     bool
 	debugStats           bool
@@ -69,6 +70,13 @@ func renderGuardStartupReport(v guardStartupView) string {
 			localLabel = filepath.Base(v.ggufPath)
 		}
 		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), v.gwURL, v.up, v.resolvedBase, v.floorSource, formatGuardInjectedEnvForBanner(v.injected), v.logLabel, v.auditLabel, v.refusalCarryForward, v.remoteBase != "", v.localModel, localLabel, v.command)
+		// A stamped-but-BEHIND (Skewed) or OFF-trunk (Diverged) guard is a distinct footgun from the
+		// unstamped case printGuardBanner already warns about on its `build` row: this binary CAN attest
+		// its commit — that commit is just provably behind/off origin/main — and the default guard path
+		// re-execs THIS same file. Classify once by git ancestry and say so right under the banner.
+		if warn := guardSkewBuildWarning(guardBuildSkewAssessment()); warn != "" {
+			fmt.Fprint(&startupReport, warn)
+		}
 		if v.preCompactInstall.Applied {
 			fmt.Fprintf(&startupReport, "fak guard: Claude PreCompact hook: %s (settings %s)\n", v.preCompactInstall.Mode, v.preCompactInstall.SettingsPath)
 		}
@@ -83,6 +91,7 @@ func renderGuardStartupReport(v guardStartupView) string {
 			fmt.Fprintf(&startupReport, "fak guard: task handoff Stop gate: %s (%s) — clean stops require %s; child sees $%s\n", v.handoffCfg.Mode, live, v.handoffCfg.File, guardTaskHandoffFileEnv)
 		}
 		printGuardCodexNote(&startupReport, v.codexInstall)
+		printGuardPiNote(&startupReport, v.piInstall)
 		printGuardMCPNote(&startupReport, v.mcpInstall)
 		printGuardCapabilitiesNote(&startupReport, v.mcpInstall)
 		switch {
