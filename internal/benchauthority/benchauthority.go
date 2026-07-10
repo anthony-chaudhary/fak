@@ -24,9 +24,17 @@
 //     are bullets, not a paragraph jammed in a cell.
 //   - Splice()/Extract() write and read that block between BEGIN/END markers inside
 //     BENCHMARK-AUTHORITY.md, so the surrounding hand-authored prose is untouched.
-//   - Validate() cross-checks every claim against reality: its Artifact path must
-//     exist on disk (catching exactly the dropped-prefix drift the old doc admitted
-//     to) and its Bench, when named, must be a registered benchcatalog surface.
+//   - Validate() enforces the CHECKABLE-MEASUREMENT invariant: a claim that asserts a
+//     measured number must carry a structured {Metric, numeric Value, Unit, Baseline}
+//     record — "specificity is the deliverable" (#4101) — so a perf number is a
+//     resolvable record, never prose crammed into a headline. It is pure over the claim
+//     data (no disk, no process state), so it is unit-testable in isolation, and it is
+//     the record the commit-audit perf-claim rung is designed to point at. The
+//     disk-and-catalog cross-checks are layered by capability-holding callers:
+//     ValidateArtifacts(root) does the on-disk half (each Artifact path must exist,
+//     catching the dropped-prefix drift the old doc admitted to); the "a named Bench is
+//     a registered benchcatalog surface" half stays with a caller that imports that
+//     leaf, since this leaf imports nothing internal by design.
 //
 // Adding or updating a number means editing one Claim literal and running
 // `go run ./cmd/authorityledger -write` — the same additive-leaf discipline the
@@ -76,8 +84,22 @@ type Claim struct {
 	Title string
 	// Headline is the ONE number, terse enough for a table cell (the anti-inflation
 	// "one primary number per result" rule, enforced by shape). Put the exhaustive
-	// decomposition in Fences, not here.
+	// decomposition in Fences, not here. Headline is the human one-liner ("60.3x TTFT
+	// reduction"); the machine-checkable twin of that number is the {Metric, Value,
+	// Unit} record below, which Validate() actually resolves.
 	Headline string
+	// Metric names WHAT was measured — the axis the number lives on ("pass@1", "TTFT",
+	// "tok/s", "cache-hit-rate"). Required for a claim that asserts a measured number;
+	// a Value with no Metric is an unlabelled figure. See Validate().
+	Metric string
+	// Value is the numeric magnitude, authored AS TEXT so a non-number that slipped in
+	// ("≈60x", "a lot faster", "") is caught as prose rather than silently coerced.
+	// Validate() parses it with strconv.ParseFloat and refuses a non-numeric, NaN, or
+	// Inf value. This is the field that closes the "headline is prose" gap (#4101).
+	Value string
+	// Unit is the unit Value is expressed in ("x", "%", "ms", "tok/s", "s"). Required
+	// alongside a Value; "60.3" with no unit is ambiguous. See Validate().
+	Unit string
 	// Status is the governance provenance word (see Status).
 	Status Status
 	// Provenance is the finer word when it adds signal (WITNESSED / OBSERVED /
