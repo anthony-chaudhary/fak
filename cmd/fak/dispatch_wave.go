@@ -171,22 +171,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 
 	product, allocationCount, preflightShortfall, preflight := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
 
-	rec := map[string]any{
-		"schema":               "fleet-issue-dispatch-wave/1",
-		"workspace":            root,
-		"live":                 *live,
-		"backend":              backendNorm,
-		"work_kind":            wk,
-		"goal":                 goalID,
-		"goal_profile":         profile,
-		"requested":            *count,
-		"allocation_requested": allocationCount,
-		"preflight":            preflight,
-		"ticks":                []any{},
-		"spawned":              0,
-		"stop_reason":          "",
-		"ok":                   false,
-	}
+	rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, allocationCount, preflight)
 	if allocationCount <= 0 {
 		rec["granted"] = 0
 		rec["shortfall"] = *count
@@ -324,6 +309,27 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 }
 
+// newDispatchWaveRecord seeds the mutable dispatch-wave result record with the run's static
+// header fields and the empty/false defaults runDispatchWave fills in as it progresses.
+func newDispatchWaveRecord(root string, live bool, backendNorm, wk, goalID, profile string, count, allocationCount int, preflight map[string]any) map[string]any {
+	return map[string]any{
+		"schema":               "fleet-issue-dispatch-wave/1",
+		"workspace":            root,
+		"live":                 live,
+		"backend":              backendNorm,
+		"work_kind":            wk,
+		"goal":                 goalID,
+		"goal_profile":         profile,
+		"requested":            count,
+		"allocation_requested": allocationCount,
+		"preflight":            preflight,
+		"ticks":                []any{},
+		"spawned":              0,
+		"stop_reason":          "",
+		"ok":                   false,
+	}
+}
+
 // dispatchWavePreflightAlloc runs the tick preflight for the wave and folds its headroom
 // verdict into the account allocation count. It returns the backend product, the (possibly
 // reduced) allocation count, the preflight-driven shortfall, and the preflight record (an
@@ -365,22 +371,7 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 	held := liveResolutionLanes(runsDir)
 	liveIssues := liveResolutionIssues(runsDir)
 	cooled := recentlyAttemptedIssues(runsDir, cooldownMin)
-	// Poison-issue cap: an OPEN issue that has burned dispatchAttemptBudget()
-	// workers without shipping is held out of the wave. The time cooldown only
-	// pauses it ~2h, so without this it re-enters the pool and wastes a worker
-	// every window forever. Union it into the per-issue skip set both candidate
-	// loops already consult (empty budget => skipIssues stays == excludedIssues,
-	// so the pre-existing behavior is byte-identical).
-	skipIssues := excludedIssues
-	if exhausted := attemptExhaustedIssues(runsDir, dispatchAttemptBudget()); len(exhausted) > 0 {
-		skipIssues = make(map[int]bool, len(excludedIssues)+len(exhausted))
-		for n := range excludedIssues {
-			skipIssues[n] = true
-		}
-		for n := range exhausted {
-			skipIssues[n] = true
-		}
-	}
+	skipIssues := dispatchWaveSkipIssues(runsDir, excludedIssues)
 	exclude := map[string]bool{}
 	for _, lane := range excluded {
 		exclude[lane] = true
@@ -549,6 +540,13 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 	for _, target := range runTargets {
 		runLaneNames = append(runLaneNames, target.Lane)
 	}
+	return dispatchWaveBuildPrice(requested, granted, cands, rows, runTargets, runLanes, runLaneNames, held, exclude, res), nil
+}
+
+// dispatchWaveBuildPrice folds the priced candidate rows, the selected run targets, and the
+// order planner's result into the final dispatchWavePrice record. It is the pure assembly tail
+// of priceDispatchWavePayloadFiltered — no I/O, no mutation of its inputs.
+func dispatchWaveBuildPrice(requested, granted int, cands []dispatchorder.Candidate, rows, runTargets []dispatchWaveCandidate, runLanes, runLaneNames []string, held, exclude map[string]bool, res dispatchorder.Result) dispatchWavePrice {
 	candidateStepBudget := dispatchWaveStepBudget(rows)
 	runStepBudget := dispatchWaveStepBudget(runTargets)
 	scopedCount := 0
@@ -595,7 +593,26 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 		ScopedParallelGain:   positiveDelta(laneSerialWaves, len(waves)),
 		CollisionWavePenalty: positiveDelta(len(waves), laneSerialWaves),
 		ExpectedRework:       res.CollisionsAvoided + res.SerializationWasted,
-	}, nil
+	}
+}
+
+// dispatchWaveSkipIssues unions the caller's excluded-issue set with the poison-issue cap: an
+// OPEN issue that has burned dispatchAttemptBudget() workers without shipping is held out of the
+// wave. The time cooldown only pauses it ~2h, so without this it re-enters the pool and wastes a
+// worker every window forever. When the attempt budget yields no exhausted issues the result
+// stays == excludedIssues, so the pre-existing behavior is byte-identical.
+func dispatchWaveSkipIssues(runsDir string, excludedIssues map[int]bool) map[int]bool {
+	skipIssues := excludedIssues
+	if exhausted := attemptExhaustedIssues(runsDir, dispatchAttemptBudget()); len(exhausted) > 0 {
+		skipIssues = make(map[int]bool, len(excludedIssues)+len(exhausted))
+		for n := range excludedIssues {
+			skipIssues[n] = true
+		}
+		for n := range exhausted {
+			skipIssues[n] = true
+		}
+	}
+	return skipIssues
 }
 
 func dispatchWaveCandidateReason(row dispatchorder.Ranked, selected bool) string {
