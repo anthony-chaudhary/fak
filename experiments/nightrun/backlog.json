@@ -89,5 +89,17 @@
     "recheck_days": 30,
     "timeout_sec": 3600,
     "doc": "docs/notes/GUARD-KERNEL-CONTROL-ABLATION-2026-07-03.md"
+  },
+  {
+    "id": "witness-cpu-decode-qwen36-27b-q4k",
+    "title": "Qwen3.6-27B Q4_K_M single-stream CPU decode + prefill tok/s in fak's OWN pure-Go resident-Q4_K/Q8 kernel (cmd/modelbench -q4k, no server), on a GPU-less high-RAM box. The honest FEASIBLE analog of the INFEASIBLE witness-glm52-cpu-throughput datum: GLM-5.2 UD-Q4_K_M (~433G) exceeds this 254G box, but a 27B Q4_K_M (16.5G GGUF, ~22.6G resident) fits with headroom and yields a real 27B-class CPU-decode number the ledger otherwise lacks (only a 1.5B Q8 @ 2.78 tok/s existed). First collected: box-873af63b decode 0.82 tok/s, prefill 2.83 tok/s at P=32.",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": ["weights"],
+    "manual": true,
+    "run": "Build once: go build -o modelbench.exe ./cmd/modelbench . Preflight (header-only, seconds): modelbench -gguf <box>/.cache/fak-models/gguf/Qwen3.6-27B-Q4_K_M.gguf -q4k -preflight (expect READY, ~15.4GiB est). Then measure: modelbench -gguf <same> -q4k -name qwen3.6-27b-q4k -prefill-sizes 32 -prefill-reps 2 -decode-prompt 16 -decode-steps 32 -decode-reps 2 -out experiments/nightrun/box-873af63b/modelbench-qwen36-27b-q4k-cpu.json . Read decode.tok_per_sec + prefill[0].tok_per_sec STRAIGHT from the artifact and fold a value=cpu-decode-toks ledger row. Two traps: (1) do NOT use `run --apply` here - modelbench prints PREFILL tok/s BEFORE decode, so the first-<num>-tok/s parser banks the WRONG figure; fold by hand from the artifact. (2) On Windows run in the BACKGROUND from the start - a foreground-timeout leaves an unkillable session-0 (Services) orphan holding ~22G resident.",
+    "acceptance": "a recorded single-stream CPU decode tok/s (and a P=32 prefill tok/s) for Qwen3.6-27B-Q4_K_M via cmd/modelbench -q4k in an experiments/nightrun/box-873af63b artifact, folded to a docs/nightrun/collected.jsonl row (value cpu-decode-toks), labelled OBSERVED (fak own pure-Go resident-Q4_K kernel)",
+    "recheck_days": 30,
+    "timeout_sec": 3600
   }
 ]
