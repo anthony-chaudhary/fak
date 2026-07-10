@@ -172,11 +172,13 @@ func (b *cudaBuf) Ready() bool {
 	return atomic.LoadUint64(&b.be.fenceGen) > b.bornGen
 }
 
-// uploadCache shares one VRAM copy per distinct host buffer across all sessions. A model's
+// uploadCache shares one VRAM copy per distinct host weight buffer across all sessions. A model's
 // weights are zero-copy views into one blob (m.tensor(name) returns the SAME pointer every
 // call), so without this each NewBackendSession re-uploaded the whole model — N sessions ×
-// the full weight set, which exhausts VRAM in a multi-session bench. Free evicts (so per-token
-// inputs, which have fresh pointers, don't accumulate).
+// the full weight set, which exhausts VRAM in a multi-session bench. Only rank >= 2 tensors enter
+// this pointer-keyed cache: rank-1 uploads are activations, norms, or biases and must copy their
+// current bytes. Go may recycle a dead rank-1 slice at the same address for the next token; caching
+// it would return the prior token's VRAM buffer and make decode deterministically degenerate.
 //
 // The key is (host pointer, narrowed dtype, layout), NOT the pointer alone: under #484 the SAME
 // host weight may be uploaded as F32 and as F16, or as F16 in two layouts (RowMajor vs the
@@ -547,7 +549,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	}
 	f := hb.F32()
 	var hp uintptr
-	if len(f) > 0 {
+	if len(f) > 0 && len(t.Shape) >= 2 {
 		hp = uintptr(unsafe.Pointer(&f[0]))
 		// Guard against host-address reuse: a uintptr key does NOT keep the host slice alive, so
 		// after GC a freed slice's address can be reused by a DIFFERENT tensor, false-hitting a
@@ -569,8 +571,10 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	out, buf := c.dev(t.Shape, F32)
 	if len(f) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-		buf.host, buf.hostDt, buf.hostLo = hp, F32, t.Layout
-		uploadCache[ucKey{hp, F32, t.Layout}] = out
+		if hp != 0 {
+			buf.host, buf.hostDt, buf.hostLo = hp, F32, t.Layout
+			uploadCache[ucKey{hp, F32, t.Layout}] = out
+		}
 	}
 	return out
 }

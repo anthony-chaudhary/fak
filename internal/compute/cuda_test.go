@@ -39,6 +39,32 @@ func TestCUDADeviceMemoryInfoReportsCurrentFree(t *testing.T) {
 	}
 }
 
+// TestCUDAUploadRankOneCopiesCurrentContents captures the #3186 failure at the cache seam.
+// Upload is a copy operation: mutating and re-uploading a same-address rank-one host slice must
+// stage the new bytes, never return the first resident tensor from the immutable-weight cache.
+// Before the fix, the second Upload aliases first because the cache key is the host address;
+// multi-token forward then feeds CUDA a stale token embedding and collapses its logits.
+func TestCUDAUploadRankOneCopiesCurrentContents(t *testing.T) {
+	cb := cudaOrSkip(t)
+	src := []float32{1, 2, 3, 4}
+	first := cb.Upload(NewF32(cb, []int{len(src)}, src), F32)
+	if got := cb.Read(first); len(got) != len(src) || got[0] != 1 || got[3] != 4 {
+		t.Fatalf("first Upload = %v, want original rank-one contents", got)
+	}
+
+	copy(src, []float32{-4, -3, -2, -1})
+	second := cb.Upload(NewF32(cb, []int{len(src)}, src), F32)
+	t.Cleanup(func() {
+		cb.Free(first)
+		if first.buf != second.buf {
+			cb.Free(second)
+		}
+	})
+	if got := cb.Read(second); len(got) != len(src) || got[0] != -4 || got[3] != -1 {
+		t.Fatalf("second Upload = %v, want current rank-one contents; stale upload-cache alias", got)
+	}
+}
+
 func rscale(s *lcg, n int, scale float32) []float32 {
 	v := randVec(s, n) // ~[-0.5,0.5)
 	for i := range v {
