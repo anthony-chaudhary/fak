@@ -94,7 +94,13 @@ type dispatchLanePick struct {
 	// lease over just those paths -- exactly as the wave path already does. Empty
 	// for an issue that declared no scope; such an issue keeps the coarse lane tree.
 	PathsByIssue map[int][]string
-	RouterError  string
+	// IssueByNumber caches each routed issue's already-fetched row (title/body/labels,
+	// State=OPEN) so dispatchPrompt builds the worker prompt from it instead of a second
+	// `gh issue view` on the hot path (#4167). A cache miss (an unrouted --target-issue)
+	// yields the zero value, which dispatchPrompt treats as "no cache" and falls back to
+	// the live fetch.
+	IssueByNumber map[int]dispatchIssueInfo
+	RouterError   string
 	// SelfSourceHeld names the lanes the guarded auto-pick SKIPPED because their
 	// tree is fak's own running source (cmd/** or internal/**). It is populated only
 	// on an auto-pick (no explicit lane) under guard, and is the witness behind the
@@ -726,7 +732,10 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	tPrompt := time.Now()
-	promptRec, err := dispatchPrompt(root, stderr, target, pick.Lane)
+	// #4167: hand dispatchPrompt the router-fetched row for the selected target so it
+	// reuses the already-fetched body instead of a second `gh issue view`. A cache miss
+	// (unrouted --target-issue) yields the zero value, and dispatchPrompt falls back.
+	promptRec, err := dispatchPrompt(root, stderr, target, pick.Lane, pick.IssueByNumber[target])
 	if err != nil {
 		return nil, err
 	}

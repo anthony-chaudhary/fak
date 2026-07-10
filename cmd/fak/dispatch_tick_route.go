@@ -47,8 +47,18 @@ var dispatchRoutedBacklogCache = dispatchcache.New[dispatchtick.RouterPayload](t
 // map; output stays byte-identical to the always-recompute path.
 var dispatchDuplicateRiskCache = &dispatchtick.DuplicateRiskCache{}
 
-func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[string]any, error) {
-	inf := dispatchFetchIssue(root, issue)
+func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...dispatchIssueInfo) (map[string]any, error) {
+	// #4167: prefer the router-fetched row (title/body/labels already in hand from the
+	// tick's list/view fetch) so the hot path skips a redundant second `gh issue view`.
+	// Fall back to the live fetch only when no cached row was threaded in or its body is
+	// absent -- an unrouted `--target-issue N` (no cache hit), or the list fetch errored.
+	// A routed issue is open, so the cached row carries State=OPEN for the resume witness.
+	var inf dispatchIssueInfo
+	if len(cached) > 0 && strings.TrimSpace(cached[0].Body) != "" {
+		inf = cached[0]
+	} else {
+		inf = dispatchFetchIssue(root, issue)
+	}
 	roles, roleErr := branchrole.Load(root)
 	rec := dispatchtick.BuildIssuePrompt(dispatchtick.IssuePromptInput{
 		Number:            firstInt(inf.Number, issue),
@@ -341,9 +351,21 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	// Carry each issue's declared file scope so a single-target tick can narrow to
 	// it (parity with the wave path, which prices route.Paths per issue).
 	pathsByIssue := map[int][]string{}
+	// #4167: cache each routed issue's already-fetched row so dispatchPrompt can build the
+	// worker prompt from the body the list/view fetch already returned, instead of a second
+	// `gh issue view`. A routed issue is open, so State is OPEN for the resume witness. A
+	// cache miss (unrouted --target-issue) leaves dispatchPrompt to fall back to the fetch.
+	issueByNumber := map[int]dispatchIssueInfo{}
 	for _, route := range router.Issues {
 		if len(route.Paths) > 0 {
 			pathsByIssue[route.Number] = append([]string(nil), route.Paths...)
+		}
+		issueByNumber[route.Number] = dispatchIssueInfo{
+			Number: route.Number,
+			Title:  route.Title,
+			Body:   route.Body,
+			Labels: append([]string(nil), route.Labels...),
+			State:  "OPEN",
 		}
 	}
 	return dispatchLanePick{
@@ -354,6 +376,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		ExcludedLanes:    excluded,
 		Tree:             tree,
 		PathsByIssue:     pathsByIssue,
+		IssueByNumber:    issueByNumber,
 		RouterError:      dispatchRouterError(router),
 		SelfSourceHeld:   selfSourceHeld,
 	}, nil
