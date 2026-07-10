@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/dormancy"
 )
 
 // descriptor.go — the DURABLE, addressable index of the live drive state (issue
@@ -136,6 +137,16 @@ type Descriptor struct {
 	// (Table.PauseTimeBudget) simply gets a descriptor whose ElapsedNanos is already
 	// exact and whose StartedAtUnixNano is already 0 — restoredPaused is then a no-op.
 	Time TimeBudget `json:"time,omitempty,omitzero"`
+	// LastActive mirrors State.LastActive (issue #1179, the dormancy-clock epic #1178) so a
+	// session re-attached after a process restart keeps its durable LastActiveAt stamp — and
+	// therefore its derivable dormancy band (dormancy.Stamp.HorizonAt) — instead of presenting
+	// as never-active. That distinction is load-bearing even in Phase 1: a zero stamp buckets
+	// to Ancient (HorizonAt returns the most-stale band on an unknown gap), so DROPPING the
+	// stamp across a restart would silently claim maximal dormancy and, once the rehydration
+	// rungs (#1181-#1186) read it, force needless full revalidation. Advisory/no-behavior-
+	// change like the State field: carried, never gated; omitzero keeps a pre-clock descriptor
+	// wire-identical.
+	LastActive dormancy.Stamp `json:"last_active,omitempty,omitzero"`
 	// Rev is the live State's monotonic revision at the last stamp — the optimistic-
 	// concurrency cursor, preserved so an operator UI that held an If-Rev across the
 	// restart still composes (the same Rev-preservation discipline as Table.Restore).
@@ -198,6 +209,7 @@ func descriptorFromState(st State) Descriptor {
 		PendingTurn:      st.PendingTurn,
 		Rev:              st.Rev,
 		Time:             st.Time,
+		LastActive:       st.LastActive,
 	}
 }
 
@@ -228,6 +240,7 @@ func (d Descriptor) RestoredState() State {
 		ObjectivePin:     d.ObjectivePin,
 		PendingTurn:      d.PendingTurn,
 		Rev:              d.Rev,
+		LastActive:       d.LastActive,
 		// Time is restored PAUSED (see TimeBudget.restoredPaused): a HIDDEN process
 		// restart is exactly a Pause the old process never got to make, so the
 		// persisted StartedAtUnixNano (a wall-clock instant in a now-dead process) must

@@ -520,6 +520,9 @@ func (t *Table) RecontinueAtWithTransaction(parent, child string, fresh Budget, 
 		st.Reason = ReasonBudgetReset
 		st.CacheAffinity = cacheAffinityForContinuation(State{TraceID: parent}, child, ReasonBudgetReset)
 		st.ResetTransaction = tx
+		// First dormancy mark on the degenerate (nil-table) path: no live parent to carry
+		// from, so the reset itself is the child's first LastActiveAt (#4141, epic #1178).
+		st.LastActive = st.LastActive.Refresh(now)
 		return st
 	}
 	t.mu.Lock()
@@ -561,6 +564,11 @@ func (t *Table) RecontinueAtWithTransaction(parent, child string, fresh Budget, 
 		Time:             carriedTime,
 		CacheAffinity:    cacheAffinityForContinuation(parentSt, child, parentSt.Reason),
 		ResetTransaction: tx,
+		// LastActive is a lineage carry like Time/Generation above: the child inherits the
+		// parent's dormancy stamp, monotonically advanced to now (the reset IS activity), so
+		// a hidden context reset neither zeroes the how-long-dormant clock nor runs it
+		// backwards. An unstamped parent gets its first mark here (#4141, epic #1178).
+		LastActive: parentSt.LastActive.Refresh(now),
 	}
 	return t.putLocked(next)
 }
