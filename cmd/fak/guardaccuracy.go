@@ -23,6 +23,7 @@ func runGuardAccuracy(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	corpusPath := fs.String("corpus", "", "override corpus file (default: the embedded seed corpus)")
+	complaintsPath := fs.String("complaints", "", "fold agent-authored guard complaints (JSON) as an advisory field false-positive intake")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
@@ -38,22 +39,38 @@ func runGuardAccuracy(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 
-	var payload scorecard.Payload
+	rows := guardaccuracy.SeedCorpus()
 	if *corpusPath != "" {
 		data, err := os.ReadFile(*corpusPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak guard-accuracy: read corpus: %v\n", err)
 			return 2
 		}
-		rows, err := guardaccuracy.LoadCorpus(data)
+		rows, err = guardaccuracy.LoadCorpus(data)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak guard-accuracy: parse corpus: %v\n", err)
 			return 2
 		}
-		payload = guardaccuracy.BuildScorecardFromRows(root, rows)
-	} else {
-		payload = guardaccuracy.BuildScorecard(root)
 	}
+
+	// The complaint intake is advisory (Soft, never debt): folding agent-authored
+	// over-block appeals surfaces a field false-positive triage queue without ever
+	// reding the gate. Absent --complaints, this is BuildScorecard's exact payload.
+	var complaints []guardaccuracy.FieldComplaint
+	if *complaintsPath != "" {
+		data, err := os.ReadFile(*complaintsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak guard-accuracy: read complaints: %v\n", err)
+			return 2
+		}
+		complaints, err = guardaccuracy.LoadComplaints(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak guard-accuracy: parse complaints: %v\n", err)
+			return 2
+		}
+	}
+
+	payload := guardaccuracy.BuildScorecardWithComplaints(root, rows, complaints)
 
 	if *comparePath != "" {
 		base, ok := readCompareBase(stderr, "fak guard-accuracy", *comparePath)
