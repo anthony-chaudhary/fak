@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 type dispatchLiveScope struct {
@@ -33,6 +34,13 @@ type dispatchLiveScope struct {
 }
 
 var dispatchResolveLogRE = regexp.MustCompile(`^resolve-(\d+)-.*\.log$`)
+
+// dispatchResolveAttemptRE extracts the issue number from ANY resolve worker attempt
+// artifact -- a resolve-<N>-<stamp>.log transcript OR its durable resolve-<N>-<stamp>.witness
+// audit sidecar. Unlike dispatchResolveLogRE it is NOT anchored to the .log extension, so it
+// mirrors the Python dispatcher's extension-agnostic _LOG_ISSUE_RE (r"resolve-(\d+)-") that
+// recently_attempted_issues uses (tools/issue_resolve_dispatch.py).
+var dispatchResolveAttemptRE = regexp.MustCompile(`^resolve-(\d+)-`)
 
 func liveResolutionIssues(runsDir string) map[int]bool {
 	out := map[int]bool{}
@@ -291,12 +299,12 @@ func cooldownIssueRowsAt(runsDir string, cooldownMin int, now time.Time) []dispa
 	}
 	cooldown := time.Duration(cooldownMin) * time.Minute
 	latest := map[int]time.Time{}
-	for _, log := range resolveLogs(runsDir) {
-		st, err := os.Stat(log)
+	for _, attempt := range resolveAttemptFiles(runsDir) {
+		st, err := os.Stat(attempt)
 		if err != nil {
 			continue
 		}
-		issue, ok := issueFromResolveLog(filepath.Base(log))
+		issue, ok := issueFromResolveAttempt(filepath.Base(attempt))
 		if !ok {
 			continue
 		}
@@ -355,8 +363,37 @@ func resolveLogs(runsDir string) []string {
 	return matches
 }
 
+// resolveAttemptFiles returns every resolve worker attempt artifact under runsDir: the
+// .log transcripts AND the durable .witness audit sidecars. The cooldown scan reads both so
+// a witnessed dead slot still cools its issue even after its .log is gone -- the .witness is
+// the durable cooldown evidence prune_dead_sidecars deliberately retains, and it is written
+// post-mortem by the witness sweep so its mtime carries the most-recent attempt touch. This
+// mirrors recently_attempted_issues in tools/issue_resolve_dispatch.py, which globs
+// resolve-*.log AND resolve-*.witness. Sorted for a stable, deterministic scan order.
+func resolveAttemptFiles(runsDir string) []string {
+	var out []string
+	for _, pattern := range []string{"resolve-*.log", "resolve-*" + dispatchtick.WitnessSidecarSuffix} {
+		matches, _ := filepath.Glob(filepath.Join(runsDir, pattern))
+		out = append(out, matches...)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func issueFromResolveLog(name string) (int, bool) {
 	m := dispatchResolveLogRE.FindStringSubmatch(name)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	return n, err == nil
+}
+
+// issueFromResolveAttempt extracts the issue number from a resolve attempt artifact's
+// basename -- a .log OR a .witness -- via the extension-agnostic dispatchResolveAttemptRE,
+// so the cooldown scan keys off either artifact the same way Python's _LOG_ISSUE_RE does.
+func issueFromResolveAttempt(name string) (int, bool) {
+	m := dispatchResolveAttemptRE.FindStringSubmatch(name)
 	if m == nil {
 		return 0, false
 	}
