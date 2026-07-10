@@ -1,168 +1,55 @@
 ---
-title: "Concept study: DFlash — block-diffusion speculative decoding (NVIDIA / Z Lab) → fak (2026-07-10)"
-description: "A mechanics-first, source-graded read of DFlash — the single-pass block-diffusion drafter shipped into vLLM via Speculators v0.5.0 as a config-only EAGLE-3 swap. Honest fak lens: no code borrow (fak never touches a KV tensor); the transferable surface is the *parallel-block-speculation* shape and the *config-only method swap* ergonomic, mapped to served-inline (`--vdso-proxy-fill`) and the vLLM adapter lane."
+title: "Concept study (CORRECTED): DFlash — block-diffusion speculative decoding (NVIDIA / Z Lab) → fak's pure kernel (2026-07-10)"
+description: "Corrected read of DFlash — the single-pass block-diffusion drafter shipped into vLLM via Speculators v0.5.0 as a config-only EAGLE-3-style swap. RETRACTS the prior version's two false claims ('fak never touches a KV tensor', 'no code borrow'). Truth: fak's PURE KERNEL owns the KV cache and ships a PARTIAL, bit-exact token-level verify+accept+rollback substrate (internal/model/verify.go:36, internal/polymodel/polymodel.go:410, internal/model/kvcache.go:94) with the DRAFT source as the one declared open gap (#3197/#3078). DFlash is an inspire-class CODE borrow into internal/model + internal/compute — a single-pass block draft head filling that gap — not a conceptual-only borrow and not the agent-layer speculator."
 ---
 
-# Concept study: DFlash — block-diffusion speculative decoding → fak
+# DFlash and fak's pure kernel — corrected concept study
 
-A **mechanics-first** read of **DFlash** (Z Lab; highlighted by NVIDIA in June 2026), graded by source
-strength the way this repo grades serving studies (**confirmed** = primary docs/repo/paper; **vendor** =
-NVIDIA/first-party benchmark; **reported** = secondary/press; **unverified** = hedge). It closes with the
-honest fak lens: DFlash is a **GPU-internal drafter** and fak is a prompt / tool-page / session /
-cache-value + gateway layer that **never touches a KV tensor**, so there is **no code borrow** — only a
-*conceptual* borrow (parallel block speculation) and an *ergonomic* one (config-only method swap), plus a
-*consumption* path through the vLLM adapter lane.
+## Correction
 
-Companion to the spec-decode section of the vLLM study
-([`docs/serving/vllm-internals-study.md` §2.7](../serving/vllm-internals-study.md)), which currently only
-*lists* `dflash` among the checkpoint-based methods — this note is the full treatment.
+The prior version of this note (docs/notes/CONCEPT-STUDY-DFLASH-2026-07-10.md, L11-14 and L109-147) made two claims that are factually wrong, and this revision retracts both:
 
-## 1. What DFlash is (confirmed)
+- **RETRACTED: "fak never touches a KV tensor."** fak's pure kernel is a from-scratch Go GPU inference engine that *owns* the KV cache. It has an in-tree, bit-exact KV rollback primitive — `model.KVCache.Evict(from, n)` (internal/model/kvcache.go:94) — that compacts a speculative span and re-rotates RoPE on the survivors, and a whole-cache Clone/restore path used by dynamic precision (internal/model/dynamic_precision.go:81,90-91). Touching KV tensors is the substrate's core competence, not something it avoids.
+- **RETRACTED: "no code borrow — only a conceptual borrow," pointing DFlash at internal/abi/speculate.go.** That anchor is the agent-layer tool-call speculator, which is the wrong level. DFlash belongs at the *token* level, feeding the pure kernel's already-shipped verify-accept substrate (internal/model/verify.go:36, internal/polymodel/polymodel.go:410). The correct classification is an **inspire-class code borrow** into internal/model + internal/compute — a real, code-level draft-head candidate for the open #3197/#3078 draft-side gap — not a conceptual-only borrow.
 
-DFlash replaces the **autoregressive draft head** of EAGLE-3 with a **lightweight block-diffusion draft
-model** that predicts an **entire block of B tokens in a single forward pass**, conditioned on **hidden
-states extracted from the target (verifier) model**. The target then verifies all B+1 positions in one pass,
-exactly as in any speculative-decoding scheme — so DFlash is **lossless-in-expectation** like EAGLE, and the
-change is confined to *how the draft is produced*, not the verify/accept rule.
+## 1. fak owns the KV cache and already has a PARTIAL token-level verify-accept substrate
 
-The bottleneck it attacks: in EAGLE-3 the draft head is **sequential** — to draft K tokens you pay K draft
-forward passes, each depending on the last. DFlash's block-diffusion drafter is **single-pass**, so K draft
-tokens cost roughly the same as 1. This is the whole thesis: *drafting is no longer serialized against draft
-depth.* (Source: Z Lab `z-lab/dflash`; arXiv:2602.06036 "DFlash: Block Diffusion for Flash Speculative
-Decoding," Jian Chen / Yesheng Liang / Zhijian Liu; vLLM Speculators DFlash algorithm docs.)
+The pure-kernel spec-decode substrate is **PARTIAL**: verify + accept + rollback are shipped and bit-exact; the **draft SOURCE is the declared gap** and the decode loop never calls the verify path (#3197, parent epic #2236).
 
-## 2. The pipeline inside Speculators / vLLM (confirmed)
+- **Verify (shipped, bit-exact).** `Session.VerifyForward(ids []int, pos []int, allow func(q,k int) bool)` runs P candidate tokens in ONE forward and returns each panel position's post-head next-token logits (internal/model/verify.go:36; logits out at internal/model/verify.go:244-248). CHAIN mode (pos==nil, allow==nil) is byte-identical to P sequential `Session.Step` calls; TREE mode applies a per-`(q,k)` ancestor mask (Medusa / EAGLE-2 / SpecInfer, internal/model/verify.go:22). It falls back to `verifyForwardSequential` on unsupported regimes (internal/model/verify.go:53), gated by `verifyForwardBatchedOK` (internal/model/verify.go:64-73).
+- **Accept (shipped, pure).** `polymodel.AcceptGreedy(draft, targetArgmax []int)` (internal/polymodel/polymodel.go:410) and `AcceptTree` (internal/polymodel/polymodel.go:473) return only accounting — `SpecResult{Accepted, Advance, KeepKV, EvictKV}` (internal/polymodel/polymodel.go:390) — with no engine, no logits, no GPU (package doc, internal/polymodel/specwiring.go:30-34). The accept rule is greedy/argmax over `targetArgmax`, not the Leviathan sampled-rejection rule.
+- **Rollback (shipped, bit-exact).** `KVCache.Evict(from, n)` compacts a speculative span and re-rotates RoPE on survivors positioned after it, making mid-span eviction — not just end-span — bit-identical to never having drafted the rejected tokens (internal/model/kvcache.go:94; position-delta re-rotation documented at internal/model/kvcache.go:82-87).
+- **Draft (the gap).** The live decode loop is `Session.Generate` — a plain greedy `Prefill -> argmaxF32 -> Step` (internal/model/kv.go:742-753). It contains no draft/verify/accept branch; a grep of kv.go finds only one unrelated "speculatively" in a Q8_0 comment (internal/model/kv.go:104). Note this repairs the prior anchor's mislabel: **kv.go:742 is `Generate`, not a "verify-accept substrate (EAGLE-3/SpecForge)"** — no EAGLE-3 or SpecForge is IMPLEMENTED anywhere in the code. Both appear only as literature/scorecard references in docs (SpecForge at docs/industry-scorecard/decoding.md:83; EAGLE-3 throughout docs/industry-scorecard and docs/awesome-token-efficiency.md:338), and the only in-code EAGLE mentions are literature labels: the SOTA-ladder row at internal/sotamatrix/ladder.go:158 and the Medusa/EAGLE-2/SpecInfer comments at internal/model/verify.go:22 and internal/polymodel/polymodel.go:431.
+- **Self-speculation scaffold (load-time only).** `var RetainMTP bool` (default false) flips the GLM-5.2 / DeepSeek-V4 `mtp.`/`.nextn.` head from dropped to retained/byte-accounted at load (internal/model/safetensors.go:349-357; internal/ggufload/gguf_glm_tensors.go:163-210), across the quant admission surface too (internal/model/v4quant_admit.go:130-131,266-267). Its own comment says materializing it into the forward is a later slice (#3078/#3197). `RetainMTP` is read ONLY by loaders/estimators/tests — never by any forward code — so the retained head is inert weight today.
 
-DFlash rides the **Speculators** library, which links the drafter to the target's hidden states in the vLLM
-inference path. Stages, per the Speculators DFlash algorithm page:
+Declared verdict, in the issue's own words: "PARTIAL: verify+accept+rollback shipped; draft source absent, decode loop unwired" (#3197).
 
-1. **Hidden-state extraction** — the verifier processes the prompt/context and yields intermediate hidden
-   states (Speculators v0.5.0 migrated this to vLLM's **native hidden-states extraction system**).
-2. **Anchor points + masking** — DFlash picks anchor points in the sequence and appends **mask tokens** for
-   the block positions to be predicted. *The block structure is realized entirely through the attention
-   mask* — no bespoke kernel surgery beyond the mask.
-3. **Parallel draft** — the draft layers process context features **and** the mask tokens together in **one
-   forward pass**; output is projected through the **target LM head** to produce vocabulary logits for the
-   speculated block.
-4. **Verify** — standard target forward over the B+1 positions; standard rejection/accept.
+## 2. Where DFlash slots: a single-pass block DRAFT head feeding the existing verify-accept core
 
-Reference eval configuration (confirmed, Speculators docs): **block size 16, a single denoising step**;
-the EAGLE-3 baseline it is compared against uses speculation length 7 (`RedHatAI/Qwen3-8B-speculator.eagle3`).
+DFlash (NVIDIA / Z-Lab block-diffusion drafter; shipped into vLLM via Speculators v0.5.0 as a config-only EAGLE-3-style swap) is a lightweight checkpoint drafter that predicts a whole block of B tokens in ONE forward, conditioned on the target's hidden states and projected through the target LM head, then verified.
 
-## 3. Config-only integration — the actual seam (confirmed)
+Placed correctly, DFlash is **an alternative draft SOURCE** for the exact seam #3197 already defines for an EAGLE-3 head — the verify/accept rule is unchanged (lossless-in-expectation); only how the draft is produced changes:
 
-The headline ergonomic: **swapping EAGLE-3 → DFlash is a config-only change** (vLLM project's own X post,
-2026; NVIDIA blog). In vLLM it is selected via `--speculative-config` with `"method": "dflash"`:
+- **EAGLE-3** = a feature-level autoregressive head reusing the target's hidden states (K sequential draft passes).
+- **GLM MTP self-speculation** = the model's own `.nextn` head proposing tokens (currently load-scaffold-only, no forward, `RetainMTP`; internal/model/safetensors.go:349-357).
+- **DFlash** = a block-diffusion drafter proposing B tokens in ONE pass, collapsing draft-depth serialization so higher K stays single-pass.
 
-```bash
-vllm serve <target-model> \
-  --speculative-config '{"method": "dflash", "model": "<dflash-checkpoint>", ...}'
-```
+Because fak's CHAIN verify already admits K candidates in one forward (internal/model/verify.go:36) and the accept core is drafter-agnostic (internal/polymodel/polymodel.go:410,:473), a DFlash block draft is architecturally compatible with the shipped substrate — it replaces the missing draft source with a single-pass block proposer.
 
-Z Lab's own Gemma-4 example ships as a Docker image because Gemma-4 currently needs a **temporary vLLM
-build**:
+The COMPUTE substrate is partway there for the mask, on ONE path: `VerifyForward`'s `allow(q,k)` predicate is a bare boolean mask with no `k<=q` guard (internal/model/verify.go:192-196), so intra-block *bidirectional* attention (a masked query attending a future masked position in its block) is directly expressible on the CPU f32 tree branch (internal/model/verify.go:177-215). Per-token absolute RoPE positions are caller-assignable via `pos[]` (internal/model/verify.go:94-99), and an end-span `KVCache.Evict(base, B)` drops exactly a rejected block (internal/model/kvcache.go:94). This makes DFlash an **inspire-class code borrow** into internal/model (draft forward + block-accept loop) and internal/compute (the masked multi-query GPU kernel) — a genuine code-level candidate, not a conceptual-only note.
 
-```bash
-docker run --rm -it --gpus all --ipc=host --shm-size=16g -p 8000:8000 \
-  -v ~/.cache/huggingface:/root/.cache/huggingface \
-  ghcr.io/z-lab/vllm-openai:gemma4-dflash-cu130 \
-  google/gemma-4-26B-A4B-it --host 0.0.0.0 --port 8000 \
-  --speculative-config '{"method": "dflash", ...}'
-```
+## 3. Gaps — brutally honest, do NOT overclaim wireability
 
-SGLang reached DFlash support earlier and uses different flags:
-`--speculative-algorithm DFLASH --speculative-draft-model-path z-lab/Qwen3-Coder-30B-A3B-DFlash
---tp-size 1 --dtype bfloat16 --attention-backend fa3` (confirmed, Z Lab / SGLang docs).
+The substrate is tested-but-loosely-wired; a DFlash draft cannot be "just dropped in":
 
-**Tuning shift (confirmed):** because drafting is single-pass, **higher K is cheaper on DFlash than on
-EAGLE-3** — with autoregressive drafting a larger K means more sequential draft steps; with DFlash the K
-tokens are one pass. So the K/acceptance tradeoff moves in DFlash's favor.
+- **No production caller of VerifyForward.** The single-pass batched/tree verify — the actual throughput "GPU lever" — is exercised ONLY by internal/model/verify_test.go:56,165,183. No decode loop, no serving path, and not even the polymodelbench witness calls it (cmd/polymodelbench/main.go:280 uses sequential `ts.Step` instead). It is a tested substrate piece with no driver on the forward path.
+- **No draft-forward wiring for the retained head.** A repo-wide grep of internal/model for `mtp|nextn|eh_proj|shared_head|enorm|hnorm` finds ONLY load-time skip/rename/classify code — zero reads of the retained tensors into any matmul; internal/model/verify.go has no `mtp`/`nextn` reference at all. On GGUF the materializing loader drops the nextn head EVEN WHEN `RetainMTP` is set, because `CanonicalTensorNameArch` returns no slot for `blk.<L>.nextn.*` (internal/ggufload/gguf_weightsource.go:180-182). There is no hidden-state -> draft-head seam and no `model.Config` field — `RetainMTP` is a deliberately package-level global whose promotion is gated on the forward wiring landing (internal/model/safetensors.go:354-356).
+- **No block/bidirectional attention kernel on GPU.** `k_flash_attention` takes a SINGLE query row per head and has NO mask/causal parameter — causality is by construction over all cached keys (internal/compute/cuda_kernels.cu:701-748; internal/compute/cuda_backend.h:139). The Go `Attention()` entrypoint accepts a `causal bool` but never forwards it (internal/compute/cuda.go:959-971). All mainline decode/prefill paths are causal-only by loop bound (internal/model/kv.go:431; internal/model/batch_attn.go:227). A DFlash draft on GPU needs a **brand-new masked multi-query flash kernel that does not exist**.
+- **The one expressible-mask path is CPU f32 only.** `verifyForwardBatchedOK` returns false — falling back to sequential — under any Backend (CUDA), quant (Q4/Q4K/GPTQ/Metal), PrecisionPolicy, or MLA/MoE/Qwen-hybrid layout (internal/model/verify.go:64-73). So a bidirectional block mask is expressible ONLY on CPU f32, not GPU and not any quantized/GLM-MoE model. A batched `glm_moe_dsa` verify path is unwritten (internal/model/verify.go:69).
+- **No diffusion control loop or block-accept semantics.** The shipped accept logic is chain/tree speculation committing a longest-accepted prefix (internal/model/verify.go:3-27), not a denoise loop that re-masks and re-forwards unconfident positions. The mask *mechanism* is present on CPU f32; the diffusion control loop and its acceptance rule are absent.
+- **No draft checkpoint; end-to-end loop is CPU-synthetic only.** A full draft->verify->accept->rollback loop runs end-to-end ONLY in the CPU-synthetic `cmd/polymodelbench` witness, and it verifies with sequential `Step` (cmd/polymodelbench/main.go:22-24,255-290) — no GPU, no real model, "no tokens/sec-on-hardware claim". `verifyForwardBatchedOK` refuses every backend/quant/MoE/Metal/hybrid regime (internal/model/verify.go:64-73). The DFlash drafter itself is Blackwell-hardware-gated on the vLLM adapter lane (epic #40).
+- **The cited internal/spec driver is absent from the live tree.** verify.go's own doc references `internal/spec.SpeculativeGreedy` + `ProvisionalSink` (internal/model/verify.go:5-7; internal/model/verify_test.go:39), but no `internal/spec/` exists in the buildable module — the only on-disk copy is a parked isolated-build sandbox (.dos/_dos_park/_iso_build/internal/spec/). No live caller performs that swap.
 
-## 4. Performance — graded by source
+## Verdict
 
-- **Paper / Z Lab (paper-reported):** up to **6× lossless acceleration on Qwen3-8B**, ≈**2.5× faster than
-  EAGLE-3**. Reasoning/thinking mode: ≈**4.5× greedy** on Qwen3-4B/8B, ≈**3.9× under sampling** (reported —
-  hedge; workload- and decode-mode-specific).
-- **NVIDIA (vendor-reported):** up to **15× higher throughput on Blackwell**; on **Gemma-4 31B, single
-  Blackwell Ultra GPU**, **5.8× throughput at the same concurrency** vs autoregressive decode — Math500 5.8×,
-  GSM8K 5.3×, HumanEval 5.6×, MBPP 4.4×.
-- **Third-party (reported, weak):** Spheron ("6× on GPU cloud"), press writeups (MarkTechPost / TechTimes) —
-  echo the vendor/paper numbers; **do not lean on these independently**.
-
-**Grading discipline (same as vLLM §2.7):** speculative decoding is a **latency** win that **collapses toward
-zero at high concurrency** once the GPU is compute-bound — every DFlash speedup number is therefore
-**concurrency- and hardware-specific**, and the biggest figures are **Blackwell-gated vendor benchmarks**.
-State the batch/hardware with any claim; treat 15× as a vendor ceiling, not a portable expectation.
-
-## 5. Requirements & caveats (confirmed)
-
-- **vLLM nightly** (or a release with DFlash support) — until it lands in a stable tag, use
-  `vllm/vllm-openai:nightly`; Gemma-4 needs the temporary `ghcr.io/z-lab/vllm-openai:gemma4-dflash-cu130`
-  build.
-- **Hardware validation is partial** — "not all hardware configurations have been validated yet; refer to
-  model cards." The marquee numbers are **Blackwell**.
-- **Online training OOM hazard** — DFlash training is typically **online**: hidden states are extracted
-  on-the-fly from a *running* vLLM server to train the speculator, so trainer + server share the GPU and you
-  must **isolate GPU resources to avoid OOM** (Speculators v0.5.0 tutorial).
-- **Checkpoints:** pretrained DFlash speculators exist on HuggingFace (RedHatAI speculator collection).
-
-## 6. The fak lens — is there a borrow?
-
-**Verdict: no direct/code borrow. Two candidate *conceptual/ergonomic* borrows + one consumption path.
-None shipped — all `not yet`, with a checkable next step.**
-
-fak never computes a draft token or touches a KV tensor (see the M2 lens in
-[`CONCEPT-STUDY-VLLM-M2-2026-07-10.md`](CONCEPT-STUDY-VLLM-M2-2026-07-10.md): the transferable surface is
-always *one level up*). So DFlash's diffusion kernel is out of scope by construction. What maps up:
-
-- **(a) Conceptual — parallel-block speculation over autoregressive.** fak already *speculates*: the
-  **served-inline** path (`fak serve --vdso-proxy-fill`) answers read-only-shaped tool calls from a warmed
-  cache instead of executing them (gate `readOnlyPrefix` at `internal/gateway/adjudicate_proposed.go:66`;
-  flag `vdsoProxyFill` at `internal/gateway/gateway.go:697`; served-inline path at
-  `internal/gateway/adjudicate_proposed.go:224`). Today that path is **per-call** (one tool → one inline
-  fill). DFlash's shape suggests a **block** analogue: draft a *block* of anticipated read-only tool-fills in
-  one speculative pass and let the turn "verify" (accept the prefix that the model actually asks for),
-  amortizing the per-call adjudication overhead — exactly DFlash's single-pass-vs-sequential win, one level
-  up. **Status: `not yet` — conceptual only.** Next checkable step: measure whether real transcripts issue
-  read-only tool calls in *runs* (blocks) frequently enough to make block-drafting pay (per the served-inline
-  measurement in [[served-inline-name-gate-blocks-claude-native]]: today served-inline is 0% on Claude
-  Code's native Read/Grep/Glob because those don't match `readOnlyPrefix` — so this borrow is *gated on
-  fixing the name gate first*, and should not be pursued before that).
-
-- **(b) Ergonomic — config-only method swap.** DFlash's "swap the checkpoint reference, one config line, no
-  code" is a design pattern for **method selection by config**. fak's `dispatch_model_policy` selects models
-  by policy; a spec-decode-*method* knob (were fak ever to front a spec-decode backend) belongs in that same
-  config surface, not in code. **Status: `not yet` — no fak surface consumes a spec-decode method today.**
-
-- **(c) Consumption — the vLLM adapter lane.** If/when fak serves through a vLLM backend (adapter lane
-  #1729–#1734; epic #40 vLLM adapter), `method: dflash` is a **serving-config passthrough**, not a fak
-  feature. Any perf claim from it is **Blackwell-hardware-gated** and must follow the #40 acceptance-split
-  discipline ([[issue-40-vllm-adapter-acceptance-split]]): the live-serving / parity items are
-  hardware-gated — **witness them on a Blackwell box or leave them `not yet`; do not fabricate the gated
-  numbers.**
-
-**No leaf filed** this pass: (a) is blocked on the served-inline name gate, (b) has no consuming surface,
-and (c) is a passthrough on an already-tracked lane. Re-filing any of these as an issue now would be a
-false-bound rider, not a borrow — anti-re-file discipline. This note is the record; a leaf follows only when
-(a)'s name-gate blocker clears and transcripts show block-shaped read-only runs.
-
-## 7. Source ledger
-
-Primary (confirmed):
-- Z Lab — project page `z-lab.ai/projects/dflash`, repo `github.com/z-lab/dflash`.
-- arXiv:2602.06036 — "DFlash: Block Diffusion for Flash Speculative Decoding" (Chen, Liang, Liu).
-- vLLM Speculators docs — DFlash algorithm page `docs.vllm.ai/projects/speculators/.../algorithms/dflash/`.
-- vLLM blog — "Speculators v0.5.0: DFlash Support and Online Training" (2026-05-28);
-  Red Hat Developer mirror (2026-06-04).
-- vLLM project on X — DFlash config-only-swap announcement (2026).
-
-Vendor:
-- NVIDIA Technical Blog — "Boost Inference Performance up to 15x on NVIDIA Blackwell Using DFlash Speculative
-  Decoding" (2026-06-24).
-
-Secondary (reported — weak, do not lean on):
-- MarkTechPost (2026-06-24), TechTimes (2026-06-27), Spheron blog, regolo.ai tutorial, Allen Kuo (Medium).
-
-fak seams cited (verified in-tree at this HEAD):
-- `internal/gateway/adjudicate_proposed.go:66` (`readOnlyPrefix` gate), `:224` (served-inline path).
-- `internal/gateway/gateway.go:697` (`--vdso-proxy-fill` flag), `:1460` (`vdsoProxyFill`).
+fak's pure kernel owns the KV cache and ships a PARTIAL, bit-exact token-level verify + accept + rollback substrate (internal/model/verify.go:36, internal/polymodel/polymodel.go:410, internal/model/kvcache.go:94) with the DRAFT source as the one declared, open gap (#3197 / #3078). DFlash is a legitimate, code-level candidate to fill that gap as a single-pass block-diffusion draft head — an alternative to EAGLE-3 and to GLM MTP self-speculation — landing as an **inspire-class code borrow into internal/model + internal/compute** (draft forward + block/bidirectional attention mask), NOT "no code borrow" and NOT the agent-layer speculator. Status: `not yet`. The honest first checkable step remains #3197's trivial n-gram / prompt-lookup drafter behind `Session.Generate` — proving the draft->verify->accept->rollback loop wires end-to-end (argmax-identical to plain `Generate`) before any EAGLE / MTP / DFlash head lands, followed by the masked multi-query GPU kernel and the lifting of the `verifyForwardBatchedOK` backend/quant gate (internal/model/verify.go:64-73) that block-diffusion drafting on GPU requires.
