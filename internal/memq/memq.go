@@ -139,6 +139,14 @@ type Op struct {
 	Bytes  int64  `json:"bytes,omitempty"`  // budget cap, or narrow's per-cell width cap (bytes)
 	Window int    `json:"window,omitempty"` // rank relevance_span: pooling width in cells (odd, >= 1; 1 = identity kernel)
 	Reason string `json:"reason,omitempty"` // tombstone/effect reason
+	// StarveK is the OPT-IN deterministic anti-starvation credit for the cutline ops
+	// (limit/budget), #4021. When > 0, every pass a cell falls below the op's cutline
+	// advances a per-cell counter in Attrs[StarveAttr]; once the cell JUST below the
+	// cutline is non-durable, unreferenced, and has sat below it for StarveK
+	// consecutive passes, it is retained for ONE pass (counter reset) — the
+	// NACL/Scissorhands anti-starvation axis with no RNG (see starve.go). 0 (the
+	// default) is byte-identical to today.
+	StarveK int `json:"starve_k,omitempty"`
 }
 
 // Query is an authored memory request: an intent string (for relevance ranking and as
@@ -225,9 +233,15 @@ func Validate(q Query) error {
 			if op.K < 0 {
 				return fmt.Errorf("memq: op %d (limit) has negative k=%d", i, op.K)
 			}
+			if op.StarveK < 0 {
+				return fmt.Errorf("memq: op %d (limit) has negative starve_k=%d", i, op.StarveK)
+			}
 		case OpBudget:
 			if op.Bytes < 0 {
 				return fmt.Errorf("memq: op %d (budget) has negative bytes=%d", i, op.Bytes)
+			}
+			if op.StarveK < 0 {
+				return fmt.Errorf("memq: op %d (budget) has negative starve_k=%d", i, op.StarveK)
 			}
 		case OpExempt:
 			if op.K < 0 {

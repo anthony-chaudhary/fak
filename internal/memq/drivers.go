@@ -23,6 +23,10 @@ type Params struct {
 	// fold would approximate worst survive bit-exact. 0 (the zero value) builds the
 	// exact pre-#4018 pipeline.
 	RetentionCount int `json:"retention_count,omitempty"`
+
+	// StarveK opts a driver's cutline op into the deterministic anti-starvation credit
+	// (#4021; see Op.StarveK). 0 (the default) builds the exact same query as before.
+	StarveK int `json:"starve_k,omitempty"`
 }
 
 // Driver is a NAMED, pre-composed memory strategy — a "canned query" in the algebra.
@@ -108,7 +112,7 @@ func init() {
 					}}},
 					{Kind: OpDedup},
 					{Kind: OpRank, By: RankRelevance, Desc: true},
-					{Kind: OpBudget, Bytes: p.Budget},
+					{Kind: OpBudget, Bytes: p.Budget, StarveK: p.StarveK},
 					{Kind: OpRender},
 				},
 			}

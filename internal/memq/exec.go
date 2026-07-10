@@ -175,6 +175,7 @@ type Result struct {
 	Refused  []Refusal      `json:"refused,omitempty"`
 	Advisory []NearDupPair  `json:"advisory,omitempty"` // opt-in near-dup pairs (#2506); advisory, never collapsed
 	Overflow *IndexOverflow `json:"overflow,omitempty"` // typed over-budget verdict (#2430); nil when nothing overflowed
+	Starve   *StarveReport  `json:"starve,omitempty"`   // typed anti-starvation verdict (#4021); nil unless an opt-in StarveK op changed a counter
 	Working  []Cell         `json:"working,omitempty"`  // final working set (safe metadata only)
 	Stats    Stats          `json:"stats"`
 }
@@ -245,12 +246,26 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 				sortByRank(work, op.By, op.Desc, score, refcount)
 			}
 		case OpLimit:
-			if op.K < len(work) {
+			if op.StarveK > 0 {
+				kept, cut := work, []Cell(nil)
+				if op.K < len(work) {
+					kept, cut = work[:op.K:op.K], work[op.K:]
+				}
+				var upds []StarveUpdate
+				work, _, upds = applyStarveCredit(kept, cut, op.StarveK, refcount)
+				note = recordStarve(&res, op.StarveK, upds)
+			} else if op.K < len(work) {
 				work = work[:op.K]
 			}
 		case OpBudget:
 			var dropped []Cell
 			work, dropped = applyBudget(work, op.Bytes)
+			starveN := ""
+			if op.StarveK > 0 {
+				var upds []StarveUpdate
+				work, dropped, upds = applyStarveCredit(work, dropped, op.StarveK, refcount)
+				starveN = recordStarve(&res, op.StarveK, upds)
+			}
 			if len(dropped) > 0 {
 				ov := &IndexOverflow{Reason: OverflowReason, Budget: op.Bytes, Kept: len(work)}
 				for _, c := range dropped {
@@ -259,6 +274,12 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 				res.Overflow = ov
 				note = fmt.Sprintf("%s: %d entr%s over the %d-byte budget (%s)", OverflowReason,
 					len(dropped), plural(len(dropped)), op.Bytes, overflowNames(dropped))
+			}
+			if starveN != "" {
+				if note != "" {
+					note += "; "
+				}
+				note += starveN
 			}
 		case OpDedup:
 			work, note = applyDedup(&res, work)
