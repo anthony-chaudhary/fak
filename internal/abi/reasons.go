@@ -11,18 +11,18 @@ import "strconv"
 
 const (
 	ReasonNone             ReasonCode = iota // not a refusal
-	ReasonDefaultDeny                        // no policy affirmatively allowed it (fail-closed)
+	ReasonDefaultDeny                        // allowed only once a policy affirmatively permits it; none did (fail-closed)
 	ReasonPolicyBlock                        // an explicit policy rule denied it
 	ReasonSelfModify                         // the call would modify the agent/kernel itself
-	ReasonLeaseHeld                          // a file-tree lease conflict (dos arbitrate)
+	ReasonLeaseHeld                          // take the tree once the conflicting lease releases; a file-tree lease conflict for now (dos arbitrate)
 	ReasonTrustViolation                     // taint/scope violation (shared-result isolation)
-	ReasonMalformed                          // failed a grammar / arity well-formedness rung
-	ReasonMisroute                           // wrong tool or arg shape — MODEL-FIXABLE
-	ReasonRateLimited                        // throttled; retry after a wait
+	ReasonMalformed                          // must pass the grammar / arity well-formedness rung; this call did not
+	ReasonMisroute                           // use the right tool and arg shape — MODEL-FIXABLE
+	ReasonRateLimited                        // retry after a wait; throttled for now
 	ReasonSecretExfil                        // result/args matched a secret pattern
-	ReasonUnwitnessed                        // require-witness gate had no corroboration
-	ReasonOversize                           // payload exceeded the context-admission budget
-	ReasonUnknownTool                        // tool not in the registry
+	ReasonUnwitnessed                        // supply a corroborating witness; the require-witness gate found none
+	ReasonOversize                           // keep the payload within the context-admission budget; this one exceeded it
+	ReasonUnknownTool                        // use a tool in the registry; this one is not
 	ReasonSecretDiscovered                   // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
 	ReasonSecretRedacted                     // a credential span in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, distinct from the SECRET_EXFIL seal
 	// 16.. reserved for additive core reasons; register out-of-tree names via
