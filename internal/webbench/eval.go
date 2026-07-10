@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 // evalHarnessTimeout bounds a single RunEval harness invocation. The harness
@@ -18,15 +20,25 @@ import (
 // var (not a const) so tests can drive the timeout path with a tiny deadline.
 var evalHarnessTimeout = 15 * time.Minute
 
-// runBoundedHarness runs the harness command under a deadline. CommandContext
-// kills the child when the context expires and WaitDelay bounds the lingering
-// wait on the child's I/O pipes, so a wedged browser run cannot block the
-// caller indefinitely. On expiry it returns an error wrapping
+// runBoundedHarness runs the harness command under a deadline. On expiry the
+// kill routes through procguard.KillPID so the whole harness subtree is reaped:
+// the harness fans out into browser subprocesses (Playwright, Chromium), and
+// the default single-PID kill would return a timeout verdict while leaving
+// real browsers running over the network (#3481, the orphan class
+// gardenbundle.RunMember reaps for #3103). WaitDelay bounds the lingering wait
+// on the child's I/O pipes, so a wedged browser run cannot block the caller
+// indefinitely. On expiry it returns an error wrapping
 // context.DeadlineExceeded (recognisable via errors.Is).
 func runBoundedHarness(timeout time.Duration, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Cancel = func() error {
+		if ok, detail := procguard.KillPID(cmd.Process.Pid); !ok {
+			return errors.New(detail)
+		}
+		return nil
+	}
 	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil && ctx.Err() == context.DeadlineExceeded {
@@ -87,11 +99,22 @@ func pythonCandidates(python string) []string {
 
 // EvalConfig drives a local success-rate run.
 type EvalConfig struct {
-	PredictionsPath string // path to predictions.json (agent trajectories)
-	Benchmark       string // "browser-agent", "webvoyager", etc.
-	RunID           string // names the harness output dir
-	MaxWorkers      int    // harness parallelism
-	Python          string // interpreter
+	PredictionsPath string        // path to predictions.json (agent trajectories)
+	Benchmark       string        // "browser-agent", "webvoyager", etc.
+	RunID           string        // names the harness output dir
+	MaxWorkers      int           // harness parallelism
+	Python          string        // interpreter
+	Timeout         time.Duration // per-benchmark harness deadline; <=0 means evalHarnessTimeout
+}
+
+// harnessTimeout resolves the per-benchmark deadline: an explicit cfg.Timeout
+// wins; the zero value (callers that don't care) falls back to the package
+// default.
+func (cfg EvalConfig) harnessTimeout() time.Duration {
+	if cfg.Timeout > 0 {
+		return cfg.Timeout
+	}
+	return evalHarnessTimeout
 }
 
 // EvalResult is the success-rate outcome.
@@ -130,7 +153,7 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 	}
 	// Bounded: the harness drives real browsers over the network, which can wedge
 	// (a hung page, a stalled fetch) with no natural deadline.
-	output, err := runBoundedHarness(evalHarnessTimeout, cmdParts[0], cmdParts[1:]...)
+	output, err := runBoundedHarness(cfg.harnessTimeout(), cmdParts[0], cmdParts[1:]...)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return res, err
