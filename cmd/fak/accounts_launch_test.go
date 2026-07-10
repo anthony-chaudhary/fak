@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
-	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
 func TestBuildLaunchArgv(t *testing.T) {
@@ -564,33 +564,31 @@ func TestLaunchModelUnavailableClassifier(t *testing.T) {
 	}
 }
 
-func TestRunAccountsLaunchWarnsOnStaleBinary(t *testing.T) {
+func TestRunAccountsLaunchWarnsOnSkewedBinary(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
 
 	const oldRev = "1111111111111111111111111111111111111111"
-	const headRev = "2222222222222222222222222222222222222222"
+	const tipRev = "2222222222222222222222222222222222222222"
 	origRun := accountsLaunchRun
-	origStamp := accountsLaunchStamp
-	origHead := accountsLaunchHeadRev
+	origAssess := accountsLaunchAssess
 	t.Cleanup(func() {
 		accountsLaunchRun = origRun
-		accountsLaunchStamp = origStamp
-		accountsLaunchHeadRev = origHead
+		accountsLaunchAssess = origAssess
 	})
 
 	launched := false
 	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		launched = true
 		if len(argv) < 3 || argv[1] != "guard" {
-			t.Fatalf("stale warning should not disable the default guard launch: %#v", argv)
+			t.Fatalf("skew warning should not disable the default guard launch: %#v", argv)
 		}
 		return launchRunResult{Code: 0}
 	}
-	accountsLaunchStamp = func() binstamp.Stamp {
-		return binstamp.Stamp{Revision: oldRev, HasVCS: true}
+	// A stamped launcher provably BEHIND origin/main (a strict ancestor of the tip).
+	accountsLaunchAssess = func() versionskew.Assessment {
+		return versionskew.Assessment{Verdict: versionskew.Skewed, Running: oldRev, TrunkTip: tipRev, Relation: versionskew.RelBehind}
 	}
-	accountsLaunchHeadRev = func() string { return headRev }
 
 	var out, errb bytes.Buffer
 	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
@@ -604,13 +602,82 @@ func TestRunAccountsLaunchWarnsOnStaleBinary(t *testing.T) {
 	for _, want := range []string{
 		"WARNING: running fak binary",
 		"built from 111111111111",
-		"checkout is at 222222222222",
+		"origin/main is at 222222222222",
+		"provably BEHIND",
 		"fak self-update",
 		"guard will re-exec the same stale file",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("stale launch warning missing %q:\n%s", want, got)
+			t.Fatalf("skewed launch warning missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestRunAccountsLaunchWarnsOnDivergedBinary: a launcher OFF the trunk line (neither behind nor
+// ahead of origin/main) was invisible to the old binstamp Stale/Unstamped surface — binstamp has
+// no "diverged" concept. versionskew makes it its own refusable token, so launch now names it.
+func TestRunAccountsLaunchWarnsOnDivergedBinary(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	origRun := accountsLaunchRun
+	origAssess := accountsLaunchAssess
+	t.Cleanup(func() {
+		accountsLaunchRun = origRun
+		accountsLaunchAssess = origAssess
+	})
+
+	launched := false
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+		launched = true
+		return launchRunResult{Code: 0}
+	}
+	accountsLaunchAssess = func() versionskew.Assessment {
+		return versionskew.Assessment{Verdict: versionskew.Diverged, Running: "3333333333333333333333333333333333333333", TrunkTip: "4444444444444444444444444444444444444444", Relation: versionskew.RelDiverged}
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch rc=%d stderr=%s", rc, errb.String())
+	}
+	if !launched {
+		t.Fatal("launch exec seam was not called")
+	}
+	got := errb.String()
+	for _, want := range []string{"WARNING: running fak binary", "OFF the trunk line", "origin/main is at 444444444444"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diverged launch warning missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestRunAccountsLaunchQuietOnAheadBinary: an AHEAD launcher (a fresh local build not yet pushed)
+// read as binstamp.Stale under the old equality check and would have emitted a FALSE stale
+// warning. versionskew keeps Ahead distinct and NON-refusable, so launch now stays silent.
+func TestRunAccountsLaunchQuietOnAheadBinary(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	origRun := accountsLaunchRun
+	origAssess := accountsLaunchAssess
+	t.Cleanup(func() {
+		accountsLaunchRun = origRun
+		accountsLaunchAssess = origAssess
+	})
+
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult { return launchRunResult{Code: 0} }
+	accountsLaunchAssess = func() versionskew.Assessment {
+		return versionskew.Assessment{Verdict: versionskew.Ahead, Running: "5555555555555555555555555555555555555555", TrunkTip: "6666666666666666666666666666666666666666", Relation: versionskew.RelAhead}
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch rc=%d stderr=%s", rc, errb.String())
+	}
+	if strings.Contains(errb.String(), "WARNING: running fak binary") {
+		t.Fatalf("AHEAD launcher must NOT emit a stale-binary warning:\n%s", errb.String())
 	}
 }
 
@@ -623,12 +690,10 @@ func TestRunAccountsLaunchWarnsOnUnstampedBinary(t *testing.T) {
 	regPath, _ := launchRegistry(t, home)
 
 	origRun := accountsLaunchRun
-	origStamp := accountsLaunchStamp
-	origHead := accountsLaunchHeadRev
+	origAssess := accountsLaunchAssess
 	t.Cleanup(func() {
 		accountsLaunchRun = origRun
-		accountsLaunchStamp = origStamp
-		accountsLaunchHeadRev = origHead
+		accountsLaunchAssess = origAssess
 	})
 
 	launched := false
@@ -639,9 +704,10 @@ func TestRunAccountsLaunchWarnsOnUnstampedBinary(t *testing.T) {
 		}
 		return launchRunResult{Code: 0}
 	}
-	// An unstamped binary: no VCS revision at all.
-	accountsLaunchStamp = func() binstamp.Stamp { return binstamp.Stamp{} }
-	accountsLaunchHeadRev = func() string { return "2222222222222222222222222222222222222222" }
+	// An unstamped binary: no VCS revision at all -> versionskew.Unstamped.
+	accountsLaunchAssess = func() versionskew.Assessment {
+		return versionskew.Assessment{Verdict: versionskew.Unstamped}
+	}
 
 	var out, errb bytes.Buffer
 	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})

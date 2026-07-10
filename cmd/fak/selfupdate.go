@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
+	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
 // cmdSelfUpdate — `fak self-update`: converge THIS install on the latest VERIFIED fak.
@@ -69,6 +70,14 @@ func cmdSelfUpdate(argv []string) {
 	}
 	verdict := binstamp.Compare(stamp, headRev)
 
+	// Beyond the coarse Fresh/Stale/Unknown, classify the stamp by git ANCESTRY vs origin/main.
+	// This is what lets SELF mode tell a binary that is provably BEHIND (Skewed — worth
+	// rebuilding) apart from one that is merely AHEAD (a fresh local build not yet pushed):
+	// binstamp.Compare collapses BOTH into Stale, so the old `verdict == Stale` rule would
+	// rebuild origin/main straight OVER a newer dev binary. AssessStamp reuses the stamp we
+	// already resolved (the target's, in fleet mode) and the origin/main we just fetched.
+	skew := versionskew.AssessStamp(context.Background(), selfinstall.RealRunner, repoRoot, "origin/main", stamp)
+
 	stampRev := stamp.Revision
 	if stampRev == "" {
 		stampRev = "(unstamped)"
@@ -79,8 +88,8 @@ func cmdSelfUpdate(argv []string) {
 	if len(head) > 12 {
 		head = head[:12]
 	}
-	fmt.Printf("%s: %s%s   origin/main: %s   => %s\n",
-		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict)
+	fmt.Printf("%s: %s%s   origin/main: %s   => %s (skew: %s)\n",
+		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict, skew.Verdict)
 
 	if *check {
 		// Observability: also report the swap-aside footprint next to the target binary, so a
@@ -89,24 +98,20 @@ func cmdSelfUpdate(argv []string) {
 		reportAsideFootprint(installTargetOr(*target))
 		return
 	}
-	// Decide whether to build. The asymmetry is deliberate:
-	//   - FLEET mode (--target a different binary): proceed unless the target is provably
-	//     Fresh. We rebuild from gated origin/main whenever we cannot PROVE the fleet binary
-	//     is already current — a cheap atomic swap is the right default for a binary the guard
-	//     fleet runs, and the build gate makes "rebuild" always safe.
-	//   - SELF mode (updating our own binary): proceed only on a provable Stale (or --force).
-	//     A bare Unknown on our own dirty dev binary must NOT restart a developer's build.
-	proceed := *force
-	if fleetTarget {
-		proceed = proceed || verdict != binstamp.Fresh
-	} else {
-		proceed = proceed || verdict == binstamp.Stale
-	}
+	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry).
+	proceed := selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict)
 	if !proceed {
-		if verdict == binstamp.Unknown {
-			fmt.Println("self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
-		} else {
+		switch {
+		case fleetTarget:
+			fmt.Println("self-update: target already current — nothing to do.")
+		case skew.Verdict == versionskew.Ahead:
+			fmt.Println("self-update: running binary is AHEAD of origin/main (a local build not yet pushed) — not rebuilding (pass --force to build+gate+install origin/main anyway).")
+		case skew.Verdict == versionskew.Fresh:
 			fmt.Println("self-update: already current — nothing to do.")
+		case skew.Verdict == versionskew.Dirty, skew.Verdict == versionskew.Unstamped, skew.Verdict == versionskew.Diverged:
+			fmt.Printf("self-update: running binary is %s vs origin/main — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install origin/main).\n", skew.Verdict)
+		default:
+			fmt.Println("self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
 		}
 		return
 	}
@@ -187,6 +192,30 @@ func cmdSelfUpdate(argv []string) {
 	if !res.Installed {
 		os.Exit(1)
 	}
+}
+
+// selfUpdateShouldBuild decides whether self-update proceeds to build+gate+install. The two
+// modes consult DIFFERENT witnesses on purpose:
+//   - FLEET (--target names a different binary): rebuild unless binstamp can PROVE the target
+//     is the trunk tip (Fresh). Anything short of proof — including an unresolvable Unknown —
+//     rebuilds, because a cheap gated swap is the right default for a binary the fleet runs.
+//   - SELF (updating our own binary): rebuild ONLY when versionskew proves the running binary
+//     is a strict ANCESTOR of origin/main (Skewed). This is the fix for the case binstamp
+//     collapses: a clean local build that is AHEAD of origin/main reads as binstamp.Stale
+//     (rev differs) and the old `verdict == Stale` rule would rebuild origin/main straight
+//     OVER — downgrading — that newer binary. versionskew keeps Ahead (and Diverged / Dirty /
+//     Unstamped) distinct from Skewed, so SELF mode never downgrades a developer's build out
+//     from under them; --force is the deliberate escape for those cases.
+//
+// --force builds in either mode (force bypasses only the staleness check, never the green gate).
+func selfUpdateShouldBuild(force, fleetTarget bool, bin binstamp.Freshness, skew versionskew.Verdict) bool {
+	if force {
+		return true
+	}
+	if fleetTarget {
+		return bin != binstamp.Fresh
+	}
+	return skew == versionskew.Skewed
 }
 
 // installTargetOr resolves the binary path --check should inspect: the explicit --target, or

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
 // (usage-limit cooldown write/resolve wiring lives in accounts_cooldown.go)
@@ -182,13 +183,25 @@ type launchRunResult struct {
 // execLaunchChild.
 var accountsLaunchRun = execLaunchChild
 
-// accountsLaunchStamp/accountsLaunchHeadRev are freshness seams. A stale launcher is a
-// special footgun because the default guard path re-execs this same binary; without a warning,
-// a user can keep starting the old guard forever even while the checkout is newer.
+// accountsLaunchStamp/accountsLaunchAssess are freshness seams. A stale launcher is a special
+// footgun because the default guard path re-execs this same binary; without a warning, a user
+// can keep starting the old guard forever even while origin/main is newer. accountsLaunchAssess
+// classifies THIS launcher's build against origin/main by git ANCESTRY (versionskew), so a
+// binary that is provably BEHIND (Skewed) or OFF the trunk line (Diverged) is called out
+// distinctly — while a developer's dirty/ahead local build stays quiet.
 var (
-	accountsLaunchStamp   = binstamp.Self
-	accountsLaunchHeadRev = accountsLaunchGitHeadRev
+	accountsLaunchStamp  = binstamp.Self
+	accountsLaunchAssess = defaultAccountsLaunchAssess
 )
+
+// defaultAccountsLaunchAssess compares the running launcher's stamp to origin/main by ancestry.
+// It runs git in the process cwd and does NOT fetch — launch must stay fast, and a stamp that is
+// a strict ANCESTOR of even a slightly-old local origin/main ref is still a genuine Skewed. When
+// origin/main cannot be resolved (fresh clone, no remote) the verdict is the honest Unknown and
+// no warning fires.
+func defaultAccountsLaunchAssess() versionskew.Assessment {
+	return versionskew.AssessStamp(context.Background(), versionskew.RealRunner, "", "origin/main", accountsLaunchStamp())
+}
 
 // runAccountsLaunch resolves the seat, builds the (guard-wrapped, skip-permissions) launch
 // argv, and execs it under that seat's CLAUDE_CONFIG_DIR. With dryRun it prints the plan and
@@ -594,37 +607,30 @@ func launchModelUnavailable(stderr, tried string) bool {
 }
 
 func warnIfAccountsLaunchStaleBinary(stderr io.Writer, fakBin string, useGuard bool) {
-	stamp := accountsLaunchStamp()
-	headRev := accountsLaunchHeadRev()
-	verdict, cause := binstamp.Explain(stamp, headRev)
+	a := accountsLaunchAssess()
 	reexecNote := "before launching"
 	if useGuard {
 		reexecNote = "before launching; otherwise fak guard will re-exec the same stale file"
 	}
-	switch {
-	case verdict == binstamp.Stale:
-		fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q was built from %s, but this checkout is at %s; run `fak self-update` or rebuild/install fak %s.\n",
-			fakBin, shortLaunchRev(stamp.Revision), shortLaunchRev(headRev), reexecNote)
-	case cause == binstamp.CauseUnstamped:
+	switch a.Verdict {
+	case versionskew.Skewed:
+		fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q was built from %s, but origin/main is at %s (provably BEHIND); run `fak self-update` or rebuild/install fak %s.\n",
+			fakBin, shortLaunchRev(a.Running), shortLaunchRev(a.TrunkTip), reexecNote)
+	case versionskew.Diverged:
+		// Off the trunk line entirely: neither an ancestor nor a descendant of origin/main. A
+		// fleet meant to converge on trunk should not keep re-launching it.
+		fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q was built from %s, which is OFF the trunk line (origin/main is at %s); rebuild/install fak from origin/main %s.\n",
+			fakBin, shortLaunchRev(a.Running), shortLaunchRev(a.TrunkTip), reexecNote)
+	case versionskew.Unstamped:
 		// An UNSTAMPED launcher is its own footgun: it cannot attest which commit it is, so
-		// binstamp can never call it Stale, so the Stale branch above would silently pass a
-		// possibly-old binary straight through — and the default guard path re-execs THIS same
-		// file (#3306). Unstamped is distinct from a dev's dirty build (CauseDirty) or running
-		// outside a repo (CauseNoHead), both of which stay quiet; only the no-provenance case
-		// warns.
+		// staleness is UNVERIFIABLE and a possibly-old binary would otherwise pass silently —
+		// while the default guard path re-execs THIS same file (#3306). Distinct from a dev's
+		// Dirty/Ahead local build, which stay quiet; only the no-provenance case warns here.
 		fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q carries NO VCS stamp — it cannot confirm which commit it is, so staleness is UNVERIFIABLE; rebuild in-repo with `go build ./cmd/fak` or run `fak self-update --force` %s.\n",
 			fakBin, reexecNote)
 	}
-}
-
-func accountsLaunchGitHeadRev() string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	// Dirty (dev build), Ahead (unpushed local build), Fresh, and the honest Unknown stay quiet:
+	// none is a stale binary a launch warning should nag about.
 }
 
 func shortLaunchRev(rev string) string {
