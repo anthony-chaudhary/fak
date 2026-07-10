@@ -38,6 +38,8 @@ func cmdTreeDoctor(argv []string) {
 	trunk := fs.String("trunk", "", "merge target a worktree must be folded into to be prunable (default: origin/main)")
 	build := fs.Bool("build", false, "probe each untracked file's package with `go build` to flag build poison (opt-in: spawns go, adds host load)")
 	abandonAfter := fs.Duration("abandon-after", treedoctor.DefaultAbandonAfter, "an untracked source file older than this and not held by a live owner is surfaced as an abandonment candidate")
+	sweepScratch := fs.Bool("sweep-scratch", false, "reap gitignored scratch under the repo root via `git clean -Xdf` (ignored-only: can never touch a tracked file or a real untracked WIP file)")
+	dryRun := fs.Bool("dry-run", false, "with --sweep-scratch, preview via `git clean -Xdn` — list what would be reaped, delete nothing")
 	_ = fs.Parse(argv)
 
 	repoRoot := strings.TrimSpace(*root)
@@ -47,6 +49,34 @@ func cmdTreeDoctor(argv []string) {
 	if repoRoot == "" {
 		fmt.Fprintln(os.Stderr, "tree-doctor: could not resolve a git repo root (pass --root)")
 		os.Exit(2)
+	}
+
+	if *sweepScratch {
+		// The gitignored-scratch reaper (#3211) is its own mode: `git clean -Xdf` removes ONLY
+		// gitignored scratch — never a tracked file, never real untracked WIP. The context is
+		// bounded so a wedged filesystem walk cannot stall the doctor; gitRunner runs it as a
+		// bounded exec.CommandContext.
+		ctx, cancel := context.WithTimeout(context.Background(), treedoctor.ScratchSweepTimeout*time.Second)
+		defer cancel()
+		res, err := treedoctor.SweepScratch(ctx, gitRunner, repoRoot, *dryRun)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tree-doctor: sweep-scratch: %v\n", err)
+			os.Exit(1)
+		}
+		if *asJSON {
+			if err := renderScratchSweepJSON(os.Stdout, scratchSweepJSON{
+				Schema:   "fak-tree-doctor-scratch/1",
+				RepoRoot: repoRoot,
+				DryRun:   res.DryRun,
+				Removed:  res.Removed,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "tree-doctor: encode json: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+		renderScratchSweepText(os.Stdout, res)
+		return
 	}
 
 	wopts := treedoctor.WIPOptions{AbandonAfter: *abandonAfter}
@@ -103,6 +133,40 @@ func treeDoctorTrunk(trunk string) string {
 		return treedoctor.DefaultTrunk
 	}
 	return trunk
+}
+
+// scratchSweepJSON is the machine-readable report for `tree-doctor --sweep-scratch --json`.
+type scratchSweepJSON struct {
+	Schema   string   `json:"schema"`
+	RepoRoot string   `json:"repo_root"`
+	DryRun   bool     `json:"dry_run"`
+	Removed  []string `json:"removed"`
+}
+
+func renderScratchSweepJSON(w io.Writer, payload scratchSweepJSON) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+// renderScratchSweepText prints the gitignored-scratch reap outcome: the paths reaped (or, in
+// dry-run, the paths that WOULD be reaped), or a clean-tree line when there is no scratch.
+func renderScratchSweepText(w io.Writer, res treedoctor.ScratchSweepResult) {
+	if len(res.Removed) == 0 {
+		fmt.Fprintln(w, "sweep-scratch: no gitignored scratch to reap — tree is clean")
+		return
+	}
+	verb := "reaped"
+	if res.DryRun {
+		verb = "would reap"
+	}
+	fmt.Fprintf(w, "sweep-scratch: %s %d gitignored path(s) (ignored-only — tracked files and real untracked WIP are untouched):\n", verb, len(res.Removed))
+	for _, p := range res.Removed {
+		fmt.Fprintln(w, "  - "+p)
+	}
+	if res.DryRun {
+		fmt.Fprintln(w, "\nrun without --dry-run to reap these (git clean -Xdf).")
+	}
 }
 
 func treeDoctorNeedsAction(rep treedoctor.Report) bool {

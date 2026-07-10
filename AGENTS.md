@@ -208,6 +208,11 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
     trunk, safely prunes loss-free strays, and `--sweep-disposable` archives-then-reaps
     dead scratch worktrees (temp / scratchpad / pr-work) while sparing live sessions via a
     freshness guard. A scheduled task runs it (`tools/register_worktree_doctor.ps1`).
+  - *Scratch files, not just worktrees* — agent/tool scratch belongs in the OS scratchpad
+    (or a single gitignored `_scratch/`), never loose in the repo root. `fak treedoctor
+    --sweep-scratch` reaps gitignored scratch via `git clean -Xdf` (ignored-only: it can
+    never touch a tracked file or a real untracked WIP file); `--sweep-scratch --dry-run`
+    previews (`git clean -Xdn`) before reaping (#3211).
   - *The one sanctioned worktree — detached, lands on `main`:* per-worker build
     isolation (#1334 / epic #3165) uses a **detached** worktree pinned at trunk HEAD
     whose diff lands on `main` through the serialized `land_worktree_diff` under the
