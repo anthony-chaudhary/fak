@@ -115,18 +115,28 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	if len(raw) == 0 {
 		return raw, BreakpointOutcome{Reason: BreakpointReasonNonJSON}
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw, BreakpointOutcome{Reason: BreakpointReasonNonJSON} // not a JSON object — leave it alone
-	}
 
 	// 1. If a cache_control breakpoint already exists ANYWHERE in the body, respect it — never
 	//    override a working layout. A bare substring scan is deliberately conservative: a false
 	//    positive (the literal inside some string value) only means we DON'T place, which is the
-	//    fail-safe direction. The common Claude Code shape already marks its head + recent turns,
-	//    so this stage targets precisely the callers that left caching on the table.
+	//    fail-safe direction. The common Claude Code shape already marks its head + recent turns, so
+	//    this stage targets precisely the callers that left caching on the table. This scan runs
+	//    BEFORE the whole-body json.Unmarshal below: the dominant default body already carries
+	//    cache_control, so returning here skips decoding + COPYING the entire messages array into a
+	//    map[string]json.RawMessage (a full-request-body allocation this stage would otherwise pay on
+	//    every wire only to discard). The skipSpace/'{' + json.Valid check keeps this EXACTLY the old
+	//    decode-first behavior: json.Unmarshal into a map accepts only a well-formed JSON object, so a
+	//    malformed or non-object body carrying the literal still bails NonJSON (identity either way).
 	if bytes.Contains(raw, []byte("cache_control")) {
-		return raw, BreakpointOutcome{Reason: BreakpointReasonAlreadySet}
+		if t := skipSpace(raw); len(t) > 0 && t[0] == '{' && json.Valid(raw) {
+			return raw, BreakpointOutcome{Reason: BreakpointReasonAlreadySet}
+		}
+		return raw, BreakpointOutcome{Reason: BreakpointReasonNonJSON}
+	}
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return raw, BreakpointOutcome{Reason: BreakpointReasonNonJSON} // not a JSON object — leave it alone
 	}
 
 	// 2. Pick the stable-head target, preferring the MAXIMAL stable span. The breakpoint marks the
