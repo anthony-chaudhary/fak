@@ -32,6 +32,12 @@ param(
 # whole survey. Handle errors locally instead.
 Set-StrictMode -Off
 
+# Immediate work-discovery remediation (#4162): always include these tasks when
+# they are still Interactive, even if Task Scheduler has not retained 0x800710E0.
+$RequiredS4UTasks = @(
+  'FleetScoutLoop',
+  'FleetStaleWorkGarden'
+)
 function Test-Admin {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
   (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
@@ -55,7 +61,7 @@ $cands = Get-ScheduledTask |
 $cands = @($cands)
 if ($cands.Count -eq 0) { Write-Output "no Interactive-logon fleet tasks found - nothing to migrate."; return }
 
-if ($All) { $targets = $cands } else { $targets = @($cands | Where-Object { $_.Failing }) }
+if ($All) { $targets = $cands } else { $targets = @($cands | Where-Object { $_.Failing -or $RequiredS4UTasks -contains $_.Task }) }
 
 Write-Output "=== Interactive-logon fleet tasks ==="
 foreach ($c in ($cands | Sort-Object Task)) {
