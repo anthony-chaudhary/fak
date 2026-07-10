@@ -50,6 +50,74 @@ func TestQADogfoodPanelFoldsCounts(t *testing.T) {
 	}
 }
 
+// TestQADogfoodPanelWitnessProven proves the #3839 upgrade: a closure witness only
+// counts as clean when it was actually RUN and PASSED. Over the three fixture states
+// the issue names — present+pass, present+fail, absent — plus a present-but-unrun
+// case, a failing or unrun witness is NOT a proven closure and, when the issue is
+// closed, becomes surfaced closure debt.
+func TestQADogfoodPanelWitnessProven(t *testing.T) {
+	issues := []QADogfoodIssue{
+		// present + pass: declared, ran, passed → proven, a clean closure witness.
+		{Number: 1, Open: false, ClosureWitness: "go test ./a", WitnessRun: true, WitnessPassed: true},
+		// present + fail: declared, ran, FAILED → not proven; closed-but-unproven debt.
+		{Number: 2, Open: false, ClosureWitness: "go test ./b", WitnessRun: true, WitnessPassed: false},
+		// present + unrun: declared but never executed → not proven; closed-but-unproven.
+		{Number: 3, Open: false, ClosureWitness: "go test ./c"},
+		// absent: no witness → not run, not proven, and not an unproven-closure (a
+		// missing witness is a different gap than a declared-but-unproven one).
+		{Number: 4, Open: false},
+	}
+
+	p := FoldQADogfoodPanel(issues)
+
+	if p.ClosureWitnessCount != 3 {
+		t.Errorf("ClosureWitnessCount = %d, want 3 (declared: #1,#2,#3)", p.ClosureWitnessCount)
+	}
+	if p.WitnessRunCount != 2 {
+		t.Errorf("WitnessRunCount = %d, want 2 (ran: #1,#2)", p.WitnessRunCount)
+	}
+	if p.WitnessPassCount != 1 {
+		t.Errorf("WitnessPassCount = %d, want 1 (proven: only #1)", p.WitnessPassCount)
+	}
+	if p.UnprovenClosureCount != 2 {
+		t.Errorf("UnprovenClosureCount = %d, want 2 (closed+declared+unproven: #2 failed, #3 unrun)", p.UnprovenClosureCount)
+	}
+
+	// The load-bearing distinction: a failing witness is NOT a clean closure witness,
+	// even though it declares one.
+	failing := issues[1]
+	if !failing.HasClosureWitness() {
+		t.Fatal("#2 declares a witness")
+	}
+	if failing.WitnessProven() {
+		t.Error("#2's witness FAILED — it must not count as a proven/clean closure witness")
+	}
+	if !issues[0].WitnessProven() {
+		t.Error("#1's witness ran and passed — it must count as proven")
+	}
+	if issues[2].WitnessProven() {
+		t.Error("#3's witness was never run — it must not count as proven")
+	}
+
+	// The render must make the distinction visible, not fold proven and unproven into
+	// one number.
+	line := RenderQADogfoodPanel(p)
+	if !strings.Contains(line, "1 proven") || !strings.Contains(line, "2 unproven-closed") {
+		t.Errorf("render must distinguish proven from unproven: %q", line)
+	}
+}
+
+// TestQADogfoodPanelOpenWitnessNotClosureDebt proves an OPEN issue with a declared-
+// but-unrun witness is not yet closure debt — the witness is only owed at closure.
+func TestQADogfoodPanelOpenWitnessNotClosureDebt(t *testing.T) {
+	p := FoldQADogfoodPanel([]QADogfoodIssue{
+		{Number: 1, Open: true, ClosureWitness: "go test ./a"}, // open, unrun
+	})
+	if p.UnprovenClosureCount != 0 {
+		t.Errorf("UnprovenClosureCount = %d, want 0 (an open issue is not closure debt)", p.UnprovenClosureCount)
+	}
+}
+
 // TestQADogfoodPanelEmptyIsWellFormed proves the empty set never divides by zero and
 // renders a well-formed zero line.
 func TestQADogfoodPanelEmptyIsWellFormed(t *testing.T) {

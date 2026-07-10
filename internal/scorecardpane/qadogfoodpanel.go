@@ -46,6 +46,16 @@ type QADogfoodIssue struct {
 	// ClosureWitness is the issue's declared `## Witness` / acceptance-gate command
 	// (the go test line that binds its closure); "" when the issue names none.
 	ClosureWitness string
+	// WitnessRun is true when that closure-witness command was actually EXECUTED (or
+	// bound to the resolving commit's test_run_witness) — not merely declared. The
+	// impure run/binding lives in the caller (cmd/fak, sandboxed); this field carries
+	// its recorded outcome into the pure fold. False for a witness that never ran —
+	// the common case until the binding source (issue #3838) exists, which is why a
+	// declared-but-unrun witness is honestly counted as UNPROVEN, not clean.
+	WitnessRun bool
+	// WitnessPassed is true when the executed witness PASSED. Only meaningful when
+	// WitnessRun; a declared-but-unrun or a ran-and-failed witness leaves it false.
+	WitnessPassed bool
 	// RootPointChange is the issue's `## Root-point change` statement — the named
 	// at-origin control the work moves earlier, not the after-the-fact symptom.
 	RootPointChange string
@@ -54,8 +64,19 @@ type QADogfoodIssue struct {
 }
 
 // HasClosureWitness reports whether the issue declares a closure-witness command.
+// Declaration alone is NOT proof — see WitnessProven for the upgraded signal.
 func (i QADogfoodIssue) HasClosureWitness() bool {
 	return strings.TrimSpace(i.ClosureWitness) != ""
+}
+
+// WitnessProven reports whether the issue's closure is actually PROVEN: it declares a
+// witness command, that command was run, and it passed. This is the upgrade #3839
+// makes over HasClosureWitness — a witness that was declared but never run, or ran
+// and failed, is theater rather than proof, and must NOT count as a clean closure
+// witness. A closed issue that is not WitnessProven is closure debt (see
+// QADogfoodPanel.UnprovenClosureCount).
+func (i QADogfoodIssue) WitnessProven() bool {
+	return i.HasClosureWitness() && i.WitnessRun && i.WitnessPassed
 }
 
 // HasRootPointFields reports whether the issue carries the at-origin "root-point"
@@ -86,13 +107,26 @@ func QADogfoodStale(open bool, updatedAt, now time.Time, horizon time.Duration) 
 // count + percent that carry the root-point fields. Field tags let cmd/fak emit it as
 // a `--json` payload alongside the other native scorecard panels.
 type QADogfoodPanel struct {
-	Schema              string  `json:"schema"`
-	Total               int     `json:"total"`
-	OpenCount           int     `json:"open_count"`
-	StaleCount          int     `json:"stale_count"`
-	ClosureWitnessCount int     `json:"closure_witness_count"`
-	RootPointCount      int     `json:"root_point_count"`
-	RootPointPercent    float64 `json:"root_point_percent"`
+	Schema     string `json:"schema"`
+	Total      int    `json:"total"`
+	OpenCount  int    `json:"open_count"`
+	StaleCount int    `json:"stale_count"`
+	// ClosureWitnessCount is how many issues DECLARE a closure-witness command
+	// (present, not necessarily run). Kept as-is for continuity; it is the "field
+	// present" signal #3839 upgrades but does not remove.
+	ClosureWitnessCount int `json:"closure_witness_count"`
+	// WitnessRunCount is how many witness-declaring issues actually had that witness
+	// executed/bound (regardless of pass/fail) — the "was it run at all" signal.
+	WitnessRunCount int `json:"witness_run_count"`
+	// WitnessPassCount is how many issues are WitnessProven (declared + run + passed):
+	// the clean closure-witness count, distinct from the merely-declared count above.
+	WitnessPassCount int `json:"witness_pass_count"`
+	// UnprovenClosureCount is the debt: CLOSED issues that declared a closure witness
+	// which was NOT run-and-passed (ran and failed, or never executed) — a closure
+	// that reads as witnessed but was never proven. This is the gap #3839 surfaces.
+	UnprovenClosureCount int     `json:"unproven_closure_count"`
+	RootPointCount       int     `json:"root_point_count"`
+	RootPointPercent     float64 `json:"root_point_percent"`
 }
 
 // FoldQADogfoodPanel folds a set of QA dogfood issues into the panel counts. Pure and
@@ -110,6 +144,17 @@ func FoldQADogfoodPanel(issues []QADogfoodIssue) QADogfoodPanel {
 		if it.HasClosureWitness() {
 			p.ClosureWitnessCount++
 		}
+		if it.HasClosureWitness() && it.WitnessRun {
+			p.WitnessRunCount++
+		}
+		if it.WitnessProven() {
+			p.WitnessPassCount++
+		}
+		// Closure debt: a closed issue that declared a witness but never proved it
+		// (failed or never run) reads as witnessed yet was never confirmed green.
+		if !it.Open && it.HasClosureWitness() && !it.WitnessProven() {
+			p.UnprovenClosureCount++
+		}
 		if it.HasRootPointFields() {
 			p.RootPointCount++
 		}
@@ -122,11 +167,14 @@ func FoldQADogfoodPanel(issues []QADogfoodIssue) QADogfoodPanel {
 
 // RenderQADogfoodPanel renders the panel as ONE concise, deterministic line — the
 // compact control-pane card the issue asks for, in the done-condition's order (open,
-// stale, closure-witness, then the root-point coverage). It performs no I/O and never
-// panics: an empty panel still renders a well-formed "0 tracked" line.
+// stale, closure-witness, then the root-point coverage). The closure-witness figure
+// now DISTINGUISHES declared from proven: "N closure-witness (P proven, U
+// unproven-closed)" so a declared-but-unrun-or-failed witness can never masquerade as
+// a clean closure. It performs no I/O and never panics: an empty panel still renders
+// a well-formed "0 tracked" line.
 func RenderQADogfoodPanel(p QADogfoodPanel) string {
 	return fmt.Sprintf(
-		"qa-dogfood issue health — %d tracked · %d open · %d stale · %d closure-witness · %d root-point (%.0f%% of tracked)",
-		p.Total, p.OpenCount, p.StaleCount, p.ClosureWitnessCount, p.RootPointCount, p.RootPointPercent,
+		"qa-dogfood issue health — %d tracked · %d open · %d stale · %d closure-witness (%d proven, %d unproven-closed) · %d root-point (%.0f%% of tracked)",
+		p.Total, p.OpenCount, p.StaleCount, p.ClosureWitnessCount, p.WitnessPassCount, p.UnprovenClosureCount, p.RootPointCount, p.RootPointPercent,
 	)
 }
