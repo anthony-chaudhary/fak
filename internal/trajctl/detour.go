@@ -311,38 +311,127 @@ func DetourRows(parent Objective, spans []DetourSpan, streamRef string, unixMill
 	}
 	rows := make([]Row, 0, 6*len(spans))
 	for k, sp := range spans {
-		child := Objective{
-			ID:       fmt.Sprintf("%s-detour-%d", parent.ID, k+1),
-			ParentID: parent.ID,
-			Statement: fmt.Sprintf("detour: repair the %d-error burst at tool call %d (topics: %s)",
-				sp.Errors, sp.BurstIndex, strings.Join(sp.Topics, ", ")),
-			Budget: DefaultDetourBudget(),
-			Status: StatusActive,
-		}
-		paused := parent
-		paused.Status = StatusPaused
-		rows = append(rows,
-			ObjectiveRecord(child),
-			ObjectiveRecord(paused),
-			ScoreRecord(detourMarker(child.ID, 0, streamRef, fmt.Sprintf(
-				"opened at events[%d]: %d-error burst at events[%d] + sustained shift to %s",
-				sp.OpenIndex, sp.Errors, sp.BurstIndex, strings.Join(sp.Topics, ", ")), unixMillis, stamp)),
-		)
-		if !sp.Closed() {
-			continue // parent stays paused; budget enforcement is #2552's rung
-		}
-		met := child
-		met.Status = StatusMet
-		resumed := parent
-		resumed.Status = StatusActive
-		rows = append(rows,
-			ObjectiveRecord(met),
-			ObjectiveRecord(resumed),
-			ScoreRecord(detourMarker(child.ID, 1, streamRef, fmt.Sprintf(
-				"closed at events[%d]: stream returned to the parent shape", sp.CloseIndex), unixMillis, stamp)),
-		)
+		open, closed := detourSpanRows(parent, sp, k, streamRef, unixMillis, stamp)
+		rows = append(rows, open...)
+		rows = append(rows, closed...)
 	}
 	return rows
+}
+
+// detourSpanRows builds the ledger rows for one detected span k (0-based; child id
+// "<parent>-detour-<k+1>"): the OPEN trio always (the budgeted child objective
+// ACTIVE, the parent flipped PAUSED, and a W2 value-0 open marker on the child),
+// plus the CLOSE trio (child MET, parent restored ACTIVE, W2 value-1 close marker)
+// only when the span has returned. It is split out so the batch [DetourRows] fold
+// and the live turn-end [LiveDetourRows] fold share one source of truth for the row
+// shapes; callers pass an already-defaulted streamRef.
+func detourSpanRows(parent Objective, sp DetourSpan, k int, streamRef string, unixMillis int64, stamp Stamp) (open, closed []Row) {
+	child := Objective{
+		ID:       fmt.Sprintf("%s-detour-%d", parent.ID, k+1),
+		ParentID: parent.ID,
+		Statement: fmt.Sprintf("detour: repair the %d-error burst at tool call %d (topics: %s)",
+			sp.Errors, sp.BurstIndex, strings.Join(sp.Topics, ", ")),
+		Budget: DefaultDetourBudget(),
+		Status: StatusActive,
+	}
+	paused := parent
+	paused.Status = StatusPaused
+	open = []Row{
+		ObjectiveRecord(child),
+		ObjectiveRecord(paused),
+		ScoreRecord(detourMarker(child.ID, 0, streamRef, fmt.Sprintf(
+			"opened at events[%d]: %d-error burst at events[%d] + sustained shift to %s",
+			sp.OpenIndex, sp.Errors, sp.BurstIndex, strings.Join(sp.Topics, ", ")), unixMillis, stamp)),
+	}
+	if !sp.Closed() {
+		return open, nil // parent stays paused; budget enforcement is #2552's rung
+	}
+	met := child
+	met.Status = StatusMet
+	resumed := parent
+	resumed.Status = StatusActive
+	closed = []Row{
+		ObjectiveRecord(met),
+		ObjectiveRecord(resumed),
+		ScoreRecord(detourMarker(child.ID, 1, streamRef, fmt.Sprintf(
+			"closed at events[%d]: stream returned to the parent shape", sp.CloseIndex), unixMillis, stamp)),
+	}
+	return open, closed
+}
+
+// LiveDetourRows is the turn-end fold of [DetourRows]: given the ledger STATE
+// already recorded on earlier turns, it returns only the rows that ADVANCE each
+// span's detour trail, so replaying the same (growing) transcript at successive
+// turn ends never double-opens a child and never re-appends a closed detour. For
+// span k (child id "<parent>-detour-<k+1>"):
+//
+//   - child absent           -> the span's open trio, plus its close trio when the
+//     span has already returned;
+//   - child still ACTIVE and the span has since returned -> only the close trio —
+//     the live open-on-one-turn / close-on-a-later-turn transition (child MET,
+//     parent resumed ACTIVE);
+//   - child already MET, or child ACTIVE while the span is still open -> nothing.
+//
+// Pure and deterministic like DetourRows: same (parent, spans, state) -> same rows;
+// the caller owns the append. An undeclarable parent yields nil. Span numbering is
+// stable across turns because DetectDetourSpans appends spans left-to-right, so an
+// earlier span keeps its k as the stream grows.
+func LiveDetourRows(parent Objective, spans []DetourSpan, state State, streamRef string, unixMillis int64, stamp Stamp) []Row {
+	if parent.ID == "" || parent.Statement == "" {
+		return nil
+	}
+	if streamRef == "" {
+		streamRef = "tool-stream"
+	}
+	rows := make([]Row, 0)
+	for k, sp := range spans {
+		childID := fmt.Sprintf("%s-detour-%d", parent.ID, k+1)
+		open, closed := detourSpanRows(parent, sp, k, streamRef, unixMillis, stamp)
+		switch existing, seen := state.Objectives[childID]; {
+		case !seen:
+			rows = append(rows, open...)
+			rows = append(rows, closed...)
+		case existing.Status == StatusActive && sp.Closed():
+			rows = append(rows, closed...)
+		}
+	}
+	return rows
+}
+
+// TurnEndDetourRows is the pure turn-end producer: it detects detour spans in the
+// live tool stream and, for every OPEN ROOT objective (a top-level objective with
+// no parent, active or paused) in state, returns the ledger rows that advance that
+// root's detour trail without double-opening on replay. It is the detour twin of
+// [Sample] — pure, deterministic, and clock-free — so the cmd/fak Stop-hook wiring
+// is a bounded, fail-open pass over the transcript path and the folded ledger. No
+// spans, or no open root, yields nil. A detour opens under the ROOT because the
+// detector reads the session-global tool stream, not a single sub-objective;
+// budget enforcement and the return-to-main nudge stay #2552's rung.
+func TurnEndDetourRows(state State, events []ToolEvent, streamRef string, unixMillis int64, stamp Stamp) []Row {
+	spans := DetectDetourSpans(events)
+	if len(spans) == 0 {
+		return nil
+	}
+	rows := make([]Row, 0)
+	for _, id := range openRootObjectiveIDs(state.Objectives) {
+		rows = append(rows, LiveDetourRows(state.Objectives[id], spans, state, streamRef, unixMillis, stamp)...)
+	}
+	return rows
+}
+
+// openRootObjectiveIDs returns the ids of the open (active or paused) ROOT
+// objectives — those with no parent id — in lexical order, so a detour pass is
+// deterministic regardless of map iteration order. A detour child carries a parent
+// id, so it is never itself a root: detours never nest.
+func openRootObjectiveIDs(objectives map[string]Objective) []string {
+	ids := make([]string, 0, len(objectives))
+	for id, obj := range objectives {
+		if obj.ParentID == "" && objectiveOpen(obj.Status) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // detourMarker is one W2 endpoint row of a detour's repair curve.

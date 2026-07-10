@@ -248,3 +248,125 @@ func TestDetourRows_UndeclarableParentYieldsNil(t *testing.T) {
 		t.Fatalf("statement-less parent produced rows: %+v", rows)
 	}
 }
+
+// TestTurnEndDetourRows_LivePassOpensClosesAndDedupesOnReplay is the #3669 done
+// condition at the producer level: the shipped detour fixture run through the live
+// turn-end fold TWICE against the SAME ledger folds to exactly one MET detour child
+// under its root, root ACTIVE — the replay double-opens nothing — and the
+// no-transcript (empty stream) case is a total no-op.
+func TestTurnEndDetourRows_LivePassOpensClosesAndDedupesOnReplay(t *testing.T) {
+	path := filepath.Join("testdata", "detour-session.jsonl")
+	events, err := ReadToolStream(path)
+	if err != nil {
+		t.Fatalf("ReadToolStream: %v", err)
+	}
+	root := fourPhaseObjective() // a top-level (ParentID "") active objective
+	childID := root.ID + "-detour-1"
+	stamp := Stamp{SessionID: "sess-detour", RunID: "run-detour"}
+
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	if err := Append(ledger, ObjectiveRecord(root)); err != nil {
+		t.Fatalf("seed root: %v", err)
+	}
+
+	// Pass 1: the closed detour opens and closes in one fold — the full 6-row trail.
+	rows1 := TurnEndDetourRows(Fold(ReadLedgerFile(ledger)), events, path, 4242, stamp)
+	if len(rows1) != 6 {
+		t.Fatalf("pass 1 produced %d rows, want 6 (open trio + close trio)", len(rows1))
+	}
+	if n, err := AppendDetourRows(ledger, rows1); err != nil || n != 6 {
+		t.Fatalf("append pass 1 = (%d, %v), want (6, nil)", n, err)
+	}
+
+	// Pass 2 (replay): the same transcript against the now-populated ledger adds nothing.
+	rows2 := TurnEndDetourRows(Fold(ReadLedgerFile(ledger)), events, path, 9999, stamp)
+	if len(rows2) != 0 {
+		t.Fatalf("replay produced %d rows, want 0 (no double-open)", len(rows2))
+	}
+
+	st := Fold(ReadLedgerFile(ledger))
+	if got := st.Objectives[childID].Status; got != StatusMet {
+		t.Fatalf("detour child status = %q, want %q after the live pass", got, StatusMet)
+	}
+	if got := st.Objectives[root.ID].Status; got != StatusActive {
+		t.Fatalf("root status = %q, want %q (resumed after the detour closed)", got, StatusActive)
+	}
+	if child := st.Objectives[childID]; child.ParentID != root.ID || child.Budget != DefaultDetourBudget() {
+		t.Fatalf("detour child = %+v, want a budgeted child under %q", child, root.ID)
+	}
+	scores := st.ScoresFor(childID)
+	if len(scores) != 2 || scores[0].Value != 0 || scores[1].Value != 1 {
+		t.Fatalf("child repair curve = %+v, want W2 endpoints 0 then 1", scores)
+	}
+	for _, s := range scores {
+		if s.Evidence[0].Kind != "transcript-span" || s.Evidence[0].Ref != path || s.SessionID != stamp.SessionID {
+			t.Fatalf("marker = %+v, want transcript-span evidence for %q stamped %q", s, path, stamp.SessionID)
+		}
+	}
+
+	// No-transcript / empty stream: a total no-op.
+	if rows := TurnEndDetourRows(st, nil, path, 1, stamp); len(rows) != 0 {
+		t.Fatalf("empty stream produced %+v, want no rows", rows)
+	}
+	// A state with no OPEN root also yields nothing even with real spans.
+	if rows := TurnEndDetourRows(State{Objectives: map[string]Objective{}}, events, path, 1, stamp); len(rows) != 0 {
+		t.Fatalf("rootless state produced %+v, want no rows", rows)
+	}
+}
+
+// TestLiveDetourRows_ClosesADetourOpenedOnAnEarlierTurn proves the live transition
+// the batch DetourRows cannot express: a span still OPEN when first folded (child
+// active, root paused) is CLOSED on a later turn once the growing transcript
+// includes the return — the close trio fires exactly once, the root resumes, and a
+// further replay adds nothing.
+func TestLiveDetourRows_ClosesADetourOpenedOnAnEarlierTurn(t *testing.T) {
+	root := fourPhaseObjective()
+	childID := root.ID + "-detour-1"
+	stamp := Stamp{SessionID: "s", RunID: "r"}
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	if err := Append(ledger, ObjectiveRecord(root)); err != nil {
+		t.Fatalf("seed root: %v", err)
+	}
+
+	// Turn A: the detour is still OPEN (no return yet) — open trio only, root paused.
+	openSpan := DetourSpan{BurstIndex: 5, OpenIndex: 8, CloseIndex: -1, Errors: 3, Topics: []string{"ops/net"}}
+	stA := Fold(ReadLedgerFile(ledger))
+	rowsA := LiveDetourRows(stA.Objectives[root.ID], []DetourSpan{openSpan}, stA, "", 1, stamp)
+	if len(rowsA) != 3 {
+		t.Fatalf("turn A produced %d rows, want 3 (open trio only)", len(rowsA))
+	}
+	if n, err := AppendDetourRows(ledger, rowsA); err != nil || n != 3 {
+		t.Fatalf("append turn A = (%d, %v), want (3, nil)", n, err)
+	}
+	if got := Fold(ReadLedgerFile(ledger)).Objectives[root.ID].Status; got != StatusPaused {
+		t.Fatalf("root status after open = %q, want %q", got, StatusPaused)
+	}
+
+	// Turn B: the transcript grew and the span now RETURNS — close trio only, root resumes.
+	closedSpan := DetourSpan{BurstIndex: 5, OpenIndex: 8, CloseIndex: 12, Errors: 3, Topics: []string{"ops/net"}}
+	stB := Fold(ReadLedgerFile(ledger))
+	rowsB := LiveDetourRows(stB.Objectives[root.ID], []DetourSpan{closedSpan}, stB, "", 2, stamp)
+	if len(rowsB) != 3 {
+		t.Fatalf("turn B produced %d rows, want 3 (close trio only)", len(rowsB))
+	}
+	if n, err := AppendDetourRows(ledger, rowsB); err != nil || n != 3 {
+		t.Fatalf("append turn B = (%d, %v), want (3, nil)", n, err)
+	}
+
+	// Turn C (replay of the closed span): nothing more to add.
+	stC := Fold(ReadLedgerFile(ledger))
+	if rows := LiveDetourRows(stC.Objectives[root.ID], []DetourSpan{closedSpan}, stC, "", 3, stamp); len(rows) != 0 {
+		t.Fatalf("turn C replay produced %d rows, want 0", len(rows))
+	}
+
+	final := Fold(ReadLedgerFile(ledger))
+	if got := final.Objectives[childID].Status; got != StatusMet {
+		t.Fatalf("child status = %q, want %q", got, StatusMet)
+	}
+	if got := final.Objectives[root.ID].Status; got != StatusActive {
+		t.Fatalf("root status = %q, want %q (resumed)", got, StatusActive)
+	}
+	if scores := final.ScoresFor(childID); len(scores) != 2 || scores[0].Value != 0 || scores[1].Value != 1 {
+		t.Fatalf("child repair curve = %+v, want W2 endpoints 0 then 1", scores)
+	}
+}

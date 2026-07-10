@@ -145,6 +145,72 @@ func guardTrajctlSampleBounded(stderr io.Writer, label, ledger string, nowMillis
 	}
 }
 
+// guardTrajctlDetourResult carries a bounded detour-detection pass's outcome back
+// over the done channel.
+type guardTrajctlDetourResult struct {
+	rows int
+	err  error
+}
+
+// detectDetoursFailOpen runs the live detour detector over the finished turn's
+// transcript and appends any open/close detour rows to the wired ledger — the live
+// turn-end wiring (#3669) of internal/trajctl's shipped detour detector (#2546).
+// Called from the Stop hook alongside scoreTurnEndFailOpen. Bounded + fail-open on
+// the SAME guard-wired ledger gate as the sampling: a no-op when no ledger is
+// configured or no transcript path was given on the stop event, and any error,
+// timeout, or panic costs at most its own rows — never the hook's exit code or the
+// session.
+func detectDetoursFailOpen(stderr io.Writer, transcriptPath string, stamp trajctl.Stamp, nowMillis int64) {
+	ledger := guardTrajctlLedgerConfigured()
+	if ledger == "" {
+		return
+	}
+	transcriptPath = strings.TrimSpace(transcriptPath)
+	if transcriptPath == "" {
+		return // no transcript on this stop event — nothing to fold
+	}
+	guardTrajctlDetourBounded(stderr, ledger, transcriptPath, stamp, nowMillis)
+}
+
+// guardTrajctlDetourBounded reads the transcript's tool stream, folds the ledger,
+// produces the turn-end detour rows (trajctl.TurnEndDetourRows), and appends them —
+// all inside a goroutine capped by the shared guardTrajctlDeadline. Like
+// guardTrajctlSampleBounded it NEVER returns an error to the caller: on a deadline it
+// abandons the in-flight pass (the goroutine's late append, if any, lands a torn line
+// the parser skips), and it recovers any panic so a bug in the fold costs at most its
+// own rows rather than the hook. The single side effect is the ledger append; the
+// stderr line is advisory (observability), not a decision.
+func guardTrajctlDetourBounded(stderr io.Writer, ledger, transcriptPath string, stamp trajctl.Stamp, nowMillis int64) {
+	done := make(chan guardTrajctlDetourResult, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- guardTrajctlDetourResult{err: fmt.Errorf("panic: %v", r)}
+			}
+		}()
+		events, err := trajctl.ReadToolStream(transcriptPath)
+		if err != nil {
+			done <- guardTrajctlDetourResult{err: err}
+			return
+		}
+		st := trajctl.Fold(trajctl.ReadLedgerFile(ledger))
+		rows := trajctl.TurnEndDetourRows(st, events, transcriptPath, nowMillis, stamp)
+		n, aerr := trajctl.AppendDetourRows(ledger, rows)
+		done <- guardTrajctlDetourResult{rows: n, err: aerr}
+	}()
+	select {
+	case <-time.After(guardTrajctlDeadline):
+		fmt.Fprintf(stderr, "fak guard: trajctl detour detection timed out (>%s); continuing fail-open\n", guardTrajctlDeadline)
+	case res := <-done:
+		switch {
+		case res.err != nil:
+			fmt.Fprintf(stderr, "fak guard: trajctl detour detection skipped (fail-open): %v\n", res.err)
+		case res.rows > 0:
+			fmt.Fprintf(stderr, "fak guard: trajctl detour detection appended %d detour row(s) into %s\n", res.rows, ledger)
+		}
+	}
+}
+
 // readHookStdin drains a hook's stdin payload once (bounded at 1 MiB) so every
 // field consumer parses the SAME bytes — a hook's stdin is not rewindable. A nil
 // reader or read error yields nil; every parse below tolerates that.

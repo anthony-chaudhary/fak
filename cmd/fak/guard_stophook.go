@@ -358,12 +358,18 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	// give-up be told apart from a graceful "no allowed path:" wrap-up; it never gates.
 	rec.Session = parseHookSessionID(payload)
 	rec.StopHookActive = active
-	rec.Transcript = readGuardStopTranscript(parseHookTranscriptPath(payload))
+	transcriptPath := parseHookTranscriptPath(payload)
+	rec.Transcript = readGuardStopTranscript(transcriptPath)
 	// #2539: score-at-turn-end — the curve gains a point every turn. Runs the cheap scorer
 	// set for the session's open objectives, bounded and fail-open, gated on the guard-wired
 	// ledger env. Deliberately BEFORE the deny-all mode gate: sampling cadence is independent
 	// of whether auto-continue is off, and it can never change this hook's exit code.
 	scoreTurnEndFailOpen(stderr, trajctl.Stamp{SessionID: rec.Session}, time.Now().UnixMilli())
+	// #3669: live detour detection — fold the finished turn's tool stream and open/close
+	// budgeted detour children on the session ledger (internal/trajctl's detector, #2546).
+	// Same guard-wired gate, bounded, and fail-open posture as the sampling above, and
+	// likewise BEFORE the deny-all mode gate: it never changes this hook's exit code.
+	detectDetoursFailOpen(stderr, transcriptPath, trajctl.Stamp{SessionID: rec.Session}, time.Now().UnixMilli())
 	// Managed-context step-advice carryover: capture the last live step-advice decision to
 	// a durable per-session stamp while the trace is still alive, so a resume can read what
 	// the window pressure WAS (internal/stepbaton, internal/stepbatoncapture). Same

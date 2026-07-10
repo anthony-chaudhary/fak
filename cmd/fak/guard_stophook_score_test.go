@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -182,6 +184,115 @@ func TestGuardTrajctlSampleBoundedDeadline(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "timed out") {
 		t.Fatalf("stderr = %q, want a timeout note", stderr.String())
+	}
+}
+
+// detourFixtureEvents is a live tool stream that folds to exactly one CLOSED detour:
+// a {internal/trajctl, go} baseline, a 3-error go-test burst, a sustained ops/net
+// topic shift, then a return to the parent shape.
+func detourFixtureEvents() []trajctl.ToolEvent {
+	ev := func(tool, target string, isErr bool) trajctl.ToolEvent {
+		return trajctl.ToolEvent{Tool: tool, Target: target, IsError: isErr}
+	}
+	return []trajctl.ToolEvent{
+		ev("Read", "internal/trajctl/a.go", false),
+		ev("Read", "internal/trajctl/b.go", false),
+		ev("Bash", "go test ./...", false),
+		ev("Read", "internal/trajctl/a.go", false),
+		ev("Bash", "go build ./...", false),
+		ev("Bash", "go test ./...", true),
+		ev("Bash", "go test ./...", true),
+		ev("Bash", "go test ./...", true),
+		ev("Read", "ops/net/x.conf", false),
+		ev("Read", "ops/net/x.conf", false),
+		ev("Read", "ops/net/x.conf", false),
+		ev("Read", "internal/trajctl/a.go", false),
+		ev("Bash", "go test ./...", false),
+	}
+}
+
+// writeDetourTranscript emits a minimal Claude Code JSONL transcript for events: one
+// assistant tool_use record and one user tool_result record per call, in order — the
+// shape ParseToolStream folds. A spaced target rides on `command`, a path-like target
+// on `file_path`, matching streamTarget's key preference.
+func writeDetourTranscript(t *testing.T, path string, events []trajctl.ToolEvent) {
+	t.Helper()
+	var b strings.Builder
+	for i, e := range events {
+		id := fmt.Sprintf("tu-%02d", i)
+		key := "file_path"
+		if strings.Contains(e.Target, " ") {
+			key = "command"
+		}
+		fmt.Fprintf(&b, `{"type":"assistant","message":{"content":[{"type":"tool_use","id":%q,"name":%q,"input":{%q:%q}}]}}`+"\n",
+			id, e.Tool, key, e.Target)
+		fmt.Fprintf(&b, `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":%q,"is_error":%v,"content":"x"}]}}`+"\n",
+			id, e.IsError)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+}
+
+// TestDetectDetoursFailOpenWiresLiveDetector is the #3669 hook-integration witness:
+// the live turn-end pass folds the finished turn's transcript into a MET detour child
+// under the session's root objective (root resumed ACTIVE), and a second identical
+// pass double-opens nothing.
+func TestDetectDetoursFailOpenWiresLiveDetector(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "trajctl.jsonl")
+	seedTrajctlObjective(t, ledger, "obj-3669") // a root objective (no parent)
+	transcript := filepath.Join(dir, "session.jsonl")
+	writeDetourTranscript(t, transcript, detourFixtureEvents())
+	t.Setenv(guardTrajctlEnvLedger, ledger)
+	t.Setenv(guardTrajctlEnvMode, "")
+
+	var stderr strings.Builder
+	detectDetoursFailOpen(&stderr, transcript, trajctl.Stamp{SessionID: "sess-3669"}, 4242)
+
+	st := trajctl.Fold(trajctl.ReadLedgerFile(ledger))
+	child, ok := st.Objectives["obj-3669-detour-1"]
+	if !ok {
+		t.Fatalf("no detour child opened; objectives = %v", st.ObjectiveIDs())
+	}
+	if child.Status != trajctl.StatusMet {
+		t.Fatalf("detour child status = %q, want %q", child.Status, trajctl.StatusMet)
+	}
+	if got := st.Objectives["obj-3669"].Status; got != trajctl.StatusActive {
+		t.Fatalf("root status = %q, want %q (resumed)", got, trajctl.StatusActive)
+	}
+	if !strings.Contains(stderr.String(), "detour detection appended") {
+		t.Fatalf("stderr missing the advisory detour line: %q", stderr.String())
+	}
+
+	// Replay: a second identical pass opens no second child.
+	detectDetoursFailOpen(&stderr, transcript, trajctl.Stamp{SessionID: "sess-3669"}, 5555)
+	if _, dup := trajctl.Fold(trajctl.ReadLedgerFile(ledger)).Objectives["obj-3669-detour-2"]; dup {
+		t.Fatalf("replay double-opened a second detour child")
+	}
+}
+
+// TestDetectDetoursFailOpenNoopWithoutLedgerOrTranscript: the pass is a total no-op
+// without a guard-wired ledger, and a no-op (no rows, no noise) when the stop event
+// carried no transcript path.
+func TestDetectDetoursFailOpenNoopWithoutLedgerOrTranscript(t *testing.T) {
+	t.Setenv(guardTrajctlEnvLedger, "")
+	var s1 strings.Builder
+	detectDetoursFailOpen(&s1, "whatever.jsonl", trajctl.Stamp{}, 1)
+	if strings.Contains(s1.String(), "trajctl") {
+		t.Fatalf("expected silence without a wired ledger, got %q", s1.String())
+	}
+
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	seedTrajctlObjective(t, ledger, "obj-x")
+	t.Setenv(guardTrajctlEnvLedger, ledger)
+	var s2 strings.Builder
+	detectDetoursFailOpen(&s2, "   ", trajctl.Stamp{}, 1)
+	if _, opened := trajctl.Fold(trajctl.ReadLedgerFile(ledger)).Objectives["obj-x-detour-1"]; opened {
+		t.Fatalf("no-transcript pass opened a detour child")
+	}
+	if strings.Contains(s2.String(), "detour") {
+		t.Fatalf("expected silence with no transcript path, got %q", s2.String())
 	}
 }
 
