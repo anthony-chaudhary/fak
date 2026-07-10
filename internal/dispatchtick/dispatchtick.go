@@ -336,7 +336,11 @@ func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, ba
 		}
 		args = append(args, "--base-url", baseURL)
 	}
-	args = append(args, "--audit", GuardAuditPath(workspace, lane, backend), "--")
+	// Headless dispatch workers launch with the curated fak_* tool surface (#3607): prune the
+	// ~9.9k-token full-registry schema floor to the allowlist a single-issue worker uses; the
+	// rest page in via the still-exposed fak_tools_search. The guard honors FAK_GUARD_EXPOSE_PROFILE
+	// as the fleet opt-out (=full/off restores the whole registry).
+	args = append(args, "--audit", GuardAuditPath(workspace, lane, backend), "--expose-profile", "headless", "--")
 	args = append(args, command...)
 	return args, true
 }

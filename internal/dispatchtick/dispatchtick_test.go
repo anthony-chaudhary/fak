@@ -201,6 +201,11 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	if got[0] != "fak" || got[1] != "guard" || got[3] != "anthropic" || got[len(got)-3] != "claude" {
 		t.Fatalf("guarded command = %#v", got)
 	}
+	// #3607: a dispatch worker launches with the curated headless tool-surface profile, as a
+	// guard flag immediately before the `--` command separator (never a claude argument).
+	if !strings.Contains(strings.Join(got, " "), "--expose-profile headless --") {
+		t.Fatalf("guarded command must carry `--expose-profile headless` before `--` (#3607): %#v", got)
+	}
 
 	opencode, guarded := GuardedLaunchCommand([]string{"opencode", "run", "prompt"}, "fak", "docs", "opencode", "/repo", "")
 	if guarded || opencode[0] != "opencode" {
