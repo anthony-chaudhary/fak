@@ -89,6 +89,19 @@ func TestGuardRotationRuntimeRotateWritesAuditAndRepoints(t *testing.T) {
 	}
 }
 
+func TestGuardRotationDoesNotRelaunchSuccessfulChild(t *testing.T) {
+	ready := func(name, key string) accounts.Home {
+		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}
+	}
+	rt := &guardRotationRuntime{Mode: "auto", CurrentSeat: "a", EnvKey: "CODEX_HOME", Registry: accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b")}}}
+	cmd := []string{"codex", "exec", "do-once"}
+	env := [][2]string{{"CODEX_HOME", "/a"}}
+	gotCmd, gotEnv, ok := rt.rotateAfterExit(nil, cmd, env, "auth_or_stale_cred", nil, "trace", nil)
+	if ok || rt.CurrentSeat != "a" || strings.Join(gotCmd, " ") != strings.Join(cmd, " ") || gotEnv[0] != env[0] {
+		t.Fatalf("clean exit rotated/relaunched: ok=%v runtime=%+v command=%v env=%v", ok, rt, gotCmd, gotEnv)
+	}
+}
+
 func TestGuardRotationLauncherWitnessesFirstFailureThenRotatedEnv(t *testing.T) {
 	ready := func(name, key string) accounts.Home {
 		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}

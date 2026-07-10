@@ -1087,7 +1087,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			command = next
 			continue
 		}
-		if nextCommand, nextInjected, ok := rotation.rotate(command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
+		if nextCommand, nextInjected, ok := rotation.rotateAfterExit(runErr, command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
 			command, injected = nextCommand, nextInjected
 			continue
 		}
@@ -1158,13 +1158,17 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			return
 		}
 		go func() { wait <- child.Wait() }()
-		select {
-		case runErr := <-wait:
+		event := waitGuardChild(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {
+			return guardTimeBudgetExhausted(serveSessions, guardTraceID, now)
+		})
+		switch event.Kind {
+		case guardChildCompleted:
+			runErr := event.RunErr
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 				command = next
 				continue
 			}
-			if nextCommand, nextInjected, ok := rotation.rotate(command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
+			if nextCommand, nextInjected, ok := rotation.rotateAfterExit(runErr, command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
 				command, injected = nextCommand, nextInjected
 				continue
 			}
@@ -1174,7 +1178,8 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
-		case ev := <-restarter.events:
+		case guardChildRestart:
+			ev := event.Restart
 			if restarter.limit > 0 && restarts >= restarter.limit {
 				if restarter.stderr != nil {
 					fmt.Fprintln(restarter.stderr, guardRestartLimitStatus(restarter.limit, ev))
@@ -1204,17 +1209,15 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			// stopping the process that initiated it.
 			time.Sleep(750 * time.Millisecond)
 			stopGuardChild(child, wait, 2*time.Second)
-		case <-budgetTicker.C:
+		case guardChildTimeBudget:
 			// The wall-clock envelope elapsed: stop the wrapped agent and report, rather
 			// than let it keep burning tokens past its --max-duration (the #2229 gap).
-			if _, reason := guardTimeBudgetExhausted(serveSessions, guardTraceID, time.Now()); reason != "" {
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", reason, guardTraceID)
-				}
-				stopGuardChild(child, wait, 2*time.Second)
-				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
-				return
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", event.Reason, guardTraceID)
 			}
+			stopGuardChild(child, wait, 2*time.Second)
+			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
 		}
 	}
 }
