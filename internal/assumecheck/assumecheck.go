@@ -187,6 +187,12 @@ type Assumption struct {
 	// ConfidenceClass labels how the assumption's holder rates it (informational;
 	// e.g. "witnessed", "declared", "folk"). Not part of the decision.
 	ConfidenceClass string `json:"confidence_class,omitempty"`
+	// WitnessStatus is the per-row wiring marker (registry.go): "wired" when an
+	// evidence gatherer exists for this assumption, "declared-only" when the row is
+	// registered but has no driver until witness plurality (#3818 C3). Data, not
+	// decision — Check never reads it; the shell uses it to EXPLAIN an
+	// UNVERIFIABLE on a declared-only row instead of returning one silently.
+	WitnessStatus WitnessStatus `json:"witness_status,omitempty"`
 }
 
 // Evidence is what an impure witness gatherer hands the pure kernel: which witness
@@ -336,7 +342,8 @@ func GuardAssumption(a Assumption, ev Evidence) (Verdict, error) {
 // actually launchable per the rotation authority behind `fak accounts next`
 // (Registry.RotationPlanWithHeadroom + the runtime headroom/cooldown overlay). The
 // witness gathering lives in cmd/fak/assume.go (impure shell); this is the pure
-// declaration. The C2 registry will absorb it as its first row.
+// declaration. The C2 registry (registry.go) holds this exact var as row 0, so the
+// shell reference and the registry share one source of truth.
 var SeatLaunchable = Assumption{
 	ID:              "seat-launchable",
 	Owner:           "accounts",
@@ -345,4 +352,5 @@ var SeatLaunchable = Assumption{
 	WitnessKind:     WitnessLedgerRead,
 	RefusalReason:   "SEAT_NOT_LAUNCHABLE",
 	ConfidenceClass: "witnessed",
+	WitnessStatus:   WitnessWired,
 }

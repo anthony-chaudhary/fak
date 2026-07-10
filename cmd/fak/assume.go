@@ -1,26 +1,37 @@
 package main
 
-// assume.go — `fak assume check`, the thin impure shell over the pure
-// internal/assumecheck kernel (#3819, epic #3818 C1). The kernel judges; this file
-// only GATHERS the evidence, prints the verdict, and maps it to an exit code — the
-// same split stallscan.go keeps with internal/stallscan.
+// assume.go — `fak assume`, the thin impure shell over the pure
+// internal/assumecheck kernel (#3819 C1 spine; #3820 C2 registry wiring, epic
+// #3818). The kernel judges; this file only GATHERS the evidence, prints the
+// verdict, and maps it to an exit code — the same split stallscan.go keeps with
+// internal/stallscan.
 //
+//	fak assume list                             # every registered assumption + its wiring
+//	fak assume list --json                      # the same registry as JSON
 //	fak assume check seat-launchable            # the spine's one wired assumption (human)
 //	fak assume check seat-launchable --json     # the same verdict as JSON
 //	fak assume check seat-launchable --seat X   # check an explicitly named seat
 //
-// THE ONE WIRED ASSUMPTION (hardcoded inline for the spine; the registry is C2):
-// "a seat named launch-clean by `fak accounts doctor`/preflight is actually
-// launchable" — witnessed against the REAL launchability authority behind
-// `fak accounts next`: Registry.RotationPlanWithHeadroom over the refreshed
-// registry, with the live runtime headroom + usage-cooldown overlay folded in
-// (accounts_headroom.go), exactly what `next` decides launches from. The failure
-// class this catches is authority drift: the doctor/preflight config plane calling a
-// seat clean while the rotation authority would refuse to hand it out.
+// `check` routes through the declarative registry (assumecheck.Lookup): an unknown
+// id is a usage error naming the known ids, never a guessed check. Witness DISPATCH
+// stays deliberately singular here — only seat-launchable has an inline gatherer
+// (gatherSeatLaunchableEvidence); witness-driver plurality is #3818 C3 (#3821). A
+// registered-but-unwired (declared-only) row hands the kernel unwitnessed evidence
+// of its declared kind, so it verdicts UNVERIFIABLE with the wiring gap as the
+// explanation — never a fabricated HOLDS.
 //
-// Exit codes: 0 the assumption HOLDS; 1 runtime error; 2 usage; 3 VIOLATED (the
-// gate a script watches); 4 UNVERIFIABLE or STALE (cannot witness — still nonzero,
-// the kernel is fail-closed).
+// THE ONE WIRED ASSUMPTION: "a seat named launch-clean by `fak accounts
+// doctor`/preflight is actually launchable" — witnessed against the REAL
+// launchability authority behind `fak accounts next`:
+// Registry.RotationPlanWithHeadroom over the refreshed registry, with the live
+// runtime headroom + usage-cooldown overlay folded in (accounts_headroom.go),
+// exactly what `next` decides launches from. The failure class this catches is
+// authority drift: the doctor/preflight config plane calling a seat clean while the
+// rotation authority would refuse to hand it out.
+//
+// Exit codes: 0 the assumption HOLDS (or `list` printed); 1 runtime error; 2 usage;
+// 3 VIOLATED (the gate a script watches); 4 UNVERIFIABLE or STALE (cannot witness —
+// still nonzero, the kernel is fail-closed).
 
 import (
 	"errors"
@@ -38,12 +49,30 @@ import (
 
 func cmdAssume(argv []string) { os.Exit(runAssume(os.Stdout, os.Stderr, argv)) }
 
+const assumeUsage = `usage: fak assume <check|list>
+  fak assume check <assumption-id> [--seat <name>] [--registry <path>] [--home <dir>] [--no-headroom] [--json]
+  fak assume list [--json]`
+
 // runAssume is the testable core (stdout/stderr injected, exit code returned).
 func runAssume(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) == 0 || argv[0] != "check" {
-		fmt.Fprintln(stderr, "usage: fak assume check <assumption-id> [--seat <name>] [--registry <path>] [--home <dir>] [--no-headroom] [--json]")
+	if len(argv) == 0 {
+		fmt.Fprintln(stderr, assumeUsage)
 		return 2
 	}
+	switch argv[0] {
+	case "check":
+		return runAssumeCheck(stdout, stderr, argv[1:])
+	case "list":
+		return runAssumeList(stdout, stderr, argv[1:])
+	default:
+		fmt.Fprintln(stderr, assumeUsage)
+		return 2
+	}
+}
+
+// runAssumeCheck witnesses ONE registered assumption and maps its closed verdict to
+// an exit code.
+func runAssumeCheck(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("assume check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	defHome, _ := os.UserHomeDir()
@@ -58,7 +87,7 @@ func runAssume(stdout, stderr io.Writer, argv []string) int {
 	noHeadroom := fs.Bool("no-headroom", false, "witness against the registry-only rotation plan, without the live runtime headroom/cooldown overlay (mirrors `fak accounts next --no-headroom`)")
 	// Tolerate the assumption id as a leading positional before flags, the same
 	// leading-positional split parseAccountsCmd does.
-	rest := argv[1:]
+	rest := argv
 	lead := 0
 	for lead < len(rest) && !strings.HasPrefix(rest[lead], "-") {
 		lead++
@@ -73,13 +102,18 @@ func runAssume(stdout, stderr io.Writer, argv []string) int {
 	if id == "" {
 		id = assumecheck.SeatLaunchable.ID
 	}
-	if id != assumecheck.SeatLaunchable.ID {
-		fmt.Fprintf(stderr, "fak assume: unknown assumption %q — the C1 spine carries exactly one (%s); the assumption registry is #3818 C2\n", id, assumecheck.SeatLaunchable.ID)
+	a, ok := assumecheck.Lookup(id)
+	if !ok {
+		fmt.Fprintf(stderr, "fak assume: unknown assumption %q — known ids: %s\n", id, strings.Join(assumeKnownIDs(), ", "))
 		return 2
 	}
 
-	a := assumecheck.SeatLaunchable
-	ev, seatName := gatherSeatLaunchableEvidence(pathutil.ExpandTilde(*registryPath), pathutil.ExpandTilde(*homeDir), strings.TrimSpace(*seat), !*noHeadroom)
+	ev, seatName := gatherAssumptionEvidence(a, assumeGatherParams{
+		registryPath: pathutil.ExpandTilde(*registryPath),
+		homeDir:      pathutil.ExpandTilde(*homeDir),
+		seat:         strings.TrimSpace(*seat),
+		useHeadroom:  !*noHeadroom,
+	})
 	v, gerr := assumecheck.GuardAssumption(a, ev)
 	refused := gerr != nil && errors.Is(gerr, assumecheck.ErrAssumptionViolated)
 
@@ -97,6 +131,7 @@ func runAssume(stdout, stderr io.Writer, argv []string) int {
 		}
 	} else {
 		fmt.Fprintf(stdout, "assumption : %s (%s/%s, owner %s)\n", a.ID, a.Level, a.WitnessKind, a.Owner)
+		fmt.Fprintf(stdout, "wiring     : %s\n", a.WitnessStatus)
 		fmt.Fprintf(stdout, "statement  : %s\n", a.Statement)
 		fmt.Fprintf(stdout, "seat       : %s\n", dash(seatName))
 		fmt.Fprintf(stdout, "evidence   : witnessed=%t holds=%t%s\n", ev.Witnessed, ev.Holds, detailTail(ev.Detail))
@@ -117,6 +152,90 @@ func runAssume(stdout, stderr io.Writer, argv []string) int {
 	default: // UNVERIFIABLE | STALE — cannot witness; fail closed, distinct from VIOLATED
 		return 4
 	}
+}
+
+// runAssumeList enumerates the declarative registry (#3820): one row per registered
+// assumption with its scope, declared witness kind, owner, and whether this shell
+// actually has a witness gatherer wired for it — so a declared-only row's
+// UNVERIFIABLE is legible from the menu, not a surprise at check time.
+func runAssumeList(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("assume list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit the registry (with per-row wiring) as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	rows := assumecheck.Registry()
+	if *asJSON {
+		type listRow struct {
+			Assumption assumecheck.Assumption `json:"assumption"`
+			Wired      bool                   `json:"wired"`
+		}
+		out := make([]listRow, 0, len(rows))
+		for _, a := range rows {
+			_, wired := assumeWitnessGatherers[a.ID]
+			out = append(out, listRow{Assumption: a, Wired: wired})
+		}
+		rec := map[string]any{
+			"schema":      "fak.assume.list.v1",
+			"assumptions": out,
+		}
+		return encodeJSONOrFail(stdout, stderr, rec, "fak assume")
+	}
+	fmt.Fprintf(stdout, "%-26s %-10s %-14s %-9s %s\n", "ID", "LEVEL", "WITNESS", "OWNER", "WIRING")
+	for _, a := range rows {
+		wiring := string(assumecheck.WitnessDeclaredOnly) + " (driver pending #3818 C3)"
+		if _, wired := assumeWitnessGatherers[a.ID]; wired {
+			wiring = string(assumecheck.WitnessWired)
+		}
+		fmt.Fprintf(stdout, "%-26s %-10s %-14s %-9s %s\n", a.ID, a.Level, a.WitnessKind, a.Owner, wiring)
+	}
+	return 0
+}
+
+// assumeKnownIDs is the registry's id menu in registry order, for the unknown-id
+// usage error.
+func assumeKnownIDs() []string {
+	rows := assumecheck.Registry()
+	ids := make([]string, 0, len(rows))
+	for _, a := range rows {
+		ids = append(ids, a.ID)
+	}
+	return ids
+}
+
+// assumeGatherParams carries the shell flags a witness gatherer may read.
+type assumeGatherParams struct {
+	registryPath string
+	homeDir      string
+	seat         string
+	useHeadroom  bool
+}
+
+// assumeWitnessGatherers is this shell's witness-dispatch table: the assumptions
+// whose evidence it can GATHER inline today. Exactly one is wired in C2
+// (seat-launchable); plurality is #3818 C3 (#3821). The registry's per-row
+// WitnessStatus declares the same fact as data — TestAssumeWiringMatchesDeclaredStatus
+// binds the two so the marker can never drift from the dispatch table.
+var assumeWitnessGatherers = map[string]func(assumeGatherParams) (assumecheck.Evidence, string){
+	assumecheck.SeatLaunchable.ID: func(p assumeGatherParams) (assumecheck.Evidence, string) {
+		return gatherSeatLaunchableEvidence(p.registryPath, p.homeDir, p.seat, p.useHeadroom)
+	},
+}
+
+// gatherAssumptionEvidence routes a registered assumption to its wired gatherer.
+// For a declared-only row it hands the kernel UNWITNESSED evidence of the DECLARED
+// kind — so Check verdicts UNVERIFIABLE with the wiring gap as the explanation,
+// never a fabricated HOLDS and never the cross-witness UNVERIFIABLE that would
+// misname the problem as a kind mismatch.
+func gatherAssumptionEvidence(a assumecheck.Assumption, p assumeGatherParams) (assumecheck.Evidence, string) {
+	if gather, wired := assumeWitnessGatherers[a.ID]; wired {
+		return gather(p)
+	}
+	return assumecheck.Evidence{
+		Kind:   a.WitnessKind,
+		Detail: fmt.Sprintf("assumption %q is declared-only: no witness gatherer is wired in this shell (witness-driver plurality is #3818 C3)", a.ID),
+	}, ""
 }
 
 // detailTail renders an evidence detail as a one-line tail for the human report.
