@@ -312,6 +312,19 @@ func EnvFromStrings(env []string) ([]EnvVar, error) {
 		if i < 0 {
 			return nil, fmt.Errorf("INVALID_ENV")
 		}
+		if i == 0 {
+			// Windows' os.Environ() surfaces per-drive current-directory pseudo-
+			// variables ("=C:=C:\\path", "=ExitCode=00000000", "=::=::\\") whose
+			// NAME is empty once split on the first '='. They are cmd.exe internals
+			// a spawned child never needs; Go's own os/exec forwards them harmlessly.
+			// The brokered EnvVar model, however, treats an empty name as
+			// EMPTY_ENV_NAME and would fail-close the ENTIRE spawn — so on a console
+			// carrying one, `fak guard -- claude` could not launch its child at all.
+			// Drop them here (matching policy.NewInheritedParentFromEnviron's i<=0
+			// skip) rather than aborting; normalizeEnv below stays strict for every
+			// genuinely-named entry.
+			continue
+		}
 		out = append(out, EnvVar{Name: kv[:i], Value: kv[i+1:]})
 	}
 	return normalizeEnv(out)
