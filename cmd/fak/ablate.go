@@ -50,9 +50,18 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	baseline := fs.String("baseline", "all-off", "arm id used as the delta reference in the table")
 	out := fs.String("out", "", "write the AblationReport JSON to this path")
 	asJSON := fs.Bool("json", false, "emit the AblationReport JSON to stdout (no table)")
+	list := fs.Bool("list", false, "print the sweepable cache-lever catalog (owner/plane/fidelity/env) and exit; with --json emit the FeatureCard array + presets")
 	engineIDFlag := fs.String("engine", "mock", "engine id (the offline mock by default)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+
+	// --list is the "see what I can try" surface behind FeatureCatalog(): it needs no
+	// trace, no engine, and no replay — it prints the static cache-lever catalog straight
+	// from internal/ablate/catalog.go (the single source of truth a live arm also reads).
+	if *list {
+		printAblateCatalog(stdout, *asJSON)
+		return 0
 	}
 
 	features := splitCommaList(*sweep)
@@ -94,7 +103,12 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 2
 	}
-	if *fromSession != "" && anyEnvGated(features) {
+	// Route by the EXPANDED feature set: a preset (e.g. @wire-cache) resolves to its
+	// levers, so an env-gated member correctly selects the rung-2 subprocess path
+	// instead of the raw preset token reading as non-env-gated. BuildSweep already
+	// validated the spec above, so expansion cannot error here.
+	routeFeatures, _ := ablate.ExpandPresets(features)
+	if *fromSession != "" && anyEnvGated(routeFeatures) {
 		fmt.Fprintln(stderr, "fak ablate: --from-session currently supports in-process sweeps only; use --sweep vdso or a bench trace for env-gated sweeps")
 		return 2
 	}
@@ -104,7 +118,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	// carrying the arm's FAK_* env (rung 2). A MIXED sweep goes wholly through the subprocess
 	// path — each child still applies vdso in-process AND reads its own env — so the vdso and
 	// the env arms land in one report under the same identical-workload guard.
-	if anyEnvGated(features) {
+	if anyEnvGated(routeFeatures) {
 		bin, err := os.Executable()
 		if err != nil {
 			fmt.Fprintln(stderr, "fak ablate: resolve fak binary for arm re-exec:", err)
