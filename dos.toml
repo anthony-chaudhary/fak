@@ -192,6 +192,8 @@ concurrent = [
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; not an internal leaf
   "productscorecard",
+  "rsl", # internal/rsl Reference State Log leaf; cmd/fak audit shim stays in the cmd lane
+  "mlpscore", # internal/mlpscore MLP first-lovable-cut scorecard; cmd/fak shims stay in the cmd lane
   "sessionaudit",
   "selfquery",
   "harnessprofile",
@@ -307,6 +309,8 @@ autopick = [
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; see [lanes].concurrent note
   "productscorecard",
+  "rsl", # internal/rsl Reference State Log leaf; see [lanes].concurrent note
+  "mlpscore", # internal/mlpscore MLP first-lovable-cut scorecard; see [lanes].concurrent note
   "sessionaudit",
   "selfquery",
   "harnessprofile",
@@ -493,6 +497,8 @@ benchruns = ["internal/benchruns/**"]
 newleaf = ["internal/newleaf/**"]
 scorecard = ["pkg/scorecard/**"]
 productscorecard = ["internal/productscorecard/**"]
+rsl = ["internal/rsl/**"]
+mlpscore = ["internal/mlpscore/**"]
 sessionaudit = ["internal/sessionaudit/**"]
 selfquery = ["internal/selfquery/**"]
 harnessprofile = ["internal/harnessprofile/**"]

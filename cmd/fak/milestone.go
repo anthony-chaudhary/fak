@@ -29,6 +29,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/milestonepost"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
+	"github.com/anthony-chaudhary/fak/internal/mlpscore"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
@@ -110,6 +111,7 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 		GeneratedAt: now.Format(time.RFC3339),
 		Date:        snapDate,
 	})
+	report = attachMLPMilestoneScorecard(report, root, now)
 
 	// Attach the per-tick trend vs the last ledger row (read-only), and -- only under
 	// --append-history -- durably append this tick so the trend accrues.
@@ -198,6 +200,7 @@ func runMilestonePost(stdout, stderr io.Writer, argv []string) int {
 			GeneratedAt: now.Format(time.RFC3339),
 			Date:        now.Format("2006-01-02"),
 		})
+		report = attachMLPMilestoneScorecard(report, root, now)
 		ledgerPath := filepath.Join(root, filepath.FromSlash(milestonereport.DefaultLedgerRel))
 		report = report.WithTrend(milestonereport.TrendVsLast(milestonereport.RowFromReport(report), readLedgerFile(ledgerPath, milestonereport.ParseLedger)))
 	}
@@ -216,6 +219,21 @@ func runMilestonePost(stdout, stderr io.Writer, argv []string) int {
 		resolveChannel: milestonepost.ResolveChannel,
 		resolveToken:   milestonepost.ResolveToken,
 	})
+}
+
+func attachMLPMilestoneScorecard(report milestonereport.Report, root string, now time.Time) milestonereport.Report {
+	score, err := collectMLPScore(root, now)
+	if err != nil {
+		// A non-git export cannot establish committed evidence. Keep the milestone
+		// row present and fail closed to not-yet rather than silently omitting it.
+		score = mlpscore.Grade(nil, mlpscore.FoldOpts{
+			Workspace:   root,
+			Commit:      report.Commit,
+			GeneratedAt: report.GeneratedAt,
+			Date:        report.Date,
+		})
+	}
+	return report.WithProgramScorecard(mlpMilestoneScorecard(score))
 }
 
 // loadMilestoneReport reads a pre-rolled report payload from a file (or stdin for "-").

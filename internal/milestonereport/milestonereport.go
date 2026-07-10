@@ -385,9 +385,31 @@ type Trend struct {
 // milestone dimensions live here.
 type Report struct {
 	trendreport.Envelope
-	Maturity Maturity `json:"maturity"`
-	Epics    Epics    `json:"epics"`
-	Trend    *Trend   `json:"trend,omitempty"`
+	Maturity          Maturity           `json:"maturity"`
+	Epics             Epics              `json:"epics"`
+	ProgramScorecards []ProgramScorecard `json:"program_scorecards,omitempty"`
+	Trend             *Trend             `json:"trend,omitempty"`
+}
+
+// ProgramScorecard is a neutral milestone projection of a program-specific
+// scorecard. The producer owns the grading logic; milestone report only carries
+// and renders the witnessed rows under the matching milestone.
+type ProgramScorecard struct {
+	Key       string             `json:"key"`
+	Milestone int                `json:"milestone"`
+	Title     string             `json:"title"`
+	Verdict   string             `json:"verdict"` // lovable | not-yet
+	Witnessed int                `json:"witnessed"`
+	Total     int                `json:"total"`
+	Criteria  []ProgramCriterion `json:"criteria"`
+}
+
+// ProgramCriterion is one witness-linked row in a program scorecard projection.
+type ProgramCriterion struct {
+	Workstream string `json:"workstream"`
+	Title      string `json:"title"`
+	Grade      string `json:"grade"`
+	WitnessRef string `json:"witness_ref"`
 }
 
 // FoldOpts carries the ambient context the fold stamps onto the envelope. It is
@@ -458,6 +480,19 @@ func (r Report) withAdvisory() Report {
 func (r Report) WithTrend(t Trend) Report {
 	r.Trend = &t
 	return r.withAdvisory()
+}
+
+// WithProgramScorecard attaches or replaces a program card by milestone+key.
+// Replacement keeps repeated collection idempotent while preserving stable order.
+func (r Report) WithProgramScorecard(card ProgramScorecard) Report {
+	for i := range r.ProgramScorecards {
+		if r.ProgramScorecards[i].Milestone == card.Milestone && r.ProgramScorecards[i].Key == card.Key {
+			r.ProgramScorecards[i] = card
+			return r
+		}
+	}
+	r.ProgramScorecards = append(r.ProgramScorecards, card)
+	return r
 }
 
 // --- the durable history ledger ---------------------------------------------
@@ -630,6 +665,22 @@ func Render(r Report) string {
 		lines = append(lines, "      ongoing programs (frontier + trend, never 'done'):")
 		for _, row := range programs {
 			lines = append(lines, "        "+programRowLine(row))
+		}
+	}
+	for _, card := range r.ProgramScorecards {
+		mark := "."
+		if card.Verdict == "lovable" {
+			mark = "+"
+		}
+		lines = append(lines, fmt.Sprintf("  %s milestone #%d %s: %s (%d/%d witnessed)",
+			mark, card.Milestone, card.Title, strings.ToUpper(card.Verdict), card.Witnessed, card.Total))
+		for _, criterion := range card.Criteria {
+			criterionMark := "."
+			if criterion.Grade == "witnessed" {
+				criterionMark = "+"
+			}
+			lines = append(lines, fmt.Sprintf("      %s [%s] %s - %s - %s",
+				criterionMark, criterion.Workstream, criterion.Title, criterion.Grade, criterion.WitnessRef))
 		}
 	}
 	if r.Epics.PartialNote != "" {

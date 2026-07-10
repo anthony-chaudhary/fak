@@ -76,6 +76,13 @@ func TestMilestoneReportJSONEnvelope(t *testing.T) {
 	if r.Trend == nil {
 		t.Fatal("report must attach a per-tick trend (first tick = 'new')")
 	}
+	if len(r.ProgramScorecards) != 1 {
+		t.Fatalf("milestone report program scorecards = %+v, want the MLP card", r.ProgramScorecards)
+	}
+	mlp := r.ProgramScorecards[0]
+	if mlp.Milestone != 17 || mlp.Key != "mlp" || mlp.Total != 5 || len(mlp.Criteria) != 5 {
+		t.Fatalf("MLP milestone projection = %+v", mlp)
+	}
 }
 
 // TestMilestoneReportAppendHistory: --append-history writes a durable ledger row that
