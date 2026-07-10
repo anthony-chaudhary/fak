@@ -51,6 +51,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/seatpark"
 )
 
 // gardenDispatchLoopID is the loop identity the bridge gates its OWN run on (via the
@@ -70,6 +71,49 @@ var gardenDispatchCapacityVerdicts = map[string]bool{
 	"WEEKLY_CAPPED":     true,
 	"REFUSE_HOST_DIRTY": true,
 	"BACKEND_UNHEALTHY": true,
+}
+
+// seatParkReasonNoSeat is the ledger Reason token a garden-dispatch run-end records when
+// a LIVE run ATTEMPTED a spawn and stopped on a seat refuse (#3523) — so a later run's
+// Gate-1.5 park-and-retry counts it toward the bounded budget. A deferred run records
+// seatpark.StatusParked (neutral in the tail); an exhausted one records
+// seatpark.StatusExhausted (which ends the tail so the next cycle starts fresh).
+const seatParkReasonNoSeat = "SEAT_NO_SEAT"
+
+// gardenDispatchSeatRefuses are the tick verdicts #3523 treats as a "no free seat" refuse
+// specifically — distinct from a drained queue (NO_LANE/NO_ISSUE) or a fault, so only a
+// genuine seat wall arms the park-and-retry. WEEKLY_CAPPED rides along per the issue: it
+// too is an account-budget wall a bounded wait respects.
+var gardenDispatchSeatRefuses = map[string]bool{
+	"REFUSE_NO_ACCOUNT": true,
+	"WEEKLY_CAPPED":     true,
+}
+
+// deriveSeatParkState folds the loop ledger's garden-dispatch run-ends (newest→oldest)
+// into the consecutive no-seat park count and the most-recent no-seat attempt time that
+// seatpark.Decide keys on. A deferred run (seatpark.StatusParked) is NEUTRAL — it neither
+// counts nor ends the tail (it is the consequence of parking, not a new no-seat failure);
+// any run that made progress or ended for another reason (including an exhausted park)
+// ends the tail, so a fresh cycle starts from zero. Pure: ledger in, counts out.
+func deriveSeatParkState(events []loopmgr.Event) (parks int, lastParkUnix int64) {
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.LoopID != gardenDispatchLoopID || ev.Kind != loopmgr.EventEnd {
+			continue
+		}
+		switch ev.Reason {
+		case string(seatpark.StatusParked):
+			continue // a chosen wait — transparent in the park tail
+		case seatParkReasonNoSeat:
+			parks++
+			if lastParkUnix == 0 {
+				lastParkUnix = ev.TSUnixNano / 1_000_000_000
+			}
+		default:
+			return parks, lastParkUnix // tail boundary: progress, exhaustion, or another stop
+		}
+	}
+	return parks, lastParkUnix
 }
 
 // gardenDispatchCandidateDecision is one garden-walk decision handed to the dispatch
@@ -174,8 +218,33 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 	if !admitDecision.Admit {
 		plan.Verdict = "LOOP_REFUSED"
 		plan.Reason = fmt.Sprintf("loop governor refused %s: %s", gardenDispatchLoopID, admitDecision.Summary)
-		witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan)
+		witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan, "")
 		return renderGardenDispatchResult(stdout, stderr, plan, *asJSON)
+	}
+
+	// Gate 1.5: bounded no-seat park-and-retry (#3523). When recent LIVE runs stopped on
+	// a seat refuse (REFUSE_NO_ACCOUNT / WEEKLY_CAPPED — no free Claude seat), re-driving
+	// another spawn attempt just bursts against a wall only a peer finishing can move, and
+	// the burst's preflight load can turn the clean seat-refuse into a REFUSE_INSPECT. So
+	// park until a bounded backoff window elapses, then retry, up to a bounded budget —
+	// the durable loop ledger this bridge already writes IS the park-state store. A parked
+	// run returns HERE, before the candidate load and before any preflight probe, so it
+	// adds no load. Only the LIVE path parks (dry-run is inspection and always runs).
+	if live {
+		parkEvents, _ := loopmgr.Load(ledgerPath)
+		parks, lastParkUnix := deriveSeatParkState(parkEvents)
+		seat := seatpark.Decide(seatpark.Input{
+			TaskID:       gardenDispatchLoopID,
+			Parks:        parks,
+			LastParkUnix: lastParkUnix,
+			NowUnix:      time.Now().Unix(),
+		})
+		if !seat.ShouldAttempt() {
+			plan.Verdict = string(seat.Status)
+			plan.Reason = seat.Detail
+			witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan, string(seat.Status))
+			return renderGardenDispatchResult(stdout, stderr, plan, *asJSON)
+		}
 	}
 
 	items, _, err := loadGardenWalkIssues(*input, *repo, *state, *limit)
@@ -203,6 +272,9 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// stopVerdict captures the fleet-wide verdict that ended the run (if any), so the
+	// witness can record a seat refuse (#3523) as a NoSeat park in the durable ledger.
+	stopVerdict := ""
 	for _, cand := range candidates {
 		res := gardenDispatchCandidateResult{
 			ID:          cand.ID,
@@ -221,9 +293,9 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 		res.Lane = lane
 
 		payload, tickErr := evaluateDispatchTick(dispatchTickOptions{
-			Workspace:      root,
-			MaxWorkers:     *maxWorkers,
-			WorkKind:       dispatchtickWorkKind(*backend),
+			Workspace:  root,
+			MaxWorkers: *maxWorkers,
+			WorkKind:   dispatchtickWorkKind(*backend),
 			// Garden dispatch IS project-management / repo-maintenance work (triage, dedup,
 			// close/relabel of stale-dormant issues) — routine coordination where a wrong
 			// call costs a re-run, not a bad production write. Default its workers to fable
@@ -270,6 +342,7 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 		plan.Results = append(plan.Results, res)
 
 		if gardenDispatchCapacityVerdicts[verdict] {
+			stopVerdict = verdict
 			plan.StopReason = fmt.Sprintf("stopped after candidate #%d: %s is a fleet-wide boundary, every remaining candidate would refuse the same way", cand.ID, verdict)
 			break
 		}
@@ -293,7 +366,14 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 		plan.Reason = fmt.Sprintf("dry-run: %d of %d considered candidate(s) would be admitted; re-run with --apply to spawn", plan.Admitted, plan.Considered)
 	}
 
-	witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan)
+	// Record a NoSeat park in the ledger when a LIVE run actually stopped on a seat
+	// refuse, so the next run's Gate-1.5 park-and-retry (#3523) counts it. A dry-run
+	// or a non-seat stop records no park token (the derivation ends its tail there).
+	seatReason := ""
+	if live && gardenDispatchSeatRefuses[stopVerdict] {
+		seatReason = seatParkReasonNoSeat
+	}
+	witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan, seatReason)
 	return renderGardenDispatchResult(stdout, stderr, plan, *asJSON)
 }
 
@@ -364,8 +444,11 @@ func evaluateGardenDispatchLoopAdmit(ledgerPath, policyPath string) (loopmgr.Dec
 
 // witnessGardenDispatch appends the bridge's run-end to the loop ledger with the
 // counts the issue asks for: walked, considered, admitted, spawned, and skipped by
-// reason (flattened to skipped_<reason> metrics, plus a total skipped_total).
-func witnessGardenDispatch(ledgerPath string, record bool, plan *gardenDispatchPlan) {
+// reason (flattened to skipped_<reason> metrics, plus a total skipped_total). seatReason
+// stamps the event's Reason with the #3523 park token (SEAT_NO_SEAT / SEAT_PARKED /
+// SEAT_EXHAUSTED) so a later run's Gate-1.5 derivation reads the park tail off the
+// durable ledger; "" leaves Reason unset (a tail boundary), exactly as before.
+func witnessGardenDispatch(ledgerPath string, record bool, plan *gardenDispatchPlan, seatReason string) {
 	if !record || ledgerPath == "" {
 		return
 	}
@@ -391,6 +474,7 @@ func witnessGardenDispatch(ledgerPath string, record bool, plan *gardenDispatchP
 		Kind:    loopmgr.EventEnd,
 		Status:  status,
 		Source:  "fak garden dispatch",
+		Reason:  seatReason,
 		Summary: fmt.Sprintf("garden dispatch %s: %s", plan.Verdict, plan.Reason),
 		Metrics: metrics,
 	})

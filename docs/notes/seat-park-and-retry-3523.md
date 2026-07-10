@@ -1,8 +1,26 @@
 # Bounded park-and-retry for the no-seat transient (#3523)
 
-**Status:** pure kernel SHIPPED in `internal/seatpark` (clean package, compiles &
-tests independently of the current red trunk); dispatcher wiring remains OPEN
-(see below). Diff-witnessed by `internal/seatpark/seatpark_test.go` (13 cases).
+**Status:** kernel SHIPPED in `internal/seatpark` (13 tests) AND **wired live** into the
+`fak garden dispatch` bridge (`cmd/fak/garden_dispatch.go`), diff-witnessed end-to-end by
+`cmd/fak/garden_dispatch_seatpark_test.go` (9 tests, incl. a full `runGardenDispatch`
+park proof). The `dispatch tick`/`dispatch sweep` core path is the one remaining wiring
+site (its file was peer-dirty at author time) — see Open below.
+
+## Wired live (garden dispatch bridge)
+
+`fak garden dispatch --apply` was the textbook burst: on a `REFUSE_NO_ACCOUNT` it stopped
+the run, and the next scheduled invocation re-drove immediately against the same wall.
+Now a **Gate 1.5** sits between the loop-governor admit and the candidate load: it derives
+the consecutive no-seat park tail from the durable loop ledger the bridge already writes
+(`deriveSeatParkState` — a run that stopped on a seat refuse records the `SEAT_NO_SEAT`
+reason; a deferred run records `SEAT_PARKED` and is neutral in the tail; an exhausted one
+records `SEAT_EXHAUSTED` and resets the cycle), feeds it to `seatpark.Decide`, and on
+`SEAT_PARKED`/`SEAT_EXHAUSTED` returns **before loading a candidate or probing preflight**
+— so a parked run adds zero load (it cannot manufacture a `REFUSE_INSPECT`). Keyed on the
+seat-refuse verdicts specifically (`gardenDispatchSeatRefuses` = `REFUSE_NO_ACCOUNT` /
+`WEEKLY_CAPPED`), so a drained queue, a fault, or the worker-slot cap (`REFUSE_AT_CAP`, a
+worker-count wall, not an account-seat wall) never arms the park. Dry-run (inspection) is
+never parked. Reuses the loop ledger + governor rather than inventing a second throttle.
 
 ## What shipped
 
@@ -48,14 +66,15 @@ unbounded busy-retry with a bounded exponential backoff:
 
 ## Open (honestly not done here)
 
-- **Dispatcher wiring.** Consulting `seatpark.Decide` on the `REFUSE_NO_ACCOUNT`
-  path in `cmd/fak/garden_dispatch.go` / `internal/dispatchtick`, and persisting
-  each task's `Parks`/`LastParkUnix` across ticks (the caller's bookkeeping the
-  kernel folds over). `garden_dispatch.go` is clean; `internal/dispatchtick`'s
-  `dispatch_tick.go` neighbour was mid-edit by another agent at author time, and
-  the trunk tip did not compile (`internal/gateway` `upstream4xxStatus`), so
-  wiring + a cmd-level test run was deferred rather than landed against a red
-  tree.
-- **Park-state store.** Where `Parks`/`LastParkUnix` live between ticks (the loop
-  ledger, or a small sidecar) is the wiring layer's call; the kernel is
-  storage-agnostic by construction.
+- **`dispatch tick` / `dispatch sweep` core path.** The garden-dispatch bridge is wired;
+  the higher-volume `internal/dispatchtick` sweep/loop (`dispatch_tick_preflight.go`,
+  where `REFUSE_NO_ACCOUNT` is produced) is the other place the park-and-retry belongs.
+  That file was peer-dirty at author time (another agent's uncommitted change), so wiring
+  it there would sweep their work into a by-path commit — deferred until it settles. The
+  same `deriveSeatParkState` / `seatpark.Decide` pair applies; only the ledger/loop id
+  differ. (Park-state is now the durable loop ledger, not a new store.)
+- **Headroom-derived park duration.** The issue prefers the park window be derived from
+  the live `fak accounts headroom` / cooldown signal (park until a seat is *projected* to
+  free) rather than the fixed geometric backoff. `accounts_headroom.go` was peer-dirty;
+  `seatpark.Policy` already accepts a caller-supplied schedule, so this is a drop-in
+  refinement once that surface is free.
