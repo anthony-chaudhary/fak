@@ -53,7 +53,13 @@ any of it: `make cuda-check` runs without a toolchain.
 
 The GPU arch defaults to `sm_89`; override with `FAK_CUDA_ARCH=<arch>`. The authoritative
 supported set is [`internal/compute/cuda_arch.txt`](../internal/compute/cuda_arch.txt), which every
-build entry point validates before invoking `nvcc`.
+build entry point validates before invoking `nvcc`. Single-arch builds remain the fast developer
+path, including first-class Blackwell targets:
+
+```bash
+make cuda-build-sm100  # B200 / GB200
+make cuda-build-sm120  # RTX 50-series / consumer Blackwell
+```
 
 ## 2. Author — edit, then gate locally (no GPU)
 

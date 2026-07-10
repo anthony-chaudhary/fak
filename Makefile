@@ -520,6 +520,14 @@ cuda-check:
 cuda-build:
 	bash internal/compute/build_cuda.sh build
 
+# First-class single-arch Blackwell developer builds (#4182). These keep the
+# fast one-architecture path; the multi-arch distributable is owned by #4183.
+cuda-build-sm100:
+	FAK_CUDA_ARCH=sm_100 bash internal/compute/build_cuda.sh build
+
+cuda-build-sm120:
+	FAK_CUDA_ARCH=sm_120 bash internal/compute/build_cuda.sh build
+
 cuda-test:
 	bash internal/compute/build_cuda.sh test
 
