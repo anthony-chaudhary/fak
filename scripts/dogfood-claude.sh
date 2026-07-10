@@ -544,7 +544,16 @@ start_ollama_backend() {
   if ! curl -sf "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
     log "starting 'ollama serve'"
     nohup ollama serve >/tmp/fak-ollama.log 2>&1 &
-    until curl -sf "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; do sleep 1; done
+    OLLAMA_PID=$!
+    # Bound the wait: a crash-on-startup 'ollama serve' (port conflict, corrupt
+    # store) must not spin curl forever. Mirror the /healthz loop below — check
+    # kill -0 liveness and a deadline — like dgx-deepseek-serve.sh HEALTH_TIMEOUT.
+    ollama_deadline=$(( $(date +%s) + ${FAK_DOGFOOD_OLLAMA_TIMEOUT_S:-60} ))
+    until curl -sf "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; do
+      kill -0 "$OLLAMA_PID" 2>/dev/null || { cat /tmp/fak-ollama.log >&2; die "ollama serve died on startup (see /tmp/fak-ollama.log)"; }
+      [ "$(date +%s)" -ge "$ollama_deadline" ] && { cat /tmp/fak-ollama.log >&2; die "timed out after ${FAK_DOGFOOD_OLLAMA_TIMEOUT_S:-60}s waiting for ollama /api/tags (see /tmp/fak-ollama.log)"; }
+      sleep 1
+    done
   fi
   # Model selection (when FAK_DOGFOOD_MODEL is unset): prefer the LARGEST installed
   # model by on-disk size, not whatever ollama happens to list first — a bigger model
@@ -604,7 +613,15 @@ start_shim_backend() {
   log "starting local_shim.py ($MODEL) on :$SHIM_PORT"
   python3 "$FAK_DIR/experiments/agent-live/local_shim.py" --model "$MODEL" --port "$SHIM_PORT" &
   SHIM_PID=$!
-  until curl -sf "http://127.0.0.1:$SHIM_PORT/v1/models" >/dev/null 2>&1; do sleep 1; done
+  # Same bound as start_ollama_backend: the shim can die on startup (bad model,
+  # missing weights) — never spin curl forever. Longer default deadline because
+  # a cold shim may download HF weights before /v1/models answers.
+  shim_deadline=$(( $(date +%s) + ${FAK_DOGFOOD_SHIM_TIMEOUT_S:-180} ))
+  until curl -sf "http://127.0.0.1:$SHIM_PORT/v1/models" >/dev/null 2>&1; do
+    kill -0 "$SHIM_PID" 2>/dev/null || die "local_shim.py died on startup (model '$MODEL', port $SHIM_PORT)"
+    [ "$(date +%s)" -ge "$shim_deadline" ] && die "timed out after ${FAK_DOGFOOD_SHIM_TIMEOUT_S:-180}s waiting for local_shim.py /v1/models"
+    sleep 1
+  done
   BASE_URL="http://127.0.0.1:$SHIM_PORT/v1"
 }
 
