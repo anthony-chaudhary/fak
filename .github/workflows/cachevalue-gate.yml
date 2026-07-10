@@ -1,0 +1,125 @@
+name: cachevalue-gate
+
+# Wire the ONLY real cache-value regression GATE (`fak nightrun score`) onto a cadence
+# (#3641, epic #3569 — independent trust-but-verify cache loops).
+#
+# Before this, `fak nightrun score` (exit 1 when the realized KV-prefix reuse ratio over a
+# thick-enough multi-turn corpus falls below the dogfooded floor) had NO caller in any
+# .github/workflows/*.yml or the Makefile — the ratchet existed but never ran, so it was
+# decorative. Only the non-gating cachevalue-feed.yml runs on cadence.
+#
+# This job has two parts:
+#   1. GATE SELF-TEST (BLOCKING) — seeds a healthy, a below-floor, and a thin corpus into
+#      throwaway workspaces and asserts `fak nightrun score` exits 0, then 1, then 0
+#      (INSUFFICIENT tolerated) at the dogfooded DEFAULT floor. This is the witness that the
+#      gate reds on a real regression and greens on a healthy corpus, independent of live
+#      fleet data. If the gate ever stops firing, THIS step reds.
+#   2. LIVE GATE (ADVISORY) — runs the gate against the committed
+#      docs/nightrun/cache-value.jsonl at the default floor and reports the verdict to the
+#      step summary. Advisory (continue-on-error) for now: #3641 explicitly starts
+#      scheduled/advisory, NOT a required merge check on day one, and the committed dogfood
+#      corpus currently sits below the 0.751 floor (realized ~0.69), so a blocking live gate
+#      would red every day on state this leaf is not chartered to fix.
+#
+# CI-spec-change migration (docs/ci/ci-spec-change-migration.md):
+#   * Consumers: this ADDS a consumer of `fak nightrun score`; the producer is unchanged and
+#     had no prior consumer to migrate. Branch-ref rows are recorded in
+#     docs/ci/workflow-branch-audit.md (regenerated with `fak workflow-audit --write-doc`).
+#   * Cutover to BLOCKING: drop `continue-on-error` on the live-gate step once the committed
+#     corpus holds the floor (or #2783 resolves the reuse-ratio floor basis).
+#   * Rollback: delete this file — nothing else references the `cachevalue-gate` job name.
+on:
+  schedule:
+    # Daily 09:53 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (blockers-feed 09:07, cachevalue-feed 09:37).
+    - cron: "53 9 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cachevalue-gate
+  cancel-in-progress: false
+
+jobs:
+  cachevalue-gate:
+    name: cache-value regression gate (fak nightrun score)
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Build the CLI from NON-TEST files only (like the sibling *-feed jobs' `go run`), so an
+      # unrelated in-flight compile break in a cmd/fak *_test.go cannot silently drop this gate
+      # — the exact failure mode that lapsed the #cache-value cadence (see cachevalue-feed.yml).
+      - name: build fak
+        run: go build -o fak ./cmd/fak
+
+      # GATE SELF-TEST (blocking): prove the gate reds on a seeded below-floor corpus, greens
+      # on a healthy one, and tolerates a thin corpus as INSUFFICIENT — at the default floor.
+      - name: gate self-test (reds on regression, greens on healthy)
+        run: |
+          set -euo pipefail
+          seed() { # $1=dir  $2=jsonl-line
+            mkdir -p "$1/docs/nightrun"
+            printf '%s\n' "$2" > "$1/docs/nightrun/cache-value.jsonl"
+          }
+          # Healthy multi-turn corpus: 95% realized reuse over 10 multi-turn turns.
+          seed healthy '{"schema":"fak-cache-value-ledger/1","date":"2026-07-01","session_type":"guard","context":"selftest","turns":10,"prompt_tokens":1000,"reused_tokens":950}'
+          # Below-floor corpus: 30% realized reuse over a thick-enough multi-turn corpus.
+          seed bad '{"schema":"fak-cache-value-ledger/1","date":"2026-07-01","session_type":"guard","context":"selftest","turns":10,"prompt_tokens":1000,"reused_tokens":300}'
+          # Thin corpus: only 2 multi-turn turns (< the 8-turn minimum) must fall open INSUFFICIENT.
+          seed thin '{"schema":"fak-cache-value-ledger/1","date":"2026-07-01","session_type":"guard","context":"selftest","turns":2,"prompt_tokens":1000,"reused_tokens":100}'
+
+          echo "== healthy corpus should PASS (exit 0) =="
+          ./fak nightrun score --workspace healthy
+
+          echo "== below-floor corpus should FAIL (exit 1) =="
+          if ./fak nightrun score --workspace bad; then
+            echo "GATE SELF-TEST FAILED: fak nightrun score did NOT red on a below-floor corpus" >&2
+            exit 1
+          fi
+
+          echo "== thin corpus should PASS as INSUFFICIENT (exit 0) =="
+          ./fak nightrun score --workspace thin
+
+          echo "gate self-test OK: reds on a seeded regression, greens on a healthy corpus, INSUFFICIENT tolerated"
+
+      # LIVE GATE (advisory): run against the committed corpus at the default floor. Advisory
+      # for now (see header). The verdict is reported to the step summary either way.
+      - name: live cache-value regression gate (advisory)
+        id: livegate
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./fak nightrun score 2>&1 | tee gate.txt
+
+      - name: report live gate verdict
+        if: always()
+        run: |
+          {
+            echo "## cache-value regression gate (fak nightrun score)"
+            echo "live gate outcome: **${{ steps.livegate.outcome }}** (advisory — not blocking yet; see workflow header for the cutover to blocking)"
+            echo '```'
+            cat gate.txt 2>/dev/null || echo "(no gate output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload gate artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cachevalue-gate
+          path: |
+            gate.txt
+            docs/nightrun/cache-value.jsonl
+          if-no-files-found: ignore
