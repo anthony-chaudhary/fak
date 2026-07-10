@@ -18,14 +18,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 func cmdGuardSessions(argv []string) { os.Exit(runGuardSessions(os.Stdout, os.Stderr, argv)) }
+
+var guardSessionIndexRecorder = recordGuardSessionIndex
+
+func maybeRecordGuardSessionIndex(audit *journal.Journal, traceID string, command []string, startedAt time.Time) string {
+	if audit == nil || len(command) == 0 || strings.TrimSpace(traceID) == "" {
+		return ""
+	}
+	return guardSessionIndexRecorder(traceID, command[0], audit.Path(), newGuardLaunchNonce(), startedAt)
+}
 
 // recordGuardSessionIndex appends this guard session to the local index under the fleet
 // registry dir and returns its short handle (or "" if the append failed). Called once at

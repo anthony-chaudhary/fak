@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
@@ -201,5 +202,23 @@ func TestSessionLsIdentity(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "uuid-XYZ") {
 		t.Fatalf("unmapped session leaked the mapped UUID:\n%s", out.String())
+	}
+}
+
+func TestMaybeRecordGuardSessionIndexProductionSeam(t *testing.T) {
+	orig := guardSessionIndexRecorder
+	defer func() { guardSessionIndexRecorder = orig }()
+	var trace, agent, audit, nonce string
+	guardSessionIndexRecorder = func(tid, a, ap, n string, started time.Time) string {
+		trace, agent, audit, nonce = tid, a, ap, n
+		return "handle"
+	}
+	j := journal.OpenMemory()
+	got := maybeRecordGuardSessionIndex(j, "trace-1", []string{"codex", "exec"}, time.Unix(1700000000, 0))
+	if got != "handle" || trace != "trace-1" || agent != "codex" || audit != j.Path() || nonce == "" {
+		t.Fatalf("got=%q trace=%q agent=%q audit=%q nonce=%q", got, trace, agent, audit, nonce)
+	}
+	if got := maybeRecordGuardSessionIndex(nil, "trace", []string{"codex"}, time.Now()); got != "" {
+		t.Fatalf("nil audit recorded %q", got)
 	}
 }

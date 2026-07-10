@@ -834,6 +834,7 @@ func cmdGuard(argv []string) {
 	guardTraceID = resolveGuardSessionID(guardTraceID, guardDurabilityWanted, session.DescriptorMeta{
 		CacheKey: sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), "", command),
 	}, newGuardLaunchNonce())
+	maybeRecordGuardSessionIndex(auditJournal, guardTraceID, command, time.Now())
 	// Wall-clock budget (issue #1584): an INDEPENDENT axis from --context-budget-tokens
 	// above — a managed run may be fine on tokens but out of real time, or vice versa.
 	// StartTimeBudget both configures the envelope and arms the clock at the current
