@@ -3,6 +3,7 @@ package fleetpane
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 func PaneText(status StatusDoc) string {
@@ -92,10 +93,64 @@ func LoopAuditText(doc LoopAuditDoc) string {
 	return strings.Join(lines, "\n")
 }
 
-func FleetText(doc FleetDoc) string {
+const fleetSnapshotStaleMargin = 2.0 // poller presumed dead at 2x the machine-stale horizon
+
+// fleetSnapshotStaleFloorMin is the fallback stale horizon when a doc carries no StaleMin.
+const fleetSnapshotStaleFloorMin = 15.0
+
+// FleetSnapshotAge reports the aggregate snapshot's age at now and whether it is
+// stale (poller presumed dead). ok is false when GeneratedUTC is empty or unparseable,
+// in which case callers omit the age and do not flag stale. Staleness is a pure
+// function of the snapshot's age — a quiet-but-fresh fleet never reads stale.
+func FleetSnapshotAge(doc FleetDoc, now time.Time) (age time.Duration, stale bool, ok bool) {
+	if doc.GeneratedUTC == "" {
+		return 0, false, false
+	}
+	captured, err := time.Parse(time.RFC3339, doc.GeneratedUTC)
+	if err != nil {
+		return 0, false, false
+	}
+	age = now.Sub(captured)
+	if age < 0 {
+		age = 0
+	}
+	staleMin := doc.StaleMin
+	if staleMin <= 0 {
+		staleMin = fleetSnapshotStaleFloorMin
+	}
+	threshold := time.Duration(staleMin * fleetSnapshotStaleMargin * float64(time.Minute))
+	return age, age > threshold, true
+}
+
+// humanizeAge renders a duration in a compact truncated form: "12s", "6m", "2h".
+func humanizeAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+func FleetText(doc FleetDoc) string { return FleetTextAt(doc, time.Now().UTC()) }
+
+func FleetTextAt(doc FleetDoc, now time.Time) string {
+	age, stale, ok := FleetSnapshotAge(doc, now)
+	header := "FLEET CONTROL PANE AGGREGATE @ " + doc.GeneratedUTC
+	if ok {
+		header += " (updated " + humanizeAge(age) + " ago)"
+	}
+	verdict := doc.Verdict
+	if stale {
+		verdict = fmt.Sprintf("STALE_SNAPSHOT (frozen: %s)", doc.Verdict)
+	}
 	lines := []string{
-		"FLEET CONTROL PANE AGGREGATE @ " + doc.GeneratedUTC,
-		fmt.Sprintf("verdict: %s  machines=%d  states=%s", doc.Verdict, len(doc.Machines), CompactCounts(intMapAny(doc.States))),
+		header,
+		fmt.Sprintf("verdict: %s  machines=%d  states=%s", verdict, len(doc.Machines), CompactCounts(intMapAny(doc.States))),
 		"versions: " + CompactCounts(intMapAny(doc.Versions)),
 		fmt.Sprintf("totals: sessions=%d actions=%d auth_sessions=%d auto_resume=%d loops=%d dirty=%d version=%d",
 			doc.Totals["sessions"], doc.Totals["actions"], doc.Totals["auth_blocked"], doc.Totals["auto_resume"], doc.Totals["loop_actions"], doc.Totals["dirty_paths"], doc.Totals["version_mismatches"]),

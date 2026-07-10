@@ -247,8 +247,11 @@ func TestStatusAndFleetSnapshotFold(t *testing.T) {
 	if fleet.Verdict != "OK" || len(fleet.Machines) != 1 || fleet.Totals["sessions"] != 2 {
 		t.Fatalf("unexpected fleet snapshot fold: %+v", fleet)
 	}
-	text := FleetText(fleet)
+	text := FleetTextAt(fleet, opts.Now().Add(5*time.Second))
 	if !strings.Contains(text, "FLEET CONTROL PANE AGGREGATE") || !strings.Contains(text, "peer") {
 		t.Fatalf("fleet text missing expected content:\n%s", text)
+	}
+	if !strings.Contains(text, "updated 5s ago") || strings.Contains(text, "STALE_SNAPSHOT") {
+		t.Fatalf("fresh fleet snapshot rendered wrong age/staleness:\n%s", text)
 	}
 }
