@@ -164,6 +164,10 @@ type Stats struct {
 	// — the width-axis counter alongside the count-axis DedupCollapsed. omitempty keeps
 	// a serialized Result byte-identical when the op is never used.
 	Narrowed int `json:"narrowed,omitempty"`
+	// MergedOnEvict counts below-budget cells folded into a surviving near-twin by the
+	// opt-in merge-on-evict pass (#4015) instead of tail-dropped. omitempty keeps a
+	// serialized Result byte-identical when the op is never used.
+	MergedOnEvict int `json:"merged_on_evict,omitempty"`
 }
 
 // Result is the outcome of Run.
@@ -272,6 +276,13 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 				work, dropped, upds = applyStarveCredit(work, dropped, op.StarveK, refcount)
 				starveN = recordStarve(&res, op.StarveK, upds)
 			}
+			mergeN := ""
+			if op.MergeFloor > 0 && len(dropped) > 0 {
+				// #4015: merge-on-evict — fold each still-dropped cell into its nearest
+				// surviving near-twin (refs preserved) instead of tail-dropping it, so only
+				// the cells with no fold target above the floor reach the overflow verdict.
+				work, dropped, mergeN = applyMergeNearest(ctx, b, &res, work, dropped, op.MergeFloor)
+			}
 			if len(dropped) > 0 {
 				ov := &IndexOverflow{Reason: OverflowReason, Budget: op.Bytes, Kept: len(work)}
 				for _, c := range dropped {
@@ -281,11 +292,14 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 				note = fmt.Sprintf("%s: %d entr%s over the %d-byte budget (%s)", OverflowReason,
 					len(dropped), plural(len(dropped)), op.Bytes, overflowNames(dropped))
 			}
-			if starveN != "" {
+			for _, extra := range []string{mergeN, starveN} {
+				if extra == "" {
+					continue
+				}
 				if note != "" {
 					note += "; "
 				}
-				note += starveN
+				note += extra
 			}
 		case OpDedup:
 			work, note = applyDedup(&res, work)

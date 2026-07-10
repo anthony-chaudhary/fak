@@ -159,6 +159,14 @@ type Op struct {
 	// pins ∪ recent union). Meaningful only with Protect; 0 protects the durable
 	// class alone.
 	Recent int `json:"recent,omitempty"` // budget: recent-window size (requires protect)
+	// MergeFloor opts a budget op into merge-on-evict (#4015, LOOK-M/CAM/KVMerger):
+	// instead of tail-dropping a below-budget cell, fold it into its single
+	// most-similar SURVIVING cell (argmax simhash cosine) when that similarity is at
+	// or above this floor. The evicted cell's Refs — and its own ID — ride onto the
+	// survivor, so its provenance is preserved rather than lost, and it leaves the
+	// overflow list. Cosine is in [-1,1]; a meaningful floor is in (0,1]. 0 (the
+	// default) is off: the budget tail-drops exactly as before, byte-for-byte.
+	MergeFloor float64 `json:"merge_floor,omitempty"` // budget: opt-in merge-on-evict similarity floor (#4015)
 }
 
 // Query is an authored memory request: an intent string (for relevance ranking and as
@@ -257,6 +265,9 @@ func Validate(q Query) error {
 			}
 			if op.Recent > 0 && !op.Protect {
 				return fmt.Errorf("memq: op %d (budget) sets recent=%d without protect", i, op.Recent)
+			}
+			if op.MergeFloor < 0 || op.MergeFloor > 1 {
+				return fmt.Errorf("memq: op %d (budget) has merge_floor=%v outside [0,1]", i, op.MergeFloor)
 			}
 			if op.StarveK < 0 {
 				return fmt.Errorf("memq: op %d (budget) has negative starve_k=%d", i, op.StarveK)

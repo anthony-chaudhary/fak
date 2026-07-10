@@ -40,6 +40,12 @@ type Params struct {
 	// candidate set (intent-matching ∪ durable); author a raw scan→rank→budget
 	// query to protect the unconditional recency tail.
 	ProtectRecent int `json:"protect_recent,omitempty"`
+	// MergeFloor opts the render driver's budget stage into merge-on-evict (#4015):
+	// a cell evicted by the byte budget is folded into its nearest surviving near-twin
+	// (simhash cosine >= this floor) instead of tail-dropped, preserving the evicted
+	// cell's refs on the survivor. Cosine is in [-1,1]; a meaningful floor is in (0,1].
+	// 0 (the default) tail-drops as before — byte-identical.
+	MergeFloor float64 `json:"merge_floor,omitempty"`
 }
 
 // Driver is a NAMED, pre-composed memory strategy — a "canned query" in the algebra.
@@ -125,7 +131,7 @@ func init() {
 					}}},
 					{Kind: OpDedup},
 					{Kind: OpRank, By: RankRelevance, Desc: true},
-					{Kind: OpBudget, Bytes: p.Budget, Protect: p.ProtectFloor, Recent: p.ProtectRecent, StarveK: p.StarveK},
+					{Kind: OpBudget, Bytes: p.Budget, Protect: p.ProtectFloor, Recent: p.ProtectRecent, StarveK: p.StarveK, MergeFloor: p.MergeFloor},
 					{Kind: OpRender},
 				},
 			}
