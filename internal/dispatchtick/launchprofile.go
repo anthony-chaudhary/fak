@@ -174,14 +174,66 @@ func LaunchProfileForIssue(labels []string, table TierLaunchTable) (profile Laun
 	if !ok {
 		return LaunchProfile{}, "", false
 	}
-	profile, ok = table[bucket]
-	if !ok {
-		// Fill any gap (nil or partial override table) from the built-in default so a
-		// defined bucket always resolves to a profile.
-		if def, defOK := DefaultTierLaunchTable()[bucket]; defOK {
-			return def, bucket, true
-		}
-		return LaunchProfile{}, bucket, false
+	return profileForBucket(bucket, table)
+}
+
+// profileForBucket resolves one bucket against an override table, filling any gap (nil
+// or partial table) from the built-in default so a defined bucket always resolves.
+func profileForBucket(bucket LaunchBucket, table TierLaunchTable) (LaunchProfile, LaunchBucket, bool) {
+	if profile, ok := table[bucket]; ok {
+		return profile, bucket, true
 	}
-	return profile, bucket, true
+	if def, ok := DefaultTierLaunchTable()[bucket]; ok {
+		return def, bucket, true
+	}
+	return LaunchProfile{}, bucket, false
+}
+
+// Tick-wide work kinds that describe project-management COORDINATION rather than code
+// implementation. They mirror dispatchTickOptions.WorkKind / DefaultWorkKind by value
+// (not import), the same by-name mirror idiom tiertag uses for issuecontract's grammar.
+const (
+	WorkKindProjectManagement = "project_management"
+	WorkKindGardening         = "gardening"
+)
+
+// normalizeWorkKind lower-cases, trims, and folds "-"/" " to "_", so
+// "project-management", "Project Management", and "project_management" are one kind.
+func normalizeWorkKind(workKind string) string {
+	s := strings.ToLower(strings.TrimSpace(workKind))
+	s = strings.ReplaceAll(s, "-", "_")
+	return strings.ReplaceAll(s, " ", "_")
+}
+
+// IsCoordinationWorkKind reports whether a tick-wide work kind is project-management
+// coordination (triage, next-up ranking, milestone scoring, status rollups, backlog
+// dedup) rather than code implementation. "engineering" — the claude DefaultWorkKind —
+// is deliberately NOT coordination, so an ordinary implementation tick is unchanged.
+func IsCoordinationWorkKind(workKind string) bool {
+	switch normalizeWorkKind(workKind) {
+	case WorkKindProjectManagement, WorkKindGardening:
+		return true
+	}
+	return false
+}
+
+// LaunchProfileForDispatch resolves a worker's launch profile from BOTH the per-issue
+// labels and the tick-wide work kind — the "project management runs on fable BY
+// DEFAULT" rung, so a PM dispatch loop needs no per-issue tier/pm label on every issue.
+//
+// Per-issue labels always WIN: an explicit tier/ultra, a valid tier tag (so hard PM
+// planning tagged tier/T0 still escalates to opus), or a bare tier/pm all resolve
+// first. Only when the issue carries no trusted label signal does the tick-wide work
+// kind decide: a COORDINATION kind routes to the cheap PM bucket, and anything else —
+// notably "engineering" — reports hasProfile=false so the caller keeps the seat
+// default. The conservative-degrade invariant is preserved: an untagged issue on an
+// implementation tick is never uplifted or downgraded.
+func LaunchProfileForDispatch(labels []string, workKind string, table TierLaunchTable) (profile LaunchProfile, bucket LaunchBucket, hasProfile bool) {
+	if profile, bucket, ok := LaunchProfileForIssue(labels, table); ok {
+		return profile, bucket, true
+	}
+	if !IsCoordinationWorkKind(workKind) {
+		return LaunchProfile{}, "", false
+	}
+	return profileForBucket(BucketPM, table)
 }
