@@ -45,6 +45,14 @@ func cmdWatchdog(args []string) {
 		os.Exit(runWatchdogStatus(os.Stdout, os.Stderr, args[1:]))
 	case "heal":
 		os.Exit(runWatchdogHeal(os.Stdout, os.Stderr, args[1:]))
+	case "selfcheck":
+		// The no-I/O proof of the decenter-the-human fold at the watchdog seam: a DOWN
+		// monitor is the autoheal's to restart, an UNKNOWN monitor is a fresh-context
+		// re-probe, and only a GAVE_UP monitor genuinely waits on a person.
+		os.Exit(runReportSelfcheck(os.Stdout, os.Stderr, args[1:], "watchdog", watchdoghealth.TriageSelfcheck,
+			"SELFCHECK OK -- decenter-the-human at the watchdog: a DOWN monitor is the autoheal's "+
+				"restart and an UNKNOWN monitor is a fresh-context re-probe; only a GAVE_UP monitor "+
+				"(automatic recovery exhausted) waits on a person."))
 	case "-h", "--help", "help":
 		watchdogUsage(os.Stdout)
 	default:
@@ -135,12 +143,33 @@ func runWatchdogStatus(stdout, stderr io.Writer, argv []string) int {
 		}
 	} else {
 		writeWatchdogStatusTable(stdout, digest)
+		// Decenter the human at the source: under FAK_WATCHDOG_TRIAGE_GATE=enforce, append
+		// the attention split — the monitors that genuinely wait on a person (a GAVE_UP
+		// monitor whose automatic recovery is exhausted) vs the ones the fleet clears itself
+		// (a DOWN monitor the autoheal restarts, an UNKNOWN monitor to re-probe). Default
+		// ("", "warn") leaves the readout byte-for-byte unchanged while it soaks.
+		if watchdoghealth.WatchdogTriageEnforced(os.Getenv("FAK_WATCHDOG_TRIAGE_GATE")) {
+			if line := watchdoghealth.AttentionTriageLine(digest); line != "" {
+				fmt.Fprintln(stdout, line)
+			}
+		}
 	}
 
-	if *check && digest.NeedsAttention {
+	if *check && watchdogCheckTrips(digest) {
 		return 1
 	}
 	return 0
+}
+
+// watchdogCheckTrips is the `--check` exit-1 condition. By default it is the digest's own
+// NeedsAttention (DOWN / UNKNOWN / GAVE_UP), unchanged. Under FAK_WATCHDOG_TRIAGE_GATE=enforce
+// it narrows to the decenter residual — only a monitor that genuinely waits on a person (a
+// GAVE_UP or auth-walled monitor) — so the fleet's own DOWN/UNKNOWN recoveries stop paging.
+func watchdogCheckTrips(d watchdoghealth.Digest) bool {
+	if watchdoghealth.WatchdogTriageEnforced(os.Getenv("FAK_WATCHDOG_TRIAGE_GATE")) {
+		return watchdoghealth.NeedsHumanAttention(d)
+	}
+	return d.NeedsAttention
 }
 
 // writeWatchdogStatusTable renders the digest as an aligned human table plus a one-line
