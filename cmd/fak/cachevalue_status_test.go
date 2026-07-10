@@ -1213,6 +1213,107 @@ func TestCachevalueStatusArtifactDirDiscoversReports(t *testing.T) {
 	}
 }
 
+func TestCachevalueStatusGateFailOnFlipsExitCode(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+	usage := filepath.Join(dir, "absent-usage.jsonl")
+	withCachevalueStatusHeadroom(t, headroom.HeadroomName)
+	t.Setenv("FAK_HEADROOM_URL", "http://127.0.0.1:9")
+	t.Setenv("FAK_HEADROOM_TIMEOUT_MS", "50")
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(dir, "absent-vcache.json"))
+	t.Setenv("FAK_VCACHE_CONTEXT_SNAPSHOT", "off")
+	base := []string{"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", usage, "--json"}
+
+	// This corpus folds to PARTIAL (pinned by the rollup test above); the
+	// default (ungated) invocation must keep exiting 0.
+	var out, errb bytes.Buffer
+	if code := runCachevalueStatus(&out, &errb, base); code != 0 {
+		t.Fatalf("ungated status exit=%d stderr=%s", code, errb.String())
+	}
+	var rep cachevalueStatusReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("status JSON did not decode: %v\n%s", err, out.String())
+	}
+	if rep.Verdict != "PARTIAL" {
+		t.Fatalf("fixture verdict = %q, want PARTIAL", rep.Verdict)
+	}
+
+	// --gate --fail-on PARTIAL on a PARTIAL corpus flips to exit 1, still
+	// emitting the JSON report so a CI capture keeps the evidence.
+	out.Reset()
+	errb.Reset()
+	code := runCachevalueStatus(&out, &errb, append(append([]string{}, base...), "--gate", "--fail-on", "PARTIAL"))
+	if code != 1 {
+		t.Fatalf("--gate --fail-on PARTIAL exit=%d, want 1; stderr=%s", code, errb.String())
+	}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("gated status JSON did not decode: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(errb.String(), "gate: verdict PARTIAL is at or worse than --fail-on floor PARTIAL") {
+		t.Fatalf("gate refusal not named on stderr: %s", errb.String())
+	}
+
+	// --fail-on alone implies the gate.
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueStatus(&out, &errb, append(append([]string{}, base...), "--fail-on", "partial")); code != 1 {
+		t.Fatalf("--fail-on partial exit=%d, want 1; stderr=%s", code, errb.String())
+	}
+
+	// A PARTIAL corpus passes a floor of INSUFFICIENT.
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueStatus(&out, &errb, append(append([]string{}, base...), "--gate", "--fail-on", "INSUFFICIENT")); code != 0 {
+		t.Fatalf("--gate --fail-on INSUFFICIENT exit=%d, want 0; stderr=%s", code, errb.String())
+	}
+
+	// --gate alone defaults the floor to PARTIAL.
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueStatus(&out, &errb, append(append([]string{}, base...), "--gate")); code != 1 {
+		t.Fatalf("--gate (default floor) exit=%d, want 1; stderr=%s", code, errb.String())
+	}
+
+	// An unknown floor is a usage error, not a silent pass.
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueStatus(&out, &errb, append(append([]string{}, base...), "--gate", "--fail-on", "BOGUS")); code != 2 {
+		t.Fatalf("--fail-on BOGUS exit=%d, want 2; stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "--fail-on must be OK, PARTIAL, or INSUFFICIENT") {
+		t.Fatalf("bad floor error not named: %s", errb.String())
+	}
+
+	// A blank --fail-on (e.g. a CI quoting mistake) is a loud usage error,
+	// never a silently disabled gate.
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueStatus(&out, &errb, append(append([]string{}, base...), "--fail-on", " ")); code != 2 {
+		t.Fatalf("--fail-on ' ' exit=%d, want 2; stderr=%s", code, errb.String())
+	}
+}
+
+func TestCachevalueStatusGateExitOrdersVerdicts(t *testing.T) {
+	cases := []struct {
+		verdict, floor string
+		want           int
+	}{
+		{"OK", "PARTIAL", 0},
+		{"OK", "OK", 1},
+		{"PARTIAL", "PARTIAL", 1},
+		{"PARTIAL", "INSUFFICIENT", 0},
+		{"INSUFFICIENT", "PARTIAL", 1},
+		{"INSUFFICIENT", "INSUFFICIENT", 1},
+		{"ok", "partial", 0},
+		{"UNKNOWN", "PARTIAL", 0},
+	}
+	for _, tc := range cases {
+		if got := cachevalueStatusGateExit(tc.verdict, tc.floor); got != tc.want {
+			t.Fatalf("cachevalueStatusGateExit(%q, %q) = %d, want %d", tc.verdict, tc.floor, got, tc.want)
+		}
+	}
+}
+
 func cachevalueRowsByComponent(rows []cachevalueStatusRow) map[string]cachevalueStatusRow {
 	out := map[string]cachevalueStatusRow{}
 	for _, row := range rows {

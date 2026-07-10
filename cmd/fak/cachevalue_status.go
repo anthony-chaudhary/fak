@@ -297,12 +297,31 @@ func runCachevalueStatus(stdout, stderr io.Writer, argv []string) int {
 	vcacheObserve := fs.String("vcache-observe-report", "", "optional fak vcache observe --json report to fold direct provider-cache telemetry and false-warm attribution into this status")
 	vcacheContextWitness := fs.String("vcache-context-witness-report", "", "optional fak vcache context-witness --json report to fold fak-owned lossy context proof and replay status into this status")
 	asJSON := fs.Bool("json", false, "emit machine-readable status")
+	gate := fs.Bool("gate", false, "exit 1 when the folded verdict is at or worse than the --fail-on floor (opt-in; default exit stays 0)")
+	failOn := fs.String("fail-on", "", "verdict floor for the gate: OK, PARTIAL, or INSUFFICIENT (implies --gate; defaults to PARTIAL when --gate is set)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 	if *since != "" {
 		if _, err := time.Parse("2006-01-02", *since); err != nil {
 			fmt.Fprintf(stderr, "fak cachevalue status: --since must be YYYY-MM-DD: %v\n", err)
+			return 2
+		}
+	}
+	failOnSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "fail-on" {
+			failOnSet = true
+		}
+	})
+	gateFloor := strings.ToUpper(strings.TrimSpace(*failOn))
+	gateActive := *gate || failOnSet
+	if gateActive {
+		if gateFloor == "" && !failOnSet {
+			gateFloor = "PARTIAL"
+		}
+		if _, ok := cachevalueVerdictRank(gateFloor); !ok {
+			fmt.Fprintf(stderr, "fak cachevalue status: --fail-on must be OK, PARTIAL, or INSUFFICIENT (got %q)\n", *failOn)
 			return 2
 		}
 	}
@@ -324,15 +343,21 @@ func runCachevalueStatus(stdout, stderr io.Writer, argv []string) int {
 		VCacheObservePath:        *vcacheObserve,
 		VCacheContextWitnessPath: *vcacheContextWitness,
 	}, time.Now().UTC())
+	rc := 0
+	if gateActive {
+		if rc = cachevalueStatusGateExit(rep.Verdict, gateFloor); rc != 0 {
+			fmt.Fprintf(stderr, "fak cachevalue status: gate: verdict %s is at or worse than --fail-on floor %s\n", rep.Verdict, gateFloor)
+		}
+	}
 	if *asJSON {
 		if err := writeIndentedJSONNoEscape(stdout, rep); err != nil {
 			fmt.Fprintf(stderr, "fak cachevalue status: marshal: %v\n", err)
 			return 1
 		}
-		return 0
+		return rc
 	}
 	renderCachevalueStatus(stdout, rep)
-	return 0
+	return rc
 }
 
 func buildCachevalueStatus(opt cachevalueStatusOptions, now time.Time) cachevalueStatusReport {
@@ -2884,6 +2909,34 @@ func cachevalueStatusVerdict(rows []cachevalueStatusRow) (string, string) {
 		return "INSUFFICIENT", fmt.Sprintf("%d cache component(s) lack evidence or are unavailable", problems)
 	}
 	return "PARTIAL", fmt.Sprintf("%d working/available component(s), %d component(s) missing, gated, unavailable, or dollar-blind", working, problems)
+}
+
+func cachevalueVerdictRank(v string) (int, bool) {
+	switch strings.ToUpper(strings.TrimSpace(v)) {
+	case "OK":
+		return 0, true
+	case "PARTIAL":
+		return 1, true
+	case "INSUFFICIENT":
+		return 2, true
+	}
+	return 0, false
+}
+
+// cachevalueStatusGateExit maps the folded verdict onto the opt-in gate exit:
+// 1 when the verdict is at or worse than the caller-chosen floor, else 0. An
+// unrecognized verdict or floor never gates (the floor is validated at flag
+// parse; the verdict set is closed by cachevalueStatusVerdict).
+func cachevalueStatusGateExit(verdict, floor string) int {
+	floorRank, ok := cachevalueVerdictRank(floor)
+	if !ok {
+		return 0
+	}
+	rank, ok := cachevalueVerdictRank(verdict)
+	if !ok || rank < floorRank {
+		return 0
+	}
+	return 1
 }
 
 func cachevalueRowWorking(row cachevalueStatusRow) bool {
