@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/logvault"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/usagelog"
 )
@@ -42,6 +43,7 @@ func runAuditUsage(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	journalPath := fs.String("journal", "", "decision journal path (default: the guard audit journal default path)")
 	usageLogPathFlag := fs.String("usage-log", "", "usage log path (default: the usage log default path)")
+	vaultDirFlag := fs.String("vault", "", "log-vault directory folded into the vault section (default: $FAK_LOG_VAULT, else <repo-parent>/fak-log-vault)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -72,6 +74,7 @@ func runAuditUsage(stdout, stderr io.Writer, argv []string) int {
 	in.CacheValue = mergeCacheValueInputs(roots)
 	in.LoopLedger = readLoopLedgerInput(defaultLoopLedger())
 	in.DispatchRuns = mergeDispatchRunsInputs(roots)
+	in.Vault = readVaultInput(resolveAuditVaultDir(*vaultDirFlag, roots))
 
 	report := auditusage.Fold(in)
 
@@ -194,6 +197,69 @@ func readLoopLedgerInput(path string) auditusage.LoopLedgerInput {
 	return in
 }
 
+// resolveAuditVaultDir picks the box's log-vault directory for the vault section
+// (#2455): an explicit -vault flag wins, else the same resolution the `fak
+// logvault` verbs and the /metrics provider use ($FAK_LOG_VAULT, then the
+// repo-parent sibling), anchored on the first --root so the audit-usage answer
+// matches where `fak logvault du` looks. The vault is box-scoped (one per box, a
+// sibling of the repo), so only the first root anchors it.
+func resolveAuditVaultDir(flagVal string, roots []string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	anchor := "."
+	if len(roots) > 0 && roots[0] != "" {
+		anchor = roots[0]
+	}
+	if abs, err := filepath.Abs(anchor); err == nil {
+		anchor = abs
+	}
+	return resolveLogvaultDir(anchor)
+}
+
+// readVaultInput folds the box's log-vault manifest (logvault.Footprint) plus a
+// bounded Verify pass into the shell's VaultInput, keeping every disk read, hash,
+// and clock HERE — never inside the pure auditusage.Fold — the same honesty fence
+// the other sinks use. A vault with no manifest is the valid-empty posture
+// (Present=false), not an error: a box that never captured legitimately has none.
+// The mirror re-hash is bounded to logvaultMetricsVerifySample (the same knob the
+// /metrics provider uses) so a large vault stays cheap to audit; a mirror outside
+// the sample is still caught by the periodic full `fak logvault verify`. A broken
+// manifest chain or a mirror mismatch surfaces the recovered footprint AND a
+// chain-broken signal so a silent backup corruption cannot hide behind the fold.
+func readVaultInput(vaultDir string) auditusage.VaultInput {
+	manifestPath := filepath.Join(vaultDir, logvault.ManifestName)
+	in := auditusage.VaultInput{Path: manifestPath}
+	if _, err := os.Stat(manifestPath); err != nil {
+		return in // absent: a box that never captured, not an error
+	}
+	in.Present = true
+	rows, err := logvault.ReadManifestRows(manifestPath)
+	if err != nil {
+		in.ChainBroken = true
+		in.ChainErr = err.Error()
+		return in
+	}
+	fps := logvault.Footprint(rows)
+	in.Sources = len(fps)
+	for _, fp := range fps {
+		in.Files += fp.Files
+		in.Rows += fp.ManifestRows
+		in.Errors += fp.Errors
+	}
+	in.Bytes = logvault.TotalBytes(fps)
+	in.LastCaptureNano = logvault.NewestCaptureUnixNano(fps)
+	v := &logvault.Vault{Dir: vaultDir}
+	if _, checked, problems, verr := v.Verify(logvaultMetricsVerifySample); verr != nil {
+		in.ChainBroken = true
+		in.ChainErr = verr.Error()
+	} else {
+		in.VerifyChecked = checked
+		in.VerifyMismatches = len(problems)
+	}
+	return in
+}
+
 func renderAuditUsage(rep auditusage.Report) string {
 	var b []byte
 	add := func(format string, args ...any) {
@@ -217,5 +283,14 @@ func renderAuditUsage(rep auditusage.Report) string {
 	add("cache (%s):    sessions=%d\n", rep.Cache.Basis, rep.Cache.Sessions)
 	add("gateway (%s):  sessions=%d\n", rep.Gateway.Basis, rep.Gateway.Sessions)
 	add("usage (%s):    total=%d errors=%d\n", rep.Usage.Basis, rep.Usage.Total, rep.Usage.Errors)
+	chainNote := ""
+	if rep.Vault.ChainBroken {
+		chainNote = " chain=BROKEN"
+	}
+	add("vault (%s):    present=%v last-capture=%s bytes=%s sources=%d files=%d rows=%d errors=%d verify-mismatches=%d%s\n",
+		rep.Vault.Basis, rep.Vault.Present,
+		lastCaptureLV(rep.GeneratedAt, rep.Vault.LastCaptureNano), fmtBytesLV(rep.Vault.Bytes),
+		rep.Vault.Sources, rep.Vault.Files, rep.Vault.Rows, rep.Vault.Errors,
+		rep.Vault.VerifyMismatches, chainNote)
 	return string(b)
 }

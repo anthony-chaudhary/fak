@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/auditusage"
+	"github.com/anthony-chaudhary/fak/internal/logvault"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/usagelog"
 )
@@ -31,6 +32,7 @@ func TestRunAuditUsage_AllAbsent(t *testing.T) {
 		"--root", root,
 		"--journal", journalPath,
 		"--usage-log", usagePath,
+		"--vault", filepath.Join(root, "missing-vault"),
 		"--json",
 	})
 	if code != 0 {
@@ -101,6 +103,7 @@ func TestRunAuditUsage_RealFixtures(t *testing.T) {
 		"--root", root,
 		"--journal", journalPath,
 		"--usage-log", usagePath,
+		"--vault", filepath.Join(root, "missing-vault"),
 		"--json",
 	})
 	if code != 0 {
@@ -128,7 +131,7 @@ func TestRunAuditUsage_RealFixtures(t *testing.T) {
 	}
 	for _, s := range rep.Sinks {
 		switch s.Kind {
-		case auditusage.SinkDecisionJournal, auditusage.SinkDispatchRuns:
+		case auditusage.SinkDecisionJournal, auditusage.SinkDispatchRuns, auditusage.SinkVault:
 			if s.Present {
 				t.Errorf("sink %s: want absent (no fixture written), got present", s.Kind)
 			}
@@ -193,6 +196,7 @@ func TestRunAuditUsage_ChainBroken_SurfacesFinding(t *testing.T) {
 		"--root", root,
 		"--journal", journalPath,
 		"--usage-log", usagePath,
+		"--vault", filepath.Join(root, "missing-vault"),
 		"--json",
 	})
 	if code != 0 {
@@ -227,12 +231,132 @@ func TestRunAuditUsage_TextOutput(t *testing.T) {
 		"--root", root,
 		"--journal", filepath.Join(root, "missing-guard-audit.jsonl"),
 		"--usage-log", filepath.Join(root, "missing-usage.jsonl"),
+		"--vault", filepath.Join(root, "missing-vault"),
 	})
 	if code != 0 {
 		t.Fatalf("runAuditUsage exit=%d, stderr=%s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "fak audit usage") {
 		t.Errorf("want a human-readable header, got:\n%s", stdout.String())
+	}
+}
+
+// TestRunAuditUsage_VaultSection drives `fak audit usage` against a real captured
+// vault fixture and asserts the vault section folds the WITNESSED footprint (rows,
+// bytes, files, last-capture) and reports the vault sink present + chain verified —
+// the "is my backup current?" answer #2455 puts in the cross-journal rollup.
+func TestRunAuditUsage_VaultSection(t *testing.T) {
+	root := t.TempDir()
+	srcDir := t.TempDir()
+	if err := writeFileLV(filepath.Join(srcDir, "loops.jsonl"), "row1\nrow2\n"); err != nil {
+		t.Fatal(err)
+	}
+	vaultDir := t.TempDir()
+	v := &logvault.Vault{Dir: vaultDir, Sources: []logvault.Source{{ID: "s", Root: srcDir}}}
+	if _, err := v.Capture(); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	t.Setenv("FAK_LOOP_LEDGER", filepath.Join(root, "missing-loops.jsonl"))
+
+	args := []string{
+		"--root", root,
+		"--journal", filepath.Join(root, "missing-guard-audit.jsonl"),
+		"--usage-log", filepath.Join(root, "missing-usage.jsonl"),
+		"--vault", vaultDir,
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runAuditUsage(&stdout, &stderr, append(append([]string{}, args...), "--json")); code != 0 {
+		t.Fatalf("runAuditUsage exit=%d, stderr=%s", code, stderr.String())
+	}
+	var rep auditusage.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, stdout.String())
+	}
+	if !rep.Vault.Present || rep.Vault.Basis != "witnessed" {
+		t.Fatalf("vault rollup: want present+witnessed after a real capture, got %+v", rep.Vault)
+	}
+	if rep.Vault.Sources != 1 || rep.Vault.Files != 1 || rep.Vault.Bytes != 10 {
+		t.Errorf("vault footprint: want sources=1 files=1 bytes=10, got %+v", rep.Vault)
+	}
+	if rep.Vault.Rows < 1 || rep.Vault.LastCaptureNano <= 0 {
+		t.Errorf("vault fold: want a witnessed row + last-capture timestamp, got %+v", rep.Vault)
+	}
+	if rep.Vault.VerifyMismatches != 0 || rep.Vault.ChainBroken {
+		t.Errorf("a freshly captured vault must verify clean, got %+v", rep.Vault)
+	}
+	var vaultSinkOK bool
+	for _, s := range rep.Sinks {
+		if s.Kind == auditusage.SinkVault {
+			vaultSinkOK = s.Present && s.Chain == auditusage.ChainVerified
+		}
+	}
+	if !vaultSinkOK {
+		t.Errorf("vault sink: want present+verified, got sinks=%+v", rep.Sinks)
+	}
+	if len(rep.Findings) != 0 {
+		t.Errorf("want no findings over a clean vault, got %+v", rep.Findings)
+	}
+
+	// The human-readable render carries the vault line with its WITNESSED footprint.
+	var textOut, textErr bytes.Buffer
+	if code := runAuditUsage(&textOut, &textErr, args); code != 0 {
+		t.Fatalf("runAuditUsage text exit=%d, stderr=%s", code, textErr.String())
+	}
+	got := textOut.String()
+	if !strings.Contains(got, "vault (witnessed):") || !strings.Contains(got, "present=true") || !strings.Contains(got, "bytes=10B") {
+		t.Errorf("text render missing the witnessed vault section:\n%s", got)
+	}
+}
+
+// TestRunAuditUsage_VaultForcedMismatchSurfaces proves the "is the vault intact?"
+// half: a forced mirror corruption surfaces as a CHAIN_BROKEN vault finding rather
+// than hiding behind the fold — a silent backup corruption cannot stay silent.
+func TestRunAuditUsage_VaultForcedMismatchSurfaces(t *testing.T) {
+	root := t.TempDir()
+	srcDir := t.TempDir()
+	if err := writeFileLV(filepath.Join(srcDir, "loops.jsonl"), "row1\nrow2\n"); err != nil {
+		t.Fatal(err)
+	}
+	vaultDir := t.TempDir()
+	v := &logvault.Vault{Dir: vaultDir, Sources: []logvault.Source{{ID: "s", Root: srcDir}}}
+	if _, err := v.Capture(); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	// Force a mirror mismatch: overwrite the captured mirror so its re-hash no
+	// longer matches the manifest — the corruption the issue says must surface.
+	mirror := filepath.Join(vaultDir, "by-source", "s", "loops.jsonl")
+	if err := os.WriteFile(mirror, []byte("CORRUPTED"), 0o644); err != nil {
+		t.Fatalf("tamper mirror: %v", err)
+	}
+	t.Setenv("FAK_LOOP_LEDGER", filepath.Join(root, "missing-loops.jsonl"))
+
+	var stdout, stderr bytes.Buffer
+	code := runAuditUsage(&stdout, &stderr, []string{
+		"--root", root,
+		"--journal", filepath.Join(root, "missing-guard-audit.jsonl"),
+		"--usage-log", filepath.Join(root, "missing-usage.jsonl"),
+		"--vault", vaultDir,
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runAuditUsage exit=%d, stderr=%s", code, stderr.String())
+	}
+	var rep auditusage.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, stdout.String())
+	}
+	if rep.Vault.VerifyMismatches < 1 && !rep.Vault.ChainBroken {
+		t.Fatalf("forced mismatch must surface in the vault rollup, got %+v", rep.Vault)
+	}
+	var found bool
+	for _, f := range rep.Findings {
+		if f.Kind == "CHAIN_BROKEN" && f.Sink == auditusage.SinkVault {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a CHAIN_BROKEN finding for the vault after a forced mismatch, got %+v", rep.Findings)
 	}
 }
 

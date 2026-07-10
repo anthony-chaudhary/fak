@@ -17,8 +17,8 @@ func TestFold_AllAbsent(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	rep := Fold(Input{Now: now})
 
-	if len(rep.Sinks) != 6 {
-		t.Fatalf("want 6 sinks, got %d: %+v", len(rep.Sinks), rep.Sinks)
+	if len(rep.Sinks) != 7 {
+		t.Fatalf("want 7 sinks, got %d: %+v", len(rep.Sinks), rep.Sinks)
 	}
 	for _, s := range rep.Sinks {
 		if s.Present {
@@ -269,4 +269,59 @@ func TestFold_SinksAlwaysSorted(t *testing.T) {
 			t.Fatalf("sinks not sorted at index %d: %s >= %s", i, rep.Sinks[i-1].Kind, rep.Sinks[i].Kind)
 		}
 	}
+}
+
+// TestFold_VaultRollup covers the vault sink branch (#2455) at the pure-fold layer:
+// an intact backup folds its WITNESSED footprint with no finding; a mirror mismatch
+// over a sound chain is still NOT intact (a CHAIN_BROKEN finding); a broken manifest
+// chain surfaces its reason. WITNESSED basis is fixed regardless of chain state.
+func TestFold_VaultRollup(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	capture := now.Add(-2 * time.Hour).UnixNano()
+
+	// Present + verified: a real backup, intact — footprint mirrored, no finding.
+	rep := Fold(Input{Now: now, Vault: VaultInput{
+		Path: "/x/vault/manifest.jsonl", Present: true,
+		Sources: 3, Files: 12, Bytes: 4096, Rows: 20, Errors: 1,
+		LastCaptureNano: capture, VerifyChecked: 12, VerifyMismatches: 0,
+	}})
+	if rep.Vault.Basis != "witnessed" {
+		t.Errorf("vault basis: want witnessed, got %q", rep.Vault.Basis)
+	}
+	if !rep.Vault.Present || rep.Vault.Sources != 3 || rep.Vault.Files != 12 || rep.Vault.Bytes != 4096 ||
+		rep.Vault.Rows != 20 || rep.Vault.Errors != 1 || rep.Vault.LastCaptureNano != capture {
+		t.Errorf("vault rollup did not mirror the input footprint: %+v", rep.Vault)
+	}
+	if f := findingForSink(rep, SinkVault); f != nil {
+		t.Errorf("an intact vault must not raise a finding, got %+v", f)
+	}
+	for _, s := range rep.Sinks {
+		if s.Kind == SinkVault && s.Chain != ChainVerified {
+			t.Errorf("vault sink: want verified, got %s", s.Chain)
+		}
+	}
+
+	// Verify mismatches over a sound chain are still NOT intact: a CHAIN_BROKEN finding.
+	mism := Fold(Input{Now: now, Vault: VaultInput{Path: "/x/vault/manifest.jsonl", Present: true, VerifyMismatches: 2}})
+	if f := findingForSink(mism, SinkVault); f == nil || f.Kind != "CHAIN_BROKEN" {
+		t.Errorf("a mirror mismatch must surface as a CHAIN_BROKEN vault finding, got %+v", mism.Findings)
+	}
+
+	// A broken manifest chain surfaces its ChainErr as the finding reason.
+	broken := Fold(Input{Now: now, Vault: VaultInput{Path: "/x/vault/manifest.jsonl", Present: true, ChainBroken: true, ChainErr: "manifest: torn chain at seq 9"}})
+	if f := findingForSink(broken, SinkVault); f == nil || f.Reason != "manifest: torn chain at seq 9" {
+		t.Errorf("a broken vault chain must surface its reason, got %+v", broken.Findings)
+	}
+	if !broken.Vault.ChainBroken {
+		t.Errorf("vault rollup must carry the chain-broken flag through the fold")
+	}
+}
+
+func findingForSink(rep Report, sink SinkKind) *Finding {
+	for i := range rep.Findings {
+		if rep.Findings[i].Sink == sink {
+			return &rep.Findings[i]
+		}
+	}
+	return nil
 }
