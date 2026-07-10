@@ -106,6 +106,20 @@ func (s WatchdogDriveState) HoldReason() string {
 	}
 }
 
+// DriveCarry is the resume-keyspace projection of state that must survive an
+// OS-process relaunch. Scalar fields keep this package independent of session.
+type DriveCarry struct {
+	TurnsLeft           int64  `json:"turns_left,omitempty"`
+	TokensLeft          int64  `json:"tokens_left,omitempty"`
+	ContextTokensLeft   int64  `json:"context_tokens_left,omitempty"`
+	SpendMicroCentsLeft int64  `json:"spend_micro_cents_left,omitempty"`
+	TimeLeftNanos       int64  `json:"time_left_nanos,omitempty"`
+	Generation          int    `json:"generation,omitempty"`
+	ObjectivePinID      string `json:"objective_pin_id,omitempty"`
+	ObjectiveText       string `json:"objective_text,omitempty"`
+	ObjectiveDigest     string `json:"objective_digest,omitempty"`
+}
+
 // DriveStateRow is one append-only line of the resume_drivestate.jsonl store, reduced
 // to the typed facts the fold reads. The shell parses the JSONL (jsonlledger.Parse);
 // unknown fields are dropped, not trusted. TS is carried for humans/audit only — the
@@ -121,6 +135,8 @@ type DriveStateRow struct {
 	Reason string `json:"reason,omitempty"`
 	// Via names what wrote the row (e.g. "fak resume hold"), for provenance.
 	Via string `json:"via,omitempty"`
+	// Carry is optional so legacy hold-only rows decode unchanged.
+	Carry *DriveCarry `json:"carry,omitempty"`
 }
 
 // FoldDriveStates folds the append-only rows into the one current drive-state per
@@ -141,6 +157,20 @@ func FoldDriveStates(rows []DriveStateRow) map[string]WatchdogDriveState {
 			continue // unknown token: leave any prior state for this session intact
 		}
 		out[sid] = st
+	}
+	return out
+}
+
+// FoldDriveCarry returns the latest explicit carry for each session. Hold-only
+// rows do not clobber a prior carry, and carry-only rows do not clobber holds.
+func FoldDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
+	out := make(map[string]DriveCarry)
+	for _, row := range rows {
+		sid := strings.TrimSpace(row.Session)
+		if sid == "" || row.Carry == nil {
+			continue
+		}
+		out[sid] = *row.Carry
 	}
 	return out
 }
