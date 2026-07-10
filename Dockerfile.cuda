@@ -12,15 +12,9 @@
 #       --engine inkernel --backend cuda
 #
 # Compute-capability floor: the builder compiles internal/compute's CUDA kernels
-# for ONE arch via --build-arg CUDA_ARCH (default sm_89, Ada/L4). Pass the arch
-# that matches the rented card — sm_80 (A100), sm_90 (H100/H200), or sm_100
-# (B200/GB200) — the same four arches internal/compute/build_cuda.sh and
-# docs/cuda-dev.md advertise:
-#   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
-# This image does NOT support sm_120 (RTX 50-series / consumer Blackwell):
-# internal/compute has no sm_120 kernel variant today, so rent a datacenter card
-# (A100/L4/H100/H200/B200/GB200), not a 50-series board — it would either fail to
-# bind or run a mismatched-arch kernel.
+# for ONE arch via --build-arg CUDA_ARCH (default sm_89). The authoritative set
+# is internal/compute/cuda_arch.txt and this image validates the argument against it:
+#   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_120 -t fak:cuda .
 #
 # CUDA 12.6 is pinned to match the toolchain internal/compute/setup_cuda_wsl.sh
 # and .github/workflows/cuda-build.yml already build and test against, so the
@@ -47,6 +41,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /src
 COPY . .
+RUN grep -Fxq ${CUDA_ARCH} internal/compute/cuda_arch.txt || (echo unsupported CUDA_ARCH ${CUDA_ARCH}; cat internal/compute/cuda_arch.txt; exit 2)
 
 # Compile the kernels with build_cuda.sh's exact flags (same nvcc invocation the CI
 # nvcc job runs), then cgo-link the version-stamped -tags cuda binary against the

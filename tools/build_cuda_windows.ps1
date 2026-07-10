@@ -90,6 +90,10 @@ function Resolve-SignTool {
 $nvcc = Resolve-Nvcc -Root $CudaPath
 if (-not $CudaPath) { $CudaPath = Split-Path -Parent (Split-Path -Parent $nvcc) }  # ...\bin\nvcc -> root
 if ($Arch -notmatch '^sm_') { $Arch = "sm_$Arch" }
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$ArchFile = Join-Path $RepoRoot 'internal\compute\cuda_arch.txt'
+$SupportedArch = @(Get-Content -LiteralPath $ArchFile | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($Arch -notin $SupportedArch) { throw "unsupported CUDA arch '$Arch'; choose one from ${ArchFile}: $($SupportedArch -join ', ')" }
 Write-Host "[cuda-win] CUDA_PATH=$CudaPath  nvcc=$nvcc  arch=$Arch"
 
 $cudaInc = Join-Path $CudaPath 'include'

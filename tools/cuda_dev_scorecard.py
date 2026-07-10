@@ -30,7 +30,7 @@ consolidated dev guide — never by writing prose.
                            covered by the full-forward witness, a heavy op by its own test
   BUILD    — reproducible, one-command, portable across the host/arch matrix
     build_portable         the build scripts cover the host matrix (WSL · datacenter/DGX ·
-                           GCP DLVM · native Windows) and the arch matrix (sm_80/89/90/100)
+                           GCP DLVM · native Windows) and the declared arch matrix
                            in an EXECUTABLE context, not just a comment
     toolchain_pinned       the CUDA toolchain is pinned (setup_cuda_wsl.sh) + the arch
                            override is documented
@@ -91,6 +91,7 @@ HEADER = cuda_abi_parity.HEADER
 KERNELS = cuda_abi_parity.KERNELS
 BINDING = cuda_abi_parity.BINDINGS[0]  # primary C binding (cuda.go); ABI tool now spans a tuple
 BUILD_SH = "internal/compute/build_cuda.sh"
+CUDA_ARCH_FILE = "internal/compute/cuda_arch.txt"
 BUILD_PS1 = "tools/build_cuda_windows.ps1"
 SETUP_SH = "internal/compute/setup_cuda_wsl.sh"
 ABI_TOOL = "tools/cuda_abi_parity.py"
@@ -255,7 +256,7 @@ def kpi_cpuref_parity_coverage(uncovered: list[str]) -> dict[str, Any]:
 def kpi_build_portable(host_missing: list[str], arch_executable: bool,
                        arch_named: list[str]) -> dict[str, Any]:
     """The build must be reproducible across the host matrix (WSL · datacenter/DGX · GCP
-    DLVM · native Windows) and the arch matrix (sm_80/89/90/100), with the arch in an
+    DLVM · native Windows) and the declared arch matrix, with the arch in an
     EXECUTABLE context (the -arch="$ARCH" nvcc line + the FAK_CUDA_ARCH override), not just a
     comment. Each missing host platform is one unit; an arch list that never reaches nvcc is
     one unit (a paste-to-pass guard)."""
@@ -633,7 +634,8 @@ def gather(root: Path) -> list[dict[str, Any]]:
     if not present(BUILD_PS1):
         host_missing.append("native Windows")
     arch_executable = _has(build_sh, "FAK_CUDA_ARCH") and bool(re.search(r'-arch="?\$?\{?ARCH', build_sh))
-    arch_named = [a for a in ("sm_80", "sm_89", "sm_90", "sm_100") if not _has(build_sh, a)]
+    arch_set = [line.strip() for line in _safe_read(root / CUDA_ARCH_FILE).splitlines() if line.strip()]
+    arch_named = [] if arch_set and _has(build_sh, "cuda_arch.txt") else arch_set
     version_pinned = bool(re.search(r"cuda-nvcc\s*=\s*\d", setup_sh)) or bool(re.search(r"\b12\.\d\b", setup_sh)) and _has(setup_sh, "nvcc")
     arch_override = _has(build_sh, "FAK_CUDA_ARCH")
     # task_runner: targets that exist AND delegate to the real scripts.

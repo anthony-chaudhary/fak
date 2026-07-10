@@ -18,6 +18,13 @@ PKG_DIR="$SCRIPT_DIR"                 # internal/compute
 MOD_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # fak/
 
 cmd="${1:-test}"
+ARCH_FILE="$SCRIPT_DIR/cuda_arch.txt"
+ARCH="${FAK_CUDA_ARCH:-sm_89}"
+case "$ARCH" in sm_*) ;; *) ARCH="sm_$ARCH";; esac
+if ! grep -Fxq "$ARCH" "$ARCH_FILE"; then
+  echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: $(tr '\n' ' ' < "$ARCH_FILE")" >&2
+  exit 2
+fi
 if [ "$cmd" = "check" ]; then
   PY="${PYTHON:-}"
   if [ -z "$PY" ]; then
@@ -162,8 +169,6 @@ fi
 
 # GPU arch: default sm_89 (Ada / L4), override via FAK_CUDA_ARCH for A100 (sm_80),
 # H100/H200 (sm_90), or B200/GB200 (sm_100). Accept either "89" or "sm_89".
-ARCH="${FAK_CUDA_ARCH:-sm_89}"
-case "$ARCH" in sm_*) ;; *) ARCH="sm_$ARCH";; esac
 echo "[cuda] nvcc compile kernels ($ARCH) ..."
 ( cd "$PKG_DIR"
   "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \

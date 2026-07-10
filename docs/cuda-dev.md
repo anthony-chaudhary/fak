@@ -51,9 +51,9 @@ any of it: `make cuda-check` runs without a toolchain.
   [`tools/build_cuda_windows.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/build_cuda_windows.ps1), which ports the build off
    the WSL workaround and code-signs the binary (on Windows, WDAC blocks unsigned fork/exec).
 
-The GPU arch defaults to `sm_89`; override with `FAK_CUDA_ARCH=sm_80` for an older datacenter
-card, or `sm_90` / `sm_100` for a newer one (the four advertised arches are `sm_80`, `sm_89`,
-`sm_90`, `sm_100`).
+The GPU arch defaults to `sm_89`; override with `FAK_CUDA_ARCH=<arch>`. The authoritative
+supported set is [`internal/compute/cuda_arch.txt`](../internal/compute/cuda_arch.txt), which every
+build entry point validates before invoking `nvcc`.
 
 ## 2. Author — edit, then gate locally (no GPU)
 
