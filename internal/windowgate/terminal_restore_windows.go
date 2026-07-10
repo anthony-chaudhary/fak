@@ -23,9 +23,16 @@ var (
 	procIsWindowVisible          = user32.NewProc("IsWindowVisible")
 	procShowWindowAsync          = user32.NewProc("ShowWindowAsync")
 	procSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
+	procGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
+	procGetConsoleWindow         = kernel32.NewProc("GetConsoleWindow")
 	procCreateToolhelp32Snapshot = kernel32.NewProc("CreateToolhelp32Snapshot")
 	procProcess32First           = kernel32.NewProc("Process32FirstW")
 	procProcess32Next            = kernel32.NewProc("Process32NextW")
+)
+
+var (
+	resolveTerminalWindow         = terminalWindow
+	restoreResolvedTerminalWindow = restoreTerminalWindow
 )
 
 type processEntry32 struct {
@@ -46,16 +53,36 @@ type processEntry32 struct {
 // focus repair, but works when fak execs Codex directly and therefore bypasses functions in
 // the user's profile.
 func RestoreTerminalWindow() bool {
+	return restoreTerminalWindow(terminalWindow())
+}
+
+// terminalWindow resolves the attended terminal once. Classic conhost windows are
+// normally owned by the current process or one of its ancestors. Windows Terminal's
+// visible HWND is different: the console client talks through ConPTY and the HWND is
+// owned by WindowsTerminal.exe, which is not in that ancestry. In that case the
+// foreground HWND at launch is the only stable attended-window identity available.
+func terminalWindow() uintptr {
 	for _, pid := range ancestorPIDs(uint32(os.Getpid())) {
-		hwnd := firstVisibleWindowForPID(pid)
-		if hwnd == 0 {
-			continue
+		if hwnd := firstVisibleWindowForPID(pid); hwnd != 0 {
+			return hwnd
 		}
-		procShowWindowAsync.Call(hwnd, swRestore)
-		procSetForegroundWindow.Call(hwnd)
-		return true
 	}
-	return false
+	if hwnd, _, _ := procGetConsoleWindow.Call(); hwnd != 0 {
+		if visible, _, _ := procIsWindowVisible.Call(hwnd); visible != 0 {
+			return hwnd
+		}
+	}
+	hwnd, _, _ := procGetForegroundWindow.Call()
+	return hwnd
+}
+
+func restoreTerminalWindow(hwnd uintptr) bool {
+	if hwnd == 0 {
+		return false
+	}
+	procShowWindowAsync.Call(hwnd, swRestore)
+	procSetForegroundWindow.Call(hwnd)
+	return true
 }
 
 // StartTerminalRestorePulse repeatedly restores the owning terminal for a short startup
@@ -67,18 +94,22 @@ func StartTerminalRestorePulse(duration, interval time.Duration) {
 	if interval <= 0 {
 		interval = 500 * time.Millisecond
 	}
+	// Pin the HWND before the child can steal focus or minimize the terminal. Re-resolving
+	// on every tick would select whichever unrelated window became foreground after the
+	// terminal disappeared, making the pulse permanently miss its intended target.
+	hwnd := resolveTerminalWindow()
 	go func() {
 		deadline := time.NewTimer(duration)
 		defer deadline.Stop()
 		tick := time.NewTicker(interval)
 		defer tick.Stop()
-		RestoreTerminalWindow()
+		restoreResolvedTerminalWindow(hwnd)
 		for {
 			select {
 			case <-deadline.C:
 				return
 			case <-tick.C:
-				RestoreTerminalWindow()
+				restoreResolvedTerminalWindow(hwnd)
 			}
 		}
 	}()
