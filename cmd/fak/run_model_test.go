@@ -32,20 +32,20 @@ func TestRunDispatchRule(t *testing.T) {
 }
 
 // TestRunSampleOpts checks that only flags the user actually set become SampleOpts:
-// max-tokens is always present; temp/top-p/top-k are no-ops at their zero default so
-// an unset temperature does not silently force greedy via an explicit 0.
+// max-tokens is always present; sampling and penalty flags are no-ops at their zero
+// defaults so an unset value does not silently override the planner.
 func TestRunSampleOpts(t *testing.T) {
 	// Defaults: only max-tokens.
-	if got := len(runSampleOpts(512, 0, 0, 0)); got != 1 {
+	if got := len(runSampleOpts(512, 0, 0, 0, 0, 0)); got != 1 {
 		t.Errorf("default opts = %d; want 1 (max-tokens only)", got)
 	}
-	// All set: four opts.
-	if got := len(runSampleOpts(256, 0.7, 0.95, 40)); got != 4 {
-		t.Errorf("all-set opts = %d; want 4", got)
+	// All set: six opts.
+	if got := len(runSampleOpts(256, 0.7, 0.95, 40, 0.2, 1.5)); got != 6 {
+		t.Errorf("all-set opts = %d; want 6", got)
 	}
 	// The opts must actually apply to a SampleParams without panicking.
 	var sp agent.SampleParams
-	for _, o := range runSampleOpts(128, 0.5, 0, 0) {
+	for _, o := range runSampleOpts(128, 0.5, 0, 0, 0.2, 1.5) {
 		o(&sp)
 	}
 	if sp.MaxTokens == nil || *sp.MaxTokens != 128 {
@@ -56,6 +56,12 @@ func TestRunSampleOpts(t *testing.T) {
 	}
 	if sp.TopP != nil {
 		t.Errorf("TopP should be unset (top-p=0), got %v", *sp.TopP)
+	}
+	if sp.FrequencyPenalty == nil || *sp.FrequencyPenalty != 0.2 {
+		t.Errorf("FrequencyPenalty not applied: %v", sp.FrequencyPenalty)
+	}
+	if sp.PresencePenalty == nil || *sp.PresencePenalty != 1.5 {
+		t.Errorf("PresencePenalty not applied: %v", sp.PresencePenalty)
 	}
 }
 

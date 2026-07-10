@@ -45,6 +45,8 @@ func runChatModel(argv []string) {
 	temp := fs.Float64("temp", 0, "sampling temperature (0 = greedy/deterministic)")
 	topP := fs.Float64("top-p", 0, "nucleus-sampling cutoff (0 = off)")
 	topK := fs.Int("top-k", 0, "top-k truncation (0 = full distribution)")
+	frequencyPenalty := fs.Float64("frequency-penalty", 0, "penalize tokens in proportion to their generated count (0 = off)")
+	presencePenalty := fs.Float64("presence-penalty", 0, "penalize tokens already generated this turn (0 = off)")
 	// fak's core value-add — KV-prefix reuse — is invisible by default everywhere else
 	// (#333: only --debug-stats or /metrics show it). On the daemon-less `fak run` front
 	// door we print a one-line WITNESSED cache-value summary per turn to STDERR (never
@@ -65,7 +67,7 @@ func runChatModel(argv []string) {
 
 	planner := buildRunPlanner(ctx, modelRef, *backendName)
 
-	opts := runSampleOpts(*maxTokens, *temp, *topP, *topK)
+	opts := runSampleOpts(*maxTokens, *temp, *topP, *topK, *frequencyPenalty, *presencePenalty)
 	if prompt != "" {
 		// One-shot: answer and exit.
 		runChatTurn(ctx, planner, *system, nil, prompt, opts, !*quiet)
@@ -171,10 +173,10 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string) *agent.I
 	return agent.NewInKernelPlanner(model, tok, modelRef, q4k, backend, false)
 }
 
-// runSampleOpts folds the CLI sampling flags into planner SampleOpts. Temperature /
-// top-p / top-k take pointers so "unset" (the zero default) stays a no-op rather than
-// forcing greedy — only a value the user actually passed reaches the sampler.
-func runSampleOpts(maxTokens int, temp, topP float64, topK int) []agent.SampleOpt {
+// runSampleOpts folds the CLI sampling flags into planner SampleOpts. Sampling and
+// repetition controls stay no-ops at their zero defaults, so only a value the user
+// actually passed reaches the sampler.
+func runSampleOpts(maxTokens int, temp, topP float64, topK int, frequencyPenalty, presencePenalty float64) []agent.SampleOpt {
 	opts := []agent.SampleOpt{agent.WithMaxTokens(maxTokens)}
 	if temp > 0 {
 		t := temp
@@ -187,6 +189,14 @@ func runSampleOpts(maxTokens int, temp, topP float64, topK int) []agent.SampleOp
 	if topK > 0 {
 		k := topK
 		opts = append(opts, agent.WithTopK(&k))
+	}
+	if frequencyPenalty != 0 {
+		p := frequencyPenalty
+		opts = append(opts, agent.WithFrequencyPenalty(&p))
+	}
+	if presencePenalty != 0 {
+		p := presencePenalty
+		opts = append(opts, agent.WithPresencePenalty(&p))
 	}
 	return opts
 }
