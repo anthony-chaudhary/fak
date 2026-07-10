@@ -91,6 +91,14 @@ type SelfObservation struct {
 // operator `resume status` table can never tell a worker a different story than they tell a
 // human. Total over any input; empty history returns the fail-closed floor.
 func FoldSelfObservation(f SelfFacts) SelfObservation {
+	// Normalize the public <=0 sentinel once before invoking sibling folds.
+	// RetryGateContinuity's dynamic earned budget is the authoritative default;
+	// FoldResumeState must receive that same resolved cap rather than interpreting
+	// zero independently as DefaultMaxResumeAttempts.
+	maxAttempts := f.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = EarnedResumeBudget(f.History)
+	}
 	attempts := CountAttempts(f.History)
 	settled := false
 	for _, a := range f.History {
@@ -99,10 +107,10 @@ func FoldSelfObservation(f SelfFacts) SelfObservation {
 			break
 		}
 	}
-	gate := RetryGateContinuity(f.History, f.Outcome, f.MaxAttempts, f.Continuity)
+	gate := RetryGateContinuity(f.History, f.Outcome, maxAttempts, f.Continuity)
 	state := FoldResumeState(ResumeFacts{
 		Attempts:        attempts,
-		MaxAttempts:     f.MaxAttempts,
+		MaxAttempts:     maxAttempts,
 		OperatorSettled: settled,
 		NewTurns:        f.NewTurns,
 		Outcome:         f.Outcome,

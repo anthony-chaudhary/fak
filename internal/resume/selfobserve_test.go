@@ -1,6 +1,9 @@
 package resume
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 // launch is a fired-launch ledger row at unix t; bookkeeping/settled rows are built inline.
 func launchAt(t int64) Attempt { return Attempt{UnixSeconds: t, Phase: "launched"} }
@@ -162,5 +165,25 @@ func TestFoldSelfObservation(t *testing.T) {
 				t.Fatalf("FoldSelfObservation mismatch\n got: %+v\nwant: %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFoldSelfObservationDefaultMaxAttemptsIsConsistent(t *testing.T) {
+	history := []Attempt{{UnixSeconds: 1}, {UnixSeconds: 2}, {UnixSeconds: 3}, {UnixSeconds: 4}}
+	got := FoldSelfObservation(SelfFacts{
+		Session:     "s",
+		History:     history,
+		Outcome:     OutcomeRecoverable,
+		MaxAttempts: 0,
+	})
+	if got.RetryBlocked {
+		t.Fatalf("RetryBlocked = true, want earned-budget retry open; observation=%+v", got)
+	}
+	if got.State != ResumeReStranded {
+		t.Fatalf("State = %q, want %q when the same earned cap keeps retry open", got.State, ResumeReStranded)
+	}
+	wantReason := "last resume failed recoverably; attempt 5/" + strconv.Itoa(got.EarnedBudget)
+	if got.RetryReason != wantReason {
+		t.Fatalf("RetryReason = %q, want %q", got.RetryReason, wantReason)
 	}
 }
