@@ -396,6 +396,9 @@ type Config struct {
 	// a guard pushed off-host with --addr keeps it false. Scoped to 400 today (the
 	// reported case); 401/403 stay generic — see the field's use site.
 	ExposeUpstreamErrorDetail bool
+	// UpstreamBadRequestNotify receives the same scrubbed, bounded provider 400 detail
+	// exposed to a trusted local child, for persistence in an operator-side audit journal.
+	UpstreamBadRequestNotify func(detail string)
 	// VDSO toggles the kernel's dedup fast path for fak_syscall.
 	VDSO bool
 	// Invalidation selects the process-global vDSO tier-2 invalidation granularity for
@@ -1022,6 +1025,7 @@ type Server struct {
 	// path (fak guard, loopback-bound); FALSE (the default) keeps the no-leak
 	// #82/#346 boundary the externally-exposed serve path relies on. See Config.
 	exposeUpstreamErrorDetail bool
+	upstreamBadRequestNotify  func(detail string)
 	version                   string
 	logf                      func(format string, args ...any)
 	debugStatsf               func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
@@ -1650,6 +1654,7 @@ func New(cfg Config) (*Server, error) {
 		model:                      model,
 		requireKey:                 cfg.RequireKey,
 		exposeUpstreamErrorDetail:  cfg.ExposeUpstreamErrorDetail,
+		upstreamBadRequestNotify:   cfg.UpstreamBadRequestNotify,
 		version:                    version,
 		logf:                       logf,
 		debugStatsf:                cfg.DebugStatsf,

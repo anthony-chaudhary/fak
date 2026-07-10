@@ -547,3 +547,16 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 	must(err)
 	return path + "  (durable, hash-chained — verify with: fak audit verify <path>)", j
 }
+
+func guardUpstreamBadRequestAuditNotify(audit *journal.Journal, traceID string) func(string) {
+	if audit == nil {
+		return nil
+	}
+	return func(detail string) {
+		detail = strings.TrimSpace(detail)
+		if detail == "" {
+			return
+		}
+		audit.AppendAgentEvent("UPSTREAM_BAD_REQUEST", traceID, detail)
+	}
+}

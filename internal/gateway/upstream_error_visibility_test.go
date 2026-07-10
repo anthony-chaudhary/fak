@@ -459,3 +459,19 @@ func TestRotationEvidenceSnapshotExposesOnlyCredentialScopedKinds(t *testing.T) 
 		t.Fatalf("snapshot=%v", got)
 	}
 }
+
+func TestTrusted400NotifiesScrubbedBoundedOperatorDetail(t *testing.T) {
+	var notified string
+	s := &Server{exposeUpstreamErrorDetail: true, upstreamBadRequestNotify: func(detail string) { notified = detail }}
+	raw := `{"error":"input[3].id invalid","token":"sk-abcdefghijklmnopqrstuvwxyz0123456789","padding":"` + strings.Repeat("x", forbiddenDetailMax*2) + `"}`
+	_, _, msg := s.plannerErrorStatus(&agent.UpstreamStatusError{Status: http.StatusBadRequest, Body: raw})
+	if notified == "" || !strings.Contains(notified, "input[3].id") {
+		t.Fatalf("notified=%q", notified)
+	}
+	if strings.Contains(notified, "sk-abcdefghijklmnopqrstuvwxyz") || len(notified) > forbiddenDetailMax {
+		t.Fatalf("detail leaked/unbounded len=%d detail=%q", len(notified), notified)
+	}
+	if !strings.Contains(msg, notified) {
+		t.Fatalf("client msg and audit detail diverged: msg=%q detail=%q", msg, notified)
+	}
+}

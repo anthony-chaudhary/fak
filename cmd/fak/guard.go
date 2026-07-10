@@ -983,6 +983,7 @@ func cmdGuard(argv []string) {
 		// (the call_id-vs-item-id bug reported input[3].id). A guard explicitly bound
 		// beyond loopback keeps the no-leak default, matching fak serve.
 		ExposeUpstreamErrorDetail: guardLoopbackOnly(ln.Addr().String()),
+		UpstreamBadRequestNotify:  guardUpstreamBadRequestAuditNotify(auditJournal, guardTraceID),
 		// Re-resolve the pinned subscription OAuth token per request so a long session
 		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every
 		// non-pinned path leaves the static-APIKey behavior byte-for-byte unchanged.

@@ -601,6 +601,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 // otherwise empty), else the upstream's own finish.
 func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudication, kept []agent.ToolCall, dropped, servedHits int, servedText string, bodyRefused bool, upstreamFinish string) string {
 	asst.ToolCalls = kept
+	// #3567 output-side shadow: classify the MODEL's own outbound prose (sampled,
+	// observe-only) before fak blanks/appends anything, folding the negative-framing
+	// finding count into fak_negframe_output_negatives_total. Pure telemetry.
+	outputNegframeAudit.observe(asst.Content)
 	if bodyRefused {
 		asst.Content = ""
 	}
@@ -856,6 +860,9 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 		if errors.As(err, &se) {
 			if detail := scrubForbiddenDetail(se.Body); detail != "" {
 				msg = msg + " — upstream said: " + detail
+				if s.upstreamBadRequestNotify != nil {
+					s.upstreamBadRequestNotify(detail)
+				}
 			}
 		}
 	}
