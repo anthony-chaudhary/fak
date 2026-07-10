@@ -49,6 +49,14 @@ const (
 	ArtifactLedger ArtifactKind = "ledger"
 	// ArtifactFile points at a repo-relative path or glob (a pointer, never the bytes).
 	ArtifactFile ArtifactKind = "file"
+	// ArtifactImage points at a portable session image (internal/sessionimage) by its
+	// bundle handle — a content-addressed, integrity-checked directory/tar the successor
+	// can LoadDir + Rehydrate to resume warm. Like every other kind it is a POINTER: the
+	// baton names the image, it never carries the image bytes or a transcript. The image's
+	// own sha256 part-index is what a resolver re-verifies (hostmigrate.go), so a
+	// cross-host resume that finds a truncated/tampered/absent image fails closed to a
+	// cold start rather than resuming a corrupt session. Added by #4144.
+	ArtifactImage ArtifactKind = "sessionimage"
 )
 
 // Baton is the `fak.relay.baton.v1` handoff object a relay leg writes at a safe point
@@ -125,6 +133,16 @@ type ProgressCursor struct {
 	// delta on resume rather than trusting a recap. Optional and back-compatible — an old
 	// baton without it (or a leg with a clean tree) resumes exactly as before. Rung C6 (#3878).
 	WipTree string `json:"wip_tree,omitempty"`
+	// SessionImage optionally names a portable session-image bundle handle (a directory or
+	// .faksession tar written by internal/sessionimage.DumpDir) the closing leg offloaded so
+	// its successor can resume WARM — the drive, the recall core image with its quarantine
+	// seals intact, and the trajectory — on a possibly different host or model. It mirrors
+	// WipTree exactly: a content-addressed POINTER, never the image bytes and never a claim.
+	// The successor re-resolves it against the image's own sha256 part-index (hostmigrate.go):
+	// a clean load is a warm resume; an absent, truncated, or tampered image fails closed to a
+	// cold start. Optional and back-compatible — an old baton without it resumes cold exactly
+	// as before. Added by #4144.
+	SessionImage string `json:"session_image,omitempty"`
 	// HeldRegion is the lane/path region (globs) the successor must re-acquire before
 	// writing, so leg N+1 takes the SAME lease and does not collide with peers on the
 	// shared tree. Empty is invalid for a write-capable relay but is a representable
