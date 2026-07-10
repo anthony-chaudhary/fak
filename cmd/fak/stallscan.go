@@ -43,7 +43,10 @@ import (
 func cmdStallscan(argv []string) { os.Exit(runStallscan(os.Stdout, os.Stderr, argv)) }
 
 // runStallscan is the testable core. Exit 0 ok / calm, 1 runtime error, 2 usage,
-// 3 a stall was observed (snapshot mode only — so a script can gate on it).
+// 3 a stall was observed, 4 a reboot is advised — a leak crossed the reboot
+// high-water — so a script can gate on either (human snapshot mode; a stall
+// outranks a reboot page, being the acute condition). --json carries the same
+// verdict + reboot block in-band and returns 0/1 as before.
 func runStallscan(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("stallscan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -75,6 +78,9 @@ func runStallscan(stdout, stderr io.Writer, argv []string) int {
 	if v.Level == stallscan.LevelStall {
 		return 3
 	}
+	if adv := stallscan.AdviseReboot(sample, stallscan.DefaultRebootThresholds()); adv.Advised {
+		return 4
+	}
 	return 0
 }
 
@@ -85,6 +91,10 @@ func stallFingerprint(s stallscan.Sample, v stallscan.Verdict) map[string]any {
 		"ts":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sample":  s,
 		"verdict": v,
+		// The reboot-threshold decision travels in every record so the --watch
+		// JSONL trail shows exactly when a leak crossed the reboot high-water, not
+		// just that it was elevated. Pure over the same sample (issue #3668).
+		"reboot": stallscan.AdviseReboot(s, stallscan.DefaultRebootThresholds()),
 	}
 }
 
@@ -124,6 +134,11 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		if v.Level != stallscan.LevelCalm {
 			fmt.Fprintf(stdout, "%s  %-8s %-18s %s\n",
 				time.Now().UTC().Format("15:04:05"), v.Level, v.Cause, stallJoinReasons(v.Reasons))
+		}
+		// A leak past the reboot high-water is the page the loop exists to catch:
+		// prompt a reboot BEFORE the freeze, not after (issue #3668).
+		if adv := stallscan.AdviseReboot(sample, stallscan.DefaultRebootThresholds()); adv.Advised {
+			fmt.Fprintf(stdout, "%s  REBOOT   %s\n", time.Now().UTC().Format("15:04:05"), adv.Reason)
 		}
 		return -1 // continue
 	}
@@ -229,6 +244,7 @@ func defaultStallLogPath() string {
 
 // renderStallFingerprint prints the human snapshot.
 func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict, topN int) {
+	adv := stallscan.AdviseReboot(s, stallscan.DefaultRebootThresholds())
 	fmt.Fprintf(w, "stall level : %s\n", v.Level)
 	fmt.Fprintf(w, "cause       : %s\n", v.Cause)
 	fmt.Fprintf(w, "faults/sec  : %0.f total  (hard %0.f = %.1f%%, demand-zero %0.f, transition %0.f)\n",
@@ -252,6 +268,9 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 	if v.ThreadGrowthProcess != "" {
 		fmt.Fprintf(w, "thread-grow : THREAD-LEAK TRAJECTORY: %s pid %d climbed +%d to %d threads since first seen\n", v.ThreadGrowthProcess, v.ThreadGrowthPID, v.ThreadGrowthDelta, v.ThreadGrowthCount)
 	}
+	if adv.Advised {
+		fmt.Fprintf(w, "reboot      : ADVISED (%s axis): %s pid %d at %d (>= %d high-water)\n", adv.Axis, adv.Process, adv.PID, adv.Count, adv.Threshold)
+	}
 	fmt.Fprintf(w, "not-the-cause: %d MB RAM free, disk queue %.1f\n", s.AvailableMB, s.DiskQueueLen)
 	if len(v.Reasons) > 0 {
 		fmt.Fprintf(w, "reasons     : %s\n", stallJoinReasons(v.Reasons))
@@ -265,6 +284,8 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 	}
 	if v.Level == stallscan.LevelStall {
 		fmt.Fprintf(w, "\nVERDICT: a stall is in progress — see `fak stallscan --watch` to record recurrence.\n")
+	} else if adv.Advised {
+		fmt.Fprintf(w, "\nVERDICT: %s\n", adv.Reason)
 	}
 }
 
