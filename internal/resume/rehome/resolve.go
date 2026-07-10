@@ -116,14 +116,33 @@ type TargetProbe struct {
 	BlockReason string `json:"block_reason,omitempty"`
 }
 
+// Action is the closed set of resume-resolution verdicts Resolve can return. It was
+// historically a bare string compared against inline literals in several files; giving
+// the vocabulary a real type + a single const block makes it a source of truth instead
+// of magic strings scattered across the resume commands (#3782, finding K).
+type Action string
+
+const (
+	ActionNotFound        Action = "NOT_FOUND"        // no account holds the id and no fresh seat exists (or a partial id matched nothing on the fleet)
+	ActionPinFresh        Action = "PIN_FRESH"        // owner-less but a full id -> land a fresh resume on a healthy seat with room
+	ActionPin             Action = "PIN"              // resume on the owning account as-is
+	ActionRehome          Action = "REHOME"           // copy the transcript onto a healthy seat (owner blocked / load-spread)
+	ActionPinBlocked      Action = "PIN_BLOCKED"      // owner blocked and no re-home target could be found/confirmed
+	ActionWaitReset       Action = "WAIT_RESET"       // owner blocked with a known imminent reset -> wait for it
+	ActionAmbiguousPrefix Action = "AMBIGUOUS_PREFIX" // a partial id prefix-matched more than one session; refuse and list candidates
+	ActionNotFullID       Action = "NOT_FULL_ID"      // a partial id matched no session; refuse to PIN_FRESH a likely typo
+)
+
 // Decision is the resume resolution record, mirroring the dict resume_resolver.resolve
-// returns. Action is one of NOT_FOUND | PIN_FRESH | PIN | REHOME | PIN_BLOCKED |
-// WAIT_RESET. PIN_FRESH is the owner-less landing: no account holds the session, so
-// there is no transcript to copy, but a healthy seat with room is pinned so a fresh
-// resume lands on capacity instead of dead-ending.
+// returns. Action is one of the closed Action set above. PIN_FRESH is the owner-less
+// landing: no account holds the session, so there is no transcript to copy, but a
+// healthy seat with room is pinned so a fresh resume lands on capacity instead of
+// dead-ending. That landing is correct only for a FULL, brand-new session id; a
+// truncated/mistyped id is disambiguated first (see Resolve) so it never silently
+// pins a fresh seat for a typo.
 type Decision struct {
 	OK               bool          `json:"ok"`
-	Action           string        `json:"action"`
+	Action           Action        `json:"action"`
 	Session          string        `json:"session"`
 	Project          string        `json:"project,omitempty"`
 	OwnerAccount     string        `json:"owner_account,omitempty"`
@@ -152,6 +171,13 @@ type Decision struct {
 	ResetUnix   int64  `json:"reset_unix,omitempty"`
 	WaitSeconds int64  `json:"wait_seconds,omitempty"`
 	Reason      string `json:"reason"`
+	// PrefixResolvedFrom / PrefixCandidates carry the #3782 partial-id disambiguation.
+	// When a truncated id uniquely prefix-matches one on-disk session, the decision is
+	// the FULL id's normal verdict with PrefixResolvedFrom set to the id the caller
+	// actually typed. When it matches several, Action is AMBIGUOUS_PREFIX and
+	// PrefixCandidates lists the colliding full ids.
+	PrefixResolvedFrom string   `json:"prefix_resolved_from,omitempty"`
+	PrefixCandidates   []string `json:"prefix_candidates,omitempty"`
 }
 
 // carriedThrottleBlock reports whether the owner is blocked by a usage throttle CARRIED
@@ -178,10 +204,29 @@ func Resolve(in ResolveInput) Decision {
 
 	owner := LocateOwner(in.SID, home)
 	if owner == nil {
-		// No ~/.claude* account holds this session -> there is no transcript to
-		// re-home, but a dead-end NOT_FOUND strands a resume that could still land
-		// on capacity. Pin a fresh resume onto the least-loaded healthy Claude seat
-		// with room; fall back to NOT_FOUND only when the fleet has no such seat.
+		// Owner-less. A brand-new session (a FULL id with no transcript yet) should
+		// still land fresh on a healthy seat. But a truncated / mistyped id must NOT
+		// silently PIN_FRESH onto an empty seat (the #3782 footgun: an 8-char prefix
+		// paste read as "session not found" and got pinned to a blank account), so a
+		// short id is disambiguated against on-disk transcripts first.
+		if !looksLikeFullSessionID(in.SID) {
+			switch full, n := resolvePrefix(in.SID, home); {
+			case n == 1:
+				// Unique prefix -> resolve to the real session and run the normal
+				// ladder against its full id, recording what the caller typed.
+				dec := Resolve(withSID(in, full))
+				dec.PrefixResolvedFrom = in.SID
+				return dec
+			case n > 1:
+				return ambiguousPrefixDecision(in, home, n)
+			default:
+				return notFullIDDecision(in.SID)
+			}
+		}
+		// Full id, genuinely absent -> there is no transcript to re-home, but a
+		// dead-end NOT_FOUND strands a resume that could still land on capacity. Pin a
+		// fresh resume onto the least-loaded healthy Claude seat with room; fall back
+		// to NOT_FOUND only when the fleet has no such seat.
 		return pinFreshToHealthy(in)
 	}
 
@@ -273,7 +318,7 @@ func loadSpreadDecision(in ResolveInput, home string, owner *Owner, cwdSlug stri
 // giving up. Only a fleet with NO healthy Claude seat at all falls back to NOT_FOUND.
 func pinFreshToHealthy(in ResolveInput) Decision {
 	notFound := Decision{
-		OK: false, Action: "NOT_FOUND", Session: in.SID,
+		OK: false, Action: ActionNotFound, Session: in.SID,
 		Reason: "no ~/.claude* account holds this session id",
 	}
 	availability := in.Availability
@@ -307,7 +352,7 @@ func pinFreshToHealthy(in ResolveInput) Decision {
 		tgtTag = tgt.Account
 	}
 	rec := Decision{
-		OK: true, Action: "PIN_FRESH", Session: in.SID,
+		OK: true, Action: ActionPinFresh, Session: in.SID,
 		PinAccount:   tgt.Account,
 		PinConfigDir: targetConfigDir(tgt, in.Home),
 		CapRelief:    relief,

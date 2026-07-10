@@ -10,9 +10,15 @@ import (
 const testProject = "C--work-fak" // ProjectSlug(`C:\work\fak`)
 const testCWD = `C:\work\fak`
 
+// absentFullSID is a full-length (36-char UUID) session id that is never written to
+// disk in these tests -> the owner-less "not found" sentinel. It must be full-length:
+// a SHORT absent id is now disambiguated as a likely typo (NOT_FULL_ID), not landed
+// fresh (#3782), so a realistic new-session id is required to exercise PIN_FRESH.
+const absentFullSID = "00000000-dead-beef-0000-000000000000"
+
 func TestResolveNotFound(t *testing.T) {
 	home := t.TempDir()
-	got := Resolve(ResolveInput{SID: "ghost", Home: home, CWD: testCWD})
+	got := Resolve(ResolveInput{SID: absentFullSID, Home: home, CWD: testCWD})
 	if got.OK || got.Action != "NOT_FOUND" {
 		t.Fatalf("Resolve = %+v, want NOT_FOUND", got)
 	}
@@ -26,7 +32,7 @@ func TestResolvePinFreshWhenNotFoundWithRoom(t *testing.T) {
 	busy := filepath.Join(home, ".claude-busy")
 	idle := filepath.Join(home, ".claude-idle")
 	got := Resolve(ResolveInput{
-		SID: "ghost", Home: home, CWD: testCWD,
+		SID: absentFullSID, Home: home, CWD: testCWD,
 		Availability: []Target{
 			{Account: ".claude-busy", Available: true, LiveSessions: 2, ConfigDir: busy},
 			{Account: ".claude-idle", Available: true, LiveSessions: 0, ConfigDir: idle},
@@ -49,7 +55,7 @@ func TestResolvePinFreshWhenNotFoundWithRoom(t *testing.T) {
 func TestResolvePinFreshRelaxesBurstCap(t *testing.T) {
 	home := t.TempDir()
 	got := Resolve(ResolveInput{
-		SID: "ghost", Home: home, CWD: testCWD,
+		SID: absentFullSID, Home: home, CWD: testCWD,
 		Availability: []Target{
 			{Account: ".claude-a", Available: true, LiveSessions: DefaultRehomeCap + 3, ConfigDir: filepath.Join(home, ".claude-a")},
 			{Account: ".claude-b", Available: true, LiveSessions: DefaultRehomeCap, ConfigDir: filepath.Join(home, ".claude-b")},
@@ -71,7 +77,7 @@ func TestResolvePinFreshRelaxesBurstCap(t *testing.T) {
 func TestResolveNotFoundWhenNoHealthySeat(t *testing.T) {
 	home := t.TempDir()
 	got := Resolve(ResolveInput{
-		SID: "ghost", Home: home, CWD: testCWD,
+		SID: absentFullSID, Home: home, CWD: testCWD,
 		Availability: []Target{
 			{Account: ".claude-walled", Available: false, ConfigDir: filepath.Join(home, ".claude-walled")},
 		},
@@ -287,7 +293,7 @@ func TestResolveWaitHorizon(t *testing.T) {
 			Availability: []Target{{Account: ".claude-healthy", Available: true, ConfigDir: filepath.Join(home, ".claude-healthy")}},
 			RehomeFn:     RehomeTranscript,
 		})
-		if got.Action != tc.want {
+		if string(got.Action) != tc.want {
 			t.Errorf("%s: action = %q, want %q", tc.name, got.Action, tc.want)
 		}
 	}
