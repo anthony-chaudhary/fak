@@ -25,9 +25,10 @@ const JournalTailWindowBytes = 4 << 20 // 4 MiB
 // nil), matching a fresh workspace — the same fail-open behavior the hook had
 // when it opened the journal directly. A journal within the window is parsed
 // whole, so behavior only diverges from a full parse once the file is large
-// enough to matter.
+// enough to matter. The open shares FILE_SHARE_DELETE on Windows so this read
+// never blocks a concurrent session's compaction swap (#3555).
 func ParseTailFile(path string) ([]Event, error) {
-	f, err := os.Open(path)
+	f, err := OpenShareDelete(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
