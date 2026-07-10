@@ -2,7 +2,7 @@
   "$schema": "benchmark/machine-specs.v1",
   "machine_id": "gcp-a3-high-h100-1g",
   "hostname": "gcp-a3-highgpu-1g",
-  "registered_at": "2026-06-28T10:54:59.979814Z",
+  "registered_at": "2026-07-09T00:13:29.096941Z",
   "hardware": {
     "gpu": {
       "model": "NVIDIA H100 (Hopper)",

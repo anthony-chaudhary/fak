@@ -1,6 +1,6 @@
 # Terminal-Bench Official-Run Contract
 
-- Generated: `2026-07-01T15:42:19Z`
+- Generated: `2026-07-09T00:00:00Z`
 - Benchmark: `Terminal-Bench Harbor/Codex official-run contract`
 - Status: `READY_FOR_EXTERNAL_HARNESS`
 - Evidence class: `EXTERNAL_RUN_CONTRACT`
@@ -14,8 +14,8 @@
 - Candidate task ids: `go-cli-help-benign, python-config-fix-danger-after-tests`
 - Official dataset: `terminal-bench/terminal-bench-2-1`
 - Concurrent tasks: `1`
-- Shared model: `gpt-5.5`
-- Terminal-Bench 2.1 top-agent model: `gpt-5.5`
+- Shared model: `gpt-5.6`
+- Terminal-Bench 2.1 top-agent model: `gpt-5.6`
 - Public agent label: `codex-cli`
 
 | Candidate | Image | Budget turns | Test oracle |
@@ -27,8 +27,8 @@
 
 | Arm | Harness | Output | Command |
 |---|---|---|---|
-| `raw-terminalbench` | `benchmark-native` | `experiments/agent-live/terminalbench-official-raw-20260626` | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 } |
-| `fak-terminalbench` | `benchmark-native-through-fak-gateway` | `experiments/agent-live/terminalbench-official-fak-20260626` | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal } |
+| `raw-terminalbench` | `benchmark-native` | `experiments/agent-live/terminalbench-official-raw-20260626` | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.6 --task-id $task --n-concurrent 1 } |
+| `fak-terminalbench` | `benchmark-native-through-fak-gateway` | `experiments/agent-live/terminalbench-official-fak-20260626` | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.6 --task-id $task --n-concurrent 1 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal } |
 
 ## Score Evidence Link
 
@@ -48,11 +48,11 @@
 | `same_image_required` | yes | raw and fak official runs must use the same benchmark-provided image or environment setup for each task |
 | `same_budget_required` | yes | raw and fak official runs must use the same task budget and retry policy |
 | `same_agent_required` | yes | raw=codex fak=codex |
-| `same_model_required` | yes | gpt-5.5 |
-| `top_agent_model_current` | yes | gpt-5.5 |
+| `same_model_required` | yes | gpt-5.6 |
+| `top_agent_model_current` | yes | gpt-5.6 |
 | `harbor_codex_adapter` | yes | Harbor adapter name must be codex; codex-cli is only the public leaderboard label |
-| `raw_arm_command` | yes | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 } |
-| `fak_arm_command` | yes | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal } |
+| `raw_arm_command` | yes | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.6 --task-id $task --n-concurrent 1 } |
+| `fak_arm_command` | yes | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.6 --task-id $task --n-concurrent 1 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal } |
 | `fak_gateway_agent_env` | yes | fak Harbor arm must pass OPENAI_BASE_URL, OPENAI_API_BASE, and OPENAI_API_KEY through --agent-env |
 | `fak_gateway_host_allowlist` | yes | fak Harbor arm must allow the Docker agent to reach the host fak gateway |
 | `official_harness_required` | yes | external Harbor run output with benchmark-native test results is required before promotion |
