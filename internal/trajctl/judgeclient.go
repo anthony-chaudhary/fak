@@ -39,6 +39,17 @@ const judgeSystemPrompt = "You are a strict progress judge. Given an OBJECTIVE a
 	"Be conservative: partial or unverified progress is not completion. " +
 	"Respond only by calling the " + judgeToolName + " tool with your verdict."
 
+// rubricJudgeSystemPrompt is the rubric-based replacement prompt (#2544) — also
+// a STABLE verbatim prefix, used whenever the request carries a rubric. The
+// judge scores each criterion independently and must attribute the verdict to
+// criteria, not just emit an aggregate.
+const rubricJudgeSystemPrompt = "You are a strict progress judge. Given an OBJECTIVE, a RUBRIC of concrete " +
+	"criteria, and the CURRENT STATE, score EACH rubric criterion independently in [0,1], then estimate " +
+	"overall objective completion in [0,1] consistent with the per-criterion scores and whether the " +
+	"objective is fully met. Be conservative: partial or unverified progress is not completion. " +
+	"Cite every criterion by its id in the criteria array. " +
+	"Respond only by calling the " + judgeToolName + " tool with your verdict."
+
 // GatewayJudgeClient is a JudgeClient backed by an OpenAI-compatible chat
 // endpoint. BaseURL is the API root (e.g. http://127.0.0.1:8000/v1); the client
 // POSTs to <BaseURL>/chat/completions.
@@ -64,6 +75,34 @@ var verdictToolParameters = json.RawMessage(`{
     "rationale": {"type": "string", "description": "one or two sentences justifying the estimate"}
   },
   "required": ["progress", "rationale"],
+  "additionalProperties": false
+}`)
+
+// rubricVerdictToolParameters is the pinned schema of a rubric-based verdict
+// (#2544): the bare shape plus a REQUIRED criteria array so per-criterion
+// attribution cannot be silently omitted.
+var rubricVerdictToolParameters = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "progress": {"type": "number", "minimum": 0, "maximum": 1, "description": "fraction of the objective complete, 0..1"},
+    "met": {"type": "boolean", "description": "true only if the objective is fully satisfied"},
+    "rationale": {"type": "string", "description": "one or two sentences justifying the estimate"},
+    "criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "description": "the rubric criterion id being scored"},
+          "progress": {"type": "number", "minimum": 0, "maximum": 1, "description": "how far this criterion is satisfied, 0..1"},
+          "note": {"type": "string", "description": "short justification for this criterion's score"}
+        },
+        "required": ["id", "progress"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["progress", "rationale", "criteria"],
   "additionalProperties": false
 }`)
 
@@ -129,18 +168,27 @@ func (c *GatewayJudgeClient) Judge(req JudgeRequest) (JudgeVerdict, JudgeUsage, 
 	if strings.TrimSpace(c.BaseURL) == "" {
 		return JudgeVerdict{}, JudgeUsage{}, fmt.Errorf("trajctl: judge client base URL is required")
 	}
+	// A request carrying a rubric (#2544) swaps in the rubric prompt and the
+	// attribution-required verdict schema; a bare request keeps the exact
+	// #2543 shape, so each mode has its own stable cache prefix.
+	system, params := judgeSystemPrompt, verdictToolParameters
+	user := fmt.Sprintf("OBJECTIVE:\n%s\n\nCURRENT STATE:\n%s", req.Objective, req.State)
+	if req.Rubric != "" {
+		system, params = rubricJudgeSystemPrompt, rubricVerdictToolParameters
+		user = fmt.Sprintf("OBJECTIVE:\n%s\n\nRUBRIC:\n%s\nCURRENT STATE:\n%s", req.Objective, req.Rubric, req.State)
+	}
 	body := chatVerdictRequest{
 		Model: c.Model,
 		Messages: []chatMessage{
-			{Role: "system", Content: judgeSystemPrompt},
-			{Role: "user", Content: fmt.Sprintf("OBJECTIVE:\n%s\n\nCURRENT STATE:\n%s", req.Objective, req.State)},
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
 		},
 		Tools: []chatTool{{
 			Type: "function",
 			Function: chatToolFunction{
 				Name:        judgeToolName,
 				Description: "Emit the structured progress verdict.",
-				Parameters:  verdictToolParameters,
+				Parameters:  params,
 			},
 		}},
 		ToolChoice:  chatToolChoice{Type: "function", Function: chatToolChoiceName{Name: judgeToolName}},

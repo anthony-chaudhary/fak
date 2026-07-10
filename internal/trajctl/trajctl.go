@@ -76,6 +76,10 @@ type Objective struct {
 	// (see metaloop.go, #2567). The one-level fence forbids Meta.Method naming the
 	// meta scorer itself, so the doctrine cannot recurse into scoring-the-scorer.
 	Meta *MetaTarget `json:"meta,omitempty"`
+	// Rubric, when set, is the issue-specific judging rubric generated once at
+	// declare time and cached here as objective metadata (rubric.go, #2544).
+	// Judge scoring READS it — never regenerates it per score call.
+	Rubric *Rubric `json:"rubric,omitempty"`
 }
 
 // EvidenceRef is a pointer to the witness behind a score. For W3 commit progress,
@@ -256,6 +260,11 @@ func validateObjective(o Objective) error {
 	}
 	if o.Meta != nil {
 		if err := validateMetaTarget(*o.Meta); err != nil {
+			return err
+		}
+	}
+	if o.Rubric != nil {
+		if err := validateRubric(*o.Rubric); err != nil {
 			return err
 		}
 	}

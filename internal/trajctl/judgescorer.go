@@ -51,6 +51,10 @@ type JudgeVerdict struct {
 	Met bool `json:"met"`
 	// Rationale is a short justification, carried verbatim as evidence.
 	Rationale string `json:"rationale"`
+	// Criteria is the per-criterion attribution a rubric-based verdict carries
+	// (#2544): one finding per rubric criterion the judge scored. Empty on a
+	// bare-statement verdict.
+	Criteria []RubricFinding `json:"criteria,omitempty"`
 }
 
 // JudgeUsage is what one judge call cost, so the scorer can enforce the budget
@@ -72,6 +76,10 @@ type JudgeRequest struct {
 	// MaxTokens is the per-call output-token cap. A client MUST forward it as the
 	// request's max_tokens so a runaway generation is bounded at the source.
 	MaxTokens int
+	// Rubric, when non-empty, is the formatted rubric block (#2544,
+	// FormatRubricForPrompt) the judge scores against instead of the bare
+	// objective statement alone. Empty keeps the #2543 bare-statement prompt.
+	Rubric string
 }
 
 // JudgeClient serves one structured verdict call. It is the injected impurity:
@@ -128,7 +136,7 @@ func (s JudgeScorer) Score(obj Objective, win EvidenceWindow) []ScoreRow {
 	if state == "" {
 		state = judgeStateSummary(obj, win)
 	}
-	req := JudgeRequest{Objective: obj.Statement, State: state, MaxTokens: s.MaxCallTokens}
+	req := JudgeRequest{Objective: obj.Statement, State: state, MaxTokens: s.MaxCallTokens, Rubric: FormatRubricForPrompt(obj.Rubric)}
 	verdict, usage, err := s.Client.Judge(req)
 	if err != nil {
 		return nil // fail-closed: a failed judge call credits no progress
@@ -140,18 +148,37 @@ func (s JudgeScorer) Score(obj Objective, win EvidenceWindow) []ScoreRow {
 	if err != nil {
 		return nil
 	}
+	evidence := []EvidenceRef{{
+		Kind:   "judge-verdict",
+		Ref:    fmt.Sprintf("tokens=%d", usage.Tokens),
+		Detail: string(blob),
+	}}
+	// Per-criterion attribution (#2544): one ref per rubric finding, keyed by
+	// criterion id, so a row cites WHICH criteria moved, not just the aggregate.
+	// Findings without an id are dropped — an unattributable finding would fail
+	// ledger validation and cannot be cited.
+	for _, f := range verdict.Criteria {
+		if f.ID == "" {
+			continue
+		}
+		fb, err := json.Marshal(f)
+		if err != nil {
+			continue
+		}
+		evidence = append(evidence, EvidenceRef{
+			Kind:   "rubric-criterion",
+			Ref:    f.ID,
+			Detail: string(fb),
+		})
+	}
 	return []ScoreRow{{
 		ObjectiveID: obj.ID,
 		Value:       clamp01(verdict.Progress),
 		Method:      JudgeScorerMethod,
 		Version:     JudgeScorerVersion,
 		Witness:     W1,
-		Evidence: []EvidenceRef{{
-			Kind:   "judge-verdict",
-			Ref:    fmt.Sprintf("tokens=%d", usage.Tokens),
-			Detail: string(blob),
-		}},
-		UnixMillis: win.UnixMillis,
+		Evidence:    evidence,
+		UnixMillis:  win.UnixMillis,
 	}}
 }
 
