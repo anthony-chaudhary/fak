@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/negframe"
+	"github.com/anthony-chaudhary/fak/internal/sessionsteer"
 )
 
 // guard_sessionstart.go — the discoverability affordance for fak's MCP verbs (#3092).
@@ -48,6 +51,11 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("guard-sessionstart", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	modeFlag := fs.String("mode", os.Getenv(guardSessionStartEnvMode), "off|on")
+	// --managed marks a session admitted onto the long-horizon posture (a headless/fleet worker,
+	// per the sessionsteer admission at install time). When set, the injected context ALSO carries
+	// the persistence + managed-context RULE (spine #3512) — the soft, always-on half of the
+	// long-horizon default. Attended human-driven sessions get the base affordance only.
+	managedFlag := fs.Bool("managed", false, "inject the long-horizon persistence + managed-context rule")
 	if err := fs.Parse(argv); err != nil {
 		// Fail open: a discoverability hint must never wedge a session start.
 		return 0
@@ -55,12 +63,28 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	if normalizeGuardSessionStartMode(*modeFlag) == guardSessionStartModeOff {
 		return 0
 	}
+	// Compose the injected context: the MCP-affordance hint always, plus the long-horizon rule
+	// when this session was admitted MANAGED. SessionStartRule returns "" for a non-managed
+	// directive, so an attended session composes to the base hint unchanged.
+	additionalContext := guardSessionStartHint
+	if *managedFlag {
+		directive := sessionsteer.Steer(sessionsteer.SteerInput{Headless: true, DurableStore: true})
+		if rule := sessionsteer.SessionStartRule(directive); rule != "" {
+			additionalContext = guardSessionStartHint + "\n\n" + rule
+		}
+	}
+	// Emit-time reframe (#3566): route the composed additionalContext through the deterministic,
+	// token-superset-safe positive-voice pass so every string fak injects at SessionStart leads
+	// with the affordance. sessionsteer stays stdlib-only (tier 1) — the reframe lives here, at the
+	// emit boundary, not inside the pure decision core. Idempotent, so a source string already in
+	// positive voice is returned unchanged.
+	additionalContext = negframe.Reframe(additionalContext)
 	// Claude Code injects a SessionStart hook's hookSpecificOutput.additionalContext into the
 	// first turn's context. Emit the envelope; a marshal failure is a silent no-op (fail open).
 	envelope := map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":     "SessionStart",
-			"additionalContext": guardSessionStartHint,
+			"additionalContext": additionalContext,
 		},
 	}
 	data, err := json.Marshal(envelope)
@@ -84,6 +108,7 @@ func normalizeGuardSessionStartMode(mode string) string {
 type guardSessionStartInstall struct {
 	Applied      bool
 	Mode         string
+	Managed      bool
 	SettingsPath string
 	Reason       string
 }
@@ -92,7 +117,7 @@ type guardSessionStartInstall struct {
 // MERGING it into the shared --settings file the other guard hooks already wrote
 // (existingSettingsPath) so a single --settings carries them all. Off mode or a non-claude
 // child is a no-op. Mirrors installGuardStopHook.
-func installGuardSessionStartHook(command []string, mode, existingSettingsPath string) ([]string, guardSessionStartInstall, error) {
+func installGuardSessionStartHook(command []string, mode string, managed bool, existingSettingsPath string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
 	if normalized == guardSessionStartModeOff {
@@ -114,10 +139,10 @@ func installGuardSessionStartHook(command []string, mode, existingSettingsPath s
 			return command, guardSessionStartInstall{}, err
 		}
 	}
-	return installGuardSessionStartHookAt(command, mode, fakBin, dir, existingSettingsPath)
+	return installGuardSessionStartHookAt(command, mode, managed, fakBin, dir, existingSettingsPath)
 }
 
-func installGuardSessionStartHookAt(command []string, mode, fakBin, dir, existingSettingsPath string) ([]string, guardSessionStartInstall, error) {
+func installGuardSessionStartHookAt(command []string, mode string, managed bool, fakBin, dir, existingSettingsPath string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
 	if normalized == guardSessionStartModeOff {
@@ -130,7 +155,7 @@ func installGuardSessionStartHookAt(command []string, mode, fakBin, dir, existin
 	}
 	var settingsPath string
 	if strings.TrimSpace(existingSettingsPath) != "" {
-		if err := mergeGuardSessionStartIntoSettings(existingSettingsPath, fakBin); err != nil {
+		if err := mergeGuardSessionStartIntoSettings(existingSettingsPath, fakBin, managed); err != nil {
 			return command, install, err
 		}
 		settingsPath = existingSettingsPath
@@ -142,33 +167,52 @@ func installGuardSessionStartHookAt(command []string, mode, fakBin, dir, existin
 			return command, install, err
 		}
 		settingsPath = filepath.Join(dir, "claude-sessionstart-settings.json")
-		if err := writeGuardSessionStartSettings(settingsPath, fakBin); err != nil {
+		if err := writeGuardSessionStartSettings(settingsPath, fakBin, managed); err != nil {
 			return command, install, err
 		}
 		command = appendClaudeSettingsArg(command, settingsPath)
 	}
 	install.Applied = true
+	install.Managed = managed
 	install.SettingsPath = settingsPath
 	return command, install, nil
+}
+
+// guardSessionStartManaged decides, by default, whether a wrapped child is admitted onto the
+// long-horizon MANAGED posture: a headless/fleet worker (a `-p` child, not an attended TUI) is,
+// where keep-going-past-a-long-window matters most and no human is present to drive it. This is
+// the default-on switch for the persistence + managed-context rule (#3512); it leans on the SAME
+// headless signal the task-handoff gate uses, so the two long-horizon gates admit in lockstep.
+func guardSessionStartManaged(command []string) bool {
+	return !guardChildInteractive(command)
+}
+
+// guardSessionStartArgs is the hook's argv. A MANAGED (headless) session carries --managed so
+// the injected context includes the long-horizon persistence + managed-context rule (#3512).
+func guardSessionStartArgs(managed bool) []string {
+	if managed {
+		return []string{"guard-sessionstart", "--managed"}
+	}
+	return []string{"guard-sessionstart"}
 }
 
 // guardSessionStartMatchers builds the SessionStart hook settings entry. The affordance is
 // wanted on a fresh start AND on clear/compact/resume (a compacted context may have dropped
 // the original hint), so the matcher is left empty to fire on every SessionStart source.
-func guardSessionStartMatchers(fakBin string) []guardPreCompactClaudeMatcher {
+func guardSessionStartMatchers(fakBin string, managed bool) []guardPreCompactClaudeMatcher {
 	return []guardPreCompactClaudeMatcher{{
 		Hooks: []guardPreCompactClaudeCommand{{
 			Type:    "command",
 			Command: guardPreCompactHookCommand(fakBin),
-			Args:    []string{"guard-sessionstart"},
+			Args:    guardSessionStartArgs(managed),
 		}},
 	}}
 }
 
-func writeGuardSessionStartSettings(path, fakBin string) error {
+func writeGuardSessionStartSettings(path, fakBin string, managed bool) error {
 	settings := guardPreCompactClaudeSettings{
 		Hooks: map[string][]guardPreCompactClaudeMatcher{
-			"SessionStart": guardSessionStartMatchers(fakBin),
+			"SessionStart": guardSessionStartMatchers(fakBin, managed),
 		},
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -176,12 +220,12 @@ func writeGuardSessionStartSettings(path, fakBin string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }
 
 // mergeGuardSessionStartIntoSettings adds (or replaces) the SessionStart hook in an existing
 // guard settings file, preserving every other key (PreCompact/Stop/toolproc hooks).
-func mergeGuardSessionStartIntoSettings(path, fakBin string) error {
+func mergeGuardSessionStartIntoSettings(path, fakBin string, managed bool) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -193,11 +237,11 @@ func mergeGuardSessionStartIntoSettings(path, fakBin string) error {
 	if settings.Hooks == nil {
 		settings.Hooks = map[string][]guardPreCompactClaudeMatcher{}
 	}
-	settings.Hooks["SessionStart"] = guardSessionStartMatchers(fakBin)
+	settings.Hooks["SessionStart"] = guardSessionStartMatchers(fakBin, managed)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }

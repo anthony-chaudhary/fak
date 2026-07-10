@@ -285,16 +285,17 @@ func transitionEvent(st State, from, to RunState) TransitionEvent {
 }
 
 // notableTransition reports whether a move from->to is one a supervisor should be PUSHED
-// about (#761): a flip INTO Paused (needs-input), Draining, or Stopped, and only when it
-// actually changes the run-state (a no-op re-set must not notify). Running/Throttled are
-// excluded — they are not "the agent is waiting / has stopped" signals, so the SIGCHLD-
-// equivalent stays the terminal/paused boundary, fired exactly once per real transition.
+// about (#761): a flip INTO Paused (needs-input), Draining, Terminating, or Stopped, and
+// only when it actually changes the run-state (a no-op re-set must not notify).
+// Running/Throttled are excluded — they are not "the agent is waiting / has stopped"
+// signals, so the SIGCHLD-equivalent stays the terminal/paused boundary, fired exactly
+// once per real transition.
 func notableTransition(from, to RunState) bool {
 	if from == to {
 		return false
 	}
 	switch to {
-	case Paused, Draining, Stopped:
+	case Paused, Draining, Terminating, Stopped:
 		return true
 	}
 	return false
@@ -302,13 +303,16 @@ func notableTransition(from, to RunState) bool {
 
 // canonicalReason maps a notable run-state to its closed stop-reason token — the default a
 // transition push carries when the operator gave no free-text reason, so a push ALWAYS
-// announces WHY with a recognized token (PAUSED / DRAINING / STOPPED) rather than a blank.
+// announces WHY with a recognized token (PAUSED / DRAINING / TERMINATED / STOPPED) rather
+// than a blank.
 func canonicalReason(to RunState) string {
 	switch to {
 	case Paused:
 		return ReasonPaused
 	case Draining:
 		return ReasonDrained
+	case Terminating:
+		return ReasonTerminated
 	case Stopped:
 		return ReasonStopped
 	}

@@ -47,8 +47,7 @@ import (
 //     gates are not yet re-applied to the in-process path (they gate OS-process launches
 //     and tree edits the prototype does not perform; wiring them is part of the #2001
 //     real-loop work).
-func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, target int, payload map[string]any, finish func(map[string]any) map[string]any) map[string]any {
-	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
+func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, target int, payload map[string]any, finish func(map[string]any) map[string]any) map[string]any {
 	plan := dispatchtick.PlanHostEnrollment(pick.Lane, target, leaseID, pick.Tree)
 	payload["host_enrollment"] = map[string]any{
 		"agent_id": plan.AgentID,

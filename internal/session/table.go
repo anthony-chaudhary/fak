@@ -61,6 +61,12 @@ type Table struct {
 	// pre-resume path. Both are nil/empty on a fresh table.
 	spliceFn      WarmKVSplicer
 	resumeWaiters map[string][]chan struct{}
+
+	// terminateSignals is the forceful-stop seam (#2758): one level-triggered channel
+	// per trace, handed out by TerminateSignal and CLOSED by the transition write path
+	// the moment the session enters Terminating — the loop-side wake-up that cancels
+	// in-flight work mid-turn (the drain waits for the boundary; terminate does not).
+	terminateSignals map[string]chan struct{}
 }
 
 // NewTable returns a Table bounded by DefaultTableLimit sessions.
@@ -234,12 +240,18 @@ func (t *Table) Transition(trace string, to RunState, reason string) (State, boo
 	from := cur.Run
 	cur.Run = to
 	switch to {
-	case Throttled, Paused, Draining, Stopped:
+	case Throttled, Paused, Draining, Stopped, Terminating:
 		cur.Reason = reason
 	case Running:
 		cur.Reason = ""
 	}
 	out := t.putLocked(cur)
+	// A session entering Terminating fires its terminate signal (#2758) so a running
+	// arm cancels in-flight work at its next safe point instead of waiting for the
+	// turn boundary. Done under the lock, mirroring the resume wake below.
+	if to == Terminating && from != Terminating {
+		t.signalTerminateLocked(trace)
+	}
 	// A session LEAVING Paused (a resume back to live, or a paused->stop) wakes every
 	// WaitResume parked on it (#916). Done under the lock so a waiter registered concurrently
 	// is either signalled here or observes the new non-Paused state on its next read — never
@@ -437,6 +449,11 @@ func (t *Table) CompareAndSet(trace string, expectRev uint64, want State) (State
 	// waiters, the same as a direct Transition off Paused (#916).
 	if from == Paused && out.Run != Paused {
 		t.signalResumeLocked(trace)
+	}
+	// A CAS flip INTO Terminating fires the terminate signal (#2758), the same as a
+	// direct Transition — an --if-rev terminate must cancel in-flight work too.
+	if out.Run == Terminating && from != Terminating {
+		t.signalTerminateLocked(trace)
 	}
 	// A CAS-driven run-state flip (the operator --if-rev path) fires the transition observer
 	// too — without this, a pause/stop applied with --if-rev would notify nothing. Staged

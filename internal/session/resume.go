@@ -121,7 +121,7 @@ func (t *Table) WaitResume(ctx context.Context, trace string) ResumeVerdict {
 				t.dropResumeWaiter(trace, ch)
 				return ResumeVerdict{Resumed: false, State: cur, Reason: ReasonResumeCancelled}
 			}
-		case Stopped, Draining:
+		case Stopped, Draining, Terminating:
 			// The hold ended in a stop, not a resume: end the loop, do not re-admit.
 			t.mu.Unlock()
 			return ResumeVerdict{Resumed: false, State: cur, Reason: cur.stopReasonOr(canonicalReason(cur.Run))}

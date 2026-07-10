@@ -160,7 +160,7 @@ func (p HarnessProfile) validateProvided() error {
 	}
 	for _, m := range p.Repoint {
 		if !m.Valid() {
-			return fmt.Errorf("unknown repoint mechanism %q (want env|cli-config|settings-file)", m)
+			return fmt.Errorf("unknown repoint mechanism %q (want env|cli-config|settings-file|extension)", m)
 		}
 	}
 	if p.Identity != "" && !p.Identity.validKind() {

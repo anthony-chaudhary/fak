@@ -44,6 +44,7 @@ const (
 	ReasonBudgetSpend     = "BUDGET_SPEND_EXHAUSTED"   // SpendMicroCentsLeft hit zero (priced dollar ceiling); never auto-reset — a spent cap is terminal, not a fresh-window continuation
 	ReasonPaused          = "PAUSED"                   // operator hold; not terminal, the loop waits
 	ReasonDrained         = "DRAINING"                 // operator stop, taken at this boundary
+	ReasonTerminated      = "TERMINATED"               // operator FORCEFUL stop (#2758): in-flight work cancelled at the next safe point, no new work — the deliberate counterpart of DRAINING (which lets the turn finish)
 	ReasonStopped         = "STOPPED"                  // already terminal
 	ReasonBudgetReset     = "BUDGET_RESET"             // budget-drained, then re-armed on a fresh window (Recontinue)
 	ReasonResumeCancelled = "RESUME_CANCELLED"         // a WaitResume parked on a Paused session ended because its context was cancelled (#916)
@@ -87,6 +88,18 @@ func (t *Table) Decide(trace string) Verdict {
 		cur.Run = Stopped
 		if cur.Reason == "" {
 			cur.Reason = ReasonDrained
+		}
+		final := t.putLocked(cur)
+		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+	case Terminating:
+		// The forceful stop (#2758) was signalled mid-turn; the arm has usually
+		// already aborted in-flight work on the terminate signal and calls back in
+		// here to finalize. Same idempotent finalize as Draining, but with the
+		// TERMINATED reason so the record never claims the drain's ran-to-completion
+		// semantics.
+		cur.Run = Stopped
+		if cur.Reason == "" {
+			cur.Reason = ReasonTerminated
 		}
 		final := t.putLocked(cur)
 		return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
@@ -151,6 +164,8 @@ func (t *Table) DebitClarificationQuery(trace string) QueryBudgetVerdict {
 		return QueryBudgetVerdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
 	case Draining:
 		return QueryBudgetVerdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonDrained), Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
+	case Terminating:
+		return QueryBudgetVerdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonTerminated), Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
 	case Paused:
 		return QueryBudgetVerdict{Proceed: false, Reason: ReasonPaused, Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
 	}

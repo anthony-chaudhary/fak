@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
+	"github.com/anthony-chaudhary/fak/internal/linkstate"
 )
 
 const (
@@ -137,7 +138,7 @@ func resolveGuardRemoteServe(operand string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if res.Status != fleet.LabReadyForDevWork {
+		if res.Status != string(linkstate.Clear) {
 			return "", fmt.Errorf("LAB_TARGET_NOT_READY: status=%s next=%s", res.Status, res.NextAction)
 		}
 		return res.baseURL, nil
@@ -157,8 +158,8 @@ func resolveLabTarget(alias string, opts labTargetResolveOpts) (labTargetResolut
 	if err != nil {
 		return labTargetResolution{}, err
 	}
-	if !ready.AdmitLabDispatch {
-		return labTargetResolution{}, fmt.Errorf("LAB_READINESS_NOT_READY: status=%s next=%s; refresh with `fak lab readiness --from-status --write-default --json`", ready.Status, ready.NextAction)
+	if !ready.AdmitDispatch {
+		return labTargetResolution{}, fmt.Errorf("LAB_READINESS_NOT_READY: phase=%s next=%s; refresh with `fak lab readiness --from-reports --write-default --json`", ready.Phase, ready.NextAction)
 	}
 	targets, err := loadLabTargets(opts.targetsPath)
 	if err != nil {
@@ -212,15 +213,15 @@ func loadLabTargetReadiness(pathFlag, machineClass string) (fleet.LabReadiness, 
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return fleet.LabReadiness{}, fmt.Errorf("LAB_READINESS_NOT_READY: missing %s; refresh with `fak lab readiness --from-status --write-default --json`", path)
+		return fleet.LabReadiness{}, fmt.Errorf("LAB_READINESS_NOT_READY: missing %s; refresh with `fak lab readiness --from-reports --write-default --json`", path)
 	}
 	defer f.Close()
 	rec, err := fleet.LoadLabReadiness(f)
 	if err != nil {
 		return fleet.LabReadiness{}, fmt.Errorf("LAB_READINESS_NOT_READY: invalid %s: %v", path, err)
 	}
-	if rec.MachineClass == "" {
-		rec.MachineClass = machineClass
+	if rec.Subject == "" {
+		rec.Subject = machineClass
 	}
 	return rec, nil
 }
@@ -328,7 +329,7 @@ func validateLabTargetReport(target labTargetConfig, model string, opts labTarge
 		validated := labTargetReportValidation{
 			boxID:      row.ID,
 			evidence:   "scrubbed-fleet-report",
-			status:     fleet.LabReadyForDevWork,
+			status:     string(linkstate.Clear),
 			nextAction: "use-guard-remote-serve-alias",
 		}
 		if row.Inference.ProbeLatencyMS > 0 {

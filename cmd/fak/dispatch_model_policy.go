@@ -36,6 +36,43 @@ func applyModelDowngrade(backend string, target int, records []dispatchtick.Witn
 	return workerModelPolicy{Model: next, Chain: dropModel(chain, next), Source: modelSourceDowngrade}, true
 }
 
+// applyPlacementGate is the PREVENTIVE placement check (#3521). Before launch it tests the
+// resolved placement's (work-shape × model-reliability) pairing and, when that pairing is
+// known-bad, re-routes onto a model whose restart profile can hold the shape — so a cheap
+// model is never dropped into a churning slot it cannot survive and then blamed for the
+// outcome. This runs BEFORE the reactive Layer-2 downgrade, which never fires on the
+// witnessed failure (a context-balloon/restart-limit starvation is not a model-switchable
+// wall like usage_cap / model_unknown / rate_limit).
+//
+// Only the AUTOMATIC pins are gated — modelSourceTier and modelSourceWorkClass. An explicit
+// --worker-model pin, a lane_models pin, and the benchmark gate are deliberate operator
+// intent and always win, matching the resolver's stated precedence doctrine; the gate exists
+// to protect the worker from a TABLE's choice, not to override a human's.
+//
+// fired is false for every other source, an unpinned seat default, a surgical shape, and an
+// unknown shape (an untagged or contradictorily-tagged issue) — so a default fleet tick is
+// byte-identical to before this seam.
+//
+// The tier's reasoning posture (Effort/Ultracode) is CARRIED across the re-route rather than
+// stripped with the model — the same rule Layer-2's downgrade follows, since a placement wall
+// is model-scoped, not reasoning-scoped. So the witnessed fable+ultracode-on-churning-hard
+// placement becomes opus+ultracode, not a bare opus. The chain drops the safe model AND keeps
+// the refused one dropped, so a later downgrade never re-offers the model that cannot hold it.
+func applyPlacementGate(p workerModelPolicy, shape dispatchtick.WorkShape) (workerModelPolicy, bool) {
+	if p.Source != modelSourceTier && p.Source != modelSourceWorkClass {
+		return p, false
+	}
+	v := dispatchtick.AssessPlacement(shape, p.Model)
+	if v.OK {
+		return p, false
+	}
+	p.Model = v.SafeModel
+	p.Chain = dropModel(p.Chain, v.SafeModel)
+	p.Source = modelSourcePlacement
+	p.PlacementReason = v.Reason
+	return p, true
+}
+
 // dispatchTickPolicy loads the operator account policy (accounts_policy.json) for a workspace
 // so the resolver can read a lane_models pin. Fail-open: a missing/malformed policy yields
 // DefaultPolicy (no lane pins), exactly the pre-seam behavior. Kept here (not in the tick) so
@@ -59,6 +96,11 @@ func dispatchWorkerModelMap(p workerModelPolicy) map[string]any {
 	}
 	if p.Ultracode {
 		out["ultracode"] = true
+	}
+	// The preventive placement gate's typed, closed reason — surfaced only when it fired, so
+	// an ungated decision's payload is byte-identical to before the seam.
+	if r := strings.TrimSpace(p.PlacementReason); r != "" {
+		out["placement_reason"] = r
 	}
 	return out
 }
@@ -102,6 +144,12 @@ const (
 	// to opus) and ABOVE the seat default, so a normal tick that names no work-class model
 	// is unchanged.
 	modelSourceWorkClass = "work-class"
+	// modelSourcePlacement is the PREVENTIVE placement gate (#3521): the resolved AUTOMATIC
+	// placement paired a work SHAPE with a model whose restart/reliability profile cannot
+	// hold it, so the worker is re-routed onto a model that can — before launch, rather than
+	// after a CLAIM_NO_COMMIT wall the reactive downgrade chain never sees (a restart-amnesia
+	// starvation is not one of the model-switchable walls).
+	modelSourcePlacement = "placement-gate"
 )
 
 // workerModelPolicy is the resolved launch decision for one dispatch worker: the Model to pin
@@ -116,6 +164,10 @@ type workerModelPolicy struct {
 	Source    string
 	Effort    string
 	Ultracode bool
+	// PlacementReason is the closed reason token (dispatchtick.PlacementShapeMismatch) set
+	// only when the preventive placement gate re-routed this placement; empty otherwise, so
+	// an ungated decision's payload is byte-identical to before the seam.
+	PlacementReason string
 }
 
 // pinned reports whether the resolver un-blanked the model to an exact id — i.e. this worker

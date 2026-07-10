@@ -212,10 +212,27 @@ func dispatchLastIssueStatus(state string) string {
 	return strings.ToUpper(state)
 }
 
-func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation, goalProfile string) (dispatchLanePick, error) {
+func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation, goalProfile string, targetIssue int) (dispatchLanePick, error) {
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		return dispatchLanePick{}, err
+	}
+	// When no lane is pinned but a specific target issue is requested, route THAT
+	// issue to its own lane before the busiest-lane auto-pick runs. Without this a
+	// `--target-issue N` with no `--lane` falls through to the largest-step-budget
+	// lane (in practice the coarse `cmd` lane) and the issue is dispatched there,
+	// colliding with whatever holds cmd — regardless of where the issue actually
+	// belongs. The operator named the issue; the router already knows its lane, so
+	// honor that as if it were an explicit `--lane`. An unrouted target (Lane == "")
+	// finds nothing here and falls through to the unchanged busiest-pick.
+	targetLaneRouted := ""
+	if strings.TrimSpace(explicit) == "" && targetIssue > 0 {
+		for _, route := range router.Issues {
+			if route.Number == targetIssue && route.Lane != "" {
+				targetLaneRouted = route.Lane
+				break
+			}
+		}
 	}
 	numsByLane := map[string][]int{}
 	treesByLane := map[string][]string{}
@@ -262,6 +279,9 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		stepBudgets[lane] = stepBudget
 	}
 	chosen := strings.TrimSpace(explicit)
+	if chosen == "" && targetLaneRouted != "" {
+		chosen = targetLaneRouted
+	}
 	var selfSourceHeld []string
 	if chosen == "" {
 		// #1397: skip fak's TRUST-CRITICAL lanes (the adjudicator/policy/kernel/shipgate
@@ -307,6 +327,14 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	if len(tree) == 0 && chosen != "" {
 		tree = []string{fmt.Sprintf("internal/%s/**", chosen)}
 	}
+	// Carry each issue's declared file scope so a single-target tick can narrow to
+	// it (parity with the wave path, which prices route.Paths per issue).
+	pathsByIssue := map[int][]string{}
+	for _, route := range router.Issues {
+		if len(route.Paths) > 0 {
+			pathsByIssue[route.Number] = append([]string(nil), route.Paths...)
+		}
+	}
 	return dispatchLanePick{
 		Lane:             chosen,
 		Numbers:          numsByLane[chosen],
@@ -314,6 +342,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		ByLaneStepBudget: stepBudgets,
 		ExcludedLanes:    excluded,
 		Tree:             tree,
+		PathsByIssue:     pathsByIssue,
 		RouterError:      dispatchRouterError(router),
 		SelfSourceHeld:   selfSourceHeld,
 	}, nil

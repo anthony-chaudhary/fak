@@ -14,7 +14,7 @@ package main
 //
 //	fak lab status [--roster F] [--reports DIR] [--group G] [--class C] [--all] [--json]
 //	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--inference ready|degraded|warming|blocked|unknown] [--reports DIR]
-//	fak lab readiness [--file F] [--status STATUS|--from-status] [--write F|--write-default] [--json]
+//	fak lab readiness [--file F] [--phase CLEAR|WAITING|WORKING [--detail D]|--from-reports] [--write F|--write-default] [--json]
 //	fak lab target ALIAS [--targets F] [--readiness F] [--roster F] [--reports DIR] [--json]
 //	fak lab ls     [--roster F] [--group G] [--class C] [--json]
 //
@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
+	"github.com/anthony-chaudhary/fak/internal/linkstate"
 )
 
 // labDefaultRosterJSON is the generic lab roster embedded at compile time. go:embed
@@ -270,15 +271,18 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("lab readiness", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	file := fs.String("file", "", "readiness record path (default: $FAK_LAB_READINESS or ~/.config/fak/fleet/lab-readiness.json)")
-	rosterPath := fs.String("roster", "", "with --from-status: roster file (default: the embedded generic lab roster)")
-	reports := fs.String("reports", "", "with --from-status: reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
+	rosterPath := fs.String("roster", "", "with --from-reports: roster file (default: the embedded generic lab roster)")
+	reports := fs.String("reports", "", "with --from-reports: reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
 	machineClass := fs.String("class", "gpu-server", "generic machine class")
-	status := fs.String("status", "", "emit this readiness status instead of reading a file")
-	fromStatus := fs.Bool("from-status", false, "derive readiness from scrubbed lab status/inference reports instead of reading a record")
-	nextAction := fs.String("next-action", "", "generic next action for --status")
-	evidence := fs.String("evidence", "", "generic evidence label for --status")
-	writePath := fs.String("write", "", "write the emitted --status record to this path")
-	writeDefault := fs.Bool("write-default", false, "write the emitted --status record to the default readiness path")
+	phaseFlag := fs.String("phase", "", "emit this link-state phase (CLEAR|WAITING|WORKING) instead of reading a file")
+	detailFlag := fs.String("detail", "", "link-state detail sub-status for --phase (default: the phase's canonical detail)")
+	statusFlag := fs.String("status", "", "DEPRECATED: legacy readiness status, coarsened onto a --phase during rollover")
+	fromReports := fs.Bool("from-reports", false, "derive the phase from scrubbed lab status/inference reports instead of reading a record")
+	fromStatus := fs.Bool("from-status", false, "DEPRECATED alias for --from-reports")
+	nextAction := fs.String("next-action", "", "generic next action for --phase")
+	evidence := fs.String("evidence", "", "generic evidence label for --phase")
+	writePath := fs.String("write", "", "write the emitted record to this path")
+	writeDefault := fs.Bool("write-default", false, "write the emitted record to the default readiness path")
 	asJSON := fs.Bool("json", false, "emit the readiness record as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -287,14 +291,27 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak lab readiness: use only one of --write or --write-default")
 		return 2
 	}
-	if *fromStatus && *status != "" {
-		fmt.Fprintln(stderr, "fak lab readiness: use only one of --status or --from-status")
+	deriving := *fromReports || *fromStatus
+
+	// Resolve the requested phase from --phase (primary) or the deprecated --status
+	// alias (coarsened for safe rollover while callers still speak the old vocabulary).
+	reqPhase := linkstate.Phase(*phaseFlag)
+	reqDetail := *detailFlag
+	if *statusFlag != "" {
+		if *phaseFlag != "" {
+			fmt.Fprintln(stderr, "fak lab readiness: use only one of --phase or --status")
+			return 2
+		}
+		reqPhase, reqDetail = linkstate.Coarsen(*statusFlag)
+	}
+	if deriving && reqPhase != "" {
+		fmt.Fprintln(stderr, "fak lab readiness: use only one of --phase or --from-reports")
 		return 2
 	}
 
 	var rec fleet.LabReadiness
-	emitRecord := *status != "" || *fromStatus
-	if *fromStatus {
+	emitRecord := reqPhase != "" || deriving
+	if deriving {
 		ro, ok := labLoadRoster(stderr, *rosterPath)
 		if !ok {
 			return 2
@@ -314,15 +331,15 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
 			return 2
 		}
-	} else if *status != "" {
-		rec = fleet.NewLabReadiness(*machineClass, *status, *nextAction, *evidence, time.Now())
+	} else if reqPhase != "" {
+		rec = fleet.NewLabReadiness(*machineClass, reqPhase, reqDetail, *nextAction, *evidence, time.Now())
 		if probs := rec.Validate(); len(probs) > 0 {
 			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
 			return 2
 		}
 	} else {
 		if *writePath != "" || *writeDefault {
-			fmt.Fprintln(stderr, "fak lab readiness: --write/--write-default requires --status or --from-status")
+			fmt.Fprintln(stderr, "fak lab readiness: --write/--write-default requires --phase or --from-reports")
 			return 2
 		}
 		path, err := labReadinessPath(*file)
@@ -368,13 +385,13 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	} else {
-		fmt.Fprintf(stdout, "lab readiness %s: %s (%s)\n", rec.MachineClass, rec.Status, rec.NextAction)
-		if !rec.AdmitLabDispatch {
-			fmt.Fprintf(stdout, "mark ready: %s\n", cmds.MarkReady)
-			fmt.Fprintf(stdout, "mark wait: %s\n", cmds.MarkWaitPrivateRecovery)
+		fmt.Fprintf(stdout, "lab readiness %s: %s/%s (%s)\n", rec.Subject, rec.Phase, rec.Detail, rec.NextAction)
+		if !rec.AdmitDispatch {
+			fmt.Fprintf(stdout, "mark clear: %s\n", cmds.MarkClear)
+			fmt.Fprintf(stdout, "mark waiting: %s\n", cmds.MarkWaiting)
 		}
 	}
-	if rec.AdmitLabDispatch {
+	if rec.AdmitDispatch {
 		return 0
 	}
 	return 1
@@ -403,22 +420,22 @@ func labReadinessFromSnapshot(machineClass string, snap fleet.Snapshot, now time
 		}
 	}
 	if useful > 0 {
-		return fleet.NewLabReadiness(machineClass, fleet.LabReadyForDevWork, "admit-lab-backed-dispatch", "scrubbed-fleet-report", now)
+		return fleet.NewLabReadiness(machineClass, linkstate.Clear, linkstate.DetailReady, "admit-lab-backed-dispatch", "scrubbed-fleet-report", now)
 	}
 	switch {
 	case latencyDegraded > 0:
-		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback", "scrubbed-fleet-report", now)
+		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailPrivateRecovery, "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback", "scrubbed-fleet-report", now)
 	case warming > 0:
-		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "wait-lab-inference-ready", "scrubbed-fleet-report", now)
+		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailPrivateRecovery, "wait-lab-inference-ready", "scrubbed-fleet-report", now)
 	case blocked > 0:
-		return fleet.NewLabReadiness(machineClass, fleet.LabWaitPrivateRecover, "recover-lab-inference", "scrubbed-fleet-report", now)
+		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailPrivateRecovery, "recover-lab-inference", "scrubbed-fleet-report", now)
 	case reported > 0:
-		return fleet.NewLabReadiness(machineClass, fleet.LabIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
+		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
 	}
 	if snap.Reachable == 0 {
-		return fleet.NewLabReadiness(machineClass, fleet.LabIndeterminate, "publish-lab-readiness", "no-fresh-lab-report", now)
+		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "publish-lab-readiness", "no-fresh-lab-report", now)
 	}
-	return fleet.NewLabReadiness(machineClass, fleet.LabIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
+	return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
 }
 
 func labLs(stdout, stderr io.Writer, argv []string) int {

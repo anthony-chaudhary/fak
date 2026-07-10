@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 const (
@@ -26,6 +27,20 @@ const (
 	guardPreCompactEnvMode       = "FAK_GUARD_PRECOMPACT_MODE"
 	guardPreCompactEnvMetricsURL = "FAK_GUARD_PRECOMPACT_METRICS_URL"
 	guardPreCompactMetricName    = "fak_harness_coherence_posture"
+
+	// guardPreCompactRelayMetricName is the gateway gauge carrying the relay's
+	// advisory would-rotate signal (1 = the soft mark crossed and the leg will
+	// rotate at its next safe point; 0 = disarmed). #1869 routes it through the
+	// PreCompact shadow seam so operators read the relay's would-rotate next to the
+	// compaction posture in ONE place. It rides the same /metrics scrape the posture
+	// already reads and is shadow-only: it never changes the hook's exit code (the
+	// relay rotates at its own safe point — this is observation, not compaction).
+	guardPreCompactRelayMetricName = "fak_relay_would_rotate"
+	// guardPreCompactRelayArmedReason is the closed relay reason token
+	// (docs/notes/RELAY-REASON-VOCABULARY-2026-07-01.md) the would-rotate signal
+	// carries when armed, mirroring internal/relay ArmFire.Reason and
+	// session.ReasonRelayArmed.
+	guardPreCompactRelayArmedReason = "RELAY_ARMED"
 )
 
 type guardPreCompactInstall struct {
@@ -52,10 +67,24 @@ type guardPreCompactClaudeCommand struct {
 }
 
 func cmdGuardPreCompact(argv []string) {
-	os.Exit(runGuardPreCompact(os.Stdout, os.Stderr, argv))
+	os.Exit(runGuardPreCompact(os.Stdout, os.Stderr, os.Stdin, argv))
 }
 
-func runGuardPreCompact(stdout, stderr io.Writer, argv []string) int {
+// runGuardPreCompact wraps the compaction-coherence decision with the #2539 PreCompact
+// twin: when the compaction is ALLOWED (any exit-0 path — the reset is about to happen),
+// append one compaction-boundary row per open objective so curve readers can see the
+// context reset. Bounded + fail-open, gated on the guard-wired ledger env, and it never
+// changes the decision's exit code. A blocked compaction (exit 2) marks no boundary —
+// the context was not reset.
+func runGuardPreCompact(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
+	code := runGuardPreCompactDecision(stdout, stderr, argv)
+	if code != 2 {
+		appendCompactionBoundaryFailOpen(stderr, trajctl.Stamp{SessionID: parseHookSessionID(readHookStdin(stdin))}, time.Now().UnixMilli())
+	}
+	return code
+}
+
+func runGuardPreCompactDecision(stdout, stderr io.Writer, argv []string) int {
 	_ = stdout
 	fs := flag.NewFlagSet("guard-precompact", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -82,7 +111,12 @@ func runGuardPreCompact(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak guard PreCompact: allowing Claude auto-compaction; no metrics URL configured")
 		return 0
 	}
-	posture, err := fetchGuardPreCompactPosture(context.Background(), metricsURL, *timeout)
+	metrics, err := fetchGuardPreCompactMetrics(context.Background(), metricsURL, *timeout)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard PreCompact: allowing Claude auto-compaction; posture unavailable: %v\n", err)
+		return 0
+	}
+	posture, err := parseGuardPreCompactMetricsPosture(metrics)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard PreCompact: allowing Claude auto-compaction; posture unavailable: %v\n", err)
 		return 0
@@ -94,9 +128,30 @@ func runGuardPreCompact(stdout, stderr io.Writer, argv []string) int {
 			action = "block"
 		}
 		fmt.Fprintf(stderr, "fak guard PreCompact: shadow would %s Claude auto-compaction (posture=%s exit=%d)\n", action, posture, exitCode)
+		surfaceGuardPreCompactRelayShadow(stderr, metrics)
 		return 0
 	}
 	return exitCode
+}
+
+// surfaceGuardPreCompactRelayShadow routes the relay would-rotate signal (#1869)
+// onto the PreCompact shadow seam. When the gateway scrape carries the relay
+// gauge, the hook logs the advisory RELAY_ARMED / disarmed state on the SAME
+// stderr line family the compaction posture already uses, so an operator reads
+// both in one place. It is observation only — the caller has already decided the
+// exit code and this never changes it. When the gauge is absent (an older gateway,
+// or no relay driver on the trace) it emits nothing, keeping the shadow log
+// byte-identical for non-relay sessions.
+func surfaceGuardPreCompactRelayShadow(stderr io.Writer, metrics string) {
+	armed, present := parseGuardPreCompactRelayArmed(metrics)
+	if !present {
+		return
+	}
+	if armed {
+		fmt.Fprintf(stderr, "fak guard PreCompact: relay would-rotate signal armed (reason=%s); shadow-only, not triggering compaction\n", guardPreCompactRelayArmedReason)
+		return
+	}
+	fmt.Fprintln(stderr, "fak guard PreCompact: relay would-rotate signal disarmed; shadow-only, not triggering compaction")
 }
 
 func installGuardPreCompactHook(command []string, mode, gwURL string) ([]string, [][2]string, guardPreCompactInstall, error) {
@@ -177,7 +232,7 @@ func writeGuardPreCompactSettings(path, fakBin string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }
 
 func guardPreCompactHookCommand(fakBin string) string {
@@ -195,6 +250,36 @@ func appendClaudeSettingsArg(command []string, settingsPath string) []string {
 	out := make([]string, 0, len(command)+2)
 	out = append(out, command[0], "--settings", settingsPath)
 	return append(out, command[1:]...)
+}
+
+// writeGuardSettingsFileAtomic writes data to path atomically: it writes a sibling
+// temp file, fsyncs nothing but renames it over path, so a failed or partial write
+// (ENOSPC / EACCES) leaves any PRE-EXISTING settings file intact rather than
+// truncating it. This matters because the guard's merge writers rewrite the SAME
+// --settings file the launched child already references, so a torn os.WriteFile there
+// would hand Claude Code a corrupt settings.json; the rename makes the swap
+// all-or-nothing. The 0o600 perm matches the prior direct os.WriteFile calls. The temp
+// file is created in path's own directory so the rename stays on one filesystem (and
+// is a same-directory replace on Windows).
+func writeGuardSettingsFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename below succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func normalizeGuardPreCompactMode(mode string) (string, error) {
@@ -237,7 +322,10 @@ func guardPreCompactMetricsURLFromBase(base string) string {
 	return base + "/metrics"
 }
 
-func fetchGuardPreCompactPosture(ctx context.Context, metricsURL string, timeout time.Duration) (compactcohere.Posture, error) {
+// fetchGuardPreCompactMetrics scrapes the gateway /metrics body once so a single
+// scrape feeds BOTH the compaction posture and the relay would-rotate shadow
+// surface (#1869) — the caller parses each metric out of the returned text.
+func fetchGuardPreCompactMetrics(ctx context.Context, metricsURL string, timeout time.Duration) (string, error) {
 	if timeout <= 0 {
 		timeout = 500 * time.Millisecond
 	}
@@ -260,7 +348,7 @@ func fetchGuardPreCompactPosture(ctx context.Context, metricsURL string, timeout
 	if err != nil {
 		return "", err
 	}
-	return parseGuardPreCompactMetricsPosture(string(body))
+	return string(body), nil
 }
 
 func parseGuardPreCompactMetricsPosture(metrics string) (compactcohere.Posture, error) {
@@ -287,4 +375,34 @@ func parseGuardPreCompactMetricsPosture(metrics string) (compactcohere.Posture, 
 		return compactcohere.PostureAllow, nil
 	}
 	return "", fmt.Errorf("metric %s not found", guardPreCompactMetricName)
+}
+
+// parseGuardPreCompactRelayArmed reads the relay would-rotate gauge (#1869) from
+// the same /metrics text: armed reports whether the leg has armed (gauge > 0 =
+// RELAY_ARMED, soft mark crossed), and present reports whether the gauge appeared
+// at all. A missing gauge (older gateway, or a non-relay trace) returns
+// (false, false) so the shadow seam stays silent for sessions with no relay
+// driver rather than falsely logging "disarmed". Malformed values are skipped,
+// matching the posture parser's fail-soft scan.
+func parseGuardPreCompactRelayArmed(metrics string) (armed, present bool) {
+	for _, line := range strings.Split(metrics, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := fields[0]
+		if name != guardPreCompactRelayMetricName && !strings.HasPrefix(name, guardPreCompactRelayMetricName+"{") {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
+		return value > 0, true
+	}
+	return false, false
 }

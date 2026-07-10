@@ -40,7 +40,7 @@ const (
 )
 
 // RepointMechanism names HOW guard points a wrapped child at the in-process gateway.
-// It is a CLOSED set of the three mechanisms that exist in guard today; a profile
+// It is a CLOSED set of the four mechanisms that exist in guard today; a profile
 // SELECTS from it by data instead of guard choosing by `if guardIsCodex` /
 // `case "claude"`. The implementations are untouched — the profile only picks them.
 type RepointMechanism string
@@ -58,6 +58,12 @@ const (
 	// `--mcp-config` self-query registration (guard_precompact.go / guard_stophook.go /
 	// guard_mcp.go).
 	RepointSettingsFile RepointMechanism = "settings-file"
+	// RepointExtension prepends Pi's `-e <ext.ts>` extension flag with an ephemeral module
+	// that calls pi.registerProvider("anthropic", {baseUrl}) (installGuardPiExtension). Pi
+	// speaks Anthropic Messages but does NOT read ANTHROPIC_BASE_URL — its Anthropic client
+	// takes baseURL from provider config (packages/ai/src/api/anthropic-messages.ts) — so an
+	// injected env var is not a reliable repoint; the registered-provider override is.
+	RepointExtension RepointMechanism = "extension"
 )
 
 // Valid reports whether m is one of the closed RepointMechanism values. C6 (config
@@ -65,7 +71,7 @@ const (
 // dropping it.
 func (m RepointMechanism) Valid() bool {
 	switch m {
-	case RepointEnv, RepointCLIConfig, RepointSettingsFile:
+	case RepointEnv, RepointCLIConfig, RepointSettingsFile, RepointExtension:
 		return true
 	default:
 		return false
@@ -214,6 +220,26 @@ var builtins = []HarnessProfile{
 		Repoint:        []RepointMechanism{RepointEnv},
 		Credential:     CredentialSource{Kind: CredentialEnvKey, EnvKey: "OPENAI_API_KEY"},
 		ConfigHomeGlob: "",
+		Identity:       IdentityEnvKey,
+	},
+	{
+		Name:           "pi",
+		Names:          []string{"pi"},
+		Wire:           WireAnthropic,
+		DefaultBaseURL: "https://api.anthropic.com",
+		// Pi (earendil-works) speaks Anthropic Messages natively, but unlike Claude Code it
+		// does NOT read ANTHROPIC_BASE_URL: its Anthropic client takes baseURL from provider
+		// config (packages/ai/src/api/anthropic-messages.ts — `baseURL: model.baseUrl`), so an
+		// injected env var never repoints it. env is still declared (guardInjectedEnv fires for
+		// every provider), but Pi's REAL repoint is the `-e <ext.ts>` extension that calls
+		// pi.registerProvider("anthropic", {baseUrl}) — the `extension` mechanism.
+		Repoint: []RepointMechanism{RepointEnv, RepointExtension},
+		// Credential: ANTHROPIC_API_KEY (Pi's anthropic env key; ANTHROPIC_OAUTH_TOKEN takes
+		// precedence for a Claude Pro/Max subscription). Its config home ~/.pi holds the richer
+		// agent/auth.json (key "anthropic"); a home-based rotation reader is a later increment,
+		// so identity buckets by env-key for now.
+		Credential:     CredentialSource{Kind: CredentialEnvKey, EnvKey: "ANTHROPIC_API_KEY"},
+		ConfigHomeGlob: ".pi*",
 		Identity:       IdentityEnvKey,
 	},
 }

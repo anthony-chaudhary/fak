@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
@@ -108,8 +109,11 @@ type serveFlags struct {
 	ctxViewBudget               *int
 	compactHistoryBudget        *int
 	compactAnchorHead           *bool
+	vcacheAnchor                *bool
+	deferColdTools              *bool
 	assumeSessionTurns          *int
 	elideResultBytes            *int
+	elideStaleReads             *bool
 	sessionID                   *string
 	sessionStatePath            *string
 	contextBudgetTokens         *int
@@ -167,6 +171,9 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.compactAnchorHead = fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything. DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (a penalty-free cut, the long-session firing path). Pass =false to pin the old warm-only first-breakpoint anchor.")
 	sf.assumeSessionTurns = fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired, so a WARM continuously-active long session sheds early instead of waiting to idle past the message-span cache TTL. The gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns: it fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (agent.CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior — no fire unless the burst is zero-penalty). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	sf.elideResultBytes = fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
+	sf.elideStaleReads = fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. No effect on non-passthrough wires.")
+	sf.vcacheAnchor = fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough (an upstream --base-url anthropic), APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. No effect on non-passthrough wires.")
+	sf.deferColdTools = fs.Bool("defer-cold-tools", false, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core into context and faults a cold schema in on demand. Deterministic + cache-safe (byte-stable tools[] turn-over-turn) and fail-safe identity on any ambiguity. DEFAULT OFF (the epic's highest-risk lever; its A/B and the #3200 fault-in are the validation gates before #3537 flips it on). Also settable via FAK_DEFER_COLD_TOOLS=1; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1. Anthropic passthrough only.")
 	sf.sessionID = fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
@@ -336,7 +343,17 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		CompactAnchorHead:           *sf.compactAnchorHead,
 		AssumeSessionTurns:          *sf.assumeSessionTurns,
 		ElideResultBytes:            *sf.elideResultBytes,
-		DebugStatsf:                 debugStatsSink(*sf.debugStats),
+		ElideStaleReads:             *sf.elideStaleReads,
+		// M2 star-anchor pre-flight gate (#1493): DEFAULT-ON (--vcache-anchor), DECOUPLED
+		// from CompactHistoryBudget so --compact-history-budget=0 no longer takes anchoring
+		// down with it. Applies cachemeta.RecommendLayout on the Anthropic passthrough;
+		// fail-safe identity on any ambiguity. No effect on non-passthrough wires.
+		VCacheAnchor: *sf.vcacheAnchor,
+		// The 10x floor lever (--defer-cold-tools, #3232): defer the COLD tool tail and
+		// inject a tool_search_tool on the outbound Anthropic body. DEFAULT OFF; gateway.New
+		// also ORs in FAK_DEFER_COLD_TOOLS. Deterministic, cache-safe, fail-safe identity.
+		DeferColdTools: *sf.deferColdTools,
+		DebugStatsf:    debugStatsSink(*sf.debugStats),
 		// MCP tool-exposure allowlist (--expose). Empty (default) leaves ExposeTools nil
 		// so gateway.New exposes the full tool surface byte-for-byte; a non-empty set
 		// narrows both tools/list and tools/call, and New fails loud on a bad pattern.
@@ -417,6 +434,11 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 		Escalated:   adj.Escalated,
 		Errored:     adj.Errored,
 
+		// The REAL per-session turn count (see gatewayusageledger.Counters.ObservedTurns):
+		// Submits above is 0 on the guard proxy path, so this — not CachedTurns — is the
+		// honest session-length signal the DefaultAssumedSessionTurns calibration percentiles.
+		ObservedTurns: srv.HarnessCoherenceSummary().ObservedTurns,
+
 		InputTokens:          adj.InputTokens,
 		OutputTokens:         adj.OutputTokens,
 		CachedPromptTokens:   adj.CachedPromptTokens,
@@ -452,9 +474,31 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 // narrower cache-value axis (#1303). Best-effort: a write failure never fails the
 // session. context is a free-form label (e.g. "http"/"stdio").
 func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration) {
-	row := gatewayusageledger.NewRow("exit", sessionType, context, "", uptime, gatewayUsageCounters(srv), time.Now())
+	row := gatewayusageledger.NewRow("exit", sessionType, context, "", uptime, gatewayUsageProvenance(srv), gatewayUsageCounters(srv), time.Now())
 	if err := gatewayusageledger.Append(nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel), row); err != nil {
 		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)
+	}
+}
+
+// gatewayUsageProvenance stamps the calibration-relevant config the Server actually ran
+// under (not what a flag said — the Server is the source of truth) plus the fak binary's
+// build revision, so a gateway-usage row is self-describing: a reader recomputing the
+// DefaultAssumedSessionTurns / headHorizonHeavyResidentFloor calibration can exclude
+// override sessions and scope to a known build. The build revision is the short VCS SHA
+// (binstamp), suffixed "-dirty" for an uncommitted build; an unstamped build (e.g. `go
+// run`) leaves it empty, which the ledger omits.
+func gatewayUsageProvenance(srv *gateway.Server) *gatewayusageledger.Provenance {
+	rev := binstamp.Self().Revision
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if rev != "" && binstamp.Self().Dirty {
+		rev += "-dirty"
+	}
+	return &gatewayusageledger.Provenance{
+		AssumeSessionTurns:   srv.AssumeSessionTurns(),
+		CompactHistoryBudget: srv.CompactHistoryBudget(),
+		BuildRevision:        rev,
 	}
 }
 
@@ -482,7 +526,7 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 				return
 			case <-t.C:
 				now := time.Now()
-				row := gatewayusageledger.NewRow("periodic", sessionType, "snapshot", "", now.Sub(startedAt), gatewayUsageCounters(srv), now)
+				row := gatewayusageledger.NewRow("periodic", sessionType, "snapshot", "", now.Sub(startedAt), gatewayUsageProvenance(srv), gatewayUsageCounters(srv), now)
 				if err := gatewayusageledger.Append(ledgerPath, row); err != nil {
 					fmt.Fprintf(os.Stderr, "fak: gateway-usage periodic snapshot failed (non-fatal): %v\n", err)
 				}

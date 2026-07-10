@@ -67,6 +67,14 @@ const (
 	// Stopped is terminal; it carries a closed Reason token so "why did it stop"
 	// is a field, not an inference from an exit code.
 	Stopped
+	// Terminating means a FORCEFUL stop was requested (#2758): the loop takes it at
+	// the next SAFE POINT — the in-flight model call's context is cancelled and no
+	// further tool call is dispatched — unlike Draining, which lets the current turn
+	// run to completion. Appended after Stopped so persisted numeric values of the
+	// prior states never shift. Like Draining it advances exactly one more step (a
+	// Decide finalizes it to Stopped with the TERMINATED reason), so it is not
+	// terminal itself.
+	Terminating
 )
 
 // String renders a RunState as its lowercase wire token (the form the
@@ -78,6 +86,9 @@ const (
 func (s RunState) String() string {
 	if s == Throttled {
 		return "throttled"
+	}
+	if s == Terminating {
+		return "terminating"
 	}
 	if p, ok := s.Phase(); ok {
 		return p.String()
@@ -93,6 +104,9 @@ func ParseRunState(s string) (RunState, bool) {
 	if s == "throttled" {
 		return Throttled, true
 	}
+	if s == "terminating" {
+		return Terminating, true
+	}
 	if p, ok := lifecycle.Parse(s); ok {
 		return RunStateFromPhase(p)
 	}
@@ -100,7 +114,8 @@ func ParseRunState(s string) (RunState, bool) {
 }
 
 // Phase projects a RunState onto the shared lifecycle skeleton. The bool is false
-// for Throttled (a session-only pace modifier with no shared peer) and for any
+// for Throttled (a session-only pace modifier with no shared peer), for Terminating
+// (the session-only forceful-stop staging state, #2758) and for any
 // out-of-range value — the projection is explicit about the extras, never a silent
 // default. This is the served-session half of the #912 "one machine" converter;
 // internal/lifebridge composes it with the supervisor half.

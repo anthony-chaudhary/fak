@@ -89,7 +89,12 @@ type dispatchLanePick struct {
 	ByLaneStepBudget map[string]int
 	ExcludedLanes    []string
 	Tree             []string
-	RouterError      string
+	// PathsByIssue carries each open issue's DECLARED file scope (route.Paths) so
+	// a single-target tick can narrow its claim to the target issue -- a per-issue
+	// lease over just those paths -- exactly as the wave path already does. Empty
+	// for an issue that declared no scope; such an issue keeps the coarse lane tree.
+	PathsByIssue map[int][]string
+	RouterError  string
 	// SelfSourceHeld names the lanes the guarded auto-pick SKIPPED because their
 	// tree is fak's own running source (cmd/** or internal/**). It is populated only
 	// on an auto-pick (no explicit lane) under guard, and is the witness behind the
@@ -309,6 +314,12 @@ type dispatchTickPick struct {
 	cooldownStatus   []map[string]any
 	target           int
 	hasTarget        bool
+	// leaseID is this tick's resolved lease id: the per-issue id
+	// (resolve-<lane>-<issue>) when the claim narrowed to the target, else the
+	// coarse lane id (resolve-<lane>) or an operator --lease-id pin. pick.Tree is
+	// narrowed in lock-step, so every downstream gate (tree-collision, self-modify,
+	// the lease acquire, the sidecars) sees the same id+tree.
+	leaseID string
 }
 
 // resolveDispatchTickPick computes this tick's candidate lane and target issue under
@@ -325,7 +336,7 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 			exclude[lane] = true
 		}
 	}
-	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation, opts.GoalProfile)
+	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation, opts.GoalProfile, opts.TargetIssue)
 	if err != nil {
 		return dispatchTickPick{}, err
 	}
@@ -358,6 +369,23 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 	if len(opts.LeaseTree) > 0 {
 		pick.Tree = append([]string(nil), opts.LeaseTree...)
 	}
+	// Per-issue claim narrowing (parity with the wave path). When the chosen target
+	// declares its OWN file scope (route.Paths) and the operator pinned neither the
+	// lease id nor the lease tree, narrow this tick's whole claim to that issue: a
+	// per-issue lease id over the declared tree. pick.Tree is mutated here so EVERY
+	// downstream gate -- the pre-acquire tree-collision check, the self-modify hold,
+	// the lease acquire, and the sidecars -- adjudicates on the narrowed tree, so two
+	// issues of one lane with disjoint declared scopes co-run (regionadmit admits
+	// disjoint sub-regions) instead of colliding on the coarse lane tree. With no
+	// declared scope, or an operator pin, the claim stays the coarse lane (byte-
+	// identical to before this seam).
+	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
+	if hasTarget && opts.LeaseID == "" && len(opts.LeaseTree) == 0 {
+		if paths := pick.PathsByIssue[target]; len(paths) > 0 {
+			pick.Tree = append([]string(nil), paths...)
+			leaseID = dispatchIssueLeaseID(pick.Lane, target)
+		}
+	}
 	return dispatchTickPick{
 		pick:             pick,
 		held:             held,
@@ -367,6 +395,7 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 		cooldownStatus:   cooldownStatus,
 		target:           target,
 		hasTarget:        hasTarget,
+		leaseID:          leaseID,
 	}, nil
 }
 
@@ -374,7 +403,14 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 // shared by every downstream verdict branch. Pure code motion out of
 // evaluateDispatchTick; behavior is unchanged.
 func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map[string]any, account dispatchtick.Account, pr dispatchTickPick) map[string]any {
-	startup := dispatchStartupBundle(root, opts, pre, account, pr.pick, pr.target, pr.hasTarget, pr.held, pr.liveIssues, pr.cooled, pr.cooldownStatus)
+	startup := dispatchStartupBundle(root, opts, pre, account, pr.pick, pr.leaseID, pr.target, pr.hasTarget, pr.held, pr.liveIssues, pr.cooled, pr.cooldownStatus)
+	preflight := map[string]any{
+		"verdict":   dispatchMapString(pre, "verdict"),
+		"reason":    dispatchMapString(pre, "reason"),
+		"cap":       pre["cap"],
+		"live":      pre["live"],
+		"cap_terms": mapAt(pre, "cap_terms"),
+	}
 	return map[string]any{
 		"schema":           dispatchtick.Schema,
 		"workspace":        root,
@@ -384,16 +420,10 @@ func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map
 		"goal_profile":     opts.GoalProfile,
 		"max_workers":      opts.MaxWorkers,
 		"registry_refresh": reg,
-		"preflight": map[string]any{
-			"verdict":   dispatchMapString(pre, "verdict"),
-			"reason":    dispatchMapString(pre, "reason"),
-			"cap":       pre["cap"],
-			"live":      pre["live"],
-			"cap_terms": mapAt(pre, "cap_terms"),
-		},
+		"preflight":        preflight,
 		"account":          dispatchtick.AccountSidecar(account),
 		"lane":             pr.pick.Lane,
-		"lease_id":         firstString(opts.LeaseID, dispatchLaneLeaseID(pr.pick.Lane)),
+		"lease_id":         pr.leaseID,
 		"lease_tree":       append([]string(nil), pr.pick.Tree...),
 		"lane_issue_count": len(pr.pick.Numbers),
 		"lane_step_budget": pr.pick.ByLaneStepBudget[pr.pick.Lane],
@@ -483,6 +513,14 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	return launch, launchPreview, guardedPreview, nil
 }
 
+// dispatchStampMs records the wall-clock elapsed since start into m under name, in
+// integer milliseconds -- the shared stopwatch for evaluateDispatchTick's per-phase
+// timing map (payload["timings_ms"]). Kept dependency-free (no new package) so any
+// hot path can attribute its own cost the same way.
+func dispatchStampMs(m map[string]int64, name string, start time.Time) {
+	m[name] = time.Since(start).Milliseconds()
+}
+
 func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[string]any, error) {
 	root, err := filepath.Abs(opts.Workspace)
 	if err != nil {
@@ -497,9 +535,25 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// that leaves View empty keeps today's full-backlog behavior.
 	dispatchTickView = opts.View
 
+	// Per-phase wall-clock attribution (observability): a slow tick is otherwise a
+	// black box -- the dominant cost (the ~40s fleet_sessions.py registry scan) and
+	// the per-tick subprocess fan-out (preflight PowerShell probes, router gh/dos
+	// spawns) were only ever asserted in comments, never witnessed. `timings` holds
+	// int64-millisecond durations, keyed per phase; a phase that did not run this
+	// tick simply has no key (mirroring the omitempty provenance sub-maps). It is
+	// attached as payload["timings_ms"] and stamped with `total` inside `finish`
+	// (the single funnel every verdict return passes through), and folded into the
+	// loop-ledger metrics under *_ms names by recordDispatchTickLoop so cross-tick
+	// per-phase percentiles become a later fold. Purely additive: no decision reads it.
+	t0 := time.Now()
+	timings := map[string]int64{}
+	var spawnStart time.Time
+
 	reg := map[string]any{"skipped": true}
 	if opts.Refresh {
+		tReg := time.Now()
 		reg = dispatchRefreshRegistry(root, stderr)
+		dispatchStampMs(timings, "registry_refresh", tReg)
 	}
 
 	// Commit-time diff-witness binding (#1324 proposal #2), ported from the Python
@@ -513,31 +567,39 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	heldNoCommit := map[int]bool{}
 	var witnessRecords []dispatchtick.WitnessRecord
 	if opts.Live {
+		tWitness := time.Now()
 		witnessedSlots, witnessRecords = witnessExitedWorkers(root, runsDir, true)
 		heldNoCommit = dispatchtick.HeldNoCommitIssues(witnessRecords)
+		dispatchStampMs(timings, "witness", tWitness)
 	}
 
+	tPreflight := time.Now()
 	pre, err := dispatchPreflight(root, stderr, opts.MaxWorkers, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend))
 	if err != nil {
 		return nil, err
 	}
+	dispatchStampMs(timings, "preflight", tPreflight)
 	preOK := dispatchMapString(pre, "verdict") == "SPAWN_OK"
 	account := accountFromMap(mapAt(pre, "account"))
 	if opts.Account != nil {
 		account = *opts.Account
 	}
 
+	tPick := time.Now()
 	pickRes, err := resolveDispatchTickPick(root, stderr, opts, runsDir, heldNoCommit)
 	if err != nil {
 		return nil, err
 	}
+	dispatchStampMs(timings, "lane_pick", tPick)
 	pick := pickRes.pick
 	held := pickRes.held
 	liveIssueDetails := pickRes.liveIssueDetails
 	target := pickRes.target
 	hasTarget := pickRes.hasTarget
 
+	tSeed := time.Now()
 	payload := seedDispatchTickPayload(root, opts, reg, pre, account, pickRes)
+	dispatchStampMs(timings, "startup_bundle", tSeed)
 	if hasTarget {
 		payload["target_issue"] = target
 	}
@@ -552,6 +614,14 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	finish := func(p map[string]any) map[string]any {
+		// The spawn phase (dispatchTickLiveSpawn / dispatchTickHostEnroll) calls finish
+		// internally, so its duration is stamped here from the start captured just before
+		// that tail call -- only on the live-spawn path where spawnStart was set.
+		if !spawnStart.IsZero() {
+			dispatchStampMs(timings, "spawn", spawnStart)
+		}
+		timings["total"] = time.Since(t0).Milliseconds()
+		p["timings_ms"] = timings
 		if opts.RecordLoop {
 			p["loop_ledger"] = recordDispatchTickLoop(root, opts.LoopLedger, p)
 		}
@@ -644,10 +714,12 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
+	tPrompt := time.Now()
 	promptRec, err := dispatchPrompt(root, stderr, target, pick.Lane)
 	if err != nil {
 		return nil, err
 	}
+	dispatchStampMs(timings, "prompt", tPrompt)
 	promptChars := dispatchMapInt(promptRec, "prompt_chars")
 	labels := dispatchStringSlice(promptRec["labels"])
 	payload["prompt_chars"] = promptChars
@@ -671,7 +743,8 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// model/guard/command machinery below (BuildWorkerCommand refuses micro). Opt-in
 	// only — a default claude/opencode/codex tick never enters here.
 	if dispatchtick.IsMicroBackend(opts.Backend) {
-		return dispatchTickHostEnroll(root, runsDir, opts, pick, account, target, payload, finish), nil
+		spawnStart = time.Now()
+		return dispatchTickHostEnroll(root, runsDir, opts, pick, pickRes.leaseID, account, target, payload, finish), nil
 	}
 	launch, launchPreview, guardedPreview, err := prepareDispatchWorkerCommand(root, opts, pick, account, target, promptChars, labels, witnessRecords, payload)
 	if err != nil {
@@ -755,15 +828,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
-	return dispatchTickLiveSpawn(root, runsDir, opts, pick, account, launch, target, promptRec, payload, finish)
+	spawnStart = time.Now()
+	return dispatchTickLiveSpawn(root, runsDir, opts, pick, pickRes.leaseID, account, launch, target, promptRec, payload, finish)
 }
 
 // dispatchTickLiveSpawn performs the live spawn once every dry-run gate has passed: acquire
 // the lane lease (refused → LANE_LEASE_HELD), build the guarded worker command + env, spawn
 // the issue-resolution worker, and record the SPAWNED / SPAWN_FAILED payload. It mutates and
 // returns the shared payload through finish, mirroring the dry-run return sites it splits off.
-func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
-	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
+func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
 	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS, opts.Goal)
 	payload["lease"] = lease
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
@@ -1427,7 +1500,7 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick.json"), blob, 0o644)
 }
 
-func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool, cooldownStatus []map[string]any) map[string]any {
+func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, leaseID string, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool, cooldownStatus []map[string]any) map[string]any {
 	route := map[string]any{
 		"lane":             pick.Lane,
 		"target_issue":     nil,
@@ -1465,7 +1538,7 @@ func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string
 		},
 		"seat": mapAt(pre, "seat"),
 		"lease": map[string]any{
-			"id":   firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)),
+			"id":   leaseID,
 			"tree": append([]string(nil), pick.Tree...),
 		},
 		"dirty_tree": dispatchDirtyTree(root),
@@ -1624,6 +1697,19 @@ func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[str
 	}
 	if n := dispatchMapInt(payload, "prompt_chars"); n != 0 {
 		metrics["prompt_chars"] = int64(n)
+	}
+	// Fold the per-phase wall-clock durations (payload["timings_ms"]) into the ledger
+	// metrics under *_ms names, so every Fire/Admit/Start/End event carries them and a
+	// later fold (mirroring turntaxmeter.FoldHookLatency) can compute cross-tick p50/p99
+	// per phase -- the measurement a TICK_PHASE_REGRESSION budget would gate on.
+	if tm, ok := payload["timings_ms"].(map[string]int64); ok {
+		for phase, ms := range tm {
+			key := phase + "_ms"
+			if phase == "total" {
+				key = "tick_total_ms"
+			}
+			metrics[key] = ms
+		}
 	}
 	evidence := []loopmgr.EvidenceRef{}
 	if n := dispatchMapInt(payload, "target_issue"); n != 0 {

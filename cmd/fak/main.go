@@ -148,6 +148,8 @@ func main() {
 		cmdSession(os.Args[2:])
 	case "session-audit":
 		cmdSessionAudit(os.Args[2:])
+	case "sessionjournal":
+		cmdSessionJournal(os.Args[2:])
 	case "tier-calibrate":
 		cmdTierCalibrate(os.Args[2:])
 	case "resume":
@@ -464,6 +466,12 @@ func main() {
 		cmdUnwiredScorecard(os.Args[2:])
 	case "unwired-debt-dispatch":
 		cmdUnwiredDebtDispatch(os.Args[2:])
+	case "qa-process-debt-dispatch":
+		cmdQAProcessDebtDispatch(os.Args[2:])
+	case "checkpoint-scorecard":
+		cmdCheckpointScorecard(os.Args[2:])
+	case "checkpoint-debt-dispatch":
+		cmdCheckpointDebtDispatch(os.Args[2:])
 	case "antipattern-scorecard":
 		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
 		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
@@ -509,6 +517,8 @@ func main() {
 		cmdGrafana(os.Args[2:])
 	case "cachevalue":
 		cmdCachevalue(os.Args[2:])
+	case "cachesweep":
+		os.Exit(runCachesweep(os.Stdout, os.Stderr, os.Args[2:]))
 	case "savings":
 		cmdSavings(os.Args[2:])
 	case "marketing":
