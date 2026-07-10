@@ -327,6 +327,26 @@ class ReportScopeAndMixTest(unittest.TestCase):
                 self.assertEqual(cm.exception.code, 3)
                 sa.cmd_audit(SimpleNamespace(**base, gate_hangs=1))  # within budget: no raise
 
+    def test_never_read_gate_exits_nonzero_over_threshold(self) -> None:
+        # #3942: --gate-never-read turns the genuine never-read defect counter into
+        # a CI regression gate. One transcript edits a file it never Read; gate 0
+        # must fail (exit 3), gate 1 must pass. Absent the flag the gate is inert.
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(
+                d, "C--work-fak", "session-n.jsonl",
+                [_assistant("m1", out=10, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                            tool_input={"file_path": "C:/x/never.go"}),
+                 _user_result("e1", "File has not been read yet. Read it first.")])
+            base = dict(root=[d], since_days=None, ns_prefix="", all=True,
+                        include_subagents=False, max=None, md=None, json=None)
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    sa.cmd_audit(SimpleNamespace(**base, gate_never_read=0))
+                self.assertEqual(cm.exception.code, 3)
+                sa.cmd_audit(SimpleNamespace(**base, gate_never_read=1))  # within budget
+
     def test_model_mix_kpi_reports_output_and_cost_shares(self) -> None:
         sa = load()
         with tempfile.TemporaryDirectory() as d:
@@ -797,6 +817,53 @@ class NotReadSubclassTest(unittest.TestCase):
         agg = sa.aggregate([s])
         self.assertEqual(agg["behavior"]["not_read_classes"],
                          {"self_duplicate": 1, "true_never_read": 1})
+
+    def test_true_never_read_path_surfaced_in_behavior(self) -> None:
+        # #3942 — the genuine never-read edit records WHICH file was hit, so the
+        # count becomes an actionable offender (only true_never_read; the other
+        # sub-classes are not misbehavior and carry no offender list).
+        _, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                       tool_input={"file_path": "C:/x/never.go"}),
+            _user_result("e1", "File has not been read yet."),
+        ])
+        b = s["behavior"]
+        self.assertEqual(b["not_read_classes"], {"true_never_read": 1})
+        self.assertEqual(b["true_never_read_paths"],
+                         [{"path": "C:/x/never.go", "count": 1}])
+
+    def test_post_resume_and_self_dup_leave_offenders_empty(self) -> None:
+        # #3942 — only true_never_read populates the offender list; a post_resume
+        # reset must not be named as a never-read defect.
+        _, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Read", tool_id="r1",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("r1", "body", is_error=False),
+            _restart(),
+            _assistant("m2", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("e1", "File has not been read yet."),
+        ])
+        self.assertEqual(s["behavior"]["not_read_classes"], {"post_resume": 1})
+        self.assertEqual(s["behavior"]["true_never_read_paths"], [])
+
+    def test_never_read_offender_surfaced_in_aggregate_and_report(self) -> None:
+        # #3942 — aggregate rolls each session's genuine never-read edits into a
+        # per-session offender row, and the report renders a named table so a
+        # reader can jump straight to the session + file.
+        sa, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                       tool_input={"file_path": "C:/x/never.go"}),
+            _user_result("e1", "File has not been read yet."),
+        ])
+        agg = sa.aggregate([s])
+        rows = agg["behavior"]["never_read_sessions"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["count"], 1)
+        self.assertEqual(rows[0]["paths"], ["C:/x/never.go"])
+        md = sa.report_md([s], agg)
+        self.assertIn("Never-read file(s)", md)
+        self.assertIn("C:/x/never.go", md)
 
     def test_restart_record_variants(self) -> None:
         sa = load()

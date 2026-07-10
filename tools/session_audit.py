@@ -260,6 +260,7 @@ class BehaviorLens:
         self.sleep_polls = 0
         self.edit_churn = collections.Counter()    # not_read / stale_read
         self.not_read_classes = collections.Counter()  # post_resume/self_dup/true (#2375 d1)
+        self.true_never_read_paths = collections.Counter()  # path -> n (#3942 offenders)
         self.verbatim_sigs = collections.Counter() # (tool, args_key, sig) -> n
         self.mass_sigs = collections.Counter()     # (tool, sig) -> n
         self.file_writes = collections.Counter()   # file_path -> mutation calls
@@ -359,7 +360,12 @@ class BehaviorLens:
             if sig in text:
                 self.edit_churn[key] += 1
                 if key == "not_read":
-                    self.not_read_classes[self._classify_not_read(path)] += 1
+                    cls = self._classify_not_read(path)
+                    self.not_read_classes[cls] += 1
+                    # #3942 — capture WHICH file the genuine defect hit, so the
+                    # report can name the offender instead of only counting it.
+                    if cls == "true_never_read" and path:
+                        self.true_never_read_paths[path] += 1
         sig = _norm_head(text, 160)
         self.verbatim_sigs[(tool, args_key, sig)] += 1
         self.mass_sigs[(tool, sig)] += 1
@@ -423,6 +429,10 @@ class BehaviorLens:
             "sleep_polls": self.sleep_polls,
             "edit_churn": dict(self.edit_churn),
             "not_read_classes": dict(self.not_read_classes),
+            "true_never_read_paths": sorted(
+                ({"path": p, "count": n}
+                 for p, n in self.true_never_read_paths.items()),
+                key=lambda r: (-r["count"], r["path"]))[:10],
             "repeat_failures": repeats[:10],
             "max_repeat_failure": max(self.verbatim_sigs.values(), default=0),
             "failure_mass": mass[:10],
@@ -788,6 +798,7 @@ def aggregate(sessions):
     stall_sessions = 0
     max_gap_s = 0.0
     repeat_rows, filechurn_rows, mass_rows, successloop_rows = [], [], [], []
+    never_read_rows = []   # #3942: sessions with a genuine never-read defect
     for s in S:
         b = s.get("behavior") or {}
         beh_errors.update(b.get("tool_errors", {}))
@@ -809,6 +820,14 @@ def aggregate(sessions):
             filechurn_rows.append({"session": s["session"], "ns": ns, **r})
         for r in (b.get("success_loops") or [])[:1]:
             successloop_rows.append({"session": s["session"], "ns": ns, **r})
+        # #3942 — surface the genuine never-read defect per session with the
+        # offending file(s), so the count is actionable, not just a total.
+        tnr = (b.get("not_read_classes") or {}).get("true_never_read", 0)
+        if tnr:
+            never_read_rows.append({
+                "session": s["session"], "ns": ns, "count": tnr,
+                "paths": [p.get("path", "") for p in
+                          (b.get("true_never_read_paths") or [])[:3]]})
     per_tool_beh = {t: {"calls": tot_tools.get(t, 0),
                         "errors": beh_errors.get(t, 0),
                         "error_rate": (beh_errors.get(t, 0) / tot_tools[t])
@@ -847,6 +866,7 @@ def aggregate(sessions):
         "failure_mass_sessions": sorted(mass_rows, key=lambda r: -r["count"])[:10],
         "file_churn_sessions": sorted(filechurn_rows, key=lambda r: -r["count"])[:10],
         "success_loop_sessions": sorted(successloop_rows, key=lambda r: -r["count"])[:10],
+        "never_read_sessions": sorted(never_read_rows, key=lambda r: -r["count"])[:10],
     }
     return {
         "n_sessions": len(S), "totals": dict(tot), "total_cost_usd": tot_cost,
@@ -1076,6 +1096,17 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                  f"{fmt_int(nrc.get('post_resume', 0))} · self-duplicate "
                  f"{fmt_int(nrc.get('self_duplicate', 0))} · **true-never-read "
                  f"{fmt_int(nrc.get('true_never_read', 0))}** (the real defect)")
+        # #3942 — name the offenders for the one sub-class that IS misbehavior,
+        # so a reader can jump straight to the session + file that never got Read.
+        nr = beh.get("never_read_sessions") or []
+        if nr:
+            L.append("")
+            L.append("| Session | NS | × | Never-read file(s) |")
+            L.append("|---|---|---:|---|")
+            for r in nr:
+                files = ", ".join(p for p in (r.get("paths") or []) if p) or "—"
+                files = files.replace("|", "\\|")[:100]
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | {files} |")
         L.append(f"- **Sessions with a ≥{STALL_GAP_S//60}-min zero-record stall "
                  f"(harness/API dead time):** {fmt_int(beh.get('stall_sessions', 0))}"
                  + (f"  (longest gap {beh.get('max_gap_s', 0)/60:.0f} min)"
@@ -1230,6 +1261,21 @@ def cmd_audit(a):
                   f"{len(sess)} sessions exceeds --gate-hangs {gate}", file=sys.stderr)
             raise SystemExit(3)
         print(f"gate ok: {hangs} interactive hang(s) ≤ --gate-hangs {gate}",
+              file=sys.stderr)
+    # #3942 — gate the one not-read sub-class that IS agent misbehavior: an edit
+    # of a file the session never Read. post_resume (harness read-state reset)
+    # and self_duplicate (guard-caught dup write) are excluded by construction,
+    # so this gate never fires on those. Off unless --gate-never-read is given.
+    nr_gate = getattr(a, "gate_never_read", None)
+    if nr_gate is not None:
+        never = ((agg.get("behavior") or {}).get("not_read_classes")
+                 or {}).get("true_never_read", 0)
+        if never > nr_gate:
+            print(f"::gate:: TRUE_NEVER_READ regression — {never} never-read edit(s) "
+                  f"across {len(sess)} sessions exceeds --gate-never-read {nr_gate}",
+                  file=sys.stderr)
+            raise SystemExit(3)
+        print(f"gate ok: {never} never-read edit(s) ≤ --gate-never-read {nr_gate}",
               file=sys.stderr)
 
 def _iso_bucket(ts, mode):
@@ -1479,6 +1525,12 @@ def main():
                            help="exit 3 if interactive-editor/pager hangs (#2365 d3) "
                                 "across the scanned window exceed N — a CI regression "
                                 "gate on the guard fix (e.g. --gate-hangs 0)")
+            q.add_argument("--gate-never-read", type=int, default=None, metavar="N",
+                           help="exit 3 if true-never-read edit churn (#3942, an edit "
+                                "of a file the session never Read) across the scanned "
+                                "window exceeds N — a CI gate on the one not-read "
+                                "sub-class that is agent misbehavior (e.g. "
+                                "--gate-never-read 0)")
     qt = sub.add_parser("trend")
     qt.add_argument("--root", action="append")
     qt.add_argument("--ns-prefix", default=NS_INCLUDE_PREFIX)
