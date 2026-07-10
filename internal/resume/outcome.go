@@ -71,6 +71,39 @@ type TerminalSignal struct {
 	Cancelled bool `json:"cancelled,omitempty"`
 }
 
+// AttemptErrorClass is the durable, closed-vocabulary cause read back from a
+// resume child's captured stderr after an unproven launch exits.
+type AttemptErrorClass string
+
+const (
+	AttemptErrorUnknown      AttemptErrorClass = "UNKNOWN_CHILD_ERROR"
+	AttemptErrorMalformed400 AttemptErrorClass = "MALFORMED_400"
+	AttemptErrorAuth         AttemptErrorClass = "STOPPED_AUTH"
+	AttemptErrorUsage        AttemptErrorClass = "STOPPED_USAGE"
+	AttemptErrorWireCrash    AttemptErrorClass = "WIRE_CRASH"
+)
+
+// ClassifyAttemptError folds captured stderr into the retry-relevant cause.
+func ClassifyAttemptError(text string) AttemptErrorClass {
+	s := strings.ToLower(text)
+	switch {
+	case (strings.Contains(s, "400") && (strings.Contains(s, "malformed") || strings.Contains(s, "bad request"))), strings.Contains(s, "child_crash") && strings.Contains(s, "400"):
+		return AttemptErrorMalformed400
+	case strings.Contains(s, "unauthorized"), strings.Contains(s, "authentication"), strings.Contains(s, "invalid api key"), strings.Contains(s, "login required"), strings.Contains(s, "401"):
+		return AttemptErrorAuth
+	case strings.Contains(s, "usage limit"), strings.Contains(s, "rate limit"), strings.Contains(s, "quota"), strings.Contains(s, "429"):
+		return AttemptErrorUsage
+	case strings.Contains(s, "connection reset"), strings.Contains(s, "broken pipe"), strings.Contains(s, "transport"), strings.Contains(s, "wire"):
+		return AttemptErrorWireCrash
+	default:
+		return AttemptErrorUnknown
+	}
+}
+
+func (c AttemptErrorClass) Unrecoverable() bool {
+	return c == AttemptErrorMalformed400 || c == AttemptErrorAuth
+}
+
 // ClassifyOutcome folds a terminal signal into the closed Outcome. Precedence follows
 // remediation cost, mirroring the terminal_failure discipline: a deliberate cancel
 // (intent — relaunch is forbidden, not merely useless) outranks an auth wall (needs a

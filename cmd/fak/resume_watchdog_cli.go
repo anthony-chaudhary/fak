@@ -230,6 +230,21 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		hist := history[p.Session]
 		progress := rwReadResumeProgress(home, p.Session, hist)
 		outcome := progress.Outcome
+		// A child may die before writing a terminal transcript event. Its stderr is
+		// still durable; read the newest capture back and classify the otherwise
+		// UNKNOWN attempt so deterministic 400/auth deaths do not burn all retries.
+		if len(hist) > 0 && progress.NewTurns == 0 {
+			if childErr, ok := rwNewestResumeChildError(logDir, p.Session); ok {
+				cause := resume.ClassifyAttemptError(childErr)
+				if cause != resume.AttemptErrorUnknown {
+					rwRecordAttemptCause(ledgerPath, tickMode, p.Session, cause)
+					if cause.Unrecoverable() {
+						note("SKIP %s: prior child failed deterministically (%s)", shortID(p.Session), cause)
+						continue
+					}
+				}
+			}
+		}
 		if len(hist) > 0 {
 			rwRecordResumeProgress(statusLedgerPath, tickMode, p.Session, progress, hist, statusEvents, progressRecorded)
 		}
@@ -411,6 +426,33 @@ type rwResumeProgress struct {
 	// took AND on which model, so the durable ledger can later prove not just "it recovered"
 	// but "it recovered on Opus 4.8" (or flag that it drifted onto something else).
 	ProgressModel string
+}
+
+func rwNewestResumeChildError(logDir, sid string) (string, bool) {
+	pattern := filepath.Join(logDir, fmt.Sprintf("resume-%s-*.log.err", shortID(sid)))
+	paths, _ := filepath.Glob(pattern)
+	if len(paths) == 0 {
+		return "", false
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		ai, _ := os.Stat(paths[i])
+		aj, _ := os.Stat(paths[j])
+		return ai != nil && aj != nil && ai.ModTime().After(aj.ModTime())
+	})
+	raw, err := os.ReadFile(paths[0])
+	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+		return "", false
+	}
+	if len(raw) > 64<<10 {
+		raw = raw[len(raw)-(64<<10):]
+	}
+	return string(raw), true
+}
+
+func rwRecordAttemptCause(path, mode, sid string, cause resume.AttemptErrorClass) {
+	rwAppendLedger(path, map[string]any{
+		"ts": rwNowISO(), "mode": mode, "session": sid, "phase": "attempt_failed", "reason": cause,
+	})
 }
 
 // rwReadResumeProgress reads the newest transcript copy for a session and returns the

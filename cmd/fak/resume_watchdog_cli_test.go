@@ -872,3 +872,33 @@ func TestResumeIdentityRecontinueDryRunWritesNothing(t *testing.T) {
 		t.Fatalf("dry-run mutated the identity store: %+v", rows)
 	}
 }
+
+func TestResumeChildErrorReadbackClassifiesNewestCapture(t *testing.T) {
+	dir := t.TempDir()
+	sid := "019f3023-52dd-7001-b559-2818dc14ede6"
+	older := filepath.Join(dir, "resume-"+shortID(sid)+"-1.log.err")
+	newer := filepath.Join(dir, "resume-"+shortID(sid)+"-2.log.err")
+	if err := os.WriteFile(older, []byte("transport reset"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(newer, []byte("CHILD_CRASH 400 malformed request"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := rwNewestResumeChildError(dir, sid)
+	if !ok || resume.ClassifyAttemptError(got) != resume.AttemptErrorMalformed400 {
+		t.Fatalf("readback ok=%v text=%q class=%s", ok, got, resume.ClassifyAttemptError(got))
+	}
+}
+
+func TestRecordAttemptCauseWritesConcreteReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
+	rwRecordAttemptCause(path, "LIVE", "sid", resume.AttemptErrorMalformed400)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"phase":"attempt_failed"`)) || !bytes.Contains(raw, []byte(`"reason":"MALFORMED_400"`)) {
+		t.Fatalf("ledger=%s", raw)
+	}
+}
