@@ -238,7 +238,7 @@ func cmdGuard(argv []string) {
 	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. Anthropic passthrough only.")
 	deferColdTools := fs.Bool("defer-cold-tools", false, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools). DEFAULT OFF: this is the epic's highest-risk lever — its A/B (token-delta x held-accuracy x poison-rate) and the deferred-tool fault-in (#3200 pin/quarantine) are the validation gates before the default flips (#3537). Also settable via FAK_DEFER_COLD_TOOLS=1; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1. Anthropic passthrough only.")
 	exposeProfile := fs.String("expose-profile", "", "in-kernel fak_* MCP tool-surface profile (#3607): \"\" (full registry, default) | \"headless\" — a curated allowlist for a single-issue dispatch worker (fak_index_work, fak_admit, fak_adjudicate, fak_memory_run, fak_tools_search), pruning the ~9.9k-token full-registry schema floor every worker otherwise pays each turn; the rest page in on demand through the still-exposed fak_tools_search. `fak dispatch` launches workers with =headless. The FAK_GUARD_EXPOSE_PROFILE env OVERRIDES this flag (the fleet opt-out: set it to `full`/`off` to restore the whole registry). Any value other than \"headless\" keeps the full registry.")
-	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
+	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: a fresh launch id derived from host, cwd, and wrapped argv; pass this flag for a stable resumable id)")
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist: high|medium|none|off. Off by default; use --session-pressure-days/--session-pressure-max to size the window.")
 	sessionPressureDays := fs.Float64("session-pressure-days", 7, "with --session-pressure-gate, audit transcripts modified within N days for the current workspace namespace")
 	sessionPressureMax := fs.Int("session-pressure-max", 40, "with --session-pressure-gate, maximum recent transcripts to audit before deciding the launch gate")
@@ -310,9 +310,6 @@ func cmdGuard(argv []string) {
 	*compactHistoryBudget = resolveGuardCompactBudget(
 		*compactHistoryBudget, guardSetFlags["compact-history-budget"], *exposeProfile)
 	guardTraceID := strings.TrimSpace(*sessionID)
-	if guardTraceID == "" {
-		guardTraceID = "guard"
-	}
 	var guardBudgetEnvelope session.BudgetEnvelope
 	hasGuardBudgetEnvelope := strings.TrimSpace(*budgetEnvelopeSpec) != ""
 	if hasGuardBudgetEnvelope {
@@ -829,10 +826,14 @@ func cmdGuard(argv []string) {
 	// Neither set: skip it entirely — sessionDescriptorMeta/configureServeSessionDurability/
 	// registerServeSessionDurability never run, so a default launch spawns zero git
 	// subprocesses for this. guardTraceID itself never needs git: an explicit --session-id
-	// is used verbatim, and the no-flag default is the fixed "guard" id (identical to
-	// defaultSessionIDFromMeta's own zero-cache-key fallback) rather than a git-SHA-derived
-	// cache key nothing will read back.
+	// is used verbatim; an ordinary non-durable launch keeps the process-local "guard" id;
+	// and an implicitly named durable launch gets a fresh host/cwd/argv-derived id. The fresh
+	// suffix is load-bearing: reusing "guard" would let the registry restore a previous run's
+	// STOPPED/TIME_BUDGET_EXHAUSTED state into a brand-new --max-duration launch.
 	guardDurabilityWanted := guardSetFlags["session-id"] || contextBudgetLimit > 0 || maxDurationLimit > 0 || hasGuardBudgetEnvelope
+	guardTraceID = resolveGuardSessionID(guardTraceID, guardDurabilityWanted, session.DescriptorMeta{
+		CacheKey: sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), "", command),
+	}, newGuardLaunchNonce())
 	// Wall-clock budget (issue #1584): an INDEPENDENT axis from --context-budget-tokens
 	// above — a managed run may be fine on tokens but out of real time, or vice versa.
 	// StartTimeBudget both configures the envelope and arms the clock at the current
