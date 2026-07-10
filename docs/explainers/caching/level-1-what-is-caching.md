@@ -61,17 +61,18 @@ knobs (Level 2), but you don't need any of them to benefit.
 One command, after you've used a session for a bit:
 
 ```bash
-fak cachevalue report
+fak cachevalue report --dev-sessions
 ```
 
-It shows what caching actually saved in your sessions. If the numbers are bigger than
-zero, the coat check is doing its job.
+It analyzes your own recent sessions and shows what caching saved. On a brand-new
+machine it may read zero until you've run a few sessions — that's the ledger still
+filling, not the coat check failing.
 
 ## Try it
 
 ```bash
-fak guard -- claude        # run your agent through fak, as usual
-fak cachevalue report      # later: see what caching saved
+fak guard -- claude                    # run your agent through fak, as usual
+fak cachevalue report --dev-sessions   # later: see what caching saved in your sessions
 ```
 
 ## See also
