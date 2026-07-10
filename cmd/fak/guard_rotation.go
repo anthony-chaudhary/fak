@@ -44,6 +44,7 @@ func guardRotationRuntimeFor(command []string, mode string) guardRotationRuntime
 		return r
 	}
 	r.Registry = accounts.Registry{Homes: homes}
+	r.Headroom = rotationHeadroom(home)
 	switch profile.Identity {
 	case harnessprofile.IdentityClaude:
 		r.EnvKey = "CLAUDE_CONFIG_DIR"
@@ -83,6 +84,17 @@ func (rt *guardRotationRuntime) rotate(command []string, injected [][2]string, r
 		audit.AppendAgentEvent("ACCOUNT_ROTATION", traceID, r.Seat+":"+r.Reason)
 	}
 	return command, injected, true
+}
+
+// rotateAfterExit is the child-supervisor boundary: a successful child already completed
+// the operator's request and must never be relaunched on another account. Keeping this guard
+// beside the rotation primitive makes both supervised and unsupervised launch paths share the
+// same no-amplification rule.
+func (rt *guardRotationRuntime) rotateAfterExit(runErr error, command []string, injected [][2]string, reason string, audit *journal.Journal, traceID string, stderr *os.File) ([]string, [][2]string, bool) {
+	if runErr == nil {
+		return command, injected, false
+	}
+	return rt.rotate(command, injected, reason, audit, traceID, stderr)
 }
 
 func normalizeGuardRotateMode(raw string, explicitlySet, interactive bool) (string, error) {
