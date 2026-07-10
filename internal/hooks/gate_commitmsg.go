@@ -75,6 +75,12 @@ var commitVerbs = setOf(
 	"consume", "dequant", "dequantize", "derive", "downgrade", "floor", "hook",
 	"invert", "memoize", "optimise", "price", "refuse", "require", "reserve",
 	"reset", "show", "splice", "synthesize",
+	// A concrete imperative verb that names a checkable change but was absent from the harvest,
+	// so `fak commit --preview` red-flagged a real subject the mutating `fak commit` (which never
+	// runs this gate) accepted and scored 100/A — the preview/mutation grade divergence of #3912.
+	// "isolate" leads a genuine action (isolate a code path / behavior under test); accepting it
+	// makes both commands grade the one subject the one way.
+	"isolate",
 )
 
 var subjectRE = regexp.MustCompile(`^([a-z]+)(\([^)]+\))?(!)?:\s+(.+)$`)

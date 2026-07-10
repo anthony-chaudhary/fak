@@ -97,6 +97,37 @@ func TestLintCommitMessage_gradeabilitySuggestionComposesTrailer(t *testing.T) {
 	}
 }
 
+// TestCommitMsgVerdict_isolateVerbAccepted is the #3912 regression fixture. `fak commit --preview`
+// graded `test(codex): isolate direct continuation override (#3023) (fak cmd)` as ungradeable
+// (55/F, BLOCKED) because `isolate` was missing from commitVerbs, while the mutating `fak commit`
+// — which never routes the subject through this gate — committed the byte-identical subject and
+// scored it 100/A. Two commands must grade one subject one way. `isolate` names a real, checkable
+// action, so both now accept it: the shared verdict is gradeable, and the full preview lint that
+// `--preview` renders returns an unblocked A-grade matching what the mutating commit reported.
+func TestCommitMsgVerdict_isolateVerbAccepted(t *testing.T) {
+	const reported = "test(codex): isolate direct continuation override (#3023) (fak cmd)"
+
+	// CommitMsgVerdict is the shared gradeability function both `--preview` and the mutating
+	// path's deriveCommitMessageStamp route through; it must now accept the exact #3912 subject.
+	if ok, why := CommitMsgVerdict(reported); !ok {
+		t.Fatalf("CommitMsgVerdict rejected the #3912 subject as ungradeable: %s", why)
+	}
+
+	// The end-to-end pre-commit lint (`--preview`'s report) must carry no blocking issue and grade
+	// A, so the preview no longer discards a subject the mutating commit would accept.
+	root := writeLintRepo(t)
+	r := LintCommitMessage(reported, []string{"cmd/fak/sessions_codex_hook_test.go"}, root)
+	if !r.OK {
+		t.Fatalf("preview lint blocked the #3912 subject; issues=%v", r.Issues)
+	}
+	if !r.Gradeable {
+		t.Fatalf("the #3912 subject must be witness-gradeable")
+	}
+	if r.Grade != "A" {
+		t.Errorf("preview grade = %s (score %d); want A to match the mutating commit's 100/A", r.Grade, r.Score)
+	}
+}
+
 // TestLintCommitMessage_nounLedNoFalseSuggestion guards the negative: a genuinely noun-led subject
 // (no deterministic fix) gets prose advice, not a fabricated rewrite.
 func TestLintCommitMessage_nounLedNoFalseSuggestion(t *testing.T) {
