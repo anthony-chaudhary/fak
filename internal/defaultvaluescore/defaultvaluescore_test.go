@@ -3,6 +3,8 @@ package defaultvaluescore
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // These mirror the conflationscore_test.go discipline: each KPI on a DEFECT fixture (the
@@ -92,7 +94,69 @@ func TestValueFlag_TransportFlagIsOutOfScope(t *testing.T) {
 	}
 }
 
-// --- Check 2: no vacuous kernel.Counters fold on the proxy -------------------------------
+// --- Check 2: cross-context default parity (VALUE_FLAG_CONTEXT_DRIFT) ---------------------
+
+func TestContextParity_DriftIsDebt(t *testing.T) {
+	// The same value saver, offered on BOTH serving surfaces, but default-ON under guard and
+	// default-OFF under serve: the win is silently disabled on the serve path. This is the
+	// class kpiValueFlagDefaultOn cannot see (it judges each surface alone -- both look fine).
+	flags := append(
+		ParseFlags(`fs.Bool("compact-anchor-head", true, "anchor the compaction head")`, "cmd/fak/guard.go"),
+		ParseFlags(`fs.Bool("compact-anchor-head", false, "anchor the compaction head")`, "cmd/fak/serve.go")...)
+	if len(flags) != 2 {
+		t.Fatalf("expected the same value-flag parsed from 2 surfaces, got %d: %+v", len(flags), flags)
+	}
+	// Each surface in isolation is clean (guard ON is fine; serve OFF alone would be a
+	// separate VALUE_FLAG_OFF, but the point here is parity specifically).
+	k := kpiValueFlagContextParity(flags)
+	if len(k.Defects) != 1 {
+		t.Fatalf("a saver ON in guard but OFF in serve must be 1 parity defect, got %d: %v", len(k.Defects), k.Defects)
+	}
+	if !strings.Contains(k.Defects[0], "VALUE_FLAG_CONTEXT_DRIFT") {
+		t.Errorf("defect must carry the VALUE_FLAG_CONTEXT_DRIFT class, got %q", k.Defects[0])
+	}
+	// The witness must name both surfaces and their opposed postures, deterministically.
+	if !strings.Contains(k.Defects[0], "guard.go=on") || !strings.Contains(k.Defects[0], "serve.go=off") {
+		t.Errorf("defect must witness both per-surface postures, got %q", k.Defects[0])
+	}
+	if k.Score >= 100.0 {
+		t.Errorf("score should drop below 100 on a parity drift, got %v", k.Score)
+	}
+}
+
+func TestContextParity_AgreementIsClean(t *testing.T) {
+	// The shipped idiom: a saver default-ON on BOTH serving surfaces. Parity holds, no debt.
+	flags := append(
+		ParseFlags(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`, "cmd/fak/guard.go"),
+		ParseFlags(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`, "cmd/fak/serve.go")...)
+	k := kpiValueFlagContextParity(flags)
+	if len(k.Defects) != 0 {
+		t.Errorf("a saver default-ON on both surfaces is parity-clean, got %v", k.Defects)
+	}
+	if k.Score != 100.0 {
+		t.Errorf("clean parity score=%v want 100", k.Score)
+	}
+}
+
+func TestContextParity_RoleSpecificSingleSurfaceIsClean(t *testing.T) {
+	// A value saver offered on ONLY one serving surface (a serve-only engine knob, a
+	// guard-only session lever) makes NO cross-context parity claim, so it is never a false
+	// positive -- even when its lone default is OFF. This is the guard against the naive
+	// "missing from the other surface = defect" over-reach.
+	flags := ParseFlags(`fs.Bool("engine-cache-require-exact-span", false, "serve-only inference-engine knob")`, "cmd/fak/serve.go")
+	if len(flags) != 1 {
+		t.Fatalf("expected 1 value-flag parsed, got %d: %+v", len(flags), flags)
+	}
+	k := kpiValueFlagContextParity(flags)
+	if len(k.Defects) != 0 {
+		t.Errorf("a saver present on a single surface makes no parity claim, got %v", k.Defects)
+	}
+	if k.Score != 100.0 {
+		t.Errorf("a single-surface saver is vacuously parity-clean, score=%v want 100", k.Score)
+	}
+}
+
+// --- Check 3: no vacuous kernel.Counters fold on the proxy -------------------------------
 
 func TestCounterFold_NoProxyGuardIsDebt(t *testing.T) {
 	src := `
@@ -187,6 +251,36 @@ func TestLiveTreeFloorPinned(t *testing.T) {
 	if got > CleanFloor {
 		t.Errorf("default-value debt rose above the floor %d: %d (%s)", CleanFloor, got, p.Reason)
 	}
+}
+
+func TestLiveTreeContextParityWiredAndClean(t *testing.T) {
+	// Proves the cross-context parity KPI is (a) actually folded into the payload the
+	// `fak score default-value` verb renders -- Payload.KPIs IS what the verb prints -- and
+	// (b) currently clean on the real guard.go/serve.go: every value saver shared by both
+	// serving surfaces ships the same default. If a future edit sets a shared saver ON in
+	// one surface but OFF in the other, this fails before the drift ships.
+	p := Build("../..")
+	var parity *scorecard.KPI
+	for i := range p.KPIs {
+		if p.KPIs[i].Key == "value_flag_context_parity" {
+			parity = &p.KPIs[i]
+			break
+		}
+	}
+	if parity == nil {
+		t.Fatalf("value_flag_context_parity KPI must be present in the payload the verb renders; got keys %v", kpiKeys(p.KPIs))
+	}
+	if len(parity.Defects) != 0 {
+		t.Errorf("live tree has a cross-context saver default drift: %v", parity.Defects)
+	}
+}
+
+func kpiKeys(kpis []scorecard.KPI) []string {
+	keys := make([]string, 0, len(kpis))
+	for _, k := range kpis {
+		keys = append(keys, k.Key)
+	}
+	return keys
 }
 
 // anyIntCorpus coerces the corpus debt (an int written by the kernel) to int for the floor

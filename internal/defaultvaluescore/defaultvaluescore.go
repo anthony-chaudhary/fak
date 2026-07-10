@@ -11,15 +11,19 @@
 // that may legitimately ship OFF lives here WITH a reason; an OFF value-flag not on the
 // list is debt. The scoring fold / grade / markdown machinery is the shared kernel in
 // pkg/scorecard; this package holds only the default-value-specific tables, parsing, and
-// the three KPIs that map worst-first onto the child issues #1090-#1095.
+// the four KPIs that map worst-first onto the child issues #1090-#1095.
 //
-// The three checks (issue #1096):
+// The four checks (issue #1096):
 //  1. VALUE_FLAG_OFF      -- a value-flag (a cost/cache/amplification lever) parsed from
 //     guard.go/serve.go that ships default-OFF, unless allow-listed with a reason.
-//  2. VACUOUS_ON_GUARD    -- an exit-summary line that folds kernel.Counters
+//  2. VALUE_FLAG_CONTEXT_DRIFT -- a value saver offered in BOTH serving surfaces (guard.go
+//     AND serve.go) that ships default-ON in one but default-OFF in the other, so the same
+//     cost/cache/context win is silently disabled on one serving path. Scoped to SHARED
+//     flags, so a role-specific saver present in only one surface is never a false positive.
+//  3. VACUOUS_ON_GUARD    -- an exit-summary line that folds kernel.Counters
 //     (VDSOHits/Transforms/Denies/EngineCalls) WITHOUT a proxy-aware path-split, because
 //     those counters are structurally 0 on the Decide-only `fak guard -- claude` proxy.
-//  3. C_MODELED_NOT_OBSERVED -- a score/report surface whose DEFAULT headline source is
+//  4. C_MODELED_NOT_OBSERVED -- a score/report surface whose DEFAULT headline source is
 //     "planned"/modeled rather than observed live telemetry.
 package defaultvaluescore
 
@@ -262,6 +266,84 @@ func kpiValueFlagDefaultOn(flags []valueFlag) scorecard.KPI {
 	}
 }
 
+// kpiValueFlagContextParity is epic #1089's CROSS-CONTEXT rung. kpiValueFlagDefaultOn asks
+// "is each value-flag on in its OWN surface"; this asks "is each value saver offered in MORE
+// THAN ONE serving surface on CONSISTENTLY across them". A saver that ships default-ON under
+// `fak guard` but default-OFF under `fak serve` (or vice versa) is the same cost/cache/context
+// win silently disabled on ONE serving path -- the purest "enabled in one context, not another"
+// defect this epic hunts, and the one kpiValueFlagDefaultOn structurally cannot see because it
+// judges each surface in isolation. It is scoped to flags present in >=2 surfaces, so a
+// legitimately role-specific saver (a serve-only inference-engine knob like --engine-cache-*,
+// a guard-only session-lifecycle lever like --precompact-hook) is NEVER a false positive: it
+// is simply not shared, so no parity is claimed for it.
+func kpiValueFlagContextParity(flags []valueFlag) scorecard.KPI {
+	// name -> (surface segment -> defaultOn), preserving first-seen order for stable output.
+	postures := map[string]map[string]bool{}
+	defLits := map[string]map[string]string{}
+	var order []string
+	for _, f := range flags {
+		if _, seen := postures[f.name]; !seen {
+			postures[f.name] = map[string]bool{}
+			defLits[f.name] = map[string]string{}
+			order = append(order, f.name)
+		}
+		seg := lastSegment(f.source)
+		postures[f.name][seg] = f.defaultOn
+		defLits[f.name][seg] = f.defLit
+	}
+	var defects []string
+	shared := 0
+	for _, name := range order {
+		bySurface := postures[name]
+		if len(bySurface) < 2 {
+			continue // present in a single serving surface -- role-specific, no parity claim
+		}
+		shared++
+		var anyOn, anyOff bool
+		for _, on := range bySurface {
+			if on {
+				anyOn = true
+			} else {
+				anyOff = true
+			}
+		}
+		if anyOn && anyOff {
+			defects = append(defects, fmt.Sprintf(
+				"value-flag --%s ships default-ON in one serving context but default-OFF in another (%s) -- the same win is silently disabled on one serving path (VALUE_FLAG_CONTEXT_DRIFT)",
+				name, renderPostures(bySurface, defLits[name])))
+		}
+	}
+	score := 100.0
+	if shared > 0 {
+		score = 100.0 * float64(shared-len(defects)) / float64(shared)
+	}
+	return scorecard.KPI{
+		Key: "value_flag_context_parity", Group: "value",
+		Score:   score,
+		Detail:  fmt.Sprintf("%d/%d shared value-flags ship the same default across serving contexts", shared-len(defects), shared),
+		Defects: defects,
+	}
+}
+
+// renderPostures renders a flag's per-surface default posture deterministically, e.g.
+// "guard.go=on[true] serve.go=off[false]", sorted by surface so the witness never reorders.
+func renderPostures(bySurface map[string]bool, defLits map[string]string) string {
+	segs := make([]string, 0, len(bySurface))
+	for s := range bySurface {
+		segs = append(segs, s)
+	}
+	sort.Strings(segs)
+	parts := make([]string, 0, len(segs))
+	for _, s := range segs {
+		state := "off"
+		if bySurface[s] {
+			state = "on"
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s[%s]", s, state, defLits[s]))
+	}
+	return strings.Join(parts, " ")
+}
+
 // counterReadRe matches a kernel.Counters field read on a guard.go line: kc.VDSOHits,
 // kc.Transforms, etc. The receiver name is not pinned (any ident.<Field>), so a renamed
 // receiver still trips the check.
@@ -365,6 +447,7 @@ func Build(root string) scorecard.Payload {
 
 	kpis := []scorecard.KPI{
 		kpiValueFlagDefaultOn(flags),
+		kpiValueFlagContextParity(flags),
 		kpiNoVacuousCounterFold(ampText, AmplificationSurface),
 		kpiObservedNotModeledDefault(scoreSurfaces),
 	}
