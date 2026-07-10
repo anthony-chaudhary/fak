@@ -59,6 +59,7 @@ var tier = map[string]int{
 	"clonescan":            1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
 	"sotamatrix":           1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"stallscan":            1, // pure churn-signal stall classifier (Classify(Sample,Thresholds)->Verdict) for low-usage machine lockups read by fak stallscan; stdlib-only, imports nothing internal, off the hot path.
+	"assumecheck":          1, // pure assumption-audit kernel (#3819 C1): closed Level/WitnessKind/Outcome vocabulary, pure Check(Assumption,Evidence)->Verdict, fail-closed GuardAssumption typed error; read by fak assume; stdlib-only, imports nothing internal, off the hot path.
 	"growthgate":           1, // pure unbounded-growth classifier (Classify([]Artifact,Budget)->Report) for append-only ledger/log bloat read by fak growthgate; the standing-bloat twin of stallscan; stdlib-only, imports nothing internal, off the hot path.
 	"branchrole":           1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
 	"benchloop":            1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.

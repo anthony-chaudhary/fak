@@ -98,6 +98,7 @@ var verbTiers = map[string]VerbTier{
 	"answer-shape":                  TierDev,
 	"antipattern-scorecard":         TierDev,
 	"api-host":                      TierDev,
+	"assume":                        TierDev,
 	"backend":                       TierDev,
 	"bench":                         TierDev,
 	"bench-ingest":                  TierDev,

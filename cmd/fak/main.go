@@ -386,6 +386,8 @@ func main() {
 		cmdRoutebench(os.Args[2:])
 	case "deepseekbench":
 		cmdDeepSeekBench(os.Args[2:])
+	case "assume":
+		cmdAssume(os.Args[2:])
 	case "accounts":
 		cmdAccounts(os.Args[2:])
 	case "fleet-accounts":
