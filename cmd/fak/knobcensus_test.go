@@ -46,11 +46,12 @@ func TestIndexKnobsJSON(t *testing.T) {
 	}
 	var census struct {
 		Knobs []struct {
-			Name        string `json:"name"`
-			Surface     string `json:"surface"`
-			Verdict     string `json:"verdict"`
-			Disposition string `json:"disposition"`
-			OwnerEpic   string `json:"owner_epic"`
+			Name          string   `json:"name"`
+			Surface       string   `json:"surface"`
+			Verdict       string   `json:"verdict"`
+			Disposition   string   `json:"disposition"`
+			OwnerEpic     string   `json:"owner_epic"`
+			RouteCoverage []string `json:"route_coverage"`
 		} `json:"knobs"`
 		Intent       int `json:"intent"`
 		Housekeeping int `json:"housekeeping"`
@@ -62,11 +63,20 @@ func TestIndexKnobsJSON(t *testing.T) {
 		t.Fatalf("counts = INTENT %d / HOUSEKEEPING %d, want 1 / 2: %+v", census.Intent, census.Housekeeping, census.Knobs)
 	}
 	got := map[string]string{}
+	route := map[string][]string{}
 	for _, k := range census.Knobs {
 		got[k.Surface+":"+k.Name] = k.Verdict
+		route[k.Surface+":"+k.Name] = k.RouteCoverage
 	}
 	if got["flag:account"] != "INTENT" {
 		t.Errorf("flag:account verdict = %q, want INTENT", got["flag:account"])
+	}
+	// Route-coverage: this fixture exposes each knob on a single surface, so every
+	// row names exactly its own surface (an INTENT knob on one surface is the
+	// promotion gap #2208 tracks). The cross-surface fold is witnessed in the
+	// knobcensus package test.
+	if r := route["flag:account"]; len(r) != 1 || r[0] != "flag" {
+		t.Errorf("flag:account route_coverage = %v, want [flag]", r)
 	}
 	if got["flag:cooldown-ttl"] != "HOUSEKEEPING" {
 		t.Errorf("flag:cooldown-ttl verdict = %q, want HOUSEKEEPING", got["flag:cooldown-ttl"])
@@ -88,7 +98,7 @@ func TestIndexKnobsTable(t *testing.T) {
 		t.Fatalf("runIndex knobs rc=%d, stderr=%s", rc, errb.String())
 	}
 	got := out.String()
-	for _, want := range []string{"VERDICT", "INTENT", "HOUSEKEEPING", "#2208", "#2198"} {
+	for _, want := range []string{"VERDICT", "ROUTE", "INTENT", "HOUSEKEEPING", "#2208", "#2198"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("knobs table missing %q, got:\n%s", want, got)
 		}

@@ -53,18 +53,31 @@ func (v Verdict) OwnerEpic() string {
 
 // Knob is one user-facing knob with its verdict and file:line provenance.
 type Knob struct {
-	Name        string  `json:"name"`
-	Surface     Surface `json:"surface"`
-	Verdict     Verdict `json:"verdict"`
-	Disposition string  `json:"disposition"` // promote | automate (derived from verdict)
-	OwnerEpic   string  `json:"owner_epic"`  // #2208 (INTENT) | #2198 (HOUSEKEEPING)
-	File        string  `json:"file"`        // repo-relative, forward slashes
-	Line        int     `json:"line"`
-	Evidence    string  `json:"evidence"`
+	Name          string    `json:"name"`
+	Surface       Surface   `json:"surface"`
+	Verdict       Verdict   `json:"verdict"`
+	Disposition   string    `json:"disposition"`    // promote | automate (derived from verdict)
+	OwnerEpic     string    `json:"owner_epic"`     // #2208 (INTENT) | #2198 (HOUSEKEEPING)
+	File          string    `json:"file"`           // repo-relative, forward slashes
+	Line          int       `json:"line"`           //
+	RouteCoverage []Surface `json:"route_coverage"` // surfaces this knob's control is exposed on (its route)
+	Evidence      string    `json:"evidence"`
 }
 
 // Key is the stable identity a knob is deduped on (surface:name).
 func (k Knob) Key() string { return string(k.Surface) + ":" + k.Name }
+
+// Route renders the knob's route-coverage as a compact "surface[+surface]" token
+// for the human table (e.g. "flag", "flag+env"). For an INTENT knob this is the
+// "each INTENT row names its route" witness the issue (#2210) requires; an INTENT
+// knob routed on a single surface is the promotion gap epic #2208 tracks.
+func (k Knob) Route() string {
+	parts := make([]string, len(k.RouteCoverage))
+	for i, s := range k.RouteCoverage {
+		parts[i] = string(s)
+	}
+	return strings.Join(parts, "+")
+}
 
 // newKnob stamps the disposition + owner epic that follow from the verdict so a
 // caller can never construct a knob whose disposition disagrees with its verdict.
@@ -136,6 +149,29 @@ func Scan(root string) (Census, error) {
 		}
 		return a.Key() < b.Key()
 	})
+
+	// Route-coverage post-pass. Group by logical knob identity so the same control
+	// exposed on two surfaces (flag --account and env FAK_ACCOUNT) is recognized as
+	// one knob whose route covers both. Each row then names its route (the issue's
+	// route-coverage column); an INTENT knob routed on a single surface is a
+	// promotion gap #2208 must close. Deterministic: surfaces are sorted.
+	surfacesByName := map[string]map[Surface]bool{}
+	for _, k := range knobs {
+		n := normalizeKnobName(k.Name)
+		if surfacesByName[n] == nil {
+			surfacesByName[n] = map[Surface]bool{}
+		}
+		surfacesByName[n][k.Surface] = true
+	}
+	for i := range knobs {
+		set := surfacesByName[normalizeKnobName(knobs[i].Name)]
+		surfaces := make([]Surface, 0, len(set))
+		for s := range set {
+			surfaces = append(surfaces, s)
+		}
+		sort.Slice(surfaces, func(a, b int) bool { return surfaces[a] < surfaces[b] })
+		knobs[i].RouteCoverage = surfaces
+	}
 
 	census := Census{Knobs: knobs}
 	for _, k := range knobs {
@@ -257,6 +293,19 @@ func classify(surface Surface, name, file string, line int) (Knob, bool) {
 	default:
 		return Knob{}, false
 	}
+}
+
+// normalizeKnobName folds a flag or env name to the logical knob identity used
+// for route-coverage: the same control on two surfaces (flag "account", env
+// "FAK_ACCOUNT") must normalize to one key. Lowercase, drop a FAK_ prefix, strip
+// the "_"/"-" word separators the two surfaces spell differently.
+func normalizeKnobName(name string) string {
+	low := strings.ToLower(name)
+	low = strings.TrimPrefix(low, "fak_")
+	low = strings.TrimPrefix(low, "fak-")
+	low = strings.ReplaceAll(low, "_", "")
+	low = strings.ReplaceAll(low, "-", "")
+	return low
 }
 
 func containsAny(s string, tokens []string) bool {
