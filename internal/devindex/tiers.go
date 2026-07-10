@@ -291,6 +291,7 @@ var verbTiers = map[string]VerbTier{
 	"webbench":                      TierDev,
 	"whats-changed":                 TierDev,
 	"windowgate":                    TierDev,
+	"wip":                           TierDev,
 	"workflow":                      TierDev,
 	"workflow-audit":                TierDev,
 	"worktree":                      TierDev,

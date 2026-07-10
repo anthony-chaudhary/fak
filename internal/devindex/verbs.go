@@ -302,6 +302,7 @@ var verbManifest = []Verb{
 	{Name: "webbench", Synopsis: "frontier web/browser-agent benchmarking (describe/eval/compare)", Lane: "cmd"},
 	{Name: "whats-changed", Synopsis: "peer code-diff readout: commits and files under target paths since a session/base ref", Lane: "cmd"},
 	{Name: "windowgate", Synopsis: "the no-desktop-popup ratchet: scan for console-popup-prone automation, non-zero on violations", Lane: "cmd"},
+	{Name: "wip", Synopsis: "checkpoint/restore the working-tree delta over refs/fak/wip/*: snapshot gc-safe, list, re-materialize", Lane: "cmd"},
 	{Name: "workflow", Synopsis: "keep ultracode Workflow scripts fak-native: lint for self-index/memory/shared-path use + seed the template", Lane: "cmd"},
 	{Name: "workflow-audit", Synopsis: "classify .github/workflows branch/tag refs against the branch-role contract; gate unclassified dev-path refs", Lane: "cmd"},
 	{Name: "worktree", Synopsis: "guarded on-trunk-safe worktree verbs; 'witness' runs a check in a transient detached worktree at origin/main", Lane: "cmd"},

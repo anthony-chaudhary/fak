@@ -83,6 +83,8 @@ func main() {
 		cmdBuildCheck(os.Args[2:])
 	case "worktree":
 		cmdWorktreeVerb(os.Args[2:])
+	case "wip":
+		cmdWip(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "ci-preflight":
