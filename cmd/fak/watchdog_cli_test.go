@@ -99,3 +99,42 @@ func TestWatchdogTimeCellEmptyIsDash(t *testing.T) {
 		t.Fatalf("watchdogTimeCell(1) = %q, want a formatted stamp", got)
 	}
 }
+
+// TestPostWatchdogHealthDigestGating covers the two branches that decide whether the poster
+// touches Slack at all — the gates that keep a scheduled `status --post-slack` quiet when healthy
+// and honest when misconfigured. Both return before any outbox/network I/O, so they need no
+// spool or token.
+func TestPostWatchdogHealthDigestGating(t *testing.T) {
+	ctx := context.Background()
+
+	// A healthy digest never posts: ShouldPost is false, so the poster returns 0 silently without
+	// needing a channel or opening the outbox.
+	t.Run("healthy is silent", func(t *testing.T) {
+		t.Setenv("FAK_WATCHDOG_SLACK_CHANNEL", "")
+		var out, errb bytes.Buffer
+		healthy := watchdoghealth.Fold([]watchdoghealth.Monitor{{ID: "m", Installed: true, Alive: true}})
+		if code := postWatchdogHealthDigest(ctx, &out, &errb, healthy, ""); code != 0 {
+			t.Fatalf("healthy digest: code = %d, want 0", code)
+		}
+		if out.Len() != 0 || errb.Len() != 0 {
+			t.Fatalf("healthy digest must be silent: stdout=%q stderr=%q", out.String(), errb.String())
+		}
+	})
+
+	// An attention digest with no channel (flag empty, env unset) refuses with exit 2 and a
+	// guidance line — before it ever touches the outbox.
+	t.Run("attention without a channel refuses", func(t *testing.T) {
+		t.Setenv("FAK_WATCHDOG_SLACK_CHANNEL", "")
+		var out, errb bytes.Buffer
+		attention := watchdoghealth.Fold([]watchdoghealth.Monitor{{ID: "m", Installed: true}})
+		if !watchdoghealth.SlackHealthDigest(attention).ShouldPost {
+			t.Fatal("test setup: a DOWN monitor should fold to a ShouldPost digest")
+		}
+		if code := postWatchdogHealthDigest(ctx, &out, &errb, attention, ""); code != 2 {
+			t.Fatalf("attention + no channel: code = %d, want 2", code)
+		}
+		if !strings.Contains(errb.String(), "no channel") {
+			t.Fatalf("want a 'no channel' guidance line, got stderr=%q", errb.String())
+		}
+	})
+}

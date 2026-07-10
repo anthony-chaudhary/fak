@@ -8,6 +8,7 @@ package main
 //	fak watchdog status           # read-only: probe every default monitor + fold its heal-state
 //	fak watchdog status --json    # the raw digest as JSON
 //	fak watchdog status --check   # exit 1 if the layer needs a human (DOWN/UNKNOWN/GAVE_UP)
+//	fak watchdog status --post-slack  # enqueue the health digest to Slack when it needs a human
 //	fak watchdog heal             # run the autoheal ONCE, now (restart dead-but-installed monitors)
 //	fak watchdog heal --warn      # heal in warn-only mode (report, do not restart)
 //
@@ -29,10 +30,12 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 	"github.com/anthony-chaudhary/fak/internal/watchdoghealth"
 )
 
@@ -68,6 +71,7 @@ func watchdogUsage(w io.Writer) {
 
 Usage:
   fak watchdog status [--json] [--check]   probe every default monitor + fold its heal-state
+  fak watchdog status --post-slack         post the health digest to Slack when it needs a human
   fak watchdog heal   [--warn] [--json]    run the autoheal once, now
 
 The default monitors are the OS-scheduled fleet timers watchdog-autoheal keeps alive on
@@ -119,6 +123,8 @@ func runWatchdogStatus(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the raw digest as JSON instead of the human table")
 	check := fs.Bool("check", false, "exit 1 (not 0) when the layer needs attention (DOWN/UNKNOWN/GAVE_UP)")
+	postSlack := fs.Bool("post-slack", false, "enqueue the health digest to the Slack outbox when it needs attention (one coalesced watchdog-health card)")
+	channel := fs.String("channel", "", "Slack channel for --post-slack (default: $FAK_WATCHDOG_SLACK_CHANNEL)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -162,10 +168,107 @@ func runWatchdogStatus(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	if *postSlack {
+		if code := postWatchdogHealthDigest(ctx, stdout, stderr, digest, strings.TrimSpace(*channel)); code != 0 {
+			return code
+		}
+	}
+
 	if *check && watchdogCheckTrips(digest) {
 		return 1
 	}
 	return 0
+}
+
+// postWatchdogHealthDigest folds the digest into internal/watchdoghealth's channel card and,
+// when it wants attention (ShouldPost — the SAME condition `--check` exits non-zero on),
+// enqueues it to the Slack outbox under a stable, host-scoped CardKey so repeat runs edit ONE
+// standing card in place rather than posting a fresh message each run. An all-clear digest posts
+// nothing and returns 0, so a scheduled `status --post-slack` speaks only when the fleet needs a
+// person. Delivery is best-effort: a missing token or a busy drain leaves the row durably
+// spooled for the next `fak slack outbox drain`.
+func postWatchdogHealthDigest(ctx context.Context, stdout, stderr io.Writer, d watchdoghealth.Digest, channel string) int {
+	card := watchdoghealth.SlackHealthDigest(d)
+	if !card.ShouldPost {
+		return 0 // healthy — the channel stays quiet
+	}
+	if channel == "" {
+		channel = strings.TrimSpace(os.Getenv("FAK_WATCHDOG_SLACK_CHANNEL"))
+	}
+	if channel == "" {
+		fmt.Fprintln(stderr, "fak watchdog status --post-slack: no channel: pass --channel or set FAK_WATCHDOG_SLACK_CHANNEL")
+		return 2
+	}
+
+	// Durability first: the row is on disk before any send, so nothing below can lose it.
+	ob, err := openOutbox()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak watchdog status --post-slack: outbox: %v\n", err)
+		return 1
+	}
+	cardKey := watchdogHealthCardKey()
+	row := slackoutbox.Row{
+		Channel: channel,
+		Text:    card.Title + "\n" + card.Body,
+		CardKey: cardKey,
+		Source:  "watchdog:health",
+	}
+	// Edit the standing card in place once it has posted, so a periodic health post coalesces
+	// to a single message instead of a new one every run.
+	if snap, err := ob.Load(); err == nil {
+		if ts := lastPostedTSForCard(snap, cardKey); ts != "" {
+			row.UpdateTS = ts
+		}
+	}
+	nonce, err := ob.Enqueue(row)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak watchdog status --post-slack: enqueue: %v\n", err)
+		return 1
+	}
+
+	// Best-effort in-process drain. A missing token, a busy lock, or a transport error all leave
+	// the row durably spooled for the next drain rather than failing the status command.
+	wire, werr := outboxWire("", "")
+	if werr != nil {
+		fmt.Fprintf(stdout, "fak watchdog status: health digest enqueued to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", channel, nonce, werr)
+		return 0
+	}
+	if _, err := ob.Drain(ctx, wire, slackoutbox.DrainOpts{Root: "."}); err != nil && err != slackoutbox.ErrDrainBusy {
+		fmt.Fprintf(stdout, "fak watchdog status: health digest enqueued to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", channel, nonce, err)
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak watchdog status: health digest delivered to %s (nonce=%s)\n", channel, nonce)
+	return 0
+}
+
+// watchdogHealthCardKey is the stable slackoutbox CardKey the health digest posts under. It is
+// host-scoped so a multi-machine fleet keeps one standing card per machine rather than fighting
+// over a shared one.
+func watchdogHealthCardKey() string {
+	host := "local"
+	if h, err := os.Hostname(); err == nil {
+		if h = strings.TrimSpace(h); h != "" {
+			host = h
+		}
+	}
+	return "watchdog-health:" + host
+}
+
+// lastPostedTSForCard returns the Slack ts of the most recent posted row carrying cardKey, or ""
+// if the card has never posted. Rows replay in append order, so the last posted match is the
+// current card — letting a stateless CLI edit its standing card (chat.update) without holding the
+// ts in memory across runs.
+func lastPostedTSForCard(snap *slackoutbox.Snapshot, cardKey string) string {
+	ts := ""
+	for _, r := range snap.Rows {
+		if r.CardKey != cardKey {
+			continue
+		}
+		if posted := snap.PostedTS(r.Nonce); posted != "" {
+			ts = posted
+		}
+	}
+	return ts
 }
 
 // watchdogCheckTrips is the `--check` exit-1 condition. By default it is the digest's own
