@@ -183,6 +183,12 @@ type IssueRoute struct {
 	// labels. Per docs/generation-loop-scheduling.md, this is a scheduling hint
 	// surfaced for a consumer to read, not a queue silo or a priority override.
 	Generation string `json:"generation,omitempty"`
+	// BlockedBy is the issue-number prerequisites this issue declares in its body via a
+	// "depends-on:/blocked-by: #N" marker (CandidateBlockedBy), as bare-numeric IDs. omitempty
+	// keeps an edge-free issue's route payload byte-identical to before the field existed. A live
+	// dependency soft-hold (holdOpenPrereqForRoute) reads this to keep a leaf out of the pick
+	// while a prerequisite it names is still an open candidate this tick.
+	BlockedBy []string `json:"blocked_by,omitempty"`
 }
 
 type SkippedIssue struct {
@@ -1599,6 +1605,7 @@ func route(issue Issue, lane, confidence, signal string, conflict bool, paths []
 		BatchPolicy:    issueBriefField(issue, "batch policy", "noise control", "spam control"),
 		UnroutedReason: unroutedReason,
 		Generation:     generationField(issue),
+		BlockedBy:      CandidateBlockedBy(issue.Body),
 	}
 }
 

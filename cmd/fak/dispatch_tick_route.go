@@ -60,6 +60,7 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[strin
 		"lane":               rec.Lane,
 		"title":              rec.Title,
 		"body":               inf.Body,
+		"labels":             inf.Labels,
 		"fetch_error":        rec.FetchError,
 		"prompt":             rec.Prompt,
 		"prompt_chars":       rec.PromptChars,
@@ -105,6 +106,22 @@ func dispatchIssueLabels(raw any) []string {
 			if name := dispatchMapString(m, "name"); name != "" {
 				out = append(out, name)
 			}
+		}
+	}
+	return out
+}
+
+// dispatchStringSlice reads a []string out of a prompt-record field, tolerating both the
+// in-process []string dispatchPrompt stores and a []any that survives a JSON round-trip, so
+// the tier-launch label read works whether the record was built in-process or rehydrated.
+func dispatchStringSlice(raw any) []string {
+	if ss, ok := raw.([]string); ok {
+		return ss
+	}
+	out := []string{}
+	for _, v := range anySlice(raw) {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
 		}
 	}
 	return out
@@ -259,6 +276,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		bestStepBudget := -1
 		bestCount := -1
 		bestPriority := -1
+		bestCore := false
 		for lane, nums := range numsByLane {
 			if exclude[lane] {
 				continue
@@ -269,11 +287,13 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 			}
 			stepBudget := stepBudgets[lane]
 			priority := dispatchLaneTopPriority(nums, priorityByLane[lane])
-			if dispatchLaneBetterForGoal(goalProfile, priority, stepBudget, len(nums), lane, bestPriority, bestStepBudget, bestCount, chosen) {
+			core := dispatchtick.IsCoreSourceLaneTree(treesByLane[lane])
+			if dispatchLaneBetterForGoal(goalProfile, priority, stepBudget, len(nums), core, lane, bestPriority, bestStepBudget, bestCount, bestCore, chosen) {
 				chosen = lane
 				bestPriority = priority
 				bestStepBudget = stepBudget
 				bestCount = len(nums)
+				bestCore = core
 			}
 		}
 		sort.Strings(selfSourceHeld)
@@ -309,7 +329,7 @@ func dispatchLaneTopPriority(nums []int, weights map[int]int) int {
 	return dispatchtick.PriorityWeightDefault
 }
 
-func dispatchLaneBetterForGoal(profile string, priority, stepBudget, count int, lane string, bestPriority, bestStepBudget, bestCount int, chosen string) bool {
+func dispatchLaneBetterForGoal(profile string, priority, stepBudget, count int, core bool, lane string, bestPriority, bestStepBudget, bestCount int, bestCore bool, chosen string) bool {
 	if strings.TrimSpace(lane) == "" {
 		return false
 	}
@@ -326,6 +346,16 @@ func dispatchLaneBetterForGoal(profile string, priority, stepBudget, count int, 
 		if priority != bestPriority {
 			return priority > bestPriority
 		}
+	}
+	// Default the unattended wave toward fak's own guard-shippable core engineering
+	// (cmd/** + internal/**, minus the trust-critical referee) instead of the coarse
+	// docs/tools buckets. Under throughput this is the LEADING term: a trunk-safe core
+	// leaf outranks a docs/tools lane regardless of step budget, so "richest-first" can no
+	// longer starve fragmented per-leaf core work behind the big docs/tools buckets. Under
+	// high-priority it sits BELOW the priority-label compare, so a genuinely urgent
+	// docs/tools issue still wins.
+	if core != bestCore {
+		return core
 	}
 	if stepBudget != bestStepBudget {
 		return stepBudget > bestStepBudget
@@ -354,6 +384,23 @@ var dispatchFetchViewIssues = dispatchFetchViewIssuesGH
 var dispatchFetchBacklogIssues = dispatchFetchOpenIssues
 
 func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
+	payload, err := dispatchRoutedBeforePrereqHold(root, stderr)
+	if err != nil {
+		return payload, err
+	}
+	// Dependency soft-hold: after the known-bad hold, hold back any dispatchable leaf whose
+	// "depends-on:/blocked-by: #N" prerequisite is still an OPEN candidate this tick. Runs AFTER
+	// known-bad on purpose -- a known-bad-held prerequisite stays in SkippedHumanBlocked (still
+	// open), so a dependent of it remains correctly held. Fails open on a closed/absent prerequisite.
+	return holdOpenPrereqForRoute(payload), nil
+}
+
+// dispatchRoutedBeforePrereqHold fetches, routes, and applies the known-bad scope-hold, but NOT the
+// dependency prereq hold -- so every routed candidate in payload.Issues still carries its BlockedBy
+// edges. The prereq hold moves held dependents into SkippedHumanBlocked (a SkippedIssue drops the
+// edges), so a consumer that needs the full dependency graph (fak dispatch graph) reads THIS payload,
+// while the live tick reads dispatchRouteIssuesNative, which folds the hold on top.
+func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
 	const issueLimit = 1000
 	taxonomy, taxErr := dispatchLaneTaxonomy(root)
 	issues, injected, issueErr := dispatchFetchScopedIssues(root, stderr, dispatchTickView, issueLimit)

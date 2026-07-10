@@ -492,6 +492,12 @@ func winnersByKey(cands []Candidate) map[string]string {
 	return winner
 }
 
+// BlockedByOpenPrereq is the exported view of blockedByOpenPrereq: given a candidate set carrying
+// BlockedBy edges, it returns per-ID the sorted set of prerequisites still open this tick (a SOFT
+// hold). It exists so the live tick's post-route hold (cmd/fak/dispatch_prereq.go) reuses the same
+// tested fail-open / cycle-safe engine the ordering leaf uses, rather than re-deriving it.
+func BlockedByOpenPrereq(cands []Candidate) map[string][]string { return blockedByOpenPrereq(cands) }
+
 // blockedByOpenPrereq computes, per candidate ID, the sorted set of prerequisites it names in
 // BlockedBy that are still OPEN candidates this tick — a SOFT hold, never a hard ban. A candidate
 // with a non-empty result is held (DispBlocked) rather than dispatched. Two invariants keep the
