@@ -70,13 +70,15 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeRelease(stdout, stderr, argv[1:])
 	case "resolve":
 		return runResumeResolve(stdout, stderr, argv[1:])
+	case "identity":
+		return runResumeIdentity(stdout, stderr, argv[1:])
 	case "why":
 		return runResumeWhy(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, hold, release, resolve, or why)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, hold, release, resolve, identity, or why)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -1170,6 +1172,8 @@ func resumeUsage(w io.Writer) {
   fak resume resolve <session-id> [--home DIR] [--cwd DIR] [--dry-run]
                      [--no-probe] [--wait] [--no-wait] [--json]
 
+  fak resume identity <uuid|trace> [--reg-dir DIR] [--json]
+
   fak resume why <session-id> [--home DIR] [--ledger FILE] [--max-attempts N] [--json]
 
 plan answers "I am resuming a long session — what happens to the prompt cache, and what
@@ -1203,6 +1207,13 @@ loaded seat — and --wait turns that into behavior: sleep out the reset (narrat
 countdown on stderr), re-resolve, and print the pin dir, so one command self-heals the
 account wall. --no-wait forces the immediate re-home. stdout is the CLAUDE_CONFIG_DIR to
 set; --dry-run decides without copying. The Go port of tools/resume_resolver.py.
+
+identity resolves the join between the two session keyspaces the resume layer straddles: the
+Claude Code transcript UUID (the id "claude --resume" takes) and the gateway / guard TRACE id
+the operator control plane keys on. Give it either id and it prints the paired one — plus the
+recorded handle/account/via provenance — from the durable, GC-immune resume_identity.jsonl store
+(so a join survives the descriptor registry's 30-minute GC). Exit 4 on no join. It resolves the
+identity only; it resumes nothing.
 
 why is the single-session narrative over the same folds: locate the session across every
 ~/.claude* account (no --store to know), read how it died from the transcript's own

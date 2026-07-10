@@ -956,6 +956,21 @@ func rwLoadDriveStates(regDir string) map[string]resume.WatchdogDriveState {
 	return states
 }
 
+// rwLoadIdentity reads the append-only identity store and folds it — through the pure leaf
+// resume.FoldIdentity — into the traceByUUID direction the watchdog needs: a plan row is keyed
+// by the transcript UUID, and this join is the only bridge from that UUID to the gateway TRACE
+// the rich drive State (internal/session/table.go) is keyed on. Mirrors rwLoadDriveStates: a
+// missing / unreadable / empty store yields a nil map, leaving any UUID->trace join INERT
+// (fail-open) rather than stranding a legitimately-crashed session. The reverse direction is
+// dropped here — the watchdog only ever holds a UUID and wants its trace.
+func rwLoadIdentity(regDir string) map[string]string {
+	traceByUUID, _ := resume.LoadIdentity(regDir)
+	if len(traceByUUID) == 0 {
+		return nil
+	}
+	return traceByUUID
+}
+
 // rwWorkerAccounts is the set of account dir-basenames policy still offers as workers.
 // Empty on any discovery problem (which disables the defense-in-depth check, fail-open).
 func rwWorkerAccounts(home string) map[string]bool {
