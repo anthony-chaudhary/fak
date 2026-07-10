@@ -30,7 +30,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
+	"github.com/anthony-chaudhary/fak/internal/wiprecon"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
@@ -53,6 +55,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipReap(stdout, stderr, argv[1:])
 	case "attribute", "attr":
 		return runWipAttribute(stdout, stderr, argv[1:])
+	case "reconcile":
+		return runWipReconcile(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -89,6 +93,12 @@ func wipUsage(w io.Writer) {
       (OWNED), to several (SHARED), or to none (ORPHAN — unattributed, at-risk WIP).
       With --orphans, print only the ORPHAN hunks (exit 3 if any exist).
 
+  fak wip reconcile [-C <repo>] [--json]
+      For every checkpoint whose owning session no longer holds a live lease
+      (CRASHED), decide the one safe action: DISCARD_WITNESSED (delta landed in
+      HEAD), RECLAIM (unlanded, applies cleanly), or QUARANTINE (unlanded, conflicts).
+      A live owner's checkpoint is SKIPped. Advisory: prints decisions, mutates nothing.
+
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta
       byte-identical, and that status lists the checkpoint. Exit 0 on PASS.
@@ -121,6 +131,29 @@ func gitWip(ctx context.Context, dir string, env []string, args ...string) (stdo
 		return o.String(), e.String(), ee.ExitCode(), nil // git ran, non-zero
 	}
 	return "", e.String(), -1, runErr // git not executable
+}
+
+// gitWipStdin runs git like gitWip but feeds stdin (a patch) to the process — used by
+// `git apply --check -` to test whether a delta would apply cleanly without mutating
+// the tree. Same error contract as gitWip: a non-zero git exit is reported in code.
+func gitWipStdin(ctx context.Context, dir, stdin string, args ...string) (stdout, stderr string, code int, err error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Stdin = strings.NewReader(stdin)
+	var o, e strings.Builder
+	cmd.Stdout = &o
+	cmd.Stderr = &e
+	runErr := cmd.Run()
+	if runErr == nil {
+		return o.String(), e.String(), 0, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(runErr, &ee) {
+		return o.String(), e.String(), ee.ExitCode(), nil
+	}
+	return "", e.String(), -1, runErr
 }
 
 // gitWipOut is the must-succeed convenience: TRIMMED stdout, or an error carrying
@@ -695,6 +728,107 @@ func wipAttrOwnerLabel(a wipattr.Attribution) string {
 	default:
 		return "-"
 	}
+}
+
+// ---- reconcile (#3875) ----
+
+// wipReconcileResult is the JSON/plain result of a reconciliation pass.
+type wipReconcileResult struct {
+	Decisions []wiprecon.Decision `json:"decisions"`
+}
+
+// runWipReconcile is advisory: it prints the per-checkpoint decision and mutates
+// nothing (no ref delete, no restore). Acting on a decision is a later, explicit cut.
+func runWipReconcile(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("wip reconcile", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "wip")
+	repo := fs.String("C", "", "run in this git repo (default: cwd)")
+	asJSON := fs.Bool("json", false, "emit the reconciliation decisions as JSON")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	res, err := wipReconcile(context.Background(), *repo)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wip reconcile: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, res, "fak wip reconcile")
+	}
+	if len(res.Decisions) == 0 {
+		fmt.Fprintln(stdout, "no checkpoints to reconcile")
+		return 0
+	}
+	for _, d := range res.Decisions {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", d.Action, d.Session, d.Reason)
+	}
+	return 0
+}
+
+// wipReconcile classifies every WIP checkpoint into a reconciliation action from three
+// git-witnessed facts: liveness (does the owning session still hold a lease under
+// refs/fak/locks/*?), landing (wipOwnerState — is the delta in HEAD?), and clean-apply
+// (git apply --check — does the delta still apply?). A live owner's checkpoint is SKIP;
+// only a crashed owner's checkpoint is DISCARD_WITNESSED / RECLAIM / QUARANTINE.
+func wipReconcile(ctx context.Context, repo string) (wipReconcileResult, error) {
+	recs, err := wipListRecords(ctx, repo)
+	if err != nil {
+		return wipReconcileResult{}, err
+	}
+	live, err := wipLiveSessions(ctx, repo)
+	if err != nil {
+		return wipReconcileResult{}, err
+	}
+	cands := make([]wiprecon.Candidate, 0, len(recs))
+	for _, r := range recs {
+		session := wipSessionOf(r)
+		c := wiprecon.Candidate{Session: session, Owner: wiprecon.OwnerCrashed}
+		if live[session] {
+			c.Owner = wiprecon.OwnerLive
+			cands = append(cands, c)
+			continue
+		}
+		st, oerr := wipOwnerState(ctx, repo, r)
+		if oerr != nil {
+			return wipReconcileResult{}, oerr
+		}
+		c.Landed = st == wipref.OwnerLanded
+		if !c.Landed {
+			c.Applies = wipDeltaApplies(ctx, repo, r)
+		}
+		cands = append(cands, c)
+	}
+	return wipReconcileResult{Decisions: wiprecon.Reconcile(cands)}, nil
+}
+
+// wipLiveSessions returns the set of session ids that currently hold a live lease under
+// refs/fak/locks/* — the liveness signal that distinguishes a crashed owner (no live
+// lease) from one still working. Read-only over the lease namespace.
+func wipLiveSessions(ctx context.Context, repo string) (map[string]bool, error) {
+	recs, _, err := leaseref.NewInDir(repo).LiveRegistrations(ctx, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("read live leases: %w", err)
+	}
+	live := make(map[string]bool, len(recs))
+	for _, r := range recs {
+		if r.SessionID != "" {
+			live[r.SessionID] = true
+		}
+	}
+	return live, nil
+}
+
+// wipDeltaApplies reports whether the checkpoint's recorded delta applies cleanly to the
+// current working tree (`git apply --check`), the RECLAIM-vs-QUARANTINE discriminator.
+// The RAW (untrimmed) diff is fed so the patch's trailing newline survives for apply.
+func wipDeltaApplies(ctx context.Context, repo string, rec wipref.RefRecord) bool {
+	diff, _, code, err := gitWip(ctx, repo, nil, "diff", rec.Object+"^", rec.Object)
+	if err != nil || code != 0 || strings.TrimSpace(diff) == "" {
+		return false
+	}
+	_, _, acode, aerr := gitWipStdin(ctx, repo, diff, "apply", "--check", "-")
+	return aerr == nil && acode == 0
 }
 
 // ---- restore ----
