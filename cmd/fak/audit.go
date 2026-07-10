@@ -31,6 +31,10 @@ import (
 //	              assert determinism: every identical recorded call (same tool + args digest)
 //	              must carry one verdict; a divergence is a structured non-determinism finding
 //	              (the reproducible-trajectory witness of #2905; see audit_replay.go).
+//	rsl PATH    — replay a git Reference State Log (append-only, hash-chained record of observed
+//	              trunk ref transitions) and exit 1 on a tampered chain OR a non-fast-forward gap,
+//	              naming the offending ref — the forge-independent no-force-push proof (#3190;
+//	              borrowed from gittuf's RSL; see audit_rsl.go / internal/rsl).
 func cmdAudit(args []string) {
 	if len(args) == 0 {
 		auditUsage()
@@ -45,6 +49,8 @@ func cmdAudit(args []string) {
 		cmdAuditDiagnose(args[1:])
 	case "replay":
 		cmdAuditReplay(args[1:])
+	case "rsl":
+		cmdAuditRSL(args[1:])
 	case "usage":
 		cmdAuditUsage(args[1:])
 	case "-h", "--help", "help":
@@ -61,6 +67,7 @@ func auditUsage() {
 	fmt.Fprintln(os.Stderr, "       fak audit export <journal.jsonl>   (re-emit the journal as JSONL on stdout)")
 	fmt.Fprintln(os.Stderr, "       fak audit diagnose [<journal.jsonl>] (tell concurrent-writer interleave apart from real tampering)")
 	fmt.Fprintln(os.Stderr, "       fak audit replay [--json] <journal.jsonl> (re-drive recorded decisions; assert every identical call replayed to one verdict)")
+	fmt.Fprintln(os.Stderr, "       fak audit rsl <rsl.jsonl>          (replay a git Reference State Log; exit 1 on a tampered chain or non-fast-forward gap)")
 	fmt.Fprintln(os.Stderr, "       fak audit usage [--since DUR] [--json] [--root DIR ...] (cross-session usage rollup over every durable journal/ledger)")
 }
 
