@@ -117,6 +117,14 @@ type ProgressCursor struct {
 	// LedgerRef optionally names an intent-ledger / run-ledger / DOS row to re-read for
 	// verified progress. If present it must resolve; omitted when unknown.
 	LedgerRef string `json:"ledger_ref,omitempty"`
+	// WipTree optionally names the git object id of this leg's working-tree checkpoint —
+	// the refs/fak/wip/<session> commit the spine (#3872) mints from the uncommitted delta.
+	// It is a content-addressed POINTER to the bytes the closing leg wrote-but-didn't-commit,
+	// not the bytes and not a claim, so it preserves the pointer-only / no-`claimed`
+	// invariants: the successor re-reads it against git (wiptree.go) and re-materializes the
+	// delta on resume rather than trusting a recap. Optional and back-compatible — an old
+	// baton without it (or a leg with a clean tree) resumes exactly as before. Rung C6 (#3878).
+	WipTree string `json:"wip_tree,omitempty"`
 	// HeldRegion is the lane/path region (globs) the successor must re-acquire before
 	// writing, so leg N+1 takes the SAME lease and does not collide with peers on the
 	// shared tree. Empty is invalid for a write-capable relay but is a representable
