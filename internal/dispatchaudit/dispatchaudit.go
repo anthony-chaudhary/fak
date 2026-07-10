@@ -115,6 +115,13 @@ type Worker struct {
 	// FirstError / LastError bound the error span (zero values when none).
 	FirstError time.Time
 	LastError  time.Time
+	// SpawnTime is the worker's spawn instant, parsed from the `# fak-spawn
+	// 20060102-150405` header stamp (zero when the header carried none).
+	SpawnTime time.Time
+	// LogMTime is the log file's last-write time — the exit proxy for a dead
+	// worker, latest-activity for a live one. Zero when unknown (direct
+	// unit fixtures).
+	LogMTime time.Time
 	// BannerOnly is true when the log is only a startup banner (no real work).
 	BannerOnly bool
 	// ProgressTicks / ProgressMoved describe the worker's progress ledger
@@ -129,6 +136,16 @@ func (w Worker) errSpan() float64 {
 		return 0
 	}
 	return w.LastError.Sub(w.FirstError).Minutes()
+}
+
+// runSpan returns the worker's TRUE run duration in minutes: spawn-header
+// stamp → last log write. Zero when either endpoint is unknown, so a fixture
+// without a spawn stamp never fabricates a duration (issue #3331).
+func (w Worker) runSpan() float64 {
+	if w.SpawnTime.IsZero() || w.LogMTime.IsZero() || !w.LogMTime.After(w.SpawnTime) {
+		return 0
+	}
+	return w.LogMTime.Sub(w.SpawnTime).Minutes()
 }
 
 // Backend resolves the worker's effective backend, preferring the sidecar and
@@ -157,17 +174,23 @@ func DefaultThresholds() Thresholds {
 
 // Classification is the verdict for one worker.
 type Classification struct {
-	Worker        Worker  `json:"-"`
-	Log           string  `json:"log"`
-	Issue         string  `json:"issue,omitempty"`
-	Lane          string  `json:"lane,omitempty"`
-	Backend       Backend `json:"backend"`
-	Outcome       Outcome `json:"outcome"`
-	LogSizeKnown  bool    `json:"log_size_known,omitempty"`
-	LogBytes      int64   `json:"log_bytes"`
-	PID           int     `json:"pid,omitempty"`
-	PIDAlive      bool    `json:"pid_alive,omitempty"`
-	WallMinutes   float64 `json:"wall_minutes"`
+	Worker       Worker  `json:"-"`
+	Log          string  `json:"log"`
+	Issue        string  `json:"issue,omitempty"`
+	Lane         string  `json:"lane,omitempty"`
+	Backend      Backend `json:"backend"`
+	Outcome      Outcome `json:"outcome"`
+	LogSizeKnown bool    `json:"log_size_known,omitempty"`
+	LogBytes     int64   `json:"log_bytes"`
+	PID          int     `json:"pid,omitempty"`
+	PIDAlive     bool    `json:"pid_alive,omitempty"`
+	// WallMinutes is the ERROR-SPAN only (first→last provider-error line) —
+	// the waste signal. A clean worker reports 0 however long it ran.
+	WallMinutes float64 `json:"wall_minutes"`
+	// RunMinutes is the true run duration: spawn-header stamp → last log
+	// write. Distinct from WallMinutes so a clean long-running worker still
+	// reports a nonzero duration (issue #3331).
+	RunMinutes    float64 `json:"run_minutes"`
 	Misattributed bool    `json:"misattributed"`
 	Reason        string  `json:"reason"`
 	// EvidenceSummary is assembled only from typed/structured fields. It
@@ -191,6 +214,7 @@ func Classify(w Worker, th Thresholds) Classification {
 		PID:          w.PID,
 		PIDAlive:     w.PIDAlive,
 		WallMinutes:  w.errSpan(),
+		RunMinutes:   w.runSpan(),
 	}
 	// Misattribution flag: a present sidecar that disagrees with the header, or a
 	// missing sidecar when a header backend is declared. Advisory — it annotates
@@ -294,6 +318,9 @@ func structuredEvidenceSummary(w Worker, backend Backend, misattributed, rawOutp
 	}
 	if span := w.errSpan(); span > 0 {
 		parts = append(parts, "error_span_min="+strconv.FormatFloat(span, 'f', 1, 64))
+	}
+	if run := w.runSpan(); run > 0 {
+		parts = append(parts, "run_min="+strconv.FormatFloat(run, 'f', 1, 64))
 	}
 	if w.BannerOnly {
 		parts = append(parts, "banner_only=true")
@@ -430,7 +457,11 @@ type BackendRollup struct {
 	NoOps         int     `json:"no_ops"`
 	Errored       int     `json:"errored"`
 	Misattributed int     `json:"misattributed"`
+	// WastedMinutes sums the ERROR-SPAN (WallMinutes) of non-shipped workers —
+	// the waste KPI. RunMinutes sums the true spawn→last-write duration of
+	// EVERY worker, so run-time and error-span stay distinct (issue #3331).
 	WastedMinutes float64 `json:"wasted_minutes"`
+	RunMinutes    float64 `json:"run_minutes"`
 }
 
 // Report is the full PURE fold output: per-worker classifications, per-backend
@@ -463,6 +494,7 @@ func Fold(workers []Worker, th Thresholds) Report {
 			roll[c.Backend] = r
 		}
 		r.Workers++
+		r.RunMinutes += c.RunMinutes
 		if c.Misattributed {
 			r.Misattributed++
 		}

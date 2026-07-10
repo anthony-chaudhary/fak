@@ -19,6 +19,7 @@ import (
 var (
 	// `# fak-spawn 20260629-235906 issue=1346 lane=docs backend=opencode argv0=...`
 	reSpawnHeader = regexp.MustCompile(`^#\s*fak-spawn\b.*$`)
+	reSpawnStamp  = regexp.MustCompile(`^#\s*fak-spawn\s+(\d{8}-\d{6})\b`)
 	reIssue       = regexp.MustCompile(`\bissue=(\S+)`)
 	reLane        = regexp.MustCompile(`\blane=(\S+)`)
 	reHdrBackend  = regexp.MustCompile(`\bbackend=(\S+)`)
@@ -187,6 +188,7 @@ func parseLog(path string) (Worker, error) {
 	if st, err := f.Stat(); err == nil {
 		w.LogSizeKnown = true
 		w.LogBytes = st.Size()
+		w.LogMTime = st.ModTime()
 	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -197,6 +199,14 @@ func parseLog(path string) (Worker, error) {
 		lines++
 
 		if reSpawnHeader.MatchString(line) {
+			if m := reSpawnStamp.FindStringSubmatch(line); m != nil {
+				// The spawn stamp is written in the host's local time (it is
+				// the same stamp as the log file name), so parse it in Local
+				// to stay comparable with the log's mtime.
+				if t, err := time.ParseInLocation("20060102-150405", m[1], time.Local); err == nil {
+					w.SpawnTime = t
+				}
+			}
 			if m := reIssue.FindStringSubmatch(line); m != nil {
 				w.Issue = m[1]
 			}

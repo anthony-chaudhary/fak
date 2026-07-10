@@ -160,6 +160,75 @@ func TestClassificationStarted(t *testing.T) {
 	}
 }
 
+// TestClassifyRunMinutesDistinctFromWallMinutes is the #3331 table witness:
+// WallMinutes stays the error-span-only waste signal, while RunMinutes reports
+// the true spawn→last-write duration — so a CLEAN long-running worker is no
+// longer invisible (wall_minutes=0) in the duration rollup.
+func TestClassifyRunMinutesDistinctFromWallMinutes(t *testing.T) {
+	spawn := mustTime(t, "2026-06-30T00:00:00Z")
+	cases := []struct {
+		name     string
+		w        Worker
+		wantRun  float64
+		wantWall float64
+	}{
+		{
+			name: "clean long-running worker: nonzero run, zero wall",
+			w: Worker{Log: "resolve-11.log", Lane: "docs", SidecarBackend: BackendClaude,
+				SpawnTime: spawn, LogMTime: spawn.Add(45 * time.Minute)},
+			wantRun:  45,
+			wantWall: 0,
+		},
+		{
+			name: "error storm: run covers the whole life, wall only the storm",
+			w: Worker{Log: "resolve-12.log", Lane: "ci", SidecarBackend: BackendClaude,
+				ErrorLines: 8,
+				FirstError: mustTime(t, "2026-06-30T00:10:00Z"),
+				LastError:  mustTime(t, "2026-06-30T00:22:00Z"),
+				SpawnTime:  spawn, LogMTime: spawn.Add(60 * time.Minute)},
+			wantRun:  60,
+			wantWall: 12,
+		},
+		{
+			name:     "no spawn stamp: run stays honestly zero",
+			w:        Worker{Log: "resolve-13.log", Lane: "docs", SidecarBackend: BackendClaude, LogMTime: spawn.Add(time.Hour)},
+			wantRun:  0,
+			wantWall: 0,
+		},
+		{
+			name:     "mtime before spawn (clock skew): never negative",
+			w:        Worker{Log: "resolve-14.log", Lane: "docs", SidecarBackend: BackendClaude, SpawnTime: spawn, LogMTime: spawn.Add(-time.Minute)},
+			wantRun:  0,
+			wantWall: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Classify(tc.w, DefaultThresholds())
+			if c.RunMinutes != tc.wantRun {
+				t.Fatalf("RunMinutes = %v, want %v", c.RunMinutes, tc.wantRun)
+			}
+			if c.WallMinutes != tc.wantWall {
+				t.Fatalf("WallMinutes = %v, want %v", c.WallMinutes, tc.wantWall)
+			}
+		})
+	}
+
+	// The rollup keeps the two durations distinct: a clean worker accrues
+	// run-time but no wasted (error-span) minutes.
+	rep := Fold([]Worker{cases[0].w}, DefaultThresholds())
+	if len(rep.Rollups) != 1 {
+		t.Fatalf("want 1 rollup, got %d", len(rep.Rollups))
+	}
+	r := rep.Rollups[0]
+	if r.RunMinutes != 45 {
+		t.Fatalf("rollup RunMinutes = %v, want 45", r.RunMinutes)
+	}
+	if r.WastedMinutes != 0 {
+		t.Fatalf("rollup WastedMinutes = %v, want 0 (clean worker has no error span)", r.WastedMinutes)
+	}
+}
+
 func TestFingerprintStability(t *testing.T) {
 	a := Classify(Worker{Log: "resolve-1346.log", Lane: "docs", HeaderBackend: BackendOpencode, SidecarMissing: true, CapHit: true, ErrorLines: 15, FirstError: mustTime(t, "2026-06-30T00:01:22Z"), LastError: mustTime(t, "2026-06-30T00:33:26Z")}, DefaultThresholds())
 	// Same outcome+backend+lane, DIFFERENT log/timestamp -> SAME fingerprint.
@@ -377,6 +446,50 @@ func TestScanDirFixture(t *testing.T) {
 				t.Errorf("walled worker with missing sidecar should be flagged misattributed")
 			}
 		}
+	}
+}
+
+// TestScanDirRunMinutesFromPlantedStamps proves the I/O shell derives the true
+// run duration from a planted log: the `# fak-spawn <stamp>` header is the
+// start, the file's mtime (planted via Chtimes) the end (issue #3331).
+func TestScanDirRunMinutesFromPlantedStamps(t *testing.T) {
+	dir := t.TempDir()
+
+	// A clean worker that ran 45 minutes and shipped: no error lines at all.
+	name := "resolve-42-20260628-105439.log"
+	writeFile(t, dir, name,
+		"# fak-spawn 20260628-105439 issue=42 lane=tools backend=claude argv0=claude\n"+
+			"working...\n")
+	writeFile(t, dir, "resolve-42-20260628-105439.backend", "claude")
+	spawn, err := time.ParseInLocation("20060102-150405", "20260628-105439", time.Local)
+	if err != nil {
+		t.Fatalf("parse planted stamp: %v", err)
+	}
+	end := spawn.Add(45 * time.Minute)
+	if err := os.Chtimes(filepath.Join(dir, name), end, end); err != nil {
+		t.Fatalf("plant mtime: %v", err)
+	}
+
+	workers, err := ScanDir(dir)
+	if err != nil {
+		t.Fatalf("ScanDir: %v", err)
+	}
+	if len(workers) != 1 {
+		t.Fatalf("want 1 worker, got %d", len(workers))
+	}
+	if !workers[0].SpawnTime.Equal(spawn) {
+		t.Fatalf("SpawnTime = %v, want %v (from the fak-spawn header stamp)", workers[0].SpawnTime, spawn)
+	}
+
+	c := Classify(workers[0], DefaultThresholds())
+	if c.RunMinutes < 44.9 || c.RunMinutes > 45.1 {
+		t.Fatalf("clean 45-min worker must report ~45 run minutes, got %v", c.RunMinutes)
+	}
+	if c.WallMinutes != 0 {
+		t.Fatalf("clean worker error-span must stay 0, got %v", c.WallMinutes)
+	}
+	if !strings.Contains(c.EvidenceSummary, "run_min=45.0") {
+		t.Fatalf("evidence summary must carry run_min, got %q", c.EvidenceSummary)
 	}
 }
 
