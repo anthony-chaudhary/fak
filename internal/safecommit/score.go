@@ -59,8 +59,8 @@ func resultScore(res Result) (int, []string) {
 		return 42, []string{"usage error before git work"}
 	case ReasonHookRefused:
 		return 35, []string{"git hook or commit command refused the change"}
-	case ReasonPathspecRace, ReasonSymlinkEscape:
-		return 10, []string{"commit landed but failed post-commit pathspec verification"}
+	case ReasonPathspecRace, ReasonMessageRace, ReasonSymlinkEscape:
+		return 10, []string{"commit landed but failed post-commit integrity verification"}
 	default:
 		return 50, []string{"unclassified safecommit refusal: " + res.Reason}
 	}

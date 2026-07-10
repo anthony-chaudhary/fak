@@ -40,6 +40,24 @@ func TestScoreResultRanksPostCommitRaceBelowPreCommitRefusal(t *testing.T) {
 	}
 }
 
+func TestScoreResultSeverePostCommitIntegrityFailures(t *testing.T) {
+	for _, reason := range []string{ReasonPathspecRace, ReasonMessageRace, ReasonSymlinkEscape} {
+		res := ScoreResult(Result{Committed: true, Reason: reason})
+		if res.Score != 10 || res.Grade != "F" || len(res.ScoreNotes) != 1 || !strings.Contains(res.ScoreNotes[0], "integrity") {
+			t.Errorf("%s score = %+v, want severe 10/F integrity failure", reason, res)
+		}
+	}
+}
+
+func TestScoreResultCoversClosedRefusalVocabulary(t *testing.T) {
+	for _, reason := range RefusalReasons() {
+		res := ScoreResult(Result{Reason: reason})
+		if len(res.ScoreNotes) == 0 || strings.HasPrefix(res.ScoreNotes[0], "unclassified safecommit refusal") {
+			t.Errorf("closed refusal %s fell through scoring: %+v", reason, res)
+		}
+	}
+}
+
 func TestCommitWithScoresResult(t *testing.T) {
 	g := &fakeGit{reply: onTrunkBase()}
 	res, err := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
