@@ -103,6 +103,7 @@
     "mcp__fak__fak_context_value",
     "mcp__fak__fak_context_spans",
     "mcp__fak__fak_context_restore",
+    "mcp__fak__fak_resume_history",
 
     "bash",
     "read",

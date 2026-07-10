@@ -440,6 +440,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ContextSpansRequest](p.Arguments, "fak_context_spans", func(req ContextSpansRequest) (any, error) {
 			return s.contextSpans(req), nil
 		})
+	case "fak_resume_history":
+		return mcpDecodeCall[ResumeHistoryRequest](p.Arguments, "fak_resume_history", func(req ResumeHistoryRequest) (any, error) {
+			return s.ResumeHistoryFor(req), nil
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -784,6 +788,18 @@ func contextIntrospectionToolDescriptors() []map[string]any {
   "type": "object",
   "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
+  }
+}`),
+		},
+		{
+			"name":        "fak_resume_history",
+			"description": "Self-observe YOUR OWN resume/heal history mid-session — the first-person answer to \"was I resumed after a crash, did that resume take, will another automatic attempt fire, or does a human own me now?\". Folds this session's durable launch ledger through the SAME closed outcome folds the CLI `fak resume self` and the operator `resume status` table use, so all three tell you one story. Returns {resolved, ledger_path, observation} where observation carries attempts (fired launches), resume_state (pending | launched | took | re-stranded | gave-up | settled), retry_blocked + retry_reason (whether a NEW automatic resume is gated, and the closed reason), earned_budget (how many automatic attempts your progress has earned), operator_settled (a human settled you by hand), and next_hint (one-line self-advice). Ledger-only and fail-closed: no launch row folds to has_history=false (nothing to recover), an unresolvable ledger returns resolved=false with the reason, and outcome is read conservatively (never a fabricated \"took\"). Read-only, advice-only — nothing here acts on the answer. Pass {session?, ledger?, max_attempts?}; all optional — omitted self-observes the guarded session against the fleet ledger the environment points at.",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "session": {"type": "string", "description": "session id to observe; omitted resolves $CLAUDE_SESSION_ID, then the gateway default trace (your own session under fak guard)"},
+    "ledger": {"type": "string", "description": "explicit resume ledger path; omitted resolves the fleet default from the environment ($FLEET_REG_DIR, then the Fleet registry conventions)"},
+    "max_attempts": {"type": "integer", "description": "give-up cap; omitted or <= 0 uses the progress-earned budget"}
   }
 }`),
 		},
