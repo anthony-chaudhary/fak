@@ -342,8 +342,15 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: open %s: %v (allowing turn)\n", resolved, err)
 		return 0
 	}
-	d, diagnoseErr := diagnose(fh, resolved)
+	// Snapshot and close before diagnosis. An injected/slow/panicking diagnose path
+	// must never retain a Windows file handle after the outer budget allows the turn.
+	snapshot, readErr := io.ReadAll(io.LimitReader(fh, 64<<20))
 	closeErr := fh.Close()
+	if readErr != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: read %s: %v (allowing turn)\n", resolved, readErr)
+		return 0
+	}
+	d, diagnoseErr := diagnose(bytes.NewReader(snapshot), resolved)
 	if diagnoseErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn)\n", diagnoseErr)
 		return 0
