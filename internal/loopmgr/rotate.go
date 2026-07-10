@@ -153,6 +153,39 @@ func Rotate(path string, minBytes int64) (RotateResult, error) {
 	return res, nil
 }
 
+// ShouldRotate reports whether the active ledger at path has grown to at least minBytes
+// (and is therefore due for a Rotate), together with its current size. It is a cheap
+// O(1) stat with NO lock and NO chain read, so a hot producer or a scheduled sweep can
+// gate the (locking, chain-verifying) Rotate call on it and pay the rotation cost only
+// once the active file has actually crossed the bound — keeping the size check off the
+// append hot path that issue #3465 flagged as growing with the ledger. A missing or
+// empty file, or minBytes<=0 ("no bound configured"), reports not-due.
+//
+// This is the cheap trigger a production auto-rotation wiring gates on; Rotate is the
+// seam that bounds the hot file, but nothing invokes it on a schedule yet. Wiring that
+// in front of the cumulative Load consumers — which must move to LoadAll first so they
+// keep counting sealed history rather than silently dropping it at a rotation boundary —
+// is the remaining activation work. Rotate stays the source of truth: it re-checks the
+// size under the append lock, so a false positive here only ever costs one no-op Rotate,
+// never a mis-seal.
+func ShouldRotate(path string, minBytes int64) (bool, int64, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, 0, errors.New("loop ledger path is required")
+	}
+	if minBytes <= 0 {
+		return false, 0, nil
+	}
+	fi, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, 0, fmt.Errorf("stat loop ledger: %w", err)
+	}
+	return fi.Size() >= minBytes, fi.Size(), nil
+}
+
 // LoadAll walks the ledger's sealed segments (oldest first) and then the active
 // segment, returning the full event history across all segments. Unlike Load — which
 // reads only the active segment for the hot per-tick fold — LoadAll is the audit-grade

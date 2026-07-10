@@ -251,3 +251,95 @@ func TestRotateChainAcrossThreeSegments(t *testing.T) {
 		t.Fatalf("LoadAll = %d events, want 9 (3+2+4)", len(all))
 	}
 }
+
+// TestShouldRotate pins the cheap lock-free trigger a production auto-rotation wiring
+// gates on: it reports due only once the active file has grown to the bound, and it is a
+// pure stat (no lock, no chain read), so keeping it off the append hot path adds none of
+// the O(N) cost issue #3465 raised about the growing ledger.
+func TestShouldRotate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+
+	// Absent file: not due, size 0, no error.
+	if due, sz, err := ShouldRotate(path, 1); err != nil || due || sz != 0 {
+		t.Fatalf("ShouldRotate(absent) = %v,%d,%v; want false,0,nil", due, sz, err)
+	}
+
+	if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", RunID: "0"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	size := fi.Size()
+
+	// minBytes<=0 means "no bound configured" -> never auto-due.
+	if due, _, err := ShouldRotate(path, 0); err != nil || due {
+		t.Fatalf("ShouldRotate(minBytes=0) = %v,%v; want false,nil", due, err)
+	}
+	// Under the bound: not due, but the real size is still reported.
+	if due, sz, err := ShouldRotate(path, size+1); err != nil || due || sz != size {
+		t.Fatalf("ShouldRotate(under) = %v,%d,%v; want false,%d,nil", due, sz, err, size)
+	}
+	// At the bound: due (>= is the boundary).
+	if due, sz, err := ShouldRotate(path, size); err != nil || !due || sz != size {
+		t.Fatalf("ShouldRotate(at) = %v,%d,%v; want true,%d,nil", due, sz, err, size)
+	}
+}
+
+// TestRotateBoundsActiveFileBelowThreshold is the on-disk-bound proof for issue #3465:
+// once the active ledger crosses the configured size bound, ShouldRotate flags it and
+// Rotate seals it away, dropping the hot active file back below the bound while LoadAll
+// still returns the full verified history across the seam. This is the loop that keeps
+// the file Append flock-serializes and growthgate size-caps (ClassLoops warns at 8 MiB)
+// bounded no matter how much total history accumulates. The 512-byte bound here is a
+// scale-invariant stand-in for that production threshold so the test stays fast.
+func TestRotateBoundsActiveFileBelowThreshold(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	const bound = 512
+
+	n := 0
+	for {
+		if _, err := Append(path, Event{LoopID: "l", Kind: EventHeartbeat, Source: "s", RunID: strconv.Itoa(n)}); err != nil {
+			t.Fatalf("seed #%d: %v", n, err)
+		}
+		n++
+		due, sz, err := ShouldRotate(path, bound)
+		if err != nil {
+			t.Fatalf("ShouldRotate: %v", err)
+		}
+		if due {
+			if sz < bound {
+				t.Fatalf("flagged due at size %d < bound %d", sz, bound)
+			}
+			break
+		}
+		if n > 10000 {
+			t.Fatalf("active file never crossed %d bytes after %d appends", bound, n)
+		}
+	}
+
+	res, err := Rotate(path, bound)
+	if err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if !res.Rotated || res.SealedEvents != n {
+		t.Fatalf("rotate = %+v, want rotated with %d sealed events", res, n)
+	}
+
+	// The hot active file is now bounded: it was renamed into the sealed segment, so a
+	// fresh (empty) one starts on the next append and ShouldRotate goes quiet.
+	if due, sz, err := ShouldRotate(path, bound); err != nil || due {
+		t.Fatalf("post-rotate ShouldRotate = %v,%d,%v; want not-due (bounded)", due, sz, err)
+	}
+
+	// No history was lost to the bound: LoadAll still returns all n events, verified
+	// across the seal.
+	all, err := LoadAll(path)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(all) != n {
+		t.Fatalf("LoadAll = %d events, want %d (full history across the seal)", len(all), n)
+	}
+}
