@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint cache-headline-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
@@ -23,7 +23,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint cache-headline-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -33,6 +33,13 @@ build:
 	# (.claude/settings.json prefers this binary, falling back to tools/repo_guard.py
 	# until it exists). Part of `build` so every green gate self-propagates it.
 	go build -o tools/.bin/repoguard ./cmd/repoguard
+	# Also cross-build a fresh Windows repoguard.exe. The native-Windows Claude Code
+	# PreToolUse hook can ONLY exec a .exe (CreateProcess refuses the bare-named PE),
+	# yet green cycles often run under Linux/WSL where the line above emits only the
+	# bare name -- so a stale .exe from an old build silently shadows the fix forever
+	# (the shim picks the freshest binary, but Windows can't run the fresh bare one).
+	# Cross-building keeps BOTH hook binaries fresh every green cycle, any build host (#3400).
+	GOOS=windows GOARCH=amd64 go build -o tools/.bin/repoguard.exe ./cmd/repoguard
 	# Likewise the Go DOS dispatch-worker launcher — the interpreter-free cutover
 	# target for tools/dispatch_worker.py (parity-tested; see dos.toml [supervise]).
 	go build -o tools/.bin/dispatchworker ./cmd/dispatchworker
@@ -180,6 +187,15 @@ vcache-gate:
 model:
 	./scripts/fetch-model.sh
 
+# logvault-drill: the restore-path cadence drill (#2453). Restores one captured
+# source into a temp dir and re-verifies it (re-hash against the manifest chain +
+# chained-journal verifiers), hermetic and self-contained, so `fak logvault`'s
+# recoverability promise stays a witnessed capability instead of an untested
+# hypothesis. Run on a cadence (nightly / a green gate); exits non-zero on any
+# restore mismatch or refusal.
+logvault-drill:
+	./scripts/logvault-restore-drill.sh
+
 # claims-lint: every "- [" line in CLAIMS.md carries exactly one tag.
 claims-lint:
 	@awk '/^- \[/{n=0; if(index($$0,"[SHIPPED]"))n++; if(index($$0,"[SIMULATED]"))n++; if(index($$0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
@@ -197,6 +213,23 @@ claims-lint:
 cache-headline-lint:
 	@python3 tools/check_cache_headlines_test.py
 	@python3 tools/check_cache_headlines.py --audit-tree
+
+# cachedoc-numbers-lint: the checking layer for RECENT-OPERATIONAL cachevalue docs
+# (e.g. docs/integrations/fable5-more-usage-for-free.md). BENCHMARK-AUTHORITY.md is the
+# SoT for COMMITTED benchmark claims and readme_freshness_audit guards the README, but a
+# doc that reports this-week's `fak cachevalue report` fleet/dev telemetry is too live-
+# moving to earn an authority row -- yet is exactly where a number rots or an arithmetic
+# slip hides (the real one: "60 discovered -- 15 priced, 36 held out" read as 60=15+36).
+# Each guarded doc gets a manifest under tools/docnumbers/ binding every rendered number
+# to a trimmed FROZEN snapshot field + the arithmetic invariants the doc asserts, so the
+# audit is fully hermetic: doc render == manifest expected == snapshot field, and the
+# sums/formulas close. False-positive-free by design -- open-ended/live windows are
+# checked against the frozen snapshot ONLY, never re-derived to equality (see the window
+# taxonomy in the tool). The unit test pins the pass/fail contract; the tree audit proves
+# the committed corpus is clean. Pure Python, no dos/Go dependency -- runs unconditionally.
+cachedoc-numbers-lint:
+	@python3 tools/cachedoc_numbers_audit_test.py
+	@python3 tools/cachedoc_numbers_audit.py
 
 # salience (dos-kernel docs/391): the first WIRED consumer of the `dos salience` verdict
 # (it was built-but-latent — nothing routed on it; see the usefulness audit in
@@ -486,3 +519,17 @@ cuda-test:
 # tools/cuda_acceptance.sh. GPU node only; a no-GPU host exits non-zero (never a false green).
 cuda-accept:
 	bash tools/cuda_acceptance.sh
+
+# negframe-ratchet (#3545): the diff-scoped negation-framing gate — the CI twin of the
+# `fak score negframe` scorecard. `--since $(BASE)` scans the agent-steer prose corpus
+# (AGENTS.md, CLAUDE.md, the skills) and exits 1 ONLY when the working tree vs BASE
+# introduces a NEW mechanical (confidently reframable) negative — pre-existing debt never
+# reds here (that is the scorecard's job), so a change is gated only on the negativity it
+# itself adds. BASE defaults to origin/main; override per-invocation, e.g.
+# `make negframe-ratchet BASE=HEAD~1` (CI passes the PR base SHA — see
+# .github/workflows/negframe-ratchet.yml, which checks out with fetch-depth 0 so the
+# ratchet's `git show <base>:<path>` can read the prior copy of each steer-prose doc).
+BASE ?= origin/main
+.PHONY: negframe-ratchet
+negframe-ratchet:
+	@go run ./cmd/fak score negframe --since $(BASE)

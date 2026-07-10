@@ -14,6 +14,8 @@ package main
 //	fak logvault du        per-source vault footprint + capture lag, one line each (WITNESSED, folded from the manifest)
 //	fak logvault gc        propose (default) or -live apply bounded .history/ retention
 //	fak logvault adopt     bank a whole tree (-cold <dir>) as one deterministic archive
+//	fak logvault restore   copy a source's replayed state OUT into a fresh -to dir, re-hashed + journal-verified (-at <seq> reconstructs an older state)
+//	fak logvault drill     cadence hook: restore one source into a temp dir, verify, append a durable drill row (-ledger <path>)
 //
 // The vault defaults to a sibling directory of the repo root (<parent>/fak-log-vault,
 // override with -vault or FAK_LOG_VAULT) so it never lives inside any git tree it
@@ -54,12 +56,26 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 	historyDepth := fs.Int("history-depth", 8, "gc: keep at most this many .history/ versions per file (0 = unlimited, prunes nothing)")
 	live := fs.Bool("live", false, "gc: APPLY the proposed prune (default: propose only — the tool deletes nothing without this grant)")
 	cold := fs.String("cold", "", "adopt: pack this directory as one deterministic content-addressed cold-park archive into the vault")
+	restoreAt := fs.Uint64("at", 0, "restore/drill: reconstruct the state as of this manifest seq (0 = current head)")
+	restoreForce := fs.Bool("force", false, "restore: allow restoring into a non-empty existing directory (never the default — the fresh-directory contract)")
+	drillLedger := fs.String("ledger", "", "drill: also append the durable drill row to this repo ledger path (e.g. docs/nightrun/logvault-drill.jsonl)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	if fs.NArg() > 0 {
+	// Collect positional args tolerant of interleaved flags, so
+	// `fak logvault restore <source-id> --to DIR` parses in any order (Go's flag
+	// package stops at the first non-flag token; re-parsing the tail past each
+	// positional restores mixed order).
+	var positionals []string
+	for rest := fs.Args(); len(rest) > 0; rest = fs.Args() {
+		positionals = append(positionals, rest[0])
+		if err := fs.Parse(rest[1:]); err != nil {
+			return 2
+		}
+	}
+	if len(positionals) > 0 && verb != "restore" && verb != "drill" {
 		// `fak logvault -vault X capture` must not silently run the default verb.
-		fmt.Fprintf(ew, "logvault: unexpected argument %q — the verb comes first: fak logvault %s [flags]\n", fs.Arg(0), fs.Arg(0))
+		fmt.Fprintf(ew, "logvault: unexpected argument %q — the verb comes first: fak logvault %s [flags]\n", positionals[0], verb)
 		return 2
 	}
 	if *repo == "" {
@@ -248,8 +264,65 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 		fmt.Fprintln(w, "  the tool deleted NOTHING. To reclaim the original, YOU may run:")
 		fmt.Fprintf(w, "    %s\n", rep.DeleteCmd)
 		return 0
+	case "restore":
+		// A backup nobody has restored from is a hypothesis (#2453). Copy one
+		// source's manifest-replayed state OUT of the vault into a fresh target
+		// (never in-place over a live store without -force), re-hashing every byte
+		// against the chain and re-verifying restored chained journals.
+		if len(positionals) != 1 {
+			fmt.Fprintln(ew, "logvault restore: exactly one <source-id> is required: fak logvault restore <source-id> [-to DIR] [-at SEQ] [-force]")
+			return 2
+		}
+		source := positionals[0]
+		to := *syncTo // -to is the restore target directory here (a fresh tree by default)
+		if to == "" {
+			to = filepath.Join(filepath.Dir(absRepo), "fak-log-restore", source)
+		}
+		rep, rErr := v.Restore(logvault.RestoreOptions{Source: source, To: to, At: *restoreAt, Force: *restoreForce})
+		if rErr != nil {
+			fmt.Fprintf(ew, "logvault restore: %v\n", rErr)
+			return 1
+		}
+		logvaultPrintRestore(w, v.Dir, rep)
+		if !rep.OK() {
+			return 1
+		}
+		return 0
+	case "drill":
+		// The cadence hook: restore one source into a temp dir, verify, append a
+		// durable DrillRow to the vault drill-log (and -ledger when named), clean
+		// up. Run on a schedule so the restore path cannot rot unnoticed (#2453).
+		if len(positionals) > 1 {
+			fmt.Fprintln(ew, "logvault drill: at most one optional <source-id>: fak logvault drill [<source-id>] [-ledger PATH]")
+			return 2
+		}
+		source := ""
+		if len(positionals) == 1 {
+			source = positionals[0]
+		}
+		row, rep, dErr := v.Drill(source, *drillLedger)
+		fmt.Fprintf(w, "logvault drill  vault=%s  source=%s (at seq=%d)\n", v.Dir, row.Source, row.HeadSeq)
+		fmt.Fprintf(w, "  files=%d bytes=%s from-history=%d mismatches=%d journals=%d journals-failed=%d\n",
+			row.Files, fmtBytesLV(row.Bytes), row.FromHistory, row.Mismatches, row.JournalsChecked, row.JournalsFailed)
+		logvaultPrintRestoreDetail(w, rep)
+		anchor := logvaultAnchorSuffix(v.Dir)
+		if row.Pass {
+			fmt.Fprintf(w, "  DRILL PASS — restore round-tripped clean, row appended to %s%s\n", logvault.DrillLogName, anchor)
+		} else {
+			fmt.Fprintf(w, "  DRILL FAIL — %s%s\n", drillFailReason(row, dErr), anchor)
+		}
+		if *drillLedger != "" {
+			fmt.Fprintf(w, "  ledger: row appended to %s\n", *drillLedger)
+		}
+		if dErr != nil {
+			fmt.Fprintf(ew, "logvault drill: %v\n", dErr)
+		}
+		if !row.Pass {
+			return 1
+		}
+		return 0
 	default:
-		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources|du|gc|adopt)\n", verb)
+		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources|du|gc|adopt|restore|drill)\n", verb)
 		return 2
 	}
 }
@@ -293,6 +366,46 @@ func fmtBytesLV(n int64) string {
 	default:
 		return fmt.Sprintf("%dB", n)
 	}
+}
+
+// logvaultPrintRestore renders a restore report: the one-line fold plus every
+// unproven file and every restored chained-journal verdict, then a PASS/FAIL
+// verdict line. The acceptance bar is 0 mismatches and every journal clean.
+func logvaultPrintRestore(w io.Writer, vaultDir string, rep logvault.RestoreReport) {
+	fmt.Fprintf(w, "logvault restore  vault=%s  source=%s -> %s (at seq=%d)\n", vaultDir, rep.Source, rep.To, rep.HeadSeq)
+	fmt.Fprintf(w, "  files=%d bytes=%s from-history=%d mismatches=%d journals=%d journals-failed=%d\n",
+		rep.Files, fmtBytesLV(rep.Bytes), rep.FromHistory, len(rep.Problems), len(rep.Journals), rep.JournalFailures())
+	logvaultPrintRestoreDetail(w, rep)
+	if rep.OK() {
+		fmt.Fprintf(w, "  RESTORE OK — %d files re-hashed clean against the manifest chain, every restored chained journal verified\n", rep.Files)
+	} else {
+		fmt.Fprintf(w, "  RESTORE FAILED — %d hash mismatch(es), %d chained-journal failure(s) (a restore that cannot PROVE its bytes is not done)\n",
+			len(rep.Problems), rep.JournalFailures())
+	}
+}
+
+// logvaultPrintRestoreDetail prints the per-file problems and per-journal
+// verdicts shared by `restore` and `drill`.
+func logvaultPrintRestoreDetail(w io.Writer, rep logvault.RestoreReport) {
+	for _, p := range rep.Problems {
+		fmt.Fprintf(w, "  PROBLEM %s: %s\n", p.RelPath, p.Reason)
+	}
+	for _, j := range rep.Journals {
+		if j.Err == "" {
+			fmt.Fprintf(w, "  JOURNAL %s [%s] rows=%d OK — chain intact end-to-end\n", j.RelPath, j.Kind, j.Rows)
+		} else {
+			fmt.Fprintf(w, "  JOURNAL %s [%s] FAILED: %s\n", j.RelPath, j.Kind, j.Err)
+		}
+	}
+}
+
+// drillFailReason names why a drill row did not pass — a refusal (the restore
+// never ran) is distinct from a restore that ran and found problems.
+func drillFailReason(row logvault.DrillRow, dErr error) string {
+	if dErr != nil {
+		return "restore refused: " + dErr.Error()
+	}
+	return fmt.Sprintf("%d mismatch(es), %d chained-journal failure(s)", row.Mismatches, row.JournalsFailed)
 }
 
 // logvaultMetricsVerifySample bounds how many mirrors the /metrics provider
