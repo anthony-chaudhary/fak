@@ -155,6 +155,117 @@ func TestFoldedTailAdvancesOffset(t *testing.T) {
 	}
 }
 
+func TestWindowRatesArithmetic(t *testing.T) {
+	// A synthetic 6-hour window: lands 10→22 (12 over 6h = 2.0/hr), resumes
+	// 100→130 (30 over 6h = 5.0/hr), deaths 4→10 (6 over 6h = 1.0/hr). Goodput
+	// = 12 / (12 + 6) = 66.67%.
+	rows := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 10, "resumes": 100, "deaths": 4, "lands_witnessed": 1},
+		{"ts": "2026-07-01T03:00:00Z", "lands": 16, "resumes": 115, "deaths": 7, "lands_witnessed": 1},
+		{"ts": "2026-07-01T06:00:00Z", "lands": 22, "resumes": 130, "deaths": 10, "lands_witnessed": 1},
+	}
+	r, ok := WindowRates(rows)
+	if !ok {
+		t.Fatal("WindowRates(counter rows) reported no data")
+	}
+	if !r.Lands.Present || r.Lands.PerHour != 2 || r.Lands.Delta != 12 {
+		t.Fatalf("lands = %+v, want 2.0/hr delta 12", r.Lands)
+	}
+	if !r.Resumes.Present || r.Resumes.PerHour != 5 {
+		t.Fatalf("resumes = %+v, want 5.0/hr", r.Resumes)
+	}
+	if !r.Deaths.Present || r.Deaths.PerHour != 1 {
+		t.Fatalf("deaths = %+v, want 1.0/hr", r.Deaths)
+	}
+	if !r.GoodputPresent || r.Goodput < 0.66 || r.Goodput > 0.67 {
+		t.Fatalf("goodput = %v (present=%v), want ~0.6667", r.Goodput, r.GoodputPresent)
+	}
+	if r.WindowHours != 6 || r.Ticks != 3 || !r.LandsWitnessed {
+		t.Fatalf("window = %.1fh ticks=%d witnessed=%v, want 6h/3/true", r.WindowHours, r.Ticks, r.LandsWitnessed)
+	}
+}
+
+func TestWindowRatesGuards(t *testing.T) {
+	// No counters at all → not derivable.
+	if _, ok := WindowRates([]map[string]any{{"ts": "2026-07-01T00:00:00Z", "usable": 3}}); ok {
+		t.Fatal("gauge-only window should report no rate data")
+	}
+	// A single counter-bearing row cannot form a rate.
+	single := []map[string]any{{"ts": "2026-07-01T00:00:00Z", "lands": 5}}
+	if r, _ := WindowRates(single); r.Lands.Present {
+		t.Fatalf("single point yielded a rate: %+v", r.Lands)
+	}
+	// A counter reset (last < first) clamps to a 0 delta, never a negative rate.
+	reset := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 20},
+		{"ts": "2026-07-01T02:00:00Z", "lands": 3},
+	}
+	if r, _ := WindowRates(reset); !r.Lands.Present || r.Lands.PerHour != 0 || r.Lands.Delta != 0 {
+		t.Fatalf("counter reset = %+v, want clamped 0/hr", r.Lands)
+	}
+	// deaths present but lands absent → goodput has no numerator.
+	noLands := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "deaths": 1},
+		{"ts": "2026-07-01T01:00:00Z", "deaths": 3},
+	}
+	if r, _ := WindowRates(noLands); r.GoodputPresent {
+		t.Fatalf("goodput present without lands: %+v", r)
+	}
+}
+
+func TestRenderThroughput(t *testing.T) {
+	if got := RenderThroughput(nil); got != "" {
+		t.Fatalf("empty throughput = %q, want empty", got)
+	}
+	rows := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 10, "resumes": 100, "deaths": 4},
+		{"ts": "2026-07-01T06:00:00Z", "lands": 22, "resumes": 130, "deaths": 10},
+	}
+	line := RenderThroughput(rows)
+	for _, want := range []string{
+		"throughput: lands 2.0/hr", "resumes 5.0/hr", "deaths 1.0/hr",
+		"goodput 67%", "over 6.0h · 2 ticks", "[lands: self-reported]",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("throughput %q missing %q", line, want)
+		}
+	}
+	// A git-witnessed lands total flips the provenance tag; absent counters read n/a.
+	witnessed := RenderThroughput([]map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 1, "lands_witnessed": 1},
+		{"ts": "2026-07-01T02:00:00Z", "lands": 5, "lands_witnessed": 1},
+	})
+	if !strings.Contains(witnessed, "[lands: git-witnessed]") || !strings.Contains(witnessed, "resumes n/a") {
+		t.Fatalf("witnessed throughput = %q", witnessed)
+	}
+}
+
+func TestThroughputCountersPersist(t *testing.T) {
+	// The counter columns MetricsOf reads from the throughput seam round-trip
+	// through Append into the ledger the rates derive from — no new ledger.
+	snap := map[string]any{
+		"accounts":   map[string]any{"usable": 2},
+		"throughput": map[string]any{"lands": 12, "resumes": 30, "deaths": 5, "lands_witness": "git"},
+	}
+	m := MetricsOf(snap)
+	if m["lands"] != 12 || m["resumes"] != 30 || m["deaths"] != 5 || m[landsWitnessedKey] != 1 {
+		t.Fatalf("MetricsOf throughput = %+v", m)
+	}
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	if _, err := Append(path, m, "2026-07-01T00:00:00Z", DefaultCap); err != nil {
+		t.Fatal(err)
+	}
+	rows := Tail(path, 24)
+	if len(rows) != 1 || number(rows[0]["lands"]) != 12 || number(rows[0][landsWitnessedKey]) != 1 {
+		t.Fatalf("persisted throughput row = %+v", rows)
+	}
+	// A snapshot with no throughput object leaves the counter columns unset.
+	bare := MetricsOf(map[string]any{"accounts": map[string]any{"usable": 1}})
+	if _, ok := bare["lands"]; ok {
+		t.Fatalf("bare snapshot set a lands counter: %+v", bare)
+	}
+}
+
 func TestRenderLine(t *testing.T) {
 	if got := RenderLine(nil); got != "" {
 		t.Fatalf("empty render = %q", got)
