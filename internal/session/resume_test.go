@@ -16,9 +16,9 @@ func TestWaitResumeWarmSplice(t *testing.T) {
 	const trace = "gw-resume"
 
 	var splicedFor string
-	tbl.WatchResumeSplice(func(st State) bool {
+	tbl.WatchResumeSplice(func(st State) SpliceResult {
 		splicedFor = st.TraceID
-		return true // warm KV available and reattached
+		return SpliceResult{Warm: true} // warm KV available and reattached
 	})
 
 	// Park the session in Paused, then block on it in a goroutine.
@@ -79,7 +79,7 @@ func TestWaitResumeColdFallback(t *testing.T) {
 	}
 
 	// A splicer that DECLINES (warm KV evicted while paused) also falls back to cold.
-	tbl.WatchResumeSplice(func(State) bool { return false })
+	tbl.WatchResumeSplice(func(State) SpliceResult { return SpliceResult{} })
 	tbl.Transition(trace, Paused, "hold-2")
 	go func() { verdicts <- tbl.WaitResume(context.Background(), trace) }()
 	time.Sleep(10 * time.Millisecond)

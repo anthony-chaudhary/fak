@@ -63,10 +63,11 @@ func (m ResumeMode) String() string {
 // Mode is warm/cold (meaningful only when Resumed); State is the drive record observed at the
 // resume edge. Reason carries why a non-resume wait ended (a closed token).
 type ResumeVerdict struct {
-	Resumed bool
-	Mode    ResumeMode
-	State   State
-	Reason  string
+	Resumed     bool
+	Mode        ResumeMode
+	State       State
+	Reason      string
+	SpanPointer KVSpanPointer
 }
 
 // WarmKVSplicer is the host-wired seam that performs the actual warm-KV reattach on a
@@ -76,7 +77,7 @@ type ResumeVerdict struct {
 // returns false to decline (no warm KV held, eviction happened while paused, or any error) —
 // the loop then degrades to cold re-prefill. It is given the resume-edge State so it can key
 // the splice on the trace / continuation lineage. A nil splicer always resumes Cold.
-type WarmKVSplicer func(State) bool
+type WarmKVSplicer func(State) SpliceResult
 
 // WatchResumeSplice wires the warm-KV splice seam. splicer==nil clears it (every resume is
 // then Cold — the byte-identical pre-splice path). Safe to call on a live table; a nil
@@ -132,10 +133,15 @@ func (t *Table) WaitResume(ctx context.Context, trace string) ResumeVerdict {
 			splicer := t.spliceFn
 			t.mu.Unlock()
 			mode := ResumeCold
-			if splicer != nil && splicer(cur) {
-				mode = ResumeWarm
+			var pointer KVSpanPointer
+			if splicer != nil {
+				result := splicer(cur)
+				if result.Warm {
+					mode = ResumeWarm
+					pointer = result.SpanPointer
+				}
 			}
-			return ResumeVerdict{Resumed: true, Mode: mode, State: cur}
+			return ResumeVerdict{Resumed: true, Mode: mode, State: cur, SpanPointer: pointer}
 		}
 	}
 }

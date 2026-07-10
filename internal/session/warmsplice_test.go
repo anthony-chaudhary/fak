@@ -135,3 +135,40 @@ func TestWarmSpliceWiredIntoResumeLoop(t *testing.T) {
 		t.Fatal("WaitResume did not wake cold for the unparked session")
 	}
 }
+
+func TestWarmKVSpliceCarriesKVSpanPointer(t *testing.T) {
+	store := NewWarmKVStore()
+	first := warmCache()
+	store.Park("gw-pointer-a", first, cachemeta.TierDRAM)
+	got := store.Splice("gw-pointer-a")
+	if !got.Warm || got.SpanPointer.Kind != KindKVSpan || got.SpanPointer.Ref == "" {
+		t.Fatalf("warm splice pointer = %+v, want non-empty %q pointer", got.SpanPointer, KindKVSpan)
+	}
+
+	store.Park("gw-pointer-b", warmCache(), cachemeta.TierDRAM)
+	again := store.Splice("gw-pointer-b")
+	if again.SpanPointer != got.SpanPointer {
+		t.Fatalf("same parked cache pointer = %+v, want stable %+v", again.SpanPointer, got.SpanPointer)
+	}
+	if cold := store.Splice("gw-missing"); cold.SpanPointer != (KVSpanPointer{}) {
+		t.Fatalf("cold splice pointer = %+v, want zero", cold.SpanPointer)
+	}
+}
+
+func TestWarmKVResumeVerdictCarriesSpanPointer(t *testing.T) {
+	tbl := NewTable()
+	store := NewWarmKVStore()
+	tbl.WatchResumeSplice(store.Splicer())
+	const trace = "gw-pointer-resume"
+	store.Park(trace, warmCache(), cachemeta.TierDRAM)
+
+	verdicts := make(chan ResumeVerdict, 1)
+	tbl.Transition(trace, Paused, "hold")
+	go func() { verdicts <- tbl.WaitResume(context.Background(), trace) }()
+	time.Sleep(10 * time.Millisecond)
+	tbl.Transition(trace, Running, "")
+	verdict := <-verdicts
+	if verdict.Mode != ResumeWarm || verdict.SpanPointer.Kind != KindKVSpan || verdict.SpanPointer.Ref == "" {
+		t.Fatalf("resume verdict = %+v, want warm with kv_span pointer", verdict)
+	}
+}

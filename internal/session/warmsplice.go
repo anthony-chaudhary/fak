@@ -30,6 +30,9 @@ package session
 // slower, never wrong.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -41,9 +44,19 @@ import (
 // tier it was offloaded to while paused (the tier MoveTo promotes it FROM). A session offloads
 // its KV here at pause and reclaims it on resume; if it is evicted while paused, the entry is
 // dropped and the resume degrades to cold.
+const KindKVSpan = "kv_span"
+
+type KVSpanPointer struct {
+	Kind string `json:"kind,omitempty"`
+	Ref  string `json:"ref,omitempty"`
+}
+
+func (p KVSpanPointer) IsZero() bool { return p.Kind == "" && p.Ref == "" }
+
 type WarmKV struct {
-	Cache    *model.KVCache
-	ColdTier cachemeta.ResidencyTier
+	Cache      *model.KVCache
+	ColdTier   cachemeta.ResidencyTier
+	SpanDigest string
 }
 
 // SpliceResult is the typed record of one warm-KV splice. Warm is true exactly when a parked
@@ -59,6 +72,7 @@ type SpliceResult struct {
 	FromTier          cachemeta.ResidencyTier
 	ToTier            cachemeta.ResidencyTier
 	RestoredPositions int
+	SpanPointer       KVSpanPointer
 }
 
 // WarmKVStore parks the offloaded KV of paused sessions and performs the concrete warm splice
@@ -102,7 +116,8 @@ func (s *WarmKVStore) Park(trace string, cache *model.KVCache, coldTier cachemet
 	if s.parked == nil {
 		s.parked = map[string]WarmKV{}
 	}
-	s.parked[trace] = WarmKV{Cache: cache, ColdTier: coldTier}
+	parked := cache.Clone()
+	s.parked[trace] = WarmKV{Cache: parked, ColdTier: coldTier, SpanDigest: warmKVSpanDigest(parked)}
 	s.mu.Unlock()
 }
 
@@ -163,6 +178,7 @@ func (s *WarmKVStore) Splice(trace string) SpliceResult {
 		FromTier:          warm.ColdTier,
 		ToTier:            hot,
 		RestoredPositions: restored.Len(),
+		SpanPointer:       KVSpanPointer{Kind: KindKVSpan, Ref: warm.SpanDigest},
 	}
 	s.mu.Lock()
 	if s.last == nil {
@@ -191,7 +207,22 @@ func (s *WarmKVStore) LastSplice(trace string) (SpliceResult, bool) {
 // (so resume.go returns ResumeWarm). A store with no parked cache for the trace reports false
 // and the resume degrades to cold. Wire it with table.WatchResumeSplice(store.Splicer()).
 func (s *WarmKVStore) Splicer() WarmKVSplicer {
-	return func(st State) bool {
-		return s.Splice(st.TraceID).Warm
+	return func(st State) SpliceResult { return s.Splice(st.TraceID) }
+}
+
+func warmKVSpanDigest(kv *model.KVCache) string {
+	if kv == nil {
+		return ""
 	}
+	h := sha256.New()
+	_, _ = h.Write([]byte("fak-warm-kv-span\x00"))
+	if span, err := kv.SerializeSpan(0, kv.Len()); err == nil {
+		_, _ = h.Write(span)
+	} else {
+		// Some in-process cache variants are intentionally not serializable yet.
+		// They still need a stable pointer identity for the additive producer seam;
+		// the backend wiring ticket decides whether that pointer can be staged.
+		_, _ = h.Write([]byte(fmt.Sprintf("%#v", kv)))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
