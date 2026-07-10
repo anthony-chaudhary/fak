@@ -261,3 +261,37 @@ func TestDroppedPeerRun_unit(t *testing.T) {
 		t.Fatalf("reformat (re-added under new layout): want 0, got %d", got)
 	}
 }
+
+// TestStaleBaseDeletion_remedyRoutesThroughSupersetAutoResolve is the safecommit-lane witness
+// for #2154: the refusal's remedy must steer the agent through `fak merge --apply` — which
+// auto-resolves the trivial two-agents-same-block divergence textlessly and asserts the merged
+// tree equals HEAD — and name the raw `git merge` only as the fallback for a genuine conflict,
+// never as the first move.
+func TestStaleBaseDeletion_remedyRoutesThroughSupersetAutoResolve(t *testing.T) {
+	t.Setenv(staleBaseEnvVar, "") // default = block
+	peerDiff := "@@ -1,0 +1,2 @@\n+peerLineOne()\n+peerLineTwo()\n"
+	wtDiff := "@@ -1,2 +1,0 @@\n-peerLineOne()\n-peerLineTwo()\n"
+	g := &fakeGit{reply: staleBaseReply(peerDiff, wtDiff)}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if res.Reason != ReasonStaleBaseDeletion {
+		t.Fatalf("want %q, got reason=%q detail=%q", ReasonStaleBaseDeletion, res.Reason, res.Detail)
+	}
+	if !strings.Contains(res.Detail, "fak merge --apply origin/main") {
+		t.Fatalf("remedy must route through the textless superset auto-resolve (#2154), got %q", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "#2154") {
+		t.Fatalf("remedy should cite the auto-resolve contract issue, got %q", res.Detail)
+	}
+	autoResolve := strings.Index(res.Detail, "fak merge --apply")
+	handMerge := strings.Index(res.Detail, "git merge origin/main")
+	if handMerge < 0 {
+		t.Fatalf("remedy must keep the hand-merge fallback for a genuine conflict, got %q", res.Detail)
+	}
+	if handMerge < autoResolve {
+		t.Fatalf("hand-merge must be the FALLBACK, after the auto-resolve, got %q", res.Detail)
+	}
+}

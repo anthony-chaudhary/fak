@@ -64,7 +64,10 @@ func staleBaseGuardMode() staleBaseMode {
 //     proceeds exactly as before.
 //   - fired == true, detail != "": a peer-added run would be dropped. The caller refuses
 //     (block) or records the detail and proceeds (warn). detail names P, the dropped count,
-//     the fork point, and the fetch+merge remedy.
+//     the fork point, and the fetch+merge remedy. The remedy routes through
+//     `fak merge --apply` (#2154): the trivial two-agents-same-block divergence — the merged
+//     tree already equals HEAD — resolves textlessly with the tree asserted, and only a
+//     tree-changing merge or a genuine conflict falls back to a hand `git merge`.
 //
 // The algorithm is whitespace-insensitive over non-trivial lines so a peer gofmt-reformat
 // (which changes only layout) never fires: a reformatted line has a trimmed twin already in
@@ -123,9 +126,11 @@ func checkStaleBaseDeletion(ctx context.Context, run Runner, dir, trunk string, 
 			}
 			return fmt.Sprintf(
 				"would drop %d line(s) peer-added to %s on %s since your base %s; "+
-					"git fetch origin %s && git merge %s (never --autostash), then re-commit. "+
+					"git fetch origin %s && fak merge --apply %s — the trivial two-agents-same-block case "+
+					"auto-resolves textlessly with the merged tree asserted == HEAD (#2154); a tree-changing "+
+					"merge or a genuine conflict defers to git merge %s (never --autostash) — then re-commit. "+
 					"(guard reads the local %s ref only — it closes the fetched-but-not-merged window, not the never-fetched one)",
-				dropped, p, originRef, short, trunk, originRef, originRef,
+				dropped, p, originRef, short, trunk, originRef, originRef, originRef,
 			), true
 		}
 	}
