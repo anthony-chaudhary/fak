@@ -1163,3 +1163,25 @@ class RegistrySummaryContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class RearmWindowOverrideTest(unittest.TestCase):
+    def test_active_rearm_overrides_window_until_consumed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ledger = Path(td) / "resume_ledger.jsonl"
+            ledger.write_text("\n".join([
+                '{bad json',
+                '{"session":"old","phase":"rearm"}',
+                '{"session":"consumed","phase":"rearm"}',
+                '{"session":"consumed","phase":"launched"}',
+                '{"session":"settled","phase":"rearm"}',
+                '{"session":"settled","action":"consolidate_operator"}',
+            ]) + "\n", encoding="utf-8")
+            self.assertEqual(fleet_sessions.active_rearmed_session_ids(td), {"old"})
+
+    def test_scan_window_gate_names_rearmed_exception(self):
+        source = (Path(__file__).resolve().parent / "fleet_sessions.py").read_text(encoding="utf-8")
+        self.assertIn("and base not in rearmed", source)
+        self.assertIn("rearmed = active_rearmed_session_ids(REG_DIR)", source)

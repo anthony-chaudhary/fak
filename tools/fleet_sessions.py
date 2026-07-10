@@ -408,8 +408,34 @@ def _account_still_worker(acct):
     return fleet_accounts.is_worker(acct, USER, ACCT_POLICY)
 
 
+def active_rearmed_session_ids(reg_dir):
+    """Return UUIDs whose latest attempt-budget event is a rearm."""
+    path = os.path.join(reg_dir, "resume_ledger.jsonl")
+    active = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                sid = str(rec.get("session") or "").strip()
+                if not sid:
+                    continue
+                phase = str(rec.get("phase") or rec.get("outcome") or "").strip().lower()
+                action = str(rec.get("action") or "").strip().lower()
+                if phase == "rearm":
+                    active[sid] = True
+                elif phase in ("launched", "settled", "operator_settled", "consolidated") or action.startswith("consolidate"):
+                    active.pop(sid, None)
+    except OSError:
+        return set()
+    return set(active)
+
+
 def scan():
     rows, throttle = [], {}
+    rearmed = active_rearmed_session_ids(REG_DIR)
     for acct_dir in glob.glob(os.path.join(USER, ".claude*")):
         acct = os.path.basename(acct_dir)
         proj = os.path.join(acct_dir, "projects")
@@ -428,7 +454,10 @@ def scan():
             except OSError:
                 continue
             age = (NOW - dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc)).total_seconds() / 60.0
-            if age > WINDOW_H * 60 or age > MAX_AGE:
+            # #4157: rearm is a targeted reconsideration request. It overrides
+            # the mtime scan window for exactly this UUID without widening the
+            # expensive whole-fleet window. A later launch/settle consumes it.
+            if (age > WINDOW_H * 60 or age > MAX_AGE) and base not in rearmed:
                 continue
             r = classify(path)
             r["account"] = acct
