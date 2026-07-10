@@ -134,7 +134,7 @@ func TestAssessCapacity_ParamSignalOnlyFits(t *testing.T) {
 }
 
 func TestCapacityReasonClosedSet(t *testing.T) {
-	for _, r := range []CapacityReason{CapacityOK, CapacityReroute, CapacityUnknown} {
+	for _, r := range []CapacityReason{CapacityOK, CapacityReroute, CapacityUnknown, SeatExhausted} {
 		if !r.Valid() {
 			t.Errorf("%q should be a known CapacityReason", r)
 		}
@@ -151,6 +151,68 @@ func TestSourcedCapacityConstants(t *testing.T) {
 	}
 	if DefaultDeviceHeadroom != 0.15 {
 		t.Errorf("DefaultDeviceHeadroom = %v, want 0.15 (hardware-limits-and-capacity.md:303)", DefaultDeviceHeadroom)
+	}
+}
+
+// --- Seat-pool exhaustion trigger (#3577) -------------------------------------------
+
+func TestAssessCapacity_SeatExhaustedReroutes(t *testing.T) {
+	// SeatPoolExhausted is the sole signal (no local ceiling, no window demand):
+	// the provider seat pool is blocked fleet-wide => reroute to fleet compute with
+	// the distinct SEAT_EXHAUSTED cause, not a model-shape CAPACITY_REROUTE.
+	v := AssessCapacity(CapacityDemand{SeatPoolExhausted: true}, CapacityCeiling{})
+	if v.Reason != SeatExhausted {
+		t.Fatalf("seat-exhausted reason = %q, want %q", v.Reason, SeatExhausted)
+	}
+	if !v.Reroute() {
+		t.Fatal("seat-exhausted verdict must reroute")
+	}
+	if v.OverParam || v.OverWindow {
+		t.Fatalf("seat exhaustion is not a model-shape overflow: OverParam=%v OverWindow=%v, want both false", v.OverParam, v.OverWindow)
+	}
+}
+
+func TestAssessCapacity_SeatNotExhaustedIsInertNoSignal(t *testing.T) {
+	// The absent-signal invariant on the seat axis: SeatPoolExhausted=false with no
+	// other signal must degrade to CAPACITY_UNKNOWN, never reroute. A false is not
+	// evidence of a healthy pool — it is simply no evidence.
+	v := AssessCapacity(CapacityDemand{SeatPoolExhausted: false}, CapacityCeiling{})
+	if v.Reason != CapacityUnknown {
+		t.Fatalf("seat-not-exhausted, no other signal => %q, want %q", v.Reason, CapacityUnknown)
+	}
+	if v.Reroute() {
+		t.Fatal("an absent seat signal must not reroute")
+	}
+}
+
+func TestAssessCapacity_SeatExhaustedIndependentOfModelFit(t *testing.T) {
+	// A model that FITS every local ceiling still reroutes when the seat pool is
+	// blocked: the seat trigger is orthogonal to the model-shape ceilings.
+	v := AssessCapacity(
+		CapacityDemand{ModelParamsB: 3, ContextWindow: 8000, PromptTokens: 100, SeatPoolExhausted: true},
+		CapacityCeiling{FaithfulParamsB: LocalFaithfulCeilingBillion},
+	)
+	if v.Reason != SeatExhausted {
+		t.Fatalf("a fitting model with an exhausted seat pool => %q, want %q", v.Reason, SeatExhausted)
+	}
+	if !v.Reroute() {
+		t.Fatal("seat exhaustion must reroute even when the model fits locally")
+	}
+}
+
+func TestAssessCapacity_ModelShapeOverflowPrecedesSeat(t *testing.T) {
+	// When a local ceiling ALSO trips, the model-shape overflow is reported as the
+	// cause (CAPACITY_REROUTE with its OverParam flag) so the reroute destination can
+	// honor the size need; either way the task reroutes. Pins the intended precedence.
+	v := AssessCapacity(
+		CapacityDemand{ModelParamsB: 70, SeatPoolExhausted: true},
+		CapacityCeiling{FaithfulParamsB: LocalFaithfulCeilingBillion},
+	)
+	if v.Reason != CapacityReroute || !v.OverParam {
+		t.Fatalf("param overflow + seat exhaustion => reason %q OverParam=%v, want CAPACITY_REROUTE + OverParam", v.Reason, v.OverParam)
+	}
+	if !v.Reroute() {
+		t.Fatal("param overflow with seat exhaustion must still reroute")
 	}
 }
 
@@ -240,5 +302,26 @@ func TestRouteWithCapacity_DoesNotMutateCallerLabels(t *testing.T) {
 	}
 	if len(shared) != 1 {
 		t.Fatalf("caller's Labels map was mutated: %v", shared)
+	}
+}
+
+func TestRouteWithCapacity_SeatExhaustedStampsLabelAndPicksFleetRule(t *testing.T) {
+	// The seat-exhaustion trigger reuses the SAME reroute label, so #3520's match
+	// rule fires unchanged — a seat-blocked task spills to the fleet-GPU lane just
+	// like a model-shape overflow does.
+	m := capacityManifest()
+	s := Subject{Aspect: AspectRequest, PromptTokens: 100}
+	dec, v := m.RouteWithCapacity(s,
+		CapacityDemand{SeatPoolExhausted: true},
+		CapacityCeiling{},
+	)
+	if v.Reason != SeatExhausted || !v.Reroute() {
+		t.Fatalf("verdict should be a SEAT_EXHAUSTED reroute, got %q reroute=%v", v.Reason, v.Reroute())
+	}
+	if !dec.Matched || dec.RuleName != "capacity-reroute-to-fleet" {
+		t.Fatalf("seat exhaustion should fire the fleet rule, got matched=%v rule=%q", dec.Matched, dec.RuleName)
+	}
+	if got := dec.Plan.Primary(); got != "fleet-large" {
+		t.Fatalf("seat-exhausted reroute should select fleet-large, got %q", got)
 	}
 }

@@ -18,8 +18,9 @@ import "fmt"
 // instead of failing or stalling. Per the doctrine note §1.2, "no local capacity"
 // is a routing INPUT, not a dead end.
 //
-// Two orthogonal ceilings, each fail-OPEN when its signal is absent (an unknown
-// capacity NEVER reroutes — docs Planks 1-5):
+// Three orthogonal reroute triggers (two numeric ceilings plus one pool signal),
+// each fail-OPEN when its signal is absent (an unknown capacity NEVER reroutes —
+// docs Planks 1-5):
 //
 //   - FAITHFUL PARAM CEILING. The local box serves a model faithfully only up to
 //     a parameter size ("fak faithful <= 7B on the 36 GB Mac",
@@ -29,6 +30,15 @@ import "fmt"
 //     model's headroom-adjusted context window (the served capacity-precheck,
 //     with a fixed 15% device-headroom reserve, hardware-limits-and-capacity.md:303)
 //     means the request cannot be served whole on the local device.
+//   - SEAT-POOL EXHAUSTION (#3577). The provider seat pool is blocked fleet-wide
+//     (REFUSE_NO_ACCOUNT holds everywhere), so a task that could run on self-hosted
+//     fleet compute has no provider seat to wait for and should spill to idle fleet
+//     GPU capacity instead of stalling (CONCEPT-IDEAL §1.2, memory
+//     local-machine-not-a-constraint). Unlike the two numeric ceilings this is a
+//     boolean pool signal rather than a threshold, but it obeys the SAME fail-OPEN
+//     rule: an absent (false) signal is not evidence of exhaustion and never
+//     reroutes. The live wiring of this signal from the deficit fold is separate
+//     (issue #2); the kernel only decides the verdict from the boolean a caller sets.
 //
 // This stays a pre-Submit MODEL-ID decision, NOT a dispatch-time override: it
 // hands a wiring layer a directive to route elsewhere, honoring the
@@ -59,12 +69,19 @@ const (
 	// no measured demand); conservative-degrade to today's routing. This value
 	// NEVER reroutes — an absent signal is not evidence of overflow.
 	CapacityUnknown CapacityReason = "CAPACITY_UNKNOWN"
+	// SeatExhausted — the provider seat pool is blocked fleet-wide, so the task has
+	// no provider seat to wait for; route it to self-hosted fleet GPU compute
+	// instead of stalling (#3577). This is a REROUTE disposition like
+	// CapacityReroute (Reroute() reports true for it); it differs only in naming the
+	// seat pool — not model shape — as the cause. Like every other reroute it fires
+	// only on a present signal: SeatPoolExhausted must be true, never merely unset.
+	SeatExhausted CapacityReason = "SEAT_EXHAUSTED"
 )
 
 // knownCapacityReason reports whether r is one of the closed CapacityReason set.
 func knownCapacityReason(r CapacityReason) bool {
 	switch r {
-	case CapacityOK, CapacityReroute, CapacityUnknown:
+	case CapacityOK, CapacityReroute, CapacityUnknown, SeatExhausted:
 		return true
 	}
 	return false
@@ -119,6 +136,12 @@ type CapacityDemand struct {
 	PromptTokens int
 	// ExpectedOutputTokens is the planned max output tokens to reserve. 0 => none.
 	ExpectedOutputTokens int
+	// SeatPoolExhausted reports that the provider seat pool is blocked fleet-wide
+	// (REFUSE_NO_ACCOUNT everywhere), fed later by the deficit fold (#2). true =>
+	// reroute to self-hosted fleet compute with reason SEAT_EXHAUSTED. false (the
+	// zero value) is an ABSENT signal, not evidence of a healthy pool: it is inert
+	// and never reroutes on this axis, exactly like an unconfigured ceiling.
+	SeatPoolExhausted bool
 }
 
 // CapacityVerdict is the closed decision: the typed Reason, which ceiling(s)
@@ -133,8 +156,12 @@ type CapacityVerdict struct {
 	Detail     string
 }
 
-// Reroute reports whether the verdict directs the task elsewhere.
-func (v CapacityVerdict) Reroute() bool { return v.Reason == CapacityReroute }
+// Reroute reports whether the verdict directs the task elsewhere. Both reroute
+// dispositions count: CapacityReroute (model-shape overflow) and SeatExhausted
+// (provider seat pool blocked) — each spills the task to the fleet-GPU lane.
+func (v CapacityVerdict) Reroute() bool {
+	return v.Reason == CapacityReroute || v.Reason == SeatExhausted
+}
 
 // AssessCapacity is the pure capacity kernel: given a task's measured demand and
 // the local faithful ceiling, decide keep-local (CapacityOK) vs route-elsewhere
@@ -144,10 +171,10 @@ func AssessCapacity(d CapacityDemand, c CapacityCeiling) CapacityVerdict {
 	paramConfigured := c.FaithfulParamsB > 0 && d.ModelParamsB > 0
 	windowConfigured := d.ContextWindow > 0 && (d.PromptTokens > 0 || d.ExpectedOutputTokens > 0)
 
-	if !paramConfigured && !windowConfigured {
+	if !paramConfigured && !windowConfigured && !d.SeatPoolExhausted {
 		return CapacityVerdict{
 			Reason: CapacityUnknown,
-			Detail: "no configured capacity ceiling or measured demand; keeping today's route",
+			Detail: "no configured capacity ceiling, measured demand, or seat-pool signal; keeping today's route",
 		}
 	}
 
@@ -178,6 +205,13 @@ func AssessCapacity(d CapacityDemand, c CapacityCeiling) CapacityVerdict {
 			Reason: CapacityReroute, OverWindow: true,
 			Detail: fmt.Sprintf("demand %d tok over-subscribes %d usable window (%d ctx - %.0f%% headroom)",
 				demand, usable, d.ContextWindow, headroom*100),
+		}
+	case d.SeatPoolExhausted:
+		// Model shape fits (or is unconfigured) but the provider seat pool is blocked
+		// fleet-wide: spill to self-hosted fleet compute rather than stall on a seat.
+		return CapacityVerdict{
+			Reason: SeatExhausted,
+			Detail: "provider seat pool exhausted (REFUSE_NO_ACCOUNT fleet-wide); routing to self-hosted fleet compute",
 		}
 	default:
 		return CapacityVerdict{Reason: CapacityOK, Detail: "fits local faithful path"}
