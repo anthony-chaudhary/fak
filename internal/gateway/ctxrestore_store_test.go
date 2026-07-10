@@ -76,7 +76,7 @@ func TestRestoreContextRoutesToRecallImage(t *testing.T) {
 	srv := newTestServer(t)
 	dir, digest := writeRecallImage(t, "sess-restore-recall")
 
-	got, err := srv.restoreContext(ContextRestoreRequest{ID: digest, TraceID: "t-recall", ImageDir: dir})
+	got, err := srv.restoreContext("", ContextRestoreRequest{ID: digest, TraceID: "t-recall", ImageDir: dir})
 	if err != nil {
 		t.Fatalf("restore from recall image: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRestoreContextRefusesTombstonedRecallPage(t *testing.T) {
 		t.Fatalf("tombstone recall page: %v", err)
 	}
 
-	_, err := srv.restoreContext(ContextRestoreRequest{ID: digest, TraceID: "t-recall-tomb", ImageDir: dir})
+	_, err := srv.restoreContext("", ContextRestoreRequest{ID: digest, TraceID: "t-recall-tomb", ImageDir: dir})
 	if !errors.Is(err, ErrRestoreRefused) {
 		t.Fatalf("tombstoned recall page: want ErrRestoreRefused, got %v", err)
 	}
@@ -119,7 +119,7 @@ func TestRestoreContextStashHitBeatsImage(t *testing.T) {
 	id := ctxplan.Digest(taskBytes)
 	srv.stashRestore(trace, id, "the stashed originating task", taskBytes)
 
-	got, err := srv.restoreContext(ContextRestoreRequest{ID: id, TraceID: trace, ImageDir: dir})
+	got, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace, ImageDir: dir})
 	if err != nil {
 		t.Fatalf("restore stash hit with image set: %v", err)
 	}

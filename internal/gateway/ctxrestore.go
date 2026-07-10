@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/sessionread"
+	"github.com/anthony-chaudhary/fak/internal/sessionread/screen"
 )
 
 // ctxrestore.go — the restore-by-ID arm of the guard's context API: the recovery edge that turns
@@ -121,6 +123,58 @@ func (s *Server) stashRestore(trace, id, excerpt string, taskBytes []byte) {
 	}
 }
 
+// bindTraceOwner records, first-writer-wins, the principal that owns a session trace — the C1
+// read-scope floor (#4192). Called from the served-request boundary (handleAnthropicMessages) the
+// first time a trace serves a turn, so the principal that drove the session is the one a later
+// read-self op must match. A nil server or empty trace is a safe no-op. The owner may legitimately
+// be "" (the single-tenant no-RequireKey loopback, where every caller shares the "" principal); an
+// already-bound trace keeps its first owner, so a mid-session principal change cannot re-home a
+// trace's dropped task under a new owner. Bounded by the same generational reset as ctxRestore.
+func (s *Server) bindTraceOwner(trace, principal string) {
+	if s == nil || strings.TrimSpace(trace) == "" {
+		return
+	}
+	s.traceOwnerMu.Lock()
+	defer s.traceOwnerMu.Unlock()
+	if s.traceOwner == nil {
+		s.traceOwner = make(map[string]string)
+	}
+	if _, ok := s.traceOwner[trace]; ok {
+		return // first-writer-wins
+	}
+	if len(s.traceOwner) >= maxCtxRestoreSessions {
+		s.traceOwner = make(map[string]string) // generational reset, like ctxRestore/ctxValue
+	}
+	s.traceOwner[trace] = principal
+}
+
+// traceOwnerOf returns the principal bound to a trace and whether any owner was recorded. An
+// unbound trace reads as ("", false) — the read-scope floor treats an unbound owner as "" (the
+// single-tenant default), so a caller with no principal still self-reads while a named principal is
+// refused.
+func (s *Server) traceOwnerOf(trace string) (string, bool) {
+	s.traceOwnerMu.RLock()
+	defer s.traceOwnerMu.RUnlock()
+	owner, ok := s.traceOwner[trace]
+	return owner, ok
+}
+
+// scopeReadSelf is the C1 read-scope floor for the two read-self context ops (fak_context_restore /
+// fak_context_spans, #4192): a caller may address a trace's dropped originating task ONLY when its
+// principal matches the trace's owner. When caller and owner are the SAME principal — including both
+// "" on the no-RequireKey loopback, where there is no per-principal boundary to cross — it is a
+// self-read and admitted. Otherwise the refusal is routed through the kernel floor
+// (screen.Authorize) so the closed READ_SCOPE_DENIED token and its byte-free detail come from one
+// place; for a read-self op with mismatched (or empty) principals Authorize always refuses. Returns
+// nil when the read is in-scope, else a *screen.Refusal carrying READ_SCOPE_DENIED.
+func (s *Server) scopeReadSelf(caller string, op sessionread.ReadOp, trace string) error {
+	owner, _ := s.traceOwnerOf(trace)
+	if caller == owner {
+		return nil
+	}
+	return screen.Authorize(screen.ScopeRequest{Op: op, Caller: caller, TargetOwner: owner})
+}
+
 // CtxRestoreResult is the fak_context_restore reply. Bytes is the verbatim dropped turn (the full
 // task, not the excerpt); Excerpt echoes the orientation line the stub carried, so a model gets both
 // "what it is" and "all of it" in one answer. Provenance is WITNESSED — fak is returning bytes it
@@ -163,12 +217,21 @@ type ContextRestoreRequest struct {
 // source (ImageDir → recall.CtxStore), the source reachable in the gateway lane; a ctxview-elision store
 // (the ctxplan planner's per-session store) and a memq-cell store plug into the same restoreFromStore
 // adapter behind a Store handle, with no new routing here.
-func (s *Server) restoreContext(req ContextRestoreRequest) (CtxRestoreResult, error) {
+func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRestoreResult, error) {
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
 		return CtxRestoreResult{}, errors.New("fak_context_restore id is required")
 	}
 	trace := s.traceFor(req.TraceID)
+
+	// 0) The C1 read-scope floor (#4192): a read-self op may page a trace's dropped originating
+	//    task back in ONLY when the caller's principal owns the trace. The scope check runs BEFORE
+	//    any source lookup, so a cross-principal caller cannot even learn whether the trace holds a
+	//    stash — it is refused READ_SCOPE_DENIED with no existence leak, and defense-in-depth with
+	//    the outbound taint screen restoreFromStash applies to the bytes it does disclose.
+	if err := s.scopeReadSelf(caller, sessionread.OpContextRestore, trace); err != nil {
+		return CtxRestoreResult{}, err
+	}
 
 	// 1) The per-trace compaction-tombstone stash — the default source. A hit here (bytes or a
 	//    trust-gate refusal) is authoritative; only a genuine miss falls through to a Store.
@@ -215,23 +278,56 @@ func (s *Server) restoreFromStash(trace, id string) (CtxRestoreResult, error) {
 		if e.id != id {
 			continue
 		}
-		switch {
-		case e.sealed:
-			return CtxRestoreResult{}, errWrap(ErrRestoreRefused, ctxplan.ErrSealed)
-		case e.tombstoned:
-			return CtxRestoreResult{}, errWrap(ErrRestoreRefused, ctxplan.ErrTombstoned)
+		// Outbound taint screen (#4192): the SAME kernel screen the read plane declares
+		// (screen.ScreenOutbound) decides whether these bytes may cross the boundary. A sealed or
+		// tombstoned span refuses with READ_TAINT_WITHHELD and its bytes never leave; a clean span
+		// discloses byte-exact. The refusal is wrapped to ALSO satisfy the historical
+		// ErrRestoreRefused + ctxplan-sentinel contract, so a caller can still branch on WHICH gate
+		// held while the closed READ_TAINT_WITHHELD token is recoverable via screen.RefusalReason.
+		body, serr := screen.ScreenOutbound(screen.Span{Bytes: e.bytes, Sealed: e.sealed, Tombstoned: e.tombstoned})
+		if serr != nil {
+			return CtxRestoreResult{}, restoreTaintRefusal(serr, e.sealed)
 		}
 		return CtxRestoreResult{
 			Schema:     ctxRestoreSchema,
 			TraceID:    trace,
 			ID:         id,
 			Excerpt:    e.excerpt,
-			Bytes:      string(e.bytes),
+			Bytes:      string(body),
 			Provenance: "WITNESSED",
 		}, nil
 	}
 	return CtxRestoreResult{}, ErrRestoreMiss
 }
+
+// restoreTaintRefusal wraps the outbound taint screen's refusal (a *screen.Refusal carrying
+// READ_TAINT_WITHHELD) so the returned error simultaneously satisfies every reader of the restore
+// refusal contract: errors.Is(err, ErrRestoreRefused) for the branch, errors.Is(err, ctxplan.Err*)
+// for the specific gate, and screen.RefusalReason(err) == READ_TAINT_WITHHELD for the closed wire
+// token. sealed selects the ctxplan sentinel (Sealed checked first, mirroring ScreenOutbound's own
+// order); the screen refusal is carried verbatim so its byte-free detail reaches the caller.
+func restoreTaintRefusal(screenErr error, sealed bool) error {
+	sentinel := ctxplan.ErrTombstoned
+	if sealed {
+		sentinel = ctxplan.ErrSealed
+	}
+	return &restoreRefusal{parts: []error{ErrRestoreRefused, sentinel, screenErr}}
+}
+
+// restoreRefusal joins the several errors a restore taint refusal must answer to (the
+// ErrRestoreRefused surface, the ctxplan gate sentinel, and the closed screen.Refusal) behind a
+// single value. Its Unwrap() []error lets errors.Is and errors.As traverse all three, so no reader
+// of the historical or the new refusal vocabulary is lost.
+type restoreRefusal struct{ parts []error }
+
+func (e *restoreRefusal) Error() string {
+	msgs := make([]string, 0, len(e.parts))
+	for _, p := range e.parts {
+		msgs = append(msgs, p.Error())
+	}
+	return strings.Join(msgs, ": ")
+}
+func (e *restoreRefusal) Unwrap() []error { return e.parts }
 
 // errWrap joins a surface error with its underlying cause so callers can errors.Is on EITHER —
 // ErrRestoreRefused for the branch and the ctxplan sentinel for the specific gate.

@@ -135,7 +135,12 @@ func (s *Server) handleMCPHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "request too large or unreadable")
 		return
 	}
-	resp := s.dispatchRPC(r.Context(), body)
+	// Lower the request's isolation principal (the auth proxy's X-Fak-Principal header) onto the
+	// context so read-self tool arms (fak_context_restore / fak_context_spans) can apply the C1
+	// scope floor. Absent a proxy (the no-RequireKey loopback) the principal is "" — the
+	// single-tenant default the floor reads as a self-read.
+	ctx := WithPrincipal(r.Context(), principalFor(r, ""))
+	resp := s.dispatchRPC(ctx, body)
 	if resp == nil { // a notification
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -434,11 +439,11 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		})
 	case "fak_context_restore":
 		return mcpDecodeCall[ContextRestoreRequest](p.Arguments, "fak_context_restore", func(req ContextRestoreRequest) (any, error) {
-			return s.restoreContext(req)
+			return s.restoreContext(principalFromContext(ctx), req)
 		})
 	case "fak_context_spans":
 		return mcpDecodeCall[ContextSpansRequest](p.Arguments, "fak_context_spans", func(req ContextSpansRequest) (any, error) {
-			return s.contextSpans(req), nil
+			return s.contextSpans(principalFromContext(ctx), req)
 		})
 	case "fak_resume_history":
 		return mcpDecodeCall[ResumeHistoryRequest](p.Arguments, "fak_resume_history", func(req ResumeHistoryRequest) (any, error) {

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/sessionread"
 )
 
 // ctxspans.go — the enumeration arm of the guard's context API: the DISCOVERY edge that lets a model
@@ -78,8 +79,17 @@ type ContextSpansRequest struct {
 // with Count 0, because enumerating a trace that has dropped nothing is a valid empty answer. Sealed and
 // tombstoned entries are LISTED (their suppression is legible) with Restorable=false, and their bytes are
 // never offered here — only restore, trust-gated, can page bytes back in.
-func (s *Server) contextSpans(req ContextSpansRequest) CtxSpansResult {
+func (s *Server) contextSpans(caller string, req ContextSpansRequest) (CtxSpansResult, error) {
 	trace := s.traceFor(req.TraceID)
+
+	// C1 read-scope floor (#4192): enumeration surfaces the byte-free orientation descriptors of a
+	// trace's dropped tasks, which are themselves the other principal's task text — so a
+	// cross-principal enumeration is refused READ_SCOPE_DENIED, mirroring the restore path. A
+	// self-read (caller principal owns the trace, including both "" on the loopback) proceeds.
+	if err := s.scopeReadSelf(caller, sessionread.OpContextSpans, trace); err != nil {
+		return CtxSpansResult{}, err
+	}
+
 	// Non-nil empty slice by default: an empty enumeration is an answer, not a null.
 	spans := []CtxSpan{}
 
@@ -113,5 +123,5 @@ func (s *Server) contextSpans(req ContextSpansRequest) CtxSpansResult {
 		TraceID: trace,
 		Spans:   spans,
 		Count:   len(spans),
-	}
+	}, nil
 }

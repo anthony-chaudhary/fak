@@ -25,7 +25,10 @@ func TestContextSpansEnumeratesInOrder(t *testing.T) {
 	srv.stashRestore(trace, idA, "rotate the auth tokens", first)
 	srv.stashRestore(trace, idB, "then redeploy the gateway", second)
 
-	got := srv.contextSpans(ContextSpansRequest{TraceID: trace})
+	got, err := srv.contextSpans("", ContextSpansRequest{TraceID: trace})
+	if err != nil {
+		t.Fatalf("contextSpans err = %v, want nil (self-read)", err)
+	}
 	if got.Schema != ctxSpansSchema {
 		t.Fatalf("schema = %q, want %q", got.Schema, ctxSpansSchema)
 	}
@@ -78,7 +81,10 @@ func TestContextSpansListsSuppressedNotRestorable(t *testing.T) {
 	}
 	srv.ctxRestoreMu.Unlock()
 
-	got := srv.contextSpans(ContextSpansRequest{TraceID: trace})
+	got, err := srv.contextSpans("", ContextSpansRequest{TraceID: trace})
+	if err != nil {
+		t.Fatalf("contextSpans err = %v, want nil (self-read)", err)
+	}
 	if got.Count != 2 {
 		t.Fatalf("count = %d, want 2 (suppressed spans are still LISTED)", got.Count)
 	}
@@ -121,7 +127,10 @@ func TestContextSpansListsSuppressedNotRestorable(t *testing.T) {
 // restore-by-id, which misses).
 func TestContextSpansEmptyTraceIsEmptyAnswer(t *testing.T) {
 	srv := newTestServer(t)
-	got := srv.contextSpans(ContextSpansRequest{TraceID: "never-stashed"})
+	got, err := srv.contextSpans("", ContextSpansRequest{TraceID: "never-stashed"})
+	if err != nil {
+		t.Fatalf("contextSpans err = %v, want nil (self-read)", err)
+	}
 	if got.Count != 0 {
 		t.Fatalf("count = %d, want 0 for an unknown trace", got.Count)
 	}

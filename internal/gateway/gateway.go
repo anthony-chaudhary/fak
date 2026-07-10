@@ -1211,6 +1211,18 @@ type Server struct {
 	ctxRestoreMu sync.Mutex
 	ctxRestore   map[string]*sessionCtxRestore
 
+	// traceOwner binds a session trace to the principal that owns it — the C1 read-scope
+	// floor (#4192). The first served turn on a trace records its principal here
+	// (first-writer-wins, via bindTraceOwner from handleAnthropicMessages), so a later
+	// read-self op (fak_context_restore / fak_context_spans) can be scoped: a caller may
+	// page a trace's dropped originating task back in ONLY when its principal matches the
+	// owner. On the common no-RequireKey loopback both sides are "" (single-tenant: every
+	// caller shares), which reads as a self-read; a caller naming a DIFFERENT principal is
+	// refused READ_SCOPE_DENIED. Guarded by traceOwnerMu; bounded by the same
+	// maxCtxRestoreSessions generational reset as ctxRestore so it cannot grow unbounded.
+	traceOwnerMu sync.RWMutex
+	traceOwner   map[string]string
+
 	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
 	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
 	// per-turn fak-turn debug line (debug_stats.go) already shows the turn's cache/token

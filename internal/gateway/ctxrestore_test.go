@@ -22,7 +22,7 @@ func TestRestoreRoundTrips(t *testing.T) {
 
 	srv.stashRestore(trace, id, "rotate the auth tokens", taskBytes)
 
-	got, err := srv.restoreContext(ContextRestoreRequest{ID: id, TraceID: trace})
+	got, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace})
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -46,12 +46,12 @@ func TestRestoreMissUnknownID(t *testing.T) {
 	srv := newTestServer(t)
 	srv.stashRestore("t-miss", ctxplan.Digest([]byte("a")), "a", []byte("a"))
 
-	_, err := srv.restoreContext(ContextRestoreRequest{ID: "deadbeef", TraceID: "t-miss"})
+	_, err := srv.restoreContext("", ContextRestoreRequest{ID: "deadbeef", TraceID: "t-miss"})
 	if !errors.Is(err, ErrRestoreMiss) {
 		t.Fatalf("unknown id err = %v, want ErrRestoreMiss", err)
 	}
 	// A trace that never stashed anything is likewise a miss, not a panic.
-	if _, err := srv.restoreContext(ContextRestoreRequest{ID: "x", TraceID: "never"}); !errors.Is(err, ErrRestoreMiss) {
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: "x", TraceID: "never"}); !errors.Is(err, ErrRestoreMiss) {
 		t.Fatalf("unknown trace err = %v, want ErrRestoreMiss", err)
 	}
 }
@@ -79,11 +79,11 @@ func TestRestoreTrustGateRefuses(t *testing.T) {
 	}
 	srv.ctxRestoreMu.Unlock()
 
-	_, err := srv.restoreContext(ContextRestoreRequest{ID: sealedID, TraceID: trace})
+	_, err := srv.restoreContext("", ContextRestoreRequest{ID: sealedID, TraceID: trace})
 	if !errors.Is(err, ErrRestoreRefused) || !errors.Is(err, ctxplan.ErrSealed) {
 		t.Fatalf("sealed restore err = %v, want refused+ErrSealed", err)
 	}
-	_, err = srv.restoreContext(ContextRestoreRequest{ID: tombID, TraceID: trace})
+	_, err = srv.restoreContext("", ContextRestoreRequest{ID: tombID, TraceID: trace})
 	if !errors.Is(err, ErrRestoreRefused) || !errors.Is(err, ctxplan.ErrTombstoned) {
 		t.Fatalf("tombstoned restore err = %v, want refused+ErrTombstoned", err)
 	}
@@ -92,7 +92,7 @@ func TestRestoreTrustGateRefuses(t *testing.T) {
 // TestRestoreEmptyIDRejected: a call with no id is a plain argument error, not a miss.
 func TestRestoreEmptyIDRejected(t *testing.T) {
 	srv := newTestServer(t)
-	if _, err := srv.restoreContext(ContextRestoreRequest{ID: "  ", TraceID: "t"}); err == nil {
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: "  ", TraceID: "t"}); err == nil {
 		t.Fatal("empty id must error")
 	}
 }

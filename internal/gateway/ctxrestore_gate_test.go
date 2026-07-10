@@ -39,7 +39,7 @@ func TestTombstoneRestoreWiredThroughContextChange(t *testing.T) {
 
 	// Precondition: the handle restores before the operator acts (the wire, not a pre-flipped flag, is
 	// what suppresses it).
-	if _, err := srv.restoreContext(ContextRestoreRequest{ID: digest, TraceID: trace}); err != nil {
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: digest, TraceID: trace}); err != nil {
 		t.Fatalf("precondition: handle should restore before the tombstone, got %v", err)
 	}
 
@@ -59,13 +59,16 @@ func TestTombstoneRestoreWiredThroughContextChange(t *testing.T) {
 	}
 
 	// The wire fired: the restore handle is now refused with the tombstone sentinel.
-	_, err = srv.restoreContext(ContextRestoreRequest{ID: digest, TraceID: trace})
+	_, err = srv.restoreContext("", ContextRestoreRequest{ID: digest, TraceID: trace})
 	if !errors.Is(err, ErrRestoreRefused) || !errors.Is(err, ctxplan.ErrTombstoned) {
 		t.Fatalf("post-tombstone restore err = %v, want refused+ErrTombstoned", err)
 	}
 
 	// Cross-feature: fak_context_spans now lists the span as suppressed, not restorable.
-	spans := srv.contextSpans(ContextSpansRequest{TraceID: trace})
+	spans, err := srv.contextSpans("", ContextSpansRequest{TraceID: trace})
+	if err != nil {
+		t.Fatalf("contextSpans err = %v, want nil (self-read)", err)
+	}
 	if spans.Count != 1 {
 		t.Fatalf("spans count = %d, want 1 (the suppressed span is still LISTED)", spans.Count)
 	}
@@ -87,11 +90,15 @@ func TestTombstoneRestoreDirectMethod(t *testing.T) {
 	if n := srv.tombstoneRestore(id); n != 1 {
 		t.Fatalf("tombstoneRestore flipped %d, want 1", n)
 	}
-	_, err := srv.restoreContext(ContextRestoreRequest{ID: id, TraceID: trace})
+	_, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace})
 	if !errors.Is(err, ErrRestoreRefused) || !errors.Is(err, ctxplan.ErrTombstoned) {
 		t.Fatalf("restore err = %v, want refused+ErrTombstoned", err)
 	}
-	if sp := srv.contextSpans(ContextSpansRequest{TraceID: trace}).Spans[0]; !sp.Tombstoned || sp.Restorable {
+	spans, err := srv.contextSpans("", ContextSpansRequest{TraceID: trace})
+	if err != nil {
+		t.Fatalf("contextSpans err = %v, want nil (self-read)", err)
+	}
+	if sp := spans.Spans[0]; !sp.Tombstoned || sp.Restorable {
 		t.Fatalf("span Tombstoned=%v Restorable=%v, want true/false", sp.Tombstoned, sp.Restorable)
 	}
 }
@@ -110,11 +117,15 @@ func TestSealRestoreSuppressesHandle(t *testing.T) {
 	if n := srv.sealRestore(id); n != 1 {
 		t.Fatalf("sealRestore flipped %d, want 1", n)
 	}
-	_, err := srv.restoreContext(ContextRestoreRequest{ID: id, TraceID: trace})
+	_, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace})
 	if !errors.Is(err, ErrRestoreRefused) || !errors.Is(err, ctxplan.ErrSealed) {
 		t.Fatalf("restore err = %v, want refused+ErrSealed", err)
 	}
-	if sp := srv.contextSpans(ContextSpansRequest{TraceID: trace}).Spans[0]; !sp.Sealed || sp.Restorable {
+	spans, err := srv.contextSpans("", ContextSpansRequest{TraceID: trace})
+	if err != nil {
+		t.Fatalf("contextSpans err = %v, want nil (self-read)", err)
+	}
+	if sp := spans.Spans[0]; !sp.Sealed || sp.Restorable {
 		t.Fatalf("span Sealed=%v Restorable=%v, want true/false", sp.Sealed, sp.Restorable)
 	}
 }
@@ -136,7 +147,7 @@ func TestGateRestoreDigestNotStashedIsNoop(t *testing.T) {
 		t.Fatalf("tombstoneRestore of a blank digest flipped %d, want 0", n)
 	}
 	// The unrelated handle is untouched.
-	if _, err := srv.restoreContext(ContextRestoreRequest{ID: keepID, TraceID: trace}); err != nil {
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: keepID, TraceID: trace}); err != nil {
 		t.Fatalf("unrelated handle should still restore, got %v", err)
 	}
 }
@@ -157,7 +168,7 @@ func TestGateRestoreCrossTrace(t *testing.T) {
 		t.Fatalf("cross-trace tombstone flipped %d handles, want 2 (one per trace)", n)
 	}
 	for _, trace := range []string{traceA, traceB} {
-		_, err := srv.restoreContext(ContextRestoreRequest{ID: id, TraceID: trace})
+		_, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace})
 		if !errors.Is(err, ErrRestoreRefused) || !errors.Is(err, ctxplan.ErrTombstoned) {
 			t.Fatalf("trace %s restore err = %v, want refused+ErrTombstoned", trace, err)
 		}
@@ -179,7 +190,7 @@ func TestGateRestoreIdempotent(t *testing.T) {
 	if n := srv.tombstoneRestore(id); n != 1 {
 		t.Fatalf("second (idempotent) tombstone flipped %d, want 1 (still matched, still set)", n)
 	}
-	if _, err := srv.restoreContext(ContextRestoreRequest{ID: id, TraceID: trace}); !errors.Is(err, ctxplan.ErrTombstoned) {
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace}); !errors.Is(err, ctxplan.ErrTombstoned) {
 		t.Fatalf("after a repeat tombstone restore err = %v, want still ErrTombstoned", err)
 	}
 }

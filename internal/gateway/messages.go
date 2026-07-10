@@ -128,6 +128,10 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
+	// C1 read-scope floor (#4192): the first turn a trace serves binds its owning principal, so a
+	// later fak_context_restore / fak_context_spans read-self op can be scoped to it. First-writer-
+	// wins; "" on the no-RequireKey loopback (single-tenant).
+	s.bindTraceOwner(reqTrace, principalFor(r, ""))
 	// Native-harness keystone (#1316/#1837): when `fak serve --native` is set, drive
 	// fak's OWN agent loop instead of the single-shot proxy turn below. The owned loop
 	// runs its own per-turn session gate (WithSessionGate over the same
