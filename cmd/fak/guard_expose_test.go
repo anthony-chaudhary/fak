@@ -69,6 +69,48 @@ func TestGuardHeadlessExposeProfileNamesAreReal(t *testing.T) {
 	}
 }
 
+// TestResolveGuardCompactBudget pins the floor-aware headless budget: a headless dispatch
+// worker swaps the interactive 48k default for gateway.HeadlessCompactHistoryBudget (so its
+// fixed tool+system floor no longer sits permanently past the budget, which is what trips the
+// per-turn inversion nudge and the fleet's compact-runaway spawn-hold), while an explicit
+// operator budget and every non-headless launch are untouched.
+func TestResolveGuardCompactBudget(t *testing.T) {
+	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "") // isolate from an operator env
+
+	// Headless, operator left the flag alone (explicit=false): floor-aware default.
+	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, "headless"); got != gateway.HeadlessCompactHistoryBudget {
+		t.Fatalf("headless default = %d, want %d", got, gateway.HeadlessCompactHistoryBudget)
+	}
+
+	// An explicit --compact-history-budget ALWAYS wins, even for a headless worker — including
+	// an explicit 0 (compaction OFF), which the floor-aware default must never resurrect.
+	if got := resolveGuardCompactBudget(120000, true, "headless"); got != 120000 {
+		t.Fatalf("explicit budget must win for headless: got %d, want 120000", got)
+	}
+	if got := resolveGuardCompactBudget(0, true, "headless"); got != 0 {
+		t.Fatalf("explicit 0 (off) must win for headless: got %d, want 0", got)
+	}
+
+	// Every non-headless launch keeps the flag value (the interactive default when unset).
+	for _, prof := range []string{"", "full", "off", "anything"} {
+		if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, prof); got != gateway.DefaultCompactHistoryBudget {
+			t.Fatalf("profile %q must keep the interactive default %d, got %d", prof, gateway.DefaultCompactHistoryBudget, got)
+		}
+	}
+
+	// The FAK_GUARD_EXPOSE_PROFILE opt-out restores the interactive budget in the same move it
+	// restores the full registry: env=full overrides a headless launch flag.
+	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "full")
+	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, "headless"); got != gateway.DefaultCompactHistoryBudget {
+		t.Fatalf("env=full must restore the interactive budget over a headless flag: got %d, want %d", got, gateway.DefaultCompactHistoryBudget)
+	}
+	// And env=headless forces the floor-aware default even when the launch flag is empty.
+	t.Setenv("FAK_GUARD_EXPOSE_PROFILE", "headless")
+	if got := resolveGuardCompactBudget(gateway.DefaultCompactHistoryBudget, false, ""); got != gateway.HeadlessCompactHistoryBudget {
+		t.Fatalf("env=headless must force the floor-aware default: got %d, want %d", got, gateway.HeadlessCompactHistoryBudget)
+	}
+}
+
 func containsStr(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

@@ -122,14 +122,42 @@ var guardHeadlessExposeTools = []string{
 // every other value — "", "full", "off", anything unrecognized — returns nil, i.e. the full registry,
 // so the interactive default and an operator opt-out are byte-for-byte the pre-#3607 surface.
 func resolveGuardExposeTools(flagValue string) []string {
+	if strings.EqualFold(effectiveGuardExposeProfile(flagValue), "headless") {
+		return append([]string(nil), guardHeadlessExposeTools...)
+	}
+	return nil
+}
+
+// resolveGuardCompactBudget picks the compaction budget for a guard launch. An explicit
+// operator --compact-history-budget always wins (explicit==true → the flag value verbatim,
+// including 0=off). Otherwise a headless dispatch worker gets the floor-aware
+// gateway.HeadlessCompactHistoryBudget in place of the interactive default, because its fixed
+// tool+system floor would otherwise sit permanently past the 48k default (see that constant);
+// every non-headless launch keeps flagValue (which carries DefaultCompactHistoryBudget when the
+// operator left the flag alone). Keyed off effectiveGuardExposeProfile so the FAK_GUARD_EXPOSE_PROFILE
+// full/off opt-out restores the interactive budget in the same move it restores the full registry.
+func resolveGuardCompactBudget(flagValue int, explicit bool, exposeProfileFlag string) int {
+	if explicit {
+		return flagValue
+	}
+	if strings.EqualFold(effectiveGuardExposeProfile(exposeProfileFlag), "headless") {
+		return gateway.HeadlessCompactHistoryBudget
+	}
+	return flagValue
+}
+
+// effectiveGuardExposeProfile resolves the operative expose-profile: the --expose-profile
+// launch flag with FAK_GUARD_EXPOSE_PROFILE taking precedence (the fleet-wide opt-out kill
+// switch). It is the single source of truth for "is this a headless dispatch worker?", so
+// the tool-surface prune (resolveGuardExposeTools) and the floor-aware compaction budget
+// key off the SAME determination — an operator who flips the env to full/off restores both
+// the full registry AND the interactive budget default in one move.
+func effectiveGuardExposeProfile(flagValue string) string {
 	profile := strings.TrimSpace(flagValue)
 	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_EXPOSE_PROFILE")); env != "" {
 		profile = env // env overrides the launch flag — the fleet-wide opt-out kill switch
 	}
-	if strings.EqualFold(profile, "headless") {
-		return append([]string(nil), guardHeadlessExposeTools...)
-	}
-	return nil
+	return profile
 }
 
 func cmdGuard(argv []string) {
@@ -260,6 +288,14 @@ func cmdGuard(argv []string) {
 	// per-turn economy line out of an attended agent's full-screen UI.
 	guardSetFlags := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { guardSetFlags[f.Name] = true })
+
+	// Floor-aware compaction budget for headless dispatch workers (resolveGuardCompactBudget):
+	// a Claude-Code worker's fixed system+tools floor sits at/above the interactive 48k default,
+	// so TOTAL resident (floor + conversation) is permanently past the budget — tripping the
+	// per-turn inversion nudge (debug_stats) and the fleet's compact-runaway spawn-hold — while
+	// the compaction cut correctly bails under_budget (only the post-floor suffix is sheddable).
+	*compactHistoryBudget = resolveGuardCompactBudget(
+		*compactHistoryBudget, guardSetFlags["compact-history-budget"], *exposeProfile)
 	guardTraceID := strings.TrimSpace(*sessionID)
 	if guardTraceID == "" {
 		guardTraceID = "guard"
@@ -926,6 +962,12 @@ func cmdGuard(argv []string) {
 		BaseURL:  resolvedBase,
 		Provider: up,
 		APIKey:   apiKey,
+		// The child is the only caller of a normal guard's loopback gateway, so surface
+		// the upstream's scrubbed, bounded 400 detail there. This turns an opaque fakc
+		// "check model/roles/ranges" failure into the provider's exact rejected field
+		// (the call_id-vs-item-id bug reported input[3].id). A guard explicitly bound
+		// beyond loopback keeps the no-leak default, matching fak serve.
+		ExposeUpstreamErrorDetail: guardLoopbackOnly(ln.Addr().String()),
 		// Re-resolve the pinned subscription OAuth token per request so a long session
 		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every
 		// non-pinned path leaves the static-APIKey behavior byte-for-byte unchanged.

@@ -71,6 +71,23 @@ import (
 // discarding a cached prefix. An explicit --compact-history-budget wins; 0 means OFF.
 const DefaultCompactHistoryBudget = 48000
 
+// HeadlessCompactHistoryBudget is the floor-aware compaction budget a headless dispatch
+// worker (`fak guard --expose-profile headless`) uses in place of the interactive
+// DefaultCompactHistoryBudget. The interactive default assumes a LEAN prompt, but a
+// Claude-Code dispatch worker carries a large fixed system+tools floor (~48-64k resident
+// observed — at or ABOVE the 48k default). Because the inversion nudge and the fleet's
+// compact-runaway spawn-hold both measure TOTAL resident (floor + conversation) against
+// the budget (debug_stats.formatCompactionBudgetNudge, issue_resolve_dispatch's
+// ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K), while the compaction cut itself only sheds the
+// post-floor SUFFIX, a 48k budget leaves every worker structurally past-compact from
+// turn one: the nudge fires every turn and the fleet freezes new spawns, yet compaction
+// correctly bails under_budget (the floor is immutable, the sheddable suffix is within
+// budget). Right-sizing the budget to the worker's real resident shape (floor + a genuine
+// ~46k conversation window) clears both false signals while keeping the cut a true
+// runaway bound (resident stays under floor+budget, safely below the model's context
+// ceiling). An explicit --compact-history-budget still wins.
+const HeadlessCompactHistoryBudget = 96000
+
 // DefaultVCacheAnchor is the default-on posture of the M2 star-anchor pre-flight gate
 // (#1493): on the flagship Anthropic passthrough, APPLY cachemeta.RecommendLayout before
 // send (maybeAnchorAnthropicRaw) rather than merely reporting it — hoist volatile system
