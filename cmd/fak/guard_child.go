@@ -1074,7 +1074,7 @@ func guardWriteLaunchFailReport(w io.Writer, report string, enabled bool) {
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	for {
-		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil)
+		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, rotation.launcher())
 		if err != nil {
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
@@ -1130,7 +1130,7 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 	return false, ""
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0
@@ -1162,6 +1162,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case runErr := <-wait:
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 				command = next
+				continue
+			}
+			if nextCommand, nextInjected, ok := rotation.rotate(command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
+				command, injected = nextCommand, nextInjected
 				continue
 			}
 			if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {

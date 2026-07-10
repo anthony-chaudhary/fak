@@ -18,6 +18,7 @@ const (
 type guardRotation struct{ Seat, Dir, Reason, EnvKey string }
 
 type guardRotationRuntime struct {
+	Launcher    guardChildLauncher
 	Mode        string
 	CurrentSeat string
 	Registry    accounts.Registry
@@ -56,6 +57,13 @@ func guardRotationRuntimeFor(command []string, mode string) guardRotationRuntime
 		}
 	}
 	return r
+}
+
+func (rt *guardRotationRuntime) launcher() guardChildLauncher {
+	if rt == nil {
+		return nil
+	}
+	return rt.Launcher
 }
 
 func (rt *guardRotationRuntime) rotate(command []string, injected [][2]string, reason string, audit *journal.Journal, traceID string, stderr *os.File) ([]string, [][2]string, bool) {

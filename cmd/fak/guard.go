@@ -1435,7 +1435,7 @@ func cmdGuard(argv []string) {
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
 
 func TestGuardRotateModeDefaults(t *testing.T) {
@@ -78,5 +82,37 @@ func TestGuardRotationRuntimeRotateWritesAuditAndRepoints(t *testing.T) {
 	cmd, env, ok := rt.rotate([]string{"claude", "-p"}, nil, "stale", nil, "trace-1", nil)
 	if !ok || rt.CurrentSeat != "b" || len(env) != 1 || env[0] != [2]string{"CLAUDE_CONFIG_DIR", "/b"} || len(cmd) != 2 {
 		t.Fatalf("runtime=%+v cmd=%v env=%v ok=%v", rt, cmd, env, ok)
+	}
+}
+
+func TestGuardRotationLauncherWitnessesFirstFailureThenRotatedEnv(t *testing.T) {
+	ready := func(name, key string) accounts.Home {
+		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}
+	}
+	var launches []map[string]string
+	rt := &guardRotationRuntime{Mode: "auto", CurrentSeat: "a", EnvKey: "CLAUDE_CONFIG_DIR", Registry: accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b")}}}
+	rt.Launcher = func(grant toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+		m := map[string]string{}
+		for _, e := range grant.Env {
+			m[e.Name] = e.Value
+		}
+		launches = append(launches, m)
+		return exec.Command("cmd.exe", "/c", "exit 0"), nil
+	}
+	cmd, env, ok := rt.rotate([]string{"claude", "-p"}, [][2]string{{"CLAUDE_CONFIG_DIR", "/a"}}, "walled", nil, "trace", nil)
+	if !ok {
+		t.Fatal("walled account did not rotate")
+	}
+	broker := toolprocgate.NewSpawnBroker()
+	meta := guardChildSpawnMetadata{AgentRunID: "run", ToolCallID: "guard-child:run", Backend: "anthropic", Envelope: toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}}}
+	_, child, err := launchGuardChildWithBroker(cmd, env, false, meta, broker, rt.launcher())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if len(launches) != 1 || launches[0]["CLAUDE_CONFIG_DIR"] != "/b" {
+		t.Fatalf("launches=%v", launches)
 	}
 }
