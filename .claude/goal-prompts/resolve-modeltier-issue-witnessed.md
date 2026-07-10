@@ -63,5 +63,11 @@ ready, stop cleanly — that is a correct, honest run, do not force one.
 - On a guard refusal (OFF_TRUNK, COLLISION_RISK, CORE_SELF_MODIFY, MERGE_IN_PROGRESS):
   recover per the AGENTS.md table or STOP; do not route around it.
 
-Report faithfully: the C-item + issue number, the witnessing commit SHA (or `not
-yet` + missing witness), and whether the tree was left clean.
+Do NOT end by narrating leftover work: any remaining or out-of-scope follow-up
+you'd otherwise list as "two more things" MUST be filed as an open gh issue first
+(dedupe → done-condition → leak-check → label) — a named-but-unfiled follow-up is
+silently-deferred work this repo forbids.
+
+Report faithfully: the C-item + issue number (plus any follow-up issue numbers),
+the witnessing commit SHA (or `not yet` + missing witness), and whether the tree
+was left clean.

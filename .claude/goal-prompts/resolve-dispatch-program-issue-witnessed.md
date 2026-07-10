@@ -55,6 +55,12 @@ run beside you in the SAME working tree — lane discipline is load-bearing.
   MERGE_IN_PROGRESS): recover per the AGENTS.md table or STOP; do not route
   around the guard.
 
-Report the outcome faithfully: the menu item, issue number(s), the witnessing
+Do NOT end by narrating leftover work: any remaining or out-of-scope follow-up
+you'd otherwise list as "two more things" MUST be filed as an open gh issue first
+(dedupe → done-condition → leak-check → label) — a named-but-unfiled follow-up is
+silently-deferred work this repo forbids.
+
+Report the outcome faithfully: the menu item, issue number(s) including any
+follow-ups you filed, the witnessing
 commit SHA (or `not yet` + the missing witness), and whether the tree was left
 clean.

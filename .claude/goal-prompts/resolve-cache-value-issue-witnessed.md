@@ -61,5 +61,11 @@ lane` — never resolve an off-scope issue to pad the count.
 - If a guard refuses you (`OFF_TRUNK`, `COLLISION_RISK`, `MERGE_IN_PROGRESS`):
   recover per AGENTS.md — reconcile in place or STOP, never route around it.
 
+Do NOT end by narrating leftover work: any remaining or out-of-scope follow-up
+you'd otherwise list as "two more things" MUST be filed as an open gh issue first
+(dedupe → done-condition → leak-check → label) — a named-but-unfiled follow-up is
+silently-deferred work this repo forbids.
+
 Report the outcome faithfully: the issue number, the witnessing commit SHA (or
-`not yet` + the missing witness), and whether the tree was left clean.
+`not yet` + the missing witness), the issue numbers of any follow-ups you filed,
+and whether the tree was left clean.
