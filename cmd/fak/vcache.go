@@ -899,62 +899,8 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		ProviderVCacheDecisions: *providerVCacheDecisions,
 		ExternalEngineEvents:    *externalEngineEvents,
 	}
-	if *kernelKVPromptTokens < 0 || *kernelKVReusedTokens < 0 {
-		fmt.Fprintln(stderr, "fak vcache score: --kernel-kv-prompt-tokens and --kernel-kv-reused-tokens must be non-negative")
-		return 2
-	}
-	if *kernelKVReusedTokens > 0 && *kernelKVPromptTokens <= 0 {
-		fmt.Fprintln(stderr, "fak vcache score: --kernel-kv-reused-tokens requires --kernel-kv-prompt-tokens")
-		return 2
-	}
-	if *kernelKVPromptTokens > 0 {
-		reused := *kernelKVReusedTokens
-		if reused > *kernelKVPromptTokens {
-			reused = *kernelKVPromptTokens
-		}
-		if in.AgenticActivation.KernelKVEvents == 0 && reused > 0 {
-			in.AgenticActivation.KernelKVEvents = 1
-		}
-		in.KernelKV = vcachescore.PlaneEvidenceInput{
-			Available:          true,
-			BaselineTokenEquiv: *kernelKVPromptTokens,
-			SavedTokenEquiv:    reused,
-			CostTokenEquiv:     *kernelKVPromptTokens - reused,
-			Reason:             "fak-owned KV witness supplied by CLI",
-		}
-	}
-	if !in.KernelKV.Available {
-		applyVCacheKernelLedger(&in, *kernelLedger)
-	}
-	if *contextShedTokens < 0 || *contextResidentTokens < 0 {
-		fmt.Fprintln(stderr, "fak vcache score: --context-shed-tokens and --context-resident-tokens must be non-negative")
-		return 2
-	}
-	if *contextShedTokens > 0 {
-		if in.AgenticActivation.ContextEvents == 0 {
-			in.AgenticActivation.ContextEvents = 1
-		}
-		in.Context = vcachescore.PlaneEvidenceInput{
-			Available:       true,
-			SavedTokenEquiv: *contextShedTokens,
-			Reason:          "O(1) context/query shed-token witness supplied by CLI",
-		}
-		if *contextResidentTokens > 0 {
-			in.Context.BaselineTokenEquiv = *contextShedTokens + *contextResidentTokens
-			in.Context.CostTokenEquiv = *contextResidentTokens
-		}
-	}
-	if *externalEngineHitRate < 0 || *externalEngineHitRate > 1 {
-		fmt.Fprintln(stderr, "fak vcache score: --external-engine-hit-rate must be between 0 and 1")
-		return 2
-	}
-	if *externalEngineHitRate > 0 {
-		in.ExternalEngine = vcachescore.PlaneEvidenceInput{
-			Available:  true,
-			Provenance: "OBSERVED",
-			HitRate:    *externalEngineHitRate,
-			Reason:     "external-engine prefix-cache hit rate supplied by CLI",
-		}
+	if rc, ok := applyVCacheScorePlaneFlags(&in, stderr, *kernelKVPromptTokens, *kernelKVReusedTokens, *contextShedTokens, *contextResidentTokens, *externalEngineHitRate, *kernelLedger); !ok {
+		return rc
 	}
 	in.Recall = vcachechain.ProveRecallInput{
 		PrefixTokens: *recallPrefix,
@@ -981,45 +927,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		in.TelemetryRows = rows
 		in.TurnsObserved = len(rows)
 	}
-	// OBSERVED-by-default: with no explicit --telemetry and no --anchors-file, read the
-	// persisted live cache window a finished guard/serve session left at the well-known path
-	// and fold it through the SAME converter `fak vcache observe` uses. When it has turns the
-	// score flips active_source to "telemetry" and reports the REALIZED multiplier; when it is
-	// absent/empty/disabled we leave TelemetryRows nil so Score falls open to the planned
-	// FORECAST (clearly labeled), never a phantom observed 0x.
-	contextFromProviderSnapshot := false
-	if len(in.TelemetryRows) == 0 && strings.TrimSpace(*anchorsFile) == "" {
-		snapPath, readProviderSnapshot := resolveVCacheProviderSnapshotPath(*snapshot)
-		if readProviderSnapshot {
-			turns, ok, err := vcachesnapshot.Read(snapPath)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
-			} else if ok {
-				providerTurns := vcacheobserve.ProviderTelemetryTurns(turns)
-				if len(providerTurns) > 0 {
-					observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
-					in.TelemetryRows = vcacheobserve.Rows(providerTurns)
-					in.Ranked = vcacheobserve.RankedWorkload(providerTurns)
-					in.Prediction = observed.Prediction
-					in.AnchorSource = vcachescore.AnchorSourceMeasured
-					in.TurnsObserved = len(providerTurns)
-					applyVCacheProviderActionDecisions(&in, providerTurns)
-				}
-				contextFromProviderSnapshot = applyVCacheSnapshotContext(&in, turns, "persisted guard/serve context snapshot")
-			}
-		}
-	}
-	if !contextFromProviderSnapshot && strings.TrimSpace(*contextSnapshot) != "" {
-		ctxPath, readContextSnapshot := resolveVCacheContextSnapshotPath(*contextSnapshot)
-		if readContextSnapshot {
-			turns, ok, err := vcachesnapshot.Read(ctxPath)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak vcache score: context snapshot %s: %v (leaving context plane unchanged)\n", ctxPath, err)
-			} else if ok {
-				applyVCacheSnapshotContext(&in, turns, "persisted context snapshot "+ctxPath)
-			}
-		}
-	}
+	applyVCacheScoreSnapshots(&in, stderr, *anchorsFile, *snapshot, *contextSnapshot)
 
 	rep := vcachescore.Score(in)
 	if strings.TrimSpace(*indexOut) != "" {
@@ -1045,6 +953,117 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	renderVCacheScoreText(stdout, rep, *indexOut)
+	if rep.TwoXBetter {
+		return 0
+	}
+	return 1
+}
+
+func applyVCacheScorePlaneFlags(in *vcachescore.Input, stderr io.Writer, kernelKVPromptTokens, kernelKVReusedTokens, contextShedTokens, contextResidentTokens, externalEngineHitRate float64, kernelLedger string) (int, bool) {
+	if kernelKVPromptTokens < 0 || kernelKVReusedTokens < 0 {
+		fmt.Fprintln(stderr, "fak vcache score: --kernel-kv-prompt-tokens and --kernel-kv-reused-tokens must be non-negative")
+		return 2, false
+	}
+	if kernelKVReusedTokens > 0 && kernelKVPromptTokens <= 0 {
+		fmt.Fprintln(stderr, "fak vcache score: --kernel-kv-reused-tokens requires --kernel-kv-prompt-tokens")
+		return 2, false
+	}
+	if kernelKVPromptTokens > 0 {
+		reused := kernelKVReusedTokens
+		if reused > kernelKVPromptTokens {
+			reused = kernelKVPromptTokens
+		}
+		if in.AgenticActivation.KernelKVEvents == 0 && reused > 0 {
+			in.AgenticActivation.KernelKVEvents = 1
+		}
+		in.KernelKV = vcachescore.PlaneEvidenceInput{
+			Available:          true,
+			BaselineTokenEquiv: kernelKVPromptTokens,
+			SavedTokenEquiv:    reused,
+			CostTokenEquiv:     kernelKVPromptTokens - reused,
+			Reason:             "fak-owned KV witness supplied by CLI",
+		}
+	}
+	if !in.KernelKV.Available {
+		applyVCacheKernelLedger(in, kernelLedger)
+	}
+	if contextShedTokens < 0 || contextResidentTokens < 0 {
+		fmt.Fprintln(stderr, "fak vcache score: --context-shed-tokens and --context-resident-tokens must be non-negative")
+		return 2, false
+	}
+	if contextShedTokens > 0 {
+		if in.AgenticActivation.ContextEvents == 0 {
+			in.AgenticActivation.ContextEvents = 1
+		}
+		in.Context = vcachescore.PlaneEvidenceInput{
+			Available:       true,
+			SavedTokenEquiv: contextShedTokens,
+			Reason:          "O(1) context/query shed-token witness supplied by CLI",
+		}
+		if contextResidentTokens > 0 {
+			in.Context.BaselineTokenEquiv = contextShedTokens + contextResidentTokens
+			in.Context.CostTokenEquiv = contextResidentTokens
+		}
+	}
+	if externalEngineHitRate < 0 || externalEngineHitRate > 1 {
+		fmt.Fprintln(stderr, "fak vcache score: --external-engine-hit-rate must be between 0 and 1")
+		return 2, false
+	}
+	if externalEngineHitRate > 0 {
+		in.ExternalEngine = vcachescore.PlaneEvidenceInput{
+			Available:  true,
+			Provenance: "OBSERVED",
+			HitRate:    externalEngineHitRate,
+			Reason:     "external-engine prefix-cache hit rate supplied by CLI",
+		}
+	}
+	return 0, true
+}
+
+func applyVCacheScoreSnapshots(in *vcachescore.Input, stderr io.Writer, anchorsFile, snapshot, contextSnapshot string) {
+	// OBSERVED-by-default: with no explicit --telemetry and no --anchors-file, read the
+	// persisted live cache window a finished guard/serve session left at the well-known path
+	// and fold it through the SAME converter `fak vcache observe` uses. When it has turns the
+	// score flips active_source to "telemetry" and reports the REALIZED multiplier; when it is
+	// absent/empty/disabled we leave TelemetryRows nil so Score falls open to the planned
+	// FORECAST (clearly labeled), never a phantom observed 0x.
+	contextFromProviderSnapshot := false
+	if len(in.TelemetryRows) == 0 && strings.TrimSpace(anchorsFile) == "" {
+		snapPath, readProviderSnapshot := resolveVCacheProviderSnapshotPath(snapshot)
+		if readProviderSnapshot {
+			turns, ok, err := vcachesnapshot.Read(snapPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
+			} else if ok {
+				providerTurns := vcacheobserve.ProviderTelemetryTurns(turns)
+				if len(providerTurns) > 0 {
+					observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
+					in.TelemetryRows = vcacheobserve.Rows(providerTurns)
+					in.Ranked = vcacheobserve.RankedWorkload(providerTurns)
+					in.Prediction = observed.Prediction
+					in.AnchorSource = vcachescore.AnchorSourceMeasured
+					in.TurnsObserved = len(providerTurns)
+					applyVCacheProviderActionDecisions(in, providerTurns)
+				}
+				contextFromProviderSnapshot = applyVCacheSnapshotContext(in, turns, "persisted guard/serve context snapshot")
+			}
+		}
+	}
+	if !contextFromProviderSnapshot && strings.TrimSpace(contextSnapshot) != "" {
+		ctxPath, readContextSnapshot := resolveVCacheContextSnapshotPath(contextSnapshot)
+		if readContextSnapshot {
+			turns, ok, err := vcachesnapshot.Read(ctxPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak vcache score: context snapshot %s: %v (leaving context plane unchanged)\n", ctxPath, err)
+			} else if ok {
+				applyVCacheSnapshotContext(in, turns, "persisted context snapshot "+ctxPath)
+			}
+		}
+	}
+}
+
+func renderVCacheScoreText(stdout io.Writer, rep vcachescore.Report, indexOut string) {
 	fmt.Fprintf(stdout, "status: %s\n", rep.Status)
 	fmt.Fprintf(stdout, "grade: %s (%d/100)\n", rep.Grade, rep.Score)
 	fmt.Fprintf(stdout, "active source: %s\n", rep.ActiveSource)
@@ -1087,8 +1106,8 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		rep.Concentration.ZipfS, rep.Concentration.Measured, rep.Concentration.Defeated)
 	fmt.Fprintf(stdout, "hot-anchor index: top %d covers %.1f%% (target %.1f%%)\n",
 		rep.Index.AnchorCount, 100*rep.Index.Coverage, 100*rep.Index.TargetCoverage)
-	if strings.TrimSpace(*indexOut) != "" {
-		fmt.Fprintf(stdout, "hot-anchor index artifact: %s\n", *indexOut)
+	if strings.TrimSpace(indexOut) != "" {
+		fmt.Fprintf(stdout, "hot-anchor index artifact: %s\n", indexOut)
 	}
 	fmt.Fprintf(stdout, "prediction errors: false-warm %.2f%% false-cold %.2f%% (%d samples)\n",
 		100*rep.Prediction.FalseWarmRate, 100*rep.Prediction.FalseColdRate, rep.Prediction.Total)
@@ -1105,10 +1124,6 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "- %s\n", action)
 	}
 	fmt.Fprintln(stdout, "correctness depends on cache hit: false")
-	if rep.TwoXBetter {
-		return 0
-	}
-	return 1
 }
 
 func planeLabel(p vcachescore.PlaneValueReport) string {
