@@ -175,20 +175,58 @@ func TestLaneOfClassifiesNarrowedTreesByContainment(t *testing.T) {
 	}
 }
 
-func TestDecideSerializesNarrowedSameLaneRegions(t *testing.T) {
-	// The witnessed bypass: two disjoint sub-regions of ONE named lane must
-	// serialize — the live lease's lane is recovered by containment even
-	// though its tree is not the lane's canonical tree.
+func TestDecideAdmitsDisjointNarrowedSameLaneRegions(t *testing.T) {
+	// Two STRICTLY-NARROWED, tree-disjoint sub-regions of ONE named lane are not
+	// a real collision: geometry (rung 4) decides, so they co-run instead of
+	// serializing on the shared lane name. The live lease's lane is recovered by
+	// containment even though its tree is not the lane's canonical tree.
+	// Precondition: the live lease's narrowed tree must classify back onto "gateway" so
+	// the same-lane rung is actually ENTERED and bypassed via the both-narrowed
+	// fall-through -- not skipped because the lane went unrecognized (which would admit
+	// for the wrong reason and mask a lane-inference regression).
+	if got := LaneOf([]string{"internal/gateway/http/**"}, testTaxonomy()); got != "gateway" {
+		t.Fatalf("precondition: live narrowed tree must classify onto gateway, got %q", got)
+	}
 	dec := Decide(
 		Request{Actor: "loop:b", Lane: "gateway", Tree: []string{"internal/gateway/relay/**"}},
 		[]Lease{{ID: "loop-a", Holder: "loop:a", Tree: []string{"internal/gateway/http/**"}}},
 		testTaxonomy(),
 	)
+	if !dec.Admit {
+		t.Fatalf("two disjoint narrowed sub-regions of one lane must co-admit, got refusal: %+v", dec)
+	}
+}
+
+func TestDecideSerializesNarrowedAgainstWholeLane(t *testing.T) {
+	// A narrowed sub-region vs a WHOLE-lane claim still serializes: the whole-lane
+	// tree is not strictly narrower than itself, so the same-lane rung fires.
+	dec := Decide(
+		Request{Actor: "loop:b", Lane: "cmd", Tree: []string{"cmd/fak/slack_inbound.go"}},
+		[]Lease{{ID: "resolve-cmd", Holder: "loop:a", Tree: []string{"cmd/**"}}},
+		testTaxonomy(),
+	)
 	if dec.Admit {
-		t.Fatal("two narrowed regions of the same named lane must serialize")
+		t.Fatal("a narrowed region vs a whole-lane claim must serialize")
 	}
 	if dec.Rung != RungSameLane {
 		t.Fatalf("rung = %q, want %q", dec.Rung, RungSameLane)
+	}
+}
+
+func TestDecideRefusesOverlappingNarrowedSameLaneRegions(t *testing.T) {
+	// Two narrowed sub-regions of one lane that OVERLAP still refuse — once the
+	// same-lane rung defers to geometry, rung 4 catches the overlap and reports
+	// it as a tree collision (the more diagnostic evidence).
+	dec := Decide(
+		Request{Actor: "loop:b", Lane: "cmd", Tree: []string{"cmd/fak/slack/**"}},
+		[]Lease{{ID: "resolve-cmd-1", Holder: "loop:a", Tree: []string{"cmd/fak/**"}}},
+		testTaxonomy(),
+	)
+	if dec.Admit {
+		t.Fatal("two overlapping narrowed sub-regions must refuse")
+	}
+	if dec.Rung != RungTreeOverlap {
+		t.Fatalf("rung = %q, want %q", dec.Rung, RungTreeOverlap)
 	}
 }
 

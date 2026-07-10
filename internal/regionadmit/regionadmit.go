@@ -128,6 +128,27 @@ func LaneOf(tree []string, tax Taxonomy) string {
 	return best
 }
 
+// strictlyWithinLane reports whether tree is a PROPER sub-region of lane's
+// canonical tree: it classifies onto lane (LaneOf) yet is not byte-equal to the
+// lane's whole tree. A whole-lane claim is within its lane but NOT strictly (it
+// equals the lane tree), so it never qualifies for the narrowed-pair co-admit --
+// only a genuinely narrowed sub-region does. A tree that classifies onto some
+// OTHER (tighter) lane, or onto no lane, is not strictly within this lane and is
+// serialized conservatively. Pure: reuses LaneOf + treeKey, no I/O.
+func strictlyWithinLane(tree []string, lane string, tax Taxonomy) bool {
+	if lane == "" {
+		return false
+	}
+	laneTree, ok := tax.Trees[lane]
+	if !ok {
+		return false
+	}
+	if LaneOf(tree, tax) != lane {
+		return false
+	}
+	return treeKey(tree) != treeKey(laneTree)
+}
+
 // treeContainmentSpec reports whether every glob of tree sits under a
 // non-catch-all glob of laneTree, and how tight the containment is (the
 // shortest container prefix used — higher = more specific). Containment uses
@@ -187,7 +208,9 @@ func globPrefix(g string) string {
 //  1. an exclusive lane request admits only when NOTHING else is live;
 //  2. a live lease on an exclusive lane refuses every new region;
 //  3. a request naming the same lane a live lease holds is refused (a named
-//     lane serializes, even on disjoint trees);
+//     lane serializes) UNLESS both the request and the live lease are strictly
+//     narrowed proper sub-regions of the lane, in which case rung 4 (geometry)
+//     decides -- two disjoint sub-regions of one lane co-run;
 //  4. a requested tree overlapping a live lease's tree is refused
 //     (dispatchorder.TreesOverlap geometry — empty trees collide
 //     conservatively).
@@ -220,9 +243,23 @@ func Decide(req Request, live []Lease, tax Taxonomy) Decision {
 				leaseLabel(l), lane))
 		}
 		if req.Lane != "" && lane == req.Lane {
-			return refusal(RungSameLane, &l, fmt.Sprintf(
-				"lane %q is already held by live lease %s (a named lane serializes)",
-				req.Lane, leaseLabel(l)))
+			// A named lane serializes by default (a whole-lane claim runs alone),
+			// but when BOTH the request and the live lease are STRICTLY-NARROWED
+			// proper sub-regions of the lane, geometry -- not the shared lane name
+			// -- decides: control falls through to the tree-overlap rung below,
+			// which admits two disjoint sub-regions and refuses two overlapping
+			// ones. This keeps whole-lane and narrowed-vs-whole-lane pairs
+			// serialized (a whole-lane tree is not strictly narrower than itself),
+			// so only two proper, disjoint sub-regions co-run. Mirrors the
+			// wave/dispatchorder path, which already prices each issue's declared
+			// scope as an independent candidate.
+			bothNarrowed := strictlyWithinLane(tree, req.Lane, tax) &&
+				strictlyWithinLane(l.Tree, req.Lane, tax)
+			if !bothNarrowed {
+				return refusal(RungSameLane, &l, fmt.Sprintf(
+					"lane %q is already held by live lease %s (a named lane serializes)",
+					req.Lane, leaseLabel(l)))
+			}
 		}
 		if dispatchorder.TreesOverlap(tree, l.Tree) {
 			return refusal(RungTreeOverlap, &l, fmt.Sprintf(
