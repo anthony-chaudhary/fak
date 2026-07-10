@@ -111,220 +111,268 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 
 	switch verb {
 	case "sources":
-		for _, s := range v.Sources {
-			fmt.Fprintf(w, "%-22s %s\n", s.ID, s.Root)
-			fmt.Fprintf(w, "%-22s   %s\n", "", s.Note)
-		}
-		return 0
+		return logvaultSources(w, v)
 	case "du":
-		// Observability rung (#2455): the "is my backup current?" answer folded
-		// PURELY from the vault manifest — every number is a WITNESSED value fak
-		// recorded in its own hash chain at capture time, never a live self-report.
-		// A missing/empty manifest is the valid-empty posture, not an error.
-		rows, err := logvault.ReadManifestRows(filepath.Join(v.Dir, logvault.ManifestName))
-		if err != nil {
-			fmt.Fprintf(ew, "logvault du: read manifest: %v\n", err)
-			return 1
-		}
-		fps := logvault.Footprint(rows)
-		now := time.Now()
-		fmt.Fprintf(w, "logvault du  vault=%s\n", v.Dir)
-		for _, fp := range fps {
-			fmt.Fprintf(w, "  %-22s bytes=%-8s files=%-5d rows=%-5d errors=%-3d last-capture=%s\n",
-				fp.Source, fmtBytesLV(fp.Bytes), fp.Files, fp.ManifestRows, fp.Errors,
-				lastCaptureLV(now, fp.LastCaptureUnixNano))
-		}
-		fmt.Fprintf(w, "TOTAL bytes=%s last-capture=%s (WITNESSED: sizes stat'd + hashes computed at capture, folded from the vault manifest)\n",
-			fmtBytesLV(logvault.TotalBytes(fps)), lastCaptureLV(now, logvault.NewestCaptureUnixNano(fps)))
-		return 0
+		return logvaultDu(w, ew, v)
 	case "plan", "capture":
-		var stats []logvault.SourceStats
-		if verb == "plan" {
-			stats, err = v.Plan()
-		} else {
-			stats, err = v.Capture()
-		}
-		if err != nil {
-			fmt.Fprintf(ew, "logvault %s: %v\n", verb, err)
-			return 1
-		}
-		fmt.Fprintf(w, "logvault %s  vault=%s\n", verb, v.Dir)
-		var files int
-		var bytes int64
-		var errs int
-		for _, st := range stats {
-			if st.Missing {
-				fmt.Fprintf(w, "  %-22s (absent on this box)\n", st.Source)
-				continue
-			}
-			fmt.Fprintf(w, "  %-22s files=%-6d unchanged=%-6d full=%-5d append=%-4d rewrite=%-4d errors=%-3d copy=%s\n",
-				st.Source, st.Files, st.Unchanged, st.Full, st.Append, st.Rewrite, st.Errors, fmtBytesLV(st.CopyBytes))
-			files += st.Files
-			bytes += st.CopyBytes
-			errs += st.Errors
-		}
-		fmt.Fprintf(w, "TOTAL files=%d copy=%s errors=%d (WITNESSED: sizes stat'd, hashes computed, by this run)\n",
-			files, fmtBytesLV(bytes), errs)
-		if verb == "capture" && *notifySlack {
-			logvaultNotifySlack(w, ew, *slackChannel, logvaultCaptureDigest(v.Dir, files, bytes, errs))
-		}
-		if errs > 0 {
-			return 1
-		}
-		return 0
+		return logvaultPlanCapture(w, ew, verb, v, *notifySlack, *slackChannel)
 	case "sync":
-		if *syncTo == "" {
-			fmt.Fprintln(ew, "logvault sync: -to <dir> is required (the second vault directory)")
-			return 2
-		}
-		stats, problems, err := v.SyncTo(*syncTo, *sample)
-		if err != nil {
-			fmt.Fprintf(ew, "logvault sync: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(w, "logvault sync  vault=%s -> %s\n", v.Dir, *syncTo)
-		fmt.Fprintf(w, "  files=%d copied=%d unchanged=%d errors=%d redacted-spans=%d copy=%s\n",
-			stats.Files, stats.Copied, stats.Unchanged, stats.Errors, stats.Redacted, fmtBytesLV(stats.CopyBytes))
-		fmt.Fprintf(w, "  receiving-side verify: chain rows=%d mirrors re-hashed=%d problems=%d%s\n",
-			stats.VerifyRows, stats.VerifyChecked, len(problems), logvaultAnchorSuffix(*syncTo))
-		for _, p := range problems {
-			fmt.Fprintf(w, "  PROBLEM %s/%s: %s\n", p.Source, p.RelPath, p.Reason)
-		}
-		if len(problems) > 0 || stats.Errors > 0 {
-			return 1
-		}
-		return 0
+		return logvaultSync(w, ew, v, *syncTo, *sample)
 	case "verify":
-		rows, checked, problems, err := v.Verify(*sample)
-		if err != nil {
-			fmt.Fprintf(ew, "logvault verify: manifest chain BROKEN: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(w, "logvault verify  vault=%s\n", v.Dir)
-		fmt.Fprintf(w, "  manifest chain OK: %d rows\n", rows)
-		fmt.Fprintf(w, "  mirrors re-hashed: %d, mismatches: %d\n", checked, len(problems))
-		for _, p := range problems {
-			fmt.Fprintf(w, "  PROBLEM %s/%s: %s\n", p.Source, p.RelPath, p.Reason)
-		}
-		if *notifySlack {
-			logvaultNotifySlack(w, ew, *slackChannel, logvaultVerifyDigest(v.Dir, rows, checked, problems))
-		}
-		if len(problems) > 0 {
-			return 1
-		}
-		return 0
+		return logvaultVerify(w, ew, v, *sample, *notifySlack, *slackChannel)
 	case "gc":
-		rep, err := v.GC(logvault.GCPolicy{HistoryDepth: *historyDepth}, *live)
-		if err != nil {
-			fmt.Fprintf(ew, "logvault gc: %v\n", err)
-			return 1
-		}
-		mode := "PROPOSE — nothing deleted; re-run with -live to apply"
-		if rep.Applied {
-			mode = "APPLIED (-live)"
-		}
-		fmt.Fprintf(w, "logvault gc  vault=%s  (%s)\n", v.Dir, mode)
-		fmt.Fprintf(w, "  policy: keep <=%d .history/ versions per file\n", rep.Policy.HistoryDepth)
-		verb2 := "prunable"
-		if rep.Applied {
-			verb2 = "pruned"
-		}
-		fmt.Fprintf(w, "  %s: %d versions, %s  (skip-error rows: %d — advisory noise, never deleted)\n",
-			verb2, len(rep.Candidates), fmtBytesLV(rep.ReclaimBytes), rep.SkipErrorRows)
-		for i, c := range rep.Candidates {
-			if i >= 20 {
-				fmt.Fprintf(w, "  … +%d more\n", len(rep.Candidates)-20)
-				break
-			}
-			fmt.Fprintf(w, "  %s %s/%s sha=%s %s\n", verb2, c.Source, c.RelPath, c.SHA16, fmtBytesLV(c.Bytes))
-		}
-		return 0
+		return logvaultGC(w, ew, v, *historyDepth, *live)
 	case "adopt":
-		if *cold == "" {
-			fmt.Fprintln(ew, "logvault adopt: -cold <dir> is required (the tree to pack as one deterministic archive)")
-			return 2
-		}
-		rep, err := v.AdoptCold(*cold)
-		if err != nil {
-			fmt.Fprintf(ew, "logvault adopt: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(w, "logvault adopt --cold %s  vault=%s\n", rep.SrcDir, v.Dir)
-		dedup := ""
-		if rep.Deduped {
-			dedup = "  [DEDUP: identical archive already banked]"
-		}
-		fmt.Fprintf(w, "  archive: %s sha=%s bytes=%s files=%d%s\n",
-			rep.ArchiveRel, rep.SHA256[:16], fmtBytesLV(rep.Bytes), rep.Files, dedup)
-		if rep.Deduped {
-			fmt.Fprintln(w, "  manifest: already witnessed by the prior adoption (content-addressed)")
-		} else {
-			fmt.Fprintln(w, "  manifest: recorded (Verify re-hashes the banked archive)")
-		}
-		fmt.Fprintln(w, "  the tool deleted NOTHING. To reclaim the original, YOU may run:")
-		fmt.Fprintf(w, "    %s\n", rep.DeleteCmd)
-		return 0
+		return logvaultAdopt(w, ew, v, *cold)
 	case "restore":
-		// A backup nobody has restored from is a hypothesis (#2453). Copy one
-		// source's manifest-replayed state OUT of the vault into a fresh target
-		// (never in-place over a live store without -force), re-hashing every byte
-		// against the chain and re-verifying restored chained journals.
-		if len(positionals) != 1 {
-			fmt.Fprintln(ew, "logvault restore: exactly one <source-id> is required: fak logvault restore <source-id> [-to DIR] [-at SEQ] [-force]")
-			return 2
-		}
-		source := positionals[0]
-		to := *syncTo // -to is the restore target directory here (a fresh tree by default)
-		if to == "" {
-			to = filepath.Join(filepath.Dir(absRepo), "fak-log-restore", source)
-		}
-		rep, rErr := v.Restore(logvault.RestoreOptions{Source: source, To: to, At: *restoreAt, Force: *restoreForce})
-		if rErr != nil {
-			fmt.Fprintf(ew, "logvault restore: %v\n", rErr)
-			return 1
-		}
-		logvaultPrintRestore(w, v.Dir, rep)
-		if !rep.OK() {
-			return 1
-		}
-		return 0
+		return logvaultRestore(w, ew, v, positionals, absRepo, *syncTo, *restoreAt, *restoreForce)
 	case "drill":
-		// The cadence hook: restore one source into a temp dir, verify, append a
-		// durable DrillRow to the vault drill-log (and -ledger when named), clean
-		// up. Run on a schedule so the restore path cannot rot unnoticed (#2453).
-		if len(positionals) > 1 {
-			fmt.Fprintln(ew, "logvault drill: at most one optional <source-id>: fak logvault drill [<source-id>] [-ledger PATH]")
-			return 2
-		}
-		source := ""
-		if len(positionals) == 1 {
-			source = positionals[0]
-		}
-		row, rep, dErr := v.Drill(source, *drillLedger)
-		fmt.Fprintf(w, "logvault drill  vault=%s  source=%s (at seq=%d)\n", v.Dir, row.Source, row.HeadSeq)
-		fmt.Fprintf(w, "  files=%d bytes=%s from-history=%d mismatches=%d journals=%d journals-failed=%d\n",
-			row.Files, fmtBytesLV(row.Bytes), row.FromHistory, row.Mismatches, row.JournalsChecked, row.JournalsFailed)
-		logvaultPrintRestoreDetail(w, rep)
-		anchor := logvaultAnchorSuffix(v.Dir)
-		if row.Pass {
-			fmt.Fprintf(w, "  DRILL PASS — restore round-tripped clean, row appended to %s%s\n", logvault.DrillLogName, anchor)
-		} else {
-			fmt.Fprintf(w, "  DRILL FAIL — %s%s\n", drillFailReason(row, dErr), anchor)
-		}
-		if *drillLedger != "" {
-			fmt.Fprintf(w, "  ledger: row appended to %s\n", *drillLedger)
-		}
-		if dErr != nil {
-			fmt.Fprintf(ew, "logvault drill: %v\n", dErr)
-		}
-		if !row.Pass {
-			return 1
-		}
-		return 0
+		return logvaultDrill(w, ew, v, positionals, *drillLedger)
 	default:
 		fmt.Fprintf(ew, "logvault: unknown verb %q (plan|capture|verify|sync|sources|du|gc|adopt|restore|drill)\n", verb)
 		return 2
 	}
+}
+
+// logvaultSources prints the source registry resolved for this box, one line
+// per source with its root and note.
+func logvaultSources(w io.Writer, v *logvault.Vault) int {
+	for _, s := range v.Sources {
+		fmt.Fprintf(w, "%-22s %s\n", s.ID, s.Root)
+		fmt.Fprintf(w, "%-22s   %s\n", "", s.Note)
+	}
+	return 0
+}
+
+// logvaultDu folds the "is my backup current?" answer PURELY from the vault
+// manifest (#2455) — every number is a WITNESSED value fak recorded in its own
+// hash chain at capture time, never a live self-report. A missing/empty manifest
+// is the valid-empty posture, not an error.
+func logvaultDu(w, ew io.Writer, v *logvault.Vault) int {
+	rows, err := logvault.ReadManifestRows(filepath.Join(v.Dir, logvault.ManifestName))
+	if err != nil {
+		fmt.Fprintf(ew, "logvault du: read manifest: %v\n", err)
+		return 1
+	}
+	fps := logvault.Footprint(rows)
+	now := time.Now()
+	fmt.Fprintf(w, "logvault du  vault=%s\n", v.Dir)
+	for _, fp := range fps {
+		fmt.Fprintf(w, "  %-22s bytes=%-8s files=%-5d rows=%-5d errors=%-3d last-capture=%s\n",
+			fp.Source, fmtBytesLV(fp.Bytes), fp.Files, fp.ManifestRows, fp.Errors,
+			lastCaptureLV(now, fp.LastCaptureUnixNano))
+	}
+	fmt.Fprintf(w, "TOTAL bytes=%s last-capture=%s (WITNESSED: sizes stat'd + hashes computed at capture, folded from the vault manifest)\n",
+		fmtBytesLV(logvault.TotalBytes(fps)), lastCaptureLV(now, logvault.NewestCaptureUnixNano(fps)))
+	return 0
+}
+
+// logvaultPlanCapture runs the plan (dry-run) or capture verb and prints the
+// per-source stats fold, optionally enqueuing a Slack digest after a capture.
+func logvaultPlanCapture(w, ew io.Writer, verb string, v *logvault.Vault, notifySlack bool, slackChannel string) int {
+	var stats []logvault.SourceStats
+	var err error
+	if verb == "plan" {
+		stats, err = v.Plan()
+	} else {
+		stats, err = v.Capture()
+	}
+	if err != nil {
+		fmt.Fprintf(ew, "logvault %s: %v\n", verb, err)
+		return 1
+	}
+	fmt.Fprintf(w, "logvault %s  vault=%s\n", verb, v.Dir)
+	var files int
+	var bytes int64
+	var errs int
+	for _, st := range stats {
+		if st.Missing {
+			fmt.Fprintf(w, "  %-22s (absent on this box)\n", st.Source)
+			continue
+		}
+		fmt.Fprintf(w, "  %-22s files=%-6d unchanged=%-6d full=%-5d append=%-4d rewrite=%-4d errors=%-3d copy=%s\n",
+			st.Source, st.Files, st.Unchanged, st.Full, st.Append, st.Rewrite, st.Errors, fmtBytesLV(st.CopyBytes))
+		files += st.Files
+		bytes += st.CopyBytes
+		errs += st.Errors
+	}
+	fmt.Fprintf(w, "TOTAL files=%d copy=%s errors=%d (WITNESSED: sizes stat'd, hashes computed, by this run)\n",
+		files, fmtBytesLV(bytes), errs)
+	if verb == "capture" && notifySlack {
+		logvaultNotifySlack(w, ew, slackChannel, logvaultCaptureDigest(v.Dir, files, bytes, errs))
+	}
+	if errs > 0 {
+		return 1
+	}
+	return 0
+}
+
+// logvaultSync replicates the vault to a second directory (-to), scrub-gated on
+// the way out and re-verified on arrival, then prints the transfer + verify fold.
+func logvaultSync(w, ew io.Writer, v *logvault.Vault, syncTo string, sample int) int {
+	if syncTo == "" {
+		fmt.Fprintln(ew, "logvault sync: -to <dir> is required (the second vault directory)")
+		return 2
+	}
+	stats, problems, err := v.SyncTo(syncTo, sample)
+	if err != nil {
+		fmt.Fprintf(ew, "logvault sync: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(w, "logvault sync  vault=%s -> %s\n", v.Dir, syncTo)
+	fmt.Fprintf(w, "  files=%d copied=%d unchanged=%d errors=%d redacted-spans=%d copy=%s\n",
+		stats.Files, stats.Copied, stats.Unchanged, stats.Errors, stats.Redacted, fmtBytesLV(stats.CopyBytes))
+	fmt.Fprintf(w, "  receiving-side verify: chain rows=%d mirrors re-hashed=%d problems=%d%s\n",
+		stats.VerifyRows, stats.VerifyChecked, len(problems), logvaultAnchorSuffix(syncTo))
+	for _, p := range problems {
+		fmt.Fprintf(w, "  PROBLEM %s/%s: %s\n", p.Source, p.RelPath, p.Reason)
+	}
+	if len(problems) > 0 || stats.Errors > 0 {
+		return 1
+	}
+	return 0
+}
+
+// logvaultVerify re-derives the manifest hash chain and re-hashes a bounded
+// sample of mirrors, optionally enqueuing a Slack digest.
+func logvaultVerify(w, ew io.Writer, v *logvault.Vault, sample int, notifySlack bool, slackChannel string) int {
+	rows, checked, problems, err := v.Verify(sample)
+	if err != nil {
+		fmt.Fprintf(ew, "logvault verify: manifest chain BROKEN: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(w, "logvault verify  vault=%s\n", v.Dir)
+	fmt.Fprintf(w, "  manifest chain OK: %d rows\n", rows)
+	fmt.Fprintf(w, "  mirrors re-hashed: %d, mismatches: %d\n", checked, len(problems))
+	for _, p := range problems {
+		fmt.Fprintf(w, "  PROBLEM %s/%s: %s\n", p.Source, p.RelPath, p.Reason)
+	}
+	if notifySlack {
+		logvaultNotifySlack(w, ew, slackChannel, logvaultVerifyDigest(v.Dir, rows, checked, problems))
+	}
+	if len(problems) > 0 {
+		return 1
+	}
+	return 0
+}
+
+// logvaultGC proposes (default) or -live applies bounded .history/ retention and
+// prints the prune report.
+func logvaultGC(w, ew io.Writer, v *logvault.Vault, historyDepth int, live bool) int {
+	rep, err := v.GC(logvault.GCPolicy{HistoryDepth: historyDepth}, live)
+	if err != nil {
+		fmt.Fprintf(ew, "logvault gc: %v\n", err)
+		return 1
+	}
+	mode := "PROPOSE — nothing deleted; re-run with -live to apply"
+	if rep.Applied {
+		mode = "APPLIED (-live)"
+	}
+	fmt.Fprintf(w, "logvault gc  vault=%s  (%s)\n", v.Dir, mode)
+	fmt.Fprintf(w, "  policy: keep <=%d .history/ versions per file\n", rep.Policy.HistoryDepth)
+	verb2 := "prunable"
+	if rep.Applied {
+		verb2 = "pruned"
+	}
+	fmt.Fprintf(w, "  %s: %d versions, %s  (skip-error rows: %d — advisory noise, never deleted)\n",
+		verb2, len(rep.Candidates), fmtBytesLV(rep.ReclaimBytes), rep.SkipErrorRows)
+	for i, c := range rep.Candidates {
+		if i >= 20 {
+			fmt.Fprintf(w, "  … +%d more\n", len(rep.Candidates)-20)
+			break
+		}
+		fmt.Fprintf(w, "  %s %s/%s sha=%s %s\n", verb2, c.Source, c.RelPath, c.SHA16, fmtBytesLV(c.Bytes))
+	}
+	return 0
+}
+
+// logvaultAdopt packs a whole tree (-cold <dir>) as one deterministic
+// content-addressed cold-park archive and prints the adoption report.
+func logvaultAdopt(w, ew io.Writer, v *logvault.Vault, cold string) int {
+	if cold == "" {
+		fmt.Fprintln(ew, "logvault adopt: -cold <dir> is required (the tree to pack as one deterministic archive)")
+		return 2
+	}
+	rep, err := v.AdoptCold(cold)
+	if err != nil {
+		fmt.Fprintf(ew, "logvault adopt: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(w, "logvault adopt --cold %s  vault=%s\n", rep.SrcDir, v.Dir)
+	dedup := ""
+	if rep.Deduped {
+		dedup = "  [DEDUP: identical archive already banked]"
+	}
+	fmt.Fprintf(w, "  archive: %s sha=%s bytes=%s files=%d%s\n",
+		rep.ArchiveRel, rep.SHA256[:16], fmtBytesLV(rep.Bytes), rep.Files, dedup)
+	if rep.Deduped {
+		fmt.Fprintln(w, "  manifest: already witnessed by the prior adoption (content-addressed)")
+	} else {
+		fmt.Fprintln(w, "  manifest: recorded (Verify re-hashes the banked archive)")
+	}
+	fmt.Fprintln(w, "  the tool deleted NOTHING. To reclaim the original, YOU may run:")
+	fmt.Fprintf(w, "    %s\n", rep.DeleteCmd)
+	return 0
+}
+
+// logvaultRestore copies one source's manifest-replayed state OUT of the vault
+// into a fresh target (never in-place over a live store without -force), re-hashing
+// every byte against the chain and re-verifying restored chained journals (#2453).
+func logvaultRestore(w, ew io.Writer, v *logvault.Vault, positionals []string, absRepo, syncTo string, restoreAt uint64, restoreForce bool) int {
+	if len(positionals) != 1 {
+		fmt.Fprintln(ew, "logvault restore: exactly one <source-id> is required: fak logvault restore <source-id> [-to DIR] [-at SEQ] [-force]")
+		return 2
+	}
+	source := positionals[0]
+	to := syncTo // -to is the restore target directory here (a fresh tree by default)
+	if to == "" {
+		to = filepath.Join(filepath.Dir(absRepo), "fak-log-restore", source)
+	}
+	rep, rErr := v.Restore(logvault.RestoreOptions{Source: source, To: to, At: restoreAt, Force: restoreForce})
+	if rErr != nil {
+		fmt.Fprintf(ew, "logvault restore: %v\n", rErr)
+		return 1
+	}
+	logvaultPrintRestore(w, v.Dir, rep)
+	if !rep.OK() {
+		return 1
+	}
+	return 0
+}
+
+// logvaultDrill is the cadence hook: restore one source into a temp dir, verify,
+// append a durable DrillRow to the vault drill-log (and -ledger when named), clean
+// up. Run on a schedule so the restore path cannot rot unnoticed (#2453).
+func logvaultDrill(w, ew io.Writer, v *logvault.Vault, positionals []string, drillLedger string) int {
+	if len(positionals) > 1 {
+		fmt.Fprintln(ew, "logvault drill: at most one optional <source-id>: fak logvault drill [<source-id>] [-ledger PATH]")
+		return 2
+	}
+	source := ""
+	if len(positionals) == 1 {
+		source = positionals[0]
+	}
+	row, rep, dErr := v.Drill(source, drillLedger)
+	fmt.Fprintf(w, "logvault drill  vault=%s  source=%s (at seq=%d)\n", v.Dir, row.Source, row.HeadSeq)
+	fmt.Fprintf(w, "  files=%d bytes=%s from-history=%d mismatches=%d journals=%d journals-failed=%d\n",
+		row.Files, fmtBytesLV(row.Bytes), row.FromHistory, row.Mismatches, row.JournalsChecked, row.JournalsFailed)
+	logvaultPrintRestoreDetail(w, rep)
+	anchor := logvaultAnchorSuffix(v.Dir)
+	if row.Pass {
+		fmt.Fprintf(w, "  DRILL PASS — restore round-tripped clean, row appended to %s%s\n", logvault.DrillLogName, anchor)
+	} else {
+		fmt.Fprintf(w, "  DRILL FAIL — %s%s\n", drillFailReason(row, dErr), anchor)
+	}
+	if drillLedger != "" {
+		fmt.Fprintf(w, "  ledger: row appended to %s\n", drillLedger)
+	}
+	if dErr != nil {
+		fmt.Fprintf(ew, "logvault drill: %v\n", dErr)
+	}
+	if !row.Pass {
+		return 1
+	}
+	return 0
 }
 
 // lastCaptureLV renders a source's last-successful-capture time as an age
