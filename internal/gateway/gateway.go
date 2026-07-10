@@ -539,6 +539,16 @@ type Config struct {
 	// 1-hour tier. It is gate-only for now; the ablation harness also enables it with
 	// FAK_ABLATE_TTL_1H=1.
 	CacheTTL1H bool
+	// PrefixGuard arms the prefix-determinism guard (#2182, the runtime form of
+	// #1602/#1604): each served Anthropic passthrough turn, witness whether the inbound
+	// protected prefix (the content-free digest the harness-coherence seam already takes
+	// BEFORE any fak transform) stayed byte-deterministic turn-over-turn, folded into the
+	// fak_prefix_guard_* metric family — the "is the cacheable prefix actually stable?"
+	// check an operator (or an ablation row) reads BEFORE relying on provider-cache
+	// economics. LOSSLESS: it never changes outbound wire bytes. Default off; it must earn
+	// default-on through its ablation row. The ablation harness also enables it with
+	// FAK_ABLATE_PREFIX_GUARD=1.
+	PrefixGuard bool
 	// VCacheAnchor, when true, arms the M2 star-anchor canonicalization as a DEFAULT-ON
 	// pre-flight gate on the flagship Anthropic PASSTHROUGH (#1493): before any other body
 	// transform, apply cachemeta.RecommendLayout (agent.PlaceAnthropicCacheBreakpointWithOutcome)
@@ -1310,6 +1320,12 @@ type Server struct {
 	// passthrough upgrades stable-head cache_control breakpoints to ttl:"1h" before forwarding.
 	cacheTTL1H bool
 
+	// prefixGuard mirrors Config.PrefixGuard or FAK_ABLATE_PREFIX_GUARD (#2182): when true,
+	// each served passthrough turn folds the inbound protected-prefix digest into the
+	// fak_prefix_guard_* determinism witness (observePrefixGuard). Lossless — wire bytes
+	// are never changed; off keeps the family at its emit-at-0 zeros.
+	prefixGuard bool
+
 	// vcacheAnchor mirrors Config.VCacheAnchor: when true the Anthropic passthrough runs the M2
 	// star-anchor pre-flight rewrite (maybeAnchorAnthropicRaw) by DEFAULT — hoisting volatile
 	// system blocks behind a byte-stable cacheable anchor and placing a breakpoint the caller did
@@ -1598,10 +1614,11 @@ func New(cfg Config) (*Server, error) {
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
 		compactAnchorHead:          cfg.CompactAnchorHead,
 		assumeSessionTurns:         cfg.AssumeSessionTurns,
-		elideResultBytes:           cfg.ElideResultBytes,
+		elideResultBytes:           ablateUncachedTrimBytes(cfg.ElideResultBytes),
 		elideStaleReads:            cfg.ElideStaleReads,
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
-		vcacheAnchor:               cfg.VCacheAnchor,
+		prefixGuard:                cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
+		vcacheAnchor:               cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		exposeAllow:                exposeAllow,
 		deferMCPTools:              cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
@@ -1704,6 +1721,19 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 	}
 	startup.phase("planner-init", time.Since(t))
 	return planner, inKernelModelButChatIsMock, nil
+}
+
+// ablateUncachedTrimBytes composes Config.ElideResultBytes with the FAK_ABLATE_UNCACHED_TRIM
+// ablation arm (#2182): a configured positive threshold always wins verbatim, and an arm
+// sweeping the uncached-tail trim on a construction that left the lever inert (<= 0) arms it
+// at the documented default. This is the int-shaped form of the `cfg.X || envEnabled(...)`
+// compose the boolean levers (CacheTTL1H, VCacheAnchor, PrefixGuard) use, so guard flags and
+// ablation env compose instead of replacing each other.
+func ablateUncachedTrimBytes(configured int) int {
+	if configured <= 0 && envEnabled("FAK_ABLATE_UNCACHED_TRIM") {
+		return DefaultElideResultBytes
+	}
+	return configured
 }
 
 func envEnabled(name string) bool {

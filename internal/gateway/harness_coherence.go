@@ -107,6 +107,17 @@ type harnessCoherenceMetrics struct {
 	harnessRewrites  uint64
 	quarantineAtRisk uint64
 	burstsObserved   uint64
+	// prefixGuardTurns / prefixGuardStable / prefixGuardMutated / prefixGuardUnknown are
+	// the prefix-determinism guard's witness counts (#2182, the runtime form of #1602/#1604):
+	// served turns folded while the guard lever was armed, split by verdict — the inbound
+	// protected-prefix digest matched the trace's baseline (stable), diverged from it
+	// (mutated — the prefix burst the guard exists to catch before an operator relies on
+	// provider-cache economics), or carried no breakpoint anchor to compare (unknown).
+	// All stay 0 while the lever is off.
+	prefixGuardTurns   uint64
+	prefixGuardStable  uint64
+	prefixGuardMutated uint64
+	prefixGuardUnknown uint64
 	// overCeilingTurns / rewriteNoDrops / recommendResets are the resident-token risk counts
 	// (#3158/#3159): turns whose resident window exceeded the ceiling; harness rewrites judged
 	// non-holding (window climbed back over the ceiling); turns recommending a hard reset
@@ -138,6 +149,13 @@ type coordEntry struct {
 	// headHorizonHeavyResidentFloor). Peak (not last) so a single small turn cannot demote a
 	// session that has proven it holds a large context; monotone within a trace's life.
 	heldPeak int64
+	// guardDigest is the prefix-determinism guard's last-accepted protected-prefix digest
+	// for this trace (#2182). Written ONLY while the guard lever is armed (--prefix-guard /
+	// FAK_ABLATE_PREFIX_GUARD=1), so an unarmed server carries zero extra state. Kept
+	// separate from the coordinator's own rolling digest state so the guard's verdict is a
+	// direct #1602-style baseline comparison, independent of the coordinator's richer
+	// event attribution.
+	guardDigest string
 }
 
 // maxCoherenceSessions bounds the per-trace coordinator map. observe mints one *coordEntry per
@@ -268,6 +286,58 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 	}
 	h.posture = d.HarnessPosture
 	return d
+}
+
+// observePrefixGuard folds one served turn's prefix-determinism verdict (#2182): compare the
+// inbound protected-prefix digest (the same content-free digest observe just folded, taken
+// BEFORE any fak transform) against the trace's last-accepted baseline. Called ONLY while the
+// prefix-guard lever is armed (Config.PrefixGuard / FAK_ABLATE_PREFIX_GUARD=1), and AFTER
+// observe for the same turn, so the trace's coordEntry already exists. A mutated verdict
+// re-primes the baseline, so a persistently NEW prefix counts one mutation, not one per turn —
+// the same last-accepted-baseline discipline as cachemeta.PrefixStabilityTracker (#1602).
+func (h *harnessCoherenceMetrics) observePrefixGuard(trace, digest string) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.prefixGuardTurns++
+	if digest == "" {
+		// No breakpoint anchor ⇒ no protected prefix to hold deterministic. Never a
+		// spurious mutation; the trace's baseline (if any) is left in place.
+		h.prefixGuardUnknown++
+		return
+	}
+	entry := h.coords[trace]
+	if entry == nil {
+		// observe folds first, so this only happens on an eviction race; treat as a fresh
+		// baseline exactly like a first turn.
+		if len(h.coords) >= maxCoherenceSessions {
+			h.evictColdestCoordLocked()
+		}
+		entry = &coordEntry{}
+		h.coords[trace] = entry
+	}
+	switch entry.guardDigest {
+	case "":
+		// First anchored turn primes the baseline; the prefix is trivially self-consistent.
+		entry.guardDigest = digest
+		h.prefixGuardStable++
+	case digest:
+		h.prefixGuardStable++
+	default:
+		entry.guardDigest = digest
+		h.prefixGuardMutated++
+	}
+}
+
+// observePrefixGuard is the gatewayMetrics-level, nil-safe accessor for the prefix-determinism
+// guard fold, mirroring observeHarnessCoherence's shape so a Server built without metrics is safe.
+func (m *gatewayMetrics) observePrefixGuard(trace, digest string) {
+	if m == nil || m.harnessCoherence == nil {
+		return
+	}
+	m.harnessCoherence.observePrefixGuard(trace, digest)
 }
 
 // recordCoherenceResetFired counts a coherence-triggered reset ACTUATED through the
@@ -416,6 +486,13 @@ func (m *gatewayMetrics) recordCoherenceResetFired() {
 // arms nothing while the recommendation still surfaces on /metrics. It returns the Decision.
 func (s *Server) observeHarnessCoherenceAndArm(trace string, now time.Time, digest string, fakFired bool, fakBail string, fakWorldBreak, sealed bool, cacheRead, cacheCreate, inputTokens int64) compactcohere.Decision {
 	d := s.metrics.observeHarnessCoherence(trace, now, digest, fakFired, fakBail, fakWorldBreak, sealed, cacheRead, cacheCreate, inputTokens)
+	if s.prefixGuard {
+		// #2182: the prefix-determinism guard rides the SAME per-turn seam (both the buffered
+		// and streaming passthrough finalizers land here), so arming it changes gateway
+		// behavior on every served turn — witnessed on fak_prefix_guard_* — without touching
+		// the outbound bytes.
+		s.metrics.observePrefixGuard(trace, digest)
+	}
 	if d.EscalateReset && s.resetOnBudget != nil {
 		s.armCoherenceReset(trace)
 	}
@@ -445,6 +522,11 @@ type harnessCoherenceSnapshot struct {
 	resetsFired      uint64
 	lastResident     int64
 	posture          compactcohere.Posture
+
+	prefixGuardTurns   uint64
+	prefixGuardStable  uint64
+	prefixGuardMutated uint64
+	prefixGuardUnknown uint64
 }
 
 func (h *harnessCoherenceMetrics) snapshot() harnessCoherenceSnapshot {
@@ -470,6 +552,10 @@ func (h *harnessCoherenceMetrics) snapshot() harnessCoherenceSnapshot {
 	out.resetsFired = h.resetsFired
 	out.lastResident = h.lastResident
 	out.posture = h.posture
+	out.prefixGuardTurns = h.prefixGuardTurns
+	out.prefixGuardStable = h.prefixGuardStable
+	out.prefixGuardMutated = h.prefixGuardMutated
+	out.prefixGuardUnknown = h.prefixGuardUnknown
 	return out
 }
 
@@ -526,6 +612,15 @@ func (h *harnessCoherenceMetrics) writeHarnessCoherenceMetrics(b *strings.Builde
 	writeHelpType(b, "fak_harness_coherence_resident_tokens",
 		"OBSERVED (relayed verbatim): the most recent served turn's RESIDENT window size (input + cache_creation + cache_read). A gauge an operator watches approach the ceiling; the size signal the yield and non-holding-rewrite policy (#3158/#3159) turn on.", "gauge")
 	fmt.Fprintf(b, "fak_harness_coherence_resident_tokens %d\n", snap.lastResident)
+
+	writeCounter(b, "fak_prefix_guard_turns_total",
+		"WITNESSED (fak authored): served passthrough turns folded into the prefix-determinism guard (#2182, the runtime form of #1602/#1604) while the lever was armed (--prefix-guard on the gateway Config, or the FAK_ABLATE_PREFIX_GUARD=1 ablation arm). 0 means the guard is off. The denominator for the verdict counters below.", int64(snap.prefixGuardTurns))
+
+	writeHelpType(b, "fak_prefix_guard_verdicts_total",
+		"WITNESSED (fak authored): armed turns by prefix-determinism verdict — stable (the inbound protected-prefix digest matched the trace's last-accepted baseline), mutated (it diverged: the cacheable prefix burst, so provider-cache economics should NOT be relied on for this span), unknown (no cache_control anchor ⇒ no protected prefix to compare). Content-free: only the digest is compared, never prompt bytes.", "counter")
+	fmt.Fprintf(b, "fak_prefix_guard_verdicts_total{verdict=%q} %d\n", "stable", snap.prefixGuardStable)
+	fmt.Fprintf(b, "fak_prefix_guard_verdicts_total{verdict=%q} %d\n", "mutated", snap.prefixGuardMutated)
+	fmt.Fprintf(b, "fak_prefix_guard_verdicts_total{verdict=%q} %d\n", "unknown", snap.prefixGuardUnknown)
 
 	writeHelpType(b, "fak_harness_coherence_posture",
 		"The CURRENT standing PreCompact posture the actuator (#1133, rung C) enforces when `fak guard` installs the Claude Code hook: 1 = block (exit 2 — suppress the harness's auto-compaction while fak's cache-preserving compaction is coping; the default), 0 = allow (exit 0 — fak's compaction has bailed for a sustained streak, so the harness is the only context net left).", "gauge")
