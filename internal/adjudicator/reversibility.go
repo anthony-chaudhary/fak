@@ -185,14 +185,24 @@ func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (
 // the redirect when a call matches several families, so the hinted families
 // stay first, in redirect-priority order.
 //
-// `gh` is deliberately NOT a family here (operator decision, 2026-07-05). Every gh
-// write — issue/pr/release create·comment·edit·close·reopen·merge·upload and `gh api`
-// mutations — targets the operator's OWN authenticated GitHub and is reversible in
-// practice (issues/PRs edit·close·reopen; a release can be deleted), so the
-// preview-confirm pause was pure friction on routine fleet work — the #2650/#2651
-// confirm-loop lesson — while the Claude Code allow-list already admits `Bash(gh …)`.
-// curl/httpie POSTs stay gated (http-write below): those reach ARBITRARY hosts, not
-// the authenticated gh surface, so the outbound floor still holds for the general case.
+// Most of the `gh` surface is deliberately NOT a family (operator decision,
+// 2026-07-05): issue/pr/release create·comment·edit·close·reopen·merge·upload
+// targets the operator's OWN authenticated GitHub and is reversible in practice
+// (issues/PRs edit·close·reopen; a release can be deleted), so the preview-confirm
+// pause was pure friction on routine fleet work — the #2650/#2651 confirm-loop
+// lesson — while the Claude Code allow-list already admits `Bash(gh …)`.
+//
+// The ONE carve-out is the gh-write family below (#3560): `gh api` with a write
+// method (--method/-X POST|PUT|PATCH|DELETE) and `gh repo fork|rename|delete` are
+// re-escalated to the SAME outward-facing class as `git push`, because those
+// escape the relaxation's premise. `gh api` mutations reach ARBITRARY third-party
+// repos and the Git Data API (author commits/branches/trees, open cross-repo PRs,
+// PATCH-rename or delete a repo) and `gh repo fork|rename|delete` always mutate —
+// a strictly LARGER blast radius than the git-CLI writes the relaxation was
+// matching, so leaving them allowed reroutes capability DOWNWARD past the git-push
+// gate. A `gh api` READ (GET / no --method) stays reversible. curl/httpie POSTs
+// likewise stay gated (http-write below): those reach ARBITRARY hosts, not the
+// authenticated gh surface, so the outbound floor still holds for the general case.
 var reversibilityFamilies = []reversibilityFamily{
 	// An MCP tool literally named create_issue / issue_create is still
 	// escalated; the redirect points at the compiled `fak issue create` verb
@@ -231,6 +241,17 @@ var reversibilityFamilies = []reversibilityFamily{
 		prefixes:     [][]string{{"git", "push"}},
 		toolContains: []string{"git_push"},
 		hint:         "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run",
+	},
+	// The gh-write carve-out (#3560, see the gh note above): a `gh api` mutation
+	// (--method/-X POST|PUT|PATCH|DELETE) or `gh repo fork|rename|delete` is the
+	// SAME outward-facing class as git push — a larger-blast-radius write than the
+	// git-CLI path, so it may not slip under the gh relaxation. A `gh api` read
+	// (GET / no --method) is untouched and stays reversible.
+	{
+		name:     "gh-write",
+		class:    ReversibilityOutwardFacing,
+		matchCmd: func(in familyMatchInput) bool { return ghWriteMutation(in.cmd) },
+		hint:     "gh api writes and gh repo fork/rename/delete reach arbitrary GitHub repos with a larger blast radius than the git-CLI path; read instead (gh api with GET / no --method), or review the exact repo, endpoint, and method before confirming the live mutation",
 	},
 	{
 		name:     "npm-publish",
@@ -448,6 +469,95 @@ func httpieWrites(segs [][]string) bool {
 func httpWriteVerb(w string) bool {
 	switch strings.ToLower(w) {
 	case "post", "put", "patch", "delete":
+		return true
+	default:
+		return false
+	}
+}
+
+// ghWriteMutation reports whether the command invokes a MUTATING gh surface that
+// the operator relaxation (see the gh note on reversibilityFamilies) must NOT
+// cover (#3560): `gh api` with a write method (--method/-X POST|PUT|PATCH|DELETE,
+// the flag anywhere in argv), or `gh repo fork|rename|delete` (always mutating).
+// A `gh api` READ (GET / no --method) is a read and returns false. It reads the
+// payload-scan view — quoted MENTIONS are already blanked (so a commit message or
+// grep pattern naming `gh api -X POST` does not classify), while a live-payload
+// statement stays visible — and parses raw segments so flag dashes survive
+// (commandWords strips them). It splits on the same sequencing operators and
+// strips the same leading env/wrapper heads as commandSegments/gitDryRunPreview,
+// so a `sudo`/`FOO=1` prefix does not hide the gh call.
+func ghWriteMutation(cmd string) bool {
+	for _, raw := range commandSegmentRE.Split(cmd, -1) {
+		fields := strings.Fields(raw)
+		for len(fields) > 0 &&
+			(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
+			fields = fields[1:]
+		}
+		if len(fields) < 2 || ghHead(fields[0]) != "gh" {
+			continue
+		}
+		switch strings.ToLower(fields[1]) {
+		case "api":
+			if ghAPIArgsWrite(fields[2:]) {
+				return true
+			}
+		case "repo":
+			if len(fields) >= 3 && ghRepoSubMutates(fields[2]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ghHead normalizes a command head to its bare program name so `gh`, `gh.exe`,
+// and a path like /usr/bin/gh all read as "gh".
+func ghHead(tok string) string {
+	h := strings.ToLower(tok)
+	h = strings.TrimSuffix(h, ".exe")
+	if k := strings.LastIndexAny(h, `/\`); k >= 0 {
+		h = h[k+1:]
+	}
+	return h
+}
+
+// ghAPIArgsWrite reports whether a `gh api` argument list carries a write method
+// flag — `--method POST`, `--method=POST`, `-X POST`, or the glued `-XPOST` — for
+// any of POST/PUT/PATCH/DELETE, robust to the flag appearing ANYWHERE in argv. The
+// default gh api method is GET (a read), so no method flag means not a write.
+func ghAPIArgsWrite(args []string) bool {
+	const eq = "--method="
+	for i, a := range args {
+		switch {
+		case strings.EqualFold(a, "--method"), strings.EqualFold(a, "-X"):
+			if i+1 < len(args) && ghMethodWrites(args[i+1]) {
+				return true
+			}
+		case len(a) > len(eq) && strings.EqualFold(a[:len(eq)], eq):
+			if ghMethodWrites(a[len(eq):]) {
+				return true
+			}
+		case len(a) > 2 && (strings.HasPrefix(a, "-X") || strings.HasPrefix(a, "-x")):
+			if ghMethodWrites(a[2:]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ghMethodWrites(m string) bool {
+	switch strings.ToUpper(m) {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	default:
+		return false
+	}
+}
+
+func ghRepoSubMutates(sub string) bool {
+	switch strings.ToLower(sub) {
+	case "fork", "rename", "delete":
 		return true
 	default:
 		return false

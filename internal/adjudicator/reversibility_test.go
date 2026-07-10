@@ -106,10 +106,108 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			want: ReversibilityReversible,
 		},
 		{
-			name: "gh api write is reversible (gh surface relaxed)",
+			// #3560: gh api WRITES are the carve-out from the gh relaxation — a
+			// `gh api -X POST` authors via the REST/Git Data API against ARBITRARY
+			// repos, a larger blast radius than the gated git-CLI writes, so it is
+			// re-escalated to git push's outward-facing class instead of slipping
+			// under the relaxed gh surface.
+			name: "gh api short-form write is outward-facing (carve-out)",
 			tool: "Bash",
 			args: map[string]any{"command": "gh api -X POST /repos/o/r/issues -f title=x"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "gh api --method POST is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "gh api --method POST /repos/o/r/pulls -f title=x"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "gh api -X PATCH is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "gh api -X PATCH /repos/o/r -f name=renamed"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			// Flag-order robustness: --method after the endpoint still escalates.
+			name: "gh api write method after endpoint is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "gh api /repos/o/r/git/refs --method DELETE"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			// A gh api READ (GET is the default; no --method) stays reversible.
+			name: "gh api GET read stays reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "gh api repos/o/r/contents/x"},
 			want: ReversibilityReversible,
+		},
+		{
+			name: "gh api explicit --method GET stays reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "gh api --method GET /repos/o/r/pulls"},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "gh repo rename is outward-facing (always mutating)",
+			tool: "Bash",
+			args: map[string]any{"command": "gh repo rename newname"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "gh repo delete is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "gh repo delete o/r --yes"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "gh repo fork is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "gh repo fork o/r --clone=false"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			// gh repo READS (view/clone) are not the fork/rename/delete carve-out and
+			// stay reversible.
+			name: "gh repo view stays reversible",
+			tool: "Bash",
+			args: map[string]any{"command": "gh repo view o/r --json name"},
+			want: ReversibilityReversible,
+		},
+		{
+			// Scope guard: the carve-out is gh api/gh repo only — the rest of the gh
+			// surface stays operator-relaxed. gh pr create / gh issue create remain
+			// reversible (own authenticated GitHub, reversible in practice), so the
+			// fix did not sweep them back under the gate.
+			name: "gh pr create stays reversible (relaxation intact)",
+			tool: "Bash",
+			args: map[string]any{"command": `gh pr create --title fix --body details`},
+			want: ReversibilityReversible,
+		},
+		{
+			// Regression guard: the git-CLI write path this issue is about stays
+			// blocked-class (outward-facing) — the carve-out lifts gh api/gh repo UP
+			// to match it, it must not accidentally relax git push.
+			name: "git push stays blocked-class (regression)",
+			tool: "Bash",
+			args: map[string]any{"command": "git push origin main"},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			// A quoted MENTION of a gh api write (inside a commit message) must not
+			// classify — the carve-out reads the payload-scan view, like the other
+			// families.
+			name: "commit message mentioning gh api POST is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `git commit -m "docs: run gh api -X POST to open a PR"`},
+			want: ReversibilityReversible,
+		},
+		{
+			// A leading sudo/env wrapper must not hide the gh api write.
+			name: "sudo-wrapped gh api write is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": "sudo gh api -X PUT /repos/o/r/contents/f"},
+			want: ReversibilityOutwardFacing,
 		},
 		{
 			name: "http write is outward-facing",
