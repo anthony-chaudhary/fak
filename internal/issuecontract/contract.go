@@ -36,6 +36,7 @@ const (
 
 	ReasonScopeIncomplete      = "ISSUE_SCOPE_INCOMPLETE"
 	ReasonUnrouted             = "ISSUE_UNROUTED"
+	ReasonNotBornRouted        = "ISSUE_NOT_BORN_ROUTED"
 	ReasonPrivateBoundary      = "ISSUE_PRIVATE_BOUNDARY"
 	ReasonLiveUnarmored        = "ISSUE_LIVE_UNARMORED"
 	ReasonNotDispatchLeaf      = "ISSUE_NOT_DISPATCH_LEAF"
@@ -161,7 +162,8 @@ type Options struct {
 	// ScaleFit readout is always computed, but it does not change
 	// dispatchability unless strict mode is requested — the same advisory→hold
 	// discipline as StrictModelTier.
-	StrictScale bool
+	StrictScale      bool
+	StrictBornRouted bool
 }
 
 // Score explains the spine-first readiness score. The four axes are intentionally
@@ -227,6 +229,7 @@ type Review struct {
 	GenerationFit   GenerationFit   `json:"generation_fit"`
 	ModelTier       ModelTier       `json:"model_tier"`
 	Scale           ScaleFit        `json:"scale"`
+	BornRouted      BornRouted      `json:"born_routed"`
 }
 
 // ReviewCandidate grades c. OK means the candidate is safe to sync as a
@@ -276,6 +279,10 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.StrictModelTier && len(modelTier.Flags) > 0 {
 		reasons.add(ReasonModelTierIncomplete)
 	}
+	bornRoutedReadout := bornRouted(c)
+	if opt.StrictBornRouted && len(bornRoutedReadout.Flags) > 0 {
+		reasons.add(ReasonNotBornRouted)
+	}
 	scaleReadout := scaleFit(c)
 	// A feature/epic/program-scale unit (S2+) is structurally not a dispatch leaf:
 	// it must decompose before a worker runs it. This is the same always-on gate as
@@ -320,6 +327,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		GenerationFit:  generationFit,
 		ModelTier:      modelTier,
 		Scale:          scaleReadout,
+		BornRouted:     bornRoutedReadout,
 	}
 	out.OK = len(out.Reasons) == 0
 	switch {

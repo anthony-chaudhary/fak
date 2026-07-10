@@ -160,6 +160,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
 	strictModelTier := fs.Bool("strict-model-tier", false, "hold issues with missing/invalid/contradictory model-tier metadata triage-only")
 	strictScale := fs.Bool("strict-scale", false, "hold issues with an undeclared work size or a witness smaller than the work triage-only")
+	strictBornRouted := fs.Bool("strict-born-routed", false, "hold issues missing a lane, class label, or priority label triage-only")
 	asJSON := fs.Bool("json", false, "emit machine-readable review/result")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -202,11 +203,12 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		OK:     true,
 	}
 	opts := issuecontract.Options{
-		Live:            *live,
-		DedupeChecked:   *dedupeChecked,
-		DedupeCap:       *dedupeCap,
-		StrictModelTier: *strictModelTier,
-		StrictScale:     *strictScale,
+		Live:             *live,
+		DedupeChecked:    *dedupeChecked,
+		DedupeCap:        *dedupeCap,
+		StrictModelTier:  *strictModelTier,
+		StrictScale:      *strictScale,
+		StrictBornRouted: *strictBornRouted,
 	}
 	if mode == "issues" {
 		issues, err := decodeIssueContractIssues(b)
