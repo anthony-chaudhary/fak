@@ -10,7 +10,7 @@ const (
 	OfficialRunContractSchema = "fak.terminalbench-official-run-contract.v1"
 
 	OfficialTerminalBench21Dataset       = "terminal-bench/terminal-bench-2-1"
-	OfficialTerminalBench21TopAgentModel = "gpt-5.5"
+	OfficialTerminalBench21TopAgentModel = "gpt-5.6"
 )
 
 type OfficialRunContractInput struct {

@@ -280,7 +280,7 @@ func TestBuildOfficialRunContractSortsCandidates(t *testing.T) {
 func TestRenderOfficialRunContractMarkdown(t *testing.T) {
 	c := BuildOfficialRunContract(OfficialRunContractInput{
 		Suite:      sampleContractSuite(),
-		Model:      "gpt-5.5",
+		Model:      OfficialTerminalBench21TopAgentModel,
 		Agent:      "codex",
 		FakAgent:   "codex",
 		RawCommand: officialRawHarborCommand,

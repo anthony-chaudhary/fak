@@ -6,12 +6,12 @@ import (
 )
 
 func TestBuildOfficialRunCommandRaw(t *testing.T) {
-	cmd := buildOfficialRunCommand("terminal-bench/terminal-bench-2-1", "", "codex", "gpt-5.5", "", "", 2, false)
+	cmd := buildOfficialRunCommand("terminal-bench/terminal-bench-2-1", "", "codex", "gpt-5.6", "", "", 2, false)
 	for _, want := range []string{
 		"harbor run",
 		"-d terminal-bench/terminal-bench-2-1",
 		"-a codex",
-		"-m gpt-5.5",
+		"-m gpt-5.6",
 		"--task-id $task",
 		"--n-concurrent 2",
 		"$env:TERMINAL_BENCH_TASK_IDS",
@@ -26,11 +26,11 @@ func TestBuildOfficialRunCommandRaw(t *testing.T) {
 }
 
 func TestBuildOfficialRunCommandFakGateway(t *testing.T) {
-	cmd := buildOfficialRunCommand("terminal-bench/terminal-bench-2-1", "", "codex", "gpt-5.5", "http://host.docker.internal:18080/v1", "{{FAK_GATEWAY_KEY}}", 1, false)
+	cmd := buildOfficialRunCommand("terminal-bench/terminal-bench-2-1", "", "codex", "gpt-5.6", "http://host.docker.internal:18080/v1", "{{FAK_GATEWAY_KEY}}", 1, false)
 	for _, want := range []string{
 		"harbor run",
 		"-a codex",
-		"-m gpt-5.5",
+		"-m gpt-5.6",
 		"--agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1",
 		"--agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1",
 		"--agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}'",
@@ -47,7 +47,7 @@ func TestBuildOfficialRunCommandFakGateway(t *testing.T) {
 }
 
 func TestBuildOfficialRunCommandOptionalEnvironmentHost(t *testing.T) {
-	cmd := buildOfficialRunCommand("terminal-bench/terminal-bench-2-1", "", "codex", "gpt-5.5", "http://host.docker.internal:18080/v1", "{{FAK_GATEWAY_KEY}}", 1, true)
+	cmd := buildOfficialRunCommand("terminal-bench/terminal-bench-2-1", "", "codex", "gpt-5.6", "http://host.docker.internal:18080/v1", "{{FAK_GATEWAY_KEY}}", 1, true)
 	if !strings.Contains(cmd, "--allow-environment-host host.docker.internal") {
 		t.Fatalf("command missing optional environment allowlist:\n%s", cmd)
 	}
