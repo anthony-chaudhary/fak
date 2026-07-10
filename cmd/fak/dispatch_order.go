@@ -200,8 +200,8 @@ func parseCandidates(raw []byte) ([]dispatchorder.Candidate, error) {
 // keep list (the pick order), then the superseded duplicates, then the units skipped because a
 // worker is live or they are cooling.
 func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
-	fmt.Fprintf(w, "dispatch order — %d candidate(s): %d keep  %d superseded  %d live  %d cooling  %d collision-risk  %d generation-held\n\n",
-		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount, r.CollisionCount, r.GenerationHeldCount)
+	fmt.Fprintf(w, "dispatch order — %d candidate(s): %d keep  %d superseded  %d live  %d cooling  %d collision-risk  %d generation-held  %d blocked\n\n",
+		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount, r.CollisionCount, r.GenerationHeldCount, r.BlockedCount)
 
 	if r.KeepCount > 0 {
 		fmt.Fprintf(w, "%-4s %-16s %-14s %5s %10s\n", "rank", "unit", "key", "prio", "age")
@@ -233,6 +233,13 @@ func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
 			}
 			fmt.Fprintf(w, "  generation %-16s (%s: %s is outside this dispatch window)\n",
 				x.ID, dispatchorder.ReasonGenerationHeld, gen)
+		case dispatchorder.DispBlocked:
+			prereq := strings.Join(x.BlockedByOpen, ",")
+			if prereq == "" {
+				prereq = "an open prerequisite"
+			}
+			fmt.Fprintf(w, "  blocked    %-16s (%s: prerequisite %s still open; soft-held)\n",
+				x.ID, dispatchorder.ReasonBlockedByOpenPrereq, prereq)
 		}
 	}
 	if r.CollisionsAvoided > 0 || r.SerializationWasted > 0 {
