@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 first-request cold tax vs. KV-prefix caching — an ablation"
+description: "GLM-5.2's ~500s first-request latency is one-time backend warmup, orthogonal to KV-prefix caching—not a cache miss, despite cache_bit=true on the cold turn."
+---
+
 # GLM-5.2 first-request cold tax vs. KV-prefix caching — an ablation, 2026-07-06
 
 **Question.** GLM-5.2 on the datacenter box shows cold turns of **~511.3s** and **~501.2s**,

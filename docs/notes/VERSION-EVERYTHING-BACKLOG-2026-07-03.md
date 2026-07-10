@@ -1,3 +1,8 @@
+---
+title: "Version-everything backlog: epic + 44 contract-ready children"
+description: "Version-everything backlog: epic #2458 plus 44 contract-ready children (#2459-#2502), filed on milestone 16 from a machine-readable issue plan."
+---
+
 # Version-everything backlog: epic + 44 contract-ready children (2026-07-03)
 
 Companion to `VERSION-EVERYTHING-SPINE-2026-07-03.md`. The machine-readable

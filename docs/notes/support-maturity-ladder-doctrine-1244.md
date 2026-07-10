@@ -1,3 +1,8 @@
+---
+title: "Support-maturity ladder M0–M7 — doctrine (1244)"
+description: "Part of epic 1243. This note is the doctrine for C1: the closed, ordered support-maturity ladder defined as a Go enum in internal/supportmaturity."
+---
+
 # Support-maturity ladder M0–M7 — doctrine (#1244)
 
 Part of epic **#1243**. This note is the doctrine for **C1**: the closed, ordered

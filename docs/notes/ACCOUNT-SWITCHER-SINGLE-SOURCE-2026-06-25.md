@@ -1,3 +1,8 @@
+---
+title: "The account switcher's single-source problem, and why gem8"
+description: "gem8 didn't vanish — three drifting rosters and dir-name-keyed identity hid it; fak's internal/accounts becomes the single source collapsing duplicate seats."
+---
+
 # The account switcher's single-source problem, and why gem8 "disappeared" (2026-06-25)
 
 **Kind:** diagnosis + consolidation path (operator-facing). **Lane:** `internal/accounts`.

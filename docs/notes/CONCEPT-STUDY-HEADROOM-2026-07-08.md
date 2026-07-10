@@ -1,3 +1,8 @@
+---
+title: "Field-borrow study: headroom → fak (2026-07-08)"
+description: "A field-borrow study of the headroom repo: witness each candidate technique against what fak already ships, filing only real gaps as dispatchable leaves."
+---
+
 # Field-borrow study: headroom → fak (2026-07-08)
 
 A `field-borrow` pass: study one external repo, witness each candidate technique

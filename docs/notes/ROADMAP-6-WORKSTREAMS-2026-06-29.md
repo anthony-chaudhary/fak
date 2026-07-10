@@ -1,3 +1,8 @@
+---
+title: "Roadmap: the 6 live-but-not-quite-there workstreams (2026-06-29)"
+description: "A reconciliation of the operator's six long-running 'live but not quite there yet' workstreams against the GitHub milestone/roadmap structure."
+---
+
 # Roadmap: the 6 live-but-not-quite-there workstreams (2026-06-29)
 
 A reconciliation of the operator's six long-running "live but not quite there yet"

@@ -1,3 +1,8 @@
+---
+title: "Cache savings in one session: what fak did, and what it didn't"
+description: "Anthropic's prompt cache saved the ~25.5M tokens, not fak; fak only priced the saving honestly and caught 1,104 bad tool calls before they wasted round-trips."
+---
+
 # Cache savings in one session: what fak did, and what it didn't
 
 *2026-06-29 — a read of the `fak guard` exit summary for resumed session `c6723f7c`.*

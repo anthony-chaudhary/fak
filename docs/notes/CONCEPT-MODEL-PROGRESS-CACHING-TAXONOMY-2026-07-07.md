@@ -1,3 +1,8 @@
+---
+title: "Model-progress caching taxonomy — what state each family produces"
+description: "Classifies what cacheable state each model family produces, naming two rows the M1–M10 KV ladder misses: MoE expert residency (M11) and SSM state reuse (M12)."
+---
+
 # Model-progress caching taxonomy — what state each family produces, and what of it is cacheable
 
 **2026-07-07.** Companion to the memory-first superset epic **#2236** and its M1–M10 ranking

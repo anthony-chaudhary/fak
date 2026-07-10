@@ -1,3 +1,8 @@
+---
+title: "Concept: the unbounded memory-value score — giving memory the P&L the"
+description: "Proposes an unbounded memory-value score giving agent memory the same P&L the cache already has, via three axes; Rung 1 (internal/memvaluescore) ships here."
+---
+
 # Concept: the unbounded memory-value score — giving memory the P&L the cache already has (2026-07-03)
 
 Status: concept + first rung shipping with this note · Track: cache-optimization

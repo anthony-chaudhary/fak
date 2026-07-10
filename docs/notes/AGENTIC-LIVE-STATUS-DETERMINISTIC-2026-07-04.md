@@ -1,3 +1,8 @@
+---
+title: "Agentic detail in fak guard live status: the deterministic-first"
+description: "Audits which fak guard live-status agent signals are already witnessed, which need aggregation, and which aren't yet deterministically attributable."
+---
+
 # Agentic detail in `fak guard` live status: the deterministic-first ladder (2026-07-04)
 
 **Operator goal (2026-07-04):** make `fak guard` live status — the `fak info`

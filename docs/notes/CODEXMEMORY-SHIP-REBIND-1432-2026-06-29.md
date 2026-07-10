@@ -1,3 +1,8 @@
+---
+title: "codexmemory ship rebind — 1432"
+description: "Corrective witness rebinding the codexmemory leaf to the read-only Codex memory posture doctor (#1432) whose ship commit stamp was scrambled by a trunk race."
+---
+
 # codexmemory ship rebind — #1432
 
 On 2026-06-29 the read-only Codex memory posture doctor (issue #1432) landed on

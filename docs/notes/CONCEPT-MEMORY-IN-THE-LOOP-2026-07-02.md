@@ -1,3 +1,8 @@
+---
+title: "Concept: memory in the loop — the loop reads, verifies, and writes"
+description: "fak has shipped every memory primitive but the agent loop never uses them; the gap is composition — a ladder wiring verified recall into each loop turn."
+---
+
 # Concept: memory in the loop — the loop reads, verifies, and writes memory by default
 
 Date: 2026-07-02 · Status: concept + first rung in flight · Track: cache-optimization

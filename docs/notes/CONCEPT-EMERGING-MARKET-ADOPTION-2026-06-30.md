@@ -1,3 +1,8 @@
+---
+title: "Making fak attractive to India- and China-based startups (2026-06-30)"
+description: "A go-to-market strategy note mapping the full lever set for adopting fak in India and China, grading each as shipped, partial, or proposed."
+---
+
 # Making fak attractive to India- and China-based startups (2026-06-30)
 
 > Concept note / go-to-market strategy. Answers the `/goal`: *how do we make fak
@@ -120,7 +125,7 @@ the headline. No new measurements; a re-skin of `BENCHMARK-AUTHORITY.md` numbers
 
 Under export controls, Chinese startups increasingly target **Huawei Ascend, Cambricon,
 Biren, Moore Threads**; India's domestic compute (IndiaAI) is nascent and mostly NVIDIA
-today. fak's `internal/compute` HAL + [neo-silicon onboarding](../vendor/neo-silicon-onboarding.md)
+today. fak's `internal/compute` HAL + neo-silicon onboarding
 is the seam to add a `compute.Backend` by registration rather than re-forking the forward
 pass — a genuine "bring-your-accelerator" story. **Fence:** the HAL ships CUDA and Vulkan
 backends; a domestic-accelerator backend is a *registration path we support*, not a

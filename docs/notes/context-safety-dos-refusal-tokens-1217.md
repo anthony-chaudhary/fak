@@ -1,3 +1,8 @@
+---
+title: "Context-safety DOS refusal tokens (1231, C13 of epic 1217)"
+description: "Design-only spec for three dos.toml [reasons] tokens a context-safety panel emits to refuse an unearned green OK with a verifiable reason."
+---
+
 # Context-safety DOS refusal tokens (#1231, C13 of epic #1217)
 
 _Research / design only. This is the **C13 structured-refusal spec** for the

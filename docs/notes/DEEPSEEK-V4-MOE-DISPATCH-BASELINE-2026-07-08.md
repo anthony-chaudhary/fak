@@ -1,3 +1,8 @@
+---
+title: "DeepSeek V4 Pro MoE dispatch + fused MegaMoE prior-art baseline"
+description: "Design note and benchmark plan mapping DeepSeek V4 Pro's all-MoE dispatch requirements onto existing fak seams; no native MegaMoE kernel lands."
+---
+
 # DeepSeek V4 Pro MoE dispatch + fused MegaMoE prior-art baseline
 
 **2026-07-08.** Issue **#3018**, parent epic **#3006** (native DeepSeek-V4 kernel track).

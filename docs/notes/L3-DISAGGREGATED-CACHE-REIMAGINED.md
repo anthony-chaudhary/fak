@@ -1,3 +1,8 @@
+---
+title: "Re-imagining the external L3 disaggregated KV cache for fak — the"
+description: "A positioning study for epic #79 mapping 8 external L3 KV-cache gaps onto shipped fak primitives that make fak the semantics layer composing with the cache."
+---
+
 # Re-imagining the external L3 disaggregated KV cache for fak — the L3-cache semantics layer
 
 > Canonical positioning artifact for epic **#79**. This is a *planning and positioning*

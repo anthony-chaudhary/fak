@@ -1,3 +1,8 @@
+---
+title: "vToolcall — Tool Results as a Materialized View"
+description: "VToolcall is contextq's materialization machine pointed at the tool-result wire instead of the inbound-context wire."
+---
+
 # vToolcall — Tool Results as a Materialized View
 
 **Date:** 2026-06-25

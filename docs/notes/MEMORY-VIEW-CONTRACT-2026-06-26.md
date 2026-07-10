@@ -1,3 +1,8 @@
+---
+title: "Memory-View Contract — typed virtual views with provenance gates (904)"
+description: "The raw memory cell is canonical; every derived summary, QA pair, or graph is a typed virtual view carrying provenance and an admission gate."
+---
+
 # Memory-View Contract — typed virtual views with provenance gates (#904)
 
 > Research/SOTA readout + design note. This is the "done when" deliverable for

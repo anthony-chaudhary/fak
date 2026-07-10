@@ -1,3 +1,8 @@
+---
+title: "Next-step scoping and issue-creation guard plan"
+description: "A plan to harden autonomous GitHub issue creation with an enforceable candidate contract, default creation policy, and phased dispatch guards."
+---
+
 # Next-step scoping and issue-creation guard plan
 
 Date: 2026-06-30

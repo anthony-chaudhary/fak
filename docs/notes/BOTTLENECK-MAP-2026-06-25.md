@@ -1,6 +1,6 @@
 ---
 title: "Bottleneck map and durable process loops - 2026-06-25"
-description: "Evidence-backed snapshot of the current system bottlenecks, GitHub/open-work bottlenecks, and the durable skills/loops that should keep both visible."
+description: "Evidence-backed 2026-06-25 snapshot of the system and open-work bottlenecks, and the durable skills and loops meant to keep both continuously visible."
 ---
 
 # Bottleneck map and durable process loops - 2026-06-25

@@ -1,3 +1,8 @@
+---
+title: "Context-safety doctrine (1218, C1 of epic 1217)"
+description: "Design-only doctrine defining context safety as the value-preservation dual of the security floor, via four value guarantees and self-checking visuals."
+---
+
 # Context-safety doctrine (#1218, C1 of epic #1217)
 
 _Research / design only. This is the **doctrine note** — the design note for the

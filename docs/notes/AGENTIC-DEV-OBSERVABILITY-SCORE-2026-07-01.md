@@ -1,3 +1,8 @@
+---
+title: "Agentic dev observability score - 2026-07-01"
+description: "This is the current score read for fak's own agentic-development process."
+---
+
 # Agentic dev observability score - 2026-07-01
 
 This is the current score read for fak's own agentic-development process. It records

@@ -1,3 +1,8 @@
+---
+title: "A native micro-scout for model routing — running a 135M–1.5B"
+description: "Survey and design for running a 135M–1.5B model locally in-process as a routing scout; nearly all pieces exist in-tree, only the native binding remains."
+---
+
 # A native micro-scout for model routing — running a 135M–1.5B classifier in-process (2026-07-01)
 
 **Question.** Can fak run a micro model (~125M / 0.5B / 1B params) *locally* to make model-routing

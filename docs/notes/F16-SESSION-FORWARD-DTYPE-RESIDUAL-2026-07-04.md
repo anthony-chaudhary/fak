@@ -1,3 +1,8 @@
+---
+title: "F16 upload-dtype path through the modelbench Session forward —"
+description: "Triage note classifying the F16 upload-dtype Session-forward residual (issue 1481) as gen/next and handing off the ready-to-implement seam, not resolving it."
+---
+
 <!-- fak:generation-triage curated note. Records the horizon classification + exact
 triage for the F16 Session-forward dtype residual (epic 1476 child C4, issue 1481).
 This note does NOT resolve the residual; it hands the next worker a classified,

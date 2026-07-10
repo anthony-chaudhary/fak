@@ -1,3 +1,8 @@
+---
+title: "Triage: Windows shell/TUI/console fault boundary (2170)"
+description: "Triage of #2170: the Windows shell/TUI/console fault-boundary mechanism already exists in-tree; only four missing regression witnesses remain to split out."
+---
+
 # Triage: Windows shell/TUI/console fault boundary (#2170)
 
 Status: **triage / classification only — #2170 stays OPEN.** This note records

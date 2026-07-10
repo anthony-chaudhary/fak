@@ -1,3 +1,8 @@
+---
+title: "Lab GLM-5.2 guarded route witness — 2026-07-05"
+description: "A privacy-scrubbed witness for #2953 that the lab's guarded loopback route to GLM-5.2 works: the local proxy returned HTTP 200 and listed the glm-5.2 model."
+---
+
 # Lab GLM-5.2 guarded route witness — 2026-07-05
 
 Status: witnessed for #2953; public push is still pending behind shared `main`.

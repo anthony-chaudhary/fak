@@ -1,3 +1,8 @@
+---
+title: "CHARTER — the ten principles fak is built to satisfy"
+description: "fak's constitution of ten principles, each mapped to a surface and a deterministic scorecard, so alignment is graded honestly from the git tree, not asserted."
+---
+
 # CHARTER — the ten principles fak is built to satisfy
 
 This is fak's constitution: the small set of commitments every surface is meant to

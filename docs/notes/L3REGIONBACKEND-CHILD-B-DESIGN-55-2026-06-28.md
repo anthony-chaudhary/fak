@@ -1,3 +1,8 @@
+---
+title: "L3RegionBackend — child B of epic 79, designed behind the frozen"
+description: "Design artifact for #55 specifying L3RegionBackend, an L3-backed dual of the frozen RegionBackend seam unlocking G2 eviction and G3 deletion attestation."
+---
+
 # `L3RegionBackend` — child B of epic #79, designed behind the frozen `Ref`/`Resolver`/`RegionBackend` seam
 
 > **Design artifact for [#55](https://github.com/anthony-chaudhary/fak/issues/55) (Option B — unlocks G2 + G3 at the L3 tier).**

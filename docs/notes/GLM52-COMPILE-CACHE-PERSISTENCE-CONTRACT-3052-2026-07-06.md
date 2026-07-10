@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 compile-cache persistence contract (3052), 2026-07-06"
+description: "Documents the tuple-keyed compile-cache persistence contract for GLM-5.2 serve; pinning and hit/rebuild readout shipped, GPU two-boot witness still open."
+---
+
 # GLM-5.2 compile-cache persistence contract (#3052), 2026-07-06
 
 **Status:** contract + runtime mechanism shipped (L1 + L3); acceptance witness (L4)

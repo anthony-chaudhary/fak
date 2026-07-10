@@ -1,3 +1,8 @@
+---
+title: "Borrow study: trajectory query / replay / signals — agent-lens +"
+description: "A borrow study of agent-lens and Laminar for queryable trajectory capture, replay, and signals, witnessing each idea against fak and filing the net-new ones."
+---
+
 # Borrow study: trajectory query / replay / signals — agent-lens + Laminar (2026-07-09)
 
 Studied two external repos for how they **capture, store, query, search, replay, and monitor agent

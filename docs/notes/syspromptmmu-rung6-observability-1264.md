@@ -1,3 +1,8 @@
+---
+title: "System-prompt MMU — Rung 6 observability surface (1264, feeds 1217)"
+description: "Research/design-only Rung 6 spec for a fak debug view that proves the realized wire prefix equals the planned system-prompt spine, alarming on divergence."
+---
+
 # System-prompt MMU — Rung 6 observability surface (#1264, feeds #1217)
 
 _Research / design only. This is the **Rung 6 spec** for the system-prompt MMU

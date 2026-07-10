@@ -1,3 +1,8 @@
+---
+title: "Universal harness profiles — declarative config + auto-rotation for"
+description: "Proposes a declarative HarnessProfile descriptor that lifts each harness's identity into config so fak guard can repoint and rotate accounts for any harness."
+---
+
 # Universal harness profiles — declarative config + auto-rotation for any sub-harness
 
 _Design note for epic #1951. Landed with C1 (#1952). Current-state claims are witnessed
@@ -32,7 +37,7 @@ descriptor instead of re-deciding it in each subsystem.
 
 ## The `HarnessProfile` shape
 
-One descriptor per harness (built-ins shipped for claude / codex / openai-generic;
+One descriptor per harness (built-ins shipped for claude / codex / openai-generic / pi;
 user-declarable in config as of C6). Defined in the pure leaf `internal/harnessprofile`
 (tier: foundation — no `cmd/` or `internal/accounts` import):
 
@@ -47,8 +52,8 @@ user-declarable in config as of C6). Defined in the pure leaf `internal/harnessp
 
 ### The closed `RepointMechanism` set
 
-A harness is pointed at the gateway by one or more of exactly three mechanisms — the
-three that exist in guard today. The set is **closed**; C6 config validation rejects
+A harness is pointed at the gateway by one or more of exactly four mechanisms — the
+four that exist in guard today. The set is **closed**; C6 config validation rejects
 anything else.
 
 - `env` — inject the wire's base-URL env var(s) (`guardInjectedEnv`:
@@ -59,6 +64,11 @@ anything else.
   custom upstream, so this is its real repoint.
 - `settings-file` — Claude's `--settings` hooks (PreCompact/Stop) + `--mcp-config`
   self-query registration.
+- `extension` — Pi's `-e <ext.ts>` extension flag with an ephemeral module calling
+  `pi.registerProvider("anthropic", {baseUrl})` (`installGuardPiExtension`). Pi speaks
+  Anthropic Messages but its client takes `baseUrl` from provider config, not
+  `ANTHROPIC_BASE_URL` (`packages/ai/src/api/anthropic-messages.ts`), so the
+  registered-provider override — not the env var — is its real repoint.
 
 Built-in encodings (pinned by `TestRepointEncodesTodaysWiring`):
 
@@ -67,6 +77,7 @@ Built-in encodings (pinned by `TestRepointEncodesTodaysWiring`):
 | claude | anthropic | `env`, `settings-file` |
 | codex | openai-responses | `env`, `cli-config` |
 | openai-generic (opencode/aider/hermes) | openai | `env` |
+| pi | anthropic | `env`, `extension` |
 
 ### Credential + rotation identity are DECLARED, not executed here
 

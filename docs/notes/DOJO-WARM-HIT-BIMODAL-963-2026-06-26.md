@@ -1,3 +1,8 @@
+---
+title: "Dojo crosssessionwarmhitrate is bimodal by workload (963)"
+description: "The dojo cross_session_warm_hit_rate is bimodal by workload; the fixed 0.17 claim was recalibrated to a conservative 0.0, with report-only scoring deferred."
+---
+
 # Dojo `cross_session_warm_hit_rate` is bimodal by workload (#963)
 
 Date: 2026-06-26

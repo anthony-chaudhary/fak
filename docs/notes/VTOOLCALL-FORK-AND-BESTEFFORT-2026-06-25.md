@@ -1,3 +1,8 @@
+---
+title: "vToolcall, Forked: Best-Effort Serve Tiers And Owning The Loop"
+description: "fak can serve cached best-effort tool results only by owning the dispatch loop, needing per-call consistency levels and a suspend/resume turn primitive."
+---
+
 # vToolcall, Forked: Best-Effort Serve Tiers And Owning The Loop
 
 Date: 2026-06-25

@@ -1,3 +1,8 @@
+---
+title: "Generation-Aware Dispatch Selection"
+description: "Selection contract for #1641: how dispatch workers treat generation labels as eligibility and portfolio-balance signals, not priority overrides."
+---
+
 # Generation-Aware Dispatch Selection
 
 This note is the selection contract for #1641. It tells dispatch workers how to

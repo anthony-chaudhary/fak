@@ -1,3 +1,8 @@
+---
+title: "Context-safety conservation roll-up contract (1224, C7 of epic 1217)"
+description: "Design-only contract for a conservation roll-up whose witnessed segments must sum to a witnessed total, so over-claims are impossible and falsifiable by eye."
+---
+
 # Context-safety conservation roll-up contract (#1224, C7 of epic #1217)
 
 _Research / design only. This is the **C7 conservation roll-up contract** for the

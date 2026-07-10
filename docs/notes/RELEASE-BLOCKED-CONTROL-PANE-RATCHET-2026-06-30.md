@@ -1,3 +1,8 @@
+---
+title: "Release blocked: scorecard control-pane grade-ratchet (2026-06-30)"
+description: "The release cut is held by the scorecard control-pane HARD ratchet going red on CI; the fix is retiring real debt and re-pinning the baseline on Linux."
+---
+
 # Release blocked: scorecard control-pane grade-ratchet (2026-06-30)
 
 **Status: `not yet` on the rolling release cut.** The release-process *improvement*

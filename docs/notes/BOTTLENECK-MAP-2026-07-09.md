@@ -1,3 +1,8 @@
+---
+title: "Bottleneck map — 2026-07-09"
+description: "Bottleneck map: the CRITICAL health is transient account-throttle churn, not a broken watchdog; the durable limiter is the MaxPerTick=4 resume cap."
+---
+
 # Bottleneck map — 2026-07-09
 
 Goal context: drive throughput of the issue-completing loops; find the limiter.

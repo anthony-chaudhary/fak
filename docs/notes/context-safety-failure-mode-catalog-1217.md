@@ -1,3 +1,8 @@
+---
+title: "Context-safety failure-mode catalog (1219, C2 of epic 1217)"
+description: "A research catalog mapping each context-safety failure mode to the witness, visual primitive, and cross-check that make its value loss visible."
+---
+
 # Context-safety failure-mode catalog (#1219, C2 of epic #1217)
 
 _Research / design only. This is the **failure-mode catalog** child of the

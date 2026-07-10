@@ -1,3 +1,8 @@
+---
+title: "The managed-cache proving ground: real guarded sessions as the"
+description: "A read-only tool that validates, rung-folds, and ratchets fak's real-session nightrun ledgers into a regression-gated proving ground for managed-cache levers."
+---
+
 # The managed-cache proving ground: real guarded sessions as the regression floor (2026-07-03)
 
 **The goal this serves:** every managed-cache lever (epic #1844's family) must be

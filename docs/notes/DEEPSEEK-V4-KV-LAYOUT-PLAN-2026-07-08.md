@@ -1,3 +1,8 @@
+---
+title: "DeepSeek V4 heterogeneous KV + on-disk prefix reuse — prototype plan"
+description: "Design + fixture plan only — no production KV rewrite lands here, no 1M-token serve is run, and no provider cache counter is reused as fak-owned KV reuse."
+---
+
 # DeepSeek V4 heterogeneous KV + on-disk prefix reuse — prototype plan
 
 **2026-07-08.** Issue **#3017**, parent epic **#3006** (native DeepSeek-V4 kernel track).

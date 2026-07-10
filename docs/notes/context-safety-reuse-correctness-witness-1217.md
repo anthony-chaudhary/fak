@@ -1,3 +1,8 @@
+---
+title: "Context-safety reuse-correctness witness (1232, C14 of epic 1217)"
+description: "Design-only spec for a reuse-correctness witness that reconciles C4's reuse count against prefix coherence and stability, catching reuse over a broken prefix."
+---
+
 # Context-safety reuse-correctness witness (#1232, C14 of epic #1217)
 
 _Research / design only. This is the **C14 second-derivation spec** for the

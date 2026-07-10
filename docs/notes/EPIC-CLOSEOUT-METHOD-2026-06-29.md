@@ -1,3 +1,8 @@
+---
+title: "Epic close-out method — how to properly close (or retire) an epic"
+description: "A repeatable method for closing or retiring epics honestly, routing each to completed, superseded, or standing on witnessed evidence, not self-reports."
+---
+
 # Epic close-out method — how to properly close (or retire) an epic
 
 *2026-06-29.* The open backlog is **epic-heavy**: 57 of 171 open issues (33%) carry

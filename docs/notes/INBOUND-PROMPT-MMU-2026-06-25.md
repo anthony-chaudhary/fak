@@ -1,3 +1,8 @@
+---
+title: "Inbound prompt-MMU — curate WHAT enters the context window"
+description: "Epic to build the inbound prompt-MMU: an ingress dual of ctxmmu that prunes already-denied tool definitions from each request, cache-safe by construction."
+---
+
 # Inbound prompt-MMU — curate WHAT enters the context window (2026-06-25)
 
 **Status:** spine SHIPPED (`internal/promptmmu`, tier-1, green). Wiring + generalization rungs OPEN.

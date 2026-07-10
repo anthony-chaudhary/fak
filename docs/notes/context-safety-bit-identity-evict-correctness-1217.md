@@ -1,3 +1,8 @@
+---
+title: "Context-safety bit-identity evict-correctness signal (1220, C3 of"
+description: "Design-only C3 spec for epic #1217 surfacing the already-tested bit-identity (max|Δ|=0) evict-correctness signal as a per-event WITNESSED heatmap datum."
+---
+
 # Context-safety bit-identity evict-correctness signal (#1220, C3 of epic #1217)
 
 _Research / design only. This is the **C3 value-decomposition spec** for the

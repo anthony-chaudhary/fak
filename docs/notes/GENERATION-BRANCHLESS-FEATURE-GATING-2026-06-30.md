@@ -1,3 +1,8 @@
+---
+title: "Generation Branchless Feature Gating"
+description: "Defines how generation labels map to runtime flags, commands, docs, and no-op scaffolds so work ships on shared trunk without a branch per horizon."
+---
+
 # Generation Branchless Feature Gating
 
 This note closes #1646. It specifies how generation metadata maps to runtime

@@ -1,3 +1,8 @@
+---
+title: "Generation classification: fleet lessons ledger (2141)"
+description: "Generation-triage record classifying issue #2141 (cross-agent fleet lessons ledger) as gen/next, with the evidence and smallest next implementation step."
+---
+
 # Generation classification: fleet lessons ledger (#2141)
 
 This note is the generation-triage record for

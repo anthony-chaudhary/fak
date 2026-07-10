@@ -1,3 +1,8 @@
+---
+title: "Dedup earlier and more often — the structural root of fresh"
+description: "fak's dedup signals all fire post-hoc; the fix is an authoring-time dup-query verb plus a guard so clones are prevented at write time, not counted later."
+---
+
 # Dedup earlier and more often — the structural root of fresh duplication (2026-07-03)
 
 The prior note (`SLOP-DEBT-SUBCATEGORIES-AND-SYSTEMIC-APPROACH-2026-07-03.md`)

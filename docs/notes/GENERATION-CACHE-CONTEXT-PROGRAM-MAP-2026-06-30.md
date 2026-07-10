@@ -1,3 +1,8 @@
+---
+title: "Generation Map For Cache And Context Programs"
+description: "Maps open cache and context GitHub issues to generation labels (now/next/second-next/future) and defines the rules for promoting or demoting those bets."
+---
+
 # Generation Map For Cache And Context Programs
 
 This note closes #1647. It maps active cache/context work to generation labels

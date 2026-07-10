@@ -1,3 +1,8 @@
+---
+title: "Token streaming TTFT with whole-turn tool gating (2026-06-25)"
+description: "Issue #47 streams safe prose live while gating tool-call bytes until the kernel adjudicates the full proposed call set, cutting perceived TTFT."
+---
+
 # Token streaming TTFT with whole-turn tool gating (2026-06-25)
 
 Issue #47 changes the streaming contract from "finish the turn, adjudicate it, then

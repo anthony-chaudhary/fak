@@ -1,3 +1,8 @@
+---
+title: "Study-repo: MinIO MemKV → fak (2026-07-08)"
+description: "MemKV is a closed-source pitch with no public repo, so study-repo grounded its borrows in open-source KV engines (Mooncake, NIXL) and filed 25 fak issues."
+---
+
 # Study-repo: MinIO MemKV → fak (2026-07-08)
 
 **Target:** <https://www.min.io/product/memkv> — a **product marketing page**, not a

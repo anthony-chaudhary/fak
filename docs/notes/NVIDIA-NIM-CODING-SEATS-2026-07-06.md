@@ -1,3 +1,8 @@
+---
+title: "NVIDIA NIM coding seats - 2026-07-06"
+description: "Benchmark snapshot ranking the three built-in opencode NIM coding seats (DeepSeek V4 Pro, Kimi K2.6, GLM-5.2) by coding-agentic strength."
+---
+
 # NVIDIA NIM coding seats - 2026-07-06
 
 Public benchmark snapshot for the built-in opencode NIM seat trio. Ranking favors

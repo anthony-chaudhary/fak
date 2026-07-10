@@ -77,7 +77,7 @@ WITNESSED/OBSERVED. This dispatch ran on the Windows dev box, which:
 
 - has **no GPU** and cannot host the resident GLM-5.2 serve (433.82 GiB resident);
 - reaches the lab hardware only through the private control bridge
-  ([`private-comms-channel.md`](private-comms-channel.md) → `../fak-private`), and running
+  (`private-comms-channel.md` → `../fak-private`), and running
   a resident serve plus an eight-point sweep is a major live operation, **outside this
   dispatch's declared "triage only" risk envelope**;
 - must not fabricate the curve — a self-authored number is not a witness, and the repo's
@@ -117,4 +117,4 @@ baseline separate from any pure-fak kernel number (epic rule; #1482 lane stays s
   [#3073](https://github.com/anthony-chaudhary/fak/issues/3073)
 - Ceiling: [`GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md`](GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md)
   (Ceiling B — aggregate: practical ~11–14k tok/s COMPUTED; 80% target ~9–11k)
-- Reaching the hardware: [`private-comms-channel.md`](private-comms-channel.md)
+- Reaching the hardware: `private-comms-channel.md`

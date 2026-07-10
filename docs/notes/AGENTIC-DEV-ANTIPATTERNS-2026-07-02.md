@@ -1,3 +1,8 @@
+---
+title: "Agentic-dev anti-patterns: the registry, the unbounded score, and the"
+description: "Establishes an initial registry of agentic-development anti-patterns, a deliberately unbounded scoring system, and the gardening loops that keep both alive."
+---
+
 # Agentic-dev anti-patterns: the registry, the unbounded score, and the gardening loops - 2026-07-02
 
 This note establishes the initial set of agentic-development anti-patterns observed

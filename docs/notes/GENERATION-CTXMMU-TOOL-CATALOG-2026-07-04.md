@@ -1,3 +1,8 @@
+---
+title: "Generation Classification — ctxmmu Tool-Catalog Paging (issue 2440)"
+description: "Grooming note classifying issue #2440 (ctxmmu tool-catalog paging) into the gen/next generation stream from issue evidence; not an implementation."
+---
+
 # Generation Classification — ctxmmu Tool-Catalog Paging (issue #2440)
 
 Grooming artifact for issue #2440

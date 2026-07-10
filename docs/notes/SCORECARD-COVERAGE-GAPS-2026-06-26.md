@@ -1,3 +1,8 @@
+---
+title: "The top unscored surfaces — a scorecard-coverage gap map (2026-06-26)"
+description: "Maps the high-value surfaces fak's scorecard family does not yet grade: one anchor (skill-effectiveness) shipped, ten ranked specs proposed to build next."
+---
+
 # The top unscored surfaces — a scorecard-coverage gap map (2026-06-26)
 
 **Kind:** coverage backlog (what to score next). **Lane:** `tools` (scorecard family).

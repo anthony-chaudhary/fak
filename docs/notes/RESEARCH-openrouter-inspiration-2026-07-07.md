@@ -1,3 +1,8 @@
+---
+title: "Research: OpenRouter — what to borrow, what fak already has"
+description: "Compares OpenRouter and fak as complementary routers: what fak's router already mirrors, plus ranked gaps to borrow like an active max_price ceiling."
+---
+
 # Research: OpenRouter — what to borrow, what fak already has (2026-07-07)
 
 Filed to explore integration/inspiration from OpenRouter for fak's routing spine. The

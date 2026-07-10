@@ -1,3 +1,8 @@
+---
+title: "Generation Lifecycle Simulation (1656)"
+description: "A deterministic worked scenario exercising the four generation lifecycle verbs (promote, demote, retire, park) before those rules govern real work."
+---
+
 # Generation Lifecycle Simulation (#1656)
 
 Issue #1656 asks for a concrete artifact that exercises generation promotion

@@ -1,3 +1,8 @@
+---
+title: "The fak-OWN cache-value path in fak guard (and why F is often ~0)"
+description: "Explains fak guard's two cache acts (preserve vs compaction-shed), why fak's own cache-value slice F is often ~0 in proxy mode, and how to see it."
+---
+
 # The fak-OWN cache-value path in `fak guard` (and why F is often ~0)
 
 **One question this answers:** when I run `fak guard -- claude`, is fak delivering

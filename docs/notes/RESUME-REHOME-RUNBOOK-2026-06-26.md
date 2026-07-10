@@ -1,3 +1,8 @@
+---
+title: "Resume & rehome runbook — restarting rate-limit-crashed Claude"
+description: "Durable runbook for restarting rate-limit-crashed Claude Code sessions, rehoming them onto healthy accounts, and tracking them to completion."
+---
+
 # Resume & rehome runbook — restarting rate-limit-crashed Claude sessions (2026-06-26)
 
 The durable procedure for restarting Claude Code sessions that crashed on a rate

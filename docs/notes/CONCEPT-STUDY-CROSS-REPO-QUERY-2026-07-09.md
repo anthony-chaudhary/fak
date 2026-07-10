@@ -1,3 +1,8 @@
+---
+title: "Source study: querying across the local tree and sibling repos"
+description: "A study-repo pass over six mature code-query engines identifying five clean-room borrows to let fak query across the local tree and sibling repos."
+---
+
 # Source study: querying across the local tree and sibling repos (2026-07-09)
 
 A `study-repo` pass over six mature code-query engines, asking one question: what would

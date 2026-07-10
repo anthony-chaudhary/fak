@@ -1,3 +1,8 @@
+---
+title: "Verified resume packet — sourcing the checkpoint from witnessed state"
+description: "Design note (#636) adding a witnessed-state overlay to the session checkpoint so a fresh or cloud agent can resume from verified progress, not a self-report."
+---
+
 # Verified resume packet — sourcing the checkpoint from witnessed state (#636) (2026-06-26)
 
 **Status:** design note (issue [#636](https://github.com/anthony-chaudhary/fak/issues/636), `docs` lane).

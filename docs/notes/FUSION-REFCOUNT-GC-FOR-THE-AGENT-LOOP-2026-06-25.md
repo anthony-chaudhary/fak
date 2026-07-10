@@ -1,3 +1,8 @@
+---
+title: "Fusion, ref-counting, and GC for the agent loop"
+description: "Treats the agent loop as a runtime heap: the compaction collector already exists; wiring a pinnable goal as a GC root makes it sound, not heuristic."
+---
+
 # Fusion, ref-counting, and GC for the agent loop
 
 *2026-06-25 design note. Lens: treat the agentic loop the way a language runtime treats a

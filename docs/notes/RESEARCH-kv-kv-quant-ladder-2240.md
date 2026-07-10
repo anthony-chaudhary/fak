@@ -1,3 +1,8 @@
+---
+title: "Design dossier — KV-cache quantization ladder: int8/fp8 KV tier"
+description: "Design dossier for #2240: the KV-quant ladder's policy plane is already built in-tree; the missing piece is the engine store that holds quantized KV bytes."
+---
+
 # Design dossier — KV-cache quantization ladder: int8/fp8 KV tier states + CacheGen-class cold-tier compression (issue #2240)
 
 > Grounded design + staged-implementation dossier for

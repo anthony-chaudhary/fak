@@ -1,3 +1,8 @@
+---
+title: "The system-prompt MMU — fak owns its own base context"
+description: "A planning note proposing fak author its own immutable base-context spine and page the harness's rules and skills in as a queried overlay."
+---
+
 # The system-prompt MMU — fak owns its own base context
 
 *Dated design note, 2026-06-29. Planning + ticket scope only; no implementation

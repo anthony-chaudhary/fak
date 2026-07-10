@@ -1,3 +1,8 @@
+---
+title: "releasestatus ship rebind — 1448"
+description: "A shared-trunk commit race scrambled the ship-stamps for the internal/releasestatus port (#1448); this note rebinds the leaf so dos verify confirms it shipped."
+---
+
 # releasestatus ship rebind — #1448
 
 On 2026-06-29 the native `internal/releasestatus` port (issue #1448) landed on

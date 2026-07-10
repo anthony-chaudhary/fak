@@ -1,3 +1,8 @@
+---
+title: "Native Go harness — next GitHub steps, benchmarked against Crush"
+description: "Benchmarks fak's kernel-owned native Go agent loop against Crush's SDK-delegated loop and orders the next GitHub steps, led by the #1380 witness run."
+---
+
 # Native Go harness — next GitHub steps, benchmarked against Crush
 
 Date: 2026-06-30. Author: agent (Windows box; compute claims routed to fleet).

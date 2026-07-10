@@ -1,3 +1,8 @@
+---
+title: "Native-harness progress tracking (1315)"
+description: "Per-surface evidence map for epic #1315 classifying the native agent loop's surfaces as SHIPPED, PARTIAL, or NOT_YET with file:line witnesses."
+---
+
 # Native-harness progress tracking (#1315)
 
 Date: 2026-06-29

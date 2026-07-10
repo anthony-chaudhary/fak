@@ -1,3 +1,8 @@
+---
+title: "Context-safety liveness-contradiction light (1230, C12 of epic 1217)"
+description: "Design-only C12 spec for a liveness-contradiction light that reds when the server looks healthy (/healthz 200, bgloop_up=1) but decode throughput is 0."
+---
+
 # Context-safety liveness-contradiction light (#1230, C12 of epic #1217)
 
 _Research / design only. This is the **C12 spec** for visual primitive **(6)**,

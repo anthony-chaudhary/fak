@@ -1,3 +1,8 @@
+---
+title: "Generation Readiness Gates"
+description: "Defines the six promotion gates a gen/next feature must pass before it can be treated as gen/now, since code existing on disk is not enough."
+---
+
 # Generation Readiness Gates
 
 This note closes #1644. It defines the readiness checks a `gen/next` feature must

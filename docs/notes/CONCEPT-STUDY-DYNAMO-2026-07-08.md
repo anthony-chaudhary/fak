@@ -1,3 +1,8 @@
+---
+title: "study-repo: NVIDIA dynamo → fak (2026-07-08)"
+description: "A study-repo pass over NVIDIA dynamo, extracting 29 candidate orchestration borrows and filing/enriching fak issues for routing, autoscaling, and migration."
+---
+
 # study-repo: NVIDIA dynamo → fak (2026-07-08)
 
 A `study-repo` pass over **[ai-dynamo/dynamo](https://github.com/ai-dynamo/dynamo)**, the

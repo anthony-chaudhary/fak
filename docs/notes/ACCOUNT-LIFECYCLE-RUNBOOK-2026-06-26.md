@@ -1,3 +1,8 @@
+---
+title: "Account-lifecycle runbook — enroll, serve, retire, purge (2026-06-26)"
+description: "Operator runbook for the account-switcher lifecycle — add, serve/rotate, retire, and purge seats from the single-source-of-truth registry."
+---
+
 # Account-lifecycle runbook — enroll, serve, retire, purge (2026-06-26)
 
 **Kind:** durable procedure + lessons log (operator-facing). **Lane:** `internal/accounts`.

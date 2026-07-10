@@ -1,3 +1,8 @@
+---
+title: "DeepSeek V4 FP4 expert weights + FP4 indexer path — quantization"
+description: "A support and fixture plan for DeepSeek V4's mixed-precision FP4/FP8 checkpoint: a Go metadata detector and fail-closed admission table, no native FP4 GEMM."
+---
+
 # DeepSeek V4 FP4 expert weights + FP4 indexer path — quantization support plan
 
 **2026-07-08.** Issue **#3019**, parent epic **#3006** (native DeepSeek-V4 kernel track).

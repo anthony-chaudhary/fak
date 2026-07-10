@@ -1,3 +1,8 @@
+---
+title: "Context-safety S/N + Faults paired series (1222, C5 of epic 1217)"
+description: "Design spec for a paired time-series charting signal-to-noise against Faults so a shed that raises S/N by starving the turn is exposed, not hidden."
+---
+
 # Context-safety S/N + Faults paired series (#1222, C5 of epic #1217)
 
 _Research / design only. This is the **C5 value-decomposition spec** for the

@@ -1,3 +1,8 @@
+---
+title: "Version everything: the per-module version spine (2026-07-03)"
+description: "A per-module version spine that derives each module's rev from trunk-commit history, shipped as fak version modules plus a delta-stamping ledger."
+---
+
 # Version everything: the per-module version spine (2026-07-03)
 
 Status: spine SHIPPED (`internal/modver` + `fak version modules`); the program

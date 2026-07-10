@@ -1,3 +1,8 @@
+---
+title: "score-signal: arming autonomous live filing (980) — posture decision"
+description: "Records the #980 decision to flip the score-signal feeder to fully autonomous --live filing, and why its dedup/cap/refresh storm bound makes that safe."
+---
+
 # score-signal: arming autonomous live filing (#980) — posture decision (2026-06-27)
 
 Operational/decision note for [#980](https://github.com/anthony-chaudhary/fak/issues/980).

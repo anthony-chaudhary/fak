@@ -1,3 +1,8 @@
+---
+title: "Slop-debt sub-categories + a systemic way to retire it (2026-07-03)"
+description: "Slop-debt is 98% duplication tracked as one flat count; proposes weighted sub-categories so agent loops retire the real extractable clones first."
+---
+
 # Slop-debt sub-categories + a systemic way to retire it (2026-07-03)
 
 Grounding: `python tools/code_slop_scorecard.py --json` on the tracked tree,

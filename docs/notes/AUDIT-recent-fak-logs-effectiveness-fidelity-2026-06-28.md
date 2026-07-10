@@ -1,3 +1,8 @@
+---
+title: "Audit: recent fak logs — how effective is the context management, and"
+description: "An operational audit of fak's context/cache management from recent logs: how effective it is, and how we know it isn't silently butchering context."
+---
+
 # Audit: recent fak logs — how effective is the context management, and how do we know it isn't butchering context? (2026-06-28)
 
 **Scope.** An operational audit driven by the *recent* fak logs on this clone

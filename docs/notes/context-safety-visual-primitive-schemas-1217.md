@@ -1,3 +1,8 @@
+---
+title: "Context-safety visual-primitive schemas (1223, C6 of epic 1217)"
+description: "Research/design spec defining the data schemas, shapes, and cross-checks of six context-safety visual primitives and their shared payload envelope."
+---
+
 # Context-safety visual-primitive schemas (#1223, C6 of epic #1217)
 
 _Research / design only. This is the **C6 visual-primitive schema spec** for the

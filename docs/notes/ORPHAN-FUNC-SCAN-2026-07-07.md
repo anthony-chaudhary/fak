@@ -1,3 +1,8 @@
+---
+title: "Orphan-func scan: catching 'built but never wired up' (2026-07-07)"
+description: "A pure syntactic scan (internal/orphanscan) flags unexported functions referenced nowhere; a dogfood run found 12, including inert cap-crash recovery."
+---
+
 # Orphan-func scan: catching "built but never wired up" (2026-07-07)
 
 ## The failure mode

@@ -1,3 +1,8 @@
+---
+title: "Decision — the clean fak↔dos hook boundary (2704)"
+description: "Records why fak keeps its settings.json dos hooks as headless insurance for plugin-less seats, choosing the Option 2 stable-contract boundary."
+---
+
 # Decision — the clean fak↔dos hook boundary (#2704)
 
 **Issue:** #2704 (part of epic #2702; consumes the #2703 audit, commit `a8ee3e6`).

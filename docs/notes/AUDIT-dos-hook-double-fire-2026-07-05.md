@@ -1,3 +1,8 @@
+---
+title: "Audit — the dos-hook double-fire (fak .claude/settings.json + enabled"
+description: "Audit confirming dos hooks fire twice per Bash call because fak's Python settings duplicate the plugin's native path — a latency tax, not journal corruption."
+---
+
 # Audit — the dos-hook double-fire (fak `.claude/settings.json` + enabled `dos-kernel` plugin)
 
 **Issue:** #2703 (part of epic #2702). **Host:** win/amd64, this dev box.

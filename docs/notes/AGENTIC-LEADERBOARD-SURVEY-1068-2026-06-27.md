@@ -1,3 +1,8 @@
+---
+title: "Frontier Agent Leaderboard Survey — Issue 1068"
+description: "Surveyed five frontier agent leaderboards to identify a scoreable fak axis."
+---
+
 # Frontier Agent Leaderboard Survey — Issue #1068
 
 **Generated:** 2026-06-27

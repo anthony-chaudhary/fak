@@ -1,3 +1,8 @@
+---
+title: "Named issue views as the default selection surface (2026-06-29)"
+description: "A JSON config of named views plus a read-only helper turn a view name into a gh issue-list query, making named views the default work-selection surface."
+---
+
 # Named issue views as the default selection surface (2026-06-29)
 
 > **The default "what should I work on" entry is now a named view, not an ad-hoc

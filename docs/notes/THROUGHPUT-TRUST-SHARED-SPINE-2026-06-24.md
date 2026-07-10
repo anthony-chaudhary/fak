@@ -1,3 +1,8 @@
+---
+title: "Throughput parity and the trust/L3 moat share one spine — connecting"
+description: "The throughput-parity and trust/L3-moat roadmaps share one code spine; build it once, and keep ridden-engine parity claims separable from native moat claims."
+---
+
 # Throughput parity and the trust/L3 moat share one spine — connecting tissue
 
 Date: 2026-06-24

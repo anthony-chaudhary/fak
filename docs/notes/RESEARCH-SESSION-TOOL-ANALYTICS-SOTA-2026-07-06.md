@@ -1,3 +1,8 @@
+---
+title: "SOTA survey: agent session / tool-call analytics & observability"
+description: "Filed to scope the session-analytics epic (rollups & reports over agent TOOL CALLS: tool-mix, timing, input/output SHAPE, cross-session trends)."
+---
+
 # SOTA survey: agent session / tool-call analytics & observability (2026-07-06)
 
 Filed to scope the session-analytics epic (rollups & reports over agent TOOL CALLS:

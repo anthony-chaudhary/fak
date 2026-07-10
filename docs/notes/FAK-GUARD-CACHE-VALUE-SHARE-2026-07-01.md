@@ -1,3 +1,8 @@
+---
+title: "fak guard's share of cache value on real sessions — proven"
+description: "On real fak guard sessions, 100% of reported cache value is the provider's prompt cache; fak's own authored share measures essentially 0%."
+---
+
 # fak guard's share of cache value on real sessions — proven (2026-07-01)
 
 **Question.** Of the cache value fak reports on real sessions, what percent is

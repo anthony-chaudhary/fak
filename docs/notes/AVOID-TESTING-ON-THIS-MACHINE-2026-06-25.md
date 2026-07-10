@@ -1,3 +1,8 @@
+---
+title: "Avoid running tests / local serves directly on this machine (for now)"
+description: "Avoid running the test suite or a local fak serve on this shared Windows box; native go test is OS-blocked and stray serves pile up memory pressure."
+---
+
 # Avoid running tests / local serves directly on this machine (for now)
 
 **Date:** 2026-06-25

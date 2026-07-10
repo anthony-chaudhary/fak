@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 GCP dogfood bring-up, 2026-07-05"
+description: "Operator trail for standing up GLM-5.2 on a GCP H100 VM with SGLang and proving a headless Claude Code dogfood turn via fak's claude-glm-gcp preset."
+---
+
 # GLM-5.2 GCP dogfood bring-up, 2026-07-05
 
 This note records the worked path for standing up GLM-5.2 on GCP and driving it

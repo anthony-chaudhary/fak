@@ -1,3 +1,8 @@
+---
+title: "Witness attestation signing-key decision"
+description: "Use an operator-supplied Ed25519 key to sign v0 fak witness attestation DSSE envelopes; defer Sigstore/gitsign to a later identity upgrade."
+---
+
 # Witness attestation signing-key decision
 
 Issue [#832](https://github.com/anthony-chaudhary/fak/issues/832) asks for a

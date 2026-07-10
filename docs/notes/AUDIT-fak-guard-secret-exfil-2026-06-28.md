@@ -1,3 +1,8 @@
+---
+title: "Audit: fak guard 'stale binary?' and the SECRETEXFIL quarantine banner"
+description: "Audits two fak guard symptoms: the SECRET_EXFIL banner reflects current HEAD, not a stale binary, and the over-firing banner was rewritten to be clearer."
+---
+
 # Audit: `fak guard` "stale binary?" and the SECRET_EXFIL quarantine banner
 
 Date: 2026-06-28. Scope: two reported symptoms of `fak guard -- claude`:

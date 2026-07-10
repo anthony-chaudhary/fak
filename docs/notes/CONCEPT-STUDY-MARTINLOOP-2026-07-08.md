@@ -1,3 +1,8 @@
+---
+title: "Study-repo: MartinLoop → fak (2026-07-08)"
+description: "A study-repo pass over MartinLoop finding fak/DOS already ships or exceeds most of its agent-trust core, and filing three issues for the genuine gaps."
+---
+
 # Study-repo: MartinLoop → fak (2026-07-08)
 
 A `/study-repo` → `/field-borrow` pass over **MartinLoop**

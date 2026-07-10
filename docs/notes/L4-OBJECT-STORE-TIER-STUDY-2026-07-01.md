@@ -1,3 +1,8 @@
+---
+title: "The object store as a first-class L4 cache tier — positioning study"
+description: "A planning study positioning an S3-compatible object store as a durable, cheap L4 cache tier that fak governs at the control path (epic #2169)."
+---
+
 # The object store as a first-class L4 cache tier — positioning study
 
 > Canonical positioning artifact for epic **#2169** (first-class object-store /

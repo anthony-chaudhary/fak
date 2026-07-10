@@ -1,5 +1,6 @@
 ---
 title: "Ultracode workflow proof harness: shared path + fak concept embedding"
+description: "Committed C5 proof artifact for #1503: grades two load-bearing premises from a clean origin/main archive using command outputs and hashes, not self-reports."
 date: 2026-07-01
 issue: 1503
 ---

@@ -1,3 +1,8 @@
+---
+title: "study-repo: LMCache → fak (2026-07-08)"
+description: "A study-repo pass mapping LMCache's KV-cache-management patterns onto fak: 9 PRESENT, 28 PARTIAL, 0 ABSENT, filing epic #3366 with 23 borrow leaves."
+---
+
 # study-repo: LMCache → fak (2026-07-08)
 
 A `study-repo` pass over **[lmcache/lmcache](https://github.com/lmcache/lmcache)**, the KV-cache

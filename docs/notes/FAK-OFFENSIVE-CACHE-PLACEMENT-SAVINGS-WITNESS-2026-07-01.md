@@ -1,3 +1,8 @@
+---
+title: "Offensive cache-breakpoint placement is a net, fak-specific saving on"
+description: "An offline, deterministic test witnessing that fak's offensive cache-breakpoint placement nets ~50% fak-specific savings on the Claude/Anthropic path."
+---
+
 # Offensive cache-breakpoint placement is a net, fak-specific saving on the Claude path (2026-07-01)
 
 > The offline economic witness for the offensive half of #806. It answers, with a green

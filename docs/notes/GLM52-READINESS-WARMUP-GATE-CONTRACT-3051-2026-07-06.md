@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 readiness warmup-gate contract (3051), 2026-07-06"
+description: "Pins the contract to gate fak serve readiness on warmup-first-token, not listener bind, so the operator's first real turn is warm, not a ~500s cold start."
+---
+
 # GLM-5.2 readiness warmup-gate contract (#3051), 2026-07-06
 
 **Status:** specification + generation classification. The runtime implementation

@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 in fak's own kernel on the sm80 datacenter node — load works"
+description: "fak's own in-kernel engine loads the 466 GB GLM-5.2 on an 8x sm_80 box; the ~100-min load is now fixed (150 s), leaving decode throughput as the open lever."
+---
+
 # GLM-5.2 in fak's own kernel on the sm_80 datacenter node — load works, load-speed is the open problem (2026-06-25)
 
 Status snapshot for the next session. fak's **own** in-kernel engine (not llama.cpp) now loads

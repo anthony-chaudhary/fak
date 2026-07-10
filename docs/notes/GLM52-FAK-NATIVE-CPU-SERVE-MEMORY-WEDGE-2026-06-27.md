@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 fak-native CPU serve on a 256-core / 1 TB host — load works"
+description: "First fak-native attempt to serve the full ~433 GB GLM-5.2 on a CPU-only host: the load completes but the all-resident serve exhausts RAM and wedges the box."
+---
+
 # GLM-5.2 fak-native CPU serve on a 256-core / 1 TB host — load works, the all-resident serve wedges on RAM (2026-06-27)
 
 Data-collection run on a **CPU-only** server (256-thread x86_64, ~1 TB RAM, **no GPU**) — the

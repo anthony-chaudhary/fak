@@ -1,3 +1,8 @@
+---
+title: "Memory-View Formats — a third, orthogonal axis (surface + ablate)"
+description: "Adds a third axis to memory views: how already-admitted records are serialized (markdown/JSON/TOON), chosen by measured byte/token cost."
+---
+
 # Memory-View Formats — a third, orthogonal axis (surface + ablate)
 
 > Extends [`MEMORY-VIEW-CONTRACT-2026-06-26.md`](MEMORY-VIEW-CONTRACT-2026-06-26.md)

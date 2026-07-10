@@ -1,3 +1,8 @@
+---
+title: "Desktop slowness: maintenance runbook (the fleet workstation)"
+description: "Maintenance runbook for the slow fleet workstation: not resource exhaustion but two long-uptime leaks (WindowsTerminal, TermService) cleared by a reboot."
+---
+
 # Desktop slowness: maintenance runbook (the fleet workstation)
 
 Date: 2026-06-28. Scope: why the Windows fleet workstation (16-core/32-thread x86-64,

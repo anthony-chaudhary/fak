@@ -1,3 +1,8 @@
+---
+title: "vCache — A Virtual API Cache over Providers We Don't Control"
+description: "A design for a virtual API cache that maps our caching units onto external providers' own prefix caching by controlling request order, shape, and timing."
+---
+
 # vCache — A Virtual API Cache over Providers We Don't Control
 
 **Date:** 2026-06-24

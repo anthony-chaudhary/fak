@@ -1,3 +1,8 @@
+---
+title: "Context-safety saved-vs-realized gap (1221, C4 of epic 1217)"
+description: "Design spec for the saved-vs-realized token gap: fak's forecast page-out savings vs later-witnessed prefix reuse, never blended with provider cache_read."
+---
+
 # Context-safety saved-vs-realized gap (#1221, C4 of epic #1217)
 
 _Research / design only. This is the **C4 value-decomposition spec** for the

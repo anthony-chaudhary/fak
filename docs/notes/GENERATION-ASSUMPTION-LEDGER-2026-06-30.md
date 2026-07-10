@@ -1,3 +1,8 @@
+---
+title: "Generation Assumption Ledger"
+description: "A ledger giving each generation stream (now/next/second-next/future) an explicit assumption, confidence, owner, review date, and promotion/demotion evidence."
+---
+
 # Generation Assumption Ledger
 
 This ledger closes #1643. It gives each generation stream an explicit assumption,

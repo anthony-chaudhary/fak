@@ -1,3 +1,8 @@
+---
+title: "Guard value under a kernel we control — the GPU server GLM-5.2 vs API"
+description: "Design for a benchmark ablating fak guard value with fak's own GLM-5.2 kernel on GPU servers versus API upstreams; no results yet, box-gated on GPU access."
+---
+
 # Guard value under a kernel we control — the GPU server GLM-5.2 vs API ablation (2026-07-03)
 
 **Goal.** Prove *real* `fak guard` value in the one regime where every number is ours:

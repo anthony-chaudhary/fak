@@ -1,3 +1,8 @@
+---
+title: "Multi-node concurrent development — groundwork (epic 2254)"
+description: "Groundwork for multi-node development: how lease state travels between machines across three coordination planes, with plane 0 (git-carried sync) shipped."
+---
+
 # Multi-node concurrent development — groundwork (epic #2254)
 
 **Date:** 2026-07-02 · **Status:** plane 0 shipped, planes 1–2 filed · **Epic:** #2254

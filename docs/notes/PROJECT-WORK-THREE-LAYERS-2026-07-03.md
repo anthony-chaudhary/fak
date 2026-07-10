@@ -1,3 +1,8 @@
+---
+title: "Pulling the project work apart: three layers, one verb each"
+description: "Pulls the repo's project work into three layers — planning, queued work, and implementation — each named by one repo verb with its own honesty rule."
+---
+
 # Pulling the project work apart: three layers, one verb each (2026-07-03)
 
 Project work in this repo is easy to read as one undifferentiated pile — a

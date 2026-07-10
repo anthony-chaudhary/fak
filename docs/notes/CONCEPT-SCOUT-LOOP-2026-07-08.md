@@ -1,3 +1,8 @@
+---
+title: "Concept: scout-loop — the research→backlog super-loop (2026-07-08)"
+description: "scout-loop is a cadenced super-loop that orders idea-scout, study-repo, and field-borrow to turn crawled repo leads into witnessed backlog, one lead per pass."
+---
+
 # Concept: `scout-loop` — the research→backlog super-loop (2026-07-08)
 
 **What shipped:** a meta-skill, `.claude/skills/scout-loop/SKILL.md`, plus its

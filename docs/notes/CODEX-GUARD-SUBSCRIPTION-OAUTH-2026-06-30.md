@@ -1,3 +1,8 @@
+---
+title: "Wiring fak guard -- codex to the Codex ChatGPT-subscription OAuth"
+description: "Increment plan to wire fak guard -- codex to hold a Codex ChatGPT-subscription OAuth token upstream, like the Claude path instead of requiring OPENAI_API_KEY."
+---
+
 # Wiring `fak guard -- codex` to the Codex ChatGPT-subscription OAuth token
 
 **Date:** 2026-06-30

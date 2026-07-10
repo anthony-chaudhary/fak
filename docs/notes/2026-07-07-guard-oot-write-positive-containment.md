@@ -1,3 +1,8 @@
+---
+title: "Durable fix: guard out-of-tree-write arg-rules → positive containment"
+description: "Replaces the guard's negative ..-regex for out-of-tree writes with a structural positive-containment matcher scoped to the workspace and scratchpad."
+---
+
 # Durable fix: guard out-of-tree-write arg-rules → positive containment
 
 *2026-07-07. Design note (adversarially verified).*

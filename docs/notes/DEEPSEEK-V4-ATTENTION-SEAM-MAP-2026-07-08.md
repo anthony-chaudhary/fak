@@ -1,3 +1,8 @@
+---
+title: "DeepSeek V4 CSA/HCA sparse-attention — seam map to fak, and the"
+description: "A design-only seam map matching DeepSeek V4's CSA/HCA sparse attention onto fak's existing DSA/MLA code seams, marking direct fits and gaps."
+---
+
 # DeepSeek V4 CSA/HCA sparse-attention — seam map to fak, and the prior-art baseline
 
 **2026-07-08.** Issue **#3016**, parent epic **#3006** (native DeepSeek-V4 kernel track).

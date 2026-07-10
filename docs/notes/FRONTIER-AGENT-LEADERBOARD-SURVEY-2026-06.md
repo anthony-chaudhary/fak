@@ -1,3 +1,8 @@
+---
+title: "Frontier Agent Leaderboard Survey — enter/skip map (1068)"
+description: "A ranked enter/skip survey of five frontier non-coding agent leaderboards that picks BFCL V4 as the cost/latency board for fak to pursue."
+---
+
 # Frontier Agent Leaderboard Survey — enter/skip map (#1068)
 
 **Generated:** 2026-06-27

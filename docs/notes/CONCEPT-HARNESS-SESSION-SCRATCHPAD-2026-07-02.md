@@ -1,3 +1,8 @@
+---
+title: "The harness session scratchpad: known as a leak, not as a place"
+description: "An audit showing fak treats the per-session temp scratchpad only as a source of junk, not as a place where work-product lives, and files two fix gaps."
+---
+
 # The harness session scratchpad: known as a leak, not as a place (2026-07-02)
 
 Every Claude Code session on this fleet is handed a private temp directory and told to

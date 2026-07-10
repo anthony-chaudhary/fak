@@ -1,3 +1,8 @@
+---
+title: "Worker-unit conservation: the leak map and its dispatch-ready backlog"
+description: "A 2026-07-02 audit mapping where worker-units leak in the issue-dispatch loop, plus three contract-validated, ready-to-file backlog issues to plug them."
+---
+
 # Worker-unit conservation: the leak map and its dispatch-ready backlog (2026-07-02)
 
 **The goal this serves:** if N open issues meet N worker-units inside a window,

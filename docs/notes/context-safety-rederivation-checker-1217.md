@@ -1,3 +1,8 @@
+---
+title: "Context-safety re-derivation checker (1227, C9 of epic 1217)"
+description: "Design-only spec for a checker that reds a rendered context-safety visual unless every number on it re-derives from a tamper-evident source."
+---
+
 # Context-safety re-derivation checker (#1227, C9 of epic #1217)
 
 _Research / design only. This is the **C9 keystone spec** for the context-safety

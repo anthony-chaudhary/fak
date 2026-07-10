@@ -1,3 +1,8 @@
+---
+title: "fak issue-backlog dispatch loop — handoff"
+description: "Session handoff for the fak issue-backlog dispatch loop: operating laws, next dispatchable leaves, and tooling to build for lane-disjoint headless workers."
+---
+
 # fak issue-backlog dispatch loop — handoff
 
 _Generated 2026-06-29 from a session that shipped 26 issues (20 example demos + 6 tooling/doc fixes) via headless lane-disjoint workers. Grounded in that session's laws + a live backlog probe. The adversarial red-team pass was cut by a session limit — treat the tooling sketches as proposals, not vetted specs._

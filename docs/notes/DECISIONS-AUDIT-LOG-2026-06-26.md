@@ -1,3 +1,8 @@
+---
+title: "Decisions audit log"
+description: "internal/witness records adjudication decisions as JSON-lines git notes on the refs/notes/fak/decisions side ref, not a branch, so main is never rewritten."
+---
+
 # Decisions audit log
 
 `internal/witness` writes adjudication decisions as JSON-lines git notes on the

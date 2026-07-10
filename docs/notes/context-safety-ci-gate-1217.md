@@ -1,3 +1,8 @@
+---
+title: "Context-safety CI gate (1228, C10 of epic 1217)"
+description: "Design spec for a CI gate that reds `make ci` when a context-safety visual persistently stops re-deriving from source, not on a single transient tick."
+---
+
 # Context-safety CI gate (#1228, C10 of epic #1217)
 
 _Research / design only. This is the **C10 spec** for the context-safety epic

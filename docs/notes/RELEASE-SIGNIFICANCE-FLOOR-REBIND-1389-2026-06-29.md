@@ -1,3 +1,8 @@
+---
+title: "release significance-floor ship rebind — 1389"
+description: "Corrective witness rebinding issue 1389's significance-floor release work to a (fak release) subject after its diff landed under a peer's commit."
+---
+
 # release significance-floor ship rebind — #1389
 
 On 2026-06-29 the auto-cut significance floor (issue #1389) landed on

@@ -1,3 +1,8 @@
+---
+title: "Context-safety debug-window surface (1229, C11 of epic 1217)"
+description: "Surface spec homing the six context-safety visual panels on the cmd/fak/debug.go context debugger, fixing each panel's data binding and read route."
+---
+
 # Context-safety debug-window surface (#1229, C11 of epic #1217)
 
 _Research / design only. This is the **C11 surface spec** for the context-safety
