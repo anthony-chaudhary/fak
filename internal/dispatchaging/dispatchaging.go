@@ -43,7 +43,9 @@
 // # Evidence, not claims; data, not code; additive, no regression
 //
 // The standing is a pure function of the wait CLOCK (Now, supplied as data — the leaf never reads
-// one) against each unit's ReadySince stamp; it trusts no worker's self-report. The knobs live in
+// one) against each unit's ReadySince stamp, counting ELIGIBLE time only: a declared cooldown
+// window pauses the clock, so time a unit could not be picked never accrues starvation pressure
+// (see Candidate.CoolingSince). It trusts no worker's self-report. The knobs live in
 // a small declared Params struct with documented defaults (candidates for dos.toml later). And the
 // term is purely additive: the zero-value Params disables aging entirely, so Fold then orders by
 // base weight (then wait, then ID) — byte-identical to the pre-aging order (see the golden test).
@@ -132,9 +134,11 @@ func (p Params) softAgingOn() bool    { return p.IntervalSeconds > 0 && p.BoostP
 func (p Params) hardDeadlineOn() bool { return p.StarvationSeconds > 0 }
 
 // Candidate is one READY unit of dispatchable work — the facts the aging order needs, none of the
-// payload. It carries only its identity, its base priority weight, and when it became ready; the
-// caller has already filtered to units that are actually dispatchable (not live, not superseded,
-// not cooling — those dispositions are dispatchorder's job, upstream of this term).
+// payload. It carries only its identity, its base priority weight, when it became ready, and its
+// latest cooldown window; the caller has already filtered to units that are actually dispatchable
+// (not live, not superseded — those dispositions are dispatchorder's job, upstream of this term).
+// Cooling is the one disposition that must ALSO be reported here: a cooling unit is ineligible, so
+// its wait clock pauses over the declared window instead of accruing phantom starvation pressure.
 type Candidate struct {
 	// ID is the unit's identity (an issue number as a string, a task id). Echoed in the result.
 	ID string `json:"id"`
@@ -145,24 +149,70 @@ type Candidate struct {
 	// 0 == unknown, which conservatively waits ZERO seconds: an unknown ready time never invents a
 	// boost and never trips the starvation deadline (the fail-closed direction).
 	ReadySince int64 `json:"ready_since"`
+	// CoolingSince / CoolingUntil describe the unit's current or most recent cooldown window (unix
+	// seconds) — the span it was INELIGIBLE to dispatch after a failed attempt (dispatchorder's
+	// DispCooling disposition, dispatch_tick's recently-attempted screen). The wait clock PAUSES
+	// over this span — its overlap with the waited span is subtracted from the wait — so ineligible
+	// time never accrues starvation pressure and a cooled unit never queue-jumps into exactly the
+	// re-storm churn dispatchconservation charges as waste. The semantics are pause, NOT reset:
+	// wait accrued before the cooldown is preserved, and accrual resumes from that paused value the
+	// moment the window ends.
+	//
+	// Zero values are the legacy no-cooling input and change nothing. A window needs a declared
+	// end: CoolingUntil == 0 means no window (CoolingSince alone is ignored). CoolingSince == 0
+	// with a declared end conservatively treats the whole wait up to CoolingUntil as cooled — an
+	// unknown start may suppress pressure, never invent it (the fail-closed direction). A caller
+	// tracking several completed cooldowns folds prior spans by advancing ReadySince by their sum;
+	// these fields carry only the latest window.
+	CoolingSince int64 `json:"cooling_since,omitempty"`
+	CoolingUntil int64 `json:"cooling_until,omitempty"`
 }
 
-// waitSeconds is the unit's wait against the clock: Now - ReadySince, clamped to >= 0, and 0 when
-// ReadySince is unknown. Clock skew (a ReadySince after Now) waits zero, never negative.
+// waitSeconds is the unit's ELIGIBLE wait against the clock: Now - ReadySince minus the slice of
+// that span covered by the declared cooldown window, clamped to >= 0, and 0 when ReadySince is
+// unknown. Clock skew (a ReadySince after Now) waits zero, never negative.
 func (c Candidate) waitSeconds(now int64) int64 {
 	if c.ReadySince <= 0 {
 		return 0
 	}
-	if w := now - c.ReadySince; w > 0 {
-		return w
+	w := now - c.ReadySince
+	if w <= 0 {
+		return 0
 	}
-	return 0
+	if w -= c.cooledOverlap(now); w <= 0 {
+		return 0
+	}
+	return w
+}
+
+// cooledOverlap is how many of the unit's waited seconds fall inside its declared cooldown window —
+// the ineligible time the wait clock skips. The window is clipped to the waited span [ReadySince,
+// now]; a window with no declared end (CoolingUntil <= 0) does not exist. While the unit is still
+// cooling (now < CoolingUntil) the overlap grows exactly as fast as the raw wait, so the eligible
+// wait — and with it the boost and the standing — holds constant: the pause.
+func (c Candidate) cooledOverlap(now int64) int64 {
+	if c.CoolingUntil <= 0 {
+		return 0
+	}
+	start := c.CoolingSince
+	if start < c.ReadySince {
+		start = c.ReadySince
+	}
+	end := c.CoolingUntil
+	if end > now {
+		end = now
+	}
+	if end <= start {
+		return 0
+	}
+	return end - start
 }
 
 // Ranked is one candidate with the aging verdict attached.
 type Ranked struct {
 	Candidate
-	// WaitSeconds is how long the unit has been ready (the evidence the standing rests on).
+	// WaitSeconds is how long the unit has been ready AND eligible — cooldown windows pause the
+	// clock (the evidence the standing rests on).
 	WaitSeconds int64 `json:"wait_seconds"`
 	// AgingBoost is the soft boost added to the base weight (>= 0, capped at MaxBoostPoints).
 	AgingBoost int `json:"aging_boost"`
@@ -223,7 +273,9 @@ func (p Params) boostFor(wait int64) int {
 // out — no clock read, no I/O. Total over any input.
 //
 // The policy, per candidate:
-//  1. wait = Now - ReadySince (clamped >= 0; 0 when ReadySince is unknown).
+//  1. wait = Now - ReadySince, minus the slice of that span inside the declared cooldown window
+//     (clamped >= 0; 0 when ReadySince is unknown). A cooling unit's wait is PAUSED: it cannot
+//     grow — and cannot starve — on ineligible time alone.
 //  2. boost = soft aging boost for the wait (0 when soft aging is disabled or wait < one interval).
 //  3. effective = BaseWeight + boost.
 //  4. standing = Starved if the hard deadline is on and wait >= StarvationSeconds; else Aging when

@@ -1,7 +1,9 @@
 package dispatchaging
 
 import (
+	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -207,6 +209,116 @@ func TestMaxBoostCap(t *testing.T) {
 	r2 := Fold([]Candidate{{ID: "y", BaseWeight: wDefault, ReadySince: readyAgo(7 * 3600)}}, p)
 	if r2.Order[0].Standing != StandingStarved {
 		t.Errorf("standing = %s, want starved even with a soft cap", r2.Order[0].Standing)
+	}
+}
+
+// --- cooldown pauses the wait clock (pause, not reset) -----------------------------------------
+
+// While a unit is cooling, its eligible wait must read the SAME at every instant of the window:
+// the clock is paused, so cooling time can never grow the boost or the standing.
+func TestCoolingPausesWaitClock(t *testing.T) {
+	ready := readyAgo(3600)  // became ready 1h before base
+	coolStart := base - 600  // attempted 10 min before base...
+	coolEnd := base + 600    // ...cooling for 20 min total
+	c := Candidate{ID: "cooling", BaseWeight: wDefault, ReadySince: ready,
+		CoolingSince: coolStart, CoolingUntil: coolEnd}
+	const wantPaused = int64(3000) // the 50 eligible minutes accrued before the cooldown began
+	for _, now := range []int64{coolStart, base, coolEnd - 1, coolEnd} {
+		u := Fold([]Candidate{c}, DefaultParams(now)).Order[0]
+		if u.WaitSeconds != wantPaused {
+			t.Errorf("now=%d: WaitSeconds = %d, want %d (clock paused while cooling)",
+				now, u.WaitSeconds, wantPaused)
+		}
+		if u.Standing != StandingAging || u.AgingBoost != 300 { // 3000s = 5 intervals * 60
+			t.Errorf("now=%d: standing/boost = %s/+%d, want aging/+300 (frozen while cooling)",
+				now, u.Standing, u.AgingBoost)
+		}
+	}
+}
+
+// Cooling time ALONE can never starve a unit: attempted the moment it became ready, then cooled
+// for wall time far past the hard deadline — zero eligible seconds, so it stays fresh.
+func TestCoolingTimeAloneNeverStarves(t *testing.T) {
+	ready := readyAgo(10 * 3600) // 10h of wall wait, all of it inside the cooldown
+	c := Candidate{ID: "flaky", BaseWeight: wDefault, ReadySince: ready,
+		CoolingSince: ready, CoolingUntil: base}
+	r := Fold([]Candidate{c}, DefaultParams(base))
+	u := r.Order[0]
+	if u.WaitSeconds != 0 || u.Standing != StandingFresh || u.AgingBoost != 0 {
+		t.Errorf("wait/standing/boost = %d/%s/+%d, want 0/fresh/+0 (cooling accrues no pressure)",
+			u.WaitSeconds, u.Standing, u.AgingBoost)
+	}
+	if r.StarvedCount != 0 {
+		t.Errorf("StarvedCount = %d, want 0 (cooling time alone never starves)", r.StarvedCount)
+	}
+}
+
+// Once cooled, the unit resumes accruing wait from where it paused — the cooled span is excluded
+// forever after, so there is no phantom jump the moment the window ends.
+func TestCooledResumesFromPausedWait(t *testing.T) {
+	ready := readyAgo(3000) // 30 eligible minutes, then a 20-min cooldown ending at base
+	c := Candidate{ID: "cooled", BaseWeight: wDefault, ReadySince: ready,
+		CoolingSince: base - 1200, CoolingUntil: base}
+	if got := Fold([]Candidate{c}, DefaultParams(base)).Order[0].WaitSeconds; got != 1800 {
+		t.Errorf("at cooldown end: WaitSeconds = %d, want 1800 (exactly where it paused)", got)
+	}
+	if got := Fold([]Candidate{c}, DefaultParams(base+600)).Order[0].WaitSeconds; got != 2400 {
+		t.Errorf("10 min after cooling: WaitSeconds = %d, want 2400 (paused 1800 + 600 eligible)", got)
+	}
+}
+
+// The zero/legacy input — no cooling info — is byte-identical to the pre-cooling fold: the wait
+// clock is the plain now-ReadySince, and the encoded artifact carries no cooling keys (omitempty).
+func TestNoCoolingInfoIsLegacyFold(t *testing.T) {
+	cands := []Candidate{
+		{ID: "a", BaseWeight: wP1, ReadySince: readyAgo(3600)},
+		{ID: "b", BaseWeight: wDefault, ReadySince: readyAgo(7 * 3600)},
+		{ID: "c", BaseWeight: wP0, ReadySince: readyAgo(10)},
+	}
+	r := Fold(cands, DefaultParams(base))
+	for _, u := range r.Order {
+		if u.WaitSeconds != base-u.ReadySince {
+			t.Errorf("%s: WaitSeconds = %d, want legacy now-ReadySince = %d",
+				u.ID, u.WaitSeconds, base-u.ReadySince)
+		}
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "cooling") {
+		t.Errorf("legacy fold leaked cooling keys into the encoded Result: %s", b)
+	}
+}
+
+// Window edges: irrelevant windows are no-ops, half-declared windows fail closed, and the
+// subtraction clips to the waited span.
+func TestCoolingWindowEdges(t *testing.T) {
+	cases := []struct {
+		name string
+		c    Candidate
+		want int64
+	}{
+		{"window entirely before ready is a no-op",
+			Candidate{ReadySince: readyAgo(600), CoolingSince: readyAgo(900), CoolingUntil: readyAgo(700)}, 600},
+		{"window entirely in the future is a no-op",
+			Candidate{ReadySince: readyAgo(600), CoolingSince: base + 100, CoolingUntil: base + 700}, 600},
+		{"window straddling ready clips at ready",
+			Candidate{ReadySince: readyAgo(600), CoolingSince: readyAgo(900), CoolingUntil: readyAgo(300)}, 300},
+		{"end without a start cools the whole wait so far (fail-closed)",
+			Candidate{ReadySince: readyAgo(600), CoolingUntil: base + 100}, 0},
+		{"start without a declared end is no window",
+			Candidate{ReadySince: readyAgo(600), CoolingSince: readyAgo(300)}, 600},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.c.ID = "x"
+			tc.c.BaseWeight = wDefault
+			got := Fold([]Candidate{tc.c}, DefaultParams(base)).Order[0].WaitSeconds
+			if got != tc.want {
+				t.Errorf("WaitSeconds = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 
