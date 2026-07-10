@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,13 +35,45 @@ type Store interface {
 	Get(ctx context.Context, key string) (payload []byte, found bool, err error)
 }
 
+// Durable record envelope (v1). A self-describing header lets a reader detect the
+// on-disk format instead of inferring it from length, so a future format change is
+// a refused unknown-version FAULT rather than a silently mis-parsed payload (#3395).
+// Layout:
+//
+//	magic(4) || version(uint16 BE) || SHA256(payload)(32) || payload
+//
+// The sha256 keeps its integrity role (the CRC slot the sessionimage bundle already
+// has); the magic+version add the forward-compat discriminant the raw KV record
+// lacked. Get refuses a record whose magic or version it does not recognize with a
+// typed fault (errBadMagic / errUnsupportedVersion), fail-closed — never a wrong hit
+// nor a torn read masquerading as a clean miss.
+const (
+	recordMagic   = "L3KV"    // 4-byte readable magic prefix identifying an l3kv record
+	recordVersion = uint16(1) // on-disk record format version
+)
+
+// recordHeaderLen is the fixed prefix ahead of the payload: magic + uint16 version +
+// the sha256 integrity sum. len of a string constant and sha256.Size are both
+// constants, so this folds at compile time.
+const recordHeaderLen = len(recordMagic) + 2 + sha256.Size
+
+var (
+	// errBadMagic is the fault for bytes that do not begin with recordMagic — an old
+	// headerless record, a foreign file dropped under a valid-looking key, or bit-rot
+	// in the prefix. Refused, never parsed.
+	errBadMagic = errors.New("unrecognized record magic — not an l3kv record (corrupt or foreign format)")
+	// errUnsupportedVersion is the fault for a well-formed l3kv record whose version
+	// this build does not read — the forward-compat gate itself.
+	errUnsupportedVersion = errors.New("unsupported record version")
+)
+
 // diskStore is a crash-safe, restart-surviving durable K/V rooted at a directory,
-// keyed by span digest. Each record is `SHA256(payload) || payload`, so a read
-// re-verifies the payload against its own hash and refuses corrupt/tampered bytes
-// (the "verify, don't trust" admission guard, fail-closed). Writes commit via a
-// temp file + fsync + atomic rename, the same durability point internal/blobfs
-// uses — an interrupted write leaves only a temp file, never a half record under a
-// valid key.
+// keyed by span digest. Each record is the versioned envelope above, so a read
+// re-verifies the payload against its own hash and refuses corrupt/tampered or
+// unknown-format bytes (the "verify, don't trust" admission guard, fail-closed).
+// Writes commit via a temp file + fsync + atomic rename, the same durability point
+// internal/blobfs uses — an interrupted write leaves only a temp file, never a half
+// record under a valid key.
 type diskStore struct{ dir string }
 
 func newDiskStore(dir string) (*diskStore, error) {
@@ -79,7 +113,11 @@ func (s *diskStore) Put(ctx context.Context, key string, payload []byte) error {
 		return fmt.Errorf("l3kv: invalid span key %q", key)
 	}
 	sum := sha256.Sum256(payload)
-	buf := make([]byte, 0, len(sum)+len(payload))
+	buf := make([]byte, 0, recordHeaderLen+len(payload))
+	buf = append(buf, recordMagic...)
+	var ver [2]byte
+	binary.BigEndian.PutUint16(ver[:], recordVersion)
+	buf = append(buf, ver[:]...)
 	buf = append(buf, sum[:]...)
 	buf = append(buf, payload...)
 	return atomicWrite(s.path(key), buf)
@@ -99,10 +137,16 @@ func (s *diskStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
 		}
 		return nil, false, err // FAULT: I/O error
 	}
-	if len(b) < sha256.Size {
-		return nil, false, fmt.Errorf("l3kv: truncated record for %s", key)
+	if len(b) < recordHeaderLen {
+		return nil, false, fmt.Errorf("l3kv: truncated record for %s (%d bytes < %d-byte header)", key, len(b), recordHeaderLen)
 	}
-	sum, payload := b[:sha256.Size], b[sha256.Size:]
+	if string(b[:len(recordMagic)]) != recordMagic {
+		return nil, false, fmt.Errorf("l3kv: %w for %s", errBadMagic, key)
+	}
+	if ver := binary.BigEndian.Uint16(b[len(recordMagic) : len(recordMagic)+2]); ver != recordVersion {
+		return nil, false, fmt.Errorf("l3kv: %w %d for %s (this build reads v%d)", errUnsupportedVersion, ver, key, recordVersion)
+	}
+	sum, payload := b[len(recordMagic)+2:recordHeaderLen], b[recordHeaderLen:]
 	got := sha256.Sum256(payload)
 	if !bytes.Equal(sum, got[:]) {
 		return nil, false, fmt.Errorf("l3kv: integrity check failed for %s (corrupt or tampered)", key)

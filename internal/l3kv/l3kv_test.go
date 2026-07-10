@@ -3,6 +3,9 @@ package l3kv
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -150,7 +153,8 @@ func TestTamperedRecordIsFault(t *testing.T) {
 	if err := store.Put(ctx, digestA, payload); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	// Flip a payload byte on disk (past the 32-byte integrity header).
+	// Flip the last byte on disk — a payload byte, past the record header — so the
+	// sha256 no longer matches its payload (an integrity fault, not a format fault).
 	p := filepath.Join(dir, digestA)
 	raw, err := os.ReadFile(p)
 	if err != nil {
@@ -269,5 +273,105 @@ func TestInvalidKeyRejected(t *testing.T) {
 		if err := store.Put(ctx, k, []byte("x")); err == nil {
 			t.Fatalf("Put accepted invalid key %q", k)
 		}
+	}
+}
+
+// TestRecordCarriesVersionHeader proves the on-disk record is the self-describing
+// envelope (#3395): the raw file opens with the readable magic and the format
+// version, ahead of the sha256 the integrity guard already used.
+func TestRecordCarriesVersionHeader(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := newDiskStore(dir)
+	if err != nil {
+		t.Fatalf("newDiskStore: %v", err)
+	}
+	payload := spanBytes(777)
+	if err := store.Put(ctx, digestA, payload); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, digestA))
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	if len(raw) != recordHeaderLen+len(payload) {
+		t.Fatalf("record len = %d, want header(%d)+payload(%d)=%d", len(raw), recordHeaderLen, len(payload), recordHeaderLen+len(payload))
+	}
+	if string(raw[:len(recordMagic)]) != recordMagic {
+		t.Fatalf("record magic = %q, want %q", raw[:len(recordMagic)], recordMagic)
+	}
+	if ver := binary.BigEndian.Uint16(raw[len(recordMagic) : len(recordMagic)+2]); ver != recordVersion {
+		t.Fatalf("record version = %d, want %d", ver, recordVersion)
+	}
+	// And the envelope round-trips: Get strips the header and returns the exact bytes.
+	got, found, err := store.Get(ctx, digestA)
+	if err != nil || !found {
+		t.Fatalf("Get found=%v err=%v", found, err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("payload not bit-exact through the versioned envelope")
+	}
+}
+
+// TestUnknownMagicIsFault proves a record without the l3kv magic — an old headerless
+// record, bit-rot, or a foreign file under a valid-looking key — is refused as a
+// structured fault, not parsed. It surfaces as a RestoreSpan FAULT (fail-closed),
+// never a wrong hit.
+func TestUnknownMagicIsFault(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := newDiskStore(dir)
+	if err != nil {
+		t.Fatalf("newDiskStore: %v", err)
+	}
+	// The pre-#3395 record shape (SHA256(payload) || payload, no magic) is exactly the
+	// "unknown magic" case now — write one directly under a valid key.
+	payload := spanBytes(64)
+	sum := sha256.Sum256(payload)
+	legacy := append(append([]byte(nil), sum[:]...), payload...)
+	if err := os.WriteFile(filepath.Join(dir, digestA), legacy, 0o644); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+	_, found, err := store.Get(ctx, digestA)
+	if err == nil {
+		t.Fatalf("Get accepted a headerless record (found=%v) — magic gate missed", found)
+	}
+	if !errors.Is(err, errBadMagic) {
+		t.Fatalf("Get err = %v, want errBadMagic", err)
+	}
+	rr, _ := New(&stagerKV{spans: map[[2]int][]byte{}}, store).RestoreSpan(ctx, digestA)
+	if rr.Outcome != abi.KVResidencyFault {
+		t.Fatalf("RestoreSpan over unknown-magic record = %v, want FAULT", rr.Outcome)
+	}
+}
+
+// TestUnsupportedVersionIsFault proves the forward-compat gate: a well-formed l3kv
+// record whose version this build does not know is refused as a structured fault —
+// even when its sha256 matches its payload (so it is the VERSION rung that trips,
+// not the integrity rung).
+func TestUnsupportedVersionIsFault(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := newDiskStore(dir)
+	if err != nil {
+		t.Fatalf("newDiskStore: %v", err)
+	}
+	payload := spanBytes(128)
+	sum := sha256.Sum256(payload)
+	var ver [2]byte
+	binary.BigEndian.PutUint16(ver[:], recordVersion+42) // a future version this build cannot read
+	rec := append([]byte(nil), recordMagic...)
+	rec = append(rec, ver[:]...)
+	rec = append(rec, sum[:]...) // valid integrity sum, so only the version is wrong
+	rec = append(rec, payload...)
+	if err := os.WriteFile(filepath.Join(dir, digestA), rec, 0o644); err != nil {
+		t.Fatalf("write future-version record: %v", err)
+	}
+	_, found, err := store.Get(ctx, digestA)
+	if err == nil {
+		t.Fatalf("Get accepted a future-version record (found=%v) — version gate missed", found)
+	}
+	if !errors.Is(err, errUnsupportedVersion) {
+		t.Fatalf("Get err = %v, want errUnsupportedVersion", err)
 	}
 }
