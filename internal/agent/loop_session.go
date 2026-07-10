@@ -75,6 +75,13 @@ type SessionGate struct {
 	// A restart reading a non-zero checkpoint re-enters that turn instead of a fresh
 	// turn-0. Optional; nil drops the checkpoint, never the turn.
 	Checkpoint func(trace string, attempt, lastStatus int, startedAtUnixNano int64)
+	// TerminateSignal returns the channel closed when the session enters Terminating
+	// (#2758) — the function-shaped twin of session.Table.TerminateSignal. When wired,
+	// runArm cancels the in-flight turn's context on the signal and dispatches no
+	// further tool call (the forceful stop), instead of waiting for the boundary like
+	// a drain. Optional; nil keeps terminate at boundary granularity (the Decide gate
+	// still stops the arm with the closed TERMINATED reason at its next turn).
+	TerminateSignal func(trace string) <-chan struct{}
 }
 
 // WithSessionTable wires a per-session drive-state table and the trace id this run is
@@ -335,6 +342,21 @@ func (c runConfig) promptMessages(ctx context.Context, messages []Message) []Mes
 		return messages
 	}
 	return planned
+}
+
+// terminateSignal returns the channel closed when this run's session enters
+// Terminating (#2758), or nil when no terminate source is wired. Source preference
+// mirrors gateTurn: a wired function-shaped gate owns the seam; otherwise the
+// concrete table. A nil channel blocks forever in a select, so the historical loop
+// (no table, no gate) is byte-for-byte unchanged.
+func (c runConfig) terminateSignal() <-chan struct{} {
+	if c.gate != nil && c.gate.TerminateSignal != nil {
+		return c.gate.TerminateSignal(c.trace)
+	}
+	if c.table != nil {
+		return c.table.TerminateSignal(c.trace)
+	}
+	return nil
 }
 
 // drainSteer non-blocking-receives any operator steer enqueued for this run on the
