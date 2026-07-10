@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/wipattr"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
@@ -50,6 +51,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipRestore(stdout, stderr, argv[1:])
 	case "reap":
 		return runWipReap(stdout, stderr, argv[1:])
+	case "attribute", "attr":
+		return runWipAttribute(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -80,6 +83,11 @@ func wipUsage(w io.Writer) {
   fak wip reap [-C <repo>] [--json] [--dry-run]
       Delete redundant checkpoint refs whose delta has LANDED in HEAD (the owner
       committed it). Fail-safe: an unlanded checkpoint is always kept.
+
+  fak wip attribute [-C <repo>] [--json] [--orphans]
+      Attribute every dirty working-tree hunk to the session that checkpointed it
+      (OWNED), to several (SHARED), or to none (ORPHAN — unattributed, at-risk WIP).
+      With --orphans, print only the ORPHAN hunks (exit 3 if any exist).
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta
@@ -597,6 +605,96 @@ func wipSessionOf(rec wipref.RefRecord) string {
 		return rec.Stamp.SessionID
 	}
 	return wipref.SessionFromRef(rec.Ref)
+}
+
+// ---- attribute (#3874) ----
+
+// wipAttributeResult is the JSON/plain result of an attribution pass: every dirty
+// hunk's verdict plus the count that are ORPHAN (the at-risk set).
+type wipAttributeResult struct {
+	Attributions []wipattr.Attribution `json:"attributions"`
+	Orphans      int                   `json:"orphans"`
+}
+
+// runWipAttribute exits 3 (in --orphans mode) when any dirty hunk is unattributed —
+// the one-bit signal a sweep-guard (#3879) or CI gate keys on. Plain/JSON listing
+// without --orphans is informational and exits 0.
+func runWipAttribute(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("wip attribute", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "wip")
+	repo := fs.String("C", "", "run in this git repo (default: cwd)")
+	asJSON := fs.Bool("json", false, "emit the attribution result as JSON")
+	orphansOnly := fs.Bool("orphans", false, "print only ORPHAN hunks; exit 3 if any exist")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	res, err := wipAttribute(context.Background(), *repo)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wip attribute: %v\n", err)
+		return 1
+	}
+	rows := res.Attributions
+	if *orphansOnly {
+		rows = wipattr.Orphans(rows)
+	}
+	switch {
+	case *asJSON:
+		if code := encodeJSONOrFail(stdout, stderr,
+			wipAttributeResult{Attributions: rows, Orphans: res.Orphans}, "fak wip attribute"); code != 0 {
+			return code
+		}
+	case len(rows) == 0 && *orphansOnly:
+		fmt.Fprintln(stdout, "no orphan hunks: every dirty hunk is attributed")
+	case len(rows) == 0:
+		fmt.Fprintln(stdout, "no dirty hunks to attribute")
+	default:
+		for _, a := range rows {
+			fmt.Fprintf(stdout, "%s\t%s\t%s\n", a.State, a.File, wipAttrOwnerLabel(a))
+		}
+	}
+	if *orphansOnly && res.Orphans > 0 {
+		return 3
+	}
+	return 0
+}
+
+// wipAttribute reads the live tracked working-tree delta (`git diff HEAD`) and every
+// session's checkpoint delta (`git diff <obj>^ <obj>`), parses both to hunks, and
+// folds them through the pure wipattr.Attribute — classifying every dirty hunk as
+// OWNED / SHARED / ORPHAN. All git parsing lives here; the classification is pure.
+func wipAttribute(ctx context.Context, repo string) (wipAttributeResult, error) {
+	liveDiff, err := gitWipOut(ctx, repo, nil, "diff", "HEAD", "--")
+	if err != nil {
+		return wipAttributeResult{}, fmt.Errorf("read working-tree diff: %w", err)
+	}
+	dirty := wipattr.ParseHunks(liveDiff)
+	recs, err := wipListRecords(ctx, repo)
+	if err != nil {
+		return wipAttributeResult{}, err
+	}
+	checkpoints := make(map[string][]wipattr.Hunk, len(recs))
+	for _, r := range recs {
+		cpDiff, derr := gitWipOut(ctx, repo, nil, "diff", r.Object+"^", r.Object, "--")
+		if derr != nil {
+			continue // a root-parent or unreadable checkpoint contributes no ownership
+		}
+		checkpoints[wipSessionOf(r)] = wipattr.ParseHunks(cpDiff)
+	}
+	attrs := wipattr.Attribute(dirty, checkpoints)
+	return wipAttributeResult{Attributions: attrs, Orphans: len(wipattr.Orphans(attrs))}, nil
+}
+
+// wipAttrOwnerLabel renders the owner column for the plain listing.
+func wipAttrOwnerLabel(a wipattr.Attribution) string {
+	switch a.State {
+	case wipattr.AttrOwned:
+		return a.Owner
+	case wipattr.AttrShared:
+		return strings.Join(a.Owners, ",")
+	default:
+		return "-"
+	}
 }
 
 // ---- restore ----
