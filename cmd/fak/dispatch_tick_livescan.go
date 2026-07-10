@@ -205,6 +205,68 @@ func recentlyAttemptedIssuesAt(runsDir string, cooldownMin int, now time.Time) m
 	return out
 }
 
+// dispatchAttemptBudgetDefault is the number of recorded worker attempts on ONE
+// still-open issue past which the wave stops auto-dispatching it. A shipped issue
+// closes and leaves the candidate set, so an OPEN issue that has burned this many
+// ~100k-token worker sessions has not converged — it is poison, not progress, and
+// the account budget it keeps consuming every cooldown window is better spent on
+// issues that can land. Eight is deliberately generous (a well-scoped leaf ships in
+// 1–3 attempts, so 8 unshipped tries means the issue is mis-scoped and needs human
+// triage, not another worker); tune or disable via FAK_DISPATCH_ATTEMPT_BUDGET
+// (0 disables the cap).
+const dispatchAttemptBudgetDefault = 8
+
+// dispatchAttemptBudget resolves the poison-issue attempt cap, honoring the
+// FAK_DISPATCH_ATTEMPT_BUDGET override (a non-negative integer; 0 disables).
+func dispatchAttemptBudget() int {
+	if v := strings.TrimSpace(os.Getenv("FAK_DISPATCH_ATTEMPT_BUDGET")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return dispatchAttemptBudgetDefault
+}
+
+// attemptExhaustedIssues returns the issues whose recorded worker attempts have
+// reached the budget — the poison-issue cap the time cooldown never enforced (an
+// issue cools ~2h then re-enters the pool, so one that can never ship burns a
+// worker every window indefinitely; #1419 alone logged 19 attempts, and ~64% of
+// all dispatch sessions ended WASTED_SPAWN concentrated on a handful of such
+// issues). Each spawned worker writes one resolve log per attempt; some legacy
+// workers split it into .out/.err, so an attempt is keyed by its <issue>-<stamp>
+// base and counted once. An at-or-over-budget issue is held OUT of the wave so
+// its account spend stops; a human (or /dos-replan) then decomposes or closes it.
+// Reversible: the hold clears itself once the issue closes (it leaves the
+// candidate set), or an operator can raise FAK_DISPATCH_ATTEMPT_BUDGET or clear
+// the run-dir logs. A budget <= 0 disables the cap (empty set = legacy behavior).
+func attemptExhaustedIssues(runsDir string, budget int) map[int]bool {
+	out := map[int]bool{}
+	if budget <= 0 {
+		return out
+	}
+	attempts := map[int]map[string]bool{}
+	for _, log := range resolveLogs(runsDir) {
+		base := filepath.Base(log)
+		issue, ok := issueFromResolveLog(base)
+		if !ok {
+			continue
+		}
+		key := strings.TrimSuffix(base, ".log")
+		key = strings.TrimSuffix(key, ".out")
+		key = strings.TrimSuffix(key, ".err")
+		if attempts[issue] == nil {
+			attempts[issue] = map[string]bool{}
+		}
+		attempts[issue][key] = true
+	}
+	for issue, keys := range attempts {
+		if len(keys) >= budget {
+			out[issue] = true
+		}
+	}
+	return out
+}
+
 type dispatchCooldownRow struct {
 	Issue                    int
 	LastAttemptUnix          int64

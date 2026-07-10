@@ -169,20 +169,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	product := dispatchtick.ProductForBackend(backendNorm)
-	allocationCount := *count
-	preflightShortfall := 0
-	var preflight map[string]any
-	if pf, err := dispatchPreflight(root, stderr, *maxWorkers, wk, product); err == nil {
-		preflight = pf
-		allocationCount = dispatchWaveAllocationCount(*count, pf)
-		preflightShortfall = *count - allocationCount
-		if preflightShortfall < 0 {
-			preflightShortfall = 0
-		}
-	} else {
-		preflight = map[string]any{"error": err.Error()}
-	}
+	product, allocationCount, preflightShortfall, preflight := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
 
 	rec := map[string]any{
 		"schema":               "fleet-issue-dispatch-wave/1",
@@ -337,6 +324,29 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 }
 
+// dispatchWavePreflightAlloc runs the tick preflight for the wave and folds its headroom
+// verdict into the account allocation count. It returns the backend product, the (possibly
+// reduced) allocation count, the preflight-driven shortfall, and the preflight record (an
+// {"error": …} map when the preflight itself failed — fail-open, matching runDispatchWave's
+// prior inline behavior).
+func dispatchWavePreflightAlloc(root string, stderr io.Writer, maxWorkers int, wk, backendNorm string, count int) (string, int, int, map[string]any) {
+	product := dispatchtick.ProductForBackend(backendNorm)
+	allocationCount := count
+	preflightShortfall := 0
+	var preflight map[string]any
+	if pf, err := dispatchPreflight(root, stderr, maxWorkers, wk, product); err == nil {
+		preflight = pf
+		allocationCount = dispatchWaveAllocationCount(count, pf)
+		preflightShortfall = count - allocationCount
+		if preflightShortfall < 0 {
+			preflightShortfall = 0
+		}
+	} else {
+		preflight = map[string]any{"error": err.Error()}
+	}
+	return product, allocationCount, preflightShortfall, preflight
+}
+
 func priceDispatchWave(root string, stderr io.Writer, requested, granted int, explicitLane string, excluded []string, cooldownMin int, goalProfile ...string) (dispatchWavePrice, error) {
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
@@ -355,6 +365,22 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 	held := liveResolutionLanes(runsDir)
 	liveIssues := liveResolutionIssues(runsDir)
 	cooled := recentlyAttemptedIssues(runsDir, cooldownMin)
+	// Poison-issue cap: an OPEN issue that has burned dispatchAttemptBudget()
+	// workers without shipping is held out of the wave. The time cooldown only
+	// pauses it ~2h, so without this it re-enters the pool and wastes a worker
+	// every window forever. Union it into the per-issue skip set both candidate
+	// loops already consult (empty budget => skipIssues stays == excludedIssues,
+	// so the pre-existing behavior is byte-identical).
+	skipIssues := excludedIssues
+	if exhausted := attemptExhaustedIssues(runsDir, dispatchAttemptBudget()); len(exhausted) > 0 {
+		skipIssues = make(map[int]bool, len(excludedIssues)+len(exhausted))
+		for n := range excludedIssues {
+			skipIssues[n] = true
+		}
+		for n := range exhausted {
+			skipIssues[n] = true
+		}
+	}
 	exclude := map[string]bool{}
 	for _, lane := range excluded {
 		exclude[lane] = true
@@ -395,7 +421,7 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 		if exclude[lane] {
 			continue
 		}
-		if liveIssues[route.Number] || cooled[route.Number] || excludedIssues[route.Number] {
+		if liveIssues[route.Number] || cooled[route.Number] || skipIssues[route.Number] {
 			continue
 		}
 		paths := append([]string(nil), route.Paths...)
@@ -428,7 +454,7 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 			Lane:        leaseID,
 			Tree:        paths,
 			Mode:        "exclusive",
-			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget),
+			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(paths)),
 			CreatedUnix: int64(route.Number),
 		})
 	}
@@ -448,7 +474,7 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 			nums = append([]int(nil), grp.Issues...)
 		}
 		nums = dispatchWaveOrderLaneIssues(nums, grp.Priority)
-		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled, excludedIssues)
+		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled, skipIssues)
 		if !ok {
 			continue
 		}
@@ -477,7 +503,7 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 			Lane:        leaseID,
 			Tree:        grp.Tree,
 			Mode:        "exclusive",
-			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget),
+			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(grp.Tree)),
 			CreatedUnix: int64(grp.Count*len(lanes) + (len(lanes) - i)),
 		})
 	}
@@ -601,11 +627,20 @@ func dispatchWaveOrderLaneIssues(nums []int, weights map[int]int) []int {
 	return dispatchtick.OrderLaneCandidates(cands, false)
 }
 
-func dispatchWaveOrderStamp(profile string, priority, stepBudget int) int64 {
-	if profile == dispatchGoalProfileHighPriority {
-		return int64(priority)*1_000_000 + int64(stepBudget)
+func dispatchWaveOrderStamp(profile string, priority, stepBudget int, core bool) int64 {
+	// core-source boost keeps the default wave progressing fak's own guard-shippable core
+	// engineering ahead of the coarse docs/tools buckets: it dominates any step budget but
+	// stays BELOW a priority label, so under high-priority the label still leads and under
+	// throughput core leads (step budget breaks ties within a class). Assumes a lane's step
+	// budget stays well under the 1e6 boost, which the per-lane budgets always do.
+	coreBoost := int64(0)
+	if core {
+		coreBoost = 1_000_000
 	}
-	return int64(stepBudget)
+	if profile == dispatchGoalProfileHighPriority {
+		return int64(priority)*1_000_000_000 + coreBoost + int64(stepBudget)
+	}
+	return coreBoost + int64(stepBudget)
 }
 
 func dispatchWaveAction(candidates, run, collisions, wasted int) (string, string) {
