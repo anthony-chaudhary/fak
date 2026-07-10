@@ -95,6 +95,12 @@ type a2aTask struct {
 	TenantID     string                 `json:"tenant_id,omitempty"`
 	AgentCardURL string                 `json:"agent_card_url,omitempty"`
 	Message      map[string]interface{} `json:"message,omitempty"`
+	// SessionTrace binds this task to a LIVE served session (the message's
+	// session_id), making cancel real (#2758): a cancel of a bound task drives the
+	// session's drive-state to Draining through the same injected control seam the
+	// /v1/fak/session route uses, instead of only flipping this record's State
+	// field. Empty = unbound (a record-only task; cancel stays record-only).
+	SessionTrace string `json:"session_trace,omitempty"`
 }
 
 // a2aMessage represents an A2A message
@@ -344,6 +350,12 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A session_id in the message binds the task to a live served session: the task
+	// then REPRESENTS that run (it stays "running" until the run ends), and a cancel
+	// of the task cancels the run itself, not just this record.
+	sessionTrace, _ := msg.Content["session_id"].(string)
+	sessionTrace = strings.TrimSpace(sessionTrace)
+
 	now := time.Now()
 	task := &a2aTask{
 		TaskID:       taskID,
@@ -357,6 +369,7 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		TenantID:     tenantID,
 		AgentCardURL: "https://fleet.example.com/a2a/agent-card",
 		Message:      msg.Content,
+		SessionTrace: sessionTrace,
 	}
 
 	// Store task (bounded: insertLocked evicts the oldest terminal task at capacity).
@@ -391,23 +404,26 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		Timestamp:  task.UpdatedAt,
 	})
 
-	// Simulate method execution
-	task.State = "completed"
-	task.UpdatedAt = time.Now()
-	task.Result = map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Method %s executed successfully", method),
-		"scope":   methodSpec.Scope,
-	}
+	if sessionTrace == "" {
+		// Unbound record-only task: no live run backs it, so the method dispatch is
+		// still simulated (the record completes immediately).
+		task.State = "completed"
+		task.UpdatedAt = time.Now()
+		task.Result = map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("Method %s executed successfully", method),
+			"scope":   methodSpec.Scope,
+		}
 
-	s.logAuditEntry(a2aAuditLog{
-		TaskID:     taskID,
-		CallerID:   callerID,
-		TenantID:   tenantID,
-		Method:     method,
-		Transition: "completed",
-		Timestamp:  task.UpdatedAt,
-	})
+		s.logAuditEntry(a2aAuditLog{
+			TaskID:     taskID,
+			CallerID:   callerID,
+			TenantID:   tenantID,
+			Method:     method,
+			Transition: "completed",
+			Timestamp:  task.UpdatedAt,
+		})
+	}
 
 	s.logf("gateway: A2A SendMessage task %s created for method %s", taskID, method)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -505,19 +521,25 @@ func (s *Server) handleA2ATask(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		// GET reads one task. A verb on the path is not allowed.
-		if verb != "" {
-			writeErr(w, http.StatusMethodNotAllowed, "use GET /a2a/v1/tasks/{task_id}")
-			return
+		// GET reads one task, or reads back a registered push-notification webhook.
+		switch verb {
+		case "":
+			s.handleA2AGetTaskByID(w, r, taskID)
+		case "pushNotificationConfig":
+			s.handleA2AGetPushConfig(w, r, taskID)
+		default:
+			writeErr(w, http.StatusMethodNotAllowed, "use GET /a2a/v1/tasks/{task_id} or GET /a2a/v1/tasks/{task_id}/pushNotificationConfig")
 		}
-		s.handleA2AGetTaskByID(w, r, taskID)
 	case http.MethodPost:
-		// POST applies a verb. Only "cancel" is supported.
-		if verb != "cancel" {
-			writeErr(w, http.StatusBadRequest, "only cancel verb is supported: POST /a2a/v1/tasks/{task_id}/cancel")
-			return
+		// POST applies a verb: cancel the task, or register a push-notification webhook.
+		switch verb {
+		case "cancel":
+			s.handleA2ACancelTaskByID(w, r, taskID)
+		case "pushNotificationConfig":
+			s.handleA2ASetPushConfig(w, r, taskID)
+		default:
+			writeErr(w, http.StatusBadRequest, "supported verbs: cancel, pushNotificationConfig")
 		}
-		s.handleA2ACancelTaskByID(w, r, taskID)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "use GET or POST")
 	}
@@ -559,21 +581,72 @@ func (s *Server) handleA2AGetTaskByID(w http.ResponseWriter, r *http.Request, ta
 }
 
 // handleA2ACancelTaskByID implements POST /a2a/v1/tasks/{task_id}/cancel
-// Mark cancellable tasks as canceled
+// A task bound to a live served session (SessionTrace) is canceled FOR REAL: the
+// session's drive-state is driven to Draining through the injected control seam (the
+// same seam the /v1/fak/session route uses), so the running arm stops at its next
+// boundary — the task record flips to "canceled" only after the run's cancel took.
+// An unbound task keeps the record-only cancel. Fail closed: a bound task whose
+// session cancel cannot be applied (no seam wired, refused, or errored) is NOT
+// marked canceled — a canceled record over a still-running session is the simulation
+// this handler no longer performs.
 func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request, taskID string) {
 	store := getA2AStore()
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	task, exists := store.tasks[taskID]
+	var sessionTrace string
+	if exists {
+		sessionTrace = task.SessionTrace
+		// Check if task can be canceled
+		if task.State == "completed" || task.State == "canceled" || task.State == "failed" {
+			store.mu.Unlock()
+			writeErr(w, http.StatusConflict, "task cannot be canceled in current state")
+			return
+		}
+	}
+	store.mu.Unlock()
 	if !exists {
 		writeErr(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	// Check if task can be canceled
-	if task.State == "completed" || task.State == "canceled" || task.State == "failed" {
-		writeErr(w, http.StatusConflict, "task cannot be canceled in current state")
+	// Bound task: cancel the real run first, outside the store lock (the control
+	// seam may perform durable writes). Only a consumed drain justifies the record
+	// flip below.
+	var sessionState *SessionState
+	if sessionTrace != "" {
+		if s.controlSession == nil {
+			writeErr(w, http.StatusConflict, "task is bound to session "+sessionTrace+" but session control is not configured; refusing a record-only cancel")
+			return
+		}
+		st, ok, err := s.controlSession(r.Context(), sessionTrace, "run", SessionControlRequest{Run: "draining"})
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "session cancel failed: "+err.Error())
+			return
+		}
+		if !ok {
+			// Terminal session or lost CAS race — the closed control refusal, not a
+			// silent record flip.
+			writeErr(w, http.StatusConflict, "session cancel refused (terminal or stale rev); task left unchanged")
+			return
+		}
+		sessionState = &st
+	}
+
+	store.mu.Lock()
+	// notifySnap carries a copy of the just-canceled task out of the locked region so the
+	// push-notification POST fires AFTER the store lock is released (this defer is registered
+	// before the unlock defer, so LIFO runs it last). Nil ⇒ an early-return path committed no
+	// transition, so nothing fires. See a2a_pushnotify.go.
+	var notifySnap *a2aTask
+	defer func() {
+		if notifySnap != nil {
+			s.a2aOnTaskTransition(notifySnap)
+		}
+	}()
+	defer store.mu.Unlock()
+	task, exists = store.tasks[taskID]
+	if !exists {
+		writeErr(w, http.StatusNotFound, "task not found")
 		return
 	}
 
@@ -581,6 +654,15 @@ func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request,
 	task.State = "canceled"
 	task.UpdatedAt = time.Now()
 	task.Error = "Task canceled by request"
+	if sessionState != nil {
+		task.Result = map[string]interface{}{
+			"session_canceled": true,
+			"session_run":      sessionState.Run,
+			"session_rev":      sessionState.Rev,
+		}
+	}
+	snap := *task
+	notifySnap = &snap
 
 	// Log audit entry
 	s.logAuditEntry(a2aAuditLog{
@@ -593,12 +675,18 @@ func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request,
 	})
 
 	s.logf("gateway: A2A task %s canceled", taskID)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"task_id":    taskID,
 		"state":      task.State,
 		"updated_at": task.UpdatedAt.UTC().Format(time.RFC3339),
 		"canceled":   true,
-	})
+	}
+	if sessionState != nil {
+		// The proof the cancel was real: the run's post-cancel drive state, read from
+		// the control seam's answer, never synthesized from the task record.
+		resp["session"] = sessionState
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleA2AGetExtendedAgentCard implements GET /a2a/v1/agent-card
