@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,9 +21,14 @@ type issueEditResult struct {
 	Repo         string   `json:"repo,omitempty"`
 	AddLabels    []string `json:"add_labels,omitempty"`
 	RemoveLabels []string `json:"remove_labels,omitempty"`
-	Args         []string `json:"args"`
-	URL          string   `json:"url,omitempty"`
-	Error        string   `json:"error,omitempty"`
+	// DroppedLabels are agent-proposed --add-label tokens that named no real repo
+	// label and were clamped out before dispatch (#4047). Surfaced (not silently
+	// dropped) so the caller — human or agent — sees exactly which hallucinated
+	// tokens never reached `gh issue edit`.
+	DroppedLabels []string `json:"dropped_labels,omitempty"`
+	Args          []string `json:"args"`
+	URL           string   `json:"url,omitempty"`
+	Error         string   `json:"error,omitempty"`
 }
 
 func runIssueEdit(stdout, stderr io.Writer, argv []string) int {
@@ -85,6 +91,33 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 		return 2
 	}
 
+	run := runner
+	if run == nil {
+		run = runTaskHandoffGH
+	}
+
+	// Closed-vocabulary label clamp at the actuator (#4047): filter agent-proposed
+	// --add-label tokens against the repo's REAL label set (`gh label list`) so a
+	// hallucinated label never reaches the `gh issue edit` side effect. LOUD, not
+	// silent — every dropped token is recorded in issueEditResult.DroppedLabels and
+	// echoed to stderr, giving the agent a signal it can self-correct on (fak's
+	// refuse-don't-drop norm, improving on the source's silent drop). The clamp runs
+	// on the dry-run path too so the rendered argv is truthful. Fail-OPEN on a
+	// label-list outage (keep the proposed set, warn) because a read failure must
+	// not wedge a repair loop, and an unknown label already errors at gh itself.
+	var droppedLabels []string
+	if len(addLabels) > 0 {
+		if canonical, ok := repoCanonicalLabels(run, *repo); ok {
+			addLabels, droppedLabels = clampLabelsToCanonical(addLabels, canonical)
+			if len(droppedLabels) > 0 {
+				fmt.Fprintf(stderr, "fak issue edit: dropped %d label(s) not in the repo label set: %s\n",
+					len(droppedLabels), strings.Join(droppedLabels, ", "))
+			}
+		} else {
+			fmt.Fprintln(stderr, "fak issue edit: warning: could not fetch repo label set; skipping label clamp")
+		}
+	}
+
 	args := []string{"issue", "edit", strconv.Itoa(*issue)}
 	if haveTitle {
 		args = append(args, "--title", *title)
@@ -104,7 +137,7 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 
 	result := issueEditResult{
 		DryRun: *dryRun, Issue: *issue, Title: *title, Repo: *repo,
-		AddLabels: addLabels, RemoveLabels: removeLabels, Args: args,
+		AddLabels: addLabels, RemoveLabels: removeLabels, DroppedLabels: droppedLabels, Args: args,
 	}
 
 	if *dryRun {
@@ -116,10 +149,6 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 		return 0
 	}
 
-	run := runner
-	if run == nil {
-		run = runTaskHandoffGH
-	}
 	out, errOut, ok := run(args)
 	result.OK = ok
 	result.URL = strings.TrimSpace(out)
@@ -137,4 +166,60 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 	}
 	fmt.Fprintln(stdout, result.URL)
 	return 0
+}
+
+// repoCanonicalLabels fetches the repo's real label set via `gh label list`,
+// reusing the SAME injected runner the edit dispatch uses so a test can stub both
+// the list and the edit through one fake. Returns the label names and whether the
+// fetch succeeded; a failed or unparseable fetch returns ok=false so the caller can
+// fail-open loudly rather than clamp against an empty set (which would drop every
+// proposed label). --limit 500 matches the source shim's ceiling.
+func repoCanonicalLabels(run issueCreateRunner, repo string) ([]string, bool) {
+	args := []string{"label", "list", "--json", "name", "--limit", "500"}
+	if strings.TrimSpace(repo) != "" {
+		args = append(args, "--repo", repo)
+	}
+	out, _, ok := run(args)
+	if !ok {
+		return nil, false
+	}
+	var rows []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rows); err != nil {
+		return nil, false
+	}
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if strings.TrimSpace(r.Name) != "" {
+			names = append(names, r.Name)
+		}
+	}
+	return names, true
+}
+
+// clampLabelsToCanonical keeps only proposed labels that name a real repo label
+// (matched case-insensitively, emitted in the canonical spelling); every other
+// proposed token is DROPPED and returned separately so the caller can surface it
+// loudly. This is the closed-vocabulary clamp at the actuator (#4047): a
+// hallucinated label never reaches `gh issue edit --add-label`. Order is preserved
+// and duplicates in the proposed list are collapsed to a single canonical entry.
+func clampLabelsToCanonical(proposed, canonical []string) (kept, dropped []string) {
+	byLower := make(map[string]string, len(canonical))
+	for _, c := range canonical {
+		byLower[strings.ToLower(strings.TrimSpace(c))] = c
+	}
+	seen := make(map[string]bool, len(proposed))
+	for _, p := range proposed {
+		key := strings.ToLower(strings.TrimSpace(p))
+		if canon, ok := byLower[key]; ok {
+			if !seen[key] {
+				seen[key] = true
+				kept = append(kept, canon)
+			}
+			continue
+		}
+		dropped = append(dropped, p)
+	}
+	return kept, dropped
 }
