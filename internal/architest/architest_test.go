@@ -266,6 +266,12 @@ var tier = map[string]int{
 	"ctxknobs":         1, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
 	"knobcensus":       2, // knob census (#2210): classifies every cmd/fak flag/env + skill knob as INTENT vs HOUSEKEEPING over a tree walk. Tool-shaped mechanism leaf; imports ctxknobs(1)+stdlib, off the hot path.
 	"treedoctor":       2, // tree-hygiene doctor over safecommit's lock seam plus git worktree reads; mechanism/tool leaf, off the hot path.
+	"tooltrend":        3, // cross-session tool-mix & I/O-shape drift lens (#2826): folds toolrollup(3) per-tool rollups across a session corpus into a drift/delta trend. Composer/analytics leaf, imports toolrollup(3)+stdlib, off the hot path.
+	"toolrollup":       3, // per-tool usage rollup over a trajectory(3) corpus (#2824): counts/costs/error-rates folded per tool. Composer/analytics leaf, imports trajectory(3)+stdlib, off the hot path.
+	"cachesweep":       3, // prompt-cache sweep/eviction planner over a radixkv(3) store; composer leaf, imports radixkv(3)+stdlib, off the hot path.
+	"qaprocessscore":   3, // QA-process quality score composing dogfoodissues(3)+brittleness(1); composer leaf, off the hot path.
+	"sessionjournal":   1, // durable session-event journal over procguard(1); foundation ledger leaf, off the hot path.
+	"toolseq":          1, // per-session tool-call SEQUENCE fold (#2825): n-gram/transition counts over a trajectory's tool stream; stdlib-only foundation leaf, imports nothing internal, off the hot path.
 	"commitintent":     1, // durable commit-intent queue record and drain ordering contract; pure stdlib, off the hot path.
 	"commitrollup":     1, // pure compatible-intent rollup planner and pathset assertion helper; stdlib-only, off the hot path.
 	"commitlane":       2, // read-only commit-lane status over safecommit's lock seam plus git/process probes; mechanism/tool leaf, off the hot path.
