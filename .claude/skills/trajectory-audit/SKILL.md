@@ -1,6 +1,6 @@
 ---
 name: trajectory-audit
-description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens — plus the behavioral stuck/churn lens (#2365): per-tool error rates, shell timeout kills, foreground sleep-polls, Edit/Write read-discipline churn, repeated identical failure signatures, and per-file mutation churn. Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", "which sessions are stuck/looping/churning", or wants cross-session efficiency or behavior numbers. Read-only — emits a dated report, never edits code.
+description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, the cache-CREATE burst / suffix-cache-thrash lens (#3069) that a flattering read-share hides, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens — plus the behavioral stuck/churn lens (#2365): per-tool error rates, shell timeout kills, foreground sleep-polls, Edit/Write read-discipline churn, repeated identical failure signatures, and per-file mutation churn. Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", "which sessions are stuck/looping/churning", or wants cross-session efficiency or behavior numbers. Read-only — emits a dated report, never edits code.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
@@ -14,10 +14,13 @@ metadata:
 
 > Wraps `tools/session_audit.py` (exact token accounting from the transcript
 > `message.usage` records). Two lenses now run on every sweep:
-> the *token-weighted* lens — exact I:O ratio, cache reuse, cost (split by billing
-> bucket), tool mix, heaviest sessions — and the *behavioral* stuck/churn lens
-> (#2365): per-tool call/error counts + error rate, shell timeout kills (exit 143 /
-> "timed out"), foreground sleep-polls (`sleep`/`Start-Sleep` command prefix),
+> the *token-weighted* lens — exact I:O ratio, cache reuse, the **cache-CREATE
+> burst share** (#3069), cost (split by billing bucket), tool mix, heaviest
+> sessions — and the *behavioral* stuck/churn lens
+> (#2365): per-tool call/error counts + an honest raw-vs-genuine shell error rate
+> (genuine discounts policy-refusals and no-TTY hangs a shell change can't move),
+> shell timeout kills (exit 143 / "timed out"), interactive-editor/pager hangs
+> (`INTERACTIVE_HANG`), foreground sleep-polls (`sleep`/`Start-Sleep` command prefix),
 > Edit/Write read-discipline churn — sub-classified into post-resume (a `--resume`
 > read-state reset), self-duplicate (a guard-caught duplicate write), and the real
 > defect true-never-read — repeated identical failure signatures (≥3×), per-file
@@ -25,6 +28,18 @@ metadata:
 > *successful* identical calls (read-loops / glob-storms / output-file poll loops,
 > ≥8× the same tool+args — Monitor/TaskOutput excluded as the sanctioned poll surface).
 > **Honest scope:** it does **not** join the transcript to any external run-id spine.
+>
+> **Cache-CREATE burst lens (#3069) — the read-share blind spot.** A high
+> cache-read share looks healthy, but it *hides* the inverse waste: when a cached
+> suffix is invalidated mid-session the provider RE-writes it, billing a
+> `cache_create` **burst** — and because the re-created suffix is read back the
+> next turn, a thrashing session looks *more* cached, not less. The auditor
+> surfaces this with a **cache-CREATE burst share** + **create:read ratio** on the
+> headline, and a per-turn **suffix-cache-reset** detector (a `cache_read`
+> snap-back `>20,000` tok to a stable floor ≈ system-prompt+tools) that names the
+> **high-burst long sessions** (≥8 billed turns with ≥1 reset) the heaviest-by-
+> output table never shows. Reset counting is post `message.id` de-dup, so a
+> retried/re-serialized turn never double-counts.
 >
 > **Billing buckets — the one cost rule.** Each model's tokens land on its vendor's
 > invoice: `claude-*` is the Anthropic bucket; a `gemini-*` / `gpt-*` / local model
@@ -89,9 +104,12 @@ The report gives you, in order:
 
 1. **Machine-wide totals (EXACT)** — output tokens (the real work), fresh billed
    input, cache-read (prompt-cache / KV reuse), the **I:O ratio**, the
-   **cache-read share** of all ingested context, web search/fetch, multi-iteration
-   count, **Anthropic-billed cost** (assumed-price, flagged), plus a line for any
-   **other billing bucket** present and the non-billed `<synthetic>` turn count.
+   **cache-read share** of all ingested context, the **cache-CREATE burst share**
+   + **create:read ratio** (context re-written into the provider cache at write
+   rates — the burst counterpart the read-share hides, #3069), web search/fetch,
+   multi-iteration count, **Anthropic-billed cost** (assumed-price, flagged), plus
+   a line for any **other billing bucket** present and the non-billed
+   `<synthetic>` turn count.
 2. **Cost by billing bucket (provider)** — the answer to "is this Claude money or
    Gemini money?". Never sum across rows; an unpriced bucket shows "— (no card)".
 3. **Per-model breakdown** — the tier split (opus vs sonnet vs haiku), so a blended
@@ -101,16 +119,22 @@ The report gives you, in order:
 5. **Per-session distributions** — median/p90 of tool-calls, output tokens, I:O
    ratio, cache-hit fraction, read-only fraction. The tails are where the waste is.
 6. **Global tool mix** — a tool dominating the call count is the first thing to question.
-7. **Behavioral lens — stuck/churn detectors** — per-tool error rates, timeout
-   kills, sleep-polls, Edit/Write churn, then the two worst-offender tables:
+7. **Behavioral lens — stuck/churn detectors** — per-tool error rates (raw vs
+   **genuine**, where genuine discounts policy-refusals and no-TTY hangs a shell
+   change can't move), timeout kills, interactive-editor/pager hangs, sleep-polls,
+   Edit/Write churn, then the two worst-offender tables:
    sessions with a repeated identical failure (≥3× the same signature = a stuck
    loop) and sessions with file churn (≥5 mutations of one file = a rewrite-loop
-   smell). These rows are the behavior audit the token lens can't see — each one
+   smell). This section also carries the **cache-CREATE burst** rows (#3069): the
+   count of **suffix-cache invalidations** (per-turn `cache_read` snap-backs
+   `>20,000` tok, with the modal reset floor) and the **high-burst long-session**
+   table (≥8 turns with ≥1 reset — cache-create tok, cc-share, resets, floor, est.
+   $). These rows are the behavior audit the token lens can't see — each one
    names a session worth a `deep` drill.
 8. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
 
 The `trend` subcommand carries the same detectors per time bucket (`err%` /
-`t/o` / `slp` / `chrn` columns, plus a `behavior` object in `--json` rows), so a
+`t/o` / `hang` / `slp` / `chrn` columns, plus a `behavior` object in `--json` rows), so a
 regression in fleet behavior is visible week-over-week, not just in one sweep.
 
 Do **not** open the individual `.jsonl` files unless a heaviest-session row needs
@@ -122,6 +146,11 @@ re-read it in a loop.
 - A high cache-read share is **good** (it's KV reuse the harness already captures),
   not waste — a healthy long-running machine sits in the ~90%+ band. A *low*
   cache-read share on a long session is the smell worth chasing.
+- The **cache-CREATE burst share** reads the *opposite* way: it is context billed
+  at write rates, so a high burst share / create:read ratio — or a session in the
+  high-burst table — is the smell, **not** reassurance (#3069). Because a burst
+  inflates the read-share the line above, don't let a healthy-looking ~90% read
+  share talk you out of chasing a session that also shows many suffix-cache resets.
 - A `--include-subagents` run counts sidechain/workflow transcripts that are
   normally uncounted; note them but don't double-count against the main thread.
 - A high I:O ratio is expected for read/research-heavy work; flag it only when it
