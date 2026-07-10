@@ -108,7 +108,7 @@ func TestGuardRotationLauncherWitnessesFirstFailureThenRotatedEnv(t *testing.T) 
 		t.Fatal("walled account did not rotate")
 	}
 	broker := toolprocgate.NewSpawnBroker()
-	meta := guardChildSpawnMetadata{AgentRunID: "run", ToolCallID: "guard-child:run", Backend: "anthropic", Envelope: toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}}}
+	meta := guardChildSpawnMetadata{AgentRunID: "run", ToolCallID: "guard-child:run", PolicyDigest: "sha256:test-policy", Backend: "anthropic", Envelope: toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}}}
 	_, child, err := launchGuardChildWithBroker(cmd, env, false, meta, broker, rt.launcher())
 	if err != nil {
 		t.Fatal(err)
