@@ -478,22 +478,7 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	// Allowed (exit 0). A clean completion (stage allow) is silent; a bounded stand-down is the
 	// residual false-stop — make it operator-visible (it is NOT fed to the model).
 	if stage == guardStopHookGiveUp {
-		// A give-up whose transcript shows the agent already wrote its sanctioned
-		// "no allowed path:" wrap-up is a graceful conclusion, not a bare stand-down —
-		// record it as such (the operator messages below are unchanged either way).
-		switch {
-		case rec.Transcript != nil && rec.Transcript.NotedNoAllowedPath:
-			rec.Disposition = string(stopDispCleanWrapup)
-		case useSame:
-			rec.Disposition = string(stopDispSameIssueGiveUp)
-		default:
-			rec.Disposition = string(stopDispBlindGiveUp)
-		}
-		if useSame {
-			fmt.Fprintln(stderr, guardStopHookSameGiveUpMessage(depth, bound))
-		} else {
-			fmt.Fprintln(stderr, guardStopHookGiveUpMessage(depth, bound))
-		}
+		recordGuardStopHookGiveUp(stderr, &rec, useSame, depth, bound)
 		return 0
 	}
 	if stage == guardStopHookAllow {
@@ -519,6 +504,27 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	}
 	rec.Disposition = string(stopDispCleanCompletion)
 	return 0
+}
+
+// recordGuardStopHookGiveUp stamps the stop row's give-up disposition and prints the
+// operator-facing stand-down line (exit 0 path, so it is NOT fed to the model). A give-up
+// whose transcript shows the agent already wrote its sanctioned "no allowed path:" wrap-up
+// is a graceful conclusion, not a bare stand-down — record it as such (the operator
+// messages below are unchanged either way).
+func recordGuardStopHookGiveUp(stderr io.Writer, rec *guardStopRecord, useSame bool, depth, bound int) {
+	switch {
+	case rec.Transcript != nil && rec.Transcript.NotedNoAllowedPath:
+		rec.Disposition = string(stopDispCleanWrapup)
+	case useSame:
+		rec.Disposition = string(stopDispSameIssueGiveUp)
+	default:
+		rec.Disposition = string(stopDispBlindGiveUp)
+	}
+	if useSame {
+		fmt.Fprintln(stderr, guardStopHookSameGiveUpMessage(depth, bound))
+	} else {
+		fmt.Fprintln(stderr, guardStopHookGiveUpMessage(depth, bound))
+	}
 }
 
 // emitUnusedSubstrateAdvisory prints a one-line advisory (never blocks the stop) when a
