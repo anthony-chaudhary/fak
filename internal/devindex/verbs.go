@@ -285,6 +285,7 @@ var verbManifest = []Verb{
 	{Name: "toolproc", Synopsis: "the kernel's process table for tool calls: fold a lifecycle journal into deadline/stall/orphan/kill verdicts", Lane: "cmd", Doc: "docs/notes/CONCEPT-TOOL-PROCESS-TABLE-2026-07-02.md"},
 	{Name: "top", Synopsis: "= fak ps --watch (the live process-table top mode)", Lane: "cmd"},
 	{Name: "traj", Synopsis: "the trajectory-corpus toolkit (similar/cluster/score/gc/export) over recorded turns", Lane: "cmd"},
+	{Name: "trajctl", Synopsis: "trajectory-control objective lifecycle (declare/close/list/curve/score/scorers) over the trajctl ledger", Lane: "cmd"},
 	{Name: "trajquery", Synopsis: "scoped SQL SELECT over your own trajectory corpus; the validator refuses out-of-scope queries (run/validate)", Lane: "cmd"},
 	{Name: "tree-doctor", Synopsis: "the worktree doctor: detect and prune stray / dead git worktrees", Lane: "cmd"},
 	{Name: "trunk-build-probe", Synopsis: "read-only diagnosis of whether the release gate's red trunk is a forgotten `git add` vs a real break", Lane: "cmd"},

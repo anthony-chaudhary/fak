@@ -275,6 +275,7 @@ var verbTiers = map[string]VerbTier{
 	"tool-coverage-audit":           TierDev,
 	"toolproc":                      TierDev,
 	"traj":                          TierDev,
+	"trajctl":                       TierDev,
 	"trajquery":                     TierDev,
 	"tree-doctor":                   TierDev,
 	"trunk-build-probe":             TierDev,

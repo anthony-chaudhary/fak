@@ -6,12 +6,12 @@ package main
 // the thing being scored before any scorer can run; this is that naming
 // surface.
 //
-// The main.go dispatch case is intentionally NOT wired in this change --
-// main.go is carrying unrelated in-flight work (the verbFlagUsage sweep) and a
-// shared-tree pathspec commit would sweep it (the peer-sweep-commit fence; see
-// cmd/fak/memvaluescore.go for the precedent). The one-line
-// `case "trajctl": cmdTrajctl(os.Args[2:])` lands when that lane clears; until
-// then the verb runs through its package tests (runTrajctl below).
+// UNPARKED (#2765, the CLI half): the main.go dispatch case
+// `case "trajctl": cmdTrajctl(os.Args[2:])` is now wired -- the peer-WIP fence
+// that held it out (the verbFlagUsage sweep on main.go) has cleared, so `fak
+// trajctl` is a live operator front door and the superloop improve-trajectory
+// enter-hints (`fak trajctl curve ...`) are runnable-as-printed. The
+// steering-ladder / regime-gated nudge half of #2765 stays open.
 
 import (
 	"flag"
@@ -25,8 +25,6 @@ import (
 )
 
 func cmdTrajctl(argv []string) { os.Exit(runTrajctl(os.Stdout, os.Stderr, argv)) }
-
-var _ = cmdTrajctl // parked: referenced by the main.go case once the cmd lane clears
 
 const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over internal/trajctl, #2533)
 

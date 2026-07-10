@@ -226,6 +226,8 @@ func main() {
 		cmdSnapshot(os.Args[2:])
 	case "traj":
 		cmdTraj(os.Args[2:])
+	case "trajctl":
+		cmdTrajctl(os.Args[2:])
 	case "shadowgit":
 		cmdShadowGit(os.Args[2:])
 	case "signals":
@@ -1202,7 +1204,7 @@ func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.S
 	case "run":
 		run, ok := session.ParseRunState(req.Run)
 		if !ok {
-			return session.State{}, false, fmt.Errorf("unknown run-state %q (want running|throttled|paused|draining|stopped)", req.Run)
+			return session.State{}, false, fmt.Errorf("unknown run-state %q (want running|throttled|paused|draining|terminating|stopped)", req.Run)
 		}
 		if req.IfRev > 0 {
 			return casApply(tbl, traceID, req.IfRev, func(s *session.State) {
@@ -1266,7 +1268,7 @@ func casApply(tbl *session.Table, traceID string, expectRev uint64, apply func(*
 // and Stopped carry the reason, Running clears it.
 func transitionReason(to session.RunState, reason string) string {
 	switch to {
-	case session.Throttled, session.Stopped:
+	case session.Throttled, session.Stopped, session.Terminating:
 		return reason
 	case session.Running:
 		return ""
