@@ -60,5 +60,75 @@ func TestDriveCarryFoldLastExplicitCarryWins(t *testing.T) {
 	}
 }
 
+// TestDriveCarryMonotoneClampsStaleRegrant proves the through-line the cluster exists to
+// fix: a stale later snapshot with HIGHER remaining budget cannot refill a spent-down
+// session. Raw FoldDriveCarry takes the last-written (higher) value; ReconcileDriveCarry
+// clamps it to the low snapshot.
+func TestDriveCarryMonotoneClampsStaleRegrant(t *testing.T) {
+	rows := []DriveStateRow{
+		{Session: "sid-a", TurnsLeft: ptr64(2), TokensLeft: ptr64(200), ContextTokensLeft: ptr64(150), SpendMicroCentsLeft: ptr64(50), TimeLeftNanos: ptr64(1_000)},
+		{Session: "sid-a", State: string(DrivePaused)}, // interleaved hold row: no carry, must not disturb the clamp
+		{Session: "sid-a", TurnsLeft: ptr64(10), TokensLeft: ptr64(1000), ContextTokensLeft: ptr64(800), SpendMicroCentsLeft: ptr64(500), TimeLeftNanos: ptr64(9_000)},
+	}
+	if raw := FoldDriveCarry(rows)["sid-a"]; raw.TurnsLeft != 10 || raw.TokensLeft != 1000 {
+		t.Fatalf("raw FoldDriveCarry = %+v, want the last-written higher snapshot (the re-grant we forbid)", raw)
+	}
+	got := ReconcileDriveCarry(rows)["sid-a"]
+	want := DriveCarry{TurnsLeft: 2, TokensLeft: 200, ContextTokensLeft: 150, SpendMicroCentsLeft: 50, TimeLeftNanos: 1_000}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reconciled carry = %+v, want clamped to the low snapshot %+v", got, want)
+	}
+}
+
+// TestDriveCarryMonotoneDrainedStaysZero proves a spend-drained axis (Left=0) stays 0
+// across a later refill attempt — the honest-money rule of Recontinue, on the relaunch path.
+func TestDriveCarryMonotoneDrainedStaysZero(t *testing.T) {
+	rows := []DriveStateRow{
+		{Session: "sid-a", TokensLeft: ptr64(0), SpendMicroCentsLeft: ptr64(0)},
+		{Session: "sid-a", TokensLeft: ptr64(5000), SpendMicroCentsLeft: ptr64(9999)},
+	}
+	got := ReconcileDriveCarry(rows)["sid-a"]
+	if got.TokensLeft != 0 || got.SpendMicroCentsLeft != 0 {
+		t.Fatalf("drained carry = %+v, want tokens/spend clamped to 0", got)
+	}
+}
+
+// TestDriveCarryMonotoneReArmRaises proves an explicit operator re-arm is the ONLY thing
+// that raises a remaining axis; an ordinary higher row is clamped.
+func TestDriveCarryMonotoneReArmRaises(t *testing.T) {
+	rows := []DriveStateRow{
+		{Session: "sid-a", TurnsLeft: ptr64(1), TokensLeft: ptr64(100)},
+		{Session: "sid-a", TurnsLeft: ptr64(9), TokensLeft: ptr64(900)},              // ordinary row: cannot raise
+		{Session: "sid-a", TurnsLeft: ptr64(8), TokensLeft: ptr64(800), ReArm: true}, // explicit re-arm: raises
+	}
+	if mid := ReconcileDriveCarry(rows[:2])["sid-a"]; mid.TurnsLeft != 1 || mid.TokensLeft != 100 {
+		t.Fatalf("pre-rearm carry = %+v, want clamped to the low snapshot {1,100}", mid)
+	}
+	got := ReconcileDriveCarry(rows)["sid-a"]
+	if got.TurnsLeft != 8 || got.TokensLeft != 800 {
+		t.Fatalf("post-rearm carry = %+v, want the re-armed snapshot {8,800}", got)
+	}
+}
+
+// TestDriveCarryMonotoneCarriesOmittedAxesAndObjective locks the snapshot semantics: an
+// axis a later row omits keeps its prior folded value (not zero), while the objective
+// identity fields take the latest value (a re-pin is never clamped away).
+func TestDriveCarryMonotoneCarriesOmittedAxesAndObjective(t *testing.T) {
+	rows := []DriveStateRow{
+		{Session: "sid-a", TurnsLeft: ptr64(5), TokensLeft: ptr64(500), ObjectivePinID: "pin-1", ObjectiveDigest: "dig-1"},
+		{Session: "sid-a", TokensLeft: ptr64(300), ObjectivePinID: "pin-1", ObjectiveDigest: "dig-2"}, // omits TurnsLeft; re-pins digest
+	}
+	got := ReconcileDriveCarry(rows)["sid-a"]
+	if got.TurnsLeft != 5 {
+		t.Fatalf("TurnsLeft = %d, want prior value 5 carried forward (row omitted it)", got.TurnsLeft)
+	}
+	if got.TokensLeft != 300 {
+		t.Fatalf("TokensLeft = %d, want lowered to 300", got.TokensLeft)
+	}
+	if got.ObjectivePinID != "pin-1" || got.ObjectiveDigest != "dig-2" {
+		t.Fatalf("objective = %q/%q, want pin-1/dig-2 (identity last-wins)", got.ObjectivePinID, got.ObjectiveDigest)
+	}
+}
+
 func ptr64(v int64) *int64 { return &v }
 func ptrInt(v int) *int    { return &v }

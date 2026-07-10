@@ -147,6 +147,14 @@ type DriveStateRow struct {
 	ObjectivePinID      string `json:"objective_pin_id,omitempty"`
 	ObjectiveText       string `json:"objective_text,omitempty"`
 	ObjectiveDigest     string `json:"objective_digest,omitempty"`
+
+	// ReArm is the operator's explicit re-grant directive. It is the ONE thing that
+	// lets a carry row RAISE a remaining axis under ReconcileDriveCarry's non-regrant
+	// clamp — mirroring drivestate.go's sticky-Stopped precedence (only an operator
+	// release reverses it) and Recontinue's explicit-fresh-axis-wins rule
+	// (table.go:550-553, where a stated fresh spend axis overrides the carried one).
+	// Absent (the zero value) a row can only lower a remaining axis, never refill it.
+	ReArm bool `json:"re_arm,omitempty"`
 }
 
 // FoldDriveStates folds the append-only rows into the one current drive-state per
@@ -183,6 +191,88 @@ func FoldDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
 		out[sid] = row.driveCarry()
 	}
 	return out
+}
+
+// ReconcileDriveCarry folds the append-only carry rows into the SAFE remaining budget
+// per session under a non-regrant invariant: for each remaining axis (turns, tokens,
+// context, spend, time) the folded value is monotone-non-increasing across rows, so a
+// stale or higher-numbered row can never silently REFILL a budget the session already
+// spent down. This is the OS-relaunch analogue of Recontinue's honest-money rule
+// (RecontinueAtWithTransaction, table.go:514-566): a spend-drained parent carries
+// Left=0 under a positive cap, and no reset re-grants it.
+//
+// The ONLY thing that raises an axis is a row with ReArm set — an explicit operator
+// re-arm, adopted wholesale (mirroring the explicit-fresh-axis-wins precedence at
+// table.go:550-553). Generation and the objective fields are NOT remaining budget, so
+// they take the latest carry row's value (last-wins), never a min-clamp.
+//
+// Pure and total, same shape as FoldDriveCarry: same append-only rows in, same map out;
+// no clock, no I/O. Each carry row is treated as a COMPLETE remaining-budget snapshot
+// (which is what the PreCompact/Stop producer writes), so an axis a row omits carries
+// the prior folded value forward rather than reading as zero. FoldDriveCarry is left
+// intact for consumers that want the raw last-written value (e.g. audit/render); the
+// re-seed path consumes THIS clamped fold so a relaunch can never over-grant.
+func ReconcileDriveCarry(rows []DriveStateRow) map[string]DriveCarry {
+	out := make(map[string]DriveCarry)
+	for _, row := range rows {
+		sid := strings.TrimSpace(row.Session)
+		if sid == "" || !row.hasCarry() {
+			continue
+		}
+		prev, seen := out[sid]
+		if !seen || row.ReArm {
+			// First carry for the session, or an explicit operator re-arm: adopt the
+			// row's snapshot as-is. Re-arm is the sanctioned way to raise an axis.
+			out[sid] = row.driveCarry()
+			continue
+		}
+		out[sid] = row.clampNonRegrant(prev)
+	}
+	return out
+}
+
+// clampNonRegrant projects this row onto prev under the non-regrant rule: an axis the
+// row sets may only LOWER the prior folded remaining value (min), an axis the row omits
+// keeps prev's value, and generation/objective take the row's latest value.
+func (row DriveStateRow) clampNonRegrant(prev DriveCarry) DriveCarry {
+	out := prev // carry forward every axis the row does not restate
+	if row.TurnsLeft != nil {
+		out.TurnsLeft = minInt64(prev.TurnsLeft, *row.TurnsLeft)
+	}
+	if row.TokensLeft != nil {
+		out.TokensLeft = minInt64(prev.TokensLeft, *row.TokensLeft)
+	}
+	if row.ContextTokensLeft != nil {
+		out.ContextTokensLeft = minInt64(prev.ContextTokensLeft, *row.ContextTokensLeft)
+	}
+	if row.SpendMicroCentsLeft != nil {
+		out.SpendMicroCentsLeft = minInt64(prev.SpendMicroCentsLeft, *row.SpendMicroCentsLeft)
+	}
+	if row.TimeLeftNanos != nil {
+		out.TimeLeftNanos = minInt64(prev.TimeLeftNanos, *row.TimeLeftNanos)
+	}
+	if row.Generation != nil {
+		out.Generation = *row.Generation // generation counts up across resets — not a remaining axis
+	}
+	// Objective fields are identity, not budget: the latest non-empty value wins so a
+	// re-pin is never clamped away (see ReconcileDriveCarry's objective note).
+	if row.ObjectivePinID != "" {
+		out.ObjectivePinID = row.ObjectivePinID
+	}
+	if row.ObjectiveText != "" {
+		out.ObjectiveText = row.ObjectiveText
+	}
+	if row.ObjectiveDigest != "" {
+		out.ObjectiveDigest = row.ObjectiveDigest
+	}
+	return out
+}
+
+func minInt64(a, b int64) int64 {
+	if b < a {
+		return b
+	}
+	return a
 }
 
 func (row DriveStateRow) hasCarry() bool {
