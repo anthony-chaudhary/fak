@@ -127,7 +127,7 @@ func overlayProfile(base, ov HarnessProfile) HarnessProfile {
 		out.Name = ov.Name
 	}
 	if len(ov.Names) > 0 {
-		out.Names = ov.Names
+		out.Names = unionDetectNames(base.Names, ov.Names)
 	}
 	if ov.Wire != "" {
 		out.Wire = ov.Wire
@@ -146,6 +146,28 @@ func overlayProfile(base, ov HarnessProfile) HarnessProfile {
 	}
 	if ov.Identity != "" {
 		out.Identity = ov.Identity
+	}
+	return out
+}
+
+// unionDetectNames preserves every built-in alias while appending genuinely new
+// override names in declaration order. Matching is normalized the same way command
+// lookup is, so case/path spelling cannot introduce duplicate detect aliases.
+func unionDetectNames(base, override []string) []string {
+	out := make([]string, 0, len(base)+len(override))
+	seen := make(map[string]struct{}, len(base)+len(override))
+	for _, names := range [][]string{base, override} {
+		for _, name := range names {
+			key := baseName(name)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, name)
+		}
 	}
 	return out
 }

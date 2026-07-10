@@ -1,6 +1,7 @@
 package harnessprofile
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -136,5 +137,31 @@ func TestDumpJSONReflectsActive(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "acme-cli") {
 		t.Errorf("DumpJSON missing the config-declared harness:\n%s", b)
+	}
+}
+
+func TestConfigPartialOverridePreservesBuiltinDetectAliases(t *testing.T) {
+	set, err := Resolve([]byte(`{"harnesses":[{"names":["claude"],"default_base_url":"https://gw.example/v1"}]}`))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := lookupIn(set, "claude-code")
+	if !ok {
+		t.Fatalf("claude-code alias disappeared after partial claude override: %#v", set)
+	}
+	if got.DefaultBaseURL != "https://gw.example/v1" {
+		t.Fatalf("claude-code DefaultBaseURL = %q, want override", got.DefaultBaseURL)
+	}
+	base, _ := lookupIn(Builtins(), "claude")
+	if !reflect.DeepEqual(got.Repoint, base.Repoint) || got.Credential != base.Credential || got.ConfigHomeGlob != base.ConfigHomeGlob {
+		t.Fatalf("base wiring was not preserved: got=%+v base=%+v", got, base)
+	}
+}
+
+func TestUnionDetectNamesStableAndDeduplicated(t *testing.T) {
+	got := unionDetectNames([]string{"claude", "claude-code"}, []string{"CLAUDE", "new-alias", "claude-code"})
+	want := []string{"claude", "claude-code", "new-alias"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unionDetectNames = %#v, want %#v", got, want)
 	}
 }
