@@ -247,6 +247,55 @@ func TestProviderAdaptersMarshalNativeToolShapes(t *testing.T) {
 	}
 }
 
+// TestOpenAIResponsesContinuationKeepsCallIDOutOfItemID is the regression witness for
+// the fakc turn-2 HTTP 400. A Responses function call carries two distinct identifiers:
+// call_id binds the later function_call_output, while id is the provider-owned output-item
+// id ("fc_...") and is optional on input. The canonical ToolCall only retains call_id, so
+// copying its "call_..." value into BOTH fields produced an invalid continuation:
+//
+//	Invalid 'input[3].id': 'call_...'. Expected an ID that begins with 'fc'.
+//
+// Omit the unavailable item id rather than fabricating one; preserve call_id exactly so
+// the result still binds to the function call.
+func TestOpenAIResponsesContinuationKeepsCallIDOutOfItemID(t *testing.T) {
+	adapter := openAIResponsesAdapter{}
+	body, err := adapter.MarshalRequest(adapterRequest{
+		Model: "gpt-test",
+		Messages: []Message{
+			{Role: RoleUser, Content: "run a tool"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{
+				ID:   "call_E9wv3KvrwBNMbZ9nEJKFNq0J",
+				Type: "function",
+				Function: Func{
+					Name:      "shell_command",
+					Arguments: `{"command":"Get-Location"}`,
+				},
+			}}},
+			{Role: RoleTool, ToolCallID: "call_E9wv3KvrwBNMbZ9nEJKFNq0J", Content: `{"ok":true}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal continuation: %v", err)
+	}
+	var req openAIResponsesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode continuation: %v\n%s", err, body)
+	}
+	if len(req.Input) != 3 {
+		t.Fatalf("input items = %d, want 3: %s", len(req.Input), body)
+	}
+	call := req.Input[1]
+	if call.Type != "function_call" || call.CallID != "call_E9wv3KvrwBNMbZ9nEJKFNq0J" {
+		t.Fatalf("function call binding changed: %+v", call)
+	}
+	if call.ID != "" {
+		t.Fatalf("function call item id = %q, want omitted (call_id is not an fc_ item id): %s", call.ID, body)
+	}
+	if got := req.Input[2].CallID; got != call.CallID {
+		t.Fatalf("function_call_output.call_id = %q, want %q", got, call.CallID)
+	}
+}
+
 func TestOpenAIAdapterToolMessagesAsTextLowersContinuation(t *testing.T) {
 	adapter := openAIAdapter{provider: ProviderOpenAI}
 	messages := adapterTestMessages("# fak")

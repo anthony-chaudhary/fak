@@ -552,7 +552,6 @@ func openAIResponsesInput(messages []Message) []openAIResponsesItem {
 				callID := tc.ID
 				out = append(out, openAIResponsesItem{
 					Type:      "function_call",
-					ID:        callID,
 					CallID:    callID,
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
