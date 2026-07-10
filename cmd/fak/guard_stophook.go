@@ -973,11 +973,32 @@ func parseGuardStopHookSignals(metrics string) (guardStopHookSignals, error) {
 		if len(fields) < 2 {
 			continue
 		}
-		value, err := strconv.ParseFloat(fields[1], 64)
-		if err != nil {
-			return guardStopHookSignals{}, fmt.Errorf("parse %s value %q: %w", fields[0], fields[1], err)
+		// The Prometheus sample name is fields[0] up to any label set ("name{labels}"). Strip the
+		// labels and match BEFORE parsing a value, so this scan only ever reads a value for a line it
+		// consumes. This /metrics endpoint carries the gateway's WHOLE scrape (labeled families,
+		// histograms), and a label value can hold a space — promQuote escapes \, ", and newline but
+		// NOT spaces — which strings.Fields would split, pushing a non-numeric token into the middle
+		// of the line. Parsing every line's value (the old fields[1]) would then hard-fail the entire
+		// scan on one unrelated series and silently fail-open the deny-all governor. Stripping the
+		// label set also lets a future LABELED emission of one of our own gauges still match.
+		name := fields[0]
+		if brace := strings.IndexByte(name, '{'); brace >= 0 {
+			name = name[:brace]
 		}
-		switch fields[0] {
+		switch name {
+		case guardStopHookMetricName, guardStopHookSameMetricName,
+			guardStopHookToolFeedbackMetricName, guardStopHookFakVerbCallsMetricName:
+		default:
+			continue // not one of ours — its value shape can never gate the scan
+		}
+		// The value is the LAST field (Prometheus puts it after the optional label set), so this is
+		// correct whether or not the line carries labels.
+		raw := fields[len(fields)-1]
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return guardStopHookSignals{}, fmt.Errorf("parse %s value %q: %w", name, raw, err)
+		}
+		switch name {
 		case guardStopHookMetricName:
 			out.DenyAllConsecutive = int(value)
 			foundDenyAll = true
