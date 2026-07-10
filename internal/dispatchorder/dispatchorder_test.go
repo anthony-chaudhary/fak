@@ -103,6 +103,7 @@ const allZeroGolden = `
   "cooling_count": 1,
   "collision_count": 0,
   "generation_held_count": 0,
+  "blocked_count": 0,
   "collisions_avoided": 0,
   "lanes_utilized": 3,
   "serialization_wasted": 0,
@@ -396,6 +397,7 @@ const defaultCollisionAdmissionGolden = `
   "cooling_count": 0,
   "collision_count": 1,
   "generation_held_count": 0,
+  "blocked_count": 0,
   "collisions": [
     {
       "a": "gateway-old",
@@ -698,6 +700,94 @@ func TestNegativeCooldownDisables(t *testing.T) {
 	}})
 	if r.Pick() != "fresh" {
 		t.Errorf("pick = %q, want fresh (cooldown disabled)", r.Pick())
+	}
+}
+
+// TestBlockedByOpenPrereqSoftHold is the headline prerequisite gate (#3224): B declares A as a
+// prerequisite (BlockedBy) and both are open this tick, so B is soft-held (DispBlocked, excluded
+// from Keep but still present in Order with the reason) while its prerequisite A is kept. Once A
+// leaves the candidate set (closed), B is dispatchable again — a hold, never a permanent ban.
+func TestBlockedByOpenPrereqSoftHold(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "A", Key: "A", UpdatedUnix: base - 100},
+		{ID: "B", Key: "B", BlockedBy: []string{"A"}, UpdatedUnix: base - 50},
+	}})
+	if dispoOf(r, "A") != DispKeep {
+		t.Fatalf("A disposition = %q, want keep (the open prerequisite is still dispatchable)", dispoOf(r, "A"))
+	}
+	if dispoOf(r, "B") != DispBlocked {
+		t.Fatalf("B disposition = %q, want blocked (prerequisite A is still open)", dispoOf(r, "B"))
+	}
+	if r.BlockedCount != 1 || r.KeepCount != 1 {
+		t.Fatalf("counts = blocked %d keep %d, want 1/1", r.BlockedCount, r.KeepCount)
+	}
+	// B is excluded from Keep but still legible in Order with the reason and the open prerequisite.
+	for _, id := range r.Keep {
+		if id == "B" {
+			t.Fatalf("keep = %v, want B excluded (soft-held on its open prerequisite)", r.Keep)
+		}
+	}
+	var b Ranked
+	for _, x := range r.Order {
+		if x.ID == "B" {
+			b = x
+		}
+	}
+	if b.Reason != ReasonBlockedByOpenPrereq {
+		t.Fatalf("B reason = %q, want %q", b.Reason, ReasonBlockedByOpenPrereq)
+	}
+	if len(b.BlockedByOpen) != 1 || b.BlockedByOpen[0] != "A" {
+		t.Fatalf("B blocked_by_open = %#v, want [A]", b.BlockedByOpen)
+	}
+	if r.Pick() != "A" {
+		t.Fatalf("pick = %q, want A (B is soft-held behind its prerequisite)", r.Pick())
+	}
+
+	// Once the prerequisite A closes (leaves the set), B unblocks and is dispatchable.
+	r2 := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "B", Key: "B", BlockedBy: []string{"A"}, UpdatedUnix: base - 50},
+	}})
+	if dispoOf(r2, "B") != DispKeep {
+		t.Fatalf("B disposition with A absent = %q, want keep (prerequisite closed)", dispoOf(r2, "B"))
+	}
+	if r2.Pick() != "B" {
+		t.Fatalf("pick with A absent = %q, want B", r2.Pick())
+	}
+}
+
+// TestBlockedByMutualCycleLowestIDDispatches: an A<->B mutual block (each names the other as a
+// prerequisite) breaks deterministically toward the LOWEST ID — A dispatches, B is held — so a
+// dependency cycle resolves to one dispatchable unit instead of hanging or freezing both.
+func TestBlockedByMutualCycleLowestIDDispatches(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "B", Key: "B", BlockedBy: []string{"A"}, UpdatedUnix: base - 10},
+		{ID: "A", Key: "A", BlockedBy: []string{"B"}, UpdatedUnix: base - 20},
+	}})
+	if dispoOf(r, "A") != DispKeep {
+		t.Fatalf("A disposition = %q, want keep (lowest ID wins the cycle)", dispoOf(r, "A"))
+	}
+	if dispoOf(r, "B") != DispBlocked {
+		t.Fatalf("B disposition = %q, want blocked (higher ID yields in the cycle)", dispoOf(r, "B"))
+	}
+	if r.Pick() != "A" {
+		t.Fatalf("pick = %q, want A (lowest ID dispatches, no hang)", r.Pick())
+	}
+	if r.KeepCount != 1 || r.BlockedCount != 1 {
+		t.Fatalf("counts = keep %d blocked %d, want 1/1 (cycle resolves, never deadlocks)", r.KeepCount, r.BlockedCount)
+	}
+}
+
+// TestBlockedByAbsentPrereqFailOpen: a BlockedBy id that is NOT in the candidate set is an
+// already-closed prerequisite and does NOT block (fail-open) — the unit is dispatchable.
+func TestBlockedByAbsentPrereqFailOpen(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "B", Key: "B", BlockedBy: []string{"999-closed"}, UpdatedUnix: base - 50},
+	}})
+	if dispoOf(r, "B") != DispKeep {
+		t.Fatalf("B disposition = %q, want keep (absent prerequisite is closed, fail-open)", dispoOf(r, "B"))
+	}
+	if r.BlockedCount != 0 || r.Pick() != "B" {
+		t.Fatalf("blocked=%d pick=%q, want 0/B (fail-open on an absent prerequisite)", r.BlockedCount, r.Pick())
 	}
 }
 

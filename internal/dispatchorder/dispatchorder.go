@@ -60,6 +60,12 @@ const (
 	// generation window does not admit its horizon. It is held before supersede/order/collision
 	// pricing so later-horizon work cannot consume the default dispatch slot.
 	DispGenerationHeld Disposition = "generation_held"
+	// DispBlocked: this unit names a prerequisite (BlockedBy) that is still an OPEN candidate this
+	// tick — a SOFT hold, so it is excluded from Keep but kept in Order with the reason (legible,
+	// not silently dropped). Fail-open: a prerequisite ABSENT from the candidate set (already
+	// closed) does NOT block. Cycle-safe: a mutual A<->B block breaks toward the lowest ID — the
+	// lower keeps the dispatch, the higher is held — so exploratory work never deadlocks.
+	DispBlocked Disposition = "blocked"
 )
 
 // The closed reason vocabulary for a Ranked.Reason, so an observability sink records WHY
@@ -77,6 +83,9 @@ const (
 	ReasonCollisionRisk = "COLLISION_RISK"
 	// ReasonGenerationHeld: the candidate's generation is outside the requested/default window.
 	ReasonGenerationHeld = "GENERATION_HELD"
+	// ReasonBlockedByOpenPrereq: a prerequisite named in BlockedBy is still an open candidate this
+	// tick, so the unit is soft-held until the prerequisite closes (leaves the candidate set).
+	ReasonBlockedByOpenPrereq = "blocked_by_open_prereq"
 )
 
 // Candidate is one unit of dispatchable work — all the facts the order needs, none of the
@@ -115,6 +124,15 @@ type Candidate struct {
 	UpdatedUnix int64 `json:"updated_unix"`
 	// LastAttemptUnix is when a worker was last spawned for this unit (0 = never); the cooldown input.
 	LastAttemptUnix int64 `json:"last_attempt_unix"`
+	// BlockedBy names the ids of prerequisites this unit depends on — a dependency edge honored as
+	// a SOFT hold, never a hard ban. When a listed prerequisite is still an OPEN candidate in the
+	// SAME tick's set, this unit is held (DispBlocked): excluded from Keep but kept in Order with
+	// the reason, so the dependency is legible instead of silently dropped. Fail-open: a BlockedBy
+	// id ABSENT from the candidate set is an already-closed prerequisite and never holds. Cycle-safe:
+	// a mutual A<->B block breaks toward the lowest ID (the lower keeps the dispatch, the higher is
+	// held), so exploratory work never deadlocks or freezes on a dependency cycle. Empty for every
+	// legacy candidate, which keeps their disposition byte-identical (the no-regression guarantee).
+	BlockedBy []string `json:"blocked_by,omitempty"`
 	// Live reports that a worker is currently running this unit (the in-flight skip).
 	Live bool `json:"live"`
 	// Generation is the issue generation label ("gen/now", "gen/next", "gen/second-next",
@@ -182,6 +200,9 @@ type Ranked struct {
 	SupersededBy string `json:"superseded_by,omitempty"`
 	// CollidesWith names the unit(s) that caused a collision-risk serialization. Empty otherwise.
 	CollidesWith []string `json:"collides_with,omitempty"`
+	// BlockedByOpen names the still-OPEN prerequisite(s) that caused a DispBlocked soft hold —
+	// the subset of BlockedBy present in this tick's candidate set (sorted). Empty otherwise.
+	BlockedByOpen []string `json:"blocked_by_open,omitempty"`
 	// Recency is the freshness value the unit was judged on (echoed for transparency).
 	Recency int64 `json:"recency"`
 	// Rank is the 0-based dispatch position among DispKeep units; -1 for everything else.
@@ -223,6 +244,7 @@ type Result struct {
 	CoolingCount        int `json:"cooling_count"`
 	CollisionCount      int `json:"collision_count"`
 	GenerationHeldCount int `json:"generation_held_count"`
+	BlockedCount        int `json:"blocked_count"`
 	// Collisions is the priced collision graph over otherwise dispatchable fan-out candidates.
 	Collisions []Collision `json:"collisions,omitempty"`
 	// Repartition names the colliding candidates that need narrower scope before a later wave
@@ -315,6 +337,7 @@ func Plan(in Input) Result {
 		eligible = append(eligible, c)
 	}
 	winner := winnersByKey(eligible)
+	blocked := blockedByOpenPrereq(in.Candidates)
 
 	ranked := make([]Ranked, 0, len(in.Candidates))
 	for _, c := range in.Candidates {
@@ -326,6 +349,8 @@ func Plan(in Input) Result {
 			r.Disposition, r.Reason = DispGenerationHeld, ReasonGenerationHeld
 		case c.Key != "" && winner[c.Key] != c.ID:
 			r.Disposition, r.Reason, r.SupersededBy = DispSuperseded, ReasonSuperseded, winner[c.Key]
+		case len(blocked[c.ID]) > 0:
+			r.Disposition, r.Reason, r.BlockedByOpen = DispBlocked, ReasonBlockedByOpenPrereq, blocked[c.ID]
 		case cooldown > 0 && c.LastAttemptUnix > 0 && in.NowUnix-c.LastAttemptUnix < cooldown:
 			r.Disposition, r.Reason = DispCooling, ReasonCooldown
 		default:
@@ -372,6 +397,8 @@ func Plan(in Input) Result {
 			out.CollisionCount++
 		case DispGenerationHeld:
 			out.GenerationHeldCount++
+		case DispBlocked:
+			out.BlockedCount++
 		}
 	}
 	out.Collisions = collisions
@@ -463,6 +490,51 @@ func winnersByKey(cands []Candidate) map[string]string {
 		winner[k] = c.ID
 	}
 	return winner
+}
+
+// blockedByOpenPrereq computes, per candidate ID, the sorted set of prerequisites it names in
+// BlockedBy that are still OPEN candidates this tick — a SOFT hold, never a hard ban. A candidate
+// with a non-empty result is held (DispBlocked) rather than dispatched. Two invariants keep the
+// hold from ever deadlocking or freezing exploratory work:
+//
+//   - Fail-open: a prerequisite id ABSENT from this tick's candidate set is already closed (no
+//     longer an open unit) and never holds — so a dependency clears itself the moment its
+//     prerequisite leaves the set.
+//   - Cycle-safe: a mutual A<->B block (each names the other) breaks toward the LOWEST ID — the
+//     lower keeps the right to dispatch, only the higher is held — so a dependency cycle resolves
+//     deterministically to one dispatchable unit instead of hanging. A self-edge never blocks.
+func blockedByOpenPrereq(cands []Candidate) map[string][]string {
+	present := make(map[string]bool, len(cands))
+	names := make(map[string]map[string]bool, len(cands))
+	for _, c := range cands {
+		present[c.ID] = true
+	}
+	for _, c := range cands {
+		for _, p := range c.BlockedBy {
+			if names[c.ID] == nil {
+				names[c.ID] = make(map[string]bool, len(c.BlockedBy))
+			}
+			names[c.ID][p] = true
+		}
+	}
+	blocked := make(map[string][]string)
+	for _, c := range cands {
+		var open []string
+		for _, p := range c.BlockedBy {
+			if p == c.ID || !present[p] {
+				continue // a self-edge, or an absent (already-closed) prerequisite: fail-open, no hold
+			}
+			if names[p][c.ID] && c.ID < p {
+				continue // mutual A<->B cycle: the lowest ID keeps the dispatch, only the higher is held
+			}
+			open = appendUniqueString(open, p)
+		}
+		if len(open) > 0 {
+			sort.Strings(open)
+			blocked[c.ID] = open
+		}
+	}
+	return blocked
 }
 
 // beats reports whether a is the fresher duplicate than b: greater recency, then greater
