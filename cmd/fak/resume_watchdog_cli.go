@@ -321,6 +321,14 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			"phase": "launched", "attempt": attempt,
 		}
 		rwAppendLedger(ledgerPath, row)
+		// A3 (#4114): refresh the durable uuid<->trace identity row for the just-resumed UUID
+		// so its newest row names the account the resume re-homed onto. The resumed child can
+		// never self-record this — WatchdogChildEnv strips CLAUDE_CODE_SESSION_ID from its env
+		// (the mass-crash fix), so the guard-SessionStart producer is blind on the resume path;
+		// the watchdog, which still holds the UUID as p.Session, records it here. Best-effort
+		// and inherently live-only — this block runs only past the live spawn above, mirroring
+		// the ledger-append gating.
+		rwRefreshResumeIdentity(regDir, p)
 		history[p.Session] = append(hist, resume.Attempt{UnixSeconds: time.Now().Unix(), Phase: "launched"})
 		launched++
 		note("  RESUMED %s acct=%s pid=%d (attempt %d/%d; re-eligible only if it fails recoverably)",
@@ -969,6 +977,39 @@ func rwLoadIdentity(regDir string) map[string]string {
 		return nil
 	}
 	return traceByUUID
+}
+
+// rwRefreshResumeIdentity best-effort refreshes the durable uuid<->trace identity row
+// (resume_identity.jsonl, the A1 store) for a session the watchdog just resumed, so the
+// join's newest row for that UUID names the account the resume re-homed onto. It is the
+// resume-path twin of the guard-SessionStart producer: a watchdog-resumed child can NEVER
+// self-record the join, because WatchdogChildEnv strips CLAUDE_CODE_SESSION_ID from its env
+// (the mass-crash fix, WatchdogChildEnvDrop), so the UUID the SessionStart hook keys on is
+// blank in the child. The watchdog holds that UUID as p.Session, so it records it here.
+//
+// The trace endpoint is carried forward from the existing store (via rwLoadIdentity, the A4
+// forward reader): a re-home changes only the ACCOUNT, not the uuid<->trace pairing, and both
+// FoldIdentity and ResolveIdentity skip a row missing either endpoint — so re-stamping the
+// known trace keeps the refreshed row a full join whose account is now authoritative. A UUID
+// with no prior join still records its account (a half row the fold ignores, but the audit
+// read and any later full row still see it). Fail-open like every other watchdog write: a
+// blank UUID or an append error is a silent no-op, never a strand.
+func rwRefreshResumeIdentity(regDir string, p resume.WatchdogPlanRow) {
+	uuid := strings.TrimSpace(p.Session)
+	if uuid == "" {
+		return
+	}
+	account := strings.TrimSpace(p.ResumeAccount)
+	if account == "" {
+		account = strings.TrimSpace(p.Account)
+	}
+	_ = appendJSONL(resume.IdentityLedgerPath(regDir), resume.IdentityRow{
+		TS:      rwNowISO(),
+		UUID:    uuid,
+		Trace:   rwLoadIdentity(regDir)[uuid], // carry the known trace; "" = a half row the fold skips
+		Account: account,
+		Via:     "resume-watchdog",
+	})
 }
 
 // rwWorkerAccounts is the set of account dir-basenames policy still offers as workers.

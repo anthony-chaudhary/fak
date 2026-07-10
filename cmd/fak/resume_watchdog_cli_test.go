@@ -740,3 +740,135 @@ func TestRwResumeArgvGuardFronting(t *testing.T) {
 		t.Fatalf("blank-fak fallback = %#v, want bare %#v", got, bare)
 	}
 }
+
+// rwRecontinuePlan seeds a re-homed STOPPED_MIDTOOL plan row plus the prior guard-SessionStart
+// identity row (uuid<->trace, on the OWNER account), and returns the transcript UUID. The source
+// transcript is materialized so a live tick's RehomeTranscript copy succeeds (else the row is
+// skipped before the launch). It is the shared fixture for the recontinue-refresh tests.
+func rwRecontinuePlan(t *testing.T, regDir string) string {
+	t.Helper()
+	sid := "sid-recont-1234567890"
+	srcConfig := t.TempDir() // owner ".claude-a" config dir (holds the transcript to re-home)
+	dstConfig := t.TempDir() // ".claude-target" resume config dir
+	work := t.TempDir()
+	// The transcript RehomeTranscript reads: <srcCfg>/projects/<project>/<sid>.jsonl.
+	proj := filepath.Join(srcConfig, "projects", "P")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, sid+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcJSON, _ := json.Marshal(srcConfig)
+	dstJSON, _ := json.Marshal(dstConfig)
+	workJSON, _ := json.Marshal(work)
+	plan := `{"plan":[{` +
+		`"session":"` + sid + `","account":".claude-a","resume_account":".claude-target","project":"P",` +
+		`"config_dir":` + string(srcJSON) + `,` +
+		`"resume_config_dir":` + string(dstJSON) + `,` +
+		`"cwd":` + string(workJSON) + `,` +
+		`"disp":"STOPPED_MIDTOOL","rehomed":true` +
+		`}]}`
+	if err := os.WriteFile(filepath.Join(regDir, "resume_plan.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The prior fresh-start join (A2), recorded on the owner account before the crash.
+	seed := `{"ts":"2026-07-01T00:00:00Z","uuid":"` + sid + `","trace":"trace-xyz","account":".claude-a","via":"guard-sessionstart"}` + "\n"
+	if err := os.WriteFile(resume.IdentityLedgerPath(regDir), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return sid
+}
+
+// A3 (#4114): a LIVE watchdog resume of a re-homed row refreshes the identity join so the
+// newest row for the UUID names the resume-target account, while carrying the prior trace
+// forward — so the join stays whole and ResolveIdentity surfaces the new account.
+func TestResumeIdentityRecontinueLiveRefreshesAccount(t *testing.T) {
+	rwHoldTestEnv(t)
+	regDir := t.TempDir()
+	logDir := t.TempDir()
+	sid := rwRecontinuePlan(t, regDir)
+
+	oldBroker := launchSpawnBroker
+	oldSpawn := rwSpawnResumeLaunch
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant { return allowLaunchBrokerGrant(a, "unit-test-allow") }
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
+		return 12345, nil
+	}
+	t.Cleanup(func() { launchSpawnBroker = oldBroker; rwSpawnResumeLaunch = oldSpawn })
+
+	var out, errb bytes.Buffer
+	rc := runResumeWatchdog(&out, &errb, []string{
+		"--live", "--no-refresh", "--reg-dir", regDir, "--log-dir", logDir, "--spacing-sec", "0",
+	})
+	if rc != 0 {
+		t.Fatalf("watchdog rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	// Sanity: the row actually launched (else there is nothing to refresh).
+	if led, _ := os.ReadFile(filepath.Join(regDir, "resume_ledger.jsonl")); !strings.Contains(string(led), `"phase":"launched"`) {
+		t.Fatalf("expected a launched ledger row:\n%s", led)
+	}
+
+	rows := resume.LoadIdentityRows(regDir)
+	var newest resume.IdentityRow
+	found := false
+	for _, r := range rows {
+		if strings.TrimSpace(r.UUID) == sid {
+			newest, found = r, true // last write wins (append-only file order)
+		}
+	}
+	if !found {
+		t.Fatalf("no identity row for %s after live resume:\n%+v", sid, rows)
+	}
+	if newest.Account != ".claude-target" {
+		t.Fatalf("newest row account = %q, want the resume target .claude-target", newest.Account)
+	}
+	if newest.Via != "resume-watchdog" {
+		t.Fatalf("newest row via = %q, want resume-watchdog", newest.Via)
+	}
+	if newest.Trace != "trace-xyz" {
+		t.Fatalf("newest row trace = %q, want the prior trace carried forward (trace-xyz)", newest.Trace)
+	}
+	// The refreshed row is a whole join, so the resolver surfaces the new account as latest.
+	if m := resume.ResolveIdentity(rows, sid); !m.OK || m.Row.Account != ".claude-target" || m.Paired != "trace-xyz" {
+		t.Fatalf("ResolveIdentity(%s) = %+v, want OK with account .claude-target paired to trace-xyz", sid, m)
+	}
+}
+
+// A3 (#4114): a DRY-RUN tick records nothing — the refresh fires only on the live launch
+// path, mirroring the ledger-append gating.
+func TestResumeIdentityRecontinueDryRunWritesNothing(t *testing.T) {
+	rwHoldTestEnv(t)
+	regDir := t.TempDir()
+	logDir := t.TempDir()
+	_ = rwRecontinuePlan(t, regDir)
+
+	oldBroker := launchSpawnBroker
+	oldSpawn := rwSpawnResumeLaunch
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant { return allowLaunchBrokerGrant(a, "unit-test-allow") }
+	spawned := false
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
+		spawned = true
+		return 12345, nil
+	}
+	t.Cleanup(func() { launchSpawnBroker = oldBroker; rwSpawnResumeLaunch = oldSpawn })
+
+	var out, errb bytes.Buffer
+	rc := runResumeWatchdog(&out, &errb, []string{
+		"--no-refresh", "--reg-dir", regDir, "--log-dir", logDir, "--spacing-sec", "0",
+	})
+	if rc != 0 {
+		t.Fatalf("watchdog rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	if spawned {
+		t.Fatal("dry-run must not spawn a resume")
+	}
+	raw, _ := os.ReadFile(resume.IdentityLedgerPath(regDir))
+	if strings.Contains(string(raw), "resume-watchdog") {
+		t.Fatalf("dry-run refreshed the identity store (should be live-only):\n%s", raw)
+	}
+	// The seed row is the only line — the fold still resolves the pre-crash pairing untouched.
+	if rows := resume.LoadIdentityRows(regDir); len(rows) != 1 || rows[0].Via != "guard-sessionstart" {
+		t.Fatalf("dry-run mutated the identity store: %+v", rows)
+	}
+}
