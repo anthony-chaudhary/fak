@@ -66,6 +66,49 @@ var (
 	dosTestLeadMarkers = setOf("test", "tests", "testing", "spec", "specs", "coverage", "assertion", "assertions")
 )
 
+// dosNoClaimMarkers / dosNoClaimPhrases mirror commit_audit.py _NOCLAIM_MARKERS — the FIRST,
+// precedence-topping rung of classify_claim. A marker appearing ANYWHERE in the subject as a whole
+// word (single) or a substring (phrase) makes the referee return claim_kind=none BEFORE it inspects
+// the type token, the DOC/TEST rungs, or a leading code verb. So it bites EVERY commit type — a
+// `fix(x): correct the release gating` ABSTAINs on `release` despite `fix`+`correct` — and it is the
+// rung dosWouldAbstainOnCodeEffect (feat/perf, leading-verb only) structurally cannot see. Real
+// victims: c024455d3 `add magic+version envelope …` (the `+` splits out the whole word `version`)
+// and f7c997c4b `… over refs/fak/wip/*` (`wip`); both shipped real source+tests UNWITNESSED.
+var (
+	dosNoClaimMarkers = setOf(
+		"wip", "misc", "cleanup", "chore", "bump", "version", "release", "merge",
+		"revert", "format", "lint", "whitespace", "style", "nit", "nits",
+	)
+	dosNoClaimPhrases = []string{"address review", "review feedback", "rename variable"}
+)
+
+// dosWordRE mirrors commit_audit.py's whole-word tokenizer (re.findall(r"[a-z][a-z']*", s)): it is
+// what makes a marker match WHOLE words, so `conversion`/`lifestyle` do NOT hit `version`/`style`,
+// while a punctuation-joined `magic+version` DOES split out the whole word `version`.
+var dosWordRE = regexp.MustCompile(`[a-z][a-z']*`)
+
+// dosNoClaimMarkerHit returns the earliest (left-most) no-claim marker in subject, or "" when none.
+// A non-empty return means the DOS commit-audit grades the commit claim_kind=none (ABSTAIN) no
+// matter how it is otherwise phrased — a valid leading code verb, a doc scope, or a test noun does
+// not rescue it, because this rung precedes them all. Mirrors classify_claim's opening short-circuit.
+// It takes the WHOLE subject (not just the description): the kernel's word set spans the type token,
+// the scope, and any trailing stamp, so a marker in `feat(release): …` or `(fak bump)` trips it too.
+func dosNoClaimMarkerHit(subject string) string {
+	s := strings.ToLower(subject)
+	best, hit := -1, ""
+	for _, loc := range dosWordRE.FindAllStringIndex(s, -1) {
+		if w := s[loc[0]:loc[1]]; dosNoClaimMarkers[w] && (best < 0 || loc[0] < best) {
+			best, hit = loc[0], w
+		}
+	}
+	for _, ph := range dosNoClaimPhrases {
+		if i := strings.Index(s, ph); i >= 0 && (best < 0 || i < best) {
+			best, hit = i, ph
+		}
+	}
+	return hit
+}
+
 var dosDocSuffixes = []string{".md", ".rst", ".txt", ".adoc", ".org"}
 
 // dosDepManifestRE — a dependency manifest wearing a doc suffix (requirements.txt) is data, not

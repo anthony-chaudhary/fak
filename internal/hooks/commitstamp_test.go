@@ -370,6 +370,62 @@ func TestAbstainHazard_predictsReferee(t *testing.T) {
 	}
 }
 
+// TestAbstainHazard_noClaimMarkerRung pins the precedence-topping _NOCLAIM_MARKERS rung
+// (commit_audit.py classify_claim's opening short-circuit) that dosWouldAbstainOnCodeEffect —
+// leading-verb-only, feat/perf-only — structurally cannot see. A marker word ANYWHERE in the
+// subject forces claim_kind=none regardless of a valid leading code verb or the commit type, so a
+// green `fak commit --preview` must warn. Grounded in two real ABSTAINed commits: c024455d3
+// (`add magic+version …` → `version`) and f7c997c4b (`… refs/fak/wip/*` → `wip`).
+func TestAbstainHazard_noClaimMarkerRung(t *testing.T) {
+	cases := []struct {
+		subject string
+		warn    bool
+	}{
+		// The two real victims from history — a valid `add` verb, yet ABSTAIN on an embedded marker.
+		{"feat(l3kv): add magic+version envelope to durable KV records (fak l3kv)", true},
+		{"feat(wip): add working-tree checkpoint/status/restore spine over refs/fak/wip/* (#3872)", true},
+		// The rung precedes the type token, so it bites EVERY type — not just feat/perf. `fix`/
+		// `refactor` normally bind through their type token, but a marker word overrides that.
+		{"fix(gateway): correct the release gating (fak gateway)", true},
+		{"refactor(session): merge the two compose paths (fak session)", true},
+		// Multi-word marker phrase, matched as a substring exactly as the kernel does.
+		{"feat(parser): address review comments on the tokenizer (fak parser)", true},
+		// Whole-word only: a marker embedded in a LARGER word must NOT fire (conversion≠version,
+		// lifestyle≠style) — the tokenizer is what keeps the rung from over-firing.
+		{"feat(engine): add a conversion helper (fak engine)", false},
+		{"feat(ui): add a lifestyle audit panel (fak ui)", false},
+		// The witnessed subject c024455d3 SHOULD have used — no marker word, leads with `add`.
+		{"feat(l3kv): add a self-describing record envelope to durable KV cache (fak l3kv)", false},
+	}
+	for _, c := range cases {
+		note := abstainHazard(c.subject)
+		if (note != "") != c.warn {
+			t.Errorf("abstainHazard(%q) warn=%v, want %v (note=%q)", c.subject, note != "", c.warn, note)
+		}
+	}
+}
+
+// TestDosNoClaimMarkerHit pins the mirror's tokenizer directly: earliest (left-most) marker wins,
+// whole-word only, punctuation splits compounds, and the multi-word phrase matches as a substring.
+func TestDosNoClaimMarkerHit(t *testing.T) {
+	cases := []struct {
+		subject string
+		want    string
+	}{
+		{"feat(l3kv): add magic+version envelope to durable KV records", "version"}, // `+` splits out `version`
+		{"feat(x): add a conversion helper", ""},                                     // whole-word: conversion ≠ version
+		{"feat(x): add a lifestyle audit", ""},                                       // whole-word: lifestyle ≠ style
+		{"fix(x): bump and then merge", "bump"},                                      // earliest marker wins
+		{"feat(x): address review of the parser", "address review"},                  // multi-word substring
+		{"feat(l3kv): add a self-describing record envelope", ""},                     // clean
+	}
+	for _, c := range cases {
+		if got := dosNoClaimMarkerHit(c.subject); got != c.want {
+			t.Errorf("dosNoClaimMarkerHit(%q) = %q, want %q", c.subject, got, c.want)
+		}
+	}
+}
+
 // TestLintCommitMessage_silentAbstainAdvisory — a gradeable `feat` whose description leads with a
 // fak-accepted-but-referee-unwitnessed verb (`define`) surfaces the DOS-abstain advisory through
 // the full lint, and it is advisory only (the commit still lints OK and ships).

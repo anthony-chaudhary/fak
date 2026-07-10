@@ -647,11 +647,17 @@ func isGoSourcePath(p string) bool {
 // abstainHazard returns a non-empty advisory when a verb-led (fak-gradeable) subject will still
 // earn an ABSTAIN from the DOS commit-audit referee, so the code change would land unwitnessed.
 //
-// Two shapes are caught:
+// Three shapes are caught:
 //
-//  1. `gate <X> on <Y>` — reads as a noun phrase to the witness grammar; the specific,
+//  1. A no-claim marker (`version`/`wip`/`merge`/`bump`/`release`/`format`/…) anywhere in the
+//     subject as a whole word. This is the referee's FIRST, precedence-topping rung
+//     (commit_audit.py classify_claim short-circuits to claim_kind=none before it looks at the
+//     type token or any verb), so it bites EVERY type and a valid leading verb does not rescue it.
+//     Real victims: c024455d3 `add magic+version envelope …` (the `+` exposes the word `version`)
+//     and f7c997c4b `… refs/fak/wip/*` (`wip`) — both shipped real source+tests UNWITNESSED.
+//  2. `gate <X> on <Y>` — reads as a noun phrase to the witness grammar; the specific,
 //     higher-signal hint (a cross-session finding predating the general rule below).
-//  2. The silent verb-set divergence: fak's commitVerbs gate accepts a WIDER set than the
+//  3. The silent verb-set divergence: fak's commitVerbs gate accepts a WIDER set than the
 //     referee's _CODE_VERBS (dos_witness_verbs.go). A `feat`/`perf` commit binds to a code-effect
 //     claim ONLY through its DESCRIPTION verb — the type token `feat`/`perf` is not itself an
 //     effect verb — so a gradeable `feat(x): define/explain/back off …` subject passes fak's gate
@@ -664,6 +670,10 @@ func abstainHazard(subject string) string {
 	m := subjectRE.FindStringSubmatch(subject)
 	if m == nil {
 		return ""
+	}
+	// Shape 1 — a no-claim marker word tops the referee's precedence (all types, before any verb).
+	if mk := dosNoClaimMarkerHit(subject); mk != "" {
+		return "subject contains `" + mk + "`, which the DOS commit-audit reads as a no-claim marker (merge/bump/version/wip/release/…): classify_claim returns claim_kind=none for ANY subject containing it — before it checks the type token or a leading code verb — so this will ABSTAIN and the change lands unwitnessed regardless of the verb. Reword to drop `" + mk + "` from the subject."
 	}
 	typ := m[1]
 	rest := strings.ToLower(strings.TrimSpace(m[4]))
