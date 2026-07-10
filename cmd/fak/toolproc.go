@@ -282,13 +282,31 @@ func runToolprocLeaks(stdout, stderr io.Writer, argv []string) int {
 func runToolprocConsoleFaults(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("toolproc console-faults", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	eventsPath := fs.String("events", "", "JSONL journal of console-fault events (required; '-' reads stdin)")
+	eventsPath := fs.String("events", "", "JSONL journal of console-fault events to fold (required unless --ingest; '-' reads stdin)")
+	ingest := fs.Bool("ingest", false, "ingest THIS host's Windows event log (.NET Runtime Event 1026 + WER Application Error Event 1000 FailFasts) for live console-host crashes, write the snapshot to --out, and fold it (Windows-only)")
+	outPath := fs.String("out", filepath.Join(".fak", "toolproc", "console-faults.jsonl"), "snapshot file --ingest writes the classified rows to (idempotent projection of the event log)")
+	sinceDays := fs.Int("since-days", 14, "how many days back --ingest scans the event log")
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	if *ingest {
+		if strings.TrimSpace(*eventsPath) != "" {
+			fmt.Fprintln(stderr, "fak toolproc console-faults: --events and --ingest are mutually exclusive")
+			return 2
+		}
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "fak toolproc console-faults: --ingest takes no positional args")
+			return 2
+		}
+		if *sinceDays < 1 {
+			fmt.Fprintln(stderr, "fak toolproc console-faults: --since-days must be >= 1")
+			return 2
+		}
+		return runConsoleFaultIngest(stdout, stderr, *outPath, time.Duration(*sinceDays)*24*time.Hour, time.Now().UnixMilli(), *asJSON)
+	}
 	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "fak toolproc console-faults: --events FILE is required ('-' reads stdin)")
+		fmt.Fprintln(stderr, "fak toolproc console-faults: --events FILE is required unless --ingest ('-' reads stdin)")
 		return 2
 	}
 	var in io.Reader = os.Stdin
