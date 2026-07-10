@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/journal"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -114,5 +118,34 @@ func TestGuardRotationLauncherWitnessesFirstFailureThenRotatedEnv(t *testing.T) 
 	}
 	if len(launches) != 1 || launches[0]["CLAUDE_CONFIG_DIR"] != "/b" {
 		t.Fatalf("launches=%v", launches)
+	}
+}
+
+func TestGuardRotationWritesDurableAuditRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guard-audit.jsonl")
+	j, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := func(name, key string) accounts.Home {
+		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}
+	}
+	rt := &guardRotationRuntime{Mode: "auto", CurrentSeat: "a", EnvKey: "CODEX_HOME", Registry: accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b")}}}
+	if _, _, ok := rt.rotate([]string{"codex"}, nil, "walled", j, "trace-rotation", nil); !ok {
+		t.Fatal("rotation refused")
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row journal.Row
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Kind != "ACCOUNT_ROTATION" || row.TraceID != "trace-rotation" || row.Reason != "b:walled" || row.Hash == "" {
+		t.Fatalf("row=%+v", row)
 	}
 }
