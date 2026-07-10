@@ -17,7 +17,7 @@ import (
 // banner-noop worker (a recycled pid pinning a lane it must NOT hold, #1398), a
 // poison issue with several recorded attempts, and a witness-only cooled slot. It
 // returns the runs dir and the fixed "now" the cooldown projections are measured at.
-func snapshotFixture(t *testing.T) (string, time.Time) {
+func snapshotFixture(t testing.TB) (string, time.Time) {
 	t.Helper()
 	runsDir := t.TempDir()
 	now := time.Unix(1700000000, 0).UTC()
