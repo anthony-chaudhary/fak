@@ -46,6 +46,7 @@ Categories are intentionally small:
 | `RELAY_PARKED_UNSAFE` | OPERATOR_GATE | The hard ceiling arrived before any verified safe point, so the leg parked instead of overrunning context. | Resume with an operator or stronger witness, recover only durable state, and write a clean baton before relaunching automation. |
 | `RELAY_BATON_STALE` | STALE_CLAIM | Successor verification found the baton cursor no longer matches git, ledger, or the configured durable store. | Discard the stale baton fields, re-derive the cursor from ground truth, and write a fresh baton before continuing. |
 | `RELAY_NO_PROGRESS` | OPERATOR_GATE | The relay made no verified progress for the configured number of consecutive legs. | Stop automatic rotation, inspect the blocker and hysteresis settings, then relaunch only after a new progress witness or narrowed objective exists. |
+| `RELAY_IDLE_PARKED` | TRUE_DRAIN | A watch-goal relay verified — against durable witnesses — that its invariant holds with zero admitted pending work, so it parked idle instead of spinning fresh windows. It is a benign terminal-for-now, not a no-progress alarm. | Hold the park; do not count it toward `RELAY_NO_PROGRESS`. Re-arm the relay on the next witnessed external event (a git ref change, a CI verdict flip); an unverifiable idle read falls back to the no-progress path instead. |
 
 ## Non-goals
 

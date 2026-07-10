@@ -74,3 +74,11 @@ func (e *NoProgressEscape) ObserveLeg(now VerifiedProgress) (halt bool, reason s
 // EmptyRun returns the current count of consecutive no-verified-progress legs — the
 // operator/debug read of how close the relay is to the escape.
 func (e *NoProgressEscape) EmptyRun() int { return e.empty }
+
+// Advances reports whether now would count as verified forward progress against the
+// current high-water mark, WITHOUT mutating the counter. It is the non-destructive peek
+// the idle terminator (idle.go) uses to give real progress priority over an idle park —
+// so the single "made progress" rule lives here in ObserveLeg's sibling, never duplicated.
+func (e *NoProgressEscape) Advances(now VerifiedProgress) bool {
+	return now.Verdict == ProgressVerified && len(now.Steps) > e.highWater
+}
