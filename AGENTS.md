@@ -246,7 +246,9 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
   equals the requested paths** — refusing `PATHSPEC_RACE` (and leaving the commit intact,
   never force-pushing) if a peer swept extra files in. It also refuses `OFF_TRUNK` /
   `MERGE_IN_PROGRESS` up front, so the runbook above is a verb, not a discipline you have
-  to remember.
+  to remember. The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md) skill mechanizes
+  the rule end to end — lint the subject with `--preview`, stage-and-commit exactly your
+  paths under the lock, and verify only your paths landed.
 - **Sign off every commit** — `git commit -s` (DCO). Use a Conventional-Commits subject
   with a `(fak <leaf>)` trailer; a docs-only change uses a `docs(scope):` subject.
   A `cmd/` **demo or binary** has no `internal/<name>/` package, so stamp it with its
