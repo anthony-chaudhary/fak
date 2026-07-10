@@ -106,6 +106,32 @@ func compressActivates(flag bool, env string) bool {
 	return flag && strings.TrimSpace(env) == ""
 }
 
+// guardHeadlessExposeTools is the curated in-kernel fak_* allowlist a single-issue dispatch worker
+// actually uses — the SessionStart affordance set (pull ranked work, gate/execute a tool call,
+// durable memory) plus fak_tools_search so every PRUNED tool stays reachable on demand (the search
+// view sees the full exposed surface). It trims the ~9.9k-token full-registry schema floor a
+// headless worker otherwise pays on every turn (#3607). Each name must be a real registered tool —
+// compileToolExposeAllow fails loud on a zero-match glob, so a typo reds the guard at startup rather
+// than silently hiding the surface (pinned by TestGuardHeadlessExposeProfileNamesAreReal).
+var guardHeadlessExposeTools = []string{
+	"fak_index_work", "fak_admit", "fak_adjudicate", "fak_memory_run", "fak_tools_search",
+}
+
+// resolveGuardExposeTools maps the --expose-profile value (with the FAK_GUARD_EXPOSE_PROFILE env
+// taking precedence as the fleet opt-out) to a gateway ExposeTools allowlist. ONLY "headless" prunes;
+// every other value — "", "full", "off", anything unrecognized — returns nil, i.e. the full registry,
+// so the interactive default and an operator opt-out are byte-for-byte the pre-#3607 surface.
+func resolveGuardExposeTools(flagValue string) []string {
+	profile := strings.TrimSpace(flagValue)
+	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_EXPOSE_PROFILE")); env != "" {
+		profile = env // env overrides the launch flag — the fleet-wide opt-out kill switch
+	}
+	if strings.EqualFold(profile, "headless") {
+		return append([]string(nil), guardHeadlessExposeTools...)
+	}
+	return nil
+}
+
 func cmdGuard(argv []string) {
 	// `fak guard allow …` is the OPERATOR control surface for the always-allow overlay
 	// — add / --list / --remove / --from-journal — peeled off before the wrap-a-command
@@ -178,7 +204,10 @@ func cmdGuard(argv []string) {
 	compactAnchorHead := fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything (see the 'anchor-starved' diagnostic). DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (the suffix re-bills cold that turn anyway, so the cut is penalty-free — the long-session firing path a plain `fak guard -- claude` actually hits). Pass =false to pin the old warm-only first-breakpoint anchor.")
 	assumeSessionTurns := fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired — the common `fak guard -- claude` case, where the wrapped harness owns the turn loop and hands the gateway no Budget.TurnsLeft. It lets a WARM continuously-active long session shed early instead of waiting to OBSERVABLY idle past the message-span cache TTL: the gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns, fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
+	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. Anthropic passthrough only.")
 	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. Anthropic passthrough only.")
+	deferColdTools := fs.Bool("defer-cold-tools", false, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools). DEFAULT OFF: this is the epic's highest-risk lever — its A/B (token-delta x held-accuracy x poison-rate) and the deferred-tool fault-in (#3200 pin/quarantine) are the validation gates before the default flips (#3537). Also settable via FAK_DEFER_COLD_TOOLS=1; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1. Anthropic passthrough only.")
+	exposeProfile := fs.String("expose-profile", "", "in-kernel fak_* MCP tool-surface profile (#3607): \"\" (full registry, default) | \"headless\" — a curated allowlist for a single-issue dispatch worker (fak_index_work, fak_admit, fak_adjudicate, fak_memory_run, fak_tools_search), pruning the ~9.9k-token full-registry schema floor every worker otherwise pays each turn; the rest page in on demand through the still-exposed fak_tools_search. `fak dispatch` launches workers with =headless. The FAK_GUARD_EXPOSE_PROFILE env OVERRIDES this flag (the fleet opt-out: set it to `full`/`off` to restore the whole registry). Any value other than \"headless\" keeps the full registry.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist: high|medium|none|off. Off by default; use --session-pressure-days/--session-pressure-max to size the window.")
 	sessionPressureDays := fs.Float64("session-pressure-days", 7, "with --session-pressure-gate, audit transcripts modified within N days for the current workspace namespace")
@@ -207,6 +236,7 @@ func cmdGuard(argv []string) {
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", 24, "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", 20, "with --codex-loop-gate, maximum newest Codex sessions to scan")
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
+	piExtension := fs.Bool("pi-extension", true, "when wrapping Pi (earendil-works), prepend a session-scoped -e extension that calls pi.registerProvider(\"anthropic\", {baseUrl}) so Pi talks to the in-process gateway. Pi-only; Pi's Anthropic client reads baseUrl from provider config, not ANTHROPIC_BASE_URL, so the env repoint alone cannot route it. Pass --pi-extension=false if you already registered the fak provider yourself.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
 	guardHelpAll := guardArgvHasAll(argv)
@@ -953,6 +983,7 @@ func cmdGuard(argv []string) {
 		CompactAnchorHead:    *compactAnchorHead,
 		AssumeSessionTurns:   *assumeSessionTurns,
 		ElideResultBytes:     *elideResultBytes,
+		ElideStaleReads:      *elideStaleReads,
 		// Managed-cache posture (--managed-cache, epic #1844 C6): when active, the gateway
 		// upgrades the stable-prefix cache_control breakpoint to the 1h TTL tier on the
 		// outbound Anthropic wire (maybeUpgradeAnthropicCacheTTL1H). Resolved above from
@@ -971,6 +1002,17 @@ func cmdGuard(argv []string) {
 		// installed floor (rt.Adjudicator.NeverAdmits): true only for a name no argument could
 		// make Allowed. nil would disable it; we always supply it.
 		ToolFloorDenies: rt.Adjudicator.NeverAdmits,
+		// The 10x floor lever (--defer-cold-tools, #3232): defer the COLD tool tail
+		// (defer_loading:true) and inject a tool_search_tool on the outbound Anthropic body,
+		// so the provider loads only the hot core into context. DEFAULT OFF (the epic's
+		// highest-risk lever); gateway.New also ORs in FAK_DEFER_COLD_TOOLS. Deterministic,
+		// cache-safe, fail-safe identity on any ambiguity.
+		DeferColdTools: *deferColdTools,
+		// Curated headless tool surface (#3607): a dispatch worker launches with --expose-profile
+		// headless, so the in-kernel fak_* registry is pruned to the allowlist it actually uses
+		// (the rest page in via fak_tools_search), trimming the ~9.9k-token full-registry floor.
+		// nil for an interactive launch or the FAK_GUARD_EXPOSE_PROFILE=full/off opt-out → full.
+		ExposeTools: resolveGuardExposeTools(*exposeProfile),
 	})
 	must(err)
 	if loadProfile != nil {
@@ -1225,7 +1267,13 @@ func cmdGuard(argv []string) {
 	if sessionStartSettings == "" {
 		sessionStartSettings = preCompactInstall.SettingsPath
 	}
-	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartSettings)
+	// A headless/fleet worker (a `-p` child, not an attended TUI) is admitted onto the
+	// long-horizon MANAGED posture: its SessionStart injection carries the persistence +
+	// managed-context rule (#3512), where keep-going-past-a-long-window matters most and no
+	// human is present to drive it. An attended interactive session gets the base affordance
+	// only. Same headless signal the task-handoff gate leans on above (guardChildInteractive).
+	sessionStartManaged := guardSessionStartManaged(command)
+	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude SessionStart hook setup failed: %v\n", err)
@@ -1246,6 +1294,16 @@ func cmdGuard(argv []string) {
 		os.Exit(2)
 	}
 	injected = append(injected, codexAuthEnv...)
+	// First-class `fak guard -- pi`: Pi (earendil-works) speaks the Anthropic wire but its
+	// client reads baseUrl from provider config, not ANTHROPIC_BASE_URL, so the env repoint
+	// cannot route it. Prepend a session-scoped `-e` extension that registers the anthropic
+	// provider at the gateway. Pi-only; no-ops for every other child. See guard_pi.go.
+	command, piInstall, err := installGuardPiExtension(command, *piExtension, gwURL)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: Pi extension setup failed: %v\n", err)
+		os.Exit(1)
+	}
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 	// Headless workers: make editor/pager-opening git forms (a `git commit` with no message
 	// source, incl. a `-m` after `--`; `git rebase -i`) fail fast instead of hanging on a
@@ -1283,6 +1341,7 @@ func cmdGuard(argv []string) {
 		stopHookInstall:      stopHookInstall,
 		handoffCfg:           handoffCfg,
 		codexInstall:         codexInstall,
+		piInstall:            piInstall,
 		mcpInstall:           mcpInstall,
 		debugStatsStderr:     debugStatsStderr,
 		debugStats:           *debugStats,
