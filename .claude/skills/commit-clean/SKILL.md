@@ -62,8 +62,10 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 |---|---|
 | `OFF_TRUNK` | HEAD is off-trunk or detached — get back on `main` first. |
 | `NOTHING_STAGED` | the pathspec has no change — re-check which paths you actually edited. |
+| `MERGE_IN_PROGRESS` | a merge is mid-flight (`MERGE_HEAD` present) — a partial path-scoped commit can't run; finish or abort the merge, then commit by path. |
 | `PATHSPEC_RACE` | a peer's files landed in your commit (the headline guard) — the commit is left intact for review and NOT pushed; surface it, never force-push. |
 | `MESSAGE_RACE` | the landed subject/body ≠ the one you requested — surface it for review. |
+| `SYMLINK_ESCAPE` | a landed path resolves through a symlink to a target outside your lease (the CVE-2025-53109 class) — the commit is left intact for review and NOT pushed; surface it, never force-push. |
 | `STALE_BASE_DELETION` | your working blob predates peer lines already on origin and would silently delete them — refresh your copy of the file first. |
 | `SPURIOUS_STAGED_DELETION` | a stale-index whole-path deletion with an untracked copy present — repair the index, keep the disk copy. |
 | `CACHED_REMOVE_WORKTREE_PRESENT` | `git rm --cached` left the file on disk — reconcile intent before committing. |
@@ -78,8 +80,8 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 
 - **0** — success: committed, verified, (pushed if asked).
 - **2** — usage error.
-- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `STALE_BASE_DELETION`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
-- **1** — a POST-attempt failure: the commit ran but its result is bad — halt and have a human review. Reasons: `PATHSPEC_RACE`, `MESSAGE_RACE`, `HOOK_REFUSED`, `PUSH_REJECTED`.
+- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `STALE_BASE_DELETION`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
+- **1** — a POST-attempt failure: the commit ran but its result is bad — halt and have a human review. Reasons: `PATHSPEC_RACE`, `MESSAGE_RACE`, `SYMLINK_ESCAPE`, `HOOK_REFUSED`, `PUSH_REJECTED`.
 
 ## Steps
 

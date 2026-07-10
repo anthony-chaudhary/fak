@@ -569,7 +569,7 @@ func commitExitCode(res safecommit.Result) int {
 		safecommit.ReasonSpuriousStagedDeletion, safecommit.ReasonPreStagedPathOverlap,
 		safecommit.ReasonCoreSelfModify:
 		return 3
-	default: // PATHSPEC_RACE, HOOK_REFUSED, PUSH_REJECTED
+	default: // PATHSPEC_RACE, MESSAGE_RACE, SYMLINK_ESCAPE, HOOK_REFUSED, PUSH_REJECTED
 		return 1
 	}
 }
