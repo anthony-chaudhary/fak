@@ -28,6 +28,7 @@ type codexLoopDiagnosis struct {
 	Schema            string                 `json:"schema"`
 	Path              string                 `json:"path"`
 	SessionID         string                 `json:"session_id,omitempty"`
+	ParentSessionID   string                 `json:"parent_session_id,omitempty"`
 	Originator        string                 `json:"originator,omitempty"`
 	CLI               string                 `json:"cli_version,omitempty"`
 	ModelProvider     string                 `json:"model_provider,omitempty"`
@@ -55,24 +56,27 @@ type codexLoopDiagnosis struct {
 }
 
 type codexLoopRecentReport struct {
-	Schema            string                 `json:"schema"`
-	CodexHome         string                 `json:"codex_home"`
-	SinceHours        float64                `json:"since_hours,omitempty"`
-	Limit             int                    `json:"limit"`
-	Scanned           int                    `json:"scanned"`
-	LoopCount         int                    `json:"loop_count"`
-	ActionCount       int                    `json:"action_count"`
-	OKCount           int                    `json:"ok_count"`
-	ProviderCounts    map[string]int         `json:"provider_counts,omitempty"`
-	UnguardedCount    int                    `json:"unguarded_count,omitempty"`
-	ToolCalls         int                    `json:"tool_calls"`
-	ToolOutputs       int                    `json:"tool_outputs"`
-	LastTokenTotalSum int64                  `json:"last_token_total_sum,omitempty"`
-	Verdict           string                 `json:"verdict"`
-	Reason            string                 `json:"reason,omitempty"`
-	NextAction        string                 `json:"next_action,omitempty"`
-	TopRepeated       []codexRepeatedOutcome `json:"top_repeated,omitempty"`
-	Diagnoses         []codexLoopDiagnosis   `json:"diagnoses"`
+	Schema             string                 `json:"schema"`
+	CodexHome          string                 `json:"codex_home"`
+	SinceHours         float64                `json:"since_hours,omitempty"`
+	Limit              int                    `json:"limit"`
+	Scanned            int                    `json:"scanned"`
+	LoopCount          int                    `json:"loop_count"`
+	ActionCount        int                    `json:"action_count"`
+	OKCount            int                    `json:"ok_count"`
+	ProviderCounts     map[string]int         `json:"provider_counts,omitempty"`
+	UnguardedCount     int                    `json:"unguarded_count,omitempty"`
+	GuardedLoopCount   int                    `json:"guarded_loop_count,omitempty"`
+	UnguardedLoopCount int                    `json:"unguarded_loop_count,omitempty"`
+	UnknownLoopCount   int                    `json:"unknown_loop_count,omitempty"`
+	ToolCalls          int                    `json:"tool_calls"`
+	ToolOutputs        int                    `json:"tool_outputs"`
+	LastTokenTotalSum  int64                  `json:"last_token_total_sum,omitempty"`
+	Verdict            string                 `json:"verdict"`
+	Reason             string                 `json:"reason,omitempty"`
+	NextAction         string                 `json:"next_action,omitempty"`
+	TopRepeated        []codexRepeatedOutcome `json:"top_repeated,omitempty"`
+	Diagnoses          []codexLoopDiagnosis   `json:"diagnoses"`
 }
 
 type codexLoopHookInput struct {
@@ -331,6 +335,30 @@ func codexLoopDiagnosisUnguarded(d codexLoopDiagnosis) bool {
 	return provider != "" && !strings.EqualFold(provider, "fak")
 }
 
+// codexLoopGuardedLaunchGate distinguishes a loop that a guarded launch can
+// remediate from one that already happened behind fak. A direct-provider loop is
+// evidence to enter through fak guard, not a reason to make that entrypoint
+// unreachable. Guarded or unknown-route loops still trip the configured threshold.
+func codexLoopGuardedLaunchGate(r codexLoopRecentReport, failOn string) (exitCode, remediationCount int, ok bool) {
+	threshold, ok := codexLoopFailOnRank(failOn)
+	if !ok {
+		return 2, 0, false
+	}
+	if threshold == 0 {
+		return 0, 0, true
+	}
+	for _, d := range r.Diagnoses {
+		if codexLoopVerdictRank(d.Verdict) < threshold {
+			continue
+		}
+		if !codexLoopDiagnosisUnguarded(d) {
+			return 1, 0, true
+		}
+		remediationCount++
+	}
+	return 0, remediationCount, true
+}
+
 func codexLoopFailOnExitCode(verdict, failOn string) (int, bool) {
 	threshold, ok := codexLoopFailOnRank(failOn)
 	if !ok {
@@ -432,6 +460,14 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 		switch d.Verdict {
 		case "LOOP":
 			r.LoopCount++
+			switch {
+			case strings.EqualFold(strings.TrimSpace(d.ModelProvider), "fak"):
+				r.GuardedLoopCount++
+			case codexLoopDiagnosisUnguarded(d):
+				r.UnguardedLoopCount++
+			default:
+				r.UnknownLoopCount++
+			}
 		case "ACTION":
 			r.ActionCount++
 		default:
@@ -466,7 +502,9 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 	default:
 		r.Verdict = "OK"
 	}
-	if r.UnguardedCount > 0 {
+	if r.GuardedLoopCount+r.UnknownLoopCount > 0 {
+		r.NextAction = "inspect the guarded or unknown-route LOOP rollout and add or tighten a hard fuse for its top tool/result class"
+	} else if r.UnguardedCount > 0 {
 		r.NextAction = "launch future Codex sessions through `fak codex` or `fak guard -- codex`; direct Codex sessions cannot use the gateway's repeated-result fuse"
 	} else if r.Verdict == "LOOP" {
 		r.NextAction = "inspect the top repeated outcome and add or tighten a hard fuse for that tool/result class"
@@ -658,37 +696,43 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 			applyCodexLoopSessionMeta(&d, rec.Timestamp, rec.Payload)
 		case "response_item":
 			var item struct {
-				Type      string `json:"type"`
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-				CallID    string `json:"call_id"`
-				Output    string `json:"output"`
+				Type      string          `json:"type"`
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+				Input     json.RawMessage `json:"input"`
+				CallID    string          `json:"call_id"`
+				Output    json.RawMessage `json:"output"`
 			}
 			if json.Unmarshal(rec.Payload, &item) != nil {
 				continue
 			}
 			switch item.Type {
-			case "function_call":
+			case "function_call", "custom_tool_call":
 				d.ToolCalls++
+				args := item.Arguments
+				if len(args) == 0 {
+					args = item.Input
+				}
 				calls[item.CallID] = codexPendingToolCall{
 					Tool:       strings.TrimSpace(item.Name),
-					ArgsDigest: guardrsi.ArgsDigest(item.Arguments),
+					ArgsDigest: guardrsi.ArgsDigest(codexLoopRawText(args)),
 					Timestamp:  rec.Timestamp,
 				}
 				pendingTokenOutcome = nil
-			case "function_call_output":
+			case "function_call_output", "custom_tool_call_output":
 				d.ToolOutputs++
 				call := calls[item.CallID]
 				if call.Tool == "" {
 					call.Tool = "unknown"
 				}
-				key := codexOutcomeKey{Tool: call.Tool, OutputDigest: digestCodexLoopText(normalizeCodexLoopText(item.Output))}
+				output := codexLoopRawText(item.Output)
+				key := codexOutcomeKey{Tool: call.Tool, OutputDigest: digestCodexLoopText(normalizeCodexLoopText(output))}
 				acc := outcomes[key]
 				if acc == nil {
 					acc = &codexOutcomeAccum{out: codexRepeatedOutcome{
 						Tool:           key.Tool,
 						OutputDigest:   key.OutputDigest,
-						OutputExcerpt:  codexLoopExcerpt(item.Output),
+						OutputExcerpt:  codexLoopExcerpt(output),
 						FirstTimestamp: rec.Timestamp,
 					}, argsDigests: map[string]bool{}}
 					outcomes[key] = acc
@@ -784,6 +828,13 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 }
 
 func applyCodexLoopSessionMeta(d *codexLoopDiagnosis, ts string, payload json.RawMessage) {
+	// A subagent rollout starts with its own metadata, then carries the parent
+	// session metadata in the inherited context. Only the first record identifies
+	// this file; allowing later records to overwrite it makes every child look like
+	// the same parent session and corrupts the recent-session report.
+	if d.SessionID != "" {
+		return
+	}
 	var meta struct {
 		SessionID     string `json:"session_id"`
 		ID            string `json:"id"`
@@ -797,7 +848,10 @@ func applyCodexLoopSessionMeta(d *codexLoopDiagnosis, ts string, payload json.Ra
 		} `json:"git"`
 	}
 	if json.Unmarshal(payload, &meta) == nil {
-		d.SessionID = firstNonEmpty(meta.SessionID, meta.ID)
+		d.SessionID = firstNonEmpty(meta.ID, meta.SessionID)
+		if meta.ID != "" && meta.SessionID != "" && meta.ID != meta.SessionID {
+			d.ParentSessionID = meta.SessionID
+		}
 		d.StartedAt = firstNonEmpty(meta.Timestamp, ts)
 		d.Originator = meta.Originator
 		d.CLI = meta.CLIVersion
@@ -961,6 +1015,9 @@ func renderCodexLoopDiagnosis(d codexLoopDiagnosis) string {
 	fmt.Fprintf(&b, "fak sessions codex-loop: %s\n", d.Path)
 	if d.SessionID != "" {
 		fmt.Fprintf(&b, "  session        : %s", d.SessionID)
+		if d.ParentSessionID != "" {
+			fmt.Fprintf(&b, " parent=%s", d.ParentSessionID)
+		}
 		if d.ModelProvider != "" {
 			fmt.Fprintf(&b, " provider=%s", d.ModelProvider)
 		}
@@ -1034,9 +1091,12 @@ func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
 		}
 		b.WriteByte('\n')
 	}
+	if r.LoopCount > 0 {
+		fmt.Fprintf(&b, "  loop routes    : guarded=%d direct=%d unknown=%d\n", r.GuardedLoopCount, r.UnguardedLoopCount, r.UnknownLoopCount)
+	}
 	fmt.Fprintf(&b, "  tool traffic   : calls=%d outputs=%d\n", r.ToolCalls, r.ToolOutputs)
 	if r.LastTokenTotalSum > 0 {
-		fmt.Fprintf(&b, "  last-token sum : %d\n", r.LastTokenTotalSum)
+		fmt.Fprintf(&b, "  token usage    : cumulative-sum=%d (latest counter per rollout)\n", r.LastTokenTotalSum)
 	}
 	if r.NextAction != "" {
 		fmt.Fprintf(&b, "  next action    : %s\n", r.NextAction)
@@ -1060,6 +1120,9 @@ func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
 		for _, d := range r.Diagnoses {
 			label := firstNonEmpty(d.SessionID, filepath.Base(d.Path))
 			fmt.Fprintf(&b, "    %s verdict=%s", label, d.Verdict)
+			if d.ParentSessionID != "" {
+				fmt.Fprintf(&b, " parent=%s", d.ParentSessionID)
+			}
 			if d.Reason != "" {
 				fmt.Fprintf(&b, " reason=%s", d.Reason)
 			}
@@ -1074,6 +1137,31 @@ func renderCodexLoopRecentReport(r codexLoopRecentReport) string {
 		}
 	}
 	return b.String()
+}
+
+func codexLoopRawText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &blocks) == nil {
+		parts := make([]string, 0, len(blocks))
+		for _, block := range blocks {
+			if block.Text != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n")
+		}
+	}
+	return string(raw)
 }
 
 func formatCodexProviderCounts(counts map[string]int) string {

@@ -138,6 +138,48 @@ func TestSessionsCodexLoopDefaultsToCurrentCodexThread(t *testing.T) {
 	}
 }
 
+func TestSessionsCodexLoopKeepsSubagentIdentityAndCustomToolTraffic(t *testing.T) {
+	dir := t.TempDir()
+	childID := "019f4c7b-443c-7d80-a9a5-4f15534f99cf"
+	parentID := "019f4c6e-14cf-7f81-a820-9f1bb70523c7"
+	path := filepath.Join(dir, "rollout-2026-07-10T07-42-54-"+childID+".jsonl")
+	writeCodexLoopFixture(t, path, []string{
+		`{"timestamp":"2026-07-10T14:42:56.000Z","type":"session_meta","payload":{"id":"019f4c7b-443c-7d80-a9a5-4f15534f99cf","session_id":"019f4c6e-14cf-7f81-a820-9f1bb70523c7","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","source":{"subagent":{"thread_spawn":{}}},"git":{"commit_hash":"761899e","branch":"main"}}}`,
+		`{"timestamp":"2026-07-10T14:42:56.000Z","type":"session_meta","payload":{"id":"019f4c6e-14cf-7f81-a820-9f1bb70523c7","session_id":"019f4c6e-14cf-7f81-a820-9f1bb70523c7","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","source":"cli","git":{"commit_hash":"761899e","branch":"main"}}}`,
+		`{"timestamp":"2026-07-10T14:43:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"{\"command\":\"first\"}","call_id":"exec_1"}}`,
+		`{"timestamp":"2026-07-10T14:43:06.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"exec_1","output":[{"type":"input_text","text":"same result"}]}}`,
+		`{"timestamp":"2026-07-10T14:43:15.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"{\"command\":\"second\"}","call_id":"exec_2"}}`,
+		`{"timestamp":"2026-07-10T14:43:16.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"exec_2","output":[{"type":"input_text","text":"same result"}]}}`,
+		`{"timestamp":"2026-07-10T14:43:25.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"{\"command\":\"third\"}","call_id":"exec_3"}}`,
+		`{"timestamp":"2026-07-10T14:43:26.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"exec_3","output":[{"type":"input_text","text":"same result"}]}}`,
+	})
+
+	fh, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, diagnoseErr := diagnoseCodexLoop(fh, path)
+	closeErr := fh.Close()
+	if diagnoseErr != nil {
+		t.Fatal(diagnoseErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if d.SessionID != childID {
+		t.Fatalf("subagent identity = %q, want rollout id %q rather than parent %q", d.SessionID, childID, parentID)
+	}
+	if d.ParentSessionID != parentID {
+		t.Fatalf("subagent parent identity = %q, want %q", d.ParentSessionID, parentID)
+	}
+	if d.ToolCalls != 3 || d.ToolOutputs != 3 {
+		t.Fatalf("custom tool traffic = calls=%d outputs=%d, want 3/3", d.ToolCalls, d.ToolOutputs)
+	}
+	if d.Verdict != "LOOP" || len(d.RepeatedOutcomes) != 1 || d.RepeatedOutcomes[0].Tool != "exec" || d.RepeatedOutcomes[0].Count != 3 {
+		t.Fatalf("custom tool repeat was not diagnosed: %+v", d)
+	}
+}
+
 func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-home")
 	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "05")
@@ -179,6 +221,9 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	if r.ProviderCounts["openai"] != 2 || r.UnguardedCount != 2 {
 		t.Fatalf("provider fold = counts=%v unguarded=%d, want openai=2 unguarded=2", r.ProviderCounts, r.UnguardedCount)
 	}
+	if r.GuardedLoopCount != 0 || r.UnguardedLoopCount != 1 || r.UnknownLoopCount != 0 {
+		t.Fatalf("loop routes = guarded=%d direct=%d unknown=%d, want 0/1/0", r.GuardedLoopCount, r.UnguardedLoopCount, r.UnknownLoopCount)
+	}
 	if len(r.TopRepeated) != 1 || r.TopRepeated[0].Tool != "update_plan" || r.TopRepeated[0].Count != 3 {
 		t.Fatalf("wrong top repeated fold: %+v", r.TopRepeated)
 	}
@@ -203,6 +248,7 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 		"verdict        : LOOP",
 		"LOOP=1 ACTION=0 OK=1",
 		"providers      : openai=2 unguarded=2",
+		"loop routes    : guarded=0 direct=1 unknown=0",
 		"next action    : launch future Codex sessions through `fak codex`",
 		"update_plan",
 		"loop-session verdict=LOOP",

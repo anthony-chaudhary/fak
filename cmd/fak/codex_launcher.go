@@ -41,6 +41,7 @@ type codexLaunchOptions struct {
 	tokenizerPath   string
 	codexConfig     bool
 	codexHome       string
+	loopGateChecked bool // outer fak codex already ran the pre-spawn gate; do not repeat it inside guard
 	passthrough     []string
 }
 
@@ -132,8 +133,6 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		codexHome:       *codexHome,
 		passthrough:     fs.Args(),
 	}
-	argvOut := buildCodexLaunchArgv(fakBin, launch)
-
 	if !launch.dryRun {
 		if rc := runCodexLoopGate(stderr, codexLoopGateConfig{
 			Threshold:  *loopGate,
@@ -144,7 +143,9 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		}); rc != 0 {
 			return rc
 		}
+		launch.loopGateChecked = true
 	}
+	argvOut := buildCodexLaunchArgv(fakBin, launch)
 
 	fmt.Fprintln(stderr, "fak codex: launching Codex through fak guard")
 	fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
@@ -216,6 +217,13 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 		argv = append(argv, "--codex-config=false")
 	}
 	appendKV("--codex-home", o.codexHome)
+	if o.loopGateChecked {
+		// fak codex just ran this same gate before spawning guard. Disable the
+		// nested copy so one launch produces one verdict instead of two scans and
+		// two identical operator messages. Direct `fak guard -- codex` launches
+		// still run their own gate because they never set this internal bit.
+		argv = append(argv, "--codex-loop-gate", "off")
+	}
 
 	argv = append(argv, "--", "codex")
 	if o.skipPermissions {
@@ -276,13 +284,20 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 		fmt.Fprintf(stderr, "fak codex: loop gate audit failed: %v\n", err)
 		return 1
 	}
-	gateCode, _ := codexLoopFailOnExitCode(rep.Verdict, threshold)
+	gateCode, remediationCount, _ := codexLoopGuardedLaunchGate(rep, threshold)
 	if gateCode != 0 {
 		fmt.Fprintf(stderr, "fak codex: loop gate REFUSE fail-on=%s verdict=%s reason=%s\n",
 			codexLoopFailOnName(threshold), rep.Verdict, rep.Reason)
 		fmt.Fprint(stderr, renderCodexLoopRecentReport(rep))
 		fmt.Fprintln(stderr, "fak codex: pass --loop-gate off to launch anyway after an operator decision.")
 		return 1
+	}
+	if remediationCount > 0 {
+		if !cfg.Quiet {
+			fmt.Fprintf(stderr, "fak codex: loop gate remediation allow fail-on=%s direct_matches=%d: prior matching rollouts bypassed fak; this child is entering through fak guard\n",
+				codexLoopFailOnName(threshold), remediationCount)
+		}
+		return 0
 	}
 	if !cfg.Quiet {
 		fmt.Fprintf(stderr, "fak codex: loop gate allow fail-on=%s verdict=%s scanned=%d\n",

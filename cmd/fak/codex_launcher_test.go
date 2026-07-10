@@ -200,7 +200,7 @@ func TestRunCodexExecSeam(t *testing.T) {
 
 func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
-	home := codexLauncherLoopFixture(t)
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
 	orig := codexLaunchRun
 	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
 		t.Fatal("codex child spawned despite loop gate refusal")
@@ -232,6 +232,40 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("loop-gate stderr missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestRunCodexLoopGateAllowsGuardedRemediationForDirectLoops(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	home := codexLauncherLoopFixture(t)
+	orig := codexLaunchRun
+	var spawned bool
+	codexLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+		spawned = true
+		if !strings.Contains(strings.Join(argv, " "), " guard ") {
+			t.Fatalf("remediation child was not routed through fak guard: %#v", argv)
+		}
+		if !strings.Contains(strings.Join(argv, " "), "--codex-loop-gate off") {
+			t.Fatalf("outer gate did not suppress the duplicate inner verdict: %#v", argv)
+		}
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate", "loop",
+		"--loop-gate-since-hours", "0",
+		"--",
+		"exec", "do x",
+	})
+	if rc != 17 || !spawned {
+		t.Fatalf("direct-loop remediation rc=%d spawned=%v, want guarded child rc=17; stderr=%s", rc, spawned, errb.String())
+	}
+	if !strings.Contains(errb.String(), "remediation allow") || strings.Contains(errb.String(), "pass --loop-gate off") {
+		t.Fatalf("remediation guidance is still contradictory:\n%s", errb.String())
 	}
 }
 
@@ -325,6 +359,10 @@ func TestRunCodexInvalidSplitFlags(t *testing.T) {
 }
 
 func codexLauncherLoopFixture(t *testing.T) string {
+	return codexLauncherLoopFixtureForProvider(t, "openai")
+}
+
+func codexLauncherLoopFixtureForProvider(t *testing.T, provider string) string {
 	t.Helper()
 	home := filepath.Join(t.TempDir(), "codex-home")
 	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "06")
@@ -333,7 +371,7 @@ func codexLauncherLoopFixture(t *testing.T) string {
 	}
 	loopPath := filepath.Join(sessionsDir, "rollout-2026-07-06T02-25-00-loop.jsonl")
 	writeCodexLoopFixture(t, loopPath, []string{
-		`{"timestamp":"2026-07-06T02:25:00.000Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","git":{"commit_hash":"4926739","branch":"main"}}}`,
+		`{"timestamp":"2026-07-06T02:25:00.000Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"` + provider + `","git":{"commit_hash":"4926739","branch":"main"}}}`,
 		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_1"}}`,
 		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
 		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"two\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
