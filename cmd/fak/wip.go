@@ -48,6 +48,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipStatus(stdout, stderr, argv[1:])
 	case "restore":
 		return runWipRestore(stdout, stderr, argv[1:])
+	case "reap":
+		return runWipReap(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -74,6 +76,10 @@ func wipUsage(w io.Writer) {
   fak wip restore <session> [-C <repo>] [--apply]
       Print the checkpointed delta as an apply-able diff (default) or, with --apply,
       re-materialize it onto the current working tree.
+
+  fak wip reap [-C <repo>] [--json] [--dry-run]
+      Delete redundant checkpoint refs whose delta has LANDED in HEAD (the owner
+      committed it). Fail-safe: an unlanded checkpoint is always kept.
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta
@@ -126,13 +132,14 @@ func gitWipOut(ctx context.Context, dir string, env []string, args ...string) (s
 
 // wipCheckpointResult is the JSON/plain result of a checkpoint.
 type wipCheckpointResult struct {
-	Session   string   `json:"session"`
-	Ref       string   `json:"ref"`
-	Object    string   `json:"object,omitempty"`
-	StartSHA  string   `json:"start_sha"`
-	Leaves    []string `json:"leaves"`
-	Buildable bool     `json:"buildable"`
-	Clean     bool     `json:"clean"`
+	Session    string   `json:"session"`
+	Ref        string   `json:"ref"`
+	Object     string   `json:"object,omitempty"`
+	StartSHA   string   `json:"start_sha"`
+	Leaves     []string `json:"leaves"`
+	Buildable  bool     `json:"buildable"`
+	Clean      bool     `json:"clean"`
+	Superseded bool     `json:"superseded,omitempty"` // a newer concurrent checkpoint won the ref (#3873)
 }
 
 func runWipCheckpoint(stdout, stderr io.Writer, argv []string) int {
@@ -170,6 +177,11 @@ func runWipCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	}
 	if res.Clean {
 		fmt.Fprintf(stdout, "clean: nothing to checkpoint for session %s\n", sess)
+		return 0
+	}
+	if res.Superseded {
+		fmt.Fprintf(stdout, "superseded: a newer checkpoint already holds session %s -> %s\n",
+			sess, shortWipSHA(res.Object))
 		return 0
 	}
 	fmt.Fprintf(stdout, "checkpointed session %s at %s (%d leaves) -> %s\n",
@@ -237,11 +249,122 @@ func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, no
 	if err != nil {
 		return res, fmt.Errorf("mint checkpoint commit: %w", err)
 	}
-	if _, err := gitWipOut(ctx, repo, nil, "update-ref", wipref.SessionRef(session), commit); err != nil {
-		return res, fmt.Errorf("update ref: %w", err)
+	cand := wipref.RefRecord{
+		Ref:    wipref.SessionRef(session),
+		Object: commit,
+		Stamp: wipref.Stamp{
+			SessionID:      session,
+			StartSHA:       head,
+			Leaves:         res.Leaves,
+			Buildable:      buildable,
+			CheckpointedAt: nowUnix,
+		},
 	}
-	res.Object = commit
+	object, superseded, err := wipAnchorCAS(ctx, repo, cand.Ref, cand)
+	if err != nil {
+		return res, err
+	}
+	res.Object, res.Superseded = object, superseded
 	return res, nil
+}
+
+// wipAnchorCAS points ref at cand.Object under a last-writer-wins compare-and-swap,
+// mirroring leaseref's fence CAS (internal/leaseref/fence.go): read the ref's current
+// object, let wipref.Reconcile decide the winner, then `git update-ref ref new old` —
+// which fails if the ref advanced under us — and retry on a lost CAS. It never holds a
+// lock across a git subprocess. Two guard processes checkpointing the same session
+// thus converge to one valid ref (the last writer, by CheckpointedAt), never a torn
+// one. Returns the object the ref converged to and whether cand was SUPERSEDED (an
+// equal-or-newer checkpoint already held the ref, so cand did not land — not an error,
+// the later writer simply won).
+func wipAnchorCAS(ctx context.Context, repo, ref string, cand wipref.RefRecord) (object string, superseded bool, err error) {
+	const maxAttempts = 16
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		oldOID, hadRef, err := wipCurrentOID(ctx, repo, ref)
+		if err != nil {
+			return "", false, err
+		}
+		var cur wipref.RefRecord
+		if hadRef {
+			if cur, err = wipRecordAt(ctx, repo, ref, oldOID); err != nil {
+				return "", false, err
+			}
+		}
+		if _, changed := wipref.Reconcile(cur, cand); !changed {
+			return oldOID, true, nil // a newer/equal checkpoint already holds the ref
+		}
+		ok, err := wipCasUpdateRef(ctx, repo, ref, cand.Object, oldOID, hadRef)
+		if err != nil {
+			return "", false, err
+		}
+		if ok {
+			return cand.Object, false, nil
+		}
+		// CAS lost: the ref moved between our read and our write — re-read and re-decide.
+	}
+	return "", false, fmt.Errorf("update ref %s: compare-and-swap contended after %d attempts", ref, maxAttempts)
+}
+
+// wipCurrentOID resolves ref to its current object id and existence — the CAS
+// old-value read, mirroring leaseref.currentOID. A non-executable git is the only
+// hard error; a missing ref is (‑, false, nil).
+func wipCurrentOID(ctx context.Context, repo, ref string) (oid string, has bool, err error) {
+	out, _, code, err := gitWip(ctx, repo, nil, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve %s: %w", ref, err)
+	}
+	if code != 0 {
+		return "", false, nil
+	}
+	return strings.TrimSpace(out), true, nil
+}
+
+// wipRecordAt reads the stamp of the checkpoint commit ref currently points at, so
+// Reconcile can order the incumbent against the candidate. A missing/unparseable
+// stamp yields a zero Stamp (CheckpointedAt 0), which loses to any real candidate.
+func wipRecordAt(ctx context.Context, repo, ref, oid string) (wipref.RefRecord, error) {
+	msg, err := gitWipOut(ctx, repo, nil, "log", "-1", "--format=%B", oid)
+	if err != nil {
+		return wipref.RefRecord{}, err
+	}
+	stamp, _ := wipref.DecodeStamp(msg)
+	return wipref.RefRecord{Ref: ref, Object: oid, Stamp: stamp}, nil
+}
+
+// wipCasUpdateRef performs the OLD-VALUE compare-and-swap ref write, with a reflog
+// entry so a just-superseded checkpoint object stays gc-reachable through the reflog
+// expiry window (not only while the ref points at it). A create uses git's zero-OID
+// "must not exist" sentinel, so even the first anchor fails closed if a peer created
+// the ref first. ok=false is a lost CAS (a value), matching leaseref; git could not
+// be executed is the only hard error.
+func wipCasUpdateRef(ctx context.Context, repo, ref, newOID, oldOID string, hadRef bool) (bool, error) {
+	old := oldOID
+	if !hadRef {
+		z, err := wipZeroOID(ctx, repo)
+		if err != nil {
+			return false, err
+		}
+		old = z
+	}
+	_, _, code, err := gitWip(ctx, repo, nil, "update-ref", "--create-reflog", ref, newOID, old)
+	if err != nil {
+		return false, fmt.Errorf("update-ref %s: %w", ref, err)
+	}
+	return code == 0, nil // non-zero: CAS lost (ref advanced, or a create raced)
+}
+
+// wipZeroOID returns git's all-zeros object id for this repo's hash algorithm — the
+// update-ref old-value sentinel meaning "the ref must not currently exist". Mirrors
+// leaseref.zeroOID: 64 zeros under sha256, else 40.
+func wipZeroOID(ctx context.Context, repo string) (string, error) {
+	out, _, code, err := gitWip(ctx, repo, nil, "rev-parse", "--show-object-format")
+	if err != nil {
+		return "", fmt.Errorf("probe object format: %w", err)
+	}
+	if code == 0 && strings.TrimSpace(out) == "sha256" {
+		return strings.Repeat("0", 64), nil
+	}
+	return strings.Repeat("0", 40), nil
 }
 
 // wipLeavesFromNames folds a `git diff --name-only` listing into the sorted unique
@@ -295,17 +418,28 @@ func runWipStatus(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-// wipStatus reads every live checkpoint ref, decodes its stamp from the commit
-// message, and hands the records to the pure fold. A ref whose stamp is missing or
-// unparseable still lists, labelled from its ref name.
+// wipStatus reads every live checkpoint ref and hands the records to the pure fold,
+// computing each checkpoint's age against nowUnix.
 func wipStatus(ctx context.Context, repo string, nowUnix int64) (wipref.StatusReport, error) {
+	recs, err := wipListRecords(ctx, repo)
+	if err != nil {
+		return wipref.StatusReport{}, err
+	}
+	return wipref.Fold(recs, nowUnix), nil
+}
+
+// wipListRecords reads every live checkpoint ref and decodes its stamp from the
+// commit message — the shared raw listing behind both the status fold and the reap
+// fold. A ref whose stamp is missing or unparseable is still listed, labelled from
+// its ref name (so nothing silently vanishes from a maintenance pass).
+func wipListRecords(ctx context.Context, repo string) ([]wipref.RefRecord, error) {
 	pattern := strings.TrimSuffix(wipref.RefNamespace, "/")
 	out, errStr, code, err := gitWip(ctx, repo, nil, "for-each-ref", "--format=%(refname) %(objectname)", pattern)
 	if err != nil {
-		return wipref.StatusReport{}, fmt.Errorf("git for-each-ref: %w", err)
+		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 	if code != 0 {
-		return wipref.StatusReport{}, fmt.Errorf("git for-each-ref exited %d: %s", code, strings.TrimSpace(errStr))
+		return nil, fmt.Errorf("git for-each-ref exited %d: %s", code, strings.TrimSpace(errStr))
 	}
 	var recs []wipref.RefRecord
 	for _, ln := range strings.Split(out, "\n") {
@@ -325,7 +459,144 @@ func wipStatus(ctx context.Context, repo string, nowUnix int64) (wipref.StatusRe
 		}
 		recs = append(recs, wipref.RefRecord{Ref: ref, Object: obj, Stamp: stamp})
 	}
-	return wipref.Fold(recs, nowUnix), nil
+	return recs, nil
+}
+
+// ---- reap (#3873) ----
+
+// wipReapResult is the JSON/plain result of a reap pass: the refs deleted (or, in a
+// dry run, that would be) and the refs kept, each with the fold's reason.
+type wipReapResult struct {
+	Reaped []wipref.ReapVerdict `json:"reaped"`
+	Kept   []wipref.ReapVerdict `json:"kept"`
+	DryRun bool                 `json:"dry_run"`
+}
+
+func runWipReap(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("wip reap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "wip")
+	repo := fs.String("C", "", "run in this git repo (default: cwd)")
+	asJSON := fs.Bool("json", false, "emit the reap result as JSON")
+	dryRun := fs.Bool("dry-run", false, "report what would be reaped without deleting any ref")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	res, err := wipReap(context.Background(), *repo, *dryRun)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wip reap: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, res, "fak wip reap")
+	}
+	if len(res.Reaped) == 0 {
+		fmt.Fprintln(stdout, "no checkpoints to reap")
+		return 0
+	}
+	verb := "reaped"
+	if res.DryRun {
+		verb = "would reap"
+	}
+	for _, v := range res.Reaped {
+		fmt.Fprintf(stdout, "%s %s (%s) -> %s\n", verb, v.Session, v.Reason, shortWipSHA(v.Object))
+	}
+	return 0
+}
+
+// wipReap resolves every live checkpoint's owner state (LANDED when its delta is
+// already present in HEAD, else UNKNOWN — the fail-safe keep the spine can prove
+// without a session registry), folds them through the pure wipref.Reap, and deletes
+// each DELETE verdict's ref under an OLD-VALUE compare-and-swap so a ref that a
+// concurrent checkpoint advanced since the listing is left intact, not reaped out
+// from under it. With dryRun it computes verdicts but issues no deletes.
+func wipReap(ctx context.Context, repo string, dryRun bool) (wipReapResult, error) {
+	recs, err := wipListRecords(ctx, repo)
+	if err != nil {
+		return wipReapResult{}, err
+	}
+	owners := make(map[string]wipref.OwnerState, len(recs))
+	for _, r := range recs {
+		st, err := wipOwnerState(ctx, repo, r)
+		if err != nil {
+			return wipReapResult{}, err
+		}
+		owners[wipSessionOf(r)] = st
+	}
+	res := wipReapResult{DryRun: dryRun, Reaped: []wipref.ReapVerdict{}, Kept: []wipref.ReapVerdict{}}
+	for _, v := range wipref.Reap(recs, owners) {
+		if v.Action != wipref.ReapDelete {
+			res.Kept = append(res.Kept, v)
+			continue
+		}
+		if dryRun {
+			res.Reaped = append(res.Reaped, v)
+			continue
+		}
+		deleted, err := wipDeleteRef(ctx, repo, v.Ref, v.Object)
+		if err != nil {
+			return wipReapResult{}, err
+		}
+		if deleted {
+			res.Reaped = append(res.Reaped, v)
+		} else {
+			res.Kept = append(res.Kept, v) // ref advanced under us: a concurrent checkpoint won
+		}
+	}
+	return res, nil
+}
+
+// wipOwnerState returns the ONLY owner state the spine can positively prove from git
+// alone: OwnerLanded when HEAD's version of exactly the files the checkpoint changed
+// already equals the checkpoint's (the owner committed the delta), else OwnerUnknown
+// — which the fold keeps. It never reports a delete-eligible state on uncertainty, so
+// reap cannot destroy an unlanded snapshot. (LIVE / CLOSED_* are resolved by later
+// cuts with a session registry; the pure fold already handles the full vocabulary.)
+func wipOwnerState(ctx context.Context, repo string, rec wipref.RefRecord) (wipref.OwnerState, error) {
+	names, err := gitWipOut(ctx, repo, nil, "diff", "--name-only", rec.Object+"^", rec.Object)
+	if err != nil {
+		return wipref.OwnerUnknown, nil // no resolvable parent/delta: fail-safe keep
+	}
+	var files []string
+	for _, n := range strings.Split(names, "\n") {
+		if n = strings.TrimSpace(n); n != "" {
+			files = append(files, n)
+		}
+	}
+	if len(files) == 0 {
+		return wipref.OwnerUnknown, nil
+	}
+	args := append([]string{"diff", "--quiet", "HEAD", rec.Object, "--"}, files...)
+	_, _, code, err := gitWip(ctx, repo, nil, args...)
+	if err != nil {
+		return wipref.OwnerUnknown, nil
+	}
+	if code == 0 {
+		return wipref.OwnerLanded, nil // HEAD already carries exactly this delta
+	}
+	return wipref.OwnerUnknown, nil // unlanded (or diverged): keep, fail-safe
+}
+
+// wipDeleteRef removes ref under an OLD-VALUE compare-and-swap (`update-ref -d ref
+// oldOID`), so a ref advanced by a concurrent checkpoint since the reap listing is
+// left alone (deleted=false) rather than removed. Once the ref is gone the object
+// becomes gc-eligible (its reflog window aside) — the retention edge ends here. A
+// non-executable git is the only hard error.
+func wipDeleteRef(ctx context.Context, repo, ref, oldOID string) (bool, error) {
+	_, _, code, err := gitWip(ctx, repo, nil, "update-ref", "-d", ref, oldOID)
+	if err != nil {
+		return false, fmt.Errorf("delete %s: %w", ref, err)
+	}
+	return code == 0, nil
+}
+
+// wipSessionOf recovers a record's session id from its stamp, falling back to the
+// ref name — the same identity rule the pure fold uses.
+func wipSessionOf(rec wipref.RefRecord) string {
+	if rec.Stamp.SessionID != "" {
+		return rec.Stamp.SessionID
+	}
+	return wipref.SessionFromRef(rec.Ref)
 }
 
 // ---- restore ----
