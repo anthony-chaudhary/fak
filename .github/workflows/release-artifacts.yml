@@ -97,9 +97,9 @@ jobs:
           OUT="fak"; [ "$GOOS" = "windows" ] && OUT="fak.exe"
 
           mkdir -p dist/pkg
-          go build -trimpath \
-              -ldflags "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${VERSION}" \
-              -o "dist/pkg/${OUT}" ./cmd/fak
+          # Build through the one canonical release recipe (scripts/build.sh, #3709);
+          # the job env (GOOS/GOARCH/CGO_ENABLED/GOTOOLCHAIN) passes through unchanged.
+          OUT="dist/pkg/${OUT}" VERSION="${VERSION}" sh scripts/build.sh
 
           # Bundle the binary with the license and the getting-started guide so a
           # downloaded archive is self-explanatory.

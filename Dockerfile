@@ -20,9 +20,9 @@ WORKDIR /src
 # Copy the module (the Go module is the repo root) and build it. Zero external
 # deps means there is no go.sum step to cache.
 COPY . .
-RUN go build -trimpath \
-      -ldflags "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${APP_VERSION}" \
-      -o /out/fak ./cmd/fak
+# Build through the one canonical release recipe (scripts/build.sh, #3709); this
+# stage's ENV (CGO_ENABLED=0, GOTOOLCHAIN=auto) passes through to it unchanged.
+RUN OUT=/out/fak VERSION="${APP_VERSION}" sh scripts/build.sh
 
 # --- runtime -------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot

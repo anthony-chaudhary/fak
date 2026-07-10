@@ -58,9 +58,9 @@ RUN cd internal/compute \
 ENV CGO_ENABLED=1 \
     CGO_CFLAGS="-I/usr/local/cuda/include" \
     CGO_LDFLAGS="-L/src/internal/compute -L/usr/local/cuda/lib64"
-RUN GOTOOLCHAIN=auto go build -trimpath -tags cuda \
-      -ldflags "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${APP_VERSION}" \
-      -o /out/fak ./cmd/fak
+# Build through the one canonical release recipe (scripts/build.sh, #3709) with the
+# cuda tag; this stage's ENV (CGO_ENABLED=1 + the cgo cuda flags above) passes through.
+RUN OUT=/out/fak VERSION="${APP_VERSION}" TAGS=cuda GOTOOLCHAIN=auto sh scripts/build.sh
 
 # --- runtime -------------------------------------------------------------------
 # -runtime (not -base): carries cudart/cublas so the binary's dynamic links resolve;

@@ -44,6 +44,14 @@ build:
 	# target for tools/dispatch_worker.py (parity-tested; see dos.toml [supervise]).
 	go build -o tools/.bin/dispatchworker ./cmd/dispatchworker
 
+.PHONY: release
+# The release binary, built through the ONE canonical recipe every shipping consumer
+# uses (scripts/build.sh, #3709) — so `make release` locally exercises the exact
+# -trimpath/-ldflags/stamp invocation the Dockerfiles and the release-artifacts
+# workflow ship. Plain `build:` above stays the fast dev build.
+release:
+	sh scripts/build.sh
+
 # clean: prune the stray go-build binaries that pile up at the module root across
 # bench/demo builds (hundreds of MB of gitignored *.exe / bare cmd/<name> outputs).
 # The build-artifact twin of `git-maint`, safe by construction: it only ever removes

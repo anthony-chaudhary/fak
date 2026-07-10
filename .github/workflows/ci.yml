@@ -317,6 +317,7 @@ jobs:
           python tools/release_publish_test.py
           python tools/release_cadence_workflow_test.py
           python tools/release_artifacts_workflow_test.py
+          python tools/build_entrypoint_test.py
           python tools/release_status_test.py
           python tools/release_lock_test.py
           python tools/scrub_public_copy_test.py
