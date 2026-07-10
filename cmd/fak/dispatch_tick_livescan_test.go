@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +92,73 @@ func TestCooldownExtendsFromLaterWitnessMtime(t *testing.T) {
 	cooled := recentlyAttemptedIssuesAt(runsDir, 120, now)
 	if !cooled[4300] {
 		t.Fatalf("recently attempted = %#v, want #4300 cooling from the witness mtime", cooled)
+	}
+}
+
+// countingReadCloser wraps a log open so a test can measure exactly how many
+// bytes laneFromSpawnHeader pulls off a live worker's streaming transcript.
+type countingReadCloser struct {
+	rc io.ReadCloser
+	n  *int64
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.rc.Read(p)
+	*c.n += int64(n)
+	return n, err
+}
+
+func (c *countingReadCloser) Close() error { return c.rc.Close() }
+
+// TestLaneFromSpawnHeaderReadsBoundedPrefix pins the #3466 fix: the lane probe
+// must parse `lane=` off a worker log's FIRST line while reading only a bounded
+// prefix of the file — never the whole multi-MB, still-growing transcript the
+// legacy os.ReadFile pulled in on every livescan pass. The body is made far
+// larger than any header buffer, and the fsOpen seam counts the bytes actually
+// read to prove the read stayed under the cap.
+func TestLaneFromSpawnHeaderReadsBoundedPrefix(t *testing.T) {
+	runsDir := t.TempDir()
+	path := filepath.Join(runsDir, "resolve-3466-20260709-000000.log")
+	header := "# fak-spawn 20260709-000000 issue=3466 lane=docs backend=opencode argv0=node\n"
+	body := strings.Repeat("streaming transcript filler line well past any first-line buffer\n", 40000) // ~2.6 MB
+	if err := os.WriteFile(path, []byte(header+body), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	var bytesRead int64
+	orig := fsOpen
+	fsOpen = func(p string) (io.ReadCloser, error) {
+		f, err := os.Open(p)
+		if err != nil {
+			return nil, err
+		}
+		return &countingReadCloser{rc: f, n: &bytesRead}, nil
+	}
+	t.Cleanup(func() { fsOpen = orig })
+
+	if got := laneFromSpawnHeader(path); got != "docs" {
+		t.Fatalf("lane = %q, want %q (parsed from the spawn-header first line)", got, "docs")
+	}
+	if bytesRead > laneHeaderReadCapBytes {
+		t.Fatalf("lane probe read %d bytes of a %d-byte transcript, want <= %d (first line only, #3466)",
+			bytesRead, len(header)+len(body), laneHeaderReadCapBytes)
+	}
+}
+
+// TestLaneFromSpawnHeaderHeaderOnlyNoNewline pins the EOF edge of the bounded
+// read: a header-only log with no trailing newline (a worker that died at
+// spawn) must still yield its lane, matching the legacy whole-file parse.
+func TestLaneFromSpawnHeaderHeaderOnlyNoNewline(t *testing.T) {
+	runsDir := t.TempDir()
+	path := filepath.Join(runsDir, "resolve-3467-20260709-000001.log")
+	if err := os.WriteFile(path,
+		[]byte("# fak-spawn 20260709-000001 issue=3467 lane=gateway backend=claude argv0=claude"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	if got := laneFromSpawnHeader(path); got != "gateway" {
+		t.Fatalf("lane = %q, want %q (header-only log, no trailing newline)", got, "gateway")
+	}
+	if got := laneFromSpawnHeader(filepath.Join(runsDir, "missing.log")); got != "" {
+		t.Fatalf("lane = %q for a missing log, want \"\" (fail closed)", got)
 	}
 }
