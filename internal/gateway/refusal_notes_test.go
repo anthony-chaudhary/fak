@@ -45,6 +45,95 @@ func TestRefusalNoteSeamSurfacesNewKindWithoutCallSiteEdit(t *testing.T) {
 	}
 }
 
+// Every refusal must surface the agent's APPEAL channel (`fak complain`) in-band:
+// a false-positive DENY is byte-identical to a correct one in the decision journal,
+// so the kernel cannot self-detect it — the only signal is the agent saying so, and
+// it can only say so if it is told the channel exists. A single-denial turn names the
+// concrete reason/tool so the appeal is copy-pasteable, and the hint leads with
+// "adapt first" so it never reads as an invitation to appeal in lieu of adapting.
+func TestAdjudicationNoteSurfacesComplaintChannel(t *testing.T) {
+	note := adjudicationNote([]ToolAdjudication{{
+		Tool:     "Write",
+		Admitted: false,
+		Verdict:  WireVerdict{Kind: "DENY", Reason: "FILE_ADMISSION", Disposition: "TERMINAL"},
+	}})
+	for _, want := range []string{
+		"fak complain",
+		"--reason FILE_ADMISSION",
+		"--tool Write",
+		"--from-journal",
+		"Adapt first; appeal only when you are confident",
+	} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("adjudicationNote missing complaint hint %q:\n%s", want, note)
+		}
+	}
+}
+
+// A single-denial appeal must bind its witness: the copy-pasted `fak complain
+// --from-journal` command carries the refused call's args_digest as an exact
+// `--args-digest` selector, so SelectDenial attaches the witnessed verdict instead
+// of refusing an ambiguous reason/tool match and filing witness-less on a busy
+// journal. When the denial carries no digest, the command falls back to the bare
+// reason/tool form (no dangling selector flag).
+func TestComplaintHintBindsWitnessSelectorOnSingleDenial(t *testing.T) {
+	withDigest := adjudicationNote([]ToolAdjudication{{
+		Tool:       "PowerShell",
+		ArgsDigest: "sha256:deadbeefcafe",
+		Admitted:   false,
+		Verdict:    WireVerdict{Kind: "DENY", Reason: "POLICY_BLOCK", Disposition: "TERMINAL"},
+	}})
+	for _, want := range []string{
+		"--reason POLICY_BLOCK",
+		"--tool PowerShell",
+		"--from-journal --args-digest sha256:deadbeefcafe",
+	} {
+		if !strings.Contains(withDigest, want) {
+			t.Fatalf("single-denial complaint hint missing %q:\n%s", want, withDigest)
+		}
+	}
+
+	// No digest on the adjudication → no selector flag (and no empty `--args-digest`).
+	noDigest := adjudicationNote([]ToolAdjudication{{
+		Tool:     "Write",
+		Admitted: false,
+		Verdict:  WireVerdict{Kind: "DENY", Reason: "FILE_ADMISSION", Disposition: "TERMINAL"},
+	}})
+	if strings.Contains(noDigest, "--args-digest") {
+		t.Fatalf("digest-less denial should not emit an --args-digest selector:\n%s", noDigest)
+	}
+	if !strings.Contains(noDigest, "--tool Write --from-journal`") {
+		t.Fatalf("digest-less denial should fall back to the bare copy-paste form:\n%s", noDigest)
+	}
+}
+
+// A turn with more than one denial keeps the <REASON>/<TOOL> placeholders rather
+// than misattributing one refused call's scope to another — the appeal command
+// stays generic when it cannot be unambiguously specialized, and emits no digest
+// selector (a mixed turn's digests are per-call and cannot be attributed).
+func TestComplaintHintKeepsPlaceholdersOnMixedTurn(t *testing.T) {
+	note := adjudicationNote([]ToolAdjudication{
+		{Tool: "Write", ArgsDigest: "sha256:aaa", Admitted: false, Verdict: WireVerdict{Kind: "DENY", Reason: "FILE_ADMISSION", Disposition: "TERMINAL"}},
+		{Tool: "Bash", ArgsDigest: "sha256:bbb", Admitted: false, Verdict: WireVerdict{Kind: "DENY", Reason: "POLICY_BLOCK", Disposition: "TERMINAL"}},
+	})
+	if !strings.Contains(note, "--reason <REASON> --tool <TOOL>") {
+		t.Fatalf("mixed-turn complaint hint should keep placeholders:\n%s", note)
+	}
+	// Even though each denial carries a digest, a mixed turn cannot attribute one to
+	// the appeal, so no --args-digest selector is emitted.
+	if strings.Contains(note, "--args-digest") {
+		t.Fatalf("mixed-turn complaint hint must not emit a digest selector:\n%s", note)
+	}
+}
+
+// A clean turn (no denials) says nothing about the complaint channel — the hint
+// rides the denial trailer, not every note.
+func TestComplaintHintAbsentWithoutDenial(t *testing.T) {
+	if h := complaintHint(nil); h != "" {
+		t.Fatalf("complaintHint should be empty with no denials, got %q", h)
+	}
+}
+
 // The seam must preserve the pinned rendering ORDER of the existing notes
 // (reversibility recipe, then sanctioned alternative) - the wire tests read the
 // confirm token adjacent to the recipe, so a reordered fold would be a silent

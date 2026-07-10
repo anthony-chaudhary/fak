@@ -85,6 +85,7 @@ func denySummary(adjs []ToolAdjudication) string {
 // can adapt. Returns "" when every call was a clean ALLOW (nothing worth saying).
 func adjudicationNote(adjs []ToolAdjudication) string {
 	denied := make([]string, 0, len(adjs))
+	deniedAdjs := make([]ToolAdjudication, 0, len(adjs))
 	repaired := make([]string, 0, len(adjs))
 	allowedLoops := make([]string, 0, len(adjs))
 	hasConfirmRecipe := false
@@ -106,6 +107,7 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 				}
 			}
 			denied = append(denied, entry)
+			deniedAdjs = append(deniedAdjs, a)
 		case a.Admitted && a.Livelock != nil:
 			allowedLoops = append(allowedLoops, livelockInBandNote(a))
 		case a.Verdict.Kind == "TRANSFORM":
@@ -146,6 +148,7 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		default:
 			b.WriteString(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		}
+		b.WriteString(complaintHint(deniedAdjs))
 	}
 	if len(repaired) > 0 {
 		if len(denied) > 0 {
@@ -198,4 +201,52 @@ func livelockInBandNote(a ToolAdjudication) string {
 		note += " fuse=armed (this repeated call was refused; changing approach is required, not optional)"
 	}
 	return note
+}
+
+// complaintHint surfaces the agent's APPEAL channel (`fak complain`) on every
+// refusal, so a governed agent that judges a guard decision wrong has a
+// sanctioned, in-band way to say so — instead of silently looping, giving up, or
+// proceeding on a false premise. A false-positive DENY is byte-identical to a
+// correct one in the decision journal, so the kernel's own RSI fold
+// (guardroute / `fak guard-verdict-rsi`) cannot detect it: only the agent that
+// made the call knows it was legitimate (internal/guardcomplaint).
+//
+// The hint LEADS the reader back to adapting first, so it never reads as an
+// invitation to appeal in lieu of choosing an allowed alternative; it is the
+// escape hatch for when the agent is confident the guard, not its call, is
+// wrong. When the turn has exactly one denial the concrete reason/tool are
+// substituted into the command so the appeal is copy-pasteable, AND the call's
+// args_digest is emitted as an exact `--args-digest` selector so `--from-journal`
+// binds the witness by construction rather than filing witness-less on a busy
+// journal (guardcomplaint.SelectDenial refuses an ambiguous reason/tool match).
+// A mixed turn keeps the <REASON>/<TOOL> placeholders and emits no selector,
+// rather than misattributing one call's scope — or digest — to another.
+func complaintHint(denied []ToolAdjudication) string {
+	if len(denied) == 0 {
+		return ""
+	}
+	reason, tool := "<REASON>", "<TOOL>"
+	// selector binds the appeal to the EXACT refused call so `--from-journal` attaches
+	// its witness by construction, instead of hitting SelectDenial's ambiguous→no-witness
+	// path (guardcomplaint.SelectDenial) — which is what a busy journal serves for a bare
+	// reason/tool match, silently filing the appeal witness-less. args_digest is the
+	// per-call identity the DENY journal row carries, and it is only unambiguous for a
+	// single denial, so a mixed turn keeps the placeholders and emits no selector.
+	selector := ""
+	if len(denied) == 1 {
+		if r := strings.TrimSpace(reasonOrKind(denied[0].Verdict)); r != "" {
+			reason = r
+		}
+		if t := strings.TrimSpace(denied[0].Tool); t != "" {
+			tool = t
+		}
+		if d := strings.TrimSpace(denied[0].ArgsDigest); d != "" {
+			selector = " --args-digest " + d
+		}
+	}
+	return fmt.Sprintf(" Judge a refusal wrong — a false positive, or a gate that"+
+		" over-refuses? Appeal it: `fak complain --summary \"…\" --reason %s --tool %s"+
+		" --from-journal%s` files one deduplicating issue with the witnessed verdict"+
+		" attached. Adapt first; appeal only when you are confident the guard, not"+
+		" your call, is wrong.", reason, tool, selector)
 }
