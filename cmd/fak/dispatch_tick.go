@@ -414,10 +414,30 @@ func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map
 func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, target, promptChars int, labels []string, witnessRecords []dispatchtick.WitnessRecord, payload map[string]any) (launch dispatchtick.WorkerLaunch, launchPreview []string, guardedPreview bool, err error) {
 	// Opt-in per-issue tier launch profile (FLEET_TIER_LAUNCH): the target's trusted tier
 	// labels resolve to a {model, effort, ultracode} profile handed to the resolver as its
-	// lowest-precedence un-blanking source. Nil (knob off / non-claude / untagged) keeps the
-	// seat default, so a default fleet tick is byte-identical to before this seam.
-	tierProfile, tierBucket := dispatchTierLaunchProfile(opts.Backend, labels)
+	// lowest-precedence un-blanking source. A coordination work kind (project_management /
+	// gardening) additionally routes an UNLABELLED issue to the cheap PM bucket, so a PM
+	// dispatch loop runs on fable by default without a per-issue tier/pm label. Nil (knob
+	// off / non-claude / untagged on an implementation tick) keeps the seat default, so a
+	// default fleet tick is byte-identical to before this seam.
+	tierProfile, tierBucket := dispatchTierLaunchProfile(opts.Backend, labels, opts.WorkKind)
 	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel, tierProfile, opts.WorkClassModel)
+	// Preventive placement gate (#3521). The tier table is DIFFICULTY-driven and happily puts
+	// the cheap model on the MOST churning bucket (BucketUltra -> fable+ultracode). Before
+	// launch, refuse a (work-shape × model-reliability) pairing the model cannot hold and
+	// re-route it, instead of letting the worker starve on restart-amnesia and then blaming
+	// the model. An untagged issue yields ShapeUnknown, so the gate is inert and a default
+	// fleet tick is byte-identical; operator pins are never gated.
+	shape := dispatchtick.WorkShapeForIssue(labels)
+	if gp, fired := applyPlacementGate(modelPolicy, shape); fired {
+		payload["placement_gate"] = map[string]any{
+			"issue":  target,
+			"shape":  string(shape),
+			"from":   modelPolicy.Model,
+			"to":     gp.Model,
+			"reason": gp.PlacementReason,
+		}
+		modelPolicy = gp
+	}
 	// Layer 2: if the target's last slot walled on a model-switchable reason this tick,
 	// re-dispatch it on the next downgrade-chain model instead of the resolved one. Live +
 	// --model-downgrade only, so the default fleet is unaffected. A model wall is transient and
@@ -1127,17 +1147,21 @@ func dispatchTierLaunchTable() dispatchtick.TierLaunchTable {
 	return dispatchtick.DefaultTierLaunchTable()
 }
 
-// dispatchTierLaunchProfile resolves the opt-in per-issue launch profile for a target issue's
-// labels, or nil to leave the seat-default posture. It returns nil when the FLEET_TIER_LAUNCH
-// knob is off, the backend is not claude (the model uplift + effort/ultracode are Claude-only;
-// opencode/codex pin their own seat model with -m and ignore both), or the issue carries no
-// trusted tier (untagged / ambiguous). The bucket is returned alongside for the payload
-// surface; it is "" whenever the profile is nil.
-func dispatchTierLaunchProfile(backend string, labels []string) (*dispatchtick.LaunchProfile, dispatchtick.LaunchBucket) {
+// dispatchTierLaunchProfile resolves the opt-in launch profile for a target issue from its
+// per-issue labels AND the tick-wide work kind, or nil to leave the seat-default posture. It
+// returns nil when the FLEET_TIER_LAUNCH knob is off, the backend is not claude (the model
+// uplift + effort/ultracode are Claude-only; opencode/codex pin their own seat model with -m
+// and ignore both), or nothing resolves a profile. Per-issue labels win first (tier/ultra, a
+// valid tier, or a bare tier/pm); only an UNLABELLED issue falls through to the work kind,
+// where a coordination kind (project_management / gardening) routes to the cheap PM bucket —
+// so a PM dispatch loop runs on fable by default — and any other kind (notably engineering)
+// keeps the seat default. The bucket is returned alongside for the payload surface; it is ""
+// whenever the profile is nil.
+func dispatchTierLaunchProfile(backend string, labels []string, workKind string) (*dispatchtick.LaunchProfile, dispatchtick.LaunchBucket) {
 	if backend != "claude" || !dispatchTierLaunchEnabled() {
 		return nil, ""
 	}
-	profile, bucket, ok := dispatchtick.LaunchProfileForIssue(labels, dispatchTierLaunchTable())
+	profile, bucket, ok := dispatchtick.LaunchProfileForDispatch(labels, workKind, dispatchTierLaunchTable())
 	if !ok {
 		return nil, ""
 	}
