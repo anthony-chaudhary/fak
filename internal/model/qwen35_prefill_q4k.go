@@ -225,78 +225,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	s.prefillQwen35HybridQ4KMetalUpload()
 
 	for l := 0; l < cfg.NumLayers; l++ {
-		lp := func(str string) string { return layerName(l, str) }
-		Xn := make([]float32, P*H)
-		wIn := m.tensor(lp("input_layernorm.weight"))
-		t = s.phaseStart()
-		parFor(P, numWorkers, func(lo, hi int) {
-			for t := lo; t < hi; t++ {
-				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
-				} else {
-					rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
-				}
-			}
-		})
-		s.phaseEnd("input_norm", t)
-
-		var o []float32
-		if cfg.isLinearAttnLayer(l) {
-			o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, pgroup, qz)
-		} else {
-			o = s.prefillQwen35FullAttnLayerQ4K(l, Xn, P, base, proj, pgroup, qz)
-		}
-		t = s.phaseStart()
-		parFor(len(X), numWorkers, func(lo, hi int) {
-			for i := lo; i < hi; i++ {
-				X[i] += o[i]
-			}
-		})
-		s.phaseEnd("attn_residual", t)
-
-		Xn2 := make([]float32, P*H)
-		wPost := m.tensor(lp("post_attention_layernorm.weight"))
-		t = s.phaseStart()
-		parFor(P, numWorkers, func(lo, hi int) {
-			for t := lo; t < hi; t++ {
-				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
-				} else {
-					rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
-				}
-			}
-		})
-		s.phaseEnd("post_attn_norm", t)
-		I := cfg.IntermediateSize
-		Xn2q := qz(Xn2, P, H)
-		t = s.phaseStart()
-		gu := pgroup([]string{lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight")}, Xn2, Xn2q)
-		G, U := gu[0], gu[1]
-		s.phaseEnd("mlp_gate_up_proj", t)
-		for t := 0; t < P; t++ {
-			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
-			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
-		}
-		t = s.phaseStart()
-		parFor(len(G), numWorkers, func(lo, hi int) {
-			for i := lo; i < hi; i++ {
-				G[i] = act(G[i], cfg) * U[i]
-			}
-		})
-		s.phaseEnd("mlp_activation", t)
-		t = s.phaseStart()
-		Down := proj(lp("mlp.down_proj.weight"), G, qz(G, P, I))
-		s.phaseEnd("mlp_down_proj", t)
-		for t := 0; t < P; t++ {
-			m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
-		}
-		t = s.phaseStart()
-		parFor(len(X), numWorkers, func(lo, hi int) {
-			for i := lo; i < hi; i++ {
-				X[i] += Down[i]
-			}
-		})
-		s.phaseEnd("mlp_residual", t)
+		s.prefillQwen35HybridQ4KLayer(l, X, P, base, eps, proj, pgroup, qz)
 	}
 
 	t = s.phaseStart()
@@ -311,6 +240,90 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		s.profileQwen35HybridQ4KPrefill(P, start, gemmTime, q4kTime, q8Time, q6kTime, q4kGPUCompute)
 	}
 	return xf
+}
+
+// prefillQwen35HybridQ4KLayer runs one transformer layer of the batched resident-Q4_K hybrid
+// prefill: input RMSNorm, the attention sub-layer (linear-attn or full-attn), the attention
+// residual, the post-attention RMSNorm, the SwiGLU MLP, and the MLP residual. It mutates the
+// running hidden panel X in place (element writes persist through the shared backing array),
+// so it returns nothing — extracted verbatim from prefillQwen35HybridQ4KHidden's layer loop so
+// the hot method stays under its line ceiling. The projection dispatch (proj/pgroup/qz) and the
+// per-layer f32 math are byte-for-byte identical to the inlined loop body.
+func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) {
+	m, cfg := s.M, s.M.Cfg
+	H := cfg.HiddenSize
+	lp := func(str string) string { return layerName(l, str) }
+	Xn := make([]float32, P*H)
+	wIn := m.tensor(lp("input_layernorm.weight"))
+	t := s.phaseStart()
+	parFor(P, numWorkers, func(lo, hi int) {
+		for t := lo; t < hi; t++ {
+			if cfg.NormGain1p || cfg.LayerNorm {
+				copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
+			} else {
+				rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
+			}
+		}
+	})
+	s.phaseEnd("input_norm", t)
+
+	var o []float32
+	if cfg.isLinearAttnLayer(l) {
+		o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, pgroup, qz)
+	} else {
+		o = s.prefillQwen35FullAttnLayerQ4K(l, Xn, P, base, proj, pgroup, qz)
+	}
+	t = s.phaseStart()
+	parFor(len(X), numWorkers, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			X[i] += o[i]
+		}
+	})
+	s.phaseEnd("attn_residual", t)
+
+	Xn2 := make([]float32, P*H)
+	wPost := m.tensor(lp("post_attention_layernorm.weight"))
+	t = s.phaseStart()
+	parFor(P, numWorkers, func(lo, hi int) {
+		for t := lo; t < hi; t++ {
+			if cfg.NormGain1p || cfg.LayerNorm {
+				copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
+			} else {
+				rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
+			}
+		}
+	})
+	s.phaseEnd("post_attn_norm", t)
+	I := cfg.IntermediateSize
+	Xn2q := qz(Xn2, P, H)
+	t = s.phaseStart()
+	gu := pgroup([]string{lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight")}, Xn2, Xn2q)
+	G, U := gu[0], gu[1]
+	s.phaseEnd("mlp_gate_up_proj", t)
+	for t := 0; t < P; t++ {
+		m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
+		m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
+	}
+	t = s.phaseStart()
+	parFor(len(G), numWorkers, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			G[i] = act(G[i], cfg) * U[i]
+		}
+	})
+	s.phaseEnd("mlp_activation", t)
+	t = s.phaseStart()
+	Down := proj(lp("mlp.down_proj.weight"), G, qz(G, P, I))
+	s.phaseEnd("mlp_down_proj", t)
+	for t := 0; t < P; t++ {
+		m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
+	}
+	t = s.phaseStart()
+	parFor(len(X), numWorkers, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			X[i] += Down[i]
+		}
+	})
+	s.phaseEnd("mlp_residual", t)
 }
 
 // prefillQwen35HybridQ4KMetalUpload bulk-uploads the resident projection weights to the GPU
