@@ -322,58 +322,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	// applyFn owns all shared mutable state (builder, KV-b merge buffer, profiler) and runs
 	// on the single collector goroutine in original tensor order.
 	applyFn := func(tw tensorWork) error {
-		p.Tick(tw.tickBytes)
-		p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
-		for _, pt := range tw.pending {
-			switch {
-			case pt.isKVBHalf:
-				merged, ready, err := bufferGLMKVBHalf(kvbHalf, pt.layer, pt.half, pt.shape, pt.f32)
-				if err != nil {
-					return err
-				}
-				if ready {
-					md, err := normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
-					if err != nil {
-						return err
-					}
-					if err := builder.AddF32Tensor(merged.Name, merged.Shape, md); err != nil {
-						return err
-					}
-				}
-			case pt.resident:
-				switch pt.residentType {
-				case TensorQ6_K:
-					if err := builder.AddResidentQ6K(pt.name, pt.shape, pt.raw); err != nil {
-						return err
-					}
-				case TensorQ5_K:
-					if err := builder.AddResidentQ5K(pt.name, pt.shape, pt.raw); err != nil {
-						return err
-					}
-				case TensorIQ3_XXS:
-					if err := builder.AddResidentIQ3XXS(pt.name, pt.shape, pt.raw); err != nil {
-						return err
-					}
-				case TensorIQ4_XS:
-					if err := builder.AddResidentIQ4XS(pt.name, pt.shape, pt.raw); err != nil {
-						return err
-					}
-				case TensorQ8_0:
-					if err := builder.AddResidentQ8_0(pt.name, pt.shape, pt.raw); err != nil {
-						return err
-					}
-				default: // TensorQ4_K
-					if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
-						return err
-					}
-				}
-			default:
-				if err := builder.AddF32Tensor(pt.name, pt.shape, pt.f32); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf)
 	}
 
 	if err := s.parallelQuantLoad(computeFn, applyFn); err != nil {
@@ -386,4 +335,64 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		p.EmitLoadPathSummary(p.Progress)
 	}
 	return builder.Build()
+}
+
+// applyQ4KTensorWork is the collector-side apply step of QuantModelQ4KProfileOptions,
+// extracted verbatim: it ticks the profiler and applies one tensorWork's pending builder
+// mutations (KV-b half buffering + merge, resident raw-quant adds, f32 adds) in order. It
+// owns all shared mutable state (builder, KV-b merge buffer, profiler) and must only run
+// on the single collector goroutine in original tensor order.
+func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builder *model.QuantBuilder, kvbHalf map[int]glmKVBHalf) error {
+	p.Tick(tw.tickBytes)
+	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
+	for _, pt := range tw.pending {
+		switch {
+		case pt.isKVBHalf:
+			merged, ready, err := bufferGLMKVBHalf(kvbHalf, pt.layer, pt.half, pt.shape, pt.f32)
+			if err != nil {
+				return err
+			}
+			if ready {
+				md, err := normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
+				if err != nil {
+					return err
+				}
+				if err := builder.AddF32Tensor(merged.Name, merged.Shape, md); err != nil {
+					return err
+				}
+			}
+		case pt.resident:
+			switch pt.residentType {
+			case TensorQ6_K:
+				if err := builder.AddResidentQ6K(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorQ5_K:
+				if err := builder.AddResidentQ5K(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorIQ3_XXS:
+				if err := builder.AddResidentIQ3XXS(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorIQ4_XS:
+				if err := builder.AddResidentIQ4XS(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorQ8_0:
+				if err := builder.AddResidentQ8_0(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			default: // TensorQ4_K
+				if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := builder.AddF32Tensor(pt.name, pt.shape, pt.f32); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
