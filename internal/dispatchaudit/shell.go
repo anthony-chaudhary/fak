@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/dispatchconservation"
 )
 
 // shell.go is the THIN I/O boundary: it reads the on-disk dispatch artifacts
@@ -51,14 +53,28 @@ var resolveIssueRE = regexp.MustCompile(`^resolve-(\d+)-`)
 
 // ScanDir reads runsDir, parses every resolve-*.log into a Worker (pairing its
 // .backend sidecar and folding in the shared progress ledger), and returns them
-// sorted by log name for determinism.
+// sorted by log name for determinism. Windowless form of ScanDirSince: it scans
+// every historical log, exactly as before the audit window existed (#3466).
 func ScanDir(runsDir string) ([]Worker, error) {
+	return ScanDirSince(runsDir, time.Time{})
+}
+
+// ScanDirSince is ScanDir windowed to logs spawned at/after since: an entry
+// whose spawn stamp (parsed from the log NAME, mirroring
+// dispatchconservation.CollectUnits) — or, for a stampless legacy name, whose
+// mtime — falls before since is skipped BEFORE any open/parse or .commit/.pid
+// sidecar read, so the scheduled audit stops paying O(total historical runs)
+// on a never-reaped runs dir (#3466). A zero since scans everything
+// (byte-identical to the legacy ScanDir behavior).
+func ScanDirSince(runsDir string, since time.Time) ([]Worker, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		return nil, err
 	}
 
-	// Index the sidecars and detect which logs have one.
+	// Index the sidecars and detect which logs have one. Windowed by the spawn
+	// stamp shared with the sidecar's log name (never by sidecar mtime, which can
+	// drift from the log's), so a log and its sidecar are windowed identically.
 	sidecar := map[string]Backend{}
 	hasSidecar := map[string]bool{}
 	progress := loadProgress(filepath.Join(runsDir, "progress.jsonl"))
@@ -70,6 +86,9 @@ func ScanDir(runsDir string) ([]Worker, error) {
 		name := e.Name()
 		if strings.HasSuffix(name, ".backend") {
 			base := strings.TrimSuffix(name, ".backend")
+			if sidecarOutOfWindow(base, since) {
+				continue
+			}
 			b, _ := os.ReadFile(filepath.Join(runsDir, name))
 			sidecar[base] = NormalizeBackend(string(b))
 			hasSidecar[base] = true
@@ -79,6 +98,9 @@ func ScanDir(runsDir string) ([]Worker, error) {
 	var workers []Worker
 	for _, e := range entries {
 		if e.IsDir() || !resolveLogRE.MatchString(e.Name()) {
+			continue
+		}
+		if !logInWindow(e, since) {
 			continue
 		}
 		base := strings.TrimSuffix(e.Name(), ".log")
@@ -121,7 +143,16 @@ const sigMaxReadBytes = 2_000_000
 // resolve-*.log's text (pairing its .backend sidecar, defaulting to claude for a
 // legacy log with none — the Python tool's parity behavior), and returns the
 // fileable candidate list. THIN I/O boundary: the classification is FoldSignatures.
+// Windowless form of ScanDirSignaturesSince (zero since = scan everything, #3466).
 func ScanDirSignatures(runsDir string, th SignatureThresholds) ([]SignatureFinding, error) {
+	return ScanDirSignaturesSince(runsDir, th, time.Time{})
+}
+
+// ScanDirSignaturesSince is ScanDirSignatures windowed to logs spawned at/after
+// since (same name-stamp-first, mtime-fallback rule as ScanDirSince), skipping
+// out-of-window logs BEFORE the capped 2 MB text read. A zero since scans
+// everything, byte-identical to the legacy behavior (#3466).
+func ScanDirSignaturesSince(runsDir string, th SignatureThresholds, since time.Time) ([]SignatureFinding, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		return nil, err
@@ -135,6 +166,9 @@ func ScanDirSignatures(runsDir string, th SignatureThresholds) ([]SignatureFindi
 		name := e.Name()
 		if strings.HasSuffix(name, ".backend") {
 			base := strings.TrimSuffix(name, ".backend")
+			if sidecarOutOfWindow(base, since) {
+				continue
+			}
 			b, _ := os.ReadFile(filepath.Join(runsDir, name))
 			sidecar[base] = NormalizeBackend(string(b))
 			hasSidecar[base] = true
@@ -144,6 +178,9 @@ func ScanDirSignatures(runsDir string, th SignatureThresholds) ([]SignatureFindi
 	var logs []SigLog
 	for _, e := range entries {
 		if e.IsDir() || !resolveLogRE.MatchString(e.Name()) {
+			continue
+		}
+		if !logInWindow(e, since) {
 			continue
 		}
 		base := strings.TrimSuffix(e.Name(), ".log")
@@ -159,6 +196,41 @@ func ScanDirSignatures(runsDir string, th SignatureThresholds) ([]SignatureFindi
 	}
 	sort.Slice(logs, func(i, j int) bool { return logs[i].Name < logs[j].Name })
 	return FoldSignatures(logs, th), nil
+}
+
+// logInWindow reports whether a resolve-log directory entry falls inside the
+// audit window [since, now]. A zero since means no window: everything is in
+// (the legacy scan-all behavior). The spawn stamp parsed from the log NAME is
+// authoritative (reusing dispatchconservation.ParseLogStampUTC — the mtime
+// moves on every write, but the unit was spent at spawn); a legacy name with
+// no parseable stamp falls back to the file mtime, and an entry whose mtime
+// cannot be read stays IN — the audit never silently drops evidence it cannot
+// date (an unreadable file is skipped by the parse step anyway). (#3466)
+func logInWindow(e os.DirEntry, since time.Time) bool {
+	if since.IsZero() {
+		return true
+	}
+	if stamp, ok := dispatchconservation.ParseLogStampUTC(e.Name()); ok {
+		return !stamp.Before(since)
+	}
+	info, err := e.Info()
+	if err != nil {
+		return true
+	}
+	return !info.ModTime().Before(since)
+}
+
+// sidecarOutOfWindow reports whether a .backend sidecar's base name dates its
+// run strictly before since. Name-stamp ONLY (no mtime fallback): the stamp is
+// shared with the paired log's name, so a stamped log and its sidecar are
+// always windowed identically, while a stampless sidecar is always indexed —
+// it can never be dropped on an mtime guess its log did not make. (#3466)
+func sidecarOutOfWindow(base string, since time.Time) bool {
+	if since.IsZero() {
+		return false
+	}
+	stamp, ok := dispatchconservation.ParseLogStampUTC(base + ".log")
+	return ok && stamp.Before(since)
 }
 
 // readCappedLog reads at most sigMaxReadBytes of a log as text.
