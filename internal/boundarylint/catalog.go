@@ -6,6 +6,9 @@ type Status string
 const (
 	StatusEnforced Status = "enforced"
 	StatusProposed Status = "proposed"
+	// StatusSoft is an implemented tell that is REPORTED (fak boundary, a scorecard KPI)
+	// but deliberately not part of any gate — a trend to watch, not a build-reddener.
+	StatusSoft Status = "soft"
 )
 
 // CatalogEntry documents one boundary tell.
@@ -44,6 +47,12 @@ var Catalog = []CatalogEntry{
 		Title:  "test freezes a current value instead of asserting an invariant",
 		Status: StatusEnforced,
 		Note:   "enforced by DefaultTestRules over _test.go. A magic enumeration count (len(verbs)==109), a wholly-literal list equality, or a pinned version string passes/fails on churn, not correctness — assert the relation the value must hold, or //boundarylint:ignore CHANGE_DETECTOR_TEST a deliberate fixed-width invariant.",
+	},
+	{
+		Code:   "SKIP_DEBT",
+		Title:  "test skips itself with no platform/short/env guard",
+		Status: StatusSoft,
+		Note:   "SOFT (not gated): a bare t.Skip/Skipf/SkipNow removes a test from the suite unconditionally, so a presence KPI still counts it while the body never runs. A skip guarded by testing.Short()/runtime.GOOS/os.Getenv is an honest conditional and is not flagged; a deliberate always-skip is //boundarylint:ignore SKIP_DEBT with a tracking issue. Reported by `fak boundary` and folded as a qa-process scorecard KPI, never a build gate.",
 	},
 	{
 		Code:   "UNCHECKED_HTTP_STATUS",
