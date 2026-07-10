@@ -771,13 +771,14 @@ func contextIntrospectionToolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_context_restore",
-			"description": "Page a compacted-away ORIGINATING task back in by its content-address handle. When a long fak guard -- claude session compacts, the stub it leaves may carry a tombstone like \"[fak] originating task (compacted, id=<hex>): \\\"…\\\"\": that id is a callable handle. Pass {id} (the <hex>) to get back the FULL verbatim first-user-turn JSON fak dropped from the wire, plus the orientation excerpt — so a model resuming past the compaction can recover WHAT it was asked to do instead of only the lossy excerpt. Read-only recovery: returns bytes fak already had and dropped; never re-enters the request path, never fabricates. Trust-gated: a span an operator later sealed (quarantine) or tombstoned (context control) is REFUSED, not resurrected. An unknown/evicted id returns a miss. Omitted trace_id uses the gateway default trace (your own session under fak guard).",
+			"description": "Page a dropped span back in by its content-address handle. When a long fak guard -- claude session compacts, the stub it leaves may carry a tombstone like \"[fak] originating task (compacted, id=<hex>): \\\"…\\\"\": that id is a callable handle. Pass {id} (the <hex>) to get back the FULL verbatim first-user-turn JSON fak dropped from the wire, plus the orientation excerpt — so a model resuming past the compaction can recover WHAT it was asked to do instead of only the lossy excerpt. The id is content-addressed in ONE shared sha256-hex space (ctxplan/recall/memq), so when the compaction stash does not hold it you may also pass {image_dir} — a persisted recall core image — and a recall PAGE addressed by its recall digest pages back in under that image's trust gate. Read-only recovery: returns bytes fak already had and dropped; never re-enters the request path, never fabricates. Trust-gated: a span an operator later sealed (quarantine) or tombstoned (context control) is REFUSED, not resurrected. An unknown/evicted id returns a miss. Omitted trace_id uses the gateway default trace (your own session under fak guard).",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "required": ["id"],
   "properties": {
-    "id": {"type": "string", "description": "the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>"},
-    "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
+    "id": {"type": "string", "description": "the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},
+    "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"},
+    "image_dir": {"type": "string", "description": "optional persisted recall core image dir; when the compaction stash misses the id, a recall page at that digest is paged back in under the image's trust gate"}
   }
 }`),
 		},

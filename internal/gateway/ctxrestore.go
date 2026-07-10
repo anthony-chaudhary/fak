@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -136,25 +137,74 @@ type CtxRestoreResult struct {
 const ctxRestoreSchema = "fak-ctxrestore-result/1"
 
 // ContextRestoreRequest is the fak_context_restore MCP argument shape: the content-address handle a
-// tombstone embedded, and an optional trace (omitted resolves to the gateway default trace — the
-// wrapped session itself under `fak guard`, so a model restoring its OWN dropped task needs no
-// out-of-band identity).
+// tombstone embedded, an optional trace (omitted resolves to the gateway default trace — the wrapped
+// session itself under `fak guard`, so a model restoring its OWN dropped task needs no out-of-band
+// identity), and an optional recall image dir (issue #3062). ImageDir generalizes restore beyond the
+// compaction-tombstone stash: when the per-trace stash does not hold the digest, a named recall core
+// image is consulted so a recall PAGE addressed by its recall digest pages back in under the image's
+// own trust gate — the SAME content-address, one restore call. Omitted, restore is stash-only, exactly
+// as Slice 1 behaved (backward-compatible).
 type ContextRestoreRequest struct {
-	ID      string `json:"id"`
-	TraceID string `json:"trace_id"`
+	ID       string `json:"id"`
+	TraceID  string `json:"trace_id"`
+	ImageDir string `json:"image_dir,omitempty"`
 }
 
-// restoreContext resolves a fak_context_restore call: page the dropped originating-task bytes back in
-// by their content-address, honoring the trust gate. A sealed/tombstoned entry is REFUSED
-// (ErrRestoreRefused) — the handle recovers a dropped span, never a suppressed one — and an unknown
-// id is a miss (ErrRestoreMiss). The lookup is exact on the digest; there is no fuzzy match, because
-// a content-address either names bytes we hold or it does not.
+// restoreContext resolves a fak_context_restore call: page dropped-span bytes back in by their
+// content-address, honoring the trust gate. Resolution is layered over ONE unified sha256-hex id space
+// (issue #3062): the per-trace compaction-tombstone stash is consulted FIRST (a hit — bytes OR a
+// sealed/tombstoned refusal — is authoritative), and only a genuine stash MISS falls through to a
+// content-addressed ctxplan.Store. A sealed/tombstoned span is REFUSED (ErrRestoreRefused wrapping the
+// ctxplan sentinel) whichever source held it — the handle recovers a dropped span, never a suppressed
+// one — and a digest no source holds is a miss (ErrRestoreMiss). The lookup is exact on the digest;
+// there is no fuzzy match, because a content-address either names bytes we hold or it does not.
+//
+// The store fall-through is source-agnostic (see ctxrestore_store.go): today it wires the recall-image
+// source (ImageDir → recall.CtxStore), the source reachable in the gateway lane; a ctxview-elision store
+// (the ctxplan planner's per-session store) and a memq-cell store plug into the same restoreFromStore
+// adapter behind a Store handle, with no new routing here.
 func (s *Server) restoreContext(req ContextRestoreRequest) (CtxRestoreResult, error) {
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
 		return CtxRestoreResult{}, errors.New("fak_context_restore id is required")
 	}
 	trace := s.traceFor(req.TraceID)
+
+	// 1) The per-trace compaction-tombstone stash — the default source. A hit here (bytes or a
+	//    trust-gate refusal) is authoritative; only a genuine miss falls through to a Store.
+	res, err := s.restoreFromStash(trace, id)
+	if err == nil || !errors.Is(err, ErrRestoreMiss) {
+		return res, err
+	}
+
+	// 2) Stash miss — generalize beyond the compaction tombstone (#3062). When the caller names a
+	//    persisted recall core image, route the SAME content-address through its ctxplan.Store so a
+	//    recall page pages back in under the image's own trust gate.
+	if dir := strings.TrimSpace(req.ImageDir); dir != "" {
+		sp, body, ierr := s.restoreFromImage(context.Background(), dir, id)
+		if ierr != nil {
+			return CtxRestoreResult{}, ierr
+		}
+		return CtxRestoreResult{
+			Schema:     ctxRestoreSchema,
+			TraceID:    trace,
+			ID:         id,
+			Excerpt:    sp.Descriptor,
+			Bytes:      string(body),
+			Provenance: "WITNESSED",
+		}, nil
+	}
+
+	return CtxRestoreResult{}, ErrRestoreMiss
+}
+
+// restoreFromStash resolves a restore-by-digest call against the per-trace compaction-tombstone stash:
+// the Slice 1 source, unchanged in behavior. A matching entry returns its bytes, or a refusal wrapping
+// the ctxplan sentinel when an operator sealed/tombstoned it; an id the stash does not hold (unknown
+// trace, unknown id, evicted) is ErrRestoreMiss — the "never had it" signal restoreContext branches on
+// to decide whether to fall through to a content-addressed Store. Holds ctxRestoreMu only for the
+// in-memory scan (no I/O), so the fall-through's recall-image load never runs under the stash lock.
+func (s *Server) restoreFromStash(trace, id string) (CtxRestoreResult, error) {
 	s.ctxRestoreMu.Lock()
 	defer s.ctxRestoreMu.Unlock()
 	sess := s.ctxRestore[trace]
