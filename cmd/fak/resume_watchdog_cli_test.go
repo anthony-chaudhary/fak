@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -900,5 +901,59 @@ func TestRecordAttemptCauseWritesConcreteReason(t *testing.T) {
 	}
 	if !bytes.Contains(raw, []byte(`"phase":"attempt_failed"`)) || !bytes.Contains(raw, []byte(`"reason":"MALFORMED_400"`)) {
 		t.Fatalf("ledger=%s", raw)
+	}
+}
+
+func writeResumeProgressTranscript(t *testing.T, home, sid string, launchUnix, turnUnix int64, model string) {
+	t.Helper()
+	dir := filepath.Join(home, ".claude-a", "projects", "C--work-fak")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	turn := time.Unix(turnUnix, 0).UTC().Format(time.RFC3339)
+	line := fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"role":"assistant","model":%q,"content":"working","usage":{"input_tokens":10}}}`+"\n", turn, model)
+	if err := os.WriteFile(filepath.Join(dir, sid+".jsonl"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRewitnessDroppedSessionRecordsProgress(t *testing.T) {
+	home := t.TempDir()
+	sid := "019f3023-52dd-7001-b559-2818dc14ede6"
+	writeResumeProgressTranscript(t, home, sid, 100, 200, "claude-opus-4-8")
+	status := filepath.Join(t.TempDir(), "status.jsonl")
+	history := map[string][]resume.Attempt{sid: {{UnixSeconds: 100, Phase: "launched"}}}
+	rwRewitnessDroppedSessions(home, status, "LIVE", nil, history, nil)
+	raw, err := os.ReadFile(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"phase":"progress"`, `"rewitnessed_after_plan_drop":true`, `"session":"` + sid + `"`} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Fatalf("status=%s missing %s", raw, want)
+		}
+	}
+}
+
+func TestRewitnessDroppedSessionSkipsPlannedOrAlreadyProven(t *testing.T) {
+	home := t.TempDir()
+	sid := "019f3023-52dd-7001-b559-2818dc14ede6"
+	writeResumeProgressTranscript(t, home, sid, 100, 200, "claude-opus-4-8")
+	history := map[string][]resume.Attempt{sid: {{UnixSeconds: 100, Phase: "launched"}}}
+	for _, tc := range []struct {
+		name   string
+		plan   []resume.WatchdogPlanRow
+		events []resume.WatchdogStatusEvent
+	}{
+		{"planned", []resume.WatchdogPlanRow{{Session: sid}}, nil},
+		{"proven", nil, []resume.WatchdogStatusEvent{{Session: sid, Phase: "progress", NewTurns: 1}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := filepath.Join(t.TempDir(), "status.jsonl")
+			rwRewitnessDroppedSessions(home, status, "LIVE", tc.plan, history, tc.events)
+			if _, err := os.Stat(status); !os.IsNotExist(err) {
+				t.Fatalf("status unexpectedly written: %v", err)
+			}
+		})
 	}
 }

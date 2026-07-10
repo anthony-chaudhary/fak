@@ -175,6 +175,11 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	history := rwLoadHistory(ledgerPath)
+	// Re-witness every launched-but-unproven session, including sessions no longer
+	// present in resume_plan.json. A productive child may remove its own eligibility
+	// before the next tick; the durable launch ledger remains the authoritative set
+	// that still needs a transcript witness.
+	rwRewitnessDroppedSessions(home, statusLedgerPath, tickMode, plan, history, statusEvents)
 
 	// Resolve the managed-cache posture ONCE per tick (the env is tick-constant) and warn ONCE
 	// (#2178 / #3779 parity with the .py/.ps1). A configured posture fronts each resumed child
@@ -417,6 +422,32 @@ func reportResumeWatchdogStatus(stdout, stderr io.Writer, tickMode string, plan 
 		return 3
 	}
 	return 0
+}
+
+func rwRewitnessDroppedSessions(home, statusPath, mode string, plan []resume.WatchdogPlanRow, history map[string][]resume.Attempt, events []resume.WatchdogStatusEvent) {
+	planned := map[string]bool{}
+	for _, row := range plan {
+		planned[row.Session] = true
+	}
+	proven := map[string]bool{}
+	for _, event := range events {
+		if strings.EqualFold(event.Phase, "progress") || event.NewTurns > 0 || event.ProgressWitnessUnix > 0 {
+			proven[event.Session] = true
+		}
+	}
+	for sid, attempts := range history {
+		if sid == "" || planned[sid] || proven[sid] || resume.CountAttempts(attempts) == 0 {
+			continue
+		}
+		progress := rwReadResumeProgress(home, sid, attempts)
+		if progress.NewTurns > 0 && progress.Outcome == resume.OutcomeProgressed {
+			rwAppendLedger(statusPath, map[string]any{
+				"ts": rwNowISO(), "mode": mode, "session": sid, "phase": "progress",
+				"new_turns": progress.NewTurns, "progress_model": progress.ProgressModel,
+				"progress_witnessed_at": progress.ProgressUnix, "rewitnessed_after_plan_drop": true,
+			})
+		}
+	}
 }
 
 type rwResumeProgress struct {
