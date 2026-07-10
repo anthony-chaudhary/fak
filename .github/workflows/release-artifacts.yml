@@ -163,6 +163,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write # SLSA build-provenance attestation of the aggregate SHA256SUMS (#1372)
+      attestations: write # write the attestation to the repo's attestation store
     steps:
       - name: Fold per-asset sums into one SHA256SUMS
         env:
@@ -190,6 +192,25 @@ jobs:
           echo "== SHA256SUMS =="
           cat "$tmp/SHA256SUMS"
           gh release upload "$TAG" "$tmp/SHA256SUMS" --clobber
+          # Hand the aggregate's on-runner path to the attestation step below. The
+          # mktemp dir persists across steps of the same job, so this path resolves.
+          echo "SHA256SUMS_PATH=$tmp/SHA256SUMS" >> "$GITHUB_ENV"
+
+      - name: Attest build provenance (SHA256SUMS)
+        # The issue's exact gap: a consumer "cannot verify the checksum itself wasn't
+        # tampered" (#1372). The build job attests each ARCHIVE, but install.sh trusts
+        # the aggregate SHA256SUMS as its PRIMARY checksum anchor (the per-asset .sha256
+        # is only a fallback) and verifies with sha256 alone — so without this the
+        # installer's trust chain bottoms out at an unsigned file. Attest it too, giving
+        # the aggregate the same machine-verifiable provenance the archives get. Verify:
+        #   gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
+        # Best-effort: skip on a fork / unprovisioned repo where id-token isn't
+        # available, so the release stays green rather than failing on a perms gap.
+        if: ${{ !github.event.repository.fork }}
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ env.SHA256SUMS_PATH }}
 
   verify-release:
     # Post-publish verification (#1369, epic #1354). A release that "succeeded" (tag +
