@@ -541,6 +541,18 @@ type HTTPPlanner struct {
 	// backoff happening instead of a frozen terminal. nil = behavior byte-for-byte unchanged.
 	RetryNotify func(attempt int, status int, wait time.Duration)
 
+	// PendingTurnCheckpoint, when non-nil, is called at the retry boundary of Complete's backoff
+	// loop (on attempt 1..N-1, BEFORE the otherwise-invisible sleep), with the 1-based attempt now
+	// in progress, the last upstream status observed (the 429/5xx that triggered the retry, or 0
+	// for a transient transport error), and the wall-clock instant this turn began (unix nanos).
+	// It is the WRITE-AHEAD durable twin of RetryNotify (#1363, epic #1193): where RetryNotify is
+	// observability that evaporates on exit, this hook records how far the in-flight turn had gotten
+	// so a kill -9 mid-retry resumes at the checkpointed attempt instead of a fresh turn-0. The
+	// agent loop binds it (RunArm) to a closure that writes session.Table.SetPendingTurn keyed on
+	// the run's trace; chat.go stays decoupled from internal/session behind this scalar seam, exactly
+	// like RetryNotify. nil = behavior byte-for-byte unchanged (no checkpoint is written).
+	PendingTurnCheckpoint func(attempt int, lastStatus int, startedAtUnixNano int64)
+
 	// AuthRefreshNotify, when non-nil, is called when a 401 on the rotating-subscription path
 	// is handled — separately from RetryNotify so a token-expiry self-heal is never conflated
 	// with a 429/5xx backoff (different cause, different metric). outcome is "recovered" when a
@@ -801,7 +813,8 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// deliberately generous and operator-tunable (FAK_PLANNER_MAX_ATTEMPTS): a fleet
 	// sharing one upstream account rides out a long 429/529 overload window far better with
 	// more, longer-spaced retries than with a fast give-up.
-	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
+	turnStart := time.Now()
+	maxAttempts, deadline, budgetOn := retryBounds(turnStart)
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
 	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
@@ -834,6 +847,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	rehomePending := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
+			// Write-ahead durable checkpoint (#1363): record how far this turn has gotten
+			// BEFORE the backoff sleep, so a kill -9 during the wait resumes at this attempt
+			// instead of a fresh turn-0. attempt+1 is the 1-based try now in progress (the
+			// PendingTurn.Attempt convention where 1 = first attempt); rs.lastStatus is the
+			// 429/5xx that triggered this retry. nil hook = unchanged.
+			if p.PendingTurnCheckpoint != nil {
+				p.PendingTurnCheckpoint(attempt+1, rs.lastStatus, turnStart.UnixNano())
+			}
 			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
 			// budget is the bound a spent budget stops the loop (surface the last error) and a
 			// cancelled context returns promptly — carrying the classified 429/5xx truth when

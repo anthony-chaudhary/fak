@@ -67,6 +67,14 @@ type SessionGate struct {
 	// model corrects its own context use. Optional; nil drops the nudge, never the
 	// turn.
 	Nudge func(trace string) string
+	// Checkpoint records the in-flight turn's write-ahead retry checkpoint (#1363, epic
+	// #1193) — the function-shaped twin of session.Table.SetPendingTurn. RunArm binds the
+	// planner's PendingTurnCheckpoint hook to it, so a retry inside HTTPPlanner.Complete
+	// writes how far the turn had gotten (attempt/last-status/start) keyed on this run's
+	// trace; the zero value (attempt=0,lastStatus=0,startedAt=0) CLEARS it on completion.
+	// A restart reading a non-zero checkpoint re-enters that turn instead of a fresh
+	// turn-0. Optional; nil drops the checkpoint, never the turn.
+	Checkpoint func(trace string, attempt, lastStatus int, startedAtUnixNano int64)
 }
 
 // WithSessionTable wires a per-session drive-state table and the trace id this run is
@@ -264,6 +272,55 @@ func (c runConfig) applyPace(maxTokens int) {
 		return
 	}
 	c.contextPlanner.ApplyPace(session.Pace{MaxTokensPerTurn: maxTokens}, c.contextBaselineOutput)
+}
+
+// hasCheckpointSink reports whether this run can record a write-ahead turn checkpoint
+// (#1363): a function-shaped gate.Checkpoint OR a concrete drive table. RunArm consults
+// it to decide whether to bind the planner's PendingTurnCheckpoint hook at all, so a run
+// with no session wiring stays byte-for-byte the historical loop (no checkpoint written).
+func (c runConfig) hasCheckpointSink() bool {
+	return (c.gate != nil && c.gate.Checkpoint != nil) || c.table != nil
+}
+
+// checkpointPending records (or, with the zero value, clears) the in-flight turn's
+// write-ahead retry checkpoint keyed on this run's trace (#1363). It is the writer half
+// the planner's PendingTurnCheckpoint hook binds to: a retry inside Complete calls it
+// with the 1-based attempt in progress + last upstream status + turn start, and turn
+// completion calls it with the zero value to clear. Source preference mirrors gateTurn:
+// a wired function-shaped gate owns the seam; otherwise the concrete table. A terminal
+// session rejects the write inside SetPendingTurn, exactly like every other drive field.
+func (c runConfig) checkpointPending(attempt, lastStatus int, startedAtUnixNano int64) {
+	if c.gate != nil && c.gate.Checkpoint != nil {
+		c.gate.Checkpoint(c.trace, attempt, lastStatus, startedAtUnixNano)
+		return
+	}
+	if c.table != nil {
+		c.table.SetPendingTurn(c.trace, session.PendingTurn{
+			Attempt:           attempt,
+			LastStatus:        lastStatus,
+			StartedAtUnixNano: startedAtUnixNano,
+		})
+	}
+}
+
+// bindPendingCheckpoint returns the planner RunArm should drive. When this run can record
+// a checkpoint (hasCheckpointSink) and p is a DIRECT *HTTPPlanner — where the retry loop
+// lives; a wrapped/dual planner's per-request trace binding is future work per #4122 — it
+// returns a per-run SHALLOW COPY whose PendingTurnCheckpoint writes the checkpoint keyed on
+// this run's trace. The copy is per-run, so concurrent arms sharing one planner never
+// cross-write each other's trace, and Complete's hot path never reassigns planner fields so
+// the copy is behavior-identical. Otherwise it returns p unchanged — byte-for-byte the
+// historical loop (no checkpoint written).
+func bindPendingCheckpoint(p Planner, cfg runConfig) Planner {
+	hp, ok := p.(*HTTPPlanner)
+	if !ok || !cfg.hasCheckpointSink() {
+		return p
+	}
+	clone := *hp
+	clone.PendingTurnCheckpoint = func(attempt, lastStatus int, startedAtUnixNano int64) {
+		cfg.checkpointPending(attempt, lastStatus, startedAtUnixNano)
+	}
+	return &clone
 }
 
 // promptMessages returns the context-planned prompt for this turn when a persistent
