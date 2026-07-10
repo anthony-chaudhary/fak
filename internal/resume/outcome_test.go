@@ -134,6 +134,40 @@ func TestRetryGate(t *testing.T) {
 	}
 }
 
+// #2178: a re-arm reclaim row zeroes the attempt budget accrued before it, so a session that hit
+// the cap on a known-transient infra fault (the managed-cache-1h-TTL 400 wave) becomes resumable
+// again — while launches AFTER the marker re-cap normally and a later operator settle still wins.
+func TestRetryGateRearmClearsCap(t *testing.T) {
+	capped := make([]Attempt, 8)
+	for i := range capped {
+		capped[i] = Attempt{UnixSeconds: int64(100 + i), Phase: "launched"}
+	}
+	if d := RetryGate(capped, OutcomeRecoverable, 8); !d.Blocked {
+		t.Fatalf("8 launches must hit the cap first, got not-blocked")
+	}
+	// a rearm marker resets the budget -> resume allowed again, and it is not counted as a launch
+	reclaimed := append(append([]Attempt{}, capped...), Attempt{UnixSeconds: 200, Phase: "rearm"})
+	if n := CountAttempts(reclaimed); n != 8 {
+		t.Fatalf("a rearm row must not count as a launch: CountAttempts = %d, want 8", n)
+	}
+	if d := RetryGate(reclaimed, OutcomeRecoverable, 8); d.Blocked {
+		t.Fatalf("a rearm marker must clear the cap: %q", d.Reason)
+	}
+	// fresh launches AFTER the rearm count from 0 -> re-caps after another full budget
+	recapped := append([]Attempt{}, reclaimed...)
+	for i := 0; i < 8; i++ {
+		recapped = append(recapped, Attempt{UnixSeconds: int64(300 + i), Phase: "launched"})
+	}
+	if d := RetryGate(recapped, OutcomeRecoverable, 8); !d.Blocked {
+		t.Fatalf("8 launches after a rearm must re-cap: %q", d.Reason)
+	}
+	// a manual override AFTER the rearm still wins (last write wins)
+	settled := append(append([]Attempt{}, reclaimed...), Attempt{ManualOverride: true})
+	if d := RetryGate(settled, OutcomeRecoverable, 8); !d.Blocked {
+		t.Fatalf("a manual override after a rearm must re-block: %q", d.Reason)
+	}
+}
+
 // A zero/negative cap takes the watchdog's default, so a caller passing an unset knob
 // still gets the real gate, not an always-blocked one.
 func TestRetryGateDefaultCap(t *testing.T) {

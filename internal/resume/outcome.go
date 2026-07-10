@@ -117,11 +117,32 @@ func (a Attempt) IsLaunch() bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(a.Phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated":
+	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated", "rearm":
 		return false
 	default:
 		return true
 	}
+}
+
+// isRearm reports whether this row is a re-arm reclaim marker (#2178): an operator/self-heal row
+// that reclaims a session which burned its whole attempt budget on a KNOWN-transient infra fault
+// (e.g. the managed-cache-1h-TTL 400 wave) rather than a real defect. RetryGate considers only the
+// history AFTER the last such marker, so the reclaimed session resumes from a fresh attempt budget.
+func (a Attempt) isRearm() bool {
+	return strings.EqualFold(strings.TrimSpace(a.Phase), "rearm")
+}
+
+// afterLastRearm returns the suffix of history following the last re-arm marker (#2178), or the
+// whole history when none is present. Because the marker zeroes the budget accrued before it, a
+// later manual_override/unrecoverable row still wins (it lands in the returned suffix): last write
+// wins, exactly like the .ps1 launch gate and the Python resume_blocked / planner counters.
+func afterLastRearm(history []Attempt) []Attempt {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].isRearm() {
+			return history[i+1:]
+		}
+	}
+	return history
 }
 
 // settled reports whether this row is an operator override (a manual consolidate) — an
@@ -319,6 +340,9 @@ type RetryDecision struct {
 // session getting the same blind DefaultMaxResumeAttempts. A positive maxAttempts is an
 // explicit operator/caller override and is honored literally, un-earned.
 func RetryGate(history []Attempt, outcome Outcome, maxAttempts int) RetryDecision {
+	// #2178: a re-arm reclaim row zeroes the budget accrued before it — gate on the suffix after
+	// the last marker so the earned budget, settled scan, and attempt count all start fresh.
+	history = afterLastRearm(history)
 	if maxAttempts <= 0 {
 		maxAttempts = EarnedResumeBudget(history)
 	}
