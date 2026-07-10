@@ -32,3 +32,35 @@ func RefusalReasons() []string {
 		ReasonPushRejected,
 	}
 }
+
+// Commit exit-code classes. A PRE-commit refusal means nothing landed: the caller
+// (or a dispatch loop) may safely retry or replan. A POST-commit failure means the
+// commit ran but its result is bad: halt and have a human review — never auto-retry
+// into a force-push or amend. These are the exit codes cmd/fak's `fak commit` reports
+// (mirrored in the commit-clean skill's "Exit codes" section) so a loop can branch on
+// outcome without parsing prose.
+const (
+	ExitPreCommitRefusal  = 3 // nothing landed — safe to retry/replan
+	ExitPostCommitFailure = 1 // commit ran, result is bad — halt for review
+)
+
+// RefusalExitCode classifies a closed-vocabulary refusal reason into its process exit
+// code. ok is false for a reason outside RefusalReasons() (an input/usage or environment
+// error, or an unknown string) — the caller keeps its own mapping for those. Keeping this
+// next to RefusalReasons() makes the classification a single source of truth: a test
+// asserts every RefusalReasons() entry is classified here, so a newly-added reason cannot
+// silently fall through to the halt-class exit code and wedge a loop that treats exit 1 as
+// "stop, human review" when the refusal was actually a retryable pre-commit block.
+func RefusalExitCode(reason string) (code int, ok bool) {
+	switch reason {
+	case ReasonOffTrunk, ReasonMergeInProgress, ReasonNothingStaged,
+		ReasonLockBusy, ReasonWindowFull, ReasonStaleBaseDeletion,
+		ReasonSpuriousStagedDeletion, ReasonCachedRemoveWorktreePresent,
+		ReasonPreStagedPathOverlap, ReasonCoreSelfModify, ReasonReviewRefuted:
+		return ExitPreCommitRefusal, true
+	case ReasonPathspecRace, ReasonMessageRace, ReasonSymlinkEscape,
+		ReasonHookRefused, ReasonPushRejected:
+		return ExitPostCommitFailure, true
+	}
+	return 0, false
+}

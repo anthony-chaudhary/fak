@@ -561,17 +561,17 @@ func commitExitCode(res safecommit.Result) int {
 		return 0
 	case safecommit.ReasonNoPath, safecommit.ReasonEmptyMessage:
 		return 2
-	case safecommit.ReasonNotARepo, safecommit.ReasonOffTrunk,
-		safecommit.ReasonMergeInProgress, safecommit.ReasonNothingStaged,
-		safecommit.ReasonLockBusy, safecommit.ReasonWindowFull,
-		safecommit.ReasonReviewRefuted, safecommit.ReasonStaleBaseDeletion,
-		safecommit.ReasonCachedRemoveWorktreePresent,
-		safecommit.ReasonSpuriousStagedDeletion, safecommit.ReasonPreStagedPathOverlap,
-		safecommit.ReasonCoreSelfModify:
-		return 3
-	default: // PATHSPEC_RACE, MESSAGE_RACE, SYMLINK_ESCAPE, HOOK_REFUSED, PUSH_REJECTED
-		return 1
+	case safecommit.ReasonNotARepo:
+		// A setup/environment error: nothing landed, safe to retry once fixed.
+		return safecommit.ExitPreCommitRefusal
 	}
+	// The closed refusal vocabulary is classified by safecommit (the SoT next to
+	// RefusalReasons); a test there asserts every reason is covered.
+	if code, ok := safecommit.RefusalExitCode(res.Reason); ok {
+		return code
+	}
+	// An unrecognized reason is not safe to auto-retry: keep the halt-class default.
+	return safecommit.ExitPostCommitFailure
 }
 
 func renderCommitResult(stdout io.Writer, res safecommit.Result) {
