@@ -25,6 +25,8 @@ signal that the project welcomes them — then get them to the working proof fas
 | मराठी (Marathi) | [`mr/README.md`](mr/README.md) | India — same levers as Hindi: INR cost, DPDP residency, self-host |
 | Deutsch (German) | [`de/README.md`](de/README.md) | EU/DACH — GDPR (DSGVO) self-host residency, EU-AI-Act audit trail |
 | Français (French) | [`fr/README.md`](fr/README.md) | EU/France — RGPD self-host residency, EU-AI-Act audit trail |
+| Español (Spanish) | [`es/README.md`](es/README.md) | Spain/EU + Latin America — RGPD self-host residency + EU-AI-Act audit; cost-sensitive self-host, Apache-2.0, no cross-border payment |
+| 日本語 (Japanese) | [`ja/README.md`](ja/README.md) | Japan — APPI self-host data residency, cost via cache-preserving serving, domestic/open-weights routing, tamper-evident audit log |
 | 简体中文 (Simplified Chinese) | [`zh/README.md`](zh/README.md) | China — domestic models (Qwen/GLM/DeepSeek), PIPL residency, `GOPROXY` onboarding |
 
 Every page links back to this hub, and the Indian-language pages cross-link each other,

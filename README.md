@@ -52,7 +52,7 @@ fak preflight --tool refund_payment --args "{}"   # -> DENY (DEFAULT_DENY): not 
 | An always-on gateway | `fak node` installs `fak serve` as a real system service | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
 | Crash recovery | `fak resume watchdog` relaunches dead sessions (dry-run by default); `fak resume plan` prices a warm vs cold restart | — |
 | Codex / Cursor / MCP hosts | keep the normal model wire; ask the kernel for verdicts over MCP | [Codex](docs/integrations/openai-codex.md) · [Cursor](docs/integrations/cursor.md) · [examples/mcp](examples/mcp) |
-| Any OpenAI/Anthropic client | `fak serve` in front of a model endpoint | [GETTING-STARTED.md](GETTING-STARTED.md) · [docs/fak/api-reference.md](docs/fak/api-reference.md) |
+| Any OpenAI/Anthropic client | `fak serve` in front of a model endpoint | [the serving side](docs/serving/README.md) · [GETTING-STARTED.md](GETTING-STARTED.md) · [docs/fak/api-reference.md](docs/fak/api-reference.md) |
 | Slack | a durable run-card per session; `fak chatrelay` bridges a served model into a channel | [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md) |
 
 Tested live with Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses connect with a single base-URL change ([the catalogue](docs/supported/README.md)).
@@ -71,7 +71,7 @@ Go 1.26+ is required; no external Go dependencies, no `go.sum`. From a clone: `g
 
 ## The honest fence
 
-For raw token throughput, reach for vLLM or SGLang — fak is the agent kernel around them, not a replacement. Prompt-injection classifiers help, but tool authority comes from your policy file, not the model. Keep irreversible or data-exfiltrating tools off the allow-list. Full list: [what fak is not](docs/explainers/what-fak-is-not.md).
+For raw token throughput, reach for vLLM or SGLang — fak is the agent kernel around them, not a replacement. Putting a model *behind* the kernel — running the gateway, riding an engine, and scaling out KV reuse — is the other half of `fak`, with its own home: [the serving side](docs/serving/README.md). Prompt-injection classifiers help, but tool authority comes from your policy file, not the model. Keep irreversible or data-exfiltrating tools off the allow-list. Full list: [what fak is not](docs/explainers/what-fak-is-not.md).
 
 ## Docs
 
@@ -81,6 +81,7 @@ Going deeper starts at the [front-page overflow](docs/README-legacy.md) — why 
 |---|---|
 | Guided first session (15 min) · absolute-beginner start | [docs/fak/tutorial.md](docs/fak/tutorial.md) · [START-HERE.md](START-HERE.md) |
 | Which do I run — gateway, agent runtime, or client? | [docs/explainers/runtime-vs-client.md](docs/explainers/runtime-vs-client.md) |
+| The serving side — run a model behind the gateway, ride vLLM/SGLang, scale out KV | [docs/serving/README.md](docs/serving/README.md) |
 | Install + the four usage tiers | [GETTING-STARTED.md](GETTING-STARTED.md) · [LEARNING-PATH.md](LEARNING-PATH.md) |
 | Long sessions / cache · you never manage context | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) · [docs/explainers/you-never-manage-the-context-window.md](docs/explainers/you-never-manage-the-context-window.md) |
 | Capability floor (policy) · security model | [POLICY.md](POLICY.md) · [docs/fak/security.md](docs/fak/security.md) |

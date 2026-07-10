@@ -19,7 +19,7 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 |---|---|
 | **Token-defaults-debt (total HARD defects)** | **0** |
 | Composite score | 100.0/100 (grade A) |
-| Savers stacked on by default | 6/6 |
+| Savers stacked on by default | 7/7 |
 | Groups | stack 100 · honesty 100 · regression 100 · parity 100 |
 | Advisory (soft) signals | 0 |
 
@@ -34,19 +34,20 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 | vdso — vDSO dedup fast path (collapse identical calls) | lossless | **ON** | ✓ | — | `--vdso` | · | ✓ | ✓ |
 | compacthistory — history compaction (drop the un-cacheable middle past the budget) | bounded | **ON** | ✓ | — | `--compact-history-budget` | · | ✓ | ✓ |
 | elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail) | bounded | **ON** | ✓ | — | `--elide-result-bytes` | · | ✓ | ✓ |
+| elidestale — stale-read elision (replace a Read superseded by a later same-file edit with a restorable marker) | bounded | **ON** | ✓ | — | `--elide-stale-reads` | · | ✓ | ✓ |
 | ctxview — ctxplan O(1) planned view (re-materialize history under a budget) | bounded | **ON** | ✓ | — | `--ctx-view-budget` | · | ✓ | ✓ |
 
 ## KPIs
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| stack | `stacking_depth` | 100 | 0 | 6/6 token-saving methods stacked on by default out of the box |
+| stack | `stacking_depth` | 100 | 0 | 7/7 token-saving methods stacked on by default out of the box |
 | stack | `lossless_stack` | 100 | 0 | 3/3 lossless savers on by default |
-| stack | `high_value_defaults` | 100 | 0 | 3/3 demonstrably-safe bounded-loss savers on by default |
+| stack | `high_value_defaults` | 100 | 0 | 4/4 demonstrably-safe bounded-loss savers on by default |
 | honesty | `witness_status` | 100 | 0 | no off-by-default high-value savers remain — every bounded-loss saver defaults on |
 | honesty | `dark_lever_gated` | 100 | 0 | 0/0 off-by-default levers carry a documented gate |
-| honesty | `default_notes` | 100 | 0 | 3/3 on-by-default bounded savers carry an honest loss note |
-| regression | `default_on_locked` | 100 | 0 | 6/6 on-by-default savers pinned by a regression sentinel |
+| honesty | `default_notes` | 100 | 0 | 4/4 on-by-default bounded savers carry an honest loss note |
+| regression | `default_on_locked` | 100 | 0 | 7/7 on-by-default savers pinned by a regression sentinel |
 | parity | `entrypoint_parity` | 100 | 0 | front doors agree + servewiring verdicts track the real defaults |
 
 ## Token-defaults-debt work-list

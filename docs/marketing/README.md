@@ -63,7 +63,10 @@ The generated term feed includes four classes:
 - **core fak terms** such as `fak agent kernel`, `treat the tool call like a syscall`,
   `default-deny tool-call gate`, and `addressable KV cache`;
 - **localized terms** such as `एजेंट कर्नेल`, `AI एजेंट टूल-कॉल सुरक्षा`, `AI 代理内核`,
-  `工具调用防火墙`, and `模型路由和回退`;
+  `工具调用防火墙`, `模型路由和回退`, `KI-Agent-Kernel für Tool-Call-Sicherheit`,
+  `noyau d'agent IA : sécurité des tool calls`, `kernel de seguridad para agentes de IA`,
+  and `AI エージェントの tool call を実行前に審査するカーネル` — each routing to its
+  in-language [entry point](../i18n/README.md);
 - **market-event terms** such as `Claude Fable 5 model routing`, `Fable 5 refusal fallback`,
   `Claude Sonnet 5 agent cost routing`, `cheaper way to run AI agents`, and
   `frontier model prompt-cache cost`;
