@@ -42,11 +42,22 @@ func TestMedianMS(t *testing.T) {
 	if ds[0] != 3*time.Millisecond {
 		t.Errorf("MedianMS mutated caller slice: %v", ds)
 	}
+	// an empty slice returns 0 instead of panicking on cp[0]
+	if got := MedianMS(nil); got != 0 {
+		t.Errorf("MedianMS(nil)=%v, want 0", got)
+	}
 }
 
 func TestLCGIDs(t *testing.T) {
 	if got := LCGIDs(0, 100, 7); got != nil {
 		t.Errorf("LCGIDs(0,...)=%v, want nil", got)
+	}
+	// a non-positive vocab has no valid id range and must not divide by zero
+	if got := LCGIDs(4, 0, 1); got != nil {
+		t.Errorf("LCGIDs(4,0,...)=%v, want nil", got)
+	}
+	if got := LCGIDs(4, -3, 1); got != nil {
+		t.Errorf("LCGIDs(4,-3,...)=%v, want nil", got)
 	}
 	ids := LCGIDs(64, 32, 1)
 	if len(ids) != 64 {

@@ -32,8 +32,13 @@ func Argmax(v []float32) int {
 func Ms(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
 
 // MedianMS returns the median of ds in fractional milliseconds. It copies before
-// sorting so the caller's slice is left untouched. ds must be non-empty.
+// sorting so the caller's slice is left untouched. An empty ds returns 0 — the
+// same degenerate-input guard Argmax applies, so a caller that forgets the
+// non-empty precondition gets 0 instead of an index-out-of-range panic.
 func MedianMS(ds []time.Duration) float64 {
+	if len(ds) == 0 {
+		return 0
+	}
 	cp := append([]time.Duration(nil), ds...)
 	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
 	return float64(cp[len(cp)/2].Nanoseconds()) / 1e6
@@ -47,9 +52,11 @@ func WriteJSON(w http.ResponseWriter, v any) {
 
 // LCGIDs generates n pseudo-random token ids in [0,vocab) from a 32-bit LCG
 // seeded by seed (added to the classic xorshift constant). It returns nil for
-// n <= 0. Pass seed 0 to reproduce the unseeded copies.
+// n <= 0 or vocab <= 0 — an empty id range has no valid ids, and a vocab of 0
+// would divide by zero in the modulo below. Pass seed 0 to reproduce the
+// unseeded copies.
 func LCGIDs(n, vocab int, seed uint64) []int {
-	if n <= 0 {
+	if n <= 0 || vocab <= 0 {
 		return nil
 	}
 	ids := make([]int, n)
