@@ -830,6 +830,79 @@ func TestTierDistributionAdvisory(t *testing.T) {
 	}
 }
 
+// misTierGap is how many tiers a leaf's DECLARED tier may sit above its import-derived floor
+// before the mis-tier advisory surfaces it. A gap of 1 is routinely intentional (a leaf named
+// for a role it will grow into), so the floor for flagging is 2. Tunable; advisory only.
+const misTierGap = 2
+
+// minTierFromImports returns the lowest tier `pkg` could legally occupy given its internal
+// imports: a leaf may import only tiers <= its own and same-tier (intra-tier) imports are legal,
+// so the floor is the highest tier it imports -- but never below foundation (1), since tier 0 is
+// the frozen ABI root, not a home for leaf code. Deps with no declared tier are skipped (that is
+// TestEveryPackageDeclaresTier's job, not this one).
+func minTierFromImports(t *testing.T, internal, pkg string) int {
+	floor := 1
+	for _, imp := range imports(t, internal, pkg) {
+		if !strings.HasPrefix(imp, modPrefix) {
+			continue
+		}
+		dep := strings.SplitN(strings.TrimPrefix(imp, modPrefix), "/", 2)[0]
+		if dep == pkg {
+			continue
+		}
+		if dt, ok := tier[dep]; ok && dt > floor {
+			floor = dt
+		}
+	}
+	return floor
+}
+
+// TestMisTierAdvisory surfaces OVER-declared leaves: a leaf whose declared tier sits >= misTierGap
+// tiers above the floor its imports require. Tier is partly a semantic/role choice, so this is
+// advisory (t.Logf, never t.Fatal): a large gap is a prompt to ask "does this leaf actually
+// compose that much, or could it sink lower and shrink the fat middle?", not a failure. Leaves
+// are listed worst-gap first. Run with -v to see them.
+func TestMisTierAdvisory(t *testing.T) {
+	internal := internalDir(t)
+	names := make([]string, 0, len(tier))
+	for p := range tier {
+		names = append(names, p)
+	}
+	sort.Strings(names)
+	type gap struct {
+		pkg      string
+		declared int
+		floor    int
+	}
+	var gaps []gap
+	for _, pkg := range names {
+		declared := tier[pkg]
+		if declared <= 1 {
+			continue // root/foundation cannot be over-declared: nothing below to sink to
+		}
+		floor := minTierFromImports(t, internal, pkg)
+		if declared-floor >= misTierGap {
+			gaps = append(gaps, gap{pkg, declared, floor})
+		}
+	}
+	sort.SliceStable(gaps, func(i, j int) bool {
+		gi, gj := gaps[i].declared-gaps[i].floor, gaps[j].declared-gaps[j].floor
+		if gi != gj {
+			return gi > gj
+		}
+		return gaps[i].pkg < gaps[j].pkg
+	})
+	if len(gaps) == 0 {
+		t.Logf("no leaf is declared >= %d tiers above its import floor", misTierGap)
+		return
+	}
+	t.Logf("advisory: %d leaf/leaves declared >= %d tiers above their import floor (could sink lower):", len(gaps), misTierGap)
+	for _, g := range gaps {
+		t.Logf("  internal/%-24s declared %d (%s) but imports reach only tier %d (%s) -- gap %d",
+			g.pkg, g.declared, tierName[g.declared], g.floor, tierName[g.floor], g.declared-g.floor)
+	}
+}
+
 func fmtEdge(from string, ft int, to string, tt int) string {
 	return from + " (" + tierName[ft] + ") -> " + to + " (" + tierName[tt] + ")"
 }
