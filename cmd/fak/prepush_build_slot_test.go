@@ -9,7 +9,7 @@ import (
 // prepush_build_slot_test.go — the advisory single-flight (SKIPPED_CONTENDED) rung.
 //
 // The trunk-build gate's whole-repo archive + go list + importer-cone build is the heaviest
-// push-seam step, and in FLEET_BUILD_GUARD=warn (the default) its verdict is advisory. Under a
+// push-seam step, and in FLEET_BUILD_GUARD=warn (the explicit advisory mode) its verdict is advisory. Under a
 // concurrent push burst, one gate should build and the rest should skip rather than pile N
 // redundant full builds onto the host contention. These tests pin that decision at the seam
 // (tryAcquireBuildSlot) and end-to-end (evaluatePrePushBuild with advisory=true), with the

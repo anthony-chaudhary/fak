@@ -94,14 +94,14 @@ fi
 # hooks pre-push` builds the pushed tip's changed packages + their importer closure in an
 # ISOLATED archive checkout (immune to the peer-dirty working tree).
 #
-# Mode (env FLEET_BUILD_GUARD):  warn (default) | block | off
-#   warn   allow the push, print the build error + how to fix it   (exit 0)  — the soak default
+# Mode (env FLEET_BUILD_GUARD):  block (default) | warn | off
+#   warn   allow the push, print the build error + how to fix it   (exit 0)  — explicit advisory override
 #   block  refuse the push until the pushed tip compiles           (exit 1)
 #   off    do nothing
 # Escape:  FLEET_ALLOW_BUILD_BREAK=1 git push   always allows.
-# Default is WARN (not block) while the gate soaks for false positives; flip to block after.
+# Default is BLOCK for a positively witnessed red pushed tree. Infrastructure/UNKNOWN failures remain fail-open below.
 # Fail-open by design: if `fak`/`go` is unavailable or the gate could-not-run, the push is allowed.
-build_mode="${FLEET_BUILD_GUARD:-warn}"
+build_mode="${FLEET_BUILD_GUARD:-block}"
 
 # Import-witness pre-rung (#1325)  --  reason: IMPORT_OF_UNCOMMITTED_PACKAGE
 #
