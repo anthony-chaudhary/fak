@@ -72,8 +72,14 @@ const (
 
 	// Wire-side cache levers are the Anthropic proxy cache-value gates that must earn
 	// default-on status through an ablation row before their gateway implementation flips.
-	// The FAK_ABLATE_* envs are harness gates: a future live runner may map these tokens
-	// to runtime setters, but the sweep vocabulary is stable now.
+	// Each FAK_ABLATE_* env is read at gateway construction and COMPOSES with its Config
+	// flag (`cfg.X || envEnabled(...)`, #2182), so a live arm's child env flips the real
+	// runtime lever: bp_plan -> the PlaceAnthropicCacheBreakpoint pre-flight
+	// (Config.VCacheAnchor), ttl_1h -> the stable-head 1h cache_control upgrade
+	// (Config.CacheTTL1H), prefix_guard -> the prefix-determinism witness
+	// (Config.PrefixGuard, fak_prefix_guard_*), uncached_trim -> the oversized
+	// uncached-tail trim (Config.ElideResultBytes armed at its documented default).
+	// Wiring only: no default flips here — that decision still rides the sweep row.
 	FeatureBreakpointPlan = "bp_plan"
 	FeatureTTL1H          = "ttl_1h"
 	FeaturePrefixGuard    = "prefix_guard"
