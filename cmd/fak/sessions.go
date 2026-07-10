@@ -12,6 +12,8 @@ package main
 //	                                                                          fold + witness + score the corpus
 //	fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
 //	                                                                          diagnose Codex JSONL for repeated tool loops
+//	fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
+//	                                                                          internal Codex UserPromptSubmit continuation gate
 //
 // It reads transcripts and shells `git` (read-only) off any hot path; it writes
 // nothing unless --corpus is given (a scrubbed JSONL corpus, only structured signal,
@@ -40,6 +42,10 @@ import (
 func cmdSessions(argv []string) { os.Exit(runSessions(os.Stdout, os.Stderr, argv)) }
 
 func runSessions(stdout, stderr io.Writer, argv []string) int {
+	return runSessionsWithStdin(stdout, stderr, os.Stdin, argv)
+}
+
+func runSessionsWithStdin(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 	if len(argv) == 0 {
 		sessionsUsage(stderr)
 		return 2
@@ -54,6 +60,8 @@ func runSessions(stdout, stderr io.Writer, argv []string) int {
 		return sessionsLearn(stdout, stderr, rest)
 	case "codex-loop":
 		return sessionsCodexLoop(stdout, stderr, rest)
+	case "codex-loop-hook":
+		return sessionsCodexLoopHook(stdout, stderr, stdin, rest)
 	case "-h", "--help", "help":
 		sessionsUsage(stdout)
 		return 0
@@ -72,6 +80,7 @@ usage:
   fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
   fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
+  fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
 
 Start here:
   fak sessions score        fold THIS host's fak sessions, witness their commits, and
@@ -85,6 +94,10 @@ Start here:
                             the local Codex store, and expose repeated tool outputs,
                             token burn, livelock notices, and abort/status. With neither
                             --session nor --path, it audits $CODEX_THREAD_ID when set.
+  fak sessions codex-loop-hook
+                            internal UserPromptSubmit hook: block the next prompt when the
+                            active Codex session bypasses fak guard. Set
+                            FAK_ALLOW_DIRECT_CODEX_CONTINUE=1 for an intentional override.
 `)
 }
 

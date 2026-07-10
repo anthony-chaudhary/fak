@@ -22,6 +22,7 @@ import (
 
 const codexLoopSchema = "fak.sessions.codex_loop.v1"
 const codexLoopRecentSchema = "fak.sessions.codex_loop_recent.v1"
+const codexLoopHookOverrideEnv = "FAK_ALLOW_DIRECT_CODEX_CONTINUE"
 
 type codexLoopDiagnosis struct {
 	Schema            string                 `json:"schema"`
@@ -72,6 +73,17 @@ type codexLoopRecentReport struct {
 	NextAction        string                 `json:"next_action,omitempty"`
 	TopRepeated       []codexRepeatedOutcome `json:"top_repeated,omitempty"`
 	Diagnoses         []codexLoopDiagnosis   `json:"diagnoses"`
+}
+
+type codexLoopHookInput struct {
+	SessionID     string `json:"session_id"`
+	HookEventName string `json:"hook_event_name"`
+	TurnID        string `json:"turn_id"`
+}
+
+type codexLoopHookBlock struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
 }
 
 type codexRepeatedOutcome struct {
@@ -204,6 +216,80 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sessions codex-loop: gate REFUSE fail-on=%s verdict=%s reason=%s\n", codexLoopFailOnName(*failOn), d.Verdict, codexLoopDiagnosisGateReason(d, *failOn))
 	}
 	return gateCode
+}
+
+// sessionsCodexLoopHook is the turn-boundary enforcement seam for #3023. Codex's
+// UserPromptSubmit hook fires before a prompt becomes the next model/tool turn and
+// carries the active session_id. Reuse the existing transcript diagnosis rather than
+// maintaining a second provider classifier: a direct provider is blocked with the same
+// typed reason the advisory `--fail-on unguarded` gate already reports.
+func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
+	fs := flag.NewFlagSet("sessions codex-loop-hook", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
+	allowDirect := fs.Bool("allow-direct", false, "explicitly allow this intentional direct-provider continuation")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]")
+	}
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	if *allowDirect || codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookOverrideEnv)) {
+		return 0
+	}
+
+	var in codexLoopHookInput
+	if err := json.NewDecoder(io.LimitReader(stdin, 1<<20)).Decode(&in); err != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: unreadable hook payload (allowing turn): %v\n", err)
+		return 0
+	}
+	if strings.TrimSpace(in.SessionID) == "" {
+		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload has no session_id (allowing turn)")
+		return 0
+	}
+
+	resolved, err := resolveCodexLoopSessionPath(*codexHome, in.SessionID, "")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: %v (allowing turn)\n", err)
+		return 0
+	}
+	fh, err := os.Open(resolved)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: open %s: %v (allowing turn)\n", resolved, err)
+		return 0
+	}
+	d, diagnoseErr := diagnoseCodexLoop(fh, resolved)
+	closeErr := fh.Close()
+	if diagnoseErr != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn)\n", diagnoseErr)
+		return 0
+	}
+	if closeErr != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: close %s: %v\n", resolved, closeErr)
+	}
+	if !codexLoopDiagnosisUnguarded(d) {
+		return 0
+	}
+
+	reason := codexLoopDiagnosisGateReason(d, "unguarded") +
+		": this active Codex session uses model_provider=" + strings.TrimSpace(d.ModelProvider) +
+		", so fak cannot enforce the guard before the next turn. Relaunch with `fak codex`" +
+		" or `fak guard -- codex`. For an intentional direct session, set " +
+		codexLoopHookOverrideEnv + "=1 and resubmit."
+	if err := json.NewEncoder(stdout).Encode(codexLoopHookBlock{Decision: "block", Reason: reason}); err != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode block: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func codexLoopHookOverrideEnabled(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func codexLoopFailOnRecentExitCode(r codexLoopRecentReport, failOn string) (int, bool) {

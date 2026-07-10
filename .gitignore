@@ -181,6 +181,11 @@ internal/compute/spirv/
 # Editor-local settings
 .vscode/
 .codex/
+# Project lifecycle hooks are shared enforcement, not editor-local state. Keep every
+# other Codex file ignored while admitting the one reviewed repo hook manifest.
+!.codex/
+.codex/*
+!.codex/hooks.json
 # .claude/ holds the COMMITTED project skill pack (skills/, project.yaml) — do NOT ignore the
 # whole dir or it silently drops tracked infrastructure. Ignore only machine-local settings.
 .claude/settings.local.json

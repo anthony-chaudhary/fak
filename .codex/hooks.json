@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fak sessions codex-loop-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
