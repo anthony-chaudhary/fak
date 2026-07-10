@@ -641,6 +641,21 @@ func maybeStartGuardChildTerminalRestorePulse(command []string) {
 	startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
 }
 
+// maybeStartGuardChildHarnessTerminalRestorePulse repairs the parent terminal after a
+// wrapped interactive harness starts. Codex already needed the pulse because its launch
+// can perturb the console window; Claude can leave the same stale/hidden terminal state,
+// so production launch paths cover both harnesses through the same restore seam.
+func maybeStartGuardChildHarnessTerminalRestorePulse(command []string) {
+	if len(command) == 0 {
+		return
+	}
+	if guardAgentBaseName(command[0]) == "claude" {
+		startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
+		return
+	}
+	maybeStartGuardChildTerminalRestorePulse(command)
+}
+
 func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, command []string) guardChildSpawnMetadata {
 	agentRunID = strings.TrimSpace(agentRunID)
 	if agentRunID == "" {
@@ -1059,7 +1074,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
-		maybeStartGuardChildTerminalRestorePulse(command)
+		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		runErr := child.Run()
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
@@ -1119,7 +1134,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
-		maybeStartGuardChildTerminalRestorePulse(command)
+		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		if err := child.Start(); err != nil {
 			// child.Start() failing IS a launch failure (the child never ran); spill the detail.
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
