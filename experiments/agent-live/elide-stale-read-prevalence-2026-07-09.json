@@ -1,0 +1,25 @@
+{
+  "schema": "fak-elide-stale-read-prevalence/1",
+  "title": "Stale (read-then-later-edit) tool_result prevalence in real Claude Code sessions",
+  "date": "2026-07-09",
+  "purpose": "Real-corpus evidence supporting the default-on flip of read-lifecycle STALE elision (gateway.DefaultElideStaleReads). Measures how much raw material the lever has: how often a real coding session leaves a Read tool_result in-window whose file a LATER in-session Edit/Write/MultiEdit/NotebookEdit has already superseded — a pre-edit snapshot that no longer reflects disk and is actively misleading, un-cached middle weight the transform replaces with a compact restorable marker.",
+  "predicate": "A Read tool_use records (tool_use_id -> normalized file_path); a file-mutating tool_use records the highest message index that edited each normalized path. A tool_result that pairs back to a Read (by tool_use_id) whose file was edited in a message STRICTLY LATER than the read's is STALE. Staleness is size-INDEPENDENT (a two-line stale read counts); the byte figures below measure the elidable text those stale reads carry.",
+  "result": {
+    "sampled_sessions": 600,
+    "tool_results": 11232,
+    "read_results": 2783,
+    "stale_reads": 565,
+    "sessions_with_stale": 67,
+    "pct_sessions_with_stale": 11.2,
+    "stale_read_text_bytes": 3416821,
+    "stale_read_text_tokens_est_bytes_div4": 854205
+  },
+  "headline": "~11% of 600 sampled real Claude Code sessions carry at least one STALE read (a Read superseded by a later same-file edit); 565 stale reads totaling ~3.4 MB (~854K estimated tokens, bytes/4 proxy) of pre-edit snapshot content that no longer reflects disk — actively-misleading middle weight the stale-elision transform replaces with a restorable fak_context_restore marker.",
+  "method": "A one-off scan of the operator's local session transcripts (~/.claude*/projects/**/*.jsonl, the 600 most-recent by mtime — the SAME sampling as elide-oversized-prevalence-2026-06-26.json). For each transcript, a document-ordered pass over message.content[] builds the read/edit lifecycle index (the reference classifier internal/agent.classifyReadLifecycle mirrors on the wire), then every tool_result paired to a Read is classified STALE iff its file was edited at a later message index. Path matching is case/slash-normalized. Token figures use the bytes/4 EstimateAnthropicTokens proxy.",
+  "honest_scope": [
+    "This measures the PREVALENCE and SIZE of the elidable raw material (stale reads), NOT the exact realized per-turn shed. The realized shed depends on each stale read's zone in the actual outbound /v1/messages body (strictly after the cache head, outside the recent working-set window, in a message with no reachable cache_control) — the same zone constraint elide-oversized notes; this prevalence number is a sound lower-bound motivation, not the full tradeoff witness.",
+    "SAFETY is proven separately and does not rest on this scan: the transform shares verbatim the fail-safe machinery of the already-default-on oversized elision (protected-prefix byte-identity re-proven by verifySplicedBody, identity-return on any ambiguity, never touches a cache_control-bearing message) and its predicate is STRICTLY MORE CONSERVATIVE (a superseded read, not merely a big one) and fully RESTORABLE (the pre-edit body is stashed behind a content-addressed fak_context_restore handle). Witnessed by internal/agent/anthropic_elide_stale_test.go (TestReadLifecycleElidesStaleKeepsFreshAndPrefix proves the protected prefix stays byte-identical) and internal/gateway/messages_elide_stale_test.go (TestMaybeElideStaleReadsRoundTrip proves the fire + restore round-trip).",
+    "PRIVACY: only counts, byte lengths, and token estimates are recorded here — never a prompt, tool argument, result body, session id, or transcript path."
+  ],
+  "reproduce": "Re-run a document-ordered scan over ~/.claude*/projects/**/*.jsonl: for each session record Read tool_use id->file_path and the highest message index each path was edited (Edit/Write/MultiEdit/NotebookEdit), then count each tool_result paired to a Read whose file was edited at a later message index, summing its text-payload bytes. This run was a manual scan mirroring the elide-oversized prevalence method."
+}
