@@ -1,0 +1,27 @@
+//go:build !windows
+
+package windowgate
+
+import (
+	"os/exec"
+	"testing"
+)
+
+// TestWorkerJobShimIsNoopOffWindows asserts the tree-teardown surface compiles
+// and is a benign no-op off Windows (architest tier unchanged): ConfigureWorker
+// does not panic, AssignToNewJobObject returns (nil, nil), and Close is safe.
+func TestWorkerJobShimIsNoopOffWindows(t *testing.T) {
+	cmd := exec.Command("true")
+	ConfigureWorkerCommand(cmd) // must not panic; no SysProcAttr requirement off Windows
+
+	job, err := AssignToNewJobObject(cmd)
+	if err != nil {
+		t.Fatalf("AssignToNewJobObject shim returned error: %v", err)
+	}
+	if job != nil {
+		t.Fatalf("AssignToNewJobObject shim returned non-nil job: %v", job)
+	}
+	if err := job.Close(); err != nil { // nil receiver Close must be safe
+		t.Fatalf("nil JobObject.Close returned error: %v", err)
+	}
+}
