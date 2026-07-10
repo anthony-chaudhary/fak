@@ -86,14 +86,31 @@ func Private(b []byte) abi.Ref { return Inline(b, abi.ScopeAgent, abi.TaintTaint
 // receiver cannot re-share it past its Scope.
 func Shared(b []byte) abi.Ref { return Inline(b, abi.ScopeFleet, abi.TaintTainted) }
 
+// DefaultQueueCap is the per-channel length bound a Bus enforces by default: the
+// most undelivered messages one ChannelKey queue may hold before Send/Publish
+// refuse further enqueues as backpressure. Without it a queue keyed on an
+// abandoned mailbox (a steer to a dead/nonexistent trace, a Publish copy to an
+// inbox no one Recvs) grows without bound in the long-lived serve process — the
+// leak this closes (#3480). 1024 is generous for a live drain yet bounds a dead
+// mailbox to a fixed, small footprint.
+const DefaultQueueCap = 1024
+
 // Bus is a process-global, mutex+condvar mailbox: one ordered queue per
-// ChannelKey. Construct with NewBus; Default is the process-global instance the
-// package-level Send/Recv use. Safe for concurrent use by many goroutine-agents.
+// ChannelKey. Each queue is length-bounded (DefaultQueueCap by default; tune with
+// SetQueueCap) so an undrained mailbox cannot grow without bound. Construct with
+// NewBus; Default is the process-global instance the package-level Send/Recv use.
+// Safe for concurrent use by many goroutine-agents.
 type Bus struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
 	queues map[ChannelKey][]Message
 	seq    uint64
+
+	// queueCap is the per-channel length bound. A Send/Publish that would push a
+	// queue past it is refused (deny-as-value, ReasonRateLimited) rather than
+	// enqueued, so an abandoned mailbox is bounded. queueCap <= 0 disables the
+	// bound (the explicit, opt-in unbounded mode — normally never chosen).
+	queueCap int
 
 	// subs is the pub/sub registry: per topic, the set of live subscriber inboxes
 	// a Publish fans a copy out to (see topic.go). subSeq mints unique inbox ids.
@@ -106,14 +123,41 @@ type Bus struct {
 	held   int64
 }
 
-// NewBus builds an empty mailbox bus.
+// NewBus builds an empty mailbox bus with the DefaultQueueCap per-channel bound.
 func NewBus() *Bus {
 	b := &Bus{
-		queues: map[ChannelKey][]Message{},
-		subs:   map[ChannelKey]map[uint64]ChannelKey{},
+		queues:   map[ChannelKey][]Message{},
+		subs:     map[ChannelKey]map[uint64]ChannelKey{},
+		queueCap: DefaultQueueCap,
 	}
 	b.cond = sync.NewCond(&b.mu)
 	return b
+}
+
+// SetQueueCap tunes the per-channel length bound (see DefaultQueueCap). n <= 0
+// disables the bound entirely — the explicit opt-in to the old unbounded
+// behavior, which reintroduces the #3480 leak, so it is a deliberate choice, not
+// a default. The new cap applies to subsequent Send/Publish enqueues; it never
+// truncates a queue already over the bound.
+func (b *Bus) SetQueueCap(n int) {
+	b.mu.Lock()
+	b.queueCap = n
+	b.mu.Unlock()
+}
+
+// queueFullLocked reports whether the queue for `to` is at/over the length bound
+// and a further enqueue must be refused. The caller must hold b.mu.
+func (b *Bus) queueFullLocked(to ChannelKey) bool {
+	return b.queueCap > 0 && len(b.queues[to]) >= b.queueCap
+}
+
+// queueFullVerdict is the deny-as-value a Send/Publish returns when a channel is
+// at its length cap. A full mailbox is backpressure, so it cites the closed core
+// vocabulary's abi.ReasonRateLimited ("retry after a wait; throttled for now") —
+// the honest in-set mapping — rather than minting a new reason (see doc.go: this
+// package reuses the closed reason set, never widening it).
+func queueFullVerdict() abi.Verdict {
+	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited, By: "a2achan/cap"}
 }
 
 // Default is the process-global bus shared by every in-kernel agent in one
@@ -125,7 +169,9 @@ var Default = NewBus()
 // message was enqueued, otherwise a deny carrying the closed-vocabulary reason
 // (the message is NOT enqueued). caps are the capabilities the caller advertises
 // (the "send right"); without CapA2ASend negotiated, Send fails closed. Send
-// never blocks.
+// never blocks: when the destination channel is already at its length bound
+// (DefaultQueueCap) it refuses with a deny-as-value (ReasonRateLimited) instead
+// of growing the queue without bound, so an undrained mailbox stays bounded.
 func (b *Bus) Send(ctx context.Context, from string, to ChannelKey, body abi.Ref, caps ...abi.Capability) abi.Verdict {
 	v := gateSend(from, to, body, caps, true) // point-to-point: the self-channel exception applies
 	if v.Kind != abi.VerdictAllow {
@@ -133,6 +179,11 @@ func (b *Bus) Send(ctx context.Context, from string, to ChannelKey, body abi.Ref
 		return v
 	}
 	b.mu.Lock()
+	if b.queueFullLocked(to) {
+		b.mu.Unlock()
+		atomic.AddInt64(&b.denied, 1)
+		return queueFullVerdict()
+	}
 	b.seq++
 	msg := Message{From: from, To: to, Body: body, Seq: b.seq}
 	b.queues[to] = append(b.queues[to], msg)

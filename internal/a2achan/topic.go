@@ -51,7 +51,11 @@ func (b *Bus) Subscribe(topic ChannelKey) (inbox ChannelKey, cancel func()) {
 // Allow, enqueues an independent copy to every current subscriber inbox of the
 // topic. It returns the admission Verdict and the number of subscribers the
 // message was fanned out to (0 when the topic has no subscribers — adjudicated but
-// undelivered). Like Send, a denied Publish enqueues nothing.
+// undelivered). Like Send, a denied Publish enqueues nothing. A subscriber inbox
+// already at its length bound (DefaultQueueCap) is SKIPPED — the copy is dropped
+// for that one abandoned inbox and it is not counted in the returned fan-out — so
+// an undrained subscriber cannot grow without bound (#3480) or block delivery to
+// the live subscribers (the message was adjudicated once for all).
 func (b *Bus) Publish(ctx context.Context, from string, topic ChannelKey, body abi.Ref, caps ...abi.Capability) (abi.Verdict, int) {
 	// allowSelfChannel=false: a topic is not a destination — the real recipients
 	// are the subscriber inboxes (topic.ID#subN), owned by arbitrary other agents —
@@ -64,7 +68,12 @@ func (b *Bus) Publish(ctx context.Context, from string, topic ChannelKey, body a
 	}
 	b.mu.Lock()
 	n := 0
+	dropped := 0
 	for _, inbox := range b.subs[topic] {
+		if b.queueFullLocked(inbox) {
+			dropped++ // abandoned subscriber at the length bound — drop its copy
+			continue
+		}
 		b.seq++
 		b.queues[inbox] = append(b.queues[inbox], Message{From: from, To: inbox, Body: body, Seq: b.seq})
 		n++
@@ -75,6 +84,9 @@ func (b *Bus) Publish(ctx context.Context, from string, topic ChannelKey, body a
 	b.mu.Unlock()
 	if n > 0 {
 		atomic.AddInt64(&b.sent, int64(n))
+	}
+	if dropped > 0 {
+		atomic.AddInt64(&b.denied, int64(dropped))
 	}
 	return v, n
 }
