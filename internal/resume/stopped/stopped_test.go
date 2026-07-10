@@ -18,6 +18,12 @@ func assistant(text string) Record {
 	return Record{Type: "assistant", Role: "assistant", Text: text}
 }
 
+// userTurn is a user record carrying a tool_result (the shape of a session that died right
+// after a tool landed, with the model about to act) — the residual user-final tail (#3783).
+func userTurn(text string) Record {
+	return Record{Type: "user", Role: "user", Text: text, HasToolResult: true}
+}
+
 func TestThrottleCurrentIsStoppedLimit(t *testing.T) {
 	r := Classify([]Record{
 		assistant("working on it"),
@@ -77,7 +83,9 @@ func TestAuthInterruptParkedDoneQuietLive(t *testing.T) {
 		{"[Request interrupted by user", 60, DispStoppedInterrupt},
 		{"The workflow is still running; the harness will notify me when it completes.", 60, DispParkedWait},
 		{"Done — committed and pushed to origin.", 60, DispDone},
-		{"thinking about the next step", 60, DispStoppedQuiet},
+		// An assistant-final residual (no wrap-up phrase) is now STOPPED_DONE, not the QUIET
+		// umbrella: the model finished a turn and went idle (#3783). Liveness still outranks it.
+		{"thinking about the next step", 60, DispStoppedDone},
 		{"thinking about the next step", 2, DispLive},
 	}
 	for _, c := range cases {
@@ -278,5 +286,128 @@ func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
 	}
 	if d.Counts[DispDupLive] != 1 {
 		t.Fatalf("DUP_LIVE count = %d, want 1", d.Counts[DispDupLive])
+	}
+}
+
+// TestResidualSplitByLastRole pins #3783: the residual STOPPED_QUIET is split by the
+// terminal record's role — assistant-final => STOPPED_DONE (idle, leave alone), user-final
+// => STOPPED_MIDTURN (stranded work, resume), empty tail => the STOPPED_QUIET umbrella. The
+// explicit stop signals (auth/limit/interrupt/midtool/live) still win over the split.
+func TestResidualSplitByLastRole(t *testing.T) {
+	cases := []struct {
+		name string
+		recs []Record
+		age  float64
+		want string
+	}{
+		{"assistant-final residual is DONE", []Record{assistant("thinking about the next step")}, 60, DispStoppedDone},
+		{"user-final residual is MIDTURN", []Record{userTurn("tool output: 3 files changed")}, 60, DispStoppedMidturn},
+		{"empty tail stays QUIET umbrella", nil, 60, DispStoppedQuiet},
+		{"assistant-final still LIVE when fresh", []Record{assistant("thinking about the next step")}, 2, DispLive},
+		// Precedence: the specific signals outrank the residual role split.
+		{"pending tool wins over assistant-final DONE",
+			[]Record{{Type: "assistant", Role: "assistant", Text: "running a tool", ToolUseName: "Bash"}}, 60, DispStoppedMidtool},
+		{"auth wall wins over user-final MIDTURN",
+			[]Record{{Type: "user", Role: "user", Text: "OAuth token has expired · please run /login"}}, 60, DispStoppedAuth},
+		{"interrupt wins over user-final MIDTURN",
+			[]Record{{Type: "user", Role: "user", Text: "[Request interrupted by user"}}, 60, DispStoppedInterrupt},
+	}
+	for _, c := range cases {
+		r := Classify(c.recs, c.age, 10, "", "sid", "p")
+		if r.Disp != c.want {
+			t.Errorf("%s: disp = %s, want %s", c.name, r.Disp, c.want)
+		}
+	}
+}
+
+// TestMidturnFixtureFromEvidenceRows reproduces the #3783 census evidence: substantial fak
+// sessions whose LAST transcript record is a user turn (a tool_result / file input) — the
+// model was mid-turn when it died. These were painted the same QUIET as an idle session and
+// so never surfaced as recoverable; each must now classify STOPPED_MIDTURN.
+func TestMidturnFixtureFromEvidenceRows(t *testing.T) {
+	tails := []string{
+		"## Notes & research (docs/notes/) ...",
+		"TRUNK_WOULD_NOT_COMPILE (advisory): the pushed tip would not build ...",
+		"--- PASS: TestDispatchProductWorkerCountIncludesRepair... (3.73s)",
+		"https://github.com/anthony-chaudhary/fak/issues/3775",
+	}
+	for _, tail := range tails {
+		r := Classify([]Record{
+			assistant("kicking off the next step"),
+			userTurn(tail),
+		}, 120, 2600, "", "sid", "p")
+		if r.Disp != DispStoppedMidturn {
+			t.Errorf("evidence tail %q => %s, want STOPPED_MIDTURN (stranded mid-turn work)", tail, r.Disp)
+		}
+		if r.LastRole != "user" {
+			t.Errorf("evidence tail %q last_role = %q, want user", tail, r.LastRole)
+		}
+	}
+}
+
+// TestDecideRoutesMidturnAndDone pins the Decide-side wiring of the #3783 split: a
+// STOPPED_MIDTURN row is resume-eligible (subject to the same throttle/replay-safety gates
+// as other resumable dispositions), while a STOPPED_DONE row is leave-alone (Skip). An
+// over-window MIDTURN still defers on the replay-safety precondition.
+func TestDecideRoutesMidturnAndDone(t *testing.T) {
+	never := func(string) bool { return false }
+	overKB := DefaultResumeContextWindowTokens/EstimatedTokensPerKB + 100
+	rows := []Row{
+		{Disp: DispStoppedMidturn, Account: "a1", AgeMin: 10, Session: "mt", SizeKB: 10},
+		{Disp: DispStoppedDone, Account: "a1", AgeMin: 12, Session: "done"},
+		{Disp: DispStoppedMidturn, Account: "a1", AgeMin: 14, Session: "big", SizeKB: overKB},
+	}
+	d := Decide(rows, never)
+
+	in := func(b []Row, sid string) bool {
+		for _, r := range b {
+			if r.Session == sid {
+				return true
+			}
+		}
+		return false
+	}
+	if !in(d.Resume, "mt") {
+		t.Fatalf("STOPPED_MIDTURN should resume; resume=%+v", d.Resume)
+	}
+	if !in(d.Skip, "done") || in(d.Resume, "done") {
+		t.Fatalf("STOPPED_DONE should skip (leave alone), not resume; skip=%+v resume=%+v", d.Skip, d.Resume)
+	}
+	if !in(d.Defer, "big") || in(d.Resume, "big") {
+		t.Fatalf("over-window STOPPED_MIDTURN should defer on replay-safety; defer=%+v resume=%+v", d.Defer, d.Resume)
+	}
+	if d.Counts[DispStoppedMidturn] != 2 || d.Counts[DispStoppedDone] != 1 {
+		t.Fatalf("counts must tabulate the split separately, got %v", d.Counts)
+	}
+}
+
+// TestDecideDoneWithLiveSiblingKeepsCause pins that STOPPED_DONE is excluded from the
+// DUP_LIVE relabel (like DONE): a finished session that happens to duplicate a live sibling
+// keeps its cause (STOPPED_DONE) rather than being masked as DUP_LIVE (#3783 / cf. #3800).
+// A STOPPED_MIDTURN duplicate — a genuine would-be resume candidate — is still redirected.
+func TestDecideDoneWithLiveSiblingKeepsCause(t *testing.T) {
+	never := func(string) bool { return false }
+	rows := []Row{
+		{Disp: DispLive, Account: "a1", AgeMin: 1, Session: "live", Project: "P", WorkKey: "issue:#42"},
+		{Disp: DispStoppedDone, Account: "a2", AgeMin: 10, Session: "done", Project: "P", WorkKey: "issue:#42"},
+		{Disp: DispStoppedMidturn, Account: "a2", AgeMin: 12, Session: "mt", Project: "P", WorkKey: "issue:#42"},
+	}
+	d := Decide(rows, never)
+
+	find := func(b []Row, sid string) *Row {
+		for i := range b {
+			if b[i].Session == sid {
+				return &b[i]
+			}
+		}
+		return nil
+	}
+	done := find(d.Skip, "done")
+	if done == nil || done.Disp != DispStoppedDone {
+		t.Fatalf("finished duplicate must stay STOPPED_DONE in Skip (cause preserved), got %+v", d.Skip)
+	}
+	mt := find(d.Skip, "mt")
+	if mt == nil || mt.Disp != DispDupLive {
+		t.Fatalf("mid-turn duplicate should be redirected to DUP_LIVE; skip=%+v", d.Skip)
 	}
 }

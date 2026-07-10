@@ -15,6 +15,10 @@
 //   - waiting   — the last assistant text says it is parked on a background task; do not
 //     resume (the harness will wake it).
 //   - done      — the last assistant text reads as a wrap-up.
+//   - residual  — none of the above matched: split by the terminal record's role (#3783).
+//     An assistant-final tail is STOPPED_DONE (a finished turn went idle — leave alone); a
+//     user-final tail is STOPPED_MIDTURN (a tool_result/user input was last — the model was
+//     about to act, so work is stranded — resume-eligible); an empty tail stays STOPPED_QUIET.
 //
 // Liveness is mtime-based (a live agent appends within LiveMinutes); the shell supplies
 // the age. Pure by construction: the I/O shell (cmd/fak resume stopped) walks the account
@@ -79,7 +83,21 @@ const (
 	DispParkedWait = "PARKED_WAIT"
 	// DispDone: the last assistant text reads as a wrap-up.
 	DispDone = "DONE"
-	// DispStoppedQuiet: stopped with no recognizable terminal signal.
+	// DispStoppedDone: a residual stop whose terminal record is an ASSISTANT turn with
+	// nothing after it — the model finished a turn and the session went idle without a
+	// recognizable wrap-up phrase. Leave alone: a finished turn is not stranded work. Split
+	// out of the STOPPED_QUIET umbrella by last_role (#3783).
+	DispStoppedDone = "STOPPED_DONE"
+	// DispStoppedMidturn: a residual stop whose terminal record is a USER turn (a tool_result
+	// or user/file input) — the model was ABOUT TO ACT when the process died, so real work is
+	// stranded mid-turn. Resume-eligible, unfinished work. Split out of the STOPPED_QUIET
+	// umbrella by last_role (#3783). (An unmatched trailing tool_use is the more specific
+	// DispStoppedMidtool, which still wins over this residual split.)
+	DispStoppedMidturn = "STOPPED_MIDTURN"
+	// DispStoppedQuiet: the residual umbrella — stopped with no recognizable terminal signal
+	// AND no resolvable terminal role (an empty tail). Since #3783 the assistant-final and
+	// user-final residuals are the typed DispStoppedDone / DispStoppedMidturn; this remains
+	// only for the genuinely-unknown tail and as the back-compat alias.
 	DispStoppedQuiet = "STOPPED_QUIET"
 	// DispDupLive: a stopped session whose work a LIVE session in the same project already
 	// owns — a crashed duplicate. Resuming it re-runs work in flight and collides on the
@@ -205,7 +223,17 @@ func Classify(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSess
 		disp = DispParkedWait
 	case doneRE.MatchString(lt):
 		disp = DispDone
+	case lastRole == "assistant":
+		// Residual stop, assistant-final: the model finished a turn and nothing followed —
+		// idle/done, safe to leave (#3783). (No explicit wrap-up phrase, or doneRE would have
+		// matched above.)
+		disp = DispStoppedDone
+	case lastRole == "user":
+		// Residual stop, user-final: a tool_result or user/file input was the last record —
+		// the model was mid-turn when it died, so real work is stranded. Resume-eligible (#3783).
+		disp = DispStoppedMidturn
 	}
+	// disp stays DispStoppedQuiet only when no terminal role resolved (an empty tail).
 
 	session := sid
 	if session == "" {
@@ -326,10 +354,12 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 
 	d := Decisions{AccountThrottle: acctThrottle, Counts: map[string]int{}, Rows: sorted}
 	for _, r := range sorted {
-		// A crashed duplicate of a live session skips before any resume decision. LIVE/DONE/
-		// PARKED are left to their own buckets — only a would-be resume candidate is redirected.
-		if r.WorkKey != "" && r.Disp != DispLive && r.Disp != DispDone && r.Disp != DispParkedWait &&
-			liveOwned[r.Project+"\x00"+r.WorkKey] {
+		// A crashed duplicate of a live session skips before any resume decision. The
+		// leave-alone states (LIVE / DONE / STOPPED_DONE / PARKED) are left to their own
+		// buckets — only a would-be resume candidate is redirected. Excluding STOPPED_DONE
+		// keeps a finished session's cause intact rather than masking it with DUP_LIVE (#3783).
+		if r.WorkKey != "" && r.Disp != DispLive && r.Disp != DispDone && r.Disp != DispStoppedDone &&
+			r.Disp != DispParkedWait && liveOwned[r.Project+"\x00"+r.WorkKey] {
 			r.Disp = DispDupLive
 			r.BlockedBy = "duplicate of a live session owning the same work (" + r.WorkKey + ")"
 			d.Counts[DispDupLive]++
@@ -338,7 +368,7 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 		}
 		d.Counts[r.Disp]++
 		switch r.Disp {
-		case DispStoppedMidtool, DispStoppedInterrupt, DispStoppedQuiet:
+		case DispStoppedMidtool, DispStoppedInterrupt, DispStoppedMidturn, DispStoppedQuiet:
 			// Replay-safety precondition first: a resume whose replayed transcript would
 			// overflow the target context window is a STRUCTURAL block that no reset clears,
 			// so it is reported ahead of a transient account throttle. Fail-closed — an
@@ -358,7 +388,7 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 		case DispStoppedAuth:
 			r.BlockedBy = "account auth/subscription disabled"
 			d.Defer = append(d.Defer, r)
-		default: // LIVE / PARKED_WAIT / DONE
+		default: // LIVE / PARKED_WAIT / DONE / STOPPED_DONE — leave alone, never a resume candidate
 			d.Skip = append(d.Skip, r)
 		}
 	}
