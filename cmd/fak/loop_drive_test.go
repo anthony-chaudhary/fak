@@ -367,3 +367,97 @@ func TestLoopDrivePassesWitnessedDoneWithHandoffReason(t *testing.T) {
 		t.Fatalf("stdout missing witnessed-done line: %s", stdout.String())
 	}
 }
+
+// TestLoopDriveArmedFileDisarmsBetweenTurns proves the filesystem-sentinel disarm
+// (#4059): a --armed-file removed out-of-band during a turn takes a clean cancel
+// at the top of the NEXT turn — before it spawns — recording a terminal
+// LOOP_DISARMED End event. A sentinel left in place keeps the loop driving.
+func TestLoopDriveArmedFileDisarmsBetweenTurns(t *testing.T) {
+	oldNewCommand := loopDriveNewCommand
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
+	// Both cases run the exit gate as always-NOT_YET so the only thing that can
+	// stop the loop is the sentinel (disarm case) or the iteration budget (control).
+	notYet := func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+		return loopDriveWitnessResult{Status: loopmgr.StatusWitnessRefused, Reason: "NOT_YET", Summary: "not done", ExitCode: 1}
+	}
+
+	t.Run("removed sentinel disarms after one turn", func(t *testing.T) {
+		goal := filepath.Join(t.TempDir(), "GOAL.md")
+		ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+		armed := filepath.Join(t.TempDir(), "armed.md")
+		writeLoopDriveGoal(t, goal, false, false)
+		if err := os.WriteFile(armed, []byte("armed\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var nextItems []string
+		loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+			nextItems = append(nextItems, loopDriveEnvValue(env, "FAK_GOAL_NEXT"))
+			return &loopDriveFakeCommand{wait: func() error {
+				writeLoopDriveGoal(t, goal, true, false) // advance the goal
+				_ = os.Remove(armed)                     // operator rm during the turn
+				return nil
+			}}
+		}
+		loopDriveRunWitness = notYet
+
+		var stdout, stderr bytes.Buffer
+		code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--armed-file", armed, "--max-iters", "3", "--", "worker"})
+		if code != 0 {
+			t.Fatalf("disarm code=%d, want 0 stderr=%s", code, stderr.String())
+		}
+		if len(nextItems) != 1 {
+			t.Fatalf("children spawned = %d (%v), want exactly 1 (turn 2 disarms before spawning)", len(nextItems), nextItems)
+		}
+		events, err := loopmgr.Load(ledger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) == 0 {
+			t.Fatal("no ledger events")
+		}
+		last := events[len(events)-1]
+		if last.Kind != loopmgr.EventEnd || last.Reason != "LOOP_DISARMED" || last.Status != loopmgr.StatusCanceled {
+			t.Fatalf("last event = {kind:%s reason:%s status:%s}, want {End LOOP_DISARMED %s}",
+				last.Kind, last.Reason, last.Status, loopmgr.StatusCanceled)
+		}
+	})
+
+	t.Run("present sentinel keeps driving", func(t *testing.T) {
+		goal := filepath.Join(t.TempDir(), "GOAL.md")
+		ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+		armed := filepath.Join(t.TempDir(), "armed.md")
+		writeLoopDriveGoal(t, goal, false, false)
+		if err := os.WriteFile(armed, []byte("armed\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var nextItems []string
+		loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+			next := loopDriveEnvValue(env, "FAK_GOAL_NEXT")
+			nextItems = append(nextItems, next)
+			return &loopDriveFakeCommand{wait: func() error {
+				if next == "first step" {
+					writeLoopDriveGoal(t, goal, true, false)
+				} else {
+					writeLoopDriveGoal(t, goal, true, true)
+				}
+				return nil // sentinel deliberately left in place
+			}}
+		}
+		loopDriveRunWitness = notYet
+
+		var stdout, stderr bytes.Buffer
+		code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--armed-file", armed, "--max-iters", "2", "--", "worker"})
+		if code != 3 {
+			t.Fatalf("control code=%d, want 3 (budget stop after 2 turns) stderr=%s", code, stderr.String())
+		}
+		if len(nextItems) != 2 {
+			t.Fatalf("control children spawned = %d (%v), want 2 (sentinel present ⇒ turn 2 runs)", len(nextItems), nextItems)
+		}
+	})
+}

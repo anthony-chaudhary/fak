@@ -54,6 +54,11 @@ type loopDriveOptions struct {
 	// spec declaration = the historical uncoordinated drive.
 	Lane   string
 	Region []string
+	// ArmedFile is a filesystem sentinel checked at the top of every turn: while
+	// it exists the loop keeps driving; once it is removed out-of-band (an
+	// operator `rm`) the loop takes a clean cancel between turns (issue #4059).
+	// Empty means no sentinel is armed and the loop never disarms on this axis.
+	ArmedFile string
 }
 
 type loopDriveWitnessResult struct {
@@ -93,6 +98,7 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var name exported with --review-model")
 	handoffFile := fs.String("task-handoff-file", "", "path the wrapped agent writes a fak.task-handoff.v1 record to before a witnessed-done completion; required for the handoff gate (default: a private per-session file exposed as FAK_TASK_HANDOFF_FILE). A missing/empty file is an ordinary non-agent stop and fails open.")
 	lane := fs.String("lane", "", "dos.toml lane this loop's writes stay inside (overrides the GOAL.md lane: field); arms region admission against the live lease fabric")
+	armedFile := fs.String("armed-file", "", "filesystem sentinel: while this path exists the loop keeps driving; remove it out-of-band to take a clean cancel between turns (empty = never disarm on this axis)")
 	var region repeatedString
 	fs.Var(&region, "tree", "region glob this loop's writes stay inside (repeatable; overrides the GOAL.md region: field); arms region admission against the live lease fabric")
 	template := fs.Bool("template", false, "print a parseable GOAL.md template and exit")
@@ -147,6 +153,7 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 		HandoffFile:     *handoffFile,
 		Lane:            *lane,
 		Region:          region,
+		ArmedFile:       *armedFile,
 	})
 }
 
@@ -181,6 +188,12 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		}
 		if strings.TrimSpace(opt.WitnessOverride) != "" {
 			spec.Witness = strings.TrimSpace(opt.WitnessOverride)
+		}
+		// Filesystem-sentinel disarm (#4059): an armed sentinel removed
+		// out-of-band during the previous turn stops the loop cleanly here,
+		// before this turn spawns anything.
+		if loopDriveDisarmed(opt.ArmedFile) {
+			return stopLoopDriveDisarmed(stderr, opt, goalPath, spec, iterations, tokensUsed)
 		}
 		limit := loopDriveLimit(opt.MaxIters, spec.Budget.MaxIters)
 		tokenLimit := loopDriveTokenLimit(opt.MaxTokens, spec.Budget.MaxTokens)
@@ -462,6 +475,47 @@ func stopLoopDriveBudget(stderr io.Writer, opt loopDriveOptions, goalPath string
 	}
 	fmt.Fprintf(stderr, "fak loop drive: %s\n", reason)
 	return 3
+}
+
+// loopDriveDisarmed reports whether an armed sentinel file was configured and has
+// since been removed out-of-band — a clean between-turns stop signal (#4059). An
+// empty ArmedFile means no sentinel is armed. Only a confirmed absence
+// (os.ErrNotExist) disarms; any other stat error (e.g. a transient permission
+// blip) keeps the loop running, so the sentinel fails safe toward continuing.
+func loopDriveDisarmed(armedFile string) bool {
+	armedFile = strings.TrimSpace(armedFile)
+	if armedFile == "" {
+		return false
+	}
+	_, err := os.Stat(armedFile)
+	return errors.Is(err, os.ErrNotExist)
+}
+
+// stopLoopDriveDisarmed records the clean cancel for a loop whose armed sentinel
+// was removed and returns exit 0 (a disarm is a success, not a refusal). It
+// writes a terminal End event carrying the structured reason LOOP_DISARMED and
+// StatusCanceled so a ledger reader sees the loop stopped on operator signal.
+func stopLoopDriveDisarmed(stderr io.Writer, opt loopDriveOptions, goalPath string, spec loopdrive.Spec, iterations int, tokensUsed int64) int {
+	summary := fmt.Sprintf("armed sentinel %s removed; clean stop after %d turn(s)", opt.ArmedFile, iterations)
+	if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
+		LoopID:    spec.Loop,
+		Kind:      loopmgr.EventEnd,
+		Source:    opt.Source,
+		Principal: opt.Principal,
+		Status:    loopmgr.StatusCanceled,
+		Reason:    "LOOP_DISARMED",
+		Summary:   summary,
+		EvidenceRefs: []loopmgr.EvidenceRef{
+			{Kind: "goal", Ref: goalPath},
+			{Kind: "armed-file", Ref: opt.ArmedFile},
+		},
+		Metrics: map[string]int64{"iterations": int64(iterations), "tokens_used": tokensUsed},
+	}); err != nil {
+		fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stderr, "fak loop drive: LOOP_DISARMED %s\n", summary)
+	return 0
 }
 
 func loadLoopGoal(path string) (loopdrive.Spec, error) {
