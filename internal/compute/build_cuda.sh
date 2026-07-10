@@ -54,6 +54,8 @@ if [ "$cmd" = "check" ]; then
 
   echo "[cuda] GPU-free ABI/header portability check ..."
   ( cd "$MOD_DIR" && "$PY" tools/cuda_abi_parity.py --check )
+  echo "[cuda] GPU-free architecture matrix check ..."
+  ( cd "$MOD_DIR" && "$PY" tools/cuda_arch_matrix.py )
 
   HEADER_CC="${CC:-}"
   if [ -z "$HEADER_CC" ]; then
