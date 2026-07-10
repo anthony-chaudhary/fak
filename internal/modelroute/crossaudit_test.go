@@ -3,6 +3,7 @@ package modelroute
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -183,17 +184,12 @@ func TestCrossAuditSpineRefusesHTTPDeclaredFamilyMismatch(t *testing.T) {
 			ObservedAuditor: &AuditIdentity{Model: "claude-review"},
 		}, nil
 	}))
-	if err != nil {
-		t.Fatalf("AuditIssue: %v", err)
+	var observedErr *ObservedAuditIdentityError
+	if !errors.As(err, &observedErr) || observedErr.Verdict != AuditIndependenceRefuse || observedErr.Reason != AuditReasonRefuseObservedMismatch {
+		t.Fatalf("HTTP mismatch error = %#v, want typed REFUSE/%s", err, AuditReasonRefuseObservedMismatch)
 	}
-	if receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceRefuse || receipt.Independence.Reason != string(AuditReasonRefuseObservedMismatch) {
-		t.Fatalf("HTTP mismatch independence = %+v", receipt.Independence)
-	}
-	if receipt.Verdict != CrossAuditInconclusive || receipt.ObservedAuditor == nil || receipt.ObservedAuditor.Family != "claude" {
-		t.Fatalf("HTTP mismatch receipt = %+v", receipt)
-	}
-	if err := receipt.Verify(); err == nil || !strings.Contains(err.Error(), "mismatches declared auditor") {
-		t.Fatalf("HTTP mismatch receipt verification error = %v", err)
+	if receipt.Schema != "" || receipt.ReceiptDigest != "" {
+		t.Fatalf("HTTP mismatch returned a durable receipt: %+v", receipt)
 	}
 }
 
@@ -213,14 +209,70 @@ func TestCrossAuditSpineHTTPDriverCannotOptOutOfObservedIdentity(t *testing.T) {
 	}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
 		return IssueAuditReviewResult{Verdict: CrossAuditPass, Reason: "caller tried to bypass readback"}, nil
 	}))
-	if err != nil {
-		t.Fatalf("AuditIssue: %v", err)
+	var observedErr *ObservedAuditIdentityError
+	if !errors.As(err, &observedErr) || observedErr.Verdict != AuditIndependenceUnknown || observedErr.Reason != AuditReasonUnknownObservedIdentity {
+		t.Fatalf("HTTP opt-out bypass error = %#v", err)
 	}
-	if receipt.Verdict == CrossAuditPass || receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceUnknown {
-		t.Fatalf("HTTP opt-out bypass receipt = %+v", receipt)
+	if receipt.Schema != "" || receipt.ReceiptDigest != "" {
+		t.Fatalf("HTTP opt-out bypass returned a durable receipt: %+v", receipt)
 	}
-	if err := receipt.Verify(); err == nil || !strings.Contains(err.Error(), "unresolved") {
-		t.Fatalf("HTTP missing-observation receipt verification error = %v", err)
+}
+
+func TestAuditIssueNilErrorIffReturnedReceiptVerifies(t *testing.T) {
+	policy := crossAuditHTTPPolicy()
+	httpAuditor := fullAuditIdentity("gpt-review", "openai", "gpt", "gpt-w56", "openai-compatible-http", "remote", "api", "high", "")
+	httpAuditor.Driver = "http"
+	ordinaryAuditor := httpAuditor
+	ordinaryAuditor.Driver = ""
+	ordinaryAuditor.Harness = "in-process-reviewer"
+
+	tests := []struct {
+		name        string
+		auditor     AuditIdentity
+		review      IssueAuditReviewResult
+		reviewErr   error
+		wantTyped   bool
+		wantVerdict AuditIndependenceVerdict
+		wantReason  AuditIndependenceReason
+		wantReceipt CrossAuditVerdict
+	}{
+		{name: "http-missing", auditor: httpAuditor, review: IssueAuditReviewResult{Verdict: CrossAuditPass}, wantTyped: true, wantVerdict: AuditIndependenceUnknown, wantReason: AuditReasonUnknownObservedIdentity},
+		{name: "http-unmapped", auditor: httpAuditor, review: IssueAuditReviewResult{Verdict: CrossAuditPass, ObservedAuditor: &AuditIdentity{Model: "unmapped"}}, wantTyped: true, wantVerdict: AuditIndependenceUnknown, wantReason: AuditReasonUnknownObservedIdentity},
+		{name: "http-mismatched", auditor: httpAuditor, review: IssueAuditReviewResult{Verdict: CrossAuditPass, ObservedAuditor: &AuditIdentity{Model: "claude-review"}}, wantTyped: true, wantVerdict: AuditIndependenceRefuse, wantReason: AuditReasonRefuseObservedMismatch},
+		{name: "http-transport-failure", auditor: httpAuditor, reviewErr: context.DeadlineExceeded, wantTyped: true, wantVerdict: AuditIndependenceUnknown, wantReason: AuditReasonUnknownObservedIdentity},
+		{name: "ordinary-reviewer-unavailable", auditor: ordinaryAuditor, reviewErr: context.DeadlineExceeded, wantReceipt: CrossAuditUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt, err := AuditIssue(context.Background(), IssueAuditRequest{
+				IssueNumber:        42,
+				Author:             AuthorManifest{Schema: CrossAuditAuthorSchema, Author: fullAuditIdentity("qwen-local", "local", "qwen", "qwen-w35", "fak-local", "local", "local", "high", "weights:qwen")},
+				Auditor:            tt.auditor,
+				IndependencePolicy: policy,
+			}, IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
+				return crossAuditFixtureEvidence(), nil
+			}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
+				return tt.review, tt.reviewErr
+			}))
+
+			verifyErr := receipt.Verify()
+			if (err == nil) != (verifyErr == nil) {
+				t.Fatalf("nil-error/verified contract diverged: err=%v verify=%v receipt=%+v", err, verifyErr, receipt)
+			}
+			if tt.wantTyped {
+				var observedErr *ObservedAuditIdentityError
+				if !errors.As(err, &observedErr) || observedErr.Verdict != tt.wantVerdict || observedErr.Reason != tt.wantReason {
+					t.Fatalf("error = %#v, want observed identity %s/%s", err, tt.wantVerdict, tt.wantReason)
+				}
+				if receipt.Schema != "" || receipt.ReceiptDigest != "" {
+					t.Fatalf("fail-closed path returned durable receipt: %+v", receipt)
+				}
+				return
+			}
+			if err != nil || receipt.Verdict != tt.wantReceipt {
+				t.Fatalf("ordinary receipt = %+v err=%v, want %s", receipt, err, tt.wantReceipt)
+			}
+		})
 	}
 }
 
@@ -294,11 +346,12 @@ func TestCrossAuditSpineClassifiesReviewerFailuresWithoutFailOpen(t *testing.T) 
 		receipt, err := AuditIssue(context.Background(), req, fetcher, IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
 			return IssueAuditReviewResult{}, context.DeadlineExceeded
 		}))
-		if err != nil || receipt.Verdict != CrossAuditUnavailable || receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceUnknown || receipt.Independence.Reason != string(AuditReasonUnknownObservedIdentity) {
-			t.Fatalf("transport-error receipt = %+v err=%v", receipt, err)
+		var observedErr *ObservedAuditIdentityError
+		if !errors.As(err, &observedErr) || observedErr.Verdict != AuditIndependenceUnknown || observedErr.Reason != AuditReasonUnknownObservedIdentity {
+			t.Fatalf("transport-error observation = %+v err=%v", receipt, err)
 		}
-		if err := receipt.Verify(); err != nil {
-			t.Fatalf("transport-error receipt did not bind: %v", err)
+		if receipt.Schema != "" || receipt.ReceiptDigest != "" {
+			t.Fatalf("transport-error returned durable receipt: %+v", receipt)
 		}
 	})
 

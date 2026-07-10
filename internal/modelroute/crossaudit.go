@@ -152,6 +152,35 @@ type IndependenceError struct {
 	Auditor ModelIdentity
 }
 
+// ObservedAuditIdentityError is returned when a reviewer whose driver requires
+// response identity readback cannot prove that the responding model is the
+// declared auditor. AuditIssue returns no receipt with this error: a durable
+// receipt is released only when its own Verify method succeeds.
+type ObservedAuditIdentityError struct {
+	Verdict  AuditIndependenceVerdict
+	Reason   AuditIndependenceReason
+	Expected AuditIdentity
+	Observed AuditIdentity
+}
+
+func (e *ObservedAuditIdentityError) Error() string {
+	detail := "observed auditor identity is unresolved"
+	if e.Reason == AuditReasonRefuseObservedMismatch {
+		detail = "observed auditor identity mismatches declared auditor"
+	}
+	return fmt.Sprintf("modelroute: %s: %s/%s", detail, e.Verdict, e.Reason)
+}
+
+func (e *ObservedAuditIdentityError) Is(target error) bool {
+	_, ok := target.(*ObservedAuditIdentityError)
+	return ok
+}
+
+func IsObservedAuditIdentityFailure(err error) bool {
+	var target *ObservedAuditIdentityError
+	return errors.As(err, &target)
+}
+
 func (e *IndependenceError) Error() string {
 	return fmt.Sprintf("modelroute: cross-audit not admitted before inference: %s/%s (author family %q, auditor family %q)", e.Verdict, e.Reason, e.Author.Family, e.Auditor.Family)
 }
@@ -254,12 +283,11 @@ func AuditIssue(ctx context.Context, req IssueAuditRequest, fetcher IssueAuditFe
 		canonicalObserved := verification.Auditor
 		observedAuditor = &canonicalObserved
 		if verification.Verdict != AuditIndependenceAdmit {
-			finalIndependence.Verdict = verification.Verdict
-			finalIndependence.Reason = verification.Reason
-			finalIndependence.MissingAxes = append([]string(nil), verification.MissingAxes...)
-			if reviewErr == nil {
-				review.Verdict = CrossAuditInconclusive
-				review.Reason = fmt.Sprintf("auditor response identity %s: %s", strings.ToLower(string(verification.Verdict)), verification.Reason)
+			return IssueAuditReceipt{}, &ObservedAuditIdentityError{
+				Verdict:  verification.Verdict,
+				Reason:   verification.Reason,
+				Expected: verification.Author,
+				Observed: verification.Auditor,
 			}
 		}
 	}
@@ -309,6 +337,9 @@ func AuditIssue(ctx context.Context, req IssueAuditRequest, fetcher IssueAuditFe
 	}
 	receipt.AuditKey = fmt.Sprintf("issue:%d:%s:%s", receipt.Subject.IssueNumber, shortDigest(receipt.Subject.Digest), identityKey(auditor))
 	receipt.ReceiptDigest = receipt.recomputeDigest()
+	if err := receipt.Verify(); err != nil {
+		return IssueAuditReceipt{}, fmt.Errorf("modelroute: cross-audit produced invalid receipt: %w", err)
+	}
 	return receipt, nil
 }
 
