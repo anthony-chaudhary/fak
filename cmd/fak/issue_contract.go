@@ -23,6 +23,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	switch argv[0] {
+	case "audit":
+		return runIssueAudit(stdout, stderr, argv[1:])
 	case "contract":
 		return runIssueContract(stdout, stderr, argv[1:])
 	case "cohort":
@@ -1133,6 +1135,8 @@ func renderIssueContractReasonCounts(counts map[string]int) string {
 func issueUsage(w io.Writer) {
 	fmt.Fprint(w, `fak issue - generated-issue gates
 
+  fak issue audit    --issue N --author-manifest A
+                     --auditor PROVIDER/FAMILY/MODEL [--json]
   fak issue contract --file CANDIDATE.json [--json]
   fak issue contract --from-plan PLAN.json [--json]
   fak issue contract --from-issues ISSUES.json [--json]
