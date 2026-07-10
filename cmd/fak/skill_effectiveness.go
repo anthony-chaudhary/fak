@@ -47,9 +47,19 @@ func cmdSkillEffectivenessScorecard(argv []string) {
 		p["verdict"], p["finding"], c["skill_debt"], c["loader_debt"], c["skills"])
 }
 
+// Per-load-tier word budgets (#4056): the always-resident metadata tier (the
+// frontmatter description) and the fault-on-demand body tier each carry a HARD
+// word ceiling. Over-budget skill text is one debt unit per tier — a KPI a skill
+// cannot pass by carrying a well-formed trigger while bloating the window.
+const (
+	skillMetadataWordBudget = 100
+	skillBodyWordBudget     = 5000
+)
+
 func collectSkillEffectivenessScorecard(root string) map[string]any {
 	matches, _ := filepath.Glob(filepath.Join(root, ".claude", "skills", "*", "SKILL.md"))
 	debt := 0
+	metadataBudget, bodyBudget := 0, 0
 	for _, path := range matches {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -63,14 +73,22 @@ func collectSkillEffectivenessScorecard(root string) map[string]any {
 		if !strings.Contains(strings.ToLower(text), "use when") && !strings.Contains(strings.ToLower(text), "use to") {
 			debt++
 		}
+		metaWords, bodyWords := skillTierWordCounts(text)
+		if metaWords > skillMetadataWordBudget {
+			metadataBudget++
+		}
+		if bodyWords > skillBodyWordBudget {
+			bodyBudget++
+		}
 	}
+	budgetDebt := metadataBudget + bodyBudget
 
 	// Loader dimension (C7 / #1110): is the catalog queryable? does it page? is
 	// the index in sync? Each gap is one debt unit, same RSI discipline as the
 	// affordance checks above.
 	loaderDebt, queryable, pagesNot, inSync := collectLoaderDebt(root)
 
-	totalDebt := debt + loaderDebt
+	totalDebt := debt + loaderDebt + budgetDebt
 	score := 100
 	grade := "A"
 	ok, verdict, finding := true, "OK", "skills_effective"
@@ -80,7 +98,10 @@ func collectSkillEffectivenessScorecard(root string) map[string]any {
 		ok, verdict, finding = false, "ACTION", "skill_debt"
 		score, grade = 85, "B"
 		reason = fmt.Sprintf("%d skill affordance + %d loader debt unit(s)", debt, loaderDebt)
-		next = "add missing front-matter descriptions/triggers, or re-sync the loader index"
+		if budgetDebt > 0 {
+			reason += fmt.Sprintf(" + %d word-budget violation(s)", budgetDebt)
+		}
+		next = "add missing front-matter descriptions/triggers, re-sync the loader index, or trim over-budget skill text"
 	}
 	return map[string]any{
 		"schema":      "fak-skill-effectiveness-scorecard/1",
@@ -95,11 +116,37 @@ func collectSkillEffectivenessScorecard(root string) map[string]any {
 			"loader_queryable": queryable,
 			"loader_pages":     pagesNot,
 			"loader_in_sync":   inSync,
+			"metadata_budget":  metadataBudget,
+			"body_budget":      bodyBudget,
 			"skills":           len(matches),
 			"score":            score,
 			"grade":            grade,
 		},
 	}
+}
+
+// skillTierWordCounts splits a SKILL.md into its two load tiers and counts words
+// in each: the frontmatter `description:` value (the always-resident metadata
+// tier) and everything after the frontmatter fence (the fault-on-demand body
+// tier). A file with no `---` frontmatter fence is treated as all body.
+func skillTierWordCounts(text string) (metaWords, bodyWords int) {
+	t := strings.ReplaceAll(text, "\r\n", "\n")
+	body := t
+	if strings.HasPrefix(t, "---\n") {
+		if end := strings.Index(t[4:], "\n---"); end >= 0 {
+			fm := t[4 : 4+end]
+			body = t[4+end+len("\n---"):]
+			for _, line := range strings.Split(fm, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "description:") {
+					desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
+					metaWords = len(strings.Fields(desc))
+				}
+			}
+		}
+	}
+	bodyWords = len(strings.Fields(body))
+	return
 }
 
 // collectLoaderDebt scores the queried-loader dimension against .claude/skills:
