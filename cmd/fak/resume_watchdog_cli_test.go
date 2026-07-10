@@ -957,3 +957,41 @@ func TestRewitnessDroppedSessionSkipsPlannedOrAlreadyProven(t *testing.T) {
 		})
 	}
 }
+
+func TestResumeCarryReseedArgvAndAbsentCompatibility(t *testing.T) {
+	const sid = "carry-session"
+	posture := []string{"--managed-cache", "on"}
+	bareFronted := rwResumeArgv("/bin/fak", "/bin/claude", sid, posture)
+	carry := resume.DriveCarryRow{
+		Session: sid, TurnsLeft: 7, TokensLeft: 12345, ContextTokensLeft: 4321,
+		SpendMicroCentsLeft: 250000000, TimeLeftNanos: int64(90 * time.Minute),
+		PaceMaxTokensPerTurn: 900, PaceMinTurnGapMs: 250,
+	}
+	got := rwResumeArgv("/bin/fak", "/bin/claude", sid, posture, carry)
+	wantSpec := "turns=7,tokens=12345,context=4321,wall=1h30m0s,spend=2.50000000,max-tokens=900,gap=250ms"
+	joined := strings.Join(got, "\x00")
+	if !strings.Contains(joined, "--budget-envelope\x00"+wantSpec+"\x00--") {
+		t.Fatalf("carried argv = %#v, want budget envelope %q before separator", got, wantSpec)
+	}
+	if strings.Join(bareFronted, "\x00") != strings.Join(rwResumeArgv("/bin/fak", "/bin/claude", sid, posture), "\x00") {
+		t.Fatalf("absent carry changed argv: %#v", bareFronted)
+	}
+}
+
+func TestResumeCarryReseedLoadLatestFailOpen(t *testing.T) {
+	dir := t.TempDir()
+	if got := rwLoadDriveCarry(dir); got != nil {
+		t.Fatalf("missing ledger = %#v, want nil", got)
+	}
+	path := rwDriveCarryLedger(dir)
+	body := "{not-json}\n" +
+		`{"session":"carry-session","turns_left":9}` + "\n" +
+		`{"session":"carry-session","turns_left":4}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := rwLoadDriveCarry(dir)
+	if got["carry-session"].TurnsLeft != 4 {
+		t.Fatalf("latest carry = %#v, want turns_left=4", got["carry-session"])
+	}
+}

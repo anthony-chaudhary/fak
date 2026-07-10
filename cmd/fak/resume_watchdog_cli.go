@@ -163,6 +163,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	// already excludes non-workers when it writes the plan, but a stale plan file could
 	// predate the policy — re-check here too. An empty roster disables the check (fail
 	// open, matching the Python's tolerance of a broken accounts read).
+	driveCarry := rwLoadDriveCarry(regDir)
 	guards := resume.WatchdogGuards{
 		SelfSID:        selfSID,
 		WorkerAccounts: rwWorkerAccounts(home),
@@ -279,7 +280,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		}
 		acct := rwAccountTag(p.Account)
 		resumeCfg := p.ResumeTarget()
-		grant := launchSpawnBroker(rwResumeBrokerAttempt(fakExe, claudeExe, p, resumeCfg, posture))
+		grant := launchSpawnBroker(rwResumeBrokerAttempt(fakExe, claudeExe, p, resumeCfg, posture, driveCarry[p.Session]))
 		if !*live {
 			if !grant.Allow {
 				note("  WOULD DENY %s acct=%s proj=%s — spawn broker: %s agent_run=%s policy_digest=%s",
@@ -923,8 +924,8 @@ func rwRefreshRegistry(regDir, claudeExe string, windowH float64, probeMode stri
 // Windows (the CREATE_NO_WINDOW discipline every fak background spawn takes).
 var rwSpawnResumeLaunch = rwSpawnResume
 
-func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string) launchBrokerAttempt {
-	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(fakExe, claudeExe, p.Session, postureArgs),
+func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string, carry ...resume.DriveCarryRow) launchBrokerAttempt {
+	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(fakExe, claudeExe, p.Session, postureArgs, carry...),
 		envMap(resume.WatchdogChildEnv(os.Environ(), resumeCfg)), rwResumeCWD(p))
 }
 
@@ -939,12 +940,17 @@ func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, r
 // auto-detects claude -> --provider anthropic, so the shape matches the other launchers (posture
 // flags BEFORE `--`, agent after). Mirrors tools/fleet_resume_watchdog.py:resume_child_argv and
 // the .ps1 spawn block (#2178 / #3779).
-func rwResumeArgv(fakExe, claudeExe, session string, postureArgs []string) []string {
+func rwResumeArgv(fakExe, claudeExe, session string, postureArgs []string, carry ...resume.DriveCarryRow) []string {
 	child := []string{claudeExe, "--resume", session, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
 	if len(postureArgs) > 0 && strings.TrimSpace(fakExe) != "" {
 		front := make([]string, 0, len(postureArgs)+len(child)+3)
 		front = append(front, fakExe, "guard")
 		front = append(front, postureArgs...)
+		if len(carry) > 0 {
+			if spec := rwDriveCarryEnvelope(carry[0]); spec != "" {
+				front = append(front, "--budget-envelope", spec)
+			}
+		}
 		front = append(front, "--")
 		return append(front, child...)
 	}
@@ -1013,6 +1019,53 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 // (session-registry.json): that store is keyed by guardTraceID, a disjoint keyspace from the
 // Claude transcript UUID the plan row carries, AND it is TTL-GC'd — a Stopped descriptor would
 // evaporate 30 min after the last stamp, so a durable Stop veto must live in an un-swept file.
+func rwDriveCarryLedger(regDir string) string {
+	return filepath.Join(regDir, "resume_drivecarry.jsonl")
+}
+
+func rwLoadDriveCarry(regDir string) map[string]resume.DriveCarryRow {
+	raw, err := os.ReadFile(rwDriveCarryLedger(regDir))
+	if err != nil {
+		return nil
+	}
+	rows := jsonlledger.Parse[resume.DriveCarryRow](string(raw), nil)
+	if len(rows) == 0 {
+		return nil
+	}
+	return resume.FoldDriveCarryRows(rows)
+}
+
+func rwDriveCarryEnvelope(c resume.DriveCarryRow) string {
+	var fields []string
+	axis := func(name string, n int64) {
+		if n > 0 {
+			fields = append(fields, name+"="+strconv.FormatInt(n, 10))
+		} else if n < 0 {
+			fields = append(fields, name+"=unbounded")
+		}
+	}
+	axis("turns", c.TurnsLeft)
+	axis("tokens", c.TokensLeft)
+	axis("context", c.ContextTokensLeft)
+	if c.TimeLeftNanos > 0 {
+		fields = append(fields, "wall="+time.Duration(c.TimeLeftNanos).String())
+	} else if c.TimeLeftNanos < 0 {
+		fields = append(fields, "wall=unbounded")
+	}
+	if c.SpendMicroCentsLeft > 0 {
+		fields = append(fields, "spend="+strconv.FormatFloat(float64(c.SpendMicroCentsLeft)/100000000, 'f', 8, 64))
+	} else if c.SpendMicroCentsLeft < 0 {
+		fields = append(fields, "spend=unbounded")
+	}
+	if c.PaceMaxTokensPerTurn > 0 {
+		fields = append(fields, "max-tokens="+strconv.Itoa(c.PaceMaxTokensPerTurn))
+	}
+	if c.PaceMinTurnGapMs > 0 {
+		fields = append(fields, "gap="+(time.Duration(c.PaceMinTurnGapMs)*time.Millisecond).String())
+	}
+	return strings.Join(fields, ",")
+}
+
 func rwDriveStateLedger(regDir string) string {
 	return filepath.Join(regDir, "resume_drivestate.jsonl")
 }
