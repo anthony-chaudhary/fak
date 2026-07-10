@@ -108,6 +108,13 @@ func printHeaderMemoryPlans(path string, expertParallel int) error {
 	if cfg, err := ws.File.Config(); err == nil {
 		fmt.Fprintln(os.Stdout, formatConfigLine(cfg))
 	}
+	// Lane F (#3074): fold the header's expert axis into the DERIVED active routed-expert
+	// bytes/token — the single-stream decode ceiling divisor. q4kdiag already holds K and the
+	// routed-expert band header-only, so this is the box-agnostic half of the ground-truth read;
+	// the box-side per-op byte trace remains the separate witness.
+	if as, ok, err := ws.RoutedExpertActiveSet(); err == nil && ok {
+		fmt.Fprintln(os.Stdout, formatActiveSetLine(as))
+	}
 	printMemoryPlan("monolith", full)
 	printMemoryPlan(fmt.Sprintf("expert_parallel_per_rank ranks=%d", expertParallel), ep)
 	return nil
@@ -122,6 +129,21 @@ func printHeaderMemoryPlans(path string, expertParallel int) error {
 func formatConfigLine(cfg model.Config) string {
 	return fmt.Sprintf("config model_type=%s layers=%d hidden=%d experts=%d experts_used=%d expert_ffn_len=%d",
 		cfg.ModelType, cfg.NumLayers, cfg.HiddenSize, cfg.NumExperts, cfg.NumExpertsPerTok, cfg.MoEIntermediateSize)
+}
+
+// formatActiveSetLine renders the DERIVED Lane F (#3074) active-set: the routed-expert resident
+// band, the per-expert resident bytes, and — once experts_used (K) is read — the active
+// routed-expert bytes streamed per decoded token, the single-stream decode ceiling divisor the
+// GPU-server roofline needs MEASURED rather than estimated. It is header arithmetic (no serve, no
+// per-op trace); when K is unread (experts_used=0) it prints the band + per-expert and flags the
+// per-token bytes PENDING(K) rather than guessing.
+func formatActiveSetLine(as ggufload.RoutedExpertActiveSet) string {
+	if as.ExpertsUsed <= 0 {
+		return fmt.Sprintf("active_set experts=%d routed_expert_resident=%.2fGiB per_expert=%.4fGiB experts_used=0 active_expert_bytes_per_tok=PENDING(K)",
+			as.NumExperts, bytesGiB(as.RoutedResident), bytesGiB(as.PerExpert))
+	}
+	return fmt.Sprintf("active_set experts=%d routed_expert_resident=%.2fGiB per_expert=%.4fGiB experts_used=%d active_expert_bytes_per_tok=%.4fGiB (DERIVED header arithmetic; box-side per-op trace is the witness)",
+		as.NumExperts, bytesGiB(as.RoutedResident), bytesGiB(as.PerExpert), as.ExpertsUsed, bytesGiB(as.ActivePerToken))
 }
 
 func printMemoryPlan(name string, plan compute.MemoryPlan) {

@@ -182,6 +182,73 @@ func scaleExpertBandBytes(total uint64, band, experts int) (uint64, error) {
 	return out + add, nil
 }
 
+// RoutedExpertActiveSet is the header-only MoE active-set Lane F (#3074) pins from the witnessed
+// GGUF header: the resident bytes of ALL routed experts (RoutedResident — the 51.80 GiB band for
+// GLM-5.2 UD-Q4_K_M across 256 experts), the per-expert resident bytes (PerExpert), and — given
+// the header's expert_used_count K (ExpertsUsed) — the routed-expert bytes streamed per decoded
+// token (ActivePerToken = K × PerExpert). It is DERIVED header arithmetic, not the box-side
+// per-op byte trace; it is the single-stream decode ceiling divisor once K is read.
+type RoutedExpertActiveSet struct {
+	NumExperts     int   // expert_count
+	ExpertsUsed    int   // expert_used_count (K); 0 when the header omits it (active bytes pending)
+	RoutedResident int64 // sum of every batched routed-expert tensor payload (all experts, unsharded)
+	PerExpert      int64 // RoutedResident / NumExperts
+	ActivePerToken int64 // K × PerExpert (0 when K is unread)
+}
+
+// RoutedExpertActiveSet derives the Lane F (#3074) active-set from the header alone — it reads NO
+// tensor payloads. It sums the batched routed-expert tensor bytes straight from the parsed header
+// directory (the same tensors EstimateExpertParallelLoadMemoryPlan shards), divides by expert_count
+// for per-expert resident bytes, and multiplies by expert_used_count (K) for the routed stream a
+// single decoded token pulls: K experts fire per MoE layer and the summed band already spans every
+// MoE layer, so K×(band/experts) is the whole active routed-expert stream. The result is the
+// witnessed-header derivation the GPU-server roofline needs in place of its ESTIMATED active-bytes;
+// the live per-op trace remains the separate box-side witness. ok=false for a model with no batched
+// expert axis (non-MoE, or an arch that does not carry routed experts as batched GGUF blobs).
+func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, error) {
+	cfg, err := s.File.Config()
+	if err != nil {
+		return RoutedExpertActiveSet{}, false, err
+	}
+	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) || cfg.NumExperts <= 0 {
+		return RoutedExpertActiveSet{}, false, nil
+	}
+	var routed uint64
+	for _, info := range s.File.Tensors {
+		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); !ok {
+			continue
+		}
+		n, err := tensorPayloadBytes(info)
+		if err != nil {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set tensor %s: %w", info.Name, err)
+		}
+		if routed > math.MaxUint64-n {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: routed-expert byte total overflows uint64")
+		}
+		routed += n
+	}
+	if routed == 0 {
+		return RoutedExpertActiveSet{}, false, nil
+	}
+	if routed > math.MaxInt64 {
+		return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: routed-expert bytes %d overflow int64", routed)
+	}
+	perExpert := int64(routed) / int64(cfg.NumExperts)
+	as := RoutedExpertActiveSet{
+		NumExperts:     cfg.NumExperts,
+		ExpertsUsed:    cfg.NumExpertsPerTok,
+		RoutedResident: int64(routed),
+		PerExpert:      perExpert,
+	}
+	if cfg.NumExpertsPerTok > 0 {
+		if perExpert != 0 && int64(cfg.NumExpertsPerTok) > math.MaxInt64/perExpert {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-bytes/token overflows int64")
+		}
+		as.ActivePerToken = perExpert * int64(cfg.NumExpertsPerTok)
+	}
+	return as, true, nil
+}
+
 // EstimateF32LoadMemoryPlan is the classed form of EstimateF32LoadBytes for the f32-resident
 // device load path.
 func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
