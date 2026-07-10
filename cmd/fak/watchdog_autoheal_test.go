@@ -200,6 +200,156 @@ func TestWatchdogHealFreshExhaustedStreakStillGivesUp(t *testing.T) {
 	}
 }
 
+// TestWatchdogHealProbeFreshnessGateSkipsColdProbe is the witness for #3155 fix (1):
+// a watchdog confirmed alive within ProbeTTL must NOT be cold-probed again (the
+// probe spawns a powershell.exe; on a resume wave that is the host-wedging burst).
+// It counts probe invocations directly: a fresh LastProbeAliveUnixNano yields a
+// noop/WATCHDOG_PROBE_FRESH with the probe never called, while a stale timestamp
+// (or ProbeTTL=0) falls through and probes as before.
+func TestWatchdogHealProbeFreshnessGateSkipsColdProbe(t *testing.T) {
+	now := time.Unix(6000, 0).UTC()
+	const probeTTL = 60 * time.Second
+
+	newSpec := func(probes *int) watchdogAutohealSpec {
+		return watchdogAutohealSpec{
+			watchdogService: watchdogService{ID: "resume", Manager: "taskscheduler", Unit: "FleetResumeWatchdog"},
+			Probe: func(context.Context) (watchdogProbe, error) {
+				*probes++
+				return watchdogProbe{Installed: true, Alive: true, Detail: "state=Ready"}, nil
+			},
+			Restart: func(context.Context) error { return nil },
+		}
+	}
+
+	// Fresh: confirmed alive 30s ago, inside the 60s TTL → probe suppressed.
+	t.Run("fresh alive suppresses probe", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeWatchdogHealState(dir, watchdogHealState{
+			Schema:                 watchdogAutohealSchema,
+			ID:                     "resume",
+			LastProbeAliveUnixNano: now.Add(-30 * time.Second).UnixNano(),
+		}); err != nil {
+			t.Fatalf("seed state: %v", err)
+		}
+		probes := 0
+		local := now
+		opts := testWatchdogAutohealOptions(dir, &local, newSpec(&probes))
+		opts.ProbeTTL = probeTTL
+
+		got := runWatchdogAutoheal(context.Background(), opts)
+		if probes != 0 {
+			t.Fatalf("probe calls = %d, want 0 (fresh alive should skip the cold probe)", probes)
+		}
+		if len(got) != 1 || got[0].Action != "noop" || got[0].Reason != watchdogReasonProbeFresh {
+			t.Fatalf("heal = %+v, want noop/%s", got, watchdogReasonProbeFresh)
+		}
+	})
+
+	// Stale: confirmed alive 90s ago, past the 60s TTL → probe fires.
+	t.Run("stale alive falls through to probe", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeWatchdogHealState(dir, watchdogHealState{
+			Schema:                 watchdogAutohealSchema,
+			ID:                     "resume",
+			LastProbeAliveUnixNano: now.Add(-90 * time.Second).UnixNano(),
+		}); err != nil {
+			t.Fatalf("seed state: %v", err)
+		}
+		probes := 0
+		local := now
+		opts := testWatchdogAutohealOptions(dir, &local, newSpec(&probes))
+		opts.ProbeTTL = probeTTL
+
+		got := runWatchdogAutoheal(context.Background(), opts)
+		if probes != 1 {
+			t.Fatalf("probe calls = %d, want 1 (stale alive must re-probe)", probes)
+		}
+		if len(got) != 1 || got[0].Action != "noop" || got[0].Reason != watchdogReasonAlive {
+			t.Fatalf("heal = %+v, want noop/%s", got, watchdogReasonAlive)
+		}
+	})
+
+	// ProbeTTL=0 (the direct-unit-test default) disables the gate: probe always fires
+	// even with a fresh timestamp on record.
+	t.Run("zero TTL disables the gate", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeWatchdogHealState(dir, watchdogHealState{
+			Schema:                 watchdogAutohealSchema,
+			ID:                     "resume",
+			LastProbeAliveUnixNano: now.UnixNano(),
+		}); err != nil {
+			t.Fatalf("seed state: %v", err)
+		}
+		probes := 0
+		local := now
+		opts := testWatchdogAutohealOptions(dir, &local, newSpec(&probes))
+		// opts.ProbeTTL left at 0.
+
+		got := runWatchdogAutoheal(context.Background(), opts)
+		if probes != 1 {
+			t.Fatalf("probe calls = %d, want 1 (zero ProbeTTL disables the freshness gate)", probes)
+		}
+		if len(got) != 1 || got[0].Reason != watchdogReasonAlive {
+			t.Fatalf("heal = %+v, want noop/%s", got, watchdogReasonAlive)
+		}
+	})
+}
+
+// TestWatchdogAutohealTickAllowedDebouncesWave is the witness for #3155 fix (2):
+// the host-global tick debounce. The watchdogs are host-global scheduled tasks, so
+// ONE process healing them per window covers every concurrent guarded session. A
+// resume/restart wave of N sessions each reaches watchdogAutohealOnStart; without
+// this gate that is the 4xN concurrent cold-probe burst that wedges the host. The
+// winner takes a lease it never releases, so every sibling starting within the TTL
+// sees the fresh lease and skips the tick — until the lease expires, when healing
+// resumes.
+func TestWatchdogAutohealTickAllowedDebouncesWave(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(9000, 0).UTC()
+	const ttl = 60 * time.Second
+
+	// The first starter in the window wins the tick.
+	if !watchdogAutohealTickAllowed(dir, now, ttl) {
+		t.Fatalf("first starter must be allowed to run the tick")
+	}
+	// Siblings in the same wave (within the TTL) skip — the whole point: one cold-probe
+	// pass covers the wave instead of 4xN.
+	if watchdogAutohealTickAllowed(dir, now.Add(1*time.Second), ttl) {
+		t.Fatalf("a sibling starting within the TTL must skip the tick")
+	}
+	if watchdogAutohealTickAllowed(dir, now.Add(ttl-time.Nanosecond), ttl) {
+		t.Fatalf("a sibling just inside the TTL must still skip the tick")
+	}
+	// Once the lease expires, healing resumes: the next starter steals the stale lease
+	// and runs the tick.
+	if !watchdogAutohealTickAllowed(dir, now.Add(ttl+time.Second), ttl) {
+		t.Fatalf("after the TTL elapses a fresh starter must run the tick again")
+	}
+	// ...and that fresh winner re-arms the debounce for its own window.
+	if watchdogAutohealTickAllowed(dir, now.Add(ttl+2*time.Second), ttl) {
+		t.Fatalf("the post-expiry winner must re-arm the debounce")
+	}
+}
+
+// TestWatchdogAutohealTickAllowedFailsOpen pins the fail-open rungs: with no state
+// dir to lease under, or a non-positive TTL, the debounce cannot be evaluated — and
+// an unbraked heal beats a silently-skipped one, so the tick is always allowed.
+func TestWatchdogAutohealTickAllowedFailsOpen(t *testing.T) {
+	now := time.Unix(9000, 0).UTC()
+	if !watchdogAutohealTickAllowed("", now, 60*time.Second) {
+		t.Fatalf("an empty state dir must fail open (tick allowed)")
+	}
+	if !watchdogAutohealTickAllowed("   ", now, 60*time.Second) {
+		t.Fatalf("a blank state dir must fail open (tick allowed)")
+	}
+	if !watchdogAutohealTickAllowed(t.TempDir(), now, 0) {
+		t.Fatalf("a zero TTL must fail open (tick allowed)")
+	}
+	if !watchdogAutohealTickAllowed(t.TempDir(), now, -time.Second) {
+		t.Fatalf("a negative TTL must fail open (tick allowed)")
+	}
+}
+
 func TestWatchdogAutohealWarnAndOffModes(t *testing.T) {
 	now := time.Unix(4000, 0).UTC()
 	dir := t.TempDir()

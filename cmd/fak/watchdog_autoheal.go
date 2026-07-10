@@ -22,6 +22,7 @@ const watchdogAutohealSchema = "fak.watchdog-autoheal.v1"
 
 const (
 	watchdogReasonAlive        = "WATCHDOG_ALREADY_ALIVE"
+	watchdogReasonProbeFresh   = "WATCHDOG_PROBE_FRESH"
 	watchdogReasonNotInstalled = "WATCHDOG_NOT_INSTALLED"
 	watchdogReasonProbeFailed  = "WATCHDOG_PROBE_FAILED"
 	watchdogReasonLeaseHeld    = "WATCHDOG_HEAL_IN_FLIGHT"
@@ -40,6 +41,21 @@ const (
 	watchdogAutohealOn watchdogAutohealMode = iota
 	watchdogAutohealWarn
 	watchdogAutohealOff
+)
+
+const (
+	// watchdogAutohealTickID / TTL back the host-global tick debounce (#3155):
+	// the watchdogs are host-global scheduled tasks, so ONE process healing them
+	// per window covers every concurrent guarded session. A resume/restart wave
+	// of N sessions must not each fire a full autoheal tick (the 4×N cold-probe
+	// burst). watchdogAutohealTickAllowed takes an atomic lease under this id that
+	// it never releases, so siblings starting within the TTL skip the tick.
+	watchdogAutohealTickID  = "autoheal-tick"
+	watchdogAutohealTickTTL = 60 * time.Second
+	// watchdogAutohealDefaultProbeTTL suppresses the per-spec cold probe when the
+	// watchdog was confirmed alive this recently: a task Ready 60s ago is Ready
+	// now, so re-probing on every start is pure churn.
+	watchdogAutohealDefaultProbeTTL = 60 * time.Second
 )
 
 type watchdogService struct {
@@ -62,14 +78,18 @@ type watchdogAutohealSpec struct {
 }
 
 type watchdogAutohealOptions struct {
-	Verb          string
-	Mode          watchdogAutohealMode
-	Specs         []watchdogAutohealSpec
-	StateDir      string
-	Clock         func() time.Time
-	Sleep         func(time.Duration)
-	LeaseTTL      time.Duration
-	Debounce      time.Duration
+	Verb     string
+	Mode     watchdogAutohealMode
+	Specs    []watchdogAutohealSpec
+	StateDir string
+	Clock    func() time.Time
+	Sleep    func(time.Duration)
+	LeaseTTL time.Duration
+	Debounce time.Duration
+	// ProbeTTL suppresses a spec's cold probe when it was confirmed alive within
+	// this window (read from LastProbeAliveUnixNano). Zero disables the gate —
+	// every spec is probed — which is what direct unit tests want.
+	ProbeTTL      time.Duration
 	RestartPolicy watchdogRestartPolicy
 	// RestartReArm clears an EXHAUSTED restart streak once this long has elapsed
 	// since the last real failed restart, so a transient failure burst does not
@@ -121,6 +141,13 @@ func watchdogAutohealOnStart(verb string) {
 		return
 	}
 	opts := defaultWatchdogAutohealOptions(verb, mode)
+	// Host-global debounce: a resume/restart wave of N guarded sessions each
+	// reaches this init entrypoint; without a gate that is the 4×N concurrent
+	// cold-probe burst behind #3155. One process per window heals the host-global
+	// watchdogs for all of them, so skip the tick if a sibling ran it recently.
+	if !watchdogAutohealTickAllowed(opts.StateDir, opts.Clock().UTC(), watchdogAutohealTickTTL) {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -138,6 +165,25 @@ func watchdogAutohealOnStart(verb string) {
 			fmt.Fprintf(w, "%s\n", b)
 		}
 	}()
+}
+
+// watchdogAutohealTickAllowed is the host-global debounce that keeps a
+// resume/restart WAVE of N guarded sessions from each firing a full autoheal
+// tick (the 4×N cold-probe burst behind #3155). It takes an atomic O_EXCL lease
+// under watchdogAutohealTickID that it deliberately never releases: the winner
+// runs the tick, and every sibling that starts within ttl sees the fresh lease
+// and skips. A stale (expired) lease is stolen so healing resumes after the
+// window. Fail-open — an empty state dir, a zero ttl, or any lease error still
+// allows the tick, because an unbraked heal beats a silently-skipped one.
+func watchdogAutohealTickAllowed(stateDir string, now time.Time, ttl time.Duration) bool {
+	if strings.TrimSpace(stateDir) == "" || ttl <= 0 {
+		return true
+	}
+	_, ok, _, err := acquireWatchdogHealLease(stateDir, watchdogAutohealTickID, ttl, now)
+	if err != nil {
+		return true
+	}
+	return ok
 }
 
 type watchdogAutohealSummary struct {
@@ -266,6 +312,7 @@ func defaultWatchdogAutohealOptions(verb string, mode watchdogAutohealMode) watc
 		Sleep:    time.Sleep,
 		LeaseTTL: 2 * time.Minute,
 		Debounce: 10 * time.Minute,
+		ProbeTTL: watchdogAutohealDefaultProbeTTL,
 		RestartPolicy: watchdogRestartPolicy{
 			MaxAttempts: 3,
 			BaseDelay:   250 * time.Millisecond,
@@ -414,6 +461,29 @@ func healOneWatchdog(ctx context.Context, opts watchdogAutohealOptions, spec wat
 	}
 
 	now := opts.Clock().UTC()
+	st, _ := readWatchdogHealState(opts.StateDir, spec.ID)
+
+	// Probe-freshness gate (#3155): the cold probe spawns a full powershell.exe
+	// (Get-ScheduledTask, via probeScheduledTask). On a resume/restart wave those
+	// cold spawns multiply into the burst that wedges the host while a delayed
+	// usage snapshot still reads idle — the "locks up but usage looks fine"
+	// signature. A watchdog confirmed Ready within ProbeTTL is still Ready now, so
+	// skip the cold probe and noop. LastProbeAliveUnixNano is stamped only on an
+	// actual alive confirmation (resetWatchdogAttemptsOnAlive), so a dead or
+	// never-seen watchdog never trips the gate and is always probed. Zero ProbeTTL
+	// disables the gate — every spec is probed — which is what the direct unit
+	// tests want. This layers under the host-global tick lease
+	// (watchdogAutohealTickAllowed): the lease bounds how many processes run the
+	// tick per window; this bounds how many cold probes each surviving tick fires.
+	if opts.ProbeTTL > 0 {
+		if lastAlive := unixNanoTime(st.LastProbeAliveUnixNano); !lastAlive.IsZero() && now.Sub(lastAlive) < opts.ProbeTTL {
+			base.Action = "noop"
+			base.Reason = watchdogReasonProbeFresh
+			base.Summary = fmt.Sprintf("probe skipped: confirmed alive %s ago, inside probe TTL %s", now.Sub(lastAlive).Round(time.Millisecond), opts.ProbeTTL)
+			return base
+		}
+	}
+
 	probe, err := spec.Probe(ctx)
 	if err != nil {
 		base.Action = "probe_failed"
@@ -422,7 +492,6 @@ func healOneWatchdog(ctx context.Context, opts watchdogAutohealOptions, spec wat
 		base.Summary = probe.Detail
 		return base
 	}
-	st, _ := readWatchdogHealState(opts.StateDir, spec.ID)
 	if probe.Alive {
 		st = resetWatchdogAttemptsOnAlive(st, spec.ID, opts.RestartPolicy, now)
 		_ = writeWatchdogHealState(opts.StateDir, st)
