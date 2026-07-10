@@ -295,6 +295,14 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 // the run early ("" when the run walked every candidate).
 func dispatchGardenCandidates(stderr io.Writer, plan *gardenDispatchPlan, candidates []gardenbundle.WalkDecision, laneByIssue map[int]string, root, backend, ledgerPath string, maxWorkers int, live, recordLoop bool) string {
 	stopVerdict := ""
+	// Refresh the fleet registry (the ~40s tools/fleet_sessions.py scan) only on the
+	// FIRST tick of the drain, then reuse it -- the same cadence sweep (iter==0) and
+	// wave (i==0) already use. The scan's result is surfaced only as the payload's
+	// registry_refresh provenance; seat admission reads live pidfile leases and the
+	// on-disk roster directly, so re-scanning before every candidate added (N-1)x~40s
+	// of serial wall-clock to a garden run that walks EVERY budgeted candidate (up to
+	// ~13 min at the default --budget 20) without changing a single admission decision.
+	registryRefreshed := false
 	for _, cand := range candidates {
 		res := gardenDispatchCandidateResult{
 			ID:          cand.ID,
@@ -326,13 +334,16 @@ func dispatchGardenCandidates(stderr io.Writer, plan *gardenDispatchPlan, candid
 			TargetIssue:    cand.ID,
 			Backend:        backend,
 			Live:           live,
-			Refresh:        true,
+			Refresh:        !registryRefreshed,
 			CooldownMin:    dispatchtick.DefaultCooldownMinutes,
 			WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
 			SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
 			RecordLoop:     recordLoop,
 			LoopLedger:     ledgerPath,
 		}, stderr)
+		// The registry is refreshed inside evaluateDispatchTick at the top of the tick
+		// (before any error), so one Refresh:true tick is enough for the whole drain.
+		registryRefreshed = true
 		if tickErr != nil {
 			res.SkipReason = "tick-error"
 			res.Reason = tickErr.Error()
