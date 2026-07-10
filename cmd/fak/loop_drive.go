@@ -202,25 +202,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 			return 1
 		}
 		if !admit.Admit {
-			if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
-				LoopID:    spec.Loop,
-				Kind:      loopmgr.EventAdmit,
-				Source:    opt.Source,
-				Principal: opt.Principal,
-				Status:    loopmgr.StatusRefused,
-				Reason:    admit.Reason,
-				Summary:   admit.Summary,
-				EvidenceRefs: []loopmgr.EvidenceRef{
-					{Kind: "goal", Ref: goalPath},
-					{Kind: "policy", Ref: opt.PolicyPath},
-				},
-				Metrics: map[string]int64{"iterations": int64(iterations), "tokens_used": tokensUsed},
-			}); err != nil {
-				fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
-				return 1
-			}
-			fmt.Fprintf(stderr, "fak loop drive: refused by loop governor: %s %s\n", admit.Reason, admit.Summary)
-			return 3
+			return refuseLoopDriveAdmit(stderr, opt, goalPath, spec, admit, iterations, tokensUsed)
 		}
 
 		// Region admission (loop_drive_region.go): decide against the live
@@ -243,31 +225,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		baseEvidence := append(loopDriveEvidence(goalPath, spec.Witness, opt.Command, headBefore, ""), regionHold.evidence()...)
 		baseMetrics := loopDriveMetrics(turn, limit, planIndex, unchecked, tokensUsed, tokenLimit)
 
-		if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
-			LoopID:       spec.Loop,
-			RunID:        runID,
-			Kind:         loopmgr.EventFire,
-			Source:       opt.Source,
-			Principal:    opt.Principal,
-			Summary:      "loop drive turn requested",
-			EvidenceRefs: baseEvidence,
-			Metrics:      cloneLoopMetrics(baseMetrics),
-		}); err != nil {
-			fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
-			return 1
-		}
-		if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
-			LoopID:       spec.Loop,
-			RunID:        runID,
-			Kind:         loopmgr.EventAdmit,
-			Source:       opt.Source,
-			Principal:    opt.Principal,
-			Status:       loopmgr.StatusAdmitted,
-			Reason:       admit.Reason,
-			Summary:      admit.Summary,
-			EvidenceRefs: baseEvidence,
-			Metrics:      cloneLoopMetrics(baseMetrics),
-		}); err != nil {
+		if err := emitLoopDriveFireAndAdmit(opt, spec, admit, runID, baseEvidence, baseMetrics); err != nil {
 			fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
 			return 1
 		}
@@ -295,20 +253,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		endMetrics := loopDriveMetrics(turn, limit, planIndex, unchecked, tokensUsed, tokenLimit)
 		endMetrics["exit_code"] = int64(exitCode)
 		endMetrics["token_delta"] = tokenDelta
-		status := loopmgr.StatusClaimedDone
-		reason := "EXIT_0"
-		summary := fmt.Sprintf("child exited with code %d", exitCode)
-		if timedOut {
-			status = loopmgr.StatusCanceled
-			reason = loopdrive.ReasonBudgetSpent
-			summary = "deadline spent while child was running"
-		} else if exitCode != 0 {
-			status = loopmgr.StatusFailed
-			reason = "EXIT_NONZERO"
-		}
-		if err != nil && !timedOut {
-			summary = err.Error()
-		}
+		status, reason, summary := loopDriveEndStatus(exitCode, timedOut, err)
 		if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
 			LoopID:       spec.Loop,
 			RunID:        runID,
@@ -326,25 +271,8 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 				return 1
 			}
 		}
-		if timedOut {
-			scratch := fmt.Sprintf("NOT_YET %s turn=%d deadline spent", loopdrive.ReasonBudgetSpent, turn)
-			if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
-				fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
-				return 1
-			}
-			fmt.Fprintf(stderr, "fak loop drive: %s\n", scratch)
-			return 3
-		}
-		if exitCode != 0 {
-			scratch := fmt.Sprintf("NOT_YET turn=%d exit=%d plan[%d]=%s", turn, exitCode, planIndex+1, item.Text)
-			if err != nil {
-				scratch += " reason=" + err.Error()
-			}
-			if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
-				fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
-				return 1
-			}
-			return exitCode
+		if code, done := handleLoopDriveNonSuccess(stderr, goalPath, turn, exitCode, planIndex, item, timedOut, err); done {
+			return code
 		}
 
 		witness := loopDriveRunWitness(spec, headBefore, headAfter)
@@ -405,6 +333,108 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 			return 3
 		}
 	}
+}
+
+// refuseLoopDriveAdmit records the governor refusal for a turn the loop policy
+// declined and reports the exit code to return (1 if the ledger append fails,
+// otherwise 3 for the refusal).
+func refuseLoopDriveAdmit(stderr io.Writer, opt loopDriveOptions, goalPath string, spec loopdrive.Spec, admit loopmgr.Decision, iterations int, tokensUsed int64) int {
+	if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
+		LoopID:    spec.Loop,
+		Kind:      loopmgr.EventAdmit,
+		Source:    opt.Source,
+		Principal: opt.Principal,
+		Status:    loopmgr.StatusRefused,
+		Reason:    admit.Reason,
+		Summary:   admit.Summary,
+		EvidenceRefs: []loopmgr.EvidenceRef{
+			{Kind: "goal", Ref: goalPath},
+			{Kind: "policy", Ref: opt.PolicyPath},
+		},
+		Metrics: map[string]int64{"iterations": int64(iterations), "tokens_used": tokensUsed},
+	}); err != nil {
+		fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stderr, "fak loop drive: refused by loop governor: %s %s\n", admit.Reason, admit.Summary)
+	return 3
+}
+
+// emitLoopDriveFireAndAdmit appends the per-turn Fire and Admit ledger events.
+// It returns the first append error, letting the caller report it once.
+func emitLoopDriveFireAndAdmit(opt loopDriveOptions, spec loopdrive.Spec, admit loopmgr.Decision, runID string, baseEvidence []loopmgr.EvidenceRef, baseMetrics map[string]int64) error {
+	if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
+		LoopID:       spec.Loop,
+		RunID:        runID,
+		Kind:         loopmgr.EventFire,
+		Source:       opt.Source,
+		Principal:    opt.Principal,
+		Summary:      "loop drive turn requested",
+		EvidenceRefs: baseEvidence,
+		Metrics:      cloneLoopMetrics(baseMetrics),
+	}); err != nil {
+		return err
+	}
+	return appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
+		LoopID:       spec.Loop,
+		RunID:        runID,
+		Kind:         loopmgr.EventAdmit,
+		Source:       opt.Source,
+		Principal:    opt.Principal,
+		Status:       loopmgr.StatusAdmitted,
+		Reason:       admit.Reason,
+		Summary:      admit.Summary,
+		EvidenceRefs: baseEvidence,
+		Metrics:      cloneLoopMetrics(baseMetrics),
+	})
+}
+
+// loopDriveEndStatus maps a turn's exit code / timeout / wait error onto the
+// ledger End event's status, reason, and summary.
+func loopDriveEndStatus(exitCode int, timedOut bool, err error) (loopmgr.RunStatus, string, string) {
+	status := loopmgr.StatusClaimedDone
+	reason := "EXIT_0"
+	summary := fmt.Sprintf("child exited with code %d", exitCode)
+	if timedOut {
+		status = loopmgr.StatusCanceled
+		reason = loopdrive.ReasonBudgetSpent
+		summary = "deadline spent while child was running"
+	} else if exitCode != 0 {
+		status = loopmgr.StatusFailed
+		reason = "EXIT_NONZERO"
+	}
+	if err != nil && !timedOut {
+		summary = err.Error()
+	}
+	return status, reason, summary
+}
+
+// handleLoopDriveNonSuccess records the NOT_YET scratch line for a turn that
+// timed out or exited non-zero and reports the exit code to return. done is
+// false only when the turn neither timed out nor failed, leaving the caller to
+// proceed to the witness gate.
+func handleLoopDriveNonSuccess(stderr io.Writer, goalPath string, turn, exitCode, planIndex int, item loopdrive.PlanItem, timedOut bool, err error) (int, bool) {
+	if timedOut {
+		scratch := fmt.Sprintf("NOT_YET %s turn=%d deadline spent", loopdrive.ReasonBudgetSpent, turn)
+		if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
+			fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
+			return 1, true
+		}
+		fmt.Fprintf(stderr, "fak loop drive: %s\n", scratch)
+		return 3, true
+	}
+	if exitCode != 0 {
+		scratch := fmt.Sprintf("NOT_YET turn=%d exit=%d plan[%d]=%s", turn, exitCode, planIndex+1, item.Text)
+		if err != nil {
+			scratch += " reason=" + err.Error()
+		}
+		if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
+			fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
+			return 1, true
+		}
+		return exitCode, true
+	}
+	return 0, false
 }
 
 func stopLoopDriveBudget(stderr io.Writer, opt loopDriveOptions, goalPath string, spec loopdrive.Spec, decision loopdrive.Decision, iterations int, tokensUsed int64) int {
