@@ -85,6 +85,54 @@ func TestComputeVerdicts(t *testing.T) {
 	}
 }
 
+func TestClassifyWallClockAgePromotesOnQuietTrunk(t *testing.T) {
+	th := DefaultThresholds() // StaleDays=14, VeryStaleDays=45
+	// The ticket's scenario: a tag 13 committer-days behind a frozen HEAD (CommitsBehind
+	// and DaysBehind both below their stale bounds), but published 60 wall-clock days ago.
+	// The trunk-delta inputs alone read Fresh; the wall-clock publish age must promote it to
+	// VeryStale — this is the freeze bug #4024 fixes.
+	frozen := Facts{Reachable: true, LatestTag: "v1.2.3", CommitsBehind: 13, DaysBehind: 13}
+
+	// Without the age axis (AgeDays=0) the old behavior stands: Fresh.
+	if got := classify(frozen, th); got != Fresh {
+		t.Fatalf("frozen trunk with no age should still be Fresh (proves the regression), got %v", got)
+	}
+
+	// With 60 wall-clock days of publish age, the same frozen trunk is VeryStale and gates.
+	aged := frozen
+	aged.AgeDays = 60
+	p := Compute(aged, th, "/ws")
+	if p.Verdict != VeryStale.String() {
+		t.Fatalf("60d publish age must classify very_stale, got %q", p.Verdict)
+	}
+	if p.OK {
+		t.Fatalf("very_stale must gate (OK=false)")
+	}
+	if p.AgeDays != 60 {
+		t.Fatalf("Payload.AgeDays = %v, want 60 (surfaced for the control pane)", p.AgeDays)
+	}
+	if !strings.Contains(p.Reason, "published 60d ago") {
+		t.Fatalf("Reason should surface the wall-clock age, got %q", p.Reason)
+	}
+	if !strings.Contains(Render(p), "60 day(s) ago") {
+		t.Fatalf("Render should surface the wall-clock age, got %q", Render(p))
+	}
+
+	// 30 days of age (between StaleDays=14 and VeryStaleDays=45) on the same frozen trunk
+	// promotes only to Stale, not VeryStale — the age axis honors both bounds.
+	midaged := frozen
+	midaged.AgeDays = 30
+	if got := classify(midaged, th); got != Stale {
+		t.Fatalf("30d publish age should be Stale (between the day bounds), got %v", got)
+	}
+
+	// Age is immaterial when the tag is AT HEAD: nothing newer to publish stays Fresh.
+	atHead := Facts{Reachable: true, LatestTag: "v1.2.3", CommitsBehind: 0, AgeDays: 999}
+	if got := classify(atHead, th); got != Fresh {
+		t.Fatalf("tag at HEAD must stay Fresh regardless of age, got %v", got)
+	}
+}
+
 func TestComputeVersionAheadOfTagSwitchesAction(t *testing.T) {
 	th := DefaultThresholds()
 	// VERSION is a higher semver than the tag => a cut landed but was never tagged.
@@ -128,6 +176,10 @@ func TestDaysBetween(t *testing.T) {
 	}
 }
 
+// fixedClock returns a Clock that always reports epoch, so Gather's now-anchored AgeDays is
+// deterministic in the transcript-driven tests.
+func fixedClock(epoch int64) Clock { return func() int64 { return epoch } }
+
 // fakeRunner replays a canned git transcript keyed by the joined command line. A missing
 // key returns ok=false, exactly as a failed git invocation would.
 func fakeRunner(t *testing.T, responses map[string]string) Runner {
@@ -143,16 +195,19 @@ func TestGatherParsesGitFacts(t *testing.T) {
 	// The tag listing is intentionally noisy: a non-semver tag and a stable/ channel tag
 	// must be skipped; the newest vX.Y.Z is chosen. HEAD is 10 days after the tag.
 	const day = 86400
+	const tagEpoch = 1000000
 	run := fakeRunner(t, map[string]string{
 		"git --no-optional-locks rev-parse HEAD":                      "headsha000000000000",
 		"git --no-optional-locks tag --sort=-v:refname --merged HEAD": "nightly-2026\nstable/2026-06\nv0.34.0\nv0.33.0",
 		"git --no-optional-locks rev-list -n1 v0.34.0":                "tagsha1111111111111",
 		"git --no-optional-locks rev-list --count v0.34.0..HEAD":      "1594",
-		"git --no-optional-locks log -1 --format=%ct v0.34.0":         "1000000",
-		"git --no-optional-locks log -1 --format=%ct HEAD":            itoa64(1000000 + 10*day),
+		"git --no-optional-locks log -1 --format=%ct v0.34.0":         itoa64(tagEpoch),
+		"git --no-optional-locks log -1 --format=%ct HEAD":            itoa64(tagEpoch + 10*day),
 	})
 
-	f := Gather(context.Background(), run, "/repo", "0.34.0")
+	// HEAD is 10 days after the tag, but wall-clock now is 40 days after the tag: DaysBehind
+	// (the frozen trunk delta) is 10, while AgeDays (the real publish age) is 40.
+	f := Gather(context.Background(), run, fixedClock(tagEpoch+40*day), "/repo", "0.34.0")
 	if !f.Reachable {
 		t.Fatalf("expected Reachable=true")
 	}
@@ -168,6 +223,9 @@ func TestGatherParsesGitFacts(t *testing.T) {
 	if f.DaysBehind != 10 {
 		t.Fatalf("DaysBehind = %v, want 10", f.DaysBehind)
 	}
+	if f.AgeDays != 40 {
+		t.Fatalf("AgeDays = %v, want 40 (wall-clock age from the injected clock)", f.AgeDays)
+	}
 	if f.VersionFile != "0.34.0" {
 		t.Fatalf("VersionFile = %q, want 0.34.0", f.VersionFile)
 	}
@@ -175,7 +233,7 @@ func TestGatherParsesGitFacts(t *testing.T) {
 
 func TestGatherUnreadableHeadIsUnreachable(t *testing.T) {
 	run := fakeRunner(t, map[string]string{}) // every call fails
-	f := Gather(context.Background(), run, "/repo", "0.34.0")
+	f := Gather(context.Background(), run, fixedClock(5000), "/repo", "0.34.0")
 	if f.Reachable {
 		t.Fatalf("expected Reachable=false when HEAD is unreadable")
 	}
@@ -191,7 +249,7 @@ func TestGatherNoSemverTag(t *testing.T) {
 		"git --no-optional-locks rev-parse HEAD":                      "headsha",
 		"git --no-optional-locks tag --sort=-v:refname --merged HEAD": "nightly-2026\nstable/2026-06",
 	})
-	f := Gather(context.Background(), run, "/repo", "")
+	f := Gather(context.Background(), run, fixedClock(5000), "/repo", "")
 	if !f.Reachable {
 		t.Fatalf("HEAD readable so Reachable should be true")
 	}

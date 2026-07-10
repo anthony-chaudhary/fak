@@ -52,7 +52,7 @@ func runReleaseStaleness(stdout, stderr io.Writer, argv []string) int {
 	// ahead of the latest tag), which changes the next-action from "cut" to "tag".
 	version, _ := appversion.FromDir(root)
 
-	facts := releasestale.Gather(context.Background(), releasestale.RealRunner, root, version)
+	facts := releasestale.Gather(context.Background(), releasestale.RealRunner, releasestale.RealClock, root, version)
 	th := releasestale.Thresholds{
 		StaleCommits:     *staleCommits,
 		StaleDays:        *staleDays,

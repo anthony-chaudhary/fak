@@ -63,7 +63,7 @@ func CollectMaturity(root string) Maturity {
 func withPublishStaleness(root string, r Releases) Releases {
 	// versionFile is only used by releasestale to detect an untagged cut (not surfaced
 	// in the cadence line), so passing "" here is fine — the lag itself is git-derived.
-	f := releasestale.Gather(context.Background(), releasestale.RealRunner, root, "")
+	f := releasestale.Gather(context.Background(), releasestale.RealRunner, releasestale.RealClock, root, "")
 	p := releasestale.Compute(f, releasestale.DefaultThresholds(), root)
 	return WithPublishStaleness(r, p.CommitsBehind, p.DaysBehind, p.Verdict)
 }

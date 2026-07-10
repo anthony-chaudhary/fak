@@ -32,6 +32,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Schema is the stable envelope id for the JSON payload, matching the
@@ -105,7 +106,8 @@ type Facts struct {
 	TagSHA        string  // the commit the latest tag points at
 	HeadSHA       string  // current trunk tip
 	CommitsBehind int     // commits on HEAD not reachable from the latest tag (rev-list --count tag..HEAD)
-	DaysBehind    float64 // HEAD commit time minus tag commit time, in days (0 if unknown)
+	DaysBehind    float64 // HEAD commit time minus tag commit time, in days (0 if unknown) — the TRUNK delta, frozen on a quiet trunk
+	AgeDays       float64 // wall-clock age of the tag: now minus tag commit time, in days (0 if unknown) — the real @latest publish age, which keeps advancing on a quiet trunk
 	VersionFile   string  // the VERSION marker at the working tree (e.g. "0.34.0"; "" if absent)
 }
 
@@ -125,6 +127,7 @@ type Payload struct {
 	HeadSHA           string     `json:"head_sha"`
 	CommitsBehind     int        `json:"commits_behind"`
 	DaysBehind        float64    `json:"days_behind"`
+	AgeDays           float64    `json:"age_days"`
 	VersionFile       string     `json:"version_file"`
 	VersionAheadOfTag bool       `json:"version_ahead_of_tag"`
 	Thresholds        Thresholds `json:"thresholds"`
@@ -141,6 +144,7 @@ func Compute(f Facts, t Thresholds, workspace string) Payload {
 		HeadSHA:       f.HeadSHA,
 		CommitsBehind: f.CommitsBehind,
 		DaysBehind:    f.DaysBehind,
+		AgeDays:       f.AgeDays,
 		VersionFile:   f.VersionFile,
 		Thresholds:    t,
 	}
@@ -178,18 +182,23 @@ func Compute(f Facts, t Thresholds, workspace string) Payload {
 }
 
 // classify is the pure verdict rule. Order matters: very-stale dominates stale dominates
-// fresh, and either the commit OR the day bound can promote a level.
+// fresh, and ANY of the three day/commit inputs can promote a level: the commit count, the
+// trunk delta (DaysBehind), or the wall-clock publish age (AgeDays). AgeDays is the input
+// that keeps escalating on a quiet-but-unpublished trunk, where CommitsBehind and DaysBehind
+// both freeze — a tag whose HEAD stopped advancing still ages in calendar terms.
 func classify(f Facts, t Thresholds) Verdict {
 	if !f.Reachable || f.LatestTag == "" {
 		return Unknown
 	}
 	if f.CommitsBehind <= 0 {
+		// Nothing newer than the tag to publish — `@latest` already serves HEAD, so the
+		// wall-clock age of the tag is immaterial (you cannot cut a release with no new work).
 		return Fresh
 	}
-	if atLeast(f.CommitsBehind, t.VeryStaleCommits) || atLeastF(f.DaysBehind, t.VeryStaleDays) {
+	if atLeast(f.CommitsBehind, t.VeryStaleCommits) || atLeastF(f.DaysBehind, t.VeryStaleDays) || atLeastF(f.AgeDays, t.VeryStaleDays) {
 		return VeryStale
 	}
-	if atLeast(f.CommitsBehind, t.StaleCommits) || atLeastF(f.DaysBehind, t.StaleDays) {
+	if atLeast(f.CommitsBehind, t.StaleCommits) || atLeastF(f.DaysBehind, t.StaleDays) || atLeastF(f.AgeDays, t.StaleDays) {
 		return Stale
 	}
 	return Fresh
@@ -214,8 +223,8 @@ func lagReason(f Facts, v Verdict) string {
 		level = "very stale"
 	}
 	return "`@latest` is " + level + ": the latest published tag " + f.LatestTag + " lags HEAD by " +
-		strconv.Itoa(f.CommitsBehind) + " commit(s) / " + days(f.DaysBehind) +
-		"d — adopters running `go install ...@latest` get " + f.LatestTag + ", not the work on the trunk"
+		strconv.Itoa(f.CommitsBehind) + " commit(s) / " + days(f.DaysBehind) + "d (published " + days(f.AgeDays) +
+		"d ago) — adopters running `go install ...@latest` get " + f.LatestTag + ", not the work on the trunk"
 }
 
 // nextAction points at the real publish levers and distinguishes the two failure shapes:
@@ -226,7 +235,8 @@ func nextAction(p Payload) string {
 			" — a cut commit landed untagged; publish the tag (release_tag.py / /release step 6) so `@latest` advances"
 	}
 	return "cut a release (" + strconv.Itoa(p.CommitsBehind) + " commit(s) / " + days(p.DaysBehind) +
-		"d since " + p.LatestTag + "): run `/release`, or arm release-cadence.yml (workflow_dispatch dry_run=false / the RELEASE_CADENCE_AUTO opt-in) so `@latest` tracks HEAD"
+		"d since " + p.LatestTag + ", published " + days(p.AgeDays) +
+		"d ago): run `/release`, or arm release-cadence.yml (workflow_dispatch dry_run=false / the RELEASE_CADENCE_AUTO opt-in) so `@latest` tracks HEAD"
 }
 
 // versionAheadOfTag reports whether the VERSION marker is a higher semver than the latest
@@ -284,6 +294,7 @@ func Render(p Payload) string {
 		"release staleness — " + mark + " (" + p.Verdict + ")",
 		"  latest published tag: " + dashIfEmpty(p.LatestTag) + "   HEAD: " + shortSHA(p.HeadSHA),
 		"  behind: " + strconv.Itoa(p.CommitsBehind) + " commit(s) / " + days(p.DaysBehind) + " day(s)",
+		"  published: " + days(p.AgeDays) + " day(s) ago (wall-clock @latest age)",
 	}
 	if p.VersionAheadOfTag {
 		lines = append(lines, "  note: VERSION ("+p.VersionFile+") is ahead of the tag — a cut landed untagged")
@@ -329,11 +340,22 @@ func RealRunner(ctx context.Context, dir, name string, args ...string) (string, 
 	return strings.TrimSpace(string(out)), true
 }
 
+// Clock returns the current wall-clock time as epoch seconds. It is injected into Gather so
+// the now-anchored publish age (Facts.AgeDays) is deterministic in tests, mirroring the
+// Runner seam. A nil Clock falls back to RealClock inside Gather.
+type Clock func() int64
+
+// RealClock is the production Clock: the current wall-clock time in epoch seconds.
+func RealClock() int64 { return time.Now().Unix() }
+
 // Gather reads the publish-staleness Facts from the repo at root using git (and the
 // VERSION marker passed in by the caller, which already knows how to resolve it). It is
 // deliberately tolerant: any unreadable rung leaves its field zero/empty and Reachable
 // reflects whether the HEAD read itself worked.
-func Gather(ctx context.Context, run Runner, root, versionFile string) Facts {
+func Gather(ctx context.Context, run Runner, now Clock, root, versionFile string) Facts {
+	if now == nil {
+		now = RealClock
+	}
 	f := Facts{VersionFile: strings.TrimSpace(versionFile)}
 
 	head, ok := run(ctx, root, "git", "--no-optional-locks", "rev-parse", "HEAD")
@@ -356,7 +378,9 @@ func Gather(ctx context.Context, run Runner, root, versionFile string) Facts {
 			f.CommitsBehind = n
 		}
 	}
-	f.DaysBehind = daysBetween(commitEpoch(ctx, run, root, f.LatestTag), commitEpoch(ctx, run, root, "HEAD"))
+	tagEpoch := commitEpoch(ctx, run, root, f.LatestTag)
+	f.DaysBehind = daysBetween(tagEpoch, commitEpoch(ctx, run, root, "HEAD"))
+	f.AgeDays = ageDays(tagEpoch, now())
 	return f
 }
 
@@ -389,6 +413,13 @@ func commitEpoch(ctx context.Context, run Runner, root, ref string) int64 {
 	}
 	return n
 }
+
+// ageDays returns the wall-clock age of the tag in days: (now - tagEpoch)/86400, never
+// negative (clock skew clamps to 0), 0 when either epoch is unknown. Unlike daysBetween
+// (which measures the tag→HEAD commit-time delta and freezes when the trunk goes quiet),
+// this is the real elapsed publish age an `@latest` adopter incurs — it keeps advancing on
+// a quiet trunk. It reuses daysBetween's clamp+rounding, treating `now` as the far epoch.
+func ageDays(tagEpoch, nowEpoch int64) float64 { return daysBetween(tagEpoch, nowEpoch) }
 
 // daysBetween returns (head - tag) in days, never negative, 0 when either epoch is unknown.
 func daysBetween(tagEpoch, headEpoch int64) float64 {
