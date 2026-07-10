@@ -28,7 +28,63 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchsweep"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/seatpark"
 )
+
+// dispatchSweepLoopID is the loop identity the sweep front-door records its bounded
+// no-seat park-and-retry (#3523) under — distinct from garden-issue-dispatch, so the
+// two dispatch loops keep independent park tails. A no-seat wall is fleet-wide (an
+// account-seat cap, not a lane property), so ONE id per sweep front-door suffices.
+const dispatchSweepLoopID = "dispatch-issue-sweep"
+
+// deriveSweepSeatParkState folds the loop ledger's dispatch-sweep run-ends
+// (newest→oldest) into the consecutive no-seat park count + most-recent no-seat time
+// seatpark.Decide keys on. It DELIBERATELY MIRRORS deriveSeatParkState (garden_dispatch.go)
+// on a different loop id, reusing the SAME shared tokens (seatParkReasonNoSeat,
+// seatpark.StatusParked): a deferred run (SEAT_PARKED) is neutral in the tail; a no-seat
+// stop counts; anything else (progress, an exhausted park, another stop) ends the tail so
+// a fresh cycle starts from zero. Pure: ledger in, counts out.
+func deriveSweepSeatParkState(events []loopmgr.Event) (parks int, lastParkUnix int64) {
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.LoopID != dispatchSweepLoopID || ev.Kind != loopmgr.EventEnd {
+			continue
+		}
+		switch ev.Reason {
+		case string(seatpark.StatusParked):
+			continue // a chosen wait — transparent in the park tail
+		case seatParkReasonNoSeat:
+			parks++
+			if lastParkUnix == 0 {
+				lastParkUnix = ev.TSUnixNano / 1_000_000_000
+			}
+		default:
+			return parks, lastParkUnix // tail boundary: progress, exhaustion, or another stop
+		}
+	}
+	return parks, lastParkUnix
+}
+
+// recordSweepSeatPark appends a dispatch-sweep run-end to the loop ledger carrying the
+// park-tail Reason token deriveSweepSeatParkState reads back: seatParkReasonNoSeat when a
+// LIVE sweep stopped on a seat refuse, the seatpark.Status string when this run chose to
+// park/exhaust, or "" otherwise (which ends the tail). Best-effort; a ledger write fault
+// never fails the sweep.
+func recordSweepSeatPark(ledgerPath, reason, summary string) {
+	if ledgerPath == "" {
+		return
+	}
+	_, _ = loopmgr.Append(ledgerPath, loopmgr.Event{
+		LoopID:  dispatchSweepLoopID,
+		RunID:   firstNonEmpty(os.Getenv("FAK_LOOP_RUN_ID"), fmt.Sprintf("dispatch-sweep-%d", time.Now().UnixNano())),
+		Kind:    loopmgr.EventEnd,
+		Status:  loopmgr.StatusWitnessedDone,
+		Source:  "fak dispatch sweep",
+		Reason:  reason,
+		Summary: summary,
+	})
+}
 
 // runDispatchSweep is the testable core of `fak dispatch sweep`: it returns the process exit
 // code (0 ok, 1 a runtime/tooling fault, 2 a usage error) and takes its streams explicitly.
@@ -43,7 +99,8 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the step-budget pick")
 	settleS := fs.Float64("settle-s", 8.0, "seconds to wait after a live spawn before the next tick (lets the worker's de-dup log appear)")
 	tickTimeoutS := fs.Int("tick-timeout-s", 300, "per-tick subprocess timeout in seconds")
-	noLedger := fs.Bool("no-loop-ledger", false, "pass --no-loop-ledger to each tick (hermetic probes)")
+	noLedger := fs.Bool("no-loop-ledger", false, "pass --no-loop-ledger to each tick AND skip the sweep-level no-seat park ledger (hermetic probes)")
+	ledger := fs.String("ledger", "", "loop JSONL ledger path for the bounded no-seat park-and-retry (#3523); default: the loop ledger")
 	live := fs.Bool("live", false, "actually spawn workers and drain the queue")
 	asJSON := fs.Bool("json", false, "emit the raw sweep Record JSON instead of the human card")
 	if !parseFlags(fs, argv) {
@@ -96,7 +153,41 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// Gate 1.5: bounded no-seat park-and-retry (#3523). When recent LIVE sweeps stopped on a
+	// seat refuse (REFUSE_NO_ACCOUNT / WEEKLY_CAPPED — no free Claude seat), re-invoking the
+	// sweep just bursts against a wall only a peer finishing can move, and the burst's
+	// preflight load can turn a clean seat-refuse into a REFUSE_INSPECT. So park until a
+	// bounded backoff window elapses, then retry, up to a bounded budget — the durable loop
+	// ledger IS the park-state store. A parked invocation returns HERE, before RunSweep runs a
+	// single tick, so it adds no preflight load. Only the LIVE path parks (dry-run inspects).
+	ledgerPath := firstNonEmpty(*ledger, defaultLoopLedger())
+	if *live && !*noLedger {
+		events, _ := loopmgr.Load(ledgerPath)
+		parks, lastPark := deriveSweepSeatParkState(events)
+		seat := seatpark.Decide(seatpark.Input{
+			TaskID:       dispatchSweepLoopID,
+			Parks:        parks,
+			LastParkUnix: lastPark,
+			NowUnix:      time.Now().Unix(),
+		})
+		if !seat.ShouldAttempt() {
+			recordSweepSeatPark(ledgerPath, string(seat.Status), seat.Detail)
+			fmt.Fprintf(stdout, "issue-dispatch-sweep: %s — %s\n", seat.Status, seat.Detail)
+			return 0
+		}
+	}
+
 	rec := dispatchsweep.RunSweep(cfg, tick, settle)
+
+	// Record this LIVE sweep's outcome in the park tail: a seat-refuse stop counts toward the
+	// bounded budget; any other stop ends the tail so the next cycle starts fresh (#3523).
+	if *live && !*noLedger {
+		seatReason := ""
+		if gardenDispatchSeatRefuses[rec.StopVerdict] {
+			seatReason = seatParkReasonNoSeat
+		}
+		recordSweepSeatPark(ledgerPath, seatReason, fmt.Sprintf("dispatch sweep %s: %s", rec.StopVerdict, rec.StopReason))
+	}
 
 	if *asJSON {
 		b, err := json.MarshalIndent(rec, "", "  ")

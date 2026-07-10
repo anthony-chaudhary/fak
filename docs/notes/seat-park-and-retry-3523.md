@@ -1,10 +1,13 @@
 # Bounded park-and-retry for the no-seat transient (#3523)
 
-**Status:** kernel SHIPPED in `internal/seatpark` (13 tests) AND **wired live** into the
-`fak garden dispatch` bridge (`cmd/fak/garden_dispatch.go`), diff-witnessed end-to-end by
-`cmd/fak/garden_dispatch_seatpark_test.go` (9 tests, incl. a full `runGardenDispatch`
-park proof). The `dispatch tick`/`dispatch sweep` core path is the one remaining wiring
-site (its file was peer-dirty at author time) — see Open below.
+**Status:** kernel SHIPPED in `internal/seatpark` (13 tests) AND **wired live into BOTH
+dispatch front-doors** — the `fak garden dispatch` bridge (`cmd/fak/garden_dispatch.go`,
+`garden_dispatch_seatpark_test.go`, 9 tests) AND the `fak dispatch sweep` queue-drain
+front-door (`cmd/fak/dispatch_sweep.go`, `dispatch_sweep_seatpark_test.go`, incl. a full
+`runDispatchSweep` park + exhaust proof). Both derive the no-seat park tail from the same
+durable loop ledger and park BEFORE running a tick. The only site left is the raw
+`internal/dispatchtick` preflight where `REFUSE_NO_ACCOUNT` is *produced* (peer-dirty at
+author time) — but every loop that *consumes* it now parks; see Open.
 
 ## Wired live (garden dispatch bridge)
 
@@ -66,13 +69,16 @@ unbounded busy-retry with a bounded exponential backoff:
 
 ## Open (honestly not done here)
 
-- **`dispatch tick` / `dispatch sweep` core path.** The garden-dispatch bridge is wired;
-  the higher-volume `internal/dispatchtick` sweep/loop (`dispatch_tick_preflight.go`,
-  where `REFUSE_NO_ACCOUNT` is produced) is the other place the park-and-retry belongs.
-  That file was peer-dirty at author time (another agent's uncommitted change), so wiring
-  it there would sweep their work into a by-path commit — deferred until it settles. The
-  same `deriveSeatParkState` / `seatpark.Decide` pair applies; only the ledger/loop id
-  differ. (Park-state is now the durable loop ledger, not a new store.)
+- **`fak dispatch sweep` front-door — NOW WIRED.** `cmd/fak/dispatch_sweep.go` gained the
+  same Gate-1.5 park (its own `dispatch-issue-sweep` loop id + `deriveSweepSeatParkState`, a
+  deliberate mirror of the garden fold on a different loop id), so the primary queue-drain
+  loop now parks instead of bursting. The only site still open is the RAW
+  `internal/dispatchtick` preflight where `REFUSE_NO_ACCOUNT` is *produced*
+  (`dispatch_tick_preflight.go`, peer-dirty at author time — a by-path commit there would
+  sweep the peer's adjacent seat-refuse-transparency work). Every dispatch loop that
+  *consumes* the verdict (garden + sweep) already parks; adding it at the production site is
+  a belt-and-suspenders refinement, not a missing behavior, and drops in once that file
+  settles.
 - **Headroom-derived park duration.** The issue prefers the park window be derived from
   the live `fak accounts headroom` / cooldown signal (park until a seat is *projected* to
   free) rather than the fixed geometric backoff. `accounts_headroom.go` was peer-dirty;
