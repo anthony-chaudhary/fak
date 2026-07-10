@@ -367,6 +367,8 @@ func TestAdjudicateSurfacesRouteRemedy(t *testing.T) {
 	}{
 		{"amend names the fak commit route", "git commit --amend", "fak commit --path"},
 		{"amend names the pathspec form", "git commit --amend", "git commit -- <paths>"},
+		{"message typo is explicitly left intact", "git commit --amend", "leave that message intact"},
+		{"future subject route names preview", "git commit --amend", "fak commit --preview"},
 		{"commit -a names explicit-path commit", "git commit -a -m x", "git commit -- <paths>"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

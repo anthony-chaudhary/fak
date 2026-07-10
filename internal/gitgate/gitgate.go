@@ -125,7 +125,7 @@ var defaultHazards = []hazard{
 	// Do not delete a remote ref from an agent.
 	{sub: "push", long: "--delete", short: 'd', law: "remote-ref delete refused: do not delete a remote branch from an agent (push --delete/-d)."},
 	// Never amend in a shared tree — HEAD moves between peers (CLAUDE.md).
-	{sub: "commit", long: "--amend", law: neverAmendSharedLaw + " amend refused: HEAD moves between peers; make a NEW commit instead."},
+	{sub: "commit", long: "--amend", law: neverAmendSharedLaw + " amend refused: HEAD moves between peers. If the existing commit has only a message typo, leave that message intact; shared history has no compliant rewrite path. Make a NEW path-scoped commit only for new content, and validate future subjects first with `fak commit --preview`."},
 	{sub: "commit", long: "--no-verify", short: 'n', law: "skip-hooks refused: never bypass the commit guards (commit --no-verify/-n). Commit with the hooks enabled."},
 	{sub: "commit", long: "--no-gpg-sign", law: "skip-signing refused: do not disable commit signing (commit --no-gpg-sign)."},
 	// Commit by explicit path — never sweep a peer's files in a shared tree (AGENTS.md).
