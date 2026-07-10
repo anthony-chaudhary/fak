@@ -174,15 +174,16 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	p.SetTotal(len(s.File.Tensors)) // arm the progress reporter (no-op on nil / unset Progress)
 	for _, info := range s.File.Tensors {
 		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
+		// Drop the MTP ("nextn") speculative head + any vision tower the text forward never
+		// reads (llama.cpp ignores them too), before canonical mapping would reject them, for
+		// every arch that ships them as sidecars (GLM-5.2, DeepSeek, Qwen3.5/3.6). The
+		// materializing loader keys on the UNGATED union: even with model.RetainMTP set the GGUF
+		// MTP head has no canonical slot to materialize into yet (wiring is a later slice), so it
+		// is dropped from materialization here while the fit estimators still count its bytes.
+		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+			continue
+		}
 		if archUsesMLAMoELayout(cfg.ModelType) {
-			// Drop the MTP ("nextn") speculative head + any vision tower the text forward never
-			// reads (llama.cpp ignores them too), before canonical mapping would reject them. The
-			// materializing loader keys on the UNGATED union: even with model.RetainMTP set the GGUF
-			// MTP head has no canonical slot to materialize into yet (wiring is a later slice), so it
-			// is dropped from materialization here while the fit estimators still count its bytes.
-			if glmMoeDsaMTPOrVisionTensor(info.Name) {
-				continue
-			}
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 				shape, data, err := s.dequantGGUFShapeF32(info)
 				if err != nil {
@@ -327,15 +328,16 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 	tensors := make([]model.NamedTensorF32, 0, len(s.File.Tensors))
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	for _, info := range s.File.Tensors {
+		// Drop the MTP ("nextn") head + any vision tower the text forward never reads, for every
+		// arch that ships them as sidecars. Ungated union: the MTP head has no canonical slot to
+		// materialize into yet even under model.RetainMTP, so drop it from materialization while
+		// the estimators count its bytes.
+		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+			continue
+		}
 		// GGUF batched routed experts: one [E,out,in] blob splits 1->E into per-expert
 		// canonical tensors. Handled before CanonicalTensorNameArch (which leaves them unmapped).
 		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
-			// Drop the MTP ("nextn") head + any vision tower the text forward never reads. Ungated
-			// union: the MTP head has no canonical slot to materialize into yet even under
-			// model.RetainMTP, so drop it from materialization while the estimators count its bytes.
-			if glmMoeDsaMTPOrVisionTensorForType(cfg.ModelType, info.Name) {
-				continue
-			}
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, data, err := s.shapeAndTensorF32(info)
 				if err != nil {

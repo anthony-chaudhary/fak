@@ -1,6 +1,11 @@
 package ggufload
 
-import "testing"
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // synthQwen35Meta is the minimal qwen35 metadata (*File).Config() accepts, shaped like the
 // real Qwen3.6-27B Q4_K_M scaled down: block_count counts the trailing NextN/MTP draft
@@ -83,5 +88,62 @@ func TestQwen35NextNTensorsSkippedFromLoadAndClassify(t *testing.T) {
 	// A plain dense arch without the sidecar contract keeps the strict mapping error.
 	if archShipsMTPOrVisionSidecar("llama") {
 		t.Fatalf("archShipsMTPOrVisionSidecar(llama)=true, want false")
+	}
+}
+
+// writeQwen35NextNFixture builds a minimal on-disk qwen35 GGUF whose ONLY tensor is the
+// trailing NextN/MTP glue tensor the real Qwen3.6-27B ships — the exact tensor the
+// witnessed load rejected. Metadata mirrors synthQwen35Meta plus general.alignment.
+func writeQwen35NextNFixture() []byte {
+	const align = 32
+	payload := f32Payload(0.25, -0.75)
+	var b bytes.Buffer
+	writeMinimalHeader(&b, 1, 11)
+	writeKVUint32(&b, "general.alignment", align)
+	writeKVString(&b, "general.architecture", "qwen35")
+	writeKVUint64(&b, "qwen35.context_length", 16)
+	writeKVUint64(&b, "qwen35.embedding_length", 32)
+	writeKVUint64(&b, "qwen35.block_count", 5)
+	writeKVUint64(&b, "qwen35.feed_forward_length", 64)
+	writeKVUint64(&b, "qwen35.attention.head_count", 4)
+	writeKVUint64(&b, "qwen35.attention.head_count_kv", 2)
+	writeKVFloat32(&b, "qwen35.attention.layer_norm_rms_epsilon", 1e-5)
+	writeKVUint64(&b, "qwen35.full_attention_interval", 4)
+	writeKVUint64(&b, "qwen35.nextn_predict_layers", 1)
+	writeTensorInfoForTest(&b, "blk.64.nextn.eh_proj.weight", []uint64{2}, TensorF32, 0)
+	padToAlignment(&b, align)
+	b.Write(payload)
+	return b.Bytes()
+}
+
+// TestQwen35NextNTensorDroppedByWeightSource pins the LIVE loader loop the first fix slice
+// missed (witnessed q36safe5, 2026-07-10): gguf_weightsource's materializing loops gated the
+// .nextn. drop on the MLA+MoE family, so a real qwen35 checkpoint still died on
+// "no canonical mapping for tensor blk.64.nextn.eh_proj.weight" AFTER the classifier and the
+// q4k computeFn were fixed. A qwen35 file whose only tensor is the NextN glue tensor must
+// materialize cleanly to zero tensors — not reject the checkpoint.
+func TestQwen35NextNTensorDroppedByWeightSource(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "qwen35_nextn.gguf")
+	if err := os.WriteFile(p, writeQwen35NextNFixture(), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ws, err := OpenWeights(p)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+	cfg, tensors, err := ws.F32Tensors()
+	if err != nil {
+		t.Fatalf("F32Tensors must drop the qwen35 NextN sidecar, not reject the checkpoint: %v", err)
+	}
+	if cfg.ModelType != "qwen35" {
+		t.Fatalf("ModelType=%q, want qwen35", cfg.ModelType)
+	}
+	if len(tensors) != 0 {
+		names := make([]string, 0, len(tensors))
+		for _, tt := range tensors {
+			names = append(names, tt.Name)
+		}
+		t.Fatalf("tensors=%v, want none (the NextN glue tensor must be dropped)", names)
 	}
 }
