@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -69,6 +70,43 @@ func TestAssumeListEnumeratesRegistry(t *testing.T) {
 	}
 	if !strings.Contains(s, string(assumecheck.WitnessWired)) || !strings.Contains(s, string(assumecheck.WitnessDeclaredOnly)) {
 		t.Fatalf("list does not distinguish wired from declared-only wiring:\n%s", s)
+	}
+}
+
+// TestAssumeListJSONCarriesSchemaAndWiring proves `fak assume list --json` emits
+// the fak.assume.list.v1 schema with one row per registered assumption, in registry
+// order, each carrying an honest per-row wired bit that matches the shell's
+// dispatch table (a relation against Registry(), not a frozen count).
+func TestAssumeListJSONCarriesSchemaAndWiring(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	if code := runAssume(&out, &errBuf, []string{"list", "--json"}); code != 0 {
+		t.Fatalf("list --json: exit=%d (stderr=%q)", code, errBuf.String())
+	}
+	var rec struct {
+		Schema      string `json:"schema"`
+		Assumptions []struct {
+			Assumption assumecheck.Assumption `json:"assumption"`
+			Wired      bool                   `json:"wired"`
+		} `json:"assumptions"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("list --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	if rec.Schema != "fak.assume.list.v1" {
+		t.Fatalf("schema = %q, want fak.assume.list.v1", rec.Schema)
+	}
+	rows := assumecheck.Registry()
+	if len(rec.Assumptions) != len(rows) {
+		t.Fatalf("list --json rows = %d, want one per registered assumption (%d)", len(rec.Assumptions), len(rows))
+	}
+	for i, row := range rec.Assumptions {
+		if row.Assumption.ID != rows[i].ID {
+			t.Fatalf("row %d id = %q, want registry-order %q", i, row.Assumption.ID, rows[i].ID)
+		}
+		_, wired := assumeWitnessGatherers[row.Assumption.ID]
+		if row.Wired != wired {
+			t.Fatalf("row %q wired=%v diverges from the shell dispatch table (%v)", row.Assumption.ID, row.Wired, wired)
+		}
 	}
 }
 
