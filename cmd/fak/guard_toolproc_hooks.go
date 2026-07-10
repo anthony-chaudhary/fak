@@ -40,6 +40,36 @@ const (
 	guardToolprocJournalRel = ".fak/toolproc/journal.jsonl"
 )
 
+// guardPromptHookType is the hook `type` value denoting an LLM-in-the-loop
+// (model-judged approve/deny) hook, as opposed to the deterministic "command"
+// hooks fak installs. fak recognizes the type only to VALIDATE its placement; it
+// wires no model call here (issue #4055, borrow-study epic #4040).
+const guardPromptHookType = "prompt"
+
+// promptHookAdmissibleEvents is the closed set of harness events at which a model
+// verdict is admissible — the only events whose protocol lets a hook's answer act
+// (approve/deny). Ports validate-hook-schema.sh:124 from
+// anthropics/claude-code@15a21e1b (clean-room, zero bytes vendored).
+var promptHookAdmissibleEvents = map[string]bool{
+	"Stop": true, "SubagentStop": true, "UserPromptSubmit": true, "PreToolUse": true,
+}
+
+// promptHookEventAdmissible reports whether a type:"prompt" hook may be installed
+// on event. True only for the four model-admissible events; a prompt hook on any
+// deterministic-only event (PostToolUse, SessionEnd, PreCompact, Notification,
+// SessionStart) is inadmissible.
+func promptHookEventAdmissible(event string) bool { return promptHookAdmissibleEvents[event] }
+
+// validatePromptHookEvent returns ("", true) when a prompt hook is admissible on
+// event, else the structured reason token PROMPT_HOOK_EVENT_INADMISSIBLE and
+// false — the closed-vocabulary form the loop can route to a replan.
+func validatePromptHookEvent(event string) (reason string, ok bool) {
+	if promptHookEventAdmissible(event) {
+		return "", true
+	}
+	return "PROMPT_HOOK_EVENT_INADMISSIBLE", false
+}
+
 type guardToolprocInstall struct {
 	Applied      bool
 	Mode         string
@@ -176,7 +206,7 @@ func writeGuardHookSettings(path string, settings guardPreCompactClaudeSettings)
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }
 
 func normalizeGuardToolprocMode(mode string) (string, error) {

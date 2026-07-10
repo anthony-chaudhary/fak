@@ -128,3 +128,39 @@ func TestInstallGuardToolprocHooksNoOps(t *testing.T) {
 		t.Fatal("invalid mode must refuse")
 	}
 }
+
+// TestPromptHookEventAdmissible pins the admissibility gate: a type:"prompt"
+// (model-judged) hook may only be placed on the four events whose harness
+// protocol lets a verdict act. On PostToolUse/SessionEnd/etc. it is REFUSED with
+// the structured reason PROMPT_HOOK_EVENT_INADMISSIBLE; on PreToolUse it is
+// ACCEPTED with an empty reason. No model call is wired — this is the gate only.
+func TestPromptHookEventAdmissible(t *testing.T) {
+	cases := []struct {
+		event string
+		want  bool
+	}{
+		{"PreToolUse", true},
+		{"Stop", true},
+		{"SubagentStop", true},
+		{"UserPromptSubmit", true},
+		{"PostToolUse", false},
+		{"SessionEnd", false},
+		{"PreCompact", false},
+		{"Notification", false},
+	}
+	for _, c := range cases {
+		if got := promptHookEventAdmissible(c.event); got != c.want {
+			t.Errorf("promptHookEventAdmissible(%q) = %v, want %v", c.event, got, c.want)
+		}
+		reason, ok := validatePromptHookEvent(c.event)
+		if ok != c.want {
+			t.Errorf("validatePromptHookEvent(%q) ok = %v, want %v", c.event, ok, c.want)
+		}
+		if !c.want && reason != "PROMPT_HOOK_EVENT_INADMISSIBLE" {
+			t.Errorf("validatePromptHookEvent(%q) reason = %q, want PROMPT_HOOK_EVENT_INADMISSIBLE", c.event, reason)
+		}
+		if c.want && reason != "" {
+			t.Errorf("validatePromptHookEvent(%q) reason = %q, want empty", c.event, reason)
+		}
+	}
+}
