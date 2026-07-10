@@ -239,6 +239,7 @@
 
   "self_modify_globs": [
     ".git/",
+    ".fak/guard/",
     ".hermes/",
     ".env",
     ".aws/",

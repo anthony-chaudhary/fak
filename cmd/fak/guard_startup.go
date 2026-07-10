@@ -207,8 +207,28 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 		floorSource += fmt.Sprintf(" + operator allow overlay (%d extra tool(s); fak guard allow --list)", n)
 	}
 	policyDigest = guardPolicyDigest(policyBytes)
+	rt = protectGuardPolicyConfig(rt, overlayPath, policyPath)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	dur = time.Since(tPolicy)
 	return rt, floorSource, policyDigest, dur
+}
+
+func protectGuardPolicyConfig(rt policy.Runtime, paths ...string) policy.Runtime {
+	seen := map[string]bool{}
+	for _, existing := range rt.Adjudicator.SelfModifyGlobs {
+		seen[filepath.ToSlash(existing)] = true
+	}
+	for _, raw := range paths {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		clean := filepath.ToSlash(filepath.Clean(raw))
+		if !seen[clean] {
+			rt.Adjudicator.SelfModifyGlobs = append(rt.Adjudicator.SelfModifyGlobs, clean)
+			seen[clean] = true
+		}
+	}
+	return rt
 }
