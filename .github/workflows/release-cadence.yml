@@ -65,6 +65,9 @@ jobs:
     permissions:
       contents: write
       actions: read
+      # #4025: the publish-staleness escalation may file/bump ONE deduped tracking issue
+      # via the shared gate-signal feeder when @latest is VERY_STALE under a killed auto-cut.
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -110,6 +113,63 @@ jobs:
           if [ "$verdict" = "very_stale" ]; then
             echo "::warning::publish staleness VERY_STALE — @latest is $commits commits / ${days}d behind HEAD ($nextact)"
           fi
+
+      - name: Escalate publish staleness under a killed cadence
+        # #4025: the informational ::warning:: above is the right default WHILE auto-cut is
+        # armed — the auto-cut steps below close the lag. But the kill switch
+        # FAK_AUTO_RELEASE=0 turns auto-cut OFF, and then a VERY_STALE @latest can rot
+        # behind HEAD indefinitely with a warning as its only signal (the blind spot the
+        # auto-cut attempt-path instrumentation cannot observe — there is no attempt to
+        # instrument). When a SCHEDULED tick sees very_stale AND auto-cut is killed,
+        # escalate: by DEFAULT open/bump a single deduped, ci-routed tracking issue via the
+        # SHARED gate-signal feeder (share the witnessable-signal contract, not duplicate
+        # the notification feed); or, if the repo opts in via FAK_STALE_ESCALATION_FAIL=1,
+        # fail the tick outright. Fresh/stale verdicts and every armed tick stay
+        # informational. Scheduled-only: a manual dispatch is operator-driven and never
+        # auto-files. The decide/shape logic is proven by tools/release_stale_escalate_test.py.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTO_RELEASE: ${{ vars.FAK_AUTO_RELEASE }}
+          FAIL_ON_ESCALATE: ${{ vars.FAK_STALE_ESCALATION_FAIL }}
+        run: |
+          set -euo pipefail
+          # The kill switch: auto-cut is disabled iff FAK_AUTO_RELEASE == '0' (any other
+          # value, unset included, keeps auto-cut on) — mirrors the arm step's own read.
+          autocut_disabled=false
+          [ "${AUTO_RELEASE:-}" = "0" ] && autocut_disabled=true
+          extra=""
+          [ "${FAIL_ON_ESCALATE:-}" = "1" ] && extra="--fail-on-escalate"
+          python tools/release_stale_escalate.py \
+            --from staleness.json \
+            --auto-cut-disabled "$autocut_disabled" \
+            $extra \
+            --emit-envelope escalate-envelope.json \
+            --json > escalate-decision.json
+          cat escalate-decision.json
+          action="$(python -c 'import json; print(json.load(open("escalate-decision.json"))["action"])')"
+          reason="$(python -c 'import json; print(json.load(open("escalate-decision.json"))["reason"])')"
+          {
+            echo "## Publish-staleness escalation: $action"
+            echo ""
+            echo "$reason"
+          } >> "$GITHUB_STEP_SUMMARY"
+          case "$action" in
+            informational)
+              echo "escalation: informational — no action (auto-cut armed, or not very_stale)." ;;
+            file-issue)
+              echo "escalation: file/bump a deduped tracking issue via the shared gate-signal feeder."
+              # gate_signal's issue-contract check shells out to `fak`; build it once and
+              # point FAK_BIN at it so the --live filing path is fully functional here.
+              go build -o "$RUNNER_TEMP/fak" ./cmd/fak
+              export FAK_BIN="$RUNNER_TEMP/fak"
+              python tools/gate_signal.py --from escalate-envelope.json --live ;;
+            fail-tick)
+              echo "::error::publish staleness VERY_STALE under a killed auto-cut (FAK_AUTO_RELEASE=0) and FAK_STALE_ESCALATION_FAIL=1 — failing the tick."
+              exit 1 ;;
+            *)
+              echo "::error::unknown escalation action '$action'"; exit 1 ;;
+          esac
 
       - name: Release status snapshot
         env:
