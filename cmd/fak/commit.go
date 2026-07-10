@@ -77,6 +77,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
 	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
+	noBuildCheck := fs.Bool("no-build-check", false, "skip the COMMITTED_RED prospective-tree compile gate before the commit (default: gate ON — refuses a commit that would red the committed trunk)")
 	reviewModel := fs.String("review-model", envOrDefault("FAK_REVIEW_MODEL", ""), "optional scout model id, or comma-separated model ids, that must pass/refute this diff before commit; a multi-model quorum blocks on any refute")
 	reviewMinModels := fs.Int("review-min-models", envIntOrDefault("FAK_REVIEW_MIN_MODELS", 0), "minimum usable review verdicts required when --review-model names multiple models (default: 2, or 1 for a single model)")
 	reviewObjective := fs.String("review-objective", envOrDefault("FAK_REVIEW_OBJECTIVE", ""), "objective given to --review-model (default: FAK_GOAL_OBJECTIVE, then first commit-message line)")
@@ -130,6 +131,20 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		if !rep.OK {
 			fmt.Fprintln(stderr, "fak commit: --require-issue refused this commit:")
 			renderPreview(stderr, rep, "")
+			return 3
+		}
+	}
+
+	// COMMITTED_RED gate (#4152): compile the PROSPECTIVE committed tree — HEAD's committed
+	// bytes + exactly this commit's paths, all other working-tree noise masked — and refuse the
+	// commit when it would red the committed trunk under default tags. Promotes the
+	// internal/buildwitness CI invariant to the commit boundary. Fails OPEN on infra error and on
+	// a pre-existing HEAD red (it never refuses on an inability to check, and never blocks a red
+	// this commit did not introduce).
+	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
+		if okB, reason, detail := commitBuildCheckGate(stderr, root, paths); !okB {
+			fmt.Fprintf(stderr, "fak commit: %s\n%s\n", reason, strings.TrimSpace(detail))
+			fmt.Fprintln(stderr, "fak commit: the prospective committed tree does not compile under default tags — commit refused so the committed trunk stays green. Commit the missing definition too, or fence not-yet-compiling WIP behind //go:build wip_<feature> (see `fak wip fence`), or pass --no-build-check for an intentional multi-commit landing.")
 			return 3
 		}
 	}
