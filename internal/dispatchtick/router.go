@@ -294,6 +294,11 @@ type RouterInput struct {
 	LabelAlias       map[string]string
 	KeywordAlias     map[string]string
 	BlockedLabelName string
+	// DuplicateRiskCache optionally memoizes the O(n^2) duplicate-risk scan
+	// across calls, keyed on a content hash of the routable backlog (#4171).
+	// Nil (the default for every existing caller) means always recompute --
+	// identical behavior to before the field existed.
+	DuplicateRiskCache *DuplicateRiskCache
 }
 
 func RouteIssues(in RouterInput) RouterPayload {
@@ -330,7 +335,7 @@ func RouteIssues(in RouterInput) RouterPayload {
 		}
 		routable = append(routable, issue)
 	}
-	duplicateRisk := DuplicateRiskIssueNumbers(routable)
+	duplicateRisk := in.DuplicateRiskCache.Risk(routable)
 	duplicateSkipped := []Issue{}
 	dispatchable := []Issue{}
 	for _, issue := range routable {
