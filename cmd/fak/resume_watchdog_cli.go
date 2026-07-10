@@ -175,6 +175,30 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 
 	history := rwLoadHistory(ledgerPath)
 
+	// Resolve the managed-cache posture ONCE per tick (the env is tick-constant) and warn ONCE
+	// (#2178 / #3779 parity with the .py/.ps1). A configured posture fronts each resumed child
+	// with its OWN `fak guard <posture> --`; the default leaves the bare `claude --resume`
+	// untouched. A malformed FAK_MANAGED_CACHE warns and continues passive — a headless worker
+	// must never strand the whole tick over one bad env var (the warn-and-continue half of
+	// fleetGuardCachePostureArgs's caller-decides contract). fakExe is this running fak binary,
+	// so it is essentially always resolvable; the fak-unresolved branch mirrors the reference's
+	// defensive warn rather than silently dropping the posture.
+	fakExe, err := os.Executable()
+	if err != nil || strings.TrimSpace(fakExe) == "" {
+		fakExe = "fak"
+	}
+	posture, postureErr := fleetGuardCachePostureArgs()
+	if postureErr != nil {
+		note("  WARN managed-cache: %v — ignoring; resuming passive", postureErr)
+		posture = nil
+	}
+	if len(posture) > 0 && strings.TrimSpace(fakExe) == "" {
+		note("  WARN managed-cache posture configured but `fak` is unavailable — resuming children directly (passive, no posture banner)")
+		posture = nil
+	} else if len(posture) > 0 {
+		note("  managed-cache posture -> fronting resumed children with `fak guard %s --`", strings.Join(posture, " "))
+	}
+
 	launched := 0
 	// One tick per sweep: a live-but-idle watchdog (all SKIPs, no launches) is now
 	// distinguishable from a dead one — zero ticks means the sweep never ran. This is the
@@ -234,7 +258,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		}
 		acct := rwAccountTag(p.Account)
 		resumeCfg := p.ResumeTarget()
-		grant := launchSpawnBroker(rwResumeBrokerAttempt(claudeExe, p, resumeCfg))
+		grant := launchSpawnBroker(rwResumeBrokerAttempt(fakExe, claudeExe, p, resumeCfg, posture))
 		if !*live {
 			if !grant.Allow {
 				note("  WOULD DENY %s acct=%s proj=%s — spawn broker: %s agent_run=%s policy_digest=%s",
@@ -817,13 +841,32 @@ func rwRefreshRegistry(regDir, claudeExe string, windowH float64, probeMode stri
 // Windows (the CREATE_NO_WINDOW discipline every fak background spawn takes).
 var rwSpawnResumeLaunch = rwSpawnResume
 
-func rwResumeBrokerAttempt(claudeExe string, p resume.WatchdogPlanRow, resumeCfg string) launchBrokerAttempt {
-	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(claudeExe, p.Session),
+func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string) launchBrokerAttempt {
+	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(fakExe, claudeExe, p.Session, postureArgs),
 		envMap(resume.WatchdogChildEnv(os.Environ(), resumeCfg)), rwResumeCWD(p))
 }
 
-func rwResumeArgv(claudeExe, session string) []string {
-	return []string{claudeExe, "--resume", session, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
+// rwResumeArgv is the argv that resumes one dead session. Default (no managed-cache posture
+// configured, or fak unresolved): a bare `claude --resume … -p <prompt>
+// --dangerously-skip-permissions`, byte-identical to before the posture knob existed. When the
+// operator configured a posture (FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV, resolved ONCE per tick
+// into postureArgs) AND fak is resolvable, FRONT the child with its OWN `fak guard <posture> --`:
+// the resumed child binds its own in-process gateway on its own CLAUDE_CONFIG_DIR seat, prints its
+// own posture banner, and reaches the ACTIVE 1h-TTL upgrade when API-key-billed — inheriting no
+// wire from this watchdog (the WatchdogChildEnv strip at the spawn site still holds). Guard
+// auto-detects claude -> --provider anthropic, so the shape matches the other launchers (posture
+// flags BEFORE `--`, agent after). Mirrors tools/fleet_resume_watchdog.py:resume_child_argv and
+// the .ps1 spawn block (#2178 / #3779).
+func rwResumeArgv(fakExe, claudeExe, session string, postureArgs []string) []string {
+	child := []string{claudeExe, "--resume", session, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
+	if len(postureArgs) > 0 && strings.TrimSpace(fakExe) != "" {
+		front := make([]string, 0, len(postureArgs)+len(child)+3)
+		front = append(front, fakExe, "guard")
+		front = append(front, postureArgs...)
+		front = append(front, "--")
+		return append(front, child...)
+	}
+	return child
 }
 
 func rwResumeCWD(p resume.WatchdogPlanRow) string {
@@ -852,7 +895,10 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	defer stdout.Close()
 	defer stderr.Close()
 
-	argv := rwResumeArgv(claudeExe, p.Session)
+	// grant.Argv is authoritative and carries any `fak guard <posture> --` front the broker
+	// attempt built (rwResumeBrokerAttempt); this bare form is only a defensive fallback for an
+	// (unreachable on the live path) empty grant, so it deliberately stays posture-free.
+	argv := rwResumeArgv("", claudeExe, p.Session, nil)
 	if len(grant.Argv) > 0 {
 		argv = grant.Argv
 	}

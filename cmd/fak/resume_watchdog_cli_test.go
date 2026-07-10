@@ -675,3 +675,68 @@ func findWatchdogStatusRow(rows []resume.WatchdogMTTRRow, session string) resume
 	}
 	return resume.WatchdogMTTRRow{}
 }
+
+// TestRwResumeArgvGuardFronting pins the Go port's managed-cache fronting decision to the SAME
+// shape the Python reference enforces (tools/fleet_resume_watchdog_test.py:644-678, #2178/#3779):
+// opted-in + fak resolvable => `fak guard <posture> --` with posture strictly BEFORE `--`;
+// otherwise the bare `claude --resume` that shipped before the knob. The posture-arg SHAPING
+// itself (order, auto emits nothing, malformed) is covered by guard_cache_posture_test.go.
+func TestRwResumeArgvGuardFronting(t *testing.T) {
+	const sid = "SID"
+	bare := []string{"/bin/claude", "--resume", sid, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
+	eq := func(got, want []string) bool { return strings.Join(got, "\x00") == strings.Join(want, "\x00") }
+	has := func(xs []string, s string) bool {
+		for _, x := range xs {
+			if x == s {
+				return true
+			}
+		}
+		return false
+	}
+
+	// No posture configured (fak present) -> the exact bare argv, never fronted with guard.
+	if got := rwResumeArgv("/bin/fak", "/bin/claude", sid, nil); !eq(got, bare) {
+		t.Fatalf("nil-posture argv = %#v, want bare %#v", got, bare)
+	}
+	if got := rwResumeArgv("/bin/fak", "/bin/claude", sid, []string{}); !eq(got, bare) {
+		t.Fatalf("empty-posture argv = %#v, want bare %#v", got, bare)
+	}
+	if got := rwResumeArgv("/bin/fak", "/bin/claude", sid, nil); has(got, "guard") {
+		t.Fatalf("bare argv must not reference guard: %#v", got)
+	}
+
+	// Opted-in + fak resolvable -> `fak guard <posture> -- claude --resume ...`, posture strictly
+	// BEFORE the `--` separator (guard parses it; the agent after `--` never sees it).
+	posture := []string{"--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on"}
+	want := []string{"/bin/fak", "guard", "--api-key-env", "ANTHROPIC_API_KEY", "--managed-cache", "on", "--",
+		"/bin/claude", "--resume", sid, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
+	got := rwResumeArgv("/bin/fak", "/bin/claude", sid, posture)
+	if !eq(got, want) {
+		t.Fatalf("fronted argv = %#v, want %#v", got, want)
+	}
+	sep := -1
+	for i, a := range got {
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep < 0 {
+		t.Fatalf("fronted argv missing `--` separator: %#v", got)
+	}
+	if !has(got[:sep], "--managed-cache") || has(got[sep+1:], "--managed-cache") {
+		t.Fatalf("posture flags must be strictly before `--`: %#v", got)
+	}
+	if !has(got[sep+1:], "--resume") {
+		t.Fatalf("claude flags must be after `--`: %#v", got)
+	}
+
+	// Opted-in but fak unresolved -> cannot front; fall back to the bare direct launch (the
+	// caller warns). The argv must never reference an empty fak binary.
+	if got := rwResumeArgv("", "/bin/claude", sid, posture); !eq(got, bare) {
+		t.Fatalf("fak-missing fallback = %#v, want bare %#v", got, bare)
+	}
+	if got := rwResumeArgv("   ", "/bin/claude", sid, posture); !eq(got, bare) {
+		t.Fatalf("blank-fak fallback = %#v, want bare %#v", got, bare)
+	}
+}
