@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -305,6 +306,86 @@ func TestRenderDispatchProgressDisambiguatesClosuresFromBacklogDrift(t *testing.
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered progress missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestDispatchProgressJSONFoldsAgingCensusOverReadySet is the #3590 witness: with a
+// --aging-candidates ready set supplied, the progress JSON carries the anti-starvation census
+// folded through dispatchaging — starved_count and oldest_wait_seconds — over a fixture set with
+// one unit parked past the 6h hard starvation deadline.
+func TestDispatchProgressJSONFoldsAgingCensusOverReadySet(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	restoreOpen, restoreAudit, restoreNow := dispatchProgressOpenCount, dispatchProgressAudit, dispatchProgressNow
+	t.Cleanup(func() {
+		dispatchProgressOpenCount, dispatchProgressAudit, dispatchProgressNow = restoreOpen, restoreAudit, restoreNow
+	})
+	dispatchProgressOpenCount = func(string) (int, error) { return 100, nil }
+	dispatchProgressAudit = func(string, io.Writer, int, string) (map[string]any, error) {
+		return map[string]any{"issues": []any{}}, nil
+	}
+	dispatchProgressNow = func() time.Time { return now }
+
+	// #42 ready 7h ago (starved, past the 6h deadline); #7 ready 30s ago (fresh).
+	starvedSince := now.Add(-7 * time.Hour).Unix()
+	freshSince := now.Add(-30 * time.Second).Unix()
+	candPath := filepath.Join(root, "ready.json")
+	if err := os.WriteFile(candPath, []byte(fmt.Sprintf(
+		`[{"id":"42","base_weight":150,"ready_since":%d},{"id":"7","base_weight":1000,"ready_since":%d}]`,
+		starvedSince, freshSince)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runDispatchProgress(&stdout, &stderr, []string{
+		"--workspace", root,
+		"--json", "--no-loop-ledger",
+		"--aging-candidates", candPath,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, stdout.String())
+	}
+	if dispatchMapInt(got, "starved_count") != 1 {
+		t.Fatalf("starved_count = %v, want 1", got["starved_count"])
+	}
+	if dispatchMapInt(got, "aging_count") != 0 {
+		t.Fatalf("aging_count = %v, want 0", got["aging_count"])
+	}
+	if dispatchMapInt(got, "oldest_wait_seconds") != 7*3600 {
+		t.Fatalf("oldest_wait_seconds = %v, want %d", got["oldest_wait_seconds"], 7*3600)
+	}
+}
+
+// TestRenderDispatchProgressShowsAgingCensus is the #3590 human-render witness: when the aging
+// census is present the readout gains a `starved: K  aging: A  oldest-wait: Th` line, and stays
+// silent (additive) when no ready set was folded.
+func TestRenderDispatchProgressShowsAgingCensus(t *testing.T) {
+	base := map[string]any{
+		"target": 50, "open_now": 100, "baseline_open": 100,
+		"closures_toward_target": 0, "closures_target_remaining": 50,
+		"witnessed_open": 0, "witnessed_numbers": []int{},
+		"closed_now": 0, "closed_by_loop_total": 0,
+	}
+	withCensus := map[string]any{}
+	for k, v := range base {
+		withCensus[k] = v
+	}
+	withCensus["starved_count"] = 2
+	withCensus["aging_count"] = 3
+	withCensus["oldest_wait_seconds"] = int64(21600)
+
+	out := renderDispatchProgress(withCensus)
+	for _, want := range []string{"starved: 2", "aging: 3", "oldest-wait: 6h"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered progress missing %q:\n%s", want, out)
+		}
+	}
+	if bare := renderDispatchProgress(base); strings.Contains(bare, "starved:") {
+		t.Fatalf("no ready set folded, but render showed a starved line:\n%s", bare)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchaging"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
@@ -41,6 +42,12 @@ type dispatchProgressOptions struct {
 	Weekly     bool
 	Since      string
 	Until      string
+	// AgingCandidates points at a ready-set JSON file (the same {id, base_weight,
+	// ready_since} array dispatch-aging consumes). When set, the progress readout folds
+	// it through dispatchaging so the standing census (starved/aging counts, oldest
+	// wait) surfaces alongside the closure metrics (#3590). Empty = no aging fold, and
+	// no new keys appear (additive: automation predating aging is unaffected).
+	AgingCandidates string
 }
 
 var dispatchProgressNow = func() time.Time { return time.Now().UTC() }
@@ -106,6 +113,7 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 	since := fs.String("since", "", "weekly report window start (RFC3339 or YYYY-MM-DD; default: now-7d)")
 	until := fs.String("until", "", "weekly report window end (RFC3339 or YYYY-MM-DD; default: now)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	agingCandidates := fs.String("aging-candidates", "", "ready-set JSON ({id, base_weight, ready_since}) to fold through dispatchaging for the starved/oldest-wait readout (#3590)")
 	if err := fs.Parse(argv); err != nil {
 		return dispatchProgressOptions{}, 2
 	}
@@ -143,6 +151,8 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 		Weekly:     *weekly,
 		Since:      strings.TrimSpace(*since),
 		Until:      strings.TrimSpace(*until),
+
+		AgingCandidates: strings.TrimSpace(*agingCandidates),
 	}, 0
 }
 
@@ -226,6 +236,13 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 	}
 	for key, value := range dispatchProgressHourlyProjection(runsDir, now, rec) {
 		rec[key] = value
+	}
+	if aging, agingErr := dispatchProgressFoldAging(root, opts.AgingCandidates, now); agingErr != nil {
+		rec["aging_error"] = agingErr.Error()
+	} else {
+		for key, value := range aging {
+			rec[key] = value
+		}
 	}
 	if auditError != "" {
 		rec["audit_error"] = auditError
@@ -850,6 +867,7 @@ func dispatchProgressMetrics(payload map[string]any) map[string]int64 {
 		"target", "open_now", "baseline_open", "resolved_toward_target",
 		"target_remaining", "closures_toward_target", "closures_target_remaining",
 		"witnessed_open", "closed_now", "closed_by_loop_total",
+		"starved_count", "aging_count", "oldest_wait_seconds",
 	}
 	out := map[string]int64{}
 	for _, key := range keys {
@@ -893,6 +911,37 @@ func dispatchProgressIntSlice(v any) []int {
 	}
 }
 
+// dispatchProgressFoldAging folds the ready-set at candidatesPath through dispatchaging so the
+// standing readout carries the anti-starvation census (#3590): starved_count, aging_count, and
+// oldest_wait_seconds. The candidate JSON is the same {id, base_weight, ready_since} array
+// dispatch-aging consumes (so the two surfaces share one input), read via the shared
+// decodeCandidates. An empty path returns a nil map (no fold, no new keys) — additive by design,
+// so a progress reader predating aging sees no change. A read/parse failure is surfaced by the
+// caller as aging_error rather than failing the whole progress tick.
+func dispatchProgressFoldAging(root, candidatesPath string, now time.Time) (map[string]any, error) {
+	if strings.TrimSpace(candidatesPath) == "" {
+		return nil, nil
+	}
+	path := candidatesPath
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read aging candidates %s: %w", path, err)
+	}
+	cands, err := decodeCandidates(raw)
+	if err != nil {
+		return nil, fmt.Errorf("aging candidates %s: %w", path, err)
+	}
+	res := dispatchaging.Fold(cands, dispatchaging.DefaultParams(now.Unix()))
+	return map[string]any{
+		"starved_count":       res.StarvedCount,
+		"aging_count":         res.AgingCount,
+		"oldest_wait_seconds": res.OldestWaitSeconds,
+	}, nil
+}
+
 func renderDispatchProgress(p map[string]any) string {
 	target := dispatchMapInt(p, "target")
 	// The progress bar tracks witnessed closures toward the close-N target, not
@@ -912,6 +961,16 @@ func renderDispatchProgress(p map[string]any) string {
 		dispatchMapFloat(p, "issues_per_hour_gap"),
 		dispatchMapInt(p, "projection_closed_count"),
 		dispatchMapFloat(p, "projection_window_hours"))
+	// Anti-starvation census, folded from dispatchaging over the ready set (#3590). Only
+	// rendered when an aging fold ran (the --aging-candidates ready set was supplied).
+	if _, ok := p["starved_count"]; ok {
+		fmt.Fprintf(&b, "  starved: %d  aging: %d  oldest-wait: %s\n",
+			dispatchMapInt(p, "starved_count"), dispatchMapInt(p, "aging_count"),
+			humanDur(int64(dispatchMapInt(p, "oldest_wait_seconds"))))
+	}
+	if errText := dispatchMapString(p, "aging_error"); errText != "" {
+		fmt.Fprintf(&b, "  ! aging error: %s\n", errText)
+	}
 	if errText := dispatchMapString(p, "audit_error"); errText != "" {
 		fmt.Fprintf(&b, "  ! audit error: %s\n", errText)
 	}
