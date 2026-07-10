@@ -166,6 +166,19 @@ type Config struct {
 	TopKGroup           int     `json:"topk_group,omitempty"`
 	RoutedScalingFactor float64 `json:"routed_scaling_factor,omitempty"`
 
+	// Multi-Token-Prediction (MTP) self-speculation head depth. The MoE families that
+	// ship a speculative-decoding head declare its depth here: GLM-5.2 (glm_moe_dsa) and
+	// DeepSeek-V3 both set num_nextn_predict_layers to 1. The head's tensors are the
+	// "mtp." / "nextn" module the loaders DROP by default and RETAIN under RetainMTP
+	// (#3078/#3197). This field is the config surface that tells the retained substrate
+	// HOW MANY nextn layers exist — the count a self-speculation verify pass drafts over.
+	//
+	// METADATA ONLY: exported and audited so a spec-decode readiness check can see the
+	// head depth (NumMTPLayers/HasMTPHead/SelfSpeculationSubstrateReady), but no draft/
+	// verify decode consumes it yet. Zero/absent = no MTP head (every dense checkpoint),
+	// so the load + forward path stays byte-identical.
+	NumNextNPredictLayers int `json:"num_nextn_predict_layers,omitempty"`
+
 	// Qwen3.5 / Qwen3-Next hybrid Gated-DeltaNet linear-attention axis. When LayerTypes
 	// marks a layer "linear_attention", that layer is a recurrent state-space token mixer
 	// (qwen35.go) instead of attention; "full_attention" layers use the standard GQA path
@@ -741,6 +754,40 @@ func (c Config) isGLM() bool {
 // cache entries remains a separate gate.
 func (c Config) isGLMMoeDsa() bool {
 	return c.isGLM() && strings.Contains(c.archFamilyKey(), "dsa")
+}
+
+// NumMTPLayers returns the declared depth of this checkpoint's Multi-Token-Prediction
+// (MTP) self-speculation head — the HF num_nextn_predict_layers field — clamped so a
+// negative or absent value reads as zero ("no MTP head"). The head's tensors are the
+// "mtp." / "nextn" module the loaders drop by default and retain under RetainMTP
+// (#3078/#3197); this is how many nextn layers that retained substrate spans, i.e. how
+// many draft tokens a self-speculation verify pass would produce per step.
+func (c Config) NumMTPLayers() int {
+	if c.NumNextNPredictLayers > 0 {
+		return c.NumNextNPredictLayers
+	}
+	return 0
+}
+
+// HasMTPHead reports whether this checkpoint declares an MTP self-speculation head
+// (num_nextn_predict_layers > 0). True for GLM-5.2 (glm_moe_dsa) and DeepSeek-V3; false
+// for every dense Llama/Qwen/Mistral checkpoint, so a self-speculation path that guards
+// on it is inert — and the default load/forward byte-identical — on models without one.
+func (c Config) HasMTPHead() bool {
+	return c.NumMTPLayers() > 0
+}
+
+// SelfSpeculationSubstrateReady reports whether BOTH independent halves of the GLM-5.2
+// self-speculation substrate agree for this config: the checkpoint DECLARES an MTP head
+// (HasMTPHead — the config surface) AND the process asked the loaders to RETAIN it (the
+// package-global RetainMTP scaffold flag, #3078/#3197). Either half alone is inert — a
+// declared-but-dropped head cannot be addressed, and a retain flag on a head-less model
+// retains nothing — so this predicate is the single seam that joins the two.
+//
+// READINESS CHECK ONLY: no draft/verify decode consumes it yet, and RetainMTP defaults
+// off, so this is false on every default decode and changes no runtime behavior.
+func (c Config) SelfSpeculationSubstrateReady() bool {
+	return c.HasMTPHead() && RetainMTP
 }
 
 // usesMLAMoELayout reports whether this model shares the MLA-latent-attention +
