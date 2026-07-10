@@ -2,6 +2,7 @@ package fleettrend
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -9,7 +10,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 const (
@@ -78,7 +82,7 @@ func Append(path string, metrics map[string]float64, now string, capRows int) (m
 }
 
 func Tail(path string, n int) []map[string]any {
-	rows := readRows(path)
+	rows := foldedRows(path)
 	if n <= 0 || n >= len(rows) {
 		return rows
 	}
@@ -189,6 +193,8 @@ func ISONow() string {
 	return time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
 }
 
+// readRows reads the whole ledger from scratch. The write path (Append) uses it
+// so the byte-for-byte rewrite it performs never depends on cached fold state.
 func readRows(path string) []map[string]any {
 	f, err := os.Open(path)
 	if err != nil {
@@ -211,6 +217,69 @@ func readRows(path string) []map[string]any {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// foldState accumulates the parsed rows in file order — the same slice readRows
+// returns, so Tail/RenderLine see identical data.
+type foldState struct {
+	rows []map[string]any
+}
+
+var (
+	foldMu    sync.Mutex
+	foldCkpts = map[string]jsonlledger.Checkpoint[foldState]{}
+)
+
+// foldRow decodes one JSONL line exactly as readRows did — UseNumber so integer
+// counts round-trip as json.Number, malformed lines dropped — and folds it in.
+func foldRow(s foldState, raw json.RawMessage) foldState {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var row map[string]any
+	if err := dec.Decode(&row); err != nil {
+		return s
+	}
+	s.rows = append(s.rows, row)
+	return s
+}
+
+// foldedRows is the read/render path readRows used to serve: it returns every
+// ledger row, but folds only the bytes appended since the last read of this
+// path via jsonlledger.TailFold, keyed by an in-process checkpoint. The dozens
+// of panes that poll the trend re-read only the delta instead of the whole
+// capped ledger each tick. A rewrite (the ledger dropping its oldest row at cap)
+// changes the bytes ending at the prior offset, so TailFold re-folds in full —
+// the output stays byte-identical to a from-scratch read. On any I/O error it
+// falls back to that from-scratch read, matching readRows' best-effort contract.
+func foldedRows(path string) []map[string]any {
+	key := path
+	if abs, err := filepath.Abs(path); err == nil {
+		key = abs
+	}
+	foldMu.Lock()
+	defer foldMu.Unlock()
+	ck, err := jsonlledger.TailFold(path, foldCkpts[key], foldState{}, foldRow)
+	if err != nil {
+		delete(foldCkpts, key)
+		return readRows(path)
+	}
+	foldCkpts[key] = ck
+	if len(ck.State.rows) == 0 {
+		return nil
+	}
+	// Hand back a copy: callers (and Append) mutate the slice they receive, and
+	// the cached fold state must not move under a later delta read.
+	out := make([]map[string]any, len(ck.State.rows))
+	copy(out, ck.State.rows)
+	return out
+}
+
+// resetFoldCache clears the in-process checkpoint cache. Tests that reuse a
+// ledger path across scenarios call it to fold from a clean slate.
+func resetFoldCache() {
+	foldMu.Lock()
+	defer foldMu.Unlock()
+	foldCkpts = map[string]jsonlledger.Checkpoint[foldState]{}
 }
 
 func asMap(v any) map[string]any {

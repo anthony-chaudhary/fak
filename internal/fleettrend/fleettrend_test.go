@@ -1,8 +1,10 @@
 package fleettrend
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -84,6 +86,72 @@ func TestTailMissingAndTornLine(t *testing.T) {
 	rows := Tail(path, 24)
 	if len(rows) != 2 || number(rows[0]["usable"]) != 3 || number(rows[1]["usable"]) != 1 {
 		t.Fatalf("torn rows = %+v", rows)
+	}
+}
+
+// TestFoldedTailMatchesFullRead is AC3: the converted Tail (an incremental
+// jsonlledger.TailFold over an in-process checkpoint) yields the same aggregate
+// — and the same rendered pane line — as a from-scratch read, across a pure-
+// append growth phase and the cap rewrites that shift the ledger's oldest rows
+// out. If the delta fold ever diverged from a full read, one of these steps
+// would mismatch.
+func TestFoldedTailMatchesFullRead(t *testing.T) {
+	resetFoldCache()
+	defer resetFoldCache()
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+
+	const capRows = 4
+	for i := 0; i < 12; i++ { // grows past capRows, so later steps rewrite in place
+		metrics := map[string]float64{
+			"usable":   float64(20 - i),
+			"live":     float64(i % 3),
+			"sessions": float64(300 + i),
+			"escalate": float64(i % 2),
+		}
+		if _, err := Append(path, metrics, fmt.Sprintf("2026-07-01T%02d:00:00Z", i), capRows); err != nil {
+			t.Fatal(err)
+		}
+
+		cached := Tail(path, 24) // delta-folded read through the checkpoint cache
+		fresh := readRows(path)  // from-scratch whole-file read
+		if !reflect.DeepEqual(cached, fresh) {
+			t.Fatalf("step %d: folded tail %+v != full read %+v", i, cached, fresh)
+		}
+		if a, b := RenderLine(cached), RenderLine(fresh); a != b {
+			t.Fatalf("step %d: folded render %q != full render %q", i, a, b)
+		}
+	}
+}
+
+// TestFoldedTailAdvancesOffset proves the conversion actually folds incrementally
+// rather than silently re-reading: a below-cap append advances the cached
+// checkpoint's offset instead of resetting it, and the aggregate still matches a
+// full read.
+func TestFoldedTailAdvancesOffset(t *testing.T) {
+	resetFoldCache()
+	defer resetFoldCache()
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	key, _ := filepath.Abs(path)
+
+	if _, err := Append(path, map[string]float64{"usable": 1}, "2026-07-01T00:00:00Z", DefaultCap); err != nil {
+		t.Fatal(err)
+	}
+	Tail(path, 24) // warm the checkpoint
+	off1 := foldCkpts[key].Offset
+	if off1 <= 0 {
+		t.Fatalf("first folded read left no offset: %d", off1)
+	}
+
+	if _, err := Append(path, map[string]float64{"usable": 2}, "2026-07-01T01:00:00Z", DefaultCap); err != nil {
+		t.Fatal(err)
+	}
+	Tail(path, 24)
+	off2 := foldCkpts[key].Offset
+	if off2 <= off1 {
+		t.Fatalf("below-cap append should advance the fold offset, got %d -> %d", off1, off2)
+	}
+	if a, b := RenderLine(Tail(path, 24)), RenderLine(readRows(path)); a != b {
+		t.Fatalf("resumed read diverged from full read: %q vs %q", a, b)
 	}
 }
 
