@@ -41,6 +41,12 @@ const dispatchRoutedBacklogTTL = 5 * time.Second
 
 var dispatchRoutedBacklogCache = dispatchcache.New[dispatchtick.RouterPayload](time.Now)
 
+// dispatchDuplicateRiskCache lives across ticks so RouteIssues only reruns the
+// O(n^2) duplicate-risk scan when the routable backlog's content hash actually
+// changes (#4171). Each call re-hashes, so a stale key can never return a wrong
+// map; output stays byte-identical to the always-recompute path.
+var dispatchDuplicateRiskCache = &dispatchtick.DuplicateRiskCache{}
+
 func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[string]any, error) {
 	inf := dispatchFetchIssue(root, issue)
 	roles, roleErr := branchrole.Load(root)
@@ -450,12 +456,13 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 		fetchErrs = append(fetchErrs, issueErr.Error())
 	}
 	payload := dispatchtick.RouteIssues(dispatchtick.RouterInput{
-		Workspace:  root,
-		Taxonomy:   taxonomy,
-		Issues:     issues,
-		IssueLimit: issueLimit,
-		Injected:   injected,
-		FetchError: strings.Join(fetchErrs, "; "),
+		Workspace:          root,
+		Taxonomy:           taxonomy,
+		Issues:             issues,
+		IssueLimit:         issueLimit,
+		Injected:           injected,
+		FetchError:         strings.Join(fetchErrs, "; "),
+		DuplicateRiskCache: dispatchDuplicateRiskCache,
 	})
 	// W4 scope-hold (#2716): after routing, hold back ONLY the issues whose declared paths
 	// intersect a live known-bad signature (internal/knownbad ledger, #2713). Disjoint
