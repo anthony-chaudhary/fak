@@ -14,6 +14,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 )
 
+// cachevalueReportNow is the report's clock seam. It stamps GeneratedAt AND drives
+// the #3394 freshness/drain-lag row (now − last-savings-row), so the report is no
+// longer clock-independent: a recompute test must pin this to fold against the same
+// instant the CLI used. Follows the dispatchProgressNow/releaseStatusNow convention.
+var cachevalueReportNow = func() time.Time { return time.Now().UTC() }
+
 // runCachevalueReport handles `fak cachevalue report` — the #1304 two-track P&L.
 // It folds BOTH durable ledgers side by side, never blended:
 //
@@ -55,7 +61,7 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 	track2 := filterTrack2Since(cachevaluereport.ReadSavingsLedgerFile(*savingsLedger), *since)
 	usage := filterGatewayUsageSince(gatewayusageledger.ReadLedgerFile(*usageLedger), *since)
 
-	now := time.Now().UTC()
+	now := cachevalueReportNow()
 	report := cachevaluereport.FoldTwoTrackWithUsage(track1, track2, usage, now, cachevaluereport.FleetBenefitOptions{
 		ContextBudgetTokens: *contextBudget,
 	})
