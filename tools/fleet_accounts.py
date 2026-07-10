@@ -1081,6 +1081,28 @@ def _should_consult_probe_ledger(registry: dict | None, probe_ledger: bool | Non
     return bool(os.environ.get("FLEET_REG_DIR"))
 
 
+def _mark_usage_soon(status: dict, throttle_info: dict | None) -> None:
+    """Carry a still-active DAILY usage cap onto ``status`` as an advisory.
+
+    A fresh OK probe reopening a seat is correct for AVAILABILITY -- a healthy seat must not
+    sit blocked behind a stale/near-expired carried cap (the day24 incident). But the reopen
+    used to DROP the cap entirely, so a seat sitting at its daily limit and about to roll over
+    showed as a plain ``serving`` row with no usage at all -- an operator could not see it was
+    one request from the wall. Surface the still-future daily ``reset`` as advisory only:
+    ``available``/``throttled`` are left untouched (the seat stays offered), a consumer/roster
+    just gains a ``usage_soon_reset`` it can render as "serving, cap resets HH:MM". A weekly cap
+    never reaches here (it holds the seat closed upstream), and an absent/already-expired cap
+    contributes nothing -- so a normal serving row gains no key and its JSON is unchanged.
+    """
+    if not throttle_info or not throttle_is_active(throttle_info):
+        return
+    if _weekly_throttle_is_active(throttle_info):
+        return
+    reset = throttle_info.get("reset")
+    if reset:
+        status["usage_soon_reset"] = reset
+
+
 def runtime_status(account: str, registry: dict | None = None,
                    throttle: dict | None = None,
                    sessions: list[dict] | None = None,
@@ -1189,6 +1211,7 @@ def runtime_status(account: str, registry: dict | None = None,
                 and _throttle_matches_current_identity(
                     account, thr, reg, acct_sessions, probe_identity):
             return _apply_throttle_status(status, thr)
+        _mark_usage_soon(status, thr)
         status["status_source"] = "probe"
         return status
     if fresh_probe_block is not None:
@@ -1219,6 +1242,7 @@ def runtime_status(account: str, registry: dict | None = None,
                         and _throttle_matches_current_identity(
                             account, thr, reg, acct_sessions, led):
                     return _apply_throttle_status(status, thr)
+                _mark_usage_soon(status, thr)
                 status["status_source"] = "probe-ledger"
                 status["probe_age_min"] = led.get("age_min")
                 return status
@@ -1256,8 +1280,16 @@ def annotate_accounts(rows: list[dict], registry: dict | None = None,
                       throttle: dict | None = None,
                       sessions: list[dict] | None = None,
                       probe_ledger: bool | None = None,
-                      cap_runs_dir: str | os.PathLike[str] | None = None) -> list[dict]:
-    """Attach live availability fields to discover_accounts() rows."""
+                      cap_runs_dir: str | os.PathLike[str] | None = None,
+                      seat_leases: list[dict] | None = None) -> list[dict]:
+    """Attach live availability fields to discover_accounts() rows.
+
+    ``seat_leases`` (as ``live_seat_leases`` returns) reflects live DISPATCHED opencode
+    workers into the roster: the watchdog session scan reads Claude transcripts, so an
+    opencode/glm worker -- which writes an opencode transcript the scan does not fold --
+    would otherwise show 0 live_sessions even while actively resolving a docs issue. When
+    provided (the live front door passes it), a leased opencode seat becomes visible the
+    same way a claude worker is. ``None`` (every hermetic caller) leaves counts untouched."""
     raw_reg = load_registry() if registry is None else registry
     reg = copy.deepcopy(raw_reg) if isinstance(raw_reg, dict) else {}
     effective_probe_ledger = True if registry is None and probe_ledger is None else probe_ledger
@@ -1292,12 +1324,49 @@ def annotate_accounts(rows: list[dict], registry: dict | None = None,
                 "registry_age_min": None,
             })
         out.append(r)
+    _fold_dispatch_leases(out, seat_leases)
     _reconcile_identity_peer_availability(out)
     out.sort(key=lambda r: (r.get("product", ""),
                             r["kind"] != "worker",
                             not r.get("available", False),
                             r["tag"]))
     return out
+
+
+def _fold_dispatch_leases(rows: list[dict], leases: list[dict] | None) -> None:
+    """Bump opencode worker rows' live/active counts from live dispatch-lease sidecars.
+
+    Scoped to opencode seats ON PURPOSE: claude workers already surface through the
+    watchdog session registry, so this only fills the gap the registry cannot -- a
+    dispatched opencode/glm worker whose transcript the session scan does not fold. Matches
+    a lease to a row by config dir (precise), falling back to tag; bumps a count only UPWARD
+    and never touches availability/blocks, so it can add capacity visibility, never hide a
+    block. Best effort: a malformed lease contributes nothing."""
+    if not leases:
+        return
+    from collections import Counter
+    by_dir: Counter = Counter()
+    by_tag: Counter = Counter()
+    for lease in leases:
+        raw_dir = str(lease.get("dir") or "")
+        if raw_dir:
+            by_dir[os.path.normcase(os.path.normpath(raw_dir))] += 1
+        tag = str(lease.get("tag") or "")
+        if tag:
+            by_tag[tag] += 1
+    for r in rows:
+        if r.get("kind") != "worker":
+            continue
+        if str(r.get("product") or "claude").lower() != "opencode":
+            continue
+        rdir = str(r.get("dir") or "")
+        n = by_dir.get(os.path.normcase(os.path.normpath(rdir)), 0) if rdir else 0
+        if not n:
+            n = by_tag.get(str(r.get("tag") or ""), 0)
+        if n and int(r.get("live_sessions") or 0) < n:
+            r["live_sessions"] = n
+            r["active_sessions"] = max(int(r.get("active_sessions") or 0), n)
+            r["dispatch_leases"] = n  # provenance: count came from .pid/.account sidecars
 
 
 def _reconcile_identity_peer_availability(rows: list[dict]) -> None:
@@ -1671,9 +1740,14 @@ def annotated_roster(home: str = USER, policy: dict | None = None,
     ``throttle``/``sessions`` overrides) when a caller already has the data in hand."""
     consult_probe_ledger = registry is None
     reg = load_registry() if registry is None else registry
+    # On the live front door (no explicit registry), reflect live DISPATCHED opencode
+    # workers from their .pid/.account sidecars so a docs-lane worker is visible in the
+    # roster. Hermetic callers pass an explicit registry and skip the filesystem read.
+    seat_leases = live_seat_leases() if consult_probe_ledger else None
     return annotate_accounts(
         discover_accounts(home, policy, config_home=config_home),
-        reg, throttle, sessions, probe_ledger=consult_probe_ledger)
+        reg, throttle, sessions, probe_ledger=consult_probe_ledger,
+        seat_leases=seat_leases)
 
 
 def read_oauth_token(account_dir: str) -> str | None:
@@ -2642,6 +2716,8 @@ def _cli_list(rows: list[dict]) -> None:
     print(f"AVAILABLE (offered to switcher now): {len(kinds['available'])}")
     for r in kinds["available"]:
         detail = f"{r['active_sessions']} active, {r['live_sessions']} live"
+        if r.get("usage_soon_reset"):
+            detail += f"; cap resets {r['usage_soon_reset']}"
         tier = f"t{r.get('model_tier', '?')}"
         model = r.get("model") or ""
         print(f"  [{r.get('product','claude'):<8}] {r['tag']:<16} {r['account']:<28} {tier:<3} {model:<24} {detail}")

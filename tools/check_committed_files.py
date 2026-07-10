@@ -18,7 +18,7 @@ Rules:
   * SOFT junk  — *.log / *.tmp / report.json / agent-report.json — refused UNLESS
     under a data dir (fak/experiments/, fak/testdata/) where such files are real
     committed evidence, or on the small kept-exception allowlist.
-  * Large file — anything larger than MAX_BYTES (default 10 MiB) — refused (use
+  * Large file — anything larger than MAX_BYTES (default 25 MiB) — refused (use
     Git LFS, trim it, or override).
 
 Modes: --audit-staged (pre-commit, staged additions) | --audit-tree (CI/DoD).
@@ -34,10 +34,13 @@ from dispatch_worker import install_no_window_subprocess_defaults
 import sys
 install_no_window_subprocess_defaults(subprocess)
 
-# 10 MiB: large enough to admit the 1440p hero-video.mp4 (~9.4 MiB), which the live
-# Pages hero + README embed by raw URL (so it cannot be dropped), while still refusing
-# genuinely oversized blobs from a forever-history public tree.
-DEFAULT_MAX_BYTES = 10 * 1024 * 1024
+# 25 MiB: comfortably admits legitimate committed assets (the 1440p hero-video.mp4 at
+# ~9.4 MiB the live Pages hero + README embed by raw URL, a model card, a fixture corpus, a
+# demo capture) that a 10 MiB cap was false-blocking, while still refusing genuinely
+# oversized blobs from a forever-history public tree. Kept in lockstep with the Go twin
+# (internal/hooks/gate_fileadmission.go fileAdmissionMaxBytes) so the pre-commit Go gate and
+# this CI checker never disagree; --max-bytes still overrides per-invocation.
+DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 
 # Always-junk: never legitimately committed.
 HARD_JUNK = [
@@ -176,6 +179,13 @@ def main() -> int:
     ap.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     a = ap.parse_args()
     root = os.path.abspath(a.root)
+
+    # A non-positive --max-bytes falls back to the default, matching the Go twin's
+    # gateEnvInt (FAK_MAX_FILE_BYTES) which treats <=0/garbage as "unset" rather than a
+    # 0-byte cap that would refuse every file. Keeps the two enforcers in lockstep on
+    # degenerate input; ALLOW_STRAY_FILE=1 is the way to actually disable the check.
+    if a.max_bytes <= 0:
+        a.max_bytes = DEFAULT_MAX_BYTES
 
     if a.audit_staged and os.environ.get("ALLOW_STRAY_FILE") == "1":
         print("file-admission: skipped (ALLOW_STRAY_FILE=1).")

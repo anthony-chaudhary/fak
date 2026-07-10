@@ -191,7 +191,10 @@ class DosSupervisorWatchdogTest(unittest.TestCase):
 
         self.assertTrue(got["ok"])
         self.assertEqual(got["action"], "would_enact")
-        self.assertIn("issue_resolve_dispatch.py", " ".join(got["command"]))
+        # #1404: the plan-empty fallback runs the native Go tick, not the retired
+        # Python dispatcher.
+        self.assertIn("dispatch tick", " ".join(got["command"]))
+        self.assertNotIn("issue_resolve_dispatch.py", " ".join(got["command"]))
         self.assertNotIn("--live", got["command"])
         self.assertEqual(got["issue_fallback"]["routed"], 3)
         self.assertIn("falling back to issue surface", got["reason"])
@@ -244,7 +247,10 @@ class DosSupervisorWatchdogTest(unittest.TestCase):
         self.assertEqual(got["action"], "enacted")
         self.assertEqual(len(calls), 1)
         self.assertIn("--live", calls[0][0])
-        self.assertIn("issue_resolve_dispatch.py", " ".join(calls[0][0]))
+        # #1404: the live plan-empty fallback runs `fak dispatch tick`, not the
+        # retired Python dispatcher.
+        self.assertIn("dispatch tick", " ".join(calls[0][0]))
+        self.assertNotIn("issue_resolve_dispatch.py", " ".join(calls[0][0]))
 
     def test_live_ready_to_canary_calls_runner_once(self) -> None:
         mod = load()

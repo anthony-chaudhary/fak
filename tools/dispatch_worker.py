@@ -413,6 +413,14 @@ CLAUDE_GUARD_RESTART_LIMIT = "16"
 # --max-duration is CUMULATIVE across --restart-on-budget relaunches, so it bounds TOTAL
 # lifespan regardless of restart count. Mirrors cmd/dispatchworker/guard.go:claudeGuardMaxDuration.
 CLAUDE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
+# The opencode path takes NO --restart-on-budget (its budget is a single run), so this is
+# a plain wall-clock envelope: the guarded opencode worker SELF-terminates at the cap even
+# when no external reaper runs. That matters for the detached docs-lane spawn path
+# (dispatch_glm_docs.py), which does not sit inside the main dispatcher's reap loop -- an
+# opencode worker retry-looping against a DOWN gateway would otherwise burn a slot and its
+# host threads for its whole (unbounded) lifespan. Backed off DEFAULT_TIMEOUT_S so the
+# in-guard drain still precedes launch()'s hard-kill on the synchronous path.
+OPENCODE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
 
 
 def claude_guard_budget_args(
@@ -813,7 +821,9 @@ def guard_wrap(
             e.get(OPENCODE_GUARD_BASE_URL_ENV) or "").strip()
         if not base:
             return cmd  # don't misroute a local-upstream worker
-        extra = ["--base-url", base]
+        # Every guarded non-claude worker gets a hard wall-clock cap so it self-terminates
+        # even off the main dispatcher's reap loop (see OPENCODE_GUARD_MAX_DURATION).
+        extra = ["--base-url", base, "--max-duration", OPENCODE_GUARD_MAX_DURATION]
         if backend == "opencode":
             addr = _opencode_guard_addr(e)
             extra = ["--addr", addr, *extra]

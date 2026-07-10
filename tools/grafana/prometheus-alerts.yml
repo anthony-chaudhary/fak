@@ -94,6 +94,21 @@ groups:
           summary: "Workers stalling on API errors"
           description: "{{ $value }} worker(s) stopped on a transient API/transport error (STOPPED_APIERR) for 5m — if climbing, the upstream API is degraded. Check provider status before adding load."
 
+      # Companion to FleetApiErrorStalls: that rule fires on a COUNT of stalled
+      # workers; this fires on the RATE (per-min) of new STOPPED_APIERR sessions. A
+      # self-inflicted crash-loop — workers relaunching straight back into the same
+      # transient error faster than they finish — shows as a sustained high rate even
+      # while a plain 'active workers' gauge still looks busy. This is the storm a
+      # bloated registry can otherwise hide (0/24 usable reading as 'saturated').
+      - alert: FleetApiErrorStorm
+        expr: fleet_apierr_per_min > 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API-error crash-loop storm"
+          description: "STOPPED_APIERR sessions are being created at {{ $value | printf \"%.1f\" }}/min for 5m — workers are dying on API errors faster than they finish (a crash-loop, not progress). Check fleet_account_apierr_recent for the storming account(s) and pause/replace them before they burn more capacity."
+
   - name: fleet_cost
     rules:
       - alert: FleetTokenWaste

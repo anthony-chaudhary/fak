@@ -30,6 +30,15 @@ Closed status vocabulary (one of):
     LIMIT      usage/session limit; carries the reset window(s)
     APIERR     transient API/transport error from the server
     TRANSPORT  could not even run the probe (spawn failure / timeout) -- local/transport
+    GATEWAY_DOWN  opencode/glm seat only: the LOCAL guard gateway the worker routes through
+                  refused the connection -- a local infra fact, never an account block
+
+An opencode/glm seat is NOT a ``claude -p pong`` surface: its worker routes
+worker -> ``fak guard`` -> a LOCAL gateway (e.g. ``http://127.0.0.1:18080/v1``) ->
+the provider. Probing it with the Claude prober stamps a bogus AUTH blocker (wrong
+config dir); ``probe_opencode_account`` instead pings the SAME guard base URL the
+worker would use, so a down gateway (the 2026-07-09 docs-lane incident: every glm
+worker connection-refused for its whole lifespan) is caught on the hop that broke.
 
 CLI:
     python tools/account_probe.py                 # probe blocked+stale workers, table
@@ -44,6 +53,7 @@ import concurrent.futures
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -170,6 +180,11 @@ STATUS_TO_DISP = {
     "LIMIT": "STOPPED_LIMIT",
     "APIERR": "STOPPED_APIERR",
     "TRANSPORT": "STOPPED_QUIET",
+    # A down LOCAL gateway is transport-class, not an account block: it maps to a QUIET
+    # stopped disp so it never latches the seat auth-blocked, and _fresh_probe_from_ledger
+    # (which only folds OK + auth/limit) leaves the carried status untouched -- a transient
+    # infra outage must not sideline the account, but the fresh verdict is still surfaced.
+    "GATEWAY_DOWN": "STOPPED_QUIET",
 }
 KNOWN_STATUSES = tuple(STATUS_TO_DISP)
 # Statuses that CAN silently recover and so are always worth re-probing, vs LIMIT which
@@ -305,12 +320,25 @@ def probe_account(row: dict[str, Any], *, claude_exe: str | None = None,
                   model: str = DEFAULT_PROBE_MODEL, prompt: str = DEFAULT_PROMPT,
                   timeout: float = DEFAULT_TIMEOUT_S,
                   runner: Callable[..., tuple[int, str, str, bool, str]] | None = None,
+                  connector: Callable[..., dict[str, Any]] | None = None,
+                  target_resolver: Callable[..., tuple[str, str]] | None = None,
+                  workspace: str | os.PathLike[str] | None = None,
+                  runs_dir: str | os.PathLike[str] | None = None,
                   ) -> dict[str, Any]:
     """Actively probe one account row (from fleet_accounts.discover_accounts).
 
     ``runner`` is injectable for tests; it must accept (argv, *, config_dir, timeout)
     and return (exit_code, stdout, stderr, timed_out, spawn_error).
+
+    A ``product == "opencode"`` row is routed to :func:`probe_opencode_account`: its
+    worker is not a ``claude -p pong`` surface, so running the Claude prober under its
+    config dir only ever stamps a bogus AUTH block. This is the single choke point that
+    fixes BOTH the batch path AND an explicit ``--account`` on an opencode seat.
     """
+    if str(row.get("product") or "claude").lower() == "opencode":
+        return probe_opencode_account(
+            row, timeout=timeout, connector=connector,
+            target_resolver=target_resolver, workspace=workspace, runs_dir=runs_dir)
     exe = claude_exe or default_claude_exe()
     config_dir = str(row.get("dir") or "")
     account = str(row.get("account") or "")
@@ -336,6 +364,201 @@ def probe_account(row: dict[str, Any], *, claude_exe: str | None = None,
         "latency_ms": latency_ms,
         "exit_code": exit_code,
         "raw_tail": tail[-400:],
+    })
+    return verdict
+
+
+# ------------------------------------------------------- opencode/glm gateway probe
+# The default opencode/glm model behind the docs-lane zai-coding-plan seat. Only the
+# provider it resolves to matters for base-URL resolution; the answer is irrelevant.
+DEFAULT_OPENCODE_MODEL = "zai-coding-plan/glm-4.5-air"
+_GLM_RESET_RE = re.compile(r"reset at (\d{4}-\d{2}-\d{2})")
+
+
+def _split_base_host_port(base_url: str) -> tuple[str, int] | None:
+    """``(host, port)`` for a gateway base URL like ``http://127.0.0.1:18080/v1``."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit((base_url or "").strip())
+    except ValueError:
+        return None
+    host = parts.hostname or ""
+    if not host:
+        return None
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return None
+    return host, int(port)
+
+
+def opencode_guard_target(row: dict[str, Any], *,
+                          workspace: str | os.PathLike[str] | None = None,
+                          runs_dir: str | os.PathLike[str] | None = None,
+                          ) -> tuple[str, str]:
+    """Resolve the ``(model, guard base URL)`` an opencode worker for this seat would use.
+
+    Reuses the SAME resolution the dispatcher does -- ``dispatch_worker.opencode_guard_
+    base_url`` over an ``issue_resolve_dispatch.opencode_worker_env`` -- so the probe pings
+    exactly the endpoint the real worker would, never a guess. The heavy dispatch modules
+    are imported lazily so account_probe stays light for its claude-only callers."""
+    import issue_resolve_dispatch as ird  # lazy: avoids an import cycle + heavy deps
+    import dispatch_worker
+    ws = Path(workspace) if workspace else Path(__file__).resolve().parent.parent
+    runs = Path(runs_dir) if runs_dir else ws / fleet_accounts.RUNS_DIRNAME
+    model = str(row.get("model") or (row.get("profile") or {}).get("model")
+                or DEFAULT_OPENCODE_MODEL)
+    cmd = ird.build_worker_command("opencode", DEFAULT_PROMPT, model)
+    env = {**os.environ,
+           **ird.opencode_worker_env(str(row.get("dir") or ""), "docs", ws, runs)}
+    base = dispatch_worker.opencode_guard_base_url(cmd, env)
+    return model, base
+
+
+def _default_opencode_connector(base_url: str, *, timeout: float) -> dict[str, Any]:
+    """Exercise the guard->gateway hop: TCP-connect the base URL, then (only when the
+    port answers) a tiny HTTP ``GET <base>/models`` through the gateway. Returns a
+    structured ``{reachable, status, body, error}``.
+
+    TCP-FIRST is the load-bearing property: a DOWN gateway is reported WITHOUT ever
+    spawning an opencode worker, which is the whole point of the preflight (a worker
+    against a refused port just retry-loops for its full lifespan)."""
+    import socket
+    hp = _split_base_host_port(base_url)
+    if not hp:
+        return {"reachable": False, "status": None, "body": "",
+                "error": f"unparseable base url {base_url!r}"}
+    host, port = hp
+    try:
+        with socket.create_connection((host, port), timeout=min(timeout, 5.0)):
+            pass
+    except OSError as exc:
+        return {"reachable": False, "status": None, "body": "", "error": str(exc)}
+    import urllib.error
+    import urllib.request
+    url = base_url.rstrip("/") + "/models"
+    try:
+        with urllib.request.urlopen(
+                urllib.request.Request(url, headers={"Accept": "application/json"}),
+                timeout=timeout) as resp:
+            body = resp.read(4096).decode("utf-8", "replace")
+            return {"reachable": True,
+                    "status": getattr(resp, "status", None) or resp.getcode(),
+                    "body": body, "error": ""}
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read(4096).decode("utf-8", "replace")
+        except Exception:
+            pass
+        return {"reachable": True, "status": exc.code, "body": body, "error": ""}
+    except (urllib.error.URLError, OSError) as exc:
+        # The port accepted the TCP connection but the HTTP request could not complete:
+        # the gateway is up but not answering the models route -- transient, not down.
+        return {"reachable": True, "status": None, "body": "", "error": str(exc)}
+
+
+def classify_opencode_probe(result: dict[str, Any], *, base_url: str = "",
+                            ) -> dict[str, Any]:
+    """Map an opencode gateway-probe result to the closed status vocabulary.
+
+    ``GATEWAY_DOWN`` is the opencode-specific verdict: the local guard gateway the worker
+    routes through refused the connection (or the base URL was unparseable). When the
+    gateway answers, provider signals forwarded through it are read with the SAME
+    ``fleet_session_signals`` regexes the passive scan and the claude probe use, so an
+    opencode LIMIT/AUTH speaks one language with the rest of the roster."""
+    if not result.get("reachable"):
+        err = result.get("error") or "connection refused"
+        return {"status": "GATEWAY_DOWN", "block_kind": "gateway",
+                "block_reason": f"guard gateway unreachable at {base_url or '?'}: {err}",
+                "reset": None, "weekly": None}
+    status = result.get("status")
+    body = result.get("body") or ""
+    windows = fleet_session_signals.limit_resets(body)
+    if status == 429 or "limit exhausted" in body.lower() or windows:
+        reset = None
+        if windows:
+            reset = windows.get("daily") or windows.get("weekly")
+        if not reset:
+            m = _GLM_RESET_RE.search(body)
+            reset = m.group(1) if m else None
+        return {"status": "LIMIT", "block_kind": "usage",
+                "block_reason": (f"provider quota exhausted; resets {reset}" if reset
+                                 else "provider quota exhausted"),
+                "reset": reset, "weekly": (windows or {}).get("weekly")}
+    if status in (401, 403) or (body and fleet_session_signals.is_auth_error(body)):
+        kind = fleet_session_signals.auth_block_kind(body) if body else "auth"
+        st = {"access": "ACCESS", "credit": "CREDIT"}.get(kind, "AUTH")
+        reason = (fleet_session_signals.auth_block_reason(body) if body
+                  else f"gateway returned HTTP {status}")
+        return {"status": st, "block_kind": kind, "block_reason": reason,
+                "reset": None, "weekly": None}
+    if isinstance(status, int) and 200 <= status < 300:
+        return {"status": "OK", "block_kind": None, "block_reason": "",
+                "reset": None, "weekly": None}
+    if isinstance(status, int) and status >= 500:
+        return {"status": "APIERR", "block_kind": "apierr",
+                "block_reason": f"gateway returned HTTP {status}",
+                "reset": None, "weekly": None}
+    # Reachable but the exercise was inconclusive (no HTTP status / odd body): transient,
+    # never a hard block -- we do not sideline a seat on a flaky models route.
+    err = result.get("error") or (f"HTTP {status}" if status else "no response")
+    return {"status": "APIERR", "block_kind": "apierr",
+            "block_reason": f"gateway reachable but probe inconclusive: {err}",
+            "reset": None, "weekly": None}
+
+
+def probe_opencode_account(row: dict[str, Any], *, timeout: float = DEFAULT_TIMEOUT_S,
+                           connector: Callable[..., dict[str, Any]] | None = None,
+                           target_resolver: Callable[..., tuple[str, str]] | None = None,
+                           workspace: str | os.PathLike[str] | None = None,
+                           runs_dir: str | os.PathLike[str] | None = None,
+                           ) -> dict[str, Any]:
+    """Actively probe one opencode/glm seat by pinging the guard base URL its worker uses.
+
+    ``connector`` and ``target_resolver`` are injectable for hermetic tests (no socket, no
+    dispatch import). The verdict shares the closed status vocabulary + the fleet_sessions
+    row projection with the claude probe, so it rides the same ledger fold into the roster.
+    """
+    account = str(row.get("account") or "")
+    tag = str(row.get("tag") or fleet_accounts.account_tag(account))
+    config_dir = str(row.get("dir") or "")
+    resolve = target_resolver or opencode_guard_target
+    started = utc_now()
+    base = ""
+    model = ""
+    try:
+        model, base = resolve(row, workspace=workspace, runs_dir=runs_dir)
+    except Exception as exc:  # resolution must never crash the batch
+        verdict = {"status": "TRANSPORT", "block_kind": "transport",
+                   "block_reason": f"could not resolve guard target: {exc}",
+                   "reset": None, "weekly": None}
+    else:
+        if not str(base).strip():
+            verdict = {"status": "TRANSPORT", "block_kind": "transport",
+                       "block_reason": "no guard base url configured; cannot exercise "
+                                       "the gateway path",
+                       "reset": None, "weekly": None}
+        else:
+            conn = connector or _default_opencode_connector
+            try:
+                result = conn(base, timeout=timeout)
+            except Exception as exc:  # a raising connector is transport, not a block
+                result = {"reachable": False, "status": None, "body": "",
+                          "error": f"connector raised: {exc}"}
+            verdict = classify_opencode_probe(result, base_url=base)
+    probed = utc_now()
+    verdict.update({
+        "account": account,
+        "tag": tag,
+        "dir": config_dir,
+        "product": "opencode",
+        "probed_utc": probed.isoformat(),
+        "latency_ms": int((probed - started).total_seconds() * 1000),
+        "exit_code": 0,
+        "raw_tail": str(verdict.get("block_reason") or "")[-400:],
+        "base_url": base,
+        "model": model,
     })
     return verdict
 
@@ -386,12 +609,13 @@ def _should_probe(row: dict[str, Any], selector: str) -> bool:
     """Selector policy. ``row`` is an ANNOTATED worker row (has available/blocked/etc.)."""
     if row.get("kind") != "worker":
         return False
-    # The probe IS a `claude -p pong` under the row's config dir, so it can only
-    # assess Claude seats: under an opencode dir it fails auth and stamps a bogus
-    # AUTH blocker that merge_known_auth then carries forward (observed 2026-07-06,
-    # first live `stale` tick). Non-claude rows are never selector-probed; the
-    # explicit single-`account` override in select_targets stays operator-honored.
-    if str(row.get("product") or "claude").lower() != "claude":
+    # probe_account routes by product: a claude row gets the `claude -p pong` surface, an
+    # opencode row gets the gateway-aware probe_opencode_account (which pings the guard
+    # base URL its worker would use). Both are safe to selector-probe, so both are allowed
+    # here. Any OTHER product (e.g. codex) has no probe implementation and would only ever
+    # stamp a bogus block under the wrong config dir -- those stay selector-skipped, with
+    # the explicit single-`account` override in select_targets still operator-honored.
+    if str(row.get("product") or "claude").lower() not in ("claude", "opencode"):
         return False
     if selector == "all":
         return True
@@ -453,8 +677,16 @@ def probe_accounts(targets: list[dict[str, Any]], *, claude_exe: str | None = No
                    model: str = DEFAULT_PROBE_MODEL, timeout: float = DEFAULT_TIMEOUT_S,
                    max_workers: int = DEFAULT_MAX_WORKERS,
                    runner: Callable[..., tuple[int, str, str, bool, str]] | None = None,
+                   connector: Callable[..., dict[str, Any]] | None = None,
+                   target_resolver: Callable[..., tuple[str, str]] | None = None,
+                   workspace: str | os.PathLike[str] | None = None,
+                   runs_dir: str | os.PathLike[str] | None = None,
                    ) -> list[dict[str, Any]]:
-    """Probe a list of (annotated worker) rows concurrently, bounded by max_workers."""
+    """Probe a list of (annotated worker) rows concurrently, bounded by max_workers.
+
+    A batch may mix claude and opencode rows; ``probe_account`` routes each by product,
+    so ``connector``/``target_resolver`` (the opencode injection seam) ride alongside the
+    claude ``runner`` and are ignored for claude rows."""
     if not targets:
         return []
     workers = max(1, min(int(max_workers), len(targets)))
@@ -462,7 +694,9 @@ def probe_accounts(targets: list[dict[str, Any]], *, claude_exe: str | None = No
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {
             pool.submit(probe_account, r, claude_exe=claude_exe, model=model,
-                        timeout=timeout, runner=runner): r
+                        timeout=timeout, runner=runner, connector=connector,
+                        target_resolver=target_resolver, workspace=workspace,
+                        runs_dir=runs_dir): r
             for r in targets
         }
         for fut in concurrent.futures.as_completed(futs):

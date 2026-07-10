@@ -64,6 +64,20 @@ def test_opencode_guarded_with_loopback_lab_proxy_base() -> None:
     assert cmd[cmd.index("--") + 1:] == raw, joined
 
 
+def test_opencode_guarded_gets_wallclock_max_duration() -> None:
+    # The detached docs-lane spawn path (dispatch_glm_docs.py) runs OFF the main
+    # dispatcher's reap loop, so the guard must cap the worker's wall clock itself --
+    # otherwise a worker retry-looping against a down gateway runs unbounded.
+    raw = dw.build_command("glm", "opencode")
+    cmd, guarded = dw.guarded_launch_command(raw, "glm", "opencode", ROOT, env=_env(GLM_BASE))
+    assert guarded is True, cmd
+    assert "--max-duration" in cmd, cmd
+    assert cmd[cmd.index("--max-duration") + 1] == dw.OPENCODE_GUARD_MAX_DURATION, cmd
+    # It stays BEFORE the `--` separator (a guard flag, not a worker arg).
+    assert cmd.index("--max-duration") < cmd.index("--"), cmd
+    assert cmd[cmd.index("--") + 1:] == raw, cmd
+
+
 def test_opencode_unguarded_without_base_url() -> None:
     raw = dw.build_command("glm", "opencode")
     cmd, guarded = dw.guarded_launch_command(raw, "glm", "opencode", ROOT, env=_env(None))

@@ -434,6 +434,54 @@ def _limited_join(rows: list[str], *, limit: int = 3) -> str:
     return "; ".join(kept)
 
 
+def _section_lines(label: str, items: list[str], *, limit: int) -> list[str]:
+    """Render one operator section as scannable lines instead of a ``;``-joined
+    run-on. 0 items → nothing; exactly 1 → a plain inline ``label: item`` line (keeps
+    quiet states compact and the ``label: value`` adjacency the tests pin); 2+ → a bold
+    ``*label:*`` header followed by one ``• item`` bullet per line, so a phone reader
+    scans a list rather than a wall. Overflow past ``limit`` collapses to a trailing
+    ``• +N more`` bullet."""
+    clean = [str(i).strip() for i in items if str(i).strip()]
+    if not clean:
+        return []
+    if len(clean) == 1:
+        return [f"{label}: {clean[0]}"]
+    kept = clean[:limit]
+    bullets = [f"• {c}" for c in kept]
+    if len(clean) > limit:
+        bullets.append(f"• +{len(clean) - limit} more")
+    return [f"*{label}:*"] + bullets
+
+
+# The per-lane low-yield action row (dispatch_status emits one, verbatim, per lane):
+# "lane X low-yield: N turns / M session(s), 0 ancestry-closes; re-scope or exclude the
+# lane". Four flagged lanes = four near-identical clauses; fold them into one line.
+_LOW_YIELD_ROW = re.compile(
+    r"^lane (\S+) low-yield: (\d+) turns / (\d+) session\(s\), "
+    r"0 ancestry-closes; re-scope or exclude the lane$")
+
+
+def _aggregate_low_yield(rows: list[str]) -> tuple[str, list[str]]:
+    """Collapse the repeated per-lane low-yield action rows into ONE compact line so N
+    identical ``re-scope or exclude the lane`` clauses become a single scannable fact.
+    Returns ``(aggregated_line_or_'', remaining_rows)``; rows that don't match the
+    low-yield grammar pass through unchanged, in order."""
+    lanes: list[tuple[str, str, str]] = []
+    rest: list[str] = []
+    for r in rows:
+        m = _LOW_YIELD_ROW.match(str(r or "").strip())
+        if m:
+            lanes.append((m.group(1), m.group(2), m.group(3)))
+        else:
+            rest.append(r)
+    if not lanes:
+        return "", rows
+    bits = ", ".join(f"{lane} {turns}t/{sess}s" for lane, turns, sess in lanes)
+    line = (f"{len(lanes)} low-yield lane(s) burning turns with nothing closed: "
+            f"{bits}; re-scope or drop them")
+    return line, rest
+
+
 def _friendly_time(raw: Any) -> str:
     text = str(raw or "").strip()
     if not text:
@@ -601,7 +649,7 @@ def _fleet_state(snap: dict[str, Any] | None) -> str:
     heal = int(sysv.get("self_healing", 0) or 0)
     tail: list[str] = []
     if esc:
-        tail.append(f"{esc} operator")
+        tail.append(f"{esc} need you")
     if heal:
         tail.append(f"{heal} auto-handled")
     return word + (f" ({', '.join(tail)})" if tail else "")
@@ -684,6 +732,12 @@ def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
         joined = fleet_top._join_attention(items)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
         joined = _limited_join([str(i.get("title") or i) for i in items], limit=2)
+    # A too-long resume command is inlined by fleet_top as a wordy "command omitted…"
+    # clause; trim the prose to a terse pointer so it stops jumbling the attention line.
+    joined = joined.replace(
+        "→ command omitted from Slack summary; run `python tools/fleet_top.py --once` "
+        "for the copyable resume command",
+        "→ resume cmd too long (`python tools/fleet_top.py --once`)")
     replacements = {
         "DEAD_MIDTOOL": "stuck mid-tool",
         "DEAD_KILLED": "killed mid-turn",
@@ -706,13 +760,6 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     the automation is already handling. This deliberately avoids the per-plane
     "plane:" labels and boxed terminal chrome."""
     glyph, severity = _rollup_severity(dispatch_payload, fleet_snap)
-    lines: list[str] = [
-        f"{glyph} *fleet roll-up — {severity}*",
-        f"status: issue work {_dispatch_state(dispatch_payload)}; sessions {_fleet_state(fleet_snap)}",
-        _issue_work_line(dispatch_payload),
-        _session_line(fleet_snap),
-    ]
-    lines.extend(_trend_lines(dispatch_payload, fleet_snap))
 
     needs: list[str] = []
     handled: list[str] = []
@@ -721,7 +768,11 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
         buckets = dispatch_status._dispatch_slack_buckets(dispatch_payload)  # type: ignore[attr-defined]
         action_rows = buckets.get("action", [])
         dispatch_login_tags = _operator_login_tags(action_rows)
+        # Fold the repeated per-lane low-yield rows into one line before rewording.
+        low_yield_line, action_rows = _aggregate_low_yield(action_rows)
         needs.extend(_operator_action(r) for r in action_rows)
+        if low_yield_line:
+            needs.append(low_yield_line)
         handled.extend(_operator_handled(r) for r in buckets.get("auto-solving", []))
         waiting.extend(_operator_waiting(dispatch_payload, buckets.get("expected", [])))
     else:
@@ -742,11 +793,22 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
         if line:
             handled.append(line)
 
-    lines.append("operator moves: " + (_limited_join(needs, limit=4) if needs else "none"))
-    if handled:
-        lines.append("being handled: " + _limited_join(handled, limit=3))
-    if waiting:
-        lines.append("waiting: " + _limited_join(waiting, limit=2))
+    # Actions-first: header, one-line status, then WHAT NEEDS A HUMAN — so a phone
+    # reader sees the ask before the supporting metrics. Context (issue-work / session
+    # counts, trends) follows, and what the automation is already handling sits last.
+    lines: list[str] = [
+        f"{glyph} *fleet roll-up — {severity}*",
+        f"status: issue work {_dispatch_state(dispatch_payload)}; sessions {_fleet_state(fleet_snap)}",
+    ]
+    if needs:
+        lines.extend(_section_lines("operator moves", needs, limit=4))
+    else:
+        lines.append("operator moves: none")
+    lines.append(_issue_work_line(dispatch_payload))
+    lines.append(_session_line(fleet_snap))
+    lines.extend(_trend_lines(dispatch_payload, fleet_snap))
+    lines.extend(_section_lines("being handled", handled, limit=3))
+    lines.extend(_section_lines("waiting", waiting, limit=2))
     return "\n".join(line for line in lines if line)
 
 

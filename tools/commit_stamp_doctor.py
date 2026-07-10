@@ -110,6 +110,26 @@ def cmd_demo_leaves(repo_root=None) -> set:
     return {p.name.lower() for p in cmd_dir.iterdir() if p.is_dir()}
 
 
+def internal_leaves(repo_root=None) -> set:
+    """Lowercased names of the real `internal/<name>/` package dirs.
+
+    The DOMINANT valid stamp shape: the fleet stamps a ship of package
+    `internal/<name>/` as `(fak <name>)` (e.g. `(fak dispatchtick)` for
+    `internal/dispatchtick/**`). Such a leaf is NOT a declared lane *name* in
+    dos.toml `[lanes]` — it binds through the lane whose tree glob covers
+    `internal/<name>/**` — yet it is a legitimate per-package ship, not the typo
+    the off-lane warning hunts for. Recognizing the real `internal/<name>` dirs is
+    what keeps the off-lane signal honest: without it, nearly every valid
+    package-scoped stamp reads as a phantom leaf. A RESIDUAL off-lane entry after
+    lanes ∪ cmd-demos ∪ internal-pkgs is a genuine typo / non-lane label. Returns an
+    empty set when `internal/` is absent (check then SKIPPED)."""
+    root = Path(repo_root) if repo_root else Path(__file__).resolve().parent.parent
+    internal_dir = root / "internal"
+    if not internal_dir.is_dir():
+        return set()
+    return {p.name.lower() for p in internal_dir.iterdir() if p.is_dir()}
+
+
 def _git_log(n: int) -> list[tuple[str, str]]:
     """Return [(short_sha, subject), …] for the last n commits, newest first."""
     out = subprocess.run(
@@ -155,7 +175,8 @@ def audit(n: int) -> dict:
     # What's left after both is a genuine typo / non-lane label — the real signal here.
     lanes = declared_lanes()
     cmd_demos = cmd_demo_leaves()
-    recognized = lanes | cmd_demos
+    internal_pkgs = internal_leaves()
+    recognized = lanes | cmd_demos | internal_pkgs
     off_lane = []
     if lanes:
         for sha, subj, k in rows:
@@ -175,6 +196,7 @@ def audit(n: int) -> dict:
         "coverage_pct": coverage,
         "known_lanes": len(lanes),
         "cmd_demos_recognized": len(cmd_demos),
+        "internal_pkgs_recognized": len(internal_pkgs),
         "off_lane_trailers": off_lane[:15],
         "unstamped_samples": [
             {"sha": sha, "subject": subj}

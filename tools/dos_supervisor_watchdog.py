@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
 import sys
@@ -265,10 +266,42 @@ def _issue_fallback_ready(issue_fallback: dict[str, Any] | None) -> bool:
     return _int(counts.get("routed"), 0) > 0 and bool(lanes)
 
 
+def fak_binary(workspace: Path) -> list[str]:
+    """Resolve the ``fak`` invocation for the native Go dispatch verbs (#1404).
+
+    Mirrors register_issue_dispatch.ps1's Resolve-FakLoopAction and the Go tick's own
+    resolveDispatchFakBin: prefer ``$FAK_BIN``, then the in-tree ``tools/.bin/fak[.exe]``,
+    then ``fak`` on PATH, else ``go run ./cmd/fak`` so a source-tree node never silently
+    reaches for the retired Python dispatcher. Returned as an argv prefix (the ``go run``
+    case is three tokens)."""
+    env_bin = (os.environ.get("FAK_BIN") or "").strip()
+    if env_bin and Path(env_bin).exists():
+        return [env_bin]
+    base = Path(workspace) / "tools" / ".bin"
+    for name in ("fak.exe", "fak"):
+        p = base / name
+        if p.exists():
+            return [str(p)]
+    on_path = shutil.which("fak")
+    if on_path:
+        return [on_path]
+    return ["go", "run", "./cmd/fak"]
+
+
 def issue_fallback_command(workspace: Path, target: int, *, live: bool) -> list[str]:
-    cmd = [
-        sys.executable,
-        str(workspace / "tools" / "issue_resolve_dispatch.py"),
+    """Native Go issue-resolution tick for the plan-empty fallback (#1404).
+
+    Retires tools/issue_resolve_dispatch.py from this scheduled resolve path: the
+    always-on issue closer was ported to ``fak dispatch tick`` (internal/dispatchtick),
+    which the primary scheduled resolve task (register_issue_dispatch.ps1 -Mode resolve)
+    already runs. ``fak dispatch tick`` spawns at most one issue-resolution worker per
+    tick under the same preflight cap, cooldown, and live-sidecar de-dup the Python
+    dispatcher carried, and takes the identical --workspace/--max-workers/--json/--live
+    flags — a behavior-parity swap that leaves the supervisor's plan-empty fallback on
+    the native verb instead of the legacy interpreter."""
+    cmd = fak_binary(workspace)
+    cmd += [
+        "dispatch", "tick",
         "--workspace", str(workspace),
         "--max-workers", str(max(1, target)),
         "--json",

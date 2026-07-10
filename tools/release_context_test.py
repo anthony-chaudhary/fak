@@ -12,10 +12,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "release_context.py"
+DECIDE_SCRIPT = ROOT / "tools" / "release_decide.py"
 
 
 def load():
     spec = importlib.util.spec_from_file_location("release_context", SCRIPT)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def load_decide():
+    """Load the CONSUMER so a test can pin the producer/consumer CI-signal contract."""
+    import sys
+    tools = str(ROOT / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    spec = importlib.util.spec_from_file_location("release_decide_under_test", DECIDE_SCRIPT)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -195,6 +209,130 @@ class ReleaseContextTest(unittest.TestCase):
         rc = load()
         self.assertEqual(rc.decisive_runs_with_ancestry(None, "deadbeef"), [])
         self.assertEqual(rc.decisive_runs_with_ancestry([{"conclusion": "success"}], ""), [])
+
+    def test_fold_latest_trunk_ci_names_the_deciding_workflow(self) -> None:
+        rc = load()
+        _, _, red_note = rc.fold_latest_trunk_ci(
+            [{"conclusion": "failure", "headSha": "abcdef123456"}], "ci-fast.yml")
+        self.assertIn("ci-fast.yml", red_note)
+        _, _, none_note = rc.fold_latest_trunk_ci([], "ci-fast.yml")
+        self.assertIn("ci-fast.yml", none_note)
+        # Default stays ci.yml so the whole-CI signal's wording is unchanged.
+        _, _, default_note = rc.fold_latest_trunk_ci([])
+        self.assertIn("ci.yml", default_note)
+
+    def _commits(self, root: Path, n: int) -> list[str]:
+        shas = []
+        for i in range(n):
+            write(root / "x.txt", f"{i}\n")
+            git(root, "add", "x.txt")
+            git(root, "commit", "-m", f"c{i}")
+            shas.append(subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True).strip())
+        return shas
+
+    def test_ci_signal_for_workflow_queries_that_workflow_and_skips_runs_on_head(self) -> None:
+        rc = load()
+        root = self._repo()
+        head = self._commits(root, 1)[0]
+        calls: list[list[str]] = []
+
+        def fake(args: list[str]) -> object:
+            calls.append(args)
+            # The trunk query is the one filtering on completed runs.
+            if "--status" in args:
+                return [{"conclusion": "success", "headSha": head, "updatedAt": None}]
+            return []
+
+        rc._run_gh_json = fake
+        sig = rc.ci_signal_for_workflow("ci-fast.yml", "main", include_runs_on_head=False)
+        self.assertEqual(sig["workflow"], "ci-fast.yml")
+        self.assertEqual(sig["status"], "green")
+        # Exactly one gh call: the runs_on_head probe is skipped off the critical path.
+        self.assertEqual(len(calls), 1)
+        self.assertIn("ci-fast.yml", calls[0])
+        self.assertEqual(sig["recent_decisive"][0]["commits_behind_head"], 0)
+
+    def test_ci_fast_workflow_name_is_env_configurable(self) -> None:
+        os.environ["FAK_RELEASE_FAST_CI_WORKFLOW"] = "custom-fast.yml"
+        self.addCleanup(os.environ.pop, "FAK_RELEASE_FAST_CI_WORKFLOW", None)
+        rc = load()
+        self.assertEqual(rc.FAST_CI_WORKFLOW, "custom-fast.yml")
+
+    def test_decisive_ci_fast_wins_the_gate_over_a_red_whole_ci(self) -> None:
+        """#1374's contract: the producer's decisive ci_fast is what release_decide gates on.
+
+        Before this producer existed the payload carried no `ci_fast`, so
+        `effective_ci` always fell back to the whole `-race`-inclusive ci.yml.
+        """
+        rc, rd = load(), load_decide()
+        root = self._repo()
+        head = self._commits(root, 1)[0]
+        rc._run_gh_json = lambda args: (
+            [{"conclusion": "success", "headSha": head, "updatedAt": None}]
+            if "--status" in args else [])
+        fast = rc.ci_signal_for_workflow("ci-fast.yml", "main", include_runs_on_head=False)
+
+        payload = {"ci_on_head": {"status": "red", "recent_decisive": []}, "ci_fast": fast}
+        signal, source = rd.effective_ci(payload)
+        self.assertEqual(source, "fast")
+        self.assertEqual(signal["status"], "green")
+
+    def test_churned_fast_signal_relaxes_on_a_green_ancestor(self) -> None:
+        """#1374 + #2655 together: the exact always-on-dev starvation case.
+
+        The newest decisive fast run is a RED on a superseded, non-ancestor commit,
+        so the head signal is red; a green run 2 commits back IS an ancestor with
+        nothing red between it and HEAD. The cut proceeds, relaxed on the ancestor.
+        """
+        rc, rd = load(), load_decide()
+        root = self._repo()
+        shas = self._commits(root, 3)
+        head = shas[-1]
+        trunk = [
+            {"conclusion": "failure", "headSha": "0" * 40, "updatedAt": None},
+            {"conclusion": "success", "headSha": shas[0], "updatedAt": None},
+        ]
+        rc._run_gh_json = lambda args: trunk if "--status" in args else []
+        fast = rc.ci_signal_for_workflow("ci-fast.yml", "main", include_runs_on_head=False)
+        self.assertEqual(fast["status"], "red")  # newest decisive run is the red one
+
+        verdict = rd.decide({
+            "commits_since_tag": [{"subject": "feat(release): real work", "body": ""}],
+            "ci_on_head": {"status": "red", "recent_decisive": []},
+            "ci_fast": fast,
+            "version_files": {},
+            "tag_drift": {},
+            "workflows_parse_ok": {"ok": True},
+        }, require_ci_green=True)
+        self.assertEqual(verdict["decision"], "release")
+        self.assertEqual(verdict["ci_source"], "fast+ancestor")
+        self.assertTrue(verdict["ci_ancestor_relaxed"])
+
+    def test_an_ancestor_red_since_the_green_still_holds_the_cut(self) -> None:
+        """The safety property survives the new producer: a red BETWEEN green and HEAD holds."""
+        rc, rd = load(), load_decide()
+        root = self._repo()
+        shas = self._commits(root, 3)
+        head = shas[-1]
+        trunk = [
+            {"conclusion": "failure", "headSha": shas[1], "updatedAt": None},
+            {"conclusion": "success", "headSha": shas[0], "updatedAt": None},
+        ]
+        rc._run_gh_json = lambda args: trunk if "--status" in args else []
+        fast = rc.ci_signal_for_workflow("ci-fast.yml", "main", include_runs_on_head=False)
+
+        verdict = rd.decide({
+            "commits_since_tag": [{"subject": "feat(release): real work", "body": ""}],
+            "ci_on_head": {"status": "red", "recent_decisive": []},
+            "ci_fast": fast,
+            "version_files": {},
+            "tag_drift": {},
+            "workflows_parse_ok": {"ok": True},
+        }, require_ci_green=True)
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_BASE_RED", verdict["blockers"])
+        self.assertFalse(verdict["ci_ancestor_relaxed"])
 
 
 if __name__ == "__main__":

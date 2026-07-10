@@ -138,6 +138,36 @@ class ActionsTest(unittest.TestCase):
         self.assertEqual(acts[0]["kind"], "review")
         self.assertIsNone(acts[0]["cmd"])
 
+    def test_needs_class_is_mechanical_backfill_not_review(self):
+        # An issue whose ONLY gap is class:* is fully mechanical: no REVIEW row, and
+        # the cohort gets one backfill-class action pointing at the lane router.
+        rows = [m.classify(
+            _issue(11, labels=["priority/P2", "bug", "gpu"], idle_days_ago=0), NOW)]
+        # (also missing a milestone, so review still fires for that judgment gap;
+        #  build one with a milestone to isolate the class-only case)
+        rows[0]["tags"] = ["needs-class"]
+        acts = m.build_actions(rows)
+        kinds = [a["kind"] for a in acts]
+        self.assertIn("backfill-class", kinds)
+        self.assertNotIn("review", kinds)  # a class-only gap is not a judgment call
+        backfill = next(a for a in acts if a["kind"] == "backfill-class")
+        self.assertIsNotNone(backfill["cmd"])
+        self.assertIn("issue_lane_router.py", backfill["cmd"])
+        self.assertIn("--apply-labels-write", backfill["cmd"])
+        self.assertEqual(backfill["issues"], [11])
+        self.assertIsNone(backfill["number"])
+
+    def test_review_reason_excludes_needs_class(self):
+        # An issue with a real judgment gap AND a missing class keeps its REVIEW row,
+        # but needs-class is stripped from the reason (the batch action handles it).
+        rows = [m.classify(_issue(1, labels=["priority/P0", "bug"], idle_days_ago=0), NOW)]
+        acts = m.build_actions(rows)
+        review = next(a for a in acts if a["kind"] == "review")
+        self.assertIn("needs-area", review["reason"])
+        self.assertIn("orphan", review["reason"])
+        self.assertNotIn("needs-class", review["reason"])
+        self.assertTrue(any(a["kind"] == "backfill-class" for a in acts))
+
 
 class ReportTest(unittest.TestCase):
     def test_rows_sorted_descending_by_score(self):
@@ -161,6 +191,14 @@ class ReportTest(unittest.TestCase):
         md = m.render_md(rep, "2026-06-01")
         self.assertIn("needs-milestone 1", md)
         self.assertIn("Needs a milestone", md)
+
+    def test_backfill_class_action_rendered_in_markdown(self):
+        # The mechanical class backfill surfaces in the proposed-actions block with
+        # its runnable command, not as a review-only row.
+        rep = m.build_report([_issue(30, labels=["priority/P2", "bug", "gpu"])], NOW)
+        md = m.render_md(rep, "2026-06-01")
+        self.assertIn("backfill-class", md)
+        self.assertIn("issue_lane_router.py --apply-labels", md)
 
     def test_main_json_exit0_with_monkeypatched_fetch(self):
         orig = m.fetch_issues

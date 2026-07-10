@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -163,6 +164,81 @@ def tree_builds() -> tuple[bool, str]:
     return False, f"go build ./cmd/fak: BROKEN — {first}"
 
 
+# ---- tree-break diagnosis (classify the poison; recommend, never auto-mutate) --
+
+# A red working tree is the single largest throughput cap: every worker in this
+# checkout that runs a full-tree `go build`/`go test` trips a break that is not
+# theirs. `tree_builds` already ROUTES the refill around it (prefers the Python wave
+# path, which does not recompile the agent package); this rung goes one step further
+# and CLASSIFIES the break so the operator knows which fix it needs.
+#
+# Why classify-and-SURFACE, never auto-quarantine: a single snapshot cannot prove a
+# red file is not under a peer's ACTIVE edit. Witnessed 2026-07-09: a red untracked
+# file (an in-flight #2601 change-set) flapped present->absent->present within ~2
+# minutes as a concurrent worker did surgery on it — an unattended `mv`/`git checkout`
+# heal would have corrupted that peer's operation. So the auto-mutate carries the same
+# operator bar as a kill (super-loop skill, Step 0.5): the rung names the exact
+# reversible action; a human runs it.
+
+TREE_OK = "TREE_OK"
+TREE_QUARANTINE_SAFE = "QUARANTINE_SAFE"   # untracked-only poison → operator can mv it aside (reversible)
+TREE_COUPLED_TRACKED = "COUPLED_TRACKED"   # break lives in a MODIFIED/tracked file → its owner fixes/reverts
+TREE_UNLOCALIZED = "UNLOCALIZED"           # red, but no single file:line to point at
+
+# `go build` prints "pkg\file.go:line:col: msg"; grab the first such file path
+# (Windows backslashes included — normalized to forward slashes below).
+_BUILD_OFFENDER_RE = re.compile(r"([\w./\\-]+\.go):\d+:\d+:")
+
+
+def parse_build_offender(full_err: str) -> str | None:
+    """PURE: first `file.go:line:col:` path in a go build stderr, normalized to
+    forward slashes. None when the failure has no file locus (link/toolchain error)."""
+    m = _BUILD_OFFENDER_RE.search(full_err or "")
+    return m.group(1).replace("\\", "/") if m else None
+
+
+def classify_tree_break(offender: str | None, *, tracked: bool | None,
+                        age_min: float | None) -> dict:
+    """PURE: from (offending file, is-it-tracked, mtime-staleness) → a typed
+    recommendation. Never mutates: the meta-loop prints/logs this and leaves the fix
+    to the operator, because a snapshot can't rule out a peer's active edit."""
+    if not offender:
+        return {"code": TREE_UNLOCALIZED, "offender": None,
+                "action": "no single-file locus in `go build ./...` — operator to inspect"}
+    if tracked:
+        return {"code": TREE_COUPLED_TRACKED, "offender": offender,
+                "action": (f"{offender} is a TRACKED file — its owning worker must fix or revert "
+                           f"its commit; do not edit beside them")}
+    age = f"{age_min:.0f}m" if isinstance(age_min, (int, float)) else "?"
+    return {"code": TREE_QUARANTINE_SAFE, "offender": offender,
+            "action": (f"untracked {offender} (mtime {age}) poisons the build — operator: confirm no "
+                       f"tracked file references its symbols, then `mv` it to a hold dir + breadcrumb (reversible)")}
+
+
+def diagnose_tree(tree_ok: bool) -> dict:
+    """IMPURE wrapper: runs ONLY when the tree is red (no extra build on green ticks).
+    Localizes the offending file over the FULL tree (`./...`, so a break in any package
+    is caught, not just ./cmd/fak), reads its git-tracked state + mtime, and returns the
+    pure classification."""
+    if tree_ok:
+        return {"code": TREE_OK, "offender": None, "action": ""}
+    _, _, err = run(["go", "build", "-o", os.devnull, "./..."], timeout=300)
+    offender = parse_build_offender(err)
+    tracked: bool | None = None
+    age_min: float | None = None
+    if offender:
+        rc, out, _ = run(["git", "status", "--porcelain", "--", offender], timeout=60)
+        # porcelain: "?? path" = untracked; " M path"/"M  path" = tracked+modified;
+        # empty = tracked+clean. Untracked iff the first line starts with "??".
+        lines = (out or "").strip().splitlines()
+        tracked = (not (lines and lines[0].lstrip().startswith("??"))) if rc == 0 else None
+        try:
+            age_min = max(0.0, (time.time() - (REPO / offender).stat().st_mtime) / 60.0)
+        except OSError:
+            age_min = None
+    return classify_tree_break(offender, tracked=tracked, age_min=age_min)
+
+
 # ---- wave decision (pure, observable, unit-testable) --------------------------
 
 # Decision codes the tick emits so the ledger reads WHY a wave did or didn't fire.
@@ -240,6 +316,78 @@ def drive_nodes(apply: bool) -> str:
     return f"nodes: local nightrun datum collected rc={rc}"
 
 
+# ---- worker effectiveness (surface the ships-per-worker leaks; never auto-kill) -
+
+# 10x issues/hour is a ships-PER-WORKER problem, not a spawn-count problem: with
+# seats free (headroom>0) the cap is workers that burn a slot and ship NOTHING — a
+# silent exit (sub-floor log, dead pid; dispatch_status #2062) or a majority-stub
+# backend. `reclaim_rung1` already self-heals DEAD inflight markers; this rung
+# surfaces the LIVE leaks it cannot (a still-listed silent worker, a backend stubbing
+# out) so the operator can rescope/cool them. Per Step 0.5 it is a READ THAT INFORMS
+# A KILL — surfaced every tick, never automated (a kill carries the -Launch bar).
+
+EFFECTIVE = "EFFECTIVE"
+LEAKING = "LEAKING"
+
+
+def effectiveness_summary(status: dict | None) -> dict:
+    """PURE: fold a `dispatch_status.py --json` payload into the ships-per-worker leak
+    signal — silent (empty-exit) workers + majority-stub backends. None/partial
+    payloads degrade to UNKNOWN, never crash."""
+    if not status:
+        return {"verdict": "UNKNOWN", "silent_count": None, "silent_issues": [],
+                "majority_stub": [], "ships_per_worker": None,
+                "action": "dispatch_status unavailable this tick — no effectiveness read"}
+    workers = status.get("workers") or {}
+    silent = [w for w in (workers.get("silent") or []) if isinstance(w, dict)]
+    silent_count = workers.get("silent_count")
+    if not isinstance(silent_count, int):
+        silent_count = len(silent)
+    stub_rows = ((status.get("backend_health") or {}).get("stub_rate")) or []
+    # A row can be majority-stub yet carry no backend name (no .backend sidecar on its
+    # logs) — that is still a real leak; surface it as "unattributed", never drop it.
+    majority_stub = [(r.get("backend") or "unattributed") for r in stub_rows
+                     if isinstance(r, dict) and r.get("majority_stub")]
+    bits = []
+    if silent_count:
+        issues = ", ".join("#" + str(w.get("issue")) for w in silent[:6])
+        bits.append(f"{silent_count} silent worker(s) exited empty ({issues}) — "
+                    f"operator: rescope/close, free the slot")
+    if majority_stub:
+        bits.append(f"backend(s) majority-stub [{', '.join(str(b) for b in majority_stub)}] — "
+                    f"operator: cool the backend/account so refills route productive")
+    return {"verdict": LEAKING if (silent_count or majority_stub) else EFFECTIVE,
+            "silent_count": silent_count,
+            "silent_issues": [w.get("issue") for w in silent[:12]],
+            "majority_stub": majority_stub,
+            "ships_per_worker": (status.get("ships_per_worker") or {}) or None,
+            "action": " | ".join(bits) if bits else "no silent/stub leak this tick"}
+
+
+# Compute ONLY the two cheap, pure-local folds we need (silent workers + backend
+# stub rate) in an isolated child — NOT the whole `dispatch_status --json` payload.
+# That payload's gh / run-status / utilization folds push it PAST TWO MINUTES on a
+# busy box (measured on a full fleet), but these two are a runs-dir glob + one psutil
+# sweep — seconds. Shelling out (vs importing dispatch_status into the loop) keeps a
+# fold crash from ever killing the marathon, matching every other fold here.
+_EFFECTIVENESS_PROBE = (
+    "import json,sys; sys.path.insert(0,'tools'); import dispatch_status as d; "
+    "from pathlib import Path; runs=Path('.')/d.RUNS_DIRNAME; "
+    "print(json.dumps({'workers':{'silent':d.silent_workers(runs)},"
+    "'backend_health':{'stub_rate':d.backend_stub_rates(runs)}}))"
+)
+
+
+def read_effectiveness() -> dict:
+    """IMPURE: the ships-per-worker leak signal from the two cheap pure-local folds in
+    dispatch_status (silent workers + backend stub rate), computed in an isolated child.
+    Deliberately NOT `dispatch_status --json` — its gh/run-status folds run for minutes
+    on a busy box; these two are seconds. effectiveness_summary derives silent_count
+    from the list, so the trimmed payload is enough."""
+    return effectiveness_summary(
+        run_json([sys.executable, "-c", _EFFECTIVENESS_PROBE], timeout=90))
+
+
 # ---- the marathon loop --------------------------------------------------------
 
 @dataclass
@@ -254,9 +402,11 @@ class TickReport:
     per_hour: float | None
     cron: str = ""
     tree: str = ""
+    tree_class: dict = field(default_factory=dict)
     reclaim: str = ""
     refills: list = field(default_factory=list)
     nodes: str = ""
+    effectiveness: dict = field(default_factory=dict)
     stop: str | None = None
 
 
@@ -336,7 +486,9 @@ def main() -> int:
         rep.cron = f"{cron['name']}={cron['state']}"
         tree_ok, tree_msg = tree_builds()
         rep.tree = tree_msg
+        rep.tree_class = diagnose_tree(tree_ok)
         rep.reclaim = reclaim_rung1(args.apply)
+        rep.effectiveness = read_effectiveness()
 
         # One gate decides whether this tick drives a wave — skip-if-inflight, so a
         # tight cadence re-checks headroom sooner without ever double-dispatching onto
@@ -355,6 +507,8 @@ def main() -> int:
         print(f"    cron: {rep.cron}  ({'supervising — cron owns the waves' if cron['live'] and not args.force_wave else 'meta-loop owns the waves'})")
         tree_flag = "OK" if tree_ok else "!! BROKEN — caps every in-checkout worker"
         print(f"    tree: {rep.tree}  [{tree_flag}]")
+        if not tree_ok and rep.tree_class.get("code") not in (None, "", TREE_OK):
+            print(f"        break: {rep.tree_class.get('code')} — {rep.tree_class.get('action')}")
         print(f"    {rep.reclaim}")
         for r in rep.refills:
             if "skipped" in r:
@@ -365,6 +519,8 @@ def main() -> int:
                 if r.get("lanes"):
                     print(f"        lanes: {', '.join(str(x) for x in r['lanes'])}")
         print(f"    {rep.nodes}")
+        eff = rep.effectiveness or {}
+        print(f"    effectiveness: {eff.get('verdict', 'UNKNOWN')} — {eff.get('action', '')}")
         append_ledger(rep)
 
         if not args.apply:

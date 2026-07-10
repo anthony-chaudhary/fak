@@ -641,6 +641,40 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(light["selected_tier"], 2)
         self.assertEqual(light["account"]["product"], "opencode")
 
+    def test_seat_leases_fold_makes_live_opencode_worker_visible(self) -> None:
+        # Defect 3: a dispatched opencode/glm docs worker writes an opencode transcript
+        # the watchdog session scan does not fold, so it would show 0 live_sessions. A
+        # live dispatch lease (from the .pid/.account sidecars) reflects it into the roster.
+        account_dir(self.home, ".claude")
+        opencode_dir(self.config_home, "opencode-zai2",
+                     config={"model": "zai-coding-plan/glm-5.2"})
+        discovered = fleet_accounts.discover_accounts(
+            str(self.home), config_home=str(self.config_home))
+        oc = next(r for r in discovered if r.get("product") == "opencode")
+
+        rows = fleet_accounts.annotate_accounts(
+            discovered, registry={},
+            seat_leases=[{"tag": oc["tag"], "dir": oc["dir"]}])
+        row = next(r for r in rows if r.get("account") == oc["account"])
+        self.assertEqual(row["live_sessions"], 1)
+        self.assertGreaterEqual(row["active_sessions"], 1)
+        self.assertEqual(row["dispatch_leases"], 1)
+
+    def test_seat_leases_fold_never_touches_claude_rows(self) -> None:
+        # The fold is opencode-scoped: a claude row already surfaces via the watchdog
+        # registry, so even a same-tag lease must not bump its counts.
+        account_dir(self.home, ".claude")
+        discovered = fleet_accounts.discover_accounts(
+            str(self.home), config_home=str(self.config_home))
+        cl = next(r for r in discovered if r.get("product") == "claude"
+                  and r.get("kind") == "worker")
+        rows = fleet_accounts.annotate_accounts(
+            discovered, registry={},
+            seat_leases=[{"tag": cl["tag"], "dir": cl["dir"]}])
+        row = next(r for r in rows if r.get("account") == cl["account"])
+        self.assertNotIn("dispatch_leases", row)
+        self.assertEqual(row.get("live_sessions") or 0, 0)
+
     def test_route_account_strict_tier2_does_not_upshift(self) -> None:
         account_dir(self.home, ".claude")
         rows = fleet_accounts.annotate_accounts(
@@ -1552,6 +1586,44 @@ class ProbeLedgerConsultTest(unittest.TestCase):
         self.assertTrue(status["available"])
         self.assertFalse(status["blocked"])
         self.assertEqual(status["status_source"], "probe-ledger")
+
+    def test_fresh_ok_probe_surfaces_active_daily_cap_as_usage_soon(self) -> None:
+        # Mirror of Go TestFreshProbeSurfacesActiveDailyCapAsUsageSoon: a fresh OK probe reopens
+        # a seat whose DAILY cap is still counting down, but carries the still-future reset as an
+        # advisory usage_soon_reset instead of silently dropping it -- so the roster can render
+        # "serving, cap resets X" rather than a blank near-cap row. Availability is unchanged.
+        self._write_ledger(status="OK", age_min=5.0)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._carried_throttle_registry())
+        self.assertTrue(status["available"], "the seat stays offered")
+        self.assertFalse(status.get("throttled"))
+        self.assertEqual(status["status_source"], "probe-ledger")
+        self.assertEqual(status.get("usage_soon_reset"),
+                         "Dec 31, 11pm (America/Los_Angeles)")
+
+    def test_serving_seat_without_cap_has_no_usage_soon(self) -> None:
+        # The additive contract: a serving seat with no carried cap gains no key, so every
+        # existing row's byte-parity JSON is unchanged.
+        self._write_ledger(status="OK", age_min=5.0)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry={"generated_utc": "2026-06-17T00:00:00+00:00",
+                                     "throttle": {}, "sessions": []})
+        self.assertTrue(status["available"])
+        self.assertNotIn("usage_soon_reset", status)
+
+    def test_active_weekly_cap_is_walled_not_usage_soon(self) -> None:
+        # Boundary: a still-active WEEKLY cap holds the seat CLOSED rather than surfacing a
+        # near-cap advisory (mirror of Go TestActiveWeeklyCapIsWalledNotUsageSoon).
+        self._write_ledger(status="OK", age_min=5.0)
+        registry = self._carried_throttle_registry({
+            "weekly": "Dec 31, 11pm (America/Los_Angeles)",
+        })
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
+        self.assertFalse(status["available"])
+        self.assertNotIn("usage_soon_reset", status)
 
 
 def _seat_row(tag: str, *, available: bool = True, block_kind: str | None = None,

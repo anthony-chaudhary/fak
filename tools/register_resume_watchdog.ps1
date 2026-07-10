@@ -67,32 +67,39 @@ if ($Live -and $DryRun) { throw '-Live and -DryRun are mutually exclusive' }
 # No flag = LIVE (#3321). DRY-RUN only when asked for by name.
 if (-not $DryRun) { $Live = $true }
 $liveArg = if ($Live) { ' -Live' } else { '' }
-# Launch powershell.exe DIRECTLY (not via `conhost.exe --headless`). On 2026-07-09 the
-# box began refusing every `conhost.exe`-launched task with 0x800710E0 ("operator or
-# administrator refused the request") while sibling tasks that launch their payload
-# directly (FleetStrandedRecovery=powershell.exe, FleetIssueDispatch=python.exe) kept
-# returning 0x0 -- a clean launcher split with battery/other settings ruled out (this
-# box is a desktop, no battery). conhost --headless silently wedged this watchdog for
-# ~38 min (drained a 65-deep backlog post-boot, then went dark at 11:42). -WindowStyle
-# Hidden suppresses the window; a brief per-tick console flash is the accepted trade for
-# a launcher that actually runs. (No-flash-without-conhost = a hidden .vbs WScript.Shell
-# wrapper; deferred.) See tools/fleet_resume_watchdog.ps1 header for the earlier, DIFFERENT
-# conhost incident (masked a param-binding failure as exit 0).
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Watchdog`"$liveArg"
-schtasks /Create /TN $TaskName /SC MINUTE /MO 10 /TR $tr /RL LIMITED /F | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
-# schtasks.exe has no switch for StartWhenAvailable; set it via the ScheduledTasks
-# module so a tick missed while the box was asleep/off fires on wake instead of
-# waiting up to 10 min (#3321). Non-fatal: without it the cadence still holds.
+# Register as S4U ("run whether the user is logged on or not", no stored password), NOT
+# Interactive ("run only when logged on" -- the schtasks /Create default this script used
+# to take). 2026-07-09 incident: as an Interactive task, from ~12:06 EVERY 10-min tick was
+# refused with 0x800710E0 ("operator/administrator refused the request"), silently wedging
+# the fleet's auto-resume layer. Root cause is the LOGON TYPE, not the launcher (the failure
+# persisted after conhost.exe was dropped for a direct powershell.exe launch): an
+# Interactive-logon task must launch into the user's attached interactive desktop, and on
+# this headless / RDP-accessed box that is unreliable -- it stays refused even while an RDP
+# session is Active, and dies outright when the session disconnects. The 17 sibling fleet
+# tasks that rode straight through the same window (FleetIssueDispatch, FleetStrandedRecovery,
+# FleetHeartbeat, ...) are ALL S4U: session-0 and windowless, yet still AS THIS USER (same
+# profile / CLAUDE_CONFIG_DIR / oauth), so the `claude --resume` children it spawns are
+# unaffected -- and S4U needs no conhost --headless flash-suppression (no desktop to flash).
+# Same migration register_issue_dispatch.ps1 already made. NOTE: setting an S4U principal
+# requires an ELEVATED shell on this box (non-elevated Register/Set-ScheduledTask -> "Access
+# is denied"); the catch below says so. See tools/fleet_resume_watchdog.ps1 header for the
+# earlier, DIFFERENT conhost incident (masked a param-binding failure as exit 0).
+$act = New-ScheduledTaskAction -Execute 'powershell.exe' `
+  -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"{1}' -f $Watchdog, $liveArg)
+$trg = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
+$prin = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+# StartWhenAvailable (#3321): a tick missed while the box slept/was off fires on wake.
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 try {
-  $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-  $t.Settings.StartWhenAvailable = $true
-  Set-ScheduledTask -InputObject $t | Out-Null
+  Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger $trg `
+    -Principal $prin -Settings $set -Force -ErrorAction Stop | Out-Null
 } catch {
-  Write-Warning "could not set StartWhenAvailable on ${TaskName}: $_"
+  throw ("Register-ScheduledTask failed: $($_.Exception.Message). S4U registration needs an elevated shell -- re-run this installer as Administrator (right-click PowerShell -> Run as administrator).")
 }
 $mode = if ($Live) { 'LIVE (auto-resumes)' } else { 'DRY-RUN (logs intentions only)' }
-Write-Output "installed $TaskName - every 10 min, current-user interactive (direct powershell, hidden window), $mode"
+Write-Output "installed $TaskName - every 10 min, current-user S4U (windowless, session-disconnect-immune), $mode"
 Write-Output "registry: %LOCALAPPDATA%\Fleet\registry\sessions.json (override with FLEET_STATE_DIR)"
 Write-Output "log:      %LOCALAPPDATA%\Fleet\watchdog\resume_watchdog.log"
 Write-Output "dry-run for testing: .\tools\register_resume_watchdog.ps1 -DryRun"

@@ -285,20 +285,27 @@ class SelectTargetsTest(unittest.TestCase):
             self._annotated(), selector="blocked", account="default")
         self.assertEqual([t["tag"] for t in targets], ["default"])
 
-    def test_selector_never_probes_nonclaude_products(self) -> None:
-        # The probe is a `claude -p pong`: under an opencode config dir it can only
-        # fail auth and stamp a bogus AUTH blocker that merge_known_auth carries
-        # forward (observed 2026-07-06, first live `stale` tick). No selector may
-        # pick a non-claude row -- stale/all included (the watchdog's auto mode is
-        # stale); the explicit single-`account` override stays operator-honored.
+    def test_selector_probes_opencode_but_not_other_products(self) -> None:
+        # opencode rows ARE now selector-probed: probe_account routes them to the
+        # gateway-aware probe_opencode_account (which pings the guard base URL its
+        # worker uses), not the claude `-p pong` surface, so there is no bogus AUTH
+        # block to fear. A product with NO probe implementation (codex) stays skipped,
+        # and the explicit single-`account` override remains operator-honored.
+        # available=False (a stale carried block, the realistic Defect-3 case) so all
+        # three selectors have grounds to pick a supported row.
         rows = self._annotated() + [
             {"kind": "worker", "account": "opencode-nim-x", "tag": "nim-x",
-             "product": "opencode", "available": True,
-             "active_sessions": 0, "live_sessions": 0, "block_kind": None},
+             "product": "opencode", "available": False,
+             "active_sessions": 0, "live_sessions": 0, "block_kind": "auth"},
+            {"kind": "worker", "account": "codex-y", "tag": "codex-y",
+             "product": "codex", "available": False,
+             "active_sessions": 0, "live_sessions": 0, "block_kind": "auth"},
         ]
         for selector in ("blocked", "stale", "all"):
             tags = {t["tag"] for t in account_probe.select_targets(rows, selector=selector)}
-            self.assertNotIn("nim-x", tags, f"selector={selector} must skip opencode rows")
+            self.assertIn("nim-x", tags, f"selector={selector} must probe opencode rows")
+            self.assertNotIn("codex-y", tags,
+                             f"selector={selector} must skip unsupported codex rows")
 
 
 class ProbeAccountsBatchTest(unittest.TestCase):
@@ -476,6 +483,114 @@ class SummaryTest(unittest.TestCase):
         s = account_probe.summarize([{"status": "OK"}, {"status": "OK"}], recs)
         self.assertEqual(s["flips"], 1)
         self.assertIn("flips=1", s["line"])
+
+
+def opencode_row(account="opencode", tag="zai-coding-plan",
+                 config_dir="C:/Users/USER/.config/opencode"):
+    return {"dir": config_dir, "product": "opencode", "account": account,
+            "tag": tag, "kind": "worker", "model": "zai-coding-plan/glm-4.5-air"}
+
+
+def _resolver(base="http://127.0.0.1:18080/v1", model="zai-coding-plan/glm-4.5-air"):
+    def _r(row, *, workspace=None, runs_dir=None):
+        return model, base
+    return _r
+
+
+def _connector(result):
+    def _c(base_url, *, timeout):
+        return dict(result, _base=base_url)
+    return _c
+
+
+class ClassifyOpencodeProbeTest(unittest.TestCase):
+    def test_unreachable_is_gateway_down(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": False, "status": None, "body": "", "error": "connection refused"},
+            base_url="http://127.0.0.1:18080/v1")
+        self.assertEqual(v["status"], "GATEWAY_DOWN")
+        self.assertEqual(v["block_kind"], "gateway")
+        self.assertIn("connection refused", v["block_reason"])
+
+    def test_2xx_is_ok(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": 200, "body": '{"data":[]}', "error": ""})
+        self.assertEqual(v["status"], "OK")
+
+    def test_429_is_limit(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": 429, "body": "Weekly Limit Exhausted; "
+             "reset at 2026-07-15", "error": ""})
+        self.assertEqual(v["status"], "LIMIT")
+        self.assertEqual(v["reset"], "2026-07-15")
+
+    def test_401_is_auth(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": 401, "body": "", "error": ""})
+        self.assertEqual(v["status"], "AUTH")
+
+    def test_5xx_is_apierr(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": 503, "body": "", "error": ""})
+        self.assertEqual(v["status"], "APIERR")
+
+    def test_reachable_but_inconclusive_is_apierr_not_block(self) -> None:
+        # A flaky models route must NEVER sideline the seat as a hard block.
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": None, "body": "", "error": "read timeout"})
+        self.assertEqual(v["status"], "APIERR")
+
+
+class ProbeOpencodeAccountTest(unittest.TestCase):
+    def test_gateway_down_verdict_shape(self) -> None:
+        v = account_probe.probe_opencode_account(
+            opencode_row(),
+            connector=_connector({"reachable": False, "status": None, "body": "",
+                                  "error": "refused"}),
+            target_resolver=_resolver())
+        self.assertEqual(v["status"], "GATEWAY_DOWN")
+        self.assertEqual(v["product"], "opencode")
+        self.assertEqual(v["base_url"], "http://127.0.0.1:18080/v1")
+        self.assertEqual(v["tag"], "zai-coding-plan")
+
+    def test_ok_verdict(self) -> None:
+        v = account_probe.probe_opencode_account(
+            opencode_row(),
+            connector=_connector({"reachable": True, "status": 200, "body": "{}",
+                                  "error": ""}),
+            target_resolver=_resolver())
+        self.assertEqual(v["status"], "OK")
+
+    def test_no_base_url_is_transport_not_gateway_down(self) -> None:
+        # An unconfigured base URL is a local config gap, not a down gateway.
+        v = account_probe.probe_opencode_account(
+            opencode_row(), connector=_connector({"reachable": True, "status": 200}),
+            target_resolver=_resolver(base=""))
+        self.assertEqual(v["status"], "TRANSPORT")
+
+    def test_probe_account_routes_opencode(self) -> None:
+        # The single choke point: probe_account must dispatch an opencode row to the
+        # gateway probe, never the claude runner (which would stamp a bogus AUTH).
+        v = account_probe.probe_account(
+            opencode_row(),
+            runner=runner_returning(1, "", BANNER_LOGIN),  # would AUTH if wrongly used
+            connector=_connector({"reachable": False, "status": None, "error": "refused"}),
+            target_resolver=_resolver())
+        self.assertEqual(v["status"], "GATEWAY_DOWN")
+
+
+class OpencodeVerdictRowTest(unittest.TestCase):
+    def test_gateway_down_row_does_not_latch_auth(self) -> None:
+        # A transient down gateway maps to a QUIET stopped disp, NOT an auth block, so
+        # merge_known_auth never sidelines the seat on a local infra blip.
+        v = account_probe.probe_opencode_account(
+            opencode_row(),
+            connector=_connector({"reachable": False, "status": None, "error": "refused"}),
+            target_resolver=_resolver())
+        row = account_probe.verdict_to_row(v)
+        self.assertEqual(row["disp"], "STOPPED_QUIET")
+        self.assertEqual(row["probe_status"], "GATEWAY_DOWN")
+        self.assertNotIn(row["disp"], ("INFRA_AUTH",))
 
 
 if __name__ == "__main__":

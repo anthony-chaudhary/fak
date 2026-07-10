@@ -440,8 +440,8 @@
       "canonical": "gateGodFile (god-file / god-function growth ratchet)",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "gateGodFileGrowthTree (internal/hooks/gate_godfile.go) is the size ratchet run by `fak hygiene` (pre-push) and `make ci`: it refuses any tracked non-test .go file over the 1500-line ceiling and any function over the 200-line ceiling, except entries grandfathered at their frozen size in the god-file baseline, which may only shrink.",
-      "distinction": "gateGodFile is a whole-tree hygiene/CI ratchet capping BOTH god-files (1500 lines) and god-functions (200 lines), enforced over `git ls-files`; the git-hook gate sibling is the family of staged-diff checks (broken-link, secret-shape, provenance) that fire at git pre-commit/commit-msg. Enforcement point and scope differ - it is not a commit hook.",
+      "definition": "gateGodFileGrowthTree (internal/hooks/gate_godfile.go) is the size ratchet run by `fak hygiene` (pre-push) and `make ci`: it refuses any tracked non-test .go file over the 1500-line ceiling (held aligned with the file-only sibling gate internal/godfileceiling) and any function over the 400-line ceiling, except entries grandfathered at their frozen size in the god-file baseline, which may grow within a bounded 20% slack band before the gate re-engages (the frozen anchor itself only ratchets down on regen).",
+      "distinction": "gateGodFile is a whole-tree hygiene/CI ratchet capping BOTH god-files (1500 lines) and god-functions (400 lines), enforced over `git ls-files`; the git-hook gate sibling is the family of staged-diff checks (broken-link, secret-shape, provenance) that fire at git pre-commit/commit-msg. Enforcement point and scope differ - it is not a commit hook.",
       "distinct_from": [
         "git-hook-gate"
       ],

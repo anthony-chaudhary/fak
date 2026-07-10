@@ -123,6 +123,30 @@ def test_root_coverage_refused_as_hard_junk() -> None:
     assert r is not None and "build artifact" in r.lower()
 
 
+# --- oversized-blob cap: 25 MiB default + non-positive clamp ----------------
+
+def test_max_bytes_default_is_25_mib() -> None:
+    # The cap is 25 MiB, in lockstep with the Go twin (gate_fileadmission.go's
+    # FAK_MAX_FILE_BYTES default). If one side moves, this pins the other.
+    assert cc.DEFAULT_MAX_BYTES == 25 * 1024 * 1024
+
+
+def test_nonpositive_max_bytes_matches_default() -> None:
+    # A non-positive --max-bytes must fall back to the default, NOT become a 0-byte
+    # cap that refuses every file — matching the Go gate's gateEnvInt(<=0 -> default).
+    # Proven behaviourally and independent of tree state: `--max-bytes 0` yields the
+    # SAME exit code as the default cap. Without the clamp, 0 would refuse the whole
+    # tracked tree and the codes would differ.
+    exe = [sys.executable,
+           str(Path(__file__).resolve().parent / "check_committed_files.py"),
+           "--audit-tree"]
+    base = subprocess.run(exe, capture_output=True, text=True, cwd=ROOT)
+    zeroed = subprocess.run(exe + ["--max-bytes", "0"], capture_output=True, text=True, cwd=ROOT)
+    assert zeroed.returncode == base.returncode, (
+        "non-positive --max-bytes should behave identically to the default cap; "
+        f"base rc={base.returncode} zeroed rc={zeroed.returncode}\n{zeroed.stdout}\n{zeroed.stderr}")
+
+
 # --- live regression guard: the real tree is clean --------------------------
 
 def test_tracked_tree_has_no_private_only_path() -> None:

@@ -33,6 +33,14 @@ import sys
 from pathlib import Path
 
 
+def _no_window_creationflags() -> int:
+    """``creationflags`` that stop the ``go build`` console child below from popping a
+    visible window when this provisions windowless (pythonw) from a scheduled dispatch
+    tick; ``0`` on POSIX. Mirrors dispatch_worker.no_window_creationflags, kept local so
+    this provisioner imports only stdlib."""
+    return 0x08000000 if os.name == "nt" else 0
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -119,7 +127,8 @@ def provision(dest: Path, env: dict, log=print) -> int:
         if gm and shutil.which("go"):
             log(f"dos-hook: building from {gm} ...")
             proc = subprocess.run(
-                ["go", "build", "-o", str(dest), "./cmd/dos-hook"], cwd=str(gm)
+                ["go", "build", "-o", str(dest), "./cmd/dos-hook"], cwd=str(gm),
+                creationflags=_no_window_creationflags(),
             )
             if proc.returncode == 0 and dest.is_file():
                 log(f"dos-hook: built -> {dest}")

@@ -16,7 +16,20 @@ backend uses.
 
   python tools/dispatch_glm_docs.py --target 2 --live
 
-Self-bounded: --target workers max, dedup, dry-run by default (--live to spawn)."""
+Self-bounded: --target workers max, dedup, dry-run by default (--live to spawn).
+
+Why a side-channel and not the account switcher? The zai-coding-plan/GLM seat carries
+``route_weight`` 0 in the roster, so the tier-aware switcher (fleet_accounts.route) never
+routes tier-2 docs work to it -- ON PURPOSE. The seat's opencode.json auth was historically
+mis-probed as "login required" (a stale claude-shaped probe under an opencode dir), which
+would have made switcher-routed spawns flap; and the docs backlog is a single, bounded pool
+best drained by ONE dedicated, self-limiting scheduled task rather than fanned across the
+general switcher. This tool is that task: it targets the docs lane directly, dedups against
+live+cooled issues, gates on a real gateway preflight (below), and caps every worker's wall
+clock -- the guarantees the generic switcher path does not give a cheap-model bulk drain.
+The account_probe opencode probe now returns a fresh, gateway-aware verdict for this seat,
+so the roster no longer shows the stale claude-shaped block; routing it through the switcher
+remains a deliberate non-goal (raise its route_weight in dos.toml to opt in)."""
 from __future__ import annotations
 
 import argparse
@@ -30,6 +43,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+import account_probe                  # noqa: E402
 import issue_resolve_dispatch as ird  # noqa: E402
 import issue_worker_prompt            # noqa: E402
 
@@ -97,12 +111,46 @@ def glm_provider_exhausted(runs: Path, *, lookback: int = 16) -> str | None:
     return None
 
 
+# Probe verdicts that mean "a worker spawned right now cannot connect / cannot auth" --
+# spawning into any of these just burns a slot on a worker that immediately fails. LIMIT is
+# handled separately (and more precisely) by glm_provider_exhausted from the worker logs.
+_PREFLIGHT_REFUSE = ("GATEWAY_DOWN", "AUTH", "ACCESS", "CREDIT")
+
+
+def gateway_preflight(acct: dict, *, probe=None) -> dict:
+    """Ping the SAME guard gateway a glm worker would route through, before spawning.
+
+    The quota guard (glm_provider_exhausted) catches a drained provider from worker logs,
+    but says nothing about the LOCAL guard->gateway hop. The docs-lane incident (2026-07-09)
+    was exactly that hop being DOWN: every spawned glm worker connection-refused and retry-
+    looped for its whole lifespan. This is the missing reachability check -- a real,
+    opencode-aware probe of the base URL the worker uses. ``probe`` is injectable for tests.
+    Returns the raw account_probe verdict (status in the closed vocabulary)."""
+    row = {"account": "opencode", "dir": acct.get("dir") or OPENCODE_DIR,
+           "product": "opencode", "tag": acct.get("tag") or "zai-coding-plan",
+           "model": acct.get("model") or GLM_MODEL}
+    fn = probe or account_probe.probe_opencode_account
+    try:
+        return fn(row, workspace=REPO, runs_dir=RUNS)
+    except Exception as exc:  # a broken probe must not wedge the tick -- treat as inconclusive
+        return {"status": "APIERR", "block_kind": "apierr",
+                "block_reason": f"gateway preflight raised: {exc}"}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--target", type=int, default=2, help="desired live glm workers")
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
+
+    # Reap timed-out glm workers BEFORE counting capacity. The detached docs-lane spawn path
+    # does not sit inside the main dispatcher's reap loop, so a runaway (e.g. one that outran
+    # its guard --max-duration, or a pre-cap worker) would otherwise hold a slot forever. This
+    # mirrors dispatch_tick's own pre-count reap; --live actually kills, dry-run just reports.
+    reaped = ird.reap_timed_out_workers(
+        RUNS, timeout_s=ird.DEFAULT_WORKER_TIMEOUT_S, live=args.live)
+    n_reaped = len(reaped.get("reaped") or reaped.get("would_reap") or [])
 
     have = live_glm_workers()
     deficit = max(0, args.target - have)
@@ -115,7 +163,8 @@ def main(argv=None) -> int:
 
     if not args.live or not targets:
         msg = {"pool": "glm-docs", "live": have, "target": args.target, "deficit": deficit,
-               "would_spawn": targets, "reason": "at target" if deficit == 0 else
+               "reaped": n_reaped, "would_spawn": targets,
+               "reason": "at target" if deficit == 0 else
                ("no fresh docs issue" if not targets else "dry-run")}
         print(json.dumps(msg) if args.json else
               f"glm-docs: live={have}/{args.target} would_spawn={targets} "
@@ -133,6 +182,23 @@ def main(argv=None) -> int:
         return 0
 
     acct = {"tag": "zai-coding-plan", "dir": OPENCODE_DIR, "model": GLM_MODEL, "tier": 2}
+
+    # Gateway reachability preflight (Defect 1): the quota guard above cannot see a DOWN
+    # local guard->gateway hop, so probe it before committing any spawn. If the gateway is
+    # unreachable (or the seat is hard auth-blocked), refuse to spawn -- exactly the failure
+    # class that previously spawned workers that immediately connection-refused and looped.
+    pf = gateway_preflight(acct)
+    if str(pf.get("status") or "").upper() in _PREFLIGHT_REFUSE:
+        msg = {"pool": "glm-docs", "live": have, "target": args.target,
+               "deficit": deficit, "would_spawn": [],
+               "preflight": pf.get("status"),
+               "reason": f"gateway preflight {pf.get('status')}: "
+                         f"{pf.get('block_reason') or 'seat not usable'}; skipping spawn"}
+        print(json.dumps(msg) if args.json else
+              f"glm-docs: gateway preflight {pf.get('status')} "
+              f"({pf.get('block_reason') or 'seat not usable'}); "
+              f"skipping {len(targets)} spawn(s)")
+        return 0
     spawned = []
     held = []
     for issue in targets:
@@ -154,8 +220,8 @@ def main(argv=None) -> int:
                                      account=acct, spawn_probe_s=8.0)
         spawned.append({"issue": issue, "pid": res.get("pid"), "log": res.get("log")})
 
-    out = {"pool": "glm-docs", "live_before": have, "spawned": len(spawned),
-           "issues": spawned, "held": held}
+    out = {"pool": "glm-docs", "live_before": have, "reaped": n_reaped,
+           "spawned": len(spawned), "issues": spawned, "held": held}
     print(json.dumps(out) if args.json else
           f"glm-docs: spawned {len(spawned)} on docs -> {[s['issue'] for s in spawned]} "
           f"(held={len(held)})")

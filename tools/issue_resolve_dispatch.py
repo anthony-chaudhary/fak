@@ -78,6 +78,7 @@ import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 import lane_yield  # noqa: E402  (shared low-yield lane fold, #2062)
 import issue_lane_router  # noqa: E402  (lane_taxonomy: dos.toml lane→tree map, #2062)
 import lane_core  # noqa: E402  (core-source / trust-critical lane predicates, mirror of internal/dispatchtick/selfmodify.go)
+import tier_launch  # noqa: E402  (per-issue tier launch profile, mirror of internal/dispatchtick/launchprofile.go)
 
 # Re-export the shared console-window suppressor so the account-topup / glm-docs
 # entry scripts (which import THIS module as `ird`) route every helper subprocess
@@ -1811,19 +1812,29 @@ def open_issue_updated_map(root: Path, *, cap: int = 1000,
 
 
 def build_worker_command(backend: str, prompt: str, model: str | None,
-                         effort: str | None = None) -> list[str]:
+                         effort: str | None = None, ultracode: bool = False) -> list[str]:
     """The argv for one detached issue-resolution worker, per backend. Both forms
     run the SAME issue-resolution prompt (with its ``#N``-in-subject rule), so the
     resulting commit is witnessable by the closure auditor regardless of backend.
 
     ``model``/``effort`` pin the claude worker's model and reasoning effort via the
     CLI flags (``--model``/``--effort``, both real in Claude Code >=2.1) — the only
-    way to apply ``xhigh``, which has no ``settings.json`` equivalent."""
+    way to apply ``xhigh``, which has no ``settings.json`` equivalent.
+
+    ``ultracode`` puts the claude worker in ultracode (xhigh reasoning PLUS dynamic
+    multi-agent workflow orchestration) via ``--settings {"ultracode":true}``. It is
+    mutually exclusive with ``effort`` on emit — ultracode already implies xhigh — so
+    when set it wins and ``--effort`` is suppressed. This mirrors the Go
+    ``dispatchtick.BuildWorkerCommand`` emit order exactly (model, then
+    ultracode-xor-effort, then prompt) so the two launch surfaces stay parity."""
     if backend == "claude":
         cmd = ["claude", "-p", "--permission-mode", "bypassPermissions"]
         if model:
             cmd += ["--model", model]  # pin the exact model (reproducible/traced)
-        if effort:
+        if ultracode:
+            # xhigh reasoning + multi-agent orchestration; session-only, no settings.json field
+            cmd += ["--settings", tier_launch.ULTRACODE_SETTINGS_ARG]
+        elif effort:
             cmd += ["--effort", effort]  # reasoning effort; no settings.json field
         cmd.append(prompt)
         return cmd

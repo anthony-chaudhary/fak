@@ -32,6 +32,10 @@ Top-level JSON keys:
   ci_on_head:         latest decisive ci.yml verdict on main, if gh can read it;
                       carries recent_decisive[] (recent completed runs enriched with
                       HEAD-ancestry) for release_decide's green-ancestor tolerance (#2655)
+  ci_fast:            same shape for the fast release-critical subset (ci-fast.yml,
+                      #1374). release_decide prefers it while it is DECISIVE and falls
+                      back to ci_on_head otherwise, so a green fast subset clears the
+                      cut without waiting on the slow `-race` tail
   modified_diff_previews:  {path: "~30-line `git diff HEAD -- path` preview"}
   untracked_doc_previews:  {path: "docstring / first ~10 non-blank lines"}
   prior_release_style:     parsed front-matter + headings of the newest release note
@@ -41,6 +45,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import re
 import subprocess
 import time
@@ -71,6 +76,15 @@ TRACKED_DOC_RE = re.compile(r"\.md$|^experiments/|^visuals/|^tools/")
 DEFAULT_BRANCH = "main"
 _GH_TIMEOUT_SECONDS = 8
 _DECISIVE_CI_CONCLUSIONS = {"success", "failure", "timed_out", "startup_failure"}
+
+# The fast release-critical CI subset (issue #1374). `ci-fast.yml` runs the
+# correctness subset (build + vet + `go test ./...`, no `-race`) on every trunk
+# commit, so it reaches a decisive conclusion long before the `-race` tail in
+# `ci.yml` does. release_decide prefers this signal when it is decisive and falls
+# back to the whole `ci.yml` otherwise, so emitting it can only ever speed up a
+# cut we would already allow -- never bypass a real red. The name matches
+# release_decide's own knob so an operator retargets both with one variable.
+FAST_CI_WORKFLOW = (os.environ.get("FAK_RELEASE_FAST_CI_WORKFLOW") or "ci-fast.yml").strip()
 GENERATION_LABELS = {"gen/now", "gen/next", "gen/second-next", "gen/future"}
 
 
@@ -414,7 +428,8 @@ def _run_gh_json(args: list[str]) -> object | None:
         return None
 
 
-def fold_latest_trunk_ci(latest_trunk: object) -> tuple[str, dict | None, str | None]:
+def fold_latest_trunk_ci(latest_trunk: object,
+                         workflow: str = "ci.yml") -> tuple[str, dict | None, str | None]:
     if latest_trunk is None:
         return "unknown", None, "gh unavailable/offline - CI state not read"
     if not isinstance(latest_trunk, list):
@@ -440,10 +455,10 @@ def fold_latest_trunk_ci(latest_trunk: object) -> tuple[str, dict | None, str | 
         if conclusion == "success":
             return "green", trunk_ci, None
         return "red", trunk_ci, (
-            "latest decisive main ci.yml run is not green; a release cut on "
+            f"latest decisive main {workflow} run is not green; a release cut on "
             "this base inherits that failure"
         )
-    return "none", None, "no decisive completed ci.yml run on main in the last 30"
+    return "none", None, f"no decisive completed {workflow} run on main in the last 30"
 
 
 def _run_age_seconds(updated_at: object) -> int | None:
@@ -512,12 +527,27 @@ def decisive_runs_with_ancestry(latest_trunk: object, head: str,
     return out
 
 
-def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
+def ci_signal_for_workflow(workflow: str, default_branch: str = DEFAULT_BRANCH,
+                           *, include_runs_on_head: bool = True) -> dict:
+    """Build release_decide's CI signal for one workflow on trunk.
+
+    Shape: ``{workflow, status, runs_on_head, latest_trunk_ci, recent_decisive,
+    note}``. ``status`` is ``green``/``red``/``none``/``unknown``; only the first
+    two are DECISIVE to release_decide. ``recent_decisive`` carries the
+    HEAD-ancestry evidence the green-ancestor tolerance walks (#2655), so a
+    churned trunk relaxes on whichever workflow answered the gate -- not just on
+    ``ci.yml``.
+
+    ``include_runs_on_head`` is a cost knob, not a semantic one: release_decide
+    reads ``runs_on_head`` from no signal and ``latest_trunk_ci.attempt`` only
+    from the whole-``ci.yml`` one, so the fast subset skips that extra `gh` call
+    on the auto-cut critical path.
+    """
     head = run(["git", "rev-parse", "HEAD"]).strip()
     runs_on_head: list[dict] = []
-    if head:
+    if head and include_runs_on_head:
         got = _run_gh_json([
-            "run", "list", "--workflow", "ci.yml", "--commit", head,
+            "run", "list", "--workflow", workflow, "--commit", head,
             "--limit", "10", "--json", "workflowName,status,conclusion,attempt,databaseId,url",
         ])
         if isinstance(got, list):
@@ -534,12 +564,13 @@ def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
             ]
 
     latest_trunk = _run_gh_json([
-        "run", "list", "--workflow", "ci.yml", "--branch", default_branch,
+        "run", "list", "--workflow", workflow, "--branch", default_branch,
         "--status", "completed", "--limit", "30",
         "--json", "conclusion,headSha,updatedAt,attempt,databaseId,url",
     ])
-    status, latest, note = fold_latest_trunk_ci(latest_trunk)
+    status, latest, note = fold_latest_trunk_ci(latest_trunk, workflow)
     return {
+        "workflow": workflow,
         "status": status,
         "runs_on_head": runs_on_head,
         "latest_trunk_ci": latest,
@@ -549,6 +580,23 @@ def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
         "recent_decisive": decisive_runs_with_ancestry(latest_trunk, head),
         "note": note,
     }
+
+
+def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
+    """The whole `-race`-inclusive ci.yml signal -- release_decide's fail-safe base."""
+    return ci_signal_for_workflow("ci.yml", default_branch)
+
+
+def ci_fast(default_branch: str = DEFAULT_BRANCH) -> dict:
+    """The fast release-critical subset signal release_decide prefers (#1374).
+
+    ci-fast.yml's own contract says release_decide "reads this workflow's latest
+    decisive (completed) conclusion on main" -- but nothing emitted the signal, so
+    `effective_ci` always fell back to the whole `ci.yml` and the `-race` tail
+    stayed on the auto-cut critical path. This is that missing producer.
+    """
+    return ci_signal_for_workflow(FAST_CI_WORKFLOW, default_branch,
+                                  include_runs_on_head=False)
 
 
 def main() -> int:
@@ -588,6 +636,7 @@ def main() -> int:
         "tag_drift": tag_drift(tag, any_tag, version_files, commits),
         "workflows_parse_ok": workflows_parse_ok(root),
         "ci_on_head": ci_on_head(DEFAULT_BRANCH),
+        "ci_fast": ci_fast(DEFAULT_BRANCH),
     }
 
     if not args.no_previews:

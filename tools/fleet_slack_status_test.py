@@ -258,6 +258,58 @@ class RollupTextTest(unittest.TestCase):
         self.assertNotIn("STOPPED_APIERR", line)
         self.assertNotIn("INFRA_ORG_DISABLED", line)
 
+    def test_rollup_bullets_multi_item_sections(self):
+        mod = load()
+        # The canonical fixture surfaces >=2 operator moves, so the section renders as
+        # a bold header + one bullet per line (a scannable list, not a ';'-run-on).
+        text = mod.rollup_text(mod.fixture_dispatch_payload(ROOT),
+                               mod.fixture_fleet_snapshot())
+        self.assertIn("*operator moves:*", text)
+        self.assertIn("\n• ", text)
+        self.assertNotIn("operator moves: none", text)
+
+    def test_section_lines_inline_vs_block(self):
+        mod = load()
+        # 0 items -> nothing; 1 -> plain inline (keeps the label: value adjacency);
+        # >=2 -> bold header + bullets, overflow past the limit collapses to '+N more'.
+        self.assertEqual(mod._section_lines("being handled", [], limit=3), [])
+        self.assertEqual(mod._section_lines("being handled", ["  ", "only one"], limit=3),
+                         ["being handled: only one"])
+        self.assertEqual(
+            mod._section_lines("operator moves", ["a", "b", "c"], limit=2),
+            ["*operator moves:*", "• a", "• b", "• +1 more"])
+
+    def test_rollup_aggregates_low_yield_lanes(self):
+        mod = load()
+        line, rest = mod._aggregate_low_yield([
+            "lane gateway low-yield: 58 turns / 3 session(s), "
+            "0 ancestry-closes; re-scope or exclude the lane",
+            "some other action row",
+            "lane memq low-yield: 54 turns / 1 session(s), "
+            "0 ancestry-closes; re-scope or exclude the lane",
+            "lane docs low-yield: 52 turns / 4 session(s), "
+            "0 ancestry-closes; re-scope or exclude the lane",
+        ])
+        # Three identical per-lane templates collapse to ONE line naming every lane.
+        self.assertIn("3 low-yield lane(s)", line)
+        self.assertIn("gateway 58t/3s", line)
+        self.assertIn("memq 54t/1s", line)
+        self.assertIn("docs 52t/4s", line)
+        self.assertNotIn("re-scope or exclude the lane", line)  # the repeated suffix is gone
+        self.assertEqual(rest, ["some other action row"])       # non-matching rows pass through
+
+    def test_rollup_trims_long_resume_command(self):
+        mod = load()
+        long_cmd = "claude --resume " + "x" * 300  # over the inline limit -> verbose phrase
+        line = mod._attention_line("agent sessions", [{
+            "kind": "resume", "count": 1,
+            "lifecycle": mod.fleet_top.LIFECYCLE_ESCALATE,
+            "detail": "stuck mid-tool", "command": long_cmd,
+        }])
+        self.assertIn("resume cmd too long", line)
+        self.assertIn("`python tools/fleet_top.py --once`", line)
+        self.assertNotIn("command omitted from Slack summary", line)
+
 
 class PostRollupTest(unittest.TestCase):
     SLACK_KEYS = ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN")

@@ -245,6 +245,10 @@ def _attention(
     resumable = [r for r in rows if r.get("action") == "AUTO_RESUME"]
     if resumable:
         first = resumable[0]
+        # age_min is clamped >= 0 at the source (fleet_sessions.classify); when the
+        # transcript's mtime was observed AHEAD of the wall clock the anomaly rides in
+        # future_skew_min -- show it rather than an impossible negative age.
+        skew = first.get("future_skew_min") or 0
         items.append({
             "kind": "resume",
             "count": len(resumable),
@@ -253,6 +257,7 @@ def _attention(
             "title": f"{len(resumable)} session(s) resumable on an available account",
             "detail": f"[{first.get('disp')}] {first.get('project')} "
                       f"age={first.get('age_min')}m"
+                      + (f" (mtime +{skew:g}m in the future: clock skew)" if skew else "")
                       + (f"  (+{len(resumable) - 1} more)" if len(resumable) > 1 else ""),
             "command": first.get("resume_cmd") or "",
         })

@@ -159,6 +159,148 @@ def test_grade_bands() -> None:
     assert sc.grade_letter(95) == "A" and sc.grade_letter(40) == "F"
 
 
+# --- excellence credit: the above-100 layer (v5) ---------------------------
+
+def test_grade_ladder_legacy_invariants_hold() -> None:
+    # The above-100 tiers must not disturb the legacy ladder: a plain flawless page
+    # (score == 100 after round) still grades "A" thanks to the 100.0-101.0 dead-zone.
+    assert sc.grade_letter(90) == "A"
+    assert sc.grade_letter(100.0) == "A"
+    assert sc.grade_letter(100.9) == "A"
+    assert sc.grade_letter(40) == "F"
+
+
+def test_grade_ladder_above_100() -> None:
+    assert sc.grade_letter(101) == "A+"
+    assert sc.grade_letter(102.9) == "A+"
+    assert sc.grade_letter(103) == "S"
+    assert sc.grade_letter(104) == "S"
+
+
+def _spotless_hub_body() -> str:
+    """A page that tops out every KPI at 100 AND earns both page credits: a shared
+    topic word ('kernel') in title ∩ H1 ∩ lede ∩ description (C1), and three
+    crawlable published links (C2)."""
+    desc = ("The fak kernel is a default-deny permission gate fused with a bit-exact "
+            "key-value cache for self-hosted agent fleets that reproduce every run.")
+    return ('---\ntitle: "The fak kernel permission gate guide"\n'
+            'description: "' + desc + '"\n---\n'
+            "The fak kernel is a default-deny permission gate that reproduces cache "
+            "bytes exactly for every agent it fronts.\n\n"
+            "# The fak kernel guide\n\n"
+            "## Overview\n\nThe kernel gates tools and replays the cache deterministically.\n\n"
+            "## Guides\n\n- [alpha](alpha.md)\n- [beta](beta.md)\n- [gamma](gamma.md)\n")
+
+
+def _make_hub_targets(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    for name in ("alpha.md", "beta.md", "gamma.md"):
+        (tmp_path / "docs" / name).write_text("# x\n\nprose line here.\n", encoding="utf-8")
+
+
+def test_page_credit_spotless_earns_S(tmp_path: Path) -> None:
+    _make_hub_targets(tmp_path)
+    d = sc.score_page(_spotless_hub_body(), "docs/hub.md", tmp_path)
+    # Precondition: genuinely spotless — every KPI is exactly 100.
+    assert all(v == 100 for v in d["kpis"].values()), d["kpis"]
+    assert d["baseline"] == 100.0, d
+    assert d["credit"] == 3, d
+    assert d["score"] == 103.0 and d["grade"] == "S", d
+    assert d["credit_detail"]["keyword_focus"]["shared"] == ["kernel"], d
+    assert d["credit_detail"]["crawl_hub"]["links"] == 3, d
+
+
+def test_page_credit_requires_spotless(tmp_path: Path) -> None:
+    # Same credit-worthy content, but a second H1 drops headings below 100 -> the
+    # page is no longer spotless, so the excellence credit is withheld ENTIRELY. A
+    # credit can never lift a dinged page above a flawless one.
+    _make_hub_targets(tmp_path)
+    body = _spotless_hub_body().replace(
+        "# The fak kernel guide\n", "# The fak kernel guide\n\n# Second H1 here\n")
+    d = sc.score_page(body, "docs/hub.md", tmp_path)
+    assert d["kpis"]["headings"] < 100, d
+    assert d["credit"] == 0 and d["credit_detail"] == {}, d
+    assert d["score"] <= 100.0 and d["grade"] in ("A", "B"), d
+
+
+def test_page_credit_keyword_focus_needs_all_four_slots(tmp_path: Path) -> None:
+    # The shared topic word must appear in title AND H1 AND lede AND description.
+    # Here the description drops 'kernel', so C1 is not earned (only C2 remains).
+    _make_hub_targets(tmp_path)
+    body = _spotless_hub_body().replace(
+        "The fak kernel is a default-deny permission gate fused with a bit-exact "
+        "key-value cache for self-hosted agent fleets that reproduce every run.",
+        "A default-deny permission gate fused with a bit-exact key-value cache for "
+        "self-hosted agent fleets that reproduce every run without any drift today.")
+    d = sc.score_page(body, "docs/hub.md", tmp_path)
+    assert all(v == 100 for v in d["kpis"].values()), d["kpis"]
+    assert "keyword_focus" not in d["credit_detail"], d
+    assert d["credit"] == 1 and d["grade"] == "A+", d  # only crawl_hub -> 101 -> A+
+
+
+def test_site_credit_schema_richness() -> None:
+    orgs = [{"@type": "Organization", "name": "fak", "url": "https://fak.example"}]
+    credit, detail = sc._site_credit(orgs, "", 0, False)
+    assert credit == 2 and detail == {"schema_richness": 2}, (credit, detail)
+
+
+def test_site_credit_org_without_identity_earns_nothing() -> None:
+    # A name but no url/@id/sameAs is not a rich enough entity for the credit.
+    credit, detail = sc._site_credit([{"@type": "Organization", "name": "fak"}], "", 0, False)
+    assert credit == 0 and detail == {}, (credit, detail)
+
+
+def test_site_credit_crawler_breadth_needs_every_bot() -> None:
+    full = "\n".join(f"User-agent: {ua}\nAllow: /" for ua in sc.AI_CRAWLER_UAS)
+    credit, detail = sc._site_credit([], full, 0, False)
+    assert credit == 2 and detail == {"crawler_breadth": 2}, (credit, detail)
+    # Naming only the 4 REQUIRED bots clears the hard gate but not the breadth credit.
+    partial = "\n".join(f"User-agent: {ua}\nAllow: /" for ua in sc.AI_CRAWLER_REQUIRED)
+    assert sc._site_credit([], partial, 0, False)[0] == 0
+
+
+def test_site_credit_faq_depth_needs_depth_and_sync() -> None:
+    assert sc._site_credit([], "", 2 * sc.MIN_FAQ_QUESTIONS, True) == (1, {"faq_depth": 1})
+    # Deep but unsynced, or synced but shallow -> no credit either way.
+    assert sc._site_credit([], "", 2 * sc.MIN_FAQ_QUESTIONS, False)[0] == 0
+    assert sc._site_credit([], "", sc.MIN_FAQ_QUESTIONS, True)[0] == 0
+
+
+def test_site_credit_all_rungs_stack_to_five() -> None:
+    orgs = [{"@type": "Organization", "name": "fak", "url": "https://fak.example"}]
+    robots = "\n".join(f"User-agent: {ua}\nAllow: /" for ua in sc.AI_CRAWLER_UAS)
+    credit, detail = sc._site_credit(orgs, robots, 2 * sc.MIN_FAQ_QUESTIONS, True)
+    assert credit == 5, (credit, detail)
+    assert set(detail) == {"schema_richness", "crawler_breadth", "faq_depth"}, detail
+
+
+def test_site_checks_dirty_repo_earns_no_credit(tmp_path: Path) -> None:
+    # A bare repo has hard defects, so the site credit is gated off entirely.
+    (tmp_path / "docs").mkdir()
+    site = sc.site_checks(tmp_path)
+    assert site["defects"], site
+    assert site["credit"] == 0 and site["credit_detail"] == {}, site
+    assert site["score_with_credit"] == site["score"], site
+
+
+def test_payload_excellence_credit_lifts_overall_above_100() -> None:
+    pages = [{"path": "docs/a.md", "score": 103.0, "grade": "S", "n_defects": 0,
+              "credit": 3, "defects": [], "soft": [], "kpis": {"title": 100, "description": 100}}]
+    site = {"checks": [], "score": 100.0, "score_with_credit": 105.0, "credit": 5,
+            "credit_detail": {}, "n_ok": 13, "n_total": 13, "defects": [], "soft": [],
+            "present_jsonld": ["SoftwareApplication"]}
+    p = sc.build_payload(workspace=".", pages=pages, site=site, scope="core")
+    c = p["corpus"]
+    # half page-mean (103) + half site headline (100+5) = 104, unbounded above 100.
+    assert c["overall_score"] == 104.0 and c["grade"] == "S", c
+    assert c["excellence_credit"] == {"page": 3, "site": 5, "total": 8}, c
+    assert c["site_score_with_credit"] == 105.0, c
+    assert c["grade_distribution"]["S"] == 1, c
+    assert p["ok"] is True, p
+    out = sc.render(p)
+    assert "credit +8" in out and "grade S" in out, out
+
+
 # --- published-set enumeration ---------------------------------------------
 
 def test_published_excludes_releases_and_nonmd() -> None:
@@ -440,8 +582,8 @@ def test_kpi_weights_sum_to_one() -> None:
     assert "alt_text" in sc.KPI_WEIGHTS, sc.KPI_WEIGHTS
 
 
-def test_schema_is_v4() -> None:
-    assert sc.SCHEMA.endswith("/4"), sc.SCHEMA
+def test_schema_is_v5() -> None:
+    assert sc.SCHEMA.endswith("/5"), sc.SCHEMA
 
 
 def test_headings_ignores_code_fence_hashes() -> None:

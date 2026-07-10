@@ -28,7 +28,8 @@ N/10") instead of a vibe.
 
 Two layers fold into one payload:
 
-  PER-PAGE (each published Pages surface, 0-100, weighted into a score + A-F):
+  PER-PAGE (each published Pages surface, weighted into a 0-100 baseline + A-F,
+            liftable ABOVE 100 by the excellence credit below):
     title          front-matter `title:` present, a sane title-tag length
     description    front-matter `description:` present, in the 70-160 char band
     headings       exactly one H1, no skipped heading level, real sections
@@ -61,6 +62,22 @@ Two layers fold into one payload:
 (a too-short title, a thin page, an optional schema type) lower a score but never
 gate, exactly the split the docs scorecard draws.
 
+EXCELLENCE CREDIT (the above-100 layer). A 0-100 ceiling can only distinguish
+"broken" from "clean"; it flattens every flawless page to the same 100 and gives a
+genuinely excellent corpus nowhere to go. So a small, non-negative, un-farmable
+credit lifts the score PAST 100 — but only once the base is already immaculate. A
+page earns credit ONLY when spotless (every KPI == 100): +2 for keyword_focus (a
+real topic token shared by title ∩ first-H1 ∩ lede ∩ description) and +1 for
+crawl_hub (>= 3 crawlable published links). A site earns credit ONLY when it has
+zero hard defects: +2 schema_richness (a real Organization entity), +2
+crawler_breadth (EVERY named answer-engine bot welcomed, not just the required
+four), +1 faq_depth (a deep, JSON-LD-mirrored FAQ). Because every rung is gated on
+already-clean and needs real shipped markup, the credit can never rescue a dinged
+page or paper over debt — it only rewards work beyond the bar. Grades gain two top
+tiers: A+ (>=101) and S (>=103); the 100.0-101.0 dead-zone keeps a plain flawless
+page at "A". seo-debt and the `ok` gate are unchanged — the headline can now exceed
+100, but it is still zero-debt that means "done".
+
 Read-only by construction: it reads the published `.md` surfaces, `docs/_config.yml`,
 `docs/robots.txt`, the Pages `<head>` include, `llms.txt`/`llms-full.txt`, and the
 social image; it edits nothing. Scores are STRATEGIC (go-to-market positioning),
@@ -89,7 +106,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "fak-seo-aeo-scorecard/4"
+SCHEMA = "fak-seo-aeo-scorecard/5"
 
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 CONFIG_REL = "docs/_config.yml"
@@ -236,6 +253,22 @@ AI_CRAWLER_UAS = {
 # The subset every AEO robots.txt MUST name explicitly (the four dominant answer
 # engines). Naming all of AI_CRAWLER_UAS is a bonus; missing one of these is debt.
 AI_CRAWLER_REQUIRED = ("GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended")
+
+# --- excellence-credit vocabulary (the v5 above-100 layer) -----------------
+# The keyword-focus credit (C1) rewards a topic word that appears in the title,
+# the first H1, the first-screen prose, AND the meta description together. To make
+# that signal about a real TOPIC and not glue words, tokens are lowercased content
+# words of >= 4 chars with the closed function-word set below removed. Kept small
+# and hand-audited on purpose: a bigger list would start dropping real topic words.
+STOPWORDS = frozenset({
+    "the", "a", "an", "and", "or", "of", "for", "to", "in", "on", "with", "is",
+    "are", "be", "this", "that", "it", "as", "at", "by", "from", "your", "you",
+    "our", "we", "how", "what", "why", "when", "where", "who", "which", "its",
+    "into", "not", "no",
+})
+# A content-word token: an alpha lead + >= 3 more word chars (>= 4 total), so
+# 3-char glue ("fak", "cli") never anchors the coherence credit.
+_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'-]{3,}")
 
 
 def _is_question(heading: str) -> bool:
@@ -711,10 +744,134 @@ def _has_prose_opener(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Excellence credit (the above-100 layer): small, non-negative, un-farmable
+# bonuses a page/site earns ONLY once it is already spotless. Every helper here
+# is pure and read-only; none touches a defect count or the ok/verdict gate.
+# ---------------------------------------------------------------------------
+
+def _tokens(s: str) -> set[str]:
+    """Lowercased content-word tokens (>= 4 chars, function words removed)."""
+    return {m.group(0).lower() for m in _TOKEN_RE.finditer(s)} - STOPWORDS
+
+
+def _first_h1_text(text: str) -> str:
+    """The text of the first `# ` heading (the on-page H1), '' if none."""
+    for raw in _strip_front_matter(text).splitlines():
+        line = raw.strip()
+        if line.startswith("# "):
+            return line[2:].strip()
+    return ""
+
+
+def _lede_tokens(text: str) -> set[str]:
+    """Content tokens from the first-screen PROSE: the first 25 body lines with
+    front-matter + fenced code removed, skipping heading / table / blockquote /
+    html lines. This is the readable copy a reader (and the answerability KPI)
+    sees first — the credit requires the topic word to live HERE, not just in meta."""
+    body = _FENCE_RE.sub(" ", _strip_front_matter(text))
+    toks: set[str] = set()
+    for raw in body.splitlines()[:25]:
+        line = raw.strip()
+        if not line or line.startswith(("#", "|", "```", ">", "<")):
+            continue
+        toks |= _tokens(line)
+    return toks
+
+
+def _crawl_hub_count(text: str, root: Path, doc_rel: str) -> int:
+    """Distinct local links that point at a genuinely CRAWLABLE published discovery
+    page (resolves on disk, is `.md`, published, on the discovery surface, not self).
+    Mirrors the kpi_links_crawlable resolution so a dead / unpublished link — the
+    stuff a link-spray farm would add — can never count."""
+    base = (root / doc_rel).parent
+    text = _FENCE_RE.sub(" ", text)
+    try:
+        self_tgt = (root / doc_rel).resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        self_tgt = doc_rel
+    seen: set[str] = set()
+    hubs: set[str] = set()
+    for m in _LINK_RE.finditer(text):
+        target = m.group("target").strip()
+        if target.startswith(("http://", "https://", "mailto:", "#", "tel:")):
+            continue
+        pp = target.split("#", 1)[0].split("?", 1)[0].strip()
+        if not pp or pp in seen:
+            continue
+        seen.add(pp)
+        if not pp.endswith(".md"):
+            continue
+        resolved = (root / pp.lstrip("/")) if pp.startswith("/") else (base / pp)
+        if not resolved.exists() or resolved.is_dir():
+            continue
+        try:
+            tgt = resolved.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        if tgt != self_tgt and _published(root, tgt) and _discovery(tgt):
+            hubs.add(tgt)
+    return len(hubs)
+
+
+def _page_credit(text: str, doc_rel: str, root: Path,
+                 fm: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """The page excellence credit (0..3), computed only for a spotless page.
+    C1 keyword_focus (+2): a real topic token shared by title ∩ first-H1 ∩ lede
+    prose ∩ description. C2 crawl_hub (+1): >= 3 crawlable published discovery links."""
+    credit = 0
+    detail: dict[str, Any] = {}
+    shared = (_tokens(fm.get("title", "")) & _tokens(_first_h1_text(text))
+              & _lede_tokens(text) & _tokens(fm.get("description", "")))
+    if shared:
+        credit += 2
+        detail["keyword_focus"] = {"points": 2, "shared": sorted(shared)[:5]}
+    hub = _crawl_hub_count(text, root, doc_rel)
+    if hub >= 3:
+        credit += 1
+        detail["crawl_hub"] = {"points": 1, "links": hub}
+    return credit, detail
+
+
+def _site_credit(jsonld_values: list[Any], robots: str, faq_questions: int,
+                 faq_sync_ok: bool) -> tuple[int, dict[str, Any]]:
+    """The site excellence credit (0..5), computed only for a clean site. Each rung
+    needs REAL shipped markup, so none can be padded:
+      S1 schema_richness (+2): a valid Organization entity — a non-empty name AND
+         an identifying URL (url/@id) or a sameAs list.
+      S2 crawler_breadth (+2): every named answer-engine bot in AI_CRAWLER_UAS is
+         welcomed, not merely the four AI_CRAWLER_REQUIRED that clear the hard gate.
+      S3 faq_depth (+1): a deep FAQ (>= 2x MIN_FAQ_QUESTIONS) whose FAQPage JSON-LD
+         mirrors every question (faq_jsonld_sync already passed)."""
+    credit = 0
+    detail: dict[str, Any] = {}
+    orgs = _jsonld_objects_with_type(jsonld_values, "Organization")
+    if any(isinstance(o.get("name"), str) and o.get("name").strip()
+           and (_jsonld_url(o) or (isinstance(o.get("sameAs"), list) and o.get("sameAs")))
+           for o in orgs):
+        credit += 2
+        detail["schema_richness"] = 2
+    if AI_CRAWLER_UAS <= set(_robots_groups(robots)):
+        credit += 2
+        detail["crawler_breadth"] = 2
+    if faq_questions >= 2 * MIN_FAQ_QUESTIONS and faq_sync_ok:
+        credit += 1
+        detail["faq_depth"] = 1
+    return credit, detail
+
+
+# ---------------------------------------------------------------------------
 # Per-page fold
 # ---------------------------------------------------------------------------
 
 def grade_letter(score: float) -> str:
+    # Above-100 tiers for the excellence layer. The 100.0–101.0 dead-zone means a
+    # plain flawless page (score == 100 after round) still grades "A", so the
+    # legacy invariants grade_letter(95)=="A" and grade_letter(100)=="A" hold; a
+    # tier only lifts to A+/S once a real credit pushes the score past 101/103.
+    if score >= 103:
+        return "S"
+    if score >= 101:
+        return "A+"
     if score >= 90:
         return "A"
     if score >= 80:
@@ -738,12 +895,22 @@ def score_page(text: str, doc_rel: str, root: Path) -> dict[str, Any]:
         kpi_alt_text(text),
     ]
     by_name = {k["kpi"]: k for k in kpis}
-    score = sum(KPI_WEIGHTS[name] * by_name[name]["score"] for name in KPI_WEIGHTS)
+    baseline = round(sum(KPI_WEIGHTS[name] * by_name[name]["score"] for name in KPI_WEIGHTS), 1)
+    # The excellence credit is earned ONLY by a spotless page — every KPI already
+    # topped out at exactly 100 (integer-exact, so weight-float dust never mis-gates).
+    # A page with any soft nudge earns 0, so a credit can never lift a dinged page
+    # above a flawless one, and never touches seo_debt or the ok/verdict gate.
+    spotless = all(by_name[name]["score"] == 100 for name in KPI_WEIGHTS)
+    credit, credit_detail = _page_credit(text, doc_rel, root, fm) if spotless else (0, {})
+    score = round(baseline + credit, 1)
     defects = [f"{k['kpi']}: {d}" for k in kpis for d in k["defects"]]
     soft = [f"{k['kpi']}: {s}" for k in kpis for s in k["soft"]]
     return {
         "path": doc_rel,
-        "score": round(score, 1),
+        "score": score,
+        "baseline": baseline,
+        "credit": credit,
+        "credit_detail": credit_detail,
         "grade": grade_letter(score),
         "kpis": {k["kpi"]: k["score"] for k in kpis},
         "kpi_detail": {k["kpi"]: k["detail"] for k in kpis},
@@ -758,7 +925,8 @@ def score_page(text: str, doc_rel: str, root: Path) -> dict[str, Any]:
 
 def missing_page_entry(doc_rel: str) -> dict[str, Any]:
     return {
-        "path": doc_rel, "score": 0.0, "grade": "F",
+        "path": doc_rel, "score": 0.0, "baseline": 0.0, "credit": 0, "credit_detail": {},
+        "grade": "F",
         "kpis": {k: 0 for k in KPI_WEIGHTS}, "kpi_detail": {},
         "meta": {"title": "", "description": ""},
         "defects": [f"missing: core page {doc_rel} does not exist on disk"],
@@ -1064,9 +1232,21 @@ def site_checks(root: Path) -> dict[str, Any]:
     soft = [c["defect"] for c in checks if not c["ok"] and not c["hard"]]
     n_ok = sum(1 for c in checks if c["ok"])
     score = round(100 * n_ok / max(1, len(checks)), 1)
+
+    # Site excellence credit (0..5), earned ONLY when the site carries no hard
+    # defect. Each rung needs REAL shipped markup, so none can be padded:
+    #   S1 schema_richness (+2): a valid Organization entity with a name AND a URL.
+    #   S2 crawler_breadth (+2): every named answer-engine bot welcomed, not just the 4 required.
+    #   S3 faq_depth (+1): a deep (>= 2x the bar) FAQ whose JSON-LD mirrors every question.
+    site_clean = len(hard_defects) == 0
+    site_credit, credit_detail = (
+        _site_credit(jsonld_values, robots, q, faq_sync_ok) if site_clean else (0, {}))
     return {
         "checks": checks,
         "score": score,
+        "score_with_credit": round(score + site_credit, 1),
+        "credit": site_credit,
+        "credit_detail": credit_detail,
         "n_ok": n_ok,
         "n_total": len(checks),
         "defects": hard_defects,
@@ -1223,7 +1403,7 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
     site_defects = len(site.get("defects", []))
     total_defects = page_defects + site_defects
     mean_score = round(sum(scores) / max(1, n), 1)
-    grades = {g: 0 for g in "ABCDF"}
+    grades = {g: 0 for g in ("S", "A+", "A", "B", "C", "D", "F")}
     for d in pages:
         grades[d["grade"]] = grades.get(d["grade"], 0) + 1
     worst = sorted(pages, key=lambda d: (d["score"], -d["n_defects"]))[:8]
@@ -1231,8 +1411,16 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
     full_meta = sum(1 for d in pages if d["kpis"].get("title", 0) > 0
                     and d["kpis"].get("description", 0) > 0)
     meta_pct = round(100 * full_meta / max(1, n), 1)
-    # The headline 0-100: half the page mean, half the site infrastructure score.
-    overall = round(0.5 * mean_score + 0.5 * site["score"], 1)
+    # Excellence credit rolls up from the per-page + site credits (each already
+    # gated on spotless/clean). It is additive and non-negative, so the headline
+    # can rise ABOVE 100 for a genuinely excellent corpus but never drops a score.
+    page_credit_total = sum(d.get("credit", 0) for d in pages)
+    site_credit = site.get("credit", 0)
+    site_headline = round(site["score"] + site_credit, 1)
+    # The headline (now UNBOUNDED above 100): half the page mean, half the site
+    # headline. mean_score already carries any per-page credit; site_headline adds
+    # the site credit — so overall tops out near 104 on a maxed, credited corpus.
+    overall = round(0.5 * mean_score + 0.5 * site_headline, 1)
     # SUCCESS-KPI breakdown (the presence-not-success defects the deepened scorecard
     # surfaces): links that 404 on the live site, non-unique meta, dead citations.
     crawl_404 = sum(1 for d in pages for x in d["defects"] if "links_crawlable: crawl-404" in x)
@@ -1248,6 +1436,9 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
         "grade": grade_letter(overall),
         "page_mean_score": mean_score,
         "site_score": site["score"],
+        "site_score_with_credit": site_headline,
+        "excellence_credit": {"page": page_credit_total, "site": site_credit,
+                              "total": page_credit_total + site_credit},
         "site_checks_ok": f"{site['n_ok']}/{site['n_total']}",
         "meta_coverage_pct": meta_pct,
         "median_score": round(sorted(scores)[n // 2], 1) if n else 0.0,
@@ -1269,13 +1460,13 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
 
     if total_defects == 0:
         ok, verdict, finding = True, "OK", "discoverable"
-        reason = (f"discoverability clean: {n} pages, overall {overall}/100, "
+        reason = (f"discoverability clean: {n} pages, overall {overall} (grade {grade_letter(overall)}), "
                   f"meta coverage {meta_pct}%, site {site['n_ok']}/{site['n_total']}, zero seo-debt")
         next_action = "no required edit; re-run after the next docs/site change"
     else:
         ok, verdict, finding = False, "ACTION", "seo_debt"
         reason = (f"{total_defects} unit(s) of seo-debt across {n} pages "
-                  f"({page_defects} in-page + {site_defects} site); overall {overall}/100, "
+                  f"({page_defects} in-page + {site_defects} site); overall {overall}, "
                   f"meta coverage {meta_pct}%, site {site['n_ok']}/{site['n_total']}")
         next_action = ("retire seo-debt worst-first (corpus.worst + site defects): add missing "
                        "front-matter title/description, JSON-LD types, llms-full.txt; repoint a "
@@ -1327,8 +1518,12 @@ def render(payload: dict[str, Any]) -> str:
         f"seo-aeo-scorecard: {payload.get('verdict')} ({payload.get('finding')})  [scope={payload.get('scope')}]",
         f"  {payload.get('reason')}",
         "",
-        (f"corpus: {c.get('n_pages', 0)} pages · overall {c.get('overall_score', 0)}/100 "
-         f"(pages {c.get('page_mean_score', 0)} · site {c.get('site_score', 0)}) "
+        (f"corpus: {c.get('n_pages', 0)} pages · overall {c.get('overall_score', 0)} "
+         f"(grade {c.get('grade', '?')}) "
+         f"(pages {c.get('page_mean_score', 0)} · site {c.get('site_score', 0)}"
+         f"{('→' + str(c.get('site_score_with_credit'))) if c.get('excellence_credit', {}).get('site') else ''}) "
+         f"· credit +{c.get('excellence_credit', {}).get('total', 0)} "
+         f"(page {c.get('excellence_credit', {}).get('page', 0)} · site {c.get('excellence_credit', {}).get('site', 0)}) "
          f"· SEO-DEBT {c.get('seo_debt', 0)}"),
         (f"meta coverage: {c.get('meta_coverage_pct', 0)}%  ·  "
          f"site checks: {c.get('site_checks_ok', '0/0')}  ·  "
@@ -1336,7 +1531,8 @@ def render(payload: dict[str, Any]) -> str:
         (f"discovery orphans (published, not front-door-reachable): {c.get('discovery_orphans', 0)}"),
         (f"success KPIs: crawl-404 {c.get('crawl_404', 0)}  ·  meta-duplicates {c.get('meta_duplicates', 0)}"
          f"  ·  dead citations {c.get('citation_dead', 0)}  ·  llms-full unresolved {c.get('llms_full_unresolved', 0)} (advisory)"),
-        ("grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}" for g in "ABCDF")),
+        ("grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}"
+                                for g in ("S", "A+", "A", "B", "C", "D", "F"))),
         f"next: {payload.get('next_action')}",
         "",
         "per-page (worst first):",
@@ -1401,13 +1597,18 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append(f"| Published pages scored | {c.get('n_pages', 0)} |")
     out.append(f"| **SEO-debt (total defects)** | **{c.get('seo_debt', 0)}** "
                f"({c.get('seo_debt_in_pages', 0)} in-page + {c.get('seo_debt_in_site', 0)} site) |")
-    out.append(f"| Overall score | {c.get('overall_score', 0)}/100 |")
-    out.append(f"| — page mean / site | {c.get('page_mean_score', 0)} / {c.get('site_score', 0)} |")
+    out.append(f"| Overall score (unbounded) | {c.get('overall_score', 0)} (grade {c.get('grade', '?')}) |")
+    ec = c.get('excellence_credit', {})
+    out.append(f"| — page mean / site | {c.get('page_mean_score', 0)} / {c.get('site_score', 0)}"
+               f"{(' → ' + str(c.get('site_score_with_credit'))) if ec.get('site') else ''} |")
+    out.append(f"| Excellence credit (page + site) | +{ec.get('total', 0)} "
+               f"({ec.get('page', 0)} page + {ec.get('site', 0)} site) |")
     out.append(f"| Meta coverage (title+desc) | {c.get('meta_coverage_pct', 0)}% |")
     out.append(f"| Site checks passing | {c.get('site_checks_ok', '0/0')} |")
     out.append(f"| JSON-LD types present | {', '.join(c.get('present_jsonld', [])) or 'none'} |")
     out.append(f"| Discovery orphans (not front-door-reachable) | {c.get('discovery_orphans', 0)} |")
-    out.append(f"| Grade distribution | A:{gd.get('A',0)} B:{gd.get('B',0)} C:{gd.get('C',0)} D:{gd.get('D',0)} F:{gd.get('F',0)} |")
+    out.append(f"| Grade distribution | S:{gd.get('S',0)} A+:{gd.get('A+',0)} A:{gd.get('A',0)} "
+               f"B:{gd.get('B',0)} C:{gd.get('C',0)} D:{gd.get('D',0)} F:{gd.get('F',0)} |")
     out.append("")
     out.append("## Per-page scores")
     out.append("")
@@ -1461,11 +1662,14 @@ def render_compare(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     cur = (current.get("corpus") or {})
     bd, cd = b.get("seo_debt", 0), cur.get("seo_debt", 0)
     bo, co = b.get("overall_score", 0), cur.get("overall_score", 0)
+    bc = (b.get("excellence_credit") or {}).get("total", 0)
+    cc = (cur.get("excellence_credit") or {}).get("total", 0)
     ratio = (bd / cd) if cd else float("inf")
     ratio_s = "∞ (zero)" if cd == 0 else f"{ratio:.1f}×"
     lines = [
         f"seo-debt: {bd} -> {cd}   ({ratio_s} fewer defects)",
-        f"overall:  {bo}/100 -> {co}/100   (+{round(co - bo, 1)})",
+        f"overall:  {bo} -> {co}   (+{round(co - bo, 1)}, unbounded above 100)",
+        f"credit:   +{bc} -> +{cc}   (excellence, earned only when spotless/clean)",
         f"meta cov: {b.get('meta_coverage_pct', 0)}% -> {cur.get('meta_coverage_pct', 0)}%",
         f"site:     {b.get('site_checks_ok','?')} -> {cur.get('site_checks_ok','?')}",
         f"JSON-LD:  {', '.join(b.get('present_jsonld', [])) or 'none'} -> "

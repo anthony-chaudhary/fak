@@ -38,6 +38,7 @@ re-parse the JSONL classifier, we consume its output):
   - tools/_registry/resume_ledger.jsonl, transitions.log, _watchdog/  <- recovery freshness
 
 Usage:
+  python fleet_bottleneck.py                        # bare = `report` (same flags apply)
   python fleet_bottleneck.py report                 # ranked bottlenecks + health card (text)
   python fleet_bottleneck.py json [--out FILE]      # full machine payload
   python fleet_bottleneck.py prometheus [--out FILE]# Prometheus text exposition (machine/agent)
@@ -129,6 +130,41 @@ def _load_registry():
         return None
 
 
+def _storm_block(reg, sessions):
+    """{storm, counts_by_disp, account_health} for the snapshot. Prefer the registry's
+    own `summary` (fleet_sessions is the authority); fall back to a local recency-bucket
+    compute so a pre-summary registry still yields storm gauges over time."""
+    s = reg.get("summary")
+    if isinstance(s, dict) and s.get("storm"):
+        return {"storm": s.get("storm", {}),
+                "counts_by_disp": s.get("counts_by_disp", {}),
+                "account_health": s.get("accounts", {})}
+    buckets = (15, 30, 60)
+    apierr = {w: 0 for w in buckets}
+    total = {w: 0 for w in buckets}
+    cbd, ah = {}, {}
+    for x in sessions:
+        d = x.get("disp") or "?"
+        cbd[d] = cbd.get(d, 0) + 1
+        am = x.get("age_min")
+        a = None if am is None else max(0.0, float(am))
+        is_err = d == "STOPPED_APIERR"
+        if a is not None:
+            for w in buckets:
+                if a <= w:
+                    total[w] += 1
+                    if is_err:
+                        apierr[w] += 1
+        acc = x.get("account")
+        if acc and is_err and a is not None and a <= 30:
+            ah.setdefault(acc, {"apierr_30m": 0})["apierr_30m"] += 1
+    storm = {f"apierr_{w}m": apierr[w] for w in buckets}
+    storm.update({f"total_{w}m": total[w] for w in buckets})
+    storm["apierr_per_min_30m"] = round(apierr[30] / 30.0, 3)
+    storm["apierr_frac_30m"] = round(apierr[30] / total[30], 3) if total[30] else 0.0
+    return {"storm": storm, "counts_by_disp": cbd, "account_health": ah}
+
+
 def _age_min(iso):
     if not iso:
         return None
@@ -164,21 +200,42 @@ def _fleet_state_dir():
     return os.path.join(tempfile.gettempdir(), "Fleet")
 
 
-def _recovery_watchdog_age_min():
-    """Minutes since the freshest recovery-watchdog heartbeat, or None if none found.
-
-    The recovery watchdogs append a heartbeat line every tick: the resume watchdog
-    (FleetResumeWatchdog) -> resume_watchdog.log, the supervisor (FleetSupervisorWatchdog)
-    -> watchdog.log. Each writes to the LIVE host state dir (<state>/watchdog/) under the
-    scheduled task and, on the dev/.py path, to the in-repo tools/_watchdog/. Read the
-    freshest across both locations so a healthy live watchdog is not misreported as
-    "no recovery activity on disk" (which falsely fired CRITICAL crash-resume/recovery
-    bottlenecks whenever the supervisor was disabled but the resume watchdog was live)."""
-    names = ("resume_watchdog.log", "watchdog.log")
+def _watchdog_age_min(names):
+    """Minutes since the freshest heartbeat among log `names`, checked across BOTH
+    watchdog locations, or None if none found. Each loop writes to the LIVE host
+    state dir (<state>/watchdog/) under the scheduled task and, on the dev/.py
+    path, to the in-repo tools/_watchdog/ — the cross-LOCATION min is deliberate,
+    so a healthy live watchdog is never misreported as dead just because the repo
+    copy went quiet. Cross-LOOP conflation is NOT done here: callers pass exactly
+    the log name(s) of the loop(s) they are asserting about."""
     dirs = (os.path.join(_fleet_state_dir(), "watchdog"), WATCH_DIR)
     ages = [a for a in (_file_age_min(os.path.join(d, n)) for d in dirs for n in names)
             if a is not None]
     return min(ages) if ages else None
+
+
+def _recovery_watchdog_age_min():
+    """Minutes since the freshest heartbeat of ANY recovery loop, or None if none found.
+
+    The recovery watchdogs append a heartbeat line every tick: the resume watchdog
+    (FleetResumeWatchdog) -> resume_watchdog.log, the supervisor (FleetSupervisorWatchdog)
+    -> watchdog.log. This is the plumbing-wide "is anything self-healing?" signal
+    (recovery_stale #5 and the fleet_watchdog_log_age_minutes gauge): reading the
+    freshest across both loops and both locations keeps a healthy live watchdog from
+    being misreported as "no recovery activity on disk" (which falsely fired CRITICAL
+    crash-resume/recovery bottlenecks whenever the supervisor was disabled but the
+    resume watchdog was live). Claims about the RESUME loop specifically must use
+    _resume_watchdog_age_min() instead — a live supervisor must never mask a dead
+    resume watchdog, because a dead resume loop is exactly the condition
+    crash_resume_backlog #4 reports."""
+    return _watchdog_age_min(("resume_watchdog.log", "watchdog.log"))
+
+
+def _resume_watchdog_age_min():
+    """Minutes since the RESUME watchdog's own freshest heartbeat (both locations),
+    or None. Attributable to FleetResumeWatchdog alone — never the supervisor's
+    watchdog.log, which is a different recovery loop."""
+    return _watchdog_age_min(("resume_watchdog.log",))
 
 
 def _resumed_set():
@@ -334,6 +391,10 @@ def collect(audit=True, audit_days=1.5, audit_max=80):
             "surface": len(surface), "api_error": len(api_error),
         },
         "per_account": {a: dict(c) for a, c in per_acct.items()},
+        # storm/health summary: prefer the authoritative block fleet_sessions writes,
+        # else derive locally so an older registry still graphs. Feeds the Prometheus
+        # apierr_recent / apierr_per_min / sessions_by_disp / account_apierr series.
+        **_storm_block(reg, sessions),
         # keep the live session list (trimmed) for the dashboard table
         "sessions": [{
             "account": s.get("account"), "project": s.get("project"),
@@ -355,9 +416,13 @@ def collect(audit=True, audit_days=1.5, audit_max=80):
     # The live watchdogs heartbeat into %FLEET_STATE_DIR%/watchdog, not tools/_watchdog,
     # and the resume watchdog's log is resume_watchdog.log (not watchdog.log) — reading
     # only the in-repo watchdog.log reported recovery DEAD even while a watchdog was
-    # ticking, so read the freshest heartbeat across both locations and both names.
+    # ticking, so read the freshest heartbeat across both locations. Two keys, two
+    # questions: watchdog_log_age_min is cross-loop ("is ANY recovery plumbing alive?",
+    # #5); resume_watchdog_age_min is the resume loop's OWN heartbeat, so a live
+    # supervisor cannot mask a dead resume watchdog in the resume-backlog claim (#4).
     snap["recovery"] = {
         "watchdog_log_age_min": _recovery_watchdog_age_min(),
+        "resume_watchdog_age_min": _resume_watchdog_age_min(),
         "resumed_ever": len(resumed),
         "transitions_log_present": os.path.exists(os.path.join(REG_DIR, "transitions.log")),
     }
@@ -440,19 +505,26 @@ def _bottlenecks(snap):
     #    AUTO_RESUME) that haven't been resumed yet. Supervised/skipped crashes are
     #    handled elsewhere, so they do NOT count here.
     wd_age = snap.get("recovery", {}).get("watchdog_log_age_min")
+    # #4's freshness claim is about the RESUME loop specifically, so it reads the
+    # resume watchdog's own heartbeat — the cross-loop wd_age let a live supervisor
+    # (watchdog.log) report a dead resume watchdog as "last ran 1m ago", when a dead
+    # resume loop is exactly the condition this bottleneck exists to surface.
+    resume_age = snap.get("recovery", {}).get("resume_watchdog_age_min")
     if c["auto_resume"]:
-        stale_wd = wd_age is None or wd_age > CFG["watchdog_stale_min"]
-        score = 22 * c["auto_resume"] + (20 if stale_wd else 0)
+        stale_resume = resume_age is None or resume_age > CFG["watchdog_stale_min"]
+        score = 22 * c["auto_resume"] + (20 if stale_resume else 0)
         out.append(_b(
             "crash_resume_backlog", "Crash-resume backlog", "Recovery",
             score,
             f"{c['auto_resume']} worker(s) queued for resume (action=AUTO_RESUME) not yet recovered"
-            + (f"; resume watchdog last ran {wd_age:.0f}m ago." if wd_age is not None
+            + (f"; resume watchdog last ran {resume_age:.0f}m ago"
+               + (" — STALE, likely not resuming anything." if stale_resume else ".")
+               if resume_age is not None
                else "; resume-watchdog activity not seen on disk."),
             "Confirm the resume watchdog is scheduled and in LIVE mode (DRY-RUN never resumes); "
             "process resume_plan.json. Each queued worker is lost throughput until resumed.",
-            {"auto_resume": c["auto_resume"], "watchdog_log_age_min":
-             round(wd_age, 1) if wd_age is not None else None}))
+            {"auto_resume": c["auto_resume"], "resume_watchdog_age_min":
+             round(resume_age, 1) if resume_age is not None else None}))
 
     # #5 Recovery plumbing stale — if anything needs recovery but the watchdog is
     #    stale/absent, recovery itself may have stopped (the meta-bottleneck).
@@ -779,9 +851,41 @@ def render_prometheus(snap, ranked):
         fam("account_throttled", "gauge", "1 for each currently rate-limited account.",
             [({"account": acc}, 1) for acc in sorted((r.get("throttle") or {}).keys())])
 
+        # --- crash-loop STORM as time series (recency buckets, per-min rate, per-disp,
+        # per-account attribution). This is the signal that was invisible: a bloated
+        # registry read as "saturated" while the fleet was 0/24 with every account
+        # rate-limited by a self-inflicted API-error loop. Graph apierr_per_min over
+        # time to SEE the storm; sessions_by_disp{disp} shows the corpse pile grow.
+        storm = r.get("storm") or {}
+        # The three scalar storm gauges emit UNCONDITIONALLY (0 when healthy) so the
+        # storm-rate panel graphs a real 0 line — a healthy fleet and a dead exporter
+        # must look different, not both read "No data".
+        fam("apierr_recent", "gauge",
+            "STOPPED_APIERR sessions within a recency bucket (crash-loop storm shape).",
+            [({"window": f"{w}m"}, storm.get(f"apierr_{w}m") or 0) for w in (15, 30, 60)])
+        fam("apierr_per_min", "gauge",
+            "STOPPED_APIERR sessions per minute over the last 30m (storm intensity).",
+            [(None, storm.get("apierr_per_min_30m") or 0)])
+        fam("apierr_frac_30m", "gauge",
+            "Fraction of sessions in the last 30m that stopped on an API error (0-1).",
+            [(None, storm.get("apierr_frac_30m") or 0)])
+        cbd = r.get("counts_by_disp") or {}
+        if cbd:
+            fam("sessions_by_disp", "gauge",
+                "Session count by disposition in the registry window (one series per disp).",
+                [({"disp": d}, n) for d, n in sorted(cbd.items())])
+        ah = r.get("account_health") or {}
+        if ah:
+            fam("account_apierr_recent", "gauge",
+                "Per-account STOPPED_APIERR in the last 30m (which account is storming).",
+                [({"account": a}, v.get("apierr_30m", 0)) for a, v in sorted(ah.items())])
+
     fam("watchdog_log_age_minutes", "gauge",
-        "Age of the recovery watchdog log in minutes (recovery-plumbing freshness).",
+        "Age of the freshest recovery-watchdog log of ANY loop, minutes (plumbing-wide freshness).",
         [(None, (snap.get("recovery") or {}).get("watchdog_log_age_min"))])
+    fam("resume_watchdog_age_minutes", "gauge",
+        "Age of the RESUME watchdog's own heartbeat in minutes (not masked by the supervisor loop).",
+        [(None, (snap.get("recovery") or {}).get("resume_watchdog_age_min"))])
 
     a = snap.get("audit")
     if a and "error" not in a:
@@ -1103,24 +1207,37 @@ def serve(port, audit, audit_days, audit_max, interval):
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
-def main():
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+def _build_parser():
     p = argparse.ArgumentParser(description="Fleet bottleneck detection + visibility (v1).")
-    sub = p.add_subparsers(dest="cmd")
-    for name in ("report", "json", "prometheus", "serve"):
-        q = sub.add_parser(name)
+
+    def shared(q):
         q.add_argument("--no-audit", action="store_true", help="skip the token-spend pass")
         q.add_argument("--audit-days", type=float, default=1.5)
         q.add_argument("--audit-max", type=int, default=80)
+
+    # The shared flags live on the TOP-LEVEL parser too: a bare invocation (no
+    # subcommand) defaults to `report`, and main() reads a.no_audit / a.audit_*
+    # on that path — registering them only on the subparsers crashed
+    # `python fleet_bottleneck.py` with AttributeError.
+    shared(p)
+    sub = p.add_subparsers(dest="cmd")
+    for name in ("report", "json", "prometheus", "serve"):
+        q = sub.add_parser(name)
+        shared(q)
         if name in ("json", "prometheus"):
             q.add_argument("--out", default=None)
         if name == "serve":
             q.add_argument("--port", type=int, default=9095)
             q.add_argument("--interval", type=int, default=45)
-    a = p.parse_args()
+    return p
+
+
+def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    a = _build_parser().parse_args()
     cmd = a.cmd or "report"
 
     if cmd == "serve":

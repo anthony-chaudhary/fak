@@ -235,14 +235,33 @@ STALE_MSG = ("Marking stale: no activity for {idle} days and not in-progress. "
              "Reply to keep open, else this will be closed in the next triage pass.")
 Q_CLOSE_MSG = ("Closing as dormant: this is a `question` with no activity for "
                "{idle} days. Reopen with new info if it is still live.")
+# needs-class is the ONE `needs-*` gap that is NOT an operator judgment call: the
+# work-class is DERIVED from the lane an issue routes to (issue_lane_router.
+# derive_class), so the lane router can backfill every missing class:* label
+# idempotently in one batch. Preview the diff, then commit it:
+CLASS_BACKFILL_CMD = (
+    "python tools/issue_lane_router.py --apply-labels                     "
+    "# DRY-RUN: preview the class:* diff\n"
+    "python tools/issue_lane_router.py --apply-labels --apply-labels-write "
+    "# commit the class:* labels"
+)
 
 
 def build_actions(rows: list[dict]) -> list[dict]:
-    """Only MECHANICAL, defensible actions get a `cmd`. Judgment calls
-    (needs-priority, needs-area, …) are surfaced as REVIEW with no cmd —
-    the operator decides per-issue. The helper never executes these."""
+    """Only MECHANICAL, defensible actions get a `cmd`. Genuine judgment calls
+    (needs-priority, needs-kind, needs-area, …) are surfaced as REVIEW with no
+    cmd — the operator decides per-issue. The helper never executes these.
+
+    needs-class is deliberately NOT treated as a judgment call: because the
+    work-class is derived from the routed lane, the whole needs-class cohort is
+    closed by a single mechanical `backfill-class` action (the lane router's
+    idempotent label reconcile), and the tag is stripped from each issue's REVIEW
+    reason so a class-only gap never masquerades as needing human judgment."""
     actions = []
+    needs_class: list[int] = []
     for r in rows:
+        if "needs-class" in r["tags"]:
+            needs_class.append(r["number"])
         if "dormant-question" in r["tags"]:
             actions.append({
                 "number": r["number"], "kind": "close-dormant-question",
@@ -257,13 +276,25 @@ def build_actions(rows: list[dict]) -> list[dict]:
                 "cmd": (f'gh issue edit {r["number"]} --add-label "stale" '
                         f'--add-comment \'{STALE_MSG.format(idle=r["idle_days"])}\''),
             })
-        elif r["tags"]:
-            # Judgment call — surface for review, do not auto-act.
-            actions.append({
-                "number": r["number"], "kind": "review",
-                "reason": ", ".join(r["tags"]),
-                "cmd": None,
-            })
+        else:
+            # Genuine judgment calls only — class is mechanical, so drop it here.
+            judgment = [t for t in r["tags"] if t != "needs-class"]
+            if judgment:
+                actions.append({
+                    "number": r["number"], "kind": "review",
+                    "reason": ", ".join(judgment),
+                    "cmd": None,
+                })
+    if needs_class:
+        # One batch move for the whole cohort — the lane router re-derives the
+        # class from the live backlog, so this list is the informational scope.
+        actions.append({
+            "number": None, "kind": "backfill-class",
+            "reason": (f"{len(needs_class)} issue(s) missing class:* — derive + "
+                       "backfill via the lane router (mechanical, idempotent)"),
+            "issues": sorted(needs_class),
+            "cmd": CLASS_BACKFILL_CMD,
+        })
     return actions
 
 
@@ -332,7 +363,16 @@ def render_md(report: dict, as_of: str) -> str:
                  f"{len(acts) - len(mechanical)} review-only)")
         L.append("")
         for a in mechanical:
-            L.append(f"- `#{a['number']}` **{a['kind']}** — {a['reason']}")
+            if a["number"] is None:
+                # Batch action (e.g. backfill-class) — no single issue number;
+                # show the reason and the one command to run.
+                L.append(f"- **{a['kind']}** — {a['reason']}")
+                L.append("  ```")
+                for line in a["cmd"].splitlines():
+                    L.append(f"  {line}")
+                L.append("  ```")
+            else:
+                L.append(f"- `#{a['number']}` **{a['kind']}** — {a['reason']}")
         L.append("")
         L.append("Apply via the skill's approve-then-run step; commands live in the "
                  "`--actions` JSON, never run by this helper.")

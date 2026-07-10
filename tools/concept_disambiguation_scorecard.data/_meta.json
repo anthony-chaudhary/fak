@@ -143,7 +143,8 @@
       "exclude": ["plane", "plank", "explanat"],
       "ignore": ["planner", "plans", "planning", "Candidates", "candidates",
                  "planned", "notplanned", "planted", "planners",
-                 "plannedcumtok", "plannedcumtokens"],
+                 "plannedcumtok", "plannedcumtokens",
+                 "planting", "fitandplanserveggufexpertparallelpathondevice"],
       "min_files": 2,
       "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner."
     },

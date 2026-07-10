@@ -131,5 +131,96 @@ class TreeBuildsTest(unittest.TestCase):
         self.assertIn(os.devnull, seen["cmd"])
 
 
+class ClassifyTreeBreakTest(unittest.TestCase):
+    """The tree-break classifier is pure (offending file, tracked?, mtime) -> a typed
+    recommendation, and it must NEVER escalate to an auto-mutate: a snapshot cannot
+    prove a red file is not under a peer's active edit (witnessed flap, 2026-07-09)."""
+
+    def test_unlocalized_when_no_offender(self):
+        d = M.classify_tree_break(None, tracked=None, age_min=None)
+        self.assertEqual(d["code"], M.TREE_UNLOCALIZED)
+        self.assertTrue(d["action"].strip())
+
+    def test_untracked_offender_is_quarantine_safe_and_reversible(self):
+        d = M.classify_tree_break("cmd/fak/eve_inspect.go", tracked=False, age_min=388.0)
+        self.assertEqual(d["code"], M.TREE_QUARANTINE_SAFE)
+        self.assertIn("eve_inspect.go", d["action"])
+        self.assertIn("mv", d["action"])          # recommends the reversible move
+        self.assertIn("reversible", d["action"])
+
+    def test_tracked_offender_is_coupled_never_edited_beside_owner(self):
+        d = M.classify_tree_break("cmd/fak/eve.go", tracked=True, age_min=5.0)
+        self.assertEqual(d["code"], M.TREE_COUPLED_TRACKED)
+        self.assertIn("owning worker", d["action"])
+
+    def test_parse_offender_first_file_line_windows_slashes(self):
+        err = ("# github.com/x/y/cmd/fak\n"
+               "cmd\\fak\\eve_inspect.go:56:29: undefined: evebridge.InspectFS\n")
+        self.assertEqual(M.parse_build_offender(err), "cmd/fak/eve_inspect.go")
+
+    def test_parse_offender_none_without_file_locus(self):
+        self.assertIsNone(M.parse_build_offender("# pkg\nlink error: cannot find symbol\n"))
+        self.assertIsNone(M.parse_build_offender(""))
+
+    def test_diagnose_tree_is_noop_on_green(self):
+        # A green tree must not spend a second `go build` — diagnose returns OK flat.
+        d = M.diagnose_tree(True)
+        self.assertEqual(d["code"], M.TREE_OK)
+        self.assertIsNone(d["offender"])
+
+
+class EffectivenessTest(unittest.TestCase):
+    """The effectiveness fold surfaces the ships-per-worker leaks (silent exits +
+    majority-stub backends) so the operator can act — it never kills unattended."""
+
+    def test_leaking_on_silent_workers(self):
+        s = {"workers": {"silent_count": 2, "silent": [{"issue": 11}, {"issue": 22}]},
+             "backend_health": {"stub_rate": []}}
+        d = M.effectiveness_summary(s)
+        self.assertEqual(d["verdict"], M.LEAKING)
+        self.assertEqual(d["silent_count"], 2)
+        self.assertIn(11, d["silent_issues"])
+        self.assertIn("free the slot", d["action"])
+
+    def test_leaking_on_majority_stub_backend(self):
+        s = {"workers": {"silent_count": 0, "silent": []},
+             "backend_health": {"stub_rate": [
+                 {"backend": "codex", "majority_stub": True, "stub_rate": 1.0},
+                 {"backend": "claude", "majority_stub": False}]}}
+        d = M.effectiveness_summary(s)
+        self.assertEqual(d["verdict"], M.LEAKING)
+        self.assertEqual(d["majority_stub"], ["codex"])
+        self.assertIn("cool", d["action"])
+
+    def test_majority_stub_without_backend_name_is_unattributed(self):
+        # Live payloads carry majority-stub rows with a null backend (no .backend
+        # sidecar) — still a real leak; surfaced as "unattributed", never dropped.
+        s = {"workers": {"silent_count": 0, "silent": []},
+             "backend_health": {"stub_rate": [{"backend": None, "majority_stub": True}]}}
+        d = M.effectiveness_summary(s)
+        self.assertEqual(d["verdict"], M.LEAKING)
+        self.assertEqual(d["majority_stub"], ["unattributed"])
+        self.assertNotIn("None", d["action"])
+
+    def test_effective_when_no_leak(self):
+        s = {"workers": {"silent_count": 0, "silent": []},
+             "backend_health": {"stub_rate": [{"backend": "claude", "majority_stub": False}]}}
+        d = M.effectiveness_summary(s)
+        self.assertEqual(d["verdict"], M.EFFECTIVE)
+
+    def test_none_payload_is_unknown_not_crash(self):
+        d = M.effectiveness_summary(None)
+        self.assertEqual(d["verdict"], "UNKNOWN")
+        self.assertEqual(d["silent_issues"], [])
+        self.assertTrue(d["action"].strip())
+
+    def test_silent_count_derived_when_absent(self):
+        # A payload with a silent list but no explicit count still reports LEAKING.
+        s = {"workers": {"silent": [{"issue": 7}]}, "backend_health": {}}
+        d = M.effectiveness_summary(s)
+        self.assertEqual(d["verdict"], M.LEAKING)
+        self.assertEqual(d["silent_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
