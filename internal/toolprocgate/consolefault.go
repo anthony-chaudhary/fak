@@ -188,6 +188,66 @@ func ClassifyConsoleFault(detail string) (ConsoleFaultClass, bool) {
 	return "", false
 }
 
+// werFailFastCode is the NTSTATUS a Windows Error Reporting Application-Error
+// (Event 1000) banner carries for a __fastfail / Environment.FailFast
+// termination: STATUS_STACK_BUFFER_OVERRUN. It is the WER-side signature of the
+// #2170 crash class — the pipe error (Win32 0xE9) throws a HostException the
+// runtime converts into a FailFast, and the process dies with this code. An
+// UNHANDLED managed exception instead dies with the CLR SEH code 0xe0434352 AND
+// logs a paired .NET Runtime Event 1026 (already covered by ClassifyConsoleFault
+// on its managed stack). Keying the WER path on the FailFast code alone is thus
+// exactly the "1026-less" class #3513 targets — not a re-catch of the 1026 path.
+const werFailFastCode = "0xc0000409"
+
+// werConsoleHostApps is the CLOSED set of faulting-application names whose WER
+// FailFast we treat as a child console-host fault. The generic 0xc0000409 is NOT
+// console-specific on its own — any __fastfail carries it — so it becomes a
+// console fault ONLY in co-occurrence with a console-host/shell faulting app.
+// That co-occurrence is precisely the structured-field context the
+// single-substring ClassifyConsoleFault could not express (see its comment, and
+// the "leave them to a future WER ingester with structured fields" note on
+// consoleHostSignatures). Deliberately excludes the operator's OUTER terminal
+// (WindowsTerminal.exe / wt.exe): the console-fault class names a CHILD console
+// surface, not the host UI the operator is sitting in front of.
+var werConsoleHostApps = map[string]bool{
+	"pwsh.exe":        true, // PowerShell 7.x — the #2170 witnessed shell
+	"powershell.exe":  true, // Windows PowerShell 5.1
+	"conhost.exe":     true, // the classic console host for a child shell
+	"openconsole.exe": true, // the modern console host (ConPTY)
+	"cmd.exe":         true, // the legacy shell
+}
+
+// ClassifyConsoleFaultWER maps a Windows Error Reporting Application-Error
+// (Event 1000) banner's STRUCTURED FIELDS onto the closed console-fault class.
+// It is the deliberate structured-field counterpart to ClassifyConsoleFault:
+// the WER banner names Microsoft.PowerShell.ConsoleHost.dll as the faulting
+// module even for an INPUT crash, so feeding its free text to the single-
+// substring classifier would mis-route it (its own doc comment says so). From
+// the banner alone the input/output mechanism is indistinguishable, so a
+// recognized console-host FailFast folds to the COARSE CONSOLE_HOST_FAILFAST —
+// an honest "a child console host hard-terminated", never an over-claimed
+// input-vs-output verdict the fields cannot support. Fail-closed: a non-console
+// faulting app, or any exception code that is not the FailFast code, returns
+// ok=false (a plain app crash stays a plain app crash; the classifier never
+// guesses). The faulting module is intentionally NOT a gate — a FailFast most
+// often surfaces in KERNELBASE.dll/ntdll.dll (where RaiseFailFastException
+// lives), not in ConsoleHost.dll, so gating on the module would MISS real
+// FailFasts; the module is carried in the row Detail for forensics instead.
+func ClassifyConsoleFaultWER(faultingApp, exceptionCode string) (ConsoleFaultClass, bool) {
+	app := strings.ToLower(strings.TrimSpace(faultingApp))
+	code := strings.ToLower(strings.TrimSpace(exceptionCode))
+	if app == "" || code == "" {
+		return "", false
+	}
+	if !werConsoleHostApps[app] {
+		return "", false
+	}
+	if code != werFailFastCode {
+		return "", false
+	}
+	return ConsoleHostFailFast, true
+}
+
 // ClassifyDrainError classifies the error a child-output drain returned.
 // callLive reports whether the call was still live (no terminal exit observed)
 // when the drain ended: an EOF on a live call means the console/PTY surface
@@ -245,6 +305,12 @@ func boundConsoleFaultDetail(s string) string {
 	}
 	return s[:consoleFaultDetailLimit]
 }
+
+// BoundConsoleFaultDetail is the exported bound for callers that build a row
+// directly — an event-log ingester classifying real OS crashes — instead of
+// through ExitConsoleFault. Keeps the head so the leading signature survives
+// and the row satisfies ValidateConsoleFaultEvent's detail limit.
+func BoundConsoleFaultDetail(s string) string { return boundConsoleFaultDetail(s) }
 
 // ExitConsoleFault records a child console/shell/PTY/renderer fault as a
 // STRUCTURED child failure: the journal gets a normal exit(status=error) — so

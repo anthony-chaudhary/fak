@@ -200,6 +200,46 @@ func TestClassifyConsoleFault(t *testing.T) {
 	}
 }
 
+// TestClassifyConsoleFaultWER pins the structured-field WER path (#3513): a
+// console-host/shell faulting app + the __fastfail code 0xc0000409 folds to the
+// coarse CONSOLE_HOST_FAILFAST; everything else fails closed. The module is
+// deliberately irrelevant to the verdict (a FailFast most often surfaces in
+// KERNELBASE.dll, not ConsoleHost.dll), so it is not a parameter here.
+func TestClassifyConsoleFaultWER(t *testing.T) {
+	cases := []struct {
+		name string
+		app  string
+		code string
+		want ConsoleFaultClass
+		ok   bool
+	}{
+		{"pwsh failfast", "pwsh.exe", "0xc0000409", ConsoleHostFailFast, true},
+		{"winps failfast", "powershell.exe", "0xc0000409", ConsoleHostFailFast, true},
+		{"conhost failfast", "conhost.exe", "0xc0000409", ConsoleHostFailFast, true},
+		{"openconsole failfast", "OpenConsole.exe", "0xc0000409", ConsoleHostFailFast, true},
+		{"cmd failfast", "cmd.exe", "0xc0000409", ConsoleHostFailFast, true},
+		{"case-insensitive app + code", "PWSH.EXE", "0xC0000409", ConsoleHostFailFast, true},
+		// Fail-closed: the FailFast code alone is NOT console-specific — a
+		// non-console app carrying it stays a plain app crash.
+		{"non-console app failfast dropped", "myapp.exe", "0xc0000409", "", false},
+		// Fail-closed: a console app with a NON-FailFast code (e.g. an access
+		// violation, the WindowsTerminal WinAppRuntime class) is not this class.
+		{"console app access-violation dropped", "pwsh.exe", "0xc0000005", "", false},
+		// Fail-closed: the operator's OUTER terminal is not a child console fault.
+		{"outer terminal dropped", "WindowsTerminal.exe", "0xc0000409", "", false},
+		{"empty app", "", "0xc0000409", "", false},
+		{"empty code", "pwsh.exe", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ClassifyConsoleFaultWER(tc.app, tc.code)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("ClassifyConsoleFaultWER(%q, %q) = (%q, %v), want (%q, %v)", tc.app, tc.code, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
 // TestClassifyDrainError covers the drain-side shapes: an EOF while the call
 // is still live is a PTY/console EOF fault; an EOF after a clean exit is not a
 // fault at all; a pipe error classifies by its signature.
