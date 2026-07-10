@@ -102,6 +102,44 @@ fi
 # Default is WARN (not block) while the gate soaks for false positives; flip to block after.
 # Fail-open by design: if `fak`/`go` is unavailable or the gate could-not-run, the push is allowed.
 build_mode="${FLEET_BUILD_GUARD:-warn}"
+
+# Import-witness pre-rung (#1325)  --  reason: IMPORT_OF_UNCOMMITTED_PACKAGE
+#
+# The cheapest, most common shape of TRUNK_WOULD_NOT_COMPILE below: a committed caller whose
+# callee package was never `git add`ed (its dir has zero tracked non-test .go). The full
+# compile-integrity gate already catches this, but only via a slow archive `go build` with an
+# opaque `undefined`/`no required module` error. This structural pre-check reads ONLY the
+# committed tip (git ls-tree + one git grep — no toolchain, no archive checkout) and names the
+# exact `git add <pkg>/` that greens it, failing fast before the expensive build. It shares the
+# build gate's FLEET_BUILD_GUARD mode + FLEET_ALLOW_BUILD_BREAK escape. Fail-open: an older `fak`
+# without the subcommand (exit 2) or a clean tip (exit 0) just falls through to the full build.
+if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
+	iw_status=0
+	if command -v fak >/dev/null 2>&1; then
+		iw_out="$(fak hooks import-witness --root "$root" 2>&1)"
+		iw_status=$?
+	elif command -v go >/dev/null 2>&1; then
+		iw_out="$(cd "$root" && go run ./cmd/fak hooks import-witness --root "$root" 2>&1)"
+		iw_status=$?
+	else
+		iw_status=2
+	fi
+	if [ "$iw_status" -eq 1 ]; then
+		if [ "$build_mode" = "block" ]; then
+			echo "IMPORT_OF_UNCOMMITTED_PACKAGE (blocked): a committed file imports a package with no tracked source." >&2
+			echo "$iw_out" >&2
+			echo "  fix: git add the missing package dir (named above), or revert the importer; then re-push." >&2
+			echo "  override once: FLEET_ALLOW_BUILD_BREAK=1 git push   (intentional only)" >&2
+			exit 1
+		else
+			echo "IMPORT_OF_UNCOMMITTED_PACKAGE (advisory): a committed file imports a package with no tracked source." >&2
+			echo "$iw_out" >&2
+			echo "  fix before others fetch, or hard-enforce with FLEET_BUILD_GUARD=block." >&2
+		fi
+	fi
+	# iw_status 0 (clean) or 2 (could-not-run) => fall through to the full compile gate below.
+fi
+
 if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
 	# In warn (advisory) mode the verdict never blocks, so a redundant concurrent full build is
 	# pure contention: pass --advisory to single-flight it (one gate builds; peers skip with
