@@ -54,6 +54,17 @@ const (
 	// this dedicated label. It is self-sufficient: an issue carrying it is uplifted
 	// even without co-tagged tier/T0 labels, so the explicit operator intent always wins.
 	UltraLabel = "tier/ultra"
+
+	// PMLabel routes project-management coordination work to the cheap model — the
+	// launch-side expression of the modelroute pm-fable preset's
+	// work_kind=project_management. Triage, next-up ranking, milestone scoring, status
+	// rollups, and backlog dedup are bounded, re-runnable coordination (a wrong triage
+	// costs a re-run, not a bad production write), so they run on fable at strong
+	// reasoning. Like UltraLabel it is self-sufficient — an issue carrying it needs no
+	// tier tag — but unlike UltraLabel it YIELDS to an explicit, valid tier tag, so a
+	// genuinely hard planning issue additionally tagged tier/T0 still escalates to opus.
+	// Matched case-insensitively; inert to the tierLabelRE grammar (never a T<N> tier).
+	PMLabel = "tier/pm"
 )
 
 // LaunchProfile is the resolved launch configuration for one worker: the model to
@@ -75,7 +86,7 @@ var (
 	ProfileFableUltracode = LaunchProfile{Model: WorkerModelFable, Ultracode: true}
 )
 
-// LaunchBucket names the four tier buckets a profile maps from.
+// LaunchBucket names the launch buckets a profile maps from.
 type LaunchBucket string
 
 const (
@@ -83,6 +94,7 @@ const (
 	BucketNormal  LaunchBucket = "normal"  // T1 — normal implementation
 	BucketHard    LaunchBucket = "hard"    // T0 — ultra-hard / high-risk
 	BucketUltra   LaunchBucket = "ultra"   // T0 + UltraLabel — the very hardest
+	BucketPM      LaunchBucket = "pm"      // PMLabel — project-management coordination
 )
 
 // TierLaunchTable maps each bucket to the profile a worker for that bucket launches
@@ -93,37 +105,53 @@ type TierLaunchTable map[LaunchBucket]LaunchProfile
 // cheap model at strong reasoning; normal/hard escalate the MODEL to opus (hard adds
 // ultracode); ultra-hard trades the model back down to fable but turns on ultracode's
 // exhaustive multi-agent orchestration — cheap model, maximum orchestration breadth.
+// Project-management coordination (BucketPM) runs on the cheap model at strong
+// reasoning, exactly like routine work — it is bounded, re-runnable, and low-stakes.
 func DefaultTierLaunchTable() TierLaunchTable {
 	return TierLaunchTable{
 		BucketRoutine: ProfileFableXHigh,
 		BucketNormal:  ProfileOpusXHigh,
 		BucketHard:    ProfileOpusUltracode,
 		BucketUltra:   ProfileFableUltracode,
+		BucketPM:      ProfileFableXHigh,
 	}
 }
 
-// hasUltraLabel reports whether the issue carries the explicit ultra promotion label
-// (case-insensitive, trimmed), matching the lower-cased label grammar tiertag uses.
-func hasUltraLabel(labels []string) bool {
+// hasLabel reports whether labels contains want (case-insensitive, trimmed), matching
+// the lower-cased label grammar tiertag uses. Shared by the self-sufficient launch
+// labels (ultra, pm), which select a bucket by exact-label presence rather than tier.
+func hasLabel(labels []string, want string) bool {
 	for _, l := range labels {
-		if strings.EqualFold(strings.TrimSpace(l), UltraLabel) {
+		if strings.EqualFold(strings.TrimSpace(l), want) {
 			return true
 		}
 	}
 	return false
 }
 
+// hasUltraLabel reports whether the issue carries the explicit ultra promotion label.
+func hasUltraLabel(labels []string) bool { return hasLabel(labels, UltraLabel) }
+
 // LaunchBucketForIssue picks the bucket from an issue's labels. The ultra label is a
 // self-sufficient, explicit signal and is checked FIRST (the tier vocabulary has no
-// level beyond T0). Otherwise the bucket follows the parsed Optimal tier. It returns
-// ok=false for an untagged or ambiguous issue (no ultra label and HasTier=false), so
-// the caller keeps the seat default rather than uplifting unlabeled work.
+// level beyond T0). Otherwise the bucket follows the parsed Optimal tier. A
+// project-management label is a self-sufficient signal too, but it YIELDS to a valid
+// tier: it is consulted only after no trusted tier resolved, so a hard planning issue
+// tagged tier/T0 still escalates to opus while a bare PM issue routes to fable. It
+// returns ok=false for an untagged or ambiguous issue (no ultra/pm label and
+// HasTier=false), so the caller keeps the seat default rather than uplifting work.
 func LaunchBucketForIssue(labels []string) (LaunchBucket, bool) {
 	if hasUltraLabel(labels) {
 		return BucketUltra, true
 	}
 	it, _ := IssueTierFromLabels(labels)
 	if !it.HasTier {
+		// No trusted tier signal: a project-management label still routes the issue to
+		// its cheap coordination bucket. An explicit VALID tier tag is handled below and
+		// wins, so a hard PM planning issue tagged tier/T0 escalates instead.
+		if hasLabel(labels, PMLabel) {
+			return BucketPM, true
+		}
 		return "", false
 	}
 	switch it.Optimal {
