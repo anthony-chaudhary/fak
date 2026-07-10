@@ -20,6 +20,13 @@ func RelaunchCacheAffinityKey(transcriptUUID string) string {
 	return hex.EncodeToString(h[:])[:32]
 }
 
+// RelaunchCacheAffinity preserves the original leaf spelling for callers that
+// landed alongside the issue implementation. New launch plumbing may use the
+// explicit Key suffix; both names derive the same route.
+func RelaunchCacheAffinity(transcriptUUID string) string {
+	return RelaunchCacheAffinityKey(transcriptUUID)
+}
+
 // RelaunchAffinityRow is the append-only transcript-keyed cache route record.
 // Keeping the derived key in the row lets operators audit what route a relaunch
 // used while the fold gives launch plumbing a last-row-wins lookup.
