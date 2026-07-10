@@ -218,6 +218,7 @@ var tier = map[string]int{
 	"ctxplan":          1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
 	"relay":            1, // pure relay-baton value (#1870): the closed Baton schema + deterministic Parse/project round-trip for the handoff/resume relay; imports ctxplan(1)+stdlib, off the hot path.
 	"session":          1, // per-session DRIVE state: a TraceID-keyed, bounded-LRU, live-mutable control-state value (run-state/budget/priority/pace), the structural twin of ifc.Ledger widened past one value; stdlib-only, imports nothing internal.
+	"sessionread":      1, // the read/query/observe-op VOCABULARY spine (#4176/#4191): the closed set of shipped session READ seams, each carrying its capability/disclosure/evidence/refusal contract; the outbound twin of sessionctl(3), but pure — stdlib-only, imports nothing internal, off the hot path.
 	"wirescreen":       2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default â€” the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
 	"advmodel":         2,
 	"modelroute":       1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
@@ -416,6 +417,7 @@ var tier = map[string]int{
 	"stepbatoncapture":      1, // step-baton capture over stepbaton(1); imports only stepbaton, off the hot path.
 	"seatpark":              1, // pure bounded park-and-retry fold for the no-seat transient; stdlib-only, imports nothing internal, off the hot path.
 	"agentsindex":           1, // sectioned, fence-aware AGENTS.md loader (#3535, epic #3229): stdlib-only ATX view over AGENTS.md bytes with a resident TOC; imports nothing internal, off the hot path.
+	"milestoneburndown":     2, // the GitHub-milestone SCHEDULE dimension milestonereport never had: reads the live milestones' own due_on + open/closed counts + trailing closure velocity and folds each into a closed at-risk verdict (ON_TRACK/AT_RISK/OVERDUE/NO_DUE_DATE/DONE) with a projected drain date vs the due date. Pure fold + injected-`gh` collector (twin of mlpscore/versionskew); imports trendreport(1)+epicprogress(1), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -455,7 +457,7 @@ var pureRoot = map[string]bool{
 	"productscorecard": true, "promalert": true, "promptaudit": true, "promptlint": true, "provenance": true, "questionledger": true,
 	"qwen36parity": true, "randhex": true, "releasestale": true, "renameconcept": true, "repoguard": true, "resumemetrics": true,
 	"rsl": true, "savingsvector": true, "seatpark": true, "sensecheck": true, "sessionaudit": true, "sessiondesc": true,
-	"sessionsignals": true, "sessionsteer": true, "sidecar": true, "signals": true, "simhash": true, "slackenv": true,
+	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "sidecar": true, "signals": true, "simhash": true, "slackenv": true,
 	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "stepbaton": true, "stopfailure": true,
 	"strmatch": true, "sweepconfig": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
 	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "trunkbuildprobe": true,
