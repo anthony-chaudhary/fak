@@ -16,6 +16,14 @@ package main
 // (changeDetectorBaseline) is reported, so the verb stays green on the existing backlog
 // and surfaces exactly the NEW change-detector an operator must convert to an invariant.
 //
+// One SOFT family also runs over _test.go and is reported separately (rep.Soft), never
+// counted toward the gate:
+//
+//	internal/boundarylint  SKIP_DEBT  a bare t.Skip/Skipf/SkipNow with no platform/short/env guard
+//
+// Skip debt is a trend to watch, not a build-reddener, so it stays out of Count/OK/exit
+// and feeds the qa-process scorecard's SOFT skip_debt KPI as a work-list of skip sites.
+//
 // These checks already existed as the package test TestBoundaryPolicy — so fak
 // COULD prove them under `go test`, but fak itself never RAN them. This verb is the
 // dogfood: the same three witnesses, on the running binary's path, runnable ad-hoc
@@ -48,6 +56,10 @@ type boundaryReport struct {
 	Count     int            `json:"count"`
 	ByLinter  map[string]int `json:"by_linter"`
 	Tells     []boundaryTell `json:"tells"`
+	// Soft carries reported-not-gated tells (SKIP_DEBT today): a work-list surfaced for
+	// the trend, deliberately excluded from Count/OK so it never reds the gate. The
+	// qa-process scorecard folds these as a SOFT KPI.
+	Soft []boundaryTell `json:"soft"`
 }
 
 const boundarySchema = "fak-boundary-lint/1"
@@ -121,6 +133,20 @@ func runBoundary(stdout, stderr io.Writer, argv []string) int {
 		tells = append(tells, boundaryTell{Code: f.Code, Linter: "boundarylint-test", Detail: f.String()})
 	}
 
+	// boundarylint-soft: the SKIP_DEBT family over _test.go — a bare t.Skip/Skipf/SkipNow
+	// with no platform/short/env guard. Reported as a SOFT work-list only: it feeds the
+	// qa-process scorecard KPI but is kept OUT of Count/OK/exit so surfacing skip debt
+	// never gates the build (unlike the change-detector family, which ratchets to green).
+	soft := []boundaryTell{}
+	skipFindings, err := boundarylint.ScanTests([]string{root + "/cmd", root + "/internal"}, []boundarylint.Rule{boundarylint.SkipDebt{}})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak boundary: boundarylint-soft: %v\n", err)
+		return 2
+	}
+	for _, f := range skipFindings {
+		soft = append(soft, boundaryTell{Code: f.Code, Linter: "boundarylint-soft", Detail: f.String()})
+	}
+
 	byLinter := map[string]int{}
 	for _, t := range tells {
 		byLinter[t.Linter]++
@@ -132,6 +158,7 @@ func runBoundary(stdout, stderr io.Writer, argv []string) int {
 		Count:     len(tells),
 		ByLinter:  byLinter,
 		Tells:     tells,
+		Soft:      soft,
 	}
 
 	if *asJSON {
@@ -151,11 +178,18 @@ func runBoundary(stdout, stderr io.Writer, argv []string) int {
 func writeBoundaryHuman(w io.Writer, rep boundaryReport) {
 	if rep.OK {
 		fmt.Fprintln(w, "boundary: clean — no boundary tells (pathlint, urllint, boundarylint, boundarylint-test)")
-		return
+	} else {
+		fmt.Fprintf(w, "boundary: %d tell(s) — %d pathlint · %d urllint · %d boundarylint · %d boundarylint-test\n",
+			rep.Count, rep.ByLinter["pathlint"], rep.ByLinter["urllint"], rep.ByLinter["boundarylint"], rep.ByLinter["boundarylint-test"])
+		for _, t := range rep.Tells {
+			fmt.Fprintf(w, "  %s\n", t.Detail)
+		}
 	}
-	fmt.Fprintf(w, "boundary: %d tell(s) — %d pathlint · %d urllint · %d boundarylint · %d boundarylint-test\n",
-		rep.Count, rep.ByLinter["pathlint"], rep.ByLinter["urllint"], rep.ByLinter["boundarylint"], rep.ByLinter["boundarylint-test"])
-	for _, t := range rep.Tells {
-		fmt.Fprintf(w, "  %s\n", t.Detail)
+	// The SOFT work-list prints even on a clean gate: it is a trend to watch, not a failure.
+	if len(rep.Soft) > 0 {
+		fmt.Fprintf(w, "soft: %d skip-debt site(s) (SKIP_DEBT — reported, not gated)\n", len(rep.Soft))
+		for _, t := range rep.Soft {
+			fmt.Fprintf(w, "  %s\n", t.Detail)
+		}
 	}
 }
