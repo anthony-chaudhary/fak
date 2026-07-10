@@ -1,0 +1,378 @@
+{
+ "rows": [
+  {
+   "id": "witness-proof-buildwitness",
+   "canonical": "buildwitness (default-build compile guard)",
+   "family": "witness-proof",
+   "kind": "subsystem",
+   "definition": "internal/buildwitness is a structural CI-guard package whose test runs `go build ./cmd/fak` under default build tags from a clean checkout, proving the default build is green independent of any WIP file left tagless in the shared tree.",
+   "distinction": "A compile-time PROOF that the default build succeeds, not the worktreewitness detached-trunk command harness or a diff/claim evidence witness such as WitnessOK.",
+   "distinct_from": [
+    "witness-proof-worktreewitness"
+   ],
+   "aliases": [
+    "buildwitness",
+    "BuildArgs",
+    "TargetPackage"
+   ],
+   "grounding": "buildwitness",
+   "grounding_kind": "path",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-commitwitnessed",
+   "canonical": "CommitWitnessed (dispatch-tick audit-row grader)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/dispatchtick.CommitWitnessed(verdict, witness string) bool grades one `dos commit-audit` row into a dispatch-tick worker slot's productive keep-bit, true only when verdict is OK AND witness equals the diff-witnessed constant WitnessOK.",
+   "distinction": "A boolean GRADING function over an already-produced audit verdict, not ClaimWitnessed's dispatch-tick sweep verdict or WitnessSidecarSuffix's audited-once file marker in the same package.",
+   "distinct_from": [
+    "drive-witness-proof-claimwitnessed"
+   ],
+   "aliases": [
+    "CommitWitnessed",
+    "commitwitnessed"
+   ],
+   "grounding": "CommitWitnessed",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-invalidationexternalrefutation",
+   "canonical": "InvalidationExternalRefutation (cachemeta invalidation-mode)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/cachemeta.InvalidationExternalRefutation (\"external_refutation\") is the InvalidationMode enum value recording that a cache entry's Coherence.InvalidationMode was set because its bound external world-state witness was refuted, as opposed to LRU, TTL, write-epoch, or policy eviction.",
+   "distinction": "One specific enum VALUE naming the refutation cause of one cache entry's eviction, not the generic Refutation type/action elsewhere or its InvalidationLRU / InvalidationTTL / InvalidationWriteEpoch sibling causes.",
+   "distinct_from": [
+    "refutation"
+   ],
+   "aliases": [
+    "InvalidationExternalRefutation",
+    "external_refutation"
+   ],
+   "grounding": "InvalidationExternalRefutation",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-missingwitnesses",
+   "canonical": "MissingWitnesses (roadmap lane debt count)",
+   "family": "witness-proof",
+   "kind": "metric",
+   "definition": "internal/milestonereport.MissingWitnesses (int, mirrored into internal/operatorbrief) is the per-lane roadmap COUNT of epics/issues lacking a witness, weighted 3x into the lane's DebtScore.",
+   "distinction": "A plural per-lane roadmap-debt COUNT, not the singular MissingWitness list of unwitnessed friction classes in internal/devexmeter, and not gateway/deepseek_budget's NativeSupport.MissingWitnesses (a []string naming the specific absent load-bearing witnesses behind one DeepSeek native-support claim).",
+   "distinct_from": [
+    "x-goal25-witness-proof-missingwitness"
+   ],
+   "aliases": [
+    "MissingWitnesses",
+    "missing_witnesses"
+   ],
+   "grounding": "MissingWitnesses",
+   "grounding_kind": "metric",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-nokeywitnesscommand",
+   "canonical": "NoKeyWitnessCommand (vcache no-key CLI command)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "cmd/fak's vcacheContextAPIStatus.NoKeyWitnessCommand field documents the exact CLI command (\"fak vcache context-witness\") a caller without a live provider API key can run to witness vCache context savings.",
+   "distinction": "One documented status-struct field naming a single CLI command, not the broader WitnessCommands list of observed-proof commands cataloged elsewhere.",
+   "distinct_from": [
+    "x-issue1420-witness-proof-witnesscommands"
+   ],
+   "aliases": [
+    "NoKeyWitnessCommand",
+    "no_key_witness_command"
+   ],
+   "grounding": "NoKeyWitnessCommand",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-openwitnessed",
+   "canonical": "OpenWitnessed (closure-audit bucket)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/closureaudit.OpenWitnessed (\"OPEN_WITNESSED\") is the closure-audit BUCKET assigned to an issue that is still open on GitHub but already carries a Resolving-kind witnessed commit - the bucket the close arm drives to CLOSED.",
+   "distinction": "The per-issue BUCKET LABEL an audit assigns, not WitnessedOpen's numeric loop-economics COUNT of how many such issues exist in a report window.",
+   "distinct_from": [
+    "witness-proof-witnessedopen"
+   ],
+   "aliases": [
+    "OpenWitnessed",
+    "OPEN_WITNESSED"
+   ],
+   "grounding": "OpenWitnessed",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-provenancewitnessed",
+   "canonical": "ProvenanceWitnessed (context-envelope evidence tier)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/ctxplan.ProvenanceWitnessed (\"WITNESSED\") is the strongest of four ordered evidence-provenance labels (FALLBACK < MODELED < OBSERVED < WITNESSED) on an EffectiveContextEnvelope row, meaning the row's default budget came from a local same-task measured run rather than a prior or external telemetry.",
+   "distinction": "A per-row EVIDENCE-STRENGTH provenance label on a context-budget envelope, not the three-valued WitnessOutcome gate verdict (Confirmed/Refuted/Abstain) used elsewhere in the tree - though gateway and toolsandbox independently declare the identically-named WITNESSED provenance constant for the same evidence-strength meaning.",
+   "distinct_from": [
+    "witness-outcome"
+   ],
+   "aliases": [
+    "ProvenanceWitnessed",
+    "WITNESSED"
+   ],
+   "grounding": "ProvenanceWitnessed",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-reasonloopbodyunwitnessed",
+   "canonical": "ReasonLoopBodyUnwitnessed (gateway constant name)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/gateway.ReasonLoopBodyUnwitnessed is the Go constant declared in adjudicate_proposed.go (and reused by subagent_witness.go for the subagent fold boundary) whose string value is the wire reason LOOP_DONE_UNWITNESSED.",
+   "distinction": "The Go IDENTIFIER for the constant, not the already-catalogued wire-string value LOOP_DONE_UNWITNESSED itself, and not package abi's separate ReasonUnwitnessed deny-reason constant.",
+   "distinct_from": [
+    "LOOP_DONE_UNWITNESSED",
+    "ReasonUnwitnessed (deny reason)"
+   ],
+   "aliases": [
+    "ReasonLoopBodyUnwitnessed"
+   ],
+   "grounding": "ReasonLoopBodyUnwitnessed",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-recallvaluewitnessed",
+   "canonical": "recall_value_witnessed (memvaluescore KPI key)",
+   "family": "witness-proof",
+   "kind": "metric",
+   "definition": "internal/memvaluescore scores a KPI row keyed \"recall_value_witnessed\" (Group \"value\") as a binary pass/fail on whether the recall-events ledger has any witnessed rows at all - rows `fak memory recall` appends only when a real recall witnesses an event.",
+   "distinction": "One specific memvaluescore KPI row key testing ledger non-emptiness, not the TallyFromCountersWitnessed realized-deny fold or the generic WitnessOutcome verdict.",
+   "distinct_from": [
+    "x2-witness-proof-tallyfromcounterswitnessed"
+   ],
+   "aliases": [
+    "recall_value_witnessed",
+    "recallvaluewitnessed"
+   ],
+   "grounding": "recall_value_witnessed",
+   "grounding_kind": "metric",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-refuting",
+   "canonical": "Refuting (causalbench TARGET causal-targeting check)",
+   "family": "witness-proof",
+   "kind": "doc-term",
+   "definition": "cmd/causalbench's step-4 \"TARGET\" assertion is the causal-targeting property that calling Revoke on one witness must evict ONLY entries admitted under that witness - refuting an unrelated witness must evict zero unrelated entries, proving eviction is causally targeted rather than a blunt flush.",
+   "distinction": "A BLAST-RADIUS test/property asserted over a refutation's effect, not the refute action itself (vdso.Revoke, cataloged as \"refute (revocation trigger)\") nor the Refutation type it produces.",
+   "distinct_from": [
+    "x-witness-proof-refute"
+   ],
+   "aliases": [
+    "refuting",
+    "TARGET"
+   ],
+   "grounding": "refuting",
+   "grounding_kind": "doc",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-verifywitness",
+   "canonical": "VerifyWitness (model-route verification tier)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/modelroute.VerifyWitness (Verification = \"witness\") is the strongest model-route verification tier, meaning DOS confirmed the work from git evidence (dos verify / dos commit-audit); Trusted() and Witnessed() both gate on it above VerifyJudge.",
+   "distinction": "A named VERIFICATION-TIER constant on the model-route quality axis, not the three-valued WitnessOutcome gate verdict, and not the identically-named internal/vcacheqa.VerifyWitness function (a thin pass-through to the real QA-gate test).",
+   "distinct_from": [
+    "witness-outcome"
+   ],
+   "aliases": [
+    "VerifyWitness"
+   ],
+   "grounding": "VerifyWitness",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-warmwitness",
+   "canonical": "warmWitness (cacheprice shed-token parameter)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/cacheprice.ShedTokenEquiv's warmWitness parameter is the OBSERVED provider cache_read count witnessing how many shed compaction tokens the provider was already serving warm; the function blends min(shed, warmWitness) at ReadMultiplier and the remainder at full input price.",
+   "distinction": "A per-call numeric OBSERVED count fed into a pricing formula, not a qualitative per-row provenance label like ProvenanceWitnessed.",
+   "distinct_from": [
+    "witness-proof-provenancewitnessed"
+   ],
+   "aliases": [
+    "warmWitness",
+    "warmwitness"
+   ],
+   "grounding": "warmWitness",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-witnessdosverify",
+   "canonical": "WitnessDosVerify (playbook evidence-kind)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/contextq.WitnessDosVerify (WitnessKind = \"dos_verify\") is the playbook WitnessKind enum value meaning a loop-ledger counter increment was earned because the referenced work was independently confirmed via a dos_verify / `fak <leaf>` ship-stamp, not merely claimed.",
+   "distinction": "A contextq playbook evidence-kind value, not internal/supportmaturity's WitnessKind enum for rung promotion, and not the identically-named internal/conceptbench.WitnessDosVerify constant that instead names the referee tool behind a concept-bench probe's WitnessSource field.",
+   "distinct_from": [
+    "witness-proof-witnesskind"
+   ],
+   "aliases": [
+    "WitnessDosVerify"
+   ],
+   "grounding": "WitnessDosVerify",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-witnessedopen",
+   "canonical": "WitnessedOpen (loop-economics still-open count)",
+   "family": "witness-proof",
+   "kind": "metric",
+   "definition": "cmd/fak's loopEconWitnessed.WitnessedOpen (int64, JSON \"witnessed_open\") is the ledger-derived COUNT of issues in the OpenWitnessed closure-audit bucket at report time, rendered in `fak loop economics` as \"witnessed-done still open\".",
+   "distinction": "A folded numeric COUNT over a report window, not the per-issue OpenWitnessed bucket label itself.",
+   "distinct_from": [
+    "witness-proof-openwitnessed"
+   ],
+   "aliases": [
+    "WitnessedOpen",
+    "witnessed_open"
+   ],
+   "grounding": "WitnessedOpen",
+   "grounding_kind": "metric",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-witnesskind",
+   "canonical": "WitnessKind (support-maturity evidence enum)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/supportmaturity.WitnessKind (uint8) is the enum of evidence kinds - produced per-Rung by WitnessFor - that PROVES a support-maturity rung promotion is earned rather than merely claimed.",
+   "distinction": "The evidence-kind TYPE the prover returns, not WitnessFor (the function that maps a Rung to its required WitnessKind), and not the differently-typed (string) internal/contextq.WitnessKind used for playbook loop-ledger counters.",
+   "distinct_from": [
+    "x2-witness-proof-witnessfor"
+   ],
+   "aliases": [
+    "WitnessKind"
+   ],
+   "grounding": "WitnessKind",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-witnesssidecarsuffix",
+   "canonical": "WitnessSidecarSuffix (dispatch-tick audited-once marker)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/dispatchtick.WitnessSidecarSuffix (\".witness\") is the on-disk file-name suffix marking a dispatch-tick worker slot as audited-once, since a landed commit's diff (and so its verdict) is immutable and a slot must be graded exactly one time.",
+   "distinction": "A file-naming CONVENTION/idempotency marker, not CommitWitnessed's boolean grading function in the same package.",
+   "distinct_from": [
+    "witness-proof-commitwitnessed"
+   ],
+   "aliases": [
+    "WitnessSidecarSuffix",
+    ".witness"
+   ],
+   "grounding": "WitnessSidecarSuffix",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-witnesssource",
+   "canonical": "WitnessSource (concept-bench referee field)",
+   "family": "witness-proof",
+   "kind": "symbol",
+   "definition": "internal/conceptbench's Verdict.WitnessSource is a string field naming the exact real DOS tool that answered one concept-bench probe (e.g. dos_verify, dos_arbitrate, dos_check_reason), so a probe's verdict can be traced back to which referee produced it.",
+   "distinction": "A per-verdict field naming WHICH referee answered, not the generic WitnessResolver interface that corroborates claims across the wider tree.",
+   "distinct_from": [
+    "witness-resolver"
+   ],
+   "aliases": [
+    "WitnessSource"
+   ],
+   "grounding": "WitnessSource",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "witness-proof-worktreewitness",
+   "canonical": "worktreewitness (detached-trunk command harness)",
+   "family": "witness-proof",
+   "kind": "subsystem",
+   "definition": "internal/worktreewitness runs an arbitrary command inside a transient, self-reaping detached git worktree pinned at the resolved origin/main SHA, so the verdict reflects the trunk tip and is never contaminated by a peer's dirty uncommitted WIP in the shared working tree.",
+   "distinction": "A general detached-worktree command RUNNER for any caller-supplied command, not buildwitness's narrower single-purpose `go build ./cmd/fak` compile proof.",
+   "distinct_from": [
+    "witness-proof-buildwitness"
+   ],
+   "aliases": [
+    "worktreewitness"
+   ],
+   "grounding": "worktreewitness",
+   "grounding_kind": "path",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}

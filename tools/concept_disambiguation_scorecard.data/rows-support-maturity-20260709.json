@@ -1,0 +1,117 @@
+{
+  "rows": [
+    {
+      "id": "x-support-maturity-dsparity",
+      "canonical": "dsparity",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "Package dsparity (internal/dsparity) is the pure, offline, dependency-free parity-harness SPECIFICATION for future DeepSeek-V4 native kernels (#3021): it encodes the parity rows and expected fields (invariance axis, tolerance, witness kind) a batch-invariant kernel must satisfy before a speed claim can close, runnable without real weights or a GPU.",
+      "distinction": "It is a DEEPSEEK-KERNEL determinism/parity SPECIFICATION package (schema + offline synthetic check), not the fak-vs-raw eval-routing parity witness (eveparity) nor a model-quality parity grader (qwen36parity).",
+      "distinct_from": [
+        "x-support-maturity-eveparity",
+        "qwen36parity"
+      ],
+      "aliases": [
+        "dsparity",
+        "DsParity"
+      ],
+      "grounding": "dsparity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-support-maturity-eveparity",
+      "canonical": "eveparity",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "Package eveparity (internal/eveparity) is the CI-runnable witness for issue #2605: it runs a fixture Eve-shaped eval suite once raw and once fak-routed through the real gateway proxy, then Compare folds the two arms into a Witness proving fak never silently downgrades a hard Eve gate failure into a soft pass.",
+      "distinction": "It is the FAK-MEDIATION eval-agreement witness (raw arm vs fak-routed arm over one eval suite), not a DeepSeek kernel determinism specification (dsparity) nor a model-quality parity grader (qwen36parity).",
+      "distinct_from": [
+        "x-support-maturity-dsparity",
+        "qwen36parity"
+      ],
+      "aliases": [
+        "eveparity",
+        "EveParity"
+      ],
+      "grounding": "eveparity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-support-maturity-monitornofailurecoverage",
+      "canonical": "MONITOR_NO_FAILURE_COVERAGE",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "The closed arm-time refusal token (ReasonMonitorNoFailureCoverage, abi.ReasonCode 1044, internal/toolproc/monitor.go) ArmMonitor cites when a monitor's filter declares no failure-signature class alongside its progress pattern, so a monitor that would stay silent-on-failure by construction is refused instead of armed.",
+      "distinction": "It is a MONITOR ARM-TIME refusal reason over failure-signature filter coverage, not a tools-module test-file audit (toolcoverage) nor the generic coverage concept (coverage) nor a dispatch-fetch coverage metric (RouterCoverage).",
+      "distinct_from": [
+        "toolcoverage",
+        "coverage",
+        "RouterCoverage"
+      ],
+      "aliases": [
+        "MONITOR_NO_FAILURE_COVERAGE",
+        "ReasonMonitorNoFailureCoverage",
+        "ErrMonitorNoFailureCoverage"
+      ],
+      "grounding": "MONITOR_NO_FAILURE_COVERAGE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-support-maturity-parityverdict-eveparity",
+      "canonical": "ParityVerdict (eveparity witness)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The eveparity.Witness.ParityVerdict string field ('pass' | 'divergent') Compare sets: pass only when every case agrees on pass/fail with a byte-identical reason and no hard-gate failure was downgraded to a soft score; any disagreement or downgrade flips it to divergent.",
+      "distinction": "It is the eve-vs-fak-routed EVAL-AGREEMENT top-line verdict field on one Witness, not the multi-replica memory-agreement enum (ParityVerdict recall) nor a local-vs-frontier model scorecard verdict.",
+      "distinct_from": [
+        "x-support-maturity-parityverdict-recall",
+        "x-support-maturity-eveparity"
+      ],
+      "aliases": [
+        "ParityVerdict",
+        "parity_verdict"
+      ],
+      "grounding": "parityverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-support-maturity-parityverdict-recall",
+      "canonical": "ParityVerdict (recall replica agreement)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The recall package's uint8 enum (ParityAgree | ParityResolved | ParityConflict) ParityFinding.Verdict carries: whether several replicas of one logical memory resource corroborate on bytes, resolve to one clear live witness, or conflict with no clear winner (#786).",
+      "distinction": "It is the MULTI-REPLICA memory disagreement verdict recall's ParityFinding carries, a completely separate Go type from the eveparity Witness's pass/divergent field despite sharing the identifier ParityVerdict.",
+      "distinct_from": [
+        "x-support-maturity-parityverdict-eveparity"
+      ],
+      "aliases": [
+        "ParityVerdict",
+        "ParityAgree",
+        "ParityResolved",
+        "ParityConflict"
+      ],
+      "grounding": "parityverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

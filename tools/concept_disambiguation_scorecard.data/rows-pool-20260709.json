@@ -1,0 +1,152 @@
+{
+  "rows": [
+    {
+      "id": "pool-bypool",
+      "canonical": "byPool accumulator",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Local map[string]AccountRow / map[string]Account accumulator named byPool, paired with an order slice, built inside uniquePoolRows (internal/dispatchtick/accounts.go) and uniquePoolAccounts (internal/fleetaccounts/resolve.go): it keeps exactly one representative row per pool key, the best-ranked candidate under accountPoolRowLess / accountPoolLess, while the input rows are reduced down to one row per pool.",
+      "distinction": "It is the per-call dedupe MAP built and discarded inside a single reduce pass, not the boolean SET of pools already granted a slot during a wave (usedPools) and not the pool-to-leased-worker-ids MAP returned by leaseWorkersByPool.",
+      "distinct_from": [
+        "pool-usedpools",
+        "pool-leaseworkersbypool"
+      ],
+      "aliases": [
+        "byPool"
+      ],
+      "grounding": "byPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-credentialpool",
+      "canonical": "credential_pool.py (Hermes reference)",
+      "family": "pool",
+      "kind": "doc-term",
+      "definition": "The external Hermes script agent/credential_pool.py, named in the package comments of internal/metrics/spend.go and internal/spendrollup/spendrollup.go as the prior-art system that pools spend/credentials across accounts but relays the provider's own billed number without labeling who authored the figure.",
+      "distinction": "It is an EXTERNAL reference system fak's own comments cite for contrast, not a fak subsystem: unlike Pool (session)'s in-process bounded session container or PoolProfile's tier-pooling character profile, fak's spendrollup deliberately does NOT copy credential_pool.py's unlabeled pooled-spend model - it draws the WITNESSED/OBSERVED provenance split directly against it.",
+      "distinct_from": [
+        "pool-session",
+        "poolprofile-cachemeta"
+      ],
+      "aliases": [
+        "credential_pool",
+        "credentialpool"
+      ],
+      "grounding": "credential_pool",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-leaseworkersbypool",
+      "canonical": "leaseWorkersByPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Function with two independent implementations (internal/dispatchtick/accounts.go over AccountRow/SeatLease, internal/fleetaccounts/resolve.go over Account/Lease) that walks the live seat leases and returns a map from pool key to the list of worker ids currently holding a lease in that pool; leaseLoadByPool and wave/status/resolve callers use it to seed per-pool in-flight occupancy before granting new slots.",
+      "distinction": "It reports IN-FLIGHT LEASED occupancy per pool from live leases, not the set of pools already granted within the current allocation call (usedPools), and not the per-pool row-dedupe accumulator that runs first (byPool).",
+      "distinct_from": [
+        "pool-usedpools",
+        "pool-bypool"
+      ],
+      "aliases": [
+        "leaseWorkersByPool"
+      ],
+      "grounding": "leaseWorkersByPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-normalizeworkerpool",
+      "canonical": "normalizeWorkerPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "internal/dispatchtick/accounts.go helper (also called from tierroute.go) that normalizes raw account rows, drops non-routable ones, applies an optional product filter, and resolves the target model tier for a work kind - the shared front matter both RouteAccount and AllocateWave run before touching the pool.",
+      "distinction": "It is the ROW-PREP step that runs once before pool selection begins, distinct from the per-pool dedupe accumulator (byPool) and the per-pool leased-worker lookup (leaseWorkersByPool) that both run AFTER normalization on its output.",
+      "distinct_from": [
+        "pool-bypool",
+        "pool-leaseworkersbypool"
+      ],
+      "aliases": [
+        "normalizeWorkerPool"
+      ],
+      "grounding": "normalizeWorkerPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-rotationemptypool",
+      "canonical": "RotationEmptyPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "accounts.RotationEmptyPool is the RotationNoCandidateReason constant (\"empty_pool\") that NextRotationDecision (internal/accounts/rotation.go) returns when a rotate finds NO eligible seats at all in the pool - every seat reserved, disabled, tombstoned, or unservable - and that cmd/fak/accounts_rotation_runtime.go switches on to render the failure to an operator.",
+      "distinction": "It names a totally empty rotation pool specifically, one of three closed no-candidate reasons on RotationDecision (its siblings being a single-bucket pool with nowhere else to rotate, and a multi-bucket pool where every non-anchor candidate is runtime-walled); it is not BuildSeatPool's dispatch-tick seat-pool result, which builds a schema-versioned seat inventory across a whole roster rather than explaining one rotate's outcome.",
+      "distinct_from": [
+        "x2-pool-buildseatpool"
+      ],
+      "aliases": [
+        "RotationEmptyPool",
+        "empty_pool"
+      ],
+      "grounding": "RotationEmptyPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-uniquepoolaccounts",
+      "canonical": "uniquePoolAccounts",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "internal/fleetaccounts/resolve.go function that reduces a slice of Account rows to one representative Account per pool key via the byPool accumulator, keeping the best-ranked (offerable-first, then rank) row; called from AllocateWave, status_report.go, resolve.go, and capacity.go to avoid double-counting a pool's seats.",
+      "distinction": "It is fleetaccounts' Account-typed dedupe helper, the same reduce-to-one-per-pool pattern as dispatchtick's AccountRow-typed uniquePoolRows (pool dedupe helper) but over a different package's row type; it is not the lease-occupancy lookup (leaseWorkersByPool) or the per-wave granted-pool tracking set (usedPools) it commonly runs alongside.",
+      "distinct_from": [
+        "x-ci-coverage-pool-uniquepoolrows",
+        "pool-leaseworkersbypool"
+      ],
+      "aliases": [
+        "uniquePoolAccounts"
+      ],
+      "grounding": "uniquePoolAccounts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-usedpools",
+      "canonical": "usedPools",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Local map[string]bool set built during AllocateWave (internal/dispatchtick/accounts.go and internal/fleetaccounts/wave.go) that records which pool keys have already been granted at least one session slot in the current wave, so the result can report DistinctPools = len(usedPools) alongside the granted/shortfall counts and the reason string.",
+      "distinction": "It is a booked-during-THIS-wave tracking set, not the pre-wave in-flight lease-occupancy map produced by leaseWorkersByPool/leaseLoadByPool, and not the per-pool row-dedupe accumulator (byPool) that runs before allocation starts.",
+      "distinct_from": [
+        "pool-leaseworkersbypool",
+        "pool-bypool"
+      ],
+      "aliases": [
+        "usedPools"
+      ],
+      "grounding": "usedPools",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

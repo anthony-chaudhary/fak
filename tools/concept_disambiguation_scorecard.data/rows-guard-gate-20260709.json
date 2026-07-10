@@ -1,0 +1,721 @@
+{
+ "rows": [
+  {
+   "id": "guard-gate-checkexternalizegate",
+   "canonical": "CheckExternalizeGate (pre-rotate externalize check)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/relay function that refuses a relay rotation with RELAY_NOT_EXTERNALIZED when any load-bearing fact is still transcript-only, else admits the rotate.",
+   "distinction": "It is the pure ADMISSION FUNCTION for the externalize precondition, not the ExternalizeGate result type it returns and not GuardRotation, a separate pre-rotation assertion.",
+   "distinct_from": [
+    "guard-gate-externalizegate",
+    "guard-gate-guardrotation"
+   ],
+   "aliases": [
+    "checkexternalizegate",
+    "CheckExternalizeGate"
+   ],
+   "grounding": "CheckExternalizeGate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-externalizegate",
+   "canonical": "ExternalizeGate (externalize-check verdict)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/relay struct CheckExternalizeGate returns: Admit bool plus, when refused, the RELAY_NOT_EXTERNALIZED reason and the transcript-only Culprits the leg must externalize or park on.",
+   "distinction": "It is the DATA/VERDICT type the check produces, not CheckExternalizeGate, the function that computes it, and not GuardRotation, a different pre-rotation assertion.",
+   "distinct_from": [
+    "guard-gate-checkexternalizegate",
+    "guard-gate-guardrotation"
+   ],
+   "aliases": [
+    "externalizegate",
+    "ExternalizeGate"
+   ],
+   "grounding": "ExternalizeGate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-fakguardlaunchanim",
+   "canonical": "FAK_GUARD_LAUNCH_ANIM (launch-animation opt-out env)",
+   "family": "guard-gate",
+   "kind": "config",
+   "definition": "The env var that opts an attended `fak guard` launch out of the in-place icon launch animation (guard_launch_anim.go), falling back to the static compact banner when set to off.",
+   "distinction": "It is the ENV TOGGLE for the launch animation, not guardBannerAnimate, the --banner mode value that selects animate mode, and not printGuardCompactBanner, the static banner it falls back to.",
+   "distinct_from": [
+    "guard-gate-guardbanneranimate",
+    "guard-gate-printguardcompactbanner"
+   ],
+   "aliases": [
+    "FAK_GUARD_LAUNCH_ANIM",
+    "guardLaunchAnimEnv"
+   ],
+   "grounding": "guardLaunchAnimEnv",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-ffngateinp",
+   "canonical": "ffn_gate_inp (GGUF MoE router-gate tensor)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The GGUF/safetensors tensor name for a MoE layer's ROUTER gate (expert-selection logits), handled in fak's GGUF loading and MoE weight-quantizer path.",
+   "distinction": "It is the ROUTER gate tensor that picks which experts fire, not ffn_gate, the existing per-expert FFN gate-projection tensor, and not gateUp/gateName, the fused gate+up load-time locals.",
+   "distinct_from": [
+    "ffn-gate",
+    "x2-guard-gate-modelgatevars"
+   ],
+   "aliases": [
+    "ffn_gate_inp"
+   ],
+   "grounding": "ffn_gate_inp",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-gateenvint",
+   "canonical": "gateEnvInt (gate env-int tuning reader)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/hooks helper that reads a positive-integer operator tuning knob from the environment for the SIZE hygiene gates (GOD_FILE_GROWTH, FILE_ADMISSION), falling back to a default on unset/unparseable/non-positive input.",
+   "distinction": "It is a GENERIC env-parsing utility shared by gate ceilings, not FAK_GITGATE, a specific gate on/off toggle, and not any one hygiene gate itself.",
+   "distinct_from": [
+    "FAK_GITGATE (gate env toggles)",
+    "guard-gate-hygienegate"
+   ],
+   "aliases": [
+    "gateEnvInt"
+   ],
+   "grounding": "gateEnvInt",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardallow",
+   "canonical": "guard allow (fak guard allow subcommand)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The `fak guard allow` operator control-surface subcommand (cmd/fak/guard_allow.go, entry cmdGuardAllow) for inspecting and editing the guard's runtime allow overlay.",
+   "distinction": "It is the CLI SUBCOMMAND an operator runs, not guardApplyAllowOverlay, the existing mechanism that applies the overlay file this subcommand edits.",
+   "distinct_from": [
+    "guard allow-overlay (guardApplyAllowOverlay)"
+   ],
+   "aliases": [
+    "guard allow",
+    "cmdGuardAllow"
+   ],
+   "grounding": "cmdGuardAllow",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardappendcontinueflag",
+   "canonical": "guardAppendContinueFlag (idempotent resume-flag append)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_child.go helper that appends a resume flag to a relaunch command unless already present, so a repeated auth-crash-recover or budget-restart cycle never stacks the flag twice.",
+   "distinction": "It is the IDEMPOTENT APPEND primitive, not guardContinueFlagForAgent, which decides which flag is safe to use, and not guardRestartRelaunchCommand, which calls both to build the full relaunch command.",
+   "distinct_from": [
+    "guard-gate-guardcontinueflagforagent",
+    "guard-gate-guardrestartrelaunchcommand"
+   ],
+   "aliases": [
+    "guardAppendContinueFlag"
+   ],
+   "grounding": "guardAppendContinueFlag",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardapplylocalproviderextrabody",
+   "canonical": "guardApplyLocalProviderExtraBody (local-model extra-body env setter)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_local.go function that sets FAK_PROVIDER_EXTRA_BODY_JSON from the detected local backend's label/model (e.g. a Qwen3.6 quirk body) unless the operator already set one.",
+   "distinction": "It is the ENV-SETTING side effect for a detected local backend, not guardDetectLocalBackend, the probe that finds the backend, and not guardLocalDetectedBanner, the render of the detection result.",
+   "distinct_from": [
+    "guard-gate-guarddetectlocalbackend",
+    "guard-gate-guardlocaldetectedbanner"
+   ],
+   "aliases": [
+    "guardApplyLocalProviderExtraBody"
+   ],
+   "grounding": "guardApplyLocalProviderExtraBody",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardauditdir",
+   "canonical": "guardAuditDir (interactive decision-journal directory)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_support.go helper returning the .dispatch-runs/guard-audit directory under a repo root where fak guard's interactive decision-journal files live.",
+   "distinction": "It is the plain DIRECTORY helper guardDefaultAuditPath composes a filename into, not guardAuditPath, the unrelated dispatch-worker per-session journal-path builder, and not guardPolicyDigest, a policy hash rather than a path.",
+   "distinct_from": [
+    "guard-gate-guardauditpath",
+    "guard-gate-guardpolicydigest"
+   ],
+   "aliases": [
+    "guardAuditDir"
+   ],
+   "grounding": "guardAuditDir",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardauditpath",
+   "canonical": "guardAuditPath (dispatch-worker journal path)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/dispatchworker/guard.go function building a per-session guard decision-journal path under .dispatch-runs/guard-audit/, keyed by lane+backend plus a pid+random-token discriminator so concurrent dispatch workers never braid one hash-chained journal.",
+   "distinction": "It is the DISPATCH-WORKER fleet path (pid + random token), not guardDefaultAuditPath, the interactive `fak guard -- claude` default keyed by pid + repo hash, and not guardAuditDir, the plain directory helper the interactive path composes into.",
+   "distinct_from": [
+    "guardDefaultAuditPath (decision-journal path)",
+    "guard-gate-guardauditdir"
+   ],
+   "aliases": [
+    "guardAuditPath"
+   ],
+   "grounding": "guardAuditPath",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardbanneranimate",
+   "canonical": "guardBannerAnimate (animate banner mode)",
+   "family": "guard-gate",
+   "kind": "config",
+   "definition": "The cmd/fak/guard_banner.go constant naming the --banner=animate mode: the attended-interactive default that plays the in-place icon launch animation instead of the static compact banner.",
+   "distinction": "It is one of the four --banner MODE VALUES (auto/full/compact/animate), not guardBannerFull, the always-full mode, and not printGuardCompactBanner, the static banner it degrades to.",
+   "distinct_from": [
+    "guard-gate-guardbannerfull",
+    "guard-gate-printguardcompactbanner"
+   ],
+   "aliases": [
+    "guardBannerAnimate"
+   ],
+   "grounding": "guardBannerAnimate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardbannerfull",
+   "canonical": "guardBannerFull (full banner mode)",
+   "family": "guard-gate",
+   "kind": "config",
+   "definition": "The cmd/fak/guard_banner.go constant naming the --banner=full mode: always print fak guard's complete startup report, forced (today's pre-flag behavior).",
+   "distinction": "It is the FULL-report --banner mode value, not guardBannerAnimate, the animated attended default, and not the compact/off mode constants that are its other siblings.",
+   "distinct_from": [
+    "guard-gate-guardbanneranimate"
+   ],
+   "aliases": [
+    "guardBannerFull"
+   ],
+   "grounding": "guardBannerFull",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardchildtreekill",
+   "canonical": "guardChildTreeKill (process-tree kill hook)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_child.go injectable var (defaults to procguard.KillPID) used as the destructive escalation that kills a wrapped child's whole process tree when it does not exit within the graceful-interrupt window.",
+   "distinction": "It is the ESCALATION KILL primitive for a hung child, not FleetProcResourceGuard, the OS-level scheduled task killing runaway fleet processes, and not guardRestartRelaunchCommand, the relaunch that may follow a kill.",
+   "distinct_from": [
+    "FleetProcResourceGuard (runaway-process guard)",
+    "guard-gate-guardrestartrelaunchcommand"
+   ],
+   "aliases": [
+    "guardChildTreeKill"
+   ],
+   "grounding": "guardChildTreeKill",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardcolorizesummary",
+   "canonical": "guardColorizeSummary (exit-summary TTY colorizer)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_format_layout.go function that layers TTY color onto an already-assembled guard exit summary at print time, dimming structural chrome without re-parsing the value-bearing rows.",
+   "distinction": "It is a PRINT-TIME color layer over an already-formatted string, not the guard report layout (guardRow/guardSection) that structurally formats it, and not printGuardCompactBanner, a different render surface.",
+   "distinct_from": [
+    "guard report layout (guardRow / guardSection)",
+    "guard-gate-printguardcompactbanner"
+   ],
+   "aliases": [
+    "guardColorizeSummary"
+   ],
+   "grounding": "guardColorizeSummary",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardcontinueflagforagent",
+   "canonical": "guardContinueFlagForAgent (safe resume-flag lookup)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_child.go function returning the resume/continue flag fak knows is safe to auto-inject for a recognized wrapped agent (currently only Claude Code's --continue); ok=false for anything unrecognized.",
+   "distinction": "It is the DECISION of which flag is safe, not guardAppendContinueFlag, which mechanically appends it, and not guardRestartRelaunchCommand, which uses both to build a full relaunch command.",
+   "distinct_from": [
+    "guard-gate-guardappendcontinueflag",
+    "guard-gate-guardrestartrelaunchcommand"
+   ],
+   "aliases": [
+    "guardContinueFlagForAgent"
+   ],
+   "grounding": "guardContinueFlagForAgent",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guarddefaultpolicyjson",
+   "canonical": "guardDefaultPolicyJSON (embedded default capability floor)",
+   "family": "guard-gate",
+   "kind": "config",
+   "definition": "The cmd/fak/guard.go embedded byte slice holding the day-to-day capability-floor policy fak guard enforces when the operator names no --policy, so guard works from any directory with no source tree present.",
+   "distinction": "It is the EMBEDDED DEFAULT POLICY DOCUMENT itself, not guardPolicyDigest, the sha256 digest computed over policy bytes, and not the guard kernel that enforces it.",
+   "distinct_from": [
+    "guard-gate-guardpolicydigest",
+    "guard-kernel"
+   ],
+   "aliases": [
+    "guardDefaultPolicyJSON"
+   ],
+   "grounding": "guardDefaultPolicyJSON",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guarddetectlocalbackend",
+   "canonical": "guardDetectLocalBackend (local endpoint probe)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_local.go function that probes the conventional local model endpoints in precedence order and returns the chosen OpenAI-compatible base/model/label, or found=false if none answered.",
+   "distinction": "It is the I/O PROBE half of --local detection, not guardChooseLocalBackend, its pure decision half, and not guardLocalDetectedBanner, the render of a positive result.",
+   "distinct_from": [
+    "guard-gate-guardlocaldetectedbanner",
+    "guard-gate-guardlocalnothingdetectedmessage"
+   ],
+   "aliases": [
+    "guardDetectLocalBackend"
+   ],
+   "grounding": "guardDetectLocalBackend",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardlocaldetectedbanner",
+   "canonical": "guardLocalDetectedBanner (positive --local detection render)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_local.go pure function rendering the positive --local detection banner (label, base URL, model) printed once guardDetectLocalBackend finds a live endpoint.",
+   "distinction": "It is the POSITIVE-CASE render, not guardLocalNothingDetectedMessage, the fail-loud negative-case one-liner, and not guardDetectLocalBackend, the probe that decides which case applies.",
+   "distinct_from": [
+    "guard-gate-guardlocalnothingdetectedmessage",
+    "guard-gate-guarddetectlocalbackend"
+   ],
+   "aliases": [
+    "guardLocalDetectedBanner"
+   ],
+   "grounding": "guardLocalDetectedBanner",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardlocalnothingdetectedmessage",
+   "canonical": "guardLocalNothingDetectedMessage (negative --local detection message)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_local.go pure function returning the fail-loud one-liner printed when --local probed every conventional endpoint and found none running.",
+   "distinction": "It is the NEGATIVE-CASE message, not guardLocalDetectedBanner, the positive-case banner, and not guardDetectLocalBackend, the probe producing the found bool that selects between them.",
+   "distinct_from": [
+    "guard-gate-guardlocaldetectedbanner",
+    "guard-gate-guarddetectlocalbackend"
+   ],
+   "aliases": [
+    "guardLocalNothingDetectedMessage"
+   ],
+   "grounding": "guardLocalNothingDetectedMessage",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardmcpinstall",
+   "canonical": "guardMCPInstall (MCP config-injection record)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_mcp.go struct recording what installGuardMCPRegistration did (Applied/ConfigPath/URL/Reason) when wiring fak's MCP surface into a Claude Code child, used by the startup banner and tests.",
+   "distinction": "It is the RESULT RECORD of the MCP registration install, not guardPreCompactInstall, the analogous record for the PreCompact hook install, and not guardStopHookInstall, the analogous record for the Stop hook install.",
+   "distinct_from": [
+    "guard-gate-guardprecompactinstall",
+    "guard-gate-guardstophookinstall"
+   ],
+   "aliases": [
+    "guardMCPInstall"
+   ],
+   "grounding": "guardMCPInstall",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardpolicydigest",
+   "canonical": "guardPolicyDigest (policy sha256 digest)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_support.go function computing a sha256:<hex> digest over the resolved policy bytes fak guard is enforcing, surfaced in the startup report so an operator can tell which floor is active.",
+   "distinction": "It is a HASH over the policy bytes, not guardDefaultPolicyJSON, the embedded policy bytes themselves, and not guardAuditDir, an unrelated path helper.",
+   "distinct_from": [
+    "guard-gate-guarddefaultpolicyjson",
+    "guard-gate-guardauditdir"
+   ],
+   "aliases": [
+    "guardPolicyDigest"
+   ],
+   "grounding": "guardPolicyDigest",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardprecompactinstall",
+   "canonical": "guardPreCompactInstall (PreCompact hook install record)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_precompact.go struct recording what the PreCompact hook installer did (Applied/Mode/SettingsPath/MetricsURL/Reason) when wiring the Claude-Code PreCompact hook into a child's settings.",
+   "distinction": "It is the RESULT RECORD for the PreCompact hook install, not guardStopHookInstall, the analogous Stop-hook record, and not guardMCPInstall, the analogous MCP-registration record.",
+   "distinct_from": [
+    "guard-gate-guardstophookinstall",
+    "guard-gate-guardmcpinstall"
+   ],
+   "aliases": [
+    "guardPreCompactInstall"
+   ],
+   "grounding": "guardPreCompactInstall",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardrestartrelaunchcommand",
+   "canonical": "guardRestartRelaunchCommand (budget-restart reattach command)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_child.go function returning the command to relaunch a wrapped child with after a budget restart, appending the agent's resume flag for a recognized agent so the relaunch reattaches the existing transcript.",
+   "distinction": "It is the FULL RELAUNCH COMMAND builder used on a budget restart, not guardContinueFlagForAgent, its flag-lookup dependency, and not guardAppendContinueFlag, its idempotent-append dependency, both of which it composes.",
+   "distinct_from": [
+    "guard-gate-guardcontinueflagforagent",
+    "guard-gate-guardappendcontinueflag"
+   ],
+   "aliases": [
+    "guardRestartRelaunchCommand"
+   ],
+   "grounding": "guardRestartRelaunchCommand",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardrotateoffcooldown",
+   "canonical": "guardRotateOffCooldown (pre-launch cooldown rotation)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_rotate.go function that, before a raw `fak guard -- claude` launch, checks the fleet-shared cooldown store and returns a live alternate account's config dir if the currently-resolved account sits inside an active cooldown window.",
+   "distinction": "It is the specific PRE-LAUNCH, fail-open cooldown-rotation mechanism (one half of the broader guard account rotation / failover concept), not GuardRotation, the unrelated internal/relay in-flight-turn rotation assertion.",
+   "distinct_from": [
+    "guard-gate-guardrotation",
+    "guard account rotation / failover (guardRotate)"
+   ],
+   "aliases": [
+    "guardRotateOffCooldown"
+   ],
+   "grounding": "guardRotateOffCooldown",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardrotation",
+   "canonical": "GuardRotation (relay in-flight rotation assertion)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/relay function (rung E2) that refuses a relay rotation with IN_FLIGHT_TOOL_CALL while a tool call/decode is mid-turn, and otherwise asserts the NoInFlightTurn axis onto the E1 SafePoint conjunction.",
+   "distinction": "It is the RELAY SAFE-POINT axis assertion for perpetual-session rotation, unrelated to guardRotateOffCooldown, the cmd/fak seat-cooldown account rotation, and not CheckExternalizeGate, a different pre-rotation precondition.",
+   "distinct_from": [
+    "guard-gate-guardrotateoffcooldown",
+    "guard-gate-checkexternalizegate"
+   ],
+   "aliases": [
+    "GuardRotation"
+   ],
+   "grounding": "GuardRotation",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardsessionpressure",
+   "canonical": "guard session pressure (compaction-pressure launch gate)",
+   "family": "guard-gate",
+   "kind": "subsystem",
+   "definition": "The cmd/fak/guard_session_pressure.go family (runGuardSessionPressureGate over guardSessionPressureGateConfig) that reads sessionaudit compaction-pressure history and can refuse a `fak guard` launch when a namespace's recent compact-action pressure crosses an operator threshold.",
+   "distinction": "It is a PRE-LAUNCH pressure/compaction-history gate, not the PreCompact hook, which fires mid-session on the wrapped agent's own compaction, and not the Stop-hook deny-all-continue install this row's sibling covers.",
+   "distinct_from": [
+    "guardPreCompactClaudeCommand (Claude hook command row)",
+    "guard-gate-guardstophookinstall"
+   ],
+   "aliases": [
+    "guard session pressure",
+    "guardSessionPressureGateConfig",
+    "runGuardSessionPressureGate"
+   ],
+   "grounding": "runGuardSessionPressureGate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardstophookinstall",
+   "canonical": "guardStopHookInstall (Stop hook install record)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_stophook.go struct recording what installGuardStopHook did (Applied/Mode/WarnAt/FinalAt/Max/SameStop/StopsLedger/Reason) when wiring the deny-all-continue Stop hook into a child's settings.",
+   "distinction": "It is the RESULT RECORD for the Stop-hook install, not guardStopHook, the deny-all continue hook mechanism itself, and not guardPreCompactInstall/guardMCPInstall, its sibling install records for other hooks.",
+   "distinct_from": [
+    "guardStopHook (deny-all continue hook)",
+    "guard-gate-guardprecompactinstall"
+   ],
+   "aliases": [
+    "guardStopHookInstall"
+   ],
+   "grounding": "guardStopHookInstall",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardtaskhandoffconfig",
+   "canonical": "guardTaskHandoffConfig (Stop-hook task-handoff config)",
+   "family": "guard-gate",
+   "kind": "config",
+   "definition": "The cmd/fak/guard_stophook.go struct (Mode/File/Repo/Live) carrying the task-handoff posture wired into the Stop hook, consumed by runGuardTaskHandoffGate to decide whether a stop needs a written handoff first.",
+   "distinction": "It is the TASK-HANDOFF configuration passed into the Stop hook, not guardStopHookInstall, the broader install record it is embedded in, and not guardSessionPressureGateConfig, an unrelated launch-time config struct.",
+   "distinct_from": [
+    "guard-gate-guardstophookinstall",
+    "guard-gate-guardsessionpressure"
+   ],
+   "aliases": [
+    "guardTaskHandoffConfig"
+   ],
+   "grounding": "guardTaskHandoffConfig",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-guardvars",
+   "canonical": "guardvars (shared /debug/vars wire shapes)",
+   "family": "guard-gate",
+   "kind": "subsystem",
+   "definition": "The internal/guardvars package holding the canonical wire shapes (e.g. SessionVars) shared field-for-field by the /debug/vars gateway producer and the `fak info` cmd/fak consumer, so a new field cannot silently drop between the two.",
+   "distinction": "It is the SHARED TYPE-DEFINITION leaf preventing producer/consumer field drift, not guardInfoVars, the cmd/fak info-pane consumer alias of these types, and not the gateway debug producer itself.",
+   "distinct_from": [
+    "guardInfoVars"
+   ],
+   "aliases": [
+    "guardvars"
+   ],
+   "grounding": "guardvars",
+   "grounding_kind": "path",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-hygienegate",
+   "canonical": "HygieneGate (whole-tree gate struct)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/hooks/tree.go struct type (Name, Check, DefaultOff) describing one whole-tree `fak hygiene` audit gate; HygieneGates() returns the ordered slice of them that `make hygiene`/CI run.",
+   "distinction": "It is the per-gate STRUCT TYPE (one row's shape), not 'hygiene gates', the existing doc-term for the whole audited family, and not a staged pre-commit Gate, which carries a ModeEnv/EscapeEnv this struct deliberately omits.",
+   "distinct_from": [
+    "hygiene gates (whole-tree audit gates)",
+    "git-hook gate"
+   ],
+   "aliases": [
+    "HygieneGate"
+   ],
+   "grounding": "HygieneGate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-printguardcompactbanner",
+   "canonical": "printGuardCompactBanner (attended compact banner)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_banner.go function rendering the attended-launch compact banner: three lines instead of the full startup report, printed per the --banner mode decision.",
+   "distinction": "It is the STATIC three-line banner renderer, not guardBannerAnimate, the animated attended default it is a fallback for, and not guardColorizeSummary, which colors the exit summary, a different render surface.",
+   "distinct_from": [
+    "guard-gate-guardbanneranimate",
+    "guard-gate-guardcolorizesummary"
+   ],
+   "aliases": [
+    "printGuardCompactBanner"
+   ],
+   "grounding": "printGuardCompactBanner",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-rungate",
+   "canonical": "RunGate (frontierswe local-capability gate)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The internal/frontierswe/run.go struct (Runnable/DockerPresent/IntegrityOK/Reason/RemoteCommand) reporting whether the real C7 SWE-bench environment could be stood up on this host, and the exact remote command to run it where it cannot.",
+   "distinction": "It is a SWE-bench harness HOST-CAPABILITY report, unrelated to a tool-call adjudication gate; distinct from PreflightGate, the rehearsal host-capability gate for a different harness, and from the generic decision-point gate concept.",
+   "distinct_from": [
+    "PreflightGate (rehearsal host-capability gate)",
+    "gate (decision point)"
+   ],
+   "aliases": [
+    "RunGate"
+   ],
+   "grounding": "RunGate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-useguard",
+   "canonical": "useGuard (launch-time guard-wrap flag)",
+   "family": "guard-gate",
+   "kind": "config",
+   "definition": "The cmd/fak/accounts_launch.go launchOpts field deciding whether `fak accounts launch` wraps the started agent in `fak guard` (kernel adjudication + vCache) or execs it bare.",
+   "distinction": "It is the LAUNCH-TIME boolean choosing whether to wrap in the guard kernel, not cmdGuard, the guard entry point itself, and not guardedLaunchCommand, the dispatch/session-side equivalent wiring.",
+   "distinct_from": [
+    "cmdGuard (fak guard entry point)",
+    "guardedLaunchCommand (guarded-launch wiring)"
+   ],
+   "aliases": [
+    "useGuard"
+   ],
+   "grounding": "useGuard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "guard-gate-writeguardsettingsfileatomic",
+   "canonical": "writeGuardSettingsFileAtomic (atomic settings-file writer)",
+   "family": "guard-gate",
+   "kind": "symbol",
+   "definition": "The cmd/fak/guard_precompact.go helper that writes a Claude Code settings.json atomically (sibling temp file plus rename), shared by the PreCompact, Stop-hook, and MCP hook installers.",
+   "distinction": "It is the shared LOW-LEVEL ATOMIC FILE WRITE primitive, not any one hook's install record (guardPreCompactInstall/guardStopHookInstall/guardMCPInstall) that calls it.",
+   "distinct_from": [
+    "guard-gate-guardprecompactinstall",
+    "guard-gate-guardstophookinstall"
+   ],
+   "aliases": [
+    "writeGuardSettingsFileAtomic"
+   ],
+   "grounding": "writeGuardSettingsFileAtomic",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}

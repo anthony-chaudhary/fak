@@ -1,0 +1,763 @@
+{
+ "rows": [
+  {
+   "id": "plan-featurebreakpointplan",
+   "canonical": "FeatureBreakpointPlan (ablate bp_plan sweep token)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "FeatureBreakpointPlan is the ablate sweep token (wire value \"bp_plan\") that gates whether provider cache breakpoints are placed at all, toggled via an ablate --sweep arm or the matching env gate.",
+   "distinction": "It is the on/off ablate FEATURE TOKEN for the cache-breakpoint optimization, not the BreakpointPlan struct a placement run produces nor the PlanBreakpoints function that computes one.",
+   "distinct_from": [
+    "plan-breakpointplan"
+   ],
+   "aliases": [
+    "bp_plan",
+    "FeatureBreakpointPlan"
+   ],
+   "grounding": "FeatureBreakpointPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-breakpointplan",
+   "canonical": "BreakpointPlan (promptmmu cache-breakpoint layout)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "BreakpointPlan is the promptmmu struct naming every provider cache breakpoint index PlanBreakpoints selects for one turn's serialized prompt segments.",
+   "distinction": "It is the immutable DATA the planner returns, not PlanBreakpoints (the function that computes it) or the ablate FeatureBreakpointPlan sweep token that turns the optimization on and off.",
+   "distinct_from": [
+    "plan-planbreakpoints",
+    "plan-featurebreakpointplan"
+   ],
+   "aliases": [
+    "BreakpointPlan"
+   ],
+   "grounding": "BreakpointPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-breakpointplanner",
+   "canonical": "breakpoint_planner (ablate wire-cache component label)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "breakpoint_planner is the wireCacheEffect/ablate catalog component label naming the subsystem that places provider cache breakpoints, used for --sweep accounting and effect descriptions.",
+   "distinction": "It is the ablate ACCOUNTING COMPONENT STRING for the subsystem, not the BreakpointPlan struct or the PlanBreakpoints function it labels.",
+   "distinct_from": [
+    "plan-breakpointplan"
+   ],
+   "aliases": [
+    "breakpoint_planner"
+   ],
+   "grounding": "breakpoint_planner",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-candidatemetric",
+   "canonical": "candidateMetric (rsiloop skill-candidate KPI)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "candidateMetric is the SkillFixtureCorpus method that folds the held fixture corpus into the mean task score WITH the proposed skill applied, the After side of the promotion witness.",
+   "distinction": "It is the scalar-with-candidate reading, not CandidateScore (the raw per-task field it averages) or SkillCandidate (the proposal record it scores).",
+   "distinct_from": [
+    "plan-candidatescore",
+    "plan-skillcandidate"
+   ],
+   "aliases": [
+    "candidateMetric"
+   ],
+   "grounding": "candidateMetric",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-candidatescore",
+   "canonical": "CandidateScore (rsiloop fixture task field)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "CandidateScore is the SkillFixtureTask field holding one held task's outcome score measured WITH the proposed skill applied.",
+   "distinction": "It is a single raw per-task measurement, not candidateMetric (the corpus-wide mean it feeds) or BaselineScore (the without-skill sibling field on the same struct).",
+   "distinct_from": [
+    "plan-candidatemetric"
+   ],
+   "aliases": [
+    "CandidateScore"
+   ],
+   "grounding": "CandidateScore",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-causeplanning",
+   "canonical": "CausePlanning (vcacheobserve attribution cause)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "CausePlanning is the AttributionCause enum member (wire value \"context_planning\") JoinContext assigns when an observed cost swing is attributed to a deliberate context-window/planning change.",
+   "distinction": "It is the per-event ENUM VALUE in the closed AttributionCause vocabulary, not PlanningAttributed (the report-level aggregate COUNT of events carrying this cause) or CauseNone/CauseProviderBehavior (its sibling members).",
+   "distinct_from": [
+    "x-goal25b-plan-planningattributed"
+   ],
+   "aliases": [
+    "CausePlanning"
+   ],
+   "grounding": "CausePlanning",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-closednotplanned",
+   "canonical": "ClosedNotPlanned (closureaudit bucket)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "ClosedNotPlanned (wire value CLOSED_NOT_PLANNED) is the closureaudit closure-reason bucket for an issue that closed without ever being scheduled via a plan/roadmap reference.",
+   "distinction": "It describes an ISSUE's closure reason in closureaudit, not planless (trajctl's unrelated reading of an objective carrying no declared PlanPhase list) - both read as 'lacks a plan' but over different subsystems.",
+   "distinct_from": [
+    "plan-planless"
+   ],
+   "aliases": [
+    "ClosedNotPlanned",
+    "CLOSED_NOT_PLANNED"
+   ],
+   "grounding": "ClosedNotPlanned",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-cohortplan",
+   "canonical": "CohortPlan (dogfoodissues/issuecatalog wave-partitioned batch plan)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "CohortPlan (defined in both internal/dogfoodissues and internal/issuecatalog) folds a batch of action items or catalog rows through issuecohort.Build, producing an issuecohort.Plan partitioned into concurrency-safe dispatch waves with collision_pairs counted up front.",
+   "distinction": "It is the WAVE-PARTITIONED structure for a whole cohort of items, not BuildPlan/BuildPlanWithOptions (the single-item action planner each row is folded through first).",
+   "distinct_from": [
+    "x-plan-buildplan",
+    "x-plan-buildplanwithoptions"
+   ],
+   "aliases": [
+    "CohortPlan"
+   ],
+   "grounding": "CohortPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-exitplanmode",
+   "canonical": "ExitPlanMode (planning-family tool name)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "ExitPlanMode is the literal tool name fak's rung/preset policy lists as a member of the planning family (propose-only tools: ExitPlanMode, diff_infra, plan_deploy, validate_terraform) that a read-only or propose-only consequence rung permits by default.",
+   "distinction": "It is an EXTERNAL AGENT-HARNESS tool-name string in the closed preset ladder, not any fak-internal Plan/PlanPhase data structure such as trajctl's PlanPhase.",
+   "distinct_from": [
+    "plan-planphase"
+   ],
+   "aliases": [
+    "ExitPlanMode"
+   ],
+   "grounding": "ExitPlanMode",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-featurectxplanseam",
+   "canonical": "FeatureCtxplanSeam (ablate ctxplan_seam sweep token)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "FeatureCtxplanSeam is the ablate sweep constant (wire value \"ctxplan_seam\") gating the CtxViewPlanner seam so a sweep run can isolate its effect from sibling ablate features.",
+   "distinction": "It is the ablate ON/OFF TOKEN for the seam, not CtxViewPlanner itself (the planner subsystem it toggles).",
+   "distinct_from": [
+    "x-plan-ctxplanseam"
+   ],
+   "aliases": [
+    "ctxplan_seam",
+    "FeatureCtxplanSeam"
+   ],
+   "grounding": "FeatureCtxplanSeam",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-foldprplanunits",
+   "canonical": "foldPRPlanUnits (release prplan grouping fold)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "foldPRPlanUnits groups the commits fak release prplan discovered into one PR unit per (fak <leaf>) ship-stamp lane, biggest-first, returning unstamped commits separately as legibility debt.",
+   "distinction": "It is the GROUPING fold over already-parsed commits, not parsePRPlanLog (the upstream parser that produces those commits) or releasePRPlanSchema (the payload's schema string).",
+   "distinct_from": [
+    "plan-parseprplanlog",
+    "plan-releaseprplanschema"
+   ],
+   "aliases": [
+    "foldPRPlanUnits"
+   ],
+   "grounding": "foldPRPlanUnits",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-generationstreamfromcandidate",
+   "canonical": "generationStreamFromCandidate (issuecontract generation-stream reader)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "generationStreamFromCandidate reads an issuecontract Candidate's Generation field (falling back to Title) through generationStreamFromText to recover its generation-stream label.",
+   "distinction": "It is the CANDIDATE-typed reader, not decodeIssueContractCandidates (cmd/fak's JSON-bytes-to-[]Candidate decoder) or generationStreamFromLabels (the labels-typed sibling reader in the same file).",
+   "distinct_from": [
+    "x-goal25b-plan-decodeissuecontractcandidates"
+   ],
+   "aliases": [
+    "generationStreamFromCandidate"
+   ],
+   "grounding": "generationStreamFromCandidate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-godsplitplan",
+   "canonical": "godsplit_plan.py (/modularize god-file boundary planner)",
+   "family": "plan",
+   "kind": "concept",
+   "definition": "godsplit_plan.py is the /modularize skill's Python tool (tools/godsplit_plan.py) that plans package-split boundaries for an oversized file before the sed-extract recipe runs; internal/hooks/gate_godfile.go and internal/pythongate/baseline.go name it in doctrine and baseline text.",
+   "distinction": "It is the BOUNDARY-PLANNING tool the /modularize recipe invokes ahead of a refactor, distinct from ReapPlan (growthgate's unrelated delete/protect partition over a different debt class - grandfathered findings, not oversized files).",
+   "distinct_from": [
+    "plan-reapplan"
+   ],
+   "aliases": [
+    "godsplit_plan",
+    "godsplit_plan.py",
+    "tools/godsplit_plan.py"
+   ],
+   "grounding": "godsplit_plan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-maxsessionplanners",
+   "canonical": "maxSessionPlanners (gateway per-session planner cache cap)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "maxSessionPlanners (8192) bounds the gateway's per-trace SessionPlanner cache; once full, a new trace triggers a cheap generational reset of the whole map instead of per-entry LRU eviction.",
+   "distinction": "It is the CAPACITY CONSTANT for the cache, not sessionPlanners (the map field it bounds) or sessionPlannerMu (the mutex serializing access to that map).",
+   "distinct_from": [
+    "x-plan-sessionplanners",
+    "plan-sessionplannermu"
+   ],
+   "aliases": [
+    "maxSessionPlanners"
+   ],
+   "grounding": "maxSessionPlanners",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-messagesstreamplanner",
+   "canonical": "messages_stream_planner.go (gateway StreamingPlanner bridge file)",
+   "family": "plan",
+   "kind": "subsystem",
+   "definition": "messages_stream_planner.go bridges the generic agent.StreamingPlanner capability to the Anthropic /v1/messages SSE wire (streamAnthropicPlannerLive), letting a generic streaming planner emit live prose deltas on that endpoint.",
+   "distinction": "It is the ANTHROPIC-WIRE bridge FILE, distinct from StreamingPlanner (the generic capability interface it bridges) and from streamAnthropicPlannerLive treated as a bare function name.",
+   "distinct_from": [
+    "x-plan-streamingplanner",
+    "x-plan-streamanthropicplannerlive"
+   ],
+   "aliases": [
+    "messages_stream_planner"
+   ],
+   "grounding": "messages_stream_planner",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-mitigationplan",
+   "canonical": "MitigationPlan (antipattern cure-action builder)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "MitigationPlan turns a set of detected antipattern Findings into an ordered, worst-first list of routed CureActions, the mitigate half of the detect-then-mitigate loop (Collect then MitigationPlan).",
+   "distinction": "It is antipattern's findings-to-cure-actions builder, distinct from ReapPlan (growthgate's unrelated delete/protect partition) even though both turn a Findings slice into an actioned list.",
+   "distinct_from": [
+    "plan-reapplan"
+   ],
+   "aliases": [
+    "MitigationPlan"
+   ],
+   "grounding": "MitigationPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-parseprplanlog",
+   "canonical": "parsePRPlanLog (release prplan git-log parser)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "parsePRPlanLog parses the raw `git log --format=%x1e%H%x1f%s%x1f%b%x1f` output for the promotion range into structured prPlanCommit records (sha, subject, leaf, type, resolves, mentions, files).",
+   "distinction": "It is the RAW-LOG-TO-COMMITS parser, distinct from foldPRPlanUnits (the next stage, which groups its output into PR units by leaf).",
+   "distinct_from": [
+    "plan-foldprplanunits"
+   ],
+   "aliases": [
+    "parsePRPlanLog"
+   ],
+   "grounding": "parsePRPlanLog",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-planbreakpoints",
+   "canonical": "PlanBreakpoints (promptmmu breakpoint selector function)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "PlanBreakpoints takes one turn's prompt segments plus a prefix-stability score and returns the BreakpointPlan naming which provider cache breakpoints to place.",
+   "distinction": "It is the FUNCTION that computes a BreakpointPlan from live turn state, not the BreakpointPlan struct itself.",
+   "distinct_from": [
+    "plan-breakpointplan"
+   ],
+   "aliases": [
+    "PlanBreakpoints"
+   ],
+   "grounding": "PlanBreakpoints",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-planhostenrollment",
+   "canonical": "PlanHostEnrollment (dispatchtick microagent enrollment builder)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "PlanHostEnrollment builds the pure HostEnrollment descriptor (agent id, lane, issue, lease id, tree) a running in-process microagent host uses to Spawn one routed issue, copying the same lease tree the detached spawn path would hold.",
+   "distinction": "It is the IN-PROCESS microagent enrollment constructor (M2), not RotationPlanWithHeadroom or any detached-worktree spawn plan - it exists so the in-process backend preserves the M11 lane-disjointness invariant.",
+   "distinct_from": [
+    "x-goal25b-plan-rotationplanwithheadroom"
+   ],
+   "aliases": [
+    "PlanHostEnrollment"
+   ],
+   "grounding": "PlanHostEnrollment",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-planless",
+   "canonical": "planless (trajctl unscheduled-objective reading)",
+   "family": "plan",
+   "kind": "concept",
+   "definition": "planless describes a trajctl Objective that carries no declared Plan ([]PlanPhase list); such an objective earns a curve point only when a scorer has a live signal, never a fabricated per-turn commit-progress point.",
+   "distinction": "It describes an OBJECTIVE lacking a declared plan, the opposite pole from PlanPhase (the declared unit an objective's plan is made of when it has one) - and distinct from ClosedNotPlanned, closureaudit's unrelated issue-closure bucket.",
+   "distinct_from": [
+    "plan-planphase"
+   ],
+   "aliases": [
+    "planless"
+   ],
+   "grounding": "planless",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-planphase",
+   "canonical": "PlanPhase (trajctl declared work unit)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "PlanPhase is one declared unit of work in a trajctl Objective's Plan list, the thing the W3 commit scorer measures a progress fraction against every turn end.",
+   "distinction": "It is the DECLARED unit an objective's plan is made of, not planless (the reading for an objective with no PlanPhase list at all) or ExitPlanMode (an unrelated external tool-name string).",
+   "distinct_from": [
+    "plan-planless"
+   ],
+   "aliases": [
+    "PlanPhase"
+   ],
+   "grounding": "PlanPhase",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-planrecovery",
+   "canonical": "PlanRecovery (macbench crash-recovery strategy builder)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "PlanRecovery(sig RecoverySignals) builds the RecoveryPlan macbench recommends after a crash/hang signal set, selecting a resume strategy and posture.",
+   "distinction": "It is the FUNCTION that builds a RecoveryPlan from raw signals, not the RecoveryPlan struct itself.",
+   "distinct_from": [
+    "plan-recoveryplan"
+   ],
+   "aliases": [
+    "PlanRecovery"
+   ],
+   "grounding": "PlanRecovery",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-recoveryplan",
+   "canonical": "RecoveryPlan (macbench crash-recovery result)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "RecoveryPlan is the macbench struct PlanRecovery returns: the recommended resume posture/strategy for one crash/hang signal set, rendered by renderMacBenchRecovery.",
+   "distinction": "It is the DATA PlanRecovery produces, not PlanRecovery (the constructor function) - and it is unrelated to cmd/fak/recover.go's separate unexported recoveryPlan type, which plans trunk-branch restoration rather than a macbench run.",
+   "distinct_from": [
+    "plan-planrecovery"
+   ],
+   "aliases": [
+    "RecoveryPlan"
+   ],
+   "grounding": "RecoveryPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-printrotationnocandidate",
+   "canonical": "printRotationNoCandidate (accounts rotate no-seat renderer)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "printRotationNoCandidate renders a rotate that found no seat to launch, reading the typed RotationDecision.Reason (accounts.RotationNoCandidateReason) instead of re-deriving the explanation from the pool.",
+   "distinction": "It is the RENDER function for a no-candidate rotate outcome, not RotationNoCandidateReason (the closed reason vocabulary it switches on).",
+   "distinct_from": [
+    "plan-rotationnocandidatereason"
+   ],
+   "aliases": [
+    "printRotationNoCandidate"
+   ],
+   "grounding": "printRotationNoCandidate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-promotioncandidates",
+   "canonical": "RowPromotionCandidates (roadmap promotion-evidence row)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "RowPromotionCandidates (wire value \"promotion-candidates\") is the generation-roadmap row counting how many options at a horizon carry promotion evidence, ready to move toward a nearer horizon.",
+   "distinction": "It is a per-horizon COUNT in the roadmap table's closed RoadmapRow vocabulary, distinct from PromotionCandidate (selfquery's single ambiguous context-to-memory promotion case).",
+   "distinct_from": [
+    "x-goal25-plan-promotioncandidate"
+   ],
+   "aliases": [
+    "RowPromotionCandidates",
+    "promotion-candidates"
+   ],
+   "grounding": "RowPromotionCandidates",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-reapplan",
+   "canonical": "ReapPlan (growthgate delete/protect partition)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "ReapPlan partitions a growthgate Report's findings into what a reaper may delete now (reap) versus what stays protected, the read a `fak growthgate` reap step consumes.",
+   "distinction": "It is the DELETE/PROTECT partition over findings, distinct from MitigationPlan (antipattern's unrelated findings-to-cure-actions builder) even though both turn findings into an actioned list.",
+   "distinct_from": [
+    "plan-mitigationplan"
+   ],
+   "aliases": [
+    "ReapPlan"
+   ],
+   "grounding": "ReapPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-releaseprplanschema",
+   "canonical": "releasePRPlanSchema (release prplan payload schema tag)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "releasePRPlanSchema (\"fak.release.prplan.v1\") is the schema tag `fak release prplan` stamps on its JSON payload (base/head SHAs, units, unstamped commits).",
+   "distinction": "It is the PAYLOAD SCHEMA STRING, not foldPRPlanUnits or parsePRPlanLog (the functions that build the payload it tags).",
+   "distinct_from": [
+    "plan-foldprplanunits"
+   ],
+   "aliases": [
+    "releasePRPlanSchema",
+    "fak.release.prplan.v1"
+   ],
+   "grounding": "releasePRPlanSchema",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-reqmemoryplan",
+   "canonical": "reqMemoryPlan (gateway per-request memory-metric map)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "reqMemoryPlan is the gateway metrics field mapping a requestMemoryMetricKey to its requestMemoryMetricStats, the live accumulator each request's memory-plan rows are folded into.",
+   "distinction": "It is the LIVE ACCUMULATOR MAP on the metrics struct, not requestMemoryPlanByClassScopeDType (the pure function that later re-groups a memory-plan slice by class/scope/dtype for rendering).",
+   "distinct_from": [
+    "plan-requestmemoryplanbyclassscopedtype"
+   ],
+   "aliases": [
+    "reqMemoryPlan"
+   ],
+   "grounding": "reqMemoryPlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-requestmemoryplanbyclassscopedtype",
+   "canonical": "requestMemoryPlanByClassScopeDType (gateway memory-plan regrouping)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "requestMemoryPlanByClassScopeDType regroups a []agent.RequestMemoryDemand memory-plan slice by (class, scope, dtype) so the metrics render and observe paths can iterate stable rows.",
+   "distinction": "It is a PURE regrouping function over an already-built memory plan, not reqMemoryPlan (the live accumulator map it is called alongside) or requestMemoryPlanSnapshot (the existing snapshot-taking sibling).",
+   "distinct_from": [
+    "plan-reqmemoryplan",
+    "x-plan-requestmemoryplansnapshot"
+   ],
+   "aliases": [
+    "requestMemoryPlanByClassScopeDType"
+   ],
+   "grounding": "requestMemoryPlanByClassScopeDType",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-rotationnocandidatereason",
+   "canonical": "RotationNoCandidateReason (accounts closed reason vocabulary)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "RotationNoCandidateReason is the closed set of reasons (RotationOK, RotationEmptyPool, RotationOnlyBucket, RotationAllOthersWalled) a rotate decision explains itself with when no seat is returned.",
+   "distinction": "It is the CLOSED REASON TYPE the decision carries, not printRotationNoCandidate (the renderer that turns one reason value into an operator-facing message).",
+   "distinct_from": [
+    "plan-printrotationnocandidate"
+   ],
+   "aliases": [
+    "RotationNoCandidateReason"
+   ],
+   "grounding": "RotationNoCandidateReason",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-runresumeplan",
+   "canonical": "runResumePlan (fak resume plan subcommand)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "runResumePlan is the `fak resume plan` subcommand body: it parses resume facts, optionally grounds them on a real session image, and prints the ranked resume-path recommendation.",
+   "distinction": "It is the CLI entry point for `fak resume plan`, distinct from runToolResumePlan (the separate `fak check-tool-failure --resume` entry point) even though both eventually reach preflight.PlanResume.",
+   "distinct_from": [
+    "plan-runtoolresumeplan"
+   ],
+   "aliases": [
+    "runResumePlan"
+   ],
+   "grounding": "runResumePlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-runtoolresumeplan",
+   "canonical": "runToolResumePlan (check-tool-failure --resume subcommand)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "runToolResumePlan is the `fak check-tool-failure --resume` mode body, printing a resume recommendation for a failed-tool session instead of a bare failure report.",
+   "distinction": "It is the check-tool-failure entry point, distinct from runResumePlan (the standalone `fak resume plan` entry point) and from PlanResume (the shared preflight function both eventually call).",
+   "distinct_from": [
+    "plan-runresumeplan",
+    "plan-planresume"
+   ],
+   "aliases": [
+    "runToolResumePlan"
+   ],
+   "grounding": "runToolResumePlan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-sessionplannermu",
+   "canonical": "sessionPlannerMu (gateway session-planner map mutex)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "sessionPlannerMu is the gateway Server mutex serializing all reads and writes of the sessionPlanners map (mint, lookup, generational-reset eviction) across concurrent turns.",
+   "distinction": "It is the MUTEX guarding the map, not sessionPlanners (the map itself) or maxSessionPlanners (the capacity constant that triggers eviction under this lock).",
+   "distinct_from": [
+    "x-plan-sessionplanners",
+    "plan-maxsessionplanners"
+   ],
+   "aliases": [
+    "sessionPlannerMu"
+   ],
+   "grounding": "sessionPlannerMu",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-skillcandidate",
+   "canonical": "SkillCandidate (rsiloop proposed-skill promotion record)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "SkillCandidate is one proposed skill awaiting promotion: its name, the held SkillFixtureCorpus it must beat, and the truth-clean verdict PromoteSkill runs through shipgate.Evaluate before keep or revert.",
+   "distinction": "It is the PROPOSAL record fed into PromoteSkill, not CandidateScore/candidateMetric (the per-task and aggregate scores it carries) or SkillPromotion (the verdict PromoteSkill returns).",
+   "distinct_from": [
+    "plan-candidatemetric",
+    "plan-candidatescore"
+   ],
+   "aliases": [
+    "SkillCandidate"
+   ],
+   "grounding": "SkillCandidate",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-updateplan",
+   "canonical": "update_plan (isUpdatePlanTool low-info receipt filter)",
+   "family": "plan",
+   "kind": "config",
+   "definition": "update_plan (matched case-insensitively, also as functions.update_plan) is the tool-name string isUpdatePlanTool recognizes to filter a low-info \"Plan updated\" tool-result receipt out of livelock detection.",
+   "distinction": "It is a TOOL-NAME STRING LITERAL the livelock filter matches, not ExitPlanMode (the harness planning-mode tool name in the policy preset ladder) or fak's own internal cache-planning types such as BreakpointPlan.",
+   "distinct_from": [
+    "plan-exitplanmode"
+   ],
+   "aliases": [
+    "update_plan",
+    "isUpdatePlanTool"
+   ],
+   "grounding": "update_plan",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-planresume",
+   "canonical": "PlanResume (preflight advisory pre-resume rung)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "PlanResume runs the advisory pre-resume rung: it consumes resume.Plan for the strategy ranking and adds preflight-specific labelling (WARM-SPLICE, a fail-open budget reason) before returning a ResumeVerdict.",
+   "distinction": "It is the preflight FUNCTION that layers advisory labelling atop a resume.Plan ranking, not resume_plan (the existing tools/_registry/resume_plan.json fleet artifact of AUTO_RESUME rows) or runResumePlan/runToolResumePlan (the two CLI entry points that call it).",
+   "distinct_from": [
+    "x-goal25b-plan-resumeplan",
+    "plan-runresumeplan"
+   ],
+   "aliases": [
+    "PlanResume"
+   ],
+   "grounding": "PlanResume",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "plan-fitandplanserveggufexpertparallelpathondevice",
+   "canonical": "fitAndPlanServeGGUFExpertParallelPathOnDevice (serve EP-path fit-and-plan orchestrator)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "fitAndPlanServeGGUFExpertParallelPathOnDevice is the cmd/fak serve orchestrator that fits an expert-parallel GGUF model against one device topology (backend, rank count, context budget) and returns the compute.MemoryPlan `fak serve` uses to admit or refuse an EP launch.",
+   "distinction": "It is the EXPERT-PARALLEL serve-path orchestrator, distinct from its two path siblings fitAndPlanServeGGUFPathOnDevice (dense, single-device) and fitAndPlanServeGGUFCPUOffloadPathOnDevice (CPU-offload) in the same serve.go dispatch, and from ExpertParallelPerRankPlan (the compute-package per-rank MemoryPlan it wraps).",
+   "distinct_from": [
+    "x-plan-expertparallelperrankplan"
+   ],
+   "aliases": [
+    "fitAndPlanServeGGUFExpertParallelPathOnDevice"
+   ],
+   "grounding": "fitAndPlanServeGGUFExpertParallelPathOnDevice",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}

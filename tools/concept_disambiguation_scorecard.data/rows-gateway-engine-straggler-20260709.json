@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-new-scheduling-gateway",
+      "canonical": "NewSchedulingGateway (slot-scheduling decorator)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "NewSchedulingGateway(gw, sched) (internal/microagent/slotsched.go) wraps the ONE shared model Gateway with cooperative slot scheduling, so every model call routes through the Scheduler with a priority hook before it reaches the underlying gateway.",
+      "distinction": "Not the served API gateway (internal/gateway wire server) and not FAK_MAC_GATEWAY (a remote compute target) - this is an in-process DECORATOR constructor that fronts the shared Gateway with slot admission, opt-in behind the microagent Scheduler.",
+      "distinct_from": [
+        "gateway-engine-fak-mac-gateway"
+      ],
+      "aliases": [
+        "NewSchedulingGateway",
+        "SchedulingGateway"
+      ],
+      "grounding": "NewSchedulingGateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

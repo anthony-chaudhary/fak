@@ -1,0 +1,344 @@
+{
+ "rows": [
+  {
+   "id": "score-debt-cmd-conflation-scorecard",
+   "canonical": "cmdConflationScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func that implements `fak conflation-scorecard`, folding internal/conflationscore's findings into the shared scorecard control-pane payload.",
+   "distinction": "Scores CONFLATION debt (a value reported as measured/WITNESSED that is really only claimed) specifically - not any other cmd*Scorecard sibling verb, each of which folds a different internal package's findings.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-milestone-scorecard"
+   ],
+   "aliases": [
+    "cmdConflationScorecard",
+    "conflation-scorecard"
+   ],
+   "grounding": "cmdConflationScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-loopindex-scorecard",
+   "canonical": "cmdLoopIndexScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func that implements the agentic-coding loop-index scorecard: derives each loop stage's witness probes (orient/plan/act/verify/ship/learn) from the tracked tree and folds them into loopindex_debt via internal/loopindex.Score.",
+   "distinction": "Scores LOOP-INDEX stage-witness coverage across the orient-plan-act-verify-ship-learn stages - not milestone climb, not conflation provenance, not any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-conflation-scorecard"
+   ],
+   "aliases": [
+    "cmdLoopIndexScorecard",
+    "loop-index-scorecard"
+   ],
+   "grounding": "cmdLoopIndexScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-milestone-scorecard",
+   "canonical": "cmdMilestoneScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak milestone-scorecard` (issue #1444): folds the milestone report's maturity-CLIMB and epic-ROADMAP dimensions into a deterministic milestone_debt integer plus a worst-first retire worklist.",
+   "distinction": "Scores the milestone report's own climb+roadmap composite (milestone_debt) - distinct from internal/supportmaturityscore's support_maturity_debt, which it deliberately does not re-derive, and from any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-propagation-scorecard"
+   ],
+   "aliases": [
+    "cmdMilestoneScorecard",
+    "milestone-scorecard"
+   ],
+   "grounding": "cmdMilestoneScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-propagation-scorecard",
+   "canonical": "cmdPropagationScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak propagation-scorecard`: scores how far each proven scorecard convention (shared kernel, --compare, --markdown, ...) has fanned out across the whole scorecard family, via internal/propagationscore.",
+   "distinction": "Scores CONVENTION FAN-OUT across scorecards (a meta-scorecard about scorecards) - not any one scorecard's own debt, and not its sibling verb `fak propagation-debt-dispatch` (the fan-out ticketer defined in the same file).",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-milestone-scorecard"
+   ],
+   "aliases": [
+    "cmdPropagationScorecard",
+    "propagation-scorecard"
+   ],
+   "grounding": "cmdPropagationScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-repo-hygiene-scorecard",
+   "canonical": "cmdRepoHygieneScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak repo-hygiene-scorecard`: runs the repo-hygiene fold over the git-tracked tree and can print the hygiene-debt delta vs a prior baseline.",
+   "distinction": "The CLI command func itself - not the general repo-hygiene-scorecard concept row (the measurement surface it implements), and not any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "repo-hygiene-scorecard",
+    "score-debt-cmd-skill-effectiveness-scorecard"
+   ],
+   "aliases": [
+    "cmdRepoHygieneScorecard"
+   ],
+   "grounding": "cmdRepoHygieneScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-skill-effectiveness-scorecard",
+   "canonical": "cmdSkillEffectivenessScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak skill-effectiveness-scorecard`: uses the shared scorecardCmdSetup front-half plus collectSkillEffectivenessScorecard to fold skill-effectiveness findings into the control-pane payload.",
+   "distinction": "Scores SKILL EFFECTIVENESS (whether declared skills are actually used/working) - not repo hygiene, not SOTA coverage, not any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-sota-coverage-scorecard"
+   ],
+   "aliases": [
+    "cmdSkillEffectivenessScorecard"
+   ],
+   "grounding": "cmdSkillEffectivenessScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-sota-coverage-scorecard",
+   "canonical": "cmdSOTACoverageScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak sota-coverage-scorecard` (internal/sotacoverage): with `--check` exits nonzero when there is any HARD sota-debt, evaluated for freshness against a `--today` date.",
+   "distinction": "Scores SOTA-COVERAGE freshness debt - not support-maturity, not token-defaults, not any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-support-maturity-scorecard"
+   ],
+   "aliases": [
+    "cmdSOTACoverageScorecard"
+   ],
+   "grounding": "cmdSOTACoverageScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-support-maturity-scorecard",
+   "canonical": "cmdSupportMaturityScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak support-maturity-scorecard` (internal/supportmaturityscore): folds declared-target shortfall per hardware/regime cell and can regenerate the HARDWARE-MATRIX.md matrix block via `--write-doc`.",
+   "distinction": "Scores declared-target SUPPORT-MATURITY shortfall per regime cell - distinct from milestone-scorecard's climb (which deliberately does not re-derive this scale) and from any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-milestone-scorecard"
+   ],
+   "aliases": [
+    "cmdSupportMaturityScorecard"
+   ],
+   "grounding": "cmdSupportMaturityScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-cmd-token-defaults-scorecard",
+   "canonical": "cmdTokenDefaultsScorecard verb",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func for `fak token-defaults-scorecard`: derives every token-saving lever's on/off + witness state from entrypoint source (guard.go, serve.go, gateway Default* constants) and folds it into the token-defaults scorecard.",
+   "distinction": "Scores whether token-saving DEFAULTS are on out of the box and honestly witnessed - not SOTA coverage, not repo hygiene, not any sibling cmd*Scorecard verb.",
+   "distinct_from": [
+    "scorecard",
+    "score-debt-cmd-sota-coverage-scorecard"
+   ],
+   "aliases": [
+    "cmdTokenDefaultsScorecard"
+   ],
+   "grounding": "cmdTokenDefaultsScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-antipattern-debt",
+   "canonical": "antipattern_debt",
+   "family": "score-debt",
+   "kind": "metric",
+   "definition": "The headline corpus integer (corpus.antipattern_debt) that internal/antipattern.Fold emits: the total count of detected anti-pattern findings, folding REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC from three previously-siloed detectors into one registry.",
+   "distinction": "ONE specific scorecard's *_debt integer (anti-pattern findings) - not the generic per-scorecard *_debt integer pattern, and not unwired_debt, the narrower package-only oracle it folds in as one of its three inputs.",
+   "distinct_from": [
+    "per-scorecard *_debt integer",
+    "score-debt-unwired-debt"
+   ],
+   "aliases": [
+    "antipattern_debt",
+    "AntiPatternDebt"
+   ],
+   "grounding": "antipattern_debt",
+   "grounding_kind": "metric",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-debt-reason",
+   "canonical": "GenerationRow.DebtReason",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The string field on milestonereport.GenerationRow (copied forward into operatorbrief's per-generation lane row) that joins WHY a lane's DebtScore is nonzero - e.g. stale issues or missing witnesses - into one human-readable reason string.",
+   "distinction": "The REASON TEXT explaining a debt score - not DebtScore itself (the integer it explains), and not any scorecard's single *_debt corpus key.",
+   "distinct_from": [
+    "score-debt-debt-score",
+    "total-debt"
+   ],
+   "aliases": [
+    "DebtReason",
+    "debt_reason"
+   ],
+   "grounding": "DebtReason",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-debt-score",
+   "canonical": "GenerationRow.DebtScore",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The int field on milestonereport.GenerationRow, computed as StaleIssues + 3*MissingWitnesses + 2*UnpromotedBets + 2*LabelShipMismatches, then copied forward into operatorbrief's per-generation lane debt.",
+   "distinction": "A PER-GENERATION-ROW composite integer - not the *_debt corpus key any one scorecard folds (e.g. milestone_debt), and not DebtReason, the text explaining it.",
+   "distinct_from": [
+    "score-debt-debt-reason",
+    "total-debt"
+   ],
+   "aliases": [
+    "DebtScore",
+    "debt_score"
+   ],
+   "grounding": "DebtScore",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-kind-scorecard",
+   "canonical": "superloop.KindScorecard",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The internal/superloop MemberKind constant (value \"scorecard\") that tags a super-loop Member as a control-pane scorecard key, so the walk reads its status from the pinned baseline or a fresh run instead of a loop-health fold or a garden descend.",
+   "distinction": "One enum VALUE of MemberKind - not KindLoop, KindGarden, KindSuperloop, or KindSurface, the sibling member kinds declared in the same const block.",
+   "distinct_from": [
+    "scorecard"
+   ],
+   "aliases": [
+    "KindScorecard"
+   ],
+   "grounding": "KindScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-run-product-scorecard",
+   "canonical": "runProductScorecard",
+   "family": "score-debt",
+   "kind": "symbol",
+   "definition": "The cmd/fak Go func that implements the `fak product-scorecard` verb's body (invoked from main.go's product-scorecard dispatch and from score.go's \"product\" registry entry), taking stdout/stderr/argv and returning an exit code.",
+   "distinction": "The IMPL func for the product scorecard - not the productscorecard package's own pure build/fold core, and not any other cmd*Scorecard verb's run func.",
+   "distinct_from": [
+    "scorecard"
+   ],
+   "aliases": [
+    "runProductScorecard"
+   ],
+   "grounding": "runProductScorecard",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-scorecard-schema",
+   "canonical": "ScorecardSchema constant",
+   "family": "score-debt",
+   "kind": "config",
+   "definition": "The per-package Go string constant named ScorecardSchema (e.g. milestonereport.ScorecardSchema = \"fak-milestone-scorecard/1\", independently redeclared in internal/guardrsi and internal/issuefanout) that tags a scorecard.Payload with its control-pane schema id.",
+   "distinction": "The SCHEMA-ID constant on a payload - not DebtKey (the debt-integer key constant declared alongside it in the same files) and not the payload's runtime corpus map.",
+   "distinct_from": [
+    "scorecard"
+   ],
+   "aliases": [
+    "ScorecardSchema"
+   ],
+   "grounding": "ScorecardSchema",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "score-debt-unwired-debt",
+   "canonical": "unwired_debt",
+   "family": "score-debt",
+   "kind": "metric",
+   "definition": "The headline corpus integer (corpus.unwired_debt) that internal/unwiredscore.Build folds: a count of code-complete internal packages imported by no .go file, via the package-granularity oracle.",
+   "distinction": "The NARROW package-only orphan count - not antipattern_debt, which later folds unwired_debt's UNWIRED_PKG class as one of three inputs alongside REDUNDANT_REWORK and ORPHAN_FUNC.",
+   "distinct_from": [
+    "score-debt-antipattern-debt"
+   ],
+   "aliases": [
+    "unwired_debt",
+    "UnwiredDebt"
+   ],
+   "grounding": "unwired_debt",
+   "grounding_kind": "metric",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}

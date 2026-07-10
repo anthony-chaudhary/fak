@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "id": "x-attention-attentionneeded-taskgraph",
+      "canonical": "AttentionNeeded (taskgraph table)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The taskgraph.Table.AttentionNeeded bool field: true when any Task in the folded shared-task table carries a refusal finding, the one-bit gate a supervisor loop or CI keys on without re-scanning every task row.",
+      "distinction": "It is a SHARED-TASK rollup bit over refusal findings, not the toolproc process-table rollup bit (AttentionNeeded toolproc) and not the ML softmax token-mixer (Attention) despite sharing the 'attention' word.",
+      "distinct_from": [
+        "x-attention-attentionneeded-toolproc",
+        "Attention (softmax token-mixer)"
+      ],
+      "aliases": [
+        "AttentionNeeded",
+        "attention_needed"
+      ],
+      "grounding": "attentionneeded",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-attention-attentionneeded-toolproc",
+      "canonical": "AttentionNeeded (toolproc table)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The toolproc.Table.AttentionNeeded bool field: true when any finding across the kernel's tool-call process table advises more than plain observe, the one-bit gate a supervisor loop or CI keys on for tool-process health.",
+      "distinction": "It is a TOOL-PROCESS rollup bit over finding severity, a separate Go field from the taskgraph shared-task rollup bit (AttentionNeeded taskgraph) despite the identical field name and doc pattern.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [
+        "AttentionNeeded",
+        "attention_needed"
+      ],
+      "grounding": "attentionneeded",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-attention-cudadsasparseattncosinemin",
+      "canonical": "cudaDsaSparseAttnCosineMin (CUDA GLM-DSA accuracy gate)",
+      "family": "attention",
+      "kind": "config",
+      "definition": "internal/compute's recorded device-vs-cpuref-f32 cosine floor (0.999) for the GLM-MoE-DSA sparse-attention kernel k_dsa_sparse_attend, whose host side already selected the exact keys so the only drift source is f32 reduction order; the value RECORDS the contract threshold an out-of-tree CUDA-node witness checks and does not itself assert a pass.",
+      "distinction": "It is a CUDA-BACKEND accuracy-gate CONSTANT for one specific kernel (GLM-DSA sparse attend), not the SDPA scale-factor constant (attnScale) and not the host-side DSA key-stride layout constant (glmDsaAttentionKStride).",
+      "distinct_from": [
+        "attnScale (SDPA denominator)",
+        "glmDsaAttentionKStride (DSA key stride)"
+      ],
+      "aliases": [
+        "cudaDsaSparseAttnCosineMin"
+      ],
+      "grounding": "cudadsasparseattncosinemin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

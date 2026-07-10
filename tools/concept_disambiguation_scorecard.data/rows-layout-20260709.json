@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "x-layout-datelayout",
+      "canonical": "dateLayout (LiveCodeBench date format)",
+      "family": "layout",
+      "kind": "config",
+      "definition": "internal/livecodebench's package-level const dateLayout = \"2006-01-02\", the Go time.Parse/Format reference layout string every LiveCodeBench contest_date, date-window bound, and normalized date field is parsed and re-rendered against.",
+      "distinction": "It is a Go stdlib TIME-FORMAT layout string (how a date is spelled as text) for the livecodebench package only, not a tensor/KV-cache memory layout (Layout tensor, mlaKVLayout, standardKVLayout) despite sharing the word 'layout'.",
+      "distinct_from": [
+        "Layout (tensor)",
+        "mlaKVLayout (model)"
+      ],
+      "aliases": [
+        "dateLayout"
+      ],
+      "grounding": "datelayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

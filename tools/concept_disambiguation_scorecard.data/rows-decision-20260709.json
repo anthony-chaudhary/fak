@@ -1,0 +1,92 @@
+{
+  "rows": [
+    {
+      "id": "x-decision-decisiononly",
+      "canonical": "decision_only (provider action transport mode)",
+      "family": "decision",
+      "kind": "config",
+      "definition": "The default Mode value PlanProviderActionsWithOptions sets on ProviderActionTransport, declaring the provider vcache action plan is advisory-only until a witnessed heartbeat or explicit-cache transport proves byte-identical-prefix and provider deletion capability (the other mode is witnessed_transport).",
+      "distinction": "It is a TRANSPORT-READINESS mode string carried on the provider action plan (decision_only vs witnessed_transport), not a governor policy verdict like GovernorDecision or a vCache governor action label (ride_natural/heartbeat_pin/lazy_rebuild).",
+      "distinct_from": [
+        "GovernorDecision (vcachegov)",
+        "DecisionRideNatural / DecisionHeartbeatPin / DecisionLazyRebuild (vCache governor actions)"
+      ],
+      "aliases": [
+        "decision_only",
+        "decisionOnly"
+      ],
+      "grounding": "decision_only",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-drivedecision",
+      "canonical": "DriveDecision (superloop)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The single worst-first WorkItem superloop.Drive selects to enter for this invocation: a pure fold over a completed WalkReport carrying Enter, the chosen Member, its Rank (always 1), Action hint, and Satisfied/IssueShortfall so a caller's exit check reads clean only when the walk is truly met.",
+      "distinction": "It is the super loop's PER-INVOCATION worst-first selection over member work, not the dispatcher's per-issue routing tier pick (TierDecision) nor an account-pool rotation pick (NextRotationDecision).",
+      "distinct_from": [
+        "x-decision-tierdecision",
+        "x-decision-nextrotationdecision"
+      ],
+      "aliases": [
+        "DriveDecision",
+        "driveDecision"
+      ],
+      "grounding": "drivedecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-nextrotationdecision",
+      "canonical": "NextRotationDecision (accounts rotation)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The Registry method behind account rotation that returns the full RotationDecision (chosen Seat, OK, and a closed Reason distinguishing an empty pool from a single-bucket pool from an all-others-walled pool, plus the anchor's own room state) so a caller can explain WHY rotation found nothing instead of recomputing the plan.",
+      "distinction": "It is the account-pool ROTATION pick with a self-explaining refusal reason, not the super loop's worklist selection (DriveDecision) nor the gateway's guardroute request-routing pick (RouteDecision).",
+      "distinct_from": [
+        "x-decision-drivedecision",
+        "RouteDecision (guardroute)"
+      ],
+      "aliases": [
+        "NextRotationDecision",
+        "nextRotationDecision"
+      ],
+      "grounding": "nextrotationdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-tierdecision",
+      "canonical": "TierDecision (issuecost calibration)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "One routing decision the dispatcher made for an issue (Issue, Chosen tier, Required risk floor, Optimal fit) that Calibrate joins against a WitnessedOutcome to classify over-tier versus under-tier dispatch calibration.",
+      "distinction": "It is the CALIBRATION record joining a dispatched tier choice to its later witnessed outcome, not the session decision-log renderer package (taskdecision) nor the super loop's worklist pick (DriveDecision).",
+      "distinct_from": [
+        "taskdecision",
+        "x-decision-drivedecision"
+      ],
+      "aliases": [
+        "TierDecision",
+        "tierDecision"
+      ],
+      "grounding": "tierdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

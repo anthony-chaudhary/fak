@@ -1,0 +1,356 @@
+{
+ "rows": [
+  {
+   "id": "policy-capability-adjoutcome-denyall",
+   "canonical": "adjudicationOutcomeDenyAll (gateway)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "gateway.adjudicationOutcomeSignal enum value meaning EVERY proposed tool call in a served turn was denied by adjudication, so no call survived to be executed or served back to the model.",
+   "distinction": "It is the ALL-DENIED classification a served turn folds to - NOT the partial case, where some calls were kept - unlike adjudicationOutcomeToolFeedback, which fires when at least one call survives.",
+   "distinct_from": [
+    "policy-capability-adjoutcome-toolfeedback",
+    "ToolAdjudication (gateway)"
+   ],
+   "aliases": [],
+   "grounding": "adjudicationOutcomeDenyAll",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "policy-capability-adjoutcome-signal",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-adjoutcome-forturn",
+   "canonical": "adjudicationOutcomeForTurn (gateway)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "gateway.adjudicationOutcomeForTurn is the pure classifier function that folds one served turn's []ToolAdjudication plus its kept/served call counts into a single adjudicationOutcomeSignal.",
+   "distinction": "It is the FUNCTION that computes the outcome, not the enum value it returns - unlike adjudicationOutcomeSignal, the type of the value it produces.",
+   "distinct_from": [
+    "policy-capability-adjoutcome-signal",
+    "AdjudicationSummary (gateway)"
+   ],
+   "aliases": [],
+   "grounding": "adjudicationOutcomeForTurn",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-adjoutcome-signal",
+   "canonical": "adjudicationOutcomeSignal (gateway)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "gateway.adjudicationOutcomeSignal is the int-enum TYPE (reset / deny-all / tool-feedback) that classifies a served turn's overall adjudication shape for the exit-summary counters.",
+   "distinction": "It is the ENUM TYPE itself, not the fold that produces a value of it - unlike adjudicationOutcomeForTurn, the function that classifies one turn into this type.",
+   "distinct_from": [
+    "policy-capability-adjoutcome-forturn",
+    "ToolAdjudication (gateway)"
+   ],
+   "aliases": [],
+   "grounding": "adjudicationOutcomeSignal",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-adjoutcome-toolfeedback",
+   "canonical": "adjudicationOutcomeToolFeedback (gateway)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "gateway.adjudicationOutcomeSignal enum value meaning some proposed calls were denied but at least one call was kept and served, so the model receives real tool-result feedback this turn.",
+   "distinction": "It is the PARTIAL-deny outcome - NOT the all-denied case - unlike adjudicationOutcomeDenyAll, where nothing survived to serve.",
+   "distinct_from": [
+    "policy-capability-adjoutcome-denyall",
+    "policy-capability-adjoutcome-signal"
+   ],
+   "aliases": [],
+   "grounding": "adjudicationOutcomeToolFeedback",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "policy-capability-adjoutcome-signal",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-ci-preflight",
+   "canonical": "ci-preflight (cmd)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "`fak ci-preflight` (cmd/fak ci_preflight.go, cmdCIPreflight/runCIPreflight) archives the COMMITTED trunk tip to a throwaway checkout and answers whether it is gofmt-clean and build-green, immune to the peer-dirty shared working tree.",
+   "distinction": "It checks the git TIP's build health, not whether a dispatch worker may spawn or one tool call is admitted - unlike DispatchPreflight (dispatch admission) and the preflight ladder (per-call schema checks).",
+   "distinct_from": [
+    "DispatchPreflight (dispatch admission)",
+    "preflight-ladder"
+   ],
+   "aliases": [
+    "cmdCIPreflight",
+    "runCIPreflight",
+    "ci-preflight"
+   ],
+   "grounding": "cmdCIPreflight",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-evaluate-preflight",
+   "canonical": "EvaluatePreflight (dispatchtick)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "dispatchtick.EvaluatePreflight is the pure fold (state in, PreflightResult out) over a PreflightInput - max-workers, dos target, host capacity, seat-pool terms - that decides whether dispatch may admit another worker this tick.",
+   "distinction": "It is the PURE decision fold dispatch admission calls each tick, not the git-tip build-health check (ci-preflight) or livecodebench's own host-state observation (PreflightProbe).",
+   "distinct_from": [
+    "policy-capability-ci-preflight",
+    "policy-capability-preflight-probe"
+   ],
+   "aliases": [],
+   "grounding": "EvaluatePreflight",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-kv-evict-policy",
+   "canonical": "KVEvictPolicy (compute)",
+   "family": "policy-capability",
+   "kind": "config",
+   "definition": "compute.KVEvictPolicy is the enum (KVEvictLRU / KVEvictCostAware) selecting which victim-ranking policy ReplayKVCache and the offline KV-replay tooling simulate when replaying recorded KV events against a token budget.",
+   "distinction": "It is the OFFLINE replay/simulation eviction policy compute scores admission decisions against, not radixkv's live EvictionPolicy the running server actually enforces - unlike PolicyEvictions (radixkv), the counter for the live tree's policy-driven drops.",
+   "distinct_from": [
+    "PolicyEvictions (radixkv)"
+   ],
+   "aliases": [
+    "KVEvictLRU",
+    "KVEvictCostAware"
+   ],
+   "grounding": "KVEvictPolicy",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-policy-bytes",
+   "canonical": "policyBytes (cmd guard startup)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "cmd/fak's policyBytes is the raw JSON byte slice of the guard's admission-policy file (or the embedded default) read at guard startup, before policy.ParseRuntime compiles it and guardPolicyDigest hashes it.",
+   "distinction": "It is the RAW on-disk bytes captured at read time, not the digest computed from them or the compiled decision table - unlike PolicyDigest (guard spawn provenance), the hash of these same bytes, and Policy (loaded), the compiled table.",
+   "distinct_from": [
+    "PolicyDigest (guard spawn provenance)",
+    "policy-loaded"
+   ],
+   "aliases": [],
+   "grounding": "policyBytes",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-posture-warmhit",
+   "canonical": "PostureWarmHit (resume)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "resume.PostureWarmHit (\"warm_hit\") is the Posture enum value for a CROSS-SESSION warm hit (#940) - a resume that opened straight onto a warm cache carried over from a PRIOR session, not merely warm within the current one.",
+   "distinction": "It is a resume-cache readiness value, not the tool-admission default-deny posture or the adjudicator's secret-discovery posture - unlike posture (tool admission) and SecretPosture (adjudicator), which govern call/result admission, not cache warmth.",
+   "distinct_from": [
+    "posture",
+    "SecretPosture (adjudicator)"
+   ],
+   "aliases": [],
+   "grounding": "PostureWarmHit",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-preflight-paths",
+   "canonical": "preflightPaths (qwen36nodereports)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "qwen36nodereports's preflightPaths is the glob-matched list of already-written `preflight-*.json` report file paths discovered under a node's report directory, used to detect whether a preflight report exists at all.",
+   "distinction": "It is a discovered list of FILESYSTEM PATHS to past preflight artifacts, not the in-memory verdict structs a preflight check produces live - unlike PreflightResult (dispatchtick) and PreflightProbe (livecodebench).",
+   "distinct_from": [
+    "policy-capability-preflight-result",
+    "policy-capability-preflight-probe"
+   ],
+   "aliases": [],
+   "grounding": "preflightPaths",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-preflight-probe",
+   "canonical": "PreflightProbe (livecodebench)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "livecodebench.PreflightProbe is the observed host state (uv, python, dataset, gateway, sandbox availability) that cmd/livecodebench's preflight build folds into a human-readable readiness report before a run starts.",
+   "distinction": "It is livecodebench's OWN host-capability observation, unrelated to dispatch's worker-admission fold - unlike EvaluatePreflight (dispatchtick), which decides whether a new worker may spawn this tick.",
+   "distinct_from": [
+    "policy-capability-evaluate-preflight"
+   ],
+   "aliases": [],
+   "grounding": "PreflightProbe",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-preflight-result",
+   "canonical": "PreflightResult (dispatchtick)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "dispatchtick.PreflightResult is the struct EvaluatePreflight returns - the dispatch tick's admission verdict, spawn-allowed count, blocking reasons, and host-capacity components (its Map() renders it for logging/JSON).",
+   "distinction": "It is the STRUCTURED verdict WITH components dispatchtick computes locally, not dispatchsweep's PreflightVerdict, a plain recorded string field on a trial/status row.",
+   "distinct_from": [
+    "PreflightVerdict (dispatch sweep admission result)",
+    "policy-capability-evaluate-preflight"
+   ],
+   "aliases": [],
+   "grounding": "PreflightResult",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-prepend-adjudication-note",
+   "canonical": "prependAdjudicationContentNote (gateway)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "gateway.prependAdjudicationContentNote takes adjudicationNote's short prose summary of a turn's denies/repairs and splices it onto the front of the assistant message's Content before the response reaches a client that only reads the content channel.",
+   "distinction": "It SPLICES the note into the returned message body, it does not compose the note text itself - unlike adjudicationNote (gateway), the renderer whose output it prepends.",
+   "distinct_from": [
+    "adjudicationNote (gateway)",
+    "ToolAdjudication (gateway)"
+   ],
+   "aliases": [],
+   "grounding": "prependAdjudicationContentNote",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-restart-policy",
+   "canonical": "RestartPolicy (loopmgr)",
+   "family": "policy-capability",
+   "kind": "config",
+   "definition": "loopmgr.RestartPolicy is the pure crashloop fence (MaxAttempts, BaseDelay, MaxDelay, ResetAfter) whose Decide/BackoffDelay methods govern a supervised loop's automatic restart/backoff scheduling, reused by cmd/fak's watchdog as watchdogRestartPolicy.",
+   "distinction": "It governs PROCESS-SUPERVISION backoff after a crash, not tool-call authorization - unlike Policy (loaded) and DefaultPolicy (adjudicator), which decide whether a tool call is allowed.",
+   "distinct_from": [
+    "policy-loaded",
+    "DefaultPolicy (adjudicator)"
+   ],
+   "aliases": [
+    "watchdogRestartPolicy"
+   ],
+   "grounding": "RestartPolicy",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-secret-policy-accessor",
+   "canonical": "SecretPolicy (adjudicator accessor)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "(*Adjudicator).SecretPolicy is the accessor method that returns the adjudicator's currently active SecretPosture value plus its declared secret-detection regex patterns, read under the policy RLock; normgate and secretgate call it at admit time.",
+   "distinction": "It is the ACCESSOR METHOD returning the posture plus patterns, not the SecretPosture enum value it returns - unlike SecretPosture (adjudicator) - and it is a different domain than RestartPolicy (loopmgr), an unrelated process-supervision policy.",
+   "distinct_from": [
+    "SecretPosture (adjudicator)",
+    "policy-capability-restart-policy"
+   ],
+   "aliases": [],
+   "grounding": "SecretPolicy",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-test-suite-policy",
+   "canonical": "TestTestSuitePolicy (boundarylint)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "boundarylint.TestTestSuitePolicy is the enforcement test (a ratchet: only a tell in a file NOT yet grandfathered fails) that walks the repo's test-suite naming/shape family and is reported by `fak boundary`.",
+   "distinction": "It is the ENFORCEMENT gate over the TEST-SUITE naming/shape family, not a tool-admission or capability policy - unlike Policy (loaded) and RestartPolicy (loopmgr), which govern unrelated domains.",
+   "distinct_from": [
+    "policy-loaded",
+    "policy-capability-restart-policy"
+   ],
+   "aliases": [],
+   "grounding": "TestTestSuitePolicy",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-t-policy",
+   "canonical": "tPolicy (cmd guard/serve timer)",
+   "family": "policy-capability",
+   "kind": "symbol",
+   "definition": "cmd/fak's tPolicy is a time.Now() checkpoint captured immediately before a guard/serve entrypoint (guard_setup.go, guard_startup.go, serve.go) loads and parses its admission policy, later subtracted (time.Since(tPolicy)) to report the policy-load stage duration.",
+   "distinction": "It is a WALL-CLOCK TIMING checkpoint local variable, not a policy value or struct field - unlike policyBytes, the bytes it times the read of, and radixkv's t.policy field (the tree's live eviction policy), an unrelated receiver-scoped field that happens to normalize to the same token.",
+   "distinct_from": [
+    "policy-capability-policy-bytes",
+    "policy-loaded"
+   ],
+   "aliases": [],
+   "grounding": "tPolicy",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "policy-capability-unadjudicated",
+   "canonical": "unadjudicated (executor / raw-arm)",
+   "family": "policy-capability",
+   "kind": "concept",
+   "definition": "\"unadjudicated\" names an executor or call path that runs WITHOUT going through the adjudicator at all - microagent's toolexec registry refuses (#2018) to ever hand back a bare unadjudicated executor, while livecodebench's raw-arm gateway calls are deliberately run UNADJUDICATED to collect an un-gated baseline.",
+   "distinction": "It describes the ABSENCE of adjudication on a call path, not a verdict the adjudicator returns - unlike verdict (abi.Verdict) and reason code, which describe what happens once a call IS adjudicated.",
+   "distinct_from": [
+    "verdict",
+    "reason-code",
+    "adjudicator"
+   ],
+   "aliases": [
+    "UNADJUDICATED"
+   ],
+   "grounding": "unadjudicated",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}
