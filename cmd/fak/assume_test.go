@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -185,6 +188,45 @@ func TestAssumeKernelLoopTriState(t *testing.T) {
 		if err != nil || code != 1 {
 			t.Fatalf("refusing verdict %q mapped to (code=%d, err=%v), want the witnessed-refute exit 1", verdict, code, err)
 		}
+	}
+}
+
+// TestAssumeCheckConfigDirSeedEndToEnd proves the wired config-flag seed's WHOLE
+// path — registry Lookup -> name-resolved driver dispatch -> os.Stat witness ->
+// kernel verdict -> exit code — against a hermetic temp registry, both ways: a
+// seat whose config dir exists HOLDS (exit 0), and a seat whose dir vanished is
+// VIOLATED (exit 3) with the SEAT_CONFIG_DIR_MISSING refusal token surfaced.
+// This is the #3821 acceptance capture as a regression test: a REAL witnessed
+// outcome from a driver, never an UNVERIFIABLE fallthrough.
+func TestAssumeCheckConfigDirSeedEndToEnd(t *testing.T) {
+	tmp := t.TempDir()
+	presentDir := filepath.Join(tmp, "seat-present")
+	if err := os.MkdirAll(presentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ghostDir := filepath.Join(tmp, "seat-vanished")
+	registry := filepath.Join(tmp, "registry.json")
+	body := fmt.Sprintf(`{"version":"fak-config-homes/v1","homes":[{"name":"present","dir":%q},{"name":"ghost","dir":%q}]}`,
+		filepath.ToSlash(presentDir), filepath.ToSlash(ghostDir))
+	if err := os.WriteFile(registry, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errBuf bytes.Buffer
+	code := runAssume(&out, &errBuf, []string{"check", "seat-config-dir-present", "--registry", registry, "--home", tmp, "--seat", "present"})
+	if code != 0 || !strings.Contains(out.String(), string(assumecheck.OutcomeHolds)) {
+		t.Fatalf("present config dir: exit=%d (stderr=%q), want 0 HOLDS:\n%s", code, errBuf.String(), out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runAssume(&out, &errBuf, []string{"check", "seat-config-dir-present", "--registry", registry, "--home", tmp})
+	if code != 3 || !strings.Contains(out.String(), string(assumecheck.OutcomeViolated)) {
+		t.Fatalf("vanished config dir: exit=%d (stderr=%q), want 3 VIOLATED:\n%s", code, errBuf.String(), out.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "ghost") || !strings.Contains(s, "SEAT_CONFIG_DIR_MISSING") {
+		t.Fatalf("VIOLATED report neither names the pruned seat nor carries the refusal token:\n%s", s)
 	}
 }
 
