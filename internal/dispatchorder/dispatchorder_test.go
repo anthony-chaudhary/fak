@@ -276,6 +276,179 @@ func TestCollisionPricedFanoutUnknownTreeCollidesConservatively(t *testing.T) {
 	}
 }
 
+// TestPreferOldestCollisionAdmissionAdmitsOlder is the #3594 headline: under PreferOldest, when a
+// collision forces one of two overlapping workers to serialize, the OLDER unit is admitted and the
+// FRESHER one is priced collision_risk — the exact inverse of the default freshest-first admission
+// (TestCollisionPricedFanoutSerializesExclusiveOverlapBeforeLaunch). Without this, PreferOldest
+// reorders Keep only for the admission step to re-starve the longest-waiting unit it rescued.
+func TestPreferOldestCollisionAdmissionAdmitsOlder(t *testing.T) {
+	r := Plan(Input{NowUnix: base, PreferOldest: true, Candidates: []Candidate{
+		{ID: "gateway-old", Key: "A", Lane: "gateway", Tree: []string{"internal/gateway/**"}, CreatedUnix: base - 900, UpdatedUnix: base - 300},
+		{ID: "gateway-fresh", Key: "B", Lane: "gateway", Tree: []string{"internal/gateway/http.go"}, CreatedUnix: base - 100, UpdatedUnix: base - 100},
+		{ID: "docs", Key: "C", Lane: "docs", Tree: []string{"docs/**"}, CreatedUnix: base - 500, UpdatedUnix: base - 200},
+	}})
+
+	if r.KeepCount != 2 || r.CollisionCount != 1 {
+		t.Fatalf("counts = keep %d collision %d, want 2/1", r.KeepCount, r.CollisionCount)
+	}
+	if dispoOf(r, "gateway-old") != DispKeep || dispoOf(r, "docs") != DispKeep {
+		t.Fatalf("safe set dispositions: gateway-old=%q docs=%q, want keep/keep",
+			dispoOf(r, "gateway-old"), dispoOf(r, "docs"))
+	}
+	if dispoOf(r, "gateway-fresh") != DispCollisionRisk {
+		t.Fatalf("gateway-fresh disposition = %q, want collision_risk (the fresher unit serializes under PreferOldest)",
+			dispoOf(r, "gateway-fresh"))
+	}
+	want := []string{"gateway-old", "docs"} // oldest-created first
+	for i, id := range want {
+		if r.Keep[i] != id {
+			t.Errorf("keep[%d] = %q, want %q (oldest-first admission)", i, r.Keep[i], id)
+		}
+	}
+}
+
+// TestMaxSafeSetTieBreaksTowardAdmissionOrder pins the property applyCollisionPrice relies on
+// (#3594): when two same-size safe subsets compete ({old} vs {fresh} across one collision edge),
+// maxSafeSet admits the candidate EARLIER in cands — the caller's admission sort (freshest-first
+// by default, oldest-first under PreferOldest) is the tie-break, not a hardcoded recency rule.
+func TestMaxSafeSetTieBreaksTowardAdmissionOrder(t *testing.T) {
+	old := Ranked{Candidate: Candidate{ID: "old", CreatedUnix: base - 900, UpdatedUnix: base - 900}}
+	fresh := Ranked{Candidate: Candidate{ID: "fresh", CreatedUnix: base - 10, UpdatedUnix: base - 10}}
+	edge := []Collision{{A: "old", B: "fresh", Reason: ReasonCollisionRisk}}
+
+	def := maxSafeSet([]Ranked{fresh, old}, edge) // freshest-first admission order (the default)
+	if !def["fresh"] || def["old"] {
+		t.Errorf("freshest-first order: safe = %v, want fresh admitted / old serialized", def)
+	}
+	aged := maxSafeSet([]Ranked{old, fresh}, edge) // oldest-first admission order (PreferOldest)
+	if !aged["old"] || aged["fresh"] {
+		t.Errorf("oldest-first order: safe = %v, want old admitted / fresh serialized", aged)
+	}
+}
+
+// defaultCollisionAdmissionGolden pins the DEFAULT (no PreferOldest) collision admission
+// byte-for-byte (#3594): freshest-first — the fresher gateway worker is kept, the older
+// serialized — exactly as before the PreferOldest-aware admission landed. The CreatedUnix values
+// are chosen so an accidental oldest-first default would flip the safe set and break this golden.
+// Regenerate ONLY when an intentional default-admission change lands.
+const defaultCollisionAdmissionGolden = `
+{
+  "order": [
+    {
+      "id": "gateway-fresh",
+      "key": "B",
+      "lane": "gateway",
+      "tree": [
+        "internal/gateway/http.go"
+      ],
+      "created_unix": 999900,
+      "updated_unix": 999900,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "keep",
+      "reason": "freshest",
+      "recency": 999900,
+      "rank": 0
+    },
+    {
+      "id": "docs",
+      "key": "C",
+      "lane": "docs",
+      "tree": [
+        "docs/**"
+      ],
+      "created_unix": 999500,
+      "updated_unix": 999800,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "keep",
+      "reason": "freshest",
+      "recency": 999800,
+      "rank": 1
+    },
+    {
+      "id": "gateway-old",
+      "key": "A",
+      "lane": "gateway",
+      "tree": [
+        "internal/gateway/**"
+      ],
+      "created_unix": 999100,
+      "updated_unix": 999700,
+      "last_attempt_unix": 0,
+      "live": false,
+      "disposition": "collision_risk",
+      "reason": "COLLISION_RISK",
+      "collides_with": [
+        "gateway-fresh"
+      ],
+      "recency": 999700,
+      "rank": -1
+    }
+  ],
+  "keep": [
+    "gateway-fresh",
+    "docs"
+  ],
+  "keep_count": 2,
+  "superseded_count": 0,
+  "live_count": 0,
+  "cooling_count": 0,
+  "collision_count": 1,
+  "generation_held_count": 0,
+  "collisions": [
+    {
+      "a": "gateway-old",
+      "b": "gateway-fresh",
+      "reason": "COLLISION_RISK",
+      "lane": [
+        "gateway",
+        "gateway"
+      ]
+    }
+  ],
+  "repartition": [
+    {
+      "candidate": "gateway-old",
+      "lane": "gateway",
+      "collides_with": [
+        "gateway-fresh"
+      ],
+      "current_tree": [
+        "internal/gateway"
+      ],
+      "action": "narrow_to_issue_paths",
+      "reason": "COLLISION_RISK",
+      "detail": "replace the broad lane tree with path-confirmed issue paths, then re-price"
+    }
+  ],
+  "collisions_avoided": 1,
+  "lanes_utilized": 2,
+  "serialization_wasted": 1,
+  "safe_concurrency": 2
+}`
+
+// TestDefaultCollisionAdmissionByteIdentical: the same candidate set as the PreferOldest headline
+// test, with the flag OFF, serializes byte-identically to the pinned pre-#3594 default — the
+// additive-no-regression witness for the admission change.
+func TestDefaultCollisionAdmissionByteIdentical(t *testing.T) {
+	in := Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "gateway-old", Key: "A", Lane: "gateway", Tree: []string{"internal/gateway/**"}, CreatedUnix: base - 900, UpdatedUnix: base - 300},
+		{ID: "gateway-fresh", Key: "B", Lane: "gateway", Tree: []string{"internal/gateway/http.go"}, CreatedUnix: base - 100, UpdatedUnix: base - 100},
+		{ID: "docs", Key: "C", Lane: "docs", Tree: []string{"docs/**"}, CreatedUnix: base - 500, UpdatedUnix: base - 200},
+	}}
+	got, err := json.MarshalIndent(Plan(in), "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	gotStr := strings.TrimSpace(string(got))
+	want := strings.TrimSpace(strings.ReplaceAll(defaultCollisionAdmissionGolden, "\r\n", "\n"))
+	if gotStr != want {
+		t.Fatalf("default collision admission drifted from the pinned golden.\n--- got ---\n%s\n--- want ---\n%s",
+			gotStr, want)
+	}
+}
+
 func TestGenerationDefaultWindowHoldsLaterHorizons(t *testing.T) {
 	tests := []struct {
 		generation string

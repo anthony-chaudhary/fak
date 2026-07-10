@@ -336,7 +336,7 @@ func Plan(in Input) Result {
 
 	collisions := priceFanout(ranked)
 	if len(collisions) > 0 {
-		applyCollisionPrice(ranked, collisions)
+		applyCollisionPrice(ranked, collisions, in.PreferOldest)
 	}
 
 	// Order: DispKeep first by recency (freshest-first), then the rest by recency, stable and
@@ -523,7 +523,13 @@ func priceFanout(ranked []Ranked) []Collision {
 	return collisions
 }
 
-func applyCollisionPrice(ranked []Ranked, collisions []Collision) {
+// applyCollisionPrice serializes the colliding losers: the kept units are sorted into the same
+// fairness order the final dispatch sort uses (freshest-first, or oldest-first under
+// Input.PreferOldest), and maxSafeSet admits from that order — so the safe set agrees with the
+// caller's declared fairness policy instead of always favoring the fresher unit. Without this,
+// PreferOldest ranks the oldest unit first only for maxSafeSet to serialize it behind a fresher
+// collider, starving the backlog item the flag exists to drain.
+func applyCollisionPrice(ranked []Ranked, collisions []Collision, preferOldest bool) {
 	collides := make(map[string][]string)
 	for _, c := range collisions {
 		collides[c.A] = append(collides[c.A], c.B)
@@ -536,7 +542,11 @@ func applyCollisionPrice(ranked []Ranked, collisions []Collision) {
 			keep = append(keep, r)
 		}
 	}
-	sort.SliceStable(keep, func(i, j int) bool { return moreRecent(keep[i], keep[j]) })
+	admitFirst := moreRecent
+	if preferOldest {
+		admitFirst = olderFirst
+	}
+	sort.SliceStable(keep, func(i, j int) bool { return admitFirst(keep[i], keep[j]) })
 	safe := maxSafeSet(keep, collisions)
 	for i := range ranked {
 		if ranked[i].Disposition != DispKeep {
@@ -647,10 +657,13 @@ func computeRepartition(r Ranked, peers, overlap []string) RepartitionAdvice {
 	}
 }
 
-// maxSafeSet returns the largest collision-free subset for normal fan-out widths, preferring
-// fresher candidates when several subsets have the same size. Very large candidate lists fall
-// back to the same deterministic freshest-first admission rule so a planning helper never turns
-// one issue-lane backlog into an exponential search.
+// maxSafeSet returns the largest collision-free subset for normal fan-out widths. When several
+// subsets have the same size, ties break toward candidates EARLIER in cands — the caller's
+// admission order (freshest-first by default, oldest-first under PreferOldest), because the DFS
+// explores include-before-exclude in position order and only a strictly larger subset replaces
+// the best. Very large candidate lists fall back to the same deterministic position-order
+// admission rule so a planning helper never turns one issue-lane backlog into an exponential
+// search.
 func maxSafeSet(cands []Ranked, collisions []Collision) map[string]bool {
 	n := len(cands)
 	graph := make(map[string]map[string]bool, len(cands))
