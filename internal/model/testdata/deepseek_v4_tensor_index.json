@@ -1,0 +1,60 @@
+{
+  "model": "deepseek-ai/DeepSeek-V4-Pro",
+  "note": "SYNTHETIC, metadata-only V4 tensor index for the #3019 FP4 admission witness. Tensor names follow the canonical HuggingFace safetensors convention; NO weights are present, only names/dtypes/shapes. dtypes model V4's mixed checkpoint: routed MoE experts and the attention indexer QK path are FP4 (F4_E2M1 / NVFP4), most other weights are FP8 (F8_E4M3), norms/embeddings/biases are kept high precision. The mtp.* (speculative-decode head) and model.visual.* (multimodal tower) tensors are the families the loader drops at load (skipLoadTensor); the admission gate SKIPs them rather than admitting or refusing them. Shapes are illustrative, not the real V4-Pro dimensions.",
+  "quantization_config": {
+    "quant_method": "nvfp4",
+    "fp4_tensor_classes": ["routed_experts", "indexer_qk"],
+    "fp8_tensor_classes": ["attention", "shared_experts", "router", "dense_ffn", "head"]
+  },
+  "tensors": [
+    {"name": "model.embed_tokens.weight", "dtype": "BF16", "shape": [129280, 7168]},
+
+    {"name": "model.layers.0.input_layernorm.weight", "dtype": "F32", "shape": [7168]},
+    {"name": "model.layers.0.post_attention_layernorm.weight", "dtype": "F32", "shape": [7168]},
+    {"name": "model.layers.0.self_attn.q_a_proj.weight", "dtype": "F8_E4M3", "shape": [1536, 7168]},
+    {"name": "model.layers.0.self_attn.q_a_layernorm.weight", "dtype": "F32", "shape": [1536]},
+    {"name": "model.layers.0.self_attn.q_b_proj.weight", "dtype": "F8_E4M3", "shape": [24576, 1536]},
+    {"name": "model.layers.0.self_attn.kv_a_proj_with_mqa.weight", "dtype": "F8_E4M3", "shape": [576, 7168]},
+    {"name": "model.layers.0.self_attn.kv_a_layernorm.weight", "dtype": "F32", "shape": [512]},
+    {"name": "model.layers.0.self_attn.kv_b_proj.weight", "dtype": "F8_E4M3", "shape": [32768, 512]},
+    {"name": "model.layers.0.self_attn.o_proj.weight", "dtype": "F8_E4M3", "shape": [7168, 16384]},
+    {"name": "model.layers.0.self_attn.indexer.wq_b.weight", "dtype": "F4_E2M1", "shape": [1536, 1536]},
+    {"name": "model.layers.0.self_attn.indexer.wk.weight", "dtype": "F4_E2M1", "shape": [128, 7168]},
+    {"name": "model.layers.0.self_attn.indexer.weights_proj.weight", "dtype": "F4_E2M1", "shape": [64, 7168]},
+    {"name": "model.layers.0.self_attn.indexer.k_norm.weight", "dtype": "F32", "shape": [128]},
+    {"name": "model.layers.0.mlp.gate_proj.weight", "dtype": "F8_E4M3", "shape": [18432, 7168]},
+    {"name": "model.layers.0.mlp.up_proj.weight", "dtype": "F8_E4M3", "shape": [18432, 7168]},
+    {"name": "model.layers.0.mlp.down_proj.weight", "dtype": "F8_E4M3", "shape": [7168, 18432]},
+
+    {"name": "model.layers.3.input_layernorm.weight", "dtype": "F32", "shape": [7168]},
+    {"name": "model.layers.3.post_attention_layernorm.weight", "dtype": "F32", "shape": [7168]},
+    {"name": "model.layers.3.self_attn.q_a_proj.weight", "dtype": "F8_E4M3", "shape": [1536, 7168]},
+    {"name": "model.layers.3.self_attn.q_b_proj.weight", "dtype": "F8_E4M3", "shape": [24576, 1536]},
+    {"name": "model.layers.3.self_attn.kv_a_proj_with_mqa.weight", "dtype": "F8_E4M3", "shape": [576, 7168]},
+    {"name": "model.layers.3.self_attn.kv_b_proj.weight", "dtype": "F8_E4M3", "shape": [32768, 512]},
+    {"name": "model.layers.3.self_attn.o_proj.weight", "dtype": "F8_E4M3", "shape": [7168, 16384]},
+    {"name": "model.layers.3.self_attn.indexer.wq_b.weight", "dtype": "F4_E2M1", "shape": [1536, 1536]},
+    {"name": "model.layers.3.self_attn.indexer.wk.weight", "dtype": "F4_E2M1", "shape": [128, 7168]},
+    {"name": "model.layers.3.self_attn.indexer.k_norm.weight", "dtype": "F32", "shape": [128]},
+    {"name": "model.layers.3.mlp.gate.weight", "dtype": "F8_E4M3", "shape": [256, 7168]},
+    {"name": "model.layers.3.mlp.gate.e_score_correction_bias", "dtype": "F32", "shape": [256]},
+    {"name": "model.layers.3.mlp.experts.0.gate_proj.weight", "dtype": "F4_E2M1", "shape": [2048, 7168]},
+    {"name": "model.layers.3.mlp.experts.0.up_proj.weight", "dtype": "F4_E2M1", "shape": [2048, 7168]},
+    {"name": "model.layers.3.mlp.experts.0.down_proj.weight", "dtype": "F4_E2M1", "shape": [7168, 2048]},
+    {"name": "model.layers.3.mlp.experts.255.gate_proj.weight", "dtype": "F4_E2M1", "shape": [2048, 7168]},
+    {"name": "model.layers.3.mlp.experts.255.down_proj.weight", "dtype": "F4_E2M1", "shape": [7168, 2048]},
+    {"name": "model.layers.3.mlp.shared_experts.gate_proj.weight", "dtype": "F8_E4M3", "shape": [2048, 7168]},
+    {"name": "model.layers.3.mlp.shared_experts.up_proj.weight", "dtype": "F8_E4M3", "shape": [2048, 7168]},
+    {"name": "model.layers.3.mlp.shared_experts.down_proj.weight", "dtype": "F8_E4M3", "shape": [7168, 2048]},
+
+    {"name": "model.norm.weight", "dtype": "F32", "shape": [7168]},
+    {"name": "lm_head.weight", "dtype": "F8_E4M3", "shape": [129280, 7168]},
+
+    {"name": "mtp.0.embed_tokens.weight", "dtype": "BF16", "shape": [129280, 7168]},
+    {"name": "mtp.0.eh_proj.weight", "dtype": "F8_E4M3", "shape": [7168, 14336]},
+    {"name": "mtp.0.shared_head.norm.weight", "dtype": "F32", "shape": [7168]},
+    {"name": "mtp.head.weight", "dtype": "F8_E4M3", "shape": [129280, 7168]},
+
+    {"name": "model.visual.patch_embed.proj.weight", "dtype": "BF16", "shape": [1280, 3, 14, 14]}
+  ]
+}
