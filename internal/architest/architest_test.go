@@ -31,8 +31,11 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // new violation.
 //
 //	0 root        the frozen ABI â€” the one tree everyone imports; imports nothing internal.
-//	1 foundation  pure primitives: content store, canonicalizer, taint/provenance vocab,
-//	              metrics, the model tensor runtime. Import only the root.
+//	1 foundation  TWO populations under one label (see pureRoot below): the declared
+//	              pureRoot set - pure primitives that import ONLY the root (abi), pinned by
+//	              TestPureRootLeavesStayPure - and a ~120-leaf sub-DAG of COMPOSITES built from
+//	              sibling foundation leaves. The coarse gate does NOT order that sub-DAG: every
+//	              such edge is intra-tier (1->1), invisible to TestNoUpwardImports (#3945).
 //	2 mechanism   single-purpose kernel mechanisms & engines: the adjudicator, context-MMU,
 //	              vDSO, grammar, pre-flight, the kernel walker, the engine client, witness,
 //	              plan-CFI, stewards, harvest, ship-gate, policy.
@@ -410,6 +413,50 @@ var tier = map[string]int{
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
 
+// pureRoot is the declared set of foundation (tier-1) leaves that MUST import no internal
+// package except the root (abi). It is seeded from the leaves that are ALREADY pure on the
+// current tree (go-parsed, build-tags ignored, same method as the gate), so
+// TestPureRootLeavesStayPure is green today with zero false positives. Adding or removing a
+// leaf here is the same conscious review chokepoint as the tier table itself: a "pure
+// primitive" that later grows a sibling import must either drop it or be consciously removed
+// from this set. This is the mechanism behind foundation's "import only the root" contract
+// that the coarse tier gate cannot enforce on its own -- TestNoUpwardImports only fires on
+// to > from, so a tier-1 leaf quietly importing a fat tier-1 composite is an intra-tier
+// (1->1) edge it never sees (#3945).
+var pureRoot = map[string]bool{
+	"accountobs": true, "accountprobe": true, "affectedtests": true, "agenticbench": true, "agentsindex": true, "ailuminate": true,
+	"answershape": true, "apihostprobe": true, "appversion": true, "astquery": true, "auditreason": true, "benchauthority": true,
+	"benchckpt": true, "benchids": true, "benchruns": true, "benchscore": true, "bgloop": true, "binstamp": true,
+	"blob": true, "boundarylint": true, "brittleness": true, "buildwitness": true, "cacheobs": true, "cacheprice": true,
+	"callavoid": true, "canon": true, "chatops": true, "chatopsdetach": true, "choicetriage": true, "claimcheck": true,
+	"clonescan": true, "closureaudit": true, "closurerate": true, "cmdutil": true, "codegraph": true, "codelint": true,
+	"codexmemory": true, "commitintent": true, "commitissuelink": true, "commitrollup": true, "compactcohere": true, "conflationscore": true,
+	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deepseekbench": true,
+	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "devexmeter": true,
+	"devindex": true, "dispatchaging": true, "dispatchaudit": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true,
+	"dispatchsweep": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
+	"evebridge": true, "eveimport": true, "eveparity": true, "execrollup": true, "fakrpc": true, "fleetcap": true,
+	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
+	"frontierswe": true, "fusedturn": true, "ghspam": true, "glm52prefillsweep": true, "godsplitplan": true, "growthgate": true,
+	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true,
+	"intlist": true, "issuecontract": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
+	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true, "loopgate": true,
+	"loopindex": true, "looporphan": true, "looprecover": true, "loopunblock": true, "macbench": true, "maputil": true,
+	"mathx": true, "memorycotravel": true, "memoryread": true, "memorystability": true, "metalgemm": true, "modelscore": true,
+	"mutationbudget": true, "negframe": true, "newleaf": true, "newmodel": true, "nodecompare": true, "numfmt": true,
+	"orphanscan": true, "pathlint": true, "pathutil": true, "planaudit": true, "polymodel": true, "popularizationtickets": true,
+	"productscorecard": true, "promalert": true, "promptaudit": true, "promptlint": true, "provenance": true, "questionledger": true,
+	"qwen36parity": true, "randhex": true, "releasestale": true, "renameconcept": true, "repoguard": true, "resumemetrics": true,
+	"rsl": true, "savingsvector": true, "seatpark": true, "sensecheck": true, "sessionaudit": true, "sessiondesc": true,
+	"sessionsignals": true, "sessionsteer": true, "sidecar": true, "signals": true, "simhash": true, "slackenv": true,
+	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "stepbaton": true, "stopfailure": true,
+	"strmatch": true, "sweepconfig": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
+	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "trunkbuildprobe": true,
+	"tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
+	"wipattr": true, "wiprecon": true, "wipref": true, "workerenvelope": true, "workflow": true, "workflowlint": true,
+	"worklog": true, "worktreewitness": true, "worktype": true, "xprobe": true,
+}
+
 var tierName = []string{"root", "foundation", "mechanism", "composer", "integrator"}
 
 // hotPath is the set of packages on a live tool-call decision. None of them may import
@@ -652,6 +699,42 @@ func TestNoUpwardImports(t *testing.T) {
 			"Rule: a package may import only packages whose tier is <= its own.\n  %s\n"+
 			"Invert the dependency (registration seam) or push the shared type down a layer; "+
 			"do not loosen the tier table.", strings.Join(violations, "\n  "))
+	}
+}
+
+// TestPureRootLeavesStayPure enforces the pureRoot invariant: every declared pureRoot leaf
+// imports no internal package except abi. This closes the hole the coarse gate leaves open --
+// TestNoUpwardImports only fires on to > from, so a declared pure primitive quietly growing an
+// import of a fat tier-1 composite sibling is an intra-tier (1->1) edge it never sees. Seeded
+// green from the currently-pure leaves; it constrains the NEXT change, never existing debt.
+func TestPureRootLeavesStayPure(t *testing.T) {
+	internal := internalDir(t)
+	names := make([]string, 0, len(pureRoot))
+	for p := range pureRoot {
+		names = append(names, p)
+	}
+	sort.Strings(names)
+	var violations []string
+	for _, pkg := range names {
+		for _, imp := range imports(t, internal, pkg) {
+			if !strings.HasPrefix(imp, modPrefix) {
+				continue
+			}
+			dep := strings.SplitN(strings.TrimPrefix(imp, modPrefix), "/", 2)[0]
+			if dep == "abi" || dep == pkg {
+				continue
+			}
+			violations = append(violations, "internal/"+pkg+" imports internal/"+dep)
+		}
+	}
+	if len(violations) > 0 {
+		sort.Strings(violations)
+		t.Fatalf("pureRoot invariant violated (a declared pure-primitive leaf imports an internal "+
+			"package other than abi):\n  %s\n"+
+			"Fix: drop the internal import so the leaf stays a pure primitive, OR -- if the import is "+
+			"genuinely needed -- consciously remove the leaf from the pureRoot map in "+
+			"internal/architest/architest_test.go (it is no longer a pure primitive; it belongs to the "+
+			"foundation sub-DAG the coarse gate does not order).", strings.Join(violations, "\n  "))
 	}
 }
 
