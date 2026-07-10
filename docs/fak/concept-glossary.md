@@ -537,6 +537,32 @@ separates them is *what is being witnessed and where*.
 - **Candidate** - a scored span the planner may keep resident with cost, benefit, and
   density metrics. *Not* Plan (the planner's output selection).
 
+### "candidate" and "plan" across the other subsystems
+
+Both roots are overloaded far beyond the ctxplanner. The line each draws is against the
+canonical **Candidate** (a scored context span) or **Plan (planner)** (a resident view):
+
+- **dispatch candidates** - `CandidateBlockedBy` (dispatchtick prereq grammar - who a
+  candidate waits on), `candidatesPath` (the ready-set file on disk), `decodeCandidates`
+  (its JSON decoder). These are launch-eligibility records in the dispatch ready-set, not
+  scored context spans. `decodeCandidates` is distinct from `parseCandidates` /
+  `decodeIssueContractCandidates` - each decodes a *different* candidate corpus.
+- **scored/counted candidates elsewhere** - `candidateIDs` (kvmmu rescore / modelroute
+  audit: the id vector parallel to a score array), `CandidatesExamined` (an issue-repair
+  loop counter), `nCandidate` (a signal-select count). An id-vector / a counter, not the
+  Candidate object; distinct from `candidate-count` (a dispatch *price*) and
+  `CandidateBound` (the ctxplan set *cap*).
+- **promotion / resume candidates** - `KnownBadCandidate` (a guardrsi fleet-correlated
+  failure pattern proposed for filing) and `PrefixCandidates` (resume partial-id prefix
+  matches, #3782). Neither is a context span.
+- **"plan" as a side-effect or ablation plan** - `buildKnownBadIssuePlan` (a gh
+  create/update plan - *not* a ctxplan/memq plan), `planProfile` (multisubmit's pure
+  plan-construction step, split from the impure `runProfile`), `FAK_ABLATE_BP_PLAN` (the
+  env knob for the `bp_plan` breakpoint-plan ablation - the knob-name, distinct from
+  `FeatureBreakpointPlan` the sweep token and `BreakpointPlan` the layout it ablates), and
+  `plannedOpen` (a checkpoint-scorecard predicate: a *planned* subsystem whose dir is still
+  absent - distinct from `planless` and `ClosedNotPlanned`).
+
 ---
 
 ## The pool family
