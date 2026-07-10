@@ -15,7 +15,7 @@ description: "The deterministic, $0, no-model half of the self-ablation benchmar
 > that makes this regime ironclad is *exactly wrong* for Regime B; the two are
 > **two harnesses sharing one record schema**, and Regime B is not claimed here.
 
-## What shipped (rung 1)
+## What shipped — both sweep rungs of Regime A
 
 `fak ablate` generalizes the 2-arm `fak bench` (vDSO on/off) into an N-ARM
 matrix: replay ONE frozen tool-call trace through each feature config and emit
@@ -23,6 +23,54 @@ one `AblationRun` per arm, every arm bound to the trace's single workload hash
 by an N-arm identical-workload guard (`ablate.Report.Validate`, generalizing
 `metrics.Report.Validate` from a fixed pair to N). The deltas are
 apples-to-apples by construction — every arm ran the same work.
+
+Both feature rungs are wired. **Rung 1** flips the one runtime-settable knob
+(`vdso`) IN-PROCESS. **Rung 2** sweeps the env-gated levers — each read once at
+process start, so every arm re-execs a child carrying that arm's `FAK_*` env
+(`ablate.SweepViaSubprocess`, driven by the hidden `ablate-arm` child verb). A
+mixed sweep routes wholly through rung 2, so the `vdso` arm and the env arms land
+in one report under the same workload-hash guard. `BuildSweep` accepts every
+token in the closed catalog (a typo still fails loud); the CLI picks the rung
+from whether any swept feature is env-gated.
+
+## The cache-lever catalog — the eight ablatable cache things
+
+The sweepable **cache** levers are a closed set of eight `FeatureCard`s in
+[`internal/ablate/catalog.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ablate/catalog.go)
+— the single source of truth a live arm and the menu share, so "what is this
+lever" is byte-identical to the classification a run reports. Print it with
+**`fak ablate --list`** (`--list --json` for the raw cards):
+
+| lever | preset | plane | component | fidelity | rung · env gate |
+|---|---|---|---|---|---|
+| `vdso` | — | `kernel_tool_cache` | vdso | lossless | 1 · in-process runtime knob |
+| `radix` | `@local` | `local_kv` | inkernel_radix | lossless | 2 · `FAK_INKERNEL_RADIX` |
+| `ctxplan_seam` | — | `context_view` | ctxplan_seam | recoverable | 2 · `FAK_CTXPLAN_SEAM` |
+| `compressor` | `@context` | `context_compression` | headroom_compressor | recoverable | 2 · `FAK_COMPRESSOR` |
+| `bp_plan` | `@wire-cache` | `provider_prompt_cache_control` | breakpoint_planner | lossless | 2 · `FAK_ABLATE_BP_PLAN` |
+| `prefix_guard` | `@wire-cache` | `provider_prompt_cache_control` | prefix_guard | lossless | 2 · `FAK_ABLATE_PREFIX_GUARD` |
+| `ttl_1h` | `@wire-cache` | `provider_prompt_cache_control` | ttl_1h | passive | 2 · `FAK_ABLATE_TTL_1H` |
+| `uncached_trim` | `@wire-cache` | `provider_prompt_cache_control` | uncached_trim | lossy | 2 · `FAK_ABLATE_UNCACHED_TRIM` |
+
+What each lever does to the cache:
+
+- **`vdso`** — serves a repeated tool call from the in-kernel vDSO fast path without re-adjudicating or re-calling the engine.
+- **`radix`** — reuses a shared KV prefix across turns via in-kernel RadixAttention (needs `engine=inkernel`).
+- **`ctxplan_seam`** — serves cache-safe materialized context views through the ctxplan seam (needs `engine=inkernel`).
+- **`compressor`** — sheds recoverable context through the headroom compressor to hold the cacheable prefix under budget.
+- **`bp_plan`** — places provider cache breakpoints without changing model-visible prefix bytes.
+- **`prefix_guard`** — guards prefix stability before relying on provider-cache economics.
+- **`ttl_1h`** — changes provider cache retention only; model-visible prefix bytes are unchanged.
+- **`uncached_trim`** — sheds or rewrites uncached context; prefix integrity covers only the guarded cacheable prefix.
+
+**Presets** sweep a whole cache plane in one flag: `@wire-cache` → the four
+`provider_prompt_cache_control` levers (`bp_plan,prefix_guard,ttl_1h,uncached_trim`),
+`@local` → `radix`, `@context` → `compressor`. A new lever on an existing plane
+joins its preset automatically (the preset is derived from `Plane`, not a hand list).
+
+Not every sweepable feature is a cache lever: `normgate` / `ifc` / `gitgate` /
+`wire_screen` / `wire_redact` / `toon_wire` are guard/wire knobs and deliberately
+carry **no** card, so `--list` prints the cache subset, not all of `KnownFeatures`.
 
 ## The committed artifact — `tau2-airline-smoke`, vDSO on/off
 
@@ -62,12 +110,16 @@ metrics reproduce exactly (see
 
 ## Honesty fences (what this rung does NOT measure)
 
-- **One runtime knob.** Rung 1 sweeps only the runtime-settable vDSO toggle
-  (`kernel.SetVDSO`, reused via `bench.RunArm`). The ~40 env-gated features
-  (`FAK_NORMGATE` / `FAK_INKERNEL_RADIX` / `FAK_COMPRESSOR` / …) are read at
-  process start; sweeping them needs a subprocess-re-exec rung (the next child
-  issue on the epic). `BuildSweep` fails loud on a non-runtime feature rather
-  than silently measuring nothing.
+- **Provider-cache levers are harness gates, not live gateway flips (yet).** The
+  four `@wire-cache` levers (`bp_plan` / `ttl_1h` / `prefix_guard` / `uncached_trim`)
+  sweep through `FAK_ABLATE_*` envs that gate the arm's *measured shape*; a future
+  live runner maps these tokens to real gateway setters, but the sweep vocabulary is
+  stable now. The in-kernel levers (`radix` / `ctxplan_seam`) require
+  `engine=inkernel` to move a counter — on the offline mock engine their arm reports
+  an honest zero delta.
+- **`--from-session` is in-process only.** A session-backed cassette replays the
+  runtime `vdso` sweep; env-gated arms need a bench trace — `--from-session` refuses
+  an env-gated sweep (usage exit 2) rather than silently measuring an unspawned child.
 - **Cross-agent arm — now shipped (rung 3).** Regime B (pure fak vs Claude Code /
   ultracode) needs a live model + API tokens and a distributional validity contract
   (success-gate, N-run variance, model-named baseline, decomposed cache). That
@@ -82,7 +134,9 @@ metrics reproduce exactly (see
 
 `go test ./internal/ablate ./cmd/fak` — `TestSweep_VDSO_NArmGuardAndIsolatedDelta`,
 `TestValidate_RefusesMismatchedWorkloadHash`, `TestBuildSweep_UnknownAndDuplicate`,
-`TestAblateJSONReport`, `TestAblateUnknownFeatureUsageError`. On a native-Windows
+`TestAblateJSONReport`, `TestAblateUnknownFeatureUsageError`, and the catalog-visual
+golden `TestAblateListHuman` / `TestAblateListJSON` (which pin `--list` to the closed
+catalog, so the table above cannot drift from `catalog.go`). On a native-Windows
 host run the suite under WSL (`./test.ps1`); `go build` / `go vet` are native.
 
 # Rung 3 — the cross-agent controller (Regime B)
