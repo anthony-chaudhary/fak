@@ -1687,8 +1687,13 @@ func chooseStatus(cond bool, yes, no loopmgr.RunStatus) loopmgr.RunStatus {
 }
 
 func currentGitSHA(root string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	// Bounded like dispatchTickGitStatus above: never let a wedged git stall
+	// the tick.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	cmd.Dir = root
+	cmd.WaitDelay = 10 * time.Second
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
