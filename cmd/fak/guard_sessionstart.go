@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/negframe"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessionsteer"
 )
 
@@ -56,10 +58,18 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	// the persistence + managed-context RULE (spine #3512) — the soft, always-on half of the
 	// long-horizon default. Attended human-driven sessions get the base affordance only.
 	managedFlag := fs.Bool("managed", false, "inject the long-horizon persistence + managed-context rule")
+	// --trace carries the guard trace id threaded in at install (guardSessionStartArgs). Paired
+	// with the child's CLAUDE_CODE_SESSION_ID (the transcript UUID) it is the A1 identity join
+	// (#4112) the resume watchdog reads to resolve a crashed UUID back to its gateway trace.
+	traceFlag := fs.String("trace", "", "guard trace id to join to the transcript uuid")
 	if err := fs.Parse(argv); err != nil {
 		// Fail open: a discoverability hint must never wedge a session start.
 		return 0
 	}
+	// Record the uuid<->trace join first (best-effort, fail-open), so it is written on EVERY
+	// SessionStart source — independent of the affordance mode below. The affordance "off" knob
+	// governs the injected hint, not the durable identity store the watchdog depends on.
+	recordGuardSessionStartIdentity(*traceFlag)
 	if normalizeGuardSessionStartMode(*modeFlag) == guardSessionStartModeOff {
 		return 0
 	}
@@ -95,6 +105,27 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// recordGuardSessionStartIdentity best-effort appends one uuid<->trace join row to the durable
+// resume_identity.jsonl store (the A1 fold's input, #4112) under the resolved fleet regDir, so
+// the resume watchdog can later resolve a crashed transcript UUID to its gateway trace long
+// after the TTL-GC'd descriptor registry has forgotten the pairing. Fail-open by the hook's
+// contract: a missing id (a resumed child has CLAUDE_CODE_SESSION_ID stripped, so the UUID is
+// blank) or any write error is a silent no-op — the identity join must never wedge a start.
+func recordGuardSessionStartIdentity(traceID string) {
+	uuid := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
+	traceID = strings.TrimSpace(traceID)
+	if uuid == "" || traceID == "" {
+		return // a half row is not a join; FoldIdentity would skip it anyway
+	}
+	row := resume.IdentityRow{
+		TS:    time.Now().UTC().Format(time.RFC3339),
+		UUID:  uuid,
+		Trace: traceID,
+		Via:   "guard-sessionstart",
+	}
+	_ = appendJSONL(resume.IdentityLedgerPath(resolveSweepRegDir("")), row)
+}
+
 // normalizeGuardSessionStartMode maps the env/flag knob to on|off. Default (empty) is ON —
 // the affordance is the fix, so it is on by default; a harness that wants the leanest
 // surface opts out with off.
@@ -117,7 +148,7 @@ type guardSessionStartInstall struct {
 // MERGING it into the shared --settings file the other guard hooks already wrote
 // (existingSettingsPath) so a single --settings carries them all. Off mode or a non-claude
 // child is a no-op. Mirrors installGuardStopHook.
-func installGuardSessionStartHook(command []string, mode string, managed bool, existingSettingsPath string) ([]string, guardSessionStartInstall, error) {
+func installGuardSessionStartHook(command []string, mode string, managed bool, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
 	if normalized == guardSessionStartModeOff {
@@ -139,10 +170,10 @@ func installGuardSessionStartHook(command []string, mode string, managed bool, e
 			return command, guardSessionStartInstall{}, err
 		}
 	}
-	return installGuardSessionStartHookAt(command, mode, managed, fakBin, dir, existingSettingsPath)
+	return installGuardSessionStartHookAt(command, mode, managed, fakBin, dir, existingSettingsPath, traceID)
 }
 
-func installGuardSessionStartHookAt(command []string, mode string, managed bool, fakBin, dir, existingSettingsPath string) ([]string, guardSessionStartInstall, error) {
+func installGuardSessionStartHookAt(command []string, mode string, managed bool, fakBin, dir, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
 	if normalized == guardSessionStartModeOff {
@@ -155,7 +186,7 @@ func installGuardSessionStartHookAt(command []string, mode string, managed bool,
 	}
 	var settingsPath string
 	if strings.TrimSpace(existingSettingsPath) != "" {
-		if err := mergeGuardSessionStartIntoSettings(existingSettingsPath, fakBin, managed); err != nil {
+		if err := mergeGuardSessionStartIntoSettings(existingSettingsPath, fakBin, managed, traceID); err != nil {
 			return command, install, err
 		}
 		settingsPath = existingSettingsPath
@@ -167,7 +198,7 @@ func installGuardSessionStartHookAt(command []string, mode string, managed bool,
 			return command, install, err
 		}
 		settingsPath = filepath.Join(dir, "claude-sessionstart-settings.json")
-		if err := writeGuardSessionStartSettings(settingsPath, fakBin, managed); err != nil {
+		if err := writeGuardSessionStartSettings(settingsPath, fakBin, managed, traceID); err != nil {
 			return command, install, err
 		}
 		command = appendClaudeSettingsArg(command, settingsPath)
@@ -188,31 +219,37 @@ func guardSessionStartManaged(command []string) bool {
 }
 
 // guardSessionStartArgs is the hook's argv. A MANAGED (headless) session carries --managed so
-// the injected context includes the long-horizon persistence + managed-context rule (#3512).
-func guardSessionStartArgs(managed bool) []string {
+// the injected context includes the long-horizon persistence + managed-context rule (#3512). A
+// non-empty traceID is threaded as --trace so the running hook holds BOTH ids — the guard trace
+// and (from the child env) the transcript UUID — and can record the A1 identity join (#4112).
+func guardSessionStartArgs(managed bool, traceID string) []string {
+	args := []string{"guard-sessionstart"}
 	if managed {
-		return []string{"guard-sessionstart", "--managed"}
+		args = append(args, "--managed")
 	}
-	return []string{"guard-sessionstart"}
+	if t := strings.TrimSpace(traceID); t != "" {
+		args = append(args, "--trace", t)
+	}
+	return args
 }
 
 // guardSessionStartMatchers builds the SessionStart hook settings entry. The affordance is
 // wanted on a fresh start AND on clear/compact/resume (a compacted context may have dropped
 // the original hint), so the matcher is left empty to fire on every SessionStart source.
-func guardSessionStartMatchers(fakBin string, managed bool) []guardPreCompactClaudeMatcher {
+func guardSessionStartMatchers(fakBin string, managed bool, traceID string) []guardPreCompactClaudeMatcher {
 	return []guardPreCompactClaudeMatcher{{
 		Hooks: []guardPreCompactClaudeCommand{{
 			Type:    "command",
 			Command: guardPreCompactHookCommand(fakBin),
-			Args:    guardSessionStartArgs(managed),
+			Args:    guardSessionStartArgs(managed, traceID),
 		}},
 	}}
 }
 
-func writeGuardSessionStartSettings(path, fakBin string, managed bool) error {
+func writeGuardSessionStartSettings(path, fakBin string, managed bool, traceID string) error {
 	settings := guardPreCompactClaudeSettings{
 		Hooks: map[string][]guardPreCompactClaudeMatcher{
-			"SessionStart": guardSessionStartMatchers(fakBin, managed),
+			"SessionStart": guardSessionStartMatchers(fakBin, managed, traceID),
 		},
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -225,7 +262,7 @@ func writeGuardSessionStartSettings(path, fakBin string, managed bool) error {
 
 // mergeGuardSessionStartIntoSettings adds (or replaces) the SessionStart hook in an existing
 // guard settings file, preserving every other key (PreCompact/Stop/toolproc hooks).
-func mergeGuardSessionStartIntoSettings(path, fakBin string, managed bool) error {
+func mergeGuardSessionStartIntoSettings(path, fakBin string, managed bool, traceID string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -237,7 +274,7 @@ func mergeGuardSessionStartIntoSettings(path, fakBin string, managed bool) error
 	if settings.Hooks == nil {
 		settings.Hooks = map[string][]guardPreCompactClaudeMatcher{}
 	}
-	settings.Hooks["SessionStart"] = guardSessionStartMatchers(fakBin, managed)
+	settings.Hooks["SessionStart"] = guardSessionStartMatchers(fakBin, managed, traceID)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

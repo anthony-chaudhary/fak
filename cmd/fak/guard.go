@@ -1315,7 +1315,9 @@ func cmdGuard(argv []string) {
 	// human is present to drive it. An attended interactive session gets the base affordance
 	// only. Same headless signal the task-handoff gate leans on above (guardChildInteractive).
 	sessionStartManaged := guardSessionStartManaged(command)
-	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings)
+	// Thread the guard trace id into the hook argv so the running SessionStart hook holds both
+	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
+	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude SessionStart hook setup failed: %v\n", err)
