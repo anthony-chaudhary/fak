@@ -176,6 +176,71 @@ type Stats struct {
 	ReuseHistTurns [len(ReuseRatioBuckets)]uint64
 }
 
+// ColdCliffFinding is the stable code raised when a session has fallen off the
+// frozen-trajectory cache cliff: the in-kernel KV-prefix reuse it was earning has
+// collapsed, so the kernel is re-prefilling prompt it used to serve from the cached
+// KV. It is a fixed string so a banner / /debug/vars reader can match on it (#3623).
+const ColdCliffFinding = "PREFIX_COLD_CLIFF"
+
+// Cold-cliff alarm thresholds. Deliberately conservative: a session's first prefill
+// is always cold and ordinary partial reuse is healthy, so neither may trip the
+// alarm — only an aggregate collapse does.
+const (
+	// ColdCliffMinTurns gates the alarm until enough turns are observed that an
+	// unavoidable cold turn-1 prefill can no longer dominate the reading.
+	ColdCliffMinTurns = 3
+	// ColdCliffReuseFloor is the aggregate reuse-ratio floor: below it the kernel is
+	// re-prefilling more than half of every prompt on average — the frozen ceiling is lost.
+	ColdCliffReuseFloor = 0.50
+	// ColdCliffColdFraction is the cold-turn fraction (ColdTurns/Turns) at or above which
+	// the session is cold-dominated even if a few large warm turns prop the token-weighted
+	// ratio up.
+	ColdCliffColdFraction = 0.50
+)
+
+// ColdCliffVerdict is the result of evaluating a Stats snapshot for the frozen-trajectory
+// cache cliff. A reader treats a Fired verdict — on the wire, the mere PRESENCE of this
+// record, since a healthy session omits it — as the PREFIX_COLD_CLIFF alarm.
+type ColdCliffVerdict struct {
+	// Fired is true when the session has left the frozen regime. It is not serialized:
+	// the record is only attached to a surface when it fired, so presence IS the alarm.
+	Fired bool `json:"-"`
+	// Finding is the stable alarm code (ColdCliffFinding) when Fired, else "".
+	Finding string `json:"finding,omitempty"`
+	// Reason names which signal tripped: "cold_fraction" (a majority of turns landed
+	// cold) or "reuse_floor" (the token-weighted aggregate reuse fell below the floor).
+	Reason string `json:"reason,omitempty"`
+	// Turns / ReuseRatio / ColdFraction are the evidence the verdict was drawn from, so a
+	// reader never has to re-derive why the alarm fired (or did not).
+	Turns        uint64  `json:"turns"`
+	ReuseRatio   float64 `json:"reuse_ratio"`
+	ColdFraction float64 `json:"cold_fraction"`
+}
+
+// ColdCliff evaluates the snapshot for the frozen-trajectory cache cliff (#3623). It
+// fires once at least ColdCliffMinTurns turns have been observed and EITHER a majority
+// of them landed in the cold regime (ColdFraction >= ColdCliffColdFraction) OR the
+// token-weighted aggregate reuse has fallen below ColdCliffReuseFloor. An idle or short
+// session, and a frozen trajectory (reuse near 1, no cold turns), never fire. It reads
+// the CUMULATIVE snapshot, not a per-turn delta: it answers "has this session's realized
+// reuse collapsed" — exactly the cliff the metric exists to show.
+func (s Stats) ColdCliff() ColdCliffVerdict {
+	v := ColdCliffVerdict{Turns: s.Turns, ReuseRatio: s.ReuseRatio}
+	if s.Turns > 0 {
+		v.ColdFraction = float64(s.ColdTurns) / float64(s.Turns)
+	}
+	if s.Turns < ColdCliffMinTurns {
+		return v // idle or still warming up: an unavoidable cold turn-1 must not alarm
+	}
+	switch {
+	case v.ColdFraction >= ColdCliffColdFraction:
+		v.Fired, v.Finding, v.Reason = true, ColdCliffFinding, "cold_fraction"
+	case v.ReuseRatio < ColdCliffReuseFloor:
+		v.Fired, v.Finding, v.Reason = true, ColdCliffFinding, "reuse_floor"
+	}
+	return v
+}
+
 // Snapshot returns the current accumulated stats. The ratio is derived under the lock so
 // it is always consistent with the totals it is computed from.
 func (o *Observer) Snapshot() Stats {

@@ -280,6 +280,86 @@ func TestObserveSplitSaturates(t *testing.T) {
 	}
 }
 
+// #3623: the frozen-trajectory cache-cliff alarm. A session driven into the cold regime
+// must fire PREFIX_COLD_CLIFF; an idle, still-warming, or frozen trajectory must not — the
+// done-condition the live loop exists to witness, exercised over the cacheobs buckets.
+func TestColdCliffDetector(t *testing.T) {
+	build := func(turns []struct{ prompt, reused int }) Stats {
+		o := New()
+		for _, tn := range turns {
+			o.Observe(tn.prompt, tn.reused)
+		}
+		return o.Snapshot()
+	}
+	type turn = struct{ prompt, reused int }
+	cases := []struct {
+		name       string
+		turns      []turn
+		wantFired  bool
+		wantReason string
+	}{
+		{"idle-no-turns", nil, false, ""},
+		// A lone cold turn-1 prefill (the unavoidable warmup) must not alarm.
+		{"single-cold-warmup", []turn{{100, 0}}, false, ""},
+		// Below the min-turns gate even when every observed turn is cold.
+		{"two-cold-under-min", []turn{{100, 0}, {100, 0}}, false, ""},
+		// A frozen trajectory: reuse near 1, no cold turns — never fires.
+		{"frozen-trajectory", []turn{{1000, 990}, {1000, 995}, {1000, 1000}, {1000, 990}}, false, ""},
+		// Healthy warmup then frozen: one cold turn-1 among frozen turns stays quiet
+		// (cold fraction 1/3 < 0.5, aggregate ratio well above the floor).
+		{"warmup-then-frozen", []turn{{100, 0}, {1000, 990}, {1000, 990}}, false, ""},
+		// Cold-dominated: a majority of turns land cold -> cold_fraction.
+		{"cold-dominated", []turn{{100, 0}, {100, 0}, {1000, 990}}, true, "cold_fraction"},
+		// All cold -> cold_fraction (fraction 1.0).
+		{"all-cold", []turn{{100, 0}, {100, 0}, {100, 0}}, true, "cold_fraction"},
+		// Uniformly poor partial reuse: no cold turns, but the aggregate ratio (0.40)
+		// falls below the floor -> reuse_floor.
+		{"low-partial-floor", []turn{{100, 40}, {100, 40}, {100, 40}}, true, "reuse_floor"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v := build(c.turns).ColdCliff()
+			if v.Fired != c.wantFired {
+				t.Fatalf("Fired = %v, want %v (verdict %+v)", v.Fired, c.wantFired, v)
+			}
+			if v.Reason != c.wantReason {
+				t.Fatalf("Reason = %q, want %q (verdict %+v)", v.Reason, c.wantReason, v)
+			}
+			if c.wantFired {
+				if v.Finding != ColdCliffFinding {
+					t.Fatalf("Finding = %q, want %q", v.Finding, ColdCliffFinding)
+				}
+			} else if v.Finding != "" {
+				t.Fatalf("Finding = %q, want empty for a non-firing verdict", v.Finding)
+			}
+		})
+	}
+}
+
+// #3623: the cold_fraction gate fires at exactly ColdCliffColdFraction (>= 0.5), and the
+// cold turn-1 of an otherwise-warm session sits just under it — the boundary that keeps a
+// warmup quiet while a genuinely cold-tipping session alarms.
+func TestColdCliffColdFractionBoundary(t *testing.T) {
+	o := New()
+	o.Observe(100, 0)     // cold
+	o.Observe(1000, 990)  // frozen
+	o.Observe(1000, 990)  // frozen
+	o.Observe(1000, 990)  // frozen -> cold fraction 1/4 = 0.25, ratio high
+	if v := o.Snapshot().ColdCliff(); v.Fired {
+		t.Fatalf("1/4 cold must not fire: %+v", v)
+	}
+	o.Observe(100, 0) // second cold -> 2/5 = 0.40, still under 0.5
+	if v := o.Snapshot().ColdCliff(); v.Fired && v.Reason == "cold_fraction" {
+		t.Fatalf("2/5 cold must not trip cold_fraction: %+v", v)
+	}
+	// Push to exactly 3/6 = 0.50 -> at the threshold, fires.
+	o.Observe(100, 0)
+	v := o.Snapshot().ColdCliff()
+	if !v.Fired || v.Reason != "cold_fraction" {
+		t.Fatalf("3/6 == 0.50 cold fraction must fire cold_fraction: %+v", v)
+	}
+}
+
 func TestConcurrentObserveIsRace_free(t *testing.T) {
 	o := New()
 	var wg sync.WaitGroup

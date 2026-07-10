@@ -642,6 +642,12 @@ type AdjudicationSummary struct {
 	// provider cache_read tokens.
 	KVPrefixPromptTokens uint64 `json:"kv_prefix_prompt_tokens"`
 	KVPrefixReusedTokens uint64 `json:"kv_prefix_reused_tokens"`
+	// KVPrefixColdCliff is the LIVE frozen-trajectory cache-cliff finding (#3623): present
+	// (PREFIX_COLD_CLIFF) only when the in-kernel KV-prefix reuse for this process has
+	// collapsed — a cold-dominated turn distribution or an aggregate reuse ratio below the
+	// floor. Absent (omitempty) on a healthy frozen/partial session, so its mere PRESENCE on
+	// /debug/vars is the alarm. WITNESSED (fak's own kernel reuse), like the KVPrefix* counts.
+	KVPrefixColdCliff *cacheobs.ColdCliffVerdict `json:"kv_prefix_cold_cliff,omitempty"`
 
 	// ToolPrune* folds the INBOUND tool-definition prune lever into the same exit summary,
 	// WITNESSED (fak authored): ToolPruneTurns is the count of turns that dropped at least one
@@ -757,6 +763,12 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	kv := cacheobs.Default.Snapshot()
 	sum.KVPrefixPromptTokens = kv.PromptTokens
 	sum.KVPrefixReusedTokens = kv.ReusedTokens
+	// Raise the live frozen-trajectory cache-cliff finding (#3623) only when this
+	// process's realized KV-prefix reuse has collapsed; a healthy session leaves the
+	// field nil, so its presence on the exit summary / /debug/vars is itself the alarm.
+	if cliff := kv.ColdCliff(); cliff.Fired {
+		sum.KVPrefixColdCliff = &cliff
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
