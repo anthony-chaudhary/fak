@@ -161,6 +161,98 @@ func TestLoadIdentity(t *testing.T) {
 	assertMapEqual(t, "uuidByTrace", byTrace, map[string]string{"t1": "u1", "t2": "u2", "t3": "u1"})
 }
 
+// ResolveIdentity resolves a query id against the append-only rows in either direction,
+// honoring last-row-wins, skipping half rows, surfacing the winning row's provenance, and
+// reporting OK=false (never inventing a join) for a blank or unknown query.
+func TestResolveIdentity(t *testing.T) {
+	rows := []IdentityRow{
+		{UUID: "u1", Trace: "t1", Handle: "old"},
+		{UUID: "u2", Trace: "t2", Account: "worker-a", Via: "guard SessionStart"},
+		{UUID: "u1", Trace: "t3", Handle: "new"}, // re-pairs u1: last row wins
+		{UUID: "", Trace: "t9"},                  // half row: never a match
+	}
+
+	t.Run("uuid resolves forward to its newest trace", func(t *testing.T) {
+		m := ResolveIdentity(rows, "u1")
+		if !m.OK || m.Direction != "uuid->trace" || m.Paired != "t3" {
+			t.Fatalf("resolve u1 = %+v, want ok uuid->trace t3", m)
+		}
+		if m.Row.Handle != "new" {
+			t.Fatalf("expected the winning (last) row's provenance handle=new, got %q", m.Row.Handle)
+		}
+	})
+
+	t.Run("trace resolves backward to its uuid with provenance", func(t *testing.T) {
+		m := ResolveIdentity(rows, "t2")
+		if !m.OK || m.Direction != "trace->uuid" || m.Paired != "u2" {
+			t.Fatalf("resolve t2 = %+v, want ok trace->uuid u2", m)
+		}
+		if m.Row.Account != "worker-a" || m.Row.Via != "guard SessionStart" {
+			t.Fatalf("provenance not carried: %+v", m.Row)
+		}
+	})
+
+	t.Run("a superseded trace still resolves its uuid", func(t *testing.T) {
+		// t1 was u1's first trace; even after u1 re-pairs to t3, the t1 row still joins to u1.
+		m := ResolveIdentity(rows, "t1")
+		if !m.OK || m.Direction != "trace->uuid" || m.Paired != "u1" {
+			t.Fatalf("resolve t1 = %+v, want ok trace->uuid u1", m)
+		}
+	})
+
+	t.Run("whitespace query is trimmed before resolving", func(t *testing.T) {
+		if m := ResolveIdentity(rows, "  u2  "); !m.OK || m.Paired != "t2" {
+			t.Fatalf("resolve padded u2 = %+v, want ok -> t2", m)
+		}
+	})
+
+	t.Run("unknown query is a clean miss, never an invented join", func(t *testing.T) {
+		if m := ResolveIdentity(rows, "nope"); m.OK {
+			t.Fatalf("resolve unknown = %+v, want OK=false", m)
+		}
+	})
+
+	t.Run("half-row endpoint never resolves", func(t *testing.T) {
+		if m := ResolveIdentity(rows, "t9"); m.OK {
+			t.Fatalf("a half row's trace must not resolve: %+v", m)
+		}
+	})
+
+	t.Run("blank query and nil rows are misses", func(t *testing.T) {
+		if m := ResolveIdentity(rows, "   "); m.OK {
+			t.Fatalf("blank query resolved: %+v", m)
+		}
+		if m := ResolveIdentity(nil, "u1"); m.OK {
+			t.Fatalf("nil rows resolved: %+v", m)
+		}
+	})
+}
+
+// LoadIdentityRows reads the store into its pre-fold rows (the form ResolveIdentity scans),
+// yielding nil for a missing store and preserving append-only file order for a present one.
+func TestLoadIdentityRows(t *testing.T) {
+	dir := t.TempDir()
+
+	if rows := LoadIdentityRows(dir); rows != nil {
+		t.Fatalf("LoadIdentityRows on missing store = %v, want nil", rows)
+	}
+
+	content := `{"uuid":"u1","trace":"t1"}
+{"uuid":"u2","trace":"t2","account":"worker-a"}
+`
+	if err := os.WriteFile(IdentityLedgerPath(dir), []byte(content), 0o644); err != nil {
+		t.Fatalf("write store: %v", err)
+	}
+	rows := LoadIdentityRows(dir)
+	if len(rows) != 2 || rows[0].UUID != "u1" || rows[1].Account != "worker-a" {
+		t.Fatalf("LoadIdentityRows = %+v, want the two rows in file order", rows)
+	}
+	// Round-trips through ResolveIdentity end-to-end.
+	if m := ResolveIdentity(rows, "u2"); !m.OK || m.Paired != "t2" || m.Row.Account != "worker-a" {
+		t.Fatalf("resolve over loaded rows = %+v, want ok -> t2 (worker-a)", m)
+	}
+}
+
 func assertMapEqual(t *testing.T, label string, got, want map[string]string) {
 	t.Helper()
 	if len(got) != len(want) {

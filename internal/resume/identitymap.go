@@ -98,3 +98,53 @@ func LoadIdentity(regDir string) (traceByUUID, uuidByTrace map[string]string) {
 	raw, _ := os.ReadFile(IdentityLedgerPath(regDir))
 	return FoldIdentity(jsonlledger.Parse[IdentityRow](string(raw), nil))
 }
+
+// LoadIdentityRows reads and parses the append-only identity store into its raw rows — the
+// pre-fold form ResolveIdentity scans so it can surface the winning row's handle/account/via
+// provenance, which FoldIdentity's UUID<->trace maps drop. A missing / unreadable / empty file
+// yields nil, so an absent store simply resolves no join (fail-open, matching LoadIdentity).
+func LoadIdentityRows(regDir string) []IdentityRow {
+	raw, _ := os.ReadFile(IdentityLedgerPath(regDir))
+	return jsonlledger.Parse[IdentityRow](string(raw), nil)
+}
+
+// IdentityMatch is the resolved join a lookup returns: the query id, the id it pairs to, the
+// direction that resolved, and the winning row (for handle/account/via provenance). OK is false
+// when no row pairs the query — the caller reports "no join" and exits non-zero, never inventing
+// one. Direction is "uuid->trace" when the query was a transcript UUID (Paired is its trace) or
+// "trace->uuid" when it was a gateway trace (Paired is its UUID).
+type IdentityMatch struct {
+	Query     string
+	Paired    string
+	Direction string
+	Row       IdentityRow
+	OK        bool
+}
+
+// ResolveIdentity resolves query against the append-only rows in EITHER direction, honoring the
+// same "last row per key wins" rule FoldIdentity applies (the store is append-only, so slice
+// order is write order): it scans forward and keeps the newest row whose UUID — or, failing
+// that, whose Trace — equals the query. Half rows (missing an endpoint) are skipped, exactly as
+// the fold skips them. A blank query, or one no row pairs, yields OK=false. Pure and total: no
+// clock, no I/O, deterministic over any input — mirroring FoldIdentity.
+func ResolveIdentity(rows []IdentityRow, query string) IdentityMatch {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return IdentityMatch{Query: query}
+	}
+	m := IdentityMatch{Query: q}
+	for _, r := range rows {
+		uuid := strings.TrimSpace(r.UUID)
+		trace := strings.TrimSpace(r.Trace)
+		if uuid == "" || trace == "" {
+			continue // a half row is not a join (same discipline as FoldIdentity)
+		}
+		switch q {
+		case uuid:
+			m = IdentityMatch{Query: q, Paired: trace, Direction: "uuid->trace", Row: r, OK: true}
+		case trace:
+			m = IdentityMatch{Query: q, Paired: uuid, Direction: "trace->uuid", Row: r, OK: true}
+		}
+	}
+	return m
+}
