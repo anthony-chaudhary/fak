@@ -1,8 +1,8 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "e3addd21",
-  "total_debt": 1190,
-  "grade_debt": 38,
+  "total_debt": 1201,
+  "grade_debt": 40,
   "metrics": {
     "doc": 0,
     "readme": 0,
@@ -45,7 +45,8 @@
     "tooling_quality": 76,
     "bench_dx": 1,
     "cuda_dev": 1,
-    "persona_fit": 0
+    "persona_fit": 0,
+    "commit_subject": 11
   },
   "grade_weights": {
     "doc": 0,
@@ -89,7 +90,8 @@
     "tooling_quality": 8,
     "bench_dx": 0,
     "cuda_dev": 0,
-    "persona_fit": 0
+    "persona_fit": 0,
+    "commit_subject": 2
   },
   "_doc": "Pinned per-metric scorecard-debt baseline for the unified control pane. total_debt is the raw-unit ratchet gate; grade_debt is the scale-invariant severity companion, and grade_weights pins each metric's letter-grade severity so an A->B slip reds the gate even at flat raw debt (#1423). Re-pin after a debt drop to ratchet the trend down: python tools/scorecard_control_pane.py --pin"
 }

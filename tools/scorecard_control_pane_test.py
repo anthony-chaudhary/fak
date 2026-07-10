@@ -141,6 +141,20 @@ EXCLUDED_SCORECARDS: dict[str, str] = {
     # metrics ARE folded, but via `go run ./cmd/fak ...` (no python script); their
     # python test/helper files (if any) are not the fold entry point.
     "vcache_scorecard_gate.py": "a CI gate wrapper, not a portfolio debt scorecard",
+    "skill_slop_scorecard.py": "a per-file HARD admission gate for SKILL.md paths (#2911): "
+    "requires positional path args and emits no corpus *_debt integer, so it is a standalone "
+    "gate, not a bare-run portfolio-debt scorecard",
+    "behavior_contract_scorecard.py": "advisory testing-quality gate (#2900): emits "
+    "change_detector_debt and is fold-eligible, but registering it would require re-pinning "
+    "scorecard_baseline.json — register + pin on a green tree to fold it into the ratchet",
+    "commit_quality_scorecard.py": "the eventual commit-scoring superset (composes "
+    "subject-gradeability + stamp-bindability + on-lane into one commit_debt). Fold-eligible "
+    "(emits corpus.commit_debt + grade), BUT its kpi_stamp_on_lane reads working-tree "
+    "dos.toml / internal / cmd dirs and rides an in-flight internal_leaves fix, so its floor "
+    "can't be pinned honestly on a dirty tree. The clean git-log subject half is folded now "
+    "via commit_subject_coverage.py (SCORECARDS 'commit_subject'); register + pin this superset "
+    "on a green tree once internal_leaves lands, and drop the commit_subject row then (folding "
+    "both double-counts the subject KPI)",
 }
 
 
@@ -201,6 +215,33 @@ def test_propagation_pinned_in_committed_baseline() -> None:
         "propagation dropped from baseline metrics — the raw-unit floor is gone"
     assert "propagation" in (baseline.get("grade_weights") or {}), \
         "propagation dropped from baseline grade_weights — the grade ratchet floor is gone"
+
+
+def test_commit_subject_scorecard_registered() -> None:
+    # The fleet's own commit output folds into the portfolio via a pure `git log`
+    # read (commit_subject_coverage.py), so it never drops out of the fold on a
+    # working-tree build break the way the go-backed cards do. It is NOT named
+    # *_scorecard.py, so the on-disk breadth invariant does not cover it — this
+    # drift sentinel pins the exact row so a refactor can't silently unfold it.
+    card = next(c for c in scp.SCORECARDS if c["key"] == "commit_subject")
+    assert card == {
+        "key": "commit_subject",
+        "debt": "commit_debt",
+        "script": "commit_subject_coverage.py",
+        "label": "commit-subject",
+    }
+
+
+def test_commit_subject_pinned_in_committed_baseline() -> None:
+    # Same #1515 discipline as propagation: registering the card is only half the
+    # ratchet — the shipped baseline must carry `commit_subject` in BOTH axes or the
+    # card has no floor and a commit-hygiene regression can't red --check.
+    baseline = scp.load_baseline(scp.repo_root() / scp.BASELINE_REL)
+    assert baseline is not None, f"{scp.BASELINE_REL} missing or unreadable"
+    assert "commit_subject" in (baseline.get("metrics") or {}), \
+        "commit_subject dropped from baseline metrics — the raw-unit floor is gone"
+    assert "commit_subject" in (baseline.get("grade_weights") or {}), \
+        "commit_subject dropped from baseline grade_weights — the grade ratchet floor is gone"
 
 
 def test_milestone_scorecard_registered() -> None:

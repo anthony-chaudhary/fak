@@ -116,6 +116,24 @@ def recent_subjects(root: Path, n: int) -> list[str]:
     return [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
 
 
+def grade_for(pct: float | None) -> str:
+    """A-F on the family's shared 90/80/70/60 ladder — the SAME thresholds the
+    scorecard portfolio's grade lens uses — so the letter this card folds into the
+    control pane reproduces exactly what the coverage percentage implies. An empty
+    window (no gradeable ship commits) is an ``A``: there is nothing to fix."""
+    if pct is None:
+        return "A"
+    if pct >= 90:
+        return "A"
+    if pct >= 80:
+        return "B"
+    if pct >= 70:
+        return "C"
+    if pct >= 60:
+        return "D"
+    return "F"
+
+
 def build_payload(*, root: str, cov: dict[str, Any], min_coverage: float | None) -> dict[str, Any]:
     frac = cov.get("coverage")
     pct = None if frac is None else round(frac * 100, 1)
@@ -139,6 +157,14 @@ def build_payload(*, root: str, cov: dict[str, Any], min_coverage: float | None)
         "workspace": root,
         "coverage_pct": pct,
         "min_coverage": min_coverage,
+        # ``commit_debt`` + ``grade`` are the control-pane fold contract: the pane's
+        # find_int()/find_grade() read these to rank this card alongside the rest of
+        # the portfolio. Debt is the count of ABSTAIN-prone ship subjects — the
+        # witness-blind commits a human must reword — and the grade is the coverage %
+        # on the shared A-F ladder. This is what turns a hand-run number into part of
+        # the unbounded scoring loop.
+        "commit_debt": int(cov.get("abstain") or 0),
+        "grade": grade_for(pct),
         **cov,
     }
 

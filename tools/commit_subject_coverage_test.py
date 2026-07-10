@@ -91,6 +91,33 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "NO_GRADEABLE_COMMITS")
 
 
+class FoldContractTest(unittest.TestCase):
+    """The scorecard-control-pane fold reads two fields off the payload:
+    ``commit_debt`` via find_int() and ``grade`` via find_grade(). These pin the
+    card's contract so a rename can't silently drop it out of the portfolio ranking."""
+
+    def test_commit_debt_is_abstain_count(self):
+        p = m.build_payload(root="r", cov=m.coverage(SUBJECTS), min_coverage=None)
+        self.assertEqual(p["commit_debt"], 1)  # the one ABSTAIN-prone ship subject
+
+    def test_grade_tracks_coverage_ladder(self):
+        # 2/3 gradeable = 66.7% -> D on the shared 90/80/70/60 ladder.
+        p = m.build_payload(root="r", cov=m.coverage(SUBJECTS), min_coverage=None)
+        self.assertEqual(p["grade"], "D")
+
+    def test_grade_for_ladder_boundaries(self):
+        self.assertEqual(m.grade_for(90), "A")
+        self.assertEqual(m.grade_for(89.9), "B")
+        self.assertEqual(m.grade_for(70), "C")
+        self.assertEqual(m.grade_for(64.0), "D")
+        self.assertEqual(m.grade_for(59.9), "F")
+
+    def test_empty_window_is_zero_debt_grade_a(self):
+        p = m.build_payload(root="r", cov=m.coverage(["Merge x"]), min_coverage=None)
+        self.assertEqual(p["commit_debt"], 0)
+        self.assertEqual(p["grade"], "A")
+
+
 class CollectWiringTest(unittest.TestCase):
     def test_collect_uses_injected_fetcher(self):
         p = m.collect(Path("r"), last=5, min_coverage=80.0,

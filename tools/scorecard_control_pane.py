@@ -312,6 +312,21 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "bench_dx", "debt": "bench_dx_debt", "script": "bench_dx_scorecard.py", "label": "bench-dx"},
     {"key": "cuda_dev", "debt": "process_debt", "script": "cuda_dev_scorecard.py", "label": "cuda-dev"},
     {"key": "persona_fit", "debt": "persona_fit_debt", "script": "persona_fit_scorecard.py", "label": "persona-fit"},
+    # The fleet's OWN commit output is an agentic-dev surface too: commit_subject_coverage
+    # folds check_commit_msg.verdict over the last N ship subjects and reports commit_debt
+    # (the count of ABSTAIN-prone, witness-blind subjects a human must reword) + a grade on
+    # the shared coverage ladder. It is a pure `git log` read — its number is IDENTICAL on a
+    # clean or a peer-dirty working tree — so unlike the Go-backed cards it never drops out of
+    # the fold on a build break. This is what puts "score the commits" on the same unbounded
+    # scoring loop as the rest of the portfolio instead of a hand-run tool nobody watches.
+    #
+    # SWAP OBLIGATION: commit_quality_scorecard.py is the eventual superset — it COMPOSES this
+    # subject KPI plus stamp-bindability + on-lane KPIs into one commit_debt. It is fold-eligible
+    # but its kpi_stamp_on_lane reads working-tree dos.toml / internal / cmd dirs and rides an
+    # in-flight internal_leaves fix, so it can't be pinned honestly on a dirty tree yet (see
+    # EXCLUDED_SCORECARDS in the test). When commit_quality IS registered + pinned on a green
+    # tree, REMOVE this row — folding both double-counts the subject defects in total_debt.
+    {"key": "commit_subject", "debt": "commit_debt", "script": "commit_subject_coverage.py", "label": "commit-subject"},
 ]
 
 # The scorecards folded via `go run ./cmd/fak …` (no python script). When one of
