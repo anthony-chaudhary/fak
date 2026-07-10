@@ -34,12 +34,14 @@
 //	         [--suffix 256 --decode 120 --fold 200 --fold-budget 4000]
 //	         [--cache-read 0.1 --cache-write 1.25 --turn-latency-ms 1500]
 //	         [--out fanout.json] [--csv fanout.csv]
+//	         [--ledger docs/nightrun/fanout-reuse.jsonl]   (append a dated reuse figure + fold+print the trend — #3630)
 //
 // The world version is process-global, so a sweep is SERIAL within one process; shard
 // the agent grid across processes (each has its own vdso.Default) and concatenate CSVs.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -86,6 +88,7 @@ func main() {
 
 	out := fs.String("out", "fanout.json", "JSON artifact path")
 	csv := fs.String("csv", "fanout.csv", "CSV artifact path (one row per cell)")
+	ledger := fs.String("ledger", "", "append this run's headline warm-vs-cold reuse figure (dated) to a JSONL cadence ledger, then fold+print the dated reuse trend (#3630)")
 	scale := fs.Bool("scale", false, "run the dedicated D-001 SCALE harness (internal/bench.RunFanScale): emit the coordination-overhead-vs-N=1-baseline + cross-agent-reuse report at the canonical 1/100/500/1000 grid (or --agents); JSON only, prefix-sweep flags ignored")
 	_ = fs.Parse(os.Args[1:])
 
@@ -173,6 +176,52 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "fanbench: wrote %s (%d cells) and %s in %s\n",
 		*out, len(sw.Cells), *csv, time.Since(t0).Round(time.Second))
+
+	// --ledger: the CADENCE seam (#3630). Append this run's headline warm-vs-cold reuse
+	// figure — dated with the wall clock (the ONLY non-deterministic input, kept here at
+	// the CLI boundary so internal/turnbench stays reproducible) — to a durable JSONL
+	// ledger, then fold the whole ledger and print the dated reuse trend. A scheduled run
+	// of this path is exactly the "produce a dated reuse figure appended to a ledger; a
+	// trend fold is visible" done-condition.
+	if strings.TrimSpace(*ledger) != "" {
+		if err := appendFanLedger(*ledger, sw); err != nil {
+			fmt.Fprintln(os.Stderr, "fanbench:", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// appendFanLedger extracts the headline reuse figure from the sweep, stamps it with the
+// current UTC instant, appends it as one JSONL line to path (created if absent), then
+// folds the ledger and prints the dated reuse trend to stderr.
+func appendFanLedger(path string, sw turnbench.FanoutSweep) error {
+	row, ok := turnbench.FanLedgerRowFromSweep(sw, time.Now().UTC().Format(time.RFC3339))
+	if !ok {
+		return fmt.Errorf("ledger: sweep has no cells to record")
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("ledger: open %s: %w", path, err)
+	}
+	if _, err := f.Write(append(row.JSONL(), '\n')); err != nil {
+		f.Close()
+		return fmt.Errorf("ledger: append %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("ledger: close %s: %w", path, err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("ledger: reread %s: %w", path, err)
+	}
+	trend, err := turnbench.FoldFanLedger(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("ledger: fold %s: %w", path, err)
+	}
+	fmt.Fprintf(os.Stderr, "fanbench: appended dated reuse figure to %s (%d run(s))\n", path, trend.Count)
+	fmt.Fprint(os.Stderr, trend.Render())
+	return nil
 }
 
 // runScale runs the dedicated D-001 fan-out SCALE harness (internal/bench.RunFanScale) at

@@ -1,0 +1,157 @@
+name: fanout-cadence
+
+# Trend fak's fan-out SHARED-PREFIX WARM-vs-COLD reuse over time (#3630).
+#
+# internal/turnbench (RunFanoutSweep, one-master-goal -> N-subagent) MEASURES shared-prefix
+# KV reuse across N siblings warm (SHARED: the whole fan-out in one world epoch) vs cold
+# (ISOLATED: each sub-agent alone), and cmd/fanbench runs the sweep — but on no cadence,
+# so the warm fan-out reuse figure was measured once and never trended. This job runs the
+# sweep on a schedule and appends ONE dated headline reuse figure (the widest fan-out
+# cell: cross-agent dedup uplift + the exact (N-1)*prefix reuse geometry) to a durable
+# JSONL ledger (docs/nightrun/fanout-reuse.jsonl), then folds the ledger into the dated
+# first->last reuse trend and surfaces it to the step summary. A shared-prefix reuse
+# regression across trunk commits therefore shows up as a falling trend instead of going
+# unseen.
+#
+# This is a CADENCE report in the cadence.yml mold (fold self-test -> append -> commit the
+# ledger back), NOT a Slack feeder and NOT an issue feeder. The pure append/fold/trend
+# logic is proven by internal/turnbench's unit tests (run FIRST below, the issue's own
+# acceptance gate `go test ./internal/turnbench`), so a green trend is a real signal, not a
+# tool that always passes.
+#
+# Dry-run-first, matching cadence.yml: a scheduled tick commits the appended ledger row
+# back to main (set repo var FAK_FANOUT_TICK=0 to fall back to dry-run); a manual dispatch
+# extends the ledger locally and commits only when dry_run=false. Either way the trend
+# renders to the step summary and the ledger + card upload as artifacts.
+#
+# New workflow + new ledger path (docs/nightrun/fanout-reuse.jsonl) — no existing consumer
+# reads this file or this job's outputs, so there is nothing to migrate in lockstep.
+on:
+  schedule:
+    # Mondays 09:47 UTC - an off-the-hour minute clear of the other scheduled jobs
+    # (security-audit Mon 06:17, garden 06:23, dogfood 06:41, dogfood-coverage 07:13,
+    # steering-guard 07:33, score-signal 07:41, gate-signal 07:53, bench-signal 08:03,
+    # cadence Mon 08:17, bench-feed 08:27, dojo-feed 08:37, capacity-feed 08:47,
+    # node-usage-feed 08:57, blockers-feed 09:07, cachevalue-feed 09:37).
+    - cron: "47 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Extend the ledger locally, but do not commit or push"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fanout-cadence
+  cancel-in-progress: false
+
+jobs:
+  fanout-cadence:
+    name: fan-out warm-vs-cold reuse trend
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The fold/trend logic FIRST — the issue's own acceptance gate. A green trend below
+      # is only meaningful if the append/fold that produced it is itself proven correct.
+      - name: fanout fold self-test
+        run: go test ./internal/turnbench
+
+      # THE CADENCE RUN: sweep the fan-out warm-vs-cold surface and append this run's dated
+      # headline reuse figure to the ledger, then fold+print the dated reuse trend. The
+      # canonical 1/100/500/1000 ladder at the default (deterministic) seed makes the
+      # measured figure a pure function of the kernel's reuse behavior, so the trend moves
+      # only when reuse actually changes across trunk commits. fanout.json/.csv are the
+      # per-run sweep artifacts (uploaded, never committed); only the ledger is committed.
+      - name: fanout reuse cadence tick
+        run: |
+          set +e
+          go run ./cmd/fanbench \
+            --profile research --grid canonical --sub-turns 4 --trials 8 \
+            --out fanout.json --csv fanout.csv \
+            --ledger docs/nightrun/fanout-reuse.jsonl 2>&1 | tee fanout-run.log
+          echo "fanout-exit=${PIPESTATUS[0]}"
+          set -e
+          # Slice the folded trend (the tail of the run log) into a standalone card.
+          sed -n '/fan-out reuse trend/,$p' fanout-run.log > fanout-trend.txt || true
+          test -s fanout-trend.txt || echo "(no trend rendered)" > fanout-trend.txt
+          cat fanout-trend.txt
+
+      - name: Arm ledger commit decision
+        id: arm
+        env:
+          FANOUT_TICK: ${{ vars.FAK_FANOUT_TICK }}
+        run: |
+          set -euo pipefail
+          execute=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            execute=true
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${FANOUT_TICK:-}" != "0" ]; then
+            execute=true
+          fi
+          echo "execute=$execute" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Fanout ledger commit decision"
+            echo ""
+            echo "event=${{ github.event_name }} · fanout_tick=${FANOUT_TICK:-unset(=on)} · execute=$execute"
+            echo ""
+            echo "The reuse ledger is DEFAULT-ON for scheduled cadence runs; set repo var FAK_FANOUT_TICK=0 to fall back to dry-run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push ledger
+        if: steps.arm.outputs.execute == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "fleet-fanout[bot]"
+          git config user.email "fleet-fanout@users.noreply.github.com"
+          git add docs/nightrun/fanout-reuse.jsonl
+          if git diff --staged --quiet; then
+            echo "No ledger changes to commit"
+          else
+            git commit -s -m "docs(nightrun): record fan-out reuse cadence tick (fak docs)"
+            git push
+          fi
+
+      - name: trend -> step summary
+        if: always()
+        run: |
+          {
+            echo "## fan-out warm-vs-cold reuse trend"
+            echo '```'
+            cat fanout-trend.txt 2>/dev/null || echo "(no trend)"
+            echo '```'
+            if [ "${{ steps.arm.outputs.execute }}" = "true" ]; then
+              echo "_Executed: the appended reuse row was committed to the ledger when present._"
+            else
+              echo "_Dry-run: the ledger was extended locally but not committed._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload cadence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fanout-cadence
+          path: |
+            fanout-trend.txt
+            fanout-run.log
+            fanout.json
+            fanout.csv
+            docs/nightrun/fanout-reuse.jsonl
+          if-no-files-found: ignore
