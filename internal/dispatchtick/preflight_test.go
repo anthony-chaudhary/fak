@@ -31,6 +31,28 @@ func TestHostCapacityRoomyBoxBoundByCores(t *testing.T) {
 	}
 }
 
+func TestHostCapacityBindingDeterministicOnTie(t *testing.T) {
+	// cores=4 -> 4/2 = 2 and ram=3000 -> 3000/1500 = 2 bind at the SAME value,
+	// so both are the minimum. Ranging info.Components (a map) picks a random
+	// binding on this tie -- Go randomizes map iteration order -- flipping the
+	// reported limiter between "cores" and "ram" for identical inputs. Pin the
+	// deterministic winner and loop enough that a regression to map order
+	// surfaces (a 3-key map re-seeds per call, so both orders appear quickly).
+	res := HostResources{Cores: IntPtr(4), FreeRAMMB: IntPtr(3000), TotalThreads: IntPtr(1000)}
+	for i := 0; i < 200; i++ {
+		info := HostCapacity(res)
+		if info.HostCap == nil || *info.HostCap != 2 {
+			t.Fatalf("host cap = %v, want 2 (iter %d)", info.HostCap, i)
+		}
+		if info.Components["cores"] != 2 || info.Components["ram"] != 2 {
+			t.Fatalf("components = %v, want cores and ram tied at 2 (iter %d)", info.Components, i)
+		}
+		if info.Binding != "cores" {
+			t.Fatalf("binding = %q, want deterministic cores on the cores/ram tie (iter %d)", info.Binding, i)
+		}
+	}
+}
+
 func TestDefaultMaxWorkersFallbackPinned(t *testing.T) {
 	// Pin the raised ceiling (8->20) so a silent revert is caught; the adaptive
 	// gates (host_cap, seats, dos target) can only pull the effective cap DOWN.

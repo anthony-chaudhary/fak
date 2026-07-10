@@ -143,6 +143,16 @@ type PreflightInput struct {
 	// DefaultHostBudgets() so the FAK_HOST_* env knobs reach the fold.
 	Budgets       HostBudgets
 	OSWorkerProcs int
+	// WorkerFloor is the SLOW predictive loop's forecast floor (#3368, two-timescale
+	// scaling). Every cap above is a lowering min(); a reactive dip (a low kernel/lease
+	// target) can therefore leave the fleet under-provisioned for a load ramp the
+	// forecast already sees coming. The fast reactive tick clamps UP to this floor via
+	// max, so capacity is pre-warmed ahead of demand -- but the floor is itself bounded
+	// by the HARD physical/config ceiling (config max, host cap, seat inventory), never
+	// the reactive lease target, so pre-warming can override a soft reactive dip WITHOUT
+	// ever overbooking the box or the seat pool. Zero (the default) means "no forecast
+	// floor" and is byte-identical to before this term existed.
+	WorkerFloor int
 }
 
 type PreflightResult struct {
@@ -166,12 +176,17 @@ type PreflightResult struct {
 }
 
 type CapTerms struct {
-	ConfiguredCap int    `json:"configured_cap"`
-	LeaseCap      *int   `json:"lease_cap"`
-	HostCap       *int   `json:"host_cap"`
-	SeatCap       *int   `json:"seat_cap"`
-	EffectiveCap  int    `json:"effective_cap"`
-	Limiting      string `json:"limiting"`
+	ConfiguredCap int  `json:"configured_cap"`
+	LeaseCap      *int `json:"lease_cap"`
+	HostCap       *int `json:"host_cap"`
+	SeatCap       *int `json:"seat_cap"`
+	// WorkerFloor is the ceiling-bounded predictive floor (#3368) that raised the
+	// effective cap, or 0 when no forecast floor applied. When it is what set the
+	// effective cap (it lifted capacity above the tightest lowering cap), Limiting
+	// reads "floor" so an operator can see the forecast, not a min() cap, is binding.
+	WorkerFloor  int    `json:"worker_floor"`
+	EffectiveCap int    `json:"effective_cap"`
+	Limiting     string `json:"limiting"`
 }
 
 func IntPtr(n int) *int { return &n }
@@ -208,7 +223,17 @@ func HostCapacityWith(res HostResources, budgets HostBudgets) HostCapacityInfo {
 		return info
 	}
 	minComponent := 0
-	for name, value := range info.Components {
+	// Iterate a fixed priority order (cores, ram, threads) rather than ranging the
+	// Components map: Go randomizes map iteration, so on a TIE for the minimum the
+	// binding -- and thus cap_terms.Limiting -- would flip between equally-tight
+	// components across identical inputs. A canonical order makes the reported
+	// limiter deterministic, which the #3368 forecast-floor observability (Limiting
+	// "floor") relies on to be stable. These three are the only keys ever set above.
+	for _, name := range []string{"cores", "ram", "threads"} {
+		value, ok := info.Components[name]
+		if !ok {
+			continue
+		}
 		if info.Binding == "" || value < minComponent {
 			info.Binding = name
 			minComponent = value
@@ -242,6 +267,32 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		capacity = 0
 	}
 
+	// Two-timescale scaling (#3368): the slow predictive loop only sets a FLOOR,
+	// never a direct count; the fast reactive tick (every min() cap above) decides
+	// freely and clamps UP to that floor here via max. The floor lifts the effective
+	// cap back over a soft reactive dip (a low kernel/lease target) so capacity is
+	// pre-warmed for an incoming ramp -- but it is bounded by the HARD ceiling (the
+	// physical/config caps only: config max, host cap, seat inventory; NOT the reactive
+	// lease target it is meant to override), so it can never overbook the box or the
+	// seat pool. floorApplied carries the ceiling-bounded value into cap_terms.
+	floorApplied := 0
+	if in.WorkerFloor > 0 {
+		ceiling := in.MaxWorkers
+		if hostCapInfo.HostCap != nil {
+			ceiling = minInt(ceiling, *hostCapInfo.HostCap)
+		}
+		if foldSeats {
+			ceiling = minInt(ceiling, *in.Seat.Total)
+		}
+		if ceiling < 0 {
+			ceiling = 0
+		}
+		floorApplied = minInt(in.WorkerFloor, ceiling)
+		if floorApplied > capacity {
+			capacity = floorApplied
+		}
+	}
+
 	aliveKernelForCap := 0
 	if in.Kernel.Target != nil && *in.Kernel.Target > 0 && in.Kernel.Alive != nil {
 		aliveKernelForCap = *in.Kernel.Alive
@@ -268,7 +319,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		Cap:           capacity,
 		Live:          live,
 		Headroom:      headroom,
-		CapTerms:      capTerms(in, hostCapInfo.HostCap, capacity),
+		CapTerms:      capTerms(in, hostCapInfo.HostCap, capacity, floorApplied),
 		MaxWorkers:    in.MaxWorkers,
 		HostCap:       hostCapInfo.HostCap,
 		HostCapacity:  hostCapInfo,
@@ -307,12 +358,13 @@ func accountUnattributedLiveSlots(seat SeatCheck, live int) SeatCheck {
 	return seat
 }
 
-func capTerms(in PreflightInput, hostCap *int, effective int) CapTerms {
+func capTerms(in PreflightInput, hostCap *int, effective, floor int) CapTerms {
 	terms := CapTerms{
 		ConfiguredCap: in.MaxWorkers,
 		LeaseCap:      positivePtr(in.Kernel.Target),
 		HostCap:       copyIntPtr(hostCap),
 		SeatCap:       positivePtr(in.Seat.Total),
+		WorkerFloor:   floor,
 		EffectiveCap:  effective,
 		Limiting:      "configured",
 	}
@@ -332,6 +384,13 @@ func capTerms(in PreflightInput, hostCap *int, effective int) CapTerms {
 	}
 	if best < 0 {
 		terms.Limiting = "configured"
+	}
+	// The predictive floor lifted the effective cap above the tightest lowering cap:
+	// the forecast floor, not a min() cap, now sets what the fleet may run. (When the
+	// floor only matches an existing lowering cap it did not raise anything, so the
+	// lowering cap stays named as the limiter.)
+	if floor > 0 && effective > best {
+		terms.Limiting = "floor"
 	}
 	return terms
 }
@@ -406,6 +465,7 @@ func (c CapTerms) Map() map[string]any {
 		"lease_cap":      ptrAny(c.LeaseCap),
 		"host_cap":       ptrAny(c.HostCap),
 		"seat_cap":       ptrAny(c.SeatCap),
+		"worker_floor":   c.WorkerFloor,
 		"effective_cap":  c.EffectiveCap,
 		"limiting":       c.Limiting,
 	}
