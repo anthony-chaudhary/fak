@@ -720,6 +720,19 @@ summary  = "An issue was held back from dispatch because its declared paths inte
 fix      = "Wait for the known-bad signature to clear (auto-release, W6) or land the elected fixer (W5); an issue disjoint from every live signature dispatches normally. Floor: `fak dispatch route` / `fak dispatch skipped` known-bad hold over the internal/knownbad ledger."
 see_also = ["internal/knownbad", "fak dispatch route", "fak dispatch skipped", "docs/blast-radius-containment-cohort.md"]
 
+# Dependency soft-hold: an issue was held from dispatch because a prerequisite it named in its
+# body ("depends-on:/blocked-by: #N") is still an OPEN candidate this tick. Self-clearing (the
+# tick refetches the backlog, so the hold lifts the tick after the prerequisite closes) and
+# fail-open (a closed/absent prerequisite never holds). DISTINCT from BLOCKED_BY_KNOWN_BAD (a
+# live-ledger tree intersection) and BLOCKED_BY_HUMAN (a static router label): this is a
+# body-declared inter-issue edge, honored as a SOFT hold, never a hard ban.
+[reasons.BLOCKED_BY_OPEN_PREREQ]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A dispatchable leaf was held from dispatch because a prerequisite it declared (\"depends-on:/blocked-by: #N\") is still an open candidate this tick; dispatching it would run work ahead of its dependency. Holds only the dependent -- every leaf with no open prerequisite keeps dispatching."
+fix      = "Let the named prerequisite close (the hold self-clears the next tick, since the backlog is refetched) or break the dependency edge in the issue body; a leaf whose prerequisites are all closed dispatches normally. Floor: `fak dispatch route` / `fak dispatch graph` prereq hold over the internal/dispatchorder engine."
+see_also = ["internal/dispatchorder", "internal/dispatchtick", "fak dispatch route", "fak dispatch graph"]
+
 # Blast-radius containment W5 (#2717, epic #2712): a SECOND `fak knownbad claim` on a
 # signature already owned by a fixer is refused with this token and the WINNER's identity,
 # so the losing agent gets a pointer to the elected fixer instead of racing a second edit to

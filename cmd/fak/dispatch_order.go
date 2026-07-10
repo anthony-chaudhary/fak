@@ -56,6 +56,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchRoute(stdout, stderr, argv[1:])
 	case "route-health":
 		return runDispatchRouteHealth(stdout, stderr, argv[1:])
+	case "graph":
+		return runDispatchGraph(stdout, stderr, argv[1:])
 	case "canary":
 		return runDispatchCanary(stdout, stderr, argv[1:])
 	case "skipped":
@@ -102,7 +104,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -274,6 +276,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
+  fak dispatch graph [--workspace DIR] [--json]
   fak dispatch route-health probe --base-url URL --model M [--provider P] [--account A] [--api-key-env ENV] [--timeout DUR] [--workspace DIR] [--json]
   fak dispatch route-health status [--workspace DIR] [--now UNIX] [--json]
   fak dispatch route-health gate (--route KEY | --provider P --model M [--account A]) [--workspace DIR] [--now UNIX] [--json]
