@@ -274,6 +274,26 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 
 	// stopVerdict captures the fleet-wide verdict that ended the run (if any), so the
 	// witness can record a seat refuse (#3523) as a NoSeat park in the durable ledger.
+	stopVerdict := dispatchGardenCandidates(stderr, plan, candidates, laneByIssue, root, *backend, ledgerPath, *maxWorkers, live, !*noLoopLedger)
+
+	classifyGardenDispatchOutcome(plan, live)
+
+	// Record a NoSeat park in the ledger when a LIVE run actually stopped on a seat
+	// refuse, so the next run's Gate-1.5 park-and-retry (#3523) counts it. A dry-run
+	// or a non-seat stop records no park token (the derivation ends its tail there).
+	seatReason := ""
+	if live && gardenDispatchSeatRefuses[stopVerdict] {
+		seatReason = seatParkReasonNoSeat
+	}
+	witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan, seatReason)
+	return renderGardenDispatchResult(stdout, stderr, plan, *asJSON)
+}
+
+// dispatchGardenCandidates routes each budgeted candidate to its lane and hands BOTH
+// to evaluateDispatchTick, folding every decision into plan (results, counters, and
+// skipped-by-reason buckets). It returns the fleet-wide capacity verdict that stopped
+// the run early ("" when the run walked every candidate).
+func dispatchGardenCandidates(stderr io.Writer, plan *gardenDispatchPlan, candidates []gardenbundle.WalkDecision, laneByIssue map[int]string, root, backend, ledgerPath string, maxWorkers int, live, recordLoop bool) string {
 	stopVerdict := ""
 	for _, cand := range candidates {
 		res := gardenDispatchCandidateResult{
@@ -294,8 +314,8 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 
 		payload, tickErr := evaluateDispatchTick(dispatchTickOptions{
 			Workspace:  root,
-			MaxWorkers: *maxWorkers,
-			WorkKind:   dispatchtickWorkKind(*backend),
+			MaxWorkers: maxWorkers,
+			WorkKind:   dispatchtickWorkKind(backend),
 			// Garden dispatch IS project-management / repo-maintenance work (triage, dedup,
 			// close/relabel of stale-dormant issues) — routine coordination where a wrong
 			// call costs a re-run, not a bad production write. Default its workers to fable
@@ -304,13 +324,13 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 			WorkClassModel: dispatchtick.WorkerModelFable,
 			Lane:           lane,
 			TargetIssue:    cand.ID,
-			Backend:        *backend,
+			Backend:        backend,
 			Live:           live,
 			Refresh:        true,
 			CooldownMin:    dispatchtick.DefaultCooldownMinutes,
 			WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
 			SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
-			RecordLoop:     !*noLoopLedger,
+			RecordLoop:     recordLoop,
 			LoopLedger:     ledgerPath,
 		}, stderr)
 		if tickErr != nil {
@@ -347,7 +367,13 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 			break
 		}
 	}
+	return stopVerdict
+}
 
+// classifyGardenDispatchOutcome folds the run's counters into the plan's closing
+// verdict and reason -- the same closed vocabulary the bridge has always emitted
+// (NO_CANDIDATES / NONE_ADMITTED / APPLIED / PARTIAL / WOULD_APPLY).
+func classifyGardenDispatchOutcome(plan *gardenDispatchPlan, live bool) {
 	switch {
 	case plan.Considered == 0:
 		plan.Verdict = "NO_CANDIDATES"
@@ -365,16 +391,6 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 		plan.Verdict = "WOULD_APPLY"
 		plan.Reason = fmt.Sprintf("dry-run: %d of %d considered candidate(s) would be admitted; re-run with --apply to spawn", plan.Admitted, plan.Considered)
 	}
-
-	// Record a NoSeat park in the ledger when a LIVE run actually stopped on a seat
-	// refuse, so the next run's Gate-1.5 park-and-retry (#3523) counts it. A dry-run
-	// or a non-seat stop records no park token (the derivation ends its tail there).
-	seatReason := ""
-	if live && gardenDispatchSeatRefuses[stopVerdict] {
-		seatReason = seatParkReasonNoSeat
-	}
-	witnessGardenDispatch(ledgerPath, !*noLoopLedger, plan, seatReason)
-	return renderGardenDispatchResult(stdout, stderr, plan, *asJSON)
 }
 
 // gardenDispatchCandidates reduces a walk plan's budgeted decisions to the ones the
