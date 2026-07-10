@@ -1,6 +1,6 @@
 ---
 name: resume-watchdog-audit
-description: The watchdog-watchdog — one read-only pass that proves the resume watchdog (the n¹ layer that revives dead autonomous Claude sessions) is itself ALIVE, TICKING, and revising PRODUCTIVE instances, versus silently STALLED. Distrusts self-report: reads the live Fleet registry ledgers (%LOCALAPPDATA%\Fleet\registry) and the scheduled-task exit codes, never the watchdog's own "I'm fine". Verifies the n² layer (is the watchdog ticking, is its backlog draining, are resumes witnessed as real transcript turns, or are they launched_unproven) and the n³ layer (is THIS audit itself scheduled and does it escalate when the watchdog is down — who watches the watchman's watchman). Catches the exact failure this repo hit on 2026-07-09: after a 10:46 boot the watchdog drained a 65-deep backlog and witnessed progress on 122 sessions, then stalled at 11:42 because its `conhost.exe --headless` scheduled-task launch shim started returning 0x800710E0 ("operator or administrator refused the request"), leaving 2 stragglers resumed-but-dead-and-unproven. Read-only by default; the live drain is operator-gated. Use after a crash/reboot, when sessions look stuck, or on a /loop cadence as the standing meta-watchdog.
+description: The watchdog-watchdog — one read-only pass that proves the resume watchdog (the n¹ layer that revives dead autonomous Claude sessions) is itself ALIVE, TICKING, and reviving PRODUCTIVE instances, versus silently STALLED. Distrusts self-report: reads the live Fleet registry ledgers (%LOCALAPPDATA%\Fleet\registry), the scheduled-task exit codes AND each task's Principal.LogonType, never the watchdog's own "I'm fine". Verifies the n² layer (is the watchdog ticking, is its backlog draining, are resumes witnessed as real transcript turns, or merely launched_unproven) and the n³ layer (is THIS audit itself scheduled/looped and orthogonal to the failure it detects — who watches the watchman's watchman). Turnkey entry point: tools\watchdog_watchdog_audit.ps1 (read-only, emits GREEN/AMBER/RED + exit 0/2/3). Catches the exact failure this repo hit on 2026-07-09: after a boot the watchdog drained the backlog, then every scheduled task with Principal.LogonType=Interactive began returning 0x800710E0 ("operator or administrator refused the request") on this RDP/headless box while S4U siblings stayed 0x0 — an 11-task outage of the whole safety net, leaving resumes launched-but-unproven. CORRECTED ROOT CAUSE: the discriminator is LogonType (Interactive dies, S4U survives), NOT the conhost launch shim (that theory was empirically disproved — the watchdog kept failing after conhost was removed). Read-only by default; the S4U migration + live drain are operator/elevation-gated. Use after a crash/reboot, when sessions look stuck, or on a /loop cadence as the standing meta-watchdog.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, PowerShell, Grep, Glob, Write
@@ -19,6 +19,20 @@ argument-hint: "[--fix] (no args = read-only audit; --fix offers the operator-ga
 
 The one rule: **silence is the failure mode.** A stalled watchdog and a healthy-with-
 nothing-to-do watchdog look identical from the outside. This pass distinguishes them.
+
+## Run it (one command)
+
+```powershell
+pwsh -NoProfile -File tools/watchdog_watchdog_audit.ps1        # human-readable verdict
+pwsh -NoProfile -File tools/watchdog_watchdog_audit.ps1 -Json  # machine verdict; exit 0/2/3 = GREEN/AMBER/RED
+```
+
+That script performs Layers 0–3 below in one read-only pass and prints a
+GREEN/AMBER/RED verdict with the single deciding artifact and the one action. The
+sections below are the manual expansion — read them to interpret the verdict, triage
+a specific straggler, or when `fak`/the script isn't on the box. **This audit must
+never share the failure mode it detects: run it as an agent `/loop` or an S4U task,
+never as an Interactive scheduled task** (that would die exactly the way the watchdog did).
 
 ---
 
@@ -69,29 +83,45 @@ foreach ($f in 'resume_ledger.jsonl','resume_watchdog_status.jsonl','resume_plan
 > `--status` reads whatever the last tick left behind and cannot tell "healthy + quiet"
 > from "dead since 11:42".
 
-## Layer 1b — WHY it stalled: the scheduled-task exit codes
+## Layer 1b — WHY it stalled: exit code **paired with `Principal.LogonType`**
 
-If it stalled, the cause is almost always the launcher, not the logic. Read the task
-family's last results:
+If it stalled, the cause is almost always the launch context, not the logic. Read the
+task family's last result **and its LogonType together** — the LogonType is the
+load-bearing column:
 
 ```powershell
-foreach ($t in 'FleetResumeWatchdog','FleetOwnerSeatResume','FleetSupervisorWatchdog','FleetProcResourceGuard','FleetStrandedRecovery','FleetIssueDispatch') {
-  $i = Get-ScheduledTaskInfo -TaskName $t -ErrorAction SilentlyContinue
-  if ($i) { [pscustomobject]@{Task=$t; LastRun=$i.LastRunTime; Result=('0x{0:X}' -f $i.LastTaskResult); Next=$i.NextRunTime} } } | Format-Table -AutoSize
+Get-ScheduledTask | Where-Object { $_.TaskName -match 'Resume|Supervisor|Watchdog|Guard|Seat|Stranded|Dispatch' } | ForEach-Object {
+  $i = Get-ScheduledTaskInfo -TaskName $_.TaskName -TaskPath $_.TaskPath -EA SilentlyContinue
+  [pscustomobject]@{ Task=$_.TaskName; LogonType="$($_.Principal.LogonType)"; Result=('0x{0:X}' -f $i.LastTaskResult); LastRun=$i.LastRunTime } } |
+  Sort-Object LogonType | Format-Table -AutoSize
 ```
 
-Decode a non-zero result with `[System.ComponentModel.Win32Exception]0x<low16>`.
-Known fault seen in this repo: **`0x800710E0` = "The operator or administrator has
-refused the request"** on every task whose action is `conhost.exe --headless
-powershell …`, while sibling tasks launched *without* the conhost shim return `0x0`.
-That split **is** the diagnosis: the `conhost --headless` launch shim is being refused
-(post-boot Windows/MDM policy — suspect `ExploitGuard MDM policy Refresh` /
-`SafeguardsReconciliation`). Confirm harmlessly — a working shim propagates the child
-exit code, a broken one returns empty:
+**Known fault (2026-07-09), CORRECTED diagnosis:** `0x800710E0` = "The operator or
+administrator has refused the request" appears on **every task with
+`Principal.LogonType=Interactive`**, while every **S4U** sibling returns `0x0` — on this
+same headless / RDP-accessed box, at the same time, under the same launcher. That split
+**is** the diagnosis: **Interactive-logon tasks are refused when there is no true
+interactive console** (they stay refused even while an RDP session shows `Active` in
+`qwinsta`, and die outright when it disconnects); **S4U** tasks ("run whether logged on
+or not"; session 0, windowless, still AS THIS USER) are immune. The clean natural
+experiment: `FleetResumeWatchdog` (Interactive → `0x800710E0`) sitting next to
+`FleetStrandedRecovery` (S4U → `0x0`).
+
+> **The `conhost.exe --headless` shim is a RED HERRING — do NOT chase it.** An earlier
+> version of this skill blamed conhost. It was empirically disproved: `FleetResumeWatchdog`
+> kept returning `0x800710E0` *after* conhost was removed and it launched `powershell.exe`
+> directly. Removing conhost does nothing; only the LogonType matters. (`ExploitGuard MDM
+> policy Refresh` / `SafeguardsReconciliation` are unrelated `ServiceAccount` system tasks
+> that are always `0x0` — not the culprit.)
+
+The failing set is not one task — enumerate ALL Interactive tasks (fleet-wide) so the
+remediation covers the whole outage, not just the watchdog:
 
 ```powershell
-$null = & conhost.exe --headless powershell.exe -NoProfile -Command "exit 7" 2>&1
-"conhost --headless exit = $LASTEXITCODE  (7 = ok; empty/other = shim refused)"
+Get-ScheduledTask | Where-Object { $_.Principal.LogonType -eq 'Interactive' } |
+  ForEach-Object { $i=Get-ScheduledTaskInfo -TaskName $_.TaskName -TaskPath $_.TaskPath -EA SilentlyContinue
+    [pscustomobject]@{ Task=$_.TaskName; Result=('0x{0:X}' -f $i.LastTaskResult) } } |
+  Where-Object { $_.Result -eq '0x800710E0' } | Format-Table -AutoSize
 ```
 
 ## Layer 2 — was the response PRODUCTIVE? (not just "did it launch")
@@ -158,10 +188,22 @@ The audit above is read-only. These act — they spawn real `claude --resume` pr
 and consume account quota, so **surface them and get explicit go-ahead; never run them
 as part of the audit**:
 
-1. **Drain the stragglers now** (one live tick, honors the per-tick cap + source governor):
-   `pwsh -NoProfile -File tools/fleet_resume_watchdog.ps1 -Live`
-2. **Fix the stall's root cause** — if `0x800710E0` on the conhost shim: re-register the
-   task to launch `powershell.exe` (or `fak` / `pwsh`) **directly** instead of via
-   `conhost.exe --headless`, then confirm the next scheduled run returns `0x0` and the
-   ledger mtime advances.
-3. Re-run this audit; expect GREEN (ledger fresh, backlog drained, no unproven).
+1. **Fix the stall's ROOT CAUSE first** — if the audit shows down tasks with
+   `LogonType=Interactive / 0x800710E0`, migrate their principal to **S4U**. This
+   **requires an ELEVATED shell** (setting an S4U principal is "Access is denied"
+   non-elevated). The helper does the whole fleet idempotently, dry-run by default:
+   ```powershell
+   # from an Administrator PowerShell:
+   .\tools\migrate_fleet_tasks_to_s4u.ps1                    # dry-run: review the plan
+   .\tools\migrate_fleet_tasks_to_s4u.ps1 -Apply -VerifyRun  # migrate all failing + force-run each -> expect 0x0
+   ```
+   Do **not** re-register to `powershell.exe`-direct as a "fix" — that changes the
+   launcher, not the LogonType, and leaves the task Interactive and still failing.
+2. **Drain the stragglers** (one live tick; honors the per-tick cap + source governor).
+   Only meaningful once the task is S4U — otherwise the scheduled task can't tick and you
+   are hand-cranking it: `pwsh -NoProfile -File tools/fleet_resume_watchdog.ps1 -Live`
+3. **Close the reinstall regression** — most `register_*.ps1` installers still create
+   Interactive (schtasks default), so a reinstall reintroduces the bug. `register_resume_watchdog.ps1`
+   and `register_issue_dispatch.ps1` are already S4U; migrate the rest.
+4. Re-run this audit (`tools/watchdog_watchdog_audit.ps1`); expect GREEN (ledger fresh,
+   no down/latent task, backlog draining, resumes proven).
