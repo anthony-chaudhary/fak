@@ -24,15 +24,20 @@ import (
 // pure planner's plain most-headroom-first sort orders tiers correctly AND orders within a
 // tier without any planner change:
 //
-//	(1,2]  OFFERABLE (available, not throttled, creds present). Base +1, plus a load bonus
-//	       1/(1+live_sessions) so the LEAST-loaded offerable bucket sorts first. Always > 1,
-//	       so every offerable bucket still outranks unknown and walled.
-//	 0     UNKNOWN — no runtime row for the bucket. Neither preferred nor penalised.
-//	[-1,0) WALLED (usage-throttled or blocked). Base -1, plus a reset-soonness bonus in [0,1)
-//	       so among walled buckets the SOONEST-to-reset (recovers first) sorts highest. Always
-//	       < 0, so a walled bucket never outranks an unknown or offerable one.
+//	(1,2]  OFFERABLE (available, not throttled, creds present). Base accounts.OfferableBase (+1),
+//	       plus a load bonus 1/(1+live_sessions) so the LEAST-loaded offerable bucket sorts first.
+//	       Always > 1, so every offerable bucket still outranks unknown and walled.
+//	 0     UNKNOWN (accounts.UnknownScore) — no runtime row for the bucket. Neither preferred nor
+//	       penalised.
+//	[-1,0) WALLED (usage-throttled or blocked). Base accounts.WalledBase (-1), plus a
+//	       reset-soonness bonus in [0,1) so among walled buckets the SOONEST-to-reset (recovers
+//	       first) sorts highest. Always < 0, so a walled bucket never outranks an unknown or
+//	       offerable one.
 //
-// This is the "finer most-room-first" ordering the header used to defer: it is a TIE-BREAK
+// The band ANCHORS (accounts.WalledBase/UnknownScore/OfferableBase) and the sign→tier read
+// (accounts.Classify, and accounts.HeadroomLabel for the display word) live in internal/accounts
+// so producer and interpreter share one source of truth — this file only ADDS the within-tier
+// bonus. This is the "finer most-room-first" ordering the header used to defer: a TIE-BREAK
 // within a tier from signals the roster already carries (live_sessions, the throttle reset
 // string), NOT a continuous remaining-quota number — a real quota API remains a follow-on.
 
@@ -85,7 +90,7 @@ func applyCooldownToHeadroom(hr accounts.RotationHeadroom, cd *accounts.Cooldown
 		hr = accounts.RotationHeadroom{}
 	}
 	for _, e := range active {
-		hr[e.Account] = -1
+		hr[e.Account] = accounts.WalledBase
 	}
 	return hr
 }
@@ -111,7 +116,7 @@ func headroomFromRoster(rows []fleetaccounts.Account, now time.Time) accounts.Ro
 		if r.Product != "claude" || r.AccountUUID == nil || *r.AccountUUID == "" {
 			continue
 		}
-		key := "uuid:" + *r.AccountUUID
+		key := accounts.UUIDBucketKey(*r.AccountUUID)
 		score := bucketScore(r, now)
 		b := buckets[key]
 		if !b.haveBest || score > b.best {
@@ -120,8 +125,11 @@ func headroomFromRoster(rows []fleetaccounts.Account, now time.Time) accounts.Ro
 		}
 		if accountUsageLimitActive(r, now) {
 			limit := score
-			if limit >= 0 {
-				limit = -1
+			// Clamp a usage-capped row into the WALLED band: if its own score is unknown/offerable
+			// (>= the walled/non-walled boundary), force it to the walled floor. The boundary is
+			// UnknownScore (0), distinct from the floor WalledBase (-1).
+			if limit >= accounts.UnknownScore {
+				limit = accounts.WalledBase
 			}
 			if !b.haveLimit || limit > b.limit {
 				b.limit = limit
@@ -163,14 +171,14 @@ func bucketScore(r fleetaccounts.Account, now time.Time) float64 {
 				bonus = s
 			}
 		}
-		return -1 + bonus
+		return accounts.WalledBase + bonus
 	case avail:
 		// Offerable: base +1, plus a load bonus 1/(1+live) in (0,1] so the least-loaded bucket
 		// sorts highest while all offerable buckets stay strictly above 1.
 		live := liveLoad(r)
-		return 1 + 1.0/float64(1+live)
+		return accounts.OfferableBase + 1.0/float64(1+live)
 	default:
-		return 0 // unknown — no runtime availability signal
+		return accounts.UnknownScore // unknown — no runtime availability signal
 	}
 }
 

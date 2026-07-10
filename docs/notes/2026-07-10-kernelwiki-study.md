@@ -1,5 +1,5 @@
 ---
-title: "KernelWiki borrow study: 5 curated-KB disciplines filed, 46/47 candidates clustered onto existing fak seams"
+title: "KernelWiki borrow study: 5 sub-epics + 28 leaves onto existing fak seams, 47 candidates witnessed"
 description: >
   A deep /study-repo pass over mit-han-lab/KernelWiki @ 76d27b56 (a curated GPU-kernel
   knowledge base + CI-invariant ingestion pipeline), scanned for the corpus-hygiene
@@ -8,10 +8,12 @@ description: >
   PRESENT. The signal is not "fak lacks a feature" but "fak has the seam (freshness.go
   DriftKinds, CLAIMS.md/honesty.go one-tag lint, idea_scout firehose, benchauthority)
   without the invariant (closed vocab, bidirectional registry, reproducibility floor,
-  committed decision ledger, byte-checkable provenance)." Clustered the 46 fileable
-  onto 5 single-axis children under epic #3946; deduped 2 into already-open #3925/#3923;
-  captured the 8 Blackwell decode-kernel borrows as a file-after-measurement shortlist.
-  All borrows inspire (Python->Go clean-room); no bytes vendored.
+  committed decision ledger, byte-checkable provenance)." Organized the fileable set as
+  5 single-axis sub-epics under umbrella epic #3946, each fully decomposed into
+  independently-shippable child leaves (28 leaves total, #4072-#4099); deduped 2 into
+  already-open #3925/#3923; captured the 8 Blackwell decode-kernel borrows as a
+  file-after-measurement shortlist. All borrows inspire (Python->Go clean-room); no
+  bytes vendored.
 metadata:
   type: project
 ---
@@ -34,18 +36,19 @@ README §License: tooling (`scripts/`, `references/`, `data/`) is "MIT-style" (n
 
 ## Decisive finding
 
-fak already has the *seams* but not the *invariants*. Witness tally across 47 candidates: **43 PARTIAL, 3 ABSENT, 1 PRESENT**. The high fileable rate is real (fak's knowledge/claim/ingest surfaces genuinely lack these disciplines) but does **not** justify 46 issues — the candidates collapse onto **five existing fak seams**, filed as five single-axis children under epic **#3946**, each folding its sub-mechanisms as a checklist. Two candidates were **deduped into already-open issues**; eight object-level kernel borrows were **captured but not filed** (they need a fak-side measurement first).
+fak already has the *seams* but not the *invariants*. Witness tally across 47 candidates: **43 PARTIAL, 3 ABSENT, 1 PRESENT**. The high fileable rate is real (fak's knowledge/claim/ingest surfaces genuinely lack these disciplines). The candidates organize onto **five existing fak seams**, filed as **five single-axis sub-epics** under umbrella epic **#3946** — and each sub-epic is **fully decomposed into independently-shippable child leaves** (28 leaves, #4072–#4099), since every folded rung is a separable PR against a distinct seam. Two candidates were **deduped into already-open issues**; eight object-level kernel borrows were **captured but not filed** (they need a fak-side measurement first).
 
 ## Filed this pass
 
-| Issue | Axis | Seam |
-|---|---|---|
-| **#3946** (epic) | umbrella: mine KernelWiki's curated-KB disciplines | — |
-| **#3947** `feat(idea_scout)` | no accepted triage item silently vanishes (committed decision-ledger + skip-audit closure) | `tools/idea_scout.py:445` |
-| **#3948** `feat(devindex)` | cross-ref index = pure byte-reproducible projection of frontmatter, no dangling internal cite | `internal/devindex/freshness.go` |
-| **#3949** `feat(claims)` | top claim tier must cite ≥2 independent evidence classes + machine-witnessed repro floor | `internal/marketing/honesty.go:30`, `internal/benchauthority` |
-| **#3950** `feat(devfresh)` | version-pinned claim resolves bidirectionally to a central registry + decays offline | `internal/devindex/freshness.go`, `internal/docfreshrsi` |
-| **#3951** `feat(field-borrow)` | borrowed excerpt carries durable byte-checkable provenance separate from synthesis | `internal/swebenchsota/swebenchsota.go:79` |
+Structure: one top umbrella epic (**#3946**) → **5 sub-epics** (one per fak seam) → **28 leaves** (each folded rung filed as an independently-shippable ticket, #4072–#4099). The 35 fileable candidates in these five clusters collapse to 28 leaves (a handful of near-identical candidates merged into one leaf; noted per-cluster below).
+
+| Sub-epic | Axis | Seam | Leaves |
+|---|---|---|---|
+| **#3947** `epic(idea_scout)` | no accepted triage item silently vanishes (committed decision-ledger + skip-audit closure) | `tools/idea_scout.py:445` | #4072–#4076 (5) |
+| **#3948** `epic(devindex)` | cross-ref index = pure byte-reproducible projection of frontmatter, no dangling internal cite | `internal/devindex/freshness.go` | #4077–#4083 (7) |
+| **#3949** `epic(claims)` | top claim tier must cite ≥2 independent evidence classes + machine-witnessed repro floor | `internal/marketing/honesty.go:30`, `internal/benchauthority` | #4084–#4089 (6) |
+| **#3950** `epic(devfresh)` | version-pinned claim resolves bidirectionally to a central registry + decays offline | `internal/devindex/freshness.go`, `internal/docfreshrsi` | #4090–#4095 (6) |
+| **#3951** `epic(field-borrow)` | borrowed excerpt carries durable byte-checkable provenance separate from synthesis | `internal/swebenchsota/swebenchsota.go:79` | #4096–#4099 (4) |
 
 **Deduped into already-open issues (no new issue):**
 - **#3925** (`feat(devindex): synonym + fuzzy fallback`) ← alias-aware ranking mechanism (canonical→alias map, best-variant MAX scoring, alias-normalized facet filters).
@@ -55,7 +58,7 @@ fak already has the *seams* but not the *invariants*. Witness tally across 47 ca
 
 Every candidate maps to a filed home so nothing is lost. `[V]` = witness verdict. Level: `sys` = system/tooling discipline, `kno` = object-level knowledge.
 
-### → #3947 · idea_scout committed decision-ledger + skip-audit closure (Cluster C, 6)
+### → sub-epic #3947 · idea_scout committed decision-ledger + skip-audit closure (Cluster C, 6 candidates → 5 leaves #4072–#4076; inclusion-reason folded into the closure-gate leaf #4073)
 | [V] | candidate | KernelWiki source @76d27b56 |
 |---|---|---|
 | PARTIAL | ledger-decision-enum-selfchecking-rollup | `scripts/validate.py:594-619` |
@@ -65,7 +68,7 @@ Every candidate maps to a filed home so nothing is lost. `[V]` = witness verdict
 | PARTIAL (kno) | two-stage-cheap-then-file-level-retriage | `scripts/generate-pr-pages.py:102-142,380-388` |
 | PARTIAL (kno) | dedup-as-structured-supersession-exclude | `candidates/deepgemm.yaml:40-48` |
 
-### → #3948 · devindex regenerated indices + internal citation-graph gate (Cluster D, 8)
+### → sub-epic #3948 · devindex regenerated indices + internal citation-graph gate (Cluster D, 8 candidates → 7 leaves #4077–#4083; the two regenerated-index candidates merged into #4077)
 | [V] | candidate | KernelWiki source @76d27b56 |
 |---|---|---|
 | PARTIAL | derived-index-layer-regenerated-from-frontmatter | `scripts/generate-indices.py:42-65` |
@@ -77,7 +80,7 @@ Every candidate maps to a filed home so nothing is lost. `[V]` = witness verdict
 | PARTIAL | closed-vocab-tag-registry-validated | `data/tags.yaml` + `scripts/validate.py:257-264,241-249` |
 | PARTIAL | out-of-scope-retention-justification | `scripts/validate.py:335-345` |
 
-### → #3949 · claims evidence-tier gate + reproducibility floor (Cluster A, 10)
+### → sub-epic #3949 · claims evidence-tier gate + reproducibility floor (Cluster A, 10 candidates → 6 leaves #4084–#4089; the 3 reproducibility-floor and 2 dual-evidence candidates merged into #4085 and #4084)
 | [V] | candidate | KernelWiki source @76d27b56 |
 |---|---|---|
 | PARTIAL | evidence-basis-quorum-for-verified | `scripts/validate.py:379-407` |
@@ -91,7 +94,7 @@ Every candidate maps to a filed home so nothing is lost. `[V]` = witness verdict
 | PARTIAL (kno) | submission-truth-provenance-tier-enum | `data/schemas.yaml:89-104` |
 | PARTIAL (kno) | granular-pathway-evidence-memo | `data/triton-3.6-evidence.md:8-33` |
 
-### → #3950 · version-sensitive-claim registry + cutoff SoT + tool-version decay (Cluster B, 7)
+### → sub-epic #3950 · version-sensitive-claim registry + cutoff SoT + tool-version decay (Cluster B, 7 candidates → 6 leaves #4090–#4095; the two bidirectional-registry candidates merged into #4090)
 | [V] | candidate | KernelWiki source @76d27b56 |
 |---|---|---|
 | PARTIAL | bidirectional-claim-registry | `scripts/validate.py:661-686,698-711` |
@@ -102,7 +105,7 @@ Every candidate maps to a filed home so nothing is lost. `[V]` = witness verdict
 | PARTIAL | upstream-amendment-detection | `scripts/verify_verbatim.py:122-164` |
 | PARTIAL | dev-branch-pin-confidence-gate | `scripts/validate.py:1018-1075` + `data/schemas.yaml:358` |
 
-### → #3951 · immutable source-page layer + provenance taxonomy (Cluster F, 4)
+### → sub-epic #3951 · immutable source-page layer + provenance taxonomy (Cluster F, 4 candidates → 4 leaves #4096–#4099)
 | [V] | candidate | KernelWiki source @76d27b56 |
 |---|---|---|
 | PARTIAL | immutable-per-source-page-schema | `scripts/generate-pr-pages.py:228-249` |
