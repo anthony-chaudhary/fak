@@ -1009,5 +1009,145 @@ class DeepErrorShapeTest(unittest.TestCase):
         self.assertIn("# Trajectory:", out.getvalue())
 
 
+class CacheBurstTest(unittest.TestCase):
+    """#3069 — the cache-CREATE burst lens. Per billed turn the provider reports
+    the size of the cached prefix it reused (cache_read); it climbs as context
+    grows, then SNAPS back to a floor when a cached suffix is invalidated
+    mid-session — a cache_create burst the read-share lens is blind to (a burst
+    INFLATES read-share next turn). This locks in: per-session cc_share (sharing
+    cache_hit_frac's denominator), the suffix-reset detector + modal floor, and the
+    high-burst long-session offender table."""
+
+    def _one(self, recs):
+        sa = load()
+        s = sa.analyze(_write_transcript(recs))
+        self.assertNotIn("error", s)
+        return sa, s
+
+    def _cread_turns(self, creads, *, ccreate=1_000, start=0, prefix="m"):
+        """One billed turn per cache_read value, each a distinct message.id."""
+        return [_assistant(f"{prefix}{start+i}", out=10, cread=cr, ccreate=ccreate)
+                for i, cr in enumerate(creads)]
+
+    def test_cc_share_shares_cache_hit_denominator(self) -> None:
+        # cc_share = cache_create / (cache_read + cache_create + input) — the SAME
+        # denominator as cache_hit_frac, so the two shares + the input share sum to 1.
+        _, s = self._one([_assistant("m1", out=100, cread=50_000, ccreate=10_000, inp=1_000)])
+        denom = 50_000 + 10_000 + 1_000
+        self.assertAlmostEqual(s["cc_share"], 10_000 / denom, places=9)
+        self.assertAlmostEqual(s["cache_hit_frac"], 50_000 / denom, places=9)
+        self.assertAlmostEqual(s["cache_hit_frac"] + s["cc_share"] + 1_000 / denom,
+                               1.0, places=9)
+
+    def test_suffix_reset_detects_snapback_records_floor(self) -> None:
+        # cread climbs then snaps back below (prev - 20k) twice, to a fixed floor.
+        _, s = self._one(self._cread_turns(
+            [0, 56_000, 88_000, 56_000, 95_000, 56_000]))
+        b = s["behavior"]
+        self.assertEqual(b["suffix_resets"], 2, "two snap-backs > 20k")
+        self.assertEqual(b["suffix_reset_floor"], 56_000, "modal floor snapped-to")
+
+    def test_first_turn_and_growth_never_trigger(self) -> None:
+        # Monotonic growth (context building up) is not a reset; the first turn,
+        # with no predecessor, can never trigger either.
+        _, s = self._one(self._cread_turns([0, 40_000, 70_000, 90_000, 110_000]))
+        self.assertEqual(s["behavior"]["suffix_resets"], 0)
+        self.assertIsNone(s["behavior"]["suffix_reset_floor"])
+
+    def test_small_drop_below_threshold_not_a_reset(self) -> None:
+        # A 2k dip (shorter user turn) is noise, not a suffix invalidation.
+        _, s = self._one(self._cread_turns([0, 90_000, 88_000, 92_000]))
+        self.assertEqual(s["behavior"]["suffix_resets"], 0)
+
+    def test_reset_deduped_by_message_id(self) -> None:
+        # The snap-back turn re-serialized 3x must fold ONCE (fed only on a new
+        # billed turn), so the reset is counted a single time.
+        recs = self._cread_turns([0, 56_000, 90_000])
+        recs += [_assistant("mreset", out=10, cread=56_000, ccreate=1_000)] * 3
+        _, s = self._one(recs)
+        self.assertEqual(s["behavior"]["suffix_resets"], 1, "dup lines don't recount")
+        self.assertEqual(s["behavior"]["suffix_reset_floor"], 56_000)
+
+    def test_burst_offender_table_ranks_long_sessions_by_cache_create(self) -> None:
+        sa = load()
+        # A: 8 turns, 3 resets to 56k, heavy cache_create. B: 8 turns, 1 reset to
+        # 57k, lighter cache_create. C: 8 turns, monotonic climb — a CLEAN long
+        # session that must NOT be flagged (the read-share false-positive #3069 kills).
+        recs_a = self._cread_turns(
+            [0, 56_000, 90_000, 56_000, 95_000, 56_000, 100_000, 56_000],
+            ccreate=5_000, prefix="a")
+        recs_b = self._cread_turns(
+            [0, 57_000, 88_000, 57_000, 70_000, 85_000, 95_000, 100_000],
+            ccreate=2_000, prefix="b")
+        recs_c = self._cread_turns(
+            [0, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000, 110_000],
+            ccreate=100, prefix="c")
+        sA = sa.analyze(_write_transcript(recs_a))
+        sB = sa.analyze(_write_transcript(recs_b))
+        sC = sa.analyze(_write_transcript(recs_c))
+        self.assertEqual(sA["behavior"]["suffix_resets"], 3)
+        self.assertEqual(sB["behavior"]["suffix_resets"], 1)
+        self.assertEqual(sC["behavior"]["suffix_resets"], 0)
+
+        agg = sa.aggregate([sC, sB, sA])   # unsorted input
+        self.assertEqual(agg["behavior"]["suffix_resets"], 4, "3 + 1 machine-wide")
+        self.assertEqual(agg["behavior"]["suffix_reset_floor"], 56_000,
+                         "56k appears 3x vs 57k 1x -> modal")
+        rows = agg["behavior"]["burst_sessions"]
+        self.assertEqual([r["session"] for r in rows], [sA["session"], sB["session"]],
+                         "long+bursting only, ranked by cache_create desc; clean C absent")
+        self.assertGreater(rows[0]["cache_create"], rows[1]["cache_create"])
+        self.assertEqual(rows[0]["reset_floor"], 56_000)
+        self.assertEqual(rows[0]["suffix_resets"], 3)
+
+    def test_long_clean_session_is_not_a_burst_offender(self) -> None:
+        sa = load()
+        s = sa.analyze(_write_transcript(self._cread_turns(
+            [0, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000, 110_000], ccreate=100)))
+        self.assertEqual(sa.aggregate([s])["behavior"]["burst_sessions"], [])
+
+    def test_short_bursting_session_below_long_threshold_not_flagged(self) -> None:
+        sa = load()
+        # 4 turns with a reset: it bursts, but is not a LONG session, so it stays
+        # out of the offender table (turns < BURST_LONG_SESSION_MIN).
+        s = sa.analyze(_write_transcript(self._cread_turns([0, 56_000, 90_000, 56_000])))
+        self.assertEqual(s["behavior"]["suffix_resets"], 1)
+        self.assertLess(s["assistant_turns"], sa.BURST_LONG_SESSION_MIN)
+        self.assertEqual(sa.aggregate([s])["behavior"]["burst_sessions"], [])
+
+    def test_report_and_json_surface_burst_and_cc_share(self) -> None:
+        sa = load()
+        recs = self._cread_turns(
+            [0, 56_000, 90_000, 56_000, 95_000, 56_000, 100_000, 56_000],
+            ccreate=5_000)
+        s = sa.analyze(_write_transcript(recs))
+        agg = sa.aggregate([s])
+        md = sa.report_md([s], agg)
+        # machine-wide burst line in the scope totals
+        self.assertIn("Cache-CREATE burst share of all ingested context", md)
+        self.assertIn("create:read ratio", md)
+        # behavioral-lens suffix-reset row + modal floor
+        self.assertIn("Suffix-cache invalidations", md)
+        self.assertIn("modal reset floor", md)
+        self.assertIn("56,000", md)
+        # the high-burst offender table
+        self.assertIn("High-burst long sessions", md)
+        self.assertIn("Cache-create tok", md)
+        # per-session cc-share column in the heaviest table
+        self.assertIn("| Session | NS | Turns | Tool calls | Output tok | I:O | "
+                      "Cache-hit | cc-share | Est.$ |", md)
+        # cc_share rides the session dict -> JSON
+        self.assertIn("cc_share", s)
+        self.assertIsNotNone(s["cc_share"])
+
+    def test_trend_scan_folds_suffix_resets(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(d, "C--work-fak", "sess.jsonl",
+                                 self._cread_turns([0, 56_000, 90_000, 56_000]))
+            buckets, _ = sa.trend_scan([d], "", "day", False)
+        self.assertEqual(buckets["2026-06-20"]["beh"]["suffix_resets"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

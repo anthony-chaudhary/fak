@@ -193,6 +193,22 @@ SUCCESS_LOOP_TOOLS = {"Read", "Glob", "Grep", "LS", "Bash", "PowerShell"}
 # This many identical SUCCESSFUL (tool, args-digest) calls in one session is a poll
 # loop / storm, not the healthy 2-4 re-reads of iterative editing.
 SUCCESS_LOOP_MIN = 8
+# Suffix-cache reset detector (#3069): per billed turn the provider reports the
+# size of the cached prefix it reused (cache_read_input_tokens). It CLIMBS as the
+# conversation grows, then SNAPS back toward a floor when a previously-cached
+# suffix is invalidated mid-session — the provider re-writes that suffix, which
+# bills as a cache_create BURST. A per-turn cache_read drop larger than this many
+# tokens is one such invalidation; the value it snaps TO is a "reset floor"
+# (empirically ~56k: the stable system-prompt+tools prefix). Fed one turn at a
+# time AFTER message.id de-dup, so a re-serialized/retried turn never double-counts.
+# This is the "reset-to-a-fixed-floor" signature the read-share lens is blind to:
+# a burst INFLATES read-share (the re-created suffix is read back next turn), so a
+# thrashing session looks MORE cached, not less — the exact blind spot #3069 fixes.
+SUFFIX_RESET_DROP_MIN = 20_000
+# A "long" session for the burst-offender table (#3069) — a session with at least
+# this many billed turns AND ≥1 suffix reset is a cache-CREATE-thrash offender the
+# heaviest-by-output table never surfaces.
+BURST_LONG_SESSION_MIN = 8
 
 def _tool_path(tool_input):
     """The file a mutation/read call targets — its read-state identity (#2375 d1)."""
@@ -274,6 +290,25 @@ class BehaviorLens:
         self.call_sigs = collections.Counter()     # (tool, args_key) -> calls
         self.call_labels = {}                       # (tool, args_key) -> offender label
         self.err_sig_counts = collections.Counter() # (tool, args_key) -> errored calls
+        # suffix-cache reset signals (#3069): per billed turn cache_read climbs then
+        # SNAPS back when a cached suffix is invalidated mid-session — a cache_create
+        # burst the read-share lens hides. Fed post-dedup, one turn at a time.
+        self._prev_cache_read = None                # last billed turn's cache_read
+        self.suffix_resets = 0                      # count of snap-backs > threshold
+        self.reset_floors = collections.Counter()   # value snapped-TO -> times
+
+    def see_turn_usage(self, cache_read):
+        """Feed one BILLED turn's cache_read (already message.id-deduped upstream).
+        A drop > SUFFIX_RESET_DROP_MIN vs the previous turn is a suffix-cache
+        invalidation (#3069); the value it snaps TO is a reset floor. The first
+        turn (prev is None) can never trigger, and context GROWTH (an increase)
+        never does — only a genuine snap-back counts."""
+        cr = int(cache_read or 0)
+        if self._prev_cache_read is not None \
+                and cr < self._prev_cache_read - SUFFIX_RESET_DROP_MIN:
+            self.suffix_resets += 1
+            self.reset_floors[cr] += 1
+        self._prev_cache_read = cr
 
     def note_restart(self):
         """Record that a session-restart / compaction marker occurred (#2375 d1)."""
@@ -441,6 +476,11 @@ class BehaviorLens:
             "max_file_churn": max(self.file_writes.values(), default=0),
             "success_loops": success_loops[:10],
             "max_success_loop": max_success_loop,
+            # suffix-cache reset burst (#3069)
+            "suffix_resets": self.suffix_resets,
+            "suffix_reset_floor": (self.reset_floors.most_common(1)[0][0]
+                                   if self.reset_floors else None),
+            "suffix_reset_floors": dict(self.reset_floors),
         }
 
 def price_for(model):
@@ -643,6 +683,7 @@ def analyze(path):
                 tok["web_fetch"]  += stu.get("web_fetch_requests", 0) or 0
                 tok["iterations"] += len(u.get("iterations", []) or [])
                 cost += cost_usd(msg.get("model"), inp, cc, cr, out)
+                lens.see_turn_usage(cr)   # #3069: suffix-cache reset detection
                 pm = per_model[msg.get("model", "?")]
                 pm["turns"] += 1
                 pm["input"] += inp
@@ -709,6 +750,13 @@ def analyze(path):
     io_ratio = total_in / tok["output"] if tok["output"] else None
     cache_hit = tok["cache_read"] / (tok["cache_read"] + tok["cache_create"] + tok["input"]) \
                 if (tok["cache_read"] + tok["cache_create"] + tok["input"]) else None
+    # #3069: the cache-CREATE share of all ingested context — the burst counterpart
+    # to cache_hit_frac, sharing its EXACT denominator (read + create + input) so the
+    # three shares sum to 1. A session that re-writes its cached suffix mid-run carries
+    # a high cc_share even while its flattering cache_hit_frac stays high; this is the
+    # signal the read-share lens is blind to.
+    cc_share = tok["cache_create"] / (tok["cache_read"] + tok["cache_create"] + tok["input"]) \
+               if (tok["cache_read"] + tok["cache_create"] + tok["input"]) else None
     wall = None
     if ts_min and ts_max:
         try:
@@ -734,7 +782,7 @@ def analyze(path):
         "tool_input_chars": tool_input_chars, "tool_result_chars": tool_result_chars,
         "n_thinking": n_thinking, "n_text": n_text, "interrupted": interrupted,
         "tokens": tok, "total_input_tokens": total_in,
-        "io_ratio": io_ratio, "cache_hit_frac": cache_hit,
+        "io_ratio": io_ratio, "cache_hit_frac": cache_hit, "cc_share": cc_share,
         "cost_usd": cost, "ts_min": ts_min, "ts_max": ts_max, "wall_s": wall,
         "behavior": behavior,
     }
@@ -788,6 +836,7 @@ def aggregate(sessions):
     outs  = [s["tokens"]["output"] for s in S]
     ios   = [s["io_ratio"] for s in S if s["io_ratio"]]
     chf   = [s["cache_hit_frac"] for s in S if s["cache_hit_frac"] is not None]
+    ccs   = [s["cc_share"] for s in S if s.get("cc_share") is not None]   # #3069
     rof   = [s["read_only_frac"] for s in S if s["read_only_frac"] is not None]
     # behavioral rollup (#2365) — tolerate sessions replayed from pre-lens JSON
     beh_errors = collections.Counter()
@@ -795,6 +844,9 @@ def aggregate(sessions):
     beh_not_read = collections.Counter()   # #2375 d1: not_read sub-classes
     beh_shell_err = collections.Counter()  # #2365 finding 2: shell err cause breakdown
     beh_timeouts = beh_sleeps = beh_hangs = 0
+    beh_suffix_resets = 0                    # #3069: mid-session cache-suffix invalidations
+    beh_reset_floors = collections.Counter() # #3069: value snapped-TO -> times (machine-wide mode)
+    burst_rows = []                          # #3069: long sessions carrying a cache-CREATE burst
     stall_sessions = 0
     max_gap_s = 0.0
     repeat_rows, filechurn_rows, mass_rows, successloop_rows = [], [], [], []
@@ -808,6 +860,23 @@ def aggregate(sessions):
         beh_timeouts += b.get("timeout_kills", 0)
         beh_hangs += b.get("interactive_hangs", 0)
         beh_sleeps += b.get("sleep_polls", 0)
+        beh_suffix_resets += b.get("suffix_resets", 0)
+        beh_reset_floors.update(b.get("suffix_reset_floors", {}))
+        # #3069 burst offender: a LONG session that snapped its cached suffix back
+        # to a floor ≥1 time mid-run — a cache-CREATE thrash the heaviest-by-output
+        # table never surfaces (the re-created suffix inflates read-share instead).
+        if s.get("assistant_turns", 0) >= BURST_LONG_SESSION_MIN \
+                and b.get("suffix_resets", 0) >= 1:
+            burst_rows.append({
+                "session": s["session"],
+                "ns": os.path.basename(os.path.dirname(s["path"])),
+                "turns": s.get("assistant_turns", 0),
+                "cache_create": s["tokens"]["cache_create"],
+                "cc_share": s.get("cc_share"),
+                "suffix_resets": b.get("suffix_resets", 0),
+                "reset_floor": b.get("suffix_reset_floor"),
+                "cost_usd": s["cost_usd"],
+            })
         if b.get("stall_gaps", 0):
             stall_sessions += 1
         max_gap_s = max(max_gap_s, b.get("max_gap_s", 0) or 0)
@@ -867,6 +936,11 @@ def aggregate(sessions):
         "file_churn_sessions": sorted(filechurn_rows, key=lambda r: -r["count"])[:10],
         "success_loop_sessions": sorted(successloop_rows, key=lambda r: -r["count"])[:10],
         "never_read_sessions": sorted(never_read_rows, key=lambda r: -r["count"])[:10],
+        # #3069 suffix-cache reset burst
+        "suffix_resets": beh_suffix_resets,
+        "suffix_reset_floor": (beh_reset_floors.most_common(1)[0][0]
+                               if beh_reset_floors else None),
+        "burst_sessions": sorted(burst_rows, key=lambda r: -r["cache_create"])[:10],
     }
     return {
         "n_sessions": len(S), "totals": dict(tot), "total_cost_usd": tot_cost,
@@ -891,6 +965,9 @@ def aggregate(sessions):
             "cache_hit_frac": {"median": round(statistics.median(chf),3) if chf else None,
                                "p10": round(_pct(chf,10),3) if chf else None,
                                "p90": round(_pct(chf,90),3) if chf else None},
+            "cc_share": {"median": round(statistics.median(ccs),3) if ccs else None,
+                         "p90": round(_pct(ccs,90),3) if ccs else None,
+                         "max": round(max(ccs),3) if ccs else None},
             "read_only_frac": {"median": round(statistics.median(rof),3) if rof else None},
         },
     }
@@ -949,6 +1026,13 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
     L.append(f"- **Total context ingested:** {fmt_int(tot_in)}  →  **machine-wide I:O ratio = {tot_in/max(t['output'],1):.1f} : 1**")
     chf = t['cache_read']/max(tot_in,1)
     L.append(f"- **Cache-read share of all ingested context = {chf*100:.1f}%**  (this is the prompt-cache/KV reuse the harness ALREADY captures)")
+    # #3069: the burst counterpart to the flattering read-share above. Cache-CREATE
+    # tokens are the cached prefix RE-written when a suffix is invalidated mid-session;
+    # they bill at write rates and the read-share line hides them (a burst inflates the
+    # NEXT turn's read, so a thrashing session reads as MORE cached, not less).
+    ccs = t['cache_create']/max(tot_in,1)
+    cr_ratio = t['cache_create']/max(t['cache_read'],1)
+    L.append(f"- **Cache-CREATE burst share of all ingested context = {ccs*100:.1f}%**  ·  **create:read ratio = {cr_ratio:.3f}**  (context RE-written into the provider cache — billed at write rates, NOT captured by the read-share above)")
     # Two DIFFERENT mechanisms reach the web — report BOTH so the line can never
     # appear to contradict the tool-mix table below (which lists the CLIENT tools):
     #   - server_tool_use: the model's built-in web_search/web_fetch (billed server-side)
@@ -1161,17 +1245,40 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                 tgt = (r.get("target") or "")[:80].replace("|", "\\|")
                 L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
                          f"{r['count']} | {tgt} |")
+        # #3069 — the suffix-cache reset burst: per-turn cache_read snapping back to a
+        # floor is a mid-session cache-CREATE re-write the read-share lens hides.
+        sr = beh.get("suffix_resets", 0)
+        floor = beh.get("suffix_reset_floor")
+        L.append(f"- **Suffix-cache invalidations (per-turn cache_read snap-back "
+                 f">{fmt_int(SUFFIX_RESET_DROP_MIN)} tok — a mid-session cache-CREATE "
+                 f"burst):** {fmt_int(sr)}"
+                 + (f"  (modal reset floor ≈ {fmt_int(floor)} tok)" if floor else ""))
+        bs = beh.get("burst_sessions") or []
+        L.append(f"- **High-burst long sessions (≥{BURST_LONG_SESSION_MIN} turns with "
+                 f"≥1 suffix-cache reset — the cache-CREATE thrash the heaviest-by-output "
+                 f"table hides):** {len(bs)}"
+                 + (" — worst below" if bs else ""))
+        if bs:
+            L.append("")
+            L.append("| Session | NS | Turns | Cache-create tok | cc-share | Resets | Reset floor | Est.$ |")
+            L.append("|---|---|---:|---:|---:|---:|---:|---:|")
+            for r in bs:
+                fl = fmt_int(r["reset_floor"]) if r.get("reset_floor") is not None else "—"
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['turns']} | "
+                         f"{fmt_int(r['cache_create'])} | {fmt_pct(r.get('cc_share'))} | "
+                         f"{r['suffix_resets']} | {fl} | ${r['cost_usd']:.2f} |")
         L.append("")
 
     L.append("## Top 15 sessions by output tokens\n")
-    L.append("| Session | NS | Turns | Tool calls | Output tok | I:O | Cache-hit | Est.$ |")
-    L.append("|---|---|---:|---:|---:|---:|---:|---:|")
+    L.append("| Session | NS | Turns | Tool calls | Output tok | I:O | Cache-hit | cc-share | Est.$ |")
+    L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for s in sorted(S, key=lambda x: -x["tokens"]["output"])[:15]:
         ns = os.path.basename(os.path.dirname(s["path"]))
         io = f"{s['io_ratio']:.0f}" if s["io_ratio"] else "—"
         ch = f"{s['cache_hit_frac']*100:.0f}%" if s["cache_hit_frac"] is not None else "—"
+        cc = f"{s['cc_share']*100:.0f}%" if s.get("cc_share") is not None else "—"
         L.append(f"| {s['session'][:8]} | {ns} | {s['assistant_turns']} | {s['n_tool_use']} | "
-                 f"{fmt_int(s['tokens']['output'])} | {io} | {ch} | ${s['cost_usd']:.2f} |")
+                 f"{fmt_int(s['tokens']['output'])} | {io} | {ch} | {cc} | ${s['cost_usd']:.2f} |")
     L.append("")
     return "\n".join(L)
 
@@ -1372,6 +1479,7 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
                 B["tok"]["cache_read"] += cr
                 B["tok"]["cache_create"] += cc
                 B["cost"] += cost_usd(msg.get("model"), inp, cc, cr, out)
+                lens.see_turn_usage(cr)   # #3069: suffix-cache reset detection
             for blk in (msg.get("content") or []):
                 if isinstance(blk, dict) and blk.get("type") == "tool_use":
                     key = blk.get("id") or (mid, blk.get("name"),
@@ -1406,6 +1514,7 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
         B["beh"]["timeout_kills"] += s["timeout_kills"]
         B["beh"]["interactive_hangs"] += s.get("interactive_hangs", 0)  # #2365 d3
         B["beh"]["sleep_polls"] += s["sleep_polls"]
+        B["beh"]["suffix_resets"] += s.get("suffix_resets", 0)   # #3069
         B["beh"]["edit_churn"] += sum(s["edit_churn"].values())
         if s["max_repeat_failure"] >= REPEAT_FAILURE_MIN:
             B["beh"]["repeat_failure_files"] += 1
