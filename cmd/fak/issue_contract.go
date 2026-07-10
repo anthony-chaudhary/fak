@@ -1136,7 +1136,7 @@ func issueUsage(w io.Writer) {
 	fmt.Fprint(w, `fak issue - generated-issue gates
 
   fak issue audit    --issue N --author-manifest A
-                     --auditor PROVIDER/FAMILY/MODEL [--json]
+                     --auditor PROVIDER/FAMILY/MODEL --identity-roster R [--json]
   fak issue contract --file CANDIDATE.json [--json]
   fak issue contract --from-plan PLAN.json [--json]
   fak issue contract --from-issues ISSUES.json [--json]

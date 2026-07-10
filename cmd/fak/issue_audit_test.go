@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +18,11 @@ import (
 func TestIssueAuditCommandEmitsVerifiedReceipt(t *testing.T) {
 	manifestPath := filepath.Join(t.TempDir(), "author.json")
 	manifest := modelroute.AuthorManifest{
-		Schema:         modelroute.CrossAuditAuthorSchema,
-		Author:         modelroute.ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-5.4", Harness: "codex"},
+		Schema: modelroute.CrossAuditAuthorSchema,
+		Author: modelroute.ModelIdentity{
+			Provider: "openai", Family: "gpt", Model: "gpt-author", WeightsRevision: "gpt-w54", Harness: "codex",
+			EndpointClass: "remote", AccountClass: "subscription", ReasoningPosture: "xhigh", ProvenanceSource: "session:codex",
+		},
 		SourceEvidence: []modelroute.EvidenceRef{{Kind: "session", Ref: "codex:session"}},
 	}
 	b, err := json.Marshal(manifest)
@@ -27,6 +32,10 @@ func TestIssueAuditCommandEmitsVerifiedReceipt(t *testing.T) {
 	if err := os.WriteFile(manifestPath, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	rosterPath := writeIssueAuditRoster(t, []modelroute.AuditIdentityAlias{
+		{Alias: "gpt-author", CanonicalModel: "gpt-5.4", Provider: "openai", Family: "gpt", WeightsRevision: "gpt-w54", ProvenanceSource: "registry:gpt"},
+		{Alias: "claude-review", CanonicalModel: "claude-opus-4-6", Provider: "anthropic", Family: "claude", WeightsRevision: "claude-w46", ProvenanceSource: "registry:claude"},
+	})
 
 	fetcher := modelroute.IssueAuditFetcherFunc(func(context.Context, int) (modelroute.IssueAuditEvidence, error) {
 		return modelroute.IssueAuditEvidence{
@@ -47,8 +56,10 @@ func TestIssueAuditCommandEmitsVerifiedReceipt(t *testing.T) {
 	code := runIssueAuditWith(&stdout, &stderr, []string{
 		"--issue", "1185",
 		"--author-manifest", manifestPath,
-		"--auditor", "anthropic/claude/claude-opus-4-6",
+		"--auditor", "anthropic/claude/claude-review",
+		"--auditor-driver", "claude",
 		"--auditor-reasoning", "high",
+		"--identity-roster", rosterPath,
 		"--json",
 	}, fetcher, reviewer)
 	if code != 0 {
@@ -218,20 +229,108 @@ func TestIssueAuditCLIDriversSendExactBoundPrompt(t *testing.T) {
 }
 
 func TestIssueAuditDriverIdentityRejectsObviousFamilyMismatch(t *testing.T) {
+	aliases := []modelroute.AuditIdentityAlias{
+		{Alias: "claude-prod", CanonicalModel: "claude-opus-4-6", Provider: "anthropic", Family: "claude", WeightsRevision: "claude-w46", ProvenanceSource: "registry:claude"},
+		{Alias: "gpt-prod", CanonicalModel: "gpt-5.6-sol", Provider: "openai", Family: "gpt", WeightsRevision: "gpt-w56", ProvenanceSource: "registry:gpt"},
+	}
 	tests := []struct {
 		driver  string
 		id      modelroute.ModelIdentity
 		wantErr bool
 	}{
-		{"claude", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "claude-opus-4-6"}, false},
-		{"claude", modelroute.ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-5.6-sol"}, true},
-		{"codex", modelroute.ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-5.6-sol"}, false},
-		{"codex", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "claude-opus-4-6"}, true},
+		{"claude", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "claude-prod"}, false},
+		{"claude", modelroute.ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-prod"}, true},
+		{"codex", modelroute.ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-prod"}, false},
+		{"codex", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "claude-prod"}, true},
+		{"codex", modelroute.ModelIdentity{Provider: "openai", Family: "gpt-fake", Model: "gpt-prod"}, true},
+		{"claude", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "unregistered"}, true},
 	}
 	for _, tt := range tests {
-		err := validateIssueAuditDriverIdentity(tt.driver, tt.id)
+		_, err := modelroute.ValidateAuditDriverIdentity(tt.driver, tt.id, aliases)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("driver=%s id=%+v err=%v wantErr=%v", tt.driver, tt.id, err, tt.wantErr)
 		}
 	}
+}
+
+func TestIssueAuditHTTPReviewerCarriesUpstreamObservedModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"claude-opus-4-6","choices":[{"message":{"role":"assistant","content":"{\"verdict\":\"PASS\",\"reason\":\"ok\",\"evidence_refs\":[]}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+	reviewer := newIssueAuditHTTPReviewer(modelroute.AuditIdentity{Model: "gpt-5.6-sol"}, server.URL, "")
+	result, err := reviewer.ReviewIssue(context.Background(), modelroute.IssueAuditReviewRequest{Prompt: "audit"})
+	if err != nil {
+		t.Fatalf("ReviewIssue: %v", err)
+	}
+	if result.ObservedAuditor == nil || result.ObservedAuditor.Model != "claude-opus-4-6" {
+		t.Fatalf("observed auditor = %+v", result.ObservedAuditor)
+	}
+}
+
+func TestIssueAuditCommandHTTPDeclaredFamilyMismatchFailsClosed(t *testing.T) {
+	manifestPath := writeIssueAuditManifest(t, modelroute.AuthorManifest{
+		Schema: modelroute.CrossAuditAuthorSchema,
+		Author: modelroute.AuditIdentity{
+			Model: "qwen-author", Provider: "local", Family: "qwen", WeightsRevision: "qwen-w35", Harness: "fak-local",
+			EndpointClass: "local", AccountClass: "local", ReasoningPosture: "high", ProvenanceSource: "weights:qwen",
+		},
+	})
+	rosterPath := writeIssueAuditRoster(t, []modelroute.AuditIdentityAlias{
+		{Alias: "qwen-author", CanonicalModel: "qwen3.5-27b", Provider: "local", Family: "qwen", WeightsRevision: "qwen-w35", ProvenanceSource: "registry:qwen"},
+		{Alias: "gpt-review", CanonicalModel: "gpt-5.6-sol", Provider: "openai", Family: "gpt", WeightsRevision: "gpt-w56", ProvenanceSource: "registry:gpt"},
+		{Alias: "claude-served", CanonicalModel: "claude-opus-4-6", Provider: "anthropic", Family: "claude", WeightsRevision: "claude-w46", ProvenanceSource: "registry:claude"},
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"claude-served","choices":[{"message":{"role":"assistant","content":"{\"verdict\":\"PASS\",\"reason\":\"declared pass\",\"evidence_refs\":[]}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	fetcher := modelroute.IssueAuditFetcherFunc(func(context.Context, int) (modelroute.IssueAuditEvidence, error) {
+		return modelroute.IssueAuditEvidence{IssueNumber: 42, IssueURL: "https://example/issues/42", Title: "t", Body: "b", State: "CLOSED", CommitSHA: "abcdef1", Diff: "diff"}, nil
+	})
+	var stdout, stderr bytes.Buffer
+	code := runIssueAuditWith(&stdout, &stderr, []string{
+		"--issue", "42", "--author-manifest", manifestPath,
+		"--auditor", "openai/gpt/gpt-review", "--auditor-driver", "http",
+		"--auditor-endpoint", server.URL,
+		"--identity-roster", rosterPath, "--json",
+	}, fetcher, nil)
+	if code == 0 {
+		t.Fatalf("HTTP mismatch unexpectedly passed: %s", stdout.String())
+	}
+	receipt, err := modelroute.ParseIssueAuditReceipt(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("parse mismatch receipt: %v stderr=%s stdout=%s", err, stderr.String(), stdout.String())
+	}
+	if receipt.Independence.Admitted || receipt.Independence.Reason != string(modelroute.AuditReasonRefuseObservedMismatch) || receipt.Verdict != modelroute.CrossAuditInconclusive {
+		t.Fatalf("mismatch receipt = %+v", receipt)
+	}
+}
+
+func writeIssueAuditManifest(t *testing.T, manifest modelroute.AuthorManifest) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "author.json")
+	b, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeIssueAuditRoster(t *testing.T, aliases []modelroute.AuditIdentityAlias) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "roster.json")
+	b, err := json.Marshal(modelroute.AuditIdentityRoster{Schema: modelroute.AuditIdentityRosterSchema, Aliases: aliases})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

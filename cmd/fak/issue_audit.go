@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -32,15 +34,13 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	issueNumber := fs.Int("issue", 0, "closed GitHub issue number to audit")
 	authorManifestPath := fs.String("author-manifest", "", "path to a fak-crossaudit-author/v1 JSON manifest")
 	auditorTarget := fs.String("auditor", "", "auditor identity as PROVIDER/FAMILY/MODEL")
-	auditorHarness := fs.String("auditor-harness", "fak issue audit", "auditor harness provenance")
 	auditorWeights := fs.String("auditor-weights", "", "auditor weights revision when known")
-	auditorAccountClass := fs.String("auditor-account-class", "", "auditor account class")
-	auditorEndpointClass := fs.String("auditor-endpoint-class", "openai-compatible", "auditor endpoint class")
 	auditorReasoning := fs.String("auditor-reasoning", "", "auditor reasoning posture")
 	auditorEndpoint := fs.String("auditor-endpoint", firstNonEmpty(os.Getenv("FAK_AUDIT_ENDPOINT"), os.Getenv("FAK_REVIEW_ENDPOINT"), "http://127.0.0.1:8080/v1"), "OpenAI-compatible endpoint for the auditor")
 	auditorAPIKeyEnv := fs.String("auditor-api-key-env", os.Getenv("FAK_REVIEW_API_KEY_ENV"), "environment variable containing the auditor API key")
 	auditorDriver := fs.String("auditor-driver", "http", "auditor transport: http, codex, or claude")
 	auditorTimeout := fs.Duration("auditor-timeout", 10*time.Minute, "maximum auditor inference time")
+	identityRosterPath := fs.String("identity-roster", "", "authoritative fak-audit-identity-roster/v1 JSON file")
 	repo := fs.String("repo", "", "GitHub OWNER/REPO (default: current repository)")
 	asJSON := fs.Bool("json", false, "emit the full typed JSON receipt")
 	if err := fs.Parse(argv); err != nil {
@@ -50,12 +50,17 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		fmt.Fprintf(stderr, "fak issue audit: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	if *issueNumber <= 0 || strings.TrimSpace(*authorManifestPath) == "" || strings.TrimSpace(*auditorTarget) == "" {
-		fmt.Fprintln(stderr, "fak issue audit: --issue, --author-manifest, and --auditor PROVIDER/FAMILY/MODEL are required")
+	if *issueNumber <= 0 || strings.TrimSpace(*authorManifestPath) == "" || strings.TrimSpace(*auditorTarget) == "" || strings.TrimSpace(*identityRosterPath) == "" {
+		fmt.Fprintln(stderr, "fak issue audit: --issue, --author-manifest, --auditor PROVIDER/FAMILY/MODEL, and --identity-roster are required")
 		return 2
 	}
 
 	manifest, err := loadCrossAuditAuthorManifest(*authorManifestPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		return 2
+	}
+	roster, err := loadCrossAuditIdentityRoster(*identityRosterPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
 		return 2
@@ -65,17 +70,49 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
 		return 2
 	}
-	auditor.Harness = strings.TrimSpace(*auditorHarness)
 	auditor.WeightsRevision = strings.TrimSpace(*auditorWeights)
-	auditor.AccountClass = strings.TrimSpace(*auditorAccountClass)
-	auditor.EndpointClass = strings.TrimSpace(*auditorEndpointClass)
-	auditor.ReasoningPosture = strings.TrimSpace(*auditorReasoning)
 	driver := strings.ToLower(strings.TrimSpace(*auditorDriver))
+	httpAPIKey := ""
+	if name := strings.TrimSpace(*auditorAPIKeyEnv); name != "" {
+		httpAPIKey = strings.TrimSpace(os.Getenv(name))
+	}
+	switch driver {
+	case "codex", "claude":
+		effort := strings.ToLower(strings.TrimSpace(*auditorReasoning))
+		if !validIssueAuditEffort(effort) {
+			fmt.Fprintf(stderr, "fak issue audit: --auditor-driver %s requires --auditor-reasoning low|medium|high|xhigh|max\n", driver)
+			return 2
+		}
+		auditor.Harness = driver + "-cli"
+		auditor.EndpointClass = "hosted-cli"
+		auditor.AccountClass = "cli-auth"
+		auditor.ReasoningPosture = effort
+	case "http":
+		if strings.TrimSpace(*auditorReasoning) != "" {
+			fmt.Fprintln(stderr, "fak issue audit: HTTP does not bind --auditor-reasoning; omit it (the request is stamped provider-default)")
+			return 2
+		}
+		auditor.Harness = "openai-compatible-http"
+		auditor.EndpointClass = issueAuditEndpointClass(*auditorEndpoint)
+		auditor.ReasoningPosture = "provider-default"
+		if httpAPIKey != "" {
+			auditor.AccountClass = "api-key"
+		} else if auditor.EndpointClass == "local-http" {
+			auditor.AccountClass = "local-no-key"
+		} else {
+			auditor.AccountClass = "unauthenticated"
+		}
+	default:
+		fmt.Fprintf(stderr, "fak issue audit: --auditor-driver %q, want http, codex, or claude\n", driver)
+		return 2
+	}
 	auditor.Driver = driver
-	if err := validateIssueAuditDriverIdentity(driver, auditor); err != nil {
+	canonicalAuditor, err := modelroute.ValidateAuditDriverIdentity(driver, auditor, roster.Aliases)
+	if err != nil {
 		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
 		return 2
 	}
+	auditor = canonicalAuditor
 
 	if injectedFetcher == nil {
 		injectedFetcher = &githubIssueAuditFetcher{
@@ -87,11 +124,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	if injectedReviewer == nil {
 		switch driver {
 		case "http":
-			apiKey := ""
-			if name := strings.TrimSpace(*auditorAPIKeyEnv); name != "" {
-				apiKey = strings.TrimSpace(os.Getenv(name))
-			}
-			injectedReviewer = newIssueAuditHTTPReviewer(auditor, strings.TrimSpace(*auditorEndpoint), apiKey)
+			injectedReviewer = newIssueAuditHTTPReviewer(auditor, strings.TrimSpace(*auditorEndpoint), httpAPIKey)
 		case "codex", "claude":
 			injectedReviewer = newIssueAuditCLIReviewer(driver, auditor)
 		default:
@@ -110,6 +143,12 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		IssueNumber: *issueNumber,
 		Author:      manifest,
 		Auditor:     auditor,
+		IndependencePolicy: func() modelroute.AuditIndependencePolicy {
+			policy := modelroute.DefaultAuditIndependencePolicy()
+			policy.Aliases = append([]modelroute.AuditIdentityAlias(nil), roster.Aliases...)
+			return policy
+		}(),
+		RequireObservedAuditorIdentity: driver == "http",
 	}, injectedFetcher, injectedReviewer)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
@@ -141,6 +180,30 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	return 0
 }
 
+func validIssueAuditEffort(effort string) bool {
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func issueAuditEndpointClass(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "invalid-http"
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if strings.EqualFold(host, "localhost") {
+		return "local-http"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return "local-http"
+	}
+	return "remote-http"
+}
+
 func loadCrossAuditAuthorManifest(path string) (modelroute.AuthorManifest, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -153,6 +216,23 @@ func loadCrossAuditAuthorManifest(path string) (modelroute.AuthorManifest, error
 		return modelroute.AuthorManifest{}, fmt.Errorf("parse --author-manifest: %w", err)
 	}
 	return manifest, nil
+}
+
+func loadCrossAuditIdentityRoster(path string) (modelroute.AuditIdentityRoster, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return modelroute.AuditIdentityRoster{}, fmt.Errorf("read --identity-roster: %w", err)
+	}
+	var roster modelroute.AuditIdentityRoster
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&roster); err != nil {
+		return modelroute.AuditIdentityRoster{}, fmt.Errorf("parse --identity-roster: %w", err)
+	}
+	if err := roster.Validate(); err != nil {
+		return modelroute.AuditIdentityRoster{}, err
+	}
+	return roster, nil
 }
 
 func parseCrossAuditAuditorTarget(raw string) (modelroute.ModelIdentity, error) {
@@ -169,30 +249,6 @@ func parseCrossAuditAuditorTarget(raw string) (modelroute.ModelIdentity, error) 
 		return modelroute.ModelIdentity{}, fmt.Errorf("--auditor %q must have non-empty provider, family, and model", raw)
 	}
 	return id, nil
-}
-
-func validateIssueAuditDriverIdentity(driver string, id modelroute.ModelIdentity) error {
-	provider := strings.ToLower(strings.TrimSpace(id.Provider))
-	family := strings.ToLower(strings.TrimSpace(id.Family))
-	model := strings.ToLower(strings.TrimSpace(id.Model))
-	switch driver {
-	case "http":
-		return nil
-	case "claude":
-		if provider != "anthropic" || !strings.Contains(family, "claude") || !strings.Contains(model, "claude") {
-			return fmt.Errorf("--auditor-driver claude requires a declared anthropic/claude/claude-* auditor identity")
-		}
-		return nil
-	case "codex":
-		modelIsOpenAI := strings.HasPrefix(model, "gpt-") || regexp.MustCompile(`^o[0-9]`).MatchString(model)
-		familyIsOpenAI := strings.HasPrefix(family, "gpt") || family == "openai" || regexp.MustCompile(`^o[0-9]`).MatchString(family)
-		if provider != "openai" || !familyIsOpenAI || !modelIsOpenAI {
-			return fmt.Errorf("--auditor-driver codex requires a declared openai/gpt-or-o/gpt-or-o auditor identity")
-		}
-		return nil
-	default:
-		return fmt.Errorf("--auditor-driver %q, want http, codex, or claude", driver)
-	}
 }
 
 type issueAuditCommandRunner func(context.Context, string, ...string) ([]byte, error)
@@ -424,6 +480,7 @@ func (r *issueAuditHTTPReviewer) ReviewIssue(ctx context.Context, req modelroute
 	if err := json.Unmarshal([]byte(stripJSONFence(completion.Message.Content)), &result); err != nil {
 		return modelroute.IssueAuditReviewResult{}, fmt.Errorf("decode auditor result: %w", err)
 	}
+	result.ObservedAuditor = &modelroute.AuditIdentity{Model: strings.TrimSpace(completion.Model)}
 	return result, nil
 }
 
@@ -448,7 +505,7 @@ func (r *issueAuditCLIReviewer) ReviewIssue(ctx context.Context, req modelroute.
 	case "claude":
 		out, err := runner(ctx, req.Prompt, "claude",
 			"-p", "--model", r.identity.Model, "--output-format", "json",
-			"--json-schema", issueAuditResultSchema, "--tools", "")
+			"--json-schema", issueAuditResultSchema, "--effort", r.identity.ReasoningPosture, "--tools", "")
 		if err != nil {
 			return modelroute.IssueAuditReviewResult{}, err
 		}

@@ -15,6 +15,9 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 			Provider:         "openai",
 			Family:           "gpt",
 			Model:            "gpt-5.4",
+			WeightsRevision:  "gpt-w54",
+			EndpointClass:    "remote",
+			AccountClass:     "subscription",
 			ReasoningPosture: "xhigh",
 		},
 		SourceEvidence: []EvidenceRef{{Kind: "session", Ref: "codex-session:abc"}},
@@ -47,12 +50,13 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 	})
 
 	_, err := AuditIssue(context.Background(), IssueAuditRequest{
-		IssueNumber: 42,
-		Author:      manifest,
-		Auditor:     ModelIdentity{Provider: "azure-openai", Family: " GPT ", Model: "gpt-5.6-sol"},
+		IssueNumber:        42,
+		Author:             manifest,
+		Auditor:            fullAuditIdentity("gpt-review", "azure-openai", "gpt", "gpt-w56", "codex", "remote", "api", "xhigh", "session:gpt-review"),
+		IndependencePolicy: crossAuditTestPolicy(),
 	}, fetcher, reviewer)
-	if !IsIndependenceRefusal(err) || !strings.Contains(err.Error(), "SAME_MODEL_FAMILY") {
-		t.Fatalf("same-family error = %v, want typed SAME_MODEL_FAMILY refusal", err)
+	if !IsIndependenceRefusal(err) || !strings.Contains(err.Error(), string(AuditReasonRefuseSameFamily)) {
+		t.Fatalf("same-family error = %v, want typed %s refusal", err, AuditReasonRefuseSameFamily)
 	}
 	if fetchCalls != 0 || reviewCalls != 0 {
 		t.Fatalf("same-family refusal happened after work: fetch=%d review=%d, want 0/0", fetchCalls, reviewCalls)
@@ -65,10 +69,14 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 			Harness:          "fak issue audit",
 			Provider:         "anthropic",
 			Family:           "claude",
-			Model:            "claude-opus-4-6",
+			Model:            "claude-review",
+			WeightsRevision:  "claude-w46",
 			EndpointClass:    "hosted",
+			AccountClass:     "subscription",
 			ReasoningPosture: "high",
+			ProvenanceSource: "session:claude-review",
 		},
+		IndependencePolicy: crossAuditTestPolicy(),
 	}, fetcher, reviewer)
 	if err != nil {
 		t.Fatalf("AuditIssue different-family: %v", err)
@@ -82,7 +90,7 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 	if receipt.Subject.DiffSHA256 == "" || receipt.Subject.Digest == "" || receipt.PromptDigest == "" || receipt.ReceiptDigest == "" {
 		t.Fatalf("receipt has empty digest binding: %+v", receipt)
 	}
-	if receipt.Author.Family != "gpt" || receipt.Auditor.Family != "claude" || !receipt.Independence.Admitted || receipt.Independence.Reason != "DIFFERENT_MODEL_FAMILY" {
+	if receipt.Author.Family != "gpt" || receipt.Auditor.Family != "claude" || !receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceAdmit || receipt.Independence.Reason != string(AuditReasonAdmitIndependent) {
 		t.Fatalf("identity/independence row = author %+v auditor %+v decision %+v", receipt.Author, receipt.Auditor, receipt.Independence)
 	}
 	if receipt.PolicyVersion != CrossAuditPolicyVersion || receipt.PromptVersion != CrossAuditPromptVersion || receipt.Verdict != CrossAuditPass {
@@ -107,6 +115,83 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 	if err := tampered.Verify(); err == nil {
 		t.Fatal("tampered receipt still verified")
 	}
+	contradictory := receipt
+	contradictory.Independence.Admitted = false
+	contradictory.ReceiptDigest = contradictory.recomputeDigest()
+	if err := contradictory.Verify(); err == nil || !strings.Contains(err.Error(), "contradicts") {
+		t.Fatalf("re-digested contradictory receipt error = %v", err)
+	}
+	policyMismatch := receipt
+	policyMismatch.Independence.Rule = "other-policy/v1"
+	policyMismatch.ReceiptDigest = policyMismatch.recomputeDigest()
+	if err := policyMismatch.Verify(); err == nil || !strings.Contains(err.Error(), "differs") {
+		t.Fatalf("re-digested policy mismatch error = %v", err)
+	}
+}
+
+func TestCrossAuditSpineRefusesRelabeledSameFamilyBeforeInference(t *testing.T) {
+	policy := DefaultAuditIndependencePolicy()
+	policy.Aliases = []AuditIdentityAlias{
+		{Alias: "author-frontier", CanonicalModel: "gpt-5.6-sol", Provider: "openai", Family: "gpt", WeightsRevision: "gpt-w56", ProvenanceSource: "registry:v1"},
+		{Alias: "independent-reviewer", CanonicalModel: "gpt-5.6-sol", Provider: "openai", Family: "gpt", WeightsRevision: "gpt-w56", ProvenanceSource: "registry:v1"},
+	}
+	var fetchCalls, reviewCalls int
+	_, err := AuditIssue(context.Background(), IssueAuditRequest{
+		IssueNumber:        42,
+		Author:             AuthorManifest{Schema: CrossAuditAuthorSchema, Author: AuditIdentity{Model: "author-frontier"}},
+		Auditor:            AuditIdentity{Model: "independent-reviewer"},
+		IndependencePolicy: policy,
+	}, IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
+		fetchCalls++
+		return crossAuditFixtureEvidence(), nil
+	}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
+		reviewCalls++
+		return IssueAuditReviewResult{Verdict: CrossAuditPass}, nil
+	}))
+	if !IsIndependenceRefusal(err) || !strings.Contains(err.Error(), string(AuditReasonRefuseSameWeights)) {
+		t.Fatalf("relabeled alias error = %v", err)
+	}
+	if fetchCalls != 0 || reviewCalls != 0 {
+		t.Fatalf("alias laundering reached work: fetch=%d review=%d", fetchCalls, reviewCalls)
+	}
+}
+
+func TestCrossAuditSpineRefusesHTTPDeclaredFamilyMismatch(t *testing.T) {
+	policy := DefaultAuditIndependencePolicy()
+	policy.Aliases = []AuditIdentityAlias{
+		auditAlias("qwen-local", "qwen3.5-27b", "local", "qwen", "qwen-w35"),
+		auditAlias("gpt-review", "gpt-5.6-sol", "openai", "gpt", "gpt-w56"),
+		auditAlias("claude-review", "claude-opus-4-6", "anthropic", "claude", "claude-w46"),
+	}
+	receipt, err := AuditIssue(context.Background(), IssueAuditRequest{
+		IssueNumber: 42,
+		Author: AuthorManifest{Schema: CrossAuditAuthorSchema, Author: fullAuditIdentity(
+			"qwen-local", "local", "qwen", "qwen-w35", "fak-local", "local", "local", "high", "weights:qwen",
+		)},
+		Auditor:                        fullAuditIdentity("gpt-review", "openai", "gpt", "gpt-w56", "http", "remote", "api", "high", "registry:gpt"),
+		IndependencePolicy:             policy,
+		RequireObservedAuditorIdentity: true,
+	}, IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
+		return crossAuditFixtureEvidence(), nil
+	}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
+		return IssueAuditReviewResult{
+			Verdict:         CrossAuditPass,
+			Reason:          "declared pass",
+			ObservedAuditor: &AuditIdentity{Model: "claude-review"},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatalf("AuditIssue: %v", err)
+	}
+	if receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceRefuse || receipt.Independence.Reason != string(AuditReasonRefuseObservedMismatch) {
+		t.Fatalf("HTTP mismatch independence = %+v", receipt.Independence)
+	}
+	if receipt.Verdict != CrossAuditInconclusive || receipt.ObservedAuditor == nil || receipt.ObservedAuditor.Family != "claude" {
+		t.Fatalf("HTTP mismatch receipt = %+v", receipt)
+	}
+	if err := receipt.Verify(); err != nil {
+		t.Fatalf("HTTP mismatch receipt digest: %v", err)
+	}
 }
 
 func TestCrossAuditSpineClassifiesReviewerFailuresWithoutFailOpen(t *testing.T) {
@@ -114,9 +199,10 @@ func TestCrossAuditSpineClassifiesReviewerFailuresWithoutFailOpen(t *testing.T) 
 		IssueNumber: 42,
 		Author: AuthorManifest{
 			Schema: CrossAuditAuthorSchema,
-			Author: ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-5.4"},
+			Author: fullAuditIdentity("gpt-author", "openai", "gpt", "gpt-w54", "codex", "remote", "subscription", "xhigh", "session:gpt"),
 		},
-		Auditor: ModelIdentity{Provider: "anthropic", Family: "claude", Model: "claude-opus-4-6"},
+		Auditor:            fullAuditIdentity("claude-review", "anthropic", "claude", "claude-w46", "claude-code", "remote", "subscription", "high", "session:claude"),
+		IndependencePolicy: crossAuditTestPolicy(),
 	}
 	fetcher := IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
 		return crossAuditFixtureEvidence(), nil
@@ -131,6 +217,20 @@ func TestCrossAuditSpineClassifiesReviewerFailuresWithoutFailOpen(t *testing.T) 
 		}
 		if err := receipt.Verify(); err != nil {
 			t.Fatalf("unavailable receipt did not bind: %v", err)
+		}
+	})
+
+	t.Run("unavailable-observed-identity-remains-unknown", func(t *testing.T) {
+		req := base
+		req.RequireObservedAuditorIdentity = true
+		receipt, err := AuditIssue(context.Background(), req, fetcher, IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
+			return IssueAuditReviewResult{}, context.DeadlineExceeded
+		}))
+		if err != nil || receipt.Verdict != CrossAuditUnavailable || receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceUnknown || receipt.Independence.Reason != string(AuditReasonUnknownObservedIdentity) {
+			t.Fatalf("transport-error receipt = %+v err=%v", receipt, err)
+		}
+		if err := receipt.Verify(); err != nil {
+			t.Fatalf("transport-error receipt did not bind: %v", err)
 		}
 	})
 
@@ -156,4 +256,18 @@ func crossAuditFixtureEvidence() IssueAuditEvidence {
 		Diff:        "diff --git a/thing.go b/thing.go\n+fixed\n",
 		Evidence:    []EvidenceRef{{Kind: "issue-event", Ref: "referenced:def456"}},
 	}
+}
+
+func crossAuditTestPolicy() AuditIndependencePolicy {
+	policy := DefaultAuditIndependencePolicy()
+	gpt54 := auditAlias("gpt-5.4", "gpt-5.4", "openai", "gpt", "gpt-w54")
+	gptAuthor := auditAlias("gpt-author", "gpt-5.4", "openai", "gpt", "gpt-w54")
+	gptAuthor.ProvenanceSource = gpt54.ProvenanceSource
+	policy.Aliases = []AuditIdentityAlias{
+		gpt54,
+		gptAuthor,
+		auditAlias("gpt-review", "gpt-5.6-sol", "azure-openai", "gpt", "gpt-w56"),
+		auditAlias("claude-review", "claude-opus-4-6", "anthropic", "claude", "claude-w46"),
+	}
+	return policy
 }
