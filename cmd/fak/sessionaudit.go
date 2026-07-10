@@ -30,6 +30,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditActions(stdout, stderr, argv[1:])
 	case "deep":
 		return runSessionAuditDeep(stdout, stderr, argv[1:])
+	case "budget":
+		return runSessionAuditBudget(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		sessionAuditUsage(stdout)
 		return 0
@@ -46,6 +48,7 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak session-audit summary  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json]")
 	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json] [--fail-on high|medium|none]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
+	fmt.Fprintln(w, "       fak session-audit budget  [--json] [--target-tokens N] [--target-turns N] <session.jsonl>")
 }
 
 type rootFlags []string
@@ -390,6 +393,18 @@ func renderSessionAuditSummary(w io.Writer, rep sessionaudit.CompactReport) {
 				row.Namespace, row.Session, row.TotalContextTokens, 100*row.CacheReadShare, row.OutputTokens, row.IORatio, row.TopModel)
 		}
 	}
+	if conf := rep.Confusion; conf != nil {
+		fmt.Fprintf(w, "confusion (assistant prose): confused_sessions=%d/%d total_markers=%d self_correction_turns=%d dead_end_turns=%d confusion_turns=%d\n",
+			conf.ConfusedSessions, conf.Sessions, conf.TotalMarkers, conf.SelfCorrectionTurns, conf.DeadEndTurns, conf.ConfusionTurns)
+		for _, m := range conf.RecurringMarkers {
+			fmt.Fprintf(w, "- recurring [%s] %s: sessions=%d count=%d ns=%d (%s)\n",
+				m.Category, m.Label, m.Sessions, m.Count, len(m.Namespaces), m.Example)
+		}
+		for _, row := range conf.TopSessions {
+			fmt.Fprintf(w, "- confused session %s/%s: markers=%d dead_ends=%d score=%.3f\n",
+				row.Namespace, row.Session, row.Markers, row.DeadEndTurns, row.Score)
+		}
+	}
 	if len(rep.Recommendations) > 0 {
 		fmt.Fprintln(w, "recommendations:")
 		for _, rec := range rep.Recommendations {
@@ -455,5 +470,40 @@ func runSessionAuditDeep(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprint(stdout, sessionaudit.DeepMarkdown(s))
+	return 0
+}
+
+// runSessionAuditBudget surfaces the per-task spend-vs-target readout the working
+// agent can query mid-task (#2091). It folds an Analyze'd session transcript into
+// tokens/turns spent against soft targets with a coarse reads/edits/other tool
+// breakdown, reusing the existing session token accounting — no new usage
+// plumbing. JSON-first for CI/tooling; the default is one inline human line.
+func runSessionAuditBudget(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("session-audit budget", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit the budget readout as JSON")
+	targetTokens := fs.Int64("target-tokens", 0, "soft token target for the task (0 = no target on this axis)")
+	targetTurns := fs.Int64("target-turns", 0, "soft assistant-turn target for the task (0 = no target on this axis)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: fak session-audit budget [--json] [--target-tokens N] [--target-turns N] <session.jsonl>")
+		return 2
+	}
+	s := sessionaudit.Analyze(fs.Arg(0))
+	if s.Error != "" {
+		fmt.Fprintf(stderr, "fak session-audit budget: %v\n", s.Error)
+		return 1
+	}
+	b := sessionaudit.FoldTaskBudget(s, sessionaudit.TaskBudgetTarget{Tokens: *targetTokens, Turns: *targetTurns})
+	if *asJSON {
+		if err := sessionaudit.WriteJSON(stdout, b); err != nil {
+			fmt.Fprintf(stderr, "fak session-audit budget: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintln(stdout, sessionaudit.RenderTaskBudget(b))
 	return 0
 }

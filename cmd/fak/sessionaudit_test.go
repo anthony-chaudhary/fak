@@ -339,6 +339,56 @@ func TestSessionAuditAliasDefaultsToHereSummary(t *testing.T) {
 	}
 }
 
+func TestSessionAuditBudget(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "budget.jsonl"), []map[string]any{
+		sessionAuditAssistant("t1", 100, "Read"), // read tool,  context 135
+		sessionAuditAssistant("t2", 50, "Edit"),  // edit tool,  context  85
+		sessionAuditAssistant("t3", 30, "Bash"),  // other tool, context  65
+	})
+
+	// JSON mode: spend, fractions, and the coarse reads/edits/other breakdown
+	// from real usage records.
+	var stdout, stderr bytes.Buffer
+	rc := runSessionAudit(&stdout, &stderr, []string{"budget", "--json", "--target-tokens", "200", "--target-turns", "5", sessionPath})
+	if rc != 0 {
+		t.Fatalf("budget --json rc=%d stderr=%s", rc, stderr.String())
+	}
+	var b sessionaudit.TaskBudget
+	if err := json.Unmarshal(stdout.Bytes(), &b); err != nil {
+		t.Fatalf("bad budget json: %v\n%s", err, stdout.String())
+	}
+	if b.TotalTokens != 285 || b.OutputTokens != 180 || b.Turns != 3 {
+		t.Fatalf("budget spend = total=%d output=%d turns=%d, want 285/180/3", b.TotalTokens, b.OutputTokens, b.Turns)
+	}
+	if b.Breakdown.Reads != 1 || b.Breakdown.Edits != 1 || b.Breakdown.OtherTools != 1 || b.Breakdown.ToolCalls != 3 {
+		t.Fatalf("budget breakdown = %+v, want reads/edits/other=1 tool_calls=3", b.Breakdown)
+	}
+	if b.TokenFrac == nil || !b.OverTokens {
+		t.Fatalf("285 tok over a 200 target should flag OverTokens with a fraction: %+v", b)
+	}
+	if b.TurnFrac == nil || b.OverTurns {
+		t.Fatalf("3 turns under a 5 target should not flag OverTurns: %+v", b)
+	}
+	if b.Breakdown.Model == "" {
+		t.Fatalf("budget should name the dominating model tier: %+v", b.Breakdown)
+	}
+
+	// Default mode: one inline line the working agent can print mid-task.
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"budget", "--target-tokens", "200", sessionPath})
+	if rc != 0 {
+		t.Fatalf("budget text rc=%d stderr=%s", rc, stderr.String())
+	}
+	line := stdout.String()
+	if !strings.Contains(line, "task-budget") ||
+		!strings.Contains(line, "reads 1, edits 1, other 1") ||
+		!strings.Contains(line, "OVER") {
+		t.Fatalf("unexpected budget line:\n%s", line)
+	}
+}
+
 func sessionAuditAssistant(id string, out int64, tool string) map[string]any {
 	return sessionAuditAssistantDetailed(id, out, 10, 20, 5, "claude-sonnet-4-5", tool)
 }
