@@ -91,12 +91,13 @@ const (
 	TrajectoryFile = "trajectory.jsonl"
 	WitnessFile    = "witness.json" // the persisted keep-bit (VerifiedDone rung); see witness.go
 	QualityFile    = "quality.json" // the latest per-card quality deltas; see quality_delta.go
+	DriveFile      = "drive.json"   // the compact resume-facing drive projection; see drive_projection.go
 )
 
 // knownParts is the deterministic order parts are dumped, integrity-listed, and packed
 // in. image.json is excluded (it is the index over these). Only parts that actually
 // exist are written and listed; a missing optional part is simply absent.
-var knownParts = []string{SessionFile, ManifestFile, CASFile, IndexFile, TrajectoryFile, WitnessFile, QualityFile}
+var knownParts = []string{SessionFile, ManifestFile, CASFile, IndexFile, TrajectoryFile, WitnessFile, QualityFile, DriveFile}
 
 // Portability declares what a restored image guarantees and what it deliberately drops —
 // the model-change contract, made explicit so an operator never assumes a KV cache rode
@@ -264,6 +265,18 @@ func DumpDir(dir string, in Input) (Meta, error) {
 	// is integrity-indexed and verified like every other part (see quality_delta.go).
 	if len(in.Quality) > 0 {
 		if err := writeQualityDelta(filepath.Join(dir, QualityFile), in.Quality); err != nil {
+			return Meta{}, err
+		}
+	}
+
+	// (4d) The drive-projection sibling (drive.json) — the compact, resume-facing view of
+	// the drive (budget remaining / priority / pace / objective-pin / generation) a lean
+	// relaunch consumer re-seeds a governor from without paging the full session.json.
+	// Written only when non-zero (a session with nothing to project omits it, staying
+	// byte-identical to a pre-#4126 image); integrity-indexed and verified like every other
+	// part (see drive_projection.go).
+	if dp := projectDrive(drive); !dp.IsZero() {
+		if err := writeDriveProjection(filepath.Join(dir, DriveFile), dp); err != nil {
 			return Meta{}, err
 		}
 	}
