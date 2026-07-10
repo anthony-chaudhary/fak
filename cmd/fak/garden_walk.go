@@ -39,6 +39,15 @@ const gardenWalkIntervalSeconds = 21600 // 6h
 // runGardenWalk loads the garden item set, folds it through the pure resource-aware
 // planner, renders/ledgers, and (with --register) installs the durable loop unit.
 func runGardenWalk(stdout, stderr io.Writer, argv []string) int {
+	// `fak garden walk selfcheck` is the deterministic, no-I/O proof of the decenter
+	// fold (walk_triage.go): a ready-command act is the fleet's to run, a
+	// needs-area/needs-kind/likely-dup review is the fleet's to drive in a fresh
+	// context, and only an unset-priority review genuinely waits on a person. Mirrors
+	// the `blockers|cadence|fleetpane selfcheck` sibling seams exactly.
+	if len(argv) > 0 && argv[0] == "selfcheck" {
+		return runReportSelfcheck(stdout, stderr, argv[1:], "garden-walk", gardenbundle.TriageSelfcheck,
+			"garden-walk triage selfcheck OK: act -> fleet, knowable review -> fresh context, only unset-priority waits on a person")
+	}
 	fs := flag.NewFlagSet("garden walk", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
@@ -117,6 +126,17 @@ func runGardenWalk(stdout, stderr io.Writer, argv []string) int {
 		return encodeJSONOrFail(stdout, stderr, plan, "fak garden walk")
 	}
 	renderGardenWalk(stdout, plan)
+	// Decenter the human at the walk's review bucket: under FAK_GARDENWALK_TRIAGE_GATE=enforce,
+	// append the split — of the emitted worklist, how many genuinely wait on a person (an
+	// unset-priority review, a prioritization authority) vs how many the fleet drives itself
+	// (every act command, plus the needs-area/needs-kind/likely-dup reviews that are knowable
+	// classification). Default ("", "warn") leaves the worklist unchanged while the fold soaks.
+	// See internal/gardenbundle/walk_triage.go.
+	if gardenbundle.GardenWalkTriageEnforced(os.Getenv("FAK_GARDENWALK_TRIAGE_GATE")) {
+		if line := gardenbundle.AttentionTriageLine(plan); line != "" {
+			fmt.Fprintln(stdout, line)
+		}
+	}
 	return 0
 }
 
