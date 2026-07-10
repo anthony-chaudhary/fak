@@ -3153,3 +3153,21 @@ func loopbackOnly(addr string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+// RotationEvidenceSnapshot returns cumulative provider-side failures that are safe to
+// use as positive account-rotation evidence. Local child exit codes are intentionally
+// absent: only errors observed at the upstream boundary enter these counters.
+func (s *Server) RotationEvidenceSnapshot() map[string]uint64 {
+	out := map[string]uint64{}
+	if s == nil || s.metrics == nil {
+		return out
+	}
+	s.metrics.upstreamErrMu.Lock()
+	defer s.metrics.upstreamErrMu.Unlock()
+	for _, kind := range []string{"auth", "rate_limited"} {
+		if n := s.metrics.upstreamErrors[kind]; n > 0 {
+			out[kind] = n
+		}
+	}
+	return out
+}

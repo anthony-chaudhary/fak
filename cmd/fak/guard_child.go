@@ -1082,12 +1082,13 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		childStarted := time.Now()
+		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		runErr := child.Run()
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
 			continue
 		}
-		if nextCommand, nextInjected, ok := rotation.rotateAfterExit(runErr, command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
+		if nextCommand, nextInjected, ok := rotation.rotateAfterExit(runErr, guardRotationEvidenceSince(rotationEvidenceBefore, srv.RotationEvidenceSnapshot()), command, injected, auditJournal, guardTraceID, os.Stderr); ok {
 			command, injected = nextCommand, nextInjected
 			continue
 		}
@@ -1151,6 +1152,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		}
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		childStarted := time.Now()
+		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		if err := child.Start(); err != nil {
 			// child.Start() failing IS a launch failure (the child never ran); spill the detail.
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
@@ -1168,7 +1170,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command = next
 				continue
 			}
-			if nextCommand, nextInjected, ok := rotation.rotateAfterExit(runErr, command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
+			if nextCommand, nextInjected, ok := rotation.rotateAfterExit(runErr, guardRotationEvidenceSince(rotationEvidenceBefore, srv.RotationEvidenceSnapshot()), command, injected, auditJournal, guardTraceID, os.Stderr); ok {
 				command, injected = nextCommand, nextInjected
 				continue
 			}

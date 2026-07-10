@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -96,7 +97,7 @@ func TestGuardRotationDoesNotRelaunchSuccessfulChild(t *testing.T) {
 	rt := &guardRotationRuntime{Mode: "auto", CurrentSeat: "a", EnvKey: "CODEX_HOME", Registry: accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b")}}}
 	cmd := []string{"codex", "exec", "do-once"}
 	env := [][2]string{{"CODEX_HOME", "/a"}}
-	gotCmd, gotEnv, ok := rt.rotateAfterExit(nil, cmd, env, "auth_or_stale_cred", nil, "trace", nil)
+	gotCmd, gotEnv, ok := rt.rotateAfterExit(nil, guardRotationEvidence{}, cmd, env, nil, "trace", nil)
 	if ok || rt.CurrentSeat != "a" || strings.Join(gotCmd, " ") != strings.Join(cmd, " ") || gotEnv[0] != env[0] {
 		t.Fatalf("clean exit rotated/relaunched: ok=%v runtime=%+v command=%v env=%v", ok, rt, gotCmd, gotEnv)
 	}
@@ -160,5 +161,63 @@ func TestGuardRotationWritesDurableAuditRow(t *testing.T) {
 	}
 	if row.Kind != "ACCOUNT_ROTATION" || row.TraceID != "trace-rotation" || row.Reason != "b:walled" || row.Hash == "" {
 		t.Fatalf("row=%+v", row)
+	}
+}
+
+func TestGuardRotationRequiresPositiveAuthEvidence(t *testing.T) {
+	ready := func(name, key string) accounts.Home {
+		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}
+	}
+	newRT := func() *guardRotationRuntime {
+		return &guardRotationRuntime{Mode: "auto", CurrentSeat: "a", EnvKey: "CODEX_HOME", Registry: accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b")}}}
+	}
+	failures := []struct {
+		name string
+		err  error
+	}{
+		{"generic_exit_1", errors.New("exit status 1")},
+		{"sandbox_process", errors.New("CreateProcessAsUserW failed with error 1312")},
+		{"oom_signal", errors.New("signal: killed (out of memory)")},
+	}
+	for _, tc := range failures {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := newRT()
+			cmd := []string{"codex", "exec"}
+			got, _, ok := rt.rotateAfterExit(tc.err, guardRotationEvidence{}, cmd, nil, nil, "trace", nil)
+			if ok || rt.CurrentSeat != "a" || strings.Join(got, " ") != "codex exec" {
+				t.Fatalf("rotated generic failure: ok=%v seat=%s cmd=%v", ok, rt.CurrentSeat, got)
+			}
+		})
+	}
+	for _, evidence := range []guardRotationEvidence{{Kind: "provider_auth", Detail: "401"}, {Kind: "stale_credential", Detail: "expired"}, {Kind: "provider_rate_limited", Detail: "429"}} {
+		rt := newRT()
+		_, _, ok := rt.rotateAfterExit(errors.New("exit status 1"), evidence, []string{"codex"}, nil, nil, "trace", nil)
+		if !ok || rt.CurrentSeat != "b" {
+			t.Fatalf("evidence=%+v did not rotate: ok=%v seat=%s", evidence, ok, rt.CurrentSeat)
+		}
+	}
+}
+
+func TestGuardRotationEvidenceReasonIsTyped(t *testing.T) {
+	got, ok := (guardRotationEvidence{Kind: "provider_auth", Detail: "401 invalid token"}).reason()
+	if !ok || got != "provider_auth:401 invalid token" {
+		t.Fatalf("reason=%q ok=%v", got, ok)
+	}
+	if _, ok := (guardRotationEvidence{Kind: "sandbox", Detail: "1312"}).reason(); ok {
+		t.Fatal("sandbox evidence admitted")
+	}
+}
+
+func TestGuardRotationEvidenceSinceRequiresProviderDelta(t *testing.T) {
+	if got := guardRotationEvidenceSince(map[string]uint64{"auth": 1}, map[string]uint64{"auth": 1}); got.Kind != "" {
+		t.Fatalf("no delta evidence=%+v", got)
+	}
+	got := guardRotationEvidenceSince(map[string]uint64{"auth": 1}, map[string]uint64{"auth": 2})
+	if got.Kind != "provider_auth" || !strings.Contains(got.Detail, "delta=1") {
+		t.Fatalf("auth evidence=%+v", got)
+	}
+	got = guardRotationEvidenceSince(nil, map[string]uint64{"rate_limited": 2})
+	if got.Kind != "provider_rate_limited" || !strings.Contains(got.Detail, "delta=2") {
+		t.Fatalf("rate evidence=%+v", got)
 	}
 }

@@ -17,6 +17,23 @@ const (
 
 type guardRotation struct{ Seat, Dir, Reason, EnvKey string }
 
+type guardRotationEvidence struct {
+	Kind   string
+	Detail string
+}
+
+func (e guardRotationEvidence) reason() (string, bool) {
+	switch e.Kind {
+	case "stale_credential", "provider_auth", "provider_rate_limited":
+		if strings.TrimSpace(e.Detail) != "" {
+			return e.Kind + ":" + strings.TrimSpace(e.Detail), true
+		}
+		return e.Kind, true
+	default:
+		return "", false
+	}
+}
+
 type guardRotationRuntime struct {
 	Launcher    guardChildLauncher
 	Mode        string
@@ -90,11 +107,25 @@ func (rt *guardRotationRuntime) rotate(command []string, injected [][2]string, r
 // the operator's request and must never be relaunched on another account. Keeping this guard
 // beside the rotation primitive makes both supervised and unsupervised launch paths share the
 // same no-amplification rule.
-func (rt *guardRotationRuntime) rotateAfterExit(runErr error, command []string, injected [][2]string, reason string, audit *journal.Journal, traceID string, stderr *os.File) ([]string, [][2]string, bool) {
+func (rt *guardRotationRuntime) rotateAfterExit(runErr error, evidence guardRotationEvidence, command []string, injected [][2]string, audit *journal.Journal, traceID string, stderr *os.File) ([]string, [][2]string, bool) {
 	if runErr == nil {
 		return command, injected, false
 	}
+	reason, ok := evidence.reason()
+	if !ok {
+		return command, injected, false
+	}
 	return rt.rotate(command, injected, reason, audit, traceID, stderr)
+}
+
+func guardRotationEvidenceSince(before, after map[string]uint64) guardRotationEvidence {
+	if after["auth"] > before["auth"] {
+		return guardRotationEvidence{Kind: "provider_auth", Detail: fmt.Sprintf("upstream_auth_delta=%d", after["auth"]-before["auth"])}
+	}
+	if after["rate_limited"] > before["rate_limited"] {
+		return guardRotationEvidence{Kind: "provider_rate_limited", Detail: fmt.Sprintf("upstream_rate_limited_delta=%d", after["rate_limited"]-before["rate_limited"])}
+	}
+	return guardRotationEvidence{}
 }
 
 func normalizeGuardRotateMode(raw string, explicitlySet, interactive bool) (string, error) {

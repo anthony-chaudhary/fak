@@ -448,3 +448,14 @@ func TestUpstreamErrorsRenderOnMetrics(t *testing.T) {
 		t.Fatalf("/metrics missing the counter HELP/TYPE header:\n%s", out)
 	}
 }
+
+func TestRotationEvidenceSnapshotExposesOnlyCredentialScopedKinds(t *testing.T) {
+	s := &Server{metrics: newGatewayMetrics(time.Now())}
+	s.metrics.upstreamErrors["auth"] = 2
+	s.metrics.upstreamErrors["rate_limited"] = 1
+	s.metrics.upstreamErrors["other"] = 9
+	got := s.RotationEvidenceSnapshot()
+	if got["auth"] != 2 || got["rate_limited"] != 1 || len(got) != 2 {
+		t.Fatalf("snapshot=%v", got)
+	}
+}
