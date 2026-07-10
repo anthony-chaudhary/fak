@@ -74,6 +74,12 @@ VERBS = {
     # commit-gardening surface itself, #1326) names a real, checkable change. The gate was
     # abstaining on "advise"/"nudge"/"recommend" despite each leading a concrete diff.
     "advise", "nudge", "recommend", "warn", "remind", "hint",
+    # A concrete imperative verb that names a checkable change but was absent from the harvest,
+    # so `fak commit --preview` red-flagged a real subject the mutating `fak commit` accepted
+    # and scored 100/A — the preview/mutation grade divergence of #3912. "isolate" leads a
+    # genuine action (isolate a code path / behavior under test); kept in lockstep with the Go
+    # commitVerbs set (internal/hooks/gate_commitmsg.go).
+    "isolate",
 }
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")

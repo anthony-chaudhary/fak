@@ -33,6 +33,7 @@ def test_valid_subjects_pass():
         "chore(repo): ignore public/private parity scratch",   # newly-added verb
         "feat(tools): archive .dos work-product to the private repo",  # newly-added
         "chore(tools): back up the durable .dos markdown",     # newly-added "back"
+        "test(codex): isolate direct continuation override",   # #3912: isolate now accepted
     ]:
         check(f"clean: {s!r}", mod.verdict(s) is None, f"got {mod.verdict(s)!r}")
 
