@@ -223,6 +223,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON (schema fak.trunk_build.v1)")
 	base := fs.String("base", "", "override the base ref the push range is computed against (default: origin/<branch>→origin/main→origin/master)")
+	tip := fs.String("tip", "", "exact local object SHA supplied by pre-push stdin (default: HEAD for manual invocation)")
 	budget := fs.Duration("budget", 60*time.Second, "report GATE_LATENCY_REGRESSION if the build exceeds this (still exits 0 when green)")
 	report := fs.String("report", "", "write the JSON result to this path in addition to stdout")
 	advisory := fs.Bool("advisory", false, "advisory mode (FLEET_BUILD_GUARD=warn): single-flight the build — skip with SKIPPED_CONTENDED when a peer build is already running on this host, rather than run a redundant concurrent full build (skip == push allowed)")
@@ -237,7 +238,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	res, code := evaluatePrePushBuild(r, *base, *budget, *advisory)
+	res, code := evaluatePrePushBuildAt(r, *base, *tip, *budget, *advisory)
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -262,11 +263,19 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 // SKIPPED_CONTENDED instead of running a redundant concurrent full build. Block mode
 // (advisory=false) never skips.
 func evaluatePrePushBuild(r, baseOverride string, budget time.Duration, advisory bool) (trunkBuildResult, int) {
+	return evaluatePrePushBuildAt(r, baseOverride, "", budget, advisory)
+}
+
+func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Duration, advisory bool) (trunkBuildResult, int) {
 	res := trunkBuildResult{Schema: "fak.trunk_build.v1"}
 
-	tip, err := prepushRevParse(r, "HEAD")
+	tipRef := strings.TrimSpace(tipOverride)
+	if tipRef == "" {
+		tipRef = "HEAD"
+	}
+	tip, err := prepushRevParse(r, tipRef)
 	if err != nil {
-		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot resolve HEAD: %v", err)
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot resolve pushed tip %s: %v", tipRef, err)
 		return res, 2
 	}
 	res.Ref = tip
@@ -277,9 +286,9 @@ func evaluatePrePushBuild(r, baseOverride string, budget time.Duration, advisory
 	}
 	res.Base = base
 
-	changed, err := prepushChangedFiles(r, base)
+	changed, err := prepushChangedFiles(r, base, tip)
 	if err != nil {
-		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot diff %s...HEAD: %v", base, err)
+		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot diff %s...%s: %v", base, tip, err)
 		return res, 2
 	}
 	if len(changed) == 0 {
@@ -422,8 +431,8 @@ func resolvePrepushBase(r string) string {
 // gitChangedGoFilesRange returns the repo-relative, slash-separated .go files the commits in
 // base..HEAD add or change, via three-dot `git diff` (merge-base range = exactly what the
 // push adds), reading COMMITTED bytes only — never the peer-dirty working tree.
-func gitChangedGoFilesRange(r, base string) ([]string, error) {
-	out, err := gitOut(r, "diff", "--name-only", base+"...HEAD")
+func gitChangedGoFilesRange(r, base, tip string) ([]string, error) {
+	out, err := gitOut(r, "diff", "--name-only", base+"..."+tip)
 	if err != nil {
 		return nil, err
 	}

@@ -159,7 +159,7 @@ func TestEvaluatePrePushBuildNoopNeverContends(t *testing.T) {
 	// A docs-only (no Go delta) push must short-circuit as NOOP before ever touching the slot,
 	// so a cheap push never blocks a concurrent real build.
 	setupHappyPrepushSeams(t)
-	prepushChangedFiles = func(string, string) ([]string, error) { return nil, nil }
+	prepushChangedFiles = func(string, string, string) ([]string, error) { return nil, nil }
 	fs := &fakeSlot{}
 	installFakeSlot(t, fs, time.Unix(1_700_000_000, 0))
 	res, code := evaluatePrePushBuild("/repo", "", time.Minute, true)

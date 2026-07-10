@@ -46,6 +46,11 @@ esac
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
+# Capture Git's standard update rows before any child can consume stdin. Build
+# evidence below is bound to each immutable local SHA actually being pushed.
+push_updates="$(cat)"
+pushed_tips="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 !~ /^0+$/ { print $2 }' | sort -u)"
+
 # The architest tier table must not drift between pushes. GitHub Actions can report
 # TestEveryPackageDeclaresTier red after a direct push, but the local push boundary is
 # the earliest in-repo place to refuse the same recurrence (#1145). Use `fak hygiene`
@@ -146,16 +151,25 @@ if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; the
 	# SKIPPED_CONTENDED, exit 0 = allowed). Block mode omits the flag and always builds.
 	build_adv=""
 	[ "$build_mode" = "warn" ] && build_adv="--advisory"
-	if command -v fak >/dev/null 2>&1; then
-		build_out="$(fak hooks pre-push --root "$root" $build_adv 2>&1)"
-		build_status=$?
-	elif command -v go >/dev/null 2>&1; then
-		build_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" $build_adv 2>&1)"
-		build_status=$?
-	else
-		build_out="neither 'fak' nor 'go' is on PATH"
-		build_status=2
-	fi
+	build_out=""
+	build_status=0
+	tips="$pushed_tips"
+	[ -z "$tips" ] && tips="HEAD" # manual invocation compatibility
+	for pushed_tip in $tips; do
+		if command -v fak >/dev/null 2>&1; then
+			one_out="$(fak hooks pre-push --root "$root" --tip "$pushed_tip" $build_adv 2>&1)"
+			one_status=$?
+		elif command -v go >/dev/null 2>&1; then
+			one_out="$(cd "$root" && go run ./cmd/fak hooks pre-push --root "$root" --tip "$pushed_tip" $build_adv 2>&1)"
+			one_status=$?
+		else
+			one_out="neither 'fak' nor 'go' is on PATH"
+			one_status=2
+		fi
+		build_out="${build_out}${build_out:+\n}${one_out}"
+		[ "$one_status" -eq 1 ] && build_status=1
+		[ "$one_status" -ne 0 ] && [ "$build_status" -eq 0 ] && build_status=$one_status
+	done
 
 	if [ "$build_status" -eq 1 ]; then
 		if [ "$build_mode" = "block" ]; then

@@ -19,7 +19,7 @@ import (
 type prepushSeamSnapshot struct {
 	revParse     func(string, string) (string, error)
 	resolveBase  func(string) string
-	changedFiles func(string, string) ([]string, error)
+	changedFiles func(string, string, string) ([]string, error)
 	extractTip   func(string, string) (string, error)
 	listGraph    func(string) (map[string]string, map[string][]string, int, error)
 	build        func(string, []string) (string, bool)
@@ -56,7 +56,7 @@ func setupHappyPrepushSeams(t *testing.T) {
 	t.Cleanup(snap.restore)
 	prepushRevParse = func(string, string) (string, error) { return "deadbeefcafef00dfeed", nil }
 	prepushResolveBase = func(string) string { return "origin/main" }
-	prepushChangedFiles = func(string, string) ([]string, error) { return []string{"internal/q/q.go"}, nil }
+	prepushChangedFiles = func(string, string, string) ([]string, error) { return []string{"internal/q/q.go"}, nil }
 	prepushExtractTip = func(string, string) (string, error) { return t.TempDir(), nil }
 	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
 		// pkg q changed; pkg p imports q — so an edit to q must select p too.
@@ -96,7 +96,7 @@ func TestEvaluatePrePushBuildWouldNotCompile(t *testing.T) {
 
 func TestEvaluatePrePushBuildNoChangeIsNoop(t *testing.T) {
 	setupHappyPrepushSeams(t)
-	prepushChangedFiles = func(string, string) ([]string, error) { return nil, nil }
+	prepushChangedFiles = func(string, string, string) ([]string, error) { return nil, nil }
 	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 0 || res.Verdict != "NOOP" || !res.OK {
 		t.Fatalf("want NOOP/exit0, got verdict=%s code=%d", res.Verdict, code)
@@ -607,4 +607,27 @@ func mustGitOut(t *testing.T, repo string, args ...string) string {
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 	return out
+}
+
+func TestPrepushBuildAuditsExplicitTipInsteadOfHead(t *testing.T) {
+	saved := savePrepushSeams()
+	defer saved.restore()
+	var resolved []string
+	prepushRevParse = func(_ string, ref string) (string, error) {
+		resolved = append(resolved, ref)
+		return ref, nil
+	}
+	prepushResolveBase = func(string) string { return "origin/main" }
+	var diffTip string
+	prepushChangedFiles = func(_, _, tip string) ([]string, error) {
+		diffTip = tip
+		return nil, nil
+	}
+	res, code := evaluatePrePushBuildAt("repo", "", "pushed-sha", time.Minute, false)
+	if code != 0 || res.Ref != "pushed-sha" || diffTip != "pushed-sha" {
+		t.Fatalf("explicit tip result=%+v code=%d diffTip=%q resolved=%v", res, code, diffTip, resolved)
+	}
+	if len(resolved) == 0 || resolved[0] != "pushed-sha" {
+		t.Fatalf("rev-parse refs=%v, want pushed-sha first", resolved)
+	}
 }
