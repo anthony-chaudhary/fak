@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
 const (
@@ -13,6 +16,66 @@ const (
 )
 
 type guardRotation struct{ Seat, Dir, Reason, EnvKey string }
+
+type guardRotationRuntime struct {
+	Mode        string
+	CurrentSeat string
+	Registry    accounts.Registry
+	EnvKey      string
+	Headroom    accounts.RotationHeadroom
+}
+
+func guardRotationRuntimeFor(command []string, mode string) guardRotationRuntime {
+	r := guardRotationRuntime{Mode: mode}
+	if mode == guardRotateOff || len(command) == 0 {
+		return r
+	}
+	profile, ok := harnessprofile.Lookup(command[0])
+	if !ok || strings.TrimSpace(profile.ConfigHomeGlob) == "" {
+		return r
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return r
+	}
+	homes, err := accounts.DiscoverProfile(home, profile)
+	if err != nil {
+		return r
+	}
+	r.Registry = accounts.Registry{Homes: homes}
+	switch profile.Identity {
+	case harnessprofile.IdentityClaude:
+		r.EnvKey = "CLAUDE_CONFIG_DIR"
+	case harnessprofile.IdentityCodex:
+		r.EnvKey = "CODEX_HOME"
+	}
+	for _, h := range homes {
+		if current := os.Getenv(r.EnvKey); current != "" && strings.EqualFold(current, h.Dir) {
+			r.CurrentSeat = h.Name
+			break
+		}
+	}
+	return r
+}
+
+func (rt *guardRotationRuntime) rotate(command []string, injected [][2]string, reason string, audit *journal.Journal, traceID string, stderr *os.File) ([]string, [][2]string, bool) {
+	if rt == nil || rt.Mode == guardRotateOff {
+		return command, injected, false
+	}
+	r, ok := guardNextRotationWithHeadroom(rt.Registry, rt.CurrentSeat, rt.Mode, reason, rt.EnvKey, rt.Headroom)
+	if !ok {
+		return command, injected, false
+	}
+	command, injected = guardApplyRotation(command, injected, r)
+	rt.CurrentSeat = r.Seat
+	if stderr != nil {
+		fmt.Fprint(stderr, guardRotationBanner(r))
+	}
+	if audit != nil {
+		audit.AppendAgentEvent("ACCOUNT_ROTATION", traceID, r.Seat+":"+r.Reason)
+	}
+	return command, injected, true
+}
 
 func normalizeGuardRotateMode(raw string, explicitlySet, interactive bool) (string, error) {
 	raw = strings.TrimSpace(raw)
@@ -32,6 +95,10 @@ func normalizeGuardRotateMode(raw string, explicitlySet, interactive bool) (stri
 }
 
 func guardNextRotation(reg accounts.Registry, currentSeat, requested, reason, envKey string) (guardRotation, bool) {
+	return guardNextRotationWithHeadroom(reg, currentSeat, requested, reason, envKey, nil)
+}
+
+func guardNextRotationWithHeadroom(reg accounts.Registry, currentSeat, requested, reason, envKey string, headroom accounts.RotationHeadroom) (guardRotation, bool) {
 	if requested == guardRotateOff {
 		return guardRotation{}, false
 	}
@@ -46,7 +113,7 @@ func guardNextRotation(reg accounts.Registry, currentSeat, requested, reason, en
 			}
 		}
 	} else {
-		next, ok = reg.NextInRotation(currentSeat)
+		next, ok = reg.NextInRotationWithHeadroom(currentSeat, headroom)
 	}
 	if !ok || next.Name == currentSeat {
 		return guardRotation{}, false

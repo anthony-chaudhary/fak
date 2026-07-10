@@ -224,6 +224,7 @@ func cmdGuard(argv []string) {
 	taskHandoffFile := fs.String("task-handoff-file", "", "path the wrapped agent must write with fak.task-handoff.v1 before a clean stop (default: a private temp file for this guard session)")
 	taskHandoffRepo := fs.String("task-handoff-repo", "", "owner/repo for optional live handoff issue sync (passed to fak task handoff --live)")
 	taskHandoffLive := fs.Bool("task-handoff-live", false, "after a valid handoff with next_steps, the Stop hook runs fak task handoff --live before allowing the clean stop")
+	operatorDirected := fs.String("operator-directed", guardOperatorDirectedModeWarn, "Claude Code Stop hook that catches a HEADLESS turn ending by asking a human (\"do you want me to push?\", \"waiting for your approval\") — a question no one is there to answer, so the work stalls: off|shadow|warn|enforce. WARN by default (soak: prints the choicetriage remediation, allows the stop); enforce BLOCKS a resolvable ask and feeds the remediation back so the agent acts, while routing a HUMAN_RESIDUAL wall as a typed escalation. Auto-OFF for an attended interactive child the operator did not gate explicitly (a human can always ask); never blocks an interactive session.")
 	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a terminal multiplexer (tmux, or Windows Terminal via $WT_SESSION); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no multiplexer is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a \"bottom\" strip or a \"right\" column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
@@ -282,7 +283,6 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, rotateErr)
 		os.Exit(2)
 	}
-	_ = resolvedRotateMode // consumed by the relaunch rotation seam; parsing/defaults are pinned now.
 	// Boot-timeline instrumentation: mirror serve.go's StartupPhases (internal/gateway/startup.go)
 	// so a slow `fak guard` launch is diagnosable from THIS session's own boot timeline instead of
 	// only fak_gateway_startup_phase_duration_seconds on an ephemeral port that closes with the
@@ -1285,9 +1285,13 @@ func cmdGuard(argv []string) {
 		handoffFile = filepath.Join(dir, "task-handoff.json")
 	}
 	handoffCfg := guardTaskHandoffConfig{Mode: handoffMode, File: handoffFile, Repo: *taskHandoffRepo, Live: *taskHandoffLive}
+	// Resolve the operator-directed gate mode with the operator-absent cap: an attended interactive
+	// child is capped so a human's genuine question can always end the turn; only a headless child
+	// ever reaches enforce. Same guardChildInteractive signal the task-handoff gate leans on above.
+	operatorDirectedMode := guardOperatorDirectedEffectiveMode(*operatorDirected, guardSetFlags["operator-directed"], guardChildInteractive(command))
 	var stopHookInstall guardStopHookInstall
 	var stopHookEnv [][2]string
-	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, *denyAllSameStop, handoffCfg)
+	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, *denyAllSameStop, operatorDirectedMode, handoffCfg)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook setup failed: %v\n", err)
@@ -1421,6 +1425,7 @@ func cmdGuard(argv []string) {
 	emitGuardStartupBanner(view, startupReport)
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
+	rotationRuntime := guardRotationRuntimeFor(command, resolvedRotateMode)
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)
 	// On a genuine launch FAILURE, spill the full startup report to stderr — except under
 	// --banner=full, which already streamed it at boot (avoid printing it twice).
@@ -1433,5 +1438,5 @@ func cmdGuard(argv []string) {
 		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 }

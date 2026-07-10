@@ -1071,7 +1071,7 @@ func guardWriteLaunchFailReport(w io.Writer, report string, enabled bool) {
 // dumpStartupOnLaunchFail spills the full startup report to stderr if the child never starts
 // (guardChildIsLaunchFailure) — set by the caller for every banner mode except --banner=full,
 // which already streamed it at boot.
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil)
@@ -1085,6 +1085,10 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		runErr := child.Run()
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
+			continue
+		}
+		if nextCommand, nextInjected, ok := rotation.rotate(command, injected, "auth_or_stale_cred", auditJournal, guardTraceID, os.Stderr); ok {
+			command, injected = nextCommand, nextInjected
 			continue
 		}
 		if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {

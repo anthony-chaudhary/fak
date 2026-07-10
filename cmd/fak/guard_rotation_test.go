@@ -57,3 +57,26 @@ func TestGuardApplyRotationRepointsChildEnvironment(t *testing.T) {
 		t.Fatalf("command=%v env=%v", gotCmd, env)
 	}
 }
+
+func TestGuardNextRotationHeadroomSkipsWalled(t *testing.T) {
+	ready := func(name, key string) accounts.Home {
+		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}
+	}
+	reg := accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b"), ready("c", "acct-c")}}
+	hr := accounts.RotationHeadroom{"uuid:acct-b": -1, "uuid:acct-c": 1}
+	r, ok := guardNextRotationWithHeadroom(reg, "a", "auto", "walled", "CLAUDE_CONFIG_DIR", hr)
+	if !ok || r.Seat != "c" {
+		t.Fatalf("rotation=%+v ok=%v", r, ok)
+	}
+}
+
+func TestGuardRotationRuntimeRotateWritesAuditAndRepoints(t *testing.T) {
+	ready := func(name, key string) accounts.Home {
+		return accounts.Home{Name: name, Dir: "/" + name, Identity: accounts.Identity{Exists: true, HasCreds: true, AccountUUID: key}}
+	}
+	rt := &guardRotationRuntime{Mode: "auto", CurrentSeat: "a", EnvKey: "CLAUDE_CONFIG_DIR", Registry: accounts.Registry{Homes: []accounts.Home{ready("a", "acct-a"), ready("b", "acct-b")}}}
+	cmd, env, ok := rt.rotate([]string{"claude", "-p"}, nil, "stale", nil, "trace-1", nil)
+	if !ok || rt.CurrentSeat != "b" || len(env) != 1 || env[0] != [2]string{"CLAUDE_CONFIG_DIR", "/b"} || len(cmd) != 2 {
+		t.Fatalf("runtime=%+v cmd=%v env=%v ok=%v", rt, cmd, env, ok)
+	}
+}
