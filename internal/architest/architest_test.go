@@ -754,6 +754,82 @@ func TestHotPathHasNoExec(t *testing.T) {
 	}
 }
 
+// tierShareThreshold is the share of all declared leaves above which a single non-terminal
+// tier is flagged as over-accumulated: past this line the layering has stopped discriminating
+// and is piling leaves into one bucket instead of ordering them into a DAG. Tunable; advisory
+// only. Set just above the post-split primitive share (~42%) so #4042 brings the tree under
+// the line and the advisory goes quiet on its own once foundation is factored.
+const tierShareThreshold = 0.55
+
+// tierCount is one row of the per-tier population table.
+type tierCount struct {
+	Tier  int
+	Name  string
+	Count int
+	Share float64
+}
+
+// tierDistribution folds a tier table into per-tier counts + shares, ordered by tier number.
+// Pure: state in, table out, no I/O -- so it is unit-testable and reused by the advisory.
+func tierDistribution(m map[string]int) []tierCount {
+	counts := map[int]int{}
+	total := 0
+	for _, tv := range m {
+		counts[tv]++
+		total++
+	}
+	tiers := make([]int, 0, len(counts))
+	for tv := range counts {
+		tiers = append(tiers, tv)
+	}
+	sort.Ints(tiers)
+	out := make([]tierCount, 0, len(tiers))
+	for _, tv := range tiers {
+		name := ""
+		if tv >= 0 && tv < len(tierName) {
+			name = tierName[tv]
+		}
+		share := 0.0
+		if total > 0 {
+			share = float64(counts[tv]) / float64(total)
+		}
+		out = append(out, tierCount{Tier: tv, Name: name, Count: counts[tv], Share: share})
+	}
+	return out
+}
+
+// TestTierDistributionAdvisory logs the per-tier population and flags over-accumulation. A
+// healthy layered DAG discriminates: leaves spread across tiers, no single NON-TERMINAL tier
+// (i.e. any tier below the top integrator sink) holding a majority. Foundation is ~69% of all
+// leaves TODAY -- everything piled at the base with no sub-order -- so the advisory fires. It
+// is advisory (t.Logf, never t.Fatal): it tracks the drift without blocking a push, and goes
+// quiet once #4042 splits foundation into primitive/composite. Run with -v to see the table.
+func TestTierDistributionAdvisory(t *testing.T) {
+	dist := tierDistribution(tier)
+	terminal := -1
+	for _, d := range dist {
+		if d.Tier > terminal {
+			terminal = d.Tier
+		}
+	}
+	t.Logf("tier population (%d declared leaves, threshold %.0f%%):", len(tier), tierShareThreshold*100)
+	for _, d := range dist {
+		marker := ""
+		if d.Tier != terminal && d.Share > tierShareThreshold {
+			marker = "  <-- OVER-ACCUMULATED"
+		}
+		t.Logf("  %d %-11s %3d  %5.1f%%%s", d.Tier, d.Name, d.Count, d.Share*100, marker)
+	}
+	for _, d := range dist {
+		if d.Tier != terminal && d.Share > tierShareThreshold {
+			t.Logf("advisory: tier %d (%s) holds %.1f%% of all %d declared leaves (> %.0f%% threshold) -- "+
+				"the layering has stopped discriminating at this level. Factor it into sub-tiers so the "+
+				"DAG orders the pile rather than heaping it (see #4042: split foundation into "+
+				"primitive/composite).", d.Tier, d.Name, d.Share*100, len(tier), tierShareThreshold*100)
+		}
+	}
+}
+
 func fmtEdge(from string, ft int, to string, tt int) string {
 	return from + " (" + tierName[ft] + ") -> " + to + " (" + tierName[tt] + ")"
 }
