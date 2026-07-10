@@ -57,6 +57,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipAttribute(stdout, stderr, argv[1:])
 	case "reconcile":
 		return runWipReconcile(stdout, stderr, argv[1:])
+	case "sweep-guard", "sweepguard":
+		return runWipSweepGuard(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -98,6 +100,12 @@ func wipUsage(w io.Writer) {
       (CRASHED), decide the one safe action: DISCARD_WITNESSED (delta landed in
       HEAD), RECLAIM (unlanded, applies cleanly), or QUARANTINE (unlanded, conflicts).
       A live owner's checkpoint is SKIPped. Advisory: prints decisions, mutates nothing.
+
+  fak wip sweep-guard [-C <repo>] [--session <id>] [--json]
+      Warn before a broad 'git add' sweeps WIP that is not yours. Grades every dirty
+      hunk SAFE (owned solely by the self session) or HAZARD (owned by a peer — LIVE
+      peers flagged sharply — SHARED, or ORPHAN). Exit 3 if any hunk is a HAZARD, 0 if
+      the sweep is clean. Advisory: it inspects and warns, it never stages anything.
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta
@@ -697,14 +705,25 @@ func runWipAttribute(stdout, stderr io.Writer, argv []string) int {
 // folds them through the pure wipattr.Attribute — classifying every dirty hunk as
 // OWNED / SHARED / ORPHAN. All git parsing lives here; the classification is pure.
 func wipAttribute(ctx context.Context, repo string) (wipAttributeResult, error) {
+	attrs, err := wipBuildAttributions(ctx, repo)
+	if err != nil {
+		return wipAttributeResult{}, err
+	}
+	return wipAttributeResult{Attributions: attrs, Orphans: len(wipattr.Orphans(attrs))}, nil
+}
+
+// wipBuildAttributions computes the per-hunk attribution of the current working-tree
+// delta against every session's checkpoint hunks — the shared input for `wip attribute`
+// and `wip sweep-guard`.
+func wipBuildAttributions(ctx context.Context, repo string) ([]wipattr.Attribution, error) {
 	liveDiff, err := gitWipOut(ctx, repo, nil, "diff", "HEAD", "--")
 	if err != nil {
-		return wipAttributeResult{}, fmt.Errorf("read working-tree diff: %w", err)
+		return nil, fmt.Errorf("read working-tree diff: %w", err)
 	}
 	dirty := wipattr.ParseHunks(liveDiff)
 	recs, err := wipListRecords(ctx, repo)
 	if err != nil {
-		return wipAttributeResult{}, err
+		return nil, err
 	}
 	checkpoints := make(map[string][]wipattr.Hunk, len(recs))
 	for _, r := range recs {
@@ -714,8 +733,7 @@ func wipAttribute(ctx context.Context, repo string) (wipAttributeResult, error) 
 		}
 		checkpoints[wipSessionOf(r)] = wipattr.ParseHunks(cpDiff)
 	}
-	attrs := wipattr.Attribute(dirty, checkpoints)
-	return wipAttributeResult{Attributions: attrs, Orphans: len(wipattr.Orphans(attrs))}, nil
+	return wipattr.Attribute(dirty, checkpoints), nil
 }
 
 // wipAttrOwnerLabel renders the owner column for the plain listing.
@@ -829,6 +847,77 @@ func wipDeltaApplies(ctx context.Context, repo string, rec wipref.RefRecord) boo
 	}
 	_, _, acode, aerr := gitWipStdin(ctx, repo, diff, "apply", "--check", "-")
 	return aerr == nil && acode == 0
+}
+
+// ---- sweep-guard (#3879) ----
+
+// wipSweepResult is the JSON/plain result of a sweep-guard pass.
+type wipSweepResult struct {
+	Self     string                 `json:"self"`
+	Verdicts []wipattr.SweepVerdict `json:"verdicts"`
+	Hazards  int                    `json:"hazards"`
+}
+
+// runWipSweepGuard warns before a broad `git add` would sweep a peer's WIP. It exits 3
+// when any dirty hunk is a HAZARD (owned by a peer, SHARED, or ORPHAN), 0 when every
+// hunk is owned by self (or the tree is clean). Advisory: it inspects and warns, it
+// never stages anything.
+func runWipSweepGuard(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("wip sweep-guard", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "wip")
+	repo := fs.String("C", "", "run in this git repo (default: cwd)")
+	session := fs.String("session", "", "the self session id (default: $CLAUDE_CODE_SESSION_ID, else $FAK_SESSION_ID)")
+	asJSON := fs.Bool("json", false, "emit every verdict as JSON")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	self := *session
+	if self == "" {
+		self = firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"))
+	}
+	res, err := wipSweepGuard(context.Background(), *repo, self)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wip sweep-guard: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		if code := encodeJSONOrFail(stdout, stderr, res, "fak wip sweep-guard"); code != 0 {
+			return code
+		}
+		if res.Hazards > 0 {
+			return 3
+		}
+		return 0
+	}
+	if res.Hazards == 0 {
+		fmt.Fprintln(stdout, "sweep-guard: clean — every dirty hunk is owned by self (or the tree is clean)")
+		return 0
+	}
+	fmt.Fprintf(stderr, "sweep-guard: %d hazard hunk(s) — a broad `git add` would sweep WIP that is not yours:\n", res.Hazards)
+	for _, v := range res.Verdicts {
+		if v.Risk == wipattr.SweepHazard {
+			fmt.Fprintf(stderr, "  %s\t%s\t%s\n", v.File, v.State, v.Reason)
+		}
+	}
+	fmt.Fprintln(stderr, "checkpoint your own work, then stage explicit paths (git add <path>) instead of -A.")
+	return 3
+}
+
+// wipSweepGuard attributes the working-tree delta, then grades each hunk SAFE/HAZARD
+// against the self session and the live-lease set (peers still holding a lock under
+// refs/fak/locks/*). Read-only: it stages nothing.
+func wipSweepGuard(ctx context.Context, repo, self string) (wipSweepResult, error) {
+	attrs, err := wipBuildAttributions(ctx, repo)
+	if err != nil {
+		return wipSweepResult{}, err
+	}
+	live, err := wipLiveSessions(ctx, repo)
+	if err != nil {
+		return wipSweepResult{}, err
+	}
+	verdicts := wipattr.SweepGuard(attrs, self, live)
+	return wipSweepResult{Self: self, Verdicts: verdicts, Hazards: len(wipattr.SweepHazards(verdicts))}, nil
 }
 
 // ---- restore ----
