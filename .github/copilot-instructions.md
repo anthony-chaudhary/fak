@@ -6,6 +6,10 @@ it first for build/test/run, the repo map, and the rules. Curated doc map:
 
 Must-know rules (enforced below the agent layer):
 
+- **Default is to ship** — when the tree is green (`make ci`), commit AND push unprompted;
+  decide from the work in front of you, you don't wait to be asked. The rules below gate
+  that default (stay on trunk, commit by path, never force-push); if a guard refuses
+  (`OFF_TRUNK`) or a peer's merge is mid-flight, reconcile in place or stop.
 - Work directly on the trunk (`main`); never open a feature branch or worktree — the
   trunk guard refuses off-trunk commits (`OFF_TRUNK`). The one sanctioned exception: a
   **detached** per-worker worktree that lands on `main` via `fak worktree worker

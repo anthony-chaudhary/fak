@@ -11,6 +11,8 @@ read:
   - AGENTS.md
   - CONTRIBUTING.md
 
-# Match the repo's trunk discipline: Aider should not auto-create commits or branches —
-# commit by explicit path with a DCO sign-off (see AGENTS.md).
+# Default is to ship: when the tree is green (`make ci`), commit AND push unprompted —
+# decide from the work in front of you, don't wait to be asked. Ship deliberately, by
+# explicit path with a DCO sign-off (see AGENTS.md), rather than letting Aider auto-commit
+# per edit — so `auto-commits` stays off and every commit is a clean, path-scoped ship.
 auto-commits: false
