@@ -21,7 +21,11 @@ package affectedtests
 // verdict — stays in the still-failing set and keeps the red exit. Flakiness is never
 // inferred from the mere ABSENCE of a repeated FAIL.
 
-import "sort"
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+)
 
 // FlakyPassedOnRetry is the closed verdict a run earns when EVERY initially-failing
 // package passed on a same-tree rerun — non-deterministic, not a deterministic regression
@@ -54,4 +58,150 @@ func ClassifyReruns(initialFailed []string, passedOnRerun map[string]bool) (flak
 	sort.Strings(flaky)
 	sort.Strings(stillFailing)
 	return flaky, stillFailing
+}
+
+// StillFailing is the per-test verdict for a test that failed the first run and
+// never produced a positive PASS on any same-tree rerun — the fail-closed default
+// (a red without green evidence is a real red, not a flake). It is the per-test
+// counterpart of the package staying in ClassifyReruns' stillFailing set.
+const StillFailing = "STILL_FAILING"
+
+// TestEvent is the subset of one `go test -json` event line this fold reads: the
+// Action ("run"|"pass"|"fail"|"output"|…), the Package it happened in, and the
+// Test it names. A package-level event carries an empty Test; a test or subtest
+// event carries "TestName" or "TestName/subtest". Only these three fields drive
+// per-test flake identification, so the rest of the event is ignored.
+type TestEvent struct {
+	Action  string `json:"Action"`
+	Package string `json:"Package"`
+	Test    string `json:"Test"`
+}
+
+// testID identifies one test/subtest within one package — the grain a quarantine
+// ledger, a "fix this flake" ticket, and a per-test trend all need but the
+// package-level ClassifyReruns cannot express.
+type testID struct {
+	pkg  string
+	name string
+}
+
+// Finding names one individual test/subtest that the reruns classified, carrying
+// the specific Package/Test the package-level ClassifyReruns could only report as
+// a whole poisoned package. Verdict is FlakyPassedOnRetry (failed first, then
+// passed on a same-tree rerun) or StillFailing (never seen green — fail-closed).
+type Finding struct {
+	Package string `json:"package"`
+	Test    string `json:"test"` // "TestName" or "TestName/subtest" — never just the package
+	Verdict string `json:"verdict"`
+}
+
+// Qualified renders the finding as "package.Test" (or just the package when no
+// test is named), the stable key a ledger or ticket dedupes on.
+func (f Finding) Qualified() string {
+	if f.Test == "" {
+		return f.Package
+	}
+	return f.Package + "." + f.Test
+}
+
+// ParseTestEvents folds `go test -json` newline-delimited output into events,
+// tolerantly skipping any non-JSON preamble a `go test` run can interleave (build
+// errors, module-download notes, a bare "FAIL" trailer) so a malformed line never
+// discards the whole stream. Pure and deterministic.
+func ParseTestEvents(raw string) []TestEvent {
+	var out []TestEvent
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] != '{' {
+			continue
+		}
+		var e TestEvent
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue // a non-event JSON object (or truncated line) is skipped, not fatal
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// ClassifyRerunFindings is the per-test upgrade of ClassifyReruns: it names the
+// individual test/subtest that flaked instead of the whole package. firstRun is
+// the `-json` events of the initial (failing) run; reruns is the concatenated
+// `-json` events of the same-tree rerun round(s). A leaf test that FAILED in
+// firstRun and PASSED in some rerun is FlakyPassedOnRetry; one never seen green
+// stays StillFailing — the SAME fail-closed rule as ClassifyReruns, because a
+// flake needs positive green evidence, never the mere absence of a repeated FAIL.
+//
+// Only leaf tests are named: when a subtest fails, `go test` also emits a fail for
+// its parent test and the package, but those fail only BECAUSE the subtest did, so
+// an ancestor whose name is a "/"-prefix of another failed name in the same
+// package is dropped — leaving the most specific unit ("TestFoo/case_b"), which is
+// the point of this leaf. Findings are sorted by package then test. Pure.
+func ClassifyRerunFindings(firstRun, reruns []TestEvent) (flaky, stillFailing []Finding) {
+	failed := failedLeafTests(firstRun)
+	passed := passedTests(reruns)
+
+	ids := make([]testID, 0, len(failed))
+	for id := range failed {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if ids[i].pkg != ids[j].pkg {
+			return ids[i].pkg < ids[j].pkg
+		}
+		return ids[i].name < ids[j].name
+	})
+
+	for _, id := range ids {
+		f := Finding{Package: id.pkg, Test: id.name}
+		if passed[id] {
+			f.Verdict = FlakyPassedOnRetry
+			flaky = append(flaky, f)
+		} else {
+			f.Verdict = StillFailing
+			stillFailing = append(stillFailing, f)
+		}
+	}
+	return flaky, stillFailing
+}
+
+// failedLeafTests collects the test-level FAIL events and keeps only the leaves —
+// dropping any failed test that is a strict "/"-prefixed ancestor of another
+// failed test in the same package, since a parent/umbrella fails only because its
+// subtest did. Package-level FAILs (empty Test) are ignored: naming the package is
+// exactly the granularity this leaf removes.
+func failedLeafTests(events []TestEvent) map[testID]bool {
+	failed := map[testID]bool{}
+	for _, e := range events {
+		if e.Action == "fail" && e.Test != "" {
+			failed[testID{e.Package, e.Test}] = true
+		}
+	}
+	leaves := make(map[testID]bool, len(failed))
+	for id := range failed {
+		isLeaf := true
+		for other := range failed {
+			if other.pkg == id.pkg && other.name != id.name &&
+				strings.HasPrefix(other.name, id.name+"/") {
+				isLeaf = false
+				break
+			}
+		}
+		if isLeaf {
+			leaves[id] = true
+		}
+	}
+	return leaves
+}
+
+// passedTests is the set of test/subtest units that produced a positive PASS in
+// the given events — the green evidence a flake verdict requires.
+func passedTests(events []TestEvent) map[testID]bool {
+	passed := map[testID]bool{}
+	for _, e := range events {
+		if e.Action == "pass" && e.Test != "" {
+			passed[testID{e.Package, e.Test}] = true
+		}
+	}
+	return passed
 }
