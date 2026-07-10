@@ -1,13 +1,39 @@
 package webbench
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
+
+// evalHarnessTimeout bounds a single RunEval harness invocation. The harness
+// drives real browsers over the network, so it gets a generous ceiling; a
+// wedged run degrades to a timeout verdict instead of hanging forever. It is a
+// var (not a const) so tests can drive the timeout path with a tiny deadline.
+var evalHarnessTimeout = 15 * time.Minute
+
+// runBoundedHarness runs the harness command under a deadline. CommandContext
+// kills the child when the context expires and WaitDelay bounds the lingering
+// wait on the child's I/O pipes, so a wedged browser run cannot block the
+// caller indefinitely. On expiry it returns an error wrapping
+// context.DeadlineExceeded (recognisable via errors.Is).
+func runBoundedHarness(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 10 * time.Second
+	out, err := cmd.CombinedOutput()
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("harness timed out after %s: %w", timeout, ctx.Err())
+	}
+	return out, err
+}
 
 // EvalCapability reports whether the official web benchmark harness can run on this box.
 // For web benchmarks, this typically means a browser runtime (Playwright, Selenium) and
@@ -102,9 +128,13 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 	if len(cmdParts) < 2 {
 		return res, fmt.Errorf("invalid harness command: %s", harnessCmd)
 	}
-	cmd := exec.Command(cmdParts[0], cmdParts[1:]...)
-	output, err := cmd.CombinedOutput()
+	// Bounded: the harness drives real browsers over the network, which can wedge
+	// (a hung page, a stalled fetch) with no natural deadline.
+	output, err := runBoundedHarness(evalHarnessTimeout, cmdParts[0], cmdParts[1:]...)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return res, err
+		}
 		return res, fmt.Errorf("harness failed: %w: %s", err, string(output))
 	}
 
