@@ -32,6 +32,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditDeep(stdout, stderr, argv[1:])
 	case "budget":
 		return runSessionAuditBudget(stdout, stderr, argv[1:])
+	case "feed":
+		return runSessionAuditFeed(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		sessionAuditUsage(stdout)
 		return 0
@@ -49,6 +51,8 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json] [--fail-on high|medium|none]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
 	fmt.Fprintln(w, "       fak session-audit budget  [--json] [--target-tokens N] [--target-turns N] <session.jsonl>")
+	fmt.Fprintln(w, "       fak session-audit feed    [--since-days N] [--all] [--ledger docs/nightrun/session-audit.jsonl] [--json] [--dry-run]")
+	fmt.Fprintln(w, "            (fold the window into ONE scrubbed row and APPEND it to the durable ledger)")
 }
 
 type rootFlags []string
@@ -301,6 +305,44 @@ func runSessionAuditActions(stdout, stderr io.Writer, argv []string) int {
 	if plan.Gate.Verdict == "refuse" {
 		return 1
 	}
+	return 0
+}
+
+// runSessionAuditFeed makes a session-audit run DURABLE: it folds the discovery window
+// into the SAME CompactReport the summary/actions surfaces build, then appends one
+// scrubbed FeedRow to the durable docs/nightrun ledger — the fold-window-then-append-one-
+// row shape `fak cachevalue feed` uses, so session health becomes a trendable time series
+// with a regression witness instead of a one-off report.
+func runSessionAuditFeed(stdout, stderr io.Writer, argv []string) int {
+	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit feed", stderr)
+	ledger := fs.String("ledger", sessionaudit.DefaultFeedLedgerRel, "durable ledger to append one scrubbed row to")
+	asJSON := fs.Bool("json", false, "also print the appended row as JSON to stdout")
+	dryRun := fs.Bool("dry-run", false, "compute and print the row but do NOT append")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 2
+	}
+	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
+	rep, rc := buildSessionAuditCompactReport(stderr, "feed", opts, *includeSubagents, *max)
+	if rc != 0 {
+		return rc
+	}
+	row := sessionaudit.FoldFeedRow(rep, time.Now())
+	if !*dryRun {
+		if err := sessionaudit.AppendFeedRow(*ledger, row); err != nil {
+			fmt.Fprintf(stderr, "fak session-audit feed: append %s: %v\n", *ledger, err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "appended 1 row to %s\n", *ledger)
+	}
+	if *asJSON || *dryRun {
+		return writeJSON(stdout, row)
+	}
+	fmt.Fprintf(stdout, "session-audit feed: %d sessions, $%.2f, cache_read %.0f%%, io %.1f, %d high / %d medium recs\n",
+		row.SessionsAudited, row.EstCostUSD, 100*row.CacheReadShare, row.IORatio, row.RecHigh, row.RecMedium)
 	return 0
 }
 
