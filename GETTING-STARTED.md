@@ -85,6 +85,23 @@ The installer honors `FAK_VERSION` (pin a version) and `FAK_INSTALL_DIR` (defaul
 `/usr/local/bin`, else `~/.local/bin`). Published targets: `linux_amd64`,
 `linux_arm64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`.
 
+**Verify provenance (optional — stronger than the checksum).** `install.sh` already
+checks each download's SHA-256 against the release's `SHA256SUMS`. A checksum only proves
+the file matches a *published number* — one a tamperer who rewrote the release could rewrite
+too. For a machine-verifiable guarantee that the binary was **built by this repository's CI
+from a specific commit**, every release archive **and** the aggregate `SHA256SUMS`
+`install.sh` anchors on carry a [SLSA build-provenance attestation](https://github.com/anthony-chaudhary/fak/attestations).
+Verify a downloaded asset with the GitHub CLI (the `gh attestation` command set):
+
+```bash
+gh attestation verify fak_<version>_<os>_<arch>.tar.gz --repo anthony-chaudhary/fak
+gh attestation verify SHA256SUMS                       --repo anthony-chaudhary/fak
+```
+
+A successful run names the attested build workflow and the source commit it was built from;
+a tampered or unattested asset fails closed. This is the supply-chain check a downstream agent
+or CI wants before trusting a `@latest` binary it did not build itself (#1372).
+
 **Install with Go.** The module path `github.com/anthony-chaudhary/fak` is the repository
 root, so it installs directly:
 
