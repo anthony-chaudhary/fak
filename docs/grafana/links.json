@@ -41,6 +41,14 @@
       "lifetime": "stack-local",
       "description": "verdict mix, trust-floor firing by refusal class, vcache economics for one guarded session",
       "source": "tools/grafana/dashboards/fak-guard-adjudication.json"
+    },
+    {
+      "title": "FAK Cache Value — Roll-up & Ablation",
+      "uid": "fak-cache-value-rollup",
+      "category": "rollup",
+      "lifetime": "stack-local",
+      "description": "is fak's cache method paying off? Track-1 WITNESSED reuse + Track-2 OBSERVED/projected-$ P&L (split by owner) + offline ablation arms — the Grafana twin of `fak cachevalue feed`",
+      "source": "tools/grafana/dashboards/fak-cache-value-rollup.json"
     }
   ]
 }

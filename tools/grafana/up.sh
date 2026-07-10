@@ -28,6 +28,7 @@ mkdir -p "$RUN_DIR"
 GATEWAY_ADDR="${FAK_GATEWAY_ADDR:-0.0.0.0:8080}"   # 0.0.0.0 so Docker's host.docker.internal can scrape it
 GATEWAY_HOSTPORT="127.0.0.1:8080"                  # where WE health-check it
 BOTTLENECK_PORT="${FLEET_BOTTLENECK_PORT:-9095}"
+CACHEVALUE_PORT="${FAK_CACHEVALUE_PORT:-9097}"
 MODEL_LABEL="${FAK_DOGFOOD_MODEL:-smollm2-135m}"
 
 log()  { printf '\033[1;36m[up]\033[0m %s\n' "$*" >&2; }
@@ -98,8 +99,13 @@ start_bg fleet_bottleneck "$BOTTLENECK_PORT /metrics" \
 if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
   start_bg fak_gateway "8080 /metrics" \
     "$FAK_BIN" serve --addr "$GATEWAY_ADDR" --engine inkernel --model "$MODEL_LABEL"
+  # The cache-value roll-up exporter re-folds the nightrun ledgers + ablate arms on
+  # each scrape (no model/weights needed). Its panels read "No data" until the
+  # docs/nightrun/*.jsonl ledgers exist — run `fak cachevalue feed --once` to populate.
+  start_bg fak_cachevalue "$CACHEVALUE_PORT /metrics" \
+    "$FAK_BIN" cachevalue metrics --serve --addr "0.0.0.0:$CACHEVALUE_PORT"
 else
-  warn "FAK_NO_GATEWAY=1 — skipping fak serve; the FAK Gateway dashboard will show no data."
+  warn "FAK_NO_GATEWAY=1 — skipping fak serve; the FAK Gateway + Cache Value dashboards will show no data."
 fi
 
 # ===== 4. Prometheus + Grafana =====
@@ -130,6 +136,7 @@ cat >&2 <<EOF
   Prometheus  http://localhost:9091
   fleet src   http://localhost:$BOTTLENECK_PORT/metrics
   gateway     http://$GATEWAY_HOSTPORT/metrics   (engine=inkernel model=$MODEL_LABEL)
+  cache value http://localhost:$CACHEVALUE_PORT/metrics   (nightrun ledgers + ablate arms)
 
   Drive a real kernel decode (populates fak_kernel_* / fak_gateway_*):
     curl -s http://$GATEWAY_HOSTPORT/v1/fak/syscall -H 'Content-Type: application/json' \\

@@ -22,12 +22,20 @@ GATEWAY_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-gateway-observab
 DOGFOOD_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-dogfood-slow-requests.json")
 STARTUP_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-startup-load.json")
 GUARD_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-guard-adjudication.json")
+ROLLUP_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-cache-value-rollup.json")
 ALERTS = os.path.join(HERE, "grafana", "prometheus-alerts.yml")
 PROMETHEUS = os.path.join(HERE, "grafana", "prometheus.yml")
-# fak_gateway_/fak_kernel_ families are emitted from two files: the request/kernel
-# counters in metrics.go and the one-time boot timeline in startup.go.
+# fak_gateway_/fak_kernel_ families are emitted from the gateway package: the
+# request/kernel counters live in metrics.go, whose exposition renderer (the quoted
+# family names) was split into metrics_render.go (3f1c3c83c), plus the one-time
+# boot timeline in startup.go.
 GATEWAY_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "metrics.go")
+GATEWAY_RENDER_GO = os.path.join(HERE, "..", "internal", "gateway", "metrics_render.go")
 STARTUP_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "startup.go")
+# fak_cachevalue_/fak_ablation_ families are emitted by the `fak cachevalue metrics`
+# exposition command (NOT the gateway package): renderCachevalueExposition builds them
+# via w.gauge("name", ...) call sites, so the emitted set is parsed straight from there.
+CACHEVALUE_METRICS_GO = os.path.join(HERE, "..", "cmd", "fak", "cachevalue_metrics.go")
 
 
 def make_snap(surface=4, api_error=3, hanging=2, auth=1, throttled_accts=("acctA",)):
@@ -50,12 +58,19 @@ def make_snap(surface=4, api_error=3, hanging=2, auth=1, throttled_accts=("acctA
             },
             "per_account": {"acctA": {"total": 30, "active": 18}, "acctB": {"total": 5, "active": 1},
                             "acctC": {"total": 5, "active": 1}, "acctD": {"total": 0, "active": 0}},
+            "storm": {"apierr_15m": 30, "apierr_30m": 60, "apierr_60m": 90,
+                      "total_15m": 40, "total_30m": 80, "total_60m": 120,
+                      "apierr_per_min_30m": 2.0, "apierr_frac_30m": 0.75},
+            "counts_by_disp": {"DONE": 20, "STOPPED_APIERR": 60, "LIVE": 5},
+            "account_health": {
+                "acctA": {"apierr_30m": 40, "newest_disp": "STOPPED_APIERR", "newest_age_min": 1.0, "live": 0},
+                "acctB": {"apierr_30m": 0, "newest_disp": "DONE", "newest_age_min": 3.0, "live": 2}},
             "sessions": [],
             "hanging_detail": [{"account": "acctA", "project": "p", "session": "abc",
                                 "disp": "PARKED_WAIT", "age_min": 200.0}],
         },
-        "recovery": {"watchdog_log_age_min": 90.0, "resumed_ever": 0,
-                     "transitions_log_present": True},
+        "recovery": {"watchdog_log_age_min": 90.0, "resume_watchdog_age_min": 90.0,
+                     "resumed_ever": 0, "transitions_log_present": True},
         "audit": {
             "n_analyzed": 12, "days": 1.5, "totals": {}, "total_cost_usd": 42.5,
             "cost_per_active_session_hr": 1.2,
@@ -159,6 +174,74 @@ class ScorerTest(unittest.TestCase):
         self.assertNotIn("api_error_stalls", ids)
 
 
+class CliParserTest(unittest.TestCase):
+    """A bare invocation (no subcommand) defaults to `report`, and main() reads
+    a.no_audit / a.audit_days / a.audit_max on that path — so the shared flags must
+    exist on the top-level parser too. Registering them only on the subparsers
+    crashed `python fleet_bottleneck.py` with AttributeError: 'Namespace' object
+    has no attribute 'no_audit'."""
+
+    def test_bare_invocation_has_shared_defaults(self):
+        a = fb._build_parser().parse_args([])
+        self.assertIsNone(a.cmd)  # main() maps None -> "report"
+        self.assertFalse(a.no_audit)
+        self.assertEqual(a.audit_days, 1.5)
+        self.assertEqual(a.audit_max, 80)
+
+    def test_bare_invocation_accepts_shared_flags(self):
+        a = fb._build_parser().parse_args(["--no-audit", "--audit-days", "3"])
+        self.assertIsNone(a.cmd)
+        self.assertTrue(a.no_audit)
+        self.assertEqual(a.audit_days, 3.0)
+
+    def test_subcommand_form_unchanged(self):
+        a = fb._build_parser().parse_args(
+            ["report", "--no-audit", "--audit-days", "3", "--audit-max", "10"])
+        self.assertEqual(a.cmd, "report")
+        self.assertTrue(a.no_audit)
+        self.assertEqual(a.audit_days, 3.0)
+        self.assertEqual(a.audit_max, 10)
+        a = fb._build_parser().parse_args(["serve", "--port", "9000", "--interval", "30"])
+        self.assertEqual((a.cmd, a.port, a.interval, a.no_audit), ("serve", 9000, 30, False))
+
+
+class CrashResumeAttributionTest(unittest.TestCase):
+    """crash_resume_backlog's freshness claim ("resume watchdog last ran Xm ago")
+    must be fed by the RESUME loop's own heartbeat, not the cross-loop minimum —
+    a live supervisor (watchdog.log) masked a ~20h-dead resume watchdog as
+    "last ran 1m ago", telling the operator the exact opposite of the truth."""
+
+    def _backlog(self, snap):
+        return {b["id"]: b for b in fb.rank_bottlenecks(snap)["bottlenecks"]}["crash_resume_backlog"]
+
+    def test_stale_resume_reported_stale_despite_live_supervisor(self):
+        snap = make_snap()
+        snap["recovery"]["watchdog_log_age_min"] = 1.0        # supervisor ticked 1m ago
+        snap["recovery"]["resume_watchdog_age_min"] = 1200.0  # resume loop dead ~20h
+        b = self._backlog(snap)
+        self.assertIn("1200m", b["symptom"])
+        self.assertIn("STALE", b["symptom"])
+        self.assertEqual(b["evidence"]["resume_watchdog_age_min"], 1200.0)
+        self.assertEqual(b["score"], 22 * 2 + 20, "stale-resume boost must apply")
+
+    def test_fresh_resume_reports_its_own_age(self):
+        snap = make_snap()
+        snap["recovery"]["watchdog_log_age_min"] = 1.0
+        snap["recovery"]["resume_watchdog_age_min"] = 2.0
+        b = self._backlog(snap)
+        self.assertIn("resume watchdog last ran 2m ago", b["symptom"])
+        self.assertNotIn("STALE", b["symptom"])
+        self.assertEqual(b["score"], 22 * 2)
+
+    def test_absent_resume_heartbeat_not_masked_by_supervisor(self):
+        snap = make_snap()
+        snap["recovery"].pop("resume_watchdog_age_min", None)
+        snap["recovery"]["watchdog_log_age_min"] = 1.0
+        b = self._backlog(snap)
+        self.assertIn("not seen on disk", b["symptom"])
+        self.assertEqual(b["score"], 22 * 2 + 20)
+
+
 class PrometheusExpositionTest(unittest.TestCase):
     def test_exposition_is_well_formed(self):
         fams, text, _ = emitted_families(make_snap())
@@ -178,7 +261,8 @@ class PrometheusExpositionTest(unittest.TestCase):
                   "fleet_surface_backlog", "fleet_api_error_stalls",
                   "fleet_workers_active_per_account", "fleet_cost_usd",
                   "fleet_cache_hit_ratio_median", "fleet_top_spender_output_tokens",
-                  "fleet_snapshot_timestamp_seconds", "fleet_registry_age_minutes"):
+                  "fleet_snapshot_timestamp_seconds", "fleet_registry_age_minutes",
+                  "fleet_watchdog_log_age_minutes", "fleet_resume_watchdog_age_minutes"):
             self.assertIn(n, fams)
 
     def test_label_values_escaped(self):
@@ -284,8 +368,9 @@ def _gateway_metric_names(exprs):
 
 def _gateway_families():
     """fak_gateway_/fak_kernel_ metric families emitted by the gateway package
-    (metrics.go: request/kernel counters; startup.go: the boot timeline)."""
-    src = _read(GATEWAY_METRICS_GO) + "\n" + _read(STARTUP_METRICS_GO)
+    (metrics.go + its split-out exposition renderer metrics_render.go: request/kernel
+    counters; startup.go: the boot timeline)."""
+    src = "\n".join(_read(p) for p in (GATEWAY_METRICS_GO, GATEWAY_RENDER_GO, STARTUP_METRICS_GO))
     return set(re.findall(r'"(fak_(?:gateway|kernel)_[a-z0-9_]+)"', src))
 
 
@@ -299,6 +384,21 @@ def _missing_gateway(refs, families):
             continue
         missing.add(name)
     return missing
+
+
+def _cachevalue_metric_names(exprs):
+    """fak_cachevalue_/fak_ablation_ metric names in PromQL exprs, ignoring quoted label
+    VALUES (so up{job="fak_cachevalue"} is the synthetic `up` metric, not a family)."""
+    joined = re.sub(r'"[^"]*"', "", " ; ".join(exprs))
+    return set(re.findall(r"fak_(?:cachevalue|ablation)_[a-z0-9_]+", joined))
+
+
+def _cachevalue_families():
+    """fak_cachevalue_/fak_ablation_ families emitted by the exposition command
+    (cmd/fak/cachevalue_metrics.go), parsed from its w.gauge("...") call sites — the
+    same emitter-source technique _gateway_families() uses for the gateway package."""
+    src = _read(CACHEVALUE_METRICS_GO)
+    return set(re.findall(r'w\.gauge\(\s*"(fak_(?:cachevalue|ablation)_[a-z0-9_]+)"', src))
 
 
 def _panel_exprs(dash):
@@ -323,6 +423,26 @@ class CrossSurfaceContractTest(unittest.TestCase):
         self.assertTrue(referenced, "dashboard references no fleet_ metrics?")
         missing = referenced - self.fams
         self.assertFalse(missing, f"dashboard queries phantom metrics: {sorted(missing)}")
+
+    def test_storm_families_emitted(self):
+        """The crash-loop storm surface (recency buckets + per-min rate + per-account
+        attribution) must be exported so Grafana can graph the storm over time — the
+        signal a single 'active workers' gauge hides."""
+        want = {"fleet_apierr_recent", "fleet_apierr_per_min", "fleet_apierr_frac_30m",
+                "fleet_sessions_by_disp", "fleet_account_apierr_recent"}
+        missing = want - self.fams
+        self.assertFalse(missing, f"storm metrics not emitted: {sorted(missing)}")
+
+    def test_storm_rate_gauges_emit_zero_when_healthy(self):
+        """apierr_per_min / apierr_frac_30m / apierr_recent must emit 0 (not be absent)
+        when there is no storm, so a healthy fleet is distinguishable from a dead
+        exporter instead of both reading 'No data'."""
+        snap = make_snap()
+        snap["registry"].pop("storm", None)
+        fams, text, _ = emitted_families(snap)
+        for name in ("fleet_apierr_per_min", "fleet_apierr_frac_30m", "fleet_apierr_recent"):
+            self.assertIn(name, fams, f"{name} must still emit when healthy")
+        self.assertIn("fleet_apierr_per_min 0", text)
 
     def test_gateway_dashboard_queries_only_emitted_metrics(self):
         for path in (GATEWAY_DASH, DOGFOOD_DASH, STARTUP_DASH, GUARD_DASH):
@@ -383,6 +503,11 @@ class RecoveryFreshnessTest(unittest.TestCase):
                 mock.patch.object(fb, "WATCH_DIR", repo_watch_dir):
             return fb._recovery_watchdog_age_min()
 
+    def _resume_age(self, state_dir, repo_watch_dir):
+        with mock.patch.dict(os.environ, {"FLEET_STATE_DIR": state_dir}, clear=False), \
+                mock.patch.object(fb, "WATCH_DIR", repo_watch_dir):
+            return fb._resume_watchdog_age_min()
+
     def test_reads_live_resume_watchdog_heartbeat(self):
         # The bug case: the live resume watchdog heartbeats into the host state dir
         # under resume_watchdog.log; the old probe (in-repo watchdog.log) saw nothing.
@@ -409,6 +534,45 @@ class RecoveryFreshnessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
             os.makedirs(os.path.join(state, "watchdog"))
             self.assertIsNone(self._age(state, repo))
+            self.assertIsNone(self._resume_age(state, repo))
+
+    def test_resume_probe_not_masked_by_live_supervisor(self):
+        # The two watchdogs are DIFFERENT recovery loops: a fresh supervisor
+        # heartbeat (watchdog.log) must not make a ~20h-dead resume watchdog read
+        # fresh. The cross-loop min stays available via _recovery_watchdog_age_min
+        # (the "is anything self-healing?" signal), but the resume probe sees only
+        # resume_watchdog.log.
+        with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
+            wd = os.path.join(state, "watchdog")
+            os.makedirs(wd)
+            open(os.path.join(wd, "watchdog.log"), "w").close()   # supervisor: now
+            dead = os.path.join(wd, "resume_watchdog.log")        # resume: 20h old
+            open(dead, "w").close()
+            t = time.time() - 20 * 3600
+            os.utime(dead, (t, t))
+            self.assertGreater(self._resume_age(state, repo), 60.0)
+            self.assertLess(self._age(state, repo), 5.0)  # plumbing-wide still fresh
+
+    def test_resume_probe_freshest_across_locations(self):
+        # Same-loop cross-LOCATION min is preserved: the resume watchdog's in-repo
+        # dev-path heartbeat still counts when the state-dir copy is stale.
+        with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
+            wd = os.path.join(state, "watchdog")
+            os.makedirs(wd)
+            stale = os.path.join(wd, "resume_watchdog.log")
+            open(stale, "w").close()
+            t = time.time() - 3600
+            os.utime(stale, (t, t))
+            open(os.path.join(repo, "resume_watchdog.log"), "w").close()  # now
+            self.assertLess(self._resume_age(state, repo), 5.0)
+
+    def test_resume_probe_none_when_only_supervisor_present(self):
+        with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
+            wd = os.path.join(state, "watchdog")
+            os.makedirs(wd)
+            open(os.path.join(wd, "watchdog.log"), "w").close()
+            self.assertIsNone(self._resume_age(state, repo))
+            self.assertIsNotNone(self._age(state, repo))
 
     def test_fresh_recovery_suppresses_false_recovery_stale(self):
         # End-to-end contract: a fresh probe value clears the recovery-plumbing-stale
@@ -420,6 +584,54 @@ class RecoveryFreshnessTest(unittest.TestCase):
         snap["recovery"]["watchdog_log_age_min"] = None
         self.assertIn("recovery_stale",
                       {b["id"] for b in fb.rank_bottlenecks(snap)["bottlenecks"]})
+
+
+class CacheValueRollupContractTest(unittest.TestCase):
+    """The cache-value & ablation roll-up dashboard must only query metrics the `fak
+    cachevalue metrics` exposition actually emits. Its families come from that command
+    (parsed from its w.gauge call sites), NOT the gateway package — so it is checked
+    against its own emitter source and stays out of the gateway cross-surface loop."""
+
+    def setUp(self):
+        self.emitted = _cachevalue_families()
+
+    def test_emitter_families_parsed(self):
+        # Guard against a silently-empty parse making the subset checks vacuous: the
+        # emitter declares ~35 families, and these load-bearing ones must be among them.
+        self.assertGreater(len(self.emitted), 20, "parsed too few emitted families")
+        for n in ("fak_cachevalue_cumulative_net_usd", "fak_cachevalue_saved_token_equiv",
+                  "fak_cachevalue_latest_reuse_ratio", "fak_cachevalue_measured",
+                  "fak_ablation_arm_speedup_ratio", "fak_ablation_report_present"):
+            self.assertIn(n, self.emitted, f"{n} not found among emitted families")
+
+    def test_rollup_dashboard_queries_only_emitted_metrics(self):
+        dash = json.loads(_read(ROLLUP_DASH))
+        referenced = _cachevalue_metric_names(_panel_exprs(dash))
+        self.assertTrue(referenced,
+                        "rollup dashboard references no fak_cachevalue_/fak_ablation_ metrics?")
+        missing = referenced - self.emitted
+        self.assertFalse(missing, f"rollup dashboard queries phantom metrics: {sorted(missing)}")
+
+    def test_rollup_spans_both_tracks_and_ablation(self):
+        # The dashboard's whole point is the two-surface story: cache-value P&L AND the
+        # ablation arms. Assert both surfaces are actually charted.
+        dash = json.loads(_read(ROLLUP_DASH))
+        referenced = _cachevalue_metric_names(_panel_exprs(dash))
+        self.assertTrue(any(n.startswith("fak_cachevalue_") for n in referenced),
+                        "rollup must chart the cache-value tracks")
+        self.assertTrue(any(n.startswith("fak_ablation_") for n in referenced),
+                        "rollup must chart the ablation arms")
+
+    def test_rollup_dashboard_valid_and_unique_ids(self):
+        dash = json.loads(_read(ROLLUP_DASH))
+        ids = [p["id"] for p in dash["panels"]]
+        self.assertEqual(len(ids), len(set(ids)), "duplicate rollup panel ids")
+        self.assertEqual(dash["uid"], "fak-cache-value-rollup")
+
+    def test_prometheus_scrapes_cachevalue_metrics(self):
+        # The dashboard's scrape-health panel reads up{job="fak_cachevalue"}; the scrape
+        # job must exist or every panel is dead on arrival.
+        self.assertIn("job_name: fak_cachevalue", _read(PROMETHEUS))
 
 
 if __name__ == "__main__":

@@ -43,3 +43,18 @@ scrape_configs:
       - targets: ["host.docker.internal:8080"]
         labels:
           service: fak-gateway
+
+  - job_name: fak_cachevalue
+    # `fak cachevalue metrics --serve` re-folds the docs/nightrun/*.jsonl ledgers +
+    # experiments/ablate/*.json arms on each scrape and exposes the two-track cache-value
+    # P&L (Track 1 WITNESSED reuse, Track 2 OBSERVED/projected $) plus the ablation arms
+    # at :9097/metrics. This is a ledger fold, not a hot request path, so a slow scrape
+    # is fine. Start it with:
+    #   ./fak cachevalue metrics --serve --addr 127.0.0.1:9097
+    # Feeds the "FAK Cache Value — Roll-up & Ablation" dashboard (uid fak-cache-value-rollup).
+    metrics_path: /metrics
+    scrape_interval: 5m
+    static_configs:
+      - targets: ["host.docker.internal:9097"]
+        labels:
+          service: fak-cachevalue

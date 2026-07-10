@@ -15,15 +15,17 @@ import (
 )
 
 // cmdCachevalue posts the cache-effectiveness P&L roll-up — fak's WITNESSED kernel
-// cache-value trend (Track 1 of epic #1301) — to the central Slack #cache-value channel
-// (C0BDSB81XDZ), the one durable place the fleet reads "is fak's cache method paying off,
-// and is it trending up or down?".
+// cache-value trend (Track 1 of epic #1301) — to the central Slack #scoreboard channel
+// (C0BEF8B8KMW), the fleet's top-level status channel and the one durable place the fleet
+// reads "is fak's cache method paying off, and is it trending up or down?".
 //
 //	fak cachevalue feed                                  # fold both cache-value ledgers → Slack card
 //	fak cachevalue feed --dry-run                        # render the exact card; do not post
 //	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger docs/nightrun/cache-savings.jsonl
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
 //	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
+//	fak cachevalue metrics                               # the same two-track fold + ablation arms as a Prometheus exposition (Grafana surface)
+//	fak cachevalue metrics --serve --addr 127.0.0.1:9097 # serve /metrics, re-folding the ledgers on each scrape
 //	fak cachevalue shapes --since 2026-06-22             # the WITNESSED ledger folded by session shape (length × realized-reuse outcome)
 //	fak cachevalue shapes --json                         # emit the ShapeReport for downstream posting
 //	fak cachevalue status --json                         # cache-plane health, owner, dependency, fidelity, and next action
@@ -39,17 +41,20 @@ import (
 //
 // It targets the FAK_CACHEVALUE_* surface (a public channel in the scoreboard Slack
 // workspace, separate from the lab/DGX control bridge); the token falls back to the
-// scoreboard bot token, the channel to the built-in #cache-value default. --dry-run
+// scoreboard bot token, the channel to the built-in #scoreboard default. --dry-run
 // renders the card and prints it without posting, matching the scoreboard/bench/blockers
 // "safe by default" idiom.
+
+//fak:ctxplan verb=cachevalue enters="nothing live — an offline fold over the durable cache-value, cache-savings, and gateway-usage JSONL ledgers on disk" pages="nothing into a model window — it renders a cache-effectiveness P&L card and posts it to the #scoreboard Slack channel (or prints it under --dry-run)" warms="nothing — it REPORTS on whether the kernel prompt-cache method is paying off; it warms no prompt cache or KV itself"
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | shapes | status | review | post | feed", argv,
+	dispatchSubcommands("cachevalue", "report | shapes | status | review | post | feed | metrics", argv,
 		subcommand{"report", runCachevalueReport},
 		subcommand{"shapes", runCachevalueShapes},
 		subcommand{"status", runCachevalueStatus},
 		subcommand{"review", runCachevalueReview},
 		subcommand{"post", runCachevaluePost},
 		subcommand{"feed", runCachevalueFeed},
+		subcommand{"metrics", runCachevalueMetrics},
 	)
 }
 
@@ -75,7 +80,7 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
-	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #cache-value)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #scoreboard)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
 	if !parseFlags(fs, argv) {
@@ -107,7 +112,7 @@ func runCachevaluePost(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	reportJSON := fs.String("report-json", "", "fold a pre-rolled cachevaluereport.Report JSON from this file (- for stdin)")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
-	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #cache-value)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #scoreboard)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
 	if !parseFlags(fs, argv) {

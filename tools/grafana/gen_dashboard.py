@@ -30,6 +30,7 @@ OUT_GATEWAY = os.path.join(HERE, "dashboards", "fak-gateway-observability.json")
 OUT_DOGFOOD = os.path.join(HERE, "dashboards", "fak-dogfood-slow-requests.json")
 OUT_STARTUP = os.path.join(HERE, "dashboards", "fak-startup-load.json")
 OUT_GUARD = os.path.join(HERE, "dashboards", "fak-guard-adjudication.json")
+OUT_ROLLUP = os.path.join(HERE, "dashboards", "fak-cache-value-rollup.json")
 
 DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
 
@@ -1014,12 +1015,232 @@ def build_guard():
     }
 
 
+# Cache-value roll-up maps. Kept local to the builder's provenance: green = the
+# honest win state, and the fence between WITNESSED and OBSERVED/projected $ is carried
+# in every panel description, never in a threshold color.
+MEASURED_MAP = [{"type": "value", "options": {
+    "0": {"text": "INSUFFICIENT", "color": "yellow", "index": 0},
+    "1": {"text": "MEASURED", "color": "green", "index": 1}}}]
+BROKE_MAP = [{"type": "value", "options": {
+    "0": {"text": "NOT YET", "color": "yellow", "index": 0},
+    "1": {"text": "BROKE EVEN", "color": "green", "index": 1}}}]
+PROVISIONAL_MAP = [{"type": "value", "options": {
+    "0": {"text": "SETTLED", "color": "green", "index": 0},
+    "1": {"text": "PROVISIONAL", "color": "yellow", "index": 1}}}]
+PRESENT_MAP = [{"type": "value", "options": {
+    "0": {"text": "NO REPORT", "color": "yellow", "index": 0},
+    "1": {"text": "PRESENT", "color": "green", "index": 1}}}]
+SPEEDUP_TH = steps((None, "red"), (1, "green"))  # >=1 = at least as fast as baseline
+
+# The honesty fence, verbatim from the report, so a Grafana reader can never mistake
+# the projected $ for a fak-WITNESSED claim.
+ROLLUP_NOTE = (
+    "**One question:** is fak's cache work paying off, and which feature moved the "
+    "needle? This dashboard is the live twin of `fak cachevalue feed` (the Slack card) "
+    "plus the offline `fak ablate` arms — the SAME two-track fold, re-projected as "
+    "metrics.\n\n"
+    "**The fence is load-bearing.** *Track 1* (`fak_cachevalue_latest_reuse_ratio`, "
+    "sessions) is **WITNESSED** realized KV-prefix reuse. *Track 2* (every `_usd` / "
+    "`saved_token_equiv` family) is an **OBSERVED / projected $** cost model over "
+    "labelled provider cache reads — never a fak-witnessed dollar, never blended into "
+    "Track 1. The `owner` label keeps provider vs fak dollars split so a provider-only "
+    "corpus can never read as a fak win.\n\n"
+    "Source: `fak cachevalue metrics --serve` (scrape job `fak_cachevalue`). Panels read "
+    "`No data` until the `docs/nightrun/*.jsonl` ledgers exist — run `fak cachevalue "
+    "feed --once` (or the nightrun) to populate them."
+)
+ABLATION_NOTE = (
+    "**Offline, deterministic, $0.** These arms come from `fak ablate` replaying the "
+    "SAME frozen trace with one feature toggled per arm — so `speedup_ratio > 1` is that "
+    "feature's WITNESSED win over the `baseline` arm (marked in the table below), not a "
+    "live provider measurement. Arms are labelled by `(arm, workload)`; a workload is a "
+    "trace's content hash, so arms from different traces never share a bar. Populate by "
+    "dropping `fak ablate` report JSONs in `experiments/ablate/` (two ship with the repo)."
+)
+
+
+def build_cache_ablation_rollup():
+    """The cache-value & ablation roll-up — the executive answer to 'is the cache method
+    paying off, and which feature earned it?' It is the Grafana twin of the `fak
+    cachevalue feed` Slack card (the two-track WITNESSED-reuse + OBSERVED-$ P&L fold) with
+    the offline `fak ablate` feature arms alongside, so the realized-value story and the
+    per-feature attribution live on one surface. Built entirely from the
+    `fak_cachevalue_*` and `fak_ablation_*` families `fak cachevalue metrics` exposes;
+    scrape it with `fak cachevalue metrics --serve --addr 127.0.0.1:9097` (job
+    `fak_cachevalue`). Every $ panel is labelled OBSERVED/projected and split by owner so
+    the honesty fence the report enforces survives into the dashboard."""
+    panels = []
+
+    # ---- headline: is it paying off? ----
+    panels.append(row("Is fak's cache method paying off?", 0))
+    panels.append(text_panel("What this dashboard answers", ROLLUP_NOTE, 0, 1, w=24, h=5))
+    panels.append(stat("Scrape", 'up{job="fak_cachevalue"}', 0, 6, thresholds=UP_TH,
+                       mappings=[{"type": "value", "options": {
+                           "0": {"text": "DOWN", "color": "red", "index": 0},
+                           "1": {"text": "UP", "color": "green", "index": 1}}}],
+                       desc="Prometheus scrape health for the `fak_cachevalue` job. Start "
+                            "it with `fak cachevalue metrics --serve --addr 127.0.0.1:9097`."))
+    panels.append(stat("Verdict", "fak_cachevalue_measured", 4, 6, mappings=MEASURED_MAP,
+                       thresholds=UP_TH,
+                       desc="MEASURED once the two-track fold has enough rows; INSUFFICIENT "
+                            "otherwise. `report_present` (not shown) stays 1 whenever the "
+                            "exporter is alive, so a dead scrape reads as DOWN, not zero."))
+    panels.append(stat("Cumulative NET $", "fak_cachevalue_cumulative_net_usd", 8, 6,
+                       unit="currencyUSD", thresholds=SAVED_TH,
+                       desc="OBSERVED/projected: running net $ through the latest period "
+                            "(rebate + shed − write premium − spend). The P&L headline; a "
+                            "cost projection, never a fak-witnessed dollar."))
+    panels.append(stat("Broke even?", "fak_cachevalue_broke_even", 12, 6, thresholds=UP_TH,
+                       mappings=BROKE_MAP,
+                       desc="1 once the cumulative net $ has crossed zero."))
+    panels.append(stat("API cost reduction", "fak_cachevalue_api_cost_reduction_pct", 16, 6,
+                       unit="percent", thresholds=steps((None, "yellow"), (25, "green")),
+                       desc="OBSERVED/projected: percent cheaper than the uncached/"
+                            "uncompacted counterfactual."))
+    panels.append(stat("fak share of $", "fak_cachevalue_fak_share_pct", 20, 6, unit="percent",
+                       desc="Percent of avoided $ attributable to fak-authored cache work; "
+                            "the rest is provider prompt-cache. Absent until any $ is avoided."))
+
+    # ---- Track 1: WITNESSED realized reuse ----
+    panels.append(row("Track 1 — WITNESSED realized KV-prefix reuse", 10))
+    panels.append(stat("Latest reuse ratio", "fak_cachevalue_latest_reuse_ratio", 0, 11,
+                       w=6, unit="percentunit", thresholds=CACHE_TH,
+                       desc="WITNESSED: most recent weekly bucket's realized KV-prefix "
+                            "reuse. NOT a vs-naive multiple (that family is excluded by "
+                            "the report's #1066 fence)."))
+    panels.append(stat("Multi-turn sessions", "fak_cachevalue_multi_turn_sessions", 6, 11,
+                       w=6, desc="WITNESSED: sessions with >1 turn — the only ones that "
+                                 "can realize prefix reuse."))
+    panels.append(stat("Total sessions", "fak_cachevalue_total_sessions", 12, 11, w=6,
+                       desc="WITNESSED: all sessions folded into Track 1."))
+    panels.append(stat("Dollar-blind rows", "fak_cachevalue_dollar_blind_rows", 18, 11, w=6,
+                       thresholds=steps((None, "green"), (1, "yellow")),
+                       desc="Rows with saved token-equiv but no trusted price — excluded "
+                            "from every $ column (honest omission, not a zero)."))
+    panels.append(timeseries(
+        "Realized reuse ratio over time",
+        [("fak_cachevalue_latest_reuse_ratio", "latest reuse ratio")],
+        0, 15, w=24, h=7, unit="percentunit",
+        desc="The WITNESSED headline reuse ratio as it moves across scrapes."))
+
+    # ---- Track 2: OBSERVED / projected $ P&L ----
+    panels.append(row("Track 2 — OBSERVED / projected $ (P&L, never blended into Track 1)", 22))
+    panels.append(timeseries(
+        "Net $ over time (OBSERVED/projected)",
+        [("fak_cachevalue_cumulative_net_usd", "cumulative net"),
+         ("fak_cachevalue_latest_net_usd", "latest period net")],
+        0, 23, w=12, h=8, unit="currencyUSD",
+        desc="Running and per-period net $. A cost projection over labelled provider "
+             "cache reads — side by side with Track 1, never summed into it."))
+    panels.append(bargauge(
+        "Saved token-equiv by owner", "sum by (owner) (fak_cachevalue_saved_token_equiv)",
+        "{{owner}}", 12, 23, w=12, h=8,
+        desc="provider = OBSERVED prompt-cache; fak = WITNESSED kernel-authored; total = "
+             "their sum. Split so a provider-only corpus cannot read as a fak win."))
+    panels.append(bargauge(
+        "API cost avoided by owner ($)",
+        "sum by (owner) (fak_cachevalue_api_cost_avoided_usd)", "{{owner}}", 0, 31,
+        w=12, h=8, unit="currencyUSD", thresholds=SAVED_TH,
+        desc="OBSERVED/projected $ avoided, split by owner. provider = read rebate net of "
+             "write premium; fak = compaction saving (WITNESSED shed, $ projected)."))
+    panels.append(stat("Observed spend", "fak_cachevalue_observed_spend_usd", 12, 31, w=6,
+                       unit="currencyUSD",
+                       desc="OBSERVED: actual API spend over the folded rows."))
+    panels.append(stat("Counterfactual", "fak_cachevalue_counterfactual_usd", 18, 31, w=6,
+                       unit="currencyUSD",
+                       desc="OBSERVED/projected: uncached/uncompacted spend the reduction "
+                            "is measured against."))
+    panels.append(stat("Usage rows", "fak_cachevalue_usage_rows", 12, 35, w=6,
+                       desc="WITNESSED: gateway/guard usage rows in the fleet aggregate."))
+    panels.append(stat("Kernel decisions", "fak_cachevalue_kernel_decisions", 18, 35, w=6,
+                       desc="WITNESSED: cumulative kernel admission decisions."))
+
+    # ---- run-rate + session extension ----
+    panels.append(row("Run-rate & session extension", 39))
+    panels.append(bargauge(
+        "$ avoided per day by owner", "sum by (owner) (fak_cachevalue_usd_avoided_per_day)",
+        "{{owner}}", 0, 40, w=12, h=8, unit="currencyUSD", thresholds=SAVED_TH,
+        desc="OBSERVED/projected daily run-rate over the savings-row span. PROVISIONAL "
+             "under the honest-window floor — check the flag to the right."))
+    panels.append(stat("Savings span (days)", "fak_cachevalue_span_days", 12, 40, w=6,
+                       desc="Days of savings rows the run-rate is computed over."))
+    panels.append(stat("Run-rate", "fak_cachevalue_rate_provisional", 18, 40, w=6,
+                       thresholds=steps((None, "green"), (1, "yellow")),
+                       mappings=PROVISIONAL_MAP,
+                       desc="PROVISIONAL when the span is under the honest floor — the "
+                            "30/90-day extrapolation is not yet settled."))
+    panels.append(stat("Compaction shed (tok)", "fak_cachevalue_compaction_shed_tokens",
+                       12, 44, w=6,
+                       desc="WITNESSED: context tokens fak compaction shed — the only "
+                            "source of session extension."))
+    panels.append(stat("Context extension (tok)", "fak_cachevalue_context_extension_tokens",
+                       18, 44, w=6,
+                       desc="WITNESSED: tokens the session window was extended by. Provider "
+                            "cache reads never enlarge the window, so only shed counts."))
+
+    # ---- ablation ----
+    panels.append(row("Feature ablation — which feature moved the needle", 48))
+    panels.append(text_panel("How to read the ablation arms", ABLATION_NOTE, 0, 49, w=24, h=4))
+    panels.append(stat("Ablate report", "fak_ablation_report_present", 0, 53, w=4,
+                       thresholds=UP_TH, mappings=PRESENT_MAP,
+                       desc="1 when at least one `fak ablate` report was folded."))
+    panels.append(stat("Arms", "fak_ablation_arms", 4, 53, w=4,
+                       desc="Total ablation arms across every folded report."))
+    panels.append(bargauge(
+        "Speedup vs baseline by arm", "fak_ablation_arm_speedup_ratio",
+        "{{arm}} ({{workload}})", 8, 53, w=16, h=8, thresholds=SPEEDUP_TH,
+        desc="WITNESSED replay: baseline mean / this arm's mean. >1 is faster than the "
+             "baseline arm (which sits at exactly 1)."))
+    panels.append(timeseries(
+        "Mean decide latency by arm (ns)",
+        [("fak_ablation_arm_mean_nanoseconds", "{{arm}} ({{workload}})")],
+        0, 61, w=12, h=8, unit="ns",
+        desc="WITNESSED replay: per-arm mean kernel decide latency. Lower is the win the "
+             "speedup ratio expresses."))
+    panels.append(bargauge(
+        "vDSO fast-path hits by arm", "fak_ablation_arm_vdso_hits", "{{arm}} ({{workload}})",
+        12, 61, w=12, h=8,
+        desc="WITNESSED replay: vDSO (fast-path) hits per arm — the mechanism the speedup "
+             "comes from when the vdso feature is on."))
+    panels.append(info_table(
+        "Baseline arm (speedup reference)", "fak_ablation_baseline_info",
+        0, 69, w=24, h=6, exclude=["fleet"],
+        desc="The arm each speedup ratio is measured against, per workload."))
+
+    return {
+        "uid": "fak-cache-value-rollup",
+        "title": "FAK Cache Value — Roll-up & Ablation",
+        "description": "Is fak's cache method paying off, and which feature earned it? The "
+                       "Grafana twin of the `fak cachevalue feed` Slack card: Track 1 "
+                       "WITNESSED KV-prefix reuse and the Track 2 OBSERVED/projected-$ P&L "
+                       "(split by owner, never blended), plus the offline `fak ablate` "
+                       "feature arms. Source: fak cachevalue metrics /metrics (scrape job "
+                       "fak_cachevalue; start with `fak cachevalue metrics --serve`).",
+        "tags": ["fak", "cache-value", "ablation", "rollup", "cost"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-30d", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
 def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     for path, dash in ((OUT, build()), (OUT_GATEWAY, build_gateway()),
                        (OUT_DOGFOOD, build_dogfood()), (OUT_STARTUP, build_startup()),
-                       (OUT_GUARD, build_guard())):
-        with open(path, "w", encoding="utf-8") as f:
+                       (OUT_GUARD, build_guard()), (OUT_ROLLUP, build_cache_ablation_rollup())):
+        # newline="\n" pins LF so a Windows regen is byte-identical to the committed
+        # (LF) dashboards instead of churning every line to CRLF — the tree stays clean
+        # for a reviewer who re-runs the generator.
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(dash, f, indent=2)
             f.write("\n")
         n_panels = sum(1 for p in dash["panels"] if p["type"] != "row")
