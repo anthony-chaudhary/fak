@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -785,9 +786,15 @@ func dojoRSIDOSObserveReceipt(workspace string, maxReverts int) rsiloop.Observer
 		return nil
 	}
 	return func(r rsiloop.Row) {
-		cmd := exec.Command(dosPath, dojoRSIDOSImproveArgs(workspace, maxReverts, r)...)
-		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-		if runErr := cmd.Run(); runErr != nil {
+		// Bounded: dos improve records a receipt per observed tick; a wedged dos
+		// process (index-lock contention, a hung child) would stall this observer
+		// callback indefinitely and back up the loop. runBoundedDOS kills the
+		// child on expiry (CommandContext) and bounds the lingering wait (WaitDelay).
+		if _, runErr := runBoundedDOS(dojoRSIDOSTimeout, "", dosPath, dojoRSIDOSImproveArgs(workspace, maxReverts, r)...); runErr != nil {
+			if errors.Is(runErr, context.DeadlineExceeded) {
+				fmt.Fprintf(os.Stderr, "dojo-rsi --dos-observe: dos improve timed out for tick %d\n", r.Cycle)
+				return
+			}
 			var exitErr *exec.ExitError
 			if !errors.As(runErr, &exitErr) {
 				fmt.Fprintf(os.Stderr, "dojo-rsi --dos-observe: dos improve did not run for tick %d: %v\n", r.Cycle, runErr)
@@ -844,11 +851,41 @@ func admitDojoRSILane(root string) error {
 		"--tree", "internal/dojo/**", "internal/dojocal/**", "cmd/fak/dojo*.go", "docs/dojo/**", ".github/workflows/dojo-rsi-feed.yml",
 		"--output", "json",
 	}
-	cmd := exec.Command(dosPath, args...)
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
+	// Bounded: admitting the lane runs a dos arbitrate before the loop starts; a
+	// wedged dos call would block startup with no deadline. runBoundedDOS kills
+	// the child on expiry (CommandContext) and bounds the lingering wait (WaitDelay).
+	out, err := runBoundedDOS(dojoRSIDOSTimeout, root, dosPath, args...)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// dojoRSIDOSTimeout bounds a single `dos` subprocess (improve receipt or
+// arbitrate). It is a var (not a const) so tests can drive the timeout path
+// with a tiny deadline.
+var dojoRSIDOSTimeout = 5 * time.Minute
+
+// runBoundedDOS runs a `dos` subcommand under a deadline, optionally from dir.
+// CommandContext kills the child when the context expires and WaitDelay bounds
+// the lingering wait on its I/O, so a wedged dos call degrades to a timeout
+// error (wrapping context.DeadlineExceeded, recognisable via errors.Is) instead
+// of hanging the caller. The combined output is returned for callers that want
+// it; callers that don't simply ignore it.
+func runBoundedDOS(timeout time.Duration, dir, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.WaitDelay = 10 * time.Second
+	out, err := cmd.CombinedOutput()
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("%s timed out after %s: %w", name, timeout, ctx.Err())
+	}
+	return out, err
 }
