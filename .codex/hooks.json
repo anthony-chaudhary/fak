@@ -5,7 +5,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "fak sessions codex-loop-hook"
+            "command": "fak sessions codex-loop-hook 2>/dev/null; status=$?; if [ \"$status\" -ne 0 ]; then printf '%s\\n' '{\"decision\":\"block\",\"reason\":\"codex_session_guard_unavailable: installed fak cannot run sessions codex-loop-hook. Rebuild or install a current fak, then relaunch with fak codex or fak guard -- codex.\"}'; exit 0; fi",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQAgAD0AIAAnAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUAJwAKACQAaQBuAHAAdQB0AEoAcwBvAG4AIAA9ACAAWwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgAuAFIAZQBhAGQAVABvAEUAbgBkACgAKQAKACQAaABvAG8AawBPAHUAdABwAHUAdAAgAD0AIAAkAGkAbgBwAHUAdABKAHMAbwBuACAAfAAgACYAIABmAGEAawAgAHMAZQBzAHMAaQBvAG4AcwAgAGMAbwBkAGUAeAAtAGwAbwBvAHAALQBoAG8AbwBrACAAMgA+ACQAbgB1AGwAbAAKAGkAZgAgACgAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQAgAC0AZQBxACAAMAApACAAewAKACAAIAAgACAAJABoAG8AbwBrAE8AdQB0AHAAdQB0ACAAfAAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0AAoAIAAgACAAIABlAHgAaQB0ACAAMAAKAH0ACgBXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACcAewAiAGQAZQBjAGkAcwBpAG8AbgAiADoAIgBiAGwAbwBjAGsAIgAsACIAcgBlAGEAcwBvAG4AIgA6ACIAYwBvAGQAZQB4AF8AcwBlAHMAcwBpAG8AbgBfAGcAdQBhAHIAZABfAHUAbgBhAHYAYQBpAGwAYQBiAGwAZQA6ACAAaQBuAHMAdABhAGwAbABlAGQAIABmAGEAawAgAGMAYQBuAG4AbwB0ACAAcgB1AG4AIABzAGUAcwBzAGkAbwBuAHMAIABjAG8AZABlAHgALQBsAG8AbwBwAC0AaABvAG8AawAuACAAUgBlAGIAdQBpAGwAZAAgAG8AcgAgAGkAbgBzAHQAYQBsAGwAIABhACAAYwB1AHIAcgBlAG4AdAAgAGYAYQBrACwAIAB0AGgAZQBuACAAcgBlAGwAYQB1AG4AYwBoACAAdwBpAHQAaAAgAGYAYQBrACAAYwBvAGQAZQB4ACAAbwByACAAZgBhAGsAIABnAHUAYQByAGQAIAAtAC0AIABjAG8AZABlAHgALgAiAH0AJwAKAGUAeABpAHQAIAAwAA==",
+            "timeout": 30,
+            "statusMessage": "Checking fak continuation guard"
           }
         ]
       }
