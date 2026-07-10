@@ -33,6 +33,12 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueFanout(stdout, stderr, argv[1:])
 	case "create":
 		return runIssueCreate(stdout, stderr, argv[1:])
+	case "edit":
+		return runIssueEdit(stdout, stderr, argv[1:])
+	case "repair":
+		return runIssueRepair(stdout, stderr, argv[1:])
+	case "decompose":
+		return runIssueDecompose(stdout, stderr, argv[1:])
 	case "dedup":
 		return runIssueDedup(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -1149,6 +1155,15 @@ func issueUsage(w io.Writer) {
                      [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
   fak issue create   --title T (--body B | --body-file F) [--labels l1,l2]
                      [--repo owner/name] [--dry-run] [--json]
+  fak issue edit     --issue N [--title T] [--body B | --body-file F]
+                     [--add-label l1,l2] [--remove-label l1,l2]
+                     [--repo owner/name] [--dry-run] [--json]
+  fak issue repair   [--live] [--kind k1,k2] [--issue N,M] [--limit N]
+                     [--max-apply N] [--from-issues ISSUES.json]
+                     [--repo owner/name] [--json | --markdown]
+  fak issue decompose [--live] [--from-plan PLAN.json] [--issue N,M]
+                     [--from-issues ISSUES.json] [--allow-stubs]
+                     [--max-create N] [--repo owner/name] [--json]
   fak issue dedup    [--json] [--limit N] [--threshold F] [--topk N]
   fak issue dedup    --from-issues ISSUES.json|- [--json]
 
@@ -1196,5 +1211,21 @@ disjoint-tree rule dos arbitrate uses), pulls oversized/non-leaf rows into a
 split-first queue with a child-issue budget, buckets the rest into triage, and
 reports duplicate marker keys. It is a planner, not a gate: exit 0 on a valid
 plan, exit 2 on bad input.
+
+The edit command is the governed mutation twin of create: it shells to gh issue
+edit N from the trusted fak binary (title/body/add-label/remove-label) so an
+apply step never proposes raw gh issue edit via Bash. It is the single write atom
+every repair path routes through. --dry-run renders the gh argv without calling
+gh. Exit 0 edited (or dry-run ok); exit 2 bad flags; exit 1 gh failure.
+
+The repair command consumes the read-only issue-contract-repair manifest and
+turns each repairable row into a disposition: auto-apply (template rows whose
+generated-header merge is provably lossless), propose-only (scope/noise/route/
+other — the fix is computed or scaffolded but a human/agent applies it via issue
+edit), refuse (private-boundary), or defer-to-phase3 (split). It DEFAULTS to a
+dry-run plan that never touches GitHub; --live arms writes but writes ONLY
+auto-apply template rows, and refuses the whole run if that count exceeds
+--max-apply. Exit 0 plan/all-applied; exit 2 bad flags/fetch/blast-radius
+refusal; exit 1 a live gh edit failed.
 `)
 }
