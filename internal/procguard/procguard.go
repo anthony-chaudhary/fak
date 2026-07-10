@@ -182,6 +182,10 @@ type Payload struct {
 	Observations           *ObservationSummary `json:"observations,omitempty"`
 	CollectError           string              `json:"collect_error,omitempty"`
 	NextAction             string              `json:"next_action"`
+	// DeadOwnerOrphanCount is how many flagged rows are lease-keyed dead-owner
+	// orphans (Kind == KindDeadOwnerOrphan) — the new candidate class the control
+	// pane folds. Omitted when zero so the contract is unchanged when the mode is off.
+	DeadOwnerOrphanCount int `json:"dead_owner_orphan_count,omitempty"`
 }
 
 // Options bundles the classifier knobs build accepts.
@@ -193,6 +197,10 @@ type Options struct {
 	CPUReapConfirm int
 	CPUStreaksPrev map[string]int
 	OrphanRows     []Finding
+	// DeadOwnerRows are lease-keyed dead-owner orphan findings (from
+	// ClassifyDeadOwnerOrphans). Merged into Flagged exactly like OrphanRows; their
+	// count is also surfaced separately in Payload.DeadOwnerOrphanCount.
+	DeadOwnerRows  []Finding
 	Observations   *ObservationSummary
 	Platform       string
 	CollectError   string
@@ -513,7 +521,10 @@ func Build(procs []Proc, opt Options) Payload {
 		confirm = 1
 	}
 	resource := Classify(procs, th, opt.ProtectedPIDs, opt.AllowNames)
-	flagged := mergeFlagged(resource, opt.OrphanRows)
+	// Dead-owner orphans merge by pid exactly like the name+age orphan rows: a
+	// tree can be both resource-flagged and dead-owner (concat reasons, keep one row).
+	orphanRows := append(append([]Finding{}, opt.OrphanRows...), opt.DeadOwnerRows...)
+	flagged := mergeFlagged(resource, orphanRows)
 
 	// Cross-tick streak ledger: bump every (pid+start) key CPU-flagged THIS run,
 	// drop the rest. Keyed by start time so a recycled pid cannot inherit a streak.
@@ -566,9 +577,13 @@ func Build(procs []Proc, opt Options) Payload {
 	// ACTION (ok:false) iff a collector failed OR a NON-PROTECTED process is flagged.
 	// A protected breach is still listed (and logged) but never flips the ok bit.
 	actionable := 0
+	deadOwnerCount := 0
 	for _, r := range flagged {
 		if !r.Protected {
 			actionable++
+		}
+		if r.Kind == KindDeadOwnerOrphan {
+			deadOwnerCount++
 		}
 	}
 	collectError := strings.TrimSpace(opt.CollectError)
@@ -589,6 +604,7 @@ func Build(procs []Proc, opt Options) Payload {
 		Observations:           opt.Observations,
 		CollectError:           collectError,
 		NextAction:             NextAction(flagged, opt.Enact, collectError),
+		DeadOwnerOrphanCount:   deadOwnerCount,
 	}
 }
 
@@ -619,7 +635,7 @@ func NextAction(flagged []Finding, enact bool, collectError string) string {
 	}
 	onlySprawl := true
 	for _, r := range flagged {
-		if r.Kind != "orphan-helper" && r.Kind != "idle-shell" && r.Kind != "orphan-console-shell" {
+		if r.Kind != "orphan-helper" && r.Kind != "idle-shell" && r.Kind != "orphan-console-shell" && r.Kind != KindDeadOwnerOrphan {
 			onlySprawl = false
 			break
 		}

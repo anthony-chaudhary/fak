@@ -15,7 +15,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/looprecover"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
@@ -42,8 +45,10 @@ func cmdProcessGuard(args []string) {
 		cpuWindow   = fs.Float64("cpu-window", procguard.DefaultCPUWindowSec, "seconds between consecutive CPU samples")
 		cpuSamples  = fs.Int("cpu-samples", procguard.DefaultCPUSamples, "CPU snapshots to take (>=2)")
 		cpuConfirm  = fs.Int("cpu-reap-confirm", procguard.DefaultCPUReapConfirm, "reap a CPU-only pin only after N consecutive flagged runs")
-		reapOrphans = fs.Bool("reap-orphans", false, "also flag orphaned ephemeral helpers whose owning session exited")
-		reapIdle    = fs.Bool("reap-idle-shells", false, "also flag idle launcher shells with zero live children")
+		reapOrphans   = fs.Bool("reap-orphans", false, "also flag orphaned ephemeral helpers whose owning session exited")
+		reapIdle      = fs.Bool("reap-idle-shells", false, "also flag idle launcher shells with zero live children")
+		reapDeadOwner = fs.Bool("reap-dead-owner", false, "also flag fak-owned loop/worker trees whose owning run-lease is dead/absent (report mode; keys on the loop ledger)")
+		loopLedger    = fs.String("loop-ledger", "", "loop ledger path for the dead-owner lease lookup (default: the standard loop ledger)")
 		idleAgeMin  = fs.Int("idle-shell-age-min", procguard.DefaultIdleShellAgeSec/60, "age floor in minutes for idle-shell flagging")
 		enact       = fs.Bool("enact", false, "DESTRUCTIVE: kill flagged non-protected processes (default: report only)")
 		asJSON      = fs.Bool("json", false, "emit the machine-readable JSON contract")
@@ -61,6 +66,7 @@ func cmdProcessGuard(args []string) {
 	// orphan modes are report-only (they need a second scan / a relation scan).
 	cpuEnabled := mode == "report" && *maxCPUPct > 0
 	orphanEnabled := mode == "report" && (*reapOrphans || len(orphanPatterns) > 0 || *reapIdle)
+	deadOwnerEnabled := mode == "report" && *reapDeadOwner
 
 	dir := *logDir
 	if dir == "" {
@@ -82,25 +88,38 @@ func cmdProcessGuard(args []string) {
 
 	protectedPIDs := []int{os.Getpid(), os.Getppid()}
 
-	var orphanRows []procguard.Finding
-	if orphanEnabled {
-		patterns := append([]string{}, procguard.DefaultOrphanPatterns...)
-		patterns = append(patterns, orphanPatterns...)
+	var orphanRows, deadOwnerRows []procguard.Finding
+	if orphanEnabled || deadOwnerEnabled {
 		relations, relErr := procguard.CollectRelations()
 		if relErr != "" && collectErr == "" {
 			collectErr = relErr
 		}
-		livePIDs := map[int]bool{}
-		for _, r := range relations {
-			if r.PID > 0 {
-				livePIDs[r.PID] = true
+		top := procguard.NewRelationTopology(relations)
+		if orphanEnabled {
+			patterns := append([]string{}, procguard.DefaultOrphanPatterns...)
+			patterns = append(patterns, orphanPatterns...)
+			orphanRows = procguard.ClassifyOrphans(
+				relations, top.LivePIDs, top.ChildCounts,
+				patterns, procguard.DefaultIdleShellNames, max(0, *idleAgeMin)*60, *reapIdle,
+				protectedPIDs, allowNames,
+			)
+		}
+		if deadOwnerEnabled {
+			// The lease lookup is fail-closed: if the loop ledger can't be read we
+			// cannot prove any owner is dead, so the mode is skipped (nothing flagged)
+			// rather than reaping every tagged tree. Report-first; --enact gates the kill.
+			leaseAlive, note := loadLeaseLiveness(*loopLedger)
+			if note != "" {
+				fmt.Fprintf(os.Stderr, "fak process-guard: dead-owner mode skipped: %s\n", note)
+			}
+			if leaseAlive != nil {
+				deadOwnerRows = procguard.ClassifyDeadOwnerOrphans(relations, top, procguard.DeadOwnerOptions{
+					LeaseAlive:    leaseAlive,
+					ProtectedPIDs: protectedPIDs,
+					AllowNames:    allowNames,
+				})
 			}
 		}
-		orphanRows = procguard.ClassifyOrphans(
-			relations, livePIDs, procguard.ChildCounts(relations),
-			patterns, procguard.DefaultIdleShellNames, max(0, *idleAgeMin)*60, *reapIdle,
-			protectedPIDs, allowNames,
-		)
 	}
 
 	th := procguard.Thresholds{MaxThreads: *maxThreads, MaxHandles: *maxHandles, MaxWSMB: *maxWSMB}
@@ -121,6 +140,7 @@ func cmdProcessGuard(args []string) {
 		CPUReapConfirm: *cpuConfirm,
 		CPUStreaksPrev: streaksPrev,
 		OrphanRows:     orphanRows,
+		DeadOwnerRows:  deadOwnerRows,
 		Platform:       runtime.GOOS,
 		CollectError:   collectErr,
 		Killer:         killer,
@@ -185,4 +205,41 @@ func ptrStr(p *int) string {
 		return "None"
 	}
 	return fmt.Sprintf("%d", *p)
+}
+
+// loadLeaseLiveness reads the loop ledger and returns a run-id -> alive lookup
+// for the dead-owner reaper (procguard.DeadOwnerOptions.LeaseAlive). A run is
+// "alive" iff its recovery disposition is RUNNING (a live/recent owner); an
+// orphaned, terminal, or absent run id reads as a dead owner. It reuses the same
+// fold `fak loop recover` uses (loopmgr.LoadPrefix -> foldRuns -> looprecover.Plan),
+// and is ledger-only (no pid probe) — the same v1 stance as loop recover.
+//
+// Fail-closed: on any read error it returns (nil, note) so the caller SKIPS the
+// mode entirely rather than treating an unreadable registry as "every owner dead".
+func loadLeaseLiveness(ledger string) (func(string) bool, string) {
+	if strings.TrimSpace(ledger) == "" {
+		ledger = defaultLoopLedger()
+	}
+	// Existence is checked explicitly BEFORE LoadPrefix: LoadPrefix treats a
+	// missing ledger as an empty (no-error) run set, which would mark EVERY tagged
+	// tree's owner dead — the exact false-reap the contract forbids. A missing or
+	// unreadable ledger means we cannot prove any owner is dead, so skip the mode.
+	if _, err := os.Stat(ledger); err != nil {
+		return nil, fmt.Sprintf("loop ledger %q not readable (%v); no lease liveness, nothing flagged", ledger, err)
+	}
+	events, _, err := loopmgr.LoadPrefix(ledger)
+	if err != nil {
+		return nil, fmt.Sprintf("loop ledger %q unreadable (%v); no lease liveness, nothing flagged", ledger, err)
+	}
+	res := looprecover.Plan(looprecover.Input{
+		Runs:    foldRuns(events),
+		NowUnix: time.Now().Unix(),
+	})
+	alive := map[string]bool{}
+	for _, r := range res.Runs {
+		if r.Disposition == looprecover.DispRunning {
+			alive[r.RunID] = true
+		}
+	}
+	return func(runID string) bool { return alive[runID] }, ""
 }
