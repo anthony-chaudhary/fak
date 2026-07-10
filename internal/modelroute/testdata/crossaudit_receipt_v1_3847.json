@@ -1,0 +1,77 @@
+{
+  "schema": "fak-crossaudit-receipt/v1",
+  "audit_key": "issue:2729:af07da37c2c12d40:openai-gpt-gpt-5.6-sol",
+  "subject": {
+    "issue_number": 2729,
+    "issue_url": "https://github.com/anthony-chaudhary/fak/issues/2729",
+    "issue_state": "CLOSED",
+    "title": "bench(conceptbench): spine — one concept x two models x dos grade x one report row",
+    "commit_sha": "2aa4145ab0433c86bf35812b828977a648d4ec88",
+    "diff_sha256": "sha256:31cbd9163a35e2cc64ae98cc056d4529649199d7344f44c6bbd5fe24f11c607a",
+    "digest": "sha256:af07da37c2c12d403312b80abd2692db705fee391202d3bc46e3afba312527ac"
+  },
+  "author": {
+    "harness": "claude-code",
+    "provider": "anthropic",
+    "family": "claude",
+    "model": "claude-unspecified",
+    "account_class": "subscription",
+    "endpoint_class": "hosted"
+  },
+  "auditor": {
+    "harness": "fak issue audit",
+    "provider": "openai",
+    "family": "gpt",
+    "model": "gpt-5.6-sol",
+    "account_class": "subscription",
+    "endpoint_class": "hosted",
+    "reasoning_posture": "xhigh",
+    "driver": "codex"
+  },
+  "independence": {
+    "admitted": true,
+    "rule": "different-model-family/v1",
+    "reason": "DIFFERENT_MODEL_FAMILY"
+  },
+  "policy_version": "different-model-family/v1",
+  "prompt_version": "issue-resolution-audit/v1",
+  "prompt_digest": "sha256:ec71a9edde10f67c373a08bf05b3739d4e0d7e853ed82711f8417760fed5118a",
+  "verdict": "REFUTE",
+  "reason": "The command does not run either named model or replay a recorded model transcript; it manufactures commits from fixture-supplied subjects/files and merely labels them as model replay outputs, so the required two-model task comparison is not witnessed. It also never calls dos_verify, and the committed artifact’s outer witness explicitly says dos_commit_audit was \"not_run\", contradicting its inner rows.",
+  "evidence_refs": [
+    {
+      "kind": "github-comment",
+      "ref": "https://github.com/anthony-chaudhary/fak/issues/2729#issuecomment-4926775134"
+    },
+    {
+      "kind": "github-closure",
+      "ref": "author-manifest:2aa4145ab0433c86bf35812b828977a648d4ec88"
+    },
+    {
+      "kind": "auditor",
+      "ref": "cmd/conceptbench/spine.go: spineCommitSpec/runSpineArm"
+    },
+    {
+      "kind": "auditor",
+      "ref": "cmd/conceptbench/testdata/spine/spine.json: hard-coded model commit outcomes without transcript provenance"
+    },
+    {
+      "kind": "auditor",
+      "ref": "experiments/agent-live/conceptbench/spine-replay.json: benchmark_artifact.witness.dos_commit_audit=\"not_run\""
+    },
+    {
+      "kind": "issue",
+      "ref": "https://github.com/anthony-chaudhary/fak/issues/2729"
+    },
+    {
+      "kind": "commit",
+      "ref": "2aa4145ab0433c86bf35812b828977a648d4ec88"
+    },
+    {
+      "kind": "diff",
+      "ref": "2aa4145ab0433c86bf35812b828977a648d4ec88",
+      "sha256": "sha256:31cbd9163a35e2cc64ae98cc056d4529649199d7344f44c6bbd5fe24f11c607a"
+    }
+  ],
+  "receipt_digest": "sha256:3f864426cba6e23275fd6f5a5a483589b2474a8a6a4a9b4e2341eb0a41188d73"
+}
