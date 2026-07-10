@@ -92,6 +92,10 @@ KERNELS = cuda_abi_parity.KERNELS
 BINDING = cuda_abi_parity.BINDINGS[0]  # primary C binding (cuda.go); ABI tool now spans a tuple
 BUILD_SH = "internal/compute/build_cuda.sh"
 CUDA_ARCH_FILE = "internal/compute/cuda_arch.txt"
+# Blackwell datacenter (sm_100, B200/GB200) + consumer (sm_120, RTX 50-series). A build that
+# silently drops one of these — or the PTX floor that lets an unlisted card JIT-load — is
+# process debt the arch-coverage sub-rung of kpi_build_portable exists to surface (#4187).
+BLACKWELL_ARCHS = ("sm_100", "sm_120")
 BUILD_PS1 = "tools/build_cuda_windows.ps1"
 SETUP_SH = "internal/compute/setup_cuda_wsl.sh"
 ABI_TOOL = "tools/cuda_abi_parity.py"
@@ -192,6 +196,20 @@ def _has(text: str | None, *tokens: str) -> bool:
     return any(t.lower() in low for t in tokens)
 
 
+def _ptx_floor_present(build_sh: str | None) -> bool:
+    """A fatbin embeds a PTX floor when it emits a virtual `code=compute_NN` gencode entry —
+    that PTX is what a future card not named in the SASS list JIT-compiles from. SASS-only
+    entries (`code=sm_NN`) give no forward compatibility, so their absence is process debt."""
+    return bool(build_sh) and re.search(r"code=compute_", build_sh) is not None
+
+
+def _blackwell_uncovered(arch_set: list[str]) -> list[str]:
+    """Blackwell arches declared-but-not-present in the arch set the build consumes. build_cuda.sh
+    fans out over cuda_arch.txt, so a Blackwell arch missing from the declared set is missing from
+    the build — a Blackwell-breaking regression that would otherwise not move the scorecard."""
+    return [a for a in BLACKWELL_ARCHS if a not in arch_set]
+
+
 # ---------------------------------------------------------------------------
 # Per-KPI pure checks. Each returns
 #   {kpi, group, score (0-100 int), detail, defects: [str], soft: [str]}
@@ -254,22 +272,34 @@ def kpi_cpuref_parity_coverage(uncovered: list[str]) -> dict[str, Any]:
 
 
 def kpi_build_portable(host_missing: list[str], arch_executable: bool,
-                       arch_named: list[str]) -> dict[str, Any]:
+                       arch_named: list[str], blackwell_missing: list[str] | None = None,
+                       ptx_floor: bool = True) -> dict[str, Any]:
     """The build must be reproducible across the host matrix (WSL · datacenter/DGX · GCP
     DLVM · native Windows) and the declared arch matrix, with the arch in an
     EXECUTABLE context (the -arch="$ARCH" nvcc line + the FAK_CUDA_ARCH override), not just a
     comment. Each missing host platform is one unit; an arch list that never reaches nvcc is
-    one unit (a paste-to-pass guard)."""
+    one unit (a paste-to-pass guard).
+
+    Blackwell arch-coverage sub-rung (#4187): a Blackwell arch dropped from the declared set,
+    or a fatbin built with no PTX floor, is one unit each — either lets Blackwell support
+    regress (a load failure on a B200/RTX-50 card) without moving this scorecard."""
     defects = [f"build scripts don't cover the {h} host path" for h in host_missing]
     if not arch_executable:
         defects.append("the GPU arch is not in an executable context (no FAK_CUDA_ARCH override + "
                        '-arch="$ARCH" nvcc line) — the arch matrix is a comment, not a build path')
+    for a in (blackwell_missing or []):
+        defects.append(f"Blackwell arch {a} absent from the declared build set (cuda_arch.txt) — "
+                       "a Blackwell-breaking build edit would not move this scorecard")
+    if not ptx_floor:
+        defects.append("the fatbin build embeds no PTX floor (no code=compute_NN gencode) — "
+                       "forward-compat JIT is lost; a card newer than the SASS list cannot load")
     soft = ([f"advertised arch not named in build_cuda.sh: {a}" for a in arch_named]
             if arch_named else [])
     return {"kpi": "build_portable", "group": "build",
             "score": _clamp(100 - 22 * len(defects) - 5 * len(soft)),
             "detail": (f"{len(defects)} portability gap(s)" if defects
-                       else "host matrix (WSL · GPU server · cloud · native Windows) + executable arch override covered"),
+                       else "host matrix (WSL · GPU server · cloud · native Windows) + executable arch "
+                            "override + Blackwell (sm_100/sm_120) & PTX floor covered"),
             "defects": defects, "soft": soft}
 
 
@@ -595,7 +625,11 @@ def gather(root: Path) -> list[dict[str, Any]]:
 
     # --- author ---
     tool_present = present(ABI_TOOL)
-    make_cuda_check = bool(re.search(r"(?m)^cuda-check:", makefile)) and _has(makefile, "cuda_abi_parity")
+    # The cuda-check recipe wires the local gate if it runs the parity tool directly OR delegates
+    # to `build_cuda.sh check` (which runs tools/cuda_abi_parity.py --check for it, #4183/#4185).
+    _cc_block = (makefile.split("\ncuda-check:", 1)[-1].split("\n\n", 1)[0]
+                 if re.search(r"(?m)^cuda-check:", makefile) else "")
+    make_cuda_check = bool(_cc_block) and _has(_cc_block, "cuda_abi_parity", "build_cuda.sh check")
     ps1_cuda_check = _has(ci_ps1, "cuda_abi_parity")
     # abi_parity: run the REAL parser over the workspace seam.
     parity_payload = cuda_abi_parity.collect(root)
@@ -633,9 +667,16 @@ def gather(root: Path) -> list[dict[str, Any]]:
         host_missing.append("GCP DLVM")
     if not present(BUILD_PS1):
         host_missing.append("native Windows")
-    arch_executable = _has(build_sh, "FAK_CUDA_ARCH") and bool(re.search(r'-arch="?\$?\{?ARCH', build_sh))
+    # The FAK_CUDA_ARCH override must actually reach nvcc, not just sit in a comment. Accept the
+    # legacy single `-arch="$ARCH"` form AND the #4183 fatbin form: a `-gencode ...,code=$ARCH`
+    # entry built from the override and fed to nvcc via the "${GENCODE[@]}" array.
+    _arch_flag = bool(re.search(r'-arch="?\$?\{?ARCH', build_sh))
+    _gencode_arch = bool(re.search(r'code=\$\{?ARCH\}?', build_sh)) and _has(build_sh, "${GENCODE[@]}")
+    arch_executable = _has(build_sh, "FAK_CUDA_ARCH") and (_arch_flag or _gencode_arch)
     arch_set = [line.strip() for line in _safe_read(root / CUDA_ARCH_FILE).splitlines() if line.strip()]
     arch_named = [] if arch_set and _has(build_sh, "cuda_arch.txt") else arch_set
+    blackwell_missing = _blackwell_uncovered(arch_set)
+    ptx_floor = _ptx_floor_present(build_sh)
     version_pinned = bool(re.search(r"cuda-nvcc\s*=\s*\d", setup_sh)) or bool(re.search(r"\b12\.\d\b", setup_sh)) and _has(setup_sh, "nvcc")
     arch_override = _has(build_sh, "FAK_CUDA_ARCH")
     # task_runner: targets that exist AND delegate to the real scripts.
@@ -699,7 +740,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_local_static_check(tool_present, make_cuda_check, ps1_cuda_check),
         kpi_abi_parity(parity_payload),
         kpi_cpuref_parity_coverage(uncovered),
-        kpi_build_portable(host_missing, arch_executable, arch_named),
+        kpi_build_portable(host_missing, arch_executable, arch_named, blackwell_missing, ptx_floor),
         kpi_toolchain_pinned(bool(version_pinned), arch_override),
         kpi_task_runner(missing_verbs),
         kpi_witness_coverage(floors_missing_script),

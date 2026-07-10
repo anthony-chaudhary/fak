@@ -71,6 +71,38 @@ class TestPureKPIs(unittest.TestCase):
         # Absent = HARD, score 0.
         self.assertEqual(m.kpi_dev_guide(False, [], [])["score"], 0)
 
+    def test_ptx_floor_detection_on_synthetic_build_script(self):
+        # A fatbin with a virtual code=compute_NN entry has a PTX floor; a SASS-only build does not.
+        with_floor = ('GENCODE+=(-gencode "arch=compute_120,code=sm_120")\n'
+                      'GENCODE+=(-gencode "arch=compute_120,code=compute_120")')
+        sass_only = 'GENCODE+=(-gencode "arch=compute_120,code=sm_120")'
+        self.assertTrue(m._ptx_floor_present(with_floor))
+        self.assertFalse(m._ptx_floor_present(sass_only))
+        self.assertFalse(m._ptx_floor_present(""))
+
+    def test_blackwell_uncovered_on_synthetic_arch_set(self):
+        self.assertEqual(m._blackwell_uncovered(["sm_80", "sm_89", "sm_90", "sm_100", "sm_120"]), [])
+        # Drop consumer Blackwell from the declared set -> flagged as uncovered.
+        self.assertEqual(m._blackwell_uncovered(["sm_80", "sm_89", "sm_90", "sm_100"]), ["sm_120"])
+        self.assertEqual(m._blackwell_uncovered(["sm_80", "sm_90"]), ["sm_100", "sm_120"])
+
+    def test_build_portable_blackwell_and_ptx_clean(self):
+        k = m.kpi_build_portable([], True, [], blackwell_missing=[], ptx_floor=True)
+        self.assertEqual(k["defects"], [])
+        self.assertEqual(k["score"], 100)
+
+    def test_build_portable_regresses_without_blackwell_arch(self):
+        clean = m.kpi_build_portable([], True, [], blackwell_missing=[], ptx_floor=True)
+        k = m.kpi_build_portable([], True, [], blackwell_missing=["sm_120"], ptx_floor=True)
+        self.assertLess(k["score"], clean["score"])
+        self.assertTrue(any("sm_120" in d for d in k["defects"]))
+
+    def test_build_portable_regresses_without_ptx_floor(self):
+        clean = m.kpi_build_portable([], True, [], blackwell_missing=[], ptx_floor=True)
+        k = m.kpi_build_portable([], True, [], blackwell_missing=[], ptx_floor=False)
+        self.assertLess(k["score"], clean["score"])
+        self.assertTrue(any("PTX floor" in d for d in k["defects"]))
+
 
 class TestFold(unittest.TestCase):
     def test_build_payload_sums_process_debt(self):

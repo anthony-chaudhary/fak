@@ -5,7 +5,7 @@ description: "fak's deterministic CUDA-dev-process scorecard: KPIs across the fi
 
 # CUDA-dev-process scorecard — how hard is it to develop a kernel in fak
 
-<!-- cuda-dev-scorecard: 2026-06-26 · process: tools/cuda_dev_scorecard.py -->
+<!-- cuda-dev-scorecard: 2026-07-10 · process: tools/cuda_dev_scorecard.py -->
 
 This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_backend.h` / `cuda.go`, building it, proving it correct, and keeping it from rotting — a loop made unusually painful because the canonical dev host has no CUDA toolkit and a walled GPU, so the loop spans a remote GPU node. Every number is re-derived from the git-tracked tree by `tools/cuda_dev_scorecard.py` — no hand-entry. The headline metric is **process-debt**: the count of concrete, mechanical defects that make the loop slower or less safe — a missing local gate, no automatic CI compile check, no one-command witness, no dev guide.
 
@@ -28,9 +28,9 @@ This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_ba
 | Stage | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | author | `local_static_check` | 100 | 0 | ABI checker + make cuda-check + ci.ps1 mirror all present |
-| author | `abi_parity` | 100 | 0 | 34 prototypes in full parity (0 standby advisory) |
+| author | `abi_parity` | 100 | 0 | 53 prototypes in full parity (0 standby advisory) |
 | author | `cpuref_parity_coverage` | 100 | 0 | 7/7 device op families have a cpuref-parity witness |
-| build | `build_portable` | 100 | 0 | host matrix (WSL · GPU server · cloud · native Windows) + executable arch override covered |
+| build | `build_portable` | 100 | 0 | host matrix (WSL · GPU server · cloud · native Windows) + executable arch override + Blackwell (sm_100/sm_120) & PTX floor covered |
 | build | `toolchain_pinned` | 100 | 0 | CUDA version pinned + arch override documented |
 | build | `task_runner` | 100 | 0 | cuda-build/cuda-test/cuda-accept delegate to the real scripts |
 | validate | `witness_coverage` | 100 | 0 | every recorded floor names an on-disk acceptance witness |
