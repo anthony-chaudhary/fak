@@ -28,12 +28,12 @@ import (
 // Published expvar names. Kept as consts so the /debug/vars fold and any external scraper key
 // on the same strings the tests assert.
 const (
-	VarTicks    = "fak_resume_watchdog_ticks"      // total watchdog ticks observed
-	VarActions  = "fak_resume_watchdog_action"     // per-verdict launch/skip/defer count
-	VarAutoheal = "fak_watchdog_autoheal_result"   // per-result autoheal boot outcome count
-	VarMonitor  = "fak_watchdog_monitor_status"    // per-monitor last folded status
-	VarRollup   = "fak_watchdoghealth_status"       // the folded cross-monitor rollup status
-	VarProgress = "fak_resume_watchdog_progress"    // drain-steward progress witnesses recorded
+	VarTicks    = "fak_resume_watchdog_ticks"    // total watchdog ticks observed
+	VarActions  = "fak_resume_watchdog_action"   // per-verdict launch/skip/defer count
+	VarAutoheal = "fak_watchdog_autoheal_result" // per-result autoheal boot outcome count
+	VarMonitor  = "fak_watchdog_monitor_status"  // per-monitor last folded status
+	VarRollup   = "fak_watchdoghealth_status"    // the folded cross-monitor rollup status
+	VarProgress = "fak_resume_watchdog_progress" // drain-steward progress witnesses recorded
 )
 
 var (
