@@ -4634,7 +4634,7 @@ class TickExitCodeTest(unittest.TestCase):
         emitted = {"spawned", "would_spawn", "no_issue", "no_lane", "lane_busy",
                    "lane_leased", "same_issue_wip", "dirty_path_collision",
                    "multi_lane_scope", "refused", "weekly_capped",
-                   "backend_unhealthy", "spawn_failed"}
+                   "backend_unhealthy", "backend_health_skip", "spawn_failed"}
         self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
 
 
@@ -5096,6 +5096,69 @@ class SeatAdaptiveEvaluateTest(unittest.TestCase):
         rendered = mod.render(p)
         self.assertIn("seats     : adaptive cap 5", rendered)
         self.assertIn("binding ramp_delta", rendered)
+
+
+class BackendHealthSpawnGateTest(unittest.TestCase):
+    """gate_spawn_on_health / recent_backend_stub_rate (#3247): the backend-health spawn
+    gate pins a majority-stub backend to 0 spawns before seat sizing, fails open on an
+    unknown rate, and auto-restores because the live rate is re-read every tick."""
+
+    def test_majority_stub_gates_to_zero(self) -> None:
+        mod = load()
+        planned, reason = mod.gate_spawn_on_health(4, 0.75)
+        self.assertEqual(planned, 0)
+        self.assertIsNotNone(reason)
+        self.assertIn("majority-stub", reason)
+
+    def test_threshold_is_inclusive(self) -> None:
+        mod = load()
+        planned, reason = mod.gate_spawn_on_health(4, mod._HEALTH_SKIP_STUB_RATE)
+        self.assertEqual(planned, 0)
+        self.assertIsNotNone(reason)
+
+    def test_healthy_backend_passes_through_unchanged(self) -> None:
+        mod = load()
+        planned, reason = mod.gate_spawn_on_health(4, 0.25)
+        self.assertEqual(planned, 4)
+        self.assertIsNone(reason)
+
+    def test_none_rate_fails_open(self) -> None:
+        mod = load()
+        self.assertEqual(mod.gate_spawn_on_health(4, None), (4, None))
+
+    def test_non_numeric_rate_fails_open(self) -> None:
+        mod = load()
+        self.assertEqual(mod.gate_spawn_on_health(4, "bogus"), (4, None))
+
+    def test_recent_rate_reads_matching_product(self) -> None:
+        mod = load()
+        import dispatch_status
+        orig = dispatch_status.backend_stub_rates
+        try:
+            dispatch_status.backend_stub_rates = lambda *a, **k: [
+                {"product": "gpt-5-codex", "stub_rate": 0.8},
+                {"product": "other", "stub_rate": 0.1}]
+            self.assertEqual(
+                mod.recent_backend_stub_rate(Path("."), product="gpt-5-codex"), 0.8)
+            self.assertIsNone(
+                mod.recent_backend_stub_rate(Path("."), product="absent"))
+        finally:
+            dispatch_status.backend_stub_rates = orig
+
+    def test_recent_rate_fails_open_on_error(self) -> None:
+        mod = load()
+        import dispatch_status
+        orig = dispatch_status.backend_stub_rates
+
+        def boom(*a, **k):
+            raise RuntimeError("logs unreadable")
+
+        try:
+            dispatch_status.backend_stub_rates = boom
+            self.assertIsNone(
+                mod.recent_backend_stub_rate(Path("."), product="gpt-5-codex"))
+        finally:
+            dispatch_status.backend_stub_rates = orig
 
 
 if __name__ == "__main__":

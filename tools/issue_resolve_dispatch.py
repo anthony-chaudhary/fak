@@ -4321,6 +4321,78 @@ def seat_adaptive_target(pre: dict[str, Any], *, fallback: int, ceiling: int,
     return target, info
 
 
+# Backend-health SPAWN gate (#3247). The standing codex cron kept dispatching into a
+# backend that was returning banner-only/0-byte stub logs — every seat burned on a
+# no-op that produced zero real output, and seat-adaptive sizing (above) only made it
+# worse by handing the dead backend MORE seats. The gate below is the stateless,
+# per-tick complement to check_backend_health's persistent self-suppress: it reads the
+# SAME per-backend stub_rate the status card computes and, when the backend is majority-
+# stub, sizes the tick to 0 workers BEFORE the seat math runs so no amount of free seats
+# can reopen a dead backend. The threshold matches the `stub > productive` majority the
+# status card and check_backend_health already use to call a backend dead.
+_HEALTH_SKIP_STUB_RATE = 0.5
+
+
+def recent_backend_stub_rate(runs_dir: Path, *, product: str,
+                             lookback_min: int = 90, now_ts: float | None = None,
+                             alive: set[int] | None = None,
+                             probe: Any | None = None) -> float | None:
+    """The recent stub_rate for one backend ``product`` — the fraction of its recent
+    worker logs that were banner-only/0-byte no-ops — read from the status card's own
+    ``dispatch_status.backend_stub_rates`` rollup (#3247) so the spawn gate and the
+    health card can never disagree. Returns ``None`` when the signal is unavailable (no
+    recent logs for the backend, the status module is missing, or any read error): a
+    ``None`` tells :func:`gate_spawn_on_health` to FAIL-OPEN, so unknown health never
+    wedges dispatch. The import is lazy to avoid an import cycle with dispatch_status
+    (which imports this module for its own fold)."""
+    try:
+        import dispatch_status  # noqa: E402  (lazy: dispatch_status imports us back)
+    except ImportError:
+        return None
+    try:
+        rows = dispatch_status.backend_stub_rates(
+            runs_dir, lookback_min=lookback_min, now_ts=now_ts,
+            alive=alive, probe=probe)
+    except Exception:
+        return None
+    for row in rows or []:
+        if row.get("product") == product and row.get("stub_rate") is not None:
+            try:
+                return float(row.get("stub_rate"))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def gate_spawn_on_health(planned: int, stub_rate: float | None,
+                         threshold: float = _HEALTH_SKIP_STUB_RATE
+                         ) -> tuple[int, str | None]:
+    """Gate a tick's planned worker count on the backend's recent health (#3247) — a
+    PURE fold that composes with :func:`seat_adaptive_target`. When the backend is
+    majority-stub (``stub_rate >= threshold``) it returns ``(0, reason)`` so the tick
+    plans zero spawns REGARDLESS of what the seat math would size, carrying a legible
+    health-skip ``reason`` for the payload; otherwise it returns ``(planned, None)``
+    unchanged. FAIL-OPEN + auto-restoring: a ``None`` (or non-numeric) stub_rate is
+    never gated, and because the live rate is re-read every tick, a backend whose
+    stub_rate recovers below ``threshold`` resumes spawning on its own — no persisted
+    hold, no operator, no reprobe timer."""
+    if stub_rate is None:
+        return planned, None
+    try:
+        rate = float(stub_rate)
+    except (TypeError, ValueError):
+        return planned, None
+    if rate < threshold:
+        return planned, None
+    reason = (
+        f"backend is majority-stub (recent stub_rate={round(rate, 3)} >= {threshold}); "
+        f"planning 0 spawns instead of {planned} — every seat would burn on a "
+        f"banner-only/0-byte no-op producing zero real output. Spawns auto-restore the "
+        f"first tick its stub_rate recovers below {threshold} (the live signal is "
+        f"re-read each tick; no persistent hold)")
+    return 0, reason
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               live: bool, refresh: bool = True, cooldown_min: int = 120,
               backend: str = "claude",
@@ -4398,14 +4470,29 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
 
     pre = issue_dispatch.preflight(root, max_workers=eff_max_workers, work_kind=work_kind,
                                    product=product)
+    # Backend-health spawn gate (#3247) — decided BEFORE the seat sizing so a majority-
+    # stub backend plans 0 REGARDLESS of what the seat math would size. Read the live
+    # per-backend stub_rate the status card already computes (recent_backend_stub_rate ->
+    # dispatch_status.backend_stub_rates); when the backend is mostly returning stub
+    # output (>= _HEALTH_SKIP_STUB_RATE), gate the effective cap to 0 and SKIP the seat
+    # re-sizing below so free seats can never reopen a dead backend. The legible refusal
+    # is emitted alongside the sibling health/cap gates further down (once the preflight/
+    # account render helpers are in scope). STATELESS + auto-restoring: the rate is
+    # re-read every tick, so recovery lifts the gate with no operator and no persisted
+    # hold. FAIL-OPEN: no recent logs / None rate -> not gated, sized exactly as before.
+    health_stub_rate = recent_backend_stub_rate(runs_dir, product=product)
+    eff_max_workers, health_skip_reason = gate_spawn_on_health(
+        eff_max_workers, health_stub_rate)
     # Seat-adaptive tick sizing (#3246): the configured --max-workers is a fail-safe,
     # not the throttle. When the probe above carries a seat signal, re-size the
     # effective cap to min(live + seat_free, host_cap, ceiling, live + ramp) and
     # re-run the preflight AT that cap — the preflight stays the authoritative DoS
     # floor (a REFUSE_* at the resized cap still stops growth); only the redundant
-    # configured_max term moves. No signal -> no re-run, exactly the old sizing.
+    # configured_max term moves. No signal -> no re-run, exactly the old sizing. Skipped
+    # entirely when the health gate above fired, so seat math can never raise a majority-
+    # stub backend back above the 0 it was pinned to.
     seat_sizing: dict[str, Any] | None = None
-    if seat_adaptive:
+    if seat_adaptive and health_skip_reason is None:
         seat_target, seat_sizing = seat_adaptive_target(
             pre, fallback=eff_max_workers, ceiling=seat_ceiling,
             ramp_delta=seat_ramp_delta)
@@ -4510,6 +4597,26 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         if account_cap_reroute:
             payload["account_cap_reroute"] = account_cap_reroute
         return finish(payload)
+
+    # Backend-health spawn gate (#3247) — the majority-stub decision taken before the
+    # seat sizing (which already pinned eff_max_workers to 0) is EMITTED here, alongside
+    # the sibling capacity/health gates, now that the preflight/account render helpers
+    # are in scope. Plan 0 spawns this tick with a legible health-skip reason instead of
+    # feeding --max-workers to doomed workers. `backend_health_skip` is a BENIGN action
+    # (a correctly-declined tick — see BENIGN_ACTIONS), never a dispatcher malfunction.
+    if health_skip_reason is not None:
+        return finish({
+            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
+            "max_workers": max_workers, "registry_refresh": reg,
+            "timed_out_workers": reaped, "pruned_sidecars": pruned,
+            "preflight": _preflight_public(pre),
+            "account": _account_public(acct),
+            "backend_health_skip": {
+                "backend": backend, "stub_rate": health_stub_rate,
+                "threshold": _HEALTH_SKIP_STUB_RATE, "planned": 0},
+            "ok": False, "action": "backend_health_skip",
+            "verdict": "BACKEND_HEALTH_SKIP", "reason": health_skip_reason,
+        })
 
     # Weekly-cap gate — BEFORE the lane router's gh work. A logged-in account can
     # still be quota-exhausted; the preflight returns SPAWN_OK regardless. Without
@@ -5526,6 +5633,7 @@ BENIGN_ACTIONS = frozenset({
     "force_reason_required",                             # --force lacked a structured --force-reason (#2637)
     "refused",                                           # preflight backpressure (host at cap / no account)
     "weekly_capped", "backend_unhealthy",                # pool unavailable; declined correctly
+    "backend_health_skip",                               # backend majority-stub; planned 0 spawns (#3247)
 })
 
 
