@@ -11,7 +11,10 @@ keywords:
   - prompt cache preservation
   - middle-out compaction
   - context health
-date: 2026-07-06
+  - goal pin
+  - originating-task tombstone
+  - context restore
+date: 2026-07-10
 ---
 
 # Context shedding
@@ -60,6 +63,46 @@ That's the "trim from the middle out." The head stays cached, your recent contex
 stays intact, and the dead weight in the middle stops riding along on every future
 turn.
 
+![One compaction fire on the outbound request body: the protected prefix (through the first cache breakpoint) is copied byte-for-byte so its cache discount survives, the stale middle is dropped to a one-message stub carrying a restore handle, and the recent window is untouched — the "after" bar is visibly shorter than "before".](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/73-compaction-wire.svg)
+
+The same picture as a plain-text twin, so it reads even where the image doesn't
+load:
+
+```text
+COMPACTION: ONE FIRE, ON THE WIRE   [outbound request body]
+legend: █ protected prefix (cache hit ~0.1x)  ▓ stale middle (cache miss, full price)  █ recent window (working set)  ░ stub + restore handle
+
+before │███████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓██████████████████████│ ~62,000 tok  (over the 48K budget -> fires)
+ after │███████████████░██████████████████████                              │ ~34,600 tok  (prefix + window untouched)
+```
+
+The prefix band is copied by a byte splice (a `memcpy`, never a re-serialize), so the
+provider sees a prefix that is `bytes`-equal to last turn and keeps the cache discount
+on it. The stale middle collapses to that one-message stub; the recent window rides
+through unchanged.
+
+### The guarantees
+
+The trim is built to fail safe, because a botched rewrite of the request body is worse
+than no trim at all:
+
+- **Identity on any ambiguity.** If anything about the body is unexpected — no cache
+  breakpoint to anchor on, too few messages, a shape the splicer can't prove it
+  understands — the transform returns its input **unchanged** and records *why* it
+  bailed (a closed vocabulary: `no_breakpoint`, `too_few_msgs`, `prefix_mismatch`, and
+  a dozen more). It never emits a body it can't stand behind.
+- **The splice is proven, not assumed.** After building the trimmed body, fak
+  re-decodes it and checks that the protected prefix bytes survived verbatim
+  (`prefix_mismatch`) and that no message was left empty or malformed
+  (`malformed_body`) — the shapes the provider would reject with a 400. If that proof
+  fails, it ships the original.
+- **Tool pairs stay intact.** The kept window is chosen so a `tool_result` is never
+  separated from the `tool_use` it answers — the classic way a naive trim produces a
+  malformed request.
+- **Request-side only.** Shedding rewrites the bytes fak *sends upstream* for this one
+  call; it changes nothing the kernel adjudicates. The full history is still there to
+  audit — the trim is a transport-layer economy, not a rewrite of the record.
+
 ## Why this beats summarizing
 
 Most agent products "compact" by asking the model to **write a summary** of the
@@ -76,6 +119,65 @@ rewritten, so the discount survives. And because the dropped span is kept
 addressable (not summarized into oblivion), it can be restored by reference rather
 than reconstructed from a lossy recap. Summarizing is *guessing what mattered*;
 shedding is *deferring the question* until something actually asks.
+
+## What survives a drop: the pin and the tombstone
+
+"Drops a span and remembers where it went" is only honest if you can say *what* the
+stub remembers. Two things ride in it, depending on what was in the middle:
+
+```text
+WHAT THE STUB CARRIES — the one message that stands in for the dropped middle
+
+ a pinned goal is present    [fak:goal] keep the invoice parser backward-compatible   <- hoisted VERBATIM
+ (the fidelity path)         [fak] compacted 12 earlier turn(s) ... detail omitted        (nothing lost)
+
+ an unmarked first task      [fak] compacted 12 earlier turn(s) ... detail omitted
+ (the oriented fallback)     [fak] originating task (compacted): id=9f3c...a1 "port the
+                             Q4_K decode kernel to AVX2 and prove it bit-exact"
+                                  |__ id is a callable sha256 handle:
+                                      fak_context_restore(id=9f3c...a1) -> pages the full turn back, verbatim
+                                      fak_context_spans()               -> lists what is still restorable
+```
+
+**The goal pin.** If a message is tagged `[fak:goal]` — a standing instruction like an
+acceptance criterion, a "keep X backward-compatible", the actual task the loop is
+working toward — and it happens to fall in the compactible middle, fak **hoists it out
+verbatim** and sets it beside the stub instead of dropping it. A goal you'd lose to a
+badly-timed compaction survives in full. On the pin path the stub carries no
+tombstone: nothing was lost, so there's nothing to leave a marker for.
+
+**The originating-task tombstone.** The common case has no pin — the first user turn
+*is* the task, unmarked. Rather than launder it into a bare "compacted 12 turns," fak
+leaves a **bounded excerpt** of that first turn (whitespace collapsed to one line,
+capped so it stays a low-volume, cache-untouched addition) plus a **content-address
+handle**. The excerpt says *what* was dropped; the handle says *how to get all of it*.
+You are reading a live instance of this right now: the top of this very session shows a
+`[fak] originating task (compacted): id=… "…"` line — that is the tombstone, doing its
+job.
+
+## Getting a dropped span back: restore
+
+The handle in the tombstone is not decoration — it is callable. It is a sha256
+content-address (the same addressing scheme fak uses across recall and its context
+planner), and two MCP tools resolve it:
+
+- `fak_context_restore(id)` — pages the **full dropped bytes** back into context,
+  verbatim. You recover the original turn, not a summary of it. A successful restore is
+  stamped `WITNESSED` — these are bytes fak actually held and handed back, not
+  reconstructed.
+- `fak_context_spans()` — lists what is still restorable in this session, so a resuming
+  model can discover its handles instead of guessing them.
+
+Restore is **trust-gated**, not a blanket undo. A span that an operator sealed
+(quarantined) or explicitly tombstoned is **refused**, not resurrected; an unknown or
+already-evicted handle returns a clean miss. So "get it back" never becomes a way to
+launder poisoned or withdrawn context back into the prompt.
+
+This is what turns the trim from a gamble into a *deferral*. You don't have to be right
+about what was dead weight. Drop the middle; if a later turn reaches for something in
+it, the handle is sitting right there in the stub, and you page the span back in
+instead of thrashing on a lossy recap. The dropped context is *deferred*, not
+destroyed.
 
 ## What it saves — and how to read the number honestly
 
@@ -169,10 +271,20 @@ turns it off). Every `fak info` line shows the live `provider X% + fak Y%` split
 so you can watch the two savings — the provider's cache discount and fak's own
 trim — side by side, honestly, without either one claiming the other's number.
 
+To keep a standing instruction safe across compactions, start the message that states
+it with `[fak:goal]` — the pin hoists it out verbatim rather than letting it fall into
+a dropped middle. And if a later turn needs a span that was shed, its handle is in the
+stub: call `fak_context_restore(id=…)` to page it back, or `fak_context_spans` to list
+what is restorable.
+
 ## See also
 
 - [Long-session economics](long-session-economics.md) — why the transcript is
   re-sent and why the cache discount depends on a byte-identical prefix.
+- [You never manage the context window](you-never-manage-the-context-window.md) — the
+  doctrine this trim serves: the window is managed *for* you, not by you.
+- [Context-tape visuals](context-tape-visuals.md) — the visual language these bars are
+  drawn in, and how to render one from your own session.
 - [Built-in compaction audit](../notes/BUILT-IN-COMPACTION-AUDIT-2026-07-06.md) —
   why the summarize-and-discard compaction other products ship is weak, and what
   "good" looks like.

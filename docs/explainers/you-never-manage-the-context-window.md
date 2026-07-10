@@ -85,7 +85,9 @@ This is the load-bearing honesty section. From a wiring survey at HEAD (a compon
 - **Live, default-on, on the `fak guard`/`serve` wire** — the
   `internal/gateway/messages.go` pipeline: a 1-hour cache-TTL upgrade → an `ctxplan`
   O(1) planned resident view → a cache-prefix-preserving compaction shed (the shed is
-  suffix-shaped so the warm prefix splices through byte-for-byte) → oversized
+  suffix-shaped so the warm prefix splices through byte-for-byte, and each dropped span
+  leaves a `fak_context_restore` handle — plus a verbatim `[fak:goal]` pin — so nothing
+  load-bearing is lost to the trim) → oversized
   `tool_result` elision → a `promptmmu` inbound tool/system prune. Alongside it:
   `ctxmmu` write-time result admission (quarantine or page-out to a CAS pointer),
   `compactcohere` coherence sensing, `cacheobs` observation, `rehydrate` on resume,
@@ -149,7 +151,8 @@ being the owner.
   [`managed-context-continuous-usage.md`](../managed-context-continuous-usage.md)
 - Why a bounded resident view is cheaper than carrying a full transcript forever:
   [`o1-context-window-economics.md`](o1-context-window-economics.md)
-- The cache-preserving compaction shed and how the prefix survives it:
+- The cache-preserving compaction shed, how the prefix survives it, and what the drop
+  leaves behind (the goal pin, the originating-task tombstone, and `fak_context_restore`):
   [`context-shedding.md`](context-shedding.md)
 - The exact-span-removal primitive behind write-time quarantine:
   [`addressable-kv-cache.md`](addressable-kv-cache.md)
