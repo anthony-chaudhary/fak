@@ -25,6 +25,8 @@ const codexLoopSchema = "fak.sessions.codex_loop.v1"
 const codexLoopRecentSchema = "fak.sessions.codex_loop_recent.v1"
 const codexLoopHookOverrideEnv = "FAK_ALLOW_DIRECT_CODEX_CONTINUE"
 const codexLoopHookDefaultBudget = 500 * time.Millisecond
+const codexLoopLaunchMaxBytes int64 = 4 << 20
+const codexLoopLaunchPrefixBytes int64 = 256 << 10
 
 // These two seams are variables so the hook's hard failure modes can be injected
 // without making the general transcript diagnoser artificial. They are only mutated
@@ -61,6 +63,12 @@ type codexLoopDiagnosis struct {
 	Reason            string                 `json:"reason,omitempty"`
 	NextAction        string                 `json:"next_action,omitempty"`
 	ObservabilityGaps []string               `json:"observability_gaps,omitempty"`
+	abruptlyEnded     bool
+}
+
+type codexLoopLaunchScan struct {
+	BytesRead int64
+	Truncated bool
 }
 
 type codexLoopRecentReport struct {
@@ -435,6 +443,13 @@ func codexLoopGuardedLaunchGate(r codexLoopRecentReport, failOn string) (exitCod
 		return 0, 0, true
 	}
 	for _, d := range r.Diagnoses {
+		// A rollout that ends on an unmatched tool call was killed or truncated while
+		// work was in flight. It is crash evidence, not proof that a repetition loop
+		// completed. Keep the advisory diagnosis intact, but never poison the next
+		// guarded launch with it. (#4212)
+		if d.abruptlyEnded {
+			continue
+		}
 		if codexLoopVerdictRank(d.Verdict) < threshold {
 			continue
 		}
@@ -503,6 +518,20 @@ func codexLoopVerdictRank(verdict string) int {
 }
 
 func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (codexLoopRecentReport, error) {
+	return diagnoseRecentCodexLoopsWith(codexHome, sinceHours, limit, diagnoseCodexLoopPath)
+}
+
+func diagnoseNewestCodexLoopForLaunch(codexHome string, sinceHours float64) (codexLoopRecentReport, codexLoopLaunchScan, error) {
+	var scan codexLoopLaunchScan
+	rep, err := diagnoseRecentCodexLoopsWith(codexHome, sinceHours, 1, func(path string) (codexLoopDiagnosis, error) {
+		d, got, err := diagnoseCodexLoopLaunchPath(path)
+		scan = got
+		return d, err
+	})
+	return rep, scan, err
+}
+
+func diagnoseRecentCodexLoopsWith(codexHome string, sinceHours float64, limit int, diagnosePath func(string) (codexLoopDiagnosis, error)) (codexLoopRecentReport, error) {
 	home, err := resolvedCodexLoopHome(codexHome)
 	if err != nil {
 		return codexLoopRecentReport{}, err
@@ -521,17 +550,9 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 		Diagnoses:      make([]codexLoopDiagnosis, 0, len(paths)),
 	}
 	for _, path := range paths {
-		fh, err := os.Open(path)
+		d, err := diagnosePath(path)
 		if err != nil {
-			return r, fmt.Errorf("open %s: %w", path, err)
-		}
-		d, derr := diagnoseCodexLoop(fh, path)
-		cerr := fh.Close()
-		if derr != nil {
-			return r, fmt.Errorf("diagnose %s: %w", path, derr)
-		}
-		if cerr != nil {
-			return r, fmt.Errorf("close %s: %w", path, cerr)
+			return r, fmt.Errorf("diagnose %s: %w", path, err)
 		}
 		r.Diagnoses = append(r.Diagnoses, d)
 		r.Scanned++
@@ -597,6 +618,75 @@ func diagnoseRecentCodexLoops(codexHome string, sinceHours float64, limit int) (
 		r.NextAction = "inspect the top repeated outcome and add or tighten a hard fuse for that tool/result class"
 	}
 	return r, nil
+}
+
+func diagnoseCodexLoopPath(path string) (codexLoopDiagnosis, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return codexLoopDiagnosis{}, fmt.Errorf("open: %w", err)
+	}
+	d, diagnoseErr := diagnoseCodexLoop(fh, path)
+	closeErr := fh.Close()
+	if diagnoseErr != nil {
+		return d, diagnoseErr
+	}
+	if closeErr != nil {
+		return d, fmt.Errorf("close: %w", closeErr)
+	}
+	return d, nil
+}
+
+func diagnoseCodexLoopLaunchPath(path string) (codexLoopDiagnosis, codexLoopLaunchScan, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return codexLoopDiagnosis{}, codexLoopLaunchScan{}, fmt.Errorf("open: %w", err)
+	}
+	snapshot, scan, readErr := readCodexLoopLaunchSnapshot(fh)
+	closeErr := fh.Close()
+	if readErr != nil {
+		return codexLoopDiagnosis{}, scan, readErr
+	}
+	if closeErr != nil {
+		return codexLoopDiagnosis{}, scan, fmt.Errorf("close: %w", closeErr)
+	}
+	d, err := diagnoseCodexLoop(bytes.NewReader(snapshot), path)
+	return d, scan, err
+}
+
+func readCodexLoopLaunchSnapshot(fh *os.File) ([]byte, codexLoopLaunchScan, error) {
+	info, err := fh.Stat()
+	if err != nil {
+		return nil, codexLoopLaunchScan{}, fmt.Errorf("stat: %w", err)
+	}
+	size := info.Size()
+	if size <= codexLoopLaunchMaxBytes {
+		b, err := io.ReadAll(io.LimitReader(fh, codexLoopLaunchMaxBytes))
+		return b, codexLoopLaunchScan{BytesRead: int64(len(b))}, err
+	}
+
+	prefixLen := codexLoopLaunchPrefixBytes
+	if prefixLen > codexLoopLaunchMaxBytes {
+		prefixLen = codexLoopLaunchMaxBytes
+	}
+	suffixLen := codexLoopLaunchMaxBytes - prefixLen
+	prefix := make([]byte, prefixLen)
+	nPrefix, prefixErr := fh.ReadAt(prefix, 0)
+	if prefixErr != nil && !errors.Is(prefixErr, io.EOF) {
+		return nil, codexLoopLaunchScan{}, fmt.Errorf("read prefix: %w", prefixErr)
+	}
+	suffix := make([]byte, suffixLen)
+	nSuffix, suffixErr := fh.ReadAt(suffix, size-suffixLen)
+	if suffixErr != nil && !errors.Is(suffixErr, io.EOF) {
+		return nil, codexLoopLaunchScan{}, fmt.Errorf("read suffix: %w", suffixErr)
+	}
+	snapshot := make([]byte, 0, nPrefix+1+nSuffix)
+	snapshot = append(snapshot, prefix[:nPrefix]...)
+	snapshot = append(snapshot, '\n')
+	snapshot = append(snapshot, suffix[:nSuffix]...)
+	return snapshot, codexLoopLaunchScan{
+		BytesRead: int64(nPrefix + nSuffix),
+		Truncated: true,
+	}, nil
 }
 
 func discoverRecentCodexLoopSessionPaths(home string, sinceHours float64, limit int) ([]string, error) {
@@ -761,6 +851,8 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 	livelocks := map[string]*codexLivelockNotice{}
 	var prevOutcome *codexOutcomeKey
 	var pendingTokenOutcome *codexOutcomeKey
+	var lastResponseItemType string
+	var lastResponseCallID string
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 256*1024), 64*1024*1024)
@@ -793,6 +885,8 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 			if json.Unmarshal(rec.Payload, &item) != nil {
 				continue
 			}
+			lastResponseItemType = item.Type
+			lastResponseCallID = item.CallID
 			switch item.Type {
 			case "function_call", "custom_tool_call":
 				d.ToolCalls++
@@ -906,6 +1000,10 @@ func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return d, err
+	}
+	if lastResponseItemType == "function_call" || lastResponseItemType == "custom_tool_call" {
+		_, pending := calls[lastResponseCallID]
+		d.abruptlyEnded = pending && !d.TurnAborted && strings.TrimSpace(d.FinalStatus) == ""
 	}
 
 	appendCodexLoopRepeatedOutcomes(&d, outcomes)

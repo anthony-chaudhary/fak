@@ -235,6 +235,95 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestRunCodexLoopGateAllowsNewestAbruptCrash(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "06")
+	older := filepath.Join(sessionsDir, "rollout-2026-07-06T02-25-00-loop.jsonl")
+	crash := filepath.Join(sessionsDir, "rollout-2026-07-06T03-25-00-crash.jsonl")
+	writeCodexLoopFixture(t, crash, []string{
+		`{"timestamp":"2026-07-06T03:25:00.000Z","type":"session_meta","payload":{"session_id":"crash-session","originator":"codex-tui","model_provider":"fak"}}`,
+		`{"timestamp":"2026-07-06T03:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{}","call_id":"plan_1"}}`,
+		`{"timestamp":"2026-07-06T03:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T03:25:13.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{}","call_id":"plan_2"}}`,
+		`{"timestamp":"2026-07-06T03:25:14.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_2","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T03:25:23.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{}","call_id":"plan_3"}}`,
+		`{"timestamp":"2026-07-06T03:25:24.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T03:25:33.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{}","call_id":"shell_pending"}}`,
+	})
+	now := time.Now()
+	if err := os.Chtimes(older, now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(crash, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := codexLaunchRun
+	spawned := false
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+		spawned = true
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate", "loop",
+		"--loop-gate-since-hours", "0",
+		"--", "exec", "resume after crash",
+	})
+	if rc != 17 || !spawned {
+		t.Fatalf("crash-then-relaunch rc=%d spawned=%v, want guarded child rc=17; stderr=%s", rc, spawned, errb.String())
+	}
+	if strings.Contains(errb.String(), "loop gate REFUSE") {
+		t.Fatalf("abrupt latest rollout poisoned relaunch:\n%s", errb.String())
+	}
+}
+
+func TestNewestCodexLoopLaunchScanIsByteBounded(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex-home")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "06")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionsDir, "rollout-large.jsonl")
+	fh, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"timestamp":"2026-07-06T02:25:00.000Z","type":"session_meta","payload":{"session_id":"large-loop","model_provider":"fak"}}`,
+		strings.Repeat("x", int(codexLoopLaunchMaxBytes)+1024),
+		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{}","call_id":"plan_1"}}`,
+		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T02:25:13.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{}","call_id":"plan_2"}}`,
+		`{"timestamp":"2026-07-06T02:25:14.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_2","output":"Plan updated"}}`,
+		`{"timestamp":"2026-07-06T02:25:23.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{}","call_id":"plan_3"}}`,
+		`{"timestamp":"2026-07-06T02:25:24.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
+	}
+	if _, err := io.WriteString(fh, strings.Join(lines, "\n")+"\n"); err != nil {
+		fh.Close()
+		t.Fatal(err)
+	}
+	if err := fh.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, scan, err := diagnoseNewestCodexLoopForLaunch(home, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scan.Truncated || scan.BytesRead > codexLoopLaunchMaxBytes {
+		t.Fatalf("launch scan = %+v, want truncated and <= %d bytes", scan, codexLoopLaunchMaxBytes)
+	}
+	if rep.Scanned != 1 || rep.Verdict != "LOOP" {
+		t.Fatalf("bounded launch report scanned=%d verdict=%s, want 1/LOOP", rep.Scanned, rep.Verdict)
+	}
+}
+
 func TestRunCodexLoopGateAllowsGuardedRemediationForDirectLoops(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	home := codexLauncherLoopFixture(t)

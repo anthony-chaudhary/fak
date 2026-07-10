@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
@@ -60,6 +61,8 @@ type guardCodexInstall struct {
 	ProviderID string
 	EnvKey     string
 	BaseURL    string
+	Model      string
+	Reasoning  string
 	AuthMode   string
 	AuthSource string
 }
@@ -67,7 +70,8 @@ type guardCodexInstall struct {
 const (
 	guardCodexLocalPlaceholderAPIKey = "fak-local-codex-placeholder"
 	guardCodexOAuthPlaceholderAPIKey = "fak-guard-oauth-placeholder"
-	guardCodexDefaultModelID         = "gpt-5.5"
+	guardCodexDefaultModelID         = configaccounts.CodexDefaultModel
+	guardCodexDefaultReasoningEffort = configaccounts.CodexDefaultReasoningEffort
 )
 
 func guardCodexGatewayModel(command []string, model, provider string) string {
@@ -98,17 +102,44 @@ func guardCodexLoopGateConfig(command []string, threshold, codexHome string, sin
 // verbatim (guard execs the child directly, with no shell to strip them — Codex's own TOML
 // parser consumes the quotes). base_url is the gateway origin plus the `/v1` Codex appends
 // `/responses` to, so the request lands on the gateway's `/v1/responses` route.
-func guardCodexConfigArgs(gwURL, apiKeyEnv string) []string {
+func guardCodexConfigArgs(gwURL, apiKeyEnv, model string) []string {
 	base := guardCodexBaseURL(gwURL)
 	envKey := guardCodexEnvKey(apiKeyEnv)
+	model = guardCodexConfiguredModel(model)
+	effort := guardCodexReasoningEffort(model)
 	id := guardCodexProviderID
 	q := func(s string) string { return `"` + s + `"` }
-	return []string{
+	args := []string{
 		"-c", "model_provider=" + id,
+		"-c", "model=" + q(model),
 		"-c", "model_providers." + id + ".name=" + q("fak (kernel-adjudicated)"),
 		"-c", "model_providers." + id + ".base_url=" + q(base),
 		"-c", "model_providers." + id + ".wire_api=" + q("responses"),
 		"-c", "model_providers." + id + ".env_key=" + q(envKey),
+	}
+	if effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+q(effort))
+	}
+	return args
+}
+
+func guardCodexConfiguredModel(model string) string {
+	if model = strings.TrimSpace(model); model != "" {
+		return model
+	}
+	return guardCodexDefaultModelID
+}
+
+// guardCodexReasoningEffort pins xhigh only for the managed GPT-5.6 default. An explicit
+// custom/local model keeps its own supported-effort contract instead of receiving a config
+// value it may reject; a later user-supplied `-c model_reasoning_effort=...` still overrides
+// this earlier default in Codex's argv.
+func guardCodexReasoningEffort(model string) string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5.6", "gpt-5.6-sol":
+		return guardCodexDefaultReasoningEffort
+	default:
+		return ""
 	}
 }
 
@@ -141,7 +172,9 @@ func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv st
 	if !enabled || len(command) == 0 || !guardIsCodex(command[0]) {
 		return command, guardCodexInstall{}
 	}
-	args := guardCodexConfigArgs(gwURL, apiKeyEnv)
+	model := guardCodexDefaultModelID
+	effort := guardCodexReasoningEffort(model)
+	args := guardCodexConfigArgs(gwURL, apiKeyEnv, model)
 	out := make([]string, 0, len(command)+len(args))
 	out = append(out, command[0])
 	out = append(out, args...)
@@ -151,6 +184,8 @@ func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv st
 		ProviderID: guardCodexProviderID,
 		EnvKey:     guardCodexEnvKey(apiKeyEnv),
 		BaseURL:    guardCodexBaseURL(gwURL),
+		Model:      model,
+		Reasoning:  effort,
 	}
 }
 
@@ -192,6 +227,11 @@ func printGuardCodexNote(w io.Writer, in guardCodexInstall) {
 		return
 	}
 	fmt.Fprintf(w, "fak guard: Codex wired via -c model_provider=%s (wire_api=responses, base_url=%s) — every tool call crosses the kernel floor\n", in.ProviderID, in.BaseURL)
+	if in.Reasoning != "" {
+		fmt.Fprintf(w, "fak guard: Codex session config — model=%s model_reasoning_effort=%s\n", in.Model, in.Reasoning)
+	} else {
+		fmt.Fprintf(w, "fak guard: Codex session config — model=%s (custom model keeps its own reasoning-effort default)\n", in.Model)
+	}
 	if in.AuthMode == "chatgpt" {
 		fmt.Fprintf(w, "fak guard: Codex upstream auth — ChatGPT subscription from %s (token held by guard; child sees $%s placeholder)\n", in.AuthSource, in.EnvKey)
 		return
