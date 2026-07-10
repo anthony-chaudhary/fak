@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/headlesslint"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume/transcript"
 )
@@ -150,6 +151,22 @@ type guardStopTranscript struct {
 	LastHadToolUse     bool   `json:"last_had_tool_use,omitempty"`
 	LastToolUse        string `json:"last_tool_use,omitempty"`
 	NotedNoAllowedPath bool   `json:"noted_no_allowed_path,omitempty"`
+
+	// OperatorDirected records that the FINAL assistant turn ended by addressing a
+	// human — "do you want me to push?", "waiting for your confirmation", "please
+	// review", "let me know if…". In an autonomous run there is no human to answer,
+	// so the question hangs and the work silently stalls. internal/headlesslint (the
+	// sensor-side dual of internal/choicetriage) finds it; the fields below carry the
+	// top finding's linguistic Class and the choicetriage Disposition/Resolve — what
+	// an autonomous worker does INSTEAD of asking (take the action, state the
+	// assumption, file a ticket, or emit a typed escalation). Observe-only and
+	// fail-open: recording the note never changes the stop decision, and a clean
+	// final turn leaves every field zero.
+	OperatorDirected            bool   `json:"operator_directed,omitempty"`
+	OperatorDirectedClass       string `json:"operator_directed_class,omitempty"`
+	OperatorDirectedDisposition string `json:"operator_directed_disposition,omitempty"`
+	OperatorDirectedResolve     string `json:"operator_directed_resolve,omitempty"`
+	OperatorDirectedCount       int    `json:"operator_directed_count,omitempty"`
 }
 
 // ---- transcript reading -----------------------------------------------------
@@ -195,6 +212,7 @@ func readGuardStopTranscript(path string) *guardStopTranscript {
 	if fi, err := os.Stat(path); err == nil && fi.Size() > guardStopTranscriptTailBytes {
 		sig.Truncated = true
 	}
+	var lastText string
 	for _, r := range recs {
 		if r.Role() != "assistant" || r.IsSynthetic() {
 			continue
@@ -203,9 +221,38 @@ func readGuardStopTranscript(path string) *guardStopTranscript {
 		name := r.LastToolUseName()
 		sig.LastHadToolUse = name != ""
 		sig.LastToolUse = name
-		sig.NotedNoAllowedPath = transcriptNotesNoAllowedPath(r.Text())
+		lastText = r.Text()
+		sig.NotedNoAllowedPath = transcriptNotesNoAllowedPath(lastText)
+	}
+	// Fold the FINAL assistant turn through headlesslint. Gate on the turn having
+	// NO tool call: a turn that still tried a tool is not stopping-to-ask — the
+	// harness feeds the tool result back and the session keeps going. It is the
+	// prose-only end_turn that actually stops the session on an unanswered
+	// question, and that is the one worth recording.
+	if lastText != "" && !sig.LastHadToolUse {
+		applyHeadlessLintSignal(sig, lastText)
 	}
 	return sig
+}
+
+// applyHeadlessLintSignal records the top operator-directed note in the final
+// assistant turn, if any. It is the guard-side use of internal/headlesslint: the
+// SENSOR that turns "the agent ended by asking a human" into a typed, countable
+// fact, sitting beside the sanctioned no-allowed-path wrap-up. The top finding is
+// the first in line order (headlesslint yields at most one Finding per line,
+// most-specific Class first); its choicetriage Disposition/Resolve name what an
+// autonomous worker does instead of asking. Fail-open: a clean scan is a no-op.
+func applyHeadlessLintSignal(sig *guardStopTranscript, finalTurn string) {
+	rep := headlesslint.Scan(finalTurn)
+	if rep.Count == 0 {
+		return
+	}
+	sig.OperatorDirected = true
+	sig.OperatorDirectedCount = rep.Count
+	top := rep.Findings[0]
+	sig.OperatorDirectedClass = string(top.Class)
+	sig.OperatorDirectedDisposition = string(top.Disposition)
+	sig.OperatorDirectedResolve = top.Resolve
 }
 
 // transcriptNotesNoAllowedPath reports whether assistant text carries the sanctioned
@@ -309,9 +356,13 @@ type guardStopsSummary struct {
 	ByDisp    map[guardStopDisposition]int `json:"by_disposition,omitempty"`
 	StandDown int                          `json:"stand_down"`
 	FailOpen  int                          `json:"fail_open"`
-	FirstTs   string                       `json:"first_ts,omitempty"`
-	LastTs    string                       `json:"last_ts,omitempty"`
-	Recent    []guardStopRecord            `json:"recent,omitempty"`
+	// OperatorDirected counts recorded stops whose final turn asked a human instead
+	// of acting (headless-directed) — the stops the choicetriage doctrine says an
+	// autonomous process should have resolved itself, not paged a person for.
+	OperatorDirected int               `json:"operator_directed,omitempty"`
+	FirstTs          string            `json:"first_ts,omitempty"`
+	LastTs           string            `json:"last_ts,omitempty"`
+	Recent           []guardStopRecord `json:"recent,omitempty"`
 }
 
 // recordKind resolves a row's coarse kind: the stored Kind if present, else recomputed
@@ -341,6 +392,9 @@ func summarizeGuardStops(content string, recentN int) guardStopsSummary {
 		kind := recordKind(r)
 		sum.ByKind[kind]++
 		sum.ByDisp[guardStopDisposition(r.Disposition)]++
+		if r.Transcript != nil && r.Transcript.OperatorDirected {
+			sum.OperatorDirected++
+		}
 		switch kind {
 		case stopKindStandDown:
 			sum.StandDown++
@@ -398,6 +452,10 @@ func renderGuardStopsSummary(sum guardStopsSummary) string {
 	if sum.FailOpen > 0 {
 		b.WriteString("    fail-open stops are NOT completions: the hook could not reach a decision (gateway unreachable, bad args, gauge missing) and allowed the stop. Investigate the wiring.\n")
 	}
+	if sum.OperatorDirected > 0 {
+		fmt.Fprintf(&b, "  → %d stop(s) ended with the agent asking a human instead of acting (headless-directed).\n", sum.OperatorDirected)
+		b.WriteString("    An autonomous run has no one to answer; the choicetriage fold says what to do instead (take the action, state the assumption, file a ticket, or escalate). Run `fak headless-lint` on the turn to see the remediation.\n")
+	}
 
 	// per-disposition breakdown, most frequent first
 	disps := make([]guardStopDisposition, 0, len(sum.ByDisp))
@@ -428,6 +486,9 @@ func renderGuardStopsSummary(sum guardStopsSummary) string {
 		}
 		if r.Transcript != nil && r.Transcript.NotedNoAllowedPath {
 			b.WriteString(" (agent noted no-allowed-path)")
+		}
+		if r.Transcript != nil && r.Transcript.OperatorDirected {
+			fmt.Fprintf(&b, " (asked a human: %s → %s)", r.Transcript.OperatorDirectedClass, r.Transcript.OperatorDirectedDisposition)
 		}
 		if r.Note != "" {
 			fmt.Fprintf(&b, " — %s", r.Note)
