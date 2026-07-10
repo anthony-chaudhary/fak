@@ -173,7 +173,7 @@ func classifyGit(operands []string, invocation string) *Violation {
 		// commit so the recommended command actually clears the gate.
 		fix := "operate on whole paths: git " + sub + " -- <paths>"
 		if sub == "commit" {
-			fix = `git commit -s -m "<type>(<leaf>): <subject> (fak <leaf>)" -- <paths>`
+			fix = CommitNonInteractiveRemedy
 		}
 		return interactiveViolation("git "+sub+" -p", invocation,
 			"the interactive hunk picker prompts a human (a closed stdin EOFs it into a no-op)",
@@ -193,10 +193,23 @@ func classifyGit(operands []string, invocation string) *Violation {
 	return nil
 }
 
+// CommitNonInteractiveRemedy is the sanctioned non-interactive commit route named
+// by every would-hang commit rung (bare `git commit`, `git commit -p`). Beyond the
+// plain-git explicit-pathspec form it leads with the fak-native `fak commit --path`
+// (an atomic add+commit under lock) and warns that a LEFT-STAGED index is
+// peer-sweepable on the shared trunk: a bare commit lands whatever a concurrent
+// peer also staged into the shared index — the cross-contamination that swept an
+// agent's un-landed work into a peer's blanket commit (#3524, the shared-index
+// class of #3547). Both recommended forms commit by explicit path so a peer's files
+// cannot ride along; the diff check surfaces a contaminated index before the retry.
+// Every form here is itself non-interactive, so following the advice clears the rung
+// (TestInteractiveFixesAreNotSelfRefuting / TestCommitFixSurfacesSanctionedRoute).
+const CommitNonInteractiveRemedy = `commit by explicit path — a left-staged index is peer-sweepable on the shared trunk (a bare commit lands a concurrent peer's staged files too): fak commit --path <paths> -F <msgfile> (atomic add+commit under lock), or git commit -s -m "<type>(<leaf>): <subject> (fak <leaf>)" -- <paths>. Verify the staged set first with git diff HEAD -- <paths>`
+
 func commitEditorViolation(invocation string) *Violation {
 	return interactiveViolation("git commit", invocation,
 		"opens the commit-message editor and waits for a human",
-		`git commit -s -m "<type>(<leaf>): <subject> (fak <leaf>)" -- <paths>`)
+		CommitNonInteractiveRemedy)
 }
 
 // commitHasMessageSource reports whether a git-commit flag set supplies the

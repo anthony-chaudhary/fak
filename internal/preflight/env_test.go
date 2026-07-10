@@ -4,8 +4,26 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/testroute"
 )
+
+// TestGitCommitHazardMirrorsRepoguard locks the promise this file's
+// interactiveHazardsFor comment makes: the git_commit_editor advice is kept
+// byte-identical to repoguard.CommitNonInteractiveRemedy, so the sanctioned-route
+// hint (#3524) an agent reads at preflight matches the one the guard emits on refusal.
+func TestGitCommitHazardMirrorsRepoguard(t *testing.T) {
+	rep := PlanEnvPreflight(EnvProbe{GOOS: "linux", Test: testroute.Probe{GOOS: "linux", NativeTestAllowed: true}})
+	var got string
+	for _, h := range rep.InteractiveHazards {
+		if h.Kind == "git_commit_editor" {
+			got = h.Fix
+		}
+	}
+	if got != repoguard.CommitNonInteractiveRemedy {
+		t.Errorf("git_commit_editor fix drifted from repoguard.CommitNonInteractiveRemedy:\n preflight: %q\n repoguard: %q", got, repoguard.CommitNonInteractiveRemedy)
+	}
+}
 
 func TestPlanEnvPreflightWindowsHost(t *testing.T) {
 	rep := PlanEnvPreflight(EnvProbe{

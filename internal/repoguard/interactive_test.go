@@ -88,6 +88,36 @@ func TestInteractiveFixesAreNotSelfRefuting(t *testing.T) {
 	}
 }
 
+// TestCommitFixSurfacesSanctionedRoute locks #3524: the would-hang commit rungs
+// (bare `git commit`, `git commit -p`) must not dead-end. Their fix must name the
+// fak-native explicit-path route AND warn that a left-staged index is peer-sweepable
+// (with the diff check to run before retrying), so the refusal reads as a redirect.
+// The recommended routes must themselves be allowed — advice the guard would refuse
+// is the self-refuting-remedy bug this also guards against.
+func TestCommitFixSurfacesSanctionedRoute(t *testing.T) {
+	for _, interactive := range []string{"git commit", "git commit -p"} {
+		v := classifyInteractive(interactive)
+		if len(v) == 0 {
+			t.Fatalf("%q: expected INTERACTIVE_HANG denial", interactive)
+		}
+		fix := v[0].Fix
+		for _, want := range []string{"fak commit --path", "-F <msgfile>", "git diff HEAD -- <paths>"} {
+			if !strings.Contains(fix, want) {
+				t.Errorf("%q: fix %q missing #3524 hint %q", interactive, fix, want)
+			}
+		}
+	}
+	// The sanctioned routes the fix recommends must clear the rung themselves.
+	for _, runnable := range []string{
+		"fak commit --path cmd/fak/main.go -F msg.txt",
+		"git diff HEAD -- cmd/fak/main.go",
+	} {
+		if rv := classifyInteractive(runnable); len(rv) != 0 {
+			t.Errorf("self-refuting remedy: recommended %q is itself refused: %v", runnable, rv)
+		}
+	}
+}
+
 func TestNonInteractiveFormsAllowed(t *testing.T) {
 	for _, c := range []string{
 		// message-carrying commits

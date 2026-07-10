@@ -120,7 +120,10 @@ func interactiveHazardsFor(goos string) []EnvHazard {
 		{
 			Kind: "git_commit_editor",
 			Why:  "git commit without -m/-F opens the commit-message editor and waits",
-			Fix:  `git commit -s -m "<type>(<leaf>): <subject> (fak <leaf>)" -- <paths>`,
+			// Kept byte-identical to repoguard.CommitNonInteractiveRemedy (the mirror
+			// this list promises above): name the fak-native explicit-path route and
+			// warn that a left-staged index is peer-sweepable on the shared trunk (#3524).
+			Fix: `commit by explicit path — a left-staged index is peer-sweepable on the shared trunk (a bare commit lands a concurrent peer's staged files too): fak commit --path <paths> -F <msgfile> (atomic add+commit under lock), or git commit -s -m "<type>(<leaf>): <subject> (fak <leaf>)" -- <paths>. Verify the staged set first with git diff HEAD -- <paths>`,
 		},
 		{
 			Kind: "gh_auth_login",
