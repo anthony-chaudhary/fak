@@ -115,6 +115,30 @@ func writeDriveProjection(path string, dp DriveProjection) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
+// SeedState re-seeds a governor's drive from the checkpoint projection (issue #4127): it
+// writes the carried (spent) Budget-remaining axes, Priority, Pace, ObjectivePin identity,
+// and Generation onto a base session.State, returning the seeded state. This is the
+// projection-only re-home path — a lean relaunch consumer that carries the witnessed
+// checkpoint but NOT the full session.json seeds a governor from here, so the resumed child
+// comes up at the CARRIED spent budget instead of a fresh full one (the reset-to-full-budget
+// bug this closes). Only the four remaining-allotment axes are overwritten; the base's caps
+// (ContextTokensCap/SpendMicroCentsCap and the clarification axis, the denominators) are
+// preserved, so a re-seed narrows the remaining onto the base's limits rather than resetting
+// them. The ObjectivePin re-seed is identity-only (PinID+Digest) — the pair the consumer
+// checks for "the objective was preserved"; the pin's Text still rides session.json.
+func (dp DriveProjection) SeedState(base session.State) session.State {
+	base.Budget.TurnsLeft = dp.Budget.TurnsLeft
+	base.Budget.TokensLeft = dp.Budget.TokensLeft
+	base.Budget.ContextTokensLeft = dp.Budget.ContextTokensLeft
+	base.Budget.SpendMicroCentsLeft = dp.Budget.SpendMicroCentsLeft
+	base.Priority = dp.Priority
+	base.Pace = dp.Pace
+	base.ObjectivePin.PinID = dp.ObjectivePin.PinID
+	base.ObjectivePin.Digest = dp.ObjectivePin.Digest
+	base.Generation = dp.Generation
+	return base
+}
+
 // DriveProjection reads the persisted drive projection back: (projection, present, err).
 // present is false when the image carries no drive.json (a pre-#4126 image, or a session
 // whose projection was zero) — the caller then re-seeds nothing and rehydrates

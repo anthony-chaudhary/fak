@@ -64,6 +64,15 @@ type Resumed struct {
 	Witness  []WitnessEntry
 	Migrated bool
 
+	// DriveProjection is the compact, resume-facing drive block re-attached from drive.json
+	// (#4127): the carried Budget-remaining / Priority / Pace / ObjectivePin identity /
+	// Generation a lean relaunch consumer seeds a governor from (DriveProjection.SeedState),
+	// so a resumed child comes up at the CARRIED spent budget instead of a fresh full one.
+	// DriveProjectionPresent is false for a pre-#4126 image (no drive.json) — the consumer
+	// then re-seeds nothing and the resume is byte-identical to today's behavior.
+	DriveProjection        DriveProjection
+	DriveProjectionPresent bool
+
 	// CacheEntries is the payload-free cache-invalidation state of the rehydrated content
 	// pages (#1536): one cachemeta.Entry per recall page, lowered through the shared
 	// cachemeta.FromContextPage adapter, so a resumed session carries EXPLICIT invalidation
@@ -149,6 +158,19 @@ func (img *Image) Rehydrate(ctx context.Context, opt RehydrateOptions) (*Resumed
 		return nil, err
 	}
 	out.Witness = w
+
+	// (2d) Re-attach the compact drive projection (#4127). A lean relaunch consumer that
+	// carries the witnessed checkpoint but not the full session.json seeds a governor from
+	// this (Resumed.DriveProjection.SeedState) so the resumed drive comes up at the carried
+	// spent budget. Absent for a pre-#4126 image — DriveProjectionPresent stays false and no
+	// re-seed runs, so the resume is byte-identical to today. The bytes were integrity-verified
+	// at Load; this decodes them onto the live handle.
+	dp, present, err := img.DriveProjection()
+	if err != nil {
+		return nil, err
+	}
+	out.DriveProjection = dp
+	out.DriveProjectionPresent = present
 
 	// (3) Record an identity move. The content is model-agnostic, so a model change needs
 	// no transform — only an honest entry in the log.
