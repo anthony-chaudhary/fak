@@ -81,6 +81,8 @@ func main() {
 		cmdBlast(os.Args[2:])
 	case "buildcheck":
 		cmdBuildCheck(os.Args[2:])
+	case "go":
+		cmdGoShim(os.Args[2:])
 	case "worktree":
 		cmdWorktreeVerb(os.Args[2:])
 	case "wip":
