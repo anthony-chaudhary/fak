@@ -339,7 +339,22 @@ type RetryDecision struct {
 // between resumes earns more attempts, a thrashing one earns fewer, rather than every
 // session getting the same blind DefaultMaxResumeAttempts. A positive maxAttempts is an
 // explicit operator/caller override and is honored literally, un-earned.
+//
+// RetryGate is the continuity-blind form: it assumes no W3 witness, so a clean "progressed"
+// terminal turn latches "already resumed once (resume took)". RetryGateContinuity is the
+// #4145 form that, given a Witnessed-but-not-Advanced W3 curve, keeps the gate OPEN.
 func RetryGate(history []Attempt, outcome Outcome, maxAttempts int) RetryDecision {
+	return RetryGateContinuity(history, outcome, maxAttempts, ContinuityWitness{})
+}
+
+// RetryGateContinuity is RetryGate plus the #4145 verified-progress witness. When the last
+// attempt "progressed" by the terminal-turn text BUT a W3 curve exists and did NOT advance
+// (took_no_progress), the resume is NOT yet recovered: the gate stays OPEN (Blocked=false) so
+// the watchdog re-anchors and keeps watching — the reversible reading — instead of latching
+// "resume took" off an unwitnessed clean turn. The stay-open is still bounded by everything
+// above it: an operator settle, a spent attempt cap, an auth wall, or a deliberate cancel all
+// still block first, so a took_no_progress cannot resume-loop past MaxEarnedResumeBudget.
+func RetryGateContinuity(history []Attempt, outcome Outcome, maxAttempts int, cont ContinuityWitness) RetryDecision {
 	// #2178: a re-arm reclaim row zeroes the budget accrued before it — gate on the suffix after
 	// the last marker so the earned budget, settled scan, and attempt count all start fresh.
 	history = afterLastRearm(history)
@@ -374,6 +389,13 @@ func RetryGate(history []Attempt, outcome Outcome, maxAttempts int) RetryDecisio
 	case OutcomeUnrecoverable:
 		return RetryDecision{Blocked: true, Reason: "last resume hit an auth/access wall — a re-resume cannot fix it"}
 	default:
+		// progressed / unknown. If a W3 curve exists and did NOT advance, the "clean turn" is
+		// not a recovery — stay OPEN and route to re-anchor-and-keep-watching (#4145). This is
+		// under the attempt cap already (checked above), so it is bounded, not a loop.
+		if cont.Witnessed && !cont.Advanced {
+			return RetryDecision{Blocked: false,
+				Reason: fmt.Sprintf("resume produced turns but the objective's verified (W3) progress did not advance — re-anchor and keep watching; attempt %d/%d", attempts+1, maxAttempts)}
+		}
 		// progressed / unknown: the resume took, or we cannot prove it didn't — burn once.
 		return RetryDecision{Blocked: true, Reason: "already resumed once (resume took)"}
 	}
@@ -390,8 +412,15 @@ const (
 	// silent case a ledger alone cannot distinguish from success.
 	ResumeLaunched ResumeState = "launched"
 	// ResumeTook: a resume fired AND the transcript shows new real turns with a clean
-	// terminal turn — provably progressed.
+	// terminal turn AND (when a W3 curve exists) the objective's verified progress advanced
+	// — provably progressed. Reserved for turns-landed AND the verified curve moving.
 	ResumeTook ResumeState = "took"
+	// ResumeTookNoProgress: a resume fired and produced new real turns on a clean terminal
+	// turn, but the objective's W3 verified-progress cursor did NOT advance across the launch
+	// (#4145) — a W3 false-negative (productive-but-uncommitted work) or genuine spinning. It
+	// is NOT yet recovered: the terminal-turn text looks clean, but nothing verifiable moved.
+	// The reversible reading — keep watching / re-anchor, never a fresh forced resume.
+	ResumeTookNoProgress ResumeState = "took_no_progress"
 	// ResumeReStranded: a resume fired and the session is walled again (limit/transient)
 	// — eligible for another attempt once the wall clears, per RetryGate.
 	ResumeReStranded ResumeState = "re-stranded"
@@ -415,6 +444,11 @@ type ResumeFacts struct {
 	NewTurns int `json:"new_turns"`
 	// Outcome is the terminal-turn classification of the last attempt (ClassifyOutcome).
 	Outcome Outcome `json:"outcome"`
+	// Continuity is the W3 verified-progress witness across the last launch (#4145,
+	// FoldW3Continuity). When it is Witnessed but did NOT Advance, a clean-terminal resume
+	// folds to took_no_progress instead of took. The zero value (Witnessed=false) is the
+	// un-instrumented floor: the fold falls back to the legacy text-cleanliness `took`.
+	Continuity ContinuityWitness `json:"continuity,omitempty"`
 }
 
 // FoldResumeState folds the facts into the one per-session label. Precedence, most
@@ -433,6 +467,14 @@ func FoldResumeState(f ResumeFacts) ResumeState {
 	case f.OperatorSettled:
 		return ResumeSettled
 	case f.NewTurns > 0 && f.Outcome == OutcomeProgressed:
+		// #4145: turns landed on a clean terminal turn — but `took` is reserved for
+		// turns-landed AND verified progress. When a W3 curve exists for the objective and it
+		// did NOT advance across this launch, the resume produced work without moving the
+		// objective: took_no_progress (not yet recovered). Un-witnessed (no W3 curve) falls
+		// through to the legacy `took` — absence of a witness is never a progress claim.
+		if f.Continuity.Witnessed && !f.Continuity.Advanced {
+			return ResumeTookNoProgress
+		}
 		return ResumeTook
 	case f.Outcome == OutcomeUnrecoverable, f.Outcome == OutcomeCancelled:
 		// Cancelled folds to gave-up for the same operator-facing meaning: no automatic

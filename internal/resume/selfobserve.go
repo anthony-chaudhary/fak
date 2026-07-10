@@ -43,6 +43,11 @@ type SelfFacts struct {
 	// MaxAttempts is the give-up cap; <= 0 means "use the progress-earned budget"
 	// (EarnedResumeBudget), the same convention RetryGate and the operator fold take.
 	MaxAttempts int
+	// Continuity is the W3 verified-progress witness across the last launch (#4145,
+	// FoldW3Continuity over the trajctl rows the shell read). It lets a worker tell a resume
+	// that TOOK (verified progress advanced) from one that only produced a clean turn without
+	// moving the objective (took_no_progress). The zero value is the un-instrumented floor.
+	Continuity ContinuityWitness
 }
 
 // SelfObservation is the worker's own witnessed recovery record: the leaf verdicts a guarded
@@ -94,13 +99,14 @@ func FoldSelfObservation(f SelfFacts) SelfObservation {
 			break
 		}
 	}
-	gate := RetryGate(f.History, f.Outcome, f.MaxAttempts)
+	gate := RetryGateContinuity(f.History, f.Outcome, f.MaxAttempts, f.Continuity)
 	state := FoldResumeState(ResumeFacts{
 		Attempts:        attempts,
 		MaxAttempts:     f.MaxAttempts,
 		OperatorSettled: settled,
 		NewTurns:        f.NewTurns,
 		Outcome:         f.Outcome,
+		Continuity:      f.Continuity,
 	})
 	return SelfObservation{
 		Session:         f.Session,
@@ -126,7 +132,9 @@ func selfNextHint(state ResumeState) string {
 	case ResumePending:
 		return "no resume attempt on record for this session — nothing to recover"
 	case ResumeTook:
-		return "a resume took — new turns landed on a clean terminal turn; you are progressing"
+		return "a resume took — new turns landed on a clean terminal turn and verified (W3) progress advanced; you are progressing"
+	case ResumeTookNoProgress:
+		return "a resume landed turns but the objective's verified (W3) progress did not advance — NOT yet recovered; re-anchor and keep watching, do not assume you are done"
 	case ResumeReStranded:
 		return "re-stranded on a wall — another automatic attempt is warranted once it clears"
 	case ResumeGaveUp:

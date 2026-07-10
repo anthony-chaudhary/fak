@@ -47,8 +47,10 @@ const (
 	// ceiling / launch-rate / spacing floor (the per-source 529 burst wall). Defer until
 	// RetryAfterUnix, then re-evaluate — a batch-wide backpressure, not a per-session block.
 	ActHoldAdmission NextAction = "hold_admission"
-	// ActWaitProgress: a resume has fired, but the transcript has not yet produced a
-	// post-launch progress witness. Do not fire a duplicate; keep watching.
+	// ActWaitProgress: a resume has fired, but no post-launch progress is yet witnessed —
+	// either the launch is unproven (state launched), or it produced turns that did NOT
+	// advance the objective's W3 verified-progress curve (state took_no_progress, #4145). The
+	// reversible reading in both: do not fire a duplicate; re-anchor and keep watching.
 	ActWaitProgress NextAction = "wait_progress"
 	// ActLogin: the last attempt hit an auth/login/credit/access wall — a re-resume cannot
 	// fix it. A human must clear the account (interactive /login) before it can be resumed.
@@ -127,6 +129,16 @@ type NextInput struct {
 	// hold_admission verdict so the agent sees why and until when.
 	AdmitReason         string `json:"admit_reason,omitempty"`
 	AdmitRetryAfterUnix int64  `json:"admit_retry_after_unix,omitempty"`
+	// RecoveryCostBreached is the OBSERVED recovery-cost governor's verdict (#4146): the
+	// session's post-resume OBSERVED spend (FoldRecoveryCost) crossed its declared cap
+	// (RecoveryCostCap.Exceeded). It is a SEPARATE governor from the witnessed attempt budget
+	// — an OBSERVED number is never summed into EarnedResumeBudget. When true (and not
+	// force-overridden), a fire-eligible launch tops out at a reversible hold, never a kill.
+	RecoveryCostBreached bool `json:"recovery_cost_breached,omitempty"`
+	// ForceCostOverride is the operator force bit for the cost governor: it skips ONLY the
+	// recovery-cost hold so a human can push a launch through past the cost cap. It never
+	// bypasses the attempt gate, the reset window, or host admission — those still bind.
+	ForceCostOverride bool `json:"force_cost_override,omitempty"`
 }
 
 // NextVerdict is the per-session runbook verdict.
@@ -147,13 +159,19 @@ type NextVerdict struct {
 // fixed order so the verdict is deterministic and the first binding constraint wins:
 //
 //  1. The RetryGate blocks a new resume → we are NOT firing. Split the reason by why:
-//     an auth wall (login), a spent attempt budget (gave_up), a fired-but-unproven launch
-//     (wait_progress), or a resume that already took / was settled (done).
-//  2. The gate allows a resume (pending, or a recoverable re-strand under the cap) → this
+//     an auth wall (login), a spent attempt budget (gave_up, including a cap-spent
+//     took_no_progress), a fired-but-unproven launch (wait_progress), or a resume that
+//     already took / was settled (done).
+//  2. The gate is OPEN but the resume took_no_progress (#4145) — turns landed without
+//     advancing verified progress → wait_progress (re-anchor and keep watching), never a
+//     fresh forced resume.
+//  3. The gate allows a resume (pending, or a recoverable re-strand under the cap) → this
 //     session is fire-eligible. Check the preconditions before firing:
 //     a. a wall-clock cap whose reset has NOT surely elapsed → wait_reset;
-//     b. the host source-admission gate refuses → hold_admission (with retry_after);
-//     c. otherwise → run.
+//     b. the OBSERVED recovery-cost cap is breached and not force-overridden → hold_admission
+//     carrying RESUME_COST_EXCEEDED (#4146), a reversible, operator-forceable hold;
+//     c. the host source-admission gate refuses → hold_admission (with retry_after);
+//     d. otherwise → run.
 //
 // Total over any input: the zero RetryDecision is Blocked=false and the zero input carries
 // no limit and Admitted=false, so a bare zero value folds to hold_admission — but a caller
@@ -167,6 +185,11 @@ func FoldNextAction(in NextInput) NextVerdict {
 				Reason: "last resume hit an auth/access wall — a re-resume cannot fix it; a human must /login"}
 		case in.State == ResumeGaveUp:
 			return NextVerdict{Action: ActGaveUp, Reason: in.Retry.Reason}
+		case in.State == ResumeTookNoProgress:
+			// Blocked + took_no_progress can only mean the attempt cap is spent (an auth wall
+			// would be OutcomeUnrecoverable above; took_no_progress carries OutcomeProgressed):
+			// the budget ran out before verified progress landed — a human owns the next move.
+			return NextVerdict{Action: ActGaveUp, Reason: in.Retry.Reason}
 		case in.State == ResumeLaunched:
 			return NextVerdict{Action: ActWaitProgress,
 				Reason: "resume launched; waiting for post-launch progress evidence"}
@@ -175,9 +198,31 @@ func FoldNextAction(in NextInput) NextVerdict {
 		}
 	}
 
+	// #4145: a took_no_progress with an OPEN gate is a resume that produced turns but did not
+	// advance the objective's verified (W3) progress. Reversible-first — re-anchor and keep
+	// watching, NEVER fire a fresh forced resume off an unwitnessed clean turn. (A cap-spent
+	// took_no_progress already read gave_up in the blocked switch above.)
+	if in.State == ResumeTookNoProgress {
+		return NextVerdict{Action: ActWaitProgress,
+			Reason: "resume landed turns but the objective's verified (W3) progress did not advance — re-anchoring and still watching, not firing a duplicate"}
+	}
+
 	if in.LimitReason != "" && !resetElapsed(in.LimitReason, in.IdleSeconds) {
 		return NextVerdict{Action: ActWaitReset,
 			Reason: fmt.Sprintf("crashed on a %s whose reset window may not have elapsed — wait, then resume", in.LimitReason)}
+	}
+
+	// #4146: the OBSERVED recovery-cost governor. A fire-eligible session that has already
+	// spent more than its declared recovery-cost envelope tops out at a REVERSIBLE hold —
+	// never a kill — carrying RESUME_COST_EXCEEDED. An operator can force past it
+	// (ForceCostOverride) or raise the cap. RetryAfterUnix is 0: recovery spend only grows, so
+	// the breach will not self-clear on a timer — a human decides. Placed before host
+	// admission so the durable, operator-actionable cost wall surfaces ahead of the transient
+	// burst backpressure. The cost term is OBSERVED-only and lives in its own governor here;
+	// it is never mixed into the witnessed attempt budget.
+	if in.RecoveryCostBreached && !in.ForceCostOverride {
+		return NextVerdict{Action: ActHoldAdmission,
+			Reason: "recovery-cost cap exceeded (" + ResumeCostExceeded + ") — defer this resume; an operator can force it or raise the cap"}
 	}
 
 	if !in.Admitted {
