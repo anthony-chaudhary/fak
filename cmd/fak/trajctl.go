@@ -56,6 +56,16 @@ const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over
       one objective; without it, list every open objective worst-first.
       --json emits the pinned ` + trajctl.CurveSchema + ` report.
 
+  fak trajctl score --objective ID --method judge --base-url URL [--model M]
+                     [--state TEXT] [--max-call-tokens N] [--api-key-env NAME]
+                     [--ledger FILE] [--json]
+      Run one registered scorer over one objective and append its rows.
+      --method judge (#2543) asks the gateway for a pinned-schema structured
+      verdict against the objective statement and appends a W1 row carrying the
+      verdict blob as evidence; the per-call token cap is enforced on both the
+      request and the returned usage (over-budget or failed calls append
+      nothing). Costs real tokens -- never runs on the stop-hook path.
+
   fak trajctl scorers [--ledger FILE] [--json]
       Calibration leaderboard: per scorer method+version, how well its scores
       correlate with the W3 witnessed outcome (` + trajctl.GroundTruthMethod + `),
@@ -81,6 +91,8 @@ func runTrajctl(stdout, stderr io.Writer, argv []string) int {
 		return runTrajctlList(stdout, stderr, rest)
 	case "curve":
 		return runTrajctlCurve(stdout, stderr, rest)
+	case "score":
+		return runTrajctlScore(stdout, stderr, rest)
 	case "scorers":
 		return runTrajctlScorers(stdout, stderr, rest)
 	case "-h", "--help", "help":
