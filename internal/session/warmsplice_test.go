@@ -220,3 +220,109 @@ func TestWarmKVSurvivesRelaunchViaRestoreSpan(t *testing.T) {
 		t.Fatalf("default/missing restore = %+v, want cold MISS", miss)
 	}
 }
+
+// degradeKVBackend is a configurable KVBackend double for the cold-degrade proof (#4134): its
+// RestoreSpan returns a fixed KVResidency outcome plus an optional transport error (standing in
+// for a ctx-deadline / store FAULT), so the table below can drive the OK|MISS|FAULT trichotomy
+// through Splice/WaitResume without a real off-box tier. StageSpan always succeeds so a span can
+// be parked off-box before the restore is exercised.
+type degradeKVBackend struct {
+	restore abi.KVResidencyOutcome
+	err     error
+}
+
+func (b *degradeKVBackend) Len() int                { return 0 }
+func (b *degradeKVBackend) Prefill([]int) []float32 { return nil }
+func (b *degradeKVBackend) Evict(int, int) int      { return 0 }
+func (b *degradeKVBackend) ModelID() string         { return "degrade-test" }
+func (b *degradeKVBackend) StageSpan(_ context.Context, digest string, _, _ int) (abi.KVResidency, error) {
+	return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest}, nil
+}
+func (b *degradeKVBackend) RestoreSpan(_ context.Context, digest string) (abi.KVResidency, error) {
+	return abi.KVResidency{Outcome: b.restore, Digest: digest}, b.err
+}
+
+// TestWarmKVResumeDegradesToColdOnUnavailableSpan pins the safety invariant the whole warm-KV
+// cluster rests on (#4134, epic #1193): warm KV is an optimization, NEVER a correctness
+// dependency. F-warmkv-relaunch-2 (#4133) added an off-box restore that can MISS (the tier
+// evicted the span), FAULT (transport error / ctx deadline), or find no carried pointer at all;
+// each MUST collapse to a correct COLD re-prefill — never a silent wrong-KV attend, never a hang.
+// This proves it across the whole trichotomy at both levels: the store (Splice) and end-to-end
+// (WaitResume), each guarded by a timeout so a FAULT that blocked would fail rather than wedge.
+func TestWarmKVResumeDegradesToColdOnUnavailableSpan(t *testing.T) {
+	span := KVSpanPointer{Kind: KindKVSpan, Ref: "deadbeef-span-digest"}
+
+	cases := []struct {
+		name    string
+		carry   bool                   // install a carried off-box pointer (false = absent, no pointer)
+		restore abi.KVResidencyOutcome // RestoreSpan outcome when the pointer is carried
+		err     error                  // RestoreSpan transport error (a FAULT / ctx-deadline stand-in)
+		want    abi.KVResidencyOutcome // residency expected on the (cold) SpliceResult
+	}{
+		{name: "miss_evicted", carry: true, restore: abi.KVResidencyMiss, want: abi.KVResidencyMiss},
+		{name: "fault_transport", carry: true, restore: abi.KVResidencyFault, err: context.DeadlineExceeded, want: abi.KVResidencyFault},
+		{name: "absent_no_pointer", carry: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Store level: Splice must report cold (Warm=false), surface the typed residency, and
+			// RETURN — a FAULT / ctx deadline must degrade, not hang. The goroutine + timeout is the
+			// non-blocking witness.
+			store := NewWarmKVStoreWithBackend(&degradeKVBackend{restore: tc.restore, err: tc.err})
+			if tc.carry {
+				store.CarrySpan("relaunched", span)
+			}
+			done := make(chan SpliceResult, 1)
+			go func() { done <- store.Splice("relaunched") }()
+			var res SpliceResult
+			select {
+			case res = <-done:
+			case <-time.After(time.Second):
+				t.Fatal("Splice blocked on an unavailable off-box span; must degrade to cold, not hang")
+			}
+			if res.Warm {
+				t.Fatalf("Splice = %+v, want cold (Warm=false) for an unavailable span", res)
+			}
+			if tc.carry && res.Residency.Outcome != tc.want {
+				t.Fatalf("Splice residency = %s, want %s", res.Residency.Outcome, tc.want)
+			}
+
+			// End-to-end: a Paused->Running resume through the wired splicer must verdict ResumeCold,
+			// never ResumeWarm, and must WAKE (not block) on the resume edge.
+			tbl := NewTable()
+			e2e := NewWarmKVStoreWithBackend(&degradeKVBackend{restore: tc.restore, err: tc.err})
+			tbl.WatchResumeSplice(e2e.Splicer())
+			if tc.carry {
+				e2e.CarrySpan("e2e", span)
+			}
+			verdicts := make(chan ResumeVerdict, 1)
+			tbl.Transition("e2e", Paused, "hold")
+			go func() { verdicts <- tbl.WaitResume(context.Background(), "e2e") }()
+			time.Sleep(10 * time.Millisecond)
+			tbl.Transition("e2e", Running, "")
+			select {
+			case v := <-verdicts:
+				if !v.Resumed {
+					t.Fatalf("verdict = %+v, want Resumed", v)
+				}
+				if v.Mode != ResumeCold {
+					t.Fatalf("verdict mode = %s, want cold for an unavailable span (warm KV is not a correctness precondition)", v.Mode)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("WaitResume did not wake on the resume edge; a MISS/FAULT must not block the loop")
+			}
+		})
+	}
+
+	// In-process-default parity: the default store (nil backend — the in-process default hosts no
+	// off-box tier, so RestoreSpan is a guaranteed MISS) resumes byte-identically to today's cold
+	// path. Even a carried pointer degrades to cold, so a default build is unchanged.
+	t.Run("in_process_default_is_cold", func(t *testing.T) {
+		store := NewWarmKVStore()
+		store.CarrySpan("default", span)
+		if res := store.Splice("default"); res.Warm {
+			t.Fatalf("default-store splice = %+v, want cold (the in-process default never restores off-box)", res)
+		}
+	})
+}
