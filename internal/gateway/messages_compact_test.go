@@ -2,7 +2,10 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +100,75 @@ func TestMaybeUpgradeCacheTTL1HGate(t *testing.T) {
 	if !bytes.Equal(raw[:cc], reqOn.Raw[:cc]) {
 		t.Fatalf("bytes before cache_control changed:\nraw=%s\nout=%s", raw[:cc], reqOn.Raw[:cc])
 	}
+}
+
+// TestPrepareServedRequestUnionsExtendedCacheTTLBeta is the regression witness for the
+// subscription-OAuth instant-400 (managed cache — ACTIVE, forced by --managed-cache on): when
+// the managed-cache 1h TTL upgrade fires, the served request MUST union the extended-cache-ttl
+// beta into the forwarded anthropic-beta set. The upgrade sets cache_control ttl:"1h", which
+// Anthropic accepts only with that beta negotiated; the wrapped claude CLI defaults to the 5m
+// tier and never sends it, so a body with ttl:"1h" but no beta is 400'd upstream as malformed.
+// The bug was that only deferColdTools unioned its beta (toolSearchBeta) — the TTL upgrade had
+// no analogous union, so the forced 1h posture shipped a malformed body.
+func TestPrepareServedRequestUnionsExtendedCacheTTLBeta(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":1024,` +
+		`"system":[{"type":"text","text":"stable policy","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	newReq := func(t *testing.T) *agent.AnthropicMessagesRequest {
+		t.Helper()
+		req, err := agent.DecodeAnthropicMessagesRequest(raw)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return req
+	}
+	// The inbound betas the wrapped claude CLI negotiates — NOT the extended-cache-ttl one.
+	const inboundBeta = "claude-code-20250219,fine-grained-tool-streaming-2025-05-14"
+	inboundReq := func() *http.Request {
+		r := httptest.NewRequest("POST", "/v1/messages", nil)
+		r.Header.Set("anthropic-beta", inboundBeta)
+		return r
+	}
+
+	// (a) managed cache ACTIVE → the upgrade fires; the extended-cache-ttl beta must be unioned
+	// in AND the inbound betas must survive (union, not replace).
+	t.Run("upgrade_fires_unions_beta", func(t *testing.T) {
+		s := anthropicPassthroughServer(1200)
+		s.cacheTTL1H = true
+		s.metrics = newGatewayMetrics(time.Now())
+
+		req := newReq(t)
+		prep := s.prepareServedAnthropicRequest(context.Background(), inboundReq(), req, "", servedSessionTurn{})
+
+		if !bytes.Contains(req.Raw, []byte(`"ttl":"1h"`)) {
+			t.Fatalf("fixture sanity: TTL upgrade did not fire on a stable breakpoint:\n%s", req.Raw)
+		}
+		if !strings.Contains(prep.upstreamBeta, extendedCacheTTLBeta) {
+			t.Fatalf("upstreamBeta = %q, want it to contain the extended-cache-ttl beta %q (ttl:1h without it is 400'd upstream)", prep.upstreamBeta, extendedCacheTTLBeta)
+		}
+		for _, want := range []string{"claude-code-20250219", "fine-grained-tool-streaming-2025-05-14"} {
+			if !strings.Contains(prep.upstreamBeta, want) {
+				t.Errorf("upstreamBeta = %q dropped inbound beta %q — must UNION, not replace", prep.upstreamBeta, want)
+			}
+		}
+	})
+
+	// (b) managed cache OFF → no upgrade, so the extended-cache-ttl beta must NOT be added (no
+	// ttl:1h in the body means the beta would be gratuitous).
+	t.Run("no_upgrade_no_beta", func(t *testing.T) {
+		s := anthropicPassthroughServer(1200) // cacheTTL1H stays false
+		s.metrics = newGatewayMetrics(time.Now())
+
+		req := newReq(t)
+		prep := s.prepareServedAnthropicRequest(context.Background(), inboundReq(), req, "", servedSessionTurn{})
+
+		if bytes.Contains(req.Raw, []byte(`"ttl":"1h"`)) {
+			t.Fatalf("fixture sanity: TTL upgrade must be gated off when cacheTTL1H is false:\n%s", req.Raw)
+		}
+		if strings.Contains(prep.upstreamBeta, extendedCacheTTLBeta) {
+			t.Fatalf("upstreamBeta = %q must NOT carry the extended-cache-ttl beta when no upgrade fired", prep.upstreamBeta)
+		}
+	})
 }
 
 // TestMaybeUpgradeCacheTTL1HPlacesThenUpgrades (#2175): a caller that sends ZERO cache_control

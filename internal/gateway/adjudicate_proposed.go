@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -378,6 +379,40 @@ func toolRejectionIsRetryableFeedback(v WireVerdict) bool {
 		return true
 	}
 	return strings.EqualFold(strings.TrimSpace(v.Disposition), "RETRYABLE")
+}
+
+// denyAllFingerprint builds a stable identity for a deny-all turn: the sorted, distinct set of
+// (tool, reason) pairs the capability floor hard-refused. Two deny-all turns share a fingerprint
+// iff they refused the SAME tools for the SAME reasons — the "same issue" test the guard Stop
+// hook keys its bounded give-up on (a session that re-proposes the identical refused action turn
+// after turn is genuinely spinning; one hitting a fresh block each turn is exploring and must not
+// be stopped). Order- and args-insensitive by construction, mirroring session.DenyAllBreaker's
+// tool+reason identity. Returns "" when nothing is fingerprintable (no refused call carried a
+// tool name or reason), which the fold treats as fail-open — an unidentifiable turn never
+// accumulates toward a stop.
+func denyAllFingerprint(adjs []ToolAdjudication) string {
+	seen := make(map[string]struct{}, len(adjs))
+	pairs := make([]string, 0, len(adjs))
+	for _, a := range adjs {
+		// A deny-all turn admitted nothing, but guard against a stray admitted entry so the
+		// fingerprint only ever reflects the refusals that define the issue.
+		if a.Admitted || a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM" {
+			continue
+		}
+		tool := strings.TrimSpace(a.Tool)
+		reason := strings.ToUpper(strings.TrimSpace(a.Verdict.Reason))
+		if tool == "" && reason == "" {
+			continue
+		}
+		key := tool + "\x1f" + reason
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		pairs = append(pairs, key)
+	}
+	sort.Strings(pairs)
+	return strings.Join(pairs, "\x1e")
 }
 
 func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall, reqTrace string) ([]agent.ToolCall, []ToolAdjudication, int) {

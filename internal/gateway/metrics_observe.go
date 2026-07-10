@@ -450,7 +450,14 @@ func (m *gatewayMetrics) recordResetShadow(d ResetDecision) {
 //
 // A reset turn (at least one survivor/served call, or pure text) clears both consecutive
 // runs. Called once per served Anthropic turn on both wire paths. A no-op for nil metrics.
-func (m *gatewayMetrics) recordAdjudicationOutcome(signal adjudicationOutcomeSignal) {
+//
+// fingerprint is the deny-all turn's same-issue identity (denyAllFingerprint) and is consulted
+// ONLY on a deny-all turn: it advances denyAllSameConsecutive when it matches the previous
+// deny-all's fingerprint, and re-seeds it to 1 when the refused tool/reason changes — so a
+// session re-proposing the identical refused action climbs while a varied one stays pinned at 1.
+// An empty fingerprint fails open (re-seeds to 1) so an unidentifiable turn never accumulates
+// toward a stop. It is ignored on tool-feedback/reset turns (they clear the same-issue run).
+func (m *gatewayMetrics) recordAdjudicationOutcome(signal adjudicationOutcomeSignal, fingerprint string) {
 	if m == nil {
 		return
 	}
@@ -459,13 +466,23 @@ func (m *gatewayMetrics) recordAdjudicationOutcome(signal adjudicationOutcomeSig
 	case adjudicationOutcomeDenyAll:
 		m.denyAllStops++
 		m.denyAllConsecutive++
+		if fingerprint != "" && fingerprint == m.denyAllFingerprint {
+			m.denyAllSameConsecutive++
+		} else {
+			m.denyAllSameConsecutive = 1
+		}
+		m.denyAllFingerprint = fingerprint
 		m.toolFeedbackConsecutive = 0
 	case adjudicationOutcomeToolFeedback:
 		m.toolFeedbackTurns++
 		m.toolFeedbackConsecutive++
 		m.denyAllConsecutive = 0
+		m.denyAllSameConsecutive = 0
+		m.denyAllFingerprint = ""
 	default:
 		m.denyAllConsecutive = 0
+		m.denyAllSameConsecutive = 0
+		m.denyAllFingerprint = ""
 		m.toolFeedbackConsecutive = 0
 	}
 	m.denyAllMu.Unlock()
@@ -500,6 +517,19 @@ func (m *gatewayMetrics) denyAllSnapshot() (stops, consecutive uint64) {
 	m.denyAllMu.Lock()
 	defer m.denyAllMu.Unlock()
 	return m.denyAllStops, m.denyAllConsecutive
+}
+
+// denyAllSameSnapshot reads the same-issue consecutive run under the deny-all lock: consecutive
+// deny-all turns proposing the IDENTICAL refused action (same tool+reason). This is the signal
+// the guard Stop hook keys its bounded give-up on — distinct from the blind denyAllConsecutive,
+// which stays for observability. Pure read.
+func (m *gatewayMetrics) denyAllSameSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	m.denyAllMu.Lock()
+	defer m.denyAllMu.Unlock()
+	return m.denyAllSameConsecutive
 }
 
 // toolFeedbackSnapshot reads the retryable tool-feedback accumulators under the same

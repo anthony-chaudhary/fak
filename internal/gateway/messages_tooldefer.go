@@ -50,6 +50,15 @@ const (
 	toolSearchBeta     = "tool-search-2025-09-17"
 )
 
+// extendedCacheTTLBeta is the Anthropic beta that admits an extended (1h) cache_control
+// TTL. Like toolSearchBeta it is the LIVE validation gate: a body carrying
+// {"type":"ephemeral","ttl":"1h"} WITHOUT this beta negotiated is 400'd upstream as
+// malformed ("parameter ranges"). The wrapped claude CLI defaults to the 5m tier and does
+// NOT send it, so the served-request transform must union it in itself the turn the
+// managed-cache 1h upgrade (maybeUpgradeAnthropicCacheTTL1H) sets that ttl — exactly the
+// way deferColdTools unions toolSearchBeta for defer_loading.
+const extendedCacheTTLBeta = "extended-cache-ttl-2025-04-11"
+
 // defaultHotToolSet is the eager core kept resident: the guard floor's built-in
 // system tools (Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web) plus the search
 // tool itself. Everything else custom is cold and deferred. Anthropic-hosted TYPED
