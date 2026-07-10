@@ -30,11 +30,11 @@ Safety rails:
     under two accounts (gem7/day30 share one identity, so one transcript can appear twice).
   * A resume target whose config dir is tombstoned (`.DELETED-*`) is skipped.
 
-Managed-cache posture (optional, #2178): by default a resumed child is launched as a bare
-`claude --resume` (guard's own passive posture). Set FAK_MANAGED_CACHE=on|off and, to bill an
-Anthropic API key, FAK_GUARD_API_KEY_ENV=<var> to front each resumed child with its own
-`fak guard <posture> --`, so the resume wave names the SAME cache posture as `fak accounts
-launch` / the dispatch worker. Unset (auto) => byte-identical to the bare launch.
+Managed-cache posture (#2178; on-by-default 2026-07-10): a resumed child is fronted with its
+own `fak guard --managed-cache on --` by default (best-effort managed cache everywhere), so the
+resume wave names the SAME cache posture as `fak accounts launch` / the dispatch worker. Set
+FAK_GUARD_API_KEY_ENV=<var> to also bill an Anthropic API key; FAK_MANAGED_CACHE=off opts out,
+and FAK_MANAGED_CACHE=auto restores the bare `claude --resume` (guard's own billing-gated auto).
 
   .\fleet_resume_watchdog.ps1                 # dry-run: log what it WOULD resume
   .\fleet_resume_watchdog.ps1 -Live           # actually resume (once per session)
@@ -187,14 +187,16 @@ function SourceAdmitGate($ledgerPath, $policyPath) {
 function Get-ManagedCachePosture {
   # #2178 parity for the resume wave: shape the `fak guard` managed-cache flags from the same
   # two fleet env knobs the Go launchers read (FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV) in
-  # the same stable order (--api-key-env then --managed-cache). auto/empty emits NOTHING, so an
-  # unconfigured fleet's launch stays byte-identical (a bare `claude --resume`, never fronted
-  # with guard). A malformed mode returns @() plus a Warn string rather than throwing -- a
-  # headless launcher warns-and-continues passive instead of stranding the whole resume wave.
+  # the same stable order (--api-key-env then --managed-cache). On-by-default (2026-07-10): an
+  # UNSET knob normalizes to on (mirrors the Go normalizeManagedCacheMode), so an unconfigured
+  # fleet FRONTS the resume with --managed-cache on rather than staying byte-identical. Only an
+  # EXPLICIT 'auto' emits NOTHING (guard keeps its own billing-gated auto); 'off' opts out. A
+  # malformed mode returns @() plus a Warn string rather than throwing -- a headless launcher
+  # warns-and-continues passive instead of stranding the whole resume wave.
   $raw = ("$env:FAK_MANAGED_CACHE").Trim().ToLowerInvariant()
-  if ($raw -eq '' -or $raw -eq 'auto') {
-    $mode = 'auto'
-  } elseif ($raw -eq 'on' -or $raw -eq 'off') {
+  if ($raw -eq '') {
+    $mode = 'on'   # unset => on (operator policy: best-effort managed cache everywhere)
+  } elseif ($raw -eq 'auto' -or $raw -eq 'on' -or $raw -eq 'off') {
     $mode = $raw
   } else {
     return @{ Args = @(); Warn = "FAK_MANAGED_CACHE='$raw': unknown managed-cache mode (auto|on|off) -- ignoring; resuming passive" }
@@ -458,8 +460,9 @@ try {
 }
 
 # Resolve the managed-cache posture ONCE per tick (the env is tick-constant) and warn ONCE.
-# A configured posture fronts each resumed child with its own `fak guard` (#2178 parity); the
-# default leaves the bare `claude --resume` untouched. A posture that cannot be applied (no fak
+# On-by-default (2026-07-10): the posture is on unless FAK_MANAGED_CACHE=auto, so each resumed
+# child is fronted with its own `fak guard --managed-cache on --` (#2178 parity); an explicit
+# `auto` leaves the bare `claude --resume` untouched. A posture that cannot be applied (no fak
 # binary) falls back to a direct launch LOUDLY rather than silently dropping the intent.
 $posture = Get-ManagedCachePosture
 [string[]]$resumePostureArgs = @($posture.Args)

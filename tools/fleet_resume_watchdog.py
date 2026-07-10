@@ -24,11 +24,11 @@ Safety rails (faithful to the .ps1):
   * RESUME ONCE: ledger-gated, survives state-file loss.
   * Per-tick launch cap.
 
-Managed-cache posture (optional, #2178): by default a resumed child is launched as a bare
-`claude --resume` (guard's own passive posture). Set FAK_MANAGED_CACHE=on|off and, to bill an
-Anthropic API key, FAK_GUARD_API_KEY_ENV=<var> to front each resumed child with its own
-`fak guard <posture> --`, so the resume wave names the SAME cache posture as `fak accounts
-launch` / the dispatch worker. Unset (auto) => byte-identical to the bare launch.
+Managed-cache posture (#2178; on-by-default 2026-07-10): a resumed child is fronted with its
+own `fak guard --managed-cache on --` by default (best-effort managed cache everywhere), so the
+resume wave names the SAME cache posture as `fak accounts launch` / the dispatch worker. Set
+FAK_GUARD_API_KEY_ENV=<var> to also bill an Anthropic API key; FAK_MANAGED_CACHE=off opts out,
+and FAK_MANAGED_CACHE=auto restores the bare `claude --resume` (guard's own billing-gated auto).
 
 Usage:
   python3 fleet_resume_watchdog.py            # dry-run: log what it WOULD resume
@@ -153,24 +153,29 @@ NON_LAUNCH_PHASES = {"deferred", "considered", "skipped", "gate_fail_open"}
 # override surface: when the operator configures one, the child is fronted with its OWN
 # `fak guard <posture> --`, so the posture comes from the child's own guard invocation on its
 # own CLAUDE_CONFIG_DIR seat -- never a wire inherited from this watchdog (the env-strip at the
-# spawn site still holds). Unconfigured => byte-identical to the bare `claude --resume` above.
+# spawn site still holds). On-by-default (2026-07-10): an UNSET knob now resolves to on, so the
+# unconfigured fleet ALSO fronts the resume with `fak guard --managed-cache on --` (when fak is
+# resolvable); an EXPLICIT FAK_MANAGED_CACHE=auto restores the bare `claude --resume` above.
 FLEET_MANAGED_CACHE_ENV = "FAK_MANAGED_CACHE"
 FLEET_GUARD_API_KEY_ENV_ENV = "FAK_GUARD_API_KEY_ENV"
 
 
 def managed_cache_posture_args() -> tuple[list[str], str | None]:
     """Shape the `fak guard` managed-cache flags from the fleet env knobs, mirroring the Go
-    guardCachePostureArgs exactly: --api-key-env then --managed-cache, in that stable order,
-    and an auto/empty mode emits NO --managed-cache (so an unconfigured fleet stays
-    byte-identical -- never fronted with guard). Returns (args, warning). A malformed
+    guardCachePostureArgs / normalizeManagedCacheMode exactly: --api-key-env then
+    --managed-cache, in that stable order. On-by-default (2026-07-10): an UNSET
+    FAK_MANAGED_CACHE now normalizes to `on`, so an unconfigured fleet fronts the resume with
+    --managed-cache on (best-effort managed cache everywhere) rather than staying byte-identical
+    to the bare launch. Only an EXPLICIT `auto` emits NO --managed-cache (guard keeps its own
+    billing-gated auto); `off` is the express opt-out. Returns (args, warning). A malformed
     FAK_MANAGED_CACHE returns ([], warning) rather than raising: this is a headless worker, so
     one bad env var must warn-and-continue passive instead of stranding the WHOLE resume wave
     -- the warn-and-continue half of guard_cache_posture.go's caller-decides contract (an
     interactive front-end aborts on the error; a headless worker does not)."""
     raw = os.environ.get(FLEET_MANAGED_CACHE_ENV, "").strip().lower()
-    if raw in ("", "auto"):
-        mode = "auto"
-    elif raw in ("on", "off"):
+    if raw == "":
+        mode = "on"  # unset => on (operator policy 2026-07-10: best-effort managed cache everywhere)
+    elif raw in ("auto", "on", "off"):
         mode = raw
     else:
         return [], (f"{FLEET_MANAGED_CACHE_ENV}={raw!r}: unknown managed-cache mode "
@@ -185,9 +190,11 @@ def managed_cache_posture_args() -> tuple[list[str], str | None]:
 
 
 def resume_child_argv(sid: str, posture_args: list[str]) -> list[str]:
-    """The argv that resumes one dead session. Default (no posture configured, or fak not on
-    PATH): a bare `claude --resume ... -p <prompt> --dangerously-skip-permissions`, exactly as
-    before this knob existed. When the operator configured a managed-cache posture AND fak is
+    """The argv that resumes one dead session. On-by-default (2026-07-10): with fak resolvable
+    the unconfigured fleet now FRONTS the child with `fak guard --managed-cache on --`. The bare
+    `claude --resume ... -p <prompt> --dangerously-skip-permissions` fallback is kept for two
+    cases only: fak is not on PATH (posture_args non-empty but FAK_EXE unset), or the operator
+    set FAK_MANAGED_CACHE=auto (posture_args empty). When a posture is emitted AND fak is
     resolvable, FRONT the child with its OWN `fak guard <posture> --`: the resumed child then
     binds its own in-process gateway on its own seat, prints its own posture banner, and
     reaches the ACTIVE 1h-TTL upgrade when API-key-billed -- inheriting no wire from this

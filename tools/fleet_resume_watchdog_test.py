@@ -290,8 +290,13 @@ def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8, env_extra=None)
     env["FLEET_STATE_DIR"] = str(tmp_path / "state")
     env["FAK_RESUME_SOURCE_POLICY"] = str(tmp_path / "policy.json")  # hermetic (missing = permissive)
     env.pop("FAK_EXE", None)
-    # hermetic posture: default OFF unless a test opts in, so ambient env can't perturb it.
-    env.pop("FAK_MANAGED_CACHE", None)
+    # hermetic posture: pin EXPLICIT auto (guard's own billing-gated passive) unless a test opts
+    # in. Since the 2026-07-10 on-by-default flip an UNSET knob normalizes to on, which would
+    # front EVERY posture-agnostic launch through `fak guard` (and the fake fak.cmd guard branch
+    # never invokes claude, so the bare-launch marker would stop appearing). Pinning auto keeps
+    # these tests on the direct-launch path; a posture test opts into on via FAK_MANAGED_CACHE=""
+    # (unset/on-by-default) or ="on" through env_extra.
+    env["FAK_MANAGED_CACHE"] = "auto"
     env.pop("FAK_GUARD_API_KEY_ENV", None)
     for k, v in (env_extra or {}).items():
         env[k] = v
@@ -415,17 +420,41 @@ def test_ps1_fronts_resume_with_guard_when_posture_configured(tmp_path):
 
 
 @_ps1_behavioral
-def test_ps1_unconfigured_posture_never_fronts_with_guard(tmp_path):
-    """The default (no FAK_MANAGED_CACHE) must stay byte-identical: claude is launched
-    DIRECTLY, guard is never fronted — the unconfigured fleet is unchanged (#2178)."""
+def test_ps1_explicit_auto_never_fronts_with_guard(tmp_path):
+    """FAK_MANAGED_CACHE=auto stays byte-identical: claude is launched DIRECTLY, guard is never
+    fronted — the express opt-out of on-by-default keeps guard's own billing-gated auto (#2178)."""
     sid = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
     paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
                             sessions=[sid])
-    r = _run_ps1_live(tmp_path, paths)  # no posture env
+    r = _run_ps1_live(tmp_path, paths, env_extra={"FAK_MANAGED_CACHE": "auto"})
     assert r.returncode == 0, r.stdout + r.stderr
-    assert not paths["guard_marker"].exists(), "unconfigured fleet must not front with guard"
+    assert not paths["guard_marker"].exists(), "explicit auto must not front with guard"
     assert paths["marker"].exists(), "claude should have launched directly"
     assert "managed-cache posture" not in r.stdout
+
+
+@_ps1_behavioral
+def test_ps1_unset_posture_fronts_with_managed_cache_on(tmp_path):
+    """On-by-default (2026-07-10): an UNSET FAK_MANAGED_CACHE now fronts the resume through
+    `fak guard --managed-cache on -- claude --resume ...` (best-effort managed cache everywhere),
+    mirroring the Go normalizeManagedCacheMode default flip (#2178)."""
+    sid = "88888888-9999-aaaa-bbbb-cccccccccccc"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    # empty string == unset after the .ps1's "$env:FAK_MANAGED_CACHE" coercion -> on-by-default
+    r = _run_ps1_live(tmp_path, paths, env_extra={"FAK_MANAGED_CACHE": ""})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert paths["guard_marker"].exists(), \
+        "on-by-default: the unconfigured fleet must front the resume with guard: " + r.stdout
+    fronted = paths["guard_marker"].read_text(encoding="ascii", errors="replace")
+    assert "--managed-cache on" in fronted
+    # no api-key-env configured -> only the managed-cache flag is carried
+    assert "--api-key-env" not in fronted
+    # the child agent (after `--`) is still the claude --resume for this sid
+    assert "-- " in fronted and "--resume " in fronted and sid in fronted
+    # the fronted path runs claude THROUGH guard, so the bare-launch marker is not written
+    assert not paths["marker"].exists()
+    assert "managed-cache posture" in r.stdout
 
 
 def test_ps1_parses_clean():
@@ -599,21 +628,28 @@ def _posture(monkeypatch, *, mode=None, api_key_env=None):
     return wd
 
 
-def test_posture_auto_no_key_emits_nothing(monkeypatch):
-    # The unconfigured fleet: auto (or unset) + no api-key-env emits NOTHING, so the resume
-    # argv stays byte-identical to the bare `claude --resume` and guard keeps its own auto.
-    wd = _posture(monkeypatch)
-    assert wd.managed_cache_posture_args() == ([], None)
+def test_posture_explicit_auto_no_key_emits_nothing(monkeypatch):
+    # EXPLICIT auto + no api-key-env emits NOTHING, so the resume argv stays byte-identical to
+    # the bare `claude --resume` and guard keeps its own billing-gated auto.
     wd = _posture(monkeypatch, mode="auto")
     assert wd.managed_cache_posture_args() == ([], None)
     wd = _posture(monkeypatch, mode="  AUTO  ")  # case/whitespace-insensitive
     assert wd.managed_cache_posture_args() == ([], None)
 
 
-def test_posture_api_key_alone_lets_auto_activate(monkeypatch):
-    # api-key-env alone (mode auto) makes guard's AUTO resolve ACTIVE on the Anthropic wire
-    # without forcing the mode -- so it emits --api-key-env but no --managed-cache.
-    wd = _posture(monkeypatch, api_key_env="ANTHROPIC_API_KEY")
+def test_posture_unset_defaults_to_on(monkeypatch):
+    # On-by-default (2026-07-10): an UNSET knob normalizes to on (mirrors the Go
+    # normalizeManagedCacheMode), so the unconfigured fleet fronts the resume with
+    # --managed-cache on rather than staying byte-identical to the bare launch.
+    wd = _posture(monkeypatch)
+    assert wd.managed_cache_posture_args() == (["--managed-cache", "on"], None)
+
+
+def test_posture_api_key_alone_with_explicit_auto_activates(monkeypatch):
+    # api-key-env + EXPLICIT auto makes guard's AUTO resolve ACTIVE on the Anthropic wire without
+    # forcing the mode -- so it emits --api-key-env but no --managed-cache. (An UNSET knob would
+    # additionally carry --managed-cache on; this pins the auto-activation path specifically.)
+    wd = _posture(monkeypatch, mode="auto", api_key_env="ANTHROPIC_API_KEY")
     assert wd.managed_cache_posture_args() == (["--api-key-env", "ANTHROPIC_API_KEY"], None)
 
 
@@ -641,8 +677,10 @@ def test_posture_malformed_warns_not_raises(monkeypatch):
     assert warn and "active" in warn and "auto|on|off" in warn
 
 
-def test_resume_child_argv_default_is_bare_claude(monkeypatch):
-    # No posture configured -> the exact pre-#2188 argv, never fronted with guard.
+def test_resume_child_argv_empty_posture_is_bare_claude(monkeypatch):
+    # Empty posture list (explicit auto, or the fak-missing fallback) -> the exact pre-#2188
+    # argv, never fronted with guard. (Since on-by-default an UNSET knob yields a non-empty
+    # posture; this pins the empty-list branch that still reaches the bare launch.)
     wd = _reload({})
     monkeypatch.setattr(wd, "CLAUDE_EXE", "/bin/claude")
     monkeypatch.setattr(wd, "FAK_EXE", "/bin/fak")  # present, but posture empty => no guard
