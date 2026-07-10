@@ -27,6 +27,19 @@ type Params struct {
 	// StarveK opts a driver's cutline op into the deterministic anti-starvation credit
 	// (#4021; see Op.StarveK). 0 (the default) builds the exact same query as before.
 	StarveK int `json:"starve_k,omitempty"`
+	// ProtectFloor opts the render driver's budget stage into the protected-floor
+	// split (#4017, NACL/Scissorhands): durable cells plus the ProtectRecent
+	// most-recent cells are charged against the byte budget FIRST, so a standing
+	// preference or the fresh tail is never tail-dropped by a low relevance rank.
+	// Both zero values compile to exactly the query the driver built before the
+	// knob existed — default off, byte-identical.
+	ProtectFloor bool `json:"protect_floor,omitempty"`
+	// ProtectRecent is the byte-exact recent-window size joined to the floor
+	// (top-N by Step). Meaningful only with ProtectFloor. Note the render
+	// driver's filter precedes its budget, so the window spans the filtered
+	// candidate set (intent-matching ∪ durable); author a raw scan→rank→budget
+	// query to protect the unconditional recency tail.
+	ProtectRecent int `json:"protect_recent,omitempty"`
 }
 
 // Driver is a NAMED, pre-composed memory strategy — a "canned query" in the algebra.
@@ -112,7 +125,7 @@ func init() {
 					}}},
 					{Kind: OpDedup},
 					{Kind: OpRank, By: RankRelevance, Desc: true},
-					{Kind: OpBudget, Bytes: p.Budget, StarveK: p.StarveK},
+					{Kind: OpBudget, Bytes: p.Budget, Protect: p.ProtectFloor, Recent: p.ProtectRecent, StarveK: p.StarveK},
 					{Kind: OpRender},
 				},
 			}

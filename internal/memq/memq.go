@@ -147,6 +147,18 @@ type Op struct {
 	// NACL/Scissorhands anti-starvation axis with no RNG (see starve.go). 0 (the
 	// default) is byte-identical to today.
 	StarveK int `json:"starve_k,omitempty"`
+	// Protect opts a budget op into the protected-floor split (#4017, NACL/
+	// Scissorhands): every durable-class cell, plus the Recent most-recent cells
+	// by Step, is charged against the cap FIRST — surviving regardless of
+	// relevance rank — before the ephemeral remainder spends the leftover
+	// headroom in working-set order. False (the default) is today's plain
+	// prefix budget, byte-for-byte.
+	Protect bool `json:"protect,omitempty"` // budget: opt-in protected floor (#4017)
+	// Recent is the byte-exact recent-window size joined to the protected floor:
+	// the top-N most-recent cells by Step, regardless of class (the NACL
+	// pins ∪ recent union). Meaningful only with Protect; 0 protects the durable
+	// class alone.
+	Recent int `json:"recent,omitempty"` // budget: recent-window size (requires protect)
 }
 
 // Query is an authored memory request: an intent string (for relevance ranking and as
@@ -239,6 +251,12 @@ func Validate(q Query) error {
 		case OpBudget:
 			if op.Bytes < 0 {
 				return fmt.Errorf("memq: op %d (budget) has negative bytes=%d", i, op.Bytes)
+			}
+			if op.Recent < 0 {
+				return fmt.Errorf("memq: op %d (budget) has negative recent=%d", i, op.Recent)
+			}
+			if op.Recent > 0 && !op.Protect {
+				return fmt.Errorf("memq: op %d (budget) sets recent=%d without protect", i, op.Recent)
 			}
 			if op.StarveK < 0 {
 				return fmt.Errorf("memq: op %d (budget) has negative starve_k=%d", i, op.StarveK)

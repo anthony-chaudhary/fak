@@ -259,7 +259,13 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			}
 		case OpBudget:
 			var dropped []Cell
-			work, dropped = applyBudget(work, op.Bytes)
+			if op.Protect {
+				// #4017: protected-floor split — the durable ∪ top-Recent recent floor
+				// is budgeted first; only leftover headroom goes to the remainder.
+				work, dropped = applyProtectedBudget(work, op.Bytes, op.Recent)
+			} else {
+				work, dropped = applyBudget(work, op.Bytes)
+			}
 			starveN := ""
 			if op.StarveK > 0 {
 				var upds []StarveUpdate
