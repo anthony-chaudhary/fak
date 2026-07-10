@@ -173,3 +173,61 @@ func TestBuildAuditError(t *testing.T) {
 		t.Fatalf("audit error not surfaced: %+v", rep)
 	}
 }
+
+func TestComputeCoverage(t *testing.T) {
+	intp := func(n int) *int { return &n }
+	cases := []struct {
+		name                       string
+		issuesFetched, issueLimit  int
+		commitsScanned, maxCommits int
+		total                      *int
+		wantComplete               bool
+		wantWarning                string
+		wantRecIssue, wantRecMax   int
+	}{
+		{
+			name: "whole backlog scanned", issuesFetched: 5, issueLimit: 1000,
+			commitsScanned: 20, maxCommits: 2000, total: intp(20),
+			wantComplete: true, wantWarning: "", wantRecIssue: 1000, wantRecMax: 2000,
+		},
+		{
+			name: "commit window narrower than history", issuesFetched: 5, issueLimit: 1000,
+			commitsScanned: 50, maxCommits: 50, total: intp(4000),
+			wantComplete: false, wantWarning: AuditWindowTruncated, wantRecIssue: 1000, wantRecMax: 5000,
+		},
+		{
+			name: "issue fetch hit the cap", issuesFetched: 1000, issueLimit: 1000,
+			commitsScanned: 20, maxCommits: 2000, total: intp(20),
+			wantComplete: false, wantWarning: AuditWindowTruncated, wantRecIssue: 2000, wantRecMax: 2000,
+		},
+		{
+			name: "git total unknown, full window scanned is conservative", issuesFetched: 5, issueLimit: 1000,
+			commitsScanned: 2000, maxCommits: 2000, total: nil,
+			wantComplete: false, wantWarning: AuditWindowTruncated, wantRecIssue: 1000, wantRecMax: 4000,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ComputeCoverage(c.issuesFetched, c.issueLimit, c.commitsScanned, c.maxCommits, c.total)
+			if got.Complete != c.wantComplete || got.Warning != c.wantWarning {
+				t.Fatalf("complete=%v warning=%q; want %v %q", got.Complete, got.Warning, c.wantComplete, c.wantWarning)
+			}
+			wantVerdict := CoverageComplete
+			if !c.wantComplete {
+				wantVerdict = CoverageIncomplete
+			}
+			if got.Verdict != wantVerdict {
+				t.Fatalf("verdict=%q want %q", got.Verdict, wantVerdict)
+			}
+			if got.Recommended.IssueLimit != c.wantRecIssue || got.Recommended.MaxCommits != c.wantRecMax {
+				t.Fatalf("recommended=%+v want issue=%d max=%d", got.Recommended, c.wantRecIssue, c.wantRecMax)
+			}
+			if c.wantComplete && len(got.Notes) != 0 {
+				t.Fatalf("complete coverage should have no notes, got %v", got.Notes)
+			}
+			if !c.wantComplete && len(got.Notes) == 0 {
+				t.Fatalf("truncated coverage should explain why, got no notes")
+			}
+		})
+	}
+}

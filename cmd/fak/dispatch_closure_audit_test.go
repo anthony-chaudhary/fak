@@ -16,13 +16,17 @@ func withClosureAuditSeams(t *testing.T,
 	audits map[string]closureaudit.Audit,
 ) {
 	t.Helper()
-	oi, oc, oa := closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit
+	oi, oc, oa, ot := closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit, closureAuditTotalCommits
 	t.Cleanup(func() {
-		closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit = oi, oc, oa
+		closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit, closureAuditTotalCommits = oi, oc, oa, ot
 	})
 	closureAuditFetchIssues = func(_ string, _ int) ([]closureaudit.Issue, error) { return issues, nil }
 	closureAuditReadCommits = func(_ string, _ int) ([]closureaudit.Commit, error) { return commits, nil }
 	closureAuditCommitAudit = func(_, sha string) closureaudit.Audit { return audits[sha] }
+	// Default: the scanned window equals the whole history, so coverage is COMPLETE
+	// unless a test narrows a cap. Keeps the git rev-list I/O out of unit tests.
+	total := len(commits)
+	closureAuditTotalCommits = func(_ string) *int { return &total }
 }
 
 func TestRunDispatchClosureAuditJSON(t *testing.T) {
@@ -119,5 +123,65 @@ func TestParseCommitAuditRecord(t *testing.T) {
 	}
 	if (parseCommitAuditRecord([]byte("not json"))) != (closureaudit.Audit{}) {
 		t.Fatalf("bad json should be zero Audit")
+	}
+}
+
+// TestRunDispatchClosureAuditWindowTruncated pins the ported coverage-truncation
+// warning: when the git-log window is narrower than the repo history, a resolving
+// commit could fall outside the window, so the audit must flag AUDIT_WINDOW_TRUNCATED
+// rather than let a narrowed audit present as complete coverage.
+func TestRunDispatchClosureAuditWindowTruncated(t *testing.T) {
+	withClosureAuditSeams(t,
+		[]closureaudit.Issue{{Number: 200, State: "CLOSED", Title: "closed, in-window"}},
+		[]closureaudit.Commit{{SHA: "aaaaaaa1", Subject: "fix(x): resolve #200"}},
+		map[string]closureaudit.Audit{"aaaaaaa1": {Verdict: "OK", Witness: "diff-witnessed"}},
+	)
+	// The repo has far more history than the scanned window.
+	total := 100
+	closureAuditTotalCommits = func(_ string) *int { return &total }
+
+	var stdout, stderr bytes.Buffer
+	runDispatchClosureAudit(&stdout, &stderr, []string{"--json", "--max-commits", "1"})
+	var rep closureaudit.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, stdout.String())
+	}
+	if rep.Coverage == nil {
+		t.Fatal("coverage block missing from truncated audit")
+	}
+	if rep.Coverage.Verdict != closureaudit.CoverageIncomplete ||
+		rep.Coverage.Warning != closureaudit.AuditWindowTruncated {
+		t.Fatalf("coverage verdict=%q warning=%q; want incomplete + truncated",
+			rep.Coverage.Verdict, rep.Coverage.Warning)
+	}
+	if !rep.Coverage.CommitsTruncated || rep.Coverage.Complete {
+		t.Fatalf("expected commits_truncated + incomplete, got %+v", rep.Coverage)
+	}
+	if rep.Coverage.Recommended.MaxCommits != total+1000 {
+		t.Fatalf("recommended max_commits=%d want %d", rep.Coverage.Recommended.MaxCommits, total+1000)
+	}
+	// The warning token must reach the machine payload verbatim.
+	if !strings.Contains(stdout.String(), closureaudit.AuditWindowTruncated) {
+		t.Fatalf("json missing %s token:\n%s", closureaudit.AuditWindowTruncated, stdout.String())
+	}
+}
+
+// TestRunDispatchClosureAuditCoverageComplete is the companion: a window that
+// covers the whole history reports COVERAGE_COMPLETE with no warning.
+func TestRunDispatchClosureAuditCoverageComplete(t *testing.T) {
+	withClosureAuditSeams(t,
+		[]closureaudit.Issue{{Number: 100, State: "OPEN", Title: "open, shipped"}},
+		[]closureaudit.Commit{{SHA: "aaaaaaa1", Subject: "fix(x): resolve #100"}},
+		map[string]closureaudit.Audit{"aaaaaaa1": {Verdict: "OK", Witness: "diff-witnessed"}},
+	)
+	var stdout, stderr bytes.Buffer
+	runDispatchClosureAudit(&stdout, &stderr, []string{"--json"})
+	var rep closureaudit.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, stdout.String())
+	}
+	if rep.Coverage == nil || !rep.Coverage.Complete ||
+		rep.Coverage.Verdict != closureaudit.CoverageComplete || rep.Coverage.Warning != "" {
+		t.Fatalf("expected complete coverage, got %+v", rep.Coverage)
 	}
 }

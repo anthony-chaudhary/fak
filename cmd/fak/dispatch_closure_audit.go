@@ -15,10 +15,11 @@ package main
 //	# the same card as an operator Markdown block
 //	fak dispatch closure-audit --markdown
 //
-// The gh/git coverage-truncation block of the Python auditor (surfacing when the
-// --issue-limit / --max-commits window is narrower than the backlog) is not yet
-// ported; the Python script stays as the compatibility shim until fixture parity
-// is pinned. This command owns the native binding + witness-gated grade.
+// The gh/git coverage-truncation block of the Python auditor is ported here: when
+// the --issue-limit fetch or the --max-commits git-log window is narrower than the
+// backlog, the report carries a COVERAGE_INCOMPLETE / AUDIT_WINDOW_TRUNCATED
+// coverage block so a narrowed audit can never present as complete coverage. This
+// command owns the native binding + witness-gated grade + coverage honesty.
 
 import (
 	"bytes"
@@ -29,6 +30,7 @@ import (
 	"io"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,9 +40,10 @@ import (
 // I/O seams, overridable in tests so the shell is exercised hermetically without
 // gh/git/dos on PATH.
 var (
-	closureAuditFetchIssues = closureAuditFetchIssuesGH
-	closureAuditReadCommits = closureAuditReadCommitsGit
-	closureAuditCommitAudit = closureAuditCommitAuditDOS
+	closureAuditFetchIssues  = closureAuditFetchIssuesGH
+	closureAuditReadCommits  = closureAuditReadCommitsGit
+	closureAuditCommitAudit  = closureAuditCommitAuditDOS
+	closureAuditTotalCommits = closureAuditTotalCommitsGit
 )
 
 func runDispatchClosureAudit(stdout, stderr io.Writer, argv []string) int {
@@ -125,7 +128,35 @@ func collectDispatchClosureAudit(root string, maxCommits, issueLimit int) closur
 	} else if len(issues) == 0 {
 		auditError = "gh returned no issues (auth/network?) — cannot grade closure"
 	}
-	return closureaudit.Build(root, issues, refs, audits, auditError)
+	rep := closureaudit.Build(root, issues, refs, audits, auditError)
+	// Attach the coverage-truncation block: the pure fold has no window facts, so
+	// the shell measures them (issues fetched vs cap, commits scanned vs the repo
+	// total from `git rev-list --count`) and surfaces AUDIT_WINDOW_TRUNCATED when
+	// the audit saw only a slice of the backlog.
+	cov := closureaudit.ComputeCoverage(len(issues), issueLimit, len(commits), maxCommits,
+		closureAuditTotalCommits(root))
+	rep.Coverage = &cov
+	return rep
+}
+
+// closureAuditTotalCommitsGit returns the count of commits reachable from HEAD,
+// or nil if git can't answer — the denominator for detecting a git-log window
+// narrower than the repo's history.
+func closureAuditTotalCommitsGit(root string) *int {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-list", "--count", "HEAD")
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return nil
+	}
+	return &n
 }
 
 func closureAuditFetchIssuesGH(root string, limit int) ([]closureaudit.Issue, error) {
@@ -245,6 +276,10 @@ func renderClosureAudit(rep closureaudit.Report) string {
 	fmt.Fprintf(&b, "buckets: true=%d data=%d claimed=%d open_witnessed=%d open=%d not_planned=%d\n",
 		c[closureaudit.TrueResolved], c[closureaudit.DataResolved], c[closureaudit.ClaimedClosed],
 		c[closureaudit.OpenWitnessed], c[closureaudit.Open], c[closureaudit.ClosedNotPlanned])
+	if cov := rep.Coverage; cov != nil && cov.Warning != "" {
+		fmt.Fprintf(&b, "  WARN %s — %s\n", cov.Warning, strings.Join(cov.Notes, "; "))
+		fmt.Fprintf(&b, "    re-run for full coverage: %s\n", cov.Recommended.Command)
+	}
 	var actionable []closureaudit.Graded
 	for _, g := range rep.Issues {
 		if g.Bucket == closureaudit.ClaimedClosed || g.Bucket == closureaudit.OpenWitnessed {
@@ -280,6 +315,10 @@ func renderClosureAuditMarkdown(rep closureaudit.Report) string {
 		closureaudit.OpenWitnessed, closureaudit.Open, closureaudit.ClosedNotPlanned,
 	} {
 		fmt.Fprintf(&b, "| %s | %d |\n", bucket, c[bucket])
+	}
+	if cov := rep.Coverage; cov != nil && cov.Warning != "" {
+		fmt.Fprintf(&b, "\n> **%s** — coverage incomplete. %s\n", cov.Warning, strings.Join(cov.Notes, " "))
+		fmt.Fprintf(&b, ">\n> re-run for full coverage: `%s`\n", cov.Recommended.Command)
 	}
 	return b.String()
 }

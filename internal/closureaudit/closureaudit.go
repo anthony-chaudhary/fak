@@ -16,6 +16,7 @@
 package closureaudit
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"sort"
@@ -277,6 +278,129 @@ type Report struct {
 	Counts          map[string]int `json:"counts"`
 	Totals          Totals         `json:"totals"`
 	Issues          []Graded       `json:"issues"`
+	// Coverage records whether the audit window saw the whole backlog or only a
+	// slice of it. The pure Build does not populate it (it has no window facts);
+	// the I/O shell computes it via ComputeCoverage and attaches it, so a
+	// narrowed audit can never present as complete coverage. nil = not computed.
+	Coverage *Coverage `json:"coverage,omitempty"`
+}
+
+// Coverage verdict + warning tokens. A truncated window makes closure_rate a
+// number over a *slice* of the backlog, not the backlog — so it is surfaced
+// loudly rather than letting issues_audited read as comprehensive.
+const (
+	CoverageComplete   = "COVERAGE_COMPLETE"
+	CoverageIncomplete = "COVERAGE_INCOMPLETE"
+	// AuditWindowTruncated is the warning emitted when the issue fetch or the
+	// git-log scan was capped below the backlog: closures whose issue or
+	// resolving commit fell outside the window are unseen and could be
+	// under-reported as witnessed. It is the closure-audit analogue of scoring a
+	// KPI while unmeasured — "didn't look" must not read as "looks clean".
+	AuditWindowTruncated = "AUDIT_WINDOW_TRUNCATED"
+)
+
+// CoverageCaps is the machine-actionable re-run recommendation that would clear
+// a truncation, plus the exact command to run.
+type CoverageCaps struct {
+	IssueLimit int    `json:"issue_limit"`
+	MaxCommits int    `json:"max_commits"`
+	Command    string `json:"command"`
+}
+
+// Coverage reports whether either load surface (gh issue fetch, git-log scan)
+// hit its cap, mirroring issue_closure_audit.py.compute_coverage.
+type Coverage struct {
+	Complete         bool         `json:"complete"`
+	Verdict          string       `json:"verdict"` // COVERAGE_COMPLETE | COVERAGE_INCOMPLETE
+	Warning          string       `json:"warning,omitempty"`
+	IssuesTruncated  bool         `json:"issues_truncated"`
+	CommitsTruncated bool         `json:"commits_truncated"`
+	IssuesFetched    int          `json:"issues_fetched"`
+	IssueLimit       int          `json:"issue_limit"`
+	CommitsScanned   int          `json:"commits_scanned"`
+	CommitsWindow    int          `json:"commits_window"`
+	CommitsTotal     *int         `json:"commits_total"` // nil when git could not answer
+	Notes            []string     `json:"notes,omitempty"`
+	Recommended      CoverageCaps `json:"recommended"`
+}
+
+// ComputeCoverage detects whether the audit saw the whole backlog or only a
+// slice. `gh issue list` returns newest-first, so a fetch returning exactly the
+// limit almost certainly dropped older issues — disproportionately the closed
+// ones this auditor grades. Likewise a git-log window narrower than history can
+// leave a closed issue's resolving commit unbindable, mis-grading it CLAIMED.
+// Pure: totalCommits is nil when git could not answer, in which case a full
+// window (commitsScanned >= maxCommits) is treated conservatively as truncated.
+func ComputeCoverage(issuesFetched, issueLimit, commitsScanned, maxCommits int, totalCommits *int) Coverage {
+	issuesTruncated := issuesFetched >= issueLimit
+	commitsTruncated := (totalCommits != nil && *totalCommits > commitsScanned) ||
+		(totalCommits == nil && commitsScanned >= maxCommits)
+
+	var notes []string
+	if issuesTruncated {
+		notes = append(notes, fmt.Sprintf(
+			"gh fetch returned %d issue(s) = the --issue-limit cap; older issues "+
+				"(disproportionately the closed ones) may be unseen — raise --issue-limit",
+			issuesFetched))
+	}
+	if commitsTruncated {
+		scanned := commitsScanned
+		total := "?"
+		if totalCommits != nil {
+			total = strconv.Itoa(*totalCommits)
+			if *totalCommits < scanned {
+				scanned = *totalCommits
+			}
+		}
+		notes = append(notes, fmt.Sprintf(
+			"git-log window scanned %d of %s commit(s); a resolving commit older "+
+				"than the window can't bind — raise --max-commits", scanned, total))
+	}
+
+	complete := !(issuesTruncated || commitsTruncated)
+	verdict, warning := CoverageComplete, ""
+	if !complete {
+		verdict, warning = CoverageIncomplete, AuditWindowTruncated
+	}
+	return Coverage{
+		Complete:         complete,
+		Verdict:          verdict,
+		Warning:          warning,
+		IssuesTruncated:  issuesTruncated,
+		CommitsTruncated: commitsTruncated,
+		IssuesFetched:    issuesFetched,
+		IssueLimit:       issueLimit,
+		CommitsScanned:   commitsScanned,
+		CommitsWindow:    maxCommits,
+		CommitsTotal:     totalCommits,
+		Notes:            notes,
+		Recommended:      recommendCaps(issuesTruncated, commitsTruncated, issueLimit, maxCommits, totalCommits),
+	}
+}
+
+// recommendCaps returns caps that would clear the truncation: a truncated issue
+// fetch doubles the issue cap (gh gives no total, so headroom is the honest
+// move); a truncated commit window jumps above known history (+1000 for growth)
+// or doubles when the total is unknown.
+func recommendCaps(issuesTruncated, commitsTruncated bool, issueLimit, maxCommits int, totalCommits *int) CoverageCaps {
+	recIssueLimit := issueLimit
+	if issuesTruncated {
+		recIssueLimit = issueLimit * 2
+	}
+	recMaxCommits := maxCommits
+	if commitsTruncated {
+		if totalCommits != nil {
+			recMaxCommits = *totalCommits + 1000
+		} else {
+			recMaxCommits = maxCommits * 2
+		}
+	}
+	return CoverageCaps{
+		IssueLimit: recIssueLimit,
+		MaxCommits: recMaxCommits,
+		Command: fmt.Sprintf("fak dispatch closure-audit --issue-limit %d --max-commits %d",
+			recIssueLimit, recMaxCommits),
+	}
 }
 
 // Build grades every issue and folds the standard closure-audit payload, faithful
