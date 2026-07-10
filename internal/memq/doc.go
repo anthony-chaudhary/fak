@@ -48,13 +48,16 @@
 //
 // # Honest scope (rung 1)
 //
-// render, tombstone, and prune are REAL: render pages bytes in through the gate;
-// tombstone applies through recall.RequestContextChange (with caps) and persists;
-// prune reclaims unreferenced storage on a backend that supports it. consolidate
-// produces a REAL derived artifact (a deterministic extractive summary the agent can
-// render into context) but does NOT yet write that disposition back to durable store,
-// and reclassify is proposal-only — the durable write-back of a derived/­reclassified
-// cell to a recall core image is the named rung-2 follow-on. memq COMPLEMENTS the
-// existing recall.Dream (which still owns the trust-gate reseal half of a sleep pass);
-// it does not replace it.
+// render, tombstone, prune, and reclassify are REAL: render pages bytes in through the
+// gate; tombstone applies through recall.RequestContextChange (with caps) and persists;
+// prune reclaims unreferenced storage on a backend that supports it; reclassify — with a
+// Caps grant and a backend implementing Reclassifier — persists a LOWERED durability
+// class back to the store and mints a demotion audit record on the promotion ledger
+// (#4147). It stays demote-only even under caps: a promotion is still refused, capped at
+// the current class, and a backend without the seam is proposal-only (the safe floor).
+// consolidate produces a REAL derived artifact (a deterministic extractive summary the
+// agent can render into context) but does NOT yet write that disposition back to durable
+// store — the consolidate durable write-back is the named rung-2 follow-on (#3906),
+// which SHARES the reclassify write-back seam. memq COMPLEMENTS the existing recall.Dream
+// (which still owns the trust-gate reseal half of a sleep pass); it does not replace it.
 package memq

@@ -126,6 +126,33 @@ func (l *PromotionLedger) Record(rec PromotionRecord) {
 	l.records = append(l.records, rec)
 }
 
+// RecordReclassify mints an audit record for a durability DEMOTION applied to an
+// already-stored cell — the demote-only twin of the promotion path (#4147). The ledger
+// is append-only, so a reclassification is a NEW record layered over the cell's prior
+// promotion, never an edit of it (For/Latest keep the whole history, so the class change
+// is auditable AND reversible). from/to are the pre/post classes; the record stores the
+// (lower) `to` class plus a structured Reason naming the transition, so Explain can
+// account for the change from structure alone. It returns whether a record was minted:
+// a `to` class that normalizes to turn writes nothing (turn is pure context, never
+// audited as memory — the same rule Record enforces), so a demote-to-turn is applied by
+// the backend but not carried here. Consent is ConsentInferred (a reclassify is a
+// producer/driver action, not a fresh user request); Producer is `by`.
+func (l *PromotionLedger) RecordReclassify(cellID string, span SourceSpan, from, to, by string) bool {
+	to = NormDurability(to)
+	if to == DurabilityTurn {
+		return false // context-only target; never audited as a promotion
+	}
+	l.Record(PromotionRecord{
+		CellID:     cellID,
+		SourceSpan: span,
+		Durability: to,
+		Consent:    ConsentInferred,
+		Producer:   NormProducer(by),
+		Reason:     fmt.Sprintf("reclassify demote %s -> %s", NormDurability(from), to),
+	})
+	return true
+}
+
 // For returns every promotion record for a cell ID, oldest first (a cell may be
 // re-promoted/reclassified over its life; the ledger keeps the whole history, it never
 // overwrites). ok is false when the cell has no promotion record at all — either it

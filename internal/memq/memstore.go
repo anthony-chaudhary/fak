@@ -145,6 +145,39 @@ func (m *MemStore) Tombstone(_ context.Context, id, _, _ string) (bool, error) {
 	return false, nil
 }
 
+// Reclassify persists a LOWERED durability class for a cell and mints a demotion audit
+// record on the store's promotion ledger (#4147 — the caps-gated reclassify write-back).
+// It is demote-only by construction: a newClass that is not STRICTLY lower than the
+// cell's current class is declined (false, nil) — the same durabilityRank guard the
+// executor enforces, re-checked here so the persisted store can never be PROMOTED
+// through this seam. The change is reversible: the ledger keeps the whole
+// reclassification history (For/Latest never overwrite), and the cell's prior promotion
+// record still stands. A demotion whose target normalizes to turn-class is applied to
+// the cell but not ledger-audited (turn is pure context, never memory — RecordReclassify
+// mints nothing for it). Returns false for an unknown cell.
+func (m *MemStore) Reclassify(_ context.Context, id, newClass, by string) (bool, error) {
+	newClass = NormDurability(newClass)
+	for i := range m.cells {
+		if m.cells[i].ID != id {
+			continue
+		}
+		cur := NormDurability(m.cells[i].Durability)
+		if durabilityRank[newClass] >= durabilityRank[cur] {
+			return false, nil // never promote or hold via this seam — demote-only
+		}
+		span := SourceSpan{
+			Step:       m.cells[i].Step,
+			Role:       m.cells[i].Role,
+			Descriptor: m.cells[i].Descriptor,
+			Digest:     m.cells[i].Digest,
+		}
+		m.cells[i].Durability = newClass
+		m.ledger.RecordReclassify(id, span, cur, newClass, by)
+		return true, nil
+	}
+	return false, nil
+}
+
 // Prune reclaims CAS blobs no cell references. With apply=false it only counts.
 func (m *MemStore) Prune(_ context.Context, apply bool) (int, int64, error) {
 	referenced := map[string]bool{}

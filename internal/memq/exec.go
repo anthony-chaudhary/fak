@@ -47,6 +47,19 @@ type Pruner interface {
 	Prune(ctx context.Context, apply bool) (blobs int, bytes int64, err error)
 }
 
+// Reclassifier is the optional durability-class write-back capability (#4147): the
+// caps-gated apply for the reclassify op. Reclassify persists a LOWERED durability
+// class for a cell and mints a demotion audit record, returning whether the demotion
+// was actually applied (false if the backend declined — e.g. the cell is unknown, or
+// newClass is not STRICTLY lower than the cell's current class). It is demote-only by
+// construction: the same durabilityRank guard the executor enforces is re-checked on
+// the backend side, so a persisted store can never be PROMOTED through this seam. A
+// backend that does not implement it stays propose-only — the safe floor, exactly like
+// Tombstoner/Pruner. The seam is shared with the consolidate durable write-back (#3906).
+type Reclassifier interface {
+	Reclassify(ctx context.Context, id, newClass, by string) (bool, error)
+}
+
 // Caps is the capability grant that lets Run APPLY a durable mutation. Without a grant
 // for an effect kind, that effect is recorded as a PROPOSAL and the backend is not
 // touched — the fail-closed default. Apply is the master switch; Allow names the
@@ -61,7 +74,7 @@ func (c Caps) may(kind string) bool { return c.Apply && c.Allow[kind] }
 // AllowAll is a convenience Caps granting every mutation — for an operator-driven
 // `--apply` at the CLI, never the MCP default.
 func AllowAll() Caps {
-	return Caps{Apply: true, Allow: map[string]bool{OpTombstone: true, OpPrune: true}}
+	return Caps{Apply: true, Allow: map[string]bool{OpTombstone: true, OpPrune: true, OpReclassify: true}}
 }
 
 // StepTrace records one executed op: the working-set size in and out, plus a note.
@@ -314,7 +327,7 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 		case OpConsolidate:
 			note = applyConsolidate(ctx, b, &res, work)
 		case OpReclassify:
-			note = applyReclassify(&res, work, op.By)
+			note = applyReclassify(ctx, b, &res, work, op.By, caps)
 		case OpPrune:
 			note = applyPrune(ctx, b, &res, caps)
 		}
@@ -769,29 +782,51 @@ func applyConsolidate(ctx context.Context, b Backend, res *Result, work []Cell) 
 	return fmt.Sprintf("folded %d cell(s) -> %s", folded, derived.ID)
 }
 
-// applyReclassify proposes a durability change for the set. It can only HOLD or LOWER
-// a class (the effective target is the less-durable of the request and the cell's
-// current class) — a promotion toward a longer-lived class is refused, since promotion
-// must be earned. Write-back is the rung-2 follow-on, so Applied stays false.
-func applyReclassify(res *Result, work []Cell, target string) string {
+// applyReclassify changes a durability class for the set. It can only HOLD or LOWER a
+// class (the effective target is the less-durable of the request and the cell's current
+// class) — a promotion toward a longer-lived class is refused, capped at the current
+// class, since promotion must be earned (the durabilityRank guard, enforced here EVEN
+// under caps). With a Caps grant for OpReclassify and a backend implementing
+// Reclassifier, each genuine demotion is PERSISTED and audited (a demotion record on the
+// backend's promotion ledger; #4147). Without the grant, or against a backend with no
+// Reclassifier, every demotion is proposal-only — the fail-closed floor.
+func applyReclassify(ctx context.Context, b Backend, res *Result, work []Cell, target string, caps Caps) string {
 	target = NormDurability(target)
+	rc, canApply := b.(Reclassifier)
+	apply := caps.may(OpReclassify) && canApply
 	var ids []string
-	capped := 0
+	capped, demotable, applied := 0, 0, 0
 	for _, c := range work {
 		cur := NormDurability(c.Durability)
 		eff := target
 		if durabilityRank[eff] > durabilityRank[cur] {
-			eff = cur // refuse the promotion
+			eff = cur // refuse the promotion — demote-only, capped at current class
 			capped++
 		}
 		ids = append(ids, c.ID)
-		_ = eff
+		if durabilityRank[eff] >= durabilityRank[cur] {
+			continue // a hold (or a capped promotion): nothing to persist
+		}
+		demotable++
+		if apply {
+			if ok, err := rc.Reclassify(ctx, c.ID, eff, "memq"); err == nil && ok {
+				applied++
+			}
+		}
+	}
+	var note string
+	switch {
+	case !canApply:
+		note = fmt.Sprintf("target=%s; backend does not support reclassify — proposal only; %d demotion(s) proposed, %d promotion(s) refused (capped at current class)", target, demotable, capped)
+	case !caps.may(OpReclassify):
+		note = fmt.Sprintf("target=%s; no caps granted — proposal only (grant reclassify to apply); %d demotion(s) proposed, %d promotion(s) refused (capped at current class)", target, demotable, capped)
+	default:
+		note = fmt.Sprintf("target=%s; %d cell(s) demoted (persisted + audited), %d promotion(s) refused (capped at current class)", target, applied, capped)
 	}
 	res.Effects = append(res.Effects, Effect{
-		Kind: OpReclassify, Applied: false, Cells: ids,
-		Note: fmt.Sprintf("target=%s; %d promotion(s) refused (capped at current class); durable write-back is rung 2", target, capped),
+		Kind: OpReclassify, Applied: applied > 0, Cells: ids, Note: note,
 	})
-	return fmt.Sprintf("%d cell(s) proposed -> %s (%d promotions refused)", len(ids), target, capped)
+	return fmt.Sprintf("%d cell(s) -> %s (%d demoted, %d promotion(s) refused, applied=%v)", len(ids), target, applied, capped, applied > 0)
 }
 
 // applyPrune reclaims unreferenced storage if the backend supports it. Dry-run counts;

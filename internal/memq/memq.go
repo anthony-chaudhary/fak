@@ -204,9 +204,11 @@ var effectKinds = map[string]bool{
 // mutationKinds are the effects that change durable backend state. They are
 // proposal-only without an explicit Caps grant. render and consolidate are NOT here:
 // render is a read (page-in), and consolidate produces an in-memory artifact this rung
-// never writes back (see the package doc's honest scope).
+// never writes back (see the package doc's honest scope). reclassify IS here: with a
+// grant + a Reclassifier backend it persists a lowered (demote-only) durability class
+// back to the store (#4147).
 var mutationKinds = map[string]bool{
-	OpTombstone: true, OpPrune: true,
+	OpTombstone: true, OpPrune: true, OpReclassify: true,
 }
 
 // IsEffect reports whether an op kind is an effect (vs a pure select op).
