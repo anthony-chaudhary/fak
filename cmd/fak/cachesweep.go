@@ -98,7 +98,7 @@ func printCachesweepReport(w io.Writer, res cachesweep.Result) {
 		res.Ceiling.ReuseRatio, res.Ceiling.ReusedTokens, res.Ceiling.TotalTokens)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', tabwriter.AlignRight)
-	fmt.Fprintln(tw, "budget\treuse\treused/total\tevictions\t%ceiling\t")
+	fmt.Fprintln(tw, "budget\treuse\treused/total\tevictions\tpct-of-ceiling\t")
 	for _, p := range res.Curve {
 		pct := 0.0
 		if res.Ceiling.ReuseRatio > 0 {
