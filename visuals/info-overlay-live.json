@@ -31,26 +31,18 @@
     {
       "trace_id": "main-trace-01",
       "run": "running",
-      "parent_trace": "",
-      "generation": 0,
-      "priority": 0,
       "turns_left": 6,
       "tokens_left": 372000,
-      "context_tokens_left": 0,
-      "elapsed_seconds": 134,
-      "assumptions": 0
+      "elapsed_seconds": 134
     },
     {
       "trace_id": "sub-trace-02",
       "run": "running",
       "parent_trace": "main-trace-01",
       "generation": 1,
-      "priority": 0,
       "turns_left": 3,
       "tokens_left": 118000,
-      "context_tokens_left": 0,
-      "elapsed_seconds": 41,
-      "assumptions": 0
+      "elapsed_seconds": 41
     }
   ],
   "upstream": {
@@ -69,10 +61,10 @@
     "provider_token_equiv": 65100,
     "fak_token_equiv": 77300,
     "total_token_equiv": 142400,
-    "provider_prompt_cache_read_token_equiv": 0,
-    "provider_prompt_cache_write_premium_token_equiv": 0,
-    "fak_compaction_shed_tokens": 0,
-    "fak_kv_prefix_reused_tokens": 0,
+    "provider_prompt_cache_read_token_equiv": 67800,
+    "provider_prompt_cache_write_premium_token_equiv": -2700,
+    "fak_compaction_shed_tokens": 52300,
+    "fak_kv_prefix_reused_tokens": 25000,
     "fak_vdso_avoided_calls": 3
   },
   "managed_cache": null,
@@ -131,7 +123,29 @@
       "UNVERIFIED_RESULT": 1
     },
     "cached_prompt_tokens": 0,
-    "cached_turns": 0
+    "cached_turns": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_creation_tokens": 0,
+    "compaction_fired": 0,
+    "compaction_bailed": 0,
+    "compaction_off": 0,
+    "compaction_dropped_turns": 0,
+    "compaction_shed_tokens": 0,
+    "compaction_cache_read_tokens": 0,
+    "last_compaction_cache_read": 0,
+    "compaction_anchor_starved": 0,
+    "compaction_budget": 0,
+    "kv_prefix_prompt_tokens": 0,
+    "kv_prefix_reused_tokens": 0,
+    "tool_prune_turns": 0,
+    "tool_prune_count": 0,
+    "tool_ref_turns": 0,
+    "tool_ref_converted": 0,
+    "deny_all_stops": 0,
+    "tool_feedback_turns": 0,
+    "cache_ttl_upgrades_upgraded": 0
   },
-  "harness": null
+  "harness": null,
+  "startup_report": ""
 }
