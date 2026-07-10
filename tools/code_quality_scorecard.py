@@ -119,7 +119,12 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code. testdata holds
 # fixtures (intentionally odd); vendored/generated trees are not ours to grade.
-GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", "node_modules", "testdata", "vendor", "__pycache__"}
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check",
+                   ".tmp_overlay", "node_modules", "testdata", "vendor", "__pycache__"}
+# `.head_build_check` (a `git archive HEAD` build-probe copy) and `.tmp_overlay` (an
+# overlay-checkout used to price a candidate diff) are two more gitignored full-repo
+# copies of the same kind — walking them double-graded every real .go and inflated the
+# architecture + tests work-list by ~50 phantom rows here. Same construction, same fix.
 # `.claude`, `.fak`, `.dos`, and `.tmp` all hold full repo CHECKOUTS / source copies
 # created by the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation
 # feature), `.fak/tmp/issue<N>-clean-<sha>/` (the dispatch clean-checkout feature),
