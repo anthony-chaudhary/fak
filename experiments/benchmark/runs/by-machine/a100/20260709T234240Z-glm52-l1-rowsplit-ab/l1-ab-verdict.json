@@ -1,0 +1,14 @@
+{
+  "schema": "fak.glm52-l1-rowsplit-ab.v1",
+  "layer": {
+    "decode_toks": 23.38,
+    "gpus_busy": 8,
+    "gpus_sampled": 8
+  },
+  "row": {
+    "decode_toks": 7.129,
+    "gpus_busy": 8,
+    "gpus_sampled": 8
+  },
+  "decode_speedup_x": 0.305,
+  "decode_delta_toks": -16.251}

@@ -1,0 +1,86 @@
+{
+  "$schema": "benchmark/run-result.v1",
+  "run_id": "a100-glm52-l1-rowsplit-ab-20260709T234240Z",
+  "machine_id": "a100",
+  "timestamp": "2026-07-09T23:42:40Z",
+  "summary": "Real 753B GLM-5.2 (UD-Q4_K_M) single-stream decode throughput under llama.cpp split-mode -sm layer vs -sm row, resident across an 8-GPU datacenter server. -sm row REGRESSES decode 3.28x (23.38 -> 7.129 tok/s); the L1 'row split -> 3-6x decode speedup' thesis is REFUTED for single-stream decode. -sm layer is the better single-stream config.",
+  "scope": "REAL-753B;unsloth-dynamic-Q4_K_M;full-MoE;resident-across-8-GPUs;single-stream-decode(batch=1);small-prompt",
+  "axis": "llama.cpp split-mode (-sm layer vs -sm row)",
+  "verdict": {
+    "winner": "layer",
+    "decode_toks_layer": 23.38,
+    "decode_toks_row": 7.129,
+    "decode_speedup_x": 0.305,
+    "decode_delta_toks": -16.251,
+    "regression_x": 3.28,
+    "thesis": "L1 row/tensor split lights all GPUs and yields a 3-6x single-stream decode speedup",
+    "thesis_result": "REFUTED for single-stream decode: row is 3.28x SLOWER, not faster. Both modes light all 8 GPUs; row's higher per-GPU sm-util is cross-GPU all-reduce overhead per token, not throughput."
+  },
+  "fixed_config": {
+    "backend": "llama.cpp server (llama-server)",
+    "gpu": "8x NVIDIA A100 (80 GB, sm_80)",
+    "devices": "0,1,2,3,4,5,6,7",
+    "precision": "UD-Q4_K_M",
+    "n_predict": 128,
+    "iters": 5,
+    "temperature": 0,
+    "util_n_predict": 512,
+    "warm": true
+  },
+  "legs": [
+    {
+      "leg": "layer",
+      "split_mode": "layer",
+      "decode_toks_median": 23.38,
+      "decode_toks_samples": [23.377863902477777, 23.380263733028073, 23.376194560067322, 23.38562029170273, 23.38135705761696],
+      "prompt_toks_median": 59.54,
+      "wall_toks_median": 22.464,
+      "gpu_sm_util_peak_range": "13-14%",
+      "gpu_sm_util_mean_range": "9.1-9.6%",
+      "gpus_busy_ge10pct": 8,
+      "gpus_sampled": 8
+    },
+    {
+      "leg": "row",
+      "split_mode": "row",
+      "decode_toks_median": 7.129,
+      "decode_toks_samples": [7.0653858961981095, 7.063824301498149, 7.128958855659524, 7.140262820802108, 7.154727522543121],
+      "prompt_toks_median": 42.223,
+      "wall_toks_median": 7.009,
+      "gpu_sm_util_peak_range": "15-17%",
+      "gpu_sm_util_mean_range": "12.3-14.9%",
+      "gpus_busy_ge10pct": 8,
+      "gpus_sampled": 8
+    }
+  ],
+  "interpretation": "For batch=1 latency-bound decode, -sm row shards every layer's matmul across all 8 GPUs, forcing a cross-GPU all-reduce/all-gather every token. That collective sync tax dwarfs the tiny per-token compute, so throughput collapses to ~0.3x despite every GPU showing MORE sm activity. -sm layer (pipeline) only passes the small hidden-state activation across a GPU boundary once per layer, so it keeps the 23.4 tok/s baseline. Row-split's design win is compute-bound work (large-batch or long-prompt prefill), NOT single-stream decode -- which is what this A/B isolates.",
+  "raw": {
+    "l1-ab-verdict.json": {
+      "schema": "fak.glm52-l1-rowsplit-ab.v1",
+      "layer": {"decode_toks": 23.38, "gpus_busy": 8, "gpus_sampled": 8},
+      "row": {"decode_toks": 7.129, "gpus_busy": 8, "gpus_sampled": 8},
+      "decode_speedup_x": 0.305,
+      "decode_delta_toks": -16.251
+    },
+    "bench-layer.json": {
+      "schema": "fak.glm52-bench-lever.v1",
+      "lever": "L1-layer",
+      "serve_split_mode": "layer",
+      "decode_toks_median": 23.38,
+      "prompt_toks_median": 59.54,
+      "wall_toks_median": 22.464,
+      "gpu_sm_util": {"0": {"peak": 13, "mean": 9.1}, "1": {"peak": 13, "mean": 9.6}, "2": {"peak": 13, "mean": 9.4}, "3": {"peak": 13, "mean": 9.6}, "4": {"peak": 13, "mean": 9.3}, "5": {"peak": 13, "mean": 9.2}, "6": {"peak": 14, "mean": 9.5}, "7": {"peak": 13, "mean": 9.2}},
+      "gpus_busy_ge10pct": 8
+    },
+    "bench-row.json": {
+      "schema": "fak.glm52-bench-lever.v1",
+      "lever": "L1-row",
+      "serve_split_mode": "row",
+      "decode_toks_median": 7.129,
+      "prompt_toks_median": 42.223,
+      "wall_toks_median": 7.009,
+      "gpu_sm_util": {"0": {"peak": 16, "mean": 13.2}, "1": {"peak": 17, "mean": 14.1}, "2": {"peak": 16, "mean": 12.3}, "3": {"peak": 17, "mean": 14.9}, "4": {"peak": 16, "mean": 13.8}, "5": {"peak": 17, "mean": 14.8}, "6": {"peak": 16, "mean": 13.8}, "7": {"peak": 15, "mean": 13.5}},
+      "gpus_busy_ge10pct": 8
+    }
+  }
+}

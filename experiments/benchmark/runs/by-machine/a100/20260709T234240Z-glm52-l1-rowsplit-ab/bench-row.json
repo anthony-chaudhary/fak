@@ -1,0 +1,55 @@
+{
+  "schema": "fak.glm52-bench-lever.v1",
+  "lever": "L1-row",
+  "serve_split_mode": "row",
+  "port": 8002,
+  "devices": "0,1,2,3,4,5,6,7",
+  "n_predict": 128,
+  "iters": 5,
+  "decode_toks_median": 7.129,
+  "decode_toks_samples": [
+    7.0653858961981095,
+    7.063824301498149,
+    7.128958855659524,
+    7.140262820802108,
+    7.154727522543121
+  ],
+  "prompt_toks_median": 42.223,
+  "wall_toks_median": 7.009,
+  "gpu_sm_util": {
+    "0": {
+      "peak": 16,
+      "mean": 13.2
+    },
+    "1": {
+      "peak": 17,
+      "mean": 14.1
+    },
+    "2": {
+      "peak": 16,
+      "mean": 12.3
+    },
+    "3": {
+      "peak": 17,
+      "mean": 14.9
+    },
+    "4": {
+      "peak": 16,
+      "mean": 13.8
+    },
+    "5": {
+      "peak": 17,
+      "mean": 14.8
+    },
+    "6": {
+      "peak": 16,
+      "mean": 13.8
+    },
+    "7": {
+      "peak": 15,
+      "mean": 13.5
+    }
+  },
+  "gpus_busy_ge10pct": 8,
+  "gpus_sampled": 8
+}

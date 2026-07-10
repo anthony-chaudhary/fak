@@ -1,0 +1,81 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "a100-glm52-l1-rowsplit-ab-20260709T234240Z",
+  "machine_id": "a100",
+  "timestamp": "2026-07-09T23:42:40Z",
+  "git": {
+    "rev": "5dff2f440",
+    "branch": "main",
+    "dirty": true,
+    "box_rev": "0f025d3",
+    "note": "rev is the authoring tree HEAD. The A/B ran on the box from a fresh `git clone --depth 1` of origin/main; box_rev (0f025d3) is that box HEAD, captured at run time."
+  },
+  "harness": {
+    "name": "glm52_l1_rowsplit_ab.sh + glm52_bench_lever.sh",
+    "version": "1",
+    "note": "tools/glm52_l1_rowsplit_ab.sh stands the resident serve up twice (once -sm layer, once -sm row), benches each leg with tools/glm52_bench_lever.sh, and folds l1-ab-verdict.json. Real llama.cpp serve, not a synthetic kernel."
+  },
+  "model": {
+    "name": "GLM-5.2 (real 753B checkpoint)",
+    "family": "glm_moe_dsa",
+    "precision": "UD-Q4_K_M",
+    "scope": "REAL-753B;unsloth-dynamic-Q4_K_M;full-MoE;resident-across-8-GPUs;single-stream-decode",
+    "note": "This IS the real 753B GLM-5.2 checkpoint (UD-Q4_K_M, ~434 GiB, 11 shards) served by llama.cpp resident across all 8 GPUs -- NOT the synthetic reduced-layer glm_moe_dsa microbench that the sibling DSA-ctx-scaling run measures. Every tok/s here is a real-weights single-stream decode measurement."
+  },
+  "config": {
+    "backend": "llama.cpp server (llama-server, build b9801-class)",
+    "gpu": "8x NVIDIA A100 (80 GB, sm_80)",
+    "split_modes_under_test": ["layer", "row"],
+    "devices": "0,1,2,3,4,5,6,7",
+    "port": 8002,
+    "alias": "glm-5.2",
+    "n_predict": 128,
+    "iters": 5,
+    "temperature": 0,
+    "util_n_predict": 512,
+    "warm": "one throwaway generation before the timed turns (pays the one-time backend warmup so timed turns are steady-state)"
+  },
+  "method": "The axis under test is llama.cpp's split-mode (-sm). Leg A serves GLM-5.2 with -sm layer (pipeline: each GPU owns a contiguous slice of layers); leg B re-serves the identical checkpoint with -sm row (tensor split: every layer's matmul is sharded across all GPUs). Each leg: warm once, then 5 timed /completion decode calls (n_predict=128, temp=0) reporting llama.cpp's own predicted_per_second (decode tok/s) median, plus per-GPU sm-util sampled via `nvidia-smi dmon -s u` during one sustained 512-token decode. Everything except -sm is held fixed. This measures SINGLE-STREAM decode throughput -- the batch=1 latency-bound regime.",
+  "box": {
+    "gpu": "8x NVIDIA A100 (80 GB, sm_80)",
+    "gpu_state_at_run": "idle+free before load (0 MiB used on all 8 cards); the A/B held the box exclusively for the run",
+    "resident_gb_per_gpu": "~42-59 GiB per card (~434 GiB total, the full UD-Q4_K_M weight set)",
+    "note": "Box GPUs returned to 0 MiB after the run (both serves stopped cleanly). No peer job was resident during the A/B."
+  },
+  "findings": [
+    "-sm row REGRESSES single-stream decode by 3.28x on this box: 23.38 tok/s (layer) -> 7.129 tok/s (row), decode_speedup_x=0.305. The L1 'row/tensor split lights all GPUs for a 3-6x decode speedup' thesis is REFUTED for single-stream decode of GLM-5.2 UD-Q4_K_M on an 8-GPU datacenter server via llama.cpp.",
+    "Both split modes light ALL 8 GPUs (gpus_busy_ge10pct=8/8 in both legs), so 'row lights all GPUs' is true but NOT the source of a speedup. Row's per-GPU sm-util is HIGHER (mean ~13.8% vs ~9.4%) yet throughput is 3.3x LOWER. Measured facts are the throughput gap and the util delta; the most likely mechanism (inferred, NOT comm-profiled here) is that -sm row forces a cross-GPU all-reduce/all-gather every token, and for batch=1 latency-bound decode that collective sync overhead dominates the tiny per-token compute.",
+    "Prefill was also slower in row mode at this prompt size (59.54 -> 42.22 tok/s), but the bench prompt is tiny (~12 tokens), so this is NOT the compute-bound long-prompt regime where -sm row can help prefill. This A/B does not test large-batch throughput or long-prompt prefill; it isolates single-stream decode.",
+    "Decode samples are extremely tight (layer CV<0.05%, row CV<0.7% over 5 back-to-back reps within one serve), so the 3.3x gap is low-variance, not sample noise. Caveat: each mode was served once, so this is within-run precision, not a cross-run reproduction. -sm layer (23.4 tok/s) is the better single-stream config and remains the GLM-5.2 decode baseline."
+  ],
+  "caveats": [
+    "Single-stream (batch=1) decode only; large concurrent batches may shift the layer/row tradeoff.",
+    "Small prompt (~12 tokens); long-prompt prefill (the compute-bound regime where -sm row is designed to help) is not measured here.",
+    "One quant (UD-Q4_K_M), one backend (llama.cpp), one box (8-GPU datacenter server). Does not generalize to other quants/backends/topologies without re-measuring."
+  ],
+  "tags": [
+    "gpu",
+    "a100",
+    "ampere",
+    "sm_80",
+    "glm52",
+    "real-753b",
+    "ud-q4_k_m",
+    "llama.cpp",
+    "split-mode",
+    "tensor-parallel",
+    "pipeline-parallel",
+    "single-stream-decode",
+    "L1",
+    "negative-result",
+    "thesis-refuted"
+  ],
+  "issue": "#3075",
+  "artifacts": {
+    "verdict": "l1-ab-verdict.json",
+    "bench_layer": "bench-layer.json",
+    "bench_row": "bench-row.json",
+    "result": "result.json",
+    "notes": "RESULTS.md"
+  }
+}
