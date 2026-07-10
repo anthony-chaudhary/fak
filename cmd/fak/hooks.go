@@ -22,7 +22,7 @@ func cmdHooks(argv []string) { os.Exit(runHooks(os.Stdout, os.Stderr, argv)) }
 
 func runHooks(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | lane-audit)")
+		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | lane-audit)")
 		return 2
 	}
 	switch argv[0] {
@@ -32,10 +32,12 @@ func runHooks(stdout, stderr io.Writer, argv []string) int {
 		return runHooksCommitMsg(stdout, stderr, argv[1:])
 	case "pre-push":
 		return runHooksPrePush(stdout, stderr, argv[1:])
+	case "import-witness":
+		return runHooksImportWitness(stdout, stderr, argv[1:])
 	case "lane-audit":
 		return runHooksLaneAudit(stdout, stderr, argv[1:])
 	default:
-		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | lane-audit)\n", argv[0])
+		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | lane-audit)\n", argv[0])
 		return 2
 	}
 }
