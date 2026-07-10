@@ -47,6 +47,28 @@ func TestValueFlag_DefaultOnIsClean(t *testing.T) {
 	}
 }
 
+func TestValueFlag_BoolNamedConstantDefaultIsOn(t *testing.T) {
+	// A Bool value-flag defaulted from a NAMED CONSTANT (the shipped-enabled idiom) is ON,
+	// not debt -- the --elide-stale-reads regression: gateway.DefaultElideStaleReads is
+	// true, so the flag ships enabled, but the Bool judge once matched only the bare `true`
+	// literal and false-positived it as VALUE_FLAG_OFF. This pins the named-constant rule
+	// for Bool the same way TestValueFlag_DefaultOnIsClean pins it for Int.
+	src := `fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default: replace a stale Read result")`
+	flags := ParseFlags(src, "cmd/fak/guard.go")
+	if len(flags) != 1 || !flags[0].defaultOn {
+		t.Fatalf("a Bool value-flag with a named-constant default must judge default-ON, got %+v", flags)
+	}
+	k := kpiValueFlagDefaultOn(flags)
+	if len(k.Defects) != 0 {
+		t.Errorf("a Bool named-constant default-on value-flag is clean, got %v", k.Defects)
+	}
+	// A bare `false` literal is still the off sentinel and remains debt when not allow-listed.
+	off := ParseFlags(`fs.Bool("elide-mystery", false, "shed something")`, "cmd/fak/serve.go")
+	if len(off) != 1 || off[0].defaultOn {
+		t.Fatalf("a bare false Bool default must still judge default-OFF, got %+v", off)
+	}
+}
+
 func TestValueFlag_OffWithAllowlistReasonIsClean(t *testing.T) {
 	// An allow-listed OFF value-flag (a genuine gate with a documented reason) is honest.
 	src := `fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine")`

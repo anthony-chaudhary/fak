@@ -180,7 +180,14 @@ func isValueFlag(name, help string) bool {
 func judgeDefaultOn(kind, def string) bool {
 	switch kind {
 	case "Bool":
-		return def == "true"
+		// A Bool is ON unless its default is a literal false sentinel. A NAMED-CONSTANT
+		// default (e.g. gateway.DefaultElideStaleReads) is ON -- the same "a named default
+		// constant is the codebase's idiom for 'shipped enabled'" rule ParseFlags already
+		// documents for the Int/String branches. The Bool branch previously matched only
+		// the bare literal `true`, so a Bool value-flag defaulted from a constant was
+		// false-positived as default-OFF (the --elide-stale-reads regression the live-tree
+		// floor caught). Only a bare `false` literal is the off sentinel.
+		return !isFalseLiteral(def)
 	case "String":
 		// A non-empty string literal default is ON. Anything that is not a bare ""
 		// literal (a named constant, a non-empty literal) counts as configured-on.
@@ -205,6 +212,15 @@ func isZeroLiteral(def string) bool {
 		return true
 	}
 	return false
+}
+
+// isFalseLiteral reports whether a Bool default literal is the off sentinel. In an
+// fs.Bool("name", <default>, ...) call the default is a Go bool expression, so the only
+// source-level off sentinel is the bare `false` literal; a `true` literal or a named
+// constant (gateway.DefaultElideStaleReads) is ON -- the "named constant == shipped
+// enabled" idiom the numeric branch already applies via isZeroLiteral.
+func isFalseLiteral(def string) bool {
+	return strings.TrimSpace(def) == "false"
 }
 
 func unescape(s string) string {
