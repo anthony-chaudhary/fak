@@ -5,13 +5,14 @@ package assumecheck
 // internal/antipattern (antipattern.go) and internal/brittleness (brittleness.go) —
 // an ordered unexported slice of the EXISTING element type, a derived byID index, a
 // copying Registry() accessor, and an ok-shaped Lookup. Rows are pure data; witness
-// GATHERING stays in the impure shell (cmd/fak/assume.go), and witness-driver
-// plurality is C3 (#3821): a declared-only row checks to UNVERIFIABLE by
-// construction (Evidence{Witnessed:false}), never a fabricated HOLDS.
+// GATHERING stays in the impure shell (cmd/fak/assume.go), routed through the
+// name-resolved driver registry (driver.go, #3821 C3). A declared-only row checks
+// to UNVERIFIABLE by construction (Evidence{Witnessed:false}), never a fabricated
+// HOLDS.
 
 // WitnessStatus is the CLOSED per-row wiring marker: is the assumption's declared
 // witness actually WIRED to an evidence gatherer, or is the row declared-only —
-// registered and addressable, but with no driver until C3 (#3821)? It mirrors
+// registered and addressable, but with no driver behind it yet? It mirrors
 // boundarylint's enforced/proposed Status axis (catalog.go): declared-only is the
 // prioritized backlog, rendered as the EXPLANATION for an UNVERIFIABLE verdict
 // rather than a silent one.
@@ -21,8 +22,9 @@ const (
 	// WitnessWired — an evidence gatherer exists for this assumption; the shell can
 	// witness it now.
 	WitnessWired WitnessStatus = "wired"
-	// WitnessDeclaredOnly — registered but no gatherer yet: checking it yields
-	// Evidence{Witnessed: false} -> OutcomeUnverifiable, never a guessed decision.
+	// WitnessDeclaredOnly — registered but no gatherer/driver yet: checking it
+	// yields Evidence{Witnessed: false} -> OutcomeUnverifiable, never a guessed
+	// decision.
 	WitnessDeclaredOnly WitnessStatus = "declared-only"
 )
 
@@ -51,9 +53,11 @@ func (s WitnessStatus) String() string {
 // share ONE source of truth — the same way antipattern/brittleness keep their
 // exported class constants referenced inside the registry slice. Every other row is
 // a REAL fleet assumption grounded in the subsystem that relies on it and a witness
-// authority already in the tree; all are declared-only until C3 (#3821) wires their
-// drivers. RefusalReason tokens stay data-only SCREAMING_SNAKE — binding them into
-// the closed DOS refusal vocabulary is C4.
+// authority already in the tree. C3 (#3821) wired the config-flag and command-probe
+// rows to name-resolved drivers (driver.go); seat-offerable-not-walled stays
+// declared-only until a real ledger-read gatherer exists for it. RefusalReason
+// tokens stay data-only SCREAMING_SNAKE — binding them into the closed DOS refusal
+// vocabulary is C4.
 var registry = []Assumption{
 	SeatLaunchable,
 	{
@@ -82,8 +86,8 @@ var registry = []Assumption{
 		Level:           LevelInfra,
 		WitnessKind:     WitnessConfigFlag,
 		RefusalReason:   "SEAT_CONFIG_DIR_MISSING",
-		ConfidenceClass: "declared",
-		WitnessStatus:   WitnessDeclaredOnly,
+		ConfidenceClass: "witnessed",
+		WitnessStatus:   WitnessWired,
 	},
 	{
 		// Dispatch admission (cmd/fak/dispatch_tick_preflight.go): the seat pool's
@@ -96,8 +100,8 @@ var registry = []Assumption{
 		Level:           LevelLoop,
 		WitnessKind:     WitnessCommandProbe,
 		RefusalReason:   "SEAT_POOL_DEPLETED",
-		ConfidenceClass: "declared",
-		WitnessStatus:   WitnessDeclaredOnly,
+		ConfidenceClass: "witnessed",
+		WitnessStatus:   WitnessWired,
 	},
 	{
 		// Kernel preflight (cmd/fak/dispatch_tick_preflight.go,
@@ -110,8 +114,8 @@ var registry = []Assumption{
 		Level:           LevelSubsystem,
 		WitnessKind:     WitnessCommandProbe,
 		RefusalReason:   "KERNEL_LOOP_DOWN",
-		ConfidenceClass: "declared",
-		WitnessStatus:   WitnessDeclaredOnly,
+		ConfidenceClass: "witnessed",
+		WitnessStatus:   WitnessWired,
 	},
 }
 

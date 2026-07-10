@@ -1,10 +1,10 @@
 package main
 
 // assume.go — `fak assume`, the thin impure shell over the pure
-// internal/assumecheck kernel (#3819 C1 spine; #3820 C2 registry wiring, epic
-// #3818). The kernel judges; this file only GATHERS the evidence, prints the
-// verdict, and maps it to an exit code — the same split stallscan.go keeps with
-// internal/stallscan.
+// internal/assumecheck kernel (#3819 C1 spine; #3820 C2 registry wiring; #3821 C3
+// witness-driver plurality, epic #3818). The kernel judges; this file only
+// GATHERS the evidence, prints the verdict, and maps it to an exit code — the
+// same split stallscan.go keeps with internal/stallscan.
 //
 //	fak assume list                             # every registered assumption + its wiring
 //	fak assume list --json                      # the same registry as JSON
@@ -14,8 +14,11 @@ package main
 //
 // `check` routes through the declarative registry (assumecheck.Lookup): an unknown
 // id is a usage error naming the known ids, never a guessed check. Witness DISPATCH
-// stays deliberately singular here — only seat-launchable has an inline gatherer
-// (gatherSeatLaunchableEvidence); witness-driver plurality is #3818 C3 (#3821). A
+// is name-resolved (#3821 C3): each wired row's gatherer builds the probe TARGET
+// for its assumption and resolves the DECLARED WitnessKind's driver from the
+// assumecheck driver registry (assumecheck.ResolveDriver) — the driver gathers,
+// the kernel judges. seat-launchable keeps its bespoke ledger-read gatherer
+// (gatherSeatLaunchableEvidence; WitnessLedgerRead has no generic driver). A
 // registered-but-unwired (declared-only) row hands the kernel unwitnessed evidence
 // of its declared kind, so it verdicts UNVERIFIABLE with the wiring gap as the
 // explanation — never a fabricated HOLDS.
@@ -34,6 +37,7 @@ package main
 // still nonzero, the kernel is fail-closed).
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,9 +45,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/assumecheck"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -184,7 +190,7 @@ func runAssumeList(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "%-26s %-10s %-14s %-9s %s\n", "ID", "LEVEL", "WITNESS", "OWNER", "WIRING")
 	for _, a := range rows {
-		wiring := string(assumecheck.WitnessDeclaredOnly) + " (driver pending #3818 C3)"
+		wiring := string(assumecheck.WitnessDeclaredOnly) + " (gatherer pending)"
 		if _, wired := assumeWitnessGatherers[a.ID]; wired {
 			wiring = string(assumecheck.WitnessWired)
 		}
@@ -213,14 +219,206 @@ type assumeGatherParams struct {
 }
 
 // assumeWitnessGatherers is this shell's witness-dispatch table: the assumptions
-// whose evidence it can GATHER inline today. Exactly one is wired in C2
-// (seat-launchable); plurality is #3818 C3 (#3821). The registry's per-row
-// WitnessStatus declares the same fact as data — TestAssumeWiringMatchesDeclaredStatus
-// binds the two so the marker can never drift from the dispatch table.
+// whose evidence it can GATHER today. Each entry builds the probe TARGET for its
+// assumption; the driver-backed ones then resolve the row's DECLARED WitnessKind
+// from the assumecheck driver registry (#3821 C3) and let that driver produce the
+// evidence. seat-launchable keeps its bespoke ledger-read gatherer —
+// WitnessLedgerRead is a per-assumption authority read, not one of the four
+// generic probe kinds. The registry's per-row WitnessStatus declares the same
+// fact as data — TestAssumeWiringMatchesDeclaredStatus binds the two so the
+// marker can never drift from the dispatch table.
 var assumeWitnessGatherers = map[string]func(assumeGatherParams) (assumecheck.Evidence, string){
 	assumecheck.SeatLaunchable.ID: func(p assumeGatherParams) (assumecheck.Evidence, string) {
 		return gatherSeatLaunchableEvidence(p.registryPath, p.homeDir, p.seat, p.useHeadroom)
 	},
+	"seat-config-dir-present": gatherSeatConfigDirEvidence,
+	"seat-pool-not-depleted":  gatherSeatPoolEvidence,
+	"kernel-loop-alive":       gatherKernelLoopEvidence,
+}
+
+// assumeProbeTimeout bounds one witness probe. Generous: the slowest wired probe
+// (`dos loop --json`, a pip console-script shim spawning a python grandchild)
+// takes tens of seconds cold on this fleet's Windows hosts.
+const assumeProbeTimeout = 90 * time.Second
+
+// assumeGatherViaDriver is the name-resolved dispatch step (#3821 C3): resolve
+// the DECLARED witness kind's driver from the assumecheck driver registry and
+// gather through it. No driver registered for the kind is the fail-closed
+// branch — unwitnessed evidence of the declared kind, so the kernel verdicts
+// UNVERIFIABLE naming the gap, never a cross-kind substitution.
+func assumeGatherViaDriver(kind assumecheck.WitnessKind, target assumecheck.Target) assumecheck.Evidence {
+	d, ok := assumecheck.ResolveDriver(kind)
+	if !ok {
+		return assumecheck.Evidence{
+			Kind:   kind,
+			Detail: fmt.Sprintf("no witness driver registered for kind %s", kind),
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), assumeProbeTimeout)
+	defer cancel()
+	return d.Gather(ctx, target)
+}
+
+// assumeSeatInRotation is the in-rotation predicate the seat-config-dir witness
+// scopes to: active status, enabled, and not policy-reserved — the seats a
+// launcher can actually be handed, the ones whose vanished config dir is the
+// doctor's prune class rather than expected retirement.
+func assumeSeatInRotation(h accounts.Home) bool {
+	return h.Active() && h.EnabledOrDefault() && !h.Reserved
+}
+
+// gatherSeatConfigDirEvidence witnesses seat-config-dir-present through the
+// config-flag driver (path presence IS the flag's source of truth): every
+// in-rotation registry seat's config dir must still exist on disk. One missing
+// dir is a witnessed violation naming the seat (the doctor prune class); a dir
+// that cannot be checked at all makes the whole claim unverifiable — "every
+// seat" cannot be confirmed past an unreadable one. With --seat the probe
+// narrows to that seat; a seat the registry does not know, holds out of
+// rotation, or records no dir for is an absent premise, not a violation.
+func gatherSeatConfigDirEvidence(p assumeGatherParams) (assumecheck.Evidence, string) {
+	ev := assumecheck.Evidence{Kind: assumecheck.WitnessConfigFlag}
+	reg, err := loadOrDiscover(p.registryPath, p.homeDir)
+	if err != nil {
+		ev.Detail = fmt.Sprintf("registry unreadable: %v", err)
+		return ev, ""
+	}
+	reg = reg.Refresh()
+
+	type dirProbe struct{ seat, dir string }
+	var probes []dirProbe
+	if p.seat != "" {
+		var home accounts.Home
+		known := false
+		for _, h := range reg.Homes {
+			if h.Name == p.seat {
+				home, known = h, true
+				break
+			}
+		}
+		switch {
+		case !known:
+			ev.Detail = fmt.Sprintf("premise absent: registry has no seat %q", p.seat)
+			return ev, p.seat
+		case !assumeSeatInRotation(home):
+			ev.Detail = fmt.Sprintf("premise absent: seat %q is not in rotation (status/enabled/reserved hold it out), so the prune-class claim does not apply", p.seat)
+			return ev, p.seat
+		case strings.TrimSpace(home.Dir) == "":
+			ev.Detail = fmt.Sprintf("premise absent: seat %q records no config dir to witness", p.seat)
+			return ev, p.seat
+		}
+		probes = append(probes, dirProbe{home.Name, home.Dir})
+	} else {
+		for _, h := range reg.Homes {
+			if assumeSeatInRotation(h) && strings.TrimSpace(h.Dir) != "" {
+				probes = append(probes, dirProbe{h.Name, h.Dir})
+			}
+		}
+		if len(probes) == 0 {
+			ev.Detail = "no in-rotation seat records a config dir to witness"
+			return ev, ""
+		}
+	}
+
+	for _, pr := range probes {
+		got := assumeGatherViaDriver(assumecheck.WitnessConfigFlag, assumecheck.Target{Path: pr.dir})
+		switch {
+		case !got.Witnessed:
+			ev.Detail = fmt.Sprintf("seat %q config dir could not be checked — %s", pr.seat, got.Detail)
+			return ev, pr.seat
+		case !got.Holds:
+			ev.Witnessed = true
+			ev.Detail = fmt.Sprintf("seat %q config dir is missing from disk (%s) — the doctor prune (tombstone+rehome) class", pr.seat, pr.dir)
+			return ev, pr.seat
+		}
+	}
+	ev.Witnessed = true
+	ev.Holds = true
+	ev.Detail = fmt.Sprintf("%d in-rotation seat config dir(s) present on disk", len(probes))
+	return ev, p.seat
+}
+
+// gatherSeatPoolEvidence witnesses seat-pool-not-depleted through the
+// command-probe driver with an IN-PROCESS probe: the depletion signal is the
+// same dispatchtick.BuildSeatPool fold dispatch preflight's SeatCheck reads
+// (dispatchPreflightSeat), already reachable in this process — spawning a
+// subprocess to re-ask ourselves would add noise, not evidence. The probe
+// returns the exit-like tri-state the driver contract maps.
+func gatherSeatPoolEvidence(_ assumeGatherParams) (assumecheck.Evidence, string) {
+	root, err := os.Getwd()
+	if err != nil {
+		root = "."
+	}
+	return assumeGatherViaDriver(assumecheck.WitnessCommandProbe, assumecheck.Target{
+		Probe: func(context.Context) (string, int, error) {
+			return assumeSeatPoolTriState(dispatchPreflightSeat(root, io.Discard, ""))
+		},
+	}), ""
+}
+
+// assumeSeatPoolTriState maps the dispatch seat gate's folded SeatCheck onto the
+// command-probe exit tri-state: free seats hold (0), a depleted pool is a
+// witnessed refute (1), an unreadable roster cannot witness (err). Pure — split
+// out so the mapping is table-testable without a roster on disk.
+func assumeSeatPoolTriState(seat dispatchtick.SeatCheck) (string, int, error) {
+	if seat.Error != "" {
+		return "", -1, errors.New("seat pool unreadable: " + seat.Error)
+	}
+	detail := fmt.Sprintf("seat pool total=%s free=%s leased=%s (the dispatchtick.BuildSeatPool fold behind preflight's SeatCheck)",
+		assumeIntPtrLabel(seat.Total), assumeIntPtrLabel(seat.Free), assumeIntPtrLabel(seat.Leased))
+	if seat.Depleted {
+		return detail + ": depleted", 1, nil
+	}
+	return detail, 0, nil
+}
+
+// gatherKernelLoopEvidence witnesses kernel-loop-alive through the command-probe
+// driver with an in-process probe around the SAME `dos loop --json` command
+// dispatchPreflightKernel folds into preflight's KernelCheck. The dos CLI exits
+// 0 whenever it can ANSWER, so the raw exit code cannot carry liveness — the
+// probe reads the answered verdict and re-expresses it as the exit-like
+// tri-state the driver contract maps.
+func gatherKernelLoopEvidence(_ assumeGatherParams) (assumecheck.Evidence, string) {
+	root, err := os.Getwd()
+	if err != nil {
+		root = "."
+	}
+	return assumeGatherViaDriver(assumecheck.WitnessCommandProbe, assumecheck.Target{
+		Probe: func(context.Context) (string, int, error) {
+			doc, err := dispatchRunExternalJSON(root, 60*time.Second, "dos", "loop", "--workspace", root, "--json")
+			return assumeKernelLoopTriState(doc, err)
+		},
+	}), ""
+}
+
+// assumeKernelLoopTriState maps the `dos loop --json` answer onto the
+// command-probe exit tri-state: a non-refusing verdict is a live, admitting
+// loop (0); a HALT/REFUSE verdict is a witnessed refusal (1); a probe that
+// could not run, or answered without a verdict, cannot witness either way
+// (err). Pure — split out so the mapping is table-testable without the dos CLI.
+func assumeKernelLoopTriState(doc map[string]any, err error) (string, int, error) {
+	if err != nil {
+		return "", -1, fmt.Errorf("`dos loop --json` probe could not run: %w", err)
+	}
+	verdict := strings.TrimSpace(dispatchMapString(doc, "verdict"))
+	if verdict == "" {
+		return "", -1, errors.New("`dos loop --json` answered without a verdict — nothing to witness")
+	}
+	detail := fmt.Sprintf("`dos loop --json` verdict=%s alive=%s target=%s",
+		verdict, assumeIntPtrLabel(intPtrFromAny(doc["alive"])), assumeIntPtrLabel(intPtrFromAny(doc["target"])))
+	up := strings.ToUpper(verdict)
+	if strings.Contains(up, "HALT") || strings.HasPrefix(up, "REFUSE") {
+		return detail + ": the loop is refusing/halted", 1, nil
+	}
+	return detail, 0, nil
+}
+
+// assumeIntPtrLabel renders an optional count for a detail line ("?" = the
+// probe carried no value).
+func assumeIntPtrLabel(p *int) string {
+	if p == nil {
+		return "?"
+	}
+	return fmt.Sprintf("%d", *p)
 }
 
 // gatherAssumptionEvidence routes a registered assumption to its wired gatherer.
@@ -234,7 +432,7 @@ func gatherAssumptionEvidence(a assumecheck.Assumption, p assumeGatherParams) (a
 	}
 	return assumecheck.Evidence{
 		Kind:   a.WitnessKind,
-		Detail: fmt.Sprintf("assumption %q is declared-only: no witness gatherer is wired in this shell (witness-driver plurality is #3818 C3)", a.ID),
+		Detail: fmt.Sprintf("assumption %q is declared-only: no witness gatherer is wired for it in this shell", a.ID),
 	}, ""
 }
 

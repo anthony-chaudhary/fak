@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/assumecheck"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 // TestAssumeWiringMatchesDeclaredStatus binds the shell's witness-dispatch table to
@@ -106,6 +108,82 @@ func TestAssumeListJSONCarriesSchemaAndWiring(t *testing.T) {
 		_, wired := assumeWitnessGatherers[row.Assumption.ID]
 		if row.Wired != wired {
 			t.Fatalf("row %q wired=%v diverges from the shell dispatch table (%v)", row.Assumption.ID, row.Wired, wired)
+		}
+	}
+}
+
+// TestAssumeWiredKindsResolveDrivers proves every driver-backed wired row's
+// declared witness kind actually resolves a registered driver (#3821 C3) — the
+// name-resolved dispatch can never silently fall through for a row the registry
+// advertises as wired. WitnessLedgerRead rows are exempt: that kind is a bespoke
+// per-assumption authority read (gatherSeatLaunchableEvidence), not a generic
+// driver.
+func TestAssumeWiredKindsResolveDrivers(t *testing.T) {
+	for _, a := range assumecheck.Registry() {
+		if a.WitnessStatus != assumecheck.WitnessWired || a.WitnessKind == assumecheck.WitnessLedgerRead {
+			continue
+		}
+		d, ok := assumecheck.ResolveDriver(a.WitnessKind)
+		if !ok {
+			t.Fatalf("wired assumption %q declares kind %s but no driver is registered for it", a.ID, a.WitnessKind)
+		}
+		if d.Kind() != a.WitnessKind {
+			t.Fatalf("driver resolved for %q stamps kind %s, want %s", a.ID, d.Kind(), a.WitnessKind)
+		}
+	}
+}
+
+// TestAssumeSeatPoolTriState proves the seat-pool probe's pure exit mapping:
+// free seats hold (0), a depleted pool refutes (1), an unreadable roster cannot
+// witness (err) — so the command-probe driver turns each into the right
+// closed-vocabulary outcome.
+func TestAssumeSeatPoolTriState(t *testing.T) {
+	if _, _, err := assumeSeatPoolTriState(dispatchtick.SeatCheck{Error: "no roster"}); err == nil {
+		t.Fatal("an unreadable seat pool must map to the cannot-witness err branch")
+	}
+	detail, code, err := assumeSeatPoolTriState(dispatchtick.SeatCheck{
+		Total: dispatchtick.IntPtr(4), Free: dispatchtick.IntPtr(0), Leased: dispatchtick.IntPtr(4), Depleted: true,
+	})
+	if err != nil || code != 1 {
+		t.Fatalf("depleted pool mapped to (code=%d, err=%v), want the witnessed-refute exit 1", code, err)
+	}
+	if !strings.Contains(detail, "depleted") {
+		t.Fatalf("depleted detail %q does not say so", detail)
+	}
+	detail, code, err = assumeSeatPoolTriState(dispatchtick.SeatCheck{
+		Total: dispatchtick.IntPtr(4), Free: dispatchtick.IntPtr(2), Leased: dispatchtick.IntPtr(2),
+	})
+	if err != nil || code != 0 {
+		t.Fatalf("free pool mapped to (code=%d, err=%v), want the holds exit 0", code, err)
+	}
+	if !strings.Contains(detail, "free=2") {
+		t.Fatalf("free-pool detail %q drops the counts", detail)
+	}
+}
+
+// TestAssumeKernelLoopTriState proves the `dos loop --json` probe's pure exit
+// mapping: a non-refusing verdict holds (0), a HALT/REFUSE verdict refutes (1),
+// and a failed probe or a verdict-less answer cannot witness (err) — the dos CLI
+// exits 0 whenever it can answer, so the verdict, not the exit code, carries
+// liveness.
+func TestAssumeKernelLoopTriState(t *testing.T) {
+	if _, _, err := assumeKernelLoopTriState(nil, errors.New("dos not found")); err == nil {
+		t.Fatal("a probe that could not run must map to the cannot-witness err branch")
+	}
+	if _, _, err := assumeKernelLoopTriState(map[string]any{"alive": 1}, nil); err == nil {
+		t.Fatal("an answer without a verdict must map to the cannot-witness err branch")
+	}
+	detail, code, err := assumeKernelLoopTriState(map[string]any{"verdict": "AT_TARGET", "alive": 2, "target": 2}, nil)
+	if err != nil || code != 0 {
+		t.Fatalf("healthy verdict mapped to (code=%d, err=%v), want the holds exit 0", code, err)
+	}
+	if !strings.Contains(detail, "verdict=AT_TARGET") || !strings.Contains(detail, "alive=2") {
+		t.Fatalf("healthy detail %q drops the loop state", detail)
+	}
+	for _, verdict := range []string{"REFUSE_HOST", "HALTED", "PROPOSED_HALT"} {
+		_, code, err := assumeKernelLoopTriState(map[string]any{"verdict": verdict}, nil)
+		if err != nil || code != 1 {
+			t.Fatalf("refusing verdict %q mapped to (code=%d, err=%v), want the witnessed-refute exit 1", verdict, code, err)
 		}
 	}
 }
