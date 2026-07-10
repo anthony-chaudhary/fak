@@ -88,16 +88,84 @@ type Speculator struct {
 	// admits any matching pattern; set it to require empirical confidence.
 	MinProb float64
 
+	// MinTrials is the empirical-α WARMUP floor: a pattern must accumulate at least
+	// this many observed outcomes (Observe) before Predict gates on its MEASURED
+	// hit-rate instead of the declared SuccessProb prior. Below the floor the small
+	// sample is not yet trustworthy, so the declared prior governs. 0 =>
+	// defaultMinTrials.
+	MinTrials int
+
 	mu       sync.Mutex
 	patterns map[string][]SpecPattern // keyed by Signature
+	stats    map[string]*patternStat  // keyed by statKey(sig, tool): observed outcomes
 	epoch    uint64                   // monotonically issued speculation epoch ids
+}
+
+// patternStat is the running empirical-outcome tally for one pattern: how many
+// speculations were issued-and-resolved (trials) and how many the model's
+// authoritative call confirmed (hits). The MEASURED success probability α is
+// derived from these by laplaceRate, closing the loop the declared SuccessProb
+// prior only opens.
+type patternStat struct {
+	hits   uint64
+	trials uint64
+}
+
+// defaultMinTrials is the warmup floor used when Speculator.MinTrials is unset: a
+// pattern gates on its declared prior until this many outcomes are observed, then
+// switches to the measured rate. Small enough to adapt quickly, large enough that a
+// handful of unlucky early misses cannot evict a genuinely good pattern.
+const defaultMinTrials = 20
+
+// statKey is the per-pattern stats key. Outcomes are attributed by (signature,
+// predicted tool) — the same pair Predict issues under and Observe resolves — so a
+// pattern's measured α is tracked independently of any other pattern sharing its
+// signature.
+func statKey(sig, tool string) string { return sig + "\x00" + tool }
+
+// laplaceRate is the Laplace (add-one) smoothed hit-rate (hits+1)/(trials+2): a
+// Beta(1,1) uniform prior so a pattern with few trials is pulled toward 0.5 rather
+// than swinging to a hard 0 or 1 on a single outcome, and converges to the raw
+// hits/trials as evidence accumulates.
+func laplaceRate(hits, trials uint64) float64 {
+	return float64(hits+1) / float64(trials+2)
 }
 
 // NewSpeculator builds an ENABLED speculator with the given probability floor. The
 // zero-value Speculator is the disabled (v0.1 no-op) form; this constructor is the
 // opt-in. Patterns are added with Learn.
 func NewSpeculator(minProb float64) *Speculator {
-	return &Speculator{Enabled: true, MinProb: minProb, patterns: map[string][]SpecPattern{}}
+	return &Speculator{
+		Enabled:  true,
+		MinProb:  minProb,
+		patterns: map[string][]SpecPattern{},
+		stats:    map[string]*patternStat{},
+	}
+}
+
+// warmupFloor is the effective MinTrials (defaulted). Read under s.mu.
+func (s *Speculator) warmupFloor() int {
+	if s.MinTrials > 0 {
+		return s.MinTrials
+	}
+	return defaultMinTrials
+}
+
+// effectiveProbLocked is the probability Predict actually gates on for one pattern:
+// the MEASURED Laplace-smoothed hit-rate once the pattern has cleared the warmup
+// floor, else the declared SuccessProb prior. Called under s.mu.
+//
+// It deliberately does NOT max(declared, measured): an optimistic declared prior
+// must NOT be able to permanently mask a bad measured rate, or the loop could never
+// self-correct — a pattern the model keeps refuting has to fall below the floor and
+// stop being issued. Symmetrically, once warm the measured rate can PROMOTE a
+// pattern whose conservative declared prior sat below MinProb.
+func (s *Speculator) effectiveProbLocked(sig, tool string, declared float64) float64 {
+	st := s.stats[statKey(sig, tool)]
+	if st == nil || st.trials < uint64(s.warmupFloor()) {
+		return declared // warmup: too little evidence to trust the measured rate
+	}
+	return laplaceRate(st.hits, st.trials)
 }
 
 // Learn registers a prediction pattern. Patterns are indexed by signature, so
@@ -133,20 +201,32 @@ func (s *Speculator) Predict(sig string, prior []*Result, parentEpoch uint64) *T
 	if s == nil || !s.Enabled {
 		return nil // default-deny: a disabled (or nil) speculator never predicts
 	}
+	// Snapshot the candidates AND their effective (measured-or-declared) probability
+	// under the lock, then release it before calling the user's DeriveArgs — that
+	// callback must never run under s.mu (it could be slow or re-enter the
+	// speculator). eff[i] is the α Predict gates on: the measured rate once pattern i
+	// is warm, else its declared prior.
 	s.mu.Lock()
 	cands := s.patterns[sig]
+	eff := make([]float64, len(cands))
+	for i := range cands {
+		eff[i] = s.effectiveProbLocked(sig, cands[i].PredictTool, cands[i].SuccessProb)
+	}
 	s.mu.Unlock()
 
 	// Pick the highest-probability pattern that clears the floor AND can derive its
-	// args. A pattern that cannot derive its args is skipped, never guessed.
+	// args, ranking on the effective (empirically-corrected) probability. A pattern
+	// that cannot derive its args is skipped, never guessed.
 	var best *SpecPattern
 	var bestArgs Ref
+	var bestProb float64
 	for i := range cands {
 		p := &cands[i]
-		if p.SuccessProb < s.MinProb {
+		prob := eff[i]
+		if prob < s.MinProb {
 			continue
 		}
-		if best != nil && p.SuccessProb <= best.SuccessProb {
+		if best != nil && prob <= bestProb {
 			continue
 		}
 		if p.DeriveArgs == nil {
@@ -156,7 +236,7 @@ func (s *Speculator) Predict(sig string, prior []*Result, parentEpoch uint64) *T
 		if !ok {
 			continue // args not derivable from prior outputs — resist speculation
 		}
-		best, bestArgs = p, args
+		best, bestArgs, bestProb = p, args, prob
 	}
 	if best == nil {
 		return nil
@@ -193,6 +273,55 @@ func cloneMeta(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// Observe feeds a resolved speculation's ground-truth outcome back into the
+// pattern's empirical hit-rate — the loop-closing counterpart to Predict. Where
+// Predict ISSUES a speculation off the declared prior, Observe RECORDS whether the
+// model's authoritative call confirmed it, so the α that gates future predictions
+// is MEASURED on real traffic. sig is the context signature the speculation was
+// issued under; predicted is the call Predict returned; authoritative is the
+// model's real next call. The trial is attributed to the pattern keyed by (sig,
+// predicted.Tool) and counts a hit exactly when PredictionMatches — the SAME
+// verdict Resolve uses to commit/squash, so the measured rate can never drift from
+// the commit/squash ledger.
+//
+// A nil/disabled speculator, or a nil predicted call, observes nothing: the
+// default-off invariant means a kernel that never speculates measures nothing.
+func (s *Speculator) Observe(sig string, predicted, authoritative *ToolCall) {
+	if s == nil || !s.Enabled || predicted == nil {
+		return
+	}
+	key := statKey(sig, predicted.Tool)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stats == nil {
+		s.stats = map[string]*patternStat{}
+	}
+	st := s.stats[key]
+	if st == nil {
+		st = &patternStat{}
+		s.stats[key] = st
+	}
+	st.trials++
+	if PredictionMatches(predicted, authoritative) {
+		st.hits++
+	}
+}
+
+// MeasuredProb reports the Laplace-smoothed empirical success probability observed
+// for the pattern keyed by (sig, tool), and whether it has cleared the warmup floor
+// (MinTrials). While warm is false the sample is too small to trust and Predict
+// still gates on the pattern's declared SuccessProb prior; once warm is true Predict
+// gates on this measured value. An unobserved pattern reports (0, false).
+func (s *Speculator) MeasuredProb(sig, tool string) (prob float64, warm bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.stats[statKey(sig, tool)]
+	if st == nil {
+		return 0, false
+	}
+	return laplaceRate(st.hits, st.trials), st.trials >= uint64(s.warmupFloor())
 }
 
 // PredictionMatches reports whether the model's AUTHORITATIVE next call confirms
@@ -269,6 +398,20 @@ func Resolve(ctx context.Context, sinks []ProvisionalSink, txn TxnID, predicted,
 		return Commit(ctx, sinks, txn, epoch)
 	}
 	return Squash(ctx, sinks, txn, epoch)
+}
+
+// ResolveAndObserve is the loop-closing entrypoint a speculative dispatcher calls
+// once the model's authoritative next call is known: it both feeds the outcome back
+// into the pattern's measured hit-rate (Observe) and drives the provisional
+// lifecycle (Resolve) — commit on a match, squash on a miss. Bundling them means a
+// caller that holds the live signature closes the empirical-α loop with one call
+// and cannot forget to pair an Observe with a Resolve; the measured α and the
+// commit/squash ledger therefore advance in lockstep. sig is the context signature
+// the speculation was issued under; the (predicted, authoritative, sinks, txn)
+// arguments are exactly Resolve's.
+func (s *Speculator) ResolveAndObserve(ctx context.Context, sinks []ProvisionalSink, txn TxnID, sig string, predicted, authoritative *ToolCall) (Outcome, error) {
+	s.Observe(sig, predicted, authoritative)
+	return Resolve(ctx, sinks, txn, predicted, authoritative)
 }
 
 // ---------------------------------------------------------------------------
