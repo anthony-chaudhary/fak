@@ -838,6 +838,16 @@ def _ledger_blocked_sids(reg_dir=None):
                 sid = rec.get("session")
                 if not sid:
                     continue
+                # Re-arm marker (2026-07-10): reclaims a sid that burned its attempt budget on a
+                # KNOWN-transient infra fault (e.g. the managed-cache-1h-TTL 400 wave, #2178) rather
+                # than a real defect. Processed in append order, so it zeroes the launches accrued
+                # BEFORE it and lifts a prior block, letting the dedup primary election pick the sid
+                # again; a later manual_override/unrecoverable row re-blocks (last write wins). Mirrors
+                # the .ps1 launch gate so the planner and the launcher agree on eligibility.
+                if rec.get("phase") == "rearm" or rec.get("outcome") == "rearm":
+                    launches[sid] = 0
+                    blocked.discard(sid)
+                    continue
                 if rec.get("manual_override") or str(rec.get("action", "")).startswith("consolidate"):
                     blocked.add(sid)
                 if rec.get("outcome") == "unrecoverable":
@@ -876,6 +886,12 @@ def _ledger_inplace_attempts(reg_dir=None):
                     continue
                 sid = rec.get("session")
                 if not sid or rec.get("rehomed"):
+                    continue
+                # Re-arm marker (#2178 fix): a reclaimed sid restarts its in-place streak from 0, so
+                # it resumes in place once more before re-home escalation rather than immediately
+                # ping-ponging seats on reclaim. Zeroes the streak accrued before the marker.
+                if rec.get("phase") == "rearm" or rec.get("outcome") == "rearm":
+                    counts[sid] = 0
                     continue
                 if rec.get("phase") in ("launched", "resumed") or rec.get("cause"):
                     counts[sid] = counts.get(sid, 0) + 1

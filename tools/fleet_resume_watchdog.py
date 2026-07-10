@@ -281,6 +281,8 @@ def is_resume_attempt_record(h: dict) -> bool:
     must not burn the retry cap.
     """
     phase = h.get("phase")
+    if phase == "rearm" or h.get("outcome") == "rearm":
+        return False  # a re-arm reclaim marker (#2178), not a spawned resume attempt
     if phase in NON_LAUNCH_PHASES:
         return False
     if phase in ("launched", "resumed"):
@@ -629,6 +631,16 @@ def resume_blocked(sid: str, history: list[dict]) -> tuple[bool, str]:
     the last attempt failed recoverably and we are under the attempt cap" -- so a
     resume that immediately hit a usage-limit wall is retried past the reset instead
     of being permanently stranded."""
+    if not history:
+        return False, ""
+    # Re-arm marker (#2178): a reclaim row zeroes the attempt budget accrued before it and lifts
+    # any earlier operator/auth settle -- so consider only the history AFTER the last rearm. This
+    # keeps the .py gate in parity with the .ps1 launch gate and the fleet_sessions.py planner.
+    for i in range(len(history) - 1, -1, -1):
+        h = history[i]
+        if h.get("phase") == "rearm" or h.get("outcome") == "rearm":
+            history = history[i + 1:]
+            break
     if not history:
         return False, ""
     # A manual override entry (operator-settled) is authoritative -- honor it.

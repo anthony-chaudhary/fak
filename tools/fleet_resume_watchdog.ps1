@@ -44,7 +44,13 @@ param(
   [switch]$Live,
   [string]$FleetDir   = '',
   [int]$WindowH       = 6,
-  [int]$MaxPerTick    = 4,
+  # Max resumes launched per tick. Raised 4 -> 6 (2026-07-10) to gear up the drain once the
+  # managed-cache-1h-TTL-400 root cause was fixed: with the subscription 400 removed, each
+  # launched resume now PROVES a turn instead of crash-looping, so the eligible backlog
+  # (observed ~150 mid-incident) actually shrinks per tick -- a modestly higher cap drains it
+  # faster. This is a soft cap: the shared source governor + LaunchSpacingSec remain the real
+  # account-pressure rail, so 6 cannot burst past what the governor admits. Override with -MaxPerTick.
+  [int]$MaxPerTick    = 6,
   # Ledger-counted resume attempts per session before it is left for a human. Was an
   # implicit 1 ("resume once ever"); raised so a session that keeps dying is retried --
   # and re-homed onto a fresh seat by the planner after repeated in-place failures --
@@ -187,25 +193,43 @@ function SourceAdmitGate($ledgerPath, $policyPath) {
 function Get-ManagedCachePosture {
   # #2178 parity for the resume wave: shape the `fak guard` managed-cache flags from the same
   # two fleet env knobs the Go launchers read (FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV) in
-  # the same stable order (--api-key-env then --managed-cache). On-by-default (2026-07-10): an
-  # UNSET knob normalizes to on (mirrors the Go normalizeManagedCacheMode), so an unconfigured
-  # fleet FRONTS the resume with --managed-cache on rather than staying byte-identical. Only an
-  # EXPLICIT 'auto' emits NOTHING (guard keeps its own billing-gated auto); 'off' opts out. A
-  # malformed mode returns @() plus a Warn string rather than throwing -- a headless launcher
-  # warns-and-continues passive instead of stranding the whole resume wave.
+  # the same stable order (--api-key-env then --managed-cache). Only an EXPLICIT 'auto' emits
+  # NOTHING (guard keeps its own billing-gated auto); 'off' opts out; a malformed mode returns
+  # @() plus a Warn string rather than throwing -- a headless launcher warns-and-continues
+  # passive instead of stranding the whole resume wave.
+  #
+  # Subscription-safe UNSET default (2026-07-10, supersedes the blind unset=>on that #2178
+  # introduced). Forcing --managed-cache on activates the stable-prefix 1h-TTL cache_control
+  # upgrade, which the subscription-OAuth wire rejects as
+  #   `API Error: 400 upstream rejected the request as malformed`
+  # -> instant CHILD_CRASH, so the resumed session NEVER proves a turn. This was proven by a
+  # clean-env ablation on a subscription seat: bare/auto resumes returned a real turn, but
+  # `fak guard --managed-cache on` 400'd EVEN with the extended-cache-ttl beta-union fix
+  # compiled in (docs/notes/MANAGED-CACHE-1H-TTL-400-FIX-2026-07-09.md). The 1h upgrade only
+  # pays off on an API-KEY-billed seat; on flat-rate subscription OAuth it is pure downside.
+  # So an UNSET knob is now billing-AWARE: force `on` only when an API-key env is configured,
+  # else default to `auto` (guard's billing-gated posture -> passive on subscription, ACTIVE on
+  # api-key). This keeps "best-effort managed cache everywhere" but RESOLVES it correctly
+  # instead of 400-crashing every subscription resume. An EXPLICIT on|off|auto is still honored
+  # verbatim; an explicit `on` with no api-key env is honored but Warn'd (it will 400 a sub seat).
   $raw = ("$env:FAK_MANAGED_CACHE").Trim().ToLowerInvariant()
+  $apiKeyEnv = ("$env:FAK_GUARD_API_KEY_ENV").Trim()
+  $warn = $null
   if ($raw -eq '') {
-    $mode = 'on'   # unset => on (operator policy: best-effort managed cache everywhere)
+    if ($apiKeyEnv -ne '') { $mode = 'on' }   # api-key seat: 1h-TTL upgrade helps and is well-formed (beta-union fix)
+    else { $mode = 'auto' }                    # subscription seat: billing-gated auto -> passive (forcing on 400s the OAuth wire)
   } elseif ($raw -eq 'auto' -or $raw -eq 'on' -or $raw -eq 'off') {
     $mode = $raw
+    if ($mode -eq 'on' -and $apiKeyEnv -eq '') {
+      $warn = "FAK_MANAGED_CACHE=on with no FAK_GUARD_API_KEY_ENV: the forced 1h-TTL upgrade 400s a subscription-OAuth resume ('upstream rejected the request as malformed'); use auto/off on subscription seats or set an api-key env"
+    }
   } else {
     return @{ Args = @(); Warn = "FAK_MANAGED_CACHE='$raw': unknown managed-cache mode (auto|on|off) -- ignoring; resuming passive" }
   }
-  $apiKeyEnv = ("$env:FAK_GUARD_API_KEY_ENV").Trim()
   $postureArgs = @()
   if ($apiKeyEnv -ne '') { $postureArgs += @('--api-key-env', $apiKeyEnv) }
   if ($mode -ne 'auto') { $postureArgs += @('--managed-cache', $mode) }
-  return @{ Args = $postureArgs; Warn = $null }
+  return @{ Args = $postureArgs; Warn = $warn }
 }
 
 function AppendJsonLine($path, $obj) {
@@ -426,6 +450,18 @@ if (Test-Path $ledgerPath) {
       $r = $_ | ConvertFrom-Json
       $s = $r.session
       if (-not $s) { return }
+      # Re-arm marker (2026-07-10): a self-heal/operator row that reclaims a session which burned
+      # its whole attempt budget on a KNOWN-transient infra fault -- e.g. the managed-cache-1h-TTL
+      # 400 wave (#2178), where every resume 400'd on a subscription seat and falsely climbed to
+      # the 8/8 cap -- rather than a real defect. Processed in append order, so it zeroes the
+      # attempts accrued BEFORE it and lifts a prior soft block; any launch appended AFTER it
+      # counts again from 0. A later manual_override/unrecoverable row re-blocks (last write wins).
+      if ($r.phase -eq 'rearm' -or $r.outcome -eq 'rearm') {
+        $launchCount[$s] = 0
+        $lastLaunch[$s] = [int64]0
+        [void]$ledgerBlocked.Remove($s)
+        return
+      }
       if ($r.manual_override -or ("$($r.action)").StartsWith('consolidate')) { $ledgerBlocked[$s] = $true }
       if ($r.outcome -eq 'unrecoverable') { $ledgerBlocked[$s] = $true }
       $nonLaunchPhase = ($r.phase -eq 'deferred') -or ($r.phase -eq 'considered') -or ($r.phase -eq 'skipped') -or ($r.phase -eq 'gate_fail_open')
