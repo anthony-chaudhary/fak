@@ -265,7 +265,51 @@ func appendGoalScratch(path, line string) error {
 		text += "\n# Scratch / last-refusal\n"
 	}
 	text += "- " + strings.TrimSpace(line) + "\n"
+	// Bound the scratch section: without a cap it grows one line per non-terminal turn
+	// forever, so every whole-file read+rewrite of GOAL.md in the loop driver becomes
+	// O(turns) and a long drive degrades O(N^2) in I/O with unbounded disk (#3453). Only
+	// the last scratch line is ever consumed (lastLoopGoalScratchLine / FAK_GOAL_LAST_REFUSAL),
+	// so trimming to the most recent entries is loss-free for every reader.
+	text = capGoalScratch(text, goalScratchCap)
 	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+// goalScratchCap bounds the "# Scratch / last-refusal" section to its most recent entries.
+// Sized so a long nightly drive keeps a useful refusal tail without the file growing with
+// the turn count; only the final entry is functionally read, the rest is operator context.
+const goalScratchCap = 50
+
+// capGoalScratch trims the scratch section of a goal file to its last `cap` entry lines,
+// preserving the preamble (goal spec) and the section header verbatim. It is a pure
+// function of the file text so it is unit-testable without disk. A non-positive cap, a file
+// with no scratch section, or a section already within cap is returned unchanged.
+func capGoalScratch(text string, cap int) string {
+	if cap <= 0 {
+		return text
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	// Header index: last "# … scratch …" heading wins, matching goalHasScratch semantics.
+	header := -1
+	for i, ln := range lines {
+		l := strings.ToLower(strings.TrimSpace(ln))
+		if strings.HasPrefix(l, "#") && strings.HasPrefix(strings.TrimSpace(strings.TrimLeft(l, "#")), "scratch") {
+			header = i
+		}
+	}
+	if header < 0 {
+		return text
+	}
+	var entries []string
+	for _, ln := range lines[header+1:] {
+		if strings.TrimSpace(ln) != "" {
+			entries = append(entries, ln)
+		}
+	}
+	if len(entries) <= cap {
+		return text
+	}
+	out := append(lines[:header+1:header+1], entries[len(entries)-cap:]...)
+	return strings.Join(out, "\n") + "\n"
 }
 
 func goalHasScratch(text string) bool {
