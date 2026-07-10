@@ -416,6 +416,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[IndexFreshnessRequest](p.Arguments, "fak_index_freshness", func(req IndexFreshnessRequest) (any, error) {
 			return s.indexFreshness(req)
 		})
+	case "fak_trajquery":
+		return mcpDecodeCall[TrajQueryRequest](p.Arguments, "fak_trajquery", func(req TrajQueryRequest) (any, error) {
+			return s.trajQuery(req)
+		})
 	case "fak_feature_query":
 		return mcpDecodeCall[FeatureQueryRequest](p.Arguments, "fak_feature_query", func(req FeatureQueryRequest) (any, error) {
 			return s.featureQuery(req)
@@ -584,7 +588,7 @@ func toolDescriptors() []map[string]any {
   },
   "required": ["tool"]
 }`)
-	return []map[string]any{
+	tools := []map[string]any{
 		{
 			"name":        "fak_adjudicate",
 			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns the verdict (ALLOW/DENY/TRANSFORM/REQUIRE_WITNESS) and, for a denial, a disposition (RETRYABLE/WAIT/ESCALATE/TERMINAL); for a TRANSFORM, the repaired canonical arguments. Call this before running a tool your own client executes.",
@@ -739,6 +743,18 @@ func toolDescriptors() []map[string]any {
 			"description": "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
 			"inputSchema": capabilitiesInputSchema,
 		},
+	}
+	// The scoped trajectory-query surface (#3550): trajquery over MCP with the same
+	// validate -> rewrite -> execute scope enforcement the CLI runs.
+	tools = append(tools, trajqueryToolDescriptor())
+	return append(tools, contextIntrospectionToolDescriptors()...)
+}
+
+// contextIntrospectionToolDescriptors is the tools/list tail covering the
+// managed-context introspection surface (value report, compacted-task restore,
+// restorable-span discovery). Split out of toolDescriptors as a cohesive concern.
+func contextIntrospectionToolDescriptors() []map[string]any {
+	return []map[string]any{
 		{
 			"name":        "fak_context_value",
 			"description": "Query the managed-context value report for a session BEFORE sizing your next step in a long session. Returns three levels — tokens (resident window, budget headroom, growth per reply; OBSERVED), turns (turns observed, context events, estimated turns to the next compaction; WITNESSED/FORECAST), session (lifecycle phase, cumulative volumes) — plus a closed step_advice verdict: any (wide headroom, a large step fits) | bounded (take a single-concern step) | checkpoint (land in-flight state before the window turns over) | rebuild (the window was just rewritten; re-anchor from durable state first) | unknown (the window edge is not visible; the reason says why). Advice-only; nothing enforces it. Pass {trace_id?}; omitted uses the gateway default trace (your own session under fak guard).",

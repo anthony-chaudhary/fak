@@ -180,3 +180,81 @@ func anyContains(ss []string, sub string) bool {
 	}
 	return false
 }
+
+// enumView adds a per-column literal set on top of the allowlist.
+func enumView() View {
+	v := sessionView()
+	v.Enums = map[string][]string{"role": {"agent", "user"}}
+	return v
+}
+
+func TestValidate_EnumRejectsUndeclaredLiteral(t *testing.T) {
+	v := enumView()
+	// 'system' is allowlisted-column-legal but is NOT a declared role literal.
+	user, _ := Parse("SELECT id FROM myturns WHERE role = 'system'")
+	rep := v.Validate(user, corpus())
+	if rep.Valid || !anyContains(rep.Violations, "allowed literals") {
+		t.Fatalf("undeclared enum literal must be rejected: %+v", rep)
+	}
+	// A declared literal on the same column passes.
+	ok, _ := Parse("SELECT id FROM myturns WHERE role = 'agent'")
+	if rep := v.Validate(ok, corpus()); !rep.Valid {
+		t.Fatalf("declared enum literal rejected: %v", rep.Violations)
+	}
+}
+
+func TestValidate_EnumBlocksLikeSubstringProbe(t *testing.T) {
+	v := enumView()
+	// A partial LIKE substring is not a full declared literal — it would let a caller sniff
+	// the closed set one character at a time, so it is refused.
+	probe, _ := Parse("SELECT id FROM myturns WHERE role LIKE 'age'")
+	if rep := v.Validate(probe, corpus()); rep.Valid {
+		t.Fatal("LIKE substring probe of an enum column must be rejected")
+	}
+	// A LIKE whose value IS a full literal is fine.
+	full, _ := Parse("SELECT id FROM myturns WHERE role LIKE 'agent'")
+	if rep := v.Validate(full, corpus()); !rep.Valid {
+		t.Fatalf("enum-literal LIKE rejected: %v", rep.Violations)
+	}
+}
+
+func TestSchema_AdvertisesColumnsEnumsScope(t *testing.T) {
+	s := enumView().Schema()
+	if strings.Join(s.Columns, ",") != "id,session,role,text,redacted" {
+		t.Fatalf("schema columns = %v", s.Columns)
+	}
+	if strings.Join(s.Enums["role"], ",") != "agent,user" {
+		t.Fatalf("schema role enum = %v", s.Enums["role"])
+	}
+	// Scope is rendered as strings so a caller sees what is always enforced.
+	if len(s.Scope) != 2 || !anyContains(s.Scope, "session = 'S1'") {
+		t.Fatalf("schema scope = %v", s.Scope)
+	}
+}
+
+func TestDescribe_IsDeterministicAndHidesNonAllowlisted(t *testing.T) {
+	d := enumView().Describe()
+	if strings.Contains(d, "secret") {
+		t.Fatalf("Describe must not name a hidden column: %s", d)
+	}
+	for _, want := range []string{"columns:", "enums:", "role: agent, user", "scope"} {
+		if !strings.Contains(d, want) {
+			t.Fatalf("Describe missing %q: %s", want, d)
+		}
+	}
+}
+
+func TestQueryString_RendersScopeEnforcedRewrite(t *testing.T) {
+	v := sessionView()
+	user, _ := Parse("SELECT id, text FROM myturns WHERE role = 'agent' LIMIT 5")
+	rw, err := v.Rewrite(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rw.String()
+	for _, want := range []string{"SELECT id, text FROM traj", "session = 'S1'", "role = 'agent'", "LIMIT 5"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rewrite render missing %q: %s", want, got)
+		}
+	}
+}

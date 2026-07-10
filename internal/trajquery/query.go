@@ -52,6 +52,30 @@ func (q Query) selectsAll() bool {
 	return len(q.Columns) == 1 && q.Columns[0] == "*"
 }
 
+// String renders the query back to its SQL-ish source form (stable column and predicate
+// order). It is used for audit/echo — e.g. showing a caller the scope-enforced rewritten
+// query the server actually executed, so the enforced scope is visible, not hidden.
+func (q Query) String() string {
+	cols := "*"
+	if !q.selectsAll() && len(q.Columns) > 0 {
+		cols = strings.Join(q.Columns, ", ")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "SELECT %s FROM %s", cols, q.From)
+	if len(q.Where) > 0 {
+		parts := make([]string, len(q.Where))
+		for i, p := range q.Where {
+			parts[i] = p.String()
+		}
+		b.WriteString(" WHERE ")
+		b.WriteString(strings.Join(parts, " AND "))
+	}
+	if q.Limit > 0 {
+		fmt.Fprintf(&b, " LIMIT %d", q.Limit)
+	}
+	return b.String()
+}
+
 // referencedColumns is every column the query names, in projection or WHERE — the set the
 // scope validator checks against a view's allowlist. "*" is reported via selectsAll, not here.
 func (q Query) referencedColumns() []string {

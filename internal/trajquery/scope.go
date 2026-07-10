@@ -2,6 +2,7 @@ package trajquery
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -10,10 +11,69 @@ import (
 // Columns is the allowlist of fields they may project or filter on. A view is the ONLY
 // sanctioned way to query the corpus — a query against the base relation is an escape.
 type View struct {
-	Name    string      `json:"name"`    // the relation name a user query must target
-	Base    string      `json:"base"`    // the underlying corpus relation
-	Scope   []Predicate `json:"scope"`   // non-removable row filter (ANDed into every query)
-	Columns []string    `json:"columns"` // allowlisted selectable/filterable columns
+	Name    string              `json:"name"`            // the relation name a user query must target
+	Base    string              `json:"base"`            // the underlying corpus relation
+	Scope   []Predicate         `json:"scope"`           // non-removable row filter (ANDed into every query)
+	Columns []string            `json:"columns"`         // allowlisted selectable/filterable columns
+	Enums   map[string][]string `json:"enums,omitempty"` // optional: per-column closed set of allowed WHERE literals
+}
+
+// ViewSchema is the queryable surface of a View, rendered for a client: the view name,
+// its base, the column allowlist, the per-column enum literals, and the always-enforced
+// scope predicates as strings. It is what the MCP tool advertises and echoes so a caller
+// knows exactly what it may project/filter — and which literals an enum column accepts —
+// WITHOUT ever seeing the base relation's full column set.
+type ViewSchema struct {
+	Name    string              `json:"name"`
+	Base    string              `json:"base"`
+	Columns []string            `json:"columns"`
+	Enums   map[string][]string `json:"enums,omitempty"`
+	Scope   []string            `json:"scope,omitempty"`
+}
+
+// Schema returns the View's advertised queryable surface (columns + enum literals +
+// rendered scope). The scope predicates are shown so a caller sees what is ANDed into
+// every query; the base is named but is never a legal query target.
+func (v View) Schema() ViewSchema {
+	scope := make([]string, 0, len(v.Scope))
+	for _, p := range v.Scope {
+		scope = append(scope, p.String())
+	}
+	return ViewSchema{
+		Name:    v.Name,
+		Base:    v.Base,
+		Columns: append([]string{}, v.Columns...),
+		Enums:   v.Enums,
+		Scope:   scope,
+	}
+}
+
+// Describe renders the queryable surface as a compact, deterministic, human- and
+// model-readable string: the column allowlist, any per-column enum literals, and the
+// always-enforced scope. It is the text form of Schema, suitable for a tool description
+// or an audit line, and never names a non-allowlisted (hidden) column.
+func (v View) Describe() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "view %q over base %q\ncolumns: %s", v.Name, v.Base, strings.Join(v.Columns, ", "))
+	if len(v.Enums) > 0 {
+		keys := make([]string, 0, len(v.Enums))
+		for k := range v.Enums {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // stable render regardless of map order
+		b.WriteString("\nenums:")
+		for _, k := range keys {
+			fmt.Fprintf(&b, "\n  %s: %s", k, strings.Join(v.Enums[k], ", "))
+		}
+	}
+	if len(v.Scope) > 0 {
+		parts := make([]string, len(v.Scope))
+		for i, p := range v.Scope {
+			parts[i] = p.String()
+		}
+		fmt.Fprintf(&b, "\nscope (enforced on every query): %s", strings.Join(parts, " AND "))
+	}
+	return b.String()
 }
 
 // Rewrite turns a user query written against the view into an executable query against
@@ -173,8 +233,25 @@ func (v View) staticValidate(user Query) error {
 		if !allowed[p.Field] {
 			return fmt.Errorf("WHERE references column %q outside view %q's allowlist", p.Field, v.Name)
 		}
+		// An enum-constrained column accepts ONLY its declared literals as a WHERE value —
+		// on ANY operator. This both documents the legal values and blocks the partial-probe
+		// escape (`WHERE status LIKE 'a'` to sniff the set one substring at a time): a LIKE is
+		// permitted only when its value is itself a full declared literal.
+		if lits, constrained := v.Enums[p.Field]; constrained && !containsStr(lits, p.Value) {
+			return fmt.Errorf("WHERE value %q for column %q is not one of view %q's allowed literals [%s]",
+				p.Value, p.Field, v.Name, strings.Join(lits, ", "))
+		}
 	}
 	return nil
+}
+
+func containsStr(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func containsPred(preds []Predicate, want Predicate) bool {
