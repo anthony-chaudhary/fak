@@ -366,15 +366,15 @@ func ggufMemoryPlanByDType(class compute.MemoryClass, scope compute.MemoryScope,
 }
 
 func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
+	// The MTP ("nextn") head + vision tower carry no canonical HF mapping. Classify them as
+	// non-expert (never a mapping error) via the UNGATED union: when model.RetainMTP retains
+	// the MTP head, the offload estimator no longer skips it before this helper, so it must
+	// still classify (as a device weight) rather than fall through to CanonicalTensorNameArch
+	// and reject a real GLM-5.2, DeepSeek-V3, or Qwen3.6 checkpoint.
+	if archShipsMTPOrVisionSidecar(modelType) && glmMoeDsaMTPOrVisionTensor(name) {
+		return false, nil
+	}
 	if archUsesMLAMoELayout(modelType) {
-		// The MTP ("nextn") head + vision tower carry no canonical HF mapping. Classify them as
-		// non-expert (never a mapping error) via the UNGATED union: when model.RetainMTP retains
-		// the MTP head, the offload estimator no longer skips it before this helper, so it must
-		// still classify (as a device weight) rather than fall through to CanonicalTensorNameArch
-		// and reject a real GLM-5.2 checkpoint.
-		if glmMoeDsaMTPOrVisionTensor(name) {
-			return false, nil
-		}
 		if _, _, ok := glmMoeDsaSplitKVB(name); ok {
 			return false, nil
 		}

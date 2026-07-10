@@ -212,12 +212,26 @@ func glmMoeDsaSkipGGUFTensor(name string) bool {
 	return false
 }
 
+// archShipsMTPOrVisionSidecar reports whether a canonical arch is known to ship llama.cpp
+// "blk.<L>.nextn.*" MTP-head (and possibly v.*/mm.* vision-tower) sidecar tensors that the text
+// causal-LM forward never reads and that carry no canonical HF mapping. Beyond the MLA+MoE
+// family, the qwen35 family (Qwen3.5/3.6) ships the same nextn head: Qwen3.6-27B Q4_K_M carries
+// a trailing blk.64.nextn.* draft block (witnessed 2026-07-10 — the load died at 97% on
+// "no canonical mapping for tensor blk.64.nextn.eh_proj.weight"), which is exactly the layer the
+// gguf_config.go nextn_predict_layers subtraction already excludes from NumLayers.
+func archShipsMTPOrVisionSidecar(arch string) bool {
+	if archUsesMLAMoELayout(arch) {
+		return true
+	}
+	return arch == "qwen35" || arch == "qwen35moe"
+}
+
 // glmMoeDsaSkipGGUFTensorForType reports whether a tensor should be dropped from byte-accounting
-// for the given model type: true only for a glm_moe_dsa file whose tensor is dropped by
-// glmMoeDsaSkipGGUFTensor. It is the shared guard the byte-accounting estimators use so the
-// "glm_moe_dsa" family check stays in one place.
+// for the given model type: true only for a file whose arch ships the MTP/vision sidecar AND
+// whose tensor is dropped by glmMoeDsaSkipGGUFTensor. It is the shared guard the byte-accounting
+// estimators use so the arch-family check stays in one place.
 func glmMoeDsaSkipGGUFTensorForType(modelType, name string) bool {
-	return archUsesMLAMoELayout(modelType) && glmMoeDsaSkipGGUFTensor(name)
+	return archShipsMTPOrVisionSidecar(modelType) && glmMoeDsaSkipGGUFTensor(name)
 }
 
 // glmMoeDsaBatchedExpert reports whether a glm_moe_dsa GGUF tensor name is a batched routed-expert

@@ -56,3 +56,32 @@ func TestQwen35NextNAbsurdCountIgnored(t *testing.T) {
 		t.Fatalf("NumLayers=%d, want 4 (nextn_predict_layers >= block_count must be ignored)", cfg.NumLayers)
 	}
 }
+
+// TestQwen35NextNTensorsSkippedFromLoadAndClassify pins the OTHER half of the NextN contract,
+// witnessed failing on da33 2026-07-10: the real Qwen3.6-27B Q4_K_M died at 97% of load with
+// "gguf: no canonical mapping for tensor blk.64.nextn.eh_proj.weight". Subtracting the draft
+// block from NumLayers (above) is not enough — the materializing loader and the CPU-offload
+// classifier must also SKIP the trailing blk.<L>.nextn.* glue tensors for the qwen35 family,
+// exactly as they do for GLM-5.2/DeepSeek, instead of rejecting the checkpoint.
+func TestQwen35NextNTensorsSkippedFromLoadAndClassify(t *testing.T) {
+	const nextn = "blk.64.nextn.eh_proj.weight"
+	for _, arch := range []string{"qwen35", "qwen35moe"} {
+		if !archShipsMTPOrVisionSidecar(arch) {
+			t.Fatalf("archShipsMTPOrVisionSidecar(%q)=false, want true", arch)
+		}
+		if !glmMoeDsaSkipGGUFTensorForType(arch, nextn) {
+			t.Fatalf("glmMoeDsaSkipGGUFTensorForType(%q, %s)=false, want true (byte-accounting drop)", arch, nextn)
+		}
+		hostExpert, err := tensorCPUOffloadExpert(nextn, arch)
+		if err != nil {
+			t.Fatalf("tensorCPUOffloadExpert(%s, %q) must classify, not error: %v", nextn, arch, err)
+		}
+		if hostExpert {
+			t.Fatalf("tensorCPUOffloadExpert(%s, %q)=true, want false (device weight, never offloaded)", nextn, arch)
+		}
+	}
+	// A plain dense arch without the sidecar contract keeps the strict mapping error.
+	if archShipsMTPOrVisionSidecar("llama") {
+		t.Fatalf("archShipsMTPOrVisionSidecar(llama)=true, want false")
+	}
+}

@@ -183,13 +183,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	// read-only Config), so it is safe to run from many workers at once.
 	computeFn := func(info TensorInfo) tensorWork {
 		tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
+		// Drop the MTP ("nextn") head + any vision tower the text forward never reads, for every
+		// arch that ships them as sidecars (GLM-5.2, DeepSeek, Qwen3.5/3.6). Ungated union: the
+		// MTP head has no canonical slot to materialize into yet even under model.RetainMTP, so
+		// drop it from materialization while the estimators count its bytes.
+		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+			return tw
+		}
 		if archUsesMLAMoELayout(cfg.ModelType) {
-			// Drop the MTP ("nextn") head + any vision tower the text forward never reads. Ungated
-			// union: the MTP head has no canonical slot to materialize into yet even under
-			// model.RetainMTP, so drop it from materialization while the estimators count its bytes.
-			if glmMoeDsaMTPOrVisionTensor(info.Name) {
-				return tw
-			}
 			// MLA KV-b half: dequant it; the collector buffers + merges the pair in order.
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 				shape, data, err := s.dequantGGUFShapeF32(info)
