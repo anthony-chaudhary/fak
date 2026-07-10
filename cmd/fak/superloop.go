@@ -555,6 +555,12 @@ func superloopUsage(w io.Writer) {
   fak superloop drive <name> [--lane L]  walk, then ENTER the one worst-first member
                                       through the same admission gate any spawn passes
                                       (COLLISION_RISK on lease overlap), and re-fold
+       [--batch N]                    admit up to N worst-first members whose regions
+                                      are mutually disjoint (and disjoint from live
+                                      leases) in one drive, through the SAME gate; N<=0
+                                      offers every member. Default 1 (single member);
+                                      FAK_SUPERLOOP_BATCH sets this default fleet-wide
+                                      when --batch is not given (explicit flag wins)
   fak superloop modelfit [--json]     offline model-fit eval: which cheaper models can
                                       do read-only watchdog/meta work reliably (#3043)
 

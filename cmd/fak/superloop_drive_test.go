@@ -174,6 +174,257 @@ func TestSuperloopDriveEntersTrajectoryMember(t *testing.T) {
 	}
 }
 
+// TestSuperloopDriveBatchEntersTopKConcurrently is the batch DoD witness: `--batch 2`
+// offers the top-2 worst-first members and, when the SHARED gate admits both under
+// DISTINCT member-scoped leases, enters both in ONE invocation and re-folds ONCE.
+// This is the throughput widening — K interior-node entries per drive instead of one
+// — with no private spawn path (every member still passes the same gate seam).
+func TestSuperloopDriveBatchEntersTopKConcurrently(t *testing.T) {
+	orig := superloopDriveAdmitGate
+	t.Cleanup(func() { superloopDriveAdmitGate = orig })
+	// Admit every member; echo the member-scoped intent into the lease so the test
+	// can prove K distinct holds coexisted (the gate mints one lease id per member).
+	var gateCalls []string
+	superloopDriveAdmitGate = func(root, lane string, tree []string, intent string) (superloopDriveAdmit, func()) {
+		gateCalls = append(gateCalls, intent)
+		return superloopDriveAdmit{Status: "ADMITTED", Admitted: true, Lease: "lease-" + intent, Tree: tree}, func() {}
+	}
+
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+
+	code := runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--batch", "2", "--json"})
+	if code != 1 {
+		t.Fatalf("an entered-but-unsatisfied batch of an empty workspace must exit 1, got %d: stderr=%s", code, errb.String())
+	}
+
+	var rep superloopDriveBatchReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("batch json: %v\n%s", err, out.String())
+	}
+	if rep.Outcome != "entered" || rep.Admitted != 2 || rep.Refused != 0 || rep.Offered != 2 {
+		t.Fatalf("want 2 admitted/0 refused/entered, got outcome=%q admitted=%d refused=%d offered=%d", rep.Outcome, rep.Admitted, rep.Refused, rep.Offered)
+	}
+	if len(rep.Entries) != 2 || !rep.Entries[0].Entered || !rep.Entries[1].Entered {
+		t.Fatalf("both offered members must be entered, got %+v", rep.Entries)
+	}
+	if rep.Entries[0].Decision.Rank != 1 || rep.Entries[1].Decision.Rank != 2 {
+		t.Errorf("entries must be worst-first (rank 1 then 2), got %d then %d", rep.Entries[0].Decision.Rank, rep.Entries[1].Decision.Rank)
+	}
+	if l0, l1 := rep.Entries[0].Admission.Lease, rep.Entries[1].Admission.Lease; l0 == l1 {
+		t.Errorf("each batch member must hold a DISTINCT member-scoped lease, got both %q", l0)
+	}
+	if rep.Refold == nil || rep.Refold.Satisfied {
+		t.Error("a batch of an empty workspace must re-fold ONCE and honestly unsatisfied")
+	}
+	if len(gateCalls) != 2 || gateCalls[0] == gateCalls[1] {
+		t.Errorf("the gate must be consulted once per member with distinct scopes, got %v", gateCalls)
+	}
+
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if n := strings.Count(string(data), `"status":"admitted"`); n != 2 {
+		t.Errorf("ledger must carry one admitted witness per entered member (2), got %d:\n%s", n, string(data))
+	}
+}
+
+// TestSuperloopDriveBatchSurfacesRefusalAndEntersRest is the batch collision witness:
+// when the gate ADMITS one member and REFUSES another (COLLISION_RISK), the batch
+// enters the admitted one, SURFACES the refusal token (never bypassing the gate), and
+// still re-folds — refused members are skipped, not silently dropped. This is how the
+// batch stays honest while scaling: throughput follows the non-colliding members only.
+func TestSuperloopDriveBatchSurfacesRefusalAndEntersRest(t *testing.T) {
+	orig := superloopDriveAdmitGate
+	t.Cleanup(func() { superloopDriveAdmitGate = orig })
+	var n int
+	superloopDriveAdmitGate = func(root, lane string, tree []string, intent string) (superloopDriveAdmit, func()) {
+		n++
+		if n == 1 {
+			return superloopDriveAdmit{Status: "ADMITTED", Admitted: true, Lease: "lease-" + intent}, func() {}
+		}
+		return superloopDriveAdmit{Status: "COLLISION_RISK", Admitted: false, Lease: "lease-" + intent,
+			Detail: "region overlaps a live lease held by a peer worker"}, func() {}
+	}
+
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+
+	code := runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--batch", "2", "--json"})
+	if code != 1 {
+		t.Fatalf("a batch that entered >=1 member (unsatisfied) must exit 1, got %d: stderr=%s", code, errb.String())
+	}
+
+	var rep superloopDriveBatchReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("batch json: %v\n%s", err, out.String())
+	}
+	if rep.Outcome != "entered" || rep.Admitted != 1 || rep.Refused != 1 {
+		t.Fatalf("want 1 admitted/1 refused/entered, got outcome=%q admitted=%d refused=%d", rep.Outcome, rep.Admitted, rep.Refused)
+	}
+	if !rep.Entries[0].Entered || rep.Entries[1].Entered {
+		t.Errorf("first must be entered, second (refused) must NOT be, got %+v", rep.Entries)
+	}
+	if rep.Entries[1].Admission.Status != "COLLISION_RISK" {
+		t.Errorf("the refused member must carry the surfaced token, got %q", rep.Entries[1].Admission.Status)
+	}
+	if !strings.Contains(errb.String(), "COLLISION_RISK") {
+		t.Errorf("stderr must surface the refusal token, got %q", errb.String())
+	}
+	if rep.Refold == nil {
+		t.Error("a batch that entered at least one member must re-fold")
+	}
+
+	data, _ := os.ReadFile(ledger)
+	row := string(data)
+	if !strings.Contains(row, `"status":"admitted"`) || !strings.Contains(row, `"status":"refused"`) {
+		t.Errorf("ledger must carry BOTH the admitted and the refused witness:\n%s", row)
+	}
+}
+
+// TestSuperloopDriveBatchAllRefusedEntersNothing pins that when the gate refuses EVERY
+// offered member, the batch enters nothing, exits 3 (the single drive's refusal code),
+// and does NOT re-fold — a re-fold would falsely imply work happened. No admitted row
+// is written (no bypass).
+func TestSuperloopDriveBatchAllRefusedEntersNothing(t *testing.T) {
+	orig := superloopDriveAdmitGate
+	t.Cleanup(func() { superloopDriveAdmitGate = orig })
+	superloopDriveAdmitGate = func(root, lane string, tree []string, intent string) (superloopDriveAdmit, func()) {
+		return superloopDriveAdmit{Status: "COLLISION_RISK", Admitted: false, Lease: "lease-" + intent,
+			Detail: "region overlaps a live lease"}, func() {}
+	}
+
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+
+	code := runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--batch", "3", "--json"})
+	if code != 3 {
+		t.Fatalf("an all-refused batch must exit 3, got %d: stderr=%s", code, errb.String())
+	}
+	var rep superloopDriveBatchReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("batch json: %v\n%s", err, out.String())
+	}
+	if rep.Outcome != "refused" || rep.Admitted != 0 || rep.Refused != 3 {
+		t.Fatalf("want 0 admitted/3 refused/refused, got outcome=%q admitted=%d refused=%d", rep.Outcome, rep.Admitted, rep.Refused)
+	}
+	if rep.Refold != nil {
+		t.Error("an all-refused batch entered nothing, so it must NOT re-fold")
+	}
+	data, _ := os.ReadFile(ledger)
+	if strings.Contains(string(data), `"status":"admitted"`) {
+		t.Errorf("an all-refused batch must NOT write an admitted row (no bypass):\n%s", string(data))
+	}
+}
+
+// schemaTag is the minimal shape shared by both drive reports — enough to tell a
+// batch drive (fak.superloop-drive-batch.v1) from a single drive (fak.superloop-drive.v1)
+// without depending on either full report struct.
+type schemaTag struct {
+	Schema string `json:"schema"`
+	Batch  int    `json:"batch"`
+}
+
+// TestSuperloopDriveEnvBatchRaisesDefaultThroughput is the LIVE-throughput witness for
+// the FAK_SUPERLOOP_BATCH deployment lever: with the env set and NO --batch flag, a
+// drive takes the fan-out path (batch schema, Batch=N) instead of the historical
+// single-member drive — so a scheduled meta-loop raises super-loop throughput past one
+// member per invocation with a single env knob and no per-caller edits.
+func TestSuperloopDriveEnvBatchRaisesDefaultThroughput(t *testing.T) {
+	t.Setenv(superloopBatchEnv, "2")
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+
+	code := runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--json"})
+	if code != 1 {
+		t.Fatalf("an entered-but-unsatisfied env-batch drive of an empty workspace must exit 1, got %d: stderr=%s", code, errb.String())
+	}
+	var tag schemaTag
+	if err := json.Unmarshal(out.Bytes(), &tag); err != nil {
+		t.Fatalf("drive json: %v\n%s", err, out.String())
+	}
+	if tag.Schema != superloop.BatchDriveSchema {
+		t.Fatalf("FAK_SUPERLOOP_BATCH=2 with no --batch must take the fan-out path; got schema %q", tag.Schema)
+	}
+	if tag.Batch != 2 {
+		t.Errorf("env-driven batch size = %d, want 2", tag.Batch)
+	}
+}
+
+// TestSuperloopDriveExplicitBatchFlagBeatsEnv pins that the command-line --batch is the
+// stronger signal: an explicit --batch 1 keeps the historical single-member drive even
+// when FAK_SUPERLOOP_BATCH would widen it, so an operator can always pin one invocation
+// back to one member regardless of the deployment default.
+func TestSuperloopDriveExplicitBatchFlagBeatsEnv(t *testing.T) {
+	t.Setenv(superloopBatchEnv, "5")
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+
+	code := runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--batch", "1", "--json"})
+	if code != 1 {
+		t.Fatalf("an entered-but-unsatisfied single drive of an empty workspace must exit 1, got %d: stderr=%s", code, errb.String())
+	}
+	var tag schemaTag
+	if err := json.Unmarshal(out.Bytes(), &tag); err != nil {
+		t.Fatalf("drive json: %v\n%s", err, out.String())
+	}
+	if tag.Schema != superloop.DriveSchema {
+		t.Fatalf("explicit --batch 1 must win over FAK_SUPERLOOP_BATCH=5 and stay single-member; got schema %q", tag.Schema)
+	}
+}
+
+// TestSuperloopDriveUnparseableEnvBatchFailsClosedToOne pins the fail-closed contract:
+// a non-integer FAK_SUPERLOOP_BATCH is surfaced on stderr and IGNORED, falling back to
+// the safe single-member default rather than erroring or silently mis-scaling the fleet.
+func TestSuperloopDriveUnparseableEnvBatchFailsClosedToOne(t *testing.T) {
+	t.Setenv(superloopBatchEnv, "not-a-number")
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+
+	code := runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--json"})
+	if code != 1 {
+		t.Fatalf("unparseable env must fall back to the single-member drive (exit 1), got %d: stderr=%s", code, errb.String())
+	}
+	var tag schemaTag
+	if err := json.Unmarshal(out.Bytes(), &tag); err != nil {
+		t.Fatalf("drive json: %v\n%s", err, out.String())
+	}
+	if tag.Schema != superloop.DriveSchema {
+		t.Fatalf("unparseable env must NOT enter the fan-out path; got schema %q", tag.Schema)
+	}
+	if !strings.Contains(errb.String(), "ignoring unparseable") {
+		t.Errorf("unparseable env must be surfaced on stderr, got: %q", errb.String())
+	}
+}
+
+// TestSuperloopDriveNoEnterOutcome pins the operator honesty seam (#3147): a
+// non-entering drive exits cleanly (0, "satisfied") ONLY when the walk is satisfied. An
+// empty-worklist walk left UNSATISFIED by an unmet headline (an issue shortfall) enters
+// nothing but is NOT done — it reports "shortfall" and exits non-zero, so an automated
+// night loop cannot read an unmet ~200-issue headline as a finished night.
+func TestSuperloopDriveNoEnterOutcome(t *testing.T) {
+	clean := superloop.DriveDecision{Enter: false, Satisfied: true}
+	if outcome, code := superloopDriveNoEnterOutcome(clean); outcome != "satisfied" || code != 0 {
+		t.Errorf("a satisfied non-enter must be a clean exit; got outcome %q code %d", outcome, code)
+	}
+
+	shortfall := superloop.DriveDecision{Enter: false, Satisfied: false, IssueShortfall: 200}
+	outcome, code := superloopDriveNoEnterOutcome(shortfall)
+	if outcome != "shortfall" {
+		t.Errorf("an unmet headline must surface as a shortfall, not satisfied; got %q", outcome)
+	}
+	if code == 0 {
+		t.Error("an unmet headline must exit non-zero — a clean exit over a shortfall is the silent-defeat defect #3147 closes")
+	}
+}
+
 // TestSuperloopDriveUnknownIntentIsUsageError pins that an unknown intent is a usage
 // error (exit 2), not a panic or a false enter.
 func TestSuperloopDriveUnknownIntentIsUsageError(t *testing.T) {

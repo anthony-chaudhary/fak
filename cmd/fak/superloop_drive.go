@@ -20,7 +20,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +33,9 @@ import (
 
 // superloopDriveReport is the folded drive verdict: the single member selected
 // worst-first, how the shared admission gate ruled, and the re-fold that is the exit
-// check. Outcome is one of "satisfied" (nothing to enter), "entered" (one member
+// check. Outcome is one of "satisfied" (nothing to enter and the intent reads clean),
+// "shortfall" (nothing to enter member-first but a declared headline gate is UNMET — an
+// issue shortfall the drive must not read as clean, #3147), "entered" (one member
 // admitted under a lease + re-folded), or "refused" (the admission gate refused; the
 // token is surfaced, never bypassed).
 type superloopDriveReport struct {
@@ -97,6 +101,20 @@ func superloopDriveRegionAdmit(root, lane string, tree []string, intent string) 
 	}
 }
 
+// superloopDriveNoEnterOutcome classifies a non-entering drive decision into its
+// operator outcome and process exit code. A satisfied walk reads clean — nothing to
+// enter, exit 0. An UNSATISFIED empty-worklist walk is an unmet headline gate (an issue
+// shortfall the drive surfaced instead of claiming clean, #3147): there is no member to
+// enter, but the night is not done, so it reports "shortfall" and exits non-zero — an
+// automated night loop can never mistake an unmet ~200-issue headline for a finished
+// night. Pure over the decision so it is witnessed without the live surface.
+func superloopDriveNoEnterOutcome(d superloop.DriveDecision) (string, int) {
+	if d.Satisfied {
+		return "satisfied", 0
+	}
+	return "shortfall", 1
+}
+
 func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("superloop drive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -104,9 +122,10 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	lane := fs.String("lane", "", "dos.toml lane the driven member's writes stay inside; arms region admission (COLLISION_RISK on lease overlap) against the live lease fabric")
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger the drive records its admission witness to")
+	batch := fs.Int("batch", 1, "admit up to N worst-first members whose regions are mutually disjoint (and disjoint from live leases) in one invocation, through the SAME admission gate; 1 (default) is the historical one-member drive, <=0 offers every worklist member")
 	var tree repeatedString
 	fs.Var(&tree, "tree", "region glob the driven member's writes stay inside (repeatable); arms region admission against the live lease fabric")
-	if err := fs.Parse(superloopInterspersedFlagArgs(argv, map[string]bool{"workspace": true, "lane": true, "ledger": true, "tree": true})); err != nil {
+	if err := fs.Parse(superloopInterspersedFlagArgs(argv, map[string]bool{"workspace": true, "lane": true, "ledger": true, "tree": true, "batch": true})); err != nil {
 		return 2
 	}
 	name := fs.Arg(0)
@@ -122,6 +141,24 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 		root = abs
 	}
 
+	// BATCH — a fan-out drive admits up to N worst-first members whose regions are
+	// mutually disjoint (and disjoint from the live lease fabric) in one invocation,
+	// through the SAME admission gate. `--batch 1` (the default) keeps the historical
+	// one-member drive below byte-for-byte; only an explicit N>1 (or N<=0 = all)
+	// widens the SELECT.
+	//
+	// FAK_SUPERLOOP_BATCH (opt-in, fail-closed) is the DEPLOYMENT lever that turns the
+	// fan-out on fleet-wide without editing every caller: when --batch is not given on
+	// the command line, a scheduled meta-loop (or an operator) can raise the default
+	// drive throughput past one member per invocation with this single env knob. Unset
+	// or unparseable ⇒ 1, byte-for-byte the historical single-member drive; an explicit
+	// --batch on the command line ALWAYS wins over the env (the flag is the stronger
+	// signal). This is the same fail-closed opt-in shape as FLEET_TIER_LAUNCH.
+	effBatch := resolveSuperloopBatch(fs, *batch, stderr)
+	if effBatch != 1 {
+		return runSuperloopDriveBatch(stdout, stderr, *asJSON, root, s, *lane, tree, *ledger, effBatch)
+	}
+
 	// WALK — read every member's status from the cheap committed surfaces, then SELECT
 	// the single worst-first member (one member per walk). The walk mutates nothing.
 	// A declared issue-target folds its live progress in here (surface-only until a
@@ -131,10 +168,14 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	report := superloopDriveReport{Schema: superloop.DriveSchema, Intent: s.Name, Decision: decision}
 
 	if !decision.Enter {
-		// A satisfied walk: nothing worst-first to enter, so the drive enters nothing
-		// and reports the intent already at floor.
-		report.Outcome = "satisfied"
-		return finishSuperloopDrive(stdout, stderr, *asJSON, report, 0)
+		// Nothing worst-first to enter — but "enters nothing" is only a CLEAN exit when
+		// the walk is satisfied. An unsatisfied empty-worklist drive is an unmet headline
+		// gate (an issue shortfall): there is no member to enter, yet the night is NOT
+		// done. Gate the outcome + exit on the decision's Satisfied, never a clean exit
+		// over an unmet headline (#3147).
+		outcome, code := superloopDriveNoEnterOutcome(decision)
+		report.Outcome = outcome
+		return finishSuperloopDrive(stdout, stderr, *asJSON, report, code)
 	}
 
 	// ADMISSION — the one member passes the SAME gate any spawn passes. The super loop
@@ -172,6 +213,237 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 		code = 0
 	}
 	return finishSuperloopDrive(stdout, stderr, *asJSON, report, code)
+}
+
+// superloopBatchEnv is the deployment-wide opt-in knob for the default drive batch
+// size (see the BATCH comment in runSuperloopDrive). Named as a const so the test and
+// the reader share one source of truth for the env name.
+const superloopBatchEnv = "FAK_SUPERLOOP_BATCH"
+
+// resolveSuperloopBatch folds the --batch flag with the FAK_SUPERLOOP_BATCH env into
+// the effective batch size. An explicit --batch on the command line wins (it is the
+// stronger, more local signal); otherwise a parseable env value raises the default.
+// Unset or unparseable env ⇒ the flag's own default (1), so a box without the knob is
+// byte-for-byte the historical single-member drive. An unparseable value is surfaced
+// on stderr and ignored (fail-closed to the safe default), never silently swallowed.
+func resolveSuperloopBatch(fs *flag.FlagSet, flagBatch int, stderr io.Writer) int {
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "batch" {
+			explicit = true
+		}
+	})
+	if explicit {
+		return flagBatch
+	}
+	env := strings.TrimSpace(os.Getenv(superloopBatchEnv))
+	if env == "" {
+		return flagBatch
+	}
+	n, err := strconv.Atoi(env)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak superloop drive: ignoring unparseable %s=%q (want an integer); using batch %d\n",
+			superloopBatchEnv, env, flagBatch)
+		return flagBatch
+	}
+	return n
+}
+
+// superloopDriveBatchReport is the folded verdict of a batch drive: the top-K
+// worst-first members offered, how each fared at the SHARED admission gate, and the
+// single re-fold that is the exit check. Outcome mirrors the single drive's
+// vocabulary at the aggregate: "satisfied"/"shortfall" when nothing was offered,
+// "entered" when at least one member was admitted (others may have been refused —
+// each refusal token is surfaced, never bypassed), or "refused" when every offered
+// member was refused by the gate (no member entered, no re-fold).
+type superloopDriveBatchReport struct {
+	Schema   string                       `json:"schema"`
+	Intent   string                       `json:"intent"`
+	Outcome  string                       `json:"outcome"`
+	Batch    int                          `json:"batch"`
+	Offered  int                          `json:"offered"`
+	Admitted int                          `json:"admitted"`
+	Refused  int                          `json:"refused"`
+	Decision superloop.BatchDriveDecision `json:"decision"`
+	Entries  []superloopDriveBatchEntry   `json:"entries,omitempty"`
+	Refold   *superloop.WalkReport        `json:"refold,omitempty"`
+}
+
+// superloopDriveBatchEntry is one member's outcome within a batch drive: the pure
+// per-member decision, the gate's ruling, and whether it was entered. A non-entered
+// entry carries the gate's refusal token (Admission.Status) — the batch surfaces it
+// rather than bypassing it.
+type superloopDriveBatchEntry struct {
+	Decision  superloop.DriveDecision `json:"decision"`
+	Admission superloopDriveAdmit     `json:"admission"`
+	Entered   bool                    `json:"entered"`
+}
+
+// runSuperloopDriveBatch is the impure shell for a fan-out drive. It WALKs the
+// members (same reads as the single drive), SELECTs the top-K worst-first via the
+// pure superloop.DriveBatch, then passes EACH offered member through the SAME
+// admission gate any spawn passes — under a MEMBER-SCOPED lease identity so K holds
+// coexist. Because each admitted member's lease stays held while the next is gated,
+// the gate itself enforces the batch's mutual disjointness (a later member whose
+// region overlaps an already-admitted one refuses COLLISION_RISK) on top of
+// disjointness from live peer leases. Admitted members are entered (their front
+// door surfaced, an admitted witness recorded); refused members surface their token
+// and are skipped (no private spawn path). One re-fold over the whole intent is the
+// exit check.
+func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, s superloop.Super, lane string, tree []string, ledger string, k int) int {
+	rep := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
+	bdec := superloop.DriveBatch(rep, k)
+	report := superloopDriveBatchReport{Schema: superloop.BatchDriveSchema, Intent: s.Name, Batch: k, Decision: bdec, Offered: len(bdec.Members)}
+
+	if !bdec.Enter {
+		// Nothing worst-first to offer — clean ONLY when satisfied; an unsatisfied
+		// empty worklist is an unmet headline gate (#3147), not a finished night.
+		outcome, code := superloopDriveNoEnterOutcome(superloop.DriveDecision{
+			Enter: false, Satisfied: bdec.Satisfied, IssueShortfall: bdec.IssueShortfall, Reason: bdec.Reason,
+		})
+		report.Outcome = outcome
+		return finishSuperloopDriveBatch(stdout, stderr, asJSON, report, code)
+	}
+
+	// ADMISSION — offer each member to the SAME gate under a member-scoped lease
+	// identity. Every admitted lease stays held (LIFO release at return) while the
+	// remaining members are gated, so the gate refuses a later member whose region
+	// overlaps one already admitted this batch (mutual disjointness) exactly as it
+	// refuses overlap with a live peer lease.
+	var releases []func()
+	defer func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}()
+	for _, m := range bdec.Members {
+		scope := superloopBatchMemberScope(s.Name, m.Member)
+		memberLane, memberTree := superloopBatchMemberRegion(lane, tree, s.Name, m.Member)
+		admit, release := superloopDriveAdmitGate(root, memberLane, memberTree, scope)
+		releases = append(releases, release)
+		entry := superloopDriveBatchEntry{Decision: m, Admission: admit}
+		if admit.Admitted {
+			entry.Entered = true
+			report.Admitted++
+			recordSuperloopDriveAdmit(ledger, s.Name, m, loopmgr.StatusAdmitted, "ENTERED",
+				"entered "+string(m.Member.Kind)+" "+m.Member.Ref+": "+m.Action, admit.Lease)
+		} else {
+			report.Refused++
+			recordSuperloopDriveAdmit(ledger, s.Name, m, loopmgr.StatusRefused, admit.Status, admit.Detail, admit.Lease)
+			fmt.Fprintf(stderr, "fak superloop drive: batch member %s %s refused: %s %s\n",
+				m.Member.Kind, m.Member.Ref, admit.Status, admit.Detail)
+		}
+		report.Entries = append(report.Entries, entry)
+	}
+
+	if report.Admitted == 0 {
+		// Every offered member was refused by the gate — surface it as a refusal
+		// (exit 3), enter nothing, and DO NOT re-fold (a re-fold would imply work
+		// happened). The tokens are already on the ledger and stderr.
+		report.Outcome = "refused"
+		return finishSuperloopDriveBatch(stdout, stderr, asJSON, report, 3)
+	}
+
+	// RE-FOLD — one re-walk over the whole intent after the batch is the exit check.
+	// A driven-but-unwitnessed member keeps the re-fold unsatisfied, so a batch can
+	// never satisfy the intent on surfacing alone.
+	report.Outcome = "entered"
+	refold := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
+	report.Refold = &refold
+	code := 1
+	if refold.Satisfied {
+		code = 0
+	}
+	return finishSuperloopDriveBatch(stdout, stderr, asJSON, report, code)
+}
+
+// superloopBatchMemberScope builds a per-member intent token so the shared gate
+// mints a DISTINCT lease id per member ("loop-superloop-<scope>"), letting K holds
+// coexist within one batch. The intent stays the prefix so the leases remain
+// recognizably this super loop's.
+func superloopBatchMemberScope(intent string, m superloop.Member) string {
+	return intent + "-m-" + superloopMemberSlug(m)
+}
+
+// superloopMemberSlug reduces a member's kind+ref to a lease-safe slug (alnum, dash,
+// underscore; every other rune folds to a dash), so distinct members yield distinct
+// lease identities and region tokens.
+func superloopMemberSlug(m superloop.Member) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, string(m.Kind)+"-"+m.Ref)
+}
+
+// superloopBatchMemberRegion resolves the region a batch member is admitted under.
+// When the operator declared an explicit shared region (--lane/--tree), it is
+// honored verbatim: the operator has fenced the batch to one tree and accepts that
+// members serialize on it (the gate refuses overlap). With no operator region, the
+// region is scoped PER MEMBER so distinct members are mutually disjoint (admitted
+// concurrently) while a peer entering the SAME member refuses COLLISION_RISK — the
+// interior-node coordination unit is the member, not raw files (the member's child
+// re-acquires its own file lease behind its front door).
+func superloopBatchMemberRegion(opLane string, opTree []string, intent string, m superloop.Member) (string, []string) {
+	if strings.TrimSpace(opLane) != "" || len(opTree) > 0 {
+		return opLane, opTree
+	}
+	return "", []string{"superloop/" + cleanDispatchLeaseToken(intent) + "/" + superloopMemberSlug(m) + "/**"}
+}
+
+func finishSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, report superloopDriveBatchReport, code int) int {
+	if asJSON {
+		if rc := encodeJSONOrFail(stdout, stderr, report, "fak superloop drive"); rc != 0 {
+			return rc
+		}
+		return code
+	}
+	renderSuperloopDriveBatch(stdout, report)
+	return code
+}
+
+func renderSuperloopDriveBatch(w io.Writer, r superloopDriveBatchReport) {
+	fmt.Fprintf(w, "superloop drive (batch %d): %s\n", r.Batch, r.Intent)
+	if r.Outcome == "satisfied" || r.Outcome == "shortfall" {
+		fmt.Fprintf(w, "  nothing to enter — %s\n", r.Decision.Reason)
+		return
+	}
+	fmt.Fprintf(w, "  offered %d worst-first, admitted %d, refused %d\n", r.Offered, r.Admitted, r.Refused)
+	for _, e := range r.Entries {
+		d := e.Decision
+		verb := "REFUSED"
+		if e.Entered {
+			verb = "entered"
+		}
+		dark := ""
+		if d.Dark {
+			dark = ", DARK"
+		}
+		fmt.Fprintf(w, "  [%s] %s %s (rank %d, debt %d%s) — admission %s", verb, d.Member.Kind, d.Member.Ref, d.Rank, d.Debt, dark, e.Admission.Status)
+		if e.Admission.Lease != "" {
+			fmt.Fprintf(w, " (lease %s)", e.Admission.Lease)
+		}
+		fmt.Fprintln(w)
+		if e.Entered {
+			fmt.Fprintf(w, "        action: %s\n", d.Action)
+		}
+	}
+	if r.Outcome == "refused" {
+		fmt.Fprintf(w, "  → refused: every offered member's admission gate refused; the tokens are surfaced, not bypassed\n")
+		return
+	}
+	if r.Refold != nil {
+		sat := "not yet"
+		if r.Refold.Satisfied {
+			sat = "SATISFIED"
+		}
+		fmt.Fprintf(w, "  re-fold: %s — %s (debt %d, floor %d, unmeasured %d, dark %d)\n",
+			r.Refold.Verdict, sat, r.Refold.TotalDebt, r.Refold.Floor, r.Refold.Unmeasured, r.Refold.Dark)
+		fmt.Fprintf(w, "  → %s\n", r.Refold.NextAction)
+	}
 }
 
 // recordSuperloopDriveAdmit appends the drive's admission decision to the loop ledger
@@ -214,7 +486,9 @@ func finishSuperloopDrive(stdout, stderr io.Writer, asJSON bool, report superloo
 
 func renderSuperloopDrive(w io.Writer, r superloopDriveReport) {
 	fmt.Fprintf(w, "superloop drive: %s\n", r.Intent)
-	if r.Outcome == "satisfied" {
+	// Both "satisfied" and "shortfall" enter nothing; the decision Reason already carries
+	// the honest clean-vs-unmet-headline text, and the exit code distinguishes them.
+	if r.Outcome == "satisfied" || r.Outcome == "shortfall" {
 		fmt.Fprintf(w, "  nothing to enter — %s\n", r.Decision.Reason)
 		return
 	}
