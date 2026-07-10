@@ -10,6 +10,7 @@ import (
 )
 
 func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit","turn_id":"turn-next"}`
 
