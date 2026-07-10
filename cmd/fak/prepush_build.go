@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -81,6 +82,49 @@ var (
 	prepushBuild        = goBuildPackages
 	prepushNow          = time.Now
 )
+
+// prepushBaselineTolerance arms the pre-existing-red attribution (#3618): when the tip's cone
+// fails to build, re-build each failing package against the base trunk to tell a peer's already-
+// published red (TRUNK_ALREADY_RED, allow) from a break THIS push introduced (TRUNK_WOULD_NOT_
+// COMPILE, refuse). Default on — it only ever RELAXES a would-be block and is fail-safe (any
+// package it cannot PROVE was already red on the base stays a regression). Off restores the
+// pre-#3618 whole-tip verdict. A seam so a test can force the legacy path; operators keep the
+// FLEET_BUILD_GUARD block/warn/off dial at the shell.
+var prepushBaselineTolerance = envFlagDefault("FLEET_BUILD_BASELINE_TOLERANCE", true)
+
+// buildPkgHeaderRE matches the `# <import-path>` header `go build`/`go vet` prints before a
+// package's own compile diagnostics. A package that fails to LOAD (absent, no non-test files, an
+// unresolved import path) errors WITHOUT this header, so it never counts as a compile failure of
+// the base — the fail-safe direction: an unprovable pre-existing red stays this push's regression.
+var buildPkgHeaderRE = regexp.MustCompile(`(?m)^#\s+(\S+)`)
+
+// failingPackagesFromBuild extracts the import paths of packages that produced COMPILE errors from
+// `go build` output, deduped and sorted. Pure.
+func failingPackagesFromBuild(out string) []string {
+	seen := map[string]bool{}
+	var pkgs []string
+	for _, m := range buildPkgHeaderRE.FindAllStringSubmatch(out, -1) {
+		p := m[1]
+		if !seen[p] {
+			seen[p] = true
+			pkgs = append(pkgs, p)
+		}
+	}
+	sort.Strings(pkgs)
+	return pkgs
+}
+
+// envFlagDefault reads an on/off env var, returning def when unset/unrecognized.
+func envFlagDefault(name string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "0", "false", "no", "off":
+		return false
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return def
+	}
+}
 
 // prepushArchiveTimeout bounds the whole-repo `git archive` + in-process untar (extractArchive).
 // The gate is fail-open BY DESIGN (see the file header), but the archive step had NO deadline, so
@@ -160,7 +204,17 @@ type trunkBuildResult struct {
 	SelectedPackages []string `json:"selected_packages"` // changed + importer closure — what was built
 	Detail           string   `json:"detail,omitempty"`  // trimmed `go build` output on a break
 	ElapsedMS        int64    `json:"elapsed_ms"`
-	Verdict          string   `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | GATE_LATENCY_REGRESSION | COULD_NOT_RUN | SKIPPED_CONTENDED
+	Verdict          string   `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | TRUNK_ALREADY_RED | GATE_LATENCY_REGRESSION | COULD_NOT_RUN | SKIPPED_CONTENDED
+	// Pre-existing-red tolerance (#3618). When the tip's cone fails to build, each failing
+	// package is re-built against the base trunk (origin/main) to attribute the break. BaseSha is
+	// the resolved base commit built against; PreExistingRed are packages red at BOTH tip and base
+	// (a peer's already-published break — not this push); Regressions are packages that build at
+	// base but fail at the tip (introduced by this push). A failure with only PreExistingRed and no
+	// Regressions is TRUNK_ALREADY_RED (exit 0, push allowed): a clean delta must not be false-
+	// blocked by a peer's red trunk.
+	BaseSha        string   `json:"base_sha,omitempty"`
+	PreExistingRed []string `json:"pre_existing_red,omitempty"`
+	Regressions    []string `json:"regressions,omitempty"`
 }
 
 func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
@@ -272,8 +326,11 @@ func evaluatePrePushBuild(r, baseOverride string, budget time.Duration, advisory
 	detail, ok := prepushBuild(dir, res.SelectedPackages)
 	res.ElapsedMS = prepushNow().Sub(start).Milliseconds()
 	if !ok {
-		res.OK, res.Reason, res.Detail, res.Verdict = false, "TRUNK_WOULD_NOT_COMPILE", detail, "TRUNK_WOULD_NOT_COMPILE"
-		return res, 1
+		// The tip's cone did not build. Attribute the break before blaming this push: a package
+		// red at BOTH the tip AND the base trunk is a peer's already-published break, not this
+		// delta (#3618). Only a package that builds at the base but fails at the tip is refused.
+		res.Detail = detail
+		return res, resolveTipBuildFailure(r, base, &res)
 	}
 
 	res.OK = true
@@ -285,6 +342,62 @@ func evaluatePrePushBuild(r, baseOverride string, budget time.Duration, advisory
 	}
 	res.Verdict = "OK"
 	return res, 0
+}
+
+// resolveTipBuildFailure attributes a tip-cone build failure to either this push or a peer (#3618),
+// mutating res and returning the exit code. It is fail-safe and only ever RELAXES a block:
+//
+//   - baseline tolerance off, base unresolvable/unarchivable, or no compile-failing package parsed
+//     from the tip output → the conservative legacy verdict TRUNK_WOULD_NOT_COMPILE (exit 1);
+//   - otherwise each failing package is re-built against the BASE trunk (origin/main). A package
+//     that builds at the base but failed at the tip is a REGRESSION this push introduced; one that
+//     also fails to COMPILE at the base (a `# pkg` header there) is a peer's PRE-EXISTING red; one
+//     that fails at the base without a compile header (absent/new/load error) stays a regression —
+//     never excuse a break we cannot PROVE pre-existed;
+//   - zero regressions ⇒ the whole failure pre-existed on the base ⇒ TRUNK_ALREADY_RED (exit 0,
+//     push allowed): a clean delta must not be false-blocked by a peer's red trunk.
+func resolveTipBuildFailure(r, base string, res *trunkBuildResult) int {
+	block := func() int {
+		res.OK, res.Reason, res.Verdict = false, "TRUNK_WOULD_NOT_COMPILE", "TRUNK_WOULD_NOT_COMPILE"
+		return 1
+	}
+	tipFailures := failingPackagesFromBuild(res.Detail)
+	if !prepushBaselineTolerance || len(tipFailures) == 0 {
+		return block()
+	}
+	baseSha, err := prepushRevParse(r, base)
+	if err != nil || strings.TrimSpace(baseSha) == "" {
+		return block()
+	}
+	res.BaseSha = baseSha
+	baseDir, err := prepushExtractTip(r, baseSha)
+	if err != nil {
+		return block()
+	}
+	defer os.RemoveAll(baseDir)
+
+	var regressions, preExisting []string
+	for _, pkg := range tipFailures {
+		d, okp := prepushBuild(baseDir, []string{pkg})
+		switch {
+		case okp:
+			regressions = append(regressions, pkg) // green at base, red at tip → this push broke it
+		case len(failingPackagesFromBuild(d)) > 0:
+			preExisting = append(preExisting, pkg) // genuine compile-red at base too → a peer's red
+		default:
+			regressions = append(regressions, pkg) // absent/new/load-error at base → fail-safe: this push's
+		}
+	}
+	sort.Strings(regressions)
+	sort.Strings(preExisting)
+	res.Regressions = regressions
+	res.PreExistingRed = preExisting
+
+	if len(regressions) == 0 {
+		res.OK, res.Reason, res.Verdict = true, "", "TRUNK_ALREADY_RED"
+		return 0
+	}
+	return block()
 }
 
 // resolvePrepushBase resolves the base ref the push range is measured from, mirroring the
@@ -510,10 +623,19 @@ func renderPrePushBuild(w io.Writer, res trunkBuildResult) {
 		fmt.Fprintln(w, "trunk-build-gate: SKIPPED_CONTENDED — a peer build is already running on this host; redundant advisory build skipped (push allowed)")
 	case "COULD_NOT_RUN":
 		fmt.Fprintf(w, "trunk-build-gate could-not-run (push allowed): %s\n", res.Detail)
+	case "TRUNK_ALREADY_RED":
+		fmt.Fprintf(w, "trunk-build-gate OK — pushed tip %s builds YOUR delta; the trunk is ALREADY red on base %s at %s from earlier commit(s), not this push (#3618). Push allowed; the peer red still needs fixing at its source.\n",
+			short(res.Ref), short(res.BaseSha), strings.Join(res.PreExistingRed, " "))
 	case "TRUNK_WOULD_NOT_COMPILE":
 		fmt.Fprintf(w, "TRUNK_WOULD_NOT_COMPILE — pushed tip %s would not build for peers:\n", short(res.Ref))
 		for _, ln := range strings.Split(res.Detail, "\n") {
 			fmt.Fprintf(w, "    %s\n", ln)
+		}
+		if len(res.Regressions) > 0 {
+			fmt.Fprintf(w, "  YOUR delta regressed: %s\n", strings.Join(res.Regressions, " "))
+		}
+		if len(res.PreExistingRed) > 0 {
+			fmt.Fprintf(w, "  (already red on base %s, not yours: %s)\n", short(res.BaseSha), strings.Join(res.PreExistingRed, " "))
 		}
 		fmt.Fprintf(w, "  built: %s\n", strings.Join(res.SelectedPackages, " "))
 	}

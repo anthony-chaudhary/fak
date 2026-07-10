@@ -169,6 +169,120 @@ func TestEvaluatePrePushBuildArchiveStallFailsOpen(t *testing.T) {
 	}
 }
 
+// --- #3618 pre-existing-red attribution -------------------------------------------------
+
+func TestFailingPackagesFromBuild(t *testing.T) {
+	out := "# mod/p\ninternal/p/p.go:7:9: undefined: q.X\ninternal/p/p.go:8:1: too many errors\n" +
+		"# mod/r\nr.go:1:1: undefined: Z\n" +
+		"no required module provides package mod/missing\n" // load error: no `# ` header → not a compile failure
+	got := failingPackagesFromBuild(out)
+	if len(got) != 2 || got[0] != "mod/p" || got[1] != "mod/r" {
+		t.Fatalf("failingPackagesFromBuild = %v, want [mod/p mod/r] (load-error line excluded)", got)
+	}
+	if len(failingPackagesFromBuild("")) != 0 {
+		t.Errorf("empty build output must yield no failing packages")
+	}
+}
+
+// setTipFailureSeams wires the happy seams to a tip cone build that fails with a `# pkg` compile
+// header for each package in tipFail, and a per-package BASE build where baseGreen[pkg]==true means
+// the package builds cleanly at the base (a regression this push introduced) and otherwise it fails
+// at the base WITH a compile header (a peer's pre-existing red). The tip cone build is the multi-
+// package call; base builds are single-package.
+func setTipFailureSeams(t *testing.T, tipFail []string, baseGreen map[string]bool) {
+	t.Helper()
+	setupHappyPrepushSeams(t)
+	var tipDetail strings.Builder
+	for _, p := range tipFail {
+		fmt.Fprintf(&tipDetail, "# %s\nx.go:1:1: undefined: Y\n", p)
+	}
+	prepushBuild = func(dir string, pkgs []string) (string, bool) {
+		if len(pkgs) != 1 { // the tip cone build (SelectedPackages: mod/p + mod/q)
+			return tipDetail.String(), false
+		}
+		if baseGreen[pkgs[0]] {
+			return "", true // green at base → this push regressed it
+		}
+		return fmt.Sprintf("# %s\nx.go:1:1: undefined: Y\n", pkgs[0]), false // compile-red at base → pre-existing
+	}
+}
+
+func TestEvaluatePrePushBuildPeerRedIsAlreadyRed(t *testing.T) {
+	// Acceptance #3618: the tip is red purely from a peer package (mod/p, red at BOTH tip and
+	// base) and this push's delta compiles atop the base → PASS, not TRUNK_WOULD_NOT_COMPILE.
+	setTipFailureSeams(t, []string{"mod/p"}, map[string]bool{})
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 0 || res.Verdict != "TRUNK_ALREADY_RED" || !res.OK {
+		t.Fatalf("a peer-red tip with a clean delta must PASS: verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
+	}
+	if !contains(res.PreExistingRed, "mod/p") || len(res.Regressions) != 0 {
+		t.Fatalf("attribution wrong: preExisting=%v regressions=%v", res.PreExistingRed, res.Regressions)
+	}
+	if res.BaseSha == "" { // Acceptance #3618: --json reports the baseline sha it built against.
+		t.Fatalf("the baseline sha built against must be reported")
+	}
+}
+
+func TestEvaluatePrePushBuildDeltaRegressionStillBlocks(t *testing.T) {
+	// Acceptance #3618: a delta that genuinely reds the base (mod/p builds at base, fails at tip)
+	// still returns TRUNK_WOULD_NOT_COMPILE.
+	setTipFailureSeams(t, []string{"mod/p"}, map[string]bool{"mod/p": true})
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" || res.OK {
+		t.Fatalf("a delta that reds the base must still block: verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
+	}
+	if !contains(res.Regressions, "mod/p") {
+		t.Fatalf("mod/p should be attributed as this push's regression: %v", res.Regressions)
+	}
+}
+
+func TestEvaluatePrePushBuildMixedRegressionAndPreExistingBlocks(t *testing.T) {
+	// A real regression (mod/q, green at base) mixed with a pre-existing peer red (mod/p) still
+	// blocks — any regression wins — but both are attributed for the operator.
+	setTipFailureSeams(t, []string{"mod/p", "mod/q"}, map[string]bool{"mod/q": true})
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" {
+		t.Fatalf("a mixed failure with a real regression must block: verdict=%s code=%d", res.Verdict, code)
+	}
+	if !contains(res.Regressions, "mod/q") || !contains(res.PreExistingRed, "mod/p") {
+		t.Fatalf("mixed attribution wrong: regressions=%v preExisting=%v", res.Regressions, res.PreExistingRed)
+	}
+}
+
+func TestEvaluatePrePushBuildBaseLoadErrorIsFailSafeRegression(t *testing.T) {
+	// mod/p fails at the tip; at the base it fails WITHOUT a compile header (an absent/new package
+	// or a load error). Triviality of the pre-existing claim cannot be PROVEN → fail-safe to a block.
+	setupHappyPrepushSeams(t)
+	prepushBuild = func(dir string, pkgs []string) (string, bool) {
+		if len(pkgs) != 1 {
+			return "# mod/p\np.go:1:1: undefined: Y\n", false
+		}
+		return "no required module provides package mod/p", false // no `# ` header
+	}
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" {
+		t.Fatalf("an unprovable base red must fail safe to a block: verdict=%s code=%d", res.Verdict, code)
+	}
+	if !contains(res.Regressions, "mod/p") || len(res.PreExistingRed) != 0 {
+		t.Fatalf("fail-safe: an unprovable base red is this push's regression: reg=%v pre=%v", res.Regressions, res.PreExistingRed)
+	}
+}
+
+func TestEvaluatePrePushBuildBaselineToleranceOffIsLegacy(t *testing.T) {
+	// With the tolerance disarmed, the pre-#3618 whole-tip verdict stands and no base attribution runs.
+	setTipFailureSeams(t, []string{"mod/p"}, map[string]bool{}) // would be TRUNK_ALREADY_RED if armed
+	old := prepushBaselineTolerance
+	prepushBaselineTolerance = false
+	t.Cleanup(func() { prepushBaselineTolerance = old })
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" {
+		t.Fatalf("with tolerance off the legacy whole-tip verdict must stand: verdict=%s code=%d", res.Verdict, code)
+	}
+	if res.BaseSha != "" || len(res.PreExistingRed) != 0 {
+		t.Fatalf("tolerance off must not run the baseline attribution: base=%q pre=%v", res.BaseSha, res.PreExistingRed)
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
