@@ -99,6 +99,17 @@ const (
 	RankRefcount   = "refcount"   // graph in-degree — how many other cells reference this one (desc = most backlinks first)
 )
 
+// Score-aggregation ops for multi-intent recall (#4020 — the GQA group-reduce: N
+// consumer intents share ONE retained set, so their per-intent relevance scores fold
+// to one shared score per cell before the single top-k). The op choice is deliberately
+// a knob, exposed exactly as upstream exposes it: mean dilutes a strong minority
+// signal, amax over-keeps for any single consumer. Empty means ScoreAggMean.
+const (
+	ScoreAggMean = "mean" // fold to the per-intent average (the diluting default)
+	ScoreAggAmax = "amax" // fold to the per-intent maximum (any one consumer's need keeps the cell)
+	ScoreAggSum  = "sum"  // fold to the per-intent total (mean without the /N normalization)
+)
+
 // Pred is a serializable predicate expression — the WHERE clause an agent authors as
 // JSON. A zero Pred (or Op == "" / PredTrue) matches every cell.
 type Pred struct {
@@ -131,7 +142,19 @@ type Query struct {
 	// only — a fuzzy signal never silently decides (the vdso/neardup.go discipline),
 	// so the pair is reported, never collapsed. Default 0 (off).
 	NearDupThreshold float64 `json:"near_dup_threshold,omitempty"`
-	Ops              []Op    `json:"ops"`
+	// Intents is the OPT-IN multi-intent recall slice (#4020, GQA group-reduce): the
+	// N consumer intents that must share this one retained set. When non-empty it
+	// supersedes Intent for relevance scoring — every cell is scored against every
+	// intent and the per-intent scores fold to ONE shared score via ScoreAgg (see
+	// reduceGroupScores in exec.go). Empty (the default) keeps the single-Intent
+	// scoring path byte-identical to today; Intents={x} ranks identically to Intent=x.
+	Intents []string `json:"intents,omitempty"`
+	// ScoreAgg is the tunable reduction operator folding per-intent scores when
+	// Intents is set: ScoreAggMean (the default when empty), ScoreAggAmax, or
+	// ScoreAggSum. An unknown value fails Validate (fail-closed); without Intents
+	// the field is inert.
+	ScoreAgg string `json:"score_agg,omitempty"`
+	Ops      []Op   `json:"ops"`
 }
 
 // effectKinds and mutationKinds classify ops. An effect reads/derives or mutates; a
@@ -158,6 +181,13 @@ func IsMutation(kind string) bool { return mutationKinds[kind] }
 // reclassify target that is not a known class. A query that does not validate never
 // runs — the same posture as an unknown verdict kind resolving to its fallback.
 func Validate(q Query) error {
+	// #4020: an unknown score-aggregation op never runs — the same fail-closed
+	// posture as an unknown op kind. Empty means the default (mean).
+	switch q.ScoreAgg {
+	case "", ScoreAggMean, ScoreAggAmax, ScoreAggSum:
+	default:
+		return fmt.Errorf("memq: unknown score_agg %q (want %s|%s|%s)", q.ScoreAgg, ScoreAggMean, ScoreAggAmax, ScoreAggSum)
+	}
 	for i, op := range q.Ops {
 		switch op.Kind {
 		case OpScan, OpRender, OpTombstone, OpConsolidate, OpPrune, OpDedup:

@@ -197,6 +197,13 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 	for _, c := range all {
 		score[c.ID] = overlap(qterms, tokenize(c.Role+" "+c.Descriptor))
 	}
+	if len(q.Intents) > 0 {
+		// Multi-intent recall (#4020): N consumer intents share this one retained
+		// set, so their per-intent rankings fold to ONE shared score per cell before
+		// any top-k — the GQA group-reduce. Opt-in: with Intents empty the
+		// single-Intent scores computed above stand, byte-identical to today.
+		score = reduceGroupScores(all, q.Intents, q.ScoreAgg)
+	}
 
 	res := Result{Intent: q.Intent}
 	res.Stats.CellsScanned = len(all)
@@ -296,6 +303,45 @@ func computeRefcount(cells []Cell) map[string]int {
 		out[c.ID] = alias + refsTo[c.Digest] + refsTo[c.ID]
 	}
 	return out
+}
+
+// reduceGroupScores is the multi-intent relevance fold (#4020 — the GQA group-reduce
+// borrowed from PyramidKV): each cell is scored against EVERY intent with the same
+// extractive overlap the single-intent path uses, then the per-intent scores collapse
+// to one shared score per cell with the chosen aggregation op:
+//
+//	amax: max_i overlap(intent_i, cell) — a cell any single consumer needs is kept
+//	sum:  Σ_i overlap(intent_i, cell)
+//	mean: Σ_i overlap(intent_i, cell) / N — computed in the comparison domain as the
+//	      integer Σ: every cell is scored against the SAME N intents, so ordering
+//	      (ties included) by Σ/N is exactly ordering by Σ, and the integer sum keeps
+//	      the fold exact — no float rounding, no RNG (the determinism contract).
+//
+// With a single intent every op degenerates to the plain overlap, so Intents={x}
+// ranks byte-identically to Intent=x. An unknown agg cannot reach here (Validate
+// fails closed); the default/empty agg folds as mean.
+func reduceGroupScores(cells []Cell, intents []string, agg string) map[string]int {
+	terms := make([][]string, len(intents))
+	for i, intent := range intents {
+		terms[i] = tokenize(intent)
+	}
+	score := make(map[string]int, len(cells))
+	for _, c := range cells {
+		doc := tokenize(c.Role + " " + c.Descriptor)
+		fold := 0
+		for i := range terms {
+			s := overlap(terms[i], doc)
+			if agg == ScoreAggAmax {
+				if s > fold {
+					fold = s
+				}
+			} else { // ScoreAggMean (default) and ScoreAggSum are both the additive fold
+				fold += s
+			}
+		}
+		score[c.ID] = fold
+	}
+	return score
 }
 
 // applyBudget keeps the prefix whose cumulative size stays within cap (0 = unbounded)
