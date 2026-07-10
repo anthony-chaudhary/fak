@@ -237,6 +237,69 @@ the spelling; nothing in the kernel's safety layer touches the model's tensors.
   gate**. The inflections (`gated`, `gates`, `guards`, `guarded`) are grammar, not
   concepts - the scorecard ignores them.
 
+### guard-wrapper components vs gate decision points
+
+More similar-sounding names in this family. The recurring line: a **guard component**
+is an INSTALL/RENDER/RESOLVE step of the guard wrapper (it edits the child launch or
+paints the pane, making no per-call decision), while a **gate** is one admit/refuse
+decision over a call, a report, or a diff.
+
+Guard-wrapper components (part of the SYSTEM, not a gate):
+
+- **guard_mcp** (`cmd/fak/guard_mcp.go`) vs **guard_codex** (`cmd/fak/guard_codex.go`)
+  vs **installGuardPiExtension** (`cmd/fak/guard_pi.go`) - three INSTALL steps that
+  inject routing into the guarded child before it runs: guard_mcp registers fak's own
+  MCP self-query servers, guard_codex is the OpenAI-Codex provider install path, and
+  installGuardPiExtension rewrites a Pi child to route through the gateway via a
+  `-e <ext.ts>` extension. None decides a call; each edits the launch. Distinct from
+  **guardMcpStatusAudit**, which AUDITS whether the MCP injection is live, and from
+  **installGuardCodexConfig**, the routing-rewrite STEP inside guard_codex.
+
+- **GuardAssumption** (`internal/assumecheck`) - the adjudication that folds a stated
+  assumption plus its evidence into an Allow/Refuse verdict for `fak assume check`. It
+  gates a CLAIM's truth, not a tool call or its result; **guardaccuracy** scores a
+  gate's decision, whereas GuardAssumption IS the decision over an assumption.
+
+- **guardUnattestedBuildWarning** vs **guardInfoStalenessNote**
+  (`cmd/fak/guard_freshness.go`) - the SAME build-staleness fact rendered two ways:
+  guardUnattestedBuildWarning is the one-shot WARN under the launch banner's build row;
+  guardInfoStalenessNote is its PERSISTENT twin in the guardInfo pane. Banner-once vs
+  pane-persistent. **guardInfoVisualIdentityRow** (`cmd/fak/info_visual.go`) is the same
+  pane's header row - which fak is watched and for how long - identity, not freshness.
+
+- **resolveGuardRemoteServe** (`cmd/fak/guard.go`) - resolves the guard's OWN
+  `--remote-serve` endpoint, distinct from **guardProvider**, which resolves the
+  UPSTREAM provider wire the guard forwards to. Own-endpoint vs upstream-endpoint.
+
+Gate decision points (one admit/refuse):
+
+- **CheckGateTriaged** vs **AdvisoryGateTriaged** - a report-boundary CI gate that
+  passes only when every cadence/milestone finding is triaged. CheckGateTriaged
+  ENFORCES (non-zero exit); AdvisoryGateTriaged is the advisory twin that warns without
+  failing CI until enforcement is on. Enforce vs advise, same triage condition.
+
+- **gateTierDeclaredTree** vs **gateUntieredLeaf** (`internal/hooks`) - both enforce
+  that every `internal/<leaf>` declares a support tier. gateTierDeclaredTree audits the
+  WHOLE tree; gateUntieredLeaf gates only the leaves a STAGED diff touches, at the
+  pre-commit boundary. Tree-scope vs staged-scope.
+
+- **GateSpendLabeled** (`internal/metrics`) - refuses a spend rollup with unlabeled cost
+  categories (the spend twin of GateBudgetLabeled). A data-hygiene gate over a report,
+  not a tool-call adjudicator or result admitter.
+
+Config / metric knobs on the prefix and pre-staged guards:
+
+- **prefixGuard** (feature) vs **FAK_ABLATE_PREFIX_GUARD** (ablation OFF switch) vs
+  **fak_prefix_guard_\*** (the determinism-witness metric, `observePrefixGuard`) - the
+  feature that keeps the cacheable prompt prefix stable, the knob that turns it off to
+  measure its value, and the counter that observes whether the prefix is actually
+  stable. Feature vs control vs measurement.
+
+- **FAK_PRESTAGED_PATH_GUARD** (`internal/hooks/gate_barecommitsweep.go`) - the env
+  opt-out for the git-hook gate family that refuses committing paths staged outside the
+  sanctioned by-path flow. `=off` disables the whole FAMILY, distinct from
+  **ALLOW_BARE_COMMIT**, which skips the check ONCE.
+
 ---
 
 ## The witness / evidence family
@@ -257,6 +320,41 @@ the spelling; nothing in the kernel's safety layer touches the model's tensors.
 - **Refutation** vs **Revocation** - refutation is the LOCAL decision that a witness is
   invalid; revocation is the BROADCAST event other agents consume. Decision vs
   broadcast.
+
+### witness naming across the subsystems
+
+The word **witness** recurs in three unrelated subsystems - assume-check, concept-bench,
+and the reporting/metrics layer. They share the spelling, not the meaning; the axis that
+separates them is *what is being witnessed and where*.
+
+- **assume-check evidence kinds** (`internal/assumecheck`) - how an assumption's evidence
+  is GATHERED. **WitnessCommandProbe** runs a command, **WitnessConfigFlag** reads a
+  config flag, and **WitnessLedgerRead** is a bespoke authority read of a ledger (NOT one
+  of the generic probe kinds - it has no generic driver). **WitnessStatus** is the
+  per-assumption FIELD declaring how the witness is wired, and **WitnessWired** is the
+  status VALUE meaning it is fully wired. Field vs value vs gather-method - none is a
+  witness OUTCOME (that is WitnessConfirmed / WitnessRefuted, in `internal/abi`).
+
+- **concept-bench witness sources** (`internal/conceptbench`) - which authority PROVED a
+  benchmarked concept. **WitnessSource** is the referee field; its values name the prover:
+  **WitnessDosArbitrate** (`dos_arbitrate`, the lane concept), **WitnessDosCheckReason**
+  (`dos_check_reason`, the refusal-vocabulary concept), **WitnessDosCommitAudit**
+  (`dos_commit_audit`, the commit-stamp concept, combined with **WitnessDosVerify**), and
+  **WitnessHandoffSchema** (`fak.task-handoff.v1`, the hook-protocol concept - proof by
+  schema emission, not by a DOS tool call).
+
+- **reporting / metrics witnesses** - **WitnessRef** (`internal/milestonereport`) is a
+  criterion's `witness_ref`: the commit/artifact reference backing that criterion's grade
+  - a report field, not a cache witness (world-state witness lives in `internal/vdso`).
+  **SpendWitnessed** (`internal/metrics`) is a spend PROVENANCE value (witnessed from real
+  session evidence vs estimated). **ProgressWitnessed** (`cmd/fak/info_watchdog.go`) is a
+  watchdog COUNTER of resume events witnessed (the "N resumed" info line), distinct from
+  **ProgressWitnessedAt**, the TIMESTAMP of the last one.
+
+- **RegisterWitnessResolver** (`internal/abi`) - the registration seam that installs a
+  WitnessResolver backing the require-witness verdict. Register (install a resolver) vs
+  **WitnessResolver** (corroborate a claim) vs **resolveWitness** (the kernel driver that
+  folds the registered resolvers at adjudication). Three stages of one pipeline.
 
 ---
 
