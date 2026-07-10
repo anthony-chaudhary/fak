@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +21,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
-	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -59,6 +57,13 @@ type dispatchTickOptions struct {
 	// one). Both default off, so a normal claude tick stays on the seat default + fallback.
 	WorkerModel    string
 	PinWorkerModel bool
+	// WorkClassModel is a LOW-precedence worker-model default for the tick's work class:
+	// `fak garden dispatch` (the project-management / repo-maintenance dispatcher) sets it
+	// to fable so routine coordination work runs on the cheap model by default. It sits
+	// BELOW the per-issue tier profile (so an explicit tier/pm or tier/T0 label still
+	// decides — a hard planning issue still escalates to opus) and ABOVE the seat default.
+	// Empty for a normal tick, so nothing changes unless a work-class dispatcher sets it.
+	WorkClassModel string
 	// ModelDowngrade turns on Layer-2 in-tick re-dispatch: when the target issue's last
 	// finished slot exited with a model-switchable no-commit reason (usage_cap /
 	// model_unknown / rate_limit), re-dispatch it on the NEXT downgrade-chain model instead
@@ -291,6 +296,173 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	return opts, *asJSON, 0
 }
 
+// dispatchTickPick bundles the resolved candidate lane and target issue for a tick
+// together with the live/cooldown/held state that fed the decision, so
+// evaluateDispatchTick can unpack them to the same local names it used before the
+// resolveDispatchTickPick extraction.
+type dispatchTickPick struct {
+	pick             dispatchLanePick
+	held             map[string]bool
+	liveIssueDetails map[int]dispatchLiveScope
+	liveIssues       map[int]bool
+	cooled           map[int]bool
+	cooldownStatus   []map[string]any
+	target           int
+	hasTarget        bool
+}
+
+// resolveDispatchTickPick computes this tick's candidate lane and target issue under
+// the live/cooldown/structurally-held skip set. Pure code motion out of
+// evaluateDispatchTick; behavior is unchanged.
+func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOptions, runsDir string, heldNoCommit map[int]bool) (dispatchTickPick, error) {
+	held := liveResolutionLanes(runsDir)
+	exclude := map[string]bool{}
+	for _, lane := range opts.ExcludeLanes {
+		exclude[lane] = true
+	}
+	if opts.Lane == "" {
+		for lane := range held {
+			exclude[lane] = true
+		}
+	}
+	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation, opts.GoalProfile)
+	if err != nil {
+		return dispatchTickPick{}, err
+	}
+	liveIssueDetails := liveResolutionIssueDetails(runsDir)
+	liveIssues := liveIssueSet(liveIssueDetails)
+	cooled := recentlyAttemptedIssues(runsDir, opts.CooldownMin)
+	cooldownStatus := cooldownIssueRows(runsDir, opts.CooldownMin)
+	skip := map[int]bool{}
+	for n := range liveIssues {
+		skip[n] = true
+	}
+	for n := range cooled {
+		skip[n] = true
+	}
+	// The pick-held-invariant rung (#1396): an issue whose last finished worker was
+	// STRUCTURALLY guard-blocked (self_modify / policy_block) re-blocks identically
+	// on re-dispatch, so hold it this tick instead of re-storming the same
+	// un-landable drain. An auth wall is deliberately NOT held here — it re-probes
+	// after the time cooldown window.
+	for n := range heldNoCommit {
+		skip[n] = true
+	}
+	target, hasTarget := dispatchtick.PickTargetIssue(pick.Numbers, skip)
+	if opts.TargetIssue > 0 {
+		target, hasTarget = opts.TargetIssue, true
+		if liveIssues[target] || cooled[target] {
+			hasTarget = false
+		}
+	}
+	if len(opts.LeaseTree) > 0 {
+		pick.Tree = append([]string(nil), opts.LeaseTree...)
+	}
+	return dispatchTickPick{
+		pick:             pick,
+		held:             held,
+		liveIssueDetails: liveIssueDetails,
+		liveIssues:       liveIssues,
+		cooled:           cooled,
+		cooldownStatus:   cooldownStatus,
+		target:           target,
+		hasTarget:        hasTarget,
+	}, nil
+}
+
+// seedDispatchTickPayload builds the base tick payload (including the startup bundle)
+// shared by every downstream verdict branch. Pure code motion out of
+// evaluateDispatchTick; behavior is unchanged.
+func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map[string]any, account dispatchtick.Account, pr dispatchTickPick) map[string]any {
+	startup := dispatchStartupBundle(root, opts, pre, account, pr.pick, pr.target, pr.hasTarget, pr.held, pr.liveIssues, pr.cooled, pr.cooldownStatus)
+	return map[string]any{
+		"schema":           dispatchtick.Schema,
+		"workspace":        root,
+		"live":             opts.Live,
+		"backend":          opts.Backend,
+		"goal":             opts.Goal,
+		"goal_profile":     opts.GoalProfile,
+		"max_workers":      opts.MaxWorkers,
+		"registry_refresh": reg,
+		"preflight": map[string]any{
+			"verdict":   dispatchMapString(pre, "verdict"),
+			"reason":    dispatchMapString(pre, "reason"),
+			"cap":       pre["cap"],
+			"live":      pre["live"],
+			"cap_terms": mapAt(pre, "cap_terms"),
+		},
+		"account":          dispatchtick.AccountSidecar(account),
+		"lane":             pr.pick.Lane,
+		"lease_id":         firstString(opts.LeaseID, dispatchLaneLeaseID(pr.pick.Lane)),
+		"lease_tree":       append([]string(nil), pr.pick.Tree...),
+		"lane_issue_count": len(pr.pick.Numbers),
+		"lane_step_budget": pr.pick.ByLaneStepBudget[pr.pick.Lane],
+		"cooled_recently":  sortedSet(pr.cooled),
+		"cooldown_status":  pr.cooldownStatus,
+		"target_issue":     nil,
+		"already_live":     sortedSet(pr.liveIssues),
+		"held_lanes":       sortedStringSet(pr.held),
+		"startup_bundle":   startup,
+		"stale_base":       mapAt(startup, "stale_base"),
+	}
+}
+
+// prepareDispatchWorkerCommand resolves the worker model policy and builds the guarded
+// worker command preview, mutating payload with the resolved command/model surface.
+// Pure code motion out of evaluateDispatchTick (the CLI-only path after the micro-backend
+// enroll); behavior is unchanged.
+func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, target, promptChars int, labels []string, witnessRecords []dispatchtick.WitnessRecord, payload map[string]any) (launch dispatchtick.WorkerLaunch, launchPreview []string, guardedPreview bool, err error) {
+	// Opt-in per-issue tier launch profile (FLEET_TIER_LAUNCH): the target's trusted tier
+	// labels resolve to a {model, effort, ultracode} profile handed to the resolver as its
+	// lowest-precedence un-blanking source. Nil (knob off / non-claude / untagged) keeps the
+	// seat default, so a default fleet tick is byte-identical to before this seam.
+	tierProfile, tierBucket := dispatchTierLaunchProfile(opts.Backend, labels)
+	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel, tierProfile, opts.WorkClassModel)
+	// Layer 2: if the target's last slot walled on a model-switchable reason this tick,
+	// re-dispatch it on the next downgrade-chain model instead of the resolved one. Live +
+	// --model-downgrade only, so the default fleet is unaffected. A model wall is transient and
+	// model-scoped, so the tier's effort/ultracode reasoning posture is carried across the
+	// switch rather than stripped along with the walled model.
+	if opts.Live && opts.ModelDowngrade {
+		if dp, fired := applyModelDowngrade(opts.Backend, target, witnessRecords); fired {
+			dp.Effort, dp.Ultracode = modelPolicy.Effort, modelPolicy.Ultracode
+			modelPolicy = dp
+			payload["model_downgrade"] = map[string]any{"issue": target, "model": dp.Model}
+		}
+	}
+	fallbackModel := dispatchWorkerFallbackModel(opts.Backend)
+	launch = dispatchtick.WorkerLaunch{
+		Model:     modelPolicy.Model,
+		Fallback:  fallbackModel,
+		Effort:    modelPolicy.Effort,
+		Ultracode: modelPolicy.Ultracode,
+	}
+	preview, err := dispatchtick.BuildWorkerCommand(opts.Backend, dispatchtick.PreviewPrompt(target, promptChars), launch)
+	if err != nil {
+		return dispatchtick.WorkerLaunch{}, nil, false, err
+	}
+	if fallbackModel != "" {
+		payload["worker_fallback_model"] = fallbackModel
+	}
+	// Surface the resolved model only when the resolver UN-BLANKED it (an explicit/lane pin,
+	// the benchmark gate, or a tier profile). A default claude tick keeps the seat default, so
+	// its payload stays byte-identical to before this seam. dispatchWorkerModelMap folds in the
+	// effort/ultracode knobs when the tier profile set them.
+	if modelPolicy.pinned() {
+		payload["worker_model"] = dispatchWorkerModelMap(modelPolicy)
+	}
+	// Attribute the uplift to the issue's tier bucket when the tier profile actually decided
+	// the model (it can be out-competed by an operator pin or the bench gate above).
+	if modelPolicy.Source == modelSourceTier && tierBucket != "" {
+		payload["worker_tier"] = string(tierBucket)
+	}
+	launchPreview, guardedPreview = guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
+	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
+	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
+	payload["guarded"] = guardedPreview
+	return launch, launchPreview, guardedPreview, nil
+}
+
 func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[string]any, error) {
 	root, err := filepath.Abs(opts.Workspace)
 	if err != nil {
@@ -335,81 +507,17 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		account = *opts.Account
 	}
 
-	held := liveResolutionLanes(runsDir)
-	exclude := map[string]bool{}
-	for _, lane := range opts.ExcludeLanes {
-		exclude[lane] = true
-	}
-	if opts.Lane == "" {
-		for lane := range held {
-			exclude[lane] = true
-		}
-	}
-	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation, opts.GoalProfile)
+	pickRes, err := resolveDispatchTickPick(root, stderr, opts, runsDir, heldNoCommit)
 	if err != nil {
 		return nil, err
 	}
-	liveIssueDetails := liveResolutionIssueDetails(runsDir)
-	liveIssues := liveIssueSet(liveIssueDetails)
-	cooled := recentlyAttemptedIssues(runsDir, opts.CooldownMin)
-	cooldownStatus := cooldownIssueRows(runsDir, opts.CooldownMin)
-	skip := map[int]bool{}
-	for n := range liveIssues {
-		skip[n] = true
-	}
-	for n := range cooled {
-		skip[n] = true
-	}
-	// The pick-held-invariant rung (#1396): an issue whose last finished worker was
-	// STRUCTURALLY guard-blocked (self_modify / policy_block) re-blocks identically
-	// on re-dispatch, so hold it this tick instead of re-storming the same
-	// un-landable drain. An auth wall is deliberately NOT held here — it re-probes
-	// after the time cooldown window.
-	for n := range heldNoCommit {
-		skip[n] = true
-	}
-	target, hasTarget := dispatchtick.PickTargetIssue(pick.Numbers, skip)
-	if opts.TargetIssue > 0 {
-		target, hasTarget = opts.TargetIssue, true
-		if liveIssues[target] || cooled[target] {
-			hasTarget = false
-		}
-	}
-	if len(opts.LeaseTree) > 0 {
-		pick.Tree = append([]string(nil), opts.LeaseTree...)
-	}
+	pick := pickRes.pick
+	held := pickRes.held
+	liveIssueDetails := pickRes.liveIssueDetails
+	target := pickRes.target
+	hasTarget := pickRes.hasTarget
 
-	startup := dispatchStartupBundle(root, opts, pre, account, pick, target, hasTarget, held, liveIssues, cooled, cooldownStatus)
-	payload := map[string]any{
-		"schema":           dispatchtick.Schema,
-		"workspace":        root,
-		"live":             opts.Live,
-		"backend":          opts.Backend,
-		"goal":             opts.Goal,
-		"goal_profile":     opts.GoalProfile,
-		"max_workers":      opts.MaxWorkers,
-		"registry_refresh": reg,
-		"preflight": map[string]any{
-			"verdict":   dispatchMapString(pre, "verdict"),
-			"reason":    dispatchMapString(pre, "reason"),
-			"cap":       pre["cap"],
-			"live":      pre["live"],
-			"cap_terms": mapAt(pre, "cap_terms"),
-		},
-		"account":          dispatchtick.AccountSidecar(account),
-		"lane":             pick.Lane,
-		"lease_id":         firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)),
-		"lease_tree":       append([]string(nil), pick.Tree...),
-		"lane_issue_count": len(pick.Numbers),
-		"lane_step_budget": pick.ByLaneStepBudget[pick.Lane],
-		"cooled_recently":  sortedSet(cooled),
-		"cooldown_status":  cooldownStatus,
-		"target_issue":     nil,
-		"already_live":     sortedSet(liveIssues),
-		"held_lanes":       sortedStringSet(held),
-		"startup_bundle":   startup,
-		"stale_base":       mapAt(startup, "stale_base"),
-	}
+	payload := seedDispatchTickPayload(root, opts, reg, pre, account, pickRes)
 	if hasTarget {
 		payload["target_issue"] = target
 	}
@@ -521,6 +629,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return nil, err
 	}
 	promptChars := dispatchMapInt(promptRec, "prompt_chars")
+	labels := dispatchStringSlice(promptRec["labels"])
 	payload["prompt_chars"] = promptChars
 	payload["issue_title"] = dispatchMapString(promptRec, "title")
 	payload["development_branch"] = dispatchMapString(promptRec, "development_branch")
@@ -544,35 +653,10 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	if dispatchtick.IsMicroBackend(opts.Backend) {
 		return dispatchTickHostEnroll(root, runsDir, opts, pick, account, target, payload, finish), nil
 	}
-	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel)
-	// Layer 2: if the target's last slot walled on a model-switchable reason this tick,
-	// re-dispatch it on the next downgrade-chain model instead of the resolved one. Live +
-	// --model-downgrade only, so the default fleet is unaffected.
-	if opts.Live && opts.ModelDowngrade {
-		if dp, fired := applyModelDowngrade(opts.Backend, target, witnessRecords); fired {
-			modelPolicy = dp
-			payload["model_downgrade"] = map[string]any{"issue": target, "model": dp.Model}
-		}
-	}
-	model := modelPolicy.Model
-	fallbackModel := dispatchWorkerFallbackModel(opts.Backend)
-	preview, err := dispatchtick.BuildWorkerCommand(opts.Backend, dispatchtick.PreviewPrompt(target, promptChars), model, fallbackModel)
+	launch, launchPreview, guardedPreview, err := prepareDispatchWorkerCommand(root, opts, pick, account, target, promptChars, labels, witnessRecords, payload)
 	if err != nil {
 		return nil, err
 	}
-	if fallbackModel != "" {
-		payload["worker_fallback_model"] = fallbackModel
-	}
-	// Surface the resolved model only when the resolver UN-BLANKED it (an explicit/lane pin
-	// or the benchmark gate). A default claude tick keeps the seat default, so its payload
-	// stays byte-identical to before this seam.
-	if modelPolicy.pinned() {
-		payload["worker_model"] = dispatchWorkerModelMap(modelPolicy)
-	}
-	launchPreview, guardedPreview := guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
-	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
-	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
-	payload["guarded"] = guardedPreview
 
 	// Self-modify pre-route (#1397): a GUARDED worker aimed at the trust-critical witness
 	// machinery (the adjudicator/policy/kernel/shipgate -- the referee's own trees) can
@@ -651,14 +735,14 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
-	return dispatchTickLiveSpawn(root, runsDir, opts, pick, account, model, target, promptRec, payload, finish)
+	return dispatchTickLiveSpawn(root, runsDir, opts, pick, account, launch, target, promptRec, payload, finish)
 }
 
 // dispatchTickLiveSpawn performs the live spawn once every dry-run gate has passed: acquire
 // the lane lease (refused → LANE_LEASE_HELD), build the guarded worker command + env, spawn
 // the issue-resolution worker, and record the SPAWNED / SPAWN_FAILED payload. It mutates and
 // returns the shared payload through finish, mirroring the dry-run return sites it splits off.
-func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, model string, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
+func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
 	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
 	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS, opts.Goal)
 	payload["lease"] = lease
@@ -675,7 +759,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	}
 
 	prompt := dispatchMapString(promptRec, "prompt")
-	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, model, dispatchWorkerFallbackModel(opts.Backend))
+	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, launch)
 	if err != nil {
 		return nil, err
 	}
@@ -749,7 +833,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	// Layer 5b: record the pinned model as a .model sidecar so the witness sweep can scrape
 	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
 	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
-	writeDispatchModelSidecar(spawned.Log, model)
+	writeDispatchModelSidecar(spawned.Log, launch.Model)
 	if reason, failed := dispatchEarlyExitFailureReason(opts.Backend, spawned.PID, target, spawned.EarlyExit); failed {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
@@ -779,17 +863,29 @@ func dispatchRunPythonJSON(root string, stderr io.Writer, timeout time.Duration,
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		cmd := exec.CommandContext(ctx, py, args...)
 		cmd.Dir = root
+		// Bound the post-deadline pipe wait: on Windows both `python3` (the
+		// WindowsApps alias) and pip console-script shims run the real
+		// interpreter as a GRANDCHILD that inherits the stdout pipe. When the
+		// context fires, Go kills only the direct child (the shim), and without
+		// a WaitDelay cmd.Output() then blocks UNBOUNDEDLY until the surviving
+		// grandchild exits -- the dispatch tick "hangs past its timeout" class.
+		cmd.WaitDelay = 10 * time.Second
 		configureDispatchHelperCommand(cmd)
 		out, err := cmd.Output()
 		cancel()
 		if obj, perr := lastJSONObject(out); perr == nil {
 			return obj, nil
 		}
-		if err != nil {
-			lastErr = err
-		} else {
-			lastErr = errors.New("no JSON object in helper output")
+		if err == nil {
+			// The helper RAN and exited 0 but printed no JSON object. That is a
+			// semantic output mismatch, not a broken interpreter: re-running the
+			// SAME helper under the next interpreter cannot print different
+			// output, it only doubles the cost of the heaviest preflight step
+			// (a fleet_sessions.py registry scan is ~40s per run on an idle
+			// box, multiples under fleet load). Fail fast instead of retrying.
+			return nil, fmt.Errorf("python helper %s (%s): no JSON object in helper output", strings.Join(args, " "), py)
 		}
+		lastErr = err
 	}
 	return nil, fmt.Errorf("python helper %s (tried %s): %w", strings.Join(args, " "), strings.Join(interps, ", "), lastErr)
 }
@@ -1005,6 +1101,47 @@ func workerWorktreeEnabled() bool {
 		return false
 	}
 	return true
+}
+
+// dispatchTierLaunchEnabled reports whether the opt-in per-issue tier launch profile
+// (FLEET_TIER_LAUNCH) is switched on. Default (unset / an off-ish value) is OFF, which keeps
+// every worker on the seat-default model with no effort/ultracode uplift — byte-identical to
+// before this seam. Mirrors workerWorktreeEnabled's truthy/falsy grammar.
+func dispatchTierLaunchEnabled() bool {
+	raw, ok := os.LookupEnv("FLEET_TIER_LAUNCH")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "0", "off", "false", "no", "disable", "disabled":
+		return false
+	}
+	return true
+}
+
+// dispatchTierLaunchTable is the tier→launch-profile table the resolver consults. Today it is
+// the built-in default (routine→fable+xhigh, normal→opus+xhigh, hard→opus+ultracode,
+// ultra→fable+ultracode). An operator per-bucket override is a fail-open follow-on that merges
+// onto this default, so a malformed override can only ever fall back to here.
+func dispatchTierLaunchTable() dispatchtick.TierLaunchTable {
+	return dispatchtick.DefaultTierLaunchTable()
+}
+
+// dispatchTierLaunchProfile resolves the opt-in per-issue launch profile for a target issue's
+// labels, or nil to leave the seat-default posture. It returns nil when the FLEET_TIER_LAUNCH
+// knob is off, the backend is not claude (the model uplift + effort/ultracode are Claude-only;
+// opencode/codex pin their own seat model with -m and ignore both), or the issue carries no
+// trusted tier (untagged / ambiguous). The bucket is returned alongside for the payload
+// surface; it is "" whenever the profile is nil.
+func dispatchTierLaunchProfile(backend string, labels []string) (*dispatchtick.LaunchProfile, dispatchtick.LaunchBucket) {
+	if backend != "claude" || !dispatchTierLaunchEnabled() {
+		return nil, ""
+	}
+	profile, bucket, ok := dispatchtick.LaunchProfileForIssue(labels, dispatchTierLaunchTable())
+	if !ok {
+		return nil, ""
+	}
+	return &profile, bucket
 }
 
 func resolveDispatchFakBin(root string) string {
@@ -1342,8 +1479,14 @@ func dispatchStaleBase(root string, tree []string) map[string]any {
 	}
 	args := []string{"diff", "--name-only", "HEAD.." + upstreamRef, "--"}
 	args = append(args, tree...)
-	cmd := exec.Command("git", args...)
+	// Bounded: this runs on every tick's startup bundle, before any spawn
+	// decision. An unbounded git call (index lock contention under a loaded
+	// fleet) would stall the whole tick; the bundle already fail-opens on error.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
+	cmd.WaitDelay = 10 * time.Second
 	configureDispatchHelperCommand(cmd)
 	raw, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1362,8 +1505,12 @@ func dispatchStaleBase(root string, tree []string) map[string]any {
 }
 
 func dispatchDirtyTree(root string) map[string]any {
-	cmd := exec.Command("git", "status", "--porcelain=v1")
+	// Bounded like dispatchStaleBase above: never let a wedged git stall the tick.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain=v1")
 	cmd.Dir = root
+	cmd.WaitDelay = 10 * time.Second
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1575,210 +1722,6 @@ func okWord(ok bool) string {
 		return "ok"
 	}
 	return "refuse"
-}
-
-func accountFromMap(m map[string]any) dispatchtick.Account {
-	return dispatchtick.Account{
-		Tag:   dispatchMapString(m, "tag"),
-		Tier:  m["tier"],
-		Model: dispatchMapString(m, "model"),
-		Dir:   firstString(dispatchMapString(m, "dir"), dispatchMapString(m, "config_dir")),
-	}
-}
-
-func dispatchSplitCSV(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
-func dispatchtickWorkKind(backend string) string {
-	b, err := dispatchtick.NormalizeBackend(backend)
-	if err != nil {
-		return dispatchtick.DefaultWorkKind("claude")
-	}
-	return dispatchtick.DefaultWorkKind(b)
-}
-
-func stringSlice(v any) []string {
-	var out []string
-	if arr, ok := v.([]any); ok {
-		for _, x := range arr {
-			if s, ok := x.(string); ok {
-				out = append(out, s)
-			}
-		}
-	}
-	return out
-}
-
-func envMap(kvs []string) map[string]string {
-	out := map[string]string{}
-	for _, kv := range kvs {
-		if i := strings.IndexByte(kv, '='); i >= 0 {
-			out[kv[:i]] = kv[i+1:]
-		}
-	}
-	return out
-}
-
-// envSliceFromMap stays as a package-local name for its many call sites; the
-// one shared implementation lives in internal/procguard (#1419).
-func envSliceFromMap(env map[string]string) []string {
-	return procguard.EnvSlice(env)
-}
-
-func mapAt(m map[string]any, key string) map[string]any {
-	if v, ok := m[key].(map[string]any); ok {
-		return v
-	}
-	return map[string]any{}
-}
-
-func dispatchMapString(m map[string]any, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func dispatchMapBool(m map[string]any, key string) bool {
-	v, _ := m[key].(bool)
-	return v
-}
-
-func dispatchStringValue(v any) string {
-	if s, ok := v.(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return ""
-}
-
-func dispatchBoolValue(v any) bool {
-	switch x := v.(type) {
-	case bool:
-		return x
-	case string:
-		switch strings.ToLower(strings.TrimSpace(x)) {
-		case "1", "true", "yes", "y", "on":
-			return true
-		}
-	}
-	return false
-}
-
-func dispatchIntValue(v any) int {
-	if n := intPtrFromAny(v); n != nil {
-		return *n
-	}
-	return 0
-}
-
-func dispatchMapInt(m map[string]any, key string) int {
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	case json.Number:
-		n, _ := v.Int64()
-		return int(n)
-	}
-	return 0
-}
-
-func intPtrFromAny(v any) *int {
-	switch x := v.(type) {
-	case int:
-		return &x
-	case int64:
-		n := int(x)
-		return &n
-	case float64:
-		n := int(x)
-		return &n
-	case json.Number:
-		if n, err := x.Int64(); err == nil {
-			i := int(n)
-			return &i
-		}
-	case string:
-		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
-			return &n
-		}
-	}
-	return nil
-}
-
-func anySlice(v any) []any {
-	if arr, ok := v.([]any); ok {
-		return arr
-	}
-	if arr, ok := v.([]map[string]any); ok {
-		out := make([]any, 0, len(arr))
-		for _, item := range arr {
-			out = append(out, item)
-		}
-		return out
-	}
-	return nil
-}
-
-func nonEmptyLines(s string) []string {
-	rows := []string{}
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) != "" {
-			rows = append(rows, line)
-		}
-	}
-	return rows
-}
-
-func sortedSet(in map[int]bool) []int {
-	out := make([]int, 0, len(in))
-	for n := range in {
-		out = append(out, n)
-	}
-	sort.Ints(out)
-	return out
-}
-
-func sortedStringSet(in map[string]bool) []string {
-	out := make([]string, 0, len(in))
-	for s := range in {
-		out = append(out, s)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func dispatchAnyOSBase(path string) string {
-	path = strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(path), "\\", "/"), "/")
-	if path == "" {
-		return ""
-	}
-	if i := strings.LastIndex(path, "/"); i >= 0 {
-		return path[i+1:]
-	}
-	return path
-}
-
-func parseAccountTier(s string) any {
-	if s == "" {
-		return nil
-	}
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
-	}
-	return s
 }
 
 func boolInt(v any) int64 {

@@ -224,6 +224,12 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 			Workspace:      root,
 			MaxWorkers:     *maxWorkers,
 			WorkKind:       dispatchtickWorkKind(*backend),
+			// Garden dispatch IS project-management / repo-maintenance work (triage, dedup,
+			// close/relabel of stale-dormant issues) — routine coordination where a wrong
+			// call costs a re-run, not a bad production write. Default its workers to fable
+			// as a LOW-precedence work-class pin: an operator --worker-model, a lane pin, or
+			// an explicit tier/T0 label on a genuinely-hard garden issue still escalates.
+			WorkClassModel: dispatchtick.WorkerModelFable,
 			Lane:           lane,
 			TargetIssue:    cand.ID,
 			Backend:        *backend,

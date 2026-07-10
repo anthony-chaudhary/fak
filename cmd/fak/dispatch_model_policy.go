@@ -52,6 +52,14 @@ func dispatchWorkerModelMap(p workerModelPolicy) map[string]any {
 	if len(p.Chain) > 0 {
 		out["downgrade_chain"] = append([]string(nil), p.Chain...)
 	}
+	// Surface the tier launch knobs only when set, so a non-tier decision's payload is
+	// byte-identical to before the seam.
+	if strings.TrimSpace(p.Effort) != "" {
+		out["effort"] = p.Effort
+	}
+	if p.Ultracode {
+		out["ultracode"] = true
+	}
 	return out
 }
 
@@ -82,15 +90,32 @@ const (
 	// modelSourceDowngrade is a Layer-2 in-tick re-dispatch: the target's last slot walled
 	// on a model-switchable reason, so it advances one rung down the downgrade ladder.
 	modelSourceDowngrade = "model-downgrade"
+	// modelSourceTier is the opt-in per-issue tier launch profile (FLEET_TIER_LAUNCH): the
+	// target's trusted tier labels resolve to a {model, effort, ultracode} profile. It sits
+	// BELOW the operator pins and the benchmark gate (all of which still win) and ABOVE the
+	// seat default, so an untagged issue or a fleet with the knob off is unchanged.
+	modelSourceTier = "tier"
+	// modelSourceWorkClass is a LOW-precedence work-class model default: a work-class
+	// dispatcher (e.g. `fak garden dispatch`, project-management / repo-maintenance work)
+	// pins the cheap model for its whole class. It sits BELOW the per-issue tier profile
+	// (so an explicit tier/pm or tier/T0 label still decides — hard planning still escalates
+	// to opus) and ABOVE the seat default, so a normal tick that names no work-class model
+	// is unchanged.
+	modelSourceWorkClass = "work-class"
 )
 
-// workerModelPolicy is the resolved model decision for one dispatch worker: the Model to pin
+// workerModelPolicy is the resolved launch decision for one dispatch worker: the Model to pin
 // (empty => seat default + fallback chain), the ordered downgrade Chain a Layer-2 model switch
-// tries after it, and the Source that decided it.
+// tries after it, the Source that decided it, and — for the per-issue tier profile — the
+// Claude reasoning Effort and Ultracode workflow-mode knobs carried into WorkerLaunch. Effort
+// and Ultracode are empty/false for every non-tier source, so nothing changes unless the
+// tier launch is on and the issue is tagged.
 type workerModelPolicy struct {
-	Model  string
-	Chain  []string
-	Source string
+	Model     string
+	Chain     []string
+	Source    string
+	Effort    string
+	Ultracode bool
 }
 
 // pinned reports whether the resolver un-blanked the model to an exact id — i.e. this worker
@@ -110,11 +135,21 @@ func (p workerModelPolicy) pinned() bool { return strings.TrimSpace(p.Model) != 
 //  2. a per-lane lane_models pin from the account policy (Source=lane);
 //  3. the benchmark gate (benchGate) — a model-accounting run that pins the account's profile
 //     model, else the fleet default, so the run measures a KNOWN model instead of one the
-//     fallback chain silently switched under it.
+//     fallback chain silently switched under it;
+//  4. the per-issue tier launch profile (tierProfile) — the opt-in FLEET_TIER_LAUNCH map from
+//     the target's trusted tier labels to a {model, effort, ultracode} launch profile. The
+//     shell resolves it (flag + labels + table) and hands it in; nil (knob off, untagged, or
+//     non-claude) leaves the seat default in place. It carries the ONLY effort/ultracode a
+//     worker is launched with.
+//  5. the work-class model default (workClassModel) — a whole-class cheap-model pin set by a
+//     work-class dispatcher (e.g. `fak garden dispatch` pins fable for project-management /
+//     maintenance work). Lowest-precedence un-blanking: it applies only when no operator pin,
+//     bench gate, or per-issue tier profile spoke, so an explicit tier label on a garden issue
+//     still escalates and an ordinary tick that names no work-class model is unchanged.
 //
 // The downgrade Chain is the same --fallback-model chain the worker command already carries,
 // with the primary dropped so a Layer-2 switch never re-dispatches onto the walled model.
-func resolveWorkerModelPolicy(backend, lane, explicit string, account dispatchtick.Account, pol fleetaccounts.Policy, benchGate bool) workerModelPolicy {
+func resolveWorkerModelPolicy(backend, lane, explicit string, account dispatchtick.Account, pol fleetaccounts.Policy, benchGate bool, tierProfile *dispatchtick.LaunchProfile, workClassModel string) workerModelPolicy {
 	if backend == "opencode" || backend == "codex" {
 		return workerModelPolicy{Model: strings.TrimSpace(account.Model), Source: modelSourceAccount}
 	}
@@ -133,6 +168,24 @@ func resolveWorkerModelPolicy(backend, lane, explicit string, account dispatchti
 			return pin(m, modelSourceProfile)
 		}
 		return pin(defaultLaunchModel, modelSourceDefault)
+	}
+	// Tier launch is a low-precedence UN-BLANKING: it pins a model (and carries the worker's
+	// effort/ultracode) only when no operator pin or bench gate already spoke, so an explicit
+	// intent always wins and an untagged issue falls through to the work-class default or seat.
+	if tierProfile != nil {
+		return workerModelPolicy{
+			Model:     strings.TrimSpace(tierProfile.Model),
+			Chain:     dropModel(chain, tierProfile.Model),
+			Source:    modelSourceTier,
+			Effort:    tierProfile.Effort,
+			Ultracode: tierProfile.Ultracode,
+		}
+	}
+	// Work-class default is the LOWEST-precedence un-blanking: a whole-class cheap-model pin
+	// (garden/PM dispatch -> fable) that applies only when nothing more specific spoke, so a
+	// per-issue tier label above still escalates and a normal tick stays on the seat default.
+	if m := strings.TrimSpace(workClassModel); m != "" {
+		return pin(m, modelSourceWorkClass)
 	}
 	return workerModelPolicy{Model: "", Chain: chain, Source: modelSourceSeatDefault}
 }
