@@ -200,14 +200,16 @@ const emptyToolResultText = "[no tool output]"
 
 // RepairEmptyToolResultContent is the general form of the tool_reference sanitizer (#3118): the
 // OUTBOUND empty-content gate. It scans the passthrough body for any `tool_result` whose `content`
-// is an EMPTY array (`[]`) — the shape a strict upstream 400s as "empty content" — and splices a
-// single wire-valid `text` placeholder block into it, leaving every other byte untouched. Where the
-// per-type tool_reference sanitizer catches ONE known client-internal block, this seam catches the
-// residual: any content array that ended up empty for ANY reason (a future client-internal type not
-// yet special-cased, or a genuinely empty source result). It is meant to run AFTER
-// SanitizeAnthropicToolReferences, on the already-converted body, as the last correctness backstop
-// before verbatim forward. Fail-safe: on any parse ambiguity, no empty array, a failed splice, or a
-// body that fails to re-decode, it returns its input UNCHANGED (identity).
+// is EMPTY in ANY shape a strict upstream 400s as "empty content" — an empty array (`[]`), an empty
+// string (`""`), or an array whose every text block is empty (#4156) — and replaces that value with
+// a wire-valid one-element `text` placeholder array, leaving every other byte untouched. It shares
+// toolResultContentIsEmpty with the compaction-side detector so the repair and the detector agree
+// byte-for-byte on what "empty" means. Where the per-type tool_reference sanitizer catches ONE known
+// client-internal block, this seam catches the residual: any content that ended up empty for ANY
+// reason (a future client-internal type not yet special-cased, or a genuinely empty source result).
+// It is meant to run AFTER SanitizeAnthropicToolReferences, on the already-converted body, as the
+// last correctness backstop before verbatim forward. Fail-safe: on any parse ambiguity, no empty
+// content, a failed splice, or a body that fails to re-decode, it returns its input UNCHANGED (identity).
 func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
 	if len(raw) == 0 {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonEmptyBody}
@@ -220,15 +222,16 @@ func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
 	if !ok {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoMsgsKey}
 	}
-	// Fast path: this gate only ever backfills a tool_result whose content is an EMPTY array
-	// (`[` + JSON whitespace + `]`). That exact run appears verbatim in the body when present, so if
-	// the body holds no empty JSON array anywhere there is nothing to repair — skip the full messages
+	// Fast path: this gate only ever repairs a tool_result whose content is empty in one of the shapes
+	// toolResultContentIsEmpty recognizes — an empty array (`[]`), an empty string (`""`), or an array
+	// of all-empty-text blocks. Each such shape leaves a verbatim byte signature in the body: an empty
+	// array is `[` + JSON whitespace + `]`, and both the empty-string and all-empty-text shapes carry
+	// the empty-string token `""`. containsRepairableEmptyContent is a true SUPERSET of all three
+	// (#4156), so if it finds neither signature there is nothing to repair — skip the full messages
 	// decode + per-element scan and return the same identity outcome the edit loop returns
-	// (EmptyContentReasonNoEmpty). containsEmptyJSONArray recognizes the identical whitespace set as
-	// isEmptyJSONArray/skipSpace, so it can never miss an array the loop would repair (a true superset
-	// guard); a false positive (an unrelated empty array, e.g. an empty tool-schema field) only costs
-	// the normal full parse, the fail-safe direction.
-	if !containsEmptyJSONArray(raw) {
+	// (EmptyContentReasonNoEmpty). A false positive (an unrelated `[]` or `""` elsewhere in the body)
+	// only costs the normal full parse, the fail-safe direction.
+	if !containsRepairableEmptyContent(raw) {
 		return raw, EmptyContentOutcome{Reason: EmptyContentReasonNoEmpty}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
@@ -256,9 +259,12 @@ func RepairEmptyToolResultContent(raw []byte) ([]byte, EmptyContentOutcome) {
 }
 
 // collectEmptyContentEdits scans one messages[] element and returns one splice edit per tool_result
-// whose content array is empty, each INSERTING a placeholder text block between the array brackets.
-// msgBase is the element's absolute start byte; every returned edit span is absolute. It mirrors
-// collectToolReferenceEdits' key-located spans so a sibling field can never mis-locate an edit.
+// whose content is empty by the SAME definition the detector uses — toolResultContentIsEmpty
+// recognizes an empty array (`[]`), an empty string (`""`), and an array whose blocks are all
+// empty-text (#4156). Each edit REPLACES the empty content value with a one-element placeholder text
+// array. msgBase is the element's absolute start byte; every returned edit span is absolute. It
+// mirrors collectToolReferenceEdits' key-located spans so a sibling field can never mis-locate an
+// edit. (An absent content key has no value span to replace and is left to the sanitizer/decoder.)
 func collectEmptyContentEdits(msgBase int, el json.RawMessage) []spliceEdit {
 	var edits []spliceEdit
 	forEachToolResultBlock(msgBase, el, func(blk json.RawMessage, blkBase int) {
@@ -267,15 +273,16 @@ func collectEmptyContentEdits(msgBase int, el json.RawMessage) []spliceEdit {
 			return
 		}
 		cVal := blk[cStart:cEnd]
-		if !isEmptyJSONArray(cVal) {
-			return // string content, or a non-empty array — nothing to repair
+		if !toolResultContentIsEmpty(cVal) {
+			return // real content (non-empty string or a block with text) — nothing to repair
 		}
 		repl, err := json.Marshal([]map[string]string{{"type": "text", "text": emptyToolResultText}})
 		if err != nil {
 			return
 		}
-		// Replace the whole `[]` value with a one-element array. The value's absolute span is
-		// [blkBase+cStart, blkBase+cEnd); blkBase is the block's absolute start.
+		// Replace the whole empty content value — `[]`, `""`, or an all-empty-text array — with a
+		// one-element text array. The value's absolute span is [blkBase+cStart, blkBase+cEnd);
+		// blkBase is the block's absolute start.
 		absStart := blkBase + cStart
 		absEnd := blkBase + cEnd
 		edits = append(edits, spliceEdit{start: absStart, end: absEnd, repl: repl})
@@ -283,24 +290,30 @@ func collectEmptyContentEdits(msgBase int, el json.RawMessage) []spliceEdit {
 	return edits
 }
 
-// isEmptyJSONArray reports whether v is a JSON empty array — `[]` with only interior whitespace.
-func isEmptyJSONArray(v json.RawMessage) bool {
-	t := skipSpace(v)
-	if len(t) == 0 || t[0] != '[' {
-		return false
-	}
-	inner := skipSpace(t[1:])
-	return len(inner) > 0 && inner[0] == ']'
+// emptyJSONString is the two-byte empty-string token `""`. In well-formed JSON a bare `""` only ever
+// appears as an empty string VALUE — distinct tokens are always separated by a structural byte, and
+// an escaped quote is the multi-byte `\"`, never a bare `""` — so its presence is the cheap superset
+// signal for the two non-array empty-content shapes: `content:""` and an array whose every text block
+// is empty (`"text":""`).
+var emptyJSONString = []byte(`""`)
+
+// containsRepairableEmptyContent is the widened fast-path guard for RepairEmptyToolResultContent
+// (#4156): a true SUPERSET of every tool_result.content shape toolResultContentIsEmpty calls empty,
+// so the full messages decode is skipped only when the body provably carries none of them. It fires
+// on an empty JSON array (`[]`, the content:[] shape) OR an empty JSON string token (`""`, present in
+// both the content:"" shape and the all-empty-text-array shape). A false positive only costs the
+// normal full parse (the fail-safe direction); it can never skip a body the repair loop would edit.
+func containsRepairableEmptyContent(raw []byte) bool {
+	return containsEmptyJSONArray(raw) || bytes.Contains(raw, emptyJSONString)
 }
 
 // containsEmptyJSONArray reports whether raw contains a JSON empty array anywhere — a '[' followed
-// by only JSON whitespace and then ']'. It is the cheap single-pass SUPERSET guard for the empty
+// by only JSON whitespace and then ']'. It is the cheap single-pass guard for the empty-array
 // tool_result.content shape RepairEmptyToolResultContent repairs: an empty content array is itself a
-// '[' + whitespace + ']' run in the body, so a false return proves no tool_result content can be
-// empty and the full json decode can be skipped. The whitespace set (isJSONSpace) is identical to
-// the one skipSpace/isEmptyJSONArray recognize, so any array they would call empty is detected here
-// too — the guard can never skip a body the repair loop would edit. The scan is O(len(raw)) with no
-// allocation, far cheaper than the decode it guards.
+// '[' + whitespace + ']' run in the body, so a false return proves no tool_result content array can
+// be empty. The whitespace set (isJSONSpace) is identical to the one skipSpace recognizes, so any
+// array the loop would call empty is detected here too. The scan is O(len(raw)) with no allocation,
+// far cheaper than the decode it guards.
 func containsEmptyJSONArray(raw []byte) bool {
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '[' {
