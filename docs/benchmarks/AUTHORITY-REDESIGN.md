@@ -1,3 +1,8 @@
+---
+title: "Benchmark Authority redesign: record, view, freshness gate"
+description: "The redesign making fak's benchmark-authority record the single source of truth, with a generated view and a freshness gate over every authority claim."
+---
+
 # Benchmark Authority — redesign: record → generated view → freshness gate
 
 **Status:** proposal + complete backfill. The record now carries **every** authority claim (Quick-Reference + tombstoned), and the generator, generated view, and freshness gate are shipped. What remains is the operator's flip.

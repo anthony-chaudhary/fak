@@ -1,3 +1,8 @@
+---
+title: "LiveCodeBench epic index"
+description: "The repo-side index mirroring fak's LiveCodeBench GitHub epic anchor: scope, child issues, and status for the benchmark submission effort."
+---
+
 # LiveCodeBench Epic Index
 
 Status: **planning**. This repo-side index mirrors the GitHub epic anchor for

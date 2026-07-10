@@ -1,3 +1,8 @@
+---
+title: "conceptbench - FAK-concept fidelity benchmark (epic #2721)"
+description: "The plan for conceptbench: which model best handles fak's own concepts, measured per concept, and what fak must adapt to raise concept fidelity."
+---
+
 # conceptbench — FAK-concept fidelity benchmark (epic #2721)
 
 > Local plan/index for the fan-out filed under **epic #2721**. This file also carries the

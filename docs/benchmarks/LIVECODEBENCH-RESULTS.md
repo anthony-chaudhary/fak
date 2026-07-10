@@ -1,3 +1,8 @@
+---
+title: "LiveCodeBench results scaffold"
+description: "An authority placeholder for fak's LiveCodeBench results: it records the intended result shape and stays pending until a scored run is published."
+---
+
 # LiveCodeBench Results Scaffold
 
 Status: **pending run**. This page is an authority placeholder only; it records the

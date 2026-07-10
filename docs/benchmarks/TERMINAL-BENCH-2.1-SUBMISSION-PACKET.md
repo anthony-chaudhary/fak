@@ -1,3 +1,8 @@
+---
+title: "Terminal-Bench 2.1 submission packet - assembly index"
+description: "The assembly index for fak's Terminal-Bench 2.1 submission packet, blocked pre-credential until there is a result claim and a benchmark-authority row."
+---
+
 # Terminal-Bench 2.1 submission packet — assembly index
 
 Status: `BLOCKED_PRECREDENTIAL` — no result claim, no authority row yet.
@@ -37,6 +42,17 @@ the campaign go/no-go threshold is a stricter **≥ 86.0% mean pass rate** on th
 official 2.1 task set, unless the organizers confirm a different ranking
 statistic.
 
+**Model update (2026-07-09).** GPT-5.6 Sol reached general availability on
+2026-07-09 and is now the Codex-supported frontier top-agent model. The
+official-run contract below has been advanced to pin `gpt-5.6` as the shared
+raw/fak model and the `top_agent_model_current` gate target; the
+`OfficialTerminalBench21TopAgentModel` constant moved in lockstep, so the
+contract artifact and its hash pins were refreshed on this date. This changes
+only the model the credentialed run will use — it makes **no** result claim and
+does not clear the go/no-go bar. The `83.4% ± 2.2` figure above stays as the
+dated 2026-06-26 GPT-5.5 leaderboard witness; a GPT-5.6 Terminal-Bench 2.1 bar
+will be recorded here only from a published organizer statistic, never inferred.
+
 ## Checked-in artifacts (hash-pinned)
 
 Every artifact below is tracked in this repo. The packet is reproducible from
@@ -44,8 +60,8 @@ this index plus these hashes: re-derive them with `sha256sum <path>` and compare
 
 | Artifact | Role in the packet | SHA-256 |
 |---|---|---|
-| `experiments/agent-live/terminalbench-official-run-contract-20260626.json` | Official-run contract (machine-readable gate): task selection, both arm commands, score-evidence link, gates, required-before-claim, `result_claim_allowed=false`. | `741f9dd8b70ba380b27f2c33634cbeedd78d733950ae12cad6b497e34d0ee69e` |
-| `experiments/agent-live/terminalbench-official-run-contract-20260626.md` | Human-readable render of the contract above. | `d0a6f2550487d76e72759215677cda2508e519bf7676eff29b9e4953f82ec6b0` |
+| `experiments/agent-live/terminalbench-official-run-contract-20260626.json` | Official-run contract (machine-readable gate): task selection, both arm commands, score-evidence link, gates, required-before-claim, `result_claim_allowed=false`. | `694da2377018134eeac89ab79142a0bdc12f3b89c76166a8ab496bd65d6fb2e5` |
+| `experiments/agent-live/terminalbench-official-run-contract-20260626.md` | Human-readable render of the contract above. | `de3c636ed5458a2f65aafed53192a5b96d39149282e648c690da3dced20c3108` |
 | `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.json` | Rehearsal host-readiness preflight (#900): machine-readable **environment metadata** — the Harbor, Docker-engine, `OPENAI_API_KEY`, and fak-gateway gates this host passes or fails — and the checked-in witness that the credentialed run is `BLOCKED_PREFLIGHT`. Never a result; `result_claim_allowed=false`. | `0dc71e6967db82f916382747179a7801ddfd7bd2d1a28fb04ce4990ad7dc71bb` |
 | `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.md` | Human-readable render of the preflight above. | `6fa494b769b1a6c83f68f3c6c8a932caca63d5286f16cc54f2c92a413c46226a` |
 | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json` | Adapter smoke (`SIMULATED_LOCAL_FIXTURE`): raw-vs-fak command-boundary shape over a recorded trace. Adapter evidence only — never a leaderboard number. | `2db95bdaa778e2df0733de41973fc895bfae01ea911ffd5a1a8f8d521c43f31c` |

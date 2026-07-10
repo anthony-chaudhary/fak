@@ -1,3 +1,8 @@
+---
+title: "LiveCodeBench runbook"
+description: "The runbook for running LiveCodeBench against fak: environment, adapter status, and the steps needed to produce a scored, citable submission."
+---
+
 # LiveCodeBench Runbook
 
 Status: **runbook assembled; native fak adapter pending child issues**. This document is

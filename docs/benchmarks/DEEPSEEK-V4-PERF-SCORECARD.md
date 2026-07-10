@@ -33,8 +33,10 @@ Each row carries: `ttft_ms`, `tpot_ms`, `e2e_ms`, `output_toks_per_s`,
 `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, `cache_attribution`, plus the
 route identity (`model_id`, `provider_route`, `engine_route`, `hosting`) and the two
 comparability keys (`prompt_shape`, `quality_parity`). The full locked list is
-`requiredBenchFields()` in [`cmd/fak/deepseekbench.go`](../../cmd/fak/deepseekbench.go);
-the field-lock test `TestDeepSeekBenchRequiredFields` fails if any row drifts from it.
+`RequiredFields()` in [`internal/deepseekbench/deepseekbench.go`](../../internal/deepseekbench/deepseekbench.go);
+the field-lock test `TestRequiredFields` fails if any row drifts from it. The
+`fak deepseekbench` command in [`cmd/fak/deepseekbench.go`](../../cmd/fak/deepseekbench.go)
+is only the thin flag/I-O wire over that pure, isolation-testable package.
 
 ## The keyless dry-run fixture (CI-safe, no key, no network)
 
@@ -87,8 +89,8 @@ the provider's own prompt-cache hit/miss split. None of it is a fak-authored sav
 The report generator **refuses to print a speedup** unless both compared rows share a
 `prompt_shape` **and** both carry `quality_parity:"verified"` **and** both are live
 measurements. A dry-run fixture, a shape mismatch, or an unverified parity yields a
-`[NOT COMPARABLE: …]` line instead of a number (see `compareSpeedup`, tested by
-`TestDeepSeekBenchSpeedupRefusal`). A DeepSeek row is compared against an existing fak
+`[NOT COMPARABLE: …]` line instead of a number (see `CompareSpeedup`, tested by
+`TestSpeedupRefusal`). A DeepSeek row is compared against an existing fak
 route baseline **only** when that baseline was produced by this same harness under a
 matching shape — otherwise the row is `[NOT COMPARABLE]` and says so.
 

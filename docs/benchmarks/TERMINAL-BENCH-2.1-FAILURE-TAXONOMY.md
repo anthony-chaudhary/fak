@@ -1,3 +1,8 @@
+---
+title: "Terminal-Bench 2.1 failure taxonomy and retry policy"
+description: "The failure taxonomy and retry policy for fak on Terminal-Bench 2.1: the engine is shipped and awaiting live-run wiring for a scored submission."
+---
+
 # Terminal-Bench 2.1 failure taxonomy and retry policy
 
 Status: engine shipped, pending live-run wiring.

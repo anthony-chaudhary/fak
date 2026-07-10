@@ -1,3 +1,8 @@
+---
+title: "LiveCodeBench submission packet - assembly index"
+description: "The assembly index for fak's LiveCodeBench code-generation submission packet, blocked pre-credential until a result claim and authority row exist."
+---
+
 # LiveCodeBench code-generation submission packet - assembly index
 
 Status: `BLOCKED_PRECREDENTIAL` - no result claim, no authority row yet.

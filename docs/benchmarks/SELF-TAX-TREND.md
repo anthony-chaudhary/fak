@@ -1,3 +1,8 @@
+---
+title: "Self-tax trend: fak's own overhead over time"
+description: "Tracks fak's self-tax over time - the overhead the kernel adds versus the net effect it delivers - as a dated trend of snapshots."
+---
+
 # Self-Tax Trend — fak's own overhead and net effect, tracked over time
 
 > **What this is.** The living trend companion to the **self-tax** row in

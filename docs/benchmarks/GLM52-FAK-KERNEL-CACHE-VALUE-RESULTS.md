@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 fak-kernel cache-value results on a solved ticket"
+description: "Measured cache-value results for GLM-5.2 running the fak kernel on an already-solved ticket, recorded 2026-06-27 as a benchmark-authority row."
+---
+
 # GLM-5.2 Fak-Kernel Cache Value — On a Solved Ticket
 
 > **📊 AUTHORITY:** This document's benchmark results are indexed in **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**,

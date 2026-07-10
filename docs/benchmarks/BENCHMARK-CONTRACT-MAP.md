@@ -1,3 +1,8 @@
+---
+title: "Benchmark contract map for mediated agent evals"
+description: "Maps the public agent-eval benchmarks fak mediates, and the ones it does not yet, onto the mediation contract each one requires to be citable."
+---
+
 # Benchmark Contract Map for Mediated Agent Evals
 
 > **Why this exists.** fak mediates an agent's tool calls before they run. To say a

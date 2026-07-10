@@ -9,6 +9,8 @@ This is the C7 adapter for epic #1706: make the C6 `harbor_ext.fak_routed:FakRou
 shim reachable inside a FrontierSWE task sandbox by starting `fak serve` co-resident with
 the agent.
 
+## Route shape
+
 The adapter is plumbing, not a result claim. The emitted command enforces this route shape:
 
 1. `fak serve` binds to loopback inside the task environment.
@@ -47,6 +49,8 @@ If the current host lacks Docker/GHCR/Modal access, the command is honestly gate
 the exact `docker run ... /bin/sh -lc ...` command to run on a capable box. It does not
 fabricate a live FrontierSWE turn or any time-to-solution number.
 
+## Registration shape
+
 The emitted `job_yaml` block is the registration shape for FrontierSWE:
 
 ```yaml
@@ -60,6 +64,8 @@ agents:
       fak_base_url: http://127.0.0.1:8080/v1
       allow_internet: false
 ```
+
+## Next steps
 
 The next live steps remain separately gated:
 

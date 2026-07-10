@@ -1,3 +1,8 @@
+---
+title: "Guard-hop overhead + prompt-cache preservation (pending)"
+description: "A pending, projected benchmark-authority row for fak guard-hop overhead and prompt-cache preservation, tracking issue #734 until a live run lands."
+---
+
 # Guard-hop overhead + prompt-cache preservation — BENCHMARK-AUTHORITY row (PENDING/PROJECTED)
 
 **Issue:** [#734](https://github.com/anthony-chaudhary/fak/issues/734)
