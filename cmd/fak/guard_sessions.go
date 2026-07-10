@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 func cmdGuardSessions(argv []string) { os.Exit(runGuardSessions(os.Stdout, os.Stderr, argv)) }
@@ -72,7 +73,10 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 			guardsessions.IndexPath(regDir))
 		return 0
 	}
-	renderGuardSessionTable(stdout, rows)
+	// A5 (#4116): join each session's guard trace to its transcript UUID (the A1/A2 store),
+	// so the operator surface names the id `claude --resume` takes, not just the trace.
+	_, uuidByTrace := resume.LoadIdentity(regDir)
+	renderGuardSessionTable(stdout, rows, uuidByTrace)
 	fmt.Fprintf(stdout, "\nreference one with `fak guard sessions <handle-or-trace-prefix>` (index: %s)\n",
 		guardsessions.IndexPath(regDir))
 	return 0
@@ -82,6 +86,7 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 // the ambiguity. Exit 1 no match, 3 ambiguous, 0 a unique resolution.
 func renderGuardSessionResolve(stdout, stderr io.Writer, regDir string, rows []guardsessions.Row, query string, asJSON bool) int {
 	res := guardsessions.Resolve(rows, query)
+	_, uuidByTrace := resume.LoadIdentity(regDir) // trace -> transcript UUID for the text renders
 	switch {
 	case res.Matched == 0:
 		if asJSON {
@@ -97,7 +102,7 @@ func renderGuardSessionResolve(stdout, stderr io.Writer, regDir string, rows []g
 			}, "fak guard sessions")
 		} else {
 			fmt.Fprintf(stderr, "fak guard sessions: %q is ambiguous — %d sessions match:\n", query, res.Matched)
-			renderGuardSessionTable(stderr, res.Candidates)
+			renderGuardSessionTable(stderr, res.Candidates, uuidByTrace)
 			fmt.Fprintln(stderr, "  narrow the prefix to name exactly one")
 		}
 		return 3
@@ -105,28 +110,32 @@ func renderGuardSessionResolve(stdout, stderr io.Writer, regDir string, rows []g
 		if asJSON {
 			return encodeJSONOrFail(stdout, stderr, res.Row, "fak guard sessions")
 		}
-		renderGuardSessionRow(stdout, res.Row)
+		renderGuardSessionRow(stdout, res.Row, uuidByTrace)
 		return 0
 	}
 }
 
 // renderGuardSessionTable prints the sessions as an aligned, scannable table: the short
-// handle first (the thing to reference), then the trace, agent, pid, start, and cwd.
-func renderGuardSessionTable(w io.Writer, rows []guardsessions.Row) {
+// handle first (the thing to reference), then the trace, the joined transcript UUID (the id
+// `claude --resume` takes; a dash when the identity store has no join yet), agent, pid,
+// start, and cwd.
+func renderGuardSessionTable(w io.Writer, rows []guardsessions.Row, uuidByTrace map[string]string) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "HANDLE\tTRACE\tAGENT\tPID\tSTARTED\tCWD\n")
+	fmt.Fprintf(tw, "HANDLE\tTRACE\tUUID\tAGENT\tPID\tSTARTED\tCWD\n")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
-			r.Handle, orDash(r.TraceID), orDash(r.Agent), r.PID, orDash(r.StartedAt), orDash(r.CWD))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			r.Handle, orDash(r.TraceID), orDash(uuidByTrace[r.TraceID]), orDash(r.Agent), r.PID, orDash(r.StartedAt), orDash(r.CWD))
 	}
 	_ = tw.Flush()
 }
 
 // renderGuardSessionRow prints one resolved session's full provenance (the detail an
-// operator wants after naming it).
-func renderGuardSessionRow(w io.Writer, r guardsessions.Row) {
+// operator wants after naming it), including the transcript UUID joined from the session's
+// trace (a dash when the identity store has no join yet).
+func renderGuardSessionRow(w io.Writer, r guardsessions.Row, uuidByTrace map[string]string) {
 	fmt.Fprintf(w, "guard session %s\n", r.Handle)
 	fmt.Fprintf(w, "  trace_id: %s\n", orDash(r.TraceID))
+	fmt.Fprintf(w, "  uuid:     %s\n", orDash(uuidByTrace[r.TraceID]))
 	fmt.Fprintf(w, "  agent:    %s\n", orDash(r.Agent))
 	fmt.Fprintf(w, "  pid:      %d\n", r.PID)
 	fmt.Fprintf(w, "  started:  %s\n", orDash(r.StartedAt))

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 // seedGuardSessionIndex writes a fixed index under a temp reg dir and points --reg-dir at
@@ -138,5 +139,67 @@ func TestRecordGuardSessionIndexRoundTrips(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "trace_id: issue-9999") {
 		t.Fatalf("recorded session did not round-trip:\n%s", out.String())
+	}
+}
+
+// TestSessionLsIdentity (A5, #4116): the guard-session surface joins each session's trace to
+// its transcript UUID from the A1/A2 identity store, and renders a dash when there is no join
+// yet — never a blank cell or another session's UUID.
+func TestSessionLsIdentity(t *testing.T) {
+	reg := t.TempDir()
+	idx := strings.Join([]string{
+		`{"schema":"fak.guard-session.v1","handle":"s1aaaaaa","trace_id":"trace-mapped","agent":"claude","pid":101,"cwd":"/w/a","audit":"a.jsonl","started_utc":"2026-07-08T02:00:00Z"}`,
+		`{"schema":"fak.guard-session.v1","handle":"s2bbbbbb","trace_id":"trace-unmapped","agent":"codex","pid":102,"cwd":"/w/b","audit":"b.jsonl","started_utc":"2026-07-08T01:00:00Z"}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(guardsessions.IndexPath(reg), []byte(idx), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The identity store joins only trace-mapped -> uuid-XYZ; trace-unmapped has no join.
+	id := `{"ts":"2026-07-08T00:00:00Z","uuid":"uuid-XYZ","trace":"trace-mapped","account":".claude-a","via":"guard-sessionstart"}` + "\n"
+	if err := os.WriteFile(resume.IdentityLedgerPath(reg), []byte(id), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// uuidDetail pulls the value off the `  uuid: <x>` detail line, robust to column padding.
+	uuidDetail := func(body string) string {
+		for _, ln := range strings.Split(body, "\n") {
+			if s := strings.TrimSpace(ln); strings.HasPrefix(s, "uuid:") {
+				return strings.TrimSpace(strings.TrimPrefix(s, "uuid:"))
+			}
+		}
+		return ""
+	}
+
+	// List: a UUID column exists and the joined UUID shows for the mapped trace.
+	var out, errb bytes.Buffer
+	if rc := runGuardSessions(&out, &errb, []string{"--reg-dir", reg}); rc != 0 {
+		t.Fatalf("list rc=%d stderr=%s", rc, errb.String())
+	}
+	if list := out.String(); !strings.Contains(list, "UUID") || !strings.Contains(list, "uuid-XYZ") {
+		t.Fatalf("list missing UUID column / joined uuid:\n%s", list)
+	}
+
+	// Resolve the mapped session: the detail names the transcript UUID.
+	out.Reset()
+	errb.Reset()
+	if rc := runGuardSessions(&out, &errb, []string{"--reg-dir", reg, "s1aaaaaa"}); rc != 0 {
+		t.Fatalf("resolve mapped rc=%d stderr=%s", rc, errb.String())
+	}
+	if got := uuidDetail(out.String()); got != "uuid-XYZ" {
+		t.Fatalf("mapped detail uuid = %q, want uuid-XYZ:\n%s", got, out.String())
+	}
+
+	// Resolve the unmapped session: the uuid line is a dash, and never leaks the other UUID.
+	out.Reset()
+	errb.Reset()
+	if rc := runGuardSessions(&out, &errb, []string{"--reg-dir", reg, "s2bbbbbb"}); rc != 0 {
+		t.Fatalf("resolve unmapped rc=%d stderr=%s", rc, errb.String())
+	}
+	if got := uuidDetail(out.String()); got != "-" {
+		t.Fatalf("unmapped detail uuid = %q, want a dash:\n%s", got, out.String())
+	}
+	if strings.Contains(out.String(), "uuid-XYZ") {
+		t.Fatalf("unmapped session leaked the mapped UUID:\n%s", out.String())
 	}
 }
