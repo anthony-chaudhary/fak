@@ -358,7 +358,7 @@ func cmdSwebenchDeepSWEContract(argv []string) {
 	model := fs.String("model", "DeepSWE-Preview", "DeepSWE model id shared by raw and fak arms")
 	adapter := fs.String("adapter", "deepswe-r2e-runner", "real DeepSWE/R2E-Gym adapter executable shared by both arms")
 	adapterArgs := fs.String("adapter-args", "", "extra adapter args shared by both arms")
-	rawBaseURL := fs.String("raw-base-url", "$env:RAW_DEEPSWE_BASE_URL", "raw provider OpenAI-compatible base URL or PowerShell env reference")
+	rawBaseURL := fs.String("raw-base-url", "$env:RAW_DEEPSWE_BASE_URL", "raw provider OpenAI-compatible base URL, @lab/<model> lab-target alias, or PowerShell env reference")
 	fakBaseURL := fs.String("fak-base-url", "http://localhost:8080/v1", "fak gateway OpenAI-compatible base URL")
 	rawOutput := fs.String("raw-output", "experiments/agent-live/deepswe-raw-smoke-20260626", "raw arm output directory")
 	fakOutput := fs.String("fak-output", "experiments/agent-live/deepswe-fak-smoke-20260626", "fak arm output directory")
@@ -369,6 +369,14 @@ func cmdSwebenchDeepSWEContract(argv []string) {
 	out := fs.String("out", "", "write the contract JSON here (default stdout)")
 	md := fs.String("md", "", "write the contract markdown here")
 	_ = fs.Parse(argv)
+
+	// --raw-base-url may name lab GPU hardware as @lab/<model>: resolve it through the same
+	// readiness+latency-gated seam `fak guard --remote-serve` uses, so a contract can't point
+	// the raw arm at a box the lab-readiness gate has not cleared. A plain URL or a $env:
+	// reference is returned unchanged (passthrough).
+	resolvedRawBase, err := resolveBenchBaseURL(*rawBaseURL)
+	must(err)
+	*rawBaseURL = resolvedRawBase
 
 	d, diff, ds, srcDesc, err := resolveSwebenchContractSource("deepswe-contract", *difficulty, *dataset)
 	must(err)
