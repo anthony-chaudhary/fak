@@ -25,17 +25,17 @@
 // Parse applies the checks in a fixed order so the refusal a caller sees is the FIRST
 // gate it failed, and so nothing about the grammar leaks to an unauthorized sender:
 //
-//	1. BOT_LOOP        — a message from any bot/app (or the door's own user) is ignored,
-//	                     the loop fence that stops the door answering itself.
-//	2. WRONG_CHANNEL   — the door listens in exactly one invited control channel.
-//	3. NOT_ADDRESSED   — the door acts only on an explicit @mention of its bot user.
-//	4. EMPTY           — a bare mention with no verb is a no-op, not a command.
-//	5. NOT_ADMIN       — authorization is a FAIL-CLOSED allowlist of immutable Slack
-//	                     user ids (Uxxxx), never display names. Checked before the verb
-//	                     is even looked up, so an unauthorized sender learns nothing
-//	                     about the grammar.
-//	6. UNKNOWN_VERB    — the first token is not a member of the closed set.
-//	7. MISSING_OPERAND — the verb needs an argument (e.g. `dispatch #2265`) and got none.
+//  1. BOT_LOOP        — a message from any bot/app (or the door's own user) is ignored,
+//     the loop fence that stops the door answering itself.
+//  2. WRONG_CHANNEL   — the door listens in exactly one invited control channel.
+//  3. NOT_ADDRESSED   — the door acts only on an explicit @mention of its bot user.
+//  4. EMPTY           — a bare mention with no verb is a no-op, not a command.
+//  5. NOT_ADMIN       — authorization is a FAIL-CLOSED allowlist of immutable Slack
+//     user ids (Uxxxx), never display names. Checked before the verb
+//     is even looked up, so an unauthorized sender learns nothing
+//     about the grammar.
+//  6. UNKNOWN_VERB    — the first token is not a member of the closed set.
+//  7. MISSING_OPERAND — the verb needs an argument (e.g. `dispatch #2265`) and got none.
 //
 // A Result that survives all seven carries the verb, its operand, the idempotency
 // nonce (the Slack ts — internal/slackwire's IdemEventType contract), and the channel

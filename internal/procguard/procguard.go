@@ -200,10 +200,10 @@ type Options struct {
 	// DeadOwnerRows are lease-keyed dead-owner orphan findings (from
 	// ClassifyDeadOwnerOrphans). Merged into Flagged exactly like OrphanRows; their
 	// count is also surfaced separately in Payload.DeadOwnerOrphanCount.
-	DeadOwnerRows  []Finding
-	Observations   *ObservationSummary
-	Platform       string
-	CollectError   string
+	DeadOwnerRows []Finding
+	Observations  *ObservationSummary
+	Platform      string
+	CollectError  string
 	// Killer is the destructive reaper, injected so tests never spawn anything.
 	// nil => no kill is ever attempted (report-only), even with Enact.
 	Killer func(pid int) (bool, string)

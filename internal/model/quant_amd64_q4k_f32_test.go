@@ -19,12 +19,12 @@ func TestQ4KRowDotF32AVX2MatchesScalar(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0x9950))
 	shapes := []struct{ out, in int }{
-		{1, 256},     // single row, single super-block
-		{7, 256},     // odd row count, one super-block
-		{5, 512},     // two super-blocks
-		{16, 768},    // three super-blocks
-		{33, 1280},   // five super-blocks, non-multiple-of-8 rows
-		{2, 5120},    // Qwen3.6 hidden width (20 super-blocks)
+		{1, 256},   // single row, single super-block
+		{7, 256},   // odd row count, one super-block
+		{5, 512},   // two super-blocks
+		{16, 768},  // three super-blocks
+		{33, 1280}, // five super-blocks, non-multiple-of-8 rows
+		{2, 5120},  // Qwen3.6 hidden width (20 super-blocks)
 	}
 	for _, sh := range shapes {
 		nblk := sh.in / qkK

@@ -21,12 +21,12 @@ func leaseSet(live ...string) func(string) bool {
 // never candidates.
 func TestClassifyDeadOwnerOrphans(t *testing.T) {
 	procs := []Proc{
-		{PID: 10, Name: "fak", PPID: ip(999), Cmdline: "fak c --run r-dead --lane gateway"},   // dead lease -> flag
-		{PID: 11, Name: "fak", PPID: ip(999), Cmdline: "fak c --run r-live --lane gateway"},   // live lease -> spare
-		{PID: 12, Name: "fak", PPID: ip(999), Cmdline: "fak guard --run=r-dead2"},             // =form, dead -> flag
-		{PID: 13, Name: "fak", PPID: ip(999), Cmdline: "fak c --lane gateway"},                // fak-owned but no run tag -> spare
-		{PID: 14, Name: "python", PPID: ip(999), Cmdline: "python -m http.server"},            // not fak-owned -> spare
-		{PID: 15, Name: "fak", PPID: ip(999), Cmdline: "fak c --run r-dead3"},                 // allow-listed by name -> spare
+		{PID: 10, Name: "fak", PPID: ip(999), Cmdline: "fak c --run r-dead --lane gateway"}, // dead lease -> flag
+		{PID: 11, Name: "fak", PPID: ip(999), Cmdline: "fak c --run r-live --lane gateway"}, // live lease -> spare
+		{PID: 12, Name: "fak", PPID: ip(999), Cmdline: "fak guard --run=r-dead2"},           // =form, dead -> flag
+		{PID: 13, Name: "fak", PPID: ip(999), Cmdline: "fak c --lane gateway"},              // fak-owned but no run tag -> spare
+		{PID: 14, Name: "python", PPID: ip(999), Cmdline: "python -m http.server"},          // not fak-owned -> spare
+		{PID: 15, Name: "fak", PPID: ip(999), Cmdline: "fak c --run r-dead3"},               // allow-listed by name -> spare
 	}
 	top := NewRelationTopology(procs) // pid 999 absent -> owners not alive anyway
 	got := ClassifyDeadOwnerOrphans(procs, top, DeadOwnerOptions{LeaseAlive: leaseSet("r-live")})

@@ -217,9 +217,9 @@ func TestMaxBoostCap(t *testing.T) {
 // While a unit is cooling, its eligible wait must read the SAME at every instant of the window:
 // the clock is paused, so cooling time can never grow the boost or the standing.
 func TestCoolingPausesWaitClock(t *testing.T) {
-	ready := readyAgo(3600)  // became ready 1h before base
-	coolStart := base - 600  // attempted 10 min before base...
-	coolEnd := base + 600    // ...cooling for 20 min total
+	ready := readyAgo(3600) // became ready 1h before base
+	coolStart := base - 600 // attempted 10 min before base...
+	coolEnd := base + 600   // ...cooling for 20 min total
 	c := Candidate{ID: "cooling", BaseWeight: wDefault, ReadySince: ready,
 		CoolingSince: coolStart, CoolingUntil: coolEnd}
 	const wantPaused = int64(3000) // the 50 eligible minutes accrued before the cooldown began

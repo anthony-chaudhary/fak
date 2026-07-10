@@ -17,10 +17,10 @@ import (
 func TestLoadLeaseLiveness(t *testing.T) {
 	now := time.Now().Unix()
 	path := filepath.Join(t.TempDir(), "loops.jsonl")
-	appendEv(t, path, "r-live", loopmgr.EventStart, "", now-60)                                 // recent -> running -> alive
-	appendEv(t, path, "r-dead", loopmgr.EventStart, "", now-5000)                               // silent past stale -> orphaned -> dead
-	appendEv(t, path, "r-done", loopmgr.EventStart, "", now-4000)                               // started ...
-	appendEv(t, path, "r-done", loopmgr.EventWitness, loopmgr.StatusWitnessedDone, now-3900)    // ... witnessed -> complete -> dead
+	appendEv(t, path, "r-live", loopmgr.EventStart, "", now-60)                              // recent -> running -> alive
+	appendEv(t, path, "r-dead", loopmgr.EventStart, "", now-5000)                            // silent past stale -> orphaned -> dead
+	appendEv(t, path, "r-done", loopmgr.EventStart, "", now-4000)                            // started ...
+	appendEv(t, path, "r-done", loopmgr.EventWitness, loopmgr.StatusWitnessedDone, now-3900) // ... witnessed -> complete -> dead
 
 	leaseAlive, note := loadLeaseLiveness(path)
 	if note != "" {

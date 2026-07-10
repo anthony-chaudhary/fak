@@ -37,7 +37,7 @@ func TestFoldIssuesTriagedDecentersRoutable(t *testing.T) {
 // still pages, and the detail names how many of the unowned issues need a person.
 func TestFoldIssuesTriagedKeepsAuthorityPage(t *testing.T) {
 	issues := []Issue{
-		{Number: 20, Title: "regenerate the report"},                        // routable
+		{Number: 20, Title: "regenerate the report"},                                              // routable
 		{Number: 21, Title: "approve the production release", Labels: []Label{{Name: "release"}}}, // authority
 	}
 	tri := FoldIssuesTriaged(issues, "blocked", "")

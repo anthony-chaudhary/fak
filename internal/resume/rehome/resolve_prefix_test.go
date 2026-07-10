@@ -24,8 +24,8 @@ func TestLooksLikeFullSessionID(t *testing.T) {
 		"":                                     false,
 		"aaaaaaaa":                             false, // the 8-char paste-truncation footgun
 		"aaaaaaaa-1111-2222":                   false,
-		"aaaaaaaa-1111-2222-3333-444444444444": true,  // canonical 36-char UUID
-		"aaaaaaaa11112222333344444444aaaa":     true,  // 32-char hex, no hyphens
+		"aaaaaaaa-1111-2222-3333-444444444444": true, // canonical 36-char UUID
+		"aaaaaaaa11112222333344444444aaaa":     true, // 32-char hex, no hyphens
 	}
 	for sid, want := range cases {
 		if got := looksLikeFullSessionID(sid); got != want {

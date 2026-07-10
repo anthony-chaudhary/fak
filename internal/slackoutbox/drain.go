@@ -81,7 +81,7 @@ type DrainReport struct {
 	Refused    int `json:"refused"`
 	Superseded int `json:"superseded"`
 	Unchanged  int `json:"unchanged"` // no-op update edits suppressed pre-send (body == card's last posted body)
-	Failed     int `json:"failed"` // transient failures recorded this pass (still pending)
+	Failed     int `json:"failed"`    // transient failures recorded this pass (still pending)
 	Dead       int `json:"dead"`
 	Remaining  int `json:"remaining"` // rows still owed after this pass
 }

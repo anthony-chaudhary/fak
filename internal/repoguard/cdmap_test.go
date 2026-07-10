@@ -11,12 +11,12 @@ const cdWS = "C:/work/fak"
 
 func TestClassifyWorkspaceCdFlagsDriveStrippedRoot(t *testing.T) {
 	cases := []string{
-		"cd /work/fak",                         // the bare audit form
-		"cd /work/fak && go test ./...",        // chained under && (the wasted-turn shape)
-		"cd /work/fak/",                        // trailing slash
-		"cd \"/work/fak\"",                      // quoted
-		"cd '/work/fak'",                       // single-quoted
-		"make ci; cd /work/fak && ls",          // second segment
+		"cd /work/fak",                  // the bare audit form
+		"cd /work/fak && go test ./...", // chained under && (the wasted-turn shape)
+		"cd /work/fak/",                 // trailing slash
+		"cd \"/work/fak\"",              // quoted
+		"cd '/work/fak'",                // single-quoted
+		"make ci; cd /work/fak && ls",   // second segment
 	}
 	for _, cmd := range cases {
 		vs := ClassifyWorkspaceCd(cmd, cdWS)

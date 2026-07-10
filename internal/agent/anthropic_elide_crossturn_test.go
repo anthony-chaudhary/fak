@@ -29,11 +29,11 @@ func TestCrossTurnDedup(t *testing.T) {
 		// Ordered blocks: earliest carries the body; two later blocks repeat it; interleaved unique
 		// blocks ensure folding is driven by content, not position.
 		blocks := [][]string{
-			body,                                    // 0 — earliest occurrence (never folded)
-			splitLinesKeepNL("unique tail one\n"),   // 1
-			body,                                    // 2 — repeat → folds to a pointer at turn 0
-			splitLinesKeepNL("unique tail two\n"),   // 3
-			body,                                    // 4 — repeat → folds to a pointer at turn 0
+			body,                                  // 0 — earliest occurrence (never folded)
+			splitLinesKeepNL("unique tail one\n"), // 1
+			body,                                  // 2 — repeat → folds to a pointer at turn 0
+			splitLinesKeepNL("unique tail two\n"), // 3
+			body,                                  // 4 — repeat → folds to a pointer at turn 0
 		}
 		turns := []int{0, 1, 2, 3, 4}
 
@@ -153,15 +153,15 @@ func crossTurnWireBody(t *testing.T) []byte {
 		return obj{"role": role, "content": []obj{{"type": "text", "text": s}}}
 	}
 	msgs := []obj{
-		toolResult("t0", body, true), // 0 — breakpoint + earliest body (protected, verbatim source)
-		text("assistant", "a1"),      // 1
+		toolResult("t0", body, true),  // 0 — breakpoint + earliest body (protected, verbatim source)
+		text("assistant", "a1"),       // 1
 		toolResult("t2", body, false), // 2 — repeat → folds
-		text("assistant", "a3"),      // 3
+		text("assistant", "a3"),       // 3
 		toolResult("t4", body, false), // 4 — repeat → folds
-		text("assistant", "a5"),      // 5 — recent window (len-4 .. len) below
-		text("user", "u6"),           // 6
-		text("assistant", "a7"),      // 7
-		text("user", "u8"),           // 8
+		text("assistant", "a5"),       // 5 — recent window (len-4 .. len) below
+		text("user", "u6"),            // 6
+		text("assistant", "a7"),       // 7
+		text("user", "u8"),            // 8
 	}
 	raw, err := json.Marshal(obj{
 		"model":      "claude-sonnet-4-6",

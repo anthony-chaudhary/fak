@@ -16,6 +16,7 @@
 //     into New() lands in a guard hook — separate wiring), nor
 //   - inject the carried line on resume (the consumer lands in the SessionStart rule /
 //     internal/sessionsteer, concurrent #3512 territory — separate wiring).
+//
 // Like internal/relay's baton and armtriggers, it takes plain SCALARS, never a
 // gateway type, so it stays dependency-free and cannot form an import cycle: the hook
 // that already holds the gateway report does the projection and calls New().

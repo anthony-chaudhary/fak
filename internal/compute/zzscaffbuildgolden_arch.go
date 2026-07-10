@@ -31,11 +31,11 @@ func (f ZzscaffbuildgoldenFamily) String() string {
 // ZzscaffbuildgoldenArch is one supported zzscaffbuildgolden compile target: its canonical target token, its family,
 // the device-native compute dtype, and a representative product.
 type ZzscaffbuildgoldenArch struct {
-	Target      string      // canonical target token, e.g. "zzscaffbuildgolden-gen1"
+	Target      string                   // canonical target token, e.g. "zzscaffbuildgolden-gen1"
 	Family      ZzscaffbuildgoldenFamily // generation
-	NativeDtype Dtype       // device-native compute tier
-	Examples    string      // representative product(s)
-	aliases     []string    // device-reported spellings (already normalized) that resolve here
+	NativeDtype Dtype                    // device-native compute tier
+	Examples    string                   // representative product(s)
+	aliases     []string                 // device-reported spellings (already normalized) that resolve here
 }
 
 // zzscaffbuildgoldenArches is the supported-target table, declared once. EDIT THIS: one seed row —

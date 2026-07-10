@@ -271,7 +271,7 @@ type InjectedContext struct {
 // the deterministic HEAD SHA when git history is seeded. Two builds of the same
 // recipe produce an equal Manifest — that is the "byte-identical rebuild" proof.
 type Manifest struct {
-	Files   map[string]string `json:"files"`             // slash relpath -> sha256 hex of content
+	Files   map[string]string `json:"files"` // slash relpath -> sha256 hex of content
 	HeadSHA string            `json:"head_sha,omitempty"`
 }
 

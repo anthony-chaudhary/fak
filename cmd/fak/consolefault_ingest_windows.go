@@ -58,6 +58,7 @@ func gatherWinConsoleFaultRecords(since time.Duration) ([]winEventRecord, string
 //   - Event 1026 (.NET Runtime): console-host managed-stack signatures.
 //   - Event 1000 (Application Error): a console-host/shell faulting app AND the
 //     FailFast exception code (0xc0000409) — the 1026-less class (#3513).
+//
 // __DAYS__ is substituted by the Go caller.
 const consoleFaultIngestPS = `
 $ErrorActionPreference='SilentlyContinue'

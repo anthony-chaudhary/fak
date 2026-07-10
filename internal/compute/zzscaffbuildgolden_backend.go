@@ -32,17 +32,45 @@ func (c *zzscaffbuildgoldenBackend) Tier() string            { return c.tier }
 func (c *zzscaffbuildgoldenBackend) Class() CorrectnessClass { return Approx }
 func (c *zzscaffbuildgoldenBackend) Caps() Caps              { return Caps{} } // TODO: advertise this device's real capabilities
 
-func (c *zzscaffbuildgoldenBackend) Upload(t Tensor, as Dtype) Tensor { panic("compute: zzscaffbuildgolden.Upload not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) Host(t Tensor) ([]float32, bool) { panic("compute: zzscaffbuildgolden.Host not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) Read(t Tensor) []float32 { panic("compute: zzscaffbuildgolden.Read not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) Free(t Tensor) { panic("compute: zzscaffbuildgolden.Free not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) NewKV(cfg KVConfig) KVStore { panic("compute: zzscaffbuildgolden.NewKV not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) MatMul(w, x Tensor) Tensor { panic("compute: zzscaffbuildgolden.MatMul not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) BatchedMatMul(w, X Tensor, P int) Tensor { panic("compute: zzscaffbuildgolden.BatchedMatMul not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) RMSNorm(x, weight Tensor, eps float32) Tensor { panic("compute: zzscaffbuildgolden.RMSNorm not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Tensor { panic("compute: zzscaffbuildgolden.RoPE not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) SwiGLU(gate, up Tensor) Tensor { panic("compute: zzscaffbuildgolden.SwiGLU not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) AddInPlace(dst, src Tensor) { panic("compute: zzscaffbuildgolden.AddInPlace not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) AddBias(dst, bias Tensor) { panic("compute: zzscaffbuildgolden.AddBias not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor { panic("compute: zzscaffbuildgolden.Attention not implemented (scaffold TODO)") }
-func (c *zzscaffbuildgoldenBackend) Argmax(logits Tensor) int { panic("compute: zzscaffbuildgolden.Argmax not implemented (scaffold TODO)") }
+func (c *zzscaffbuildgoldenBackend) Upload(t Tensor, as Dtype) Tensor {
+	panic("compute: zzscaffbuildgolden.Upload not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) Host(t Tensor) ([]float32, bool) {
+	panic("compute: zzscaffbuildgolden.Host not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) Read(t Tensor) []float32 {
+	panic("compute: zzscaffbuildgolden.Read not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) Free(t Tensor) {
+	panic("compute: zzscaffbuildgolden.Free not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) NewKV(cfg KVConfig) KVStore {
+	panic("compute: zzscaffbuildgolden.NewKV not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) MatMul(w, x Tensor) Tensor {
+	panic("compute: zzscaffbuildgolden.MatMul not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
+	panic("compute: zzscaffbuildgolden.BatchedMatMul not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
+	panic("compute: zzscaffbuildgolden.RMSNorm not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Tensor {
+	panic("compute: zzscaffbuildgolden.RoPE not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) SwiGLU(gate, up Tensor) Tensor {
+	panic("compute: zzscaffbuildgolden.SwiGLU not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) AddInPlace(dst, src Tensor) {
+	panic("compute: zzscaffbuildgolden.AddInPlace not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) AddBias(dst, bias Tensor) {
+	panic("compute: zzscaffbuildgolden.AddBias not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
+	panic("compute: zzscaffbuildgolden.Attention not implemented (scaffold TODO)")
+}
+func (c *zzscaffbuildgoldenBackend) Argmax(logits Tensor) int {
+	panic("compute: zzscaffbuildgolden.Argmax not implemented (scaffold TODO)")
+}

@@ -24,8 +24,8 @@ type fakeGit struct {
 		rc  int
 		out string
 	}
-	envCalls [][]string          // args of calls made through the env-aware runner
-	lastEnv  map[string]string   // env overlay of the most recent env-aware call
+	envCalls [][]string        // args of calls made through the env-aware runner
+	lastEnv  map[string]string // env overlay of the most recent env-aware call
 }
 
 func newFakeGit() *fakeGit {

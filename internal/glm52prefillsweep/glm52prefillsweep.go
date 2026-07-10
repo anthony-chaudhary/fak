@@ -184,8 +184,8 @@ type artifactResults struct {
 }
 
 type artifactWitness struct {
-	TestPath             string `json:"test_path"`
-	ReproductionCommand  string `json:"reproduction_command"`
+	TestPath            string `json:"test_path"`
+	ReproductionCommand string `json:"reproduction_command"`
 }
 
 type benchmarkArtifact struct {
@@ -410,11 +410,11 @@ func parseJSONObject(raw string) map[string]any {
 }
 
 type endpointGate struct {
-	URL          string   `json:"url"`
-	Reachable    bool     `json:"reachable"`
-	HTTPStatus   int      `json:"http_status"`
-	ModelIDs     []string `json:"model_ids"`
-	BodyExcerpt  string   `json:"body_excerpt"`
+	URL         string   `json:"url"`
+	Reachable   bool     `json:"reachable"`
+	HTTPStatus  int      `json:"http_status"`
+	ModelIDs    []string `json:"model_ids"`
+	BodyExcerpt string   `json:"body_excerpt"`
 }
 
 func excerpt(s string, n int) string {
@@ -921,17 +921,17 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("glm52-prefill-sweep", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		endpoint     string
-		model        string
-		lengthsRaw   string
-		maxTokens    int
-		noStream     bool
-		nodeArg      string
-		stampArg     string
-		outPath      string
-		httpTimeout  float64
-		reqTimeout   float64
-		dryRun       bool
+		endpoint    string
+		model       string
+		lengthsRaw  string
+		maxTokens   int
+		noStream    bool
+		nodeArg     string
+		stampArg    string
+		outPath     string
+		httpTimeout float64
+		reqTimeout  float64
+		dryRun      bool
 	)
 	fs.StringVar(&endpoint, "endpoint", "", "OpenAI-compatible GLM-5.2 fak serve endpoint (omit with --dry-run to only print the plan)")
 	fs.StringVar(&endpoint, "base-url", "", "alias for --endpoint")

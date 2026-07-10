@@ -46,10 +46,10 @@ type EffortMultiplier map[string]float64
 func DefaultEffortMultipliers() EffortMultiplier {
 	return EffortMultiplier{
 		"none": 0.4, "minimal": 0.4, // barely-reasoning: a fraction of a medium task's output
-		"low": 0.7,
+		"low":    0.7,
 		"medium": 1.0, "default": 1.0, "normal": 1.0, // the neutral anchor
-		"high":      1.6,
-		"xhigh":     2.4, "very-high": 2.4, "ultra": 2.4, "ultracode": 2.4, // xhigh == ultracode posture
+		"high":  1.6,
+		"xhigh": 2.4, "very-high": 2.4, "ultra": 2.4, "ultracode": 2.4, // xhigh == ultracode posture
 		"max": 3.2, "maximum": 3.2,
 	}
 }

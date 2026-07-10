@@ -80,7 +80,6 @@ func TestDosImproveArgs_OmitsFalseWitnessesAndEmptyWorkspace(t *testing.T) {
 	}
 }
 
-
 func TestDosObserveReceipt_BoundsWedgedSpawnWithDeadline(t *testing.T) {
 	// A wedged dos (one that blocks until its context is cancelled) must NOT freeze the
 	// synchronous per-cycle Observer: the CommandContext deadline (#3486) kills it so the

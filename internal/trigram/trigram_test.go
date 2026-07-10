@@ -109,10 +109,10 @@ func TestRequiredLiteralsSoundness(t *testing.T) {
 	}{
 		{`authenticate\(`, []string{"authenticate("}}, // escaped paren folds into the literal run
 		{`foo(bar)?`, []string{"foo"}},                // bar is optional -> not required
-		{`(cat|dog)house`, []string{"house"}},          // alternation contributes nothing
-		{`ab*cdef`, []string{"cdef"}},                  // b* breaks "ab", cdef survives
-		{`ident+`, []string{"ident"}},                  // x+ requires at least one -> "ident" required
-		{`.*`, nil},                                    // no required literal
+		{`(cat|dog)house`, []string{"house"}},         // alternation contributes nothing
+		{`ab*cdef`, []string{"cdef"}},                 // b* breaks "ab", cdef survives
+		{`ident+`, []string{"ident"}},                 // x+ requires at least one -> "ident" required
+		{`.*`, nil},                                   // no required literal
 	}
 	for _, c := range cases {
 		got := requiredLiterals(c.pattern)

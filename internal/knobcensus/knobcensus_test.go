@@ -105,9 +105,9 @@ func TestRouteCoverageFolds(t *testing.T) {
 	src := "package main\n\nimport (\n\t\"flag\"\n\t\"os\"\n)\n\n" +
 		"func sample() {\n" +
 		"\tfs := flag.NewFlagSet(\"s\", flag.ContinueOnError)\n" +
-		"\tfs.String(\"model\", \"\", \"which model\")\n" +      // INTENT, flag surface
-		"\t_ = os.Getenv(\"FAK_MODEL\")\n" +                     // same control, env surface
-		"\tfs.String(\"account\", \"\", \"which account\")\n" +  // INTENT, single surface
+		"\tfs.String(\"model\", \"\", \"which model\")\n" + // INTENT, flag surface
+		"\t_ = os.Getenv(\"FAK_MODEL\")\n" + // same control, env surface
+		"\tfs.String(\"account\", \"\", \"which account\")\n" + // INTENT, single surface
 		"\t_ = fs\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "sample.go"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)
