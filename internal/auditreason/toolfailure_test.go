@@ -81,3 +81,89 @@ func TestToolFailureRetryContract(t *testing.T) {
 		}
 	}
 }
+
+// Every vocabulary row must carry a pre-filled recovery command so an agent can
+// branch on the code and run NextCommand instead of parsing prose.
+func TestToolFailureNextCommandPresent(t *testing.T) {
+	for _, row := range ToolFailures() {
+		if strings.TrimSpace(row.NextCommand) == "" {
+			t.Fatalf("%s missing next_command recovery", row.Token)
+		}
+	}
+}
+
+// A SIMULATED tool hang returns a structured payload with a recognized code and a
+// runnable next_command.
+func TestToolFailurePayloadHang(t *testing.T) {
+	payload, ok := ToolFailurePayloadFromMessage("tool hung: no output for 120s")
+	if !ok {
+		t.Fatal("simulated hang did not classify into the closed vocabulary")
+	}
+	if payload.Code != ToolFailureHang {
+		t.Fatalf("code = %q, want %q", payload.Code, ToolFailureHang)
+	}
+	if strings.TrimSpace(payload.NextCommand) == "" {
+		t.Fatalf("hang payload has no runnable next_command: %+v", payload)
+	}
+	if strings.TrimSpace(payload.Evidence) == "" || strings.TrimSpace(payload.Cause) == "" || strings.TrimSpace(payload.Fix) == "" {
+		t.Fatalf("hang payload missing cause/evidence/fix: %+v", payload)
+	}
+}
+
+// A SIMULATED non-guard tool failure (partial mutation) returns a structured
+// payload with a recognized code and a runnable next_command.
+func TestToolFailurePayloadGenericFailure(t *testing.T) {
+	payload, ok := ToolFailurePayloadFromMessage("partial apply: edit wrote two files before the third hunk failed")
+	if !ok {
+		t.Fatal("simulated partial-apply failure did not classify")
+	}
+	if payload.Code != ToolFailurePartialApply {
+		t.Fatalf("code = %q, want %q", payload.Code, ToolFailurePartialApply)
+	}
+	if payload.Retryable {
+		t.Fatal("partial-apply payload must stay non-retryable until read-back")
+	}
+	if strings.TrimSpace(payload.NextCommand) == "" {
+		t.Fatalf("generic-failure payload has no runnable next_command: %+v", payload)
+	}
+}
+
+// The canonical case: a Bash git/gh command killed with exit 143 classifies to
+// TOOL_HANG_SHELL_MISMATCH and its next_command names the PowerShell recovery.
+func TestToolFailurePayloadExit143NamesPowerShell(t *testing.T) {
+	payload, ok := ToolFailurePayloadFromMessage("Bash exited with exit status 143 while running gh issue list")
+	if !ok {
+		t.Fatal("exit-143 git/gh hang did not classify")
+	}
+	if payload.Code != ToolFailureHangShellMismatch {
+		t.Fatalf("code = %q, want %q", payload.Code, ToolFailureHangShellMismatch)
+	}
+	if !strings.Contains(strings.ToLower(payload.NextCommand), "powershell") {
+		t.Fatalf("exit-143 next_command must name the PowerShell recovery, got %q", payload.NextCommand)
+	}
+}
+
+// With the exact failing command, the shell-mismatch recovery is pre-filled into
+// a literally-runnable PowerShell next_command rather than the placeholder.
+func TestToolFailurePayloadForCommandPreFillsPowerShell(t *testing.T) {
+	payload, ok := ToolFailurePayloadForCommand(
+		"Bash exited with exit status 143 while running the command",
+		"gh issue view 2072 --json title",
+	)
+	if !ok {
+		t.Fatal("exit-143 with command did not classify")
+	}
+	want := "powershell -NoProfile -Command 'gh issue view 2072 --json title'"
+	if payload.NextCommand != want {
+		t.Fatalf("next_command = %q, want %q", payload.NextCommand, want)
+	}
+	if strings.Contains(payload.NextCommand, "<") {
+		t.Fatalf("placeholder left unfilled in exact recovery: %q", payload.NextCommand)
+	}
+}
+
+func TestToolFailurePayloadUnrecognized(t *testing.T) {
+	if _, ok := ToolFailurePayloadFromMessage("everything succeeded"); ok {
+		t.Fatal("success text must not fabricate a failure payload")
+	}
+}
