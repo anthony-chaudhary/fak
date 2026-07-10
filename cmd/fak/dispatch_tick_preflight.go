@@ -45,6 +45,12 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 		Budgets:       dispatchtick.DefaultHostBudgets(),
 		OSWorkerProcs: dispatchProbeWorkerCount(root, product),
 	}
+	// The operator concurrency setpoint (#4036, wired live by #4165): fold
+	// FAK_DISPATCH_SETPOINT through the pure ReconcileSetpoint plan into the input
+	// BEFORE evaluation, so an operator-written level actually moves admits. An
+	// unset/blank/malformed setpoint yields the inactive plan and leaves the input
+	// untouched -- byte-identical to before the knob existed.
+	in, setpointPlan := dispatchFoldSetpoint(in, os.Getenv(dispatchtick.SetpointConcurrencyEnv))
 	// The fifth cap term (#2221, G3 of epic #2218): fold the MEASURED guard-hook
 	// latency rollup UP into admission so a slow kernel earns spawn reluctance. The
 	// four in-struct terms only flow caps DOWN; this composes gate health on top and
@@ -84,7 +90,41 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 			out["janitor_worklist"] = worklist
 		}
 	}
+	// Surface the ACTIVE setpoint plan on the payload so an operator (and the tick
+	// log) can see WHY the cap moved -- which branch (grow/steady/drain), the level
+	// converged toward, and how many surplus workers are draining. Attached only when
+	// a setpoint is active, so the common payload stays byte-identical.
+	if setpointPlan.Active {
+		out["setpoint"] = map[string]any{
+			"mode":               setpointPlan.Mode,
+			"desired_cap":        setpointPlan.DesiredCap,
+			"contraction_target": setpointPlan.ContractionTarget,
+			"draining":           setpointPlan.Draining,
+		}
+	}
 	return out, nil
+}
+
+func dispatchSetpointLive(in dispatchtick.PreflightInput) int {
+	live := in.OSWorkerProcs
+	if in.Kernel.Target != nil && *in.Kernel.Target > 0 && in.Kernel.Alive != nil && *in.Kernel.Alive > live {
+		live = *in.Kernel.Alive
+	}
+	return maxInt(live, 0)
+}
+
+func dispatchFoldSetpoint(in dispatchtick.PreflightInput, raw string) (dispatchtick.PreflightInput, dispatchtick.SetpointPlan) {
+	plan := dispatchtick.ReconcileSetpoint(dispatchSetpointLive(in), dispatchtick.ParseConcurrencySetpoint(raw))
+	if !plan.Active {
+		return in, plan
+	}
+	if plan.ContractionTarget > 0 && (in.ContractionTarget <= 0 || plan.ContractionTarget < in.ContractionTarget) {
+		in.ContractionTarget = plan.ContractionTarget
+	}
+	if plan.Mode == "grow" && plan.DesiredCap > in.WorkerFloor {
+		in.WorkerFloor = plan.DesiredCap
+	}
+	return in, plan
 }
 
 // dispatchPreflightGate folds the workspace's MEASURED guard-hook latency rollup into
