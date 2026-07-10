@@ -39,6 +39,14 @@ const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over
       canonical session objective. --id defaults to the GOAL.md 'loop:' id.
       Mutually exclusive with --statement/--plan/--budget-turns/--budget-tokens.
 
+      Rubric gate (#2544, opt-in — costs ONE model call): add
+      --rubric-base-url URL [--rubric-model M] [--rubric-max-call-tokens N]
+      [--api-key-env NAME] to either declare form to generate an
+      issue-specific judging rubric at declare time and cache it on the
+      objective row. Later "score --method judge" runs read the cached rubric
+      (rubric-based prompt, per-criterion attribution) — never regenerate it.
+      A failed or over-budget rubric call fails the declare (nothing appended).
+
   fak trajctl close --id ID [--status met|abandoned] [--ledger FILE] [--json]
       Append a status-flip row for ID (default --status met). The prior
       statement/plan/budget/parent carry over unchanged. Fails if ID has never
@@ -146,6 +154,10 @@ func runTrajctlDeclare(stdout, stderr io.Writer, argv []string) int {
 	budgetTurns := fs.Int("budget-turns", 0, "detour-style turn budget (0 = unspecified)")
 	budgetTokens := fs.Int("budget-tokens", 0, "detour-style token budget (0 = unspecified)")
 	fromGoal := fs.String("from-goal", "", "import Objective/Plan/Budget from a GOAL.md path")
+	rubricBaseURL := fs.String("rubric-base-url", "", "gate: generate an issue-specific judging rubric at declare time via this OpenAI-compatible API root (#2544; one model call, cached on the objective)")
+	rubricModel := fs.String("rubric-model", "", "model id for the rubric call (empty: the gateway's default)")
+	rubricMaxCallTokens := fs.Int("rubric-max-call-tokens", trajctl.DefaultRubricMaxCallTokens, "rubric per-call token budget cap, enforced on request and return")
+	apiKeyEnv := fs.String("api-key-env", "FAK_GATEWAY_KEY", "env var NAMING the gateway bearer (never the secret itself)")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+trajctl.DefaultLedgerRel+")")
 	asJSON := fs.Bool("json", false, "emit the written objective as JSON")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
@@ -201,6 +213,23 @@ func runTrajctlDeclare(stdout, stderr io.Writer, argv []string) int {
 			Budget:    trajctl.Budget{Turns: *budgetTurns, Tokens: *budgetTokens},
 			Status:    trajctl.StatusActive,
 		}
+	}
+
+	// The rubric gate (#2544): one model call at declare time, cached on the
+	// objective row. Fail-closed — a failed or over-budget rubric call fails
+	// the declare before anything is appended, so a declared objective either
+	// carries the rubric the operator asked for or does not exist.
+	if strings.TrimSpace(*rubricBaseURL) != "" {
+		rubric, err := trajctl.GenerateObjectiveRubric(&trajctl.GatewayRubricClient{
+			BaseURL: *rubricBaseURL,
+			APIKey:  os.Getenv(*apiKeyEnv),
+			Model:   *rubricModel,
+		}, obj, *rubricMaxCallTokens)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak trajctl declare: %v\n", err)
+			return 1
+		}
+		obj.Rubric = rubric
 	}
 
 	path := trajctlLedgerPath(*ledger)
