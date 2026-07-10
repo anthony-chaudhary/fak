@@ -1,0 +1,250 @@
+package trajctl
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// dev is a terse stream-event builder for the table cases: a target with a
+// space reads as a shell command (Bash), anything else as a file touch (Read).
+func dev(target string, isErr bool) ToolEvent {
+	tool := "Read"
+	if strings.Contains(target, " ") {
+		tool = "Bash"
+	}
+	return ToolEvent{Tool: tool, Target: target, IsError: isErr}
+}
+
+// detourBaseline is the parent shape every table case starts from: five
+// healthy calls whose topics are {internal/trajctl, go}.
+func detourBaseline() []ToolEvent {
+	return []ToolEvent{
+		dev("internal/trajctl/a.go", false),
+		dev("internal/trajctl/b.go", false),
+		dev("go test ./...", false),
+		dev("internal/trajctl/a.go", false),
+		dev("go build ./...", false),
+	}
+}
+
+func TestDetourDetector_ErrorDetourTranscriptOpensAndClosesOnce(t *testing.T) {
+	path := filepath.Join("testdata", "detour-session.jsonl")
+	events, err := ReadToolStream(path)
+	if err != nil {
+		t.Fatalf("ReadToolStream: %v", err)
+	}
+	if len(events) != 14 {
+		t.Fatalf("extracted %d events, want 14", len(events))
+	}
+
+	spans := DetectDetourSpans(events)
+	if len(spans) != 1 {
+		t.Fatalf("DetectDetourSpans = %+v, want exactly 1 span", spans)
+	}
+	sp := spans[0]
+	if sp.BurstIndex != 5 || sp.OpenIndex != 8 || sp.CloseIndex != 12 || sp.Errors != 3 {
+		t.Fatalf("span = %+v, want burst 5, open 8, close 12, errors 3", sp)
+	}
+	if want := []string{"c:/programdata/proxy", "netsh"}; strings.Join(sp.Topics, ",") != strings.Join(want, ",") {
+		t.Fatalf("span.Topics = %v, want %v", sp.Topics, want)
+	}
+
+	obj := fourPhaseObjective()
+	rows := DetourRows(obj, spans, path, 4242, Stamp{SessionID: "sess-detour", RunID: "run-detour"})
+	if len(rows) != 6 {
+		t.Fatalf("DetourRows returned %d rows, want 6 (open trio + close trio)", len(rows))
+	}
+
+	// While the detour is open — fold the open trio only — the parent is
+	// paused and the budgeted child is active under it.
+	mid := Fold(append([]Row{ObjectiveRecord(obj)}, rows[:3]...))
+	childID := obj.ID + "-detour-1"
+	child, ok := mid.Objectives[childID]
+	if !ok {
+		t.Fatalf("open fold: child %q not declared; objectives = %v", childID, mid.ObjectiveIDs())
+	}
+	if child.ParentID != obj.ID || child.Status != StatusActive || child.Budget != DefaultDetourBudget() {
+		t.Fatalf("open child = %+v, want active under %q with the default budget", child, obj.ID)
+	}
+	if child.Statement == "" {
+		t.Fatalf("open child carries no statement")
+	}
+	if got := mid.Objectives[obj.ID].Status; got != StatusPaused {
+		t.Fatalf("parent status while detour open = %q, want %q", got, StatusPaused)
+	}
+
+	// The full trail round-trips the ledger: child met, parent resumed, and
+	// the child's W2 repair curve has both endpoints with transcript evidence.
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	if err := Append(ledger, ObjectiveRecord(obj)); err != nil {
+		t.Fatalf("append parent: %v", err)
+	}
+	if n, err := AppendDetourRows(ledger, rows); err != nil || n != 6 {
+		t.Fatalf("AppendDetourRows = (%d, %v), want (6, nil)", n, err)
+	}
+	st := Fold(ReadLedgerFile(ledger))
+	if got := st.Objectives[childID].Status; got != StatusMet {
+		t.Fatalf("closed child status = %q, want %q", got, StatusMet)
+	}
+	if got := st.Objectives[obj.ID].Status; got != StatusActive {
+		t.Fatalf("parent status after close = %q, want %q (resumed)", got, StatusActive)
+	}
+	scores := st.ScoresFor(childID)
+	if len(scores) != 2 || scores[0].Value != 0 || scores[1].Value != 1 {
+		t.Fatalf("child scores = %+v, want W2 endpoints 0 then 1", scores)
+	}
+	for _, s := range scores {
+		if s.Witness != W2 || s.Method != DetourDetectorMethod || s.Version != DetourDetectorVersion {
+			t.Fatalf("marker identity = witness %q method %q version %q", s.Witness, s.Method, s.Version)
+		}
+		if len(s.Evidence) != 1 || s.Evidence[0].Kind != "transcript-span" || s.Evidence[0].Ref != path {
+			t.Fatalf("marker evidence = %+v, want transcript-span ref %q", s.Evidence, path)
+		}
+		if s.SessionID != "sess-detour" || s.RunID != "run-detour" || s.UnixMillis != 4242 {
+			t.Fatalf("marker stamp = %+v, want the caller's stamp", s)
+		}
+	}
+}
+
+func TestDetourDetector_HealthyTranscriptsOpenNone(t *testing.T) {
+	for _, fixture := range []string{"healthy-session.jsonl", "stalled-session.jsonl"} {
+		t.Run(fixture, func(t *testing.T) {
+			events, err := ReadToolStream(filepath.Join("testdata", fixture))
+			if err != nil {
+				t.Fatalf("ReadToolStream: %v", err)
+			}
+			if spans := DetectDetourSpans(events); len(spans) != 0 {
+				t.Fatalf("healthy transcript opened %+v, want none", spans)
+			}
+		})
+	}
+}
+
+func TestDetectDetourSpans_StreamShapes(t *testing.T) {
+	base := detourBaseline()
+	errs := func(n int) []ToolEvent {
+		out := make([]ToolEvent, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, dev("go test ./...", true))
+		}
+		return out
+	}
+	cat := func(parts ...[]ToolEvent) []ToolEvent {
+		out := make([]ToolEvent, 0)
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	off := func(dir string, n int) []ToolEvent {
+		out := make([]ToolEvent, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, dev(dir+"/x.conf", false))
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name   string
+		events []ToolEvent
+		want   []DetourSpan
+	}{
+		{
+			name:   "in-place retry burst without topic shift opens nothing",
+			events: cat(base, errs(3), []ToolEvent{dev("go test ./...", false), dev("internal/trajctl/a.go", false)}),
+			want:   nil,
+		},
+		{
+			name:   "topic shift without an error burst opens nothing",
+			events: cat(base, off("pkg/other", 5)),
+			want:   nil,
+		},
+		{
+			name:   "shift starting past the horizon is new work, not this burst's detour",
+			events: cat(base, errs(3), append(off("internal/trajctl", 13), off("pkg/other", 3)...)),
+			want:   nil,
+		},
+		{
+			name:   "burst with no established parent shape opens nothing",
+			events: cat(errs(3), off("pkg/other", 3)),
+			want:   nil,
+		},
+		{
+			name:   "a two-call stray off-topic probe is not sustained",
+			events: cat(base, errs(3), off("pkg/other", 2), []ToolEvent{dev("internal/trajctl/a.go", false), dev("go test ./...", false)}),
+			want:   nil,
+		},
+		{
+			name:   "no return before stream end leaves the span open",
+			events: cat(base, errs(3), off("ops/net", 3)),
+			want:   []DetourSpan{{BurstIndex: 5, OpenIndex: 8, CloseIndex: -1, Errors: 3, Topics: []string{"ops/net"}}},
+		},
+		{
+			name: "a second burst after a proven return opens a second span",
+			events: cat(
+				base, errs(3), off("ops/a", 3),
+				[]ToolEvent{dev("internal/trajctl/a.go", false), dev("go test ./...", false)},
+				errs(3), off("ops/b", 3),
+				[]ToolEvent{dev("internal/trajctl/b.go", false), dev("go test ./...", false)},
+			),
+			want: []DetourSpan{
+				{BurstIndex: 5, OpenIndex: 8, CloseIndex: 11, Errors: 3, Topics: []string{"ops/a"}},
+				{BurstIndex: 13, OpenIndex: 16, CloseIndex: 19, Errors: 3, Topics: []string{"ops/b"}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DetectDetourSpans(tc.events)
+			if len(got) != len(tc.want) {
+				t.Fatalf("spans = %+v, want %d span(s)", got, len(tc.want))
+			}
+			for i := range tc.want {
+				g, w := got[i], tc.want[i]
+				if g.BurstIndex != w.BurstIndex || g.OpenIndex != w.OpenIndex || g.CloseIndex != w.CloseIndex || g.Errors != w.Errors {
+					t.Fatalf("span[%d] = %+v, want %+v", i, g, w)
+				}
+				if strings.Join(g.Topics, ",") != strings.Join(w.Topics, ",") {
+					t.Fatalf("span[%d].Topics = %v, want %v", i, g.Topics, w.Topics)
+				}
+			}
+		})
+	}
+}
+
+func TestDetourRows_OpenEndedDetourLeavesParentPaused(t *testing.T) {
+	obj := fourPhaseObjective()
+	span := DetourSpan{BurstIndex: 5, OpenIndex: 8, CloseIndex: -1, Errors: 3, Topics: []string{"ops/net"}}
+	rows := DetourRows(obj, []DetourSpan{span}, "", 99, Stamp{})
+	if len(rows) != 3 {
+		t.Fatalf("open-ended DetourRows returned %d rows, want 3 (no close trio)", len(rows))
+	}
+
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	if err := Append(ledger, ObjectiveRecord(obj)); err != nil {
+		t.Fatalf("append parent: %v", err)
+	}
+	if n, err := AppendDetourRows(ledger, rows); err != nil || n != 3 {
+		t.Fatalf("AppendDetourRows = (%d, %v), want (3, nil)", n, err)
+	}
+	st := Fold(ReadLedgerFile(ledger))
+	if got := st.Objectives[obj.ID].Status; got != StatusPaused {
+		t.Fatalf("parent status = %q, want %q while the detour stays open", got, StatusPaused)
+	}
+	if got := st.Objectives[obj.ID+"-detour-1"].Status; got != StatusActive {
+		t.Fatalf("child status = %q, want %q", got, StatusActive)
+	}
+	if scores := st.ScoresFor(obj.ID + "-detour-1"); len(scores) != 1 || scores[0].Value != 0 || scores[0].Evidence[0].Ref != "tool-stream" {
+		t.Fatalf("open marker = %+v, want one value-0 row with the tool-stream fallback ref", scores)
+	}
+}
+
+func TestDetourRows_UndeclarableParentYieldsNil(t *testing.T) {
+	span := DetourSpan{OpenIndex: 1, CloseIndex: -1, Errors: 3}
+	if rows := DetourRows(Objective{ID: "", Statement: "x"}, []DetourSpan{span}, "", 0, Stamp{}); rows != nil {
+		t.Fatalf("id-less parent produced rows: %+v", rows)
+	}
+	if rows := DetourRows(Objective{ID: "p", Statement: ""}, []DetourSpan{span}, "", 0, Stamp{}); rows != nil {
+		t.Fatalf("statement-less parent produced rows: %+v", rows)
+	}
+}
