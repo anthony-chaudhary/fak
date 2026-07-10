@@ -106,23 +106,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return nil
 	}
 
-	var temp *float64
-	if req.Temperature != 0 {
-		temp = &req.Temperature
-	}
-	opts := []agent.SampleOpt{
-		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(temp),
-		agent.WithTopP(req.TopP),
-		agent.WithTopK(req.TopK),
-		agent.WithStop(req.StopSequences),
-	}
-	// The dual planner (local model alongside the API upstream) routes on the requested
-	// model, so forward it — ONLY there: the single-planner paths historically never
-	// forwarded the client model on this wire.
-	if _, dual := s.planner.(*DualPlanner); dual {
-		opts = append(opts, agent.WithModel(req.Model))
-	}
+	opts := s.plannerSampleOpts(req, sessionTurn)
 	lease, err := s.beginServedAdmission(r.Context(), sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
 	if err != nil {
 		s.logf("gateway: scheduler admission refused (messages stream): %v", err)
@@ -191,19 +175,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	start()
 	closeText()
 
-	for _, blk := range agent.AnthropicResponseBlocks(agent.Message{Role: agent.RoleAssistant, ToolCalls: kept}) {
-		oi := outIdx
-		outIdx++
-		sendLocked("content_block_start", map[string]any{
-			"type": "content_block_start", "index": oi,
-			"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
-		})
-		sendLocked("content_block_delta", map[string]any{
-			"type": "content_block_delta", "index": oi,
-			"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
-		})
-		sendLocked("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
-	}
+	emitAnthropicToolUseBlocks(sendLocked, &outIdx, kept)
 	if dropped > 0 || anyRepaired(adjs) || anyLivelock(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
 			emitAnthropicTextBlock(sendLocked, &outIdx, note)
@@ -228,6 +200,47 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)
 	sendAnthropicTerminal(sendLocked, stop, usage)
 	return true
+}
+
+// plannerSampleOpts assembles the agent.SampleOpt set for a planner stream from the
+// inbound request and the served turn's token ceiling. The dual planner (local model
+// alongside the API upstream) routes on the requested model, so forward it — ONLY there:
+// the single-planner paths historically never forwarded the client model on this wire.
+func (s *Server) plannerSampleOpts(req *agent.AnthropicMessagesRequest, sessionTurn servedSessionTurn) []agent.SampleOpt {
+	var temp *float64
+	if req.Temperature != 0 {
+		temp = &req.Temperature
+	}
+	opts := []agent.SampleOpt{
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
+		agent.WithTemperature(temp),
+		agent.WithTopP(req.TopP),
+		agent.WithTopK(req.TopK),
+		agent.WithStop(req.StopSequences),
+	}
+	if _, dual := s.planner.(*DualPlanner); dual {
+		opts = append(opts, agent.WithModel(req.Model))
+	}
+	return opts
+}
+
+// emitAnthropicToolUseBlocks streams the surviving tool_use blocks as
+// content_block_start/input_json_delta/content_block_stop triples, advancing outIdx for
+// each block so the client-facing index numbering stays contiguous.
+func emitAnthropicToolUseBlocks(send func(string, any), outIdx *int, kept []agent.ToolCall) {
+	for _, blk := range agent.AnthropicResponseBlocks(agent.Message{Role: agent.RoleAssistant, ToolCalls: kept}) {
+		oi := *outIdx
+		*outIdx++
+		send("content_block_start", map[string]any{
+			"type": "content_block_start", "index": oi,
+			"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
+		})
+		send("content_block_delta", map[string]any{
+			"type": "content_block_delta", "index": oi,
+			"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
+		})
+		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
+	}
 }
 
 // streamPlannerUpstreamError renders the right failure for a CompleteStream error and
