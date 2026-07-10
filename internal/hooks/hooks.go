@@ -100,6 +100,14 @@ func PreCommitGates() []Gate {
 		// it only prints the SOTA reference + a `Prior-art:` suggestion. Set FLEET_PRIORART_GUARD=block
 		// to hard-enforce it, or ALLOW_NO_PRIOR_ART=1 to skip it once. It runs LAST.
 		{Name: "PRIOR_ART", ModeEnv: "FLEET_PRIORART_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_PRIOR_ART", Check: gatePriorArt},
+		// UNTIERED_LEAF is ADVISORY (issue #3614): DefaultMode "warn" so it never reds a shared
+		// trunk out of the box. It is the STAGED, commit-boundary twin of the whole-tree
+		// TIER_DECLARED hygiene gate — it fires when THIS commit adds a new internal/<leaf>/ non-test
+		// .go with no architest tier row, before the untiered leaf reaches the trunk and reds every
+		// peer's push (architest's TestEveryPackageDeclaresTier + `fak sync push` refusal). It names
+		// the exact one-line edit (or `fak new-leaf`). Set FLEET_TIER_GUARD=block to hard-enforce it,
+		// ALLOW_UNTIERED_LEAF=1 to skip it once.
+		{Name: "UNTIERED_LEAF", ModeEnv: "FLEET_TIER_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNTIERED_LEAF", Check: gateUntieredLeaf},
 	}
 }
 

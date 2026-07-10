@@ -40,6 +40,16 @@ func declaredTiers(t *TrackedTree) (map[string]bool, bool) {
 	if !exists {
 		return nil, false
 	}
+	return parseDeclaredTierKeys(body)
+}
+
+// parseDeclaredTierKeys extracts the lower-cased keys of the `var tier = map[string]int{...}`
+// literal from the architest tier-table source. ok is false when the table marker is absent or
+// the shape changed (zero keys parsed), so a caller fails open rather than emit a false verdict
+// on an unreadable source. Shared by the whole-tree gate (declaredTiers, over a TrackedTree) and
+// the staged UNTIERED_LEAF gate (gateUntieredLeaf, over a StagedDiff) so both read the ONE source
+// of truth through the same parser.
+func parseDeclaredTierKeys(body []byte) (map[string]bool, bool) {
 	declared := map[string]bool{}
 	inTable := false
 	for _, line := range strings.Split(string(body), "\n") {

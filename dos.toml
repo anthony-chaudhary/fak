@@ -692,6 +692,23 @@ summary  = "A commit outside fak's vetted path (a raw `git commit` / `git add -A
 fix      = "Commit by explicit pathspec so only your files land: `fak commit --path <yours> -m ...` (sets the vetted marker), or `git commit -- <yours>`. One-shot escape: ALLOW_BARE_COMMIT=1; soften fleet-wide: FLEET_BARE_COMMIT_GUARD=warn|off; disable the whole prestaged family: FAK_PRESTAGED_PATH_GUARD=off."
 see_also = ["internal/hooks/gate_barecommitsweep.go", "internal/safecommit/prestaged.go", "fak commit", "fak hooks pre-commit"]
 
+# The untiered-leaf pre-commit gate (#3614): the STAGED, commit-boundary twin of the whole-tree
+# TIER_DECLARED hygiene gate. TIER_DECLARED runs only in `fak hygiene` / `make ci`, so it catches
+# an internal/<leaf> missing its architest tier row only AFTER the leaf is committed -- at which
+# point architest's TestEveryPackageDeclaresTier reds the whole module and `fak sync push` refuses
+# on the drift, stalling every peer's push over one worker's hand-made leaf. The UNTIERED_LEAF gate
+# fires one boundary earlier, on the staged diff of the commit that adds the leaf, naming the exact
+# one-line tier row (or the `fak new-leaf` command). Declaring the token here makes
+# `dos_check_reason UNTIERED_LEAF` classify it as a known OPERATOR_GATE the author clears by adding
+# the row, not UNCLASSIFIED drift. ADVISORY by default (DefaultMode "warn"): FLEET_TIER_GUARD=block
+# hard-enforces it once a soak validates the signal.
+[reasons.UNTIERED_LEAF]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A commit adds a new internal/<leaf>/ non-test Go file with no row in the architest tier table (internal/architest/architest_test.go). Left to land, TestEveryPackageDeclaresTier reds the whole module and `fak sync push` refuses on the drift, so one hand-made leaf stalls every peer's push. Caught at the author's own commit boundary instead. Advisory by default; blocks only under FLEET_TIER_GUARD=block."
+fix      = "Add `\"<leaf>\": <tier>,` before the `// new-leaf:tier` marker in internal/architest/architest_test.go (the lowest tier whose role the leaf fits), or run `fak new-leaf <leaf> --tier <tier>`, and stage the tier table in the SAME commit. One-shot escape: ALLOW_UNTIERED_LEAF=1; soften fleet-wide: FLEET_TIER_GUARD=warn|off."
+see_also = ["internal/hooks/gate_untieredleaf.go", "internal/hooks/gate_tierdeclared.go", "internal/newleaf", "fak new-leaf", "fak hooks pre-commit"]
+
 # The reversibility preview-confirm gate (#3306, #2776): an irreversible or
 # outward-facing tool call is HELD (REQUIRE_WITNESS/ESCALATE) pending an echoed
 # confirm token or a switch to a compiled sidestep. The gate surfaces the token
