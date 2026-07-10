@@ -26,5 +26,11 @@ ULTRACODE overlay for your one leaf:
 - If a guard refuses you (OFF_TRUNK / COLLISION_RISK / STALE_BASE_DELETION /
   MERGE_IN_PROGRESS): reconcile in place or STOP. Do not route around it.
 
+Do NOT end by narrating leftover work. Any remaining or out-of-scope follow-up you
+would otherwise list as "two more things" at the end MUST be filed as an open gh
+issue first (dedupe → done-condition → leak-check → label) — a named-but-unfiled
+follow-up is silently-deferred work this repo forbids.
+
 Report faithfully: the issue number, the witnessing commit SHA (or `not yet` + the
-missing witness), and whether the tree was left clean.
+missing witness), the issue numbers of any follow-ups you filed, and whether the
+tree was left clean.

@@ -150,6 +150,15 @@ checklist in the `/spine-fanout` skill:
    `fak issue cohort --from-plan`. The verb refuses to plan without a spine witness — that
    refusal is default 1 talking.
 
+**End of run: file the leftovers, don't narrate them.** `never silently deferred` binds
+every run, not just new-work spines. If a task finishes and surfaces remaining or
+out-of-scope follow-ups — the "there are two more things worth doing" you'd otherwise
+list at the end — **file each as an open gh issue** before you stop (dedupe →
+done-condition → leak-check the body → label), then report those issue numbers. A
+follow-up named in prose but left unfiled is silently-deferred work: it becomes an OPEN
+issue or it does not leave the run. This binds headless workers, in-session loops, and
+interactive turns alike; if there is genuinely nothing left, say so plainly.
+
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)
 
 **Default: ship.** Once the tree is green, **commit AND push** unprompted.

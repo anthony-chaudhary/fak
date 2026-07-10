@@ -51,5 +51,14 @@ the SAME working tree, so lane discipline is load-bearing, not optional.
   `MERGE_IN_PROGRESS`): recover per the AGENTS.md table — reconcile in place or
   STOP. Do not route around the guard; that just trips the next one.
 
+Do NOT end by narrating leftover work. If your run surfaced any remaining or
+out-of-scope follow-ups — the "there are two more things worth doing" you'd
+otherwise list in prose — **file each as an open gh issue** before you stop
+(dedupe → done-condition → leak-check the body → label), exactly as the
+out-of-scope rule above requires. A named-but-unfiled follow-up is silently
+deferred work, which this repo forbids: it becomes an OPEN issue or it does not
+leave your run. If there is genuinely nothing left, say so plainly.
+
 Report the outcome faithfully: the issue number, the witnessing commit SHA (or
-`not yet` + the missing witness), and whether the tree was left clean.
+`not yet` + the missing witness), the issue numbers of any follow-ups you filed,
+and whether the tree was left clean.
