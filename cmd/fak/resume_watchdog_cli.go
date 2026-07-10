@@ -51,6 +51,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/resume/rehome"
+	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -175,6 +176,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	history := rwLoadHistory(ledgerPath)
 
 	launched := 0
+	// One tick per sweep: a live-but-idle watchdog (all SKIPs, no launches) is now
+	// distinguishable from a dead one — zero ticks means the sweep never ran. This is the
+	// authoritative in-process count the ledger-derived reconstruction used to lose (#3803).
+	resumemetrics.Tick()
 	progressRecorded := map[string]bool{}
 	procScan := &rwProcScan{}
 	for _, p := range plan {
@@ -219,6 +224,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		d := resume.DecideWatchdogRow(p, guards, hist, outcome)
+		// Count the per-session verdict the moment it is decided — launch, skip_self,
+		// skip_blocked, skip_operator_hold, … — so /debug/vars carries the live verdict mix
+		// independent of any ledger write that may or may not land (#3803).
+		resumemetrics.RecordAction(string(d.Action))
 		if d.Action != resume.WatchdogLaunch {
 			note("  SKIP %s — %s", sid8, d.Reason)
 			continue
@@ -424,6 +433,9 @@ func rwRecordResumeProgress(ledgerPath, mode, sid string, progress rwResumeProgr
 	}
 	rwAppendLedger(ledgerPath, row)
 	recorded[sid] = true
+	// Live twin of the ledger's "progress" row: a resume proven to have produced a real
+	// post-launch turn, counted at the moment it is witnessed (#3803).
+	resumemetrics.ProgressWitnessed()
 }
 
 func rwHasProgressWitness(events []resume.WatchdogStatusEvent, sid string, afterUnix int64) bool {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -153,6 +154,13 @@ func watchdogAutohealOnStart(verb string) {
 		defer cancel()
 		t0 := time.Now()
 		results := runWatchdogAutoheal(ctx, opts)
+		// Count each autoheal outcome (WATCHDOG_RESTARTED / scheduled / debounced /
+		// exhausted / policy-invalid …) the moment the boot heal reports it. This path runs
+		// INSIDE the guard/serve process that hosts the gateway, so these counts surface in
+		// that gateway's /debug/vars directly (#3803).
+		for _, r := range results {
+			resumemetrics.RecordAutohealResult(r.Reason)
+		}
 		elapsed := time.Since(t0)
 		// Pick the sink so the JSON heal lines never land on top of an attended agent's
 		// alternate-screen TUI: an interactive `fak guard -- <agent>` launch routes them to a

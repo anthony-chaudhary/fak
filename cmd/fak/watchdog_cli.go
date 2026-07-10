@@ -32,6 +32,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/watchdoghealth"
 )
 
@@ -133,6 +134,12 @@ func runWatchdogStatus(stdout, stderr io.Writer, argv []string) int {
 	defer cancel()
 	mons := watchdogStatusMonitors(ctx, specs, opts.StateDir, uint64(opts.RestartPolicy.MaxAttempts))
 	digest := watchdoghealth.Fold(mons)
+	// Publish the folded health onto the process-global expvar surface so /debug/vars carries
+	// the last-seen per-monitor status and the cross-monitor rollup (#3803).
+	for _, h := range digest.Monitors {
+		resumemetrics.SetMonitorStatus(h.ID, string(h.Status))
+	}
+	resumemetrics.SetHealthRollup(string(digest.Rollup))
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
