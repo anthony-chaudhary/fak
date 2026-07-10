@@ -98,6 +98,12 @@ const (
 	RankStep       = "step"       // ordinal position
 	RankDurability = "durability" // shortest-lived first (asc) / longest-lived first (desc)
 	RankRefcount   = "refcount"   // graph in-degree — how many other cells reference this one (desc = most backlinks first)
+	// RankRelevanceSpan is the neighborhood-pooled relevance variant (#4014, SnapKV):
+	// each cell's intent-overlap score is summed over an odd, centered window of its
+	// step-adjacent neighbors before ranking, so a coherent multi-cell span outranks an
+	// isolated one-cell spike. Opt-in only — it requires Op.Window (odd, >= 1); window 1
+	// is the identity kernel and reproduces RankRelevance's ordering exactly.
+	RankRelevanceSpan = "relevance_span"
 )
 
 // Score-aggregation ops for multi-intent recall (#4020 — the GQA group-reduce: N
@@ -129,6 +135,7 @@ type Op struct {
 	Desc   bool   `json:"desc,omitempty"`   // rank direction (default ascending)
 	K      int    `json:"k,omitempty"`      // limit
 	Bytes  int64  `json:"bytes,omitempty"`  // budget cap, or narrow's per-cell width cap (bytes)
+	Window int    `json:"window,omitempty"` // rank relevance_span: pooling width in cells (odd, >= 1; 1 = identity kernel)
 	Reason string `json:"reason,omitempty"` // tombstone/effect reason
 }
 
@@ -203,6 +210,12 @@ func Validate(q Query) error {
 		case OpRank:
 			switch op.By {
 			case RankRelevance, RankBytes, RankStep, RankDurability, RankRefcount:
+			case RankRelevanceSpan:
+				// The pooling kernel is part of the authored query, never guessed: a
+				// centered window must be an explicit odd width (1 = identity kernel).
+				if op.Window < 1 || op.Window%2 == 0 {
+					return fmt.Errorf("memq: op %d (rank %s) requires an odd window >= 1, got %d", i, RankRelevanceSpan, op.Window)
+				}
 			default:
 				return fmt.Errorf("memq: op %d (rank) has unknown key %q", i, op.By)
 			}

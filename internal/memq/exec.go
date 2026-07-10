@@ -228,7 +228,17 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			}
 			work = kept
 		case OpRank:
-			sortByRank(work, op.By, op.Desc, score, refcount)
+			if op.By == RankRelevanceSpan {
+				// Neighborhood-pooled relevance (#4014, SnapKV): smooth each surviving
+				// cell's raw intent-overlap over its step-adjacent neighbors, then rank
+				// by the pooled score with the plain-relevance comparator (same
+				// higher-is-better direction, same Step/ID tie-breaks).
+				pooled := poolSpanScores(work, score, op.Window)
+				sortByRank(work, RankRelevance, op.Desc, pooled, refcount)
+				note = fmt.Sprintf("relevance pooled over a %d-cell step window (span beats spike)", op.Window)
+			} else {
+				sortByRank(work, op.By, op.Desc, score, refcount)
+			}
 		case OpLimit:
 			if op.K < len(work) {
 				work = work[:op.K]
