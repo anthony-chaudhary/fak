@@ -244,11 +244,15 @@ func TestIssueAuditDriverIdentityRejectsObviousFamilyMismatch(t *testing.T) {
 		{"codex", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "claude-prod"}, true},
 		{"codex", modelroute.ModelIdentity{Provider: "openai", Family: "gpt-fake", Model: "gpt-prod"}, true},
 		{"claude", modelroute.ModelIdentity{Provider: "anthropic", Family: "claude", Model: "unregistered"}, true},
+		{"http", modelroute.ModelIdentity{Provider: "openai", Family: "gpt", Model: "gpt-prod"}, false},
 	}
 	for _, tt := range tests {
-		_, err := modelroute.ValidateAuditDriverIdentity(tt.driver, tt.id, aliases)
+		got, err := modelroute.ValidateAuditDriverIdentity(tt.driver, tt.id, aliases)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("driver=%s id=%+v err=%v wantErr=%v", tt.driver, tt.id, err, tt.wantErr)
+		}
+		if err == nil && got.Driver != tt.driver {
+			t.Errorf("driver=%s canonical identity driver=%q", tt.driver, got.Driver)
 		}
 	}
 }
@@ -300,12 +304,8 @@ func TestIssueAuditCommandHTTPDeclaredFamilyMismatchFailsClosed(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("HTTP mismatch unexpectedly passed: %s", stdout.String())
 	}
-	receipt, err := modelroute.ParseIssueAuditReceipt(stdout.Bytes())
-	if err != nil {
-		t.Fatalf("parse mismatch receipt: %v stderr=%s stdout=%s", err, stderr.String(), stdout.String())
-	}
-	if receipt.Independence.Admitted || receipt.Independence.Reason != string(modelroute.AuditReasonRefuseObservedMismatch) || receipt.Verdict != modelroute.CrossAuditInconclusive {
-		t.Fatalf("mismatch receipt = %+v", receipt)
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "observed auditor identity mismatches declared auditor") {
+		t.Fatalf("HTTP mismatch output: stderr=%s stdout=%s", stderr.String(), stdout.String())
 	}
 }
 

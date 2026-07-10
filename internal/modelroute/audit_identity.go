@@ -367,7 +367,6 @@ func ValidateAuditDriverIdentity(driver string, id AuditIdentity, aliases []Audi
 	driver = strings.ToLower(strings.TrimSpace(driver))
 	switch driver {
 	case "http":
-		return normalized, nil
 	case "claude":
 		if normalized.Provider != "anthropic" || normalized.Family != "claude" {
 			return normalized, fmt.Errorf("modelroute: claude driver requires roster-canonical anthropic/claude identity")
@@ -381,6 +380,19 @@ func ValidateAuditDriverIdentity(driver string, id AuditIdentity, aliases []Audi
 	}
 	normalized.Driver = driver
 	return normalized, nil
+}
+
+// AuditDriverRequiresObservedIdentity reports whether a driver's trust
+// contract requires the response to carry an independently readable model
+// identity. Keep this closed and capability-based: callers may opt into a
+// stronger check, but cannot opt a driver out of its required readback.
+func AuditDriverRequiresObservedIdentity(driver string) bool {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "http":
+		return true
+	default:
+		return false
+	}
 }
 
 type identityNormalizationStatus string

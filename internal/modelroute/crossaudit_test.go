@@ -168,9 +168,12 @@ func TestCrossAuditSpineRefusesHTTPDeclaredFamilyMismatch(t *testing.T) {
 		Author: AuthorManifest{Schema: CrossAuditAuthorSchema, Author: fullAuditIdentity(
 			"qwen-local", "local", "qwen", "qwen-w35", "fak-local", "local", "local", "high", "weights:qwen",
 		)},
-		Auditor:                        fullAuditIdentity("gpt-review", "openai", "gpt", "gpt-w56", "http", "remote", "api", "high", "registry:gpt"),
-		IndependencePolicy:             policy,
-		RequireObservedAuditorIdentity: true,
+		Auditor: func() AuditIdentity {
+			id := fullAuditIdentity("gpt-review", "openai", "gpt", "gpt-w56", "http", "remote", "api", "high", "registry:gpt")
+			id.Driver = "http"
+			return id
+		}(),
+		IndependencePolicy: policy,
 	}, IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
 		return crossAuditFixtureEvidence(), nil
 	}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
@@ -189,8 +192,73 @@ func TestCrossAuditSpineRefusesHTTPDeclaredFamilyMismatch(t *testing.T) {
 	if receipt.Verdict != CrossAuditInconclusive || receipt.ObservedAuditor == nil || receipt.ObservedAuditor.Family != "claude" {
 		t.Fatalf("HTTP mismatch receipt = %+v", receipt)
 	}
+	if err := receipt.Verify(); err == nil || !strings.Contains(err.Error(), "mismatches declared auditor") {
+		t.Fatalf("HTTP mismatch receipt verification error = %v", err)
+	}
+}
+
+func TestCrossAuditSpineHTTPDriverCannotOptOutOfObservedIdentity(t *testing.T) {
+	policy := crossAuditHTTPPolicy()
+	auditor := fullAuditIdentity("gpt-review", "openai", "gpt", "gpt-w56", "openai-compatible-http", "remote", "api", "high", "")
+	auditor.Driver = "http"
+	receipt, err := AuditIssue(context.Background(), IssueAuditRequest{
+		IssueNumber:        42,
+		Author:             AuthorManifest{Schema: CrossAuditAuthorSchema, Author: fullAuditIdentity("qwen-local", "local", "qwen", "qwen-w35", "fak-local", "local", "local", "high", "weights:qwen")},
+		Auditor:            auditor,
+		IndependencePolicy: policy,
+		// Deliberately false: the HTTP driver's capability is authoritative.
+		RequireObservedAuditorIdentity: false,
+	}, IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
+		return crossAuditFixtureEvidence(), nil
+	}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
+		return IssueAuditReviewResult{Verdict: CrossAuditPass, Reason: "caller tried to bypass readback"}, nil
+	}))
+	if err != nil {
+		t.Fatalf("AuditIssue: %v", err)
+	}
+	if receipt.Verdict == CrossAuditPass || receipt.Independence.Admitted || receipt.Independence.Verdict != AuditIndependenceUnknown {
+		t.Fatalf("HTTP opt-out bypass receipt = %+v", receipt)
+	}
+	if err := receipt.Verify(); err == nil || !strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("HTTP missing-observation receipt verification error = %v", err)
+	}
+}
+
+func TestIssueAuditReceiptVerifyRejectsTamperedHTTPObservation(t *testing.T) {
+	policy := crossAuditHTTPPolicy()
+	auditor := fullAuditIdentity("gpt-review", "openai", "gpt", "gpt-w56", "openai-compatible-http", "remote", "api", "high", "")
+	auditor.Driver = "http"
+	receipt, err := AuditIssue(context.Background(), IssueAuditRequest{
+		IssueNumber:        42,
+		Author:             AuthorManifest{Schema: CrossAuditAuthorSchema, Author: fullAuditIdentity("qwen-local", "local", "qwen", "qwen-w35", "fak-local", "local", "local", "high", "weights:qwen")},
+		Auditor:            auditor,
+		IndependencePolicy: policy,
+	}, IssueAuditFetcherFunc(func(context.Context, int) (IssueAuditEvidence, error) {
+		return crossAuditFixtureEvidence(), nil
+	}), IssueAuditReviewerFunc(func(context.Context, IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
+		return IssueAuditReviewResult{Verdict: CrossAuditPass, Reason: "matched", ObservedAuditor: &AuditIdentity{Model: "gpt-review"}}, nil
+	}))
+	if err != nil {
+		t.Fatalf("AuditIssue: %v", err)
+	}
 	if err := receipt.Verify(); err != nil {
-		t.Fatalf("HTTP mismatch receipt digest: %v", err)
+		t.Fatalf("valid HTTP receipt: %v", err)
+	}
+
+	tampered := receipt
+	tampered.ObservedAuditor = nil
+	tampered.ReceiptDigest = tampered.recomputeDigest()
+	if err := tampered.Verify(); err == nil || !strings.Contains(err.Error(), "requires observed") {
+		t.Fatalf("re-digested missing observation error = %v", err)
+	}
+
+	tampered = receipt
+	other := *tampered.ObservedAuditor
+	other.Model = "forged-model"
+	tampered.ObservedAuditor = &other
+	tampered.ReceiptDigest = tampered.recomputeDigest()
+	if err := tampered.Verify(); err == nil || !strings.Contains(err.Error(), "mismatches declared auditor") {
+		t.Fatalf("re-digested mismatched observation error = %v", err)
 	}
 }
 
@@ -267,6 +335,16 @@ func crossAuditTestPolicy() AuditIndependencePolicy {
 		gpt54,
 		gptAuthor,
 		auditAlias("gpt-review", "gpt-5.6-sol", "azure-openai", "gpt", "gpt-w56"),
+		auditAlias("claude-review", "claude-opus-4-6", "anthropic", "claude", "claude-w46"),
+	}
+	return policy
+}
+
+func crossAuditHTTPPolicy() AuditIndependencePolicy {
+	policy := DefaultAuditIndependencePolicy()
+	policy.Aliases = []AuditIdentityAlias{
+		auditAlias("qwen-local", "qwen3.5-27b", "local", "qwen", "qwen-w35"),
+		auditAlias("gpt-review", "gpt-5.6-sol", "openai", "gpt", "gpt-w56"),
 		auditAlias("claude-review", "claude-opus-4-6", "anthropic", "claude", "claude-w46"),
 	}
 	return policy

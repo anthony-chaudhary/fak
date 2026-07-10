@@ -145,6 +145,9 @@ func TestAuditIdentityDriverRequiresRosterAndExactCanonicalFamily(t *testing.T) 
 	if got, err := ValidateAuditDriverIdentity("codex", AuditIdentity{Provider: "openai", Family: "gpt", Model: "gpt-prod"}, aliases); err != nil || got.Driver != "codex" || got.Model != "gpt-5.6-sol" {
 		t.Fatalf("canonical codex identity = %+v err=%v", got, err)
 	}
+	if got, err := ValidateAuditDriverIdentity(" HTTP ", AuditIdentity{Provider: "openai", Family: "gpt", Model: "gpt-prod"}, aliases); err != nil || got.Driver != "http" || got.Model != "gpt-5.6-sol" {
+		t.Fatalf("canonical HTTP identity = %+v err=%v", got, err)
+	}
 }
 
 func TestAuditIdentityObservedHTTPRequiresRosterBackedLineage(t *testing.T) {

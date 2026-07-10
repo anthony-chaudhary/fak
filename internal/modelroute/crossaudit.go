@@ -96,11 +96,13 @@ func (f IssueAuditReviewerFunc) ReviewIssue(ctx context.Context, req IssueAuditR
 }
 
 type IssueAuditRequest struct {
-	IssueNumber                    int                     `json:"issue_number"`
-	Author                         AuthorManifest          `json:"author_manifest"`
-	Auditor                        ModelIdentity           `json:"auditor"`
-	IndependencePolicy             AuditIndependencePolicy `json:"independence_policy,omitempty"`
-	RequireObservedAuditorIdentity bool                    `json:"require_observed_auditor_identity,omitempty"`
+	IssueNumber        int                     `json:"issue_number"`
+	Author             AuthorManifest          `json:"author_manifest"`
+	Auditor            ModelIdentity           `json:"auditor"`
+	IndependencePolicy AuditIndependencePolicy `json:"independence_policy,omitempty"`
+	// RequireObservedAuditorIdentity is an additive legacy opt-in. A false
+	// value never disables readback required by the canonical auditor Driver.
+	RequireObservedAuditorIdentity bool `json:"require_observed_auditor_identity,omitempty"`
 }
 
 type IndependenceDecision struct {
@@ -243,7 +245,7 @@ func AuditIssue(ctx context.Context, req IssueAuditRequest, fetcher IssueAuditFe
 	}
 	finalIndependence := policyDecision
 	var observedAuditor *AuditIdentity
-	if req.RequireObservedAuditorIdentity {
+	if AuditDriverRequiresObservedIdentity(auditor.Driver) || req.RequireObservedAuditorIdentity {
 		observed := AuditIdentity{}
 		if review.ObservedAuditor != nil {
 			observed = *review.ObservedAuditor
@@ -344,9 +346,34 @@ func (r IssueAuditReceipt) Verify() error {
 			return fmt.Errorf("modelroute: cross-audit PASS requires admitted independence")
 		}
 	}
+	if AuditDriverRequiresObservedIdentity(r.Auditor.Driver) {
+		if err := verifyReceiptObservedAuditor(r.Auditor, r.ObservedAuditor); err != nil {
+			return err
+		}
+	}
 	want := r.recomputeDigest()
 	if r.ReceiptDigest != want {
 		return fmt.Errorf("modelroute: cross-audit receipt digest mismatch: stamped %s, recomputed %s", r.ReceiptDigest, want)
+	}
+	return nil
+}
+
+func verifyReceiptObservedAuditor(expected AuditIdentity, observed *AuditIdentity) error {
+	if observed == nil {
+		return fmt.Errorf("modelroute: cross-audit receipt driver %q requires observed auditor identity", expected.Driver)
+	}
+	want := normalizeAuditIdentityFields(expected)
+	got := normalizeAuditIdentityFields(*observed)
+	for _, axis := range []AuditIdentityAxis{
+		AuditAxisProvider, AuditAxisFamily, AuditAxisModel, AuditAxisWeights, AuditAxisProvenance,
+	} {
+		wantValue, gotValue := auditAxisValue(want, axis), auditAxisValue(got, axis)
+		if wantValue == "" || gotValue == "" {
+			return fmt.Errorf("modelroute: cross-audit receipt observed auditor identity is unresolved on %s", axis)
+		}
+		if !strings.EqualFold(wantValue, gotValue) {
+			return fmt.Errorf("modelroute: cross-audit receipt observed auditor identity mismatches declared auditor on %s", axis)
+		}
 	}
 	return nil
 }
