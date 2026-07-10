@@ -141,6 +141,29 @@ def test_attempt_cap_eventually_blocks(tmp_path, monkeypatch):
     assert blocked and "cap" in why.lower()
 
 
+def test_rearm_marker_clears_attempt_cap():
+    """A re-arm reclaim row (#2178) zeroes the attempt budget accrued BEFORE it, so a sid that
+    burned its whole cap on a known-transient infra fault (the managed-cache-1h-TTL 400 wave)
+    becomes resumable again -- while launches appended AFTER the marker re-cap normally."""
+    wd = _reload({"FAK_MAX_ATTEMPTS": "8"})
+    capped = [{"phase": "launched", "attempt": i + 1} for i in range(8)]
+    blocked, why = wd.resume_blocked("sid-rearm", capped)
+    assert blocked and "cap" in why.lower(), "8 launches must hit the cap first"
+    # a rearm marker resets the budget -> resume allowed again (and the marker isn't an attempt)
+    reclaimed = capped + [{"phase": "rearm", "reason": "managed-cache-1h-ttl-400 #2178"}]
+    assert wd.is_resume_attempt_record(reclaimed[-1]) is False
+    blocked, why = wd.resume_blocked("sid-rearm", reclaimed)
+    assert not blocked, f"a rearm marker must clear the cap, got blocked: {why}"
+    # fresh launches AFTER the rearm count again from 0 -> re-caps after another full budget
+    recapped = reclaimed + [{"phase": "launched", "attempt": i + 1} for i in range(8)]
+    blocked, why = wd.resume_blocked("sid-rearm", recapped)
+    assert blocked and "cap" in why.lower(), "8 launches after a rearm must re-cap"
+    # a later operator/auth settle after the rearm still wins (last write wins)
+    settled = reclaimed + [{"manual_override": True, "action": "consolidate-x"}]
+    blocked, why = wd.resume_blocked("sid-rearm", settled)
+    assert blocked and "operator" in why.lower(), "a manual override AFTER a rearm re-blocks"
+
+
 def test_auth_outcome_is_unrecoverable_and_blocks(tmp_path, monkeypatch):
     wd = _reload({})
     p = _write_jsonl(tmp_path, "auth.jsonl", _asst_err("Not logged in. Please run /login"))
@@ -357,6 +380,29 @@ def test_ps1_deferred_rows_do_not_trip_max_attempts(tmp_path):
     assert launched and launched[0]["attempt"] == 1
 
 
+def test_ps1_rearm_marker_reclaims_capped_session(tmp_path):
+    """#2178 fix: a sid that burned its whole attempt budget on the managed-cache-1h-TTL 400 wave
+    is reclaimed by a `phase=rearm` ledger row -- the .ps1 launch gate zeroes the attempts accrued
+    before it, so the session resumes again (fresh attempt 1) instead of staying settled at the
+    cap. Parity with the .py resume_blocked / fleet_sessions.py planner rearm handling."""
+    sid = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+    prior = [{"ts": f"2026-07-09T00:00:0{i}Z", "session": sid, "phase": "launched",
+              "attempt": i + 1} for i in range(8)]
+    prior.append({"ts": "2026-07-10T00:00:00Z", "session": sid, "phase": "rearm",
+                  "reason": "managed-cache-1h-ttl-400 #2178"})
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid], ledger_rows=prior)
+    r = _run_ps1_live(tmp_path, paths, max_attempts=8)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "attempt cap" not in r.stdout, \
+        "the rearm marker must clear the cap, but the sid was still settled: " + r.stdout
+    assert paths["marker"].exists(), "the reclaimed session should have resumed"
+    launched = [x for x in _ledger_rows(paths)
+                if x.get("phase") == "launched" and x.get("ts", "") >= "2026-07-10T00:00:00Z"]
+    assert launched and launched[-1]["attempt"] == 1, \
+        "the post-rearm launch must count from attempt 1, not 9"
+
+
 @_ps1_behavioral
 def test_ps1_launch_spacing_prevents_same_second_starts(tmp_path):
     """#2172 acceptance: with spacing configured, two live resumes cannot start in the
@@ -434,22 +480,46 @@ def test_ps1_explicit_auto_never_fronts_with_guard(tmp_path):
 
 
 @_ps1_behavioral
-def test_ps1_unset_posture_fronts_with_managed_cache_on(tmp_path):
-    """On-by-default (2026-07-10): an UNSET FAK_MANAGED_CACHE now fronts the resume through
-    `fak guard --managed-cache on -- claude --resume ...` (best-effort managed cache everywhere),
-    mirroring the Go normalizeManagedCacheMode default flip (#2178)."""
+def test_ps1_unset_posture_subscription_stays_passive(tmp_path):
+    """Subscription-safe UNSET default (2026-07-10, supersedes the blind unset=>on). With no
+    FAK_GUARD_API_KEY_ENV configured (a subscription-OAuth seat), an UNSET FAK_MANAGED_CACHE now
+    defaults to `auto` -- a bare `claude --resume` with NO forced `--managed-cache on`. Forcing on
+    would activate the stable-prefix 1h-TTL upgrade, which the subscription wire rejects as
+    `400 upstream rejected the request as malformed` (proven by clean-env ablation; see
+    docs/notes/MANAGED-CACHE-1H-TTL-400-FIX-2026-07-09.md), 400-crashing every subscription
+    resume. The 1h upgrade only pays off on an API-key seat, so an unconfigured (subscription)
+    fleet must resume passive."""
     sid = "88888888-9999-aaaa-bbbb-cccccccccccc"
     paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
                             sessions=[sid])
-    # empty string == unset after the .ps1's "$env:FAK_MANAGED_CACHE" coercion -> on-by-default
+    # empty string == unset after the .ps1's "$env:FAK_MANAGED_CACHE" coercion; no api-key env
     r = _run_ps1_live(tmp_path, paths, env_extra={"FAK_MANAGED_CACHE": ""})
     assert r.returncode == 0, r.stdout + r.stderr
+    # unset + no api-key env -> auto -> bare launch (NOT fronted with --managed-cache on)
+    assert paths["marker"].exists(), \
+        "subscription default must resume bare/passive, not fronted with managed-cache on: " + r.stdout
+    assert not paths["guard_marker"].exists(), \
+        "unset+no-api-key must NOT force a managed-cache posture on a subscription seat: " + r.stdout
+    assert "managed-cache posture ->" not in r.stdout
+
+
+def test_ps1_unset_posture_apikey_fronts_managed_cache_on(tmp_path):
+    """The other half of the billing-aware unset default: when an API-key seat IS configured
+    (FAK_GUARD_API_KEY_ENV set), an UNSET FAK_MANAGED_CACHE still fronts the resume through
+    `fak guard --api-key-env X --managed-cache on -- claude --resume ...`. Managed cache stays
+    best-effort-everywhere where it actually helps and is well-formed (the 1h-TTL upgrade is only
+    accepted on API-key billing), so the fix narrows #2178 to correct seats, it does not revert it."""
+    sid = "88888888-9999-aaaa-bbbb-cccccccccccc"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths, env_extra={
+        "FAK_MANAGED_CACHE": "", "FAK_GUARD_API_KEY_ENV": "ANTHROPIC_API_KEY"})
+    assert r.returncode == 0, r.stdout + r.stderr
     assert paths["guard_marker"].exists(), \
-        "on-by-default: the unconfigured fleet must front the resume with guard: " + r.stdout
+        "api-key seat: an unset knob must still front the resume with guard: " + r.stdout
     fronted = paths["guard_marker"].read_text(encoding="ascii", errors="replace")
     assert "--managed-cache on" in fronted
-    # no api-key-env configured -> only the managed-cache flag is carried
-    assert "--api-key-env" not in fronted
+    assert "--api-key-env ANTHROPIC_API_KEY" in fronted
     # the child agent (after `--`) is still the claude --resume for this sid
     assert "-- " in fronted and "--resume " in fronted and sid in fronted
     # the fronted path runs claude THROUGH guard, so the bare-launch marker is not written
