@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"model\":\"claude-x\",\"max_tokens\":64,\"system\":[{\"type\":\"text\",\"text\":\"head\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"5m\"}}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"tail\",\"cache_control\":{\"type\":\"ephemeral\"}}]}]}")

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"model\":\"claude-x\",\"max_tokens\":64,\"tools\":[{\"name\":\"search\",\"description\":\"stable\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}")

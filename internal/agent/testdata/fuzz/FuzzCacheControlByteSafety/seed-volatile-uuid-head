@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"model\":\"claude-x\",\"max_tokens\":64,\"system\":[{\"type\":\"text\",\"text\":\"session 123e4567-e89b-12d3-a456-426614174000\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}")
