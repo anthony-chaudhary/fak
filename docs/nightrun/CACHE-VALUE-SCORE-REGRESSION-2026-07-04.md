@@ -1,3 +1,8 @@
+---
+title: "Cache-value score regression diagnosis - 2026-07-04"
+description: "Diagnosis of the 2026-07-04 nightrun cache-value regression (#2613): realized KV-prefix reuse fell below the gate, and why the score went red."
+---
+
 # Cache-value score regression diagnosis — 2026-07-04 (#2613)
 
 `fak nightrun score --json` is red: realized KV-prefix reuse **0.6918** is below the

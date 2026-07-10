@@ -1,3 +1,8 @@
+---
+title: "fak nightrun — unattended overnight data collection"
+description: "The one door an operator or agent uses to run fak all night for unattended data collection and to answer whether the run is safe to leave alone."
+---
+
 # Run it all night — the data-collection center of excellence
 
 `fak nightrun` is the one door an operator or an agent uses to answer the only

@@ -1,3 +1,8 @@
+---
+title: "Consuming the fak change feed — the consumer contract"
+description: "How to read fak's log-based change feed like a database CDC consumer: hold a cursor by offset, ask for everything after it, apply the change, and advance."
+---
+
 <!--
   How-to: consume the fak change feed correctly (#3173).
   Concept page: ../explainers/change-data-capture-for-agents.md

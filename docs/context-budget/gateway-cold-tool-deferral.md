@@ -1,3 +1,8 @@
+---
+title: "Gateway cold-tool deferral - the 10x floor lever"
+description: "The gateway cold-tool-deferral lever (#3232) under epic #3229: deferring cold tool schemas to cut the always-sent context budget's biggest floor."
+---
+
 # Gateway cold-tool deferral — the 10× floor lever (#3232)
 
 Part of epic **#3229**. This is the reduction lever for the epic's biggest,
@@ -41,7 +46,17 @@ ESTIMATED byte footprint (`fak footprint`, #3230). The measurement that proves t
 - **identity on ambiguity** (non-JSON, no tools, only hot tools) — fail-safe.
 
 Metrics: `observeToolDefer` accumulates `deferFiredTurns` / `deferColdCount`
-(WITNESSED), the twin of `observeInboundToolPrune`.
+(WITNESSED), the twin of `observeInboundToolPrune`. These fold into the
+`AdjudicationSummary` (`DeferColdTurns` / `DeferColdCount`) and surface on two
+operator faces (#3531):
+
+- the `/metrics` scrape — `fak_gateway_tool_defer_cold_total` and
+  `fak_gateway_tool_defer_turns_total`, the OUTBOUND twin of the inbound
+  `fak_gateway_inbound_tools_pruned_total` family;
+- the `fak guard` exit summary — a **cold-tool deferral** section printed only
+  when the lever fired (a default-off or all-hot session stays quiet), naming the
+  cold-def count × turns and flagging that the token drop is **OBSERVED** on
+  `/metrics` (provider-side), never a request-byte shrink like the prune lever.
 
 ## Default OFF — the validation gates before flipping it on
 
@@ -64,10 +79,8 @@ this is the epic's highest-risk lever. Before the default flips on:
 
 ## Follow-ups
 
-- `/metrics` render of `fak_gateway_tool_defer_*` (the counter is accumulated and
-  unit-witnessed; the render row is a separate observability surface).
 - The A/B scorecard entry (token-delta × held-accuracy × poison-rate) extending
-  #3230's footprint scorecard, once a live run exists.
+  #3230's footprint scorecard, once a live run exists (#3532).
 
 ## Cross-links
 

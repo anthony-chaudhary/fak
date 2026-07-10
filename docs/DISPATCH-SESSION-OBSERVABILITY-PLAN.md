@@ -1,3 +1,8 @@
+---
+title: "Dispatch session observability + auto session-analysis tickets"
+description: "The operating plan for giving fak operators default visibility into every dispatch session and auto-filing session-analysis tickets from what it finds."
+---
+
 # Dispatch session observability + automated session-analysis tickets — operating plan
 
 **Goal (two halves).** (1) Give operators *default* visibility into all dispatch

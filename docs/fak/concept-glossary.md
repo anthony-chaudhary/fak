@@ -1,3 +1,8 @@
+---
+title: "fak concept glossary — disambiguating overloaded names"
+description: "The single place fak draws the line between similar-sounding names — cache, gate, guard, witness — so overloaded vocabulary stops causing confusion."
+---
+
 # fak concept glossary - drawing the line between similar-sounding names
 
 fak has grown a large vocabulary, and several roots are badly overloaded. The word

@@ -246,6 +246,7 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 | **How fak serves at scale** | [Serving plans](serving/README.md) — dual-track · poly-model · hardware-aware & regenerable KV |
 | **What's real, what's not** | [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) |
 | **The leadership snapshot** (wins · live goal · risks · the one decision) | [Executive roll-up](EXECUTIVE-ROLLUP.md) |
+| **How fak maps to what enterprises are buying** (runtime enforcement · prove-it · cost kill-switch · NHI · tamper-evident audit · air-gap) — every stat sourced, every claim fenced shipped/ticketed | [Enterprise positioning](enterprise-positioning.md) |
 | **A machine-readable map (for LLMs)** | [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) |
 
 ---

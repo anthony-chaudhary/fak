@@ -1,3 +1,8 @@
+---
+title: "Proof artifact placement"
+description: "Where to place the witness an issue fix ships: matching the proof artifact to the failure class, since not every fix needs the same kind of witness."
+---
+
 # Proof Artifact Placement
 
 Issue fixes should ship a witness matched to the failure class, but not every witness

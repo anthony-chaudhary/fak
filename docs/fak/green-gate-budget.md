@@ -1,3 +1,8 @@
+---
+title: "Green-Gate Budget — tuning fak's incremental verify loop"
+description: "For anyone tuning the incremental verify loop: the tracked time budgets, how fak affected enforces them, and how to override a budget for one run."
+---
+
 # Green-Gate Budget
 
 > **Audience.** Anyone tuning the incremental verify loop — by the end you'll know the tracked time budgets, how `fak affected` enforces them, and how to override a budget for one run.

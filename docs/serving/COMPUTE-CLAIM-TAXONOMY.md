@@ -1,3 +1,8 @@
+---
+title: "The disaggregable compute-claim ladder"
+description: "The scale-free compute-claim taxonomy under epic #3259: a disaggregable ladder of compute claims and the profiles that make them scale-free."
+---
+
 # The disaggregable compute-claim ladder + scale-free profiles
 
 Parent epic: [#3259](https://github.com/anthony-chaudhary/fak/issues/3259) — *the claim-space is the

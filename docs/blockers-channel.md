@@ -1,3 +1,8 @@
+---
+title: "The #blockers channel"
+description: "How the fak fleet uses the #blockers channel: the one place any agent or CI run records what is currently stopping progress, so blockers stay visible."
+---
+
 # The #blockers channel
 
 `#blockers` is the one place the fleet records what is stopping progress. Any agent, CI

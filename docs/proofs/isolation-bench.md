@@ -1,3 +1,8 @@
+---
+title: "Per-tenant KV cache-isolation benchmark"
+description: "A provable-deletion, per-tenant KV cache-isolation benchmark for fak's L3 tier: a structural floor over a fak-authored, AgentDojo-style corpus."
+---
+
 # per-tenant KV cache-isolation benchmark
 
 ## Overview

@@ -1,3 +1,8 @@
+---
+title: "fak-native TOON scorecard"
+description: "The SCORE child of the TOON epic (#3064), issue #3068: a fak-native scorecard that answers one question about TOON with a single measured number."
+---
+
 # fak-native TOON scorecard
 
 The [SCORE] child of the TOON epic (#3064), issue **#3068**. It answers one question with

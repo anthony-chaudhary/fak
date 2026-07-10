@@ -1,3 +1,8 @@
+---
+title: "fak cadence report — quality, maturity, work, and release state"
+description: "How fak cadence folds the four things worth watching regularly — quality scores, feature maturity, work done, and release state — into one control pane."
+---
+
 # Cadence report
 
 `fak cadence` folds the four things worth watching on a regular cadence into one

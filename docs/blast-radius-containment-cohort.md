@@ -1,3 +1,8 @@
+---
+title: "Blast-radius containment - ticket cohort"
+description: "The cohort of blast-radius containment tickets (#2712-#2720) filed on the fak repo, grouped so the containment work is tracked as a single unit."
+---
+
 # Blast-radius containment — ticket cohort
 
 **Status:** already filed on `anthony-chaudhary/fak` as issues **#2712–#2720** (2026-07-05).

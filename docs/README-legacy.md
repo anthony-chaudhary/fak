@@ -1,3 +1,8 @@
+---
+title: "fak README overflow — deep-dive sections moved off the front page"
+description: "Narrower-audience and deep-dive sections that once lived on fak's README front page, moved here so the README stays focused on first-read essentials."
+---
+
 # fak — front-page overflow (moved off README.md)
 
 These sections used to live on the front page. They were moved here on
@@ -7,7 +12,7 @@ first — performance and cost, the no-key demo, and the one-command wrap.
 Nothing here is deprecated; it is narrower-audience or deep-dive material that
 earns a link from the front page rather than a place on it. The pre-restructure
 front page is archived at
-[README-2026-06-25-before-fresh-start.md](archive/README-2026-06-25-before-fresh-start.md).
+[README-2026-06-25-before-fresh-start.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/archive/README-2026-06-25-before-fresh-start.md).
 
 Each claim still carries the same authority it did on the front page — every
 number traces to [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), and every

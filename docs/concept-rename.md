@@ -1,3 +1,8 @@
+---
+title: "Renaming a concept with fak rename-concept"
+description: "How to rename a concept across the fak repo with fak rename-concept, since a concept name is never just one string living in one file."
+---
+
 # Renaming a concept — `fak rename-concept`
 
 A concept in this repo is never one string in one file. By the time a name like

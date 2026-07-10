@@ -7,7 +7,7 @@ description: "Inward persona×feature-space scorecard: a fit matrix of fak's top
 
 <!-- persona-fit-scorecard: 513f3319 · process: tools/persona_fit_scorecard.py · data: tools/persona_fit_scorecard.data/ -->
 
-The sibling [`persona-readiness`](../persona-scorecard/README.md) scorecard asks whether each top persona's *entry path* is served. This one asks the matrix question a go-to-market person draws: **across the key feature spaces fak ships, how much would each persona LIKE each one?** How an *engineer* feels about the model internals, how a *decision-maker* (≈ a product manager) feels about the benchmarks, how a *researcher* feels about reproducibility. Every cell is computed, not typed: a persona's WEIGHTS over the value dimensions × a feature's tree-grounded DELIVERY. To raise a cell you make the feature actually deliver what that persona values — never by editing the score.
+The sibling `persona-readiness` scorecard asks whether each top persona's *entry path* is served. This one asks the matrix question a go-to-market person draws: **across the key feature spaces fak ships, how much would each persona LIKE each one?** How an *engineer* feels about the model internals, how a *decision-maker* (≈ a product manager) feels about the benchmarks, how a *researcher* feels about reproducibility. Every cell is computed, not typed: a persona's WEIGHTS over the value dimensions × a feature's tree-grounded DELIVERY. To raise a cell you make the feature actually deliver what that persona values — never by editing the score.
 
 > Regenerate: `python tools/persona_fit_scorecard.py --markdown-dir docs/persona-fit-scorecard`.
 

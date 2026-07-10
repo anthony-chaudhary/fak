@@ -1,3 +1,8 @@
+---
+title: "docs/questions - the question-loop ledger"
+description: "The durable home of fak's question loop: a super-loop family that records open questions and their resolutions as a ledger under docs/questions."
+---
+
 # `docs/questions/` — the question-loop ledger
 
 This directory is the durable home of the **question loop**: a super-loop-family

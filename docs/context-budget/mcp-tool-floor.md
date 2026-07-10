@@ -1,3 +1,8 @@
+---
+title: "MCP tool-schema floor - committed baseline"
+description: "The committed baseline (#3230) for fak's MCP tool-schema floor, part of epic #3229's work to shrink the always-sent context budget."
+---
+
 # MCP tool-schema floor — committed baseline (#3230)
 
 Part of epic **#3229** (shrink the always-sent context budget). This is the

@@ -1,3 +1,8 @@
+---
+title: "Milestone tracking ledger"
+description: "The durable state directory behind fak milestone report and status: how the model-by-backend maturity ledger is stored and regenerated."
+---
+
 # Milestone tracking ledger
 
 This directory holds the durable state behind `fak milestone report` / `fak milestone

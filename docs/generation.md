@@ -1,3 +1,8 @@
+---
+title: "Generation Contract — the product horizon for fak work"
+description: "Generation names the product horizon a piece of fak work optimizes for and what evidence moves it closer to now — not priority, branch strategy, or a flag."
+---
+
 # Generation Contract
 
 Generation is the product horizon for a piece of fak work. It answers: "which

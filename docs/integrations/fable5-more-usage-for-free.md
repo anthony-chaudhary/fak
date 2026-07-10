@@ -1,6 +1,6 @@
 ---
 title: "More Fable 5 (and every model) out of your Claude seat — with fak guard"
-description: "How one command — fak guard -- claude — stretches your existing Claude seat: the pure-fak, native-cache-excluded slice (context shedding + KV-prefix reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable fallover). Every number is from a live fak-guarded fleet and labeled by provenance, with the double-count fence carried in full."
+description: "How one command — fak guard -- claude — stretches your existing Claude seat: the pure-fak, native-cache-excluded slice (context shedding + KV-prefix reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable fallover). Every number is recent — the latest fleet week, plus this repo's own last-3-day Claude Code dev sessions priced end to end — labeled by provenance, with the double-count fence carried in full and the few deliberately-cited all-time baselines flagged as such."
 date: 2026-07-09
 ---
 
@@ -85,33 +85,41 @@ middle is shed and a small restore handle is left where it was (recoverable late
 via `fak_context_restore`). Full mechanism:
 [`context-shedding.md`](../explainers/context-shedding.md).
 
-### What we measured (live fak-guarded fleet, pure-fak slice only)
+### What we measured (latest week, live fak-guarded fleet, pure-fak slice only)
 
-Source: `fak cachevalue report --json`, run against the live dogfood fleet.
+Source: `fak cachevalue report --since 2026-07-06 --json` — the **latest week
+only** (W28: 2026-07-06 → 2026-07-09, a 3.8-day window), snapshot 2026-07-09.
 Native prompt-cache dollars are **excluded** — these are fak's authored slice.
+(The KV-reuse row is the one exception to the `--since` floor: the sparse KV
+ledger logged no multi-turn sample in W28, so that row carries `latest_reuse_ratio`
+from the **unfloored** report — W27, the most recent week it actually measured.
+Under the floored command that field reads `INSUFFICIENT`.)
 
 | Metric | Value | Provenance | Field |
 |---|---|---|---|
-| Realized KV-prefix reuse (latest multi-turn week; 0.69 all-time) | **69.7%** | WITNESSED | `track1_witnessed_kernel.latest_reuse_ratio` |
-| Compaction fires across the fleet | 2,964 fires over 2,046 sessions | WITNESSED | `fleet_benefit.compaction_fired` / `exit_sessions` |
-| Shed **per fire** (the honest unit — see fence below) | **≈37,000 tokens/fire** | WITNESSED | `compaction_shed_tokens ÷ compaction_fired` |
-| fak's authored share of total token-equivalent value | **≈7.0%** | WITNESSED | `fleet_benefit.fak_share_pct` |
-| fak-authored API cost attributed over the sampled window | ≈$541 (≈$63/day) | OBSERVED | `fleet_benefit.fak_api_cost_avoided_usd` |
+| Realized KV-prefix reuse (W27 — latest week the sparse KV ledger measured) | **69.7%** | WITNESSED | `track1_witnessed_kernel.latest_reuse_ratio` |
+| Compaction fires (this week) | 2,347 fires over 898 sessions | WITNESSED | `fleet_benefit.compaction_fired` / `exit_sessions` |
+| Shed **per fire** (the honest unit — see fence below) | **≈34,000 tokens/fire** | WITNESSED | `compaction_shed_tokens ÷ compaction_fired` |
+| fak's authored share of total token-equivalent value | **≈20%** | WITNESSED | `fleet_benefit.fak_share_pct` |
+| fak-authored API cost attributed (this week) | ≈$398 over 3.8 days (≈$105/day) | ESTIMATED (WITNESSED shed × rate card) | `fleet_benefit.fak_api_cost_avoided_usd` |
 
 Read these the honest way:
 
-- **KV-prefix reuse (69.7% latest week, 0.69 all-time)** is a lossless, WITNESSED
-  reuse of already-computed prefix — no output token changed. Two fences, both
-  stated plainly: (i) the WITNESSED KV track is a **small sample** (11 sessions,
-  6 multi-turn) — a direct measurement, not a fleet-wide average; and (ii) the
-  all-time 0.69 currently sits **below the repo's 0.751 CI floor** (`fak nightrun
-  score` exits non-zero on it right now), so cite it as a witnessed measurement
-  *under active improvement*, **not** as a passing benchmark. Also note the
-  vs-naive re-prefill multiple `1/(1-reuse)` is deliberately **excluded** — the
-  honest single-session cache value is ~1.0× marginal over a tuned warm-KV server
-  (the #1066 fence; `internal/cachevalueledger/ledger.go`).
-- **Shed is cited per fire (~37k tokens), never as a sum.** The cumulative
-  `compaction_shed_tokens` (≈110M fleet-wide) **re-counts the same aged middle
+- **KV-prefix reuse (69.7%)** is a lossless, WITNESSED reuse of already-computed
+  prefix — no output token changed. It's the latest week the KV ledger actually
+  measured (W27); the ledger is **sparse** and logged no fresh multi-turn sample
+  in W28, so this is the most recent reading, not a same-week number. Two fences,
+  both stated plainly: (i) the WITNESSED KV track is a **small sample** (11
+  sessions, 6 multi-turn) — a direct measurement, not a fleet-wide average; and
+  (ii) **both** the W27 reading (0.697) and the all-time 0.69 currently sit
+  **below the repo's 0.751 CI floor** (`fak nightrun score` exits non-zero on it
+  right now), so cite it as a witnessed measurement *under active improvement*,
+  **not** as a passing benchmark. Also
+  note the vs-naive re-prefill multiple `1/(1-reuse)` is deliberately **excluded**
+  — the honest single-session cache value is ~1.0× marginal over a tuned warm-KV
+  server (the #1066 fence; `internal/cachevalueledger/ledger.go`).
+- **Shed is cited per fire (~34k tokens), never as a sum.** The week's cumulative
+  `compaction_shed_tokens` (≈81M this week) **re-counts the same aged middle
   every fire** as the client re-sends full history and fak re-trims from scratch.
   Turning that sum into "N context windows saved" or a "share of cache reads"
   is exactly the double-count this repo has an **on-record retraction** for (a
@@ -119,21 +127,26 @@ Read these the honest way:
   [`context-shedding.md`](../explainers/context-shedding.md) and
   [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)). Per fire it's "about a
   third of a turn's worth of context, trimmed each time compaction fires."
-- **fak's authored slice is ~7% here, and that's the honest shape** — fleet-wide
-  it runs roughly 0.3–16% of total tokens saved on the Claude route. fak's *bigger*
-  job is keeping the provider's much larger discount **alive** as the session
-  grows; that larger discount is the part we're excluding on this page by design.
+- **fak's authored slice is ~20% this week, and that's the honest shape** — it
+  runs higher in a recent, heavy-usage window (the all-time figure is ~8.5%;
+  recent sessions are longer and shed more, so the fires-per-session density is
+  up). fak's *bigger* job is keeping the provider's much larger discount **alive**
+  as the session grows; that larger discount is the part we're excluding on this
+  page by design.
 
-### Dogfood witness: this very page
+### Dogfood witness: this very session
 
-This guide was written **inside a `fak guard -- claude` session** (gateway trace
-`guard`). At the time of writing, `fak_context_value` reported the session had
-stayed alive across **54 context events over 80 turns** while its resident window
-was held near the 48,000-token budget (`resident_tokens` 117,441, `peak` 153,273)
-— against a raw transcript weight of **7,302,545 resident-token-turns**
-(`total_resident_token_turns`, WITNESSED). Without the lever, that session would
-long since have hit the context wall and forced a lossy native recompact. The
-session extension isn't a projection here; it's the thing running this document.
+This page is being updated **inside a `fak guard -- claude` session** (gateway
+trace `guard`). As these edits were made, `fak_context_value` reported the session
+had stayed alive across **36 context events over 39 turns** — thirty-six
+mid-session sheds — against a raw transcript weight of **3,948,011
+resident-token-turns** (`total_resident_token_turns`, WITNESSED). Guard sheds the
+stale middle toward the 48,000-token budget each turn; the resident window runs
+*above* budget right after a heavy tool-output turn (here 121,832 against the
+48,000 budget, `peak` 127,409) and is trimmed back as those turns age out. Without
+the lever, a session of this transcript weight would long since have hit the
+context wall and forced a lossy native recompact. The session extension isn't a
+projection here; it's the thing running this document.
 
 ---
 
@@ -175,6 +188,63 @@ capped — it does not continuously "top up" Fable usage.
 
 ---
 
+## Our own sessions, priced (the preserved-discount lens)
+
+Lever 1 reports **only fak's authored slice** and excludes the provider's native
+prompt-cache discount by design. This section shows that excluded number — the
+discount fak keeps alive byte-for-byte — measured on **this repo's own Claude Code
+dev sessions**, so you can see the whole picture on real work instead of a model.
+It is a **different lens**, reported side by side with Lever 1 and never summed
+with it.
+
+Source: `fak cachevalue report --dev-sessions --dev-session-days 3` — a
+**point-in-time snapshot at 2026-07-09T21:53Z**, last 3 days, this workspace's
+namespace only. The lens discovers and prices real, un-proxied Claude Code
+transcripts under `~/.claude*/projects/C--work-fak`. These are **live,
+still-growing** files (the totals climbed measurably between runs minutes apart),
+so read the figures as a recent snapshot, not a fixed ledger.
+
+### The aggregate — 15 priced Opus-tier sessions from the last 3 days
+
+| Metric | Value | Provenance | Field |
+|---|---|---|---|
+| Sessions discovered (last 3 days, this repo) | 60 discovered — 15 priced (Opus-tier), 45 held out (36 synthetic, 9 other unpriced) | WITNESSED | `dev_session_benefit.sessions` / `priced_sessions` |
+| Provider cache-read tokens preserved | 62.6M | OBSERVED | `cache_read_tokens` |
+| API-equivalent cost **without** the preserved cache | $1,181.37 | OBSERVED | `observed_counterfactual_usd` |
+| API-equivalent cost **with** it | $375.54 | OBSERVED | `observed_actual_spend_usd` |
+| API cost avoided by the preserved discount | **$805.83 (68.2% reduction)** | OBSERVED | `observed_api_cost_avoided_usd` / `_reduction_pct` |
+
+Read it the honest way: the **$806 is the *provider's* discount, not fak's** — fak
+neither authors nor bills it. What fak authors is its **survival**: Lever 1 keeps
+the session small and the cached prefix byte-identical so this discount keeps
+paying as the transcript grows past the point a lossy recompact would otherwise
+bust it. The pricing is sessionaudit's Opus base rate ($15/$75 per MTok, cache
+reads at $1.50) and these sessions are Opus-tier, so the repo's Fable-price
+disagreement (fence 3) does not touch these numbers. Because a guarded session
+also leaves a transcript here, this lens **may overlap** the Lever-1 fleet
+aggregate — the two are never added.
+
+### Three recent sessions from this repo
+
+The three most-recently-active sessions in the live account, each priced with
+`fak cachevalue status --session <transcript> --json` (same 2026-07-09 snapshot):
+
+| Session (this repo) | Assistant turns | Provider cache-hit | Cache-read tokens | API-equiv cost (Opus) |
+|---|---|---|---|---|
+| `8a9f820c…` | 49 | 89.3% | 3.36M | $18.64 |
+| `a8aadc0c…` | 64 | 84.0% | 5.27M | $31.62 |
+| `2aaab7c9…` | 39 | 83.6% | 3.54M | $26.06 |
+
+The cache-hit fraction *is* the lever's payoff: on the 64-turn, 6.3M-token
+session, 84.0% of the context tokens billed came back as cache reads (Opus
+$1.50/MTok) rather than fresh input (Opus $15/MTok) — the byte-identical prefix
+fak protects on every turn. The cost column is the **API-equivalent** price of
+those tokens; on a subscription seat you paid your flat seat, not this — it is
+what the same work would meter at, and on a pricey tier (Fable 5 more so than
+Opus) that gap is the whole point of keeping the cache alive.
+
+---
+
 ## The honest fences
 
 Keep these in view — they are why the framing above is worded the way it is:
@@ -204,17 +274,23 @@ Keep these in view — they are why the framing above is worded the way it is:
 5. **Shed per fire, never the sum.** Repeated because it's the easiest number to
    get wrong: never present cumulative shed as distinct savings or as a
    share-of-cache ratio.
+6. **The dev-session lens is the *preserved* discount, not the authored slice.**
+   "Our own sessions, priced" reports the provider prompt-cache value fak keeps
+   alive (OBSERVED, Opus base pricing, may overlap the fleet aggregate) — the
+   opposite selection from Lever 1's authored slice. fak authors the cache's
+   survival, not the discount, and the two lenses are never summed.
 
 ---
 
 ## Prove it yourself
 
 ```bash
-# 1. Your own fak-authored slice, native cache excluded (the numbers above):
-fak cachevalue report --json        # track1_witnessed_kernel + fleet_benefit fields
+# 1. Your own fak-authored slice, latest week, native cache excluded (the numbers above):
+fak cachevalue report --since 2026-07-06 --json   # track1 + fleet_benefit, latest-week window
 
-# 2. Price your real Claude Code transcripts (~/.claude/projects/**/*.jsonl):
-fak cachevalue report --dev-sessions
+# 2. Price your recent Claude Code transcripts — live, still-growing files:
+fak cachevalue report --dev-sessions --dev-session-days 3   # the recent "our own sessions" aggregate
+fak cachevalue status --session <transcript.jsonl> --json   # one session, priced (the per-session table)
 
 # 3. Watch the lever move on a live session (compaction on by default; 0 disables):
 fak guard --compact-history-budget 48000 -- claude
@@ -233,3 +309,11 @@ fak guard --compact-history-budget 48000 -- claude
 - [Long-session value: 100 / 200 / 300 turns](../long-session-value.md) — the modeled savings table, every number cited and labeled SIMULATED/OBSERVED.
 - [Cache-value roll-up](../cache-value-rollup.md) — the ongoing WITNESSED-vs-OBSERVED P&L (`fak cachevalue report`) and the #1066 marginal-over-warm-KV fence.
 - [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) — the number authority and the compaction double-count row.
+
+> **These numbers are gated.** Every headline figure on this page is bound to a
+> frozen `fak cachevalue report` snapshot and its arithmetic invariants by
+> `tools/docnumbers/fable5-more-usage-for-free.json`, checked hermetically in
+> `make cachedoc-numbers-lint`. When the window has moved on, refresh them with
+> the `/refresh-cachedoc-numbers` skill (or `python3
+> tools/cachedoc_numbers_audit.py --refresh`) rather than editing the numbers by
+> hand — see `tools/docnumbers/README.md`.

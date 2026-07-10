@@ -42,6 +42,12 @@
       "Title": "perpetual sessions (bounded-context relays)",
       "Generation": "next",
       "Label": ""
+    },
+    {
+      "Number": 3256,
+      "Title": "all-in-one agent runtime (MLP)",
+      "Generation": "now",
+      "Label": ""
     }
   ]
 }

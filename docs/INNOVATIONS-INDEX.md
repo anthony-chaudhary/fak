@@ -1,3 +1,8 @@
+---
+title: "fak Innovations Index — concepts, learnings, and where they live"
+description: "The durable catalog of what fak invented or assembled: each innovation, the general concept it embodies, where it lives, and whether it has shipped."
+---
+
 # INNOVATIONS INDEX — fak's innovations, concepts, and learnings, in one map
 
 The durable, refreshable catalog of *what fak invented or assembled* — distinct from

@@ -1,3 +1,8 @@
+---
+title: "fak Work-Map — routing optimizations, ongoing work, and dev"
+description: "The index that separates fak's three kinds of work — optimizations, ongoing work, and dev tooling — and routes each task to its own front door."
+---
+
 # WORK-MAP: optimizations, ongoing work, and dev, kept separate
 
 **WORK-MAP is the index that separates fak's three kinds of work and routes each to its

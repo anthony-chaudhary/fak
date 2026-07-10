@@ -1,3 +1,8 @@
+---
+title: "fak edge quickstart — air-gapped, audited, compliant"
+description: "The edge and IoT front door: a five-minute walk proving fak runs fully offline with a tamper-evident audit trail matching EU AI Act Article 12."
+---
+
 # Edge quickstart: air-gapped, audited, compliant
 
 This is the edge/IoT front door. A 5-minute walk that proves fak runs fully offline with a tamper-evident audit trail that structurally matches EU AI Act Article 12.

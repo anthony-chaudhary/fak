@@ -1,3 +1,8 @@
+---
+title: "Changing a CI/CD spec — migrate every consumer safely"
+description: "Why a CI/CD spec is a contract across files, and how to change one side without breaking the other later in a scheduled job or someone else's PR."
+---
+
 # Changing a CI/CD spec: migrate every consumer, and state what will happen
 
 **Rule of thumb:** a CI/CD spec is a *contract between two sides that live in different files*.

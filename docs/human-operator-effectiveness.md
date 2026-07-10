@@ -1,3 +1,8 @@
+---
+title: "Human Operator Effectiveness — keeping fak steerable"
+description: "An ongoing program to keep fak understandable and steerable as its agent fleet, CLI surface, refusal vocabulary, and background loops keep growing."
+---
+
 # Human Operator Effectiveness
 
 Human operator effectiveness is an ongoing program, not a feature with a

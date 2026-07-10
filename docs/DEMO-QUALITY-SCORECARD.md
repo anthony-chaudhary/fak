@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 72 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 73 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 72 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 72 |
+| Demos scored | 73 |
 | **Demo-debt (total defects)** | **0** |
 | Mean score | 98.6/100 |
 | Median / min / max | 100.0 / 91.0 / 100.0 |
-| Grade distribution | A:72 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:73 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -84,6 +84,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/witness-gate` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/a2ademo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/agentbenchdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/cachedemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/ctxdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/ctxplandemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/cxlpooldemo` |

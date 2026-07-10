@@ -1,3 +1,8 @@
+---
+title: "Localized entry points for fak (i18n)"
+description: "Compact, faithful localized front doors for fak in other languages, carrying the pitch, proof, and install path before handing off to the English docs."
+---
+
 # Localized entry points for fak (i18n)
 
 fak's canonical documentation is English. This directory holds **localized entry-point

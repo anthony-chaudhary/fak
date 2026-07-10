@@ -1,3 +1,8 @@
+---
+title: "Industry scorecard freshness cadence"
+description: "The recurring freshness cadence for fak's industry scorecard, keeping stale SOTA bars from silently regrowing between scheduled checks."
+---
+
 # Industry Scorecard Freshness Cadence
 
 Recurring freshness check for the industry scorecard — keeps stale SOTA bars from silently regrowing.

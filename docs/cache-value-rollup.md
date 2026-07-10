@@ -1,3 +1,8 @@
+---
+title: "Cache-Value Roll-Up — is fak's cache work paying off?"
+description: "The front door for reading whether fak's cache work pays off, keeping kernel-reuse proof and provider-dollar economics in separate, unblended tracks."
+---
+
 # Cache-Value Roll-Up
 
 > The cache-value roll-up is the front door for reading whether fak's cache work is

@@ -1,3 +1,8 @@
+---
+title: "fak milestone status: the maturity climb snapshot"
+description: "A durable, freshness-checked snapshot of the project's maturity climb: the model-by-backend grid across the closed M0-M7 support-maturity ladder."
+---
+
 # Milestone status
 
 The durable, freshness-checked snapshot of the project's maturity CLIMB -- the model x backend

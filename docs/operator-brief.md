@@ -1,3 +1,8 @@
+---
+title: "fak operator brief — the human pacing layer"
+description: "How fak operator brief folds the existing control panes into one question: the system state, the choice being asked of a human, and what to understand next."
+---
+
 # Operator Brief
 
 `fak operator brief` is the human pacing layer over the existing control panes.

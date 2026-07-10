@@ -1,3 +1,8 @@
+---
+title: "DevOps/SRE vertical adoption playbook"
+description: "A playbook for DevOps and SRE teams adopting fak as a capability floor for infrastructure automation agents: threat model, floor, and rollout steps."
+---
+
 # DevOps/SRE Vertical Adoption Playbook
 
 This playbook guides DevOps and SRE teams through adopting fak as a capability floor for infrastructure automation agents. It covers the threat model, the capability floor, rollout steps, and the change-request escalation flow for high-stakes infrastructure operations.

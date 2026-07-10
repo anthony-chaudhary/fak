@@ -1,3 +1,8 @@
+---
+title: "Model × Backend Coverage Matrix: the fak support grid"
+description: "The model-by-backend support matrix for fak: which model families run on which serving backends, and where each cell is supported, fenced, or undefined."
+---
+
 # Model × Backend Coverage Matrix
 
 > Generated from the source tree by `fak coverage-matrix`.  

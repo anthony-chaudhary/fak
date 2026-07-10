@@ -1,3 +1,8 @@
+---
+title: "The vLLM lifecycle cache-loss bridge, explained"
+description: "How fak bridges session dormancy to an upstream vLLM worker's sleep, pause, and wake controls, with explicit evidence of what happened to the KV cache."
+---
+
 # The vLLM lifecycle cache-loss bridge
 
 *Bridging fak session dormancy to an upstream vLLM worker's sleep/pause/wake

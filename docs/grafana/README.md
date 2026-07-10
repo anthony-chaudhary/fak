@@ -1,3 +1,8 @@
+---
+title: "#grafana channel link registry"
+description: "The link registry behind fak's #grafana channel: the long-lived dashboard and debug links that fold into a single rollup card for operators."
+---
+
 # `#grafana` channel link registry
 
 [`links.json`](links.json) is the committed corpus the `#grafana` Slack surface

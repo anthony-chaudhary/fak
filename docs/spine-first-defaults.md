@@ -1,3 +1,8 @@
+---
+title: "Spine-first + fan-out — the two defaults for new work"
+description: "The two defaults that fire for every new feature, leaf, verb, demo, or process change in fak unless explicitly waived: spine-first, then fan-out."
+---
+
 # Spine-first + fan-out: the two defaults for any new unit of work
 
 These are defaults, not ceremonies: they fire for **every** new feature, leaf,

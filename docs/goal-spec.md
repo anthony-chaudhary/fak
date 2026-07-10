@@ -1,3 +1,8 @@
+---
+title: "GOAL.md goal specs — the loop's durable cross-turn memory"
+description: "How a GOAL.md goal-spec gives a fak loop durable cross-turn memory: the loop id, witness criterion, iteration budget, objective, plan, and scratch."
+---
+
 # GOAL.md Goal Specs
 
 A `GOAL.md` goal-spec is the loop's durable cross-turn memory: frontmatter names the loop id, the witness criterion that decides completion, and the iteration budget; `# Objective` states one unit of work; `# Plan` is a markdown checklist the agent updates as durable progress; `# Scratch / last-refusal` is where `fak loop drive` appends the prior `NOT_YET` reason before a fresh-context retry. Start from [`docs/templates/GOAL.md`](templates/GOAL.md), keep the objective singular, choose a witness criterion such as `commit-audit`, `verify PLAN PHASE`, `test-witness BASELINE CANDIDATE`, `witness SOURCE SUBJECT`, or `none` for a budgeted/manual loop that cannot auto-witness completion, and run `fak loop drive --goal GOAL.md -- <agent command>` so each turn re-reads the file from disk instead of relying on the previous context window.

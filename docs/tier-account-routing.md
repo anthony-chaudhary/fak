@@ -1,3 +1,8 @@
+---
+title: "Tier to account routing (dispatch marathons)"
+description: "How fak fleet dispatch maps a work tier to the account and model that serves it, and how that routing holds up across long dispatch marathons."
+---
+
 # Tier ↔ account routing (dispatch marathons)
 
 How fleet dispatch maps work *tier* to the account/model that serves it, how an

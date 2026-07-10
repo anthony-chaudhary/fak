@@ -1,3 +1,8 @@
+---
+title: "Generation Public Narrative — talking about fak horizons"
+description: "Market-facing rules for describing fak generations — shipped, next, and research — honestly and without hype, the external half of the Generation Contract."
+---
+
 # Generation Public Narrative
 
 Market-facing rules for talking about fak generations — **shipped**, **next**,
@@ -39,7 +44,7 @@ deadline must not promote an internal stream.
    tag: `[SHIPPED]` (a witness a reader can reproduce today), `[NEXT]` (real code,
    gated or default-off, name the gate), or `[RESEARCH]` (an option or memo, name
    the open assumption). This mirrors the `[SHIPPED]`/`[VERIFIED]`/`[PROJECTED]`
-   fences already used in [`docs/launch/positioning-brief.md`](launch/positioning-brief.md).
+   fences already used in [`docs/launch/positioning-brief.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/positioning-brief.md).
 2. **Witness before adjective.** A capability claim leads with the reproducible
    witness (`go run ...`, a test name, `max|Δ|=0`), then the adjective. No
    superlative may appear without the witness that earns it in the same sentence.
@@ -115,5 +120,5 @@ The public narrative does not relax any of the three orthogonality guarantees:
 
 - [Generation Contract](generation.md) — the internal now/next/second-next/future
   taxonomy, promotion verbs, and intake rules this narrative maps to.
-- [`docs/launch/positioning-brief.md`](launch/positioning-brief.md) — the honest-fence
+- [`docs/launch/positioning-brief.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/positioning-brief.md) — the honest-fence
   discipline applied to specific launch claims.

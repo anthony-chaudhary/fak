@@ -1,3 +1,8 @@
+---
+title: "The #releases channel"
+description: "How fak uses the #releases channel as the scoreboard-workspace status feed for cut releases - the dual of the #blockers progress channel."
+---
+
 # The #releases channel
 
 `#releases` is the scoreboard-workspace status feed for cut releases. It is the dual of

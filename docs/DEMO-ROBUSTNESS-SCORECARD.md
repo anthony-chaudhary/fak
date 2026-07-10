@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Robustness Scorecard: Simplicity, Speed, Durability"
-description: "The fak demo-robustness scorecard grades 72 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
+description: "The fak demo-robustness scorecard grades 73 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
 ---
 
 # Demo-robustness scorecard
@@ -16,12 +16,12 @@ description: "The fak demo-robustness scorecard grades 72 demos on simplicity, s
 
 | Metric | Value |
 |---|---|
-| Demos scored | 72 |
+| Demos scored | 73 |
 | **Robustness-debt (total defects)** | **0** |
 | Axis-debt | simplicity:0 · speed:0 · durability:0 |
 | Mean score | 97.6/100 |
 | Median / min / max | 100.0 / 91.6 / 100.0 |
-| Grade distribution | A:72 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:73 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -85,6 +85,7 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/wire-proof` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `cmd/a2ademo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `cmd/agentbenchdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `cmd/cachedemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `cmd/ctxdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `cmd/ctxplandemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `cmd/cxlpooldemo` |
@@ -149,7 +150,7 @@ No robustness-debt: every demo is simple, fast, and durable. 🎉
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 
 ### `examples/shared-task-record`
-- simplicity: 21 files in the demo dir — a larger surface to skim
+- simplicity: 22 files in the demo dir — a larger surface to skim
 - durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
 
 ### `examples/auth-hardening`

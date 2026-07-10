@@ -1,3 +1,8 @@
+---
+title: "Coding/dev-agent vertical adoption playbook"
+description: "A playbook for deploying fak as the capability floor for coding and dev agents that read, write, test, and commit code: threat model and rollout."
+---
+
 # Coding/Dev-Agent Vertical Adoption Playbook
 
 This playbook guides teams through deploying `fak` for coding/dev-agent workflows — agents that read, write, test, and commit code. It covers the threat model, the capability floor, rollout steps for three IDE paths (Cursor, Claude Code, generic OpenAI), and the ship-gate + self-modify escalation flows.

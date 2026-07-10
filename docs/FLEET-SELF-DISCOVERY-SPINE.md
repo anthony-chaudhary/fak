@@ -1,3 +1,8 @@
+---
+title: "Fleet self-discovery spine"
+description: "How machines and the agents running on them find each other in fak, and where that fleet-wide view surfaces for operators to act on."
+---
+
 # Fleet self-discovery spine
 
 How machines and the agents on them find each other, and where that view surfaces.

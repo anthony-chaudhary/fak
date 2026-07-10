@@ -1,3 +1,8 @@
+---
+title: "#scorecards Slack routing decision — one channel or many?"
+description: "The decision on how fak's roughly 45 scorecard surfaces reach the scoreboard Slack workspace: a single catch-all channel versus per-family routing."
+---
+
 # #scorecards Slack routing decision
 
 Issue [#1003](https://github.com/anthony-chaudhary/fak/issues/1003) asks how the

@@ -1,3 +1,8 @@
+---
+title: "KV-Transport Governance — NIXL, Mooncake, LMCache"
+description: "The governance contract for external KV-transport systems to report P/D disaggregation and KV-transfer events to fak for observability and trust."
+---
+
 # KV-Transport Governance: NIXL, Mooncake, LMCache integration
 
 This doc describes the governance contract for external KV-transport systems (NIXL, Mooncake, LMCache) to report P/D disaggregation and KV-transfer events to fak for observability, invalidation, and trust governance.

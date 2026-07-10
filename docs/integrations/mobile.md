@@ -1,3 +1,8 @@
+---
+title: "Mobile FFI - gating on-device tool calls through fak"
+description: "How fak's default-deny adjudicator floor is reached over FFI from an on-device mobile agent, gating on-device tool calls through the kernel."
+---
+
 # Mobile FFI — gating on-device tool calls through fak
 
 fak's default-deny adjudicator floor is reachable from an on-device agent on
