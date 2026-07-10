@@ -144,6 +144,75 @@ func TestRunHooks_preCommitOffEnvSkips(t *testing.T) {
 	}
 }
 
+// #3615: a bare (no-pathspec) commit that did NOT come through `fak commit` — a raw
+// `git add <path> && git commit` — is refused in block mode with BARE_COMMIT_SWEEP naming
+// the staged path it would sweep. src/x.go is the known-clean shape (see preCommitClean) so
+// ONLY the bare-sweep gate fires, not a leak/index gate.
+func TestRunHooks_preCommitBareSweepBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package x\n"})
+	t.Setenv("FLEET_BARE_COMMIT_GUARD", "block")
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 1 {
+		t.Fatalf("an unvetted bare commit should block in block mode (1), got %d; stderr=%s", code, errb.String())
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("BARE_COMMIT_SWEEP")) {
+		t.Fatalf("refusal should name BARE_COMMIT_SWEEP, got %s", errb.String())
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("src/x.go")) {
+		t.Fatalf("refusal should name the staged path it would sweep, got %s", errb.String())
+	}
+}
+
+// #3615: the FAK_SAFECOMMIT_VETTED handshake (set by safecommit on its own `git commit`)
+// stands the gate down even in block mode — fak's vetted, path-scoped commit is not a sweep.
+func TestRunHooks_preCommitBareSweepVettedMarkerPasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package x\n"})
+	t.Setenv("FLEET_BARE_COMMIT_GUARD", "block")
+	t.Setenv("FAK_SAFECOMMIT_VETTED", "1")
+	var out, errb bytes.Buffer
+	if code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo}); code != 0 {
+		t.Fatalf("a vetted commit (FAK_SAFECOMMIT_VETTED=1) must pass even in block mode, got %d; stderr=%s", code, errb.String())
+	}
+}
+
+// #3615: out of the box the gate is ADVISORY — an unvetted bare commit does NOT block (warn
+// default), but the finding still surfaces (here via --json) so a soak can measure it.
+func TestRunHooks_preCommitBareSweepWarnDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package x\n"})
+	var out, errb bytes.Buffer
+	if code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo, "--json"}); code != 0 {
+		t.Fatalf("warn-default: an unvetted bare commit must not block, got %d; stderr=%s", code, errb.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("BARE_COMMIT_SWEEP")) {
+		t.Fatalf("--json should carry the advisory BARE_COMMIT_SWEEP finding; got %s", out.String())
+	}
+}
+
+// #3615: FAK_PRESTAGED_PATH_GUARD=off disables the whole prestaged family, this gate included,
+// so a deliberate one-shot opt-out of the family silences the bare-sweep gate too.
+func TestRunHooks_preCommitBareSweepFamilyOff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package x\n"})
+	t.Setenv("FLEET_BARE_COMMIT_GUARD", "block")
+	t.Setenv("FAK_PRESTAGED_PATH_GUARD", "off")
+	var out, errb bytes.Buffer
+	if code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo}); code != 0 {
+		t.Fatalf("FAK_PRESTAGED_PATH_GUARD=off must disable the gate even in block mode, got %d; stderr=%s", code, errb.String())
+	}
+}
+
 func TestRunHooks_commitMsgVerbShape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short")

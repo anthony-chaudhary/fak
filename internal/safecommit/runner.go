@@ -31,6 +31,14 @@ func realRunner(ctx context.Context, dir string, args ...string) (string, int, e
 	// stall class). Mandatory write locks (add/commit) are unaffected; contention
 	// on those is ridden out by runRidingLockContention instead.
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	// Handshake with the hook-layer BARE_COMMIT_SWEEP gate (issue #3615): this `git commit`
+	// was issued by safecommit, which has already vetted the DECLARED pathspec through the
+	// path-scoped PRESTAGED_PATH_OVERLAP guard. The marker rides down through `git commit` into
+	// the pre-commit hook it spawns, so that gate stands down instead of re-flagging the vetted
+	// commit as an unvetted bare sweep. A raw `git commit` carries no marker and is still gated.
+	if len(args) > 0 && args[0] == "commit" {
+		cmd.Env = append(cmd.Env, "FAK_SAFECOMMIT_VETTED=1")
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}

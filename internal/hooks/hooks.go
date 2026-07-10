@@ -82,6 +82,14 @@ func PreCommitGates() []Gate {
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
+		// BARE_COMMIT_SWEEP is ADVISORY (issue #3615): DefaultMode "warn" so it never reds a shared
+		// trunk out of the box. It closes the raw-git bypass in safecommit's prestaged discipline —
+		// a `git commit` / `git add -A && git commit` that did NOT come through `fak commit` (no
+		// FAK_SAFECOMMIT_VETTED handshake) would fold the whole staged index, foreign hunks included,
+		// into one commit. It fires on any unvetted staged set, naming what would be swept and the
+		// pathspec fix. Set FLEET_BARE_COMMIT_GUARD=block to enforce, ALLOW_BARE_COMMIT=1 to skip once;
+		// FAK_PRESTAGED_PATH_GUARD=off disables the prestaged family (this gate + safecommit's guard).
+		{Name: "BARE_COMMIT_SWEEP", ModeEnv: "FLEET_BARE_COMMIT_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_BARE_COMMIT", Check: gateBareCommitSweep},
 		// E2E_OVER_MOCKS is ADVISORY (issue #2901): DefaultMode "warn" so it never blocks a commit
 		// out of the box — it names the security-critical floor/quarantine surface a diff touched
 		// and asks for a witnessed end-to-end run (the /verify output), not a green mock. Set
