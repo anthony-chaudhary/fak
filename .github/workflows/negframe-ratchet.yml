@@ -68,6 +68,8 @@ jobs:
             echo "negframe-ratchet: no base ref to diff against — nothing introduced, passing."
             exit 0
           fi
-          # `fak score negframe --since <base>` exits 1 iff a tracked steer-prose doc
-          # gained a new mechanical (confidently reframable) negative vs the base.
-          go run ./cmd/fak score negframe --since "$base"
+          # `make negframe-ratchet` wraps `go run ./cmd/fak score negframe --since
+          # $(BASE)` (building fak as it goes), which exits 1 iff a tracked steer-prose
+          # doc gained a new mechanical (confidently reframable) negative vs the base —
+          # ONE entrypoint shared with the local gate so CI and `make` can't drift.
+          make negframe-ratchet BASE="$base"
