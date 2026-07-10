@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/dispatchcache"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
@@ -35,6 +36,10 @@ type dispatchIssueInfo struct {
 
 var dispatchFetchIssue = dispatchFetchIssueGH
 var dispatchRouteIssues = dispatchRouteIssuesNative
+
+const dispatchRoutedBacklogTTL = 5 * time.Second
+
+var dispatchRoutedBacklogCache = dispatchcache.New[dispatchtick.RouterPayload](time.Now)
 
 func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[string]any, error) {
 	inf := dispatchFetchIssue(root, issue)
@@ -431,6 +436,10 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 // while the live tick reads dispatchRouteIssuesNative, which folds the hold on top.
 func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
 	const issueLimit = 1000
+	cacheKey := dispatchcache.Key(root, dispatchTickView, issueLimit)
+	if payload, ok := dispatchRoutedBacklogCache.Get(cacheKey); ok {
+		return payload, nil
+	}
 	taxonomy, taxErr := dispatchLaneTaxonomy(root)
 	issues, injected, issueErr := dispatchFetchScopedIssues(root, stderr, dispatchTickView, issueLimit)
 	fetchErrs := []string{}
@@ -451,7 +460,9 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 	// W4 scope-hold (#2716): after routing, hold back ONLY the issues whose declared paths
 	// intersect a live known-bad signature (internal/knownbad ledger, #2713). Disjoint
 	// issues keep dispatching. Fails open on a missing/broken ledger so it never stalls.
-	return holdKnownBadForRoute(root, payload), nil
+	payload = holdKnownBadForRoute(root, payload)
+	dispatchRoutedBacklogCache.Put(cacheKey, payload, dispatchRoutedBacklogTTL)
+	return payload, nil
 }
 
 // dispatchFetchScopedIssues fetches the open-issue set the router folds. A
