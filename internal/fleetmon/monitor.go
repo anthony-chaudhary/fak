@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/doomloop"
 )
 
 // MonitorSchema tags the monitor's JSON payload.
@@ -59,6 +61,19 @@ type WorkerEvidence struct {
 	PrevLines        *int             // transcript line count at the previous sample (nil = first sample)
 	Transcript       TranscriptSignal //
 	StaleChildren    []ChildCommand   // stale child commands the janitor scan attributed to this worker
+
+	// DoomSamples is the worker's trailing two-axis verified-progress history the
+	// caller resolves and injects (effort = a monotone work counter such as
+	// transcript lines; progress = VERIFIED forward progress such as commits landed
+	// on the worker's region — never a self-report). When present, the liveness fold
+	// (#4148) consults the shipped doomloop classifier so a burning-flat worker —
+	// effort climbing while region commits stay flat for >= TripWindows windows — is
+	// no longer read as advancing/healthy even though its transcript is growing.
+	// Empty => activity-only liveness (fail-open: absent progress evidence never
+	// manufactures a doom verdict). OBSERVE-only — it reclassifies, never corrects.
+	DoomSamples []doomloop.Sample
+	// DoomConfig tunes that fold; the zero value folds doomloop.DefaultConfig().
+	DoomConfig doomloop.Config
 }
 
 // WorkerSample is the classified, machine-readable monitor row for one worker.
@@ -127,7 +142,12 @@ func Classify(ev WorkerEvidence, now time.Time, th Thresholds) WorkerSample {
 	// grew, or CPU was burned. Freshness alone is NOT active growth — a worker that
 	// just stopped (final report) has a fresh transcript but is not still working.
 	activelyGrowing := (s.LineDelta != nil && *s.LineDelta > 0) || (ev.CPUDeltaSec != nil && *ev.CPUDeltaSec > 0)
-	advancing := isAdvancing(ev, ageSec, s.LineDelta, th)
+	// doomConfirmed folds the worker's verified-progress window through the shipped
+	// two-axis classifier (#4148): a growing transcript is NOT advancement when the
+	// verified (region-commit) axis says nothing landed for >= TripWindows windows.
+	// Bounded + OBSERVE-only; empty samples => false (fail-open).
+	doomConfirmed, doomRes := doomLoopConfirmed(ev.DoomSamples, ev.DoomConfig)
+	advancing := isAdvancing(ev, ageSec, s.LineDelta, th, doomConfirmed)
 	blocked := ev.Transcript.Blocker != "" || ev.RegistryAction == "BLOCKED_AUTH" || ev.RegistryDisp == "INFRA_AUTH"
 	// pidAlive is a CONFIRMED-alive PID (the scan ran and found it). A merely
 	// advancing transcript is independent liveness evidence (the process is writing),
@@ -168,7 +188,14 @@ func Classify(ev WorkerEvidence, now time.Time, th Thresholds) WorkerSample {
 
 	default:
 		s.Class = ClassAttention
-		s.Reasons = append(s.Reasons, attentionReason(ev, ageSec))
+		if doomConfirmed {
+			// A burning-flat doom loop reads as attention (ask a human) rather than
+			// healthy: effort is climbing while verified progress is flat. OBSERVE-only —
+			// the fold reclassifies; delivering a correction is the doomloop shell's seam.
+			s.Reasons = append(s.Reasons, "two-axis doom loop: "+doomRes.Reason)
+		} else {
+			s.Reasons = append(s.Reasons, attentionReason(ev, ageSec))
+		}
 	}
 	return s
 }
@@ -177,7 +204,16 @@ func Classify(ev WorkerEvidence, now time.Time, th Thresholds) WorkerSample {
 // transcript is fresh (younger than the stale floor), OR its line count grew,
 // OR it burned CPU since the previous sample. Any one is enough — the monitor
 // errs toward "still working" so it does not alarm on a briefly quiet worker.
-func isAdvancing(ev WorkerEvidence, ageSec *float64, lineDelta *int, th Thresholds) bool {
+//
+// The #4148 fold: a CONFIRMED two-axis doom loop overrides all of the activity
+// signals. A worker can be actively growing its transcript and burning CPU and
+// still be landing nothing (effort up, verified region-commit progress flat for
+// >= TripWindows windows) — that is precisely the failure this exists to catch,
+// so doomConfirmed short-circuits to not-advancing regardless of activity.
+func isAdvancing(ev WorkerEvidence, ageSec *float64, lineDelta *int, th Thresholds, doomConfirmed bool) bool {
+	if doomConfirmed {
+		return false
+	}
 	if lineDelta != nil && *lineDelta > 0 {
 		return true
 	}
