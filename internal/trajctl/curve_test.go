@@ -155,6 +155,16 @@ func TestClassify_WindowedSubEpsilonDrift(t *testing.T) {
 	if sig, _ := st.classify(obj, nil, rising, latest, delta); sig != SignalHealthy {
 		t.Fatalf("a rising curve must stay HEALTHY, got %q", sig)
 	}
+
+	// The window's lower boundary: the same sub-epsilon slide one point SHORT of
+	// the window must NOT be DRIFT — windowedDecline abstains (ok=false) and the
+	// single-step fold decides alone. This is the guard that keeps every pinned
+	// golden shorter than the window classifying exactly as before (#3148).
+	short := declining[:curveDriftWindow-1]
+	latest, delta = latestDelta(short)
+	if sig, detail := st.classify(obj, nil, short, latest, delta); sig == SignalDrift {
+		t.Fatalf("a sub-epsilon slide over %d points (shorter than the %d-point window) must not be DRIFT, got %q (%s)", len(short), curveDriftWindow, sig, detail)
+	}
 }
 
 // assertGolden compares v's indented JSON to the golden file at path, or rewrites
