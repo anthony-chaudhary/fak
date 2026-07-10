@@ -1,6 +1,6 @@
 ---
 name: study-repo
-description: One repeatable pass that turns "look at <repo>" into scoped, witnessed, license-clean, FILED backlog. When someone drops anything that names a body of code — a GitHub URL, a local checkout, a monorepo subtree, a single file, an npm/pypi/crates package, a paper-with-code / arXiv link, a tarball, a PR/diff, or a bare "study this repo" / "what can we learn from X" / "borrow from <repo>" with no URL at all — this drives the whole flow end to end. Acquire the source into scratch (never the tree) and PIN the commit SHA; read the CODE not the pitch, DEEP by default (fan parallel readers across load-bearing modules + tests + recent commits, then a completeness-critic pass — not a README skim) AND reconstruct THEIR design rationale + user world (who they built it for, what they optimized for, what constraint they were under) so a borrow is weighed on their tradeoffs rather than fak's ego; extract MANY candidate borrows, each grounded at a real source `path:line@sha` and ABLATED to the one axis it optimizes; decide borrow-vs-integrate with a license + attribution check; DECOMPOSE into many small independently-shippable tickets (or an epic + child leaves for a track), NEVER one "adopt everything from repo X" monolith; witness each borrow against fak at the AXIS it targets, not the capability name, so a coarse "we already have that" is ablated to PRESENT/PARTIAL/ABSENT *on that axis* before it can dismiss a borrow; and — the default terminal action — FILE the surviving PARTIAL/ABSENT borrows as gh issues under the right epic. The acquisition/exploration/scoping front-half that FEEDS `field-borrow` (which witnesses+files a single named capability). Distinct from the automated outward `idea-scout` and the kernel-only `sota-check`. Use when handed a specific external repo/codebase/paper to learn from, before filing any "we should adopt X from repo Y" issue, after a competitor open-sources something worth reading, or on a `/loop` cadence over a watch-list.
+description: One repeatable pass that turns "look at <repo>" into scoped, witnessed, license-clean, FILED backlog. When someone drops anything that names a body of code — a GitHub URL, a local checkout, a monorepo subtree, a single file, an npm/pypi/crates package, a paper-with-code / arXiv link, a tarball, a PR/diff, or a bare "study this repo" / "what can we learn from X" / "borrow from <repo>" with no URL at all — this drives the whole flow end to end. Acquire the source into scratch (never the tree) and PIN the commit SHA; read the CODE not the pitch, DEEP by default (fan parallel readers across load-bearing modules + tests + recent commits, then a completeness-critic pass — not a README skim) AND reconstruct THEIR design rationale + user world (who they built it for, what they optimized for, what constraint they were under); extract MANY candidate borrows, each grounded at a real source `path:line@sha` and ABLATED to the one axis it optimizes; decide borrow-vs-integrate with a license + attribution check; DECOMPOSE into many small independently-shippable tickets (or an epic + child leaves for a track), NEVER one "adopt everything from repo X" monolith; witness each borrow against fak on-axis (not at the capability name), so a coarse "we already have that" cannot dismiss a borrow it does not actually cover; and — the default terminal action — FILE the surviving PARTIAL/ABSENT borrows as gh issues under the right epic. The acquisition/exploration/scoping front-half that FEEDS `field-borrow` (which witnesses+files a single named capability). Distinct from the automated outward `idea-scout` and the kernel-only `sota-check`. Use when handed a specific external repo/codebase/paper to learn from, before filing any "we should adopt X from repo Y" issue, after a competitor open-sources something worth reading, or on a `/loop` cadence over a watch-list.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob, Write, Edit, WebFetch, WebSearch, Agent, mcp__fak__fak_feature_query, mcp__fak__fak_capabilities, mcp__fak__fak_index_docs, mcp__fak__fak_index_leaves, mcp__fak__fak_index_verbs, mcp__fak__fak_index_claims
@@ -21,9 +21,9 @@ the *code that implements it* (a fabricated "repo X does Y" is the exact citatio
 `dos_citation_resolve` exists to catch). It read **shallowly** — one skim, a couple of
 obvious borrows, and stopped, leaving the real value unmined. It never asked whether
 **fak already has it**. It produced a **monolith** or a **transcript-only** result —
-research that never became dispatchable work. And — the failure this revision targets — it
+research that never became dispatchable work. And — the subtlest failure — it
 read just enough to plant a flag and **dismissed by ego**: it decided "ours is better" or
-"we already have that" from the couch, killing a borrow at the coarse *capability* level
+"we already have that" from the pitch, killing a borrow at the coarse *capability* level
 ("we have graph memory too") without ablating to the specific *axis* the other repo wins on
 ("…but not the bi-temporal edge invalidation") and without ever reconstructing *why their
 users made them build it that way*. Ego is cheaper than ablation, and it silently discards
@@ -37,16 +37,12 @@ unopened, witness each against fak, decide borrow-vs-integrate on the license, a
 many small independently-shippable gh issues (never one monolith, never zero).** Deep and
 filed are the *defaults*; `--quick` and `--draft` are the opt-outs, not the reverse.
 
-And a second law, the one this revision adds — **judge a borrow on _their_ tradeoffs, not
-fak's ego.** Before you dismiss anything, reconstruct *who they built it for and what they
-were optimizing*, and ablate a coarse "we already have that" down to the specific axis the
-borrow targets. A capability fak nominally has is not a reason to drop a borrow that beats
-fak *on the one axis that borrow is about*. "Ours is better" is a **conclusion you must
-earn by ablation**, never the default posture — and when it is genuinely true, it is stated
-as a named tradeoff (*"fak chose X because its users need Y, which theirs don't"*), not as a
-reflex. Humility here is not "borrow everything" (you still will not — most candidates
-resolve to PRESENT or a deliberate divergence); it is *reading and comparing at a fine
-enough grain that the dismissal, when it comes, is honest.*
+Its companion law: **judge a borrow on _their_ tradeoffs, not fak's ego** — reconstruct who
+they built it for, and ablate a coarse "we already have that" down to the axis the borrow
+targets before you drop it. "Ours is better" is a conclusion you *earn by ablation*, stated
+as a named tradeoff, never the opening posture. Humility here is not "borrow everything" —
+you still will not — it is comparing at a fine enough grain that the dismissal, when it
+comes, is honest. Steps 2, 3, and 6 own the mechanism; this is just the rule they enforce.
 
 This skill owns the **acquisition + exploration + scoping + filing** front-half. For a
 single already-named capability it reuses [`field-borrow`](../field-borrow/SKILL.md)'s
@@ -121,8 +117,8 @@ Read in this order, because it goes from claims to ground truth:
    config, the benchmarks they hold themselves to, the constraints in their README's
    non-goals. Reconstruct **who they built this for and what they were optimizing** (latency
    over footprint? single-node simplicity over horizontal scale? a research user who
-   re-runs, or an ops user who never touches it?). This is the lens the old version of this
-   skill was missing, and it does two jobs: it lets you tell a genuine *improvement* from a
+   re-runs, or an ops user who never touches it?). This lens does two jobs: it lets you tell
+   a genuine *improvement* from a
    *different tradeoff for a different user* (so "we'd never do it that way" becomes a
    testable claim, not a reflex), and it is the antidote to the ego dismissal — you cannot
    honestly conclude "ours is better" about a choice whose reason you never reconstructed.
@@ -137,7 +133,10 @@ justify each skip, or open it. The depth floor: you are not done reading until t
 finds nothing material left unopened — not when you've found "a couple of borrows".
 
 `--quick` is the deliberate escape hatch (one file, one obvious technique, a time box):
-one reader, skip the fan-out. Everything else is deep.
+one reader, skip the fan-out. A one-file peek cannot do the step-5 worldview read, so a
+`--quick` pass may only file an obvious INSPIRE borrow or **defer to a deep pass** — it may
+not *earn a dismissal* (a PRESENT-on-axis drop or a DIVERGENT), which the companion law
+makes conditional on the worldview read. Everything else is deep.
 
 **A borrow must be grounded in code you read**, at `path:line@sha` in the clone — never a
 paraphrase of the pitch.
@@ -159,12 +158,14 @@ us":
    way** (from step 2's rationale read). Do not write "beats fak"; write the comparison and
    let step 6 grade it.
 
-Two widenings the old version narrowed away — **capture more than fak-beating borrows**:
+Two widenings — **capture more than fak-beating borrows**:
 
 - A **worldview finding** — a user need their design implies that fak may not be serving at
   all — is a first-class output even when there is *no line of code to copy*. It reframes
-  fak's roadmap rather than adding a kernel; record it (and in step 6 it becomes a
-  consideration, not an auto-decomposed leaf — respecting "we don't do everything").
+  fak's roadmap rather than adding a kernel; record it in the study note, and step 6 routes
+  it through the **worldview-finding branch** — a consideration under the roadmap epic only
+  if it clears the same ship-alone bar a borrow does, never an auto-decomposed leaf
+  (respecting "we don't do everything").
 - A **deliberate divergence worth understanding** — a place where they and fak solve the
   same problem oppositely — is worth writing down *with both rationales*, even if you file
   nothing. Understanding why they diverged is how you avoid mistaking a real improvement for
@@ -173,7 +174,7 @@ Two widenings the old version narrowed away — **capture more than fak-beating 
 **Do not pre-dismiss here.** A "we probably already do that" hunch is not grounds to omit a
 candidate — write it down and let the ablated witness in step 6 decide. A rich repo yields
 *many* candidates; a list of two or three from a large tree is usually a shallow-read (or a
-proud-read) tell, not a sparse repo. Steps 4–6 shrink and scope; step 2's job was to give
+proud-read) tell, not a sparse repo. Steps 4–6 shrink and scope; steps 2–3's job was to give
 them enough raw material.
 
 ### 4 — Decide borrow-vs-integrate (the license gate)
@@ -221,7 +222,7 @@ step — do not restate it, use it:
   phrasing **and** a raw `Grep` for the obvious symbol; for a high-value borrow, witness twice
   before trusting an ABSENT.
 
-**Witness at the AXIS, not the capability name — this is the ablation the old skill skipped.**
+**Witness at the AXIS, not the capability name — this is the ablation a coarse pass skips.**
 Phrase the query as the *specific axis from step 3*, not the umbrella capability. A hit on
 the umbrella ("yes, fak has memory / a scheduler / an eval harness") is **not** a PRESENT for
 the borrow — it only means fak is in the neighborhood. You are not done until you have read
@@ -248,6 +249,14 @@ classify at that grain:
   DIVERGENT with no stated tradeoff is just the ego dismissal wearing a verdict — reject it
   and go ablate. When the divergence is genuinely load-bearing for fak's roadmap, file it as a
   **consideration/discussion**, not an auto-decomposed leaf.
+- **WORLDVIEW-FINDING (no axis to witness)** → a step-3 worldview finding — a user need their
+  design implies fak may not be serving at all — has *no source `path:line@sha` and no single
+  axis*, so it cannot go through the on-axis witness; do not force it into PRESENT/PARTIAL.
+  Default to **note-only** capture (step 7's candidate table), naming the user need and the
+  design evidence for it (a config default, a stated non-goal, a benchmark they optimize).
+  File it as a **consideration** under the roadmap epic *only* when it clears the same
+  ship-alone / first-checkable-step bar a borrow does — otherwise it stays an observation, not
+  an issue (respecting "we don't do everything").
 
 **Filing is the default, not an optional epilogue.** A run that surfaced PARTIAL/ABSENT
 borrows and filed *nothing* is an incomplete pass — the research died in the transcript.
@@ -281,11 +290,13 @@ the research durable.**
 
 - The source was **acquired and read at a pinned `@sha`** — every borrow cites real code,
   not a README claim — and read **deep**: the fan-out covered every load-bearing subsystem
-  and the completeness critic found nothing material unopened.
+  and the completeness critic found nothing material unopened (a sanctioned `--quick` pass
+  reads one file with no fan-out — state that explicitly, the same way `--draft` is stated).
 - **Issues were filed** for the PARTIAL/ABSENT borrows (their `#`s reported), each carrying
   a **source `path:line@sha`**, a **fak seam `path:line`**, a **dogfood witness**, an
   **inspire/integrate + license verdict**, and a **first checkable step** — unless every
-  candidate was PRESENT or `--draft` was set (stated explicitly).
+  candidate resolved to PRESENT-on-axis or a stated DIVERGENT, or `--draft` was set (stated
+  explicitly).
 - **No monolith was filed** — the work is decomposed into small independently-shippable
   leaves (an epic + children if it is a real track).
 - **Every dismissal was earned by ablation, not ego** — each dropped candidate resolved to
@@ -302,7 +313,7 @@ the research durable.**
 
 **Never file a borrow you did not locate at a real `path:line@sha` in the actually-acquired
 source; never file the monolith; never let "done" mean "wrote a table and filed nothing";
-and never dismiss a borrow you did not ablate.** Five failure modes this kills:
+and never dismiss a borrow you did not ablate.** Six failure modes this kills:
 
 - **Borrowed the pitch.** Filing "repo X does Y" from the README when the code does not, or
   citing a repo you did not acquire. The fix is the pinned `path:line@sha` you read.
@@ -310,6 +321,9 @@ and never dismiss a borrow you did not ablate.** Five failure modes this kills:
   critic. The fix is step 2's depth floor — deep is the default.
 - **The mega-ticket.** "Adopt everything from repo X" as one leaf. The fix is the ship-alone
   test in step 5 — decompose or file an epic + leaves.
+- **Filed nothing.** A tidy candidate table and zero issues — the research died in the
+  transcript. The fix is step 6: filing is the default terminal action, not an optional
+  epilogue.
 - **License laundering.** Copying incompatible-licensed bytes in as "inspiration". If you
   copied, it is `integrate` and the license gate applies; if you truly reimplemented
   clean-room, it is `inspire` and you still cite the source.
@@ -321,9 +335,8 @@ and never dismiss a borrow you did not ablate.** Five failure modes this kills:
   and step 2's worldview read: earn the dismissal at the property grain, or file the
   enhancement.
 
-A PRESENT witnessed **on the axis** ("fak already does this specific thing, here is the
-fak code") is a complete, honest pass — not a failure. A PRESENT *assumed from the
-capability name* is the failure above.
+A PRESENT witnessed **on the axis** — fak's code read on that seam — is a complete, honest
+pass, not a failure to find a borrow.
 
 ## Honest limits
 
@@ -338,8 +351,8 @@ capability name* is the failure above.
   why-they-chose-it you infer from their code, issues, and defaults can be wrong — so keep it
   falsifiable (cite the config default, the non-goal, the benchmark they optimize) and never
   let a *guessed* rationale harden into a reason to dismiss. A DIVERGENT resting on an
-  invented motive is just the ego reflex with a backstory; if you cannot ground the rationale,
-  ablate and file rather than assume.
+  invented motive is fiction, not a finding; if you cannot ground the rationale, ablate and
+  file rather than assume.
 - **Composes with, does not replace:** `field-borrow` (the per-capability witness+file —
   this skill's hand-off target), `idea-scout` (automated outward feed), `sota-check` (route
   a kernel borrow through the matrix), `industry-score` (a witnessed PRESENT/PARTIAL/ABSENT
