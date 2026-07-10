@@ -155,3 +155,37 @@ func TestHintCoversEveryCategory(t *testing.T) {
 		}
 	}
 }
+
+// TestHedgeNotUnFalsePositives is the regression guard for the "un"-is-not-always-negating bug
+// that a real-corpus scan surfaced: the double-negative mechanical rule must fire ONLY on genuine
+// un- antonyms ("not unreadable" -> "readable"), and must stay silent on words where "un" is part
+// of the root ("not unique", "not unless", "does not unlock", "not universal"). A false mechanical
+// hit here is a GATING defect -- it would red the ratchet on innocent prose.
+func TestHedgeNotUnFalsePositives(t *testing.T) {
+	// These carry a real un- antonym: a mechanical hedge suggestion is correct.
+	for _, line := range []string{
+		"The output is not unreadable.",
+		"This failure mode is not uncommon.",
+		"The result is not unexpected here.",
+	} {
+		fs := Classify("t.md", line)
+		if len(fs) == 0 || !fs[0].Mechanical() {
+			t.Errorf("%q: want a mechanical hedge reframe, got %+v", line, fs)
+		}
+	}
+	// In these, "un" is part of the root -- a mechanical suggestion would be nonsense. The rule
+	// must not produce ANY mechanical finding for them.
+	for _, line := range []string{
+		"This lane is not unique to the worker.",
+		"The interface is not universal across hosts.",
+		"A retry is not allowed unless you opt in.",
+		"Safety takes precedence and does not unlock a retry.",
+		"The plan runs not until the lease drains.",
+	} {
+		for _, f := range Classify("t.md", line) {
+			if f.Category == Hedge && f.Mechanical() {
+				t.Errorf("%q: rule emitted a bogus mechanical hedge %q", line, f.Suggest)
+			}
+		}
+	}
+}

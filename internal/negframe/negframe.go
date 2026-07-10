@@ -110,7 +110,14 @@ var rules = []reframeRule{
 	{regexp.MustCompile(`(?i)\bdo\s+not\s+hesitate\s+to\s+(\w+)`), Prohibition, "feel free to $1"},
 	{regexp.MustCompile(`(?i)\bdon'?t\s+hesitate\s+to\s+(\w+)`), Prohibition, "feel free to $1"},
 	{regexp.MustCompile(`(?i)\bno\s+need\s+to\s+(\w+)`), Absence, "you can skip $1"},
-	{regexp.MustCompile(`(?i)\bnot\s+un(\w+)`), Hedge, "$1"},
+	// The double-negative reframe ("not un-X" -> "X") holds ONLY when "un" is the negating prefix
+	// of a genuine antonym. A bare `not\s+un(\w+)` also fires on words where "un" is part of the
+	// ROOT -- "not unique", "not universal", "not unless", "does not unlock" -- and emits garbage
+	// ("less", "lock") at the MECHANICAL (gating) tier, so a real "does not unlock" would falsely
+	// red the ratchet. The stem is therefore an explicit allowlist of adjectives that actually
+	// negate with "un-"; anything outside it stays un-suggested (and is caught, if at all, by the
+	// generic judgement rules). Extend the list rather than loosening it back to `\w+`.
+	{regexp.MustCompile(`(?i)\bnot\s+un(readable|usual|common|clear|likely|necessary|important|safe|able|available|aware|certain|reasonable|realistic|helpful|related|expected|documented|reachable|recoverable|ambiguous|desirable|acceptable|familiar|known|wise|fair|kind|true|real|stable|bounded|intended|wanted|used|changed|tested|defined|limited|restricted|planned|warranted|justified|founded|biased|happy|healthy|even)\b`), Hedge, "$1"},
 	{regexp.MustCompile(`(?i)\bmake\s+sure\s+(?:that\s+)?you\s+do\s+not\s+(\w+)`), Prohibition, "make sure you avoid $1ing"},
 
 	// --- judgement tier: negatively framed, reframe is a human call ---------------------------
