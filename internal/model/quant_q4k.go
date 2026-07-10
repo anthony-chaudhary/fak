@@ -135,7 +135,12 @@ func q4kMatRowsInto(qt *q4kTensor, x, y []float32) {
 		parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { q4kMatRowsRangeInt8(qt, qv, y, lo, hi) })
 		return
 	}
-	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { q4kMatRowsRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) {
+		// AVX2 f32 kernel (bit-identical to the scalar reference) on an AVX2+ box; scalar otherwise.
+		if !q4kMatRowsRangeArch(qt, x, y, lo, hi) {
+			q4kMatRowsRange(qt, x, y, lo, hi)
+		}
+	})
 }
 
 // q4kMatRowsRange computes y[lo:hi] by dequanting each super-block inline and dotting it
