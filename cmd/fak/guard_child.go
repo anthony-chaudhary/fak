@@ -683,6 +683,8 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 // into its environment (never the parent shell). In pinned subscription mode it also hands
 // the client a provider-shaped placeholder API key (when it has none) so it talks to the
 // gateway, which ignores the placeholder and authenticates upstream with the held token.
+const guardActiveEnv = "FAK_GUARD_ACTIVE"
+
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
 	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
 	child := exec.Command(command[0], command[1:]...)
@@ -715,6 +717,10 @@ func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bo
 			env = append(env, kv[0]+"="+kv[1])
 		}
 	}
+	// Durable child marker consumed by the Codex continuation hook. This is
+	// injected by guard itself, so direct/unwrapped sessions cannot spoof it via
+	// ambient inheritance after StripInheritedSecrets.
+	env = append(env, guardActiveEnv+"=1")
 	// Subscription mode: hand the client a PLACEHOLDER api key (only if it has none) so
 	// it talks to the gateway; the gateway IGNORES the placeholder (pinUpstream) and
 	// authenticates upstream with the real held OAuth token.
@@ -1075,8 +1081,13 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			return
 		}
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
+		childStarted := time.Now()
 		runErr := child.Run()
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
+			command = next
+			continue
+		}
+		if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {
 			command = next
 			continue
 		}
@@ -1135,6 +1146,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			return
 		}
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
+		childStarted := time.Now()
 		if err := child.Start(); err != nil {
 			// child.Start() failing IS a launch failure (the child never ran); spill the detail.
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
@@ -1145,6 +1157,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		select {
 		case runErr := <-wait:
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
+				command = next
+				continue
+			}
+			if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {
 				command = next
 				continue
 			}

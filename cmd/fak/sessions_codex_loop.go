@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,13 @@ import (
 const codexLoopSchema = "fak.sessions.codex_loop.v1"
 const codexLoopRecentSchema = "fak.sessions.codex_loop_recent.v1"
 const codexLoopHookOverrideEnv = "FAK_ALLOW_DIRECT_CODEX_CONTINUE"
+const codexLoopHookDefaultBudget = 500 * time.Millisecond
+
+// These two seams are variables so the hook's hard failure modes can be injected
+// without making the general transcript diagnoser artificial. They are only mutated
+// by the serial CodexLoopHook witness tests.
+var codexLoopHookBudget = codexLoopHookDefaultBudget
+var codexLoopHookDiagnose = diagnoseCodexLoop
 
 type codexLoopDiagnosis struct {
 	Schema            string                 `json:"schema"`
@@ -227,7 +235,69 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 // carries the active session_id. Reuse the existing transcript diagnosis rather than
 // maintaining a second provider classifier: a direct provider is blocked with the same
 // typed reason the advisory `--fail-on unguarded` gate already reports.
+type codexLoopHookRunResult struct {
+	code   int
+	stdout []byte
+	stderr []byte
+}
+
+// sessionsCodexLoopHook keeps the untrusted filesystem/diagnosis work behind a
+// bounded, buffered boundary. Nothing reaches Codex until a complete, parseable block
+// decision exists. A timeout, panic, or ordinary fail-open result therefore returns 0
+// with zero output bytes, regardless of what the inner path attempted to report.
 func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
+	if os.Getenv(guardActiveEnv) == "1" {
+		return 0
+	}
+	diagnose := codexLoopHookDiagnose
+	budget := codexLoopHookBudget
+	resultc := make(chan codexLoopHookRunResult, 1)
+	go func() {
+		result := codexLoopHookRunResult{}
+		defer func() {
+			if recover() != nil {
+				result = codexLoopHookRunResult{}
+			}
+			resultc <- result
+		}()
+
+		var out, errOut bytes.Buffer
+		result.code = sessionsCodexLoopHookUnbounded(&out, &errOut, stdin, argv, diagnose)
+		result.stdout = append([]byte(nil), out.Bytes()...)
+		result.stderr = append([]byte(nil), errOut.Bytes()...)
+	}()
+
+	if budget <= 0 {
+		budget = codexLoopHookDefaultBudget
+	}
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+
+	select {
+	case result := <-resultc:
+		if result.code != 0 {
+			if len(result.stderr) > 0 {
+				_, _ = stderr.Write(result.stderr)
+			}
+			return result.code
+		}
+		if len(result.stdout) == 0 {
+			return 0
+		}
+		var block codexLoopHookBlock
+		if err := json.Unmarshal(result.stdout, &block); err != nil || block.Decision != "block" {
+			return 0
+		}
+		if _, err := stdout.Write(result.stdout); err != nil {
+			return 1
+		}
+		return 0
+	case <-timer.C:
+		return 0
+	}
+}
+
+func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, argv []string, diagnose func(io.Reader, string) (codexLoopDiagnosis, error)) int {
 	fs := flag.NewFlagSet("sessions codex-loop-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
@@ -262,7 +332,7 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: open %s: %v (allowing turn)\n", resolved, err)
 		return 0
 	}
-	d, diagnoseErr := diagnoseCodexLoop(fh, resolved)
+	d, diagnoseErr := diagnose(fh, resolved)
 	closeErr := fh.Close()
 	if diagnoseErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn)\n", diagnoseErr)
