@@ -71,7 +71,8 @@ func runFleetTrend(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 	}
 	rows := fleettrend.Tail(*ledger, *window)
 	if *asJSON {
-		payload := map[string]any{"schema": fleettrend.Schema, "ledger": *ledger, "rows": rows}
+		rates, _ := fleettrend.WindowRates(rows)
+		payload := map[string]any{"schema": fleettrend.Schema, "ledger": *ledger, "rows": rows, "throughput": rates}
 		if err := writeIndentedJSONNoEscape(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fleet-trend: encode json: %v\n", err)
 			return 2
@@ -83,5 +84,11 @@ func runFleetTrend(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 		line = "(no history yet)"
 	}
 	fmt.Fprintln(stdout, line)
+	// The throughput SLO row (resumes/deaths/lands per-hr + goodput) renders only
+	// once the window carries cumulative counters; a counter-free history stays
+	// silent rather than printing a row of n/a.
+	if tp := fleettrend.RenderThroughput(rows); tp != "" {
+		fmt.Fprintln(stdout, tp)
+	}
 	return 0
 }
