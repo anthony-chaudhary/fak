@@ -82,6 +82,8 @@ type issueContractCounts struct {
 	GenerationMismatches  int            `json:"generation_mismatches,omitempty"`
 	ModelTierTagged       int            `json:"model_tier_tagged,omitempty"`
 	ModelTierFlagged      int            `json:"model_tier_flagged,omitempty"`
+	BornRouted            int            `json:"born_routed,omitempty"`
+	BornRoutedFlagged     int            `json:"born_routed_flagged,omitempty"`
 	ScaleFlagged          int            `json:"scale_flagged,omitempty"`
 	ByReason              map[string]int `json:"by_reason"`
 	ByLane                map[string]int `json:"by_lane"`
@@ -316,6 +318,12 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		}
 		if len(review.ModelTier.Flags) > 0 {
 			counts.ModelTierFlagged++
+		}
+		if review.BornRouted.Lane != "" && review.BornRouted.ClassLabel != "" && review.BornRouted.PriorityLabel != "" {
+			counts.BornRouted++
+		}
+		if len(review.BornRouted.Flags) > 0 {
+			counts.BornRoutedFlagged++
 		}
 		counts.ByScale[issueContractBucketValue(string(review.Scale.Effective), "(undeclared)")]++
 		if len(review.Scale.Flags) > 0 {
@@ -944,6 +952,10 @@ func renderIssueContract(r issueContractResult) string {
 		lines = append(lines, fmt.Sprintf("  model_tier: tagged=%d flagged=%d",
 			r.Counts.ModelTierTagged, r.Counts.ModelTierFlagged))
 	}
+	if r.Counts.BornRouted > 0 || r.Counts.BornRoutedFlagged > 0 {
+		lines = append(lines, fmt.Sprintf("  born_routed: complete=%d flagged=%d",
+			r.Counts.BornRouted, r.Counts.BornRoutedFlagged))
+	}
 	if r.Counts.ScaleFlagged > 0 {
 		lines = append(lines, fmt.Sprintf("  scale: flagged=%d", r.Counts.ScaleFlagged))
 	}
@@ -1071,6 +1083,12 @@ func renderIssueContract(r issueContractResult) string {
 				issueContractBucketValue(review.ModelTier.Required, "?"),
 				issueContractBucketValue(review.ModelTier.Optimal, "?"))
 		}
+		if review.BornRouted.Lane != "" || len(review.BornRouted.Flags) > 0 {
+			line += fmt.Sprintf(" born_routed=%s/%s/%s",
+				issueContractBucketValue(review.BornRouted.Lane, "?"),
+				issueContractBucketValue(review.BornRouted.ClassLabel, "?"),
+				issueContractBucketValue(review.BornRouted.PriorityLabel, "?"))
+		}
 		if review.Scale.Effective != "" {
 			line += fmt.Sprintf(" scale=%s(%s)",
 				string(review.Scale.Effective), issueContractBucketValue(review.Scale.Source, "?"))
@@ -1090,6 +1108,9 @@ func renderIssueContract(r issueContractResult) string {
 		}
 		for _, flag := range review.Scale.Flags {
 			lines = append(lines, "    scale_flag: "+flag)
+		}
+		for _, flag := range review.BornRouted.Flags {
+			lines = append(lines, "    born_routed_flag: "+flag)
 		}
 	}
 	return strings.Join(lines, "\n")
