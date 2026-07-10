@@ -92,6 +92,8 @@ func detailOf(op Op) string {
 		return fmt.Sprintf("keep the prefix whose cumulative size <= %d bytes", op.Bytes)
 	case OpDedup:
 		return "collapse byte-identical cells by content digest (read-only; folded siblings recorded)"
+	case OpExempt:
+		return fmt.Sprintf("exempt the %d most-divergent cell(s) from the lossy fold, kept bit-exact (read-only MiniCache outlier carve)", op.K)
 	case OpNarrow:
 		if op.Bytes <= 0 {
 			return "narrow nothing (no per-cell width cap set)"

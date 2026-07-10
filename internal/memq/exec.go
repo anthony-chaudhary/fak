@@ -236,6 +236,11 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 				pooled := poolSpanScores(work, score, op.Window)
 				sortByRank(work, RankRelevance, op.Desc, pooled, refcount)
 				note = fmt.Sprintf("relevance pooled over a %d-cell step window (span beats spike)", op.Window)
+			} else if op.By == RankDivergence {
+				// Divergence is working-set-relative: it is scored against the CURRENT
+				// set's consolidation centroid at sort time, never precomputed once per
+				// Run the way relevance/refcount are (#4018).
+				sortByDivergence(work, op.Desc, computeDivergence(ctx, b, work))
 			} else {
 				sortByRank(work, op.By, op.Desc, score, refcount)
 			}
@@ -263,6 +268,8 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			note = renderInto(ctx, b, &res, work)
 		case OpTombstone:
 			note = applyTombstone(ctx, b, &res, work, op, caps)
+		case OpExempt:
+			work, note = applyExempt(ctx, b, &res, work, op)
 		case OpConsolidate:
 			note = applyConsolidate(ctx, b, &res, work)
 		case OpReclassify:
@@ -505,6 +512,99 @@ func computeNearDup(ctx context.Context, b Backend, work []Cell, threshold float
 		return pairs[i].B < pairs[j].B
 	})
 	return pairs
+}
+
+// computeDivergence scores each cell in work by its simhash dissimilarity to the
+// working set's OWN consolidation centroid: divergence = 1 - cosine(cell, centroid),
+// where the centroid is the sum of the set's embeddings (Cosine is scale-invariant, so
+// the sum stands in for the mean). It is the MiniCache outlier signal (#4018): a
+// high-divergence cell is the one a lossy fold would approximate worst. Bodies page in
+// through the backend's trust gate exactly as computeNearDup's do; a sealed,
+// tombstoned, or unpageable cell gets NO score, so it is never an exemption candidate
+// (the fold's own pageIn refuses it, and that refusal must stay on the audit trail).
+// Deterministic: a pure function of (backend bytes, working set) — no RNG, no
+// map-order dependence.
+func computeDivergence(ctx context.Context, b Backend, work []Cell) map[string]float64 {
+	type cellVec struct {
+		id  string
+		vec simhash.Vector
+	}
+	vecs := make([]cellVec, 0, len(work))
+	for _, c := range work {
+		if c.Sealed || c.Tombstoned {
+			continue
+		}
+		body, err := b.Materialize(ctx, c.ID)
+		if err != nil || len(body) == 0 {
+			continue
+		}
+		vecs = append(vecs, cellVec{id: c.ID, vec: simhash.Embed(string(body))})
+	}
+	out := make(map[string]float64, len(vecs))
+	if len(vecs) == 0 {
+		return out
+	}
+	centroid := make(simhash.Vector, simhash.Dim)
+	for _, v := range vecs {
+		for i, x := range v.vec {
+			centroid[i] += x
+		}
+	}
+	for _, v := range vecs {
+		out[v.id] = 1 - simhash.Cosine(v.vec, centroid)
+	}
+	return out
+}
+
+// applyExempt carves the top-K most-divergent cells OUT of the working set before a
+// lossy fold — the MiniCache outlier exemption (#4018). Each scored cell is ranked by
+// divergence from the set's consolidation centroid (always most-divergent-first for
+// the carve, regardless of any authored direction), and the top K are removed from the
+// set a downstream consolidate/tombstone sees — so they survive bit-exact by
+// construction: memq has no op that rewrites cell bytes, and the exempted cells are
+// simply never folded and never tombstoned. Read-only (no Caps needed): the carve is
+// recorded as an audit Effect naming the survivors. Only cells with a computed
+// divergence score are candidates — a sealed/unpageable cell is left for pageIn's own
+// refusal accounting. Selection is deterministic: divergence desc, ties by ascending
+// Step then ID.
+func applyExempt(ctx context.Context, b Backend, res *Result, work []Cell, op Op) ([]Cell, string) {
+	if op.K <= 0 || len(work) == 0 {
+		return work, ""
+	}
+	div := computeDivergence(ctx, b, work)
+	cand := make([]Cell, 0, len(div))
+	for _, c := range work {
+		if _, ok := div[c.ID]; ok {
+			cand = append(cand, c)
+		}
+	}
+	sortByDivergence(cand, true, div)
+	k := op.K
+	if k > len(cand) {
+		k = len(cand)
+	}
+	if k == 0 {
+		return work, ""
+	}
+	exempt := make(map[string]bool, k)
+	ids := make([]string, 0, k)
+	for _, c := range cand[:k] {
+		exempt[c.ID] = true
+		ids = append(ids, c.ID)
+	}
+	kept := work[:0:0]
+	for _, c := range work {
+		if !exempt[c.ID] {
+			kept = append(kept, c)
+		}
+	}
+	sort.Strings(ids)
+	res.Effects = append(res.Effects, Effect{
+		Kind:  OpExempt,
+		Cells: ids,
+		Note:  fmt.Sprintf("%d divergence outlier(s) exempted from the lossy fold, kept bit-exact (read-only; survivors: %s)", len(ids), strings.Join(ids, ", ")),
+	})
+	return kept, fmt.Sprintf("exempted %d divergence outlier(s) (kept bit-exact)", len(ids))
 }
 
 // pageIn routes one cell through the backend's trust gate for rendering/folding. It

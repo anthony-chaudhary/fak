@@ -16,6 +16,13 @@ type Params struct {
 	// dropped, Descriptor re-headLined) instead of tail-dropped whole. Default 0
 	// (off): the compiled Query is identical to before this field existed.
 	NarrowBytes int64 `json:"narrow_bytes,omitempty"`
+
+	// RetentionCount is the OPT-IN divergence-outlier exemption (MiniCache; #4018):
+	// when > 0, the compact driver carves the RetentionCount most-divergent fold
+	// candidates out of the set (OpExempt) before consolidating, so the cells a lossy
+	// fold would approximate worst survive bit-exact. 0 (the zero value) builds the
+	// exact pre-#4018 pipeline.
+	RetentionCount int `json:"retention_count,omitempty"`
 }
 
 // Driver is a NAMED, pre-composed memory strategy — a "canned query" in the algebra.
@@ -152,22 +159,29 @@ func init() {
 			if reason == "" {
 				reason = "compacted into a derived disposition"
 			}
-			q := Query{
-				Intent: p.Intent,
-				Ops: []Op{
-					{Kind: OpScan},
-					{Kind: OpFilter, Pred: &Pred{Op: PredAnd, Args: []Pred{
-						{Op: PredEq, Field: "sealed", Value: "false"},
-						{Op: PredEq, Field: "tombstoned", Value: "false"},
-						{Op: PredNe, Field: "durability", Value: DurabilityDurable},
-						{Op: PredEq, Field: "refcount", Value: "0"},
-					}}},
-					{Kind: OpRank, By: RankBytes, Desc: true},
-					{Kind: OpBudget, Bytes: p.Budget},
-					{Kind: OpConsolidate},
-					{Kind: OpTombstone, Reason: reason},
-				},
+			ops := []Op{
+				{Kind: OpScan},
+				{Kind: OpFilter, Pred: &Pred{Op: PredAnd, Args: []Pred{
+					{Op: PredEq, Field: "sealed", Value: "false"},
+					{Op: PredEq, Field: "tombstoned", Value: "false"},
+					{Op: PredNe, Field: "durability", Value: DurabilityDurable},
+					{Op: PredEq, Field: "refcount", Value: "0"},
+				}}},
+				{Kind: OpRank, By: RankBytes, Desc: true},
+				{Kind: OpBudget, Bytes: p.Budget},
 			}
+			// MiniCache outlier exemption (#4018), opt-in via RetentionCount: carve the
+			// top-K most-divergent candidates out of the fold set so the cells the fold
+			// would approximate worst survive bit-exact. Unset (0) appends nothing —
+			// the pipeline is exactly the pre-#4018 query.
+			if p.RetentionCount > 0 {
+				ops = append(ops, Op{Kind: OpExempt, By: RankDivergence, K: p.RetentionCount})
+			}
+			ops = append(ops,
+				Op{Kind: OpConsolidate},
+				Op{Kind: OpTombstone, Reason: reason},
+			)
+			q := Query{Intent: p.Intent, Ops: ops}
 			if p.NarrowBytes > 0 {
 				// The opt-in width axis (#4019): slim over-wide cells before the
 				// count-axis budget picks what to fold.

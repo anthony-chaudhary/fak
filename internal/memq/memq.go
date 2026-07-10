@@ -73,6 +73,7 @@ const (
 	OpConsolidate = "consolidate" // fold the set into one derived extractive disposition
 	OpReclassify  = "reclassify"  // change durability class (never promotes to durable)
 	OpPrune       = "prune"       // reclaim unreferenced storage (GC); no model-visible effect
+	OpExempt      = "exempt"      // carve the top-K most-divergent cells out of the set before a lossy fold, kept bit-exact (MiniCache; #4018)
 )
 
 // Pred ops. Comparison ops resolve a field; the boolean ops compose sub-predicates.
@@ -104,6 +105,7 @@ const (
 	// isolated one-cell spike. Opt-in only — it requires Op.Window (odd, >= 1); window 1
 	// is the identity kernel and reproduces RankRelevance's ordering exactly.
 	RankRelevanceSpan = "relevance_span"
+	RankDivergence    = "divergence" // simhash dissimilarity (1 - cosine) to the working set's consolidation centroid (desc = most divergent first; #4018)
 )
 
 // Score-aggregation ops for multi-intent recall (#4020 — the GQA group-reduce: N
@@ -168,7 +170,7 @@ type Query struct {
 // effectKinds and mutationKinds classify ops. An effect reads/derives or mutates; a
 // mutation additionally requires a Caps grant to be APPLIED (otherwise it is proposed).
 var effectKinds = map[string]bool{
-	OpRender: true, OpTombstone: true, OpConsolidate: true, OpReclassify: true, OpPrune: true, OpDedup: true, OpNarrow: true,
+	OpRender: true, OpTombstone: true, OpConsolidate: true, OpReclassify: true, OpPrune: true, OpDedup: true, OpNarrow: true, OpExempt: true,
 }
 
 // mutationKinds are the effects that change durable backend state. They are
@@ -209,7 +211,7 @@ func Validate(q Query) error {
 			}
 		case OpRank:
 			switch op.By {
-			case RankRelevance, RankBytes, RankStep, RankDurability, RankRefcount:
+			case RankRelevance, RankBytes, RankStep, RankDurability, RankRefcount, RankDivergence:
 			case RankRelevanceSpan:
 				// The pooling kernel is part of the authored query, never guessed: a
 				// centered window must be an explicit odd width (1 = identity kernel).
@@ -226,6 +228,15 @@ func Validate(q Query) error {
 		case OpBudget:
 			if op.Bytes < 0 {
 				return fmt.Errorf("memq: op %d (budget) has negative bytes=%d", i, op.Bytes)
+			}
+		case OpExempt:
+			if op.K < 0 {
+				return fmt.Errorf("memq: op %d (exempt) has negative k=%d", i, op.K)
+			}
+			switch op.By {
+			case "", RankDivergence:
+			default:
+				return fmt.Errorf("memq: op %d (exempt) has unknown carve key %q (only %q is supported)", i, op.By, RankDivergence)
 			}
 		case OpNarrow:
 			if op.Bytes < 0 {
@@ -452,6 +463,29 @@ func sortByRank(cells []Cell, by string, desc bool, score, refcount map[string]i
 		return rankLess(by, desc, cells[i], cells[j],
 			score[cells[i].ID], score[cells[j].ID],
 			refcount[cells[i].ID], refcount[cells[j].ID])
+	})
+}
+
+// sortByDivergence stably sorts cells in place by their divergence score — the simhash
+// dissimilarity (1 - cosine) to the working set's own consolidation centroid, computed
+// per rank op by the executor (divergence is working-set-relative, so it is never
+// precomputed once per Run the way relevance/refcount are; #4018). desc puts the most
+// divergent first (the MiniCache outlier order). A cell with no computed score (sealed
+// or unpageable) scores 0 — least divergent. Ties always break by ascending Step then
+// ID, the same total-order discipline as rankLess.
+func sortByDivergence(cells []Cell, desc bool, div map[string]float64) {
+	sort.SliceStable(cells, func(i, j int) bool {
+		di, dj := div[cells[i].ID], div[cells[j].ID]
+		if di != dj {
+			if desc {
+				return di > dj
+			}
+			return di < dj
+		}
+		if cells[i].Step != cells[j].Step {
+			return cells[i].Step < cells[j].Step
+		}
+		return cells[i].ID < cells[j].ID
 	})
 }
 
