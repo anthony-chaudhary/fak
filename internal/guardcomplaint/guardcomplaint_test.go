@@ -245,6 +245,50 @@ func TestLatestDenialFiltersAndPicksMostRecent(t *testing.T) {
 	}
 }
 
+// TestSelectDenialBindsExactComplaintEvidence is the #3830 regression witness: two
+// POLICY_BLOCK-style rows with the same reason/tool are both plausible under the old
+// "latest match" lookup. An unqualified selection now refuses that ambiguity, while each
+// exact identity selector binds the intended row and never silently substitutes the other.
+func TestSelectDenialBindsExactComplaintEvidence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-audit.jsonl")
+	lines := []string{
+		`{"seq":72,"ts_unix_nano":720,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"gitgate","trace_id":"hook-bypass","args_digest":"sha256:hooks"}`,
+		`{"seq":81,"ts_unix_nano":810,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"gitgate","trace_id":"amend-attempt","args_digest":"sha256:amend"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{path}
+	coarse := DenialSelector{Reason: "POLICY_BLOCK", Tool: "Bash"}
+	if got := SelectDenial(paths, coarse); !got.Ambiguous || got.Matches != 2 || got.Evidence != nil {
+		t.Fatalf("coarse selection = %+v, want two-match ambiguity with no attached evidence", got)
+	}
+
+	tests := []struct {
+		name string
+		sel  DenialSelector
+		seq  uint64
+	}{
+		{"journal seq", DenialSelector{Reason: "POLICY_BLOCK", Tool: "Bash", Seq: 72}, 72},
+		{"trace id", DenialSelector{Reason: "POLICY_BLOCK", Tool: "Bash", TraceID: "amend-attempt"}, 81},
+		{"args digest", DenialSelector{Reason: "POLICY_BLOCK", Tool: "Bash", ArgsDigest: "sha256:hooks"}, 72},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SelectDenial(paths, tc.sel)
+			if got.Ambiguous || got.Matches != 1 || got.Evidence == nil || got.Evidence.Seq != tc.seq {
+				t.Fatalf("selection = %+v, want exact seq %d", got, tc.seq)
+			}
+		})
+	}
+
+	contradictory := DenialSelector{Reason: "POLICY_BLOCK", Tool: "Bash", Seq: 72, TraceID: "amend-attempt"}
+	if got := SelectDenial(paths, contradictory); got.Ambiguous || got.Matches != 0 || got.Evidence != nil {
+		t.Fatalf("contradictory exact selector = %+v, want honest no-match", got)
+	}
+}
+
 func TestRenderShowsActionAndDryRunHint(t *testing.T) {
 	c := sampleComplaint()
 	r := Result{Schema: Schema, Mode: "dry-run", Planned: []PlanRow{BuildPlan(c, nil)}}

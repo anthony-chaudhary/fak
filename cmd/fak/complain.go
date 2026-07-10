@@ -23,6 +23,7 @@ package main
 //
 //	fak complain --summary "floor blocked a legit docs/notes commit" \
 //	    --reason FILE_ADMISSION --tool Bash --from-journal \
+//	    --journal-seq 42 \
 //	    --rationale "the path is a curated note, not operator-private telemetry; the marker heuristic misfired" --live
 
 import (
@@ -50,8 +51,11 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	tool := fs.String("tool", "", "the refused tool (e.g. Bash, Write)")
 	summary := fs.String("summary", "", "one-line headline of the complaint (required; drives the dedup key)")
 	rationale := fs.String("rationale", "", "why the agent judges the guard wrong — and the recovery it wanted")
-	fromJournal := fs.Bool("from-journal", false, "attach the latest matching DENY/QUARANTINE verdict from the guard decision journal as the witness (filtered by --reason/--tool)")
+	fromJournal := fs.Bool("from-journal", false, "attach one matching DENY/QUARANTINE verdict from the guard decision journal as the witness; ambiguous reason/tool matches attach nothing until disambiguated")
 	journal := fs.String("journal", "", "explicit guard-audit journal path to pull the witness from (default: discover under --workspace and the user config dir)")
+	journalSeq := fs.Uint64("journal-seq", 0, "select the exact journal row sequence (requires --from-journal)")
+	traceID := fs.String("trace-id", "", "select the exact denial trace id (requires --from-journal)")
+	argsDigest := fs.String("args-digest", "", "select the exact denial args digest (requires --from-journal)")
 	workspace := fs.String("workspace", ".", "workspace root for journal discovery when --journal is not given")
 	repo := fs.String("repo", "", "owner/repo for gh; default is the current repo")
 	limit := fs.Int("limit", 300, "existing issue scan limit for live/fetch modes")
@@ -67,6 +71,10 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 
 	if strings.TrimSpace(*summary) == "" {
 		fmt.Fprintln(stderr, "fak complain: --summary is required (the one-line headline that identifies the complaint)")
+		return 2
+	}
+	if !*fromJournal && (*journalSeq != 0 || strings.TrimSpace(*traceID) != "" || strings.TrimSpace(*argsDigest) != "") {
+		fmt.Fprintln(stderr, "fak complain: --journal-seq, --trace-id, and --args-digest require --from-journal")
 		return 2
 	}
 	normKind, err := guardcomplaint.NormalizeKind(*kind)
@@ -88,9 +96,19 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	// the miss on stderr and proceed — the appeal still files on the agent's rationale.
 	if *fromJournal {
 		paths := guardcomplaint.DiscoverJournals(*workspace, *journal)
-		if ev := guardcomplaint.LatestDenial(paths, c.Reason, c.Tool); ev != nil {
-			c.Evidence = ev
-		} else {
+		selection := guardcomplaint.SelectDenial(paths, guardcomplaint.DenialSelector{
+			Reason:     c.Reason,
+			Tool:       c.Tool,
+			Seq:        *journalSeq,
+			TraceID:    strings.TrimSpace(*traceID),
+			ArgsDigest: strings.TrimSpace(*argsDigest),
+		})
+		switch {
+		case selection.Evidence != nil:
+			c.Evidence = selection.Evidence
+		case selection.Ambiguous:
+			fmt.Fprintf(stderr, "fak complain: --from-journal found %d matching DENY/QUARANTINE rows; refusing to attach an ambiguous witness. Pass --journal-seq, --trace-id, or --args-digest to select the refused call being appealed\n", selection.Matches)
+		default:
 			fmt.Fprintln(stderr, "fak complain: --from-journal found no matching DENY/QUARANTINE row; filing on the rationale alone (the body discloses the missing witness)")
 		}
 	}

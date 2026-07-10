@@ -352,14 +352,72 @@ func FetchExisting(repo string, limit int) ([]dogfoodissues.Issue, error) {
 	return dogfoodissues.FetchExistingIssues(repo, limit)
 }
 
+// DenialSelector identifies the journal denial a complaint is actually appealing.
+// Reason and Tool are useful coarse filters, but they are not an identity: a busy guard
+// session routinely records several denials with the same reason/tool pair. Seq, TraceID,
+// and ArgsDigest are exact selectors that bind the complaint to the refused call rather
+// than whichever similar denial happened most recently (#3830).
+type DenialSelector struct {
+	Reason     string
+	Tool       string
+	Seq        uint64
+	TraceID    string
+	ArgsDigest string
+}
+
+// DenialSelection is the honest result of selecting complaint evidence. Evidence is set
+// only when exactly one row matches. Multiple matches are Ambiguous and deliberately carry
+// no Evidence: attaching the newest of several plausible rows would make an unrelated
+// denial look like a witness for the complaint (#3830).
+type DenialSelection struct {
+	Evidence  *Evidence
+	Matches   int
+	Ambiguous bool
+}
+
+// SelectDenial selects exactly one witnessed denial. A coarse reason/tool lookup remains
+// convenient when it yields one row, while a busy journal must be disambiguated by seq,
+// trace id, or args digest. No match and ambiguity are both fail-honest: neither fabricates
+// or guesses a witness.
+func SelectDenial(paths []string, selector DenialSelector) DenialSelection {
+	matches := matchingDenials(paths, selector)
+	result := DenialSelection{Matches: len(matches)}
+	switch len(matches) {
+	case 1:
+		result.Evidence = matches[0]
+	case 0:
+		// Honest no-witness result.
+	default:
+		result.Ambiguous = true
+	}
+	return result
+}
+
 // LatestDenial scans the guard decision journals for the most recent DENY/QUARANTINE row,
 // optionally filtered to a reason token and/or tool, and returns it as witnessed Evidence.
 // paths is the set of journal files (use guardrsi.JournalPaths to discover them). It returns
 // nil when no matching denial is present — an honest "no witness" rather than a fabricated one.
+//
+// Deprecated for complaint filing: use SelectDenial, which refuses an ambiguous reason/tool
+// match instead of silently binding the appeal to the newest plausible row. LatestDenial is
+// retained for callers that explicitly want a recency query rather than evidence identity.
 func LatestDenial(paths []string, reasonFilter, toolFilter string) *Evidence {
-	reasonFilter = strings.ToUpper(strings.TrimSpace(reasonFilter))
-	toolFilter = strings.TrimSpace(toolFilter)
+	matches := matchingDenials(paths, DenialSelector{Reason: reasonFilter, Tool: toolFilter})
 	var best *Evidence
+	for _, cand := range matches {
+		if best == nil || moreRecent(cand, best) {
+			best = cand
+		}
+	}
+	return best
+}
+
+func matchingDenials(paths []string, selector DenialSelector) []*Evidence {
+	reasonFilter := strings.ToUpper(strings.TrimSpace(selector.Reason))
+	toolFilter := strings.TrimSpace(selector.Tool)
+	traceFilter := strings.TrimSpace(selector.TraceID)
+	digestFilter := strings.TrimSpace(selector.ArgsDigest)
+	matches := []*Evidence{}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -402,6 +460,15 @@ func LatestDenial(paths []string, reasonFilter, toolFilter string) *Evidence {
 			if toolFilter != "" && row.Tool != toolFilter {
 				continue
 			}
+			if selector.Seq != 0 && row.Seq != selector.Seq {
+				continue
+			}
+			if traceFilter != "" && strings.TrimSpace(row.TraceID) != traceFilter {
+				continue
+			}
+			if digestFilter != "" && strings.TrimSpace(row.ArgsDigest) != digestFilter {
+				continue
+			}
 			cand := &Evidence{
 				Source:      "journal",
 				JournalPath: path,
@@ -414,12 +481,10 @@ func LatestDenial(paths []string, reasonFilter, toolFilter string) *Evidence {
 				TraceID:     row.TraceID,
 				ArgsDigest:  row.ArgsDigest,
 			}
-			if best == nil || moreRecent(cand, best) {
-				best = cand
-			}
+			matches = append(matches, cand)
 		}
 	}
-	return best
+	return matches
 }
 
 // moreRecent orders two evidence rows: by wall-clock timestamp, then by sequence as a

@@ -129,3 +129,51 @@ func TestComplainFromJournalAttachesWitnessOrDisclosesMiss(t *testing.T) {
 		t.Fatalf("a missing witness must be disclosed on stderr: %q", errs)
 	}
 }
+
+// TestComplainFromJournalRefusesAmbiguousWitness drives the #3830 CLI spine. Two rows
+// share the appealed reason/tool, so the old latest-match behavior would attach row B to a
+// complaint about row A. The CLI now files without a witness until an exact selector is
+// supplied, then accepts the selected row without an ambiguity or miss warning.
+func TestComplainFromJournalRefusesAmbiguousWitness(t *testing.T) {
+	dir := t.TempDir()
+	jpath := filepath.Join(dir, "guard-audit.jsonl")
+	rows := []string{
+		`{"seq":72,"ts_unix_nano":720,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"gitgate","trace_id":"hook-bypass","args_digest":"sha256:hooks"}`,
+		`{"seq":81,"ts_unix_nano":810,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"gitgate","trace_id":"amend-attempt","args_digest":"sha256:amend"}`,
+	}
+	if err := os.WriteFile(jpath, []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{
+		"--summary", "amend refusal appealed", "--reason", "POLICY_BLOCK", "--tool", "Bash",
+		"--from-journal", "--journal", jpath, "--json",
+	}
+	code, _, errs := runComplainCapture(base)
+	if code != 0 {
+		t.Fatalf("ambiguous dry-run exit = %d, want 0", code)
+	}
+	if !strings.Contains(errs, "2 matching DENY/QUARANTINE rows") || !strings.Contains(errs, "refusing to attach an ambiguous witness") {
+		t.Fatalf("ambiguous lookup must fail honest with selectors named: %q", errs)
+	}
+
+	exact := append(append([]string{}, base...), "--journal-seq", "72")
+	code, _, errs = runComplainCapture(exact)
+	if code != 0 {
+		t.Fatalf("exact dry-run exit = %d, want 0 (stderr=%q)", code, errs)
+	}
+	if strings.Contains(errs, "ambiguous witness") || strings.Contains(errs, "no matching DENY") {
+		t.Fatalf("exact selector should attach one witness without warning: %q", errs)
+	}
+}
+
+func TestComplainEvidenceSelectorsRequireFromJournal(t *testing.T) {
+	code, _, errs := runComplainCapture([]string{
+		"--summary", "x", "--journal-seq", "72",
+	})
+	if code != 2 {
+		t.Fatalf("selector without --from-journal exit = %d, want 2", code)
+	}
+	if !strings.Contains(errs, "require --from-journal") {
+		t.Fatalf("selector dependency not explained: %q", errs)
+	}
+}
