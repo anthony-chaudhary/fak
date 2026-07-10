@@ -7,6 +7,11 @@ import (
 	"sort"
 )
 
+// ToolRollupSchema versions the rollup report (and the JSONL [ToolCall] corpus row
+// it folds) so a downstream reader can tell which fold discipline produced a table —
+// the same schema-stamp convention internal/usagelog and internal/toolshape follow.
+const ToolRollupSchema = "fak.toolrollup.v1"
+
 // ToolCall is one tool-call record in the corpus: a single call of a single tool,
 // with its token cost, its wall duration, and whether it succeeded. The JSON tags
 // are the stable corpus schema. `tool` mirrors internal/trajectory's Turn field
@@ -121,4 +126,23 @@ func ReadCorpus(r io.Reader) ([]ToolCall, error) {
 		out = append(out, tc)
 	}
 	return out, nil
+}
+
+// Render writes a stable, human-readable table of the per-tool rollup [Rollup]
+// produced — one header row then one row per tool in the fold's deterministic
+// most-used-first (tie by name) order, so the same corpus always prints
+// byte-identically. Columns: tool, calls, share%, error%, and the mean input/output
+// token cost and mean wall duration per call. It answers, at a glance, "what tools
+// ran, how often, how expensively, how reliably?" — the toolrollup analogue of the
+// per-verb usage table. An empty slice prints just the header (honest-empty, no
+// panic). Rates are shown as percentages; token/duration means are rounded to whole
+// units for a compact column.
+func Render(w io.Writer, stats []ToolStat) {
+	fmt.Fprintf(w, "%-20s %8s %8s %8s %10s %10s %10s\n",
+		"TOOL", "CALLS", "SHARE%", "ERR%", "MEAN-IN", "MEAN-OUT", "MEAN-MS")
+	for _, s := range stats {
+		fmt.Fprintf(w, "%-20s %8d %7.1f%% %7.1f%% %10.0f %10.0f %10.0f\n",
+			s.Tool, s.Calls, s.Share*100, s.ErrorRate*100,
+			s.MeanTokensIn, s.MeanTokensOut, s.MeanDuration)
+	}
 }
