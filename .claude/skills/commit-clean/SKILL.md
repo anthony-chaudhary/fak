@@ -43,7 +43,7 @@ Checks the subject is witness-gradeable, carries a bindable `(fak <leaf>)` stamp
 fak commit --path <p> [--path <q>] -m "<subject>" [--push]
 ```
 
-Stages EXACTLY the named paths under an advisory lock, writes the message to a file (so an em-dash or multi-line subject can't misparse as a pathspec), commits, then VERIFIES the committed path-set == the requested path-set and the landed message == yours. If a peer raced, it refuses non-destructively — it never force-pushes. `-s` sign-off is the default; `--no-signoff` opts out. `--require-issue` makes a missing bindable `#N` blocking. `--core-lock-maintenance-witness <claim>` is the only way to clear a `CORE_SELF_MODIFY` refusal.
+Stages EXACTLY the named paths under an advisory lock, writes the message to a file (so an em-dash or multi-line subject can't misparse as a pathspec), commits, then VERIFIES the committed path-set == the requested path-set and the landed message == yours. If a peer raced, it refuses non-destructively — it never force-pushes. `-s` sign-off is the default; `--no-signoff` opts out. `--require-issue` makes a missing bindable `#N` blocking. `--core-lock-maintenance-witness <claim>` is the only way to clear a `CORE_SELF_MODIFY` refusal. `--json` emits the structured result (`committed`, `verified`, `committed_sha`, `reason`) instead of the default prose line — use it when a step needs to check those fields.
 
 **Whole-lane sweep** — when the dirty tree spans a whole lane you own:
 
@@ -76,6 +76,8 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 | `HOOK_REFUSED` | a git/commit hook declined — read the hook output and fix the cause. |
 | `PUSH_REJECTED` | non-fast-forward — integrate via `fak sync apply`, never force. |
 
+`LOCK_BROKEN holder_dead …` is informational, not a refusal — a stale lock from a dead process was reclaimed and the commit proceeded.
+
 ## Exit codes
 
 - **0** — success: committed, verified, (pushed if asked).
@@ -85,11 +87,11 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 
 ## Steps
 
-1. **Confirm the tree is green for your lane** — `make ci`, or the scoped test for the packages you touched.
+1. **Confirm the tree is green for your lane** — `make ci`, or the scoped test for the packages you touched. A docs-only change touches no Go package and has no scoped test — proceed.
 2. **List the exact paths YOU changed** — never a peer's. On a hot tree check mtimes/`git log -- <file>` if ownership is unclear.
 3. **Lint:** `fak commit --preview -m "<subject>" --path <p> …` — fix any subject/stamp/lane issue it flags before anything lands.
 4. **Commit:** `fak commit --path <p> [--path <q>] -m "<type>(<scope>): <what> (fak <leaf>)" [--push]`.
-5. **Witness:** on success, `git show --stat HEAD` (or the JSON `verified: true` + `committed_sha`) shows EXACTLY your paths and your subject on HEAD. A clean result is `committed && verified && reason == ""`.
+5. **Witness:** on success, `git show --stat <committed_sha>` (the SHA `fak commit` prints — NOT `HEAD`, which a racing peer may already have moved past your commit) shows EXACTLY your paths and your subject. To check the structured fields, run with `--json`: a clean result is `committed && verified && reason == ""`; the default human output is a prose line (`committed <sha> (N path(s)) and pushed`) instead.
 6. **On a `reason` refusal,** act per the vocabulary table above — never convert a race or refusal into a force-push or an amend.
 
 ## Never
