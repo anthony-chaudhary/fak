@@ -134,6 +134,8 @@ func main() {
 		cmdGodsplitPlan(os.Args[2:])
 	case "refactor-verify":
 		cmdRefactorVerify(os.Args[2:])
+	case "glm52-prefill-sweep":
+		cmdGLM52PrefillSweep(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
 	case "recover":
@@ -323,6 +325,10 @@ func main() {
 	case "guard-sessionstart":
 		// Hidden: Claude Code SessionStart hook actuator installed by `fak guard` (#3092).
 		cmdGuardSessionStart(os.Args[2:])
+	case "guard-stops":
+		// Operator-facing: fold the typed Stop-hook decision ledger into a tally (clean
+		// stops, bounded stand-downs, and the fail-open stops that are otherwise invisible).
+		cmdGuardStops(os.Args[2:])
 	case guard.TrampolineVerb:
 		// Hidden internal seam: the Landlock hook-floor re-exec trampoline, Linux (see
 		// guard.LandlockTrampoline).
@@ -394,12 +400,18 @@ func main() {
 		cmdMilestone(os.Args[2:])
 	case "milestone-scorecard":
 		cmdMilestoneScorecard(os.Args[2:])
+	case "mlp-score":
+		// The witnessed grade of the "first lovable cut" for the all-in-one agent
+		// runtime epic (#3256, milestone #17): per-criterion PASS/not-yet (#3284).
+		cmdMLPScore(os.Args[2:])
 	case "program":
 		cmdProgram(os.Args[2:])
 	case "rollup":
 		cmdRollup(os.Args[2:])
 	case "spend":
 		cmdSpend(os.Args[2:])
+	case "budget":
+		cmdBudget(os.Args[2:])
 	case "sidecar":
 		cmdSidecar(os.Args[2:])
 	case "nightrun":
