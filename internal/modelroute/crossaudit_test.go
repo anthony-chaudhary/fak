@@ -31,7 +31,10 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 		if req.SubjectDigest == "" || req.PromptDigest == "" || req.PromptVersion != CrossAuditPromptVersion {
 			t.Fatalf("review request lost bound prompt/subject fields: %+v", req)
 		}
-		for _, want := range []string{"BEGIN_UNTRUSTED_ISSUE_BODY", "BEGIN_UNTRUSTED_DIFF", "subject_digest:"} {
+		if req.PromptDigest != hashString(req.Prompt) {
+			t.Fatalf("prompt digest %q does not bind exact sent payload %q", req.PromptDigest, hashString(req.Prompt))
+		}
+		for _, want := range []string{CrossAuditSystemPrompt, "BEGIN_UNTRUSTED_ISSUE_BODY", "BEGIN_UNTRUSTED_DIFF", "subject_digest:"} {
 			if !strings.Contains(req.Prompt, want) {
 				t.Fatalf("review prompt missing %q", want)
 			}

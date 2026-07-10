@@ -40,6 +40,7 @@ type ModelIdentity struct {
 	AccountClass     string `json:"account_class,omitempty"`
 	EndpointClass    string `json:"endpoint_class,omitempty"`
 	ReasoningPosture string `json:"reasoning_posture,omitempty"`
+	Driver           string `json:"driver,omitempty"`
 }
 
 // AuthorManifest is intentionally explicit in the first spine. Automatic
@@ -221,12 +222,9 @@ func AuditIssue(ctx context.Context, req IssueAuditRequest, fetcher IssueAuditFe
 		CommitSHA   string `json:"commit_sha"`
 		DiffSHA256  string `json:"diff_sha256"`
 	}{evidence.IssueNumber, evidence.IssueURL, evidence.Title, evidence.Body, strings.ToUpper(evidence.State), evidence.ClosedAt, evidence.CommitSHA, diffDigest})
-	prompt := buildIssueAuditPrompt(evidence, subjectDigest, diffDigest)
-	promptDigest := hashJSON(struct {
-		Version string `json:"version"`
-		System  string `json:"system"`
-		User    string `json:"user"`
-	}{CrossAuditPromptVersion, CrossAuditSystemPrompt, prompt})
+	userPrompt := buildIssueAuditPrompt(evidence, subjectDigest, diffDigest)
+	prompt := CrossAuditSystemPrompt + "\n\n" + userPrompt
+	promptDigest := hashString(prompt)
 
 	review, reviewErr := reviewer.ReviewIssue(ctx, IssueAuditReviewRequest{
 		IssueNumber:   req.IssueNumber,
@@ -338,6 +336,7 @@ func validateCrossAuditIdentity(role string, id ModelIdentity) (ModelIdentity, e
 	id.AccountClass = strings.TrimSpace(id.AccountClass)
 	id.EndpointClass = strings.TrimSpace(id.EndpointClass)
 	id.ReasoningPosture = strings.TrimSpace(id.ReasoningPosture)
+	id.Driver = strings.ToLower(strings.TrimSpace(id.Driver))
 	if id.Provider == "" || id.Family == "" || id.Model == "" {
 		return ModelIdentity{}, fmt.Errorf("modelroute: %s identity requires provider, family, and model", role)
 	}

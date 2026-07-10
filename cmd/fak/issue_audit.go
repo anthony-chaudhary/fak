@@ -70,6 +70,12 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	auditor.AccountClass = strings.TrimSpace(*auditorAccountClass)
 	auditor.EndpointClass = strings.TrimSpace(*auditorEndpointClass)
 	auditor.ReasoningPosture = strings.TrimSpace(*auditorReasoning)
+	driver := strings.ToLower(strings.TrimSpace(*auditorDriver))
+	auditor.Driver = driver
+	if err := validateIssueAuditDriverIdentity(driver, auditor); err != nil {
+		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		return 2
+	}
 
 	if injectedFetcher == nil {
 		injectedFetcher = &githubIssueAuditFetcher{
@@ -79,7 +85,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		}
 	}
 	if injectedReviewer == nil {
-		switch strings.ToLower(strings.TrimSpace(*auditorDriver)) {
+		switch driver {
 		case "http":
 			apiKey := ""
 			if name := strings.TrimSpace(*auditorAPIKeyEnv); name != "" {
@@ -87,7 +93,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 			}
 			injectedReviewer = newIssueAuditHTTPReviewer(auditor, strings.TrimSpace(*auditorEndpoint), apiKey)
 		case "codex", "claude":
-			injectedReviewer = newIssueAuditCLIReviewer(strings.ToLower(strings.TrimSpace(*auditorDriver)), auditor)
+			injectedReviewer = newIssueAuditCLIReviewer(driver, auditor)
 		default:
 			fmt.Fprintf(stderr, "fak issue audit: --auditor-driver %q, want http, codex, or claude\n", *auditorDriver)
 			return 2
@@ -165,6 +171,30 @@ func parseCrossAuditAuditorTarget(raw string) (modelroute.ModelIdentity, error) 
 	return id, nil
 }
 
+func validateIssueAuditDriverIdentity(driver string, id modelroute.ModelIdentity) error {
+	provider := strings.ToLower(strings.TrimSpace(id.Provider))
+	family := strings.ToLower(strings.TrimSpace(id.Family))
+	model := strings.ToLower(strings.TrimSpace(id.Model))
+	switch driver {
+	case "http":
+		return nil
+	case "claude":
+		if provider != "anthropic" || !strings.Contains(family, "claude") || !strings.Contains(model, "claude") {
+			return fmt.Errorf("--auditor-driver claude requires a declared anthropic/claude/claude-* auditor identity")
+		}
+		return nil
+	case "codex":
+		modelIsOpenAI := strings.HasPrefix(model, "gpt-") || regexp.MustCompile(`^o[0-9]`).MatchString(model)
+		familyIsOpenAI := strings.HasPrefix(family, "gpt") || family == "openai" || regexp.MustCompile(`^o[0-9]`).MatchString(family)
+		if provider != "openai" || !familyIsOpenAI || !modelIsOpenAI {
+			return fmt.Errorf("--auditor-driver codex requires a declared openai/gpt-or-o/gpt-or-o auditor identity")
+		}
+		return nil
+	default:
+		return fmt.Errorf("--auditor-driver %q, want http, codex, or claude", driver)
+	}
+}
+
 type issueAuditCommandRunner func(context.Context, string, ...string) ([]byte, error)
 
 func defaultIssueAuditRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -235,7 +265,7 @@ func (f *githubIssueAuditFetcher) FetchIssueAuditEvidence(ctx context.Context, i
 	if err != nil {
 		return modelroute.IssueAuditEvidence{}, err
 	}
-	diff, err := f.runner(ctx, "git", "show", "--format=", "--no-ext-diff", "--binary", "--no-renames", commit)
+	diff, err := f.readClosingDiff(ctx, commit)
 	if err != nil {
 		return modelroute.IssueAuditEvidence{}, fmt.Errorf("read closing diff %s: %w", commit, err)
 	}
@@ -250,6 +280,24 @@ func (f *githubIssueAuditFetcher) FetchIssueAuditEvidence(ctx context.Context, i
 		Diff:        string(diff),
 		Evidence:    []modelroute.EvidenceRef{{Kind: "github-closure", Ref: source}},
 	}, nil
+}
+
+func (f *githubIssueAuditFetcher) readClosingDiff(ctx context.Context, commit string) ([]byte, error) {
+	parents, err := f.runner(ctx, "git", "rev-list", "--parents", "-n", "1", commit)
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.Fields(string(parents))
+	if len(fields) < 2 {
+		return nil, fmt.Errorf("commit %s has no parent to diff", commit)
+	}
+	if len(fields) > 2 {
+		// A normal `git show <merge>` is a combined diff and can be empty even
+		// when the PR changed hundreds of lines. The PR's actual closing change
+		// is the merge result relative to its first parent.
+		return f.runner(ctx, "git", "diff", "--no-ext-diff", "--binary", "--no-renames", fields[1], fields[0])
+	}
+	return f.runner(ctx, "git", "show", "--format=", "--no-ext-diff", "--binary", "--no-renames", fields[0])
 }
 
 func (f *githubIssueAuditFetcher) closingCommit(ctx context.Context, repo string, issue int, prs []struct {
@@ -364,7 +412,6 @@ func (r *issueAuditHTTPReviewer) ReviewIssue(ctx context.Context, req modelroute
 	client.Temperature = 0
 	temp := 0.0
 	completion, err := client.Complete(ctx, []agent.Message{
-		{Role: agent.RoleSystem, Content: modelroute.CrossAuditSystemPrompt},
 		{Role: agent.RoleUser, Content: req.Prompt},
 	}, nil, agent.WithMaxTokens(512), agent.WithTemperature(&temp))
 	if err != nil {
@@ -383,18 +430,23 @@ func (r *issueAuditHTTPReviewer) ReviewIssue(ctx context.Context, req modelroute
 type issueAuditCLIReviewer struct {
 	driver   string
 	identity modelroute.ModelIdentity
+	runner   issueAuditProcessRunner
 }
 
 func newIssueAuditCLIReviewer(driver string, identity modelroute.ModelIdentity) modelroute.IssueAuditReviewer {
-	return &issueAuditCLIReviewer{driver: driver, identity: identity}
+	return &issueAuditCLIReviewer{driver: driver, identity: identity, runner: runIssueAuditProcess}
 }
 
 const issueAuditResultSchema = `{"type":"object","additionalProperties":false,"properties":{"verdict":{"type":"string","enum":["PASS","REFUTE","INCONCLUSIVE"]},"reason":{"type":"string"},"evidence_refs":{"type":"array","items":{"type":"string"}}},"required":["verdict","reason","evidence_refs"]}`
 
 func (r *issueAuditCLIReviewer) ReviewIssue(ctx context.Context, req modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
+	runner := r.runner
+	if runner == nil {
+		runner = runIssueAuditProcess
+	}
 	switch r.driver {
 	case "claude":
-		out, err := runIssueAuditProcess(ctx, req.Prompt, "claude",
+		out, err := runner(ctx, req.Prompt, "claude",
 			"-p", "--model", r.identity.Model, "--output-format", "json",
 			"--json-schema", issueAuditResultSchema, "--tools", "")
 		if err != nil {
@@ -421,7 +473,7 @@ func (r *issueAuditCLIReviewer) ReviewIssue(ctx context.Context, req modelroute.
 			args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", reasoning))
 		}
 		args = append(args, "-")
-		if _, err := runIssueAuditProcess(ctx, req.Prompt, "codex", args...); err != nil {
+		if _, err := runner(ctx, req.Prompt, "codex", args...); err != nil {
 			return modelroute.IssueAuditReviewResult{}, err
 		}
 		out, err := os.ReadFile(outputPath)
@@ -433,6 +485,8 @@ func (r *issueAuditCLIReviewer) ReviewIssue(ctx context.Context, req modelroute.
 		return modelroute.IssueAuditReviewResult{}, fmt.Errorf("unsupported issue audit CLI driver %q", r.driver)
 	}
 }
+
+type issueAuditProcessRunner func(context.Context, string, string, ...string) ([]byte, error)
 
 func runIssueAuditProcess(ctx context.Context, stdin, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
