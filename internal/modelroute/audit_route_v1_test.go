@@ -659,60 +659,6 @@ func TestPlanIssueAuditHighRiskProviderDiversityAndRootCauseRefusals(t *testing.
 	})
 }
 
-type auditRouteArtifactV1 struct {
-	Schema                string                          `json:"schema"`
-	Risk                  AuditRisk                       `json:"risk"`
-	Author                AuditIdentity                   `json:"author"`
-	AuthorUnknown         bool                            `json:"author_unknown"`
-	RequiredTier          WorkTier                        `json:"required_tier"`
-	RequiredEffort        string                          `json:"required_effort"`
-	RequiredQuorum        int                             `json:"required_quorum"`
-	PolicyVersion         string                          `json:"policy_version"`
-	PolicyDigest          string                          `json:"policy_digest"`
-	EstimatedInputTokens  int64                           `json:"estimated_input_tokens"`
-	EstimatedOutputTokens int64                           `json:"estimated_output_tokens"`
-	QuorumCostMicrosUSD   int64                           `json:"quorum_cost_micros_usd"`
-	Candidates            []auditRouteArtifactCandidateV1 `json:"candidates"`
-}
-
-type auditRouteArtifactCandidateV1 struct {
-	Rank                   int                       `json:"rank"`
-	CandidateID            string                    `json:"candidate_id"`
-	Identity               AuditIdentity             `json:"identity"`
-	Capability             WorkTier                  `json:"capability"`
-	CapabilitySource       string                    `json:"capability_source"`
-	ActualEffort           string                    `json:"actual_effort"`
-	ProviderHealth         AuditProviderHealthStatus `json:"provider_health"`
-	Capacity               AuditCapacityStatus       `json:"capacity"`
-	Cooldown               AuditCooldownStatus       `json:"cooldown"`
-	EstimatedCostMicrosUSD int64                     `json:"estimated_cost_micros_usd"`
-	IndependenceVerdict    AuditIndependenceVerdict  `json:"independence_verdict"`
-	IndependenceReason     AuditIndependenceReason   `json:"independence_reason"`
-	IndependenceDigest     string                    `json:"independence_digest"`
-	MissingAxes            []string                  `json:"missing_axes,omitempty"`
-}
-
-func auditRouteArtifactFromPlanV1(plan AuditIssuePlan) auditRouteArtifactV1 {
-	artifact := auditRouteArtifactV1{
-		Schema: plan.Schema, Risk: plan.Risk, Author: plan.Author, AuthorUnknown: plan.AuthorUnknown,
-		RequiredTier: plan.RequiredTier, RequiredEffort: plan.RequiredEffort, RequiredQuorum: plan.RequiredQuorum,
-		PolicyVersion: plan.PolicyVersion, PolicyDigest: plan.PolicyDigest,
-		EstimatedInputTokens: plan.EstimatedInputTokens, EstimatedOutputTokens: plan.EstimatedOutputTokens,
-		QuorumCostMicrosUSD: plan.QuorumCostMicrosUSD,
-	}
-	for _, candidate := range plan.Candidates {
-		artifact.Candidates = append(artifact.Candidates, auditRouteArtifactCandidateV1{
-			Rank: candidate.Rank, CandidateID: candidate.CandidateID, Identity: candidate.Identity,
-			Capability: candidate.Capability, CapabilitySource: candidate.CapabilitySource, ActualEffort: candidate.ActualEffort,
-			ProviderHealth: candidate.ProviderHealth, Capacity: candidate.Capacity, Cooldown: candidate.Cooldown,
-			EstimatedCostMicrosUSD: candidate.EstimatedCostMicrosUSD,
-			IndependenceVerdict:    candidate.Independence.Verdict, IndependenceReason: candidate.Independence.Reason,
-			IndependenceDigest: candidate.Independence.PolicyDigest, MissingAxes: candidate.Independence.MissingAxes,
-		})
-	}
-	return artifact
-}
-
 func TestPlanIssueAuditCredentialFreeArtifact(t *testing.T) {
 	authors, _, _ := auditRouteV1Fixtures()
 	roster := auditRouteV1Roster("gpt-primary", "local-open")
@@ -720,7 +666,7 @@ func TestPlanIssueAuditCredentialFreeArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := json.MarshalIndent(auditRouteArtifactFromPlanV1(plan), "", "  ")
+	b, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

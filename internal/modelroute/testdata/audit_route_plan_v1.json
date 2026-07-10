@@ -14,6 +14,7 @@
     "driver": "claude"
   },
   "author_unknown": false,
+  "diversified_quorum": false,
   "required_tier": 1,
   "required_effort": "high",
   "required_quorum": 1,
@@ -45,9 +46,39 @@
       "capacity": "AVAILABLE",
       "cooldown": "READY",
       "estimated_cost_micros_usd": 2000,
-      "independence_verdict": "ADMIT",
-      "independence_reason": "ADMIT_INDEPENDENT",
-      "independence_digest": "sha256:798695cbe6b762e4fd6b954e3e826694ee93d590b8fe6be28149bc3bdab23f9b"
+      "cost_currency": "USD",
+      "cost_basis": "roster-estimate",
+      "independence": {
+        "verdict": "ADMIT",
+        "reason": "ADMIT_INDEPENDENT",
+        "policy_version": "audit-independence/v1",
+        "policy_digest": "sha256:798695cbe6b762e4fd6b954e3e826694ee93d590b8fe6be28149bc3bdab23f9b",
+        "risk": "default",
+        "author": {
+          "harness": "claude-code",
+          "provider": "anthropic",
+          "family": "claude",
+          "model": "claude-author-canonical",
+          "weights_revision": "claude-wa",
+          "account_class": "subscription",
+          "endpoint_class": "hosted",
+          "reasoning_posture": "high",
+          "provenance_source": "registry:claude-author",
+          "driver": "claude"
+        },
+        "auditor": {
+          "harness": "codex",
+          "provider": "openai",
+          "family": "gpt",
+          "model": "gpt-review-configured",
+          "weights_revision": "gpt-wr",
+          "account_class": "subscription",
+          "endpoint_class": "hosted",
+          "reasoning_posture": "xhigh",
+          "provenance_source": "registry:gpt-review",
+          "driver": "codex"
+        }
+      }
     },
     {
       "rank": 2,
@@ -71,9 +102,151 @@
       "capacity": "AVAILABLE",
       "cooldown": "READY",
       "estimated_cost_micros_usd": 0,
-      "independence_verdict": "ADMIT",
-      "independence_reason": "ADMIT_INDEPENDENT",
-      "independence_digest": "sha256:798695cbe6b762e4fd6b954e3e826694ee93d590b8fe6be28149bc3bdab23f9b"
+      "cost_currency": "USD",
+      "cost_basis": "roster-estimate",
+      "independence": {
+        "verdict": "ADMIT",
+        "reason": "ADMIT_INDEPENDENT",
+        "policy_version": "audit-independence/v1",
+        "policy_digest": "sha256:798695cbe6b762e4fd6b954e3e826694ee93d590b8fe6be28149bc3bdab23f9b",
+        "risk": "default",
+        "author": {
+          "harness": "claude-code",
+          "provider": "anthropic",
+          "family": "claude",
+          "model": "claude-author-canonical",
+          "weights_revision": "claude-wa",
+          "account_class": "subscription",
+          "endpoint_class": "hosted",
+          "reasoning_posture": "high",
+          "provenance_source": "registry:claude-author",
+          "driver": "claude"
+        },
+        "auditor": {
+          "harness": "local-runner",
+          "provider": "local",
+          "family": "qwen",
+          "model": "local-open-review",
+          "weights_revision": "qwen-wr",
+          "account_class": "local",
+          "endpoint_class": "local",
+          "reasoning_posture": "high",
+          "provenance_source": "registry:local-review",
+          "driver": "http"
+        }
+      }
+    }
+  ],
+  "considered": [
+    {
+      "candidate_id": "gpt-primary",
+      "identity": {
+        "harness": "codex",
+        "provider": "openai",
+        "family": "gpt",
+        "model": "gpt-review-configured",
+        "weights_revision": "gpt-wr",
+        "account_class": "subscription",
+        "endpoint_class": "hosted",
+        "reasoning_posture": "xhigh",
+        "provenance_source": "registry:gpt-review",
+        "driver": "codex"
+      },
+      "capability": 0,
+      "capability_source": "benchmark:gpt-frontier",
+      "actual_effort": "xhigh",
+      "provider_health": "HEALTHY",
+      "capacity": "AVAILABLE",
+      "cooldown": "READY",
+      "estimated_cost_micros_usd": 2000,
+      "independence": {
+        "verdict": "ADMIT",
+        "reason": "ADMIT_INDEPENDENT",
+        "policy_version": "audit-independence/v1",
+        "policy_digest": "sha256:798695cbe6b762e4fd6b954e3e826694ee93d590b8fe6be28149bc3bdab23f9b",
+        "risk": "default",
+        "author": {
+          "harness": "claude-code",
+          "provider": "anthropic",
+          "family": "claude",
+          "model": "claude-author-canonical",
+          "weights_revision": "claude-wa",
+          "account_class": "subscription",
+          "endpoint_class": "hosted",
+          "reasoning_posture": "high",
+          "provenance_source": "registry:claude-author",
+          "driver": "claude"
+        },
+        "auditor": {
+          "harness": "codex",
+          "provider": "openai",
+          "family": "gpt",
+          "model": "gpt-review-configured",
+          "weights_revision": "gpt-wr",
+          "account_class": "subscription",
+          "endpoint_class": "hosted",
+          "reasoning_posture": "xhigh",
+          "provenance_source": "registry:gpt-review",
+          "driver": "codex"
+        }
+      },
+      "admitted": true,
+      "preference": 0
+    },
+    {
+      "candidate_id": "local-open",
+      "identity": {
+        "harness": "local-runner",
+        "provider": "local",
+        "family": "qwen",
+        "model": "local-open-review",
+        "weights_revision": "qwen-wr",
+        "account_class": "local",
+        "endpoint_class": "local",
+        "reasoning_posture": "high",
+        "provenance_source": "registry:local-review",
+        "driver": "http"
+      },
+      "capability": 1,
+      "capability_source": "benchmark:local-implementation",
+      "actual_effort": "high",
+      "provider_health": "HEALTHY",
+      "capacity": "AVAILABLE",
+      "cooldown": "READY",
+      "estimated_cost_micros_usd": 0,
+      "independence": {
+        "verdict": "ADMIT",
+        "reason": "ADMIT_INDEPENDENT",
+        "policy_version": "audit-independence/v1",
+        "policy_digest": "sha256:798695cbe6b762e4fd6b954e3e826694ee93d590b8fe6be28149bc3bdab23f9b",
+        "risk": "default",
+        "author": {
+          "harness": "claude-code",
+          "provider": "anthropic",
+          "family": "claude",
+          "model": "claude-author-canonical",
+          "weights_revision": "claude-wa",
+          "account_class": "subscription",
+          "endpoint_class": "hosted",
+          "reasoning_posture": "high",
+          "provenance_source": "registry:claude-author",
+          "driver": "claude"
+        },
+        "auditor": {
+          "harness": "local-runner",
+          "provider": "local",
+          "family": "qwen",
+          "model": "local-open-review",
+          "weights_revision": "qwen-wr",
+          "account_class": "local",
+          "endpoint_class": "local",
+          "reasoning_posture": "high",
+          "provenance_source": "registry:local-review",
+          "driver": "http"
+        }
+      },
+      "admitted": true,
+      "preference": 1
     }
   ]
 }
