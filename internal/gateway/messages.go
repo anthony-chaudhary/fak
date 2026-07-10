@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -123,29 +122,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptBody)
-	raw := make([]byte, 0, 4096)
-	buf := make([]byte, 32*1024)
-	for {
-		n, readErr := r.Body.Read(buf)
-		raw = append(raw, buf[:n]...)
-		if readErr != nil {
-			// MaxBytesReader signals overflow with *http.MaxBytesError. Forwarding
-			// the truncated prefix upstream yields an opaque 400; surface it as a
-			// clean 413 so the operator sees the real cause (a body past the cap),
-			// not a malformed-JSON guess.
-			var maxErr *http.MaxBytesError
-			if errors.As(readErr, &maxErr) {
-				writeErr(w, http.StatusRequestEntityTooLarge,
-					"request body exceeds the gateway limit ("+strconv.Itoa(maxTranscriptBody>>20)+" MiB); the transcript is too large to forward")
-				return
-			}
-			break
-		}
-	}
-	req, err := agent.DecodeAnthropicMessagesRequest(raw)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	req, ok := s.readAnthropicMessagesRequest(w, r)
+	if !ok {
 		return
 	}
 	ctx := r.Context()
@@ -203,112 +181,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
 	s.injectGuardRecoveryPrompt(req)
-	// Harness-coherence seam (#1132): capture a CONTENT-FREE digest of the inbound protected
-	// prefix (bytes through the first cache_control breakpoint) BEFORE any of fak's request-side
-	// transforms below. This ordering is load-bearing — fak forwards the inbound protected prefix
-	// verbatim, so a change in this digest across turns can only be the harness rewriting its own
-	// history (auto-compaction), never fak. The observation is folded after the served turn, once
-	// the provider's cache counters are known.
-	inboundPrefixDigest := inboundProtectedPrefixDigest(req.Raw)
-	// Live footprint (#3233): price the as-sent structural floor (system + built-in
-	// tools + MCP tools + history/tail) at the SAME pre-transform anchor as the
-	// prefix digest — before maybeCompactInboundTools prunes any tool def — and fold
-	// it per-trace for fak_context_value. ESTIMATED, audit-only, off the byte-faithful
-	// passthrough (it reads a de-folded COPY, never mutating req).
-	s.observeCtxFootprint(reqTrace, req)
-	// Tool-reference sanitization (correctness, runs on EVERY wire, before any shrinker or the
-	// prefix-digest matters for cache accounting): the Claude Code client emits its INTERNAL
-	// `tool_reference` blocks inside a ToolSearch tool_result, which is not a valid Anthropic
-	// tool_result.content block type — a body carrying one is 400'd upstream as malformed
-	// (witnessed: session b98cf818, which died on turn 2 right after a ToolSearch result). Rewrite
-	// each into a wire-valid `text` block naming the tool so the body forwards cleanly and the model
-	// still sees which tools the search surfaced. Fail-safe (identity on any ambiguity) and placed
-	// AFTER the digest — a tool_reference only ever lives in a late-turn tool_result, never in the
-	// cached protected prefix, so this leaves the digest's harness-coherence meaning intact.
-	s.sanitizeAnthropicToolReferences(req)
-	// Managed-cache 1h TTL upgrade (#1850 / epic #1844 C6): when the lever is on
-	// (fak guard --managed-cache, auto-on for API-key-billed sessions; or the
-	// FAK_ABLATE_TTL_1H ablation arm), extend an existing stable-head cache_control
-	// breakpoint to Anthropic's 1h tier before any body shrinker touches req.Raw, so a
-	// long session idling past the 5m window re-enters on a cache read. Every attempt is
-	// witnessed on /metrics (fak_gateway_cache_ttl_upgrade_total).
-	if s.maybeUpgradeAnthropicCacheTTL1H(req) {
-		// #2446: the 1h window now applies to this session, so the ctxvalue wakeup
-		// horizon reads the 1h TTL instead of the 5m default from here on.
-		s.noteCtxValueTTL1h(reqTrace)
-	}
-	// ctxplan planned VIEW on the Anthropic passthrough (#927 — the deferred #555 req.Raw
-	// transform): when --ctx-view-budget is set, plan req.Messages into an O(1) resident
-	// view and materialize it onto req.Raw by stubbing each elided middle turn in place
-	// (same role → alternation preserved), while the cache_control prefix bytes and every
-	// resident message's original bytes stay byte-identical so the upstream cache hit
-	// survives. Runs before the shrinkers so it operates on the original conversation body
-	// (its content match keys off the decoded req.Messages); the siblings below then see the
-	// already-bounded body and bail (under-budget) in the common case. OFF (identity) by
-	// default; fail-safe.
-	viewPlanned, _ := s.maybePlanAnthropicRaw(ctx, reqTrace, req)
-	// Cache-prefix-preserving history compaction (#555): on the Anthropic passthrough,
-	// shrink the OUTBOUND body's OLD turns to the configured resident-token budget while
-	// keeping the cached-prefix bytes verbatim, so a long conversation forwards far fewer
-	// uncached tokens upstream with the cache hit intact. OFF (identity) by default and on
-	// every non-passthrough wire. Applied to req.Raw ONLY — the decoded req.Messages the
-	// kernel adjudicates below are untouched, so the trust boundary is unchanged. Placed
-	// after the pace cap (which only ever rewrites the top-level max_tokens, never the
-	// cached message prefix) and before either passthrough consumer of req.Raw.
-	//
-	// turnsLeft rides sessionTurn.state.Budget.TurnsLeft — the ONLY live session-horizon
-	// signal this request boundary carries — through to the --compact-anchor-head burst
-	// economics gate (#1407/#1408). Only a genuinely bounded positive value counts as a
-	// known horizon; 0 (no DecideSession wired, or a session with no turns left) and -1
-	// (session.Unbounded) both leave the gate's TotalTurns unset, so an un-budgeted or
-	// unbounded session never bursts the cache on a guess. reqTrace additionally lets the
-	// gate consult the OBSERVED per-trace idle gap: a trace that idled past the
-	// message-breakpoint cache TTL is provably cold, so a head-anchored fire there carries
-	// no marginal penalty and needs no horizon at all — the unflagged long-session firing
-	// path (#1407's cold case).
-	compacted, compactReason := s.compactAnthropicRawWithReason(req, sessionTurn.state.Budget.TurnsLeft, reqTrace)
-	// fakBail is the harness-coherence view of fak's own compaction this turn: "" for a clean fire
-	// AND for a healthy under_budget no-op, the real reason for any actual bail. Threaded into the
-	// observation below so the coordinator can count a sustained fak-bail streak (when it yields the
-	// context net back to the harness).
-	fakBail := fakBailReasonFor(compactReason)
-	hcoh := harnessCoherenceInputs{inboundPrefixDigest: inboundPrefixDigest, fakBail: fakBail}
-	contextEvent := compacted || viewPlanned
-	// Oversized tool_result elision (the bounded-loss sibling of compaction): after compaction
-	// has dropped whole OLD turns, shrink any remaining oversized tool_result bodies in the
-	// un-cached, non-recent middle to a bounded head+tail form, keeping the cached-prefix bytes
-	// verbatim and never touching a cache_control-bearing message. OFF (identity) by default and
-	// on every non-passthrough wire; fail-safe. Runs on the already-compacted body.
-	s.maybeElideAnthropicRaw(req)
-	// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
-	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
-	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are
-	// disjoint regions) and before either passthrough consumer of req.Raw. Identity-safe:
-	// nil predicate or no floor-denied advertised tool ⇒ req.Raw untouched. The call records
-	// its WITNESSED prune count into /metrics (observeInboundToolPrune), so a turn that shed
-	// unreachable tool defs is now visible in the exit summary instead of silently discarded.
-	// Also remember the concrete names per trace so a later model proposal of a pruned name is
-	// logged once as a floor-vs-observed drift witness.
-	s.recordInboundPrunedToolDefinitions(reqTrace, s.maybeCompactInboundTools(req))
-	s.maybeCompactInboundSystem(req)
-	// The 10x floor lever (#3232): defer the cold tool tail (defer_loading:true) and inject
-	// a tool_search_tool on the outbound body, so the provider loads only the hot core into
-	// context. OFF by default; deterministic + cache-safe + fail-safe identity. Runs AFTER
-	// the deny-prune (disjoint operations on tools[]) and before the passthrough consumers of
-	// req.Raw. deferredCold>0 means the body now carries defer_loading and needs the beta.
-	deferredCold := s.maybeDeferColdTools(req, reqTrace)
-	// In passthrough mode the upstream credential is the client's own (transparent
-	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
-	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
-	// Both extracted here, on the HTTP boundary, since the planner layer never sees
-	// the request headers.
-	upstreamKey := s.anthropicUpstreamCredential(r)
-	upstreamBeta := r.Header.Get("anthropic-beta")
-	// Beta union (#3232): when this turn deferred the cold tail, the upstream must accept
-	// defer_loading / tool_search_tool, so union the tool-search beta into the forwarded set.
-	if deferredCold > 0 {
-		upstreamBeta = unionBeta(upstreamBeta, toolSearchBeta)
-	}
+	prep := s.prepareServedAnthropicRequest(ctx, r, req, reqTrace, sessionTurn)
+	compacted := prep.compacted
+	contextEvent := prep.contextEvent
+	hcoh := prep.hcoh
+	upstreamKey := prep.upstreamKey
+	upstreamBeta := prep.upstreamBeta
 
 	// Repetition-loop guard (runs on EVERY wire, before any planner round-trip). A small
 	// local model, after a tool refusal, often stops making progress and loops — echoing
@@ -891,6 +769,42 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	return outcome.Reason == agent.CompactReasonNone, outcome.Reason
 }
 
+// maybeAnchorAnthropicRaw is the DEFAULT-ON M2 star-anchor pre-flight gate (#1493): on the
+// flagship Anthropic passthrough it APPLIES cachemeta.RecommendLayout (via
+// agent.PlaceAnthropicCacheBreakpointWithOutcome) rather than merely reporting it — hoisting
+// volatile system blocks behind a byte-stable cacheable anchor and splicing a cache_control
+// breakpoint onto the stable head the caller did NOT send — so a no-breakpoint caller earns
+// provider prefix caching BY DEFAULT. Unlike the placement inside compactAnthropicRawWithReason
+// (gated on compactHistoryBudget>0, so --compact-history-budget=0 took anchoring down with it),
+// this gate is DECOUPLED: it fires whenever s.vcacheAnchor is on, independent of the compaction
+// budget and the managed-cache TTL lever. Gated on s.vcacheAnchor (--vcache-anchor, default-on);
+// OFF is byte-for-byte identity. Fail-safe: any ambiguity — no stable head, or a volatile-only
+// head whose hoist would change the model-visible prefix — returns req.Raw UNCHANGED (the honesty
+// guard: a semantics-changing hoist is refused, not silently applied). Idempotent with the
+// compaction and TTL-upgrade placements: a body that already carries a breakpoint bails
+// already_set, so running the anchor first makes the later gates no-op on the same breakpoint.
+// The first natural request then WRITES the anchor to the provider cache and later siblings READ
+// it. Anthropic passthrough only; inert on every other wire. Returns whether it PLACED this turn.
+func (s *Server) maybeAnchorAnthropicRaw(req *agent.AnthropicMessagesRequest, trace string) (fired bool) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
+		return false
+	}
+	if !s.vcacheAnchor {
+		return false // configured OFF (--vcache-anchor=false)
+	}
+	placed, placement := agent.PlaceAnthropicCacheBreakpointWithOutcome(req.Raw)
+	req.Raw = placed
+	s.metrics.observePlacement(placement)
+	if placement.Reason != agent.BreakpointReasonNone {
+		return false // refused (already_set / volatile_head / no_stable_head / …): identity, witnessed
+	}
+	// fak placed a breakpoint the caller did NOT send — this turn's provider cache_read is
+	// fak-unlocked. Credit it so the per-turn debug render attributes it as fak-authored (keyed by
+	// the same trace; the empty-trace path is a safe no-op).
+	s.recordPlacement(trace)
+	return true
+}
+
 func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesRequest) bool {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H {
 		return false
@@ -942,6 +856,30 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 	req.Raw = out
 	s.metrics.observeUncachedTrim(outcome)
 	return outcome.Reason == agent.ElideReasonNone
+}
+
+// maybeElideStaleReads is the read-lifecycle sibling of maybeElideAnthropicRaw: on the outbound
+// passthrough body it replaces a Read tool_result whose file was Edited/Written in a LATER in-session
+// turn (a STALE, superseded snapshot) with a compact restore marker, and stashes the full original
+// text behind the marker's content-address so fak_context_restore can page it back in. Like the
+// oversized-result path it is a no-op unless the gateway fronts the REAL Anthropic API (only there is
+// req.Raw forwarded verbatim), and agent.ElideStaleReadsWithOutcome is fail-safe — identity on any
+// ambiguity, never touches a cache_control-bearing message, proves the protected prefix stays
+// byte-identical. trace is REQUIRED: the stash lands under it so the same-trace fak_context_restore
+// resolves the handle. Returns whether it FIRED.
+func (s *Server) maybeElideStaleReads(req *agent.AnthropicMessagesRequest, trace string) (fired bool) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
+		return false
+	}
+	if !s.elideStaleReads {
+		return false // configured OFF
+	}
+	out, outcome := agent.ElideStaleReadsWithOutcome(req.Raw)
+	req.Raw = out
+	for _, r := range outcome.Restores {
+		s.stashRestore(trace, r.ID, r.Excerpt, r.Bytes)
+	}
+	return outcome.Reason == agent.StaleReasonNone
 }
 
 // sanitizeAnthropicToolReferences rewrites the Claude Code client's INTERNAL `tool_reference`
@@ -1332,8 +1270,14 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	s.recordTurnSafety(reqTrace, adjs, resultAdmissions)
 	// Fold this turn's adjudication SHAPE into separate turn-control signals. Hard deny-all
 	// remains the bounded stop-policy path; retryable tool feedback (for example malformed JSON)
-	// continues the agent without counting as a session-stop/give-up reason.
-	s.metrics.recordAdjudicationOutcome(adjudicationOutcomeForTurn(adjs, len(kept), servedHits))
+	// continues the agent without counting as a session-stop/give-up reason. On a deny-all turn
+	// the fingerprint (same tool+reason) is what the guard Stop hook keys its give-up on.
+	signal := adjudicationOutcomeForTurn(adjs, len(kept), servedHits)
+	denyFP := ""
+	if signal == adjudicationOutcomeDenyAll {
+		denyFP = denyAllFingerprint(adjs)
+	}
+	s.metrics.recordAdjudicationOutcome(signal, denyFP)
 
 	blocks := agent.AnthropicResponseBlocks(asst)
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)
@@ -1360,6 +1304,13 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// If the client reports the known Windows Bash git/gh exit-143 hang, give the
 	// model the closed failure token plus the native PowerShell retry command.
 	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
+		blocks = prependTextBlock(blocks, note)
+	}
+	// If the session has become unusually expensive (block-tier per-turn as-sent
+	// volume) AND the context-expense gate is armed, tell the model once to
+	// checkpoint and end the turn (ctxExpenseNoteOnce; "" when the gate is off or
+	// the tier/dedup does not fire, so the default path is byte-for-byte unchanged).
+	if note := s.ctxExpenseNoteOnce(reqTrace); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
 	// Echo the model the client asked for (Anthropic reflects the requested id);
@@ -1456,344 +1407,6 @@ func secretRedactedWarn(n int) string {
 		" in a tool result (SECRET_REDACTED) — the rest of the output is intact and in context. " +
 		"Warn-first default: your own output is not withheld, only the credential itself is masked. " +
 		"To hold the whole result instead, set the fail_closed secret posture."
-}
-
-// resultAdmissionNote names any inbound tool result the kernel PAGED OUT so a quarantine
-// stub does not read as a broken tool — in ONE line. A quarantine is a routine safety
-// precaution (most often a credential-shaped string or injection-shaped text in the
-// tool's OWN output, which CAN be a false positive on placeholder/example or
-// security-discussing content), not a sign the agent did anything wrong. The per-result
-// verdicts (tool, reason, page-in id) still ride the machine-readable `fak` extension, so
-// the prose only needs to carry the three things a reading model acts on: that something
-// was held (not lost), that it is retrievable, and that it is not the agent's fault. The
-// reason CODES (TRUST_VIOLATION / SECRET_EXFIL / OVERSIZE) are the closed-vocabulary
-// labels — terse and self-describing — instead of a per-item paragraph. Returns "" when
-// every result was a clean allow.
-//
-// This is the buffered/streaming Anthropic + Gemini prose; resultAdmissionNoteOnce wraps
-// it with per-session dedup so a single held result is announced once, not every replayed
-// turn.
-func resultAdmissionNote(adms []ResultAdmission) string {
-	n := 0
-	redacted := 0 // warn-first SECRET_REDACTED transforms: masked in place, NOT held out
-	counts := map[string]int{}
-	order := make([]string, 0, 4)
-	livelocks := make([]string, 0, 1)
-	for _, a := range adms {
-		if a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonSecretRedacted {
-			redacted++
-			continue
-		}
-		if a.Verdict.Kind != "QUARANTINE" {
-			continue
-		}
-		n++
-		reason := a.Verdict.Reason
-		if reason == "" {
-			reason = "RESULT_FLOOR"
-		}
-		if _, seen := counts[reason]; !seen {
-			order = append(order, reason)
-		}
-		counts[reason]++
-		if a.Livelock != nil {
-			livelocks = append(livelocks, resultLivelockInBandNote(a))
-		}
-	}
-	if n == 0 {
-		// No held-out result. If a credential span was MASKED in place (the warn-first
-		// default), say so in one line — the rest of the result is in context, so this is
-		// a WARN, not a "held out" banner, and never baits a re-read.
-		return secretRedactedWarn(redacted)
-	}
-	noun, verb := "tool result", "was"
-	if n > 1 {
-		noun, verb = "tool results", "were"
-	}
-	parts := make([]string, 0, len(order))
-	for _, reason := range order {
-		if c := counts[reason]; c > 1 {
-			parts = append(parts, reason+"×"+strconv.Itoa(c))
-		} else {
-			parts = append(parts, reason)
-		}
-	}
-	// The retrievability clause must be HONEST per reason class. Most quarantines
-	// (TRUST_VIOLATION / OVERSIZE / injection-shaped text) page back in via the kernel
-	// page-in gate. Secret-class quarantines (SECRET_EXFIL / RESULT_SECRET_DISCOVERED)
-	// do NOT: the page-in gate re-screens on release and refuses any bytes that still
-	// match, so a credential-shaped result never returns to context — by design.
-	// Telling a worker such bytes are "retrievable" is false AND actively harmful: it
-	// baits a retrieval loop (worker #2704 re-read the same held result to ~125k tokens
-	// chasing a promise the gate would never honor). So name the secret class honestly
-	// and give it a concrete next step instead of a false promise.
-	hasSecret := counts[reasonSecretExfil] > 0 || counts[reasonSecretDiscovered] > 0
-	hasNonSecret := false
-	for _, r := range order {
-		if r != reasonSecretExfil && r != reasonSecretDiscovered {
-			hasNonSecret = true
-			break
-		}
-	}
-	var retrievability string
-	switch {
-	case hasSecret && !hasNonSecret:
-		retrievability = "held; credential-shaped bytes will NOT page back into context (secrets are absolute by design — the page-in gate re-screens and refuses release). If this was a placeholder/example or config value, do not re-read to retrieve it — proceed without the secret, or ask the operator to whitelist the value's shape."
-	case hasSecret && hasNonSecret:
-		retrievability = "paged out, not lost. Non-secret results are retrievable via the kernel page-in gate; credential-shaped results (SECRET_EXFIL) will NOT page back — do not re-read to retrieve them, proceed without them or ask the operator to whitelist the shape."
-	default:
-		retrievability = "paged out, not lost; retrievable via the kernel page-in gate."
-	}
-	note := "[fak] " + strconv.Itoa(n) + " " + noun + " " + verb + " held out of context (" +
-		strings.Join(parts, ", ") + ") — " + retrievability + " " +
-		"Routine guard behavior, not an error you caused; see the `fak` extension for per-result detail."
-	if len(livelocks) > 0 {
-		note += " " + strings.Join(livelocks, " ")
-	}
-	if w := secretRedactedWarn(redacted); w != "" {
-		note += " " + w // a mixed turn: some held, some masked-in-place
-	}
-	return note
-}
-
-// resultAdmissionNoteOnce is resultAdmissionNote with PER-SESSION dedup: it emits the
-// prose banner only for quarantined results this trace has not already announced, so a
-// held result is surfaced once rather than re-announced on every replayed turn (the client
-// re-sends the full transcript each turn, so admitInboundResults re-quarantines the SAME
-// result every time). The machine-readable verdicts still ride the `fak` extension on every
-// turn — only the repeated human paragraph is suppressed, so dedup costs no signal. A
-// fresh quarantine on a later turn (new key) still emits. An empty trace falls back to the
-// un-deduped note (no session to key on).
-func (s *Server) resultAdmissionNoteOnce(trace string, adms []ResultAdmission) string {
-	if s == nil || trace == "" {
-		return resultAdmissionNote(adms)
-	}
-	fresh := make([]ResultAdmission, 0, len(adms))
-	s.notedResultsMu.Lock()
-	if s.notedResults == nil {
-		s.notedResults = map[string]map[string]struct{}{}
-	}
-	if len(s.notedResults) >= maxResetHealthSessions {
-		// Bound the map (same reaper convention as turnSafety/resetHealth): drop one stale
-		// trace. The dedup is best-effort observability, so an evicted trace re-announcing
-		// once is harmless.
-		for k := range s.notedResults {
-			delete(s.notedResults, k)
-			break
-		}
-	}
-	seen := s.notedResults[trace]
-	if seen == nil {
-		seen = map[string]struct{}{}
-		s.notedResults[trace] = seen
-	}
-	for _, a := range adms {
-		isQuarantine := a.Verdict.Kind == "QUARANTINE"
-		isRedact := a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonSecretRedacted
-		if !isQuarantine && !isRedact {
-			continue
-		}
-		key := resultNoteKey(a)
-		if _, already := seen[key]; already {
-			if a.Livelock != nil {
-				fresh = append(fresh, a)
-			}
-			continue
-		}
-		seen[key] = struct{}{}
-		fresh = append(fresh, a)
-	}
-	s.notedResultsMu.Unlock()
-	return resultAdmissionNote(fresh)
-}
-
-func resultLivelockInBandNote(a ResultAdmission) string {
-	if a.Livelock == nil {
-		return ""
-	}
-	note := "LIVELOCK_DETECTED repeat=" + strconv.Itoa(a.Livelock.RepeatCount) +
-		" repeated_result=" + livelockCallLabel(*a.Livelock) +
-		" approach=" + a.Livelock.SuggestedChange
-	if a.Livelock.Escalate {
-		note += " ABORT=terminal (re-reading this same result keeps producing the same held/paged-out stub — it will NOT change; stop re-reading, proceed without it or report the blocker)"
-	} else if a.Livelock.Fuse {
-		note += " fuse=armed"
-	}
-	return note
-}
-
-// resultNoteKey is the stable per-result dedup key. The tool_call_id is replayed
-// byte-identically across turns by the client, so it identifies the SAME held result over
-// a session; an idless result (a nameless cross-boundary payload) falls back to
-// tool|reason, which collapses repeats of the same shape without a stable id.
-func resultNoteKey(a ResultAdmission) string {
-	if a.ToolCallID != "" {
-		return a.ToolCallID
-	}
-	return a.Tool + "|" + a.Verdict.Reason
-}
-
-// anyRepaired reports whether the kernel rewrote any admitted call's arguments.
-func anyRepaired(adjs []ToolAdjudication) bool {
-	for _, a := range adjs {
-		if a.Admitted && a.Verdict.Kind == "TRANSFORM" {
-			return true
-		}
-	}
-	return false
-}
-
-func anyLivelock(adjs []ToolAdjudication) bool {
-	for _, a := range adjs {
-		if a.Livelock != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// loopBreakThreshold is how long a degenerate tail of assistant turns must grow before
-// the gateway short-circuits the loop. A capable model never repeats itself verbatim or
-// echoes a kernel notice; a small local model fronted by the kernel often does exactly
-// that — turn after turn, with no new tool call and no progress — until the harness
-// turn-cap ends the session with an empty result. At threshold=2 the third such
-// degenerate turn trips the break, reclaiming the rest of the turn budget.
-const loopBreakThreshold = 2
-
-// degenerateStreak counts the trailing run of NON-PROGRESSING assistant turns in the
-// replayed history. A turn is degenerate when it is text-only (no tool call survived to
-// drive work forward) AND it is either:
-//
-//   - a `[fak]` echo: text the KERNEL originates (adjudicationNote / resultAdmissionNote)
-//     that a model should never produce — the model parroting the refusal note back; or
-//   - a verbatim repeat of the previous assistant turn — the model emitting the SAME
-//     prose every turn (e.g. the same graceful "I can't, policy blocks it" refusal).
-//
-// Counted from the END so a single stale line in a long healthy transcript never trips
-// it; only an unbroken degenerate tail does. A turn that carries a tool_use, or differs
-// from its predecessor and is not a `[fak]` echo, is real progress and breaks the run.
-// Stateless: it reads exactly what Claude Code replayed.
-func degenerateStreak(messages []agent.Message) int {
-	// Collect the trailing run of text-only assistant turns (most recent first). A turn
-	// carrying a tool_use is forward progress and ends the run.
-	var tail []string
-	for i := len(messages) - 1; i >= 0; i-- {
-		m := messages[i]
-		if m.Role != agent.RoleAssistant {
-			continue // user / tool turns interleave; skip without breaking the run
-		}
-		if len(m.ToolCalls) > 0 {
-			break
-		}
-		tail = append(tail, m.Content)
-	}
-	// Count, from the most recent backward, how many turns are degenerate: a `[fak]`
-	// echo (kernel-originated text the model should never produce), or a verbatim repeat
-	// of the adjacent more-recent assistant turn (the model emitting the same prose).
-	n := 0
-	for i, c := range tail {
-		isEcho := strings.Contains(c, "[fak]")
-		isRepeat := c != "" && ((i > 0 && c == tail[i-1]) || (i+1 < len(tail) && c == tail[i+1]))
-		if isEcho || isRepeat {
-			n++
-			continue
-		}
-		break
-	}
-	return n
-}
-
-// pendingFreshUserInput reports whether the turns after the most recent assistant
-// message — the input this completion must answer — carry fresh user prose: a plain
-// RoleUser turn that is non-empty, not kernel-originated (`[fak]`), and not a verbatim
-// repeat of a user turn the model already answered. Fresh input means the next turn is
-// not predetermined to repeat, so the repetition-loop steer must stand down. The
-// observed victim is an out-of-band evaluator call — Claude Code's prompt-based Stop
-// hook replays the stuck session PLUS a novel judge prompt and must answer with
-// structured JSON; steering it substituted prose for the verdict, and every stop
-// errored with "JSON validation failed". Tool results decode as RoleTool and a
-// re-injected identical nudge is a verbatim repeat, so the dead loops the steer exists
-// for — mechanical continuations that add nothing new — still trip it.
-func pendingFreshUserInput(messages []agent.Message) bool {
-	last := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == agent.RoleAssistant {
-			last = i
-			break
-		}
-	}
-	if last < 0 {
-		return false
-	}
-	answered := make(map[string]struct{})
-	for _, m := range messages[:last+1] {
-		if m.Role == agent.RoleUser && m.Content != "" {
-			answered[m.Content] = struct{}{}
-		}
-	}
-	for _, m := range messages[last+1:] {
-		if m.Role != agent.RoleUser || m.Content == "" || strings.Contains(m.Content, "[fak]") {
-			continue
-		}
-		if _, ok := answered[m.Content]; !ok {
-			return true
-		}
-	}
-	return false
-}
-
-// repetitionLoopSteer returns a terminal corrective turn when the model is stuck in a
-// degenerate tail (degenerateStreak ≥ loopBreakThreshold) — echoing the kernel's `[fak]`
-// notes or repeating the same prose with no progress — or nil otherwise. The corrective
-// turn is a single plain-text assistant message, deliberately NOT prefixed with `[fak]`
-// (so it can't itself feed the echo detector) and distinct from any repeated line, that
-// ends the turn (end_turn). Returned BEFORE the planner runs, it breaks the loop
-// deterministically and cheaply (no model round-trip) and Claude Code reads a normal
-// terminal assistant turn so its agent loop settles instead of grinding to the turn-cap.
-// A pending fresh user turn vetoes the steer: new input (an operator question, a Stop
-// hook evaluator's judge prompt) deserves a real model answer even behind a stuck tail.
-func repetitionLoopSteer(messages []agent.Message, id, model string) *anthropicTurn {
-	if degenerateStreak(messages) < loopBreakThreshold {
-		return nil
-	}
-	if pendingFreshUserInput(messages) {
-		return nil
-	}
-	const steer = "I was repeating myself without making progress: a tool I tried is " +
-		"blocked by the security policy and cannot be used. Stopping that loop. If the " +
-		"request needs the blocked tool I cannot complete it; otherwise tell me what to " +
-		"answer and I will respond directly."
-	if id == "" {
-		id = "msg_fak_" + itoa(uint64(time.Now().UnixNano()))
-	}
-	return &anthropicTurn{
-		ID:    id,
-		Model: model,
-		Blocks: []agent.AnthropicBlockOut{
-			{Type: "text", Text: steer},
-		},
-		Stop: "end_turn",
-	}
-}
-
-// prependTextBlock inserts an in-band [fak] note as the FIRST content block so a
-// client that reads content top-to-bottom (Claude Code) sees the kernel's decision
-// before the surviving tool_use blocks it is about to run. The note never replaces
-// model prose — existing text/tool_use blocks follow it untouched.
-func prependTextBlock(blocks []agent.AnthropicBlockOut, text string) []agent.AnthropicBlockOut {
-	out := make([]agent.AnthropicBlockOut, 0, len(blocks)+1)
-	out = append(out, agent.AnthropicBlockOut{Type: "text", Text: text})
-	return append(out, blocks...)
-}
-
-// fakExtFrom builds the response extension from a turn's proposed-call
-// adjudications and inbound-result admissions, or nil when there is nothing to
-// report (so the `fak` key is omitted on a turn with no tool activity at all).
-func fakExtFrom(adjs []ToolAdjudication, results []ResultAdmission) *FakExt {
-	if len(adjs) == 0 && len(results) == 0 {
-		return nil
-	}
-	return &FakExt{Adjudications: adjs, ResultAdmissions: results}
 }
 
 func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted, contextEvent bool, hcoh harnessCoherenceInputs) {

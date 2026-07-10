@@ -273,6 +273,12 @@ type CtxValueReport struct {
 	// anchor. nil until the first Anthropic-passthrough turn. Composed with, never
 	// substituted for, the OBSERVED Tokens above (Law A2).
 	Footprint *CtxValueFootprint `json:"footprint,omitempty"`
+	// Expense is the DECISION on whether the session has become UNUSUALLY EXPENSIVE,
+	// graded on Footprint's total per-turn as-sent volume against the warn/block
+	// lines (ctxexpense.go). Always present; Level is "ok"/Basis "none" until a
+	// footprint exists to grade. This is the "warns/blocks" verdict the --debug-stats
+	// line and the opt-in block advisory read from.
+	Expense CtxExpense `json:"expense"`
 }
 
 // CtxValueSnapshot is the multi-session HTTP body: every tracked session's report.
@@ -512,6 +518,8 @@ func (s *Server) ctxValueReportLocked(trace string, v *sessionCtxValue) CtxValue
 	}
 	// The ESTIMATED as-sent footprint (#3233), surfaced beside the OBSERVED tokens.
 	r.Footprint = v.footprint.report()
+	// The DECISION on per-turn expense, graded on that footprint's total volume.
+	r.Expense = s.ctxExpenseForLocked(v)
 	return r
 }
 
@@ -535,6 +543,9 @@ func (s *Server) CtxValueReportFor(trace string) CtxValueReport {
 	r.Turns.Provenance = "WITNESSED"
 	r.StepAdvice = adviseCtxStep(ctxValueState{Budget: s.compactHistoryBudget})
 	r.Wakeup = ctxWakeupHorizon(false, 0)
+	// No footprint yet ⇒ an ok/none expense verdict (nothing to grade), carrying the
+	// configured lines so a reader sees the thresholds even before the first turn.
+	r.Expense = assessCtxExpense(ctxExpenseState{WarnTokens: s.ctxExpenseWarn, BlockTokens: s.ctxExpenseBlock})
 	return r
 }
 

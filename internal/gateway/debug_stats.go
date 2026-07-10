@@ -231,8 +231,13 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	// operator line and /metrics can never disagree. Absent until the two context managers actually
 	// collide, so the fields' presence is itself the signal (like safety=).
 	sum := s.metrics.harnessCoherenceSummary()
+	// #3233 follow-on: the per-turn EXPENSE verdict (ctxexpense.go), peeked read-only from
+	// the session's latest as-sent footprint so the operator sees "this session is getting
+	// unusually expensive" on the same line they already watch — absent (formatExpenseField
+	// returns "") until the volume crosses the warn line, like the nudge=/safety= fields.
+	expense, haveExpense := s.peekCtxExpense(trace)
 	line := formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety)
-	s.debugStatsf("%s", line+formatHarnessCoherenceField(sum.HarnessRewrites, sum.QuarantineAtRisk))
+	s.debugStatsf("%s", line+formatHarnessCoherenceField(sum.HarnessRewrites, sum.QuarantineAtRisk)+formatExpenseField(expense, haveExpense))
 }
 
 // formatHarnessCoherenceField renders the harness-coherence collision fields for the per-turn

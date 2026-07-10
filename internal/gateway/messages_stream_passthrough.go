@@ -204,6 +204,10 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		if note := p.s.resultAdmissionNoteOnce(p.reqTrace, p.resultAdms); note != "" {
 			emitAnthropicTextBlock(p.send, &p.outIdx, note)
 		}
+		// Unusually-expensive-session advisory (once/session, gate-armed only).
+		if note := p.s.ctxExpenseNoteOnce(p.reqTrace); note != "" {
+			emitAnthropicTextBlock(p.send, &p.outIdx, note)
+		}
 
 	case "content_block_start":
 		var d struct {
@@ -271,7 +275,14 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		// Fold this turn's adjudication SHAPE into separate turn-control signals BEFORE relaying
 		// the (possibly end_turn-rewritten) message_delta. Hard deny-all remains the bounded
 		// stop-policy path; retryable tool feedback continues without counting as a session stop.
-		p.s.metrics.recordAdjudicationOutcome(adjudicationOutcomeForTurn(p.adjs, p.keptTools, p.servedTools))
+		// On a deny-all turn the fingerprint (same tool+reason) is the same-issue signal the guard
+		// Stop hook keys its give-up on.
+		signal := adjudicationOutcomeForTurn(p.adjs, p.keptTools, p.servedTools)
+		denyFP := ""
+		if signal == adjudicationOutcomeDenyAll {
+			denyFP = denyAllFingerprint(p.adjs)
+		}
+		p.s.metrics.recordAdjudicationOutcome(signal, denyFP)
 		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
 
 	case "message_stop":

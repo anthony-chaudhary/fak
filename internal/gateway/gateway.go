@@ -500,6 +500,23 @@ type Config struct {
 	// other wire. Sibling of CtxViewBudget: compaction drops a contiguous suffix of old
 	// turns, ctxview stubs the planner's non-contiguous resident-set misses (#927).
 	CompactHistoryBudget int
+	// CtxExpenseWarnTokens / CtxExpenseBlockTokens set the per-turn as-sent-volume lines the
+	// context-expense arm (ctxexpense.go) warns and blocks on — the total volume of context
+	// (system + tools + history + tail) that would be re-shipped on ONE turn, in ESTIMATED
+	// tokens. Detection is on by default: the struct zero value takes the built-in
+	// ctxExpense{Warn,Block}TokensDefault, a positive value overrides, and a NEGATIVE value
+	// disables that tier (the explicit off, like --compact-history-budget=0). The warn tier
+	// is pure observability (the report + the --debug-stats line); the block tier only
+	// ACTUATES when the FAK_CTX_EXPENSE_GATE soak switch is on, and then only as one in-band
+	// [fak] advisory per session — the passthrough body is never refused.
+	CtxExpenseWarnTokens  int
+	CtxExpenseBlockTokens int
+	// CtxExpenseGate is the soak switch for the block-tier ACTUATION: false (the default)
+	// keeps the expense arm view-only (report + --debug-stats line); true arms the once-per-
+	// session in-band [fak] advisory a block-tier verdict emits. The ablation/soak harness
+	// also arms it with FAK_CTX_EXPENSE_GATE=1. Detection (warn + block verdicts) is
+	// unaffected by this — only whether the block tier writes an in-band note.
+	CtxExpenseGate bool
 	// CompactAnchorHead, when true, re-anchors CompactHistoryBudget's protected prefix on
 	// the stable provider head (agent.CompactAnchorHead) instead of the default first-
 	// breakpoint anchor (agent.CompactAnchorFirstBP). This is the #1407 anchor-starved fix:
@@ -1152,6 +1169,21 @@ type Server struct {
 	ctxValueMu sync.Mutex
 	ctxValue   map[string]*sessionCtxValue
 
+	// ctxExpenseWarn / ctxExpenseBlock are the effective per-turn as-sent-volume lines the
+	// context-expense verdict (ctxexpense.go) grades on, in ESTIMATED tokens (0 = that tier
+	// off). Derived from Config.CtxExpense{Warn,Block}Tokens via ctxExpenseThresholdOr, so
+	// detection is on by default. ctxExpenseGate is the soak switch (FAK_CTX_EXPENSE_GATE):
+	// when true, a block-tier verdict emits ONE in-band [fak] advisory per session; when
+	// false (the default) the block tier is view-only. ctxExpenseNoted dedups that advisory
+	// to once per session (the resultAdmissionNoteOnce pattern), guarded by ctxExpenseNotedMu
+	// and bounded by the same reaper. All read-only relative to the request path — the gate's
+	// only actuation is the in-band note; the passthrough body is never mutated.
+	ctxExpenseWarn    int
+	ctxExpenseBlock   int
+	ctxExpenseGate    bool
+	ctxExpenseNotedMu sync.Mutex
+	ctxExpenseNoted   map[string]struct{}
+
 	// ctxRestore holds, per session trace, the content-addressed stash of ORIGINATING tasks the
 	// Anthropic-passthrough compaction dropped (ctxrestore.go). A fired tombstone hands the gateway
 	// the dropped turn's bytes + its sha256-hex handle (agent.CompactOutcome.RestoreID/RestoreBytes),
@@ -1612,6 +1644,9 @@ func New(cfg Config) (*Server, error) {
 		admissionCtl:               admissionCtl,
 		ctxView:                    ctxView,
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
+		ctxExpenseWarn:             ctxExpenseThresholdOr(cfg.CtxExpenseWarnTokens, ctxExpenseWarnTokensDefault),
+		ctxExpenseBlock:            ctxExpenseThresholdOr(cfg.CtxExpenseBlockTokens, ctxExpenseBlockTokensDefault),
+		ctxExpenseGate:             cfg.CtxExpenseGate || envEnabled("FAK_CTX_EXPENSE_GATE"),
 		compactAnchorHead:          cfg.CompactAnchorHead,
 		assumeSessionTurns:         cfg.AssumeSessionTurns,
 		elideResultBytes:           ablateUncachedTrimBytes(cfg.ElideResultBytes),
