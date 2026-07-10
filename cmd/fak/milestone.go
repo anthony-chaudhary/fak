@@ -11,10 +11,16 @@ package main
 // every tracked epic). `fak milestone post` renders the report as a Slack card and
 // posts it to the #milestones channel via the shared scoreboard transport.
 //
+// The sibling `fak milestone burndown` tracks the SCHEDULE dimension -- each open
+// milestone's due date vs recent closure velocity -- into an at-risk-debt trend on
+// its own durable ledger (docs/milestones/burndown.jsonl).
+//
 //	fak milestone report                     # fold + render the snapshot
 //	fak milestone report --json              # the machine-readable envelope
 //	fak milestone report --check             # advisory gate (exit 1 only if unmeasured)
 //	fak milestone report --append-history    # trend a dated row into the ledger
+//	fak milestone burndown                   # fold + render the schedule/at-risk snapshot
+//	fak milestone burndown --append-history  # trend a dated at-risk-debt row into the ledger
 //	fak milestone post --dry-run             # render the exact card; do not post
 //	fak milestone post                       # post the card to #milestones
 
@@ -34,8 +40,9 @@ import (
 )
 
 func cmdMilestone(argv []string) {
-	dispatchSubcommands("milestone", "report | post | status-doc | selfcheck", argv,
+	dispatchSubcommands("milestone", "report | burndown | post | status-doc | selfcheck", argv,
 		subcommand{"report", runMilestoneReport},
+		subcommand{"burndown", runMilestoneBurndown},
 		subcommand{"post", runMilestonePost},
 		subcommand{"status-doc", runMilestoneStatusDoc},
 		subcommand{"selfcheck", runMilestoneSelfcheck},

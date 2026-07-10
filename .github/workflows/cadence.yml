@@ -7,7 +7,8 @@ name: cadence report
 #   * WORK-DONE — git commits + `(fak ` ship-trailer count over a trailing window
 #                 (the dimension that had NO durable cadence report before this).
 #   * RELEASES  — the release-status fold (latest tag + next action).
-#   * MILESTONES — the milestone trend ledger + generated climb status snapshot.
+#   * MILESTONES — the milestone trend ledger + generated climb status snapshot,
+#                 plus the SCHEDULE burndown (due-date vs velocity at-risk debt).
 #
 # Today each lands in a SEPARATE place (garden.yml folds scores daily,
 # release-cadence.yml folds releases every 6h, work-done was nowhere). This makes
@@ -90,6 +91,11 @@ jobs:
       - name: milestone fold self-test
         run: go test ./internal/milestonereport/
 
+      # The burndown (SCHEDULE) fold rides the same loop: its at-risk verdicts and
+      # debt trend are only a real signal if the pure fold is proven first.
+      - name: milestone burndown fold self-test
+        run: go test ./internal/milestoneburndown/
+
       # The REPORT. Tolerate a non-zero exit (a flaky sub-tool must not suppress
       # the report) — the verdict is surfaced below, not swallowed.
       - name: cadence report
@@ -168,6 +174,36 @@ jobs:
           PY
           cat milestone-report.txt
 
+      # MILESTONE BURNDOWN (SCHEDULE dimension) on the SAME loop cadence: each open
+      # milestone's due date vs recent closure velocity, trended as an at-risk-debt
+      # integer on its own durable ledger (docs/milestones/burndown.jsonl). Appends
+      # exactly once per cadence run under the same execute gate as the report append;
+      # --check keeps an unmeasured milestone list visible on the operator's weekly read.
+      - name: milestone burndown (same-cadence append)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          go run ./cmd/fak milestone burndown --json --check --append-history > milestone-burndown.json
+          echo "milestone-burndown-exit=$?"
+          set -e
+          test -s milestone-burndown.json || echo '{}' > milestone-burndown.json
+          python3 - <<'PY' > milestone-burndown.txt || echo "(milestone burndown unreadable)" > milestone-burndown.txt
+          import json
+          d = json.load(open("milestone-burndown.json"))
+          print(f"{d.get('verdict','?')} ({d.get('finding','')}) @{d.get('commit','')} {d.get('date','')}")
+          p = d.get("portfolio") or {}
+          if isinstance(p, dict) and p:
+              print(f"  schedule  {p.get('overdue',0)} overdue, {p.get('at_risk',0)} at-risk, {p.get('no_due_date',0)} no-due-date, {p.get('on_track',0)} on-track, {p.get('done',0)} done")
+              print(f"  debt      at-risk debt {p.get('at_risk_debt',0)}; {p.get('open_total',0)} open across {p.get('total',0)} milestone(s)")
+          if d.get("trend"):
+              print(f"  trend     {d['trend'].get('summary','')}")
+          if d.get("next_action"):
+              print(f"  -> {d['next_action']}")
+          PY
+          cat milestone-burndown.txt
+
       # Render the card on every cadence run. The live post below is gated on the
       # milestone execute decision + a wired token, matching the retired tick.
       - name: Render milestone card
@@ -202,7 +238,7 @@ jobs:
             git add docs/cadence/history.jsonl
           fi
           if [ "${{ steps.milestone_arm.outputs.execute }}" = "true" ]; then
-            git add docs/milestones/history.jsonl docs/milestones/STATUS.md
+            git add docs/milestones/history.jsonl docs/milestones/STATUS.md docs/milestones/burndown.jsonl
             if [ "${{ github.event_name }}" = "schedule" ]; then
               subject="docs(milestones): record same-cadence milestone tick (fak docs)"
             else
@@ -235,6 +271,10 @@ jobs:
             echo '```'
             cat milestone-report.txt 2>/dev/null || echo "(no milestone report)"
             echo '```'
+            echo "## milestone burndown (same-cadence append)"
+            echo '```'
+            cat milestone-burndown.txt 2>/dev/null || echo "(no milestone burndown)"
+            echo '```'
             echo '<details><summary>rendered milestone card</summary>'
             echo
             echo '```'
@@ -262,6 +302,8 @@ jobs:
             cadence-report.txt
             milestone-report.json
             milestone-report.txt
+            milestone-burndown.json
+            milestone-burndown.txt
             milestone-card.txt
             milestone-status-doc.txt
           if-no-files-found: ignore

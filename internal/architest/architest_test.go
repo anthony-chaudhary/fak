@@ -442,7 +442,7 @@ var pureRoot = map[string]bool{
 	"codexmemory": true, "commitintent": true, "commitissuelink": true, "commitrollup": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deepseekbench": true,
 	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "devexmeter": true,
-	"devindex": true, "dispatchaging": true, "dispatchaudit": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true,
+	"devindex": true, "dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true,
 	"dispatchsweep": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "execrollup": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
