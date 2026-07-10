@@ -179,6 +179,20 @@ func BuildScorecard(root string) scorecard.Payload {
 // override corpus and a test can inject a known FP/FN to prove the fold detects
 // them. The KPIs, weights, and grade come from the shared pkg/scorecard kernel.
 func BuildScorecardFromRows(root string, rows []CorpusRow) scorecard.Payload {
+	return BuildScorecardWithComplaints(root, rows, nil)
+}
+
+// BuildScorecardWithComplaints folds the labeled corpus AND the agent-authored
+// guard-complaint intake (#2821). The corpus half is unchanged hard debt (the
+// escalate/don't boundary scored against ground truth); the complaint half is an
+// advisory field-false-positive triage queue (scorecard Soft) that never counts
+// as debt and never reds the gate. That split is deliberate: a complaint is a
+// cheap-to-file self-report (byte-identical in the journal to a correct refusal),
+// so scoring it as debt would let an agent lower the guard's assertiveness by
+// appealing. A confirmed complaint becomes a measured FP only once it is promoted
+// into testdata/corpus.json, where the corpus fold scores it. Passing a nil/empty
+// complaint slice yields a payload byte-identical to BuildScorecardFromRows.
+func BuildScorecardWithComplaints(root string, rows []CorpusRow, complaints []FieldComplaint) scorecard.Payload {
 	res := Fold(rows)
 
 	fpKPI := scorecard.KPI{
@@ -228,6 +242,15 @@ func BuildScorecardFromRows(root string, rows []CorpusRow) scorecard.Payload {
 
 	kpis := []scorecard.KPI{fpKPI, fnKPI, nvKPI, exactKPI}
 
+	// Field-complaint intake (#2821): agent-authored over-block appeals folded as
+	// an advisory triage queue -- never debt, so it cannot flip ok or red the gate.
+	// Appended only when there is at least one appeal, keeping the complaint-free
+	// path byte-identical to BuildScorecardFromRows.
+	sig := FoldComplaints(complaints)
+	if sig.Appeals > 0 {
+		kpis = append(kpis, complaintIntakeKPI(sig))
+	}
+
 	finding := "guard_accuracy_clean"
 	next := "hold the line; add every wild guard misfire to internal/guardaccuracy/testdata/corpus.json as a new labeled row"
 	reason := fmt.Sprintf("guard classifier scored %d/%d corpus row(s) correctly: %d false positive(s), %d false negative(s), %d subclass drift(s)",
@@ -248,6 +271,26 @@ func BuildScorecardFromRows(root string, rows []CorpusRow) scorecard.Payload {
 		next = "retire worst-first: no_false_positives -- the guard over-blocked a benign call; match on call structure, not payload mention"
 	}
 
+	extra := map[string]any{
+		"total_rows":     res.Total,
+		"correct":        res.Correct,
+		"benign_rows":    res.BenignRows,
+		"dangerous_rows": res.DangerousRows,
+		"fp_count":       len(res.FalsePositive),
+		"fn_count":       len(res.FalseNegative),
+		"drift_count":    len(res.ClassDrift),
+		"fp_rate":        scorecard.Round3(res.FPRate),
+		"fn_rate":        scorecard.Round3(res.FNRate),
+	}
+	// Surface the field-FP intake in the machine-readable corpus only when it is
+	// non-empty, so the complaint-free payload is unchanged. These are counts of an
+	// advisory, unconfirmed signal -- deliberately NOT folded into fp_count/fp_rate,
+	// which remain the ground-truth corpus numbers an RSI loop drives down.
+	if sig.Appeals > 0 {
+		extra["field_fp_appeals"] = sig.Appeals
+		extra["field_fp_occurrences"] = sig.Occurrences
+	}
+
 	p := scorecard.Fold(Schema, kpis, DebtKey, nil, scorecard.Messages{
 		Grade:           scorecard.GradeStd,
 		Finding:         finding,
@@ -255,17 +298,7 @@ func BuildScorecardFromRows(root string, rows []CorpusRow) scorecard.Payload {
 		NextAction:      next,
 		NextActionClean: "hold the line; add every wild guard misfire to internal/guardaccuracy/testdata/corpus.json as a new labeled row",
 		Reason:          reason,
-		ExtraCorpus: map[string]any{
-			"total_rows":     res.Total,
-			"correct":        res.Correct,
-			"benign_rows":    res.BenignRows,
-			"dangerous_rows": res.DangerousRows,
-			"fp_count":       len(res.FalsePositive),
-			"fn_count":       len(res.FalseNegative),
-			"drift_count":    len(res.ClassDrift),
-			"fp_rate":        scorecard.Round3(res.FPRate),
-			"fn_rate":        scorecard.Round3(res.FNRate),
-		},
+		ExtraCorpus:     extra,
 	})
 	p.Workspace = root
 	return p
