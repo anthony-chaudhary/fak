@@ -7,10 +7,19 @@ package main
 // in flight, and which lanes are pinned only by a dead banner-noop worker (#1275,
 // #1398) and can be reclaimed. Split out of dispatch_tick.go along this concern seam
 // so the dispatch surface stays steerable as new verbs land (steerability
-// dispatch_god_file). Behavior-preserving code motion — same package, no logic change.
+// dispatch_god_file).
+//
+// The live-lane / live-scope / cooldown / attempt-budget / tree-collision views are
+// now thin projections over a single per-tick runsSnapshot (dispatch_tick_snapshot.go):
+// each public helper here builds a one-shot snapshot and projects from it, so a caller
+// that needs several views scans the runs directory once instead of once per view
+// (#3593). The projections are byte-identical to the prior per-loop scans. All sidecar
+// I/O routes through the fsGlob/fsStat/fsReadFile seam below so the scan is countable.
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,8 +28,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+)
+
+// fsGlob/fsStat/fsReadFile/fsOpen are the runs-directory I/O seam. Every sidecar glob,
+// stat, read and open in this file (and the snapshot scan) routes through them, so a test
+// can swap in counting wrappers to prove a tick's discovery cost is one pass -- the
+// runsSnapshot projections read only captured state and do zero further I/O (#3593) --
+// and that the spawn-header lane probe reads a bounded prefix, never the whole streaming
+// transcript (#3466).
+var (
+	fsGlob     = filepath.Glob
+	fsStat     = os.Stat
+	fsReadFile = os.ReadFile
+	fsOpen     = func(path string) (io.ReadCloser, error) { return os.Open(path) }
 )
 
 type dispatchLiveScope struct {
@@ -42,98 +63,35 @@ var dispatchResolveLogRE = regexp.MustCompile(`^resolve-(\d+)-.*\.log$`)
 // recently_attempted_issues uses (tools/issue_resolve_dispatch.py).
 var dispatchResolveAttemptRE = regexp.MustCompile(`^resolve-(\d+)-`)
 
+// liveResolutionIssues / liveResolutionIssueDetails / liveResolutionLanes /
+// liveResolutionTreeCollision / liveResolutionScopes each build a one-shot runsSnapshot
+// and project the requested view from it (#3593). The banner-noop lane-reclaim rationale
+// (#1275/#1398) now lives on runsSnapshot.liveLanes / the scan's live gate. A caller that
+// needs several of these views should build ONE snapshot (scanRunsSnapshot) and project
+// from it directly -- the tick picker and wave pricer do, to scan the runs dir once.
+
 func liveResolutionIssues(runsDir string) map[int]bool {
-	out := map[int]bool{}
-	for issue := range liveResolutionIssueDetails(runsDir) {
-		out[issue] = true
-	}
-	return out
+	return scanRunsSnapshot(runsDir, time.Now()).liveIssues()
 }
 
 func liveResolutionIssueDetails(runsDir string) map[int]dispatchLiveScope {
-	out := map[int]dispatchLiveScope{}
-	for _, live := range liveResolutionScopes(runsDir) {
-		if _, exists := out[live.Issue]; !exists {
-			out[live.Issue] = live
-		}
-	}
-	return out
+	return scanRunsSnapshot(runsDir, time.Now()).liveIssueDetails()
 }
 
 func liveResolutionLanes(runsDir string) map[string]bool {
-	out := map[string]bool{}
-	for _, log := range resolveLogs(runsDir) {
-		pid, ok := readPID(strings.TrimSuffix(log, filepath.Ext(log)) + ".pid")
-		if !ok || !dispatchPIDAlive(pid) {
-			continue
-		}
-		// A worker whose log is a terminal banner no-op (#1275: it printed only its
-		// startup banner -- "> build · glm-…" -- and produced nothing) holds no real
-		// work even when its pid still passes the liveness gate above. An opencode
-		// worker runs as a `node` image, so AFTER it exits a recycled `node` pid that
-		// lands in the spawn window passes dispatchPIDAlive and would otherwise pin
-		// the lane FOREVER (#1398: `docs` stayed LANE_BUSY behind dead 122-byte no-ops
-		// while real docs work could not dispatch). Drop such a lane so a lane held
-		// ONLY by dead no-op workers reports FREE and `fak dispatch tick --lane docs`
-		// returns WOULD_SPAWN. Safe: a genuinely live worker streams kilobytes past
-		// the stub floor within seconds so it never classifies as a banner no-op, and
-		// on a LIVE tick the fenced git-ref lease (acquireDispatchLaneLease) still
-		// serializes a just-started worker across hosts.
-		if dispatchLogIsBannerNoop(log) {
-			continue
-		}
-		if lane := laneFromSpawnHeader(log); lane != "" {
-			out[lane] = true
-		}
-	}
-	return out
+	return scanRunsSnapshot(runsDir, time.Now()).liveLanes()
 }
 
 func liveResolutionTreeCollision(runsDir string, requested []string) (dispatchLiveScope, bool) {
-	requested = dispatchTrimTree(requested)
-	if len(requested) == 0 {
-		return dispatchLiveScope{}, false
-	}
-	for _, live := range liveResolutionScopes(runsDir) {
-		if len(live.Tree) == 0 {
-			continue
-		}
-		if dispatchorder.TreesOverlap(requested, live.Tree) {
-			return live, true
-		}
-	}
-	return dispatchLiveScope{}, false
+	return scanRunsSnapshot(runsDir, time.Now()).treeCollision(requested)
 }
 
 func liveResolutionScopes(runsDir string) []dispatchLiveScope {
-	var out []dispatchLiveScope
-	for _, log := range resolveLogs(runsDir) {
-		issue, ok := issueFromResolveLog(filepath.Base(log))
-		if !ok {
-			continue
-		}
-		stem := strings.TrimSuffix(log, filepath.Ext(log))
-		pid, ok := readPID(stem + ".pid")
-		if !ok || !dispatchPIDAlive(pid) || dispatchLogIsBannerNoop(log) {
-			continue
-		}
-		lane := laneFromSpawnHeader(log)
-		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
-		out = append(out, dispatchLiveScope{
-			Issue:   issue,
-			Lane:    lane,
-			Tree:    tree,
-			Log:     log,
-			PID:     pid,
-			Worker:  filepath.Base(stem),
-			LeaseID: readResolveLeaseID(stem, lane),
-		})
-	}
-	return out
+	return scanRunsSnapshot(runsDir, time.Now()).liveScopes()
 }
 
 func readResolveLeaseTree(path string) []string {
-	b, err := os.ReadFile(path)
+	b, err := fsReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -145,7 +103,7 @@ func readResolveLeaseTree(path string) []string {
 }
 
 func readResolveLeaseID(stem, lane string) string {
-	b, err := os.ReadFile(stem + dispatchLeaseIDSidecarSuffix)
+	b, err := fsReadFile(stem + dispatchLeaseIDSidecarSuffix)
 	if err == nil {
 		if id := strings.TrimSpace(string(b)); id != "" {
 			return id
@@ -185,11 +143,22 @@ var dispatchNoopBannerRE = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
 // gate (#1398). FAIL-CLOSED to false on any stat/read error or an over-floor log so a
 // log we cannot classify -- or one with real streamed work -- is never falsely reaped.
 func dispatchLogIsBannerNoop(path string) bool {
-	st, err := os.Stat(path)
-	if err != nil || st.Size() > dispatchResolveLogStubFloorBytes {
+	st, err := fsStat(path)
+	if err != nil {
 		return false
 	}
-	b, err := os.ReadFile(path)
+	return classifyBannerNoop(st, path)
+}
+
+// classifyBannerNoop is the size-gate + banner-match core of dispatchLogIsBannerNoop,
+// split out so the snapshot scan can classify a log off the single stat it already took
+// (dispatch_tick_snapshot.go) instead of re-statting. An over-floor log is never a no-op;
+// a read error fails closed to false so an unclassifiable log is never falsely reaped.
+func classifyBannerNoop(st os.FileInfo, path string) bool {
+	if st.Size() > dispatchResolveLogStubFloorBytes {
+		return false
+	}
+	b, err := fsReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -201,16 +170,7 @@ func recentlyAttemptedIssues(runsDir string, cooldownMin int) map[int]bool {
 }
 
 func recentlyAttemptedIssuesAt(runsDir string, cooldownMin int, now time.Time) map[int]bool {
-	out := map[int]bool{}
-	if cooldownMin <= 0 {
-		return out
-	}
-	for _, row := range cooldownIssueRowsAt(runsDir, cooldownMin, now) {
-		if row.Cooling {
-			out[row.Issue] = true
-		}
-	}
-	return out
+	return scanRunsSnapshot(runsDir, now).recentlyAttempted(cooldownMin)
 }
 
 // dispatchAttemptBudgetDefault is the number of recorded worker attempts on ONE
@@ -248,31 +208,7 @@ func dispatchAttemptBudget() int {
 // candidate set), or an operator can raise FAK_DISPATCH_ATTEMPT_BUDGET or clear
 // the run-dir logs. A budget <= 0 disables the cap (empty set = legacy behavior).
 func attemptExhaustedIssues(runsDir string, budget int) map[int]bool {
-	out := map[int]bool{}
-	if budget <= 0 {
-		return out
-	}
-	attempts := map[int]map[string]bool{}
-	for _, log := range resolveLogs(runsDir) {
-		base := filepath.Base(log)
-		issue, ok := issueFromResolveLog(base)
-		if !ok {
-			continue
-		}
-		key := strings.TrimSuffix(base, ".log")
-		key = strings.TrimSuffix(key, ".out")
-		key = strings.TrimSuffix(key, ".err")
-		if attempts[issue] == nil {
-			attempts[issue] = map[string]bool{}
-		}
-		attempts[issue][key] = true
-	}
-	for issue, keys := range attempts {
-		if len(keys) >= budget {
-			out[issue] = true
-		}
-	}
-	return out
+	return scanRunsSnapshot(runsDir, time.Now()).attemptExhausted(budget)
 }
 
 type dispatchCooldownRow struct {
@@ -285,63 +221,11 @@ type dispatchCooldownRow struct {
 }
 
 func cooldownIssueRows(runsDir string, cooldownMin int) []map[string]any {
-	rows := cooldownIssueRowsAt(runsDir, cooldownMin, time.Now())
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, row.Map())
-	}
-	return out
+	return scanRunsSnapshot(runsDir, time.Now()).cooldownRowMaps(cooldownMin)
 }
 
 func cooldownIssueRowsAt(runsDir string, cooldownMin int, now time.Time) []dispatchCooldownRow {
-	if cooldownMin <= 0 {
-		return nil
-	}
-	cooldown := time.Duration(cooldownMin) * time.Minute
-	latest := map[int]time.Time{}
-	for _, attempt := range resolveAttemptFiles(runsDir) {
-		st, err := os.Stat(attempt)
-		if err != nil {
-			continue
-		}
-		issue, ok := issueFromResolveAttempt(filepath.Base(attempt))
-		if !ok {
-			continue
-		}
-		if prev, exists := latest[issue]; !exists || st.ModTime().After(prev) {
-			latest[issue] = st.ModTime()
-		}
-	}
-	issues := make([]int, 0, len(latest))
-	for issue := range latest {
-		issues = append(issues, issue)
-	}
-	sort.Ints(issues)
-	out := make([]dispatchCooldownRow, 0, len(issues))
-	for _, issue := range issues {
-		last := latest[issue]
-		if last.After(now) {
-			last = now
-		}
-		next := last.Add(cooldown)
-		remaining := int(next.Sub(now).Seconds())
-		if remaining < 0 {
-			remaining = 0
-		}
-		age := int(now.Sub(last).Seconds())
-		if age < 0 {
-			age = 0
-		}
-		out = append(out, dispatchCooldownRow{
-			Issue:                    issue,
-			LastAttemptUnix:          last.Unix(),
-			LastAttemptAgeSeconds:    age,
-			CooldownRemainingSeconds: remaining,
-			NextEligibleUnix:         next.Unix(),
-			Cooling:                  remaining > 0,
-		})
-	}
-	return out
+	return scanRunsSnapshot(runsDir, now).cooldownRows(cooldownMin)
 }
 
 func (r dispatchCooldownRow) Map() map[string]any {
@@ -358,26 +242,21 @@ func (r dispatchCooldownRow) Map() map[string]any {
 }
 
 func resolveLogs(runsDir string) []string {
-	matches, _ := filepath.Glob(filepath.Join(runsDir, "resolve-*.log"))
+	matches, _ := fsGlob(filepath.Join(runsDir, "resolve-*.log"))
 	sort.Strings(matches)
 	return matches
 }
 
-// resolveAttemptFiles returns every resolve worker attempt artifact under runsDir: the
-// .log transcripts AND the durable .witness audit sidecars. The cooldown scan reads both so
-// a witnessed dead slot still cools its issue even after its .log is gone -- the .witness is
-// the durable cooldown evidence prune_dead_sidecars deliberately retains, and it is written
-// post-mortem by the witness sweep so its mtime carries the most-recent attempt touch. This
-// mirrors recently_attempted_issues in tools/issue_resolve_dispatch.py, which globs
-// resolve-*.log AND resolve-*.witness. Sorted for a stable, deterministic scan order.
-func resolveAttemptFiles(runsDir string) []string {
-	var out []string
-	for _, pattern := range []string{"resolve-*.log", "resolve-*" + dispatchtick.WitnessSidecarSuffix} {
-		matches, _ := filepath.Glob(filepath.Join(runsDir, pattern))
-		out = append(out, matches...)
-	}
-	sort.Strings(out)
-	return out
+// resolveWitnessFiles returns the durable resolve-*.witness audit sidecars under runsDir,
+// sorted. The cooldown fold reads them so a witnessed dead slot still cools its issue even
+// after its .log is gone -- the .witness is the durable cooldown evidence prune_dead_sidecars
+// deliberately retains, written post-mortem by the witness sweep so its mtime carries the
+// most-recent attempt touch. Together with resolveLogs this mirrors the two-pattern glob
+// recently_attempted_issues uses in tools/issue_resolve_dispatch.py.
+func resolveWitnessFiles(runsDir string) []string {
+	matches, _ := fsGlob(filepath.Join(runsDir, "resolve-*"+dispatchtick.WitnessSidecarSuffix))
+	sort.Strings(matches)
+	return matches
 }
 
 func issueFromResolveLog(name string) (int, bool) {
@@ -401,13 +280,35 @@ func issueFromResolveAttempt(name string) (int, bool) {
 	return n, err == nil
 }
 
+// laneHeaderReadCapBytes bounds how much of a worker log laneFromSpawnHeader reads.
+// The `lane=` field lives on the spawn-header FIRST line, but the file itself is a
+// live worker's streaming transcript (tens of MB and growing), so the probe must
+// never pull the whole file into memory (#3466). 4 KB comfortably covers any real
+// `# fak-spawn ...` header; mirrors the cheap stat-gate style of
+// dispatchLogIsBannerNoop above (dispatchResolveLogStubFloorBytes).
+const laneHeaderReadCapBytes = 4096
+
+// laneFromSpawnHeader extracts the `lane=` field from a worker log's first line,
+// reading at most laneHeaderReadCapBytes of the file instead of the entire growing
+// transcript (#3466). Parsing of the first line is identical to the legacy
+// whole-file read (bytes up to the first '\n', whitespace-split fields, `lane=`
+// prefix); only how much of the file is read changed. A header line longer than
+// the cap is parsed from its readable prefix; any open/read error fails closed to
+// "" exactly like the legacy read did.
 func laneFromSpawnHeader(path string) string {
-	b, err := os.ReadFile(path)
+	f, err := fsOpen(path)
 	if err != nil {
 		return ""
 	}
-	line := strings.SplitN(string(b), "\n", 2)[0]
-	for _, field := range strings.Fields(line) {
+	defer f.Close()
+	r := bufio.NewReaderSize(f, laneHeaderReadCapBytes)
+	line, err := r.ReadSlice('\n')
+	// io.EOF: a header-only log with no trailing newline; bufio.ErrBufferFull: a
+	// first line longer than the cap. Both still yield the readable prefix.
+	if err != nil && err != io.EOF && err != bufio.ErrBufferFull {
+		return ""
+	}
+	for _, field := range strings.Fields(strings.TrimSuffix(string(line), "\n")) {
 		if strings.HasPrefix(field, "lane=") {
 			return strings.TrimPrefix(field, "lane=")
 		}
@@ -416,7 +317,7 @@ func laneFromSpawnHeader(path string) string {
 }
 
 func readPID(path string) (int, bool) {
-	b, err := os.ReadFile(path)
+	b, err := fsReadFile(path)
 	if err != nil {
 		return 0, false
 	}

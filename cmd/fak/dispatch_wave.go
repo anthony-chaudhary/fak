@@ -368,10 +368,14 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, goalProfile ...string) (dispatchWavePrice, error) {
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	profile := dispatchWaveGoalProfile(goalProfile)
-	held := liveResolutionLanes(runsDir)
-	liveIssues := liveResolutionIssues(runsDir)
-	cooled := recentlyAttemptedIssues(runsDir, cooldownMin)
-	skipIssues := dispatchWaveSkipIssues(runsDir, excludedIssues)
+	// One runs-directory scan feeds every view this pricing pass needs -- held lanes, live
+	// issues, the cooldown set, and the poison-cap skip set -- instead of re-globbing the
+	// sidecars four times (#3593).
+	snap := scanRunsSnapshot(runsDir, time.Now())
+	held := snap.liveLanes()
+	liveIssues := snap.liveIssues()
+	cooled := snap.recentlyAttempted(cooldownMin)
+	skipIssues := dispatchWaveSkipIssuesFrom(snap, excludedIssues)
 	exclude := map[string]bool{}
 	for _, lane := range excluded {
 		exclude[lane] = true
@@ -602,8 +606,14 @@ func dispatchWaveBuildPrice(requested, granted int, cands []dispatchorder.Candid
 // worker every window forever. When the attempt budget yields no exhausted issues the result
 // stays == excludedIssues, so the pre-existing behavior is byte-identical.
 func dispatchWaveSkipIssues(runsDir string, excludedIssues map[int]bool) map[int]bool {
+	return dispatchWaveSkipIssuesFrom(scanRunsSnapshot(runsDir, time.Now()), excludedIssues)
+}
+
+// dispatchWaveSkipIssuesFrom is dispatchWaveSkipIssues over an already-captured snapshot, so
+// the wave pricer computes the skip set from the same one scan that fed its live/cooldown views.
+func dispatchWaveSkipIssuesFrom(snap *runsSnapshot, excludedIssues map[int]bool) map[int]bool {
 	skipIssues := excludedIssues
-	if exhausted := attemptExhaustedIssues(runsDir, dispatchAttemptBudget()); len(exhausted) > 0 {
+	if exhausted := snap.attemptExhausted(dispatchAttemptBudget()); len(exhausted) > 0 {
 		skipIssues = make(map[int]bool, len(excludedIssues)+len(exhausted))
 		for n := range excludedIssues {
 			skipIssues[n] = true

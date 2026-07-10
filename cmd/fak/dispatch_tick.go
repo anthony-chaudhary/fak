@@ -309,11 +309,15 @@ type dispatchTickPick struct {
 	pick             dispatchLanePick
 	held             map[string]bool
 	liveIssueDetails map[int]dispatchLiveScope
-	liveIssues       map[int]bool
-	cooled           map[int]bool
-	cooldownStatus   []map[string]any
-	target           int
-	hasTarget        bool
+	// liveScopes is this tick's captured live-worker set (from the same runs-directory
+	// snapshot that fed liveIssueDetails), reused for the per-pick tree-collision gate in
+	// evaluateDispatchTick so that check projects off captured state instead of re-scanning.
+	liveScopes     []dispatchLiveScope
+	liveIssues     map[int]bool
+	cooled         map[int]bool
+	cooldownStatus []map[string]any
+	target         int
+	hasTarget      bool
 	// leaseID is this tick's resolved lease id: the per-issue id
 	// (resolve-<lane>-<issue>) when the claim narrowed to the target, else the
 	// coarse lane id (resolve-<lane>) or an operator --lease-id pin. pick.Tree is
@@ -326,7 +330,12 @@ type dispatchTickPick struct {
 // the live/cooldown/structurally-held skip set. Pure code motion out of
 // evaluateDispatchTick; behavior is unchanged.
 func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOptions, runsDir string, heldNoCommit map[int]bool) (dispatchTickPick, error) {
-	held := liveResolutionLanes(runsDir)
+	// One runs-directory scan feeds every live/cooldown/collision view this tick needs
+	// (held lanes, live issue details, cooldown set + rows, and the per-pick tree-collision
+	// gate below), instead of re-globbing/re-statting the sidecars once per view (#3593).
+	snap := scanRunsSnapshot(runsDir, time.Now())
+	scopes := snap.liveScopes()
+	held := snap.liveLanes()
 	exclude := map[string]bool{}
 	for _, lane := range opts.ExcludeLanes {
 		exclude[lane] = true
@@ -340,10 +349,10 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 	if err != nil {
 		return dispatchTickPick{}, err
 	}
-	liveIssueDetails := liveResolutionIssueDetails(runsDir)
+	liveIssueDetails := snap.liveIssueDetails()
 	liveIssues := liveIssueSet(liveIssueDetails)
-	cooled := recentlyAttemptedIssues(runsDir, opts.CooldownMin)
-	cooldownStatus := cooldownIssueRows(runsDir, opts.CooldownMin)
+	cooled := snap.recentlyAttempted(opts.CooldownMin)
+	cooldownStatus := snap.cooldownRowMaps(opts.CooldownMin)
 	skip := map[int]bool{}
 	for n := range liveIssues {
 		skip[n] = true
@@ -390,6 +399,7 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 		pick:             pick,
 		held:             held,
 		liveIssueDetails: liveIssueDetails,
+		liveScopes:       scopes,
 		liveIssues:       liveIssues,
 		cooled:           cooled,
 		cooldownStatus:   cooldownStatus,
@@ -594,6 +604,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	pick := pickRes.pick
 	held := pickRes.held
 	liveIssueDetails := pickRes.liveIssueDetails
+	liveScopes := pickRes.liveScopes
 	target := pickRes.target
 	hasTarget := pickRes.hasTarget
 
@@ -681,7 +692,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 	if hasTarget {
-		if live, ok := liveResolutionTreeCollision(runsDir, pick.Tree); ok {
+		if live, ok := treeCollisionFromScopes(liveScopes, pick.Tree); ok {
 			payload["ok"] = false
 			payload["action"] = "collision_risk"
 			payload["verdict"] = dispatchorder.ReasonCollisionRisk
