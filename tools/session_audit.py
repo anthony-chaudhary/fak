@@ -389,9 +389,16 @@ class BehaviorLens:
                 if new_h in seen_old and new_h != old_h:
                     reverts += 1          # this edit restores an earlier state
                 seen_old.add(old_h)
-            # Rewrite loop = edits undo each other or keep revisiting the same
-            # few regions; distinct-region build-out is filtered out here.
-            if reverts >= 1 or distinct * 2 <= n:
+            # Rewrite loop = edits keep revisiting the same few regions
+            # (distinct*2 <= n), OR undo each other WHILE regions are being
+            # reused (reverts and distinct < n). A single revert amid all-
+            # distinct regions (distinct == n) is NOT a loop: a long linear
+            # refactor that happens to restore one earlier snippet once is
+            # healthy build-out, not thrash. Requiring distinct < n on the
+            # revert arm kills the b72e2808 false alarm (n=19, distinct=19,
+            # reverts=1) while still catching real region-reuse thrash
+            # (5c72b8ba: n=5, distinct=4, reverts=2).
+            if distinct * 2 <= n or (reverts >= 1 and distinct < n):
                 rows.append({"file": f, "count": n,
                              "distinct_regions": distinct, "reverts": reverts})
         return sorted(rows, key=lambda r: -r["count"])
@@ -1099,7 +1106,8 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                          f"{r['count']} | {sig} |")
         fc = beh.get("file_churn_sessions") or []
         L.append(f"- **Sessions with a REWRITE loop (≥{FILE_CHURN_MIN} mutations "
-                 f"of one file, same-region or reverting):** {len(fc)}"
+                 f"of one file, revisiting the same regions or reverting amid "
+                 f"region reuse):** {len(fc)}"
                  + (" — worst below" if fc else ""))
         if fc:
             L.append("")

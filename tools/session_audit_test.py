@@ -570,10 +570,15 @@ class BehavioralLensTest(unittest.TestCase):
         self.assertEqual(b["max_file_churn"], 6, "raw count still reported")
         self.assertEqual(b["file_churn"], [], "distinct-region build-out is not churn")
 
-    def test_file_churn_revert_pair_flagged(self) -> None:
-        # Distinct regions overall, but one edit RESTORES an earlier pre-state
-        # (its new_string == an earlier edit's old_string) — an undo marks a loop.
-        edits = [("A", "B"), ("C", "D"), ("E", "F"), ("B", "A"), ("G", "H")]
+    def test_file_churn_revert_amid_region_reuse_flagged(self) -> None:
+        # #3943: a revert only marks a rewrite loop when regions are ALSO being
+        # reused (distinct < count). Here A is edited twice (region reuse) and a
+        # B->A edit restores edit 0's pre-state: distinct=4 < n=5, reverts=1 ->
+        # genuine thrash, stays flagged. (This replaces the old
+        # test_file_churn_revert_pair_flagged, which asserted a LONE revert amid
+        # all-distinct regions was a loop — the b72e2808 false positive #3943
+        # refutes; see test_file_churn_lone_revert_all_distinct_not_flagged.)
+        edits = [("A", "B"), ("C", "D"), ("A", "E"), ("B", "A"), ("G", "H")]
         recs = [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Edit",
                            tool_id=f"t{i}",
                            tool_input={"file_path": "C:/x/flip.go",
@@ -582,7 +587,39 @@ class BehavioralLensTest(unittest.TestCase):
         _, s = self._one(recs)
         rows = s["behavior"]["file_churn"]
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["distinct_regions"], 4, "A reused -> 4 distinct")
         self.assertEqual(rows[0]["reverts"], 1, "B->A restores edit 0's pre-state")
+
+    def test_file_churn_lone_revert_all_distinct_not_flagged(self) -> None:
+        # #3943 anchor (b72e2808 shape): count>=5, distinct == count, reverts==1
+        # — a long linear refactor across DISTINCT regions that happens to
+        # restore one earlier snippet once. NOT a rewrite loop; must NOT flag.
+        edits = [("A", "x"), ("B", "y"), ("C", "z"), ("D", "A"), ("E", "w")]
+        recs = [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Edit",
+                           tool_id=f"t{i}",
+                           tool_input={"file_path": "C:/x/author.go",
+                                       "old_string": old, "new_string": new})
+                for i, (old, new) in enumerate(edits)]
+        _, s = self._one(recs)
+        b = s["behavior"]
+        self.assertEqual(b["max_file_churn"], 5, "raw count still reported")
+        self.assertEqual(b["file_churn"], [],
+                         "lone revert amid all-distinct regions is not a loop")
+
+    def test_file_churn_region_reuse_multi_revert_flagged(self) -> None:
+        # #3943 anchor (5c72b8ba shape): count=5, distinct=4, reverts=2 — repeated
+        # same-region reverts are genuine thrash and must stay flagged.
+        edits = [("A", "B"), ("C", "D"), ("B", "A"), ("D", "C"), ("A", "E")]
+        recs = [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Edit",
+                           tool_id=f"t{i}",
+                           tool_input={"file_path": "C:/x/thrash.go",
+                                       "old_string": old, "new_string": new})
+                for i, (old, new) in enumerate(edits)]
+        _, s = self._one(recs)
+        rows = s["behavior"]["file_churn"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["distinct_regions"], 4)
+        self.assertEqual(rows[0]["reverts"], 2, "B->A and D->C are two reverts")
 
     def test_verbatim_vs_failure_mass_split(self) -> None:
         # 3 DIFFERENT commands sharing one error text: a failure CLASS, not a

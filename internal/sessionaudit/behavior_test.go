@@ -1,6 +1,7 @@
 package sessionaudit
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -38,6 +39,48 @@ func TestBehaviorLensMatchesPythonReference(t *testing.T) {
 	}
 	if !reflect.DeepEqual(s.Behavior, want) {
 		t.Fatalf("behavior mismatch:\n got  %+v\n want %+v", s.Behavior, want)
+	}
+}
+
+// TestFileChurnRevertArmRegionAware pins the #3943 fix: the lone-revert arm of
+// the rewrite-loop detector is region-aware. A single revert amid all-distinct
+// regions (distinct == count) is a long linear refactor that restores one
+// earlier snippet once — healthy build-out, NOT a loop (the b72e2808 false
+// positive). A revert WITH region reuse (distinct < count) stays flagged as
+// genuine thrash (5c72b8ba). Mirrors the Python _churn_rows anchor cases so the
+// Go and Python flag decisions agree byte-for-byte.
+func TestFileChurnRevertArmRegionAware(t *testing.T) {
+	edit := func(old, nw string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{
+			"file_path": "/repo/f.go", "old_string": old, "new_string": nw,
+		})
+		return b
+	}
+	churn := func(edits [][2]string) []FileChurnRow {
+		l := newBehaviorLens()
+		for _, e := range edits {
+			l.noteToolUse("", "Edit", edit(e[0], e[1]), "")
+		}
+		return l.summary().FileChurn
+	}
+
+	// b72e2808 shape: count=5, distinct=5, reverts=1 -> NOT flagged.
+	if rows := churn([][2]string{{"A", "x"}, {"B", "y"}, {"C", "z"}, {"D", "A"}, {"E", "w"}}); len(rows) != 0 {
+		t.Fatalf("lone revert amid all-distinct regions must not flag, got %+v", rows)
+	}
+
+	// 5c72b8ba shape: count=5, distinct=4, reverts=2 -> flagged.
+	thrash := churn([][2]string{{"A", "B"}, {"C", "D"}, {"B", "A"}, {"D", "C"}, {"A", "E"}})
+	if len(thrash) != 1 {
+		t.Fatalf("region-reuse thrash must flag exactly one file, got %+v", thrash)
+	}
+	if thrash[0].Count != 5 || thrash[0].DistinctRegions != 4 || thrash[0].Reverts != 2 {
+		t.Fatalf("unexpected churn row: %+v", thrash[0])
+	}
+
+	// distinct-region build-out (6 distinct regions, 0 reverts) stays unflagged.
+	if rows := churn([][2]string{{"a", "1"}, {"b", "2"}, {"c", "3"}, {"d", "4"}, {"e", "5"}, {"g", "6"}}); len(rows) != 0 {
+		t.Fatalf("distinct-region build-out must not flag, got %+v", rows)
 	}
 }
 

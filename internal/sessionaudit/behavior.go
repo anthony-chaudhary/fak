@@ -341,7 +341,13 @@ func (l *behaviorLens) summary() Behavior {
 			}
 			seenOld[rg.oldH] = true
 		}
-		if reverts >= 1 || distinct*2 <= n {
+		// Rewrite loop = edits keep revisiting the same few regions
+		// (distinct*2 <= n), OR undo each other WHILE regions are being reused
+		// (reverts and distinct < n). A single revert amid all-distinct regions
+		// (distinct == n) is a long linear refactor that restores one earlier
+		// snippet once — healthy build-out, not thrash. Mirrors the Python
+		// _churn_rows gate (kills the b72e2808 false alarm; keeps 5c72b8ba).
+		if distinct*2 <= n || (reverts >= 1 && distinct < n) {
 			b.FileChurn = append(b.FileChurn, FileChurnRow{File: f, Count: n, DistinctRegions: distinct, Reverts: reverts})
 		}
 	}
