@@ -227,6 +227,15 @@ type Model struct {
 	// pick standardKVLayout (MLA==nil) vs mlaKVLayout (MLA!=nil).
 	MLA *MLAConfig
 
+	// Vision holds the retained CLIP/ViT image-tower weights when a VLM's vision
+	// source is loaded (an mmproj GGUF or an inline model.visual.* safetensors set),
+	// mirroring MLA as a dedicated sub-struct for a stack the text forward never
+	// reads. It is nil for every text-only model — the unchanged default — so the
+	// proven decoder path is byte-for-byte untouched. The vision encoder (#4030)
+	// consumes it; only a load with RetainVision set (the --mmproj flag, #4032) ever
+	// populates it. See vision.go.
+	Vision *VisionTower
+
 	// attnObs is the optional attention-mass witness (#852). nil by default — the
 	// unobserved forward pass is byte-identical and allocation-identical. When set via
 	// SetAttnObserver, the named attention seams emit a COPY of their post-softmax

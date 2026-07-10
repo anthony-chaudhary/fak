@@ -1,0 +1,228 @@
+package model
+
+// vision.go — the vision-tower substrate for the VLM epic (#4029).
+//
+// A VLM's image encoder (llama.cpp's CLIP tower: patch-embed → ViT blocks →
+// projector) is a SEPARATE weight stack from the text decoder. Its tensors ship
+// either in a companion mmproj GGUF (v.* / mm.*, loaded via ggufload.OpenMMProj,
+// #4028) or inline in an HF safetensors checkpoint (model.visual.*). Both the text
+// forward and every existing loader DROP these tensors today (materializeQwen35Tensors
+// here; isGLMMoeDsaVisionTensor in ggufload). This file gives them a home: a
+// VisionTower held on the Model in a dedicated field (mirroring Model.MLA), so the
+// decoder path is byte-for-byte unchanged (Vision is nil for every text-only model)
+// while the encoder slice (#4030) has a resident, resolvable set of vision weights to
+// read. Nothing is retained unless RetainVision is set — the unchanged default drops
+// the vision tower exactly as before.
+
+import (
+	"encoding/binary"
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+	"unsafe"
+)
+
+// RetainVision is the "an mmproj / vision source is present" gate, mirroring
+// RetainMTP (safetensors.go). When false (the default) the loaders drop the vision
+// tower exactly as before, so a text-only load is byte-for-byte unchanged. When
+// true, the vision tensors (model.visual.* in safetensors, v.*/mm.* in GGUF) are
+// retained and segregated into Model.Vision instead of being discarded. It is a
+// package var — not a Config field — because it is a load-time operator choice
+// (the --mmproj flag, wired in #4032), exactly like RetainMTP.
+var RetainVision bool
+
+// VisionConfig is the CLIP/ViT image-tower geometry the encoder (#4030) needs,
+// parsed from an mmproj GGUF's clip.* metadata (or an HF vision_config). Only the
+// fields the tower's forward reads live here; the projector output dim must equal
+// the decoder hidden size so image vectors splice into the prompt sequence. Zero
+// fields mean "unknown from this source" — the encoder slice pins any it requires.
+type VisionConfig struct {
+	HiddenSize    int     // ViT hidden width (clip.vision.embedding_length)
+	NumLayers     int     // ViT block count (clip.vision.block_count); drives the resolver's per-layer template
+	NumHeads      int     // ViT attention heads (clip.vision.attention.head_count)
+	FFNLength     int     // ViT MLP inner size (clip.vision.feed_forward_length)
+	PatchSize     int     // conv patch edge in pixels (clip.vision.patch_size)
+	ImageSize     int     // native square input edge (clip.vision.image_size)
+	ProjOutDim    int     // projector output width = decoder hidden size (mm.* out features)
+	ProjectorType string  // llama.cpp clip.projector_type (e.g. "mlp", "qwen2vl_merger")
+	LNEps         float32 // ViT layernorm epsilon (clip.vision.attention.layer_norm_epsilon)
+	MergeSize     int     // spatial patch-merge factor for Qwen2/2.5-VL (1 when absent)
+}
+
+// VisionTower is a resident vision weight stack: its parsed geometry plus the same
+// zero-copy (manifest, raw f32 LE) representation Model uses, so a tensor view is a
+// reinterpretation of the blob, not a copy. It is owned by Model.Vision and read
+// only by the vision encoder (#4030); the text decoder never touches it.
+type VisionTower struct {
+	Cfg      VisionConfig
+	manifest map[string]tensorMeta
+	raw      []byte
+}
+
+// NewVisionTower packs decoded f32 vision tensors into the (manifest, raw) layout,
+// exactly as NewFromF32Tensors does for the decoder. It is the single construction
+// point both source paths funnel through: ggufload.OpenMMProj's v.*/mm.* reader
+// (#4028) for the GGUF companion file, and the safetensors model.visual.* extractor
+// for inline checkpoints. Names are stored verbatim (the source scheme), so the
+// vision resolver's aliases map them onto the canonical v.* set.
+func NewVisionTower(cfg VisionConfig, tensors []NamedTensorF32) (*VisionTower, error) {
+	man := make(map[string]tensorMeta, len(tensors))
+	var raw []byte
+	off := 0
+	for _, t := range tensors {
+		if t.Name == "" {
+			return nil, fmt.Errorf("model: vision tower: empty tensor name")
+		}
+		if _, ok := man[t.Name]; ok {
+			return nil, fmt.Errorf("model: vision tower: duplicate tensor %s", t.Name)
+		}
+		elems, err := tensorShapeElems(t.Name, t.Shape)
+		if err != nil {
+			return nil, err
+		}
+		if elems != len(t.Data) {
+			return nil, fmt.Errorf("model: vision tensor %s has %d values, shape wants %d", t.Name, len(t.Data), elems)
+		}
+		nbytes := len(t.Data) * 4
+		if nbytes/4 != len(t.Data) || off > math.MaxInt-nbytes {
+			return nil, fmt.Errorf("model: vision tensor %s byte size overflows int", t.Name)
+		}
+		start := len(raw)
+		raw = append(raw, make([]byte, nbytes)...)
+		for i, v := range t.Data {
+			binary.LittleEndian.PutUint32(raw[start+i*4:], math.Float32bits(v))
+		}
+		shape := append([]int(nil), t.Shape...)
+		man[t.Name] = tensorMeta{Dtype: "f32", Shape: shape, Offset: off, Nbytes: nbytes}
+		off += nbytes
+	}
+	return &VisionTower{Cfg: cfg, manifest: man, raw: raw}, nil
+}
+
+// Config returns the tower's parsed geometry.
+func (t *VisionTower) Config() VisionConfig { return t.Cfg }
+
+// Bytes is the resident size of the vision weights (the f32 blob length) — the
+// figure the load estimator adds when the tower is retained (#4029 byte-accounting).
+func (t *VisionTower) Bytes() int64 { return int64(len(t.raw)) }
+
+// TensorNames returns the tower's tensor names in sorted order (deterministic for
+// tests and byte-accounting; the map is otherwise unordered).
+func (t *VisionTower) TensorNames() []string {
+	names := make([]string, 0, len(t.manifest))
+	for n := range t.manifest {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// has / tensor / tensorOptional mirror the Model accessors so the encoder (#4030)
+// reads vision weights the same zero-copy way the decoder reads its own.
+func (t *VisionTower) has(name string) bool {
+	_, ok := t.manifest[name]
+	return ok
+}
+
+func (t *VisionTower) tensor(name string) []float32 {
+	meta, ok := t.manifest[name]
+	if !ok {
+		panic("model: vision tower missing tensor " + name)
+	}
+	n := meta.Nbytes / 4
+	return unsafe.Slice((*float32)(unsafe.Pointer(&t.raw[meta.Offset])), n)
+}
+
+func (t *VisionTower) tensorOptional(name string) []float32 {
+	if t.has(name) {
+		return t.tensor(name)
+	}
+	return nil
+}
+
+// ---- vision tensor-name resolver (the #4029 proof) ---------------------------------
+//
+// The vision tower is NOT one of the decoder families resolveSpecFor routes, so it
+// gets its own entry point rather than a branch there — keeping the decoder resolver
+// (issue #473) untouched. The canonical scheme is llama.cpp's mmproj GGUF naming
+// (v.* globals + per-layer v.blk.<l>.* + the mm.* projector); an HF safetensors
+// source is mapped on via aliases.
+
+// ResolveVisionTensorNames proves a vision manifest carries every required tower
+// tensor, mapping each canonical v.* name onto the source name that provides it. A
+// required tensor with no source is a precise error naming the missing canonical
+// tensor and the candidates searched — the same contract ResolveTensorNames gives
+// the decoder families. It inspects manifest KEYS only, never bytes.
+func ResolveVisionTensorNames(cfg VisionConfig, manifest map[string]tensorMeta) (*Resolution, error) {
+	spec := visionSpec(cfg)
+	res := &Resolution{Family: spec.family, Resolved: make(map[string]string)}
+	reqs := append([]tensorReq(nil), spec.globals...)
+	if spec.perLayer != nil {
+		for l := 0; l < cfg.NumLayers; l++ {
+			reqs = append(reqs, spec.perLayer(l)...)
+		}
+	}
+	for _, r := range reqs {
+		src, ok := r.resolve(manifest)
+		if ok {
+			res.Resolved[r.canonical] = src
+			continue
+		}
+		if r.optional {
+			continue
+		}
+		return nil, fmt.Errorf("model: %s family: required canonical tensor %q has no source in the manifest (searched: %s)",
+			spec.family, r.canonical, strings.Join(r.candidates(), ", "))
+	}
+	return res, nil
+}
+
+// visionSpec is the CLIP/ViT tower's required-tensor table under the canonical mmproj
+// v.* scheme. Globals: the patch-embed conv, the position embedding, and the mm.*
+// projector (the seam that maps ViT hidden states into the decoder's embedding
+// space). Per layer v.blk.<l>.*: split q/k/v/out attention, the two block layernorms,
+// and the MLP up/down. Biases are optional (presence-driven — CLIP carries attention
+// bias; some variants omit projector bias). Names an HF model.visual.* source can
+// also satisfy are supplied as aliases. Finer per-variant differences (Qwen2-VL's
+// merger, windowed attention) are pinned by the encoder forward (#4030), not asserted
+// here — the same "core required, variant gated on a real checkpoint" discipline the
+// deepseek/gptoss specs use.
+func visionSpec(cfg VisionConfig) resolverSpec {
+	return resolverSpec{
+		family: "vision-clip",
+		globals: []tensorReq{
+			{canonical: "v.patch_embd.weight", aliases: []string{"model.visual.patch_embed.proj.weight"}},
+			{canonical: "v.patch_embd.bias", aliases: []string{"model.visual.patch_embed.proj.bias"}, optional: true},
+			{canonical: "v.position_embd.weight", aliases: []string{"model.visual.pos_embed", "model.visual.position_embedding.weight"}, optional: true},
+			{canonical: "v.post_ln.weight", aliases: []string{"model.visual.post_layernorm.weight", "model.visual.merger.ln_q.weight"}, optional: true},
+			{canonical: "v.post_ln.bias", aliases: []string{"model.visual.post_layernorm.bias"}, optional: true},
+			{canonical: "mm.0.weight", aliases: []string{"model.visual.merger.mlp.0.weight", "mm.mlp.0.weight"}},
+			{canonical: "mm.0.bias", aliases: []string{"model.visual.merger.mlp.0.bias"}, optional: true},
+			{canonical: "mm.2.weight", aliases: []string{"model.visual.merger.mlp.2.weight"}, optional: true},
+			{canonical: "mm.2.bias", aliases: []string{"model.visual.merger.mlp.2.bias"}, optional: true},
+		},
+		perLayer: func(l int) []tensorReq {
+			p := "v.blk." + itoa(l) + "."
+			hf := "model.visual.blocks." + itoa(l) + "."
+			return []tensorReq{
+				{canonical: p + "attn_q.weight", aliases: []string{hf + "attn.q.weight"}},
+				{canonical: p + "attn_q.bias", aliases: []string{hf + "attn.q.bias"}, optional: true},
+				{canonical: p + "attn_k.weight", aliases: []string{hf + "attn.k.weight"}},
+				{canonical: p + "attn_k.bias", aliases: []string{hf + "attn.k.bias"}, optional: true},
+				{canonical: p + "attn_v.weight", aliases: []string{hf + "attn.v.weight"}},
+				{canonical: p + "attn_v.bias", aliases: []string{hf + "attn.v.bias"}, optional: true},
+				{canonical: p + "attn_out.weight", aliases: []string{hf + "attn.proj.weight"}},
+				{canonical: p + "attn_out.bias", aliases: []string{hf + "attn.proj.bias"}, optional: true},
+				{canonical: p + "ln1.weight", aliases: []string{hf + "norm1.weight"}},
+				{canonical: p + "ln1.bias", aliases: []string{hf + "norm1.bias"}, optional: true},
+				{canonical: p + "ln2.weight", aliases: []string{hf + "norm2.weight"}},
+				{canonical: p + "ln2.bias", aliases: []string{hf + "norm2.bias"}, optional: true},
+				{canonical: p + "ffn_up.weight", aliases: []string{hf + "mlp.fc1.weight"}},
+				{canonical: p + "ffn_up.bias", aliases: []string{hf + "mlp.fc1.bias"}, optional: true},
+				{canonical: p + "ffn_down.weight", aliases: []string{hf + "mlp.fc2.weight"}},
+				{canonical: p + "ffn_down.bias", aliases: []string{hf + "mlp.fc2.bias"}, optional: true},
+			}
+		},
+	}
+}
