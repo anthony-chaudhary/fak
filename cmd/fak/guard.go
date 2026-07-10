@@ -191,6 +191,7 @@ func cmdGuard(argv []string) {
 	}
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
+	rotateMode := fs.String("rotate", "", "account rotation: auto|off|<seat> (default auto headless, off interactive)")
 	verbFlagUsage(fs, "guard")
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
 	provider := fs.String("provider", "", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai (default: auto-detected from the agent name — claude->anthropic, codex/opencode->openai — else anthropic)")
@@ -270,6 +271,18 @@ func cmdGuard(argv []string) {
 	guardHelpAll := guardArgvHasAll(argv)
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, guardHelpAll) }
 	_ = fs.Parse(argv)
+	rotateSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "rotate" {
+			rotateSet = true
+		}
+	})
+	resolvedRotateMode, rotateErr := normalizeGuardRotateMode(*rotateMode, rotateSet, guardChildInteractive(fs.Args()))
+	if rotateErr != nil {
+		fmt.Fprintln(os.Stderr, rotateErr)
+		os.Exit(2)
+	}
+	_ = resolvedRotateMode // consumed by the relaunch rotation seam; parsing/defaults are pinned now.
 	// Boot-timeline instrumentation: mirror serve.go's StartupPhases (internal/gateway/startup.go)
 	// so a slow `fak guard` launch is diagnosable from THIS session's own boot timeline instead of
 	// only fak_gateway_startup_phase_duration_seconds on an ephemeral port that closes with the
