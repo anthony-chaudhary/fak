@@ -18,6 +18,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
+	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 	"golang.org/x/term"
 )
@@ -144,33 +146,28 @@ type guardInfoVars struct {
 	// --startup flag prints it verbatim; empty means the gateway recorded none (a fak
 	// serve gateway, or a guard build predating the report wiring).
 	StartupReport string `json:"startup_report"`
+	// Watchdog is the resume/heal watchdog's process-global expvar snapshot (#3803), mirrored
+	// from the gateway's /debug/vars "watchdog" block. It shares resumemetrics.Snapshot with the
+	// producer (debugWatchdogVars) so emit and decode cannot drift. Pointer, like VCache: the
+	// gateway OMITS the block on a cold process that never ran a watchdog (resumemetrics.Active()
+	// is false), so nil means "no watchdog signal here" — distinct from a present all-zero snapshot.
+	Watchdog *guardInfoWatchdog `json:"watchdog"`
 }
 
-// guardInfoSession is the wire shape of one /debug/vars sessions row
-// (internal/gateway debugSessionVars), field-for-field, so a gateway that grows the
-// block needs no change on this side. A non-empty ParentTrace marks a sub-agent;
-// Generation is its spawn depth. The budget fields are what REMAINS of the seeded
-// allotment (0 usually means "never seeded", so the renderer omits, not fabricates).
-type guardInfoSession struct {
-	TraceID           string `json:"trace_id"`
-	Run               string `json:"run"`
-	ParentTrace       string `json:"parent_trace"`
-	Generation        int    `json:"generation"`
-	Priority          int    `json:"priority"`
-	TurnsLeft         int    `json:"turns_left"`
-	TokensLeft        int    `json:"tokens_left"`
-	ContextTokensLeft int    `json:"context_tokens_left"`
-	ElapsedSeconds    int64  `json:"elapsed_seconds"`
-	Assumptions       int    `json:"assumptions"`
-	// LastTool/SpawnCount/InflightSeconds/IdleSeconds are the live-status activity cell
-	// (#2627): the last ADMITTED tool name (payload-free), the admitted subagent-spawn
-	// count, and the in-flight-OR-idle age of the trace. A gateway that predates the
-	// fields simply omits them and these decode to zero (rendered as no clause).
-	LastTool        string `json:"last_tool"`
-	SpawnCount      int    `json:"spawn_count"`
-	InflightSeconds int64  `json:"inflight_seconds"`
-	IdleSeconds     int64  `json:"idle_seconds"`
-}
+// guardInfoWatchdog is the wire shape of the resume/heal watchdog counters the pane renders. It
+// is a type alias to resumemetrics.Snapshot — the SAME type the gateway's debugWatchdogVars emits
+// — so the block cannot drift between emit and decode, the strongest form of the "shared shape"
+// contract guardInfoSession/guardInfoManagedCache already keep.
+type guardInfoWatchdog = resumemetrics.Snapshot
+
+// guardInfoSession is one /debug/vars sessions row. Its shape lives in internal/guardvars,
+// shared with the gateway producer (debugSessionVars) so the block cannot drift between emit and
+// decode. A non-empty ParentTrace marks a sub-agent; Generation is its spawn depth. The budget
+// fields are what REMAINS of the seeded allotment (0 usually means "never seeded", so the
+// renderer omits, not fabricates). LastTool/SpawnCount/InflightSeconds/IdleSeconds are the
+// live-status activity cell (#2627); a gateway that predates them omits them and they decode to
+// zero (rendered as no clause).
+type guardInfoSession = guardvars.SessionVars
 
 // guardInfoManagedContext is the wire shape of a
 // scorecardpane.ContextStatusSignals, field-for-field, so a gateway that starts
@@ -202,28 +199,17 @@ type guardInfoPrefixStability struct {
 	Reason                    string `json:"reason"`
 }
 
-// guardInfoManagedCache is the wire shape of the gateway's /debug/vars managed_cache block
-// (internal/gateway debugManagedCacheVars), field-for-field, so a gateway that starts
-// populating it needs no change here. Active is the 1h TTL-upgrade lever state; Inert marks
-// the #2190 ACTIVE-but-inert signal (lever on, zero upgrades). Reasons is the per-refusal
-// outcome breakdown (refusal-only; the "upgraded" outcome lives in Upgraded).
-type guardInfoManagedCache struct {
-	Active   bool              `json:"active"`
-	Inert    bool              `json:"inert"`
-	Upgraded uint64            `json:"upgraded"`
-	Reasons  map[string]uint64 `json:"reasons,omitempty"`
-}
+// guardInfoManagedCache is the gateway's /debug/vars managed_cache posture block. Its shape
+// lives in internal/guardvars, shared with the gateway producer (debugManagedCacheVars) so emit
+// and decode cannot drift. Active is the 1h TTL-upgrade lever state; Inert marks the #2190
+// ACTIVE-but-inert signal (lever on, zero upgrades). Reasons is the per-refusal outcome
+// breakdown (refusal-only; the "upgraded" outcome lives in Upgraded).
+type guardInfoManagedCache = guardvars.ManagedCacheVars
 
-type guardInfoCacheAttribution struct {
-	ProviderTokenEquiv                        float64 `json:"provider_token_equiv"`
-	FakTokenEquiv                             float64 `json:"fak_token_equiv"`
-	TotalTokenEquiv                           float64 `json:"total_token_equiv"`
-	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
-	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"`
-	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
-	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
-	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"`
-}
+// guardInfoCacheAttribution is the /debug/vars owner-split block. Its shape lives in
+// internal/guardvars, shared with the gateway producer (debugCacheAttributionVars) so emit and
+// decode cannot drift.
+type guardInfoCacheAttribution = guardvars.CacheAttributionVars
 
 func cmdInfo(argv []string) {
 	os.Exit(runInfo(os.Stdout, os.Stderr, argv))
@@ -547,11 +533,11 @@ func loadPrefixTranscriptTurns(path string) ([][]cachemeta.PromptSegment, error)
 // pane close itself rather than spin forever on a dead port. --once (once=true) is a scripted
 // one-shot: it prints a single line with no header/legend and exits non-zero on a failed fetch.
 func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string, maxIdleOpt ...time.Duration) int {
-	// maxIdle is an OPTIONAL trailing arg (variadic) so the existing call sites — and the non-watch
-	// one-shots — stay byte-for-byte unchanged; only the real watch launch (runInfo) and the focused
-	// #2340 tests pass it. idleLimit lowers that duration to a consecutive-unreachable tick budget,
-	// the same unit the sawHealthy/misses close path already speaks. 0 (default) disables the
-	// backstop: the overlay polls a never-answering gateway forever, as before.
+	// maxIdle is an OPTIONAL trailing arg (variadic) so the seven existing call sites — and the
+	// non-watch one-shots — stay byte-for-byte unchanged; only the real watch launch (runInfo) and
+	// the focused #2340 test pass it. idleLimit lowers that duration to a consecutive-unreachable
+	// tick budget, the same unit the sawHealthy/misses close path already speaks. 0 (the default)
+	// disables the backstop: the overlay polls a never-answering gateway forever, as before.
 	var maxIdle time.Duration
 	if len(maxIdleOpt) > 0 {
 		maxIdle = maxIdleOpt[0]
@@ -566,12 +552,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// --once is a scripted one-shot probe: print ONE line (or fail), no header, no legend —
 	// the standing header is noise when there is no watch loop to head.
 	if once {
-		v, ok := fetchGuardInfoVars(c, stderr)
-		if !ok {
-			return 1
-		}
-		fmt.Fprintf(stdout, "%s\n", renderGuardInfoLine(v))
-		return 0
+		return runGuardInfoOnce(stdout, stderr, c)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -600,17 +581,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 	}
 
-	// Visual is the DEFAULT for the live 20% pane: stacked sub-panes (trend sparklines + a
-	// task-manager gauge pane) redrawn in place. It needs a TTY for the cursor control, so off a
-	// TTY (piped/redirected log) and under --style line we keep the single compact status line.
-	visual := tty && strings.EqualFold(strings.TrimSpace(style), "visual")
-	if visual {
-		// A compact intro line scrolls into history above the live block; the block carries its
-		// own labels, so the verbose status-line legend is not printed in visual mode.
-		fmt.Fprint(stdout, guardInfoVisualIntro(c.base, interval, width))
-	} else {
-		fmt.Fprint(stdout, guardInfoStartupHeader(c.base, interval, width))
-	}
+	visual, colorOn := guardInfoOverlayIntro(stdout, c, interval, tty, width, style)
 
 	tr := newGuardInfoTrend(guardInfoTrendCap)
 	sawHealthy := false
@@ -678,6 +649,8 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			if focusable {
 				block = renderGuardInfoInteractiveBlock(viewState, v, tr, width, height)
 			}
+			// Layer color on the finished, width-capped block (a no-op off a TTY / under NO_COLOR).
+			block = colorizeGuardInfoBlock(block, colorOn)
 			prevRows = writeGuardInfoFrame(stdout, block, prevRows)
 			dirty = true
 			return
@@ -702,6 +675,33 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			prevRows = 0
 		}
 		fmt.Fprintln(w, line)
+	}
+
+	// Copy/freeze mode hands text selection back to the terminal (mouse reporting off) and FREEZES
+	// the in-place redraw, so a watcher can drag-select and copy the pane without the next tick
+	// erasing it. Ticks keep fetching (gateway-closed detection stays live); they just stop painting
+	// while frozen (see emit + the keyCh arms). Only reachable on the interactive path, where keyCh
+	// exists — so the mouse-toggle side effects only fire when mouse reporting was actually on.
+	enterCopyMode := func() {
+		if viewState.copyMode {
+			return
+		}
+		writeMouseDisable(stdout) // stop capturing drags → native terminal selection works again
+		viewState.copyMode = true
+		if haveSample {
+			writeFrame(lastSample) // paint the frozen frame once, now with the copy banner
+		}
+	}
+	exitCopyMode := func() {
+		if !viewState.copyMode {
+			return
+		}
+		viewState.copyMode = false
+		writeMouseEnable(stdout) // resume click-to-select-tab / wheel-scroll
+		fs.needsRepaint = true
+		if haveSample {
+			writeFrame(lastSample) // repaint the live tab bar + body from the freshest sample
+		}
 	}
 
 	// emit fetches + renders once. ok is true when a frame was rendered; stop is true when the
@@ -729,7 +729,11 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 		sawHealthy = true
 		misses = 0
-		writeFrame(v)
+		if viewState.copyMode {
+			lastSample, haveSample = v, true // keep the sample fresh but stay frozen for copy/select
+		} else {
+			writeFrame(v)
+		}
 		return true, false
 	}
 
@@ -753,7 +757,20 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			// the context ourselves and let the ctx.Done() arm run the clean teardown.
 			switch ev.Kind {
 			case infoInputQuit:
-				stop()
+				// Ctrl-C / 'q'. In copy mode Ctrl-C is forgiving: it resumes the live pane instead of
+				// tearing it down, so the reflexive copy keystroke can never kill the frame a watcher
+				// is selecting. Outside copy mode it quits as before.
+				if viewState.copyMode {
+					exitCopyMode()
+				} else {
+					stop()
+				}
+			case infoInputCopyMode:
+				if viewState.copyMode {
+					exitCopyMode()
+				} else {
+					enterCopyMode()
+				}
 			case infoInputFocusIn:
 				// Focus-IN edge: the tab may have been resized while hidden. Latch a repaint and
 				// paint it now from the last sample (writeFrame re-measures + clears the old block;
@@ -763,8 +780,8 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 				fs.focused = true
 				fs.needsRepaint = true
 				if !prev {
-					if haveSample {
-						writeFrame(lastSample)
+					if haveSample && !viewState.copyMode {
+						writeFrame(lastSample) // frozen for copy: the needsRepaint latch repaints on resume
 					}
 					ticker.Reset(effectiveInterval(true, interval, bg))
 				}
@@ -775,14 +792,29 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 					ticker.Reset(effectiveInterval(false, interval, bg))
 				}
 			default:
-				// A view switch / glossary toggle / mouse click. Fold it into the UI state and
-				// repaint from the last sample (no new fetch). A mouse click carries ABSOLUTE screen
-				// coords; translate the row to block-relative before hit-testing against the tab/chip
-				// layout. Only repaint when the state actually changed, so an inert click is silent.
+				if viewState.copyMode {
+					break // frozen for copy: ignore view/scroll/mouse until copy mode resumes
+				}
+				// A view switch / glossary toggle / scroll / mouse click. Fold it into the UI state
+				// and repaint from the last sample (no new fetch). A mouse click carries ABSOLUTE
+				// screen coords; translate the row to block-relative before hit-testing against the
+				// tab/chip layout. A scroll event's raw offset is then clamped to the active view's
+				// current content (kills drift, lands End on the last page). Only repaint when the
+				// state actually changed, so an inert click or an at-the-end scroll is silent.
 				if ev.Kind == infoInputMouseClick {
 					ev.Y = blockRelativeRow(ev.Y, height, prevRows)
 				}
-				if next := applyInfoInput(viewState, ev); next != viewState {
+				next := applyInfoInput(viewState, ev)
+				// A body click the tab/glossary layout did not claim may still land on a Cache-tab
+				// ablation bar → toggle that mechanism's detail sub-panel, resolved against the rows
+				// just rendered (so scroll/width are already baked in).
+				if ev.Kind == infoInputMouseClick && next == viewState && haveSample {
+					next = applyInfoCacheMechClick(next, lastSample, tr, width, height, ev.Y)
+				}
+				if haveSample {
+					next = clampInfoScrollToSample(next, lastSample, tr, width, height)
+				}
+				if next != viewState {
 					viewState = next
 					fs.needsRepaint = true
 					if haveSample {
@@ -796,8 +828,8 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			// re-measures to the new geometry + clears the old block). If no sample yet, the latch
 			// rides to the next tick.
 			fs.needsRepaint = true
-			if haveSample {
-				writeFrame(lastSample)
+			if haveSample && !viewState.copyMode {
+				writeFrame(lastSample) // frozen for copy: the needsRepaint latch repaints on resume
 			}
 			continue
 		case <-ticker.C:
@@ -806,6 +838,35 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			}
 		}
 	}
+}
+
+// runGuardInfoOnce is the --once scripted one-shot: fetch /debug/vars, print ONE compact
+// status line, and exit — exit non-zero on a failed fetch. No header, no legend, no loop.
+func runGuardInfoOnce(stdout, stderr io.Writer, c *claudeMacDebugClient) int {
+	v, ok := fetchGuardInfoVars(c, stderr)
+	if !ok {
+		return 1
+	}
+	fmt.Fprintf(stdout, "%s\n", renderGuardInfoLine(v))
+	return 0
+}
+
+// guardInfoOverlayIntro resolves the two run-time display modes for the live overlay and prints
+// the appropriate intro/header. visual is the DEFAULT for the live 20% pane (stacked sub-panes
+// redrawn in place); it needs a TTY for cursor control, so off a TTY and under --style line the
+// single compact status line is kept. colorOn gates print-time SGR color for the live block: a
+// real TTY that has not set NO_COLOR (info_color.go), computed once here.
+func guardInfoOverlayIntro(stdout io.Writer, c *claudeMacDebugClient, interval time.Duration, tty bool, width int, style string) (visual, colorOn bool) {
+	visual = tty && strings.EqualFold(strings.TrimSpace(style), "visual")
+	colorOn = guardInfoColorEnabled(tty)
+	if visual {
+		// A compact intro line scrolls into history above the live block; the block carries its
+		// own labels, so the verbose status-line legend is not printed in visual mode.
+		fmt.Fprint(stdout, guardInfoVisualIntro(c.base, interval, width))
+	} else {
+		fmt.Fprint(stdout, guardInfoStartupHeader(c.base, interval, width))
+	}
+	return visual, colorOn
 }
 
 // renderGuardInfoLine renders one compact live line in plain words a non-technical watcher
@@ -835,6 +896,12 @@ func renderGuardInfoLine(v guardInfoVars) string {
 	}
 	if ep := guardInfoEndpointsSummary(v.Endpoints); ep != "" {
 		line += " · " + ep
+	}
+	// Resume/heal watchdog health rides here, next to the liveness summary: a dead resume layer
+	// (down / gave-up) is a session-level concern, and the clause is empty on the common case where
+	// no watchdog is running, so a plain passthrough line stays quiet (#3802).
+	if wd := guardInfoWatchdogText(v.Watchdog); wd != "" {
+		line += " · " + wd
 	}
 	// "turns saved": engine calls fak avoided for the agent this session (the same
 	// WITNESSED FakVDSOAvoidedCalls the visual pane's trends row and the exit summary
@@ -1284,9 +1351,39 @@ func guardInfoStartupHeader(base string, interval time.Duration, width int) stri
 	b.WriteString(header)
 	b.WriteByte('\n')
 	if width > 0 && width < guardInfoNarrowCols {
+		// A narrow split pane stays intentionally compact (header + one compact guide line). The
+		// unattested-build warning is carried by the startup banner and the full-width pane; adding
+		// a row here would crowd the live status line the narrow path exists to protect.
 		b.WriteString(trimTUI(guardInfoCompactLegend(), width))
 		b.WriteByte('\n')
 		return b.String()
+	}
+	// Wide/unknown pane: room for the persistent unattested-build warning under the header. A build
+	// with no VCS stamp cannot show a "+"-marked build id in the version tag above, so without this
+	// the pane would give an operator NO staleness tell at all — and the startup banner that first
+	// carried it has long since scrolled off. Reuses the banner's predicate and stamp source
+	// (guardBuildStampUnattested over guardBannerBuildStamp); attested builds return "" and the pane
+	// stays uncluttered.
+	if note := guardInfoStalenessNote(guardBannerBuildStamp()); note != "" {
+		if width > 0 {
+			note = trimTUI(note, width)
+		}
+		b.WriteString(note)
+		b.WriteByte('\n')
+	}
+	// The ATTESTED-but-behind twin: guardInfoStalenessNote above fires only for an UNSTAMPED
+	// binary (staleness UNVERIFIABLE); this fires for a STAMPED binary that git ancestry proves is
+	// behind (Skewed) or off (Diverged) origin/main — the pane-persistent twin of the banner's
+	// guardSkewBuildWarning (guard_startup.go). The assessment is a per-process sync.Once, so the
+	// pane re-reads a cached verdict every frame and git never runs on the render path. The two
+	// notes are mutually exclusive per binary — an unstamped build is never classified Skewed — so
+	// emitting both unconditionally cannot double-warn.
+	if note := guardInfoSkewNote(guardBuildSkewAssessment()); note != "" {
+		if width > 0 {
+			note = trimTUI(note, width)
+		}
+		b.WriteString(note)
+		b.WriteByte('\n')
 	}
 	b.WriteString(guardInfoLegend())
 	return b.String()
@@ -1310,6 +1407,7 @@ func guardInfoLegend() string {
 	fmt.Fprintln(&b, "  saved  = \"turns saved\": engine calls fak avoided for you (served from its own cache or handled in-kernel) so the agent never had to make them — shown only once at least one was avoided.")
 	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
 	fmt.Fprintln(&b, "  agents = live sessions running through this fak — the main agent plus any sub-agents it spawned, with remaining budget and wall-clock.")
+	fmt.Fprintln(&b, "  watchdog = health of the layer that resumes stranded agents and restarts a dead monitor: the rollup verdict (healthy / healing / down / gave up), how many times it has ticked (alive proof), how many resumes it has proven, and whether any monitor needs attention. Absent when no watchdog is running here.")
 	fmt.Fprintln(&b, "  replies = answers the model has given · busy with = work happening right now · running = how long fak has been up · \"nothing yet\" = no re-use has happened.")
 	return b.String()
 }

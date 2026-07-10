@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
@@ -55,5 +56,21 @@ func TestGuardInfoSkewNote(t *testing.T) {
 		if got := guardInfoSkewNote(versionskew.Assessment{Verdict: v}); got != "" {
 			t.Fatalf("verdict %v must not add a pane note, got: %q", v, got)
 		}
+	}
+}
+
+// TestGuardInfoStartupHeaderSkewConsistency is the render-witness that the pane header surfaces the
+// attested-but-behind SKEW note EXACTLY when the running binary's cached ancestry verdict is
+// Skewed/Diverged. It ties the header output to the SAME one-shot guardBuildSkewAssessment the pane
+// reads, so the assertion holds for whatever verdict the test binary happens to carry (in a clean
+// checkout that is usually Fresh/Dirty/Unknown, so no note). It keys on the skew-distinctive
+// phrasing so the unattested note — which shares the "stale-build WARN" prefix — is never counted.
+func TestGuardInfoStartupHeaderSkewConsistency(t *testing.T) {
+	header := guardInfoStartupHeader("anthropic", 2*time.Second, 0)
+	wantNote := guardInfoSkewNote(guardBuildSkewAssessment()) != ""
+	gotNote := strings.Contains(header, "provably BEHIND") || strings.Contains(header, "OFF the trunk line")
+	if gotNote != wantNote {
+		t.Fatalf("header skew note present=%v, want %v (assessment %+v):\n%s",
+			gotNote, wantNote, guardBuildSkewAssessment(), header)
 	}
 }

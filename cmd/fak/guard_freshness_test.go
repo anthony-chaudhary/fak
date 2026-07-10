@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestGuardBuildStampUnattested pins the classifier that decides whether the guard banner
@@ -76,6 +77,50 @@ func TestPrintGuardBannerWarnsOnUnstampedBuild(t *testing.T) {
 	stamped := render("abc123def456 +uncommitted  (committed 2026-06-30T00:00:00Z)")
 	if strings.Contains(stamped, "build WARN") {
 		t.Fatalf("attested banner must not carry the warning:\n%s", stamped)
+	}
+}
+
+// TestGuardInfoStalenessNote pins the info-pane twin of the banner warning: an unattested build
+// yields a single-line note that names the defect and BOTH durable fixes; an attested build
+// yields "" so the pane header stays uncluttered.
+func TestGuardInfoStalenessNote(t *testing.T) {
+	note := guardInfoStalenessNote("(no VCS stamp — built without module/VCS provenance; cannot confirm the commit)")
+	if note == "" {
+		t.Fatal("expected a staleness note for an unstamped build, got none")
+	}
+	for _, want := range []string{
+		"stale-build WARN",
+		"UNVERIFIABLE",
+		"go build ./cmd/fak",
+		"fak self-update --force",
+	} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("note missing %q:\n%s", want, note)
+		}
+	}
+	// The header supplies the line break; the note itself must be a single line so a width-trim
+	// cannot split it across rows.
+	if strings.Contains(note, "\n") {
+		t.Fatalf("pane note must be a single line: %q", note)
+	}
+	if got := guardInfoStalenessNote("abc123def456 +uncommitted  (committed 2026-06-30T00:00:00Z)"); got != "" {
+		t.Fatalf("attested build must not warn, got: %q", got)
+	}
+}
+
+// TestGuardInfoStartupHeaderStalenessConsistency is the render-witness that the pane header
+// surfaces the UNATTESTED note EXACTLY when the running binary is unattested. It ties the header's
+// output to the pure helper's verdict on the SAME live build stamp, so the assertion holds whether
+// or not the test binary itself happens to carry a VCS stamp. It keys on the unattested note's
+// DISTINCTIVE phrase (not the shared "stale-build WARN" prefix) so the attested-but-behind skew
+// note — which shares that prefix — cannot be mistaken for this one.
+func TestGuardInfoStartupHeaderStalenessConsistency(t *testing.T) {
+	header := guardInfoStartupHeader("anthropic", 2*time.Second, 0)
+	wantNote := guardInfoStalenessNote(guardBannerBuildStamp()) != ""
+	gotNote := strings.Contains(header, "cannot confirm which commit fak is running")
+	if gotNote != wantNote {
+		t.Fatalf("header staleness note present=%v, want %v (build stamp %q):\n%s",
+			gotNote, wantNote, guardBannerBuildStamp(), header)
 	}
 }
 
