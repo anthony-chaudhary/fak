@@ -81,6 +81,22 @@ class StampOnLaneKPI(unittest.TestCase):
         self.assertEqual(len(bad["defects"]), 1)
         self.assertEqual(good["defects"], [])
 
+    def test_internal_pkg_stamp_is_recognized_on_real_repo(self):
+        # Drift sentinel for the internal_leaves rung: a stamp naming a REAL
+        # internal/<leaf> package binds through the lane whose tree covers
+        # internal/<leaf>/** and must NOT read as a phantom off-lane defect — the
+        # dominant valid stamp shape. Without internal_leaves() in the recognized
+        # set nearly every package-scoped ship would be a false positive, so this
+        # locks the rung against a silent drop. Leaf is picked from the live tree,
+        # not hardcoded, so a package rename can't rot the test into a false pass.
+        root = cq.repo_root()
+        internal = cq._stampdoc.internal_leaves(str(root))
+        if not internal:
+            self.skipTest("no internal/<leaf> packages in this checkout")
+        leaf = sorted(internal)[0]
+        k = cq.kpi_stamp_on_lane([("j1", f"feat(x): touch it (fak {leaf})")], root)
+        self.assertEqual(k["defects"], [], f"real internal leaf '{leaf}' misread as off-lane")
+
 
 class Fold(unittest.TestCase):
     def test_clean_window_zero_debt_grade_a(self):

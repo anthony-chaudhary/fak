@@ -178,13 +178,16 @@ def kpi_ship_stamped(rows: list[tuple[str, str]]) -> dict[str, Any]:
 
 def kpi_stamp_on_lane(rows: list[tuple[str, str]], root: Path) -> dict[str, Any]:
     """A stamped leaf must bind to something the taxonomy knows: a declared lane in
-    ``dos.toml`` OR a real ``cmd/<leaf>/`` demo dir. A leaf outside both (``(fak
+    ``dos.toml``, a real ``cmd/<leaf>/`` demo dir, OR a real ``internal/<leaf>/``
+    package (the dominant valid shape — ``(fak dispatchtick)`` binds through the lane
+    whose tree covers ``internal/dispatchtick/**``). A leaf outside all three (``(fak
     gatway)`` typo) binds ``dos verify fak <leaf>`` to a phantom nobody queries — the
     silent half of the trust gap. Each off-lane stamp is one HARD defect. When
     ``dos.toml`` is unreadable the recognized set is empty and this check is SKIPPED
     (scores 100), never failed — a parse error must not manufacture debt."""
     lanes = _stampdoc.declared_lanes(str(root))
-    recognized = lanes | _stampdoc.cmd_demo_leaves(str(root))
+    recognized = (lanes | _stampdoc.cmd_demo_leaves(str(root))
+                  | _stampdoc.internal_leaves(str(root)))
     defects = []
     stamped_total = 0
     if lanes:
@@ -193,7 +196,7 @@ def kpi_stamp_on_lane(rows: list[tuple[str, str]], root: Path) -> dict[str, Any]
                 stamped_total += 1
                 leaf = _stampdoc.stamp_leaf(subj)
                 if leaf and leaf not in recognized:
-                    defects.append(f"{sha}: (fak {leaf}) binds no declared lane / cmd demo")
+                    defects.append(f"{sha}: (fak {leaf}) binds no declared lane / cmd demo / internal pkg")
     score = 100.0 if not stamped_total else round(
         100.0 * (stamped_total - len(defects)) / stamped_total, 1)
     detail = (f"{stamped_total - len(defects)}/{stamped_total} stamps bind a real lane"
