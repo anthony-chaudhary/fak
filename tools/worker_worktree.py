@@ -331,7 +331,29 @@ def land_worktree_diff(root: Path, wt_path: str | Path, *,
 
     Returns ``{"ok", "applied", "committed", ...}``. FAIL-OPEN on git errors: any
     git error is reported, never raised. ``paths`` (when given) scopes the trunk
-    commit to the worker's declared file region — never an ``add -A`` of the tree."""
+    commit to the worker's declared file region — never an ``add -A`` of the tree.
+
+    EXCEPT the apply-reject arm (#3207): a diff that no longer applies because the
+    trunk moved inside the worker's region since ``base_sha`` is NOT a generic git
+    hiccup to fail open on — failing open silently drops the worker's entire
+    (already-verified) delta. That arm returns a STRUCTURED REFUSAL —
+    ``{"reason": "COLLISION_RISK", "detail": <git evidence>, "next_action": ...}``
+    — where ``reason`` is a recognized token from the closed refusal vocabulary
+    (``dos check-reason COLLISION_RISK``: refusal, route-to-replan), so the
+    caller's loop replans (re-pin the worktree onto current trunk HEAD, re-verify
+    there, re-land) instead of losing the work. Contract and the chosen
+    serialized-apply-with-auto-rebase-on-reject reconcile algorithm:
+    ``docs/notes/WORKTREE-LAND-MERGE-RECONCILIATION-2026-07-10.md``.
+
+    >>> def fake_git(root, args):
+    ...     if args and args[0] == "diff":
+    ...         return 0, "diff --git a/x b/x\\n@@\\n-old\\n+new\\n"
+    ...     return 1, "error: patch does not apply"
+    >>> r = land_worktree_diff(Path("."), "wt", commit_msg_file="m", git=fake_git)
+    >>> (r["ok"], r["committed"], r["reason"])
+    (False, False, 'COLLISION_RISK')
+    >>> "patch does not apply" in r["detail"]
+    True"""
     run = git or _git
     wt = str(wt_path)
     # Capture the worker's full delta since the pinned base (committed + staged +
@@ -354,11 +376,28 @@ def land_worktree_diff(root: Path, wt_path: str | Path, *,
             return {"ok": False, "applied": False, "committed": False,
                     "reason": f"worktree verify failed, refusing to land: {vres.get('detail')}",
                     "verify": vres}
-    # Apply the captured diff to the trunk worktree's working tree.
+    # Apply the captured diff to the trunk worktree's working tree. A plain
+    # `git apply` is all-or-nothing: on a reject NOTHING was applied and the
+    # trunk stays clean — but the worker's whole verified delta is at stake.
     proc = _git_apply(root, diff, git_run=run)
     if not proc.get("ok"):
+        # STRUCTURED REFUSAL, not a fail-open drop (#3207). A rejected apply
+        # means the trunk moved inside the worker's diff region since base_sha —
+        # a MATERIALIZED lease collision (`dos check-reason COLLISION_RISK`:
+        # known, refusal, route-to-replan). The LANDING SESSION owns the
+        # conflict: keep the worktree (never reap on refusal — the preserved
+        # work is the evidence), re-pin it onto current trunk HEAD, re-run the
+        # verify witness there, and re-land; on a genuine overlapping-region
+        # conflict STOP and replan the region. Never a human merge queue, never
+        # a silent drop. Contract + algorithm comparison:
+        # docs/notes/WORKTREE-LAND-MERGE-RECONCILIATION-2026-07-10.md
         return {"ok": False, "applied": False, "committed": False,
-                "reason": f"git apply to trunk failed: {proc.get('detail')}"}
+                "reason": "COLLISION_RISK",
+                "detail": f"git apply to trunk rejected (diff base {diff_ref}): "
+                          f"{proc.get('detail')}",
+                "next_action": ("replan: re-pin the worktree onto current trunk "
+                                "HEAD, re-verify, re-land; STOP on a genuine "
+                                "conflict")}
     commit_args = ["commit", "-s", "-F", str(commit_msg_file)]
     if paths:
         commit_args += ["--", *list(paths)]

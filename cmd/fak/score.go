@@ -29,6 +29,7 @@ import (
 var scoreRoutes = map[string]func(argv []string){
 	"conflation":          cmdConflationScorecard,
 	"concept-usage":       cmdConceptUsageScore,
+	"default-value":       cmdDefaultValueScorecard,
 	"dogfood":             cmdDogfoodScore,
 	"dojo-rsi":            cmdDojoRSI,
 	"guard-accuracy":      cmdGuardAccuracy,
