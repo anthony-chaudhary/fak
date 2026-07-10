@@ -269,30 +269,13 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 
 	// (5) Acquire the advisory lock (bounded). Busy is a value, not an error.
-	unlock, err := lock(opts.Lock)
-	if err != nil {
-		if errors.Is(err, ErrLockBusy) {
-			res.Reason = ReasonLockBusy
-			return res, nil
-		}
-		return res, fmt.Errorf("safecommit: lock: %w", err)
+	releaseLock, busyReason, lockErr := acquireCommitLock(lock, opts, &res)
+	if lockErr != nil {
+		return res, lockErr
 	}
-	now := opts.Now
-	if now == nil {
-		now = time.Now
-	}
-	lockStart := now()
-	lockReleased := false
-	releaseLock := func() {
-		if lockReleased {
-			return
-		}
-		held := now().Sub(lockStart)
-		if held > 0 {
-			res.LockHoldNS = held.Nanoseconds()
-		}
-		unlock()
-		lockReleased = true
+	if busyReason != "" {
+		res.Reason = busyReason
+		return res, nil
 	}
 	defer releaseLock()
 
@@ -317,18 +300,11 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// dirty file. The post-commit assertion (step 7) remains the authority — a peer who raced
 	// between this add and the commit is caught there.
 	addArgs := append([]string{"add", "--all", "--"}, paths...)
-	if out, code, aerr := runRidingLockContention(ctx, run, opts.Dir, addArgs...); aerr != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", aerr)
-	} else if code != 0 {
-		// A peer's raw git holding index.lock (or a ref lock) is TRANSIENT
-		// contention, not a hook refusal — after the in-place retries are spent it
-		// surfaces as the retryable LOCK_BUSY, never the halt-class HOOK_REFUSED.
-		if isGitLockContention(out) {
-			res.Reason = ReasonLockBusy
-		} else {
-			res.Reason = ReasonHookRefused
-		}
-		res.Detail = trimDetail(out)
+	if reason, detail, aerr := runLockRidingMutation(ctx, run, opts.Dir, addArgs); aerr != nil {
+		return res, aerr
+	} else if reason != "" {
+		res.Reason = reason
+		res.Detail = detail
 		return res, nil
 	}
 
@@ -339,17 +315,11 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	defer cleanup()
 
 	commitArgs := buildCommitArgs(opts.SignOff, msgPath, paths)
-	if out, code, cerr := runRidingLockContention(ctx, run, opts.Dir, commitArgs...); cerr != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", cerr)
-	} else if code != 0 {
-		// Same transient-vs-permanent split as the add step: a lost ref/index lock
-		// race is LOCK_BUSY (retry), only a genuine hook refusal is HOOK_REFUSED.
-		if isGitLockContention(out) {
-			res.Reason = ReasonLockBusy
-		} else {
-			res.Reason = ReasonHookRefused
-		}
-		res.Detail = trimDetail(out)
+	if reason, detail, cerr := runLockRidingMutation(ctx, run, opts.Dir, commitArgs); cerr != nil {
+		return res, cerr
+	} else if reason != "" {
+		res.Reason = reason
+		res.Detail = detail
 		return res, nil
 	}
 
@@ -452,6 +422,62 @@ func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk stri
 	}
 
 	return res, nil
+}
+
+// acquireCommitLock performs step (5): acquire the advisory lock (bounded) and build the
+// idempotent release closure that stamps the hold duration onto the caller's Result. Busy
+// is a value, not an error — a non-empty busyReason (ReasonLockBusy) with a nil err; any
+// other lock failure is infrastructure and returns as err. Extracted verbatim from
+// CommitWith so the executor core stays under its ceiling; res is a pointer to the
+// caller's named result so the release closure records LockHoldNS exactly where the
+// original in-function closure did.
+func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock func(), busyReason string, err error) {
+	unlock, err := lock(opts.Lock)
+	if err != nil {
+		if errors.Is(err, ErrLockBusy) {
+			return nil, ReasonLockBusy, nil
+		}
+		return nil, "", fmt.Errorf("safecommit: lock: %w", err)
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	lockStart := now()
+	lockReleased := false
+	release := func() {
+		if lockReleased {
+			return
+		}
+		held := now().Sub(lockStart)
+		if held > 0 {
+			res.LockHoldNS = held.Nanoseconds()
+		}
+		unlock()
+		lockReleased = true
+	}
+	return release, "", nil
+}
+
+// runLockRidingMutation runs one lock-riding git mutation (the pathspec-scoped add, then
+// the commit — extracted verbatim from CommitWith, shared by both steps) and maps a
+// non-zero exit to the transient-vs-permanent split: a peer's raw git holding index.lock
+// (or a ref lock) is TRANSIENT contention — after the in-place retries are spent it
+// surfaces as the retryable LOCK_BUSY, never the halt-class HOOK_REFUSED, which is
+// reserved for a genuine hook refusal. The returned err is non-nil only when git itself
+// could not be executed; on success both reason and err are empty.
+func runLockRidingMutation(ctx context.Context, run Runner, dir string, args []string) (reason, detail string, err error) {
+	out, code, rerr := runRidingLockContention(ctx, run, dir, args...)
+	if rerr != nil {
+		return "", "", fmt.Errorf("safecommit: git not executable: %w", rerr)
+	}
+	if code != 0 {
+		if isGitLockContention(out) {
+			return ReasonLockBusy, trimDetail(out), nil
+		}
+		return ReasonHookRefused, trimDetail(out), nil
+	}
+	return "", "", nil
 }
 
 func pushVerifiedCommit(ctx context.Context, run Runner, dir, trunk, sha string) (safesync.PushResult, error) {
