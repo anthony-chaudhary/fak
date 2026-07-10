@@ -107,6 +107,15 @@ type Tree struct {
 	clock     uint64 // logical access clock
 	policy    EvictionPolicy
 
+	// retention is the signed prefix-cache retention override (#4039): once set via
+	// SetRetention it supersedes maxTokens with ctxresidency's signed grammar --
+	// <0 keep-all, 0 keep-none, >0 evict-to-N -- so radixkv exposes ONE legible dial
+	// at a single zero-point. maxTokens is retained as the legacy positive-only budget
+	// so New() and Stats stay byte-identical for every existing caller (retentionSet
+	// is false until a caller opts into the signed dial).
+	retention    int
+	retentionSet bool
+
 	evictions       int // LRU leaf evictions
 	costEvictions   int // cost-aware leaf evictions
 	policyEvictions int // EvictNode calls (the fak differentiator)
@@ -134,6 +143,60 @@ func NewWithEvictionPolicy(maxTokens int, policy EvictionPolicy) *Tree {
 	t := New(maxTokens)
 	t.SetEvictionPolicy(policy)
 	return t
+}
+
+// NewWithRetention builds an empty prefix cache with the signed retention dial set
+// directly (#4039): n<0 keep-all, n==0 keep-none, n>0 evict-to-N. It is the
+// signed-grammar sibling of New(), whose legacy argument is positive-only (0 ==
+// unbounded); this constructor lets a caller pick keep-none or keep-all explicitly.
+func NewWithRetention(n int) *Tree {
+	t := New(0)
+	t.SetRetention(n)
+	return t
+}
+
+// SetRetention sets prefix-cache retention with one signed dial, matching
+// ctxresidency.SetMaxHeld's grammar so radixkv shares a single legible zero-point:
+//
+//	n <  0  keep-all   -- disable eviction; retain the whole tree (unbounded)
+//	n == 0  keep-none  -- retain nothing; the tree is evicted back toward empty
+//	n >  0  evict-to-N  -- bound the tree to N cached tokens (LRU / cost-aware)
+//
+// It supersedes the legacy New(maxTokens) budget and re-applies immediately, so
+// lowering it trims the live tree now. Only unlocked (unleased) leaves are evictable,
+// so keep-none is best-effort: a prefix currently being served survives until Done.
+func (t *Tree) SetRetention(n int) {
+	t.retention = n
+	t.retentionSet = true
+	t.evictToBudget()
+}
+
+// resolveBudget folds the retention dial (when set) or the legacy maxTokens budget
+// into (tokenBudget, evicts): evicts=false is keep-all (unbounded); evicts=true bounds
+// the tree to tokenBudget (0 for keep-none, N for evict-to-N).
+func (t *Tree) resolveBudget() (budget int, evicts bool) {
+	if t.retentionSet {
+		if t.retention < 0 {
+			return 0, false // keep-all
+		}
+		return t.retention, true // 0 keep-none, N evict-to-N
+	}
+	if t.maxTokens > 0 {
+		return t.maxTokens, true
+	}
+	return 0, false // legacy 0 (or negative) == unbounded
+}
+
+// effectiveMaxTokens reports the positive token budget for Stats back-compat: N for
+// evict-to-N, and 0 for both keep-all (unbounded) and keep-none -- preserving the
+// field's historical "0 == unbounded" reading for every legacy New() caller (keep-none
+// is only reachable through the new signed SetRetention dial). For a tree that never
+// touched SetRetention this equals the old t.maxTokens exactly.
+func (t *Tree) effectiveMaxTokens() int {
+	if b, evicts := t.resolveBudget(); evicts {
+		return b
+	}
+	return 0
 }
 
 // SetEvictionPolicy changes the budget-pressure victim rule for future evictions only.
@@ -346,7 +409,11 @@ func (n *node) Plen() int { return n.plen }
 // a leaf, which the next iteration may then evict (the upward collapse). A node that is
 // leased (refs>0) is never chosen, so a prefix being served survives memory pressure.
 func (t *Tree) evictToBudget() {
-	for t.maxTokens > 0 && t.tokens > t.maxTokens {
+	budget, evicts := t.resolveBudget()
+	if !evicts {
+		return // keep-all: eviction disabled
+	}
+	for t.tokens > budget {
 		v := t.victimLeaf()
 		if v == nil {
 			return // everything in budget-excess is locked; cannot evict further
@@ -598,7 +665,7 @@ func (t *Tree) Stats() Stats {
 		CostEvictions:         t.costEvictions,
 		PolicyEvictions:       t.policyEvictions,
 		Splits:                t.splits,
-		MaxTokens:             t.maxTokens,
+		MaxTokens:             t.effectiveMaxTokens(),
 		EvictionPolicy:        t.policy.String(),
 		LastEvictPolicy:       t.lastEvictPolicy.String(),
 		LastEvictCandidates:   t.lastEvictCandidates,
