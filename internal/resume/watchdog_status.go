@@ -456,10 +456,19 @@ func normalizeWatchdogMode(mode string) string {
 	return mode
 }
 
+// watchdogPhaseUnknown marks a ledger row that never recorded its phase. A blank
+// phase used to fold to "launched" (#3801), silently counting bookkeeping rows as
+// real resumes and inflating the drain/launch metric; keeping it distinct makes a
+// missing phase visible as missing, never a launch. Real launch rows always write
+// an explicit "launched"/"resumed" phase.
+const watchdogPhaseUnknown = "phase_unknown"
+
+// TODO(#3801): unify this classifier with Attempt.IsLaunch (outcome.go), which still
+// treats phase-less rows as launches — follow-up, out of scope here.
 func normalizeWatchdogPhase(phase string) string {
 	phase = strings.ToLower(strings.TrimSpace(phase))
 	if phase == "" {
-		return "launched"
+		return watchdogPhaseUnknown
 	}
 	return phase
 }

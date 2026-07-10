@@ -165,24 +165,73 @@ func TestFoldWatchdogStatusAuthPlanDoesNotMasqueradeAsUnproven(t *testing.T) {
 	}
 }
 
-func TestFoldWatchdogStatusLegacyPhaseLessLaunchAndSettledRows(t *testing.T) {
+// TestNormalizeWatchdogPhaseBlankIsNotALaunch pins the #3801 classifier fix as a table:
+// a blank/whitespace phase folds to the distinct watchdogPhaseUnknown bucket (a missing
+// fact, never a launch), every genuinely-known launch token still classifies as a launch,
+// and an unrecognized non-empty token passes through without silently becoming a launch.
+func TestNormalizeWatchdogPhaseBlankIsNotALaunch(t *testing.T) {
+	cases := []struct {
+		name       string
+		phase      string
+		want       string
+		wantLaunch bool
+	}{
+		{name: "blank", phase: "", want: watchdogPhaseUnknown, wantLaunch: false},
+		{name: "whitespace only", phase: " \t ", want: watchdogPhaseUnknown, wantLaunch: false},
+		{name: "launched", phase: "launched", want: "launched", wantLaunch: true},
+		{name: "resumed", phase: "resumed", want: "resumed", wantLaunch: true},
+		{name: "launched with case and padding", phase: "  Launched ", want: "launched", wantLaunch: true},
+		{name: "unrecognized token passes through", phase: "bookkeeping_row", want: "bookkeeping_row", wantLaunch: false},
+		{name: "queued is not a launch", phase: "queued", want: "queued", wantLaunch: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeWatchdogPhase(tc.phase)
+			if got != tc.want {
+				t.Fatalf("normalizeWatchdogPhase(%q) = %q, want %q", tc.phase, got, tc.want)
+			}
+			// Mirror the fold's launch switch: only these tokens record a launch.
+			if isLaunch := got == "launched" || got == "resumed"; isLaunch != tc.wantLaunch {
+				t.Fatalf("normalizeWatchdogPhase(%q) classifies launch=%v, want %v", tc.phase, isLaunch, tc.wantLaunch)
+			}
+		})
+	}
+}
+
+// TestFoldWatchdogStatusPhaseLessRowsAreNotLaunches replaces the pre-#3801 pin that a
+// phase-less ledger row folds to "launched": a row that never recorded its phase mints
+// no launched_unproven row, and never satisfies the launch-liveness check — so a queued
+// plan whose only ledger evidence is phase-less bookkeeping still reads NOT LAUNCHING.
+func TestFoldWatchdogStatusPhaseLessRowsAreNotLaunches(t *testing.T) {
 	got := FoldWatchdogStatus(WatchdogStatusInput{
 		Mode:           "LIVE",
 		NowUnix:        2_000,
 		SilentSeconds:  10_000,
 		MonotonicTicks: 3,
 		Events: []WatchdogStatusEvent{
-			{UnixSeconds: 1_000, Session: "sid-legacy"},
+			{UnixSeconds: 1_000, Session: "sid-legacy"}, // bookkeeping row: session, no phase
 			{UnixSeconds: 1_050, Session: "sid-settled", Phase: "settled"},
 		},
 	})
-
-	if len(got.MTTRSessions) != 1 {
-		t.Fatalf("mttr rows = %+v, want only the legacy launch row", got.MTTRSessions)
+	if len(got.MTTRSessions) != 0 {
+		t.Fatalf("mttr rows = %+v, want none: a phase-less row is not a launch (#3801)", got.MTTRSessions)
 	}
-	row := got.MTTRSessions[0]
-	if row.Session != "sid-legacy" || row.Status != WatchdogMTTRLaunchedUnproven || row.ResumedAt != 1_000 {
-		t.Fatalf("legacy launch row = %+v, want launched_unproven at 1000", row)
+
+	// Metric level: the phase-less row at 9_950 must not read as a fresh ledger launch,
+	// so the armed staleness alarm still fires its no-launch headline.
+	headline := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:               "LIVE",
+		NowUnix:            10_000,
+		LaunchStaleSeconds: 1800,
+		Plan:               []WatchdogPlanRow{{Session: "sid-queued", Account: ".claude-a"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 9_950, Session: "sid-legacy"},
+			{UnixSeconds: 9_900, Session: "sid-queued", Phase: "queued", Mode: "LIVE"},
+		},
+	})
+	if headline.Verdict != WatchdogDrainRed || len(headline.Reasons) == 0 ||
+		!strings.Contains(headline.Reasons[0], "no ledger launch on record") {
+		t.Fatalf("verdict/reasons = %s/%q, want red no-ledger-launch headline (#3801)", headline.Verdict, headline.Reasons)
 	}
 }
 
