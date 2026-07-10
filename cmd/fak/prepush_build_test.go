@@ -610,7 +610,7 @@ func mustGitOut(t *testing.T, repo string, args ...string) string {
 }
 
 func TestPrepushBuildAuditsExplicitTipInsteadOfHead(t *testing.T) {
-	saved := savePrepushSeams()
+	saved := snapshotPrepushSeams()
 	defer saved.restore()
 	var resolved []string
 	prepushRevParse = func(_ string, ref string) (string, error) {
