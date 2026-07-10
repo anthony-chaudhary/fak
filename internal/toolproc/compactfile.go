@@ -1,9 +1,12 @@
 package toolproc
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -52,9 +55,15 @@ const JournalCompactTailKeep = 4096
 //     journal is simply left un-compacted this round (retried at the next
 //     stop) rather than truncated.
 //
-// A journal whose single record exceeds the parser's token cap (pathological —
-// rows are bounded scalars ~100–300 bytes) makes ParseEvents error, which is
-// likewise surfaced fail-open: the file is left as-is, not bounded.
+// A row the reader cannot decode — a single record past the parser's token
+// cap, torn/malformed JSON, or an invalid event (pathological: rows are bounded
+// scalars ~100–300 bytes, so only a corrupt write or an out-of-band appender
+// produces one) — is dropped by the compaction read rather than aborting the
+// compaction (#3556). Aborting would leave such a journal un-boundable forever:
+// the one pass that could shrink it is exactly the pass that errored. Dropping
+// is compaction-only — the fold path's ParseEvents stays fail-closed — and a
+// journal that had rows dropped is rewritten even when nothing terminal was
+// reclaimable, so the bad row is expelled and the file comes back fold-clean.
 func CompactJournalFile(path string, thresholdBytes int64, tailKeep int) (bool, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -73,15 +82,17 @@ func CompactJournalFile(path string, thresholdBytes int64, tailKeep int) (bool, 
 		}
 		return false, err
 	}
-	events, err := ParseEvents(f)
+	events, dropped, err := parseEventsLenient(f)
 	f.Close()
 	if err != nil {
 		return false, err
 	}
 	compacted := CompactJournal(events, tailKeep)
-	if len(compacted) >= len(events) {
+	if dropped == 0 && len(compacted) >= len(events) {
 		// Everything is either recent or a still-live spawn — nothing terminal to
 		// reclaim. Leave the file untouched rather than churn an identical rewrite.
+		// (With dropped rows the rewrite must happen regardless: expelling them is
+		// the only way the file gets bounded.)
 		return false, nil
 	}
 	var buf []byte
@@ -96,6 +107,59 @@ func CompactJournalFile(path string, thresholdBytes int64, tailKeep int) (bool, 
 		return false, err
 	}
 	return true, nil
+}
+
+// parseEventsLenient reads a JSONL journal for compaction, dropping any row it
+// cannot decode — a line past maxEventLineBytes, malformed JSON, or an invalid
+// event — instead of refusing the whole file the way the fail-closed fold
+// reader (ParseEvents) does (#3556). A bufio.Scanner cannot continue past
+// bufio.ErrTooLong, so this reads bounded lines itself: an oversized line stops
+// accumulating at the cap and drains to its newline, and reading resumes at the
+// next row. Blank and comment rows are skipped as in ParseEvents and are not
+// counted as dropped. err is non-nil only for a real read failure.
+func parseEventsLenient(r io.Reader) (events []Event, dropped int, err error) {
+	br := bufio.NewReaderSize(r, 64*1024)
+	var line []byte
+	overflow := false
+	flush := func() {
+		raw := strings.TrimSpace(string(line))
+		switch {
+		case overflow:
+			dropped++
+		case raw == "" || strings.HasPrefix(raw, "#"):
+		default:
+			var ev Event
+			if json.Unmarshal([]byte(raw), &ev) != nil || ValidateEvent(ev) != nil {
+				dropped++
+			} else {
+				events = append(events, ev)
+			}
+		}
+		line = line[:0]
+		overflow = false
+	}
+	for {
+		frag, isPrefix, rerr := br.ReadLine()
+		if len(frag) > 0 && !overflow {
+			if len(line)+len(frag) > maxEventLineBytes {
+				overflow = true
+				line = line[:0]
+			} else {
+				line = append(line, frag...)
+			}
+		}
+		if rerr != nil {
+			if rerr == io.EOF {
+				// ReadLine never returns data alongside an error, so anything
+				// buffered was already flushed at its final !isPrefix return.
+				return events, dropped, nil
+			}
+			return nil, 0, rerr
+		}
+		if !isPrefix {
+			flush()
+		}
+	}
 }
 
 // replaceFileAtomic writes data to a temp file in path's directory and renames

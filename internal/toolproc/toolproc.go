@@ -246,13 +246,19 @@ type Table struct {
 // TableSchema stamps the fold output.
 const TableSchema = "fak.toolproc-table.v1"
 
+// maxEventLineBytes caps a single journal line for both the strict fold read
+// (ParseEvents) and the lenient compaction read (parseEventsLenient). Sharing
+// the bound keeps the two readers agreeing on which rows are oversized: a row
+// too big to fold is exactly the row compaction drops (#3556).
+const maxEventLineBytes = 4 * 1024 * 1024
+
 // ParseEvents reads a JSONL journal. Fail-closed: an unknown kind, a missing
 // identity field, a bad enum token, or malformed JSON refuses the whole journal
 // with the offending line number — fail at the boundary, do not guess.
 func ParseEvents(r io.Reader) ([]Event, error) {
 	var out []Event
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxEventLineBytes)
 	line := 0
 	for sc.Scan() {
 		line++

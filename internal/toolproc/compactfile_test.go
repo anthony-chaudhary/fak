@@ -1,6 +1,7 @@
 package toolproc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,6 +83,103 @@ func TestCompactJournalFileBoundsOversized(t *testing.T) {
 	// The oldest live spawn survives and still folds to a running proc.
 	if id, running := hookResolveID("live", got); !running || id != "live" {
 		t.Fatalf("live spawn dropped by file compaction: id=%q running=%v", id, running)
+	}
+}
+
+// appendRaw appends raw bytes to an existing journal file — damage the helpers
+// above could never write.
+func appendRaw(t *testing.T, path string, chunks ...[]byte) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range chunks {
+		if _, err := f.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A journal carrying rows the parser cannot decode — a single record past the
+// scanner token cap and a torn JSON write — must still get bounded: the
+// compaction read drops the bad rows and truncates forward instead of aborting,
+// and the rewritten file is fold-clean (#3556).
+func TestCompactJournalFileDropsUndecodableRows(t *testing.T) {
+	events := []Event{{Kind: EvSpawn, CallID: "live", Tool: "Bash", Session: "s", AtMS: 1}}
+	for i := 0; i < 200; i++ {
+		id := fmt.Sprintf("done-%d", i)
+		events = append(events,
+			Event{Kind: EvSpawn, CallID: id, Tool: "Bash", Session: "s", AtMS: int64(2 + 2*i)},
+			Event{Kind: EvExit, CallID: id, AtMS: int64(3 + 2*i), Status: "ok"})
+	}
+	path := writeJournal(t, events)
+	// One record past the token cap, one torn write, then a good row AFTER the
+	// damage to prove the reader skips forward rather than stopping at it.
+	goodTail, err := json.Marshal(Event{Kind: EvSpawn, CallID: "after-damage", Tool: "Bash", Session: "s", AtMS: 9999})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendRaw(t, path,
+		append(bytes.Repeat([]byte("x"), maxEventLineBytes+1), '\n'),
+		[]byte(`{"kind":"spawn","call_id":"torn"`+"\n"),
+		append(goodTail, '\n'))
+
+	compacted, err := CompactJournalFile(path, 1, 8)
+	if err != nil {
+		t.Fatalf("compaction must drop undecodable rows, not abort: %v", err)
+	}
+	if !compacted {
+		t.Fatal("journal with undecodable rows was not rewritten")
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() > int64(maxEventLineBytes) {
+		t.Fatalf("oversized record survived compaction: size=%d", after.Size())
+	}
+	got := readJournal(t, path) // strict ParseEvents: the result must be fold-clean
+	if id, running := hookResolveID("live", got); !running || id != "live" {
+		t.Fatalf("live spawn dropped: id=%q running=%v", id, running)
+	}
+	if id, running := hookResolveID("after-damage", got); !running || id != "after-damage" {
+		t.Fatalf("decodable row after the damaged region lost: id=%q running=%v", id, running)
+	}
+}
+
+// The "never recovers" shape from #3556: the oversized record alone holds the
+// file over the threshold and every real row is a live spawn, so there is no
+// terminal history to reclaim. The rewrite must still happen — expelling the
+// bad row is the only way the file ever gets bounded.
+func TestCompactJournalFileRewritesForDroppedRowsAlone(t *testing.T) {
+	events := []Event{
+		{Kind: EvSpawn, CallID: "live-a", Tool: "Bash", Session: "s", AtMS: 1},
+		{Kind: EvSpawn, CallID: "live-b", Tool: "Bash", Session: "s", AtMS: 2},
+	}
+	path := writeJournal(t, events)
+	appendRaw(t, path, append(bytes.Repeat([]byte("x"), maxEventLineBytes+1), '\n'))
+
+	compacted, err := CompactJournalFile(path, 1, 8)
+	if err != nil {
+		t.Fatalf("compaction must drop the oversized row, not abort: %v", err)
+	}
+	if !compacted {
+		t.Fatal("journal held over the threshold by an undecodable row alone must still be rewritten")
+	}
+	got := readJournal(t, path)
+	if len(got) != len(events) {
+		t.Fatalf("live spawns not preserved: want %d events, got %d", len(events), len(got))
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() > int64(maxEventLineBytes) {
+		t.Fatalf("oversized record survived compaction: size=%d", after.Size())
 	}
 }
 
