@@ -194,6 +194,7 @@ concurrent = [
   "productscorecard",
   "rsl", # internal/rsl Reference State Log leaf; cmd/fak audit shim stays in the cmd lane
   "mlpscore", # internal/mlpscore MLP first-lovable-cut scorecard; cmd/fak shims stay in the cmd lane
+  "versionskew", # internal/versionskew binary-vs-trunk ancestry witness; cmd/fak shim stays in the cmd lane
   "sessionaudit",
   "selfquery",
   "harnessprofile",
@@ -311,6 +312,7 @@ autopick = [
   "productscorecard",
   "rsl", # internal/rsl Reference State Log leaf; see [lanes].concurrent note
   "mlpscore", # internal/mlpscore MLP first-lovable-cut scorecard; see [lanes].concurrent note
+  "versionskew", # internal/versionskew binary-vs-trunk ancestry witness; see [lanes].concurrent note
   "sessionaudit",
   "selfquery",
   "harnessprofile",
@@ -499,6 +501,7 @@ scorecard = ["pkg/scorecard/**"]
 productscorecard = ["internal/productscorecard/**"]
 rsl = ["internal/rsl/**"]
 mlpscore = ["internal/mlpscore/**"]
+versionskew = ["internal/versionskew/**"]
 sessionaudit = ["internal/sessionaudit/**"]
 selfquery = ["internal/selfquery/**"]
 harnessprofile = ["internal/harnessprofile/**"]
