@@ -3,7 +3,7 @@
 The canonical agent instructions for this repo are in **[`AGENTS.md`](AGENTS.md)** —
 read it first for build/test/run, the repo map, and the rules.
 
-The three that will bite you if you skip them:
+The four that will bite you if you skip them:
 
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree** —
   the trunk guard *refuses* off-trunk commits (`OFF_TRUNK`). The *one* sanctioned

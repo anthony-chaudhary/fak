@@ -292,10 +292,10 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
 - **Add a feature as a leaf, not a core edit.** `fak new-leaf <name> --tier
   <tier> [--register]` stamps a conforming skeleton; the frozen ABI (`fak/internal/abi`)
   is additive-only and human-owned. `internal/architest` fails the build on a bad import.
-- **New tooling is Go, not Python.** The repo is a Go project; the ~460 `tools/*.py` scripts
+- **New tooling is Go, not Python.** The repo is a Go project; the ~560 `tools/*.py` scripts
   are a *grandfathered* baseline, frozen - not a pattern to copy. A new tool ships as a `fak`
   subcommand (pure logic in `internal/<name>/`, a thin shell in `cmd/fak/<name>.go` - see
-  `cmd/fak/velocity.go`) or a `cmd/<name>/` binary, never a new `tools/*.py`. The
+  `cmd/fak/stallscan.go`) or a `cmd/<name>/` binary, never a new `tools/*.py`. The
   `internal/pythongate` ratchet (`go test ./internal/pythongate -run TestNoNewPythonTools`)
   reds the trunk on any `tools/*.py` outside the baseline, and porting a grandfathered script
   to Go shrinks that baseline - the ratchet only ever tightens. When you *touch* a `tools/*.py`
