@@ -110,7 +110,7 @@ type hazard struct {
 
 const neverAmendSharedReason = "NEVER_AMEND_SHARED"
 
-const neverAmendSharedLaw = neverAmendSharedReason + ": shared-history rewrite refused: never amend, rebase, or force-push on the shared trunk. Make a new path-scoped commit, or fetch and merge the trunk in place."
+const neverAmendSharedLaw = neverAmendSharedReason + ": shared-history rewrite refused: never amend, rebase, or force-push on the shared trunk. Make a new path-scoped commit (`git commit -- <paths>`, or `fak commit --path <path>`), or fetch and merge the trunk in place."
 
 // defaultHazards is the repo's structurally-decidable trunk discipline, encoded
 // once. Every entry maps 1:1 to a documented law (AGENTS.md / CLAUDE.md) that today
@@ -268,6 +268,14 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 			Reason:  abi.ReasonPolicyBlock,
 			By:      "gitgate",
 			Payload: abi.WitnessPayload{Claim: law},
+			// Surface the corrective move to the AGENT, not just the forensic channel.
+			// The law names the sanctioned route, but it rides Payload.Claim
+			// (Detail["claim"]), which the in-band refusal note DROPS — only
+			// Detail["remedy"] (fed from Meta["fix"]) is rendered by remedyNote. Without
+			// this, a gitgate Deny reaches the agent as a bare POLICY_BLOCK/TERMINAL with
+			// no recovery path (#3524). Feed the same law through the one render seam the
+			// arg-predicate rung already uses (Meta["fix"]) so the agent sees the route.
+			Meta: map[string]string{"fix": law},
 		}
 		g.recordRefusal(ctx, "gitgate", gitgateReasonClass(law, abi.ReasonName(v.Reason)), []string{"shell", "-c", cmd}, nil)
 		return v

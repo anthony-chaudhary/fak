@@ -353,6 +353,38 @@ func TestAdjudicate(t *testing.T) {
 	}
 }
 
+// TestAdjudicateSurfacesRouteRemedy proves the #3524 fix: a gitgate Deny carries the
+// corrective route in Meta["fix"] — the ONE field renderVerdict folds into
+// Detail["remedy"] and the in-band refusal note renders — so the agent sees the
+// sanctioned move (git commit -- <paths> / fak commit --path <path>) instead of a bare
+// POLICY_BLOCK/TERMINAL. Before the fix the route rode only Payload.Claim
+// (Detail["claim"]), which the note drops.
+func TestAdjudicateSurfacesRouteRemedy(t *testing.T) {
+	g := New()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, cmd, wantSub string
+	}{
+		{"amend names the fak commit route", "git commit --amend", "fak commit --path"},
+		{"amend names the pathspec form", "git commit --amend", "git commit -- <paths>"},
+		{"commit -a names explicit-path commit", "git commit -a -m x", "git commit -- <paths>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := g.Adjudicate(ctx, cmdCall("Bash", "command", tc.cmd))
+			if v.Kind != abi.VerdictDeny {
+				t.Fatalf("Adjudicate(%q) Kind=%v, want Deny", tc.cmd, v.Kind)
+			}
+			fix := v.Meta["fix"]
+			if fix == "" {
+				t.Fatalf("Adjudicate(%q): Meta[\"fix\"] empty — the route is not surfaced to the render seam (#3524)", tc.cmd)
+			}
+			if !strings.Contains(fix, tc.wantSub) {
+				t.Fatalf("Adjudicate(%q): Meta[\"fix\"]=%q, want it to name %q", tc.cmd, fix, tc.wantSub)
+			}
+		})
+	}
+}
+
 func TestSharedHistoryRewriteRefusesWithDedicatedToken(t *testing.T) {
 	g := New()
 	for _, cmd := range []string{
