@@ -400,11 +400,17 @@ def kpi_ship_integrity(dos: dict[str, Any] | None) -> dict[str, Any]:
         return {"kpi": "ship_integrity", "score": 100, "detail": "skipped (--no-dos)",
                 "defects": [], "soft": ["dos review not run (--no-dos / dos unavailable)"]}
     if dos.get("error"):
-        return {"kpi": "ship_integrity", "score": 100,
+        # dos ran but is unavailable/failed. Scoring 100 here is anti-honest: a missing
+        # kernel would read as flawless witness discipline — the "no detection reads as
+        # perfect" fail-OPEN. Score it a conservative 0 and mark it errored so it can
+        # never present as a clean pass; an unmeasured witness is treated fail-CLOSED,
+        # not perfect. The 0.10 weight now contributes 0 (not a phantom +10), so the
+        # composite ceiling drops when ship integrity could not be witnessed. (#3833)
+        return {"kpi": "ship_integrity", "score": 0, "errored": True,
                 "detail": f"UNMEASURED (dos review unavailable): {dos['error'][:60]}",
                 "defects": [],
-                "soft": [f"ship_integrity UNMEASURED — dos unavailable, scored 100 "
-                         f"(fail-open, not a witnessed-clean review): {dos['error'][:100]}"]}
+                "soft": [f"ship_integrity UNMEASURED — dos unavailable, scored 0 "
+                         f"(fail-closed, not a witnessed-clean review): {dos['error'][:100]}"]}
     residual = dos.get("residual", []) or []
     n = len(residual)
     rng = dos.get("rev_range", "?")

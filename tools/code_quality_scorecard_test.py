@@ -165,7 +165,22 @@ def test_ship_integrity_clean():
 
 def test_ship_integrity_unavailable_is_soft():
     k = cq.kpi_ship_integrity({"error": "dos not found"})
+    # unavailable is a soft signal (no HARD defect) but must NOT read as a clean pass:
+    # a missing kernel scores a conservative fail-closed 0 + errored flag, never 100.
     assert not k["defects"] and k["soft"]
+    assert k["score"] == 0 and k.get("errored") is True
+
+
+def test_ship_integrity_unavailable_is_not_a_clean_pass():
+    # A repo perfect on every other KPI but with dos unavailable must NOT score 100:
+    # the fail-open bug scored ship_integrity 100, letting a missing witness inflate the
+    # composite to a flawless grade. With the fix the 0.10 weight contributes 0.
+    perfect = [{"kpi": name, "score": 100, "defects": [], "soft": [], "detail": ""}
+               for name in cq.KPI_WEIGHTS if name != "ship_integrity"]
+    perfect.append(cq.kpi_ship_integrity({"error": "dos not found"}))
+    p = cq.build_payload(workspace="/x", kpis=perfect)
+    assert p["corpus"]["score"] < 100
+    assert p["corpus"]["kpi_scores"]["ship_integrity"] == 0
 
 
 # --- fold -----------------------------------------------------------------
