@@ -2,15 +2,15 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"unicode/utf16"
+	"time"
 )
 
 type codexProjectCommandHook struct {
@@ -73,6 +73,96 @@ func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 	}
 }
 
+// TestCodexLoopHookGuardedMarkerSkipsReparse pins the #4210 guarded-path short-circuit:
+// a session already wrapped by `fak guard` (which marks the child env with guardActiveEnv,
+// inherited by this hook subprocess) is allowed WITHOUT opening or reparsing the transcript
+// — even when the session's own model_provider would otherwise be diagnosed unguarded and
+// blocked (contrast TestCodexLoopHookBlocksActiveDirectContinuation with the same fixture).
+// This keeps the per-turn hook off the growing session file on the guarded dogfood path.
+func TestCodexLoopHookGuardedMarkerSkipsReparse(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "") // no explicit direct override in play
+	t.Setenv(guardActiveEnv, "1")          // as if spawned by `fak guard`
+	home, sessionID := writeCodexHookSession(t, "openai")
+
+	// The whole point of the marker is that the transcript is never reparsed: fail loudly
+	// (from any goroutine — t.Error is safe) if the diagnose path is reached at all.
+	original := codexLoopHookDiagnose
+	codexLoopHookDiagnose = func(io.Reader, string) (codexLoopDiagnosis, error) {
+		t.Error("guarded hook reparsed the session transcript; expected a marker short-circuit")
+		return codexLoopDiagnosis{ModelProvider: "openai"}, nil
+	}
+	t.Cleanup(func() { codexLoopHookDiagnose = original })
+
+	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("guarded marker path exit = %d, want allow (0); stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("guarded marker path must be byte-silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestCodexLoopHookRecoversPanicAllowSilent(t *testing.T) {
+	home, sessionID := writeCodexHookSession(t, "openai")
+	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
+
+	original := codexLoopHookDiagnose
+	codexLoopHookDiagnose = func(io.Reader, string) (codexLoopDiagnosis, error) {
+		panic("injected diagnose fault")
+	}
+	t.Cleanup(func() { codexLoopHookDiagnose = original })
+
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("panic path exit = %d, want allow (0)", code)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("panic path must be byte-silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestCodexLoopHookTimesOutAllowSilent(t *testing.T) {
+	home, sessionID := writeCodexHookSession(t, "openai")
+	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
+
+	originalDiagnose := codexLoopHookDiagnose
+	originalBudget := codexLoopHookBudget
+	codexLoopHookBudget = 40 * time.Millisecond
+	codexLoopHookDiagnose = func(io.Reader, string) (codexLoopDiagnosis, error) {
+		time.Sleep(2 * time.Second)
+		return codexLoopDiagnosis{ModelProvider: "openai"}, nil
+	}
+	t.Cleanup(func() {
+		codexLoopHookDiagnose = originalDiagnose
+		codexLoopHookBudget = originalBudget
+	})
+
+	started := time.Now()
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("timeout path exit = %d, want allow (0)", code)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("timeout path took %s, want bounded well below the outer hook timeout", elapsed)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("timeout path must be byte-silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestCodexLoopHookUnreadableSessionAllowsSilently(t *testing.T) {
+	payload := `{"session_id":"missing-or-locked-session","hook_event_name":"UserPromptSubmit"}`
+
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", t.TempDir()}); code != 0 {
+		t.Fatalf("unreadable session path exit = %d, want allow (0)", code)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("unreadable session path must be byte-silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestCodexLoopHookConfigWiresUserPromptSubmit(t *testing.T) {
 	h := loadCodexProjectHook(t)
 	if h.Type != "command" {
@@ -80,43 +170,20 @@ func TestCodexLoopHookConfigWiresUserPromptSubmit(t *testing.T) {
 	}
 	for name, command := range map[string]string{
 		"portable": h.Command,
-		"windows":  decodeCodexWindowsHook(t, h.CommandWindows),
+		"windows":  h.CommandWindows,
 	} {
-		for _, want := range []string{
-			"fak sessions codex-loop-hook",
-			"codex_session_guard_unavailable",
-			"fak codex",
-			"fak guard -- codex",
-		} {
+		for _, want := range []string{"fak sessions codex-loop-hook"} {
 			if !strings.Contains(command, want) {
 				t.Errorf("%s UserPromptSubmit command missing %q: %s", name, want, command)
 			}
 		}
 	}
+	if strings.Contains(strings.ToLower(h.CommandWindows), "powershell") {
+		t.Fatalf("Windows hook must invoke fak natively, not cold-start PowerShell: %s", h.CommandWindows)
+	}
 }
 
-func decodeCodexWindowsHook(t *testing.T, command string) string {
-	t.Helper()
-	const marker = "-EncodedCommand "
-	i := strings.Index(command, marker)
-	if i < 0 {
-		t.Fatalf("Windows UserPromptSubmit hook is not shell-neutral PowerShell: %s", command)
-	}
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(command[i+len(marker):]))
-	if err != nil {
-		t.Fatalf("decode Windows UserPromptSubmit hook: %v", err)
-	}
-	if len(raw)%2 != 0 {
-		t.Fatalf("Windows UserPromptSubmit hook UTF-16LE bytes = %d, want even", len(raw))
-	}
-	units := make([]uint16, len(raw)/2)
-	for i := range units {
-		units[i] = uint16(raw[2*i]) | uint16(raw[2*i+1])<<8
-	}
-	return string(utf16.Decode(units))
-}
-
-func TestCodexLoopHookConfigFailsClosedWhenFakIsStale(t *testing.T) {
+func TestCodexLoopHookConfigAllowsSilentlyWhenFakIsStale(t *testing.T) {
 	h := loadCodexProjectHook(t)
 	fakeDir := t.TempDir()
 	writeCodexHookFakeFak(t, fakeDir, true)
@@ -128,27 +195,10 @@ func TestCodexLoopHookConfigFailsClosedWhenFakIsStale(t *testing.T) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("stale fak hook must return a parseable block: %v; stdout=%s stderr=%s", err, stdout.String(), stderr.String())
+		t.Fatalf("stale fak hook must fail open: %v; stdout=%s stderr=%s", err, stdout.String(), stderr.String())
 	}
-	var got codexLoopHookBlock
-	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
-		t.Fatalf("stale fak block is not JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
-	}
-	for _, want := range []string{
-		"codex_session_guard_unavailable",
-		"Rebuild or install a current fak",
-		"fak codex",
-		"fak guard -- codex",
-	} {
-		if !strings.Contains(got.Reason, want) {
-			t.Errorf("stale fak block reason missing %q: %s", want, got.Reason)
-		}
-	}
-	if got.Decision != "block" {
-		t.Errorf("stale fak decision = %q, want block", got.Decision)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("stale fak usage leaked to stderr: %s", stderr.String())
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stale fak allow must stay silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 

@@ -311,6 +311,16 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	if *allowDirect || codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookOverrideEnv)) {
 		return 0
 	}
+	// A session already wrapped by `fak guard` cannot be an unguarded direct-provider
+	// continuation: the gateway adjudicates every turn and the launch-time loop gate has
+	// already run. guard marks the child env with guardActiveEnv (see guard_child.go),
+	// inherited by this hook subprocess, so short-circuit BEFORE decoding the payload and
+	// opening/reparsing the whole (growing) session file every turn — the guarded dogfood
+	// path pays O(1), not O(n) in transcript length, per turn. Direct `codex` launches lack
+	// the marker and still get the full diagnose-and-block below. (#4210)
+	if codexLoopHookOverrideEnabled(os.Getenv(guardActiveEnv)) {
+		return 0
+	}
 
 	var in codexLoopHookInput
 	if err := json.NewDecoder(io.LimitReader(stdin, 1<<20)).Decode(&in); err != nil {
