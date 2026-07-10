@@ -153,6 +153,16 @@ type PreflightInput struct {
 	// ever overbooking the box or the seat pool. Zero (the default) means "no forecast
 	// floor" and is byte-identical to before this term existed.
 	WorkerFloor int
+	// ContractionTarget is the post-contraction worker count when a scale-down / drain
+	// is in flight (#4038). While the fleet is draining N toward this target T, admits
+	// are capped at T so no new worker is placed onto capacity that is about to be
+	// reclaimed -- kvcached's in_shrink guard, where available_size() floors to the
+	// pending target so an admit never races the contraction. It is applied AFTER the
+	// predictive floor (WorkerFloor), so it also bounds a pre-warm: admitting onto
+	// reclaimed capacity via the forecast floor is exactly the race being closed. Pure
+	// lowering term -- it can only tighten the cap, never raise it. Zero (the default)
+	// means "no contraction in flight" and is byte-identical to before this term existed.
+	ContractionTarget int
 }
 
 type PreflightResult struct {
@@ -184,9 +194,14 @@ type CapTerms struct {
 	// effective cap, or 0 when no forecast floor applied. When it is what set the
 	// effective cap (it lifted capacity above the tightest lowering cap), Limiting
 	// reads "floor" so an operator can see the forecast, not a min() cap, is binding.
-	WorkerFloor  int    `json:"worker_floor"`
-	EffectiveCap int    `json:"effective_cap"`
-	Limiting     string `json:"limiting"`
+	WorkerFloor int `json:"worker_floor"`
+	// ContractionCap is the pending-contraction target (#4038) that capped admits while
+	// a scale-down was in flight, or nil when no contraction was pending. When it is the
+	// tightest term, Limiting reads "contraction" so an operator sees the drain -- not a
+	// physical/config cap -- is what is holding admits down.
+	ContractionCap *int   `json:"contraction_cap,omitempty"`
+	EffectiveCap   int    `json:"effective_cap"`
+	Limiting       string `json:"limiting"`
 }
 
 func IntPtr(n int) *int { return &n }
@@ -293,6 +308,15 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		}
 	}
 
+	// Pending-contraction floor (#4038): while a scale-down / drain is in flight toward
+	// ContractionTarget T, cap admits at T so no worker is admitted onto capacity being
+	// reclaimed (kvcached's in_shrink guard). Applied AFTER the predictive floor so it
+	// bounds a pre-warm too -- admitting onto reclaimed capacity via the forecast floor
+	// is the same race. Pure lowering term; T <= 0 (the default) is a no-op.
+	if in.ContractionTarget > 0 && in.ContractionTarget < capacity {
+		capacity = in.ContractionTarget
+	}
+
 	aliveKernelForCap := 0
 	if in.Kernel.Target != nil && *in.Kernel.Target > 0 && in.Kernel.Alive != nil {
 		aliveKernelForCap = *in.Kernel.Alive
@@ -368,6 +392,9 @@ func capTerms(in PreflightInput, hostCap *int, effective, floor int) CapTerms {
 		EffectiveCap:  effective,
 		Limiting:      "configured",
 	}
+	if in.ContractionTarget > 0 {
+		terms.ContractionCap = IntPtr(in.ContractionTarget)
+	}
 	best := in.MaxWorkers
 	for _, candidate := range []struct {
 		name  string
@@ -376,6 +403,7 @@ func capTerms(in PreflightInput, hostCap *int, effective, floor int) CapTerms {
 		{name: "lease", value: terms.LeaseCap},
 		{name: "host", value: terms.HostCap},
 		{name: "seat", value: terms.SeatCap},
+		{name: "contraction", value: terms.ContractionCap},
 	} {
 		if candidate.value != nil && *candidate.value < best {
 			best = *candidate.value
