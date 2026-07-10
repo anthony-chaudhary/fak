@@ -52,7 +52,7 @@ Every finding lands in exactly one tier - do not conflate them:
 
    Default scope is the steer-prose corpus (`negframe.ResolveTargets`: AGENTS.md, CLAUDE.md,
    the skills); pass explicit paths as positional args to score anything else. `--per-doc`
-   and `--suggest` both support `--json` for a machine-readable list.
+   also takes `--json` for a machine-readable finding list; `--suggest` prints text only.
 
 2. **Retire `negframe_debt` worst-first** - for every mechanical finding `--suggest` lists,
    apply the printed reframe to the source prose. This pass changes ONLY the flagged clause's
