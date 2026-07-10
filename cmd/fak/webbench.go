@@ -277,7 +277,7 @@ func cmdWebbenchServing(argv []string) {
 	fs := flag.NewFlagSet("webbench serving", flag.ExitOnError)
 	dataset := fs.String("dataset", "", "path to web task dataset (required)")
 	tracksArg := fs.String("tracks", "ours,sglang,vllm,fak-fronts-fleet", "comma-separated tracks")
-	endpointsArg := fs.String("endpoints", "", "comma-separated track=OpenAI-compatible /v1 base URLs")
+	endpointsArg := fs.String("endpoints", "", "comma-separated track=OpenAI-compatible /v1 base URLs (each may be an @lab/<model> lab-target alias)")
 	metricsArg := fs.String("metrics", "", "comma-separated track=Prometheus metrics URLs for prefix-cache hit rate")
 	model := fs.String("model", "unknown", "model id sent to each OpenAI-compatible endpoint")
 	machine := fs.String("machine", "", "machine id for artifact path (default: hostname)")
@@ -302,6 +302,15 @@ func cmdWebbenchServing(argv []string) {
 	must(err)
 	endpoints, err := parseServingTrackMap(*endpointsArg)
 	must(err)
+	// An endpoint may name lab GPU hardware as @lab/<model>: resolve each through the same
+	// readiness+latency-gated seam `fak guard --remote-serve` uses, so a live serving-parity
+	// run can't start against a box the lab-readiness gate has not cleared. A plain /v1 URL is
+	// returned unchanged (passthrough).
+	for tr, base := range endpoints {
+		resolved, rerr := resolveBenchBaseURL(base)
+		must(rerr)
+		endpoints[tr] = resolved
+	}
 	metrics, err := parseServingTrackMap(*metricsArg)
 	must(err)
 
