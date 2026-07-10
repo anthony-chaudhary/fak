@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
@@ -31,7 +32,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply", "push":
+		case "check", "apply", "push", "drain":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -39,7 +40,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, or push)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, or drain)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -54,6 +55,8 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
 	retries := fs.Int("retries", 3, "push: total attempts before giving up on a moving trunk")
+	queueFile := fs.String("queue-file", "", "drain: stranded-commit queue file (default: <repo>/.fak/sync-drain-queue.json)")
+	budget := fs.Duration("budget", 60*time.Second, "drain: trunk-green build budget for the window verdict")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
@@ -87,6 +90,25 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		}
 		return syncExitRefused
+	}
+
+	// drain is the release valve for commits stranded by a red-trunk push refusal (#3617): it
+	// queues them, polls the trunk-green quiescent window (reusing the pre-push witness), and
+	// flushes in one push when green — backing off, not blind-retrying, while red.
+	if command == "drain" {
+		repoPath := pathutil.ExpandTilde(*repo)
+		qp := *queueFile
+		if strings.TrimSpace(qp) == "" {
+			qp = filepath.Join(repoPath, ".fak", "sync-drain-queue.json")
+		}
+		return runSyncDrain(stdout, stderr, syncDrainConfig{
+			repo:      repoPath,
+			remote:    *remote,
+			branch:    *branch,
+			queuePath: qp,
+			asJSON:    *asJSON,
+			budget:    *budget,
+		})
 	}
 
 	opts := safesync.Options{
@@ -142,13 +164,17 @@ func syncUsage(w io.Writer) {
   fak sync [check] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync apply   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync push    [--repo DIR] [--remote origin] [--branch B] [--retries N] [--json]
+  fak sync drain   [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
 --fetch. apply runs the fast-forward only when every path Git would write is clean at
 HEAD or already byte-identical to the remote-tracking version. push pushes the branch
 and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a
-clear integrate-then-push next step. None of these run git pull, stash, reset --hard,
+clear integrate-then-push next step. drain is the release valve for commits stranded by
+a red-trunk push refusal: it queues the ahead commits, polls the trunk-green quiescent
+window (reusing the pre-push build witness), flushes in one push when green, and backs
+off — not blind-retries — while red. None of these run git pull, stash, reset --hard,
 clean, add, merge, or --force.
 `)
 }
