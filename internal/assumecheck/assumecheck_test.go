@@ -131,7 +131,8 @@ func TestCheckAllOutcomeBranches(t *testing.T) {
 // TestGuardAssumptionFailClosed proves the hard gate: HOLDS is the ONLY outcome with
 // a nil error; violated, unverifiable, and stale all return the typed
 // *AssumptionViolationError, branchable via errors.Is/errors.As, carrying the closed
-// Verdict and the assumption's refusal token.
+// Verdict and the OUTCOME-CLASS refusal token (#3822 C4) — with the per-assumption
+// label folded into the verdict's reason so it is not lost.
 func TestGuardAssumptionFailClosed(t *testing.T) {
 	holds := Evidence{Kind: WitnessLedgerRead, Witnessed: true, Holds: true}
 	if v, err := GuardAssumption(declared, holds); err != nil {
@@ -168,8 +169,11 @@ func TestGuardAssumptionFailClosed(t *testing.T) {
 			if ave.Verdict.Outcome != tc.want {
 				t.Fatalf("typed error carries outcome %s, want %s", ave.Verdict.Outcome, tc.want)
 			}
-			if ave.RefusalReason != declared.RefusalReason {
-				t.Fatalf("typed error refusal token = %q, want %q", ave.RefusalReason, declared.RefusalReason)
+			if want := tc.want.RefusalReason(); ave.RefusalReason != want {
+				t.Fatalf("typed error refusal token = %q, want the outcome-class token %q", ave.RefusalReason, want)
+			}
+			if !strings.Contains(ave.Verdict.Reason, declared.RefusalReason) {
+				t.Fatalf("verdict reason %q lost the per-assumption label %q", ave.Verdict.Reason, declared.RefusalReason)
 			}
 		})
 	}

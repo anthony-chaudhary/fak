@@ -163,6 +163,35 @@ func (o Outcome) String() string {
 // or stale assumption is exactly as unsafe to act on as a violated one).
 func (o Outcome) blocksReliance() bool { return o != OutcomeHolds }
 
+// RefusalReason maps an outcome onto the closed, dos-registered refusal token a
+// refusing caller emits (#3822, epic #3818 C4): the OUTCOME CLASS — not the
+// per-assumption label — is what `dos check-reason` resolves against the workspace
+// dos.toml [reasons] vocabulary. Total over the blocking set; OutcomeHolds (and any
+// foreign value) maps to "" because a holding assumption refuses nothing.
+func (o Outcome) RefusalReason() string {
+	switch o {
+	case OutcomeViolated:
+		return "ASSUMPTION_VIOLATED"
+	case OutcomeUnverifiable:
+		return "ASSUMPTION_UNVERIFIABLE"
+	case OutcomeStale:
+		return "ASSUMPTION_STALE"
+	}
+	return ""
+}
+
+// KnownAssumptionRefusalReasons enumerates the closed refusal-reason vocabulary in a
+// stable order — one token per blocking outcome — mirroring toon.KnownSkipReasons:
+// the dosreasons binding test iterates this set against the dos.toml [reasons]
+// registration, so the Go floor and the workspace vocabulary cannot drift apart.
+func KnownAssumptionRefusalReasons() []string {
+	return []string{
+		OutcomeViolated.RefusalReason(),
+		OutcomeUnverifiable.RefusalReason(),
+		OutcomeStale.RefusalReason(),
+	}
+}
+
 // Assumption is one declared, checkable belief: who relies on it, what it claims,
 // how far it reaches, and which witness kind is allowed to adjudicate it. It is pure
 // data — the C2 registry will hold many of these; the C1 spine ships exactly one
@@ -180,9 +209,11 @@ type Assumption struct {
 	// Evidence of any other kind yields OutcomeUnverifiable, never a cross-witness
 	// guess.
 	WitnessKind WitnessKind `json:"witness_kind"`
-	// RefusalReason is the structured reason token a refusing caller should emit when
-	// the guard blocks on this assumption. Carried as data for now; binding it into
-	// the closed DOS refusal vocabulary is C4 (#3818).
+	// RefusalReason is the per-assumption label naming WHICH assumption blocked
+	// (e.g. SEAT_NOT_LAUNCHABLE). It is NOT the dos-resolvable refusal reason: the
+	// token a refusing caller emits is the OUTCOME-CLASS Outcome.RefusalReason()
+	// (#3822 C4); GuardAssumption folds this label into the verdict's reason text
+	// as detail so it is not lost.
 	RefusalReason string `json:"refusal_reason,omitempty"`
 	// ConfidenceClass labels how the assumption's holder rates it (informational;
 	// e.g. "witnessed", "declared", "folk"). Not part of the decision.
@@ -307,9 +338,10 @@ var ErrAssumptionViolated = errors.New("assumecheck: assumption refused as unsaf
 // AssumptionViolationError is the TYPED FAULT GuardAssumption returns in place of
 // ever letting a caller proceed on a non-holding assumption. The closed Verdict
 // travels with it, so a caller can branch on Outcome (violated/unverifiable/stale)
-// instead of parsing Error()'s text, and RefusalReason carries the assumption's
-// structured refusal token for the caller that must refuse loudly (C4 binds it into
-// the DOS vocabulary).
+// instead of parsing Error()'s text, and RefusalReason carries the OUTCOME-CLASS
+// token from the closed DOS refusal vocabulary (Outcome.RefusalReason, #3822 C4)
+// for the caller that must refuse loudly; the per-assumption label travels folded
+// into Verdict.Reason.
 type AssumptionViolationError struct {
 	Verdict       Verdict
 	RefusalReason string
@@ -332,7 +364,13 @@ func (e *AssumptionViolationError) Unwrap() error { return ErrAssumptionViolated
 func GuardAssumption(a Assumption, ev Evidence) (Verdict, error) {
 	v := Check(a, ev)
 	if v.Outcome.blocksReliance() {
-		return v, &AssumptionViolationError{Verdict: v, RefusalReason: a.RefusalReason}
+		if a.RefusalReason != "" {
+			// Fold the per-assumption label into the verdict's reason as detail, so
+			// naming WHICH assumption blocked survives the outcome-class token
+			// replacing it as the emitted refusal reason (#3822 C4).
+			v.Reason += " [assumption label: " + a.RefusalReason + "]"
+		}
+		return v, &AssumptionViolationError{Verdict: v, RefusalReason: v.Outcome.RefusalReason()}
 	}
 	return v, nil
 }

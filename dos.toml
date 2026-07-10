@@ -1276,6 +1276,34 @@ summary  = "TOON auto-fire declined: the payload is a response schema the model 
 fix      = "Keep JSON -- TOON auto-fire is input-only; a payload the model must emit stays JSON. Only encode inbound (model-consumed) spans. Floor: go test ./internal/toon -run TestDecide."
 see_also = ["internal/toon/decide.go", "issue #3066"]
 
+# The assumecheck outcome-class refusal bindings (#3822, epic #3818 C4): the pure
+# kernel's three BLOCKING outcomes (internal/assumecheck Outcome.blocksReliance --
+# everything except HOLDS) each resolve to ONE closed token here, so a caller refusing
+# on a guarded assumption emits a reason `dos check-reason` resolves, instead of the
+# per-assumption label (e.g. SEAT_NOT_LAUNCHABLE), which is folded into the verdict's
+# reason text as detail. Bound to the Go floor by internal/assumecheck/dosreasons_test.go,
+# mirroring toon's #3066 gate.
+[reasons.ASSUMPTION_VIOLATED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A guarded assumption a caller relies on was checked and the declared witness REFUTED it: the assumed condition is provably false, so proceeding on it is refused."
+fix      = "Fix the violated condition (or retire the assumption), re-witness with `fak assume check <id>` until the outcome is HOLDS, then retry the refused action. Floor: internal/assumecheck GuardAssumption."
+see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+
+[reasons.ASSUMPTION_UNVERIFIABLE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A guarded assumption could not be witnessed either way -- the declared witness could not run, the evidence came from the wrong witness kind, or the only evidence is a self-report. Fail-closed: unverifiable is NOT holds."
+fix      = "Wire or repair the assumption's declared witness so it can adjudicate, gather fresh evidence, then re-run `fak assume check <id>` until the outcome is HOLDS before relying on it. Floor: internal/assumecheck GuardAssumption."
+see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+
+[reasons.ASSUMPTION_STALE]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "A guarded assumption is about to be relied on, but its backing evidence has aged past its declared freshness bound relative to the witness's source of truth."
+fix      = "Re-witness the assumption from its declared source (`fak assume check <id>` gathers fresh evidence), discard the stale evidence, then retry once the fresh witness confirms HOLDS. Floor: internal/assumecheck GuardAssumption."
+see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).

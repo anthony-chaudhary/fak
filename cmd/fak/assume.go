@@ -144,9 +144,16 @@ func runAssumeCheck(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "outcome    : %s\n", v.Outcome)
 		fmt.Fprintf(stdout, "reason     : %s\n", v.Reason)
 		if refused {
-			// The typed-guard seam end-to-end: the same errors.Is branch a programmatic
-			// caller takes, rendered with the structured refusal token it would emit.
-			fmt.Fprintf(stdout, "refusal    : %s — %v\n", a.RefusalReason, gerr)
+			// The typed-guard seam end-to-end: the same errors.As branch a programmatic
+			// caller takes, rendered with the OUTCOME-CLASS token it would emit — the
+			// dos-registered refusal class (#3822 C4), never the per-assumption label
+			// (which the reason line above carries folded in as detail).
+			refusal := v.Outcome.RefusalReason()
+			var ave *assumecheck.AssumptionViolationError
+			if errors.As(gerr, &ave) && ave.RefusalReason != "" {
+				refusal = ave.RefusalReason
+			}
+			fmt.Fprintf(stdout, "refusal    : %s — %v\n", refusal, gerr)
 		}
 	}
 
