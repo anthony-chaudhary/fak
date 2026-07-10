@@ -37,7 +37,7 @@ func TestAuditRelaunchesFold(t *testing.T) {
 			}},
 		},
 	}
-	rows := AuditRelaunches(roster, copies, map[string]bool{"sid-stranded": true})
+	rows := AuditRelaunches(roster, copies, map[string]bool{"sid-stranded": true}, nil)
 
 	if len(rows) != 3 {
 		t.Fatalf("want a row per rostered sid, got %d", len(rows))
@@ -66,11 +66,15 @@ func TestAuditRelaunchesFold(t *testing.T) {
 	if ok.Live {
 		t.Fatalf("sid-ok is not in the live census")
 	}
+	// A nil carry witness leaves every row's carry axis nameably UNKNOWN, never blank.
+	if ok.Carry != CarryUnknown {
+		t.Fatalf("no carry witness must fold to UNKNOWN, got %q", ok.Carry)
+	}
 }
 
 func TestAuditRelaunchesDeterministicTieBreak(t *testing.T) {
 	roster := map[string][]string{"sid-b": {"?"}, "sid-a": {"?"}, "sid-c": {"?"}}
-	rows := AuditRelaunches(roster, nil, nil)
+	rows := AuditRelaunches(roster, nil, nil, nil)
 	got := []string{rows[0].SID, rows[1].SID, rows[2].SID}
 	if strings.Join(got, ",") != "sid-a,sid-b,sid-c" {
 		t.Fatalf("equal-key rows must sort by sid: %v", got)
@@ -88,5 +92,80 @@ func TestCountNotOK(t *testing.T) {
 	}
 	if CountNotOK(nil) != 0 {
 		t.Fatalf("empty audit is all-OK")
+	}
+}
+
+// TestRelaunchCarry pins the CARRY axis as ORTHOGONAL to the relaunch verdict: a session that
+// advanced past its error (RELAUNCHED_OK) can still have booted a FRESH budget cap, and the
+// audit must surface that as a first-class finding — CountFreshCap counts it even though
+// CountNotOK (which keys on the verdict) reads zero. The carry classification is the shell-
+// computed witness handed in via the carry map, exactly the seam `live` uses.
+func TestRelaunchCarry(t *testing.T) {
+	roster := map[string][]string{"sid-x": {"resume"}}
+	copies := map[string][]Copy{
+		"sid-x": {
+			// The transcript advanced past its error → RELAUNCHED_OK by the verdict...
+			{Path: "only", Account: ".claude-a", Records: []Record{
+				rec("assistant", "API Error 529", "", "2026-06-23T10:00:00Z", true),
+				rec("assistant", "resumed and kept working", "", "2026-06-23T12:00:00Z", false),
+			}},
+		},
+	}
+	// ...but the shell's join of the carried record to the first post-launch turn found a fresh
+	// full budget: the carry channel silently reset. The two axes disagree, by design.
+	carry := map[string]string{"sid-x": CarryFreshCap}
+
+	rows := AuditRelaunches(roster, copies, nil, carry)
+	if len(rows) != 1 {
+		t.Fatalf("want one audited row, got %d", len(rows))
+	}
+	x := rows[0]
+	if x.Verdict != VerdictRelaunchedOK {
+		t.Fatalf("verdict = %s, want RELAUNCHED_OK (carry is a separate axis)", x.Verdict)
+	}
+	if x.Carry != CarryFreshCap {
+		t.Fatalf("carry = %q, want FRESH_CAP", x.Carry)
+	}
+	if got := CountFreshCap(rows); got != 1 {
+		t.Fatalf("CountFreshCap = %d, want 1", got)
+	}
+	if got := CountNotOK(rows); got != 0 {
+		t.Fatalf("CountNotOK = %d, want 0 — a FRESH_CAP relaunch still passes the verdict", got)
+	}
+}
+
+func TestCountFreshCap(t *testing.T) {
+	rows := []RelaunchRow{
+		{Carry: CarryFreshCap},
+		{Carry: CarryCarried},
+		{Carry: CarryUnknown},
+		{Carry: CarryFreshCap},
+	}
+	if got := CountFreshCap(rows); got != 2 {
+		t.Fatalf("CountFreshCap = %d, want 2", got)
+	}
+	if CountFreshCap(nil) != 0 {
+		t.Fatalf("empty audit has no fresh-cap rows")
+	}
+}
+
+// TestNormalizeCarryFoldsUnknown pins the total-over-any-input fold: a blank, garbage, or
+// absent carry token lands UNKNOWN (never blank), and a known token folds case-insensitively.
+func TestNormalizeCarryFoldsUnknown(t *testing.T) {
+	roster := map[string][]string{"sid-a": {"?"}, "sid-b": {"?"}, "sid-c": {"?"}}
+	carry := map[string]string{"sid-a": "carried", "sid-b": "bogus"} // sid-c absent entirely
+	rows := AuditRelaunches(roster, nil, nil, carry)
+	got := map[string]string{}
+	for _, r := range rows {
+		got[r.SID] = r.Carry
+	}
+	if got["sid-a"] != CarryCarried {
+		t.Fatalf("sid-a carry = %q, want CARRIED (case-folded)", got["sid-a"])
+	}
+	if got["sid-b"] != CarryUnknown {
+		t.Fatalf("sid-b carry = %q, want UNKNOWN (unrecognized token)", got["sid-b"])
+	}
+	if got["sid-c"] != CarryUnknown {
+		t.Fatalf("sid-c carry = %q, want UNKNOWN (absent from carry map)", got["sid-c"])
 	}
 }

@@ -48,6 +48,40 @@ const (
 	VerdictNoTranscript = "NO_TRANSCRIPT"
 )
 
+// The closed CARRY-outcome vocabulary — an axis ORTHOGONAL to the verdict above. The verdict
+// answers "did the session advance past its error?"; this answers the independent question
+// "did the relaunched child come up carrying its pre-crash budget, or boot a fresh cap?". A row
+// can be RELAUNCHED_OK (it advanced) and still FRESH_CAP (the carry channel silently reset) —
+// the exact regression the drive-carry channel exists to catch. Unlike the verdict, this is NOT
+// derived from the transcript here: the shell joins the carried record to the resumed
+// transcript's first post-launch turn and hands the classification in (the same externally
+// computed seam `live` uses), so this leaf only folds it and never re-derives it.
+const (
+	// CarryCarried: the relaunch restored the pre-crash budget — the carry channel took.
+	CarryCarried = "CARRIED"
+	// CarryFreshCap: the relaunched child booted a FRESH full budget — the carry silently
+	// reset. Orthogonal to the verdict: a FRESH_CAP row is commonly RELAUNCHED_OK.
+	CarryFreshCap = "FRESH_CAP"
+	// CarryUnknown: no carry witness for this sid (no carried record, or no post-launch turn
+	// to read a budget from) — the carry outcome is unproven, not a finding. The default.
+	CarryUnknown = "UNKNOWN"
+)
+
+// normalizeCarry folds a shell-supplied carry token to the closed vocabulary, returning
+// CarryUnknown for the empty / absent / unrecognized case so an audited row always carries a
+// nameable classification and an unknown token never invents a bucket — the same total-over-
+// any-input discipline the drive-state and metrics folds keep.
+func normalizeCarry(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case CarryCarried:
+		return CarryCarried
+	case CarryFreshCap:
+		return CarryFreshCap
+	default:
+		return CarryUnknown
+	}
+}
+
 // relaunchBannerMark is the synthetic usage-limit banner text: a record carrying it is
 // an error for verdict purposes even when the error channel bits are unset, because a
 // re-capped resume writes the banner as an ordinary assistant turn.

@@ -25,6 +25,11 @@ type RelaunchRow struct {
 	// mid-relaunch is shown as live rather than mistaken for finished.
 	Live         bool   `json:"live"`
 	SupersetPath string `json:"superset_path,omitempty"`
+	// Carry classifies whether the relaunch restored the pre-crash budget (CARRIED) or booted
+	// a FRESH_CAP — an axis ORTHOGONAL to Verdict (a RELAUNCHED_OK row can be FRESH_CAP).
+	// UNKNOWN when no carry witness was supplied for this sid. Shell-computed and handed in via
+	// AuditRelaunches's carry map, exactly like Live.
+	Carry string `json:"carry"`
 	RelaunchResult
 }
 
@@ -32,11 +37,14 @@ type RelaunchRow struct {
 // audited rows. A rostered sid with no on-disk copy is NO_TRANSCRIPT (the attempt is
 // still shown — a vanished transcript is a finding, not a skip). Rows sort
 // still-broken-first (RelaunchOrder), then by account, then most records first, then
-// sid — fully deterministic where the Python inherited dict order.
-func AuditRelaunches(roster map[string][]string, copiesBySID map[string][]Copy, live map[string]bool) []RelaunchRow {
+// sid — fully deterministic where the Python inherited dict order. carry is the
+// shell-computed per-sid budget-carry classification (the same externally-supplied seam
+// live uses); an absent / unknown token folds to CarryUnknown, so every row lands a
+// nameable Carry without this leaf re-deriving it from the transcript.
+func AuditRelaunches(roster map[string][]string, copiesBySID map[string][]Copy, live map[string]bool, carry map[string]string) []RelaunchRow {
 	rows := make([]RelaunchRow, 0, len(roster))
 	for sid, actions := range roster {
-		row := RelaunchRow{SID: sid, Actions: actions, Live: live[sid]}
+		row := RelaunchRow{SID: sid, Actions: actions, Live: live[sid], Carry: normalizeCarry(carry[sid])}
 		if best := SupersetIndex(copiesBySID[sid]); best < 0 {
 			row.RelaunchResult = RelaunchResult{Verdict: VerdictNoTranscript}
 		} else {
@@ -70,6 +78,20 @@ func CountNotOK(rows []RelaunchRow) int {
 	n := 0
 	for _, r := range rows {
 		if r.Verdict != VerdictRelaunchedOK {
+			n++
+		}
+	}
+	return n
+}
+
+// CountFreshCap is how many audited sessions relaunched onto a FRESH budget cap — the
+// drive-carry regression signal: a relaunch that "took" by the verdict yet silently reset the
+// session's budget. Orthogonal to CountNotOK: a FRESH_CAP row is typically RELAUNCHED_OK, so
+// this count can be non-zero while CountNotOK reads zero.
+func CountFreshCap(rows []RelaunchRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.Carry == CarryFreshCap {
 			n++
 		}
 	}
