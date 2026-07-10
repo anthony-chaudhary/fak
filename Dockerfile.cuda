@@ -27,7 +27,7 @@
 # --- builder -------------------------------------------------------------------
 FROM nvidia/cuda:12.6.2-devel-ubuntu22.04 AS build
 ARG APP_VERSION=docker
-ARG CUDA_ARCH=sm_89
+ARG CUDA_ARCH=
 
 # The -devel image lacks git/build-essential/Go by default (same toolchain gap
 # .github/workflows/cuda-build.yml's nvcc job fills).
@@ -41,14 +41,19 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /src
 COPY . .
-RUN grep -Fxq ${CUDA_ARCH} internal/compute/cuda_arch.txt || (echo unsupported CUDA_ARCH ${CUDA_ARCH}; cat internal/compute/cuda_arch.txt; exit 2)
+RUN test -z "${CUDA_ARCH}" || grep -Fxq "${CUDA_ARCH}" internal/compute/cuda_arch.txt || (echo unsupported CUDA_ARCH ${CUDA_ARCH}; cat internal/compute/cuda_arch.txt; exit 2)
 
 # Compile the kernels with build_cuda.sh's exact flags (same nvcc invocation the CI
 # nvcc job runs), then cgo-link the version-stamped -tags cuda binary against the
 # resident archive + this image's cudart/cublas libs.
 RUN cd internal/compute \
-    && nvcc -O3 -std=c++14 -arch="${CUDA_ARCH}" -ccbin g++ -Xcompiler -fPIC \
-         -c cuda_kernels.cu -o cuda_kernels.o \
+    && if [ -n "${CUDA_ARCH}" ]; then \
+         cc="${CUDA_ARCH#sm_}"; gencode="-gencode arch=compute_${cc},code=${CUDA_ARCH}"; \
+       else \
+         gencode=""; while read -r arch; do cc="${arch#sm_}"; gencode="$gencode -gencode arch=compute_${cc},code=${arch}"; done < cuda_arch.txt; \
+         gencode="$gencode -gencode arch=compute_${cc},code=compute_${cc}"; \
+       fi \
+    && nvcc -O3 -std=c++14 $gencode -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o \
     && ar rcs libfakcuda.a cuda_kernels.o
 ENV CGO_ENABLED=1 \
     CGO_CFLAGS="-I/usr/local/cuda/include" \

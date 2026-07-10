@@ -37,7 +37,7 @@ a GPU, and a signing cert. This script is the wiring; running it there is the ex
 #>
 [CmdletBinding()]
 param(
-  [string] $Arch = $(if ($env:FAK_CUDA_ARCH) { $env:FAK_CUDA_ARCH } else { 'sm_89' }),
+  [string] $Arch = $(if ($env:FAK_CUDA_ARCH) { $env:FAK_CUDA_ARCH } else { '' }),
   [string] $CudaPath = $env:CUDA_PATH,
   [string] $Output = 'fak.exe',
   [switch] $SkipSign
@@ -89,12 +89,25 @@ function Resolve-SignTool {
 # --- 1. resolve toolkit + normalize arch ----------------------------------------------------
 $nvcc = Resolve-Nvcc -Root $CudaPath
 if (-not $CudaPath) { $CudaPath = Split-Path -Parent (Split-Path -Parent $nvcc) }  # ...\bin\nvcc -> root
-if ($Arch -notmatch '^sm_') { $Arch = "sm_$Arch" }
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ArchFile = Join-Path $RepoRoot 'internal\compute\cuda_arch.txt'
 $SupportedArch = @(Get-Content -LiteralPath $ArchFile | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($Arch -notin $SupportedArch) { throw "unsupported CUDA arch '$Arch'; choose one from ${ArchFile}: $($SupportedArch -join ', ')" }
-Write-Host "[cuda-win] CUDA_PATH=$CudaPath  nvcc=$nvcc  arch=$Arch"
+$NvccArchArgs = @()
+if ($Arch) {
+  if ($Arch -notmatch '^sm_') { $Arch = "sm_$Arch" }
+  if ($Arch -notin $SupportedArch) { throw "unsupported CUDA arch '$Arch'; choose one from ${ArchFile}: $($SupportedArch -join ', ')" }
+  $cc = $Arch.Substring(3)
+  $NvccArchArgs += @('-gencode', "arch=compute_${cc},code=${Arch}")
+  $BuildArchs = "$Arch (single-arch dev build)"
+} else {
+  foreach ($item in $SupportedArch) {
+    $cc = $item.Substring(3)
+    $NvccArchArgs += @('-gencode', "arch=compute_${cc},code=${item}")
+  }
+  $NvccArchArgs += @('-gencode', "arch=compute_${cc},code=compute_${cc}")
+  $BuildArchs = "$($SupportedArch -join ', ') + compute_${cc} PTX"
+}
+Write-Host "[cuda-win] CUDA_PATH=$CudaPath  nvcc=$nvcc  archs=$BuildArchs"
 
 $cudaInc = Join-Path $CudaPath 'include'
 $cudaLib = Join-Path $CudaPath 'lib\x64'
@@ -107,7 +120,7 @@ $obj = Join-Path $PkgDir 'cuda_kernels.obj'
 $lib = Join-Path $PkgDir 'libfakcuda.a'
 Push-Location $PkgDir
 try {
-  Invoke-Checked $nvcc '-O3' '-std=c++14' "-arch=$Arch" '-Xcompiler' '/MD' '-c' 'cuda_kernels.cu' '-o' $obj
+  Invoke-Checked $nvcc @('-O3', '-std=c++14') @NvccArchArgs @('-Xcompiler', '/MD', '-c', 'cuda_kernels.cu', '-o', $obj)
   $ar = Get-Command ar.exe -ErrorAction SilentlyContinue
   if (-not $ar) { $ar = Get-Command llvm-ar.exe -ErrorAction SilentlyContinue }
   if ($ar) {

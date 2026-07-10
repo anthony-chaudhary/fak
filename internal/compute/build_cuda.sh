@@ -19,11 +19,26 @@ MOD_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # fak/
 
 cmd="${1:-test}"
 ARCH_FILE="$SCRIPT_DIR/cuda_arch.txt"
-ARCH="${FAK_CUDA_ARCH:-sm_89}"
-case "$ARCH" in sm_*) ;; *) ARCH="sm_$ARCH";; esac
-if ! grep -Fxq "$ARCH" "$ARCH_FILE"; then
-  echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: $(tr '\n' ' ' < "$ARCH_FILE")" >&2
-  exit 2
+ARCH="${FAK_CUDA_ARCH:-}"
+GENCODE=()
+if [ -n "$ARCH" ]; then
+  case "$ARCH" in sm_*) ;; *) ARCH="sm_$ARCH";; esac
+  if ! grep -Fxq "$ARCH" "$ARCH_FILE"; then
+    echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: $(tr '\n' ' ' < "$ARCH_FILE")" >&2
+    exit 2
+  fi
+  cc="${ARCH#sm_}"
+  GENCODE=(-gencode "arch=compute_${cc},code=${ARCH}")
+  BUILD_ARCHS="$ARCH (single-arch dev build)"
+else
+  while IFS= read -r arch; do
+    [ -n "$arch" ] || continue
+    cc="${arch#sm_}"
+    GENCODE+=(-gencode "arch=compute_${cc},code=${arch}")
+    PTX_CC="$cc"
+  done < "$ARCH_FILE"
+  GENCODE+=(-gencode "arch=compute_${PTX_CC},code=compute_${PTX_CC}")
+  BUILD_ARCHS="$(tr '\n' ' ' < "$ARCH_FILE")+ compute_${PTX_CC} PTX"
 fi
 if [ "$cmd" = "check" ]; then
   PY="${PYTHON:-}"
@@ -169,18 +184,18 @@ fi
 
 # GPU arch: default sm_89 (Ada / L4), override via FAK_CUDA_ARCH for A100 (sm_80),
 # H100/H200 (sm_90), or B200/GB200 (sm_100). Accept either "89" or "sm_89".
-echo "[cuda] nvcc compile kernels ($ARCH) ..."
+echo "[cuda] nvcc compile kernels ($BUILD_ARCHS) ..."
 ( cd "$PKG_DIR"
-  "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+  "$NVCC" -O3 -std=c++14 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
       -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
   objs="cuda_kernels.o"
   if [ "${FAK_CUDA_NCCL:-0}" = "1" ]; then
-    echo "[cuda] nvcc compile NCCL collectives ($ARCH) ..."
-    "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+    echo "[cuda] nvcc compile NCCL collectives ($BUILD_ARCHS) ..."
+    "$NVCC" -O3 -std=c++14 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
         -Xcompiler -fPIC -c cuda_nccl.cu -o cuda_nccl.o
     objs="$objs cuda_nccl.o"
-    echo "[cuda] nvcc compile multi-process NCCL process group ($ARCH) ..."
-    "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+    echo "[cuda] nvcc compile multi-process NCCL process group ($BUILD_ARCHS) ..."
+    "$NVCC" -O3 -std=c++14 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
         -Xcompiler -fPIC -c cuda_nccl_pg.cu -o cuda_nccl_pg.o
     objs="$objs cuda_nccl_pg.o"
   fi
