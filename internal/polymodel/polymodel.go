@@ -183,6 +183,46 @@ func (p *Pool) Evict(id ModelID) bool {
 	return true
 }
 
+// Resize changes the weight-byte budget at runtime, evicting the coldest UNPINNED
+// residents (LRU order, exactly as Admit) until the resident set fits the new budget, and
+// returns the evicted IDs in eviction order. GROWING the budget — or any resize that still
+// fits the current residents — evicts nothing and returns nil. When the pinned residents
+// alone exceed the new budget it refuses with ErrPinnedNoRoom and leaves the pool
+// byte-for-byte unchanged (the same all-or-nothing discipline as Admit — no half-eviction).
+// A negative budget is clamped to 0 (matching NewPool). This is the runtime knob a host
+// turns when available memory shrinks under pressure (the unified-memory overrun cascade)
+// or grows on hot-add, so the resident set adapts without rebuilding the pool and reloading
+// every model.
+func (p *Pool) Resize(newBudgetBytes int64) ([]ModelID, error) {
+	if newBudgetBytes < 0 {
+		newBudgetBytes = 0
+	}
+	// Feasibility WITHOUT mutating: pinned residents can never be evicted, so if they alone
+	// exceed the new budget no amount of eviction can make room → refuse, pool unchanged.
+	if need := p.used - newBudgetBytes; need > 0 {
+		var evictable int64
+		for _, e := range p.models {
+			if !e.m.Pinned {
+				evictable += e.m.WeightBytes
+			}
+		}
+		if evictable < need {
+			return nil, ErrPinnedNoRoom
+		}
+	}
+	// Evict coldest-unpinned-first until it fits (feasibility guaranteed a path). A grow, or
+	// a shrink that still fits the residents, skips the loop entirely and evicts nothing.
+	var evicted []ModelID
+	for p.used > newBudgetBytes {
+		victim := p.coldestUnpinned()
+		evicted = append(evicted, victim)
+		p.used -= p.models[victim].m.WeightBytes
+		delete(p.models, victim)
+	}
+	p.budget = newBudgetBytes
+	return evicted, nil
+}
+
 // Has reports whether a model is resident.
 func (p *Pool) Has(id ModelID) bool { _, ok := p.models[id]; return ok }
 

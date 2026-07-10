@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/microagent"
 )
@@ -140,6 +141,180 @@ func TestHibernationRoundTripByteIdentical(t *testing.T) {
 	}
 	if !store.Parked("lossy") {
 		t.Error("a refused (lossy) Wake destroyed the frozen copy, want it preserved")
+	}
+}
+
+// countAgent counts Thaw calls and, as the single-flight leader, blocks its first
+// Thaw on a release channel so the wake-stampede test can hold every waker in flight
+// before the one restore completes — then assert exactly one Thaw ran (issue #4034).
+type countAgent struct {
+	thaws   *int32
+	arrived *sync.WaitGroup // Done'd by the leader when its restore begins
+	release <-chan struct{} // the leader's Thaw blocks here until the test releases it
+	state   []byte
+}
+
+func (a *countAgent) Step(context.Context, microagent.Gateway) (bool, error) { return true, nil }
+func (a *countAgent) Freeze() ([]byte, error)                                { return append([]byte(nil), a.state...), nil }
+func (a *countAgent) Thaw(b []byte) error {
+	if atomic.AddInt32(a.thaws, 1) == 1 && a.arrived != nil {
+		a.arrived.Done() // leader reached the single restore...
+		<-a.release      // ...and holds it open while the stampede piles up behind it
+	}
+	a.state = append([]byte(nil), b...)
+	return nil
+}
+
+// TestWakeCoalescesStampedeOnOneID is the #4034 acceptance witness: N goroutines
+// barrier-released against the SAME hibernated id coalesce to exactly one Thaw whose
+// result fans out to all N (no double-restore, file removed exactly once), instead of
+// N racing ReadFile→Thaw→Remove on the one frozen file.
+func TestWakeCoalescesStampedeOnOneID(t *testing.T) {
+	store, err := microagent.NewHibernationStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewHibernationStore: %v", err)
+	}
+	if _, err := store.Park("hot", &countAgent{thaws: new(int32), state: []byte("resident-state")}); err != nil {
+		t.Fatalf("Park: %v", err)
+	}
+
+	const N = 32
+	var thaws, entered int32
+	var arrived sync.WaitGroup
+	arrived.Add(1)
+	release := make(chan struct{})
+	// One shared sink: an id maps to ONE hibernated agent, so every concurrent waker
+	// targets that same agent — the leader's single Thaw restores it for all of them.
+	sink := &countAgent{thaws: &thaws, arrived: &arrived, release: release}
+
+	errs := make([]error, N)
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			atomic.AddInt32(&entered, 1)
+			errs[i] = store.Wake("hot", sink)
+		}(i)
+	}
+
+	// Hold the leader inside its Thaw (arrived) until every waker has entered Wake and
+	// piled up behind the single inflight call, then release the one restore.
+	arrived.Wait()
+	for atomic.LoadInt32(&entered) < N {
+		runtime.Gosched()
+	}
+	time.Sleep(25 * time.Millisecond) // let the last entrants reach the inflight join
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&thaws); got != 1 {
+		t.Errorf("Thaw ran %d times across the stampede, want exactly 1 (single-flight did not coalesce)", got)
+	}
+	for i, e := range errs {
+		if e != nil {
+			t.Errorf("waiter %d: Wake = %v, want nil (waiters share the leader's success)", i, e)
+		}
+	}
+	if !bytes.Equal(sink.state, []byte("resident-state")) {
+		t.Errorf("restored state = %q, want the parked bytes", sink.state)
+	}
+	if store.Parked("hot") {
+		t.Error("frozen file still present after a coalesced wake, want removed exactly once")
+	}
+
+	// Distinct ids still wake concurrently (no global-lock regression): two ids parked
+	// and woken in parallel both complete.
+	for _, id := range []string{"a", "b"} {
+		if _, err := store.Park(id, &countAgent{thaws: new(int32), state: []byte(id)}); err != nil {
+			t.Fatalf("Park(%s): %v", id, err)
+		}
+	}
+	var dwg sync.WaitGroup
+	derrs := make([]error, 2)
+	for i, id := range []string{"a", "b"} {
+		dwg.Add(1)
+		go func(i int, id string) {
+			defer dwg.Done()
+			derrs[i] = store.Wake(id, &countAgent{thaws: new(int32)})
+		}(i, id)
+	}
+	dwg.Wait()
+	for i, e := range derrs {
+		if e != nil {
+			t.Errorf("distinct-id wake %d: %v, want nil", i, e)
+		}
+	}
+}
+
+// TestResidentCapWarmBand pins the #4035 two-watermark warm band: below the low-water
+// mark WarmRefill fills up to the high-water cap (batch, not per-slot); above it
+// WarmPark drains down to low-water (a warm reserve survives); a plain NewResidentCap
+// has no band and is byte-identical (both folds return 0).
+func TestResidentCapWarmBand(t *testing.T) {
+	// No band: a plain cap reports no low-water and never asks to warm-refill/park.
+	plain := microagent.NewResidentCap(4)
+	if plain.LowWater() != 0 {
+		t.Errorf("plain LowWater = %d, want 0 (no band)", plain.LowWater())
+	}
+	plain.Admit()
+	if got := plain.WarmRefill(10); got != 0 {
+		t.Errorf("plain WarmRefill = %d, want 0 (no band)", got)
+	}
+	if got := plain.WarmPark(10); got != 0 {
+		t.Errorf("plain WarmPark = %d, want 0 (no band)", got)
+	}
+
+	// Warm band [low=2, high=6].
+	c := microagent.NewResidentCapBand(2, 6)
+	if c.Limit() != 6 || c.LowWater() != 2 {
+		t.Fatalf("band Limit/LowWater = %d/%d, want 6/2", c.Limit(), c.LowWater())
+	}
+
+	// Empty and below low-water: refill up to the HIGH-water cap (to 6), not just to low.
+	if got := c.WarmRefill(100); got != 6 {
+		t.Errorf("WarmRefill at 0 resident = %d, want 6 (fill to high-water)", got)
+	}
+	if got := c.WarmRefill(3); got != 3 {
+		t.Errorf("WarmRefill bounded by parked = %d, want 3", got)
+	}
+
+	// Fill to the low-water mark: at/above low, refill stops (hysteresis, not per-slot).
+	c.Admit()
+	c.Admit() // resident = 2 == low
+	if got := c.WarmRefill(100); got != 0 {
+		t.Errorf("WarmRefill at low-water = %d, want 0 (band satisfied)", got)
+	}
+	if got := c.WarmPark(100); got != 0 {
+		t.Errorf("WarmPark at low-water = %d, want 0 (nothing above the reserve)", got)
+	}
+
+	// Climb above low-water, then drain: WarmPark sheds down to low (2), never below.
+	c.Admit()
+	c.Admit()
+	c.Admit() // resident = 5
+	if got := c.WarmPark(100); got != 3 {
+		t.Errorf("WarmPark at resident 5 = %d, want 3 (drain to low-water 2)", got)
+	}
+	if got := c.WarmPark(1); got != 1 {
+		t.Errorf("WarmPark bounded by idle = %d, want 1", got)
+	}
+
+	// Dropping below low-water re-arms refill up to the high-water cap.
+	c.Release()
+	c.Release()
+	c.Release()
+	c.Release() // resident = 1 < low = 2
+	if got := c.WarmRefill(100); got != 5 {
+		t.Errorf("WarmRefill below low-water = %d, want 5 (fill 1->6)", got)
+	}
+
+	// Clamps: low>high collapses to high; high<=0 selects DefaultResidentCap.
+	if cc := microagent.NewResidentCapBand(9, 4); cc.LowWater() != 4 || cc.Limit() != 4 {
+		t.Errorf("clamp low>high: LowWater/Limit = %d/%d, want 4/4", cc.LowWater(), cc.Limit())
+	}
+	if cc := microagent.NewResidentCapBand(3, 0); cc.Limit() != microagent.DefaultResidentCap {
+		t.Errorf("high<=0 Limit = %d, want DefaultResidentCap %d", cc.Limit(), microagent.DefaultResidentCap)
 	}
 }
 

@@ -103,8 +103,18 @@ type Hibernable interface {
 // writes atomically (temp file + rename) so a crash mid-write never leaves a
 // torn frozen context a later Wake would restore.
 type HibernationStore struct {
-	dir string
-	mu  sync.Mutex // serializes the temp-file dance per store; ids are independent
+	dir      string
+	mu       sync.Mutex           // guards the temp-file dance AND the inflight map; ids are independent
+	inflight map[string]*wakeCall // per-id single-flight for Wake (#4034); nil entry = no wake in flight
+}
+
+// wakeCall is one in-flight Wake for an id. Concurrent wakes of the SAME id join the
+// leader's call and share its outcome, so a wake stampede on one hibernated id drives
+// exactly one Thaw + one file removal instead of N goroutines racing
+// ReadFile→Thaw→re-Freeze→Remove on the same frozen file (issue #4034).
+type wakeCall struct {
+	done chan struct{} // closed when the leader's restore finishes
+	err  error         // the leader's result, fanned out to every waiter
 }
 
 // NewHibernationStore roots a store at dir, creating it if needed.
@@ -112,7 +122,7 @@ func NewHibernationStore(dir string) (*HibernationStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("microagent: hibernation store dir: %w", err)
 	}
-	return &HibernationStore{dir: dir}, nil
+	return &HibernationStore{dir: dir, inflight: map[string]*wakeCall{}}, nil
 }
 
 // path returns the on-disk file for id, refusing an id that is not a single safe
@@ -155,7 +165,44 @@ func (s *HibernationStore) Park(id string, h Hibernable) (int, error) {
 // the restore is verified at the boundary, not trusted). On success it removes
 // the file, so a woken id no longer counts against on-disk residency. Wake
 // returns ErrNotHibernated when id has no frozen context.
+//
+// Wake is single-flighted per id (#4034): a burst of concurrent wakes on the SAME
+// id coalesces to ONE restore whose result fans out to every waiter, instead of N
+// goroutines each racing ReadFile→Thaw→re-Freeze→Remove on the same frozen file (a
+// double-restore hazard — two of them could Thaw one context into two live residents
+// before either Remove landed). Because an id maps to exactly one hibernated agent,
+// concurrent callers should target that one agent: the leader's Thaw is the single
+// restore, and the followers observe it and return the leader's error without a second
+// Thaw or Remove. Distinct ids still wake fully concurrently — the coalescing is
+// per-key, never a global lock.
 func (s *HibernationStore) Wake(id string, h Hibernable) error {
+	if _, err := s.path(id); err != nil {
+		return err // refuse an unsafe id up front, before it can pollute the inflight map
+	}
+	s.mu.Lock()
+	if call, ok := s.inflight[id]; ok {
+		// A wake of this id is already in flight: join it and share the leader's
+		// outcome. No second Thaw, no second Remove — the stampede is coalesced.
+		s.mu.Unlock()
+		<-call.done
+		return call.err
+	}
+	call := &wakeCall{done: make(chan struct{})}
+	s.inflight[id] = call
+	s.mu.Unlock()
+
+	call.err = s.wakeOnce(id, h)
+
+	s.mu.Lock()
+	delete(s.inflight, id)
+	s.mu.Unlock()
+	close(call.done)
+	return call.err
+}
+
+// wakeOnce is the actual single restore of an id's frozen context. It is only ever run
+// by the single-flight leader in Wake; followers share its result via wakeCall.
+func (s *HibernationStore) wakeOnce(id string, h Hibernable) error {
 	src, err := s.path(id)
 	if err != nil {
 		return err
@@ -204,17 +251,49 @@ func (s *HibernationStore) Parked(id string) bool {
 type ResidentCap struct {
 	mu       sync.Mutex
 	limit    int
+	low      int // low-water mark of the warm band (#4035); 0 disables warm refill/park
 	resident int
 	peak     int // high-water resident count ever reached (the O(R) witness)
 }
 
 // NewResidentCap builds a resident cap with the given slot limit; limit <= 0
-// selects DefaultResidentCap.
+// selects DefaultResidentCap. It has NO warm band (low-water 0), so WarmRefill and
+// WarmPark are always 0 and behavior is identical to a plain hard cap.
 func NewResidentCap(limit int) *ResidentCap {
 	if limit <= 0 {
 		limit = DefaultResidentCap
 	}
 	return &ResidentCap{limit: limit}
+}
+
+// NewResidentCapBand builds a resident cap with a two-watermark WARM BAND (#4035): a
+// hard high-water admit cap (high, the same gate NewResidentCap enforces) plus a
+// low-water refill mark (low). The band is advisory hysteresis a scheduler consults to
+// keep the resident set inside [low, high] without thrashing the hibernation store on
+// every admit/release — the worker/agent-process twin of the shipped KV-layer prewarm
+// (#810):
+//
+//   - Below low-water, WarmRefill says how many parked agents to warm-wake now,
+//     refilling all the way up to high (not just back to low) so a burst of admits pops
+//     from warm residents instead of paying a cold Thaw each.
+//   - Above low-water, WarmPark says how many idle residents to warm-park now, draining
+//     down to low (not to zero) so a warm reserve survives for the next admit.
+//
+// high <= 0 selects DefaultResidentCap; low is clamped to [0, high]; low <= 0 disables
+// the band (WarmRefill/WarmPark return 0), so it degrades to a plain NewResidentCap. The
+// hard Admit/Release gate is unchanged — the band never lets residency exceed high, and
+// correctness never depends on a warm hit: a miss only ever costs the status-quo cold start.
+func NewResidentCapBand(low, high int) *ResidentCap {
+	if high <= 0 {
+		high = DefaultResidentCap
+	}
+	if low < 0 {
+		low = 0
+	}
+	if low > high {
+		low = high
+	}
+	return &ResidentCap{limit: high, low: low}
 }
 
 // Admit reserves a resident slot, reporting false without reserving when all
@@ -262,4 +341,53 @@ func (c *ResidentCap) Peak() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.peak
+}
+
+// LowWater reports the warm-band low-water mark (#4035). It is 0 for a plain
+// NewResidentCap (no band), positive for a NewResidentCapBand.
+func (c *ResidentCap) LowWater() int { return c.low }
+
+// WarmRefill is a pure fold (#4035): how many parked agents a scheduler should
+// warm-wake right now to refill the warm band. It returns 0 unless the resident set
+// has fallen BELOW the low-water mark; once below, it refills up to the high-water cap
+// (Limit), so a single crossing triggers a batch refill rather than one warm-wake per
+// admit (the hysteresis that keeps the store from thrashing). The answer is bounded by
+// parkedAvailable — you cannot warm-wake more agents than are actually parked. With no
+// band (low <= 0) it is always 0, so a plain cap never asks for a refill.
+func (c *ResidentCap) WarmRefill(parkedAvailable int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.low <= 0 || c.resident >= c.low {
+		return 0
+	}
+	want := c.limit - c.resident
+	if want > parkedAvailable {
+		want = parkedAvailable
+	}
+	if want < 0 {
+		want = 0
+	}
+	return want
+}
+
+// WarmPark is a pure fold (#4035): how many currently-idle resident agents a scheduler
+// should warm-park right now, draining the resident set DOWN to the low-water mark
+// (never below) so a warm reserve is kept for the next admit instead of decommitting to
+// zero and paying a cold Thaw on the next wake. It returns 0 unless resident exceeds
+// low-water. idle bounds the answer to agents that are actually parkable (returned from
+// Step, holding no live work). With no band (low <= 0) it is always 0.
+func (c *ResidentCap) WarmPark(idle int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.low <= 0 || c.resident <= c.low {
+		return 0
+	}
+	want := c.resident - c.low
+	if want > idle {
+		want = idle
+	}
+	if want < 0 {
+		want = 0
+	}
+	return want
 }

@@ -131,6 +131,108 @@ func TestPoolBudgetNeverExceeded(t *testing.T) {
 	}
 }
 
+// TestPoolResizeShrinkEvictsLRU shrinks the budget at runtime and asserts the coldest
+// UNPINNED residents are paged out in LRU order until the resident set fits, returned in
+// eviction order — the re-budget-under-pressure direction of the knob.
+func TestPoolResizeShrinkEvictsLRU(t *testing.T) {
+	p := NewPool(120)
+	mustAdmit(t, p, Model{ID: "a", WeightBytes: 40})
+	mustAdmit(t, p, Model{ID: "b", WeightBytes: 40})
+	mustAdmit(t, p, Model{ID: "c", WeightBytes: 40})
+	// Make a the hottest, then b; c stays coldest. Shrinking 120→50 must free 70 bytes:
+	// evict c then b (coldest-first), leaving a (40 <= 50).
+	p.Touch("b")
+	p.Touch("a")
+	evicted, err := p.Resize(50)
+	if err != nil {
+		t.Fatalf("resize: %v", err)
+	}
+	if len(evicted) != 2 || evicted[0] != "c" || evicted[1] != "b" {
+		t.Fatalf("evicted = %v, want [c b] (coldest-first)", evicted)
+	}
+	if p.Budget() != 50 || p.Used() != 40 || !p.Has("a") || p.Has("b") || p.Has("c") {
+		t.Fatalf("after shrink: budget=%d used=%d resident=%v, want 50/40/[a]", p.Budget(), p.Used(), p.Resident())
+	}
+}
+
+// TestPoolResizeGrowEvictsNothing proves growing the budget — and any shrink that still
+// fits the residents — evicts nothing and only re-sets the budget.
+func TestPoolResizeGrowEvictsNothing(t *testing.T) {
+	p := NewPool(100)
+	mustAdmit(t, p, Model{ID: "a", WeightBytes: 30})
+	mustAdmit(t, p, Model{ID: "b", WeightBytes: 30})
+	if evicted, err := p.Resize(500); err != nil || len(evicted) != 0 { // grow
+		t.Fatalf("grow: err=%v evicted=%v, want no eviction", err, evicted)
+	}
+	if p.Budget() != 500 || p.Len() != 2 {
+		t.Fatalf("after grow: budget=%d len=%d, want 500/2", p.Budget(), p.Len())
+	}
+	if evicted, err := p.Resize(60); err != nil || len(evicted) != 0 { // shrink but >= used(60)
+		t.Fatalf("shrink-to-fit: err=%v evicted=%v, want no eviction", err, evicted)
+	}
+	if p.Used() != 60 || p.Len() != 2 {
+		t.Fatalf("shrink-to-fit dropped a resident: used=%d len=%d", p.Used(), p.Len())
+	}
+}
+
+// TestPoolResizePinnedOverflowRefused shrinks below the pinned footprint: no eviction can
+// make room (pinned are exempt), so Resize refuses with ErrPinnedNoRoom and leaves the pool
+// byte-for-byte unchanged — the same all-or-nothing discipline as Admit.
+func TestPoolResizePinnedOverflowRefused(t *testing.T) {
+	p := NewPool(100)
+	mustAdmit(t, p, Model{ID: "pin", WeightBytes: 60, Pinned: true})
+	mustAdmit(t, p, Model{ID: "x", WeightBytes: 30})
+	budget, used, ln := p.Budget(), p.Used(), p.Len()
+	// Shrink to 50 < pinned 60: even evicting all unpinned (x=30) leaves 60 > 50 → refuse.
+	if _, err := p.Resize(50); !errors.Is(err, ErrPinnedNoRoom) {
+		t.Fatalf("resize below pinned footprint: err=%v, want ErrPinnedNoRoom", err)
+	}
+	if p.Budget() != budget || p.Used() != used || p.Len() != ln {
+		t.Fatalf("refused resize mutated pool: budget %d->%d used %d->%d len %d->%d",
+			budget, p.Budget(), used, p.Used(), ln, p.Len())
+	}
+	// Shrink to exactly the pinned footprint (60): evicts unpinned x, the pinned model stays.
+	evicted, err := p.Resize(60)
+	if err != nil {
+		t.Fatalf("resize to pinned footprint: %v", err)
+	}
+	if len(evicted) != 1 || evicted[0] != "x" || !p.Has("pin") {
+		t.Fatalf("evicted=%v resident=%v, want [x] with pin surviving", evicted, p.Resident())
+	}
+}
+
+// TestPoolResizeInvariantHolds drives a grow/shrink/negative-clamp resize sequence and
+// asserts used <= budget after every step, that a negative budget clamps to 0 (matching
+// NewPool), and that the clamp evicts every unpinned resident.
+func TestPoolResizeInvariantHolds(t *testing.T) {
+	p := NewPool(300)
+	for _, m := range []Model{
+		{ID: "a", WeightBytes: 80},
+		{ID: "b", WeightBytes: 80},
+		{ID: "c", WeightBytes: 80},
+	} {
+		mustAdmit(t, p, m)
+	}
+	for _, nb := range []int64{300, 500, 160, 90, 400, -50} {
+		if _, err := p.Resize(nb); err != nil {
+			t.Fatalf("resize(%d): %v", nb, err)
+		}
+		want := nb
+		if want < 0 {
+			want = 0
+		}
+		if p.Budget() != want {
+			t.Fatalf("budget = %d after resize(%d), want %d", p.Budget(), nb, want)
+		}
+		if p.Used() > p.Budget() {
+			t.Fatalf("resize(%d): used %d exceeds budget %d", nb, p.Used(), p.Budget())
+		}
+	}
+	if p.Len() != 0 || p.Used() != 0 {
+		t.Fatalf("after clamp-to-0 resize: len=%d used=%d, want empty", p.Len(), p.Used())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Decode lane.
 // ---------------------------------------------------------------------------

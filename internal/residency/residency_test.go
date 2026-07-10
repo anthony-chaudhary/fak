@@ -193,6 +193,86 @@ func TestDescriptorRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSetBudgetShrinkPagesOutLRU shrinks the resident budget at runtime and asserts the
+// coldest UNPINNED residents are paged out in LRU order with their weight handles handed
+// back — the page-out signal polymodel.Pool.Resize alone cannot give (it returns only IDs).
+func TestSetBudgetShrinkPagesOutLRU(t *testing.T) {
+	r := New(300)
+	mA, mB, mC := newModel(t), newModel(t), newModel(t)
+	if _, err := r.Admit("A", mA, 100, "fam", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Admit("B", mB, 100, "fam", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Admit("C", mC, 100, "fam", "", false); err != nil {
+		t.Fatal(err)
+	}
+	// Hotten B then C; A stays coldest. Shrinking 300→150 frees 150: evict A then B
+	// (coldest-first), leaving C (100 <= 150).
+	r.Touch("B")
+	r.Touch("C")
+	evicted, err := r.SetBudget(150)
+	if err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+	if len(evicted) != 2 || evicted[0].ID != "A" || evicted[1].ID != "B" {
+		t.Fatalf("evicted = %v, want [A B] coldest-first", evicted)
+	}
+	if evicted[0].Weights != mA || evicted[1].Weights != mB {
+		t.Fatal("paged-out handles lost their *model.Model binding")
+	}
+	if r.Budget() != 150 || r.Used() != 100 || r.Len() != 1 {
+		t.Fatalf("after shrink: budget=%d used=%d len=%d, want 150/100/1", r.Budget(), r.Used(), r.Len())
+	}
+	if _, ok := r.Get("C"); !ok {
+		t.Fatal("hot C was paged out")
+	}
+	if _, ok := r.Get("A"); ok {
+		t.Fatal("A still bound after page-out")
+	}
+}
+
+// TestSetBudgetGrowPagesOutNothing proves growing the budget evicts nothing and keeps every
+// binding — the hot-add-headroom direction of the runtime knob.
+func TestSetBudgetGrowPagesOutNothing(t *testing.T) {
+	r := New(200)
+	if _, err := r.Admit("A", newModel(t), 100, "fam", "", false); err != nil {
+		t.Fatal(err)
+	}
+	evicted, err := r.SetBudget(1000)
+	if err != nil || len(evicted) != 0 {
+		t.Fatalf("grow: err=%v evicted=%v, want none", err, evicted)
+	}
+	if r.Budget() != 1000 || r.Len() != 1 {
+		t.Fatalf("after grow: budget=%d len=%d, want 1000/1", r.Budget(), r.Len())
+	}
+}
+
+// TestSetBudgetPinnedOverflowRefused shrinks below the pinned footprint: no eviction can
+// make room, so SetBudget refuses with ErrPinnedNoRoom and the resident set (and its
+// bindings) are byte-for-byte unchanged — the runtime re-budget fails CLOSED.
+func TestSetBudgetPinnedOverflowRefused(t *testing.T) {
+	r := New(200)
+	if _, err := r.Admit("P", newModel(t), 120, "fam", "", true); err != nil {
+		t.Fatal(err) // pinned
+	}
+	if _, err := r.Admit("Q", newModel(t), 60, "fam", "", false); err != nil {
+		t.Fatal(err)
+	}
+	before, ln := r.Used(), r.Len()
+	// Shrink to 100 < pinned 120: evicting all unpinned (Q=60) still leaves 120 > 100.
+	if _, err := r.SetBudget(100); !errors.Is(err, polymodel.ErrPinnedNoRoom) {
+		t.Fatalf("SetBudget below pinned footprint: err=%v, want ErrPinnedNoRoom", err)
+	}
+	if r.Used() != before || r.Len() != ln || r.Budget() != 200 {
+		t.Fatalf("refused SetBudget mutated state: used=%d len=%d budget=%d", r.Used(), r.Len(), r.Budget())
+	}
+	if _, ok := r.Get("P"); !ok {
+		t.Fatal("pinned P lost its binding on a refused resize")
+	}
+}
+
 // TestConcurrentAdmit proves the Manager is safe under concurrent admitters and that the
 // budget invariant survives the race (run with -race). The mutex makes each Admit atomic;
 // used can never exceed budget regardless of interleaving.

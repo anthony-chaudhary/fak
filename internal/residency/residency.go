@@ -116,6 +116,31 @@ func (r *Manager) Evict(id polymodel.ModelID) (*model.Model, bool) {
 	return m, true
 }
 
+// SetBudget changes the resident weight-byte budget at runtime, delegating the eviction
+// policy to polymodel.Pool.Resize and handing back the evicted weight handles for page-out
+// — the residency-layer counterpart to Admit's page-out signal (polymodel.Pool.Resize
+// returns only IDs; this layer owns the binding). Shrinking evicts the coldest UNPINNED
+// residents (LRU) until the resident set fits and returns them in eviction order; growing
+// evicts nothing. When the pinned residents alone exceed the new budget it refuses with
+// polymodel.ErrPinnedNoRoom and leaves the resident set (and every binding) byte-for-byte
+// unchanged. A negative budget is clamped to 0. The budget test, the LRU victim choice, and
+// the all-or-nothing discipline are ALL polymodel.Pool's — this method only releases the
+// evicted bindings, so it fails CLOSED exactly as Admit does.
+func (r *Manager) SetBudget(newBudgetBytes int64) ([]Evicted, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	evictedIDs, err := r.pool.Resize(newBudgetBytes)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Evicted, 0, len(evictedIDs))
+	for _, vid := range evictedIDs {
+		out = append(out, Evicted{ID: vid, Weights: r.weights[vid]})
+		delete(r.weights, vid)
+	}
+	return out, nil
+}
+
 // Descriptor returns the residency descriptor (Family / WeightBytes / Pinned /
 // PrefixDigest) for a resident model — the polymodel.Pool.Get view. Returns
 // (zero, false) for a non-resident id.
