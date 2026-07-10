@@ -30,11 +30,13 @@ package session
 // slower, never wrong.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -57,6 +59,7 @@ type WarmKV struct {
 	Cache      *model.KVCache
 	ColdTier   cachemeta.ResidencyTier
 	SpanDigest string
+	Residency  abi.KVResidency
 }
 
 // SpliceResult is the typed record of one warm-KV splice. Warm is true exactly when a parked
@@ -73,6 +76,7 @@ type SpliceResult struct {
 	ToTier            cachemeta.ResidencyTier
 	RestoredPositions int
 	SpanPointer       KVSpanPointer
+	Residency         abi.KVResidency
 }
 
 // WarmKVStore parks the offloaded KV of paused sessions and performs the concrete warm splice
@@ -89,6 +93,7 @@ type WarmKVStore struct {
 	HotTier  cachemeta.ResidencyTier
 	profiles map[cachemeta.ResidencyTier]cachemeta.TierProfile
 	last     map[string]SpliceResult
+	backend  abi.KVBackend
 }
 
 // NewWarmKVStore builds an empty store promoting to TierHBM with the default tier profiles.
@@ -99,6 +104,26 @@ func NewWarmKVStore() *WarmKVStore {
 		profiles: cachemeta.DefaultTierProfiles(),
 		last:     map[string]SpliceResult{},
 	}
+}
+
+// NewWarmKVStoreWithBackend injects the residency backend used across relaunch.
+func NewWarmKVStoreWithBackend(backend abi.KVBackend) *WarmKVStore {
+	s := NewWarmKVStore()
+	s.backend = backend
+	return s
+}
+
+// CarrySpan installs a durable pointer in a fresh store after process relaunch.
+func (s *WarmKVStore) CarrySpan(trace string, pointer KVSpanPointer) {
+	if s == nil || pointer.Kind != KindKVSpan || pointer.Ref == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.parked == nil {
+		s.parked = map[string]WarmKV{}
+	}
+	s.parked[trace] = WarmKV{ColdTier: cachemeta.TierDRAM, SpanDigest: pointer.Ref}
+	s.mu.Unlock()
 }
 
 // Park records a paused session's offloaded KV under its trace, to be reattached warm on
@@ -117,7 +142,18 @@ func (s *WarmKVStore) Park(trace string, cache *model.KVCache, coldTier cachemet
 		s.parked = map[string]WarmKV{}
 	}
 	parked := cache.Clone()
-	s.parked[trace] = WarmKV{Cache: parked, ColdTier: coldTier, SpanDigest: warmKVSpanDigest(parked)}
+	digest := warmKVSpanDigest(parked)
+	entry := WarmKV{Cache: parked, ColdTier: coldTier, SpanDigest: digest}
+	backend := s.backend
+	s.mu.Unlock()
+	if backend != nil && digest != "" {
+		residency, err := backend.StageSpan(context.Background(), digest, 0, parked.Len())
+		if err == nil {
+			entry.Residency = residency
+		}
+	}
+	s.mu.Lock()
+	s.parked[trace] = entry
 	s.mu.Unlock()
 }
 
@@ -145,14 +181,27 @@ func (s *WarmKVStore) Splice(trace string) SpliceResult {
 	}
 	s.mu.Lock()
 	warm, ok := s.parked[trace]
-	if !ok || warm.Cache == nil {
+	if !ok {
 		s.mu.Unlock()
 		return SpliceResult{}
 	}
-	delete(s.parked, trace) // a resume reclaims the parked KV exactly once
+	delete(s.parked, trace)
 	profiles := s.profiles
 	hot := s.HotTier
+	backend := s.backend
 	s.mu.Unlock()
+
+	pointer := KVSpanPointer{Kind: KindKVSpan, Ref: warm.SpanDigest}
+	if warm.Cache == nil {
+		if backend == nil || warm.SpanDigest == "" {
+			return SpliceResult{}
+		}
+		residency, err := backend.RestoreSpan(context.Background(), warm.SpanDigest)
+		if err != nil || residency.Outcome != abi.KVResidencyOK {
+			return SpliceResult{SpanPointer: pointer, Residency: residency}
+		}
+		return SpliceResult{Warm: true, SpanPointer: pointer, Residency: residency}
+	}
 
 	if profiles == nil {
 		profiles = cachemeta.DefaultTierProfiles()
@@ -178,7 +227,8 @@ func (s *WarmKVStore) Splice(trace string) SpliceResult {
 		FromTier:          warm.ColdTier,
 		ToTier:            hot,
 		RestoredPositions: restored.Len(),
-		SpanPointer:       KVSpanPointer{Kind: KindKVSpan, Ref: warm.SpanDigest},
+		SpanPointer:       pointer,
+		Residency:         warm.Residency,
 	}
 	s.mu.Lock()
 	if s.last == nil {

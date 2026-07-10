@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -170,5 +172,51 @@ func TestWarmKVResumeVerdictCarriesSpanPointer(t *testing.T) {
 	verdict := <-verdicts
 	if verdict.Mode != ResumeWarm || verdict.SpanPointer.Kind != KindKVSpan || verdict.SpanPointer.Ref == "" {
 		t.Fatalf("resume verdict = %+v, want warm with kv_span pointer", verdict)
+	}
+}
+
+type relaunchKVBackend struct {
+	staged map[string]bool
+}
+
+func (b *relaunchKVBackend) Len() int                { return 0 }
+func (b *relaunchKVBackend) Prefill([]int) []float32 { return nil }
+func (b *relaunchKVBackend) Evict(int, int) int      { return 0 }
+func (b *relaunchKVBackend) ModelID() string         { return "test" }
+func (b *relaunchKVBackend) StageSpan(_ context.Context, digest string, _, _ int) (abi.KVResidency, error) {
+	if b.staged == nil {
+		b.staged = map[string]bool{}
+	}
+	b.staged[digest] = true
+	return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest}, nil
+}
+func (b *relaunchKVBackend) RestoreSpan(_ context.Context, digest string) (abi.KVResidency, error) {
+	if b.staged[digest] {
+		return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest}, nil
+	}
+	return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest}, nil
+}
+
+func TestWarmKVSurvivesRelaunchViaRestoreSpan(t *testing.T) {
+	backend := &relaunchKVBackend{}
+	origin := NewWarmKVStoreWithBackend(backend)
+	origin.Park("origin", warmCache(), cachemeta.TierDRAM)
+	parked := origin.Splice("origin")
+	if parked.SpanPointer.Ref == "" || !backend.staged[parked.SpanPointer.Ref] {
+		t.Fatalf("park stage = %+v staged=%v, want durable pointer", parked, backend.staged)
+	}
+
+	fresh := NewWarmKVStoreWithBackend(backend)
+	fresh.CarrySpan("relaunched", parked.SpanPointer)
+	restored := fresh.Splice("relaunched")
+	if !restored.Warm || restored.Residency.Outcome != abi.KVResidencyOK {
+		t.Fatalf("fresh-store restore = %+v, want warm residency OK", restored)
+	}
+
+	missing := NewWarmKVStoreWithBackend(&relaunchKVBackend{})
+	missing.CarrySpan("missing", parked.SpanPointer)
+	miss := missing.Splice("missing")
+	if miss.Warm || miss.Residency.Outcome != abi.KVResidencyMiss {
+		t.Fatalf("default/missing restore = %+v, want cold MISS", miss)
 	}
 }
