@@ -9,6 +9,13 @@ type Params struct {
 	K      int    `json:"k,omitempty"`
 	Budget int64  `json:"budget,omitempty"`
 	Reason string `json:"reason,omitempty"`
+
+	// NarrowBytes is the OPT-IN per-cell width cap for the second compression axis
+	// (#4019): when > 0, render and compact chain an OpNarrow immediately before
+	// their OpBudget, so an over-wide cell is slimmed (least-relevant Attrs fields
+	// dropped, Descriptor re-headLined) instead of tail-dropped whole. Default 0
+	// (off): the compiled Query is identical to before this field existed.
+	NarrowBytes int64 `json:"narrow_bytes,omitempty"`
 }
 
 // Driver is a NAMED, pre-composed memory strategy — a "canned query" in the algebra.
@@ -80,7 +87,7 @@ func init() {
 		Name: "render",
 		Doc:  "render the intent-relevant + durable cells within a byte budget",
 		Build: func(p Params) Query {
-			return Query{
+			q := Query{
 				Intent: p.Intent,
 				Ops: []Op{
 					{Kind: OpScan},
@@ -98,6 +105,12 @@ func init() {
 					{Kind: OpRender},
 				},
 			}
+			if p.NarrowBytes > 0 {
+				// The opt-in width axis (#4019): narrow over-wide cells BEFORE the
+				// count-axis budget so the two compression axes compose.
+				q.Ops = insertNarrowBeforeBudget(q.Ops, p.NarrowBytes)
+			}
+			return q
 		},
 	})
 
@@ -139,7 +152,7 @@ func init() {
 			if reason == "" {
 				reason = "compacted into a derived disposition"
 			}
-			return Query{
+			q := Query{
 				Intent: p.Intent,
 				Ops: []Op{
 					{Kind: OpScan},
@@ -155,6 +168,12 @@ func init() {
 					{Kind: OpTombstone, Reason: reason},
 				},
 			}
+			if p.NarrowBytes > 0 {
+				// The opt-in width axis (#4019): slim over-wide cells before the
+				// count-axis budget picks what to fold.
+				q.Ops = insertNarrowBeforeBudget(q.Ops, p.NarrowBytes)
+			}
+			return q
 		},
 	})
 

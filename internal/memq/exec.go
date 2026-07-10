@@ -160,6 +160,10 @@ type Stats struct {
 	// NearDupAdvisory counts body-similar pairs flagged by the opt-in simhash advisory
 	// (#2506) — the fuzzy near-dup counter for the dedup census fold.
 	NearDupAdvisory int `json:"near_dup_advisory"`
+	// Narrowed counts cells whose width was pruned by the opt-in OpNarrow pass (#4019)
+	// — the width-axis counter alongside the count-axis DedupCollapsed. omitempty keeps
+	// a serialized Result byte-identical when the op is never used.
+	Narrowed int `json:"narrowed,omitempty"`
 }
 
 // Result is the outcome of Run.
@@ -243,6 +247,8 @@ func Run(ctx context.Context, b Backend, q Query, caps Caps) (Result, error) {
 			}
 		case OpDedup:
 			work, note = applyDedup(&res, work)
+		case OpNarrow:
+			work, note = applyNarrow(&res, work, op.Bytes, qterms)
 		case OpRender:
 			note = renderInto(ctx, b, &res, work)
 		case OpTombstone:

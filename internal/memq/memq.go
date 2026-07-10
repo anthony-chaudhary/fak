@@ -67,6 +67,7 @@ const (
 	OpLimit       = "limit"       // keep the first K (LIMIT)
 	OpBudget      = "budget"      // keep the prefix whose cumulative Bytes <= Bytes
 	OpDedup       = "dedup"       // collapse digest-identical cells to one (read-side recall dedup; #2506)
+	OpNarrow      = "narrow"      // shrink kept cells' width to a per-cell byte cap (opt-in 2nd compression axis; ThinK #4019)
 	OpRender      = "render"      // materialize the set into context (read-only page-in via the gate)
 	OpTombstone   = "tombstone"   // negative-only suppression (recall.RequestContextChange)
 	OpConsolidate = "consolidate" // fold the set into one derived extractive disposition
@@ -127,7 +128,7 @@ type Op struct {
 	By     string `json:"by,omitempty"`     // rank key, or reclassify target class
 	Desc   bool   `json:"desc,omitempty"`   // rank direction (default ascending)
 	K      int    `json:"k,omitempty"`      // limit
-	Bytes  int64  `json:"bytes,omitempty"`  // budget cap (bytes)
+	Bytes  int64  `json:"bytes,omitempty"`  // budget cap, or narrow's per-cell width cap (bytes)
 	Reason string `json:"reason,omitempty"` // tombstone/effect reason
 }
 
@@ -160,7 +161,7 @@ type Query struct {
 // effectKinds and mutationKinds classify ops. An effect reads/derives or mutates; a
 // mutation additionally requires a Caps grant to be APPLIED (otherwise it is proposed).
 var effectKinds = map[string]bool{
-	OpRender: true, OpTombstone: true, OpConsolidate: true, OpReclassify: true, OpPrune: true, OpDedup: true,
+	OpRender: true, OpTombstone: true, OpConsolidate: true, OpReclassify: true, OpPrune: true, OpDedup: true, OpNarrow: true,
 }
 
 // mutationKinds are the effects that change durable backend state. They are
@@ -212,6 +213,10 @@ func Validate(q Query) error {
 		case OpBudget:
 			if op.Bytes < 0 {
 				return fmt.Errorf("memq: op %d (budget) has negative bytes=%d", i, op.Bytes)
+			}
+		case OpNarrow:
+			if op.Bytes < 0 {
+				return fmt.Errorf("memq: op %d (narrow) has negative bytes=%d", i, op.Bytes)
 			}
 		case OpReclassify:
 			if _, ok := durabilityRank[op.By]; !ok {
