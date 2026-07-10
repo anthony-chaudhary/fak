@@ -203,6 +203,27 @@ func compactActionFromRecommendation(rep CompactReport, rec CompactRecommendatio
 			}
 		}
 		return action, true
+	case "confusion_pressure":
+		action := CompactAction{
+			ID:       "triage_agent_confusion",
+			Kind:     rec.Kind,
+			Severity: rec.Severity,
+			Target:   "process:agent_confusion",
+			Command:  rec.Action,
+			WitnessCommands: []string{
+				"fak session-audit deep <session.jsonl>",
+				"fak session-audit summary --here --json",
+			},
+			Reason:   rec.Reason,
+			Evidence: rec.Evidence,
+		}
+		if conf := rep.Confusion; conf != nil && len(conf.TopSessions) > 0 {
+			top := conf.TopSessions[0]
+			action.Session = top.Session
+			action.Namespace = top.Namespace
+			action.Target = fmt.Sprintf("process:confusion@%s", top.Session)
+		}
+		return action, true
 	default:
 		return CompactAction{}, false
 	}

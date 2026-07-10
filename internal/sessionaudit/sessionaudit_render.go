@@ -81,7 +81,25 @@ func DeepMarkdown(s Session) string {
 		}
 		fmt.Fprintf(&b, "  [%2d] %s  %s\n", i, p.Timestamp, txt)
 	}
+	renderConfusion(&b, s.Confusion)
 	return b.String()
+}
+
+// renderConfusion surfaces the prose Confusion lens for a single deep-audited session —
+// the "read the trace for confusion" view: the confused-turn rate and every detected
+// self-correction / dead-end / confusion marker with one verbatim example. A session
+// with no markers prints a one-line clean verdict rather than an empty header.
+func renderConfusion(b *strings.Builder, c Confusion) {
+	fmt.Fprintln(b, "\n## Confusion / self-correction (assistant prose)")
+	if c.TextTurns == 0 || c.TotalMarkers == 0 {
+		fmt.Fprintf(b, "  none detected across %d prose turn(s)\n", c.TextTurns)
+		return
+	}
+	fmt.Fprintf(b, "  score=%.3f  turns_with_confusion=%d/%d  self_correction_turns=%d  dead_end_turns=%d  confusion_turns=%d  total_markers=%d\n",
+		c.Score, c.TurnsWithConfusion, c.TextTurns, c.SelfCorrectionTurns, c.DeadEndTurns, c.ConfusionTurns, c.TotalMarkers)
+	for _, m := range c.Markers {
+		fmt.Fprintf(b, "  - [%s] %s ×%d: %s\n", m.Category, m.Label, m.Count, m.Example)
+	}
 }
 
 func scopeLine(sessions []Session, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int) string {
