@@ -25,11 +25,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/focusscore"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 const dispatchStatusSchema = "fleet-dispatch-status/1"
@@ -67,6 +69,7 @@ type dispatchStatusSnapshot struct {
 	LanesHeld       []string               `json:"lanes_held"`
 	Workers         []dispatchStatusWorker `json:"workers"`
 	Focus           *dispatchStatusFocus   `json:"focus,omitempty"`
+	Trajectory      *trajctl.Status        `json:"trajectory,omitempty"`
 }
 
 func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
@@ -134,6 +137,17 @@ func dispatchStatusFold(root string) *dispatchStatusFocus {
 	}
 }
 
+func dispatchStatusTrajectory(root string) *trajctl.Status {
+	if strings.TrimSpace(root) == "" {
+		return nil
+	}
+	status := trajctl.Fold(trajctl.ReadLedgerFile(filepath.Join(root, trajctl.DefaultLedgerRel))).Status()
+	if status.Empty() {
+		return nil
+	}
+	return &status
+}
+
 // dispatchStatusScan folds the runs directory into the live-worker snapshot. It is
 // pure over the filesystem: the same runs-dir yields the same snapshot, so a test
 // drives it hermetically by planting resolve-*.log/.pid sidecars for a live pid. root
@@ -175,6 +189,7 @@ func dispatchStatusScan(runsDir, root string) dispatchStatusSnapshot {
 		LanesHeld:       lanes,
 		Workers:         workers,
 		Focus:           dispatchStatusFold(root),
+		Trajectory:      dispatchStatusTrajectory(root),
 	}
 }
 
@@ -211,6 +226,11 @@ func renderDispatchStatus(snap dispatchStatusSnapshot) string {
 	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
+	if snap.Trajectory != nil {
+		for _, line := range snap.Trajectory.Lines() {
+			fmt.Fprintln(&b, line)
+		}
+	}
 	if len(snap.Workers) == 0 {
 		fmt.Fprint(&b, "no live issue-resolution workers\n")
 		return b.String()
@@ -232,6 +252,11 @@ func renderDispatchStatusMarkdown(snap dispatchStatusSnapshot) string {
 	fmt.Fprintf(&b, "- lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
 	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
 		fmt.Fprintf(&b, "- %s\n", line)
+	}
+	if snap.Trajectory != nil {
+		for _, line := range snap.Trajectory.Lines() {
+			fmt.Fprintf(&b, "- %s\n", line)
+		}
 	}
 	b.WriteString("\n")
 	if len(snap.Workers) == 0 {
