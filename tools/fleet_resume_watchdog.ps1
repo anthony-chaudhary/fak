@@ -50,7 +50,10 @@ param(
   # (observed ~150 mid-incident) actually shrinks per tick -- a modestly higher cap drains it
   # faster. This is a soft cap: the shared source governor + LaunchSpacingSec remain the real
   # account-pressure rail, so 6 cannot burst past what the governor admits. Override with -MaxPerTick.
-  [int]$MaxPerTick    = 6,
+  [int]$MaxPerTick    = 0,
+  [int]$MaxPerTickFloor = 4,
+  [int]$MaxPerTickCeiling = 64,
+  [int]$SeatSessionCap = 6,
   # Ledger-counted resume attempts per session before it is left for a human. Was an
   # implicit 1 ("resume once ever"); raised so a session that keeps dying is retried --
   # and re-homed onto a fresh seat by the planner after repeated in-place failures --
@@ -419,10 +422,22 @@ try {
 }
 $planPath = Join-Path $regDir 'resume_plan.json'
 $plan = if (Test-Path $planPath) { (Get-Content $planPath -Raw | ConvertFrom-Json).plan } else { @() }
+# Size this tick from the registry snapshot just refreshed above. An explicit
+# -MaxPerTick remains the operator override; zero selects the live derivation.
+$capSource = 'override'
+$capEvidence = [ordered]@{ cap = $MaxPerTick; floor = $MaxPerTickFloor; ceiling = $MaxPerTickCeiling; seat_cap = $SeatSessionCap; healthy_seats = 0; headroom = 0 }
+if ($MaxPerTick -le 0) {
+  $capSource = 'derived'
+  $capJson = & $fakExe resume cap --sessions (Join-Path $regDir 'sessions.json') --floor $MaxPerTickFloor --ceiling $MaxPerTickCeiling --seat-cap $SeatSessionCap
+  if ($LASTEXITCODE -ne 0) { throw "resume cap derivation failed (exit $LASTEXITCODE)" }
+  $capEvidence = $capJson | ConvertFrom-Json
+  $MaxPerTick = [int]$capEvidence.cap
+}
 $mode = if ($Live) { 'LIVE' } else { 'DRY-RUN' }
 Note ("TICK $mode plan={0} window=${WindowH}h cap=$MaxPerTick" -f @($plan).Count)
 $statusLedger = Join-Path $regDir 'resume_watchdog_status.jsonl'
 RecordDrainTick $statusLedger $mode @($plan)
+AppendJsonLine $statusLedger @{ ts = [DateTime]::UtcNow.ToString('o'); phase = 'cap'; mode = $mode; cap_source = $capSource; cap = [int]$MaxPerTick; floor = [int]$capEvidence.floor; ceiling = [int]$capEvidence.ceiling; seat_cap = [int]$capEvidence.seat_cap; healthy_seats = [int]$capEvidence.healthy_seats; headroom = [int]$capEvidence.headroom }
 
 # defense-in-depth: the set of account dir-basenames that policy still treats as
 # workers. fleet_sessions.py already excludes non-workers when it writes the plan,
@@ -737,3 +752,4 @@ Note "  done: launched=$launched sessions_in_ledger=$($launchCount.Count)"
 # refresh the observability card on disk
 try { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $FleetDir 'tools\fleet_status.ps1') -Quiet -RegistryDir $regDir -LogDir $LogDir } catch {}
 exit 0
+
