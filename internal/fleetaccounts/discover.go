@@ -9,6 +9,7 @@ import (
 	"time"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 // Account is one discovered config dir's roster row. The JSON field names and order
@@ -16,7 +17,8 @@ import (
 //
 // The base classification fields (dir/product/account/tag/kind/reason/notes) are always
 // present. Worker rows additionally carry the model Profile (flattened) + route_weight,
-// and Claude worker rows carry the logged-in identity + the reconciliation verdict.
+// and config-home worker rows (Claude/Codex) carry the logged-in identity + the
+// reconciliation verdict.
 // Runtime status fields are attached by Annotate.
 type Account struct {
 	Dir     string `json:"dir"`
@@ -64,6 +66,12 @@ type Account struct {
 	AuthBlockedSessions *int     `json:"auth_blocked_sessions,omitempty"`
 	StatusSource        *string  `json:"status_source,omitempty"`
 	RegistryAgeMin      *float64 `json:"registry_age_min"`
+	// UsageSoonReset carries a still-active DAILY usage cap that a fresh OK probe reopened
+	// the seat over (see markUsageSoon). Advisory only: the seat stays Available; this lets
+	// the roster show "serving, cap resets HH:MM" instead of a blank near-cap row. Nil on
+	// every row not in that reopen-over-a-live-cap state, and MarshalJSON emits the key only
+	// when set, so a normal row's byte-parity JSON is unchanged.
+	UsageSoonReset *string `json:"usage_soon_reset,omitempty"`
 }
 
 func strp(s string) *string { return &s }
@@ -293,11 +301,18 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 	id := Identity{}
 	if product == "claude" {
 		id = ReadAccountIdentity(acctDir)
+	} else if product == "codex" {
+		id, _, _ = codexLoginStatus(acctDir, tag)
 	}
-	if reason := accountsRegistryExclusion(acctDir, product, account, tag, id, acctIdx); reason != "" {
-		base.Kind = KindExcluded
-		base.Reason = reason
-		return base
+	// The ~/.claude-accounts registry is a Claude config-home registry. Its role names
+	// (especially "default") are not globally unique product ids, so applying it to a
+	// `.codex` row would falsely inherit a Claude tombstone/rehome with the same short tag.
+	if product == "claude" {
+		if reason := accountsRegistryExclusion(acctDir, product, account, tag, id, acctIdx); reason != "" {
+			base.Kind = KindExcluded
+			base.Reason = reason
+			return base
+		}
 	}
 	if hit := excludedMatch(tag, account, pol.Exclude, id.LoginEmail); hit != "" {
 		base.Kind = KindExcluded
@@ -331,8 +346,11 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 		}
 	}
 	label := "real offered account"
-	if product == "opencode" {
+	switch product {
+	case "opencode":
 		label = "real offered opencode account"
+	case "codex":
+		label = "real offered Codex account"
 	}
 	row := base
 	row.Kind = KindWorker
@@ -354,8 +372,28 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 		st, can := claudeLoginStatus(acctDir, tag)
 		row.LoginStatus = strp(string(st))
 		row.CanServe = boolp(can)
+	} else if product == "codex" {
+		codexID, st, can := codexLoginStatus(acctDir, tag)
+		row.AccountUUID = strp(codexID.AccountUUID)
+		row.LoginStatus = strp(string(st))
+		row.CanServe = boolp(can)
 	}
 	return row
+}
+
+// codexLoginStatus projects the generic config-home identity reader into the roster's
+// credential-safe identity/login fields. The reader consumes only auth.json account metadata
+// and credential presence; it never returns token bytes. A home with config.toml but no live
+// auth remains visible in the picker as needs_login and is not offerable.
+func codexLoginStatus(acctDir, tag string) (Identity, configaccounts.LoginStatus, bool) {
+	profile, ok := harnessprofile.Lookup("codex")
+	if !ok {
+		return Identity{}, configaccounts.LoginNeedsLogin, false
+	}
+	derived := configaccounts.DeriveIdentityForProfile(acctDir, profile)
+	home := configaccounts.Home{Name: tag, Dir: acctDir, Identity: derived}
+	st := home.LoginStatus()
+	return Identity{AccountUUID: derived.AccountUUID}, st, st == configaccounts.LoginReady
 }
 
 func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
@@ -378,9 +416,8 @@ func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
 // row: the common "not a directory" guard first (every product agrees on that),
 // then a product-specific second gate (extraCheck) that returns a non-empty
 // Reason to short-circuit as a KindNonAccount row, or "" to fall through to
-// classifyRow. This is the glob-then-classify idiom discoverClaude and
-// discoverOpencode share; only the glob pattern, the product tag, and the
-// second gate differ between them.
+// classifyRow. This is the glob-then-classify idiom discoverClaude, discoverCodex, and
+// discoverOpencode share; only the glob pattern, the product tag, and the second gate differ.
 func discoverProduct(root, pattern, product string, pol Policy, acctIdx accountsRegistryIndex, extraCheck func(acctDir string) (reason string)) []Account {
 	var rows []Account
 	matches, _ := filepath.Glob(filepath.Join(root, pattern))
@@ -414,6 +451,17 @@ func discoverClaude(home string, pol Policy, acctIdx accountsRegistryIndex) []Ac
 	})
 }
 
+func discoverCodex(home string, pol Policy, acctIdx accountsRegistryIndex) []Account {
+	return discoverProduct(home, ".codex*", "codex", pol, acctIdx, func(acctDir string) string {
+		for _, marker := range []string{"auth.json", "config.toml"} {
+			if mst, merr := os.Stat(filepath.Join(acctDir, marker)); merr == nil && !mst.IsDir() {
+				return ""
+			}
+		}
+		return "no auth.json or config.toml"
+	})
+}
+
 func discoverOpencode(configHome string, pol Policy, acctIdx accountsRegistryIndex) []Account {
 	return discoverProduct(configHome, "opencode*", "opencode", pol, acctIdx, func(acctDir string) string {
 		for _, m := range OpencodeMarkerFiles {
@@ -444,14 +492,15 @@ func dirRecency(acctDir string) float64 {
 	return newest
 }
 
-// reconcileIdentities detects Claude worker dirs sharing ONE logged-in Anthropic account,
+// reconcileIdentities detects config-home worker dirs sharing ONE logged-in provider account,
 // stamping identity_role (unique|canonical|duplicate|no-login), identity_peers, and
 // tag_login_match. Duplicates stay visible but callers exclude them from routing counts.
 func reconcileIdentities(rows []Account) {
-	// gather pointers to Claude workers
+	// Gather config-home workers. OpenCode is env/config based and has no per-home identity
+	// reader, so it remains outside this dedup fold.
 	var workers []*Account
 	for i := range rows {
-		if rows[i].Kind == KindWorker && rows[i].Product == "claude" {
+		if rows[i].Kind == KindWorker && (rows[i].Product == "claude" || rows[i].Product == "codex") {
 			workers = append(workers, &rows[i])
 		}
 	}
@@ -459,7 +508,7 @@ func reconcileIdentities(rows []Account) {
 	for _, r := range workers {
 		uuid := derefStr(r.AccountUUID)
 		if uuid != "" {
-			byUUID[uuid] = append(byUUID[uuid], r)
+			byUUID[r.Product+"\x00"+uuid] = append(byUUID[r.Product+"\x00"+uuid], r)
 		}
 	}
 	// pass 1: tag<->login agreement for EVERY worker first.
@@ -493,7 +542,7 @@ func reconcileIdentities(rows []Account) {
 			r.IdentityPeers = []string{}
 			continue
 		}
-		group := byUUID[uuid]
+		group := byUUID[r.Product+"\x00"+uuid]
 		if len(group) == 0 {
 			group = []*Account{r}
 		}
@@ -520,7 +569,13 @@ func reconcileIdentities(rows []Account) {
 			} else if name == "" {
 				name = uuid
 			}
-			r.Reason = "duplicate identity: same Anthropic account as " +
+			provider := "provider"
+			if r.Product == "claude" {
+				provider = "Anthropic"
+			} else if r.Product == "codex" {
+				provider = "Codex"
+			}
+			r.Reason = "duplicate identity: same " + provider + " account as " +
 				derefStr(canonical.TagPtr()) + " (" + name + ")"
 		}
 	}
@@ -591,12 +646,13 @@ func derefInt(p *int) int {
 	return *p
 }
 
-// Discover classifies every account config dir across both products, then reconciles
-// shared Claude identities. Rows are sorted by (product, kind != worker, tag) to match
+// Discover classifies every account config dir across all products, then reconciles shared
+// Claude/Codex identities. Rows are sorted by (product, kind != worker, tag) to match
 // fleet_accounts.discover_accounts.
 func Discover(home, configHome string, pol Policy) []Account {
 	acctIdx := indexAccountsRegistry(loadAccountsRegistry(home))
-	rows := append(discoverClaude(home, pol, acctIdx), discoverOpencode(configHome, pol, acctIdx)...)
+	rows := append(discoverClaude(home, pol, acctIdx), discoverCodex(home, pol, acctIdx)...)
+	rows = append(rows, discoverOpencode(configHome, pol, acctIdx)...)
 	reconcileIdentities(rows)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Product != rows[j].Product {

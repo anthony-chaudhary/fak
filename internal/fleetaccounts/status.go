@@ -210,6 +210,24 @@ func applyThrottleStatus(st RuntimeStatus, thr map[string]any) RuntimeStatus {
 	return st
 }
 
+// markUsageSoon carries a still-active DAILY cap onto st as advisory when a fresh OK probe
+// reopens the seat over it. Mirrors fleet_accounts._mark_usage_soon: the reopen is correct
+// for availability (a healthy seat must not sit behind a stale/near-expired cap — the day24
+// incident), but dropping the cap entirely hid a seat sitting at its daily limit and about to
+// roll over, which showed as a plain "serving" row with no usage. st.Available/st.Throttled
+// are left untouched (the seat stays offered); only a still-future daily reset is surfaced so
+// the roster can render "serving, cap resets X". A weekly-active cap never reaches here (it
+// holds the seat closed upstream); an absent/expired cap contributes nothing, so a normal
+// serving row gains no field and its byte-parity JSON is unchanged.
+func markUsageSoon(st *RuntimeStatus, thr map[string]any) {
+	if thr == nil || !throttleIsActive(thr) || weeklyThrottleIsActive(thr) {
+		return
+	}
+	if reset := resetText(thr); reset != "" {
+		st.UsageSoonReset, st.hasUsageSoon = reset, true
+	}
+}
+
 // shouldConsultProbeLedger mirrors fleet_accounts._should_consult_probe_ledger for the
 // passed-registry case (the only shape the Go fold has: Annotate always receives a
 // loaded Registry): consult the ledger exactly when FLEET_REG_DIR names the registry
@@ -256,9 +274,11 @@ type RuntimeStatus struct {
 	AuthBlockedSessions int
 	StatusSource        string
 	RegistryAgeMin      *float64
+	UsageSoonReset      string // advisory: a still-active daily cap a fresh probe reopened over
 	hasBlockKind        bool
 	hasReset            bool
 	hasWeekly           bool
+	hasUsageSoon        bool
 }
 
 // computeRuntimeStatus folds the passive registry signals (sessions/throttle) into one
@@ -380,7 +400,11 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		st.RegistryAgeMin = registryAgeMin(reg)
 	}
 
+	thr, hasThr := throttleMap[account]
 	if freshProbeOK {
+		if hasThr {
+			markUsageSoon(&st, thr)
+		}
 		st.StatusSource = "probe"
 		return st
 	}
@@ -412,7 +436,6 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 	// (probe says OK, roster still "resets 11pm"). A ledger verdict within
 	// ProbeLedgerFreshMin is the same authoritative fresh probe. Mirrors
 	// fleet_accounts.runtime_status's probe-ledger rung.
-	thr, hasThr := throttleMap[account]
 	if shouldConsultProbeLedger() {
 		if led := FreshProbeFromLedger(account, "", time.Now().UTC(), 0); led != nil {
 			if led.Available {
@@ -430,6 +453,9 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 				if hasThr && weeklyThrottleIsActive(thr) &&
 					throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, nil) {
 					return applyThrottleStatus(st, thr)
+				}
+				if hasThr {
+					markUsageSoon(&st, thr)
 				}
 				st.StatusSource = "probe-ledger"
 				return st
@@ -558,14 +584,14 @@ func reconcileIdentityPeerAvailability(rows []Account) {
 	byUUID := map[string][]int{}
 	for i := range rows {
 		r := rows[i]
-		if r.Product != "claude" || r.Kind != KindWorker {
+		if !configHomeLoginProduct(r.Product) || r.Kind != KindWorker {
 			continue
 		}
 		uuid := derefStr(r.AccountUUID)
 		if uuid == "" {
 			continue
 		}
-		byUUID[uuid] = append(byUUID[uuid], i)
+		byUUID[r.Product+"\x00"+uuid] = append(byUUID[r.Product+"\x00"+uuid], i)
 	}
 	for _, group := range byUUID {
 		if len(group) < 2 {
@@ -649,10 +675,15 @@ func applyStatus(r *Account, st RuntimeStatus) {
 	r.AuthBlockedSessions = intp(st.AuthBlockedSessions)
 	r.StatusSource = strp(st.StatusSource)
 	r.RegistryAgeMin = st.RegistryAgeMin
+	if st.hasUsageSoon {
+		r.UsageSoonReset = strp(st.UsageSoonReset)
+	} else {
+		r.UsageSoonReset = nil
+	}
 }
 
 func applyLoginGate(r *Account) {
-	if r.Product != "claude" || r.Kind != KindWorker {
+	if !configHomeLoginProduct(r.Product) || r.Kind != KindWorker {
 		return
 	}
 	if !accountLoginBlocked(*r) {
@@ -692,7 +723,7 @@ func accountCanBeOffered(r Account) bool {
 }
 
 func accountLoginBlocked(r Account) bool {
-	if r.Product != "claude" || r.Kind != KindWorker {
+	if !configHomeLoginProduct(r.Product) || r.Kind != KindWorker {
 		return false
 	}
 	if r.CanServe != nil && !*r.CanServe {
@@ -700,6 +731,18 @@ func accountLoginBlocked(r Account) bool {
 	}
 	st := configaccounts.LoginStatus(derefStr(r.LoginStatus))
 	return st != "" && st != configaccounts.LoginReady
+}
+
+// configHomeLoginProduct reports the products whose picker rows are backed by an isolated
+// config home with a real credential reader. Those rows must pass LoginStatus before routing;
+// env/config-only products (OpenCode today) keep their existing runtime-status behavior.
+func configHomeLoginProduct(product string) bool {
+	switch strings.ToLower(strings.TrimSpace(product)) {
+	case "claude", "codex":
+		return true
+	default:
+		return false
+	}
 }
 
 func accountLoginBlockReason(r Account) string {

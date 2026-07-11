@@ -1,10 +1,11 @@
 // Package fleetaccounts is the Go port of the READ-ONLY roster/resolve/probe fold
 // from tools/fleet_accounts.py — the single source of truth for "what is an account,
-// and is it offered?" across both product families (Claude Code and opencode).
+// and is it offered?" across the Claude Code, Codex, and opencode product families.
 //
 // The fleet resume/switcher layer discovers accounts by globbing config dirs:
-// Claude dirs under the user home (<home>/.claude*) and opencode dirs under the XDG
-// config home (<config_home>/opencode*). Each discovered dir is classified into ONE
+// Claude and Codex dirs under the user home (<home>/.claude*, <home>/.codex*) and
+// opencode dirs under the XDG config home (<config_home>/opencode*). Each discovered dir
+// is classified into ONE
 // Kind — worker | excluded | non-account — by an operator-editable POLICY
 // (accounts_policy.json), then folded with live runtime status (usage throttle /
 // auth block / live sessions) read from the watchdog's sessions.json registry.
@@ -25,6 +26,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 // Kind classifies a discovered config dir.
@@ -65,7 +68,7 @@ var defaultNIMCodingRouteWeights = map[string]int{
 }
 
 // Policy is the operator-editable account policy (accounts_policy.json), applying
-// uniformly to BOTH products. Exclude substrings tombstone accounts; IncludeOnly (when
+// uniformly to every discovered product. Exclude substrings tombstone accounts; IncludeOnly (when
 // non-empty) is an allowlist. AccountProfiles overrides model-tier inference; RouteWeights
 // biases the routing tie-break. LaneModels pins a dispatch worker's model per LANE (the
 // model-switching config seam: a lane can name the model its resolution workers start on,
@@ -122,27 +125,36 @@ func DefaultPolicy() Policy {
 }
 
 // AccountProduct classifies a discovered dir basename to its product family.
-// .claude* -> "claude" (the default under the user home); opencode* -> "opencode"
-// (the config under ~/.config). Anything else defaults to "claude" so historical call
-// sites keep working.
+// .claude* -> "claude" and .codex* -> "codex" under the user home; opencode* ->
+// "opencode" under ~/.config. Anything else defaults to "claude" so historical call sites
+// keep working.
 func AccountProduct(account string) string {
-	if strings.HasPrefix(strings.ToLower(account), "opencode") {
+	lower := strings.ToLower(account)
+	if strings.HasPrefix(lower, "opencode") {
 		return "opencode"
+	}
+	if strings.HasPrefix(lower, ".codex") {
+		return "codex"
 	}
 	return "claude"
 }
 
 // AccountTag normalizes a config-dir basename to its short tag, matching the resume
 // layer convention. Claude: ".claude-gem8-acct" -> "gem8"; ".claude" -> "default".
-// opencode: "opencode-glm" -> "glm"; "opencode" -> "default". The trailing "-acct" org
-// suffix is stripped if present.
+// Codex: ".codex-work" -> "work"; ".codex" -> "default". opencode:
+// "opencode-glm" -> "glm"; "opencode" -> "default". The trailing "-acct" org suffix is
+// stripped if present.
 func AccountTag(account string) string {
 	product := AccountProduct(account)
 	var tag string
-	if product == "opencode" {
+	switch product {
+	case "opencode":
 		tag = strings.ReplaceAll(account, "opencode-", "")
 		tag = strings.ReplaceAll(tag, "opencode", "")
-	} else {
+	case "codex":
+		tag = strings.ReplaceAll(account, ".codex-", "")
+		tag = strings.ReplaceAll(tag, ".codex", "")
+	default:
 		tag = strings.ReplaceAll(account, ".claude-", "")
 		tag = strings.ReplaceAll(tag, ".claude", "")
 	}
@@ -185,7 +197,17 @@ func modelTierFromName(model string) int {
 	text = strings.ReplaceAll(text, "_", "-")
 	text = strings.ReplaceAll(text, " ", "-")
 	compact := nonAlnum.ReplaceAllString(text, "")
-	if strings.Contains(text, "gpt-5.5") || strings.Contains(compact, "gpt55") {
+	// GPT-5.6 Luna is OpenAI's fast/cheap seat in the 5.6 generation — the
+	// lightweight tier, checked before the generation-wide frontier match below so
+	// the `gpt-5.6` substring does not sweep it up into tier 1.
+	if strings.Contains(text, "gpt-5.6-luna") || strings.Contains(compact, "gpt56luna") {
+		return 2
+	}
+	// GPT-5.6 Sol (the flagship, aliased by the bare `gpt-5.6` id) and GPT-5.6 Terra
+	// (≈ GPT-5.5) are the current OpenAI frontier seats; GPT-5.5 stays classified
+	// alongside them.
+	if strings.Contains(text, "gpt-5.6") || strings.Contains(compact, "gpt56") ||
+		strings.Contains(text, "gpt-5.5") || strings.Contains(compact, "gpt55") {
 		return 1
 	}
 	if strings.Contains(text, "opus-4.6") || strings.Contains(compact, "opus46") ||
@@ -285,6 +307,14 @@ func accountProfile(row Account, pol Policy) Profile {
 		}
 		return cleanProfile(ProfileOverride{ModelTier: 1, Model: "opus", Effort: "xhigh", Agent: "claude"},
 			"default:claude-opus")
+	}
+	if product == "codex" {
+		return cleanProfile(ProfileOverride{
+			ModelTier: TierFrontier,
+			Model:     configaccounts.CodexDefaultModel,
+			Effort:    configaccounts.CodexDefaultReasoningEffort,
+			Agent:     "codex",
+		}, "default:codex-"+configaccounts.CodexDefaultModel+"-"+configaccounts.CodexDefaultReasoningEffort)
 	}
 	if product == "opencode" {
 		models := safeOpencodeModels(row.Dir)

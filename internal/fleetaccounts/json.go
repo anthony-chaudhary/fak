@@ -69,6 +69,13 @@ func (a Account) MarshalJSON() ([]byte, error) {
 		o.set("auth_blocked_sessions", derefInt(a.AuthBlockedSessions))
 		o.set("status_source", derefStr(a.StatusSource))
 		o.setNullableFloat("registry_age_min", a.RegistryAgeMin)
+		// Advisory near-cap reset (see Account.UsageSoonReset). Emitted only when a fresh
+		// probe reopened the seat over a still-active daily cap, so a normal serving row
+		// keeps its exact prior key set — matching the Python row, which only inserts
+		// usage_soon_reset in the same reopen path.
+		if a.UsageSoonReset != nil {
+			o.set("usage_soon_reset", *a.UsageSoonReset)
+		}
 	}
 
 	return o.marshal()
