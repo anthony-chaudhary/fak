@@ -491,6 +491,10 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		// the unused-substrate pathology — fak present as a passive guard but never engaged as a
 		// substrate (#3093). Emit before the handoff gate; the stop is still allowed regardless.
 		emitUnusedSubstrateAdvisory(stderr, signals)
+		// Advisory-only (never blocks the stop): a clean completion whose modified trees intersect
+		// a LIVE known-bad signature — surface the fleet's recorded pre-existing blocker so the
+		// agent recognises the red as not-its-own and does not loop re-fixing it. Fails open silent.
+		emitKnownFrictionAdvisory(stderr, transcriptPath)
 		handoffExit := runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
