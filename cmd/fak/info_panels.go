@@ -43,6 +43,10 @@ type guardInfoPanelCtx struct {
 	width  int
 	sparkW int
 	gaugeW int
+	// cacheMech is the 1-based ablation mechanism whose detail sub-panel is expanded in the Cache
+	// tab (0 = none). Threaded from infoViewState so renderInfoCacheAblationRows can mark the row
+	// and inject its provenance lines; unused by every other view. Zero value = collapsed.
+	cacheMech int
 }
 
 // guardInfoPanel is one self-contained section of the live pane.
@@ -63,6 +67,7 @@ func guardInfoPanels() []guardInfoPanel {
 		{name: "tasks", degrade: 1, rows: guardInfoTasksPanelRows},
 		{name: "endpoints", degrade: 2, rows: guardInfoEndpointsPanelRows},
 		{name: "incident", degrade: 0, rows: guardInfoIncidentPanelRows},
+		{name: "watchdog", degrade: 2, rows: guardInfoWatchdogPanelRows},
 		{name: "resources", degrade: 3, rows: guardInfoResourcesPanelRows},
 		{name: "agents", degrade: 2, rows: guardInfoAgentsPanelRows},
 	}
