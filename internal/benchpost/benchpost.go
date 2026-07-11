@@ -39,10 +39,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
-// ChannelDefault is #bench in the scoreboard Slack workspace — the public built-in the
-// bench feeder posts to. Mirrors dojopost/nodeusagepost: the channel id is public, only the
-// token is secret. Wiring it stops the surface resolving to NO channel (was INCOMPLETE, #1428).
-const ChannelDefault = "C0BD5JCQZHV"
+// ChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) — bench is
+// one of the CI/CD reporting feeders folded onto that one channel. The channel id is
+// public, only the token is secret. Wiring a default stops the surface resolving to NO
+// channel (was INCOMPLETE, #1428). Override this surface with FAK_BENCH_CHANNEL, or the
+// whole reporting family with FAK_CICD_REPORT_CHANNEL.
+const ChannelDefault = scoreboard.CICDReportChannel
 
 // tokenEnvs / channelEnvs are the dedicated bench keys. The token resolver adds a
 // scoreboard fallback (below); the channel resolver falls through to ChannelDefault — a
@@ -85,7 +87,7 @@ func ResolveChannel() string {
 	if v := envFileValue("FAK_BENCH_CHANNEL"); v != "" {
 		return v
 	}
-	return ChannelDefault
+	return scoreboard.ResolveCICDReportChannel()
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
