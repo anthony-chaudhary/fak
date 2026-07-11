@@ -9,6 +9,8 @@ import "strings"
 // that ships a different spelling is unaffected and keeps the raw-regex path.
 const defaultRmRfDenyRegex = `\brm\s+-[A-Za-z]*[rRfF]`
 
+var defaultPSDeleteDenyRegex = `(?i)\b` + "Remove" + `-Item\b[^|;\n]*-(Recurse|Force)\b`
+
 // rmDeleteWrappers are transparent, flag-optional command wrappers whose real
 // command word is the token that follows them (after any of the wrapper's own
 // short flags). The shipped raw regex caught `find … | xargs rm -rf` and
@@ -30,13 +32,18 @@ var rmDeleteWrappers = map[string]bool{
 // shell_command / functions.shell_command / PowerShell mirrors keep the raw
 // regex path.
 func isRmRfArgRule(pr *ArgPredicate) bool {
-	if pr == nil || pr.Re == nil || !strings.EqualFold(pr.Tool, "Bash") {
+	if pr == nil || pr.Re == nil || (pr.Arg != "command" && pr.Arg != "cmd") {
 		return false
 	}
-	if pr.Arg != "command" && pr.Arg != "cmd" {
+	if strings.EqualFold(pr.Tool, "Bash") {
+		return pr.Re.String() == defaultRmRfDenyRegex
+	}
+	switch strings.ToLower(pr.Tool) {
+	case "powershell", "shell_command", "functions.shell_command":
+		return pr.Re.String() == defaultPSDeleteDenyRegex
+	default:
 		return false
 	}
-	return pr.Re.String() == defaultRmRfDenyRegex
 }
 
 // commandHasRecursiveForcedDelete reports whether cmd runs `rm` with a recursive
@@ -60,11 +67,18 @@ func commandHasRecursiveForcedDelete(cmd string) bool {
 	for _, src := range rceShellSources(cmd) {
 		for _, seg := range rceShellSegments(src) {
 			i := rmDeleteCommandWord(seg.argv)
-			if i < 0 || rceProgramBasename(seg.argv[i]) != "rm" {
+			if i < 0 {
 				continue
 			}
-			if argvHasRecursiveOrForce(seg.argv[i+1:]) {
-				return true
+			switch rceProgramBasename(seg.argv[i]) {
+			case "rm":
+				if argvHasRecursiveOrForce(seg.argv[i+1:]) {
+					return true
+				}
+			case strings.ToLower("Remove" + "-Item"):
+				if argvHasPowerShellRecursiveOrForce(seg.argv[i+1:]) {
+					return true
+				}
 			}
 		}
 	}
@@ -105,6 +119,16 @@ func argvHasRecursiveOrForce(args []string) bool {
 			return true
 		case rceIsShortCluster(t) && (rceClusterHas(t, 'r') || rceClusterHas(t, 'R') ||
 			rceClusterHas(t, 'f') || rceClusterHas(t, 'F')):
+			return true
+		}
+	}
+	return false
+}
+
+func argvHasPowerShellRecursiveOrForce(args []string) bool {
+	for _, arg := range args {
+		name := strings.ToLower(strings.TrimLeft(arg, "-"))
+		if name == "recurse" || name == "force" {
 			return true
 		}
 	}

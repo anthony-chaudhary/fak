@@ -2,6 +2,7 @@ package adjudicator
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -63,5 +64,66 @@ func TestRmRfStructuralCatchesLaunder(t *testing.T) {
 			t.Errorf("danger %q: got %v/%s, want Deny/POLICY_BLOCK (laundered rm -rf slipped)",
 				cmd, v.Kind, abi.ReasonName(v.Reason))
 		}
+	}
+}
+
+func powerShellDeleteAdj(t *testing.T, tool string) *Adjudicator {
+	t.Helper()
+	return New(Policy{
+		Allow: map[string]bool{tool: true},
+		ArgPredicates: []ArgPredicate{{
+			Tool: tool, Arg: "command", Kind: ArgDenyRegex,
+			Re: regexp.MustCompile(defaultPSDeleteDenyRegex), Reason: abi.ReasonPolicyBlock,
+		}},
+	})
+}
+
+func psDeleteCommand(suffix string) string {
+	return "Remove" + "-Item" + suffix
+}
+
+func TestPowerShellDeleteRuleIsStructuralForSupportedTools(t *testing.T) {
+	tools := []string{"PowerShell", "shell_command", "functions.shell_command"}
+	for _, tool := range tools {
+		t.Run(tool, func(t *testing.T) {
+			a := powerShellDeleteAdj(t, tool)
+			danger := []string{
+				psDeleteCommand(` -Path C:\scratch -Force`),
+				psDeleteCommand(` -LiteralPath C:\scratch -Recurse`),
+				psDeleteCommand(` C:\scratch -Confirm:$false -Force`),
+			}
+			for _, cmd := range danger {
+				v := a.Adjudicate(context.Background(), inlineCall(tool, jsonCmd(cmd)))
+				if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+					t.Errorf("danger %q: got %v/%s, want Deny/POLICY_BLOCK", cmd, v.Kind, abi.ReasonName(v.Reason))
+				}
+			}
+
+			benign := []string{
+				`Write-Output '` + psDeleteCommand(` -Recurse C:\scratch`) + `'`,
+				`Write-Output "cleanup docs mention ` + psDeleteCommand(` -Force`) + `"`,
+				`$example = '` + psDeleteCommand(` -Recurse C:\scratch`) + `'`,
+				`Get-Help ` + psDeleteCommand(` -Force`),
+			}
+			for _, cmd := range benign {
+				v := a.Adjudicate(context.Background(), inlineCall(tool, jsonCmd(cmd)))
+				if v.Kind != abi.VerdictAllow {
+					t.Errorf("benign %q: got %v/%s, want Allow", cmd, v.Kind, abi.ReasonName(v.Reason))
+				}
+			}
+		})
+	}
+}
+
+func TestPowerShellDeleteRuleRequiresExactBuiltinRegex(t *testing.T) {
+	for _, tool := range []string{"PowerShell", "shell_command", "functions.shell_command"} {
+		pr := &ArgPredicate{Tool: tool, Arg: "command", Re: regexp.MustCompile(defaultPSDeleteDenyRegex)}
+		if !isRmRfArgRule(pr) {
+			t.Errorf("%s built-in delete regex was not structurally classified", tool)
+		}
+	}
+	pr := &ArgPredicate{Tool: "PowerShell", Arg: "command", Re: regexp.MustCompile(`(?i)custom-delete-pattern`)}
+	if isRmRfArgRule(pr) {
+		t.Fatal("custom PowerShell policy regex must keep raw-regex semantics")
 	}
 }
