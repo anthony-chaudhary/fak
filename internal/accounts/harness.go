@@ -11,6 +11,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
+// CodexDefaultModel and CodexDefaultReasoningEffort are the config-home defaults shared by
+// the Codex account picker and every guarded Codex launch. Keep the exact flagship slug here
+// (rather than the moving gpt-5.6 alias) so the picker, launch plan, and child config all name
+// the same effective model. The Codex config reference calls the reasoning key
+// model_reasoning_effort and admits xhigh on supported Responses models.
+const (
+	CodexDefaultModel           = "gpt-5.6-sol"
+	CodexDefaultReasoningEffort = "xhigh"
+)
+
 // harness.go generalizes the account model so a NON-Claude harness's config homes — the
 // ~/.codex* homes today — enter the SAME rotation pool the ~/.claude* homes use (C4,
 // #1955). The rotation engine (RotationPlan / NextInRotation, rotation.go) already keys
