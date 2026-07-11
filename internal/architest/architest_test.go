@@ -424,6 +424,7 @@ var tier = map[string]int{
 	"milestoneburndown":     2, // the GitHub-milestone SCHEDULE dimension milestonereport never had: reads the live milestones' own due_on + open/closed counts + trailing closure velocity and folds each into a closed at-risk verdict (ON_TRACK/AT_RISK/OVERDUE/NO_DUE_DATE/DONE) with a projected drain date vs the due date. Pure fold + injected-`gh` collector (twin of mlpscore/versionskew); imports trendreport(1)+epicprogress(1), off the hot path.
 	"agentreadinessscore":   1, // agent-readiness scorecard (Go port of tools/agent_readiness_scorecard.py): experience-frontier + friction-debt over the git-tracked tree; stdlib-only, imports nothing internal, off the hot path.
 	"wiki":                  1, // #4277 deepwiki-study: witness-verified repo-wiki core — Structure (L1 #4278) projects the section→page tree from the self-index, VerifyCitations (L3 #4280) resolves Sources:[path:line] code cites vs the tree; composes devindex(1), off the hot path.
+	"projectreport":         1, // the ProjectsV2 board control-pane fold: a pure fold of board item × {Status,Generation,Priority} into the same schema/ok/verdict/finding envelope milestonereport uses, with a fail-closed UNMEASURED verdict for an unreadable board. The `gh` read lives in cmd/fak; this leaf is stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
