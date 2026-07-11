@@ -49,6 +49,20 @@ description: Quick lint pass.
 Run `python tools/lint.py --changed`; exit 0 means clean, nonzero lists offenders.
 """
 
+OTHER_GOOD = """---
+name: rebuild-cache
+description: Rebuild the local cache and prove it is warm.
+---
+
+# rebuild-cache
+
+Drop the cache, rebuild it, then confirm the warm read path.
+
+1. `python tools/cache.py --drop`
+2. `python tools/cache.py --rebuild`
+3. Verify: `python tools/cache.py --check` — exit 0 means the cache is warm.
+"""
+
 
 def _signals(card):
     return {f["signal"] for f in card["findings"]}
@@ -153,6 +167,60 @@ class CliGateTest(unittest.TestCase):
             self.assertEqual(payload["schema"], mod.SCHEMA)
             self.assertEqual(payload["graded"], 1)
             self.assertEqual(payload["cards"][0]["verdict"], "ADMIT")
+
+
+class DuplicateBodyTest(unittest.TestCase):
+    """The #2839 'duplicated body vs an existing skill' reject: opt-in, needs --corpus."""
+
+    def test_near_verbatim_copy_rejects_against_corpus(self) -> None:
+        # A renamed copy of an existing library skill is pure slop — loaded every
+        # session for zero new instruction. The frontmatter rename is stripped, so the
+        # copy still collides on its (identical) instruction lines.
+        mod = load()
+        corpus = [("refresh-index", mod.body_shingles(GOOD))]
+        copy = GOOD.replace("name: refresh-index", "name: refresh-index-copy")
+        card = mod.grade_text(copy, corpus=corpus)
+        self.assertFalse(card["ok"], card)
+        self.assertIn("duplicate_body", _signals(card))
+
+    def test_duplicate_signal_not_evaluated_without_corpus(self) -> None:
+        # Omitting the corpus keeps the gate single-file and hermetic: a body that
+        # WOULD duplicate an existing skill still ADMITs when no corpus is supplied.
+        mod = load()
+        self.assertNotIn("duplicate_body", _signals(mod.grade_text(GOOD)))
+        self.assertTrue(mod.grade_text(GOOD)["ok"])
+
+    def test_terse_legit_skill_never_flagged_as_duplicate(self) -> None:
+        # The DUP_MIN_LINES floor: a terse legitimate skill cannot trip merely because
+        # its 2-3 substantive lines echo a larger corpus skill.
+        mod = load()
+        corpus = [("lint-fast", mod.body_shingles(TERSE_LEGIT))]
+        self.assertNotIn("duplicate_body", _signals(mod.grade_text(TERSE_LEGIT, corpus=corpus)))
+
+    def test_distinct_skill_admits_against_corpus(self) -> None:
+        # A genuinely new skill that shares no instruction lines stays far below
+        # DUP_CONTAINMENT — the over-flagging confusion risk #2839 names.
+        mod = load()
+        corpus = [("refresh-index", mod.body_shingles(GOOD))]
+        card = mod.grade_text(OTHER_GOOD, corpus=corpus)
+        self.assertNotIn("duplicate_body", _signals(card))
+        self.assertTrue(card["ok"], card)
+
+    def test_corpus_cli_excludes_self_but_flags_a_copy(self) -> None:
+        # Self-exclusion by resolved path: a library skill graded against its own dir is
+        # never a duplicate of itself (exit 0), but a brand-new near-verbatim copy under
+        # the same corpus REJECTs (exit 1) — the --corpus flag is actually wired.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            skills = Path(d)
+            orig = skills / "refresh-index" / "SKILL.md"
+            orig.parent.mkdir(parents=True)
+            orig.write_text(GOOD, encoding="utf-8")
+            self.assertEqual(mod.main([str(orig), "--corpus", str(skills)]), 0)
+            copy = skills / "dup" / "SKILL.md"
+            copy.parent.mkdir(parents=True)
+            copy.write_text(GOOD.replace("refresh-index", "clone"), encoding="utf-8")
+            self.assertEqual(mod.main([str(copy), "--corpus", str(skills)]), 1)
 
 
 if __name__ == "__main__":

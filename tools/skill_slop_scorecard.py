@@ -8,7 +8,7 @@ scale, and its ungated agent path stored a 74KB transcript verbatim as one skill
 bug #3006's shape). This is the machine gate for the same defects a human reviewer
 rejects by hand, run BEFORE a candidate SKILL.md is admitted to the library.
 
-Five signals, all HARD (each one is true slop, never a style nit):
+Six signals, all HARD (each one is true slop, never a style nit):
 
   verbatim_dump         one fenced block (or the whole body) so large it can only be a
                         pasted transcript/file, not authored instruction  [the #3006 reject]
@@ -20,6 +20,9 @@ Five signals, all HARD (each one is true slop, never a style nit):
                         transcript remnant, not a reusable procedure
   missing_verification  no verification/witness section AND no checkable command or
                         exit-code anywhere — an unfalsifiable skill
+  duplicate_body        the substantive body near-duplicates an existing skill (opt-in,
+                        needs --corpus) — a redundant skill paying context cost for no new
+                        instruction; the "duplicated body vs an existing skill" reject (#2839)
 
 The gate is calibrated to reject SLOP, not brevity: a terse skill whose few lines
 name a real check ("run X; exit 0 means clean") ADMITS — thresholds only trip on
@@ -32,6 +35,7 @@ paths — no network, no git, no toolchain. Run from anywhere::
 
     python tools/skill_slop_scorecard.py .claude/skills/foo/SKILL.md       # one skill
     python tools/skill_slop_scorecard.py .claude/skills --json             # scan a tree
+    python tools/skill_slop_scorecard.py new/SKILL.md --corpus .claude/skills  # + dedup
     # exit 0 = every candidate ADMITted; 1 = at least one REJECT (the HARD gate);
     # exit 2 = a path was unreadable / no SKILL.md found (contract error, not a verdict)
 """
@@ -56,6 +60,14 @@ MIN_SUBSTANTIVE_LINES = 3
 MARKETING_MAX = 2
 # Narration hits at/above this mark a transcript remnant, not one figure of speech.
 NARRATIVE_MAX = 3
+# Duplicate-body reject (#2839): a candidate this fraction of whose substantive lines
+# appear verbatim in ONE existing skill is a copy, not fresh instruction. Containment
+# (not symmetric similarity) so a copy with extra padding is still caught; a title or
+# frontmatter tweak that defeats a whole-file hash does not defeat it.
+DUP_CONTAINMENT = 0.80
+# Only skills with at least this many substantive lines are dedup-checked, so a terse
+# legitimate skill cannot trip merely because its 2-3 lines echo a larger one.
+DUP_MIN_LINES = 4
 
 MARKETING_RE = re.compile(
     r"\b(seamless(?:ly)?|revolutionary|cutting[- ]edge|best[- ]in[- ]class|"
@@ -126,8 +138,28 @@ def _substantive_lines(body: str) -> list[str]:
     return out
 
 
-def grade_text(text: str) -> dict[str, Any]:
-    """Grade one candidate SKILL.md body. Pure; the CLI wraps file IO around this."""
+def _norm_line(line: str) -> str:
+    """Whitespace- and case-folded form of a line, so a reflow or re-case is not a diff."""
+    return re.sub(r"\s+", " ", line).strip().lower()
+
+
+def body_shingles(text: str) -> frozenset[str]:
+    """The set of normalized substantive lines of a skill body — the unit of the
+    duplicate-vs-corpus comparison. Frontmatter (name/description) is excluded, so a
+    copy that only renames the skill still collides on its instruction lines."""
+    return frozenset(_norm_line(ln) for ln in _substantive_lines(_strip_frontmatter(text)))
+
+
+def grade_text(
+    text: str,
+    corpus: list[tuple[str, frozenset[str]]] | None = None,
+) -> dict[str, Any]:
+    """Grade one candidate SKILL.md body. Pure; the CLI wraps file IO around this.
+
+    ``corpus`` is an optional list of ``(existing-skill-label, body_shingles)`` to check
+    the candidate against for duplication. Omit it (the default) and the duplicate_body
+    signal is simply not evaluated — the gate stays hermetic and single-file, so every
+    prior caller is unchanged."""
     body = _strip_frontmatter(text)
     findings: list[dict[str, Any]] = []
 
@@ -173,19 +205,60 @@ def grade_text(text: str) -> dict[str, Any]:
             "detail": "no verification/witness section and no checkable command "
                       "or exit-code named anywhere — unfalsifiable skill"})
 
+    # Duplicated body vs an existing skill (#2839) — opt-in, needs a corpus to compare
+    # against. A near-verbatim copy of a library skill is pure slop: it is loaded on
+    # every session for zero new instruction. Containment (candidate lines found in ONE
+    # existing skill) catches a copy even when a renamed title/frontmatter would defeat a
+    # whole-file hash; the MIN_LINES floor keeps a terse legitimate skill from tripping.
+    if corpus:
+        cand = frozenset(_norm_line(ln) for ln in lines)
+        if len(cand) >= DUP_MIN_LINES:
+            best_label, best_ratio = "", 0.0
+            for label, other in corpus:
+                if not other:
+                    continue
+                ratio = len(cand & other) / len(cand)
+                if ratio > best_ratio:
+                    best_label, best_ratio = label, ratio
+            if best_ratio >= DUP_CONTAINMENT:
+                findings.append({
+                    "signal": "duplicate_body",
+                    "detail": (f"{best_ratio:.0%} of substantive lines duplicate an "
+                               f"existing skill ('{best_label}') — a redundant skill pays "
+                               f"context cost every session for no new instruction")})
+
     ok = not findings
     return {"ok": ok, "verdict": "ADMIT" if ok else "REJECT",
             "defects": len(findings), "score": 100 - 25 * len(findings),
             "findings": findings}
 
 
-def grade_file(path: Path) -> dict[str, Any]:
+def grade_file(
+    path: Path,
+    corpus: list[tuple[str, frozenset[str]]] | None = None,
+) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         return {"path": str(path), "ok": False, "verdict": "UNREADABLE",
                 "error": str(e), "defects": 0, "findings": []}
-    return {"path": str(path), **grade_text(text)}
+    return {"path": str(path), **grade_text(text, corpus=corpus)}
+
+
+def load_corpus(dirs: list[str]) -> list[tuple[Path, frozenset[str]]]:
+    """Read every SKILL.md under each --corpus dir into (resolved-path, shingles) rows.
+    The resolved path lets the caller drop a candidate that is its own corpus entry so a
+    skill never scores as a duplicate of itself. Unreadable corpus files are skipped —
+    they are reference, not the graded artifact."""
+    rows: list[tuple[Path, frozenset[str]]] = []
+    for d in dirs:
+        for sk in sorted(Path(d).rglob("SKILL.md")):
+            try:
+                rows.append((sk.resolve(),
+                             body_shingles(sk.read_text(encoding="utf-8", errors="replace"))))
+            except OSError:
+                continue
+    return rows
 
 
 def discover(paths: list[Path]) -> list[Path]:
@@ -217,6 +290,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Skill-slop scorecard — HARD admission gate for SKILL.md (read-only).")
     ap.add_argument("paths", nargs="+", help="SKILL.md files or directories to scan")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--corpus", action="append", default=[], metavar="DIR",
+                    help="existing-skill dir(s) to flag duplicate bodies against "
+                         "(repeatable; a candidate that is its own corpus entry is skipped)")
     args = ap.parse_args(argv)
 
     try:
@@ -229,7 +305,19 @@ def main(argv: list[str] | None = None) -> int:
         print("skill-slop: contract error — no SKILL.md found under the given paths",
               file=sys.stderr)
         return 2
-    cards = [grade_file(p) for p in files]
+    # Build the dedup corpus once (empty unless --corpus was given). Each candidate is
+    # graded against every corpus body EXCEPT its own entry, matched by resolved path, so
+    # a skill that already lives under a --corpus dir never scores as a duplicate of
+    # itself. Without --corpus the corpus is empty and the duplicate_body signal is
+    # simply not evaluated — the gate stays hermetic and every prior caller is unchanged.
+    corpus_rows = load_corpus(args.corpus)
+    cards = []
+    for p in files:
+        corpus: list[tuple[str, frozenset[str]]] | None = None
+        if corpus_rows:
+            pr = p.resolve()
+            corpus = [(cp.parent.name, sh) for cp, sh in corpus_rows if cp != pr]
+        cards.append(grade_file(p, corpus=corpus))
     unreadable = any(c["verdict"] == "UNREADABLE" for c in cards)
     admitted = sum(1 for c in cards if c["ok"])
     payload = {"schema": SCHEMA, "graded": len(cards), "admitted": admitted,
