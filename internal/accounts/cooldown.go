@@ -97,6 +97,15 @@ func ParseReset(message string) time.Time {
 type CooldownStore struct {
 	path    string
 	entries map[string]CooldownEntry
+
+	// Fleet degraded mode (#3383): an aggregate over the cooldown set. degraded
+	// is true exactly while at least one account sits in the skip-set; it engages
+	// on the first-down edge (set size 0->1) and restores on the last-up edge
+	// (1->0). degradedSince marks the engage edge's observation time, zero when
+	// not degraded. Derived state, never persisted — LoadCooldownStore re-derives
+	// both from the entries it reads.
+	degraded      bool
+	degradedSince time.Time
 }
 
 // CooldownStoreSchema tags the persisted file.
@@ -131,6 +140,7 @@ func LoadCooldownStore(path string) (*CooldownStore, error) {
 		}
 		s.entries[e.Account] = e
 	}
+	s.syncDegraded(earliestCooledAt(s.entries))
 	return s, nil
 }
 
@@ -179,6 +189,37 @@ func (s *CooldownStore) CooledDown(account string, now time.Time) (CooldownEntry
 	return e, true
 }
 
+// Degraded reports whether the fleet is in degraded mode: at least one account
+// is currently in the cooldown skip-set (#3383). Expiry is realized lazily,
+// matching the entries map itself: an elapsed entry keeps the fleet degraded
+// until the store observes the recovery (Prune, or the account's last signal
+// clearing). Added observability only — no admission decision reads it.
+func (s *CooldownStore) Degraded() bool { return s.degraded }
+
+// DegradedSince returns when degraded mode engaged — the observation time of
+// the first account down (for a loaded store, the earliest CooledAt among its
+// entries) — or the zero time when the fleet is not degraded.
+func (s *CooldownStore) DegradedSince() time.Time { return s.degradedSince }
+
+// syncDegraded re-derives the fleet degraded flag from cooldown-set membership.
+// It is called at every point an account enters or leaves the skip-set
+// (UpdateOverload/Cool, Clear, Prune, LoadCooldownStore), so the flag can never
+// disagree with the set. Only the two edges transition: 0->1 engages (recording
+// engagedAt as the engaged-since marker) and 1->0 restores; any other size
+// change — a second account down, one of several recovering, an already-cooled
+// account re-cooling — leaves both fields untouched, so the fleet never
+// re-engages or flaps inside a stable state. engagedAt is ignored on restore.
+func (s *CooldownStore) syncDegraded(engagedAt time.Time) {
+	switch {
+	case !s.degraded && len(s.entries) > 0:
+		s.degraded = true
+		s.degradedSince = engagedAt.UTC()
+	case s.degraded && len(s.entries) == 0:
+		s.degraded = false
+		s.degradedSince = time.Time{}
+	}
+}
+
 // UpdateOverload folds one independent load signal into the account latch. An over-threshold
 // observation sets/extends that signal. A cleared observation removes only that signal; the
 // account remains latched while any sibling signal is active. changed is true ONLY when pool
@@ -200,6 +241,7 @@ func (s *CooldownStore) UpdateOverload(account, signal string, kind CooldownKind
 		delete(signals, signal)
 		if len(signals) == 0 {
 			delete(s.entries, account)
+			s.syncDegraded(observedAt)
 			return CooldownEntry{}, beforeLatched
 		}
 		beforeEntry.Signals = signals
@@ -228,6 +270,7 @@ func (s *CooldownStore) UpdateOverload(account, signal string, kind CooldownKind
 		Signals:  signals,
 	}
 	s.entries[account] = entry
+	s.syncDegraded(observedAt)
 	return entry, !beforeLatched
 }
 
@@ -245,6 +288,7 @@ func (s *CooldownStore) Cool(account string, kind CooldownKind, reason string, c
 func (s *CooldownStore) Clear(account string) bool {
 	if _, ok := s.entries[account]; ok {
 		delete(s.entries, account)
+		s.syncDegraded(time.Time{})
 		return true
 	}
 	return false
@@ -264,6 +308,7 @@ func (s *CooldownStore) Prune(now time.Time) int {
 		e.ResetAt = resetAt
 		s.entries[k] = e
 	}
+	s.syncDegraded(now)
 	return n
 }
 
@@ -297,6 +342,19 @@ func activeCooldownSignals(e CooldownEntry, now time.Time) (map[string]time.Time
 		}
 	}
 	return active, latestSignalReset(active)
+}
+
+// earliestCooledAt returns the earliest CooledAt across entries (UTC), or the
+// zero time when entries is empty. It reconstructs the engaged-since marker for
+// a store loaded from disk: the first account down is the oldest cool still held.
+func earliestCooledAt(entries map[string]CooldownEntry) time.Time {
+	var earliest time.Time
+	for _, e := range entries {
+		if !e.CooledAt.IsZero() && (earliest.IsZero() || e.CooledAt.Before(earliest)) {
+			earliest = e.CooledAt
+		}
+	}
+	return earliest.UTC()
 }
 
 func latestSignalReset(signals map[string]time.Time) time.Time {

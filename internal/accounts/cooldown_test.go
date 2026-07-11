@@ -201,6 +201,138 @@ func TestCooldownOverloadLatchSignalsSurviveDiskRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFleetDegradedEngageOnFirstRestoreOnLast walks the full fleet degrade
+// cycle (#3383): all-healthy is not degraded; the FIRST account into cooldown
+// engages; a second account down and a partial recovery both leave the flag in
+// its stable state; only the LAST recovery restores.
+func TestFleetDegradedEngageOnFirstRestoreOnLast(t *testing.T) {
+	base := mustTime(t, "2026-07-06T12:00:00Z")
+	s := &CooldownStore{entries: map[string]CooldownEntry{}}
+
+	// (a) empty store, all healthy: not degraded.
+	if s.Degraded() {
+		t.Fatal("empty store must not be degraded")
+	}
+	if !s.DegradedSince().IsZero() {
+		t.Fatalf("healthy fleet has DegradedSince=%s, want zero", s.DegradedSince())
+	}
+
+	// (b) first account down: engage edge.
+	s.Cool("acct-1", CooldownUsageLimit, "weekly", base, base.Add(time.Hour))
+	if !s.Degraded() {
+		t.Fatal("first account into cooldown must engage degraded mode")
+	}
+	if !s.DegradedSince().Equal(base) {
+		t.Fatalf("DegradedSince=%s, want the first-down observation %s", s.DegradedSince(), base)
+	}
+
+	// (c) second account down: still degraded, no re-engage (marker unchanged).
+	s.Cool("acct-2", CooldownUsageLimit, "weekly", base.Add(time.Minute), base.Add(time.Hour))
+	if !s.Degraded() {
+		t.Fatal("second account down must leave the fleet degraded")
+	}
+	if !s.DegradedSince().Equal(base) {
+		t.Fatalf("second account down re-engaged: DegradedSince=%s, want %s", s.DegradedSince(), base)
+	}
+
+	// (d) one of two recovers: others still down, so still degraded.
+	if !s.Clear("acct-1") {
+		t.Fatal("Clear(acct-1) should remove an entry")
+	}
+	if !s.Degraded() {
+		t.Fatal("fleet must stay degraded while acct-2 remains cooled")
+	}
+
+	// (e) the LAST recovers: restore edge.
+	if !s.Clear("acct-2") {
+		t.Fatal("Clear(acct-2) should remove an entry")
+	}
+	if s.Degraded() {
+		t.Fatal("last recovery must restore the fleet to normal mode")
+	}
+	if !s.DegradedSince().IsZero() {
+		t.Fatalf("restored fleet has DegradedSince=%s, want zero", s.DegradedSince())
+	}
+}
+
+// TestFleetDegradedIdempotentReCool: (f) re-cooling an already-cooled account is
+// not a 0->1 edge — the flag stays engaged with its original marker — and the
+// signal-clear recovery path (UpdateOverload overloaded=false) drives the same
+// restore edge Clear does.
+func TestFleetDegradedIdempotentReCool(t *testing.T) {
+	base := mustTime(t, "2026-07-06T12:00:00Z")
+	s := &CooldownStore{entries: map[string]CooldownEntry{}}
+
+	s.Cool("acct-1", CooldownUsageLimit, "weekly", base, base.Add(time.Hour))
+	since := s.DegradedSince()
+	s.Cool("acct-1", CooldownUsageLimit, "weekly again", base.Add(10*time.Minute), base.Add(2*time.Hour))
+	if !s.Degraded() {
+		t.Fatal("re-cooling the same account must keep the fleet degraded")
+	}
+	if !s.DegradedSince().Equal(since) {
+		t.Fatalf("re-cool double-engaged: DegradedSince=%s, want original %s", s.DegradedSince(), since)
+	}
+
+	// Cool folds through UpdateOverload with signal = string(kind); clearing that
+	// last signal empties the account's latch and restores the fleet.
+	s.UpdateOverload("acct-1", string(CooldownUsageLimit), CooldownUsageLimit, false, "", base.Add(20*time.Minute), time.Time{})
+	if s.Degraded() {
+		t.Fatal("clearing the last signal of the last account must restore the fleet")
+	}
+}
+
+// TestFleetDegradedRestoresViaPrune: an elapsed window keeps the fleet degraded
+// until the store OBSERVES the recovery — the same lazy-expiry discipline the
+// entries map follows — and Prune is that observation point.
+func TestFleetDegradedRestoresViaPrune(t *testing.T) {
+	base := mustTime(t, "2026-07-06T12:00:00Z")
+	s := &CooldownStore{entries: map[string]CooldownEntry{}}
+	s.Cool("acct-1", CooldownUsageLimit, "weekly", base, base.Add(time.Hour))
+
+	// Window elapsed but not yet observed: membership-driven flag still holds.
+	if !s.Degraded() {
+		t.Fatal("fleet must stay degraded until the expiry is observed")
+	}
+	if n := s.Prune(base.Add(2 * time.Hour)); n != 1 {
+		t.Fatalf("Prune dropped %d entries, want 1", n)
+	}
+	if s.Degraded() {
+		t.Fatal("Prune of the last cooled account must restore the fleet")
+	}
+}
+
+// TestFleetDegradedSurvivesDiskRoundTrip: the flag is derived, not persisted —
+// a reload re-engages from the entries on disk with the earliest CooledAt as
+// the engaged-since marker, and an empty file loads not-degraded.
+func TestFleetDegradedSurvivesDiskRoundTrip(t *testing.T) {
+	base := mustTime(t, "2026-07-06T12:00:00Z")
+	path := filepath.Join(t.TempDir(), "cooldown.json")
+
+	s, err := LoadCooldownStore(path)
+	if err != nil {
+		t.Fatalf("load empty: %v", err)
+	}
+	if s.Degraded() {
+		t.Fatal("missing file must load not-degraded")
+	}
+	s.Cool("acct-2", CooldownUsageLimit, "weekly", base.Add(time.Minute), base.Add(time.Hour))
+	s.Cool("acct-1", CooldownUsageLimit, "weekly", base, base.Add(time.Hour))
+	if err := s.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	reloaded, err := LoadCooldownStore(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !reloaded.Degraded() {
+		t.Fatal("reloaded store with active cooldowns must be degraded")
+	}
+	if !reloaded.DegradedSince().Equal(base) {
+		t.Fatalf("reloaded DegradedSince=%s, want earliest CooledAt %s", reloaded.DegradedSince(), base)
+	}
+}
+
 // TestParseResetAbsolute: an explicit RFC3339 reset in the message is parsed to that instant
 // (UTC). ParseReset is the single source both cooldown writers share, so this pins its contract
 // in one place instead of once per writer.
