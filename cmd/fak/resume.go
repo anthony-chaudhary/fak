@@ -68,6 +68,8 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeWatchdog(stdout, stderr, argv[1:])
 	case "cap":
 		return runResumeCap(stdout, stderr, argv[1:])
+	case "rearm":
+		return runResumeRearm(stdout, stderr, argv[1:])
 	case "hold":
 		return runResumeHold(stdout, stderr, argv[1:])
 	case "release":
