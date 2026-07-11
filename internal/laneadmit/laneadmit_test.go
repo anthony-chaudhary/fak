@@ -112,6 +112,34 @@ func TestDecideEmptyTreeConservativelyCollides(t *testing.T) {
 	}
 }
 
+func TestDecideReadOnlyRequestAdmitsAgainstEverything(t *testing.T) {
+	// A read-only request writes NOTHING (a provably empty write footprint, distinct from the
+	// tree-less unknown-blast-radius case above): it is admitted against a live lease it would
+	// otherwise collide with on every rung — an empty tree, the same named lane, an exclusive lane.
+	live := []Lease{{ID: "resolve-gateway", Lane: "gateway", Tree: []string{"internal/gateway/**"}, Holder: "peer"}}
+	for _, req := range []Request{
+		{Surface: SurfaceManual, Holder: "me", ReadOnly: true},                  // empty tree — would conservatively collide
+		{Surface: SurfaceManual, Lane: "gateway", Holder: "me", ReadOnly: true}, // same named lane — would serialize
+		{Surface: SurfaceManual, Lane: "release", Holder: "me", ReadOnly: true}, // exclusive lane — would run alone
+	} {
+		if v := Decide(req, live, tax()); !v.Admit {
+			t.Fatalf("a read-only request must admit, got %+v for req %+v", v, req)
+		}
+	}
+}
+
+func TestDecideReadOnlyLeaseBlocksNothing(t *testing.T) {
+	// A read-only live lease holds nothing writable, so a writer that overlaps it is admitted.
+	v := Decide(
+		Request{Surface: SurfaceManual, Lane: "gateway", Tree: []string{"internal/gateway/http.go"}, Holder: "me"},
+		[]Lease{{ID: "resolve-gateway", Lane: "gateway", Tree: []string{"internal/gateway/**"}, Holder: "peer", ReadOnly: true}},
+		tax(),
+	)
+	if !v.Admit {
+		t.Fatalf("a writer must admit against a read-only live lease, got %+v", v)
+	}
+}
+
 func TestDecideUnloadedTaxonomySkipsLaneModes(t *testing.T) {
 	// With no taxonomy, lane-mode rules cannot fire — but geometry still guards.
 	v := Decide(

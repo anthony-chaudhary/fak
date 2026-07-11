@@ -35,6 +35,13 @@ type Request struct {
 	Tree    []string // requested tree globs; empty falls back to the lane's taxonomy tree
 	Holder  string   // requesting holder identity (host:pid, session id, ...)
 	LeaseID string   // the lease id the caller would acquire under; a live lease with this id is the caller's own and never conflicts
+	// ReadOnly declares the request writes NOTHING — a provably empty write footprint, the
+	// third state distinct from a declared tree (known blast radius) and an ABSENT tree
+	// (UNKNOWN blast radius, which still collides conservatively). A read-only request is
+	// admitted against every live lease — it cannot clobber a writer and holds nothing a writer
+	// can clobber — so a pure read (a `git log`, a `grep`) is never serialized behind an
+	// unrelated lane. Default false keeps every existing caller's verdict byte-identical.
+	ReadOnly bool
 }
 
 // Lease is one live lease projected out of the shared namespace
@@ -44,6 +51,10 @@ type Lease struct {
 	Lane   string // named lane when known; "" = unknown (infer with LaneOfLeaseID)
 	Tree   []string
 	Holder string
+	// ReadOnly reports the live lease itself writes NOTHING (a held pure read). It blocks no
+	// request: a read-only holder cannot be clobbered, so no new act needs to serialize behind
+	// it. Default false leaves every existing lease projection blocking exactly as before.
+	ReadOnly bool
 }
 
 // Taxonomy is the slice of dos.toml [lanes] the admission decision needs.
@@ -97,9 +108,20 @@ func Decide(req Request, live []Lease, tax Taxonomy) Verdict {
 	if len(tree) == 0 && req.Lane != "" && tax.Loaded {
 		tree = cleanGlobs(tax.Trees[req.Lane])
 	}
+	// A provably read-only request writes nothing and therefore contends with nothing — it is
+	// admitted against every live lease, ABOVE the empty-tree conservative-overlap rule. This is
+	// the tri-state opt-out: an ABSENT tree is unknown blast radius (falls through and collides),
+	// a declared ReadOnly is an EMPTY write footprint (never collides).
+	if req.ReadOnly {
+		return Verdict{Admit: true, Tree: tree}
+	}
 	var conflicts []Conflict
 	for _, l := range live {
 		if l.ID != "" && l.ID == req.LeaseID {
+			continue
+		}
+		// A read-only live lease holds nothing writable, so it blocks no request.
+		if l.ReadOnly {
 			continue
 		}
 		lane := l.Lane
