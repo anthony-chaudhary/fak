@@ -217,16 +217,23 @@ class LowYieldSoftExcludesTest(unittest.TestCase):
     def test_worst_by_turns_capped_at_max_excludes(self):
         with TemporaryDirectory() as d:
             runs = Path(d)
-            for i, (lane, per) in enumerate([("tools", 50), ("docs", 40), ("compute", 30)]):
-                write_log(runs, 100 + i * 2, lane, per, stamp="20260707-120000")
-                write_log(runs, 101 + i * 2, lane, per, stamp="20260707-130000")
-            trees = {"tools": ["tools/**"], "docs": ["docs/**"],
-                     "compute": ["internal/compute/**"]}
+            # 7 flagged low-yield lanes (each 2 finished sessions, 0 closes). The cap
+            # keeps only the worst-by-turns LOW_YIELD_MAX_EXCLUDES of them, leaving the
+            # lightest still pickable so even a raised cap can never demote every lane.
+            specs = [("aa", 50), ("bb", 45), ("cc", 40), ("dd", 35),
+                     ("ee", 30), ("ff", 25), ("gg", 20)]   # per-session turns, desc
+            trees = {}
+            for i, (lane, per) in enumerate(specs):
+                write_log(runs, 200 + i * 2, lane, per, stamp="20260707-120000")
+                write_log(runs, 201 + i * 2, lane, per, stamp="20260707-130000")
+                trees[lane] = [f"internal/{lane}/**"]
             with _LowYieldPatches(closes=0):
                 res = ird.low_yield_soft_excludes(ROOT, runs, lane_trees=trees)
-        # all three flagged; only the worst-by-turns two are soft-excluded (cap=2).
-        self.assertEqual(set(res["flagged"]), {"tools", "docs", "compute"})
-        self.assertEqual(res["exclude"], {"tools", "docs"})
+        # all seven flagged; only the worst-by-turns cap(5) are soft-excluded.
+        self.assertEqual(set(res["flagged"]),
+                         {"aa", "bb", "cc", "dd", "ee", "ff", "gg"})
+        self.assertEqual(len(res["exclude"]), ird.LOW_YIELD_MAX_EXCLUDES)
+        self.assertEqual(res["exclude"], {"aa", "bb", "cc", "dd", "ee"})
 
     def test_fail_open_on_missing_runs_dir(self):
         res = ird.low_yield_soft_excludes(ROOT, ROOT / "no-such-runs",

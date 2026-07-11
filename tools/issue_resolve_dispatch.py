@@ -190,7 +190,16 @@ _COLLISION_HOLD_LEDGER = "collision-holds.jsonl"
 # sessions before it is trusted as a signal, and lane_issue_numbers re-seats a
 # demoted lane (reporting it under low_yield_relief) if it is the last eligible one.
 # The fold's 180-min sliding lookback IS the self-healing TTL — no sticky state.
-LOW_YIELD_MAX_EXCLUDES = 2
+# Cap sized to the trust floor, not to 2: on a busy fleet 5+ lanes routinely clear
+# LOW_YIELD_MIN_SESSIONS at once (measured: 5 proven low-yield lanes in one 180-min
+# window, all internal/** core-source). At the old cap of 2 the picker demoted only
+# the 2 worst and the value-weighted pick (which ranks core lanes first) then landed
+# on the 3rd/4th 0-close core lane instead of a lane that is actually closing — the
+# cap, not the starvation floor, was the binding constraint. 5 demotes the whole
+# proven-sink set; still freeze-safe because MIN_SESSIONS bounds the candidate set
+# upstream and lane_issue_numbers' batch starvation floor re-seats them ALL (under
+# low_yield_relief) whenever excluding would leave zero eligible lanes.
+LOW_YIELD_MAX_EXCLUDES = 5
 LOW_YIELD_MIN_SESSIONS = 2
 # Operator-forced contract-gate bypass ledger (#2637): every time --force downgrades
 # a FAILED issue-contract readiness gate to advisory and spawns anyway, one row is
