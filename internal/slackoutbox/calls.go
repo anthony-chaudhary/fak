@@ -22,14 +22,14 @@ import (
 // SourceCalls is one producing surface's Slack API-call footprint.
 type SourceCalls struct {
 	Source     string `json:"source"`
-	Posts      int    `json:"posts"`      // chat.postMessage calls that reached the wire
-	Updates    int    `json:"updates"`    // chat.update calls that reached the wire
+	Posts      int    `json:"posts"`             // chat.postMessage calls that reached the wire
+	Updates    int    `json:"updates"`           // chat.update calls that reached the wire
 	Deletes    int    `json:"deletes,omitempty"` // chat.delete calls the ephemeral reaper spent
-	Coalesced  int    `json:"coalesced"`  // edits collapsed into a newer one (calls the outbox saved)
-	Suppressed int    `json:"suppressed"` // no-op edits dropped pre-send, body == last posted (calls the outbox saved)
-	Refused    int    `json:"refused"`    // bodies the leak fence blocked (calls the outbox saved)
-	Dead       int    `json:"dead"`       // rows dead-lettered after exhausting retries
-	Pending    int    `json:"pending"`    // rows still owed a delivery (no call spent yet)
+	Coalesced  int    `json:"coalesced"`         // edits collapsed into a newer one (calls the outbox saved)
+	Suppressed int    `json:"suppressed"`        // no-op edits dropped pre-send, body == last posted (calls the outbox saved)
+	Refused    int    `json:"refused"`           // bodies the leak fence blocked (calls the outbox saved)
+	Dead       int    `json:"dead"`              // rows dead-lettered after exhausting retries
+	Pending    int    `json:"pending"`           // rows still owed a delivery (no call spent yet)
 }
 
 // Sent is the API calls this surface actually spent against the rate limit —

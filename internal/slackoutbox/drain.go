@@ -93,7 +93,7 @@ type DrainReport struct {
 	Failed     int `json:"failed"`    // transient failures recorded this pass (still pending)
 	Dead       int `json:"dead"`
 	Reaped     int `json:"reaped,omitempty"` // expired ephemeral messages deleted (or found already gone) this pass
-	Remaining  int `json:"remaining"` // rows still owed after this pass
+	Remaining  int `json:"remaining"`        // rows still owed after this pass
 }
 
 // PlanItem is one send the next drain pass would perform, in order.

@@ -48,17 +48,17 @@ var (
 // a reply to another row in THIS outbox: it is resolved to the parent's posted ts at
 // drain, so a root and its replies can be enqueued together before the root has a ts.
 type Row struct {
-	Nonce       string `json:"nonce"`
-	Channel     string `json:"channel"`
-	Text        string `json:"text"`
-	Blocks      []any  `json:"blocks,omitempty"`
-	ThreadTS    string `json:"thread_ts,omitempty"`
-	UpdateTS    string `json:"update_ts,omitempty"`
-	ParentNonce string `json:"parent_nonce,omitempty"` // deferred thread parent, resolved to its posted ts at drain
-	CardKey     string `json:"card_key,omitempty"`
-	Source      string `json:"source,omitempty"`         // producing surface, for status/dead reporting
-	EnqueuedAt  string `json:"enqueued_at,omitempty"`    // RFC3339 UTC
-	DeleteAfterS int   `json:"delete_after_s,omitempty"` // >0: reap this message this many seconds after its last activity (per-row ephemeral TTL; 0 => channel/opts default, see reap.go)
+	Nonce        string `json:"nonce"`
+	Channel      string `json:"channel"`
+	Text         string `json:"text"`
+	Blocks       []any  `json:"blocks,omitempty"`
+	ThreadTS     string `json:"thread_ts,omitempty"`
+	UpdateTS     string `json:"update_ts,omitempty"`
+	ParentNonce  string `json:"parent_nonce,omitempty"` // deferred thread parent, resolved to its posted ts at drain
+	CardKey      string `json:"card_key,omitempty"`
+	Source       string `json:"source,omitempty"`         // producing surface, for status/dead reporting
+	EnqueuedAt   string `json:"enqueued_at,omitempty"`    // RFC3339 UTC
+	DeleteAfterS int    `json:"delete_after_s,omitempty"` // >0: reap this message this many seconds after its last activity (per-row ephemeral TTL; 0 => channel/opts default, see reap.go)
 }
 
 // Row states. Absent = pending. sending is the pre-send intent marker that closes the
