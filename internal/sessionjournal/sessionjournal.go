@@ -50,24 +50,47 @@ const (
 	KindClose Kind = "close" // clean deregister at graceful exit
 )
 
+// DriveCarry is the plain-data projection of a session's remaining drive-state — the
+// budget / generation / objective axes that must survive a machine-wide reboot so a
+// resumed process comes up at the RIGHT remaining allotment, not a fresh full one. Every
+// field is a scalar (no internal imports) so this foundation leaf stays stdlib-only (the
+// §5 no-upward-import fence); it is the crash-journal mirror of internal/resume.DriveCarry
+// and the projection of internal/session.State's Budget / Generation / ObjectivePin axes.
+// A nil *DriveCarry on an Event / Session means "no carry" — exactly today's behavior.
+//
+// This slice adds only the CHANNEL. Populating it from a live internal/session.State on
+// the write path is the guard/cmd writer's job (kept out here to hold the stdlib fence),
+// and the identity-map join + report render are the sibling E2 / E3 leaves.
+type DriveCarry struct {
+	TurnsLeft           int64  `json:"turns_left,omitempty"`
+	TokensLeft          int64  `json:"tokens_left,omitempty"`
+	ContextTokensLeft   int64  `json:"context_tokens_left,omitempty"`
+	ContextTokensCap    int64  `json:"context_tokens_cap,omitempty"`
+	SpendMicroCentsLeft int64  `json:"spend_micro_cents_left,omitempty"`
+	SpendMicroCentsCap  int64  `json:"spend_micro_cents_cap,omitempty"`
+	Generation          int    `json:"generation,omitempty"`
+	ObjectivePinID      string `json:"objective_pin_id,omitempty"`
+}
+
 // Event is one appended lifecycle row. Forward-extensible: a row with extra keys still
 // decodes, so later rungs can add fields without breaking this reader.
 type Event struct {
-	Schema   string   `json:"schema"`
-	Kind     Kind     `json:"kind"`
-	ID       string   `json:"id"`  // session / trace id — the join + fold key
-	TS       string   `json:"ts"`  // RFC3339 UTC event time
-	Boot     string   `json:"boot,omitempty"`
-	PID      int      `json:"pid,omitempty"`
-	Host     string   `json:"host,omitempty"`
-	CWD      string   `json:"cwd,omitempty"`
-	Model    string   `json:"model,omitempty"`
-	Agent    string   `json:"agent,omitempty"`
-	Account  string   `json:"account,omitempty"` // config dir / seat
-	Argv     []string `json:"argv,omitempty"`
-	StartSHA string   `json:"start_sha,omitempty"`
-	Gateway  string   `json:"gateway,omitempty"`
-	Reason   string   `json:"reason,omitempty"` // close reason
+	Schema   string      `json:"schema"`
+	Kind     Kind        `json:"kind"`
+	ID       string      `json:"id"` // session / trace id — the join + fold key
+	TS       string      `json:"ts"` // RFC3339 UTC event time
+	Boot     string      `json:"boot,omitempty"`
+	PID      int         `json:"pid,omitempty"`
+	Host     string      `json:"host,omitempty"`
+	CWD      string      `json:"cwd,omitempty"`
+	Model    string      `json:"model,omitempty"`
+	Agent    string      `json:"agent,omitempty"`
+	Account  string      `json:"account,omitempty"` // config dir / seat
+	Argv     []string    `json:"argv,omitempty"`
+	StartSHA string      `json:"start_sha,omitempty"`
+	Gateway  string      `json:"gateway,omitempty"`
+	Drive    *DriveCarry `json:"drive,omitempty"`  // remaining drive-state to resume at (nil = none)
+	Reason   string      `json:"reason,omitempty"` // close reason
 }
 
 // DefaultPath resolves the journal path: the env override, else <UserConfigDir>/fak/…,
@@ -151,21 +174,22 @@ func LoadFile(path string) []Event {
 
 // Session is the folded lifecycle state of one recorded session — the input to Classify.
 type Session struct {
-	ID          string    `json:"id"`
-	Boot        string    `json:"boot,omitempty"`
-	PID         int       `json:"pid,omitempty"`
-	Host        string    `json:"host,omitempty"`
-	CWD         string    `json:"cwd,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	Agent       string    `json:"agent,omitempty"`
-	Account     string    `json:"account,omitempty"`
-	Argv        []string  `json:"argv,omitempty"`
-	StartSHA    string    `json:"start_sha,omitempty"`
-	Gateway     string    `json:"gateway,omitempty"`
-	StartedAt   time.Time `json:"started_at"`
-	LastSeen    time.Time `json:"last_seen"`
-	Closed      bool      `json:"closed"`
-	CloseReason string    `json:"close_reason,omitempty"`
+	ID          string      `json:"id"`
+	Boot        string      `json:"boot,omitempty"`
+	PID         int         `json:"pid,omitempty"`
+	Host        string      `json:"host,omitempty"`
+	CWD         string      `json:"cwd,omitempty"`
+	Model       string      `json:"model,omitempty"`
+	Agent       string      `json:"agent,omitempty"`
+	Account     string      `json:"account,omitempty"`
+	Argv        []string    `json:"argv,omitempty"`
+	StartSHA    string      `json:"start_sha,omitempty"`
+	Gateway     string      `json:"gateway,omitempty"`
+	StartedAt   time.Time   `json:"started_at"`
+	LastSeen    time.Time   `json:"last_seen"`
+	Closed      bool        `json:"closed"`
+	CloseReason string      `json:"close_reason,omitempty"`
+	Drive       *DriveCarry `json:"drive,omitempty"` // the newest carried drive-state (nil = none)
 }
 
 // FoldEvents folds the lifecycle log to one Session per id, applying events in event-time
@@ -245,6 +269,12 @@ func applyProvenance(s *Session, ev Event) {
 	if ev.Gateway != "" {
 		s.Gateway = ev.Gateway
 	}
+	if ev.Drive != nil {
+		// Last non-nil carry wins (same last-write-wins fold as the scalar fields
+		// above); copy by value so the folded Session never aliases the event's pointer.
+		d := *ev.Drive
+		s.Drive = &d
+	}
 }
 
 // eventTime parses an event's RFC3339 TS, zero on failure (an unstamped row folds as
@@ -277,10 +307,10 @@ const (
 
 // ClassifyConfig parameterizes the fold so it is fully testable with injected inputs.
 type ClassifyConfig struct {
-	Now      time.Time            // wall clock for the stale-beat window
-	BootTime time.Time            // machine current boot instant; zero = unknown (skips MACHINE_REBOOT)
+	Now        time.Time          // wall clock for the stale-beat window
+	BootTime   time.Time          // machine current boot instant; zero = unknown (skips MACHINE_REBOOT)
 	StaleAfter time.Duration      // same-boot last-seen older than this -> STALE; 0 disables
-	PIDAlive func(pid int) bool   // optional same-boot liveness check; nil = skip (foundation passes nil)
+	PIDAlive   func(pid int) bool // optional same-boot liveness check; nil = skip (foundation passes nil)
 }
 
 // Classified is a session plus its verdict.
