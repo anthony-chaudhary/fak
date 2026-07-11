@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // TestLoadProgressReporter verifies the streaming load-progress lines: throttled by a
 // percent step, with the first and last tick always emitted, and carrying the percent,
 // tensor count, and GB read so a multi-minute large-model load is observable.
 func TestLoadProgressReporter(t *testing.T) {
+	pinHostMemStatus(t, compute.HostMemStatus{})
 	var buf bytes.Buffer
 	p := NewLoadProfiler()
 	p.Progress = &buf

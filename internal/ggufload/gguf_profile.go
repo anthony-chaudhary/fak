@@ -5,7 +5,13 @@ import (
 	"io"
 	"sort"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// hostMemStatus is compute.ReadHostMemStatus, indirected so progress-line tests can
+// inject deterministic memory snapshots.
+var hostMemStatus = compute.ReadHostMemStatus
 
 // LoadPhaseStat is one aggregate phase in the GGUF quant-on-load path.
 type LoadPhaseStat struct {
@@ -94,6 +100,7 @@ type LoadProfiler struct {
 	cumBytes      int64
 	ggufSeen      int // GGUF tensors consumed (advances even for split/merged tensors)
 	lastPct       float64
+	memWarned     bool // the headroom-collapse warning fired (emit once per load)
 
 	// loadPaths tallies the per-quant-type resident-vs-dequant breakdown. Written only by
 	// the serial load collector (one goroutine), so it needs no lock even under the parallel
@@ -185,8 +192,68 @@ func (p *LoadProfiler) emitProgress() {
 	if s := elapsed.Seconds(); s > 0 {
 		rate = gb / s
 	}
-	fmt.Fprintf(p.Progress, "fak: loading model %.0f%% (%d/%d tensors, %.1f GB, %s elapsed, %.2f GB/s)\n",
-		pct, n, p.Total, gb, elapsed.Round(time.Second), rate)
+	mem := hostMemStatus()
+	if n == 1 {
+		p.emitMemPreflight(mem)
+	}
+	fmt.Fprintf(p.Progress, "fak: loading model %.0f%% (%d/%d tensors, %.1f GB, %s elapsed, %.2f GB/s%s)\n",
+		pct, n, p.Total, gb, elapsed.Round(time.Second), rate, memSuffix(mem))
+	p.emitMemCliffWarning(mem)
+}
+
+// emitMemPreflight prints a one-time confinement notice before the first progress line.
+// It fires ONLY when allocations are strictly confined to a NUMA-node subset, because
+// that is the regime where the box-wide MemAvailable number everyone looks at is a lie:
+// the load must fit in the confined nodes' free memory or the kernel SIGKILLs the
+// process with no Go-side trace (CONSTRAINT_MEMORY_POLICY in dmesg is the only record).
+func (p *LoadProfiler) emitMemPreflight(mem compute.HostMemStatus) {
+	if !mem.Constrained {
+		return
+	}
+	free := "unknown"
+	if mem.PolicyFree > 0 {
+		free = fmt.Sprintf("%.1f GB", float64(mem.PolicyFree)/(1<<30))
+	}
+	avail := "unknown"
+	if mem.HostAvail > 0 {
+		avail = fmt.Sprintf("%.1f GB", float64(mem.HostAvail)/(1<<30))
+	}
+	fmt.Fprintf(p.Progress, "fak: memory preflight: allocations CONFINED to numa node(s) %s (%s): %s free there now, host MemAvailable %s — if the load outgrows the confined nodes the kernel kills fak silently (dmesg: CONSTRAINT_MEMORY_POLICY)\n",
+		mem.PolicyNodes, mem.PolicyLabel, free, avail)
+}
+
+// emitMemCliffWarning fires once when a confined load's remaining node-local free
+// memory drops under max(4 GiB, rss/8) — close enough to the cliff that the very next
+// tensors may be the ones that draw the OOM kill. Its job is to be the last legible
+// line in the log when the kill happens.
+func (p *LoadProfiler) emitMemCliffWarning(mem compute.HostMemStatus) {
+	if p.memWarned || !mem.Constrained || mem.PolicyFree <= 0 || mem.RSS <= 0 {
+		return
+	}
+	floor := int64(4 << 30)
+	if r := mem.RSS / 8; r > floor {
+		floor = r
+	}
+	if mem.PolicyFree >= floor {
+		return
+	}
+	p.memWarned = true
+	fmt.Fprintf(p.Progress, "fak: WARNING: numa-confined memory nearly exhausted: rss %.1f GB, only %.1f GB free on allowed node(s) %s — imminent risk of a silent kernel OOM kill; widen the membind (or set it only when the node's free memory clears the load peak)\n",
+		float64(mem.RSS)/(1<<30), float64(mem.PolicyFree)/(1<<30), mem.PolicyNodes)
+}
+
+// memSuffix renders the live memory tail of a progress line: resident set always (when
+// known), plus the confined nodes' current free memory when a strict policy applies —
+// the two numbers whose convergence IS the OOM countdown.
+func memSuffix(mem compute.HostMemStatus) string {
+	s := ""
+	if mem.RSS > 0 {
+		s += fmt.Sprintf(", rss %.1f GB", float64(mem.RSS)/(1<<30))
+	}
+	if mem.Constrained && mem.PolicyFree > 0 {
+		s += fmt.Sprintf(", node-free %.1f GB", float64(mem.PolicyFree)/(1<<30))
+	}
+	return s
 }
 
 func loadProfileStart(p *LoadProfiler) time.Time {
