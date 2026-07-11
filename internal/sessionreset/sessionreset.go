@@ -137,9 +137,18 @@ func BuildSeed(in Input) Seed {
 	snapshot := make([]Contributor, len(registry))
 	copy(snapshot, registry)
 	mu.RUnlock()
+	return buildSeedFrom(snapshot, in)
+}
 
-	parts := make([]Part, 0, len(snapshot))
-	for _, c := range snapshot {
+// buildSeedFrom folds an EXPLICIT contributor set over in, sharing the deterministic
+// order-then-name sort and recap render that BuildSeed uses. BuildSeed passes the whole
+// registry; a scoped policy (e.g. BuildRelaySeed) passes a curated subset so it can
+// carry a strict, closed contributor set instead of whatever the global registry holds.
+// The fold is identical in either case, so a scoped seed and the default seed agree on
+// ordering and rendering for the contributors they share.
+func buildSeedFrom(contributors []Contributor, in Input) Seed {
+	parts := make([]Part, 0, len(contributors))
+	for _, c := range contributors {
 		if p, ok := c.Contribute(in); ok && strings.TrimSpace(p.Text) != "" {
 			if p.Name == "" {
 				p.Name = c.Name()
