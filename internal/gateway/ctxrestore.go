@@ -213,10 +213,10 @@ type ContextRestoreRequest struct {
 // one — and a digest no source holds is a miss (ErrRestoreMiss). The lookup is exact on the digest;
 // there is no fuzzy match, because a content-address either names bytes we hold or it does not.
 //
-// The store fall-through is source-agnostic (see ctxrestore_store.go): today it wires the recall-image
-// source (ImageDir → recall.CtxStore), the source reachable in the gateway lane; a ctxview-elision store
-// (the ctxplan planner's per-session store) and a memq-cell store plug into the same restoreFromStore
-// adapter behind a Store handle, with no new routing here.
+// The store fall-through is source-agnostic (see ctxrestore_store.go): it wires the ctxview-elision
+// source (the trace's retained SessionPlanner, now a ctxplan.Store) and the recall-image source
+// (ImageDir → recall.CtxStore), both reachable in the gateway lane. A memq-cell store plugs into the
+// same restoreFromStore adapter behind a Store handle, with no new routing here.
 func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRestoreResult, error) {
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
@@ -240,7 +240,32 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 		return res, err
 	}
 
-	// 2) Stash miss — generalize beyond the compaction tombstone (#3062). When the caller names a
+	// 2) Stash miss — the ctxview-elision source (#3062). The trace's retained view planner holds a
+	//    LOSSLESS, content-addressed store of every span the planned-view rewrite ELIDED from the
+	//    passthrough; route the SAME digest through it (as a ctxplan.Store) so a ctxview elision pages
+	//    back in under the store's own trust gate. Needs no request field — it is the trace's OWN
+	//    dropped context, the closest analogue to the compaction tombstone. A hit (bytes, or a
+	//    sealed/tombstoned refusal) is authoritative; a trace that never planned a turn has no retained
+	//    planner and is a plain miss that falls through to the caller-named recall image below.
+	if planner := s.existingSessionPlanner(trace); planner != nil {
+		sp, body, ierr := restoreFromStore(context.Background(), planner, id)
+		if ierr == nil {
+			return CtxRestoreResult{
+				Schema:     ctxRestoreSchema,
+				TraceID:    trace,
+				ID:         id,
+				Excerpt:    sp.Descriptor,
+				Bytes:      string(body),
+				Provenance: "WITNESSED",
+			}, nil
+		}
+		if !errors.Is(ierr, ErrRestoreMiss) {
+			return CtxRestoreResult{}, ierr // a sealed/tombstoned refusal is authoritative
+		}
+		// genuine miss — fall through to the caller-named recall-image source
+	}
+
+	// 3) Still a miss — generalize beyond the compaction tombstone (#3062). When the caller names a
 	//    persisted recall core image, route the SAME content-address through its ctxplan.Store so a
 	//    recall page pages back in under the image's own trust gate.
 	if dir := strings.TrimSpace(req.ImageDir); dir != "" {

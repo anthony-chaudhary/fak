@@ -183,7 +183,7 @@ func TestBudgetExhaustedCallbackReceivesServedTranscript(t *testing.T) {
 		},
 	}
 	msgs := []agent.Message{{Role: agent.RoleUser, Content: "carry this into the restart"}}
-	srv.debitServedSessionTurn(context.Background(), servedSessionTurn{traceID: "guard"}, agent.Usage{PromptTokens: 151}, msgs)
+	srv.debitServedSessionTurn(context.Background(), servedSessionTurn{traceID: "guard"}, agent.Usage{PromptTokens: 151}, 0, msgs)
 	if gotState.TraceID != "guard" || gotState.ContinuationID != "win-child" {
 		t.Fatalf("callback state = %+v, want drained guard->win-child", gotState)
 	}

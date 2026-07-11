@@ -63,6 +63,44 @@ func TestWithMetricsRecoversHandlerPanic(t *testing.T) {
 	}
 }
 
+// TestWithMetricsPanicLogIsStructured pins #2775 step 3: a recovered handler panic must
+// self-identify as a structured gateway_recovered_panic event (route + method + path +
+// panic value + trace id), not just prose, so future occurrences aggregate in the same
+// log pipeline as gateway_http_request instead of forcing a human to grep a stack dump.
+func TestWithMetricsPanicLogIsStructured(t *testing.T) {
+	var lines []string
+	s := &Server{
+		metrics: newGatewayMetrics(time.Now()),
+		logf:    func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) },
+	}
+	h := s.withMetrics(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom in handler")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	req.Header.Set(traceHeader, "gw-panic-3")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	ev := findLogEvent(t, lines, "gateway_recovered_panic")
+	for k, want := range map[string]any{
+		"event":    "gateway_recovered_panic",
+		"msg":      "recovered handler panic",
+		"method":   http.MethodPost,
+		"route":    routeForMetrics("/v1/messages"),
+		"path":     "/v1/messages",
+		"panic":    "boom in handler",
+		"trace_id": "gw-panic-3",
+	} {
+		if got := ev[k]; got != want {
+			t.Fatalf("panic event %s = %#v, want %#v (event=%v)", k, got, want, ev)
+		}
+	}
+}
+
 // TestWithMetricsReRaisesErrAbortHandler pins the one panic withMetrics must NOT swallow:
 // http.ErrAbortHandler is net/http's intentional silent-abort sentinel and has to propagate
 // so the server aborts the response as designed rather than reporting a spurious 500.

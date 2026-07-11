@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -141,7 +142,7 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 				if rec.status == 0 {
 					writeRecoveredPanicErr(rec, p)
 				}
-				s.logf("gateway: recovered handler panic route=%s method=%s trace_id=%s: %v", route, r.Method, traceID, p)
+				s.logRecoveredPanic(r, route, traceID, p)
 			}
 			status := rec.status
 			if status == 0 {
@@ -173,6 +174,35 @@ func (s *Server) logHTTPRequest(r *http.Request, route string, status int, dur t
 	}
 	if ua := r.Header.Get("User-Agent"); ua != "" {
 		ev["user_agent"] = ua
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	s.logf("%s", b)
+}
+
+// logRecoveredPanic emits the one structured event that lets a recovered handler
+// panic self-identify in the log stream (#2775 step 3): route + method + path + the
+// panic value + trace id, in the same JSON shape as gateway_http_request so a scraper
+// can aggregate panics by route/trace instead of parsing prose. The "msg" field keeps
+// the human-readable "recovered handler panic" marker that log tails and the #2773
+// containment test grep for, so this stays a drop-in for the prior prose line. Called
+// only from withMetrics' recover, i.e. at most once per served turn.
+func (s *Server) logRecoveredPanic(r *http.Request, route, traceID string, p any) {
+	if s == nil || s.logf == nil {
+		return
+	}
+	ev := map[string]any{
+		"event":  "gateway_recovered_panic",
+		"msg":    "recovered handler panic",
+		"method": r.Method,
+		"route":  route,
+		"path":   r.URL.Path,
+		"panic":  fmt.Sprintf("%v", p),
+	}
+	if traceID != "" {
+		ev["trace_id"] = traceID
 	}
 	b, err := json.Marshal(ev)
 	if err != nil {
@@ -257,7 +287,7 @@ func routeForMetrics(path string) string {
 	case "/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/messages/count_tokens",
 		"/v1/fak/syscall", "/v1/fak/adjudicate", "/v1/fak/admit",
 		"/v1/fak/changes", "/v1/fak/session/changes", "/v1/fak/revoke", "/v1/fak/policy/reload",
-		"/v1/fak/trace/reset", "/v1/models", "/mcp", "/healthz", "/metrics",
+		"/v1/fak/route/reload", "/v1/fak/trace/reset", "/v1/models", "/mcp", "/healthz", "/metrics",
 		"/debug/vars":
 		return path
 	default:

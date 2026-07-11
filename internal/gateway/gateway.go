@@ -411,6 +411,15 @@ type Config struct {
 	// ReloadPolicy reloads the process policy floor in-place. Nil disables the
 	// /v1/fak/policy/reload route.
 	ReloadPolicy PolicyReloadFunc
+	// ReloadRoute is the model-routing manifest hot-reload watcher (#4003) — the
+	// route-plane twin of ReloadPolicy. When non-nil it seeds the atomic seam that
+	// backs POST /v1/fak/route/reload, a manual SIGHUP-style forced reload of the
+	// installed --route-manifest. The watcher is normally constructed AFTER New (it
+	// needs the server's live routing holder, RouteLive), so the host installs it
+	// post-hoc via SetRouteWatcher; this config field is the pre-New seam for a
+	// host/test that already holds the watcher. A nil watcher — both here and via
+	// SetRouteWatcher — disables the route (404), mirroring a nil ReloadPolicy.
+	ReloadRoute *modelroute.Watcher
 	// ResetTrace clears one trace's process-local taint ledger mark. Nil disables
 	// the /v1/fak/trace/reset route.
 	ResetTrace TraceResetFunc
@@ -730,6 +739,19 @@ type PolicyReloadResponse struct {
 	Summary  string `json:"summary,omitempty"`
 }
 
+// RouteReloadResponse is the wire result of POST /v1/fak/route/reload — the outcome
+// of a forced model-routing manifest reload (the route-plane twin of
+// PolicyReloadResponse). Reloaded is false with no error when the on-disk manifest
+// was byte-identical to the installed policy (a no-op reload); a malformed edit is
+// reported as a 400, never a silent success.
+type RouteReloadResponse struct {
+	Reloaded bool   `json:"reloaded"`
+	Source   string `json:"source,omitempty"`  // the watched route-manifest path
+	Changed  bool   `json:"changed,omitempty"` // file content differed from the installed policy
+	Reloads  int64  `json:"reloads,omitempty"` // cumulative successful hot-swaps (after this reload)
+	Rejects  int64  `json:"rejects,omitempty"` // cumulative rejected (malformed) reload attempts
+}
+
 // TraceResetFunc is injected by the host CLI so the gateway can reset live IFC
 // trace state without importing IFC internals.
 type TraceResetFunc func(context.Context, string) error
@@ -789,7 +811,12 @@ type SessionState struct {
 	// started) marshals away via omitzero so a session with no time budget keeps the
 	// pre-#1584 wire shape byte-for-byte.
 	Time SessionTime `json:"time,omitempty,omitzero"`
-	Rev  uint64      `json:"rev"`
+	// Throughput is the throughput envelope's read projection (#2762): the
+	// configured expected/min rates plus the observed sustained rate. Advisory /
+	// read-only, like Time; the zero value (axis unconfigured, nothing observed)
+	// marshals away via omitzero so the pre-#2762 wire shape is unchanged.
+	Throughput SessionThroughput `json:"throughput,omitempty,omitzero"`
+	Rev        uint64            `json:"rev"`
 }
 
 // SessionTime is the gateway wire projection of internal/session.TimeBudget's read-only
@@ -890,6 +917,13 @@ type SessionBudget struct {
 	ContextTokensLeft     int `json:"context_tokens_left,omitempty"`
 	ContextTokensCap      int `json:"context_tokens_cap,omitempty"`
 	ResidentContextTokens int `json:"resident_context_tokens,omitempty"`
+	// SpendMicroCentsLeft/Cap mirror internal/session.Budget's priced spend axis
+	// (#2762): the remaining/configured dollar ceiling in micro-cents (1e-8 USD).
+	// 0 = no spend budget. Carried on the wire so the envelope control route can
+	// SET a spend ceiling and a budget read-modify-write can PRESERVE one instead
+	// of silently clearing it.
+	SpendMicroCentsLeft int64 `json:"spend_micro_cents_left,omitempty"`
+	SpendMicroCentsCap  int64 `json:"spend_micro_cents_cap,omitempty"`
 }
 
 // SessionPace is the wire form of internal/session.Pace. Zero on either axis means
@@ -899,18 +933,38 @@ type SessionPace struct {
 	MinTurnGapMs     int `json:"min_turn_gap_ms"`
 }
 
+// SessionWall is the wire form of the wall-clock LIMIT the control route applies
+// (#2762): the total envelope in nanoseconds, mirroring
+// internal/session.TimeBudget.LimitNanos. <=0 clears the envelope.
+type SessionWall struct {
+	LimitNanos int64 `json:"limit_nanos"`
+}
+
+// SessionThroughput is the wire form of internal/session.ThroughputBudget's
+// configured rates (#2762): the soft expected pace-shaping rate and the enforced
+// minimum sustained-rate floor. ObservedTokensPerSec is a read-only projection on
+// SessionState (the measured sustained rate the floor is judged against); it is
+// ignored on control writes.
+type SessionThroughput struct {
+	ExpectedTokensPerSec float64 `json:"expected_tokens_per_sec,omitempty"`
+	MinTokensPerSec      float64 `json:"min_tokens_per_sec,omitempty"`
+	ObservedTokensPerSec float64 `json:"observed_tokens_per_sec,omitempty"`
+}
+
 // SessionControlRequest is the gateway-parsed body of POST
 // /v1/fak/session/{trace_id}/{verb}. Exactly the field named by the verb is read;
 // the others are ignored. if_rev, when non-zero, is the optimistic-concurrency
 // guard: the write is taken only if the session's current Rev matches, else the
 // route returns 409 (the client re-reads and retries).
 type SessionControlRequest struct {
-	Run      string         `json:"run,omitempty"`      // verb "run": target run-state token
-	Reason   string         `json:"reason,omitempty"`   // verb "run": reason token (closed vocabulary)
-	Budget   *SessionBudget `json:"budget,omitempty"`   // verb "budget"
-	Pace     *SessionPace   `json:"pace,omitempty"`     // verb "pace"
-	Priority *int           `json:"priority,omitempty"` // verb "priority"
-	IfRev    uint64         `json:"if_rev,omitempty"`   // optional CAS guard
+	Run        string             `json:"run,omitempty"`        // verb "run": target run-state token
+	Reason     string             `json:"reason,omitempty"`     // verb "run": reason token (closed vocabulary)
+	Budget     *SessionBudget     `json:"budget,omitempty"`     // verb "budget"
+	Pace       *SessionPace       `json:"pace,omitempty"`       // verb "pace"
+	Priority   *int               `json:"priority,omitempty"`   // verb "priority"
+	Wall       *SessionWall       `json:"wall,omitempty"`       // verb "wall" (#2762): wall-clock limit
+	Throughput *SessionThroughput `json:"throughput,omitempty"` // verb "throughput" (#2762): expected rate + min floor
+	IfRev      uint64             `json:"if_rev,omitempty"`     // optional CAS guard
 }
 
 // SessionObserveFunc is injected by the host CLI so the gateway can read one
@@ -990,6 +1044,9 @@ type SessionUsage struct {
 	ContextTokens            int `json:"context_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	// DurationNanos is the served turn's real wall-clock duration, feeding the
+	// session throughput axis's sustained-rate observation (#2762). 0 = unknown.
+	DurationNanos int64 `json:"duration_nanos,omitempty"`
 }
 
 // SessionDebitFunc is injected by the host CLI to run session.Table.DebitUsage with
@@ -1055,6 +1112,14 @@ type Server struct {
 	budgetDrained  BudgetExhaustedFunc
 	defaultTraceMu sync.RWMutex
 	defaultTraceID string
+
+	// routeWatcher is the model-routing manifest hot-reload seam behind POST
+	// /v1/fak/route/reload (#4003) — the SIGHUP-style manual twin of the background
+	// Watcher.Run poll loop. It is an atomic pointer because the host installs the
+	// watcher AFTER New (the watcher needs RouteLive), while a request may hit the
+	// route concurrently; a nil load means routing hot-reload is not configured and
+	// the route answers 404, mirroring a nil reloadPolicy. Set via SetRouteWatcher.
+	routeWatcher atomic.Pointer[modelroute.Watcher]
 
 	// loops is the in-kernel background-loop supervisor (internal/bgloop): the
 	// runtime that keeps registered recurring loops progressing while the gateway is
@@ -1701,6 +1766,14 @@ func New(cfg Config) (*Server, error) {
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
 
+	// #4003: seed the model-routing hot-reload seam behind POST /v1/fak/route/reload.
+	// The watcher is normally installed AFTER New via SetRouteWatcher (it needs the
+	// server's live routing holder), so this is a no-op unless a host/test supplies a
+	// pre-built watcher in the config. A nil watcher leaves the route disabled (404).
+	if cfg.ReloadRoute != nil {
+		s.routeWatcher.Store(cfg.ReloadRoute)
+	}
+
 	// Wire retry observability onto the proxy planner (#793 follow-on): Complete's 429/5xx
 	// backoff is otherwise invisible — up to ~8s of silent waiting. The hook bumps a retry
 	// counter and prints a glanceable `fak-turn … retry` line to the default --debug-stats
@@ -1906,6 +1979,20 @@ func newRouteLive(m *modelroute.Manifest) *modelroute.Live {
 // modelroute.Watcher so a manifest edit hot-swaps the policy this server reads —
 // the same Live, so the swap is visible on the hot path with no restart (#842).
 func (s *Server) RouteLive() *modelroute.Live { return s.route }
+
+// SetRouteWatcher installs (or clears, with nil) the model-routing manifest
+// hot-reload watcher that backs POST /v1/fak/route/reload (#4003). The host calls
+// this from the serve lifecycle right after it constructs the watcher over the
+// server's RouteLive holder, so the manual reload route drives the SAME watcher as
+// the background poll loop. The store is atomic, so a concurrent request that hits
+// the route observes either the old or the new watcher, never a torn pointer. A nil
+// watcher leaves the route disabled (404), mirroring an unset reloadPolicy.
+func (s *Server) SetRouteWatcher(w *modelroute.Watcher) { s.routeWatcher.Store(w) }
+
+// currentRouteWatcher loads the installed route-reload watcher, or nil when routing
+// hot-reload is not configured for this deployment (the 404 predicate for the route
+// handler).
+func (s *Server) currentRouteWatcher() *modelroute.Watcher { return s.routeWatcher.Load() }
 
 func newEngineCacheClient(cfg Config) (*enginecache.Client, error) {
 	engineName := strings.ToLower(strings.TrimSpace(cfg.EngineCacheEngine))
@@ -2403,6 +2490,23 @@ func (s *Server) sessionPlannerFor(trace string) *agent.SessionPlanner {
 	return sp
 }
 
+// existingSessionPlanner returns the retained per-trace SessionPlanner WITHOUT minting one — the
+// read-only counterpart of sessionPlannerFor. The restore path (fak_context_restore, #3062) uses it
+// so a restore call for a trace that never planned a turn is a plain miss that falls through to the
+// next source, rather than a freshly-minted empty planner (which would allocate, pollute the map,
+// and still miss). It does not gate on ctxView.Enabled: if a planner was retained for the trace its
+// lossless store is a valid ctxview-elision source regardless of the current seam flag. The returned
+// planner is safe to call Spans/Materialize on concurrently — those methods take the planner's own
+// lock — so the read holds sessionPlannerMu only for the map lookup.
+func (s *Server) existingSessionPlanner(trace string) *agent.SessionPlanner {
+	if trace == "" {
+		return nil
+	}
+	s.sessionPlannerMu.Lock()
+	defer s.sessionPlannerMu.Unlock()
+	return s.sessionPlanners[trace]
+}
+
 // complete runs the configured planner for one turn and records the inference
 // metrics that make real model work visible at /metrics — the token counts the
 // planner reports plus the wall-clock spent generating. Both /v1/chat/completions
@@ -2483,7 +2587,8 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	// Mark the trace as holding an open model request so the agents pane can show its
 	// in-flight age (#2627). The window closes when this call returns; adjudication then
 	// stamps last_tool/idle from the served turn. Cleared on every exit path via defer.
-	s.activity.beginTurn(turn.traceID, time.Now())
+	began := time.Now()
+	s.activity.beginTurn(turn.traceID, began)
 	defer s.activity.endTurn(turn.traceID)
 	lease, err := s.beginServedAdmission(ctx, turn, messages, tools, sampleMaxTokens(opts))
 	if err != nil {
@@ -2497,7 +2602,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	// The provider's real usage is now known — settle the token-rate window with it
 	// (#2019), replacing the admission-time estimate.
 	lease.SettleUsage(comp.Usage)
-	s.debitServedSessionTurn(ctx, turn, comp.Usage, messages)
+	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 	return comp, nil
 }
 

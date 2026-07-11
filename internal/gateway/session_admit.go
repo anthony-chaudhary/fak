@@ -219,9 +219,15 @@ func (t servedSessionTurn) maxTokensFor(requestMax int) int {
 // debitServedSessionTurn reports the provider usage after a served model request.
 // Usage is known only post-response; session.Table.DebitUsage records the debit
 // now, and the next Decide takes any normal budget-exhaustion stop at the boundary.
-func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionTurn, usage agent.Usage, messages []agent.Message) {
+// turnDur is the turn's real wall-clock duration (0 = unknown); it feeds the
+// throughput axis's sustained-rate observation (#2762), so a turn that produced
+// no tokens but took real time (a stall) is still reported.
+func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionTurn, usage agent.Usage, turnDur time.Duration, messages []agent.Message) {
 	su := sessionUsageFromAgent(usage)
-	if s.debitSession == nil || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0) {
+	if turnDur > 0 {
+		su.DurationNanos = int64(turnDur)
+	}
+	if s.debitSession == nil || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0 && su.DurationNanos <= 0) {
 		return
 	}
 	st := s.debitSession(ctx, turn.traceID, su)
@@ -237,7 +243,7 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time) {
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, time.Since(began))
 	s.observePlannerRequestMemory()
-	s.debitServedSessionTurn(ctx, turn, comp.Usage, messages)
+	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 }
 
 func sessionUsageFromAgent(u agent.Usage) SessionUsage {

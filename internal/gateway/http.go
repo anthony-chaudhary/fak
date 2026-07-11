@@ -92,6 +92,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/revoke", s.handleFakRevoke},
 		{"/v1/fak/context/change", s.handleFakContextChange},
 		{"/v1/fak/policy/reload", s.handleFakPolicyReload},
+		{"/v1/fak/route/reload", s.handleFakRouteReload},
 		{"/v1/fak/trace/reset", s.handleFakTraceReset},
 		{"/v1/fak/trace/", s.handleFakTraceObserve},
 		// /v1/fak/session/changes is the DRIVE-state revision stream (#630): a
@@ -102,7 +103,8 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/session/changes", s.handleFakSessionChanges},
 		// /v1/fak/session/ is the DRIVE-state control surface: GET /v1/fak/session/{id}
 		// observes one session's run-state/budget/priority/pace; POST
-		// /v1/fak/session/{id}/{verb} applies a control verb (run|budget|pace|priority).
+		// /v1/fak/session/{id}/{verb} applies a control verb
+		// (run|budget|pace|priority|wall|throughput).
 		// One subtree handler dispatches on method + the trailing path segments.
 		{"/v1/fak/session/", s.handleFakSession},
 		// /v1/fak/sessions (no trailing slash) is the MULTI-session read: a snapshot of
@@ -1282,6 +1284,41 @@ func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleFakRouteReload forces a reload of the installed model-routing manifest in
+// place (#4003) — the route-plane twin of handleFakPolicyReload. It drives the SAME
+// modelroute.Watcher the background poll loop uses (installed by the host via
+// SetRouteWatcher), so a manual reload and the poll loop share the last-good gate and
+// the atomic Live swap. A malformed edit is REJECTED (last-good kept) and reported as
+// a 400, never a silent success; a byte-identical file is a 200 no-op (reloaded:false).
+func (s *Server) handleFakRouteReload(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	watcher := s.currentRouteWatcher()
+	if watcher == nil {
+		writeErr(w, http.StatusNotFound, "route reload is not configured")
+		return
+	}
+	ev := watcher.Reload()
+	if ev.Err != nil {
+		s.logf("gateway: route reload failed: %v", ev.Err)
+		writeErr(w, http.StatusBadRequest, "route reload failed: "+ev.Err.Error())
+		return
+	}
+	if ev.Reloaded {
+		s.logf("gateway: hot-reloaded model-routing policy from %s (reload #%d)", ev.Path, ev.Reloads)
+	} else {
+		s.logf("gateway: route reload: no change (%s)", ev.Path)
+	}
+	writeJSON(w, http.StatusOK, RouteReloadResponse{
+		Reloaded: ev.Reloaded,
+		Source:   ev.Path,
+		Changed:  ev.Changed,
+		Reloads:  ev.Reloads,
+		Rejects:  ev.Rejects,
+	})
+}
+
 // handleFakTraceReset clears the per-trace IFC taint high-water mark for a live
 // served session. The reset implementation is injected by cmd/fak.
 func (s *Server) handleFakTraceReset(w http.ResponseWriter, r *http.Request) {
@@ -1384,7 +1421,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		// POST applies a control verb. The verb is required from the path.
 		if verb == "" {
-			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority}")
+			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority|wall|throughput}")
 			return
 		}
 		// steer is its own shape (operator input to a RUNNING session, #760): a different
