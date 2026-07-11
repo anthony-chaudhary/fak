@@ -129,6 +129,14 @@ func Scaffold() string {
 	// The marker pair starts adjacent; Splice fills Block() between them on the same
 	// write, so the scaffold is never committed empty.
 	var b strings.Builder
+	// SEO/AEO front-matter: a discoverable title + description so the committed doc is not
+	// an F-grade page. ASCII-only, like the rest of the scaffold, so the first committed
+	// bytes stay byte-stable on a Windows checkout. Kept outside the generated markers, so
+	// --check-doc (which compares only the marker block) never sees it as drift.
+	b.WriteString("---\n")
+	b.WriteString("title: \"fak milestone status: the maturity climb snapshot\"\n")
+	b.WriteString("description: \"A durable, freshness-checked snapshot of the project's maturity climb: the model-by-backend grid across the closed M0-M7 support-maturity ladder.\"\n")
+	b.WriteString("---\n\n")
 	b.WriteString("# Milestone status\n\n")
 	b.WriteString("The durable, freshness-checked snapshot of the project's maturity CLIMB -- the model x backend\n")
 	b.WriteString("grid's distribution across the closed M0-M7 support-maturity ladder. Generated from\n")
