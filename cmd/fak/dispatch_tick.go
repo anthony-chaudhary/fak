@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -55,8 +56,13 @@ type dispatchTickOptions struct {
 	// seat default. PinWorkerModel turns on the benchmark gate (a model-accounting run that
 	// pins the account/default model so it measures a KNOWN model, not a silently-switched
 	// one). Both default off, so a normal claude tick stays on the seat default + fallback.
-	WorkerModel    string
-	PinWorkerModel bool
+	WorkerModel     string
+	CapacityReason  string
+	CapacityFrom    string
+	CapacityTargets []modelroute.CapacityTarget
+	RequiredModelB  float64
+	RequiredContext int
+	PinWorkerModel  bool
 	// WorkClassModel is a LOW-precedence worker-model default for the tick's work class:
 	// `fak garden dispatch` (the project-management / repo-maintenance dispatcher) sets it
 	// to fable so routine coordination work runs on the cheap model by default. It sits
@@ -220,6 +226,11 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	loopLedger := fs.String("loop-ledger", "", "append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
 	noLoopLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for this tick")
 	workerModel := fs.String("worker-model", "", "pin the claude worker to this exact --model id (un-blanks the seat default; empty falls back to the lane_models pin/benchmark gate/seat default)")
+	capacityReason := fs.String("capacity-reason", "", "capacity block reason token")
+	capacityFrom := fs.String("capacity-from", "", "blocked target name")
+	capacityTargetsPath := fs.String("capacity-targets", "", "JSON file containing alternate capacity targets")
+	requiredModelB := fs.Float64("required-model-b", 0, "minimum faithful model size in billions")
+	requiredContext := fs.Int("required-context", 0, "required context tokens")
 	pinWorkerModel := fs.Bool("pin-worker-model", false, "benchmark gate: pin the claude worker to the account/default model (model-accounting run) instead of the seat default + fallback chain")
 	modelDowngrade := fs.Bool("model-downgrade", false, "Layer-2 in-tick re-dispatch: when the target's last slot exited model-switchable (usage_cap/model_unknown/rate_limit), re-dispatch it on the next downgrade-chain model")
 	focusHold := fs.Bool("focus-hold", false, "focus WIP backpressure (#3223): HOLD (refuse) a spawn that OPENS a new objective while the fleet is at/over the focusscore WIP cap, instead of the default WARN (advise + still spawn); continuation of an already-open objective is never held ($FLEET_DISPATCH_FOCUS_HOLD also enables)")
@@ -263,6 +274,18 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", goalErr)
 		return dispatchTickOptions{}, false, 2
 	}
+	var capacityTargets []modelroute.CapacityTarget
+	if strings.TrimSpace(*capacityTargetsPath) != "" {
+		b, err := os.ReadFile(*capacityTargetsPath)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak dispatch tick:", err)
+			return dispatchTickOptions{}, false, 1
+		}
+		if err := json.Unmarshal(b, &capacityTargets); err != nil {
+			fmt.Fprintln(stderr, "fak dispatch tick: capacity targets:", err)
+			return dispatchTickOptions{}, false, 2
+		}
+	}
 	opts := dispatchTickOptions{
 		Workspace:               root,
 		MaxWorkers:              *maxWorkers,
@@ -286,6 +309,11 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		LoopLedger:              *loopLedger,
 		RecordLoop:              !*noLoopLedger,
 		WorkerModel:             firstString(strings.TrimSpace(*workerModel), strings.TrimSpace(os.Getenv("FLEET_DISPATCH_WORKER_MODEL"))),
+		CapacityReason:          strings.TrimSpace(*capacityReason),
+		CapacityFrom:            strings.TrimSpace(*capacityFrom),
+		CapacityTargets:         capacityTargets,
+		RequiredModelB:          *requiredModelB,
+		RequiredContext:         *requiredContext,
 		PinWorkerModel:          *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
 		ModelDowngrade:          *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
 		FocusHold:               *focusHold || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_FOCUS_HOLD")),
@@ -491,6 +519,14 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	// default fleet tick is byte-identical to before this seam.
 	tierProfile, tierBucket := dispatchTierLaunchProfile(opts.Backend, labels, opts.WorkKind)
 	modelPolicy := resolveWorkerModelPolicy(opts.Backend, pick.Lane, opts.WorkerModel, account, dispatchTickPolicy(root), opts.PinWorkerModel, tierProfile, opts.WorkClassModel)
+	if opts.CapacityReason != "" {
+		reroute := modelroute.RerouteCapacity(opts.CapacityFrom, modelroute.CapacitySignal{Blocked: true, Reason: opts.CapacityReason, RequiredModelB: opts.RequiredModelB, RequiredContext: opts.RequiredContext}, opts.CapacityTargets)
+		payload["capacity_reroute"] = reroute
+		if reroute.Rerouted {
+			modelPolicy.Model = reroute.To.Model
+			modelPolicy.Source = "capacity_reroute"
+		}
+	}
 	// Preventive placement gate (#3521). The tier table is DIFFICULTY-driven and happily puts
 	// the cheap model on the MOST churning bucket (BucketUltra -> fable+ultracode). Before
 	// launch, refuse a (work-shape × model-reliability) pairing the model cannot hold and
