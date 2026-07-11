@@ -24,6 +24,11 @@
 //   - the per-regime turn buckets — frozen (reuse >= FrozenFloor), partial, cold
 //     (reuse < ColdCeil) — show WHEN turns leave the frozen regime, which a single
 //     cumulative ratio hides.
+//   - the preempted vs cold miss-token split (#3895, vLLM's preempted_* counter split):
+//     of the prompt tokens a turn had to re-prefill (promptTokens - reusedTokens), the
+//     share SELF-INFLICTED by admission evicting a still-warm entry is booked separately
+//     from genuine cold/capacity misses, so eviction pressure cannot masquerade as low
+//     cache value.
 package cacheobs
 
 import (
@@ -64,9 +69,18 @@ type Observer struct {
 	// the prefix index at lookup time, whether or not eviction/admission then let them
 	// be served. Always >= reusedTokens (a served token was necessarily matched).
 	cacheableTokens uint64
-	frozen          uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
-	partial         uint64 // turns between ColdCeil and FrozenFloor
-	cold            uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
+	// preemptedReuseLostTokens / coldMissTokens split every turn's missed prompt tokens
+	// (promptTokens - reusedTokens) by cause (#3895, vLLM's preempted_* counter split):
+	// preempted is the SELF-INFLICTED share — admission evicted a still-warm entry and
+	// forced this turn to recompute tokens the cache had already paid for — while cold
+	// is everything else: a genuine cold / capacity miss, or a miss with no eviction
+	// witness (attribution defaults to cold, never to a fabricated self-infliction).
+	// preempted + cold == promptTokens - reusedTokens by construction.
+	preemptedReuseLostTokens uint64
+	coldMissTokens           uint64
+	frozen                   uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
+	partial                  uint64 // turns between ColdCeil and FrozenFloor
+	cold                     uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
 	// reuseHist[i] counts turns whose ratio fell in (ReuseRatioBuckets[i-1],
 	// ReuseRatioBuckets[i]] — per-bucket (non-cumulative) so each increment touches
 	// one slot; a renderer accumulates left-to-right to emit `le` lines.
@@ -96,8 +110,34 @@ func (o *Observer) Observe(promptTokens, reusedPrefixTokens int) {
 // a token cannot be served without having matched, so the CacheabilityRatio >= ReuseRatio
 // invariant holds by construction and the gap between them is exactly the eviction/
 // admission loss. Regime buckets and the histogram stay keyed on the REALIZED ratio —
-// the split adds the lookup rate beside them, it does not redefine them.
+// the split adds the lookup rate beside them, it does not redefine them. With no
+// eviction witness the turn's missed tokens are attributed to the cold bucket (#3895):
+// a tap that KNOWS the miss was self-inflicted uses ObservePreempted instead.
 func (o *Observer) ObserveSplit(promptTokens, cacheablePrefixTokens, reusedPrefixTokens int) {
+	o.observeAttributed(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, 0)
+}
+
+// ObservePreempted records one served in-kernel turn exactly like ObserveSplit and
+// additionally attributes preemptedLostTokens of the turn's missed prompt tokens
+// (promptTokens - reusedPrefixTokens) to SELF-INFLICTED eviction (#3895, vLLM's
+// preempted_* counter split): admission evicted a still-warm entry, so this turn had to
+// recompute tokens the cache had already paid for. The caller supplies the witness —
+// typically the cache lifecycle, which knows the refetched key was evicted while warm;
+// cacheobs never infers preemption on its own. preemptedLostTokens is clamped into
+// [0, promptTokens - reusedPrefixTokens] after the ObserveSplit clamps (a served token
+// was not lost to anything), and the remainder of the miss books to the cold bucket, so
+// PreemptedReuseLostTokens + ColdMissTokens == PromptTokens - ReusedTokens always
+// reconciles. Every pre-existing counter, regime bucket, histogram slot, and the
+// CacheabilityRatio/ReuseRatio aggregates accumulate exactly as ObserveSplit — the
+// attribution splits the miss, it never changes the aggregate's meaning.
+func (o *Observer) ObservePreempted(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens int) {
+	o.observeAttributed(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens)
+}
+
+// observeAttributed is the shared accumulation core behind Observe / ObserveSplit /
+// ObservePreempted: the #3390 lookup-vs-realized clamps and counters, plus the #3895
+// miss-cause attribution (preempted vs cold) of the turn's un-reused prompt tokens.
+func (o *Observer) observeAttributed(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens int) {
 	if o == nil || promptTokens <= 0 {
 		return
 	}
@@ -113,12 +153,21 @@ func (o *Observer) ObserveSplit(promptTokens, cacheablePrefixTokens, reusedPrefi
 	if cacheablePrefixTokens > promptTokens {
 		cacheablePrefixTokens = promptTokens
 	}
+	missTokens := promptTokens - reusedPrefixTokens
+	if preemptedLostTokens < 0 {
+		preemptedLostTokens = 0
+	}
+	if preemptedLostTokens > missTokens {
+		preemptedLostTokens = missTokens
+	}
 	ratio := float64(reusedPrefixTokens) / float64(promptTokens)
 	o.mu.Lock()
 	o.turns = saturatingAddU64(o.turns, 1)
 	o.promptTokens = saturatingAddU64(o.promptTokens, uint64(promptTokens))
 	o.reusedTokens = saturatingAddU64(o.reusedTokens, uint64(reusedPrefixTokens))
 	o.cacheableTokens = saturatingAddU64(o.cacheableTokens, uint64(cacheablePrefixTokens))
+	o.preemptedReuseLostTokens = saturatingAddU64(o.preemptedReuseLostTokens, uint64(preemptedLostTokens))
+	o.coldMissTokens = saturatingAddU64(o.coldMissTokens, uint64(missTokens-preemptedLostTokens))
 	switch {
 	case ratio >= FrozenFloor:
 		o.frozen = saturatingAddU64(o.frozen, 1)
@@ -159,9 +208,22 @@ type Stats struct {
 	// matched the prefix index at lookup time, before eviction/admission decided what
 	// was servable. Always >= ReusedTokens; equal when every tap lacked lookup info.
 	CacheableTokens uint64
-	FrozenTurns     uint64
-	PartialTurns    uint64
-	ColdTurns       uint64
+	// PreemptedReuseLostTokens is the SELF-INFLICTED share of the missed prompt tokens
+	// (#3895, vLLM's preempted_* counter split): tokens a turn had to recompute because
+	// admission evicted a still-warm entry, as witnessed by an ObservePreempted tap.
+	// Kept strictly apart from ColdMissTokens so eviction pressure cannot masquerade
+	// as low cache value. It sub-attributes the miss side; the CacheabilityRatio -
+	// ReuseRatio aggregate keeps its exact pre-split meaning.
+	PreemptedReuseLostTokens uint64
+	// ColdMissTokens is every other missed prompt token: a genuine cold / capacity
+	// miss, or a miss observed without an eviction witness (Observe / ObserveSplit
+	// default the attribution here — the honest default, never a fabricated
+	// self-infliction). PreemptedReuseLostTokens + ColdMissTokens ==
+	// PromptTokens - ReusedTokens (barring saturation at MaxUint64).
+	ColdMissTokens uint64
+	FrozenTurns    uint64
+	PartialTurns   uint64
+	ColdTurns      uint64
 	// ReuseRatio is reusedTokens/promptTokens — the realized cache-hit across all observed
 	// turns. 0 when no turns have prompt tokens yet (an idle process never reports a
 	// phantom ratio).
@@ -250,14 +312,16 @@ func (o *Observer) Snapshot() Stats {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	s := Stats{
-		Turns:           o.turns,
-		PromptTokens:    o.promptTokens,
-		ReusedTokens:    o.reusedTokens,
-		CacheableTokens: o.cacheableTokens,
-		FrozenTurns:     o.frozen,
-		PartialTurns:    o.partial,
-		ColdTurns:       o.cold,
-		ReuseHistTurns:  o.reuseHist,
+		Turns:                    o.turns,
+		PromptTokens:             o.promptTokens,
+		ReusedTokens:             o.reusedTokens,
+		CacheableTokens:          o.cacheableTokens,
+		PreemptedReuseLostTokens: o.preemptedReuseLostTokens,
+		ColdMissTokens:           o.coldMissTokens,
+		FrozenTurns:              o.frozen,
+		PartialTurns:             o.partial,
+		ColdTurns:                o.cold,
+		ReuseHistTurns:           o.reuseHist,
 	}
 	if o.promptTokens > 0 {
 		s.ReuseRatio = float64(o.reusedTokens) / float64(o.promptTokens)
