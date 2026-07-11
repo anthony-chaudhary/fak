@@ -127,3 +127,41 @@ if __name__ == "__main__":
         sys.exit(1 if failed else 0)
 
     sys.exit(pytest.main([__file__, "-q"]))
+
+def test_supervisor_alive_bounds_pgrep(monkeypatch):
+    seen = {}
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        raise wd.subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(wd.subprocess, "run", fake_run)
+    assert wd.supervisor_alive() == []
+    assert seen["timeout"] == wd.PGREP_TIMEOUT_S
+
+
+def test_main_bounds_unknown_verdict_probe(tmp_path, monkeypatch):
+    job = tmp_path / "job"
+    scripts = job / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "run_supervise_loop.py").write_text("", encoding="utf-8")
+    (scripts / "supervise_now.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(wd, "JOB_DIR", str(job))
+    monkeypatch.setattr(wd, "LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(wd, "ENABLED", True)
+    monkeypatch.setattr(wd, "supervisor_alive", lambda: [])
+    monkeypatch.setattr(wd, "toast", lambda *args: None)
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append((argv, kwargs))
+        raise wd.subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+    class FakeProc:
+        pid = 123
+
+    monkeypatch.setattr(wd.subprocess, "run", fake_run)
+    monkeypatch.setattr(wd.subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    assert wd.main() == 10
+    assert seen[0][1]["timeout"] == wd.VERDICT_TIMEOUT_S
+

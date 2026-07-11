@@ -44,6 +44,8 @@ LOG_DIR = os.environ.get("FAK_WATCHDOG_LOG_DIR", os.path.join(HERE, "_watchdog")
 # Slack carries exactly the "supervisor was down and I brought it back" events.
 SLACK = ("--slack" in sys.argv) or _env_flag("FAK_DISPATCH_SLACK")
 SLACK_DRY = "--slack-dry-run" in sys.argv
+PGREP_TIMEOUT_S = float(os.environ.get("FAK_SUPERVISOR_PGREP_TIMEOUT_S", "5"))
+VERDICT_TIMEOUT_S = float(os.environ.get("FAK_SUPERVISOR_VERDICT_TIMEOUT_S", "60"))
 
 
 def now_iso() -> str:
@@ -94,7 +96,7 @@ def supervisor_alive() -> list[int]:
     try:
         out = subprocess.run(
             ["pgrep", "-f", "run_supervise_loop.py"],
-            check=False, capture_output=True, text=True,
+            check=False, capture_output=True, text=True, timeout=PGREP_TIMEOUT_S,
         ).stdout
         return [int(x) for x in out.split()]
     except Exception:
@@ -126,7 +128,7 @@ def main() -> int:
         j = json.loads(
             subprocess.run(
                 [py, os.path.join(JOB_DIR, "scripts", "supervise_now.py"), "--json"],
-                check=False, capture_output=True, text=True,
+                check=False, capture_output=True, text=True, timeout=VERDICT_TIMEOUT_S,
             ).stdout
             or "{}"
         )
