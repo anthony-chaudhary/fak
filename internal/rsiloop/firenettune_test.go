@@ -19,7 +19,7 @@ func TestScoreCompactionFireNetSign(t *testing.T) {
 		Seq: 3, PredictedHorizonMargin: 1,
 		ShedTokens: 1000, BurstTokens: 1000, ObservedHorizonTurns: 2,
 	})
-	wantShed := 1000 * cacheprice.ReadMultiplier * 2                       // 200
+	wantShed := 1000 * cacheprice.ReadMultiplier * 2                               // 200
 	wantBurst := 1000 * (cacheprice.Write5mMultiplier - cacheprice.ReadMultiplier) // 1150
 	if !approxEq(neg.ShedSavingTokenEquiv, wantShed) {
 		t.Fatalf("shed saving = %v, want %v", neg.ShedSavingTokenEquiv, wantShed)
