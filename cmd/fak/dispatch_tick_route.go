@@ -578,7 +578,14 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 	// "depends-on:/blocked-by: #N" prerequisite is still an OPEN candidate this tick. Runs AFTER
 	// known-bad on purpose -- a known-bad-held prerequisite stays in SkippedHumanBlocked (still
 	// open), so a dependent of it remains correctly held. Fails open on a closed/absent prerequisite.
-	return holdOpenPrereqForRoute(payload), nil
+	payload = holdOpenPrereqForRoute(payload)
+	fields := dispatchFetchProjectFields(root)
+	for lane, group := range payload.Lanes {
+		group.Priority, group.Issues = dispatchtick.MergeProjectFields(group.Priority, group.Issues, fields)
+		group.Count = len(group.Issues)
+		payload.Lanes[lane] = group
+	}
+	return payload, nil
 }
 
 // dispatchRoutedBeforePrereqHold fetches, routes, and applies the known-bad scope-hold, but NOT the
