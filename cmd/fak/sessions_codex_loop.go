@@ -45,6 +45,7 @@ type codexLoopDiagnosis struct {
 	Originator        string                 `json:"originator,omitempty"`
 	CLI               string                 `json:"cli_version,omitempty"`
 	ModelProvider     string                 `json:"model_provider,omitempty"`
+	GuardWitnessed    bool                   `json:"guard_witnessed,omitempty"`
 	GitCommit         string                 `json:"git_commit,omitempty"`
 	GitBranch         string                 `json:"git_branch,omitempty"`
 	StartedAt         string                 `json:"started_at,omitempty"`
@@ -291,9 +292,6 @@ type codexLoopHookRunResult struct {
 // decision exists. A timeout, panic, or ordinary fail-open result therefore returns 0
 // with zero output bytes, regardless of what the inner path attempted to report.
 func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
-	if os.Getenv(guardActiveEnv) == "1" {
-		return 0
-	}
 	diagnose := codexLoopHookDiagnose
 	budget := codexLoopHookBudget
 	resultc := make(chan codexLoopHookRunResult, 1)
@@ -342,6 +340,54 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 	}
 }
 
+func codexGuardWitnessPath(codexHome, sessionID string) (string, error) {
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return "", err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || filepath.Base(sessionID) != sessionID {
+		return "", errors.New("invalid Codex session id for guard witness")
+	}
+	return filepath.Join(home, "fak-guarded-sessions", sessionID+".json"), nil
+}
+
+func writeCodexGuardWitness(codexHome, sessionID string) error {
+	path, err := codexGuardWitnessPath(codexHome, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	body, err := json.Marshal(struct {
+		Schema    string `json:"schema"`
+		SessionID string `json:"session_id"`
+		GuardedAt string `json:"guarded_at"`
+	}{"fak.codex_guard_witness.v1", sessionID, time.Now().UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	return os.WriteFile(path, body, 0o600)
+}
+
+func codexGuardWitnessExists(codexHome, sessionID string) bool {
+	path, err := codexGuardWitnessPath(codexHome, sessionID)
+	if err != nil {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var witness struct {
+		Schema    string `json:"schema"`
+		SessionID string `json:"session_id"`
+	}
+	return json.Unmarshal(raw, &witness) == nil && witness.Schema == "fak.codex_guard_witness.v1" && witness.SessionID == sessionID
+}
+
 func codexLoopFirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -372,23 +418,18 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	if *allowDirect || codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookOverrideEnv)) {
 		return 0
 	}
-	// A session already wrapped by `fak guard` cannot be an unguarded direct-provider
-	// continuation: the gateway adjudicates every turn and the launch-time loop gate has
-	// already run. guard marks the child env with guardActiveEnv (see guard_child.go),
-	// inherited by this hook subprocess, so short-circuit BEFORE decoding the payload and
-	// opening/reparsing the whole (growing) session file every turn — the guarded dogfood
-	// path pays O(1), not O(n) in transcript length, per turn. Direct `codex` launches lack
-	// the marker and still get the full diagnose-and-block below. (#4210)
-	if codexLoopHookOverrideEnabled(os.Getenv(guardActiveEnv)) {
-		return 0
-	}
-
 	var in codexLoopHookInput
 	if err := json.NewDecoder(io.LimitReader(stdin, 1<<20)).Decode(&in); err != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: unreadable hook payload (allowing turn): %v\n", err)
 		return 0
 	}
 	sessionID := codexLoopFirstNonEmpty(in.SessionID, in.ThreadID, in.ConversationID, os.Getenv("CODEX_THREAD_ID"))
+	if sessionID != "" && codexLoopHookOverrideEnabled(os.Getenv(guardActiveEnv)) {
+		if err := writeCodexGuardWitness(*codexHome, sessionID); err != nil {
+			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: persist guard witness: %v (allowing turn)\n", err)
+		}
+		return 0
+	}
 	if sessionID == "" {
 		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload and CODEX_THREAD_ID have no session identifier (allowing turn)")
 		return 0
@@ -407,6 +448,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	// Snapshot and close before diagnosis. An injected/slow/panicking diagnose path
 	// must never retain a Windows file handle after the outer budget allows the turn.
 	d, diagnoseErr := diagnose(fh, resolved)
+	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, sessionID)
 	closeErr := fh.Close()
 	if diagnoseErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn)\n", diagnoseErr)
@@ -505,8 +547,7 @@ func codexLoopDiagnosisGateReason(d codexLoopDiagnosis, failOn string) string {
 }
 
 func codexLoopDiagnosisUnguarded(d codexLoopDiagnosis) bool {
-	provider := strings.TrimSpace(d.ModelProvider)
-	return provider != "" && !strings.EqualFold(provider, "fak")
+	return strings.TrimSpace(d.ModelProvider) != "" && !d.GuardWitnessed
 }
 
 // codexLoopGuardedLaunchGate distinguishes a loop that a guarded launch can
@@ -633,6 +674,7 @@ func diagnoseRecentCodexLoopsWith(codexHome string, sinceHours float64, limit in
 		if err != nil {
 			return r, fmt.Errorf("diagnose %s: %w", path, err)
 		}
+		d.GuardWitnessed = codexGuardWitnessExists(home, d.SessionID)
 		r.Diagnoses = append(r.Diagnoses, d)
 		r.Scanned++
 		r.ToolCalls += d.ToolCalls
@@ -640,7 +682,7 @@ func diagnoseRecentCodexLoopsWith(codexHome string, sinceHours float64, limit in
 		r.LastTokenTotalSum += d.LastTokenTotal
 		if provider := strings.TrimSpace(d.ModelProvider); provider != "" {
 			r.ProviderCounts[provider]++
-			if !strings.EqualFold(provider, "fak") {
+			if codexLoopDiagnosisUnguarded(d) {
 				r.UnguardedCount++
 			}
 		}
@@ -648,7 +690,7 @@ func diagnoseRecentCodexLoopsWith(codexHome string, sinceHours float64, limit in
 		case "LOOP":
 			r.LoopCount++
 			switch {
-			case strings.EqualFold(strings.TrimSpace(d.ModelProvider), "fak"):
+			case d.GuardWitnessed:
 				r.GuardedLoopCount++
 			case codexLoopDiagnosisUnguarded(d):
 				r.UnguardedLoopCount++

@@ -223,8 +223,8 @@ func TestCodexLoopHookPartialFinalLine(t *testing.T) {
 			codexHookMetaLine(t, "fak"),
 			`{"type":"response_item","payload":{"type":"func`,
 		})
-		code, stdout, stderr := runCodexLoopHookForTest(t, home, codexHookEdgePayload(sessionID))
-		assertCodexHookAllow(t, code, stdout, stderr)
+		code, stdout, _ := runCodexLoopHookForTest(t, home, codexHookEdgePayload(sessionID))
+		assertCodexHookBlock(t, code, stdout, "fak")
 	})
 }
 
@@ -245,10 +245,10 @@ func TestCodexLoopHookEdgeProviderStrings(t *testing.T) {
 		{name: "openai blocks", provider: "openai", wantBlock: true, providerInText: "openai"},
 		{name: "mixed case OpenAI blocks", provider: "OpenAI", wantBlock: true, providerInText: "OpenAI"},
 		{name: "uppercase ANTHROPIC blocks", provider: "ANTHROPIC", wantBlock: true, providerInText: "ANTHROPIC"},
-		{name: "fak allows", provider: "fak", wantBlock: false},
-		{name: "uppercase FAK allows", provider: "FAK", wantBlock: false},
-		{name: "titlecase Fak allows", provider: "Fak", wantBlock: false},
-		{name: "padded fak allows", provider: "  fak  ", wantBlock: false},
+		{name: "fak without witness blocks", provider: "fak", wantBlock: true, providerInText: "fak"},
+		{name: "uppercase FAK without witness blocks", provider: "FAK", wantBlock: true, providerInText: "FAK"},
+		{name: "titlecase Fak without witness blocks", provider: "Fak", wantBlock: true, providerInText: "Fak"},
+		{name: "padded fak without witness blocks", provider: "  fak  ", wantBlock: true, providerInText: "fak"},
 		{name: "empty provider allows", provider: "", wantBlock: false},
 		{name: "whitespace provider allows", provider: "   ", wantBlock: false},
 		{name: "fak lookalike hyphen blocks", provider: "fak-direct", wantBlock: true, providerInText: "fak-direct"},

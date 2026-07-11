@@ -252,6 +252,34 @@ func TestSessionsCodexLoopKeepsSubagentIdentityAndCustomToolTraffic(t *testing.T
 	}
 }
 
+func TestRecentCodexLoopTreatsSpoofedFakProviderAsUnguarded(t *testing.T) {
+	home := t.TempDir()
+	sessionID := "019f4350-52dd-7001-b559-2818dc14ede6"
+	dir := filepath.Join(home, "sessions", "2026", "07", "11")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-2026-07-11T10-00-00-"+sessionID+".jsonl")
+	writeCodexLoopFixture(t, path, []string{`{"timestamp":"2026-07-11T17:00:00Z","type":"session_meta","payload":{"id":"` + sessionID + `","model_provider":"fak"}}`})
+	rep, err := diagnoseRecentCodexLoops(home, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.UnguardedCount != 1 || len(rep.Diagnoses) != 1 || rep.Diagnoses[0].GuardWitnessed {
+		t.Fatalf("spoofed provider fold: %+v diagnoses=%+v", rep, rep.Diagnoses)
+	}
+	if err := writeCodexGuardWitness(home, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = diagnoseRecentCodexLoops(home, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.UnguardedCount != 0 || !rep.Diagnoses[0].GuardWitnessed {
+		t.Fatalf("witnessed provider fold: %+v diagnoses=%+v", rep, rep.Diagnoses)
+	}
+}
+
 func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-home")
 	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "05")
@@ -367,8 +395,8 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 // bogus relative "sessions" root that fails the live continuation hook open.
 func TestResolvedCodexLoopHomeTrimsPollutedEnv(t *testing.T) {
 	userHome := t.TempDir()
-	t.Setenv("HOME", userHome)          // POSIX os.UserHomeDir
-	t.Setenv("USERPROFILE", userHome)   // Windows os.UserHomeDir
+	t.Setenv("HOME", userHome)        // POSIX os.UserHomeDir
+	t.Setenv("USERPROFILE", userHome) // Windows os.UserHomeDir
 	wantFallback := filepath.Clean(filepath.Join(userHome, ".codex"))
 
 	t.Run("whitespace-only env falls back to ~/.codex", func(t *testing.T) {

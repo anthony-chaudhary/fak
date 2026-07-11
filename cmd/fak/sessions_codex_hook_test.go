@@ -93,7 +93,6 @@ func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 		provider string
 		override string
 	}{
-		{name: "guarded fak provider", provider: "fak"},
 		{name: "explicit direct override", provider: "openai", override: "1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,6 +116,41 @@ func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 // — even when the session's own model_provider would otherwise be diagnosed unguarded and
 // blocked (contrast TestCodexLoopHookBlocksActiveDirectContinuation with the same fixture).
 // This keeps the per-turn hook off the growing session file on the guarded dogfood path.
+func TestCodexLoopHookSpoofedFakProviderBlocksWithoutGuardWitness(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
+	home, sessionID := writeCodexHookSession(t, "fak")
+	payload := `{"session_id":"` + sessionID + `"}`
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	var block codexLoopHookBlock
+	if err := json.Unmarshal(stdout.Bytes(), &block); err != nil || block.Decision != "block" {
+		t.Fatalf("spoofed fak provider was not blocked: err=%v stdout=%q", err, stdout.String())
+	}
+}
+
+func TestCodexLoopHookGuardMarkerPersistsWitnessThenAllowsWithoutEnv(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	home, sessionID := writeCodexHookSession(t, "fak")
+	payload := `{"session_id":"` + sessionID + `"}`
+	t.Setenv(guardActiveEnv, "1")
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 || stdout.Len() != 0 {
+		t.Fatalf("guarded first turn exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !codexGuardWitnessExists(home, sessionID) {
+		t.Fatal("guarded turn did not persist session witness")
+	}
+	t.Setenv(guardActiveEnv, "")
+	stdout.Reset()
+	stderr.Reset()
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 || stdout.Len() != 0 {
+		t.Fatalf("witnessed continuation exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestCodexLoopHookSessionIdentifierAliases(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
 	t.Setenv(guardActiveEnv, "")
