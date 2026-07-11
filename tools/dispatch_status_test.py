@@ -998,6 +998,46 @@ class LeaseStateTest(unittest.TestCase):
         self.assertEqual(by_id["resolve-gateway"]["liveness"], "peer-unknown")
         self.assertFalse(by_id["resolve-gateway"]["reclaimable"])
 
+    def test_summarize_leases_counts_stranded_vs_live_blocking(self) -> None:
+        # #4324: LANE_LEASE_HELD refusals against a dead holder ("phantom"
+        # collisions) must be countable separately from refusals against a
+        # genuinely live peer, so a release-on-exit fix's effect is measurable.
+        mod = load()
+        state = mod.summarize_leases([
+            {
+                "id": "resolve-tools-1762",
+                "tree_globs": ["tools/**"],
+                "holder": "node-a/s-stopped",
+                "session_id": "s-stopped",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+            {
+                "id": "resolve-tools-1763",
+                "tree_globs": ["tools/**"],
+                "holder": "node-a/s-live",
+                "session_id": "s-live",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+            {
+                "id": "resolve-model-1700",
+                "tree_globs": ["internal/model/**"],
+                "holder": "peer-b",
+                "acquired_unix": 1_100,
+                "ttl_seconds": 3_600,
+            },
+        ], self._backlog(), sessions={
+            "s-stopped": {"id": "s-stopped", "pcb_state": "STOPPED",
+                          "updated_at": 1_500, "ttl_seconds": 600},
+            "s-live": {"id": "s-live", "pcb_state": "RUNNING",
+                       "updated_at": 1_500, "ttl_seconds": 600},
+        }, now_ts=1_600)
+
+        self.assertEqual(state["blocking_count"], 2)
+        self.assertEqual(state["blocking_stranded_count"], 1)
+        self.assertEqual(state["blocking_live_count"], 1)
+
     def test_age_text_formats_minutes_and_hours(self) -> None:
         mod = load()
         self.assertEqual(mod._age_text(10.0), "10m")

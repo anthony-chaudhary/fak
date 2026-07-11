@@ -1017,13 +1017,23 @@ def summarize_leases(records: list[dict[str, Any]], backlog: dict[str, Any],
 
     active.sort(key=lambda r: (not bool(r.get("blocks_candidate")), str(r.get("lane") or ""), str(r.get("id") or "")))
     expired.sort(key=lambda r: str(r.get("id") or ""))
+    blocking_count = sum(1 for r in active if r.get("blocks_candidate"))
+    # #4324: split blocking leases by holder liveness so the PHANTOM share (a
+    # blocking lease whose holder session is provably dead — `reclaimable`) is
+    # measurable before/after a release-on-exit fix, not just the raw blocking
+    # count. `blocking_live_count` covers both a live holder and an unknown
+    # holder (no session_id -> not provably dead; never counted as phantom).
+    blocking_stranded_count = sum(
+        1 for r in active if r.get("blocks_candidate") and r.get("reclaimable"))
     return {
         "source": "refs/fak/locks",
         "candidate_source_available": candidate_source_available,
         "candidate_count": len(candidates),
         "active_count": len(active),
         "expired_count": len(expired),
-        "blocking_count": sum(1 for r in active if r.get("blocks_candidate")),
+        "blocking_count": blocking_count,
+        "blocking_stranded_count": blocking_stranded_count,
+        "blocking_live_count": blocking_count - blocking_stranded_count,
         "active": active,
         "expired": expired[:8],
     }
@@ -3644,9 +3654,11 @@ def render(p: dict[str, Any]) -> str:
         lines.append(f"║ leases    : unavailable ({leases.get('read_error')})")
     elif leases.get("active_count"):
         bits = "; ".join(_lease_summary_bits(leases))
+        phantom = leases.get("blocking_stranded_count", 0)
+        phantom_bit = f", {phantom} phantom" if phantom else ""
         lines.append(
             f"║ leases    : {leases.get('active_count')} active, "
-            f"{leases.get('blocking_count', 0)} blocking [{bits}]")
+            f"{leases.get('blocking_count', 0)} blocking{phantom_bit} [{bits}]")
     wl = p.get("worker_lease_check") or {}
     if wl.get("available") is False:
         lines.append(f"║ lease chk : unknown ({wl.get('error')})")
