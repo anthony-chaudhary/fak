@@ -9,11 +9,12 @@ import (
 // TestRunResumeResolveNotFound drives the CLI end-to-end against an empty home: no
 // ~/.claude* dir holds the session, so the resolver returns NOT_FOUND, exit 1, and an
 // empty stdout (nothing to pin). This exercises the roster-build + Resolve wiring
-// without a live fleet.
+// without a live fleet. The id is full-length (>= 32 chars, looksLikeFullSessionID) so
+// it flows past the NOT_FULL_ID typo-guard into the genuine not-found path.
 func TestRunResumeResolveNotFound(t *testing.T) {
 	home := t.TempDir()
 	var out, errb bytes.Buffer
-	code := runResumeResolve(&out, &errb, []string{"--home", home, "no-such-session"})
+	code := runResumeResolve(&out, &errb, []string{"--home", home, "00000000-0000-0000-0000-000000000000"})
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (NOT_FOUND); stderr=%q", code, errb.String())
 	}
@@ -25,11 +26,12 @@ func TestRunResumeResolveNotFound(t *testing.T) {
 	}
 }
 
-// TestRunResumeResolveJSONNotFound: --json still exits 1 but emits the record.
+// TestRunResumeResolveJSONNotFound: --json still exits 1 but emits the record. The id is
+// full-length so the miss resolves to NOT_FOUND, not the NOT_FULL_ID typo-guard.
 func TestRunResumeResolveJSONNotFound(t *testing.T) {
 	home := t.TempDir()
 	var out, errb bytes.Buffer
-	code := runResumeResolve(&out, &errb, []string{"--home", home, "--json", "ghost"})
+	code := runResumeResolve(&out, &errb, []string{"--home", home, "--json", "11111111-1111-1111-1111-111111111111"})
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
