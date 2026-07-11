@@ -89,12 +89,45 @@ func ResetForTest() {
 	reg.engines = map[string]EngineDriver{}
 	reg.regionBackend = nil
 	reg.kvBackend = nil
-	reg.pageOut = map[string]PageOutBackend{}
+	// Page-out codecs are the ONE registry reset RESTORES rather than empties. The rest of
+	// the reset clears the controlled driver surface a test assembles by hand (adjudicators,
+	// ops, engines) — but a page-out codec (notably internal/blob's "blob" default, wired at
+	// blob.init()) is a passive, stateless, content-addressed backend a test never means to
+	// strip. Emptying it left a sibling paging/evict test's abi.PageOut("blob") backend-less
+	// and returning false — a silent, order-dependent flake (the victim passed alone, failed
+	// after any resetting sibling ran first). See builtinPageOut for why the baseline is
+	// captured here instead of re-registered by each caller.
+	reg.pageOut = restoredBuiltinPageOut()
 	reg.witnesses = map[string]WitnessResolver{}
 	reg.stewards = nil
 	reg.sinks = nil
 	reg.screens = nil
 	rebuildSnapshot()
+}
+
+// builtinPageOut snapshots the page-out codecs registered at init() (the built-in "blob"
+// default, plus any optional sidecar codec a linked leaf registered) the FIRST time
+// ResetForTest runs — before it clears them. Every package init() has completed by the
+// first reset, so this baseline is exactly the process's built-in codec set. Capturing it
+// here (rather than having ResetForTest re-register "blob" directly) keeps abi a leaf: it
+// need not import internal/blob, which would be an import cycle (blob imports abi, never the
+// reverse). Guarded by reg.mu — read and written only inside ResetForTest under the lock.
+var builtinPageOut map[string]PageOutBackend
+
+// restoredBuiltinPageOut returns a fresh copy of the built-in page-out codec baseline,
+// capturing it from the live registry on first call. Callers hold reg.mu.
+func restoredBuiltinPageOut() map[string]PageOutBackend {
+	if builtinPageOut == nil {
+		builtinPageOut = make(map[string]PageOutBackend, len(reg.pageOut))
+		for id, b := range reg.pageOut {
+			builtinPageOut[id] = b
+		}
+	}
+	out := make(map[string]PageOutBackend, len(builtinPageOut))
+	for id, b := range builtinPageOut {
+		out[id] = b
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

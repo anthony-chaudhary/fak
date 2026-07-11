@@ -503,3 +503,13 @@ func TestDefaultStoreViaABI(t *testing.T) {
 		t.Fatalf("Default PageOut/PageIn via ABI: bytes not identical")
 	}
 }
+
+func TestABIResetPreservesBuiltinBlobPageOut(t *testing.T) {
+	if _, ok := abi.PageOut("blob"); !ok {
+		t.Fatal("blob page-out backend must be registered before reset")
+	}
+	abi.ResetForTest()
+	if _, ok := abi.PageOut("blob"); !ok {
+		t.Fatal("ResetForTest removed the built-in blob page-out backend")
+	}
+}
