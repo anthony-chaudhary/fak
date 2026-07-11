@@ -28,6 +28,13 @@ ci: build gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-
 
 build:
 	go build ./...
+	# Emit a debuggable ./fak through the ONE build entrypoint (dev profile, #3710):
+	# DWARF/symbols kept + host paths intact so Delve can step, BuildVersion stamped so
+	# `fak version` is honest — the object cache is shared with the `go build ./...` above,
+	# so this is a link step, not a rebuild. Set GCFLAGS='all=-N -l' for pristine stepping.
+	# The shipped stripped/reproducible binary is `make release`; the race variant is
+	# `make build-race`; see docs/dev-tooling.md for the profile flag-delta table.
+	OUT=fak PROFILE=dev sh scripts/build.sh
 	# Drop the repo-guard PreToolUse hook binary into the (gitignored) tools/.bin so
 	# the Claude Code hook runs the Go guard instead of spawning Python per tool call
 	# (.claude/settings.json prefers this binary, falling back to tools/repo_guard.py
@@ -51,6 +58,20 @@ build:
 # workflow ship. Plain `build:` above stays the fast dev build.
 release:
 	sh scripts/build.sh
+
+# build-race (#3710): the opt-in race-instrumented dev binary, built through the ONE
+# entrypoint (scripts/build.sh, PROFILE=race). -race REQUIRES cgo (CGO_ENABLED=1), so
+# this is NOT the static pure-Go binary `make build` / `make release` produce. Same cc
+# preflight as `test-race`: REFUSE (exit 2) on a cgo-less toolchain rather than silently
+# building a race-BLIND binary. See docs/dev-tooling.md for the profile flag-delta table.
+.PHONY: build-race
+build-race:
+	@command -v cc >/dev/null 2>&1 && cc --version >/dev/null 2>&1 || { \
+		echo "build-race: BLOCKED -- no working C compiler (cc); the Go race detector needs cgo (CGO_ENABLED=1)." >&2; \
+		echo "  Building -race without it silently produces a race-BLIND binary. Run on a cgo-capable box (WSL/Linux/macOS)." >&2; \
+		exit 2; }
+	CGO_ENABLED=1 OUT=fak PROFILE=race sh scripts/build.sh
+	@echo "build-race OK (race-instrumented ./fak via scripts/build.sh PROFILE=race; NOT the static binary)"
 
 # clean: prune the stray go-build binaries that pile up at the module root across
 # bench/demo builds (hundreds of MB of gitignored *.exe / bare cmd/<name> outputs).

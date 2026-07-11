@@ -60,6 +60,50 @@ class BuildEntrypointExistsTest(unittest.TestCase):
         self.assertNotIn("CGO_ENABLED=", code)
 
 
+class ProfileSelectorTest(unittest.TestCase):
+    """#3710 — the one recipe grew named dev/race profiles beside the shipped release
+    profile. These pin the profile posture so a debuggable `make build` cannot silently
+    regress into a stripped build (or the reverse)."""
+
+    def setUp(self) -> None:
+        self.text = BUILD_SH.read_text(encoding="utf-8")
+        # Code only: the header comment documents every profile, so posture assertions
+        # must look at the actual `case` branches, not the prose that describes them.
+        self.code = "\n".join(
+            ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#")
+        )
+
+    def test_implements_the_three_profiles(self) -> None:
+        # Each profile must be a selectable `case` branch, not just documented in prose.
+        for branch in ("release)", "dev)", "race)"):
+            self.assertIn(branch, self.code,
+                          f"build.sh must implement the {branch[:-1]} profile as a case branch")
+
+    def test_strip_is_release_only(self) -> None:
+        # The strip flags belong to the SHIPPED profile only; a debuggable `make build`
+        # must keep DWARF. Exactly one code occurrence of `-s -w` (the release branch).
+        self.assertEqual(self.code.count("-s -w"), 1,
+                         "the strip flags -s -w must appear once, in the release profile only")
+
+    def test_trimpath_is_release_only(self) -> None:
+        # -trimpath removes host paths (reproducible ship) but also the source paths a
+        # debugger needs — so it, too, is release-only. One code occurrence.
+        self.assertEqual(self.code.count("-trimpath"), 1,
+                         "-trimpath must appear once, in the release profile only")
+
+    def test_race_profile_passes_the_detector(self) -> None:
+        self.assertIn("-race", self.code, "the race profile must pass -race to go build")
+
+    def test_makefile_routes_dev_and_race_through_the_script(self) -> None:
+        # `make build` (dev) and `make build-race` (race) must both select a profile via
+        # the entrypoint, never re-type a bare `go build -o fak ./cmd/fak`.
+        mk = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("PROFILE=dev sh scripts/build.sh", mk,
+                      "`make build` must emit ./fak through the dev profile of the entrypoint")
+        self.assertIn("PROFILE=race sh scripts/build.sh", mk,
+                      "`make build-race` must build through the race profile of the entrypoint")
+
+
 class NoInlineRecipeDriftTest(unittest.TestCase):
     def test_consumers_route_through_the_script(self) -> None:
         for name, path in CONSUMERS.items():

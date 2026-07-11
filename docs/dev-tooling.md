@@ -32,6 +32,28 @@ go build -o fak ./cmd/fak     # -> ./fak  (fak.exe on Windows); ~30-60s cold, in
 The 60-second, no-key/no-model/no-GPU proof is the canonical first run — see
 [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) and the full [repro packet](repro-packet.md).
 
+### Build profiles
+
+Every shipping build routes through **one** entrypoint, `scripts/build.sh`, so the
+`-trimpath`/`-ldflags`/version-stamp flags live in a single place and cannot drift apart
+(both Dockerfiles and `release-artifacts.yml` call it; the guard `tools/build_entrypoint_test.py`
+reds if any of them re-inlines the recipe). You select a **profile** with `$PROFILE`; the
+`make` targets pick one for you. Every profile stamps `internal/appversion.BuildVersion`, so
+`fak version` is honest no matter how you built — only the strip/trim/DWARF posture differs:
+
+| Profile   | `make` target     | `-trimpath` | strip `-s -w` | DWARF   | `CGO_ENABLED` | `-race` | Use |
+|-----------|-------------------|:-----------:|:-------------:|:-------:|:-------------:|:-------:|-----|
+| `release` | `make release`    | ✓           | ✓             | stripped| `0` (static)  | —       | the **shipped** binary — stripped, reproducible-ready, stamped |
+| `dev`     | `make build`      | —           | —             | kept    | `0` (static)  | —       | fast local build; Delve can set a breakpoint and step |
+| `race`    | `make build-race` | —           | —             | kept    | `1` (cgo)     | ✓       | opt-in race-detector variant; **not** the static pure-Go binary |
+
+The `dev` profile keeps DWARF/symbols and host paths so a debugger works out of the box; add
+`GCFLAGS='all=-N -l' make build` for pristine stepping (disables inlining/optimization). The
+`race` profile's `-race` **requires** cgo, so `make build-race` sets `CGO_ENABLED=1` and
+preflights a C compiler, refusing rather than building a race-blind binary on a cgo-less box
+(the same contract as `make test-race`). `TAGS=cuda` (the GPU image's delta from `release`)
+and future `dev`/`race` build tags layer on top of the profile, not beside it.
+
 ## The test runner
 
 `fak test` is the host-aware runner: it resolves the right `go test` invocation for
