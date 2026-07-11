@@ -269,7 +269,9 @@ experiments/benchmark/runs/by-machine/dgx*/
 # `fak nightrun --apply` captures each task's raw stdout under experiments/nightrun/<box>/.
 # Those per-box dirs are LOCAL evidence only: regenerable, low-signal (mostly failure logs),
 # and one carries a raw os.Hostname() box dir (pre-#970) that must never reach the public tree.
-# The durable record is docs/nightrun/collected.jsonl; the operator overlay
+# The live durable record is now .fak/nightrun/collected.jsonl (the gitignored runtime
+# root, #3209); the tracked docs/nightrun/collected.jsonl is a periodic publication
+# snapshot of it, not the live writer target. The operator overlay
 # experiments/nightrun/backlog.json stays tracked (a shareable input, not an artifact).
 # docs/nightrun/cache-value.jsonl is a per-run scratch sibling of collected.jsonl —
 # regenerated each nightrun, not the durable ledger, so it stays out of the tree.
@@ -280,6 +282,13 @@ docs/nightrun/cache-value.jsonl
 # tracked docs. New guards write beside .fak/trajctl.jsonl; keep old still-running
 # processes and restored sessions from re-dirtying the shared tree (#4276).
 docs/nightrun/stepadvice-*.json
+# Do NOT blanket-ignore docs/nightrun: the dir holds curated, TRACKED publication
+# snapshots (README.md, the *.md plans, collected.jsonl). A whole-dir `/docs/nightrun`
+# rule neither untracks them (gitignore is inert for already-tracked paths) nor should
+# hide them; it only masks a future stray. Scope ignores to the regenerable siblings
+# above, and reverse a stray re-add with `git rm --cached`. History: #4276 git-rm'd the
+# legacy stamps and added the rule above; commit e041fdd42 (a broad `git add`) re-added
+# all 192 despite the rule — the README's "must never return to the index" invariant.
 # Shadow nightrun tree: telemetry writers were CWD-relative, so a guard/serve run — most
 # visibly `go test ./cmd/fak` (cwd=cmd/fak) — forked docs/nightrun UNDER cmd/fak and left
 # it tracked-but-perpetually-dirty. The writers now anchor to the repo root

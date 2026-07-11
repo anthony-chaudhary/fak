@@ -180,6 +180,7 @@ front page.
 
 ### Latest working notes
 
+- [Nightrun `.gitignore` hygiene + safe detect-and-refuse gitignore automation (2026-07-11)](docs/notes/NIGHTRUN-GITIGNORE-SAFE-AUTOMATION-2026-07-11.md) -- auto-indexed dated note.
 - [Handoff — #2817 per-fire net-score + fire-gate tuning (gen/next)](docs/notes/HANDOFF-2817-per-fire-net-score-2026-07-11.md) -- auto-indexed dated note.
 - [Concept: the scorer-of-scorers — "an unmeasured axis fails closed, never perfect"](docs/notes/CONCEPT-SCORER-OF-SCORERS-FAILOPEN-2026-07-11.md) -- auto-indexed dated note.
 - [Benchmark-Portfolio Execution Roadmap & Ground-Truth Status — 2026-07-10](docs/notes/BENCHMARK-PORTFOLIO-EXECUTION-ROADMAP-2026-07-10.md) -- auto-indexed dated note.
