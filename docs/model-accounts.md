@@ -85,10 +85,17 @@ A full example is `examples/model-accounts.example.json`.
 ## Two account layers, one vocabulary
 
 This page is about **provider accounts**: which credential/env-var serves a routed model.
-Claude Code subscription seats add a second layer: **config-home accounts** (`CLAUDE_CONFIG_DIR`
-homes such as `~/.claude-gem8-seat`) that may be logged in, logged out, tombstoned, disabled, or
-duplicated onto the same rate-limit bucket. That lifecycle is owned by `fak accounts`, not by the
-provider roster.
+Coding-agent subscriptions add a second layer: **config-home accounts**. Claude uses
+`CLAUDE_CONFIG_DIR` homes such as `~/.claude-gem8-seat`; Codex uses `CODEX_HOME` homes such as
+`~/.codex` or `~/.codex-work`. `fak fleet-accounts` discovers both, derives their non-secret
+provider-account identity, collapses duplicate homes on the same rate-limit bucket, and offers
+only homes whose credential state is ready. The default Codex picker profile is
+`gpt-5.6-sol` with `model_reasoning_effort=xhigh`.
+
+The authored lifecycle registry behind `fak accounts` remains Claude-specific today; its seat
+names and tombstones are therefore applied only to Claude rows. Codex rows take lifecycle/login
+truth from their own home (`auth.json`/`config.toml`) and never inherit a same-named Claude seat
+such as `default`.
 
 Use `fak accounts status --json` for the observable config-home login report. It emits
 `fak.accounts.login.v1`: one closed `status` per seat (`ready`, `needs_login`, `missing_dir`,

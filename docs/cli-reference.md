@@ -442,7 +442,14 @@ contract). A row that exhausts its retry budget goes `dead` — kept, listed, op
 — never silently dropped; every outgoing body passes the PUBLIC_LEAK/SECRET_SHAPE needle scan
 first, and a hit refuses the row terminally with the finding as its structured reason.
 `fak slack health` gains an `outbox` rung: dead rows or a pending backlog older than 2h grade
-the surface non-OK, so a wedged drain pages instead of rotting.
+the surface non-OK, so a wedged drain pages instead of rotting. To keep the noisy dgx-bridge
+channels clean, the drainer also **reaps** — an ephemeral channel on the `FAK_SLACK_EPHEMERAL_CHANNELS`
+allowlist (or a row that opted in via its own delete-after) has its posted messages
+`chat.delete`d once they go idle past a TTL (default 30m, measured from the message's last
+activity so a live card is not culled mid-run). Reaping rides the tail of every drain — no
+separate scheduler — and `fak slack outbox reap` runs (or `--dry-run` previews) one pass on
+demand; an already-gone message is recorded reaped idempotently, a transient delete retries
+next drain, and a channel nobody opted in is never touched.
 
 `fak slack alert` is the **Prometheus-alerts→Slack receiver** — the inbound producer that
 turns a firing alert into a durable outbox row. Prometheus (`tools/grafana/prometheus.yml`
@@ -491,6 +498,7 @@ fak slack outbox drain [--dry-run] # run one serialized drain pass now (dry-run:
 fak slack outbox retry --all|--nonce N [--dry-run]  # re-arm dead rows for the next drain
 fak slack outbox dead [--json]     # list dead rows with their structured reasons
 fak slack outbox compact [--dry-run] [--json] [--retain D] [--retain-dead D]  # fold old settled/dead rows + heartbeats out of the spool
+fak slack outbox reap [--dry-run] [--json] [--ttl D] [--channels C1,C2]  # delete ephemeral (bridge-channel) messages idle past their TTL (FAK_SLACK_EPHEMERAL_CHANNELS)
 fak slack outbox limits [--json]   # effective retention windows + live occupancy (terminal/droppable rows, pass-due)
 fak slack outbox calls [--json]    # per-source Slack API-call spend vs saved (rate-limit gauge; before/after noise baseline)
 ```
