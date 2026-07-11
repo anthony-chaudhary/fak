@@ -105,6 +105,12 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
 	}
+	// subscribe (#2767) is the re-attach drain of one session's event stream; it
+	// carries its own cursor flag surface, so it dispatches ahead of the shared
+	// gateway-verb flag table (session_subscribe_cmd.go).
+	if verb == "subscribe" {
+		return runSessionSubscribe(stdout, stderr, args)
+	}
 	if verb == "envelope" && (len(args) == 0 || strings.HasPrefix(args[0], "-")) {
 		return runSessionEnvelope(stdout, stderr, args)
 	}
@@ -791,6 +797,9 @@ func sessionUsage(w io.Writer) {
   fak session envelope <id> <spec>            apply a managed-context budget envelope
                                                spec: turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
   fak session context  <id>                   read the managed-context value report
+  fak session subscribe <id> [--since N]      re-attach to a running session's event stream by
+                                               handle: drain its drive-state revisions after the
+                                               cursor (lossless across a controller disconnect)
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
   fak session audit [summary|actions|discover|audit|deep] [--days N] [--json] [--fail-on high]
                                                offline recent transcript audit; defaults to summary --here

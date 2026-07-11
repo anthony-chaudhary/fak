@@ -1364,6 +1364,13 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		// subscribe (#2767) is the one GET verb on the subtree: the per-session
+		// re-attach drain of the drive-state revision feed (session_subscribe.go).
+		// Every other GET verb is not the observe shape.
+		if verb == "subscribe" {
+			s.handleFakSessionSubscribe(w, r, traceID)
+			return
+		}
 		// GET observes one session. A verb on the path is not the observe shape.
 		if verb != "" {
 			writeErr(w, http.StatusMethodNotAllowed, "use GET /v1/fak/session/{trace_id}")
