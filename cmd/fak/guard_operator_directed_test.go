@@ -292,3 +292,47 @@ func TestInstallGuardStopHookInjectsOperatorDirectedEnv(t *testing.T) {
 		t.Fatalf("bad-mode operator-directed env = %q, want warn", got2)
 	}
 }
+
+// TestGuardOperatorDirectedContinueInjectsResolve pins the #3883 acceptance criterion that a BLOCKED
+// operator-directed stop injects the choicetriage Resolve text FOR THE TOP FINDING back to the model
+// — the actionable per-finding remediation, not a generic nudge — and covers the defensive fallbacks
+// the message helpers use when the sensor left Class/Resolve blank. The ladder decisions are pinned by
+// [[TestRunGuardOperatorDirectedGate]]; this pins the model-facing REMEDIATION CONTENT the enforce
+// rung feeds, so the redirect-to-operator guidance is a usable instruction in all cases (a fired-but-
+// unclassified row must still yield a real continue message, never an empty "()" or a dangling
+// "Instead:  Then finish").
+func TestGuardOperatorDirectedContinueInjectsResolve(t *testing.T) {
+	// The exact per-finding choicetriage Resolve text — and the finding's Class — flow into the
+	// enforce continue message. This is what makes the redirect actionable rather than a generic hint.
+	resolvable := resolvableDirected()
+	var stderr strings.Builder
+	exit, disp, fired := runGuardOperatorDirectedGate(&stderr, guardPreCompactModeEnforce, resolvable)
+	if exit != 2 || disp != stopDispOperatorDirectedContinue || !fired {
+		t.Fatalf("enforce resolvable = exit %d disp %q fired %v; want 2/continue/true", exit, disp, fired)
+	}
+	for _, want := range []string{resolvable.OperatorDirectedResolve, resolvable.OperatorDirectedClass} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("continue message missing top-finding %q:\n%s", want, stderr.String())
+		}
+	}
+
+	// Defensive fallbacks: a fired row the sensor left unclassified (blank Class + blank Resolve) must
+	// still produce a usable continue message — the generic "operator-directed" label and the generic
+	// take-the-obvious-action remediation — never an empty parenthetical or a dangling "Instead:".
+	blank := &guardStopTranscript{Read: true, OperatorDirected: true, OperatorDirectedCount: 1}
+	var stderr2 strings.Builder
+	exit2, _, fired2 := runGuardOperatorDirectedGate(&stderr2, guardPreCompactModeEnforce, blank)
+	if exit2 != 2 || !fired2 {
+		t.Fatalf("enforce blank-classification = exit %d fired %v; want 2/true", exit2, fired2)
+	}
+	msg := stderr2.String()
+	if !strings.Contains(msg, "(operator-directed)") {
+		t.Errorf("blank Class did not fall back to the generic label:\n%s", msg)
+	}
+	if !strings.Contains(msg, "take the obvious next action yourself") {
+		t.Errorf("blank Resolve did not fall back to the generic remediation:\n%s", msg)
+	}
+	if strings.Contains(msg, "()") || strings.Contains(msg, "Instead:  ") {
+		t.Errorf("blank fields produced an empty parenthetical or dangling clause:\n%s", msg)
+	}
+}
