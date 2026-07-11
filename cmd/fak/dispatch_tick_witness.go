@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -58,15 +59,40 @@ func landAndReapWorkerWorktree(root, stem, base string) {
 	_ = os.Remove(stem + dispatchWorktreeSidecarSuffix)
 }
 
+// dispatchLandVerify is the #3178 pre-land build witness wired into the live land
+// site: `go build ./...` INSIDE the worker's isolated worktree, refusing the land if
+// it reds so a broken edit never reaches the trunk. Until now the spine (#3168) landed
+// mechanically with verify=nil, leaning only on the downstream dos commit-audit — which
+// witnesses the CLAIM, not the build. worktreeWorkerGoBuildVerify FAILS OPEN when the
+// go toolchain is absent (a missing `go` never wedges a land). A package var so
+// TestDispatchLandVerify can pin a red/green witness without a real toolchain.
+var dispatchLandVerify workerworktree.VerifyHook = worktreeWorkerGoBuildVerify
+
 // landAndReapWorkerWorktreeDefault is the production land+reap: apply the worktree's
 // diff-since-base onto the trunk as the worker's own stamped commit (scoped to its
 // declared lease tree), then force-remove the worktree. Both fail-open.
 func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) {
 	// No commit-message file: Land derives the subject from the worktree tip so the
 	// landed commit keeps the worker's own #N-citing, (fak <leaf>)-stamped subject.
-	// verify=nil — the downstream dos commit-audit in this same sweep is the backstop.
-	_ = workerworktree.Land(root, wtPath, base, "", tree, nil, nil)
+	// verify=dispatchLandVerify (#3178): a red `go build ./...` in the worktree refuses
+	// the land (nothing applied/committed) so a broken edit never reaches main.
+	res := landWorkerWorktreeVerified(root, wtPath, base, tree, nil)
+	if !res.OK && strings.TrimSpace(res.Reason) != "" {
+		// Surface WHY a worker produced no commit — a refused land is silent otherwise,
+		// leaving an operator to guess whether the worker crashed or was refused (#3178).
+		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s: %s\n",
+			filepath.Base(wtPath), res.Reason)
+	}
 	_ = workerworktree.Reap(root, wtPath, nil)
+}
+
+// landWorkerWorktreeVerified lands a worker's worktree diff-since-base onto the trunk
+// with the #3178 in-worktree build verify (dispatchLandVerify) wired in: a red build
+// REFUSES the land (applied:false, committed:false) so a broken edit never reaches
+// main. git is nil in production (the default runner); the witness test injects a fake
+// git and pins dispatchLandVerify red/green to drive refuse-on-red / pass-on-green.
+func landWorkerWorktreeVerified(root, wtPath, base string, tree []string, git workerworktree.GitRunner) workerworktree.Result {
+	return workerworktree.Land(root, wtPath, base, "", tree, dispatchLandVerify, git)
 }
 
 // dispatchWitnessScanLimit bounds the no-basesha fallback window, mirroring the

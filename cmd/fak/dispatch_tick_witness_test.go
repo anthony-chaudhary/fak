@@ -464,3 +464,54 @@ func TestDispatchTickLiveHoldsStructurallyBlockedIssue(t *testing.T) {
 	}
 	assertFileContains(t, filepath.Join(runsDir, "resolve-12-20260702-060606"+dispatchtick.WitnessSidecarSuffix), dispatchtick.NoCommitSelfModify)
 }
+
+// TestDispatchLandVerify is the #3178 witness: the live land site wires a real
+// (non-nil) verify, so a worktree whose edit REDS the injected build refuses the land
+// (applied:false, committed:false) while a GREEN one commits. The fake git drives the
+// land end-to-end without a real toolchain; dispatchLandVerify is pinned red/green.
+func TestDispatchLandVerify(t *testing.T) {
+	// The live land site must wire a real verify — not the old verify=nil the spine
+	// (#3168) shipped, which let a red edit land on main.
+	if dispatchLandVerify == nil {
+		t.Fatal("live land site must wire a non-nil verify hook (#3178 regressed to verify=nil)")
+	}
+	orig := dispatchLandVerify
+	t.Cleanup(func() { dispatchLandVerify = orig })
+
+	// A fake git that yields a non-empty worktree diff and rubber-stamps the rest of
+	// the land (message read, apply, commit) so the ONLY gate is the verify hook.
+	fakeGit := func(_ string, args []string) (int, string) {
+		if len(args) == 0 {
+			return 0, ""
+		}
+		switch args[0] {
+		case "diff":
+			return 0, "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -0,0 +1 @@\n+var x = 1\n"
+		case "log":
+			return 0, "feat(cmd): worker edit (#3178) (fak cmd)\n"
+		case "apply":
+			return 0, ""
+		case "commit":
+			return 0, "[main abc1234] worker edit\n"
+		default:
+			return 0, ""
+		}
+	}
+
+	// Refuse-on-red: a worktree whose build reds lands NOTHING.
+	dispatchLandVerify = func(string) (bool, string) { return false, "go build ./... failed: boom" }
+	red := landWorkerWorktreeVerified(t.TempDir(), "wt", "base", nil, fakeGit)
+	if red.OK || red.Applied || red.Committed {
+		t.Fatalf("red verify must refuse the land (nothing applied/committed), got %+v", red)
+	}
+	if !strings.Contains(red.Reason, "refusing to land") {
+		t.Fatalf("refusal must name why the land was refused (operator log), got %q", red.Reason)
+	}
+
+	// Pass-on-green: a worktree that builds lands normally (applied + committed).
+	dispatchLandVerify = func(string) (bool, string) { return true, "" }
+	green := landWorkerWorktreeVerified(t.TempDir(), "wt", "base", nil, fakeGit)
+	if !green.OK || !green.Applied || !green.Committed {
+		t.Fatalf("green verify must land the diff (applied+committed), got %+v", green)
+	}
+}
