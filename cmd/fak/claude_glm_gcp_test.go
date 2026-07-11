@@ -22,7 +22,9 @@ func TestClaudeGLMGCPBashLauncherPreset(t *testing.T) {
 		"ensure_timeout_floor FAK_HTTP_WRITE_TIMEOUT_S",
 		"claude-glm-gcp)",
 		`PRESET="glm-gcp"`,
-		`glm_name="claude-glm-gcp"`,
+		// Post-#3034 the installer no longer hard-codes a per-preset symlink var; the
+		// launcher->preset mapping (and its opt-in verdict) lives in the graduation manifest.
+		`claude-glm-gcp|glm-gcp|no|`,
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
 	}
@@ -40,8 +42,10 @@ func TestClaudeGLMGCPPowerShellLauncherPreset(t *testing.T) {
 		`$PresetExtraBody = '{"chat_template_kwargs":{"enable_thinking":false}}'`,
 		"Ensure-TimeoutFloor 'FAK_PLANNER_TIMEOUT_S'",
 		"Ensure-TimeoutFloor 'FAK_HTTP_WRITE_TIMEOUT_S'",
-		"claude-glm-gcp.cmd",
-		"FAK_DOGFOOD_PRESET=glm-gcp",
+		// Post-#3034 the .cmd shim name + preset pin are derived from the graduation
+		// manifest at install time, so the launcher->preset mapping is pinned there.
+		"Launcher='claude-glm-gcp'",
+		"Preset='glm-gcp'",
 	} {
 		requireContainsForClaudeGLMGCP(t, ps1, want)
 	}
@@ -58,7 +62,8 @@ func TestClaudeQwen36DogfoodLauncherPreset(t *testing.T) {
 		`DEFAULT_OPENAI_BASE_URL="http://127.0.0.1:8131/v1"`,
 		`DEFAULT_MODEL="lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"`,
 		`DEFAULT_PROVIDER_EXTRA_BODY='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'`,
-		`qwen_name="fak-qwen36-claude"`,
+		// #3034: fak-qwen36-claude is a GRADUATED (installed-by-default) local preset in the manifest.
+		`fak-qwen36-claude|qwen36-local|yes|`,
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
 	}
@@ -67,8 +72,8 @@ func TestClaudeQwen36DogfoodLauncherPreset(t *testing.T) {
 		"$PresetBaseUrl   = 'http://127.0.0.1:8131/v1'",
 		"$PresetModel     = 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M'",
 		`$PresetExtraBody = '{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'`,
-		"fak-qwen36-claude.cmd",
-		"FAK_DOGFOOD_PRESET=qwen36-local",
+		"Launcher='fak-qwen36-claude'",
+		"Preset='qwen36-local'",
 		"FAK_PROVIDER_EXTRA_BODY_JSON",
 	} {
 		requireContainsForClaudeGLMGCP(t, ps1, want)
@@ -90,7 +95,8 @@ func TestClaudeGroqDogfoodLauncherPresets(t *testing.T) {
 		`DEFAULT_PROVIDER_MAX_TOKENS="8192"`,
 		`PROVIDER_MAX_TOKENS="${FAK_DOGFOOD_PROVIDER_MAX_TOKENS:-$DEFAULT_PROVIDER_MAX_TOKENS}"`,
 		`export FAK_PROVIDER_MAX_TOKENS="$PROVIDER_MAX_TOKENS"`,
-		`groq_compound_name="claude-groq-compound"`,
+		// #3034: claude-groq-compound is an opt-in (not-installed-by-default) launcher in the manifest.
+		`claude-groq-compound|groq-compound|no|`,
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
 	}
@@ -104,7 +110,7 @@ func TestClaudeGroqDogfoodLauncherPresets(t *testing.T) {
 		"$PresetProviderMaxTokens = '8192'",
 		"$ProviderMaxTokens = if ($env:FAK_DOGFOOD_PROVIDER_MAX_TOKENS)",
 		"$env:FAK_PROVIDER_MAX_TOKENS = $ProviderMaxTokens",
-		"claude-groq-compound.cmd",
+		"Launcher='claude-groq-compound'",
 	} {
 		requireContainsForClaudeGLMGCP(t, ps1, want)
 	}
@@ -128,8 +134,10 @@ func TestClaudeMacDogfoodBashLauncherPreset(t *testing.T) {
 		`cat ~/.fak-gateway-key`,
 		`FAK_DOGFOOD_PROBE_TOOLS`,
 		`FAK_DOGFOOD_PROBE_ALLOWED_TOOLS`,
-		`mac_name="claude-mac"`,
-		`ln -sf "$target" "$bindir/$mac_name"`,
+		// #3034: claude-mac is opt-in in the manifest, and the installer now creates the
+		// gated launcher symlink through one generic line rather than a per-preset var.
+		`claude-mac|mac|no|`,
+		`ln -sf "$target" "$bindir/$launcher"`,
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
 	}
@@ -151,6 +159,43 @@ func TestClaudeMacDogfoodPowerShellLauncherPreset(t *testing.T) {
 		"FAK_DOGFOOD_PROBE_ALLOWED_TOOLS",
 		"examples\\dogfood-claude-policy.json",
 		"$serveArgs += @('--policy', $Policy)",
+	} {
+		requireContainsForClaudeGLMGCP(t, ps1, want)
+	}
+}
+
+// TestDogfoodInstallGraduationGate locks the #3034 external-provider graduation rule from the
+// dogfood launcher text: `--install` gates the launcher symlinks/shims on ONE manifest
+// (graduated => installed, opt-in => stays a wrapper) instead of the old hard-coded
+// install-everything list, and exposes `--graduation` plus the `--install-all` operator
+// override. The behavioral both-states witness (opt-in-not-installed vs graduated-installed)
+// runs in scripts/dogfood-claude_test.sh; this pins the structure on every OS, bash or not.
+func TestDogfoodInstallGraduationGate(t *testing.T) {
+	root := repoRootFromTest(t)
+	sh := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.sh")
+	for _, want := range []string{
+		"graduation_manifest()",
+		"graduated_launchers()",
+		"fak-qwen36-claude|qwen36-local|yes|",   // a graduated local preset (installed by default)
+		"claude-nim-kimi|nim-kimi|no|",          // an opt-in external provider (NOT installed by default)
+		"--install-all)",                        // the operator override mode
+		"--graduation)",                         // the verdict-preview mode
+		"FAK_DOGFOOD_INSTALL_DRYRUN",            // the offline preview seam the regression drives
+		`ln -sf "$target" "$bindir/$launcher"`, // the single gated install line
+	} {
+		requireContainsForClaudeGLMGCP(t, sh, want)
+	}
+	ps1 := readRepoTextForClaudeGLMGCP(t, root, "scripts", "dogfood-claude.ps1")
+	for _, want := range []string{
+		"function Get-GraduationManifest",
+		"function Get-GraduatedLaunchers",
+		"Launcher='fak-qwen36-claude'",
+		"Graduated=$true",
+		"Launcher='claude-nim-kimi'",
+		"Graduated=$false",
+		"'--install-all'",
+		"'--graduation'",
+		"FAK_DOGFOOD_INSTALL_DRYRUN",
 	} {
 		requireContainsForClaudeGLMGCP(t, ps1, want)
 	}
