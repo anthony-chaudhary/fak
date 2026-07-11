@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,7 +141,7 @@ func TestRunSyncPushSurfacesDirtyWorktree(t *testing.T) {
 	if code != syncExitOK {
 		t.Fatalf("exit = %d, want ok; stderr=%s stdout=%s", code, errb.String(), out.String())
 	}
-	for _, want := range []string{"pushed work -> origin/work", "worktree dirty: 4 path(s)", "junk: wave.err, route.err, tick.dryrun.err", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
+	for _, want := range []string{"pushed work -> origin/work", "velocity:", "/ 5s budget", "100/100 A", "worktree dirty: 4 path(s)", "junk: wave.err, route.err, tick.dryrun.err", "next: remove 3 junk path(s)", "fak sweep --clean-junk"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sync push output missing %q:\n%s", want, out.String())
 		}
@@ -180,6 +181,9 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 	if !got.Pushed || got.Worktree == nil || !got.Worktree.Dirty {
 		t.Fatalf("push result = %+v, want pushed with dirty worktree metadata", got)
 	}
+	if !got.Velocity.Qualified || got.Velocity.Score == nil || got.Velocity.BudgetMS != 5000 {
+		t.Fatalf("velocity = %+v, want qualified default 5s push score", got.Velocity)
+	}
 	if got.Worktree.TotalDirty != 4 || got.Worktree.Junk != 3 {
 		t.Fatalf("worktree = %+v, want dirty totals", got.Worktree)
 	}
@@ -188,6 +192,45 @@ func TestRunSyncPushJSONSurfacesDirtyWorktree(t *testing.T) {
 	}
 	if !strings.Contains(got.Worktree.NextAction, "remove 3 junk path(s)") || !strings.Contains(got.Worktree.NextAction, "fak sweep --clean-junk") {
 		t.Fatalf("next action = %q", got.Worktree.NextAction)
+	}
+}
+
+func TestRunSyncPushRejectsSubMillisecondVelocityBudget(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"push", "--budget", "500us", "--repo", t.TempDir()})
+	if code != syncExitUsage || !strings.Contains(errb.String(), "at least 1ms") {
+		t.Fatalf("exit=%d stderr=%q, want usage refusal", code, errb.String())
+	}
+}
+
+func TestRunSyncPushInternalErrorStillEmitsVelocityJSON(t *testing.T) {
+	old := syncSafePush
+	syncSafePush = func(context.Context, safesync.PushOptions) (safesync.PushResult, error) {
+		return safesync.PushResult{
+			Reason: safesync.PushReasonInternal,
+			Detail: "merge-base unavailable",
+			Velocity: safesync.PushVelocity{
+				ElapsedMS: 12, BudgetMS: 1000, BudgetRatio: 0.012,
+				Grade: "UNSCORED", Notes: []string{"unscored: safe push ended with INTERNAL_ERROR"},
+			},
+		}, errors.New("merge-base unavailable")
+	}
+	t.Cleanup(func() { syncSafePush = old })
+	oldWorktree := syncWorktree
+	syncWorktree = func(context.Context, string) (safesync.Worktree, bool) { return safesync.Worktree{}, false }
+	t.Cleanup(func() { syncWorktree = oldWorktree })
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"push", "--budget", "1s", "--repo", ".", "--json"})
+	if code != syncExitInternal {
+		t.Fatalf("exit=%d stderr=%q, want internal", code, errb.String())
+	}
+	var got safesync.PushResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, out.String())
+	}
+	if got.Reason != safesync.PushReasonInternal || got.Velocity.Score != nil || got.Velocity.ElapsedMS != 12 {
+		t.Fatalf("result = %+v, want timed unscored internal error", got)
 	}
 }
 
@@ -299,7 +342,6 @@ func TestRunSyncCheckAheadSurfacesPushAuditResidual(t *testing.T) {
 
 func TestRunSyncApplySafeFastForward(t *testing.T) {
 	clone := syncCLIFixture(t)
-	syncWriteFile(t, filepath.Join(clone, "a.txt"), "v2\n")     // already target bytes
 	syncWriteFile(t, filepath.Join(clone, "mine.txt"), "local") // unrelated dirty work
 
 	var out, errb bytes.Buffer
@@ -318,6 +360,27 @@ func TestRunSyncApplySafeFastForward(t *testing.T) {
 	}
 	if got := syncReadFile(t, filepath.Join(clone, "mine.txt")); got != "local" {
 		t.Fatalf("unrelated work was not preserved: %q", got)
+	}
+}
+
+func TestRunSyncApplyDirtyIdenticalRefusesWithoutCleaning(t *testing.T) {
+	clone := syncCLIFixture(t)
+	syncWriteFile(t, filepath.Join(clone, "a.txt"), "v2\n")
+	headBefore := syncRev(t, clone, "HEAD")
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"apply", "--repo", clone, "--remote", "origin", "--branch", "work"})
+	if code != syncExitRefused {
+		t.Fatalf("exit = %d, want refused; stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "DIVERGES") || !strings.Contains(out.String(), "a.txt") {
+		t.Fatalf("output should name pre-existing dirty path refusal, got:\n%s", out.String())
+	}
+	if got := syncRev(t, clone, "HEAD"); got != headBefore {
+		t.Fatalf("HEAD moved on refusal: got %s want %s", got, headBefore)
+	}
+	if got := syncReadFile(t, filepath.Join(clone, "a.txt")); got != "v2\n" {
+		t.Fatalf("dirty target-identical bytes changed on refusal: %q", got)
 	}
 }
 

@@ -80,6 +80,7 @@ type syncDrainConfig struct {
 	queuePath string
 	asJSON    bool
 	budget    time.Duration
+	sourceSHA string
 }
 
 // Seams (overridden in tests): the window read, the stranded-commit enumeration, the flush push,
@@ -120,6 +121,15 @@ func runSyncDrain(stdout, stderr io.Writer, cfg syncDrainConfig) int {
 		}
 		report.Verdict = "IDLE"
 		return emitSyncDrainReport(stdout, stderr, report, cfg.asJSON, syncExitOK)
+	}
+
+	if strings.TrimSpace(cfg.sourceSHA) == "" {
+		sha, captureErr := syncCaptureSource(cfg.repo)
+		if captureErr != nil || strings.TrimSpace(sha) == "" {
+			fmt.Fprintf(stderr, "fak sync drain: capture push source: %v\n", captureErr)
+			return syncExitInternal
+		}
+		cfg.sourceSHA = strings.TrimSpace(sha)
 	}
 
 	window := syncDrainWindow(ctx, cfg)
@@ -364,6 +374,8 @@ func defaultSyncDrainFlush(ctx context.Context, cfg syncDrainConfig) (safesync.P
 		Repo:       cfg.repo,
 		Remote:     cfg.remote,
 		Branch:     cfg.branch,
+		SourceRef:  cfg.sourceSHA,
+		TargetRef:  syncTargetRef(cfg.branch),
 		MaxRetries: 3,
 	})
 }

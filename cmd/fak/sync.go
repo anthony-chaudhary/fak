@@ -27,6 +27,10 @@ func cmdSync(argv []string) { os.Exit(runSync(os.Stdout, os.Stderr, argv)) }
 
 var syncAheadAudit = defaultSyncAheadAudit
 var syncWorktree = defaultSyncWorktree
+var (
+	syncSafePush      = safesync.SafePush
+	syncCaptureSource = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
+)
 
 func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
@@ -56,7 +60,13 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
 	retries := fs.Int("retries", 3, "push: total attempts before giving up on a moving trunk")
 	queueFile := fs.String("queue-file", "", "drain: stranded-commit queue file (default: <repo>/.fak/sync-drain-queue.json)")
-	budget := fs.Duration("budget", 60*time.Second, "drain: trunk-green build budget for the window verdict")
+	budgetDefault := 60 * time.Second
+	budgetHelp := "drain: trunk-green build budget for the window verdict"
+	if command == "push" {
+		budgetDefault = safesync.DefaultPushVelocityBudget
+		budgetHelp = "push: responsiveness budget used for the safety-qualified velocity score"
+	}
+	budget := fs.Duration("budget", budgetDefault, budgetHelp)
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
@@ -66,18 +76,38 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	// transient non-fast-forward race (a peer landed between fetch and push, but HEAD
 	// already contains origin) and stops with a clear next step when genuinely behind.
 	if command == "push" {
+		if err := validatePushVelocityBudget(*budget); err != nil {
+			fmt.Fprintf(stderr, "fak sync: %v\n", err)
+			return syncExitUsage
+		}
 		repoPath := pathutil.ExpandTilde(*repo)
-		res, err := safesync.SafePush(context.Background(), safesync.PushOptions{
-			Repo:       repoPath,
-			Remote:     *remote,
-			Branch:     *branch,
-			MaxRetries: *retries,
+		sourceSHA, err := syncCaptureSource(repoPath)
+		if err != nil || strings.TrimSpace(sourceSHA) == "" {
+			fmt.Fprintf(stderr, "fak sync: capture push source: %v\n", err)
+			return syncExitInternal
+		}
+		res, err := syncSafePush(context.Background(), safesync.PushOptions{
+			Repo:           repoPath,
+			Remote:         *remote,
+			Branch:         *branch,
+			SourceRef:      strings.TrimSpace(sourceSHA),
+			TargetRef:      syncTargetRef(*branch),
+			MaxRetries:     *retries,
+			VelocityBudget: *budget,
 		})
+		res = annotatePushWorktree(context.Background(), res, repoPath)
 		if err != nil {
+			if *asJSON {
+				if writeErr := writeIndentedJSON(stdout, res); writeErr != nil {
+					fmt.Fprintf(stderr, "fak sync: %v\n", writeErr)
+					return syncExitInternal
+				}
+			} else {
+				renderSyncPush(stdout, res)
+			}
 			fmt.Fprintf(stderr, "fak sync: %v\n", err)
 			return syncExitInternal
 		}
-		res = annotatePushWorktree(context.Background(), res, repoPath)
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, res); err != nil {
 				fmt.Fprintf(stderr, "fak sync: %v\n", err)
@@ -159,11 +189,19 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	return syncExitRefused
 }
 
+func syncTargetRef(branch string) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return ""
+	}
+	return "refs/heads/" + branch
+}
+
 func syncUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak sync [check] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync apply   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-  fak sync push    [--repo DIR] [--remote origin] [--branch B] [--retries N] [--json]
+  fak sync push    [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
   fak sync drain   [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
@@ -171,11 +209,15 @@ Safe shared-trunk git for dirty worktrees. check is read-only except for optiona
 HEAD or already byte-identical to the remote-tracking version. push pushes the branch
 and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a
-clear integrate-then-push next step. drain is the release valve for commits stranded by
+clear integrate-then-push next step. Its velocity evidence scores only a published
+safe push against the declared --budget; refusals/errors retain timing but are UNSCORED.
+apply uses only git merge --ff-only
+--no-autostash --no-overwrite-ignore against the immutable SHA that check assessed;
+a last-moment worktree change is a refusal, never pre-cleaned. drain is the release valve for commits stranded by
 a red-trunk push refusal: it queues the ahead commits, polls the trunk-green quiescent
 window (reusing the pre-push build witness), flushes in one push when green, and backs
 off — not blind-retries — while red. None of these run git pull, stash, reset --hard,
-clean, add, merge, or --force.
+clean, add, a non-fast-forward merge, or --force.
 `)
 }
 
@@ -187,10 +229,16 @@ func renderSyncPush(w io.Writer, res safesync.PushResult) {
 			attempts = fmt.Sprintf("%d attempts", res.Attempts)
 		}
 		fmt.Fprintf(w, "pushed %s -> %s/%s (%s)\n", res.Branch, res.Remote, res.Branch, attempts)
+		renderSyncPushVelocity(w, res.Velocity)
 		renderWorktree(w, res.Worktree)
 		return
 	}
-	fmt.Fprintf(w, "[REFUSED] not pushed (%s): %s\n", res.Reason, res.Detail)
+	label := "REFUSED"
+	if res.Reason == safesync.PushReasonInternal {
+		label = "ERROR"
+	}
+	fmt.Fprintf(w, "[%s] not pushed (%s): %s\n", label, res.Reason, res.Detail)
+	renderSyncPushVelocity(w, res.Velocity)
 	renderWorktree(w, res.Worktree)
 }
 
