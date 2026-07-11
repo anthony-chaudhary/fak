@@ -240,6 +240,33 @@ func TestFoldRows(t *testing.T) {
 	}
 }
 
+func TestFoldRowsSeparatesGitOperationTerminalOutcomes(t *testing.T) {
+	rows := []Row{
+		{Schema: SchemaV1, Verb: "sync push", ExitCode: 0, DurationMS: 100},
+		{Schema: SchemaV1, Verb: "sync push", ExitCode: 0, DurationMS: 300},
+		{Schema: SchemaV1, Verb: "dev sync push", ExitCode: 0, DurationMS: 500},
+		{Schema: SchemaV1, Verb: "sync push", ExitCode: 3, DurationMS: 1},
+		{Schema: SchemaV1, Verb: "sync push", ExitCode: 2, DurationMS: 2},
+		{Schema: SchemaV1, Verb: "sync push", ExitCode: 4, DurationMS: 4},
+		{Schema: SchemaV1, Verb: "sync", ExitCode: 0, DurationMS: 1}, // legacy: suboperation unknowable
+	}
+	stats := FoldRows(rows, FoldOptions{}).ByOperationOutcome
+	if len(stats) != 4 {
+		t.Fatalf("stats = %+v, want success/refused/usage/error", stats)
+	}
+	want := []OperationOutcomeStat{
+		{Operation: "sync push", Outcome: OutcomeSuccess, Count: 3, P50MS: 300},
+		{Operation: "sync push", Outcome: OutcomeRefused, Count: 1, P50MS: 1},
+		{Operation: "sync push", Outcome: OutcomeUsage, Count: 1, P50MS: 2},
+		{Operation: "sync push", Outcome: OutcomeError, Count: 1, P50MS: 4},
+	}
+	for i := range want {
+		if stats[i] != want[i] {
+			t.Errorf("stats[%d] = %+v, want %+v", i, stats[i], want[i])
+		}
+	}
+}
+
 // TestFoldRowsSinceCutoff covers the --since window.
 func TestFoldRowsSinceCutoff(t *testing.T) {
 	rows := []Row{

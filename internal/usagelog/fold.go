@@ -2,6 +2,7 @@ package usagelog
 
 import (
 	"sort"
+	"strings"
 )
 
 // VerbStat is the per-verb roll-up: how many times a verb ran, how many of those
@@ -14,16 +15,36 @@ type VerbStat struct {
 	P50MS  int64  `json:"p50_ms"` // median duration_ms over this verb's runs
 }
 
+type TerminalOutcome string
+
+const (
+	OutcomeSuccess TerminalOutcome = "success"
+	OutcomeRefused TerminalOutcome = "refused"
+	OutcomeUsage   TerminalOutcome = "usage"
+	OutcomeError   TerminalOutcome = "error"
+)
+
+// OperationOutcomeStat keeps latency split by BOTH sanitized operation and
+// terminal process outcome. A fast refusal therefore cannot lower the p50 of
+// successful pushes/commits. Success means exit 0 only, never downstream proof.
+type OperationOutcomeStat struct {
+	Operation string          `json:"operation"`
+	Outcome   TerminalOutcome `json:"outcome"`
+	Count     int             `json:"count"`
+	P50MS     int64           `json:"p50_ms"`
+}
+
 // Fold is the read-side roll-up of a usage journal — the answer to "how is fak
 // being used?" that `fak usage` prints. Every number here is an OBSERVED aggregate
 // of the process's own self-reported rows, never a witness of downstream effect.
 type Fold struct {
-	Total     int         `json:"total"`      // rows folded (after the --since cutoff)
-	Errors    int         `json:"errors"`     // rows with exit_code != 0
-	P50MS     int64       `json:"p50_ms"`     // median duration over all folded rows
-	ByVerb    []VerbStat  `json:"by_verb"`    // sorted: most-used first, ties broken by verb name
-	ExitCodes map[int]int `json:"exit_codes"` // exit-code distribution
-	Recent    []Row       `json:"recent"`     // the last TopN rows, oldest-first
+	Total              int                    `json:"total"`      // rows folded (after the --since cutoff)
+	Errors             int                    `json:"errors"`     // rows with exit_code != 0
+	P50MS              int64                  `json:"p50_ms"`     // median duration over all folded rows
+	ByVerb             []VerbStat             `json:"by_verb"`    // sorted: most-used first, ties broken by verb name
+	ExitCodes          map[int]int            `json:"exit_codes"` // exit-code distribution
+	Recent             []Row                  `json:"recent"`     // the last TopN rows, oldest-first
+	ByOperationOutcome []OperationOutcomeStat `json:"by_operation_outcome,omitempty"`
 }
 
 // FoldOptions parameterizes a fold. The zero value folds every row and returns a
@@ -54,6 +75,11 @@ func FoldRows(rows []Row, opt FoldOptions) Fold {
 		durs   []int64
 	}
 	byVerb := map[string]*acc{}
+	type operationKey struct {
+		operation string
+		outcome   TerminalOutcome
+	}
+	byOperation := map[operationKey][]int64{}
 	var allDurs []int64
 	var kept []Row
 
@@ -81,6 +107,10 @@ func FoldRows(rows []Row, opt FoldOptions) Fold {
 			a.errors++
 		}
 		a.durs = append(a.durs, r.DurationMS)
+		if operation, ok := CanonicalGitOperation(r.Verb); ok {
+			k := operationKey{operation: operation, outcome: ClassifyTerminalOutcome(r.ExitCode)}
+			byOperation[k] = append(byOperation[k], r.DurationMS)
+		}
 
 		kept = append(kept, r)
 	}
@@ -104,6 +134,22 @@ func FoldRows(rows []Row, opt FoldOptions) Fold {
 		return out.ByVerb[i].Verb < out.ByVerb[j].Verb
 	})
 
+	out.ByOperationOutcome = make([]OperationOutcomeStat, 0, len(byOperation))
+	for key, durations := range byOperation {
+		out.ByOperationOutcome = append(out.ByOperationOutcome, OperationOutcomeStat{
+			Operation: key.operation,
+			Outcome:   key.outcome,
+			Count:     len(durations),
+			P50MS:     medianInt64(durations),
+		})
+	}
+	sort.Slice(out.ByOperationOutcome, func(i, j int) bool {
+		if out.ByOperationOutcome[i].Operation != out.ByOperationOutcome[j].Operation {
+			return out.ByOperationOutcome[i].Operation < out.ByOperationOutcome[j].Operation
+		}
+		return terminalOutcomeRank(out.ByOperationOutcome[i].Outcome) < terminalOutcomeRank(out.ByOperationOutcome[j].Outcome)
+	})
+
 	// Recent tail: the last topN kept rows, oldest-first (kept is already in file
 	// order, which is chronological).
 	if len(kept) > topN {
@@ -111,6 +157,49 @@ func FoldRows(rows []Row, opt FoldOptions) Fold {
 	}
 	out.Recent = kept
 	return out
+}
+
+// ClassifyTerminalOutcome is intentionally exit-only. It describes how the fak
+// process ended; it does not infer that a commit/ref update or other effect exists.
+func ClassifyTerminalOutcome(code int) TerminalOutcome {
+	switch code {
+	case 0:
+		return OutcomeSuccess
+	case 2:
+		return OutcomeUsage
+	case 3:
+		return OutcomeRefused
+	default:
+		return OutcomeError
+	}
+}
+
+// CanonicalGitOperation recognizes only the closed composite vocabulary emitted
+// by cmd/fak. The exact `dev ` prefix is stripped for velocity aggregation while
+// the original Row.Verb remains intact for namespace-adoption reporting.
+func CanonicalGitOperation(verb string) (string, bool) {
+	verb = strings.TrimPrefix(verb, "dev ")
+	switch verb {
+	case "commit local", "commit push",
+		"sweep plan", "sweep apply local", "sweep apply push", "sweep clean-junk",
+		"sync check", "sync check fetch", "sync apply", "sync apply fetch", "sync drain", "sync push":
+		return verb, true
+	default:
+		return "", false
+	}
+}
+
+func terminalOutcomeRank(outcome TerminalOutcome) int {
+	switch outcome {
+	case OutcomeSuccess:
+		return 0
+	case OutcomeRefused:
+		return 1
+	case OutcomeUsage:
+		return 2
+	default:
+		return 3
+	}
 }
 
 // medianInt64 returns the median of a set of durations (the p50). It copies before
