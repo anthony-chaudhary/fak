@@ -1933,7 +1933,8 @@ func newEngineCacheClient(cfg Config) (*enginecache.Client, error) {
 			return nil, errors.New("gateway: engine cache reset with replica base URLs requires EngineCacheBaseURL")
 		}
 		if len(urls) == 1 {
-			baseURL = urls[0]
+			// urls[0] may carry a name=URL identity; the cache-control target is the URL.
+			_, baseURL = parseReplicaEntry(urls[0])
 		}
 	}
 	if baseURL == "" {
@@ -2009,7 +2010,10 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 
 func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner, error) {
 	if len(baseURLs) == 1 {
-		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, baseURLs[0], model, cfg.APIKey)
+		// A lone upstream needs no replica identity, but still honor a name=URL form
+		// (an operator may pin one) by dialing only the URL part.
+		_, dialURL := parseReplicaEntry(baseURLs[0])
+		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, dialURL, model, cfg.APIKey)
 		if err != nil {
 			return nil, err
 		}
@@ -2022,8 +2026,16 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		return p, nil
 	}
 	replicas := make([]PlannerReplica, 0, len(baseURLs))
-	for i, base := range baseURLs {
-		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, base, model, cfg.APIKey)
+	for _, base := range baseURLs {
+		// Stable, order-independent identity (#3968): use the operator-chosen id from a
+		// name=URL entry, else derive replica-<digest> from the endpoint so the same
+		// upstream keeps one identity — and one set of metric/residency labels — no
+		// matter its flag position or a membership change that drops a peer.
+		name, dialURL := parseReplicaEntry(base)
+		if name == "" {
+			name = deriveReplicaName(dialURL)
+		}
+		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, dialURL, model, cfg.APIKey)
 		if err != nil {
 			return nil, err
 		}
@@ -2034,7 +2046,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		p.ForceResponsesStream = cfg.ForceResponsesStream
 		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		replicas = append(replicas, PlannerReplica{
-			Name:    fmt.Sprintf("replica-%d", i+1),
+			Name:    name,
 			Planner: p,
 		})
 	}

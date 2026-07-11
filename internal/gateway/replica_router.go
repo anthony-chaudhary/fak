@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	neturl "net/url"
+	"strings"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -85,6 +87,41 @@ func NewReplicaRouter(model string, replicas []PlannerReplica) (*ReplicaRouter, 
 		cp[i] = repl
 	}
 	return &ReplicaRouter{model: model, replicas: cp}, nil
+}
+
+// parseReplicaEntry splits an optional operator-chosen identity from a
+// --replica-base-url value. "name=URL" yields (name, URL) so an operator can pin a
+// stable id that survives a URL change (a live re-base's "same replica, new URL"); a
+// bare "URL" yields ("", URL) and the caller derives the identity from the endpoint
+// (deriveReplicaName). The split is robust to '=' inside a URL query string: the left
+// side is taken as a name ONLY when it carries no ':' or '/', so "http://h/v1?k=v" stays
+// one whole URL and never a spurious name "http://h/v1?k".
+func parseReplicaEntry(raw string) (name, url string) {
+	raw = strings.TrimSpace(raw)
+	if i := strings.IndexByte(raw, '='); i > 0 {
+		if lhs := raw[:i]; !strings.ContainsAny(lhs, ":/") {
+			return strings.TrimSpace(lhs), strings.TrimSpace(raw[i+1:])
+		}
+	}
+	return "", raw
+}
+
+// deriveReplicaName is the default, order-independent replica identity: replica-<6 hex>
+// over the endpoint's scheme://host (host carries the port), so the SAME upstream keeps
+// ONE identity — and thus one set of /metrics transition labels and one residency-index
+// slot — regardless of its position in the flag list or a membership change that drops a
+// peer (#3968). Positional replica-N naming silently reassigned identity on any reorder
+// or removal: dropping URL 1 of 3 renamed the survivors and restarted their counters.
+// Two entries that resolve to the same endpoint collide on this derived name and are
+// rejected by NewReplicaRouter's duplicate-name check; give same-endpoint replicas the
+// explicit name=URL form to keep them distinct.
+func deriveReplicaName(rawURL string) string {
+	key := strings.TrimSpace(rawURL)
+	if u, err := neturl.Parse(key); err == nil && u.Host != "" {
+		key = u.Scheme + "://" + u.Host
+	}
+	sum := sha256.Sum256([]byte(key))
+	return "replica-" + hex.EncodeToString(sum[:3])
 }
 
 // WithMembership attaches a live FleetMembership so the router routes only to
