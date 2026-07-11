@@ -134,7 +134,7 @@ func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok boo
 	defer os.RemoveAll(headDir)
 	if headPkgs := commitBuildCheckExistingPackages(headDir, pkgs); len(headPkgs) > 0 {
 		if headDetail, headOK := goBuildPackages(headDir, headPkgs); !headOK && !commitBuildCheckOnlyUnbuildable(headDetail) {
-			fmt.Fprintln(stderr, "fak commit: build-check: the committed trunk is ALREADY red at HEAD (pre-existing, not introduced by this commit) — not blocking")
+			fmt.Fprint(stderr, formatPreexistingRedAdvisory(headDetail))
 			return true, "", ""
 		}
 	}
@@ -142,6 +142,30 @@ func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok boo
 		buildDetail = "undefined: " + sym + "\n" + buildDetail
 	}
 	return false, "COMMITTED_RED", buildDetail
+}
+
+// formatPreexistingRedAdvisory renders the advisory the gate prints when differential attribution
+// proves the red already exists at HEAD (a peer's break, not this commit) — so the commit is
+// admitted, never wedged behind someone else's break. It does NOT stay silent: it NAMES the shared
+// break (the failing package(s) and the first undefined symbol, parsed from the HEAD build output)
+// and frames it as a trunk red that still needs a fix AT ITS SOURCE — not an island for this agent
+// to route around in isolation. This aligns the commit gate with the pre-push gate's richer
+// TRUNK_ALREADY_RED render (prepushBuild's renderPrePushBuild): a detected break is a first-class,
+// actionable signal the fleet converges on, per
+// docs/notes/CONCEPT-AGENTIC-OPERATOR-QUESTIONS-2026-07-10.md. Pure over the compiler output so it
+// is unit-testable without git/go. Keeps the "ALREADY red" phrase the pre-existing-red case is
+// recognized by. headDetail is the trimmed `go build` output of the same packages at HEAD.
+func formatPreexistingRedAdvisory(headDetail string) string {
+	var b strings.Builder
+	b.WriteString("fak commit: build-check: the committed trunk is ALREADY red at HEAD (pre-existing, not introduced by this commit) — your commit is allowed.\n")
+	if pkgs := failingPackagesFromBuild(headDetail); len(pkgs) > 0 {
+		b.WriteString("  shared trunk red in: " + strings.Join(pkgs, " ") + "\n")
+	}
+	if sym := extractUndefinedSymbol(headDetail); sym != "" {
+		b.WriteString("  first break: undefined: " + sym + "\n")
+	}
+	b.WriteString("  this is a SHARED break that still needs a fix at its source — until HEAD builds, every peer inherits it.\n")
+	return b.String()
 }
 
 // commitProspectiveTree writes the tree object this commit WOULD produce: a THROWAWAY index

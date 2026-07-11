@@ -197,7 +197,29 @@ func TestCommitBuildCheckGate_preexistingHeadRedFailsOpen(t *testing.T) {
 	if !ok {
 		t.Fatalf("pre-existing HEAD red must fail open; got reason=%q detail=%q stderr=%s", reason, detail, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "ALREADY red") {
-		t.Fatalf("expected the pre-existing-red advisory on stderr; got %q", stderr.String())
+	// The advisory must not stay a silent shrug: it names the shared break (the undefined symbol)
+	// and frames it as needing a fix at its source, aligned with the pre-push gate's TRUNK_ALREADY_RED
+	// render. Keeps the "ALREADY red" phrase the pre-existing case is recognized by.
+	for _, want := range []string{"ALREADY red", "neverDefined", "fix at its source"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("advisory missing %q; got %q", want, stderr.String())
+		}
+	}
+}
+
+// TestFormatPreexistingRedAdvisory pins the pure advisory formatter without git/go: it must keep the
+// "ALREADY red" recognition phrase AND name the failing package + first undefined symbol + the
+// fix-at-source framing (the "work together" upgrade over the old silent shrug).
+func TestFormatPreexistingRedAdvisory(t *testing.T) {
+	out := formatPreexistingRedAdvisory("# buildcheck.test/p\np/p.go:3:9: undefined: neverDefined\n")
+	for _, want := range []string{"ALREADY red", "buildcheck.test/p", "undefined: neverDefined", "fix at its source"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("advisory missing %q:\n%s", want, out)
+		}
+	}
+	// A build output with no parseable package header / symbol still yields the base advisory —
+	// never empty, never a panic.
+	if base := formatPreexistingRedAdvisory(""); !strings.Contains(base, "ALREADY red") {
+		t.Fatalf("empty build output should still carry the base advisory; got %q", base)
 	}
 }

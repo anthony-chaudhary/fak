@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -129,35 +130,26 @@ func gitRevParse(r, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// extractCommittedTip archives sha from repo r into a fresh temp dir and returns its path. Uses
-// `git archive` (committed bytes only — never the working tree or index) piped to `tar -x`.
+// extractCommittedTip archives sha from repo r into a fresh temp dir and returns its path
+// (committed bytes only — `git archive` never reads the working tree or index). It extracts the
+// stream IN-PROCESS via the pre-push gate's hardened extractArchive (Go's archive/tar) rather than
+// shelling to an external `tar -x`. The external-`tar` pipe was the #3432 wedge: the first `tar` on
+// a Windows PATH is MSYS GNU tar, which cannot open a native Windows `-C` path and exits status 2,
+// so `git archive` blocks writing a full pipe — or, as here, `tar` exits and the whole commit
+// build-check silently FAILS OPEN on Windows (the COMMITTED_RED gate becomes a no-op that never
+// runs). Reusing the in-process path (no external tar dependency, hard prepushArchiveTimeout
+// deadline) makes the commit / ci-preflight tree extraction functional and immune to the tar-flavor
+// ambiguity on every OS, aligning it with prepushArchiveTip's already-hardened extraction.
 func extractCommittedTip(r, sha string) (string, error) {
 	dir, err := os.MkdirTemp("", "fak-ci-preflight-*")
 	if err != nil {
 		return "", err
 	}
-	ar := exec.Command("git", "-C", r, "archive", "--format=tar", sha)
-	windowgate.ConfigureBackgroundCommand(ar)
-	tar := exec.Command("tar", "-x", "-C", dir)
-	windowgate.ConfigureBackgroundCommand(tar)
-	pipe, err := ar.StdoutPipe()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), prepushArchiveTimeout)
+	defer cancel()
+	if err := extractArchive(ctx, r, sha, dir); err != nil {
 		os.RemoveAll(dir)
 		return "", err
-	}
-	tar.Stdin = pipe
-	if err := tar.Start(); err != nil {
-		os.RemoveAll(dir)
-		return "", err
-	}
-	if err := ar.Run(); err != nil {
-		_ = tar.Wait()
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("git archive: %w", err)
-	}
-	if err := tar.Wait(); err != nil {
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("tar extract: %w", err)
 	}
 	return dir, nil
 }
