@@ -81,6 +81,7 @@ usage:
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
   fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
   fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
+  fak sessions codex-hook-install [--codex-home DIR] [--dry-run]
 
 Start here:
   fak sessions score        fold THIS host's fak sessions, witness their commits, and
