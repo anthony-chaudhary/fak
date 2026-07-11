@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,17 +12,21 @@ import (
 func captureRun(t *testing.T, argv []string) (int, string) {
 	t.Helper()
 	old := os.Stdout
-	r, w, err := os.Pipe()
+	out, err := os.CreateTemp(t.TempDir(), "conceptbench-stdout-*.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Stdout = w
+	os.Stdout = out
 	code := run(argv)
-	_ = w.Close()
 	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	return code, buf.String()
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, string(b)
 }
 
 func replayDir() string { return filepath.Join("testdata", "replay") }
