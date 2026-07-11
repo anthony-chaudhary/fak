@@ -1,0 +1,98 @@
+package syspromptmmu
+
+import (
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+)
+
+// steering.go — #3308 (epic #1258): cache-safe verbosity/terseness steering as one more
+// after-breakpoint overlay segment. Borrowed (clean-room, Python→Go) from
+// headroomlabs-ai/headroom's apply_verbosity_steering (Apache-2.0, pinned 38074888),
+// which appends a leveled, sentinel-wrapped steering block AFTER the last system block so
+// any earlier cache_control breakpoint — and with it the whole cached prefix — is
+// untouched.
+//
+// This file is the PRODUCER only: steeringSegment maps a terseness level (1..4, mild →
+// maximal; 0 = no-op) to a fixed canonical, sentinel-wrapped text emitted as the same
+// segment shape SelectOverlay produces (SegMessage, no cache_control, content-derived
+// Witness). It rides the existing Rung-2/Rung-3 path — BuildSystemValue for a fresh base,
+// SpliceSystemOverlay for a per-turn swap — so it lands strictly past the breakpoint and
+// never disturbs the cached resident spine+policy prefix (invariants 1+2).
+//
+// Byte-stable by construction: every level's text is a fixed literal and the wrapping is
+// deterministic, so the same level always yields identical bytes — a cache-safe segment
+// whose Witness (WitnessFor over the content) is stable per level. The sentinel names the
+// block so a later turn can replace it in place through the overlay swap when the level
+// changes; the same level re-applied is byte-identical (idempotent).
+//
+// Scope fence: advisory output-token steering only — opt-in, appended after the client's
+// own system blocks, never an override of an explicit client instruction, and NOT wired
+// to the live gateway here (the overlay path has no request-path caller today; the wiring
+// is the follow-on rung).
+//
+// Tier: mechanism (2). Imports cachemeta(1) + stdlib only.
+
+// steeringSentinelOpen / steeringSentinelClose wrap every steering block so it is
+// identifiable in a realized overlay: a later turn finds the sentinel and swaps the block
+// in place (through the overlay splice, never an edit of the resident prefix). The
+// sentinel is version-stamped like the spine/policy tiers (SpineVersion idiom): a text
+// change is a deliberate version bump, and the content Witness detects drift regardless.
+const (
+	steeringSentinelOpen  = "<fak:steering v1>"
+	steeringSentinelClose = "</fak:steering>"
+)
+
+// The leveled canonical texts, mild (1) → maximal (4) terseness. Fixed literals, never
+// templated per turn, so each level's emitted segment is byte-identical every call.
+const (
+	steeringLevel1 = "Terseness level 1 (mild): prefer concision. Trim filler and skip restating the " +
+		"question, but keep full explanations where they add substance."
+
+	steeringLevel2 = "Terseness level 2 (moderate): be brief. Skip preamble and recap, answer directly, " +
+		"and keep explanations to the ones the answer needs."
+
+	steeringLevel3 = "Terseness level 3 (strong): be terse. No preamble, no restating the question, no " +
+		"closing summary; short sentences, essential content only."
+
+	steeringLevel4 = "Terseness level 4 (maximal): minimum viable answer. Output only the requested " +
+		"result — no explanation unless explicitly asked, no framing, no commentary."
+)
+
+// steeringText maps a level to its canonical text. The set is CLOSED: only 1..4 exist;
+// 0 is the documented no-op and anything else is refused the same way (fail-safe — an
+// unknown level must never fabricate a steering block).
+func steeringText(level int) (string, bool) {
+	switch level {
+	case 1:
+		return steeringLevel1, true
+	case 2:
+		return steeringLevel2, true
+	case 3:
+		return steeringLevel3, true
+	case 4:
+		return steeringLevel4, true
+	default:
+		return "", false
+	}
+}
+
+// steeringSegment returns the sentinel-wrapped, byte-stable terseness segment for
+// `level` (1..4), shaped exactly like a Rung-3 overlay segment (SegMessage tail content,
+// no cache_control, Witness = content blob hash) so the caller hands it to
+// BuildSystemValue / SpliceSystemOverlay alongside the queried capability overlay and it
+// lands strictly AFTER the cache breakpoint. Level 0 is the no-op (steering off — the
+// opt-in default): ok is false and the zero segment must not be appended. Deterministic:
+// the same level always produces identical bytes, so re-applying a level is idempotent
+// and can never bust the cached prefix.
+func steeringSegment(level int) (cachemeta.PromptSegment, bool) {
+	text, ok := steeringText(level)
+	if !ok {
+		return cachemeta.PromptSegment{}, false
+	}
+	content := []byte(steeringSentinelOpen + "\n" + text + "\n" + steeringSentinelClose)
+	return cachemeta.PromptSegment{
+		Kind:    cachemeta.SegMessage, // tail content, appended after the cached prefix
+		Tokens:  estTokens(content),
+		Content: content,
+		Witness: WitnessFor(content), // content blob hash — drift-detectable per level
+	}, true
+}
