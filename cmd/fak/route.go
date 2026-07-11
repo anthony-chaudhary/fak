@@ -72,6 +72,13 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accountsStatus := fs.String("accounts-status", "", "validate an account roster and print credential readiness (env presence only; no network, no secret values)")
 	accountsCover := fs.String("accounts-cover", "", "cross-check an account roster against the routing manifest's routed ids and report coverage (exit 1 if any id is unbound)")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
+	capacityReason := fs.String("capacity-reason", "", "capacity block reason token")
+	capacityFrom := fs.String("capacity-from", "", "currently blocked target")
+	requiredModelB := fs.Float64("required-model-b", 0, "minimum faithful model size in billions")
+	localModelB := fs.Float64("local-model-b", 0, "local faithful model ceiling in billions")
+	requiredContext := fs.Int("required-context", 0, "required context tokens")
+	usableContext := fs.Int("usable-context", 0, "local usable context tokens")
+	capacityTargets := fs.String("capacity-targets", "", "JSON file containing alternate capacity targets")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -148,6 +155,23 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		Labels:       parseLabels(*labels),
 	}
 	d := m.Route(subj)
+	var capacity *modelroute.CapacityReroute
+	if strings.TrimSpace(*capacityReason) != "" {
+		var targets []modelroute.CapacityTarget
+		if strings.TrimSpace(*capacityTargets) != "" {
+			b, err := os.ReadFile(*capacityTargets)
+			if err != nil {
+				fmt.Fprintln(stderr, "fak route:", err)
+				return 1
+			}
+			if err := json.Unmarshal(b, &targets); err != nil {
+				fmt.Fprintln(stderr, "fak route: capacity targets:", err)
+				return 2
+			}
+		}
+		r := modelroute.RerouteCapacity(*capacityFrom, modelroute.CapacitySignal{Blocked: true, Reason: *capacityReason, RequiredModelB: *requiredModelB, LocalModelCeilingB: *localModelB, RequiredContext: *requiredContext, UsableContext: *usableContext}, targets)
+		capacity = &r
+	}
 	sav := modelroute.EstimateSavings(d, book, *frontier)
 
 	var red *modelroute.Result
@@ -180,7 +204,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		fmt.Fprintln(stdout, routeJSON(d, red, sav, bound))
+		fmt.Fprintln(stdout, routeJSON(d, red, sav, bound, capacity))
 		return 0
 	}
 	printRoute(stdout, d, red, sav, bound)
@@ -385,7 +409,7 @@ func readinessByAccount(report modelroute.AccountReadinessReport) map[string]mod
 }
 
 // routeJSON renders the decision (and any reduction) as a stable JSON object.
-func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings, bound *modelroute.ResolvedPlan) string {
+func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings, bound *modelroute.ResolvedPlan, capacity ...*modelroute.CapacityReroute) string {
 	type memberJSON struct {
 		Model  string  `json:"model"`
 		Weight float64 `json:"weight,omitempty"`
@@ -422,6 +446,9 @@ func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Sav
 			"tally":   red.Tally,
 			"members": red.Members,
 		}
+	}
+	if len(capacity) > 0 && capacity[0] != nil {
+		obj["capacity_reroute"] = capacity[0]
 	}
 	if bound != nil {
 		bj := map[string]any{"members": targetsJSON(bound.Members)}
