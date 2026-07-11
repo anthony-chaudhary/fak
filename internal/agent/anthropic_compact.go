@@ -205,6 +205,19 @@ type CompactOptions struct {
 	// session horizon — the exact cold case #1407 says the lever was built for. Never set this
 	// from a guess: a false cold claim converts a warm cache read into a cold re-write.
 	ColdCache bool
+	// MinHorizonMargin is the fed-back fire/bail threshold (#2817): the EXTRA predicted headroom,
+	// in future turns, the head-anchored burst must clear OVER its break-even before firing. The
+	// gate fires iff remainingTurns >= breakEven + MinHorizonMargin, so a positive margin bails the
+	// thin-headroom fires whose realized net most often goes negative when the session ends earlier
+	// than predicted. The zero value is today's plain gate (fire whenever the burst pays back at
+	// all), keeping the default firing path byte-for-byte unchanged. Its value is learned OFFLINE by
+	// rsiloop.TuneFirePolicy over a corpus of scored per-fire receipts (rsiloop.CompactionFireObs →
+	// ScoreCompactionFire) and fed back here; it gates ONLY on this ex-ante horizon feature, never on
+	// the ex-post net (feeding the net back would be circular). Negative values are treated as 0. It
+	// does NOT relax the penalty-free short-circuit: a burst with no one-time penalty (breakEven 0,
+	// e.g. ColdCache) still fires horizon-free regardless of the margin, since there is no estimation
+	// error to hedge.
+	MinHorizonMargin int
 }
 
 // CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte range
@@ -478,7 +491,7 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 			// carries no marginal penalty and the gate fires horizon-free (breakEven 0).
 			invalidatedSuffixTokens = 0
 		}
-		if !CacheBurstPaysBack(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult) {
+		if !CacheBurstPaysBackWithMargin(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, opts.MinHorizonMargin) {
 			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
 		}
 	}
@@ -856,8 +869,27 @@ func CacheBurstBreakEvenTurns(droppedCachedTokens, invalidatedSuffixTokens int, 
 // CacheBurstPaysBack reports whether an explicit cache-burst rewrite has enough future
 // turns left in this session to repay itself. currentTurn is 1-based and "now": in a
 // 50-turn session at currentTurn=20, there are 30 future turns left (21..50). Unknown or
-// exhausted horizons return false unless the burst has no one-time penalty.
+// exhausted horizons return false unless the burst has no one-time penalty. It is
+// CacheBurstPaysBackWithMargin at the untuned zero margin (fire whenever the burst repays at
+// all), so every caller predating the fed-back threshold is byte-for-byte unchanged.
 func CacheBurstPaysBack(totalTurns, currentTurn, droppedCachedTokens, invalidatedSuffixTokens int, readMult, writeMult float64) bool {
+	return CacheBurstPaysBackWithMargin(totalTurns, currentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, 0)
+}
+
+// CacheBurstPaysBackWithMargin is CacheBurstPaysBack with the fed-back fire/bail threshold
+// (#2817): the burst fires only when the remaining horizon clears the break-even by at least
+// minHorizonMargin extra turns — remainingTurns >= breakEven + minHorizonMargin. A positive
+// margin (learned OFFLINE by rsiloop.TuneFirePolicy over scored per-fire receipts) hedges the
+// break-even estimate's error by bailing the thin-headroom fires whose realized net most often
+// goes negative when the session ends earlier than predicted. The comparison is the exact live-gate
+// twin of rsiloop.FirePolicy.Fires: since a receipt's PredictedHorizonMargin is
+// remainingTurns − breakEven, "remainingTurns >= breakEven + margin" is "PredictedHorizonMargin >=
+// margin", so the offline tuner and this gate agree by construction. The margin does NOT relax the
+// penalty-free short-circuit: a burst with no one-time penalty (breakEven 0, e.g. an observed-cold
+// suffix) fires horizon-free regardless of the margin — there is no break-even error to hedge.
+// A negative margin is clamped to 0 (never below the untuned gate). minHorizonMargin 0 reproduces
+// CacheBurstPaysBack exactly.
+func CacheBurstPaysBackWithMargin(totalTurns, currentTurn, droppedCachedTokens, invalidatedSuffixTokens int, readMult, writeMult float64, minHorizonMargin int) bool {
 	breakEven := CacheBurstBreakEvenTurns(droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult)
 	if breakEven == 0 {
 		return true
@@ -865,8 +897,11 @@ func CacheBurstPaysBack(totalTurns, currentTurn, droppedCachedTokens, invalidate
 	if totalTurns <= 0 || currentTurn <= 0 {
 		return false
 	}
+	if minHorizonMargin < 0 {
+		minHorizonMargin = 0
+	}
 	remainingTurns := totalTurns - currentTurn
-	return remainingTurns >= breakEven
+	return remainingTurns >= breakEven+minHorizonMargin
 }
 
 // rawHasCacheControl reports whether a `system` or message `content` value (a bare string,

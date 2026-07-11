@@ -173,7 +173,7 @@ func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan
 		if opts.ColdCache {
 			invalidatedSuffixTokens = 0
 		}
-		if !CacheBurstPaysBack(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult) {
+		if !CacheBurstPaysBackWithMargin(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult, opts.MinHorizonMargin) {
 			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
 		}
 	}

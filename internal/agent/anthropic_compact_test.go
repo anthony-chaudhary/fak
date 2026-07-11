@@ -526,6 +526,54 @@ func TestCacheBurstPaysBackOnKnownSessionHorizon(t *testing.T) {
 	}
 }
 
+// TestCacheBurstPaysBackWithMarginFedBack witnesses the #2817 "feed it back" seam at the gate: the
+// fed-back MinHorizonMargin raises the fire/bail threshold so a thin-headroom burst the untuned gate
+// takes is BAILED once the tuned margin exceeds its predicted headroom — the live twin of
+// rsiloop.FirePolicy.Fires (remainingTurns−breakEven >= margin). The economics match
+// TestCacheBurstPaysBackOnKnownSessionHorizon: dropped 20000, invalidated 5000 ⇒ break-even 3 turns.
+func TestCacheBurstPaysBackWithMarginFedBack(t *testing.T) {
+	const dropped, invalidated = 20000, 5000
+	const readMult, writeMult = 0.1, 1.25
+	// break-even = ceil(5000*(1.25-0.1) / 20000*0.1) = ceil(5750/2000) = 3 turns.
+	if be := CacheBurstBreakEvenTurns(dropped, invalidated, readMult, writeMult); be != 3 {
+		t.Fatalf("break-even = %d, want 3 (fixture precondition)", be)
+	}
+
+	// Turn 47 of 50 leaves exactly 3 future turns — the burst pays back at margin 0 (the untuned
+	// gate), but a tuned margin of 1 demands 4 turns of headroom and BAILS the thin fire.
+	if !CacheBurstPaysBackWithMargin(50, 47, dropped, invalidated, readMult, writeMult, 0) {
+		t.Fatal("margin 0 must fire at exactly break-even headroom (untuned gate)")
+	}
+	if CacheBurstPaysBackWithMargin(50, 47, dropped, invalidated, readMult, writeMult, 1) {
+		t.Fatal("margin 1 must BAIL a fire with only break-even headroom (the fed-back suppression)")
+	}
+	// Give the burst the extra headroom the margin demands: turn 44 of 50 leaves 6 turns >= 3+3.
+	if !CacheBurstPaysBackWithMargin(50, 44, dropped, invalidated, readMult, writeMult, 3) {
+		t.Fatal("margin 3 must fire when the horizon clears break-even by the margin")
+	}
+
+	// Back-compat: CacheBurstPaysBack IS the zero-margin gate, byte-for-byte, at every turn.
+	for _, cur := range []int{20, 40, 44, 47, 48, 49} {
+		plain := CacheBurstPaysBack(50, cur, dropped, invalidated, readMult, writeMult)
+		zero := CacheBurstPaysBackWithMargin(50, cur, dropped, invalidated, readMult, writeMult, 0)
+		if plain != zero {
+			t.Fatalf("turn %d: CacheBurstPaysBack=%v != margin-0 gate=%v", cur, plain, zero)
+		}
+	}
+
+	// The margin never relaxes the penalty-free short-circuit: a burst with no one-time penalty
+	// (breakEven 0, the observed-cold case) fires horizon-free regardless of the margin — there is
+	// no break-even error to hedge, so the #1407 cold-cache guarantee is unaffected.
+	if !CacheBurstPaysBackWithMargin(50, 49, dropped, 0, readMult, writeMult, 100) {
+		t.Fatal("zero-penalty burst must fire regardless of margin (cold-cache guarantee)")
+	}
+	// A negative margin clamps to the untuned gate, never below it.
+	if CacheBurstPaysBackWithMargin(50, 47, dropped, invalidated, readMult, writeMult, -5) !=
+		CacheBurstPaysBackWithMargin(50, 47, dropped, invalidated, readMult, writeMult, 0) {
+		t.Fatal("negative margin must clamp to the zero-margin gate")
+	}
+}
+
 // headOrderedBody is the head-BEFORE-messages variant of the #1407 dormant shape: the stable
 // cache_control head is a top-level `system` block serialized before messages[] (Go struct field
 // order is the JSON key order), and the ONLY messages[] breakpoint sits on a RECENT turn
@@ -641,6 +689,32 @@ func TestCompactHeadAnchorRespectsBurstEconomics(t *testing.T) {
 	// Known but exhausted horizon (no future turns left) → cannot repay → no fire.
 	if out, outcome := CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, TotalTurns: 10, CurrentTurn: 10}); !bytes.Equal(out, raw) || outcome.Reason != CompactReasonBurstUnprofitable {
 		t.Fatalf("exhausted horizon must bail burst_unprofitable (identity); got changed=%v reason=%q",
+			!bytes.Equal(out, raw), outcome.Reason)
+	}
+}
+
+// TestCompactHeadAnchorMarginSuppressesFire wires the #2817 fed-back threshold through the LIVE
+// path: with CompactOptions.MinHorizonMargin set above the predicted headroom, a head-anchored
+// compaction the untuned (margin-0) gate FIRES is instead BAILED (CompactReasonBurstUnprofitable,
+// identity). This is "feed it back so negative-net fires are suppressed by the tuned policy"
+// observed end-to-end, not just in the pure gate — the tuned margin rsiloop.TuneFirePolicy learns
+// offline suppresses the thin-headroom fire when supplied to the live compactor.
+func TestCompactHeadAnchorMarginSuppressesFire(t *testing.T) {
+	raw := headOrderedBody(t, 120, 2)
+
+	// Baseline: margin 0 with a paying horizon FIRES (as in TestCompactHeadAnchorFiresOnDormantShape).
+	base := CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, TotalTurns: 1000, CurrentTurn: 1}
+	if _, outcome := CompactAnthropicHistoryWithOptions(raw, base); outcome.Reason != CompactReasonNone {
+		t.Fatalf("margin-0 baseline must fire, got reason=%q", outcome.Reason)
+	}
+
+	// Fed-back margin above the 999-turn predicted headroom: this fixture's burst carries a real
+	// one-time penalty (an unknown horizon bails it, per TestCompactHeadAnchorRespectsBurstEconomics),
+	// so break-even >= 1 and remaining(999) < break-even + 1000 — the tuned policy SUPPRESSES the fire.
+	tuned := base
+	tuned.MinHorizonMargin = 1000
+	if out, outcome := CompactAnthropicHistoryWithOptions(raw, tuned); !bytes.Equal(out, raw) || outcome.Reason != CompactReasonBurstUnprofitable {
+		t.Fatalf("fed-back margin must suppress the fire (identity + burst_unprofitable); got changed=%v reason=%q",
 			!bytes.Equal(out, raw), outcome.Reason)
 	}
 }
