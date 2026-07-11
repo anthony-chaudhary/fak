@@ -239,7 +239,7 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 			parts = prependGeminiTextPart(parts, note)
 		}
 	}
-	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
+	if note := resultAdmissionNote(freshAdmissionNotes(resultAdmissions)); note != "" {
 		parts = prependGeminiTextPart(parts, note)
 	}
 	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {

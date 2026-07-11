@@ -598,6 +598,11 @@ type ResultAdmission struct {
 	ResultDigest string                     `json:"result_digest,omitempty"`
 	Verdict      WireVerdict                `json:"verdict"`
 	Livelock     *guardrsi.LivelockEnvelope `json:"livelock,omitempty"`
+	// fresh marks a result the admission ledger screened for the FIRST time this turn
+	// (#2417) — the held-out banner is announced once, when a result is first admitted,
+	// not on every client replay. Request-local and unexported, so it never rides the
+	// `fak` wire extension; freshAdmissionNotes reads it to select what to announce.
+	fresh bool
 }
 
 // itoa is the package-local alias for numfmt.Itoa. The hand-rolled body was

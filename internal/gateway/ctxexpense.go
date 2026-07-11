@@ -184,10 +184,11 @@ func (s *Server) peekCtxExpense(trace string) (CtxExpense, bool) {
 }
 
 // ctxExpenseNoteOnce is the GATE: the opt-in, once-per-session in-band [fak]
-// advisory a block-tier verdict emits when FAK_CTX_EXPENSE_GATE is on. It mirrors
-// resultAdmissionNoteOnce exactly — a no-op for the empty trace, deduped per
-// session so the paragraph fires once (the machine-readable verdict still rides the
-// report every turn), and bounded by the same reaper. Returns "" when the gate is
+// advisory a block-tier verdict emits when FAK_CTX_EXPENSE_GATE is on. Like the
+// other once-per-session in-band notes it is a no-op for the empty trace and deduped
+// per session (via ctxExpenseNoted) so the paragraph fires once — the machine-readable
+// verdict still rides the report every turn — and is bounded by the same reaper.
+// Returns "" when the gate is
 // off, the session is not block-tier, or the note already fired this session; the
 // caller prepends a non-empty return as a text block on the Anthropic response.
 func (s *Server) ctxExpenseNoteOnce(trace string) string {

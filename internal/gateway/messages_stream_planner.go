@@ -119,7 +119,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)
 	}
-	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
+	if note := resultAdmissionNote(freshAdmissionNotes(resultAdmissions)); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)
 	}
 

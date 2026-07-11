@@ -232,64 +232,77 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			originSeq = s.originSeqFor(traceID, origin)
 		}
 		resultDigest := guardrsi.ArgsDigest(messages[i].Content)
-		wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
-		if aerr != nil {
-			// A result we cannot even admit is held out fail-closed rather than
-			// forwarded raw to the model.
-			messages[i].Content = `{"_quarantined":true,"boundary":"proxy","reason":"ADMIT_ERROR"}`
-			admissions = append(admissions, ResultAdmission{
-				ToolCallID:   messages[i].ToolCallID,
-				Tool:         tool,
-				ResultDigest: resultDigest,
-				Verdict:      WireVerdict{Kind: "QUARANTINE", Reason: "ADMIT_ERROR", Disposition: "TERMINAL"},
-			})
-			quarantinedIdx = append(quarantinedIdx, i)
-			continue
-		}
-		// On a quarantine/transform the kernel paged the bytes out and rewrote the
-		// payload in place; forward the paged-out form so the poison never reaches
-		// the model. A plain Allow leaves the content untouched.
-		if envlp != nil && (wv.Kind == "QUARANTINE" || wv.Kind == "TRANSFORM") {
-			messages[i].Content = envlp.Content
-		}
-		if wv.Kind == "QUARANTINE" {
-			quarantinedIdx = append(quarantinedIdx, i)
-		}
-		// Subagent-boundary witness (#2438): a child terminal result whose prose CLAIMS
-		// ship/create/fix but carries no artifact witness (commit SHA / file hash) is
-		// folded TAINTED, not clean — the loop-body-witness discipline
-		// (ReasonLoopBodyUnwitnessed) at the subagent fold. Only a plain ALLOW is demoted;
-		// the content is still forwarded (the parent sees it) but the admission records it
-		// visibly unverified. Placed before the vDSO fill (ALLOW-only) so a demoted, unbacked
-		// claim can never warm the cache either.
-		if demoted, ok := subagentDoneVerdict(tool, messages[i].Content, wv); ok {
-			wv = demoted
-		}
-		// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
-		// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
-		// call, fills (tool,args)->result so a later identical read is served inline.
-		// All the soundness/security guards live in fillVDSOFromResult.
-		if s.vdsoProxyFill && wv.Kind == "ALLOW" {
-			if orig, ok := callByID[messages[i].ToolCallID]; ok {
-				s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
+		// Screen this result EXACTLY ONCE per (trace, content) (#2417). On first arrival
+		// the ledger runs the closure — the real result-side stack — and records the
+		// verdict; on a later replay of the same content it returns the recorded verdict
+		// without re-screening, so the kernel work, the vDSO fill, the proxy_admit metric,
+		// and the eviction/reset below all happen once per unique result, not once per turn.
+		rec, fresh := s.admitLedger.admit(traceID, resultDigest, func() (WireVerdict, string, bool) {
+			wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
+			if aerr != nil {
+				// A result we cannot even admit is held out fail-closed rather than
+				// forwarded raw to the model.
+				return WireVerdict{Kind: "QUARANTINE", Reason: "ADMIT_ERROR", Disposition: "TERMINAL"},
+					`{"_quarantined":true,"boundary":"proxy","reason":"ADMIT_ERROR"}`, true
 			}
+			// On a quarantine/transform the kernel paged the bytes out and rewrote the
+			// payload in place; record the paged-out form so every replay forwards it and
+			// the poison never reaches the model. A plain Allow leaves the content untouched.
+			content, rewrote := messages[i].Content, false
+			if envlp != nil && (wv.Kind == "QUARANTINE" || wv.Kind == "TRANSFORM") {
+				content, rewrote = envlp.Content, true
+			}
+			// Subagent-boundary witness (#2438): a child terminal result whose prose CLAIMS
+			// ship/create/fix but carries no artifact witness (commit SHA / file hash) is
+			// folded RESIDUAL, not clean — the loop-body-witness discipline
+			// (ReasonLoopBodyUnwitnessed) at the subagent fold. Only a plain ALLOW is demoted;
+			// the content is still forwarded (the parent sees it) but the admission records it
+			// visibly unverified. Placed before the vDSO fill (ALLOW-only) so a demoted, unbacked
+			// claim can never warm the cache either.
+			if demoted, ok := subagentDoneVerdict(tool, messages[i].Content, wv); ok {
+				wv = demoted
+			}
+			// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
+			// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
+			// call, fills (tool,args)->result so a later identical read is served inline.
+			// All the soundness/security guards live in fillVDSOFromResult.
+			if s.vdsoProxyFill && wv.Kind == "ALLOW" {
+				if orig, ok := callByID[messages[i].ToolCallID]; ok {
+					s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
+				}
+			}
+			return wv, content, rewrote
+		})
+		wv := rec.verdict
+		if rec.rewrote {
+			messages[i].Content = rec.content
+		}
+		// Only a FIRST-arrival quarantine drives the in-kernel eviction + engine-cache
+		// reset below; a replay already paged the bytes out and evicted on its first turn,
+		// so re-firing them per replay is exactly the redundant work #2417 removes.
+		if wv.Kind == "QUARANTINE" && fresh {
+			quarantinedIdx = append(quarantinedIdx, i)
 		}
 		adm := ResultAdmission{
 			ToolCallID:   messages[i].ToolCallID,
 			Tool:         tool,
 			ResultDigest: resultDigest,
 			Verdict:      wv,
+			fresh:        fresh,
 		}
 		admissions = append(admissions, adm)
 	}
 	s.annotateResultLivelock(traceID, admissions)
-	// Defense in depth (candidate #14): a result the kernel just quarantined may have been
-	// admitted as benign on an EARLIER turn and prefilled into the in-kernel KV cache. Drop
-	// any cached prefix that attended to it so a later turn re-prefills instead of replaying
-	// the poisoned KV. Fires on the SAME quarantine event as the external engine-cache reset.
+	// Both defenses fire on a FIRST-arrival quarantine only (quarantinedIdx holds the fresh
+	// ones): a replay was already paged out and evicted on its first turn, so re-firing them
+	// per replay is the redundant work admit-once (#2417) removes. evictInKernelPoison already
+	// no-ops on an empty index; gate the engine-cache reset the same way so a replayed
+	// quarantine verdict in `admissions` does not re-reset the remote cache every turn.
 	s.evictInKernelPoison(messages, origContent, quarantinedIdx, tools)
-	if err := s.resetEngineCacheAfterQuarantine(ctx, admissions); err != nil {
-		return admissions, err
+	if len(quarantinedIdx) > 0 {
+		if err := s.resetEngineCacheAfterQuarantine(ctx, admissions); err != nil {
+			return admissions, err
+		}
 	}
 	return admissions, nil
 }

@@ -142,52 +142,47 @@ func TestResultAdmissionNoteSecretRetrievabilityIsHonest(t *testing.T) {
 	}
 }
 
-// TestResultAdmissionNoteOnceDedup pins the A half: a held result is announced ONCE per
-// session (trace), even though the client replays it — and re-quarantines it — every turn.
-// A genuinely NEW held result on a later turn still emits; the dedup is per-trace.
-func TestResultAdmissionNoteOnceDedup(t *testing.T) {
-	s := &Server{}
-	adms := []ResultAdmission{qadm("tc1", "WebFetch", "TRUST_VIOLATION")}
-
-	// Turn 1: first sight of tc1 -> emits.
-	if got := s.resultAdmissionNoteOnce("sess-A", adms); got == "" {
-		t.Fatal("first turn should announce the held result")
-	}
-	// Turns 2..N: the same replayed result -> suppressed.
-	for turn := 2; turn <= 5; turn++ {
-		if got := s.resultAdmissionNoteOnce("sess-A", adms); got != "" {
-			t.Fatalf("turn %d should suppress the already-announced result, got: %s", turn, got)
-		}
+// TestFreshAdmissionNotesSelectsFreshAndLivelock pins the banner-selection half of the
+// admit-once wire (#2417): the held-out banner announces a result the ledger screened for
+// the FIRST time this turn (fresh), never a replay of an already-admitted result — and a
+// replay the livelock detector just annotated is surfaced anyway so an escalating
+// repeated-quarantine loop still reaches the model.
+func TestFreshAdmissionNotesSelectsFreshAndLivelock(t *testing.T) {
+	// First arrival: fresh -> announced.
+	fresh := qadm("tc1", "WebFetch", "TRUST_VIOLATION")
+	fresh.fresh = true
+	if got := resultAdmissionNote(freshAdmissionNotes([]ResultAdmission{fresh})); got == "" {
+		t.Fatal("a fresh quarantine should be announced")
 	}
 
-	// A NEW held result (tc2) arrives alongside the old tc1: only tc2 is announced.
-	two := []ResultAdmission{qadm("tc1", "WebFetch", "TRUST_VIOLATION"), qadm("tc2", "Bash", "SECRET_EXFIL")}
-	got := s.resultAdmissionNoteOnce("sess-A", two)
-	if got == "" {
-		t.Fatal("a new held result should be announced")
-	}
-	if !strings.Contains(got, "1 tool result") || strings.Contains(got, "2 tool results") {
-		t.Errorf("only the new result should be counted; got: %s", got)
-	}
-	if !strings.Contains(got, "SECRET_EXFIL") || strings.Contains(got, "TRUST_VIOLATION") {
-		t.Errorf("only the unseen reason should appear; got: %s", got)
+	// A replay (fresh == false, no livelock): the ledger already admitted it -> suppressed.
+	replay := qadm("tc1", "WebFetch", "TRUST_VIOLATION")
+	if got := resultAdmissionNote(freshAdmissionNotes([]ResultAdmission{replay})); got != "" {
+		t.Fatalf("a replayed (already-admitted) result must not re-announce, got: %s", got)
 	}
 
-	// A different session sees tc1 for the first time -> emits (dedup is per-trace).
-	if got := s.resultAdmissionNoteOnce("sess-B", adms); got == "" {
-		t.Fatal("a different session should announce tc1 independently")
+	// A replay the livelock detector annotated: surfaced even though it is not fresh.
+	loop := qadm("tc1", "WebFetch", "TRUST_VIOLATION")
+	loop.Livelock = &guardrsi.LivelockEnvelope{RepeatCount: 3}
+	got := resultAdmissionNote(freshAdmissionNotes([]ResultAdmission{loop}))
+	if got == "" || !strings.Contains(got, "LIVELOCK_DETECTED") {
+		t.Fatalf("a replayed quarantine with a livelock annotation must still surface: %s", got)
 	}
 
-	// Empty trace has no session to key on -> always emits (un-deduped fallback).
-	if a := s.resultAdmissionNoteOnce("", adms); a == "" {
-		t.Fatal("empty trace should fall back to the un-deduped note (first)")
-	}
-	if b := s.resultAdmissionNoteOnce("", adms); b == "" {
-		t.Fatal("empty trace should fall back to the un-deduped note (repeat)")
+	// A mixed turn: the fresh redaction is announced; a stale (non-fresh) allow drops out.
+	red := radm("tc2", "Bash")
+	red.fresh = true
+	stale := ResultAdmission{ToolCallID: "tc3", Tool: "Read", Verdict: WireVerdict{Kind: "ALLOW"}}
+	mixed := resultAdmissionNote(freshAdmissionNotes([]ResultAdmission{red, stale}))
+	if !strings.Contains(mixed, "SECRET_REDACTED") || !strings.Contains(mixed, "masked") {
+		t.Errorf("a fresh redaction should be announced; got: %s", mixed)
 	}
 }
 
-func TestResultAdmissionNoteOnceSurfacesRepeatedQuarantineLivelock(t *testing.T) {
+// TestResultAdmissionLivelockSurfacesOnReplay pins that an escalating repeated-quarantine
+// loop still reaches the model on the replay turn it trips: the result is a replay (not
+// fresh) but annotateResultLivelock marks it, so freshAdmissionNotes keeps it.
+func TestResultAdmissionLivelockSurfacesOnReplay(t *testing.T) {
 	s := &Server{}
 	mk := func() []ResultAdmission {
 		return []ResultAdmission{{
@@ -195,28 +190,92 @@ func TestResultAdmissionNoteOnceSurfacesRepeatedQuarantineLivelock(t *testing.T)
 			Tool:         "tool_result",
 			ResultDigest: "sha256:abc",
 			Verdict:      WireVerdict{Kind: "QUARANTINE", Reason: "SECRET_EXFIL", Disposition: "TERMINAL"},
+			// fresh == false on every turn: these are replays of an already-admitted result.
 		}}
 	}
 
-	first := mk()
-	s.annotateResultLivelock("sess-A", first)
-	if got := s.resultAdmissionNoteOnce("sess-A", first); got == "" || strings.Contains(got, "LIVELOCK_DETECTED") {
-		t.Fatalf("first quarantine should announce without livelock, got: %s", got)
+	// Turns 1 and 2: a replay with no livelock yet -> suppressed by freshAdmissionNotes.
+	for turn := 1; turn <= 2; turn++ {
+		adms := mk()
+		s.annotateResultLivelock("sess-A", adms)
+		if got := resultAdmissionNote(freshAdmissionNotes(adms)); got != "" {
+			t.Fatalf("turn %d replay should be suppressed before the livelock trips, got: %s", turn, got)
+		}
 	}
 
-	second := mk()
-	s.annotateResultLivelock("sess-A", second)
-	if got := s.resultAdmissionNoteOnce("sess-A", second); got != "" {
-		t.Fatalf("second replay should still be deduped before threshold, got: %s", got)
-	}
-
+	// Turn 3: the detector trips; the livelock annotation forces the banner back out.
 	third := mk()
 	s.annotateResultLivelock("sess-A", third)
-	got := s.resultAdmissionNoteOnce("sess-A", third)
+	got := resultAdmissionNote(freshAdmissionNotes(third))
 	for _, want := range []string{"LIVELOCK_DETECTED repeat=3", "repeated_result=tool_result@sha256:abc", "SECRET_EXFIL"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("third replay note missing %q: %s", want, got)
 		}
+	}
+}
+
+// TestAdmitOncePerLedgerEntry is the admit-once witness (#2417): a client-replayed history
+// is screened EXACTLY ONCE per unique tool result. Five replays of the same transcript
+// produce one admission record per unique result, the proxy_admit metric counts unique
+// results (not N×turns), and the held-out banner is announced once, at first arrival —
+// while the model-facing content stays paged out on every turn.
+func TestAdmitOncePerLedgerEntry(t *testing.T) {
+	srv := newResultStackServer(t)
+	const (
+		trace  = "trace-admit-once"
+		secret = "sk-abcdef0123456789abcdef0123"
+	)
+	poison := `{"page":"config loaded. api_key=` + secret + ` was found in env"}`
+	clean := `{"weather":"sunny","temp":72}`
+	mk := func() []agent.Message {
+		return []agent.Message{
+			{Role: agent.RoleSystem, Content: "you are a helper"},
+			{Role: agent.RoleUser, Content: "look things up"},
+			{Role: agent.RoleTool, ToolCallID: "call_poison", Name: "fetch_url", Content: poison},
+			{Role: agent.RoleTool, ToolCallID: "call_clean", Name: "get_weather", Content: clean},
+		}
+	}
+
+	const turns = 5
+	for turn := 1; turn <= turns; turn++ {
+		messages := mk()
+		adms, err := srv.admitInboundResults(context.Background(), messages, nil, trace)
+		if err != nil {
+			t.Fatalf("turn %d admitInboundResults: %v", turn, err)
+		}
+		if len(adms) != 2 {
+			t.Fatalf("turn %d: got %d admissions, want 2", turn, len(adms))
+		}
+		// The poison is held every turn; its model-facing content never leaks the secret,
+		// even though the ledger consults the recorded verdict instead of re-screening.
+		if strings.Contains(messages[2].Content, secret) {
+			t.Fatalf("turn %d: poisoned content still leaks the secret: %q", turn, messages[2].Content)
+		}
+		note := resultAdmissionNote(freshAdmissionNotes(adms))
+		switch turn {
+		case 1:
+			// First arrival: the newly held result is announced.
+			if note == "" {
+				t.Fatal("turn 1 should announce the newly held result")
+			}
+		case 2:
+			// A pure replay, before the repeated-quarantine livelock trips: admit-once
+			// suppresses the re-banner (the record was already screened and announced).
+			if note != "" {
+				t.Fatalf("turn 2 re-announced an already-admitted result — admit-once should suppress it: %s", note)
+			}
+		}
+		// Turns 3+: the repeated-quarantine livelock legitimately re-surfaces the banner;
+		// that (orthogonal) path is covered by TestResultAdmissionLivelockSurfacesOnReplay.
+	}
+
+	// Exactly one admission record per UNIQUE tool result, regardless of replay count.
+	if n := srv.admitLedger.records(trace); n != 2 {
+		t.Fatalf("ledger recorded %d results, want 2 (one per unique result over %d turns)", n, turns)
+	}
+	// /metrics: proxy_admit was observed once per unique result — 2 total, not 2×turns.
+	if total := srv.metrics.adjudicationSummary().Total; total != 2 {
+		t.Fatalf("proxy_admit observations = %d, want 2 (unique-result count, not %d turns × 2)", total, turns)
 	}
 }
 

@@ -20,9 +20,9 @@ import (
 // labels — terse and self-describing — instead of a per-item paragraph. Returns "" when
 // every result was a clean allow.
 //
-// This is the buffered/streaming Anthropic + Gemini prose; resultAdmissionNoteOnce wraps
-// it with per-session dedup so a single held result is announced once, not every replayed
-// turn.
+// This is the buffered/streaming Anthropic + Gemini prose; callers pass it through
+// freshAdmissionNotes first so a held result is announced once — when the admission
+// ledger screened it (fresh) — not on every replayed turn (#2417).
 func resultAdmissionNote(adms []ResultAdmission) string {
 	n := 0
 	redacted := 0 // warn-first SECRET_REDACTED transforms: masked in place, NOT held out
@@ -106,55 +106,23 @@ func resultAdmissionNote(adms []ResultAdmission) string {
 	return note
 }
 
-// resultAdmissionNoteOnce is resultAdmissionNote with PER-SESSION dedup: it emits the
-// prose banner only for quarantined results this trace has not already announced, so a
-// held result is surfaced once rather than re-announced on every replayed turn (the client
-// re-sends the full transcript each turn, so admitInboundResults re-quarantines the SAME
-// result every time). The machine-readable verdicts still ride the `fak` extension on every
-// turn — only the repeated human paragraph is suppressed, so dedup costs no signal. A
-// fresh quarantine on a later turn (new key) still emits. An empty trace falls back to the
-// un-deduped note (no session to key on).
-func (s *Server) resultAdmissionNoteOnce(trace string, adms []ResultAdmission) string {
-	if s == nil || trace == "" {
-		return resultAdmissionNote(adms)
-	}
-	fresh := make([]ResultAdmission, 0, len(adms))
-	s.notedResultsMu.Lock()
-	if s.notedResults == nil {
-		s.notedResults = map[string]map[string]struct{}{}
-	}
-	if len(s.notedResults) >= maxResetHealthSessions {
-		// Bound the map (same reaper convention as turnSafety/resetHealth): drop one stale
-		// trace. The dedup is best-effort observability, so an evicted trace re-announcing
-		// once is harmless.
-		for k := range s.notedResults {
-			delete(s.notedResults, k)
-			break
-		}
-	}
-	seen := s.notedResults[trace]
-	if seen == nil {
-		seen = map[string]struct{}{}
-		s.notedResults[trace] = seen
-	}
+// freshAdmissionNotes selects the admissions the held-out banner should announce THIS
+// turn, then hands them to resultAdmissionNote. Admission is now keyed to the ledger
+// entry (#2417): a result is screened once, at first arrival (fresh), so its banner is
+// emitted once — the client re-sends the full transcript every turn, but a replay is not
+// fresh and is not re-announced. A result the livelock detector just annotated is always
+// included even on a replay, so an escalating repeated-quarantine loop still surfaces.
+// The machine-readable verdicts still ride the `fak` extension on every turn (the ledger
+// record is consulted), so suppressing the repeated paragraph costs no signal. An empty
+// trace never dedups upstream, so every admission is marked fresh — the un-deduped note.
+func freshAdmissionNotes(adms []ResultAdmission) []ResultAdmission {
+	out := make([]ResultAdmission, 0, len(adms))
 	for _, a := range adms {
-		isQuarantine := a.Verdict.Kind == "QUARANTINE"
-		isRedact := a.Verdict.Kind == "TRANSFORM" && a.Verdict.Reason == reasonSecretRedacted
-		if !isQuarantine && !isRedact {
-			continue
+		if a.fresh || a.Livelock != nil {
+			out = append(out, a)
 		}
-		key := resultNoteKey(a)
-		if _, already := seen[key]; already {
-			if a.Livelock != nil {
-				fresh = append(fresh, a)
-			}
-			continue
-		}
-		seen[key] = struct{}{}
-		fresh = append(fresh, a)
 	}
-	s.notedResultsMu.Unlock()
-	return resultAdmissionNote(fresh)
+	return out
 }
 
 func resultLivelockInBandNote(a ResultAdmission) string {

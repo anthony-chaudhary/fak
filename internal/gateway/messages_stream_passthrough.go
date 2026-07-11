@@ -201,7 +201,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		if note := p.s.toolFailureNoteOnce(p.reqTrace, p.req.Messages); note != "" {
 			emitAnthropicTextBlock(p.send, &p.outIdx, note)
 		}
-		if note := p.s.resultAdmissionNoteOnce(p.reqTrace, p.resultAdms); note != "" {
+		if note := resultAdmissionNote(freshAdmissionNotes(p.resultAdms)); note != "" {
 			emitAnthropicTextBlock(p.send, &p.outIdx, note)
 		}
 		// Unusually-expensive-session advisory (once/session, gate-armed only).

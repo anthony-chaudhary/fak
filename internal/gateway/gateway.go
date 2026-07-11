@@ -1196,7 +1196,7 @@ type Server struct {
 	// detection is on by default. ctxExpenseGate is the soak switch (FAK_CTX_EXPENSE_GATE):
 	// when true, a block-tier verdict emits ONE in-band [fak] advisory per session; when
 	// false (the default) the block tier is view-only. ctxExpenseNoted dedups that advisory
-	// to once per session (the resultAdmissionNoteOnce pattern), guarded by ctxExpenseNotedMu
+	// to once per session (a per-session once-note pattern), guarded by ctxExpenseNotedMu
 	// and bounded by the same reaper. All read-only relative to the request path — the gate's
 	// only actuation is the in-band note; the passthrough body is never mutated.
 	ctxExpenseWarn    int
@@ -1271,7 +1271,7 @@ type Server struct {
 	// key is observed at most once, so passive replay is filtered while a genuinely
 	// RE-ISSUED call — which the client stamps with a NEW tool_call_id — is a new key and
 	// still climbs toward a real trip. Bounded by maxResetHealthSessions (same reaper as
-	// notedResults/turnSafety).
+	// admitLedger/turnSafety).
 	resultLivelockObserved map[string]map[string]struct{}
 	// resultLivelockRecorded dedups the DURABLE side effects of a real trip — the
 	// AppendLivelock journal row and the fleet-observation JSONL line — to at most once per
@@ -1307,25 +1307,17 @@ type Server struct {
 	contextQueryAuditSeq uint64
 	contextQueryAudit    []ContextQueryAuditRecord
 
-	// notedResultsMu guards notedResults, the per-trace set of inbound tool results whose
-	// human-facing "[fak] … held out of context" note has ALREADY been emitted this session.
-	// The client (Claude Code) replays the full transcript every turn, so admitInboundResults
-	// re-quarantines the SAME result on every subsequent turn — without this, resultAdmissionNote
-	// re-emits the identical banner turn after turn for one held result ("seeing this too often").
-	// Keyed by trace -> set of stable per-result keys (ToolCallID, or Tool|Reason when idless);
-	// resultAdmissionNoteOnce records a key the first time and suppresses the prose banner
-	// thereafter. The machine-readable verdict still rides the `fak` extension every turn, so
-	// dedup costs no signal — only the repeated paragraph. Bounded by maxResetHealthSessions
-	// (same reaper as turnSafety/resetHealth).
-	notedResultsMu sync.Mutex
-	notedResults   map[string]map[string]struct{}
-
-	// notedToolFailures is the sibling dedup set for in-band diagnostic notes about
-	// tool executor failures that are not policy refusals. A replayed Bash exit-143
-	// git/gh result should surface the PowerShell retry once per trace, not on every
-	// transcript replay.
-	notedToolFailuresMu sync.Mutex
-	notedToolFailures   map[string]map[string]struct{}
+	// admitLedger keys result admission to content, per trace (#2417): a tool result is
+	// screened EXACTLY ONCE, at first arrival, and its verdict is recorded on the entry;
+	// a later replay of the same content consults the record instead of re-running the
+	// result-side stack over the whole client-replayed transcript. This replaces the old
+	// notedResults / notedToolFailures dedup maps — which only suppressed the repeated
+	// human-facing banner while the re-screening still happened every turn — so "was this
+	// result screened?" is a ledger query, the held-out banner and the exit-143 recovery
+	// note are surfaced once, and /metrics counts unique results, not N×turns. The
+	// machine-readable verdict still rides the `fak` extension every turn (the record is
+	// consulted, so no signal is lost). See admission_ledger.go; carries its own mutex.
+	admitLedger admissionLedger
 
 	// originSeq maps an admitted origin call to the sequence stamped on its DECIDE row,
 	// so a later client-produced tool_result can journal its QUARANTINE against the

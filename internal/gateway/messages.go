@@ -1302,7 +1302,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// If the result-side floor paged out an inbound tool result, say so in-band too:
 	// the model is about to read a quarantine stub where its tool output was, and a
 	// silent stub reads as a broken tool. Naming the quarantine lets the agent adapt.
-	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
+	if note := resultAdmissionNote(freshAdmissionNotes(resultAdmissions)); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
 	// If the client reports the known Windows Bash git/gh exit-143 hang, give the

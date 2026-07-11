@@ -6,6 +6,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/auditreason"
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 )
 
 type toolFailureNote struct {
@@ -14,6 +15,9 @@ type toolFailureNote struct {
 	Command    string
 	Recovery   string
 	Token      auditreason.ToolFailure
+	// Digest is the content hash of the failing tool result, the admission-ledger key
+	// that dedups this recovery note to once per unique result across client replays.
+	Digest string
 }
 
 // toolFailureNotes detects known tool-executor failures in replayed tool results.
@@ -53,6 +57,7 @@ func toolFailureNotes(messages []agent.Message) []toolFailureNote {
 			Command:    command,
 			Recovery:   exit143Recovery(command, m.Content, gitGhShellSucceeded),
 			Token:      spec.Token,
+			Digest:     guardrsi.ArgsDigest(m.Content),
 		})
 	}
 	return out
@@ -73,36 +78,22 @@ func toolFailureNoteText(notes []toolFailureNote) string {
 	return "[fak] " + token + ": " + itoa(uint64(len(notes))) + " Bash git/gh commands ended with exit 143; recovery: " + strings.Join(recoveries, " ; ")
 }
 
+// toolFailureNoteOnce surfaces the exit-143 recovery note ONCE per unique failing
+// result per trace. Dedup is now a query against the admission ledger (#2417) keyed on
+// the result's content hash — the same entry admission keys to — so the separate
+// notedToolFailures map is gone. An empty trace has no session to key on and always
+// emits (the un-deduped fallback).
 func (s *Server) toolFailureNoteOnce(trace string, messages []agent.Message) string {
 	notes := toolFailureNotes(messages)
 	if s == nil || trace == "" {
 		return toolFailureNoteText(notes)
 	}
 	fresh := make([]toolFailureNote, 0, len(notes))
-	s.notedToolFailuresMu.Lock()
-	if s.notedToolFailures == nil {
-		s.notedToolFailures = map[string]map[string]struct{}{}
-	}
-	if len(s.notedToolFailures) >= maxResetHealthSessions {
-		for k := range s.notedToolFailures {
-			delete(s.notedToolFailures, k)
-			break
-		}
-	}
-	seen := s.notedToolFailures[trace]
-	if seen == nil {
-		seen = map[string]struct{}{}
-		s.notedToolFailures[trace] = seen
-	}
 	for _, n := range notes {
-		key := toolFailureNoteKey(n)
-		if _, already := seen[key]; already {
-			continue
+		if s.admitLedger.failNoteFirst(trace, n.Digest) {
+			fresh = append(fresh, n)
 		}
-		seen[key] = struct{}{}
-		fresh = append(fresh, n)
 	}
-	s.notedToolFailuresMu.Unlock()
 	return toolFailureNoteText(fresh)
 }
 
@@ -259,9 +250,3 @@ func escapePowerShellDoubleQuoted(s string) string {
 	return s
 }
 
-func toolFailureNoteKey(n toolFailureNote) string {
-	if n.ToolCallID != "" {
-		return n.ToolCallID
-	}
-	return string(n.Token) + "|" + n.Command
-}
