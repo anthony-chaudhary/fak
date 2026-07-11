@@ -45,13 +45,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
-// ChannelDefault is #node-usage in the scoreboard Slack workspace — the public built-in
-// the node-usage feeder (.github/workflows/node-usage-feed.yml) already documents as its
-// default. Mirrors dojopost/blockerpost/steeringChannelDefault's posture: the channel id
-// is public (it grants nothing without the bot token), only the token is secret. Wiring it
-// here stops the surface resolving to NO channel and silently dry-running (was INCOMPLETE
-// in `fak slack health`, #1428).
-const ChannelDefault = "C0BEFFPCSAU"
+// ChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) — node-usage
+// is one of the CI/CD reporting feeders folded onto that one channel. The channel id is
+// public (it grants nothing without the bot token), only the token is secret. Wiring a
+// default stops the surface resolving to NO channel and silently dry-running (was
+// INCOMPLETE in `fak slack health`, #1428). Override this surface with
+// FAK_NODE_USAGE_CHANNEL, or the whole reporting family with FAK_CICD_REPORT_CHANNEL.
+const ChannelDefault = scoreboard.CICDReportChannel
 
 // tokenEnvs / channelEnvs are the dedicated node-usage keys. The token resolver adds a
 // scoreboard fallback (below); the channel resolver falls through to ChannelDefault — a
@@ -94,7 +94,7 @@ func ResolveChannel() string {
 	if v := envFileValue("FAK_NODE_USAGE_CHANNEL"); v != "" {
 		return v
 	}
-	return ChannelDefault
+	return scoreboard.ResolveCICDReportChannel()
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
