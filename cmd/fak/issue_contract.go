@@ -43,6 +43,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueDecompose(stdout, stderr, argv[1:])
 	case "dedup":
 		return runIssueDedup(stdout, stderr, argv[1:])
+	case "finding":
+		return runIssueFinding(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		issueUsage(stdout)
 		return 0
@@ -1194,6 +1196,9 @@ func issueUsage(w io.Writer) {
                      [--max-create N] [--repo owner/name] [--json]
   fak issue dedup    [--json] [--limit N] [--threshold F] [--topk N]
   fak issue dedup    --from-issues ISSUES.json|- [--json]
+  fak issue finding  (--ledger LEDGER.jsonl | --receipts RECEIPTS.json)
+                     [--from-issues ISSUES.json] [--lane L] [--json]
+                     [--live --dedupe-cap N --max-apply N] [--repo owner/name]
 
 The dedup command is the retrospective backlog duplicate census — the read-only
 complement of the write-time near-duplicate gate. It builds a body-aware simhash
@@ -1204,6 +1209,22 @@ shared labels/paths, matched excerpts). It never writes to GitHub — the
 confirm-before-closing-as-dup discipline stands. Default reads the live backlog
 via gh; --from-issues reads a cached array (offline-safe). Exit 0 report; exit 2
 bad flags/input; exit 1 gh/encode failure.
+
+The finding command is the live adapter over the pure cross-audit finding
+planner (#3857): it reads a batch of verified audit receipts (--ledger, the
+hash-chained receipt ledger, or --receipts, an offline array) plus the findings
+already filed (--from-issues), and turns each receipt into one bounded action —
+CREATE a new finding issue for a fresh REFUTE, UPDATE/COMMENT one that recurs
+with new evidence, REOPEN a closed finding whose subject a REFUTE recurs on, or
+ESCALATE an INCONCLUSIVE/UNAVAILABLE receipt for human review instead of
+asserting a corruption finding. Repeated identical receipts dedupe onto one
+finding. Every generated CREATE is held to the strict armed issue contract, so a
+candidate the contract would not admit fails the run (exit 3) rather than being
+filed. It DEFAULTS to a dry-run plan that never touches GitHub; --live arms
+bounded mutations through the same governed gh atoms and requires a proven
+--dedupe-cap, refusing the whole run if planned mutations exceed --max-apply.
+Exit 0 plan/all-applied; exit 2 bad flags/unarmed/blast-radius refusal; exit 3 a
+generated candidate is not dispatchable; exit 1 a live gh mutation failed.
 
 The create command files one GitHub issue directly, shelling to gh issue
 create from the trusted fak binary instead of the agent proposing raw gh
