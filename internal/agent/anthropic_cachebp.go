@@ -147,9 +147,12 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	//    breakpoint secures, so we'd pay the provider's cache-WRITE premium for a prefix doomed to
 	//    miss. So we step DOWN from a volatile tools+system head to caching just the stable tools,
 	//    and bail to identity when no cacheable span is byte-stable (#806 bullet 2, fail-safe form).
-	sysElems, sysSpans, sysOK := decodeArrayElements(raw, obj["system"])
+	// Anchor the head arrays by KEY (decodeTopLevelArray), never bytes.Index on their value bytes:
+	// a `system`/`tools` array can be byte-identical to a message content array, and a first-
+	// occurrence search would then splice the breakpoint into the wrong array (#3773).
+	sysElems, sysSpans, sysOK := decodeTopLevelArray(raw, "system")
 	sysOK = sysOK && len(sysElems) > 0
-	toolElems, toolSpans, toolOK := decodeArrayElements(raw, obj["tools"])
+	toolElems, toolSpans, toolOK := decodeTopLevelArray(raw, "tools")
 	toolOK = toolOK && len(toolElems) > 0
 	toolsVolatile := headValueIsVolatile(obj["tools"])
 
@@ -165,7 +168,7 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	if sysOK {
 		if plan, ok := planAnthropicSystemAnchor(sysElems); ok {
 			if plan.rewritten {
-				out, ok := rewriteSystemArrayWithBreakpoint(raw, obj["system"], sysElems, plan)
+				out, ok := rewriteSystemArrayWithBreakpoint(raw, sysElems, plan)
 				if !ok {
 					return raw, BreakpointOutcome{Reason: BreakpointReasonSpliceFailed}
 				}
@@ -234,17 +237,20 @@ func UpgradeAnthropicStableCacheTTL1h(raw []byte) ([]byte, TTLUpgradeOutcome) {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
 	}
-	if out, oc, ok := upgradeStableCacheTTLInArray(raw, obj["system"], "system", headValueIsVolatile(obj["tools"])); ok {
+	if out, oc, ok := upgradeStableCacheTTLInArray(raw, "system", headValueIsVolatile(obj["tools"])); ok {
 		return out, oc
 	}
-	if out, oc, ok := upgradeStableCacheTTLInArray(raw, obj["tools"], "tools", false); ok {
+	if out, oc, ok := upgradeStableCacheTTLInArray(raw, "tools", false); ok {
 		return out, oc
 	}
 	return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNoStableBreakpoint}
 }
 
-func upgradeStableCacheTTLInArray(raw []byte, arr json.RawMessage, target string, inheritedVolatile bool) ([]byte, TTLUpgradeOutcome, bool) {
-	elems, spans, ok := decodeArrayElements(raw, arr)
+func upgradeStableCacheTTLInArray(raw []byte, target string, inheritedVolatile bool) ([]byte, TTLUpgradeOutcome, bool) {
+	// Anchor the head array by its KEY (target is "system"/"tools"), never bytes.Index on the value
+	// bytes: a head array byte-identical to a message content array would otherwise upgrade the ttl
+	// inside the wrong occurrence (#3773).
+	elems, spans, ok := decodeTopLevelArray(raw, target)
 	if !ok || len(elems) == 0 {
 		return raw, TTLUpgradeOutcome{}, false
 	}
@@ -419,12 +425,13 @@ func placeAndValidateAtSpan(raw []byte, span elementSpan) ([]byte, string) {
 	return out, BreakpointReasonNone
 }
 
-func rewriteSystemArrayWithBreakpoint(raw []byte, systemRaw json.RawMessage, elems []json.RawMessage, plan anthropicSystemAnchorPlan) ([]byte, bool) {
-	start := bytes.Index(raw, systemRaw)
-	if start < 0 {
+func rewriteSystemArrayWithBreakpoint(raw []byte, elems []json.RawMessage, plan anthropicSystemAnchorPlan) ([]byte, bool) {
+	// Locate the system value by KEY, not bytes.Index on its bytes: a system array byte-identical
+	// to a message content array would otherwise rewrite the wrong occurrence (#3773).
+	start, end, ok := objectValueSpanLastWins(raw, "system")
+	if !ok {
 		return nil, false
 	}
-	end := start + len(systemRaw)
 	var sys bytes.Buffer
 	sys.WriteByte('[')
 	for pos, idx := range plan.order {
@@ -444,7 +451,7 @@ func rewriteSystemArrayWithBreakpoint(raw []byte, systemRaw json.RawMessage, ele
 	sys.WriteByte(']')
 
 	var out bytes.Buffer
-	out.Grow(len(raw) + sys.Len() - len(systemRaw))
+	out.Grow(len(raw) + sys.Len() - (end - start))
 	out.Write(raw[:start])
 	out.Write(sys.Bytes())
 	out.Write(raw[end:])

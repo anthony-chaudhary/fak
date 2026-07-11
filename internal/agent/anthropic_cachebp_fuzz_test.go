@@ -101,6 +101,30 @@ func checkCacheControlByteSafety(t testing.TB, raw []byte) byteSafetyStats {
 	return stats
 }
 
+// assertLiteralInTarget pins the splice POSITION, the #3773 invariant: the single spliced literal
+// must live inside the value of the top-level key the outcome NAMES (system|tools), never a byte-
+// identical sibling array (e.g. a message content array equal to the system array). The target
+// value is read last-wins via the map — the same semantics the transform anchors on — so a
+// duplicate-key body pins the same value bytes the transform targeted. Byte counting alone cannot
+// catch a misroute: the wrong array still holds exactly one literal.
+func assertLiteralInTarget(t testing.TB, out []byte, target, literal string, in []byte) {
+	t.Helper()
+	if target != "system" && target != "tools" {
+		t.Fatalf("outcome names an unexpected target %q (want system|tools)\nout: %q", target, out)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(out, &obj); err != nil {
+		t.Fatalf("output no longer unmarshals for the position pin: %v\nout: %q", err, out)
+	}
+	val, ok := obj[target]
+	if !ok {
+		t.Fatalf("outcome names target %q but the output has no such top-level key\nin: %q\nout: %q", target, in, out)
+	}
+	if !bytes.Contains(val, []byte(literal)) {
+		t.Fatalf("splice misrouted: %q landed OUTSIDE the reported target %q value — a byte-identical sibling array\ntarget value: %q\nin: %q\nout: %q", literal, target, val, in, out)
+	}
+}
+
 func checkPlaceByteSafety(t testing.TB, raw []byte, stats *byteSafetyStats) []byte {
 	t.Helper()
 	out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
@@ -131,6 +155,7 @@ func checkPlaceByteSafety(t testing.TB, raw []byte, stats *byteSafetyStats) []by
 			t.Fatalf("placement added %d bytes, want the breakpoint key (%d, or +1 with comma)\nadded: %q", d, len(cacheControlBreakpoint), added)
 		}
 	}
+	assertLiteralInTarget(t, out, oc.Target, cacheControlBreakpoint, raw)
 	again, oc2 := PlaceAnthropicCacheBreakpointWithOutcome(out)
 	if oc2.Reason != BreakpointReasonAlreadySet || !bytes.Equal(again, out) {
 		t.Fatalf("place is not idempotent: second pass reason=%q\nfirst: %q\nsecond: %q", oc2.Reason, out, again)
@@ -266,6 +291,7 @@ func checkUpgradeByteSafety(t testing.TB, in []byte) bool {
 	if got, want := bytes.Count(out, []byte(`"ttl":"1h"`)), bytes.Count(in, []byte(`"ttl":"1h"`))+1; got != want {
 		t.Fatalf("ttl upgrade: %d 1h ttl literals, want %d\nin: %q\nout: %q", got, want, in, out)
 	}
+	assertLiteralInTarget(t, out, oc.Target, cacheControlTTL1h, in)
 	again, oc2 := UpgradeAnthropicStableCacheTTL1h(out)
 	if !bytes.Equal(again, out) {
 		t.Fatalf("ttl upgrade is not idempotent: second pass (reason=%q) changed bytes\nfirst: %q\nsecond: %q", oc2.Reason, out, again)

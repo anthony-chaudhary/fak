@@ -705,16 +705,44 @@ func compactSpliceVerdict(raw, out []byte, ok bool, spans []elementSpan, pfxEnd 
 // exact anchors for byte-splicing (never a fragile string search). msgsRaw must be the
 // `messages` value as it appears in raw (json.Unmarshal of an object preserves the value
 // bytes verbatim, so a sub-search for it is reliable). ok is false on any decode error.
+//
+// Locating the base with bytes.Index is only sound when msgsRaw is unlikely to be byte-identical
+// to a sibling value; the head arrays (`system`, `tools`) CAN collide with a message content
+// array, so those callers must anchor by KEY via decodeTopLevelArray instead (#3773).
 func decodeArrayElements(raw []byte, msgsRaw json.RawMessage) (elems []json.RawMessage, spans []elementSpan, ok bool) {
 	// Find where msgsRaw sits in raw so element offsets are absolute. json.RawMessage is a
-	// verbatim slice of the input, so a single LastIndex of its bytes locates it; the
+	// verbatim slice of the input, so a single Index of its bytes locates it; the
 	// `"messages"` key value is unique enough in practice, and we re-verify with a prefix
 	// byte-equality at the end, so a wrong guess can only produce identity, never breakage.
 	base := bytes.Index(raw, msgsRaw)
 	if base < 0 {
 		return nil, nil, false
 	}
-	dec := json.NewDecoder(bytes.NewReader(msgsRaw))
+	return decodeArrayElementsAt(msgsRaw, base)
+}
+
+// decodeTopLevelArray locates the value of top-level object key `key` by a streaming KEY walk
+// (objectValueSpanLastWins) and decodes it as a JSON array with absolute spans. Anchoring by key
+// — never bytes.Index on the value bytes, which finds the FIRST byte-identical occurrence — is
+// what stops a head splice (`system`/`tools`) from misrouting into a byte-identical sibling array,
+// e.g. a user message whose content array equals the system array: the #3773 vector. Last-key-wins
+// matches the map[string]json.RawMessage the callers read obj[key] with, so an adversarial
+// duplicate top-level key anchors the same value the decoder keeps. ok is false when the key is
+// absent, its value is not a JSON object member, or the value is not a JSON array.
+func decodeTopLevelArray(raw []byte, key string) (elems []json.RawMessage, spans []elementSpan, ok bool) {
+	start, end, found := objectValueSpanLastWins(raw, key)
+	if !found {
+		return nil, nil, false
+	}
+	return decodeArrayElementsAt(raw[start:end], start)
+}
+
+// decodeArrayElementsAt is the shared core: it decodes the JSON array arrRaw and reports each
+// element's byte span offset by base — arrRaw's absolute start within the request body. The base
+// comes from bytes.Index (decodeArrayElements) or a key walk (decodeTopLevelArray). ok is false on
+// any decode error or if arrRaw is not a JSON array.
+func decodeArrayElementsAt(arrRaw json.RawMessage, base int) (elems []json.RawMessage, spans []elementSpan, ok bool) {
+	dec := json.NewDecoder(bytes.NewReader(arrRaw))
 	tok, err := dec.Token()
 	if err != nil {
 		return nil, nil, false
@@ -727,7 +755,7 @@ func decodeArrayElements(raw []byte, msgsRaw json.RawMessage) (elems []json.RawM
 		// prior element's `}`), so it sits BEFORE this element's leading `,`/whitespace.
 		// Advance past both to the element's first significant byte for a clean start.
 		startRel := int(dec.InputOffset())
-		for startRel < len(msgsRaw) && (isJSONSpace(msgsRaw[startRel]) || msgsRaw[startRel] == ',') {
+		for startRel < len(arrRaw) && (isJSONSpace(arrRaw[startRel]) || arrRaw[startRel] == ',') {
 			startRel++
 		}
 		var el json.RawMessage

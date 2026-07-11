@@ -20,6 +20,10 @@ package agent
 //	resume    same turn    parked arm wakes and completes the HELD turn      CONTROL_SESSION_TERMINAL
 //	cancel    next turn    Draining (enqueued) finalized to Stopped at the   CONTROL_SESSION_TERMINAL,
 //	                       boundary; arm stops with DRAINING                 CONTROL_REV_STALE (--if-rev race)
+//	terminate safe point   Terminating wakes the arm MID-TURN (#2758): the   CONTROL_SESSION_TERMINAL,
+//	                       in-flight model call's context is cancelled, no   CONTROL_REV_STALE (--if-rev race)
+//	                       further tool call dispatches; arm stops with
+//	                       TERMINATED (a drain would run the turn out)
 //	throttle  next turn    pace cap lowered into THIS turn's sampling        CONTROL_SESSION_TERMINAL
 //	budget    next turn    exhausted allotment stops the arm with the        CONTROL_SESSION_TERMINAL
 //	                       closed exhaustion reason; record finalized
@@ -348,6 +352,44 @@ func controlOpWitnesses() []controlOpWitness {
 			},
 		},
 		{
+			op:     "terminate",
+			tokens: []string{session.ReasonControlSessionTerminal},
+			applied: func(t *testing.T) {
+				const trace = "ctl-2766-terminate-applied"
+				tbl := session.NewTable()
+				tbl.Decide(trace) // seed a live record
+				// The flip lands MID-TURN: the planner has already returned a turn
+				// with two pending tool calls when the operator terminates. Consumed
+				// means the safe point took it — NO pending tool call dispatches
+				// (a drain would run them all; that contrast is the dedicated
+				// drain-vs-terminate witness in loop_terminate_test.go).
+				p := &midTurnFlipPlanner{flip: func() {
+					if _, ok := tbl.Transition(trace, session.Terminating, ""); !ok {
+						t.Error("terminate write refused on a live session")
+					}
+				}}
+				m, err := RunArm(context.Background(), p, "task", false, 3, nil, WithSessionTable(tbl, trace))
+				if err != nil {
+					t.Fatalf("RunArm: %v", err)
+				}
+				if m.StoppedBySession != session.ReasonTerminated {
+					t.Fatalf("StoppedBySession = %q, want %q (the terminate was not consumed at the safe point)", m.StoppedBySession, session.ReasonTerminated)
+				}
+				if m.ToolCalls != 0 {
+					t.Fatalf("terminated arm still dispatched %d tool calls — terminate must start no new work", m.ToolCalls)
+				}
+				// Consumed: the safe point finalized Terminating -> Stopped.
+				if st := tbl.Get(trace); st.Run != session.Stopped || st.Reason != session.ReasonTerminated {
+					t.Fatalf("post-terminate state = %v/%q, want Stopped/%q", st.Run, st.Reason, session.ReasonTerminated)
+				}
+			},
+			refused: func(t *testing.T) []string {
+				return refuseTerminal(t, "terminate", func(tbl *session.Table, trace string) (session.State, bool) {
+					return tbl.Transition(trace, session.Terminating, "")
+				})
+			},
+		},
+		{
 			op:     "throttle",
 			tokens: []string{session.ReasonControlSessionTerminal},
 			applied: func(t *testing.T) {
@@ -498,7 +540,7 @@ func TestControlRefusalVocabularyComplete(t *testing.T) {
 	}
 	// The epic's live op set at HEAD — a new control op must add its row here
 	// (and its tokens to the closed vocabulary) or this test names the gap.
-	for _, op := range []string{"steer", "redirect", "pause", "resume", "cancel", "throttle", "budget", "priority"} {
+	for _, op := range []string{"steer", "redirect", "pause", "resume", "cancel", "terminate", "throttle", "budget", "priority"} {
 		if !seenOps[op] {
 			t.Fatalf("live control op %q has no witness row — applied/refused contract missing", op)
 		}
@@ -515,8 +557,8 @@ func TestControlRefusalVocabularyComplete(t *testing.T) {
 	stopReasons := []string{
 		session.ReasonBudgetTurns, session.ReasonBudgetTokens, session.ReasonBudgetContext,
 		session.ReasonBudgetQueries, session.ReasonBudgetSpend, session.ReasonPaused,
-		session.ReasonDrained, session.ReasonStopped, session.ReasonBudgetReset,
-		session.ReasonResumeCancelled, session.ReasonTimeBudgetExhausted,
+		session.ReasonDrained, session.ReasonTerminated, session.ReasonStopped,
+		session.ReasonBudgetReset, session.ReasonResumeCancelled, session.ReasonTimeBudgetExhausted,
 	}
 	for _, token := range session.ControlRefusalTokens() {
 		if slices.Contains(stopReasons, token) {

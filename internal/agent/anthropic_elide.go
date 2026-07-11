@@ -399,6 +399,23 @@ func elideHeadTail(s string, threshold int) string {
 // a streaming decoder so the span is exact even when a sibling value has identical bytes — a plain
 // bytes.Index over the object would mis-locate it (the tool_use_id == content corruption vector).
 func objectValueSpan(obj json.RawMessage, key string) (start, end int, ok bool) {
+	return objectValueSpanImpl(obj, key, false)
+}
+
+// objectValueSpanLastWins is objectValueSpan but, on a duplicate top-level key, returns the
+// LAST matching key's value span instead of the first — matching json.Unmarshal-into-a-map
+// (last-key-wins). The top-level cachebp routing (decodeTopLevelArray) reads obj[key] with those
+// same map semantics, so it must anchor the splice on the SAME value bytes the decoder keeps, or
+// an adversarial duplicate key would splice one value while the rest of the planner reasons about
+// another (#3773 confusion risk).
+func objectValueSpanLastWins(obj json.RawMessage, key string) (start, end int, ok bool) {
+	return objectValueSpanImpl(obj, key, true)
+}
+
+// objectValueSpanImpl is the shared streaming walk behind objectValueSpan (first match) and
+// objectValueSpanLastWins (last match). lastWins keeps scanning after a hit so the final
+// occurrence wins; otherwise it returns on the first hit.
+func objectValueSpanImpl(obj json.RawMessage, key string, lastWins bool) (start, end int, ok bool) {
 	dec := json.NewDecoder(bytes.NewReader(obj))
 	tok, err := dec.Token()
 	if err != nil {
@@ -432,10 +449,13 @@ func objectValueSpan(obj json.RawMessage, key string) (start, end int, ok bool) 
 			vEnd--
 		}
 		if k == key {
-			return vStart, vEnd, true
+			start, end, ok = vStart, vEnd, true
+			if !lastWins {
+				return start, end, ok
+			}
 		}
 	}
-	return 0, 0, false
+	return start, end, ok
 }
 
 // applySpliceEdits applies disjoint byte-range replacements to raw, building the result forward.
