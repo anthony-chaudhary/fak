@@ -32,7 +32,11 @@ import (
 // trimmed of leading/trailing underscores. An empty derivation falls back to
 // "wip". Build-tag terms allow [A-Za-z0-9_.]; underscores keep it simple.
 func wipFenceSlug(pathOrName string) string {
-	name := path.Base(filepath.ToSlash(pathOrName))
+	// Normalize BOTH separators by hand rather than filepath.ToSlash: ToSlash only
+	// rewrites the host OS's separator, so a Windows path fed to a Linux build (the
+	// canonical WSL test runner) keeps its backslashes and path.Base returns the whole
+	// string. A slug must not depend on which OS derived it.
+	name := path.Base(strings.ReplaceAll(pathOrName, `\`, "/"))
 	name = strings.TrimSuffix(name, ".go")
 	name = strings.TrimSuffix(name, "_test")
 	name = strings.ToLower(name)

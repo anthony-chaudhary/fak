@@ -206,7 +206,10 @@ func printGuardLaunchAnimation(w io.Writer, version, shortBuild, gwURL string, c
 // guardLaunchAgentName is the short, human name of the wrapped agent for the settle line — the
 // command's base with any executable extension trimmed ("C:\\...\\claude.exe" -> "claude").
 func guardLaunchAgentName(cmd0 string) string {
-	base := filepath.Base(strings.TrimSpace(cmd0))
+	// Normalize backslashes before filepath.Base: it only splits the HOST separator,
+	// so a Windows launch path (C:\tools\Claude.exe) fed to the Linux test runner would
+	// otherwise come back whole. Same host-independence fix as wipFenceSlug.
+	base := filepath.Base(strings.ReplaceAll(strings.TrimSpace(cmd0), `\`, "/"))
 	for _, ext := range []string{".exe", ".cmd", ".bat"} {
 		if strings.EqualFold(filepath.Ext(base), ext) {
 			return strings.ToLower(strings.TrimSuffix(base, filepath.Ext(base)))
