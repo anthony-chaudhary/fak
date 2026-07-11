@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -297,6 +298,59 @@ func TestModelErrorDoesNotAdvanceMark(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("retry handled = %d, want 1 (the message was retried, not dropped)", n)
+	}
+}
+
+func TestDefangMentions(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare user mention (the @app ping)", "<@U07BOT> hi", "@U07BOT hi"},
+		{"labeled user mention keeps the label", "pinging <@U07BOT|app> now", "pinging @app now"},
+		{"labeled mention with redundant @", "<@U1|@bob> hey", "@bob hey"},
+		{"here broadcast", "<!here> heads up", "@here heads up"},
+		{"channel broadcast bare", "<!channel>", "@channel"},
+		{"everyone broadcast with label", "<!everyone|everyone> ping", "@everyone ping"},
+		{"subteam with handle", "<!subteam^S1|team-x> look", "@team-x look"},
+		{"subteam bare", "<!subteam^S1>", "@S1"},
+		{"two user mentions", "<@U1> and <@U2|bob>", "@U1 and @bob"},
+		{"non-notifying tokens are untouched", "see <!date^123^{date}|Jan> and <#C1|general>", "see <!date^123^{date}|Jan> and <#C1|general>"},
+		{"plain text unchanged", "no mentions, just @app typed literally", "no mentions, just @app typed literally"},
+	}
+	for _, c := range cases {
+		if got := defangMentions(c.in); got != c.want {
+			t.Errorf("%s: defangMentions(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+func TestTickDefangsOutboundMentions(t *testing.T) {
+	hub := newFakeHub()
+	// The model echoes back the mention it was addressed with plus a broadcast — the
+	// exact shape that would re-ping @app and the whole channel if posted verbatim.
+	hub.completeFn = func(p string) (string, int) {
+		return "Sure, <@U07BOT> can help — <!here> take a look", 200
+	}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+
+	hub.addHistory(map[string]any{"type": "message", "ts": "1001.000100", "user": "U_HUMAN", "text": "<@U07BOT> help"})
+
+	r := newRelay(t, srv, "C_CHAT")
+	if _, err := r.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	posted := hub.postedCopy()
+	if len(posted) != 1 {
+		t.Fatalf("posted %d messages, want 1: %+v", len(posted), posted)
+	}
+	if strings.Contains(posted[0].Text, "<@") || strings.Contains(posted[0].Text, "<!") {
+		t.Fatalf("posted text still carries a live Slack mention token: %q", posted[0].Text)
+	}
+	if want := "Sure, @U07BOT can help — @here take a look"; posted[0].Text != want {
+		t.Errorf("posted text = %q, want the defanged %q", posted[0].Text, want)
 	}
 }
 

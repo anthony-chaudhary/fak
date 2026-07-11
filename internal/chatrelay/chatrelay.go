@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -155,6 +156,10 @@ func (r *Relay) Tick(ctx context.Context) (handled int, err error) {
 		if reply == "" {
 			reply = "(the model returned an empty completion)"
 		}
+		// Defang any Slack mention/broadcast control tokens the model echoed back before
+		// posting, so an answer can never re-ping the addressed app ("@app") or the whole
+		// channel — the bridge posts chat, not notifications (see defangMentions).
+		reply = defangMentions(reply)
 		// Reply in the message's own thread: a top-level message anchors a new thread on its
 		// ts; a threaded message keeps its parent thread.
 		threadTS := m.ThreadTS
@@ -220,6 +225,50 @@ func (r *Relay) promptFor(m Message) (string, bool) {
 		}
 	}
 	return text, true
+}
+
+// The Slack control tokens that turn POSTED text into a notification. chat.postMessage
+// is sent WITHOUT link_names (see slackwire), so a bare "@app"/"@channel" is inert
+// literal text — only these angle-bracket forms are re-linked by Slack and actually
+// ping someone. A served model, addressed as "<@U07BOT>", routinely echoes that token
+// back (or emits a "<!here>" it saw in the room), which is exactly the "the bridge keeps
+// tagging @app" notification noise this defangs.
+var (
+	// reUserMention: <@U07BOT> or <@U07BOT|label> — a user/bot mention (the "@app" ping).
+	reUserMention = regexp.MustCompile(`<@([^>|]*)(?:\|([^>]*))?>`)
+	// reSubteamMention: <!subteam^S123> or <!subteam^S123|handle> — pings a whole group.
+	reSubteamMention = regexp.MustCompile(`<!subteam\^([^>|]*)(?:\|([^>]*))?>`)
+	// reBroadcast: <!here>, <!channel>, <!everyone> (optionally <!here|here>) — the
+	// channel/workspace-wide broadcast pings. Note this deliberately does NOT match other
+	// <!…> tokens (e.g. <!date^…>), which do not notify and must render unchanged.
+	reBroadcast = regexp.MustCompile(`<!(here|channel|everyone)(?:\|[^>]*)?>`)
+)
+
+// defangMentions rewrites the notification-triggering Slack control tokens in text into
+// their plain-text "@label" form. Because the bridge posts with link_names off, the
+// result is inert — it reads like a normal "@app" / "@here" but Slack no longer re-links
+// it, so a reply cannot ping the addressed app or the whole channel. A token carrying a
+// display label (`<@U07BOT|app>`, `<!subteam^S1|team>`) keeps the friendly label; a bare
+// id falls back to the id itself. Pure: text in, text out, no I/O.
+func defangMentions(text string) string {
+	text = reUserMention.ReplaceAllStringFunc(text, func(m string) string {
+		return atLabel(reUserMention.FindStringSubmatch(m))
+	})
+	text = reSubteamMention.ReplaceAllStringFunc(text, func(m string) string {
+		return atLabel(reSubteamMention.FindStringSubmatch(m))
+	})
+	return reBroadcast.ReplaceAllString(text, "@$1")
+}
+
+// atLabel renders a defanged mention from a [full, id, label] submatch: the label when
+// present (with any redundant leading "@" collapsed so it never doubles), else the id.
+func atLabel(sub []string) string {
+	if len(sub) >= 3 {
+		if label := strings.TrimSpace(sub[2]); label != "" {
+			return "@" + strings.TrimPrefix(label, "@")
+		}
+	}
+	return "@" + sub[1]
 }
 
 // tsAfter reports whether Slack ts a is strictly after b. Slack timestamps are
