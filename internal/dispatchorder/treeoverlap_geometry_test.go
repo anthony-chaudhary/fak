@@ -50,8 +50,8 @@ func TestTreeOverlapNormalizationEquivalence(t *testing.T) {
 		"internal/gateway/**",
 		"internal/gateway/*",
 		"./internal/gateway",
-		`internal\gateway`,     // Windows separators
-		`internal\gateway\**`,  // Windows separators + glob suffix
+		`internal\gateway`,    // Windows separators
+		`internal\gateway\**`, // Windows separators + glob suffix
 	}
 	target := []string{"internal/gateway/http.go"}
 	for _, s := range spellings {
