@@ -66,7 +66,7 @@ this index plus these hashes: re-derive them with `sha256sum <path>` and compare
 | `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.md` | Human-readable render of the preflight above. | `6fa494b769b1a6c83f68f3c6c8a932caca63d5286f16cc54f2c92a413c46226a` |
 | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json` | Adapter smoke (`SIMULATED_LOCAL_FIXTURE`): raw-vs-fak command-boundary shape over a recorded trace. Adapter evidence only — never a leaderboard number. | `2db95bdaa778e2df0733de41973fc895bfae01ea911ffd5a1a8f8d521c43f31c` |
 | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.md` | Human-readable render of the smoke above. | `a334c9c6a94576f82e006ee19a7192ada36c36a0ba0379dbc793ef51a9375691` |
-| `docs/benchmarks/TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md` | Failure taxonomy + legal retry policy (#901): the closed-vocabulary classifier the compare artifact tallies by. | `768a2eea696bc8dcb1a82034d724c7c89b79ea96e2ddd92a32fd7cb08ed4a52c` |
+| `docs/benchmarks/TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md` | Failure taxonomy + legal retry policy (#901): the closed-vocabulary classifier the compare artifact tallies by. | `6048b5af957a9ab081335c51e71ff5f82a87150f8211cd2eea5f0ae61a489080` |
 | `testdata/terminalbench/command_boundary_smoke.json` | Terminal-Bench-shaped candidate suite the contract draws its candidate task ids from. | `73b6481228ded6c092f36883a38386f0d20ee686774d1d8c1f9306c796737e31` |
 
 Re-render the two generated artifacts (no key, no network). Each stamps a fresh

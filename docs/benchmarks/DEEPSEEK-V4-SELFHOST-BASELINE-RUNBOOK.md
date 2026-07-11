@@ -106,23 +106,41 @@ No private bridge/control details are committed. In generic terms:
 
 ### Which node can actually serve V4 — the honest floor
 
-The floor above is **confirmed**, not hypothetical, for this repo's fleet:
+The floor above is **confirmed** for **stock** engines, not hypothetical, for
+this repo's fleet — but a fork-based sm_80 path has since opened (see the update
+below):
 
-- **sm_80 (Ampere, 8×80 GB-class node) is BELOW the stock V4 floor.** The FP4
-  expert / FP8 / FP4-indexer / DSA stack has no stock sm_80 resident path
-  (the same wall that forces GLM-5.2 onto a llama.cpp CPU-offload path on sm_80,
-  vLLM #35021). **Unlike GLM-5.2, V4 has no sm_80 fallback in fak today**: there
-  is no fak-native V4 kernel yet (that is the deferred native track,
-  [#3016](https://github.com/anthony-chaudhary/fak/issues/3016)–[#3019](https://github.com/anthony-chaudhary/fak/issues/3019),
-  planned in [`docs/deepseek/`](../deepseek/)) and no llama.cpp path for the FP4
-  checkpoint. So an sm_80 node **cannot serve V4 live** with current tooling —
-  `scripts/dgx-deepseek-serve.sh` correctly **refuses** below sm_90.
-- **The two paths that work today:**
+- **sm_80 (Ampere, 8×80 GB-class node) is BELOW the *stock* V4 floor.** The FP4
+  expert / FP8 / FP4-indexer / DSA stack has no stock sm_80 resident path — stock
+  vLLM/SGLang refuse (the same wall that blocks GLM-5.2 on sm_80, vLLM #35021),
+  and `scripts/dgx-deepseek-serve.sh`, which fronts a stock engine, correctly
+  **refuses** below sm_90.
+- **UPDATE (2026-07, supersedes the old "V4 has no sm_80 fallback" claim): a
+  V4-aware llama.cpp fork now serves V4-Flash on sm_80** — the same
+  "llama.cpp overcomes the sm_90 kernel floor" move already proven for GLM-5.2 on
+  the Ampere GPU server. The [cchuter `feat/v4-port-cuda`](https://github.com/cchuter/llama.cpp)
+  fork (and upstream [PR #24162](https://github.com/ggml-org/llama.cpp/pull/24162)
+  for Unsloth quants) implements V4's five custom ops (compressor decode,
+  hyperconnection, lightning indexer, FP8-KV simulation, NextN heads) with CUDA
+  kernels; sm_80 uses the software-emulated FP8 path (correct, not HW-accelerated).
+  V4-Flash GGUFs (UD-IQ3_XXS ≈103 GB → UD-Q8_K_XL ≈162 GB) fit **resident** on
+  8×A100-80 GB (640 GB) — no CPU-offload floor like GLM-5.2's 466 GB. The turnkey
+  harness is [`tools/deepseekv4_stage_serve_the Ampere GPU server.sh`](../../tools/deepseekv4_stage_serve_the Ampere GPU server.sh)
+  (self-stages the GGUF, builds the fork at sm_80 with the required
+  `GGML_SCHED_MAX_SPLIT_INPUTS=128`, serves, and records a three-rung on-box wire
+  witness). This does **not** replace the deferred fak-native V4 kernel track
+  ([#3016](https://github.com/anthony-chaudhary/fak/issues/3016)–[#3019](https://github.com/anthony-chaudhary/fak/issues/3019));
+  it is the interim serve path. **Status: a live the Ampere GPU server witness against this harness
+  is IN PROGRESS — the *path* is published/validated upstream (on sm_89 Ada;
+  less battle-tested on sm_80); the on-the Ampere GPU server pass is not yet recorded here.**
+- **The paths that work today:**
   1. **Route to a hosted V4 endpoint through fak** — proven live this session
      (see [Live witness](#live-witness--wire-proven-on-a-real-v4-endpoint)). The
      model runs hosted; fak governs the wire. This is the "V4 usable now" answer
      for any environment, including one whose local GPUs are below the floor.
-  2. **Provision an sm_90+ node (Hopper/Blackwell) and self-host.** This repo's
+  2. **Serve V4-Flash on an sm_80 node via the llama.cpp V4 fork** — the harness
+     above (interim; live the Ampere GPU server witness in progress).
+  3. **Provision an sm_90+ node (Hopper/Blackwell) and self-host.** This repo's
      GCP idiom (`scripts/gcp-glm-serve.sh` + the `tools/gcp_accel.py` tier
      registry, e.g. `GCP_TIER=a3-ultra-h200` for Hopper or `a4-b200` for
      Blackwell's native FP4) provisions such a node and reaches it via
