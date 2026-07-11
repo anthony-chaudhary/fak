@@ -15,11 +15,12 @@ import (
 // line and a future format can be versioned without ambiguity.
 const CollectSchema = "fak-nightrun-collect/1"
 
-// DefaultLedgerRel is the committed, append-only collection ledger — one JSONL
-// row per collected (or attempted) datum. It lives under docs/ so it is durable
-// trunk evidence of what the fleet has gathered, not a regenerable build
-// artifact, mirroring docs/cadence/history.jsonl.
-const DefaultLedgerRel = "docs/nightrun/collected.jsonl"
+// DefaultLedgerRel is the local runtime collection ledger — one JSONL row per
+// collected (or attempted) datum. Live collection is intentionally kept under
+// the gitignored .fak state root: a scheduled collection tick must not make the
+// shared working tree dirty. The tracked docs/nightrun/collected.jsonl file is a
+// historical publication snapshot, not the live writer target.
+const DefaultLedgerRel = ".fak/nightrun/collected.jsonl"
 
 // Outcome is the OBSERVED result of attempting a collection — never an asserted
 // success. "collected" means the command ran to a zero exit and produced an

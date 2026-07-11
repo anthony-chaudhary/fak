@@ -23,7 +23,7 @@ func runCachevalueWeekly(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak cachevalue weekly", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "the durable cache-value ledger to fold (docs/nightrun/cache-value.jsonl)")
-	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for posture/shed/refusal counters (docs/nightrun/gateway-usage.jsonl)")
+	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for posture/shed/refusal counters (.fak/nightrun/gateway-usage.jsonl)")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #scoreboard)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")

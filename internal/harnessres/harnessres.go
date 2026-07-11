@@ -22,11 +22,12 @@ import (
 	"time"
 )
 
-// LedgerSchema tags each durable JSONL row (docs/nightrun/harness-resources.jsonl).
+// LedgerSchema tags each durable local JSONL row.
 const LedgerSchema = "fak-harness-resources/1"
 
-// DefaultLedgerRel is the durable ledger path (sibling of cache-savings.jsonl).
-const DefaultLedgerRel = "docs/nightrun/harness-resources.jsonl"
+// DefaultLedgerRel is the gitignored runtime ledger path. The tracked docs
+// sibling is a historical publication snapshot, never the live writer target.
+const DefaultLedgerRel = ".fak/nightrun/harness-resources.jsonl"
 
 // Half is one side of the harness: the kernel (guard + in-process gateway, one PID,
 // sampled continuously) or the agent (the wrapped child, folded from its exit state).

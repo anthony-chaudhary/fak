@@ -37,9 +37,9 @@ from typing import Any
 
 SCHEMA = "fleet-trend/1"
 
-# The default history ledger, workspace-relative. JSONL, one row per tick, sharing the
-# docs/nightrun home the other fleet ledgers already live under.
-DEFAULT_LEDGER = os.path.join("docs", "nightrun", "fleet-status-history.jsonl")
+# The default history ledger, workspace-relative. Runtime ticks belong under the
+# gitignored state root so a scheduled status poll never dirties the shared tree.
+DEFAULT_LEDGER = os.path.join(".fak", "nightrun", "fleet-status-history.jsonl")
 
 # The load-bearing scalars a fleet-status trend is about, in render order: each is a
 # (key, label) the renderer shows a sparkline + delta for. Chosen so the line reads as

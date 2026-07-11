@@ -699,7 +699,7 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  backlog  -  by novelty x value x staleness, and answers "what is the
                  single most important datum to collect here right now" (next). run is
                  DRY-RUN unless --apply; --apply executes + appends an OBSERVED row to
-                 docs/nightrun/collected.jsonl, --loop collects the whole feasible queue.
+                 .fak/nightrun/collected.jsonl, --loop collects the whole feasible queue.
                  A task the box can't run is never selected, so the loop can't claim a
                  datum the hardware can't produce)
   fak audit     verify <journal.jsonl> | export <journal.jsonl>

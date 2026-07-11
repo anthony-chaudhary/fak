@@ -24,7 +24,7 @@ var cachevalueReportNow = func() time.Time { return time.Now().UTC() }
 // It folds BOTH durable ledgers side by side, never blended:
 //
 //	Track 1 (WITNESSED kernel)  — docs/nightrun/cache-value.jsonl   (realized KV reuse)
-//	Track 2 (OBSERVED $)        — docs/nightrun/cache-savings.jsonl (provider rebate +
+//	Track 2 (OBSERVED $)        — .fak/nightrun/cache-savings.jsonl (provider rebate +
 //	                              compaction token-shed − write premium − API spend)
 //
 // and prints both tracks plus a single NET line per period with the running total
@@ -36,8 +36,8 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak cachevalue report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "Track-1 WITNESSED kernel ledger (docs/nightrun/cache-value.jsonl)")
-	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "Track-2 OBSERVED-$ ledger (docs/nightrun/cache-savings.jsonl)")
-	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (docs/nightrun/gateway-usage.jsonl)")
+	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "Track-2 OBSERVED-$ ledger (.fak/nightrun/cache-savings.jsonl)")
+	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (.fak/nightrun/gateway-usage.jsonl)")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	asJSON := fs.Bool("json", false, "emit the two-track report as JSON instead of the table")

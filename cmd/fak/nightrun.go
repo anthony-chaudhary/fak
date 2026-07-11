@@ -15,7 +15,7 @@ package main
 //
 // next/plan/caps are pure reads. run is DRY-RUN by default (prints what it would
 // execute, writes nothing); --apply executes real commands, captures each to an
-// artifact, and appends an OBSERVED row to docs/nightrun/collected.jsonl.
+// artifact, and appends an OBSERVED row to .fak/nightrun/collected.jsonl.
 
 import (
 	"context"
@@ -430,7 +430,7 @@ func nightrunPostCacheValue(stdout, stderr io.Writer, argv []string) int {
 }
 
 // nightrunCut is the operator door for gatewayusageledger.Cut (#3490): bound the
-// append-only docs/nightrun/gateway-usage.jsonl by folding everything older than
+// append-only .fak/nightrun/gateway-usage.jsonl by folding everything older than
 // the newest --keep rows into counter-preserving carryforward rows. DRY-RUN by
 // default, mirroring `fak nightrun run` — nothing rewrites a tracked ledger file
 // unless the operator passes --apply. It deliberately does NOT run on any ticker

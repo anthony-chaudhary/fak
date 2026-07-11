@@ -2,7 +2,7 @@ package gatewayusageledger
 
 // cut.go — the sanctioned fold-and-truncate compaction for the gateway-usage
 // ledger (#3490). The ledger is append-only by design (doc.go), so every
-// guard/serve session on every box grows docs/nightrun/gateway-usage.jsonl
+// guard/serve session on every box grows .fak/nightrun/gateway-usage.jsonl
 // forever, and every reader (ReadLedgerFile) pays a whole-file parse. Cut is
 // the bounded answer, following the internal/journal Cut discipline (#2457)
 // adapted to a plain (un-chained) JSONL file: fold everything older than the

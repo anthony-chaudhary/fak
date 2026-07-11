@@ -21,7 +21,7 @@ import (
 //
 //	fak cachevalue feed                                  # fold both cache-value ledgers → Slack card
 //	fak cachevalue feed --dry-run                        # render the exact card; do not post
-//	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger docs/nightrun/cache-savings.jsonl
+//	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger .fak/nightrun/cache-savings.jsonl
 //	fak cachevalue weekly --dry-run                      # weekly fleet cache-HEALTH digest (posture adoption + reuse trend + shed + refused upgrades, #3646)
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
 //	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
@@ -77,8 +77,8 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak cachevalue feed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "the durable cache-value ledger to fold (docs/nightrun/cache-value.jsonl)")
-	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "the Track-2 OBSERVED-$ ledger to fold (docs/nightrun/cache-savings.jsonl)")
-	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (docs/nightrun/gateway-usage.jsonl)")
+	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "the Track-2 OBSERVED-$ ledger to fold (.fak/nightrun/cache-savings.jsonl)")
+	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (.fak/nightrun/gateway-usage.jsonl)")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")

@@ -33,7 +33,7 @@ func runBudget(stdout, stderr io.Writer, argv []string) int {
 	targetTokens := fs.Uint64("target-tokens", 0, "operator soft target for total (input+output) spend tokens; 0 = no target")
 	targetTurns := fs.Uint64("target-turns", 0, "operator soft target for served turns; 0 = no target")
 	sessionID := fs.String("session", "", "report this session id (default: the most recent task/session in the ledger)")
-	ledgerPath := fs.String("ledger", "", "gateway-usage ledger path (default: docs/nightrun/gateway-usage.jsonl under the repo root)")
+	ledgerPath := fs.String("ledger", "", "gateway-usage ledger path (default: .fak/nightrun/gateway-usage.jsonl under the repo root)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}

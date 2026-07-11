@@ -113,7 +113,7 @@ CAP_VERSION_BIND`), flushed per write, each row carrying the prior row's chained
 | Session crash-journal | `session-journal.jsonl` (see roots table) | JSONL append | `internal/sessionjournal/sessionjournal.go:92` | open/beat/close vs. boot epoch → LIVE/CRASHED/STALE/CLOSED |
 | Durable session registry | `UserConfigDir/fak/session-registry.json` (or `.fak/session-registry.json`) | single-JSON overwrite | `cmd/fak/session_durable.go:104` | mirror of serve/guard session table |
 | Guard session index | `<regDir>/guard_sessions.jsonl` | JSONL append | `internal/guardsessions/guardsessions.go:90` | **⚠ writer present but the live-launch trigger is not wired** — `recordGuardSessionIndex` (`guard_sessions.go:35`) is referenced only from `guard_sessions_test.go`. `fak guard sessions` reads it; a live `fak guard` may not populate it in this tree. |
-| Harness-resources ledger | `docs/nightrun/harness-resources.jsonl` | JSONL append | `cmd/fak/harness_resources.go:18` | per-session CPU/RSS/disk-IO on guard/serve exit (`--resource-stats`, on by default) |
+| Harness-resources ledger | `.fak/nightrun/harness-resources.jsonl` | JSONL append | `cmd/fak/harness_resources.go:18` | per-session CPU/RSS/disk-IO on guard/serve exit (`--resource-stats`, on by default) |
 
 **Excluded (per-launch temp only):** the hook *installers* write Claude Code `--settings`
 JSON into `os.MkdirTemp("fak-guard-*")` dirs scoped to the one launched child
@@ -122,20 +122,24 @@ JSON into `os.MkdirTemp("fak-guard-*")` dirs scoped to the one launched child
 
 ---
 
-## 3. Repo-tracked analytics ledgers — `docs/nightrun/*` and friends
+## 3. Runtime analytics ledgers and published snapshots
 
-Committed, append-only trend ledgers anchored to repo root via `nightrunLedgerPath`
-(`cmd/fak/nightrun_ledger_path.go:23`). Most share the `appendLedgerFile[T]` seam
-(`cmd/fak/ledgerio.go:28`). Each takes a `--ledger` override; several accept `off`/`none`.
+Background-written trend ledgers are anchored under the gitignored `.fak/nightrun`
+runtime state root. The same-named tracked files under `docs/nightrun` are historical
+publication snapshots, not live writer targets. This keeps guard/serve/cron ticks
+from dirtying the shared tree. A fresh clone has zero live rows until its first tick;
+the readers below tolerate absence. Most writers share the `appendLedgerFile[T]` seam
+(`cmd/fak/ledgerio.go:28`) and take a `--ledger` override.
 
 | Ledger | Default path | Schema | Writer | Purpose |
 |---|---|---|---|---|
-| Nightrun collection | `docs/nightrun/collected.jsonl` | — | `internal/nightrun/run.go:482` | one row per collected bench task (run-it-all-night) |
-| Gateway usage | `docs/nightrun/gateway-usage.jsonl` | `fak-gateway-usage-ledger/1` | `internal/gatewayusageledger/ledger.go:201` | per-session token/usage counters (`serve.go:478`) |
+| Nightrun collection | `.fak/nightrun/collected.jsonl` | — | `internal/nightrun/run.go:482` | one row per collected bench task (run-it-all-night) |
+| Fleet status history | `.fak/nightrun/fleet-status-history.jsonl` | `fleet-trend/1` | `internal/fleettrend`, `tools/fleet_trend.py` | bounded status-tick trend for fleet/Slack views |
+| Gateway usage | `.fak/nightrun/gateway-usage.jsonl` | `fak-gateway-usage-ledger/1` | `internal/gatewayusageledger/ledger.go:201` | per-session token/usage counters (`serve.go:478`) |
 | Cache-value (Track 1) | `docs/nightrun/cache-value.jsonl` | `fak-cache-value-ledger/1` | `internal/cachevalueledger/ledger.go:90` | witnessed prompt-cache KV-reuse (`serve.go:401`, `run_model.go:81`) |
-| Cache-savings (Track 2) | `docs/nightrun/cache-savings.jsonl` | — | `internal/cachevaluereport/track2.go:582` | observed-$ provider-cache + compaction savings |
+| Cache-savings (Track 2) | `.fak/nightrun/cache-savings.jsonl` | — | `internal/cachevaluereport/track2.go:582` | observed-$ provider-cache + compaction savings |
 | Known-bad signatures | `docs/nightrun/known-bad.jsonl` | `fak.known-bad.v1` | `cmd/fak/knownbad.go:962` | fleet-wide record/claim/resolve/revoke of known-bad trees |
-| Harness-resources | `docs/nightrun/harness-resources.jsonl` | `fak-harness-resources/1` | `cmd/fak/harness_resources.go:18` | per-session resource footprint |
+| Harness-resources | `.fak/nightrun/harness-resources.jsonl` | `fak-harness-resources/1` | `cmd/fak/harness_resources.go:18` | per-session resource footprint |
 | Memory-value / recall | `docs/nightrun/memory-value.jsonl` | — | `cmd/fak/memory_recall.go:338` | recall-event / memory-value rows (`off`/`none` disables) |
 | Trajectory-control | `docs/nightrun/trajctl.jsonl` | `fak-trajctl/1` | `internal/trajctl/trajctl.go:139` | see §2.2 |
 | Cadence history | `docs/cadence/history.jsonl` | — | `cmd/fak/cadence.go:102` | dev-cadence scores/maturity trend |

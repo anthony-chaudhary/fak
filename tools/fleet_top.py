@@ -39,6 +39,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fleet_version  # noqa: E402
+import fleet_trend  # noqa: E402
 
 SCHEMA = "fleet-top/1"
 
@@ -656,7 +657,6 @@ def attach_trend(snap: dict[str, Any], history_path: str, *, now: str = "",
     ``record=False`` (a dry-run) it renders the existing history without appending, so a
     preview never pollutes the ledger."""
     try:
-        import fleet_trend  # sibling module in tools/
         if record:
             stamp = now or snap.get("generated_utc") or fleet_trend._iso_now()
             fleet_trend.append(history_path, fleet_trend.metrics_of(snap), stamp)
@@ -765,7 +765,7 @@ def main(argv: list[str] | None = None) -> int:
         snap = snapshot(root, args.window)
         channel = "" if args.slack == "__env__" else args.slack
         history = "" if args.no_trend else (
-            args.history or str(root / "docs" / "nightrun" / "fleet-status-history.jsonl"))
+            args.history or str(root / fleet_trend.DEFAULT_LEDGER))
         verdict = post_to_slack(snap, channel=channel, dry_run=args.slack_dry_run,
                                 history_path=history, trend_window=args.trend_window)
         if verdict.get("posted"):

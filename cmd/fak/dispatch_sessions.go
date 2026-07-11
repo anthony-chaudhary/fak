@@ -116,7 +116,7 @@ func runDispatchSessions(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	runsDir := fs.String("runs-dir", dispatchProgressRunsDir, "directory of dispatch worker logs")
 	regDir := fs.String("reg-dir", "", "registry dir holding guard_sessions.jsonl (default: $FLEET_REG_DIR, else the host Fleet registry, else <repo>/tools/_registry)")
-	usageLedger := fs.String("usage-ledger", "", "gateway-usage ledger for per-session token/cost accounting (default: docs/nightrun/gateway-usage.jsonl under the repo root)")
+	usageLedger := fs.String("usage-ledger", "", "gateway-usage ledger for per-session token/cost accounting (default: .fak/nightrun/gateway-usage.jsonl under the repo root)")
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for age math (0 = current time)")
 	asJSON := fs.Bool("json", false, "emit the fleet-dispatch-sessions/1 JSON payload")
 	asMarkdown := fs.Bool("markdown", false, "render the operator session card as Markdown")
@@ -181,7 +181,7 @@ func runDispatchSessions(stdout, stderr io.Writer, argv []string) int {
 
 // resolveDispatchSessionsUsageLedger resolves the gateway-usage ledger path for the
 // token/cost fold: the explicit --usage-ledger when given, else the default
-// docs/nightrun/gateway-usage.jsonl under the repo root. An absent ledger simply
+// .fak/nightrun/gateway-usage.jsonl under the repo root. An absent ledger simply
 // yields no fold (the fields stay omitted), so this never needs to exist.
 func resolveDispatchSessionsUsageLedger(flagVal string) string {
 	if strings.TrimSpace(flagVal) != "" {

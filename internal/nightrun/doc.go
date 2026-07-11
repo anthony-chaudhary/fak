@@ -39,7 +39,7 @@
 //     datasets, creds, net). Satisfies(task) is the feasibility filter.
 //   - next() is the pure, deterministic selector: rank the feasible-here tasks by
 //     novelty × value × staleness and return the single best one.
-//   - the collection ledger (docs/nightrun/collected.jsonl) is the durable,
+//   - the collection ledger (.fak/nightrun/collected.jsonl) is the durable local,
 //     append-only record of what was gathered, on which box, when — the loop's
 //     memory, and the input next() reads to compute staleness.
 //

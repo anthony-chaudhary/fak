@@ -18,7 +18,7 @@ import (
 
 const (
 	Schema        = "fleet-trend/1"
-	DefaultLedger = "docs/nightrun/fleet-status-history.jsonl"
+	DefaultLedger = ".fak/nightrun/fleet-status-history.jsonl"
 	DefaultCap    = 500
 )
 

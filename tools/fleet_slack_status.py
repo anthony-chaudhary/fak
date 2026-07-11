@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dispatch_status  # noqa: E402
 import fleet_top  # noqa: E402
+import fleet_trend  # noqa: E402
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -239,7 +240,7 @@ def fixture_dispatch_payload(root: Path) -> dict[str, Any]:
 
 
 def _default_history(root: Path) -> str:
-    return str(root / "docs" / "nightrun" / "fleet-status-history.jsonl")
+    return str(root / fleet_trend.DEFAULT_LEDGER)
 
 
 def _boxed_dispatch_body(payload: dict[str, Any]) -> str:
@@ -898,7 +899,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--separate", action="store_true",
                     help="legacy mode: post dispatch and session health as two messages")
     ap.add_argument("--history", default="",
-                    help="trend ledger path (default: docs/nightrun/fleet-status-history.jsonl)")
+                    help="trend ledger path (default: .fak/nightrun/fleet-status-history.jsonl)")
     ap.add_argument("--no-trend", action="store_true",
                     help="do not append to / show the fleet trend ledger")
     ap.add_argument("--trend-window", type=int, default=24,

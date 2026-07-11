@@ -5,13 +5,9 @@ import (
 	"path/filepath"
 )
 
-// nightrunLedgerPath anchors a docs/nightrun-relative ledger constant (e.g.
-// harnessres.DefaultLedgerRel = "docs/nightrun/harness-resources.jsonl") to the
-// repo root so a telemetry append lands in the real docs/nightrun regardless of the
-// process cwd. Without this, a guard/serve run whose cwd is a subdir — most visibly
-// `go test ./cmd/fak`, whose cwd is the cmd/fak package dir — resolves the relative
-// path against that cwd and forks a SHADOW tree (cmd/fak/docs/nightrun/*.jsonl) that
-// then sits tracked-but-perpetually-dirty and re-appends on every test run.
+// nightrunLedgerPath anchors a repo-relative live-ledger constant (normally under
+// .fak/nightrun) to the repo root regardless of process cwd. Without the anchor, a
+// guard/serve run from a subdir would fork a shadow state tree under that subdir.
 //
 // It reuses repoRoot() (a go.mod upward walk, no git subprocess — the same anchor
 // knownBadLedgerPath and program.go already use for this ledger class). From the repo

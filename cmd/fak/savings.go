@@ -12,7 +12,7 @@ import (
 // cmdSavings is the front door for the Track-2 OBSERVED-$ cache-savings AUDIT trio
 // (#2780/#2781/#2782): it promotes the throwaway Python fold that produced the
 // "net API cost reduction = 80.8%" headline into versioned, tested commands over the
-// durable savings ledger (docs/nightrun/cache-savings.jsonl):
+// local savings ledger (.fak/nightrun/cache-savings.jsonl):
 //
 //	fak savings audit --since 2026-07-01            # per-date + cumulative $ reconciliation
 //	fak savings gate  --slo lossless-or-better       # fidelity SLO gate (exits non-zero on breach)

@@ -146,11 +146,11 @@ the binary.
   path, a best-effort parsed number only when one is actually present) — never a
   fabricated number. A failed run is recorded as `failed`, with its artifact.
 
-## The durable ledger
+## Live ledgers and published snapshots
 
-`docs/nightrun/collected.jsonl` is append-only — one `fak-nightrun-collect/1` row
-per collected (or attempted) datum, so it is durable trunk evidence of what the
-fleet has gathered, not a regenerable build artifact:
+Live background writers default to the gitignored `.fak/nightrun/` state root.
+For collection, `.fak/nightrun/collected.jsonl` is append-only — one
+`fak-nightrun-collect/1` row per collected (or attempted) datum:
 
 | field | meaning |
 |---|---|
@@ -161,13 +161,26 @@ fleet has gathered, not a regenerable build artifact:
 | `artifact` | the captured-output path, when any |
 | `number` | the first parsed unit-bearing token (e.g. `17.73 tok/s`), best-effort — the artifact is authoritative |
 
-`--apply` extends the ledger; don't hand-edit it. Commit the one file by path:
+`--apply` extends the local runtime ledger; don't hand-edit it. The tracked
+`docs/nightrun/{collected,cache-savings,gateway-usage,harness-resources,fleet-status-history}.jsonl`
+files are historical publication snapshots through the 2026-07-11 migration, not
+live writer targets. This is deliberate: guard exits and scheduled ticks must not
+make a shared working tree dirty or force telemetry-only commits.
+
+A fresh clone therefore starts with no live rows. Readers treat a missing live
+ledger as zero rows, and the first writer creates it. When evidence is worth
+publishing, copy a reviewed, scrubbed snapshot into `docs/nightrun/` and commit
+that explicit publication by path; there is no background auto-committer. This
+trades automatic trunk publication for a working tree that stays clean by default
+while preserving the pre-migration record in the tracked snapshots and git history.
+
+Example explicit publication commit:
 
 ```bash
 git commit -s -- docs/nightrun/collected.jsonl -m "docs(nightrun): record collection tick (fak nightrun)"
 ```
 
-The committed ledger is the durable record. The per-run captured-output logs under
+The per-run captured-output logs under
 `experiments/nightrun/<box>/` are local evidence only — they are gitignored (raw
 stdout, regenerable, and a raw-hostname box dir must never reach the public tree).
 The operator overlay `experiments/nightrun/backlog.json` is the exception: it is a

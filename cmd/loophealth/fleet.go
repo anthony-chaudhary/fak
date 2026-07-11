@@ -60,7 +60,7 @@ type ledgerAdapter struct {
 func fleetAdapters() []ledgerAdapter {
 	return []ledgerAdapter{
 		{Kind: "loopmgr", Path: filepath.Join(".fak", "loops.jsonl"), Expected: time.Hour, Classify: classifyLoopmgr},
-		{Kind: "nightrun", Path: filepath.Join("docs", "nightrun", "collected.jsonl"), Expected: 24 * time.Hour, Classify: classifyNightrun},
+		{Kind: "nightrun", Path: filepath.Join(".fak", "nightrun", "collected.jsonl"), Expected: 24 * time.Hour, Classify: classifyNightrun},
 		{Kind: "dojo", Path: filepath.Join("docs", "dojo", "history.jsonl"), Expected: 24 * time.Hour, Classify: classifyDojo},
 		{Kind: "cadence", Path: filepath.Join("docs", "cadence", "history.jsonl"), Expected: 24 * time.Hour, Classify: classifyCadence},
 		{Kind: "rsiloop", Path: filepath.Join(".dos", "rsiloop-journal.jsonl"), Expected: 24 * time.Hour, Classify: classifyRSILoop},

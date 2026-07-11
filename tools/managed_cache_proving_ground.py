@@ -2,8 +2,8 @@
 """The managed-cache proving ground — real guarded sessions as the regression floor (epic #1844).
 
 fak's durable ledgers already record REAL traffic: every `fak guard -- claude` exit
-appends an OBSERVED-$ row to ``docs/nightrun/cache-savings.jsonl``, every MCP serve
-exit appends a counter snapshot to ``docs/nightrun/gateway-usage.jsonl``, and every
+appends an OBSERVED-$ row to ``.fak/nightrun/cache-savings.jsonl``, every MCP serve
+exit appends a counter snapshot to ``.fak/nightrun/gateway-usage.jsonl``, and every
 `fak run` kernel session with KV reuse appends a WITNESSED row to
 ``docs/nightrun/cache-value.jsonl``. Those ledgers are the one population where a
 managed-cache lever's effect is *provable* rather than asserted — the same sessions
@@ -73,8 +73,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REPORT_SCHEMA = "fak-managed-cache-proving-ground/1"
 
-SAVINGS_LEDGER_REL = "docs/nightrun/cache-savings.jsonl"
-USAGE_LEDGER_REL = "docs/nightrun/gateway-usage.jsonl"
+SAVINGS_LEDGER_REL = ".fak/nightrun/cache-savings.jsonl"
+USAGE_LEDGER_REL = ".fak/nightrun/gateway-usage.jsonl"
 VALUE_LEDGER_REL = "docs/nightrun/cache-value.jsonl"
 
 SAVINGS_SCHEMA = "fak-cache-savings-ledger/1"

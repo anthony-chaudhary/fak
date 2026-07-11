@@ -39,10 +39,11 @@ import (
 // a WITNESSED row for an OBSERVED one.
 const SavingsLedgerSchema = "fak-cache-savings-ledger/1"
 
-// DefaultSavingsLedgerRel is the sibling ledger that carries Track 2 (the OBSERVED
-// $ economics), written next to the kernel ledger (docs/nightrun/cache-value.jsonl)
-// per the #1303 "sibling file" option, so the two provenances never share a row.
-const DefaultSavingsLedgerRel = "docs/nightrun/cache-savings.jsonl"
+// DefaultSavingsLedgerRel is the live Track-2 OBSERVED-$ ledger. Runtime rows
+// stay under the gitignored .fak state root so guard/serve exits cannot dirty the
+// shared tree. The tracked docs/nightrun/cache-savings.jsonl file is the last
+// published historical snapshot; the two provenances still never share a row.
+const DefaultSavingsLedgerRel = ".fak/nightrun/cache-savings.jsonl"
 
 // providerCacheReadMultiplier is the price of a cached-prefix READ relative to base input.
 // It READS the canonical cacheprice.ReadMultiplier (a tier-1 leaf this tier-2 package may

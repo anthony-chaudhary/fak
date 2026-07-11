@@ -13,11 +13,10 @@ const (
 	// Schema versions the row shape so a future field addition can be detected by a
 	// reader without guessing.
 	Schema = "fak-gateway-usage-ledger/1"
-	// DefaultLedgerRel is the sibling path to cachevalueledger.DefaultLedgerRel
-	// (docs/nightrun/cache-value.jsonl) — same directory, same append-only JSONL
-	// convention, distinct file because this ledger carries the FULL served-turn
-	// counter family rather than only the cache-value axis.
-	DefaultLedgerRel = "docs/nightrun/gateway-usage.jsonl"
+	// DefaultLedgerRel is the live, gitignored runtime path. Keeping background
+	// guard/serve writes under .fak prevents every session exit from dirtying the
+	// shared tree. The tracked docs sibling is a historical publication snapshot.
+	DefaultLedgerRel = ".fak/nightrun/gateway-usage.jsonl"
 )
 
 // Counters is the OBSERVED served-turn counter family this ledger snapshots. Every

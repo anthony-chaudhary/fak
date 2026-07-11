@@ -14,6 +14,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fleet_trend  # noqa: E402
 
 
+class DefaultPathTest(unittest.TestCase):
+    def test_runtime_default_is_gitignored_state(self):
+        self.assertEqual(
+            Path(fleet_trend.DEFAULT_LEDGER).parts,
+            (".fak", "nightrun", "fleet-status-history.jsonl"),
+        )
+
+
 class SparkTest(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(fleet_trend.spark([]), "")

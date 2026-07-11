@@ -7,7 +7,7 @@
 // written in its own schema:
 //
 //	loopmgr   .fak/loops.jsonl            (fak.loop-event.v1)
-//	nightrun  docs/nightrun/collected.jsonl (fak-nightrun-collect/1)
+//	nightrun  .fak/nightrun/collected.jsonl (fak-nightrun-collect/1)
 //	dojo      docs/dojo/history.jsonl       (fak-dojo-ledger/1)
 //	cadence   docs/cadence/history.jsonl    (fak-cadence-ledger/1)
 //	dispatch  .dispatch-runs/progress.jsonl (fleet-issue-resolve-progress/1)
@@ -139,7 +139,7 @@ type adapter struct {
 // the Fold loop, the skip-and-surface handling, and the rollup all flow from it.
 func adapters() []adapter {
 	return []adapter{
-		{id: "nightrun", relPath: filepath.Join("docs", "nightrun", "collected.jsonl"), cadence: dailyCadence, fold: foldNightrun},
+		{id: "nightrun", relPath: filepath.Join(".fak", "nightrun", "collected.jsonl"), cadence: dailyCadence, fold: foldNightrun},
 		{id: "dojo", relPath: filepath.Join("docs", "dojo", "history.jsonl"), cadence: dailyCadence, fold: foldDojo},
 		{id: "cadence", relPath: filepath.Join("docs", "cadence", "history.jsonl"), cadence: dailyCadence, fold: foldCadence},
 		{id: "dispatch", relPath: filepath.Join(".dispatch-runs", "progress.jsonl"), cadence: hourlyCadence, fold: foldDispatch},

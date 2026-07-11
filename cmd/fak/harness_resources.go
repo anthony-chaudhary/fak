@@ -10,7 +10,7 @@ import (
 
 // appendHarnessResources writes one durable row of the guard session's harness
 // hardware-resource use (CPU/mem/IO for the kernel + agent halves) to
-// docs/nightrun/harness-resources.jsonl — the sibling of the cache-savings ledger
+// .fak/nightrun/harness-resources.jsonl — the sibling of the cache-savings ledger
 // (appendObservedCacheSavings). Best-effort: a write failure never fails the session,
 // and an empty snapshot (resource-stats off) is never reached because the caller gates
 // on the sampler being present. Epic #2044 / #2046.
@@ -19,8 +19,7 @@ func appendHarnessResources(mode, provider, agent string, snap harnessres.Snapsh
 }
 
 // appendHarnessResourcesTo is the testable core: it renders the row and appends it to
-// path, creating the parent directory if needed (a guard run from a fresh cwd may not
-// have docs/nightrun yet).
+// path, creating the parent directory if needed.
 func appendHarnessResourcesTo(path, mode, provider, agent string, snap harnessres.Snapshot, now time.Time) error {
 	line, err := snap.MarshalLedgerRow(mode, provider, agent, now)
 	if err != nil {
