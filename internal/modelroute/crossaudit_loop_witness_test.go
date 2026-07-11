@@ -118,10 +118,45 @@ func TestIssueAuditLoopWitnessGolden(t *testing.T) {
 		t.Fatalf("final ledger verify: %v", err)
 	}
 	b.WriteString("== final ledger verify ==\n")
-	fmt.Fprintf(&b, "chain=OK rows=%d unique_audits=%d verdicts: pass=%d refute=%d inconclusive=%d unavailable=%d\n",
+	fmt.Fprintf(&b, "chain=OK rows=%d unique_audits=%d verdicts: pass=%d refute=%d inconclusive=%d unavailable=%d\n\n",
 		v.Cursor.Rows, v.UniqueAudits,
 		v.VerdictCounts[CrossAuditPass], v.VerdictCounts[CrossAuditRefute],
 		v.VerdictCounts[CrossAuditInconclusive], v.VerdictCounts[CrossAuditUnavailable])
+
+	// STALLED path: a subject whose provider never recovers exhausts its retry
+	// budget and dead-letters; the next observing tick reports STALLED. Captured on
+	// a separate on-disk fixture so all four typed states the done-condition names
+	// are present in the witness — ADVANCING/WAIT/DARK above, STALLED here.
+	stalledLedger, stalledCursor := loopTestPaths(t)
+	stalledClock := &loopTestClock{now: time.Unix(1_700_000_000, 0).UTC()}
+	stalledAuditor := newCountingAuditor()
+	stalledAuditor.errs[900] = errors.New("provider hard down") // never recovers
+	stalledCfg := IssueAuditLoopConfig{
+		LedgerPath: stalledLedger, CursorPath: stalledCursor,
+		BatchCap: 5, MaxAttempts: 3, BackoffBase: time.Millisecond,
+		Now: stalledClock.Now,
+		Discoverer: IssueAuditLoopDiscovererFunc(func(context.Context, int) ([]IssueAuditLoopSubject, error) {
+			return []IssueAuditLoopSubject{eligible(900)}, nil
+		}),
+		Auditor: stalledAuditor,
+	}
+	var attemptStates []string
+	for i := 0; i < 3; i++ {
+		r, aerr := RunIssueAuditLoopTick(context.Background(), stalledCfg)
+		if aerr != nil {
+			t.Fatalf("stalled attempt %d: %v", i, aerr)
+		}
+		attemptStates = append(attemptStates, string(r.State))
+		stalledClock.Advance(time.Second)
+	}
+	stalledObserve, err := RunIssueAuditLoopTick(context.Background(), stalledCfg)
+	if err != nil {
+		t.Fatalf("stalled observe tick: %v", err)
+	}
+	b.WriteString("== STALLED path (separate fixture: provider for #900 never recovers) ==\n")
+	fmt.Fprintf(&b, "retry-attempt ticks: %s (3 attempts exhaust the retry budget, then dead-lettered)\n", strings.Join(attemptStates, ", "))
+	fmt.Fprintf(&b, "observe tick: state=%s dead_lettered=%d dead_letter_queue=%s (UNAVAILABLE row retained, never advanced)\n",
+		stalledObserve.State, stalledObserve.DeadLettered, intsField(stalledObserve.DeadLetterQueue))
 
 	got := []byte(b.String())
 
@@ -146,6 +181,12 @@ func TestIssueAuditLoopWitnessGolden(t *testing.T) {
 	}
 	if v.UniqueAudits != 3 {
 		t.Fatalf("final unique audits = %d, want 3", v.UniqueAudits)
+	}
+	if stalledObserve.State != IssueAuditLoopStalled || stalledObserve.DeadLettered != 1 {
+		t.Fatalf("stalled observe = %+v, want STALLED / dead_lettered 1", stalledObserve)
+	}
+	if stalledAuditor.calls[900] != 3 {
+		t.Fatalf("#900 audited %d times, want 3 (exhausted retry budget)", stalledAuditor.calls[900])
 	}
 
 	if *updateAuditLoopWitness {

@@ -26,3 +26,7 @@ dark_subjects=[102] ledger_rows=3 cursor.settled=[100 101 103] cursor.dead_lette
 
 == final ledger verify ==
 chain=OK rows=3 unique_audits=3 verdicts: pass=2 refute=1 inconclusive=0 unavailable=0
+
+== STALLED path (separate fixture: provider for #900 never recovers) ==
+retry-attempt ticks: WAIT, WAIT, WAIT (3 attempts exhaust the retry budget, then dead-lettered)
+observe tick: state=STALLED dead_lettered=1 dead_letter_queue=[900] (UNAVAILABLE row retained, never advanced)
