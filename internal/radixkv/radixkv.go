@@ -142,6 +142,14 @@ type Tree struct {
 	thrashGapTotal uint64 // Σ evict→reuse gap (logical ticks) over those thrashes
 	thrashGapLast  uint64 // gap of the most recent thrash
 	thrashGapMax   uint64 // largest gap counted
+
+	// Bounded-eviction confirmed-delete ledger (#3387, plan.go): staged-unconfirmed
+	// victims in FIFO staging order (≤ evictionLedgerCap entries) plus the accumulated
+	// plane counters. Additive plane — evictToBudget never touches it.
+	evictLedger           []evictionRecord
+	boundedEvictions      int // victims staged (and detached) by PlanBoundedEviction
+	ledgerConfirmed       int // victims confirmed by ConfirmEvictions, each exactly once
+	ledgerConfirmedTokens int // Σ victim edge tokens over confirmed deletes
 }
 
 // New builds an empty prefix cache. maxTokens is the LRU budget in cached tokens; pass 0
@@ -682,6 +690,15 @@ type Stats struct {
 	ThrashGapLast  uint64 // gap of the most recent thrash
 	ThrashGapMax   uint64 // largest gap counted
 	ThrashTracked  int    // just-evicted keys currently probe-able (≤ thrashCap)
+
+	// Bounded-eviction plane (#3387, plan.go). BoundedEvictions counts victims staged
+	// (and detached) by PlanBoundedEviction — a subset of Evictions, which counts BOTH
+	// planes. LedgerConfirmed lags BoundedEvictions by exactly LedgerPending: staged
+	// lifetime == BoundedEvictions, and every staged victim is confirmed exactly once.
+	BoundedEvictions      int // victims evicted via the ratio-capped bounded plane
+	LedgerConfirmed       int // confirmed deletes settled by ConfirmEvictions
+	LedgerConfirmedTokens int // Σ victim edge tokens over confirmed deletes
+	LedgerPending         int // staged-unconfirmed ledger entries (≤ evictionLedgerCap)
 }
 
 // Stats walks the tree and returns its current shape.
@@ -714,6 +731,10 @@ func (t *Tree) Stats() Stats {
 		ThrashGapLast:         t.thrashGapLast,
 		ThrashGapMax:          t.thrashGapMax,
 		ThrashTracked:         len(t.thrashIndex),
+		BoundedEvictions:      t.boundedEvictions,
+		LedgerConfirmed:       t.ledgerConfirmed,
+		LedgerConfirmedTokens: t.ledgerConfirmedTokens,
+		LedgerPending:         len(t.evictLedger),
 	}
 	var visit func(n *node)
 	visit = func(n *node) {
