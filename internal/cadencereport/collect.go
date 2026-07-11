@@ -153,16 +153,34 @@ func RunPyEnvelope(root string, argv []string, python string, timeout time.Durat
 	}
 }
 
-// WorkFromGit derives the WORK-DONE dimension from git over the trailing window:
-// the total commit count on HEAD, and the subset whose SUBJECT carries a real
-// per-leaf ship-stamp. The ship count is NOT a bare `--grep=(fak ` count — that
-// over-counts in three ways the real grammar doesn't: it matches a merge subject,
-// a body-line / co-author-trailer mention anywhere in the message (not the
-// anchored subject stamp), and it can't bucket by leaf. Instead we enumerate one
-// `(sha, subject)` per non-merge commit and decide ship-ness per subject through
-// hooks.StampOf — the SAME grammar the pre-commit lint binds to — so this counts
-// exactly what `dos verify` can bind, and buckets each ship by its leaf.
+const (
+	shipHoldLocalOnly            = "local_only"
+	shipHoldPublishedUnwitnessed = "published_unwitnessed"
+)
+
+type shipCommit struct {
+	SHA     string
+	Subject string
+	Leaf    string
+}
+
+type shipAuditResult struct {
+	Witnessed bool
+	Detail    string
+}
+
+type shipAuditFunc func(root, publishedRef string, commits []shipCommit) (map[string]shipAuditResult, string)
+
+// WorkFromGit derives WORK-DONE from authoritative effects, not the local subject
+// alone. Commits remains the trailing HEAD activity count for compatibility. Ships is
+// narrower: the commit must be reachable from origin's trunk, carry the real stamp
+// grammar, AND receive a diff-witnessed OK from `dos commit-audit`. Ship-stamped local
+// commits and published-but-unwitnessed commits are retained as typed holds.
 func WorkFromGit(root string, windowDays int) Work {
+	return workFromGit(root, windowDays, auditPublishedShips)
+}
+
+func workFromGit(root string, windowDays int, audit shipAuditFunc) Work {
 	w := Work{WindowDays: windowDays}
 	since := fmt.Sprintf("%d days ago", windowDays)
 
@@ -175,39 +193,225 @@ func WorkFromGit(root string, windowDays int) Work {
 	}
 	w.Commits = commits
 
-	// One subject line per non-merge commit (%s is git's single-line subject, so a
-	// multi-line body can't leak a body-only `(fak x)` into the count). git log over
-	// HEAD is already deduped, so each reachable commit is counted at most once.
-	subjects, gerr := gitShipSubjects(root, since)
+	head, gerr := gitShipCommits(root, since, "HEAD")
 	if gerr != "" {
-		// The commit count already succeeded; a subject-enumeration failure is a
-		// partial signal, not a measurement failure — keep commits authoritative,
-		// leave ships at 0, do NOT set w.Err (matching the prior soft-degrade).
-		w.Ships = 0
+		w.Err = gerr
 		return w
 	}
-	w.Ships, w.ByLane = shipsBySubjects(subjects)
+	publishedRef, rerr := originTrunkRef(root)
+	if rerr != "" {
+		w.Err = rerr
+		return w
+	}
+	published, perr := gitShipCommits(root, since, publishedRef)
+	if perr != "" {
+		w.Err = perr
+		return w
+	}
+
+	publishedSet := make(map[string]bool, len(published))
+	var publishedCandidates []shipCommit
+	for _, commit := range published {
+		publishedSet[commit.SHA] = true
+		if commit.Leaf != "" {
+			publishedCandidates = append(publishedCandidates, commit)
+		}
+	}
+	for _, commit := range head {
+		if commit.Leaf == "" || publishedSet[commit.SHA] {
+			continue
+		}
+		w.Held = append(w.Held, ShipHold{
+			SHA: shortCommit(commit.SHA), Leaf: commit.Leaf, Reason: shipHoldLocalOnly,
+			Detail: "not reachable from " + publishedRef, Subject: commit.Subject,
+		})
+	}
+
+	audits, aerr := audit(root, publishedRef, publishedCandidates)
+	if aerr != "" {
+		w.Err = aerr
+	}
+	w.ByLane = map[string]int{}
+	for _, commit := range publishedCandidates {
+		result, ok := audits[commit.SHA]
+		if ok && result.Witnessed {
+			w.Ships++
+			w.ByLane[commit.Leaf]++
+			continue
+		}
+		detail := "commit audit returned no diff-witnessed OK"
+		if ok && result.Detail != "" {
+			detail = result.Detail
+		} else if aerr != "" {
+			detail = aerr
+		}
+		w.Held = append(w.Held, ShipHold{
+			SHA: shortCommit(commit.SHA), Leaf: commit.Leaf, Reason: shipHoldPublishedUnwitnessed,
+			Detail: detail, Subject: commit.Subject,
+		})
+	}
+	if len(w.ByLane) == 0 {
+		w.ByLane = nil
+	}
 	return w
 }
 
-// gitShipSubjects returns one subject line per non-merge commit in the trailing
-// window on HEAD. Errors degrade to ("", errString) for the soft-fail path above.
+// gitShipSubjects is retained as the pure-subject compatibility helper for its grammar
+// tests. Delivery credit no longer uses it; WorkFromGit needs SHA + publication + audit.
 func gitShipSubjects(root, since string) ([]string, string) {
-	cmd := exec.Command("git", "log", "--no-merges", "--since="+since, "--format=%s", "HEAD")
+	commits, err := gitShipCommits(root, since, "HEAD")
+	if err != "" {
+		return nil, err
+	}
+	subjects := make([]string, len(commits))
+	for i, commit := range commits {
+		subjects[i] = commit.Subject
+	}
+	return subjects, ""
+}
+
+func gitShipCommits(root, since, ref string) ([]shipCommit, string) {
+	cmd := exec.Command("git", "log", "--no-merges", "--since="+since, "--format=%H%x09%s", ref)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, "git log failed: " + gitErr(err)
+		return nil, "git log " + ref + " failed: " + gitErr(err)
 	}
-	var subjects []string
+	var commits []shipCommit
 	for _, line := range strings.Split(string(out), "\n") {
-		s := strings.TrimSpace(line)
-		if s != "" {
-			subjects = append(subjects, s)
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		sha, subject, ok := strings.Cut(line, "\t")
+		if !ok || sha == "" || subject == "" {
+			return nil, "git log " + ref + " emitted malformed commit row"
+		}
+		kind, leaf := hooks.StampOf(subject)
+		if kind != "trailer" && kind != "direct" {
+			leaf = ""
+		}
+		commits = append(commits, shipCommit{SHA: sha, Subject: subject, Leaf: leaf})
+	}
+	return commits, ""
+}
+
+func originTrunkRef(root string) (string, string) {
+	cmd := exec.Command("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	if out, err := cmd.Output(); err == nil {
+		if ref := strings.TrimSpace(string(out)); ref != "" {
+			return ref, ""
 		}
 	}
-	return subjects, ""
+	// A local checkout created by `git push -u` may not have origin/HEAD, but its
+	// branch upstream is still authoritative. This also covers master-named trunks.
+	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	if out, err := cmd.Output(); err == nil {
+		if ref := strings.TrimSpace(string(out)); strings.HasPrefix(ref, "origin/") {
+			return ref, ""
+		}
+	}
+	var lastErr error
+	for _, ref := range []string{"origin/main", "origin/master"} {
+		cmd = exec.Command("git", "rev-parse", "--verify", ref)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		cmd.Dir = root
+		if _, err := cmd.Output(); err == nil {
+			return ref, ""
+		} else {
+			lastErr = err
+		}
+	}
+	return "", "git origin trunk unavailable: " + gitErr(lastErr)
+}
+
+type dosAuditRow struct {
+	SHA     string `json:"sha"`
+	Verdict string `json:"verdict"`
+	Witness string `json:"witness"`
+	Reason  string `json:"reason"`
+}
+
+func auditPublishedShips(root, publishedRef string, commits []shipCommit) (map[string]shipAuditResult, string) {
+	results := map[string]shipAuditResult{}
+	if len(commits) == 0 {
+		return results, ""
+	}
+	oldest := commits[len(commits)-1].SHA
+	parentCmd := exec.Command("git", "rev-parse", "--verify", oldest+"^")
+	windowgate.ConfigureBackgroundCommand(parentCmd)
+	parentCmd.Dir = root
+	parentOut, err := parentCmd.Output()
+	if err != nil {
+		return auditPublishedIndividually(root, commits)
+	}
+	rangeRef := strings.TrimSpace(string(parentOut)) + ".." + publishedRef
+	rows, auditErr := runDOSCommitAudit(root, rangeRef)
+	if auditErr != "" {
+		return nil, auditErr
+	}
+	return foldDOSAuditRows(commits, rows), ""
+}
+
+func auditPublishedIndividually(root string, commits []shipCommit) (map[string]shipAuditResult, string) {
+	results := map[string]shipAuditResult{}
+	for _, commit := range commits {
+		rows, err := runDOSCommitAudit(root, commit.SHA)
+		if err != "" {
+			return nil, err
+		}
+		for sha, result := range foldDOSAuditRows([]shipCommit{commit}, rows) {
+			results[sha] = result
+		}
+	}
+	return results, ""
+}
+
+func runDOSCommitAudit(root, ref string) ([]dosAuditRow, string) {
+	cmd := exec.Command("dos", "commit-audit", "--json", ref)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			return nil, "dos commit-audit failed: " + gitErr(err)
+		}
+	}
+	var rows []dosAuditRow
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return nil, "dos commit-audit emitted invalid JSON: " + err.Error()
+	}
+	return rows, ""
+}
+
+func foldDOSAuditRows(commits []shipCommit, rows []dosAuditRow) map[string]shipAuditResult {
+	results := map[string]shipAuditResult{}
+	for _, commit := range commits {
+		for _, row := range rows {
+			if !strings.HasPrefix(commit.SHA, row.SHA) && !strings.HasPrefix(row.SHA, commit.SHA) {
+				continue
+			}
+			detail := strings.TrimSpace(row.Verdict + " " + row.Witness + ": " + row.Reason)
+			results[commit.SHA] = shipAuditResult{
+				Witnessed: row.Verdict == "OK" && row.Witness == "diff-witnessed",
+				Detail:    detail,
+			}
+			break
+		}
+	}
+	return results
+}
+
+func shortCommit(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // shipsBySubjects is the pure ship predicate over already-extracted subjects: a

@@ -70,10 +70,22 @@ type Maturity struct {
 	Err                 string         `json:"err,omitempty"`
 }
 
-// Work is the WORK-DONE dimension, derived from git over a trailing window: the
-// commit count and the subset whose SUBJECT carries a real per-leaf ship-stamp
-// (the same `(fak <leaf>)` trailer / `fak/<leaf>:` direct grammar the pre-commit
-// lint binds to — see hooks.StampOf). ByLane buckets those ships by leaf; it is
+// ShipHold is a ship-stamped commit that cannot receive delivery credit. Reason is
+// local_only when the commit is not an ancestor of origin's trunk, or
+// published_unwitnessed when it is published but the independent commit audit does
+// not report a diff-witnessed OK. Held commits remain visible without inflating Ships.
+type ShipHold struct {
+	SHA     string `json:"sha"`
+	Leaf    string `json:"leaf"`
+	Reason  string `json:"reason"`
+	Detail  string `json:"detail,omitempty"`
+	Subject string `json:"subject,omitempty"`
+}
+
+// Work is the WORK-DONE dimension, derived from git over a trailing window. Ships
+// counts only commits that are both reachable from origin's trunk and independently
+// diff-witnessed; a ship-shaped local or unwitnessed commit is reported in Held instead
+// of receiving credit. ByLane buckets credited ships by leaf. ByLane and Held are
 // report/render-only and intentionally NOT persisted to the ledger, so the
 // fak-cadence-ledger/1 row schema stays byte-stable.
 type Work struct {
@@ -81,6 +93,7 @@ type Work struct {
 	Commits    int            `json:"commits"`
 	Ships      int            `json:"ships"`
 	ByLane     map[string]int `json:"by_lane,omitempty"`
+	Held       []ShipHold     `json:"held,omitempty"`
 	Err        string         `json:"err,omitempty"`
 }
 
@@ -356,6 +369,9 @@ func FoldWithMaturity(scores Scores, maturity Maturity, work Work, releases Rele
 		maturityLine += fmt.Sprintf(", %d private skip(s)", maturity.RouteSkippedPrivate)
 	}
 	workLine := fmt.Sprintf("work: %d commit(s)/%d ship(s) in %dd", work.Commits, work.Ships, work.WindowDays)
+	if len(work.Held) > 0 {
+		workLine += fmt.Sprintf(", %d held", len(work.Held))
+	}
 	relLine := fmt.Sprintf("releases: %s -> %s", releases.Version, releases.ActionKind)
 	if releases.CommitsBehind > 0 {
 		relLine += fmt.Sprintf(" (@latest %d behind", releases.CommitsBehind)
@@ -679,6 +695,11 @@ func Render(r Report) string {
 		}
 		lines = append(lines, "      by lane: "+strings.Join(parts, ", "))
 	}
+	if len(r.Work.Held) > 0 {
+		for _, hold := range r.Work.Held {
+			lines = append(lines, fmt.Sprintf("      held: %s %s (%s)%s", hold.Reason, hold.SHA, hold.Leaf, detailSuffix(hold.Detail)))
+		}
+	}
 	if r.Trend != nil {
 		if r.Trend.StandingTo != 0 {
 			lines = append(lines, fmt.Sprintf("  standing   score %d (%+d); health %s; difficulty %d (%+d)",
@@ -702,6 +723,13 @@ func publishLagSuffix(r Releases) string {
 		suffix += ", " + r.PublishVerdict
 	}
 	return suffix + "]"
+}
+
+func detailSuffix(detail string) string {
+	if strings.TrimSpace(detail) == "" {
+		return ""
+	}
+	return ": " + detail
 }
 
 func maturityNextSuffix(m Maturity) string {
