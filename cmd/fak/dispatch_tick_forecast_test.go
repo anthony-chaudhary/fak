@@ -52,6 +52,12 @@ func TestDispatchPreflightFoldsForecastFloor(t *testing.T) {
 	oldRows := dispatchProbeWorkerProcessRows
 	dispatchProbeWorkerProcessRows = func() ([]dispatchCodexProcessRow, error) { return nil, nil }
 	t.Cleanup(func() { dispatchProbeWorkerProcessRows = oldRows })
+	oldResources := dispatchBuildHostResources
+	dispatchBuildHostResources = func(dispatchtick.ProcGuardInput) dispatchtick.HostResources {
+		cores, ram, threads := 64, 128000, 1000
+		return dispatchtick.HostResources{Cores: &cores, FreeRAMMB: &ram, TotalThreads: &threads}
+	}
+	t.Cleanup(func() { dispatchBuildHostResources = oldResources })
 
 	root := t.TempDir()
 	// configured max 20 leaves room for the seat ceiling (12) to be the binding hard limit.

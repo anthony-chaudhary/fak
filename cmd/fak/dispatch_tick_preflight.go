@@ -64,7 +64,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 		Account:       dispatchPreflightAccount(root, stderr, workKind, product),
 		Kernel:        kernel,
 		Seat:          dispatchPreflightSeat(root, stderr, product),
-		Resources:     dispatchPreflightHostResourcesFromProcesses(processes),
+		Resources:     dispatchBuildHostResources(processes),
 		Budgets:       dispatchtick.DefaultHostBudgets(),
 		OSWorkerProcs: dispatchProbeWorkerCount(root, product),
 	}
@@ -1279,6 +1279,8 @@ func dispatchScanProcessesPOSIX() ([]dispatchtick.ProcInfo, error) {
 	}
 	return procs, nil
 }
+
+var dispatchBuildHostResources = dispatchPreflightHostResourcesFromProcesses
 
 func dispatchPreflightHostResources() dispatchtick.HostResources {
 	return dispatchPreflightHostResourcesFromProcesses(dispatchProbeProcesses())
