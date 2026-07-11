@@ -219,19 +219,27 @@ func (s Snapshot) validateRow(i int, r SnapshotRow) error {
 // toBenchScore converts one validated snapshot row into a modelscore.BenchScore,
 // carrying the benchmark id + version from the snapshot envelope and folding the
 // source-confidence enum into the numeric [0,1] belief modelscore stores.
+func snapshotProvenance(r SnapshotRow) modelscore.Provenance {
+	p := modelscore.Provenance{Source: r.Source, AsOf: r.AsOf, Confidence: r.Confidence.Weight(), Illustrative: r.Illustrative, SubmissionTruthTier: modelscore.InferredSubmissionTruthTier(string(r.Confidence))}
+	switch p.SubmissionTruthTier {
+	case modelscore.TierOfficialSubmission:
+		p.SubmissionSource = r.Source
+	case modelscore.TierAuthorPublishedPosthoc:
+		p.SubmissionSource, p.AuthorSource = r.Source, r.Source
+	case modelscore.TierReconstructedFromBlog:
+		p.SubmissionSource, p.AuthorSource, p.ReconstructionWitness = r.Source, r.Source, "committed benchmark snapshot"
+	}
+	return p
+}
+
 func (s Snapshot) toBenchScore(r SnapshotRow) modelscore.BenchScore {
 	return modelscore.BenchScore{
-		Benchmark: s.Benchmark,
-		Version:   s.Version,
-		Score:     r.Score,
-		Unit:      r.Metric,
-		Harness:   r.Harness,
-		Provenance: modelscore.Provenance{
-			Source:       r.Source,
-			AsOf:         r.AsOf,
-			Confidence:   r.Confidence.Weight(),
-			Illustrative: r.Illustrative,
-		},
+		Benchmark:  s.Benchmark,
+		Version:    s.Version,
+		Score:      r.Score,
+		Unit:       r.Metric,
+		Harness:    r.Harness,
+		Provenance: snapshotProvenance(r),
 	}
 }
 

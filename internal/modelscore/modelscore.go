@@ -56,6 +56,10 @@ const Schema = "fak.modelscore-registry.v1"
 // value (a benchmark score, a price, a context window) carries its own
 // Provenance; the registry refuses a row whose evidence has no source.
 type Provenance struct {
+	SubmissionTruthTier   SubmissionTruthTier `json:"submission_truth_tier"`
+	SubmissionSource      string              `json:"submission_source,omitempty"`
+	AuthorSource          string              `json:"author_source,omitempty"`
+	ReconstructionWitness string              `json:"reconstruction_witness,omitempty"`
 	// Source is the citation the value came from — a leaderboard URL, a repo, a
 	// published price page. Required: an evidence value with no source is a guess,
 	// and the validator refuses it.

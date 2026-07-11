@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/modelscore"
 )
 
 // fixturesDir holds the committed snapshot fixtures the ingestor reads. Each
@@ -207,5 +209,18 @@ func TestBenchmarkIngestRejectsBadSchemaTag(t *testing.T) {
 	_, err := ParseSnapshot([]byte(`{"schema":"wrong","benchmark":"x","version":"1"}`))
 	if err == nil || !strings.Contains(err.Error(), "schema") {
 		t.Fatalf("err = %v, want a schema-tag refusal", err)
+	}
+}
+
+func TestIngestCarriesSubmissionTruthTier(t *testing.T) {
+	snap := Snapshot{Schema: IngestSchema, Benchmark: "bench", Version: "1", Rows: []SnapshotRow{{Model: "m", Score: 1, Metric: "score", Source: "https://official.example/result", AsOf: "2026-07-11", Confidence: ConfidenceOfficial}}}
+	reg, err := Ingest(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, _ := reg.Profile("m")
+	p := prof.Benchmarks[0].Provenance
+	if p.SubmissionTruthTier != modelscore.TierOfficialSubmission || p.ValidateSubmissionTruth() != nil {
+		t.Fatalf("provenance=%+v", p)
 	}
 }
