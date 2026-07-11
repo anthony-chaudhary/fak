@@ -23,6 +23,7 @@ import (
 	"time"
 
 	acct "github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -40,8 +41,16 @@ const (
 )
 
 var (
-	tuiPriorityWeights = map[string]int{"priority/P0": 1000, "priority/P1": 400, "priority/P2": 150}
-	tuiKindLabels      = map[string]bool{
+	// Sourced from the canonical dispatchtick priority constants so the picker, the
+	// triage scorer, and this TUI never disagree (see internal/dispatchtick/priority.go's
+	// lockstep note). The unlabeled default lives at the lookup site in
+	// tui_issues_garden.go (dispatchtick.PriorityWeightDefault).
+	tuiPriorityWeights = map[string]int{
+		"priority/P0": dispatchtick.PriorityWeightP0,
+		"priority/P1": dispatchtick.PriorityWeightP1,
+		"priority/P2": dispatchtick.PriorityWeightP2,
+	}
+	tuiKindLabels = map[string]bool{
 		"bug": true, "enhancement": true, "documentation": true, "question": true,
 		"performance": true, "build": true, "research": true,
 	}
@@ -191,6 +200,9 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 	top := fs.Int("top", 25, "number of session rows to render in human mode")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the session TUI model as JSON")
+	controlKey := fs.String("press", "", "OOB control (#2763): drive one lifecycle op on the selected session — p pause, r resume, t throttle, d drain — through the same session-control route, instead of rendering the pane")
+	controlSession := fs.String("session", "", "with --press: the session trace id to control (default: the highlighted/top-of-attention row)")
+	confirm := fs.Bool("confirm", false, "with --press: confirm a destructive control op (drain), which is otherwise withheld")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -216,10 +228,71 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	report := buildTUISessionReport(list, source, at)
+	// OOB control keybinding (#2763): when the operator presses a control key, drive one
+	// lifecycle op on the selected session through the shared session-control route rather
+	// than rendering the read-only pane. A sessions-JSON fixture is a read-only snapshot
+	// (no gateway to POST to), so a control key there is refused with an explanatory error.
+	if strings.TrimSpace(*controlKey) != "" {
+		if strings.TrimSpace(*sessionsJSON) != "" {
+			fmt.Fprintln(stderr, "fak console sessions: --press drives a live gateway; it cannot combine with --sessions-json (a read-only snapshot)")
+			return 2
+		}
+		return runTUISessionControlKey(stdout, stderr, *addr, *key, report, *controlKey, *controlSession, *confirm, *asJSON)
+	}
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, report, "fak console sessions")
 	}
 	fmt.Fprint(stdout, renderTUISessions(report, *top, *width))
+	return 0
+}
+
+// runTUISessionControlKey drives one OOB control keybinding (#2763): it resolves the
+// selected session, plans the control request the pressed key emits (the pure, gated
+// core), and — when the plan is emit-ready — dispatches it through the shared
+// session-control route. A withheld plan (unbound key, destructive-needs-confirm, or a
+// deferred op like redirect) prints why and returns non-zero without dialing the route,
+// so a destructive op is never fired without confirmation.
+func runTUISessionControlKey(stdout, stderr io.Writer, addr, key string, report tuiSessionReport, controlKey, controlSession string, confirm, asJSON bool) int {
+	runes := []rune(controlKey)
+	if len(runes) != 1 {
+		fmt.Fprintf(stderr, "fak console sessions: --press must be a single control key (one of %s)\n", strings.Join(tuiSessionControlKeys(), " "))
+		return 2
+	}
+	row, ok := selectTUISessionRow(report, controlSession)
+	if !ok {
+		if strings.TrimSpace(controlSession) != "" {
+			fmt.Fprintf(stderr, "fak console sessions: --session %q not found among %d live session(s)\n", controlSession, len(report.Rows))
+		} else {
+			fmt.Fprintln(stderr, "fak console sessions: no live sessions to control (pass --session <id> once one is running)")
+		}
+		return 1
+	}
+	plan, bound := planTUISessionControlKey(row, runes[0], confirm)
+	if !bound {
+		fmt.Fprintf(stderr, "fak console sessions: %q is not a control key (one of %s)\n", controlKey, strings.Join(tuiSessionControlKeys(), " "))
+		return 2
+	}
+	if !plan.Emit {
+		switch {
+		case plan.Deferred != "":
+			fmt.Fprintf(stderr, "fak console sessions: %s deferred — %s\n", plan.Label, plan.Deferred)
+		case plan.NeedsConfirm:
+			fmt.Fprintf(stderr, "fak console sessions: %s is destructive — re-run with --confirm to drain %s\n", plan.Label, plan.TraceID)
+		default:
+			fmt.Fprintf(stderr, "fak console sessions: %s emitted no control op\n", plan.Label)
+		}
+		return 1
+	}
+	c := &sessionClient{base: strings.TrimRight(addr, "/"), key: key, hc: &http.Client{Timeout: 15 * time.Second}}
+	st, err := dispatchTUISessionControl(c, plan)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak console sessions: %s %s: %v\n", plan.Label, plan.TraceID, err)
+		return 1
+	}
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, st, "fak console sessions")
+	}
+	fmt.Fprintf(stdout, "%s -> %s\n%s\n", plan.Label, plan.TraceID, formatSessionState(st))
 	return 0
 }
 

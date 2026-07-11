@@ -684,6 +684,10 @@ func renderTUISessions(report tuiSessionReport, top, width int) string {
 	}
 	fmt.Fprintln(&b, "\nSession Queue")
 	renderTUISessionRows(&b, report.Rows, minTUI(top, len(report.Rows)), width)
+	// The control surface (#2763): advertise the keybindings that drive the highlighted
+	// session's lifecycle, so the pane is not merely render-only. `fak console sessions
+	// --session <id> --key <k>` (see runTUISessions) drives one op through these bindings.
+	fmt.Fprintln(&b, "\n"+trimTUI(renderTUISessionControlLegend(), maxTUI(20, width)))
 	return b.String()
 }
 
