@@ -343,3 +343,55 @@ func TestRotateBoundsActiveFileBelowThreshold(t *testing.T) {
 		t.Fatalf("LoadAll = %d events, want %d (full history across the seal)", len(all), n)
 	}
 }
+
+// TestRotateIfDue pins the lock-cheap activation primitive for issue #3465: under the
+// bound it is a pure no-op that seals nothing (so a per-tick sweep never takes the append
+// lock on the common pass that would re-strain the hot path the issue flags), and once
+// the active file crosses the bound it delegates to Rotate and seals the segment while
+// LoadAll still returns the full verified history across the seam.
+func TestRotateIfDue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+
+	// Absent file: not due, no-op, no error.
+	if res, err := RotateIfDue(path, 1); err != nil || res.Rotated {
+		t.Fatalf("RotateIfDue(absent) = %+v, %v; want no-op", res, err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", RunID: strconv.Itoa(i)}); err != nil {
+			t.Fatalf("seed #%d: %v", i, err)
+		}
+	}
+
+	// Under the bound: no-op, and crucially nothing is sealed.
+	if res, err := RotateIfDue(path, 1<<30); err != nil || res.Rotated {
+		t.Fatalf("RotateIfDue(under) = %+v, %v; want no-op", res, err)
+	}
+	if segs, _ := sealedSegments(path); len(segs) != 0 {
+		t.Fatalf("under-bound RotateIfDue sealed %d segment(s), want 0", len(segs))
+	}
+
+	// minBytes<=0 ("no bound configured"): never seals.
+	if res, err := RotateIfDue(path, 0); err != nil || res.Rotated {
+		t.Fatalf("RotateIfDue(minBytes=0) = %+v, %v; want no-op", res, err)
+	}
+
+	// At/over the bound: due -> delegates to Rotate and seals the active segment.
+	res, err := RotateIfDue(path, 1)
+	if err != nil {
+		t.Fatalf("RotateIfDue(due): %v", err)
+	}
+	if !res.Rotated || res.SealedEvents != 3 {
+		t.Fatalf("RotateIfDue(due) = %+v, want rotated with 3 sealed events", res)
+	}
+	if segs, _ := sealedSegments(path); len(segs) != 1 {
+		t.Fatalf("due RotateIfDue sealed %d segment(s), want 1", len(segs))
+	}
+	all, err := LoadAll(path)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("LoadAll = %d events, want 3 (full history across the seal)", len(all))
+	}
+}

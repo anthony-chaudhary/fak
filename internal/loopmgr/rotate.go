@@ -186,6 +186,32 @@ func ShouldRotate(path string, minBytes int64) (bool, int64, error) {
 	return fi.Size() >= minBytes, fi.Size(), nil
 }
 
+// RotateIfDue rotates the active ledger only when it has crossed minBytes, pairing the
+// cheap unlocked ShouldRotate trigger with the locking Rotate so a hot producer or a
+// per-tick sweep can keep the file bounded WITHOUT taking the cross-process append lock
+// on the common not-due pass. That distinction is the point of issue #3465: Rotate
+// re-checks the size under the SAME lock Append serializes on, so gating rotation by
+// calling Rotate directly every tick would put lock traffic back on the append hot path
+// the ledger's growth already strains — the ErrLedgerBusy-under-contention failure mode
+// the issue names. RotateIfDue stats first (no lock) and only takes the lock to seal on
+// the rare pass that is actually over the bound.
+//
+// It is the single call an activation wiring uses to bound the hot file. A no-op returns
+// Rotated=false: "active ledger under threshold" when under the bound (or minBytes<=0).
+// Otherwise it delegates to Rotate, which independently re-checks the size under the lock,
+// so a race that shrinks the file between the stat and the lock only ever costs one no-op
+// Rotate, never a mis-seal.
+func RotateIfDue(path string, minBytes int64) (RotateResult, error) {
+	due, _, err := ShouldRotate(path, minBytes)
+	if err != nil {
+		return RotateResult{}, err
+	}
+	if !due {
+		return RotateResult{Reason: "active ledger under threshold"}, nil
+	}
+	return Rotate(path, minBytes)
+}
+
 // LoadAll walks the ledger's sealed segments (oldest first) and then the active
 // segment, returning the full event history across all segments. Unlike Load — which
 // reads only the active segment for the hot per-tick fold — LoadAll is the audit-grade
