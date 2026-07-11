@@ -180,3 +180,12 @@ and others write above the defaults, for a core use case or a one-off alike. The
 data is typed and exportable; the similarity is a deterministic reference you can
 replace; the seam takes your scorer with no core edit. That is the observability
 layer; the analysis is yours to build.
+
+## Read next
+
+- [Trajectory control (trajctl)](trajectory-control.md) — the **live**
+  forward-progress control plane this retrospective data plane is *not*. `fak
+  traj` scores which *past* turns were notable, redundant, or expensive; trajctl
+  scores whether a *live* run is still moving toward its declared objective. Same
+  "trajectory" root, opposite tense — the
+  [concept glossary](../fak/concept-glossary.md) draws the full line.
