@@ -144,6 +144,12 @@ func cmdDupGuard(args []string) {
 		return
 	}
 
+	// Tokenize the whole tracked tree ONCE, then query each added file against the
+	// prebuilt index. Previously each added file re-tokenized all ~5.7k tracked
+	// files, so the scan cost grew with (added files × tree size); building the
+	// index once makes it (tree size + added files × cheap intersection).
+	index := clonescan.BuildTreeIndex(tree)
+
 	type warning struct {
 		AddedIn string            `json:"added_in"`
 		Matches []clonescan.Match `json:"matches"`
@@ -157,7 +163,7 @@ func cmdDupGuard(args []string) {
 	for _, rel := range addedFiles {
 		// Exclude the file itself: a block appearing in both the added lines and the
 		// committed file is the same code, not a duplicate.
-		matches := clonescan.Query(added[rel], tree, rel, 5)
+		matches := index.Query(clonescan.CandidateKeys(added[rel]), rel, 5)
 		if len(matches) > 0 {
 			warnings = append(warnings, warning{AddedIn: rel, Matches: matches})
 		}

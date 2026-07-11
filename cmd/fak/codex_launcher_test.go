@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -235,6 +236,55 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestRunCodexLoopGateAllowsForwardProgressPlanTraffic(t *testing.T) {
+	// Regression: a guarded (fak-provider) session that called update_plan many
+	// times, each with a DISTINCT plan, is forward planning progress — not a
+	// no-progress loop. It must not poison the next `fak codex` launch. This is
+	// the false positive reported for Epic #4277 (update_plan count=44
+	// args_digests=44 refusing a fresh guarded launch).
+	t.Setenv("CODEX_THREAD_ID", "")
+	home := filepath.Join(t.TempDir(), "codex-home")
+	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "11")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionsDir, "rollout-2026-07-11T08-00-00-progress.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-07-11T15:00:00.000Z","type":"session_meta","payload":{"session_id":"progress-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"fak","git":{"commit_hash":"abc1234","branch":"main"}}}`,
+	}
+	for i, step := range []string{"one", "two", "three", "four", "five", "six"} {
+		call := fmt.Sprintf("plan_%d", i+1)
+		lines = append(lines,
+			fmt.Sprintf(`{"timestamp":"2026-07-11T15:0%d:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"%s\",\"status\":\"in_progress\"}]}","call_id":"%s"}}`, i, step, call),
+			fmt.Sprintf(`{"timestamp":"2026-07-11T15:0%d:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"%s","output":"Plan updated"}}`, i, call),
+		)
+	}
+	writeCodexLoopFixture(t, path, lines)
+
+	orig := codexLaunchRun
+	spawned := false
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+		spawned = true
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate", "loop",
+		"--loop-gate-since-hours", "0",
+		"--", "exec", "keep planning",
+	})
+	if rc != 17 || !spawned {
+		t.Fatalf("forward-progress plan traffic blocked launch: rc=%d spawned=%v stderr=%s", rc, spawned, errb.String())
+	}
+	if strings.Contains(errb.String(), "loop gate REFUSE") {
+		t.Fatalf("distinct-plan update_plan traffic poisoned the guarded relaunch:\n%s", errb.String())
+	}
+}
+
 func TestRunCodexLoopGateAllowsNewestAbruptCrash(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	home := codexLauncherLoopFixtureForProvider(t, "fak")
@@ -461,11 +511,15 @@ func codexLauncherLoopFixtureForProvider(t *testing.T, provider string) string {
 	loopPath := filepath.Join(sessionsDir, "rollout-2026-07-06T02-25-00-loop.jsonl")
 	writeCodexLoopFixture(t, loopPath, []string{
 		`{"timestamp":"2026-07-06T02:25:00.000Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"` + provider + `","git":{"commit_hash":"4926739","branch":"main"}}}`,
+		// Same plan re-submitted verbatim each turn: a genuine no-progress
+		// thrash loop (ArgsDigestCount==1 < Count), the case the loop gate must
+		// still refuse. Distinct-argument progress is covered by
+		// TestRunCodexLoopGateAllowsForwardProgressPlanTraffic.
 		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_1"}}`,
 		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
-		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"two\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
+		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
 		`{"timestamp":"2026-07-06T02:25:16.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_2","output":"Plan updated"}}`,
-		`{"timestamp":"2026-07-06T02:25:27.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"three\",\"status\":\"in_progress\"}]}","call_id":"plan_3"}}`,
+		`{"timestamp":"2026-07-06T02:25:27.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_3"}}`,
 		`{"timestamp":"2026-07-06T02:25:28.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
 	})
 	return home

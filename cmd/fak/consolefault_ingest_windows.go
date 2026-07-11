@@ -33,7 +33,9 @@ func gatherWinConsoleFaultRecords(since time.Duration) ([]winEventRecord, string
 	script := strings.Replace(consoleFaultIngestPS, "__DAYS__", fmt.Sprintf("%d", days), 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Sprintf("Get-WinEvent: %v", err)
 	}

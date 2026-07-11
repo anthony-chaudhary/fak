@@ -3,11 +3,83 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCodexOutcomeProgressExemptionDiscriminates(t *testing.T) {
+	// update_plan across fully distinct plans is forward progress, exempt.
+	progress := codexRepeatedOutcome{Tool: "update_plan", Count: 44, ArgsDigestCount: 44}
+	if !codexOutcomeIsForwardProgress(progress) {
+		t.Fatalf("distinct-arg update_plan should be forward progress: %+v", progress)
+	}
+	// Same plan re-submitted (args_digests < count) is thrash — still a loop.
+	thrash := codexRepeatedOutcome{Tool: "update_plan", Count: 44, ArgsDigestCount: 1}
+	if codexOutcomeIsForwardProgress(thrash) {
+		t.Fatalf("same-arg update_plan must stay a loop signal: %+v", thrash)
+	}
+	// A real work tool is never exempt, even with fully distinct args (this is
+	// the only thing separating it from update_plan — the exec subagent fixture).
+	work := codexRepeatedOutcome{Tool: "exec", Count: 3, ArgsDigestCount: 3}
+	if codexOutcomeIsForwardProgress(work) {
+		t.Fatalf("exec is not a progress tool and must never be exempt: %+v", work)
+	}
+	// A progress tool must never mask a concurrent real loop: the work tool drives.
+	top, ok := codexTopLoopDrivingOutcome([]codexRepeatedOutcome{progress, work})
+	if !ok || top.Tool != "exec" {
+		t.Fatalf("progress outcome masked the real loop: top=%+v ok=%v", top, ok)
+	}
+	// All-forward-progress → no loop-driving outcome.
+	if _, ok := codexTopLoopDrivingOutcome([]codexRepeatedOutcome{progress}); ok {
+		t.Fatal("all-forward-progress outcomes must not drive a loop verdict")
+	}
+}
+
+func TestSessionsCodexLoopTreatsDistinctPlanTrafficAsProgress(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-07-11T08-00-00-progress.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-07-11T15:00:00.000Z","type":"session_meta","payload":{"session_id":"progress-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"fak","git":{"commit_hash":"abc1234","branch":"main"}}}`,
+	}
+	for i, step := range []string{"one", "two", "three", "four", "five", "six"} {
+		call := fmt.Sprintf("plan_%d", i+1)
+		lines = append(lines,
+			fmt.Sprintf(`{"timestamp":"2026-07-11T15:0%d:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"%s\",\"status\":\"in_progress\"}]}","call_id":"%s"}}`, i, step, call),
+			fmt.Sprintf(`{"timestamp":"2026-07-11T15:0%d:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"%s","output":"Plan updated"}}`, i, call),
+		)
+	}
+	writeCodexLoopFixture(t, path, lines)
+
+	fh, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, diagErr := diagnoseCodexLoop(fh, path)
+	closeErr := fh.Close()
+	if diagErr != nil {
+		t.Fatal(diagErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if d.Verdict != "OK" {
+		t.Fatalf("distinct-plan update_plan traffic classified %s, want OK: %+v", d.Verdict, d)
+	}
+	if d.Reason != "repeated_progress_tool_no_loop" {
+		t.Fatalf("reason = %q, want repeated_progress_tool_no_loop: %+v", d.Reason, d)
+	}
+	// The traffic stays visible for token/burn observability even though it is
+	// not a loop — this is where the 44-call / 6.2M-token burn is surfaced.
+	if len(d.RepeatedOutcomes) != 1 || d.RepeatedOutcomes[0].Tool != "update_plan" {
+		t.Fatalf("update_plan traffic should stay visible for observability: %+v", d.RepeatedOutcomes)
+	}
+	if got := d.RepeatedOutcomes[0]; got.Count != 6 || got.ArgsDigestCount != 6 {
+		t.Fatalf("want count==args_digests==6 (fully distinct plans), got %+v", got)
+	}
+}
 
 func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 	dir := t.TempDir()
@@ -189,13 +261,15 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	loopPath := filepath.Join(sessionsDir, "rollout-2026-07-05T19-24-43-loop.jsonl")
 	writeCodexLoopFixture(t, loopPath, []string{
 		`{"timestamp":"2026-07-06T02:24:43.315Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","cli_version":"0.142.5","model_provider":"openai","git":{"commit_hash":"4926739","branch":"main"}}}`,
+		// Same plan re-submitted each turn (ArgsDigestCount==1 < Count): a
+		// genuine no-progress loop the recent scan must still flag LOOP.
 		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_1"}}`,
 		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
 		`{"timestamp":"2026-07-06T02:25:04.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":20,"total_tokens":1020},"last_token_usage":{"input_tokens":1000,"output_tokens":20,"total_tokens":1020}}}}`,
-		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"two\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
+		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
 		`{"timestamp":"2026-07-06T02:25:16.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_2","output":"Plan updated"}}`,
 		`{"timestamp":"2026-07-06T02:25:16.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2000,"output_tokens":30,"total_tokens":2030},"last_token_usage":{"input_tokens":1000,"output_tokens":10,"total_tokens":1010}}}}`,
-		`{"timestamp":"2026-07-06T02:25:27.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"three\",\"status\":\"in_progress\"}]}","call_id":"plan_3"}}`,
+		`{"timestamp":"2026-07-06T02:25:27.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_3"}}`,
 		`{"timestamp":"2026-07-06T02:25:28.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
 		`{"timestamp":"2026-07-06T02:25:28.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":3000,"output_tokens":40,"total_tokens":3040},"last_token_usage":{"input_tokens":1000,"output_tokens":10,"total_tokens":1010}}}}`,
 	})

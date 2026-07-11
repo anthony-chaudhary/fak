@@ -963,6 +963,12 @@ func TestGuardBudgetEnvelopeSeedsBudgetPaceAndWallClock(t *testing.T) {
 	if !q.Bounded || q.Limit != 45*time.Minute || q.Remaining != 40*time.Minute {
 		t.Fatalf("time query = %+v, want 45m limit and 40m remaining", q)
 	}
+	if st.Budget.SpendMicroCentsLeft != 125*session.MicroCentsPerCent {
+		t.Fatalf("spend = %d micro-cents, want $1.25 projected live", st.Budget.SpendMicroCentsLeft)
+	}
+	if st.Throughput.ExpectedTokensPerSec != 30 {
+		t.Fatalf("throughput = %+v, want expected=30 recorded on the drive state (#2762)", st.Throughput)
+	}
 }
 
 // TestGuardMaxDurationZeroLeavesTimeBudgetUnconfigured proves the flag's documented

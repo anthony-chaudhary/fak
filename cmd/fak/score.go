@@ -28,6 +28,7 @@ import (
 // so a scorecard reachable only at the root reds the contract.
 var scoreRoutes = map[string]func(argv []string){
 	"agent-readiness":     cmdAgentReadinessScore,
+	"brittleness":         cmdBrittlenessScorecard,
 	"cache-health":        cmdCacheHealthScore,
 	"catchup":             cmdCatchUpScore,
 	"conflation":          cmdConflationScorecard,
@@ -35,6 +36,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"default-value":       cmdDefaultValueScorecard,
 	"dogfood":             cmdDogfoodScore,
 	"dojo-rsi":            cmdDojoRSI,
+	"focus":               cmdFocusScore,
 	"guard-accuracy":      cmdGuardAccuracy,
 	"guard-rsi":           cmdGuardRSIScorecard,
 	"guard-verdict-rsi":   cmdGuardVerdictRSI,

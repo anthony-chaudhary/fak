@@ -20,6 +20,7 @@ func cmdQuestionLedger(argv []string) {
 // runQuestionLedgerGH is the gh seam used by `ensure-label --apply`.
 func runQuestionLedgerGH(args []string) (string, string, error) {
 	cmd := exec.Command("gh", args...)
+	configureDispatchHelperCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

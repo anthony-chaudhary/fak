@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 // TestCachevalueSurfaceReadyAgainstChannel is the issue #1306 witness: `fak slack check`
-// lists `cachevalue` READY against C0BEF8B8KMW (#scoreboard) once a token resolves.
+// lists `cachevalue` READY against the CI/CD reporting sink once a token resolves.
 func TestCachevalueSurfaceReadyAgainstChannel(t *testing.T) {
 	clearSlackEnv(t)
 	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-sb") // shared workspace token
@@ -19,8 +21,8 @@ func TestCachevalueSurfaceReadyAgainstChannel(t *testing.T) {
 	if cv == nil {
 		t.Fatal("cachevalue surface not registered in slackSurfaces")
 	}
-	if cv.Channel != "C0BEF8B8KMW" {
-		t.Fatalf("cachevalue should default to the public #scoreboard channel C0BEF8B8KMW, got %q", cv.Channel)
+	if cv.Channel != scoreboard.CICDReportChannel {
+		t.Fatalf("cachevalue should default to the CI/CD reporting sink %q, got %q", scoreboard.CICDReportChannel, cv.Channel)
 	}
 	if cv.ChannelSource != "built-in default" {
 		t.Fatalf("cachevalue channel should come from the built-in default, got %q", cv.ChannelSource)

@@ -18,12 +18,13 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
-// steeringChannelDefault is #steering-guard in the scoreboard Slack workspace
-// (team T0BDEJF1HGB). It is a PUBLIC channel id (not a secret): the @agent bot is a
-// member and posts here with FAK_SCOREBOARD_TOKEN. Override with --channel or
-// FAK_STEERING_CHANNEL to point the surface elsewhere — NOT FAK_SCOREBOARD_CHANNEL,
-// which is the scoreboard CLI's own default (#scoreboard).
-const steeringChannelDefault = "C0BD5J4ERL7"
+// steeringChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) —
+// steering is one of the CI/CD reporting feeders folded onto that single channel. It is
+// a PUBLIC channel id (not a secret): the @agent bot is a member and posts here with
+// FAK_SCOREBOARD_TOKEN. Override this surface with --channel or FAK_STEERING_CHANNEL —
+// NOT FAK_SCOREBOARD_CHANNEL, which is the scoreboard CLI's own default (#scoreboard) —
+// or the whole reporting family with FAK_CICD_REPORT_CHANNEL.
+const steeringChannelDefault = scoreboard.CICDReportChannel
 
 // steeringBaselineRel is the committed alert ratchet floor (separate from the
 // unified scorecard_baseline.json, which tracks only the hard `steer` debt integer,
@@ -96,7 +97,7 @@ type steeringDogfood struct {
 func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 	fs := flag.NewFlagSet("fak steering "+mode, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	channel := fs.String("channel", "", "target channel id (default: "+steeringChannelDefault+" #steering-guard, or $FAK_STEERING_CHANNEL)")
+	channel := fs.String("channel", "", "target channel id (default: "+steeringChannelDefault+" CI/CD reporting sink, or $FAK_STEERING_CHANNEL)")
 	token := fs.String("token", "", "override bot token (default: $FAK_SCOREBOARD_TOKEN / .env.slack.local)")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	scorecardJSON := fs.String("scorecard-json", "", "read the steerability payload from this file instead of running the scorecard (- for stdin)")
@@ -657,13 +658,13 @@ func postSteering(stdout, stderr io.Writer, up scoreboard.Update, channel, token
 }
 
 // resolveSteeringChannel applies: --channel, then the steering-specific
-// FAK_STEERING_CHANNEL, then the #steering-guard built-in default. It deliberately
-// does NOT fall through to the generic FAK_SCOREBOARD_CHANNEL — that env var is the
-// scoreboard CLI's default target (#scoreboard), so reusing it here would misroute
-// the steering surface to #scoreboard whenever an operator has sourced
-// .env.slack.local. Steering owns its own default, so the surface lands in
-// #steering-guard with zero config; redirect it only via --channel or
-// FAK_STEERING_CHANNEL.
+// FAK_STEERING_CHANNEL, then the CI/CD reporting sink built-in default
+// (steeringChannelDefault == scoreboard.CICDReportChannel). It deliberately does NOT
+// fall through to the generic FAK_SCOREBOARD_CHANNEL — that env var is the scoreboard
+// CLI's default target (#scoreboard), so reusing it here would misroute the steering
+// surface to #scoreboard whenever an operator has sourced .env.slack.local. Steering
+// lands on the reporting sink with zero config; redirect it only via --channel or
+// FAK_STEERING_CHANNEL (or the family-wide FAK_CICD_REPORT_CHANNEL).
 func resolveSteeringChannel(flagVal string) string {
 	if flagVal != "" {
 		return flagVal

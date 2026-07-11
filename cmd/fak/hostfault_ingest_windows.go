@@ -53,7 +53,9 @@ func gatherWinHostFaultRecords(since time.Duration, maxPerSource int) ([]hostfau
 	).Replace(hostFaultIngestPS)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Sprintf("Get-WinEvent: %v", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 )
 
@@ -160,12 +161,25 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	limit := fs.Int("limit", 20, "with --recent, cap sessions scanned after newest-first sorting")
 	asJSON := fs.Bool("json", false, "emit a machine-readable diagnosis")
 	failOn := fs.String("fail-on", "none", "exit 1 when verdict/posture reaches this threshold: none|loop|action|unguarded (action also fails LOOP)")
+	syncIssues := fs.Bool("sync-issues", false, "with --recent, fold LOOP classes into deduplicated GitHub issues (one per tool/output-digest class); output becomes the issue plan/result")
+	issueLive := fs.Bool("live", false, "with --sync-issues, create/update issues with gh (else dry-run plan)")
+	issueFetchExisting := fs.Bool("fetch-existing", false, "with --sync-issues, dry-run but query gh to classify create vs update")
+	issueRepo := fs.String("repo", "", "with --sync-issues, owner/repo for gh (default: current repo)")
+	issueMilestone := fs.String("milestone", dogfoodissues.DefaultMilestone, "with --sync-issues, milestone title to assign to created/updated issues")
+	issueLimit := fs.Int("issue-limit", 300, "with --sync-issues, existing-issue scan limit for live/fetch modes")
+	issueExistingJSON := fs.String("existing-json", "", "with --sync-issues, fixture list of existing gh issues for dry-run tests")
+	var issueLabels stringList
+	fs.Var(&issueLabels, "label", "with --sync-issues, extra label for newly-created issues; repeatable")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]")
+		fmt.Fprintln(stderr, "usage: fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded] [--sync-issues [--live]]")
 		fs.PrintDefaults()
 	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
+	}
+	if !*recent && (*syncIssues || *issueLive || *issueFetchExisting) {
+		fmt.Fprintln(stderr, "fak sessions codex-loop: --sync-issues/--live/--fetch-existing require --recent")
+		return 2
 	}
 	if *recent {
 		if strings.TrimSpace(*path) != "" || strings.TrimSpace(*sessionID) != "" {
@@ -176,6 +190,17 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		if err != nil {
 			fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
 			return 1
+		}
+		if *syncIssues {
+			return runCodexLoopSyncIssues(stdout, stderr, r, *asJSON, codexLoopIssueOptions{
+				Live:          *issueLive,
+				FetchExisting: *issueFetchExisting,
+				Repo:          strings.TrimSpace(*issueRepo),
+				Milestone:     strings.TrimSpace(*issueMilestone),
+				ExistingJSON:  strings.TrimSpace(*issueExistingJSON),
+				Limit:         *issueLimit,
+				Labels:        []string(issueLabels),
+			})
 		}
 		gateCode, ok := codexLoopFailOnRecentExitCode(r, *failOn)
 		if !ok {
@@ -1148,8 +1173,67 @@ func parseCodexLivelockNotice(ts, msg string) (codexLivelockNotice, bool) {
 	}, true
 }
 
+// codexProgressAckTools are host tools whose output is a constant, content-free
+// acknowledgment by design — update_plan always answers "Plan updated" no matter
+// which plan it recorded. For these a run of identical outputs across FULLY
+// DISTINCT arguments is forward progress (a new plan each turn), not a no-progress
+// loop. The same run from a real work tool (exec, shell_command) still signals a
+// loop, so this set is deliberately tiny and role-based rather than a blanket
+// "benign-looking output" heuristic. (#4278, Epic #4277)
+var codexProgressAckTools = map[string]bool{
+	"update_plan": true,
+}
+
+// codexOutcomeIsForwardProgress reports whether a repeated outcome is distinct
+// forward progress rather than a stuck repetition: a constant-ack progress tool
+// whose every call carried a distinct argument digest. A progress tool that
+// re-submits the SAME arguments (ArgsDigestCount < Count) is still thrashing and
+// stays a loop signal, as does any non-progress tool.
+func codexOutcomeIsForwardProgress(o codexRepeatedOutcome) bool {
+	if !codexProgressAckTools[strings.ToLower(strings.TrimSpace(o.Tool))] {
+		return false
+	}
+	// ArgsDigest never yields an empty digest (empty args canonicalize to "{}"),
+	// so ArgsDigestCount == Count means every call carried distinct arguments.
+	return o.Count > 0 && o.ArgsDigestCount >= o.Count
+}
+
+// codexTopLoopDrivingOutcome returns the highest-ranked repeated outcome that is a
+// genuine no-progress loop, skipping forward-progress progress-tool outcomes. The
+// bool is false when there is no loop-driving outcome (empty or all forward
+// progress).
+func codexTopLoopDrivingOutcome(outcomes []codexRepeatedOutcome) (codexRepeatedOutcome, bool) {
+	for _, o := range outcomes {
+		if codexOutcomeIsForwardProgress(o) {
+			continue
+		}
+		return o, true
+	}
+	return codexRepeatedOutcome{}, false
+}
+
+// applyCodexLoopForwardProgressNote annotates an OK diagnosis whose only repeated
+// outcomes were forward progress, so a reader is not puzzled by an OK verdict
+// sitting next to a populated repeated-outcome list (and the launch gate can name
+// why a high-traffic progress tool was not fused).
+func applyCodexLoopForwardProgressNote(d *codexLoopDiagnosis) {
+	var progress []string
+	for _, o := range d.RepeatedOutcomes {
+		if codexOutcomeIsForwardProgress(o) {
+			progress = append(progress, fmt.Sprintf("%s:%d", o.Tool, o.Count))
+		}
+	}
+	if len(progress) == 0 {
+		return
+	}
+	d.Reason = "repeated_progress_tool_no_loop"
+	d.NextAction = "no hard fuse needed: " + strings.Join(progress, ", ") +
+		" repeated a constant acknowledgment across fully distinct arguments (forward planning progress), not a no-progress loop"
+}
+
 func classifyCodexLoopDiagnosis(d *codexLoopDiagnosis) {
-	if len(d.RepeatedOutcomes) == 0 {
+	top, hasLoop := codexTopLoopDrivingOutcome(d.RepeatedOutcomes)
+	if !hasLoop {
 		if len(d.LivelockNotices) > 0 {
 			d.Verdict = "ACTION"
 			d.Reason = "livelock_advisory_seen"
@@ -1158,10 +1242,10 @@ func classifyCodexLoopDiagnosis(d *codexLoopDiagnosis) {
 			return
 		}
 		d.Verdict = "OK"
+		applyCodexLoopForwardProgressNote(d)
 		applyCodexLoopUnguardedGuidance(d)
 		return
 	}
-	top := d.RepeatedOutcomes[0]
 	d.Verdict = "LOOP"
 	d.Reason = "repeated_tool_output"
 	d.NextAction = "stop re-calling the same tool after an invariant failure; continue from the existing state or add a hard fuse for repeated admitted failures"

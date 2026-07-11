@@ -361,6 +361,15 @@ func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
 			// installed-but-stopped is auto-restarted. Install with `fak cron emit --target
 			// taskscheduler --label FleetStaleWorkGarden ...` (see docs/cli-reference.md).
 			{ID: "fleet-stale-work-garden", Manager: "taskscheduler", Unit: "FleetStaleWorkGarden"},
+			// The process-resource guard: the standing reaper for runaway/orphan process
+			// classes the other watchdogs miss (a thread/handle/working-set runaway, an
+			// orphaned dos_mcp.server helper, a single-threaded core pin). It already
+			// survives reboot while installed (persisted repeating trigger), but without
+			// autoheal membership a deleted task stayed gone until an operator noticed
+			// (#3324). Same schtasks /Run restart path as its siblings: not-installed is a
+			// no-op, installed-but-stopped is auto-restarted. Install with
+			// tools/register_proc_resource_guard.ps1 (TaskName FleetProcResourceGuard).
+			{ID: "fleet-proc-resource-guard", Manager: "taskscheduler", Unit: "FleetProcResourceGuard"},
 		}
 	case "darwin":
 		home, _ := os.UserHomeDir()

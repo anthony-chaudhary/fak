@@ -505,6 +505,11 @@ func main() {
 		cmdAntipatternScorecard(os.Args[2:])
 	case "maturity":
 		cmdMaturity(os.Args[2:])
+	case "balance":
+		// The night-balance readout (#3128): resume recovery-vs-stranding and
+		// gardening-vs-throughput folded side by side; exit non-zero on an
+		// underwater recovery budget so a night gate reading $? sees it.
+		cmdBalance(os.Args[2:])
 	case "token-defaults-scorecard":
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":

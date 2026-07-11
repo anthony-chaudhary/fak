@@ -330,10 +330,12 @@ func (c *sessionClient) paceVerb(stdout, stderr io.Writer, asJSON bool, id strin
 }
 
 // envelopeVerb parses issue #1573's one-string managed-context budget envelope and
-// applies the axes supported by the existing gateway control API: budget and pace.
-// Wall-clock, spend, and throughput remain visible in the parsed report so the caller
-// can inspect the deterministic contract even when this gateway build has no direct
-// control route for those axes.
+// applies EVERY stated axis through the gateway control API (#2762): budget —
+// including the spend ceiling, which rides the budget wire — and pace, then the
+// wall-clock limit ("wall") and the throughput rates ("throughput") through their
+// own control verbs. An unstated axis is never written (no verb is issued for it),
+// so applying an envelope that names only token budgets is byte-identical to the
+// pre-#2762 two-verb apply.
 func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, spec string, ifRev uint64, inspectOnly bool) int {
 	env, err := session.ParseBudgetEnvelope(spec)
 	if err != nil {
@@ -345,10 +347,13 @@ func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, 
 		return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)
 	}
 
+	sb := env.SessionBudget()
 	gb := gateway.SessionBudget{
-		TurnsLeft:         env.SessionBudget().TurnsLeft,
-		TokensLeft:        env.SessionBudget().TokensLeft,
-		ContextTokensLeft: env.SessionBudget().ContextTokensLeft,
+		TurnsLeft:           sb.TurnsLeft,
+		TokensLeft:          sb.TokensLeft,
+		ContextTokensLeft:   sb.ContextTokensLeft,
+		SpendMicroCentsLeft: sb.SpendMicroCentsLeft,
+		SpendMicroCentsCap:  sb.SpendMicroCentsCap,
 	}
 	st, err := c.control(id, "budget", gateway.SessionControlRequest{Budget: &gb, IfRev: ifRev})
 	if err != nil {
@@ -367,6 +372,31 @@ func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, 
 			return 1
 		}
 		rep.Applied = append(rep.Applied, "pace")
+		rep.State = &st
+	}
+
+	if env.WallClockLimitNanos > 0 {
+		gw := gateway.SessionWall{LimitNanos: env.WallClockLimitNanos}
+		st, err = c.control(id, "wall", gateway.SessionControlRequest{Wall: &gw, IfRev: st.Rev})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak session envelope: apply wall: %v\n", err)
+			return 1
+		}
+		rep.Applied = append(rep.Applied, "wall")
+		rep.State = &st
+	}
+
+	if !env.Throughput.IsZero() {
+		gt := gateway.SessionThroughput{
+			ExpectedTokensPerSec: env.Throughput.ExpectedTokensPerSec,
+			MinTokensPerSec:      env.Throughput.MinTokensPerSec,
+		}
+		st, err = c.control(id, "throughput", gateway.SessionControlRequest{Throughput: &gt, IfRev: st.Rev})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak session envelope: apply throughput: %v\n", err)
+			return 1
+		}
+		rep.Applied = append(rep.Applied, "throughput")
 		rep.State = &st
 	}
 	return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)
@@ -391,28 +421,31 @@ func (c *sessionClient) renderContextValue(stdout, stderr io.Writer, asJSON bool
 
 // mergeBudget fills the axes the operator did not name from the session's current
 // state and returns the rev to fence the write with. code != 0 is an early exit (the
-// observe failed); the caller returns it.
+// observe failed); the caller returns it. The observe is unconditional: the budget
+// write REPLACES the whole Budget value, so the axes this verb has no flag for —
+// the spend ceiling (#2762) — must be carried forward from the live state or a
+// `fak session budget --turns N` would silently clear a live dollar cap.
 func (c *sessionClient) mergeBudget(stderr io.Writer, id string, turns, tokens, contextTokens int, ifRev uint64) (gateway.SessionBudget, uint64, int) {
 	b := gateway.SessionBudget{TurnsLeft: turns, TokensLeft: tokens, ContextTokensLeft: contextTokens}
 	rev := ifRev
-	if turns == sessionFlagUnset || tokens == sessionFlagUnset || contextTokens == sessionFlagUnset || ifRev == 0 {
-		cur, err := c.observe(id)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak session budget: read current state: %v\n", err)
-			return b, 0, 1
-		}
-		if turns == sessionFlagUnset {
-			b.TurnsLeft = cur.Budget.TurnsLeft
-		}
-		if tokens == sessionFlagUnset {
-			b.TokensLeft = cur.Budget.TokensLeft
-		}
-		if contextTokens == sessionFlagUnset {
-			b.ContextTokensLeft = cur.Budget.ContextTokensLeft
-		}
-		if ifRev == 0 {
-			rev = cur.Rev // fence the read-modify-write so a concurrent change 409s
-		}
+	cur, err := c.observe(id)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session budget: read current state: %v\n", err)
+		return b, 0, 1
+	}
+	b.SpendMicroCentsLeft = cur.Budget.SpendMicroCentsLeft
+	b.SpendMicroCentsCap = cur.Budget.SpendMicroCentsCap
+	if turns == sessionFlagUnset {
+		b.TurnsLeft = cur.Budget.TurnsLeft
+	}
+	if tokens == sessionFlagUnset {
+		b.TokensLeft = cur.Budget.TokensLeft
+	}
+	if contextTokens == sessionFlagUnset {
+		b.ContextTokensLeft = cur.Budget.ContextTokensLeft
+	}
+	if ifRev == 0 {
+		rev = cur.Rev // fence the read-modify-write so a concurrent change 409s
 	}
 	return b, rev, 0
 }

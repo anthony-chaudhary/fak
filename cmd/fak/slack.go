@@ -69,7 +69,7 @@ type slackSurface struct {
 // wiring a channel later (set the var or add a ChannelDefault) promotes them automatically.
 var slackSurfaces = []slackSurface{
 	{"scoreboard", "scorecard / score / run-event status", "FAK_SCOREBOARD_TOKEN", "FAK_SCOREBOARD_CHANNEL", "", false},
-	{"product", "product direction / persona findings", "", "FAK_PRODUCT_CHANNEL", "", false},
+	{"product", "product direction / persona findings", "", "FAK_PRODUCT_CHANNEL", scoreboard.CICDReportChannel, false},
 	{"grafana", "grafana snapshots + dashboard/debug links", "FAK_GRAFANA_TOKEN", "FAK_GRAFANA_CHANNEL", grafanapost.ChannelDefault, false},
 	{"alerts", "Prometheus/Alertmanager alerts (fak slack alert receiver)", "", alertsChannelEnv, grafanapost.ChannelDefault, false},
 	{"blockers", "fleet blockers (status vs operator page)", "FAK_BLOCKERS_TOKEN", "FAK_BLOCKERS_CHANNEL", blockerpost.ChannelDefault, false},
@@ -77,7 +77,7 @@ var slackSurfaces = []slackSurface{
 	{"bench", "benchmark rollups / run-requests", "FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL", benchpost.ChannelDefault, false},
 	{"dispatch", "background code-dispatch results", "FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "", false},
 	{"dojo", "dojo rollups / trends", "FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL", dojopost.ChannelDefault, false},
-	{"backlog", "issue triage + bottleneck digest", "", "FAK_BACKLOG_CHANNEL", "", false},
+	{"backlog", "issue triage + bottleneck digest", "", "FAK_BACKLOG_CHANNEL", scoreboard.CICDReportChannel, false},
 	{"marketing", "marketing updates feed", "FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL", "", true},
 	{"news", "external industry / SOTA / OSS research updates", "", "FAK_NEWS_CHANNEL", "", false},
 	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", nodeusagepost.ChannelDefault, false},

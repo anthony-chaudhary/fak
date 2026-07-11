@@ -1082,7 +1082,7 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	now := time.Now()
 	live, _, liveErr := store.Live(context.Background(), now)
 	if liveErr != nil {
-		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": liveErr.Error(), "tree": tree}
+		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": liveErr.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind}
 	}
 	// One admission contract for every surface (internal/regionadmit): the same
 	// decision `fak loop drive` and `fak loop region` run — tree geometry PLUS
@@ -1092,6 +1092,16 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	if taxErr != nil {
 		tax = regionadmit.Taxonomy{}
 	}
+	// Structured lane fields for the refusal ledger (#4322): the canonical lane,
+	// its kind (a refs/fak/locks lease is a tree-scoped CLUSTER lease — exactly
+	// leaseref's arbiter projection), and its serialization mode. Stamped onto
+	// every result map so per-lane collision rate and the WIP-vs-lease split are
+	// computable straight from loops.jsonl instead of being regex-scraped out of
+	// the summary prose. Additive: existing readers of the lease map are unaffected.
+	laneMode := "shared"
+	if tax.Exclusive[lane] {
+		laneMode = "exclusive"
+	}
 	// SelfID stays empty on purpose: a live lease under this very id (a previous
 	// worker on this lane, still running) must refuse here exactly as it always
 	// has — with a pinned FAK_LEASE_OWNER the fence would otherwise read the new
@@ -1100,14 +1110,17 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	dec := regionadmit.Decide(req, regionLeases(live), tax)
 	if !dec.Admit {
 		return map[string]any{
-			"acquired": false,
-			"refused":  true,
-			"id":       id,
-			"holder":   holder,
-			"reason":   dec.Reason,
-			"rung":     dec.Rung,
-			"detail":   dec.Detail,
-			"tree":     tree,
+			"acquired":  false,
+			"refused":   true,
+			"id":        id,
+			"holder":    holder,
+			"reason":    dec.Reason,
+			"rung":      dec.Rung,
+			"detail":    dec.Detail,
+			"tree":      tree,
+			"lane":      lane,
+			"lane_kind": leaseref.ArbiterLaneKind,
+			"mode":      laneMode,
 		}
 	}
 	// Record the tree the decision was MADE on: with an empty requested tree

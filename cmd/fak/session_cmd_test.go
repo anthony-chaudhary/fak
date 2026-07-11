@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
@@ -330,6 +331,58 @@ func TestSessionCLIBudgetEnvelopeAppliesBudgetAndPace(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("envelope output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestSessionCLIBudgetEnvelopeAppliesAllAxes is the #2762 control-route witness:
+// an envelope stating every axis issues one control verb per axis — budget
+// (with the spend ceiling riding the budget wire), pace, wall, throughput — so
+// no stated axis is parsed-and-dropped anymore.
+func TestSessionCLIBudgetEnvelopeAppliesAllAxes(t *testing.T) {
+	g := &stubGateway{curBudget: gateway.SessionBudget{TurnsLeft: -1, TokensLeft: -1}, curRev: 8}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	out, errb, code := runSessionAt(t, ts.URL, "envelope", "sess-env",
+		"turns=4,tokens=900,wall=30m,spend=$2.50,throughput=20/s,min-tps=5/s,max-tokens=128,gap=75ms")
+	if code != 0 {
+		t.Fatalf("envelope apply exit = %d (%s)", code, errb)
+	}
+	if len(g.verbs) != 4 || g.verbs[0] != "budget" || g.verbs[1] != "pace" || g.verbs[2] != "wall" || g.verbs[3] != "throughput" {
+		t.Fatalf("envelope verbs = %v, want budget,pace,wall,throughput", g.verbs)
+	}
+	if b := g.bodies[0].Budget; b == nil || b.SpendMicroCentsLeft != 250_000_000 || b.SpendMicroCentsCap != 250_000_000 {
+		t.Fatalf("budget body = %+v, want spend=$2.50 as 250,000,000 micro-cents left+cap", b)
+	}
+	if w := g.bodies[2].Wall; w == nil || w.LimitNanos != int64(30*time.Minute) {
+		t.Fatalf("wall body = %+v, want limit_nanos=30m", w)
+	}
+	if tp := g.bodies[3].Throughput; tp == nil || tp.ExpectedTokensPerSec != 20 || tp.MinTokensPerSec != 5 {
+		t.Fatalf("throughput body = %+v, want expected=20 min=5", tp)
+	}
+	if !strings.Contains(out, "applied: budget,pace,wall,throughput") {
+		t.Fatalf("envelope output missing full applied list:\n%s", out)
+	}
+}
+
+// TestSessionCLIBudgetMergePreservesSpendCeiling: the partial budget
+// read-modify-write must carry a live spend ceiling forward (#2762) — before the
+// spend axis rode the budget wire, `fak session budget --turns N` silently
+// cleared a launch-set dollar cap.
+func TestSessionCLIBudgetMergePreservesSpendCeiling(t *testing.T) {
+	g := &stubGateway{curBudget: gateway.SessionBudget{
+		TurnsLeft: 7, TokensLeft: -1, SpendMicroCentsLeft: 900, SpendMicroCentsCap: 1000,
+	}, curRev: 5}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	_, errb, code := runSessionAt(t, ts.URL, "budget", "sess-2", "--turns", "3")
+	if code != 0 {
+		t.Fatalf("budget exit = %d (%s)", code, errb)
+	}
+	b := g.lastBody.Budget
+	if b == nil || b.TurnsLeft != 3 || b.SpendMicroCentsLeft != 900 || b.SpendMicroCentsCap != 1000 {
+		t.Fatalf("budget merge = %+v, want turns=3 with spend 900/1000 preserved", b)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/issuestriage"
 	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
@@ -296,7 +297,7 @@ func classifyTUIIssue(issue tuiIssue, asOf time.Time, dups map[int]int) tuiIssue
 
 	score := tuiPriorityWeights[prio]
 	if score == 0 {
-		score = 60
+		score = dispatchtick.PriorityWeightDefault
 	}
 	if (prio == "priority/P0" || prio == "priority/P1") && !inProgress && !assigned {
 		score += 300

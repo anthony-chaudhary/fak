@@ -1900,9 +1900,24 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 		return dispatchtick.TreeCheck{}
 	}
 	// Missing toolchain/probe infrastructure fails open; a real compiler diagnostic
-	// names a package/file and is the poison witness.
-	if errors.Is(err, exec.ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "executable file not found") {
-		return dispatchtick.TreeCheck{Error: err.Error()}
+	// names a package/file and is the poison witness. A probe root without a Go
+	// module (a bare temp dir, a misconfigured root) is infrastructure-missing, not
+	// a red tree, so it must fail open too -- otherwise the #3583 poison gate freezes
+	// the fleet over a moduleless probe root, and every dispatch test that ticks a
+	// temp workspace refuses with TREE_POISONED. `go build` names the missing module
+	// two ways: "go.mod file not found ..." in a bare dir, and "cannot find main
+	// module, but found .git/config ..." once the root is git-init'd (as the tick
+	// test harness leaves it). Both land in combined output, not err.Error().
+	lowered := strings.ToLower(err.Error() + "\n" + out)
+	if errors.Is(err, exec.ErrNotFound) ||
+		strings.Contains(lowered, "executable file not found") ||
+		strings.Contains(lowered, "go.mod file not found") ||
+		strings.Contains(lowered, "cannot find main module") {
+		detail := strings.TrimSpace(out)
+		if detail == "" {
+			detail = err.Error()
+		}
+		return dispatchtick.TreeCheck{Error: detail}
 	}
 	line := ""
 	for _, candidate := range strings.Split(strings.TrimSpace(out), "\n") {
