@@ -27,6 +27,7 @@ func dispatchFetchProjectFieldsGH(root string) map[int]dispatchtick.ProjectIssue
 	owner := "anthony-chaudhary"
 	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "-f", "query="+query, "-F", "owner="+owner, "-F", "number="+strconv.Itoa(n))
 	cmd.Dir = root
+	configureDispatchSpawn(cmd)
 	raw, err := cmd.Output()
 	if err != nil {
 		return nil

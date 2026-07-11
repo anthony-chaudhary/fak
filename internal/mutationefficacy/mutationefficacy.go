@@ -38,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -258,6 +259,7 @@ func GoTestRunner(timeout time.Duration) TestRunner {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "go", "test", "-count=1", ".")
 		cmd.Dir = pkgDir
+		windowgate.ConfigureBackgroundCommand(cmd)
 		return cmd.Run() == nil
 	}
 }

@@ -19,6 +19,7 @@ var scoreboardGitWorktreeList = func(root string) (string, error) {
 	c, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(c, "git", "-C", root, "worktree", "list", "--porcelain")
+	configureDispatchSpawn(cmd)
 	b, err := cmd.Output()
 	return string(b), err
 }

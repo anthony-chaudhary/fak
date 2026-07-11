@@ -39,6 +39,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Schema is the control-pane schema id (unchanged from the Python tool).
@@ -1200,6 +1202,7 @@ func buildPayload(workspace string, kpis []KPI, facts map[string]int, errText st
 func gitLines(args []string, root string) []string {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil

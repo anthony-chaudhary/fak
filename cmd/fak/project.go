@@ -353,6 +353,7 @@ func fetchProjectReportItems(root string, number int) ([]projectreport.Item, boo
 	owner := "anthony-chaudhary"
 	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "-f", "query="+query, "-F", "owner="+owner, "-F", "number="+strconv.Itoa(number))
 	cmd.Dir = root
+	configureDispatchSpawn(cmd)
 	raw, err := cmd.Output()
 	if err != nil {
 		return nil, false
@@ -415,6 +416,7 @@ func parseProjectReportItems(raw []byte) ([]projectreport.Item, bool) {
 func projectHeadCommit(root string) string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = root
+	configureDispatchSpawn(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
