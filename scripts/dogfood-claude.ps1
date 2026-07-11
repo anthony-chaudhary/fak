@@ -547,11 +547,29 @@ if ($Mode -eq 'install') {
   if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Force $BinDir | Out-Null }
   if (-not (Test-Path $BinDir)) { Die "could not create bin dir: $BinDir (set FAK_DOGFOOD_BINDIR)" }
 
-  # Build + copy the repo CLI as fak.exe.
+  # Build + install the repo CLI as fak.exe, LOCK-SAFELY. A plain `Copy-Item -Force` over
+  # an already-running fak.exe fails on Windows (the PE is locked while mapped), which
+  # stranded the fresh build as a dangling `.new` and left the on-PATH copy stale until a
+  # hand-run swap. Windows PERMITS *renaming* a running image (only overwrite/delete is
+  # blocked), so swap by rename: stage the fresh build beside the target, rename the
+  # current exe aside under a timestamped name (never collides with a still-mapped prior
+  # backup), move the fresh one into place, then best-effort reclaim the parked old copy
+  # (a live process may still map it; it is reclaimed on the next --install). This is what
+  # makes `--install` a dependable one-command local-bin refresh that always completes.
   Log "building fak -> $Bin"
   Build-FakBinary -out $Bin
-  Copy-Item -Force $Bin (Join-Path $BinDir 'fak.exe')
-  Log "installed: $(Join-Path $BinDir 'fak.exe')  (copied; re-run --install to refresh)"
+  $dest = Join-Path $BinDir 'fak.exe'
+  $new  = "$dest.new"
+  Copy-Item -Force $Bin $new
+  if (Test-Path $dest) {
+    $old = "$dest.old-$(Get-Date -Format yyyyMMddHHmmss)"
+    Move-Item -Force $dest $old
+    Move-Item -Force $new  $dest
+    Remove-Item -Force $old -ErrorAction SilentlyContinue
+  } else {
+    Move-Item -Force $new $dest
+  }
+  Log "installed: $dest  (lock-safe swap; refreshes even while fak.exe is running)"
 
   # Write a .cmd shim per graduated launcher (a preset shim pins FAK_DOGFOOD_PRESET for
   # its own cmd.exe instance only; the generic fak-dogfood shim pins nothing). Opt-in
