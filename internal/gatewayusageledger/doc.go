@@ -15,6 +15,23 @@
 // file back into a slice, and FoldTrend derives a simple before/after summary a
 // caller can use to see counters trending across gateway restarts.
 //
+// Row idempotency (the ledger-family convention, #2507). The O_APPEND write path
+// has no cross-process serialization, so a retried exit flush, a crash-then-rerun
+// teardown, or a periodic and an exit flush landing in the same millisecond can
+// write two rows for ONE snapshot. To keep trend reports (and, via the dedup census
+// #2503, savings claims) from double-counting, every NewRow row carries a
+// deterministic RowKey hashed over its identity + payload (schema, session_id, pid,
+// unix_millis, and the counter snapshot — NOT the write-time labels, so a retried or
+// periodic-vs-exit re-emission of one snapshot shares a key while two genuinely
+// distinct snapshots do not). Readers dedupe by key at FOLD time (FoldTrend, via the
+// exported DedupeByKey), keeping the first occurrence and reporting the collapse in
+// Trend.RowsDedupedAtFold. The write path stays a pure append and the read path a
+// pure parse; only the fold collapses duplicates. Dedupe is tolerant of legacy
+// keyless rows — a row with an empty RowKey is never treated as a duplicate, so
+// historical files (out of scope to rewrite) fold exactly as before. This RowKey +
+// fold-time-dedupe discipline is the convention for the whole append-only nightrun
+// ledger family; internal/cachevalueledger carries the same key and fold.
+//
 // Writers never truncate, so the file grows one row per session (plus opt-in
 // periodic snapshots) for the whole fleet lifetime. The sanctioned bound is Cut
 // (#3490, following the internal/journal cut discipline of #2457): an

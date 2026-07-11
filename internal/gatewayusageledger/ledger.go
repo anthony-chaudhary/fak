@@ -2,8 +2,10 @@ package gatewayusageledger
 
 import (
 	"encoding/json"
+	"hash/fnv"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -146,7 +148,17 @@ type Provenance struct {
 // folding rows into a trend can choose to fold only exit rows, or watch periodic
 // rows for a crash-before-exit trail.
 type Row struct {
-	Schema      string      `json:"schema"`
+	Schema string `json:"schema"`
+	// RowKey is a deterministic idempotency key over the row's IDENTITY + PAYLOAD
+	// (schema, session_id, pid, unix_millis, and the counter snapshot) — see
+	// computeRowKey. It deliberately excludes the write-time labels (Kind, Context,
+	// uptime, generated_at) so a retried exit flush, or a periodic and an exit flush
+	// of ONE snapshot landing in the same millisecond, collapse to one row at fold,
+	// while two genuinely distinct snapshots (any counter differs) both survive.
+	// Stamped by NewRow; empty on legacy pre-key rows (which fold as-is, never treated
+	// as duplicates) and on synthetic carryforward rows. omitempty keeps a keyless row
+	// byte-identical to the pre-key schema.
+	RowKey      string      `json:"row_key,omitempty"`
 	Kind        string      `json:"kind"`              // "exit" | "periodic" | KindCarryforward
 	SessionType string      `json:"session_type"`      // "serve" | "guard"
 	Context     string      `json:"context,omitempty"` // free-form label, e.g. transport (http/stdio)
@@ -175,19 +187,53 @@ func NewRow(kind, sessionType, context, sessionID string, uptime time.Duration, 
 	if c.ByReason == nil {
 		c.ByReason = map[string]uint64{}
 	}
+	pid := os.Getpid()
+	unixMillis := now.UnixMilli()
 	return Row{
 		Schema:      Schema,
+		RowKey:      computeRowKey(Schema, sessionID, pid, unixMillis, c),
 		Kind:        kind,
 		SessionType: sessionType,
 		Context:     context,
 		SessionID:   sessionID,
-		PID:         os.Getpid(),
-		UnixMillis:  now.UnixMilli(),
+		PID:         pid,
+		UnixMillis:  unixMillis,
 		UptimeSecs:  uptime.Seconds(),
 		Provenance:  prov,
 		Counters:    c,
 		GeneratedAt: now.UTC().Format(time.RFC3339),
 	}
+}
+
+// computeRowKey derives the deterministic idempotency key stamped into RowKey. It
+// hashes the row's IDENTITY (schema, session_id, pid, unix_millis) together with its
+// PAYLOAD — the counter snapshot, JSON-serialized (json.Marshal orders struct fields
+// deterministically and sorts map keys, so the bytes are stable). Covering the payload
+// is load-bearing: two genuinely distinct snapshots in the same millisecond differ in
+// at least one counter, so they hash differently and both survive the fold; only a true
+// re-emission of the same snapshot (identical counters) collapses. Write-time-only
+// labels (Kind, Context, uptime, generated_at) are excluded so a periodic-vs-exit or a
+// retried flush of ONE snapshot yields the SAME key. A payload that cannot be marshaled
+// (never expected for Counters) yields "" — the row stays keyless and folds as legacy
+// rather than carrying a bogus key that could collide with a real one.
+func computeRowKey(schema, sessionID string, pid int, unixMillis int64, c Counters) string {
+	payload, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	h := fnv.New64a()
+	// Length-prefix-free but NUL-delimited: the identity fields never contain a NUL,
+	// and the payload is appended last, so no two distinct tuples share a serialization.
+	_, _ = h.Write([]byte(schema))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(sessionID))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strconv.Itoa(pid)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strconv.FormatInt(unixMillis, 10)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(payload)
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // Append serializes row and appends it (plus a trailing newline) to path, creating
@@ -227,8 +273,14 @@ func ReadLedgerFile(path string) []Row {
 // surface is a follow-on, not required here.
 type Trend struct {
 	Sessions int `json:"sessions"`
-	First    Row `json:"first"`
-	Last     Row `json:"last"`
+	// RowsDedupedAtFold counts the rows collapsed by RowKey before this fold — the
+	// retried-append / same-millisecond double-flush rows the fold refused to
+	// double-count. Zero on a legacy keyless corpus (keyless rows never dedupe). It
+	// is the rows-deduped-at-fold signal the dedup census (#2503) reads, so a
+	// double-counted row can never inflate a savings claim.
+	RowsDedupedAtFold int `json:"rows_deduped_at_fold"`
+	First             Row `json:"first"`
+	Last              Row `json:"last"`
 
 	DeltaInputTokens        int64 `json:"delta_input_tokens"`
 	DeltaOutputTokens       int64 `json:"delta_output_tokens"`
@@ -238,16 +290,45 @@ type Trend struct {
 	DeltaDenies             int64 `json:"delta_denies"`
 }
 
+// DedupeByKey collapses rows that repeat an earlier row's non-empty RowKey,
+// preserving input order and keeping the FIRST occurrence. Rows with an empty RowKey
+// — legacy pre-key files and synthetic carryforwards — are NEVER treated as
+// duplicates (two keyless rows cannot be proven to describe one snapshot), so they
+// always pass through, which is what keeps a legacy keyless file folding unchanged.
+// It returns the deduped rows and the count dropped — the rows-deduped-at-fold signal
+// the dedup census (#2503) reads.
+func DedupeByKey(rows []Row) (deduped []Row, dropped int) {
+	seen := make(map[string]struct{}, len(rows))
+	out := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		if r.RowKey != "" {
+			if _, ok := seen[r.RowKey]; ok {
+				dropped++
+				continue
+			}
+			seen[r.RowKey] = struct{}{}
+		}
+		out = append(out, r)
+	}
+	return out, dropped
+}
+
 // FoldTrend folds rows (already read, e.g. via ReadLedgerFile) into a Trend. It is
 // pure and deterministic. ok is false when fewer than 2 rows are given — a single
 // row (or none) has nothing to trend against, matching the acceptance criteria's
 // ">=2 rows" framing.
+//
+// Rows are first collapsed by RowKey (DedupeByKey): a retried or same-millisecond
+// double-flush of ONE snapshot folds to a single row so the trend never
+// double-counts it, while legacy keyless rows pass through unchanged. The number
+// collapsed is reported as Trend.RowsDedupedAtFold.
 func FoldTrend(rows []Row) (Trend, bool) {
+	deduped, dropped := DedupeByKey(rows)
 	// Carryforward rows are synthetic sums, not session snapshots — trending
 	// oldest-vs-newest against one would compare a whole folded era's total to a
 	// single session. Skip them; the trend stays over real rows only.
-	real := make([]Row, 0, len(rows))
-	for _, r := range rows {
+	real := make([]Row, 0, len(deduped))
+	for _, r := range deduped {
 		if r.Kind == KindCarryforward {
 			continue
 		}
@@ -261,6 +342,7 @@ func FoldTrend(rows []Row) (Trend, bool) {
 	first, last := sorted[0], sorted[len(sorted)-1]
 	t := Trend{
 		Sessions:                len(sorted),
+		RowsDedupedAtFold:       dropped,
 		First:                   first,
 		Last:                    last,
 		DeltaInputTokens:        int64(last.Counters.InputTokens) - int64(first.Counters.InputTokens),
