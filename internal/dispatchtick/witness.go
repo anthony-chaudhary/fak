@@ -32,6 +32,37 @@ const (
 // non-forgeable keep-bit the closure audit grades against.
 const WitnessOK = "diff-witnessed"
 
+// Test-run claim verdicts (#3838) — the additive rung that binds a "done" claim to a
+// green test run of the resolving commit's changed package, not just its diff shape.
+// diff-witnessed proves the diff did the KIND of thing the subject claimed; it says
+// NOTHING about whether that change passes its own tests. GREEN = affected tests ran
+// and passed; RED = they ran and failed (a diff-witnessed commit can still be RED —
+// that is exactly the gap this rung closes); UNRUN = no test was run (no resolving
+// commit, no test-bearing changed package, the runner is disabled, or it faulted).
+// UNRUN is a VALID, surfaced state — the rung never fabricates a pass it did not see.
+const (
+	ClaimTestGreen = "CLAIM_TEST_GREEN"
+	ClaimTestRed   = "CLAIM_TEST_RED"
+	ClaimTestUnrun = "CLAIM_TEST_UNRUN"
+)
+
+// GradeTestRun folds an affected-package test run into the #3838 test-run claim. It is
+// the pure grader the shell's runner and the `verify` skill both bind through: `ran`
+// is whether a test actually executed (false -> UNRUN, so a runner that never fired,
+// found no test-bearing package, or faulted can NEVER masquerade as a pass), and
+// `passed` is its exit verdict (only meaningful when ran). Fail-safe by construction:
+// the only path to GREEN is ran && passed.
+func GradeTestRun(ran, passed bool) string {
+	switch {
+	case !ran:
+		return ClaimTestUnrun
+	case passed:
+		return ClaimTestGreen
+	default:
+		return ClaimTestRed
+	}
+}
+
 // Why a FINISHED worker landed no resolving commit (the .witness `reason` field).
 //
 // The model-switchable trio (usage_cap / model_unknown / rate_limit) is distinct from
@@ -88,6 +119,12 @@ type WitnessRecord struct {
 	// keys off this + Reason: a model-switchable no-commit exit whose ladder head was
 	// Model advances to the NEXT chain model instead of re-storming the same walled one.
 	Model string
+	// TestClaim is the #3838 test-run rung: CLAIM_TEST_GREEN / CLAIM_TEST_RED /
+	// CLAIM_TEST_UNRUN for the resolving commit's affected-package tests, recorded
+	// ALONGSIDE (never replacing) the diff-shape Verdict/Witness. Empty on a no-commit
+	// slot (no resolving commit -> no test rung at all), so a no-commit sidecar stays
+	// byte-identical to before this rung.
+	TestClaim string
 }
 
 // Map renders the record in the exact sidecar shape the Python dispatcher writes:
@@ -119,6 +156,12 @@ func (r WitnessRecord) Map() map[string]any {
 	// model-switch program) — a floor worker (model=="") writes no model key at all.
 	if r.Model != "" {
 		out["model"] = r.Model
+	}
+	// The #3838 test-run rung is emitted ONLY when a test claim was graded (a resolving
+	// commit was found and the runner produced GREEN/RED/UNRUN). A no-commit slot leaves
+	// it empty, so its sidecar stays byte-identical to before this rung.
+	if r.TestClaim != "" {
+		out["test_claim"] = r.TestClaim
 	}
 	return out
 }

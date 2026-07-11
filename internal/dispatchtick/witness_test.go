@@ -44,6 +44,47 @@ func TestClassifyNoCommitReason(t *testing.T) {
 	}
 }
 
+// TestGradeTestRun pins the #3838 test-run grader: the ONLY path to GREEN is a test
+// that actually ran AND passed. A runner that never fired (ran=false) grades UNRUN
+// regardless of the passed bit, so a disabled/faulted/no-test-package run can never
+// masquerade as a pass; a run that fired and failed grades RED.
+func TestGradeTestRun(t *testing.T) {
+	cases := []struct {
+		ran    bool
+		passed bool
+		want   string
+	}{
+		{true, true, ClaimTestGreen},
+		{true, false, ClaimTestRed},
+		{false, false, ClaimTestUnrun},
+		{false, true, ClaimTestUnrun}, // never-ran outranks a stale passed bit
+	}
+	for _, tc := range cases {
+		if got := GradeTestRun(tc.ran, tc.passed); got != tc.want {
+			t.Errorf("GradeTestRun(ran=%v, passed=%v) = %q, want %q", tc.ran, tc.passed, got, tc.want)
+		}
+	}
+}
+
+// TestWitnessRecordMapEmitsTestClaim pins the #3838 sidecar rung: a graded record with
+// a TestClaim emits a test_claim key ALONGSIDE the diff-shape verdict/witness, while a
+// record with no test claim (a no-commit slot) omits the key entirely, so its sidecar
+// stays byte-identical to before this rung.
+func TestWitnessRecordMapEmitsTestClaim(t *testing.T) {
+	green := WitnessRecord{Issue: 3838, SHA: "abc123", Claim: ClaimWitnessed, Verdict: "OK", Witness: WitnessOK, TestClaim: ClaimTestGreen}
+	if gm := green.Map(); gm["test_claim"] != ClaimTestGreen || gm["witness"] != WitnessOK {
+		t.Fatalf("green map = %#v, want test_claim GREEN alongside diff-witness", gm)
+	}
+	red := WitnessRecord{Issue: 3839, SHA: "def456", Claim: ClaimWitnessed, Verdict: "OK", Witness: WitnessOK, TestClaim: ClaimTestRed}
+	if rm := red.Map(); rm["test_claim"] != ClaimTestRed {
+		t.Fatalf("red map = %#v, want test_claim RED even on a diff-witnessed commit", rm)
+	}
+	bare := WitnessRecord{Issue: 3840, Claim: ClaimNoCommit, Reason: NoCommitSelfModify}
+	if _, ok := bare.Map()["test_claim"]; ok {
+		t.Fatalf("no-commit record must omit test_claim: %#v", bare.Map())
+	}
+}
+
 // TestHeldNoCommitIssuesHoldsOnlyReblockableGuardRefusals pins the pick-held-invariant
 // rung (#1396): only the two structural guard refusals (self_modify / policy_block)
 // hold their issue -- an auth wall re-probes after the time cooldown, a banner no-op

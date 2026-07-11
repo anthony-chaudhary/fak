@@ -36,8 +36,16 @@ func PlanHostEnrollment(lane string, issue int, leaseID string, tree []string) H
 	if id == "" {
 		id = "resolve-" + laneToken(lane)
 	}
+	// The agent id is the lease id suffixed with the issue -- but a NARROWED lease id
+	// already ends in "-<issue>" (the per-issue form wave/tick narrowing emits), so
+	// appending again would double it (resolve-docs-12-12). Append only when absent,
+	// keeping the id idempotent across the coarse and narrowed lease grammars.
+	agentID := fmt.Sprintf("%s-%d", id, issue)
+	if suffix := fmt.Sprintf("-%d", issue); strings.HasSuffix(id, suffix) {
+		agentID = id
+	}
 	return HostEnrollment{
-		AgentID: fmt.Sprintf("%s-%d", id, issue),
+		AgentID: agentID,
 		Lane:    lane,
 		Issue:   issue,
 		LeaseID: leaseID,

@@ -14,6 +14,12 @@ func TestPlanHostEnrollmentCopiesLeaseTreeAndDerivesStableID(t *testing.T) {
 	if plan.AgentID != "resolve-docs-12" {
 		t.Fatalf("agent id = %q, want resolve-docs-12", plan.AgentID)
 	}
+	// A NARROWED lease id already ends in "-<issue>"; the agent id must stay idempotent
+	// and NOT double the suffix (resolve-docs-12-12) across the coarse and narrowed
+	// (wave/tick per-issue) lease grammars.
+	if got := PlanHostEnrollment("docs", 12, "resolve-docs-12", tree).AgentID; got != "resolve-docs-12" {
+		t.Fatalf("narrowed agent id = %q, want resolve-docs-12 (no doubled suffix)", got)
+	}
 	if len(plan.Tree) != 1 || plan.Tree[0] != "docs/**" {
 		t.Fatalf("plan tree = %v, want [docs/**]", plan.Tree)
 	}
