@@ -234,3 +234,54 @@ func TestReasons_ClosedAndUnique(t *testing.T) {
 		}
 	}
 }
+
+// EMPTY (step 4) precedes NOT_ADMIN (step 5): a NON-admin bare mention is EMPTY, not
+// NOT_ADMIN. This pins the 4-before-5 adjacency the way TestParse_LoopBeatsChannel pins
+// 1-before-2 — without it, swapping the empty and admin gates survives the whole suite
+// (every other test pairs a non-admin with a non-empty body, or an empty body with an
+// admin, so none distinguishes the two orderings).
+func TestParse_EmptyBeatsNotAdmin(t *testing.T) {
+	got := Parse(Message{User: "UINTRUDER", Channel: "CTRL", Text: "<@UBOT>   "}, baseCfg())
+	if got.Reason != ReasonEmpty {
+		t.Fatalf("reason=%q; want EMPTY to precede NOT_ADMIN for a non-admin bare mention", got.Reason)
+	}
+}
+
+// Admin matching is exact: Slack user ids are case-sensitive, so a case-variant of the
+// seeded admin id is NOT the admin and is refused, while the exact id is accepted. Locks
+// the documented exact compare — a case-insensitive weakening (EqualFold) would widen
+// the allowlist and otherwise pass every existing test.
+func TestParse_AdminMatchIsCaseSensitive(t *testing.T) {
+	cfg := baseCfg() // Admins: {"UADMIN"}
+	variant := Parse(Message{User: "uadmin", Channel: "CTRL", TS: "1", Text: "<@UBOT> ping"}, cfg)
+	if !variant.Refused || variant.Reason != ReasonNotAdmin {
+		t.Fatalf("case-variant id must not match the exact allowlist; got %+v", variant)
+	}
+	exact := Parse(Message{User: "UADMIN", Channel: "CTRL", TS: "1", Text: "<@UBOT> ping"}, cfg)
+	if exact.Refused || exact.Verb != VerbPing {
+		t.Fatalf("exact admin id must be accepted; got %+v", exact)
+	}
+}
+
+// Fail-closed on an empty sender id: even if the allowlist carries a blank entry (a
+// mis-seeded config), an empty-User message must never match it — isAdmin rejects the
+// empty user before it can equal a blank allowlist entry. Deleting that guard authorizes
+// an empty-User sender against a blank entry, and no existing test exercises an empty User.
+func TestParse_EmptyUserFailsClosed(t *testing.T) {
+	cfg := Config{BotUserID: "UBOT", ControlChannel: "CTRL", Admins: []string{"UADMIN", ""}}
+	got := Parse(Message{User: "", Channel: "CTRL", TS: "1", Text: "<@UBOT> ping"}, cfg)
+	if !got.Refused || got.Reason != ReasonNotAdmin {
+		t.Fatalf("empty user must never authorize, even against a blank allowlist entry; got %+v", got)
+	}
+}
+
+// An embedded (non-leading) mention still addresses the door: the verb before a trailing
+// `<@UBOT>` is the command. Locks the documented "leading-or-embedded" stripping — a
+// leading-only narrowing (requiring the mention at index 0) would refuse this as
+// NOT_ADDRESSED yet still pass every current test.
+func TestParse_EmbeddedMentionAddressed(t *testing.T) {
+	got := Parse(admin("halt <@UBOT>"), baseCfg())
+	if got.Refused || got.Verb != VerbHalt {
+		t.Fatalf("embedded mention should address the door; got %+v", got)
+	}
+}
