@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -91,6 +92,25 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("git add -A", p)      # the forbidden form is named
         self.assertIn("commit -s", p)       # sign-off required
         self.assertIn("OFF_TRUNK", p)
+
+    def test_commit_law_models_message_before_pathspec(self) -> None:
+        # INTERACTIVE_HANG root cause (#4323): git parses everything after `--`
+        # as a pathspec, so a prompt that shows `-- <paths>` with no `-m` (or
+        # with `-m` placed after `--`) invites exactly the ordering that opens
+        # the commit-message editor and hangs a headless worker. The example
+        # must show `-m` BEFORE `--`, and INTERACTIVE_HANG must be named as
+        # the consequence of getting the order wrong.
+        mod = load()
+        p = mod.render_prompt(self.ISSUE, "docs", workspace="C:/work/fak")
+        self.assertIn('git commit -s -m "<subject>" -- <explicit paths>', p)
+        self.assertIn("INTERACTIVE_HANG", p)
+        # no single backtick-delimited command span may show `--` followed by
+        # `-m` (that ordering is what git parses as a pathspec, not a message).
+        for span in re.findall(r"`([^`]*)`", p):
+            self.assertNotRegex(
+                span, r"--.*-m ",
+                f"commit example models `-m` after `--`: `{span}`",
+            )
 
     def test_pathspec_race_recovery_preserves_explicit_paths(self) -> None:
         mod = load()

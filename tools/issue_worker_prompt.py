@@ -285,8 +285,12 @@ issue names). A claim with no gate run is not done.
 
 git laws (enforced below the agent — breaking them refuses your commit):
 - Work on `main` ONLY. Never branch / new-worktree (the OFF_TRUNK guard refuses it).
-- `git commit -s -- <explicit paths>` — sign-off (DCO), commit BY PATH only. \
-NEVER `git add -A` (shared multi-session tree — a blanket add steals a sibling's \
+- `git commit -s -m "<subject>" -- <explicit paths>` — sign-off (DCO), commit BY \
+PATH only, with `-m`/`-F` BEFORE the `--` pathspec separator: git parses everything \
+after `--` as a pathspec, so an `-m` placed AFTER `--` is silently parsed as a \
+pathspec instead of a message, and a bare `git commit` with no `-m`/`-F` at all \
+opens the interactive editor and hangs headless (`INTERACTIVE_HANG`). NEVER \
+`git add -A` (shared multi-session tree — a blanket add steals a sibling's \
 in-flight files). Stage only the files you wrote.
 - **Reference `#{n}` in the subject AND end it with a `(fak {lane})` trailer**, \
 lead with a verb (e.g. `fix({lane}): … (#{n}) (fak {lane})`; use add/fix/implement/\
