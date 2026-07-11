@@ -52,8 +52,14 @@ except (AttributeError, ValueError):
 SCHEMA = "fleet-issue-resolve-witnessed/1"
 WITNESS_OK = "diff-witnessed"
 # Claim kinds that can BIND a close (#2998): a diff-witnessed doc/triage claim
-# witnesses only that a note shipped — it never resolves a non-docs issue.
-RESOLVING_CLAIM_KINDS = {"code_effect", "test_cover"}
+# witnesses only that a note shipped — it never resolves a non-docs issue. A
+# code/test claim over non-doc paths binds. `dos commit-audit` emits the bare
+# token `test` for a test-covering commit (verified on the live oracle); the
+# historical `test_cover` is kept for backward-safety in case the vocabulary
+# ever re-widens. Without `test` the closer silently held EVERY test-witnessed
+# resolution (test-first / qa / regression / coverage issues, and feat commits
+# dos grades test-line-dominant), booking 0 closes for the whole class.
+RESOLVING_CLAIM_KINDS = {"code_effect", "test", "test_cover"}
 NONRESOLVING_HOLD = "CLAIM_KIND_NONRESOLVING"
 # State-readback idempotency (#2641): `gh issue close` returning rc 0 proves the
 # COMMAND ran, not that the issue is durably closed — a concurrent/lagging reopen
@@ -232,7 +238,9 @@ def fetch_issue_meta(root: Path, number: Any) -> dict[str, Any] | None:
         return None
     rc, out, _ = run_capture(
         ["gh", "issue", "view", str(number), "--json", "body,labels"], root, timeout=30)
-    if rc != 0:
+    if rc != 0 or not out:
+        # rc!=0, or a rc-0 call that still yielded no stdout (a rare gh hiccup):
+        # unreadable -> COVERAGE_UNKNOWN (hold), never crash the live close tick.
         return None
     try:
         doc = json.loads(out.strip() or "{}")

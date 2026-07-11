@@ -201,6 +201,25 @@ class ClaimKindGateTest(unittest.TestCase):
         row = {"number": 5, "title": "fix(guard): budget restart"}
         self.assertEqual(mod.claim_binds_resolution(rv, row), (True, None))
 
+    def test_test_claim_over_source_paths_binds(self) -> None:
+        # dos commit-audit emits the bare token `test` (not `test_cover`) for a
+        # test-covering commit; a test-witnessed close over non-doc paths must bind
+        # (regression: the token drift silently held the whole test class -> 0 closes).
+        mod = load()
+        self.assertIn("test", mod.RESOLVING_CLAIM_KINDS)
+        rv = {"witness_ok": True, "claim_kind": "test", "touches_code": True}
+        row = {"number": 3364, "title": "feat(dispatchtick): witness a test-integrity rung"}
+        self.assertEqual(mod.claim_binds_resolution(rv, row), (True, None))
+
+    def test_test_claim_with_docs_only_diff_is_held(self) -> None:
+        # a `test` claim whose diff touched no code/test path still cannot bind.
+        mod = load()
+        rv = {"witness_ok": True, "claim_kind": "test", "touches_code": False}
+        row = {"number": 5, "title": "feat(x): thing"}
+        binds, reason = mod.claim_binds_resolution(rv, row)
+        self.assertFalse(binds)
+        self.assertIn("CLAIM_KIND_NONRESOLVING", reason)
+
     def test_code_effect_with_docs_only_diff_is_held(self) -> None:
         mod = load()
         rv = {"witness_ok": True, "claim_kind": "code_effect", "touches_code": False}
@@ -655,6 +674,15 @@ class CoverageGateTest(unittest.TestCase):
     def test_fetch_issue_meta_gh_error_is_none(self) -> None:
         mod = load()
         mod.run_capture = lambda cmd, cwd, timeout: (1, "", "gh boom")
+        self.assertIsNone(mod.fetch_issue_meta(ROOT, 4277))
+
+    def test_fetch_issue_meta_rc0_none_stdout_is_none_not_crash(self) -> None:
+        # a rc-0 gh call that still yields None/empty stdout (rare hiccup) must
+        # fail-safe to None (COVERAGE_UNKNOWN hold), never AttributeError on .strip().
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, None, "")
+        self.assertIsNone(mod.fetch_issue_meta(ROOT, 4277))
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "", "")
         self.assertIsNone(mod.fetch_issue_meta(ROOT, 4277))
 
     def _audit(self, number, title, sha="wok", subject="shipped"):
