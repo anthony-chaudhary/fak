@@ -283,6 +283,8 @@ type RouterPayload struct {
 	NextAction          string                     `json:"next_action"`
 	Workspace           string                     `json:"workspace"`
 	View                string                     `json:"view,omitempty"`
+	ViewQuery           string                     `json:"view_query,omitempty"`
+	ViewDigest          string                     `json:"view_digest,omitempty"`
 	ViewFallback        bool                       `json:"view_fallback,omitempty"`
 	ViewFallbackReason  string                     `json:"view_fallback_reason,omitempty"`
 	Coverage            RouterCoverage             `json:"coverage"`

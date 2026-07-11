@@ -9,6 +9,7 @@ package main
 // Behavior-preserving code motion -- same package, no logic change.
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,7 +72,7 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 		FetchError:        inf.FetchError,
 		ResumeWitness: dispatchtick.ResumeWitnessState{
 			LastCommitAudit:   dispatchLastCommitAudit(root, issue),
-			LastRouteDecision: dispatchLastRouteDecision(issue, lane),
+			LastRouteDecision: dispatchLastRouteDecision(issue, lane, dispatchTickView),
 			LastIssueStatus:   dispatchLastIssueStatus(inf.State),
 		},
 	})
@@ -217,10 +218,13 @@ func dispatchProgressCommitAuditSummary(row map[string]any) string {
 	return ""
 }
 
-func dispatchLastRouteDecision(issue int, lane string) string {
+func dispatchLastRouteDecision(issue int, lane, view string) string {
 	lane = strings.TrimSpace(lane)
 	if lane == "" || issue <= 0 {
 		return ""
+	}
+	if view = strings.TrimSpace(view); view != "" {
+		return fmt.Sprintf("view=%s lane=%s target=#%d", view, lane, issue)
 	}
 	return fmt.Sprintf("lane=%s target=#%d", lane, issue)
 }
@@ -374,16 +378,21 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		}
 	}
 	return dispatchLanePick{
-		Lane:             chosen,
-		Numbers:          numsByLane[chosen],
-		ByLaneCount:      counts,
-		ByLaneStepBudget: stepBudgets,
-		ExcludedLanes:    excluded,
-		Tree:             tree,
-		PathsByIssue:     pathsByIssue,
-		IssueByNumber:    issueByNumber,
-		RouterError:      dispatchRouterError(router),
-		SelfSourceHeld:   selfSourceHeld,
+		Lane:               chosen,
+		Numbers:            numsByLane[chosen],
+		ByLaneCount:        counts,
+		ByLaneStepBudget:   stepBudgets,
+		ExcludedLanes:      excluded,
+		Tree:               tree,
+		PathsByIssue:       pathsByIssue,
+		IssueByNumber:      issueByNumber,
+		View:               router.View,
+		ViewQuery:          router.ViewQuery,
+		ViewDigest:         router.ViewDigest,
+		ViewFallback:       router.ViewFallback,
+		ViewFallbackReason: router.ViewFallbackReason,
+		RouterError:        dispatchRouterError(router),
+		SelfSourceHeld:     selfSourceHeld,
 	}, nil
 }
 
@@ -493,6 +502,11 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 		DuplicateRiskCache: dispatchDuplicateRiskCache,
 	})
 	payload.View = strings.TrimSpace(dispatchTickView)
+	if payload.View != "" {
+		if _, query, digest, err := dispatchViewQueryWithDigest(root, payload.View); err == nil {
+			payload.ViewQuery, payload.ViewDigest = query, digest
+		}
+	}
 	payload.ViewFallback = viewFallbackReason != ""
 	payload.ViewFallbackReason = viewFallbackReason
 	// W4 scope-hold (#2716): after routing, hold back ONLY the issues whose declared paths
@@ -552,9 +566,14 @@ func dispatchAnyDispatchable(issues []dispatchtick.Issue) bool {
 // (the API-readable mirror of the GitHub saved views) to the repo and the
 // issue-search query that materializes it.
 func dispatchViewQuery(root, slug string) (repo, query string, err error) {
+	repo, query, _, err = dispatchViewQueryWithDigest(root, slug)
+	return
+}
+
+func dispatchViewQueryWithDigest(root, slug string) (repo, query, digest string, err error) {
 	raw, err := os.ReadFile(filepath.Join(root, ".github", "issue-views.json"))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var cfg struct {
 		Repo  string `json:"repo"`
@@ -564,17 +583,17 @@ func dispatchViewQuery(root, slug string) (repo, query string, err error) {
 		} `json:"views"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return "", "", fmt.Errorf("issue-views.json: %w", err)
+		return "", "", "", fmt.Errorf("issue-views.json: %w", err)
 	}
 	for _, v := range cfg.Views {
 		if v.Slug == slug {
 			if strings.TrimSpace(v.Query) == "" {
-				return "", "", fmt.Errorf("view %q has an empty query", slug)
+				return "", "", "", fmt.Errorf("view %q has an empty query", slug)
 			}
-			return cfg.Repo, v.Query, nil
+			return cfg.Repo, v.Query, fmt.Sprintf("sha256:%x", sha256.Sum256(raw)), nil
 		}
 	}
-	return "", "", fmt.Errorf("unknown view %q in issue-views.json", slug)
+	return "", "", "", fmt.Errorf("unknown view %q in issue-views.json", slug)
 }
 
 func dispatchFetchViewIssuesGH(root, slug string, limit int) ([]dispatchtick.Issue, error) {

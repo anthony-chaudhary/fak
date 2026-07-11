@@ -99,8 +99,13 @@ type dispatchLanePick struct {
 	// `gh issue view` on the hot path (#4167). A cache miss (an unrouted --target-issue)
 	// yields the zero value, which dispatchPrompt treats as "no cache" and falls back to
 	// the live fetch.
-	IssueByNumber map[int]dispatchIssueInfo
-	RouterError   string
+	IssueByNumber      map[int]dispatchIssueInfo
+	View               string
+	ViewQuery          string
+	ViewDigest         string
+	ViewFallback       bool
+	ViewFallbackReason string
+	RouterError        string
 	// SelfSourceHeld names the lanes the guarded auto-pick SKIPPED because their
 	// tree is fak's own running source (cmd/** or internal/**). It is populated only
 	// on an auto-pick (no explicit lane) under guard, and is the witness behind the
@@ -433,30 +438,43 @@ func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map
 		"live":      pre["live"],
 		"cap_terms": mapAt(pre, "cap_terms"),
 	}
-	return map[string]any{
-		"schema":           dispatchtick.Schema,
-		"workspace":        root,
-		"live":             opts.Live,
-		"backend":          opts.Backend,
-		"goal":             opts.Goal,
-		"goal_profile":     opts.GoalProfile,
-		"max_workers":      opts.MaxWorkers,
-		"registry_refresh": reg,
-		"preflight":        preflight,
-		"account":          dispatchtick.AccountSidecar(account),
-		"lane":             pr.pick.Lane,
-		"lease_id":         pr.leaseID,
-		"lease_tree":       append([]string(nil), pr.pick.Tree...),
-		"lane_issue_count": len(pr.pick.Numbers),
-		"lane_step_budget": pr.pick.ByLaneStepBudget[pr.pick.Lane],
-		"cooled_recently":  sortedSet(pr.cooled),
-		"cooldown_status":  pr.cooldownStatus,
-		"target_issue":     nil,
-		"already_live":     sortedSet(pr.liveIssues),
-		"held_lanes":       sortedStringSet(pr.held),
-		"startup_bundle":   startup,
-		"stale_base":       mapAt(startup, "stale_base"),
+	payload := map[string]any{
+		"schema":               dispatchtick.Schema,
+		"workspace":            root,
+		"live":                 opts.Live,
+		"backend":              opts.Backend,
+		"goal":                 opts.Goal,
+		"goal_profile":         opts.GoalProfile,
+		"max_workers":          opts.MaxWorkers,
+		"view":                 pr.pick.View,
+		"view_query":           pr.pick.ViewQuery,
+		"view_digest":          pr.pick.ViewDigest,
+		"view_fallback":        pr.pick.ViewFallback,
+		"view_fallback_reason": pr.pick.ViewFallbackReason,
+		"registry_refresh":     reg,
+		"preflight":            preflight,
+		"account":              dispatchtick.AccountSidecar(account),
+		"lane":                 pr.pick.Lane,
+		"lease_id":             pr.leaseID,
+		"lease_tree":           append([]string(nil), pr.pick.Tree...),
+		"lane_issue_count":     len(pr.pick.Numbers),
+		"lane_step_budget":     pr.pick.ByLaneStepBudget[pr.pick.Lane],
+		"cooled_recently":      sortedSet(pr.cooled),
+		"cooldown_status":      pr.cooldownStatus,
+		"target_issue":         nil,
+		"already_live":         sortedSet(pr.liveIssues),
+		"held_lanes":           sortedStringSet(pr.held),
+		"startup_bundle":       startup,
+		"stale_base":           mapAt(startup, "stale_base"),
 	}
+	if strings.TrimSpace(pr.pick.View) == "" {
+		delete(payload, "view")
+		delete(payload, "view_query")
+		delete(payload, "view_digest")
+		delete(payload, "view_fallback")
+		delete(payload, "view_fallback_reason")
+	}
+	return payload
 }
 
 // prepareDispatchWorkerCommand resolves the worker model policy and builds the guarded

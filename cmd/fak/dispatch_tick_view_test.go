@@ -233,3 +233,64 @@ func TestDispatchTickThreadsViewFlagToRouter(t *testing.T) {
 		t.Fatalf("router saw view %q after --view \"\", want disabled (empty)", seen)
 	}
 }
+
+func TestDispatchViewDigestBindsExactConfigBytes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".github"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".github", "issue-views.json")
+	first := []byte(`{"repo":"o/r","views":[{"slug":"current","query":"is:open label:a"}]}`)
+	if err := os.WriteFile(path, first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, query, d1, err := dispatchViewQueryWithDigest(root, "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "is:open label:a" || d1 == "" {
+		t.Fatalf("query=%q digest=%q", query, d1)
+	}
+	_, _, d1b, err := dispatchViewQueryWithDigest(root, "current")
+	if err != nil || d1b != d1 {
+		t.Fatalf("stable digest=%q err=%v, want %q", d1b, err, d1)
+	}
+	second := []byte(`{"repo":"o/r","views":[{"slug":"current","query":"is:open label:b"}]}`)
+	if err := os.WriteFile(path, second, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, d2, err := dispatchViewQueryWithDigest(root, "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d2 == d1 {
+		t.Fatalf("digest did not change after config edit: %q", d1)
+	}
+}
+
+func TestSeedDispatchTickPayloadCarriesViewProvenance(t *testing.T) {
+	pr := dispatchTickPick{pick: dispatchLanePick{
+		Lane: "docs", View: "current", ViewQuery: "is:open label:focus",
+		ViewDigest: "sha256:abc", ViewFallback: true, ViewFallbackReason: "view_empty",
+		ByLaneStepBudget: map[string]int{},
+	}}
+	got := seedDispatchTickPayload(t.TempDir(), dispatchTickOptions{}, map[string]any{}, map[string]any{}, dispatchtick.Account{}, pr)
+	for key, want := range map[string]any{"view": "current", "view_query": "is:open label:focus", "view_digest": "sha256:abc", "view_fallback": true, "view_fallback_reason": "view_empty"} {
+		if got[key] != want {
+			t.Fatalf("%s=%v, want %v", key, got[key], want)
+		}
+	}
+	if route := dispatchLastRouteDecision(4026, "docs", "current"); route != "view=current lane=docs target=#4026" {
+		t.Fatalf("route=%q", route)
+	}
+}
+
+func TestSeedDispatchTickPayloadOmitsDisabledViewProvenance(t *testing.T) {
+	pr := dispatchTickPick{pick: dispatchLanePick{ByLaneStepBudget: map[string]int{}}}
+	got := seedDispatchTickPayload(t.TempDir(), dispatchTickOptions{}, map[string]any{}, map[string]any{}, dispatchtick.Account{}, pr)
+	for _, key := range []string{"view", "view_query", "view_digest", "view_fallback", "view_fallback_reason"} {
+		if value, ok := got[key]; ok && value != "" && value != false {
+			t.Fatalf("disabled view %s=%v", key, value)
+		}
+	}
+}
