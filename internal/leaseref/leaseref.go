@@ -337,10 +337,12 @@ type ArbiterLease struct {
 	Tree     []string `json:"tree"`
 }
 
-// arbiterLaneKind is the kind every refs/fak/locks lease projects to: a
-// tree-scoped (cluster) lane. Named so the constant is greppable and the one
-// honest mapping decision lives in one place.
-const arbiterLaneKind = "cluster"
+// ArbiterLaneKind is the kind every refs/fak/locks lease projects to: a
+// tree-scoped (cluster) lane. Exported so a PRODUCER stamping a structured
+// lane-lease event (e.g. the dispatch refusal ledger, #4322) names the kind
+// with the SAME constant this read-side projection uses — the one honest
+// mapping decision lives in one place and cannot drift.
+const ArbiterLaneKind = "cluster"
 
 // LiveLeases reads the genuinely-held records under refs/fak/locks/* and projects
 // each into the arbiter's live_leases shape. This is the read side of the
@@ -366,7 +368,7 @@ func (s *Store) LiveLeases(ctx context.Context, now time.Time) ([]ArbiterLease, 
 		if tree == nil {
 			tree = []string{} // a record with no globs still projects a concrete empty tree
 		}
-		out = append(out, ArbiterLease{Lane: r.ID, LaneKind: arbiterLaneKind, Tree: tree})
+		out = append(out, ArbiterLease{Lane: r.ID, LaneKind: ArbiterLaneKind, Tree: tree})
 	}
 	return out, nil
 }
