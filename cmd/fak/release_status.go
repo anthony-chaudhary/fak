@@ -148,6 +148,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 			"latest_any_tag":          releaseStatusNilIfEmpty(releaseStatusString(contextPayload["latest_any_tag"])),
 			"commits_since_tag":       releaseStatusCommitsSinceTag(contextPayload, root, lastTag),
 			"files_touched_since_tag": releaseStatusFilesSinceTag(contextPayload, root, lastTag),
+			"contents":                releaseStatusContents(root, lastTag),
 			"tag_drift":               releaseStatusAnyOrNil(contextPayload["tag_drift"]),
 			"ci_on_head":              releaseStatusAnyOrNil(contextPayload["ci_on_head"]),
 			"ci_diagnosis":            ciDiag,
@@ -875,8 +876,11 @@ func renderReleaseStatus(status map[string]any) string {
 		releaseStatusRenderBranchRegime(branchRegime),
 		releaseStatusRenderShadowCutover(shadowCutover),
 		fmt.Sprintf("  commits since tag: %d", releaseStatusInt(rolling["commits_since_tag"])),
-		fmt.Sprintf("  next action: %s - %s", releaseStatusString(action["kind"]), releaseStatusString(action["detail"])),
 	}
+	if line := releaseStatusRenderContents(releaseStatusMap(rolling["contents"])); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, fmt.Sprintf("  next action: %s - %s", releaseStatusString(action["kind"]), releaseStatusString(action["detail"])))
 	if latest := releaseStatusMap(stable["latest_stable"]); len(latest) > 0 {
 		lines = append(lines, fmt.Sprintf("  stable: %s (%s); lag=%v", latest["tag"], latest["version"], stable["stable_lag"]))
 	} else {
