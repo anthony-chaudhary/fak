@@ -153,6 +153,32 @@ func TestClassifyForwardPathRecognizedQwen35Hybrid(t *testing.T) {
 	}
 }
 
+// TestClassifyForwardPathNamesNonGQAPaths pins the classifier's non-GQA branches so a
+// serve/bench readout names them distinctly from attnSeq-GQA — an MLA-latent+MoE or a
+// MiniMax MSA checkpoint must never be mistaken for the standard GQA forward. These ride
+// #3814's arch-support column alongside the small-GQA candidates.
+func TestClassifyForwardPathNamesNonGQAPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want ForwardPathKind
+	}{
+		{"DeepSeek-v2 (MLA-latent + MoE)", Config{ModelType: "deepseek2", NumLayers: 1}, ForwardGLMDsaMLA},
+		{"MiniMax-M3 (sparse MSA)", Config{ModelType: "minimax_m3", NumLayers: 1}, ForwardMiniMax},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ClassifyForwardPath(tc.cfg, nil)
+			if err != nil {
+				t.Fatalf("supported non-GQA arch must classify, got refusal: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("ClassifyForwardPath = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestClassifyForwardPathRefusesUnrecognizedGDN proves the classifier surfaces the SAME
 // typed refusal newModel returns for the #934 GDN/SSM state (linear_attn.* present,
 // layer_types empty) instead of naming a supported path — so a serve/bench caller
