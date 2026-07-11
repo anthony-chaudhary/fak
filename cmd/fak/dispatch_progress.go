@@ -29,6 +29,8 @@ const (
 	dispatchProgressTargetIPH = 400.0
 )
 
+var dispatchProgressRotateBytes int64 = 8 << 20
+
 type dispatchProgressOptions struct {
 	Workspace  string
 	Target     int
@@ -773,6 +775,25 @@ func dispatchProgressRound1(v float64) float64 {
 
 func dispatchProgressRound2(v float64) float64 {
 	return math.Round(v*100) / 100
+}
+
+func rotateDispatchProgressIfDue(path string, maxBytes int64) error {
+	if maxBytes <= 0 {
+		return nil
+	}
+	fi, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if fi.Size() < maxBytes {
+		return nil
+	}
+	sealed := path + ".1"
+	_ = os.Remove(sealed)
+	return os.Rename(path, sealed)
 }
 
 func dispatchProgressAppend(runsDir string, rec map[string]any) error {

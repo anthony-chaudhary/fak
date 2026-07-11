@@ -611,20 +611,7 @@ func parseISOUTC(ts string) (time.Time, bool) {
 	return t.UTC(), true
 }
 
-func readLines(path string) []string {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
-}
+func readLines(path string) []string { return ReadTailLines(path, DefaultTailLines) }
 
 func sortedKeys(m map[string]int) []string {
 	keys := make([]string, 0, len(m))

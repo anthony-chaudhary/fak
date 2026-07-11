@@ -393,20 +393,10 @@ type progRow struct {
 // empty map, never an error (the progress signal is advisory).
 func loadProgress(path string) map[string]progRow {
 	out := map[string]progRow{}
-	f, err := os.Open(path)
-	if err != nil {
-		return out
-	}
-	defer f.Close()
 	// progress.jsonl rows are keyed by close_result/witnessed_numbers, not by a
-	// single issue; we conservatively roll all rows into one synthetic bucket so
-	// the parser stays robust to schema drift. The witnessed issue, when present,
-	// keys the row.
+	// single issue; consume only the bounded recent tail.
 	var lastResolved = -1
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
+	for _, line := range dispatchconservation.ReadTailLines(path, dispatchconservation.DefaultTailLines) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
