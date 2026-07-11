@@ -95,3 +95,14 @@ func TestRunDispatchSweep_ExhaustsAfterBoundedParks(t *testing.T) {
 		t.Fatalf("after %d bounded parks the sweep must EXHAUST, got: %s", seatpark.DefaultMaxParks, stdout.String())
 	}
 }
+
+func TestDispatchSweepRefreshesRegistryOnlyOnFirstTick(t *testing.T) {
+	for _, tc := range []struct {
+		iter int
+		want bool
+	}{{0, true}, {1, false}, {2, false}, {99, false}} {
+		if got := dispatchSweepRefresh(tc.iter); got != tc.want {
+			t.Errorf("dispatchSweepRefresh(%d) = %v, want %v", tc.iter, got, tc.want)
+		}
+	}
+}

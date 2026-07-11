@@ -128,14 +128,22 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 
 	tick := func(iter int) (dispatchsweep.TickResult, error) {
 		payload, err := evaluateDispatchTick(dispatchTickOptions{
-			Workspace:      root,
-			MaxWorkers:     *maxWorkers,
-			WorkKind:       dispatchtickWorkKind(*backend),
-			Lane:           *lane,
-			Backend:        *backend,
-			ExcludeLanes:   dispatchSplitCSV(*excludeLane),
-			Live:           *live,
-			Refresh:        true,
+			Workspace:    root,
+			MaxWorkers:   *maxWorkers,
+			WorkKind:     dispatchtickWorkKind(*backend),
+			Lane:         *lane,
+			Backend:      *backend,
+			ExcludeLanes: dispatchSplitCSV(*excludeLane),
+			Live:         *live,
+			// Refresh the fleet registry (the ~40s tools/fleet_sessions.py scan) only on the
+			// FIRST tick of the drain, then reuse it -- mirroring the wave execution loop's
+			// `i == 0` cadence (dispatch_wave.go). The scan's result is surfaced only as the
+			// payload's registry_refresh provenance field; seat admission reads LIVE pidfile
+			// leases (dispatchLiveSeatLeases) and the on-disk roster directly, and the worker
+			// this sweep just spawned is counted via its own pidfile regardless. So re-scanning
+			// before every spawn added (N-1)x~40s of serial wall-clock to an N-spawn sweep
+			// without changing a single admission decision. One scan per drain suffices.
+			Refresh:        dispatchSweepRefresh(iter),
 			CooldownMin:    dispatchtick.DefaultCooldownMinutes,
 			WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
 			SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
@@ -208,6 +216,10 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 // lastJSONObject returns the last top-level JSON object in out. The tick prints exactly one
 // object under --json, but a loop-ledger append or an incidental log line could precede it, so
 // we scan from the end for the last balanced {...} that decodes — that one can never be shadowed.
+// dispatchSweepRefresh limits the expensive fleet-registry scan to the first tick in a
+// drain. Later admission decisions read live pidfile leases and the roster directly.
+func dispatchSweepRefresh(iter int) bool { return iter == 0 }
+
 func lastJSONObject(out []byte) (map[string]any, error) {
 	trimmed := bytes.TrimSpace(out)
 	if len(trimmed) == 0 {
