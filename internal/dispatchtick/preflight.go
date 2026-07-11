@@ -14,6 +14,7 @@ const (
 	PreflightRefuseNoSeat    = "REFUSE_NO_SEAT"
 	PreflightRefuseAtCap     = "REFUSE_AT_CAP"
 	PreflightRefuseInspect   = "REFUSE_INSPECT"
+	PreflightObserveSettling = "OBSERVE_SCALING_IN_PROGRESS"
 )
 
 const (
@@ -437,6 +438,8 @@ func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool
 	case seatsDepleted:
 		total, leased := intValue(in.Seat.Total), intValue(in.Seat.Leased)
 		return PreflightRefuseNoSeat, fmt.Sprintf("seat pool depleted: 0 of %d session slot(s) free (%d leased to live worker(s), live=%d); a slot frees when a worker exits - refusing rather than overbook a busy account", total, leased, live)
+	case in.Kernel.Alive != nil && in.Kernel.Target != nil && *in.Kernel.Alive != *in.Kernel.Target:
+		return PreflightObserveSettling, fmt.Sprintf("observing scaling in progress: %d alive, target %d", *in.Kernel.Alive, *in.Kernel.Target)
 	case live >= capacity:
 		return PreflightRefuseAtCap, fmt.Sprintf("live workers %d >= cap %d (kernel alive=%s, os procs=%d, dos target=%s, host_cap=%s, max-workers=%d)",
 			live, capacity, ptrString(in.Kernel.Alive), in.OSWorkerProcs, ptrString(in.Kernel.Target), ptrString(hostCap), in.MaxWorkers)
