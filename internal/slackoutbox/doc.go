@@ -25,6 +25,13 @@
 //   - bounded retries: transient failures back off to the NEXT drain pass (the wire
 //     already honors Retry-After within a call); after MaxAttempts a row goes DEAD and
 //     surfaces in `fak slack health` — never silently dropped;
+//   - ephemeral reaping (reap.go): posted messages in the dgx-bridge channels (the
+//     FAK_SLACK_EPHEMERAL_CHANNELS allowlist, or a row that opted in via DeleteAfterS) are
+//     chat.delete'd once they go IDLE past their TTL (default 30m), measured from last
+//     activity so a live card is not culled mid-run. One reap pass runs at the tail of every
+//     Drain (and on demand via `fak slack outbox reap`); a message already gone is recorded
+//     reaped idempotently, a transient delete failure retries next drain. This clears the
+//     channel noise the outbox otherwise accretes without touching a channel nobody opted in;
 //   - a leak fence before every send (hooks.ScanOutboundText): a PUBLIC_LEAK needle or
 //     SECRET_SHAPE hit refuses the row with the finding as its structured reason,
 //     terminally — a refused body must be re-authored, never retried into posting;

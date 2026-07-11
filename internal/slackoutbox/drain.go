@@ -21,6 +21,7 @@ type Wire interface {
 	PostMessageIdem(ctx context.Context, channel, text string, blocks []any, threadTS, nonce string) (string, error)
 	UpdateMessage(ctx context.Context, channel, ts, text string, blocks []any) error
 	History(ctx context.Context, channel, oldestTS string, limit int) ([]slackwire.Message, error)
+	DeleteMessage(ctx context.Context, channel, ts string) error
 }
 
 var _ Wire = (*slackwire.Client)(nil)
@@ -40,6 +41,14 @@ type DrainOpts struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 	// HistoryProbeLimit bounds the ambiguity probe's history read (default 100).
 	HistoryProbeLimit int
+	// ReapEphemeral reports whether a channel auto-expires its posted messages by default
+	// (the dgx-bridge allowlist, resolved by the caller from FAK_SLACK_EPHEMERAL_CHANNELS).
+	// nil disables the channel-default reaper — only rows with an explicit DeleteAfterS are
+	// then reaped. Each drain runs one reap pass with these settings after delivering.
+	ReapEphemeral func(channel string) bool
+	// ReapTTL is the idle window an ephemeral-channel message survives before the reaper
+	// deletes it (measured from its last activity). <=0 => DefaultReapTTL (30m).
+	ReapTTL time.Duration
 }
 
 func (d DrainOpts) norm() DrainOpts {
@@ -83,6 +92,7 @@ type DrainReport struct {
 	Unchanged  int `json:"unchanged"` // no-op update edits suppressed pre-send (body == card's last posted body)
 	Failed     int `json:"failed"`    // transient failures recorded this pass (still pending)
 	Dead       int `json:"dead"`
+	Reaped     int `json:"reaped,omitempty"` // expired ephemeral messages deleted (or found already gone) this pass
 	Remaining  int `json:"remaining"` // rows still owed after this pass
 }
 
@@ -347,6 +357,16 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 	if err := o.appendState(transition{State: stateDrainPass}); err != nil {
 		return rep, err
 	}
+	// Ephemeral reap: delete posted messages in bridge channels (or rows with an explicit
+	// DeleteAfterS) that have been idle past their TTL, so the dgx-bridge channels stay
+	// clean. Best-effort — a transiently failing delete retries next drain; only a disk
+	// fault aborts. Reuse the pre-pass snapshot: this pass's fresh posts are too new to be
+	// due, and prior-pass posts are already folded into it.
+	rr, err := o.reapSnap(ctx, w, snap, ReapOpts{Ephemeral: opts.ReapEphemeral, TTL: opts.ReapTTL, held: true})
+	if err != nil {
+		return rep, err
+	}
+	rep.Reaped = rr.Deleted + rr.Gone
 	// Fold the accumulated segments while we still hold the lock, when it is due. The
 	// drain's messages are already durable; a compaction error surfaces the filesystem
 	// fault but never un-delivers them (re-running Drain is idempotent). snap predates this

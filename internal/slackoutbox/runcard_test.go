@@ -40,6 +40,12 @@ func (f *cardWire) History(ctx context.Context, channel, oldestTS string, limit 
 	return nil, nil
 }
 
+func (f *cardWire) DeleteMessage(ctx context.Context, channel, ts string) error {
+	f.sends = append(f.sends, fmt.Sprintf("delete %s %s", channel, ts))
+	delete(f.byTS, ts)
+	return nil
+}
+
 func testCard(t *testing.T, o *Outbox) *Card {
 	t.Helper()
 	c, err := OpenCard(o, filepath.Join(t.TempDir(), "card.json"))

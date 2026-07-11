@@ -24,6 +24,7 @@ type SourceCalls struct {
 	Source     string `json:"source"`
 	Posts      int    `json:"posts"`      // chat.postMessage calls that reached the wire
 	Updates    int    `json:"updates"`    // chat.update calls that reached the wire
+	Deletes    int    `json:"deletes,omitempty"` // chat.delete calls the ephemeral reaper spent
 	Coalesced  int    `json:"coalesced"`  // edits collapsed into a newer one (calls the outbox saved)
 	Suppressed int    `json:"suppressed"` // no-op edits dropped pre-send, body == last posted (calls the outbox saved)
 	Refused    int    `json:"refused"`    // bodies the leak fence blocked (calls the outbox saved)
@@ -31,8 +32,9 @@ type SourceCalls struct {
 	Pending    int    `json:"pending"`    // rows still owed a delivery (no call spent yet)
 }
 
-// Sent is the API calls this surface actually spent against the rate limit.
-func (s SourceCalls) Sent() int { return s.Posts + s.Updates }
+// Sent is the API calls this surface actually spent against the rate limit —
+// chat.postMessage, chat.update, and the chat.delete an ephemeral reap spends.
+func (s SourceCalls) Sent() int { return s.Posts + s.Updates + s.Deletes }
 
 // Saved is the API calls the outbox avoided for this surface (coalesced duplicate edits,
 // suppressed no-op re-edits, and fence refusals) — the noise it already suppresses.
@@ -77,6 +79,15 @@ func (o *Outbox) CallStats(now time.Time) (*CallStats, error) {
 			} else {
 				sc.Posts++
 			}
+		case stateReaped:
+			// A reaped row spent its original send (post or update) AND the chat.delete
+			// that removed it — both are real calls against the rate limit.
+			if r.UpdateTS != "" {
+				sc.Updates++
+			} else {
+				sc.Posts++
+			}
+			sc.Deletes++
 		case stateSuperseded:
 			sc.Coalesced++
 		case stateUnchanged:
@@ -113,6 +124,6 @@ func CallStatsReportLine(cs *CallStats) string {
 	if cs.LastCompactAgeS >= 0 {
 		window = "since last compaction " + (time.Duration(cs.LastCompactAgeS) * time.Second).String() + " ago"
 	}
-	return fmt.Sprintf("sent %d call(s) (chat.postMessage+chat.update), saved %d (coalesced+suppressed+refused) across %d source(s) — %s",
+	return fmt.Sprintf("sent %d call(s) (chat.postMessage+chat.update+chat.delete), saved %d (coalesced+suppressed+refused) across %d source(s) — %s",
 		cs.TotalSent, cs.TotalSaved, len(cs.Sources), window)
 }

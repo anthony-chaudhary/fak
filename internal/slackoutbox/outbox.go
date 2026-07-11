@@ -56,8 +56,9 @@ type Row struct {
 	UpdateTS    string `json:"update_ts,omitempty"`
 	ParentNonce string `json:"parent_nonce,omitempty"` // deferred thread parent, resolved to its posted ts at drain
 	CardKey     string `json:"card_key,omitempty"`
-	Source      string `json:"source,omitempty"`      // producing surface, for status/dead reporting
-	EnqueuedAt  string `json:"enqueued_at,omitempty"` // RFC3339 UTC
+	Source      string `json:"source,omitempty"`         // producing surface, for status/dead reporting
+	EnqueuedAt  string `json:"enqueued_at,omitempty"`    // RFC3339 UTC
+	DeleteAfterS int   `json:"delete_after_s,omitempty"` // >0: reap this message this many seconds after its last activity (per-row ephemeral TTL; 0 => channel/opts default, see reap.go)
 }
 
 // Row states. Absent = pending. sending is the pre-send intent marker that closes the
@@ -73,6 +74,7 @@ const (
 	stateRefused     = "refused"
 	stateSuperseded  = "superseded"
 	stateUnchanged   = "unchanged"    // no-op update (identical to the card's last posted body), suppressed pre-send
+	stateReaped      = "reaped"       // the posted message was chat.delete'd by the ephemeral reaper (terminal forever; see reap.go)
 	stateRetry       = "retry"        // operator re-arm transition (dead -> pending)
 	stateDrainPass   = "drain_pass"   // heartbeat transition (Nonce == "")
 	stateCompactPass = "compact_pass" // heartbeat transition marking the last Compact (Nonce == "")
@@ -108,7 +110,7 @@ type rowState struct {
 // here because only an explicit Retry transition (not a drain) may move it.
 func (s rowState) terminal() bool {
 	switch s.State {
-	case statePosted, stateDead, stateRefused, stateSuperseded, stateUnchanged:
+	case statePosted, stateDead, stateRefused, stateSuperseded, stateUnchanged, stateReaped:
 		return true
 	}
 	return false
@@ -133,7 +135,7 @@ func (s rowState) apply(t transition) rowState {
 		s.Ambiguous = t.Ambiguous
 		s.At = at
 		return s
-	case statePosted, stateDead, stateRefused, stateSuperseded, stateUnchanged:
+	case statePosted, stateDead, stateRefused, stateSuperseded, stateUnchanged, stateReaped:
 		s.State = t.State
 		s.TS = t.TS
 		s.Reason = t.Reason
@@ -435,6 +437,7 @@ type Status struct {
 	Dead              int       `json:"dead"`
 	Refused           int       `json:"refused"`
 	Superseded        int       `json:"superseded"`
+	Reaped            int       `json:"reaped,omitempty"`     // posted messages the ephemeral reaper deleted (see `outbox reap`)
 	Suppressed        int       `json:"suppressed,omitempty"` // no-op update edits dropped pre-send (see `outbox calls`)
 	Corrupt           int       `json:"corrupt"`
 	OldestPendingAgeS int64     `json:"oldest_pending_age_s"` // -1 when nothing is pending
@@ -464,6 +467,8 @@ func (o *Outbox) Status(now time.Time) (*Status, error) {
 			st.Refused++
 		case stateSuperseded:
 			st.Superseded++
+		case stateReaped:
+			st.Reaped++ // posted then deleted by the ephemeral reaper — gone from the channel
 		case stateUnchanged:
 			st.Suppressed++ // terminal no-op edit — not owed a delivery, not a real post
 		default: // pending / sending / failed — all still owed a delivery

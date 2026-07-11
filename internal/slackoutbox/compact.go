@@ -108,6 +108,7 @@ type CompactReport struct {
 	DroppedSuperseded  int   `json:"dropped_superseded"`   // superseded rows past RetainSettled
 	DroppedUnchanged   int   `json:"dropped_unchanged"`    // no-op (unchanged) rows past RetainSettled
 	DroppedRefused     int   `json:"dropped_refused"`      // refused rows past RetainSettled
+	DroppedReaped      int   `json:"dropped_reaped"`       // reaped (ephemeral-deleted) rows past RetainSettled
 	DroppedDead        int   `json:"dropped_dead"`         // dead rows past RetainDead (unretried)
 	CollapsedDrainPass int   `json:"collapsed_drain_pass"` // drain_pass heartbeats folded to one
 	DroppedCards       int   `json:"dropped_cards"`        // finalized run-card files removed
@@ -260,6 +261,8 @@ func (o *Outbox) rewriteArchive(opts CompactOpts, rep *CompactReport) (int, erro
 					rep.DroppedUnchanged++
 				case stateRefused:
 					rep.DroppedRefused++
+				case stateReaped:
+					rep.DroppedReaped++
 				case stateDead:
 					rep.DroppedDead++
 				}
@@ -327,6 +330,13 @@ func keepRow(s rowState, opts CompactOpts) (keep bool, class string) {
 			return true, ""
 		}
 		return false, stateUnchanged
+	case stateReaped:
+		// A reaped message is gone from the channel; keep the row briefly for diagnostics
+		// (the same short settled window), then forget it — nothing owed, nothing to probe.
+		if s.At.IsZero() || opts.Now.Sub(s.At) < opts.RetainSettled {
+			return true, ""
+		}
+		return false, stateReaped
 	case stateRefused:
 		if s.At.IsZero() || opts.Now.Sub(s.At) < opts.RetainSettled {
 			return true, ""
@@ -384,6 +394,8 @@ func (o *Outbox) compactPreview(opts CompactOpts) (*CompactReport, error) {
 			rep.DroppedUnchanged++
 		case stateRefused:
 			rep.DroppedRefused++
+		case stateReaped:
+			rep.DroppedReaped++
 		case stateDead:
 			rep.DroppedDead++
 		}
@@ -526,8 +538,8 @@ func CompactReportLine(rep *CompactReport) string {
 		verb = "would compact"
 	}
 	return fmt.Sprintf(
-		"%s: scanned %d  kept %d  dropped(posted %d superseded %d refused %d dead %d)  cards %d  drain_pass→1 (from %d)  spool %d→%dB  state %d→%dB",
+		"%s: scanned %d  kept %d  dropped(posted %d superseded %d refused %d reaped %d dead %d)  cards %d  drain_pass→1 (from %d)  spool %d→%dB  state %d→%dB",
 		verb, rep.ScannedRows, rep.KeptRows, rep.DroppedPosted, rep.DroppedSuperseded, rep.DroppedRefused,
-		rep.DroppedDead, rep.DroppedCards, rep.CollapsedDrainPass, rep.SpoolBytesBefore, rep.SpoolBytesAfter,
+		rep.DroppedReaped, rep.DroppedDead, rep.DroppedCards, rep.CollapsedDrainPass, rep.SpoolBytesBefore, rep.SpoolBytesAfter,
 		rep.StateBytesBefore, rep.StateBytesAfter)
 }

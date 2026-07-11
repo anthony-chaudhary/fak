@@ -25,6 +25,9 @@ type fakeWire struct {
 	deliverOnErr bool    // a failing post STILL lands in history (ambiguous half-success)
 	updateErrs   []error
 	historyErr   error
+
+	deletes    []string // "channel/ts" in delete order (reap witness)
+	deleteErrs []error  // scripted per-delete errors, consumed in order (nil = success)
 }
 
 func newFakeWire() *fakeWire {
@@ -79,6 +82,16 @@ func (f *fakeWire) History(ctx context.Context, channel, oldestTS string, limit 
 		return nil, f.historyErr
 	}
 	return f.history[channel], nil
+}
+
+func (f *fakeWire) DeleteMessage(ctx context.Context, channel, ts string) error {
+	f.deletes = append(f.deletes, channel+"/"+ts)
+	if len(f.deleteErrs) > 0 {
+		err := f.deleteErrs[0]
+		f.deleteErrs = f.deleteErrs[1:]
+		return err
+	}
+	return nil
 }
 
 // drainOpts returns test options: no real sleeping, waits recorded.
