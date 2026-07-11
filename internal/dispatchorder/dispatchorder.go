@@ -149,6 +149,16 @@ type Candidate struct {
 	// ORDER among survivors: supersede-collapse, live, cooldown, generation-hold, and collision
 	// pricing are untouched.
 	Priority int `json:"priority,omitempty"`
+	// ReadOnly declares that this unit writes NOTHING — a provably empty WRITE footprint, which
+	// is the third state the file-tree axis distinguishes from a declared tree (a known blast
+	// radius) and an ABSENT tree (an UNKNOWN blast radius that collides conservatively). A
+	// read-only candidate never collides on the file plane: it cannot clobber a concurrent
+	// writer and cannot be clobbered by one, so it is admitted alongside anything, even an empty
+	// tree or the same lane. This is the opt-out for a pure read (a `git log`, a `grep`) that the
+	// bare empty-Tree rule would otherwise fold into unknown-blast-radius and serialize. Purely
+	// additive — a false ReadOnly (every existing caller) prices byte-identically to before, and
+	// the compute axis is untouched (a read-only file footprint asserts nothing about compute).
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 // ComputeClaim is a candidate's claim over a compute region — the finer-grained twin of the
@@ -868,8 +878,17 @@ func collisionOf(a, b Candidate) (Collision, bool) {
 	return Collision{}, false
 }
 
-// fileCollision is the file-tree axis: the original lane/tree/mode geometry, unchanged.
+// fileCollision is the file-tree axis: the original lane/tree/mode geometry, unchanged
+// except for the read-only opt-out. A participant that declares ReadOnly writes NOTHING, so
+// it cannot contend on the write plane with anyone — not even an empty-tree (unknown blast
+// radius) or same-lane peer the geometry would otherwise serialize. This is the branch that
+// distinguishes a provably empty WRITE footprint from an ABSENT tree: gated here, ABOVE the
+// empty-tree conservative-overlap rule in TreesOverlap, so that pure geometry (TreesOverlap)
+// keeps its "empty collides" contract for every unknown-footprint caller.
 func fileCollision(a, b Candidate) (Collision, bool) {
+	if a.ReadOnly || b.ReadOnly {
+		return Collision{}, false
+	}
 	ma, mb := lockMode(a), lockMode(b)
 	if ma == "shared" && mb == "shared" {
 		return Collision{}, false

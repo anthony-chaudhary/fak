@@ -277,6 +277,34 @@ func TestCollisionPricedFanoutUnknownTreeCollidesConservatively(t *testing.T) {
 	}
 }
 
+// TestReadOnlyCandidateNeverCollidesOnFilePlane is the tri-state twin of the
+// empty-tree conservative-collide floor (#3898): a candidate that declares
+// ReadOnly writes NOTHING (a provably empty WRITE footprint), which is distinct
+// from an ABSENT tree (unknown blast radius). Where the same-lane, overlapping
+// pair serializes without it, the read-only reader is admitted alongside the
+// writer it overlaps — it cannot clobber and cannot be clobbered.
+func TestReadOnlyCandidateNeverCollidesOnFilePlane(t *testing.T) {
+	plan := func(readOnly bool) Result {
+		return Plan(Input{NowUnix: base, Candidates: []Candidate{
+			{ID: "reader", Key: "A", Lane: "gateway", Tree: []string{"internal/gateway/**"}, ReadOnly: readOnly, UpdatedUnix: base - 10},
+			{ID: "writer", Key: "B", Lane: "gateway", Tree: []string{"internal/gateway/http.go"}, UpdatedUnix: base - 20},
+		}})
+	}
+	// Floor: without the opt-out, a same-lane overlapping pair serializes before launch.
+	if r := plan(false); r.CollisionCount != 1 {
+		t.Fatalf("same-lane overlap must collide without ReadOnly, got collision %d", r.CollisionCount)
+	}
+	// Opt-out: a read-only reader writes nothing, so both are admitted.
+	r := plan(true)
+	if r.KeepCount != 2 || r.CollisionCount != 0 || len(r.Collisions) != 0 {
+		t.Fatalf("read-only reader must not collide = keep %d collision %d edges %d, want 2/0/0",
+			r.KeepCount, r.CollisionCount, len(r.Collisions))
+	}
+	if dispoOf(r, "reader") != DispKeep || dispoOf(r, "writer") != DispKeep {
+		t.Fatalf("both must keep, got reader=%q writer=%q", dispoOf(r, "reader"), dispoOf(r, "writer"))
+	}
+}
+
 // TestPreferOldestCollisionAdmissionAdmitsOlder is the #3594 headline: under PreferOldest, when a
 // collision forces one of two overlapping workers to serialize, the OLDER unit is admitted and the
 // FRESHER one is priced collision_risk — the exact inverse of the default freshest-first admission
