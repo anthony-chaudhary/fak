@@ -180,6 +180,7 @@ front page.
 
 ### Latest working notes
 
+- [Audit: fakguard crashes & bad preventions at trajectory final steps (2026-07-11)](docs/notes/AUDIT-fakguard-final-step-preventions-2026-07-11.md) -- auto-indexed dated note.
 - [Catch-up scorecard — one 0..1 "how caught up is the dev system" number](docs/notes/CATCHUP-SCORECARD-2026-07-11.md) -- auto-indexed dated note.
 - [Generation Classification — modver policy-manifest key space (issue #2462)](docs/notes/GENERATION-MODVER-POLICY-KEYSPACE-2026-07-11.md) -- auto-indexed dated note.
 - [Nightrun `.gitignore` hygiene + safe detect-and-refuse gitignore automation (2026-07-11)](docs/notes/NIGHTRUN-GITIGNORE-SAFE-AUTOMATION-2026-07-11.md) -- auto-indexed dated note.

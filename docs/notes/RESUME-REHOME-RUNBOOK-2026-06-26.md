@@ -10,11 +10,17 @@ limit, rehoming them onto a healthy account, and tracking them to completion. It
 indexes the existing fleet tooling and records the non-obvious seams that cost a
 session to rediscover.
 
-> **Owes a Go port.** Every tool below is legacy `tools/*.py`, frozen by the
-> `internal/pythongate` ratchet. The durable home for this is a `cmd/fak` verb
-> (`fak resume sweep|plan|run|audit`) backed by `internal/resume`; `fak accounts`
-> already models the rehome/identity layer in Go. Do not extend the Python — port
-> the touched slice. Blocked while `cmd/fak` does not compile (peer WIP).
+> **Go port has landed (the durable home).** `cmd/fak` compiles and the `fak resume`
+> verb family backed by `internal/resume` is wired:
+> `fak resume sweep|scan|plan|stopped|status|watchdog|identity|drive|why`. Prefer
+> these verbs for the discover/plan/status/identity stages. (The earlier note —
+> "owes a Go port … blocked while `cmd/fak` does not compile, peer WIP" — is
+> resolved, and the old `run|audit` verb names never shipped: launch stays the
+> gated Python watchdog and outcome audit is `tools/resume_relaunch_audit.py`.)
+> `fak accounts` models the rehome/identity layer in Go. The `tools/*.py` pipeline
+> below is frozen by the `internal/pythongate` ratchet — do not extend it — and
+> remains the reference for the once-ever `--live` launcher and the cross-platform
+> path.
 
 ## The pipeline (four stages, read-only until the launcher)
 

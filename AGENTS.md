@@ -33,11 +33,17 @@ is the current focus; the security floor rides along for free on the same seam.
 
 ```bash
 go build ./cmd/fak        # -> ./fak  (fak.exe on Windows).
+make build                # debuggable ./fak via the dev profile (DWARF/symbols kept, Delve-ready)
 make test-fast            # ~2s smoke gate: build + vet + `go test -short ./...`
 make test-race            # fast LOCAL race gate (#1311): WSL `go test -short -race ./...`, cgo-preflighted
+make build-race           # race-detector ./fak via the race profile (cgo-preflighted, like test-race)
 make test                 # full suite incl. the weight-backed model witnesses
 make ci                   # the full gate: build + vet + test + claims-lint  (Windows: scripts/ci.ps1)
 ```
+
+The profiles behind `make build` / `make build-race` / `make release` (debuggable vs race-detector vs
+stripped-shipped) are the single flag-delta table in [`docs/dev-tooling.md`](docs/dev-tooling.md#build-profiles),
+all routed through the one `scripts/build.sh` entrypoint (#3709/#3710).
 
 ### Which build am I asking about? (shared trunk — name the question first)
 
@@ -170,8 +176,8 @@ commit/push — so "the guard passed" means CI is green *and* the commit/push wa
 binary is on PATH — ~10.7s → ~0.3s vs spawning a Python interpreter per gate; the shell
 hooks fall back to the `tools/check_*.py` checkers when no binary resolves, so a fresh
 clone is still gated.)
-The HOW below is unchanged and gates the WHEN: stay on the trunk, `git commit -s -- <paths>`
-(never `git add -A`), merge **in place** if the trunk diverged, wait out a peer's
+The HOW below is unchanged and gates the WHEN: stay on the trunk, `git commit -s -m "…" -- <paths>`
+(`-m` before `--`; never `git add -A`), merge **in place** if the trunk diverged, wait out a peer's
 `MERGE_HEAD`, and **never force-push**. If a guard refuses (`OFF_TRUNK`), a peer merge is
 mid-flight, or a blocker stands — reconcile in place or STOP; the default does not fire
 until it clears.
@@ -180,7 +186,8 @@ Dirty shared trees are normal; land finished, green work promptly. Before report
 done, use the repo's index-safe commit tools: `fak sweep [--json]` to group the dirty tree
 by lane, then `fak sweep --apply --lane <lane> -m "<subject>" [--push]` for a whole lane
 group or `fak commit --preview ...` followed by `fak commit --path <p> ... -m "<subject>"`
-for a narrower change. Use raw `git commit -s -- <paths>` only as a fallback when the
+for a narrower change. Use raw `git commit -s -m "<subject>" -- <paths>` (`-m` before `--`, or
+the message editor opens and hangs headless as `INTERACTIVE_HANG`) only as a fallback when the
 binary/tooling is unavailable, and say so in the handoff.
 
 Filing a GitHub issue from an agent session works the same way: prefer
@@ -226,8 +233,9 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
     `git merge origin/main` **in place** and resolve. This is a shared trunk — peers
     routinely build the SAME feature under a different SHA, so most conflicts resolve to
     the trunk **superset** and the merged tree often equals HEAD (verify:
-    `git diff --cached` is empty). Finish with a plain `git commit -s` — the merge commits
-    the index as-is; never `-a` / `git add -A`, which would sweep a peer's files into your
+    `git diff --cached` is empty). Finish with `git commit -s --no-edit` — the merge commits
+    the index as-is with its prepared message (`--no-edit` skips the editor, which would
+    otherwise hang headless as `INTERACTIVE_HANG`); never `-a` / `git add -A`, which would sweep a peer's files into your
     merge. Prefer **merge over rebase**: rebase replays every local commit and re-hits the
     same conflict N times; merge resolves it once. **Never `--autostash`** (on `rebase` or
     `pull --rebase`): an aborted/conflicted rebase pops the stash back as a working-tree
@@ -243,7 +251,8 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
     `git restore --staged` your files, leave edits in the working tree, and wait for
     `MERGE_HEAD` to clear, then commit by explicit path.
 - **Commit by explicit path** — prefer `fak commit --path <p> ...` (or `fak sweep --apply`
-  for one lane group); fallback is `git commit -- <paths>`, never `git add -A`. This is a
+  for one lane group); fallback is `git commit -s -m "<subject>" -- <paths>` (`-m` before
+  `--`), never `git add -A`. This is a
   shared multi-session tree; never stage a peer's uncommitted files. `fak commit --path
   <p> -m "<msg>"` mechanizes this whole rule: it stages only the named paths under an
   advisory lock, writes the message to a file (so an em-dash/multiline subject can't
@@ -376,7 +385,7 @@ route around the guard (that just trips the next one).
 
 | Token | What tripped it | Recover by |
 |---|---|---|
-| `OFF_TRUNK` | you branched / spun a worktree instead of committing to `main` | commit directly to `main` with `git commit -s -- <paths>`; a dirty/diverged tree means merge **in place** or STOP — never escape into a side branch |
+| `OFF_TRUNK` | you branched / spun a worktree instead of committing to `main` | commit directly to `main` with `git commit -s -m "<subject>" -- <paths>` (`-m` before `--`); a dirty/diverged tree means merge **in place** or STOP — never escape into a side branch |
 | `LOOP_DONE_UNWITNESSED` | a loop turn claimed done, but its configured external witness did not corroborate the done effect | re-arm the loop with this token as feedback, satisfy the witness criterion (`dos commit-audit`, `dos verify`, `dos test-witness`, or a registered witness), then re-check |
 | `STALE_BASE_DELETION` | a pathspec commit would silently drop a peer-added block because the working-tree copy is stale relative to `origin/<trunk>` | fetch and merge/rebase `origin/<trunk>` in place so the working tree includes the peer block, then re-commit by explicit path |
 | `FRESH_DELETION` | a staged commit deletes a path added within the recent trunk window, but the commit message does not mention that path | restore the path if the deletion is collateral; if intentional, name the deleted path in the commit message or override once with `FLEET_ALLOW_FRESH_DELETE=1` |

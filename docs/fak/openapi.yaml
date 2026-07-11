@@ -1004,6 +1004,28 @@ paths:
               example: { error: { message: "policy reload is not configured", type: "invalid_request_error", code: null, param: null } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/route/reload:
+    post:
+      tags: [fak-native]
+      summary: Hot-reload the model-routing manifest
+      description: Forces an in-place reload of the installed model-routing manifest (no request body) — the route-plane twin of `/v1/fak/policy/reload`. Drives the same watcher as the background poll loop; a malformed edit is rejected (last-good kept) and reported as a 400, and a byte-identical file is a 200 no-op.
+      responses:
+        '200':
+          description: The reload result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteReloadResponse' }
+              example: { reloaded: true, source: "/etc/fak/route.json", changed: true, reloads: 1, rejects: 0 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Route reload is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "route reload is not configured", type: "invalid_request_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/trace/reset:
     post:
       tags: [fak-native]
@@ -1763,6 +1785,16 @@ components:
         reloaded: { type: boolean }
         source: { type: string, description: The path the policy was reloaded from. }
         summary: { type: string }
+
+    RouteReloadResponse:
+      type: object
+      description: The outcome of a forced model-routing manifest reload.
+      properties:
+        reloaded: { type: boolean, description: True when a new manifest was atomically installed. }
+        source: { type: string, description: The watched route-manifest path. }
+        changed: { type: boolean, description: True when the file content differed from the installed policy. }
+        reloads: { type: integer, format: int64, description: Cumulative successful hot-swaps (after this reload). }
+        rejects: { type: integer, format: int64, description: Cumulative rejected (malformed) reload attempts. }
 
     TraceResetRequest:
       type: object

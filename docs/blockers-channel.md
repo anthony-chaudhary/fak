@@ -13,8 +13,11 @@ isn't paged for the ones that don't.
 It is a **Slack status surface**, the twin of `#scoreboard` / the bench channel — an
 OUTBOUND post, never an inbound listener. fak does not take orders from a Slack message
 here; it posts a blocker it already detected locally. It lives in the public scoreboard
-workspace (team `T0BDEJF1HGB`), channel `C0BDHRJJPTP`, and posts with the same
-`FAK_SCOREBOARD_TOKEN` bot — never the private lab `SLACK_BOT_TOKEN`.
+workspace (team `T0BDEJF1HGB`) and posts with the same `FAK_SCOREBOARD_TOKEN` bot —
+never the private lab `SLACK_BOT_TOKEN`. By default it lands in the shared **CI/CD
+reporting sink** (`C0BGQ411TCJ`, `scoreboard.CICDReportChannel`) alongside the rest of
+the status feeders (see [decisions/cicd-reporting-slack-sink.md](decisions/cicd-reporting-slack-sink.md));
+set `FAK_BLOCKERS_CHANNEL` to split blockers back into their own room.
 
 ## Two tiers: background vs surfaced
 
@@ -76,7 +79,7 @@ configures every workspace):
 | Key | Default | Meaning |
 |---|---|---|
 | `FAK_BLOCKERS_TOKEN` | falls back to `FAK_SCOREBOARD_TOKEN` | the bot token (never the lab `SLACK_BOT_TOKEN`). |
-| `FAK_BLOCKERS_CHANNEL` | `C0BDHRJJPTP` (#blockers) | target channel; never inherits `FAK_SCOREBOARD_CHANNEL`. |
+| `FAK_BLOCKERS_CHANNEL` | `C0BGQ411TCJ` (CI/CD reporting sink) | target channel; falls back to the family sink, then `FAK_CICD_REPORT_CHANNEL`; never inherits `FAK_SCOREBOARD_CHANNEL`. |
 | `FAK_BLOCKERS_LABEL` | `blocked` | the feeder's issue-label filter (repo variable). |
 
 **Operator one-time step:** add the repo secret `FAK_SCOREBOARD_TOKEN` (the

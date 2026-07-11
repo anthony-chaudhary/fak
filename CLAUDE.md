@@ -12,9 +12,11 @@ The four that will bite you if you skip them:
   it is detached (never a branch) and commits only through the serialized land under the
   worker's lane lease, it is not off-trunk and never trips `OFF_TRUNK`. Feature branches
   and any other off-trunk commit stay forbidden. (Details in [`AGENTS.md`](AGENTS.md).)
-- **Commit by explicit path** — `git commit -- <paths>`, never `git add -A` (shared
-  multi-session tree). Sign off with `git commit -s` (DCO). Use a Conventional-Commits
-  subject and end every ship commit with a `(fak <leaf>)` trailer so the `dos verify`
+- **Commit by explicit path** — `git commit -s -m "<subject>" -- <paths>`, never `git add -A`
+  (shared multi-session tree). Keep `-m`/`-F` BEFORE the `--` pathspec: a bare `git commit`
+  opens the message editor and hangs headless (`INTERACTIVE_HANG`), and an `-m` placed AFTER
+  `--` is parsed as a pathspec, not a message. Sign off with `-s` (DCO). End every ship
+  commit's Conventional-Commits subject with a `(fak <leaf>)` trailer so the `dos verify`
   referee can bind it — e.g. `fix(gateway): treat same-tick ready as positive (fak gateway)`.
   A bare un-stamped subject stays NOT_SHIPPED. The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md)
   skill mechanizes this rule end to end — lint the subject, stage-and-commit exactly your
