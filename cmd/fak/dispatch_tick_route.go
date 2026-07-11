@@ -42,6 +42,20 @@ const dispatchRoutedBacklogTTL = 5 * time.Second
 
 var dispatchRoutedBacklogCache = dispatchcache.New[dispatchtick.RouterPayload](time.Now)
 
+const dispatchLaneQueueTTL = 5 * time.Minute
+
+func dispatchLaneQueuePath(root string) string {
+	return filepath.Join(root, ".fak", "dispatch", "lane-queues.json")
+}
+
+func persistDispatchLaneQueues(root, key string, payload dispatchtick.RouterPayload, now time.Time) error {
+	lanes := make(map[string][]int, len(payload.Lanes))
+	for lane, group := range payload.Lanes {
+		lanes[lane] = append([]int(nil), group.Issues...)
+	}
+	return dispatchcache.WriteQueues(dispatchLaneQueuePath(root), key, lanes, now)
+}
+
 // dispatchDuplicateRiskCache lives across ticks so RouteIssues only reruns the
 // O(n^2) duplicate-risk scan when the routable backlog's content hash actually
 // changes (#4171). Each call re-hashes, so a stale key can never return a wrong
@@ -513,6 +527,9 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 	// intersect a live known-bad signature (internal/knownbad ledger, #2713). Disjoint
 	// issues keep dispatching. Fails open on a missing/broken ledger so it never stalls.
 	payload = holdKnownBadForRoute(root, payload)
+	// Persist the already-scored per-lane order so the next process/tick can pop a
+	// lane head without reconstructing ordering from the whole backlog (#4170).
+	_ = persistDispatchLaneQueues(root, cacheKey, payload, time.Now())
 	dispatchRoutedBacklogCache.Put(cacheKey, payload, dispatchRoutedBacklogTTL)
 	return payload, nil
 }
