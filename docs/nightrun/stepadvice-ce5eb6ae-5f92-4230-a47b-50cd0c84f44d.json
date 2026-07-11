@@ -4,7 +4,7 @@
   "step_class": "rebuild",
   "basis": "context_event",
   "reason": "context event 0 turn(s) ago rewrote the window; re-anchor from durable state before a wide step",
-  "resident_tokens": 120270,
+  "resident_tokens": 117473,
   "budget_tokens": 48000,
   "phase": "post_event"
 }

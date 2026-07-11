@@ -1,0 +1,10 @@
+{
+  "schema": "fak.stepadvice.stamp.v1",
+  "trace_id": "guard",
+  "step_class": "checkpoint",
+  "basis": "token_headroom",
+  "reason": "resident 67.9k of 48.0k budget (141% used)",
+  "resident_tokens": 67907,
+  "budget_tokens": 48000,
+  "phase": "crowding"
+}

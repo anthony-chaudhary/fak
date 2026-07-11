@@ -1,0 +1,10 @@
+{
+  "schema": "fak.stepadvice.stamp.v1",
+  "trace_id": "docs-claude-68896-bcc08b87",
+  "step_class": "checkpoint",
+  "basis": "token_headroom",
+  "reason": "resident 70.2k of 48.0k budget (146% used)",
+  "resident_tokens": 70248,
+  "budget_tokens": 48000,
+  "phase": "crowding"
+}
