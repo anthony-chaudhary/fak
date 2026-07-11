@@ -16,6 +16,10 @@ const (
 	PreflightRefuseInspect    = "REFUSE_INSPECT"
 	PreflightObserveSettling  = "OBSERVE_SCALING_IN_PROGRESS"
 	PreflightRefuseTreePoison = "TREE_POISONED"
+	// PreflightRefuseLandSaturated throttles new spawns while the serialized-land
+	// funnel is saturated (#3574). It is only ever emitted when PreflightInput's
+	// LandContention term is Enabled; with the knob off the fold never reaches it.
+	PreflightRefuseLandSaturated = "LAND_SATURATED"
 )
 
 const (
@@ -138,6 +142,24 @@ type TreeCheck struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// LandContention is the OPTIONAL land-saturation backpressure term (#3574). When
+// Enabled, classifyPreflight refuses with PreflightRefuseLandSaturated while the
+// serialized-land contention Signal sits at or above HighWater, holds the Prior
+// tick's decision between the marks (a Schmitt-trigger hysteresis band, so a signal
+// oscillating around one threshold does not flap the fleet), and admits once Signal
+// falls below LowWater. Enabled defaults false, so the zero value is a pure no-op and
+// the preflight fold stays byte-identical to before this term existed.
+type LandContention struct {
+	Enabled   bool    `json:"enabled"`
+	Signal    float64 `json:"signal"`
+	HighWater float64 `json:"high_water"`
+	LowWater  float64 `json:"low_water"`
+	// Prior carries the previous tick's land-contention decision so the hysteresis band
+	// can hold it: PreflightRefuseLandSaturated when the last tick refused for saturation,
+	// "" otherwise. Only consulted while Signal is inside the [LowWater, HighWater) band.
+	Prior string `json:"prior,omitempty"`
+}
+
 type PreflightInput struct {
 	Workspace  string
 	MaxWorkers int
@@ -172,6 +194,10 @@ type PreflightInput struct {
 	// lowering term -- it can only tighten the cap, never raise it. Zero (the default)
 	// means "no contraction in flight" and is byte-identical to before this term existed.
 	ContractionTarget int
+	// LandContention is the OPTIONAL serialized-land backpressure term (#3574). Its zero
+	// value (Enabled=false) is a no-op: classifyPreflight only consults it when Enabled,
+	// so the fold is byte-identical to before this term existed unless the knob is set.
+	LandContention LandContention
 }
 
 type PreflightResult struct {
@@ -434,6 +460,26 @@ func capTerms(in PreflightInput, hostCap *int, effective, floor int) CapTerms {
 	return terms
 }
 
+// landSaturated is the #3574 land-contention Schmitt trigger. With the knob enabled it
+// latches ON at or above HighWater, latches OFF below LowWater, and inside the
+// [LowWater, HighWater) band holds whatever the prior tick decided (c.Prior). Disabled
+// (the zero value) it always returns false, so classifyPreflight is byte-identical to
+// before the term existed. A degenerate HighWater<=LowWater collapses to a single
+// threshold at HighWater (the band is empty).
+func landSaturated(c LandContention) bool {
+	if !c.Enabled {
+		return false
+	}
+	switch {
+	case c.Signal >= c.HighWater:
+		return true
+	case c.Signal < c.LowWater:
+		return false
+	default:
+		return c.Prior == PreflightRefuseLandSaturated
+	}
+}
+
 func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool, hostCap *int) (string, string) {
 	switch {
 	case strings.TrimSpace(in.Host.Error) != "" || strings.TrimSpace(in.Kernel.Error) != "":
@@ -450,6 +496,9 @@ func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool
 	case seatsDepleted:
 		total, leased := intValue(in.Seat.Total), intValue(in.Seat.Leased)
 		return PreflightRefuseNoSeat, fmt.Sprintf("seat pool depleted: 0 of %d session slot(s) free (%d leased to live worker(s), live=%d); a slot frees when a worker exits - refusing rather than overbook a busy account", total, leased, live)
+	case landSaturated(in.LandContention):
+		lc := in.LandContention
+		return PreflightRefuseLandSaturated, fmt.Sprintf("land contention saturated: signal %.3f (high-water %.3f, low-water %.3f) - throttling new spawns until the serialized-land funnel drains", lc.Signal, lc.HighWater, lc.LowWater)
 	case in.Kernel.Alive != nil && in.Kernel.Target != nil && *in.Kernel.Alive != *in.Kernel.Target:
 		return PreflightObserveSettling, fmt.Sprintf("observing scaling in progress: %d alive, target %d", *in.Kernel.Alive, *in.Kernel.Target)
 	case live >= capacity:
