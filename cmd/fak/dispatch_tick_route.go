@@ -508,6 +508,63 @@ var dispatchTickView = ""
 var dispatchFetchViewIssues = dispatchFetchViewIssuesGH
 var dispatchFetchBacklogIssues = dispatchFetchOpenIssues
 
+type dispatchBacklogDelta struct {
+	Issues    []dispatchtick.Issue
+	Closed    []int
+	Watermark time.Time
+}
+
+var dispatchFetchBacklogDeltaIssues = dispatchFetchBacklogDeltaGH
+
+func dispatchBacklogSnapshotPath(root string) string {
+	return filepath.Join(root, ".fak", "dispatch", "backlog.json")
+}
+
+func dispatchIssueRows(issues []dispatchtick.Issue) []dispatchcache.BacklogIssue {
+	rows := make([]dispatchcache.BacklogIssue, 0, len(issues))
+	for _, issue := range issues {
+		if b, err := json.Marshal(issue); err == nil {
+			rows = append(rows, dispatchcache.BacklogIssue{Number: issue.Number, Data: b})
+		}
+	}
+	return rows
+}
+func dispatchRowsIssues(rows []dispatchcache.BacklogIssue) ([]dispatchtick.Issue, error) {
+	out := make([]dispatchtick.Issue, 0, len(rows))
+	for _, row := range rows {
+		var issue dispatchtick.Issue
+		if err := json.Unmarshal(row.Data, &issue); err != nil {
+			return nil, err
+		}
+		out = append(out, issue)
+	}
+	return out, nil
+}
+
+func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]dispatchtick.Issue, error) {
+	key := dispatchcache.Key(root, "", limit)
+	path := dispatchBacklogSnapshotPath(root)
+	if snap, ok := dispatchcache.ReadBacklog(path, key); ok {
+		delta, err := dispatchFetchBacklogDeltaIssues(root, snap.Watermark, limit)
+		if err == nil {
+			merged := dispatchcache.MergeBacklog(snap.Issues, dispatchIssueRows(delta.Issues), delta.Closed)
+			watermark := delta.Watermark
+			if watermark.IsZero() {
+				watermark = now
+			}
+			if err = dispatchcache.WriteBacklog(path, key, watermark, merged); err == nil {
+				return dispatchRowsIssues(merged)
+			}
+		}
+	}
+	issues, err := dispatchFetchBacklogIssues(root, limit)
+	if err != nil {
+		return nil, err
+	}
+	_ = dispatchcache.WriteBacklog(path, key, now, dispatchIssueRows(issues))
+	return issues, nil
+}
+
 func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
 	payload, err := dispatchRoutedBeforePrereqHold(root, stderr)
 	if err != nil {
@@ -596,7 +653,7 @@ func dispatchFetchScopedIssuesWithSignal(root string, stderr io.Writer, view str
 			return viewIssues, true, "", nil
 		}
 	}
-	issues, err := dispatchFetchBacklogIssues(root, limit)
+	issues, err := dispatchFetchBacklogIncremental(root, limit, time.Now())
 	reason := ""
 	if view != "" {
 		reason = "view unavailable or empty; full backlog used"
@@ -759,6 +816,39 @@ func parseDispatchTomlStringArray(raw string) []string {
 		}
 	}
 	return out
+}
+
+func dispatchFetchBacklogDeltaGH(root string, watermark time.Time, limit int) (dispatchBacklogDelta, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	search := "updated:>=" + watermark.UTC().Format(time.RFC3339)
+	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "all", "--search", search, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,state,updatedAt")
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	var rows []struct {
+		dispatchtick.Issue
+		State     string    `json:"state"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+	if uerr := json.Unmarshal(out, &rows); uerr != nil {
+		if err != nil {
+			return dispatchBacklogDelta{}, fmt.Errorf("gh issue delta: %w (%s)", err, strings.TrimSpace(string(out)))
+		}
+		return dispatchBacklogDelta{}, uerr
+	}
+	d := dispatchBacklogDelta{Watermark: time.Now().UTC()}
+	for _, row := range rows {
+		if row.UpdatedAt.After(d.Watermark) {
+			d.Watermark = row.UpdatedAt
+		}
+		if strings.EqualFold(row.State, "OPEN") {
+			d.Issues = append(d.Issues, row.Issue)
+		} else {
+			d.Closed = append(d.Closed, row.Number)
+		}
+	}
+	return d, nil
 }
 
 func dispatchFetchOpenIssues(root string, limit int) ([]dispatchtick.Issue, error) {

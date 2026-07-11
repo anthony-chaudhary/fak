@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -119,5 +120,53 @@ func TestPickDispatchLaneFallsBackWhenPersistedQueueStale(t *testing.T) {
 	}
 	if fetches != 1 {
 		t.Fatalf("fallback fetches=%d, want 1", fetches)
+	}
+}
+
+func TestDispatchBacklogIncrementalMergesUpdateAddAndClosure(t *testing.T) {
+	root := t.TempDir()
+	now := time.Unix(200, 0).UTC()
+	key := dispatchcache.Key(root, "", 1000)
+	if err := dispatchcache.WriteBacklog(dispatchBacklogSnapshotPath(root), key, now.Add(-time.Minute), dispatchIssueRows([]dispatchtick.Issue{{Number: 1, Title: "old"}, {Number: 2, Title: "close"}})); err != nil {
+		t.Fatal(err)
+	}
+	oldDelta, oldFull := dispatchFetchBacklogDeltaIssues, dispatchFetchBacklogIssues
+	dispatchFetchBacklogDeltaIssues = func(string, time.Time, int) (dispatchBacklogDelta, error) {
+		return dispatchBacklogDelta{Issues: []dispatchtick.Issue{{Number: 1, Title: "new"}, {Number: 3, Title: "added"}}, Closed: []int{2}, Watermark: now}, nil
+	}
+	full := 0
+	dispatchFetchBacklogIssues = func(string, int) ([]dispatchtick.Issue, error) { full++; return nil, nil }
+	t.Cleanup(func() { dispatchFetchBacklogDeltaIssues, dispatchFetchBacklogIssues = oldDelta, oldFull })
+	got, err := dispatchFetchBacklogIncremental(root, 1000, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full != 0 || len(got) != 2 || got[0].Number != 1 || got[0].Title != "new" || got[1].Number != 3 {
+		t.Fatalf("got=%+v full=%d", got, full)
+	}
+}
+
+func TestDispatchBacklogIncrementalFallsBackToFullRefresh(t *testing.T) {
+	root := t.TempDir()
+	now := time.Unix(200, 0).UTC()
+	key := dispatchcache.Key(root, "", 1000)
+	if err := dispatchcache.WriteBacklog(dispatchBacklogSnapshotPath(root), key, now.Add(-time.Minute), nil); err != nil {
+		t.Fatal(err)
+	}
+	oldDelta, oldFull := dispatchFetchBacklogDeltaIssues, dispatchFetchBacklogIssues
+	dispatchFetchBacklogDeltaIssues = func(string, time.Time, int) (dispatchBacklogDelta, error) {
+		return dispatchBacklogDelta{}, errors.New("delta unavailable")
+	}
+	dispatchFetchBacklogIssues = func(string, int) ([]dispatchtick.Issue, error) {
+		return []dispatchtick.Issue{{Number: 9, Title: "full"}}, nil
+	}
+	t.Cleanup(func() { dispatchFetchBacklogDeltaIssues, dispatchFetchBacklogIssues = oldDelta, oldFull })
+	got, err := dispatchFetchBacklogIncremental(root, 1000, now)
+	if err != nil || len(got) != 1 || got[0].Number != 9 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	snap, ok := dispatchcache.ReadBacklog(dispatchBacklogSnapshotPath(root), key)
+	if !ok || !snap.Watermark.Equal(now) {
+		t.Fatalf("snap=%+v ok=%v", snap, ok)
 	}
 }
