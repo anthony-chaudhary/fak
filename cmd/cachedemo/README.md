@@ -85,4 +85,4 @@ evidence — nothing about a live session or a projected future rate.
 - [Cache-value rollup](../../docs/cache-value-rollup.md) — WITNESSED reuse vs OBSERVED dollars
 - [What a saved token is worth](../../docs/explainers/what-a-saved-token-is-worth.md)
 - [Context shedding](../../docs/explainers/context-shedding.md) — the per-fire trim this demo folds
-- Ledgers it reads: [`gateway-usage.jsonl`](../../docs/nightrun/gateway-usage.jsonl), [`cache-savings.jsonl`](../../docs/nightrun/cache-savings.jsonl)
+- Ledgers it reads (live runtime defaults `.fak/nightrun/{gateway-usage,cache-savings}.jsonl` since the #3209 migration; the tracked publication snapshots are linked here): [`gateway-usage.jsonl`](../../docs/nightrun/gateway-usage.jsonl), [`cache-savings.jsonl`](../../docs/nightrun/cache-savings.jsonl)
