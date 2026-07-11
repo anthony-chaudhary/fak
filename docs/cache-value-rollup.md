@@ -14,7 +14,9 @@ description: "The front door for reading whether fak's cache work pays off, keep
 Before the roll-up, cache-effectiveness evidence was scattered across five places:
 
 - `docs/nightrun/cache-value.jsonl`, the durable session ledger.
-- `docs/nightrun/gateway-usage.jsonl`, the durable guard/serve usage ledger.
+- `.fak/nightrun/gateway-usage.jsonl`, the live guard/serve usage ledger (gitignored
+  runtime state since the #3209 migration; a tracked publication snapshot persists under
+  `docs/nightrun/`).
 - `fak nightrun score`, the all-time regression gate over that ledger.
 - `internal/cachevaluereport`, the weekly Track-1 trend fold.
 - Benchmark packets such as `docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md`.
@@ -42,7 +44,8 @@ kernel reuse.
 
 `fak cachevalue report` also prints `Fleet aggregate`, an all-time roll-up by default
 (or caller-windowed with `--since`). It joins the two cache ledgers with
-`docs/nightrun/gateway-usage.jsonl` so long-horizon guard use has cumulative counters:
+`.fak/nightrun/gateway-usage.jsonl` (the live runtime default of `--usage-ledger`) so
+long-horizon guard use has cumulative counters:
 
 - **Usage** (WITNESSED operational): recorded guard/serve rows, exit sessions, uptime,
   kernel decisions, and the operational token axes (input/output). This block is the
