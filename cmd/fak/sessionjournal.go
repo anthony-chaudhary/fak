@@ -200,7 +200,7 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 				"stale":   counts[sessionjournal.StatusStale],
 				"closed":  counts[sessionjournal.StatusClosed],
 			},
-			"sessions": classified,
+			"sessions": reportRows(classified),
 		}, "fak sessionjournal")
 	}
 
@@ -214,9 +214,32 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderSessionJournalTable(stdout, classified)
 	if counts[sessionjournal.StatusCrashed] > 0 && !*crashedOnly {
-		fmt.Fprintln(stdout, "\nCRASHED rows are resume candidates — each carries the cwd to relaunch from.")
+		fmt.Fprintln(stdout, "\nCRASHED rows are resume candidates — each carries the cwd and remaining drive (budget/spend/generation) to relaunch from; DRIVE=- means no carried drive (legacy row).")
 	}
 	return 0
+}
+
+// sessionJournalReportRow is a classified session plus the resume_with_drive flag the C4
+// relaunch pipeline (#3788) filters on. Classified is embedded (no json tag) so every field
+// it carries — including the `drive` block E1 (#4129) adds to Session — flattens into the
+// report envelope unchanged; this only ADDS the boolean.
+type sessionJournalReportRow struct {
+	sessionjournal.Classified
+	ResumeWithDrive bool `json:"resume_with_drive"`
+}
+
+// reportRows projects the classified set into the JSON rows, stamping resume_with_drive on
+// each. It is a CRASHED (resume-candidate) row that actually carries a drive-state — the one
+// the pipeline can relaunch at the right remaining budget rather than a fresh full one.
+func reportRows(cs []sessionjournal.Classified) []sessionJournalReportRow {
+	rows := make([]sessionJournalReportRow, len(cs))
+	for i, c := range cs {
+		rows[i] = sessionJournalReportRow{
+			Classified:      c,
+			ResumeWithDrive: c.Status == sessionjournal.StatusCrashed && c.Drive != nil,
+		}
+	}
+	return rows
 }
 
 func bootTimeString(bt time.Time) string {
@@ -292,13 +315,53 @@ func sortClassified(cs []sessionjournal.Classified) {
 
 func renderSessionJournalTable(w io.Writer, cs []sessionjournal.Classified) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "STATUS\tREASON\tID\tAGENT\tPID\tSTARTED\tCWD\n")
+	fmt.Fprintf(tw, "STATUS\tREASON\tID\tAGENT\tPID\tSTARTED\tDRIVE\tCWD\n")
 	for _, c := range cs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			c.Status, c.Reason, orDash(c.ID), orDash(firstNonEmpty(c.Agent, c.Model)),
-			c.PID, orDash(startedString(c.StartedAt)), orDash(c.CWD))
+			c.PID, orDash(startedString(c.StartedAt)), orDash(driveSummary(c.Drive)), orDash(c.CWD))
 	}
 	_ = tw.Flush()
+}
+
+// microCentsPerDollar converts the DriveCarry spend axis (micro-cents; 1e6 per cent per
+// internal/session.MicroCentsPerCent, ×100 cents) to dollars for the compact DRIVE cell.
+const microCentsPerDollar = 100 * 1_000_000
+
+// driveSummary renders a compact one-cell remaining-budget summary for the DRIVE column,
+// e.g. "t=3 tok=12k $4.50 gen=2"; "" (rendered "-" by orDash) when no drive is carried. Only
+// the set axes appear, so a carry with just turns reads "t=3" rather than a wall of zeros.
+func driveSummary(d *sessionjournal.DriveCarry) string {
+	if d == nil {
+		return ""
+	}
+	var parts []string
+	if d.TurnsLeft != 0 {
+		parts = append(parts, fmt.Sprintf("t=%d", d.TurnsLeft))
+	}
+	if d.TokensLeft != 0 {
+		parts = append(parts, "tok="+compactCount(d.TokensLeft))
+	}
+	if d.SpendMicroCentsLeft != 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", float64(d.SpendMicroCentsLeft)/microCentsPerDollar))
+	}
+	if d.Generation != 0 {
+		parts = append(parts, fmt.Sprintf("gen=%d", d.Generation))
+	}
+	return strings.Join(parts, " ")
+}
+
+// compactCount renders a token count compactly for the DRIVE cell: 12000 -> "12k",
+// 3_500_000 -> "3.5m", small values verbatim.
+func compactCount(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fm", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%dk", n/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 func startedString(t time.Time) string {
