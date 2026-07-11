@@ -1,0 +1,76 @@
+{
+  "source": ".dispatch-runs/guard-audit/interactive-37096-16daf1ca84d5.jsonl",
+  "note": "Aggregates recomputed from a live `fak guard` hash-chained decision journal (a local .dispatch-runs capture). Regenerate with tools/gen_session_effectiveness_svg.py.",
+  "total_decisions": 1720,
+  "allow": 1716,
+  "deny": 4,
+  "allow_pct": 99.77,
+  "duration_seconds": 25846.5,
+  "duration_hms": "7h 11m",
+  "hash_chain_breaks": 0,
+  "distinct_tools": 22,
+  "reads": 936,
+  "writes": 77,
+  "read_write_ratio": 12.2,
+  "enforcers": {
+    "monitor": 1716,
+    "gitgate": 1,
+    "ifc-sink": 3
+  },
+  "deny_events": [
+    {
+      "seq": 142,
+      "tool": "Bash",
+      "verdict": "DENY",
+      "reason": "POLICY_BLOCK",
+      "by": "gitgate",
+      "args_label": "command=cd fak"
+    },
+    {
+      "seq": 544,
+      "tool": "CronDelete",
+      "verdict": "DENY",
+      "reason": "TRUST_VIOLATION",
+      "by": "ifc-sink",
+      "args_label": "keys=id"
+    },
+    {
+      "seq": 545,
+      "tool": "SendMessage",
+      "verdict": "DENY",
+      "reason": "TRUST_VIOLATION",
+      "by": "ifc-sink",
+      "args_label": "keys=message,to"
+    },
+    {
+      "seq": 1052,
+      "tool": "SendMessage",
+      "verdict": "DENY",
+      "reason": "TRUST_VIOLATION",
+      "by": "ifc-sink",
+      "args_label": "keys=message,summary,to"
+    }
+  ],
+  "timeline_bins_12": [
+    211,
+    203,
+    123,
+    158,
+    322,
+    169,
+    93,
+    129,
+    161,
+    68,
+    29,
+    54
+  ],
+  "work_mix": {
+    "execute": 537,
+    "mcp": 45,
+    "explore": 1035,
+    "orchestrate": 22,
+    "author": 77,
+    "schedule": 4
+  }
+}

@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180" role="img" aria-labelledby="se-title se-desc">
+<title id="se-title">One guarded fak session: 1,720 hash-chained decisions over 7h 11m, 4 dangerous calls blocked, 0 chain breaks</title>
+<desc id="se-desc">A live fak guard journal replayed. The kernel adjudicated 1,720 tool calls across a 7-hour unattended run, allowed 99.77% to proceed, blocked exactly the 4 dangerous ones, and chained every verdict into a tamper-evident record with zero breaks. Numbers computed from .dispatch-runs/guard-audit/interactive-37096-16daf1ca84d5.jsonl.</desc>
+<defs>
+<linearGradient id="se-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f7f9fb"/><stop offset="55%" stop-color="#eef4f1"/><stop offset="100%" stop-color="#f8f3ee"/></linearGradient>
+<style>.kick{font:800 13px "Segoe UI",Arial,sans-serif;fill:#2e8b57;letter-spacing:2px}.ti{font:900 42px "Segoe UI",Arial,sans-serif;fill:#14202b}.sub{font:400 19px "Segoe UI",Arial,sans-serif;fill:#415266}.statV{font:900 40px "Segoe UI",Arial,sans-serif}.statL{font:700 12px "Segoe UI",Arial,sans-serif;fill:#5b6a7a;letter-spacing:.5px}.statS{font:400 11px "Segoe UI",Arial,sans-serif;fill:#8090a0}.pband{font:800 15px "Segoe UI",Arial,sans-serif;fill:#fff;letter-spacing:1px}.pbandR{font:700 11px "Segoe UI",Arial,sans-serif;fill:#fff;fill-opacity:.85}.pnote{font:400 13px "Segoe UI",Arial,sans-serif;fill:#415266}.rowT{font:800 15px "Segoe UI",Arial,sans-serif;fill:#14202b}.rowN{font:400 12px "Segoe UI",Arial,sans-serif;fill:#5b6a7a}.chip{font:700 11px "Segoe UI",Arial,sans-serif}.axis{font:400 11px "Segoe UI",Arial,sans-serif;fill:#5b6a7a}.barN{font:700 12px "Segoe UI",Arial,sans-serif;fill:#415266}.big{font:900 34px "Segoe UI",Arial,sans-serif}.mid{font:900 24px "Segoe UI",Arial,sans-serif}.wlab{font:700 13px "Segoe UI",Arial,sans-serif;fill:#14202b}.wnum{font:800 13px "Segoe UI",Arial,sans-serif;fill:#1c7c92}.thH{font:800 14px "Segoe UI",Arial,sans-serif;fill:#fff;letter-spacing:1px}.thB{font:400 15px "Segoe UI",Arial,sans-serif;fill:#eaf1f4}.thL{font:800 15px "Segoe UI",Arial,sans-serif;fill:#8fd0c4}.foot{font:400 12px "Segoe UI",Arial,sans-serif;fill:#5b6a7a}.mono{font:400 11px "Consolas","Segoe UI",monospace;fill:#5b6a7a}
+</style></defs>
+<rect x="0" y="0" width="1440" height="1180" fill="url(#se-bg)"/>
+<rect x="24" y="20" width="1392" height="1140" rx="12" fill="#ffffff" stroke="#d9e1e8" stroke-width="1" opacity="0.62"/>
+<text x="56" y="66" class="kick">ONE GUARDED SESSION · CAPTURED LIVE · EVERY TOOL CALL ADJUDICATED</text>
+<text x="56" y="112" class="ti">1,720 decisions. 4 stopped. 0 tampered.</text>
+<text x="56" y="146" class="sub">One “fak guard” run drove an agent for 7 hours unattended — the kernel let the real work flow,</text>
+<text x="56" y="172" class="sub">blocked only the dangerous calls, and hash-chained every verdict into an unbroken record.</text>
+<line x1="56" y1="190" x2="1384" y2="190" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="40" y="210" width="256" height="124" rx="10" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="40" y="210" width="5" height="124" rx="2.5" fill="#1c7c92"/>
+<text x="62" y="272" class="statV" style="fill:#1c7c92">1,720</text>
+<text x="62" y="300" class="statL">GUARDED DECISIONS</text>
+<text x="62" y="318" class="statS">every tool call, one verdict</text>
+<rect x="316" y="210" width="256" height="124" rx="10" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="316" y="210" width="5" height="124" rx="2.5" fill="#14202b"/>
+<text x="338" y="272" class="statV" style="fill:#14202b">7h 11m</text>
+<text x="338" y="300" class="statL">UNATTENDED</text>
+<text x="338" y="318" class="statS">no human in the loop</text>
+<rect x="592" y="210" width="256" height="124" rx="10" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="592" y="210" width="5" height="124" rx="2.5" fill="#3a7d9c"/>
+<text x="614" y="272" class="statV" style="fill:#3a7d9c">99.77%</text>
+<text x="614" y="300" class="statL">ALLOWED TO PROCEED</text>
+<text x="614" y="318" class="statS">the guard is a floor, not friction</text>
+<rect x="868" y="210" width="256" height="124" rx="10" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="868" y="210" width="5" height="124" rx="2.5" fill="#d03b3b"/>
+<text x="890" y="272" class="statV" style="fill:#d03b3b">4</text>
+<text x="890" y="300" class="statL">DANGEROUS CALLS BLOCKED</text>
+<text x="890" y="318" class="statS">caught exactly what mattered</text>
+<rect x="1144" y="210" width="256" height="124" rx="10" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="1144" y="210" width="5" height="124" rx="2.5" fill="#1c7c92"/>
+<text x="1166" y="272" class="statV" style="fill:#1c7c92">0</text>
+<text x="1166" y="300" class="statL">HASH-CHAIN BREAKS</text>
+<text x="1166" y="318" class="statS">the record can't be edited</text>
+<rect x="40" y="360" width="424" height="46" rx="8" fill="#3a7d9c"/>
+<text x="56" y="389" class="pband">SAFETY IS NOT FRICTION</text>
+<text x="448" y="389" class="pbandR" text-anchor="end">1,716 allow · 4 deny</text>
+<text x="42" y="438" class="pnote">The kernel waved through the work and stopped only the risk.</text>
+<rect x="42" y="452" width="420" height="26" rx="6" fill="#3a7d9c"/>
+<rect x="450" y="452" width="12" height="26" fill="#d03b3b"/>
+<text x="54" y="469" class="chip" style="fill:#fff">ALLOW 99.77%</text>
+<text x="442" y="469" class="chip" text-anchor="end" style="fill:#fff">DENY 0.23%</text>
+<text x="42" y="496" class="statS">↓  the 0.23% is 4 calls — magnified below, not to scale</text>
+<rect x="40" y="512" width="424" height="66" rx="8" fill="#fdecec" stroke="#e6a3a3" stroke-width="1"/>
+<rect x="40" y="512" width="5" height="66" rx="2.5" fill="#d03b3b"/>
+<text x="58" y="538" class="rowT">Bash</text>
+<rect x="353.6" y="524" width="96.4" height="20" rx="10" fill="#fff" stroke="#e6a3a3" stroke-width="1"/>
+<text x="401.8" y="538" class="chip" text-anchor="middle" style="fill:#d03b3b">POLICY_BLOCK</text>
+<text x="58" y="558" class="rowN">off-policy git action — refused at the git gate</text>
+<text x="58" y="572" class="rowN" style="fill:#b06a2a;font-weight:700">enforcer: gitgate</text>
+<rect x="40" y="586" width="424" height="66" rx="8" fill="#fdecec" stroke="#e6a3a3" stroke-width="1"/>
+<rect x="40" y="586" width="5" height="66" rx="2.5" fill="#d03b3b"/>
+<text x="58" y="612" class="rowT">CronDelete</text>
+<rect x="332.0" y="598" width="118.0" height="20" rx="10" fill="#fff" stroke="#e6a3a3" stroke-width="1"/>
+<text x="391.0" y="612" class="chip" text-anchor="middle" style="fill:#d03b3b">TRUST_VIOLATION</text>
+<text x="58" y="632" class="rowN">tainted data reaching a destructive sink — refused</text>
+<text x="58" y="646" class="rowN" style="fill:#b06a2a;font-weight:700">enforcer: ifc-sink</text>
+<rect x="40" y="660" width="424" height="66" rx="8" fill="#fdecec" stroke="#e6a3a3" stroke-width="1"/>
+<rect x="40" y="660" width="5" height="66" rx="2.5" fill="#d03b3b"/>
+<text x="58" y="686" class="rowT">SendMessage</text>
+<rect x="332.0" y="672" width="118.0" height="20" rx="10" fill="#fff" stroke="#e6a3a3" stroke-width="1"/>
+<text x="391.0" y="686" class="chip" text-anchor="middle" style="fill:#d03b3b">TRUST_VIOLATION</text>
+<text x="58" y="706" class="rowN">outbound send carrying tainted data — refused</text>
+<text x="58" y="720" class="rowN" style="fill:#b06a2a;font-weight:700">enforcer: ifc-sink</text>
+<rect x="40" y="734" width="424" height="66" rx="8" fill="#fdecec" stroke="#e6a3a3" stroke-width="1"/>
+<rect x="40" y="734" width="5" height="66" rx="2.5" fill="#d03b3b"/>
+<text x="58" y="760" class="rowT">SendMessage</text>
+<rect x="332.0" y="746" width="118.0" height="20" rx="10" fill="#fff" stroke="#e6a3a3" stroke-width="1"/>
+<text x="391.0" y="760" class="chip" text-anchor="middle" style="fill:#d03b3b">TRUST_VIOLATION</text>
+<text x="58" y="780" class="rowN">outbound send carrying tainted data — refused</text>
+<text x="58" y="794" class="rowN" style="fill:#b06a2a;font-weight:700">enforcer: ifc-sink</text>
+<rect x="508" y="360" width="424" height="46" rx="8" fill="#1c7c92"/>
+<text x="524" y="389" class="pband">THE GUARD NEVER FELL BEHIND</text>
+<text x="916" y="389" class="pbandR" text-anchor="end">7h 11m of work</text>
+<text x="510" y="438" class="pnote">Verdicts stayed in lockstep with the agent across the whole run.</text>
+<line x1="522" y1="612.0" x2="918" y2="612.0" stroke="#d9e1e8" stroke-width="1"/>
+<line x1="522" y1="564.0" x2="918" y2="564.0" stroke="#d9e1e8" stroke-width="1"/>
+<line x1="522" y1="516.0" x2="918" y2="516.0" stroke="#d9e1e8" stroke-width="1"/>
+<line x1="522" y1="468.0" x2="918" y2="468.0" stroke="#d9e1e8" stroke-width="1"/>
+<line x1="522" y1="660" x2="918" y2="660" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="522" y="460" class="axis">peak 322 decisions / interval</text>
+<rect x="525.0" y="534.1863354037267" width="27.0" height="125.8136645962733" rx="4" fill="#1c7c92"/>
+<rect x="558.0" y="538.9565217391305" width="27.0" height="121.04347826086956" rx="4" fill="#1c7c92"/>
+<rect x="591.0" y="586.6583850931677" width="27.0" height="73.3416149068323" rx="4" fill="#1c7c92"/>
+<rect x="624.0" y="565.7888198757764" width="27.0" height="94.2111801242236" rx="4" fill="#1c7c92"/>
+<rect x="657.0" y="468.0" width="27.0" height="192.0" rx="4" fill="#1c7c92"/>
+<rect x="690.0" y="559.2298136645962" width="27.0" height="100.77018633540372" rx="4" fill="#1c7c92"/>
+<rect x="723.0" y="604.5465838509317" width="27.0" height="55.453416149068325" rx="4" fill="#1c7c92"/>
+<rect x="756.0" y="583.0807453416149" width="27.0" height="76.9192546583851" rx="4" fill="#1c7c92"/>
+<rect x="789.0" y="564.0" width="27.0" height="96.0" rx="4" fill="#1c7c92"/>
+<rect x="822.0" y="619.4534161490683" width="27.0" height="40.546583850931675" rx="4" fill="#1c7c92"/>
+<rect x="855.0" y="642.7080745341615" width="27.0" height="17.29192546583851" rx="4" fill="#1c7c92"/>
+<rect x="888.0" y="627.8012422360248" width="27.0" height="32.19875776397515" rx="4" fill="#1c7c92"/>
+<text x="522" y="680" class="axis">start</text>
+<text x="918" y="680" class="axis" text-anchor="end">7h 11m</text>
+<text x="720.0" y="680" class="axis" text-anchor="middle">← one 7-hour autonomous session →</text>
+<rect x="508" y="696" width="424" height="100" rx="8" fill="#f4f8f6" stroke="#d9e1e8" stroke-width="1"/>
+<text x="526" y="726" class="rowT">1,720 verdicts, evenly sustained</text>
+<text x="526" y="752" class="rowN">A guarded decision landed roughly every 15s of wall-clock</text>
+<text x="526" y="770" class="rowN">for seven straight hours — the boundary never became the</text>
+<text x="526" y="788" class="rowN">bottleneck. In-kernel decide cost: 362 ns / verdict.</text>
+<rect x="976" y="360" width="424" height="46" rx="8" fill="#7a5cb0"/>
+<text x="992" y="389" class="pband">TAMPER-EVIDENT &amp; DEFENDED</text>
+<rect x="976" y="422" width="424" height="118" rx="8" fill="#f4f0fb" stroke="#c9b8e8" stroke-width="1"/>
+<text x="994" y="468" class="big" style="fill:#7a5cb0">✓ 0 breaks in 1,720 links</text>
+<text x="994" y="498" class="rowN">Each record carries the prior record's hash. Every</text>
+<text x="994" y="516" class="rowN">prev_hash matched — the log can't be rewritten</text>
+<text x="994" y="534" class="rowN">after the fact without the break showing.</text>
+<text x="978" y="570" class="statL">THREE INDEPENDENT ENFORCERS</text>
+<rect x="976" y="584" width="424" height="52" rx="8" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="976" y="584" width="5" height="52" rx="2.5" fill="#3a7d9c"/>
+<text x="994" y="606" class="rowT">monitor</text>
+<text x="994" y="624" class="rowN">waved through the safe work</text>
+<text x="1384" y="614" class="mid" text-anchor="end" style="fill:#3a7d9c">1,716</text>
+<rect x="976" y="644" width="424" height="52" rx="8" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="976" y="644" width="5" height="52" rx="2.5" fill="#b06a2a"/>
+<text x="994" y="666" class="rowT">gitgate</text>
+<text x="994" y="684" class="rowN">blocked an off-policy git action</text>
+<text x="1384" y="674" class="mid" text-anchor="end" style="fill:#b06a2a">1</text>
+<rect x="976" y="704" width="424" height="52" rx="8" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<rect x="976" y="704" width="5" height="52" rx="2.5" fill="#d03b3b"/>
+<text x="994" y="726" class="rowT">ifc-sink</text>
+<text x="994" y="744" class="rowN">blocked tainted-data sinks</text>
+<text x="1384" y="734" class="mid" text-anchor="end" style="fill:#d03b3b">3</text>
+<rect x="976" y="764" width="424" height="46" rx="8" fill="#e9f3f6" stroke="#a9d2dc" stroke-width="1"/>
+<text x="994" y="793" class="rowT">Read-before-write discipline</text>
+<text x="1384" y="794" class="mid" text-anchor="end" style="fill:#1c7c92">12.2 : 1</text>
+<rect x="40" y="826" width="1360" height="132" rx="10" fill="#ffffff" stroke="#d9e1e8" stroke-width="1"/>
+<text x="60" y="856" class="statL">WHAT THE AGENT ACTUALLY DID</text>
+<text x="60" y="876" class="rowN">all 1,720 guarded calls, by kind</text>
+<text x="60" y="902" class="statS">explore = Read / Grep / Glob</text>
+<text x="60" y="918" class="statS">execute = Bash / PowerShell</text>
+<text x="60" y="934" class="statS">author = Edit / Write · orchestrate = agents</text>
+<text x="458" y="855" class="wlab" text-anchor="end">explore</text>
+<rect x="470" y="844" width="560" height="14" rx="4" fill="#eef3f5"/>
+<rect x="470" y="844" width="560.0" height="14" rx="4" fill="#1c7c92"/>
+<text x="1040.0" y="855" class="wnum">1,035</text>
+<text x="458" y="873.6" class="wlab" text-anchor="end">execute</text>
+<rect x="470" y="862.6" width="560" height="14" rx="4" fill="#eef3f5"/>
+<rect x="470" y="862.6" width="290.5507246376812" height="14" rx="4" fill="#1c7c92"/>
+<text x="770.5507246376812" y="873.6" class="wnum">537</text>
+<text x="458" y="892.2" class="wlab" text-anchor="end">author</text>
+<rect x="470" y="881.2" width="560" height="14" rx="4" fill="#eef3f5"/>
+<rect x="470" y="881.2" width="41.66183574879227" height="14" rx="4" fill="#1c7c92"/>
+<text x="521.6618357487923" y="892.2" class="wnum">77</text>
+<text x="458" y="910.8000000000001" class="wlab" text-anchor="end">mcp</text>
+<rect x="470" y="899.8000000000001" width="560" height="14" rx="4" fill="#eef3f5"/>
+<rect x="470" y="899.8000000000001" width="24.347826086956523" height="14" rx="4" fill="#1c7c92"/>
+<text x="504.3478260869565" y="910.8000000000001" class="wnum">45</text>
+<text x="458" y="929.4000000000001" class="wlab" text-anchor="end">orchestrate</text>
+<rect x="470" y="918.4000000000001" width="560" height="14" rx="4" fill="#eef3f5"/>
+<rect x="470" y="918.4000000000001" width="11.903381642512077" height="14" rx="4" fill="#1c7c92"/>
+<text x="491.9033816425121" y="929.4000000000001" class="wnum">22</text>
+<text x="458" y="948.0000000000001" class="wlab" text-anchor="end">schedule</text>
+<rect x="470" y="937.0000000000001" width="560" height="14" rx="4" fill="#eef3f5"/>
+<rect x="470" y="937.0000000000001" width="3" height="14" rx="4" fill="#1c7c92"/>
+<text x="483" y="948.0000000000001" class="wnum">4</text>
+<text x="1380" y="880" class="big" text-anchor="end" style="fill:#1c7c92">22</text>
+<text x="1380" y="904" class="rowN" text-anchor="end">distinct tools driven</text>
+<text x="1380" y="922" class="rowN" text-anchor="end">in a single unattended session</text>
+<rect x="40" y="974" width="1360" height="128" rx="12" fill="#2e3a47"/>
+<rect x="40" y="974" width="6" height="128" rx="3" fill="#8fd0c4"/>
+<text x="66" y="1008" class="thH">WHERE EVERY SESSION IS GOING</text>
+<text x="66" y="1038" class="thB">This isn’t a special run — it’s the default shape of any agent under fak guard. As agents run longer and more autonomously,</text>
+<text x="66" y="1062" class="thB">a real-time verdict on every tool call and a tamper-evident record of every decision stop being nice-to-haves.</text>
+<text x="66" y="1086" class="thL">A 7-hour unattended run that blocks only what’s dangerous and can prove what it did — that’s the floor every session is heading toward.</text>
+<text x="40" y="1154" class="foot">Source: .dispatch-runs/guard-audit/interactive-37096-16daf1ca84d5.jsonl — 1,720 hash-chained DECIDE records, replayed.</text>
+<text x="1400" y="1154" class="foot" text-anchor="end">Per-verdict kernel decide cost 362 ns → BENCHMARK-AUTHORITY.md.</text>
+</svg>

@@ -30,6 +30,16 @@ fak guard -- claude   # run it in front of your agent: your Pro/Max plan, no API
 
 Every number here traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag — `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
 
+## One guarded session, start to finish
+
+<p align="center">
+  <img src="visuals/74-session-effectiveness.svg" alt="One fak guard session, replayed from its decision journal: 1,720 hash-chained tool-call decisions over a 7h 11m unattended run — 99.77% allowed to proceed, the 4 dangerous calls blocked (an off-policy git action at the git gate, three tainted-data sinks at the IFC gate), zero hash-chain breaks, across 22 distinct tools. A timeline shows verdicts kept pace across the whole run; a work-mix bar breaks the calls into explore/execute/author/mcp/orchestrate/schedule." width="900">
+</p>
+
+This is one real `fak guard` run, replayed from its decision journal. An agent worked for **7 hours unattended** while the kernel put a verdict on **every one of 1,720 tool calls** — waving the work through, blocking only the four that were dangerous, and hash-chaining every decision into a record that can't be edited after the fact. Nothing about it is special: it's the default shape of running any agent behind the gate. As agents run longer and more autonomously, a real-time verdict on every call plus a tamper-evident trail stops being a nice-to-have — a long unattended run that blocks only what's dangerous and can *prove* what it did is where every session is heading.
+
+Every number on the card is recomputed from the session's hash-chained journal by [`tools/gen_session_effectiveness_svg.py`](tools/gen_session_effectiveness_svg.py) into a checkable [stats sidecar](visuals/74-session-effectiveness.stats.json); the per-verdict kernel cost traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
+
 ## Start in one command
 
 Wrap the agent you already run — no rewrite, no config file, no second terminal:
