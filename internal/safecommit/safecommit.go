@@ -468,16 +468,35 @@ func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock fu
 // could not be executed; on success both reason and err are empty.
 func runLockRidingMutation(ctx context.Context, run Runner, dir string, args []string) (reason, detail string, err error) {
 	out, code, rerr := runRidingLockContention(ctx, run, dir, args...)
+	// Stale-index-lock auto-recovery (#3915): contention that outlives the in-place
+	// retries and names the INDEX lock may be a crashed writer's abandoned lock,
+	// which never clears on its own and would otherwise force a manual `rm`. Reap it
+	// when it is provably stale and retry once; when it is fresh (a live git may
+	// hold it), report a precise "another git process is active" message instead of
+	// git's generic crash text. Any other failure class is unaffected.
+	if rerr == nil && code != 0 && isIndexLockContention(out) {
+		if r, d, e, handled := recoverStaleIndexLock(ctx, run, dir, args); handled {
+			return r, d, e
+		}
+	}
+	return classifyMutation(out, code, rerr)
+}
+
+// classifyMutation maps a finished git mutation (out, exit code, exec err) to the
+// safecommit reason/detail split: an exec failure is an infrastructure error; a
+// clean exit is success; a lock-contention non-zero is the retryable LOCK_BUSY;
+// anything else is the halt-class HOOK_REFUSED.
+func classifyMutation(out string, code int, rerr error) (reason, detail string, err error) {
 	if rerr != nil {
 		return "", "", fmt.Errorf("safecommit: git not executable: %w", rerr)
 	}
-	if code != 0 {
-		if isGitLockContention(out) {
-			return ReasonLockBusy, trimDetail(out), nil
-		}
-		return ReasonHookRefused, trimDetail(out), nil
+	if code == 0 {
+		return "", "", nil
 	}
-	return "", "", nil
+	if isGitLockContention(out) {
+		return ReasonLockBusy, trimDetail(out), nil
+	}
+	return ReasonHookRefused, trimDetail(out), nil
 }
 
 func pushVerifiedCommit(ctx context.Context, run Runner, dir, trunk, sha string) (safesync.PushResult, error) {
