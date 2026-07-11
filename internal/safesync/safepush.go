@@ -2,10 +2,14 @@ package safesync
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // safepush.go — the SAFE PUSH retry for the hot shared trunk, the push-side sibling
@@ -53,14 +57,21 @@ func DecidePush(div PushDivergence) PushAction {
 
 // PushOptions configures SafePush.
 type PushOptions struct {
-	Repo       string
-	Remote     string
-	Branch     string // default: current branch
-	SourceRef  string // optional exact source to push, e.g. a verified commit SHA
-	TargetRef  string // optional destination ref when SourceRef is set; default refs/heads/<branch>
-	MaxRetries int    // total push attempts; default 3
-	Runner     Runner `json:"-"`
+	Repo           string
+	Remote         string
+	Branch         string // default: current branch
+	SourceRef      string // optional exact source to push, e.g. a verified commit SHA
+	TargetRef      string // optional destination ref when SourceRef is set; default refs/heads/<branch>
+	MaxRetries     int    // total push attempts; default 3
+	VelocityBudget time.Duration
+	Runner         Runner           `json:"-"`
+	Now            func() time.Time `json:"-"` // injectable end-to-end wall clock
 }
+
+// DefaultPushVelocityBudget is the declared responsiveness SLO used when a
+// caller does not supply one. It is an operator budget, not a comparative
+// performance claim or a correctness threshold.
+const DefaultPushVelocityBudget = 5 * time.Second
 
 // Push reason constants for PushResult.Reason ("" means pushed).
 const (
@@ -70,18 +81,34 @@ const (
 	PushReasonGitMissing  = "GIT_UNAVAILABLE"    // git/fetch could not run
 	PushReasonUnreachable = "REMOTE_UNREACHABLE" // a transient network failure persisted through every retry
 	PushReasonCancelled   = "CANCELLED"          // the caller's ctx was cancelled mid-backoff; no further attempt was made
+	PushReasonInternal    = "INTERNAL_ERROR"     // a read-only Git classification/query failed; effect is indeterminate
 )
 
 // PushResult is the structured outcome of SafePush.
 type PushResult struct {
-	Pushed     bool      `json:"pushed"`
-	Attempts   int       `json:"attempts"`
-	Branch     string    `json:"branch,omitempty"`
-	Remote     string    `json:"remote,omitempty"`
-	Reason     string    `json:"reason,omitempty"`     // "" | one of the PushReason* constants
-	Divergence string    `json:"divergence,omitempty"` // last classified divergence on a non-ff
-	Detail     string    `json:"detail,omitempty"`
-	Worktree   *Worktree `json:"worktree,omitempty"`
+	Pushed     bool         `json:"pushed"`
+	Attempts   int          `json:"attempts"`
+	Branch     string       `json:"branch,omitempty"`
+	Remote     string       `json:"remote,omitempty"`
+	Reason     string       `json:"reason,omitempty"`     // "" | one of the PushReason* constants
+	Divergence string       `json:"divergence,omitempty"` // last classified divergence on a non-ff
+	Detail     string       `json:"detail,omitempty"`
+	Worktree   *Worktree    `json:"worktree,omitempty"`
+	Velocity   PushVelocity `json:"velocity"`
+}
+
+// PushVelocity is end-to-end, safety-qualified push timing. A numeric score is
+// present only when SafePush actually published the requested ref. Refusals and
+// errors keep their elapsed/budget evidence but are UNSCORED, so a 1ms failure
+// can never look like high ship velocity.
+type PushVelocity struct {
+	Qualified   bool     `json:"qualified"`
+	ElapsedMS   int64    `json:"elapsed_ms"`
+	BudgetMS    int64    `json:"budget_ms"`
+	BudgetRatio float64  `json:"budget_ratio"`
+	Score       *int     `json:"score"`
+	Grade       string   `json:"grade"`
+	Notes       []string `json:"notes"`
 }
 
 // SafePush pushes repo's branch (or SourceRef:TargetRef when SourceRef is set) to remote,
@@ -92,7 +119,34 @@ type PushResult struct {
 // merge-base; never force/merge/reset/stash. err is returned only when a read-only git
 // query (branch resolution / merge-base) cannot run; recoverable push outcomes are
 // reported through PushResult.Reason.
-func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
+func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error) {
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	budget := opts.VelocityBudget
+	if budget == 0 {
+		budget = DefaultPushVelocityBudget
+	}
+	scoreBudget := budget
+	if scoreBudget < time.Millisecond {
+		scoreBudget = time.Millisecond
+	}
+	started := now()
+	defer func() {
+		elapsed := now().Sub(started)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		if err != nil && res.Reason == "" {
+			res.Reason = PushReasonInternal
+			res.Detail = err.Error()
+		}
+		res.Velocity = ScorePushVelocity(res, elapsed, scoreBudget, err)
+	}()
+	if budget < time.Millisecond {
+		return res, fmt.Errorf("push velocity budget must be at least 1ms")
+	}
 	run := opts.Runner
 	if run == nil {
 		run = RealRunner
@@ -117,7 +171,7 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 	if max <= 0 {
 		max = 3
 	}
-	res := PushResult{Branch: branch, Remote: remote}
+	res = PushResult{Branch: branch, Remote: remote}
 	remoteRef := remote + "/" + branch
 	pushArgs := safePushArgs(remote, branch, opts.SourceRef, opts.TargetRef)
 	compareRef := safePushCompareRef(opts.SourceRef)
@@ -201,6 +255,53 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 	res.Reason = PushReasonExhausted
 	res.Detail = "push still rejected after " + strconv.Itoa(max) + " attempts; the trunk is moving fast — retry shortly"
 	return res, nil
+}
+
+// ScorePushVelocity converts raw end-to-end timing into SLO credit. The ratio
+// remains visible even within budget; the score is capped at 100 and degrades as
+// budget/elapsed once the SLO is exceeded. It never qualifies a non-publication.
+func ScorePushVelocity(res PushResult, elapsed, budget time.Duration, runErr error) PushVelocity {
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if budget < time.Millisecond {
+		budget = time.Millisecond
+	}
+	ratioRaw := float64(elapsed) / float64(budget)
+	v := PushVelocity{
+		ElapsedMS:   elapsed.Milliseconds(),
+		BudgetMS:    budget.Milliseconds(),
+		BudgetRatio: scorecard.Round3(ratioRaw),
+		Grade:       "UNSCORED",
+	}
+	if runErr != nil {
+		v.Notes = []string{"unscored: safe push ended with INTERNAL_ERROR"}
+		return v
+	}
+	if !res.Pushed || res.Reason != "" {
+		reason := strings.TrimSpace(res.Reason)
+		if reason == "" {
+			reason = "NO_PUBLICATION"
+		}
+		v.Notes = []string{"unscored: safe push did not publish (" + reason + ")"}
+		return v
+	}
+
+	v.Qualified = true
+	credit := 1.0
+	if elapsed > budget {
+		credit = float64(budget) / float64(elapsed)
+	}
+	score := int(math.Round(100 * credit))
+	if score < 0 {
+		score = 0
+	} else if score > 100 {
+		score = 100
+	}
+	v.Score = &score
+	v.Grade = scorecard.GradeStd(float64(score))
+	v.Notes = []string{"qualified: safe push published the requested ref"}
+	return v
 }
 
 func safePushArgs(remote, branch, sourceRef, targetRef string) []string {

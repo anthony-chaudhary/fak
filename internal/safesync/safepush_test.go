@@ -2,11 +2,23 @@ package safesync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+func twoPointClock(start, end time.Time) func() time.Time {
+	calls := 0
+	return func() time.Time {
+		calls++
+		if calls == 1 {
+			return start
+		}
+		return end
+	}
+}
 
 func TestDecidePush(t *testing.T) {
 	if DecidePush(PushAhead) != PushRetry {
@@ -89,6 +101,141 @@ func TestSafePush_CleanFirstPush(t *testing.T) {
 	}
 	if !res.Pushed || res.Attempts != 1 || res.Reason != "" {
 		t.Fatalf("clean push = %+v, want pushed in 1 attempt", res)
+	}
+}
+
+func TestSafePushVelocityQualifiesPublishedResult(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	sr := &scriptedRunner{push: []RunResult{{Code: 0}}}
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo: ".", Branch: "main", Runner: sr.run,
+		VelocityBudget: time.Second,
+		Now:            twoPointClock(start, start.Add(250*time.Millisecond)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := res.Velocity
+	if !v.Qualified || v.ElapsedMS != 250 || v.BudgetMS != 1000 || v.BudgetRatio != 0.25 || v.Score == nil || *v.Score != 100 || v.Grade != "A" {
+		t.Fatalf("velocity = %+v, want qualified 250ms/1s ratio=.25 score=100/A", v)
+	}
+	if len(v.Notes) != 1 || !strings.Contains(v.Notes[0], "published") {
+		t.Fatalf("velocity notes = %v, want publication qualification", v.Notes)
+	}
+}
+
+func TestSafePushVelocityDegradesBeyondBudget(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	sr := &scriptedRunner{push: []RunResult{{Code: 0}}}
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo: ".", Branch: "main", Runner: sr.run,
+		VelocityBudget: time.Second,
+		Now:            twoPointClock(start, start.Add(2*time.Second)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := res.Velocity
+	if !v.Qualified || v.BudgetRatio != 2 || v.Score == nil || *v.Score != 50 || v.Grade != "F" {
+		t.Fatalf("velocity = %+v, want qualified ratio=2 score=50/F", v)
+	}
+}
+
+func TestSafePushVelocityNeverRewardsFastRefusal(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	sr := &scriptedRunner{push: []RunResult{{Code: 1, Stderr: []byte("remote rejected: policy")}}}
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo: ".", Branch: "main", Runner: sr.run,
+		VelocityBudget: time.Second,
+		Now:            twoPointClock(start, start.Add(time.Millisecond)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := res.Velocity
+	if v.Qualified || v.Score != nil || v.Grade != "UNSCORED" || v.ElapsedMS != 1 || v.BudgetRatio != 0.001 {
+		t.Fatalf("velocity = %+v, want 1ms refusal retained but unscored", v)
+	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonText := string(b)
+	for _, want := range []string{`"velocity":`, `"score":null`, `"grade":"UNSCORED"`, `"budget_ratio":0.001`} {
+		if !strings.Contains(jsonText, want) {
+			t.Fatalf("JSON missing %s: %s", want, jsonText)
+		}
+	}
+}
+
+func TestSafePushVelocityIncludesRetryBackoff(t *testing.T) {
+	current := time.Unix(1_700_000_000, 0)
+	start := current
+	var waited time.Duration
+	previousWait := pushWait
+	pushWait = func(ctx context.Context, d time.Duration) error {
+		waited += d
+		current = current.Add(d)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { pushWait = previousWait })
+	sr := &scriptedRunner{
+		push:      []RunResult{nonFF(), {Code: 0}},
+		fetch:     RunResult{Code: 0},
+		ancestors: map[string]int{"origin/main..HEAD": 0},
+	}
+	runner := func(ctx context.Context, repo string, args ...string) RunResult {
+		res := sr.run(ctx, repo, args...)
+		current = current.Add(10 * time.Millisecond)
+		return res
+	}
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo: ".", Branch: "main", Runner: runner,
+		VelocityBudget: time.Second,
+		Now:            func() time.Time { return current },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantElapsed := current.Sub(start).Milliseconds()
+	if waited <= 0 || res.Attempts != 2 || res.Velocity.ElapsedMS != wantElapsed {
+		t.Fatalf("attempts=%d waited=%v velocity=%+v, want elapsed=%dms including backoff", res.Attempts, waited, res.Velocity, wantElapsed)
+	}
+}
+
+func TestSafePushVelocityRetainsTimingOnGoError(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	sr := &scriptedRunner{branch: RunResult{Code: -1, Err: errors.New("git unavailable")}}
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo: ".", Runner: sr.run, VelocityBudget: time.Second,
+		Now: twoPointClock(start, start.Add(12*time.Millisecond)),
+	})
+	if err == nil {
+		t.Fatal("SafePush error = nil, want git unavailable")
+	}
+	if res.Velocity.Qualified || res.Velocity.Score != nil || res.Velocity.ElapsedMS != 12 || !strings.Contains(strings.Join(res.Velocity.Notes, " "), "INTERNAL_ERROR") {
+		t.Fatalf("velocity = %+v, want 12ms INTERNAL_ERROR unscored", res.Velocity)
+	}
+}
+
+func TestSafePushRejectsSubMillisecondVelocityBudget(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	res, err := SafePush(context.Background(), PushOptions{
+		Repo: ".", Branch: "main", VelocityBudget: 500 * time.Microsecond,
+		Now: twoPointClock(start, start),
+	})
+	if err == nil || !strings.Contains(err.Error(), "at least 1ms") {
+		t.Fatalf("error = %v, want budget validation", err)
+	}
+	if res.Velocity.BudgetMS != 1 || res.Velocity.Score != nil || res.Velocity.Grade != "UNSCORED" {
+		t.Fatalf("velocity = %+v, want present unscored minimum-resolution evidence", res.Velocity)
+	}
+}
+
+func TestScorePushVelocityClampsNegativeClockSkew(t *testing.T) {
+	v := ScorePushVelocity(PushResult{Pushed: true}, -time.Second, time.Second, nil)
+	if v.ElapsedMS != 0 || v.BudgetRatio != 0 || !v.Qualified || v.Score == nil || *v.Score != 100 {
+		t.Fatalf("velocity = %+v, want zero-elapsed qualified score after skew clamp", v)
 	}
 }
 
