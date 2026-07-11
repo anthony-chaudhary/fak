@@ -49,9 +49,11 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/knownbad"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/resume/rehome"
+	"github.com/anthony-chaudhary/fak/internal/resumebackoff"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -135,6 +137,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	}
 	plan := rwLoadPlan(planPath)
 	ledgerPath := filepath.Join(regDir, "resume_ledger.jsonl")
+	backoffHistory := rwBackoffHistory(ledgerPath)
 	rwBoundWatchdogArtifacts(logDir, ledgerPath, time.Now())
 	if targetedPlan != "" {
 		// Fail closed (#2367): a targeted run must consume the exact plan the operator
@@ -280,6 +283,13 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			note("  SKIP %s — %s", sid8, d.Reason)
 			continue
 		}
+		signature := knownbad.Signature(firstString(p.Disp, "resume_crash"), []string{p.CWD}, "")
+		backoff := resumebackoff.Decide(resumebackoff.Input{Session: p.Session, Signature: signature, Now: time.Now().UTC(), History: backoffHistory})
+		if !backoff.Eligible {
+			note("  SKIP %s — %s repeat=%d next=%s", sid8, backoff.Reason, backoff.Repeat, backoff.NextEligible.Format(time.RFC3339))
+			rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": p.Session, "signature": signature, "phase": "deferred", "reason": backoff.Reason, "repeat": backoff.Repeat, "next_eligible": backoff.NextEligible})
+			continue
+		}
 		acct := rwAccountTag(p.Account)
 		resumeCfg := p.ResumeTarget()
 		grant := launchSpawnBroker(rwResumeBrokerAttempt(fakExe, claudeExe, p, resumeCfg, posture, driveCarry[p.Session]))
@@ -342,7 +352,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			"ts": rwNowISO(), "session": p.Session, "account": p.Account,
 			"resume_account": p.ResumeAccount, "rehomed": p.Rehomed,
 			"project": p.Project, "pid": pid, "cause": p.Disp,
-			"phase": "launched", "attempt": attempt,
+			"phase": "launched", "attempt": attempt, "signature": signature,
 		}
 		rwAppendLedger(ledgerPath, row)
 		// #4139/#4216: record the OS-relaunch reset transaction — the transcript-UUID-keyed
@@ -1447,4 +1457,27 @@ func rwEnvInt(name string, def int) int {
 		}
 	}
 	return def
+}
+
+func rwBackoffHistory(path string) []resumebackoff.Event {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []resumebackoff.Event
+	for _, line := range bytes.Split(b, []byte{'\n'}) {
+		var row struct {
+			TS        string `json:"ts"`
+			Session   string `json:"session"`
+			Signature string `json:"signature"`
+			Phase     string `json:"phase"`
+		}
+		if json.Unmarshal(line, &row) != nil || row.Phase != "launched" || row.Session == "" || row.Signature == "" {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339, row.TS); err == nil {
+			out = append(out, resumebackoff.Event{Session: row.Session, Signature: row.Signature, At: at})
+		}
+	}
+	return out
 }
