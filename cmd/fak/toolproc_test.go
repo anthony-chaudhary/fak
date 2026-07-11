@@ -277,3 +277,47 @@ func TestToolprocHookBridgesBackgroundJob(t *testing.T) {
 			job.Tool, job.State, job.ExitStatus, job.Pulses)
 	}
 }
+
+// TestAppendJournalLinesLeavesNoHandleBlockingSwap pins the #3555/#3671
+// contract of the appender call-site directly: appendJournalLines appends
+// (never truncates) and closes its handle before returning, so the very next
+// step the stop-hook takes — swapping the journal via a rename during
+// CompactJournalFile — is never blocked by a lingering open handle. On Windows
+// a plain non-share-delete open left dangling would deny this rename; that is
+// exactly the third open-site #3555 named and this test is its regression guard.
+func TestAppendJournalLinesLeavesNoHandleBlockingSwap(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+
+	// Two successive appends: the second must extend the first, proving the
+	// open is append-mode (O_APPEND) and each call closed cleanly rather than
+	// reopening a truncating handle.
+	if err := appendJournalLines(journal, []byte("first\n")); err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+	if err := appendJournalLines(journal, []byte("second\n")); err != nil {
+		t.Fatalf("second append: %v", err)
+	}
+	got, err := os.ReadFile(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "first\nsecond\n" {
+		t.Fatalf("append did not extend the journal: got %q, want %q", got, "first\nsecond\n")
+	}
+
+	// The swap the stop-hook compaction performs. If appendJournalLines held an
+	// open handle across return, this rename is denied on Windows (the #3555
+	// contention) — the failure this guard exists to catch.
+	swapped := journal + ".swapped"
+	if err := os.Rename(journal, swapped); err != nil {
+		t.Fatalf("journal swap blocked by a lingering append handle: %v", err)
+	}
+	// And the rename moved the content intact, not an empty stand-in.
+	after, err := os.ReadFile(swapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "second") {
+		t.Fatalf("swapped journal lost its content: %q", after)
+	}
+}
