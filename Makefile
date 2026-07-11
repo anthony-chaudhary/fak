@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
@@ -23,7 +23,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -189,6 +189,22 @@ dogfood-recent:
 vcache-gate:
 	@python3 tools/vcache_scorecard_gate_test.py
 	@python3 tools/vcache_scorecard_gate.py
+
+# cache-default-readiness (#1568, cache-frontier Next-50 item 50 "Release gate"): the
+# named release gate that blocks default-on cache claims. vcache-gate above asserts the
+# 2x economics floor; this asserts the stronger "useful by default" bar — the
+# vcachescore.DefaultReadiness fold fails CLOSED on the three regression classes item 50
+# names: per-plane scoring (a provider-only, low default-usefulness verdict), cold-path
+# correctness (a hit-dependent request path), and provenance labels (a plane whose
+# WITNESSED/OBSERVED/FORECAST label collapses). The regression contract is pinned by
+# internal/vcachescore/readiness_test.go — a passing witnessed-planes report stays
+# default_ready, while each regression flips the verdict to "blocked". These tests already
+# run inside `go test ./...`; naming them as a dedicated, deterministic (no network, no
+# telemetry) gate makes "cache-default readiness" a discoverable release gate rather than
+# an anonymous unit test. Exits non-zero if any regression stops blocking.
+cache-default-readiness:
+	@go test -count=1 ./internal/vcachescore/ -run '^TestDefaultReadiness'
+	@echo "cache-default-readiness OK"
 
 # model: export the real SmolLM2-135M weights the in-kernel engine (--engine inkernel)
 # loads from FAK_MODEL_DIR. One-time; needs Python. See GETTING-STARTED.md §4b.
