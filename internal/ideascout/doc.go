@@ -6,4 +6,10 @@
 // pure parse over wire bytes (ParseArxivAtom / ParseGitHubRepos /
 // ParseHackerNewsJSON / ParseRedditJSON); only the LiveFetcher touches the
 // network, and only --live files issues.
+//
+// GitHub is walked on two lanes from the same topic query: FetchGitHub (all-time
+// stars, floored at MinStars) and FetchGitHubFresh (sorted most-recently-updated,
+// floored at the lower FreshMinStars) so newly-created / trending / recently-pushed
+// repos enter the pool instead of only established incumbents. Scoring then rewards
+// a repo's star-velocity (trending) and how recently it was pushed.
 package ideascout

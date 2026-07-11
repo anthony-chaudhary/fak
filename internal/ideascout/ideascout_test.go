@@ -25,11 +25,11 @@ func TestScoreCandidateTransparentWeights(t *testing.T) {
 	}
 
 	score, reasons := ScoreCandidate(cand, topic, DefaultConfig(), now)
-	if score != 69 {
-		t.Fatalf("score = %d, want 69 (title hits 20 + body 3 + freshness 34 + stars 2 + push 10), reasons=%v", score, reasons)
+	if score != 94 {
+		t.Fatalf("score = %d, want 94 (title hits 20 + body 3 + freshness 34 + stars 2 + fresh-push 15 + trending 20), reasons=%v", score, reasons)
 	}
 	joined := strings.Join(reasons, "; ")
-	for _, want := range []string{"prompt injection(title)", "agent(title)", "tool", "recent (10d)", "very fresh", "250 stars (+2)", "pushed <=90d"} {
+	for _, want := range []string{"prompt injection(title)", "agent(title)", "tool", "recent (10d)", "very fresh", "250 stars (+2)", "pushed <=45d (actively updated)", "trending (25*/day, +20)"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("reasons %q missing %q", joined, want)
 		}
@@ -234,18 +234,21 @@ func TestScoreCandidateHackerNewsPoints(t *testing.T) {
 }
 
 type stubFetcher struct {
-	hnJSON     string
-	redditJSON string
+	github      []GitHubRepo
+	githubFresh []GitHubRepo
+	hnJSON      string
+	redditJSON  string
 }
 
-func (s stubFetcher) FetchArxiv(string, int) (string, error)           { return "", nil }
-func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)    { return nil, nil }
-func (s stubFetcher) FetchHackerNews(string, int) (string, error)      { return s.hnJSON, nil }
-func (s stubFetcher) FetchReddit(string, int) (string, error)          { return s.redditJSON, nil }
-func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error) { return nil, nil }
-func (s stubFetcher) EnsureLabels() error                              { return nil }
-func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)    { return "", nil }
-func (s stubFetcher) AddToProject(string, string, string) error        { return nil }
+func (s stubFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
+func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return s.github, nil }
+func (s stubFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return s.githubFresh, nil }
+func (s stubFetcher) FetchHackerNews(string, int) (string, error)        { return s.hnJSON, nil }
+func (s stubFetcher) FetchReddit(string, int) (string, error)            { return s.redditJSON, nil }
+func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error)   { return nil, nil }
+func (s stubFetcher) EnsureLabels() error                                { return nil }
+func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)      { return "", nil }
+func (s stubFetcher) AddToProject(string, string, string) error          { return nil }
 
 func TestGatherCandidatesHackerNewsFiltersByPoints(t *testing.T) {
 	hn := `{"hits":[
@@ -313,6 +316,83 @@ func TestGatherCandidatesRedditFiltersByPoints(t *testing.T) {
 	}
 	if len(cands) != 1 || cands[0].SourceID != "reddit:1" {
 		t.Fatalf("want only the 300-point post above MinPoints, got %#v", cands)
+	}
+}
+
+func TestGatherCandidatesFreshLaneAdmitsYoungRepo(t *testing.T) {
+	// A young repo below MinStars(25): the stars lane drops it, the fresh lane
+	// (star floor FreshMinStars=3) admits it and tags its provenance.
+	young := GitHubRepo{
+		FullName:        "newco/fresh-agent",
+		URL:             "https://github.com/newco/fresh-agent",
+		Description:     "a brand-new agent tool sandbox",
+		StargazersCount: 8,
+		PushedAt:        "2026-06-28T00:00:00Z",
+		CreatedAt:       "2026-06-20T00:00:00Z",
+	}
+	topics := []Topic{{Key: "t", GitHub: "agent tool", Terms: []string{"agent", "tool"}}}
+	cfg := DefaultConfig() // MinStars=25, FreshMinStars=3, FreshPerTopic=6
+	var errs []string
+	// Offered on BOTH lanes: the stars floor drops it, only the fresh lane admits it.
+	cands := GatherCandidates(stubFetcher{github: []GitHubRepo{young}, githubFresh: []GitHubRepo{young}}, topics, cfg, &errs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected gather errors: %v", errs)
+	}
+	if len(cands) != 1 || cands[0].SourceID != "github:newco/fresh-agent" {
+		t.Fatalf("want exactly the fresh-lane candidate, got %#v", cands)
+	}
+	if cands[0].Extra["lane"] != "fresh" {
+		t.Fatalf("fresh-lane candidate not tagged lane=fresh, Extra=%#v", cands[0].Extra)
+	}
+}
+
+func TestGatherCandidatesFreshLaneRespectsFreshMinStars(t *testing.T) {
+	toy := GitHubRepo{
+		FullName:        "toy/repo",
+		URL:             "https://github.com/toy/repo",
+		StargazersCount: 1, // below FreshMinStars(3): pure noise, dropped
+		PushedAt:        "2026-06-29T00:00:00Z",
+		CreatedAt:       "2026-06-25T00:00:00Z",
+	}
+	topics := []Topic{{Key: "t", GitHub: "agent tool", Terms: []string{"agent"}}}
+	cfg := DefaultConfig() // FreshMinStars=3
+	var errs []string
+	cands := GatherCandidates(stubFetcher{githubFresh: []GitHubRepo{toy}}, topics, cfg, &errs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected gather errors: %v", errs)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("1-star toy repo should be dropped by FreshMinStars=3, got %#v", cands)
+	}
+}
+
+func TestScoreCandidateTrending(t *testing.T) {
+	now := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	topic := Topic{Key: "t", Terms: []string{"agent"}}
+	// Same stars, same recent push; only repo age differs. The young repo accrued
+	// its stars fast (high stars/day) and earns the trending bonus; the old one didn't.
+	young := Candidate{Title: "agent x", Published: "2026-06-10T00:00:00Z", Extra: map[string]any{"stars": 400, "pushed_at": "2026-06-29T00:00:00Z"}}
+	old := Candidate{Title: "agent x", Published: "2022-06-10T00:00:00Z", Extra: map[string]any{"stars": 400, "pushed_at": "2026-06-29T00:00:00Z"}}
+	youngScore, youngReasons := ScoreCandidate(young, topic, DefaultConfig(), now)
+	oldScore, _ := ScoreCandidate(old, topic, DefaultConfig(), now)
+	if youngScore <= oldScore {
+		t.Fatalf("young high-velocity repo (%d) should outscore old same-star repo (%d)", youngScore, oldScore)
+	}
+	if joined := strings.Join(youngReasons, "; "); !strings.Contains(joined, "trending") {
+		t.Fatalf("young repo reasons missing trending signal: %q", joined)
+	}
+}
+
+func TestApplyThresholdsFreshKnobs(t *testing.T) {
+	cfg := DefaultConfig()
+	// JSON numbers decode to float64 — anyInt must coerce them.
+	applyThresholds(&cfg, map[string]any{
+		"fresh_per_topic":   float64(10),
+		"fresh_min_stars":   float64(1),
+		"fresh_window_days": float64(30),
+	})
+	if cfg.FreshPerTopic != 10 || cfg.FreshMinStars != 1 || cfg.FreshWindowDays != 30 {
+		t.Fatalf("fresh knobs not applied: %+v", cfg)
 	}
 }
 
