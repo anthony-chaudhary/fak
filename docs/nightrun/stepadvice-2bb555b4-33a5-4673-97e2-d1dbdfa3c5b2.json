@@ -1,9 +1,0 @@
-{
-  "schema": "fak.stepadvice.stamp.v1",
-  "trace_id": "guard",
-  "step_class": "unknown",
-  "basis": "none",
-  "reason": "no resident budget configured and no context event observed; the window edge is not visible from the guard",
-  "resident_tokens": 63314,
-  "phase": "building"
-}

@@ -174,6 +174,12 @@ that explicit publication by path; there is no background auto-committer. This
 trades automatic trunk publication for a working tree that stays clean by default
 while preserving the pre-migration record in the tracked snapshots and git history.
 
+Per-session step-advice stamps are runtime state too. Current guards write
+`.fak/stepadvice-<session>.json` beside `.fak/trajctl.jsonl`; the legacy
+`docs/nightrun/stepadvice-*.json` path is ignored. The former tracked stamps remain
+available in git history, but are not publication artifacts and must never return
+to the index.
+
 Example explicit publication commit:
 
 ```bash

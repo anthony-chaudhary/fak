@@ -276,6 +276,10 @@ experiments/benchmark/runs/by-machine/dgx*/
 fak/experiments/nightrun/*/
 experiments/nightrun/*/
 docs/nightrun/cache-value.jsonl
+# Legacy pre-86dbfe7fa guard processes wrote per-session step-advice stamps into
+# tracked docs. New guards write beside .fak/trajctl.jsonl; keep old still-running
+# processes and restored sessions from re-dirtying the shared tree (#4276).
+docs/nightrun/stepadvice-*.json
 # Shadow nightrun tree: telemetry writers were CWD-relative, so a guard/serve run — most
 # visibly `go test ./cmd/fak` (cwd=cmd/fak) — forked docs/nightrun UNDER cmd/fak and left
 # it tracked-but-perpetually-dirty. The writers now anchor to the repo root
