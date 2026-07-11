@@ -323,3 +323,9 @@ func readGuardStopRows(t *testing.T, path string) []guardStopRecord {
 	}
 	return out
 }
+
+func TestGuardStopsDefaultLedgerStaysInIgnoredRuntimeState(t *testing.T) {
+	if got, want := filepath.ToSlash(guardStopsLedgerDefaultRel), ".fak/guard-stops.jsonl"; got != want {
+		t.Fatalf("default guard-stop ledger = %q, want %q", got, want)
+	}
+}

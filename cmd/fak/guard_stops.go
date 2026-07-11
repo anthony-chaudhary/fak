@@ -283,8 +283,8 @@ const (
 	// guardStopsModeEnv opts recording out (value "off") even when a ledger is wired.
 	guardStopsModeEnv = "FAK_GUARD_STOPS_MODE"
 	// guardStopsLedgerDefaultRel is the repo-root-relative default the installer
-	// injects, alongside the trajctl curve ledger.
-	guardStopsLedgerDefaultRel = "docs/nightrun/guard-stops.jsonl"
+	// injects, in the gitignored runtime-state directory, so active hooks never dirty tracked docs.
+	guardStopsLedgerDefaultRel = ".fak/guard-stops.jsonl"
 )
 
 // guardStopsLedgerConfigured returns the wired ledger path for the WRITER (the Stop
@@ -297,7 +297,7 @@ func guardStopsLedgerConfigured() string {
 }
 
 // guardStopsLedgerDefault is the absolute default path the installer injects:
-// <repo root>/docs/nightrun/guard-stops.jsonl. Empty when the root is unresolvable.
+// <repo root>/.fak/guard-stops.jsonl. Empty when the root is unresolvable.
 func guardStopsLedgerDefault() string {
 	root := repoRoot()
 	if strings.TrimSpace(root) == "" {
