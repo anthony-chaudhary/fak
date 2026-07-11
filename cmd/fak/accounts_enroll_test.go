@@ -132,6 +132,76 @@ func TestEnrollCurrentIdentityFromCredentialWinsAndSkipsTwin(t *testing.T) {
 	}
 }
 
+// TestEnrollCurrentResolvesSessionDirFromEnv pins the defining behavior of enroll-current that the
+// #3215 identity acceptance (which passes an explicit --from) leaves uncovered: with NO --from, the
+// verb resolves the CURRENT session's config dir from $CLAUDE_CONFIG_DIR — exactly what a launched
+// `fak guard` seat exports — and enrolls THAT login, recording the credential-probed identity. This
+// is the first bullet of the issue's proposed fix ("Resolves the current session's config dir
+// (CLAUDE_CONFIG_DIR or ~/.claude)") turned into a regression witness, so "enroll the session I'm in"
+// can't silently regress to ~/.claude or start requiring a hand-passed source.
+func TestEnrollCurrentResolvesSessionDirFromEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
+
+	// The live session runs from a NON-default dir the launcher exported via CLAUDE_CONFIG_DIR — not
+	// ~/.claude, and never named on the command line. Its credential serves account B while its stale
+	// .claude.json still names A, so a correct resolve-then-probe must land B, proving the source came
+	// from the env dir (whose disk metadata said A) and the credential won.
+	sessionDir := filepath.Join(home, "session-cfg")
+	writeFileString(t, filepath.Join(sessionDir, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"at-b","refreshToken":"rt-b"}}`)
+	writeFileString(t, filepath.Join(sessionDir, ".claude.json"), `{"oauthAccount":{"emailAddress":"a-old@example.test","accountUuid":"uuid-a-old"}}`)
+	t.Setenv("CLAUDE_CONFIG_DIR", sessionDir)
+
+	srv := enrollProfileServerFor(t, map[string]accounts.ProbedIdentity{
+		"at-b": {Email: "b-live@example.test", AccountUUID: "uuid-b-live"},
+	})
+	t.Setenv("FAK_OAUTH_PROFILE_URL", srv.URL)
+
+	regPath := filepath.Join(home, "reg.json")
+	var out, errb bytes.Buffer
+	// NOTE: no --from — the source MUST be resolved from CLAUDE_CONFIG_DIR.
+	rc := runAccounts(&out, &errb, []string{
+		"enroll-current", "--name", "live",
+		"--home", home, "--registry", regPath, "--dos-view", "", "--job-view", "",
+	})
+	if rc != 0 {
+		t.Fatalf("enroll-current rc=%d\nstdout=%s\nstderr=%s", rc, out.String(), errb.String())
+	}
+
+	seatDir := filepath.Join(home, ".claude-live-netra")
+	// The env-named session credential was the source: it landed in the seat.
+	if _, err := os.Stat(filepath.Join(seatDir, ".credentials.json")); err != nil {
+		t.Errorf("seat missing .credentials.json copied from the CLAUDE_CONFIG_DIR session: %v", err)
+	}
+	// The registry records the credential-probed account B (resolved from the env dir), not stale A.
+	reg, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	var found bool
+	for _, h := range reg.Homes {
+		if h.Name == "live-netra" {
+			found = true
+			if h.Identity.Email != "b-live@example.test" || h.Identity.AccountUUID != "uuid-b-live" {
+				t.Errorf("registry identity = %q/%q, want the credential-probed b-live (uuid-b-live) resolved from CLAUDE_CONFIG_DIR",
+					h.Identity.Email, h.Identity.AccountUUID)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("registry has no live-netra row; homes=%v", reg.Homes)
+	}
+	// The seat's .claude.json was reconciled to the probed account, confirming the source dir carried
+	// the stale A metadata (only the CLAUDE_CONFIG_DIR fixture did) and the credential overwrote it.
+	claudeJSON, err := os.ReadFile(filepath.Join(seatDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("read seat .claude.json: %v", err)
+	}
+	if !bytes.Contains(claudeJSON, []byte("uuid-b-live")) {
+		t.Errorf("seat .claude.json = %s, want the probed account uuid-b-live written in", claudeJSON)
+	}
+}
+
 // TestStatusProbeFlagsIdentityMetadataStale is the #3216 read-surface acceptance: `status --probe`
 // probes each seat's live credential and, when its account disagrees with the on-disk .claude.json
 // metadata, flags identity_metadata_stale and shows the credential's true account instead of
