@@ -257,6 +257,9 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	if c.Tool == ToolCollectiveCommit {
 		return g.adjudicateCollective(ctx, c)
 	}
+	if c.Tool == ToolSweepGuard {
+		return g.adjudicateSweepGuard(ctx, c)
+	}
 	cmd := shellCommand(ctx, c)
 	// Cheap reject: no command arg, or no "git" anywhere in it — nothing to prove.
 	if cmd == "" || !strings.Contains(strings.ToLower(cmd), "git") {
