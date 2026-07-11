@@ -58,12 +58,14 @@ func TestResolveTokenNeverLeaksLabToken(t *testing.T) {
 }
 
 func TestResolveChannelDefaultsToPublicDojoChannel(t *testing.T) {
-	// Unlike the bench channel, the dojo channel id is a public, non-secret default so
-	// the surface lands with zero config.
+	// With no dedicated dojo key, the surface folds onto the CI/CD reporting sink
+	// (scoreboard.CICDReportChannel, == ChannelDefault) — a public, non-secret default so
+	// the surface lands with zero config. Isolate from any family override in the env.
 	t.Setenv("FAK_DOJO_CHANNEL", "")
+	t.Setenv("FAK_CICD_REPORT_CHANNEL", "")
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {
-		t.Fatalf("ResolveChannel default = %q, want the public dojo channel %q", got, ChannelDefault)
+		t.Fatalf("ResolveChannel default = %q, want the CI/CD reporting sink %q", got, ChannelDefault)
 	}
 	if got := ResolveChannelWithSource(); got.Value != ChannelDefault || got.Source != "built-in default" {
 		t.Fatalf("ResolveChannelWithSource default = %+v, want built-in default", got)
@@ -72,8 +74,10 @@ func TestResolveChannelDefaultsToPublicDojoChannel(t *testing.T) {
 
 func TestResolveChannelDoesNotInheritScoreboardChannel(t *testing.T) {
 	// FAK_SCOREBOARD_CHANNEL is the scoreboard CLI's #scoreboard default; the dojo
-	// surface must NOT misroute to it — it owns its own default.
+	// surface must NOT misroute to it — it folds onto the CI/CD reporting sink, never
+	// the scoreboard key.
 	t.Setenv("FAK_DOJO_CHANNEL", "")
+	t.Setenv("FAK_CICD_REPORT_CHANNEL", "")
 	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C_SCOREBOARD_MUST_NOT_LEAK")
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {

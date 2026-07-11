@@ -31,16 +31,17 @@
 package dojopost
 
 import (
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
-// ChannelDefault is the dojo channel in the scoreboard Slack workspace (team
-// T0BDEJF1HGB). It is a PUBLIC channel id (not a secret): the @agent bot is a
-// member and posts here with FAK_SCOREBOARD_TOKEN. Override with --channel or
-// FAK_DOJO_CHANNEL — NOT FAK_SCOREBOARD_CHANNEL, which is the scoreboard CLI's own
-// default (#scoreboard). This mirrors steeringChannelDefault's posture: the channel
-// id is public, only the token is secret.
-const ChannelDefault = "C0BDP2V51L1"
+// ChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) — dojo is
+// one of the CI/CD reporting feeders folded onto that single channel. It is a PUBLIC
+// channel id (not a secret): the @agent bot is a member and posts here with
+// FAK_SCOREBOARD_TOKEN. Override this surface with --channel or FAK_DOJO_CHANNEL — NOT
+// FAK_SCOREBOARD_CHANNEL, which is the scoreboard CLI's own default (#scoreboard) — or
+// repoint the whole reporting family with FAK_CICD_REPORT_CHANNEL.
+const ChannelDefault = scoreboard.CICDReportChannel
 
 // tokenEnvs is the dedicated dojo token key; the resolver adds a scoreboard fallback
 // (below). channelEnvs is the dedicated dojo channel key; the channel resolver adds
@@ -109,7 +110,7 @@ func ResolveChannelWithSource() Resolved {
 			return Resolved{Value: r.Value, Source: sourceLabel(r)}
 		}
 	}
-	return Resolved{Value: ChannelDefault, Source: "built-in default"}
+	return Resolved{Value: scoreboard.ResolveCICDReportChannel(), Source: "built-in default"}
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
