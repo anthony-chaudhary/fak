@@ -1,0 +1,66 @@
+{
+  "schema": "fak-codex-guard-child-exit-live-witness/1",
+  "captured_at": "2026-07-11T22:34:34Z",
+  "github_issue": 4213,
+  "status": "PARTIAL_NOT_REPRODUCED",
+  "build": {
+    "commit": "e00169aaa5756f4a7b29e77ce856c56d0696a8ac",
+    "method": "git archive HEAD into an OS temp directory, then go build -o <temp>/fak4213.exe ./cmd/fak"
+  },
+  "probes": [
+    {
+      "name": "guarded_codex_split_off",
+      "command": "<temp>/fak4213.exe codex --split off --loop-gate off --audit <temp>/audit.jsonl --quiet -- exec --json <fixed-no-tool-prompt>",
+      "result": "PASS",
+      "child_exit_code": 0,
+      "model_result": "fixed sentinel returned",
+      "journal_terminal_row": {
+        "kind": "CHILD_EXIT",
+        "tool": "codex",
+        "reason": "CLEAN_EXIT",
+        "exit_code": 0,
+        "wall_time_ms": 8179
+      }
+    },
+    {
+      "name": "guarded_codex_split_auto",
+      "command": "<temp>/fak4213.exe codex --split auto --loop-gate off --audit <temp>/audit.jsonl --quiet -- exec --json <fixed-no-tool-prompt>",
+      "result": "PASS",
+      "child_exit_code": 0,
+      "model_result": "fixed sentinel returned",
+      "journal_terminal_row": {
+        "kind": "CHILD_EXIT",
+        "tool": "codex",
+        "reason": "CLEAN_EXIT",
+        "exit_code": 0,
+        "wall_time_ms": 8329
+      },
+      "interpretation": "On this non-multiplexer PowerShell host, split=auto did not cause a start-time exit; it behaved equivalently to split=off. This rules out the auto-selection path here, not an actually-created multiplexer info pane."
+    },
+    {
+      "name": "launch_loop_gate",
+      "command": "<temp>/fak4213.exe codex --split off --loop-gate loop --audit <temp>/audit.jsonl --quiet -- exec --json <fixed-no-tool-prompt>",
+      "result": "EXPECTED_REFUSAL_BEFORE_CHILD_LAUNCH",
+      "launcher_exit_code": 1,
+      "typed_reason": "codex_session_bypassed_fak_guard",
+      "child_exit_row_present": false,
+      "interpretation": "The launch gate refuses synchronously before spawning Codex and prints an explicit reason. It does not explain a child rollout that starts and then truncates mid-turn."
+    },
+    {
+      "name": "nonzero_child_exit_control",
+      "command": "<temp>/fak4213.exe guard ... -- codex exec <intentionally malformed argv control>",
+      "result": "PASS",
+      "launcher_exit_code": 2,
+      "journal_terminal_row": {
+        "kind": "CHILD_CRASH",
+        "tool": "codex",
+        "reason": "NONZERO_EXIT",
+        "exit_code": 2,
+        "wall_time_ms": 205
+      },
+      "interpretation": "The new durable witness distinguishes an ordinary nonzero child teardown from clean completion."
+    }
+  ],
+  "privacy": "Prompts are fixed synthetic sentinels and omitted. Session UUIDs, absolute paths, stdout text, and credentials are not retained.",
+  "verdict": "The historical right-at-start/mid-turn kill was not reproduced. Split auto and split off both completed normally on this host; the launch loop-gate is ruled out as a post-start killer because it refuses before child launch. The exact external kill/signal remains NOT_PROVEN, but future occurrences now leave a typed CHILD_EXIT/CHILD_CRASH row with wall time and the last journal decision."
+}
