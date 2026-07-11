@@ -36,12 +36,12 @@ and the summary says so, so a fork or a secret-less run never hard-fails. The co
 pinned by `tools/release_artifacts_workflow_test.py`
 (`test_announces_release_after_assets_land`, `test_release_announce_dry_runs_without_secret`).
 
-`release-notify.yml` separately watches the release-cadence run itself (fired /
-failed-mid-chain / stalled) and also posts its `fired` ping to `#releases` via the same
-defaulted `FAK_RELEASES_CHANNEL` — see that workflow's header comment for the autonomous-
-release-observability distinction (#1390). Its failure/stall alerts are, by design, blocker
-signals (a dangling cut, a rotting `@latest`) and route to the louder `#blockers` channel,
-not to `#releases`.
+`release-notify.yml` separately watches the release-cadence run itself and posts EVERY
+release-observability card — `fired`, `failed-mid-chain`, `cadence-stalled`, and the
+downstream `artifacts-failed` — to `#releases` via the same defaulted
+`FAK_RELEASES_CHANNEL` (#1390). Severity rides the card's grade/verdict (A·OK for a fired
+release, F/D/C·ACTION for a failure or stall), not a separate channel — so all release
+reporting, success and failure alike, lands in one place.
 
 ## Operator step (token only)
 

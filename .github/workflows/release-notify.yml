@@ -11,30 +11,32 @@ name: Release notify
 #
 # It runs as a SEPARATE workflow keyed on `workflow_run` (not a step inside the
 # cadence job) so the cadence file stays single-concern and a notify failure can
-# NEVER fail the release. Three notify paths, decided from the triggering run's
-# conclusion + step outcomes:
+# NEVER fail the release. ALL release reporting — success and failure alike — sinks
+# to the #releases channel (C0BGHS7HFV1, the FAK_RELEASES_CHANNEL default); the
+# distinct grade/verdict on each card carries the severity, not a separate channel.
+# Three notify paths, decided from the triggering run's conclusion + step outcomes:
 #
 #   1. FIRED          — the cut->push->tag->publish chain completed (run succeeded
 #                       and a release was actually cut this tick). Success ping to
 #                       #releases with the version/tag.
 #   2. FAILED MID-CHAIN — the run FAILED and the cut step had started (the execute
-#                       chain began but a later step refused/died). Alert to the
-#                       louder #blockers channel naming the failing step.
+#                       chain began but a later step refused/died). ACTION card to
+#                       #releases naming the failing step (a dangling state).
 #   3. CADENCE STALLED — the run FAILED before deciding (decide/status errored), OR
 #                       it held cleanly but the recent cadence has cut NOTHING across
-#                       several ticks while the trunk moved. Heads-up to #blockers.
+#                       several ticks while the trunk moved. Heads-up to #releases.
 #
 # The same silent-failure logic applies one workflow downstream: release-artifacts
 # decorates the published release and its verify job can QUARANTINE a bad cut
 # (prerelease + not-latest) — but its announce job is skipped on failure, so a
 # failed decoration was invisible (witnessed 2026-07-07: both v0.37.0 runs failed
 # post-publish verification and nothing pinged, #1390/#3130). A fourth notify path
-# watches release-artifacts and alerts #blockers when it fails.
+# watches release-artifacts and posts an ACTION card to #releases when it fails.
 #
 # FAIL-OPEN + SELF-DISABLING: set the repo variable FAK_RELEASE_NOTIFY = '0' to mute
-# all pings. Every post is `|| true` and the token/channel guards skip silently when
-# unset (a secret-less fork posts nothing), so a delivery hiccup or missing secret
-# never turns a green release into a red notify run.
+# all pings. Every post is `|| true` and the token guard skips silently when unset
+# (a secret-less fork posts nothing), so a delivery hiccup or missing secret never
+# turns a green release into a red notify run.
 on:
   workflow_run:
     workflows: ["Release cadence", "release-artifacts"]
@@ -59,10 +61,10 @@ jobs:
     if: ${{ vars.FAK_RELEASE_NOTIFY != '0' && github.event.workflow_run.name == 'Release cadence' }}
     env:
       GOTOOLCHAIN: auto
-      # Same keys the other feeders read: token is a secret, channels are repo vars.
+      # Same keys the other feeders read: token is a secret, the channel is a repo var
+      # with a built-in #releases default. ALL cards below post to #releases.
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
       FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || 'C0BGHS7HFV1' }}
-      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
       FAK_SCOREBOARD_SOURCE: ci
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
@@ -206,14 +208,14 @@ jobs:
             --detail "autonomous release cut+tagged+published — $RUN_URL" \
             --source ci || true
 
-      # 2. FAILED MID-CHAIN — the execute chain started but a later step died. Alert
-      # to the louder #blockers channel naming the failing step (a dangling state).
+      # 2. FAILED MID-CHAIN — the execute chain started but a later step died. ACTION
+      # card to #releases naming the failing step (a dangling state).
       - name: notify auto-cut failed mid-chain
-        if: ${{ steps.classify.outputs.classify == 'failed_midchain' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        if: ${{ steps.classify.outputs.classify == 'failed_midchain' && env.FAK_SCOREBOARD_TOKEN != '' }}
         run: |
           set -euo pipefail
           go run ./cmd/fak scoreboard post \
-            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --channel "$FAK_RELEASES_CHANNEL" \
             --kpi auto-release \
             --value failed-mid-chain \
             --grade F \
@@ -223,11 +225,11 @@ jobs:
 
       # 3a. CADENCE STALLED (errored before deciding) — the tick couldn't even decide.
       - name: notify cadence stalled (errored)
-        if: ${{ steps.classify.outputs.classify == 'stalled' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        if: ${{ steps.classify.outputs.classify == 'stalled' && env.FAK_SCOREBOARD_TOKEN != '' }}
         run: |
           set -euo pipefail
           go run ./cmd/fak scoreboard post \
-            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --channel "$FAK_RELEASES_CHANNEL" \
             --kpi auto-release \
             --value cadence-stalled \
             --grade D \
@@ -237,11 +239,11 @@ jobs:
 
       # 3b. CADENCE STALLED (held N consecutive ticks) — clean runs, nothing shipped.
       - name: notify cadence stalled (consecutive holds)
-        if: ${{ steps.classify.outputs.classify == 'hold' && steps.holds.outputs.stalled == 'true' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        if: ${{ steps.classify.outputs.classify == 'hold' && steps.holds.outputs.stalled == 'true' && env.FAK_SCOREBOARD_TOKEN != '' }}
         run: |
           set -euo pipefail
           go run ./cmd/fak scoreboard post \
-            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --channel "$FAK_RELEASES_CHANNEL" \
             --kpi auto-release \
             --value cadence-stalled \
             --grade C \
@@ -258,19 +260,16 @@ jobs:
             if [ -z "${FAK_SCOREBOARD_TOKEN}" ]; then
               echo "Release notify SKIPPED — FAK_SCOREBOARD_TOKEN not set (secret-less fork or missing secret); nothing posted."
             fi
-            echo "- #releases fired-ping target defaults to C0BGHS7HFV1; override with the FAK_RELEASES_CHANNEL repo variable."
-            if [ -z "${FAK_BLOCKERS_CHANNEL}" ]; then
-              echo "- FAK_BLOCKERS_CHANNEL repo variable not set (#blockers failure/stall target)."
-            fi
+            echo "- all release notify cards (fired / failed-mid-chain / cadence-stalled) target #releases (default C0BGHS7HFV1); override with the FAK_RELEASES_CHANNEL repo variable."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # 4. ARTIFACTS FAILED — the published release's decoration/verification failed.
   # A failed release-artifacts run means the verify job may have QUARANTINED the
   # release (prerelease + not-latest, so the front door lags HEAD) or the assets
   # never fully landed — and its own announce job is skipped on failure, so the
-  # failure is otherwise silent (#1390; witnessed on v0.37.0, #3130). Alert the
-  # louder #blockers channel naming the failing job. Same fail-open posture as
-  # the cadence paths: `|| true` posts, silent skip without token/channel.
+  # failure is otherwise silent (#1390; witnessed on v0.37.0, #3130). Post an ACTION
+  # card to #releases naming the failing job. Same fail-open posture as the cadence
+  # paths: `|| true` posts, silent skip without the token.
   notify-artifacts:
     name: notify on release-artifacts failure
     runs-on: ubuntu-latest
@@ -279,7 +278,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
+      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || 'C0BGHS7HFV1' }}
       FAK_SCOREBOARD_SOURCE: ci
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_URL: ${{ github.event.workflow_run.html_url }}
@@ -318,11 +317,11 @@ jobs:
           echo "release-artifacts run ${RUN_ID} failed at job: ${failing:-unknown}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: notify artifacts failure
-        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' }}
         run: |
           set -euo pipefail
           go run ./cmd/fak scoreboard post \
-            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --channel "$FAK_RELEASES_CHANNEL" \
             --kpi auto-release \
             --value artifacts-failed \
             --grade F \
@@ -337,7 +336,5 @@ jobs:
             if [ -z "${FAK_SCOREBOARD_TOKEN}" ]; then
               echo "Artifacts-failure notify SKIPPED — FAK_SCOREBOARD_TOKEN not set; nothing posted."
             fi
-            if [ -z "${FAK_BLOCKERS_CHANNEL}" ]; then
-              echo "- FAK_BLOCKERS_CHANNEL repo variable not set (#blockers failure target)."
-            fi
+            echo "- the artifacts-failure card targets #releases (default C0BGHS7HFV1); override with the FAK_RELEASES_CHANNEL repo variable."
           } >> "$GITHUB_STEP_SUMMARY"
