@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
@@ -306,6 +307,21 @@ type gatewayMetrics struct {
 	// conflate provenances. The vDSO's own hits/lookups still update, so fak_vdso_hit_rate
 	// reflects these probes too.
 	servedInline uint64
+
+	// cacheBreakMu guards the per-session cache-break witness sink (#2916): the
+	// CONSUMER half of the cache-integrity invariant. Each entry is one witnessed
+	// cache-break — a warm prompt prefix that broke mid-conversation — carrying the
+	// closed cause (toolset_change/altered_turn/rebuilt_prompt/provider_quirk/unknown)
+	// and the cold-rebuild token cost it caused, folded through internal/metrics so the
+	// guard exit summary and the Prometheus surface read the SAME numbers. The SOURCE of
+	// the events (the mid-conversation prefix-mutation detector) is sibling #2915;
+	// recordCacheBreak is the seam that detector calls. Until #2915 wires a live producer
+	// this sink stays empty and the family renders a clean zero (its HELP/TYPE declared,
+	// no samples), the same dogfooded-at-zero posture the deny-all/auth-refresh families
+	// keep so a panel exists from the first scrape. Kept off inferenceMu — folded only at
+	// scrape / exit-summary time, never on the hot path.
+	cacheBreakMu     sync.Mutex
+	cacheBreakEvents []metrics.CacheBreakEvent
 
 	// vcacheMu guards the per-family live-observe accumulator (#935). The cumulative
 	// fak_vcache_* family above is one aggregate row; this retains the per-turn,

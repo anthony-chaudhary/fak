@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -233,6 +234,7 @@ func (s *Server) renderMetrics() string {
 	m.writeCompactionMetrics(&b)
 	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses
 	m.writeResetShadowMetrics(&b)
+	m.writeCacheBreakMetrics(&b) // #2916: per-session cache-break events + cold-rebuild token cost, by closed cause
 	m.writeDenyAllMetrics(&b)
 	s.writeSessionMetrics(&b) // #1204: live session count by DRIVE run-state token
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
@@ -1246,6 +1248,28 @@ func (m *gatewayMetrics) writeResetShadowMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_compaction_reset_score",
 		"The most recent compacted turn's 0..1 resetScore reset-pressure magnitude (0 = clearly keep cutting, 1 = clearly reset). Reported even when the cooldown holds the recommendation, so the building pressure is visible. Advisory: nothing acts on it in SHADOW mode.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_compaction_reset_score %s\n", promFloat(snap.lastScore))
+}
+
+// writeCacheBreakMetrics renders the per-session cache-break family (#2916): two counter
+// families — event count and cold-rebuild token cost — each labeled by the closed cause
+// vocabulary (toolset_change/altered_turn/rebuilt_prompt/provider_quirk/unknown) and emitted
+// in canonical cause order. Both families ALWAYS declare their HELP/TYPE so a regression gate
+// and a dashboard panel exist from the first scrape; a session with no witnessed break renders
+// the declarations with NO per-cause sample (a clean zero), which is exactly the empty state a
+// gate reads as "no regression". The scrape and the guard exit summary fold the SAME
+// cacheBreakReport witnesses, so the two views can never disagree.
+func (m *gatewayMetrics) writeCacheBreakMetrics(b *strings.Builder) {
+	report := m.cacheBreakReport()
+	writeHelpType(b, metrics.CacheBreakEventsMetric,
+		"Cache-break events this session, labeled by closed cause (toolset_change/altered_turn/rebuilt_prompt/provider_quirk/unknown). A rise means the warm prompt prefix broke more often mid-conversation.", "counter")
+	for _, t := range report.ByCause {
+		fmt.Fprintf(b, "%s{cause=\"%s\"} %d\n", metrics.CacheBreakEventsMetric, promQuote(string(t.Cause)), t.Events)
+	}
+	writeHelpType(b, metrics.CacheBreakCostMetric,
+		"Cold-rebuild token cost of cache breaks this session, labeled by closed cause. Each break's cost is the warm prompt prefix that had to be re-prefilled.", "counter")
+	for _, t := range report.ByCause {
+		fmt.Fprintf(b, "%s{cause=\"%s\"} %d\n", metrics.CacheBreakCostMetric, promQuote(string(t.Cause)), t.CostTokens)
+	}
 }
 
 func writeHelpType(b *strings.Builder, name, help, typ string) {

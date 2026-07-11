@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
 // observeUpstreamError increments the upstream-error counter for the error's KIND. It is the
@@ -505,6 +506,38 @@ func (m *gatewayMetrics) servedInlineSnapshot() uint64 {
 		return 0
 	}
 	return atomic.LoadUint64(&m.servedInline)
+}
+
+// recordCacheBreak witnesses one cache-break event (#2916): a warm prompt prefix
+// that broke mid-conversation under the closed cause vocabulary, and the cold-rebuild
+// token cost that break caused (the prefix that must now be re-prefilled). This is the
+// CONSUMER seam sibling #2915's prefix-mutation detector calls; the cause and cost are
+// caller-supplied from cache accounting and normalized by internal/metrics (an
+// out-of-vocabulary cause folds to unknown, a negative cost clamps to zero). A nil
+// metrics is a no-op. Off the hot path — appended under its own lock, folded only at
+// scrape / exit-summary time.
+func (m *gatewayMetrics) recordCacheBreak(cause metrics.CacheBreakCause, costTokens int64) {
+	if m == nil {
+		return
+	}
+	m.cacheBreakMu.Lock()
+	m.cacheBreakEvents = append(m.cacheBreakEvents, metrics.WitnessCacheBreak(cause, costTokens))
+	m.cacheBreakMu.Unlock()
+}
+
+// cacheBreakReport folds the session's witnessed cache-break events into the
+// per-session operator readout (#2916): total events, total cold-rebuild token cost,
+// and the per-cause tally in canonical order. The guard exit summary and the Prometheus
+// surface fold the SAME witnesses, so the two views can never disagree. An empty sink
+// folds to a clean zero. Pure read — snapshots under the lock, folds outside it.
+func (m *gatewayMetrics) cacheBreakReport() metrics.CacheBreakReport {
+	if m == nil {
+		return metrics.CacheBreakReport{}
+	}
+	m.cacheBreakMu.Lock()
+	events := append([]metrics.CacheBreakEvent(nil), m.cacheBreakEvents...)
+	m.cacheBreakMu.Unlock()
+	return metrics.FoldCacheBreaks(events)
 }
 
 // denyAllSnapshot reads the deny-all accumulators under their lock. Pure read — the exit
