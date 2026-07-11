@@ -58,12 +58,13 @@ type GradedTrial struct {
 // best wall-clock over the SOLVED trials only (a censored trial contributes no time).
 type ArmTTS struct {
 	Trials        int         `json:"trials"`
-	ReachedTrials int         `json:"reached_trials"` // trials that solved (correctness 1.0)
-	MeanWallSec   float64     `json:"mean_wall_sec"`  // mean wall-clock over solved trials (0 if none)
-	BestWallSec   float64     `json:"best_wall_sec"`  // min wall-clock over solved trials (0 if none)
-	MeanTurns     float64     `json:"mean_turns"`     // mean turns-to-first-correct over solved trials
-	Provenance    string      `json:"provenance"`     // measured | projected | mixed | none
-	Metrics       []TTSMetric `json:"metrics"`        // per-trial C14 metrics, for inspection
+	ReachedTrials int         `json:"reached_trials"`  // trials that solved (correctness 1.0)
+	MeanWallSec   float64     `json:"mean_wall_sec"`   // mean wall-clock over solved trials (0 if none)
+	BestWallSec   float64     `json:"best_wall_sec"`   // min wall-clock over solved trials (0 if none)
+	MeanTurns     float64     `json:"mean_turns"`      // mean turns-to-first-correct over solved trials
+	MeanReuseRate float64     `json:"mean_reuse_rate"` // C8: mean realized cross-turn reuse rate over the arm's trials (whole-trajectory, not solved-only)
+	Provenance    string      `json:"provenance"`      // measured | projected | mixed | none
+	Metrics       []TTSMetric `json:"metrics"`         // per-trial C14 metrics, for inspection
 }
 
 // CompareReport is the fak.frontierswe.compare.v1 payload: the C11 parity gate, the
@@ -73,11 +74,13 @@ type ArmTTS struct {
 type CompareReport struct {
 	Schema     string            `json:"schema"`
 	Task       string            `json:"task"`
-	Parity     ScoreParityReport `json:"parity"`              // C11 — evaluated FIRST
-	Raw        ArmTTS            `json:"raw"`                 // C14 aggregate, raw arm
-	Fak        ArmTTS            `json:"fak"`                 // C14 aggregate, fak arm
-	TTSRatio   *float64          `json:"tts_ratio,omitempty"` // T_fak/T_raw, only when parity ok AND both arms solved
-	Provenance string            `json:"provenance"`          // the ratio's provenance: measured | projected (absent when no ratio)
+	Parity     ScoreParityReport `json:"parity"`                   // C11 — evaluated FIRST (carries the C3 Avg/Best/correct distribution)
+	Raw        ArmTTS            `json:"raw"`                      // C14 aggregate, raw arm
+	Fak        ArmTTS            `json:"fak"`                      // C14 aggregate, fak arm
+	TTSRatio   *float64          `json:"tts_ratio,omitempty"`      // T_fak/T_raw, only when parity ok AND both arms solved
+	Provenance string            `json:"provenance"`               // the ratio's provenance: measured | projected (absent when no ratio)
+	FloorRatio *float64          `json:"c4_floor_ratio,omitempty"` // C4 deterministic floor T_fak/T_raw at the fak arm's realized reuse — the projection the measured ratio is checked against (#1718)
+	OverClaim  bool              `json:"over_claim,omitempty"`     // a MEASURED ratio below the C4 floor — physically suspicious, surfaced not hidden
 	Verdict    string            `json:"verdict"`
 	Headline   string            `json:"headline"`
 }
@@ -93,6 +96,13 @@ func CompareArms(task string, raw, fak []GradedTrial, tolerance float64) Compare
 		Raw:    aggregateArm(task, raw),
 		Fak:    aggregateArm(task, fak),
 	}
+
+	// The C4 deterministic floor is a projection independent of the parity/gated
+	// verdict, so it is computed once up front and always carried: T_fak/T_raw =
+	// C(r)/A projected from the fak arm's budget geometry at its realized reuse rate.
+	// It is the number the measured ratio is checked against (#1718); over-claim (a
+	// MEASURED ratio below it) is flagged in the ratio branch below.
+	rep.FloorRatio = c4FloorRatio(task, fak, rep.Fak.MeanReuseRate)
 
 	// 1) Parity FIRST. A regressed score distribution stops the compare — there is
 	// no time-to-solution win to read, only a regression to fix.
@@ -116,10 +126,35 @@ func CompareArms(task string, raw, fak []GradedTrial, tolerance float64) Compare
 	ratio := rep.Fak.MeanWallSec / rep.Raw.MeanWallSec
 	rep.TTSRatio = &ratio
 	rep.Provenance = comparisonProvenance(rep.Raw.Provenance, rep.Fak.Provenance)
+	// Over-claim: a MEASURED ratio that dips below the deterministic C4 floor is
+	// physically suspicious (prefix reuse alone cannot beat the floor), so surface it
+	// rather than bank the bigger number. A PROJECTED ratio IS the floor's own family,
+	// so it is never flagged — only a measurement can over-claim against the projection.
+	if rep.Provenance == ProvenanceMeasured && rep.FloorRatio != nil && ratio+tolClamp(tolerance) < *rep.FloorRatio {
+		rep.OverClaim = true
+	}
 	win := ratio+tolClamp(tolerance) < 1.0
 	rep.Verdict = verdictFor(rep.Provenance, win)
 	rep.Headline = compareHeadline(rep.Provenance, win, ratio, rep.Raw.MeanWallSec, rep.Fak.MeanWallSec)
 	return rep
+}
+
+// c4FloorRatio projects the deterministic C4 time-to-solution floor T_fak/T_raw =
+// C(r)/A for the arm's task, from the arm's budget geometry (the [agent] timeout_sec
+// carried on its TTS trace) at realized reuse rate r. It is the projection the
+// measured ratio is checked against (#1718), reusing the same C4 TTSModel the
+// describe surface projects with. Returns nil when no trial carries a budget to
+// project from — a floor is never fabricated from a missing budget.
+func c4FloorRatio(task string, arm []GradedTrial, reuse float64) *float64 {
+	for _, t := range arm {
+		if t.Trace.BudgetSec > 0 {
+			ft := &Task{Name: task}
+			ft.Agent.TimeoutSec = float64(t.Trace.BudgetSec)
+			floor := ProjectTTS(ft, reuse, nil).Arms.TTSRatio
+			return &floor
+		}
+	}
+	return nil
 }
 
 // scoresOf projects the arm's trials onto the C11 TrialScore slice the parity gate
@@ -137,10 +172,13 @@ func scoresOf(arm []GradedTrial) []TrialScore {
 // the mean is a true mean-time-to-solution over the trials that actually solved.
 func aggregateArm(task string, arm []GradedTrial) ArmTTS {
 	a := ArmTTS{Trials: len(arm), Metrics: make([]TTSMetric, 0, len(arm))}
-	var wallSum, turnSum float64
+	var wallSum, turnSum, reuseSum float64
 	best := 0.0
 	sawMeasured, sawProjected := false, false
 	for _, t := range arm {
+		// C8 realized reuse is a whole-trajectory property (it does not depend on
+		// whether the trial solved), so it is summed over every trial, not just solved.
+		reuseSum += t.Trace.CacheSeries.RealizedReuseRate
 		m := TTSMetricOf(task, t.Score.ID, t.Score.Correctness, t.Trace, t.Mocked)
 		a.Metrics = append(a.Metrics, m)
 		if !m.Reached {
@@ -163,6 +201,9 @@ func aggregateArm(task string, arm []GradedTrial) ArmTTS {
 		a.MeanWallSec = wallSum / float64(a.ReachedTrials)
 		a.MeanTurns = turnSum / float64(a.ReachedTrials)
 		a.BestWallSec = best
+	}
+	if len(arm) > 0 {
+		a.MeanReuseRate = reuseSum / float64(len(arm))
 	}
 	a.Provenance = armProvenance(sawMeasured, sawProjected)
 	return a
@@ -248,21 +289,32 @@ func RenderCompareMarkdown(r CompareReport) string {
 			fmt.Fprintf(&b, "  - %s\n", f)
 		}
 	}
-	fmt.Fprintf(&b, "\n## Time-to-solution (C14 — solved trials only)\n\n")
-	fmt.Fprintf(&b, "| arm | trials | solved | mean wall (s) | best wall (s) | mean turns | provenance |\n")
-	fmt.Fprintf(&b, "|---|---|---|---|---|---|---|\n")
-	writeArmRow(&b, "raw", r.Raw)
-	writeArmRow(&b, "fak", r.Fak)
+	// One side-by-side row per arm carrying the four families the issue names: the C3
+	// gated score (avg/best + correct X/N), the C14 measured time-to-solution (solved
+	// trials only), and the C8 realized reuse rate — plus the provenance label.
+	fmt.Fprintf(&b, "\n## Score, time-to-solution, and reuse (per arm)\n\n")
+	fmt.Fprintf(&b, "| arm | avg score | best score | correct X/N | solved | mean wall (s) | mean turns | realized reuse (C8) | provenance |\n")
+	fmt.Fprintf(&b, "|---|---|---|---|---|---|---|---|---|\n")
+	writeArmRow(&b, "raw", r.Parity.Raw, r.Raw)
+	writeArmRow(&b, "fak", r.Parity.Fak, r.Fak)
 	b.WriteString("\n")
 	if r.TTSRatio != nil {
 		fmt.Fprintf(&b, "**TTS ratio (T_fak/T_raw):** %.4f  (%s)\n", *r.TTSRatio, r.Provenance)
 	} else {
 		fmt.Fprintf(&b, "**TTS ratio:** — (not claimed: %s)\n", r.Verdict)
 	}
+	// The projection-vs-measurement column: the C4 deterministic floor beside the
+	// measured ratio, so an over-claim (a measurement beating the floor) is visible.
+	if r.FloorRatio != nil {
+		fmt.Fprintf(&b, "**C4 floor (projected T_fak/T_raw):** %.4f — the projection the measurement is checked against\n", *r.FloorRatio)
+		if r.OverClaim {
+			fmt.Fprintf(&b, "> **OVER-CLAIM:** the measured ratio is below the deterministic C4 floor — re-check the measurement.\n")
+		}
+	}
 	return b.String()
 }
 
-func writeArmRow(b *strings.Builder, name string, a ArmTTS) {
-	fmt.Fprintf(b, "| %s | %d | %d | %.1f | %.1f | %.1f | %s |\n",
-		name, a.Trials, a.ReachedTrials, a.MeanWallSec, a.BestWallSec, a.MeanTurns, a.Provenance)
+func writeArmRow(b *strings.Builder, name string, s ScoreDistribution, a ArmTTS) {
+	fmt.Fprintf(b, "| %s | %.4f | %.4f | %d/%d | %d | %.1f | %.1f | %.4f | %s |\n",
+		name, s.AvgScore, s.BestScore, s.CorrectCount, s.Trials, a.ReachedTrials, a.MeanWallSec, a.MeanTurns, a.MeanReuseRate, a.Provenance)
 }

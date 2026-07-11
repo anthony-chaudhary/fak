@@ -141,12 +141,23 @@ func printFrontiersweCompareSummary(w io.Writer, r frontierswe.CompareReport) {
 			fmt.Fprintf(w, "  - %s\n", f)
 		}
 	}
-	fmt.Fprintf(w, "raw arm     : solved %d/%d, mean wall %.1fs (%s)\n", r.Raw.ReachedTrials, r.Raw.Trials, r.Raw.MeanWallSec, r.Raw.Provenance)
-	fmt.Fprintf(w, "fak arm     : solved %d/%d, mean wall %.1fs (%s)\n", r.Fak.ReachedTrials, r.Fak.Trials, r.Fak.MeanWallSec, r.Fak.Provenance)
+	fmt.Fprintf(w, "raw arm     : score avg %.3f/best %.3f, correct %d/%d, solved %d/%d, mean wall %.1fs, reuse r=%.4f (%s)\n",
+		r.Parity.Raw.AvgScore, r.Parity.Raw.BestScore, r.Parity.Raw.CorrectCount, r.Parity.Raw.Trials,
+		r.Raw.ReachedTrials, r.Raw.Trials, r.Raw.MeanWallSec, r.Raw.MeanReuseRate, r.Raw.Provenance)
+	fmt.Fprintf(w, "fak arm     : score avg %.3f/best %.3f, correct %d/%d, solved %d/%d, mean wall %.1fs, reuse r=%.4f (%s)\n",
+		r.Parity.Fak.AvgScore, r.Parity.Fak.BestScore, r.Parity.Fak.CorrectCount, r.Parity.Fak.Trials,
+		r.Fak.ReachedTrials, r.Fak.Trials, r.Fak.MeanWallSec, r.Fak.MeanReuseRate, r.Fak.Provenance)
 	if r.TTSRatio != nil {
 		fmt.Fprintf(w, "TTS ratio   : %.4f  (%s)\n", *r.TTSRatio, r.Provenance)
 	} else {
 		fmt.Fprintf(w, "TTS ratio   : — (not claimed)\n")
+	}
+	if r.FloorRatio != nil {
+		flag := ""
+		if r.OverClaim {
+			flag = "  ** OVER-CLAIM vs floor **"
+		}
+		fmt.Fprintf(w, "C4 floor    : %.4f (the projection the measurement is checked against)%s\n", *r.FloorRatio, flag)
 	}
 	fmt.Fprintf(w, "VERDICT     : %s\n", r.Verdict)
 	fmt.Fprintf(w, "%s\n", r.Headline)

@@ -137,6 +137,85 @@ func TestCompareNoWin(t *testing.T) {
 	}
 }
 
+// traceFull carries the C8 realized reuse rate and the [agent] budget the C4 floor
+// is projected from, so the reuse/floor surfacing (#1718) can be exercised offline.
+func traceFull(wallSec float64, turns int, budgetSec int64, reuse float64) TTSTrace {
+	return TTSTrace{
+		Schema: "fak.frontierswe.tts-trace.v1", Turns: turns, TotalWallSec: wallSec, BudgetSec: budgetSec,
+		CacheSeries: CacheWitnessSeries{RealizedReuseRate: reuse},
+	}
+}
+
+func gradedTrialFull(id string, correctness, score, wallSec float64, turns int, budgetSec int64, reuse float64, mocked bool) GradedTrial {
+	return GradedTrial{
+		Score:  TrialScore{ID: id, Task: "git-to-zig", Correctness: correctness, Score: score},
+		Trace:  traceFull(wallSec, turns, budgetSec, reuse),
+		Mocked: mocked,
+	}
+}
+
+// #1718: the compare surfaces the C8 realized reuse rate per arm and the C4
+// deterministic floor the measured ratio is checked against. A measured ratio that
+// sits ABOVE the floor is honest — no over-claim.
+func TestCompareSurfacesReuseAndFloor(t *testing.T) {
+	raw := []GradedTrial{gradedTrialFull("r1", 1.0, 1.0, 1000, 40, 3600, 0.80, false)}
+	fak := []GradedTrial{gradedTrialFull("f1", 1.0, 1.0, 250, 10, 3600, 0.90, false)}
+	rep := CompareArms("git-to-zig", raw, fak, 0)
+	if !floatsEqual(rep.Raw.MeanReuseRate, 0.80) || !floatsEqual(rep.Fak.MeanReuseRate, 0.90) {
+		t.Fatalf("realized reuse (C8) must surface per arm, got raw=%v fak=%v", rep.Raw.MeanReuseRate, rep.Fak.MeanReuseRate)
+	}
+	if rep.FloorRatio == nil {
+		t.Fatalf("a budgeted arm must project a C4 floor")
+	}
+	if *rep.FloorRatio <= 0 || *rep.FloorRatio >= 1 {
+		t.Fatalf("C4 floor must be a fraction in (0,1), got %v", *rep.FloorRatio)
+	}
+	if rep.OverClaim {
+		t.Fatalf("measured ratio 0.25 sits above the floor %v; over-claim must be false", *rep.FloorRatio)
+	}
+}
+
+// #1718: a MEASURED ratio that dips below the deterministic C4 floor is physically
+// suspicious and must be flagged as an over-claim, not banked as a bigger win.
+func TestCompareOverClaimBelowFloor(t *testing.T) {
+	raw := []GradedTrial{gradedTrialFull("r1", 1.0, 1.0, 1000, 40, 3600, 0.90, false)}
+	fak := []GradedTrial{gradedTrialFull("f1", 1.0, 1.0, 5, 1, 3600, 0.90, false)} // absurdly fast: below the floor
+	rep := CompareArms("git-to-zig", raw, fak, 0)
+	if rep.Verdict != VerdictMeasuredWin {
+		t.Fatalf("expected MEASURED_WIN, got %s", rep.Verdict)
+	}
+	if rep.FloorRatio == nil || !rep.OverClaim {
+		t.Fatalf("a measured ratio below the C4 floor must flag over-claim; floor=%v ratio=%v", rep.FloorRatio, rep.TTSRatio)
+	}
+}
+
+// #1718: a PROJECTED (mocked) ratio IS the floor's own family, so it can never
+// over-claim against the projection even when the arithmetic dips below it.
+func TestCompareProjectedNeverOverClaim(t *testing.T) {
+	raw := []GradedTrial{gradedTrialFull("r1", 1.0, 1.0, 1000, 40, 3600, 0.90, true)}
+	fak := []GradedTrial{gradedTrialFull("f1", 1.0, 1.0, 5, 1, 3600, 0.90, true)}
+	rep := CompareArms("git-to-zig", raw, fak, 0)
+	if rep.Provenance != ProvenanceProjected {
+		t.Fatalf("mocked ⇒ projected, got %s", rep.Provenance)
+	}
+	if rep.OverClaim {
+		t.Fatalf("a projected floor is not a measurement; over-claim must not fire")
+	}
+}
+
+// #1718: the markdown surfaces the per-arm score, the realized reuse rate, and the
+// C4 floor beside the measured ratio.
+func TestRenderCompareMarkdownSurfacesReuseScoreFloor(t *testing.T) {
+	raw := []GradedTrial{gradedTrialFull("r1", 1.0, 1.0, 1000, 40, 3600, 0.80, false)}
+	fak := []GradedTrial{gradedTrialFull("f1", 1.0, 1.0, 250, 10, 3600, 0.90, false)}
+	md := RenderCompareMarkdown(CompareArms("git-to-zig", raw, fak, 0))
+	for _, want := range []string{"avg score", "realized reuse", "C4 floor"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown must surface %q; got:\n%s", want, md)
+		}
+	}
+}
+
 // The markdown renders in the honest order: verdict, parity, then the ratio.
 func TestRenderCompareMarkdownOrder(t *testing.T) {
 	raw := []GradedTrial{gradedTrial("r1", 1.0, 1.0, 1000, 40, false)}
