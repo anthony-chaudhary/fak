@@ -40,6 +40,13 @@ func TestModuleOf(t *testing.T) {
 		{"tools/_registry/state.py", "", "", false},                                // nested: registry, not the flat inventory
 		{"tools/__pycache__/x.pyc", "", "", false},                                 // nested cache
 		{"tools/.gitignore", "", "", false},                                        // bare dotfile
+		// examples/ is a flat, file-keyed policy-manifest keyspace.
+		{"examples/repo-guard-policy.json", "examples/repo-guard-policy.json", "policy", true},
+		{"examples/customer-support-readonly-policy.json", "examples/customer-support-readonly-policy.json", "policy", true},
+		{"examples\\dev-agent-policy.json", "examples/dev-agent-policy.json", "policy", true}, // backslash-normalized
+		{"examples/README.md", "", "", false},                                                // top-level non-JSON: excluded
+		{"examples/mcp/.mcp.json", "", "", false},                                            // nested demo fixture: excluded
+		{"examples/adjudication-demo/main.go", "", "", false},                                // nested demo: excluded
 		{"", "", "", false},
 	}
 	for _, c := range cases {
@@ -212,6 +219,64 @@ func TestToolsKeyspace(t *testing.T) {
 	for _, r := range rows {
 		if r.Kind != "tools" || !strings.HasPrefix(r.Module, "tools/") {
 			t.Errorf("ledger row not a tools row: %+v", r)
+		}
+	}
+}
+
+// TestPolicyKeyspace is the #2462 witness: a top-level examples/<file>.json flows
+// through Snapshot as a file-keyed "policy" module and produces a ledger row (the
+// "live stamp with policy rows"), while a top-level non-JSON file and a nested
+// demo/fixture path are excluded from the deployable-manifest keyspace.
+func TestPolicyKeyspace(t *testing.T) {
+	const polLog = "\x1e" + "pl222222\t2026-07-08T12:00:00Z\n" +
+		"examples/customer-support-readonly-policy.json\n" +
+		"examples/customer-support-readonly-policy.json\n" + // same manifest twice in one commit: counts once
+		"examples/README.md\n" + // top-level non-JSON: excluded
+		"examples/mcp/.mcp.json\n" + // nested demo fixture: excluded
+		"\x1e" + "pl111111\t2026-07-07T09:00:00Z\n" +
+		"examples/customer-support-readonly-policy.json\n" +
+		"examples/repo-guard-policy.json\n"
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("plhead01\n"), nil
+		case "ls-files":
+			return []byte("examples/customer-support-readonly-policy.json\x00" +
+				"examples/repo-guard-policy.json\x00examples/README.md\x00examples/mcp/.mcp.json\x00"), nil
+		case "log":
+			return []byte(polLog), nil
+		}
+		t.Fatalf("unexpected git args: %v", args)
+		return nil, nil
+	}
+	rep, err := Snapshot(context.Background(), t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two manifests survive: the two top-level policy JSONs. The README and the
+	// nested demo fixture are excluded from the keyspace.
+	if len(rep.Modules) != 2 {
+		t.Fatalf("got %d modules, want 2 (two policy manifests): %+v", len(rep.Modules), rep.Modules)
+	}
+	cs := findModuleMV(t, rep, "examples/customer-support-readonly-policy.json")
+	if cs.Kind != "policy" || cs.Rev != 2 || cs.LastCommit != "pl222222" {
+		t.Fatalf("customer-support policy = %+v, want kind=policy rev=2 last=pl222222 (both commits touch it)", cs)
+	}
+	if v := cs.Version(); v != "r2+gpl222222" {
+		t.Errorf("Version() = %q, want r2+gpl222222", v)
+	}
+	guard := findModuleMV(t, rep, "examples/repo-guard-policy.json")
+	if guard.Kind != "policy" || guard.Rev != 1 {
+		t.Fatalf("repo-guard policy = %+v, want kind=policy rev=1", guard)
+	}
+	// The policy manifests must be emittable as ledger rows (empty prior ledger).
+	rows := DeltaRows(rep, nil, "2026-07-08T12:00:00Z")
+	if len(rows) != 2 {
+		t.Fatalf("ledger rows = %+v, want two policy rows", rows)
+	}
+	for _, r := range rows {
+		if r.Kind != "policy" || !strings.HasPrefix(r.Module, "examples/") {
+			t.Errorf("ledger row not a policy row: %+v", r)
 		}
 	}
 }

@@ -34,10 +34,11 @@ import (
 const Schema = "fak-module-versions/1"
 
 // Module is one versioned unit: an internal/<leaf> package, a cmd/<dir> binary,
-// a .github/workflows/<file> CI workflow, or a tools/<family> script.
+// a .github/workflows/<file> CI workflow, a tools/<family> script, or an
+// examples/<file>.json policy manifest.
 type Module struct {
-	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe"
-	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools"
+	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe", "examples/repo-guard-policy.json"
+	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools" | "policy"
 	Rev        int      `json:"rev"`    // distinct commits touching the module
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"` // committer date (ISO) of the last touch
@@ -85,10 +86,12 @@ func RealRunner(ctx context.Context, dir string, args ...string) ([]byte, error)
 
 // trackedRoots are the path prefixes that define the module key space today:
 // the internal/ leaves and cmd/ binaries, the .github/workflows/ CI keyspace
-// (each workflow file is its own module), and the tools/ script keyspace (each
-// top-level script family is a module — see moduleOf). (docs/, skills, policies
-// are follow-on key spaces — see the version-everything backlog.)
-var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools"}
+// (each workflow file is its own module), the tools/ script keyspace (each
+// top-level script family is a module), and the examples/ policy-manifest
+// keyspace (each top-level examples/<file>.json is a module — see moduleOf).
+// (docs/ and skills are follow-on key spaces — see the version-everything
+// backlog.)
+var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools", "examples"}
 
 // Snapshot computes the module-version report for the repo at dir: one
 // `git ls-files` to bound the LIVE module set, one `git log --name-only`
@@ -155,11 +158,15 @@ func liveModules(lsFilesOut []byte) map[string]bool {
 // directory. The tools/ script keyspace is family-keyed: each top-level script
 // (tools/<name>.py|.sh|.ps1) is a module keyed by its family (tools/<name>),
 // with a _test sibling folded into the same family, since a de-Python unit is a
-// script plus its test (see toolsFamily). Files sitting directly under a
-// directory root (no module directory) belong to no module, as do nested paths
-// under .github/workflows/ (GitHub Actions does not run workflows in
-// subdirectories) or under tools/ (registries, caches, and fixtures — not the
-// flat frozen-script inventory the de-Python ratchet tracks).
+// script plus its test (see toolsFamily). The examples/ policy-manifest keyspace
+// is file-keyed and flat like the workflow keyspace: each top-level manifest
+// (examples/<file>.json) is its own module, since a policy's unit of behavior is
+// the file; nested examples/<demo>/… paths are runnable demos and their
+// fixtures, not deployable capability-floor manifests, so they are excluded.
+// Files sitting directly under a directory root (no module directory) belong to
+// no module, as do nested paths under .github/workflows/ (GitHub Actions does
+// not run workflows in subdirectories) or under tools/ (registries, caches, and
+// fixtures — not the flat frozen-script inventory the de-Python ratchet tracks).
 func moduleOf(path string) (name, kind string, ok bool) {
 	path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
 	parts := strings.Split(path, "/")
@@ -183,6 +190,14 @@ func moduleOf(path string) (name, kind string, ok bool) {
 			if fam, famOK := toolsFamily(parts[1]); famOK {
 				return "tools/" + fam, "tools", true
 			}
+		}
+	case "examples":
+		// Flat, file-keyed policy-manifest keyspace: only top-level
+		// examples/<file>.json count (len == 2). Nested examples/<demo>/… paths
+		// are runnable demos and their fixtures, not deployable manifests —
+		// excluded, the same flat rule as tools/.
+		if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
+			return path, "policy", true
 		}
 	}
 	return "", "", false
