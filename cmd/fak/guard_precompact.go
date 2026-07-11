@@ -80,6 +80,11 @@ func runGuardPreCompact(stdout, stderr io.Writer, stdin io.Reader, argv []string
 	code := runGuardPreCompactDecision(stdout, stderr, argv)
 	if code != 2 {
 		appendCompactionBoundaryFailOpen(stderr, trajctl.Stamp{SessionID: parseHookSessionID(readHookStdin(stdin))}, time.Now().UnixMilli())
+		// #4118: an allowed compaction is a context reset — the latest moment the live
+		// remaining budget is known before the window is handed off. Project it into the
+		// transcript-UUID carry store so a later `claude --resume` re-seeds at the carried
+		// budget, not a fresh cap. Fail-open; never changes the decision's exit code.
+		writeDriveCarryFailOpen(time.Now())
 	}
 	return code
 }

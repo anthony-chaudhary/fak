@@ -377,6 +377,11 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	// BEFORE the deny-all mode gate: the carryover is independent of whether auto-continue
 	// is off, and can never change this hook's exit code.
 	stampStepAdviceFailOpen(stderr, rec.Session, os.Getenv("ANTHROPIC_BASE_URL"))
+	// #4118: a Stop may be the session's last breath before a `claude --resume` relaunch, so
+	// record the live remaining budget into the transcript-UUID carry store here — while the
+	// process still holds the spent-down State. Placed with the other pre-gate fail-open
+	// side-effects: independent of the deny-all decision below and never changes the exit code.
+	writeDriveCarryFailOpen(time.Now())
 	mode, err := normalizeGuardStopHookMode(*modeFlag)
 	if err != nil {
 		rec.Disposition = string(stopDispFailOpenBadMode)
