@@ -28,6 +28,7 @@ import (
 //	fak ablate --sweep vdso                         (built-in tau2-smoke trace)
 //	fak ablate --trace FILE --sweep vdso --json     (emit the AblationReport JSON)
 //	fak ablate --suite NAME --out ablation.json
+//	fak ablate --report experiments/ablate/tau2-smoke-vdso-ablation.json   (re-render a saved run)
 //
 // Exit 0 ok, 1 a load/run error, 2 a usage error.
 func cmdAblate(argv []string) { os.Exit(runAblate(os.Stdout, os.Stderr, argv)) }
@@ -51,6 +52,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write the AblationReport JSON to this path")
 	asJSON := fs.Bool("json", false, "emit the AblationReport JSON to stdout (no table)")
 	list := fs.Bool("list", false, "print the sweepable cache-lever catalog (owner/plane/fidelity/env) and exit; with --json emit the FeatureCard array + presets")
+	report := fs.String("report", "", "load a saved AblationReport JSON (e.g. from experiments/ablate/) and re-render its table/deltas — no trace, engine, or replay")
 	engineIDFlag := fs.String("engine", "mock", "engine id (the offline mock by default)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
@@ -62,6 +64,33 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	if *list {
 		printAblateCatalog(stdout, *asJSON)
 		return 0
+	}
+
+	// --report is the READ counterpart to --out: it loads a saved AblationReport JSON (a
+	// prior sweep, e.g. a committed experiments/ablate/*.json artifact) and re-renders its
+	// table + baseline deltas with no trace, engine, or replay — so an ablation captured to
+	// an experiment file stays re-analyzable without re-running the whole sweep. It
+	// short-circuits before any sweep, exactly like --list. When --baseline is given
+	// explicitly it re-selects the delta reference arm on the loaded report (view the same
+	// experiment against a different reference without re-running); otherwise the report's
+	// own stored baseline stands. --json / --out re-emit the (re-baselined) report.
+	if *report != "" {
+		rep, err := ablate.LoadReport(*report)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak ablate:", err)
+			return 1
+		}
+		if flagWasSet(fs, "baseline") {
+			rep.Baseline = *baseline
+		}
+		// The identical-workload guard (+ baseline-membership check) is what keeps the
+		// deltas apples-to-apples; apply it to a loaded report too, so a tampered or
+		// mismatched artifact fails loud rather than rendering misleading deltas.
+		if err := rep.Validate(); err != nil {
+			fmt.Fprintln(stderr, "fak ablate:", err)
+			return 1
+		}
+		return emitAblation(stdout, stderr, rep, *out, *asJSON)
 	}
 
 	features := splitCommaList(*sweep)

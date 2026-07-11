@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -331,6 +332,35 @@ func (r *Report) Validate() error {
 func (r *Report) JSON() []byte {
 	b, _ := json.MarshalIndent(r, "", "  ")
 	return append(b, '\n')
+}
+
+// UnmarshalReport decodes an AblationReport JSON body (the exact shape Report.JSON
+// writes) back into a *Report, so a saved sweep can be re-rendered or re-baselined
+// without re-running it. It fails loud on a body that carries no arms — e.g. a
+// cross-agent ablation artifact, which is a DIFFERENT schema (no runs[]) and is not an
+// N-arm Report — rather than returning an empty report that would render a header with
+// no rows. It does NOT apply the identical-workload guard: the caller runs Validate
+// when it wants the deltas to be apples-to-apples (e.g. after re-selecting a baseline).
+func UnmarshalReport(data []byte) (*Report, error) {
+	var rep Report
+	if err := json.Unmarshal(data, &rep); err != nil {
+		return nil, fmt.Errorf("ablate: parse report: %w", err)
+	}
+	if len(rep.Runs) == 0 {
+		return nil, errors.New("ablate: not an N-arm AblationReport (no runs[])")
+	}
+	return &rep, nil
+}
+
+// LoadReport reads a saved AblationReport JSON from disk (e.g. a committed
+// experiments/ablate/*.json artifact) and decodes it via UnmarshalReport — the read
+// counterpart to the --out write path.
+func LoadReport(path string) (*Report, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return UnmarshalReport(data)
 }
 
 // BuildSweep turns a list of feature names into the arm matrix: a fail-closed
