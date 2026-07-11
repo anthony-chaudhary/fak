@@ -58,10 +58,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
-// ChannelDefault is #blockers in the scoreboard Slack workspace (team T0BDEJF1HGB). It
-// is a PUBLIC channel id (not a secret): the @agent bot is a member and posts here with
-// FAK_SCOREBOARD_TOKEN. Override with --channel or FAK_BLOCKERS_CHANNEL.
-const ChannelDefault = "C0BDHRJJPTP"
+// ChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) in the
+// scoreboard Slack workspace (team T0BDEJF1HGB) — blockers is one of the CI/CD reporting
+// feeders folded onto that one channel. It is a PUBLIC channel id (not a secret): the
+// @agent bot is a member and posts here with FAK_SCOREBOARD_TOKEN. Override this one
+// surface with --channel or FAK_BLOCKERS_CHANNEL, or the whole reporting family with
+// FAK_CICD_REPORT_CHANNEL.
+const ChannelDefault = scoreboard.CICDReportChannel
 
 // Severity is the render state of a blocker — it decides how loud the post is.
 type Severity string
@@ -150,7 +153,7 @@ func ResolveChannel() string {
 	if v := envFileValue("FAK_BLOCKERS_CHANNEL"); v != "" {
 		return v
 	}
-	return ChannelDefault
+	return scoreboard.ResolveCICDReportChannel()
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
