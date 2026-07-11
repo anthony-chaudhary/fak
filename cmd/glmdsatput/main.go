@@ -109,6 +109,102 @@ func bisectPlan(good, bad glmDims) []bisectStep {
 	return steps
 }
 
+// emitBisectPlan runs the GPU-free bisection-plan mode: it parses the known-good baseline,
+// builds the failing `bad` config from this run's flags, and prints the deterministic
+// single-variable sweep (plus the GLMBISECT_JSON line) that pins the P0 device-kernel
+// illegal-memory-access one dim at a time. Extracted verbatim from main so main stays under
+// its ceiling; a malformed baseline still exits(2) exactly as before.
+func emitBisectPlan(bisectBaseline string, layers, hidden, heads, inter, idxTopK int) {
+	var good glmDims
+	if n, err := fmt.Sscan(bisectBaseline, &good.Layers, &good.Hidden, &good.Heads, &good.Inter, &good.TopK); err != nil || n != 5 {
+		fmt.Fprintf(os.Stderr, "-bisect-baseline must be 5 ints \"layers hidden heads inter topk\" (got %q)\n", bisectBaseline)
+		os.Exit(2)
+	}
+	bad := glmDims{Layers: layers, Hidden: hidden, Heads: heads, Inter: inter, TopK: idxTopK}
+	plan := bisectPlan(good, bad)
+	fmt.Printf("=== glm_moe_dsa P0 single-variable bisection plan ===\n")
+	fmt.Printf("good(no-fault): layers=%d hidden=%d heads=%d inter=%d topk=%d\n", good.Layers, good.Hidden, good.Heads, good.Inter, good.TopK)
+	fmt.Printf("bad (faults)  : layers=%d hidden=%d heads=%d inter=%d topk=%d\n", bad.Layers, bad.Hidden, bad.Heads, bad.Inter, bad.TopK)
+	if len(plan) == 0 {
+		fmt.Printf("(no differing dims — good == bad; nothing to bisect)\n")
+	}
+	for _, s := range plan {
+		fmt.Printf("  revert %-10s -> layers=%d hidden=%d heads=%d inter=%d topk=%d  (if THIS runs clean, dim %q at bad's value carries the OOB)\n",
+			s.Dim, s.Layers, s.Hidden, s.Heads, s.Inter, s.TopK, s.Dim)
+	}
+	b, _ := json.Marshal(plan)
+	fmt.Printf("GLMBISECT_JSON %s\n", b)
+}
+
+// decodeTimings holds the three timed millisecond figures runDecodeBenchmark produces.
+type decodeTimings struct {
+	buildMS   float64
+	prefillMS float64
+	decodeMS  float64
+}
+
+// runDecodeBenchmark builds the synthetic model, warms the device, then times prefill and
+// `steps` incremental decode Step() calls (median over reps). Split out of main as the timed
+// run body so main reads as flags -> config -> RUN -> report/emit.
+func runDecodeBenchmark(cfg model.Config, be compute.Backend, quant bool, vocab, prompt, reps, steps int) decodeTimings {
+	t0 := time.Now()
+	m := model.NewSyntheticGLMDsa(cfg)
+	if quant {
+		m.Quantize()
+	}
+	buildMS := float64(time.Since(t0).Nanoseconds()) / 1e6
+
+	newSession := func() *model.Session {
+		if be != nil {
+			s := m.NewBackendSession(be)
+			s.Quant = quant
+			return s
+		}
+		s := m.NewSession()
+		s.Quant = quant
+		return s
+	}
+
+	// Warm up: page weights onto the device + JIT allocation paths.
+	{
+		s := newSession()
+		s.Prefill(lcgIDs(16, vocab))
+		s.Step(7 % vocab)
+		s.Close()
+	}
+
+	// Prefill timing.
+	pIDs := lcgIDs(prompt, vocab)
+	pDs := make([]time.Duration, reps)
+	for r := 0; r < reps; r++ {
+		s := newSession()
+		t := time.Now()
+		s.Prefill(pIDs)
+		pDs[r] = time.Since(t)
+		s.Close()
+	}
+	prefillMS := medianMS(pDs)
+
+	// Decode timing: prefill the prompt, then time `steps` incremental Step() calls.
+	perTok := make([]time.Duration, 0, reps)
+	for r := 0; r < reps; r++ {
+		s := newSession()
+		s.Prefill(pIDs)
+		id := (r*131 + 7) % vocab
+		t := time.Now()
+		for i := 0; i < steps; i++ {
+			logits := s.Step(id)
+			id = (id*48271 + 1) % vocab
+			_ = logits
+		}
+		perTok = append(perTok, time.Since(t)/time.Duration(steps))
+		s.Close()
+	}
+	decodeMS := medianMS(perTok)
+
+	return decodeTimings{buildMS: buildMS, prefillMS: prefillMS, decodeMS: decodeMS}
+}
+
 func main() {
 	layers := flag.Int("layers", 8, "number of glm_moe_dsa layers (all full-indexer)")
 	hidden := flag.Int("hidden", 2048, "hidden size H")
@@ -138,25 +234,7 @@ func main() {
 	// host (no backend, no model build) — it is a plan the GPU runner executes, one fresh process
 	// per step. See docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md §3.
 	if *bisectBaseline != "" {
-		var good glmDims
-		if n, err := fmt.Sscan(*bisectBaseline, &good.Layers, &good.Hidden, &good.Heads, &good.Inter, &good.TopK); err != nil || n != 5 {
-			fmt.Fprintf(os.Stderr, "-bisect-baseline must be 5 ints \"layers hidden heads inter topk\" (got %q)\n", *bisectBaseline)
-			os.Exit(2)
-		}
-		bad := glmDims{Layers: *layers, Hidden: *hidden, Heads: *heads, Inter: *inter, TopK: *idxTopK}
-		plan := bisectPlan(good, bad)
-		fmt.Printf("=== glm_moe_dsa P0 single-variable bisection plan ===\n")
-		fmt.Printf("good(no-fault): layers=%d hidden=%d heads=%d inter=%d topk=%d\n", good.Layers, good.Hidden, good.Heads, good.Inter, good.TopK)
-		fmt.Printf("bad (faults)  : layers=%d hidden=%d heads=%d inter=%d topk=%d\n", bad.Layers, bad.Hidden, bad.Heads, bad.Inter, bad.TopK)
-		if len(plan) == 0 {
-			fmt.Printf("(no differing dims — good == bad; nothing to bisect)\n")
-		}
-		for _, s := range plan {
-			fmt.Printf("  revert %-10s -> layers=%d hidden=%d heads=%d inter=%d topk=%d  (if THIS runs clean, dim %q at bad's value carries the OOB)\n",
-				s.Dim, s.Layers, s.Hidden, s.Heads, s.Inter, s.TopK, s.Dim)
-		}
-		b, _ := json.Marshal(plan)
-		fmt.Printf("GLMBISECT_JSON %s\n", b)
+		emitBisectPlan(*bisectBaseline, *layers, *hidden, *heads, *inter, *idxTopK)
 		return
 	}
 
@@ -199,60 +277,8 @@ func main() {
 		}
 	}
 
-	t0 := time.Now()
-	m := model.NewSyntheticGLMDsa(cfg)
-	if *quant {
-		m.Quantize()
-	}
-	buildMS := float64(time.Since(t0).Nanoseconds()) / 1e6
-
-	newSession := func() *model.Session {
-		if be != nil {
-			s := m.NewBackendSession(be)
-			s.Quant = *quant
-			return s
-		}
-		s := m.NewSession()
-		s.Quant = *quant
-		return s
-	}
-
-	// Warm up: page weights onto the device + JIT allocation paths.
-	{
-		s := newSession()
-		s.Prefill(lcgIDs(16, *vocab))
-		s.Step(7 % *vocab)
-		s.Close()
-	}
-
-	// Prefill timing.
-	pIDs := lcgIDs(*prompt, *vocab)
-	pDs := make([]time.Duration, *reps)
-	for r := 0; r < *reps; r++ {
-		s := newSession()
-		t := time.Now()
-		s.Prefill(pIDs)
-		pDs[r] = time.Since(t)
-		s.Close()
-	}
-	prefillMS := medianMS(pDs)
-
-	// Decode timing: prefill the prompt, then time `steps` incremental Step() calls.
-	perTok := make([]time.Duration, 0, *reps)
-	for r := 0; r < *reps; r++ {
-		s := newSession()
-		s.Prefill(pIDs)
-		id := (r*131 + 7) % *vocab
-		t := time.Now()
-		for i := 0; i < *steps; i++ {
-			logits := s.Step(id)
-			id = (id*48271 + 1) % *vocab
-			_ = logits
-		}
-		perTok = append(perTok, time.Since(t)/time.Duration(*steps))
-		s.Close()
-	}
-	decodeMS := medianMS(perTok)
+	tm := runDecodeBenchmark(cfg, be, *quant, *vocab, *prompt, *reps, *steps)
+	buildMS, prefillMS, decodeMS := tm.buildMS, tm.prefillMS, tm.decodeMS
 
 	backend := "host(legacy)"
 	if be != nil {
