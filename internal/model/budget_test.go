@@ -199,3 +199,48 @@ func TestQ8DecodeWorkersNonAppleDefaultUnchanged(t *testing.T) {
 		t.Errorf("linux arm64 source=%s, want %s", source, defaultWorkerBudgetSource)
 	}
 }
+
+// TestQ8DecodeWorkersManyCoreAmd64Cap pins the #3176 mitigation: on a many-core amd64
+// box the memory-bound batch-1 decode GEMV is capped instead of split across every core
+// (which collapses to the parFor barrier). Only the >=64 regime is capped; desktop/small
+// amd64 stays byte-for-byte on the global budget.
+func TestQ8DecodeWorkersManyCoreAmd64Cap(t *testing.T) {
+	cases := []struct {
+		workers int
+		want    int
+		capped  bool
+	}{
+		{12, 12, false},  // small amd64 — unchanged
+		{32, 32, false},  // below the many-core threshold — unchanged
+		{63, 63, false},  // just below — unchanged
+		{64, 8, true},    // 64/8 = 8
+		{128, 16, true},  // 128/8 = 16
+		{192, 16, true},  // 192/8 = 24 -> clamped to 16
+		{256, 16, true},  // the reporter's 256-thread EPYC -> 16
+	}
+	for _, tc := range cases {
+		got, source := q8DecodeWorkersFor(tc.workers, defaultWorkerBudgetSource, "linux", "amd64")
+		if got != tc.want {
+			t.Errorf("workers=%d -> q8 decode workers=%d, want %d", tc.workers, got, tc.want)
+		}
+		capped := source != defaultWorkerBudgetSource
+		if capped != tc.capped {
+			t.Errorf("workers=%d -> capped=%v (source=%q), want capped=%v", tc.workers, capped, source, tc.capped)
+		}
+	}
+}
+
+// TestQ8DecodeWorkersManyCoreAmd64HonorsExplicitBudget confirms an operator override still
+// wins on a many-core amd64 box: FAK_WORKERS / FAK_BUDGET / -budget set a non-default source
+// and return above the cap, byte-exact — the reporter's tuning lever is untouched.
+func TestQ8DecodeWorkersManyCoreAmd64HonorsExplicitBudget(t *testing.T) {
+	for _, source := range []string{"FAK_WORKERS=256", "FAK_BUDGET=1.0", "-budget=1.0"} {
+		got, gotSource := q8DecodeWorkersFor(256, source, "linux", "amd64")
+		if got != 256 {
+			t.Errorf("source=%s -> q8 decode workers=%d, want explicit 256", source, got)
+		}
+		if gotSource != source {
+			t.Errorf("source=%s -> q8 decode source=%s", source, gotSource)
+		}
+	}
+}
