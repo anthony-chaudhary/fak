@@ -408,7 +408,133 @@
       "description": "Japanese search phrase for cutting long agent-session cost via cache-preserving self-hosted serving that keeps data on your own infrastructure; routes readers to the in-language fak entry point.",
       "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ja/README.md",
       "keywords": "prompt cache コスト削減, self-host データレジデンシー, 個人情報保護法 APPI"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "AI 에이전트 커널 — 모든 tool call을 실행 전에 검토",
+      "termCode": "localized",
+      "inLanguage": "ko",
+      "description": "Korean search phrase for an AI agent kernel that vets every tool call before it runs behind a default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ko/README.md",
+      "keywords": "AI 에이전트 커널, tool call 보안, fak agent kernel"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "긴 세션을 저렴하게 만드는 PIPA 자체 호스팅 에이전트 게이트웨이",
+      "termCode": "localized",
+      "inLanguage": "ko",
+      "description": "Korean search phrase for the cost and PIPA data-residency side of fak: cheaper long sessions via prompt-cache-preserving self-hosted serving; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ko/README.md",
+      "keywords": "자체 호스팅, prompt cache, PIPA"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "núcleo de agente de IA que revisa cada tool call antes de executá-lo",
+      "termCode": "localized",
+      "inLanguage": "pt",
+      "description": "Portuguese search phrase for an AI agent kernel that vets every tool call before it runs under a default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/pt/README.md",
+      "keywords": "núcleo de agente IA, segurança de tool call, capability floor default-deny"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "self-host com prompt cache para sessões longas mais baratas e residência de dados LGPD",
+      "termCode": "localized",
+      "inLanguage": "pt",
+      "description": "Portuguese search phrase for the cost and LGPD/RGPD data-residency lever of self-hosting an agent kernel; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/pt/README.md",
+      "keywords": "self-host prompt cache, sessões longas mais baratas, residência de dados LGPD"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "ядро AI-агента, проверяющее каждый tool call до выполнения",
+      "termCode": "localized",
+      "inLanguage": "ru",
+      "description": "Russian search phrase for an AI agent kernel that vets every tool call before it runs behind a fail-closed, default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ru/README.md",
+      "keywords": "ядро AI-агента, безопасность tool call, capability floor default-deny"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "дешёвый self-host с prompt cache для долгих сессий и хранение данных по 152-ФЗ",
+      "termCode": "localized",
+      "inLanguage": "ru",
+      "description": "Russian search phrase for the cost and 152-FZ data-residency side of fak: cheaper long sessions via cache-preserving self-hosted serving; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ru/README.md",
+      "keywords": "self-host prompt cache, дешевле долгие сессии, 152-ФЗ"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "نواة وكيل الذكاء الاصطناعي تراجع كل tool call قبل تنفيذه",
+      "termCode": "localized",
+      "inLanguage": "ar",
+      "description": "Arabic search phrase for an AI agent kernel that vets every tool call before it runs under a default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ar/README.md",
+      "keywords": "نواة وكيل الذكاء الاصطناعي, أمان tool call, capability floor"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "استضافة ذاتية مع prompt cache لجلسات أطول أرخص وإقامة بيانات متوافقة مع PDPL",
+      "termCode": "localized",
+      "inLanguage": "ar",
+      "description": "Arabic search phrase for the cost and PDPL data-residency lever of self-hosting an agent kernel; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ar/README.md",
+      "keywords": "استضافة ذاتية, prompt cache, PDPL"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "kernel agen AI yang memeriksa setiap tool call sebelum dijalankan",
+      "termCode": "localized",
+      "inLanguage": "id",
+      "description": "Indonesian search phrase for an AI agent kernel that vets every tool call before it runs under a default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/id/README.md",
+      "keywords": "kernel agen AI, keamanan tool call, capability floor default-deny"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "self-host dengan prompt cache untuk sesi panjang lebih murah dan residensi data UU PDP",
+      "termCode": "localized",
+      "inLanguage": "id",
+      "description": "Indonesian search phrase for the cost and UU PDP data-residency lever of self-hosting an agent kernel; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/id/README.md",
+      "keywords": "self-host prompt cache, sesi panjang lebih murah, UU PDP"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "nhân agent AI xét duyệt mọi tool call trước khi chạy",
+      "termCode": "localized",
+      "inLanguage": "vi",
+      "description": "Vietnamese search phrase for an AI agent kernel that vets every tool call before it runs under a default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/vi/README.md",
+      "keywords": "nhân agent AI, bảo mật tool call, capability floor default-deny"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "tự lưu trữ với prompt cache cho phiên dài rẻ hơn và lưu trú dữ liệu theo Nghị định 13/2023 (PDPD)",
+      "termCode": "localized",
+      "inLanguage": "vi",
+      "description": "Vietnamese search phrase for the cost and PDPD (Decree 13/2023) data-residency lever of self-hosting an agent kernel; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/vi/README.md",
+      "keywords": "tự lưu trữ prompt cache, phiên dài rẻ hơn, PDPD Nghị định 13"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "her tool call'u çalışmadan önce denetleyen AI ajan çekirdeği",
+      "termCode": "localized",
+      "inLanguage": "tr",
+      "description": "Turkish search phrase for an AI agent kernel that vets every tool call before it runs under a default-deny capability floor; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/tr/README.md",
+      "keywords": "AI ajan çekirdeği, tool call güvenliği, capability floor default-deny"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "uzun oturumları ucuzlatan prompt cache'li KVKK uyumlu self-host ajan ağ geçidi",
+      "termCode": "localized",
+      "inLanguage": "tr",
+      "description": "Turkish search phrase for the cost and KVKK data-residency lever of self-hosting an agent kernel; routes readers to the in-language fak entry point.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/tr/README.md",
+      "keywords": "self-host prompt cache, uzun oturum ucuz, KVKK"
     }
   ],
-  "dateModified": "2026-07-10T00:22:15Z"
+  "dateModified": "2026-07-11T16:41:07Z"
 }

@@ -229,6 +229,13 @@ func TestLocalizedTermsRouteEveryI18nEntryPoint(t *testing.T) {
 		"te":      "docs/i18n/te/",
 		"es":      "docs/i18n/es/",
 		"ja":      "docs/i18n/ja/",
+		"ko":      "docs/i18n/ko/",
+		"pt":      "docs/i18n/pt/",
+		"ru":      "docs/i18n/ru/",
+		"ar":      "docs/i18n/ar/",
+		"id":      "docs/i18n/id/",
+		"vi":      "docs/i18n/vi/",
+		"tr":      "docs/i18n/tr/",
 	}
 	routed := map[string]bool{}
 	for _, term := range AEODisambiguationTerms() {

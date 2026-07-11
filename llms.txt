@@ -4,18 +4,18 @@
 
 ## What's new
 
-- **2026-07-01** — Fixed: add cross-tick account de-confliction to the wave seat picker ([`3444c4d8`](https://github.com/anthony-chaudhary/fak/commit/3444c4d8))
-- **2026-07-01** — New: add fleet status trend ledger ([`5563b48d`](https://github.com/anthony-chaudhary/fak/commit/5563b48d))
-- **2026-07-01** — New: add fleet sweep slice fold ([`535dad54`](https://github.com/anthony-chaudhary/fak/commit/535dad54))
-- **2026-07-01** — New: add irreversible call preview gate ([`027107d9`](https://github.com/anthony-chaudhary/fak/commit/027107d9))
-- **2026-07-01** — New: add AMD GPU facts probe ([`4faf9b34`](https://github.com/anthony-chaudhary/fak/commit/4faf9b34))
-- **2026-07-01** — New: add parity witness gate fold ([`5a1824e6`](https://github.com/anthony-chaudhary/fak/commit/5a1824e6))
-- **2026-07-01** — New: add network + GPU VRAM axes to fak guard harness resource tracking (#2049) ([`87e627ee`](https://github.com/anthony-chaudhary/fak/commit/87e627ee))
-- **2026-07-01** — Shipped: cover net and GPU provider folding ([`5470592e`](https://github.com/anthony-chaudhary/fak/commit/5470592e))
-- **2026-07-01** — New: add transactional multi-file edit #2157 ([`25fb110a`](https://github.com/anthony-chaudhary/fak/commit/25fb110a))
-- **2026-07-01** — New: wire fak guard's gateway listener to the harness network axis (#2049) ([`56dc0689`](https://github.com/anthony-chaudhary/fak/commit/56dc0689))
-- **2026-07-01** — New: add network rx/tx axis (served-bytes CountingListener + upstream CountingRoundTripper) rendered in report/metrics/ledger (#2049) ([`919b1c8b`](https://github.com/anthony-chaudhary/fak/commit/919b1c8b))
-- **2026-07-01** — New: add sweep profile config fold ([`c882f4dc`](https://github.com/anthony-chaudhary/fak/commit/c882f4dc))
+- **2026-07-11** — Shipped: retire the seo-aeo python tool, wire callers to Go (#4205) ([`16be4d9d`](https://github.com/anthony-chaudhary/fak/commit/16be4d9d))
+- **2026-07-11** — New: fold a release-contents digest into fak release status ([`50061918`](https://github.com/anthony-chaudhary/fak/commit/50061918))
+- **2026-07-11** — Documented: wire the 17-language hub, INDEX, and llms.txt ([`eb5b365e`](https://github.com/anthony-chaudhary/fak/commit/eb5b365e))
+- **2026-07-11** — New: add above-the-fold cache-savings hero to fak console overview ([`1480540e`](https://github.com/anthony-chaudhary/fak/commit/1480540e))
+- **2026-07-11** — Documented: add 7 new language entry points — Korean, Portuguese, Russian, Arabic, Indonesian, Vietnamese, Turkish ([`694ccdfc`](https://github.com/anthony-chaudhary/fak/commit/694ccdfc))
+- **2026-07-11** — Fixed: add seo to the route-contract test (#4205) ([`014274bc`](https://github.com/anthony-chaudhary/fak/commit/014274bc))
+- **2026-07-11** — Documented: add frontdoor pages for 8 more languages (quickstart/install/faq) ([`20e78d7a`](https://github.com/anthony-chaudhary/fak/commit/20e78d7a))
+- **2026-07-11** — Documented: add Hindi & Chinese frontdoor pages (quickstart/install/faq) ([`d043cf5b`](https://github.com/anthony-chaudhary/fak/commit/d043cf5b))
+- **2026-07-11** — Documented: add theme-aware logo lockup ([`11b07928`](https://github.com/anthony-chaudhary/fak/commit/11b07928))
+- **2026-07-11** — Shipped: match resume-watchdog installer contract to -StartWhenAvailable switch ([`12ba4f00`](https://github.com/anthony-chaudhary/fak/commit/12ba4f00))
+- **2026-07-11** — Fixed: commit forgotten trunk_red_ledger.go defining cmdTrunkRed ([`ef9202a4`](https://github.com/anthony-chaudhary/fak/commit/ef9202a4))
+- **2026-07-11** — New: port seo-aeo scorecard to Go, wire fak score seo (#4205) ([`541e8ebd`](https://github.com/anthony-chaudhary/fak/commit/541e8ebd))
 
 <!-- WHATS-NEW:END -->
 
