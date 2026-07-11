@@ -373,6 +373,7 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 		for _, c := range free {
 			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
 		}
+		applyBackpressure(&p, b.Backpressure)
 		finalize(&p, used)
 		return p
 	}
@@ -395,6 +396,7 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 		for _, c := range free {
 			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
 		}
+		applyBackpressure(&p, b.Backpressure)
 		finalize(&p, used)
 		return p
 	}
@@ -427,6 +429,7 @@ func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string
 	} else if hasOverBudgetElision(p) {
 		p.BindingConstraint = BindResidentBudgetCap
 	}
+	applyBackpressure(&p, b.Backpressure)
 	finalize(&p, used)
 	return p
 }
