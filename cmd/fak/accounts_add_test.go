@@ -36,6 +36,18 @@ func mkLoggedInSeat(t *testing.T, root, dir, email, uuid, token string) string {
 	return full
 }
 
+// hermeticProbeStub points FAK_OAUTH_PROFILE_URL at a local stub that 401s every token, so an
+// adopt's now-default credential-identity probe resolves INSTANTLY to "unknown" and falls back to
+// the copied disk identity — without ever touching the real Anthropic endpoint. The bundle-copy
+// tests below assert the disk-derived identity of a FAKE credential; this keeps them hermetic and
+// fast under the probe-on default while still exercising the real fallback path. A test that wants
+// the probe to SUCCEED registers its own enrollProfileServerFor instead.
+func hermeticProbeStub(t *testing.T) {
+	t.Helper()
+	srv := enrollProfileServerFor(t, map[string]accounts.ProbedIdentity{}) // empty map → 401 on every token
+	t.Setenv("FAK_OAUTH_PROFILE_URL", srv.URL)
+}
+
 // findHome returns the registry row for name, or a zero Home if absent (including when the
 // registry file itself does not exist — e.g. a failed enrollment that never wrote it).
 func findHome(t *testing.T, regPath, name string) accounts.Home {
@@ -60,6 +72,7 @@ func TestRunAccountsAddAdopt_CopiesBundle(t *testing.T) {
 	t.Setenv("FAK_DOS_ROSTER", "")
 	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
 	home := t.TempDir()
+	hermeticProbeStub(t)
 	// The live default seat we adopt FROM.
 	mkLoggedInSeat(t, home, ".claude", "july6@example.test", "u-july6", "")
 	regPath := filepath.Join(home, "registry.json")
@@ -115,6 +128,7 @@ func TestRunAccountsAddAdopt_CopiesBoth(t *testing.T) {
 	t.Setenv("FAK_DOS_ROSTER", "")
 	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
 	home := t.TempDir()
+	hermeticProbeStub(t)
 	// Adopt from a NAMED source that has BOTH a session cred and a static setup-token.
 	mkLoggedInSeat(t, home, ".claude-src-netra", "gem@example.test", "u-gem", "sk-ant-oat01-BOTHTEST")
 	regPath := filepath.Join(home, "registry.json")
@@ -149,6 +163,7 @@ func TestRunAccountsAddAdopt_SkipsCrossAccountTwinToken(t *testing.T) {
 	t.Setenv("FAK_DOS_ROSTER", "")
 	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
 	home := t.TempDir()
+	hermeticProbeStub(t)
 	const twinTok = "sk-ant-oat01-SHARED-TWIN-TOKEN"
 	// The seat that legitimately OWNS the token (a different account, already enrolled).
 	mkLoggedInSeat(t, home, ".claude-owner-netra", "owner@example.test", "u-owner", twinTok)
@@ -201,6 +216,7 @@ func TestRunAccountsAddAdopt_KeepsTokenWhenNoSession(t *testing.T) {
 	t.Setenv("FAK_DOS_ROSTER", "")
 	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
 	home := t.TempDir()
+	hermeticProbeStub(t)
 	const tok = "sk-ant-oat01-TOKEN-ONLY-SOURCE"
 	// The adopt source: token ONLY, no .credentials.json (a distinct dir from the target). No
 	// sibling shares this token, so it is the source's own — the twin-skip must NOT fire.
@@ -361,6 +377,103 @@ func TestAccountDir(t *testing.T) {
 		if got := accountDir(home, c.name, c.suffix); got != c.want {
 			t.Errorf("accountDir(%q,%q) = %q, want %q", c.name, c.suffix, got, c.want)
 		}
+	}
+}
+
+// TestRunAccountsAddAdopt_ProbesIdentityByDefault is the determinism regression for the
+// stale-.claude.json incident: a plain `add --adopt` (NO --probe-identity flag) from a source whose
+// .claude.json metadata names account A but whose live .credentials.json serves account B must now
+// enroll as B — the credential is ground truth, probed by default — instead of silently recording
+// the stale A the disk claims. Before the default flip this required the operator to know to pass
+// --probe-identity (or use enroll-current); forgetting it enrolled the wrong account.
+func TestRunAccountsAddAdopt_ProbesIdentityByDefault(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
+	home := t.TempDir()
+
+	// The source (default ~/.claude) serves account B (accessToken at-b) but its .claude.json
+	// still names A — exactly the shape a /login into a shared dir leaves behind.
+	source := filepath.Join(home, ".claude")
+	writeFileString(t, filepath.Join(source, "projects", ".keep"), "")
+	writeFileString(t, filepath.Join(source, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"at-b","refreshToken":"rt-b"}}`)
+	writeFileString(t, filepath.Join(source, ".claude.json"), `{"oauthAccount":{"emailAddress":"a-stale@example.test","accountUuid":"uuid-a-stale"}}`)
+
+	srv := enrollProfileServerFor(t, map[string]accounts.ProbedIdentity{
+		"at-b": {Email: "b-true@example.test", AccountUUID: "uuid-b-true"},
+	})
+	t.Setenv("FAK_OAUTH_PROFILE_URL", srv.URL)
+
+	regPath := filepath.Join(home, "registry.json")
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"add", "--name", "seat", "--adopt", // NOTE: no --probe-identity
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("adopt rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+
+	// The enrolled identity must be the credential's true account B, not the stale disk A.
+	h := findHome(t, regPath, "seat-netra")
+	if h.Identity.Email != "b-true@example.test" || h.Identity.AccountUUID != "uuid-b-true" {
+		t.Fatalf("adopt identity = %q/%q, want the credential's true account b-true (uuid-b-true) — probe should be default-on",
+			h.Identity.Email, h.Identity.AccountUUID)
+	}
+	// The seat's .claude.json must have been rewritten to the credential identity so every later
+	// disk read (list/status/discover) reports B, not the stale A.
+	dir := filepath.Join(home, ".claude-seat-netra")
+	got, _ := os.ReadFile(filepath.Join(dir, ".claude.json"))
+	if !strings.Contains(string(got), "uuid-b-true") || strings.Contains(string(got), "uuid-a-stale") {
+		t.Fatalf("seat .claude.json not reconciled to credential identity: %s", got)
+	}
+	// The reconcile must be surfaced to the operator, not silent.
+	if !strings.Contains(out.String(), "identity reconcile") {
+		t.Errorf("expected an 'identity reconcile' line on stdout, got: %s", out.String())
+	}
+}
+
+// TestRunAccountsAddAdopt_NoProbeIdentityStaysDiskOnly pins the offline escape hatch: with
+// --no-probe-identity, the adopt records the copied disk metadata verbatim and makes NO network
+// probe, even when a profile endpoint is configured — so a deliberately offline enrollment trusts
+// the .claude.json it copied.
+func TestRunAccountsAddAdopt_NoProbeIdentityStaysDiskOnly(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
+	home := t.TempDir()
+
+	source := filepath.Join(home, ".claude")
+	writeFileString(t, filepath.Join(source, "projects", ".keep"), "")
+	writeFileString(t, filepath.Join(source, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"at-b","refreshToken":"rt-b"}}`)
+	writeFileString(t, filepath.Join(source, ".claude.json"), `{"oauthAccount":{"emailAddress":"a-stale@example.test","accountUuid":"uuid-a-stale"}}`)
+
+	// A profile endpoint IS configured; --no-probe-identity must ignore it and never hit it.
+	probed := false
+	srv := enrollProfileServerFor(t, map[string]accounts.ProbedIdentity{
+		"at-b": {Email: "b-true@example.test", AccountUUID: "uuid-b-true"},
+	})
+	t.Setenv("FAK_OAUTH_PROFILE_URL", srv.URL)
+	_ = probed
+
+	regPath := filepath.Join(home, "registry.json")
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"add", "--name", "seat", "--adopt", "--no-probe-identity",
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("adopt rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+
+	// Disk-only: the recorded identity is the copied .claude.json A, untouched.
+	h := findHome(t, regPath, "seat-netra")
+	if h.Identity.Email != "a-stale@example.test" || h.Identity.AccountUUID != "uuid-a-stale" {
+		t.Fatalf("--no-probe-identity identity = %q/%q, want the disk metadata a-stale (uuid-a-stale)",
+			h.Identity.Email, h.Identity.AccountUUID)
+	}
+	if strings.Contains(out.String(), "identity reconcile") {
+		t.Errorf("--no-probe-identity must not reconcile against the network, got: %s", out.String())
 	}
 }
 

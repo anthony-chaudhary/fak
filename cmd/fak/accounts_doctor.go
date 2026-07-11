@@ -32,9 +32,10 @@ type doctorAction string
 
 const (
 	doctorNone           doctorAction = "none"
-	doctorRelogin        doctorAction = "relogin"          // needs_login, or a fresh auth/access wall
+	doctorRelogin        doctorAction = "relogin"          // needs_login, or a fresh auth wall
 	doctorWaitReset      doctorAction = "wait_reset"       // fresh usage limit; recovers by itself
 	doctorTopUp          doctorAction = "top_up"           // fresh credit wall; needs billing, not code
+	doctorAccessBlocked  doctorAction = "access_blocked"   // subscription access disabled upstream; re-login can't restore it
 	doctorPrune          doctorAction = "prune"            // config dir vanished; tombstone+rehome (auto with --write)
 	doctorHydrate        doctorAction = "hydrate"          // canonical same-account home is missing creds/sessions; copy from ready peer
 	doctorEnableOrRemove doctorAction = "enable_or_remove" // explicitly disabled; operator judgment
@@ -417,7 +418,14 @@ func foldDoctorSeat(obs accounts.LoginObservation, consultLedger bool) doctorSea
 				seat.Action = doctorWaitReset
 			case "credit":
 				seat.Action = doctorTopUp
-			default: // auth / access
+			case "access":
+				// Subscription access was disabled upstream ("use an API key instead" /
+				// "ask your admin to enable access"). Re-login re-auths the SAME disabled
+				// account and hits the SAME wall — it cannot restore serving, so this is
+				// operator judgment, not a relogin fix.
+				seat.Action = doctorAccessBlocked
+				seat.Command = "fak accounts remove --name " + obs.Name + "  (subscription access disabled upstream; re-login can't restore it — use an API key or ask your org admin to re-enable)"
+			default: // auth
 				seat.Action = doctorRelogin
 				seat.Command = loginCommandFor(obs.Dir)
 			}

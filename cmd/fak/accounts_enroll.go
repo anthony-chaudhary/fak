@@ -28,6 +28,7 @@ type enrollParams struct {
 	suffix   string
 	noSync   bool
 	probeURL string // OAuth profile endpoint override ($FAK_OAUTH_PROFILE_URL); "" = default
+	dryRun   bool   // print the enrollment plan without mutating anything (#3954)
 
 	homeDir      string
 	registryPath string
@@ -62,7 +63,11 @@ func runAccountsEnrollCurrent(stdout, stderr io.Writer, p enrollParams) int {
 		return 1
 	}
 	src := currentSessionDir(p.homeDir, p.from)
-	fmt.Fprintf(stdout, "enrolling the current login (%s) as seat %q with a live credential-identity probe…\n", src, p.name)
+	verb := "enrolling"
+	if p.dryRun {
+		verb = "would enroll"
+	}
+	fmt.Fprintf(stdout, "%s the current login (%s) as seat %q with a live credential-identity probe…\n", verb, src, p.name)
 	return runAccountsAdd(stdout, stderr, addParams{
 		name:          p.name,
 		reserved:      p.reserved,
@@ -73,6 +78,7 @@ func runAccountsEnrollCurrent(stdout, stderr io.Writer, p enrollParams) int {
 		force:         p.force,
 		probeIdentity: true,
 		probeURL:      p.probeURL,
+		dryRun:        p.dryRun,
 		homeDir:       p.homeDir,
 		registryPath:  p.registryPath,
 		dosView:       p.dosView,

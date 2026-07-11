@@ -51,11 +51,27 @@ type addParams struct {
 	// prefers the credential over stale on-disk .claude.json metadata, overwriting the seeded
 	// oauthAccount when they disagree. This is the fix for a seat whose .claude.json names one
 	// account while its .credentials.json (a later /login into a shared dir) serves another.
-	// `enroll-current` always sets it; plain `add --adopt` opts in via --probe-identity.
+	// The probe is now the DEFAULT for every adopt (the credential is live, so the ground truth
+	// is always available and the same-network cost buys a deterministically-correct identity);
+	// `enroll-current` forces it on, and a plain `add --adopt` gets it unless --no-probe-identity
+	// is passed. probeIdentity only records that a caller EXPLICITLY forced it (enroll-current),
+	// which matters for the "warn loudly on probe failure" policy below; the default-on decision
+	// is `!noProbeIdentity`.
 	probeIdentity bool
+	// noProbeIdentity (adopt only) opts OUT of the default credential-identity probe, restoring the
+	// historical disk-only derivation. Use it for a deliberately offline enrollment where no OAuth
+	// endpoint is reachable and the copied .claude.json identity is trusted as-is. Ignored when
+	// probeIdentity is set (enroll-current always probes).
+	noProbeIdentity bool
 	// probeURL overrides the OAuth profile endpoint (accounts.DefaultProfileURL when empty).
 	// It exists as a test/advanced seam, sourced from $FAK_OAUTH_PROFILE_URL at the CLI layer.
 	probeURL string
+
+	// dryRun prints the enrollment plan and returns without any mutation — no dir created, no
+	// credential copied, no OAuth probe, no registry write, no view sync (#3954). It short-circuits
+	// after the read-only refusals (bad target, existing dir, duplicate name, missing source) so a
+	// dry run still surfaces those, but performs zero writes and zero network calls.
+	dryRun bool
 
 	homeDir      string
 	registryPath string
@@ -143,6 +159,15 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		}
 	}
 
+	// Dry run (#3954): every durable mutation and network probe lives BELOW this point (MkdirAll,
+	// SnapshotBeforeOverwrite, copyLoginBundle, the OAuth identity probe, the registry write, the
+	// view sync). Short-circuit here — after the read-only refusals above have had their say — so a
+	// dry run reports exactly what WOULD happen and touches nothing. The source seat is still
+	// resolved (read-only) so an adopt from a missing source fails the same way it would for real.
+	if p.dryRun {
+		return dryRunAddPlan(stdout, stderr, p, reg, rosterName, dir, reconcile)
+	}
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "fak accounts: mkdir %s: %v\n", dir, err)
 		return 1
@@ -166,6 +191,16 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			fmt.Fprintf(stderr, "fak accounts: --from source and target are the same dir (%s)\n", dir)
 			return 1
 		}
+		// Backup-on-write (#3987): before copyLoginBundle overwrites this dir's credential blobs,
+		// snapshot whatever is already there so the prior account is always recoverable. On a fresh
+		// add the dir is empty and this is a no-op; on a --force reconcile it captures the live
+		// credential being replaced, so even an in-place refresh can be undone with
+		// `restore-credential`. A backup miss is a non-fatal warning — it never blocks the enroll.
+		if snaps, berr := accounts.SnapshotBeforeOverwrite(accounts.BackupRoot(p.homeDir), rosterName, dir, time.Now()); berr != nil {
+			fmt.Fprintf(stderr, "fak accounts: warning: pre-overwrite credential backup failed: %v\n", berr)
+		} else if len(snaps) > 0 {
+			fmt.Fprintf(stdout, "backed up %d prior credential blob(s) before overwrite (restore with `fak accounts restore-credential --name %s`)\n", len(snaps), rosterName)
+		}
 		copied, skipped, err := copyLoginBundle(src, dir, p.homeDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak accounts: adopt from %s: %v\n", src, err)
@@ -186,24 +221,19 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			}
 		}
 		fmt.Fprintf(stdout, "adopted login from %s (%s)\n", src, strings.Join(copied, ", "))
-		// Derive identity from the copied disk state. With --probe-identity (always on for
-		// enroll-current), reconcile that disk metadata against the account the copied live
-		// credential ACTUALLY serves and let the credential win — writing a corrected
-		// .claude.json so every later disk read is right. Without it, keep the historical
-		// disk-only derivation (no network on a plain adopt), falling back to a token probe only
-		// when disk identity is empty and a bare token was copied.
-		if p.probeIdentity {
-			id = adoptedIdentityWithProbe(stdout, stderr, dir, p.probeURL)
+		// Record identity. The copied disk metadata (.claude.json oauthAccount) is only a CLAIM —
+		// it lies exactly when the source is a shared dir a later /login rewrote .credentials.json
+		// on without touching oauthAccount. So by DEFAULT reconcile that claim against the account
+		// the copied LIVE credential actually serves (an OAuth profile probe) and let the credential
+		// win, writing a corrected .claude.json so every later disk read is right. --no-probe-identity
+		// opts back into the historical disk-only derivation for a deliberately offline enrollment.
+		// A probe that can't run (no live session credential, offline, endpoint error) degrades to
+		// the same disk+token derivation, so a plain adopt is never WORSE than before — only better
+		// when the network is there.
+		if p.noProbeIdentity {
+			id = adoptedIdentityDiskOnly(dir, p.probeURL)
 		} else {
-			derived := accounts.DeriveIdentity(dir)
-			id = accounts.ProbedIdentity{Email: derived.Email, AccountUUID: derived.AccountUUID}
-			if id.Email == "" && id.AccountUUID == "" {
-				if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
-					if probed, perr := accounts.ProbeToken(nil, "", string(tok)); perr == nil {
-						id = probed
-					}
-				}
-			}
+			id = adoptedIdentityWithProbe(stdout, stderr, dir, p.probeURL, p.probeIdentity)
 		}
 		if id.Email != "" || id.AccountUUID != "" {
 			fmt.Fprintf(stdout, "adopted identity: %s (%s)\n", id.Email, id.AccountUUID)
@@ -241,6 +271,33 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			id = probed
 			fmt.Fprintf(stdout, "probed identity: %s (%s)\n", id.Email, id.AccountUUID)
 		}
+	}
+
+	// Step 4b (#3954): refuse a login-identity hijack BEFORE writing the seat. GateTokenWrite above
+	// already guards the token-fingerprint smear; this guards the orthogonal axis — the account the
+	// just-probed credential ACTUALLY serves colliding with an EXISTING seat. reg is the pre-add
+	// registry (recorded identities, deliberately un-Refreshed) so the check keys on the registry's
+	// binding, not current disk. A duplicate (a different active seat already owns this account) is
+	// refused unless --force; a rebind of this seat onto its own new account is enroll-current's job,
+	// so it is surfaced, not blocked; an unprobed identity warns rather than guesses.
+	switch col := accounts.DetectEnrollCollision(reg, rosterName, id); col.Kind {
+	case accounts.EnrollDuplicate:
+		if !p.force {
+			// The dir was created THIS run (a duplicate-refuse implies !force, and reconcile needs
+			// force, so an existing dir would have been refused earlier). Remove it so a refused
+			// hijack leaves no half-seat behind — the registry (the authority) was never touched.
+			if !reconcile {
+				_ = os.RemoveAll(dir)
+			}
+			fmt.Fprintf(stderr, "fak accounts: REFUSED (identity-hijack): %s\n", col.Detail)
+			fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket; pass --force to override, or remove seat %q first\n", rosterName, col.ConflictSeat)
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak accounts: warning: --force enrolling a duplicate of seat %q (%s)\n", col.ConflictSeat, col.Account)
+	case accounts.EnrollRebind:
+		fmt.Fprintf(stdout, "note: %s\n", col.Detail)
+	case accounts.EnrollUnknown:
+		fmt.Fprintf(stderr, "fak accounts: warning: could not verify identity collision (%s)\n", col.Detail)
 	}
 
 	// Step 5: seed markers so every consumer recognizes the seat.
@@ -285,6 +342,11 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			return serr
 		}
 		fmt.Fprintf(stdout, "synced %d roster view(s)\n", synced)
+		// Step 7b (#3954): auto-verify the seat we just enrolled is actually usable — serveable in
+		// the registry projection AND present in each rendered roster view. Advisory only: the dir +
+		// registry + views already landed, so a miss is a loud warning pointing at the gap, not a
+		// failure of the enroll that already committed.
+		verifyServableAfterSync(stdout, stderr, p, rosterName)
 	}
 
 	action := "added"
@@ -293,6 +355,99 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	}
 	fmt.Fprintf(stdout, "%s account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", action, rosterName, dir, p.reserved)
 	return 0
+}
+
+// dryRunAddPlan prints the enrollment plan for `--dry-run` and returns without mutating anything.
+// It performs only read-only work: resolving the adopt source (so a missing source still fails as it
+// would for real) and describing the mutations the real run would perform. Kept in lockstep with the
+// mutation sequence in runAccountsAdd — every "would" line names a step that lives below the dry-run
+// short-circuit there.
+func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry, rosterName, dir string, reconcile bool) int {
+	regVerb := "add"
+	if reconcile {
+		regVerb = "update (reconcile in place)"
+	}
+	fmt.Fprintf(stdout, "DRY RUN: no dir created, no credential copied, no probe, no registry write, no view sync\n")
+	fmt.Fprintf(stdout, "  target dir:    %s\n", dir)
+	fmt.Fprintf(stdout, "  roster name:   %s (reserved=%v)\n", rosterName, p.reserved)
+	if p.adopt {
+		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
+		if err != nil {
+			// A missing/invalid source is a read-only refusal that must fire under --dry-run too.
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "  credential:    would ADOPT the login bundle from %s\n", src)
+		if p.noProbeIdentity {
+			fmt.Fprintf(stdout, "  identity:      would derive from copied disk state (probe disabled)\n")
+		} else {
+			fmt.Fprintf(stdout, "  identity:      would PROBE the live credential's OAuth profile to record the true account\n")
+		}
+	} else {
+		fmt.Fprintf(stdout, "  credential:    would MINT a new setup-token via `claude setup-token`\n")
+		fmt.Fprintf(stdout, "  identity:      would PROBE the new token's OAuth profile\n")
+	}
+	fmt.Fprintf(stdout, "  registry:      would %s %q -> %s\n", regVerb, rosterName, dir)
+	if p.noSync {
+		fmt.Fprintf(stdout, "  views:         sync SKIPPED (--no-sync)\n")
+	} else {
+		fmt.Fprintf(stdout, "  views:         would regenerate the dos + job roster views and re-verify the seat is servable\n")
+	}
+	fmt.Fprintf(stdout, "re-run without --dry-run to apply — ~/.claude untouched\n")
+	return 0
+}
+
+// verifyServableAfterSync re-reads the registry (Refresh()ed, so LoginStatus reflects the just-copied
+// dir) and the rendered view files, then asserts the new seat is serveable and present in each
+// CONFIGURED view. It only warns — never changes the exit code — because it runs after the enroll has
+// already committed; its job is to turn a silent "enrolled but nothing will call it" into a visible
+// one. A disabled view (empty path) is not counted against servability.
+func verifyServableAfterSync(stdout, stderr io.Writer, p addParams, rosterName string) {
+	reg, err := accounts.LoadRegistry(p.registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: warning: could not re-verify servability: %v\n", err)
+		return
+	}
+	reg = reg.Refresh()
+	dosText := readViewFileForVerify(p.dosView)
+	jobText := readViewFileForVerify(p.jobView)
+	rep := accounts.VerifySeatServable(reg, rosterName, dosText, jobText)
+	var problems []string
+	if !rep.DosServable {
+		problems = append(problems, fmt.Sprintf("not serveable (login status %q)", rep.LoginStatus))
+	}
+	if p.dosView != "" && !rep.InDosView {
+		problems = append(problems, "missing from the dos roster view")
+	}
+	if p.jobView != "" && !rep.InJobView {
+		problems = append(problems, "missing from the job roster view")
+	}
+	if len(problems) == 0 {
+		switch {
+		case p.dosView != "" && p.jobView != "":
+			fmt.Fprintf(stdout, "servable: seat %q is ready in both roster views\n", rosterName)
+		case p.dosView != "" || p.jobView != "":
+			fmt.Fprintf(stdout, "servable: seat %q is ready in the configured roster view\n", rosterName)
+		default:
+			fmt.Fprintf(stdout, "servable: seat %q is serveable (no roster views configured to check)\n", rosterName)
+		}
+		return
+	}
+	fmt.Fprintf(stderr, "fak accounts: warning: seat %q enrolled but NOT yet servable — %s\n", rosterName, strings.Join(problems, "; "))
+	fmt.Fprintln(stderr, "  run `fak accounts status --probe` to inspect, or `fak accounts sync` to regenerate the views")
+}
+
+// readViewFileForVerify reads a rendered view file for the servability check, returning "" (treated
+// as "not checked") for an unconfigured or unreadable view rather than failing.
+func readViewFileForVerify(path string) string {
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // resolveSourceSeat resolves the --from source for an adopt: an empty value is the default
@@ -1009,9 +1164,14 @@ func extractToken(out string) string {
 // metadata against the account its live credential ACTUALLY serves (an OAuth profile probe), and
 // prefers the credential. When the two disagree it OVERWRITES the seat's .claude.json oauthAccount
 // with the credential identity — the durable fix for the mislabel, so `list`/`status`/`discover`
-// (all disk-only) report the true account forever after, not just this run. A probe failure is
-// non-fatal: it falls back to the copied disk identity. profileURL is "" for the real endpoint.
-func adoptedIdentityWithProbe(stdout, stderr io.Writer, dir, profileURL string) accounts.ProbedIdentity {
+// (all disk-only) report the true account forever after, not just this run. A probe that cannot
+// run — no live session credential to probe, or an endpoint/transport error — is non-fatal: it
+// degrades to the SAME disk+token derivation a --no-probe-identity adopt uses, so the probe-on
+// default is never worse than disk-only. profileURL is "" for the real endpoint. `explicit` is
+// true only when a caller FORCED the probe (enroll-current); it controls how loud a probe failure
+// is: an explicitly-requested probe that fails warns (the operator asked for the guarantee and did
+// not get it), while the default-on probe falling back is quiet (it is the expected offline path).
+func adoptedIdentityWithProbe(stdout, stderr io.Writer, dir, profileURL string, explicit bool) accounts.ProbedIdentity {
 	probe := func(tok string) (accounts.ProbedIdentity, error) {
 		return accounts.ProbeToken(nil, profileURL, tok)
 	}
@@ -1024,10 +1184,37 @@ func adoptedIdentityWithProbe(stdout, stderr io.Writer, dir, profileURL string) 
 			fmt.Fprintf(stderr, "fak accounts: warning: rewrite .claude.json to credential identity: %v\n", err)
 		}
 		return res.Credential
-	case res.ProbeErr != nil:
+	case res.Probed:
+		// Probed and agreed (or filled an empty disk identity): the credential is ground truth.
+		return res.Credential
+	case res.ProbeErr != nil && explicit:
+		// The operator explicitly asked for the probe guarantee and the endpoint failed — warn,
+		// then fall through to the disk+token derivation so enrollment still completes.
 		fmt.Fprintf(stderr, "fak accounts: warning: could not probe the credential identity (%v); trusting the copied on-disk identity\n", res.ProbeErr)
 	}
-	return accounts.ProbedIdentity{Email: res.Resolved.Email, AccountUUID: res.Resolved.AccountUUID}
+	// No live credential to probe, or a quiet default-on fallback: use the full disk+token
+	// derivation (identical to a --no-probe-identity adopt), never a possibly-empty disk read.
+	return adoptedIdentityDiskOnly(dir, profileURL)
+}
+
+// adoptedIdentityDiskOnly derives an adopted seat's identity primarily from disk: the copied
+// .claude.json metadata via DeriveIdentity, falling back to a token probe ONLY when disk identity
+// is empty and a bare .oauth-token was copied (the historical --no-probe-identity behavior). It is
+// the shared fallback for both the opt-out path and a probe that could not run. profileURL is the
+// OAuth endpoint override ("" = the real DefaultProfileURL) — threaded through so the token-only
+// fallback probe honors the same $FAK_OAUTH_PROFILE_URL test/advanced seam as the primary probe,
+// rather than silently hitting the real endpoint.
+func adoptedIdentityDiskOnly(dir, profileURL string) accounts.ProbedIdentity {
+	derived := accounts.DeriveIdentity(dir)
+	id := accounts.ProbedIdentity{Email: derived.Email, AccountUUID: derived.AccountUUID}
+	if id.Email == "" && id.AccountUUID == "" {
+		if tok, terr := os.ReadFile(filepath.Join(dir, ".oauth-token")); terr == nil {
+			if probed, perr := accounts.ProbeToken(nil, profileURL, string(tok)); perr == nil {
+				id = probed
+			}
+		}
+	}
+	return id
 }
 
 // identityLabel renders an identity as "email (uuid)", "email", "(uuid)", or "unknown" for a

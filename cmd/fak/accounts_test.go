@@ -61,6 +61,67 @@ func TestRunAccountsDiscoverAndList(t *testing.T) {
 	}
 }
 
+// TestAccountsTombstonedHiddenByDefault pins the "retired seats are not a mainline
+// row" behavior: `list` and `status` collapse tombstoned seats into a one-line count
+// (plus the summary's tombstoned=N tally) so a roster with dozens of them still reads
+// as the live seats. --all restores the full roster; --json is always complete.
+func TestAccountsTombstonedHiddenByDefault(t *testing.T) {
+	home := t.TempDir()
+	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
+	needs := mkHome(t, home, ".claude-needs-seat", "needs@example.test", false)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"ready-seat","dir":"` + jsonPath(ready) + `"},` +
+		`{"name":"needs-seat","dir":"` + jsonPath(needs) + `"},` +
+		`{"name":"old-1","status":"tombstoned","rehome_to":"ready-seat"},` +
+		`{"name":"old-2","status":"tombstoned","rehome_to":"ready-seat"}` +
+		`],"roles":{"active":"ready-seat","anchor":"ready-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		var out, errb bytes.Buffer
+		full := append(args, "--registry", regPath, "--home", home)
+		if rc := runAccounts(&out, &errb, full); rc != 0 {
+			t.Fatalf("%v rc=%d stderr=%s", args, rc, errb.String())
+		}
+		return out.String()
+	}
+
+	for _, sub := range []string{"list", "status"} {
+		t.Run(sub+" default hides tombstones", func(t *testing.T) {
+			got := run(t, sub)
+			if strings.Contains(got, "old-1") || strings.Contains(got, "old-2") {
+				t.Fatalf("%s default must not print tombstoned seat rows:\n%s", sub, got)
+			}
+			if !strings.Contains(got, "2 tombstoned seats hidden") {
+				t.Fatalf("%s default should collapse tombstones into a count note:\n%s", sub, got)
+			}
+			if !strings.Contains(got, "--all") {
+				t.Fatalf("%s note should point at --all to reveal them:\n%s", sub, got)
+			}
+			if !strings.Contains(got, "tombstoned=2") {
+				t.Fatalf("%s summary should still carry the tombstoned tally:\n%s", sub, got)
+			}
+			if !strings.Contains(got, "ready-seat") {
+				t.Fatalf("%s must still list the live seats:\n%s", sub, got)
+			}
+		})
+		t.Run(sub+" --all reveals tombstones", func(t *testing.T) {
+			got := run(t, sub, "--all")
+			if !strings.Contains(got, "old-1") || !strings.Contains(got, "old-2") {
+				t.Fatalf("%s --all should show every tombstoned seat:\n%s", sub, got)
+			}
+			if strings.Contains(got, "hidden — ") {
+				t.Fatalf("%s --all should print no collapse note:\n%s", sub, got)
+			}
+		})
+	}
+}
+
 func TestRunAccountsStatusReport(t *testing.T) {
 	home := t.TempDir()
 	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)

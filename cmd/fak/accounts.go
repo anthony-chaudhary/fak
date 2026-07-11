@@ -71,13 +71,37 @@ import (
 //	fak accounts version               this binary's build + the registry schema/family it supports + verb set
 func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv)) }
 
-func runAccounts(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|enroll-current|remove|restore|set-role|set-default|launch|next|rotation|rehome|list|status|cooldown|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
-		return 2
-	}
-	sub, rest := argv[0], argv[1:]
+// accountsCmd carries the parsed `fak accounts` flag set plus the leading-positional split so
+// runAccounts can dispatch on it without owning the full flag-definition block.
+type accountsCmd struct {
+	fs *flag.FlagSet
 
+	registryPath, homeDir, gateDir, dosView, jobView *string
+	asJSON, listAll, asEnv, pin, dryRun, write       *bool
+	checkDiff                                        *bool
+
+	addName, addChrome, addToken, addSuffix, addFrom           *string
+	addReserved, addNoLogin, addNoSync, addAdopt               *bool
+	addForce, addProbeIdentity, addNoProbeIdentity, probeIdent *bool
+
+	rmRehome, rmReason, rehomeAddr, rehomeKey *string
+	rmArchive                                 *bool
+
+	roleFlag, launchCommand, launchModel, launchFallbackModel, launchManagedCache, afterSeat, cooldownClear *string
+	launchGuard, launchSkipPerms, launchUltracode, rotateFlag, noHeadroom                                   *bool
+
+	backupAt, backupFile *string
+	backupKeep           *int
+	backupList           *bool
+
+	positional []string
+	lead       int
+}
+
+// parseAccountsCmd builds the accounts flag set, parses argv (tolerating a leading positional
+// before flags), applies the --home/--dos-view hermeticity defense and tilde expansion, and
+// returns the parsed command. code is non-zero (2) only on a flag parse error.
+func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd, int) {
 	fs := flag.NewFlagSet("accounts "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	defHome, _ := os.UserHomeDir()
@@ -88,13 +112,15 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	registryPath := fs.String("registry", regDefault, "path to the config-home registry.json")
 	homeDir := fs.String("home", defHome, "home dir to discover ~/.claude* under")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
+	listAll := fs.Bool("all", false, "(list/status) include tombstoned seats in the table; by default they are hidden behind the summary's tombstoned=N count and a one-line note")
 	asEnv := fs.Bool("env", false, "(resolve) print CLAUDE_CONFIG_DIR=<dir> for eval/wrappers")
 	pin := fs.Bool("pin", false, "(resolve) PIN to the exact seat (strict); default rehomes to a live seat")
-	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying; (launch) print the launch plan without starting the agent")
+	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying; (launch) print the launch plan without starting the agent; (add/enroll-current) print the enrollment plan without creating the dir, copying credentials, probing, or writing the registry")
 	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
 	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout; (doctor) APPLY the auto-fixable repairs instead of only reporting them")
 	dosView := fs.String("dos-view", firstNonEmpty(os.Getenv("FAK_DOS_ROSTER"), defaultDosView(defHome)), "(sync/check) path to the generated dos roster view (~/.claude/accounts.yaml)")
 	jobView := fs.String("job-view", os.Getenv("FAK_JOB_ROSTER"), "(sync/check) path to the generated job roster view; empty skips the job view")
+	checkDiff := fs.Bool("diff", false, "(check) show a line-level diff of each drifting view: `- ` lines are on-disk lines `sync` would overwrite, `+ ` lines are projection lines it would add back")
 	addName := fs.String("name", "", "(add) roster name for the new account")
 	addReserved := fs.Bool("reserved", false, "(add) hold the new account OUT of routine rotation (last-resort fallback)")
 	addChrome := fs.String("chrome-profile", "", "(add) Chrome profile provenance for the new account (informational)")
@@ -106,6 +132,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addFrom := fs.String("from", "", "(add --adopt) source seat to copy the login bundle from: a seat name, a config-dir path, or empty for the default ~/.claude seat")
 	addForce := fs.Bool("force", false, "(add --adopt) reconcile an EXISTING target dir/registry row in place (refresh creds + re-derive identity + upsert) instead of refusing")
 	addProbeIdentity := fs.Bool("probe-identity", false, "(add --adopt) reconcile the adopted seat's identity against a live OAuth profile probe of its credential, preferring the credential over stale on-disk .claude.json metadata (always on for enroll-current)")
+	addNoProbeIdentity := fs.Bool("no-probe-identity", false, "(add --adopt) opt OUT of the default identity probe: record the adopted seat's on-disk .claude.json metadata as-is and hit no network (the pre-probe disk-only behavior); enroll-current ignores this and always probes")
 	probeIdent := fs.Bool("probe", false, "(status) probe each seat's live credential identity and flag identity-metadata-stale when the on-disk .claude.json disagrees with the account the credential actually serves")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry; (rehome) reason token recorded on the live seat switch")
@@ -119,11 +146,15 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
 	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 4.8 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
 	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Opus 4.8 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. an Opus weekly cap -> Fable); empty disables. Default: Fable 5 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
-	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else auto). auto stays PASSIVE on a subscription-OAuth seat; on forces the stable-prefix 1h-TTL cache upgrade; set $"+fleetGuardAPIKeyEnvEnv+" so auto resolves ACTIVE on an API-key-billed seat")
+	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else on — best-effort managed cache everywhere). on forces the stable-prefix 1h-TTL cache upgrade regardless of billing; explicit auto restores guard's billing-gated default (PASSIVE on a subscription-OAuth seat unless $"+fleetGuardAPIKeyEnvEnv+" makes it ACTIVE); off is the express opt-out for a seat where on self-blocks")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
 	cooldownClear := fs.String("clear", "", "(cooldown) clear the cooldown for this account key so its seats re-enter the servable pool immediately (use once the account is actually free)")
+	backupAt := fs.String("at", "", "(restore-credential) select the snapshot to restore by timestamp OR content-sha prefix; empty restores the newest")
+	backupFile := fs.String("file", ".credentials.json", "(restore-credential) which credential blob to restore (.credentials.json|.claude.json|.oauth-token)")
+	backupKeep := fs.Int("keep", 20, "(backup) keep at most this many snapshots per file per seat, pruning older ones")
+	backupList := fs.Bool("list", false, "(backup) list the stored snapshots for --name instead of taking a new one")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -132,7 +163,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		lead++
 	}
 	if err := fs.Parse(rest[lead:]); err != nil {
-		return 2
+		return accountsCmd{}, 2
 	}
 	// Defense-in-depth against a view-clobber footgun: the dos-view default is computed
 	// from the process home (os.UserHomeDir) at flag-definition time, so a caller that
@@ -152,6 +183,83 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	*jobView = pathutil.ExpandTilde(*jobView)
 	positional := append(append([]string{}, rest[:lead]...), fs.Args()...)
 
+	return accountsCmd{
+		fs:                  fs,
+		registryPath:        registryPath,
+		homeDir:             homeDir,
+		gateDir:             gateDir,
+		dosView:             dosView,
+		jobView:             jobView,
+		asJSON:              asJSON,
+		listAll:             listAll,
+		asEnv:               asEnv,
+		pin:                 pin,
+		dryRun:              dryRun,
+		write:               write,
+		checkDiff:           checkDiff,
+		addName:             addName,
+		addChrome:           addChrome,
+		addToken:            addToken,
+		addSuffix:           addSuffix,
+		addFrom:             addFrom,
+		addReserved:         addReserved,
+		addNoLogin:          addNoLogin,
+		addNoSync:           addNoSync,
+		addAdopt:            addAdopt,
+		addForce:            addForce,
+		addProbeIdentity:    addProbeIdentity,
+		addNoProbeIdentity:  addNoProbeIdentity,
+		probeIdent:          probeIdent,
+		rmRehome:            rmRehome,
+		rmReason:            rmReason,
+		rehomeAddr:          rehomeAddr,
+		rehomeKey:           rehomeKey,
+		rmArchive:           rmArchive,
+		roleFlag:            roleFlag,
+		launchCommand:       launchCommand,
+		launchModel:         launchModel,
+		launchFallbackModel: launchFallbackModel,
+		launchManagedCache:  launchManagedCache,
+		afterSeat:           afterSeat,
+		cooldownClear:       cooldownClear,
+		launchGuard:         launchGuard,
+		launchSkipPerms:     launchSkipPerms,
+		launchUltracode:     launchUltracode,
+		rotateFlag:          rotateFlag,
+		noHeadroom:          noHeadroom,
+		backupAt:            backupAt,
+		backupFile:          backupFile,
+		backupKeep:          backupKeep,
+		backupList:          backupList,
+		positional:          positional,
+		lead:                lead,
+	}, 0
+}
+
+func runAccounts(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 {
+		fmt.Fprintln(stderr, "usage: fak accounts <add|enroll-current|remove|restore|backup|restore-credential|set-role|set-default|launch|next|rotation|rehome|list|status|cooldown|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		return 2
+	}
+	sub, rest := argv[0], argv[1:]
+
+	c, code := parseAccountsCmd(stderr, sub, rest)
+	if code != 0 {
+		return code
+	}
+	fs := c.fs
+	registryPath, homeDir, gateDir, dosView, jobView := c.registryPath, c.homeDir, c.gateDir, c.dosView, c.jobView
+	asJSON, listAll, asEnv, pin, dryRun, write := c.asJSON, c.listAll, c.asEnv, c.pin, c.dryRun, c.write
+	checkDiff := c.checkDiff
+	addName, addReserved, addChrome, addNoLogin, addToken := c.addName, c.addReserved, c.addChrome, c.addNoLogin, c.addToken
+	addSuffix, addNoSync, addAdopt, addFrom, addForce := c.addSuffix, c.addNoSync, c.addAdopt, c.addFrom, c.addForce
+	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
+	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
+	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
+	launchUltracode, launchModel, launchFallbackModel, launchManagedCache := c.launchUltracode, c.launchModel, c.launchFallbackModel, c.launchManagedCache
+	rotateFlag, afterSeat, noHeadroom, cooldownClear := c.rotateFlag, c.afterSeat, c.noHeadroom, c.cooldownClear
+	positional, lead := c.positional, c.lead
+
 	switch sub {
 	case "list":
 		reg, err := loadOrDiscover(*registryPath, *homeDir)
@@ -164,11 +272,11 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			stdout.Write(reg.JSON())
 			return 0
 		}
-		printAccountsTable(stdout, reg)
+		printAccountsTable(stdout, reg, *listAll)
 		return 0
 
 	case "status":
-		return accountsStatus(stdout, stderr, *registryPath, *homeDir, *asJSON, *probeIdent)
+		return accountsStatus(stdout, stderr, *registryPath, *homeDir, *asJSON, *probeIdent, *listAll)
 
 	case "cooldown":
 		// The usage-limit cooldown surface: list accounts currently walled off a
@@ -239,22 +347,24 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// login's bundle from a source seat (default ~/.claude) so the account you are already
 		// logged into becomes a rotation seat with no setup-token and no hand-scripting.
 		return runAccountsAdd(stdout, stderr, addParams{
-			name:          *addName,
-			reserved:      *addReserved,
-			chrome:        *addChrome,
-			noLogin:       *addNoLogin,
-			token:         *addToken,
-			suffix:        *addSuffix,
-			noSync:        *addNoSync,
-			adopt:         *addAdopt,
-			from:          *addFrom,
-			force:         *addForce,
-			probeIdentity: *addProbeIdentity,
-			probeURL:      enrollProfileURL(),
-			homeDir:       *homeDir,
-			registryPath:  *registryPath,
-			dosView:       *dosView,
-			jobView:       *jobView,
+			name:            *addName,
+			reserved:        *addReserved,
+			chrome:          *addChrome,
+			noLogin:         *addNoLogin,
+			token:           *addToken,
+			suffix:          *addSuffix,
+			noSync:          *addNoSync,
+			adopt:           *addAdopt,
+			from:            *addFrom,
+			force:           *addForce,
+			probeIdentity:   *addProbeIdentity,
+			noProbeIdentity: *addNoProbeIdentity,
+			probeURL:        enrollProfileURL(),
+			dryRun:          *dryRun,
+			homeDir:         *homeDir,
+			registryPath:    *registryPath,
+			dosView:         *dosView,
+			jobView:         *jobView,
 		})
 
 	case "enroll-current":
@@ -270,6 +380,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			suffix:       *addSuffix,
 			noSync:       *addNoSync,
 			probeURL:     enrollProfileURL(),
+			dryRun:       *dryRun,
 			homeDir:      *homeDir,
 			registryPath: *registryPath,
 			dosView:      *dosView,
@@ -302,6 +413,32 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			dosView:      *dosView,
 			jobView:      *jobView,
 			noSync:       *addNoSync,
+		})
+
+	case "backup":
+		// The credential safety net (#3987): snapshot every live seat's credential blobs (or just
+		// --name) into the content-addressed, gitignored home-tree store before any /login can
+		// overwrite them, pruning to --keep per file. --list shows what is recoverable for a seat.
+		return runAccountsBackup(stdout, stderr, backupParams{
+			name:         *addName,
+			list:         *c.backupList,
+			keep:         *c.backupKeep,
+			registryPath: *registryPath,
+			homeDir:      *homeDir,
+			asJSON:       *asJSON,
+		})
+
+	case "restore-credential":
+		// Reverse a credential overwrite (#3987): restore a seat's prior credential blob from the
+		// backup store — the newest, or the one named by --at (timestamp/sha prefix). The restore
+		// is itself reversible (it snapshots the current blob first).
+		return runAccountsRestoreCredential(stdout, stderr, restoreCredParams{
+			name:         *addName,
+			at:           *c.backupAt,
+			file:         *c.backupFile,
+			registryPath: *registryPath,
+			homeDir:      *homeDir,
+			asJSON:       *asJSON,
 		})
 
 	case "set-role":
@@ -378,13 +515,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "check":
-		return accountsCheck(stdout, stderr, *registryPath, *dosView, *jobView)
+		return accountsCheck(stdout, stderr, *registryPath, *dosView, *jobView, *checkDiff)
 
 	case "version":
 		return accountsVersion(stdout, *asJSON)
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|enroll-current|remove|restore|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|enroll-current|remove|restore|backup|restore-credential|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -395,7 +532,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 // VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
 func accountsVersion(stdout io.Writer, asJSON bool) int {
 	verbs := []string{
-		"add", "enroll-current", "remove", "restore", "set-role", "set-default", "launch", "next", "rotation", "list", "status", "resolve", "pull",
+		"add", "enroll-current", "remove", "restore", "backup", "restore-credential", "set-role", "set-default", "launch", "next", "rotation", "list", "status", "resolve", "pull",
 		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
 	}
 	if asJSON {
@@ -716,7 +853,7 @@ func driftIdentityLabel(id accounts.Identity) string {
 // accountsStatus emits the first-class login-status report. It is the machine-readable
 // sibling of `accounts list`: closed statuses, can_serve, warnings, and next actions live in
 // internal/accounts, not in table-rendering guesses.
-func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJSON, probe bool) int {
+func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJSON, probe, showAll bool) int {
 	reg, err := loadOrDiscover(registryPath, homeDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
@@ -738,7 +875,7 @@ func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJS
 		fmt.Fprintln(stdout)
 		return 0
 	}
-	printAccountsStatus(stdout, report)
+	printAccountsStatus(stdout, report, showAll)
 	return 0
 }
 
@@ -911,106 +1048,6 @@ func accountsDiscover(stdout, stderr io.Writer, registryPath, homeDir string, wr
 	reg := accounts.Registry{Homes: homes}
 	stdout.Write(reg.JSON())
 	return 0
-}
-
-// accountsCheckTwins is the audit gate for Regression A: RED (exit 1) when two config homes
-// logged into DIFFERENT accounts share one setup-token fingerprint (the cross-account smear that
-// surfaces as "subscription disabled"). Homes that share a token but resolve to ONE account pass.
-func accountsCheckTwins(stdout, stderr io.Writer, homeDir string, asJSON bool) int {
-	findings, err := accounts.AuditTokenTwins(homeDir)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-		return 1
-	}
-	if asJSON {
-		stdout.Write(mustJSON(map[string]any{"clean": len(findings) == 0, "findings": findings}))
-		fmt.Fprintln(stdout)
-	}
-	if len(findings) == 0 {
-		if !asJSON {
-			fmt.Fprintln(stdout, "ok: no cross-account token-twins — every shared setup token is one account")
-		}
-		return 0
-	}
-	if !asJSON {
-		for _, f := range findings {
-			fmt.Fprintf(stdout, "TOKEN-TWIN: homes [%s] share one setup token but log into %d accounts [%s]\n",
-				strings.Join(f.Homes, ", "), len(f.Accounts), strings.Join(f.Accounts, ", "))
-		}
-		fmt.Fprintf(stderr, "fak accounts: %d cross-account token-twin(s) — a foreign token will surface as "+
-			"\"subscription disabled\". Give each account its OWN setup token in its OWN dir.\n", len(findings))
-	}
-	return 1
-}
-
-// accountsGateWrite is the pre-write gate: decide whether writing a setup token (stdin) into
-// gateDir is safe BEFORE any flow persists it. Exit 0 = safe; exit 1 = refused (would create a
-// cross-account token-twin). The token is read from stdin only, never argv, and is fingerprinted.
-func accountsGateWrite(stdout, stderr io.Writer, gateDir, homeDir string, asJSON bool) int {
-	if gateDir == "" {
-		fmt.Fprintln(stderr, "usage: fak accounts gate-write --dir <config-dir> < token")
-		return 2
-	}
-	tokBytes, _ := io.ReadAll(os.Stdin)
-	verdict := accounts.GateTokenWrite(gateDir, string(tokBytes), homeDir)
-	if asJSON {
-		stdout.Write(mustJSON(verdict))
-		fmt.Fprintln(stdout)
-	} else if verdict.Allow {
-		fmt.Fprintf(stdout, "ok: safe to write into %s (login: %s)\n", gateDir, verdict.DirAccount)
-	} else {
-		fmt.Fprintf(stderr, "REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
-	}
-	if verdict.Allow {
-		return 0
-	}
-	return 1
-}
-
-// accountsCheck is the drift detector: RED (exit 1) if any on-disk view differs from a
-// freshly-rendered projection of the registry. The ratchet that keeps the generated views from
-// silently diverging from the canonical source.
-func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView string) int {
-	reg, err := accounts.LoadRegistry(registryPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-		return 1
-	}
-	reg = reg.Refresh()
-	fixes := accountFixSummary(registryPath, reg)
-	drift := 0
-	for _, t := range viewTargets(dosView, jobView) {
-		want, err := reg.RenderView(t.view)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		got, err := os.ReadFile(t.path)
-		if err != nil {
-			fmt.Fprintf(stdout, "DRIFT %s: cannot read %s%s (%v)\n", t.view, t.path, accountsViewConsumerHint(t.view), err)
-			drift++
-			continue
-		}
-		if string(got) != want {
-			fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection%s — run `fak accounts sync`\n",
-				t.view, t.path, accountsViewConsumerHint(t.view))
-			drift++
-			continue
-		}
-		fmt.Fprintf(stdout, "ok %s: %s matches registry\n", t.view, t.path)
-	}
-	printAccountFixSummary(stdout, fixes, "account fixes")
-	if drift > 0 {
-		return 1
-	}
-	return 0
-}
-
-func accountsViewConsumerHint(view accounts.ViewName) string {
-	if view == accounts.ViewJob {
-		return " (this is what `u` reads)"
-	}
-	return ""
 }
 
 // syncViews projects the canonical registry (at registryPath) into the named roster views and
@@ -1222,7 +1259,7 @@ func copyTree(src, dst string) (int, error) {
 	return count, err
 }
 
-func printAccountsTable(w io.Writer, reg accounts.Registry) {
+func printAccountsTable(w io.Writer, reg accounts.Registry, showAll bool) {
 	// One provenance line above the table: WHICH fak build rendered this and the registry
 	// schema it speaks. It is the cheap visibility half of `fak accounts version` — an operator
 	// reading a roster sees the tool version inline, so a stale binary is obvious at a glance.
@@ -1236,8 +1273,17 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tLOGIN\tIDENTITY\tCREDS\tREHOME\tFLAG")
 	dupes, twins := 0, 0
+	hiddenTombstones := 0
 	accountSet := map[string]bool{}
 	for _, h := range reg.Homes {
+		// Tombstoned seats are retired bookkeeping, not a mainline roster row: with
+		// dozens of them they bury the live seats an operator actually reads. Collapse
+		// them into the one-line count below the table unless --all is asked for; the
+		// login summary still carries the tombstoned=N tally, and --json stays complete.
+		if !h.Active() && !showAll {
+			hiddenTombstones++
+			continue
+		}
 		name := h.Name
 		if h.Default {
 			name += " *"
@@ -1296,6 +1342,7 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name, status, login, ident, creds, rehome, strings.Join(flags, "; "))
 	}
 	tw.Flush()
+	tombstoneHiddenNote(w, hiddenTombstones, "list")
 	printLoginSummary(w, report, "login")
 	// A one-line reconcile summary when there is anything to collapse or warn about, so
 	// the operator sees "N seats are really M accounts" instead of inferring it per row.
@@ -1312,11 +1359,18 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 	}
 }
 
-func printAccountsStatus(w io.Writer, report accounts.LoginReport) {
+func printAccountsStatus(w io.Writer, report accounts.LoginReport, showAll bool) {
 	fmt.Fprintf(w, "# %s\n", report.Schema)
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tLOGIN\tCAN_SERVE\tACCOUNT\tIDENTITY\tROLES\tNEXT_ACTION\tWARNING")
+	hiddenTombstones := 0
 	for _, obs := range report.Seats {
+		// Same collapse as the list table: a retired seat is not a mainline status row.
+		// Hide it unless --all; the summary line below still tallies tombstoned=N.
+		if obs.Status == accounts.LoginTombstoned && !showAll {
+			hiddenTombstones++
+			continue
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			obs.Name,
 			obs.Status,
@@ -1329,7 +1383,23 @@ func printAccountsStatus(w io.Writer, report accounts.LoginReport) {
 		)
 	}
 	tw.Flush()
+	tombstoneHiddenNote(w, hiddenTombstones, "status")
 	printLoginSummary(w, report, "summary")
+}
+
+// tombstoneHiddenNote prints the one-line collapse note when `hidden` tombstoned
+// seats were kept out of a default table. `sub` is the subcommand to re-run with
+// --all to reveal them. Nothing prints when hidden is zero, so a roster with no
+// tombstones (the --all view, or a fresh registry) reads exactly as before.
+func tombstoneHiddenNote(w io.Writer, hidden int, sub string) {
+	if hidden <= 0 {
+		return
+	}
+	seats := "seats"
+	if hidden == 1 {
+		seats = "seat"
+	}
+	fmt.Fprintf(w, "# %d tombstoned %s hidden — `fak accounts %s --all` to show\n", hidden, seats, sub)
 }
 
 func loginObservationsByName(report accounts.LoginReport) map[string]accounts.LoginObservation {
@@ -1341,8 +1411,12 @@ func loginObservationsByName(report accounts.LoginReport) map[string]accounts.Lo
 }
 
 func printLoginSummary(w io.Writer, report accounts.LoginReport, prefix string) {
-	fmt.Fprintf(w, "%s: %d/%d can serve; %d distinct account(s)",
-		prefix, report.Summary.CanServe, report.Summary.Total, report.Summary.DistinctAccounts)
+	// Denominator is the active-style roster (Total minus tombstoned/disabled/
+	// missing_dir), not every seat ever registered: reporting "5/36" when 22 seats
+	// are tombstoned understates the servable pool. The terminal-class counts still
+	// appear in the per-status breakdown below for context.
+	fmt.Fprintf(w, "%s: %d/%d active seat(s) can serve; %d distinct account(s)",
+		prefix, report.Summary.CanServe, report.Summary.ActiveStyleSeats, report.Summary.DistinctAccounts)
 	for _, part := range sortedLoginStatusParts(report.Summary.ByStatus) {
 		fmt.Fprintf(w, "; %s", part)
 	}

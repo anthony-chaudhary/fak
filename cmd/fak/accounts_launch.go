@@ -46,7 +46,7 @@ type launchOpts struct {
 	skipPermissions bool     // pass --dangerously-skip-permissions to the agent
 	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
 	model           string   // pass --model <id> to Claude (default Opus 4.8); empty => the seat's own default
-	guardCacheArgs  []string // managed-cache posture flags spliced into `fak guard` (--api-key-env / --managed-cache); nil => guard's own auto
+	guardCacheArgs  []string // managed-cache posture flags spliced into `fak guard` (--api-key-env / --managed-cache); nil only for an explicit `auto` (guard's own billing-gated default) — the unconfigured default now resolves to on
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
 
@@ -162,7 +162,7 @@ type launchParams struct {
 	model         string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit bool
 	fallbackModel string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
-	managedCache  string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else auto)
+	managedCache  string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else on — best-effort; explicit "auto" restores guard's billing-gated auto)
 	dryRun        bool   // print the plan, do not exec
 	passthrough   []string
 	registryPath  string
@@ -278,11 +278,12 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fakBin = "fak" // fall back to PATH resolution if the binary path can't be read
 	}
 	warnIfAccountsLaunchStaleBinary(stderr, fakBin, p.useGuard)
-	// Managed-cache posture (epic #1844 C6): a launched seat's guard session used to inherit
-	// guard's own auto default, which stays PASSIVE on a subscription-OAuth seat. Resolve the
-	// posture from --managed-cache (defaulted to $FAK_MANAGED_CACHE) plus $FAK_GUARD_API_KEY_ENV
-	// so an API-key-billed seat can reach ACTIVE without hand-editing this launcher. Fail loud on
-	// a bad mode. The flags ride the guard argv (guardCacheArgs), so a resumed child keeps them.
+	// Managed-cache posture (epic #1844 C6; on-by-default 2026-07-10): resolve the posture from
+	// --managed-cache (defaulted to $FAK_MANAGED_CACHE). An UNSET knob now normalizes to `on`
+	// (operator policy: best-effort managed cache everywhere), so a launched seat forces the
+	// stable-prefix 1h-TTL upgrade instead of inheriting guard's own PASSIVE-on-subscription auto.
+	// $FAK_GUARD_API_KEY_ENV still lets an explicit `auto` reach ACTIVE by billing a key. Fail loud
+	// on a bad mode. The flags ride the guard argv (guardCacheArgs), so a resumed child keeps them.
 	mcMode, mcErr := normalizeManagedCacheMode(p.managedCache)
 	if mcErr != nil {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", mcErr)
@@ -301,55 +302,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
 	grant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), argv, envMap(env), home.Dir))
 
-	guardWord := "off (--guard=false; launching the agent directly, no kernel/cache hop)"
-	if p.useGuard {
-		guardWord = "on (fak guard — kernel adjudicates every tool call; prompt-cache/compaction vCache layer on)"
-	}
-	permWord := command + " prompts per tool (--skip-permissions=false)"
-	if p.skipPerms {
-		if flag := launchSkipPermsFlag(command); flag != "" {
-			permWord = fmt.Sprintf("fak floor is the permission system (%s passed to %s)", flag, command)
-		} else {
-			permWord = fmt.Sprintf("fak floor is the permission system; %s keeps its own prompts (no known kernel-bypass flag)", command)
-		}
-	}
-	fmt.Fprintf(stderr, "fak accounts launch — seat %q\n", home.Name)
-	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = <account-dir>\n")
-	if id.Email != "" {
-		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
-	}
-	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
-	ultracodeWord := "off (--ultracode=false)"
-	if p.ultracode {
-		switch guardAgentBaseName(command) {
-		case "claude", "claude-code":
-			ultracodeWord = `on (--settings '{"ultracode":true}' — xhigh reasoning + workflow orchestration)`
-		default:
-			ultracodeWord = fmt.Sprintf("n/a (%s is not Claude; --settings not applied)", command)
-		}
-	}
-	modelWord := "seat default (--model '')"
-	if strings.TrimSpace(p.model) != "" {
-		switch guardAgentBaseName(command) {
-		case "claude", "claude-code":
-			modelWord = p.model
-		default:
-			modelWord = fmt.Sprintf("n/a (%s is not Claude; --model not applied)", command)
-		}
-	}
-	if chain, ok := modelFallbackChain(command, p); ok {
-		modelWord += fmt.Sprintf(" (fallback chain: %s — on unknown-model or usage/rate-limit startup)", strings.Join(chain, " -> "))
-	}
-	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
-	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
-	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
-	fmt.Fprintf(stderr, "  model             = %s\n", modelWord)
-	if p.useGuard {
-		fmt.Fprintf(stderr, "  managed-cache     = %s\n", accountsLaunchManagedCacheWord(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv)))
-	}
-	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(grant.SanitizedArgv, " "))
-	fmt.Fprintf(stderr, "  agent_run         = %s policy_digest=%s broker=%s\n",
-		grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest, grant.Reason)
+	printAccountsLaunchPlan(stderr, p, command, home, id, grant, mcMode)
 	printAccountFixSummary(stderr, fixes, "account fixes")
 
 	if !grant.Allow {
@@ -416,6 +369,62 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		recordLaunchCooldown(stderr, home.Identity.AccountKey(), res.Stderr, kind, time.Now())
 	}
 	return res.Code
+}
+
+// printAccountsLaunchPlan renders the human-readable launch plan summary to stderr: the resolved
+// seat, identity, login, the guard/permissions/ultracode/model posture (Claude-only words gated
+// off for other agents), the managed-cache word, and the broker-sanitized command + agent_run
+// provenance. Pure output — extracted from runAccountsLaunch verbatim.
+func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, home accounts.Home, id accounts.Identity, grant launchBrokerGrant, mcMode string) {
+	guardWord := "off (--guard=false; launching the agent directly, no kernel/cache hop)"
+	if p.useGuard {
+		guardWord = "on (fak guard — kernel adjudicates every tool call; prompt-cache/compaction vCache layer on)"
+	}
+	permWord := command + " prompts per tool (--skip-permissions=false)"
+	if p.skipPerms {
+		if flag := launchSkipPermsFlag(command); flag != "" {
+			permWord = fmt.Sprintf("fak floor is the permission system (%s passed to %s)", flag, command)
+		} else {
+			permWord = fmt.Sprintf("fak floor is the permission system; %s keeps its own prompts (no known kernel-bypass flag)", command)
+		}
+	}
+	fmt.Fprintf(stderr, "fak accounts launch — seat %q\n", home.Name)
+	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = <account-dir>\n")
+	if id.Email != "" {
+		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
+	}
+	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
+	ultracodeWord := "off (--ultracode=false)"
+	if p.ultracode {
+		switch guardAgentBaseName(command) {
+		case "claude", "claude-code":
+			ultracodeWord = `on (--settings '{"ultracode":true}' — xhigh reasoning + workflow orchestration)`
+		default:
+			ultracodeWord = fmt.Sprintf("n/a (%s is not Claude; --settings not applied)", command)
+		}
+	}
+	modelWord := "seat default (--model '')"
+	if strings.TrimSpace(p.model) != "" {
+		switch guardAgentBaseName(command) {
+		case "claude", "claude-code":
+			modelWord = p.model
+		default:
+			modelWord = fmt.Sprintf("n/a (%s is not Claude; --model not applied)", command)
+		}
+	}
+	if chain, ok := modelFallbackChain(command, p); ok {
+		modelWord += fmt.Sprintf(" (fallback chain: %s — on unknown-model or usage/rate-limit startup)", strings.Join(chain, " -> "))
+	}
+	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
+	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
+	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
+	fmt.Fprintf(stderr, "  model             = %s\n", modelWord)
+	if p.useGuard {
+		fmt.Fprintf(stderr, "  managed-cache     = %s\n", accountsLaunchManagedCacheWord(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv)))
+	}
+	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(grant.SanitizedArgv, " "))
+	fmt.Fprintf(stderr, "  agent_run         = %s policy_digest=%s broker=%s\n",
+		grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest, grant.Reason)
 }
 
 // modelFallbackChain returns the ordered list of Claude model ids to try, in order, when the

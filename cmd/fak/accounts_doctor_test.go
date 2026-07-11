@@ -145,6 +145,42 @@ func TestAccountsDoctorProbeLedgerOverlay(t *testing.T) {
 	}
 }
 
+func TestAccountsDoctorAccessWallIsNotRelogin(t *testing.T) {
+	// An upstream ACCESS wall (org disabled the subscription) is NOT fixable by
+	// re-login: re-auth hits the same disabled account. Doctor must route it to the
+	// operator-judgment action, never propose `claude /login`, so an account confused
+	// out of serving isn't handed a dead-end recovery step.
+	home := t.TempDir()
+	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"ready-seat","dir":"` + jsonPath(ready) + `"}` +
+		`],"roles":{"active":"ready-seat","anchor":"ready-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rd := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", rd)
+	line := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `","account":".claude-ready-seat","status":"ACCESS","block_reason":"organization has disabled Claude subscription access"}`
+	if err := os.WriteFile(filepath.Join(rd, "probe_ledger.jsonl"), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"doctor", "--registry", regPath, "--home", home})
+	if rc != 1 {
+		t.Fatalf("doctor with a fresh ACCESS probe rc=%d, want 1; out=%s", rc, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "access_blocked") {
+		t.Fatalf("doctor should fold a fresh ACCESS wall into access_blocked:\n%s", got)
+	}
+	if strings.Contains(got, "relogin") || strings.Contains(got, "CLAUDE_CONFIG_DIR=") {
+		t.Fatalf("doctor must not propose re-login for an ACCESS wall:\n%s", got)
+	}
+}
+
 func TestAccountsDoctorIdentityMismatchRequiresRelogin(t *testing.T) {
 	t.Setenv("FLEET_REG_DIR", "")
 	home := t.TempDir()

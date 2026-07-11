@@ -35,24 +35,8 @@ func TestLaunchKindToCooldownKind(t *testing.T) {
 	}
 }
 
-func TestParseCooldownResetAbsolute(t *testing.T) {
-	got := parseCooldownReset("usage limit reached; resets at 2026-07-07T15:00:00Z, try later")
-	want := cdMustTime(t, "2026-07-07T15:00:00Z")
-	if !got.Equal(want) {
-		t.Fatalf("parseCooldownReset absolute: got %s want %s", got, want)
-	}
-}
-
-func TestParseCooldownResetVagueIsZero(t *testing.T) {
-	// "resets in 42 minutes" has no date — we must NOT guess a wall-clock; caller
-	// then applies the default window instead of a mis-parsed absolute time.
-	if got := parseCooldownReset("session limit; resets in 42 minutes"); !got.IsZero() {
-		t.Fatalf("vague reset should be zero, got %s", got)
-	}
-	if got := parseCooldownReset("no limit language here"); !got.IsZero() {
-		t.Fatalf("absent reset should be zero, got %s", got)
-	}
-}
+// Reset-string parsing now lives in the single source accounts.ParseReset (internal/accounts);
+// its behavior is guarded by TestParseReset* in that package.
 
 func TestCooldownReasonFromStderrPicksLimitLine(t *testing.T) {
 	stderr := "starting claude...\nresolving model\nError: weekly limit reached for this account; resets at 15:00\ndone\n"
