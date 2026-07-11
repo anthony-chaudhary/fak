@@ -118,7 +118,7 @@ func TestOpenMMProjRejectsTextModel(t *testing.T) {
 // TestIsMMProjVisionTensor pins the load-side vision-namespace predicate.
 func TestIsMMProjVisionTensor(t *testing.T) {
 	cases := map[string]bool{
-		"v.patch_embd.weight":  true,
+		"v.patch_embd.weight":   true,
 		"v.blk.0.attn_q.weight": true,
 		"mm.0.weight":           true,
 		"mm.merger.ln_q.weight": true,

@@ -125,15 +125,15 @@ func TestCmdTrajReportText(t *testing.T) {
 
 func TestTurnOK(t *testing.T) {
 	cases := map[string]bool{
-		"":           true,
-		"ALLOW":      true,
-		"allow":      true,
-		"WITNESS":    true,
-		"DENY":       false,
+		"":             true,
+		"ALLOW":        true,
+		"allow":        true,
+		"WITNESS":      true,
+		"DENY":         false,
 		" quarantine ": false,
-		"BLOCK":      false,
-		"ERROR":      false,
-		"FAULT":      false,
+		"BLOCK":        false,
+		"ERROR":        false,
+		"FAULT":        false,
 	}
 	for verdict, want := range cases {
 		if got := turnOK(verdict); got != want {

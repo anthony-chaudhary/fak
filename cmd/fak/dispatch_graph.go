@@ -27,10 +27,10 @@ import (
 // dispatchGraph is the rendered dependency model: roots (dispatchable now), the declared edges, the
 // chains rooted at each dispatchable prerequisite, and the cycles no root can reach.
 type dispatchGraph struct {
-	Roots  []int             `json:"roots"`
+	Roots  []int               `json:"roots"`
 	Edges  []dispatchGraphEdge `json:"edges"`
 	Chains []dispatchGraphNode `json:"chains"`
-	Cycles [][]int           `json:"cycles"`
+	Cycles [][]int             `json:"cycles"`
 	Counts dispatchGraphCounts `json:"counts"`
 }
 

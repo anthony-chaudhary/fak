@@ -44,8 +44,8 @@ const (
 	// delivery at the shell seam.
 	cronExitDeduped = 3
 
-	cronTickWait = 5 * time.Second   // how long a tick blocks for a live lock holder
-	cronTickTTL  = 2 * time.Minute   // a lockfile older than this is a crashed tick's leftover
+	cronTickWait = 5 * time.Second // how long a tick blocks for a live lock holder
+	cronTickTTL  = 2 * time.Minute // a lockfile older than this is a crashed tick's leftover
 	cronTickPoll = 5 * time.Millisecond
 )
 

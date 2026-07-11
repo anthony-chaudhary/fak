@@ -341,10 +341,10 @@ func TestColdCliffDetector(t *testing.T) {
 // warmup quiet while a genuinely cold-tipping session alarms.
 func TestColdCliffColdFractionBoundary(t *testing.T) {
 	o := New()
-	o.Observe(100, 0)     // cold
-	o.Observe(1000, 990)  // frozen
-	o.Observe(1000, 990)  // frozen
-	o.Observe(1000, 990)  // frozen -> cold fraction 1/4 = 0.25, ratio high
+	o.Observe(100, 0)    // cold
+	o.Observe(1000, 990) // frozen
+	o.Observe(1000, 990) // frozen
+	o.Observe(1000, 990) // frozen -> cold fraction 1/4 = 0.25, ratio high
 	if v := o.Snapshot().ColdCliff(); v.Fired {
 		t.Fatalf("1/4 cold must not fire: %+v", v)
 	}

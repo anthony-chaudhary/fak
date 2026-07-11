@@ -14,7 +14,7 @@ type visionFixture struct {
 	layers        int
 	patch         int
 	merge         int
-	temporal      int  // 1 still-image, 2 Qwen2-VL temporal-doubled
+	temporal      int // 1 still-image, 2 Qwen2-VL temporal-doubled
 	ffn           int
 	decoderHidden int  // projector out width == this
 	twoLayerProj  bool // include mm.2 (GELU projector) vs single mm.0

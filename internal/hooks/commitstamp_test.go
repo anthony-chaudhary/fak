@@ -413,11 +413,11 @@ func TestDosNoClaimMarkerHit(t *testing.T) {
 		want    string
 	}{
 		{"feat(l3kv): add magic+version envelope to durable KV records", "version"}, // `+` splits out `version`
-		{"feat(x): add a conversion helper", ""},                                     // whole-word: conversion ≠ version
-		{"feat(x): add a lifestyle audit", ""},                                       // whole-word: lifestyle ≠ style
-		{"fix(x): bump and then merge", "bump"},                                      // earliest marker wins
-		{"feat(x): address review of the parser", "address review"},                  // multi-word substring
-		{"feat(l3kv): add a self-describing record envelope", ""},                     // clean
+		{"feat(x): add a conversion helper", ""},                                    // whole-word: conversion ≠ version
+		{"feat(x): add a lifestyle audit", ""},                                      // whole-word: lifestyle ≠ style
+		{"fix(x): bump and then merge", "bump"},                                     // earliest marker wins
+		{"feat(x): address review of the parser", "address review"},                 // multi-word substring
+		{"feat(l3kv): add a self-describing record envelope", ""},                   // clean
 	}
 	for _, c := range cases {
 		if got := dosNoClaimMarkerHit(c.subject); got != c.want {
