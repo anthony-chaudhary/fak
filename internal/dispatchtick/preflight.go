@@ -198,6 +198,17 @@ type PreflightInput struct {
 	// value (Enabled=false) is a no-op: classifyPreflight only consults it when Enabled,
 	// so the fold is byte-identical to before this term existed unless the knob is set.
 	LandContention LandContention
+	// SettleBeforeRedecide is the OPTIONAL settle-before-redecide gate (#3370). When true,
+	// classifyPreflight returns PreflightObserveSettling while the kernel is mid-scale
+	// (Alive != Target) -- holding a new scaling decision until the prior one converges so
+	// decisions do not stack while the fleet is still moving. It defaults false, so the zero
+	// value is a no-op and the preflight fold stays byte-identical to before this term
+	// existed: it only shadows the downstream cap/account/seat classification when the knob
+	// is explicitly set. Gated off by default to match the #3574 LandContention convention --
+	// #3370 originally landed this verdict UNgated, which red the trunk on ~40 integration
+	// tests that assert the ordinary mid-scale SPAWN path (alive < target still admits toward
+	// target). The behavior can be enabled deliberately alongside its integration-test flip.
+	SettleBeforeRedecide bool
 }
 
 type PreflightResult struct {
@@ -499,7 +510,7 @@ func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool
 	case landSaturated(in.LandContention):
 		lc := in.LandContention
 		return PreflightRefuseLandSaturated, fmt.Sprintf("land contention saturated: signal %.3f (high-water %.3f, low-water %.3f) - throttling new spawns until the serialized-land funnel drains", lc.Signal, lc.HighWater, lc.LowWater)
-	case in.Kernel.Alive != nil && in.Kernel.Target != nil && *in.Kernel.Alive != *in.Kernel.Target:
+	case in.SettleBeforeRedecide && in.Kernel.Alive != nil && in.Kernel.Target != nil && *in.Kernel.Alive != *in.Kernel.Target:
 		return PreflightObserveSettling, fmt.Sprintf("observing scaling in progress: %d alive, target %d", *in.Kernel.Alive, *in.Kernel.Target)
 	case live >= capacity:
 		return PreflightRefuseAtCap, fmt.Sprintf("live workers %d >= cap %d (kernel alive=%s, os procs=%d, dos target=%s, host_cap=%s, max-workers=%d)",

@@ -6,7 +6,7 @@ import (
 )
 
 func settledPreflightInput(alive, target int) PreflightInput {
-	return PreflightInput{MaxWorkers: 10, Host: HostCheck{Safe: true}, Account: AccountCheck{Available: true, Tag: "a", Tier: 1}, Kernel: KernelCheck{Alive: IntPtr(alive), Target: IntPtr(target)}, Seat: SeatCheck{Total: IntPtr(10), Free: IntPtr(8), Leased: IntPtr(alive)}, Resources: HostResources{}, OSWorkerProcs: alive}
+	return PreflightInput{SettleBeforeRedecide: true, MaxWorkers: 10, Host: HostCheck{Safe: true}, Account: AccountCheck{Available: true, Tag: "a", Tier: 1}, Kernel: KernelCheck{Alive: IntPtr(alive), Target: IntPtr(target)}, Seat: SeatCheck{Total: IntPtr(10), Free: IntPtr(8), Leased: IntPtr(alive)}, Resources: HostResources{}, OSWorkerProcs: alive}
 }
 
 func TestEvaluatePreflightObservesScaleUpInFlight(t *testing.T) {
