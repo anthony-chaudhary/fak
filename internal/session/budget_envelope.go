@@ -142,6 +142,17 @@ func (e BudgetEnvelope) ExpectedThroughput() Throughput {
 	return Throughput{ExpectedTokensPerSec: e.Throughput.ExpectedTokensPerSec}
 }
 
+// ThroughputBudget projects the envelope's throughput axis onto the live drive
+// state axis (#2762): the expected rate as the soft pace-shaping reference and
+// the min rate as the enforced sustained-rate floor (see throughput.go). The
+// observation window starts empty — it accumulates from real reported turns.
+func (e BudgetEnvelope) ThroughputBudget() ThroughputBudget {
+	return ThroughputBudget{
+		ExpectedTokensPerSec: e.Throughput.ExpectedTokensPerSec,
+		MinTokensPerSec:      e.Throughput.MinTokensPerSec,
+	}
+}
+
 func budgetEnvelopeKey(key string) string {
 	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.NewReplacer("-", "_", " ", "_").Replace(key)

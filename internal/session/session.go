@@ -312,6 +312,16 @@ type State struct {
 	// envelope behaves byte-identically to a pre-#1584 State (omitzero keeps the wire
 	// shape unchanged when unused).
 	Time TimeBudget `json:"time,omitempty,omitzero"`
+	// Throughput is the throughput envelope axis as live drive state (issue #2762,
+	// the out-of-band operator-control epic #2753): the soft expected pace-shaping
+	// rate, the enforced minimum sustained-rate floor, and the accumulated
+	// observation window DebitUsage judges the floor against (see throughput.go).
+	// Carried forward across a Recontinue re-arm like Time/spend, so a hidden
+	// context reset cannot launder a session running below its floor. The zero
+	// value is unconfigured — a State with no throughput envelope behaves
+	// byte-identically to a pre-#2762 State (omitzero keeps the wire shape
+	// unchanged when unused).
+	Throughput ThroughputBudget `json:"throughput,omitempty,omitzero"`
 	// Assumptions is the live, visible ledger of facts the session is relying on.
 	// It carries provenance, confidence, and expiry only; it never carries hidden
 	// transcript bytes and it does not gate behavior by itself. Empty means the

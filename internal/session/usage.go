@@ -16,10 +16,15 @@ import (
 // place (the host, which knows the provider). 0 = unpriced turn, no spend debit;
 // a dollar-blind host therefore leaves a configured spend budget honestly
 // untouched rather than debiting a guessed cost.
+// DurationNanos is the turn's real wall-clock duration as reported by the
+// caller (the table reads no clock of its own, matching TimeBudget's
+// discipline); it feeds the throughput axis's sustained-rate observation
+// (#2762). 0 = duration unknown, no throughput observation for this turn.
 type Usage struct {
 	OutputTokens   int
 	ContextTokens  int
 	CostMicroCents int64
+	DurationNanos  int64
 }
 
 // DebitUsage records a completed turn's token usage against the session's live
@@ -28,7 +33,7 @@ type Usage struct {
 // reset trigger: the session is moved to Draining immediately and a continuation id
 // is minted so the next boundary can tell a supervisor which fresh window to start.
 func (t *Table) DebitUsage(trace string, u Usage) State {
-	if t == nil || (u.OutputTokens <= 0 && u.ContextTokens <= 0 && u.CostMicroCents <= 0) {
+	if t == nil || (u.OutputTokens <= 0 && u.ContextTokens <= 0 && u.CostMicroCents <= 0 && u.DurationNanos <= 0) {
 		if t != nil {
 			return t.Get(trace)
 		}
@@ -68,6 +73,23 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 			spendDrained = true
 		}
 	}
+	// Throughput floor NEXT (#2762): observation accumulates only while a floor is
+	// configured (arming a floor mid-run judges the session from that moment, never
+	// against contract-free history), and a sustained rate under the floor past the
+	// grace window drains immediately — like spend, it is terminal for the lineage:
+	// no continuation id is minted, because a fresh window does not make a session
+	// the operator declared too slow any faster. Ordered after spend (money is the
+	// hardest ceiling) and before context (whose drain mints the reset path).
+	hardDrained := spendDrained
+	if u.DurationNanos > 0 && cur.Throughput.Bounded() {
+		cur.Throughput = cur.Throughput.observe(u.OutputTokens, u.DurationNanos)
+		changed = true
+		if !hardDrained && cur.Throughput.BelowFloor() {
+			cur.Run = Draining
+			cur.Reason = ReasonThroughputFloor
+			hardDrained = true
+		}
+	}
 	// fireKind/fire capture which budget event (if any) this debit triggers; the observer
 	// itself runs AFTER the lock is released so a slow webhook never stalls other sessions.
 	fireKind, fire := BudgetWarn, false
@@ -79,7 +101,7 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 		switch {
 		case cur.Budget.ContextTokensLeft <= 0:
 			cur.Budget.ContextTokensLeft = 0
-			if !spendDrained {
+			if !hardDrained {
 				cur.Run = Draining
 				cur.Reason = ReasonBudgetContext
 				if cur.ContinuationID == "" {
@@ -88,7 +110,7 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 				cur.CacheAffinity = cacheAffinityForContinuation(cur, cur.ContinuationID, ReasonBudgetContext)
 				fireKind, fire = BudgetExhausted, t.obs != nil
 			}
-		case !spendDrained && t.crossedWarnLocked(cur.Budget, prevLeft):
+		case !hardDrained && t.crossedWarnLocked(cur.Budget, prevLeft):
 			fireKind, fire = BudgetWarn, true
 		}
 		if t.crossedRelaySoftLocked(trace, cur.Budget, u.ContextTokens) {

@@ -353,6 +353,32 @@ func (t *Table) SetTimeBudget(trace string, b TimeBudget) (State, bool) {
 	return t.setLocked(trace, func(cur *State) { cur.Time = b })
 }
 
+// SetWallClockLimit re-sets a session's wall-clock LIMIT live through the control
+// route (#2762) — the operator form of SetTimeBudget that PRESERVES the lineage's
+// accumulated elapsed time (an operator adjusting the ceiling mid-run must not
+// zero the clock) and arms the clock at now when it is not already ticking, so a
+// limit set on a session that never started one begins enforcing immediately.
+// limit<=0 clears the envelope (WithLimit's TimeUnbounded rule) while the clock
+// keeps ticking for observability, matching StartTimeBudget's unbounded case. A
+// terminal session rejects the change, matching SetBudget.
+func (t *Table) SetWallClockLimit(trace string, limit time.Duration, now time.Time) (State, bool) {
+	return t.setLocked(trace, func(cur *State) {
+		cur.Time = cur.Time.WithLimit(limit).Start(now)
+	})
+}
+
+// SetThroughputBudget re-sets a session's throughput envelope live (#2762): the
+// soft expected pace-shaping rate and the enforced minimum sustained-rate floor.
+// The accumulated observation window is preserved — re-stating the rates must
+// not forget what has already been measured under a live floor. A terminal
+// session rejects the change, matching SetBudget.
+func (t *Table) SetThroughputBudget(trace string, b ThroughputBudget) (State, bool) {
+	return t.setLocked(trace, func(cur *State) {
+		cur.Throughput.ExpectedTokensPerSec = b.ExpectedTokensPerSec
+		cur.Throughput.MinTokensPerSec = b.MinTokensPerSec
+	})
+}
+
 // StartTimeBudget configures trace's wall-clock envelope to limit and arms the clock at
 // now in one write — the usual entry point for a managed run that wants "govern me to
 // at most N wall-clock minutes starting now". limit<=0 configures an unbounded budget
@@ -564,6 +590,11 @@ func (t *Table) RecontinueAtWithTransaction(parent, child string, fresh Budget, 
 		Time:             carriedTime,
 		CacheAffinity:    cacheAffinityForContinuation(parentSt, child, parentSt.Reason),
 		ResetTransaction: tx,
+		// The throughput envelope is a lineage contract like Time and the spend
+		// ceiling: the floor AND its accumulated observation window carry onto the
+		// child (#2762), so a hidden context reset cannot launder a session that
+		// has been running below its floor back to a fresh grace window.
+		Throughput: parentSt.Throughput,
 		// LastActive is a lineage carry like Time/Generation above: the child inherits the
 		// parent's dormancy stamp, monotonically advanced to now (the reset IS activity), so
 		// a hidden context reset neither zeroes the how-long-dormant clock nor runs it
