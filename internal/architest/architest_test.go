@@ -74,6 +74,7 @@ var tier = map[string]int{
 	"cachevalueledger":     1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"cacheprice":           1, // the ONE source of truth for the provider prompt-cache price multipliers (read 0.1x / write 1.25x / 2.0x): a pure leaf gateway(4) and resume(1) read (and the agent(4) fire gate is test-pinned to) so an identical cached token is priced identically (#2798). Imports nothing internal, off the hot path.
 	"gatewayusageledger":   1, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
+	"skillvalue":           1, // durable, append-only per-skill outcome-value ledger (#2873) read by `fak skill value report`; JSONL persistence via jsonlledger(1), imports nothing else internal, off the hot path.
 	"benchcli":             1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
 	"benchids":             1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
 	"benchscore":           1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
