@@ -1134,12 +1134,12 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	rec := leaseref.Record{ID: id, TreeGlobs: recTree, Holder: holder, TTLSeconds: int64(ttlS)}
 	written, verdict, err := store.AcquireFenced(context.Background(), rec, now)
 	if err != nil {
-		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree}
+		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
 	if verdict.OK {
-		return map[string]any{"acquired": true, "refused": false, "id": id, "holder": holder, "generation": written.Generation, "tree": tree}
+		return map[string]any{"acquired": true, "refused": false, "id": id, "holder": holder, "generation": written.Generation, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
-	return map[string]any{"acquired": false, "refused": true, "id": id, "holder": holder, "reason": string(verdict.Reason), "detail": verdict.Detail, "tree": tree}
+	return map[string]any{"acquired": false, "refused": true, "id": id, "holder": holder, "reason": string(verdict.Reason), "detail": verdict.Detail, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 }
 
 func dispatchLeaseHolder() string {

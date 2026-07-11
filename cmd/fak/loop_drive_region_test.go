@@ -446,3 +446,52 @@ func TestDispatchAcquireRecordsDecidedTree(t *testing.T) {
 		t.Fatalf("recorded tree = %v, want the docs lane's canonical tree", got)
 	}
 }
+
+// TestDispatchLaneLeaseStructuredFields pins #4322: every acquireDispatchLaneLease
+// result — acquired OR refused — carries the canonical lane, its kind, and its
+// serialization mode as STORED fields, so the refusal ledger's per-lane collision
+// rate and its lease-vs-WIP split are computable straight from loops.jsonl without
+// regex-scraping the lane out of the summary prose. Additive: the fields sit
+// alongside the existing lease-map keys, never replacing one.
+func TestDispatchLaneLeaseStructuredFields(t *testing.T) {
+	dir := initRegionTestRepo(t)
+	t.Setenv("FAK_LEASE_OWNER", "owner-a")
+
+	// A shared lane, acquired free: the fields describe the requested lane, and
+	// the kind is exactly leaseref's arbiter projection (a tree-scoped cluster
+	// lease) — the same constant the read side stamps, so the two cannot drift.
+	acq := acquireDispatchLaneLease(dir, "resolve-docs", "docs", []string{"docs/**"}, 600, "")
+	if got, _ := acq["acquired"].(bool); !got {
+		t.Fatalf("free docs lane must acquire, got %+v", acq)
+	}
+	if acq["lane"] != "docs" {
+		t.Fatalf("lane = %v, want docs", acq["lane"])
+	}
+	if acq["lane_kind"] != leaseref.ArbiterLaneKind {
+		t.Fatalf("lane_kind = %v, want %q", acq["lane_kind"], leaseref.ArbiterLaneKind)
+	}
+	if acq["mode"] != "shared" {
+		t.Fatalf("mode = %v, want shared (docs is a concurrent lane)", acq["mode"])
+	}
+
+	// A same-lane refusal carries the IDENTICAL structured fields: the analysis
+	// reads .lease.lane, never the summary prose. This is the LANE_LEASE_HELD
+	// event whose per-lane rate #4322 exists to make exactly computable.
+	ref := acquireDispatchLaneLease(dir, "resolve-docs-2", "docs", []string{"docs/**"}, 600, "")
+	if refused, _ := ref["refused"].(bool); !refused {
+		t.Fatalf("second docs claim must refuse on the live lease, got %+v", ref)
+	}
+	if ref["lane"] != "docs" || ref["lane_kind"] != leaseref.ArbiterLaneKind || ref["mode"] != "shared" {
+		t.Fatalf("refusal must carry structured lane fields, got lane=%v kind=%v mode=%v", ref["lane"], ref["lane_kind"], ref["mode"])
+	}
+
+	// An exclusive lane reports mode=exclusive regardless of the admit outcome —
+	// mode is a property of the requested lane's taxonomy, not of the decision.
+	exc := acquireDispatchLaneLease(dir, "release-cut", "release", []string{"VERSION"}, 600, "")
+	if exc["lane"] != "release" {
+		t.Fatalf("lane = %v, want release", exc["lane"])
+	}
+	if exc["mode"] != "exclusive" {
+		t.Fatalf("mode = %v, want exclusive (release is an exclusive lane)", exc["mode"])
+	}
+}
