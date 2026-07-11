@@ -124,6 +124,35 @@ func TestDecideEmptyTreeCollidesConservatively(t *testing.T) {
 	}
 }
 
+func TestDecideReadOnlyRequestAdmitsAgainstEverything(t *testing.T) {
+	// A read-only request writes NOTHING (a provably empty write footprint), distinct from the
+	// tree-less unknown-blast-radius case: admitted against a live lease it would otherwise
+	// collide with on every rung — an empty region, the same named lane, an exclusive lane.
+	live := []Lease{{ID: "resolve-gateway", Holder: "peer", Lane: "gateway", Tree: []string{"internal/gateway/**"}}}
+	for _, req := range []Request{
+		{Actor: "me", ReadOnly: true},                  // empty region — would conservatively collide
+		{Actor: "me", Lane: "gateway", ReadOnly: true}, // same named lane — would serialize
+		{Actor: "me", Lane: "release", ReadOnly: true}, // exclusive lane requested — would run alone
+	} {
+		if dec := Decide(req, live, testTaxonomy()); !dec.Admit {
+			t.Fatalf("a read-only request must admit, got %+v for req %+v", dec, req)
+		}
+	}
+}
+
+func TestDecideReadOnlyLeaseBlocksNothing(t *testing.T) {
+	// A read-only live lease holds nothing writable, so it blocks no region — not even a live
+	// lease sitting on an exclusive lane, which otherwise blocks every new region.
+	dec := Decide(
+		Request{Actor: "me", Lane: "gateway", Tree: []string{"internal/gateway/http.go"}},
+		[]Lease{{ID: "resolve-release", Holder: "peer", Lane: "release", Tree: []string{"VERSION"}, ReadOnly: true}},
+		testTaxonomy(),
+	)
+	if !dec.Admit {
+		t.Fatalf("a request must admit against a read-only live lease, got %+v", dec)
+	}
+}
+
 func TestResolveTreeUsesLaneCanonicalTree(t *testing.T) {
 	tree := ResolveTree(Request{Lane: "docs"}, testTaxonomy())
 	if len(tree) != 2 || tree[0] != "docs/**" {

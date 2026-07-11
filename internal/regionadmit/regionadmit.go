@@ -53,6 +53,13 @@ type Request struct {
 	Lane   string
 	Tree   []string
 	SelfID string
+	// ReadOnly declares the region is a provably empty WRITE footprint — the caller writes
+	// NOTHING. It is the third state distinct from a declared tree (known blast radius) and an
+	// ABSENT tree (UNKNOWN blast radius, which still collides conservatively via dispatchorder
+	// geometry). A read-only request is admitted against every live lease, even an exclusive
+	// lane, because a pure read cannot clobber a writer nor be clobbered by one. Default false
+	// keeps every existing caller's decision byte-identical.
+	ReadOnly bool
 }
 
 // Lease is the projection of one live lease the decision folds — any source
@@ -64,6 +71,10 @@ type Lease struct {
 	Holder string
 	Lane   string
 	Tree   []string
+	// ReadOnly reports the live lease itself writes NOTHING (a held pure read). It blocks no
+	// new region: a read-only holder cannot be clobbered, so nothing needs to serialize behind
+	// it — including an exclusive-lane request. Default false leaves existing leases blocking.
+	ReadOnly bool
 }
 
 // Decision is the admission verdict. A refusal carries the closed reason
@@ -218,9 +229,21 @@ func globPrefix(g string) string {
 // A lease whose ID equals req.SelfID is the caller's own and never conflicts.
 func Decide(req Request, live []Lease, tax Taxonomy) Decision {
 	tree := ResolveTree(req, tax)
+	// A provably read-only request writes nothing and contends with nothing — admitted against
+	// every live lease, even an exclusive one, ABOVE the empty-tree conservative-overlap rule.
+	// This is the tri-state opt-out: an ABSENT tree stays unknown blast radius (falls through
+	// and collides), a declared ReadOnly is an EMPTY write footprint (never collides).
+	if req.ReadOnly {
+		return Decision{Admit: true}
+	}
 	others := make([]Lease, 0, len(live))
 	for _, l := range live {
 		if req.SelfID != "" && l.ID == req.SelfID {
+			continue
+		}
+		// A read-only live lease holds nothing writable, so it blocks no region (not even an
+		// exclusive-lane request) — drop it before the exclusive/same-lane/geometry rungs.
+		if l.ReadOnly {
 			continue
 		}
 		others = append(others, l)
