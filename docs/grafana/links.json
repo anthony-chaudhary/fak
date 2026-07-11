@@ -43,6 +43,14 @@
       "source": "tools/grafana/dashboards/fak-guard-adjudication.json"
     },
     {
+      "title": "FAK Cache Health",
+      "uid": "fak-cache-health",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "cache health on one screen — WITNESSED KV-prefix reuse ratio + regime buckets (the cache cliff live), managed-cache TTL-upgrade & breakpoint-placement outcomes, OBSERVED provider cache-read/creation axes, tool-defer counts (#3645)",
+      "source": "tools/grafana/dashboards/fak-cache-health.json"
+    },
+    {
       "title": "FAK Cache Value — Roll-up & Ablation",
       "uid": "fak-cache-value-rollup",
       "category": "rollup",

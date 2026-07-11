@@ -16,6 +16,7 @@ Re-run after changing either metric set:
                                               # and dashboards/fak-startup-load.json
                                               # and dashboards/fak-guard-adjudication.json
                                               # and dashboards/fak-cache-value-rollup.json
+                                              # and dashboards/fak-cache-health.json
 
 The committed JSON is what Grafana provisions; this generator is the maintainable
 source. `METRICS` / `GATEWAY_METRICS` below are the contract —
@@ -32,6 +33,7 @@ OUT_DOGFOOD = os.path.join(HERE, "dashboards", "fak-dogfood-slow-requests.json")
 OUT_STARTUP = os.path.join(HERE, "dashboards", "fak-startup-load.json")
 OUT_GUARD = os.path.join(HERE, "dashboards", "fak-guard-adjudication.json")
 OUT_ROLLUP = os.path.join(HERE, "dashboards", "fak-cache-value-rollup.json")
+OUT_CACHEHEALTH = os.path.join(HERE, "dashboards", "fak-cache-health.json")
 
 DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
 
@@ -97,6 +99,22 @@ GUARD_METRICS = [
     "fak_gateway_inbound_tools_pruned_total",
     "fak_gateway_upstream_errors_total", "fak_gateway_upstream_retries_total",
     "fak_gateway_turns_saved_total",
+]
+
+# The cache-health view (#3645, under epic #3569): every family already emitted by
+# fak serve / fak guard /metrics (internal/gateway/metrics_render.go) — no new metric
+# is introduced. In-kernel KV-prefix reuse (WITNESSED) and the provider prompt-cache
+# read/write axes (OBSERVED, relayed) are distinct signals and never double-count.
+CACHE_HEALTH_METRICS = [
+    "fak_gateway_up",
+    "fak_gateway_kv_prefix_turns_total", "fak_gateway_kv_prefix_prompt_tokens_total",
+    "fak_gateway_kv_prefix_reused_tokens_total",
+    "fak_gateway_kv_prefix_turns_by_regime_total", "fak_gateway_kv_prefix_reuse_ratio",
+    "fak_gateway_cache_ttl_upgrade_total",
+    "fak_gateway_cache_breakpoint_placement_total",
+    "fak_gateway_inference_cached_prompt_tokens_total",
+    "fak_vcache_cache_creation_tokens_total",
+    "fak_gateway_tool_defer_cold_total", "fak_gateway_tool_defer_turns_total",
 ]
 
 _id = [0]
@@ -1234,11 +1252,176 @@ def build_cache_ablation_rollup():
     }
 
 
+# Cache-health first-run note (#3645). Same posture as the other notes: markdown
+# carries no PromQL, so the explanation renders even while every counter is 0.
+CACHE_HEALTH_NOTE = (
+    "**One screen: is the cache healthy right now?** Every panel reads the live "
+    "`fak serve` / `fak guard` `/metrics` (scrape job `fak_gateway`) — the families "
+    "already emitted by `internal/gateway/metrics_render.go`, no new metric.\n\n"
+    "Two distinct signals, never double-counted: the **KV-prefix family** "
+    "(`fak_gateway_kv_prefix_*`) is the WITNESSED in-kernel RadixAttention prefix "
+    "match — it stays 0 on a pure proxy workload (no in-kernel model). The "
+    "**provider axes** (`fak_gateway_inference_cached_prompt_tokens_total` read, "
+    "`fak_vcache_cache_creation_tokens_total` write) are OBSERVED provider-relayed "
+    "usage. The **authoring outcomes** (`_cache_ttl_upgrade_total`, "
+    "`_cache_breakpoint_placement_total`) count what fak's managed-cache transform "
+    "did; they stay 0 until `--managed-cache on` traffic flows. **Tool-defer** "
+    "counters stay 0 unless `--defer-cold-tools` is enabled (off by default)."
+)
+
+
+def build_cache_health():
+    """The cache-health board (#3645, epic #3569): the six cache signals on one
+    screen — KV-prefix reuse ratio, regime buckets (the cache-cliff distribution),
+    managed-cache TTL-upgrade and breakpoint-placement outcomes, the provider
+    cache-read/creation token axes, and the cold-tool deferral counters. Built
+    entirely from families fak serve / fak guard already emit (scrape job
+    `fak_gateway`); its authoring twin for $-value questions is the cache-value
+    roll-up (uid fak-cache-value-rollup), which folds ledgers, not live counters."""
+    panels = []
+
+    UP_MAP = [{"type": "value", "options": {
+        "0": {"text": "DOWN", "color": "red", "index": 0},
+        "1": {"text": "UP", "color": "green", "index": 1}}}]
+
+    panels.append(row("Cache health at a glance", 0))
+    panels.append(text_panel("How to read this board", CACHE_HEALTH_NOTE, 0, 1, w=24, h=5))
+    panels.append(stat("Scrape", 'up{job="fak_gateway"}', 0, 6, thresholds=UP_TH,
+                       mappings=UP_MAP,
+                       desc="Prometheus scrape health for fak serve / fak guard /metrics."))
+    panels.append(stat("KV-prefix reuse ratio", "fak_gateway_kv_prefix_reuse_ratio", 4, 6,
+                       unit="percentunit", thresholds=CACHE_TH,
+                       desc="WITNESSED realized in-kernel cache hit: reused / prompt "
+                            "tokens across served turns. Climbs toward ~1 in the frozen "
+                            "append-only regime; 0 on a pure proxy workload."))
+    panels.append(stat("In-kernel turns",
+                       "fak_gateway_kv_prefix_turns_total or vector(0)", 8, 6,
+                       desc="Turns observed by the KV-prefix tap — the sample size "
+                            "behind the reuse ratio."))
+    panels.append(stat("Reused tokens",
+                       "fak_gateway_kv_prefix_reused_tokens_total or vector(0)", 12, 6,
+                       desc="Prompt tokens served from the cached KV prefix — prefill "
+                            "work the kernel did NOT redo."))
+    panels.append(stat("Provider cache-read (tok)",
+                       "fak_gateway_inference_cached_prompt_tokens_total or vector(0)",
+                       16, 6,
+                       desc="OBSERVED: prompt tokens the provider served from its own "
+                            "cache (cache_read), relayed verbatim."))
+    panels.append(stat("Provider cache-write (tok)",
+                       "fak_vcache_cache_creation_tokens_total or vector(0)", 20, 6,
+                       desc="OBSERVED: cache_creation tokens — the write premium the "
+                            "reads must repay. Net saving = read rebate minus this."))
+
+    panels.append(row("Reuse ratio — the realized cache hit", 10))
+    panels.append(timeseries(
+        "KV-prefix reuse ratio",
+        [("fak_gateway_kv_prefix_reuse_ratio", "session (cumulative)"),
+         ("rate(fak_gateway_kv_prefix_reused_tokens_total[5m]) / "
+          "rate(fak_gateway_kv_prefix_prompt_tokens_total[5m])", "5m window")],
+        0, 11, w=12, h=8, unit="percentunit",
+        desc="Cumulative and windowed reuse ratio. A falling 5m window while the "
+             "session line holds is the first sign of leaving the frozen regime."))
+    panels.append(timeseries(
+        "Prefill tokens — total vs reused",
+        [("rate(fak_gateway_kv_prefix_prompt_tokens_total[5m])", "prompt (prefill)"),
+         ("rate(fak_gateway_kv_prefix_reused_tokens_total[5m])", "reused from cache")],
+        12, 11, w=12, h=8,
+        desc="Token-rate view of the same hit: the gap between the lines is prefill "
+             "work actually redone."))
+
+    panels.append(row("Regime buckets — the cache-cliff distribution", 19))
+    panels.append(timeseries(
+        "Turns by reuse regime (rate)",
+        [("sum by (regime) (rate(fak_gateway_kv_prefix_turns_by_regime_total[5m]))",
+          "{{regime}}")],
+        0, 20, w=12, h=8,
+        desc="frozen: reuse >= 0.90 (append-only ceiling); partial: 0.10-0.90; cold: "
+             "< 0.10. Turns migrating frozen -> partial/cold is the cliff firing live."))
+    panels.append(bargauge(
+        "Turns by regime (session total)",
+        "sum by (regime) (fak_gateway_kv_prefix_turns_by_regime_total)", "{{regime}}",
+        12, 20, w=12, h=8,
+        desc="Cumulative regime mix this session. A healthy single-linear agent is "
+             "dominated by frozen turns after the first cold prefill."))
+
+    panels.append(row("Managed-cache authoring — TTL upgrades & breakpoint placement", 28))
+    panels.append(bargauge(
+        "TTL-upgrade outcomes",
+        "sum by (outcome) (fak_gateway_cache_ttl_upgrade_total)", "{{outcome}}",
+        0, 29, w=12, h=8,
+        desc="What fak's managed-cache transform did with the TTL upgrade per turn: "
+             "upgraded = a longer-TTL breakpoint authored; the rest are structured "
+             "skip reasons (no_stable_breakpoint, volatile_head, ...). All 0 until "
+             "--managed-cache on traffic flows."))
+    panels.append(bargauge(
+        "Breakpoint-placement outcomes",
+        "sum by (outcome) (fak_gateway_cache_breakpoint_placement_total)", "{{outcome}}",
+        12, 29, w=12, h=8,
+        desc="Where the cache_control breakpoint landed per turn: placed = fak set "
+             "one; already_set = the harness's own breakpoint stood; the rest are "
+             "skip reasons (no_stable_head, ...)."))
+
+    panels.append(row("Provider cache — read vs write", 37))
+    panels.append(timeseries(
+        "Provider cache token rates (OBSERVED)",
+        [("rate(fak_gateway_inference_cached_prompt_tokens_total[5m])",
+          "cache-read (rebate)"),
+         ("rate(fak_vcache_cache_creation_tokens_total[5m])",
+          "cache-creation (write premium)")],
+        0, 38, w=24, h=8,
+        desc="The provider's own cache economics, relayed: reads must outpace writes "
+             "for the cache to pay. A write spike with flat reads is a burst — a "
+             "prefix that keeps getting re-authored instead of re-used."))
+
+    panels.append(row("Tool defer — the cold-tool floor lever", 46))
+    panels.append(stat("Cold tool defs deferred",
+                       "fak_gateway_tool_defer_cold_total or vector(0)", 0, 47, w=6, h=8,
+                       desc="WITNESSED: cold tool definitions marked defer_loading on "
+                            "the outbound body (--defer-cold-tools, off by default)."))
+    panels.append(stat("Turns with a deferral",
+                       "fak_gateway_tool_defer_turns_total or vector(0)", 6, 47, w=6, h=8,
+                       desc="Turns on which the lever fired (>=1 cold def deferred and "
+                            "a tool_search_tool injected)."))
+    panels.append(timeseries(
+        "Tool-defer rate",
+        [("rate(fak_gateway_tool_defer_cold_total[5m])", "cold defs deferred"),
+         ("rate(fak_gateway_tool_defer_turns_total[5m])", "turns with a deferral")],
+        12, 47, w=12, h=8,
+        desc="Deferral activity over time. Flat 0 with the lever on means every "
+             "advertised tool was hot."))
+
+    return {
+        "uid": "fak-cache-health",
+        "title": "FAK Cache Health",
+        "description": "Cache health on one screen (#3645, epic #3569): WITNESSED "
+                       "in-kernel KV-prefix reuse ratio and regime buckets (the cache "
+                       "cliff live), managed-cache TTL-upgrade and breakpoint-placement "
+                       "outcomes, OBSERVED provider cache-read/creation token axes, and "
+                       "the cold-tool deferral counters. Source: fak serve / fak guard "
+                       "/metrics (scrape job fak_gateway). $-value questions live on "
+                       "the cache-value roll-up instead.",
+        "tags": ["fak", "cache", "prompt-caching", "observability"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
 def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     for path, dash in ((OUT, build()), (OUT_GATEWAY, build_gateway()),
                        (OUT_DOGFOOD, build_dogfood()), (OUT_STARTUP, build_startup()),
-                       (OUT_GUARD, build_guard()), (OUT_ROLLUP, build_cache_ablation_rollup())):
+                       (OUT_GUARD, build_guard()), (OUT_ROLLUP, build_cache_ablation_rollup()),
+                       (OUT_CACHEHEALTH, build_cache_health())):
         # newline="\n" pins LF so a Windows regen is byte-identical to the committed
         # (LF) dashboards instead of churning every line to CRLF — the tree stays clean
         # for a reviewer who re-runs the generator.
