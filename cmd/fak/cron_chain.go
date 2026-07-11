@@ -184,6 +184,65 @@ func runCronPrompt(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// runCronChain reads the A→B handoff edges back OUT of the ledger, so an operator
+// can traverse a chained pipeline after the fact — the readback half of the
+// `context_from` audit trail (#2888). runCronPrompt WRITES `fak-cron-edge/1` rows;
+// without a reader they are write-only and the "auditable end-to-end" claim is only
+// half-kept. This prints each recorded handoff as `FROM@slot -> TO@slot (consumed …)`
+// (or --json for a machine read), optionally filtered to the edges touching --job
+// (either side). Exit 0 = printed (empty ledger is a valid empty chain); exit 2 =
+// usage/IO error.
+func runCronChain(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("cron chain", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", "", "witness ledger path, JSONL (required)")
+	jobFilter := fs.String("job", "", "restrict to edges touching this job id (as source OR consumer)")
+	asJSON := fs.Bool("json", false, "emit the edges as JSON instead of a table")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*ledger) == "" {
+		fmt.Fprintln(stderr, "fak cron chain: --ledger is required")
+		return 2
+	}
+	edges, err := cronReadEdges(*ledger)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak cron chain: read ledger: %v\n", err)
+		return 2
+	}
+	if jf := strings.TrimSpace(*jobFilter); jf != "" {
+		kept := edges[:0:0]
+		for _, e := range edges {
+			if e.FromJob == jf || e.ToJob == jf {
+				kept = append(kept, e)
+			}
+		}
+		edges = kept
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if edges == nil {
+			edges = []cronEdgeRecord{} // encode an empty chain as [], never null
+		}
+		if err := enc.Encode(edges); err != nil {
+			fmt.Fprintf(stderr, "fak cron chain: encode: %v\n", err)
+			return 2
+		}
+		return 0
+	}
+	if len(edges) == 0 {
+		fmt.Fprintln(stdout, "no cron chain edges recorded")
+		return 0
+	}
+	for _, e := range edges {
+		fmt.Fprintf(stdout, "%s@%s -> %s@%s  (consumed %s)\n",
+			e.FromJob, e.FromSlot, e.ToJob, e.ToSlot, e.ConsumedAt)
+	}
+	return 0
+}
+
 // cronObservedBlock wraps an injected input in an OBSERVED provenance frame so a
 // downstream reader (human or agent) can tell tool-collected data apart from
 // agent-authored text. The frame names the origin job/slot and the producing

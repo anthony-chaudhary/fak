@@ -37,6 +37,8 @@ func runCron(stdout, stderr io.Writer, argv []string) int {
 		return runCronAudit(stdout, stderr, argv[1:])
 	case "prompt":
 		return runCronPrompt(stdout, stderr, argv[1:])
+	case "chain":
+		return runCronChain(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		cronUsage(stdout)
 		return 0
@@ -320,6 +322,7 @@ func cronUsage(w io.Writer) {
   fak cron audit  --ledger FILE [--job ID] [--json]
   fak cron prompt --job ID --ledger FILE [--script 'CMD'] [--context-from A,B]
                   [--base 'PROMPT'] [--interval DUR] [--at RFC3339] [--slot KEY]
+  fak cron chain  --ledger FILE [--job ID] [--json]
 
 Fire is the FIRE WITNESS (#2886): it records each fire in the ledger under a
 (job, slot) compare-and-set guarded by a dup-tick lock, so a duplicate or
@@ -336,6 +339,12 @@ prompt, recording each A→B handoff as a `+"`fak-cron-edge/1`"+` ledger edge. A
 context source with no witnessed output is refused (exit 2) — B consumes only
 what A provably produced. The assembled prompt (OBSERVED blocks + --base) prints
 to stdout for a dispatcher to hand the agent.
+
+Chain reads the `+"`fak-cron-edge/1`"+` handoffs back OUT of the ledger so an operator
+can traverse a chained pipeline after the fact — each row prints as
+`+"`FROM@slot -> TO@slot (consumed …)`"+` (--json for machine read, --job to filter to
+the edges touching one job). It is the readback half of the `+"`context-from`"+` audit
+trail: prompt writes the edges, chain makes them queryable evidence.
 
 Emit renders ONE OS scheduler unit. By default its command is `+"`fak loop run --loop <id> ...`"+`
 — fak owns the semantics (overlap-lock via the ledger, missed-run policy) and the OS

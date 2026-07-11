@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,6 +109,95 @@ func TestCronPromptRefusesUnwitnessedContext(t *testing.T) {
 	}
 	if len(edges) != 0 {
 		t.Fatalf("refused chain still recorded %d edge(s): %+v", len(edges), edges)
+	}
+}
+
+// TestCronChainReadsEdgesBack is the readback contract: after a two-job chain
+// records an A→B edge, `fak cron chain` surfaces that same edge as operator-readable
+// evidence — in the text table, as JSON, and under a --job filter. This closes the
+// loop the audit goal needs: prompt WRITES the edge, chain makes it queryable, so a
+// chained pipeline is traversable after the fact rather than write-only.
+func TestCronChainReadsEdgesBack(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "chain.jsonl")
+	const jobA, jobB = "collect-a", "summarize-b"
+	const slotA, slotB = "2026-07-10T00:00:00Z", "2026-07-10T01:00:00Z"
+
+	// Build the A→B edge exactly the way the chain contract does.
+	var sink bytes.Buffer
+	if code := runCron(&sink, &sink, []string{
+		"prompt", "--job", jobA, "--ledger", ledger, "--slot", slotA,
+		"--script", "echo " + witnessMarker,
+	}); code != 0 {
+		t.Fatalf("job A: exit %d; out=%q", code, sink.String())
+	}
+	sink.Reset()
+	if code := runCron(&sink, &sink, []string{
+		"prompt", "--job", jobB, "--ledger", ledger, "--slot", slotB,
+		"--context-from", jobA, "--base", "summarize the input",
+	}); code != 0 {
+		t.Fatalf("job B: exit %d; out=%q", code, sink.String())
+	}
+
+	// Text readout: the A→B handoff must be visible with both endpoints and the arrow.
+	var out, errb bytes.Buffer
+	if code := runCron(&out, &errb, []string{"chain", "--ledger", ledger}); code != 0 {
+		t.Fatalf("cron chain: exit %d, want 0; stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{jobA, slotA, jobB, slotB, "->"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("chain readout missing %q:\n%s", want, got)
+		}
+	}
+
+	// JSON readout: must decode into the same edge, not prose.
+	out.Reset()
+	errb.Reset()
+	if code := runCron(&out, &errb, []string{"chain", "--ledger", ledger, "--json"}); code != 0 {
+		t.Fatalf("cron chain --json: exit %d, want 0; stderr=%q", code, errb.String())
+	}
+	var edges []cronEdgeRecord
+	if err := json.Unmarshal(out.Bytes(), &edges); err != nil {
+		t.Fatalf("chain --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	if len(edges) != 1 || edges[0].FromJob != jobA || edges[0].ToJob != jobB {
+		t.Fatalf("chain --json edges = %+v, want one %s->%s edge", edges, jobA, jobB)
+	}
+
+	// --job filter keeps the edge that touches the named job and drops the rest.
+	out.Reset()
+	errb.Reset()
+	if code := runCron(&out, &errb, []string{"chain", "--ledger", ledger, "--job", jobB}); code != 0 {
+		t.Fatalf("cron chain --job: exit %d, want 0; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), jobB) {
+		t.Fatalf("chain --job %s dropped the touching edge:\n%s", jobB, out.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runCron(&out, &errb, []string{"chain", "--ledger", ledger, "--job", "unrelated"}); code != 0 {
+		t.Fatalf("cron chain --job unrelated: exit %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "no cron chain edges recorded") {
+		t.Fatalf("chain --job unrelated should report an empty chain:\n%s", out.String())
+	}
+}
+
+// TestCronChainEmptyAndUsage: an empty ledger is a valid empty chain (exit 0), and
+// a missing --ledger is a usage error (exit 2).
+func TestCronChainEmptyAndUsage(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "none.jsonl")
+	var out, errb bytes.Buffer
+	if code := runCron(&out, &errb, []string{"chain", "--ledger", empty}); code != 0 {
+		t.Fatalf("empty ledger: exit %d, want 0; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "no cron chain edges recorded") {
+		t.Fatalf("empty ledger readout = %q, want empty-chain notice", out.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runCron(&out, &errb, []string{"chain"}); code != 2 {
+		t.Fatalf("chain without --ledger: exit %d, want 2", code)
 	}
 }
 
