@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="visuals/brand/fak-logo.svg">
+    <img src="visuals/brand/fak-logo-ink.svg" alt="fak logo" width="320">
+  </picture>
+</p>
+
 # fak — the Fused Agent Kernel
 
 **Same agent, smaller bill. Wrap Claude Code, Codex, or Cursor in one command — cheaper, self-resuming, and checked on every tool call.**
@@ -90,5 +97,12 @@ Going deeper starts at the [front-page overflow](docs/README-legacy.md) — why 
 | Every feature, by subsystem, with honest status (shipped / simulated / stub) | [docs/supported/features.md](docs/supported/features.md) |
 | Benchmark authority · gallery · honesty ledger | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) · [BENCHMARK-GALLERY.md](BENCHMARK-GALLERY.md) · [CLAIMS.md](CLAIMS.md) |
 | Machine-readable map | [llms.txt](llms.txt) |
+
+---
+
+<p align="center">
+  <strong>When in doubt, <code>fak</code> it out.</strong><br>
+  <sub><em>Once you go fak, you never go back · Give a fak — ship on trunk · Don't take our word for it, take a fak's</em></sub>
+</p>
 
 License: [Apache-2.0](LICENSE).
