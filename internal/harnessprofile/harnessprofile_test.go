@@ -28,9 +28,12 @@ func TestLookupReproducesGuardDetectTable(t *testing.T) {
 		{"opencode.cmd", WireOpenAI, true},
 		{"aider", WireOpenAI, true},
 		{"hermes", WireOpenAI, true},
-		{"vim", "", false},                // unrecognized -> miss (caller falls back to anthropic)
-		{"some-unknown-agent", "", false}, // unrecognized -> miss
-		{"", "", false},                   // empty -> miss
+		{"pi", WireAnthropic, true},                // Pi (earendil-works) speaks Anthropic Messages
+		{"pi.exe", WireAnthropic, true},            // Windows launcher
+		{"/usr/local/bin/pi", WireAnthropic, true}, // absolute POSIX path
+		{"vim", "", false},                         // unrecognized -> miss (caller falls back to anthropic)
+		{"some-unknown-agent", "", false},          // unrecognized -> miss
+		{"", "", false},                            // empty -> miss
 	}
 	for _, tc := range cases {
 		p, ok := Lookup(tc.command)
@@ -84,6 +87,7 @@ func TestRepointEncodesTodaysWiring(t *testing.T) {
 		"claude":         {RepointEnv, RepointSettingsFile},
 		"codex":          {RepointEnv, RepointCLIConfig},
 		"openai-generic": {RepointEnv},
+		"pi":             {RepointEnv, RepointExtension},
 	}
 	for _, p := range Profiles() {
 		got := p.Repoint
@@ -115,7 +119,7 @@ func TestClosedVocabulariesValidate(t *testing.T) {
 	if Wire("groq").Valid() {
 		t.Errorf("unknown wire should not be Valid")
 	}
-	for _, m := range []RepointMechanism{RepointEnv, RepointCLIConfig, RepointSettingsFile} {
+	for _, m := range []RepointMechanism{RepointEnv, RepointCLIConfig, RepointSettingsFile, RepointExtension} {
 		if !m.Valid() {
 			t.Errorf("built-in mechanism %q should be Valid", m)
 		}
