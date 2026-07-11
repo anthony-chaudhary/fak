@@ -32,16 +32,14 @@ func TestCrossAuditSpineRejectsSameFamilyAndBindsReceipt(t *testing.T) {
 	})
 	reviewer := IssueAuditReviewerFunc(func(_ context.Context, req IssueAuditReviewRequest) (IssueAuditReviewResult, error) {
 		reviewCalls++
-		if req.SubjectDigest == "" || req.PromptDigest == "" || req.PromptVersion != CrossAuditPromptVersion {
+		if req.SubjectDigest == "" || req.BundleDigest == "" || req.PromptDigest == "" || req.PromptVersion != CrossAuditPromptVersion {
 			t.Fatalf("review request lost bound prompt/subject fields: %+v", req)
 		}
-		if req.PromptDigest != hashString(req.Prompt) {
-			t.Fatalf("prompt digest %q does not bind exact sent payload %q", req.PromptDigest, hashString(req.Prompt))
+		if err := req.Verify(); err != nil {
+			t.Fatalf("review request channel binding: %v", err)
 		}
-		for _, want := range []string{CrossAuditSystemPrompt, "BEGIN_UNTRUSTED_ISSUE_BODY", "BEGIN_UNTRUSTED_DIFF", "subject_digest:"} {
-			if !strings.Contains(req.Prompt, want) {
-				t.Fatalf("review prompt missing %q", want)
-			}
+		if req.TrustedInstruction.Role != IssueAuditTrustedRole || req.UntrustedEvidence.Role != IssueAuditUntrustedRole {
+			t.Fatalf("review request channels = %+v / %+v", req.TrustedInstruction, req.UntrustedEvidence)
 		}
 		return IssueAuditReviewResult{
 			Verdict:      CrossAuditPass,
@@ -366,6 +364,7 @@ func TestCrossAuditSpineClassifiesReviewerFailuresWithoutFailOpen(t *testing.T) 
 }
 
 func crossAuditFixtureEvidence() IssueAuditEvidence {
+	patch := "diff --git a/thing.go b/thing.go\n+fixed\n"
 	return IssueAuditEvidence{
 		IssueNumber: 42,
 		IssueURL:    "https://github.com/example/repo/issues/42",
@@ -374,8 +373,15 @@ func crossAuditFixtureEvidence() IssueAuditEvidence {
 		State:       "CLOSED",
 		ClosedAt:    "2026-07-10T00:00:00Z",
 		CommitSHA:   "def456",
-		Diff:        "diff --git a/thing.go b/thing.go\n+fixed\n",
-		Evidence:    []EvidenceRef{{Kind: "issue-event", Ref: "referenced:def456"}},
+		Diff:        patch,
+		ClosingCommits: []IssueAuditClosingCommit{{
+			SHA: "def456", FirstParentSHA: "abc123", TreeOID: "tree-def456", FirstParentTreeOID: "tree-abc123",
+			Patch: patch, PatchSHA256: IssueAuditContentDigest(patch), ChangedPaths: []string{"thing.go", "thing_test.go"},
+		}},
+		Tests:    []EvidenceRef{{Kind: "test-path", Ref: "thing_test.go"}},
+		CI:       []EvidenceRef{{Kind: "check", Ref: "ci/unit"}},
+		DOS:      []EvidenceRef{{Kind: "dos-commit-audit", Ref: "commit:def456"}},
+		Evidence: []EvidenceRef{{Kind: "issue-event", Ref: "referenced:def456"}},
 	}
 }
 

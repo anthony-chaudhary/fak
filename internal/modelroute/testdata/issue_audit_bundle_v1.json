@@ -1,0 +1,206 @@
+{
+  "schema": "fak-issue-audit-bundle/v1",
+  "channel": "UNTRUSTED_DATA",
+  "complete": true,
+  "issue": {
+    "number": 3849,
+    "url": "https://github.com/anthony-chaudhary/fak/issues/3849",
+    "state": "CLOSED",
+    "closed_at": "2026-07-10T03:00:00Z",
+    "title_blob_id": "issue-title",
+    "body_blob_id": "issue-body",
+    "comments": [
+      {
+        "id": "comment-1",
+        "url": "https://example/comments/1",
+        "author": "\u003cREDACTED_GITHUB_USER\u003e",
+        "created_at": "2026-07-10T01:00:00Z",
+        "body_blob_id": "comment-0001-comment-1"
+      },
+      {
+        "id": "comment-2",
+        "url": "https://example/comments/2",
+        "author": "\u003cREDACTED_GITHUB_USER\u003e",
+        "created_at": "2026-07-10T02:00:00Z",
+        "body_blob_id": "comment-0002-comment-2"
+      }
+    ]
+  },
+  "contract": {
+    "done_condition_blob_id": "contract-done-condition",
+    "witness_blob_id": "contract-witness",
+    "acceptance_gate_blob_id": "contract-acceptance-gate"
+  },
+  "closure": {
+    "primary_commit": "abcdef1234567890",
+    "commits": [
+      {
+        "sha": "abcdef1234567890",
+        "first_parent_sha": "1234567890abcdef",
+        "tree_oid": "tree-after-abcdef",
+        "first_parent_tree_oid": "tree-before-123456",
+        "patch_blob_id": "closing-patch-0001",
+        "patch_sha256": "sha256:531928442b01bd906ef245c4e17cf1a9c74f8e7aa620d8e237c2e1ce4b26bb8b",
+        "changed_paths": [
+          "internal/modelroute/a.go",
+          "internal/modelroute/a_test.go",
+          "internal/modelroute/testdata/result.json"
+        ]
+      }
+    ]
+  },
+  "evidence": {
+    "tests": [
+      {
+        "kind": "test-path",
+        "ref": "internal/modelroute/a_test.go"
+      }
+    ],
+    "ci": [
+      {
+        "kind": "github-check",
+        "ref": "unit / test"
+      }
+    ],
+    "dos": [
+      {
+        "kind": "dos-commit-audit",
+        "ref": "commit:abcdef1234567890"
+      }
+    ],
+    "artifacts": [
+      {
+        "kind": "artifact-path",
+        "ref": "internal/modelroute/testdata/result.json",
+        "sha256": "sha256:c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c"
+      }
+    ],
+    "prior_findings": [
+      {
+        "kind": "issue-comment-finding",
+        "ref": "https://example/comments/2"
+      }
+    ],
+    "other": [
+      {
+        "kind": "github-closure",
+        "ref": "github-event:closed:abcdef1234567890"
+      }
+    ]
+  },
+  "blobs": [
+    {
+      "id": "closing-patch-0001",
+      "kind": "first-parent-patch",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:531928442b01bd906ef245c4e17cf1a9c74f8e7aa620d8e237c2e1ce4b26bb8b",
+      "content_sha256": "sha256:531928442b01bd906ef245c4e17cf1a9c74f8e7aa620d8e237c2e1ce4b26bb8b",
+      "original_bytes": 171,
+      "included_bytes": 171,
+      "content": "diff --git a/internal/modelroute/a.go b/internal/modelroute/a.go\nindex 111..222 100644\n--- a/internal/modelroute/a.go\n+++ b/internal/modelroute/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+    },
+    {
+      "id": "comment-0001-comment-1",
+      "kind": "issue-comment",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:e636a235d41369c1960048556c288d678d01aec7022e3d1f34399bf8e540fdd5",
+      "content_sha256": "sha256:e636a235d41369c1960048556c288d678d01aec7022e3d1f34399bf8e540fdd5",
+      "original_bytes": 25,
+      "included_bytes": 25,
+      "content": "closure evidence captured"
+    },
+    {
+      "id": "comment-0002-comment-2",
+      "kind": "issue-comment",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:a7d2c02bd07ca7f808ffde7b76feb466317c3e384952194058810cbade77b27d",
+      "content_sha256": "sha256:a7d2c02bd07ca7f808ffde7b76feb466317c3e384952194058810cbade77b27d",
+      "original_bytes": 51,
+      "included_bytes": 51,
+      "content": "[finding] prior audit requested exact patch binding"
+    },
+    {
+      "id": "contract-acceptance-gate",
+      "kind": "issue-contract",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:1c103c57c4d850ec96904e2d82ad5a51105482e955a92a76ae8ad206ff0e6cde",
+      "content_sha256": "sha256:1c103c57c4d850ec96904e2d82ad5a51105482e955a92a76ae8ad206ff0e6cde",
+      "original_bytes": 54,
+      "included_bytes": 54,
+      "content": "`fak buildcheck --vet ./internal/modelroute ./cmd/fak`"
+    },
+    {
+      "id": "contract-done-condition",
+      "kind": "issue-contract",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:50e109bc98930f1723f2df2f3f895824c7ff2eee263bdbede8fba1f1ce757d56",
+      "content_sha256": "sha256:50e109bc98930f1723f2df2f3f895824c7ff2eee263bdbede8fba1f1ce757d56",
+      "original_bytes": 63,
+      "included_bytes": 63,
+      "content": "Bundle metadata is byte stable and missing closure is explicit."
+    },
+    {
+      "id": "contract-witness",
+      "kind": "issue-contract",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:a7dac641a30805e163cfcab709fa88952b1ed2aecf88be9a35bf2e8c645c705a",
+      "content_sha256": "sha256:a7dac641a30805e163cfcab709fa88952b1ed2aecf88be9a35bf2e8c645c705a",
+      "original_bytes": 57,
+      "included_bytes": 57,
+      "content": "`go test ./internal/modelroute -run TestIssueAuditBundle`"
+    },
+    {
+      "id": "issue-body",
+      "kind": "issue-body",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:2d148aa1f48f89d0cdb6708cd6bf03e3463ba78c50afbb9783db1f4eb5395140",
+      "content_sha256": "sha256:2d148aa1f48f89d0cdb6708cd6bf03e3463ba78c50afbb9783db1f4eb5395140",
+      "original_bytes": 226,
+      "included_bytes": 226,
+      "content": "## Done condition\nBundle metadata is byte stable and missing closure is explicit.\n\n## Witness\n`go test ./internal/modelroute -run TestIssueAuditBundle`\n\n## Acceptance gate\n`fak buildcheck --vet ./internal/modelroute ./cmd/fak`"
+    },
+    {
+      "id": "issue-title",
+      "kind": "issue-title",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:706319183148209d32505088f619509c273811ee3a1d8da6d22d9bb3ef1c5707",
+      "content_sha256": "sha256:706319183148209d32505088f619509c273811ee3a1d8da6d22d9bb3ef1c5707",
+      "original_bytes": 50,
+      "included_bytes": 50,
+      "content": "assemble a hostile-data-safe issue evidence bundle"
+    }
+  ],
+  "manifest": {
+    "limits": {
+      "max_bundle_bytes": 524288,
+      "max_blob_bytes": 24576,
+      "max_content_bytes": 98304,
+      "max_comments": 32,
+      "max_changed_paths": 128,
+      "max_refs_per_kind": 32
+    },
+    "input_bytes": 697,
+    "included_bytes": 697,
+    "redactions": [
+      {
+        "blob_id": "comment:comment-1:author",
+        "rule": "github-comment-author",
+        "count": 1
+      },
+      {
+        "blob_id": "comment:comment-2:author",
+        "rule": "github-comment-author",
+        "count": 1
+      }
+    ]
+  },
+  "bundle_digest": "sha256:b517c39a776613561ea73de47d17080fbbd1d738250db0353d85bd353767510c"
+}

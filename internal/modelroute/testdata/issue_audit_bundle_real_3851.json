@@ -1,0 +1,189 @@
+{
+  "schema": "fak-issue-audit-bundle/v1",
+  "channel": "UNTRUSTED_DATA",
+  "complete": true,
+  "issue": {
+    "number": 3851,
+    "url": "https://github.com/anthony-chaudhary/fak/issues/3851",
+    "state": "CLOSED",
+    "closed_at": "2026-07-10T17:34:48Z",
+    "title_blob_id": "issue-title",
+    "body_blob_id": "issue-body",
+    "comments": [
+      {
+        "id": "IC_kwDOTBLA088AAAABJlLFYg",
+        "url": "https://github.com/anthony-chaudhary/fak/issues/3851#issuecomment-4937925986",
+        "author": "\u003cREDACTED_GITHUB_USER\u003e",
+        "created_at": "2026-07-10T17:34:47Z",
+        "body_blob_id": "comment-0001-ic_kwdotbla088aaaabjllfyg"
+      }
+    ]
+  },
+  "contract": {
+    "done_condition_blob_id": "contract-done-condition",
+    "witness_blob_id": "contract-witness",
+    "acceptance_gate_blob_id": "contract-acceptance-gate"
+  },
+  "closure": {
+    "primary_commit": "9293322c5d8cd75adfaa39d278ee92ae03d29514",
+    "commits": [
+      {
+        "sha": "9293322c5d8cd75adfaa39d278ee92ae03d29514",
+        "first_parent_sha": "375c17a3638e5df558ade0bfd7f6937c054a0c86",
+        "tree_oid": "5bb5466a83a8c6125f2a67f79c1f8eebbad88947",
+        "first_parent_tree_oid": "47bbfcf7fab4ca0f21c976a2c484bb65db57e09c",
+        "patch_blob_id": "closing-patch-0001",
+        "patch_sha256": "sha256:df8dad005b7f2b439c9916c53b2c847a6a545c0226a777617e16cf95c2b76646",
+        "changed_paths": [
+          "internal/modelroute/audit_route.go",
+          "internal/modelroute/audit_route_v1_test.go",
+          "internal/modelroute/testdata/audit_route_plan_v1.json"
+        ]
+      }
+    ]
+  },
+  "evidence": {
+    "tests": [
+      {
+        "kind": "test-path",
+        "ref": "internal/modelroute/audit_route_v1_test.go"
+      },
+      {
+        "kind": "test-path",
+        "ref": "internal/modelroute/testdata/audit_route_plan_v1.json"
+      }
+    ],
+    "ci": [
+      {
+        "kind": "github-check-runs",
+        "ref": "anthony-chaudhary/fak@9293322c5d8cd75adfaa39d278ee92ae03d29514"
+      }
+    ],
+    "dos": [
+      {
+        "kind": "dos-commit-audit",
+        "ref": "commit:9293322c5d8cd75adfaa39d278ee92ae03d29514"
+      }
+    ],
+    "artifacts": [
+      {
+        "kind": "artifact-path",
+        "ref": "internal/modelroute/testdata/audit_route_plan_v1.json"
+      }
+    ],
+    "other": [
+      {
+        "kind": "github-closure",
+        "ref": "author-manifest:9293322c5d8cd75adfaa39d278ee92ae03d29514"
+      }
+    ]
+  },
+  "blobs": [
+    {
+      "id": "closing-patch-0001",
+      "kind": "first-parent-patch",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:df8dad005b7f2b439c9916c53b2c847a6a545c0226a777617e16cf95c2b76646",
+      "content_sha256": "sha256:7b932a76471bc1bd8bf1cf49db80a19954a2dc9f0f7b6b8c7915cb89f0dd8d90",
+      "original_bytes": 73822,
+      "included_bytes": 24576,
+      "content": "diff --git a/internal/modelroute/audit_route.go b/internal/modelroute/audit_route.go\nnew file mode 100644\nindex 000000000..7e0235b90\n--- /dev/null\n+++ b/internal/modelroute/audit_route.go\n@@ -0,0 +1,850 @@\n+package modelroute\n+\n+import (\n+\t\"errors\"\n+\t\"fmt\"\n+\t\"math\"\n+\t\"sort\"\n+\t\"strings\"\n+)\n+\n+const (\n+\tAuditRouteRosterSchema  = \"fak-crossaudit-route-roster/v1\"\n+\tAuditRouteHealthSchema  = \"fak-crossaudit-route-health/v1\"\n+\tAuditIssuePlanSchema    = \"fak-crossaudit-route-plan/v1\"\n+\tMaxAuditRouteCandidates = 16\n+\tMaxAuditRoutePriority   = 1_000_000\n+)\n+\n+type AuditProviderHealthStatus string\n+\n+const (\n+\tAuditProviderHealthy   AuditProviderHealthStatus = \"HEALTHY\"\n+\tAuditProviderDegraded  AuditProviderHealthStatus = \"DEGRADED\"\n+\tAuditProviderUnhealthy AuditProviderHealthStatus = \"UNHEALTHY\"\n+\tAuditProviderUnknown   AuditProviderHealthStatus = \"UNKNOWN\"\n+)\n+\n+func (status AuditProviderHealthStatus) Valid() bool {\n+\tswitch status {\n+\tcase AuditProviderHealthy, AuditProviderDegraded, AuditProviderUnhealthy, AuditProviderUnknown:\n+\t\treturn true\n+\tdefault:\n+\t\treturn false\n+\t}\n+}\n+\n+type AuditCapacityStatus string\n+\n+const (\n+\tAuditCapacityAvailable AuditCapacityStatus = \"AVAILABLE\"\n+\tAuditCapacitySaturated AuditCapacityStatus = \"SATURATED\"\n+\tAuditCapacityUnknown   AuditCapacityStatus = \"UNKNOWN\"\n+)\n+\n+func (status AuditCapacityStatus) Valid() bool {\n+\treturn status == AuditCapacityAvailable || status == AuditCapacitySaturated || status == AuditCapacityUnknown\n+}\n+\n+type AuditCooldownStatus string\n+\n+const (\n+\tAuditCooldownReady   AuditCooldownStatus = \"READY\"\n+\tAuditCooldownActive  AuditCooldownStatus = \"ACTIVE\"\n+\tAuditCooldownUnknown AuditCooldownStatus = \"UNKNOWN\"\n+)\n+\n+func (status AuditCooldownStatus) Valid() bool {\n+\treturn status == AuditCooldownReady || status == AuditCooldownActive || status == AuditCooldownUnknown\n+}\n+\n+// AuditRouteHealth is an injected, credential-free readiness snapshot. Provider\n+// health applies to every alias on that provider; capacity is candidate-specific.\n+type AuditRouteHealth struct {\n+\tSchema    string                               `json:\"schema\"`\n+\tProviders map[string]AuditProviderHealthStatus `json:\"providers\"`\n+\tCapacity  map[string]AuditCapacityStatus       `json:\"capacity\"`\n+\tCooldown  map[string]AuditCooldownStatus       `json:\"cooldown\"`\n+}\n+\n+type AuditRoutePrice struct {\n+\tInputMicrosPerMillionTokens  int64 `json:\"input_micros_per_million_tokens\"`\n+\tOutputMicrosPerMillionTokens int64 `json:\"output_micros_per_million_tokens\"`\n+}\n+\n+// AuditAuditorConfig is a configured candidate. Identity carries the actual\n+// effort posture that dispatch will use; Capability is the strongest work tier\n+// the operator's evidence says the candidate can serve.\n+type AuditAuditorConfig struct {\n+\tID               string          `json:\"id\"`\n+\tIdentity         AuditIdentity   `json:\"identity\"`\n+\tCapability       WorkTier        `json:\"capability\"`\n+\tCapabilitySource string          `json:\"capability_source\"`\n+\tPrice            AuditRoutePrice `json:\"price\"`\n+\tPriority         int             `json:\"priority,omitempty\"`\n+}\n+\n+// AuditRouteRoster contains model identities and public planning metadata only.\n+// There is deliberately no credential, token, base URL, or environment field.\n+type AuditRouteRoster struct {\n+\tSchema                string               `json:\"schema\"`\n+\tAliases               []AuditIdentityAlias `json:\"aliases\"`\n+\tCandidates            []AuditAuditorConfig `json:\"candidates\"`\n+\tUnknownAuthorQuorum   int                  `json:\"unknown_author_quorum,omitempty\"`\n+\tEstimatedInputTokens  int64                `json:\"estimated_input_tokens\"`\n+\tEstimatedOutputTokens int64                `json:\"estimated_output_tokens\"`\n+}\n+\n+type AuditRouteSkipReason string\n+\n+const (\n+\tAuditSkipNone                  AuditRouteSkipReason = \"\"\n+\tAuditSkipIdentityUnresolved    AuditRouteSkipReason = \"IDENTITY_UNRESOLVED\"\n+\tAuditSkipIdentityConflict      AuditRouteSkipReason = \"IDENTITY_CONFLICT\"\n+\tAuditSkipDriverIdentityInvalid AuditRouteSkipReason = \"DRIVER_IDENTITY_INVALID\"\n+\tAuditSkipReciprocalRule        AuditRouteSkipReason = \"RECIPROCAL_RULE_MISMATCH\"\n+\tAuditSkipProviderUnhealthy     AuditRouteSkipReason = \"PROVIDER_UNHEALTHY\"\n+\tAuditSkipProviderHealthUnknown AuditRouteSkipReason = \"PROVIDER_HEALTH_UNKNOWN\"\n+\tAuditSkipCapacitySaturated     AuditRouteSkipReason = \"CAPACITY_SATURATED\"\n+\tAuditSkipCapacityUnknown       AuditRouteSkipReason = \"CAPACITY_UNKNOWN\"\n+\tAuditSkipCooldownActive        AuditRouteSkipReason = \"COOLDOWN_ACTIVE\"\n+\tAuditSkipCooldownUnknown       AuditRouteSkipReason = \"COOLDOWN_UNKNOWN\"\n+\tAuditSkipBelowTierFloor        AuditRouteSkipReason = \"BELOW_TIER_FLOOR\"\n+\tAuditSkipBelowEffortFloor      AuditRouteSkipReason = \"BELOW_EFFORT_FLOOR\"\n+\tAuditSkipIndependence          AuditRouteSkipReason = \"INDEPENDENCE_NOT_ADMITTED\"\n+\tAuditSkipQuorumNotDiverse      AuditRouteSkipReason = \"QUORUM_NOT_DIVERSE\"\n+)\n+\n+func (reason AuditRouteSkipReason) Valid() bool {\n+\tswitch reason {\n+\tcase AuditSkipNone, AuditSkipIdentityUnresolved, AuditSkipIdentityConflict, AuditSkipDriverIdentityInvalid, AuditSkipReciprocalRule,\n+\t\tAuditSkipProviderUnhealthy, AuditSkipProviderHealthUnknown, AuditSkipCapacitySaturated,\n+\t\tAuditSkipCapacityUnknown, AuditSkipCooldownActive, AuditSkipCooldownUnknown,\n+\t\tAuditSkipBelowTierFloor, AuditSkipBelowEffortFloor, AuditSkipIndependence, AuditSkipQuorumNotDiverse:\n+\t\treturn true\n+\tdefault:\n+\t\treturn false\n+\t}\n+}\n+\n+type AuditRouteNoRouteReason string\n+\n+const (\n+\tAuditNoRouteInvalidRisk       AuditRouteNoRouteReason = \"NO_ROUTE_INVALID_RISK\"\n+\tAuditNoRouteInvalidRoster     AuditRouteNoRouteReason = \"NO_ROUTE_INVALID_ROSTER\"\n+\tAuditNoRouteInvalidHealth     AuditRouteNoRouteReason = \"NO_ROUTE_INVALID_HEALTH\"\n+\tAuditNoRouteAuthorConflict    AuditRouteNoRouteReason = \"NO_ROUTE_AUTHOR_IDENTITY_CONFLICT\"\n+\tAuditNoRouteNoHealthyProvider AuditRouteNoRouteReason = \"NO_ROUTE_NO_HEALTHY_PROVIDER\"\n+\tAuditNoRouteNoCapacity        AuditRouteNoRouteReason = \"NO_ROUTE_NO_CAPACITY\"\n+\tAuditNoRouteCooldown          AuditRouteNoRouteReason = \"NO_ROUTE_COOLDOWN\"\n+\tAuditNoRouteTierFloor         AuditRouteNoRouteReason = \"NO_ROUTE_TIER_FLOOR\"\n+\tAuditNoRouteEffortFloor       AuditRouteNoRouteReason = \"NO_ROUTE_EFFORT_FLOOR\"\n+\tAuditNoRouteNoIndependent     AuditRouteNoRouteReason = \"NO_ROUTE_NO_INDEPENDENT_AUDITOR\"\n+\tAuditNoRouteDiversifiedQuorum AuditRouteNoRouteReason = \"NO_ROUTE_DIVERSIFIED_QUORUM\"\n+)\n+\n+func (reason AuditRouteNoRouteReason) Valid() bool {\n+\tswitch reason {\n+\tcase AuditNoRouteInvalidRisk, AuditNoRouteInvalidRoster, AuditNoRouteInvalidHealth,\n+\t\tAuditNoRouteAuthorConflict, AuditNoRouteNoHealthyProvider, AuditNoRouteNoCapacity,\n+\t\tAuditNoRouteCooldown, AuditNoRouteTierFloor, AuditNoRouteEffortFloor, AuditNoRouteNoIndependent,\n+\t\tAuditNoRouteDiversifiedQuorum:\n+\t\treturn true\n+\tdefault:\n+\t\treturn false\n+\t}\n+}\n+\n+type AuditRouteCandidateDecision struct {\n+\tCandidateID            string                    `json:\"candidate_id\"`\n+\tIdentity               AuditIdentity             `json:\"identity\"`\n+\tCapability             WorkTier                  `json:\"capability\"`\n+\tCapabilitySource       string                    `json:\"capability_source\"`\n+\tActualEffort           string                    `json:\"actual_effort\"`\n+\tProviderHealth         AuditProviderHealthStatus `json:\"provider_health\"`\n+\tCapacity               AuditCapacityStatus       `json:\"capacity\"`\n+\tCooldown               AuditCooldownStatus       `json:\"cooldown\"`\n+\tEstimatedCostMicrosUSD int64                     `json:\"estimated_cost_micros_usd\"`\n+\tIndependence           AuditIndependenceDecision `json:\"independence\"`\n+\tAdmitted               bool                      `json:\"admitted\"`\n+\tSkipReason             AuditRouteSkipReason      `json:\"skip_reason,omitempty\"`\n+\tPreference             int                       `json:\"preference\"`\n+\tPriority               int                       `json:\"priority,omitempty\"`\n+}\n+\n+type AuditPlannedAuditor struct {\n+\tRank                   int                       `json:\"rank\"`\n+\tCandidateID            string                    `json:\"candidate_id\"`\n+\tIdentity               AuditIdentity             `json:\"identity\"`\n+\tCapability             WorkTier                  `json:\"capability\"`\n+\tCapabilitySource       string                    `json:\"capability_source\"`\n+\tActualEffort           string                    `json:\"actual_effort\"`\n+\tProviderHealth         AuditProviderHealthStatus `json:\"provider_health\"`\n+\tCapacity               AuditCapacityStatus       `json:\"capacity\"`\n+\tCooldown               AuditCooldownStatus       `json:\"cooldown\"`\n+\tEstimatedCostMicrosUSD int64                     `json:\"estimated_cost_micros_usd\"`\n+\tCostCurrency           string                    `json:\"cost_currency\"`\n+\tCostBasis              string                    `json:\"cost_basis\"`\n+\tIndependence           AuditIndependenceDecision `json:\"independence\"`\n+}\n+\n+type AuditIssuePlan struct {\n+\tSchema                string                        `json:\"schema\"`\n+\tRisk                  AuditRisk                     `json:\"risk\"`\n+\tAuthor                AuditIdentity                 `json:\"author\"`\n+\tAuthorUnknown         bool                          `json:\"author_unknown\"`\n+\tDiversifiedQuorum     bool                          `json:\"diversified_quorum\"`\n+\tRequiredTier          WorkTier                      `json:\"required_tier\"`\n+\tRequiredEffort        string                        `json:\"required_effort\"`\n+\tRequiredQuorum        int                           `json:\"required_quorum\"`\n+\tPolicyVersion         string                        `json:\"policy_version\"`\n+\tPolicyDigest          string                        `json:\"policy_digest\"`\n+\tEstimatedInputTokens  int64                         `json:\"estimated_input_tokens\"`\n+\tEstimatedOutputTokens int64                         `json:\"estimated_output_tokens\"`\n+\tQuorumCostMicrosUSD   int64                         `json:\"quorum_cost_micros_usd\"`\n+\tQuorumGroups          []AuditQuorumGroup            `json:\"quorum_groups,omitempty\"`\n+\tCandidates            []AuditPlannedAuditor         `json:\"candidates\"`\n+\tConsidered            []AuditRouteCandidateDecision `json:\"considered\"`\n+}\n+\n+type AuditQuorumGroup struct {\n+\tRank                   int      `json:\"rank\"`\n+\tCandidateIDs           []string `json:\"candidate_ids\"`\n+\tEstimatedCostMicrosUSD int64    `json:\"estimated_cost_micros_usd\"`\n+}\n+\n+type AuditNoRouteError struct {\n+\tReason AuditRouteNoRouteReason\n+\tDetail string\n+\tPlan   AuditIssuePlan\n+}\n+\n+func (e *AuditNoRouteError) Error() string {\n+\tif strings.TrimSpace(e.Detail) == \"\" {\n+\t\treturn \"modelroute: \" + string(e.Reason)\n+\t}\n+\treturn fmt.Sprintf(\"modelroute: %s: %s\", e.Reason, e.Detail)\n+}\n+\n+func (e *AuditNoRouteError) Is(target error) bool {\n+\t_, ok := target.(*AuditNoRouteError)\n+\treturn ok\n+}\n+\n+func IsAuditNoRoute(err error) bool {\n+\tvar target *AuditNoRouteError\n+\treturn errors.As(err, \u0026target)\n+}\n+\n+type auditAuthorClass string\n+\n+const (\n+\tauditAuthorClaude  auditAuthorClass = \"claude\"\n+\tauditAuthorGPT     auditAuthorClass = \"gpt\"\n+\tauditAuthorLocal   auditAuthorClass = \"local\"\n+\tauditAuthorUnknown auditAuthorClass = \"unknown\"\n+)\n+\n+// PlanIssueAudit constructs a credential-free, ordered reciprocal audit route.\n+// It performs no I/O and never resolves credentials or calls a model.\n+func PlanIssueAudit(author AuditIdentity, risk AuditRisk, roster AuditRouteRoster, health AuditRouteHealth) (AuditIssuePlan, error) {\n+\tplan := AuditIssuePlan{Schema: AuditIssuePlanSchema, Risk: risk}\n+\tif risk != AuditRiskDefault \u0026\u0026 risk != AuditRiskHigh {\n+\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteInvalidRisk, Detail: fmt.Sprintf(\"risk %q is not declared\", risk), Plan: plan}\n+\t}\n+\tif err := validateAuditRouteRoster(roster); err != nil {\n+\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteInvalidRoster, Detail: err.Error(), Plan: plan}\n+\t}\n+\tif err := validateAuditRouteHealth(roster, health); err != nil {\n+\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteInvalidHealth, Detail: err.Error(), Plan: plan}\n+\t}\n+\n+\tpolicy := DefaultAuditIndependencePolicy()\n+\tif risk == AuditRiskHigh {\n+\t\tpolicy = HighRiskAuditIndependencePolicy()\n+\t}\n+\tpolicy.Aliases = append([]AuditIdentityAlias(nil), roster.Aliases...)\n+\tplan.PolicyVersion = policy.Version\n+\tplan.PolicyDigest = policy.Digest()\n+\tplan.EstimatedInputTokens = roster.EstimatedInputTokens\n+\tplan.EstimatedOutputTokens = roster.EstimatedOutputTokens\n+\tplan.RequiredTier, plan.RequiredEffort = auditRouteFloors(risk)\n+\n+\tcanonicalAuthor, authorStatus := normalizeAuditIdentity(author, roster.Aliases)\n+\tauthorClass := classifyAuditAuthor(canonicalAuthor, authorStatus)\n+\tif authorStatus == identityAliasConflict || authorStatus == identityAliasAmbiguous {\n+\t\tplan.Author = canonicalAuthor\n+\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteAuthorConflict, Detail: string(authorStatus), Plan: plan}\n+\t}\n+\tplan.Author = canonicalAuthor\n+\tif err := validateAuditIdentityLocality(canonicalAuthor); err != nil {\n+\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteAuthorConflict, Detail: err.Error(), Plan: plan}\n+\t}\n+\tauthorResolved := authorStatus == identityRosterResolved \u0026\u0026 len(missingAuditAxes(canonicalAuthor, canonicalAuthor, DefaultAuditIndependencePolicy().RequiredAxes)) == 0\n+\tplan.AuthorUnknown = !authorResolved\n+\tplan.DiversifiedQuorum = authorClass == auditAuthorUnknown\n+\tplan.RequiredQuorum = 1\n+\tif plan.DiversifiedQuorum {\n+\t\tplan.RequiredQuorum = roster.UnknownAuthorQuorum\n+\t\tif plan.RequiredQuorum \u003c 2 {\n+\t\t\tplan.RequiredQuorum = 2\n+\t\t}\n+\t}\n+\n+\tproviderHealth := normalizeAuditProviderHealth(health.Providers)\n+\tdecisions := make([]AuditRouteCandidateDecision, 0, len(roster.Candidates))\n+\tfor _, configured := range roster.Candidates {\n+\t\tdecision := evaluateAuditRouteCandidate(plan, authorClass, authorResolved, configured, policy, providerHealth, health.Capacity, health.Cooldown)\n+\t\tdecisions = append(decisions, decision)\n+\t}\n+\tsortAuditRouteDecisions(decisions)\n+\n+\tvar orderedIndexes []int\n+\tif plan.DiversifiedQuorum {\n+\t\tgroups := auditDiversifiedQuorumGroups(decisions, plan.RequiredQuorum)\n+\t\tfor groupIndex, indexes := range groups {\n+\t\t\tgroup := AuditQuorumGroup{Rank: groupIndex + 1}\n+\t\t\tfor _, index := range indexes {\n+\t\t\t\tgroup.CandidateIDs = append(group.CandidateIDs, decisions[index].CandidateID)\n+\t\t\t\tif group.EstimatedCostMicrosUSD \u003e math.MaxInt64-decisions[index].EstimatedCostMicrosUSD {\n+\t\t\t\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteInvalidRoster, Detail: \"quorum cost overflows int64\", Plan: plan}\n+\t\t\t\t}\n+\t\t\t\tgroup.EstimatedCostMicrosUSD += decisions[index].EstimatedCostMicrosUSD\n+\t\t\t}\n+\t\t\tplan.QuorumGroups = append(plan.QuorumGroups, group)\n+\t\t}\n+\t\tselected := map[int]bool{}\n+\t\tif len(groups) \u003e 0 {\n+\t\t\tfor _, index := range groups[0] {\n+\t\t\t\torderedIndexes = append(orderedIndexes, index)\n+\t\t\t\tselected[index] = true\n+\t\t\t}\n+\t\t}\n+\t\tfor i, decision := range decisions {\n+\t\t\tif decision.Admitted \u0026\u0026 !selected[i] {\n+\t\t\t\torderedIndexes = append(orderedIndexes, i)\n+\t\t\t}\n+\t\t}\n+\t} else {\n+\t\tfor i, decision := range decisions {\n+\t\t\tif decision.Admitted {\n+\t\t\t\torderedIndexes = append(orderedIndexes, i)\n+\t\t\t}\n+\t\t}\n+\t}\n+\tfor _, index := range orderedIndexes {\n+\t\tdecision := \u0026decisions[index]\n+\t\tplan.Candidates = append(plan.Candidates, AuditPlannedAuditor{\n+\t\t\tRank: len(plan.Candidates) + 1, CandidateID: decision.CandidateID, Identity: decision.Identity,\n+\t\t\tCapability: decision.Capability, CapabilitySource: decision.CapabilitySource, ActualEffort: decision.ActualEffort,\n+\t\t\tProviderHealth: decision.ProviderHealth, Capacity: decision.Capacity, Cooldown: decision.Cooldown,\n+\t\t\tEstimatedCostMicrosUSD: decision.EstimatedCostMicrosUSD, CostCurrency: \"USD\", CostBasis: \"roster-estimate\",\n+\t\t\tIndependence: decision.Independence,\n+\t\t})\n+\t}\n+\tplan.Considered = decisions\n+\tquorumReady := len(plan.Candidates) \u003e= plan.RequiredQuorum\n+\tif plan.DiversifiedQuorum {\n+\t\tquorumReady = len(plan.QuorumGroups) \u003e 0\n+\t}\n+\tif !quorumReady {\n+\t\treason := auditNoRouteReason(decisions, plan.DiversifiedQuorum)\n+\t\treturn plan, \u0026AuditNoRouteError{\n+\t\t\tReason: reason, Detail: fmt.Sprintf(\"planned %d candidate(s), require %d\", len(plan.Candidates), plan.RequiredQuorum), Plan: plan,\n+\t\t}\n+\t}\n+\tif plan.DiversifiedQuorum {\n+\t\tplan.QuorumCostMicrosUSD = plan.QuorumGroups[0].EstimatedCostMicrosUSD\n+\t} else {\n+\t\tfor i := 0; i \u003c plan.RequiredQuorum; i++ {\n+\t\t\tif plan.QuorumCostMicrosUSD \u003e math.MaxInt64-plan.Candidates[i].EstimatedCostMicrosUSD {\n+\t\t\t\treturn plan, \u0026AuditNoRouteError{Reason: AuditNoRouteInvalidRoster, Detail: \"quorum cost overflows int64\", Plan: plan}\n+\t\t\t}\n+\t\t\tplan.QuorumCostMicrosUSD += plan.Candidates[i].EstimatedCostMicrosUSD\n+\t\t}\n+\t}\n+\treturn plan, nil\n+}\n+\n+func validateAuditRouteRoster(roster AuditRouteRoster) error {\n+\tif roster.Schema != AuditRouteRosterSchema {\n+\t\treturn fmt.Errorf(\"audit route roster schema %q, want %q\", roster.Schema, AuditRouteRosterSchema)\n+\t}\n+\tif err := (AuditIdentityRoster{Schema: AuditIdentityRosterSchema, Aliases: roster.Aliases}).Validate(); err != nil {\n+\t\treturn err\n+\t}\n+\tif len(roster.Candidates) == 0 {\n+\t\treturn fmt.Errorf(\"audit route roster has no candidates\")\n+\t}\n+\tif len(roster.Candidates) \u003e MaxAuditRouteCandidates {\n+\t\treturn fmt.Errorf(\"audit route roster has %d candidates, maximum %d for deterministic quorum planning\", len(roster.Candidates), MaxAuditRouteCandidates)\n+\t}\n+\tif roster.EstimatedInputTokens \u003c 0 || roster.EstimatedOutputTokens \u003c 0 {\n+\t\treturn fmt.Errorf(\"audit route token estimates cannot be negative\")\n+\t}\n+\tif roster.UnknownAuthorQuorum \u003c 0 || roster.UnknownAuthorQuorum == 1 {\n+\t\treturn fmt.Errorf(\"audit route unknown-author quorum must be 0 or at least 2\")\n+\t}\n+\tseen := map[string]bool{}\n+\tfor i, candidate := range roster.Candidates {\n+\t\tif candidate.ID == \"\" || candidate.ID != strings.TrimSpace(candidate.ID) || seen[candidate.ID] {\n+\t\t\treturn fmt.Errorf(\"audit route candidate %d has empty or duplicate id %q\", i, candidate.ID)\n+\t\t}\n+\t\tseen[candidate.ID] = true\n+\t\tif !candidate.Capability.Valid() {\n+\t\t\treturn fmt.Errorf(\"audit route candidate %q has invalid capability %s\", candidate.ID, candidate.Capability)\n+\t\t}\n+\t\tif strings.TrimSpace(candidate.CapabilitySource) == \"\" {\n+\t\t\treturn fmt.Errorf(\"audit route candidate %q has no capability source\", candidate.ID)\n+\t\t}\n+\t\tif candidate.Priority \u003c 0 || candidate.Priority \u003e MaxAuditRoutePriority {\n+\t\t\treturn fmt.Errorf(\"audit route candidate %q priority %d is outside 0..%d\", candidate.ID, candidate.Priority, MaxAuditRoutePriority)\n+\t\t}\n+\t\tif candidate.Price.InputMicrosPerMillionTokens \u003c 0 || candidate.Price.OutputMicrosPerMillionTokens \u003c 0 {\n+\t\t\treturn fmt.Errorf(\"audit route candidate %q has negative price\", candidate.ID)\n+\t\t}\n+\t\tif _, err := estimateAuditRouteCost(candidate.Price, roster.EstimatedInputTokens, roster.EstimatedOutputTokens); err != nil {\n+\t\t\treturn fmt.Errorf(\"audit route candidate %q price: %w\", candidate.ID, err)\n+\t\t}\n+\t}\n+\treturn nil\n+}\n+\n+func validateAuditRouteHealth(roster AuditRouteRoster, health AuditRouteHealth) error {\n+\tif health.Schema != AuditRouteHealthSchema {\n+\t\treturn fmt.Errorf(\"audit route health schema %q, want %q\", health.Schema, AuditRouteHealthSchema)\n+\t}\n+\tfor provider, status := range health.Providers {\n+\t\tif provider == \"\" || provider != strings.ToLower(strings.TrimSpace(provider)) || !status.Valid() {\n+\t\t\treturn fmt.Errorf(\"audit route provider health %q=%q is invalid\", provider, status)\n+\t\t}\n+\t}\n+\tfor candidate, status := range health.Capacity {\n+\t\tif candidate == \"\" || candidate != strings.TrimSpace(candidate) || !status.Valid() {\n+\t\t\treturn fmt.Errorf(\"audit route capacity %q=%q is invalid\", candidate, status)\n+\t\t}\n+\t}\n+\tfor candidate, status := range health.Cooldown {\n+\t\tif candidate == \"\" || candidate != strings.TrimSpace(candidate) || !status.Valid() {\n+\t\t\treturn fmt.Errorf(\"audit route cooldown %q=%q is invalid\", candidate, status)\n+\t\t}\n+\t}\n+\twantCandidates := make(map[string]bool, len(roster.Candidates))\n+\tfor _, candidate := range roster.Candidates {\n+\t\twantCandidates[candidate.ID] = true\n+\t}\n+\tfor candidate := range health.Capacity {\n+\t\tif !wantCandidates[candidate] {\n+\t\t\treturn fmt.Errorf(\"audit route capacity names unknown candidate %q\", candidate)\n+\t\t}\n+\t}\n+\tfor candidate := range health.Cooldown {\n+\t\tif !wantCandidates[candidate] {\n+\t\t\treturn fmt.Errorf(\"audit route cooldown names unknown candidate %q\", candidate)\n+\t\t}\n+\t}\n+\treturn nil\n+}\n+\n+func normalizeAuditProviderHealth(in map[string]AuditProviderHealthStatus) map[string]AuditProviderHealthStatus {\n+\tout := make(map[string]AuditProviderHealthStatus, len(in))\n+\tfor provider, status := range in {\n+\t\tout[strings.ToLower(strings.TrimSpace(provider))] = status\n+\t}\n+\treturn out\n+}\n+\n+func auditRouteFloors(risk AuditRisk) (WorkTier, string) {\n+\tif risk == AuditRiskHigh {\n+\t\treturn TierT0, \"xhigh\"\n+\t}\n+\treturn TierT1, \"high\"\n+}\n+\n+func classifyAuditAuthor(author AuditIdentity, status identityNormalizationStatus) auditAuthorClass {\n+\tif status != identityRosterResolved || len(missingAuditAxes(author, author, DefaultAuditIndependencePolicy().RequiredAxes)) \u003e 0 {\n+\t\treturn auditAuthorUnknown\n+\t}\n+\tif isLocalAuditIdentity(author) {\n+\t\treturn auditAuthorLocal\n+\t}\n+\tswitch author.Family {\n+\tcase \"claude\":\n+\t\treturn auditAuthorClaude\n+\tcase \"gpt\", \"openai-o\":\n+\t\treturn auditAuthorGPT\n+\tdefault:\n+\t\treturn auditAuthorUnknown\n+\t}\n+}\n+\n+func evaluateAuditRouteCandidate(\n+\tplan AuditIssuePlan,\n+\tauthorClass auditAuthorClass,\n+\tauthorResolved bool,\n+\tconfigured AuditAuditorConfig,\n+\tpolicy AuditIndependencePolicy,\n+\tproviderHealth map[string]AuditProviderHealthStatus,\n+\tcapacity map[string]AuditCapacityStatus,\n+\tcooldown map[string]AuditCooldownStatus,\n+) AuditRouteCandidateDecision {\n+\tdecision := AuditRouteCandidateDecision{\n+\t\tCandidateID: configured.ID, Capability: configured.Capability, CapabilitySource: configured.CapabilitySource, Priority: configured.Priority,\n+\t\tProviderHealth: AuditProviderUnknown, Capacity: AuditCapacityUnknown, Cooldown: AuditCooldownUnknown,\n+\t}\n+\tidentity, status := normalizeAuditIdentity(configured.Identity, policy.Aliases)\n+\tdecision.Identity = identity\n+\tdecision.ActualEffort = identity.ReasoningPosture\n+\tdecision.Preference = auditReciprocalPreference(authorClass, identity, configured.Capability)\n+\tdecision.EstimatedCostMicrosUSD, _ = estimateAuditRouteCost(configured.Price, plan.EstimatedInputTokens, plan.EstimatedOutputTokens)\n+\tif status == identityAliasConflict || status == identityAliasAmbiguous {\n+\t\tdecision.SkipReason = AuditSkipIdentityConflict\n+\t\treturn decision\n+\t}\n+\tif err := validateAuditIdentityLocality(identity); err != nil {\n+\t\tdecision.SkipReason = AuditSkipIdentityConflict\n+\t\treturn decision\n+\t}\n+\tif status != identityRosterResolved || len(missingAuditAxes(identity, identity, DefaultAuditIndependencePolicy().RequiredAxes)) \u003e 0 {\n+\t\tdecision.SkipReason = AuditSkipIdentityUnresolved\n+\t\treturn decision\n+\t}\n+\tvalidatedIdentity, err := ValidateAuditDriverIdentity(identity.Driver, identity, policy.Aliases)\n+\tif err != nil {\n+\t\tdecision.SkipReason = AuditSkipDriverIdentityInvalid\n+\t\treturn decision\n+\t}\n+\tidentity = validatedIdentity\n+\tdecision.Identity = identity\n+\tif decision.Preference \u003c 0 {\n+\t\tdecision.SkipReason = AuditSkipReciprocalRule\n+\t\treturn decision\n+\t}\n+\tdecision.ProviderHealth = providerHealth[identity.Provider]\n+\tswitch decision.ProviderHealth {\n+\tcase AuditProviderHealthy, AuditProviderDegraded:\n+\tcase AuditProviderUnhealthy:\n+\t\tdecision.SkipReason = AuditSkipProviderUnhealthy\n+\t\treturn decision\n+\tdefault:\n+\t\tdecision.ProviderHealth = AuditProviderUnknown\n+\t\tdecision.SkipReason = AuditSkipProviderHealthUnknown\n+\t\treturn decision\n+\t}\n+\tdecision.Capacity = capacity[configured.ID]\n+\tswitch decision.Capacity {\n+\tcase AuditCapacityAvailable:\n+\tcase AuditCapacitySaturated:\n+\t\tdecision.SkipReason = AuditSkipCapacitySaturated\n+\t\treturn decision\n+\tdefault:\n+\t\tdecision.Capacity = AuditCapacityUnknown\n+\t\tdecision.SkipReason = AuditSkipCapacityUnknown\n+\t\treturn decision\n+\t}\n+\tdecision.Cooldown = cooldown[configured.ID]\n+\tswitch decision.Cooldown {\n+\tcase AuditCooldownReady:\n+\tcase AuditCooldownActive:\n+\t\tdecision.SkipReason = AuditSkipCooldownActive\n+\t\treturn decision\n+\tdefault:\n+\t\tdecision.Cooldown = AuditCooldownUnknown\n+\t\tdecision.SkipReason = AuditSkipCooldownUnknown\n+\t\treturn decision\n+\t}\n+\tif !configured.Capability.MeetsRequirement(plan.RequiredTier) {\n+\t\tdecision.SkipReason = AuditSkipBelowTierFloor\n+\t\treturn decision\n+\t}\n+\tif !auditEffortMeets(identity.Reas"
+    },
+    {
+      "id": "comment-0001-ic_kwdotbla088aaaabjllfyg",
+      "kind": "issue-comment",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:21b65e9e222ecd0c1df5e1133848ce029f3b602c6a5742343af882f15303d60a",
+      "content_sha256": "sha256:21b65e9e222ecd0c1df5e1133848ce029f3b602c6a5742343af882f15303d60a",
+      "original_bytes": 517,
+      "included_bytes": 517,
+      "content": "Shipped on origin/main via 9293322c5d8c and bb2711eb9a27. Independent postcommit witness passed the full reciprocal-routing matrix, exact full-plan golden/secret scan, named + full modelroute tests, gofmt, build/vet, and DOS diff witnesses. Credential-free route artifact attached to parent #3846: https://github.com/anthony-chaudhary/fak/issues/3846#issuecomment-4937923038 . Repository-wide ci-preflight remains red on unrelated pre-existing cmd helper/gofmt drift; this closure does not claim a globally green tip."
+    },
+    {
+      "id": "contract-acceptance-gate",
+      "kind": "issue-contract",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:c7e416a819b9ca7a030bdb9ad73080d043f01fda3f96dff17675ab31eb745aea",
+      "content_sha256": "sha256:c7e416a819b9ca7a030bdb9ad73080d043f01fda3f96dff17675ab31eb745aea",
+      "original_bytes": 85,
+      "included_bytes": 85,
+      "content": "`fak buildcheck --vet ./internal/modelroute` and all audit routing matrix tests pass."
+    },
+    {
+      "id": "contract-done-condition",
+      "kind": "issue-contract",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:6162d13ce8cc3b8b19bde518f319fb29e3465db21533102cc058e31721b8bdfe",
+      "content_sha256": "sha256:6162d13ce8cc3b8b19bde518f319fb29e3465db21533102cc058e31721b8bdfe",
+      "original_bytes": 211,
+      "included_bytes": 211,
+      "content": "Table tests prove Claude-\u003econfigured GPT/local, GPT-\u003eClaude/local, local-\u003efrontier, unknown-\u003ediversified quorum, same-family alias skipped, unhealthy provider skipped, and no valid route returns a typed refusal."
+    },
+    {
+      "id": "contract-witness",
+      "kind": "issue-contract",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:0646053911eaac0c049bf5e479c3d97778e671a10e6d5efb9f351a46d5d3622b",
+      "content_sha256": "sha256:0646053911eaac0c049bf5e479c3d97778e671a10e6d5efb9f351a46d5d3622b",
+      "original_bytes": 181,
+      "included_bytes": 181,
+      "content": "`go test ./internal/modelroute -run TestPlanIssueAudit` with fixtures for GPT xhigh, Claude, and a local open-weight target; emitted plan includes identity and independence reasons."
+    },
+    {
+      "id": "issue-body",
+      "kind": "issue-body",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:1737d96326018423d3328a7cb51fc3a8ffa9b3d42b49c82e33bdb1802f62d14d",
+      "content_sha256": "sha256:1737d96326018423d3328a7cb51fc3a8ffa9b3d42b49c82e33bdb1802f62d14d",
+      "original_bytes": 3589,
+      "included_bytes": 3589,
+      "content": "\u003c!-- fak-crossaudit-key: crossaudit-router-v1 --\u003e\n\n## Parent context\n\nPart of #3846. This is one dispatchable leaf in the independent cross-model issue-audit program.\n\n## Current state\n\nAccount routing resolves a configured model but review flags do not select an auditor from author provenance or enforce a diversified fallback chain.\n\n## Why this is next\n\nThe user's desired Claude-versus-GPT/open-weight reciprocal audit must be a policy-driven route, not an operator remembering which flag to pass.\n\n## Working spine\n\n`PlanIssueAudit(author,risk,roster,health)` returns a priced ordered auditor plan plus the independence proof for each candidate.\n\n## Priority context\n\nDepends on the identity policy and spine; blocks unattended loops.\n\n## In scope\n\nDeclarative reciprocal rules for Claude, GPT/Codex, and local/open-weight authors; risk-tier provider-diversity requirements; reasoning effort; model-tier floor; health/capacity checks; ordered fallback; unknown-author quorum; cost estimate; no-independent-auditor refusal.\n\n## Out of scope\n\nNo background scheduler, live credential refresh, hard-coded unreleased model availability, or verdict aggregation beyond plan construction.\n\n## Done condition\n\nTable tests prove Claude-\u003econfigured GPT/local, GPT-\u003eClaude/local, local-\u003efrontier, unknown-\u003ediversified quorum, same-family alias skipped, unhealthy provider skipped, and no valid route returns a typed refusal.\n\n## Witness\n\n`go test ./internal/modelroute -run TestPlanIssueAudit` with fixtures for GPT xhigh, Claude, and a local open-weight target; emitted plan includes identity and independence reasons.\n\n## Acceptance gate\n\n`fak buildcheck --vet ./internal/modelroute` and all audit routing matrix tests pass.\n\n## Dependencies\n\nBlocked by #3847\nBlocked by #3848\n\n## Closure binding\n\nClosing commit references this issue and carries `(fak modelroute)`; route output attached to #3846 contains no credential values.\n\n## Work unit\n\nleaf\n\n## Expected steps\n\n7\n\n## Scale\n\nS1\n\n## Required model tier\n\ntier/T1-required\n\n## Optimal model tier\n\ntier/T0-optimal\n\n## Assumptions\n\n- Provider health/account readiness can be read through existing modelroute seams.\n- Specific IDs such as gpt-5.6-sol and effort xhigh are operator roster/config data, not hard-coded product constants.\n\n## Confusion risks\n\n- Falling back from GPT to a different alias of the same family.\n- Selecting a cheap local auditor whose capability tier is below the issue risk without surfacing the downgrade.\n\n## Coordination\n\n- Modelroute leaf; reuse account readiness and model-tier metadata, and do not add secrets to routing manifests.\n\n## Trigger\n\nOperator request on 2026-07-10 to create independent cross-model background audits for general issue work and silent/adversarial/model-specific corruption.\n\n## Batch policy\n\nOne issue per fak-crossaudit marker key; reruns update an existing open or closed issue instead of creating a duplicate; the producer scans at most 500 issues per planning run.\n\n## Lane\n\nmodelroute\n\n## Likely files\n\n- `internal/modelroute/audit_route*.go`\n- `internal/modelroute/account*.go`\n\n## Generation\n\n- Stream: gen/now\n- Promotion evidence: the named acceptance gate and witness in this issue are both satisfied.\n- Demotion/retirement evidence: superseded only by a shipped child that provides the same end-to-end effect with equal or stronger witnesses.\n- Invalidating assumption: Provider health/account readiness can be read through existing modelroute seams.\n- Orthogonality: this generation label does not change priority, shared-trunk rules, or runtime feature-gate policy.\n\r\n"
+    },
+    {
+      "id": "issue-title",
+      "kind": "issue-title",
+      "channel": "UNTRUSTED_DATA",
+      "encoding": "utf-8",
+      "source_sha256": "sha256:11adf577a3481a3853c053656325ddf0781610fdac1e267caf66524fb8b283ab",
+      "content_sha256": "sha256:11adf577a3481a3853c053656325ddf0781610fdac1e267caf66524fb8b283ab",
+      "original_bytes": 117,
+      "included_bytes": 117,
+      "content": "feat(modelroute): cross-provider audit router - Claude work to GPT/local, GPT work to Claude/local, unknown to quorum"
+    }
+  ],
+  "manifest": {
+    "limits": {
+      "max_bundle_bytes": 524288,
+      "max_blob_bytes": 24576,
+      "max_content_bytes": 98304,
+      "max_comments": 32,
+      "max_changed_paths": 128,
+      "max_refs_per_kind": 32
+    },
+    "input_bytes": 78522,
+    "included_bytes": 29276,
+    "redactions": [
+      {
+        "blob_id": "comment:ic_kwdotbla088aaaabjllfyg:author",
+        "rule": "github-comment-author",
+        "count": 1
+      }
+    ],
+    "truncations": [
+      {
+        "kind": "first-parent-patch",
+        "ref": "closing-patch-0001",
+        "original_bytes": 73822,
+        "included_bytes": 24576,
+        "source_sha256": "sha256:df8dad005b7f2b439c9916c53b2c847a6a545c0226a777617e16cf95c2b76646"
+      }
+    ]
+  },
+  "bundle_digest": "sha256:7563ea9c8b245d4af38301e8dd38e9e2d41062e2266d5db3e7d7617f034450ea"
+}

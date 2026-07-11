@@ -545,10 +545,29 @@ func (b *auditBundleBuilder) refs(kind string, refs []EvidenceRef) []EvidenceRef
 	return out
 }
 
+// omit records that a piece of evidence was left out of the bundle. The omission
+// manifest ships inside the credential-free bundle, so caller-supplied kind/ref/
+// reason are run through the same redactors as every other evidence field before
+// being recorded — a hostile or careless fetch edge cannot smuggle a private
+// companion path or credential through the omission channel.
 func (b *auditBundleBuilder) omit(kind, ref, reason string) {
 	b.manifest.Omissions = append(b.manifest.Omissions, IssueAuditBundleOmission{
-		Kind: truncateAuditBundleUTF8(strings.TrimSpace(kind), 64), Ref: truncateAuditBundleUTF8(strings.TrimSpace(ref), 128), Reason: truncateAuditBundleUTF8(strings.TrimSpace(reason), 256),
+		Kind:   truncateAuditBundleUTF8(strings.TrimSpace(redactAuditBundleValue(kind)), 64),
+		Ref:    truncateAuditBundleUTF8(strings.TrimSpace(redactAuditBundleValue(ref)), 128),
+		Reason: truncateAuditBundleUTF8(strings.TrimSpace(redactAuditBundleValue(reason)), 256),
 	})
+}
+
+// redactAuditBundleValue applies the bundle's credential redactors to a single
+// scalar value. It is the pure form of the redaction loop used by blob and
+// scalar; callers that do not track per-rule match counts (the omission channel)
+// use it to stay credential-free without emitting a manifest redaction row.
+func redactAuditBundleValue(raw string) string {
+	redacted := raw
+	for _, rule := range auditBundleRedactors {
+		redacted = rule.re.ReplaceAllString(redacted, rule.repl)
+	}
+	return redacted
 }
 
 func (b *auditBundleBuilder) finish() ([]IssueAuditBundleBlob, IssueAuditBundleManifest) {
