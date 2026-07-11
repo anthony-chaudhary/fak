@@ -19,7 +19,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/devindex"
@@ -39,6 +42,10 @@ func runWiki(stdout, stderr io.Writer, argv []string) int {
 		return wikiStructure(stdout, stderr, argv[1:])
 	case "verify", "check":
 		return wikiVerify(stdout, stderr, argv[1:])
+	case "fresh", "freshness":
+		return wikiFresh(stdout, stderr, argv[1:])
+	case "score":
+		return wikiScore(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		writeWikiUsage(stdout)
 		return 0
@@ -56,6 +63,10 @@ usage:
   fak wiki structure [--root DIR] [--json]   section→page tree from the self-index
   fak wiki verify <page.md> [--root DIR] [--json]
                                              resolve Sources:[path:line] cites vs the tree
+  fak wiki fresh <page.md> [--root DIR] [--json]
+                                             flag the page stale if any cited file moved since its generated_at_sha
+  fak wiki score [--pages DIR] [--root DIR] [--check] [--json]
+                                             citation-resolve + leaf-coverage + freshness score (a CI gate)
 
 `)
 }
@@ -157,6 +168,195 @@ func wikiVerify(stdout, stderr io.Writer, argv []string) int {
 	tw.Flush()
 	fmt.Fprintf(stderr, "fak wiki verify: %d dangling citation(s) in %s\n", len(dangs), page)
 	return 1
+}
+
+// wikiFresh witnesses one page's freshness (L4 #4281): it parses the page's
+// generated_at_sha + cited_files frontmatter, asks git which files changed since
+// that SHA, and flags the page stale if any cited file is in that set. Exit 0 fresh,
+// 1 stale (the gate), 2 usage.
+func wikiFresh(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("wiki fresh", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "wiki")
+	root := fs.String("root", "", "repo root the SHA/cited files resolve against (default: search upward for dos.toml)")
+	asJSON := fs.Bool("json", false, "emit the freshness verdict as JSON")
+	if err := fs.Parse(argv); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "fak wiki fresh: needs a <page.md>")
+		return 2
+	}
+	page := fs.Arg(0)
+	md, err := os.ReadFile(page)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wiki fresh: %v\n", err)
+		return 1
+	}
+	rootDir := *root
+	if rootDir == "" {
+		rootDir = devindex.FindRoot(".")
+	}
+	meta := wiki.ParseFrontmatter(md)
+
+	// `git diff --name-only <sha>` compares the pinned build commit to the working
+	// tree, so it catches BOTH committed and uncommitted drift of the cited code
+	// since the page was generated — the freshness question exactly.
+	var changed []string
+	if strings.TrimSpace(meta.GeneratedAtSHA) != "" {
+		out, gerr := gitOut(rootDir, "diff", "--name-only", meta.GeneratedAtSHA)
+		if gerr != nil {
+			fmt.Fprintf(stderr, "fak wiki fresh: %v\n", gerr)
+			return 1
+		}
+		changed = nonEmptyLines(out)
+	}
+	sp, stale := wiki.DriftStaleWikiPage(page, meta, changed)
+
+	if *asJSON {
+		verdict := struct {
+			Page   string          `json:"page"`
+			Stale  bool            `json:"stale"`
+			Detail *wiki.StalePage `json:"detail,omitempty"`
+		}{Page: page, Stale: stale}
+		if stale {
+			verdict.Detail = &sp
+		}
+		code := encodeJSONOrFail(stdout, stderr, verdict, "fak wiki fresh")
+		if code == 0 && stale {
+			return 1
+		}
+		return code
+	}
+
+	if !stale {
+		fmt.Fprintf(stdout, "fresh: %s — pinned at %s, no cited file has moved\n", page, short(meta.GeneratedAtSHA))
+		return 0
+	}
+	switch sp.Reason {
+	case wiki.ReasonNoSHA:
+		fmt.Fprintf(stdout, "stale: %s — no generated_at_sha; a generated page must pin its build commit\n", page)
+	case wiki.ReasonCitedCodeMoved:
+		fmt.Fprintf(stdout, "stale: %s — %d cited file(s) moved since %s:\n", page, len(sp.Touched), short(sp.SHA))
+		for _, f := range sp.Touched {
+			fmt.Fprintf(stdout, "  - %s\n", f)
+		}
+	}
+	return 1
+}
+
+// wikiScore folds the generated pages under --pages into the wiki quality report
+// (L7 #4284): citation-resolve rate (L3), leaf coverage (L1), freshness (L4). With
+// --check it exits nonzero when the score falls below the floors — the CI gate that
+// keeps the wiki honest as the tree moves.
+func wikiScore(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("wiki score", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "wiki")
+	root := fs.String("root", "", "repo root the cites resolve against (default: search upward for dos.toml)")
+	pagesDir := fs.String("pages", "docs/wiki", "directory of generated wiki pages (*.md)")
+	check := fs.Bool("check", false, "exit nonzero when the score is below the floors")
+	minResolve := fs.Float64("min-resolve", 1.0, "minimum citation-resolve rate for --check")
+	minCoverage := fs.Float64("min-coverage", 0.0, "minimum leaf-coverage rate for --check")
+	asJSON := fs.Bool("json", false, "emit the score as JSON")
+	if err := fs.Parse(argv); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	rootDir := *root
+	if rootDir == "" {
+		rootDir = devindex.FindRoot(".")
+	}
+	cat, err := devindex.Load(rootDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wiki: %v\n", err)
+		return 1
+	}
+	pages, absDir, err := loadWikiPages(rootDir, *pagesDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wiki score: %v\n", err)
+		return 1
+	}
+	score := wiki.ComputeScore(rootDir, cat, pages)
+	pass := score.Passes(*minResolve, *minCoverage)
+
+	if *asJSON {
+		code := encodeJSONOrFail(stdout, stderr, score, "fak wiki score")
+		if code == 0 && *check && !pass {
+			return 1
+		}
+		return code
+	}
+
+	renderScore(stdout, score, absDir)
+	if *check && !pass {
+		fmt.Fprintf(stderr, "fak wiki score: below floor (resolve %.0f%% < %.0f%% or coverage %.0f%% < %.0f%%)\n",
+			100*score.CitationResolveRate, 100**minResolve, 100*score.LeafCoverage, 100**minCoverage)
+		return 1
+	}
+	return 0
+}
+
+func renderScore(stdout io.Writer, s wiki.Score, dir string) {
+	if s.Pages == 0 {
+		fmt.Fprintf(stdout, "wiki: %s — no generated pages under %s (nothing scored)\n", s.Repo, dir)
+	} else {
+		fmt.Fprintf(stdout, "wiki: %s — %d pages under %s\n", s.Repo, s.Pages, dir)
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintf(tw, "METRIC\tVALUE\tDETAIL\n")
+	fmt.Fprintf(tw, "citation-resolve\t%.0f%%\t%d/%d cites resolve\n", 100*s.CitationResolveRate, s.CitationsResolved, s.Citations)
+	fmt.Fprintf(tw, "leaf-coverage\t%.0f%%\t%d/%d leaves have a page\n", 100*s.LeafCoverage, s.LeavesCovered, s.Leaves)
+	fmt.Fprintf(tw, "freshness\t%.0f%%\t%d/%d pages pin a generated_at_sha\n", 100*s.FreshRate, s.FreshPages, s.Pages)
+	tw.Flush()
+	if len(s.Danglers) > 0 {
+		fmt.Fprintf(stdout, "\n%d dangling citation(s) — run `fak wiki verify <page>` to locate\n", len(s.Danglers))
+	}
+}
+
+// loadWikiPages walks pagesRel under root for *.md files and reads each into a
+// PageInput whose RelID is the slash path under the pages dir with ".md" stripped
+// (matching the Structure page ID scheme). A missing pages dir is not an error — it
+// returns zero pages, the honest "nothing generated yet" state. It returns the
+// absolute pages dir for the human-facing render.
+func loadWikiPages(root, pagesRel string) ([]wiki.PageInput, string, error) {
+	absDir := pagesRel
+	if !filepath.IsAbs(absDir) {
+		absDir = filepath.Join(root, filepath.FromSlash(pagesRel))
+	}
+	info, err := os.Stat(absDir)
+	if err != nil || !info.IsDir() {
+		return nil, absDir, nil // no wiki dir yet: 0 pages, not a failure
+	}
+	var pages []wiki.PageInput
+	walkErr := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".md") {
+			return nil
+		}
+		rel, rerr := filepath.Rel(absDir, path)
+		if rerr != nil {
+			return rerr
+		}
+		body, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		id := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
+		pages = append(pages, wiki.PageInput{RelID: id, Markdown: body})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, absDir, walkErr
+	}
+	return pages, absDir, nil
 }
 
 // joinCap joins up to n entries with ", ", appending a "+k more" tail when the
