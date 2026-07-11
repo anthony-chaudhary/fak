@@ -9,6 +9,13 @@
 // the value and the tests. Every axis a platform cannot read stays absent behind a
 // presence bit, so a missing number renders "n/a" — never a fabricated 0.
 //
+// Beyond hardware, each row also carries a small operator-question RIDER
+// (GuardStopCounts): how often this session's guard Stop hook ended a turn by asking a
+// human instead of acting, and how many stops fell open. harnessres only carries,
+// renders, and marshals those counts; the caller (fak guard) folds the guard-stops
+// ledger and assigns them. Unlike the hardware axes a zero there is meaningful, so it is
+// always emitted — a missing gauge must never read as "no stops" (#4348).
+//
 // Foundation leaf for epic #2044 / #2045: imports nothing internal, off the hot path.
 package harnessres
 
@@ -83,6 +90,25 @@ type Snapshot struct {
 	// own presence bit.
 	GPUUtilPercent float64
 	HaveGPUUtil    bool
+	// GuardStops rides the operator-question guard-stop tallies on the row. Unlike the
+	// hardware axes above it has NO presence bit: zero is a meaningful, honest value
+	// here (no such stops observed), not an unread axis — so it always marshals and
+	// renders an explicit count. The sampler never sets it; the caller (fak guard)
+	// folds the guard-stops ledger and assigns it before Report/Marshal. See #4348.
+	GuardStops GuardStopCounts
+}
+
+// GuardStopCounts is the operator-question rider on a harness-resources row — the two
+// guard Stop-hook tallies an operator most wants folded next to the session's resource
+// economy: OperatorDirected (turn-ends where the agent asked a human instead of acting)
+// and FailOpen (stops the hook could not decide, which otherwise read as "the guard is
+// still killing sessions"). Sourced from the guard-stops ledger by the caller
+// (cmd/fak/guard_stops.go summarizeGuardStops); harnessres only carries, renders, and
+// marshals it. Zero is explicit and meaningful — a tick that observed no ledger reports
+// 0, never a gap, so a missing gauge can never read as "no stops" (#4348).
+type GuardStopCounts struct {
+	OperatorDirected int
+	FailOpen         int
 }
 
 // procSample is a single raw reading of ONE process's OS-level resource use, as
@@ -356,6 +382,7 @@ func (s Snapshot) Report() string {
 			fmt.Fprintf(&b, " util %.0f%%", s.GPUUtilPercent)
 		}
 	}
+	fmt.Fprintf(&b, "; operator-questions %d asked-human, %d fail-open", s.GuardStops.OperatorDirected, s.GuardStops.FailOpen)
 	fmt.Fprintf(&b, "; sampled %dx over %s", s.Samples, humanDur(s.Elapsed))
 	return b.String()
 }
@@ -449,6 +476,12 @@ func (s Snapshot) PrometheusText() string {
 	fmt.Fprintf(&b, "fak_harness_num_cpu %d\n", s.NumCPU)
 	writeHelp(&b, "fak_harness_elapsed_seconds", "Wall-clock seconds the fak guard harness was sampled this session.", "gauge")
 	fmt.Fprintf(&b, "fak_harness_elapsed_seconds %s\n", promFloat(s.Elapsed.Seconds()))
+	// Operator-question guard-stop tallies observed at this tick. Always emitted (zero
+	// is meaningful): a missing gauge must never read as "no stops" (#4348).
+	writeHelp(&b, "fak_harness_operator_directed_stops", "Guard Stop-hook turn-ends where the agent asked a human instead of acting, as observed in the guard-stops ledger at this harness tick.", "gauge")
+	fmt.Fprintf(&b, "fak_harness_operator_directed_stops %d\n", s.GuardStops.OperatorDirected)
+	writeHelp(&b, "fak_harness_fail_open_stops", "Guard Stop-hook fail-open stops (the hook could not decide and allowed the stop) observed in the guard-stops ledger at this harness tick.", "gauge")
+	fmt.Fprintf(&b, "fak_harness_fail_open_stops %d\n", s.GuardStops.FailOpen)
 	return b.String()
 }
 
@@ -486,6 +519,11 @@ type ledgerRow struct {
 	GPUVRAMUsed      *uint64  `json:"gpu_vram_used_bytes,omitempty"`
 	GPUVRAMTotal     *uint64  `json:"gpu_vram_total_bytes,omitempty"`
 	GPUUtilPct       *float64 `json:"gpu_utilization_percent,omitempty"`
+	// Operator-question guard-stop tallies observed at this tick. NOT omitempty — a
+	// zero is a meaningful, honest reading (no such stops), so it is always present so
+	// a missing field can never be misread as "no stops recorded" (#4348).
+	OperatorDirectedStops int `json:"operator_directed_stops"`
+	FailOpenStops         int `json:"fail_open_stops"`
 }
 
 type halfJSON struct {
@@ -540,6 +578,9 @@ func (s Snapshot) MarshalLedgerRow(mode, provider, agent string, now time.Time) 
 		GoHeapSysBytes: s.GoHeapSysBytes,
 		NumCPU:         s.NumCPU,
 		GOMAXPROCS:     s.GOMAXPROCS,
+
+		OperatorDirectedStops: s.GuardStops.OperatorDirected,
+		FailOpenStops:         s.GuardStops.FailOpen,
 	}
 	if s.HaveKernelCPUPeak {
 		p := s.KernelCPUPercentPeak

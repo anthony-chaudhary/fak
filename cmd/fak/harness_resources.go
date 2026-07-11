@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
@@ -35,4 +36,34 @@ func appendHarnessResourcesTo(path, mode, provider, agent string, snap harnessre
 	defer f.Close()
 	_, err = f.Write(append(line, '\n'))
 	return err
+}
+
+// foldGuardStopCounts folds the session's guard-stops ledger into the operator-question
+// counts that ride on the harness-resources row (operator-directed asks + fail-open
+// stops). It reads the SAME ledger `fak guard-stops` folds, so the harness tick and the
+// guard-stops tally agree. The counts are the ledger-to-date totals observed at this
+// tick (a gauge, not a per-session delta); a fleet consumer diffs consecutive ticks.
+//
+// Zero-safe and fail-open (#4348): no ledger wired, an unreadable file, or an empty
+// ledger all yield an explicit zero — never a gap — so every harness row states how
+// often the harness stopped to ask a human, even when that answer is "never".
+func foldGuardStopCounts() harnessres.GuardStopCounts {
+	return guardStopCountsFrom(guardStopsLedgerResolved())
+}
+
+// guardStopCountsFrom is the testable core: fold the guard-stops ledger at path into the
+// harness-row counts. An empty path or a read error is a zero reading, not a failure.
+func guardStopCountsFrom(ledger string) harnessres.GuardStopCounts {
+	if strings.TrimSpace(ledger) == "" {
+		return harnessres.GuardStopCounts{}
+	}
+	content, err := readGuardStopsLedger(ledger)
+	if err != nil {
+		return harnessres.GuardStopCounts{}
+	}
+	sum := summarizeGuardStops(content, 0)
+	return harnessres.GuardStopCounts{
+		OperatorDirected: sum.OperatorDirected,
+		FailOpen:         sum.FailOpen,
+	}
 }

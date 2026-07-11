@@ -1489,6 +1489,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	var sessionWindow time.Duration
 	if sampler != nil {
 		snap := sampler.Stop()
+		snap.GuardStops = foldGuardStopCounts()
 		sessionWindow = snap.Elapsed
 		appendHarnessResources("guard", provider, agentName, snap)
 		if !quiet {
