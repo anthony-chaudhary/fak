@@ -57,8 +57,13 @@ type CacheAttributionVars struct {
 	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
 	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"` // negative until reads repay writes
 	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
-	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
-	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"` // avoided engine calls, NOT a token-equiv
+	// FakCompactionCacheReadTokens is the OBSERVED provider cache_read at this session's compaction
+	// fires — the warm witness FakTokenEquiv prices the shed on (min(shed, this) prices at the read
+	// marginal, the cold remainder at full input). Carried so the `fak info` cache tab can EXPLAIN
+	// why the shed's token-equiv is below its raw count on a warm session, not just report the net.
+	FakCompactionCacheReadTokens uint64 `json:"fak_compaction_cache_read_tokens,omitempty"`
+	FakKVPrefixReusedTokens      uint64 `json:"fak_kv_prefix_reused_tokens"`
+	FakVDSOAvoidedCalls          uint64 `json:"fak_vdso_avoided_calls"` // avoided engine calls, NOT a token-equiv
 }
 
 // ManagedCacheVars is the /debug/vars managed-cache 1h TTL-upgrade POSTURE (#2190). Active is the
