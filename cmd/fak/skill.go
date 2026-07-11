@@ -47,6 +47,8 @@ func cmdSkill(args []string) {
 		code = runSkillResidency(os.Stdout, os.Stderr, args[1:])
 	case "footprint":
 		code = runSkillFootprint(os.Stdout, os.Stderr, args[1:])
+	case "value":
+		code = runSkillValue(os.Stdout, os.Stderr, args[1:])
 	case "swap":
 		code = runSkillSwap(os.Stdout, os.Stderr, args[1:])
 	case "-h", "--help", "help":
@@ -86,6 +88,12 @@ The queried skill loader — 0 cost for ∞ skills, paged on demand (epic #1103,
       the userland resident-floor scorecard: per-skill resident description
       bytes + at-rest card bytes, the floor total (the /context Skills slice),
       and the top-N heaviest. Deterministic and offline (epic #3229 / #3234).
+
+  fak skill value [--ledger PATH] [--basis PATH] [--json]
+      the per-skill outcome-VALUE ledger (not a usage count): measured pass /
+      cost / latency lift of sessions that LOADED a skill vs matched same-class
+      sessions that did not. Flags net-negative skills for auto-revert and any
+      active skill promoted with no valuation basis (#2796 mirror; issue #2873).
 
 Without a live kernel the faulted/evicted residency states and the eviction
 blast radius are zero (a one-shot CLI holds no resident pages); the verbs still
