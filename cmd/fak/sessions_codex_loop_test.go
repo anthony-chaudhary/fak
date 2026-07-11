@@ -361,6 +361,43 @@ func TestSessionsCodexLoopRecentScansCodexHome(t *testing.T) {
 	}
 }
 
+// A whitespace- or CR-polluted CODEX_HOME (setx / CRLF .env / trailing space) must
+// still resolve like the sibling resolveCodexHome: whitespace-only falls back to
+// ~/.codex, and a real dir with trailing space resolves to the trimmed dir — never a
+// bogus relative "sessions" root that fails the live continuation hook open.
+func TestResolvedCodexLoopHomeTrimsPollutedEnv(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)          // POSIX os.UserHomeDir
+	t.Setenv("USERPROFILE", userHome)   // Windows os.UserHomeDir
+	wantFallback := filepath.Clean(filepath.Join(userHome, ".codex"))
+
+	t.Run("whitespace-only env falls back to ~/.codex", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "   ")
+		got, err := resolvedCodexLoopHome("")
+		if err != nil {
+			t.Fatalf("resolvedCodexLoopHome: %v", err)
+		}
+		if got != wantFallback {
+			t.Fatalf("polluted CODEX_HOME resolved to %q, want fallback %q", got, wantFallback)
+		}
+		if strings.TrimSpace(got) == "" || !filepath.IsAbs(got) {
+			t.Fatalf("resolved home %q is not a usable absolute path", got)
+		}
+	})
+
+	t.Run("real dir with trailing space resolves to the trimmed dir", func(t *testing.T) {
+		real := filepath.Join(t.TempDir(), "codex-home")
+		t.Setenv("CODEX_HOME", real+"  ")
+		got, err := resolvedCodexLoopHome("")
+		if err != nil {
+			t.Fatalf("resolvedCodexLoopHome: %v", err)
+		}
+		if got != filepath.Clean(real) {
+			t.Fatalf("padded CODEX_HOME resolved to %q, want %q", got, filepath.Clean(real))
+		}
+	})
+}
+
 func writeCodexLoopFixture(t *testing.T, path string, lines []string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {

@@ -841,7 +841,11 @@ func diagnoseCurrentCodexLoop(codexHome string) (codexLoopDiagnosis, bool, error
 func resolvedCodexLoopHome(codexHome string) (string, error) {
 	home := strings.TrimSpace(codexHome)
 	if home == "" {
-		home = os.Getenv("CODEX_HOME")
+		// TrimSpace mirrors resolveCodexHome (memq_codex.go): a whitespace- or
+		// CR-polluted CODEX_HOME (setx / CRLF .env / trailing space) must still
+		// fall through to ~/.codex, not become a bogus relative sessions root
+		// that fails the live continuation hook open.
+		home = strings.TrimSpace(os.Getenv("CODEX_HOME"))
 	}
 	if home == "" {
 		userHome, err := os.UserHomeDir()
