@@ -3,8 +3,8 @@
   "trace_id": "guard",
   "step_class": "checkpoint",
   "basis": "token_headroom",
-  "reason": "resident 120.2k of 96.0k budget (125% used)",
-  "resident_tokens": 120230,
+  "reason": "resident 111.0k of 96.0k budget (116% used)",
+  "resident_tokens": 111002,
   "budget_tokens": 96000,
   "phase": "crowding"
 }
