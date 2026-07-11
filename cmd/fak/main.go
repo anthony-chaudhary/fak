@@ -431,6 +431,10 @@ func main() {
 		cmdMilestone(os.Args[2:])
 	case "milestone-scorecard":
 		cmdMilestoneScorecard(os.Args[2:])
+	case "project":
+		// The ProjectsV2 board control-pane fold — makes the board an operator-visible
+		// dimension (report/verdict/Slack-ready) instead of a write-only sync target.
+		cmdProject(os.Args[2:])
 	case "mlp-score":
 		// The witnessed grade of the "first lovable cut" for the all-in-one agent
 		// runtime epic (#3256, milestone #17): per-criterion PASS/not-yet (#3284).
