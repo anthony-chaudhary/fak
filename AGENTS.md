@@ -254,6 +254,17 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
   to remember. The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md) skill mechanizes
   the rule end to end — lint the subject with `--preview`, stage-and-commit exactly your
   paths under the lock, and verify only your paths landed.
+- **One issue, one commit; one commit, one leaf.** The atom is a whole issue's coherent
+  change, landed once — not one file, not one step. Finish and *green the acceptance
+  criteria before the first commit*: splitting an issue across follow-ups that re-touch the
+  same files (land → patch → patch) is churn, and each re-run pays the full preflight +
+  hook-audit + advisory-lock + CI cost while spreading the diff-witnessed close over N SHAs
+  (#3848 landed one audit change in three commits, `crossaudit.go` re-touched in all three).
+  Don't swing the other way either — batching *different* issues into one commit blurs the
+  closure gate, which binds one `#N` to one diff-witnessed SHA (over 300 commits, one does
+  this; the rarity is the point). When a lane you own carries many dirty paths from finished
+  work, `fak sweep` groups them by leaf so a coherent slice commits together (a lane over ~10
+  paths splits into directory-coherent sub-units — small, but each still a whole change).
 - **Sign off every commit** — `git commit -s` (DCO). Use a Conventional-Commits subject
   with a `(fak <leaf>)` trailer; a docs-only change uses a `docs(scope):` subject.
   A `cmd/` **demo or binary** has no `internal/<name>/` package, so stamp it with its
