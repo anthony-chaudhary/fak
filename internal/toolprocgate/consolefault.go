@@ -345,7 +345,32 @@ func (s *Supervisor) ExitConsoleFault(callID string, nowMS int64, class ConsoleF
 		Surface: string(surface),
 		Detail:  boundConsoleFaultDetail(detail),
 	}
+	// Remember the fault so AdmitSpawn can contain the blast radius of the NEXT
+	// spawn (bounded ring: a storm cannot grow this without limit).
+	s.mu.Lock()
+	s.recentFaults = append(s.recentFaults, ev)
+	if over := len(s.recentFaults) - recentFaultRingCap; over > 0 {
+		s.recentFaults = s.recentFaults[over:]
+	}
+	s.mu.Unlock()
 	return ev, nil
+}
+
+// AdmitSpawn is the containment gate: BEFORE the embedder launches an agent onto
+// a console surface, it asks whether that spawn would let a terminal crash
+// cascade. The verdict folds the console faults this supervisor has recorded
+// (ExitConsoleFault) against pol, so a surface stuck in a re-crash loop, a
+// surface already at its blast-radius cap, or a host in a cross-session fault
+// storm is refused/held instead of admitted. A ContainAdmit verdict is the only
+// green light; every other verdict is a protective refusal the embedder honors
+// by placing the agent elsewhere or holding. Pure w.r.t. the recorded history —
+// it reads the fault ring and req, never a clock of its own.
+func (s *Supervisor) AdmitSpawn(req ContainmentRequest, pol ContainmentPolicy) ContainmentDecision {
+	s.mu.Lock()
+	faults := make([]ConsoleFaultEvent, len(s.recentFaults))
+	copy(faults, s.recentFaults)
+	s.mu.Unlock()
+	return DecideContainment(pol, faults, req)
 }
 
 // AppendConsoleFaultEvent writes one validated row as a JSONL line.

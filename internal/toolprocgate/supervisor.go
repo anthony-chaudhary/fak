@@ -34,7 +34,19 @@ type Supervisor struct {
 	spawned map[string]bool   // callIDs ever spawned (journal identity guard)
 	pids    map[string]int    // callID -> bound OS process-tree root (seam 6), cleared with cancels
 	reaper  OSReaper          // OS lever for bound pids; nil = advice-only (no teeth)
+	// recentFaults is a bounded ring of the last console faults ExitConsoleFault
+	// recorded, kept so AdmitSpawn can fold them into a blast-radius containment
+	// verdict — the memory that lets a crash contain the NEXT spawn instead of
+	// only the dead call. Bounded by recentFaultRingCap so a fault storm cannot
+	// grow it without limit.
+	recentFaults []ConsoleFaultEvent
 }
+
+// recentFaultRingCap bounds the in-memory fault history AdmitSpawn folds. The
+// containment policy only ever looks inside a minutes-wide window, so a few
+// hundred rows is far more than any live decision reads; the cap is the
+// storm-proofing backstop, not the working set.
+const recentFaultRingCap = 256
 
 // TickAction is one enforcement act Tick performed or advised.
 type TickAction struct {
