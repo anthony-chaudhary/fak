@@ -35,7 +35,7 @@ const codexLoopLaunchPrefixBytes int64 = 256 << 10
 // without making the general transcript diagnoser artificial. They are only mutated
 // by the serial CodexLoopHook witness tests.
 var codexLoopHookBudget = codexLoopHookDefaultBudget
-var codexLoopHookDiagnose = diagnoseCodexLoop
+var codexLoopHookDiagnose = probeCodexLoopProvider
 
 type codexLoopDiagnosis struct {
 	Schema            string                 `json:"schema"`
@@ -406,13 +406,8 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	}
 	// Snapshot and close before diagnosis. An injected/slow/panicking diagnose path
 	// must never retain a Windows file handle after the outer budget allows the turn.
-	snapshot, readErr := io.ReadAll(io.LimitReader(fh, 64<<20))
+	d, diagnoseErr := diagnose(fh, resolved)
 	closeErr := fh.Close()
-	if readErr != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: read %s: %v (allowing turn)\n", resolved, readErr)
-		return 0
-	}
-	d, diagnoseErr := diagnose(bytes.NewReader(snapshot), resolved)
 	if diagnoseErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn)\n", diagnoseErr)
 		return 0
@@ -926,6 +921,32 @@ func expandCodexLoopTilde(path string) string {
 		}
 	}
 	return path
+}
+
+func probeCodexLoopProvider(r io.Reader, path string) (codexLoopDiagnosis, error) {
+	d := codexLoopDiagnosis{Schema: codexLoopSchema, Path: path, Verdict: "OK"}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var rec struct {
+			Timestamp string          `json:"timestamp"`
+			Type      string          `json:"type"`
+			Payload   json.RawMessage `json:"payload"`
+		}
+		if json.Unmarshal(line, &rec) != nil || rec.Type != "session_meta" {
+			continue
+		}
+		applyCodexLoopSessionMeta(&d, rec.Timestamp, rec.Payload)
+		return d, nil
+	}
+	if err := sc.Err(); err != nil {
+		return d, err
+	}
+	return d, nil
 }
 
 func diagnoseCodexLoop(r io.Reader, path string) (codexLoopDiagnosis, error) {

@@ -149,6 +149,44 @@ func TestCodexLoopHookSessionIdentifierAliases(t *testing.T) {
 	}
 }
 
+func TestCodexLoopHookLargeTranscriptUsesProviderProbeWithinBudget(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
+	home, sessionID := writeCodexHookSession(t, "openai")
+	path, err := resolveCodexLoopSessionPath(home, sessionID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fh, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := bytes.Repeat([]byte(`{"timestamp":"2026-07-10T17:00:01Z","type":"response_item","payload":{"type":"message","content":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}`+"\n"), 50000)
+	if _, err := fh.Write(chunk); err != nil {
+		t.Fatal(err)
+	}
+	if err := fh.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBudget := codexLoopHookBudget
+	codexLoopHookBudget = 100 * time.Millisecond
+	t.Cleanup(func() { codexLoopHookBudget = oldBudget })
+	payload := `{"session_id":"` + sessionID + `"}`
+	started := time.Now()
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("hook exit=%d stderr=%s", code, stderr.String())
+	}
+	if elapsed := time.Since(started); elapsed >= codexLoopHookBudget {
+		t.Fatalf("provider probe took %s, budget=%s", elapsed, codexLoopHookBudget)
+	}
+	var block codexLoopHookBlock
+	if err := json.Unmarshal(stdout.Bytes(), &block); err != nil || block.Decision != "block" {
+		t.Fatalf("large direct transcript failed open: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+}
+
 func TestCodexLoopHookGuardedMarkerSkipsReparse(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "") // no explicit direct override in play
 	t.Setenv(guardActiveEnv, "1")          // as if spawned by `fak guard`
