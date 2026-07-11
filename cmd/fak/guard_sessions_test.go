@@ -181,6 +181,25 @@ func TestSessionLsIdentity(t *testing.T) {
 		t.Fatalf("list missing UUID column / joined uuid:\n%s", list)
 	}
 
+	// JSON uses the same identity join rather than leaking the underlying index row schema.
+	out.Reset()
+	errb.Reset()
+	if rc := runGuardSessions(&out, &errb, []string{"--reg-dir", reg, "--json"}); rc != 0 {
+		t.Fatalf("json rc=%d stderr=%s", rc, errb.String())
+	}
+	var payload struct {
+		Sessions []struct {
+			TraceID        string `json:"trace_id"`
+			TranscriptUUID string `json:"transcript_uuid"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, out.String())
+	}
+	if len(payload.Sessions) != 2 || payload.Sessions[0].TranscriptUUID != "uuid-XYZ" || payload.Sessions[1].TranscriptUUID != "" {
+		t.Fatalf("json identity projection = %+v", payload.Sessions)
+	}
+
 	// Resolve the mapped session: the detail names the transcript UUID.
 	out.Reset()
 	errb.Reset()

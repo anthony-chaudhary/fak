@@ -73,10 +73,15 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
+		_, uuidByTrace := resume.LoadIdentity(regDir)
+		projected := make([]guardSessionJSONRow, 0, len(rows))
+		for _, row := range rows {
+			projected = append(projected, guardSessionJSONRow{Row: row, TranscriptUUID: uuidByTrace[row.TraceID]})
+		}
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
 			"schema":   "fak.guard-sessions.v1",
 			"reg_dir":  regDir,
-			"sessions": rows,
+			"sessions": projected,
 		}, "fak guard sessions")
 	}
 	if len(rows) == 0 {
@@ -130,6 +135,11 @@ func renderGuardSessionResolve(stdout, stderr io.Writer, regDir string, rows []g
 // handle first (the thing to reference), then the trace, the joined transcript UUID (the id
 // `claude --resume` takes; a dash when the identity store has no join yet), agent, pid,
 // start, and cwd.
+type guardSessionJSONRow struct {
+	guardsessions.Row
+	TranscriptUUID string `json:"transcript_uuid,omitempty"`
+}
+
 func renderGuardSessionTable(w io.Writer, rows []guardsessions.Row, uuidByTrace map[string]string) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "HANDLE\tTRACE\tUUID\tAGENT\tPID\tSTARTED\tCWD\n")
