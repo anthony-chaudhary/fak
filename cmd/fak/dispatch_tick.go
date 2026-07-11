@@ -596,11 +596,14 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	tPreflight := time.Now()
-	pre, err := dispatchPreflight(root, stderr, opts.MaxWorkers, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend))
+	pre, preflightTimings, err := dispatchPreflightTimed(root, stderr, opts.MaxWorkers, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend))
 	if err != nil {
 		return nil, err
 	}
 	dispatchStampMs(timings, "preflight", tPreflight)
+	for name, ms := range preflightTimings {
+		timings["preflight_"+name] = ms
+	}
 	preOK := dispatchMapString(pre, "verdict") == "SPAWN_OK"
 	account := accountFromMap(mapAt(pre, "account"))
 	if opts.Account != nil {

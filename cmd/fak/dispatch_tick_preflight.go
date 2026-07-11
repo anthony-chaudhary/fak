@@ -36,15 +36,33 @@ func dispatchRefreshRegistry(root string, stderr io.Writer) map[string]any {
 }
 
 func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, error) {
+	out, _, err := dispatchPreflightTimed(root, stderr, maxWorkers, workKind, product)
+	return out, err
+}
+
+func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, map[string]int64, error) {
+	timings := map[string]int64{}
+	stamp := func(name string, started time.Time) {
+		ms := time.Since(started).Milliseconds()
+		if ms == 0 {
+			ms = 1
+		}
+		timings[name] = ms
+	}
 	// One host process snapshot feeds both the safety fold and aggregate thread/RAM
 	// capacity. Before #4258 those consumers each spawned their own full Get-Process.
+	t0 := time.Now()
 	processes := dispatchProbeProcesses()
+	stamp("process_snapshot", t0)
+	t0 = time.Now()
+	kernel := dispatchPreflightKernel(root)
+	stamp("kernel_probe", t0)
 	in := dispatchtick.PreflightInput{
 		Workspace:     root,
 		MaxWorkers:    maxWorkers,
 		Host:          dispatchPreflightHostFromProcesses(processes),
 		Account:       dispatchPreflightAccount(root, stderr, workKind, product),
-		Kernel:        dispatchPreflightKernel(root),
+		Kernel:        kernel,
 		Seat:          dispatchPreflightSeat(root, stderr, product),
 		Resources:     dispatchPreflightHostResourcesFromProcesses(processes),
 		Budgets:       dispatchtick.DefaultHostBudgets(),
@@ -142,7 +160,7 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 			"required_workers": forecast.RequiredWorkers,
 		}
 	}
-	return out, nil
+	return out, timings, nil
 }
 
 // dispatchSetpointLive mirrors EvaluatePreflight's live fold EXACTLY -- the max of
