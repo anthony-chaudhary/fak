@@ -5161,5 +5161,103 @@ class BackendHealthSpawnGateTest(unittest.TestCase):
             dispatch_status.backend_stub_rates = orig
 
 
+
+class TestOpencodeGatewayGate(unittest.TestCase):
+    def test_gateway_down_suppresses_tick_with_legible_reason(self):
+        mod = load()
+        down = lambda _row: {"status": "GATEWAY_DOWN", "block_reason": "connection refused"}
+        planned, reason = mod.gate_opencode_gateway(3, {"name": "glm"}, probe=down)
+        self.assertEqual(planned, 0)
+        self.assertIn("gateway_down", reason)
+        self.assertIn("backend_unhealthy", reason)
+
+    def test_healthy_gateway_resumes_next_tick(self):
+        mod = load()
+        healthy = lambda _row: {"status": "OK"}
+        self.assertEqual(mod.gate_opencode_gateway(3, {"name": "glm"}, probe=healthy), (3, None))
+
+    def test_probe_error_fails_open(self):
+        mod = load()
+        def broken(_row): raise OSError("probe unavailable")
+        self.assertEqual(mod.gate_opencode_gateway(3, {"name": "glm"}, probe=broken), (3, None))
+
+    def test_evaluate_emits_zero_spawn_gateway_down_payload(self):
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 3, "live": 0,
+               "host_cap": 32, "account": {"tag": "glm-a", "tier": 2,
+               "model": "glm-5.2", "dir": "/acct/glm"}}
+        pick = {"lane": "docs", "numbers": [3866], "by_lane_count": {"docs": 1}}
+        EvaluateTest._patch(self, mod, pre=pre, pick=pick)
+        mod.account_probe.probe_opencode_account = lambda _row: {
+            "status": "GATEWAY_DOWN", "block_reason": "connection refused"}
+
+        payload = mod.evaluate(ROOT, max_workers=3, work_kind="gardening",
+                               lane=None, live=False, backend="opencode")
+
+        self.assertEqual(payload["action"], "backend_health_skip")
+        self.assertEqual(payload["verdict"], "GATEWAY_DOWN")
+        self.assertEqual(payload["gateway_health_gate"], {
+            "status": "backend_unhealthy", "reason": "gateway_down", "planned": 0})
+        self.assertIn("connection refused", payload["reason"])
+
+class SpawnFailedCauseTest(unittest.TestCase):
+    """classify_spawn_failed_cause pins each cause bucket on a sample worker-log
+    tail — the ~4% SPAWN_FAILED noise made attributable, never a false blame (#2635)."""
+
+    HEADER = "# fak-spawn 20260710-010203 issue=1515 lane=cmd backend=claude argv0=claude.exe\n"
+
+    def test_weekly_limit_banner(self) -> None:
+        mod = load()
+        tail = self.HEADER + "You've hit your weekly limit · resets 4am (America/Los_Angeles)\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
+                         mod.SPAWN_CAUSE_WEEKLY_LIMIT)
+
+    def test_glm_wall_is_weekly_limit(self) -> None:
+        mod = load()
+        tail = self.HEADER + "Limit Exhausted — usage limit reached\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
+                         mod.SPAWN_CAUSE_WEEKLY_LIMIT)
+
+    def test_stale_cred_auth_gap(self) -> None:
+        mod = load()
+        tail = self.HEADER + "Missing environment variable: `ANTHROPIC_API_KEY`\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
+                         mod.SPAWN_CAUSE_STALE_CRED)
+        login = self.HEADER + "no ChatGPT subscription auth.json was resolved. Run `codex login`\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": login}),
+                         mod.SPAWN_CAUSE_STALE_CRED)
+
+    def test_child_crash_traceback(self) -> None:
+        mod = load()
+        tail = self.HEADER + "Traceback (most recent call last):\n  File ...\nRuntimeError: boom\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
+                         mod.SPAWN_CAUSE_CHILD_CRASH)
+        oom = self.HEADER + "fatal error: runtime: out of memory\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": oom}),
+                         mod.SPAWN_CAUSE_CHILD_CRASH)
+
+    def test_exec_race_header_only_and_empty(self) -> None:
+        mod = load()
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": self.HEADER}),
+                         mod.SPAWN_CAUSE_EXEC_RACE)
+        self.assertEqual(
+            mod.classify_spawn_failed_cause({"tail": "", "silent": True, "log_bytes": 0}),
+            mod.SPAWN_CAUSE_EXEC_RACE)
+
+    def test_unknown_unrecognized_child_output(self) -> None:
+        mod = load()
+        tail = self.HEADER + "some novel shutdown line we do not recognize yet\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
+                         mod.SPAWN_CAUSE_UNKNOWN)
+
+    def test_precedence_quota_beats_crash(self) -> None:
+        # A cap banner that also mentions a fatal error is still a weekly_limit,
+        # not a child_crash — most-specific (quota) wins.
+        mod = load()
+        tail = self.HEADER + "HTTP 429 rate-limited\nfatal error: aborted\n"
+        self.assertEqual(mod.classify_spawn_failed_cause({"tail": tail}),
+                         mod.SPAWN_CAUSE_WEEKLY_LIMIT)
+
+
 if __name__ == "__main__":
     unittest.main()

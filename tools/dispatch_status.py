@@ -1487,6 +1487,127 @@ def silent_workers(
     return out
 
 
+_SPAWN_FAILED_CAUSE_SCHEMA = "fak.spawn-failed-cause-breakdown.v1"
+_SPAWN_CAUSE_LOOKBACK_MIN = 24 * 60  # default trailing window (24h)
+
+
+def spawn_failed_cause_breakdown(
+    runs_dir: Path,
+    *,
+    lookback_min: int = _SPAWN_CAUSE_LOOKBACK_MIN,
+    now_ts: float | None = None,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+    max_evidence: int = 5,
+) -> dict[str, Any]:
+    """Read-only fold: the trailing SPAWN_FAILED early-exit rate, BROKEN DOWN by
+    cause (#2635).
+
+    The ~1-in-25 baseline early-exit noise is absorbed by backend/account failover
+    and dismissed as "known noise" — but it was only ever LABELLED SPAWN_FAILED,
+    never attributed, so a regression in one sub-cause could hide inside the ~4%
+    aggregate. This fold reads the SAME disk artifacts :func:`silent_workers`
+    reads — a dead-pid ``resolve-<N>-<stamp>.log`` at/below the stub floor is one
+    empty/stub early-exit event — classifies each by
+    ``issue_resolve_dispatch.classify_spawn_failed_cause`` on its log tail, and
+    reports the count + rate PER cause with per-event evidence rows, so "≈4%
+    baseline" becomes a named, watchable MIX instead of a lumped constant.
+
+    Denominator = every ``resolve-*.log`` inside the window (each is one spawn), so
+    ``rate`` is spawn_failed / spawns. Scope note: a crash that dumps a LARGE log
+    before exiting clears the stub floor and is out of this disk-fold's population —
+    it is attributed instead by the live tick's ``cause`` stamp
+    (:func:`issue_resolve_dispatch.classify_spawn_failed_cause` at the spawn_failed
+    payload sites). Read-only + FAIL-OPEN: no psutil oracle ⇒ the silent set is
+    empty and the mix is reported over 0 events (never a false attribution). Newest
+    evidence first."""
+    schema = _SPAWN_FAILED_CAUSE_SCHEMA
+    empty = {"schema": schema, "lookback_min": lookback_min, "spawns": 0,
+             "spawn_failed": 0, "rate": 0.0, "by_cause": {}, "events": []}
+    if not runs_dir.is_dir():
+        return empty
+    try:
+        import issue_resolve_dispatch as ird  # type: ignore
+    except ImportError:
+        return empty
+    now_ts = time.time() if now_ts is None else now_ts
+    horizon = now_ts - lookback_min * 60
+    # Denominator: every spawn (resolve log) whose mtime is inside the window.
+    spawns = 0
+    for log in runs_dir.glob("resolve-*.log"):
+        if not _RESOLVE_LOG_RE.search(log.name):
+            continue
+        try:
+            if log.stat().st_mtime >= horizon:
+                spawns += 1
+        except OSError:
+            continue
+    causes = list(getattr(ird, "SPAWN_FAILED_CAUSES",
+                          ("weekly_limit", "stale_cred", "child_crash",
+                           "exec_race", "unknown")))
+    by_cause: dict[str, dict[str, Any]] = {
+        c: {"count": 0, "evidence": []} for c in causes}
+    events: list[dict[str, Any]] = []
+    tail_chars = int(getattr(ird, "EARLY_EXIT_TAIL_CHARS", 8192))
+    # Numerator: the silent/stub early-exit population, classified by cause.
+    for row in silent_workers(runs_dir, alive=alive, probe=probe):
+        log = runs_dir / str(row.get("log") or "")
+        try:
+            if log.stat().st_mtime < horizon:
+                continue
+        except OSError:
+            continue
+        try:
+            tail = log.read_text(encoding="utf-8", errors="replace")[-tail_chars:]
+        except OSError:
+            tail = ""
+        size = int(row.get("size") or 0)
+        cause = ird.classify_spawn_failed_cause(
+            {"tail": tail, "silent": size == 0, "log_bytes": size})
+        ev = {"issue": row.get("issue"), "log": row.get("log"),
+              "stamp": row.get("stamp"), "size": size, "cause": cause}
+        events.append(ev)
+        bucket = by_cause.setdefault(cause, {"count": 0, "evidence": []})
+        bucket["count"] += 1
+        if len(bucket["evidence"]) < max_evidence:
+            bucket["evidence"].append(ev)
+    spawn_failed = len(events)
+    for bucket in by_cause.values():
+        n = int(bucket["count"])
+        bucket["rate_of_failed"] = round(n / spawn_failed, 3) if spawn_failed else 0.0
+        bucket["rate_of_spawns"] = round(n / spawns, 4) if spawns else 0.0
+    return {
+        "schema": schema, "lookback_min": lookback_min,
+        "spawns": spawns, "spawn_failed": spawn_failed,
+        "rate": round(spawn_failed / spawns, 4) if spawns else 0.0,
+        "by_cause": by_cause, "events": events,
+    }
+
+
+def render_spawn_causes(b: dict[str, Any]) -> str:
+    """One-screen render of :func:`spawn_failed_cause_breakdown` (#2635): the
+    trailing SPAWN_FAILED rate, then a per-cause mix with a few evidence rows."""
+    win_h = round(int(b.get("lookback_min") or 0) / 60, 1)
+    spawns = int(b.get("spawns") or 0)
+    failed = int(b.get("spawn_failed") or 0)
+    lines = [
+        f"spawn-failed cause breakdown ({b.get('schema')})",
+        f"  window   : trailing {win_h}h — {failed}/{spawns} spawns early-exited "
+        f"(rate {b.get('rate')})",
+    ]
+    by_cause = b.get("by_cause") or {}
+    for cause in sorted(by_cause, key=lambda c: (-int(by_cause[c].get('count') or 0), c)):
+        row = by_cause[cause]
+        n = int(row.get("count") or 0)
+        lines.append(f"  {cause:<12}: {n:>3}  (of failed {row.get('rate_of_failed')}, "
+                     f"of spawns {row.get('rate_of_spawns')})")
+        for ev in (row.get("evidence") or [])[:3]:
+            lines.append(f"      · #{ev.get('issue')} {ev.get('log')} ({ev.get('size')}B)")
+    if not failed:
+        lines.append("  (no early-exit events in window — nothing to attribute)")
+    return "\n".join(lines)
+
+
 def parse_ships_per_worker(records: list[str]) -> dict[str, Any]:
     """Fold a list of commit-message records (each ``subject\\n body``) into a
     ships-per-worker attribution (#2065). Pure — the git read lives in the caller.
@@ -4425,6 +4546,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="write the committed markdown status doc to this path "
                          "(forces the full fold; --fast is ignored when --md is set)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--spawn-causes", action="store_true",
+                    help="print ONLY the SPAWN_FAILED early-exit rate broken down by "
+                         "cause (#2635) over the trailing window and exit — the "
+                         "read-only attribution fold, honoring --json")
     ap.add_argument("--slack", nargs="?", const="__env__", default=None,
                     metavar="CHANNEL",
                     help="post the status card to Slack (optional channel id; default: "
@@ -4436,6 +4561,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    if args.spawn_causes:
+        # Read-only attribution fold (#2635): no gh/preflight fold, no spawn.
+        breakdown = spawn_failed_cause_breakdown(root / RUNS_DIRNAME)
+        if args.json:
+            print(json.dumps(breakdown, indent=2))
+        else:
+            print(render_spawn_causes(breakdown))
+        return 0
     # The committed doc must carry the real backlog/closure tables, so --md always
     # runs the full fold regardless of --fast. A LIVE Slack post is just as useless when
     # every row reads "n/a (fast)", so --slack forces the full fold too — but a

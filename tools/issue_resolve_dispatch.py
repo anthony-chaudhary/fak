@@ -52,6 +52,7 @@ record ``end``. Disable with ``--no-loop-ledger`` for hermetic/manual probes.
 from __future__ import annotations
 
 import argparse
+import account_probe
 import datetime as dt
 import json
 import os
@@ -3583,6 +3584,89 @@ def classify_no_commit_reason(log: Path) -> str:
     return NO_COMMIT_UNKNOWN
 
 
+# --- SPAWN_FAILED cause attribution (#2635) --------------------------------
+# The ~1-in-25 baseline early-exit — a spawned worker that dies inside the <5s
+# probe window (probe_spawned_worker) with an empty/stub log — is self-healing
+# failover noise, but it is only ever LABELLED verdict=SPAWN_FAILED, never
+# ATTRIBUTED. Lumping the causes means "it's just baseline noise" is an
+# assumption, not a measured fact: a regression in ONE sub-cause could hide
+# inside the ~4% aggregate. classify_spawn_failed_cause stamps each early-exit
+# witness with ONE cause bucket from the log tail + exit code ALREADY captured,
+# so the read-only fold (dispatch_status.spawn_failed_cause_breakdown) can report
+# the trailing rate PER CAUSE instead of one opaque constant.
+SPAWN_CAUSE_WEEKLY_LIMIT = "weekly_limit"
+SPAWN_CAUSE_STALE_CRED = "stale_cred"
+SPAWN_CAUSE_CHILD_CRASH = "child_crash"
+SPAWN_CAUSE_EXEC_RACE = "exec_race"
+SPAWN_CAUSE_UNKNOWN = "unknown"
+SPAWN_FAILED_CAUSES = (
+    SPAWN_CAUSE_WEEKLY_LIMIT, SPAWN_CAUSE_STALE_CRED, SPAWN_CAUSE_CHILD_CRASH,
+    SPAWN_CAUSE_EXEC_RACE, SPAWN_CAUSE_UNKNOWN,
+)
+
+# A child_crash tail names a runtime fault the worker hit AFTER it exec'd — a real
+# crash (interpreter traceback / Go panic / OOM / segfault / exec failure; cf.
+# #2170), as opposed to a clean lease/exec race that never wrote past the pre-exec
+# spawn header. Kept to unambiguous crash signatures so a benign line never
+# false-blames a healthy exit.
+_SPAWN_CRASH_RE = re.compile(
+    r"Traceback \(most recent call last\)"
+    r"|panic:|goroutine \d+ \[running\]"
+    r"|Segmentation fault|SIGSEGV|signal:\s*(?:killed|segmentation|abort)"
+    r"|core dumped|std::bad_alloc|std::terminate"
+    r"|out of memory|OOMKilled|Cannot allocate memory"
+    r"|fatal error:"
+    r"|exec format error|executable file not found|fork/exec",
+    re.IGNORECASE)
+
+
+def _spawn_header_only(tail: str) -> bool:
+    """True when ``tail`` holds nothing past the pre-exec ``# fak-spawn`` header
+    line(s) :func:`spawn_issue_worker` flushes BEFORE exec — i.e. the child never
+    wrote a byte of its own. That is the on-disk signature of a same-tick
+    lease/exec race (the OS ran nothing, or the child died at exec). An empty tail
+    counts as header-only."""
+    for line in tail.splitlines():
+        if line.strip() and not line.startswith("# fak-spawn"):
+            return False
+    return True
+
+
+def classify_spawn_failed_cause(early: dict[str, Any]) -> str:
+    """Attribute ONE early-exit SPAWN_FAILED event to a cause bucket (#2635).
+
+    ``early`` is the witness :func:`probe_spawned_worker` records for a worker that
+    exited inside the probe window: it carries the worker-log ``tail``, the process
+    ``returncode``, ``silent`` (0-byte log), and ``log_bytes``. Classify from those
+    ALREADY-captured signals — no new probe, no new instrumentation:
+
+    - ``weekly_limit``: the provider quota / 429 banner (``_cap_hit_from_text`` /
+      ``_GLM_WALL_RE``) — the case #2610 cools the seat down for,
+    - ``stale_cred``: a permanent auth gap — missing key / no resolved login
+      (``_AUTH_GAP_RE`` / ``_MISSING_API_KEY_RE``): a seat that cannot authenticate,
+    - ``child_crash``: the child exec'd then died on a runtime fault (traceback /
+      panic / OOM / segfault / exec failure — ``_SPAWN_CRASH_RE``; cf. #2170),
+    - ``exec_race``: an empty / header-only log — the child never wrote past the
+      pre-exec spawn header: a same-tick lease/exec race,
+    - ``unknown``: a non-empty tail with no recognized signature — kept HONEST so a
+      genuinely new cause surfaces as a rising ``unknown`` share, not a silent
+      misfile into one of the known buckets.
+
+    Pure + FAIL-OPEN: precedence runs most-specific first (quota, then cred, then
+    crash) and any doubt falls through to ``exec_race``/``unknown`` — never a false
+    ``weekly_limit``/``stale_cred`` attribution."""
+    tail = str(early.get("tail") or "")
+    if _cap_hit_from_text(tail) is not None or _GLM_WALL_RE.search(tail):
+        return SPAWN_CAUSE_WEEKLY_LIMIT
+    if _AUTH_GAP_RE.search(tail) or _MISSING_API_KEY_RE.search(tail):
+        return SPAWN_CAUSE_STALE_CRED
+    if _SPAWN_CRASH_RE.search(tail):
+        return SPAWN_CAUSE_CHILD_CRASH
+    if early.get("silent") or _spawn_header_only(tail):
+        return SPAWN_CAUSE_EXEC_RACE
+    return SPAWN_CAUSE_UNKNOWN
+
+
 # The RE-BLOCKABLE terminal guard refusals: a worker that TRIED and was STRUCTURALLY
 # blocked by a guard (SELF_MODIFY / POLICY_BLOCK). Re-dispatching the SAME issue
 # re-hits the SAME guard and burns the budget again for no commit (#1396: two ticks
@@ -4252,6 +4336,7 @@ def _maybe_dispatch_contract_repair(
         payload.update({
             "ok": False, "action": "spawn_failed", "verdict": "SPAWN_FAILED",
             "spawned": spawned,
+            "cause": classify_spawn_failed_cause(early),
             "reason": (f"{backend} contract-repair worker pid {spawned['pid']} "
                        f"for issue(s) {nums} exited within {early.get('wait_s')}s "
                        f"with code {early.get('returncode')}"
@@ -4404,6 +4489,21 @@ def gate_spawn_on_health(planned: int, stub_rate: float | None,
     return 0, reason
 
 
+def gate_opencode_gateway(planned: int, account: dict, *, probe=None) -> tuple[int, str | None]:
+    """Suppress opencode only for a conclusive existing-probe GATEWAY_DOWN verdict."""
+    if planned <= 0 or not account:
+        return planned, None
+    probe = probe or account_probe.probe_opencode_account
+    try:
+        verdict = probe(account)
+    except Exception:
+        return planned, None
+    if verdict.get("status") != "GATEWAY_DOWN":
+        return planned, None
+    detail = verdict.get("block_reason") or "guard gateway unreachable"
+    return 0, f"gateway_down: backend_unhealthy: {detail}"
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               live: bool, refresh: bool = True, cooldown_min: int = 120,
               backend: str = "claude",
@@ -4514,6 +4614,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                            work_kind=work_kind, product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
+    gateway_skip_reason = None
+    if backend == "opencode" and pre_ok:
+        eff_max_workers, gateway_skip_reason = gate_opencode_gateway(
+            eff_max_workers, acct)
     account_cap_reroute: dict[str, Any] | None = None
 
     def _preflight_int(value: Any) -> int | None:
@@ -4608,6 +4712,21 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         if account_cap_reroute:
             payload["account_cap_reroute"] = account_cap_reroute
         return finish(payload)
+
+    # Active opencode gateway gate (#3866): unlike the passive stub-rate signal, this
+    # catches a worker that hangs before producing a terminal log. It is deliberately
+    # stateless and fail-open except for the existing prober's typed GATEWAY_DOWN result.
+    if gateway_skip_reason is not None:
+        return finish({
+            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
+            "max_workers": max_workers, "registry_refresh": reg,
+            "timed_out_workers": reaped, "pruned_sidecars": pruned,
+            "preflight": _preflight_public(pre), "account": _account_public(acct),
+            "gateway_health_gate": {"status": "backend_unhealthy",
+                                    "reason": "gateway_down", "planned": 0},
+            "ok": False, "action": "backend_health_skip", "verdict": "GATEWAY_DOWN",
+            "reason": gateway_skip_reason,
+        })
 
     # Backend-health spawn gate (#3247) — the majority-stub decision taken before the
     # seat sizing (which already pinned eff_max_workers to 0) is EMITTED here, alongside
@@ -5489,6 +5608,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         payload.update({"ok": False, "action": "spawn_failed",
                         "verdict": "SPAWN_FAILED",
                         "spawned": spawned,
+                        "cause": classify_spawn_failed_cause(early),
                         "spawn_failed_streak": bump_spawn_failure_streak(
                             runs_dir, target, backend),
                         "reason": (f"{backend} worker pid {spawned['pid']} for "

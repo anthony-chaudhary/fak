@@ -2728,5 +2728,54 @@ class BacklogRateTest(unittest.TestCase):
         self.assertNotIn("supply    :", mod.render(p))
 
 
+class SpawnFailedCauseBreakdownTest(unittest.TestCase):
+    """spawn_failed_cause_breakdown folds the silent/stub early-exit population into a
+    per-cause SPAWN_FAILED mix with evidence rows (#2635) — hermetic tmp runs-dir."""
+
+    HEADER = "# fak-spawn 20260710-010203 issue={n} lane=cmd backend=claude argv0=claude.exe\n"
+
+    def _mk(self, runs: Path, issue: int, stamp: str, tail_body: str) -> None:
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text(self.HEADER.format(n=issue) + tail_body, encoding="utf-8")
+        (runs / f"resolve-{issue}-{stamp}.pid").write_text("39000", encoding="utf-8")
+
+    def test_mix_and_evidence_over_dead_stub_logs(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1515, "20260703-010101",
+                     "You've hit your weekly limit · resets 4am (America/Los_Angeles)\n")
+            self._mk(runs, 2382, "20260703-020202",
+                     "Missing environment variable: `ANTHROPIC_API_KEY`\n")
+            self._mk(runs, 2401, "20260703-030303", "")  # header-only -> exec_race
+            # A productive worker (over the stub floor) is a spawn but NOT a failure.
+            big = runs / "resolve-999-20260703-040404.log"
+            big.write_text("x" * 4000, encoding="utf-8")
+            (runs / "resolve-999-20260703-040404.pid").write_text("39001", encoding="utf-8")
+
+            out = mod.spawn_failed_cause_breakdown(runs, alive=set())  # nothing alive
+
+            self.assertEqual(out["schema"], "fak.spawn-failed-cause-breakdown.v1")
+            self.assertEqual(out["spawns"], 4)          # all four resolve logs
+            self.assertEqual(out["spawn_failed"], 3)    # the three stub early-exits
+            self.assertEqual(out["by_cause"]["weekly_limit"]["count"], 1)
+            self.assertEqual(out["by_cause"]["stale_cred"]["count"], 1)
+            self.assertEqual(out["by_cause"]["exec_race"]["count"], 1)
+            self.assertEqual(out["by_cause"]["child_crash"]["count"], 0)
+            # per-event evidence rows carry the classified cause
+            ev = out["by_cause"]["weekly_limit"]["evidence"][0]
+            self.assertEqual(ev["issue"], 1515)
+            self.assertEqual(ev["cause"], "weekly_limit")
+            self.assertIn("spawn-failed cause breakdown", mod.render_spawn_causes(out))
+
+    def test_empty_runs_dir_is_fail_open(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.spawn_failed_cause_breakdown(Path(d), alive=set())
+            self.assertEqual(out["spawns"], 0)
+            self.assertEqual(out["spawn_failed"], 0)
+            self.assertEqual(out["rate"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
