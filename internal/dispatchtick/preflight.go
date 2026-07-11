@@ -8,13 +8,14 @@ import (
 const (
 	PreflightSchema = "fleet-dispatch-preflight/1"
 
-	PreflightOKVerdict       = "SPAWN_OK"
-	PreflightRefuseHost      = "REFUSE_HOST"
-	PreflightRefuseNoAccount = "REFUSE_NO_ACCOUNT"
-	PreflightRefuseNoSeat    = "REFUSE_NO_SEAT"
-	PreflightRefuseAtCap     = "REFUSE_AT_CAP"
-	PreflightRefuseInspect   = "REFUSE_INSPECT"
-	PreflightObserveSettling = "OBSERVE_SCALING_IN_PROGRESS"
+	PreflightOKVerdict        = "SPAWN_OK"
+	PreflightRefuseHost       = "REFUSE_HOST"
+	PreflightRefuseNoAccount  = "REFUSE_NO_ACCOUNT"
+	PreflightRefuseNoSeat     = "REFUSE_NO_SEAT"
+	PreflightRefuseAtCap      = "REFUSE_AT_CAP"
+	PreflightRefuseInspect    = "REFUSE_INSPECT"
+	PreflightObserveSettling  = "OBSERVE_SCALING_IN_PROGRESS"
+	PreflightRefuseTreePoison = "TREE_POISONED"
 )
 
 const (
@@ -131,10 +132,17 @@ type SeatCheck struct {
 	Error            string `json:"error,omitempty"`
 }
 
+type TreeCheck struct {
+	Poisoned bool   `json:"poisoned"`
+	Package  string `json:"package,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 type PreflightInput struct {
 	Workspace  string
 	MaxWorkers int
 	Host       HostCheck
+	Tree       TreeCheck
 	Account    AccountCheck
 	Kernel     KernelCheck
 	Seat       SeatCheck
@@ -181,6 +189,7 @@ type PreflightResult struct {
 	HostCapacity  HostCapacityInfo `json:"host_capacity"`
 	Seat          SeatCheck        `json:"seat"`
 	Host          HostCheck        `json:"host"`
+	Tree          TreeCheck        `json:"tree"`
 	Account       AccountCheck     `json:"account"`
 	Kernel        KernelCheck      `json:"kernel"`
 	OSWorkerProcs int              `json:"os_worker_procs"`
@@ -350,6 +359,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		HostCapacity:  hostCapInfo,
 		Seat:          seat,
 		Host:          in.Host,
+		Tree:          in.Tree,
 		Account:       publicAccount(in.Account),
 		Kernel:        in.Kernel,
 		OSWorkerProcs: in.OSWorkerProcs,
@@ -429,6 +439,8 @@ func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool
 	case strings.TrimSpace(in.Host.Error) != "" || strings.TrimSpace(in.Kernel.Error) != "":
 		reason := firstNonEmpty(in.Host.Error, in.Kernel.Error, "a preflight safety check could not run")
 		return PreflightRefuseInspect, reason
+	case in.Tree.Poisoned:
+		return PreflightRefuseTreePoison, fmt.Sprintf("shared tree build is red: %s", firstNonEmpty(in.Tree.Package, in.Tree.Error, "failing package unknown"))
 	case !in.Host.Safe:
 		names := strings.Join(in.Host.FlaggedNames, ", ")
 		if strings.TrimSpace(names) == "" {

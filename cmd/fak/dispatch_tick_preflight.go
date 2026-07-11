@@ -61,6 +61,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 		Workspace:     root,
 		MaxWorkers:    maxWorkers,
 		Host:          dispatchPreflightHostFromProcesses(processes),
+		Tree:          dispatchProbeTreeBuild(root),
 		Account:       dispatchPreflightAccount(root, stderr, workKind, product),
 		Kernel:        kernel,
 		Seat:          dispatchPreflightSeat(root, stderr, product),
@@ -1874,4 +1875,45 @@ func dispatchProductBackends(product string) []string {
 	default:
 		return []string{product}
 	}
+}
+
+var dispatchTreeBuildCommand = func(root string) (string, error) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, goBin, "build", "-o", os.DevNull, "./cmd/fak")
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), err
+	}
+	return string(out), nil
+}
+
+func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
+	out, err := dispatchTreeBuildCommand(root)
+	if err == nil {
+		return dispatchtick.TreeCheck{}
+	}
+	// Missing toolchain/probe infrastructure fails open; a real compiler diagnostic
+	// names a package/file and is the poison witness.
+	if errors.Is(err, exec.ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "executable file not found") {
+		return dispatchtick.TreeCheck{Error: err.Error()}
+	}
+	line := ""
+	for _, candidate := range strings.Split(strings.TrimSpace(out), "\n") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			line = candidate
+			break
+		}
+	}
+	if line == "" {
+		line = err.Error()
+	}
+	return dispatchtick.TreeCheck{Poisoned: true, Package: line, Error: err.Error()}
 }
