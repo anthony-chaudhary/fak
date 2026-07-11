@@ -426,6 +426,20 @@ func (sp *SessionPlanner) Materialize(ctx context.Context, id string) ([]byte, e
 	return sp.store.Materialize(ctx, id)
 }
 
+// Spans returns a snapshot of the lossless store's span table (safe metadata only — each span's
+// Digest is its sha256-hex content address, never its bytes), taken under the planner lock so a
+// concurrent turn's ingest cannot tear the read. Together with Materialize this makes
+// *SessionPlanner a ctxplan.Store: the enumeration half a restore-by-digest call needs to map a
+// content-address back to a span ID before demand-paging it. That is what lets the gateway route a
+// fak_context_restore(id) for a ctxview-ELIDED span — one the planned-view rewrite dropped from the
+// passthrough but the lossless store still holds — back to its verbatim bytes through this store's
+// own trust gate, with no new routing code (issue #3062).
+func (sp *SessionPlanner) Spans(ctx context.Context) ([]ctxplan.Span, error) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return sp.store.Spans(ctx)
+}
+
 // Len reports how many messages have been lowered into the store+index — the indexed span count
 // N. After T appended turns it is exactly the message count (each message is Add-ed once), the
 // witness that maintenance is O(total spans), not O(turns²).
