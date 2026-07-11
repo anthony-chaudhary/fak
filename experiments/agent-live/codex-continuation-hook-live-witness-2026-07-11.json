@@ -1,0 +1,55 @@
+{
+  "schema": "fak-codex-continuation-hook-live-witness/1",
+  "captured_at": "2026-07-11T22:21:05Z",
+  "github_issue": 4338,
+  "status": "PROVEN",
+  "environment": {
+    "codex_cli_version": "0.144.1",
+    "host": "windows/amd64",
+    "working_directory": "<repo-root>",
+    "hook_source": "<repo-root>/.codex/hooks.json",
+    "user_codex_home_hooks_json_present": false,
+    "hook_trust_mode": "--dangerously-bypass-hook-trust for this automation-only witness"
+  },
+  "method": {
+    "command": "codex exec --dangerously-bypass-hook-trust --json -C <repo-root> <fixed-no-tool-prompt>",
+    "fak_shim": "A PATH-prepended fak.cmd captured stdin byte-for-byte, emitted the same {decision:block,reason:string} schema as fak sessions codex-loop-hook, and exited 0.",
+    "privacy": "The fixed synthetic prompt is omitted from captured_payload; no tool or model response text was produced. Session/turn UUIDs and the absolute transcript path are normalized."
+  },
+  "captured_payload": {
+    "session_id": "<session-uuid>",
+    "turn_id": "<turn-uuid>",
+    "transcript_path": "<codex-home>/sessions/2026/07/11/rollout-2026-07-11T15-21-05-<session-uuid>.jsonl",
+    "cwd": "<repo-root>",
+    "hook_event_name": "UserPromptSubmit",
+    "model": "gpt-5.6-sol",
+    "permission_mode": "bypassPermissions",
+    "prompt": "<fixed-synthetic-prompt-redacted>"
+  },
+  "checks": {
+    "repo_level_manifest_discovered": {
+      "pass": true,
+      "evidence": "The shim named only by <repo-root>/.codex/hooks.json executed while no <codex-home>/hooks.json existed."
+    },
+    "hook_fired": {
+      "pass": true,
+      "evidence": "The shim created the payload capture before any model tokens were used."
+    },
+    "payload_identifier_matches_resolver": {
+      "pass": true,
+      "key": "session_id",
+      "evidence": "The live payload contains session_id and transcript_path with the same UUID; fak accepts session_id."
+    },
+    "block_schema_stops_turn": {
+      "pass": true,
+      "emitted": {"decision": "block", "reason": "fak live witness sentinel"},
+      "evidence": "Codex emitted thread.started and turn.started/turn.completed with input_tokens=0 and output_tokens=0; it produced no model message or tool event."
+    }
+  },
+  "observed_codex_events": [
+    {"type": "thread.started", "thread_id": "<session-uuid>"},
+    {"type": "turn.started"},
+    {"type": "turn.completed", "usage": {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0}}
+  ],
+  "verdict": "PROVEN: Codex CLI 0.144.1 discovers the repo-level UserPromptSubmit manifest, sends session_id in the hook payload, and honors the {decision:block,reason} response before model execution."
+}

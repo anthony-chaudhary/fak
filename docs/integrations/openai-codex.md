@@ -102,6 +102,15 @@ The dry-run should print a command shaped like:
 fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
+### Live continuation-hook contract witness
+
+Codex CLI 0.144.1 was exercised end to end with the reviewed repo-level
+`.codex/hooks.json`. The CLI discovered the manifest, invoked `UserPromptSubmit` with
+`session_id`, and honored the `{"decision":"block","reason":...}` response before
+model execution (zero input/output tokens). The privacy-preserving captured payload and
+normalized event evidence are committed at
+[`experiments/agent-live/codex-continuation-hook-live-witness-2026-07-11.json`](../../experiments/agent-live/codex-continuation-hook-live-witness-2026-07-11.json).
+
 ### Continuation guard and intentional direct sessions
 
 The reviewed Codex `UserPromptSubmit` continuation hook runs `fak sessions
