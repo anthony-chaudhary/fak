@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"path/filepath"
 	"testing"
 
@@ -146,5 +148,18 @@ func TestDispatchTickFocusUnderCapByteIdentical(t *testing.T) {
 	}
 	if _, present := got["focus"]; present {
 		t.Fatalf("under cap carried a focus advisory, want none (byte-identical): %#v", got["focus"])
+	}
+}
+
+func TestDispatchFetchScopedIssuesSignalsViewFallback(t *testing.T) {
+	oldView, oldBack := dispatchFetchViewIssues, dispatchFetchBacklogIssues
+	defer func() { dispatchFetchViewIssues = oldView; dispatchFetchBacklogIssues = oldBack }()
+	dispatchFetchViewIssues = func(string, string, int) ([]dispatchtick.Issue, error) { return nil, fmt.Errorf("boom") }
+	dispatchFetchBacklogIssues = func(string, int) ([]dispatchtick.Issue, error) {
+		return []dispatchtick.Issue{{Number: 1, Title: "fallback"}}, nil
+	}
+	got, injected, reason, err := dispatchFetchScopedIssuesWithSignal(t.TempDir(), io.Discard, "current", 10)
+	if err != nil || injected || len(got) != 1 || reason == "" {
+		t.Fatalf("got=%v injected=%v reason=%q err=%v", got, injected, reason, err)
 	}
 }

@@ -475,7 +475,7 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 		return payload, nil
 	}
 	taxonomy, taxErr := dispatchLaneTaxonomy(root)
-	issues, injected, issueErr := dispatchFetchScopedIssues(root, stderr, dispatchTickView, issueLimit)
+	issues, injected, viewFallbackReason, issueErr := dispatchFetchScopedIssuesWithSignal(root, stderr, dispatchTickView, issueLimit)
 	fetchErrs := []string{}
 	if taxErr != nil {
 		fetchErrs = append(fetchErrs, taxErr.Error())
@@ -492,6 +492,9 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 		FetchError:         strings.Join(fetchErrs, "; "),
 		DuplicateRiskCache: dispatchDuplicateRiskCache,
 	})
+	payload.View = strings.TrimSpace(dispatchTickView)
+	payload.ViewFallback = viewFallbackReason != ""
+	payload.ViewFallbackReason = viewFallbackReason
 	// W4 scope-hold (#2716): after routing, hold back ONLY the issues whose declared paths
 	// intersect a live known-bad signature (internal/knownbad ledger, #2713). Disjoint
 	// issues keep dispatching. Fails open on a missing/broken ledger so it never stalls.
@@ -508,6 +511,11 @@ func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick
 // branches tools/issue_lane_router.py --view ships, so an unattended tick
 // never starves on a bad or still-empty `current` view.
 func dispatchFetchScopedIssues(root string, stderr io.Writer, view string, limit int) ([]dispatchtick.Issue, bool, error) {
+	issues, injected, _, err := dispatchFetchScopedIssuesWithSignal(root, stderr, view, limit)
+	return issues, injected, err
+}
+
+func dispatchFetchScopedIssuesWithSignal(root string, stderr io.Writer, view string, limit int) ([]dispatchtick.Issue, bool, string, error) {
 	if stderr == nil {
 		stderr = io.Discard
 	}
@@ -520,11 +528,15 @@ func dispatchFetchScopedIssues(root string, stderr io.Writer, view string, limit
 		case !dispatchAnyDispatchable(viewIssues):
 			fmt.Fprintf(stderr, "WARN: --view %q: no dispatchable issues; using full open backlog\n", view)
 		default:
-			return viewIssues, true, nil
+			return viewIssues, true, "", nil
 		}
 	}
 	issues, err := dispatchFetchBacklogIssues(root, limit)
-	return issues, false, err
+	reason := ""
+	if view != "" {
+		reason = "view unavailable or empty; full backlog used"
+	}
+	return issues, false, reason, err
 }
 
 func dispatchAnyDispatchable(issues []dispatchtick.Issue) bool {

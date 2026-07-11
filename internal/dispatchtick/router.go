@@ -282,6 +282,9 @@ type RouterPayload struct {
 	Reason              string                     `json:"reason"`
 	NextAction          string                     `json:"next_action"`
 	Workspace           string                     `json:"workspace"`
+	View                string                     `json:"view,omitempty"`
+	ViewFallback        bool                       `json:"view_fallback,omitempty"`
+	ViewFallbackReason  string                     `json:"view_fallback_reason,omitempty"`
 	Coverage            RouterCoverage             `json:"coverage"`
 	Counts              RouterCounts               `json:"counts"`
 	Lanes               map[string]RouterLaneGroup `json:"lanes"`
