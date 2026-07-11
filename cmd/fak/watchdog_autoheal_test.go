@@ -457,6 +457,12 @@ func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 	if !serviceProjectionHas(win, "taskscheduler", "FleetStaleWorkGarden") {
 		t.Fatalf("windows projection missing stale-work garden task: %+v", win)
 	}
+	// #3324: the proc-resource guard must be in the autoheal target set so a deleted
+	// FleetProcResourceGuard task self-reinstalls via the same schtasks /Run path as
+	// its siblings, instead of staying gone until an operator notices.
+	if !serviceProjectionHas(win, "taskscheduler", "FleetProcResourceGuard") {
+		t.Fatalf("windows projection missing proc-resource-guard task (self-heal on deletion, #3324): %+v", win)
+	}
 
 	darwin := watchdogAutohealServicesForGOOS("darwin")
 	if !serviceProjectionHas(darwin, "launchd", "com.fleet.dispatch-supervisor") {
