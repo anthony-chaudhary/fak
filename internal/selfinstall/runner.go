@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ErrBusy is returned by TrySingleFlight when another self-update already holds the lock.
@@ -44,11 +45,20 @@ func TrySingleFlight(dir string) (release func(), err error) {
 
 // RealRunner runs the command for real, merging stdout+stderr, and reports ok=false on any
 // non-zero exit or exec failure (so a failed gate is a clean ok=false, not a panic).
+//
+// Every child it spawns (git fetch/rev-parse/worktree add, go build, the target's `version`
+// smoke) is a console-prone tool, and self-update's caller is a windowless scheduled task
+// (`conhost --headless cmd.exe /c fak self-update …`, every N minutes). Without the no-window
+// hook those children allocate their own conhost and FLASH a foreground console window each
+// tick — the `--headless` wrapper only covers the top process, not descendants it spawns.
+// windowgate.ConfigureBackgroundCommand sets HideWindow + CREATE_NO_WINDOW (a no-op off
+// Windows), so the whole self-update subprocess tree stays off the desktop.
 func RealRunner(ctx context.Context, dir, name string, args ...string) (string, bool) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil
 }
