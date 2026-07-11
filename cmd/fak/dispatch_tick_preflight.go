@@ -35,14 +35,17 @@ func dispatchRefreshRegistry(root string, stderr io.Writer) map[string]any {
 }
 
 func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, error) {
+	// One host process snapshot feeds both the safety fold and aggregate thread/RAM
+	// capacity. Before #4258 those consumers each spawned their own full Get-Process.
+	processes := dispatchProbeProcesses()
 	in := dispatchtick.PreflightInput{
 		Workspace:     root,
 		MaxWorkers:    maxWorkers,
-		Host:          dispatchPreflightHost(root, stderr),
+		Host:          dispatchPreflightHostFromProcesses(processes),
 		Account:       dispatchPreflightAccount(root, stderr, workKind, product),
 		Kernel:        dispatchPreflightKernel(root),
 		Seat:          dispatchPreflightSeat(root, stderr, product),
-		Resources:     dispatchProbeHostResources(),
+		Resources:     dispatchPreflightHostResourcesFromProcesses(processes),
 		Budgets:       dispatchtick.DefaultHostBudgets(),
 		OSWorkerProcs: dispatchProbeWorkerCount(root, product),
 	}
@@ -602,7 +605,11 @@ func dispatchLastLine(path string) string {
 }
 
 func dispatchPreflightHost(_ string, _ io.Writer) dispatchtick.HostCheck {
-	res := dispatchtick.EvaluateProcGuard(dispatchProbeProcesses())
+	return dispatchPreflightHostFromProcesses(dispatchProbeProcesses())
+}
+
+func dispatchPreflightHostFromProcesses(processes dispatchtick.ProcGuardInput) dispatchtick.HostCheck {
+	res := dispatchtick.EvaluateProcGuard(processes)
 	return dispatchtick.HostCheck{
 		Safe:         res.OK,
 		Error:        res.CollectError,
@@ -1240,9 +1247,46 @@ func dispatchScanProcessesPOSIX() ([]dispatchtick.ProcInfo, error) {
 }
 
 func dispatchPreflightHostResources() dispatchtick.HostResources {
+	return dispatchPreflightHostResourcesFromProcesses(dispatchProbeProcesses())
+}
+
+func dispatchPreflightHostResourcesFromProcesses(processes dispatchtick.ProcGuardInput) dispatchtick.HostResources {
 	cores := runtime.NumCPU()
-	freeRAM, threads := dispatchRAMAndThreads()
+	freeRAM := dispatchFreeRAM()
+	totalThreads := 0
+	seenThreads := false
+	for _, proc := range processes.Processes {
+		if proc.Threads != nil {
+			totalThreads += *proc.Threads
+			seenThreads = true
+		}
+	}
+	var threads *int
+	if seenThreads {
+		threads = &totalThreads
+	}
 	return dispatchtick.HostResources{Cores: &cores, FreeRAMMB: freeRAM, TotalThreads: threads}
+}
+
+func dispatchFreeRAM() *int {
+	if runtime.GOOS != "windows" {
+		free, _ := dispatchRAMAndThreadsPOSIX()
+		return free
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", "$os=Get-CimInstance Win32_OperatingSystem; [int64]$os.FreePhysicalMemory")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	kb, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return nil
+	}
+	mb := int(kb / 1024)
+	return &mb
 }
 
 func dispatchRAMAndThreads() (*int, *int) {
