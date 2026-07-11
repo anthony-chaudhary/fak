@@ -1,16 +1,19 @@
 package main
 
-// fak project -- the ProjectsV2 board control-pane fold. It reshapes the board that
+// fak project -- the ProjectsV2 board control-pane surface. It reshapes the board that
 // .github/workflows/project-board-sync.yml writes into (and cmd/fak/dispatch_project_fields.go
 // reads for dispatch ranking) into the SAME schema/ok/verdict/finding/next_action
-// envelope `fak milestone report` uses, so the board becomes an operator-visible
-// dimension instead of a write-only sync target. It is READ/REPORT only: it never
-// writes to the board and never changes dispatch ranking.
+// envelope `fak milestone report` uses, and posts it to Slack through the SAME durable
+// scoreboard outbox `fak milestone post` / `fak steering` use — so the board becomes an
+// operator-visible dimension instead of a write-only sync target. It is READ/REPORT
+// only: it never writes to the board and never changes dispatch ranking.
 //
 //	fak project report                       # fold + render the board snapshot (live)
 //	fak project report --json                # the machine-readable envelope
 //	fak project report --check               # advisory gate (exit 1 only if unmeasured)
 //	fak project report --from-items items.json   # fold a fixture hermetically (no gh)
+//	fak project post --dry-run               # render the exact Slack card; do not post
+//	fak project post                         # post the card to #project (durable outbox)
 //
 // Live reads are gated on FAK_DISPATCH_PROJECT_NUMBER (the same knob the dispatch
 // reader uses) and need a gh token with read:project scope; absent either, the fold is a
@@ -24,16 +27,19 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/projectreport"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 func cmdProject(argv []string) {
-	dispatchSubcommands("project", "report", argv,
+	dispatchSubcommands("project", "report | post", argv,
 		subcommand{"report", runProjectReport},
+		subcommand{"post", runProjectPost},
 	)
 }
 
@@ -52,34 +58,10 @@ func runProjectReport(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	root := repoRoot()
-	now := time.Now().UTC()
-	opts := projectreport.FoldOpts{
-		Commit:      projectHeadCommit(root),
-		GeneratedAt: now.Format(time.RFC3339),
-		Date:        now.Format("2006-01-02"),
-	}
-
-	var report projectreport.Report
-	if *fromItems != "" {
-		items, err := loadProjectItems(*fromItems)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak project report: %v\n", err)
-			return 2
-		}
-		report = projectreport.Fold(items, opts)
-	} else {
-		number := *projectNumber
-		if number <= 0 {
-			number, _ = strconv.Atoi(strings.TrimSpace(os.Getenv(dispatchProjectNumberEnv)))
-		}
-		if number <= 0 {
-			report = projectreport.Unmeasured(dispatchProjectNumberEnv+" is unset — no board to read", opts)
-		} else if items, ok := fetchProjectReportItems(root, number); ok {
-			report = projectreport.Fold(items, opts)
-		} else {
-			report = projectreport.Unmeasured("could not read ProjectsV2 board (gh read:project scope or project number)", opts)
-		}
+	report, err := loadProjectReport(*fromItems, "", *projectNumber)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak project report: %v\n", err)
+		return 2
 	}
 
 	if *asJSON {
@@ -102,15 +84,84 @@ func runProjectReport(stdout, stderr io.Writer, argv []string) int {
 	return 1
 }
 
+// runProjectPost folds the board (live, from a --from-items fixture, or from a pre-rolled
+// --report-json), renders the card, and posts it to the #project channel through the same
+// durable scoreboard outbox tail every other feeder uses -- the project twin of
+// `fak milestone post`.
+func runProjectPost(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak project post", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fromItems := fs.String("from-items", "", "fold the board from this JSON items file instead of reading live (- for stdin)")
+	reportJSON := fs.String("report-json", "", "post a pre-rolled projectreport.Report JSON from this file (- for stdin) instead of folding live")
+	projectNumber := fs.Int("project-number", 0, "ProjectsV2 number to read live (default: $"+dispatchProjectNumberEnv+")")
+	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_PROJECT_CHANNEL)")
+	token := fs.String("token", "", "override bot token (default: $FAK_PROJECT_TOKEN, then $FAK_SCOREBOARD_TOKEN)")
+	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	report, err := loadProjectReport(*fromItems, *reportJSON, *projectNumber)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak project post: %v\n", err)
+		return 2
+	}
+
+	src := *source
+	if src == "" {
+		src = defaultSource()
+	}
+	card := projectCard(report, src)
+	return slackPostTail(stdout, stderr, slackPostSpec{
+		card:           card,
+		channel:        *channel,
+		token:          *token,
+		dryRun:         *dryRun,
+		label:          "fak project post",
+		chanEnv:        "FAK_PROJECT_CHANNEL",
+		resolveChannel: resolveProjectChannel,
+		resolveToken:   resolveProjectToken,
+	})
+}
+
+// loadProjectReport builds the report from exactly one source, in precedence order:
+// a pre-rolled --report-json, a --from-items fixture, else a live board read gated on the
+// project number. A missing project number or an unreadable board folds to UNMEASURED.
+func loadProjectReport(fromItems, reportJSON string, projectNumber int) (projectreport.Report, error) {
+	now := time.Now().UTC()
+	opts := projectreport.FoldOpts{
+		Commit:      projectHeadCommit(repoRoot()),
+		GeneratedAt: now.Format(time.RFC3339),
+		Date:        now.Format("2006-01-02"),
+	}
+	if reportJSON != "" {
+		return loadPreRolledProjectReport(reportJSON)
+	}
+	if fromItems != "" {
+		items, err := loadProjectItems(fromItems)
+		if err != nil {
+			return projectreport.Report{}, err
+		}
+		return projectreport.Fold(items, opts), nil
+	}
+	number := projectNumber
+	if number <= 0 {
+		number, _ = strconv.Atoi(strings.TrimSpace(os.Getenv(dispatchProjectNumberEnv)))
+	}
+	if number <= 0 {
+		return projectreport.Unmeasured(dispatchProjectNumberEnv+" is unset — no board to read", opts), nil
+	}
+	items, ok := fetchProjectReportItems(repoRoot(), number)
+	if !ok {
+		return projectreport.Unmeasured("could not read ProjectsV2 board (gh read:project scope or project number)", opts), nil
+	}
+	return projectreport.Fold(items, opts), nil
+}
+
 // loadProjectItems reads a JSON array of board items from a file (or stdin for "-").
 func loadProjectItems(path string) ([]projectreport.Item, error) {
-	var raw []byte
-	var err error
-	if path == "-" {
-		raw, err = io.ReadAll(os.Stdin)
-	} else {
-		raw, err = readFromFile(path)
-	}
+	raw, err := readProjectPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +170,111 @@ func loadProjectItems(path string) ([]projectreport.Item, error) {
 		return nil, fmt.Errorf("parse --from-items payload: %w", err)
 	}
 	return items, nil
+}
+
+// loadPreRolledProjectReport reads a folded projectreport.Report JSON (or stdin for "-").
+func loadPreRolledProjectReport(path string) (projectreport.Report, error) {
+	raw, err := readProjectPath(path)
+	if err != nil {
+		return projectreport.Report{}, err
+	}
+	var report projectreport.Report
+	if err := json.Unmarshal(raw, &report); err != nil {
+		return projectreport.Report{}, fmt.Errorf("parse --report-json payload: %w", err)
+	}
+	return report, nil
+}
+
+func readProjectPath(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return readFromFile(path)
+}
+
+// projectCard folds the report into a scoreboard.Update — the same card type
+// `fak steering` posts — so `fak project post` renders through the proven Slack
+// block/text machinery with zero new rendering surface. The unclassified count is the
+// headline debt; the field distributions ride the Lines.
+func projectCard(r projectreport.Report, source string) scoreboard.Update {
+	up := scoreboard.Update{
+		Title:    "project board",
+		Verdict:  r.Verdict,
+		Detail:   r.Finding,
+		NextStep: r.NextAction,
+		Source:   source,
+	}
+	if !r.Measured {
+		return up
+	}
+	up.DebtKey = "unclassified"
+	up.Debt = strconv.Itoa(len(r.Unclassified))
+	up.Lines = []string{fmt.Sprintf("total %d item(s)", r.Total)}
+	if line := projectDistLine(r.ByStatus, nil); line != "" {
+		up.Lines = append(up.Lines, "status "+line)
+	}
+	if line := projectDistLine(r.ByGeneration, []string{"now", "next", "second-next", "future"}); line != "" {
+		up.Lines = append(up.Lines, "horizon "+line)
+	}
+	if line := projectDistLine(r.ByPriority, nil); line != "" {
+		up.Lines = append(up.Lines, "priority "+line)
+	}
+	return up
+}
+
+// projectDistLine renders a "k n · k n" distribution for the card Lines. When order is
+// non-nil those keys lead; the remainder sort by descending count then key, with the
+// "(unset)" bucket last.
+func projectDistLine(m map[string]int, order []string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	const unset = "(unset)"
+	seen := map[string]bool{}
+	var keys []string
+	for _, k := range order {
+		if _, ok := m[k]; ok {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+	var rest []string
+	for k := range m {
+		if !seen[k] && k != unset {
+			rest = append(rest, k)
+		}
+	}
+	sort.Slice(rest, func(i, j int) bool {
+		if m[rest[i]] != m[rest[j]] {
+			return m[rest[i]] > m[rest[j]]
+		}
+		return rest[i] < rest[j]
+	})
+	keys = append(keys, rest...)
+	if _, ok := m[unset]; ok {
+		keys = append(keys, unset)
+	}
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s %d", k, m[k]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// resolveProjectChannel: --channel wins (handled by slackPostTail), else FAK_PROJECT_CHANNEL.
+// It deliberately does NOT fall through to FAK_SCOREBOARD_CHANNEL (the scoreboard CLI's own
+// default target), so the project surface never misroutes to #scoreboard.
+func resolveProjectChannel() string {
+	return strings.TrimSpace(os.Getenv("FAK_PROJECT_CHANNEL"))
+}
+
+// resolveProjectToken: --token wins, else FAK_PROJECT_TOKEN, else the shared
+// FAK_SCOREBOARD_TOKEN (the same transport every feeder shares).
+func resolveProjectToken() string {
+	if v := strings.TrimSpace(os.Getenv("FAK_PROJECT_TOKEN")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("FAK_SCOREBOARD_TOKEN"))
 }
 
 // fetchProjectReportItems reads the board's items with their Status / Generation /
@@ -191,7 +347,7 @@ func parseProjectReportItems(raw []byte) ([]projectreport.Item, bool) {
 	return items, true
 }
 
-// projectHeadCommit returns the short HEAD sha for the provenance stamp, "" on failure.
+// projectHeadCommit returns the HEAD sha for the provenance stamp, "" on failure.
 func projectHeadCommit(root string) string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = root
