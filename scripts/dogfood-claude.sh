@@ -16,7 +16,9 @@
 #   ./scripts/dogfood-claude.sh --smoke         # curl the wire (no model intelligence needed), then exit
 #   ./scripts/dogfood-claude.sh --print-env     # print the export lines for your own `claude` invocation
 #   ./scripts/dogfood-claude.sh --list-accounts # show the account switcher's roster, then exit
-#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the `fak-dogfood`/`fak-qwen36-claude`/`claude-glm-gcp`/`claude-gemini-gcp`/`claude-groq-qwen36`/`claude-groq-compound`/`claude-nim-kimi`/`claude-nim-deepseek`/`claude-mac` launchers onto PATH
+#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the GRADUATED launchers onto PATH (see the graduation rule, #3034)
+#   ./scripts/dogfood-claude.sh --install-all    # same, but also symlink the opt-in (not-yet-graduated) external-provider launchers
+#   ./scripts/dogfood-claude.sh --graduation     # print each launcher's graduation verdict (graduated => installed by --install; opt-in => stays a wrapper)
 #   fak-qwen36-claude --probe "hi"              # installed Qwen3.6 local preset
 #   claude-glm-gcp --probe "say pong"           # installed GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
 #   claude-gemini-gcp --probe "say pong"        # installed Gemini-3.5-Flash-on-GCP-Vertex preset (set FAK_GEMINI_GCP_PROJECT + FAK_GEMINI_GCP_KEY first)
@@ -389,14 +391,74 @@ esac
 [ -n "$CLAUDE_DEBUG_FILE" ] && CLAUDE_DEBUG_ARGS+=(--debug-file "$CLAUDE_DEBUG_FILE")
 
 MODE="run"; PROBE_PROMPT="Reply with exactly the word: pong"
+INSTALL_ALL="${FAK_DOGFOOD_INSTALL_ALL:-}"
 case "${1:-}" in
   --probe)         MODE="probe"; [ $# -ge 2 ] && PROBE_PROMPT="$2" ;;
   --smoke)         MODE="smoke" ;;
   --print-env)     MODE="print-env" ;;
   --list-accounts) MODE="list-accounts" ;;
   --install)       MODE="install" ;;
+  --install-all)   MODE="install"; INSTALL_ALL=1 ;;
+  --graduation)    MODE="graduation" ;;
   --help|-h)       sed -n '2,50p' "$0"; exit 0 ;;
 esac
+
+# --- external-provider graduation rule (#3034) --------------------------------
+# `--install` used to symlink EVERY preset launcher unconditionally — provider-
+# specific enthusiasm: a one-off cloud experiment got a first-class PATH shim the
+# moment its preset landed. Instead, a launcher is installed only if it has
+# GRADUATED, i.e. it clears a GENERIC, evidence-based bar (identical for every
+# provider, so nobody graduates on enthusiasm):
+#   1. a documented key env (or it is keyless-local),
+#   2. a currently-available route (live route-health mechanics defer to #3035),
+#   3. minimum successful probes recorded in-repo,
+#   4. at least one tool-use / coding witness (required for issue-worker presets),
+#   5. known rate / expiry / preview caveats written down.
+# Presets that do not clear the bar stay OPT-IN: still runnable via
+# FAK_DOGFOOD_PRESET=<preset> (or their scripts/claude-*.sh wrapper), and
+# installable on demand with --install-all, but never DEFAULT-installed. The
+# manifest below is the SINGLE source of truth for the rule; --install, --graduation,
+# and the regression test all read it, so a test that checks one verdict is checking
+# the exact gate the installer uses.
+#
+# The two keyless local presets clear the bar today: they are witnessed by the
+# committed probe transcripts (experiments/agent-live/dogfood-claude-probe*.json)
+# and the bounded-wait regression, and their route (local shim/ollama) is always
+# reachable. The external cloud/self-hosted presets stay opt-in pending route-health
+# classification (#3035) — their keys/routes are per-operator and can expire.
+#
+# Fields (pipe-delimited, no field contains a pipe): launcher|preset|graduated|key-env|caveat
+graduation_manifest() {
+  cat <<'EOF'
+fak-dogfood|-|yes|-|generic local shim/ollama; witnessed by committed probe + bounded-wait regression
+fak-qwen36-claude|qwen36-local|yes|-|local Qwen3.6 (127.0.0.1:8131); needs the local server up
+claude-glm-gcp|glm-gcp|no|-|self-hosted GCP GLM-5.2; route stood up per-operator, availability not yet classified (#3035)
+claude-gemini-gcp|gemini-gcp|no|FAK_GEMINI_GCP_KEY|Vertex bearer is a short-lived GCP token; route not yet classified (#3035)
+claude-groq-qwen36|groq-qwen36|no|FAK_GROQ_API_KEY|Groq tier; rate-limited, route not yet classified (#3035)
+claude-groq-compound|groq-compound|no|FAK_GROQ_API_KEY|Groq lower-tier compound; rate/token-capped, route not yet classified (#3035)
+claude-nim-kimi|nim-kimi|no|NVIDIA_API_KEY|NVIDIA NIM Kimi K2.6 preview; small in-repo sample, key/route may expire (#3035)
+claude-nim-deepseek|nim-deepseek-v4-pro|no|NVIDIA_API_KEY|NVIDIA NIM DeepSeek V4 Pro preview; small sample, key/route may expire (#3035)
+claude-mac|mac|no|FAK_GATEWAY_KEY|needs a reachable Mac fak serve gateway (FAK_MAC_GATEWAY); route per-operator, not classified (#3035)
+EOF
+}
+
+# graduated_launchers prints the launcher names --install should create: the
+# graduated set by default, or EVERY launcher when INSTALL_ALL is set (the
+# --install-all / FAK_DOGFOOD_INSTALL_ALL operator override that restores the old
+# install-everything behavior on demand). This is the ONE decision --install and its
+# dry-run both consume.
+graduated_launchers() {
+  graduation_manifest | awk -F'|' -v all="${INSTALL_ALL:-}" 'all!="" || $3=="yes" { print $1 }'
+}
+
+if [ "$MODE" = "graduation" ]; then
+  log "external-provider graduation (rule #3034): 'graduated' launchers are installed by --install; 'opt-in' stay wrappers"
+  graduation_manifest | while IFS='|' read -r launcher preset grad keyenv caveat; do
+    verdict="opt-in"; [ "$grad" = "yes" ] && verdict="graduated"
+    printf '%-10s %-22s preset=%-20s key=%-16s %s\n' "$verdict" "$launcher" "$preset" "$keyenv" "$caveat"
+  done
+  exit 0
+fi
 
 # --- --install: put dogfood launchers and `fak` on PATH -----------------------
 # Idempotent. Picks the first writable PATH dir among ~/.local/bin, /opt/homebrew/bin,
@@ -409,15 +471,6 @@ esac
 # cannot be copied free of it; --install warns clearly that they depend on the clone
 # staying put (the second half of the install-path contract).
 if [ "$MODE" = "install" ]; then
-  name="fak-dogfood"
-  qwen_name="fak-qwen36-claude"
-  glm_name="claude-glm-gcp"
-  gemini_name="claude-gemini-gcp"
-  groq_name="claude-groq-qwen36"
-  groq_compound_name="claude-groq-compound"
-  nim_kimi_name="claude-nim-kimi"
-  nim_deepseek_name="claude-nim-deepseek"
-  mac_name="claude-mac"
   if [ -n "${FAK_DOGFOOD_BINDIR:-}" ]; then
     cands="$FAK_DOGFOOD_BINDIR"
   else
@@ -432,15 +485,28 @@ if [ "$MODE" = "install" ]; then
   # SCRIPT_DIR is already absolute (resolved above); make the link target absolute
   # so it doesn't dangle when invoked via a relative path like ./scripts/...
   target="$SCRIPT_DIR/$(basename "$SELF")"
-  ln -sf "$target" "$bindir/$name"
-  ln -sf "$target" "$bindir/$qwen_name"
-  ln -sf "$target" "$bindir/$glm_name"
-  ln -sf "$target" "$bindir/$gemini_name"
-  ln -sf "$target" "$bindir/$groq_name"
-  ln -sf "$target" "$bindir/$groq_compound_name"
-  ln -sf "$target" "$bindir/$nim_kimi_name"
-  ln -sf "$target" "$bindir/$nim_deepseek_name"
-  ln -sf "$target" "$bindir/$mac_name"
+
+  # The graduation gate (#3034): only the launchers graduated_launchers emits get a
+  # symlink; the rest are reported as opt-in with the one-command probe recipe so an
+  # operator can try them WITHOUT installing (and without any long-term-support promise).
+  install_set="$(graduated_launchers)"
+
+  # Dry-run: report exactly what --install would create / skip, then exit BEFORE any
+  # build or symlink. This is the offline seam the regression test drives — it witnesses
+  # the gate on the real --install path without a toolchain build or PATH mutation.
+  if [ -n "${FAK_DOGFOOD_INSTALL_DRYRUN:-}" ]; then
+    graduation_manifest | while IFS='|' read -r launcher preset grad keyenv caveat; do
+      if printf '%s\n' "$install_set" | grep -qx "$launcher"; then
+        printf 'would-install: %s\n' "$launcher"
+      else
+        if [ "$keyenv" = "-" ]; then keyhint=""; else keyhint="$keyenv=... "; fi
+        printf 'opt-in-skip: %s (run: FAK_DOGFOOD_PRESET=%s %s%s --probe "say pong")\n' \
+          "$launcher" "$preset" "$keyhint" "$0"
+      fi
+    done
+    exit 0
+  fi
+
   log "building fak -> $BIN"
   build_fak "$BIN"
   # COPY the built binary onto PATH (not `ln -sf`): a copy is repo-independent, so the
@@ -448,23 +514,25 @@ if [ "$MODE" = "install" ]; then
   # $BIN would silently dangle. Mirrors the .ps1 twin (Copy-Item fak.exe). The copy goes
   # stale after a rebuild until you re-run --install, the same as the Windows path.
   cp -f "$BIN" "$bindir/fak"
-  log "installed: $bindir/$name -> $target"
-  log "installed: $bindir/$qwen_name -> $target"
-  log "installed: $bindir/$glm_name -> $target"
-  log "installed: $bindir/$gemini_name -> $target (preset gemini-gcp: fak -> GCP Vertex Gemini 3.5 Flash)"
-  log "installed: $bindir/$groq_name -> $target (preset groq-qwen36: fak -> Groq qwen/qwen3.6-27b)"
-  log "installed: $bindir/$groq_compound_name -> $target (preset groq-compound: fak -> Groq groq/compound)"
-  log "installed: $bindir/$nim_kimi_name -> $target (preset nim-kimi: fak -> NVIDIA NIM moonshotai/kimi-k2.6)"
-  log "installed: $bindir/$nim_deepseek_name -> $target (preset nim-deepseek-v4-pro: fak -> NVIDIA NIM deepseek-ai/deepseek-v4-pro)"
-  log "installed: $bindir/$mac_name -> $target"
   log "installed: $bindir/fak  (copied; re-run --install to refresh)"
-  # The launcher symlinks RUN the in-tree script, so they depend on the clone staying put
-  # — only the copied `fak` binary above is repo-independent. Warn clearly so a later
-  # move/delete of the clone is not a silent breakage (the install-path contract).
-  warn "the $name/$qwen_name/$glm_name/$gemini_name/$groq_name/$groq_compound_name/$nim_kimi_name/$nim_deepseek_name/$mac_name launchers are symlinks INTO this clone ($SCRIPT_DIR);"
-  warn "they break if you move or delete it. The copied \`fak\` binary survives a move — re-run --install after one."
+
+  # Install the gated launcher symlinks; report the opt-in ones (not installed) with how
+  # to run and how to force-install them. The launcher symlinks RUN the in-tree script, so
+  # they depend on the clone staying put — only the copied `fak` binary above is
+  # repo-independent (warned below).
+  graduation_manifest | while IFS='|' read -r launcher preset grad keyenv caveat; do
+    if printf '%s\n' "$install_set" | grep -qx "$launcher"; then
+      ln -sf "$target" "$bindir/$launcher"
+      log "installed: $bindir/$launcher -> $target  (preset $preset)"
+    else
+      if [ "$keyenv" = "-" ]; then keyhint=""; else keyhint="$keyenv=... "; fi
+      log "opt-in (not installed): $launcher — try: FAK_DOGFOOD_PRESET=$preset ${keyhint}$0 --probe \"say pong\"  [$caveat]; force-install with --install-all"
+    fi
+  done
+  warn "the launcher symlinks are symlinks INTO this clone ($SCRIPT_DIR); they break if you move or delete it."
+  warn "the copied \`fak\` binary survives a move — re-run --install after one."
   case ":$PATH:" in
-    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, \`$glm_name --probe\`, \`$groq_name --probe\`, \`$nim_kimi_name --probe\`, \`$nim_deepseek_name --probe\`, or \`$mac_name --probe\` from anywhere" ;;
+    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`fak-dogfood --probe\`, or \`fak-qwen36-claude --probe\` from anywhere (see --graduation for the opt-in launchers)" ;;
     *)             log "NOTE: $bindir is not on PATH — add it: export PATH=\"$bindir:\$PATH\"" ;;
   esac
   exit 0

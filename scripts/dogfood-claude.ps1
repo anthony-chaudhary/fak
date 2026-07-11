@@ -26,7 +26,9 @@
   --smoke           curl the wire end-to-end (no model needed), then exit
   --print-env       print the env lines for your own `claude` invocation
   --list-accounts   show the account switcher's roster, then exit
-  --install         copy `fak.exe` + `fak-dogfood.cmd` / `claude-glm-gcp.cmd` / `claude-gemini-gcp.cmd` / `claude-groq-qwen36.cmd` / `claude-groq-compound.cmd` / `claude-nim-kimi.cmd` / `claude-nim-deepseek.cmd` shims onto PATH, then exit
+  --install         copy `fak.exe` + write a .cmd shim for each GRADUATED launcher onto PATH, then exit (graduation rule, #3034)
+  --install-all     same, but also write shims for the opt-in (not-yet-graduated) external-provider launchers
+  --graduation      print each launcher's graduation verdict (graduated => installed by --install; opt-in => stays a wrapper), then exit
   --help            this help
 
 .NOTES
@@ -122,6 +124,7 @@ $args = $argv
 $Mode = 'run'
 $ProbePrompt = 'Reply with exactly the word: pong'
 $RunArgs = @()
+$InstallAll = [bool]$env:FAK_DOGFOOD_INSTALL_ALL
 if ($args.Count -ge 1) {
   switch ($args[0]) {
     '--probe'         { $Mode = 'probe'; if ($args.Count -ge 2) { $ProbePrompt = [string]$args[1] } }
@@ -129,6 +132,8 @@ if ($args.Count -ge 1) {
     '--print-env'     { $Mode = 'print-env' }
     '--list-accounts' { $Mode = 'list-accounts' }
     '--install'       { $Mode = 'install' }
+    '--install-all'   { $Mode = 'install'; $InstallAll = $true }
+    '--graduation'    { $Mode = 'graduation' }
     '--help'          { $Mode = 'help' }
     '-h'              { $Mode = 'help' }
     default           { $RunArgs = $args }   # interactive: pass everything through to claude
@@ -443,6 +448,47 @@ function Get-FirstOpenAiModel { param([string]$url, [hashtable]$headers = @{})
     }
   } catch { }
   return $null
+}
+
+# ---- external-provider graduation rule (#3034) -----------------------------
+# Windows twin of the manifest in scripts/dogfood-claude.sh. `--install` used to
+# write a .cmd shim for EVERY preset unconditionally — provider-specific enthusiasm.
+# Instead, a launcher is installed only if it has GRADUATED against a GENERIC,
+# evidence-based bar (documented key env or keyless-local; a currently-available
+# route — live route-health defers to #3035; minimum successful probes recorded
+# in-repo; at least one tool-use/coding witness; known rate/expiry caveats). The two
+# keyless local presets clear the bar today (committed probe transcripts + the
+# bounded-wait regression, always-reachable local route); the external cloud/self-
+# hosted presets stay OPT-IN — runnable via FAK_DOGFOOD_PRESET or --install-all, but
+# never default-installed. This manifest is the SINGLE source of truth the install
+# gate and --graduation both read.
+function Get-GraduationManifest {
+  @(
+    [pscustomobject]@{ Launcher='fak-dogfood';          Preset='';                    Graduated=$true;  KeyEnv='-';                 Caveat='generic local shim/ollama; witnessed by committed probe + bounded-wait regression' }
+    [pscustomobject]@{ Launcher='fak-qwen36-claude';    Preset='qwen36-local';        Graduated=$true;  KeyEnv='-';                 Caveat='local Qwen3.6 (127.0.0.1:8131); needs the local server up' }
+    [pscustomobject]@{ Launcher='claude-glm-gcp';       Preset='glm-gcp';             Graduated=$false; KeyEnv='-';                 Caveat='self-hosted GCP GLM-5.2; route stood up per-operator, availability not yet classified (#3035)' }
+    [pscustomobject]@{ Launcher='claude-gemini-gcp';    Preset='gemini-gcp';          Graduated=$false; KeyEnv='FAK_GEMINI_GCP_KEY'; Caveat='Vertex bearer is a short-lived GCP token; route not yet classified (#3035)' }
+    [pscustomobject]@{ Launcher='claude-groq-qwen36';   Preset='groq-qwen36';         Graduated=$false; KeyEnv='FAK_GROQ_API_KEY';   Caveat='Groq tier; rate-limited, route not yet classified (#3035)' }
+    [pscustomobject]@{ Launcher='claude-groq-compound'; Preset='groq-compound';       Graduated=$false; KeyEnv='FAK_GROQ_API_KEY';   Caveat='Groq lower-tier compound; rate/token-capped, route not yet classified (#3035)' }
+    [pscustomobject]@{ Launcher='claude-nim-kimi';      Preset='nim-kimi';            Graduated=$false; KeyEnv='NVIDIA_API_KEY';     Caveat='NVIDIA NIM Kimi K2.6 preview; small in-repo sample, key/route may expire (#3035)' }
+    [pscustomobject]@{ Launcher='claude-nim-deepseek';  Preset='nim-deepseek-v4-pro'; Graduated=$false; KeyEnv='NVIDIA_API_KEY';     Caveat='NVIDIA NIM DeepSeek V4 Pro preview; small sample, key/route may expire (#3035)' }
+    [pscustomobject]@{ Launcher='claude-mac';           Preset='mac';                 Graduated=$false; KeyEnv='FAK_GATEWAY_KEY';    Caveat='needs a reachable Mac fak serve gateway (FAK_MAC_GATEWAY); route per-operator, not classified (#3035)' }
+  )
+}
+# The one decision --install and its dry-run both consume: graduated by default, or
+# every launcher when $InstallAll (--install-all / FAK_DOGFOOD_INSTALL_ALL) is set.
+function Get-GraduatedLaunchers {
+  Get-GraduationManifest | Where-Object { $InstallAll -or $_.Graduated } | ForEach-Object { $_.Launcher }
+}
+
+if ($Mode -eq 'graduation') {
+  Log "external-provider graduation (rule #3034): 'graduated' launchers are installed by --install; 'opt-in' stay wrappers"
+  foreach ($m in Get-GraduationManifest) {
+    $verdict = if ($m.Graduated) { 'graduated' } else { 'opt-in' }
+    $preset  = if ($m.Preset) { $m.Preset } else { '-' }
+    Write-Host ('{0,-10} {1,-22} preset={2,-20} key={3,-16} {4}' -f $verdict, $m.Launcher, $preset, $m.KeyEnv, $m.Caveat)
+  }
+  exit 0
 }
 
 # ---- help / list-accounts: no stack needed ---------------------------------
