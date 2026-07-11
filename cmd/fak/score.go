@@ -29,6 +29,7 @@ import (
 var scoreRoutes = map[string]func(argv []string){
 	"agent-readiness":     cmdAgentReadinessScore,
 	"cache-health":        cmdCacheHealthScore,
+	"catchup":             cmdCatchUpScore,
 	"conflation":          cmdConflationScorecard,
 	"concept-usage":       cmdConceptUsageScore,
 	"default-value":       cmdDefaultValueScorecard,

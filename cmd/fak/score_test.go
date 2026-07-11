@@ -12,6 +12,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 	want := []string{
 		"agent-readiness",
 		"cache-health",
+		"catchup",
 		"conflation",
 		"concept-usage",
 		"default-value",
