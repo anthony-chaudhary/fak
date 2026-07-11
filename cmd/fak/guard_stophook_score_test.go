@@ -325,6 +325,11 @@ func TestInstallGuardStopHookInjectsTrajctlLedger(t *testing.T) {
 	if want == "" {
 		t.Skip("repo root not resolvable from test cwd")
 	}
+	root := repoRoot()
+	rel, err := filepath.Rel(root, want)
+	if err != nil || filepath.ToSlash(rel) != ".fak/trajctl.jsonl" {
+		t.Fatalf("runtime ledger = %q (rel=%q err=%v), want ignored .fak/trajctl.jsonl", want, rel, err)
+	}
 	for _, kv := range env {
 		if kv[0] == guardTrajctlEnvLedger {
 			if kv[1] != want {

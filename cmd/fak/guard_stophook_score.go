@@ -53,14 +53,15 @@ func guardTrajctlLedgerConfigured() string {
 }
 
 // guardTrajctlLedgerDefault is the absolute default ledger path the installer
-// injects: <repo root>/docs/nightrun/trajctl.jsonl. Empty when the root cannot be
+// injects: <repo root>/.fak/trajctl.jsonl. This is live per-turn runtime state,
+// including step-advice siblings, so it must not dirty the tracked tree. Empty when the root cannot be
 // resolved, in which case the installer injects nothing and the hook stays inert.
 func guardTrajctlLedgerDefault() string {
 	root := repoRoot()
 	if strings.TrimSpace(root) == "" {
 		return ""
 	}
-	return filepath.Join(root, filepath.FromSlash(trajctl.DefaultLedgerRel))
+	return filepath.Join(root, ".fak", "trajctl.jsonl")
 }
 
 // cheapTurnEndScorers is the cheap scorer set run at turn cadence: the W3
