@@ -1,0 +1,33 @@
+[dogfood] building fak -> <workspace>\tools\.bin\fak.exe
+[dogfood] fetching Mac gateway bearer from configured Mac SSH host
+[dogfood] using OpenAI-compatible backend http://<gpu-server>:8080/v1 (model: qwen3.6-27b)
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model qwen3.6-27b --base-url http://<gpu-server>:8080/v1 --api-key-env FAK_GATEWAY_KEY
+[dogfood] kernel healthy: {"engine":"inkernel","model":"qwen3.6-27b","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = <windows-user-home>\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = qwen3.6-27b
+[dogfood] one live turn through Claude Code (headless): "Use tools and complete every step before your final answer. Work only in the current directory.
+
+1. Replace strpad/strpad.go with this implementation:
+package strpad
+
+import strings
+
+// LeftPad pads s on the left with p until it is at least n runes wide.
+func LeftPad(s string, n int, p rune) string {
+ missing := n - len([]rune(s))
+ if missing <= 0 {
+ return s
+ }
+ return strings.Repeat(string(p), missing) + s
+}
+
+2. Create strpad/strpad_test.go with tests covering no padding, ASCII padding, and Unicode input width.
+3. Run go test ./...
+4. Reply with the files changed and the exact test result. Do not stop after reading the file."
+[dogfood] transcript -> <workspace>\experiments\agent-live\mac-dev-witness-20260706\claude-dev-tools-witness.json
+[dogfood] result: [fak] refused 2 tool call(s): Bash (DEFAULT_DENY/TERMINAL); Bash (DEFAULT_DENY/TERMINAL). This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.
+[dogfood] subtype=success  is_error=False  turns=1  model=qwen3.6-27b
+[dogfood] live turn ok - Claude Code completed a turn against the local kernel-fronted model

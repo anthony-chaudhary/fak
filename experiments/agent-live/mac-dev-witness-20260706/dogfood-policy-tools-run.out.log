@@ -1,0 +1,12 @@
+[dogfood] building fak -> <workspace>\tools\.bin\fak.exe
+[dogfood] fetching Mac gateway bearer from configured Mac SSH host
+[dogfood] using OpenAI-compatible backend http://<gpu-server>:8080/v1 (model: qwen3.6-27b)
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model qwen3.6-27b --base-url http://<gpu-server>:8080/v1 --api-key-env FAK_GATEWAY_KEY --policy <workspace>\examples\dogfood-claude-policy.json
+[dogfood] kernel healthy: {"engine":"inkernel","model":"qwen3.6-27b","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = <windows-user-home>\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = qwen3.6-27b
+[dogfood] one live turn through Claude Code (headless): "Use tools and complete every step before your final answer. Work only in the current directory. Implement strpad.LeftPad in strpad/strpad.go using the standard library strings package and rune length. Add strpad/strpad_test.go with tests for no padding, ASCII padding, and Unicode input width. Run go test ./... and reply with files changed plus the exact test result. Do not stop after reading the file."
+[dogfood] claude probe exited 1

@@ -1,0 +1,17 @@
+[dogfood] building fak -> <workspace>\tools\.bin\fak.exe
+[dogfood] fetching Mac gateway bearer from configured Mac SSH host
+[dogfood] using OpenAI-compatible backend http://<gpu-server>:8080/v1 (model: qwen3.6-27b)
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model qwen3.6-27b --base-url http://<gpu-server>:8080/v1 --api-key-env FAK_GATEWAY_KEY
+[dogfood] kernel healthy: {"engine":"inkernel","model":"qwen3.6-27b","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = <windows-user-home>\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = qwen3.6-27b
+[dogfood] one live turn through Claude Code (headless): "Read strpad/strpad.go, implement LeftPad, add focused tests in strpad/strpad_test.go, run go test ./..., and reply with a concise summary. Only edit files under the current directory."
+[dogfood] transcript -> <workspace>\experiments\agent-live\mac-dev-witness-20260706\claude-dev-localguard-witness.json
+[dogfood] result: I'll start by reading the existing file to understand the current implementation.
+
+
+[dogfood] subtype=success  is_error=False  turns=1  model=qwen3.6-27b
+[dogfood] live turn ok - Claude Code completed a turn against the local kernel-fronted model
