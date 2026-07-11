@@ -397,7 +397,9 @@ var doomloopCountLines = func(path string) (int64, bool, error) {
 // a clean zero.
 var doomloopCountRegionCommits = func(root string, region []string) (int64, error) {
 	args := append([]string{"-C", root, "rev-list", "--count", "HEAD", "--"}, region...)
-	out, err := exec.Command("git", args...).Output()
+	cmd := exec.Command("git", args...)
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("git rev-list: %w", err)
 	}

@@ -189,6 +189,50 @@ if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; the
 	fi
 fi
 
+# Desktop-popup gate  --  reason: DESKTOP_POPUP_REGRESSION
+#
+# A console-tool child (git/gh/powershell) spawned WITHOUT the Windows no-window hook flashes
+# a visible console window every time background automation runs it — the operator's "so many
+# popups". internal/windowgate already asserts a clean tracked tree (TestTrackedTreeHasNoPopups),
+# but that test only runs in a full `go test ./...` the fleet build-guard path skips, so
+# unsuppressed spawns kept reaching main. This rung runs the SAME scan at the push seam so the
+# floor binds every agent and a human alike — the push-time complement to the compile gate above.
+# Fix a hit by wrapping the Go exec with windowgate.ConfigureBackgroundCommand (or
+# configureDispatchHelperCommand in cmd/fak), passing creationflags=no_window_creationflags() to
+# the Python spawn, or making the .ps1 installer off-desktop.
+#
+# Mode (env FLEET_POPUP_GUARD):  block (default) | warn | off
+# Escape:  FLEET_ALLOW_POPUP=1 git push   always allows.
+# Fail-open by design: an older `fak` without the subcommand (exit 2) or an unavailable
+# toolchain allows the push — a missing verifier must never wedge the trunk.
+popup_mode="${FLEET_POPUP_GUARD:-block}"
+if [ "$popup_mode" != "off" ] && [ "${FLEET_ALLOW_POPUP:-0}" != "1" ]; then
+	popup_status=0
+	if command -v fak >/dev/null 2>&1; then
+		popup_out="$(fak hooks popup-scan --root "$root" 2>&1)"
+		popup_status=$?
+	elif command -v go >/dev/null 2>&1; then
+		popup_out="$(cd "$root" && go run ./cmd/fak hooks popup-scan --root "$root" 2>&1)"
+		popup_status=$?
+	else
+		popup_status=2
+	fi
+	if [ "$popup_status" -eq 1 ]; then
+		if [ "$popup_mode" = "block" ]; then
+			echo "DESKTOP_POPUP_REGRESSION (blocked): a tracked console-tool spawn would flash a window under background automation." >&2
+			echo "$popup_out" >&2
+			echo "  fix: suppress the spawn (windowgate.ConfigureBackgroundCommand / configureDispatchHelperCommand / creationflags=no_window_creationflags()); then re-push." >&2
+			echo "  override once: FLEET_ALLOW_POPUP=1 git push   (intentional only)" >&2
+			exit 1
+		else
+			echo "DESKTOP_POPUP_REGRESSION (advisory): a tracked console-tool spawn would flash a window under background automation." >&2
+			echo "$popup_out" >&2
+			echo "  fix before others fetch, or hard-enforce with FLEET_POPUP_GUARD=block." >&2
+		fi
+	fi
+	# popup_status 0 (clean) or 2 (could-not-run) => fall through.
+fi
+
 [ "$mode" = "off" ] && exit 0
 [ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ] && exit 0
 

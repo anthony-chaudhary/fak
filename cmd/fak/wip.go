@@ -154,6 +154,7 @@ func wipUsage(w io.Writer) {
 // stdout is NOT trimmed — a patch's exact bytes (trailing newline) must survive.
 func gitWip(ctx context.Context, dir string, env []string, args ...string) (stdout, stderr string, code int, err error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	configureDispatchHelperCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -179,6 +180,7 @@ func gitWip(ctx context.Context, dir string, env []string, args ...string) (stdo
 // the tree. Same error contract as gitWip: a non-zero git exit is reported in code.
 func gitWipStdin(ctx context.Context, dir, stdin string, args ...string) (stdout, stderr string, code int, err error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	configureDispatchHelperCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -1121,6 +1123,7 @@ func wipRestore(ctx context.Context, repo, session string, apply bool, stdout io
 // from being rejected.
 func wipApplyPatch(ctx context.Context, repo, patch string) error {
 	cmd := exec.CommandContext(ctx, "git", "apply", "--whitespace=nowarn")
+	configureDispatchHelperCommand(cmd)
 	if repo != "" {
 		cmd.Dir = repo
 	}
