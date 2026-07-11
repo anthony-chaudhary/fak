@@ -128,6 +128,20 @@ type Tree struct {
 	lastEvictVictimHits   int
 	lastEvictVictimTokens int
 	lastEvictVictimPrefix int
+
+	// Evict→reuse thrash detector state (#3393, thrash.go): a bounded just-evicted
+	// side-map (FIFO ring + latest-record index, ≤ thrashCap entries) plus the
+	// accumulated thrash counters it feeds. Observability only — never steers eviction.
+	thrashRing  []thrashRecord // lazily allocated on the first budget eviction
+	thrashHead  int
+	thrashCount int
+	thrashIndex map[uint64]thrashRecord
+
+	thrashReuses   int    // evictions whose key was re-demanded within thrashWindow
+	thrashTokens   int    // Σ victim edge tokens over those thrashes (wasted recompute)
+	thrashGapTotal uint64 // Σ evict→reuse gap (logical ticks) over those thrashes
+	thrashGapLast  uint64 // gap of the most recent thrash
+	thrashGapMax   uint64 // largest gap counted
 }
 
 // New builds an empty prefix cache. maxTokens is the LRU budget in cached tokens; pass 0
@@ -320,6 +334,9 @@ func (t *Tree) Lookup(tokens []int) (*node, int) {
 			p.hits++
 		}
 	}
+	// Thrash probe (#3393): was this exact request path just evicted? Demand for it is
+	// back — count the evict→reuse gap. Free when the side-map is empty.
+	t.probeThrash(t.root, tokens)
 	boundary.refs++
 	return boundary, matched
 }
@@ -365,6 +382,11 @@ func (t *Tree) InsertWithLogits(boundary *node, suffix []int, kv *model.KVCache,
 // (prewarm.go) share; each caller applies its own lease/recency bookkeeping and
 // eviction pass on the returned leaf.
 func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logits []float32, lastUsed uint64) *node {
+	// Thrash probe (#3393): the new leaf's full path is (root→boundary)+suffix — if that
+	// exact key was just evicted, this attach is the re-insert that proves the eviction
+	// premature. Covers both demand Insert and WarmInsert; a Lookup-consumed entry is
+	// simply absent here (consumed once).
+	t.probeThrash(boundary, suffix)
 	s := append([]int(nil), suffix...)
 	leaf := &node{
 		key:      s,
@@ -418,6 +440,7 @@ func (t *Tree) evictToBudget() {
 		if v == nil {
 			return // everything in budget-excess is locked; cannot evict further
 		}
+		t.noteEviction(v) // thrash detector (#3393): remember the victim before it goes
 		t.removeLeaf(v)
 		t.evictions++
 		if t.policy == EvictionCostAware {
@@ -648,6 +671,17 @@ type Stats struct {
 	LastEvictVictimHits   int
 	LastEvictVictimTokens int
 	LastEvictVictimPrefix int
+
+	// Evict→reuse thrash detector (#3393, thrash.go). ThrashReuses counts budget
+	// evictions whose exact key was re-demanded within thrashWindow logical ticks —
+	// premature evictions, the live "budget/policy too aggressive" signal. Gaps are in
+	// logical-clock ticks (deterministic, wall-clock-free).
+	ThrashReuses   int    // premature evictions detected (evict→reuse within the window)
+	ThrashTokens   int    // Σ victim edge tokens over those thrashes — wasted recompute
+	ThrashGapTotal uint64 // Σ evict→reuse gap over those thrashes
+	ThrashGapLast  uint64 // gap of the most recent thrash
+	ThrashGapMax   uint64 // largest gap counted
+	ThrashTracked  int    // just-evicted keys currently probe-able (≤ thrashCap)
 }
 
 // Stats walks the tree and returns its current shape.
@@ -674,6 +708,12 @@ func (t *Tree) Stats() Stats {
 		LastEvictVictimHits:   t.lastEvictVictimHits,
 		LastEvictVictimTokens: t.lastEvictVictimTokens,
 		LastEvictVictimPrefix: t.lastEvictVictimPrefix,
+		ThrashReuses:          t.thrashReuses,
+		ThrashTokens:          t.thrashTokens,
+		ThrashGapTotal:        t.thrashGapTotal,
+		ThrashGapLast:         t.thrashGapLast,
+		ThrashGapMax:          t.thrashGapMax,
+		ThrashTracked:         len(t.thrashIndex),
 	}
 	var visit func(n *node)
 	visit = func(n *node) {
