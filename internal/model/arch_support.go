@@ -77,3 +77,61 @@ func refuseUnsupportedHybridArch(cfg Config, man map[string]tensorMeta) error {
 	}
 	return nil
 }
+
+// ForwardPathKind names the in-kernel token-mixer forward a loaded checkpoint
+// dispatches to. It is the load-time, device-independent classification issue #3814
+// asks for — "confirm it maps to a supported forward path (attnSeq GQA for
+// llama3/dense-Qwen2.5; gemma4.go for Gemma)" — resolved from the SAME cfg predicates
+// forwardHiddenRows (forward.go) switches on, so a serve/bench caller can name the
+// path (or surface the typed UnsupportedArchError) BEFORE binding the gateway and
+// decoding a token on Metal, instead of a missing-tensor panic mid-request.
+type ForwardPathKind string
+
+const (
+	// ForwardAttnSeqGQA is the standard separate-projection GQA attention
+	// (forward.go's default m.layer / attnSeq): llama3, dense Qwen2.5 /
+	// Qwen2.5-Coder, and every generic q/k/v-proj checkpoint. This is the small-GQA
+	// class epic #3809 selects and the #67-proven Qwen2.5-7B-Q8 Metal decode path.
+	ForwardAttnSeqGQA ForwardPathKind = "attnSeq-gqa"
+	// ForwardGemma4 is the Gemma-4 heterogeneous per-layer geometry path (gemma4.go).
+	ForwardGemma4 ForwardPathKind = "gemma4"
+	// ForwardGLMDsaMLA is the GLM-DSA / DeepSeek MLA-latent + MoE layout path.
+	ForwardGLMDsaMLA ForwardPathKind = "glm-dsa-mla"
+	// ForwardMiniMax is the MiniMax-M3 lightning-indexer sparse-attention path.
+	ForwardMiniMax ForwardPathKind = "minimax-msa"
+	// ForwardQwen35GDN is the qwen35-family gated full-attention + Gated-DeltaNet
+	// linear-attention hybrid (qwen35.go). It rides forward.go's default m.layer,
+	// which dispatches per layer on layer_types (isLinearAttnLayer); it is reached
+	// only for a RECOGNIZED hybrid (IsQwen35Hybrid), never the #934 refusal state.
+	ForwardQwen35GDN ForwardPathKind = "qwen35-gdn"
+)
+
+// ClassifyForwardPath resolves the in-kernel forward path a checkpoint (cfg +
+// materialized manifest) will take, or returns a typed *UnsupportedArchError when the
+// load gate refuses it. It runs the SAME refuseUnsupportedHybridArch newModel runs,
+// then reads the SAME cfg predicates forwardHiddenRows dispatches on — so the named
+// path cannot drift from what the forward actually does.
+//
+// This is the #3814 load-time confirmation seam: a serve/bench caller (cmd/modelbench,
+// epic #3809 children #4/#6) asserts the selected small-GQA checkpoint maps to a
+// supported path — or gets a named refusal — before serving a real
+// /v1/chat/completions turn on Metal, never a mid-request missing-tensor panic. The
+// case order mirrors forwardHiddenRows: gemma4, then MLA/MoE, then MiniMax MSA, then
+// the qwen35 GDN hybrid, with standard GQA as the default.
+func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind, error) {
+	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
+		return "", err
+	}
+	switch {
+	case cfg.isGemma4():
+		return ForwardGemma4, nil
+	case cfg.usesMLAMoELayout():
+		return ForwardGLMDsaMLA, nil
+	case cfg.isMiniMaxSparseAttn():
+		return ForwardMiniMax, nil
+	case cfg.IsQwen35Hybrid():
+		return ForwardQwen35GDN, nil
+	default:
+		return ForwardAttnSeqGQA, nil
+	}
+}

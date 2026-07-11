@@ -101,3 +101,76 @@ func TestNewFromF32TensorsRefusesUnsupportedHybridArch(t *testing.T) {
 		t.Fatalf("NewFromF32Tensors error is %T, want *UnsupportedArchError: %v", err, err)
 	}
 }
+
+// #3814 (child of epic #3809): ClassifyForwardPath is the host-verifiable half of the
+// small-GQA serve-verify — "confirm it maps to a supported forward path (attnSeq GQA
+// for llama3/dense-Qwen2.5; gemma4.go for Gemma)". Each candidate the epic selects
+// must resolve, at LOAD time, to its named supported path — pinning the naming↔dispatch
+// mapping so a serve/bench readout (child #4/#6) cannot silently fall through to a wrong
+// forward. The on-Metal tok/s+RSS smoke (DoD path a) is device-gated and remains the
+// promotion evidence; this contract is what the smoke asserts before it runs.
+func TestClassifyForwardPathSelectedSmallGQACandidates(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want ForwardPathKind
+	}{
+		{"Llama-3.2-3B (llama3 GQA)", Config{ModelType: "llama", NumLayers: 1}, ForwardAttnSeqGQA},
+		{"Qwen2.5-Coder-7B (dense Qwen2.5 GQA)", Config{ModelType: "qwen2", NumLayers: 1}, ForwardAttnSeqGQA},
+		{"Gemma-4-4B (heterogeneous geometry)", Config{ModelType: "gemma4", NumLayers: 1}, ForwardGemma4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ClassifyForwardPath(tc.cfg, nil)
+			if err != nil {
+				t.Fatalf("selected supported candidate must classify, got refusal: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("ClassifyForwardPath = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A recognized qwen35 hybrid (layer_types marks the linear-attention layers) passes the
+// load gate and classifies to the wired GDN forward — not the #934 refusal, and not a
+// silent attnSeq fall-through that would panic on the missing self_attn.q_proj.weight.
+func TestClassifyForwardPathRecognizedQwen35Hybrid(t *testing.T) {
+	cfg := Config{
+		ModelType:  "qwen35",
+		NumLayers:  2,
+		LayerTypes: []string{"linear_attention", "full_attention"},
+	}
+	if !cfg.IsQwen35Hybrid() {
+		t.Fatalf("precondition: layer_types with linear_attention must be IsQwen35Hybrid")
+	}
+	got, err := ClassifyForwardPath(cfg, nil)
+	if err != nil {
+		t.Fatalf("recognized qwen35 hybrid must classify, got refusal: %v", err)
+	}
+	if got != ForwardQwen35GDN {
+		t.Errorf("ClassifyForwardPath = %q, want %q", got, ForwardQwen35GDN)
+	}
+}
+
+// TestClassifyForwardPathRefusesUnrecognizedGDN proves the classifier surfaces the SAME
+// typed refusal newModel returns for the #934 GDN/SSM state (linear_attn.* present,
+// layer_types empty) instead of naming a supported path — so a serve/bench caller
+// refuses at classification time, never mid-request.
+func TestClassifyForwardPathRefusesUnrecognizedGDN(t *testing.T) {
+	man := map[string]tensorMeta{
+		"model.layers.0.linear_attn.A_log": {},
+	}
+	cfg := Config{ModelType: "qwen3next", NumLayers: 1}
+	got, err := ClassifyForwardPath(cfg, man)
+	if err == nil {
+		t.Fatalf("unrecognized GDN hybrid must refuse, got path %q", got)
+	}
+	if got != "" {
+		t.Errorf("path must be empty on refusal, got %q", got)
+	}
+	var ua *UnsupportedArchError
+	if !errors.As(err, &ua) {
+		t.Fatalf("error is %T, want *UnsupportedArchError: %v", err, err)
+	}
+}
