@@ -1228,6 +1228,8 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// is stopped through the existing stopGuardChild path and the session is reported.
 	budgetTicker := time.NewTicker(guardTimeBudgetTickInterval)
 	defer budgetTicker.Stop()
+	stopLoginHijackWatch := guardStartLoginHijackWatch(credPath, os.Stderr)
+	defer stopLoginHijackWatch()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
