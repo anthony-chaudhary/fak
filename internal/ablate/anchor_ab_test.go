@@ -138,3 +138,39 @@ func TestAnchorABSweep_FailsClosed(t *testing.T) {
 		t.Errorf("session with no token activity should error, got nil")
 	}
 }
+
+// The issue's acceptance stated IN WORDS: Verdict() renders the three-way net-dollar read (#2809).
+// A positive delta whose CI clears zero → net-beneficial; a negative delta whose CI clears zero →
+// net-negative; a CI straddling zero → not yet distinguishable. Each verdict must state the net
+// dollars, the interval, and the matched-session count, and must agree with ClearsZero().
+func TestAnchorABRow_VerdictThreeWay(t *testing.T) {
+	cases := []struct {
+		name string
+		row  AnchorABRow
+		want string // the distinguishing phrase the verdict must carry
+	}{
+		{"beneficial", AnchorABRow{MeanNetUSD: 0.50, CI95LowUSD: 0.10, CI95HighUSD: 0.90, N: 4}, "IS net-beneficial"},
+		{"negative", AnchorABRow{MeanNetUSD: -0.50, CI95LowUSD: -0.90, CI95HighUSD: -0.10, N: 4}, "NET-NEGATIVE"},
+		{"undetermined", AnchorABRow{MeanNetUSD: 0.10, CI95LowUSD: -0.20, CI95HighUSD: 0.40, N: 4}, "NOT YET DISTINGUISHABLE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.row.Verdict()
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("Verdict() = %q, want phrase %q", got, tc.want)
+			}
+			// A directional verdict is claimed iff the interval clears zero — the worded read may
+			// not out-run the numbers.
+			directional := strings.Contains(got, "net-beneficial") || strings.Contains(got, "NET-NEGATIVE")
+			if directional != tc.row.ClearsZero() {
+				t.Errorf("Verdict directional=%v but ClearsZero()=%v for %q", directional, tc.row.ClearsZero(), got)
+			}
+			// Every verdict states the net dollars, the 95% interval, and the matched count.
+			for _, s := range []string{"net $", "95% CI", "N=4"} {
+				if !strings.Contains(got, s) {
+					t.Errorf("Verdict() = %q, missing %q", got, s)
+				}
+			}
+		})
+	}
+}

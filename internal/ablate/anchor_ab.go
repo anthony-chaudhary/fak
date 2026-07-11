@@ -125,6 +125,34 @@ func (r AnchorABRow) ClearsZero() bool {
 	return r.CI95LowUSD > 0 || r.CI95HighUSD < 0
 }
 
+// Verdict renders the issue's acceptance IN WORDS: a one-line net-dollar verdict on whether
+// head-anchoring is net-beneficial vs the firstBP idle default (#2809 done condition: "a verdict on
+// whether head-anchoring is net-beneficial on real traffic, stated in net dollars"). It is the
+// worded read of the SAME numbers SweepRow() prices and ClearsZero() tests, so the three outcomes
+// are exhaustive and cannot read richer than the burst-priced delta behind them:
+//
+//   - interval clears zero, positive mean → head-anchoring IS net-beneficial: it paid for its #2795
+//     cache_creation burst and then some, so #1408's CacheBurstPaysBack fired correctly.
+//   - interval clears zero, negative mean → head-anchoring is NET-NEGATIVE: the burst outweighed the
+//     shed (dropping already-warm reads to write a fresh prefix cost more than it saved) — the exact
+//     case the gate exists to refuse.
+//   - interval straddles zero → NOT YET DISTINGUISHABLE from the firstBP idle default: the evidence
+//     earns no directional claim on this traffic, so the verdict states that instead of fabricating one.
+//
+// The dollars are always the per-session net-of-burst mean and its 95% CI, never gross shed.
+func (r AnchorABRow) Verdict() string {
+	label := "is NOT YET DISTINGUISHABLE from the firstBP idle default"
+	if r.ClearsZero() {
+		if r.MeanNetUSD > 0 {
+			label = "IS net-beneficial vs firstBP"
+		} else {
+			label = "is NET-NEGATIVE vs firstBP"
+		}
+	}
+	return fmt.Sprintf("head-anchoring %s: net $%+.4f/session net of burst [95%% CI $%+.4f, $%+.4f] over N=%d matched sessions",
+		label, r.MeanNetUSD, r.CI95LowUSD, r.CI95HighUSD, r.N)
+}
+
 // AnchorABSweep folds MATCHED FirstBP/Head sessions into the one sweep row: it prices each
 // session's net-of-burst delta with CachePricing (the shared burst-premium engine), takes the mean
 // over sessions, and brackets it with a 95% confidence interval. It fails closed on an empty
