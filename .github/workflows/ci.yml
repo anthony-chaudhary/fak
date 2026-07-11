@@ -678,21 +678,21 @@ jobs:
           python tools/learning_scorecard_test.py
           python tools/learning_scorecard.py --check --baseline 45
 
-      # Scorecard regression suites (the six that ran in NO gate): the docs / demo-quality
+      # Scorecard regression suites (the family that ran in NO gate): the docs / demo-quality
       # / demo-robustness / seo-aeo / repo-hygiene scorecards each run their own *_test.py
-      # HARD above, but six members of the same family — code-quality, doc-appeal, industry,
-      # agent-readiness, tooling-quality, observability — had no test step anywhere, so a
-      # regression in any of those tools (whose debt the control pane folds) failed nothing.
+      # HARD above, but members of the same family — code-quality, doc-appeal, industry,
+      # tooling-quality, observability — had no test step anywhere, so a regression in any of
+      # those tools (whose debt the control pane folds) failed nothing. (agent-readiness was
+      # ported to Go — internal/agentreadinessscore — and is now gated by `go test ./...`.)
       # Their suites are deterministic, pure-stdlib (the code-quality + tooling-quality
       # runners were converted off the pytest subprocess to match their siblings), and green
       # today; wired HARD here so the whole family is gated symmetrically.
-      - name: scorecard regression suites (code-quality · doc-appeal · industry · agent-readiness · tooling-quality · observability · stability)
+      - name: scorecard regression suites (code-quality · doc-appeal · industry · tooling-quality · observability · stability)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/code_quality_scorecard_test.py
           python tools/doc_appeal_scorecard_test.py
           python tools/industry_scorecard_test.py
-          python tools/agent_readiness_scorecard_test.py
           python tools/tooling_quality_scorecard_test.py
           python tools/observability_scorecard_test.py
           # stability: the sentinel/invariant/revert/drift measuring stick. Its live

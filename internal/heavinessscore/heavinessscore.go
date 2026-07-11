@@ -13,7 +13,7 @@
 // flag set, the dos.toml refusal vocabulary, and whether the doc map makes the steering surfaces
 // discoverable). No KPI here re-derives a code-shape number, so the two never double-count.
 //
-// Shared inputs, NOT shared scores: tools/agent_readiness_scorecard.py also reads dos.toml's
+// Shared inputs, NOT shared scores: internal/agentreadinessscore also reads dos.toml's
 // [reasons.*] blocks (its refusal_recovery_mapped) and the cmd/fak verb table (its
 // command_verbs_resolve). The overlap is the SOURCE, not the function -- agent_readiness scores
 // whether each refusal maps to a recovery and whether a verb resolves; this card scores the raw

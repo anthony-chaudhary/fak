@@ -10,6 +10,7 @@ import (
 // without updating this list, the test reds -- the parent's surface is a contract, not incidental.
 func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 	want := []string{
+		"agent-readiness",
 		"conflation",
 		"concept-usage",
 		"default-value",

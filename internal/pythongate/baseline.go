@@ -8,8 +8,6 @@ var grandfathered = []string{
 	"tools/account_probe.py",
 	"tools/account_relogin_test.py",
 	"tools/account_relogin.py",
-	"tools/agent_readiness_scorecard_test.py",
-	"tools/agent_readiness_scorecard.py",
 	"tools/agent_test_harness.py",
 	"tools/agent_walltime.py",
 	"tools/amd_gpu_facts_test.py",

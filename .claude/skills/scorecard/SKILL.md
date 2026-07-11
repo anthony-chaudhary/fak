@@ -34,7 +34,7 @@ down by adding the real thing — never by gaming the detector.**
 | repo-hygiene | `tools/repo_hygiene_scorecard.py` | `hygiene_debt` | the tree's shape |
 | observability | `tools/observability_scorecard.py` | — | dashboards / alerts / metrics doc |
 | industry | `tools/industry_scorecard.py` | `parity_debt` | fak vs the SOTA field (OUTWARD) |
-| agent-readiness | `tools/agent_readiness_scorecard.py` | `friction_debt` | can an AI agent adopt fak (one persona) |
+| agent-readiness | `fak score agent-readiness` (internal/agentreadinessscore) | `friction_debt` | can an AI agent adopt fak (one persona) |
 | product | `tools/product_scorecard.py` | `product_debt` | can a person use each concept today |
 | persona | `tools/persona_readiness_scorecard.py` | `persona_debt` | are the top-10 personas served |
 | steerability | `tools/steerability_scorecard.py` | `steerability_debt` | does steering effort stay FLAT as the repo grows (growth-invariant) |
@@ -174,7 +174,7 @@ build-break from being mistaken for one.
 
 When a surface isn't measured yet, add one. The fastest path is to copy the closest
 existing instance and re-point it: **`product_scorecard.py` / `persona_readiness_scorecard.py`**
-for a *catalog* (data-dir rows cross-checked against the tree), **`agent_readiness_scorecard.py`**
+for a *catalog* (data-dir rows cross-checked against the tree), **`internal/agentreadinessscore`**
 for a *tree-reading* scorecard (no data dir).
 
 1. **Pick the shape.** Catalog (a roster of rows that evolves — concepts, personas,

@@ -1,6 +1,6 @@
 ---
 name: agent-readiness
-description: One repeatable pass that keeps fak the path of least resistance for an AI agent — Claude Code, OpenAI Codex, Cursor, an MCP client — to discover, adopt, and build on. Runs the agent-readiness scorecard (tools/agent_readiness_scorecard.py) over the git-tracked tree, turns each HARD defect into a required affordance to ADD (a missing agents.md entry point, a missing harness config, a dead orientation link, no copy-pasteable first command, no install one-liner, an untagged claim, a missing per-agent recipe, a missing leaf scaffold, an unsurfaced guardrail, a missing contributor contract), retires friction-debt worst-step-first, re-measures + regenerates the snapshot to PROVE the debt dropped, and commits only the scorecard lane by explicit path. The INWARD agent-experience counterpart of industry-score (competitive) and repo-hygiene (structure). Use after a change to an agent surface (AGENTS.md, llms.txt, CLAIMS.md, the integration recipes, the guards), when onboarding a new agent harness, or on a /loop cadence to keep the front door agent-friendly.
+description: One repeatable pass that keeps fak the path of least resistance for an AI agent — Claude Code, OpenAI Codex, Cursor, an MCP client — to discover, adopt, and build on. Runs the agent-readiness scorecard (`fak score agent-readiness`, backed by internal/agentreadinessscore) over the git-tracked tree, turns each HARD defect into a required affordance to ADD (a missing agents.md entry point, a missing harness config, a dead orientation link, no copy-pasteable first command, no install one-liner, an untagged claim, a missing per-agent recipe, a missing leaf scaffold, an unsurfaced guardrail, a missing contributor contract), retires friction-debt worst-step-first, re-measures + regenerates the snapshot to PROVE the debt dropped, and commits only the scorecard lane by explicit path. The INWARD agent-experience counterpart of industry-score (competitive) and repo-hygiene (structure). Use after a change to an agent surface (AGENTS.md, llms.txt, CLAIMS.md, the integration recipes, the guards), when onboarding a new agent harness, or on a /loop cadence to keep the front door agent-friendly.
 ---
 
 # agent-readiness — keep fak the path of least resistance for an agent, and prove it
@@ -104,8 +104,8 @@ score but are **never** friction-debt; weigh them, don't grind on them.
 From the repo root:
 
 ```bash
-python tools/agent_readiness_scorecard.py            # human scorecard + friction-debt work-list
-python tools/agent_readiness_scorecard.py --json     # machine payload (the loop uses this)
+go run ./cmd/fak score agent-readiness            # human scorecard + friction-debt work-list
+go run ./cmd/fak score agent-readiness --json     # machine payload (the loop uses this)
 ```
 
 It scores the three steps (discover · adopt · build) into a composite (0–100, A–F)
@@ -120,9 +120,9 @@ the scorecard** and watch the number fall; that loop (add, re-measure, add again
 is the whole method. Capture a before/after baseline so you can prove the drop:
 
 ```bash
-python tools/agent_readiness_scorecard.py --json > /tmp/before.json   # baseline before the pass
+go run ./cmd/fak score agent-readiness --json > /tmp/before.json   # baseline before the pass
 # … add the affordances …
-python tools/agent_readiness_scorecard.py --compare /tmp/before.json  # experience-frontier delta (+35% goal) + friction-debt delta
+go run ./cmd/fak score agent-readiness --compare /tmp/before.json  # experience-frontier delta (+35% goal) + friction-debt delta
 ```
 
 `--compare` leads with the **experience-frontier** delta and a percentage: the goal
@@ -142,7 +142,7 @@ Re-run the scorecard; state the before/after on BOTH headlines (e.g. "friction-d
 committed snapshot so the doc matches the tree:
 
 ```bash
-python tools/agent_readiness_scorecard.py --markdown --stamp $(date +%F) > docs/AGENT-READINESS-SCORECARD.md
+go run ./cmd/fak score agent-readiness --markdown --stamp $(date +%F) > docs/AGENT-READINESS-SCORECARD.md
 ```
 
 If you added or removed a scorecard surface, also re-fold the portfolio:
@@ -153,8 +153,9 @@ If you added or removed a scorecard surface, also re-fold the portfolio:
 This is a shared trunk; commit *your* lane, never a peer's work:
 
 ```bash
-git commit -s -F <msgfile> -- tools/agent_readiness_scorecard.py \
-  tools/agent_readiness_scorecard_test.py docs/AGENT-READINESS-SCORECARD.md
+git commit -s -F <msgfile> -- internal/agentreadinessscore/agentreadinessscore.go \
+  internal/agentreadinessscore/agentreadinessscore_test.go cmd/fak/agentreadinessscore.go \
+  docs/AGENT-READINESS-SCORECARD.md
 ```
 
 - **Stage by explicit path, never `git add -A`** — stage + commit in one shell

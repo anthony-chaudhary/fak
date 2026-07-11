@@ -27,6 +27,7 @@ import (
 // top-level *-scorecard verb. score_test.go pins every legacy scorecard spelling to its route,
 // so a scorecard reachable only at the root reds the contract.
 var scoreRoutes = map[string]func(argv []string){
+	"agent-readiness":     cmdAgentReadinessScore,
 	"conflation":          cmdConflationScorecard,
 	"concept-usage":       cmdConceptUsageScore,
 	"default-value":       cmdDefaultValueScorecard,

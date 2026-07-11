@@ -81,7 +81,7 @@ var Cards = []Card{
 	{Key: "robustness", Debt: "robustness_debt", Script: "demo_robustness_scorecard.py", Label: "demo-robustness"},
 	{Key: "hygiene", Debt: "hygiene_debt", Script: "repo_hygiene_scorecard.py", Label: "repo-hygiene"},
 	{Key: "parity", Debt: "parity_debt", Script: "industry_scorecard.py", Label: "industry-parity"},
-	{Key: "agent", Debt: "friction_debt", Script: "agent_readiness_scorecard.py", Label: "agent-readiness"},
+	{Key: "agent", Debt: "friction_debt", Cmd: "go run ./cmd/fak score agent-readiness --json", Label: "agent-readiness"},
 	{Key: "product", Debt: "product_debt", Cmd: "go run ./cmd/fak product-scorecard --json", Label: "product"},
 	{Key: "persona", Debt: "persona_debt", Script: "persona_readiness_scorecard.py", Label: "persona"},
 	{Key: "stability", Debt: "stability_debt", Script: "stability_scorecard.py", Label: "stability"},

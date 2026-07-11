@@ -5,11 +5,11 @@ description: "fak's deterministic agent-readiness scorecard: KPIs across the thr
 
 # Agent-readiness scorecard — can an agent discover, adopt, and build on fak
 
-<!-- agent-readiness-scorecard: 2026-06-30 · process: tools/agent_readiness_scorecard.py -->
+<!-- agent-readiness-scorecard: 2026-06-30 · process: internal/agentreadinessscore -->
 
-This is the measuring stick for fak's **agent attractiveness** — the question an agent-first project lives or dies on: can an autonomous coding agent (Claude Code, OpenAI Codex, Cursor, an MCP client) **discover** fak, **want** to adopt it, and **build** on it effectively? Every number below is re-derived from the git-tracked tree by `tools/agent_readiness_scorecard.py` — no hand-entry. There are two headline numbers. **Experience-frontier** (unbounded, higher = better) is the one to grow: the weighted count of real, working agent affordances the tree provides — a never-done program with no ceiling, the mirror of the operator-heaviness gauge. **Friction-debt** (lower = better, floor 0) is the baseline gate: the count of concrete, mechanical defects that make fak harder for an agent to find, trust, and build on — a missing entry point, a dead orientation link, no copy-pasteable first command, an un-tagged claim, a guard that ambushes instead of teaches. Driving friction-debt to zero makes fak the path of least resistance for the agent that lands in it cold; climbing the frontier keeps widening the set of agents it serves.
+This is the measuring stick for fak's **agent attractiveness** — the question an agent-first project lives or dies on: can an autonomous coding agent (Claude Code, OpenAI Codex, Cursor, an MCP client) **discover** fak, **want** to adopt it, and **build** on it effectively? Every number below is re-derived from the git-tracked tree by `fak score agent-readiness` (internal/agentreadinessscore) — no hand-entry. There are two headline numbers. **Experience-frontier** (unbounded, higher = better) is the one to grow: the weighted count of real, working agent affordances the tree provides — a never-done program with no ceiling, the mirror of the operator-heaviness gauge. **Friction-debt** (lower = better, floor 0) is the baseline gate: the count of concrete, mechanical defects that make fak harder for an agent to find, trust, and build on — a missing entry point, a dead orientation link, no copy-pasteable first command, an un-tagged claim, a guard that ambushes instead of teaches. Driving friction-debt to zero makes fak the path of least resistance for the agent that lands in it cold; climbing the frontier keeps widening the set of agents it serves.
 
-> Regenerate: `python tools/agent_readiness_scorecard.py --markdown --stamp DATE > docs/AGENT-READINESS-SCORECARD.md`
+> Regenerate: `go run ./cmd/fak score agent-readiness --markdown --stamp DATE > docs/AGENT-READINESS-SCORECARD.md`
 
 ## Headline
 
