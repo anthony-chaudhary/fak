@@ -220,9 +220,9 @@ func (s *Server) renderMetrics() string {
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	s.writeServingMetrics(&b, inf)
-	m.writeHarnessMetrics(&b)   // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
-	m.writeLogvaultMetrics(&b)  // fak_logvault_* — vault last-capture age/footprint/verify mismatches (#2455)
-	s.writeNativePDMetrics(&b)  // #28: native prefill/decode role-split telemetry, when a cluster is wired
+	m.writeHarnessMetrics(&b)  // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
+	m.writeLogvaultMetrics(&b) // fak_logvault_* — vault last-capture age/footprint/verify mismatches (#2455)
+	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
 	m.writeVCacheWarmthDemotionMetrics(&b)
