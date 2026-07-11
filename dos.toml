@@ -1169,6 +1169,11 @@ see_also = ["internal/dispatchtick/preflight_focus.go", "internal/focusscore/foc
 # not decide cheaply; the costlier rung was unavailable, so fail closed -- escalate,
 # never silently allow." Pure DATA: it introduces no spontaneous refusal, it only
 # gives the ladder's existing fail-closed tail a checkable name.
+
+[reasons.OBJECTIVE_SCORER_MISSING]
+summary = "A dispatch objective has no attached witnessed scorer."
+fix = "Add a non-empty Witness section to the issue contract that names the independent progress evidence, then dispatch again."
+
 [reasons.INDETERMINATE]
 category = "OPERATOR_GATE"
 refusal  = true

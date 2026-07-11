@@ -802,6 +802,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	contract := dispatchtick.ParseObjectiveContract(dispatchMapString(promptRec, "body"))
+	if contract.Refusal != "" {
+		payload["ok"] = false
+		payload["action"] = "objective_contract_refused"
+		payload["verdict"] = contract.Refusal
+		payload["reason"] = "issue objective has no attached Witness scorer"
+		payload["objective_contract"] = contract
+		return finish(payload), nil
+	}
 	dispatchStampMs(timings, "prompt", tPrompt)
 	promptChars := dispatchMapInt(promptRec, "prompt_chars")
 	labels := dispatchStringSlice(promptRec["labels"])

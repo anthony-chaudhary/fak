@@ -75,10 +75,12 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 		inf = dispatchFetchIssue(root, issue)
 	}
 	roles, roleErr := branchrole.Load(root)
+	contract := dispatchtick.ParseObjectiveContract(inf.Body)
 	rec := dispatchtick.BuildIssuePrompt(dispatchtick.IssuePromptInput{
 		Number:            firstInt(inf.Number, issue),
 		Title:             inf.Title,
 		Body:              inf.Body,
+		ObjectiveContract: contract,
 		Labels:            inf.Labels,
 		Lane:              lane,
 		Workspace:         root,
@@ -97,6 +99,7 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 		"title":              rec.Title,
 		"body":               inf.Body,
 		"labels":             inf.Labels,
+		"objective_contract": contract,
 		"fetch_error":        rec.FetchError,
 		"prompt":             rec.Prompt,
 		"prompt_chars":       rec.PromptChars,

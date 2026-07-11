@@ -4,6 +4,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 // TestDispatchPromptUsesCachedRowWithoutRefetch proves the #4167 hot-path win: when a
@@ -68,5 +70,22 @@ func TestDispatchPromptFallsBackWhenCachedBodyEmpty(t *testing.T) {
 	}
 	if want := "Fetched via gh because no cached body was threaded in."; got["body"] != want {
 		t.Fatalf("prompt body = %#v, want fetched fallback body %q", got["body"], want)
+	}
+}
+
+func TestDispatchPromptCarriesObjectiveContract(t *testing.T) {
+	root := t.TempDir()
+	body := "## Working spine\nSteer the child by measured progress.\n\n## Witness\ncurve ledger rows from `fak trajctl curve`."
+	got, err := dispatchPrompt(root, io.Discard, 2550, "dispatch", dispatchIssueInfo{Number: 2550, Title: "trajectory child", Body: body, State: "OPEN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := dispatchMapString(got, "prompt")
+	if !strings.Contains(prompt, "Steer the child by measured progress") || !strings.Contains(prompt, "curve ledger rows") {
+		t.Fatalf("prompt missing objective/scorer block:\n%s", prompt)
+	}
+	contract, ok := got["objective_contract"].(dispatchtick.ObjectiveContract)
+	if !ok || !contract.Attached {
+		t.Fatalf("objective_contract=%T %#v, want attached", got["objective_contract"], got["objective_contract"])
 	}
 }
