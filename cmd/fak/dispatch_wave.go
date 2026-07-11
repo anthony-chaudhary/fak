@@ -383,6 +383,16 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 	for lane := range held {
 		exclude[lane] = true
 	}
+	// #4285: soft-exclude lanes the #2062 low-yield fold flagged (recent finished
+	// sessions burned turns yet closed nothing). This is the load-bearing merge: each
+	// priced row runs a tick with its lane PINNED, which bypasses the tick exclude, so
+	// steering the fleet away from a poison lane has to happen here at pricing time.
+	// Auto-pick only -- an explicit --lane still overrides. Fail-open (nil on error).
+	if explicitLane == "" {
+		for lane := range dispatchLowYieldExcludes(root) {
+			exclude[lane] = true
+		}
+	}
 
 	lanes := make([]string, 0, len(router.Lanes))
 	for lane := range router.Lanes {
