@@ -743,6 +743,9 @@ func findWatchdogStatusRow(rows []resume.WatchdogMTTRRow, session string) resume
 // otherwise the bare `claude --resume` that shipped before the knob. The posture-arg SHAPING
 // itself (order, auto emits nothing, malformed) is covered by guard_cache_posture_test.go.
 func TestRwResumeArgvGuardFronting(t *testing.T) {
+	oldAnchor := rwResumeAnchor
+	rwResumeAnchor = func(string) resume.ResumeAnchor { return resume.ResumeAnchor{} }
+	t.Cleanup(func() { rwResumeAnchor = oldAnchor })
 	const sid = "SID"
 	bare := []string{"/bin/claude", "--resume", sid, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
 	eq := func(got, want []string) bool { return strings.Join(got, "\x00") == strings.Join(want, "\x00") }
@@ -1053,5 +1056,24 @@ func TestResumeCarryReseedLoadLatestFailOpen(t *testing.T) {
 	got := rwLoadDriveCarry(dir)
 	if got["carry-session"].TurnsLeft != 4 {
 		t.Fatalf("latest carry = %#v, want turns_left=4", got["carry-session"])
+	}
+}
+
+func TestRwResumeArgvPrependsFreshAnchor(t *testing.T) {
+	oldAnchor := rwResumeAnchor
+	rwResumeAnchor = func(session string) resume.ResumeAnchor {
+		curve := trajctl.ObjectiveCurve{ObjectiveID: "issue-2551", Signal: trajctl.SignalStall, Latest: .4, Delta: 0, Detail: "flat witnessed progress"}
+		return resume.ResumeAnchor{Schema: resume.ResumeAnchorSchema, Session: session, ObjectiveID: curve.ObjectiveID, Objective: "prevent cascade drift", Curve: &curve, Plan: []trajctl.PlanPhase{{ID: "p1", Title: "wire anchor"}}, Present: true}
+	}
+	t.Cleanup(func() { rwResumeAnchor = oldAnchor })
+	got := rwResumeArgv("", "/bin/claude", "SID", nil)
+	if len(got) < 6 || got[4] != "-p" {
+		t.Fatalf("argv=%#v", got)
+	}
+	prompt := got[5]
+	for _, want := range []string{"fresh resume anchor", "prevent cascade drift", "STALL latest=0.40", "p1 wire anchor", resumeWatchdogPrompt} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, prompt)
+		}
 	}
 }

@@ -56,6 +56,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/resumebackoff"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -348,11 +349,13 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		// tick. The gate keys on OUTCOME, not mere presence: phase="launched" marks an
 		// attempt whose result is unknown until the next tick reads the transcript.
 		attempt := d.Attempt
+		anchor := rwResumeAnchor(p.Session)
 		row := map[string]any{
 			"ts": rwNowISO(), "session": p.Session, "account": p.Account,
 			"resume_account": p.ResumeAccount, "rehomed": p.Rehomed,
 			"project": p.Project, "pid": pid, "cause": p.Disp,
 			"phase": "launched", "attempt": attempt, "signature": signature,
+			"resume_anchor": anchor,
 		}
 		rwAppendLedger(ledgerPath, row)
 		// #4139/#4216: record the OS-relaunch reset transaction — the transcript-UUID-keyed
@@ -1047,6 +1050,11 @@ func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, r
 		envMap(resume.WatchdogChildEnv(os.Environ(), resumeCfg)), rwResumeCWD(p))
 }
 
+var rwResumeAnchor = func(session string) resume.ResumeAnchor {
+	path := filepath.Join(repoRoot(), trajctl.DefaultLedgerRel)
+	return resume.BuildResumeAnchor(session, trajctl.Fold(trajctl.ReadLedgerFile(path)))
+}
+
 // rwResumeArgv is the argv that resumes one dead session. Default (no managed-cache posture
 // configured, or fak unresolved): a bare `claude --resume … -p <prompt>
 // --dangerously-skip-permissions`, byte-identical to before the posture knob existed. When the
@@ -1059,7 +1067,12 @@ func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, r
 // flags BEFORE `--`, agent after). Mirrors tools/fleet_resume_watchdog.py:resume_child_argv and
 // the .ps1 spawn block (#2178 / #3779).
 func rwResumeArgv(fakExe, claudeExe, session string, postureArgs []string, carry ...resume.DriveCarryRow) []string {
-	child := []string{claudeExe, "--resume", session, "-p", resumeWatchdogPrompt, "--dangerously-skip-permissions"}
+	prompt := resumeWatchdogPrompt
+	anchor := rwResumeAnchor(session)
+	if block := anchor.Prompt(); block != "" {
+		prompt = block + "\n\n" + prompt
+	}
+	child := []string{claudeExe, "--resume", session, "-p", prompt, "--dangerously-skip-permissions"}
 	if len(postureArgs) > 0 && strings.TrimSpace(fakExe) != "" {
 		front := make([]string, 0, len(postureArgs)+len(child)+3)
 		front = append(front, fakExe, "guard")
