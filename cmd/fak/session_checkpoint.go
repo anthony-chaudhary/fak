@@ -26,7 +26,6 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionimage"
 )
 
@@ -62,7 +61,7 @@ func runSessionCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	// The op's shape rule is the closed CHECKPOINT_MALFORMED refusal — an empty destination
 	// has nowhere to write. Validating through the typed op keeps the CLI and the op contract
 	// in lockstep rather than re-inventing the check.
-	if r := (sessionctl.Checkpoint{Dest: *out}).Validate(); r != nil {
+	if r := (sessionimage.Checkpoint{Dest: *out}).Validate(); r != nil {
 		fmt.Fprintf(stderr, "fak session checkpoint: %v\n", r)
 		return 2
 	}

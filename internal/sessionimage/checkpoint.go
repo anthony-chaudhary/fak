@@ -1,41 +1,39 @@
-package sessionctl
+package sessionimage
 
-// checkpoint.go — the typed CHECKPOINT / on-demand snapshot op of the operator control
-// epic (#2760, child of #2753). Where redirect.go changes WHAT a session pursues and
-// constraint.go tightens its floor, checkpoint CAPTURES a running session: it writes the
-// session's boundary-consistent drive state + context image into a durable, addressable
-// snapshot — WITHOUT stopping, pausing, or otherwise mutating the source. Durable
-// checkpointed state is the substrate fork, safe experimentation, and crash-durable
-// resume all build on.
+// checkpoint.go — the typed on-demand CHECKPOINT op of the operator-control epic (#2760,
+// child of #2753). A checkpoint CAPTURES a running session: it writes the session's
+// boundary-consistent drive state + context image into a durable, addressable snapshot —
+// WITHOUT stopping, pausing, or otherwise mutating the source. Durable checkpointed state
+// is the substrate fork, safe experimentation, and crash-durable resume all build on.
 //
-// # Why this op is NOT in the loop-consumed vocabulary spine (vocab.go / #2766)
+// # Why the op lives here (tier: integrator), not with the sessionctl control ops
+//
+// The other operator-control ops (redirect, constraint) work purely on a session's drive
+// STATE — they compose adjudicator + abi and belong in tier-3 sessionctl. A checkpoint is a
+// different animal: it is an operator-initiated READ that produces a durable session-IMAGE
+// ARTIFACT. Its capture is literally the in-memory twin of DumpDir (see snapshot.go's
+// SnapshotDir, the on-disk twin), so it couples to the integrator types this package owns —
+// Input, Meta, DumpDir. That coupling is why it is an integrator-tier op: a tier-3 composer
+// may not import this tier-4 package (the layered-DAG import rule), so the checkpoint op
+// lives here, next to the DumpDir it wraps, and the CLI verb (`fak session checkpoint`)
+// binds transport in cmd/fak.
+//
+// # Why this op is NOT in the loop-consumed vocabulary spine (#2766)
 //
 // The nine spine ops (steer/redirect/pause/resume/cancel/terminate/throttle/budget/
-// priority) share one shape: the LOOP consumes them at a boundary — a splice into the
-// turn input, a hold, a stop, a sampling cap, a scheduler read. Their witness-of-applied
-// is that loop-side consumption (internal/agent/loop_control_witness_test.go).
-//
-// A checkpoint is a different animal: it is an operator-initiated READ that produces a
-// durable ARTIFACT. Nothing is spliced, nothing halts, the drive is not written. Its
-// witness is not a loop-side stop/splice — it is the round-trip RESTORE: dump the live
-// session, load it back, and prove the restored drive state is equivalent while the
-// source keeps running (checkpoint_test.go, this issue's named witness). Because it has
-// no loop-consumption half, it does not register a #2766 row and so is deliberately
-// absent from the closed spine registry — registering it there would demand a loop-side
-// applied-witness this op does not (and should not) have. A future boundary-DRIVEN
-// auto-checkpoint (explicitly out of scope for #2760) would be the spine citizen; this
-// on-demand capture is not.
-//
-// Like the other sessionctl ops this file owns ONLY the typed op payload, its validation,
-// its closed refusal vocabulary, and the capture itself (which reuses internal/sessionimage
-// — a checkpoint IS a session image, taken live). Transport (the `fak session checkpoint`
-// verb) binds in cmd/fak.
+// priority) share one shape: the LOOP consumes them at a boundary — a splice into the turn
+// input, a hold, a stop, a sampling cap, a scheduler read. Their witness-of-applied is that
+// loop-side consumption. A checkpoint has no loop-consumption half: nothing is spliced,
+// nothing halts, the drive is not written. Its witness is the round-trip RESTORE — dump the
+// live session, load it back, and prove the restored drive state is equivalent while the
+// source keeps running (checkpoint_test.go, this issue's named witness). Because it has no
+// loop-consumption half it registers no #2766 row and is deliberately absent from the closed
+// spine registry. A future boundary-DRIVEN auto-checkpoint (out of scope for #2760) would be
+// the spine citizen; this on-demand capture is not.
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/sessionimage"
 )
 
 // checkpointReasonLabel is the image label a checkpoint stamps its operator reason under,
@@ -56,7 +54,7 @@ type Checkpoint struct {
 }
 
 // CheckpointRefuseReason is the closed refusal vocabulary for a checkpoint op — the same
-// closed-reason discipline as redirect.go's RedirectRefuseReason and every other fak
+// closed-reason discipline as sessionctl's RedirectRefuseReason and every other fak
 // refusal. These are op-shape reasons, distinct from the drive-state control vocabulary
 // (session.ControlRefusalTokens): a checkpoint is a READ, so it has no "terminal session"
 // refusal — a stopped session is a perfectly legal thing to snapshot (that is exactly the
@@ -114,27 +112,28 @@ func (c Checkpoint) Validate() *CheckpointRefusal {
 // A shape refusal (empty dest) or an identity refusal (no SessionID/TraceID) surfaces as a
 // *CheckpointRefusal carrying its closed reason; a disk/IO failure surfaces as a wrapped
 // error. Callers branch the two with errors.As.
-func (c Checkpoint) Snapshot(live sessionimage.Input) (sessionimage.Meta, error) {
+func (c Checkpoint) Snapshot(live Input) (Meta, error) {
 	if r := c.Validate(); r != nil {
-		return sessionimage.Meta{}, r
+		return Meta{}, r
 	}
 	if strings.TrimSpace(live.SessionID) == "" && strings.TrimSpace(live.Drive.TraceID) == "" {
-		return sessionimage.Meta{}, checkpointRefuse(CheckpointNoSession,
+		return Meta{}, checkpointRefuse(CheckpointNoSession,
 			"a checkpoint needs a session identity (SessionID or Drive.TraceID) to key the snapshot on")
 	}
 	if note := strings.TrimSpace(c.Reason); note != "" {
-		live.Labels = withLabel(live.Labels, checkpointReasonLabel, note)
+		live.Labels = withCheckpointLabel(live.Labels, checkpointReasonLabel, note)
 	}
-	meta, err := sessionimage.DumpDir(strings.TrimSpace(c.Dest), live)
+	meta, err := DumpDir(strings.TrimSpace(c.Dest), live)
 	if err != nil {
-		return sessionimage.Meta{}, fmt.Errorf("sessionctl: checkpoint snapshot: %w", err)
+		return Meta{}, fmt.Errorf("sessionimage: checkpoint snapshot: %w", err)
 	}
 	return meta, nil
 }
 
-// withLabel returns a COPY of src with key=val set — never mutating the caller's map, so a
-// checkpoint leaves the live session's Labels (and everything else it was handed) untouched.
-func withLabel(src map[string]string, key, val string) map[string]string {
+// withCheckpointLabel returns a COPY of src with key=val set — never mutating the caller's
+// map, so a checkpoint leaves the live session's Labels (and everything else it was handed)
+// untouched.
+func withCheckpointLabel(src map[string]string, key, val string) map[string]string {
 	out := make(map[string]string, len(src)+1)
 	for k, v := range src {
 		out[k] = v

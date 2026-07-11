@@ -1,4 +1,4 @@
-package sessionctl
+package sessionimage
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/session"
-	"github.com/anthony-chaudhary/fak/internal/sessionimage"
 )
 
 // TestCheckpointRoundTripLiveSession is the #2760 named witness: checkpoint a LIVE session,
@@ -45,7 +44,7 @@ func TestCheckpointRoundTripLiveSession(t *testing.T) {
 	rec.Record(ctx, "search_flights", []byte("UA123 $310"))
 
 	origLabels := map[string]string{"role": "primary"}
-	in := sessionimage.Input{
+	in := Input{
 		SessionID: trace,
 		Drive:     before,
 		Recorder:  rec,
@@ -65,7 +64,7 @@ func TestCheckpointRoundTripLiveSession(t *testing.T) {
 	}
 
 	// --- Restorable + drive-state equivalence: load the snapshot back, assert the drive. ---
-	img, err := sessionimage.LoadDir(dir)
+	img, err := LoadDir(dir)
 	if err != nil {
 		t.Fatalf("LoadDir snapshot: %v", err)
 	}
@@ -104,14 +103,14 @@ func TestCheckpointRoundTripLiveSession(t *testing.T) {
 // surface as a structured *CheckpointRefusal, never a bare error.
 func TestCheckpointRefusals(t *testing.T) {
 	// Empty destination — nowhere to write.
-	_, err := Checkpoint{Dest: ""}.Snapshot(sessionimage.Input{SessionID: "s1"})
+	_, err := Checkpoint{Dest: ""}.Snapshot(Input{SessionID: "s1"})
 	var ref *CheckpointRefusal
 	if !errors.As(err, &ref) || ref.Reason != CheckpointMalformed {
 		t.Fatalf("empty dest error = %v, want a *CheckpointRefusal with %s", err, CheckpointMalformed)
 	}
 
 	// No session identity — nothing to capture.
-	_, err = Checkpoint{Dest: t.TempDir()}.Snapshot(sessionimage.Input{})
+	_, err = Checkpoint{Dest: t.TempDir()}.Snapshot(Input{})
 	if !errors.As(err, &ref) || ref.Reason != CheckpointNoSession {
 		t.Fatalf("no-identity error = %v, want a *CheckpointRefusal with %s", err, CheckpointNoSession)
 	}
