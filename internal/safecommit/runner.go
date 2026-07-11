@@ -16,32 +16,45 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-// realRunner is the default Runner: it runs the real git binary. It mirrors
-// witness.gitRunner's contract — a non-zero git exit is returned in code (not err); err
-// signals git could not be EXECUTED at all — with one deliberate difference: it MERGES
-// stderr into the returned stdout. The executor needs a hook's refusal / a push rejection
-// message to surface in Result.Detail, which witness (Stderr = nil) discards.
-func realRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
+// newGitCmd builds the *exec.Cmd realRunner executes, applying by construction the two
+// environment invariants that keep a busy shared tree DRAINED — the reason this is a
+// named helper rather than inline: both defaults are one careless edit from re-opening a
+// contention class, so they are pinned here and asserted by a guard test that never has
+// to spawn git.
+//
+//   - GIT_OPTIONAL_LOCKS=0 on EVERY invocation: the read probes (rev-parse, symbolic-ref,
+//     status, diff) must never take git's OPTIONAL locks — a plain `git status` otherwise
+//     opportunistically refreshes the index under .git/index.lock and, on a busy shared
+//     tree, collides with a concurrent writer (the documented burst-time stall class that
+//     once wedged the commit lane). Mandatory write locks (add/commit) are unaffected;
+//     contention on those is ridden out by runRidingLockContention instead.
+//   - FAK_SAFECOMMIT_VETTED=1 on `git commit` ONLY: the handshake with the hook-layer
+//     BARE_COMMIT_SWEEP gate (issue #3615). This `git commit` was issued by safecommit,
+//     which already vetted the DECLARED pathspec through the path-scoped
+//     PRESTAGED_PATH_OVERLAP guard; the marker rides down into the pre-commit hook so that
+//     gate stands down instead of re-flagging the vetted commit as an unvetted bare sweep.
+//     A raw `git commit` carries no marker and is still gated, so the marker must never
+//     leak onto a read probe or push.
+func newGitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
-	// GIT_OPTIONAL_LOCKS=0: the read probes (rev-parse, symbolic-ref, status,
-	// diff) must never take git's OPTIONAL locks — a plain `git status` otherwise
-	// opportunistically refreshes the index under .git/index.lock and, on a busy
-	// shared tree, collides with a concurrent writer (the documented burst-time
-	// stall class). Mandatory write locks (add/commit) are unaffected; contention
-	// on those is ridden out by runRidingLockContention instead.
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	// Handshake with the hook-layer BARE_COMMIT_SWEEP gate (issue #3615): this `git commit`
-	// was issued by safecommit, which has already vetted the DECLARED pathspec through the
-	// path-scoped PRESTAGED_PATH_OVERLAP guard. The marker rides down through `git commit` into
-	// the pre-commit hook it spawns, so that gate stands down instead of re-flagging the vetted
-	// commit as an unvetted bare sweep. A raw `git commit` carries no marker and is still gated.
 	if len(args) > 0 && args[0] == "commit" {
 		cmd.Env = append(cmd.Env, "FAK_SAFECOMMIT_VETTED=1")
 	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	return cmd
+}
+
+// realRunner is the default Runner: it runs the real git binary. It mirrors
+// witness.gitRunner's contract — a non-zero git exit is returned in code (not err); err
+// signals git could not be EXECUTED at all — with one deliberate difference: it MERGES
+// stderr into the returned stdout. The executor needs a hook's refusal / a push rejection
+// message to surface in Result.Detail, which witness (Stderr = nil) discards.
+func realRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
+	cmd := newGitCmd(ctx, dir, args...)
 	var buf strings.Builder
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
