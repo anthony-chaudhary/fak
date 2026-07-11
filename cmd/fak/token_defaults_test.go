@@ -131,16 +131,16 @@ func TestTokenDefaultsSnapshotFresh(t *testing.T) {
 
 // TestTokenDefaultsLeversDerivedFromSource guards the anti-gaming rule for THIS scorecard: each
 // lever's on/off must be DERIVED from the entrypoint source, never a hardcoded roster claim. It
-// asserts the elision and ctxview flips are reflected (both ON), ctxview is no longer gated, and
-// the headline counters match (all 6 stacked), so the scorecard cannot report a default that
-// contradicts the binary.
+// asserts the elision, stale-elision, and ctxview flips are reflected (all ON), ctxview is no
+// longer gated, and the headline counters match (all 7 stacked), so the scorecard cannot report a
+// default that contradicts the binary.
 func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
 	c := collectTokenDefaultsScorecard("../..")["corpus"].(map[string]any)
-	if got := c["stacked_on"].(int); got != 6 {
-		t.Errorf("stacked_on derived = %d, want 6 (6/6 safe savers on by default)", got)
+	if got := c["stacked_on"].(int); got != 7 {
+		t.Errorf("stacked_on derived = %d, want 7 (7/7 safe savers on by default)", got)
 	}
-	if got := c["levers_total"].(int); got != 6 {
-		t.Errorf("levers_total = %d, want 6", got)
+	if got := c["levers_total"].(int); got != 7 {
+		t.Errorf("levers_total = %d, want 7", got)
 	}
 	on := map[string]bool{}
 	gated := map[string]bool{}
@@ -150,6 +150,12 @@ func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
 	}
 	if !on["elideresult"] {
 		t.Errorf("elideresult must derive ON from source (the default-on flip), got OFF")
+	}
+	if !on["elidestale"] {
+		t.Errorf("elidestale must derive ON from source (the default-on flip of read-lifecycle STALE elision), got OFF")
+	}
+	if gated["elidestale"] {
+		t.Errorf("elidestale must no longer be gated once it is on by default")
 	}
 	if !on["ctxview"] {
 		t.Errorf("ctxview must derive ON from source (the default-on flip at 8000), got OFF")

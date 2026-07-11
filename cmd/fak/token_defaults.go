@@ -161,6 +161,8 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 	require(strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes"), "gateway.DefaultElideResultBytes must arm oversized-result elision on by default at the documented threshold")
 	require(bothWire(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`), "both front doors must wire compact-history-budget to gateway.DefaultCompactHistoryBudget")
 	require(bothWire(`fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`), "both front doors must wire elide-result-bytes to gateway.DefaultElideResultBytes")
+	require(strings.Contains(gateway, "const DefaultElideStaleReads = true"), "gateway.DefaultElideStaleReads must arm read-lifecycle STALE elision on by default (the restorable sibling of oversized elision)")
+	require(bothWire(`fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads`), "both front doors must wire elide-stale-reads to gateway.DefaultElideStaleReads")
 	require(strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000"), "agent.DefaultCtxViewBudget must stay default-on at the witnessed 8000-resident-token budget")
 	require(bothWire(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`), "both front doors must default ctx-view-budget ON by wiring it to agent.DefaultCtxViewBudget (the witnessed 8000-resident-token budget: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md)")
 	require(strings.Contains(serve, `fs.Bool("vdso", true`), "serve.go must default vDSO on")
@@ -195,6 +197,7 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 
 	// ---- derive each lever's REAL default + state from the entrypoint source ----
 	elideWitnessed := exists("experiments/agent-live/elide-oversized-prevalence-2026-06-26.json")
+	elideStaleWitnessed := exists("experiments/agent-live/elide-stale-read-prevalence-2026-07-09.json")
 	levers := []lever{
 		{
 			key: "provider_cache", label: "provider_cache — provider prompt-cache prefix (byte-faithful passthrough)",
@@ -220,6 +223,11 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 			key: "elideresult", label: "elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail)",
 			class: "bounded", on: strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes") && bothWire(`fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`),
 			witnessed: elideWitnessed, blocker: blockerIf(!elideWitnessed, "unwitnessed"), flag: "--elide-result-bytes", gated: false, noted: true, locked: true,
+		},
+		{
+			key: "elidestale", label: "elidestale — stale-read elision (replace a Read superseded by a later same-file edit with a restorable marker)",
+			class: "bounded", on: strings.Contains(gateway, "const DefaultElideStaleReads = true") && bothWire(`fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads`),
+			witnessed: elideStaleWitnessed, blocker: blockerIf(!elideStaleWitnessed, "unwitnessed"), flag: "--elide-stale-reads", gated: false, noted: true, locked: true,
 		},
 		{
 			key: "ctxview", label: "ctxview — ctxplan O(1) planned view (re-materialize history under a budget)",
