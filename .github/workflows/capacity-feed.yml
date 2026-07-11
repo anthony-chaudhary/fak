@@ -19,7 +19,7 @@ name: capacity-feed
 # OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
 # scoreboard-workspace bot token — the same value in the gitignored
 # .env.slack.local) under Settings -> Secrets and variables -> Actions. The channel
-# #capacity (C0BDNU04JDP) is the built-in default; override with the
+# the CI/CD reporting sink (C0BGQ411TCJ) is the built-in default; override with the
 # FAK_CAPACITY_CHANNEL repo variable if you point the surface elsewhere.
 on:
   schedule:
@@ -51,7 +51,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_CAPACITY_CHANNEL: ${{ vars.FAK_CAPACITY_CHANNEL || 'C0BDNU04JDP' }}
+      FAK_CAPACITY_CHANNEL: ${{ vars.FAK_CAPACITY_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4

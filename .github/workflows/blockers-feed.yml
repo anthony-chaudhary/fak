@@ -26,9 +26,10 @@ name: blockers-feed
 #
 # OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
 # scoreboard-workspace bot token — the same value in the gitignored .env.slack.local)
-# under Settings -> Secrets and variables -> Actions. The channel #blockers (C0BDHRJJPTP)
-# is the built-in default; override with the FAK_BLOCKERS_CHANNEL repo variable, and the
-# label with the FAK_BLOCKERS_LABEL repo variable, if you point the surface elsewhere.
+# under Settings -> Secrets and variables -> Actions. The CI/CD reporting sink
+# (C0BGQ411TCJ) is the built-in default; override with the FAK_BLOCKERS_CHANNEL repo
+# variable (or the whole family with FAK_CICD_REPORT_CHANNEL), and the label with the
+# FAK_BLOCKERS_LABEL repo variable, if you point the surface elsewhere.
 on:
   schedule:
     # Daily 09:07 UTC — an off-the-hour minute clear of the other scheduled jobs
@@ -60,7 +61,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL || 'C0BDHRJJPTP' }}
+      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_BLOCKERS_LABEL: ${{ vars.FAK_BLOCKERS_LABEL || 'blocked' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:

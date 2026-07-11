@@ -12,7 +12,7 @@ name: cachevalue-feed
 # scoreboard bot token secret is configured.
 #
 # OPERATOR STEP (one-time): add FAK_SCOREBOARD_TOKEN under Settings -> Secrets
-# and variables -> Actions. The card defaults to #scoreboard (C0BEF8B8KMW);
+# and variables -> Actions. The card defaults to the CI/CD reporting sink (C0BGQ411TCJ);
 # override with the FAK_CACHEVALUE_CHANNEL repo variable to split it out (e.g. the
 # dedicated #cache-value channel C0BDSB81XDZ).
 on:
@@ -46,7 +46,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL || 'C0BEF8B8KMW' }}
+      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4

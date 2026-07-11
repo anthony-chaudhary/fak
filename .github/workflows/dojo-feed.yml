@@ -65,7 +65,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_DOJO_CHANNEL: ${{ vars.FAK_DOJO_CHANNEL || 'C0BDP2V51L1' }}
+      FAK_DOJO_CHANNEL: ${{ vars.FAK_DOJO_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4

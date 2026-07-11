@@ -67,7 +67,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_PRODUCT_CHANNEL: ${{ vars.FAK_PRODUCT_CHANNEL }}
+      FAK_PRODUCT_CHANNEL: ${{ vars.FAK_PRODUCT_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4
@@ -110,25 +110,22 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # POST — only when BOTH the token secret AND the channel variable are set.
-      # A manual dry_run also skips. #product has no default channel, so the
-      # FAK_PRODUCT_CHANNEL gate is load-bearing, not just the token.
+      # POST — only when the token secret is set (a manual dry_run also skips).
+      # product now folds onto the CI/CD reporting sink by default
+      # (FAK_PRODUCT_CHANNEL || FAK_CICD_REPORT_CHANNEL || C0BGQ411TCJ), so the channel
+      # is never empty and the gate is the token alone — the var is just an override.
       - name: post to #product
-        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_PRODUCT_CHANNEL != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
         run: |
           go run ./cmd/fak product post --${{ steps.mode.outputs.mode }} --source ci
 
       - name: note when posting was skipped
-        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_PRODUCT_CHANNEL == '' }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
         run: |
           {
             echo "Product post SKIPPED — ran in dry-run, nothing posted."
-            if [ -z "${{ env.FAK_SCOREBOARD_TOKEN }}" ]; then
-              echo "- FAK_SCOREBOARD_TOKEN secret not set (add it under Settings -> Secrets and variables -> Actions -> Secrets)."
-            fi
-            if [ -z "${{ env.FAK_PRODUCT_CHANNEL }}" ]; then
-              echo "- FAK_PRODUCT_CHANNEL repo variable not set (#product has no default channel; add it under Variables)."
-            fi
+            echo "- FAK_SCOREBOARD_TOKEN secret not set (add it under Settings -> Secrets and variables -> Actions -> Secrets)."
+            echo "- Channel defaults to the CI/CD reporting sink (C0BGQ411TCJ); set FAK_PRODUCT_CHANNEL (or FAK_CICD_REPORT_CHANNEL) to override."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload card artifact

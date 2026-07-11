@@ -14,7 +14,7 @@ name: cachevalue-weekly
 #
 # OPERATOR STEP (one-time, shared with cachevalue-feed): add FAK_SCOREBOARD_TOKEN
 # under Settings -> Secrets and variables -> Actions. The card defaults to
-# #scoreboard (C0BEF8B8KMW); override with the FAK_CACHEVALUE_CHANNEL repo variable.
+# the CI/CD reporting sink (C0BGQ411TCJ); override with the FAK_CACHEVALUE_CHANNEL repo variable.
 on:
   schedule:
     # Weekly, Monday 09:47 UTC - an off-the-hour minute clear of the other scheduled
@@ -43,7 +43,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL || 'C0BEF8B8KMW' }}
+      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4
