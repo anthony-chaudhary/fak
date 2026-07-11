@@ -130,6 +130,20 @@ These add fak to the docs of tools fak fronts, reaching THEIR users (not just a 
 
 *Not actionable yet:* **awesome-go** — its ≥5-month-commit-history gate is provably failed (repo created 2026-06-21); earliest eligibility ~2026-11-21, and only if Go Report Card grades A-/A/A+ (note: Go Report Card is sunsetting). **Homebrew core** needs ~225 stars; a personal tap (`homebrew-fak`) is available now if Mac reach matters.
 
+### 9. Hugging Face Space — the offline in-browser demo (NEW, owner-gated)
+
+Spaces are the one directory where a visitor **runs** a claim instead of reading it. fak ships
+no weights (so no model card — that's the fence, not a gap), but the committed
+[`spaces/hf-demo/`](https://github.com/anthony-chaudhary/fak/tree/main/spaces/hf-demo) **Docker
+Space** runs three offline witnesses in-browser: policy DENY/ALLOW, provable deletion
+(`max|Δ|=0`), and the turn tax — no key, no GPU. Full playbook: [`huggingface.md`](huggingface.md).
+
+- **Create:** <https://huggingface.co/new-space> → SDK **Docker**, name `fak-demo`, license `apache-2.0`, public.
+- **Push:** the three files in `spaces/hf-demo/` (`README.md` carries the HF `sdk: docker` front-matter, plus `Dockerfile` and `app.py`) to the Space git remote — it builds automatically.
+- **Short description (paste):** `Adjudicate every tool call like a syscall; provably evict a poisoned result. Three witnesses, no key, no GPU.`
+- **Tags:** `agents`, `llm-security`, `prompt-injection`, `kv-cache`, `mcp`
+- **Fence:** fak uploads no weights — the Space runs fak's own binaries; the HF-oracle **numeric** parity (cos=1.000000, KV-evict `max|Δ|=0`) is `go test ./internal/model`, not the Space itself.
+
 ---
 
 *Every description here is agent-kernel-first and traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). No

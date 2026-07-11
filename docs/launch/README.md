@@ -59,6 +59,8 @@ top commenter does.
 | [`x-thread.md`](x-thread.md) | An X/Twitter thread + a standalone Bluesky variant, each post paired with an existing visual. |
 | [`lobsters-and-blog.md`](lobsters-and-blog.md) | A Lobsters submission + a dev.to/Hashnode cross-post outline (the long-tail SEO + newsletter-pickup asset). |
 | [`untrusted-program-talk.md`](untrusted-program-talk.md) | **The long-form spine.** A talk outline (the syscall framing → the two flips → the 0/29 posture → the `max|Δ|=0` slide → the modeled WebVoyager 8.8×–9.7× vs the naive floor, with fences), a 4-post blog-series outline each mapped to a sourced explainer, and a conference/meetup submission-target list. Extends this kit; every number traces to `BENCHMARK-AUTHORITY.md` or a named doc. |
+| [`huggingface.md`](huggingface.md) | **The offline front door.** The owner-gated Hugging Face **Space** (Docker SDK) that runs three witnesses in-browser — policy DENY/ALLOW, provable deletion (`max\|Δ\|=0`), turn tax — no key, no GPU. Scaffold committed at `spaces/hf-demo/`; fak is not a model, the Space is the artifact. |
+| [`directory-submissions.md`](directory-submissions.md) | The owner-gated MCP / AI-tool directory payloads (mcpservers.org, mcp.so, Smithery, AlternativeTo, the HF Space). Copy-paste field values. |
 
 Each post file ends with a **Provenance & fact-check** appendix — the adversarial review
 that produced it. Keep it for your own reference; strip it before pasting.

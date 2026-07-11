@@ -67,5 +67,9 @@ These durable surfaces are being driven separately from this human-gated list:
   Twitter/4× JSON-LD), pkg.go.dev indexing: all verified live.
 - **Awesome-list PRs + registry/directory submissions** — researched and staged for review (the
   external-backlink half of SEO). See the distribution working notes.
+- **Hugging Face Space** — an owner-gated in-browser demo (Docker SDK) staged at `spaces/hf-demo/`;
+  deploy playbook in [`huggingface.md`](huggingface.md). Runs three offline witnesses (policy
+  DENY/ALLOW, provable deletion, turn tax) — no key, no GPU. fak ships no model, so the artifact
+  is a Space, not a model card.
 
 The durable surfaces compound for months; this human-gated list is the one-day spike that seeds them.
