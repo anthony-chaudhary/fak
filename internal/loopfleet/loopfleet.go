@@ -80,7 +80,13 @@ type LoopHealth struct {
 	Witness int `json:"witness"`
 	// KeepRate is Keep/Runs rounded to 3 decimals; -1 when Runs==0 (no denominator),
 	// so a brand-new loop is never slandered as 0% kept on an empty base.
-	KeepRate float64 `json:"keep_rate"`
+	KeepRate          float64 `json:"keep_rate"`
+	RecentRuns        int     `json:"recent_runs"`
+	RecentKeep        int     `json:"recent_keep"`
+	RecentWitness     int     `json:"recent_witness"`
+	RecentKeepRate    float64 `json:"recent_keep_rate"`
+	RecentWitnessRate float64 `json:"recent_witness_rate"`
+	RecentAvailable   bool    `json:"recent_available"`
 }
 
 // Skipped is a ledger that could not be folded — missing, unreadable, or holding no
@@ -116,12 +122,31 @@ type Report struct {
 
 // rawLoop is the normalized intermediate every adapter produces: one loop's
 // identity plus the raw counts and last tick, before the health state is derived.
+const keepRateWindow = 20
+
+type loopOutcome struct{ keep, witness bool }
+
+func (r *rawLoop) observe(keep, witness bool) {
+	r.runs++
+	if keep {
+		r.keep++
+	}
+	if witness {
+		r.witness++
+	}
+	r.recent = append(r.recent, loopOutcome{keep: keep, witness: witness})
+	if len(r.recent) > keepRateWindow {
+		r.recent = r.recent[len(r.recent)-keepRateWindow:]
+	}
+}
+
 type rawLoop struct {
 	kind             string
 	lastTickUnixNano int64
 	runs             int
 	keep             int
 	witness          int
+	recent           []loopOutcome
 }
 
 // adapter is one ledger's read-only descriptor: its id, its repo-relative path, the
@@ -247,6 +272,22 @@ func deriveRow(ledger string, raw rawLoop, cadence int64, now time.Time, th loop
 	} else {
 		row.KeepRate = -1
 	}
+	row.RecentRuns = len(raw.recent)
+	row.RecentAvailable = row.RecentRuns > 0
+	for _, o := range raw.recent {
+		if o.keep {
+			row.RecentKeep++
+		}
+		if o.witness {
+			row.RecentWitness++
+		}
+	}
+	if row.RecentRuns > 0 {
+		row.RecentKeepRate = round3(float64(row.RecentKeep) / float64(row.RecentRuns))
+		row.RecentWitnessRate = round3(float64(row.RecentWitness) / float64(row.RecentRuns))
+	} else {
+		row.RecentKeepRate, row.RecentWitnessRate = -1, -1
+	}
 	if raw.lastTickUnixNano > 0 {
 		age := now.UTC().UnixNano() - raw.lastTickUnixNano
 		if age < 0 {
@@ -323,14 +364,8 @@ func rollup(loops []LoopHealth, skipped int) Rollup {
 func foldNightrun(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "nightrun"}
 	for _, r := range rows {
-		lp.runs++
 		bumpLastTick(&lp, asString(r["generated_at"]))
-		if isSuccess(asString(r["outcome"])) {
-			lp.keep++
-		}
-		if strings.TrimSpace(asString(r["artifact"])) != "" {
-			lp.witness++
-		}
+		lp.observe(isSuccess(asString(r["outcome"])), strings.TrimSpace(asString(r["artifact"])) != "")
 	}
 	return single(lp)
 }
@@ -340,14 +375,9 @@ func foldNightrun(rows []map[string]any) []rawLoop {
 func foldDojo(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "dojo"}
 	for _, r := range rows {
-		lp.runs++
 		bumpLastTick(&lp, asString(r["generated_at"]))
-		if strings.EqualFold(asString(r["verdict"]), "OK") {
-			lp.keep++
-		}
-		if f, ok := asFloat(r["measured"]); ok && f > 0 {
-			lp.witness++
-		}
+		measured, ok := asFloat(r["measured"])
+		lp.observe(strings.EqualFold(asString(r["verdict"]), "OK"), ok && measured > 0)
 	}
 	return single(lp)
 }
@@ -357,14 +387,8 @@ func foldDojo(rows []map[string]any) []rawLoop {
 func foldCadence(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "cadence"}
 	for _, r := range rows {
-		lp.runs++
 		bumpLastTick(&lp, asString(r["generated_at"]))
-		if strings.EqualFold(asString(r["verdict"]), "OK") {
-			lp.keep++
-		}
-		if strings.TrimSpace(asString(r["commit"])) != "" {
-			lp.witness++
-		}
+		lp.observe(strings.EqualFold(asString(r["verdict"]), "OK"), strings.TrimSpace(asString(r["commit"])) != "")
 	}
 	return single(lp)
 }
@@ -374,14 +398,9 @@ func foldCadence(rows []map[string]any) []rawLoop {
 func foldDispatch(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "dispatch"}
 	for _, r := range rows {
-		lp.runs++
 		bumpLastTick(&lp, asString(r["utc"]))
-		if b, ok := r["ok"].(bool); ok && b {
-			lp.keep++
-		}
-		if positive(r["closed_now"]) || positive(r["witnessed_open"]) {
-			lp.witness++
-		}
+		kept, _ := r["ok"].(bool)
+		lp.observe(kept, positive(r["closed_now"]) || positive(r["witnessed_open"]))
 	}
 	return single(lp)
 }

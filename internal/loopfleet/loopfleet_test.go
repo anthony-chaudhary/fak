@@ -226,3 +226,25 @@ func TestRound3(t *testing.T) {
 		}
 	}
 }
+
+func TestFoldWindowedKeepRate(t *testing.T) {
+	rows := make([]map[string]any, 0, 50)
+	for i := 0; i < 30; i++ {
+		rows = append(rows, map[string]any{"outcome": "success", "artifact": "proof"})
+	}
+	for i := 0; i < 20; i++ {
+		rows = append(rows, map[string]any{"outcome": "failed"})
+	}
+	raw := foldNightrun(rows)
+	if len(raw) != 1 {
+		t.Fatalf("raw=%v", raw)
+	}
+	got := deriveRow("nightrun", raw[0], dailyCadence, time.Unix(0, 0), loopmgr.HealthThresholds{})
+	if got.KeepRate != .6 || got.RecentRuns != 20 || got.RecentKeepRate != 0 || got.RecentWitnessRate != 0 {
+		t.Fatalf("health=%+v, want lifetime=.6 recent=0", got)
+	}
+	healthy := deriveRow("nightrun", foldNightrun(rows[:30])[0], dailyCadence, time.Unix(0, 0), loopmgr.HealthThresholds{})
+	if healthy.KeepRate != 1 || healthy.RecentKeepRate != 1 || healthy.RecentWitnessRate != 1 {
+		t.Fatalf("healthy=%+v", healthy)
+	}
+}
