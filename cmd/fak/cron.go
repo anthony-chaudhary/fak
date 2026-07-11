@@ -35,6 +35,8 @@ func runCron(stdout, stderr io.Writer, argv []string) int {
 		return runCronFire(stdout, stderr, argv[1:])
 	case "audit":
 		return runCronAudit(stdout, stderr, argv[1:])
+	case "prompt":
+		return runCronPrompt(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		cronUsage(stdout)
 		return 0
@@ -314,8 +316,10 @@ func cronUsage(w io.Writer) {
                 [--command 'CMD ARG...'] [--interval DUR] [--fak-bin PATH]
                 [--label NAME] [--ledger FILE] [-- TICK-CMD ARG...]
 
-  fak cron fire  --job ID --ledger FILE [--interval DUR] [--at RFC3339] [--slot KEY]
-  fak cron audit --ledger FILE [--job ID] [--json]
+  fak cron fire   --job ID --ledger FILE [--interval DUR] [--at RFC3339] [--slot KEY]
+  fak cron audit  --ledger FILE [--job ID] [--json]
+  fak cron prompt --job ID --ledger FILE [--script 'CMD'] [--context-from A,B]
+                  [--base 'PROMPT'] [--interval DUR] [--at RFC3339] [--slot KEY]
 
 Fire is the FIRE WITNESS (#2886): it records each fire in the ledger under a
 (job, slot) compare-and-set guarded by a dup-tick lock, so a duplicate or
@@ -323,6 +327,15 @@ overlapping tick for an already-fired slot is recorded as a `+"`deduped`"+` even
 instead of double-delivering. Exit 0 = fired (run the job), 3 = deduped (skip) —
 so `+"`fak cron fire ... && <run job>`"+` delivers at most once. Audit rolls the
 ledger up per job into fired / missed / deduped counts (--json for machine read).
+
+Prompt turns cron into a witnessed PIPELINE (#2888): --script runs a pre-run
+command and records its stdout as a `+"`fak-cron-output/1`"+` row tagged
+provenance=OBSERVED (tool output, NOT agent-authored), then injects it; and
+--context-from A[,B...] chains each named job's LAST witnessed output into this
+prompt, recording each A→B handoff as a `+"`fak-cron-edge/1`"+` ledger edge. A
+context source with no witnessed output is refused (exit 2) — B consumes only
+what A provably produced. The assembled prompt (OBSERVED blocks + --base) prints
+to stdout for a dispatcher to hand the agent.
 
 Emit renders ONE OS scheduler unit. By default its command is `+"`fak loop run --loop <id> ...`"+`
 — fak owns the semantics (overlap-lock via the ledger, missed-run policy) and the OS
