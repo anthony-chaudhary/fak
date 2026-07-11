@@ -233,7 +233,7 @@ SCORECARDS: list[dict[str, str]] = [
     # instead of duplicating the toolchain passes a second time.
     {"key": "code", "debt": "code_debt", "script": "code_quality_scorecard.py", "args": "--no-toolchain", "label": "code"},
     {"key": "appeal", "debt": "appeal_debt", "script": "doc_appeal_scorecard.py", "label": "doc-appeal"},
-    {"key": "seo", "debt": "seo_debt", "script": "seo_aeo_scorecard.py", "label": "seo"},
+    {"key": "seo", "debt": "seo_debt", "script": "", "cmd": "go run ./cmd/fak score seo --json", "label": "seo"},
     {"key": "demo", "debt": "demo_debt", "script": "demo_quality_scorecard.py", "label": "demo-quality"},
     {"key": "robustness", "debt": "robustness_debt", "script": "demo_robustness_scorecard.py", "label": "demo-robustness"},
     {"key": "hygiene", "debt": "hygiene_debt", "script": "repo_hygiene_scorecard.py", "label": "repo-hygiene"},
