@@ -57,6 +57,25 @@ func (p *pathList) Set(v string) error {
 	return nil
 }
 
+// messageList is a repeatable -m flag: each -m appends one paragraph, and the paragraphs are
+// joined with a blank line exactly like `git commit -m A -m B` ("their values are concatenated
+// as separate paragraphs"). This closes a silent footgun: a plain fs.String -m is last-wins, so
+// the muscle-memory call `fak commit -m "<subject> (fak leaf)" -m "<body>"` silently kept only
+// the body — dropping the subject AND its ship-stamp, after which deriveCommitMessageStamp
+// re-derived a DIFFERENT subject (silent corruption, not even a hard refusal). Joining preserves
+// the subject and stamp and matches git's own behavior.
+type messageList []string
+
+func (m *messageList) String() string { return m.Joined() }
+func (m *messageList) Set(v string) error {
+	*m = append(*m, v)
+	return nil
+}
+
+// Joined concatenates the -m paragraphs with a blank line (git's separator). An empty list
+// joins to "" so assembleMessage still treats "no -m" as the -F/stdin/required-message case.
+func (m messageList) Joined() string { return strings.Join([]string(m), "\n\n") }
+
 // runCommit is the `fak commit` shim: it assembles a safecommit.Options from flags
 // (message from -m / -F / stdin; paths from repeated --path AND/OR positionals after --),
 // runs the safe-commit algorithm, and reports the structured Result. Exit codes mirror the
@@ -69,7 +88,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "commit")
 	var paths pathList
 	fs.Var(&paths, "path", "a repo-relative path to commit (repeatable); paths may also be given after --")
-	msg := fs.String("m", "", "commit message (mutually exclusive with -F)")
+	var msg messageList
+	fs.Var(&msg, "m", "commit message paragraph (repeatable; multiple -m are joined by a blank line exactly like `git commit -m A -m B`; mutually exclusive with -F)")
 	msgFile := fs.String("F", "", "read the commit message from this file ('-' = stdin)")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
@@ -100,7 +120,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// local commit first). It needs a message but tolerates zero paths (the lane match is then
 	// skipped with a note).
 	if *preview {
-		message, code := assembleMessage(stdin(), *msg, *msgFile, stderr)
+		message, code := assembleMessage(stdin(), msg.Joined(), *msgFile, stderr)
 		if code != 0 {
 			return code
 		}
@@ -113,7 +133,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	message, code := assembleMessage(stdin(), *msg, *msgFile, stderr)
+	message, code := assembleMessage(stdin(), msg.Joined(), *msgFile, stderr)
 	if code != 0 {
 		return code
 	}
@@ -239,7 +259,8 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "commit")
 	var paths pathList
 	fs.Var(&paths, "path", "a repo-relative path for the future commit (repeatable); paths may also be given after --")
-	msg := fs.String("m", "", "commit subject for the intent (mutually exclusive with -F)")
+	var msg messageList
+	fs.Var(&msg, "m", "commit subject/paragraph for the intent (repeatable; joined by a blank line like `git commit -m A -m B`; mutually exclusive with -F)")
 	msgFile := fs.String("F", "", "read the commit subject from this file ('-' = stdin)")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	queueDir := fs.String("queue-dir", "", "commit-intent queue dir (default: <repo>/.fak/commit-intents)")
@@ -257,7 +278,7 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak commit submit: at least one --path (or a path after --) is required")
 		return 2
 	}
-	subject, code := assembleMessage(stdin(), *msg, *msgFile, stderr)
+	subject, code := assembleMessage(stdin(), msg.Joined(), *msgFile, stderr)
 	if code != 0 {
 		return code
 	}

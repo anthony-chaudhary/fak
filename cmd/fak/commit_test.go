@@ -77,6 +77,47 @@ func TestRunCommit_derivesMissingSingleLaneStamp(t *testing.T) {
 	}
 }
 
+// TestRunCommit_multipleDashMJoinsParagraphs locks the git-parity fix: `fak commit -m A -m B`
+// must join A and B as separate paragraphs (subject + body), NOT silently keep only the last -m.
+// Before the fix, Go's last-wins fs.String dropped the real subject AND its `(fak leaf)` stamp on
+// this common muscle-memory call; deriveCommitMessageStamp then re-derived a different subject.
+func TestRunCommit_multipleDashMJoinsParagraphs(t *testing.T) {
+	tmp := t.TempDir()
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: o.Paths}, nil
+	})
+
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--dir", tmp,
+		"--path", "internal/gateway/server.go",
+		"-m", "feat(gateway): add real thing (fak gateway)",
+		"-m", "First body paragraph.",
+		"-m", "Second body paragraph.",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+	want := "feat(gateway): add real thing (fak gateway)\n\nFirst body paragraph.\n\nSecond body paragraph."
+	if got.Message != want {
+		t.Fatalf("multiple -m should join as paragraphs (subject preserved)\n got %q\nwant %q", got.Message, want)
+	}
+}
+
+func TestMessageList_JoinedEmptyIsBlank(t *testing.T) {
+	var m messageList
+	if m.Joined() != "" {
+		t.Fatalf("empty messageList must join to \"\", got %q", m.Joined())
+	}
+	_ = m.Set("a")
+	_ = m.Set("b")
+	if got := m.Joined(); got != "a\n\nb" {
+		t.Fatalf("join want %q got %q", "a\n\nb", got)
+	}
+}
+
 func TestRunCommit_multiLaneMissingStampDoesNotGuess(t *testing.T) {
 	tmp := t.TempDir()
 	var got safecommit.Options
