@@ -2597,6 +2597,59 @@ class WeeklyCapGateTest(unittest.TestCase):
             # Not the 60-min blind fallback, and not clamped to the 90-min session cap.
             self.assertGreater(until, now_utc + dt.timedelta(minutes=90))
 
+    def test_weekly_cap_sidecar_writer_reader_contract(self) -> None:
+        """#2610 writer<->reader contract. ``check_weekly_cap`` WRITES the
+        account-cap sidecar; ``fleet_accounts.active_account_cap_throttles`` /
+        ``annotate_accounts`` READ it to drop the seat. Each side is unit-tested
+        in isolation — the writer above, the reader from a HAND-WRITTEN dict in
+        fleet_accounts_test — so a field rename in ``_write_cap_hold``
+        (until/kind/account/product) would leave BOTH suites green while the live
+        cooldown silently reoffers the weekly-capped seat, the exact regression
+        #2610 fixes. This chains the REAL writer into the REAL reader and asserts
+        the seat goes unavailable as a weekly usage block — the availability
+        contract dispatch_preflight/issue_dispatch honor through the switcher.
+
+        Uses real wall-clock time on purpose: ``annotate_accounts`` reads the
+        cooldown with the live clock, so the 6h50m announced window must land in
+        the real future for the hold to be active during the run."""
+        import datetime as dt
+        import tempfile
+        import time
+        mod = load()
+        sys.path.insert(0, str(SCRIPT.parent))
+        import fleet_accounts
+        now = time.time()
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d) / "home"
+            (home / ".claude-july2-netra-acct" / "projects").mkdir(parents=True)
+            cfg = Path(d) / "cfg"   # empty XDG config home -> no opencode accounts
+            runs = Path(d) / "runs"
+            runs.mkdir()
+            # WRITER: a guard-form weekly-limit 429 log -> the real account-cap sidecar.
+            self._write_worker(runs, "resolve-2610-weekly.log", self.GUARDED_WEEKLY_429,
+                               mtime=now - 60, account_tag="july2-netra")
+            wrote = mod.check_weekly_cap(runs, product="claude",
+                                         account_tag="july2-netra", now_ts=now)
+            self.assertTrue(wrote["capped"])
+            self.assertEqual(wrote["kind"], "weekly")
+            self.assertTrue((runs / "account-cap-claude-july2-netra.json").exists())
+
+            rows = fleet_accounts.discover_accounts(str(home), config_home=str(cfg))
+            # READER 1 (pure fold): the sidecar the writer emitted resolves to a
+            # WEEKLY throttle keyed by the discovered account basename.
+            thr = fleet_accounts.active_account_cap_throttles(
+                rows, runs_dir=str(runs), now=dt.datetime.now(dt.timezone.utc))
+            self.assertIn(".claude-july2-netra-acct", thr)
+            self.assertEqual(thr[".claude-july2-netra-acct"]["cap_kind"], "weekly")
+            self.assertTrue(thr[".claude-july2-netra-acct"].get("weekly"))
+            # READER 2 (end-to-end availability): the seat preflight/dispatch would
+            # be offered is instead dropped as a usage block until the window.
+            annotated = fleet_accounts.annotate_accounts(
+                rows, registry={}, cap_runs_dir=str(runs))
+            seat = {r["tag"]: r for r in annotated}["july2-netra"]
+            self.assertFalse(seat["available"])
+            self.assertEqual(seat["block_kind"], "usage")
+
     def test_parse_relative_wait_ignores_absolute_clause(self) -> None:
         """The relative-wait parser fires ONLY on a bare Go-duration; an absolute
         banner reset clause falls through to _parse_reset_to_utc unchanged (#2610)."""
