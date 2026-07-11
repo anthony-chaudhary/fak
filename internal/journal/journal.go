@@ -124,6 +124,17 @@ type Row struct {
 	// class (Reason) — rides the frozen decision fields above, and this carries the
 	// content-free repeat detail layered on top.
 	Livelock *LivelockRow `json:"livelock,omitempty"`
+
+	// Config-swap field (for CONFIG_SWAP: the capability-floor / route-manifest
+	// hot-swap witness, #3959). A swap changes the live security boundary but is
+	// supervision, not a kernel decision, so AppendConfigSwap writes it directly
+	// through the chain, like a restart. NOT part of the hash-chain pre-image
+	// (chainHash lists the chained fields explicitly, so appending it here leaves
+	// every existing journal verifying byte-for-byte); the chained forensic
+	// identity of a swap — Kind, the swapped surface (Tool), the outcome class
+	// (Reason) — rides the frozen decision fields above, and this carries the full
+	// correlated record (source path + sha256 of the installed bytes) on top.
+	ConfigSwap *ConfigSwapRow `json:"config_swap,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
