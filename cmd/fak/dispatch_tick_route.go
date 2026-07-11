@@ -314,10 +314,8 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		// path (explicit != "") is deliberately untouched: an operator who names a
 		// trust-critical lane must still reach the post-pick SELF_MODIFY hold.
 		guarded := !guardDisabled()
-		bestStepBudget := -1
-		bestCount := -1
-		bestPriority := -1
-		bestCore := false
+		laneCandidates := make([]dispatchtick.DispatchLaneCandidate, 0, len(numsByLane))
+		maxStepBudget, maxCount := 0, 0
 		for lane, nums := range numsByLane {
 			if exclude[lane] {
 				continue
@@ -326,16 +324,23 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 				selfSourceHeld = append(selfSourceHeld, lane)
 				continue
 			}
-			stepBudget := stepBudgets[lane]
-			priority := dispatchLaneTopPriority(nums, priorityByLane[lane])
-			core := dispatchtick.IsCoreSourceLaneTree(treesByLane[lane])
-			if dispatchLaneBetterForGoal(goalProfile, priority, stepBudget, len(nums), core, lane, bestPriority, bestStepBudget, bestCount, bestCore, chosen) {
-				chosen = lane
-				bestPriority = priority
-				bestStepBudget = stepBudget
-				bestCount = len(nums)
-				bestCore = core
+			candidate := dispatchtick.DispatchLaneCandidate{
+				Lane: lane, Priority: dispatchLaneTopPriority(nums, priorityByLane[lane]),
+				StepBudget: stepBudgets[lane], Count: len(nums),
+				Core: dispatchtick.IsCoreSourceLaneTree(treesByLane[lane]),
 			}
+			laneCandidates = append(laneCandidates, candidate)
+			if candidate.StepBudget > maxStepBudget {
+				maxStepBudget = candidate.StepBudget
+			}
+			if candidate.Count > maxCount {
+				maxCount = candidate.Count
+			}
+		}
+		highPriority := goalProfile == dispatchGoalProfileHighPriority
+		orderedLanes := dispatchtick.DefaultDispatchLaneScorers(highPriority, maxStepBudget, maxCount).Order(laneCandidates)
+		if len(orderedLanes) > 0 {
+			chosen = orderedLanes[0].Lane
 		}
 		sort.Strings(selfSourceHeld)
 	}
