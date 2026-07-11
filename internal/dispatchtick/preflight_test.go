@@ -410,3 +410,15 @@ func TestEvaluatePreflightInspectPrecedesHostFlag(t *testing.T) {
 		t.Fatalf("verdict = %s, want REFUSE_INSPECT", got.Verdict)
 	}
 }
+
+func TestCapTermsMapIncludesContractionCap(t *testing.T) {
+	n := 3
+	got := (CapTerms{ContractionCap: &n}).Map()
+	if got["contraction_cap"] != 3 {
+		t.Fatalf("map=%v", got)
+	}
+	var none CapTerms
+	if _, ok := none.Map()["contraction_cap"]; !ok {
+		t.Fatal("contraction_cap key missing when nil")
+	}
+}

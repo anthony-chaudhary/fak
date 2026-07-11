@@ -489,13 +489,14 @@ func (r PreflightResult) Map() map[string]any {
 
 func (c CapTerms) Map() map[string]any {
 	return map[string]any{
-		"configured_cap": c.ConfiguredCap,
-		"lease_cap":      ptrAny(c.LeaseCap),
-		"host_cap":       ptrAny(c.HostCap),
-		"seat_cap":       ptrAny(c.SeatCap),
-		"worker_floor":   c.WorkerFloor,
-		"effective_cap":  c.EffectiveCap,
-		"limiting":       c.Limiting,
+		"configured_cap":  c.ConfiguredCap,
+		"contraction_cap": ptrAny(c.ContractionCap),
+		"lease_cap":       ptrAny(c.LeaseCap),
+		"host_cap":        ptrAny(c.HostCap),
+		"seat_cap":        ptrAny(c.SeatCap),
+		"worker_floor":    c.WorkerFloor,
+		"effective_cap":   c.EffectiveCap,
+		"limiting":        c.Limiting,
 	}
 }
 
