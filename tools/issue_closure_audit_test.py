@@ -38,8 +38,11 @@ def _issue(number: int, *, state: str = "OPEN", reason: str = "", title: str = "
     return {"number": number, "state": state, "stateReason": reason, "title": title, "labels": []}
 
 
-def _audit(verdict: str = "OK", witness: str = "diff-witnessed") -> dict:
-    return {"verdict": verdict, "witness": witness, "claim_kind": "fix"}
+def _audit(verdict: str = "OK", witness: str = "diff-witnessed",
+           claim_kind: str = "code_effect") -> dict:
+    # claim_kind defaults to a REAL resolving token dos emits (code_effect); the
+    # binding gate (#2998) demotes a doc/triage claim on a non-docs issue.
+    return {"verdict": verdict, "witness": witness, "claim_kind": claim_kind}
 
 
 class BindingClassifierTest(unittest.TestCase):
@@ -191,6 +194,64 @@ class GraderTest(unittest.TestCase):
     def test_closed_not_planned_excluded(self):
         g = m.grade_issue(_issue(9, state="CLOSED", reason="NOT_PLANNED"), [], {})
         self.assertEqual(g["bucket"], m.CLOSED_NOT_PLANNED)
+
+
+class ClaimBindingGateTest(unittest.TestCase):
+    """#2998 checking-layer parity: a diff-witnessed commit whose claim KIND cannot
+    resolve the issue (a doc/triage note on a feature) is NOT TRUE_RESOLVED -- the
+    same rung the close arm enforces. Without it the grader over-credits doc-claim
+    closes of feature issues, inflating closure_rate."""
+
+    def test_commit_binds_resolution_vocab(self):
+        # the real dos resolving tokens bind; doc/triage does not (unless docs rung);
+        # an unknown/None kind fails OPEN (never slanders a witnessed close).
+        self.assertTrue(m.commit_binds_resolution({"claim_kind": "code_effect"}, "feat(x): y"))
+        self.assertTrue(m.commit_binds_resolution({"claim_kind": "test"}, "feat(x): y"))
+        self.assertFalse(m.commit_binds_resolution({"claim_kind": "doc"}, "feat(x): y"))
+        self.assertTrue(m.commit_binds_resolution({"claim_kind": "doc"}, "docs(guard): note"))
+        self.assertTrue(m.commit_binds_resolution({"claim_kind": None}, "feat(x): y"))
+
+    def test_doc_claim_on_feature_issue_is_claimed_not_true_resolved(self):
+        # closed feature issue, resolving commit dos graded a DOC claim -> the note
+        # witnesses itself, not the feature -> CLAIMED_CLOSED, not TRUE_RESOLVED.
+        g = m.grade_issue(
+            _issue(2205, state="CLOSED", reason="COMPLETED",
+                   title="feat(autoctx): relay-default admission"),
+            [{"sha": "note123", "subject": "docs(autoctx): triage note (#2205)",
+              "kind": m.RESOLVING}],
+            {"note123": _audit(claim_kind="doc")},
+        )
+        self.assertEqual(g["bucket"], m.CLAIMED_CLOSED)
+        self.assertEqual(g["witnessed_commits"], [])
+
+    def test_doc_claim_on_docs_rung_is_true_resolved(self):
+        # a docs-shaped issue MAY be resolved by a doc claim (#2998 carve-out).
+        g = m.grade_issue(
+            _issue(9, state="CLOSED", reason="COMPLETED",
+                   title="docs(guard): restart continuity contract"),
+            [{"sha": "note123", "subject": "docs(guard): write it (#9)", "kind": m.RESOLVING}],
+            {"note123": _audit(claim_kind="doc")},
+        )
+        self.assertEqual(g["bucket"], m.TRUE_RESOLVED)
+
+    def test_doc_claim_on_open_feature_is_open_not_witnessed(self):
+        # the OPEN side: a non-binding witnessed commit must not surface a phantom
+        # OPEN_WITNESSED the closer would then refuse (skip_nonresolving).
+        g = m.grade_issue(
+            _issue(2205, state="OPEN", title="feat(autoctx): relay-default admission"),
+            [{"sha": "note123", "subject": "docs(autoctx): note (#2205)", "kind": m.RESOLVING}],
+            {"note123": _audit(claim_kind="doc")},
+        )
+        self.assertEqual(g["bucket"], m.OPEN)
+
+    def test_unknown_claim_kind_still_true_resolved(self):
+        # a legacy/uncached audit row (no claim_kind) fails OPEN -> stays witnessed.
+        g = m.grade_issue(
+            _issue(178, state="CLOSED", reason="COMPLETED", title="feat(x): y"),
+            [{"sha": "good123", "subject": "fix", "kind": m.RESOLVING}],
+            {"good123": _audit(claim_kind=None)},
+        )
+        self.assertEqual(g["bucket"], m.TRUE_RESOLVED)
 
     def test_open_with_witnessed_commit_is_open_witnessed(self):
         g = m.grade_issue(

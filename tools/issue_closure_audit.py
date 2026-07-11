@@ -89,6 +89,38 @@ _WITNESS_OK = "diff-witnessed"
 # so it stays correctly in CLAIMED_CLOSED.
 _WITNESS_DATA = "data-witnessed"
 _VERDICT_OK = "OK"
+# Claim-kind BINDING gate (#2998) — the checking layer must be as strict as the
+# acting layer. A diff-witnessed commit only TRULY resolves an issue when its claim
+# KIND binds: a `doc`/`triage` claim is diff-witnessed for its own note yet resolves
+# nothing about a non-docs feature. The close arm (tools/issue_resolve_witnessed.py:
+# claim_binds_resolution) already refuses to close on such a claim; without the same
+# gate here, grade_issue over-credits doc-claim closes of feature issues as
+# TRUE_RESOLVED, inflating closure_rate — the very metric the RSI loop optimizes. The
+# token set mirrors the close arm (dos emits the bare `test`, not `test_cover`).
+_RESOLVING_CLAIM_KINDS = {"code_effect", "test", "test_cover"}
+
+
+def _issue_is_docs_rung(title: str) -> bool:
+    """A docs-shaped issue MAY be resolved by a doc claim (#2998 carve-out); mirror
+    of issue_resolve_witnessed.issue_is_docs_rung so both layers agree."""
+    t = (title or "").lstrip().lower()
+    return t.startswith(("docs(", "docs:", "doc(", "doc:"))
+
+
+def commit_binds_resolution(audit: dict[str, Any], title: str) -> bool:
+    """Does this commit's claim KIND bind resolution of the issue? (#2998)
+
+    Binds iff the claim is a code/test kind, or the issue itself is a docs rung. An
+    UNKNOWN kind (legacy/uncached audit row with no claim_kind) fails OPEN — the gate
+    only demotes a KNOWN non-binding (doc/triage) claim, it never slanders a witnessed
+    close whose kind we could not read. Mirrors issue_resolve_witnessed.claim_binds_resolution
+    (minus its touches_code refinement, which the audit row does not carry)."""
+    kind = audit.get("claim_kind")
+    if not kind:
+        return True
+    if str(kind) in _RESOLVING_CLAIM_KINDS:
+        return True
+    return _issue_is_docs_rung(title)
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -355,8 +387,16 @@ def grade_issue(
 ) -> dict[str, Any]:
     """Grade one issue into exactly one bucket using the witness rung."""
     resolving = [r for r in issue_refs if r.get("kind") == RESOLVING]
+    title = str(issue.get("title") or "")
+    # Witnessed AND binding: a diff-witnessed commit whose claim KIND cannot resolve
+    # this issue (a doc/triage note on a feature) is NOT a true resolution -- the same
+    # rung the close arm enforces (#2998). Non-binding witnessed closes fall through to
+    # CLAIMED_CLOSED; non-binding witnessed OPENs fall through to OPEN (never a phantom
+    # OPEN_WITNESSED the closer would then refuse).
     witnessed = [
-        r for r in resolving if commit_is_witnessed(audits.get(r["sha"], {}))
+        r for r in resolving
+        if commit_is_witnessed(audits.get(r["sha"], {}))
+        and commit_binds_resolution(audits.get(r["sha"], {}), title)
     ]
     data_witnessed = [
         r for r in resolving if commit_is_data_witnessed(audits.get(r["sha"], {}))
