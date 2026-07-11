@@ -48,6 +48,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopEconomics(stdout, stderr, argv[1:])
 	case "admit":
 		return runLoopAdmit(stdout, stderr, argv[1:])
+	case "policy":
+		return runLoopPolicy(stdout, stderr, argv[1:])
 	case "region":
 		return runLoopRegion(stdout, stderr, argv[1:])
 	case "recover":
@@ -893,6 +895,90 @@ func loopSnapshotForID(st loopmgr.Status, id string) loopmgr.LoopSnapshot {
 	return loopmgr.LoopSnapshot{LoopID: id}
 }
 
+// runLoopPolicy dispatches the read-only governor-policy verbs. Today it carries
+// only the propose-only self-tuning readout (#3976); every verb under it is strictly
+// read-only — the operator lands any policy edit, this surface never writes it.
+func runLoopPolicy(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 {
+		fmt.Fprintln(stderr, "fak loop policy: expected a subcommand (propose)")
+		return 2
+	}
+	switch argv[0] {
+	case "propose":
+		return runLoopPolicyPropose(stdout, stderr, argv[1:])
+	case "-h", "--help", "help":
+		fmt.Fprintln(stdout, "fak loop policy propose [--ledger FILE] [--policy FILE] [--json]")
+		return 0
+	default:
+		fmt.Fprintf(stderr, "fak loop policy: unknown subcommand %q\n", argv[0])
+		return 2
+	}
+}
+
+// runLoopPolicyPropose prints the propose-only governor-policy fold: bounded,
+// human-gated knob nudges for loops whose ledger signal has tripped a governor gate
+// (a refusal-storming loop -> a bounded cadence-floor raise; a witness-collapsed loop
+// -> a pause), each with a one-line rationale. It is strictly READ-ONLY: it folds the
+// ledger under the current policy and prints proposals; it NEVER writes the policy
+// file — the operator lands the edit (the human gate is the edit itself), and
+// `fak loop admit` re-reads the policy per tick so a landed edit needs no reload.
+// Exits 0 always: an empty proposal set is a healthy fleet, not an error.
+func runLoopPolicyPropose(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("loop policy propose", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
+	policyPath := fs.String("policy", defaultLoopPolicy(), "loop admission policy JSON path")
+	asJSON := fs.Bool("json", false, "emit the proposals as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak loop policy propose: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+
+	// Fold against the SAME effective policy the governor admits under, so a proposal
+	// triggers on exactly the gate a live `fak loop admit` would refuse on.
+	policies, err := loopmgr.LoadPoliciesOrDefault(*policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop policy propose: %v\n", err)
+		return 2
+	}
+	st, err := loopmgr.SnapshotFile(*ledger, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop policy propose: %v\n", err)
+		return 1
+	}
+
+	proposals := loopmgr.ProposePolicies(st, policies, loopmgr.DefaultProposeConfig())
+
+	if *asJSON {
+		if proposals == nil {
+			proposals = []loopmgr.PolicyProposal{}
+		}
+		if err := writeIndentedJSON(stdout, map[string]any{
+			"schema":      "fak.loop-policy-propose.v1",
+			"ledger_path": *ledger,
+			"policy_path": *policyPath,
+			"proposals":   proposals,
+		}); err != nil {
+			fmt.Fprintf(stderr, "fak loop policy propose: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	if len(proposals) == 0 {
+		fmt.Fprintf(stdout, "no policy proposals: every loop is within its governor gates (ledger %s)\n", *ledger)
+		return 0
+	}
+	for _, p := range proposals {
+		fmt.Fprintf(stdout, "%-30s %-20s %-16s %s->%s  %s\n", p.LoopID, p.Field, p.Reason, p.Before, p.After, p.Rationale)
+	}
+	fmt.Fprintf(stdout, "\npropose-only: land an edit in %s yourself; nothing here writes it.\n", *policyPath)
+	return 0
+}
+
 func defaultLoopLedger() string {
 	if v := os.Getenv("FAK_LOOP_LEDGER"); v != "" {
 		return v
@@ -1268,6 +1354,7 @@ func loopUsage(w io.Writer) {
   fak loop economics [--ledger FILE] [--loop ID] [--provider-cache-tokens N]
                   [--fak-authored-tokens N] [--modeled-tokens-per-avoided N] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
+  fak loop policy propose [--ledger FILE] [--policy FILE] [--json]
   fak loop region [--lane LANE] [--tree GLOB ...] [--actor ID] [--self LEASE-ID]
                   [--dir DIR] [--json]
   fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
