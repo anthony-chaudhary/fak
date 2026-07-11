@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
+	"github.com/anthony-chaudhary/fak/internal/fleetcap"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
@@ -51,6 +52,21 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 	// unset/blank/malformed setpoint yields the inactive plan and leaves the input
 	// untouched -- byte-identical to before the knob existed.
 	in, setpointPlan := dispatchFoldSetpoint(in, os.Getenv(dispatchtick.SetpointConcurrencyEnv))
+	// The slow predictive loop (#3368, two-timescale scaling): compute a forecast-driven
+	// worker FLOOR from a target issue-throughput rate via fleetcap's Little's-law forecast
+	// and fold it into the input the fast reactive tick clamps UP to. This is the live
+	// PRODUCER the #3368 seam was built for: EvaluatePreflight already clamps capacity up to
+	// WorkerFloor (bounded by the HARD host/seat/config ceilings, never overbooking), but the
+	// term stayed inert at 0 without a signal -- so cap_terms.limiting == "floor" was
+	// unreachable in production from a forecast. FAK_FLEET_TARGET_IPH is the slow-cadence
+	// demand an operator or a slow scheduler writes (it changes rarely; the kernel lease
+	// target the reactive min() reads changes every tick -- the two timescales); Little's law
+	// L = lambda*W turns it into the workers that must be pre-warmed for the ramp. It composes
+	// via max with any operator-setpoint floor already in WorkerFloor (the higher wins). Unset
+	// FAK_FLEET_TARGET_IPH -> a 0 forecast -> the input is untouched, byte-identical to before
+	// this producer existed. The tick-lead / never-dip-below property is unit-witnessed in
+	// dispatchtick.TestEvaluatePreflightForecastFloorRaisesReactiveTick.
+	in, forecast := dispatchFoldForecastFloor(in, dispatchForecastTargetIPH(), dispatchForecastSessionMinutes())
 	// The fifth cap term (#2221, G3 of epic #2218): fold the MEASURED guard-hook
 	// latency rollup UP into admission so a slow kernel earns spawn reluctance. The
 	// four in-struct terms only flow caps DOWN; this composes gate health on top and
@@ -90,6 +106,15 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 			out["janitor_worklist"] = worklist
 		}
 	}
+	// The usage_cap ADVISORY term (advisory-only, folds nothing): when a majority of the
+	// fleet's accounts sit under an active usage-limit cooldown, attach a note so an
+	// operator/loop sees the pool is quota-exhausted -- and that a fresh spawn walling here
+	// is a usage cap the witness classifier will likely mislabel reason=rate_limit, which
+	// concurrency backoff cannot clear. It never touches the verdict or cap; the field is
+	// added ONLY when armed, so the common preflight payload stays byte-identical.
+	if adv := dispatchPreflightUsageCap(root, product, res.Seat).Note(); adv != nil {
+		out["usage_cap_advisory"] = adv
+	}
 	// Surface the ACTIVE setpoint plan on the payload so an operator (and the tick
 	// log) can see WHY the cap moved -- which branch (grow/steady/drain), the level
 	// converged toward, and how many surplus workers are draining. Attached only when
@@ -102,9 +127,25 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 			"draining":           setpointPlan.Draining,
 		}
 	}
+	// Surface the ACTIVE forecast floor on the payload so an operator (and the tick log) can
+	// see the slow predictive loop pre-warmed capacity, and the RAW forecast (required_workers)
+	// vs what the hard ceilings allowed (cap_terms.worker_floor is the ceiling-bounded value).
+	// Attached only when the forecast produced a floor, so the common payload stays byte-identical.
+	if forecast.Active {
+		out["forecast_floor"] = map[string]any{
+			"target_iph":       forecast.TargetRatePerHour,
+			"session_min":      forecast.MedianSessionMinutes,
+			"required_workers": forecast.RequiredWorkers,
+		}
+	}
 	return out, nil
 }
 
+// dispatchSetpointLive mirrors EvaluatePreflight's live fold EXACTLY -- the max of
+// the kernel's alive count (counted only while a positive lease target is armed) and
+// the OS worker census -- so the setpoint reconcile classifies grow/steady/drain
+// against the SAME live number the preflight itself will judge and report. Drift here
+// would let a setpoint misread a drain as a grow (or vice versa).
 func dispatchSetpointLive(in dispatchtick.PreflightInput) int {
 	live := in.OSWorkerProcs
 	if in.Kernel.Target != nil && *in.Kernel.Target > 0 && in.Kernel.Alive != nil && *in.Kernel.Alive > live {
@@ -113,6 +154,21 @@ func dispatchSetpointLive(in dispatchtick.PreflightInput) int {
 	return maxInt(live, 0)
 }
 
+// dispatchFoldSetpoint folds the operator-written concurrency setpoint (#4036,
+// FAK_DISPATCH_SETPOINT) into the live preflight input -- the wiring that makes the
+// pure ReconcileSetpoint plan actually move admitted workers (#4165).
+//
+// ParseConcurrencySetpoint yields 0 for a blank/malformed/non-positive value and
+// ReconcileSetpoint returns the inactive plan for 0, so an unset knob is a total
+// no-op. A DRAIN (setpoint below live) feeds the plan's ContractionTarget into the
+// #4038 pending-contraction term, capping admits at the post-drain target so no new
+// worker lands on capacity being reclaimed -- surplus workers drain as they finish,
+// never killed. A GROW (setpoint above live) realizes DesiredCap through the
+// ceiling-bounded #3368 worker floor, raising the effective cap toward the setpoint
+// over a soft reactive dip WITHOUT ever overbooking the hard config/host/seat
+// ceilings (the floor is min()'d against them downstream). Steady changes nothing.
+// Existing input terms are only ever tightened (min for a contraction, max for a
+// floor), never loosened.
 func dispatchFoldSetpoint(in dispatchtick.PreflightInput, raw string) (dispatchtick.PreflightInput, dispatchtick.SetpointPlan) {
 	plan := dispatchtick.ReconcileSetpoint(dispatchSetpointLive(in), dispatchtick.ParseConcurrencySetpoint(raw))
 	if !plan.Active {
@@ -125,6 +181,73 @@ func dispatchFoldSetpoint(in dispatchtick.PreflightInput, raw string) (dispatcht
 		in.WorkerFloor = plan.DesiredCap
 	}
 	return in, plan
+}
+
+// forecastFloorPlan is the slow predictive loop's decision (#3368): the Little's-law forecast
+// inputs and the worker floor they imply. Active is false (the zero value) when the forecast
+// produced no floor -- a non-positive/unset target rate -- so the shell leaves the payload
+// untouched and byte-identical to before the producer existed.
+type forecastFloorPlan struct {
+	Active               bool
+	TargetRatePerHour    float64
+	MedianSessionMinutes float64
+	RequiredWorkers      int
+}
+
+// dispatchFoldForecastFloor computes the #3368 forecast-driven worker floor from a target
+// issue-throughput rate via fleetcap's Little's-law forecast (L = lambda*W) and folds it into
+// the preflight input the reactive tick clamps UP to. It only ever RAISES WorkerFloor (max
+// with any operator-setpoint floor already present), never lowers it, and never bounds the
+// floor itself -- EvaluatePreflight clamps the applied floor to the hard host/seat/config
+// ceilings, so this producer can never overbook the box or the seat pool.
+//
+// fleetcap.RequiredWorkers returns 0 for a non-positive or non-finite rate/session, so an
+// unset FAK_FLEET_TARGET_IPH yields the inactive plan and leaves the input untouched -- a
+// total no-op, byte-identical to before the producer had a signal.
+func dispatchFoldForecastFloor(in dispatchtick.PreflightInput, targetRatePerHour, medianSessionMinutes float64) (dispatchtick.PreflightInput, forecastFloorPlan) {
+	floor := fleetcap.RequiredWorkers(targetRatePerHour, medianSessionMinutes)
+	if floor <= 0 {
+		return in, forecastFloorPlan{}
+	}
+	if floor > in.WorkerFloor {
+		in.WorkerFloor = floor
+	}
+	return in, forecastFloorPlan{
+		Active:               true,
+		TargetRatePerHour:    targetRatePerHour,
+		MedianSessionMinutes: medianSessionMinutes,
+		RequiredWorkers:      floor,
+	}
+}
+
+// fleetForecastDefaultSessionMinutes is W in Little's law when FAK_FLEET_SESSION_MIN is unset:
+// a 10-minute median agent session, fleetcap's canonical example duration.
+const fleetForecastDefaultSessionMinutes = 10.0
+
+// dispatchForecastTargetIPH resolves the slow predictive loop's target issue-throughput rate
+// (lambda, issues/hour) from FAK_FLEET_TARGET_IPH. Unset, non-positive, or unparseable yields
+// 0 -- no forecast, so the floor producer is a no-op unless an operator/scheduler arms it.
+func dispatchForecastTargetIPH() float64 {
+	return dispatchEnvPosFloat("FAK_FLEET_TARGET_IPH", 0)
+}
+
+// dispatchForecastSessionMinutes resolves W (median session minutes) from FAK_FLEET_SESSION_MIN,
+// falling back to fleetForecastDefaultSessionMinutes on empty/non-positive/unparseable input.
+func dispatchForecastSessionMinutes() float64 {
+	return dispatchEnvPosFloat("FAK_FLEET_SESSION_MIN", fleetForecastDefaultSessionMinutes)
+}
+
+// dispatchEnvPosFloat parses a strictly-positive float from env key, returning fallback when the
+// value is empty, non-positive, or unparseable (a garbled write can never arm a wrong forecast).
+func dispatchEnvPosFloat(key string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 {
+		return v
+	}
+	return fallback
 }
 
 // dispatchPreflightGate folds the workspace's MEASURED guard-hook latency rollup into
@@ -498,21 +621,27 @@ func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string
 	}
 	route := dispatchtick.RouteAccount(dispatchtick.AccountRouteInput{Rows: rows, Product: product, WorkKind: workKind})
 	blocked := make([]string, 0, len(route.BlockedTargetAccounts))
+	blockedAccounts := make([]dispatchtick.BlockedAccount, 0, len(route.BlockedTargetAccounts))
 	for _, row := range route.BlockedTargetAccounts {
 		if row.Tag != "" {
 			blocked = append(blocked, row.Tag)
 		}
+		// Carry the per-account block REASON (throttled / needs-login / at session cap),
+		// not just the tag, so a REFUSE_NO_ACCOUNT verdict can name why each seat was
+		// refused -- the transparency task-#6 half of the storm/health work.
+		blockedAccounts = append(blockedAccounts, dispatchtick.BlockedAccountFromRow(row))
 	}
 	return dispatchtick.AccountCheck{
-		Available:   route.OK,
-		Tag:         route.Account.Tag,
-		Dir:         route.Account.Dir,
-		Tier:        route.SelectedTier,
-		Model:       route.Account.Model,
-		Reason:      route.Reason,
-		Blocked:     blocked,
-		LoginStatus: route.Account.LoginStatus,
-		CanServe:    route.Account.CanServe,
+		Available:       route.OK,
+		Tag:             route.Account.Tag,
+		Dir:             route.Account.Dir,
+		Tier:            route.SelectedTier,
+		Model:           route.Account.Model,
+		Reason:          route.Reason,
+		Blocked:         blocked,
+		BlockedAccounts: blockedAccounts,
+		LoginStatus:     route.Account.LoginStatus,
+		CanServe:        route.Account.CanServe,
 	}
 }
 
@@ -656,6 +785,95 @@ func dispatchCooldownBlockReason(e accounts.CooldownEntry, now time.Time) string
 	}
 	return fmt.Sprintf("account in cooldown (%s) until %s (%s remaining)",
 		e.Kind, e.ResetAt.UTC().Format(time.RFC3339), remaining.Round(time.Minute))
+}
+
+// dispatchUsageCapAdvisoryThreshold resolves the usage-cap advisory's arming floor from
+// FAK_USAGECAP_ADVISORY_MIN (a positive integer count of usage-limit-cooled accounts),
+// falling back to dispatchtick.DefaultUsageCapAdvisoryMin on empty/zero/unparseable input.
+func dispatchUsageCapAdvisoryThreshold() int {
+	raw := strings.TrimSpace(os.Getenv("FAK_USAGECAP_ADVISORY_MIN"))
+	if raw == "" {
+		return dispatchtick.DefaultUsageCapAdvisoryMin
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return n
+	}
+	return dispatchtick.DefaultUsageCapAdvisoryMin
+}
+
+// dispatchPreflightUsageCap builds the ADVISORY-ONLY usage-cap census the preflight
+// surfaces (dispatchtick.UsageCapAdvisory). Unlike the rate_budget term it folds nothing
+// into the cap -- it reads the AUTHORITATIVE account-cooldown store (the one signal that
+// distinguishes a usage cap from the transient 429 the witness classifier often mislabels
+// it as) and reports how many of the backend's routable accounts sit under an active
+// usage-limit-kind cooldown, plus the soonest reset. FreeSeats is carried from the seat
+// gate's already-computed pool as context only. Fail-open: a codex backend, an unreadable
+// roster, or a nil cooldown store yields a zero census (not armed), so the advisory never
+// grows an error path and a fleet without the store is byte-identical to before.
+func dispatchPreflightUsageCap(root, product string, seat dispatchtick.SeatCheck) dispatchtick.UsageCapAdvisory {
+	// Seat-cooldown usage caps are a Claude-seat concept; codex carries no usage-limit
+	// cooldown store, so the census abstains rather than counting an unrelated store.
+	if product == "codex" {
+		return dispatchtick.UsageCapAdvisory{}
+	}
+	store := dispatchLoadAccountCooldownStore()
+	if store == nil {
+		return dispatchtick.UsageCapAdvisory{}
+	}
+	rows, err := dispatchBuildAccountRoster(root)
+	if err != nil {
+		return dispatchtick.UsageCapAdvisory{}
+	}
+	free := 0
+	if seat.Free != nil {
+		free = *seat.Free
+	}
+	return dispatchUsageCapCensus(rows, store, product, time.Now(), dispatchUsageCapAdvisoryThreshold(), free)
+}
+
+// dispatchUsageCapCensus is the pure-ish counting core of the usage-cap advisory: over the
+// backend's routable roster it counts unique accounts (deduped by uuid) and, among them,
+// how many sit under an ACTIVE usage-limit-kind cooldown at now, tracking the soonest
+// reset. Kept separate from the store/roster loading so it is testable in-memory with a
+// seeded store (mirroring dispatchApplyAccountCooldown). A nil store yields a zero-capped
+// census (nothing cooled), so the caller stays fail-open.
+func dispatchUsageCapCensus(rows []dispatchtick.AccountRow, store *accounts.CooldownStore, product string, now time.Time, threshold, freeSeats int) dispatchtick.UsageCapAdvisory {
+	total, capped := 0, 0
+	var earliest time.Time
+	seen := map[string]bool{}
+	for _, raw := range rows {
+		row := dispatchtick.NormalizeAccountRow(raw)
+		// Scope the census to this backend's product, mirroring BuildSeatPool's filter, so
+		// another product's usage caps never colour this backend's advisory.
+		if product != "" && product != "all" && row.Product != product {
+			continue
+		}
+		uuid := strings.TrimSpace(row.AccountUUID)
+		if uuid == "" || seen[uuid] {
+			continue // dedup by account: one usage cap removes the account, counted once
+		}
+		seen[uuid] = true
+		total++
+		if store == nil {
+			continue
+		}
+		entry, cooled := store.CooledDown(accounts.UUIDBucketKey(uuid), now)
+		if !cooled || entry.Kind != accounts.CooldownUsageLimit {
+			continue
+		}
+		capped++
+		if earliest.IsZero() || entry.ResetAt.Before(earliest) {
+			earliest = entry.ResetAt
+		}
+	}
+	return dispatchtick.UsageCapAdvisory{
+		Capped:        capped,
+		Accounts:      total,
+		FreeSeats:     freeSeats,
+		EarliestReset: earliest,
+		Threshold:     threshold,
+		Now:           now,
+	}
 }
 
 func dispatchBuildAccountRoster(root string) ([]dispatchtick.AccountRow, error) {
@@ -898,6 +1116,12 @@ func dispatchRunExternalJSONImpl(root string, timeout time.Duration, name string
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = root
+	// Bound the post-deadline pipe wait: `dos` is a pip console-script shim
+	// whose real work runs in a python.exe GRANDCHILD holding the inherited
+	// stdout pipe. When the context fires, Go kills only the shim; without a
+	// WaitDelay, CombinedOutput() then blocks unboundedly until the grandchild
+	// exits -- the dispatch tick "hangs past its timeout" class.
+	cmd.WaitDelay = 10 * time.Second
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if obj, perr := lastJSONObject(out); perr == nil {
@@ -1102,10 +1326,18 @@ func dispatchProductWorkerCount(root, product string) int {
 // #3109 self-heal name the exact orphan PIDs preflight counts as unattributed_live.
 func dispatchProductWorkerPIDs(root, product string) map[int]bool {
 	pids := dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product)
-	for pid := range dispatchLiveGoalWorkerPIDs(filepath.Join(root, dispatchGoalRunsDirName), product) {
+	// Snapshot the host worker-process table ONCE per call and share it: both the
+	// goal-breadcrumb and cmdline-marker passes below classify the same Win32_Process
+	// rows, yet each used to spawn its OWN dispatchProbeWorkerProcessRows() -- a cold
+	// PowerShell start + full-table Get-CimInstance enumeration (~0.3-1.5s on a busy
+	// box) -- so a claude/unscoped preflight paid the identical scan twice every tick.
+	// One scan serves both; a scan error yields nil rows, which folds each pass to the
+	// same empty result the old per-caller `if err != nil { return out }` produced.
+	rows, _ := dispatchProbeWorkerProcessRows()
+	for pid := range dispatchLiveGoalWorkerPIDs(filepath.Join(root, dispatchGoalRunsDirName), product, rows) {
 		pids[pid] = true
 	}
-	for pid := range dispatchCmdlineWorkerPIDs(product) {
+	for pid := range dispatchCmdlineWorkerPIDs(product, rows) {
 		pids[pid] = true
 	}
 	if product == "codex" {
@@ -1270,12 +1502,12 @@ const (
 	dispatchIssueResolveCmdMarker = "resolve GitHub issue #"
 )
 
-func dispatchCmdlineWorkerPIDs(product string) map[int]bool {
+// dispatchCmdlineWorkerPIDs classifies a caller-supplied host process table (one
+// Win32_Process snapshot shared across the preflight's worker-PID passes, see
+// dispatchProductWorkerPIDs) into the marker-cmdline workers for a product. Nil rows
+// (the scan errored, or nothing ran) yield an empty set.
+func dispatchCmdlineWorkerPIDs(product string, rows []dispatchCodexProcessRow) map[int]bool {
 	out := map[int]bool{}
-	rows, err := dispatchProbeWorkerProcessRows()
-	if err != nil {
-		return out
-	}
 	for _, row := range rows {
 		if row.PID <= 0 || !dispatchIsWorkerCmdline(row.Cmdline) {
 			continue
@@ -1489,7 +1721,12 @@ func dispatchWorkerPIDFiles(runsDir string) []string {
 	return matches
 }
 
-func dispatchLiveGoalWorkerPIDs(goalRunsDir, product string) map[int]bool {
+// dispatchLiveGoalWorkerPIDs maps live goal-run breadcrumbs to worker PIDs, verifying
+// each against the caller-supplied host process table (the single Win32_Process
+// snapshot shared across the preflight's worker-PID passes, see
+// dispatchProductWorkerPIDs). Nil rows (scan errored, or nothing ran) yield an empty
+// set -- the same result the old per-caller scan-error early-return produced.
+func dispatchLiveGoalWorkerPIDs(goalRunsDir, product string, rows []dispatchCodexProcessRow) map[int]bool {
 	out := map[int]bool{}
 	if st, err := os.Stat(goalRunsDir); err != nil || !st.IsDir() {
 		return out
@@ -1498,10 +1735,6 @@ func dispatchLiveGoalWorkerPIDs(goalRunsDir, product string) map[int]bool {
 	// no backend sidecar, so a product-scoped count can only assign them to the
 	// Claude pool. Empty product is the unscoped/global fold.
 	if product != "" && product != "claude" {
-		return out
-	}
-	rows, err := dispatchProbeWorkerProcessRows()
-	if err != nil {
 		return out
 	}
 	byPID := map[int]dispatchCodexProcessRow{}

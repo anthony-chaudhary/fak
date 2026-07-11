@@ -57,6 +57,15 @@ type launchBrokerGrant struct {
 var launchSpawnBroker = defaultLaunchSpawnBroker
 
 func defaultLaunchSpawnBroker(a launchBrokerAttempt) launchBrokerGrant {
+	// Blast-radius containment (#2170): hold a capability-valid spawn when the
+	// recorded console-fault history says its surface — or the whole host — is
+	// unstable, so one terminal crash cannot cascade into the fleet. Consulted
+	// before the capability broker; the durable journal is the shared source,
+	// and a missing/unreadable journal admits (the gate only ever ADDS a
+	// refusal off real history). See dispatch_tick_containment.go.
+	if dec := launchContainmentGate(a.Surface, 0); !dec.Admit {
+		return denyLaunchBrokerGrant(a, "CONTAINMENT_"+string(dec.Verdict))
+	}
 	grant, err := toolprocgate.NewSpawnBroker().Admit(a.Spawn)
 	if err != nil {
 		reason := err.Error()

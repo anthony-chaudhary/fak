@@ -19,11 +19,17 @@ func withWitnessStubs(t *testing.T, sha func(root string, issue int, base string
 	t.Helper()
 	oldSHA := dispatchWitnessResolvingSHA
 	oldAudit := dispatchWitnessCommitAudit
+	oldTestRun := dispatchWitnessTestRun
 	dispatchWitnessResolvingSHA = sha
 	dispatchWitnessCommitAudit = func(root, gotSHA string) (string, string) { return verdict, witness }
+	// Default the #3838 test-run seam to a deterministic UNRUN so existing witness tests
+	// neither shell out to `go test` nor depend on the ambient FAK_WITNESS_TEST_RUN env.
+	// A test that exercises GREEN/RED overrides dispatchWitnessTestRun after this call.
+	dispatchWitnessTestRun = func(root, gotSHA string) (bool, bool) { return false, false }
 	t.Cleanup(func() {
 		dispatchWitnessResolvingSHA = oldSHA
 		dispatchWitnessCommitAudit = oldAudit
+		dispatchWitnessTestRun = oldTestRun
 	})
 }
 
@@ -120,6 +126,77 @@ func TestWitnessExitedWorkersGradesFinishedSlots(t *testing.T) {
 	// The sidecar gates re-audit: a second sweep finds nothing new.
 	if _, again := witnessExitedWorkers(root, runsDir, true); len(again) != 0 {
 		t.Fatalf("second sweep re-audited: %+v, want audited-once", again)
+	}
+}
+
+// TestWitnessBindsTestRunToDoneClaim is the #3838 witness: at witness time the resolving
+// commit's changed-package tests are run through the injectable seam and the GREEN / RED /
+// UNRUN binding is recorded ALONGSIDE (never replacing) the diff-shape verdict, both in the
+// WitnessRecord and in the .witness sidecar. A stubbed runner drives all three states: a
+// diff-witnessed commit whose tests fail still grades CLAIM_TEST_RED, proving the rung is
+// the promised layer between "the diff looks like the claim" and "the claim holds".
+func TestWitnessBindsTestRunToDoneClaim(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	// Every slot resolves to a diff-witnessed commit; only the test-run rung differs.
+	withWitnessStubs(t, func(_ string, issue int, _ string) string {
+		return fmt.Sprintf("sha%d", issue)
+	}, "OK", dispatchtick.WitnessOK)
+	// Stubbed runner: green passed, red ran-but-failed, unrun never fired.
+	dispatchWitnessTestRun = func(_ string, sha string) (bool, bool) {
+		switch sha {
+		case "sha5001":
+			return true, true // GREEN
+		case "sha5002":
+			return true, false // RED
+		default:
+			return false, false // UNRUN
+		}
+	}
+
+	writeWitnessWorker(t, runsDir, "resolve-5001-20260710-010101", "# fak-spawn issue=5001 lane=cmd\ndone\n", deadDispatchPID)
+	writeWitnessWorker(t, runsDir, "resolve-5002-20260710-020202", "# fak-spawn issue=5002 lane=cmd\ndone\n", deadDispatchPID)
+	writeWitnessWorker(t, runsDir, "resolve-5003-20260710-030303", "# fak-spawn issue=5003 lane=cmd\ndone\n", deadDispatchPID)
+
+	_, records := witnessExitedWorkers(root, runsDir, true)
+	byIssue := map[int]dispatchtick.WitnessRecord{}
+	for _, rec := range records {
+		byIssue[rec.Issue] = rec
+	}
+	want := map[int]string{
+		5001: dispatchtick.ClaimTestGreen,
+		5002: dispatchtick.ClaimTestRed,
+		5003: dispatchtick.ClaimTestUnrun,
+	}
+	for issue, wantClaim := range want {
+		rec := byIssue[issue]
+		// The diff-shape verdict is never replaced — the test rung is strictly additive.
+		if rec.Claim != dispatchtick.ClaimWitnessed {
+			t.Fatalf("issue %d diff-shape claim = %q, want CLAIM_WITNESSED (test rung must be additive)", issue, rec.Claim)
+		}
+		if rec.TestClaim != wantClaim {
+			t.Fatalf("issue %d TestClaim = %q, want %q", issue, rec.TestClaim, wantClaim)
+		}
+		// The binding must survive into the persisted .witness sidecar.
+		side := filepath.Join(runsDir, fmt.Sprintf("resolve-%d-", issue))
+		matches, _ := filepath.Glob(side + "*" + dispatchtick.WitnessSidecarSuffix)
+		if len(matches) != 1 {
+			t.Fatalf("issue %d: want one .witness sidecar, got %v", issue, matches)
+		}
+		b, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatalf("read sidecar %s: %v", matches[0], err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Fatalf("sidecar %s not JSON: %v", matches[0], err)
+		}
+		if doc["test_claim"] != wantClaim {
+			t.Fatalf("issue %d sidecar test_claim = %v, want %q", issue, doc["test_claim"], wantClaim)
+		}
+		if doc["claim"] != dispatchtick.ClaimWitnessed {
+			t.Fatalf("issue %d sidecar must keep the diff-shape claim, got %v", issue, doc["claim"])
+		}
 	}
 }
 

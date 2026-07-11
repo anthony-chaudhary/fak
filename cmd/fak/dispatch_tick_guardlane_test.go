@@ -35,7 +35,7 @@ func TestDispatchTickGuardedAutoPickSkipsSelfSourceLane(t *testing.T) {
 	t.Cleanup(func() { dispatchRouteIssues = old })
 
 	// Pure picker: the trust-critical busiest lane is skipped, docs is chosen.
-	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput)
+	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 0)
 	if err != nil {
 		t.Fatalf("pickDispatchLane: %v", err)
 	}

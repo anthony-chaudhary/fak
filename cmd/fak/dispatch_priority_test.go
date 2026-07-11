@@ -77,7 +77,7 @@ func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
 	}
 	t.Cleanup(func() { dispatchRouteIssues = old })
 
-	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput)
+	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 0)
 	if err != nil {
 		t.Fatalf("pickDispatchLane: %v", err)
 	}
@@ -89,5 +89,72 @@ func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
 	}
 	if len(pick.Numbers) != 2 || pick.Numbers[0] != 20 || pick.Numbers[1] != 21 {
 		t.Fatalf("picked numbers = %+v, want tools issues ordered oldest-first", pick.Numbers)
+	}
+}
+
+// TestPickDispatchLaneRoutesTargetIssueToItsLane pins the default-process fix: a
+// `--target-issue N` with no explicit `--lane` routes N to the lane the router
+// assigns it, instead of falling through to the busiest-lane auto-pick — which
+// would drop it on the coarse cmd lane and collide with whatever holds cmd. The
+// fixture makes cmd the busiest lane by a wide margin; targeting a gateway issue
+// must still choose gateway, and an unrouted target must fall back unchanged.
+func TestPickDispatchLaneRoutesTargetIssueToItsLane(t *testing.T) {
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0") // isolate routing from the self-source guard skip
+	old := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"cmd": {
+					Tree:       []string{"cmd/**"},
+					Issues:     []int{100, 200, 300},
+					Count:      3,
+					StepBudget: 30,
+				},
+				"gateway": {
+					Tree:       []string{"internal/gateway/**"},
+					Issues:     []int{2850},
+					Count:      1,
+					StepBudget: 1,
+				},
+			},
+			Issues: []dispatchtick.IssueRoute{
+				{Number: 100, Lane: "cmd"},
+				{Number: 200, Lane: "cmd"},
+				{Number: 300, Lane: "cmd"},
+				{Number: 2850, Lane: "gateway"},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = old })
+
+	// Baseline: no target issue → the busiest lane (cmd) is auto-picked.
+	base, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 0)
+	if err != nil {
+		t.Fatalf("pickDispatchLane (no target): %v", err)
+	}
+	if base.Lane != "cmd" {
+		t.Fatalf("baseline lane = %q, want cmd (busiest by step budget)", base.Lane)
+	}
+
+	// Target a gateway issue with no --lane: the issue's own lane wins over the
+	// busiest-pick, so it never lands on cmd.
+	got, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 2850)
+	if err != nil {
+		t.Fatalf("pickDispatchLane (target 2850): %v", err)
+	}
+	if got.Lane != "gateway" {
+		t.Fatalf("target-issue lane = %q, want gateway (routed by the target, not busiest cmd)", got.Lane)
+	}
+
+	// An unrouted target (absent from the router's issue list) falls through to the
+	// unchanged busiest-pick rather than inventing a lane.
+	unrouted, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 999)
+	if err != nil {
+		t.Fatalf("pickDispatchLane (unrouted target): %v", err)
+	}
+	if unrouted.Lane != "cmd" {
+		t.Fatalf("unrouted target lane = %q, want cmd (fell through to busiest-pick)", unrouted.Lane)
 	}
 }

@@ -180,3 +180,135 @@ func TestResolveWorkerModelPolicy_TierAndPinsBeatWorkClass(t *testing.T) {
 		t.Fatalf("bench over work-class: got source=%q", bench.Source)
 	}
 }
+
+// --- #3521: the preventive placement gate --------------------------------------------
+
+// TestApplyPlacementGate_GoldenRefusesFableOnChurning reproduces the witnessed placement
+// failure: the tier table's BucketUltra profile (fable + ultracode) landing on a hard,
+// CHURNING issue. The gate must re-route it to opus BEFORE launch, keep the ultracode
+// reasoning posture, stamp the typed reason, and never re-offer fable on the chain.
+func TestApplyPlacementGate_GoldenRefusesFableOnChurning(t *testing.T) {
+	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-fable-5,claude-opus-4-8,claude-sonnet-5")
+	acct := dispatchtick.Account{Tag: "gem8"}
+	prof := dispatchtick.ProfileFableUltracode // exactly what BucketUltra resolves to
+	placed := resolveWorkerModelPolicy("claude", "docs", "", acct, fleetaccounts.DefaultPolicy(), false, &prof, "")
+	if placed.Model != dispatchtick.WorkerModelFable || placed.Source != modelSourceTier {
+		t.Fatalf("precondition: tier placed model=%q source=%q", placed.Model, placed.Source)
+	}
+
+	gated, fired := applyPlacementGate(placed, dispatchtick.ShapeChurning)
+	if !fired {
+		t.Fatal("fable on a churning slot must be gated before launch")
+	}
+	if gated.Model != dispatchtick.WorkerModelOpus {
+		t.Errorf("re-routed model = %q, want %q", gated.Model, dispatchtick.WorkerModelOpus)
+	}
+	if gated.Source != modelSourcePlacement {
+		t.Errorf("source = %q, want %q", gated.Source, modelSourcePlacement)
+	}
+	if gated.PlacementReason != dispatchtick.PlacementShapeMismatch {
+		t.Errorf("reason = %q, want %q", gated.PlacementReason, dispatchtick.PlacementShapeMismatch)
+	}
+	// The reasoning posture survives the model swap (a placement wall is model-scoped).
+	if !gated.Ultracode {
+		t.Error("ultracode must be carried across the placement re-route")
+	}
+	// The chain never re-offers the safe model, nor the refused one.
+	for _, m := range gated.Chain {
+		if m == dispatchtick.WorkerModelOpus {
+			t.Errorf("chain %v must not re-offer the pinned safe model", gated.Chain)
+		}
+		if m == dispatchtick.WorkerModelFable {
+			t.Errorf("chain %v must not re-offer the model that cannot hold the shape", gated.Chain)
+		}
+	}
+	// The typed reason reaches the tick payload.
+	if got := dispatchWorkerModelMap(gated)["placement_reason"]; got != dispatchtick.PlacementShapeMismatch {
+		t.Errorf("payload placement_reason = %v, want %q", got, dispatchtick.PlacementShapeMismatch)
+	}
+}
+
+// TestApplyPlacementGate_ConservativeDegrade pins that an untagged/surgical issue, an
+// unpinned seat default, and a capable model all leave the decision byte-identical.
+func TestApplyPlacementGate_ConservativeDegrade(t *testing.T) {
+	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-opus-4-8,claude-sonnet-5")
+	acct := dispatchtick.Account{Tag: "gem8"}
+	fable := dispatchtick.ProfileFableUltracode
+	opus := dispatchtick.ProfileOpusUltracode
+
+	tierFable := resolveWorkerModelPolicy("claude", "docs", "", acct, fleetaccounts.DefaultPolicy(), false, &fable, "")
+	tierOpus := resolveWorkerModelPolicy("claude", "docs", "", acct, fleetaccounts.DefaultPolicy(), false, &opus, "")
+	seat := resolveWorkerModelPolicy("claude", "docs", "", acct, fleetaccounts.DefaultPolicy(), false, nil, "")
+
+	cases := []struct {
+		name  string
+		p     workerModelPolicy
+		shape dispatchtick.WorkShape
+	}{
+		{"untagged issue (unknown shape)", tierFable, dispatchtick.ShapeUnknown},
+		{"surgical issue", tierFable, dispatchtick.ShapeSurgical},
+		{"churning issue on a capable model", tierOpus, dispatchtick.ShapeChurning},
+		{"unpinned seat default", seat, dispatchtick.ShapeChurning},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, fired := applyPlacementGate(c.p, c.shape)
+			if fired {
+				t.Fatalf("gate must not fire: %+v", got)
+			}
+			if !reflect.DeepEqual(got, c.p) {
+				t.Errorf("ungated policy must be byte-identical: got %+v want %+v", got, c.p)
+			}
+			if _, ok := dispatchWorkerModelMap(got)["placement_reason"]; ok {
+				t.Error("an ungated decision's payload must carry no placement_reason")
+			}
+		})
+	}
+}
+
+// TestApplyPlacementGate_OperatorPinsAreNeverGated: the gate protects the worker from a
+// TABLE's choice, not from a human's. An explicit pin, a lane pin, and the benchmark gate
+// are deliberate intent and always win, matching the resolver's precedence doctrine.
+func TestApplyPlacementGate_OperatorPinsAreNeverGated(t *testing.T) {
+	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-opus-4-8,claude-sonnet-5")
+	acct := dispatchtick.Account{Tag: "gem8", Model: dispatchtick.WorkerModelFable}
+
+	explicit := resolveWorkerModelPolicy("claude", "docs", dispatchtick.WorkerModelFable, acct, fleetaccounts.DefaultPolicy(), false, nil, "")
+	pol := fleetaccounts.DefaultPolicy()
+	pol.LaneModels["docs"] = dispatchtick.WorkerModelFable
+	lane := resolveWorkerModelPolicy("claude", "docs", "", acct, pol, false, nil, "")
+	bench := resolveWorkerModelPolicy("claude", "gateway", "", acct, fleetaccounts.DefaultPolicy(), true, nil, "")
+
+	for _, c := range []struct {
+		name string
+		p    workerModelPolicy
+	}{
+		{"explicit --worker-model pin", explicit},
+		{"lane_models pin", lane},
+		{"benchmark gate", bench},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.p.Model != dispatchtick.WorkerModelFable {
+				t.Fatalf("precondition: %s should pin fable, got %q", c.name, c.p.Model)
+			}
+			if got, fired := applyPlacementGate(c.p, dispatchtick.ShapeChurning); fired {
+				t.Errorf("operator intent must win the gate, got re-route to %q", got.Model)
+			}
+		})
+	}
+}
+
+// TestApplyPlacementGate_WorkClassPinIsGated: the work-class default is an AUTOMATIC pin
+// (a table's choice), so it is gated just like the tier profile.
+func TestApplyPlacementGate_WorkClassPinIsGated(t *testing.T) {
+	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-opus-4-8,claude-sonnet-5")
+	acct := dispatchtick.Account{Tag: "gem8"}
+	wc := resolveWorkerModelPolicy("claude", "docs", "", acct, fleetaccounts.DefaultPolicy(), false, nil, dispatchtick.WorkerModelFable)
+	if wc.Source != modelSourceWorkClass {
+		t.Fatalf("precondition: source = %q, want %q", wc.Source, modelSourceWorkClass)
+	}
+	gated, fired := applyPlacementGate(wc, dispatchtick.ShapeChurning)
+	if !fired || gated.Model != dispatchtick.WorkerModelOpus || gated.Source != modelSourcePlacement {
+		t.Fatalf("work-class fable on churning must re-route: fired=%v %+v", fired, gated)
+	}
+}

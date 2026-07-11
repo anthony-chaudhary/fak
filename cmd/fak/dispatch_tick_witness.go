@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,21 @@ import (
 // Injectable seams mirroring the Python sweep's git= / audit_runner= test params.
 var dispatchWitnessResolvingSHA = dispatchWitnessResolvingSHAGit
 var dispatchWitnessCommitAudit = dispatchWitnessCommitAuditDos
+
+// dispatchWitnessTestRun is the #3838 test-run seam: given a resolving commit, run its
+// changed package's tests and report (ran, passed). Injectable so the sweep test pins
+// GREEN/RED/UNRUN with a stubbed runner. It grades the missing rung between "the diff
+// looks like the claim" (the diff-shape witness) and "the claim actually holds" — a
+// diff-witnessed commit that fails its own tests grades CLAIM_TEST_RED. The default is
+// OPT-IN (env-gated), so the hot dispatch loop is never destabilized by an in-tick
+// `go test`; the always-on live consumer of this rung is the `verify` skill.
+var dispatchWitnessTestRun = dispatchWitnessTestRunGo
+
+// dispatchWitnessTestRunEnv gates the default in-tick runner. Unset/false -> the rung
+// records CLAIM_TEST_UNRUN (a valid, surfaced state — #3838 out-of-scope: not every
+// commit must carry a test run). Set truthy -> the sweep runs the resolving commit's
+// changed-package tests WSL-aware and binds GREEN/RED to the slot.
+const dispatchWitnessTestRunEnv = "FAK_WITNESS_TEST_RUN"
 
 // dispatchWitnessLandReap is the seam the #3168 land+reap fires through, injectable
 // so the sweep test can assert it runs (before the resolving-SHA scan) and that a
@@ -161,6 +177,12 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 				Verdict: verdict,
 				Witness: witness,
 			}
+			// #3838 test-run rung: bind the done-claim to a green test of the resolving
+			// commit's changed package, ALONGSIDE (never replacing) the diff-shape verdict.
+			// The default runner is opt-in, so on a normal tick this grades UNRUN — a valid,
+			// surfaced state — while the `verify` skill is the always-on live consumer.
+			ran, passed := dispatchWitnessTestRun(root, sha)
+			rec.TestClaim = dispatchtick.GradeTestRun(ran, passed)
 		}
 		// Layer 5b: scrape the model the slot was pinned to from its .model sidecar (absent
 		// for a floor/seat-default worker -> Model stays ""). It feeds both the .witness
@@ -278,4 +300,72 @@ func dispatchWitnessCommitAuditDos(root, sha string) (string, string) {
 		}
 	}
 	return dispatchMapString(row, "verdict"), dispatchMapString(row, "witness")
+}
+
+// dispatchWitnessTestRunGo is the default #3838 runner: for a resolving commit, run the
+// tests of the packages it CHANGED and report (ran, passed). It is OPT-IN via
+// dispatchWitnessTestRunEnv so the hot dispatch loop never eats an in-tick `go test`;
+// unset -> (false,false) -> the rung grades CLAIM_TEST_UNRUN. FAIL-SAFE: an empty sha,
+// no test-bearing changed package, or a launch fault all yield ran=false (UNRUN), so a
+// disabled/faulted run can NEVER masquerade as a green pass. WSL-aware: on Windows the
+// tests run through test.ps1 (the same seam `fak affected` uses), else `go test`.
+func dispatchWitnessTestRunGo(root, sha string) (ran, passed bool) {
+	if sha == "" || !dispatchWitnessTestRunEnabled() {
+		return false, false // no commit, or the in-tick runner is opt-in and off -> UNRUN
+	}
+	pkgs := dispatchWitnessChangedTestPkgs(root, sha)
+	if len(pkgs) == 0 {
+		return false, false // nothing test-bearing changed -> honest UNRUN, not a fake pass
+	}
+	name, cmdArgs := affectedTestCommand(runtime.GOOS, append([]string{"test", "-count=1"}, pkgs...))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, cmdArgs...)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	err := cmd.Run()
+	return true, err == nil
+}
+
+// dispatchWitnessTestRunEnabled reports whether the opt-in in-tick runner is on. Default
+// OFF (unset/false/off/no/0) — the rung then surfaces UNRUN rather than paying an
+// in-tick test on every witnessed commit.
+func dispatchWitnessTestRunEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(dispatchWitnessTestRunEnv))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// dispatchWitnessChangedTestPkgs maps a resolving commit's changed .go files to the set
+// of `./dir/` package patterns that actually carry Go tests. A changed dir with no
+// *_test.go is skipped (running it would grade a vacuous pass), so the runner only ever
+// goes GREEN/RED on a package whose tests it truly executed. Fail-open: a git error
+// yields no packages -> UNRUN.
+func dispatchWitnessChangedTestPkgs(root, sha string) []string {
+	out, err := gitOut(root, "show", "--name-only", "--pretty=format:", sha)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var pkgs []string
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.TrimSpace(line)
+		if !strings.HasSuffix(f, ".go") {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(f))
+		if dir == "." || dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		matches, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(dir), "*_test.go"))
+		if len(matches) == 0 {
+			continue // changed package carries no tests -> nothing to bind a pass to
+		}
+		pkgs = append(pkgs, "./"+dir+"/")
+	}
+	return pkgs
 }

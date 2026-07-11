@@ -786,6 +786,99 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	}
 }
 
+// TestDispatchTickNarrowsTargetClaimToDeclaredPaths pins the single-target claim seam:
+// when the chosen target issue declares its OWN file scope (router.Issues[*].Paths) and
+// the operator pinned neither --lease-id nor --lease-tree, the tick narrows its whole
+// claim to that issue -- a per-issue lease id (resolve-<lane>-<issue>) over the declared
+// tree -- instead of claiming the coarse lane tree. This is what lets two issues of one
+// lane with DISJOINT declared scopes co-run (regionadmit admits disjoint sub-regions) and
+// what stops the pre-acquire tree-collision gate from serializing them. The narrowed
+// id+tree must flow to BOTH the top-level lease sidecar and the startup bundle lease (the
+// sidecar the live worker's lease acquire + live-scan readback actually consume).
+//
+// The negative control -- an issue that declared NO scope -- keeps the coarse lane claim
+// (resolve-<lane> over the lane tree), byte-identical to before this seam, so an unscoped
+// issue never loses its lane-level serialization.
+func TestDispatchTickNarrowsTargetClaimToDeclaredPaths(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+	// Keep the issue text benign-docs so neither self-modify arm fires on the narrowed
+	// docs/alpha.md tree -- we want the plain would_spawn path.
+	oldFetch := dispatchFetchIssue
+	dispatchFetchIssue = func(root string, issue int) dispatchIssueInfo {
+		return dispatchIssueInfo{Number: issue, Title: "docs: clarify alpha page", Body: "edit docs/alpha.md wording", Labels: []string{"docs"}}
+	}
+	t.Cleanup(func() { dispatchFetchIssue = oldFetch })
+
+	runTick := func(t *testing.T, router dispatchtick.RouterPayload) map[string]any {
+		t.Helper()
+		dispatchRouteIssues = func(string, io.Writer) (dispatchtick.RouterPayload, error) { return router, nil }
+		root := t.TempDir()
+		out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr: %s)\n%s", code, errb, out)
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("bad json: %v\n%s", err, out)
+		}
+		return got
+	}
+
+	// Scoped target: declares docs/alpha.md -> per-issue lease over just that file.
+	t.Run("scoped_target_narrows", func(t *testing.T) {
+		got := runTick(t, dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes:  map[string]dispatchtick.RouterLaneGroup{"docs": {Tree: []string{"docs/**"}, Issues: []int{101}, Count: 1}},
+			Issues: []dispatchtick.IssueRoute{{Number: 101, Title: "docs alpha", Lane: "docs", Confidence: "path-confirmed", Paths: []string{"docs/alpha.md"}}},
+		})
+		if got["action"] != "would_spawn" || got["target_issue"] != float64(101) {
+			t.Fatalf("scoped tick = action %v target %v, want would_spawn/101", got["action"], got["target_issue"])
+		}
+		if got["lease_id"] != "resolve-docs-101" {
+			t.Fatalf("scoped lease_id = %v, want resolve-docs-101 (narrowed per-issue id)", got["lease_id"])
+		}
+		if tree := stringAnySlice(got["lease_tree"]); len(tree) != 1 || tree[0] != "docs/alpha.md" {
+			t.Fatalf("scoped lease_tree = %#v, want [docs/alpha.md] (narrowed, not the docs/** lane tree)", tree)
+		}
+		// The narrowed id+tree must also reach the startup bundle lease -- that sidecar,
+		// not the top-level echo, is what the worker's lease acquire + live-scan consume.
+		lease := mapAt(mapAt(got, "startup_bundle"), "lease")
+		if dispatchMapString(lease, "id") != "resolve-docs-101" {
+			t.Fatalf("startup bundle lease id = %v, want resolve-docs-101", lease["id"])
+		}
+		if tree := stringAnySlice(lease["tree"]); len(tree) != 1 || tree[0] != "docs/alpha.md" {
+			t.Fatalf("startup bundle lease tree = %#v, want [docs/alpha.md]", tree)
+		}
+		// Per-phase tick timing is recorded on every tick (additive observability, folded
+		// into the loop ledger); assert the map is present with the always-stamped total.
+		if tm := mapAt(got, "timings_ms"); len(tm) == 0 || tm["total"] == nil {
+			t.Fatalf("timings_ms = %#v, want a non-empty per-phase map including total", got["timings_ms"])
+		}
+	})
+
+	// Unscoped target: declares no paths -> coarse lane claim (unchanged pre-seam).
+	t.Run("unscoped_target_keeps_lane_claim", func(t *testing.T) {
+		got := runTick(t, dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes:  map[string]dispatchtick.RouterLaneGroup{"docs": {Tree: []string{"docs/**"}, Issues: []int{12}, Count: 1}},
+			// No router.Issues entry for #12 -> no declared scope -> no narrowing.
+		})
+		if got["action"] != "would_spawn" || got["target_issue"] != float64(12) {
+			t.Fatalf("unscoped tick = action %v target %v, want would_spawn/12", got["action"], got["target_issue"])
+		}
+		if got["lease_id"] != "resolve-docs" {
+			t.Fatalf("unscoped lease_id = %v, want resolve-docs (coarse lane id)", got["lease_id"])
+		}
+		if tree := stringAnySlice(got["lease_tree"]); len(tree) != 1 || tree[0] != "docs/**" {
+			t.Fatalf("unscoped lease_tree = %#v, want [docs/**] (coarse lane tree)", tree)
+		}
+	})
+}
+
 func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
