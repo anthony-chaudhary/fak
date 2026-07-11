@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -64,6 +65,21 @@ NONRESOLVING_HOLD = "CLAIM_KIND_NONRESOLVING"
 DURABLE_CLOSED_STATE = "CLOSED"
 CLOSE_NOT_PERSISTENT = "close_not_persistent"
 CLOSE_ALREADY_COUNTED = "already_counted"
+# Coverage gate (#3870): a single diff-witnessed commit resolves an issue only when
+# nothing EXPLICITLY declares the issue to be multi-part. A first-of-many commit that
+# merely references an epic (or a spine-first artifact) is diff-witnessed for its own
+# small claim yet closes the WHOLE tracking ticket -- the partial-close failure. These
+# are high-precision author-intent markers (an `epic` label, an unchecked task box, a
+# spine-first work-unit), NOT a heuristic over every multi-bullet body, so the gate
+# holds the documented partial closes without stranding ordinary single-scope issues.
+PARTIAL_HOLD = "RESOLVED_PARTIAL"
+COVERAGE_UNKNOWN_HOLD = "COVERAGE_UNKNOWN"
+# `- [ ]` / `* [ ]` GitHub task-list box, unchecked (a `[x]`/`[X]` box never matches).
+_UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s+\[\s\]\s+\S", re.MULTILINE)
+_SPINE_FIRST_RE = re.compile(
+    r"spine[-\s]?first|first[-\s]?spine|required first(?:[-\s]spine)?\s+artifact",
+    re.IGNORECASE)
+_KEEP_OPEN_LABELS = {"epic"}
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -182,6 +198,66 @@ def claim_binds_resolution(rv: dict[str, Any], row: dict[str, Any]) -> tuple[boo
                    f"cannot resolve a non-docs issue")
 
 
+def classify_coverage(number: Any, body: str,
+                      labels: set[str]) -> tuple[bool, str | None]:
+    """Pure body/label -> (binds, hold_reason) coverage decision (#3870).
+
+    Holds (returns False) only on an EXPLICIT multi-part marker: an `epic` label, an
+    unchecked task-list box (an epic's child-issue checklist or an unfinished
+    acceptance criterion), or a spine-first / first-artifact work-unit. Everything
+    else binds. This is deliberately high-precision -- it does NOT hold on a plain
+    multi-bullet ``## In scope`` (which would strand ordinary single-scope issues),
+    only on markers an author placed to say 'this ticket is not done in one commit'.
+    """
+    hit = set(labels) & _KEEP_OPEN_LABELS
+    if hit:
+        return False, (f"{PARTIAL_HOLD}: #{number} is labelled {sorted(hit)} "
+                       "(a parent/epic groups child issues; one commit does not close it)")
+    if _UNCHECKED_BOX_RE.search(body or ""):
+        return False, (f"{PARTIAL_HOLD}: #{number} has unchecked task-list box(es) "
+                       "-- declared work remains, a single commit does not close it")
+    if _SPINE_FIRST_RE.search(body or ""):
+        return False, (f"{PARTIAL_HOLD}: #{number} is a spine-first / first-of-many "
+                       "artifact -- the resolving commit is step one, not the close")
+    return True, None
+
+
+def fetch_issue_meta(root: Path, number: Any) -> dict[str, Any] | None:
+    """The issue's body + lower-cased label names, or None when GitHub can't be read.
+
+    None is the fail-SAFE signal: the coverage gate treats an unreadable body as
+    COVERAGE_UNKNOWN and keeps the issue open (a transient gh error self-heals on the
+    next tick) rather than closing something it could not inspect."""
+    if number is None:
+        return None
+    rc, out, _ = run_capture(
+        ["gh", "issue", "view", str(number), "--json", "body,labels"], root, timeout=30)
+    if rc != 0:
+        return None
+    try:
+        doc = json.loads(out.strip() or "{}")
+    except ValueError:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    labels = {str((lbl or {}).get("name") or "").strip().lower()
+              for lbl in (doc.get("labels") or []) if isinstance(lbl, dict)}
+    return {"body": str(doc.get("body") or ""), "labels": labels}
+
+
+def coverage_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does a single resolving commit actually close this whole issue? (#3870)
+
+    Fetches the issue's live body/labels and classifies; an unreadable body holds as
+    COVERAGE_UNKNOWN -- never a silent close of an issue we could not inspect."""
+    number = row.get("number")
+    meta = fetch_issue_meta(root, number)
+    if meta is None:
+        return False, (f"{COVERAGE_UNKNOWN_HOLD}: could not read #{number} "
+                       "body/labels to confirm full coverage")
+    return classify_coverage(number, meta["body"], meta["labels"])
+
+
 def origin_main_resolvable(root: Path) -> bool:
     """Best-effort refresh + presence check for the origin/main remote-tracking ref.
 
@@ -267,6 +343,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     planned, results = [], []
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
     close_not_persistent = already_counted = 0
+    skipped_partial = skipped_coverage_unknown = 0
     # Unique issue IDs durably closed THIS run — a repeated close tick on an issue
     # already counted here does not inflate the tally (#2641, done condition 3).
     counted: set[int] = set()
@@ -290,6 +367,21 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             item["action"] = "skip_unpushed"
             item["reason"] = "resolving commit not on origin/main yet (not durable)"
             skipped_unpushed += 1
+            results.append(item)
+            continue
+        # #3870: a diff-witnessed commit closes an issue only when the issue is not
+        # EXPLICITLY multi-part. A read-only body/label probe runs even in dry-run so
+        # the plan reflects the hold; an unreadable body holds (COVERAGE_UNKNOWN) and
+        # never false-closes an issue we could not inspect.
+        covers, cover_hold = coverage_binds_closure(root, row)
+        if not covers:
+            unknown = str(cover_hold or "").startswith(COVERAGE_UNKNOWN_HOLD)
+            item["action"] = "skip_coverage_unknown" if unknown else "skip_partial"
+            item["reason"] = cover_hold
+            if unknown:
+                skipped_coverage_unknown += 1
+            else:
+                skipped_partial += 1
             results.append(item)
             continue
         if not live:
@@ -349,6 +441,8 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             1 for r in results if r.get("action") == "would_close"),
             "skipped_unwitnessed": skipped,
             "skipped_nonresolving": skipped_nonresolving,
+            "skipped_partial": skipped_partial,
+            "skipped_coverage_unknown": skipped_coverage_unknown,
             "skipped_unpushed": skipped_unpushed,
             "close_not_persistent": close_not_persistent,
             "already_counted": already_counted,
@@ -378,6 +472,8 @@ def render(p: dict[str, Any]) -> str:
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
                  f"skipped={c.get('skipped_unwitnessed')} "
                  f"nonresolving={c.get('skipped_nonresolving')} "
+                 f"partial={c.get('skipped_partial')} "
+                 f"coverage_unknown={c.get('skipped_coverage_unknown')} "
                  f"unpushed={c.get('skipped_unpushed')} "
                  f"not_persistent={c.get('close_not_persistent')} "
                  f"already_counted={c.get('already_counted')} "
@@ -391,8 +487,8 @@ def render(p: dict[str, Any]) -> str:
 def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
-    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_unpushed",
-                  CLOSE_ALREADY_COUNTED}:
+    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_partial",
+                  "skip_coverage_unknown", "skip_unpushed", CLOSE_ALREADY_COUNTED}:
         return "hold"
     if action == CLOSE_NOT_PERSISTENT:
         return "reopened"

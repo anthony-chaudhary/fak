@@ -315,6 +315,10 @@ class EvaluateTest(unittest.TestCase):
         # covered in PushedGateTest); with no resolvable origin the gate is inert,
         # so these assertions mirror the pre-gate close logic exactly.
         mod.origin_main_resolvable = lambda root: False
+        # Neutralize the #3870 coverage gate too (own behavior in CoverageGateTest):
+        # bind every issue so these cases exercise the pre-coverage close logic and
+        # never make the read-only body/label gh probe.
+        mod.coverage_binds_closure = lambda root, row: (True, None)
 
         def fake_reverify(root, sha):
             return reverify_map[sha]
@@ -407,6 +411,7 @@ class PushedGateTest(unittest.TestCase):
             "witness_ok": True, "verdict": "OK",
             "witness": "diff-witnessed", "reason": None}
         mod.origin_main_resolvable = lambda root: gate_active
+        mod.coverage_binds_closure = lambda root, row: (True, None)  # #3870 inert here
         # only "onmain" is an ancestor of origin/main; "localonly" is not.
         mod.reachable_from_origin = lambda root, sha: sha == "onmain"
 
@@ -490,6 +495,7 @@ class StateReadbackTest(unittest.TestCase):
     def _patch(self, mod, audit, view_states):
         mod.load_audit = lambda root, audit_json, max_commits: audit
         mod.origin_main_resolvable = lambda root: False  # inert durability gate
+        mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
         run, calls = self._fake_gh(view_states)
         mod.run_capture = run
@@ -557,6 +563,7 @@ class StateReadbackTest(unittest.TestCase):
         mod = load()
         mod.load_audit = lambda root, audit_json, max_commits: self._audit((2605, "sha1"))
         mod.origin_main_resolvable = lambda root: False
+        mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
 
         def run(cmd, cwd, timeout):
@@ -587,6 +594,142 @@ class StateReadbackTest(unittest.TestCase):
 
         mod.run_capture = boom
         self.assertEqual(mod.readback_state(ROOT, None), {})
+
+
+class CoverageGateTest(unittest.TestCase):
+    """The #3870 coverage gate: a single diff-witnessed commit closes an issue only
+    when the issue is not EXPLICITLY multi-part. The classifier is pure (body/labels
+    in, decision out); the evaluate-level wiring is exercised with a stubbed
+    ``fetch_issue_meta`` so no live gh runs."""
+
+    def test_plain_single_scope_body_binds(self) -> None:
+        mod = load()
+        body = "## In scope\n- add the flag\n- wire it into the picker\n\n## Done when\nit works"
+        self.assertEqual(mod.classify_coverage(5, body, set()), (True, None))
+
+    def test_epic_label_holds(self) -> None:
+        mod = load()
+        binds, reason = mod.classify_coverage(4277, "epic body", {"epic", "class:dev"})
+        self.assertFalse(binds)
+        self.assertIn("RESOLVED_PARTIAL", reason)
+        self.assertIn("epic", reason)
+
+    def test_unchecked_task_box_holds(self) -> None:
+        mod = load()
+        # an epic's child-issue checklist / an unfinished acceptance criterion.
+        body = "## Children\n- [ ] #4278 — L1 structure\n- [x] #4279 done\n"
+        binds, reason = mod.classify_coverage(4277, body, set())
+        self.assertFalse(binds)
+        self.assertIn("unchecked task-list box", reason)
+
+    def test_all_boxes_checked_binds(self) -> None:
+        mod = load()
+        body = "## Acceptance\n- [x] tests green\n- [X] pushed\n"
+        self.assertEqual(mod.classify_coverage(9, body, set()), (True, None))
+
+    def test_spine_first_work_unit_holds(self) -> None:
+        mod = load()
+        # the literal #3830 marker shape.
+        body = ("## Work unit\nSpine-first bugfix leaf. The code lane is occupied, so "
+                "this issue is the required first-spine artifact; the missing witness "
+                "is the two-denial fixture.")
+        binds, reason = mod.classify_coverage(3830, body, set())
+        self.assertFalse(binds)
+        self.assertIn("spine-first", reason)
+
+    def test_fetch_meta_none_is_coverage_unknown_hold(self) -> None:
+        mod = load()
+        mod.fetch_issue_meta = lambda root, number: None  # gh unreadable
+        binds, reason = mod.coverage_binds_closure(ROOT, {"number": 42})
+        self.assertFalse(binds)
+        self.assertTrue(reason.startswith("COVERAGE_UNKNOWN"))
+
+    def test_fetch_issue_meta_parses_gh_json(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (
+            0, json.dumps({"body": "hi", "labels": [{"name": "Epic"}, {"name": "bug"}]}), "")
+        meta = mod.fetch_issue_meta(ROOT, 4277)
+        self.assertEqual(meta["body"], "hi")
+        self.assertEqual(meta["labels"], {"epic", "bug"})  # lower-cased
+
+    def test_fetch_issue_meta_gh_error_is_none(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (1, "", "gh boom")
+        self.assertIsNone(mod.fetch_issue_meta(ROOT, 4277))
+
+    def _audit(self, number, title, sha="wok", subject="shipped"):
+        return {"closure_rate": 0.5, "issues": [
+            {"number": number, "title": title, "bucket": "OPEN_WITNESSED",
+             "witnessed_commits": [{"sha": sha, "subject": subject}]}]}
+
+    def _patch_through_to_coverage(self, mod, audit):
+        """Witness + claim-bind + durability all PASS, so the only gate left is
+        coverage -- an issue's disposition is then decided purely by #3870."""
+        mod.load_audit = lambda root, audit_json, max_commits: audit
+        mod.origin_main_resolvable = lambda root: False
+        mod.reverify = lambda root, sha: {
+            "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+            "claim_kind": "code_effect", "touches_code": True, "reason": None}
+
+    def test_evaluate_holds_epic_and_never_calls_close(self) -> None:
+        mod = load()
+        self._patch_through_to_coverage(
+            mod, self._audit(4277, "epic(deepwiki): witness-verified repo"))
+        mod.fetch_issue_meta = lambda root, number: {"body": "grouping issue",
+                                                     "labels": {"epic"}}
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("a coverage-held issue must never reach gh issue close")
+
+        mod.run_capture = boom
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_partial")
+        self.assertIn("RESOLVED_PARTIAL", r["reason"])
+        self.assertEqual(p["counts"]["skipped_partial"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(mod.close_decision("skip_partial"), "hold")
+        self.assertIn("partial=1", mod.render(p))
+
+    def test_evaluate_dry_run_reflects_partial_hold(self) -> None:
+        # the acceptance shape: a spine-first issue is HELD in dry-run (not would_close).
+        mod = load()
+        self._patch_through_to_coverage(
+            mod, self._audit(3830, "fix(x): two-denial binding"))
+        mod.fetch_issue_meta = lambda root, number: {
+            "body": "## Work unit\nSpine-first bugfix leaf; required first-spine artifact.",
+            "labels": {"bug"}}
+        p = mod.evaluate(ROOT, limit=10, live=False, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "skip_partial")
+        self.assertEqual(p["counts"]["would_close"], 0)
+        self.assertEqual(p["counts"]["skipped_partial"], 1)
+
+    def test_evaluate_covers_plain_issue_closes(self) -> None:
+        mod = load()
+        self._patch_through_to_coverage(mod, self._audit(9, "fix(x): single scope"))
+        mod.fetch_issue_meta = lambda root, number: {
+            "body": "## In scope\n- one focused change\n", "labels": {"bug"}}
+        mod.run_capture = gh_close_then_state()  # readback confirms CLOSED
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "closed")
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["skipped_partial"], 0)
+
+    def test_evaluate_coverage_unknown_holds(self) -> None:
+        mod = load()
+        self._patch_through_to_coverage(mod, self._audit(50, "fix(x): unreadable"))
+        mod.fetch_issue_meta = lambda root, number: None  # gh body unreadable
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("an UNKNOWN-coverage issue must not be closed")
+
+        mod.run_capture = boom
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_coverage_unknown")
+        self.assertEqual(p["counts"]["skipped_coverage_unknown"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(mod.close_decision("skip_coverage_unknown"), "hold")
 
 
 if __name__ == "__main__":
