@@ -87,6 +87,10 @@ func TestGuardCodexEnvKey(t *testing.T) {
 }
 
 func TestGuardCodexGatewayModel(t *testing.T) {
+	if guardCodexDefaultModelID != "gpt-5.6-sol" || guardCodexDefaultReasoningEffort != "xhigh" {
+		t.Fatalf("Codex defaults = model %q effort %q, want gpt-5.6-sol/xhigh",
+			guardCodexDefaultModelID, guardCodexDefaultReasoningEffort)
+	}
 	if got := guardCodexGatewayModel([]string{"codex"}, "", "openai-responses"); got != guardCodexDefaultModelID {
 		t.Fatalf("default Codex gateway model = %q, want %q", got, guardCodexDefaultModelID)
 	}
@@ -125,13 +129,15 @@ func TestGuardCodexLoopGateConfigCodexOnly(t *testing.T) {
 // path because the current Codex docs prefer Responses while Chat Completions is
 // deprecated for future removal. This test pins the exact emitted sequence.
 func TestGuardCodexConfigArgs(t *testing.T) {
-	got := guardCodexConfigArgs("http://127.0.0.1:8137", "")
+	got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "")
 	want := []string{
 		"-c", "model_provider=fak",
+		"-c", `model="gpt-5.6-sol"`,
 		"-c", `model_providers.fak.name="fak (kernel-adjudicated)"`,
 		"-c", `model_providers.fak.base_url="http://127.0.0.1:8137/v1"`,
 		"-c", `model_providers.fak.wire_api="responses"`,
 		"-c", `model_providers.fak.env_key="OPENAI_API_KEY"`,
+		"-c", `model_reasoning_effort="xhigh"`,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("guardCodexConfigArgs len = %d, want %d\n got=%v", len(got), len(want), got)
@@ -144,12 +150,15 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 
 	// An explicit --api-key-env threads through into env_key, and a base that already
 	// carries /v1 is not doubled.
-	gotKey := guardCodexConfigArgs("http://h:1/v1", "ALT_KEY")
+	gotKey := guardCodexConfigArgs("http://h:1/v1", "ALT_KEY", "gpt-custom")
 	if !containsArg(gotKey, `model_providers.fak.env_key="ALT_KEY"`) {
 		t.Errorf("guardCodexConfigArgs with --api-key-env ALT_KEY did not emit env_key=\"ALT_KEY\": %v", gotKey)
 	}
 	if !containsArg(gotKey, `model_providers.fak.base_url="http://h:1/v1"`) {
 		t.Errorf("guardCodexConfigArgs did not keep the /v1 base undoubled: %v", gotKey)
+	}
+	if !containsArg(gotKey, `model="gpt-custom"`) || containsArg(gotKey, `model_reasoning_effort="xhigh"`) {
+		t.Errorf("custom model must be pinned without forcing the managed GPT-5.6 effort: %v", gotKey)
 	}
 
 	// wire_api is responses on every code path for the first-class guard route.
@@ -186,8 +195,9 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 			t.Errorf("`-c` overrides must precede the subcommand: lastC=%d exec=%d argv=%v", lastC, ix, out)
 		}
 		// The struct the banner reads is fully populated.
-		if info.ProviderID != "fak" || info.EnvKey != "OPENAI_API_KEY" || info.BaseURL != gw+"/v1" {
-			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1", info, gw)
+		if info.ProviderID != "fak" || info.EnvKey != "OPENAI_API_KEY" || info.BaseURL != gw+"/v1" ||
+			info.Model != "gpt-5.6-sol" || info.Reasoning != "xhigh" {
+			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-5.6-sol effort=xhigh", info, gw)
 		}
 	})
 

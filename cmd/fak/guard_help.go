@@ -73,7 +73,7 @@ type guardFlagGroup struct {
 var guardFlagGroups = []guardFlagGroup{
 	{"Upstream wire & auth", []string{
 		"addr", "provider", "base-url", "model", "api-key-env",
-		"anthropic-oauth", "oauth-token-env", "env", "require-key-env",
+		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{
 		"policy", "dump-policy", "audit", "no-audit", "log", "landlock-hooks",
@@ -99,7 +99,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
 		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
-		"codex-loop-gate-since-hours", "mcp-register", "pi-extension",
+		"codex-loop-gate-since-hours", "mcp-register", "pi-extension", "expose-profile",
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",

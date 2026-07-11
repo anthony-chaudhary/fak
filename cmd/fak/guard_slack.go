@@ -164,7 +164,7 @@ func startGuardSessionThreadDrain() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_, _ = ob.Drain(ctx, wire, slackoutbox.DrainOpts{Root: "."})
+		_, _ = ob.Drain(ctx, wire, stdDrainOpts())
 	}()
 }
 
@@ -372,7 +372,7 @@ func (c *guardSessionCard) finalize(text string) {
 	// A periodic drain kicked by the last tick may still hold the lock; retry within the
 	// bounded window until it releases so the final edit actually ships.
 	for {
-		if _, derr := ob.Drain(ctx, wire, slackoutbox.DrainOpts{Root: "."}); !errors.Is(derr, slackoutbox.ErrDrainBusy) {
+		if _, derr := ob.Drain(ctx, wire, stdDrainOpts()); !errors.Is(derr, slackoutbox.ErrDrainBusy) {
 			return
 		}
 		select {

@@ -51,14 +51,9 @@ func guardRotateOffCooldown(homeDir, registryPath string, now time.Time, warn io
 		return cur, false
 	}
 	if warn != nil {
-		msg := fmt.Sprintf("fak guard: account %q is cooling down — rotating to %q", note.From, note.To)
-		if !note.ResetAt.IsZero() {
-			msg += fmt.Sprintf(" (resets %s)", note.ResetAt.UTC().Format(time.RFC3339))
-		}
-		if note.Headroom != nil {
-			msg += fmt.Sprintf(" (headroom=%s)", headroomLabel(*note.Headroom))
-		}
-		fmt.Fprintln(warn, msg)
+		// The one-line message is rendered by the pure guardrotate.Note.Explain (unit-tested there)
+		// so this wrapper only does I/O.
+		fmt.Fprintln(warn, note.Explain())
 	}
 	return dir, true
 }

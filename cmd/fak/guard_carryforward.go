@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
 const (
@@ -379,7 +380,11 @@ func guardRecoveryPrompt(items []guardRefusalCarry) string {
 		return ""
 	}
 	b.WriteString(". Keep fak guard wrapped after the blocker is cleared.")
-	return b.String()
+	// Emit-time reframe (#3566): this prompt interpolates per-reason `fix:` prose from the
+	// reason docs, which can itself carry an unambiguous negative idiom ("do not forget to
+	// stamp"). Route the assembled prompt through the token-superset-safe positive-voice pass
+	// so the recovery note leads with the affordance while every reason token stays intact.
+	return negframe.Reframe(b.String())
 }
 
 var guardReasonHeaderRE = regexp.MustCompile(`^\[reasons\.([A-Z0-9_]+)\]`)

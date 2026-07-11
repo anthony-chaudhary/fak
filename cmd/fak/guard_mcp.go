@@ -100,7 +100,7 @@ func writeGuardMCPConfig(path, mcpURL string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeGuardSettingsFileAtomic(path, data)
 }
 
 // guardMCPURLFromGatewayBase is the gateway's MCP endpoint: the bare origin (gwURL

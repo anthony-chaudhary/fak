@@ -136,7 +136,7 @@ func TestRunGuardPreCompactShadowLogsWouldBlockButAllows(t *testing.T) {
 	defer srv.Close()
 
 	var stderr strings.Builder
-	code := runGuardPreCompact(nil, &stderr, []string{
+	code := runGuardPreCompact(nil, &stderr, nil, []string{
 		"--mode", guardPreCompactModeShadow,
 		"--metrics-url", srv.URL + "/metrics",
 	})
@@ -154,7 +154,7 @@ func TestRunGuardPreCompactEnforceReturnsPostureExitCode(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	code := runGuardPreCompact(nil, ioDiscard{}, []string{
+	code := runGuardPreCompact(nil, ioDiscard{}, nil, []string{
 		"--mode", guardPreCompactModeEnforce,
 		"--metrics-url", srv.URL + "/metrics",
 	})
@@ -169,7 +169,7 @@ func TestRunGuardPreCompactEnforceAllowsWhenPostureAllows(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	code := runGuardPreCompact(nil, ioDiscard{}, []string{
+	code := runGuardPreCompact(nil, ioDiscard{}, nil, []string{
 		"--mode", guardPreCompactModeEnforce,
 		"--metrics-url", srv.URL + "/metrics",
 	})
@@ -180,7 +180,7 @@ func TestRunGuardPreCompactEnforceAllowsWhenPostureAllows(t *testing.T) {
 
 func TestRunGuardPreCompactFailsOpenWhenPostureUnavailable(t *testing.T) {
 	var stderr strings.Builder
-	code := runGuardPreCompact(nil, &stderr, []string{
+	code := runGuardPreCompact(nil, &stderr, nil, []string{
 		"--mode", guardPreCompactModeEnforce,
 		"--metrics-url", "http://127.0.0.1:1/metrics",
 		"--timeout", "1ms",
@@ -190,6 +190,93 @@ func TestRunGuardPreCompactFailsOpenWhenPostureUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "allowing Claude auto-compaction") {
 		t.Fatalf("stderr = %q, want fail-open log", stderr.String())
+	}
+}
+
+// TestRelayPrecompactShadowSurfacesArmedWithoutCompaction is the #1869 witness:
+// the relay would-rotate signal, carried on the gateway /metrics scrape the
+// PreCompact hook already reads, surfaces on the SAME shadow seam as the
+// compaction posture — and never triggers compaction (the hook stays exit 0 in
+// shadow mode regardless of the relay state).
+func TestRelayPrecompactShadowSurfacesArmedWithoutCompaction(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantSubstr string
+		wantAbsent string
+	}{
+		{
+			name:       "armed surfaces RELAY_ARMED alongside an allow posture",
+			body:       "fak_harness_coherence_posture 0\nfak_relay_would_rotate 1\n",
+			wantSubstr: "relay would-rotate signal armed (reason=RELAY_ARMED)",
+		},
+		{
+			name:       "armed surfaces alongside a block posture too",
+			body:       "fak_harness_coherence_posture 1\nfak_relay_would_rotate 1\n",
+			wantSubstr: "relay would-rotate signal armed (reason=RELAY_ARMED)",
+		},
+		{
+			name:       "disarmed gauge surfaces disarmed, still shadow-only",
+			body:       "fak_harness_coherence_posture 1\nfak_relay_would_rotate 0\n",
+			wantSubstr: "relay would-rotate signal disarmed",
+		},
+		{
+			name:       "absent gauge keeps the seam silent (non-relay session)",
+			body:       "fak_harness_coherence_posture 1\n",
+			wantAbsent: "relay would-rotate",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			var stderr strings.Builder
+			code := runGuardPreCompact(nil, &stderr, nil, []string{
+				"--mode", guardPreCompactModeShadow,
+				"--metrics-url", srv.URL + "/metrics",
+			})
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0 (shadow never triggers compaction)", code)
+			}
+			// The compaction posture line must always still be present — the relay
+			// signal rides the same seam, it does not replace it.
+			if !strings.Contains(stderr.String(), "fak guard PreCompact: shadow would") {
+				t.Fatalf("stderr = %q, want the compaction shadow posture line", stderr.String())
+			}
+			if tc.wantSubstr != "" && !strings.Contains(stderr.String(), tc.wantSubstr) {
+				t.Fatalf("stderr = %q, want relay substring %q", stderr.String(), tc.wantSubstr)
+			}
+			if tc.wantAbsent != "" && strings.Contains(stderr.String(), tc.wantAbsent) {
+				t.Fatalf("stderr = %q, want NO relay line %q", stderr.String(), tc.wantAbsent)
+			}
+		})
+	}
+}
+
+// TestRelayPrecompactShadowParsesGauge covers the pure relay-gauge parser: a
+// present gauge reports its armed bit, a labeled series matches, and an absent
+// gauge reports not-present so the shadow seam stays silent.
+func TestRelayPrecompactShadowParsesGauge(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		body        string
+		wantArmed   bool
+		wantPresent bool
+	}{
+		{name: "armed", body: "fak_relay_would_rotate 1\n", wantArmed: true, wantPresent: true},
+		{name: "disarmed", body: "fak_relay_would_rotate 0\n", wantArmed: false, wantPresent: true},
+		{name: "labeled", body: `fak_relay_would_rotate{trace="abc"} 1` + "\n", wantArmed: true, wantPresent: true},
+		{name: "absent", body: "fak_harness_coherence_posture 1\n", wantArmed: false, wantPresent: false},
+		{name: "comment-and-malformed-skipped", body: "# HELP fak_relay_would_rotate x\nfak_relay_would_rotate nope\nfak_relay_would_rotate 1\n", wantArmed: true, wantPresent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			armed, present := parseGuardPreCompactRelayArmed(tc.body)
+			if armed != tc.wantArmed || present != tc.wantPresent {
+				t.Fatalf("parse(%q) = (armed=%v present=%v), want (armed=%v present=%v)", tc.body, armed, present, tc.wantArmed, tc.wantPresent)
+			}
+		})
 	}
 }
 

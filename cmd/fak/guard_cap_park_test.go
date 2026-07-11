@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,4 +276,78 @@ func TestGuardCapParkEnabled(t *testing.T) {
 			t.Errorf("FAK_GUARD_CAP_PARK=%q -> %v, want %v", val, got, want)
 		}
 	}
+}
+
+// capTranscriptStore writes a two-record transcript — a real assistant turn followed by a
+// synthetic session-limit api-error — under a temp CLAUDE_CONFIG_DIR, at an mtime just after
+// childStarted. It is the on-disk witness guardMaybeRecoverCapCrash locates and folds, so this
+// exercises the full I/O entry point (find → open → scan → diagnose → classify → park), not just
+// the pure core the other tests drive. Returns the base wall-clock the transcript's last record
+// carries, so the caller can inject a `now` that yields a known, still-fresh idle.
+func capTranscriptStore(t *testing.T, childStarted time.Time) time.Time {
+	t.Helper()
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	base := time.Unix(1_700_000_000, 0).UTC()
+	ts := base.Format(time.RFC3339)
+	body := strings.Join([]string{
+		`{"type":"assistant","timestamp":"` + ts + `","message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":120000}}}`,
+		`{"type":"assistant","timestamp":"` + ts + `","isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","content":"You've hit your session limit · resets 8pm"}}`,
+	}, "\n") + "\n"
+	writeTranscriptAt(t, filepath.Join(cfg, "projects", "C--work-fak", "session.jsonl"), childStarted.Add(time.Minute), body)
+	return base
+}
+
+// TestGuardMaybeRecoverCapCrash covers the top-level entry point wired into both guard child
+// recovery sites (runGuardChildAndReport / runGuardChildSupervisedAndReport). Its purity siblings
+// prove the decision core; this proves the glue actually fires — the seam that was BUILT but never
+// called until it was wired, so a regression back to dead code fails here.
+func TestGuardMaybeRecoverCapCrash(t *testing.T) {
+	cmd := []string{"claude", "-p", "x"}
+	exit := errors.New("exit status 1")
+
+	t.Run("a witnessed session cap parks (injected sleep) and returns the --continue relaunch", func(t *testing.T) {
+		childStarted := time.Unix(1_699_999_900, 0).UTC()
+		base := capTranscriptStore(t, childStarted)
+		now := func() time.Time { return time.Unix(base.Unix()+60, 0) } // 60s idle — fresh, inside the 5h window
+		slept := false
+		sleep := func(time.Duration) { slept = true }
+		relaunch, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, now, sleep, nil)
+		if !ok {
+			t.Fatalf("ok = false, want true (a fresh session-cap transcript must recover)")
+		}
+		if got := strings.Join(relaunch, " "); got != "claude -p x --continue" {
+			t.Errorf("relaunch = %q, want the command with --continue appended", got)
+		}
+		if !slept {
+			t.Errorf("no park slept, want the recovery to ride out the reset window")
+		}
+	})
+
+	t.Run("a nil (clean) child exit never recovers", func(t *testing.T) {
+		childStarted := time.Unix(1_699_999_900, 0).UTC()
+		base := capTranscriptStore(t, childStarted)
+		now := func() time.Time { return time.Unix(base.Unix()+60, 0) }
+		if _, ok := guardMaybeRecoverCapCrash(nil, cmd, "claude", childStarted, true, now, func(time.Duration) {}, nil); ok {
+			t.Errorf("ok = true on a nil exit, want false")
+		}
+	})
+
+	t.Run("FAK_GUARD_CAP_PARK=0 disables the recovery even with a witnessed cap", func(t *testing.T) {
+		childStarted := time.Unix(1_699_999_900, 0).UTC()
+		base := capTranscriptStore(t, childStarted)
+		t.Setenv("FAK_GUARD_CAP_PARK", "0")
+		now := func() time.Time { return time.Unix(base.Unix()+60, 0) }
+		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, now, func(time.Duration) {}, nil); ok {
+			t.Errorf("ok = true with the park disabled, want false")
+		}
+	})
+
+	t.Run("no transcript at/after the child launch is a no-op", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty store
+		childStarted := time.Unix(1_699_999_900, 0).UTC()
+		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, time.Now, func(time.Duration) {}, nil); ok {
+			t.Errorf("ok = true with no witness transcript, want false")
+		}
+	})
 }

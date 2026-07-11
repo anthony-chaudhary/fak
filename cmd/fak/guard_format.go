@@ -151,6 +151,19 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			fmt.Sprintf("%d unreachable tool def(s) from tools[] across %d turn(s)", sum.ToolPruneCount, sum.ToolPruneTurns)))
 		b.WriteString(guardNote("uncached-token saving; cache prefix byte-identical"))
 	}
+	// Cold-tool deferral (the OUTBOUND 10x floor lever, --defer-cold-tools #3232): how many cold
+	// tool DEFINITIONS fak marked defer_loading and handed to the provider's tool-search fault-in
+	// this session. Unlike the prune above, this does NOT shrink the request bytes — the reduction
+	// is provider-side (only the hot core loads into context), so the WITNESSED count here is the
+	// deferral fak DROVE, and the actual token drop is OBSERVED on /metrics (input_tokens/cache_read),
+	// not claimed here. Printed only when the lever actually fired, so a default-off or all-hot
+	// session stays quiet rather than printing a vacuous 0.
+	if sum.DeferColdCount > 0 {
+		b.WriteString(guardSection("cold-tool deferral"))
+		b.WriteString(guardRow("deferred",
+			fmt.Sprintf("%d cold tool def(s) to the provider fault-in across %d turn(s)", sum.DeferColdCount, sum.DeferColdTurns)))
+		b.WriteString(guardNote("provider-side context saving; request bytes + cache prefix byte-identical (drop is OBSERVED on /metrics)"))
+	}
 	// Deny-all stops: turns the floor refused ENTIRELY, which the wire reports to the client as
 	// end_turn so it does not hang hunting for a dropped tool_use block (the v0.15.0 contract).
 	// That end_turn halts the agent though the model wanted to act — a STOP the agent did not
