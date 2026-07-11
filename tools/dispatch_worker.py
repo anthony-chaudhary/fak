@@ -308,6 +308,21 @@ CLAUDE_GUARD_BASELINE_TOKENS = 62000
 # replaced was the crash-looping flat "48000"; a flat 131072 was only ever an
 # uncommitted working-tree interim, never shipped.)
 CLAUDE_GUARD_BIRTH_HEADROOM_FACTOR = 2
+# The COMPACT shed-line (--compact-history-budget) — DISTINCT from the drain ceiling
+# above. It is the resident-token target compaction squeezes OLD turns toward. Guard's
+# interactive default (gateway.DefaultCompactHistoryBudget) is 48000, which sits BELOW
+# the workers' ~62K irreducible baseline: compact=fired every turn but never sheds under
+# baseline, resident stays permanently "past compact", and the dispatch tick's
+# ACTIVE_COMPACT_RUNAWAY hold arms on every worker and WEDGES the dispatcher. Neither
+# launcher passed this flag, so the 96000 headless value that fixes exactly this
+# (gateway.HeadlessCompactHistoryBudget, otherwise reachable only via --expose-profile
+# headless) never applied. Pass it EXPLICITLY (explicit wins in
+# cmd/fak/guard.go:resolveGuardCompactBudget) so the shed-line sits above the ~62K
+# baseline and below the 124000 drain ceiling. MIRRORS gateway.HeadlessCompactHistoryBudget
+# and cmd/dispatchworker/guard.go:claudeGuardCompactHistoryBudget by hand — keep the
+# integer identical across all three (Go golden TestClaudeGuardCompactHistoryBudget is
+# the drift tripwire). #4253.
+CLAUDE_GUARD_COMPACT_HISTORY_BUDGET = 96000
 # Launch-prompt constituents a self-claiming lane worker can SIZE at launch: the
 # orientation files every worker loads (AGENTS.md, llms.txt, CLAUDE.md), plus a
 # workspace-root MEMORY.md when a repo keeps one. NOTE the real injected fleet memory
@@ -432,6 +447,7 @@ def claude_guard_budget_args(
     return [
         "--context-budget-tokens",
         str(claude_guard_context_budget_tokens(workspace, env)),
+        "--compact-history-budget", str(CLAUDE_GUARD_COMPACT_HISTORY_BUDGET),
         "--restart-on-budget",
         "--restart-limit", CLAUDE_GUARD_RESTART_LIMIT,
         "--max-duration", CLAUDE_GUARD_MAX_DURATION,

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 func TestGuardEnabledDefaultOnAndOptOut(t *testing.T) {
@@ -132,12 +133,46 @@ func TestClaudeGuardContextBudgetDerivation(t *testing.T) {
 	want := []string{
 		"--precompact-hook", "enforce",
 		"--context-budget-tokens", strconv.Itoa(got),
+		"--compact-history-budget", strconv.Itoa(claudeGuardCompactHistoryBudget),
 		"--restart-on-budget",
 		"--restart-limit", "16",
 		"--max-duration", "1740s",
 	}
 	if !slices.Equal(claudeGuardArgs("", "", nil), want) {
 		t.Errorf("claudeGuardArgs() = %v, want %v", claudeGuardArgs("", "", nil), want)
+	}
+}
+
+// TestClaudeGuardCompactHistoryBudget pins the COMPACT shed-line fix (#4253): the
+// dispatch worker must launch with a --compact-history-budget ABOVE its ~62K resident
+// baseline and BELOW the drain ceiling, so compaction can actually shed and the
+// ACTIVE_COMPACT_RUNAWAY hold stops arming on every worker. Guards against a silent
+// regression back to the 48K interactive default that BELOW the baseline crash-loops
+// the dispatcher. Parity partner: tools/dispatch_worker_test.py
+// test_claude_guard_compact_history_budget (same integers).
+func TestClaudeGuardCompactHistoryBudget(t *testing.T) {
+	// (a) Single source of truth: the local mirror MUST equal the gateway constant that
+	// exists for exactly this (reachable otherwise only via --expose-profile headless).
+	if claudeGuardCompactHistoryBudget != gateway.HeadlessCompactHistoryBudget {
+		t.Errorf("compact shed-line %d != gateway.HeadlessCompactHistoryBudget %d: mirror drifted",
+			claudeGuardCompactHistoryBudget, gateway.HeadlessCompactHistoryBudget)
+	}
+	// (b) Strictly ABOVE the baseline — a shed-line at/below baseline (the 48K default)
+	// can never succeed and pins the worker permanently past compact (#4253).
+	if claudeGuardCompactHistoryBudget <= claudeGuardBaselineTokens {
+		t.Errorf("compact shed-line %d <= baseline %d: worker can never shed under it, stays past-compact",
+			claudeGuardCompactHistoryBudget, claudeGuardBaselineTokens)
+	}
+	// (c) Strictly raised above the broken interactive default it replaces.
+	if claudeGuardCompactHistoryBudget <= gateway.DefaultCompactHistoryBudget {
+		t.Errorf("compact shed-line %d not above the 48K interactive default %d",
+			claudeGuardCompactHistoryBudget, gateway.DefaultCompactHistoryBudget)
+	}
+	// (d) At/under the drain ceiling (derived --context-budget-tokens), so the shed-line
+	// is a meaningful target below where the runaway backstop fires.
+	ceiling, _ := strconv.Atoi(claudeGuardContextBudgetTokens("", "", nil))
+	if claudeGuardCompactHistoryBudget > ceiling {
+		t.Errorf("compact shed-line %d > drain ceiling %d", claudeGuardCompactHistoryBudget, ceiling)
 	}
 }
 

@@ -99,6 +99,23 @@ const (
 	// 62000 baseline / 200000-32000 window this yields 124000 — comfortably above
 	// baseline, comfortably under the 168000 effective ceiling.
 	claudeGuardBirthHeadroomFactor = 2
+	// claudeGuardCompactHistoryBudget is the COMPACT shed-line passed to guard as
+	// --compact-history-budget — DISTINCT from the drain ceiling above. It is the
+	// resident-token target compaction squeezes OLD turns toward; guard's interactive
+	// default (gateway.DefaultCompactHistoryBudget) is 48000. That 48K default is BELOW
+	// the workers' ~62K irreducible baseline, so a dispatch worker can never shed under
+	// it: compact=fired every turn but never succeeds, the resident stays permanently
+	// "past compact", and the dispatch tick's ACTIVE_COMPACT_RUNAWAY hold (resident ≥20K
+	// past compact over ≥3 turns) arms on every worker and WEDGES the dispatcher (idle
+	// seats vs backlog). Neither launcher passed this flag, so the 96000 headless value
+	// that exists precisely for this (gateway.HeadlessCompactHistoryBudget, reachable
+	// only via --expose-profile headless) never applied. Pass it EXPLICITLY (explicit
+	// wins in cmd/fak/guard.go:resolveGuardCompactBudget) so the shed-line sits above the
+	// ~62K baseline and below the 124000 drain ceiling: compaction can actually succeed
+	// and the false runaway hold stops arming — without the tool-surface prune the
+	// headless profile also carries. Mirrors gateway.HeadlessCompactHistoryBudget (drift
+	// pinned by TestClaudeGuardCompactHistoryBudget); Python mirrors it by hand. #4253.
+	claudeGuardCompactHistoryBudget = 96000
 	// claudeGuardRestartLimit caps --restart-on-budget relaunches. The budget above
 	// drains in ~2 turns per epoch (each turn debits its FULL ~62K+ resident window),
 	// so a relaunch happens every ~2 min. The old "2" killed a healthy worker after
@@ -270,6 +287,7 @@ func claudeGuardArgs(workspace, workerModel string, env map[string]string) []str
 	return []string{
 		"--precompact-hook", "enforce",
 		"--context-budget-tokens", claudeGuardContextBudgetTokens(workspace, workerModel, env),
+		"--compact-history-budget", strconv.Itoa(claudeGuardCompactHistoryBudget),
 		"--restart-on-budget",
 		"--restart-limit", claudeGuardRestartLimit,
 		"--max-duration", claudeGuardMaxDuration(),

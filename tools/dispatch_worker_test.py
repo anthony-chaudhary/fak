@@ -230,6 +230,17 @@ class DispatchWorkerTest(unittest.TestCase):
         # drains at DEFAULT_TIMEOUT_S - 60 before launch()'s hard-kill at 1800s.
         self.assertIn("--max-duration", wrapped)
         self.assertEqual(wrapped[wrapped.index("--max-duration") + 1], "1740s")
+        # The COMPACT shed-line (#4253): raised above the ~62K baseline so compaction can
+        # actually shed and the ACTIVE_COMPACT_RUNAWAY hold stops arming. MUST be > the
+        # baseline floor (a shed-line at/below baseline is the 48K default that wedges the
+        # dispatcher) and <= the drain ceiling above it.
+        self.assertIn("--compact-history-budget", wrapped)
+        shed = int(wrapped[wrapped.index("--compact-history-budget") + 1])
+        self.assertGreater(
+            shed, WORKER_BASELINE_FLOOR_TOKENS,
+            f"compact shed-line {shed} <= baseline floor {WORKER_BASELINE_FLOOR_TOKENS}: "
+            "worker can never shed under it and stays permanently past-compact (#4253)")
+        self.assertLessEqual(shed, budget, "shed-line must sit at/under the drain ceiling")
         self.assertIn("--audit", wrapped)
         audit = Path(wrapped[wrapped.index("--audit") + 1])
         self.assertEqual(wrapped[wrapped.index("--session-id") + 1], audit.stem)
@@ -275,6 +286,31 @@ class DispatchWorkerTest(unittest.TestCase):
         # ...while a runaway baseline is still clamped to the window ceiling.
         mod.CLAUDE_GUARD_BASELINE_TOKENS = ceiling
         self.assertEqual(mod.claude_guard_context_budget_tokens(), ceiling)
+
+    def test_claude_guard_compact_history_budget(self) -> None:
+        # Python half of the compact shed-line parity (#4253). Mirror of
+        # cmd/dispatchworker/guard_test.go:TestClaudeGuardCompactHistoryBudget. The
+        # Go golden pins this == gateway.HeadlessCompactHistoryBudget; Python cannot
+        # import Go, so keep the integer identical here by hand.
+        mod = load()
+        shed = mod.CLAUDE_GUARD_COMPACT_HISTORY_BUDGET
+        # (a) Golden lock: the headless compact budget value (== Go mirror == gateway).
+        self.assertEqual(
+            shed, 96000,
+            "compact shed-line diverged from Go's TestClaudeGuardCompactHistoryBudget "
+            "golden / gateway.HeadlessCompactHistoryBudget; re-sync the mirrors")
+        # (b) Strictly above the baseline — a shed-line at/below baseline (the 48K
+        # default) can never succeed and pins the worker permanently past compact.
+        self.assertGreater(
+            shed, mod.CLAUDE_GUARD_BASELINE_TOKENS,
+            f"compact shed-line {shed} <= baseline: worker stays past-compact")
+        # (c) At/under the derived drain ceiling, so it is a meaningful target below
+        # where the runaway backstop fires.
+        self.assertLessEqual(shed, int(mod.claude_guard_context_budget_tokens()))
+        # (d) It is actually WIRED into the claude guard argv (not just a constant).
+        args = mod.claude_guard_budget_args()
+        self.assertIn("--compact-history-budget", args)
+        self.assertEqual(args[args.index("--compact-history-budget") + 1], str(shed))
 
     def test_measure_launch_baseline_floors_and_tracks(self) -> None:
         # Python half of the measurement-seam parity (#3522). Mirror of
