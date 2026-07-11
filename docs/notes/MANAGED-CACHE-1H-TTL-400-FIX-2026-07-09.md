@@ -74,13 +74,27 @@ two subtests:
 Built and hot-swapped into the three live fak binaries this session; each verified to contain the
 `extended-cache-ttl-2025-04-11` literal in its bytes:
 
-- `C:\Users\USER\bin\fak.exe`      (fleet launcher on PATH)
+- `<windows-user-home>\bin\fak.exe`      (fleet launcher on PATH)
 - `C:\work\fak\tools\.bin\fak.exe` (dispatch / worker binary)
 - `C:\work\fak\fak.exe`            (repo root)
 
 Old binaries backed up as `*.bak-20260709-0738*`.
 
 ## Scope: this is an API-key-path fix — leave subscription seats PASSIVE
+
+> **Superseded (operator policy, 2026-07-10).** The "leave subscription seats PASSIVE —
+> zero benefit (flat-rate)" guidance below was correct *as the default on 2026-07-09*, but
+> is superseded on two counts. (1) **Policy:** `guard_cache_posture.go` now maps an unset
+> `FAK_MANAGED_CACHE` → `on`, so fleet launchers force the 1h upgrade on **every** seat,
+> subscription included (best-effort managed cache everywhere). (2) **Reasoning:** "zero
+> benefit on flat-rate" was too strong — a subscription's binding constraint is the
+> **compute-weighted usage limit**, not dollars, and cache reads cost ~0.1× the compute of
+> a fresh write *and* don't count against the rate limit, so avoiding cold prefix rewrites
+> buys **usage-limit headroom**. The one open item below still stands: whether the
+> subscription-OAuth wire returns the read-rebate end-to-end is witnessed via
+> `fak cachevalue report`, not assumed. See
+> [what-is-managed-cache.md](../explainers/what-is-managed-cache.md) for the reader-facing
+> version. The `off` opt-out remains the escape hatch for a seat where `on` misbehaves.
 
 **Critical, do not skip.** 1h-TTL managed cache is **API-key-billing-only by design**
 (`cmd/fak/guard_managed_cache.go`): the 1h tier **doubles the cache-write cost**, and on a

@@ -130,3 +130,64 @@ the refusal). Fixes 2–3 are noted there as separate follow-ons.
 
 `gh` itself is fine — authenticated, read-only calls succeed. The deadlock is
 specific to the outward-facing WRITE path's confirm handshake.
+
+## Resolution (#2777) — bound to the landed fix + generation triage
+
+**Filed:** 2026-07-07, closing the loop this note opened.
+
+Issue **#2777** ("reversibility confirm token hashes cosmetic args, so a reworded
+re-proposal never converges") is the ticketized form of the description-drift root
+cause pinned in "Fixes" #2 above. It stayed **OPEN** only because the closing
+commit's subject never named `#2777`, so the closure auditor never bound it — the
+fix itself is landed and witnessed.
+
+### Binding
+
+- **Fix:** `cf9f9a74` *"fix(adjudicator): bind reversibility confirm token to the
+  command, not the description"* — an **ancestor of HEAD**
+  (`git merge-base --is-ancestor cf9f9a74 HEAD` → yes). `argsForToken`
+  (`internal/adjudicator/reversibility.go`) drops the incidental annotation keys
+  (`description`/`explanation`) from the token hash alongside the confirm keys, so
+  the token binds to the effect-bearing args only; dispatch
+  (`argsWithoutConfirmation`) still forwards `description` to the tool.
+- **Witness re-run this session** (evidence, not trust-the-commit): WSL
+  `go test ./internal/adjudicator/ -run Reversibility -count=1` → `ok ... 0.007s`
+  (native `go test` is blocked on this Windows host — AGENTS.md §Windows). Covers
+  the stability regression `TestReversibilityConfirmTokenIgnoresDescriptionDrift`
+  and the full-adjudicate-path
+  `TestAdjudicateReversibilityTokenStableAcrossDescriptionDrift`, with
+  `TestAdjudicateReversibilityGateDoesNotOverrideHardDeny` (hard-deny-wins) green.
+
+### Residual — deliberately deferred, not lost
+
+The `command`-whitespace/quoting axis named in the issue's "Working spine" is
+**not** normalized. A naive whitespace collapse would conflate semantically
+different commands (`echo "a  b"` ≠ `echo "a b"`); doing it safely needs a
+quote-aware tokenizer. The dominant, fleet-wedging cause was `description` drift
+(Claude Code regenerates that free-text every turn), which is fixed; the whitespace
+axis warrants its own follow-up before #2777's Done condition is claimed in full.
+
+### Generation triage — `gen/now`
+
+Classified from issue evidence (docs/generation.md §Streams): a current-product
+operator-loop reliability bug fix with a clear Go-test witness and **no** dependency
+on a future architecture bet → **`gen/now`**, milestone *Generation G0 - Now /
+Immediate*. Not `gen/next` (no gate/dogfood/schema/default-exposure proof pending —
+the behavior is already live), not `gen/second-next`/`gen/future` (no
+cross-generation architecture or research).
+
+- **Promotion evidence:** the confirm handshake now converges on description drift —
+  the deadlock that wedged a fleet session 1h+ (the four-token table above) can no
+  longer arise from the mandatory Bash `description`; witnessed by the green
+  adjudicator regression.
+- **Demotion/retirement evidence:** none warrants demotion — this is a live-product
+  fix, not a stale later-horizon bet. The one retirement-shaped fact is that the
+  whitespace axis is scoped OUT (a quote-aware tokenizer's option cost exceeds its
+  current value), so it splits to a follow-up rather than holding #2777 open.
+- **Invalidating assumption:** the `gen/now` "current-product improvement" claim
+  assumes the fix is *deployed*, not merely landed. A recurrence on 2026-07-07
+  (#2777 comment) showed the running guard still rotated the token because the
+  host's `fak.exe` predated `cf9f9a74` — CI/release, not commit, reinstalls the
+  binary. So the claim holds in source but is only true at runtime once the deployed
+  guard carries the fix; witness with `fak doctor --binary` (`binary-vcs-stamp`
+  check) reporting the guard binary fresh + stamped vs `origin/main`.
