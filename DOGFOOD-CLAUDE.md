@@ -90,7 +90,9 @@ count reaches the client.
 ./scripts/dogfood-claude.sh --smoke          # curl the wire end-to-end (no model needed), then exit
 ./scripts/dogfood-claude.sh --print-env      # the export lines for your own `claude` invocation
 ./scripts/dogfood-claude.sh --list-accounts  # the account switcher roster
-./scripts/dogfood-claude.sh --install        # symlink `fak`, `fak-dogfood`, `fak-qwen36-claude`, and `claude-glm-gcp` onto PATH
+./scripts/dogfood-claude.sh --graduation     # each launcher's graduation verdict (graduated => installed; opt-in => wrapper)
+./scripts/dogfood-claude.sh --install        # copy `fak` + symlink the GRADUATED launchers onto PATH
+./scripts/dogfood-claude.sh --install-all    # also symlink the opt-in (not-yet-graduated) external-provider launchers
 ```
 
 ### Run it from anywhere (one line)
@@ -109,6 +111,49 @@ fak serve --help                              #   repo CLI from PATH
 launchers are symlinks; the script resolves them back to the repo, so they always run
 the in-tree code. It also builds `tools/.bin/fak` and symlinks it as `fak`, so
 manual commands like `fak serve --help` work after install.
+
+### External-provider graduation: which launchers `--install` actually adds (#3034)
+
+`--install` does **not** create a first-class launcher for every provider preset just
+because its preset landed. A launcher gets an installed shim only if it has **graduated**
+against one *generic*, evidence-based bar — identical for every provider, so nothing
+graduates on enthusiasm alone:
+
+1. a **documented key env** (or it is keyless-local),
+2. a **currently-available route** (live route-health mechanics defer to route-health
+   classification, #3035),
+3. **minimum successful probes** recorded in-repo,
+4. at least one **tool-use / coding witness** (required when the preset is meant for
+   issue workers),
+5. **known rate / expiry / preview caveats** written down.
+
+The rule and its per-launcher verdicts live in one manifest inside
+`scripts/dogfood-claude.sh` (and the `.ps1` twin); `--graduation` prints it, and
+`--install` gates on it. Today the two keyless **local** presets clear the bar —
+`fak-dogfood` and `fak-qwen36-claude` (witnessed by the committed probe transcripts and
+the bounded-wait regression, and a local route that is always reachable). The external
+cloud / self-hosted presets (`claude-nim-kimi`, `claude-nim-deepseek`,
+`claude-groq-qwen36`, `claude-groq-compound`, `claude-gemini-gcp`, `claude-glm-gcp`,
+`claude-mac`) stay **opt-in**: their keys and routes are per-operator and can expire, so
+they are not installed by default (route-health classification for them is tracked under
+#3035).
+
+**Try an opt-in provider in one command — no install, no long-term-support promise.**
+An opt-in preset is still a first-class *experiment*; just pin `FAK_DOGFOOD_PRESET` (plus
+its key) and probe it directly:
+
+```bash
+# a single witnessable turn through an opt-in provider — nothing added to PATH
+FAK_DOGFOOD_PRESET=nim-kimi NVIDIA_API_KEY=... ./scripts/dogfood-claude.sh --probe "say pong"
+# or its dedicated opt-in wrapper, which sets the same knobs and delegates:
+NVIDIA_API_KEY=... ./scripts/claude-nim-kimi.sh --probe "say pong"
+```
+
+If an operator genuinely wants every launcher on PATH regardless of graduation, that
+choice is explicit and reversible: `--install-all` (or `FAK_DOGFOOD_INSTALL_ALL=1
+--install`) installs the opt-in launchers too. Run `--graduation` any time to see each
+launcher's current verdict, and `FAK_DOGFOOD_INSTALL_DRYRUN=1 --install` to preview
+exactly what an install would add or skip.
 
 **It cannot damage your normal `claude`.** Every wiring env var
 (`ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`, the model tiers) is exported only into
