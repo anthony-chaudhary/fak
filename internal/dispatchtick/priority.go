@@ -72,14 +72,7 @@ type LaneCandidate struct {
 // citing #1395, never #1780; published history cannot be rewritten, so this
 // comment restates the closure binding explicitly for the grep-based referee.
 func OrderLaneCandidates(cands []LaneCandidate, preferNewest bool) []int {
-	ordered := append([]LaneCandidate(nil), cands...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].Weight != ordered[j].Weight {
-			return ordered[i].Weight > ordered[j].Weight
-		}
-		return numberTiebreak(ordered[i].Number, ordered[j].Number, preferNewest)
-	})
-	return orderedNumbers(len(ordered), func(i int) int { return ordered[i].Number })
+	return defaultLaneScorers.Order(cands, preferNewest)
 }
 
 // orderedNumbers materializes the Number field of an already-sorted candidate slice,
