@@ -34,15 +34,35 @@ const (
 	VarMonitor  = "fak_watchdog_monitor_status"  // per-monitor last folded status
 	VarRollup   = "fak_watchdoghealth_status"    // the folded cross-monitor rollup status
 	VarProgress = "fak_resume_watchdog_progress" // drain-steward progress witnesses recorded
+
+	// #4138 — the drive-carry outcome of each watchdog relaunch: did the resumed session
+	// RESTORE its carried drive budget, or come up RESET to a fresh cap? A live, always-on
+	// counter whose `reset` bucket climbs while `restored` stays flat is the immediate
+	// "carry channel broke" alarm — the in-process twin of the transcript carry audit
+	// (G-ops-audit-2). Buckets are the closed carry tokens: restored / reset / unknown.
+	VarDriveCarry = "fak_resume_watchdog_drive_carry" // per-outcome restored/reset/unknown count
+
+	// #4146 — the OBSERVED recovery-cost governor surface. These are the live twin of
+	// resume.FoldRecoveryCost / RecoveryCostCap: cumulative OBSERVED post-resume spend and the
+	// count of reversible RESUME_COST_EXCEEDED holds. They are OBSERVED-only and named apart
+	// from every witnessed counter above so a reader can never mistake spend for earned budget.
+	VarRecoveryTokens    = "fak_resume_recovery_tokens"         // cumulative OBSERVED post-resume tokens
+	VarRecoveryCost      = "fak_resume_recovery_cost_micro_usd" // cumulative OBSERVED post-resume cost, micro-USD
+	VarRecoveryCostHolds = "fak_resume_recovery_cost_holds"     // reversible RESUME_COST_EXCEEDED holds raised
 )
 
 var (
-	ticks    = expvar.NewInt(VarTicks)
-	actions  = expvar.NewMap(VarActions)
-	autoheal = expvar.NewMap(VarAutoheal)
-	monitor  = expvar.NewMap(VarMonitor)
-	rollup   = expvar.NewString(VarRollup)
-	progress = expvar.NewInt(VarProgress)
+	ticks      = expvar.NewInt(VarTicks)
+	actions    = expvar.NewMap(VarActions)
+	autoheal   = expvar.NewMap(VarAutoheal)
+	monitor    = expvar.NewMap(VarMonitor)
+	rollup     = expvar.NewString(VarRollup)
+	progress   = expvar.NewInt(VarProgress)
+	driveCarry = expvar.NewMap(VarDriveCarry)
+
+	recoveryTokens    = expvar.NewInt(VarRecoveryTokens)
+	recoveryCost      = expvar.NewInt(VarRecoveryCost)
+	recoveryCostHolds = expvar.NewInt(VarRecoveryCostHolds)
 )
 
 // norm collapses a closed token to its published form: trimmed, lowercased, and never empty
@@ -84,6 +104,31 @@ func SetHealthRollup(status string) { rollup.Set(norm(status)) }
 // real post-launch turn. It is the live twin of the ledger's "progress" phase rows.
 func ProgressWitnessed() { progress.Add(1) }
 
+// RecordDriveCarry counts one watchdog relaunch by its drive-carry outcome: "restored" when the
+// resumed session came up on its carried remaining budget, "reset" when it fell back to a fresh
+// cap, "unknown" when the carry record was absent or unreadable. A climbing `reset` bucket while
+// `restored` stays flat is the live "carry channel broke" alarm (#4138). Norm-folded like
+// RecordAction, so a blank or uppercased token can never mint a bucket no reader can name.
+func RecordDriveCarry(outcome string) { driveCarry.Add(norm(outcome), 1) }
+
+// RecordRecoverySpend accumulates one attribution of OBSERVED post-resume spend (#4146): the
+// tokens and micro-USD cost resume.FoldRecoveryCost summed for a session's recovery. It is the
+// live twin of that fold — OBSERVED-only, never added to any witnessed counter. Negative
+// readings are ignored so a bad provider number never lowers the running total.
+func RecordRecoverySpend(tokens int, costMicroUSD int64) {
+	if tokens > 0 {
+		recoveryTokens.Add(int64(tokens))
+	}
+	if costMicroUSD > 0 {
+		recoveryCost.Add(costMicroUSD)
+	}
+}
+
+// RecordRecoveryCostHold counts one reversible RESUME_COST_EXCEEDED hold — a launch the
+// recovery-cost governor deferred because the session crossed its declared cap. Bumped at the
+// point the hold verdict is made, independent of any ledger write.
+func RecordRecoveryCostHold() { recoveryCostHolds.Add(1) }
+
 // Snapshot is a typed, JSON-friendly copy of the current counters for the gateway /debug/vars
 // fold and the unit tests. Reading is lock-free: each expvar is independently synchronized, and
 // a snapshot need not be atomic across vars for a metrics readout.
@@ -92,19 +137,29 @@ type Snapshot struct {
 	ProgressWitnessed int64             `json:"progress_witnessed"`
 	Actions           map[string]int64  `json:"actions,omitempty"`
 	AutohealResults   map[string]int64  `json:"autoheal_results,omitempty"`
+	DriveCarry        map[string]int64  `json:"drive_carry,omitempty"` // #4138 restored/reset/unknown carry outcomes
 	MonitorStatus     map[string]string `json:"monitor_status,omitempty"`
 	HealthRollup      string            `json:"health_rollup,omitempty"`
+	// #4146 OBSERVED recovery-cost governor. Named apart from every witnessed count so a
+	// reader never mistakes OBSERVED spend for earned attempt budget.
+	RecoveryTokens       int64 `json:"recovery_tokens,omitempty"`
+	RecoveryCostMicroUSD int64 `json:"recovery_cost_micro_usd,omitempty"`
+	RecoveryCostHolds    int64 `json:"recovery_cost_holds,omitempty"`
 }
 
 // Read returns the current counters as a typed Snapshot.
 func Read() Snapshot {
 	return Snapshot{
-		Ticks:             ticks.Value(),
-		ProgressWitnessed: progress.Value(),
-		Actions:           countMap(actions),
-		AutohealResults:   countMap(autoheal),
-		MonitorStatus:     statusMap(monitor),
-		HealthRollup:      rollup.Value(),
+		Ticks:                ticks.Value(),
+		ProgressWitnessed:    progress.Value(),
+		Actions:              countMap(actions),
+		AutohealResults:      countMap(autoheal),
+		DriveCarry:           countMap(driveCarry),
+		MonitorStatus:        statusMap(monitor),
+		HealthRollup:         rollup.Value(),
+		RecoveryTokens:       recoveryTokens.Value(),
+		RecoveryCostMicroUSD: recoveryCost.Value(),
+		RecoveryCostHolds:    recoveryCostHolds.Value(),
 	}
 }
 
@@ -115,7 +170,10 @@ func Active() bool {
 	if ticks.Value() > 0 || progress.Value() > 0 || rollup.Value() != "" {
 		return true
 	}
-	return mapLen(actions) > 0 || mapLen(autoheal) > 0 || mapLen(monitor) > 0
+	if recoveryTokens.Value() > 0 || recoveryCost.Value() > 0 || recoveryCostHolds.Value() > 0 {
+		return true
+	}
+	return mapLen(actions) > 0 || mapLen(autoheal) > 0 || mapLen(monitor) > 0 || mapLen(driveCarry) > 0
 }
 
 // Reset clears every counter. Test-only: production code only ever increments. It lets a test
@@ -125,9 +183,13 @@ func Reset() {
 	ticks.Set(0)
 	progress.Set(0)
 	rollup.Set("")
+	recoveryTokens.Set(0)
+	recoveryCost.Set(0)
+	recoveryCostHolds.Set(0)
 	actions.Init()
 	autoheal.Init()
 	monitor.Init()
+	driveCarry.Init()
 }
 
 func countMap(m *expvar.Map) map[string]int64 {

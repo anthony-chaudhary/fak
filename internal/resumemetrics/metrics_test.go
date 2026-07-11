@@ -58,6 +58,44 @@ func TestRecorders_EachMovesItsCounter(t *testing.T) {
 	}
 }
 
+// TestDriveCarry is the #4138 acceptance gate: the drive-carry outcome counter splits a
+// watchdog relaunch that RESTORED its carried budget from one that RESET to a fresh cap, the
+// split is authoritative in-process, and recording either outcome makes the surface Active.
+func TestDriveCarry(t *testing.T) {
+	Reset()
+	if Read().DriveCarry != nil {
+		t.Fatalf("DriveCarry not nil at the clean floor: %v", Read().DriveCarry)
+	}
+
+	RecordDriveCarry("restored")
+	RecordDriveCarry("reset")
+
+	if !Active() {
+		t.Fatal("Active() false after recording a drive-carry outcome")
+	}
+	got := Read()
+	if got.DriveCarry["restored"] != 1 || got.DriveCarry["reset"] != 1 {
+		t.Errorf("DriveCarry = %v, want restored:1 reset:1", got.DriveCarry)
+	}
+
+	// Norm folds a blank outcome to the nameable "unknown" bucket, never a phantom key.
+	RecordDriveCarry("  RESTORED ")
+	RecordDriveCarry("")
+	got = Read()
+	if got.DriveCarry["restored"] != 2 {
+		t.Errorf("DriveCarry[restored] = %d, want 2 after a padded+uppercased repeat", got.DriveCarry["restored"])
+	}
+	if got.DriveCarry["unknown"] != 1 {
+		t.Errorf("DriveCarry[unknown] = %d, want 1 for the empty outcome", got.DriveCarry["unknown"])
+	}
+
+	// Reset returns the bucket map to the nil floor, no cross-test bleed.
+	Reset()
+	if Read().DriveCarry != nil {
+		t.Errorf("DriveCarry not nil after Reset: %v", Read().DriveCarry)
+	}
+}
+
 // TestNorm_ClosedTokens pins the token folding: verdicts are trimmed+lowercased and an empty
 // token never creates an unnameable bucket — it folds to "unknown".
 func TestNorm_ClosedTokens(t *testing.T) {
