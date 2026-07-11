@@ -439,8 +439,55 @@ func SnapshotFile(path string, now time.Time) (Status, error) {
 	return st, nil
 }
 
+// SnapshotFileAll is the rotation-aware cumulative sibling of SnapshotFile: it folds the
+// FULL event history across every sealed segment AND the active segment (via LoadAll), so
+// its per-loop totals stay correct once rotation has sealed old events — whereas
+// SnapshotFile folds only the active segment and would undercount sealed history (and can
+// underflow Concurrent()=Started-Ended when an in-flight run's EventStart was sealed while
+// its EventEnd is still in the active segment). Use it for any consumer whose correctness
+// depends on cumulative lifetime totals, or on an in-flight count that can span a rotation
+// boundary. With no sealed segments it is exactly SnapshotFile(path) — LoadAll == Load when
+// unrotated. It is O(total-history) today; the carried-snapshot seal optimization reduces
+// it to O(active) later without changing this result or its signature.
+func SnapshotFileAll(path string, now time.Time) (Status, error) {
+	events, err := LoadAll(path)
+	if err != nil {
+		return Status{}, err
+	}
+	st := Summarize(events, now)
+	st.LedgerPath = path
+	return st, nil
+}
+
+// Summarize folds an ordered event slice into a per-loop Status snapshot, starting from
+// empty. It is the from-scratch special case of SummarizeFrom:
+// Summarize(events, now) == SummarizeFrom(nil, events, now).
 func Summarize(events []Event, now time.Time) Status {
-	byLoop := map[string]*LoopSnapshot{}
+	return SummarizeFrom(nil, events, now)
+}
+
+// SummarizeFrom is the RESUMABLE form of Summarize: it seeds the per-loop fold with a
+// prior snapshot — e.g. the cumulative per-loop state as of a sealed rotation boundary —
+// then folds `events` on top. Because Summarize is a pure per-loop left-fold whose entire
+// accumulator IS the LoopSnapshot struct, the fold is exactly resumable:
+//
+//	SummarizeFrom(Summarize(A, now).Loops, B, now) == Summarize(append(A, B...), now)
+//
+// field-for-field. The additive counters continue, the ConsecutiveRefusals streak resumes
+// at its true position, the last-writer-wins scalars (State/LastSeq/LastKind/CurrentRunID)
+// resolve against the real tail, LastRun's prior-run RunID inheritance is preserved across
+// the seam, and Metrics per-key overwrite continues. This is the primitive a rotation-aware
+// cumulative read is built on: fold only the active segment seeded from a carried baseline
+// instead of an O(total-history) re-fold of every sealed segment.
+//
+// The seed is DEEP-copied (the Metrics map, the *LastRun, and its EvidenceRefs slice)
+// before folding, so the caller's snapshot is never aliased into the result nor mutated by
+// the fold. A nil or empty seed makes it identical to the from-empty Summarize.
+func SummarizeFrom(seed []LoopSnapshot, events []Event, now time.Time) Status {
+	byLoop := make(map[string]*LoopSnapshot, len(seed))
+	for i := range seed {
+		byLoop[seed[i].LoopID] = cloneLoopSnapshot(seed[i])
+	}
 	for _, ev := range events {
 		loop := byLoop[ev.LoopID]
 		if loop == nil {
@@ -526,6 +573,26 @@ func Summarize(events []Event, now time.Time) Status {
 		TSUnixNano: now.UTC().UnixNano(),
 		Loops:      loops,
 	}
+}
+
+// cloneLoopSnapshot returns a deep copy of a seed snapshot so SummarizeFrom can fold new
+// events onto it without aliasing or mutating the caller's baseline. The value fields copy
+// by assignment; the Metrics map (mutated in place by the fold) and the *LastRun pointer
+// with its EvidenceRefs slice (which the caller may still hold) are cloned explicitly.
+func cloneLoopSnapshot(s LoopSnapshot) *LoopSnapshot {
+	c := s
+	if s.Metrics != nil {
+		c.Metrics = make(map[string]int64, len(s.Metrics))
+		for k, v := range s.Metrics {
+			c.Metrics[k] = v
+		}
+	}
+	if s.LastRun != nil {
+		lr := *s.LastRun
+		lr.EvidenceRefs = append([]EvidenceRef(nil), s.LastRun.EvidenceRefs...)
+		c.LastRun = &lr
+	}
+	return &c
 }
 
 type Status struct {
