@@ -1,0 +1,20 @@
+{
+  "_captured": "2026-07-09T21:53:21Z",
+  "_source": "fak cachevalue report --dev-sessions --dev-session-days 3 --json",
+  "_window": "live_snapshot",
+  "dev_session_benefit": {
+    "cache_read_tokens": 62611769,
+    "model_tiers": {
+      "opus": 15
+    },
+    "observed_actual_spend_usd": 375.5363760000001,
+    "observed_api_cost_avoided_usd": 805.832589,
+    "observed_api_cost_reduction_pct": 68.2117621906548,
+    "observed_counterfactual_usd": 1181.3689650000001,
+    "priced_sessions": 15,
+    "sessions": 60,
+    "unpriced_models": {
+      "<synthetic>": 36
+    }
+  }
+}

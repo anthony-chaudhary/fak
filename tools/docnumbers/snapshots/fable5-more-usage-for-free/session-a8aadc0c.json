@@ -1,0 +1,12 @@
+{
+  "_captured": "2026-07-09T21:53:21Z",
+  "_source": "fak cachevalue status --session <a8aadc0c...> --json",
+  "_window": "live_snapshot",
+  "session": {
+    "assistant_turns": 64,
+    "cache_hit_frac": 0.8404133617573596,
+    "cache_read_tokens": 5273177,
+    "cost_usd": 31.621668000000003,
+    "total_context_tokens": 6274504
+  }
+}

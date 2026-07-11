@@ -1,0 +1,208 @@
+{
+  "schema": "fak.docnumbers.v1",
+  "doc": "docs/integrations/fable5-more-usage-for-free.md",
+  "title": "More Fable 5 out of your Claude seat",
+  "snapshot_dir": "tools/docnumbers/snapshots/fable5-more-usage-for-free",
+  "snapshot_date": "2026-07-09",
+  "stale_after_days": 21,
+  "note": "Recent-window cachevalue telemetry. Every window here is open-ended or live: --since with no --until GROWS with wall-clock, dev transcripts and per-session status grow between captures. So NONE of these is live-equality-checked (today's larger number is elapsed time, not drift). The frozen snapshots under snapshot_dir are the authority; --live only probes that the cited fields still exist. A doubly-bounded settled window (--since X --until Y) would be 'bounded' and could be live-equality-checked.",
+
+  "sources": {
+    "fleet.json": {
+      "cmd": ["cachevalue", "report", "--since", "2026-07-06", "--json"],
+      "window": "since_open"
+    },
+    "dev.json": {
+      "cmd": ["cachevalue", "report", "--dev-sessions", "--dev-session-days", "3", "--json"],
+      "window": "live_snapshot"
+    },
+    "kv.json": {
+      "cmd": ["cachevalue", "report", "--json"],
+      "window": "all_time_last_measured"
+    },
+    "session-8a9f820c.json": { "cmd": null, "window": "live_snapshot" },
+    "session-a8aadc0c.json": { "cmd": null, "window": "live_snapshot" },
+    "session-2aaab7c9.json": { "cmd": null, "window": "live_snapshot" }
+  },
+
+  "claims": [
+    {
+      "id": "kv.reuse",
+      "appears_as": "**69.7%**",
+      "source": "kv.json",
+      "provenance": "WITNESSED",
+      "numbers": [
+        { "display": "69.7%", "field": "track1_witnessed_kernel.latest_reuse_ratio", "expected": 0.697, "scale": 100 }
+      ]
+    },
+    {
+      "id": "fleet.fires",
+      "appears_as": "2,347 fires over 898 sessions",
+      "source": "fleet.json",
+      "provenance": "WITNESSED",
+      "numbers": [
+        { "display": "2,347", "field": "fleet_benefit.compaction_fired", "expected": 2347 },
+        { "display": "898", "field": "fleet_benefit.exit_sessions", "expected": 898 }
+      ]
+    },
+    {
+      "id": "fleet.per_fire",
+      "appears_as": "**≈34,000 tokens/fire**",
+      "source": "fleet.json",
+      "provenance": "WITNESSED",
+      "numbers": [
+        { "display": "≈34,000", "expected": 34484.3506, "derived_from": "compaction_shed_tokens / compaction_fired" }
+      ]
+    },
+    {
+      "id": "fleet.share",
+      "appears_as": "fak's authored share of total token-equivalent value | **≈20%**",
+      "source": "fleet.json",
+      "provenance": "WITNESSED",
+      "numbers": [
+        { "display": "≈20%", "field": "fleet_benefit.fak_share_pct", "expected": 20.307425929069925 }
+      ]
+    },
+    {
+      "id": "fleet.cost",
+      "appears_as": "≈$398 over 3.8 days (≈$105/day)",
+      "source": "fleet.json",
+      "provenance": "ESTIMATED",
+      "numbers": [
+        { "display": "≈$398", "field": "fleet_benefit.fak_api_cost_avoided_usd", "expected": 397.890829 },
+        { "display": "≈$105", "field": "fleet_benefit.fak_usd_avoided_per_day", "expected": 104.69248810210465 }
+      ]
+    },
+    {
+      "id": "fleet.shed_total",
+      "appears_as": "≈81M this week",
+      "source": "fleet.json",
+      "provenance": "WITNESSED",
+      "provenance_inline": false,
+      "numbers": [
+        { "display": "≈81M", "field": "fleet_benefit.compaction_shed_tokens", "expected": 80934770 }
+      ]
+    },
+    {
+      "id": "dev.sessions",
+      "appears_as": "60 discovered — 15 priced (Opus-tier), 45 held out (36 synthetic, 9 other unpriced)",
+      "source": "dev.json",
+      "provenance": "WITNESSED",
+      "numbers": [
+        { "display": "60", "field": "dev_session_benefit.sessions", "expected": 60 },
+        { "display": "15", "field": "dev_session_benefit.priced_sessions", "expected": 15 },
+        { "display": "36", "field": "dev_session_benefit.unpriced_models.<synthetic>", "expected": 36 }
+      ]
+    },
+    {
+      "id": "dev.cache_read",
+      "appears_as": "Provider cache-read tokens preserved | 62.6M",
+      "source": "dev.json",
+      "provenance": "OBSERVED",
+      "numbers": [
+        { "display": "62.6M", "field": "dev_session_benefit.cache_read_tokens", "expected": 62611769 }
+      ]
+    },
+    {
+      "id": "dev.counterfactual",
+      "appears_as": "$1,181.37",
+      "source": "dev.json",
+      "provenance": "OBSERVED",
+      "numbers": [
+        { "display": "$1,181.37", "field": "dev_session_benefit.observed_counterfactual_usd", "expected": 1181.3689650000001 }
+      ]
+    },
+    {
+      "id": "dev.actual",
+      "appears_as": "$375.54",
+      "source": "dev.json",
+      "provenance": "OBSERVED",
+      "numbers": [
+        { "display": "$375.54", "field": "dev_session_benefit.observed_actual_spend_usd", "expected": 375.5363760000001 }
+      ]
+    },
+    {
+      "id": "dev.avoided",
+      "appears_as": "**$805.83 (68.2% reduction)**",
+      "source": "dev.json",
+      "provenance": "OBSERVED",
+      "numbers": [
+        { "display": "$805.83", "field": "dev_session_benefit.observed_api_cost_avoided_usd", "expected": 805.832589 },
+        { "display": "68.2%", "field": "dev_session_benefit.observed_api_cost_reduction_pct", "expected": 68.2117621906548 }
+      ]
+    },
+    {
+      "id": "session.8a9f820c",
+      "appears_as": "| `8a9f820c…` | 49 | 89.3% | 3.36M | $18.64 |",
+      "source": "session-8a9f820c.json",
+      "provenance": "OBSERVED",
+      "provenance_inline": false,
+      "numbers": [
+        { "display": "89.3%", "field": "session.cache_hit_frac", "expected": 0.8934669014110735, "scale": 100 },
+        { "display": "3.36M", "field": "session.cache_read_tokens", "expected": 3358526 },
+        { "display": "$18.64", "field": "session.cost_usd", "expected": 18.635071500000002 }
+      ]
+    },
+    {
+      "id": "session.a8aadc0c",
+      "appears_as": "| `a8aadc0c…` | 64 | 84.0% | 5.27M | $31.62 |",
+      "source": "session-a8aadc0c.json",
+      "provenance": "OBSERVED",
+      "provenance_inline": false,
+      "numbers": [
+        { "display": "84.0%", "field": "session.cache_hit_frac", "expected": 0.8404133617573596, "scale": 100 },
+        { "display": "5.27M", "field": "session.cache_read_tokens", "expected": 5273177 },
+        { "display": "$31.62", "field": "session.cost_usd", "expected": 31.621668000000003 }
+      ]
+    },
+    {
+      "id": "session.2aaab7c9",
+      "appears_as": "| `2aaab7c9…` | 39 | 83.6% | 3.54M | $26.06 |",
+      "source": "session-2aaab7c9.json",
+      "provenance": "OBSERVED",
+      "provenance_inline": false,
+      "numbers": [
+        { "display": "83.6%", "field": "session.cache_hit_frac", "expected": 0.8362746349372929, "scale": 100 },
+        { "display": "3.54M", "field": "session.cache_read_tokens", "expected": 3538094 },
+        { "display": "$26.06", "field": "session.cost_usd", "expected": 26.057499750000005 }
+      ]
+    }
+  ],
+
+  "invariants": [
+    {
+      "kind": "sum",
+      "label": "dev session decomposition (discovered = priced + synthetic + other)",
+      "total": 60,
+      "parts": [15, 36, 9]
+    },
+    {
+      "kind": "formula",
+      "label": "dev cost avoided = counterfactual - actual",
+      "expr": "1181.3689650000001 - 375.5363760000001",
+      "expect": 805.832589,
+      "tol": 0.001
+    },
+    {
+      "kind": "formula",
+      "label": "dev reduction pct = 100 * (counterfactual - actual) / counterfactual",
+      "expr": "100 * (1181.3689650000001 - 375.5363760000001) / 1181.3689650000001",
+      "expect": 68.2117621906548,
+      "tol": 0.0001
+    },
+    {
+      "kind": "formula",
+      "label": "fleet shed per fire = shed_tokens / fires",
+      "expr": "80934770 / 2347",
+      "expect": 34484.3506,
+      "tol": 0.1
+    },
+    {
+      "kind": "formula",
+      "label": "fleet usd per day = cost / span_days",
+      "expr": "397.890829 / 3.8005671296296293",
+      "expect": 104.69248810210465,
+      "tol": 0.0001
+    }
+  ]
+}

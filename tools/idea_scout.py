@@ -10,7 +10,12 @@ gate) — and turns the genuinely-new, genuinely-relevant hits into GitHub issue
 human can triage. Sources, both keyless-or-already-authed (no new secret):
 
   * arXiv      the Atom export API (http://export.arxiv.org/api/query) — no key.
-  * GitHub     `gh search repos` on the SAME authed CLI the dispatch loop uses.
+  * GitHub     `gh search repos` on the SAME authed CLI the dispatch loop uses,
+               walked on two lanes from the same topic query: a STARS lane
+               (all-time popular, floored at min_stars) and a FRESH lane
+               (fresh_per_topic repos sorted most-recently-updated, floored at the
+               lower fresh_min_stars) so newly-created / trending / recently-pushed
+               repos surface instead of only incumbents. fresh_per_topic: 0 disables it.
 
 The hard part of an UNATTENDED issue filer is not fetching — it is NOT spamming.
 Three dedup rungs gate every candidate before it can become an issue:
@@ -148,8 +153,11 @@ DEFAULTS = {
     "min_score": 25,      # a candidate below this is not worth an issue
     "max_issues": 3,      # hard cap on issues filed per run (anti-storm)
     "arxiv_per_topic": 8,  # arXiv results fetched per topic
-    "github_per_topic": 6,  # GitHub repos fetched per topic
-    "min_stars": 25,      # GitHub repos under this many stars are dropped pre-score
+    "github_per_topic": 6,  # GitHub repos fetched per topic (stars lane)
+    "min_stars": 25,      # stars-lane repos under this many stars are dropped pre-score
+    "fresh_per_topic": 6,  # recency-sorted GitHub repos fetched per topic (0 disables the fresh lane)
+    "fresh_min_stars": 3,  # fresh-lane star floor: admits young repos the min_stars floor would drop
+    "fresh_window_days": 45,  # pushed within this window earns the strong "actively updated" bonus
     "dup_jaccard": 0.55,  # title token-overlap to call a near-duplicate
     "issue_scan_limit": 800,  # existing issues fetched for the dedup index
     "milestone": "",      # assign filed issues to this milestone title (empty = none)
@@ -165,6 +173,8 @@ W_RECENT_30 = 22       # additive on top of the 180 bonus → very fresh = +34
 STAR_DIVISOR = 100     # +1 per 100 stars …
 STAR_CAP = 30          # … capped
 W_RECENT_PUSH = 10     # GitHub repo pushed within 90d
+W_FRESH_PUSH = 15      # … or +15 if pushed within fresh_window_days (actively updated)
+TRENDING_CAP = 20      # cap on the star-velocity (stars/day) trending bonus
 
 
 # ============================================================================
@@ -242,9 +252,27 @@ def score_candidate(cand: dict[str, Any], topic: dict[str, Any],
             score += bonus
             reasons.append(f"{stars} stars (+{bonus})")
     pushed = _parse_iso(cand.get("extra", {}).get("pushed_at", ""))
-    if pushed is not None and (now - pushed).days <= 90:
-        score += W_RECENT_PUSH
-        reasons.append("pushed ≤90d")
+    if pushed is not None:
+        days = (now - pushed).days
+        window = cfg.get("fresh_window_days", 45) or 45
+        if 0 <= days <= window:
+            score += W_FRESH_PUSH
+            reasons.append(f"pushed ≤{window}d (actively updated)")
+        elif days <= 90:
+            score += W_RECENT_PUSH
+            reasons.append("pushed ≤90d")
+
+    # Trending: a young repo already gathering stars (high stars/day) is on the
+    # rise; an old repo with the same stars accrued them slowly and scores ~0.
+    if stars:
+        created = _parse_iso(cand.get("published", ""))
+        if created is not None:
+            age_days = max((now - created).days, 1)
+            raw_vel = stars // age_days
+            if raw_vel > 0:
+                bonus = min(raw_vel, TRENDING_CAP)
+                score += bonus
+                reasons.append(f"trending ({raw_vel}★/day, +{bonus})")
 
     return score, reasons
 
@@ -484,6 +512,18 @@ def fetch_github(query: str, limit: int) -> list[dict[str, Any]]:
     ])
 
 
+def fetch_github_fresh(query: str, limit: int) -> list[dict[str, Any]]:
+    """The recency-first companion to fetch_github: the SAME topic query (so the
+    neighborhood stays "relative to ours") sorted by most-recently-updated instead
+    of all-time stars, surfacing newly-created / trending / freshly-pushed repos
+    the stars sort would bury under incumbents."""
+    return gh_json([
+        "search", "repos", query, "--limit", str(limit), "--sort", "updated",
+        "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,"
+        "createdAt,language",
+    ])
+
+
 def fetch_existing_issues(limit: int) -> list[dict[str, Any]]:
     return gh_json([
         "issue", "list", "--state", "all", "--limit", str(limit),
@@ -639,6 +679,21 @@ def gather_candidates(topics: list[dict[str, Any]], cfg: dict[str, Any],
                 cands += parse_github_repos(items, key)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"github[{key}]: {e}")
+        if topic.get("github") and cfg.get("fresh_per_topic", 0) > 0:
+            # The fresh lane: same topic query, sorted most-recently-updated, with a
+            # low star floor so young/trending repos the min_stars floor would drop
+            # enter the pool. Recency is rewarded in scoring (which has a clock);
+            # here we only admit and tag provenance (extra.lane = "fresh").
+            try:
+                items = fetch_github_fresh(topic["github"], cfg["fresh_per_topic"])
+                items = [it for it in items
+                         if int(it.get("stargazersCount", 0) or 0) >= cfg["fresh_min_stars"]]
+                fresh = parse_github_repos(items, key)
+                for c in fresh:
+                    c["extra"]["lane"] = "fresh"
+                cands += fresh
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"github-fresh[{key}]: {e}")
     return cands
 
 

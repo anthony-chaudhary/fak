@@ -477,17 +477,28 @@ def kpi_proof_witness(defects_by_doc: dict[str, list[str]], n_theorems: int,
 def kpi_ship_integrity(dos: dict[str, Any] | None) -> dict[str, Any]:
     """The DOS grounding (reused from code_quality_scorecard): each RESIDUAL commit
     — a claim the diff could not witness — is one unit of debt the kernel itself
-    flagged. Fails OPEN when dos is absent (scored 100, a soft unmeasured note)."""
+    flagged.
+
+    `dos is None` ONLY when `--no-dos` was passed (a deliberate operator skip,
+    legitimately 100); genuine dos unavailability comes back as ``{"error": ...}``
+    from ``_dos_review`` and takes the fail-CLOSED branch below — the two must not
+    be conflated (#3833)."""
     if dos is None:
         return {"kpi": "ship_integrity", "group": "verifiability", "score": 100,
                 "detail": "skipped (--no-dos)", "defects": [],
-                "soft": ["dos review not run (--no-dos / dos unavailable)"]}
+                "soft": ["dos review not run (--no-dos)"]}
     if dos.get("error"):
-        return {"kpi": "ship_integrity", "group": "verifiability", "score": 100,
+        # dos ran but is unavailable/failed. Scoring 100 here is anti-honest: a
+        # missing kernel would read as flawless witness discipline — the "no
+        # detection reads as perfect" fail-OPEN. Score a conservative 0 and mark
+        # it errored so an unmeasured witness is treated fail-CLOSED, not perfect
+        # (mirrors the code_quality_scorecard fix). (#3833)
+        return {"kpi": "ship_integrity", "group": "verifiability", "score": 0,
+                "errored": True,
                 "detail": f"UNMEASURED (dos review unavailable): {str(dos['error'])[:60]}",
                 "defects": [],
-                "soft": [f"ship_integrity UNMEASURED — dos unavailable, scored 100 "
-                         f"(fail-open, not a witnessed-clean review): {str(dos['error'])[:100]}"]}
+                "soft": [f"ship_integrity UNMEASURED — dos unavailable, scored 0 "
+                         f"(fail-closed, not a witnessed-clean review): {str(dos['error'])[:100]}"]}
     residual = dos.get("residual", []) or []
     n = len(residual)
     rng = dos.get("rev_range", "?")

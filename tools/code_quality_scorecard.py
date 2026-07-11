@@ -33,6 +33,7 @@ does not grade the same tree lower than one with it.
   honesty       every `- [` line in CLAIMS.md carries exactly one tag     [static]
   architecture  no egregious god-file / god-function outliers            [static]
   tests         every non-trivial package has a real Test/Benchmark/Fuzz  [static]
+  assertion_strength  every Test func has a reachable failure mechanism    [static]
   godoc         exported symbols carry a doc comment (SOFT — never gates) [static]
   hygiene       TODO/FIXME/HACK/XXX marker density (SOFT — never gates)   [static]
   ship_integrity  `dos review` shows zero unwitnessed RESIDUAL commits    [DOS]
@@ -44,6 +45,21 @@ RESIDUAL (a claim the diff could NOT witness — the only place review attention
 is load-bearing), and UNVERIFIABLE. A RESIDUAL commit is a unit of code-debt
 the kernel itself flags: the ship said something the diff can't back. This KPI
 reads that verdict from evidence the committing agent could not author.
+
+``assertion_strength`` is the residue ``tests`` leaves: ``tests`` credits a
+package the moment it holds one ``Test``/``Benchmark`` entry point — it counts
+*presence*, never *assertions*. So ``func TestX(t *testing.T){ t.Log("ok") }``
+clears the whole package's tests-debt while proving nothing. This KPI reads each
+``func Test…(t *testing.T)`` body and flags the ones with NO reachable failure
+mechanism — none of ``t.Error*``/``Fatal*``/``Fail*``, no ``require.``/``assert.``
+call, no ``panic(``, no ``t.Run(`` subtest, and no call that passes the test's
+``*testing.T`` through to a helper (which may ``Fatal`` on its behalf). A
+zero-assertion test is worse than no test: it turns ``tests`` green while it
+cannot fail. The detector mirrors ``dispatchtick``'s #3364 test-integrity rung
+(``internal/dispatchtick/testintegrity.go``: ``funcCanFail``) so the two agree on
+what "can fail" means; it is deliberately conservative — any doubt clears the
+func — and a body that only ``t.Skip*``s is cleared here, since a skipped test is
+``boundarylint``'s SKIP_DEBT concern (#3840), not silent zero-assertion debt.
 
 ``godoc`` and ``hygiene`` are deliberately SOFT — they score (a doc-poor or
 marker-heavy tree grades lower) but emit no hard debt, because the cheap way to
@@ -80,6 +96,23 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+# The assertion_strength KPI (#3832) reuses code-slop's tested false-positive guards for
+# tests that assert through a channel a `t.*` scan cannot see: a re-exec child helper
+# (its body calls `os.Exit`; the PARENT process asserts on the exit code) and a
+# does-not-panic test (the guarded call NOT panicking is itself the assertion). No second,
+# drifting copy of those subtle shapes — fall back to permissive stubs only if the sibling
+# is shipped away, so a lone code_quality_scorecard.py still runs (it just re-flags those
+# two idioms). Mirrors the code_quality<-steerability reuse idiom.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from code_slop_scorecard import _is_reexec_helper_test, _is_does_not_panic_test
+except Exception:  # noqa: BLE001 — stand-alone fallback
+    def _is_reexec_helper_test(body_blob: str, raw_lines: list[str], lineno: int) -> bool:  # type: ignore[misc]
+        return False
+
+    def _is_does_not_panic_test(fname: str, body: list[str]) -> bool:  # type: ignore[misc]
+        return False
 
 SCHEMA = "fleet-code-quality-scorecard/1"
 
@@ -144,6 +177,24 @@ _MARKER_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 # A real Go test entry point — used to confirm a _test.go is not just a bare
 # `package foo` marker. Example funcs are legitimate tests; all four count.
 _TESTFUNC_RE = re.compile(r"^func\s+(Test|Benchmark|Fuzz|Example)\w*\s*\(", re.MULTILINE)
+# A `func TestXxx(t *testing.T)` header — captures the func name and the *testing.T
+# parameter name so the assertion scan can bind its checks to the right identifier.
+# Benchmarks (*testing.B), Fuzz (*testing.F), Examples (no param) and TestMain
+# (*testing.M) have other signatures and are NOT graded — matching the #3364 rung's
+# dispatchtick.isTestFunc, which grades only `*testing.T` tests.
+_TEST_T_FUNC_RE = re.compile(r"^func\s+(Test\w*)\s*\(\s*(\w+)\s+\*testing\.T\s*\)")
+# A compile-time interface/type guard is a BUILD-checked assertion (the package fails to
+# compile if unsatisfied), so a test body that only holds one is NOT zero-assertion — the
+# `build` KPI, not silence, catches a broken contract. Two forms clear:
+#   var _  Iface = (*T)(nil)      the canonical blank guard (code-slop's inline form)
+#   var kv abi.KVBackend = New()  the NAMED conformance form — a qualified (`pkg.Type`) or
+#                                 exported (`Type`) declared type, which a builtin-typed
+#                                 var (`var n int`) is not, so `var n int = 0` stays flagged.
+# The named form is the one code-slop's `var _`-only guard misses; broadening it here only
+# ever clears a typed-conformance decl — every genuinely-vacuous test in the tree uses `:=`.
+_IFACE_GUARD_RE = re.compile(
+    r"\bvar\s+_\s+[\w\.\[\]\*]+\s*="
+    r"|\bvar\s+\w+\s+\*?(?:\w+\.\w+|[A-Z]\w*)")
 # A top-level declaration we expect a doc comment on. Exported = capitalised name.
 _EXPORTED_FUNC_RE = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Z]\w*)\s*[\(\[]")
 _EXPORTED_TYPE_RE = re.compile(r"^type\s+([A-Z]\w*)\b")
@@ -367,6 +418,25 @@ def kpi_tests(untested: list[str], n_packages: int) -> dict[str, Any]:
             "defects": defects, "soft": []}
 
 
+def kpi_assertion_strength(zero_assert: list[str], n_testfuncs: int) -> dict[str, Any]:
+    """Each ``func Test…(t *testing.T)`` with no reachable failure mechanism is one unit
+    of debt: it runs, passes unconditionally, and turns the ``tests`` KPI green while
+    proving nothing (the residue ``tests`` leaves — it grades presence, not assertions).
+    `zero_assert` is the pre-formatted work-list (one row per flagged func, path:line
+    name); `n_testfuncs` is the total ``*testing.T`` test count the score is a fraction
+    of. Hard debt, unweighted: the defects gate ``ok`` and drive the debt count, but the
+    KPI carries no KPI_WEIGHTS entry, so it never rebalances the composite (and never
+    touches the ``tests`` weight — #3832). A tree with no test funcs scores 100 (nothing
+    to assert), the same n==0 convention ``godoc`` uses for a surface with no symbols."""
+    n = len(zero_assert)
+    asserting = max(0, n_testfuncs - n)
+    pct = round(100 * asserting / max(1, n_testfuncs), 1)
+    detail = (f"{asserting}/{n_testfuncs} test funcs have a reachable failure mechanism "
+              f"({pct}%)") if n_testfuncs else "no *testing.T test funcs"
+    return {"kpi": "assertion_strength", "score": _clamp(pct if n_testfuncs else 100),
+            "detail": detail, "defects": zero_assert, "soft": []}
+
+
 def kpi_hygiene(markers: list[tuple[str, int]]) -> dict[str, Any]:
     """SOFT only. TODO/FIXME/HACK/XXX markers in shipped (non-test) code, capped
     per file. Advisory, never hard debt: this repo keeps an honest [STUB] ledger,
@@ -403,7 +473,7 @@ def kpi_ship_integrity(dos: dict[str, Any] | None) -> dict[str, Any]:
     not witness — is one unit of debt the kernel itself flagged."""
     if dos is None:
         return {"kpi": "ship_integrity", "score": 100, "detail": "skipped (--no-dos)",
-                "defects": [], "soft": ["dos review not run (--no-dos / dos unavailable)"]}
+                "defects": [], "soft": ["dos review not run (--no-dos)"]}
     if dos.get("error"):
         # dos ran but is unavailable/failed. Scoring 100 here is anti-honest: a missing
         # kernel would read as flawless witness discipline — the "no detection reads as
@@ -698,6 +768,106 @@ def scan_go_file(text: str) -> dict[str, Any]:
             "long_funcs": long_funcs, "exported": exported}
 
 
+def _func_can_fail(body: str, tname: str) -> bool:
+    """True iff a code-only test body has a reachable failure mechanism, mirroring
+    dispatchtick.funcCanFail (#3364): any ``t.Error*``/``Fatal*``/``Fail*`` method, a
+    ``t.Run(`` subtest, a ``require.``/``assert.`` call, a ``panic(``, or a call that
+    passes the test's ``*testing.T`` through to a helper (which may ``Fatal`` on its
+    behalf). A ``t.Skip*`` also clears — a skipped test is SKIP_DEBT's concern (#3840),
+    not silent zero-assertion debt. Conservative in the SAFE direction: any single match
+    clears the func, so table tests, testify wrappers, and subtests are never flagged.
+    `body` must already be code-only (strings/comments blanked by ``_code_only``)."""
+    t = re.escape(tname)
+    if re.search(rf"\b{t}\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow|Run|Skip|Skipf|SkipNow)\b", body):
+        return True
+    if re.search(r"\b(require|assert)\.\w+", body):
+        return True
+    if re.search(r"\bpanic\(", body):
+        return True
+    # a call that hands the test's *testing.T to a helper: `helper(t)`, `helper(x, t)`,
+    # `p.check(t, …)` — the bare identifier in any argument position (mirrors
+    # dispatchtick.callPassesIdent). A method call ON the T (`t.Name()`) is not an arg.
+    return bool(re.search(rf"[(,]\s*{t}\s*[,)]", body))
+
+
+def _zero_assertion_test_funcs(text: str) -> tuple[list[tuple[str, int]], int]:
+    """Scan `text` for ``func Test…(t *testing.T)`` declarations and return
+    ``(flagged, total)``: `flagged` is ``(funcName, 1-based header line)`` for every such
+    func whose body has NO reachable failure mechanism (see :func:`_func_can_fail`), and
+    `total` is the count of ``*testing.T`` test funcs examined (the denominator the KPI's
+    fraction is over).
+
+    Uses the same literal-blanking + empty-``{}``-aware brace-depth scan as
+    :func:`scan_go_file`, so a brace inside a string / comment never fools the body
+    boundary, and a one-line body (``func TestX(t *testing.T){ … }``) closes on its own
+    line. A ``func`` that begins *inside* a raw string / block comment is not a real
+    declaration and is skipped (it is also not counted in `total`)."""
+    lines = text.splitlines()
+    code_lines: list[str] = []
+    state_at_start: list[tuple[bool, bool]] = []
+    in_raw = in_block = False
+    for ln in lines:
+        state_at_start.append((in_raw, in_block))
+        code, in_raw, in_block = _code_only(ln, in_raw, in_block)
+        code_lines.append(code)
+
+    out: list[tuple[str, int]] = []
+    total = 0
+    i = 0
+    while i < len(lines):
+        sr, sb = state_at_start[i]
+        m = None if (sr or sb) else _TEST_T_FUNC_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        total += 1
+        fname, tname = m.group(1), m.group(2)
+        depth = 0
+        seen_open = False
+        closed = False
+        j = i
+        while j < len(lines):
+            code = code_lines[j]
+            k = 0
+            while k < len(code):
+                ch = code[k]
+                if ch == "{":
+                    p = k + 1
+                    while p < len(code) and code[p] in " \t":
+                        p += 1
+                    if p < len(code) and code[p] == "}":
+                        k = p + 1  # empty `{}` — never opens the body
+                        continue
+                    depth += 1
+                    seen_open = True
+                elif ch == "}":
+                    depth -= 1
+                    if seen_open and depth <= 0:
+                        closed = True
+                        break
+                k += 1
+            if closed:
+                break
+            j += 1
+        # Body = the code strictly inside the outer braces. A Test signature holds no
+        # `{`, so the first `{` in the joined code-only span is always the body opener.
+        blob = "\n".join(code_lines[i:j + 1])
+        first, last = blob.find("{"), blob.rfind("}")
+        body = blob[first + 1:last] if (first != -1 and last > first) else ""
+        # A func with no direct failure mechanism is STILL not zero-assertion debt if it
+        # asserts through a channel the `t.*` scan can't see: a build-checked interface
+        # guard, a re-exec child helper (os.Exit; the parent asserts), or a does-not-panic
+        # test (the un-panicking call is the assertion). These reuse code-slop's tested
+        # guards so the two scorecards agree on what counts as a hidden assertion.
+        if (not _func_can_fail(body, tname)
+                and not _IFACE_GUARD_RE.search(body)
+                and not _is_reexec_helper_test(body, lines, i + 1)
+                and not _is_does_not_panic_test(fname, body.split("\n"))):
+            out.append((fname, i + 1))
+        i = j + 1
+    return out, total
+
+
 def _anon_func_name(header: str) -> str:
     m = re.match(r"^func\s+(?:\([^)]*\)\s*)?(\w+)", header)
     return m.group(1) if m else "func"
@@ -730,9 +900,16 @@ def gather(root: Path, *, run_toolchain: bool, run_dos: bool,
     # Test/Benchmark/Fuzz/Example function — NOT merely a `package foo` marker file.
     # (Presence-only crediting let an empty _test.go clear the hard tests-debt.)
     test_pkgs: set[str] = set()
+    zero_assert: list[str] = []          # one row per zero-assertion Test func (#3832)
+    n_testfuncs = 0                      # total *testing.T funcs — assertion_strength denominator
     for rel in test_files:
-        if _TESTFUNC_RE.search(_safe_read(root / rel)):
+        ttext = _safe_read(root / rel)
+        if _TESTFUNC_RE.search(ttext):
             test_pkgs.add(package_of(rel))
+        flagged, total = _zero_assertion_test_funcs(ttext)
+        n_testfuncs += total
+        zero_assert.extend(f"zero-assertion test (cannot fail): {rel}:{lineno} {fn}"
+                           for fn, lineno in flagged)
 
     scanned: list[dict[str, Any]] = []
     pkg_funccount: dict[str, int] = {}
@@ -789,6 +966,7 @@ def gather(root: Path, *, run_toolchain: bool, run_dos: bool,
         kpi_honesty(claims),
         kpi_architecture(scanned),
         kpi_tests(untested, len(all_pkgs)),
+        kpi_assertion_strength(zero_assert, n_testfuncs),
         kpi_hygiene(markers),
         kpi_godoc(n_exported, n_documented, undocumented),
         kpi_ship_integrity(dos_payload),

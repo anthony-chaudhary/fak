@@ -300,16 +300,22 @@ def test_kpi_trace_correlation_gaps():
     assert len(k["defects"]) == 2 and k["score"] < 100
 
 
-# --- ship integrity (DOS, fail-open) ---------------------------------------
+# --- ship integrity (DOS) --------------------------------------------------
 
-def test_ship_integrity_skipped_fails_open():
+def test_ship_integrity_skipped_stays_100():
+    # `--no-dos` is a deliberate operator skip, legitimately 100 (NOT a failure
+    # to measure — its soft note must not speak "unavailable"). (#3833)
     k = obs.kpi_ship_integrity(None)
     assert k["score"] == 100 and k["defects"] == [] and k["soft"]
+    assert "unavailable" not in " ".join(k["soft"]).lower()
 
 
-def test_ship_integrity_dos_error_fails_open():
+def test_ship_integrity_dos_error_fails_closed():
+    # dos ran and could not produce a verdict → UNMEASURED, which must fail
+    # CLOSED (0 + errored), never read as a phantom-perfect 100. This is the
+    # #3833 lesson applied to observability; the old test asserted the bug. (#3833)
     k = obs.kpi_ship_integrity({"error": "dos: command not found"})
-    assert k["score"] == 100 and k["defects"] == [] and k["soft"]
+    assert k["score"] == 0 and k["errored"] is True and k["defects"] == []
 
 
 def test_ship_integrity_counts_residual():

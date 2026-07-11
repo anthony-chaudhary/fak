@@ -27,6 +27,7 @@ RELEASE_SUBSTRATE_TESTS = (
     "tools/release_tag_test.py",
     "tools/release_publish_test.py",
     "tools/release_cadence_workflow_test.py",
+    "tools/release_stale_escalate_test.py",
     "tools/release_status_test.py",
     "tools/release_lock_test.py",
     "tools/safe_ff_sync_test.py",

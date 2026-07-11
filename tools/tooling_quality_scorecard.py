@@ -37,12 +37,27 @@ lint-divergent or doc-poor tree grades lower) but emit no hard debt:
   docstring spam, not quality, so it scores but never gates — the same WARN/HARD
   split ``code_quality``'s ``godoc``/``hygiene`` KPIs draw.
 
-The ``lint`` and ``format`` KPIs fail-open when ``ruff`` is absent: a box without
-``ruff`` scores them as *skipped* (100, a soft "unmeasured" note), never as a
-failure — so a box without the toolchain does not grade the same tree lower.
+The ``lint`` and ``format`` KPIs distinguish two ways ``ruff`` can be missing —
+because conflating them is the ``#3833`` fail-open bug. ``--no-toolchain`` is a
+deliberate operator skip (legitimately 100). But if ``ruff`` is *probed and
+absent*, the KPI is UNMEASURED and fails **closed** (score 0, ``errored``): a box
+without ``ruff`` genuinely cannot certify the tree is lint-clean, so it must NOT
+read as a phantom-perfect 100 that inflates the composite. "No measurement" must
+never read as "clean."
+
+The **scorer-of-scorers** self-audit (``audit_failopen``) turns that one lesson
+into a standing check across the whole ``*_scorecard.py`` family: it flags any
+KPI branch that returns a HIGH score from a branch whose own text admits a
+measurement failure ("... unavailable", "UNMEASURED", "could not") without an
+explicit ``# failopen-ok`` waiver — the fail-open pattern above, mechanized so the
+fix outlives the incident that seeded it. Findings surface as the advisory
+``failopen_debt`` meter (a stage-1 ratchet; deliberate opt-outs and absent-subject
+branches are excluded). It is the sixth family law — *an unmeasured axis fails
+closed, never perfect* — made self-enforcing.
 
 ``ok`` is False iff any HARD defect exists. Soft signals (near-threshold files,
-ruff-format divergence, undocumented modules) are advisory and never gate.
+ruff-format divergence, undocumented modules, fail-open scorer branches) are
+advisory and never gate.
 
 Read-only by construction: it reads ``tools/*.py`` and shells out to ``ruff``
 (read-only verbs); it edits nothing. Run from the repo ROOT::
@@ -121,15 +136,30 @@ def _clamp(score: float) -> int:
 # `soft` is a judgment-call nudge (never gates `ok`).
 # ---------------------------------------------------------------------------
 
-def kpi_lint(diagnostics: list[dict[str, Any]] | None) -> dict[str, Any]:
+def kpi_lint(diagnostics: list[dict[str, Any]] | None, *,
+             unavailable: bool = False) -> dict[str, Any]:
     """``ruff check`` diagnostics over tools/. Each is one HARD unit of py-debt —
     an unused import (F401), undefined name (F821), unused variable (F841), or
     other pyflakes/pycodestyle error: a concrete dead-code / correctness signal.
-    `diagnostics` is the parsed `ruff check --output-format json` list, or None
-    when ruff is absent (KPI skipped, fail-open — never a failure)."""
+    `diagnostics` is the parsed `ruff check --output-format json` list.
+
+    None means ruff produced no verdict — and the two ways that happens must NOT
+    be conflated (the #3833 fail-open lesson): the operator passed
+    ``--no-toolchain`` (a deliberate skip — legitimately 100), OR ruff was probed
+    and is absent/unparseable (``unavailable=True`` — an UNMEASURED KPI). An
+    unmeasured KPI must fail CLOSED at 0, never inflate the composite to a phantom
+    100: a box without ruff genuinely cannot certify the tree is lint-clean, so it
+    must not score as if it did. (Pass ``--no-toolchain`` to skip lint by choice.)"""
+    if unavailable:
+        return {"kpi": "lint", "score": 0, "errored": True,
+                "detail": "UNMEASURED (ruff unavailable) — failed closed, not scored 100",
+                "defects": [],
+                "soft": ["lint UNMEASURED: ruff probed and absent/unparseable; scored 0 "
+                         "(fail-closed) so a box without ruff cannot inflate the composite "
+                         "— pass --no-toolchain to skip lint by choice"]}
     if diagnostics is None:
-        return {"kpi": "lint", "score": 100, "detail": "skipped (ruff unavailable / --no-toolchain)",
-                "defects": [], "soft": ["ruff not run (ruff unavailable / --no-toolchain)"]}
+        return {"kpi": "lint", "score": 100, "detail": "skipped (--no-toolchain)",
+                "defects": [], "soft": ["ruff not run (--no-toolchain)"]}
     defects: list[str] = []
     for d in diagnostics:
         code = d.get("code") or "?"
@@ -191,15 +221,27 @@ def kpi_tests(untested: list[str], n_modules: int) -> dict[str, Any]:
             "defects": defects, "soft": []}
 
 
-def kpi_format(n_reformat: int | None, n_total: int) -> dict[str, Any]:
+def kpi_format(n_reformat: int | None, n_total: int, *,
+               unavailable: bool = False) -> dict[str, Any]:
     """SOFT only. ``ruff format --check`` divergence. The repo has NOT adopted
     ruff's formatter as its house style, so near-every file "would reformat" —
     counting that as hard debt would be hundreds of units of pure style noise,
     gaming-prone, not defects. It scores (a divergent tree grades a touch lower)
-    but never gates `ok`. None = ruff absent → skipped (fail-open)."""
+    but never gates `ok`.
+
+    None means ruff gave no verdict; like ``kpi_lint`` the two causes must not be
+    conflated. ``--no-toolchain`` is a deliberate skip (100); ``unavailable=True``
+    (ruff probed and absent) is UNMEASURED and fails CLOSED at 0 — an unmeasured
+    axis never scores as if it passed (the #3833 fail-open lesson)."""
+    if unavailable:
+        return {"kpi": "format", "score": 0, "errored": True,
+                "detail": "UNMEASURED (ruff unavailable) — failed closed, not scored 100",
+                "defects": [],
+                "soft": ["format UNMEASURED: ruff probed and absent; scored 0 (fail-closed) "
+                         "— pass --no-toolchain to skip by choice"]}
     if n_reformat is None:
-        return {"kpi": "format", "score": 100, "detail": "skipped (ruff unavailable / --no-toolchain)",
-                "defects": [], "soft": ["ruff format not run (ruff unavailable / --no-toolchain)"]}
+        return {"kpi": "format", "score": 100, "detail": "skipped (--no-toolchain)",
+                "defects": [], "soft": ["ruff format not run (--no-toolchain)"]}
     clean = max(0, n_total - n_reformat)
     pct = round(100 * clean / max(1, n_total), 1)
     soft = ([f"{n_reformat}/{n_total} file(s) diverge from `ruff format` "
@@ -228,6 +270,97 @@ def kpi_docstrings(n_modules: int, n_documented: int, undocumented_sample: list[
 
 
 # ---------------------------------------------------------------------------
+# Fail-open self-audit — the scorer-of-scorers meta-loop
+# ---------------------------------------------------------------------------
+# #3833 fixed one scorecard (code_quality's ship_integrity) that returned a
+# perfect 100 when it could NOT run its witness — "no measurement" read as "clean"
+# and inflated the composite. That was a one-off patch of a SYSTEMIC pattern: any
+# KPI that emits a HIGH score from a branch whose own text admits it failed to
+# measure ("... unavailable", "UNMEASURED", "not installed") is fail-OPEN. An
+# unmeasured axis must fail CLOSED (score 0 + errored) or be an EXPLICIT operator
+# opt-out (`--no-toolchain` / `--no-dos` — which never speaks failure language).
+#
+# This detector mechanizes that law across the scorer family, so the fix outlives
+# the incident: the tool that grades tools/ now also grades whether a scorer is
+# honest about what it could not measure. It keys off the branch's OWN confession
+# text (the same words the scorer already writes), so it needs no per-scorer
+# config. It is a FLOOR, not a ceiling: a fail-open branch that hides behind
+# opt-out phrasing ("unavailable / --no-toolchain" in one string) is the residual
+# a human audit still owns — the detector deliberately flags that conflation too.
+FAILOPEN_SCORE_FLOOR = 90  # a "high" score a fail-open branch would emit
+# Measurement-FAILURE language: the WITNESS could not run or produce a verdict.
+# Deliberately NARROW — it must NOT match two legitimate high-score branches:
+#   * explicit operator opt-out: "skipped (--no-toolchain)", "ruff not run" — a
+#     CHOICE not to measure, correctly 100 (so "not run"/"skipped" are excluded);
+#   * absent SUBJECT: "no CLAIMS.md (skipped)", "no modules" — nothing to grade,
+#     vacuously 100 (so "not found"/"absent"/"no <file>" are excluded).
+# Only tool/witness unavailability — "ruff unavailable", "dos UNMEASURED",
+# "gh not installed" — is fail-OPEN when the score is nonetheless high.
+_FAILURE_LEXICON = (
+    "unavailable", "unmeasured", "not installed", "could not", "couldn't",
+    "errored", "no binary", "probe failed",
+)
+_WAIVER_MARKER = "failopen-ok"  # inline `# failopen-ok: <reason>` on a reviewed branch
+
+
+def _return_dict_score_text(node: ast.Dict) -> tuple[int | None, str]:
+    """From a returned dict literal, pull the numeric ``score`` constant and the
+    lower-cased concatenation of every string constant in it (detail + soft)."""
+    score: int | None = None
+    for key, val in zip(node.keys, node.values):
+        if (isinstance(key, ast.Constant) and key.value == "score"
+                and isinstance(val, ast.Constant) and isinstance(val.value, (int, float))
+                and not isinstance(val.value, bool)):
+            score = int(val.value)
+    texts = [sub.value for sub in ast.walk(node)
+             if isinstance(sub, ast.Constant) and isinstance(sub.value, str)]
+    return score, " ".join(texts).lower()
+
+
+def audit_failopen(sources: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    """Flag fail-open KPI branches across scorer sources. Pure over ``(rel, text)``
+    pairs — no disk. A finding is a return of a score-dict where the score is
+    >= FAILOPEN_SCORE_FLOOR AND the branch's own text speaks measurement failure,
+    with no ``# failopen-ok`` waiver in its span. Deterministic, sorted."""
+    findings: list[dict[str, Any]] = []
+    for rel, text in sources:
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            continue
+        lines = text.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Return) or not isinstance(node.value, ast.Dict):
+                continue
+            score, blob = _return_dict_score_text(node.value)
+            if score is None or score < FAILOPEN_SCORE_FLOOR:
+                continue
+            if not any(term in blob for term in _FAILURE_LEXICON):
+                continue
+            # honour an inline `# failopen-ok:` waiver on the return itself OR on
+            # the couple of comment lines immediately above it (where reviewers
+            # naturally place it — comments are not part of the AST span).
+            end = getattr(node, "end_lineno", node.lineno)
+            span = lines[max(0, node.lineno - 3): end]
+            if any(_WAIVER_MARKER in ln for ln in span):
+                continue
+            kpi = ""
+            for key, val in zip(node.value.keys, node.value.values):
+                if (isinstance(key, ast.Constant) and key.value == "kpi"
+                        and isinstance(val, ast.Constant)):
+                    kpi = str(val.value)
+            findings.append({
+                "file": f"tools/{rel}", "line": node.lineno,
+                "kpi": kpi, "score": score,
+                "detail": f"{rel}:{node.lineno} kpi={kpi or '?'} returns "
+                          f"{score} from a branch that admits it could not measure "
+                          f"(fail-OPEN) — fail closed (score 0 + errored) or, if this "
+                          f"is a deliberate operator opt-out, drop the failure language",
+            })
+    return sorted(findings, key=lambda f: (f["file"], f["line"]))
+
+
+# ---------------------------------------------------------------------------
 # Per-corpus fold
 # ---------------------------------------------------------------------------
 
@@ -244,6 +377,7 @@ def grade_letter(score: float) -> str:
 
 
 def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
+                  failopen: list[dict[str, Any]] | None = None,
                   error: str | None = None) -> dict[str, Any]:
     if error:
         return {
@@ -252,12 +386,17 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
             "next_action": "fix the read (run from repo ROOT), then re-run",
             "workspace": workspace, "corpus": {}, "kpis": [],
         }
+    failopen = failopen or []
     by_name = {k["kpi"]: k for k in kpis}
     score = sum(KPI_WEIGHTS[name] * by_name[name]["score"]
                 for name in KPI_WEIGHTS if name in by_name)
     score = round(score, 1)
     py_debt = sum(len(k["defects"]) for k in kpis)
-    n_soft = sum(len(k["soft"]) for k in kpis)
+    # failopen findings are ADVISORY (stage-1 ratchet): they surface + count, but
+    # do not (yet) fold into py_debt or gate `ok`, so introducing the meter cannot
+    # red a live multi-writer trunk. They DO count as soft signals. Ratchet-to-HARD
+    # (fold into py_debt) once the family has held failopen_debt == 0 for a cycle.
+    n_soft = sum(len(k["soft"]) for k in kpis) + len(failopen)
     grade = grade_letter(score)
     breakdown = sorted(
         ({"kpi": k["kpi"], "score": k["score"], "debt": len(k["defects"]),
@@ -268,17 +407,24 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "score": score,
         "grade": grade,
         "py_debt": py_debt,
+        "failopen_debt": len(failopen),
         "soft_signals": n_soft,
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
         "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
         "breakdown": breakdown,
+        "failopen": failopen,
     }
 
+    failopen_note = (f"; {len(failopen)} fail-open scorer branch(es) (advisory — see "
+                     f"corpus.failopen)" if failopen else "")
     if py_debt == 0:
         ok, verdict, finding = True, "OK", "tooling_clean"
         reason = (f"tooling clean: score {score}/100 (grade {grade}), zero py-debt "
-                  f"across {len(kpis)} KPIs ({n_soft} advisory signal(s))")
-        next_action = "no required edit; re-run after the next tools/ change"
+                  f"across {len(kpis)} KPIs ({n_soft} advisory signal(s)){failopen_note}")
+        next_action = ("no required edit; re-run after the next tools/ change"
+                       if not failopen else
+                       "advisory: make the fail-open scorer branch(es) in corpus.failopen "
+                       "fail CLOSED (score 0 + errored) so an unmeasured axis cannot read as 100")
     else:
         ok, verdict, finding = False, "ACTION", "py_debt"
         worst = breakdown[0]
@@ -419,15 +565,23 @@ def gather(root: Path, *, run_toolchain: bool) -> list[dict[str, Any]]:
     # --- toolchain shells (ruff) ---
     lint_diags: list[dict[str, Any]] | None = None
     n_reformat: int | None = None
+    lint_unavailable = False
+    format_unavailable = False
     if run_toolchain:
         lint_diags = _ruff_check(tools_dir)
         n_reformat = _ruff_format_check(tools_dir)
+        # We ASKED for the toolchain but ruff returned no parseable verdict → the
+        # KPI is UNMEASURED (env-absence), which must fail CLOSED. This is a
+        # different None from `--no-toolchain` (an explicit operator skip, which
+        # never sets run_toolchain and is handled by each KPI's None@100 path).
+        lint_unavailable = lint_diags is None
+        format_unavailable = n_reformat is None
 
     return [
-        kpi_lint(lint_diags),
+        kpi_lint(lint_diags, unavailable=lint_unavailable),
         kpi_architecture(scanned),
         kpi_tests(untested, n_nontrivial),
-        kpi_format(n_reformat, len(rels)),
+        kpi_format(n_reformat, len(rels), unavailable=format_unavailable),
         kpi_docstrings(n_modules, n_documented, undocumented),
     ]
 
@@ -478,7 +632,15 @@ def collect(workspace: Path, *, run_toolchain: bool = True) -> dict[str, Any]:
         return build_payload(workspace=str(root), kpis=[],
                              error=f"no {TOOLS_REL}/ dir at {root} — run from the repo ROOT")
     kpis = gather(root, run_toolchain=run_toolchain)
-    return build_payload(workspace=str(root), kpis=kpis)
+    # scorer-of-scorers: scan the scorecard family for fail-open KPI branches.
+    # Restricted to *_scorecard.py (the score-emitting family) — cheap, focused,
+    # and future-proof (a non-scorer has no score-dict returns to flag anyway).
+    tools_dir = root / TOOLS_REL
+    sources = [(rel, _safe_read(tools_dir / rel))
+               for rel in list_py_files(tools_dir)
+               if rel.endswith("_scorecard.py") and not is_test_file(rel)]
+    failopen = audit_failopen(sources)
+    return build_payload(workspace=str(root), kpis=kpis, failopen=failopen)
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +654,8 @@ def render(payload: dict[str, Any]) -> str:
         f"  {payload.get('reason')}",
         "",
         (f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) "
-         f"· PY-DEBT {c.get('py_debt', 0)} · {c.get('soft_signals', 0)} advisory"),
+         f"· PY-DEBT {c.get('py_debt', 0)} · FAIL-OPEN {c.get('failopen_debt', 0)} "
+         f"· {c.get('soft_signals', 0)} advisory"),
         "",
         "per-KPI (worst first):",
         f"  {'score':>5} {'debt':>4}  kpi            detail",
@@ -513,6 +676,14 @@ def render(payload: dict[str, Any]) -> str:
             lines.append(f"      ... and {len(k['defects']) - 12} more")
     if not any_defect:
         lines.append("  (none — zero py-debt)")
+    failopen = c.get("failopen") or []
+    if failopen:
+        lines.append("")
+        lines.append(f"fail-open scorer self-audit ({len(failopen)}, advisory):")
+        for f in failopen[:12]:
+            lines.append(f"      - {f['detail']}")
+        if len(failopen) > 12:
+            lines.append(f"      ... and {len(failopen) - 12} more")
     lines.append("")
     lines.append(f"next: {payload.get('next_action')}")
     return "\n".join(lines)

@@ -1,5 +1,5 @@
 {
-  "_comment": "Expanded --config for tools/idea_scout.py: the 6 baked-in DEFAULT_TOPICS PLUS 13 FRESH durable topics targeting fak/DOS surfaces the defaults under-cover (claim verification & provenance, agent coordination/locking, verified memory, KV eviction/disaggregation, capability/IFC/sandbox, deterministic inference, LLM-OS/agent-kernel framings, MCP tooling defense, context/tool-schema compression, agent-eval/reward-hacking benchmarks). Derived from the 2026-07-07 landscape sweep (15 clusters, ~200 finds, adversarially existence-verified). `area` on every topic is an EXISTING repo label (security | trust-floor | agentic-serving | prompt-caching | mcp | model-arch) so `gh issue create` never fails; add `coordination` + `memory` labels first if you want finer routing and re-point topics 8/10 and 11/13. Run dry-run first: `python tools/idea_scout.py --config tools/idea_scout_topics_fresh.json --json` (files nothing); add `--live --max-issues 3` to file. github queries are kept to 2-3 high-signal words because gh repo-search ANDs every term.",
+  "_comment": "Expanded --config for tools/idea_scout.py: the 6 baked-in DEFAULT_TOPICS PLUS 13 FRESH durable topics targeting fak/DOS surfaces the defaults under-cover (claim verification & provenance, agent coordination/locking, verified memory, KV eviction/disaggregation, capability/IFC/sandbox, deterministic inference, LLM-OS/agent-kernel framings, MCP tooling defense, context/tool-schema compression, agent-eval/reward-hacking benchmarks). Derived from the 2026-07-07 landscape sweep (15 clusters, ~200 finds, adversarially existence-verified). `area` on every topic is an EXISTING repo label (security | trust-floor | agentic-serving | prompt-caching | mcp | model-arch) so `gh issue create` never fails; add `coordination` + `memory` labels first if you want finer routing and re-point topics 8/10 and 11/13. Run dry-run first: `python tools/idea_scout.py --config tools/idea_scout_topics_fresh.json --json` (files nothing); add `--live --max-issues 3` to file. github queries are kept to 2-3 high-signal words because gh repo-search ANDs every term. Each github topic is walked on TWO lanes: the all-time stars lane (github_per_topic @ min_stars) and a recency-sorted FRESH lane (fresh_per_topic @ the lower fresh_min_stars) so newly-created/trending repos surface where the stars sort buries them; scoring rewards star-velocity (trending) and a push within fresh_window_days. Set fresh_per_topic:0 to disable the fresh lane.",
   "topics": [
     {
       "key": "prompt-injection-defense",
@@ -143,6 +143,9 @@
     "arxiv_per_topic": 8,
     "github_per_topic": 6,
     "min_stars": 25,
+    "fresh_per_topic": 6,
+    "fresh_min_stars": 3,
+    "fresh_window_days": 45,
     "dup_jaccard": 0.55,
     "issue_scan_limit": 800
   }

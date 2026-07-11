@@ -1,0 +1,14 @@
+{
+  "_captured": "2026-07-09T21:53:21Z",
+  "_source": "fak cachevalue report --since 2026-07-06 --json",
+  "_window": "since_open",
+  "fleet_benefit": {
+    "compaction_fired": 2347,
+    "compaction_shed_tokens": 80934770,
+    "exit_sessions": 898,
+    "fak_api_cost_avoided_usd": 397.890829,
+    "fak_share_pct": 20.307425929069925,
+    "fak_usd_avoided_per_day": 104.69248810210465,
+    "span_days": 3.8005671296296293
+  }
+}

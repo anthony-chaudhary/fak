@@ -15,6 +15,7 @@ Re-run after changing either metric set:
                                               # and dashboards/fak-dogfood-slow-requests.json
                                               # and dashboards/fak-startup-load.json
                                               # and dashboards/fak-guard-adjudication.json
+                                              # and dashboards/fak-cache-value-rollup.json
 
 The committed JSON is what Grafana provisions; this generator is the maintainable
 source. `METRICS` / `GATEWAY_METRICS` below are the contract —
@@ -1055,7 +1056,8 @@ ABLATION_NOTE = (
     "feature's WITNESSED win over the `baseline` arm (marked in the table below), not a "
     "live provider measurement. Arms are labelled by `(arm, workload)`; a workload is a "
     "trace's content hash, so arms from different traces never share a bar. Populate by "
-    "dropping `fak ablate` report JSONs in `experiments/ablate/` (two ship with the repo)."
+    "dropping `fak ablate` report JSONs in `experiments/ablate/` (a sample report ships "
+    "with the repo; non-ablate JSONs there are skipped with a note)."
 )
 
 

@@ -353,6 +353,114 @@ def test_testfunc_regex_distinguishes_real_from_empty():
     assert cq._TESTFUNC_RE.search("package foo\nfunc FuzzZ(f *testing.F){}\n")
 
 
+# --- assertion strength: zero-assertion test funcs (#3832) ----------------
+
+def test_func_can_fail_direct_mechanisms():
+    # every direct failure mechanism clears the func, bound to the *actual* t-param name.
+    assert cq._func_can_fail('if got != want { t.Errorf("x") }', "t")
+    assert cq._func_can_fail("t.Fatal()", "t")
+    assert cq._func_can_fail("t.FailNow()", "t")
+    assert cq._func_can_fail('t.Run("sub", func(t *testing.T){})', "t")
+    assert cq._func_can_fail("require.NoError(t, err)", "t")
+    assert cq._func_can_fail("assert.Equal(t, a, b)", "t")
+    assert cq._func_can_fail('panic("boom")', "t")
+    assert cq._func_can_fail("t.Skip(\"later\")", "t")           # a skip is SKIP_DEBT, not this
+    assert cq._func_can_fail("checkRefusal(t, got)", "t")        # delegated assertion helper
+    assert cq._func_can_fail("p.mustEqual(tt, a, b)", "tt")      # custom t-param name
+    # a body with no reachable failure mechanism does NOT clear.
+    assert not cq._func_can_fail('t.Logf("just a log")', "t")
+    assert not cq._func_can_fail('fmt.Println("print, no assert")', "t")
+    assert not cq._func_can_fail("x := 1\n_ = x", "t")
+    # a t.Fatal for a DIFFERENT param name is not this test's failure mechanism.
+    assert not cq._func_can_fail("other.Fatal()", "t")
+
+
+def test_zero_assertion_flags_log_and_print_only():
+    src = (
+        "package p\n"
+        "import \"testing\"\n"
+        'func TestLogOnly(t *testing.T) {\n\tt.Logf("economics: %d", n)\n}\n'
+        'func TestPrintOnly(t *testing.T) {\n\tfmt.Println("scratch probe")\n}\n'
+        "func TestEmpty(t *testing.T) {\n}\n"
+    )
+    flagged, total = cq._zero_assertion_test_funcs(src)
+    assert total == 3
+    assert [f for f, _ in flagged] == ["TestLogOnly", "TestPrintOnly", "TestEmpty"]
+
+
+def test_zero_assertion_clears_asserting_and_delegating():
+    src = (
+        "package p\n"
+        'func TestAsserts(t *testing.T) {\n\tif a != b { t.Fatalf("no") }\n}\n'
+        "func TestDelegates(t *testing.T) {\n\tassertRefusal(t, got)\n}\n"
+        'func TestSubtest(t *testing.T) {\n\tt.Run("c", func(t *testing.T){ t.Fatal() })\n}\n'
+    )
+    flagged, total = cq._zero_assertion_test_funcs(src)
+    assert total == 3 and flagged == []
+
+
+def test_zero_assertion_excludes_non_T_signatures():
+    # Benchmark/Fuzz/Example/TestMain(*testing.M) are not graded — not in `total`.
+    src = (
+        "package p\n"
+        'func BenchmarkX(b *testing.B) {\n\tb.Log("nope")\n}\n'
+        'func FuzzY(f *testing.F) {\n\tf.Add(1)\n}\n'
+        "func TestMain(m *testing.M) {\n\tos.Exit(m.Run())\n}\n"
+        "func ExampleZ() {\n\tfmt.Println(1)\n}\n"
+    )
+    flagged, total = cq._zero_assertion_test_funcs(src)
+    assert total == 0 and flagged == []
+
+
+def test_zero_assertion_is_literal_aware():
+    # a t.Fatal() and a brace living INSIDE a string are not real code — the func is
+    # still zero-assertion, and the string-brace does not truncate the body scan.
+    src = (
+        "package p\n"
+        'func TestStr(t *testing.T) {\n\ts := "t.Fatal() { won\'t fool me }"\n\t_ = s\n}\n'
+    )
+    flagged, total = cq._zero_assertion_test_funcs(src)
+    assert total == 1 and [f for f, _ in flagged] == ["TestStr"]
+
+
+def test_zero_assertion_exempts_hidden_channel_asserts():
+    # build-checked interface conformance — BOTH the blank `var _` and the NAMED form —
+    # a re-exec child helper (os.Exit; the parent asserts), and a does-not-panic test all
+    # assert through a channel the t.* scan can't see; none is flagged.
+    src = (
+        "package p\n"
+        "func TestIfaceBlank(t *testing.T) {\n\tvar _ io.Writer = (*myW)(nil)\n}\n"
+        "func TestIfaceNamed(t *testing.T) {\n\tvar kv abi.KVBackend = NewAuditKV()\n\t_ = New(kv)\n}\n"
+        'func TestHelperProcess(t *testing.T) {\n'
+        '\tif os.Getenv("GO_WANT_HELPER") != "1" {\n\t\treturn\n\t}\n\tos.Exit(0)\n}\n'
+        "func TestDoesNotPanicOnEmpty(t *testing.T) {\n\tApply(emptySpec)\n}\n"
+    )
+    flagged, total = cq._zero_assertion_test_funcs(src)
+    assert total == 4, total
+    assert flagged == [], [f for f, _ in flagged]
+
+
+def test_zero_assertion_named_typed_var_still_flags_builtin():
+    # the named-conformance exemption must NOT clear a builtin-typed var (`var n int`) —
+    # a body whose only statement is a builtin-typed decl is genuinely zero-assertion.
+    src = "package p\nfunc TestBuiltinVar(t *testing.T) {\n\tvar n int = 0\n\t_ = n\n}\n"
+    flagged, _ = cq._zero_assertion_test_funcs(src)
+    assert [f for f, _ in flagged] == ["TestBuiltinVar"]
+
+
+def test_kpi_assertion_strength_scores_and_lists_defects():
+    k = cq.kpi_assertion_strength(["zero-assertion test (cannot fail): a_test.go:9 TestA"], 10)
+    assert k["kpi"] == "assertion_strength"
+    assert k["score"] == 90 and k["defects"] and k["soft"] == []
+    assert "9/10" in k["detail"]
+
+
+def test_kpi_assertion_strength_clean_and_empty_are_100():
+    assert cq.kpi_assertion_strength([], 42)["score"] == 100
+    empty = cq.kpi_assertion_strength([], 0)
+    assert empty["score"] == 100 and empty["detail"] == "no *testing.T test funcs"
+
+
 def main() -> int:
     """Pure-stdlib runner: collects and runs every module-level test_* function so the
     suite runs in the pytest-free CI exactly like its scorecard-family siblings

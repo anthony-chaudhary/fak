@@ -1,0 +1,8 @@
+{
+  "_note": "latest_reuse_ratio is 0/INSUFFICIENT under --since 2026-07-06; 0.697 is the W27 last-measured week from the unfloored report",
+  "_source": "fak cachevalue report --json  (UNFLOORED; --since removes the sparse KV sample)",
+  "_window": "all_time_last_measured",
+  "track1_witnessed_kernel": {
+    "latest_reuse_ratio": 0.697
+  }
+}

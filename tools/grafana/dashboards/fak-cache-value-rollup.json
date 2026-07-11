@@ -1692,7 +1692,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Offline, deterministic, $0.** These arms come from `fak ablate` replaying the SAME frozen trace with one feature toggled per arm \u2014 so `speedup_ratio > 1` is that feature's WITNESSED win over the `baseline` arm (marked in the table below), not a live provider measurement. Arms are labelled by `(arm, workload)`; a workload is a trace's content hash, so arms from different traces never share a bar. Populate by dropping `fak ablate` report JSONs in `experiments/ablate/` (two ship with the repo)."
+        "content": "**Offline, deterministic, $0.** These arms come from `fak ablate` replaying the SAME frozen trace with one feature toggled per arm \u2014 so `speedup_ratio > 1` is that feature's WITNESSED win over the `baseline` arm (marked in the table below), not a live provider measurement. Arms are labelled by `(arm, workload)`; a workload is a trace's content hash, so arms from different traces never share a bar. Populate by dropping `fak ablate` report JSONs in `experiments/ablate/` (a sample report ships with the repo; non-ablate JSONs there are skipped with a note)."
       },
       "pluginVersion": "11.5.2"
     },

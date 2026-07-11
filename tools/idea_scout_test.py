@@ -151,6 +151,21 @@ class ScoreTest(unittest.TestCase):
         _, reasons = M.score_candidate(old, TOPIC, cfg, NOW)
         self.assertNotIn("recent", " ".join(reasons))
 
+    def test_trending_bonus(self) -> None:
+        cfg = dict(M.DEFAULTS)
+        # Same stars, same recent push; only repo age differs. The young repo
+        # accrued its stars fast (high stars/day) and earns the trending bonus.
+        young = {"title": "agent x", "summary": "",
+                 "published": "2026-06-02T00:00:00Z",
+                 "extra": {"stars": 400, "pushed_at": "2026-06-20T00:00:00Z"}}
+        old = {"title": "agent x", "summary": "",
+               "published": "2022-06-02T00:00:00Z",
+               "extra": {"stars": 400, "pushed_at": "2026-06-20T00:00:00Z"}}
+        young_score, young_reasons = M.score_candidate(young, TOPIC, cfg, NOW)
+        old_score, _ = M.score_candidate(old, TOPIC, cfg, NOW)
+        self.assertGreater(young_score, old_score)
+        self.assertIn("trending", " ".join(young_reasons))
+
 
 class DedupTest(unittest.TestCase):
     def _index(self, issues):
@@ -298,11 +313,60 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(stats["seen-cache"], 1)
 
 
+class GatherTest(unittest.TestCase):
+    """gather_candidates walks GitHub on two lanes; the fresh lane admits young
+    repos the stars floor drops and tags their provenance. Hermetic: both
+    module-level fetchers are monkeypatched, nothing live runs."""
+
+    def test_fresh_lane_admits_young_repo_and_tags_it(self) -> None:
+        young = {"fullName": "newco/fresh-agent",
+                 "description": "a brand-new agent tool sandbox",
+                 "url": "https://github.com/newco/fresh-agent",
+                 "stargazersCount": 8, "pushedAt": "2026-06-18T00:00:00Z",
+                 "createdAt": "2026-06-10T00:00:00Z", "language": "Go"}
+        topics = [{"key": "t", "github": "agent tool", "terms": ["agent", "tool"]}]
+        cfg = dict(M.DEFAULTS)  # min_stars=25, fresh_min_stars=3, fresh_per_topic=6
+        errors: list[str] = []
+        orig_g, orig_f = M.fetch_github, M.fetch_github_fresh
+        try:
+            # Same repo on both lanes: the stars floor drops it, only fresh admits it.
+            M.fetch_github = lambda q, n: [dict(young)]
+            M.fetch_github_fresh = lambda q, n: [dict(young)]
+            cands = M.gather_candidates(topics, cfg, errors)
+        finally:
+            M.fetch_github, M.fetch_github_fresh = orig_g, orig_f
+        self.assertEqual(errors, [])
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0]["source_id"], "github:newco/fresh-agent")
+        self.assertEqual(cands[0]["extra"].get("lane"), "fresh")
+
+    def test_fresh_lane_respects_fresh_min_stars(self) -> None:
+        toy = {"fullName": "toy/repo", "url": "https://github.com/toy/repo",
+               "description": "", "stargazersCount": 1,
+               "pushedAt": "2026-06-19T00:00:00Z", "createdAt": "2026-06-15T00:00:00Z"}
+        topics = [{"key": "t", "github": "agent tool", "terms": ["agent"]}]
+        cfg = dict(M.DEFAULTS)  # fresh_min_stars=3
+        errors: list[str] = []
+        orig_g, orig_f = M.fetch_github, M.fetch_github_fresh
+        try:
+            M.fetch_github = lambda q, n: []
+            M.fetch_github_fresh = lambda q, n: [dict(toy)]
+            cands = M.gather_candidates(topics, cfg, errors)
+        finally:
+            M.fetch_github, M.fetch_github_fresh = orig_g, orig_f
+        self.assertEqual(errors, [])
+        self.assertEqual(cands, [])
+
+
 class ConfigCacheTest(unittest.TestCase):
     def test_default_config(self) -> None:
         topics, cfg = M.load_config(None)
         self.assertTrue(topics)
         self.assertEqual(cfg["max_issues"], M.DEFAULTS["max_issues"])
+        # the fresh-lane knobs are part of the default config
+        self.assertEqual(cfg["fresh_per_topic"], M.DEFAULTS["fresh_per_topic"])
+        self.assertEqual(cfg["fresh_min_stars"], 3)
+        self.assertEqual(cfg["fresh_window_days"], 45)
 
     def test_config_override(self) -> None:
         with tempfile.TemporaryDirectory() as d:

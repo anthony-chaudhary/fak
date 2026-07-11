@@ -83,6 +83,29 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
         self.assertLess(acquire, defer)
         self.assertIn("exit 0", text[defer:])
 
+    def test_publish_staleness_escalates_under_killed_cadence(self) -> None:
+        # #4025: a very_stale @latest under a killed auto-cut (FAK_AUTO_RELEASE=0) must
+        # escalate BEYOND the informational ::warning:: — by default via the SHARED,
+        # deduped gate-signal feeder, or a hard fail when the repo opts in. Pin the whole
+        # wiring so the escalation cannot be silently dropped back to warning-only.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        # The decide/shape helper is invoked against the staleness envelope + kill switch.
+        self.assertIn("python tools/release_stale_escalate.py", text)
+        self.assertIn("--from staleness.json", text)
+        self.assertIn("--auto-cut-disabled", text)
+        self.assertIn("--emit-envelope", text)
+        # The kill switch and the fail opt-in are both read from repo variables.
+        self.assertIn("FAK_AUTO_RELEASE", text)
+        self.assertIn("FAK_STALE_ESCALATION_FAIL", text)
+        # Escalation REUSES the deduped gate-signal feeder (not a second notification feed).
+        self.assertIn("python tools/gate_signal.py --from escalate-envelope.json --live", text)
+        # Filing an issue requires the job to hold issues: write.
+        self.assertIn("issues: write", text)
+        # Scoped to SCHEDULED ticks — a manual dispatch is operator-driven, never auto-files.
+        escalate = text.index("release_stale_escalate.py")
+        guard = text.rindex("github.event_name == 'schedule'", 0, escalate)
+        self.assertLess(guard, escalate, "the escalate step must be gated to schedule events")
+
     def test_workflow_does_not_bypass_tag_helper(self) -> None:
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("git push --tags", text)

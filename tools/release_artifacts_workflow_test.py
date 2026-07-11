@@ -18,6 +18,10 @@ WORKFLOW = ROOT / ".github" / "workflows" / "release-artifacts.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 INSTALL_SH = ROOT / "install.sh"
 DOCKERFILE = ROOT / "Dockerfile"
+# The stamp recipe (-trimpath/-ldflags) is DRY'd into the one canonical build
+# entrypoint (#3709); the workflow and Dockerfile route through it rather than
+# carrying the recipe inline, so those assertions follow it here.
+BUILD_SH = ROOT / "scripts" / "build.sh"
 
 # The four targets the issue's "Done when" enumerates.
 TARGETS = [
@@ -46,14 +50,20 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
 
     def test_static_no_cgo_build(self) -> None:
         # Static, reproducible, no cgo — the property that lets the binary run
-        # anywhere and the distroless image stay tiny.
+        # anywhere and the distroless image stay tiny. CGO_ENABLED stays in the job
+        # env; the -trimpath flag now lives in the shared recipe this workflow routes
+        # through (scripts/build.sh, #3709).
         self.assertIn('CGO_ENABLED: "0"', self.text)
-        self.assertIn("-trimpath", self.text)
+        self.assertIn("scripts/build.sh", self.text)
+        self.assertIn("-trimpath", BUILD_SH.read_text(encoding="utf-8"))
 
     def test_stamps_version_ldflag(self) -> None:
         # A shipped binary with no VERSION file alongside resolves its version from
-        # this ldflag (internal/appversion.Current precedence).
-        self.assertIn(LDFLAG, self.text)
+        # this ldflag (internal/appversion.Current precedence). The stamp is DRY'd
+        # into scripts/build.sh (#3709); the workflow inherits it by routing through
+        # that script rather than carrying the ldflag inline.
+        self.assertIn("scripts/build.sh", self.text)
+        self.assertIn(LDFLAG, BUILD_SH.read_text(encoding="utf-8"))
 
     def test_uploads_idempotently_with_checksums(self) -> None:
         self.assertIn("gh release upload", self.text)
@@ -175,7 +185,10 @@ class DockerfileContractTest(unittest.TestCase):
         self.assertIn("FROM golang:1.26 AS build", self.text)
         self.assertIn("CGO_ENABLED=0", self.text)
         self.assertIn("gcr.io/distroless/static", self.text)
-        self.assertIn(LDFLAG, self.text)
+        # The version stamp is DRY'd into scripts/build.sh (#3709); the Dockerfile
+        # routes through it instead of carrying the ldflag inline.
+        self.assertIn("scripts/build.sh", self.text)
+        self.assertIn(LDFLAG, BUILD_SH.read_text(encoding="utf-8"))
 
     def test_serves_on_all_interfaces(self) -> None:
         # Containers must bind 0.0.0.0, not loopback.

@@ -215,6 +215,155 @@ def test_render_compare_not_yet_2x():
     assert "not yet 2x" in out
 
 
+# --- fail-closed on genuine ruff-absence (the #3833 lesson) ----------------
+
+def test_lint_unavailable_fails_closed():
+    # ruff was PROBED and is absent → UNMEASURED, must fail closed at 0 + errored,
+    # never inflate the composite to a phantom 100.
+    k = tq.kpi_lint(None, unavailable=True)
+    assert k["score"] == 0 and k["errored"] is True and k["defects"] == []
+
+
+def test_lint_explicit_skip_stays_100_without_failure_language():
+    # `--no-toolchain` is a deliberate skip: 100 is legitimate, and the note must
+    # NOT speak measurement-failure language (else it reads as fail-open).
+    k = tq.kpi_lint(None)  # unavailable defaults False
+    assert k["score"] == 100
+    assert "unavailable" not in (k["detail"] + " ".join(k["soft"])).lower()
+
+
+def test_format_unavailable_fails_closed():
+    k = tq.kpi_format(None, 10, unavailable=True)
+    assert k["score"] == 0 and k["errored"] is True
+
+
+def test_gather_ruff_absent_fails_closed(monkeypatch, tmp_path):
+    # end-to-end: run_toolchain=True but ruff yields no verdict → lint/format
+    # KPIs come back fail-closed (0), NOT skipped@100.
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "x.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    monkeypatch.setattr(tq, "_ruff_check", lambda _d: None)
+    monkeypatch.setattr(tq, "_ruff_format_check", lambda _d: None)
+    kpis = {k["kpi"]: k for k in tq.gather(tmp_path, run_toolchain=True)}
+    assert kpis["lint"]["score"] == 0 and kpis["lint"].get("errored") is True
+    assert kpis["format"]["score"] == 0 and kpis["format"].get("errored") is True
+
+
+# --- the scorer-of-scorers fail-open self-audit ----------------------------
+
+_FAILOPEN_SRC = '''
+def kpi_x(dos):
+    if dos.get("error"):
+        return {"kpi": "x", "score": 100, "detail": "UNMEASURED (dos unavailable)",
+                "defects": [], "soft": ["scored 100, fail-open"]}
+    return {"kpi": "x", "score": 50, "defects": [], "soft": []}
+'''
+
+_FAILCLOSED_SRC = '''
+def kpi_x(dos):
+    if dos.get("error"):
+        return {"kpi": "x", "score": 0, "errored": True,
+                "detail": "UNMEASURED (dos unavailable)", "defects": [], "soft": []}
+    return {"kpi": "x", "score": 100, "defects": [], "soft": []}
+'''
+
+_OPTOUT_SRC = '''
+def kpi_x(dos):
+    if dos is None:
+        return {"kpi": "x", "score": 100, "detail": "skipped (--no-dos)",
+                "defects": [], "soft": ["dos review not run (--no-dos)"]}
+    return {"kpi": "x", "score": 100, "defects": [], "soft": []}
+'''
+
+_ABSENT_SUBJECT_SRC = '''
+def kpi_x(root):
+    if not root:
+        return {"kpi": "x", "score": 100, "detail": "no CLAIMS.md (skipped)",
+                "defects": [], "soft": ["CLAIMS.md not found"]}
+    return {"kpi": "x", "score": 100, "defects": [], "soft": []}
+'''
+
+
+def test_audit_failopen_flags_high_score_with_failure_language():
+    hits = tq.audit_failopen([("y_scorecard.py", _FAILOPEN_SRC)])
+    assert len(hits) == 1 and hits[0]["kpi"] == "x" and hits[0]["score"] == 100
+
+
+def test_audit_failopen_ignores_fail_closed_zero():
+    # score 0 is below the floor — a properly fail-closed branch is not flagged.
+    assert tq.audit_failopen([("y_scorecard.py", _FAILCLOSED_SRC)]) == []
+
+
+def test_audit_failopen_ignores_explicit_optout():
+    # "skipped (--no-dos)" / "not run" is a deliberate opt-out, not a failure.
+    assert tq.audit_failopen([("y_scorecard.py", _OPTOUT_SRC)]) == []
+
+
+def test_audit_failopen_ignores_absent_subject():
+    # "no CLAIMS.md / not found" is nothing-to-grade (vacuously 100), not fail-open.
+    assert tq.audit_failopen([("y_scorecard.py", _ABSENT_SUBJECT_SRC)]) == []
+
+
+def test_audit_failopen_catches_the_3833_regression():
+    # The exact pre-fix code_quality ship_integrity branch #3833 fixed. This proves
+    # the detector would have caught the original incident — the meta-loop closes.
+    pre_fix_3833 = '''
+def kpi_ship_integrity(dos):
+    if dos.get("error"):
+        return {"kpi": "ship_integrity", "score": 100,
+                "detail": f"UNMEASURED (dos review unavailable): {dos['error']}",
+                "defects": [],
+                "soft": ["ship_integrity UNMEASURED - dos unavailable, scored 100 (fail-open)"]}
+'''
+    hits = tq.audit_failopen([("code_quality_scorecard.py", pre_fix_3833)])
+    assert len(hits) == 1 and hits[0]["kpi"] == "ship_integrity"
+
+
+def test_audit_failopen_respects_inline_waiver():
+    waived = '''
+def kpi_x(dos):
+    if dos.get("error"):
+        # failopen-ok: reviewed — this axis is genuinely advisory-only here
+        return {"kpi": "x", "score": 100, "detail": "UNMEASURED (dos unavailable)",
+                "defects": [], "soft": []}
+'''
+    assert tq.audit_failopen([("y_scorecard.py", waived)]) == []
+
+
+def test_audit_failopen_skips_unparseable_source():
+    # a non-parseable source is skipped, never crashes the audit.
+    assert tq.audit_failopen([("bad_scorecard.py", "def (((")]) == []
+
+
+def test_tooling_quality_is_clean_under_its_own_audit():
+    # dogfood: this tool audits itself; after the fail-closed fix its own branches
+    # must not trip the detector (no self-false-positive).
+    src = (tq.repo_root() / "tools" / "tooling_quality_scorecard.py").read_text(encoding="utf-8")
+    assert tq.audit_failopen([("tooling_quality_scorecard.py", src)]) == []
+
+
+def test_observability_ship_integrity_clean_after_fix():
+    # regression guard: the observability fail-open this change fixed stays fixed.
+    p = tq.repo_root() / "tools" / "observability_scorecard.py"
+    if not p.exists():
+        return
+    src = p.read_text(encoding="utf-8")
+    hits = [h for h in tq.audit_failopen([("observability_scorecard.py", src)])
+            if h["kpi"] == "ship_integrity"]
+    assert hits == []
+
+
+def test_build_payload_surfaces_failopen_advisory():
+    kpis = [{"kpi": "lint", "score": 100, "detail": "clean", "defects": [], "soft": []}]
+    fo = [{"file": "tools/z_scorecard.py", "line": 9, "kpi": "q", "score": 100,
+           "detail": "z:9 fail-open"}]
+    p = tq.build_payload(workspace="/w", kpis=kpis, failopen=fo)
+    assert p["corpus"]["failopen_debt"] == 1
+    assert p["corpus"]["failopen"] == fo
+    # advisory: a fail-open finding alone does NOT flip ok (py_debt still gates)
+    assert p["ok"] is True and "fail-open" in p["reason"]
+
+
 def main() -> int:
     """Pure-stdlib runner: collects and runs every module-level test_* function so the
     suite runs in the pytest-free CI exactly like its scorecard-family siblings
