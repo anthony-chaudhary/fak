@@ -28,9 +28,20 @@ signal that the project welcomes them — then get them to the working proof fas
 | Español (Spanish) | [`es/README.md`](es/README.md) | Spain/EU + Latin America — RGPD self-host residency + EU-AI-Act audit; cost-sensitive self-host, Apache-2.0, no cross-border payment |
 | 日本語 (Japanese) | [`ja/README.md`](ja/README.md) | Japan — APPI self-host data residency, cost via cache-preserving serving, domestic/open-weights routing, tamper-evident audit log |
 | 简体中文 (Simplified Chinese) | [`zh/README.md`](zh/README.md) | China — domestic models (Qwen/GLM/DeepSeek), PIPL residency, `GOPROXY` onboarding |
+| 한국어 (Korean) | [`ko/README.md`](ko/README.md) | South Korea — PIPA data residency, self-host, domestic/open-weights routing, cost via cache |
+| Português (Portuguese) | [`pt/README.md`](pt/README.md) | Brazil & Portugal — LGPD/RGPD self-host residency, cost-sensitive self-host, Apache-2.0, no cross-border payment |
+| Русский (Russian) | [`ru/README.md`](ru/README.md) | Russia/CIS — 152-FZ data localization, self-host, domestic/open-weights, `GOPROXY` access note |
+| العربية (Arabic) | [`ar/README.md`](ar/README.md) | Gulf/MENA — PDPL (SA/UAE) data residency, RTL, self-host, cost in SAR/AED |
+| Bahasa Indonesia (Indonesian) | [`id/README.md`](id/README.md) | Indonesia — PDP Law (UU PDP 2022) residency, cost-sensitive self-host, Apache-2.0 |
+| Tiếng Việt (Vietnamese) | [`vi/README.md`](vi/README.md) | Vietnam — Decree 13/2023 (PDPD) data localization, self-host, cost |
+| Türkçe (Turkish) | [`tr/README.md`](tr/README.md) | Turkey — KVKK data residency, self-host, cost in TRY |
 
-Every page links back to this hub, and the Indian-language pages cross-link each other,
-so a reader landing on any one can reach the rest.
+Each language folder now also carries three deeper front doors alongside its `README.md`:
+**`quickstart.md`** (zero to a governed local model in ~10 minutes), **`install.md`** (install the
+binary and the tier map), and **`faq.md`** (top first-contact questions).
+
+Every page links back to this hub and cross-links its sibling pages, so a reader landing on
+any one can reach the rest.
 
 ## Status & honesty fence
 
