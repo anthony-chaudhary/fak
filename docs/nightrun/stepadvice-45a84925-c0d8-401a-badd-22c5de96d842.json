@@ -1,0 +1,10 @@
+{
+  "schema": "fak.stepadvice.stamp.v1",
+  "trace_id": "contract-repair-claude-70568-4da33e7c",
+  "step_class": "checkpoint",
+  "basis": "token_headroom",
+  "reason": "resident 75.4k of 96.0k budget (78% used), est 2.3 turn(s) to the next context event",
+  "resident_tokens": 75351,
+  "budget_tokens": 96000,
+  "phase": "cruising"
+}

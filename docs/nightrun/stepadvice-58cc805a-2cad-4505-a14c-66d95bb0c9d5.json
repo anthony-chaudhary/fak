@@ -1,0 +1,10 @@
+{
+  "schema": "fak.stepadvice.stamp.v1",
+  "trace_id": "win-3810a32ac57b43ec",
+  "step_class": "rebuild",
+  "basis": "context_event",
+  "reason": "context event 0 turn(s) ago rewrote the window; re-anchor from durable state before a wide step",
+  "resident_tokens": 80571,
+  "budget_tokens": 48000,
+  "phase": "post_event"
+}

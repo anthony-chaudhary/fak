@@ -1,0 +1,10 @@
+{
+  "schema": "fak.stepadvice.stamp.v1",
+  "trace_id": "toolproc-claude-7344-03955579",
+  "step_class": "bounded",
+  "basis": "token_headroom",
+  "reason": "resident 71.9k of 96.0k budget (75% used), est 6.5 turn(s) to the next context event",
+  "resident_tokens": 71910,
+  "budget_tokens": 96000,
+  "phase": "cruising"
+}
