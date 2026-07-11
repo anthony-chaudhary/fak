@@ -124,12 +124,22 @@ OpenAI server on `:8000`, health-checks `/models`, and prints the exact `fak ser
 
 > **Architecture floor — confirm before reserving GPU time.** V4 checkpoints are
 > **FP4** (MoE experts) + **FP8** (most params) with an **FP4 attention indexer**,
-> and the attention stack is **DSA (DeepSeek Sparse Attention)**. Stock kernels
-> generally need **sm_90+ (Hopper)**, with **sm_100 (Blackwell)** for native NVFP4.
-> A **Volta-class node (V100, sm_70) cannot serve a stock V4 path**; an Ampere
-> sm_80 node is BF16-dense-fallback-only. The script warns and refuses below the
-> floor unless `FAK_DGX_FORCE=1`. V4-**Pro** (1.6T total) is a **multi-node**
-> expert-parallel deployment; size a single node against V4-**Flash** first.
+> and the attention stack is **DSA (DeepSeek Sparse Attention)**. **Stock** kernels
+> (vLLM/SGLang/NIM) generally need **sm_90+ (Hopper)**, with **sm_100 (Blackwell)**
+> for native NVFP4. `scripts/dgx-deepseek-serve.sh` fronts a stock engine and warns
+> and refuses below the floor unless `FAK_DGX_FORCE=1`. V4-**Pro** (1.6T total) is a
+> **multi-node** expert-parallel deployment; size a single node against V4-**Flash**
+> first.
+>
+> **sm_80 (Ampere/A100) is no longer dead-ended.** A V4-aware **llama.cpp fork**
+> ([cchuter `feat/v4-port-cuda`](https://github.com/cchuter/llama.cpp); upstream
+> [PR #24162](https://github.com/ggml-org/llama.cpp/pull/24162) for Unsloth quants)
+> serves **V4-Flash** on sm_80 via CUDA V4-op kernels + a software-emulated FP8 path
+> — the same route that overcame the sm_90 wall for GLM-5.2 on A100. V4-Flash GGUFs
+> (≈103–162 GB) fit **resident** on 8×A100-80 GB. The turnkey harness is
+> [`tools/deepseekv4_stage_serve_dgx3.sh`](../../tools/deepseekv4_stage_serve_dgx3.sh).
+> This is the interim serve path; the fak-native V4 kernel is a separate track
+> ([#3016](https://github.com/anthony-chaudhary/fak/issues/3016)–[#3019](https://github.com/anthony-chaudhary/fak/issues/3019)).
 
 The full procedure, the minimum-evidence witness ladder, and the comparability
 boundary are in the
