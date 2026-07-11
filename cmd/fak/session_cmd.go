@@ -95,6 +95,13 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "checkpoint" {
 		return runSessionCheckpoint(stdout, stderr, args)
 	}
+	// fork (#2761) snapshot-and-branches a session into a divergent continuation — an offline
+	// image-in, image-out move over internal/sessionimage.ForkDir that pins the branch point
+	// (checkpoint, #2760) then diverges from it (branch, #1200), source read-only, never
+	// dialing a live gateway. Dispatched alongside its sibling lifecycle verbs.
+	if verb == "fork" {
+		return runSessionFork(stdout, stderr, args)
+	}
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
 	}
@@ -797,6 +804,11 @@ func sessionUsage(w io.Writer) {
   fak session checkpoint <image-dir> --out <snap-dir> [--reason R] [--json]
                                                offline on-demand snapshot of a session
                                                (same id, copy-on-write, source unaffected)
+  fak session fork     <parent-image-dir> --out <fork-dir> --checkpoint <branch-point-dir>
+                       [--id ID] [--reason R] [--to-model M] [--to-host H] [--registry PATH] [--json]
+                                               snapshot-and-branch a session into a divergent
+                                               continuation: pin an immutable branch point,
+                                               then fork it under a fresh trace (original untouched)
 
 flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json
