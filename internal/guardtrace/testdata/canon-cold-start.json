@@ -1,0 +1,14 @@
+{
+  "slice_id": "canon-cold-start",
+  "_provenance": "Canonical cache-economy transcript #1 for the shed/reuse golden regression (#3639). A cold first turn: the whole prompt is prefilled fresh and WRITTEN to cache (cache_creation), nothing is read back yet. Reuse ratio is 0 (nothing served from the prefix) and shed is 0 (a single turn removes nothing from the window). This pins the cold regime so a transform that fabricates reuse on a cold prime reds the golden.",
+  "_classes": "allow | deny",
+  "turns": [
+    {
+      "note": "Cold prime. cache_read=0, cache_creation=2400 -> resident prompt is all fresh, reuse 0, cold bucket.",
+      "usage": { "input_tokens": 800, "output_tokens": 40, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 2400 },
+      "calls": [
+        { "id": "cold_read", "tool": "Read", "args": { "file_path": "README.md" }, "class": "allow" }
+      ]
+    }
+  ]
+}

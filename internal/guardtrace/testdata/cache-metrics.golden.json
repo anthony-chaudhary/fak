@@ -1,0 +1,38 @@
+[
+  {
+    "slice_id": "canon-cold-start",
+    "turns": 1,
+    "prompt_tokens": 3200,
+    "reused_tokens": 0,
+    "cache_creation_tokens": 2400,
+    "shed_tokens": 0,
+    "reuse_ratio": 0,
+    "frozen_turns": 0,
+    "partial_turns": 0,
+    "cold_turns": 1
+  },
+  {
+    "slice_id": "canon-compaction-shed",
+    "turns": 5,
+    "prompt_tokens": 14050,
+    "reused_tokens": 9000,
+    "cache_creation_tokens": 4000,
+    "shed_tokens": 2330,
+    "reuse_ratio": 0.640569,
+    "frozen_turns": 0,
+    "partial_turns": 4,
+    "cold_turns": 1
+  },
+  {
+    "slice_id": "canon-frozen-append",
+    "turns": 4,
+    "prompt_tokens": 8080,
+    "reused_tokens": 5860,
+    "cache_creation_tokens": 1810,
+    "shed_tokens": 0,
+    "reuse_ratio": 0.725248,
+    "frozen_turns": 3,
+    "partial_turns": 0,
+    "cold_turns": 1
+  }
+]

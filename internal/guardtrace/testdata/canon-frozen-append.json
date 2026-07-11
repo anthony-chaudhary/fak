@@ -1,0 +1,35 @@
+{
+  "slice_id": "canon-frozen-append",
+  "_provenance": "Canonical cache-economy transcript #2 for the shed/reuse golden regression (#3639). An append-only, linear session: one unavoidable cold prime, then turns that read the growing cached prefix back. The resident prompt only GROWS turn over turn, so shed stays 0, while the per-turn reuse ratio climbs into the frozen regime (>= 0.90). This pins the frozen-append ceiling so an anchor/upgrade transform that drops reuse on a stable trajectory reds the golden.",
+  "_classes": "allow | deny",
+  "turns": [
+    {
+      "note": "Cold prime. resident=1800 (200 fresh + 1600 written), reuse 0, cold.",
+      "usage": { "input_tokens": 200, "output_tokens": 30, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 1600 },
+      "calls": [
+        { "id": "fa_read1", "tool": "Read", "args": { "file_path": "main.go" }, "class": "allow" }
+      ]
+    },
+    {
+      "note": "Reads the primed prefix. resident=1960 (grew), reused=1800, ratio 0.918 -> frozen.",
+      "usage": { "input_tokens": 80, "output_tokens": 24, "cache_read_input_tokens": 1800, "cache_creation_input_tokens": 80 },
+      "calls": [
+        { "id": "fa_ls", "tool": "Bash", "args": { "command": "ls -la" }, "class": "allow" }
+      ]
+    },
+    {
+      "note": "Prefix grew; still append-only. resident=2100, reused=1960, ratio 0.933 -> frozen, shed 0.",
+      "usage": { "input_tokens": 70, "output_tokens": 20, "cache_read_input_tokens": 1960, "cache_creation_input_tokens": 70 },
+      "calls": [
+        { "id": "fa_grep", "tool": "Bash", "args": { "command": "grep -r TODO ." }, "class": "allow" }
+      ]
+    },
+    {
+      "note": "Frozen ceiling holding. resident=2220, reused=2100, ratio 0.946 -> frozen, shed 0.",
+      "usage": { "input_tokens": 60, "output_tokens": 18, "cache_read_input_tokens": 2100, "cache_creation_input_tokens": 60 },
+      "calls": [
+        { "id": "fa_read2", "tool": "Read", "args": { "file_path": "notes.txt" }, "class": "allow" }
+      ]
+    }
+  ]
+}

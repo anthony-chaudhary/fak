@@ -1,0 +1,43 @@
+{
+  "slice_id": "canon-compaction-shed",
+  "_provenance": "Canonical cache-economy transcript #3 for the shed/reuse golden regression (#3639). A session that grows its window for three turns, then a compaction/prune FIRES on turn 4 and sheds a large slice of the resident prompt (the resident prompt collapses from 3880 to 1550), before re-warming on turn 5. Reuse stays in the partial regime throughout; the shed count is the sum of the turn-over-turn resident-prompt reductions (the ablate ShedTokens sense: resident tokens the fire removed). This pins the prune/defer shed so a transform that changes how much the window sheds reds the golden.",
+  "_classes": "allow | deny",
+  "turns": [
+    {
+      "note": "Cold prime. resident=3400, reuse 0, cold.",
+      "usage": { "input_tokens": 400, "output_tokens": 42, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 3000 },
+      "calls": [
+        { "id": "cs_read1", "tool": "Read", "args": { "file_path": "server.go" }, "class": "allow" }
+      ]
+    },
+    {
+      "note": "Window grows. resident=3600 (grew), reused=3000, ratio 0.833 -> partial, shed 0.",
+      "usage": { "input_tokens": 200, "output_tokens": 30, "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 400 },
+      "calls": [
+        { "id": "cs_ls", "tool": "Bash", "args": { "command": "ls internal" }, "class": "allow" }
+      ]
+    },
+    {
+      "note": "Window grows further. resident=3880 (grew), reused=3400, ratio 0.876 -> partial, shed 0.",
+      "usage": { "input_tokens": 180, "output_tokens": 28, "cache_read_input_tokens": 3400, "cache_creation_input_tokens": 300 },
+      "calls": [
+        { "id": "cs_grep", "tool": "Bash", "args": { "command": "grep -rn func ." }, "class": "allow" },
+        { "id": "cs_rm", "tool": "Bash", "args": { "command": "rm -rf /tmp/scratch" }, "class": "deny", "reason": "POLICY_BLOCK" }
+      ]
+    },
+    {
+      "note": "COMPACTION FIRES: old turns shed, resident collapses 3880 -> 1550 (shed 2330). reused=1200, ratio 0.774 -> partial.",
+      "usage": { "input_tokens": 150, "output_tokens": 26, "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 200 },
+      "calls": [
+        { "id": "cs_read2", "tool": "Read", "args": { "file_path": "server.go" }, "class": "allow" }
+      ]
+    },
+    {
+      "note": "Re-warm after the shed. resident=1620 (grew), reused=1400, ratio 0.864 -> partial, shed 0.",
+      "usage": { "input_tokens": 120, "output_tokens": 22, "cache_read_input_tokens": 1400, "cache_creation_input_tokens": 100 },
+      "calls": [
+        { "id": "cs_read3", "tool": "Read", "args": { "file_path": "notes.txt" }, "class": "allow" }
+      ]
+    }
+  ]
+}
