@@ -44,6 +44,45 @@ func (p *PagedKVPool) blocksForTokens(n int) int {
 	return (n + p.blockTokens - 1) / p.blockTokens
 }
 
+// canReserveBlocks reports whether the pool can satisfy an n-block batch reservation in full:
+// the free list plus, when MaxBlocks > 0, the remaining growth budget (MaxBlocks - len(blocks),
+// clamped at zero in case MaxBlocks was set below the already-grown backing store). With
+// MaxBlocks == 0 the pool is unbounded and any batch is satisfiable — the pre-#3386 contract.
+// Pure capacity arithmetic: it mints nothing and mutates nothing.
+func (p *PagedKVPool) canReserveBlocks(n int) bool {
+	if n <= 0 {
+		return true
+	}
+	if p.MaxBlocks <= 0 {
+		return true
+	}
+	budget := p.MaxBlocks - len(p.blocks)
+	if budget < 0 {
+		budget = 0
+	}
+	return len(p.free)+budget >= n
+}
+
+// TryReserveBlocks is the capacity-aware, ALL-OR-NOTHING batch reserve (#3386): it appends
+// exactly n owned (ref==1), zeroed physical blocks to this sequence's page table and returns
+// true — but only after checking, BEFORE minting any block, that the pool's free list plus its
+// remaining growth budget (MaxBlocks - len(blocks), when MaxBlocks > 0) can satisfy the whole
+// batch. On a shortfall it returns false and mutates NOTHING — no block is minted, the free
+// list, backing store, and page table are untouched — so there is no partial commit and no
+// rollback path. A non-positive n is trivially satisfied (true, nothing minted). With
+// MaxBlocks == 0 the pool is unbounded and TryReserveBlocks always succeeds, preserving the
+// pre-#3386 alloc-never-fails behavior.
+func (s *PagedKV) TryReserveBlocks(n int) bool {
+	p := s.pool
+	if !p.canReserveBlocks(n) {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		s.table = append(s.table, p.alloc())
+	}
+	return true
+}
+
 // Reserve pre-allocates the owned physical blocks a future growth of extraTokens more tokens
 // will cross into, so subsequent Append/AppendRaw calls draw them from this sequence's page
 // table instead of minting fresh blocks from the pool on the decode hot-path. It does NOT
@@ -51,15 +90,18 @@ func (p *PagedKVPool) blocksForTokens(n int) int {
 // never read by GatherK/GatherV (which stop at Len), so the sequence's live content stays
 // bit-exact. Blocks() and OverheadRatio() do grow to reflect the reserved capacity — the paged
 // analogue of the contiguous cache's cap > len. A non-positive extraTokens is a no-op.
+//
+// Since #3386 Reserve is backed by TryReserveBlocks, so it is capacity-aware and all-or-nothing:
+// on a pool with MaxBlocks > 0, a reservation the free list plus growth budget cannot FULLY
+// satisfy fails cleanly (no block minted, nothing mutated) instead of growing the pool
+// unbounded. With MaxBlocks == 0 (the default) every reservation succeeds exactly as before, so
+// existing callers are unaffected.
 func (s *PagedKV) Reserve(extraTokens int) {
 	if extraTokens <= 0 {
 		return
 	}
-	p := s.pool
-	want := p.blocksForTokens(s.nTokens + extraTokens)
-	for len(s.table) < want {
-		s.table = append(s.table, p.alloc())
-	}
+	want := s.pool.blocksForTokens(s.nTokens + extraTokens)
+	s.TryReserveBlocks(want - len(s.table))
 }
 
 // Clone returns an EAGER deep copy of this sequence: every physical block is copied to a fresh

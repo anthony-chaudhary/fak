@@ -49,6 +49,13 @@ type PagedKVPool struct {
 	blocks      [][]float32 // physical storage, indexed by block id (len == blockFloats())
 	ref         []int       // reference count per block id; 0 == free
 	free        []int       // free list of reusable block ids
+
+	// MaxBlocks optionally caps the pool's backing store (#3386): when > 0, capacity-aware
+	// reservation (TryReserveBlocks / Reserve) may grow the pool to at most MaxBlocks physical
+	// blocks and refuses — all-or-nothing, mutating nothing — a batch the free list plus the
+	// remaining growth budget cannot fully satisfy. 0 (the zero value) means unbounded, which
+	// preserves the pre-#3386 behavior exactly for every existing caller.
+	MaxBlocks int
 }
 
 // NewPagedKVPool builds a pool sized to a model config with blockTokens tokens per block.
