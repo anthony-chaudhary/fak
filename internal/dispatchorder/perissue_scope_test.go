@@ -26,7 +26,10 @@ package dispatchorder
 // "disjoint" issues can still collide on disk; the tree lease is only as honest
 // as the contract that produced it.
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestPerIssueScopeSameLaneDisjointRunConcurrently is #3592 acceptance #1: two
 // issues in the SAME dispatch lane whose declared Paths are disjoint are BOTH
@@ -90,5 +93,75 @@ func TestPerIssueScopeUndeclaredFallsBackToLaneTree(t *testing.T) {
 	}
 	if r.SafeConcurrency != 1 {
 		t.Fatalf("SafeConcurrency = %d, want 1 (undeclared issue claims the whole lane)", r.SafeConcurrency)
+	}
+}
+
+// TestPerIssueScopeCollisionRowsCarryPerIssueTree is #3592 acceptance #3 pinned at
+// the geometry boundary that BUILDS the operator-facing rows: when two same-dispatch-
+// lane issues collide, the Collision edge AND the RepartitionAdvice row must expose the
+// PER-ISSUE tree (a strict sub-path of the coarse lane tree), never the whole-lane glob
+// the old wave fed. `fak dispatch wave` surfaces res.Collisions/res.Repartition verbatim
+// into its price (dispatchWaveBuildPrice), so pinning the tree the pricer emits pins what
+// the price shows. Both declared trees here are strictly narrower than the lane root
+// internal/dispatchorder and overlap only by containment, so a row could carry the lane
+// glob ONLY if a regression widened the fed tree back to grp.Tree — which this catches.
+func TestPerIssueScopeCollisionRowsCarryPerIssueTree(t *testing.T) {
+	const laneRoot = "internal/dispatchorder"
+	// A file the coarse lane tree never names: its presence in a row proves the row
+	// reflects per-issue scope, not the whole-lane tree.
+	const issueFile = "internal/dispatchorder/scorecard/pane.go"
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "iss-606", Key: "iss-606", Lane: "dispatchorder#606", Tree: []string{"internal/dispatchorder/scorecard"}, Mode: "exclusive", UpdatedUnix: base - 100},
+		{ID: "iss-707", Key: "iss-707", Lane: "dispatchorder#707", Tree: []string{issueFile}, Mode: "exclusive", UpdatedUnix: base - 50},
+	}})
+	if r.KeepCount != 1 || r.CollisionCount != 1 || r.SafeConcurrency != 1 {
+		t.Fatalf("scoped overlap = keep %d collision %d safe %d, want 1/1/1",
+			r.KeepCount, r.CollisionCount, r.SafeConcurrency)
+	}
+	// scoped asserts every tree entry is a strict sub-path of the lane root (proves
+	// per-issue narrowing) and carries no glob (proves it is not the coarse grp.Tree).
+	scoped := func(label string, trees []string) {
+		t.Helper()
+		if len(trees) == 0 {
+			t.Fatalf("%s tree is empty, want the per-issue path(s)", label)
+		}
+		for _, tr := range trees {
+			if strings.Contains(tr, "*") {
+				t.Fatalf("%s tree %v carries a glob, want a concrete per-issue path (lane tree leaked)", label, trees)
+			}
+			if tr == laneRoot || !strings.HasPrefix(tr, laneRoot+"/") {
+				t.Fatalf("%s tree entry %q is not a strict sub-path of lane root %q — coarse lane tree leaked", label, tr, laneRoot)
+			}
+		}
+	}
+	has := func(trees []string, want string) bool {
+		for _, tr := range trees {
+			if tr == want {
+				return true
+			}
+		}
+		return false
+	}
+	// Collision row carries the per-issue tree.
+	if len(r.Collisions) != 1 || r.Collisions[0].Reason != ReasonCollisionRisk {
+		t.Fatalf("collisions = %+v, want one %s edge", r.Collisions, ReasonCollisionRisk)
+	}
+	scoped("collision", r.Collisions[0].Tree)
+	if !has(r.Collisions[0].Tree, issueFile) {
+		t.Fatalf("collision tree %v does not name the per-issue file %q", r.Collisions[0].Tree, issueFile)
+	}
+	// Repartition row (built only for the collided candidate) carries the per-issue tree.
+	if len(r.Repartition) != 1 {
+		t.Fatalf("repartition rows = %d (%+v), want exactly 1 for the collided candidate", len(r.Repartition), r.Repartition)
+	}
+	adv := r.Repartition[0]
+	scoped("repartition current", adv.CurrentTree)
+	scoped("repartition overlap", adv.OverlapTree)
+	if adv.Action != "narrow_to_issue_paths" {
+		t.Fatalf("repartition action = %q, want narrow_to_issue_paths (both peers scoped)", adv.Action)
+	}
+	if !has(adv.OverlapTree, issueFile) && !has(adv.CurrentTree, issueFile) {
+		t.Fatalf("repartition row does not surface per-issue file %q: current=%v overlap=%v",
+			issueFile, adv.CurrentTree, adv.OverlapTree)
 	}
 }
