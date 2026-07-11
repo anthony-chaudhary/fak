@@ -675,6 +675,49 @@ func accountWaveSlotLess(a, b AccountRow, loadA, loadB int) bool {
 	return accountRouteLess(a, b)
 }
 
+// LaneUnattributed is the bucket LaneSeatShare files a leased seat under when its
+// lane cannot be resolved (laneOf is nil or returns an empty/whitespace lane).
+const LaneUnattributed = "unattributed"
+
+// LaneShare is the per-lane rollup LaneSeatShare returns: how many leased seats
+// resolved to the lane, and that lane's fraction of all leases in the input.
+type LaneShare struct {
+	Count int     `json:"count"`
+	Share float64 `json:"share"`
+}
+
+// LaneSeatShare groups leased seats by lane and returns each lane's leased-seat
+// Count and its Share of the total leases. laneOf resolves a lease to its lane; a
+// lease whose resolved lane is empty (unresolved, or laneOf is nil) is bucketed
+// under LaneUnattributed so no lease is silently dropped and the counts always sum
+// to len(leases). Share is Count/total, so over a non-empty input the shares sum to
+// 1. A pure fold -- no I/O, deterministic in its inputs; an empty input returns an
+// empty (non-nil) map with no divide-by-zero.
+func LaneSeatShare(leases []SeatLease, laneOf func(SeatLease) string) map[string]LaneShare {
+	counts := map[string]int{}
+	total := 0
+	for _, lease := range leases {
+		lane := ""
+		if laneOf != nil {
+			lane = strings.TrimSpace(laneOf(lease))
+		}
+		if lane == "" {
+			lane = LaneUnattributed
+		}
+		counts[lane]++
+		total++
+	}
+	out := make(map[string]LaneShare, len(counts))
+	for lane, count := range counts {
+		share := 0.0
+		if total > 0 {
+			share = float64(count) / float64(total)
+		}
+		out[lane] = LaneShare{Count: count, Share: share}
+	}
+	return out
+}
+
 func leaseLoadByPool(rows []AccountRow, leases []SeatLease) map[string]int {
 	out := map[string]int{}
 	for pool, workers := range leaseWorkersByPool(rows, leases) {

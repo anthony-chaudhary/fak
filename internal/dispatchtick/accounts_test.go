@@ -404,3 +404,74 @@ func TestAccountNormalizeAppliesClaudeLoginGate(t *testing.T) {
 		t.Fatalf("seat pool = %+v, want login-blocked seat", pool)
 	}
 }
+
+func TestLaneSeatShare(t *testing.T) {
+	// Lanes A (x2), B (x1), C (x1), plus two leases whose lane does not resolve
+	// (one empty, one whitespace-only) -> both bucketed under LaneUnattributed.
+	leases := []SeatLease{
+		{Worker: "w1", Tag: "a-one"},
+		{Worker: "w2", Tag: "a-two"},
+		{Worker: "w3", Tag: "b-one"},
+		{Worker: "w4", Tag: "c-one"},
+		{Worker: "w5", Tag: "orphan"}, // laneOf returns "" -> unattributed
+		{Worker: "w6", Tag: "spacey"}, // laneOf returns "  " -> trimmed empty -> unattributed
+	}
+	laneOf := func(l SeatLease) string {
+		switch l.Tag {
+		case "a-one", "a-two":
+			return "A"
+		case "b-one":
+			return "B"
+		case "c-one":
+			return "C"
+		case "spacey":
+			return "  " // whitespace must trim to empty and bucket as unattributed
+		default:
+			return "" // unresolved lane
+		}
+	}
+
+	got := LaneSeatShare(leases, laneOf)
+	want := map[string]LaneShare{
+		"A":              {Count: 2, Share: 2.0 / 6.0},
+		"B":              {Count: 1, Share: 1.0 / 6.0},
+		"C":              {Count: 1, Share: 1.0 / 6.0},
+		LaneUnattributed: {Count: 2, Share: 2.0 / 6.0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("lane count = %d %+v, want %d lanes", len(got), got, len(want))
+	}
+	var sum float64
+	for lane, w := range want {
+		g, ok := got[lane]
+		if !ok {
+			t.Fatalf("missing lane %q in %+v", lane, got)
+		}
+		if g.Count != w.Count {
+			t.Fatalf("lane %q count = %d, want %d", lane, g.Count, w.Count)
+		}
+		if diff := g.Share - w.Share; diff > 1e-9 || diff < -1e-9 {
+			t.Fatalf("lane %q share = %v, want %v", lane, g.Share, w.Share)
+		}
+	}
+	for _, g := range got {
+		sum += g.Share
+	}
+	if diff := sum - 1.0; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("shares sum = %v, want 1.0", sum)
+	}
+
+	// Empty input -> empty (non-nil) map: no phantom unattributed lane, no NaN share.
+	if empty := LaneSeatShare(nil, laneOf); len(empty) != 0 {
+		t.Fatalf("empty input lanes = %+v, want empty map", empty)
+	}
+
+	// Nil laneOf -> every lease is unattributed.
+	nilFold := LaneSeatShare([]SeatLease{{Worker: "x"}, {Worker: "y"}}, nil)
+	if len(nilFold) != 1 {
+		t.Fatalf("nil laneOf lanes = %+v, want only unattributed", nilFold)
+	}
+	if u := nilFold[LaneUnattributed]; u.Count != 2 || u.Share != 1.0 {
+		t.Fatalf("nil laneOf unattributed = %+v, want count 2 share 1.0", u)
+	}
+}
