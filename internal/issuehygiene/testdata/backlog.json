@@ -1,0 +1,82 @@
+[
+  {
+    "number": 101,
+    "title": "Wire the managed-cache posture into the resume watchdogs",
+    "state": "OPEN",
+    "labels": [{"name": "class:dev"}, {"name": "priority/P1"}, {"name": "bug"}, {"name": "dispatch"}],
+    "assignees": [{"login": "alice"}],
+    "createdAt": "2025-05-20T00:00:00Z",
+    "updatedAt": "2025-06-20T00:00:00Z",
+    "body": "## Current state\nThe watchdog ignores the managed-cache posture flag entirely.\n\n## Scope\nFlip the default and thread it through.\n\n## Done condition\nThe watchdog reads the posture on every tick.\n\n## Witness\ngo test ./cmd/fak -run Watchdog passes with the posture on.\n\n## Likely files\ncmd/fak/guard_startup.go"
+  },
+  {
+    "number": 102,
+    "title": "Teach the broker to backfill account cooldown from the ledger",
+    "state": "OPEN",
+    "labels": [{"name": "priority/P2"}, {"name": "enhancement"}, {"name": "dispatch"}],
+    "assignees": [],
+    "createdAt": "2025-05-21T00:00:00Z",
+    "updatedAt": "2025-06-18T00:00:00Z",
+    "body": "## Current state\nCooldown is recomputed from scratch each launch.\n\n## Scope\nRead the prior cooldown out of the probe ledger.\n\n## Done condition\nA relaunched broker keeps the prior cooldown.\n\n## Witness\ngo test ./internal/accountprobe passes.\n\n## Likely files\ninternal/accountprobe/probe_ledger.go"
+  },
+  {
+    "number": 103,
+    "title": "Render the fleet pane headroom column in the info tab",
+    "state": "OPEN",
+    "labels": [{"name": "class:dev"}, {"name": "enhancement"}, {"name": "dispatch"}],
+    "assignees": [],
+    "createdAt": "2025-05-22T00:00:00Z",
+    "updatedAt": "2025-06-15T00:00:00Z",
+    "body": "## Current state\nThe info tab omits per-account headroom.\n\n## Scope\nAdd a headroom column sourced from the roster.\n\n## Done condition\nThe info tab shows a headroom column.\n\n## Witness\ngo test ./cmd/fak -run InfoTabs passes.\n\n## Likely files\ncmd/fak/info_tabs_render.go"
+  },
+  {
+    "number": 104,
+    "title": "Something is wrong with the loop and it should be fixed soon",
+    "state": "OPEN",
+    "labels": [{"name": "class:dev"}, {"name": "priority/P2"}, {"name": "bug"}, {"name": "dispatch"}],
+    "assignees": [],
+    "createdAt": "2025-05-23T00:00:00Z",
+    "updatedAt": "2025-06-14T00:00:00Z",
+    "body": "The loop sometimes stalls. Please look into it when you get a chance, thanks."
+  },
+  {
+    "number": 105,
+    "title": "Wire the managed-cache posture into the resume watchdogs",
+    "state": "OPEN",
+    "labels": [{"name": "class:dev"}, {"name": "priority/P1"}, {"name": "bug"}, {"name": "dispatch"}],
+    "assignees": [],
+    "createdAt": "2025-05-24T00:00:00Z",
+    "updatedAt": "2025-06-13T00:00:00Z",
+    "body": "## Current state\nThe watchdog ignores the managed-cache posture flag entirely.\n\n## Scope\nFlip the default and thread it through.\n\n## Done condition\nThe watchdog reads the posture on every tick.\n\n## Witness\ngo test ./cmd/fak -run Watchdog passes with the posture on.\n\n## Likely files\ncmd/fak/guard_startup.go"
+  },
+  {
+    "number": 200,
+    "title": "epic(dispatch): overhaul the pickup ranking",
+    "state": "OPEN",
+    "labels": [{"name": "epic"}],
+    "assignees": [],
+    "createdAt": "2025-05-10T00:00:00Z",
+    "updatedAt": "2025-06-10T00:00:00Z",
+    "body": "We should make pickup ranking much better across the board. Lots to do here."
+  },
+  {
+    "number": 300,
+    "title": "Idea: maybe we could cache the tokenizer vocab across runs",
+    "state": "OPEN",
+    "labels": [{"name": "needs-triage"}],
+    "assignees": [],
+    "createdAt": "2025-06-01T00:00:00Z",
+    "updatedAt": "2025-06-09T00:00:00Z",
+    "body": "Random thought, needs scoping before anyone picks it up."
+  },
+  {
+    "number": 400,
+    "title": "Backfill the antipattern score corpus with the new fixtures",
+    "state": "OPEN",
+    "labels": [{"name": "class:dev"}, {"name": "priority/P2"}, {"name": "documentation"}, {"name": "rsi"}],
+    "assignees": [],
+    "createdAt": "2024-12-15T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z",
+    "body": "## Current state\nThe antipattern corpus predates the new fixture format.\n\n## Scope\nRegenerate the corpus from the current fixtures.\n\n## Done condition\nThe corpus round-trips the new fixtures.\n\n## Witness\ngo test ./cmd/fak -run Antipattern passes.\n\n## Likely files\ncmd/fak/antipatternscore.go"
+  }
+]
