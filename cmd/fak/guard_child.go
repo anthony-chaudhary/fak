@@ -1526,6 +1526,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// nothing is outstanding.
 		emit(guardToolprocSummary(time.Now()))
 		emit(guardTrajectoryWarningLine())
+		// The context-health verdict (#3099): fold this session's LIVE trajectory
+		// corpus through the #3098 HEALTHY/STALL/DRIFT/DETOUR_OVERRUN scorer + the
+		// #3096 shed-span use-after-free detector onto the same guard status channel,
+		// so a repeat-failure loop or a shed-then-reference is visible here, not only
+		// in a post-hoc `fak traj score`. Empty (silent) unless trajectory recording
+		// is on, exactly like the sibling lines stay quiet when their signal is absent.
+		emit(guardContextHealthLine())
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075) AND surface it.
 	// Persist both tracks, then — for a non-quiet (interactive) session — print the
