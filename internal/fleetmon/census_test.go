@@ -109,10 +109,24 @@ func TestCensusCrossAgentGolden(t *testing.T) {
 		t.Errorf("NO_NAMESPACE row should explain why the namespace is absent")
 	}
 
+	// The pi harness (Claude-subscription-backed, config home ~/.pi*) has no config
+	// home in this fixture, so like the env-key harness it yields a typed NO_NAMESPACE
+	// row, never silence.
+	pi, ok := findRow(rows, "pi", KindNoNamespace)
+	if !ok {
+		t.Fatalf("no NO_NAMESPACE row for the pi harness; got %+v", rows)
+	}
+	if pi.Liveness != LivenessUnknown {
+		t.Errorf("pi NO_NAMESPACE liveness = %q, want UNKNOWN", pi.Liveness)
+	}
+	if pi.Note == "" {
+		t.Errorf("pi NO_NAMESPACE row should explain why the namespace is absent")
+	}
+
 	// No agent is silently dropped: every built-in profile contributes at least one
 	// row, and each SESSION row's agent is exactly its profile Name.
-	if got := len(rows); got != 3 {
-		t.Fatalf("census row count = %d, want 3 (claude + codex + no-namespace); rows=%+v", got, rows)
+	if got := len(rows); got != 4 {
+		t.Fatalf("census row count = %d, want 4 (claude + codex + openai-generic + pi); rows=%+v", got, rows)
 	}
 	for _, r := range rows {
 		if r.Agent == "" {
@@ -129,7 +143,7 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 
 	rows := Census(home, censusFixtureNow)
 
-	for _, agent := range []string{"claude", "codex", "openai-generic"} {
+	for _, agent := range []string{"claude", "codex", "openai-generic", "pi"} {
 		r, ok := findRow(rows, agent, KindNoNamespace)
 		if !ok {
 			t.Fatalf("agent %q missing its NO_NAMESPACE row; got %+v", agent, rows)
@@ -138,8 +152,8 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 			t.Errorf("agent %q NO_NAMESPACE liveness = %q, want UNKNOWN", agent, r.Liveness)
 		}
 	}
-	if len(rows) != 3 {
-		t.Errorf("bare home census = %d rows, want 3 (one NO_NAMESPACE per agent)", len(rows))
+	if len(rows) != 4 {
+		t.Errorf("bare home census = %d rows, want 4 (one NO_NAMESPACE per agent)", len(rows))
 	}
 }
 
