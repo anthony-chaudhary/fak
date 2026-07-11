@@ -140,3 +140,39 @@ func TestVisionPlaceholderAbsent(t *testing.T) {
 func TestVisionPlaceholdersInterface(t *testing.T) {
 	var _ VisionPlaceholders = (*Tokenizer)(nil)
 }
+
+// TestImagePadSlots proves the splice-slot mapping (#4031 DoD bullet 2): every
+// <|image_pad|> occurrence in a decoded id stream maps to its index, in stream order,
+// across multiple image spans; a stream with no pad, and any stream over a text-only
+// vocab, yields no slots (nil), so the render/prefill path never sees a spurious slot.
+func TestImagePadSlots(t *testing.T) {
+	tok, err := visionVocab(true)
+	if err != nil {
+		t.Fatalf("visionVocab: %v", err)
+	}
+	// Two image spans: <|vision_start|> pad pad <|vision_end|> a <|vision_start|> pad <|vision_end|>.
+	// ids from visionVocab: vision_start=3, vision_end=4, image_pad=6, base "a"=0.
+	ids := []int{3, 6, 6, 4, 0, 3, 6, 4}
+	got := tok.ImagePadSlots(ids)
+	want := []int{1, 2, 6}
+	if len(got) != len(want) {
+		t.Fatalf("ImagePadSlots(%v) = %v, want %v", ids, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ImagePadSlots(%v) = %v, want %v", ids, got, want)
+		}
+	}
+	// A stream with the span markers but no pad maps to no slots.
+	if s := tok.ImagePadSlots([]int{3, 4, 0}); s != nil {
+		t.Errorf("ImagePadSlots(no pad) = %v, want nil", s)
+	}
+	// A text-only vocab has no <|image_pad|>, so no stream yields a slot.
+	txt, err := FromGGML([]string{"a", "b", "ab", "<|im_end|>"}, []string{"a b"}, nil, "qwen2")
+	if err != nil {
+		t.Fatalf("FromGGML: %v", err)
+	}
+	if s := txt.ImagePadSlots([]int{0, 1, 2, 3}); s != nil {
+		t.Errorf("text-only ImagePadSlots = %v, want nil", s)
+	}
+}

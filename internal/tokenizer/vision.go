@@ -49,6 +49,7 @@ type VisionPlaceholders interface {
 	VideoPadID() (int, bool)
 	IsVisionPlaceholder(id int) bool
 	IsImagePad(id int) bool
+	ImagePadSlots(ids []int) []int
 }
 
 // SpecialID returns the id registered for a special-token content string, resolved
@@ -94,4 +95,27 @@ func (t *Tokenizer) IsVisionPlaceholder(id int) bool {
 		}
 	}
 	return false
+}
+
+// ImagePadSlots maps a decoded id stream to its splice slots: the index of every
+// <|image_pad|> occurrence, in stream order. Each returned index is one splice slot —
+// the position the serve seam (#4032) overwrites with the vision encoder's feature rows
+// for that image. This file deliberately stops at WHERE: how MANY rows land at a slot
+// (and reconciling that against the encoder slice) is #4032/#4030's call, per the scope
+// boundary above — ImagePadSlots computes no count and expands nothing. The pad id is
+// resolved once from this vocab's special table, so a text-only model (no <|image_pad|>)
+// returns nil for every stream and never reports a spurious slot; a stream with no pad
+// also returns nil, so the common text-only path allocates nothing.
+func (t *Tokenizer) ImagePadSlots(ids []int) []int {
+	pad, ok := t.ImagePadID()
+	if !ok {
+		return nil
+	}
+	var slots []int
+	for i, id := range ids {
+		if id == pad {
+			slots = append(slots, i)
+		}
+	}
+	return slots
 }
