@@ -348,6 +348,8 @@ var tier = map[string]int{
 	"dispatchaudit":    1, // pure dispatch-worker outcome fold (#1454): classifies each .dispatch-runs worker (shipped/wasted-spawn/quota-walled/retry-storm/no-op/errored), rolls up wasted-spawn + wasted-wall-clock per backend, and emits fingerprinted findings; stdlib-only core + a thin I/O shell, off the hot path.
 	"issuecatalog":     3, // performance-enablement issue-catalog planner/syncer; reads curated rows, reviews them through issuecontract(1), and shells to gh only behind --live; off the hot path.
 	"safesync":         2, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
+	"hostfault":        1, // pure closed host-fault classification vocabulary; stdlib-only, off hot path.
+	"issuestriage":     1, // pure issue-action triage classifier; stdlib-only, off hot path.
 	"wipfence":         2, // pure shared-trunk WIP build-fence text engine; no hot-path dependency.
 	"usagelog":         1, // durable, append-only, hash-chained CLI-invocation journal (epic #1601/#1608): one redacted row per top-level fak verb + the `fak usage` read fold; stdlib-only, imports nothing internal, off the hot path.
 	"promptaudit":      1, // scans system/developer/context prompt text for hidden control markers (apostrophe-alphabet / date-separator channels) before they cross a model or cache boundary; stdlib-only, imports nothing internal, off the hot path.
