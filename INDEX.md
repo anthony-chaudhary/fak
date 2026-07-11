@@ -180,6 +180,7 @@ front page.
 
 ### Latest working notes
 
+- [Concept study — colibri (consumer-hardware GLM-5.2 MoE SSD-streaming inference engine) → witnessed borrows for fak](docs/notes/CONCEPT-STUDY-COLIBRI-2026-07-11.md) -- auto-indexed dated note.
 - [Audit: fakguard crashes & bad preventions at trajectory final steps (2026-07-11)](docs/notes/AUDIT-fakguard-final-step-preventions-2026-07-11.md) -- auto-indexed dated note.
 - [Catch-up scorecard — one 0..1 "how caught up is the dev system" number](docs/notes/CATCHUP-SCORECARD-2026-07-11.md) -- auto-indexed dated note.
 - [Generation Classification — modver policy-manifest key space (issue #2462)](docs/notes/GENERATION-MODVER-POLICY-KEYSPACE-2026-07-11.md) -- auto-indexed dated note.
