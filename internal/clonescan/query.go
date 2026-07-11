@@ -16,13 +16,16 @@ type Match struct {
 	SampleLine string `json:"sample_line,omitempty"`
 }
 
+// span is one qualifying window's source-line extent: [startLine, endLine].
+type span = [2]int
+
 // qualifyingWindows slides the WindowTokens-length window over a token stream and
 // returns, for each window that carries enough logic, its (startLine, endLine,
 // key). The key is the joined normalized token sequence — the same identity the
 // scorecard clones on. A window is skipped unless its effective logic count (its
 // logic count, gated to zero when it carries only bare assignments) is >=
 // MinLogicTokens, so data/declaration regions never qualify.
-func qualifyingWindows(toks []token) (keys []string, spans [][2]int) {
+func qualifyingWindows(toks []token) (keys []string, spans []span) {
 	m := len(toks)
 	if m < WindowTokens {
 		return nil, nil
@@ -57,7 +60,7 @@ func qualifyingWindows(toks []token) (keys []string, spans [][2]int) {
 		}
 		key := windowKey(toks, start)
 		keys = append(keys, key)
-		spans = append(spans, [2]int{toks[start].line, toks[start+WindowTokens-1].line})
+		spans = append(spans, span{toks[start].line, toks[start+WindowTokens-1].line})
 	}
 	return keys, spans
 }
@@ -77,10 +80,12 @@ func windowKey(toks []token, start int) string {
 	return string(buf)
 }
 
-// candidateKeys returns the set of qualifying window keys for a candidate block.
+// CandidateKeys returns the set of qualifying window keys for a candidate block.
 // Identifiers are kept (normalizeIdents=false) to match the scorecard's precision
-// sweet spot: distinct code with distinct names must not false-match.
-func candidateKeys(candidate string) map[string]bool {
+// sweet spot: distinct code with distinct names must not false-match. Callers that
+// hold a prebuilt *TreeIndex compute this once per candidate and hand it straight
+// to TreeIndex.Query.
+func CandidateKeys(candidate string) map[string]bool {
 	keys, _ := qualifyingWindows(goTokens(candidate, false))
 	set := make(map[string]bool, len(keys))
 	for _, k := range keys {
@@ -89,56 +94,94 @@ func candidateKeys(candidate string) map[string]bool {
 	return set
 }
 
-// Query answers the authoring-time question: given a candidate Go block, which
-// tracked files hold a token-similar block RIGHT NOW? `tree` maps rel-path ->
-// source text (the caller supplies the tracked tree; this package does no I/O so
-// it stays pure and testable). Results are ranked most-overlap first, capped at
-// maxResults (<=0 means no cap).
+// TreeIndex is a tree tokenized ONCE: each file's source is run through the same
+// deterministic qualifyingWindows(goTokens) exactly once at build time and stored
+// as a per-file map of window key -> the source-line spans where that key occurs
+// (a key can repeat at several positions in one file, so the value is a slice). A
+// caller with many candidates to check against the same tree builds the index once
+// and queries each candidate against it, instead of re-tokenizing the whole tree
+// per candidate.
+//
+// selfPath is intentionally NOT baked into the index: the same prebuilt index
+// answers queries for different candidates, each excluding its own path at query
+// time. `files` is the deterministic sorted rel-path order so a query folds through
+// the identical stable ordering the legacy per-call Query used.
+type TreeIndex struct {
+	files  []string                     // rel paths, sorted, for stable output order
+	byFile map[string]map[string][]span // rel path -> (window key -> spans)
+}
+
+// BuildTreeIndex tokenizes each file in `tree` exactly once and returns the prebuilt
+// index. tree maps rel-path -> source text; this package does no I/O so it stays
+// pure and testable.
+func BuildTreeIndex(tree map[string]string) *TreeIndex {
+	idx := &TreeIndex{
+		files:  make([]string, 0, len(tree)),
+		byFile: make(map[string]map[string][]span, len(tree)),
+	}
+	for rel := range tree {
+		idx.files = append(idx.files, rel)
+	}
+	sort.Strings(idx.files)
+	for _, rel := range idx.files {
+		keys, spans := qualifyingWindows(goTokens(tree[rel], false))
+		if len(keys) == 0 {
+			continue
+		}
+		fi := make(map[string][]span, len(keys))
+		for i, k := range keys {
+			fi[k] = append(fi[k], spans[i])
+		}
+		idx.byFile[rel] = fi
+	}
+	return idx
+}
+
+// Query intersects a candidate's `want` key-set (from CandidateKeys) against the
+// prebuilt index and returns the ranked, capped matches. It folds through the
+// SAME final sort.SliceStable (Windows desc, File asc) and maxResults cap the
+// legacy per-call Query used, so output is byte-identical.
 //
 // A file is skipped when its path equals selfPath — so querying a block that is
 // ALREADY committed at some path does not report that path as its own duplicate.
-// Pass "" for selfPath when the candidate is unwritten.
-func Query(candidate string, tree map[string]string, selfPath string, maxResults int) []Match {
-	want := candidateKeys(candidate)
+// Pass "" for selfPath when the candidate is unwritten. maxResults <= 0 means no cap.
+func (idx *TreeIndex) Query(want map[string]bool, selfPath string, maxResults int) []Match {
 	if len(want) == 0 {
 		return nil
 	}
 	var matches []Match
-	// Deterministic file order for stable output.
-	files := make([]string, 0, len(tree))
-	for rel := range tree {
+	for _, rel := range idx.files {
 		if rel == selfPath {
 			continue
 		}
-		files = append(files, rel)
-	}
-	sort.Strings(files)
-
-	for _, rel := range files {
-		keys, spans := qualifyingWindows(goTokens(tree[rel], false))
-		var hitSpans [][2]int
-		for i, k := range keys {
-			if want[k] {
-				hitSpans = append(hitSpans, spans[i])
-			}
-		}
-		if len(hitSpans) == 0 {
+		fi := idx.byFile[rel]
+		if len(fi) == 0 {
 			continue
 		}
-		lo, hi := hitSpans[0][0], hitSpans[0][1]
-		for _, s := range hitSpans[1:] {
-			if s[0] < lo {
-				lo = s[0]
+		var lo, hi, windows int
+		for k := range want {
+			for _, s := range fi[k] {
+				if windows == 0 {
+					lo, hi = s[0], s[1]
+				} else {
+					if s[0] < lo {
+						lo = s[0]
+					}
+					if s[1] > hi {
+						hi = s[1]
+					}
+				}
+				windows++
 			}
-			if s[1] > hi {
-				hi = s[1]
-			}
+		}
+		if windows == 0 {
+			continue
 		}
 		matches = append(matches, Match{
 			File:      rel,
 			StartLine: lo,
 			EndLine:   hi,
-			Windows:   len(hitSpans),
+			Windows:   windows,
 		})
 	}
 
@@ -152,4 +195,21 @@ func Query(candidate string, tree map[string]string, selfPath string, maxResults
 		matches = matches[:maxResults]
 	}
 	return matches
+}
+
+// Query answers the authoring-time question: given a candidate Go block, which
+// tracked files hold a token-similar block RIGHT NOW? `tree` maps rel-path ->
+// source text (the caller supplies the tracked tree; this package does no I/O so
+// it stays pure and testable). Results are ranked most-overlap first, capped at
+// maxResults (<=0 means no cap).
+//
+// A file is skipped when its path equals selfPath — so querying a block that is
+// ALREADY committed at some path does not report that path as its own duplicate.
+// Pass "" for selfPath when the candidate is unwritten.
+//
+// Query is a thin wrapper over BuildTreeIndex + TreeIndex.Query kept for callers
+// with a single candidate to check; a caller with many candidates against the same
+// tree should build the index once and reuse it.
+func Query(candidate string, tree map[string]string, selfPath string, maxResults int) []Match {
+	return BuildTreeIndex(tree).Query(CandidateKeys(candidate), selfPath, maxResults)
 }
