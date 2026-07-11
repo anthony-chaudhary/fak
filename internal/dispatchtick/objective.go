@@ -5,10 +5,11 @@ import "strings"
 const RefuseObjectiveNoScorer = "OBJECTIVE_SCORER_MISSING"
 
 type ObjectiveContract struct {
-	Objective string `json:"objective,omitempty"`
-	Scorers   string `json:"scorers,omitempty"`
-	Attached  bool   `json:"attached"`
-	Refusal   string `json:"refusal,omitempty"`
+	ObjectiveID string `json:"objective_id,omitempty"`
+	Objective   string `json:"objective,omitempty"`
+	Scorers     string `json:"scorers,omitempty"`
+	Attached    bool   `json:"attached"`
+	Refusal     string `json:"refusal,omitempty"`
 }
 
 // ParseObjectiveContract derives the child objective and its independently
@@ -57,6 +58,7 @@ func (c ObjectiveContract) PromptBlock() string {
 		return ""
 	}
 	return "objective contract (kernel-authored from the issue; do not replace with self-reported progress):\n" +
+		"objective id: " + c.ObjectiveID + "\n" +
 		"objective:\n" + c.Objective + "\n\n" +
 		"attached scorers / witnessed progress:\n" + c.Scorers
 }

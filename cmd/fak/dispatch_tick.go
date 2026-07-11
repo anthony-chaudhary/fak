@@ -817,6 +817,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	payload["prompt_chars"] = promptChars
 	payload["issue_title"] = dispatchMapString(promptRec, "title")
 	payload["development_branch"] = dispatchMapString(promptRec, "development_branch")
+	payload["child_curve"] = dispatchtick.ChildCurve(root, target)
 	if errText := dispatchMapString(promptRec, "branch_role_error"); errText != "" {
 		payload["branch_role_error"] = errText
 	}

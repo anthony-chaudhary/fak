@@ -76,6 +76,7 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 	}
 	roles, roleErr := branchrole.Load(root)
 	contract := dispatchtick.ParseObjectiveContract(inf.Body)
+	contract.ObjectiveID = fmt.Sprintf("issue-%d", firstInt(inf.Number, issue))
 	rec := dispatchtick.BuildIssuePrompt(dispatchtick.IssuePromptInput{
 		Number:            firstInt(inf.Number, issue),
 		Title:             inf.Title,

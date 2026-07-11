@@ -81,7 +81,7 @@ func TestDispatchPromptCarriesObjectiveContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := dispatchMapString(got, "prompt")
-	if !strings.Contains(prompt, "Steer the child by measured progress") || !strings.Contains(prompt, "curve ledger rows") {
+	if !strings.Contains(prompt, "Steer the child by measured progress") || !strings.Contains(prompt, "curve ledger rows") || !strings.Contains(prompt, "objective id: issue-2550") {
 		t.Fatalf("prompt missing objective/scorer block:\n%s", prompt)
 	}
 	contract, ok := got["objective_contract"].(dispatchtick.ObjectiveContract)
