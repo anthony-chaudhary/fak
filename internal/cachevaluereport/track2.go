@@ -23,7 +23,6 @@ package cachevaluereport
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -558,11 +557,7 @@ func ParseSavingsLedger(content string) []SavingsRow {
 // ReadSavingsLedgerFile reads the Track-2 ledger at path. A missing file folds to
 // no rows (the honest empty-Track-2 case), not an error.
 func ReadSavingsLedgerFile(path string) []SavingsRow {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return ParseSavingsLedger(string(b))
+	return ParseSavingsLedger(string(jsonlledger.ReadTail(path, jsonlledger.DefaultActiveBytes)))
 }
 
 // AppendSavingsLine renders the JSONL line for one Track-2 row (the durable shape
@@ -585,15 +580,7 @@ func AppendSavings(ledgerPath string, row SavingsRow) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(ledgerPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.WriteString(line + "\n"); err != nil {
-		return err
-	}
-	return nil
+	return jsonlledger.AppendBounded(ledgerPath, []byte(line), jsonlledger.DefaultActiveBytes)
 }
 
 func normalizeSavingsDimensions(row *SavingsRow) {

@@ -94,23 +94,11 @@ func Append(sessionType, context, ledgerPath string, stats cacheobs.Stats) error
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(ledgerPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.WriteString(line + "\n"); err != nil {
-		return err
-	}
-	return nil
+	return jsonlledger.AppendBounded(ledgerPath, []byte(line), jsonlledger.DefaultActiveBytes)
 }
 
 func ReadLedgerFile(path string) []Row {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return ParseLedger(string(b))
+	return ParseLedger(string(jsonlledger.ReadTail(path, jsonlledger.DefaultActiveBytes)))
 }
 
 // PublishableValueFamily is the ONLY cache-value framing #1066's honesty fence permits

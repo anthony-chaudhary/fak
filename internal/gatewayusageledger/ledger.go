@@ -202,15 +202,7 @@ func Append(path string, row Row) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(append(b, '\n')); err != nil {
-		return err
-	}
-	return nil
+	return jsonlledger.AppendBounded(path, b, jsonlledger.DefaultActiveBytes)
 }
 
 // ParseLedger parses the JSONL ledger content into rows, skipping blank lines and any
@@ -224,11 +216,7 @@ func ParseLedger(content string) []Row {
 // returns nil (no rows yet), matching cachevalueledger.ReadLedgerFile's fall-open
 // posture — an absent ledger is a clean first-run state, not an error.
 func ReadLedgerFile(path string) []Row {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return ParseLedger(string(b))
+	return ParseLedger(string(jsonlledger.ReadTail(path, jsonlledger.DefaultActiveBytes)))
 }
 
 // Trend is a simple fold of >=2 ledger rows into an oldest-vs-newest comparison, the
