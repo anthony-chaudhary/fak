@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
@@ -778,4 +779,82 @@ func TestActiveLaunchSeatName(t *testing.T) {
 	if got, ok := activeLaunchSeatName(reg); ok {
 		t.Fatalf("ambiguous pick should fail, got %q,%v", got, ok)
 	}
+}
+
+func TestActiveLaunchSeatFallsForwardWhenActiveIsWalled(t *testing.T) {
+	now := time.Date(2026, 7, 11, 15, 0, 0, 0, time.UTC)
+	reg := accounts.Registry{
+		Homes: []accounts.Home{
+			{Name: "walled", Dir: "/walled", Enabled: boolPtr(false)},
+			{Name: "room", Dir: "/room"},
+		},
+		Roles: map[string]string{accounts.RoleActive: "walled", accounts.RoleAnchor: "walled"},
+	}
+	got, ok, fellForward := activeLaunchSeatNameAt(reg, now)
+	if !ok || !fellForward || got != "room" {
+		t.Fatalf("pick = %q,%v,%v want room,true,true", got, ok, fellForward)
+	}
+	anchor, _ := reg.Role(accounts.RoleAnchor)
+	if anchor.Name != "walled" {
+		t.Fatalf("anchor moved to %q; launch fallback must not alter anchor", anchor.Name)
+	}
+}
+
+func TestActiveLaunchSeatStaysPutWhenActiveHasRoom(t *testing.T) {
+	now := time.Date(2026, 7, 11, 15, 0, 0, 0, time.UTC)
+	reg := accounts.Registry{
+		Homes: []accounts.Home{{Name: "active", Dir: "/active"}, {Name: "other", Dir: "/other"}},
+		Roles: map[string]string{accounts.RoleActive: "active"},
+	}
+	got, ok, fellForward := activeLaunchSeatNameAt(reg, now)
+	if !ok || fellForward || got != "active" {
+		t.Fatalf("pick = %q,%v,%v want active,true,false", got, ok, fellForward)
+	}
+}
+
+func TestRunAccountsLaunchBareReportsActiveFallback(t *testing.T) {
+	home := t.TempDir()
+	regPath := filepath.Join(home, "accounts.json")
+	walledDir := mkHome(t, home, "walled", "walled@example.test", true)
+	roomDir := mkHome(t, home, "room", "room@example.test", true)
+	reg := accounts.Registry{
+		Homes: []accounts.Home{
+			{Name: "walled", Dir: walledDir, Enabled: boolPtr(false)},
+			{Name: "room", Dir: roomDir},
+		},
+		Roles: map[string]string{accounts.RoleActive: "walled", accounts.RoleAnchor: "room"},
+	}
+	if err := accounts.SaveRegistry(regPath, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := accountsLaunchRun
+	var gotEnv []string
+	accountsLaunchRun = func(_, _ io.Writer, _ []string, env []string) launchRunResult {
+		gotEnv = env
+		return launchRunResult{}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--guard=false", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(errb.String(), "active walled is walled; launching room with room") {
+		t.Fatalf("missing fallback note: %q", errb.String())
+	}
+	if got := testEnvValue(gotEnv, "CLAUDE_CONFIG_DIR"); got != roomDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q want room dir", got)
+	}
+}
+
+func testEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
 }

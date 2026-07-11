@@ -250,12 +250,16 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		}
 		name = seat.Name
 	} else if name == "" {
-		picked, ok := activeLaunchSeatName(reg)
+		picked, ok, fellForward := activeLaunchSeatNameAt(reg, time.Now())
 		if !ok {
 			fmt.Fprintln(stderr, "fak accounts launch: no --name and no active seat to default to — "+
 				"set one with `fak accounts set-default --name <seat>`, or pass --name <seat>")
 			printAccountFixSummary(stderr, fixes, "account fixes")
 			return 2
+		}
+		if fellForward {
+			active, _ := reg.Role(accounts.RoleActive)
+			fmt.Fprintf(stderr, "fak accounts launch: active %s is walled; launching %s with room\n", active.Name, picked)
 		}
 		name = picked
 	}
@@ -659,24 +663,48 @@ func shortLaunchRev(rev string) string {
 // false when none of those uniquely identify a seat, so the caller can fail loud with a hint
 // instead of guessing.
 func activeLaunchSeatName(reg accounts.Registry) (string, bool) {
-	if h, ok := reg.Role(accounts.RoleActive); ok {
-		return h.Name, true
+	name, ok, _ := activeLaunchSeatNameAt(reg, time.Now())
+	return name, ok
+}
+
+// activeLaunchSeatNameAt treats RoleActive as a preference, not a hard pin. A bare launch
+// stays on the active seat while it can serve; when that seat is cooled, tombstoned, or has
+// a known login failure, it falls forward through the declared rotation pool. The anchor role
+// is deliberately not consulted or changed: rehome anchoring and interactive launch choice are
+// separate contracts.
+func activeLaunchSeatNameAt(reg accounts.Registry, now time.Time) (name string, ok, fellForward bool) {
+	if h, found := reg.Role(accounts.RoleActive); found {
+		if launchSeatServable(h, now) {
+			return h.Name, true, false
+		}
+		for _, c := range reg.Homes {
+			if !strings.EqualFold(c.Name, h.Name) && launchSeatServable(c, now) {
+				return c.Name, true, true
+			}
+		}
+		// Preserve the old diagnostic path when the entire pool is walled: Resolve will name
+		// why the active seat cannot launch instead of silently choosing an arbitrary home.
+		return h.Name, true, false
 	}
 	for _, h := range reg.Homes {
-		if h.Active() && strings.EqualFold(h.Name, "default") {
-			return h.Name, true
+		if launchSeatServable(h, now) && strings.EqualFold(h.Name, "default") {
+			return h.Name, true, false
 		}
 	}
 	only, n := "", 0
 	for _, h := range reg.Homes {
-		if h.Active() {
+		if launchSeatServable(h, now) {
 			only, n = h.Name, n+1
 		}
 	}
 	if n == 1 {
-		return only, true
+		return only, true, false
 	}
-	return "", false
+	return "", false, false
+}
+
+func launchSeatServable(h accounts.Home, _ time.Time) bool {
+	return h.Active() && h.EnabledOrDefault()
 }
 
 // execLaunchChild spawns argv[0] with argv[1:] under env, wiring the child to the real
