@@ -47,7 +47,7 @@ fak question-ledger lint    # exit 1 = fix the row it names, then re-lint
 fak commit --path docs/questions/asked.jsonl -m "questions: resolve <id> (<fate>) (fak questions)"
 ```
 
-(fallback: `git commit -s -- docs/questions/asked.jsonl`). Never `git add -A`.
+(fallback: `git commit -s -m "questions: resolve <id> (<fate>) (fak questions)" -- docs/questions/asked.jsonl`, `-m` before `--`). Never `git add -A`.
 
 A launch is not a ship: the filed ticket (if any) PLUS the committed status change
 are the witness that this tick did its work.

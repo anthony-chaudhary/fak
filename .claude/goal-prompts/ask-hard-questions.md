@@ -58,8 +58,8 @@ thoughtful maintainer stop and think, not ones with an obvious answer.
    fak commit --path docs/questions/asked.jsonl -m "questions: <N> asked (fak questions)"
    ```
 
-   (fallback: `git commit -s -- docs/questions/asked.jsonl`). Never `git add -A` —
-   this is a shared multi-session tree.
+   (fallback: `git commit -s -m "questions: <N> asked (fak questions)" -- docs/questions/asked.jsonl`,
+   `-m` before `--`). Never `git add -A` — this is a shared multi-session tree.
 
 5. Leave the tree clean and STOP. One honest batch of `open` questions is a
    complete run. Do not answer them. Do not spin.

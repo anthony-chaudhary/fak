@@ -52,7 +52,7 @@ fak sweep [--json]                                        # group the dirty tree
 fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane group by path
 ```
 
-**Fallback** — ONLY when the `fak` binary is unavailable: raw `git commit -s -- <paths>` (never `git add -A`, never `-m` after `--`). Say in the handoff that you fell back.
+**Fallback** — ONLY when the `fak` binary is unavailable: raw `git commit -s -m "<subject> (fak <leaf>)" -- <paths>` — keep `-m`/`-F` BEFORE the `--` pathspec. A bare `git commit` with no message source opens the editor and hangs headless (the guard's `INTERACTIVE_HANG`); an `-m` placed AFTER `--` is parsed as a pathspec, not a message. Never `git add -A`. Say in the handoff that you fell back.
 
 ## Refusal vocabulary
 

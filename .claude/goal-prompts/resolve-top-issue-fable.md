@@ -27,7 +27,7 @@ the SAME working tree, so lane discipline is load-bearing, not optional.
 4. **Ship on the trunk, by explicit path.** Stay on `main` (never a branch/worktree
    — the `OFF_TRUNK` guard refuses). Green first: `make ci` (Windows: `./test.ps1`
    under WSL for tests). Then `fak commit --path <p> ... -m "<subject>"` (fallback
-   `git commit -s -- <paths>`), never `git add -A`. Conventional-Commits subject
+   `git commit -s -m "<subject>" -- <paths>`, `-m` before `--`), never `git add -A`. Conventional-Commits subject
    ending in a `(fak <leaf>)` trailer; preview it first with `fak commit --preview`.
 
 5. **Close by ancestry, never by narration.** Put `Fixes #<N>` in the commit BODY

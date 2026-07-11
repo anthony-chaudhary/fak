@@ -33,8 +33,8 @@ run beside you in the SAME working tree — lane discipline is load-bearing.
    landing in the SAME commit as the change.
 4. **Ship on the trunk, by explicit path.** Green first: make ci (Windows:
    tests under WSL via ./test.ps1). Then `fak commit --preview -m ... --path
-   ...` and `fak commit --path ... -m "..."` (fallback `git commit -s --
-   <paths>`), never `git add -A`. Conventional-Commits subject ending in a
+   ...` and `fak commit --path ... -m "..."` (fallback `git commit -s -m
+   "..." -- <paths>`, `-m` before `--`), never `git add -A`. Conventional-Commits subject ending in a
    `(fak <leaf>)` trailer.
 5. **Close by ancestry, never by narration.** `Fixes #<N>` in the commit BODY.
    Do NOT `gh issue close`. Verify the ship: `dos commit-audit --json`.
