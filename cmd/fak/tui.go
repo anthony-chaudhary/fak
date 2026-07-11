@@ -918,6 +918,7 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", "", "read loop JSONL ledger and include the loop pane card")
 	sessionsJSON := fs.String("sessions-json", "", "read SessionListResponse JSON and include the session pane card")
 	gardenJSON := fs.String("garden-json", "", "read fak garden JSON and include the garden pane card")
+	savingsLedger := fs.String("savings-ledger", "", "Track-2 OBSERVED-$ savings ledger for the above-the-fold savings hero (default: live then published ledger)")
 	var guardJSON stringList
 	fs.Var(&guardJSON, "guard-json", "read a guard artifact JSON file and include the guard pane card (repeatable)")
 	var paneList stringList
@@ -957,17 +958,18 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	report, err := loadTUIOverview(tuiOverviewOptions{
-		IssuesJSON:   *issuesJSON,
-		Epic:         *epic,
-		Ledger:       *ledger,
-		SessionsJSON: *sessionsJSON,
-		GardenJSON:   *gardenJSON,
-		GuardJSON:    []string(guardJSON),
-		CheckGarden:  *check,
-		PaneOrder:    panes,
-		PaneSource:   paneSource,
-		AsOf:         asOf,
-		At:           at,
+		IssuesJSON:    *issuesJSON,
+		Epic:          *epic,
+		Ledger:        *ledger,
+		SessionsJSON:  *sessionsJSON,
+		GardenJSON:    *gardenJSON,
+		SavingsLedger: *savingsLedger,
+		GuardJSON:     []string(guardJSON),
+		CheckGarden:   *check,
+		PaneOrder:     panes,
+		PaneSource:    paneSource,
+		AsOf:          asOf,
+		At:            at,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console overview: %v\n", err)
@@ -981,17 +983,18 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 }
 
 type tuiOverviewOptions struct {
-	IssuesJSON   string
-	Epic         int
-	Ledger       string
-	SessionsJSON string
-	GardenJSON   string
-	GuardJSON    []string
-	CheckGarden  bool
-	PaneOrder    []string
-	PaneSource   string
-	AsOf         time.Time
-	At           time.Time
+	IssuesJSON    string
+	Epic          int
+	Ledger        string
+	SessionsJSON  string
+	GardenJSON    string
+	SavingsLedger string
+	GuardJSON     []string
+	CheckGarden   bool
+	PaneOrder     []string
+	PaneSource    string
+	AsOf          time.Time
+	At            time.Time
 }
 
 func parseTUIDay(s string) (time.Time, error) {

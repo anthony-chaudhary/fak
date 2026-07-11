@@ -48,6 +48,7 @@ func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
 		At:      opt.At.UTC().Format(time.RFC3339),
 		Source:  source,
 		Counts:  counts,
+		Savings: buildTUIOverviewSavings(resolveOverviewSavingsRows(opt.SavingsLedger), opt.At),
 		Cards:   cards,
 		Actions: overviewActions(cards),
 	}, nil
@@ -471,6 +472,9 @@ func displayTUIAgentEnvValue(kv tuiAgentEnv) string {
 func renderTUIOverview(report tuiOverviewReport, width int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak console overview  at=%s  source=%s\n", report.At, report.Source)
+	if hero := renderTUIOverviewSavingsHero(report.Savings, width); hero != "" {
+		fmt.Fprintf(&b, "\n%s\n\n", hero)
+	}
 	fmt.Fprintf(&b, "cards=%d  ok=%d  action=%d  warn=%d  missing=%d\n",
 		report.Counts.Cards, report.Counts.OK, report.Counts.Action, report.Counts.Warn, report.Counts.Missing)
 	fmt.Fprintln(&b, "\nPanes")

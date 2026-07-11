@@ -65,7 +65,7 @@ func registerBuiltinTUIPanes() {
 	tuiplugin.Register(tuiplugin.Pane{
 		ID:      "overview",
 		Summary: "compose selected pane models into one ranked operator spine",
-		Usage:   "fak console overview [--pane ID ...] [--console-config FILE] [--issues-json FILE] [--ledger FILE] [--sessions-json FILE] [--garden-json FILE] [--guard-json FILE ...]",
+		Usage:   "fak console overview [--pane ID ...] [--console-config FILE] [--issues-json FILE] [--ledger FILE] [--sessions-json FILE] [--garden-json FILE] [--savings-ledger FILE] [--guard-json FILE ...]",
 		Schema:  tuiOverviewSchema,
 		BuiltIn: true,
 		Controls: []tuiplugin.Control{
@@ -77,6 +77,7 @@ func registerBuiltinTUIPanes() {
 			{ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json", Detail: "emit the typed overview model"},
 			{ID: "ledger", Label: "Loop Ledger", Kind: "input", Flag: "--ledger"},
 			{ID: "pane", Label: "Pane", Kind: "input", Flag: "--pane", Detail: "repeat to choose overview pane subset and display order"},
+			{ID: "savings-ledger", Label: "Savings Ledger", Kind: "input", Flag: "--savings-ledger", Detail: "Track-2 OBSERVED-$ ledger for the above-the-fold savings hero"},
 			{ID: "sessions-json", Label: "Sessions JSON", Kind: "input", Flag: "--sessions-json"},
 		},
 		Run: runTUIOverview,

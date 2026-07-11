@@ -345,8 +345,28 @@ type tuiOverviewReport struct {
 	At      string              `json:"at"`
 	Source  string              `json:"source"`
 	Counts  tuiOverviewCounts   `json:"counts"`
+	Savings *tuiOverviewSavings `json:"savings,omitempty"`
 	Cards   []tuiOverviewCard   `json:"cards"`
 	Actions []tuiOverviewAction `json:"actions,omitempty"`
+}
+
+// tuiOverviewSavings is the compact, above-the-fold cache-savings hero the overview
+// renders before its pane table: the headline net-$ reduction plus the axes a reader
+// needs to trust it, folded from the Track-2 OBSERVED-$ ledger. It is nil (and omitted
+// from JSON) when there are no OBSERVED savings rows to reconcile, so a fresh checkout's
+// overview stays byte-identical to before this hero existed. Built by
+// buildTUIOverviewSavings; rendered by renderTUIOverviewSavingsHero.
+type tuiOverviewSavings struct {
+	Verdict           string    `json:"verdict"`
+	ReductionPct      *float64  `json:"reduction_pct,omitempty"`
+	NetUSD            float64   `json:"net_usd"`
+	CounterfactualUSD float64   `json:"counterfactual_usd"`
+	SavedTokenEquiv   float64   `json:"saved_token_equiv"`
+	CacheReadFraction *float64  `json:"cache_read_fraction,omitempty"`
+	Dates             int       `json:"dates"`
+	Rows              int       `json:"rows"`
+	Fidelity          string    `json:"fidelity,omitempty"`
+	NetTrend          []float64 `json:"net_trend,omitempty"`
 }
 
 type tuiOverviewCounts struct {
