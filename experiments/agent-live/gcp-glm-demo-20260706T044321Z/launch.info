@@ -1,0 +1,5 @@
+run_id=20260706T044321Z
+pid=16064
+base=c31387080a4e66c44d022a570e28b95c18e31502
+patch=<windows-user-home>\AppData\Local\Temp\fak-glm-gcp-startup-origin-main-to-workingtree-source.patch
+wsl_patch=<wsl-user-home>/AppData/Local/Temp/fak-glm-gcp-startup-origin-main-to-workingtree-source.patch

@@ -1,0 +1,10 @@
+[dogfood] building fak -> C:\work\fak\tools\.bin\fak.exe
+[dogfood] starting transformers shim (HuggingFaceTB/SmolLM2-135M-Instruct) on :8190
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model HuggingFaceTB/SmolLM2-135M-Instruct --base-url http://127.0.0.1:8190/v1
+[dogfood] kernel healthy: {"engine":"inkernel","model":"HuggingFaceTB/SmolLM2-135M-Instruct","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = <windows-user-home>\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = HuggingFaceTB/SmolLM2-135M-Instruct
+[dogfood] one live turn through Claude Code (headless): "say pong"

@@ -1,0 +1,30 @@
+NAME          ZONE           MACHINE_TYPE   PREEMPTIBLE  INTERNAL_IP    EXTERNAL_IP    STATUS
+fak-glm-demo  us-central1-c  a3-megagpu-8g               10.128.15.194  35.254.97.170  RUNNING
+
+# --- then, from this laptop ---
+# 1) Open a private path to the VM's /v1 (it has no public ingress). Either:
+#    a. SSH/IAP tunnel — local :8200 -> VM :8000:
+gcloud compute ssh fak-glm-demo --zone us-central1-c --project <gcp-project> \
+  --tunnel-through-iap -- -N -L 8200:localhost:8000
+#       then point the preset at the tunnel (this is the preset's default port):
+export FAK_GLM_GCP_BASE_URL=http://127.0.0.1:8200/v1
+#    b. or, if the VM joined Tailscale, dial it directly:
+# export FAK_GLM_GCP_BASE_URL=http://fak-glm-demo:8000/v1
+
+# 2) Use GLM-5.2 from here through the kernel — one preset command:
+claude-glm-gcp --probe "say pong"     # one witnessable headless turn
+claude-glm-gcp                         # interactive Claude Code on GLM-5.2
+# (run scripts/dogfood-claude.sh --install once so claude-glm-gcp is on PATH;
+#  on Windows: .\scripts\dogfood-claude.ps1 --install)
+READY phase=GLM52_FAK_NATIVE_SERVE_READY port=8000 model=glm-5.2 ep_ranks=8
+{"data":[{"id":"glm-5.2","object":"model","owned_by":"fak"}],"models":[{"additional_speed_tiers":[],"apply_patch_tool_type":"freeform","availability_nux":null,"base_instructions":"","comp_hash":"fak","context_window":272000,"default_reasoning_level":"medium","default_reasoning_summary":"none","default_verbosity":"low","description":"fak gateway model","display_name":"glm-5.2","effective_context_window_percent":95,"experimental_supported_tools":[],"input_modalities":["text"],"max_context_window":272000,"priority":0,"service_tiers":[],"shell_type":"shell_command","slug":"glm-5.2","support_verbosity":false,"supported_in_api":true,"supported_reasoning_levels":[{"description":"Light reasoning","effort":"low"},{"description":"Default reasoning","effort":"medium"},{"description":"Deep reasoning","effort":"high"}],"supports_image_detail_original":false,"supports_parallel_tool_calls":true,"supports_reasoning_summaries":false,"supports_search_tool":false,"truncation_policy":{"limit":10000,"mode":"tokens"},"use_responses_lite":false,"visibility":"list","web_search_tool_type":"text_and_image"}],"object":"list"}
+[dogfood] building fak -> C:\work\fak\tools\.bin\fak.exe
+[dogfood] starting transformers shim (HuggingFaceTB/SmolLM2-135M-Instruct) on :8190
+[dogfood] starting kernel: fak serve --addr 127.0.0.1:8080 --provider openai --model HuggingFaceTB/SmolLM2-135M-Instruct --base-url http://127.0.0.1:8190/v1
+[dogfood] kernel healthy: {"engine":"inkernel","model":"HuggingFaceTB/SmolLM2-135M-Instruct","ok":true,"planner":"proxy"}
+
+[dogfood] Claude Code wired:
+[dogfood]   ANTHROPIC_BASE_URL = http://127.0.0.1:8080   (native /v1/messages on the kernel)
+[dogfood]   CLAUDE_CONFIG_DIR  = <windows-user-home>\.claude-faklocal    (account: faklocal)
+[dogfood]   model (all tiers)  = HuggingFaceTB/SmolLM2-135M-Instruct
+[dogfood] one live turn through Claude Code (headless): "say pong"
