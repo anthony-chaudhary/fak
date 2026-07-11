@@ -96,6 +96,7 @@ var tier = map[string]int{
 	"sessiondesc":          1,                // pure session-descriptor join schema (fak.session.descriptor.v1, #2214): folds gateway drive-state / leaseref / harness-identity rows into one exact-join record with a closed absence vocabulary; stdlib-only, imports nothing internal, off the hot path.
 	"watchdoghealth":       1,                // pure health-digest for the DEFAULT watchdog monitors (fak.watchdog-health.v1): folds the live probe + persisted autoheal heal-state into a closed per-monitor status vocabulary + a worst-of fleet rollup for `fak watchdog status`; stdlib-only, imports nothing internal, off the hot path.
 	"resumemetrics":        1,                // in-process expvar metrics for the resume/heal watchdog (#3803): expvar counters + strings only; imports nothing internal, off the hot path.
+	"resumebackoff":        1,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
 	"wipref":               1,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
 	"wipattr":              1,                // pure dirty-hunk-to-checkpoint attribution fold (#3874); stdlib-only, imports nothing internal, off the hot path.
 	"wiprecon":             1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
