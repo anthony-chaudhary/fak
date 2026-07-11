@@ -11,7 +11,7 @@ fire on real Claude Code traffic — net positive on net dollars, after the cach
 ## Verdict
 
 **YES — head-anchoring is net-beneficial on real traffic, with a conservative net-dollar floor of
-`+$2,457.6360` over the window 2026-07-04..2026-07-11.**
+`+$2,735.2977` over the window 2026-07-04..2026-07-11** (pinned to committed ledger `1c55b6668`).
 
 This is a *lower bound*, not a point estimate: head-anchoring's gross shed cleared its cache-write
 burst even when charged the **entire** window's provider write premium — an over-charge (see
@@ -19,24 +19,29 @@ methodology). The true net-of-burst benefit is `≥` this floor.
 
 | quantity | value | source |
 |---|---|---|
-| compaction fires (head arm, N) | **575** | `compaction_shed` rows with `compaction_saved_usd > 0` |
-| gross shed (head-arm benefit) | **`+$2,809.0038`** | Σ `compaction_saved_usd` (shed valued at input price) |
-| window provider write premium (burst upper bound) | **`$351.3678`** | Σ `write_premium_usd`, all `provider_prompt_cache` rows |
-| **conservative net floor** | **`+$2,457.6360`** | gross shed − entire window write premium |
+| compaction fires (head arm, N) | **605** | `compaction_shed` rows with `compaction_saved_usd > 0` |
+| gross shed (head-arm benefit) | **`+$3,115.7683`** | Σ `compaction_saved_usd` (shed valued at input price) |
+| window provider write premium (burst upper bound) | **`$380.4706`** | Σ `write_premium_usd`, all `provider_prompt_cache` rows |
+| **conservative net floor** | **`+$2,735.2977`** | gross shed − entire window write premium |
 | window | **2026-07-04 .. 2026-07-11** | ledger `date` range of the folded rows |
 
 ## Provenance / how to reproduce
 
 Real traffic, committed ledger: **`docs/nightrun/cache-savings.jsonl`** (schema
-`fak-cache-savings-ledger/1`, 1,951 rows over 2026-07-01..2026-07-11). The two sides of a
+`fak-cache-savings-ledger/1`, 2,045 rows over 2026-07-01..2026-07-11 as of committed ledger
+`1c55b6668`). The two sides of a
 head-anchor fire land on **separate mechanism rows**: `compaction_shed` (the fak-authored shed, no
 burst on that row) and `provider_prompt_cache` (the cache-write premium — where the burst lands, but
 not attributed per fire).
 
+# Pinned to committed ledger 1c55b6668 so these numbers reproduce EXACTLY and forever — nightrun
+# folds new rows into cache-savings.jsonl ~7×/day, so reading the live working-tree file drifts as
+# traffic accumulates (that is expected, not a defect). Feed the committed object on stdin:
+#   git show 1c55b6668:docs/nightrun/cache-savings.jsonl | python anchor_net_floor.py
 ```python
-import json
+import sys, json
 gross = wp = 0.0; fires = 0; dates = []
-for line in open('docs/nightrun/cache-savings.jsonl', encoding='utf-8'):
+for line in sys.stdin:
     line = line.strip()
     if not line: continue
     r = json.loads(line)
@@ -45,20 +50,23 @@ for line in open('docs/nightrun/cache-savings.jsonl', encoding='utf-8'):
     wp += r.get('write_premium_usd', 0) or 0
 print(f"fires={fires} gross_shed=${gross:.4f} window_write_premium=${wp:.4f} "
       f"floor=${gross-wp:+.4f} window={min(dates)}..{max(dates)}")
-# -> fires=575 gross_shed=$2809.0038 window_write_premium=$351.3678 floor=$+2457.6360 window=2026-07-04..2026-07-11
+# -> fires=605 gross_shed=$3115.7683 window_write_premium=$380.4706 floor=$+2735.2977 window=2026-07-04..2026-07-11
 ```
 
 The verdict rendering (three-way, worded, floor-gated) is the pure `ablate.ObservedAnchorArm` seam
 (`internal/ablate/anchor_observed.go`); `go test ./internal/ablate -run TestObservedAnchorArm` pins
-these exact aggregates to the `IS net-beneficial` verdict.
+the verdict *rule* — a directional `IS net-beneficial` claim is earned only when the conservative
+floor is strictly positive — against a deterministic frozen fixture, decoupled from the mutable
+ledger by design so the assertion never drifts as rows fold. The SHA-pinned command above ties the
+*live numbers* to that rule; the test guards the *rule* itself.
 
 ## Methodology — why a *conservative floor*, and why that is the honest shape here
 
 The clean A/B (`ablate.AnchorABSweep`, `anchor_ab.go`) prices **one session under both anchors** and
 differences them. That needs a **counterfactual** — the same traffic replayed under FirstBP *and*
 Head — and real traffic never carries one: a live session runs under whichever anchor is configured,
-never both. The recorded window is **entirely the head arm** (571 fired sessions; **0**
-`compaction_anchor_starved` rows — no FirstBP-dormant arm to difference against). So the matched A/B
+never both. The recorded window is **entirely the head arm** (605 fires; **0**
+`compaction_anchor_starved` rows at the pinned SHA — no FirstBP-dormant arm to difference against). So the matched A/B
 has no pairs to fold, and forcing single-arm rows into it would fabricate the missing arm.
 
 What the ledger *does* witness cleanly:
@@ -71,20 +79,25 @@ What the ledger *does* witness cleanly:
 Charging the head arm the **entire** window write premium is therefore a deliberate over-charge —
 and FirstBP-idle would itself write cache, indeed re-prime the *larger* unshed prefix on TTL expiry,
 so its own burst could equal or exceed head's. Netting the full premium out yields a floor that the
-true net-of-burst benefit cannot fall below: `true ≥ gross_shed − window_write_premium = +$2,457.64`.
+true net-of-burst benefit cannot fall below: `true ≥ gross_shed − window_write_premium = +$2,735.30`.
 A positive floor is a hard directional win requiring no per-fire attribution; only a *non-positive*
 floor would have been undistinguished and kicked the question to the attribution siblings.
 
 ## Generation-closure evidence
 
-- **Promotion evidence (earned `net-beneficial`):** 575 real compaction fires over a full week of
-  guarded-Claude traffic, gross shed `+$2,809.00`, floor `+$2,457.64` positive even under the
-  worst-case burst charge. The #1407 de-starvation switch paid for its burst and then some.
+- **Promotion evidence (earned `net-beneficial`):** 605 real compaction fires over a full week of
+  guarded-Claude traffic (pinned ledger `1c55b6668`), gross shed `+$3,115.77`, floor `+$2,735.30`
+  positive even under the worst-case burst charge. The floor is not a knife-edge: it stayed strictly
+  positive and *rose monotonically* across every committed ledger snapshot as the window filled —
+  `+$216.22` @ 61 fires (07-04..07-06, `03e7b042a`), `+$332.86` @ 202 fires (..07-08, `a3b5b5935`),
+  `+$2,684.25` @ 598 fires (`90c4cff06`), `+$2,735.30` @ 605 fires (..07-11, `1c55b6668`). The #1407
+  de-starvation switch paid for its burst and then some, with widening margin, throughout.
 - **Demotion / retirement evidence (what would flip it):** a future window whose window write
   premium exceeds the gross shed drives the floor `≤ 0` — the verdict then downgrades to
   `NOT DISTINGUISHABLE` and the question routes to per-fire burst attribution (#1490/#1072). A window
-  with 0 fires (FirstBP dormancy, #1407) reads `UNWITNESSED`. Re-run the reproducing command against
-  the then-current ledger to re-check.
+  with 0 fires (FirstBP dormancy, #1407) reads `UNWITNESSED`. Re-run the reproducing command against a
+  later committed SHA (`git show <sha>:docs/nightrun/cache-savings.jsonl | python …`) to re-check
+  against the then-current ledger.
 - **Invalidating assumption:** the floor assumes the fire-caused burst is bounded by the total
   provider write premium and that shed is correctly priced at the input rate. If a future accounting
   change books fire bursts on the `compaction_shed` rows themselves (or splits 5m/1h creation tiers
