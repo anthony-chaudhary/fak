@@ -96,6 +96,32 @@ def test_bump_dist_manifest_no_date_leaves_date_alone(tmp_path: Path) -> None:
     assert "date-released: 2026-01-01" in out and "version: 0.34.0" in out
 
 
+# --- plugin_manifests (reuses bump_dist_manifest) --------------------------
+
+def test_bump_plugin_marketplace_bumps_both_version_pins(tmp_path: Path) -> None:
+    # marketplace.json carries the release version twice (marketplace metadata +
+    # the plugins[fak] entry); PLUGIN_MANIFEST_PINS relies on both bumping while a
+    # description that mentions a version stays put.
+    (tmp_path / "marketplace.json").write_text(
+        '{\n'
+        '  "metadata": {\n'
+        '    "description": "fak 0.33.0 marketplace",\n'
+        '    "version": "0.33.0"\n'
+        '  },\n'
+        '  "plugins": [\n'
+        '    {\n'
+        '      "name": "fak",\n'
+        '      "version": "0.33.0"\n'
+        '    }\n'
+        '  ]\n'
+        '}\n',
+        encoding="utf-8")
+    res = rb.bump_dist_manifest(tmp_path, "marketplace.json", "0.34.0", date=None, dry_run=False)
+    out = (tmp_path / "marketplace.json").read_text(encoding="utf-8")
+    assert res["changed"] and out.count('"version": "0.34.0"') == 2
+    assert '"description": "fak 0.33.0 marketplace"' in out   # prose version untouched
+
+
 def _run_all() -> int:
     import tempfile
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

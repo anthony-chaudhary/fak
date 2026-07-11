@@ -6,10 +6,14 @@ root (fak/ carries no version constant today). Cold-start install docs ALSO carr
 copy-paste version pins (`INSTALL.md`: `FAK_VERSION=`, `VERSION=`, `--build-arg
 APP_VERSION=`, the PowerShell `$Version`, the illustrative `e.g. X`); those drift
 behind a release if nobody bumps them — exactly what stranded INSTALL.md at 0.33.0
-after the 0.34.0 cut. This helper bumps both: the `version` target rewrites
-`VERSION`, and the `install_docs` target pin-bumps each doc in `INSTALL_DOC_PINS`
-on its install/pin lines only (the same context gate `docs_scorecard.py` reads),
-so the bump set matches the gate set and the drift can't recur.
+after the 0.34.0 cut. This helper bumps every version-pinned surface a release
+must move together: the `version` target rewrites `VERSION`, `install_docs`
+pin-bumps each doc in `INSTALL_DOC_PINS` on its install/pin lines only (the same
+context gate `docs_scorecard.py` reads), `dist_manifests` bumps the
+registry/citation manifests in `DIST_MANIFEST_PINS`, and `plugin_manifests` syncs
+the Claude-plugin manifests in `PLUGIN_MANIFEST_PINS` (the surface cmd/fak's
+TestPluginManifestVersionMatchesVERSION gates), so the bump set matches every gate
+set and the drift can't recur.
 
 Prints a JSON report — `{new_version, dry_run, targets}` — where `targets` maps
 each target to `{ok, changed, ...}` (the `install_docs` target nests a per-file
@@ -90,6 +94,21 @@ _DIST_CTX_RE = re.compile(
 )
 # An ISO date token (CITATION.cff `date-released`).
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# The Claude-plugin distribution manifests pin the release version on a JSON
+# `"version":` line a plugin marketplace parses. plugin.json carries the plugin
+# version once; marketplace.json carries it twice (the marketplace
+# metadata.version and the plugins[fak].version entry). All three must equal
+# VERSION or cmd/fak's TestPluginManifestVersionMatchesVERSION (ci-fast) goes
+# red — which it did at 0.38.0 vs a 0.39.0 VERSION, because the only manifests
+# this helper bumped were the dist ones above. They are ordinary `"version":`
+# pins, so `bump_dist_manifest` (date=None) rewrites them with the same
+# whole-line context guard — a description that happens to contain a version is
+# left alone.
+PLUGIN_MANIFEST_PINS = [
+    "plugins/fak/.claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+]
 
 
 def repo_root() -> Path:
@@ -188,7 +207,7 @@ def main() -> int:
     ap.add_argument("version", help="New semver, e.g. 0.2.0 (no leading v)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--date", default=None, help="Release date YYYY-MM-DD (updates CITATION.cff date-released; omit to leave dates alone)")
-    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs", "dist_manifests"], help="Skip a target (repeatable)")
+    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs", "dist_manifests", "plugin_manifests"], help="Skip a target (repeatable)")
     ap.add_argument("--owner", default=None, help="release-lock owner to gate on (default: session id)")
     ap.add_argument("--no-lock", action="store_true", help="bypass the single-writer release lock (solo/CI only)")
     args = ap.parse_args()
@@ -228,10 +247,15 @@ def main() -> int:
         files = [bump_dist_manifest(root, rel, new_version, date=args.date, dry_run=args.dry_run) for rel in DIST_MANIFEST_PINS]
         return {"ok": all(f.get("ok", False) for f in files), "files": files}
 
+    def _plugin_manifests() -> dict:
+        files = [bump_dist_manifest(root, rel, new_version, date=None, dry_run=args.dry_run) for rel in PLUGIN_MANIFEST_PINS]
+        return {"ok": all(f.get("ok", False) for f in files), "files": files}
+
     actions = {
         "version": lambda: bump_plain_file(root, "VERSION", new_version, dry_run=args.dry_run),
         "install_docs": _install_docs,
         "dist_manifests": _dist_manifests,
+        "plugin_manifests": _plugin_manifests,
     }
 
     report: dict = {"new_version": new_version, "dry_run": args.dry_run, "targets": {}}
