@@ -481,6 +481,7 @@ try {
 $ledgerPath = Join-Path $regDir 'resume_ledger.jsonl'
 $launchCount = @{}
 $lastLaunch = @{}
+$launchCauses = @{}
 $ledgerBlocked = @{}
 if (Test-Path $ledgerPath) {
   Get-Content $ledgerPath | ForEach-Object {
@@ -497,6 +498,7 @@ if (Test-Path $ledgerPath) {
       if ($r.phase -eq 'rearm' -or $r.outcome -eq 'rearm') {
         $launchCount[$s] = 0
         $lastLaunch[$s] = [int64]0
+        $launchCauses[$s] = @()
         [void]$ledgerBlocked.Remove($s)
         return
       }
@@ -505,6 +507,7 @@ if (Test-Path $ledgerPath) {
       $nonLaunchPhase = ($r.phase -eq 'deferred') -or ($r.phase -eq 'considered') -or ($r.phase -eq 'skipped') -or ($r.phase -eq 'gate_fail_open')
       if (($r.phase -eq 'launched') -or ($r.phase -eq 'resumed') -or ($r.cause -and -not $nonLaunchPhase)) {
         $launchCount[$s] = [int]$launchCount[$s] + 1
+        if ($r.cause) { $launchCauses[$s] = @($launchCauses[$s]) + @("$($r.cause)") }
         $u = ParseUnix $r.ts
         if ($u -gt [int64]$lastLaunch[$s]) { $lastLaunch[$s] = $u }
       }
@@ -584,7 +587,10 @@ foreach ($p in @($plan)) {
   }
   $attempts = [int]$launchCount[$sid]
   if ($attempts -ge $MaxAttempts) {
-    RecordSettled $statusLedger $mode $sid "attempt cap reached ($attempts/$MaxAttempts)"
+        $causeGroups = @($launchCauses[$sid] | Group-Object | Sort-Object @{Expression='Count';Descending=$true}, @{Expression='Name';Ascending=$true})
+    $dominantCause = if ($causeGroups.Count) { $causeGroups[0].Name } else { '' }
+    $causeShare = if ($causeGroups.Count) { "{0}/{1}" -f $causeGroups[0].Count, @($launchCauses[$sid]).Count } else { '' }
+    AppendJsonLine $statusLedger @{ ts = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'); session = $sid; phase = 'settled'; mode = $mode; reason = "attempt cap reached ($attempts/$MaxAttempts)"; dominant_cause = $dominantCause; cause_share = $causeShare }
     Note "  SKIP $sid8 -- attempt cap reached ($attempts/$MaxAttempts) -- left for a human"
     $closedSids[$sid] = $true
     continue
@@ -775,5 +781,8 @@ Note "  done: launched=$launched sessions_in_ledger=$($launchCount.Count)"
 # refresh the observability card on disk
 try { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $FleetDir 'tools\fleet_status.ps1') -Quiet -RegistryDir $regDir -LogDir $LogDir } catch {}
 exit 0
+
+
+
 
 
