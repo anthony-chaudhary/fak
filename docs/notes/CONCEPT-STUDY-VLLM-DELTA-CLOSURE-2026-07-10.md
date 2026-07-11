@@ -1,18 +1,22 @@
 ---
 title: "study-repo: vLLM delta + 8-axis convergence witness → fak (2026-07-10)"
-description: "Re-clone of vLLM at 26ff616. Two verified findings: (1) the 4-commit delta over the M2 pass is off fak's transferable axis (AMD MoE kernels + a deepseek_v4/amd model + one config guard), with the one on-axis bit being the DSpark sub-block-length correctness contract; (2) an exhaustive 8-reader + critic witness workflow (880k tokens, SHA 26ff616) found fak's control plane has independently CONVERGED on vLLM's orchestration axes — every candidate witnessed PRESENT or PARTIAL-present-adjacent, so 0 new leaves filed. Includes the verified `gh issue list --search` fabrication hazard + reliable alternative."
+description: "Re-clone of vLLM at 26ff616. Verified findings: (1) the 4-commit delta over the M2 pass is off fak's transferable axis (AMD MoE kernels + a deepseek_v4/amd model + one config guard), with the one on-axis bit being the DSpark sub-block-length correctness contract; (2) an 8-reader + critic witness workflow found fak CONVERGED on vLLM's CI / liveness / quorum / observability-producer axes (all PRESENT/PARTIAL-adjacent); (3) a SECOND, deeper adversarial re-witness of the decode-constraint / spec-sample / metrics-consumer control-plane (workflow wf_2bed7fc7-41f, 67 agents, refute-every-gap) found 3 code-verified on-axis SURVIVORS the first table never covered — 2 latent/downstream design-inputs (recorded), 1 candidate metrics leaf (per-request queued→prefill→decode→inference timeline). So 'saturated' is scoped to the axes actually witnessed, not universal. Includes the verified `gh issue list --search` fabrication hazard + reliable alternative."
 ---
 
 # study-repo: vLLM delta + 8-axis convergence witness → fak (2026-07-10)
 
-> **STATUS: CLOSED, 0 leaves filed — an honest "we already have it".** The exhaustive verified witness
-> that an earlier revision was waiting on has landed (workflow `wf_e9081795-807`: 8 subsystem readers + 1
-> completeness critic, 880 020 subagent tokens, all anchors spot-checked against the tree at SHA
-> `26ff616`). Its verdict, cross-checked against fak `internal/` + `cmd/fak/` code below, is that **fak's
-> control plane has independently converged on vLLM's orchestration patterns** — the borrow surface is
-> saturated *by fak's own substrate*, not merely "already ticketed". The prior revision's saturation claim
-> (which had rested on `gh issue list --search` output this session proved fabricated) is now re-established
-> from code witnesses, and no new issues are filed this pass.
+> **STATUS: MOSTLY CONVERGED — the "saturated" claim is now SCOPED, not universal.** Two passes ran.
+> **Pass A** (workflow `wf_e9081795-807`: 8 subsystem readers + 1 completeness critic, 880 020 subagent
+> tokens, anchors spot-checked at SHA `26ff616`) witnessed fak's **CI / minimal-checks / liveness / quorum /
+> observability-producer** axes all PRESENT or PARTIAL-adjacent — the convergence table below stands for
+> *those* axes. **Pass B** (workflow `wf_2bed7fc7-41f`: 67 agents over the **decode-constraint / spec-sample /
+> metrics-consumer** control-plane, every claimed gap sent to adversarial refutation) drilled a *different*
+> candidate set and found **3 genuine on-axis SURVIVORS** that Pass A never covered — each re-verified below
+> against fak `internal/` code, not against `gh issue list --search` (which this session proved fabricates
+> number↔title, see hazard table). So the earlier revision's blanket "the borrow surface is saturated / 0
+> leaves" was an **over-broad headline**: correct for Pass A's axes, wrong as a universal claim. The honest
+> verdict is **broad convergence + 3 residual gaps**, of which **2 are latent/downstream design-inputs
+> (recorded, not filed)** and **1 is a candidate metrics leaf** — see [§ deeper re-witness](#verified--deeper-re-witness-decode--sample--metrics-control-plane-3-survivors).
 
 ## Tooling hazard (verified — the reusable lesson)
 
@@ -95,17 +99,36 @@ cap-park/rotate); `vllm/v1/structured_output/backend_types.py` `StructuredOutput
 `vllm/tool_parsers/abstract_tool_parser.py` `ToolParserManager` (≈ guard MCP mediation `guard_mcp.go`);
 `vllm/v1/metrics/{stats,loggers}.py` (producer/schema half of fleetpane observability).
 
-## Why 0 leaves is the honest, disciplined outcome
+## VERIFIED — deeper re-witness (decode / sample / metrics control-plane): 3 survivors
+
+Pass B (`wf_2bed7fc7-41f`) re-scouted the axes Pass A's readers did **not** open — the decode-constraint
+mask, the spec-sample acceptance ledger, and the metrics-consumer timeline — and sent every claimed gap to
+adversarial refutation (majority-refute ⇒ killed). Of 50 candidates: **25 witnessed PRESENT, 12 already
+TRACKED, 7 refuted, 3 survived.** All three anchors below were **re-verified by hand against fak's tree**
+(not via issue search), and each survivor's disposition is chosen by the same scout-loop discipline Pass A
+used — *record a latent/downstream design-input, file only a small ship-alone on-axis leaf.*
+
+| # | survivor (vLLM axis) | fak ground-truth anchor (verified this pass) | why it's REAL, not present | disposition |
+|---|---|---|---|---|
+| S1 | Reasoning-phase mask suspension: suspend the grammar/byte mask while the model is inside a `<think>` span, resume at the reasoning-end boundary | `internal/model/constraint.go:203` `StepMask.MaskLogits` keys on `step := len(history)` from step 0; `:271` `GuidedByteMask.MaskLogits` rebuilds the prefix from **all** history via `decodePrefix` — **neither has any reasoning-phase gate** | The mask has no notion of a reasoning boundary. **But** `:234` states the mask is **"NOT WIRED LIVE … dormant until `FAK_NATIVE_GUIDED_DECODE=1`"** (default-off; corroborated across `constraint_test.go`, `grammar/compile.go:122`, 3 notes). So the gap is **latent** — it only bites the moment the mask is wired into the live sampler, which the code itself defers to "a later slice" | **Recorded, not filed.** Add "suspend on reasoning span" to the later-slice wiring contract for the native-guided-decode epic (#26 / #2596-family). Pre-implementation design-input for an epic fak owns; no ship-now surface |
+| S2 | Synthetic acceptance-ledger replay: drive a rejection-sampler test from a per-position **conditional** rate curve (cᵢ = pᵢ/pᵢ₋₁) instead of running the model | `internal/turnbench/stochastic.go:49` `RateProfile` = four **independent** per-class Bernoulli draws against an eligible base call (`AliasRate`/`DupRate`/`PureRate`/`StaticRate`); grep `synthetic_mode\|unconditional_to_conditional\|conditionalRate` in `internal/` = **0** | fak simulates via real-kernel Bernoulli draws, not a replayed per-position conditional-acceptance ledger. Genuinely un-borrowed **but** testing-grade, and **downstream of per-position acceptance work fak hasn't built** (tracked via the DeepSpec per-position line, `[[deepspec-borrow-study-2026-07-11]]`) | **Recorded, not filed.** One-line note on the existing per-position-acceptance tracked item; it can't ship before the mechanism it replays exists |
+| S3 | Per-request latency **event timeline**: QUEUED→SCHEDULED→first→last ledger yielding a **queued-wait** interval + a first-schedule-wins **preemption fold**, not just a prefill/decode split | `internal/gateway/metrics_observe.go:573` `observeInferenceTimed` is *handed* `dur, ttft` and only splits prefill=ttft / decode=dur−ttft; grep `scheduled_ts\|queued_time\|first_schedule\|queuedWait\|QueueWait` in `internal/` = **0**; reliable `gh search issues` finds no on-point ticket (nearest: #3391 token-hit-rate, #4008 TTL-witness — both other metrics) | No queued-wait component and no event ledger, though fak **does** queue at admission (dispatch-tick / seat-park) so a queue-wait is measurable. On fak's exact metrics axis; sibling to the active gateway-metrics enrichment line (#3391) | **FILED #4261** — the one small, ship-alone, on-axis, unowned lead this pass produced. Lands as a `queued`/`prefill`/`decode`/`inference` interval decomposition on `gatewayMetrics` with a first-schedule-wins fold; sibling to #3391 |
+
+**Why these survived where Pass A saw only convergence:** Pass A's readers mapped CI/liveness/quorum/observability-*producer* axes, all of which fak implements. Pass B drilled the *consumer/decode* interior — the grammar mask's phase-awareness, the acceptance ledger's replay mode, the metrics timeline's granularity — where fak's mechanisms are present but **coarser** than vLLM's. None is a "fak is missing a subsystem" gap; all three are **refinements at the edge of a mechanism fak already has**, which is why 2 of 3 are design-inputs rather than leaves.
+
+## Why the outcome is still disciplined (broad convergence + one candidate lead)
 
 Scout-loop rule: one lead per pass, file SMALL + ship-alone + on-axis, and **a witnessed "we already have
 it" is a good result**. vLLM is fak's most-studied repo (M2, spec-decode, LMCache, Mooncake, SGLang, EPLB,
 ktransformers, kvcache-factory). Filing from this firehose would be the "storm the backlog" anti-pattern.
-Every witnessed candidate is PRESENT or a marginal-PARTIAL over an existing mechanism; the one PARTIAL
-(death-pipe lease-release) is already recorded in memory and present-adjacent via lease-staleness. The
-registerable finding is the convergence itself: **fak's substrate has independently arrived at vLLM's
-orchestration axes** — dos (refusal-vocab / advisory-downgrade / quorum / verify-audit), affected
-(minimal-checks), knownbad (flaky ledger), fleetpane (load + STALE), guard (carryforward / resume), lane
-leases (arbitrate).
+Across both passes the tally is exactly what the discipline wants: the Pass-A axes are PRESENT or a
+marginal-PARTIAL over an existing mechanism, and Pass B's 3 survivors reduce to **2 recorded design-inputs
+(S1, S2 — latent / downstream of unbuilt work) + 1 ship-alone leaf filed as #4261 (S3)** — one lead, not a
+backlog storm. The primary registerable finding remains the convergence: **fak's substrate has
+independently arrived at vLLM's orchestration axes** — dos (refusal-vocab / advisory-downgrade / quorum /
+verify-audit), affected (minimal-checks), knownbad (flaky ledger), fleetpane (load + STALE), guard
+(carryforward / resume), lane leases (arbitrate) — with the honest caveat that fak's decode/sample/metrics
+*interior* is coarser than vLLM's at three edges (S1–S3), not saturated.
 
 ## Honest limits
 
