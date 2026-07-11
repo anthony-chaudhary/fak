@@ -104,6 +104,49 @@ func TestUpdateMessageSendsChannelTSText(t *testing.T) {
 	}
 }
 
+func TestDeleteMessageSendsChannelTS(t *testing.T) {
+	var gotBody map[string]any
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv)
+	if err := c.DeleteMessage(context.Background(), "C1", "111.222"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(gotPath, "chat.delete") {
+		t.Fatalf("path = %q, want chat.delete", gotPath)
+	}
+	if gotBody["channel"] != "C1" || gotBody["ts"] != "111.222" {
+		t.Fatalf("body wrong: %+v", gotBody)
+	}
+}
+
+// TestDeleteMessageAlreadyGoneIsTypedAPIError pins the reaper's idempotency contract at the
+// transport: deleting a message that is already gone answers ok:false message_not_found,
+// which surfaces as the typed *APIError the outbox treats as success.
+func TestDeleteMessageAlreadyGoneIsTypedAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ok":false,"error":"message_not_found"}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv)
+	err := c.DeleteMessage(context.Background(), "C1", "gone.0")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("want *APIError, got %T: %v", err, err)
+	}
+	if apiErr.Method != "chat.delete" || apiErr.Code != "message_not_found" {
+		t.Fatalf("APIError fields wrong: %+v", apiErr)
+	}
+}
+
 func TestHistoryPassesOldestAndLimitAndDecodes(t *testing.T) {
 	var gotQuery map[string][]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
