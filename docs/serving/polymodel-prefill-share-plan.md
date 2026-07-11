@@ -189,6 +189,19 @@ accepted path is token-identical to plain greedy decode.
 Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 **[SEAM-ONLY]** interface/seam exists, no production impl · **[GAP]** absent.
 
+> **Reconciled 2026-07-10.** The `internal/spec` leaf (the end-to-end spec-decode
+> *driver*: `Sink`, `SpeculativeGreedy`, `VerifyTree`/`SpeculativeTree`,
+> `SplicePrefillShare`) was **retired as unwired** on main (`f7083ed1d refactor(spec):
+> retire the unwired internal/spec speculation leaf`) — it is no longer on disk or in
+> `HEAD`, so its `go test ./internal/spec` witnesses no longer run. What SURVIVED and
+> stays proven: the `abi.ProvisionalSink` seam, the `polymodel` accept core
+> (`AcceptGreedy`/`AcceptTree`/`CanShare`), the single-pass verify EXECUTION primitive
+> (`model.VerifyForward`), and the `cachemeta` prefill-share verdict layer
+> (`WithPrefillShare`). The rows below are corrected to that surviving substrate; any
+> remaining `internal/spec` reference elsewhere in this doc (§5, §7 rungs 4/4b/5) is
+> superseded by this note. Wiring the surviving substrate natively into the decode loop
+> is tracked in **#3197**.
+
 | Capability | Status | Anchor |
 |---|---|---|
 | Bit-exact KV `Clone` (the speculative fork) | **[SHIPPED]** | `internal/model/kv.go:123` |
@@ -204,9 +217,9 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Multi-model weight residency — policy + *model.Model binding | **[SHIPPED]** | `internal/residency` — `Manager` hosts many `*model.Model` under one weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget + eviction policy and binding each residency descriptor to the weights it governs (off-defconfig, a library type like `polymodel`) |
 | Multi-model weight residency / whole-model eviction ON a backend | **[GAP]** | the policy + binding layer is shipped above; the real per-backend weight load/evict (per-weight budget `internal/compute/vulkan.go:164`; process-wide `gpulease` `lease.go:36`) is the deeper rung a future wiring drives through `Manager.Admit`/`Evict` |
 | Runtime resident-budget adapt (re-budget a live pool) | **[SHIPPED]** (off-defconfig) | `polymodel.Pool.Resize` + `residency.Manager.SetBudget` (#3999) — shrink evicts the coldest-unpinned residents (LRU) until it fits, handing the weight handles back for page-out; grow evicts nothing; a shrink below the pinned footprint refuses `ErrPinnedNoRoom` with the pool unchanged (Admit's all-or-nothing). The runtime knob for the `gpulease` memory-pressure cascade / hot-add, without rebuilding the pool |
-| Cross-model prefill share (served) | **[SHIPPED]** (verdict-layer + splice; off-defconfig) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534); `internal/spec.SplicePrefillShare`/`CrossModelPrefillShare` (the `KVCache.Clone` splice, bit-exact). Live multi-model backend residency (#531) still [GAP] |
-| `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. (Its verify step is now single-pass — see the row below.) |
-| Single-pass verify EXECUTION — batched chain + tree-attention masks | **[SHIPPED]** (off-defconfig) | `internal/model.VerifyForward(ids, pos, allow)` — the rung-#533 execution primitive. CHAIN (nil `pos`/nil `allow`): bit-identical to kk sequential `Session.Step` calls (same logits + appended K/Kraw/V/pos), so `spec.SpeculativeGreedy` verifies in ONE pass; TREE (depth-based `pos`, ancestor `allow`): tree-attention masks — each node attends only to its ancestor chain + prefix, never siblings. `spec.VerifyTree`/`SpeculativeTree` drive it through `AcceptTree`; accepted path token-identical to greedy. Witness: `go test ./internal/model ./internal/spec`. CPU PreNorm regime only — no GPU/tokens-per-sec (bench harness #535); tree recomputes the accepted path (no KV-compaction primitive yet) |
+| Cross-model prefill share (served) | **[PARTIAL]** (verdict-layer shipped; splice retired) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534) — SHIPPED, on main. The `KVCache.Clone` splice half lived in the now-retired `internal/spec` (`SplicePrefillShare`/`CrossModelPrefillShare`, removed as unwired in `f7083ed1d`); rebuild it when the substrate is wired (#3197). Live multi-model backend residency (#531) still [GAP] |
+| `ProvisionalSink` implementation / `internal/spec` | **[SEAM-ONLY]** (impl retired) | The `abi.ProvisionalSink` seam is frozen and present (`internal/abi/registry.go`), but the `internal/spec` implementation (Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; `SpeculativeGreedy`) was **retired as unwired** in `f7083ed1d` — the leaf and its `go test ./internal/spec` witness no longer exist on main. The accept DECISION (`polymodel.AcceptGreedy`) and the rollback (`model.KVCache.Evict`) survive; a native re-wiring is tracked in #3197 |
+| Single-pass verify EXECUTION — batched chain + tree-attention masks | **[SHIPPED]** (primitive; driver retired) | `internal/model.VerifyForward(ids, pos, allow)` — the rung-#533 execution primitive — SURVIVES on main. CHAIN (nil `pos`/nil `allow`): bit-identical to P sequential `Session.Step` calls (same logits + appended K/Kraw/V/pos); TREE (depth-based `pos`, ancestor `allow`): tree-attention masks — each node attends only to its ancestor chain + prefix, never siblings. Witness: `go test ./internal/model`. The `internal/spec` end-to-end drivers that consumed it (`SpeculativeGreedy`, `VerifyTree`/`SpeculativeTree`) were retired as unwired (`f7083ed1d`); native re-wiring is #3197. CPU PreNorm regime only — no GPU/tokens-per-sec (bench harness #535) |
 
 ## 7. The child map / sequencing
 
