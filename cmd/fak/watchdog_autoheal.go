@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -416,18 +415,14 @@ func runWatchdogAutoheal(ctx context.Context, opts watchdogAutohealOptions) []wa
 		return nil
 	}
 	results := make([]watchdogAutohealResult, len(opts.Specs))
-	var wg sync.WaitGroup
+	// The specs are four cheap host-global probes. Run them serially: a guarded
+	// session wave must never multiply them into a cold PowerShell spawn storm.
 	for i, spec := range opts.Specs {
-		wg.Add(1)
-		go func(i int, spec watchdogAutohealSpec) {
-			defer wg.Done()
-			t0 := time.Now()
-			r := healOneWatchdog(ctx, opts, spec)
-			r.ElapsedMS = time.Since(t0).Milliseconds()
-			results[i] = r
-		}(i, spec)
+		t0 := time.Now()
+		r := healOneWatchdog(ctx, opts, spec)
+		r.ElapsedMS = time.Since(t0).Milliseconds()
+		results[i] = r
 	}
-	wg.Wait()
 	return results
 }
 

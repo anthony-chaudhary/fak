@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -508,47 +509,6 @@ func TestWatchdogAutohealKeepsAgentPaneClean(t *testing.T) {
 	}
 }
 
-func TestRunWatchdogAutohealProbesSpecsConcurrently(t *testing.T) {
-	now := time.Unix(5000, 0).UTC()
-	dir := t.TempDir()
-	const perSpecDelay = 60 * time.Millisecond
-	const specCount = 4
-
-	specs := make([]watchdogAutohealSpec, specCount)
-	for i := 0; i < specCount; i++ {
-		id := fmt.Sprintf("svc-%d", i)
-		specs[i] = watchdogAutohealSpec{
-			watchdogService: watchdogService{ID: id, Manager: "taskscheduler", Unit: id},
-			Probe: func(context.Context) (watchdogProbe, error) {
-				time.Sleep(perSpecDelay)
-				return watchdogProbe{Installed: false, Alive: false, Detail: "not installed"}, nil
-			},
-			Restart: func(context.Context) error { return nil },
-		}
-	}
-	opts := testWatchdogAutohealOptions(dir, &now, specs[0])
-	opts.Specs = specs
-
-	start := time.Now()
-	got := runWatchdogAutoheal(context.Background(), opts)
-	wall := time.Since(start)
-
-	if len(got) != specCount {
-		t.Fatalf("results = %d, want %d", len(got), specCount)
-	}
-	if budget := perSpecDelay * 5 / 2; wall >= budget {
-		t.Fatalf("runWatchdogAutoheal took %s for %d specs at %s each, want < %s", wall, specCount, perSpecDelay, budget)
-	}
-	for i, r := range got {
-		if r.ID != specs[i].ID {
-			t.Fatalf("result order not preserved: got[%d].ID = %q, want %q", i, r.ID, specs[i].ID)
-		}
-		if r.ElapsedMS <= 0 {
-			t.Fatalf("result[%d].ElapsedMS = %d, want > 0", i, r.ElapsedMS)
-		}
-	}
-}
-
 func TestWatchdogAutohealSummaryLineIsUnconditional(t *testing.T) {
 	results := []watchdogAutohealResult{
 		{Action: "noop", ID: "a"},
@@ -578,4 +538,28 @@ func serviceProjectionHas(services []watchdogService, manager, unit string) bool
 		}
 	}
 	return false
+}
+
+func TestRunWatchdogAutohealSerializesProbes(t *testing.T) {
+	var active, maxActive atomic.Int32
+	specs := make([]watchdogAutohealSpec, 4)
+	for i := range specs {
+		specs[i] = watchdogAutohealSpec{watchdogService: watchdogService{ID: fmt.Sprintf("s%d", i)}, Restart: func(context.Context) error { return nil }, Probe: func(context.Context) (watchdogProbe, error) {
+			n := active.Add(1)
+			for {
+				m := maxActive.Load()
+				if n <= m || maxActive.CompareAndSwap(m, n) {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+			active.Add(-1)
+			return watchdogProbe{Installed: true, Alive: true}, nil
+		}}
+	}
+	opts := watchdogAutohealOptions{Mode: watchdogAutohealOn, Specs: specs, StateDir: t.TempDir(), Clock: time.Now, Sleep: time.Sleep}
+	got := runWatchdogAutoheal(context.Background(), opts)
+	if len(got) != 4 || maxActive.Load() != 1 {
+		t.Fatalf("results=%d max concurrent=%d", len(got), maxActive.Load())
+	}
 }
