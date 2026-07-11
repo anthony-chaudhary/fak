@@ -84,6 +84,45 @@ type Store struct {
 	hits    int64 // Put of an already-present digest (content dedup)
 	resolv  int64
 	evicted int64 // digests deleted by the byte budget
+
+	// Async durable-write pipeline (PutAsync), additive over the synchronous
+	// Put/commit path above. A non-blocking Put copies the caller's bytes into an
+	// OWNED buffer (so the caller may reuse its slice at once), enqueues the
+	// fsync+rename onto a BOUNDED background worker, and returns the Ref
+	// immediately; a concurrent same-digest Put COALESCES onto the pending write
+	// via inflight instead of racing a second disk write. The worker is spawned
+	// lazily on the first PutAsync, so a store that never goes async spawns no
+	// goroutine and behaves exactly as before.
+	inflight      map[string]struct{} // digests with a pending async write (guarded by s.mu) — the coalesce set
+	asyncMu       sync.Mutex          // serializes channel sends against Close (send-on-closed safety)
+	asyncJobs     chan asyncJob       // bounded queue of pending durable writes
+	asyncCap      int                 // asyncJobs capacity — the queue bound
+	asyncOnce     sync.Once           // spawns the worker on first PutAsync
+	asyncWG       sync.WaitGroup      // joins the worker on Close
+	asyncStarted  bool                // worker spawned (guarded by asyncMu)
+	asyncClosed   bool                // Close initiated: no further enqueues (guarded by asyncMu)
+	closeOnce     sync.Once           // idempotent Close
+	workerLive    atomic.Bool         // worker goroutine alive — the join witness
+	bgWrites      int64               // background write jobs executed (atomic) — the coalesce witness
+	asyncErrMu    sync.Mutex          // guards firstAsyncErr
+	firstAsyncErr error               // first async write error, surfaced by Flush/Close
+	beforeWrite   func(digest string) // test seam: invoked by the worker just before writeBlob (nil in prod)
+}
+
+// defaultAsyncQueueCap bounds the pending-write queue a lazily-spawned PutAsync
+// worker drains. It caps the in-flight backlog (and thus the owned-buffer memory
+// held for not-yet-durable writes); a full queue applies backpressure to PutAsync
+// rather than growing without limit.
+const defaultAsyncQueueCap = 256
+
+// asyncJob is one unit of durable-write work handed to the background worker: an
+// owned copy of the payload plus its precomputed digest. A job whose barrier is
+// non-nil carries no payload — it is a Flush fence the worker closes once every
+// earlier job has drained (the single FIFO worker makes the fence exact).
+type asyncJob struct {
+	digest  string
+	buf     []byte
+	barrier chan struct{}
 }
 
 // New opens (creating if absent) a durable store rooted at dir, seeding the index
@@ -105,12 +144,15 @@ func NewWithBudget(dir string, maxBytes int64) (*Store, error) {
 		return nil, fmt.Errorf("blobfs: create store dir %s: %w", dir, err)
 	}
 	s := &Store{
-		root:     dir,
-		index:    map[string]int64{},
-		maxBytes: maxBytes,
-		pins:     map[string]int{},
-		order:    list.New(),
-		orderIdx: map[string]*list.Element{},
+		root:      dir,
+		index:     map[string]int64{},
+		maxBytes:  maxBytes,
+		pins:      map[string]int{},
+		order:     list.New(),
+		orderIdx:  map[string]*list.Element{},
+		inflight:  map[string]struct{}{},
+		asyncJobs: make(chan asyncJob, defaultAsyncQueueCap),
+		asyncCap:  defaultAsyncQueueCap,
 	}
 	if err := s.scan(); err != nil {
 		return nil, err
