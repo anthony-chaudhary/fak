@@ -31,6 +31,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Schema identifiers — the versioned envelope every corpus artifact carries.
@@ -486,6 +488,7 @@ func runGit(dir string, extraEnv []string, args ...string) error {
 
 func runGitOut(dir string, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = dir
 	// A hermetic, C-locale environment: inherit PATH but drop the caller's git
 	// identity/config knobs so the fixture's pins are the only ones that apply.
