@@ -78,6 +78,9 @@ type watchdogAutohealSpec struct {
 	watchdogService
 	Probe   func(context.Context) (watchdogProbe, error)
 	Restart func(context.Context) error
+	// LastActivity reports independently observed output. Recent output resets
+	// the silence canary; unknown activity fails open to a verified probe.
+	LastActivity func() (time.Time, error)
 }
 
 type watchdogAutohealOptions struct {
@@ -410,9 +413,38 @@ func watchdogAutohealSpecsForGOOS(goos string, run watchdogCommandRunner) []watc
 				return err
 			}
 		}
+		if activityPath := watchdogActivityPathForService(goos, svc); activityPath != "" {
+			spec.LastActivity = func() (time.Time, error) {
+				info, err := os.Stat(activityPath)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return info.ModTime().UTC(), nil
+			}
+		}
 		specs = append(specs, spec)
 	}
 	return specs
+}
+
+func watchdogActivityPathForService(goos string, svc watchdogService) string {
+	if goos != "windows" {
+		return ""
+	}
+	local := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if local == "" {
+		return ""
+	}
+	switch svc.ID {
+	case "fleet-resume-watchdog":
+		return filepath.Join(local, "Fleet", "watchdog", "resume_watchdog.log")
+	case "fleet-supervisor-watchdog":
+		return filepath.Join(local, "Fleet", "supervisor-watchdog", "supervisor-watchdog.log")
+	case "fleet-dos-dispatch-watchdog":
+		return filepath.Join(local, "Fleet", "dos-dispatch-watchdog", "dos-dispatch-watchdog.log")
+	default:
+		return ""
+	}
 }
 
 func runWatchdogAutoheal(ctx context.Context, opts watchdogAutohealOptions) []watchdogAutohealResult {
@@ -529,6 +561,17 @@ func healOneWatchdog(ctx context.Context, opts watchdogAutohealOptions, spec wat
 
 	now := opts.Clock().UTC()
 	st, _ := readWatchdogHealState(opts.StateDir, spec.ID)
+	// Emitted output is the primary liveness signal. Recent activity resets the
+	// canary; only silence reaches the manager probe. Unknown activity fails open.
+	if opts.ProbeTTL > 0 && spec.LastActivity != nil {
+		if lastActivity, err := spec.LastActivity(); err == nil && !lastActivity.IsZero() &&
+			now.Sub(lastActivity) >= 0 && now.Sub(lastActivity) < opts.ProbeTTL {
+			base.Action = "noop"
+			base.Reason = watchdogReasonProbeFresh
+			base.Summary = fmt.Sprintf("probe skipped: output observed %s ago, inside silence canary %s", now.Sub(lastActivity).Round(time.Millisecond), opts.ProbeTTL)
+			return base
+		}
+	}
 
 	// Probe-freshness gate (#3155): the cold probe spawns a full powershell.exe
 	// (Get-ScheduledTask, via probeScheduledTask). On a resume/restart wave those

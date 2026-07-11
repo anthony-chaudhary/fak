@@ -242,6 +242,39 @@ func TestWatchdogHealFreshExhaustedStreakStillGivesUp(t *testing.T) {
 // It counts probe invocations directly: a fresh LastProbeAliveUnixNano yields a
 // noop/WATCHDOG_PROBE_FRESH with the probe never called, while a stale timestamp
 // (or ProbeTTL=0) falls through and probes as before.
+func TestWatchdogHealRecentOutputResetsSilenceCanary(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 11, 13, 0, 0, 0, time.UTC)
+	probes := 0
+	spec := watchdogAutohealSpec{
+		watchdogService: watchdogService{ID: "active-output", Manager: "systemd", Unit: "active.timer"},
+		LastActivity:    func() (time.Time, error) { return now.Add(-10 * time.Second), nil },
+		Probe: func(context.Context) (watchdogProbe, error) {
+			probes++
+			return watchdogProbe{Alive: false, Installed: true}, nil
+		},
+		Restart: func(context.Context) error { return nil },
+	}
+	opts := watchdogAutohealOptions{Mode: watchdogAutohealOn, StateDir: dir, Specs: []watchdogAutohealSpec{spec}, Clock: func() time.Time { return now }, ProbeTTL: time.Minute}
+	got := runWatchdogAutoheal(context.Background(), opts)
+	if probes != 0 {
+		t.Fatalf("probe calls=%d, want 0 while output is recent", probes)
+	}
+	if len(got) != 1 || got[0].Action != "noop" || got[0].Reason != watchdogReasonProbeFresh {
+		t.Fatalf("result=%+v, want activity-reset noop", got)
+	}
+
+	spec.LastActivity = func() (time.Time, error) { return now.Add(-2 * time.Minute), nil }
+	opts.Specs = []watchdogAutohealSpec{spec}
+	got = runWatchdogAutoheal(context.Background(), opts)
+	if probes != 1 {
+		t.Fatalf("probe calls=%d, want 1 after silence window", probes)
+	}
+	if len(got) != 1 || got[0].Action == "noop" {
+		t.Fatalf("silent result=%+v, want verified probe path", got)
+	}
+}
+
 func TestWatchdogHealProbeFreshnessGateSkipsColdProbe(t *testing.T) {
 	now := time.Unix(6000, 0).UTC()
 	const probeTTL = 60 * time.Second
