@@ -1,0 +1,55 @@
+{
+  "schema": "fak-codex-memories-dogfood/1",
+  "captured_at": "2026-07-11T23:10:00Z",
+  "github_issue": 1433,
+  "codex_version": "0.144.1",
+  "status": "NOT_YET_VALUE_POSITIVE",
+  "privacy": "Isolated temporary CODEX_HOME directories; only auth copied; fixed harmless synthetic prompts; no raw memory, prompt, tool, or operator-private content retained.",
+  "supported_semantics": {
+    "feature": "memories (experimental, default false)",
+    "implementation": "SQLite memories_1.sqlite plus per-thread memory_mode and background jobs",
+    "limitation": "0.144.1 exposes one combined create-and-retrieve feature, not independent supported use-only and generate controls"
+  },
+  "postures": [
+    {
+      "name": "off",
+      "external_context": "excluded",
+      "feature_enabled": false,
+      "session_result": "fixed sentinel returned",
+      "memory_db_bytes": 40960,
+      "jobs": 0,
+      "stage1_outputs": 0
+    },
+    {
+      "name": "enabled_empty",
+      "external_context": "excluded",
+      "feature_enabled": true,
+      "session_result": "fixed sentinel returned",
+      "memory_db_bytes": 40960,
+      "jobs": 1,
+      "job_category": "memory_consolidate_global",
+      "job_status": "error",
+      "stage1_outputs": 0
+    },
+    {
+      "name": "enabled_generation_attempt",
+      "external_context": "intentionally allowed harmless public workflow category",
+      "feature_enabled": true,
+      "session_result": "fixed sentinel returned",
+      "memory_db_bytes": 40960,
+      "jobs": 1,
+      "job_category": "memory_consolidate_global",
+      "job_status": "error",
+      "stage1_outputs": 0,
+      "reuse_probe": "MEMORY_REUSE_NONE"
+    }
+  ],
+  "qualitative_categories_generated": [],
+  "findings": [
+    "Enabling the feature schedules global consolidation but did not produce a stage1 memory in either isolated home.",
+    "The generation attempt failed internally before producing reusable memory; the follow-up session reported no supplied prior memory.",
+    "No evidence supports promoting a recurring workflow into AGENTS.md, docs, or a skill from this run.",
+    "Generated-memory tool-output risk was not observable because generation produced zero outputs."
+  ],
+  "verdict": "not yet: Codex 0.144.1 exposes no supported use-only/generate split and isolated generation jobs errored, so actual memory value and safety cannot be claimed."
+}
