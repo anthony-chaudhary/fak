@@ -26,6 +26,7 @@ import (
 const codexLoopSchema = "fak.sessions.codex_loop.v1"
 const codexLoopRecentSchema = "fak.sessions.codex_loop_recent.v1"
 const codexLoopHookOverrideEnv = "FAK_ALLOW_DIRECT_CODEX_CONTINUE"
+const codexLoopHookAuditJournalEnv = "FAK_AUDIT_JOURNAL"
 const codexLoopHookDefaultBudget = 500 * time.Millisecond
 const codexLoopLaunchMaxBytes int64 = 4 << 20
 const codexLoopLaunchPrefixBytes int64 = 256 << 10
@@ -108,6 +109,14 @@ type codexLoopHookInput struct {
 type codexLoopHookBlock struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason"`
+}
+
+type codexLoopHookBlockWitness struct {
+	Timestamp     string `json:"timestamp"`
+	Event         string `json:"event"`
+	SessionID     string `json:"session_id"`
+	ModelProvider string `json:"model_provider"`
+	Reason        string `json:"reason"`
 }
 
 type codexRepeatedOutcome struct {
@@ -424,7 +433,37 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode block: %v\n", err)
 		return 1
 	}
+	if err := appendCodexLoopHookBlockWitness(os.Getenv(codexLoopHookAuditJournalEnv), codexLoopHookBlockWitness{
+		Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
+		Event:         "codex_continuation_guard_block",
+		SessionID:     sessionID,
+		ModelProvider: strings.TrimSpace(d.ModelProvider),
+		Reason:        codexLoopDiagnosisGateReason(d, "unguarded"),
+	}); err != nil {
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: append block witness: %v\n", err)
+	}
 	return 0
+}
+
+func appendCodexLoopHookBlockWitness(path string, witness codexLoopHookBlockWitness) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	line, err := json.Marshal(witness)
+	if err != nil {
+		return err
+	}
+	line = append(line, '\n')
+	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err = fh.Write(line); err != nil {
+		_ = fh.Close()
+		return err
+	}
+	return fh.Close()
 }
 
 func codexLoopHookOverrideEnabled(raw string) bool {

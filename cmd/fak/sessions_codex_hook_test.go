@@ -54,6 +54,39 @@ func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
 	}
 }
 
+func TestCodexLoopHookBlockWritesExactlyOneAuditWitness(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
+	home, sessionID := writeCodexHookSession(t, "openai")
+	journal := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv(codexLoopHookAuditJournalEnv, journal)
+	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
+
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("hook exit = %d; stderr=%s", code, stderr.String())
+	}
+	var block codexLoopHookBlock
+	if err := json.Unmarshal(stdout.Bytes(), &block); err != nil || block.Decision != "block" {
+		t.Fatalf("stdout must remain the Codex block JSON only: err=%v stdout=%q", err, stdout.String())
+	}
+	raw, err := os.ReadFile(journal)
+	if err != nil {
+		t.Fatalf("read audit witness: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("audit witness lines = %d, want exactly 1: %q", len(lines), raw)
+	}
+	var witness codexLoopHookBlockWitness
+	if err := json.Unmarshal([]byte(lines[0]), &witness); err != nil {
+		t.Fatalf("decode audit witness: %v", err)
+	}
+	if witness.Event != "codex_continuation_guard_block" || witness.SessionID != sessionID || witness.ModelProvider != "openai" || witness.Reason != "codex_session_bypassed_fak_guard" {
+		t.Fatalf("unexpected audit witness: %+v", witness)
+	}
+}
+
 func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
