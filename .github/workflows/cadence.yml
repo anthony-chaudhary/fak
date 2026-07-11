@@ -4,8 +4,8 @@ name: cadence report
 # operator tracks into ONE control-pane envelope on a weekly cadence:
 #
 #   * SCORES    — the scorecard control pane (portfolio debt + trend).
-#   * WORK-DONE — git commits + `(fak ` ship-trailer count over a trailing window
-#                 (the dimension that had NO durable cadence report before this).
+#   * WORK-DONE — git commits + origin-published, diff-witnessed ship commits over a
+#                 trailing window; local-only/unwitnessed stamps remain typed holds.
 #   * RELEASES  — the release-status fold (latest tag + next action).
 #   * MILESTONES — the milestone trend ledger + generated climb status snapshot,
 #                 plus the SCHEDULE burndown (due-date vs velocity at-risk debt).
@@ -81,6 +81,13 @@ jobs:
         with:
           python-version: "3.x"
 
+      # WORK-DONE credits a ship only after the repository's independent DOS
+      # commit-audit reads the published diff. Install the same kernel package the
+      # main CI trust-floor job uses; without it cadence fails the dimension closed
+      # instead of falling back to a forgeable subject-line count (#4224).
+      - name: install DOS commit witness
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
       # The fold/trend logic FIRST: a green report below is only meaningful if the
       # fold that produced it is itself proven correct. The milestone fold rides the
       # SAME loop cadence (issue #1443) so a milestone regression surfaces on the
@@ -112,6 +119,8 @@ jobs:
           print(f"{d['verdict']} ({d['finding']}) @{d['commit']} {d['date']}")
           print(f"  scores    debt {s['debt']} across {s.get('measured', 0)} scorecard(s); trend {s.get('trend_direction')}")
           print(f"  work      {w['commits']} commit(s) / {w['ships']} ship(s) in {w['window_days']}d")
+          for hold in w.get("held", []):
+              print(f"    held    {hold['reason']} {hold['sha']} ({hold['leaf']}): {hold.get('detail', '')}")
           print(f"  releases  {r['version']}; next {r['action_kind']}")
           if d.get("trend"):
               print(f"  trend     {d['trend']['summary']}")
