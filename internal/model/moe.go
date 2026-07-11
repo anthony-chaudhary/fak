@@ -292,7 +292,9 @@ func route(m *Model, layer int, xn any, mat matKernel) []routePick {
 	logits := mat.mul(routerName(layer), xn, E, cfg.HiddenSize)
 	m.addBiasIfPresent(logits, routerBiasName(layer))
 	if cfg.isGPTOSS() {
-		return routeTopKSoftmax(logits, K)
+		picks := routeTopKSoftmax(logits, K)
+		m.emitExpertRoute(layer, picks)
+		return picks
 	}
 	probs := softmaxOf(logits)
 
@@ -317,6 +319,7 @@ func route(m *Model, layer int, xn any, mat matKernel) []routePick {
 			picks[i].weight /= sum
 		}
 	}
+	m.emitExpertRoute(layer, picks)
 	return picks
 }
 
@@ -670,6 +673,7 @@ func glmRoute(m *Model, layer int, xn any, mat matKernel) []routePick {
 	sort.SliceStable(picks, func(i, j int) bool {
 		return picks[i].expert < picks[j].expert
 	})
+	m.emitExpertRoute(layer, picks)
 	return picks
 }
 

@@ -243,6 +243,11 @@ type Model struct {
 	// attn_observer.go.
 	attnObs AttnObserver
 
+	// expertRouteObs is the optional routed-expert touch witness (#4233). nil is the
+	// production default, so ordinary routing performs no extra allocation or accounting.
+	// The observer is diagnostic only and never changes a pick or eviction policy.
+	expertRouteObs ExpertRouteObserver
+
 	// lora is the optional set of active LoRA adapters applied dynamically at the
 	// named-projection seam (#291). nil by default — residentMatRows is then
 	// byte-identical and allocation-identical. When set via SetLoRA, each named
