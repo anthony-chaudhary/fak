@@ -123,18 +123,53 @@ func ResolveChannel() string {
 }
 
 // ResolveProductChannel returns the #product channel id from FAK_PRODUCT_CHANNEL, then a
-// FAK_PRODUCT_CHANNEL= line in .env.slack.local. It mirrors ResolveChannel but targets the
-// product-direction channel rather than #scoreboard; returns "" if none found so a caller
-// can require an explicit --channel. The two never share a default: a product post must not
-// silently fall back to #scoreboard, so `fak product post` requires this key (or --channel)
-// and does not call ResolveChannel.
+// FAK_PRODUCT_CHANNEL= line in .env.slack.local, then the CI/CD reporting sink
+// (ResolveCICDReportChannel) — product is one of the reporting feeders folded onto that
+// single channel. It never inherits FAK_SCOREBOARD_CHANNEL: a product post must not
+// silently fall back to the scoreboard CLI's #scoreboard default, so this dedicated key
+// (or --channel), then the family sink, is used — never ResolveChannel's key.
 func ResolveProductChannel() string {
 	for _, e := range productChannelEnvs {
 		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
 			return v
 		}
 	}
-	return envFileValue("FAK_PRODUCT_CHANNEL")
+	if v := envFileValue("FAK_PRODUCT_CHANNEL"); v != "" {
+		return v
+	}
+	return ResolveCICDReportChannel()
+}
+
+// CICDReportChannel is the single Slack sink every CI/CD reporting feeder publishes to
+// by default — the fleet's "put all CI/CD reporting in one channel" decision made
+// concrete. The reporting family (scoreboard, blockers, bench, cachevalue, capacity,
+// node-usage, backlog, dojo, product, releases, steering) folds status / debt / issue /
+// blocker / release reporting here, so an operator watches one timeline instead of a dozen near-silent
+// rooms. It is a PUBLIC, non-secret channel id in the scoreboard Slack workspace (team
+// T0BDEJF1HGB): the id grants nothing without the bot token, exactly like every other
+// public ChannelDefault. A surface still overrides it with its own dedicated
+// FAK_<SURFACE>_CHANNEL, and the whole family at once with CICDReportChannelEnv.
+const CICDReportChannel = "C0BGQ411TCJ"
+
+// CICDReportChannelEnv is the family-wide override key: set it (env or a
+// FAK_CICD_REPORT_CHANNEL= line in .env.slack.local) to repoint EVERY CI/CD reporting
+// feeder's default at once, without touching each surface's own FAK_<SURFACE>_CHANNEL.
+// A per-surface key still wins over it — this is the shared FALLBACK, not a hard sink.
+const CICDReportChannelEnv = "FAK_CICD_REPORT_CHANNEL"
+
+// ResolveCICDReportChannel returns the CI/CD reporting sink: FAK_CICD_REPORT_CHANNEL
+// (env then .env.slack.local) if the operator repointed the family, else the built-in
+// CICDReportChannel default. It is the shared fallback every reporting surface's
+// ResolveChannel lands on after its own dedicated FAK_<SURFACE>_CHANNEL key misses — so
+// the sink id lives in exactly one place and the whole family moves together.
+func ResolveCICDReportChannel() string {
+	if v := strings.TrimSpace(os.Getenv(CICDReportChannelEnv)); v != "" {
+		return v
+	}
+	if v := envFileValue(CICDReportChannelEnv); v != "" {
+		return v
+	}
+	return CICDReportChannel
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating

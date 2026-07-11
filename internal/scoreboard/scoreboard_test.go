@@ -294,6 +294,29 @@ func TestResolveProductChannelFromEnvFileWhenEnvUnset(t *testing.T) {
 	}
 }
 
+// TestCICDReportChannelIsThePinnedSink locks the single CI/CD reporting sink id every
+// reporting feeder (blockers/bench/cachevalue/node-usage/…) folds onto. The value is
+// public (grants nothing without the bot token); changing it here moves the whole family.
+func TestCICDReportChannelIsThePinnedSink(t *testing.T) {
+	if CICDReportChannel != "C0BGQ411TCJ" {
+		t.Fatalf("CICDReportChannel = %q, want the pinned CI/CD reporting sink C0BGQ411TCJ", CICDReportChannel)
+	}
+}
+
+// TestResolveCICDReportChannelFamilyOverride proves the family-wide override wins over the
+// built-in sink default, and that an unset override falls through to it.
+func TestResolveCICDReportChannelFamilyOverride(t *testing.T) {
+	t.Setenv("FAK_CICD_REPORT_CHANNEL", "")
+	chdir(t, t.TempDir())
+	if got := ResolveCICDReportChannel(); got != CICDReportChannel {
+		t.Fatalf("ResolveCICDReportChannel unset = %q, want the built-in sink %q", got, CICDReportChannel)
+	}
+	t.Setenv("FAK_CICD_REPORT_CHANNEL", "C_FAMILY_OVERRIDE")
+	if got := ResolveCICDReportChannel(); got != "C_FAMILY_OVERRIDE" {
+		t.Fatalf("ResolveCICDReportChannel override = %q, want C_FAMILY_OVERRIDE", got)
+	}
+}
+
 func TestNotesRenderInTextAndBlocks(t *testing.T) {
 	body := "fak ships 11 durable products today.\nNext product surface: the disk cache tier (#986)."
 	u := Update{Title: "fak product direction", Notes: body, Source: "agent"}
