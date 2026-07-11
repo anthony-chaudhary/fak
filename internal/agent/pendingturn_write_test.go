@@ -123,6 +123,22 @@ func TestPendingTurnClear_ClearedAfterRetryRecovery(t *testing.T) {
 		if pt := tbl.Get("trace-x").PendingTurn; !pt.IsZero() {
 			t.Fatalf("after a recovered turn the table still carries %+v, want the zero checkpoint (nothing in flight)", pt)
 		}
+		// The #4123 Done condition also names Snapshot(): the persisted view a resumed
+		// process enumerates must carry the zero checkpoint too, so it restores byte-
+		// identically to a pre-#1363 State (not just the single-trace Get()).
+		var sawTrace bool
+		for _, st := range tbl.Snapshot() {
+			if st.TraceID != "trace-x" {
+				continue
+			}
+			sawTrace = true
+			if !st.PendingTurn.IsZero() {
+				t.Fatalf("Snapshot() carries %+v for trace-x, want the zero checkpoint", st.PendingTurn)
+			}
+		}
+		if !sawTrace {
+			t.Fatal("Snapshot() did not include trace-x; the clear-on-completion witness is vacuous")
+		}
 	})
 }
 
