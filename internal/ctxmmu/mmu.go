@@ -55,17 +55,19 @@ var injectionMarkers = []string{
 // MMU is the context memory-management unit. Construct with New; Default is
 // registered.
 type MMU struct {
-	total      int64
-	quarantine int64
-	paged      int64
-	evicted    int64 // held entries dropped by the maxHeld bound (observability)
-	screened   int64 // results additively quarantined by a registered SemanticScreen
-	digested   int64 // oversize results paged out to a digest-bearing stub (rung 3, ScreenDigest)
-	capPaged   int64 // capability bodies paged out via PageOutBody (C3, issue #1106)
+	total        int64
+	quarantine   int64
+	paged        int64
+	evicted      int64 // held entries dropped by the maxHeld bound (observability)
+	screened     int64 // results additively quarantined by a registered SemanticScreen
+	digested     int64 // oversize results paged out to a digest-bearing stub (rung 3, ScreenDigest)
+	capPaged     int64 // capability bodies paged out via PageOutBody (C3, issue #1106)
+	forcedUnpins int64 // held pins force-unpinned by the TTL leaked-pin reaper (pinreaper.go), distinct from evicted
 
 	mu        sync.Mutex
 	held      map[string]abi.Ref // id -> paged-out handle (quarantined bytes)
 	cleared   map[string]bool    // ids that passed a witness clear() (⊆ held)
+	lastTouch map[string]int64   // id -> keepalive stamp, unix millis; set on hold, reset on repin/Clear/PageIn (⊆ held; pinreaper.go)
 	order     []string           // FIFO insertion order of held ids (bounded eviction)
 	orderHead int                // consumed-prefix index into order (compacted in place)
 	maxHeld   int                // cap on len(held); 0 in zero-value, set by constructors
@@ -88,7 +90,7 @@ func NewWithLimit(maxHeld int) *MMU {
 	if maxHeld < 1 {
 		maxHeld = DefaultMaxHeld
 	}
-	return &MMU{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld, pageOutID: pageOutBackendID()}
+	return &MMU{held: map[string]abi.Ref{}, cleared: map[string]bool{}, lastTouch: map[string]int64{}, maxHeld: maxHeld, pageOutID: pageOutBackendID()}
 }
 
 // pageOutBackendID is the keyed page-out codec id the MMU pages cold/quarantined
@@ -222,6 +224,7 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	// Pin the held bytes UNDER m.mu so the bounded CAS cannot reclaim them before the
 	// gated PageIn resolves them later; the FIFO bound unpins on eviction.
 	abi.PinResolved(handle)
+	m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
 	m.evictExcessLocked()
 	m.mu.Unlock()
 	stub := map[string]any{"_quarantined": true, "id": id, "reason": abi.ReasonName(reason), "len": len(body)}
@@ -313,6 +316,7 @@ func (m *MMU) digestToPointer(ctx context.Context, body []byte, digest, by strin
 	m.held[id] = handle
 	m.order = append(m.order, id)
 	abi.PinResolved(handle)
+	m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
 	m.evictExcessLocked()
 	m.mu.Unlock()
 	return ref, id, true
@@ -337,12 +341,14 @@ func (m *MMU) Clear(id string) {
 	m.mu.Lock()
 	if _, ok := m.held[id]; ok {
 		m.cleared[id] = true
+		m.touchLocked(id, holdNowMillis()) // a witness clear is a liveness signal (keepalive)
 	}
 	m.mu.Unlock()
 }
 
 // evictExcessLocked drops the oldest held quarantines (FIFO) until len(held) is
-// within maxHeld, removing each id's cleared flag with it so cleared stays ⊆ held.
+// within maxHeld, removing each id's cleared flag and keepalive stamp with it so
+// cleared and lastTouch stay ⊆ held.
 // The consumed prefix of order is compacted in place once it reaches half the
 // slice, so order's backing array is bounded to ≈2·maxHeld and never leaks. The
 // caller holds m.mu. Dropping a handle releases its CAS pin (taken in
@@ -358,6 +364,7 @@ func (m *MMU) evictExcessLocked() {
 			abi.UnpinResolved(h) // release the CAS pin taken in quarantineResult
 			delete(m.held, old)
 			delete(m.cleared, old)
+			delete(m.lastTouch, old)
 			atomic.AddInt64(&m.evicted, 1)
 		}
 	}
@@ -374,6 +381,9 @@ func (m *MMU) PageIn(ctx context.Context, id string) ([]byte, error) {
 	m.mu.Lock()
 	handle, ok := m.held[id]
 	cleared := m.cleared[id]
+	if ok {
+		m.touchLocked(id, holdNowMillis()) // a page-in attempt is a liveness signal (keepalive)
+	}
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("ctxmmu: no quarantined result %s", id)
