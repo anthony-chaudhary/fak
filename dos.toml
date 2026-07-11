@@ -231,6 +231,7 @@ concurrent = [
   "microagent",
   "l3kv",
   "cvregress",
+  "wiki", # #4278/#4280: internal/wiki leaf (witness-verified repo-wiki structure + citation resolver); cmd/fak/wiki.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -527,6 +528,7 @@ microagent = ["internal/microagent/**"]
 l3kv = ["internal/l3kv/**"]
 doomloop = ["internal/doomloop/**"]
 cvregress = ["internal/cvregress/**"]
+wiki = ["internal/wiki/**"] # #4277 deepwiki-study: witness-verified repo-wiki structure (L1 #4278) + Sources:[path:line] citation resolver (L3 #4280); cmd/fak/wiki.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

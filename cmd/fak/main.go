@@ -297,6 +297,8 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "orient":
 		cmdOrient(os.Args[2:])
+	case "wiki":
+		cmdWiki(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":
@@ -351,6 +353,11 @@ func main() {
 		// Operator-facing: fold the typed Stop-hook decision ledger into a tally (clean
 		// stops, bounded stand-downs, and the fail-open stops that are otherwise invisible).
 		cmdGuardStops(os.Args[2:])
+	case "trunk-red":
+		// Operator-facing: fold the pre-existing trunk-red witness ledger into the distinct
+		// shared breaks the build gates admitted over (a peer's red, not yours) — worst (most
+		// clones stuck) first, so a break the whole fleet inherits gets fixed at its source.
+		cmdTrunkRed(os.Args[2:])
 	case guard.TrampolineVerb:
 		// Hidden internal seam: the Landlock hook-floor re-exec trampoline, Linux (see
 		// guard.LandlockTrampoline).
