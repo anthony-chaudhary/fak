@@ -8,10 +8,11 @@ package main
 //	fak session ls                          # every live session (the snapshot)
 //	fak session status <id>                 # one session's drive state
 //	fak session stop   <id> [--reason R]    # request a clean stop (drain at the next boundary)
+//	fak session terminate <id> [--reason R] # forceful stop (#2758): cancel in-flight work at the next safe point
 //	fak session pause  <id>                 # hold at the next boundary
 //	fak session resume <id>                 # un-pause (a live state flip, not a cold re-attach)
 //	fak session throttle <id> [--reason R]  # slow without pausing
-//	fak session run    <id> <state>         # set any run-state (running|throttled|paused|draining|stopped)
+//	fak session run    <id> <state>         # set any run-state (running|throttled|paused|draining|terminating|stopped)
 //	fak session budget <id> [--turns N] [--tokens N] [--context-tokens N]   # re-set the work allotment live
 //	fak session pace   <id> [--max-tokens N] [--gap-ms N]  # re-set the per-turn throttle
 //	fak session envelope <id> <spec>       # parse/apply one managed-context budget envelope (#1573)
@@ -99,7 +100,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	// before any flags, so `fak session status sess-1 --json` parses cleanly.
 	arity := map[string]int{
 		"ls": 0, "status": 1,
-		"stop": 1, "pause": 1, "resume": 1, "throttle": 1,
+		"stop": 1, "terminate": 1, "pause": 1, "resume": 1, "throttle": 1,
 		"run": 2, "budget": 1, "pace": 1, "envelope": 2, "budget-envelope": 2, "context": 1, "priority": 2,
 	}
 	want, known := arity[verb]
@@ -178,6 +179,12 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		return rc
 	case "stop":
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "stopped", *reason, *ifRev)
+	case "terminate":
+		// The forceful stop (#2758): unlike `stop` (drain — the in-flight turn runs to
+		// completion), terminate parks the session at Terminating, which cancels the
+		// arm's in-flight work at its next safe point and dispatches no further tool
+		// call. Rides the same run-state verb wire, so the gateway stays vocabulary-blind.
+		return c.runVerb(stdout, stderr, *asJSON, pos[0], "terminating", *reason, *ifRev)
 	case "pause":
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "paused", *reason, *ifRev)
 	case "resume":
@@ -760,10 +767,12 @@ func sessionUsage(w io.Writer) {
   fak session ls --fleet   [--remote R]       every node's sessions (C1 + C2 refs after a git fetch)
   fak session status   <id>                   one session's drive state
   fak session stop     <id> [--reason R]      request a clean stop (drain at the next boundary)
+  fak session terminate <id> [--reason R]     forceful stop: cancel in-flight work at the next
+                                               safe point (no new tool calls; no drain cleanup)
   fak session pause    <id>                   hold at the next turn boundary
   fak session resume   <id>                   un-pause (a live state flip)
   fak session throttle <id> [--reason R]      slow without pausing
-  fak session run      <id> <state>           set running|throttled|paused|draining|stopped
+  fak session run      <id> <state>           set running|throttled|paused|draining|terminating|stopped
   fak session budget   <id> [--turns N] [--tokens N] [--context-tokens N]  re-set the work allotment live
   fak session pace     <id> [--max-tokens N] [--gap-ms N]   re-set the per-turn throttle
   fak session envelope <id> <spec>            apply a managed-context budget envelope

@@ -156,6 +156,19 @@ func TestSessionCLIStopAndRunVerbs(t *testing.T) {
 	}
 }
 
+func TestSessionCLITerminateMapsToTerminating(t *testing.T) {
+	g := &stubGateway{curRev: 1}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	_, errb, code := runSessionAt(t, ts.URL, "terminate", "sess-9", "--reason", "operator-force-stop")
+	if code != 0 {
+		t.Fatalf("terminate exit = %d (%s)", code, errb)
+	}
+	if g.lastVerb != "run" || g.lastBody.Run != "terminating" || g.lastBody.Reason != "operator-force-stop" {
+		t.Fatalf("terminate sent verb=%q body=%+v, want run/terminating/operator-force-stop", g.lastVerb, g.lastBody)
+	}
+}
 func TestSessionCLIBudgetPartialMergeFencesRev(t *testing.T) {
 	// Current state: turns=7 tokens=-1 context=150 rev=5. A `--turns 3` partial
 	// update must preserve the other axes and fence the write with the observed rev.
