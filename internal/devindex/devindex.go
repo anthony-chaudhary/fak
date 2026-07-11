@@ -19,6 +19,7 @@ package devindex
 // Pure and stdlib-only (tier foundation): no network, no hot-path coupling.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,13 +29,21 @@ import (
 
 // Leaf is one entry of fak's lane taxonomy: a lane/leaf name, the tree glob(s) it
 // owns, the package directory that tree resolves to, whether that directory exists
-// on disk, and the one-line description maintained as the inline dos.toml comment.
+// on disk, the one-line description maintained as the inline dos.toml comment, and
+// the module's current derived version (the version-everything spine, #2465).
 type Leaf struct {
 	Name   string `json:"name"`
 	Tree   string `json:"tree"`
 	Dir    string `json:"dir,omitempty"`
 	Exists bool   `json:"exists"`
 	Desc   string `json:"desc,omitempty"`
+	// Version is the leaf's current module version — "r<rev>+g<sha>", the SAME string
+	// `fak version modules` prints — read from the last fak-module-versions/1 ledger
+	// row whose module equals this leaf's Dir (#2465). It lets an agent reason about a
+	// leaf's staleness from the index payload without shelling out. Empty when the
+	// ledger names no version for this Dir, or the ledger is absent: a staleness hint,
+	// never load-bearing, so it degrades quietly.
+	Version string `json:"version,omitempty"`
 	// Status is the CLAIMS.md maturity rollup for this leaf (C2 #1289): how many of
 	// the ledger claims that name a path under this leaf are SHIPPED / SIMULATED /
 	// STUB. The zero value means the honesty ledger names no capability here.
@@ -148,7 +157,51 @@ func Load(root string) (*Catalog, error) {
 	if cl, err := os.ReadFile(filepath.Join(root, "CLAIMS.md")); err == nil {
 		c.parseClaims(string(cl))
 	}
+	// The module-versions ledger is joined AFTER the lanes so each leaf's Dir is
+	// known. A missing ledger degrades to empty versions, not an error — the version
+	// is a staleness hint (#2465), never load-bearing.
+	if mv, err := os.ReadFile(filepath.Join(root, "docs", "nightrun", "module-versions.jsonl")); err == nil {
+		c.joinModuleVersions(mv)
+	}
 	return c, nil
+}
+
+// modVersionRow is the minimal shape this view reads from a fak-module-versions/1
+// ledger line: the module path and its "r<rev>+g<sha>" version string. The ledger
+// schema is additive-only (a breaking row change is a /2 with its own contract), so
+// binding to just these two fields is stable — every other column is ignored.
+type modVersionRow struct {
+	Module  string `json:"module"`
+	Version string `json:"version"`
+}
+
+// joinModuleVersions folds the module-versions ledger onto the leaves: it takes the
+// LAST row per module (the ledger is append-only, so the final row is the current
+// version) and sets Leaf.Version for every leaf whose Dir names that module. It is a
+// VIEW — it never rewrites the ledger, only reads the bytes `fak version modules
+// --stamp` already produced. A malformed line is skipped, never fatal: a bad ledger
+// row must not break the leaf map.
+func (c *Catalog) joinModuleVersions(ledger []byte) {
+	latest := map[string]string{}
+	for _, raw := range strings.Split(string(ledger), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		var row modVersionRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		if row.Module == "" || row.Version == "" {
+			continue
+		}
+		latest[row.Module] = row.Version // append-only ⇒ last row wins
+	}
+	for i := range c.Leaves {
+		if v, ok := latest[c.Leaves[i].Dir]; ok {
+			c.Leaves[i].Version = v
+		}
+	}
 }
 
 // laneLineRE captures the comment that trails a `[lanes.trees]` entry. The globs
