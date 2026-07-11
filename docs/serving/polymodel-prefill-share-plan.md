@@ -91,7 +91,13 @@ call" (`batch.go:1147`). But that is **one model, many users**. The poly-model l
 
 - **Residency** is bounded by a weight-byte **budget**, not by an architectural cap.
   Admit past the budget → evict the coldest **unpinned** model (LRU). A hot working
-  set of a few models stays warm; a long tail pages in/out. (`polymodel.Pool`.)
+  set of a few models stays warm; a long tail pages in/out. The budget itself is
+  **runtime-adjustable** — `polymodel.Pool.Resize` / `residency.Manager.SetBudget`
+  re-budget a live pool (shrink evicts the coldest **unpinned** residents LRU to fit
+  and hands their weight handles back for page-out; grow evicts nothing; a shrink
+  below the pinned footprint refuses with `ErrPinnedNoRoom`, pool byte-for-byte
+  unchanged), so a host adapts to memory pressure or hot-add without rebuilding the
+  pool and reloading every model. (`polymodel.Pool`.)
 - **The decode lane** is a single serial resource. A scheduler picks which resident
   model decodes next (priority, then FCFS), and round-robins a quantum of decode
   tokens so no model starves. The load-bearing invariant — *at most one model
@@ -197,6 +203,7 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Multiple models hosted in one process | **[GAP]** | single `modelengine.Default`, one `*model.Model` (`internal/modelengine/modelengine.go:54,226`); gateway binds one planner (`internal/gateway/gateway.go:253`) |
 | Multi-model weight residency — policy + *model.Model binding | **[SHIPPED]** | `internal/residency` — `Manager` hosts many `*model.Model` under one weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget + eviction policy and binding each residency descriptor to the weights it governs (off-defconfig, a library type like `polymodel`) |
 | Multi-model weight residency / whole-model eviction ON a backend | **[GAP]** | the policy + binding layer is shipped above; the real per-backend weight load/evict (per-weight budget `internal/compute/vulkan.go:164`; process-wide `gpulease` `lease.go:36`) is the deeper rung a future wiring drives through `Manager.Admit`/`Evict` |
+| Runtime resident-budget adapt (re-budget a live pool) | **[SHIPPED]** (off-defconfig) | `polymodel.Pool.Resize` + `residency.Manager.SetBudget` (#3999) — shrink evicts the coldest-unpinned residents (LRU) until it fits, handing the weight handles back for page-out; grow evicts nothing; a shrink below the pinned footprint refuses `ErrPinnedNoRoom` with the pool unchanged (Admit's all-or-nothing). The runtime knob for the `gpulease` memory-pressure cascade / hot-add, without rebuilding the pool |
 | Cross-model prefill share (served) | **[SHIPPED]** (verdict-layer + splice; off-defconfig) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534); `internal/spec.SplicePrefillShare`/`CrossModelPrefillShare` (the `KVCache.Clone` splice, bit-exact). Live multi-model backend residency (#531) still [GAP] |
 | `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. (Its verify step is now single-pass — see the row below.) |
 | Single-pass verify EXECUTION — batched chain + tree-attention masks | **[SHIPPED]** (off-defconfig) | `internal/model.VerifyForward(ids, pos, allow)` — the rung-#533 execution primitive. CHAIN (nil `pos`/nil `allow`): bit-identical to kk sequential `Session.Step` calls (same logits + appended K/Kraw/V/pos), so `spec.SpeculativeGreedy` verifies in ONE pass; TREE (depth-based `pos`, ancestor `allow`): tree-attention masks — each node attends only to its ancestor chain + prefix, never siblings. `spec.VerifyTree`/`SpeculativeTree` drive it through `AcceptTree`; accepted path token-identical to greedy. Witness: `go test ./internal/model ./internal/spec`. CPU PreNorm regime only — no GPU/tokens-per-sec (bench harness #535); tree recomputes the accepted path (no KV-compaction primitive yet) |
