@@ -148,7 +148,7 @@ type Provenance struct {
 // rows for a crash-before-exit trail.
 type Row struct {
 	Schema      string      `json:"schema"`
-	Kind        string      `json:"kind"`              // "exit" | "periodic"
+	Kind        string      `json:"kind"`              // "exit" | "periodic" | KindCarryforward
 	SessionType string      `json:"session_type"`      // "serve" | "guard"
 	Context     string      `json:"context,omitempty"` // free-form label, e.g. transport (http/stdio)
 	SessionID   string      `json:"session_id,omitempty"`
@@ -158,6 +158,10 @@ type Row struct {
 	Provenance  *Provenance `json:"provenance,omitempty"`
 	Counters    Counters    `json:"counters"`
 	GeneratedAt string      `json:"generated_at"`
+	// Carryforward is set only on Kind==KindCarryforward rows written by Cut —
+	// the fold witness for the pre-cut rows this row's Counters sum. Pointer +
+	// omitempty keeps every real session row byte-identical to the pre-cut schema.
+	Carryforward *Carryforward `json:"carryforward,omitempty"`
 }
 
 // NewRow builds a Row from a live counter snapshot at now. kind should be "exit" or
@@ -252,11 +256,20 @@ type Trend struct {
 // row (or none) has nothing to trend against, matching the acceptance criteria's
 // ">=2 rows" framing.
 func FoldTrend(rows []Row) (Trend, bool) {
-	if len(rows) < 2 {
+	// Carryforward rows are synthetic sums, not session snapshots — trending
+	// oldest-vs-newest against one would compare a whole folded era's total to a
+	// single session. Skip them; the trend stays over real rows only.
+	real := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		if r.Kind == KindCarryforward {
+			continue
+		}
+		real = append(real, r)
+	}
+	if len(real) < 2 {
 		return Trend{}, false
 	}
-	sorted := make([]Row, len(rows))
-	copy(sorted, rows)
+	sorted := real
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].UnixMillis < sorted[j].UnixMillis })
 	first, last := sorted[0], sorted[len(sorted)-1]
 	t := Trend{
