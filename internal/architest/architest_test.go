@@ -371,6 +371,7 @@ var tier = map[string]int{
 	"closurerate":      1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
 	"issuecost":        1, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
 	"mutationbudget":   1, // GitHub mutation throttle guard: holds close/comment bursts with an actionable reason when remaining API budget < reserve; stdlib-only, off the hot path.
+	"mutationefficacy": 1, // bounded SOFT mutation-testing probe (#3845): applies operator mutants over an allow-list, runs `go test`, counts survivors as SOFT KPI; imports pkg/scorecard + os/exec, off the hot path.
 	"completiondist":   1, // fold historical issue-closure durations into a distribution (median/p95/buckets) for the capacity model; reuses fleetmetrics+fleetcap; stdlib-only, off the hot path.
 	"fleetfreeze":      1, // operator freeze/dry-run gate: holds new spawns while allowing witness-close + status-refresh; stdlib-only, off the hot path.
 	"auditreason":      1, // closed vocabulary classifying commit-audit failures as transient (retryable) vs permanent unwitnessed claim; stdlib-only, off the hot path.

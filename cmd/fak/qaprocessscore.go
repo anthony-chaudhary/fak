@@ -20,8 +20,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
+	"github.com/anthony-chaudhary/fak/internal/mutationefficacy"
 	"github.com/anthony-chaudhary/fak/internal/qaprocessscore"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -42,6 +44,10 @@ func runQAProcessScorecard(stdout, stderr io.Writer, argv []string) int {
 	coverBaseline := fs.String("coverage-baseline", "", "path to a JSON coverage ratchet {floor, epsilon, per_package}")
 	coverFloor := fs.Float64("coverage-floor", 0, "absolute statement-coverage floor % (a --coverage-baseline that sets floor wins)")
 	racedCSV := fs.String("raced", "", "comma-separated packages exercised under -race (empty => race unmeasured: one SOFT note, never a HARD fail)")
+	var mutatePkgs stringList
+	fs.Var(&mutatePkgs, "mutate-pkg", "package dir to mutation-probe for the mutation_efficacy KPI (repeatable; empty => KPI omitted); relative paths join --workspace")
+	mutateCap := fs.Int("mutate-cap", 8, "per-package mutant cap for --mutate-pkg (iteration cap; 0 => uncapped)")
+	mutateTimeout := fs.Int("mutate-timeout", 120, "per-mutant `go test` timeout in seconds for --mutate-pkg (time cap)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -77,6 +83,14 @@ func runQAProcessScorecard(stdout, stderr io.Writer, argv []string) int {
 		kpis = append(kpis, kpi)
 	}
 
+	// mutation_efficacy (#3845) is opt-in on a supplied --mutate-pkg allow-list: it MUTATES
+	// real source on disk (restore-always) and shells `go test`, so it never runs unless an
+	// operator names the packages. With no allow-list the KPI is omitted (absence is absence,
+	// not a green). Survivors are SOFT -- the probe can never gate the card.
+	if len(mutatePkgs) > 0 {
+		kpis = append(kpis, mutationEfficacyKPI(root, []string(mutatePkgs), *mutateCap, *mutateTimeout))
+	}
+
 	payload := qaprocessscore.Compose(kpis)
 
 	return emitScorecard(stdout, stderr, "fak score qa-process", qaprocessscore.DebtKey, payload,
@@ -95,6 +109,27 @@ func runQAProcessScorecard(stdout, stderr io.Writer, argv []string) int {
 			DebtKey:     qaprocessscore.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - %d commit(s) scanned", len(commits)),
 		})
+}
+
+// mutationEfficacyKPI runs the bounded mutation probe over the --mutate-pkg allow-list and folds
+// the survivors into the mutation_efficacy SOFT KPI (#3845). It is the CLI's I/O boundary: the
+// mutate/restore + `go test` runner live in internal/mutationefficacy; this seam only resolves
+// each package path against the workspace root and picks the real `go test` runner. Relative
+// paths join root so `--mutate-pkg internal/foo` probes the in-tree package.
+func mutationEfficacyKPI(root string, pkgs []string, capN, timeoutSec int) scorecard.KPI {
+	if timeoutSec <= 0 {
+		timeoutSec = 120
+	}
+	run := mutationefficacy.GoTestRunner(time.Duration(timeoutSec) * time.Second)
+	results := make([]mutationefficacy.PackageResult, 0, len(pkgs))
+	for _, p := range pkgs {
+		dir := p
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(root, p)
+		}
+		results = append(results, mutationefficacy.ProbePackage(dir, run, capN))
+	}
+	return mutationefficacy.Fold(results)
 }
 
 // coverageDisciplineKPI reads the coverage profile (and optional ratchet baseline) off disk and
