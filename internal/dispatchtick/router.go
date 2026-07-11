@@ -189,6 +189,15 @@ type IssueRoute struct {
 	// dependency soft-hold (holdOpenPrereqForRoute) reads this to keep a leaf out of the pick
 	// while a prerequisite it names is still an open candidate this tick.
 	BlockedBy []string `json:"blocked_by,omitempty"`
+	// Body is the issue's full markdown body, carried through the route so the picker can
+	// build a worker prompt from the already-fetched row instead of a second `gh issue
+	// view` on the hot dispatch path (#4167). omitempty keeps a body-less issue's route
+	// payload byte-identical to before the field existed.
+	Body string `json:"body,omitempty"`
+	// Labels is the issue's label-name set (sorted, deduped via labelNames), carried
+	// alongside Body so the cached prompt path has the labels the second fetch supplied
+	// (#4167). omitempty keeps an unlabeled issue's route payload unchanged.
+	Labels []string `json:"labels,omitempty"`
 }
 
 type SkippedIssue struct {
@@ -1611,6 +1620,8 @@ func route(issue Issue, lane, confidence, signal string, conflict bool, paths []
 		UnroutedReason: unroutedReason,
 		Generation:     generationField(issue),
 		BlockedBy:      CandidateBlockedBy(issue.Body),
+		Body:           issue.Body,
+		Labels:         labelNames(issue),
 	}
 }
 
