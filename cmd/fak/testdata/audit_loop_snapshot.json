@@ -1,0 +1,6 @@
+[
+  {"issue_number": 100, "marker_key": "crossaudit-100", "eligible": true},
+  {"issue_number": 101, "marker_key": "crossaudit-101", "eligible": true},
+  {"issue_number": 102, "eligible": false, "ineligible_reason": "not a closed dispatch leaf"},
+  {"issue_number": 103, "marker_key": "crossaudit-103", "eligible": true}
+]

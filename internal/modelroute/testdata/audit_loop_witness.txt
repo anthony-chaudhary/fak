@@ -1,0 +1,28 @@
+# fak issue audit-loop — captured witness (#3856)
+#
+# Regenerate: go test ./internal/modelroute -run TestIssueAuditLoopWitnessGolden -update-audit-loop-witness
+#
+# Scenario: 4 discovered subjects — #100 PASS, #101 REFUTE, #102 ineligible (DARK),
+# #103 provider UNAVAILABLE on tick 1, recovers by tick 3. A fake clock and fake
+# provider make every tick deterministic; the ledger + cursor live on disk and are
+# reloaded between ticks to simulate a crash/restart resume. Row hashes and receipt
+# digests embed wall-clock append time and are omitted so this golden stays stable.
+
+== dry-run (plan only; no lease, no audit, no ledger/cursor write) ==
+state=WAIT dry_run=true discovered=4 eligible=3 planned=3 planned_subjects=[100 101 103] dark_subjects=[102]
+side effects: ledger_written=false cursor_written=false (both must be false)
+
+== tick 1 (live) ==
+state=ADVANCING audited=2 pass=1 refute=1 inconclusive=0 unavailable=1 already_settled=0 deferred=0 dead_lettered=0
+dark_subjects=[102] ledger_rows=2 cursor.settled=[100 101] cursor.dead_letters=[103] dead_letter_queue=[]
+
+== tick 2 (resume: cursor reloaded, still in backoff) ==
+state=WAIT audited=0 pass=0 refute=0 inconclusive=0 unavailable=0 already_settled=2 deferred=1 dead_lettered=0
+dark_subjects=[102] ledger_rows=2 cursor.settled=[100 101] cursor.dead_letters=[103] dead_letter_queue=[]
+
+== tick 3 (resume: clock advanced, provider recovered) ==
+state=ADVANCING audited=1 pass=1 refute=0 inconclusive=0 unavailable=0 already_settled=2 deferred=0 dead_lettered=0
+dark_subjects=[102] ledger_rows=3 cursor.settled=[100 101 103] cursor.dead_letters=[] dead_letter_queue=[]
+
+== final ledger verify ==
+chain=OK rows=3 unique_audits=3 verdicts: pass=2 refute=1 inconclusive=0 unavailable=0
