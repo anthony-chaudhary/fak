@@ -214,8 +214,18 @@ func Apply(ctx context.Context, opts Options) (Assessment, error) {
 		info.Applied = false
 		return info, nil
 	}
-	if err := applyFastForward(ctx, run, opts.Repo, info); err != nil {
+	applied, detail, err := applyFastForward(ctx, run, opts.Repo, info)
+	if err != nil {
 		return info, err
+	}
+	if !applied {
+		info.OK = false
+		info.Applied = false
+		info.Reason = "fast-forward refused after assessment; the worktree or repository state changed, so no sync was applied"
+		if detail != "" {
+			info.Reason += ": " + detail
+		}
+		return info, nil
 	}
 	newHead, err := rev(ctx, run, opts.Repo, "HEAD")
 	if err != nil {
@@ -356,13 +366,15 @@ func classify(repo string, run Runner, ctx context.Context, head, target string,
 		switch e.Status {
 		case "M":
 			wt, ok := worktreeBytes(repo, e.Path)
-			tgt, exists := blobAt(ctx, run, repo, target, e.Path)
 			base, baseExists := blobAt(ctx, run, repo, head, e.Path)
-			safe = ok && ((exists && bytes.Equal(wt, tgt)) || (baseExists && bytes.Equal(wt, base)))
+			// A target-identical local edit is content-safe in a snapshot, but
+			// `git merge --ff-only` deliberately refuses it. Classify only the
+			// worktree shape Git can update without pre-cleaning so check/apply
+			// agree and no helper ever needs to overwrite the path first.
+			safe = ok && baseExists && bytes.Equal(wt, base)
 		case "A":
-			wt, ok := worktreeBytes(repo, e.Path)
-			tgt, exists := blobAt(ctx, run, repo, target, e.Path)
-			safe = !ok || (exists && bytes.Equal(wt, tgt))
+			_, ok := worktreeBytes(repo, e.Path)
+			safe = !ok
 		case "D":
 			wt, ok := worktreeBytes(repo, e.Path)
 			base, exists := blobAt(ctx, run, repo, head, e.Path)
@@ -399,35 +411,67 @@ func worktreeBytes(repo, path string) ([]byte, bool) {
 	return b, true
 }
 
-func applyFastForward(ctx context.Context, run Runner, repo string, info Assessment) error {
-	var modified []string
-	for _, e := range info.Identical {
-		if e.Status == "M" {
-			modified = append(modified, e.Path)
+func applyFastForward(ctx context.Context, run Runner, repo string, info Assessment) (applied bool, detail string, err error) {
+	// The assessment is a snapshot, not a lease over arbitrary raw file writers. Do not pre-clean
+	// "identical" paths here: a peer can edit or create one after classify reads it,
+	// and checkout/remove would then destroy that newer work. Git's merge worktree
+	// checks close that explicit assess->preclean window for ordinary tracked and
+	// untracked paths; --no-overwrite-ignore extends the check to ignored paths.
+	//
+	// Merge the immutable object that Assess inspected, never the mutable remote
+	// tracking ref. A concurrent fetch may advance TargetRef between these calls,
+	// but it cannot change the tree identified by Target.
+	if strings.TrimSpace(info.Target) == "" {
+		return false, "", fmt.Errorf("assessed target SHA is empty")
+	}
+	branch, err := currentBranch(ctx, run, repo)
+	if err != nil {
+		return false, "", err
+	}
+	if info.Branch != "" && branch != info.Branch {
+		return false, "branch changed after assessment", nil
+	}
+	head, err := rev(ctx, run, repo, "HEAD")
+	if err != nil {
+		return false, "", err
+	}
+	if info.Head != "" && head != info.Head {
+		return false, "HEAD changed after assessment", nil
+	}
+	args := []string{"merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", info.Target}
+	res := run(ctx, repo, args...)
+	if res.Err != nil {
+		return false, "", res.Err
+	}
+	if res.Code != 0 {
+		detail := runDetail(res)
+		if safeFastForwardRefusal(detail) {
+			return false, pushFirstLine(detail), nil
+		}
+		return false, "", &GitError{Args: args, Code: res.Code, Detail: detail}
+	}
+	return true, "", nil
+}
+
+// safeFastForwardRefusal recognizes only merge failures that establish a
+// non-mutating worktree/ref race. Unknown failures (index corruption/locks,
+// permissions, invalid configuration, missing objects) remain infrastructure
+// errors; Apply must not claim "no sync was applied" without positive evidence.
+func safeFastForwardRefusal(detail string) bool {
+	low := strings.ToLower(detail)
+	needles := []string{
+		"local changes to the following files would be overwritten by merge",
+		"untracked working tree files would be overwritten by merge",
+		"not possible to fast-forward",
+		"refusing to merge unrelated histories",
+		"not uptodate. cannot merge",
+	}
+	for _, needle := range needles {
+		if strings.Contains(low, needle) {
+			return true
 		}
 	}
-	if len(modified) > 0 {
-		args := append([]string{"checkout", "HEAD", "--"}, modified...)
-		if _, err := checked(ctx, run, repo, args...); err != nil {
-			return err
-		}
-	}
-	for _, e := range info.Identical {
-		if e.Status != "A" {
-			continue
-		}
-		full, ok := safeWorktreePath(repo, e.Path)
-		if !ok {
-			return fmt.Errorf("unsafe repo path %q", e.Path)
-		}
-		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	if _, err := checked(ctx, run, repo, "merge", "--ff-only", info.TargetRef); err != nil {
-		return err
-	}
-	return nil
+	return false
 }
 
 func safeWorktreePath(repo, path string) (string, bool) {
