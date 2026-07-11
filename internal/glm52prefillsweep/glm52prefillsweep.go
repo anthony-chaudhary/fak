@@ -36,6 +36,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -77,6 +79,7 @@ const Scope = "single-stream prefill tok/s = prompt_tokens / TTFT (time to first
 // path never shells out (override it to fail, then run --dry-run).
 var execGit = func(root string, args ...string) (string, int) {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	var out bytes.Buffer
 	cmd.Stdout = &out
