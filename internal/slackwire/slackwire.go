@@ -240,6 +240,19 @@ func (c *Client) UpdateMessage(ctx context.Context, channel, ts, text string, bl
 	return c.callJSON(ctx, "chat.update", body, &r)
 }
 
+// DeleteMessage calls chat.delete, removing message ts from channel. A bot token may
+// delete ONLY messages it authored (Slack answers ok:false cant_delete_message
+// otherwise) — the outbox reaper only ever deletes fak's own posts, so this is the
+// expected-success path. Deleting an already-gone message answers ok:false
+// message_not_found, surfaced as the typed *APIError (Code "message_not_found"); the
+// caller treats that as success, because the goal state — the message is not in the
+// channel — already holds.
+func (c *Client) DeleteMessage(ctx context.Context, channel, ts string) error {
+	body := map[string]any{"channel": channel, "ts": ts}
+	var r struct{ envelope }
+	return c.callJSON(ctx, "chat.delete", body, &r)
+}
+
 // History calls conversations.history: messages with ts after oldestTS (""
 // means from the beginning), capped at limit (<=0 lets Slack default). Callers
 // re-filter by ts themselves — the inclusive/exclusive `oldest` nuance stays theirs.
