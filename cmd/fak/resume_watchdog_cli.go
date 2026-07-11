@@ -134,6 +134,8 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		planPath = targetedPlan
 	}
 	plan := rwLoadPlan(planPath)
+	ledgerPath := filepath.Join(regDir, "resume_ledger.jsonl")
+	rwBoundWatchdogArtifacts(logDir, ledgerPath, time.Now())
 	if targetedPlan != "" {
 		// Fail closed (#2367): a targeted run must consume the exact plan the operator
 		// selected — silently acting on nothing (or on the shared file a concurrent
@@ -148,7 +150,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	if *live {
 		tickMode = "LIVE"
 	}
-	ledgerPath := filepath.Join(regDir, "resume_ledger.jsonl")
+
 	statusLedgerPath := rwWatchdogStatusLedger(regDir)
 	statusEvents := rwLoadWatchdogStatusEvents(ledgerPath)
 	statusEvents = append(statusEvents, rwLoadWatchdogStatusEvents(statusLedgerPath)...)
@@ -818,6 +820,104 @@ func rwRecordWatchdogStatusTick(ledgerPath, mode string, plan []resume.WatchdogP
 
 func rwWatchdogStatusLedger(regDir string) string {
 	return filepath.Join(regDir, "resume_watchdog_status.jsonl")
+}
+
+func rwEnvInt64(name string, fallback int64) int64 {
+	if v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, 64); err == nil && v >= 0 {
+		return v
+	}
+	return fallback
+}
+
+func rwRotateFile(path string, maxBytes int64) {
+	if maxBytes <= 0 {
+		return
+	}
+	if st, err := os.Stat(path); err == nil && st.Size() >= maxBytes {
+		_ = os.Remove(path + ".1")
+		_ = os.Rename(path, path+".1")
+	}
+}
+
+func rwPruneResumeLogs(logDir string, retainDays float64, now time.Time) int {
+	if retainDays < 0 {
+		return 0
+	}
+	cutoff := now.Add(-time.Duration(retainDays * float64(24*time.Hour)))
+	entries, _ := os.ReadDir(logDir)
+	pruned := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "resume-") || (!strings.HasSuffix(entry.Name(), ".log") && !strings.HasSuffix(entry.Name(), ".log.err")) {
+			continue
+		}
+		if info, err := entry.Info(); err == nil && info.ModTime().Before(cutoff) {
+			if os.Remove(filepath.Join(logDir, entry.Name())) == nil {
+				pruned++
+			}
+		}
+	}
+	return pruned
+}
+
+func rwBoundWatchdogArtifacts(logDir, ledgerPath string, now time.Time) {
+	maxBytes := rwEnvInt64("FAK_WATCHDOG_LOG_MAX_BYTES", 5*1024*1024)
+	rwRotateFile(filepath.Join(logDir, "resume_watchdog.log"), maxBytes)
+	rwRotateFile(filepath.Join(logDir, "notifications.log"), maxBytes)
+	_ = rwPruneResumeLogs(logDir, rwEnvFloat("FAK_RESUME_LOG_RETAIN_DAYS", 14), now)
+	_ = rwCompactResumeLedger(ledgerPath, rwEnvFloat("FAK_RESUME_LEDGER_RETAIN_DAYS", 30), rwEnvInt64("FAK_RESUME_LEDGER_COMPACT_BYTES", 512*1024), now)
+}
+
+func rwCompactResumeLedger(path string, retainDays float64, compactBytes int64, now time.Time) int {
+	if retainDays <= 0 || compactBytes <= 0 {
+		return 0
+	}
+	if st, err := os.Stat(path); err != nil || st.Size() < compactBytes {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	cutoff := now.Add(-time.Duration(retainDays * float64(24*time.Hour)))
+	kept := make([][]byte, 0)
+	dropped := 0
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var row map[string]any
+		if json.Unmarshal(line, &row) != nil {
+			kept = append(kept, line)
+			continue
+		}
+		action, _ := row["action"].(string)
+		manual, _ := row["manual_override"].(bool)
+		if strings.HasPrefix(action, "consolidate") || manual {
+			kept = append(kept, line)
+			continue
+		}
+		tsText, _ := row["ts"].(string)
+		ts, err := time.Parse("2006-01-02T15:04:05Z", tsText)
+		if err != nil || !ts.Before(cutoff) {
+			kept = append(kept, line)
+		} else {
+			dropped++
+		}
+	}
+	if dropped == 0 {
+		return 0
+	}
+	out := bytes.Join(kept, []byte{'\n'})
+	out = append(out, '\n')
+	tmp := path + ".compact.tmp"
+	if os.WriteFile(tmp, out, 0o644) != nil {
+		return 0
+	}
+	if os.Rename(tmp, path) != nil {
+		_ = os.Remove(tmp)
+		return 0
+	}
+	return dropped
 }
 
 func renderResumeWatchdogStatus(w io.Writer, rep resume.WatchdogDrainStatus) {

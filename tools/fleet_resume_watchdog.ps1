@@ -102,6 +102,29 @@ if (-not $LogDir) { $LogDir = Join-Path $stateRoot 'watchdog' }
 if (-not $RegistryDir) { $RegistryDir = Join-Path $stateRoot 'registry' }
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $log = Join-Path $LogDir 'resume_watchdog.log'
+$logMaxBytes = if ($env:FAK_WATCHDOG_LOG_MAX_BYTES) { [int64]$env:FAK_WATCHDOG_LOG_MAX_BYTES } else { 5MB }
+$resumeLogRetainDays = if ($env:FAK_RESUME_LOG_RETAIN_DAYS) { [double]$env:FAK_RESUME_LOG_RETAIN_DAYS } else { 14 }
+$ledgerRetainDays = if ($env:FAK_RESUME_LEDGER_RETAIN_DAYS) { [double]$env:FAK_RESUME_LEDGER_RETAIN_DAYS } else { 30 }
+$ledgerCompactBytes = if ($env:FAK_RESUME_LEDGER_COMPACT_BYTES) { [int64]$env:FAK_RESUME_LEDGER_COMPACT_BYTES } else { 512KB }
+function Rotate-BoundedFile([string]$Path, [int64]$MaxBytes) {
+  if ($MaxBytes -le 0 -or -not (Test-Path -LiteralPath $Path)) { return }
+  if ((Get-Item -LiteralPath $Path).Length -lt $MaxBytes) { return }
+  $old = "$Path.1"
+  if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old }
+  Move-Item -LiteralPath $Path -Destination $old
+}
+function Prune-ResumeLogs([string]$Dir, [double]$Days) {
+  if ($Days -lt 0) { return }
+  $cutoff = [DateTime]::UtcNow.AddDays(-$Days)
+  Get-ChildItem -LiteralPath $Dir -File | Where-Object {
+    $_.Name -like 'resume-*.log' -or $_.Name -like 'resume-*.log.err'
+  } | Where-Object { $_.LastWriteTimeUtc -lt $cutoff } | ForEach-Object {
+    Remove-Item -LiteralPath $_.FullName
+  }
+}
+Rotate-BoundedFile $log $logMaxBytes
+Rotate-BoundedFile (Join-Path $LogDir 'notifications.log') $logMaxBytes
+Prune-ResumeLogs $LogDir $resumeLogRetainDays
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $FleetDir) { $FleetDir = $repoRoot }
 $notify = Join-Path $FleetDir 'tools\notify.ps1'
@@ -752,4 +775,5 @@ Note "  done: launched=$launched sessions_in_ledger=$($launchCount.Count)"
 # refresh the observability card on disk
 try { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $FleetDir 'tools\fleet_status.ps1') -Quiet -RegistryDir $regDir -LogDir $LogDir } catch {}
 exit 0
+
 
