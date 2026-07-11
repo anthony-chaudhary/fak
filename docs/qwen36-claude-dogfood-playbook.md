@@ -44,19 +44,29 @@ On Windows PowerShell, run:
 .\scripts\dogfood-claude.ps1 --install
 ```
 
-That installs the PATH commands for the common local and remote dogfood paths:
+`--install` installs the PATH commands for the **graduated** dogfood paths (the
+[external-provider graduation rule, #3034](../DOGFOOD-CLAUDE.md#external-provider-graduation-which-launchers---install-actually-adds-3034)):
 
 | command | purpose |
 |---|---|
 | `fak` | the repo CLI, so `fak serve --help` works from any directory |
 | `fak-dogfood` | generic Claude Code dogfood launcher |
 | `fak-qwen36-claude` | Qwen3.6 local preset launcher |
-| `claude-glm-gcp` | GLM-5.2 remote-node preset launcher |
-| `claude-groq-qwen36` | Groq Qwen3.6-27B preset launcher; set `FAK_GROQ_API_KEY` first |
-| `claude-groq-compound` | Groq Compound lower-tier preset launcher; set `FAK_GROQ_API_KEY` first |
-| `claude-mac` | MacBook fak-gateway preset launcher; set `FAK_MAC_GATEWAY` first |
 
-On Windows the same presets are installed as `.cmd` shims.
+The external-provider launchers below are **opt-in**: not installed by default (their
+keys/routes are per-operator and can expire). Install them explicitly with
+`--install-all`, or just run one directly via `FAK_DOGFOOD_PRESET=<preset>` — see
+[the graduation rule](../DOGFOOD-CLAUDE.md#external-provider-graduation-which-launchers---install-actually-adds-3034):
+
+| opt-in command | preset | purpose |
+|---|---|---|
+| `claude-glm-gcp` | `glm-gcp` | GLM-5.2 remote-node preset; set `FAK_GLM_GCP_BASE_URL` first |
+| `claude-groq-qwen36` | `groq-qwen36` | Groq Qwen3.6-27B preset; set `FAK_GROQ_API_KEY` first |
+| `claude-groq-compound` | `groq-compound` | Groq Compound lower-tier preset; set `FAK_GROQ_API_KEY` first |
+| `claude-mac` | `mac` | MacBook fak-gateway preset; set `FAK_MAC_GATEWAY` first |
+
+On Windows the same graduated presets are installed as `.cmd` shims (and `--install-all`
+adds the opt-in ones).
 
 ### What command runs the Qwen3.6 Claude probe?
 
