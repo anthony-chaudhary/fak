@@ -19,14 +19,15 @@
 #   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the GRADUATED launchers onto PATH (see the graduation rule, #3034)
 #   ./scripts/dogfood-claude.sh --install-all    # same, but also symlink the opt-in (not-yet-graduated) external-provider launchers
 #   ./scripts/dogfood-claude.sh --graduation     # print each launcher's graduation verdict (graduated => installed by --install; opt-in => stays a wrapper)
-#   fak-qwen36-claude --probe "hi"              # installed Qwen3.6 local preset
-#   claude-glm-gcp --probe "say pong"           # installed GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
-#   claude-gemini-gcp --probe "say pong"        # installed Gemini-3.5-Flash-on-GCP-Vertex preset (set FAK_GEMINI_GCP_PROJECT + FAK_GEMINI_GCP_KEY first)
-#   claude-groq-qwen36 --probe "say pong"       # installed Groq Qwen3.6-27B preset (set FAK_GROQ_API_KEY first)
-#   claude-groq-compound --probe "say pong"     # installed Groq Compound lower-tier preset
-#   claude-nim-kimi --probe "say pong"          # installed NVIDIA NIM Kimi K2.6 preset (set NVIDIA_API_KEY first)
-#   claude-nim-deepseek --probe "say pong"      # installed NVIDIA NIM DeepSeek V4 Pro preset (set NVIDIA_API_KEY first)
-#   claude-mac --probe "say pong"               # installed Mac fak-serve preset (set FAK_MAC_GATEWAY first)
+#   fak-qwen36-claude --probe "hi"              # GRADUATED, installed by --install: Qwen3.6 local preset
+#   # the launchers below are OPT-IN (not installed by default; add with --install-all, or run via FAK_DOGFOOD_PRESET):
+#   claude-glm-gcp --probe "say pong"           # opt-in GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
+#   claude-gemini-gcp --probe "say pong"        # opt-in Gemini-3.5-Flash-on-GCP-Vertex preset (set FAK_GEMINI_GCP_PROJECT + FAK_GEMINI_GCP_KEY first)
+#   claude-groq-qwen36 --probe "say pong"       # opt-in Groq Qwen3.6-27B preset (set FAK_GROQ_API_KEY first)
+#   claude-groq-compound --probe "say pong"     # opt-in Groq Compound lower-tier preset
+#   claude-nim-kimi --probe "say pong"          # opt-in NVIDIA NIM Kimi K2.6 preset (set NVIDIA_API_KEY first)
+#   claude-nim-deepseek --probe "say pong"      # opt-in NVIDIA NIM DeepSeek V4 Pro preset (set NVIDIA_API_KEY first)
+#   claude-mac --probe "say pong"               # opt-in Mac fak-serve preset (set FAK_MAC_GATEWAY first)
 #
 # Knobs (env):
 #   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp / claude-gemini-gcp / claude-groq-qwen36 / claude-groq-compound / claude-nim-kimi / claude-nim-deepseek / claude-mac)
