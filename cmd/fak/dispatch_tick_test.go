@@ -2661,3 +2661,12 @@ func assertJSONField(t *testing.T, path, key string, want any) {
 		t.Fatalf("%s[%s] = %#v, want %#v", path, key, got[key], want)
 	}
 }
+
+func TestDispatchStampSubBuckets(t *testing.T) {
+	m := map[string]int64{}
+	dispatchStampMs(m, "collision_scan", time.Now().Add(-2*time.Millisecond))
+	dispatchStampMs(m, "lease", time.Now().Add(-3*time.Millisecond))
+	if m["collision_scan"] <= 0 || m["lease"] <= 0 {
+		t.Fatalf("timings=%v", m)
+	}
+}
