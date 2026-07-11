@@ -10,17 +10,23 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 func cmdDispatchLat(argv []string) {
 	fs := flag.NewFlagSet("dispatchlat", flag.ExitOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	since := fs.Duration("since", 0, "only include events newer than this age (for example 1h)")
 	_ = fs.Parse(argv)
 	paths := fs.Args()
 	if len(paths) == 0 {
 		paths = []string{filepathFromRoot(".fak", "loops.jsonl")}
 	}
 	rows := []map[string]int64{}
+	cutoff := int64(0)
+	if *since > 0 {
+		cutoff = time.Now().Add(-*since).UnixNano()
+	}
 	for _, p := range paths {
 		f, e := os.Open(p)
 		if e != nil {
@@ -30,6 +36,9 @@ func cmdDispatchLat(argv []string) {
 		for sc.Scan() {
 			var ev loopmgr.Event
 			if json.Unmarshal(sc.Bytes(), &ev) != nil {
+				continue
+			}
+			if cutoff > 0 && (ev.TSUnixNano == 0 || ev.TSUnixNano < cutoff) {
 				continue
 			}
 			row := map[string]int64{}
