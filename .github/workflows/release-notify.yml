@@ -61,7 +61,7 @@ jobs:
       GOTOOLCHAIN: auto
       # Same keys the other feeders read: token is a secret, channels are repo vars.
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL }}
+      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || 'C0BGHS7HFV1' }}
       FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
       FAK_SCOREBOARD_SOURCE: ci
       RUN_ID: ${{ github.event.workflow_run.id }}
@@ -194,7 +194,7 @@ jobs:
 
       # 1. FIRED — a release actually went out this tick. Success ping to #releases.
       - name: notify auto-cut fired
-        if: ${{ steps.classify.outputs.classify == 'fired' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_RELEASES_CHANNEL != '' }}
+        if: ${{ steps.classify.outputs.classify == 'fired' && env.FAK_SCOREBOARD_TOKEN != '' }}
         run: |
           set -euo pipefail
           go run ./cmd/fak scoreboard post \
@@ -258,9 +258,7 @@ jobs:
             if [ -z "${FAK_SCOREBOARD_TOKEN}" ]; then
               echo "Release notify SKIPPED — FAK_SCOREBOARD_TOKEN not set (secret-less fork or missing secret); nothing posted."
             fi
-            if [ -z "${FAK_RELEASES_CHANNEL}" ]; then
-              echo "- FAK_RELEASES_CHANNEL repo variable not set (#releases fired-ping target)."
-            fi
+            echo "- #releases fired-ping target defaults to C0BGHS7HFV1; override with the FAK_RELEASES_CHANNEL repo variable."
             if [ -z "${FAK_BLOCKERS_CHANNEL}" ]; then
               echo "- FAK_BLOCKERS_CHANNEL repo variable not set (#blockers failure/stall target)."
             fi

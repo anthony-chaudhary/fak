@@ -20,9 +20,12 @@
 # See docs/explainers/cross-platform-spine.md.
 #
 # After the aggregate checksum asset lands, the announce job renders a release status
-# card for the scoreboard workspace's #releases channel. Posting is gated on BOTH the
-# FAK_SCOREBOARD_TOKEN secret and the FAK_RELEASES_CHANNEL repo variable; without either
-# it dry-runs into GITHUB_STEP_SUMMARY so forks and unprovisioned repos stay green.
+# card for the scoreboard workspace's #releases channel. #releases has a built-in
+# default channel id (C0BGHS7HFV1) — the public sink every release report lands in,
+# exactly like the other feeders (#blockers, #bench, …); override it with the
+# FAK_RELEASES_CHANNEL repo variable. Posting is gated on the FAK_SCOREBOARD_TOKEN
+# secret alone; without it the job dry-runs into GITHUB_STEP_SUMMARY so forks and
+# unprovisioned repos stay green.
 name: release-artifacts
 
 on:
@@ -431,7 +434,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
-      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL }}
+      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || 'C0BGHS7HFV1' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4
@@ -465,7 +468,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: post to #releases
-        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_RELEASES_CHANNEL != '' }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
@@ -480,16 +483,12 @@ jobs:
             --source ci
 
       - name: note when posting was skipped
-        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_RELEASES_CHANNEL == '' }}
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
         run: |
           {
             echo "Release announcement SKIPPED — ran in dry-run, nothing posted."
-            if [ -z "${{ env.FAK_SCOREBOARD_TOKEN }}" ]; then
-              echo "- FAK_SCOREBOARD_TOKEN secret not set (add it under Settings -> Secrets and variables -> Actions -> Secrets)."
-            fi
-            if [ -z "${{ env.FAK_RELEASES_CHANNEL }}" ]; then
-              echo "- FAK_RELEASES_CHANNEL repo variable not set (#releases has no default channel; create #releases and add its channel id under Variables)."
-            fi
+            echo "- FAK_SCOREBOARD_TOKEN secret not set (add it under Settings -> Secrets and variables -> Actions -> Secrets)."
+            echo "- #releases target defaults to C0BGHS7HFV1; override with the FAK_RELEASES_CHANNEL repo variable."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload card artifact
