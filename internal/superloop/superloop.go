@@ -938,8 +938,12 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 	// Divide the declared budget down across the worklist members: each budgeted
 	// dimension's cap splits evenly (floored) among the members with work, and every
 	// worklist member is annotated with its share; an unbudgeted dimension is held
-	// (see divideBudget). No cap is enforced here — this is the reservation the drive
-	// rung binds to a member's budget.* / cap env when it enters (#2224).
+	// (see divideBudget). No cap is enforced HERE — this is the reservation the drive
+	// rung binds when it enters (#2224). The bind has teeth for the Time dimension: the
+	// `--execute` exec rung turns [Allocation.MaxMinutes] into the front-door run's real
+	// deadline (superloopEffectiveTimeout, cmd/fak). The other dimensions
+	// (Tokens/Workers/Review) have no headless enforcement point yet and stay reservations
+	// the operator and the member's own child machinery observe.
 	rows, alloc := divideBudget(s.Budget, len(rep.Worklist))
 	rep.Budget = rows
 	for i := range rep.Worklist {

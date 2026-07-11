@@ -43,6 +43,13 @@ type DriveDecision struct {
 	// yet the declared ~headline is not met — the number the drive must not hide.
 	IssueShortfall int    `json:"issue_shortfall,omitempty"`
 	Reason         string `json:"reason"`
+	// Allocation is the entered member's divided share of the intent's declared budget,
+	// carried from the walk's [WorkItem] so the exec rung can BIND it when it runs the
+	// member's front door (#2224). The walk computes it as a reservation; the drive's
+	// `--execute` path turns the Time share into a real ceiling — the tighter of the
+	// operator's --exec-timeout and this MaxMinutes bounds the front-door deadline, so a
+	// member can never outrun its declared time budget. Empty for a non-entering decision.
+	Allocation Allocation `json:"allocation,omitempty"`
 }
 
 // Drive reduces a completed walk's worst-first worklist to the SINGLE member to enter
@@ -96,6 +103,7 @@ func enteredDecision(rep WalkReport, it WorkItem) DriveDecision {
 		Debt:           it.Debt,
 		Dark:           it.Dark,
 		Container:      it.Container,
+		Allocation:     it.Allocation,
 		Reason:         fmt.Sprintf("worst-first: enter %s %s", it.Member.Kind, it.Member.Ref),
 	}
 }

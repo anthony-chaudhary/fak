@@ -44,6 +44,32 @@ func TestDriveSelectsWorstFirstOneMember(t *testing.T) {
 	}
 }
 
+// TestDriveCarriesMemberAllocation pins the #2224 propagation: the entered decision must
+// carry the worst-first member's divided budget share, so the exec rung can BIND its Time
+// allocation to the front-door deadline. Drive is a pure fold over the WalkReport, so build
+// the worklist directly with a known allocation and assert it survives the SELECT.
+func TestDriveCarriesMemberAllocation(t *testing.T) {
+	alloc := Allocation{MaxMinutes: 12, TokenCeiling: 40000, MaxWorkers: 1, Held: []string{BudgetReview}}
+	rep := WalkReport{
+		Name: "drain-throughput",
+		Worklist: []WorkItem{
+			{Rank: 1, Member: Member{Kind: KindLoop, Ref: "throughput", Enter: "go run ./cmd/fak dispatch auto"}, Debt: 5, Allocation: alloc},
+		},
+	}
+	dec := Drive(rep)
+	if !dec.Enter {
+		t.Fatalf("a worklist member must be entered; reason=%s", dec.Reason)
+	}
+	if dec.Allocation.MaxMinutes != alloc.MaxMinutes || dec.Allocation.TokenCeiling != alloc.TokenCeiling || dec.Allocation.MaxWorkers != alloc.MaxWorkers {
+		t.Errorf("entered decision must carry the member's allocation, got %+v want %+v", dec.Allocation, alloc)
+	}
+	// DriveBatch reuses the same enteredDecision, so the top-K prefix must carry it too.
+	b := DriveBatch(rep, 1)
+	if len(b.Members) != 1 || b.Members[0].Allocation.MaxMinutes != alloc.MaxMinutes {
+		t.Errorf("batch member must carry the allocation too, got %+v", b.Members)
+	}
+}
+
 // TestDriveSatisfiedEntersNothing pins that a clean walk (empty worklist) enters
 // nothing: Enter is false and no member is named — the caller's re-fold is a clean exit.
 func TestDriveSatisfiedEntersNothing(t *testing.T) {
