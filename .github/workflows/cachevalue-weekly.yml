@@ -1,0 +1,100 @@
+name: cachevalue-weekly
+
+# Publish the WEEKLY fleet cache-HEALTH digest (#3646) to the #scoreboard Slack
+# channel (C0BEF8B8KMW, scoreboard workspace T0BDEJF1HGB). This is the OPERATIONAL
+# complement to the daily cachevalue-feed $ card: not "what did the cache save" but
+# "is the cache machinery actually working across the fleet this week" — posture
+# adoption, realized-reuse trend, shed effectiveness, and the refused-upgrade rate,
+# all folded from the SAME durable ledgers the daily card reads (no new metrics).
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), not an issue feeder.
+# Scheduled ticks are dry-run-first: they always render the card to the step
+# summary and upload artifacts; a live Slack post happens only when the shared
+# scoreboard bot token secret is configured.
+#
+# OPERATOR STEP (one-time, shared with cachevalue-feed): add FAK_SCOREBOARD_TOKEN
+# under Settings -> Secrets and variables -> Actions. The card defaults to
+# #scoreboard (C0BEF8B8KMW); override with the FAK_CACHEVALUE_CHANNEL repo variable.
+on:
+  schedule:
+    # Weekly, Monday 09:47 UTC - an off-the-hour minute clear of the other scheduled
+    # jobs (the daily cachevalue-feed runs 09:37; see its comment for the full map).
+    - cron: "47 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cachevalue-weekly
+  cancel-in-progress: false
+
+jobs:
+  cachevalue-weekly:
+    name: weekly cache-health digest -> #scoreboard
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL || 'C0BEF8B8KMW' }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Self-test the cachevalue-SPECIFIC packages only — deliberately NOT
+      # `go test ./cmd/fak`, so an unrelated in-flight cmd/fak test break can never
+      # silently drop the weekly post (the exact failure mode that lapsed the daily
+      # feed; see cachevalue-feed.yml). The `go run` render below is the real
+      # end-to-end CLI smoke test (go run compiles only non-test files).
+      - name: cachevalue weekly self-test
+        run: |
+          go test ./internal/cachevaluereport ./internal/cachevaluepost
+
+      # Always render the card to the step summary (and as the artifact) so the run
+      # is auditable even when nothing posts (missing secret / manual dry-run / fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak cachevalue weekly \
+            --channel "$FAK_CACHEVALUE_CHANNEL" \
+            --source ci \
+            --dry-run | tee cachevalue-weekly-card.txt
+          {
+            echo "## cachevalue-weekly - fleet cache-health digest"
+            echo '```'
+            cat cachevalue-weekly-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST - only when the token secret is present. A manual dry_run also skips.
+      - name: post to #scoreboard
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak cachevalue weekly \
+            --channel "$FAK_CACHEVALUE_CHANNEL" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set - ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cachevalue-weekly-card
+          path: |
+            cachevalue-weekly-card.txt
+            docs/nightrun/gateway-usage.jsonl
+          if-no-files-found: ignore
