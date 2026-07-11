@@ -57,9 +57,13 @@ const CapZeroCopy abi.Capability = "zerocopy"
 
 // span is one live allocation in the arena: the byte range [off, off+n) that a
 // RefRegion handle (Handle == off) addresses. Evict deletes the entry; a deleted
-// handle no longer resolves.
+// handle no longer resolves. The two evictability counters (#3384, lease.go) ride
+// on the span and are guarded by the Arena's lock: capacity eviction (TryEvict)
+// is refused unless BOTH are zero, while the Evict quarantine stays unconditional.
 type span struct {
-	off, n int64
+	off, n  int64
+	pins    int // persistent pin refcount (Pin/Unpin): a live holder will resolve later
+	readers int // transient reader leases (AcquireReader/ResolveLeased): views outstanding NOW
 }
 
 // Arena is a co-resident byte region whose bytes fak does NOT own a private copy of:
