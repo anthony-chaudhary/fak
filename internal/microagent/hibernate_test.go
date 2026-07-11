@@ -247,6 +247,97 @@ func TestWakeCoalescesStampedeOnOneID(t *testing.T) {
 	}
 }
 
+// panicAgent's Thaw panics — the single-flight leader's restore blows up so the test
+// can prove a panicking Hibernable cannot wedge the id (#4034): Wake catches the panic
+// and returns ErrWakePanicked to the leader AND every follower coalesced behind it,
+// instead of deadlocking them on a done channel that never closes. When arrived/release
+// are set the leader announces it reached Thaw and holds there until released, so the
+// stampede piles up on the one inflight call before it panics.
+type panicAgent struct {
+	arrived *sync.WaitGroup // Done'd when the leader enters Thaw
+	release <-chan struct{} // leader blocks here until the test releases the panic
+	state   []byte
+}
+
+func (a *panicAgent) Step(context.Context, microagent.Gateway) (bool, error) { return true, nil }
+func (a *panicAgent) Freeze() ([]byte, error)                                { return append([]byte(nil), a.state...), nil }
+func (a *panicAgent) Thaw([]byte) error {
+	if a.arrived != nil {
+		a.arrived.Done()
+		<-a.release
+	}
+	panic("panicAgent: boom in Thaw")
+}
+
+// TestWakePanicDoesNotWedgeID proves the #4034 single-flight is panic-safe. When the
+// caller-supplied Hibernable panics inside the leader's Thaw, Wake catches it and
+// returns ErrWakePanicked — to the leader AND to every follower coalesced behind it —
+// instead of leaving the inflight entry and done channel dangling, which would deadlock
+// every current and future waiter on that id. The frozen file survives the panic (no
+// partial Remove), so the id stays wakeable by a healthy agent afterward.
+func TestWakePanicDoesNotWedgeID(t *testing.T) {
+	store, err := microagent.NewHibernationStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewHibernationStore: %v", err)
+	}
+	if _, err := store.Park("hot", &histAgent{id: "hot", turns: 3}); err != nil {
+		t.Fatalf("Park: %v", err)
+	}
+
+	const N = 16
+	var arrived sync.WaitGroup
+	arrived.Add(1)
+	release := make(chan struct{})
+	// One shared sink whose Thaw panics: an id maps to ONE hibernated agent, so every
+	// waker coalesces onto the leader's single (panicking) restore.
+	sink := &panicAgent{arrived: &arrived, release: release}
+
+	errs := make([]error, N)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = store.Wake("hot", sink)
+		}(i)
+	}
+	go func() { wg.Wait(); close(done) }()
+
+	// Hold the leader inside its panicking Thaw until the stampede has piled up behind
+	// the one inflight call, then release it so the single restore panics with followers
+	// already waiting on it.
+	arrived.Wait()
+	time.Sleep(25 * time.Millisecond) // let the followers reach the inflight join
+	close(release)
+
+	// A wedged id would hang every waiter forever — bound the wait and fail loudly.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wake stampede did not return after a leader panic — the id is wedged (deadlock)")
+	}
+
+	for i, e := range errs {
+		if !errors.Is(e, microagent.ErrWakePanicked) {
+			t.Errorf("waiter %d: Wake = %v, want ErrWakePanicked (panic fanned out to every waiter)", i, e)
+		}
+	}
+
+	// The id is not wedged: the frozen file survived the panic (no partial Remove) and a
+	// healthy agent can still wake it cleanly.
+	if !store.Parked("hot") {
+		t.Fatal("frozen file removed despite a panicking restore, want it preserved")
+	}
+	woken := &histAgent{}
+	if err := store.Wake("hot", woken); err != nil {
+		t.Fatalf("Wake after a prior panic = %v, want a clean restore (id must not be wedged)", err)
+	}
+	if store.Parked("hot") {
+		t.Error("frozen file still present after the recovery Wake, want removed")
+	}
+}
+
 // TestResidentCapWarmBand pins the #4035 two-watermark warm band: below the low-water
 // mark WarmRefill fills up to the high-water cap (batch, not per-slot); above it
 // WarmPark drains down to low-water (a warm reserve survives); a plain NewResidentCap

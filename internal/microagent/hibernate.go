@@ -74,6 +74,16 @@ var (
 	// read from disk. This is the built-in no-state-loss check — a lossy round
 	// trip is refused at the wake boundary, never silently accepted.
 	ErrThawMismatch = errors.New("microagent: Thaw did not restore the frozen context byte-identically (lossy round-trip refused)")
+	// ErrWakePanicked is returned to a wake — the single-flight leader AND every
+	// follower coalesced behind it — when the caller-supplied Hibernable panics
+	// inside Thaw/Freeze during the restore. The panic is caught at the wake
+	// boundary so it can never wedge the id: a panicking leader that skipped its
+	// inflight cleanup would leave the id's wakeCall in the map and its done channel
+	// open forever, deadlocking every current and future waiter and leaking their
+	// goroutines. Instead the panic becomes this loud error, fanned out to all
+	// waiters like any other outcome, matching the boundary's refuse-loudly stance
+	// (issue #4034).
+	ErrWakePanicked = errors.New("microagent: Hibernable panicked during wake restore (Thaw/Freeze)")
 )
 
 // Hibernable is the OPTIONAL seam a step-resumable Microagent implements to be
@@ -174,7 +184,10 @@ func (s *HibernationStore) Park(id string, h Hibernable) (int, error) {
 // concurrent callers should target that one agent: the leader's Thaw is the single
 // restore, and the followers observe it and return the leader's error without a second
 // Thaw or Remove. Distinct ids still wake fully concurrently — the coalescing is
-// per-key, never a global lock.
+// per-key, never a global lock. A panic in the caller's Hibernable during the
+// restore is caught and returned as ErrWakePanicked (to the leader and every
+// follower) so one bad agent cannot wedge the id (leave its inflight slot and done
+// channel dangling) and deadlock every later wake of it.
 func (s *HibernationStore) Wake(id string, h Hibernable) error {
 	if _, err := s.path(id); err != nil {
 		return err // refuse an unsafe id up front, before it can pollute the inflight map
@@ -191,7 +204,21 @@ func (s *HibernationStore) Wake(id string, h Hibernable) error {
 	s.inflight[id] = call
 	s.mu.Unlock()
 
-	call.err = s.wakeOnce(id, h)
+	// Run the single restore under a recover so a panic in the caller-supplied
+	// Hibernable (Thaw/Freeze) cannot wedge the id. A panicking leader that never
+	// reached the cleanup below would leave its inflight entry in the map and its
+	// done channel open forever, deadlocking every current AND future waiter on this
+	// id and leaking their goroutines. The recover turns the panic into a loud
+	// ErrWakePanicked — fanned out to every waiter exactly like a normal wake outcome
+	// — instead of unwinding past the cleanup or crashing a coalesced worker (#4034).
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				call.err = fmt.Errorf("microagent: wake %q: %w: %v", id, ErrWakePanicked, r)
+			}
+		}()
+		call.err = s.wakeOnce(id, h)
+	}()
 
 	s.mu.Lock()
 	delete(s.inflight, id)
