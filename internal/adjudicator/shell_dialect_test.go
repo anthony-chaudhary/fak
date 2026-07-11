@@ -60,15 +60,15 @@ func TestShellDialectStructuralNoFalsePositive(t *testing.T) {
 // fails `command not found` (exit 127) in the POSIX Bash tool before doing anything.
 func TestShellDialectStructuralCatchesCmdlets(t *testing.T) {
 	danger := []string{
-		`Get-ChildItem`,                       // bare cmdlet
+		`Get-ChildItem`,                          // bare cmdlet
 		`Get-ChildItem | Select-Object -First 5`, // leading stage is a cmdlet
-		`get-childitem -Recurse`,              // PowerShell is case-insensitive
-		`Where-Object { $_ -gt 5 }`,           // brace block does not hide the command word
+		`get-childitem -Recurse`,                 // PowerShell is case-insensitive
+		`Where-Object { $_ -gt 5 }`,              // brace block does not hide the command word
 		`ForEach-Object { Write-Host $_ }`,
 		`cat access.log | Measure-Object -Line`, // a LATER stage leads with a cmdlet
 		`Get-Content foo.txt`,
-		`sudo Get-Process`,                    // sudo unwrap → cmdlet is still the real word
-		`sh -c 'Get-ChildItem'`,               // laundered one level through sh -c
+		`sudo Get-Process`,      // sudo unwrap → cmdlet is still the real word
+		`sh -c 'Get-ChildItem'`, // laundered one level through sh -c
 		`Test-Path ./foo`,
 	}
 	a := shellDialectAdj(t)
