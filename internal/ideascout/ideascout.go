@@ -42,6 +42,8 @@ const (
 	HNPointDiv   = 20
 	HNPointCap   = 25
 	WRecentPush  = 10
+	WFreshPush   = 15 // pushed within FreshWindowDays: stronger "actively updated" bonus
+	TrendingCap  = 20 // cap on the star-velocity (stars/day) trending bonus
 	DefaultToday = "1970-01-01"
 )
 
@@ -56,20 +58,23 @@ type Topic struct {
 }
 
 type Config struct {
-	RecentDays     int     `json:"recent_days"`
-	MinScore       int     `json:"min_score"`
-	MaxIssues      int     `json:"max_issues"`
-	ArxivPerTopic  int     `json:"arxiv_per_topic"`
-	GitHubPerTopic int     `json:"github_per_topic"`
-	HNPerTopic     int     `json:"hn_per_topic"`
-	RedditPerTopic int     `json:"reddit_per_topic"`
-	MinStars       int     `json:"min_stars"`
-	MinPoints      int     `json:"min_points"`
-	DupJaccard     float64 `json:"dup_jaccard"`
-	IssueScanLimit int     `json:"issue_scan_limit"`
-	Milestone      string  `json:"milestone,omitempty"`
-	Project        string  `json:"project,omitempty"`
-	ProjectOwner   string  `json:"project_owner,omitempty"`
+	RecentDays      int     `json:"recent_days"`
+	MinScore        int     `json:"min_score"`
+	MaxIssues       int     `json:"max_issues"`
+	ArxivPerTopic   int     `json:"arxiv_per_topic"`
+	GitHubPerTopic  int     `json:"github_per_topic"`
+	HNPerTopic      int     `json:"hn_per_topic"`
+	RedditPerTopic  int     `json:"reddit_per_topic"`
+	MinStars        int     `json:"min_stars"`
+	FreshPerTopic   int     `json:"fresh_per_topic"`   // recency-sorted GitHub repos fetched per topic (0 disables the fresh lane)
+	FreshMinStars   int     `json:"fresh_min_stars"`   // fresh-lane star floor: admits young repos the MinStars floor would drop
+	FreshWindowDays int     `json:"fresh_window_days"` // pushed within this window earns the strong "actively updated" bonus
+	MinPoints       int     `json:"min_points"`
+	DupJaccard      float64 `json:"dup_jaccard"`
+	IssueScanLimit  int     `json:"issue_scan_limit"`
+	Milestone       string  `json:"milestone,omitempty"`
+	Project         string  `json:"project,omitempty"`
+	ProjectOwner    string  `json:"project_owner,omitempty"`
 }
 
 type Candidate struct {
@@ -140,6 +145,7 @@ type GitHubRepo struct {
 type Fetcher interface {
 	FetchArxiv(query string, maxResults int) (string, error)
 	FetchGitHub(query string, limit int) ([]GitHubRepo, error)
+	FetchGitHubFresh(query string, limit int) ([]GitHubRepo, error)
 	FetchHackerNews(query string, limit int) (string, error)
 	FetchReddit(query string, limit int) (string, error)
 	FetchExistingIssues(limit int) ([]ExistingIssue, error)
@@ -169,17 +175,20 @@ type RunOptions struct {
 
 func DefaultConfig() Config {
 	return Config{
-		RecentDays:     180,
-		MinScore:       25,
-		MaxIssues:      3,
-		ArxivPerTopic:  8,
-		GitHubPerTopic: 6,
-		HNPerTopic:     8,
-		RedditPerTopic: 8,
-		MinStars:       25,
-		MinPoints:      10,
-		DupJaccard:     0.55,
-		IssueScanLimit: 800,
+		RecentDays:      180,
+		MinScore:        25,
+		MaxIssues:       3,
+		ArxivPerTopic:   8,
+		GitHubPerTopic:  6,
+		HNPerTopic:      8,
+		RedditPerTopic:  8,
+		MinStars:        25,
+		FreshPerTopic:   6,
+		FreshMinStars:   3,
+		FreshWindowDays: 45,
+		MinPoints:       10,
+		DupJaccard:      0.55,
+		IssueScanLimit:  800,
 	}
 }
 
@@ -277,9 +286,37 @@ func ScoreCandidate(c Candidate, topic Topic, cfg Config, now time.Time) (int, [
 		}
 	}
 	if pushed, ok := parseISO(stringFromExtra(c.Extra, "pushed_at")); ok {
-		if int(now.Sub(pushed).Hours()/24) <= 90 {
+		days := int(now.Sub(pushed).Hours() / 24)
+		window := cfg.FreshWindowDays
+		if window <= 0 {
+			window = 45
+		}
+		switch {
+		case days >= 0 && days <= window:
+			score += WFreshPush
+			reasons = append(reasons, fmt.Sprintf("pushed <=%dd (actively updated)", window))
+		case days <= 90:
 			score += WRecentPush
 			reasons = append(reasons, "pushed <=90d")
+		}
+	}
+	// Trending: a young repo already gathering stars (high stars/day) is on the
+	// rise; an old repo with the same stars accrued them slowly and scores ~0.
+	if stars > 0 {
+		if created, ok := parseISO(c.Published); ok {
+			ageDays := int(now.Sub(created).Hours() / 24)
+			if ageDays < 1 {
+				ageDays = 1
+			}
+			rawVel := stars / ageDays
+			if rawVel > 0 {
+				bonus := rawVel
+				if bonus > TrendingCap {
+					bonus = TrendingCap
+				}
+				score += bonus
+				reasons = append(reasons, fmt.Sprintf("trending (%d*/day, +%d)", rawVel, bonus))
+			}
 		}
 	}
 	return score, reasons
@@ -868,6 +905,31 @@ func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]
 				cands = append(cands, ParseGitHubRepos(filtered, topic.Key)...)
 			}
 		}
+		if topic.GitHub != "" && cfg.FreshPerTopic > 0 {
+			// The fresh lane: same topic query, sorted by most-recently-updated,
+			// with a low star floor so young/trending repos the MinStars floor
+			// would drop enter the pool. Recency itself is rewarded in scoring
+			// (which has a clock); here we only admit and tag provenance.
+			items, err := fetcher.FetchGitHubFresh(topic.GitHub, cfg.FreshPerTopic)
+			if err != nil {
+				*errorsOut = append(*errorsOut, "github-fresh["+topic.Key+"]: "+err.Error())
+			} else {
+				filtered := items[:0]
+				for _, item := range items {
+					if item.StargazersCount >= cfg.FreshMinStars {
+						filtered = append(filtered, item)
+					}
+				}
+				fresh := ParseGitHubRepos(filtered, topic.Key)
+				for i := range fresh {
+					if fresh[i].Extra == nil {
+						fresh[i].Extra = map[string]any{}
+					}
+					fresh[i].Extra["lane"] = "fresh"
+				}
+				cands = append(cands, fresh...)
+			}
+		}
 		if topic.HN != "" {
 			jsonText, err := fetcher.FetchHackerNews(topic.HN, cfg.HNPerTopic)
 			if err != nil {
@@ -933,6 +995,16 @@ func (f LiveFetcher) FetchArxiv(query string, maxResults int) (string, error) {
 func (f LiveFetcher) FetchGitHub(query string, limit int) ([]GitHubRepo, error) {
 	var out []GitHubRepo
 	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "stars", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, &out)
+	return out, err
+}
+
+// FetchGitHubFresh is the recency-first companion to FetchGitHub: the SAME topic
+// query (so the neighborhood stays "relative to ours") sorted by most-recently
+// updated instead of all-time stars, so newly-created / trending / freshly-pushed
+// repos surface where the stars sort would bury them under incumbents.
+func (f LiveFetcher) FetchGitHubFresh(query string, limit int) ([]GitHubRepo, error) {
+	var out []GitHubRepo
+	err := ghJSON([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "updated", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, &out)
 	return out, err
 }
 
@@ -1349,6 +1421,12 @@ func applyThresholds(cfg *Config, values map[string]any) {
 			cfg.RedditPerTopic = anyInt(v, cfg.RedditPerTopic)
 		case "min_stars":
 			cfg.MinStars = anyInt(v, cfg.MinStars)
+		case "fresh_per_topic":
+			cfg.FreshPerTopic = anyInt(v, cfg.FreshPerTopic)
+		case "fresh_min_stars":
+			cfg.FreshMinStars = anyInt(v, cfg.FreshMinStars)
+		case "fresh_window_days":
+			cfg.FreshWindowDays = anyInt(v, cfg.FreshWindowDays)
 		case "min_points":
 			cfg.MinPoints = anyInt(v, cfg.MinPoints)
 		case "dup_jaccard":
