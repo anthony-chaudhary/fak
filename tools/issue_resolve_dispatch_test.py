@@ -760,6 +760,7 @@ class LoopLedgerTest(unittest.TestCase):
 
     def test_record_loop_tick_refusal_has_fire_and_refused_admit(self) -> None:
         mod = load()
+        mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
         rows: list[dict[str, object]] = []
         payload = {
             "schema": mod.SCHEMA,
@@ -789,6 +790,106 @@ class LoopLedgerTest(unittest.TestCase):
         self.assertEqual(rows[1]["status"], "refused")
         self.assertEqual(rows[1]["reason"], "REFUSE_NO_ACCOUNT")
         self.assertEqual(rows[1]["metrics"]["preflight_live"], 2)
+        # #4322: a refused tick's evidence carries the structured lane fields
+        # (not scraped from summary prose) so per-lane collision rate is exact.
+        self.assertIn(("lane", "docs"), rows[1]["evidence"])
+        self.assertIn(("lane_kind", "cluster"), rows[1]["evidence"])
+        self.assertIn(("mode", "shared"), rows[1]["evidence"])
+        self.assertIn(("tree", "internal/docs/**"), rows[1]["evidence"])
+
+    def test_record_loop_tick_admitted_tick_has_no_collision_evidence(self) -> None:
+        # The structured lane/tree fields are additive on REFUSED ticks only —
+        # an admitted (would_spawn/spawned) tick's evidence is unchanged.
+        mod = load()
+        rows: list[dict[str, object]] = []
+        payload = {
+            "schema": mod.SCHEMA,
+            "workspace": str(ROOT),
+            "live": False,
+            "backend": "claude",
+            "max_workers": 2,
+            "preflight": {"verdict": "SPAWN_OK", "cap": 2, "live": 0},
+            "account": {"tag": "worker-a"},
+            "lane": "gateway",
+            "lane_issue_count": 3,
+            "target_issue": 717,
+            "ok": True,
+            "action": "would_spawn",
+            "verdict": "WOULD_SPAWN",
+            "reason": "safe to spawn one worker",
+        }
+        mod.record_loop_tick(
+            ROOT, payload, ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-DISPATCH3")
+
+        for r in rows:
+            self.assertFalse(any(k == "lane_kind" for k, _ in r["evidence"]))
+
+    def test_record_loop_tick_lane_lease_held_prefers_lease_tree(self) -> None:
+        # The fenced-CAS lease refusal carries its OWN requested tree (the
+        # dispatch_tick.go convention: lane/lane_kind/mode/tree stamped on the
+        # lease map) -- record_loop_tick reads it straight off payload["lease"]
+        # rather than re-deriving it from the lane taxonomy.
+        mod = load()
+        mod.lane_tree = lambda root, lane: [f"SHOULD-NOT-BE-USED/{lane}/**"]
+        rows: list[dict[str, object]] = []
+        payload = {
+            "schema": mod.SCHEMA,
+            "workspace": str(ROOT),
+            "live": True,
+            "backend": "claude",
+            "max_workers": 2,
+            "preflight": {"verdict": "SPAWN_OK", "cap": 2, "live": 0},
+            "account": {"tag": "worker-a"},
+            "lane": "cmd",
+            "lane_issue_count": 3,
+            "target_issue": 900,
+            "ok": False,
+            "action": "lane_leased",
+            "verdict": "LANE_LEASE_HELD",
+            "reason": "lane \"cmd\" lease is held by a live peer",
+            "lease": {"refused": True, "acquired": False,
+                      "tree": ["cmd/fak/**", "internal/dispatchtick/**"]},
+        }
+        mod.record_loop_tick(
+            ROOT, payload, ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-DISPATCH4")
+
+        self.assertEqual(rows[1]["status"], "refused")
+        self.assertIn(("lane", "cmd"), rows[1]["evidence"])
+        self.assertIn(("tree", "cmd/fak/**,internal/dispatchtick/**"), rows[1]["evidence"])
+
+    def test_record_loop_tick_dirty_path_collision_carries_paths(self) -> None:
+        mod = load()
+        mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
+        rows: list[dict[str, object]] = []
+        payload = {
+            "schema": mod.SCHEMA,
+            "workspace": str(ROOT),
+            "live": True,
+            "backend": "claude",
+            "max_workers": 2,
+            "preflight": {"verdict": "SPAWN_OK", "cap": 2, "live": 0},
+            "account": {"tag": "worker-a"},
+            "lane": "gateway",
+            "lane_issue_count": 3,
+            "target_issue": 901,
+            "ok": False,
+            "action": "dirty_path_collision",
+            "verdict": "DIRTY_PATH_COLLISION",
+            "reason": "dirty path collision",
+            "dirty_path_collision": {"collides": True,
+                                      "dirty_paths": ["internal/gateway/foo.go"]},
+        }
+        mod.record_loop_tick(
+            ROOT, payload, ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-DISPATCH5")
+
+        self.assertIn(("paths", "internal/gateway/foo.go"), rows[1]["evidence"])
+        self.assertIn(("tree", "internal/gateway/**"), rows[1]["evidence"])
 
 
 class EvaluateTest(unittest.TestCase):

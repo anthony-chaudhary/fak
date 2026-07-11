@@ -4096,6 +4096,47 @@ def _loop_evidence_args(evidence: list[tuple[str, str]]) -> list[str]:
     return out
 
 
+def _dispatch_collision_evidence(root: Path, payload: dict[str, Any]) -> list[tuple[str, str]]:
+    """Structured lane/lane_kind/mode/tree evidence for a refused dispatch tick
+    (#4322): the canonical lane (not scraped from summary prose), its kind
+    ("cluster" -- every lane this dispatcher fences is a tree-scoped
+    refs/fak/locks lease, the same constant leaseref.ArbiterLaneKind names on
+    the Go `fak dispatch tick` producer so a reader sees one grammar across
+    both), its serialization mode (exclusive/shared, from the same
+    EXCLUSIVE_LANES taxonomy dispatch_tick.go's tax.Exclusive check mirrors),
+    and the requested tree/paths that collided. So per-lane collision rate and
+    the WIP-vs-lease split are computable straight from loops.jsonl instead of
+    regex-scraped out of the summary prose. Additive: an unrecognized evidence
+    kind is simply unread by existing consumers.
+
+    Deliberately silent on whether a LANE_LEASE_HELD blocker was live or
+    stranded/dead -- that instrumentation is owned by #4324 and is not
+    fabricated here.
+    """
+    out: list[tuple[str, str]] = []
+    lane = str(payload.get("lane") or "").strip()
+    if not lane:
+        return out
+    out.append(("lane", lane))
+    out.append(("lane_kind", "cluster"))
+    out.append(("mode", "exclusive" if lane in issue_lane_router.EXCLUSIVE_LANES else "shared"))
+    lease = payload.get("lease") if isinstance(payload.get("lease"), dict) else {}
+    tree = lease.get("tree") if isinstance(lease.get("tree"), list) else None
+    if not tree:
+        try:
+            tree = lane_tree(root, lane)
+        except Exception:  # noqa: BLE001  (fail-open: evidence stays lane-only)
+            tree = None
+    if tree:
+        out.append(("tree", ",".join(str(t) for t in tree)))
+    dirty = (payload.get("dirty_path_collision")
+             if isinstance(payload.get("dirty_path_collision"), dict) else {})
+    paths = dirty.get("dirty_paths") if isinstance(dirty.get("dirty_paths"), list) else None
+    if paths:
+        out.append(("paths", ",".join(str(p) for p in paths)))
+    return out
+
+
 def append_loop_event(root: Path, ledger: Path, event: dict[str, Any],
                       *, source: str = "issue_resolve_dispatch") -> dict[str, Any]:
     """Append one canonical loop-ledger row through `fak loop append`.
@@ -4191,13 +4232,18 @@ def record_loop_tick(root: Path, payload: dict[str, Any],
         evidence.append(("log", str(spawned["log"])))
     if (payload.get("account") or {}).get("tag"):
         evidence.append(("account", str((payload.get("account") or {}).get("tag"))))
+    admitted = bool(payload.get("ok")) and payload.get("action") in {"would_spawn", "spawned"}
+    if not admitted:
+        # #4322: a refused tick gets the structured lane/lane_kind/mode/tree
+        # fields a reader needs for exact per-lane collision accounting,
+        # instead of regex-scraping the lane out of the summary prose.
+        evidence.extend(_dispatch_collision_evidence(root, payload))
 
     events: list[dict[str, Any]] = [{
         "loop_id": loop_id, "run_id": run_id, "kind": "fire",
         "backend": payload.get("backend"), "summary": f"issue dispatch tick lane={payload.get('lane') or '-'}",
         "metrics": metrics, "evidence": evidence,
     }]
-    admitted = bool(payload.get("ok")) and payload.get("action") in {"would_spawn", "spawned"}
     events.append({
         "loop_id": loop_id, "run_id": run_id, "kind": "admit",
         "backend": payload.get("backend"),
