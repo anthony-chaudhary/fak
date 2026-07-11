@@ -11,6 +11,7 @@ import (
 func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 	want := []string{
 		"agent-readiness",
+		"cache-health",
 		"conflation",
 		"concept-usage",
 		"default-value",
@@ -28,6 +29,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"propagation",
 		"qa-process",
 		"repo-hygiene",
+		"seo",
 		"skill-effectiveness",
 		"sota-coverage",
 		"support-maturity",
