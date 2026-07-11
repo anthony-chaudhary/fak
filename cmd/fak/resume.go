@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/resumebackoff"
+
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
@@ -68,6 +70,8 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeWatchdog(stdout, stderr, argv[1:])
 	case "cap":
 		return runResumeCap(stdout, stderr, argv[1:])
+	case "backoff":
+		return runResumeBackoff(stdout, stderr, argv[1:])
 	case "rearm":
 		return runResumeRearm(stdout, stderr, argv[1:])
 	case "hold":
@@ -1336,4 +1340,40 @@ example (one dead session — the full story and the exact command to bring it b
 example (resume one session, self-healing an imminent owner reset by waiting it out):
   CLAUDE_CONFIG_DIR="$(fak resume resolve -wait <sid>)" claude --resume <sid>
 `)
+}
+
+func runResumeBackoff(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("resume backoff", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	session := fs.String("session", "", "session id")
+	signature := fs.String("signature", "", "knownbad signature")
+	historyPath := fs.String("history", "", "JSON event history")
+	base := fs.Duration("base", time.Minute, "base delay")
+	ceiling := fs.Duration("ceiling", time.Hour, "maximum delay")
+	window := fs.Duration("window", time.Hour, "coalescing window")
+	threshold := fs.Int("park-threshold", 3, "distinct sessions before parking")
+	if !parseFlags(fs, args) || *session == "" || *signature == "" {
+		fmt.Fprintln(stderr, "fak resume backoff: --session and --signature are required")
+		return 2
+	}
+	var history []resumebackoff.Event
+	if *historyPath != "" {
+		b, err := os.ReadFile(*historyPath)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if err = json.Unmarshal(b, &history); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	d := resumebackoff.Decide(resumebackoff.Input{Session: *session, Signature: *signature, Now: time.Now().UTC(), History: history, Base: *base, Ceiling: *ceiling, Window: *window, ParkThreshold: *threshold})
+	if err := json.NewEncoder(stdout).Encode(d); err != nil {
+		return 1
+	}
+	if d.Eligible {
+		return 0
+	}
+	return 3
 }
