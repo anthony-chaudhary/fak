@@ -57,6 +57,16 @@ type ReportRow struct {
 	Evidence      string  `json:"evidence"`
 	Replay        bool    `json:"replay,omitempty"`
 
+	// Per-run {model, arm, source} provenance resolved by the model-driver
+	// registry (#2731, modelarm.go). SignalClass marks a run that hit a
+	// usage/entitlement wall (the sessionsignals-derived class): such a row is
+	// CLASSIFIED — excluded from headline scoring — never counted as a concept
+	// failure. Distinct from NoCommitReason, which existing rows use for scored
+	// guard refusals (e.g. OFF_TRUNK) that ARE genuine failures.
+	Arm         string `json:"arm,omitempty"`
+	ModelSource string `json:"model_source,omitempty"`
+	SignalClass string `json:"signal_class,omitempty"`
+
 	// fak-native per-episode signals (optional), rolled up per model.
 	GuardRefused   bool    `json:"guard_refused,omitempty"`
 	NoCommitReason string  `json:"no_commit_reason,omitempty"`
@@ -64,9 +74,12 @@ type ReportRow struct {
 	WallClockSec   float64 `json:"wall_clock_sec,omitempty"`
 }
 
-// headline reports whether this row can back a headline claim: a non-replay run
-// with a real referee witness_source.
-func (r ReportRow) headline() bool { return !r.Replay && isRealWitness(r.WitnessSource) }
+// headline reports whether this row can back a headline claim: a non-replay,
+// non-walled run with a real referee witness_source. A SignalClass row is a
+// classified wall (usage cap / auth / model_unknown), not a measured result.
+func (r ReportRow) headline() bool {
+	return !r.Replay && r.SignalClass == "" && isRealWitness(r.WitnessSource)
+}
 
 // Cell is one (model x concept) aggregate: pass@1 fidelity over the headline
 // rows for that pair. Replay is true when the pair has only replay/unwitnessed
@@ -103,6 +116,7 @@ type HonestyGate struct {
 	HeadlineRows    int    `json:"headline_rows"`
 	ReplayRows      int    `json:"replay_rows"`
 	UnwitnessedRows int    `json:"unwitnessed_rows"`
+	ClassifiedRows  int    `json:"classified_rows,omitempty"`
 	Reason          string `json:"reason"`
 }
 
@@ -153,6 +167,10 @@ func gate(rows []ReportRow) HonestyGate {
 		switch {
 		case r.Replay:
 			g.ReplayRows++
+		case r.SignalClass != "":
+			// A classified wall (usage cap / auth / model_unknown) is recorded,
+			// never scored — it neither backs a claim nor refuses one.
+			g.ClassifiedRows++
 		case isRealWitness(r.WitnessSource):
 			g.HeadlineRows++
 		default:
@@ -166,6 +184,9 @@ func gate(rows []ReportRow) HonestyGate {
 		g.Reason = fmt.Sprintf("%d headline row(s) but %d lack a referee verdict — result claim refused", g.HeadlineRows, g.UnwitnessedRows)
 	default:
 		g.Reason = fmt.Sprintf("%d headline row(s), all referee-witnessed; %d replay row(s) labeled and excluded — result claim allowed", g.HeadlineRows, g.ReplayRows)
+	}
+	if g.ClassifiedRows > 0 {
+		g.Reason += fmt.Sprintf(" (%d walled row(s) classified, not scored)", g.ClassifiedRows)
 	}
 	return g
 }
