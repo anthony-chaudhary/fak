@@ -89,7 +89,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	var paths pathList
 	fs.Var(&paths, "path", "a repo-relative path to commit (repeatable); paths may also be given after --")
 	var msg messageList
-	fs.Var(&msg, "m", "commit message paragraph (repeatable; multiple -m are joined by a blank line exactly like `git commit -m A -m B`; mutually exclusive with -F)")
+	fs.Var(&msg, "m", "commit message `string` (repeatable; multiple -m join as blank-line-separated paragraphs, exactly like git commit -m A -m B; mutually exclusive with -F)")
 	msgFile := fs.String("F", "", "read the commit message from this file ('-' = stdin)")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
@@ -260,7 +260,7 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 	var paths pathList
 	fs.Var(&paths, "path", "a repo-relative path for the future commit (repeatable); paths may also be given after --")
 	var msg messageList
-	fs.Var(&msg, "m", "commit subject/paragraph for the intent (repeatable; joined by a blank line like `git commit -m A -m B`; mutually exclusive with -F)")
+	fs.Var(&msg, "m", "commit subject/paragraph `string` for the intent (repeatable; joined as blank-line paragraphs like git commit -m A -m B; mutually exclusive with -F)")
 	msgFile := fs.String("F", "", "read the commit subject from this file ('-' = stdin)")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	queueDir := fs.String("queue-dir", "", "commit-intent queue dir (default: <repo>/.fak/commit-intents)")
