@@ -66,6 +66,10 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		budgetDefault = safesync.DefaultPushVelocityBudget
 		budgetHelp = "push: responsiveness budget used for the safety-qualified velocity score"
 	}
+	if command == "apply" {
+		budgetDefault = safesync.DefaultPushVelocityBudget
+		budgetHelp = "apply: responsiveness budget used for the effect-qualified velocity score"
+	}
 	budget := fs.Duration("budget", budgetDefault, budgetHelp)
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	if err := fs.Parse(argv); err != nil {
@@ -142,10 +146,11 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	opts := safesync.Options{
-		Repo:   pathutil.ExpandTilde(*repo),
-		Remote: *remote,
-		Branch: *branch,
-		Fetch:  *fetch,
+		Repo:                pathutil.ExpandTilde(*repo),
+		Remote:              *remote,
+		Branch:              *branch,
+		Fetch:               *fetch,
+		ApplyVelocityBudget: *budget,
 	}
 	var (
 		info safesync.Assessment
@@ -243,6 +248,11 @@ func renderSyncPush(w io.Writer, res safesync.PushResult) {
 }
 
 func renderSync(w io.Writer, command string, info safesync.Assessment) {
+	defer func() {
+		if command == "apply" {
+			renderSyncApplyVelocity(w, info.ApplyVelocity)
+		}
+	}()
 	switch info.State {
 	case safesync.StateInSync:
 		fmt.Fprintln(w, "in sync: local branch already matches the remote; nothing to do")

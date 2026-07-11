@@ -27,7 +27,7 @@ func renderSyncPushVelocity(w io.Writer, v safesync.PushVelocity) {
 	if len(v.Notes) > 0 && strings.TrimSpace(v.Notes[0]) != "" {
 		note = strings.TrimSpace(v.Notes[0])
 	}
-	fmt.Fprintf(w, "  velocity: %s / %s budget (ratio %.3f, UNSCORED — %s)\n",
+	fmt.Fprintf(w, "  velocity: %s / %s budget (ratio %.3f, UNSCORED - %s)\n",
 		elapsed, budget, v.BudgetRatio, note)
 }
 
@@ -36,4 +36,16 @@ func validatePushVelocityBudget(budget time.Duration) error {
 		return fmt.Errorf("--budget must be at least 1ms for sync push")
 	}
 	return nil
+}
+
+func renderSyncApplyVelocity(w io.Writer, v safesync.PushVelocity) {
+	if v.Qualified && v.Score != nil {
+		fmt.Fprintf(w, "apply velocity: %d/100 (%s) in %s (budget %s)\n", *v.Score, v.Grade, time.Duration(v.ElapsedMS)*time.Millisecond, time.Duration(v.BudgetMS)*time.Millisecond)
+		return
+	}
+	reason := "no fast-forward effect"
+	if len(v.Notes) > 0 {
+		reason = v.Notes[0]
+	}
+	fmt.Fprintf(w, "apply velocity: UNSCORED in %s � %s\n", time.Duration(v.ElapsedMS)*time.Millisecond, reason)
 }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -33,11 +34,13 @@ type RunResult struct {
 }
 
 type Options struct {
-	Repo   string
-	Remote string
-	Branch string
-	Fetch  bool
-	Runner Runner `json:"-"`
+	Repo                string
+	Remote              string
+	Branch              string
+	Fetch               bool
+	Runner              Runner           `json:"-"`
+	Now                 func() time.Time `json:"-"`
+	ApplyVelocityBudget time.Duration    `json:"-"`
 }
 
 type Entry struct {
@@ -46,20 +49,21 @@ type Entry struct {
 }
 
 type Assessment struct {
-	OK         bool       `json:"ok"`
-	State      string     `json:"state"`
-	Head       string     `json:"head,omitempty"`
-	Target     string     `json:"target,omitempty"`
-	TargetRef  string     `json:"target_ref,omitempty"`
-	Branch     string     `json:"branch,omitempty"`
-	WriteCount int        `json:"write_count,omitempty"`
-	Identical  []Entry    `json:"identical,omitempty"`
-	Divergent  []Entry    `json:"divergent,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	Applied    bool       `json:"applied,omitempty"`
-	NewHead    string     `json:"new_head,omitempty"`
-	PushAudit  *PushAudit `json:"push_audit,omitempty"`
-	Worktree   *Worktree  `json:"worktree,omitempty"`
+	OK            bool         `json:"ok"`
+	State         string       `json:"state"`
+	Head          string       `json:"head,omitempty"`
+	Target        string       `json:"target,omitempty"`
+	TargetRef     string       `json:"target_ref,omitempty"`
+	Branch        string       `json:"branch,omitempty"`
+	WriteCount    int          `json:"write_count,omitempty"`
+	Identical     []Entry      `json:"identical,omitempty"`
+	Divergent     []Entry      `json:"divergent,omitempty"`
+	Reason        string       `json:"reason,omitempty"`
+	Applied       bool         `json:"applied,omitempty"`
+	NewHead       string       `json:"new_head,omitempty"`
+	PushAudit     *PushAudit   `json:"push_audit,omitempty"`
+	Worktree      *Worktree    `json:"worktree,omitempty"`
+	ApplyVelocity PushVelocity `json:"apply_velocity"`
 }
 
 // PushAudit is optional, read-only evidence attached by higher-level callers when an
@@ -200,10 +204,20 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 
 // Apply performs the same assessment and runs the fast-forward only when Assess
 // says the behind state is safe. Refused states leave the tree untouched.
-func Apply(ctx context.Context, opts Options) (Assessment, error) {
+func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	budget := opts.ApplyVelocityBudget
+	if budget == 0 {
+		budget = DefaultPushVelocityBudget
+	}
+	started := now()
+	defer func() { info.ApplyVelocity = ScoreApplyVelocity(info, now().Sub(started), budget, err) }()
 	opts = normalizeOptions(opts)
 	run := opts.Runner
-	info, err := Assess(ctx, opts)
+	info, err = Assess(ctx, opts)
 	if err != nil {
 		return info, err
 	}

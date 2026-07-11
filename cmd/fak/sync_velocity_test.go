@@ -43,3 +43,17 @@ func TestValidatePushVelocityBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderSyncApplyVelocityQualifiedAndUnscored(t *testing.T) {
+	score := 100
+	var out bytes.Buffer
+	renderSyncApplyVelocity(&out, safesync.PushVelocity{Qualified: true, Score: &score, Grade: "A", ElapsedMS: 10, BudgetMS: 1000})
+	if !strings.Contains(out.String(), "apply velocity: 100/100") {
+		t.Fatalf("%s", out.String())
+	}
+	out.Reset()
+	renderSyncApplyVelocity(&out, safesync.PushVelocity{ElapsedMS: 1, Grade: "UNSCORED", Notes: []string{"unscored: no effect"}})
+	if !strings.Contains(out.String(), "UNSCORED") || strings.Contains(out.String(), "/100") {
+		t.Fatalf("%s", out.String())
+	}
+}
