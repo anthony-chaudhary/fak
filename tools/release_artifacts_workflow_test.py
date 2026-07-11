@@ -123,10 +123,11 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn("needs: checksums", self.text)
         self.assertIn("announce release to #releases", self.text)
         self.assertIn("FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}", self.text)
-        # #releases has a built-in default channel (C0BGHS7HFV1), exactly like every
-        # sibling feeder — the repo variable is now only an override, not a hard
-        # requirement, so a provisioned repo posts release reports without operator setup.
-        self.assertIn("FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || 'C0BGHS7HFV1' }}", self.text)
+        # #releases folds onto the CI/CD reporting sink (C0BGQ411TCJ) by default, exactly
+        # like every sibling feeder — the repo variable and the family-wide
+        # FAK_CICD_REPORT_CHANNEL are overrides, not hard requirements, so a provisioned
+        # repo posts release reports without operator setup.
+        self.assertIn("FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}", self.text)
         self.assertIn("go run ./cmd/fak scoreboard post", self.text)
         self.assertIn("--kpi release", self.text)
         self.assertIn('--value "$TAG"', self.text)

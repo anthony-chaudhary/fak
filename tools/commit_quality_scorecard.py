@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,6 +55,14 @@ except (AttributeError, ValueError):
 
 SCHEMA = "fleet-commit-quality-scorecard/1"
 DEFAULT_LAST = 50
+
+
+def _no_window_creationflags() -> int:
+    """``creationflags`` that stop the ``git`` child from popping a console window when
+    this scorecard runs windowless from a background scoring tick; ``0`` on POSIX. Mirrors
+    dispatch_preflight._no_window_creationflags, kept local so this module imports only
+    stdlib (scorecard law: pure/portable)."""
+    return 0x08000000 if os.name == "nt" else 0
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -101,6 +110,7 @@ def recent_commits(root: Path, n: int) -> list[tuple[str, str]]:
             ["git", "log", f"-{int(n)}", "--format=%h%x09%s"],
             cwd=str(root), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
+            creationflags=_no_window_creationflags(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -121,6 +131,7 @@ def head_sha(root: Path) -> str:
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(root), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=10,
+            creationflags=_no_window_creationflags(),
         )
         return proc.stdout.strip() if proc.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):

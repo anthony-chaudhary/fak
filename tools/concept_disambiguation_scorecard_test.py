@@ -272,6 +272,92 @@ def test_bar_proportional_and_sliver() -> None:
     assert cd._bar(5, 0, width=4) == "." * 4
 
 
+# --- hierarchical roll-up (the namespace at its abstraction heads) -----------
+
+def _head_and_child(child_verdict: str = "defined"):
+    """A 2-concept abstraction: a crystal head `p` over a child `c`. The child's own
+    verdict is the knob - `defined` makes the head OVERCLAIM under weakest-link."""
+    head = row(id="p", canonical="Parent", distinct_from=["c"], distinction="p not c",
+               verdict="crystal")
+    kid = row(id="c", canonical="Child", distinct_from=["p"], distinction="c not p",
+              grounding="beta", glossary_anchor="", verdict=child_verdict, parent="p")
+    return head, kid
+
+
+def test_resolve_parents_keeps_resolvable_and_flags_bad() -> None:
+    rows = [row(id="p"), sibling(id="c", parent="p"),
+            row(id="orphan", canonical="Orphan", parent="ghost"),
+            row(id="loop", canonical="Loop", parent="loop")]
+    parent, children, soft = cd.resolve_parents(rows)
+    assert parent.get("c") == "p" and children.get("p") == ["c"]
+    assert "orphan" not in parent and "loop" not in parent  # bad edges are not kept
+    assert any("resolves to no catalog id" in s for s in soft)   # orphan -> ghost
+    assert any("points at itself" in s for s in soft)            # loop -> loop
+
+
+def test_roll_up_weakest_link_flags_overclaim() -> None:
+    head, kid = _head_and_child("defined")
+    ru = cd.roll_up([head, kid], {"c": 3, "p": 0})
+    assert ru["heads"] == 1 and ru["roots"] == 1 and ru["max_depth"] == 1
+    a = ru["abstractions"][0]
+    assert a["id"] == "p"
+    # the head DECLARES crystal but the subtree only rolls up to its foggiest member.
+    assert a["declared_verdict"] == "crystal" and a["rolled_verdict"] == "defined"
+    assert a["overclaim"] is True
+    assert a["subtree_size"] == 2 and a["subtree_debt"] == 3
+    assert a["weakest"] == {"id": "c", "verdict": "defined"}
+    assert ru["overclaims"] and "rolls up to 'defined'" in ru["overclaims"][0]
+
+
+def test_roll_up_clean_subtree_does_not_overclaim() -> None:
+    head, kid = _head_and_child("crystal")
+    ru = cd.roll_up([head, kid], {})
+    a = ru["abstractions"][0]
+    assert a["rolled_verdict"] == "crystal" and a["overclaim"] is False
+    assert ru["overclaims"] == []
+
+
+def test_roll_up_never_rolls_up_clearer_than_declared() -> None:
+    # Fold invariant: a subtree can only ever DRAG a head down (weakest-link), never lift
+    # it above what it declares. rolled_rank >= declared_rank for every head.
+    head, kid = _head_and_child("colliding")
+    ru = cd.roll_up([head, kid], {})
+    a = ru["abstractions"][0]
+    assert cd.VERDICT_RANK[a["rolled_verdict"]] >= cd.VERDICT_RANK[a["declared_verdict"]]
+    assert a["rolled_verdict"] == "colliding"  # the foggiest descendant wins
+
+
+def test_roll_up_is_cycle_safe() -> None:
+    # A malformed a<->b cycle must not hang the fold; the subtree terminates via a seen-set.
+    a = row(id="a", canonical="A", parent="b", verdict="crystal")
+    b = sibling(id="b", canonical="B", parent="a", verdict="defined")
+    ru = cd.roll_up([a, b], {})
+    assert ru["heads"] >= 1
+    assert any(x["rolled_verdict"] == "defined" for x in ru["abstractions"])
+
+
+def test_kpi_hierarchy_soft_is_advisory_but_flags_overclaim() -> None:
+    head, kid = _head_and_child("defined")
+    rows = [head, kid, row(id="orphan", canonical="Orphan", parent="ghost")]
+    k = cd.kpi_hierarchy_soft(rows)
+    assert k["group"] == "honesty" and k["defects"] == []   # never hard debt - hierarchy is optional
+    assert any("resolves to no catalog id" in s for s in k["soft"])
+    assert any("head declares 'crystal'" in s for s in k["soft"])
+    assert k["score"] < 100                                 # soft signals dent the advisory score
+
+
+def test_render_rollup_and_doc_section() -> None:
+    head, kid = _head_and_child("defined")
+    p = cd.build_payload(workspace=".", data=_data([head, kid]), tree=tree())
+    assert p["corpus"]["clarity_defects"] == 0            # the fixture is clean per-row...
+    assert p["corpus"]["rollup"]["overclaims"]            # ...yet the ABSTRACTION overclaims
+    txt = cd.render_rollup(p)
+    assert "roll-up" in txt and "WEAKEST-LINK" in txt and "overclaim" in txt
+    assert "weakest-link" in cd.render(p)                 # headline carries a roll-up line
+    files = cd.render_doc_folder(p, stamp="2026-06-26")
+    assert "Concept roll-up" in files["README.md"]
+
+
 # --- the load-bearing live smoke: the committed catalog is clean + substantially mapped ---
 
 def test_live_real_data_is_clean_and_in_band() -> None:
@@ -291,6 +377,14 @@ def test_live_real_data_is_clean_and_in_band() -> None:
     # Discovery must still be working: a large confusable universe is found in the tree.
     # (A trivially-100% coverage from a BROKEN/empty discovery would fail the floor below.)
     assert c["coverage"]["discovered"] >= 100, "the confusable universe should be large"
+    # The hierarchical roll-up folds the parent forest into an honest higher-level view.
+    ru = c["rollup"]
+    assert ru["roots"] >= 1 and ru["forest_nodes"] >= ru["heads"], ru
+    assert isinstance(ru["overclaims"], list)
+    # WEAKEST-LINK invariant on real data: a roll-up can only DRAG a head down to its
+    # foggiest descendant, never lift it above what its head declares.
+    for a in ru["abstractions"]:
+        assert cd.VERDICT_RANK[a["rolled_verdict"]] >= cd.VERDICT_RANK[a["declared_verdict"]], a
     # The coverage-debt has been RETIRED: the namespace is substantially positioned. A small
     # band is allowed so a peer landing a few new confusable tokens does not red the gate
     # before they are catalogued - the catalog stays useful, not perfect-or-bust.

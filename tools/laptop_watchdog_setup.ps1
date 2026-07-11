@@ -83,7 +83,7 @@ $Settings = New-ScheduledTaskSettingsSet `
 Write-Host "Task configuration:" -ForegroundColor Cyan
 Write-Host "  Trigger  : Every 5 minutes"
 Write-Host "  Action   : python $WatchdogArgs --target $Target --json"
-Write-Host "  Principal: $($Principal.UserId) (interactive)"
+Write-Host "  Principal: $($Principal.UserId) (S4U, windowless)"
 Write-Host "  Settings : Allow on battery, restart on failure"
 Write-Host ""
 

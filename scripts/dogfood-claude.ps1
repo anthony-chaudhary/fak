@@ -37,12 +37,14 @@
     FAK_DOGFOOD_SHIM_PORT  transformers shim port         (default 8190, auto-bumped if busy)
     FAK_DOGFOOD_MODEL      served model id                (default SmolLM2-135M for shim; qwen2.5-coder:7b for ollama; qwen2.5-7b-q8 for gguf; empty for anthropic)
     FAK_DOGFOOD_CTX        ollama context window          (default 32768; baked via a derived num_ctx model so the ~25K Claude Code prompt is not truncated; 0 disables)
-    FAK_DOGFOOD_PRESET     qwen36-local | glm-gcp | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac    (auto from the installed preset shims)
+    FAK_DOGFOOD_PRESET     qwen36-local | glm-gcp | glm-zai | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac    (auto from the installed preset shims)
                              qwen36-local = front a local Qwen3.6 OpenAI-compatible server at
                              http://127.0.0.1:8131/v1 with the LM Studio Q4_K_M model id
                              glm-gcp = front GLM-5.2 served on the GCP node (scripts/gcp-glm-serve.sh)
                              via the openai backend. Set FAK_GLM_GCP_BASE_URL to its /v1 (a Tailscale
                              host, or a localhost SSH/IAP tunnel; default http://127.0.0.1:8200/v1).
+                             glm-zai = front the HOSTED Z.ai coding-plan GLM-5.2 (api.z.ai/api/coding/paas/v4)
+                             via the openai backend; no VM, just set ZAI_API_KEY.
                              gemini-gcp = front GCP Vertex AI Gemini 3.5 Flash (its OpenAI-compat
                              endpoint) via the openai backend. Set FAK_GEMINI_GCP_PROJECT (or
                              GCP_PROJECT) + FAK_GEMINI_GCP_KEY (a GCP access token); no VM needed.
@@ -55,6 +57,10 @@
                              nim-deepseek-v4-pro = front NVIDIA NIM's OpenAI-compatible DeepSeek V4 Pro
                              endpoint via the openai backend. Set NVIDIA_API_KEY first.
     FAK_GLM_GCP_BASE_URL   glm-gcp preset's GLM-5.2 /v1 base URL   (default http://127.0.0.1:8200/v1)
+    ZAI_API_KEY            glm-zai preset's Z.ai coding-plan bearer (Authorization: Bearer)
+    FAK_ZAI_BASE_URL       glm-zai preset's Z.ai coding-plan root  (default https://api.z.ai/api/coding/paas/v4)
+    FAK_ZAI_MODEL          glm-zai preset's upstream model id      (default zai-coding-plan/glm-5.2)
+    FAK_ZAI_API_KEY_ENV    env var holding the Z.ai bearer         (default ZAI_API_KEY)
     FAK_GEMINI_GCP_PROJECT / FAK_GEMINI_GCP_LOCATION  gemini-gcp preset's GCP project + region (location
                              default global) — builds the Vertex OpenAI-compat base when
                              FAK_GEMINI_GCP_BASE_URL is unset; project falls back to GCP_PROJECT
@@ -187,6 +193,16 @@ if ($Preset) {
       $PresetModel     = if ($env:FAK_GLM_GCP_MODEL)    { $env:FAK_GLM_GCP_MODEL }    else { 'glm-5.2' }
       $PresetExtraBody = '{"chat_template_kwargs":{"enable_thinking":false}}'
     }
+    'glm-zai' {
+      # HOSTED Z.ai coding-plan GLM-5.2 via the openai backend — the claude-glm-gcp wire pointed
+      # at Z.ai's MANAGED endpoint (no VM, just a ZAI_API_KEY). The base is Z.ai's OpenAI-compatible
+      # coding-plan root (fak appends /chat/completions); the served id is the provider-scoped
+      # zai-coding-plan/glm-5.2, forwarded verbatim. Mirrors tools/claude_agent_chat.py --glm.
+      $PresetBackend   = 'openai'
+      $PresetBaseUrl   = if ($env:FAK_ZAI_BASE_URL) { $env:FAK_ZAI_BASE_URL } else { 'https://api.z.ai/api/coding/paas/v4' }
+      $PresetModel     = if ($env:FAK_ZAI_MODEL)    { $env:FAK_ZAI_MODEL }    else { 'zai-coding-plan/glm-5.2' }
+      $PresetApiKeyEnv = if ($env:FAK_ZAI_API_KEY_ENV) { $env:FAK_ZAI_API_KEY_ENV } else { 'ZAI_API_KEY' }
+    }
     'gemini-gcp' {
       # Gemini 3.5 Flash served by GCP Vertex AI (its OpenAI-compat endpoint) fronted by fak's
       # openai backend — the claude-glm-gcp wire pointed at a Google-MANAGED model, so there is
@@ -252,7 +268,7 @@ if ($Preset) {
       $PresetModel     = if ($env:FAK_NIM_DEEPSEEK_MODEL)    { $env:FAK_NIM_DEEPSEEK_MODEL }    else { 'deepseek-ai/deepseek-v4-pro' }
       $PresetApiKeyEnv = if ($env:FAK_NIM_DEEPSEEK_API_KEY_ENV) { $env:FAK_NIM_DEEPSEEK_API_KEY_ENV } else { 'NVIDIA_API_KEY' }
     }
-    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want qwen36-local|glm-gcp|gemini-gcp|groq-qwen36|groq-compound|nim-kimi|nim-deepseek-v4-pro|mac)" }
+    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want qwen36-local|glm-gcp|glm-zai|gemini-gcp|groq-qwen36|groq-compound|nim-kimi|nim-deepseek-v4-pro|mac)" }
   }
 }
 
@@ -467,6 +483,7 @@ function Get-GraduationManifest {
     [pscustomobject]@{ Launcher='fak-dogfood';          Preset='';                    Graduated=$true;  KeyEnv='-';                 Caveat='generic local shim/ollama; witnessed by committed probe + bounded-wait regression' }
     [pscustomobject]@{ Launcher='fak-qwen36-claude';    Preset='qwen36-local';        Graduated=$true;  KeyEnv='-';                 Caveat='local Qwen3.6 (127.0.0.1:8131); needs the local server up' }
     [pscustomobject]@{ Launcher='claude-glm-gcp';       Preset='glm-gcp';             Graduated=$false; KeyEnv='-';                 Caveat='self-hosted GCP GLM-5.2; route stood up per-operator, availability not yet classified (#3035)' }
+    [pscustomobject]@{ Launcher='claude-glm-zai';       Preset='glm-zai';             Graduated=$false; KeyEnv='ZAI_API_KEY';       Caveat='hosted Z.ai coding-plan GLM-5.2; managed endpoint, key/route per-operator, not classified (#3035)' }
     [pscustomobject]@{ Launcher='claude-gemini-gcp';    Preset='gemini-gcp';          Graduated=$false; KeyEnv='FAK_GEMINI_GCP_KEY'; Caveat='Vertex bearer is a short-lived GCP token; route not yet classified (#3035)' }
     [pscustomobject]@{ Launcher='claude-groq-qwen36';   Preset='groq-qwen36';         Graduated=$false; KeyEnv='FAK_GROQ_API_KEY';   Caveat='Groq tier; rate-limited, route not yet classified (#3035)' }
     [pscustomobject]@{ Launcher='claude-groq-compound'; Preset='groq-compound';       Graduated=$false; KeyEnv='FAK_GROQ_API_KEY';   Caveat='Groq lower-tier compound; rate/token-capped, route not yet classified (#3035)' }

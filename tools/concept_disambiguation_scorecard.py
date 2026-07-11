@@ -40,6 +40,14 @@ appear in the production corpus, the glossary anchor must exist on disk, a
 gamed by editing the data alone; to drop debt you fix the real thing (rename a true
 collision, write a definition, draw + anchor the distinction).
 
+For scale, an optional ``parent`` edge rolls a concept up to the abstraction that HEADS
+it, and ``--rollup`` folds the forest into a higher-level operator view. The fold is
+WEAKEST-LINK: an abstraction reads as crystal-clear only when EVERY concept beneath it
+is - one ``defined`` leaf keeps the whole head from rolling up to crystal. That keeps the
+collapsed view honest (it cannot hide fog it contains) and ungameable (it is derived from
+the same cross-checked per-row verdicts); a head that reads clearer than its subtree
+supports is flagged as an abstraction ``overclaim`` (advisory - hierarchy is optional).
+
 Two numbers are driven, mirroring ``product_scorecard``:
 
   DISAMBIGUATION-DEBT  honesty/clarity defects of the rows that EXIST + coverage gaps
@@ -70,6 +78,7 @@ Run from the repo ROOT::
     python tools/concept_disambiguation_scorecard.py --chart         # at-a-glance ASCII chart
     python tools/concept_disambiguation_scorecard.py --json          # machine payload (control-pane)
     python tools/concept_disambiguation_scorecard.py --critical      # worst-first clarity backlog
+    python tools/concept_disambiguation_scorecard.py --rollup        # hierarchy roll-up (abstraction heads, weakest-link)
     python tools/concept_disambiguation_scorecard.py --gaps          # coverage backlog (unpositioned tree tokens)
     python tools/concept_disambiguation_scorecard.py --compare base.json   # prove the debt dropped
     python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard
@@ -449,22 +458,36 @@ def kpi_kind_grounding_soft(rows: list[dict[str, Any]], doc_verbs: set[str]) -> 
             "defects": [], "soft": soft}
 
 
-def kpi_hierarchy_soft(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """SOFT: an optional `parent` (the hierarchy / isomorphism grouping) should resolve
-    to a real catalog id and not cycle. Advisory - hierarchy is encouraged, not required."""
+# ---------------------------------------------------------------------------
+# Hierarchical roll-up - fold the optional `parent` forest into an honest
+# higher-level view so an operator can read the namespace at the abstraction
+# heads instead of one leaf at a time. The fold is WEAKEST-LINK: an abstraction
+# is only as crystal-clear as its foggiest descendant. No averaging hides a
+# drifting leaf, and it is ungameable - it is derived from the same cross-checked
+# per-row verdicts, so a head cannot roll up to crystal until every concept
+# beneath it actually is.
+# ---------------------------------------------------------------------------
+
+def resolve_parents(rows: list[dict[str, Any]]) -> tuple[dict[str, str], dict[str, list[str]], list[str]]:
+    """Resolve the optional `parent` edges into a forest. Keeps every edge whose
+    parent resolves to a real catalog id (subtree traversal below is cycle-safe, so
+    a cycle is reported but not silently dropped). Returns (parent_map, children_map,
+    soft_issues) where soft_issues names each unresolved / self / cyclic edge."""
     ids = {r.get("id") for r in rows if _nonempty(r.get("id"))}
     parent: dict[str, str] = {}
     soft: list[str] = []
     for r in rows:
         rid = r.get("id")
         p = r.get("parent")
-        if _nonempty(p):
-            if p not in ids:
-                soft.append(f"{rid}: parent '{p}' resolves to no catalog id")
-            else:
-                parent[rid] = p
-    # cycle check
-    for start in list(parent):
+        if not _nonempty(p):
+            continue
+        if p not in ids:
+            soft.append(f"{rid}: parent '{p}' resolves to no catalog id")
+        elif p == rid:
+            soft.append(f"{rid}: parent points at itself")
+        else:
+            parent[rid] = p
+    for start in list(parent):  # report (do not remove) cycles; traversal guards itself.
         seen, cur = set(), start
         while cur in parent:
             if cur in seen:
@@ -472,10 +495,134 @@ def kpi_hierarchy_soft(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 break
             seen.add(cur)
             cur = parent[cur]
+    children: dict[str, list[str]] = {}
+    for c, p in parent.items():
+        children.setdefault(p, []).append(c)
+    for p in children:
+        children[p].sort()
+    return parent, children, soft
+
+
+def _subtree_ids(root: str, children: dict[str, list[str]]) -> set[str]:
+    """Every id in `root`'s subtree, including `root`. Cycle-safe (a `seen` set), so a
+    malformed parent cycle can never loop the fold."""
+    seen: set[str] = set()
+    stack = [root]
+    while stack:
+        x = stack.pop()
+        if x in seen:
+            continue
+        seen.add(x)
+        for k in children.get(x, ()):  # deterministic: children are pre-sorted.
+            if k not in seen:
+                stack.append(k)
+    return seen
+
+
+def _verdict_rank(v: Any) -> int:
+    return VERDICT_RANK.get(v, len(VERDICTS))  # an unknown verdict is treated as foggiest.
+
+
+def abstraction_rollup(rows: list[dict[str, Any]], row_debt: dict[str, int],
+                       parent: dict[str, str], children: dict[str, list[str]]) -> list[dict[str, Any]]:
+    """One record per abstraction HEAD (a concept with >= 1 child), summarizing its
+    whole subtree WEAKEST-LINK:
+
+      rolled_verdict  the WORST verdict anywhere in the subtree (incl. the head) - the
+                      honest 'is this whole abstraction crystal-clear?' answer.
+      verdict_mix     how many concepts sit at each verdict beneath the head.
+      subtree_debt    the clarity-debt summed over the subtree (0 in the clean state).
+      weakest         the foggiest concept in the subtree (the drill-down target).
+      overclaim       the head's DECLARED verdict reads clearer than the subtree supports
+                      (a descendant is worse than the head claims) - abstraction overclaim.
+
+    Sorted worst-first: heaviest subtree-debt, then foggiest roll-up, then largest subtree."""
+    byid = {r.get("id"): r for r in rows if _nonempty(r.get("id"))}
+    recs: list[dict[str, Any]] = []
+    for head in children:
+        if head not in byid:
+            continue
+        subtree = _subtree_ids(head, children)
+        mix = {v: 0 for v in VERDICTS}
+        debt = 0
+        worst_id, worst_rank = head, -1
+        for n in subtree:
+            r = byid.get(n)
+            if r is None:
+                continue
+            v = r.get("verdict")
+            if v in mix:
+                mix[v] += 1
+            debt += row_debt.get(n, 0)
+            if _verdict_rank(v) > worst_rank:
+                worst_rank, worst_id = _verdict_rank(v), n
+        rolled = VERDICTS[worst_rank] if 0 <= worst_rank < len(VERDICTS) else "undocumented"
+        declared = byid[head].get("verdict")
+        depth, cur = 0, head
+        while cur in parent and depth <= len(rows):  # bounded even on a malformed cycle.
+            depth += 1
+            cur = parent[cur]
+        recs.append({
+            "id": head, "canonical": byid[head].get("canonical"), "family": byid[head].get("family"),
+            "declared_verdict": declared, "rolled_verdict": rolled,
+            "subtree_size": len(subtree), "child_count": len(children.get(head, [])),
+            "subtree_debt": debt, "verdict_mix": mix, "depth": depth,
+            "weakest": {"id": worst_id, "verdict": byid[worst_id].get("verdict")},
+            "overclaim": _verdict_rank(declared) < worst_rank,
+        })
+    recs.sort(key=lambda a: (-a["subtree_debt"], -_verdict_rank(a["rolled_verdict"]),
+                             -a["subtree_size"], a["id"] or ""))
+    return recs
+
+
+def roll_up(rows: list[dict[str, Any]], row_debt: dict[str, int]) -> dict[str, Any]:
+    """Fold the parent forest into the payload roll-up: the per-head abstraction
+    records, the count of top-level (depth-0) abstraction roots, the forest size, and
+    the abstraction-overclaim list. Deterministic + pure (no disk, no tree)."""
+    parent, children, _soft = resolve_parents(rows)
+    recs = abstraction_rollup(rows, row_debt, parent, children)
+    overclaims = [
+        f"{a['id']}: abstraction declares '{a['declared_verdict']}' but rolls up to "
+        f"'{a['rolled_verdict']}' (weakest: {a['weakest']['id']} = {a['weakest']['verdict']})"
+        for a in recs if a["overclaim"]
+    ]
+
+    def _depth(node: str) -> int:  # chain length to a root; bounded even on a cycle.
+        d, cur, guard = 0, node, 0
+        while cur in parent and guard <= len(parent):
+            d += 1
+            cur = parent[cur]
+            guard += 1
+        return d
+
+    all_nodes = set(parent) | set(children)
+    return {
+        "abstractions": recs,
+        "heads": len(recs),
+        "roots": sum(1 for a in recs if a["depth"] == 0),
+        "forest_nodes": len(all_nodes),
+        "max_depth": max((_depth(n) for n in all_nodes), default=0),  # leaf-inclusive forest depth
+        "overclaims": overclaims,
+    }
+
+
+def kpi_hierarchy_soft(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """SOFT: the optional `parent` hierarchy should (a) resolve to a real catalog id and
+    not cycle, and (b) not OVERCLAIM - a head marked crystal while a descendant still
+    drifts means the abstraction, read at the head, is clearer than the subtree supports.
+    Advisory - hierarchy is encouraged, not required, so this never becomes hard debt;
+    the weakest-link roll-up (see `roll_up`) is what makes the higher-level view honest."""
+    parent, children, soft = resolve_parents(rows)
+    recs = abstraction_rollup(rows, {}, parent, children)
+    soft = list(soft)
+    for a in recs:
+        if a["overclaim"]:
+            soft.append(f"{a['id']}: rolls up to '{a['rolled_verdict']}' but head declares "
+                        f"'{a['declared_verdict']}' (weakest descendant {a['weakest']['id']})")
     score = _clamp(100 - min(30, 6 * len(soft)))
     return {"kpi": "hierarchy_soft", "group": "honesty",
             "score": score, "value": round(score / 100, 3),
-            "detail": "hierarchy parents resolve" if not soft else f"{len(soft)} hierarchy issue(s)",
+            "detail": "hierarchy resolves + rolls up honestly" if not soft else f"{len(soft)} hierarchy issue(s)",
             "defects": [], "soft": soft}
 
 
@@ -687,6 +834,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     pos = standing(rows)
     lb = leaderboard(rows, colliding_ids, exists, sizes)
     crit = critical_backlog(rows, row_debt)
+    rollup = roll_up(rows, row_debt)
     n_crystal = pos.get("crystal", 0)
 
     corpus_out = {
@@ -712,6 +860,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
         "breakdown": breakdown,
         "leaderboard": lb,
         "critical": crit,
+        "rollup": rollup,
     }
 
     standing_line = (f"{pos['crystal']} crystal / {pos['defined']} defined / "
@@ -951,6 +1100,9 @@ def render(payload: dict[str, Any]) -> str:
          f"{pos.get('undocumented', 0)} undocumented"),
         ("debt by group: " + "  ".join(
             f"{g}:{(c.get('debt_by_group') or {}).get(g, 0)}" for g in GROUPS)),
+        (f"roll-up: {(c.get('rollup') or {}).get('roots', 0)} top-level abstraction(s) over "
+         f"{(c.get('rollup') or {}).get('forest_nodes', 0)} concepts (weakest-link) - "
+         f"{len((c.get('rollup') or {}).get('overclaims') or [])} overclaim(s); see --rollup"),
         "",
         "concepts (best verdict first):",
         f"  {'verdict':<13} {'kind':<10} {'family':<16} canonical",
@@ -1099,6 +1251,60 @@ def render_chart(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _mix_spark(mix: dict[str, int], cap: int = 24) -> str:
+    """A per-verdict sparkline for one subtree: one mark per concept, best-first. If the
+    subtree is larger than `cap`, fall back to a compact `*3 o5 ~1` count form so the
+    column stays readable."""
+    total = sum(mix.get(v, 0) for v in VERDICTS)
+    if total <= cap:
+        return "".join(_MARK.get(v, " ") * mix.get(v, 0) for v in VERDICTS)
+    return " ".join(f"{_MARK.get(v, '?')}{mix.get(v, 0)}" for v in VERDICTS if mix.get(v, 0))
+
+
+def render_rollup(payload: dict[str, Any]) -> str:
+    """Operator view of the namespace at its abstraction HEADS. Each row is one
+    top-level abstraction rolled up WEAKEST-LINK - it reads as crystal only when every
+    concept beneath it is. `!` flags a head whose declared verdict overclaims the
+    subtree (the whole point: a collapsed view that cannot lie about what it hides)."""
+    c = payload.get("corpus") or {}
+    ru = c.get("rollup") or {}
+    recs = ru.get("abstractions") or []
+    lines = [
+        (f"concept-disambiguation roll-up: {ru.get('roots', 0)} top-level abstraction(s), "
+         f"{ru.get('heads', 0)} head(s) total, max depth {ru.get('max_depth', 0)} "
+         f"({ru.get('forest_nodes', 0)} concepts in the forest)"),
+        "",
+        "Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest",
+        "descendant. '!' = the head verdict reads clearer than the subtree supports.",
+        "",
+        f"     {'rolled':<12} {'head':<12} {'size':>4} {'debt':>4}  {'mix':<20} family / canonical",
+    ]
+    if not recs:
+        lines.append("  (no hierarchy positioned - add a `parent` edge to a row to roll it up)")
+        return "\n".join(lines)
+    roots = [a for a in recs if a.get("depth", 0) == 0]
+    for a in roots:
+        spark = _mix_spark(a.get("verdict_mix") or {})
+        flag = "!" if a.get("overclaim") else " "
+        lines.append(f"  {flag}{_MARK.get(a['rolled_verdict'], ' ')} {a['rolled_verdict']:<11} "
+                     f"{str(a['declared_verdict']):<12} {a['subtree_size']:>4} {a['subtree_debt']:>4}  "
+                     f"{spark:<20} {a.get('family')} / {a.get('canonical')}")
+    over = ru.get("overclaims") or []
+    lines.append("")
+    if over:
+        lines.append(f"abstraction overclaims ({len(over)}) - head reads clearer than its subtree supports:")
+        for o in over[:20]:
+            lines.append(f"  ! {o}")
+        if len(over) > 20:
+            lines.append(f"  ... and {len(over) - 20} more")
+    else:
+        lines.append("abstraction overclaims: none - every head verdict is backed by its whole subtree")
+    lines.append("")
+    lines.append("(weakest-link: one 'defined' leaf keeps its abstraction from rolling up to crystal - "
+                 "anchor the leaf, or accept the honest lower roll-up.)")
+    return "\n".join(lines)
+
+
 def _front_matter(title: str, desc: str) -> list[str]:
     return ["---", f'title: "{title}"', f'description: "{desc}"', "---", ""]
 
@@ -1173,6 +1379,32 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
         out.append(f"| {mark} | {row['verdict']} | {row.get('kind')} | {row.get('family')} | "
                    f"**{row.get('canonical')}** - {row.get('definition')} |")
     out.append("")
+    ru = c.get("rollup") or {}
+    recs = ru.get("abstractions") or []
+    if recs:
+        out.append("## Concept roll-up (the namespace at its abstraction heads)")
+        out.append("")
+        out.append("Most readers cannot hold every concept at once. The optional `parent` forest lets "
+                   "the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is "
+                   "**weakest-link**: an abstraction reads as crystal only when *every* concept beneath it "
+                   "is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the "
+                   "collapsed view can never hide fog it contains. `!` marks a head whose declared verdict "
+                   "reads clearer than its subtree supports.")
+        out.append("")
+        out.append("```text")
+        out.append(render_rollup(payload))
+        out.append("```")
+        out.append("")
+        out.append("| | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |")
+        out.append("|---|---|---|---|---:|---:|---|")
+        for a in [x for x in recs if x.get("depth", 0) == 0]:
+            mark = _MARK.get(a["rolled_verdict"], " ")
+            flag = "!" if a.get("overclaim") else ""
+            weak = a.get("weakest") or {}
+            out.append(f"| {mark}{flag} | **{a.get('canonical')}** (`{a.get('id')}`) | {a['rolled_verdict']} "
+                       f"| {a['declared_verdict']} | {a['subtree_size']} | {a['subtree_debt']} "
+                       f"| {weak.get('id')} = {weak.get('verdict')} |")
+        out.append("")
     out.append("## Per-KPI (disambiguation-debt = clarity of the rows that exist)")
     out.append("")
     out.append("| Group | KPI | Score | Debt | Detail |")
@@ -1207,6 +1439,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--chart", action="store_true", help="an at-a-glance ASCII chart")
     ap.add_argument("--critical", action="store_true", help="the worst-first clarity backlog")
+    ap.add_argument("--rollup", action="store_true", help="the hierarchy roll-up (namespace at its abstraction heads)")
     ap.add_argument("--gaps", action="store_true", help="the coverage backlog (unpositioned tree tokens)")
     ap.add_argument("--compare", default="", help="baseline JSON to prove disambiguation-debt dropped")
     ap.add_argument("--markdown-dir", default="", help=f"regenerate the doc folder (e.g. {GENERATED_DOC_DIR})")
@@ -1246,6 +1479,8 @@ def main(argv: list[str] | None = None) -> int:
         print(render_chart(payload))
     elif args.critical:
         print(render_critical(payload))
+    elif args.rollup:
+        print(render_rollup(payload))
     elif args.gaps:
         print(render_gaps(payload))
     elif not args.markdown_dir:

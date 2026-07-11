@@ -8,9 +8,16 @@ This is the fleet counterpart to register_supervisor_watchdog.ps1 (which keeps
 the SIBLING C:\work\job supervisor alive). Distinct TaskName so the two never
 collide.
 
-The task runs in the CURRENT USER's interactive context (LogonType Interactive,
-/RL LIMITED) so the per-account Claude auth / CLAUDE_CONFIG_DIR the dispatch
-workers need is present.
+The task is registered with `schtasks /Create ... /RL LIMITED` — the Interactive
+logon type. NOTE (owed migration): that is the SAME logon type behind the
+2026-07-09 `0x800710E0` fleet outage (see register_resume_watchdog.ps1's header) —
+an Interactive task must launch into the attached desktop and is refused on a
+headless/RDP box. The correct target is an S4U principal, which runs windowless in
+session 0 yet still AS THIS USER (same profile / Claude auth / CLAUDE_CONFIG_DIR
+the dispatch workers need), so S4U does NOT lose the per-account auth this header
+used to claim Interactive was required for. This installer still owes that S4U
+migration that register_resume_watchdog.ps1 and register_issue_dispatch.ps1
+already made; until then a no-flag reinstall re-registers Interactive.
 
   .\register_dos_dispatch_watchdog.ps1            # install (default)
   .\register_dos_dispatch_watchdog.ps1 -Action status

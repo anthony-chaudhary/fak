@@ -22,6 +22,7 @@
 #   fak-qwen36-claude --probe "hi"              # GRADUATED, installed by --install: Qwen3.6 local preset
 #   # the launchers below are OPT-IN (not installed by default; add with --install-all, or run via FAK_DOGFOOD_PRESET):
 #   claude-glm-gcp --probe "say pong"           # opt-in GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
+#   claude-glm-zai --probe "say pong"           # opt-in HOSTED Z.ai coding-plan GLM-5.2 preset (set ZAI_API_KEY first)
 #   claude-gemini-gcp --probe "say pong"        # opt-in Gemini-3.5-Flash-on-GCP-Vertex preset (set FAK_GEMINI_GCP_PROJECT + FAK_GEMINI_GCP_KEY first)
 #   claude-groq-qwen36 --probe "say pong"       # opt-in Groq Qwen3.6-27B preset (set FAK_GROQ_API_KEY first)
 #   claude-groq-compound --probe "say pong"     # opt-in Groq Compound lower-tier preset
@@ -30,10 +31,15 @@
 #   claude-mac --probe "say pong"               # opt-in Mac fak-serve preset (set FAK_MAC_GATEWAY first)
 #
 # Knobs (env):
-#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp / claude-gemini-gcp / claude-groq-qwen36 / claude-groq-compound / claude-nim-kimi / claude-nim-deepseek / claude-mac)
+#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp | glm-zai | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp / claude-glm-zai / claude-gemini-gcp / claude-groq-qwen36 / claude-groq-compound / claude-nim-kimi / claude-nim-deepseek / claude-mac)
 #   FAK_GLM_GCP_BASE_URL the glm-gcp preset's GLM-5.2 /v1 base URL (a Tailscale host, or a localhost
 #                          SSH/IAP tunnel to the GCP serving node; default http://127.0.0.1:8200/v1).
 #                          Stand the node up with scripts/gcp-glm-serve.sh.
+#   ZAI_API_KEY          the glm-zai preset's Z.ai coding-plan bearer (read as Authorization: Bearer).
+#   FAK_ZAI_BASE_URL     the glm-zai preset's Z.ai OpenAI-compatible coding-plan root
+#                          (default https://api.z.ai/api/coding/paas/v4; fak appends /chat/completions).
+#   FAK_ZAI_MODEL        the glm-zai preset's upstream model id (default zai-coding-plan/glm-5.2).
+#   FAK_ZAI_API_KEY_ENV  env var name holding the Z.ai bearer for the glm-zai preset (default ZAI_API_KEY).
 #   FAK_GEMINI_GCP_PROJECT / FAK_GEMINI_GCP_LOCATION  the gemini-gcp preset's GCP project + region
 #                          (location default global) — used to build the Vertex OpenAI-compat base
 #                          URL when FAK_GEMINI_GCP_BASE_URL is not set. FAK_GEMINI_GCP_PROJECT falls back
@@ -188,6 +194,7 @@ if [ -z "$PRESET" ]; then
   case "$INVOKED_NAME" in
     fak-qwen36-claude) PRESET="qwen36-local" ;;
     claude-glm-gcp)    PRESET="glm-gcp" ;;
+    claude-glm-zai)    PRESET="glm-zai" ;;
     claude-gemini-gcp) PRESET="gemini-gcp" ;;
     claude-groq-qwen36) PRESET="groq-qwen36" ;;
     claude-groq-compound) PRESET="groq-compound" ;;
@@ -225,6 +232,22 @@ case "$PRESET" in
     DEFAULT_OPENAI_BASE_URL="${FAK_GLM_GCP_BASE_URL:-http://127.0.0.1:8200/v1}"
     DEFAULT_MODEL="${FAK_GLM_GCP_MODEL:-glm-5.2}"
     DEFAULT_PROVIDER_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false}}'
+    ;;
+  glm-zai)
+    # GLM-5.2 on the HOSTED Z.ai coding-plan API (https://api.z.ai/api/coding/paas/v4) fronted
+    # by `fak serve --provider openai`, so every tool call still crosses the kernel floor. This
+    # is the `claude-glm-gcp` wire pointed at Z.ai's MANAGED endpoint instead of a self-hosted
+    # GPU node: no VM to stand up, only a ZAI_API_KEY. The base is Z.ai's OpenAI-compatible
+    # coding-plan ROOT (NOT a /v1 path — fak's openai backend appends /chat/completions to it),
+    # and the served id is the provider-scoped `zai-coding-plan/glm-5.2`, forwarded verbatim
+    # (it is a provider cache-Vary axis; see internal/agent/chat.go). Z.ai reads the key as
+    # `Authorization: Bearer`, exactly like the gemini-gcp/mac presets. These defaults mirror
+    # the proven tools/claude_agent_chat.py --glm path so both z.ai front doors agree.
+    PRESET="glm-zai"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="${FAK_ZAI_BASE_URL:-https://api.z.ai/api/coding/paas/v4}"
+    DEFAULT_MODEL="${FAK_ZAI_MODEL:-zai-coding-plan/glm-5.2}"
+    DEFAULT_UPSTREAM_API_KEY_ENV="${FAK_ZAI_API_KEY_ENV:-ZAI_API_KEY}"
     ;;
   gemini-gcp)
     # Gemini 3.5 Flash served by GCP Vertex AI (its OpenAI-compatible endpoint) fronted by
@@ -311,7 +334,7 @@ case "$PRESET" in
     DEFAULT_UPSTREAM_API_KEY_ENV="FAK_GATEWAY_KEY"
     DEFAULT_OPENAI_TOOL_MESSAGES_AS_TEXT="1"
     ;;
-  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac)" ;;
+  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp | glm-zai | gemini-gcp | groq-qwen36 | groq-compound | nim-kimi | nim-deepseek-v4-pro | mac)" ;;
 esac
 
 PORT="${FAK_DOGFOOD_PORT:-8080}"
@@ -434,6 +457,7 @@ graduation_manifest() {
 fak-dogfood|-|yes|-|generic local shim/ollama; witnessed by committed probe + bounded-wait regression
 fak-qwen36-claude|qwen36-local|yes|-|local Qwen3.6 (127.0.0.1:8131); needs the local server up
 claude-glm-gcp|glm-gcp|no|-|self-hosted GCP GLM-5.2; route stood up per-operator, availability not yet classified (#3035)
+claude-glm-zai|glm-zai|no|ZAI_API_KEY|hosted Z.ai coding-plan GLM-5.2; managed endpoint, key/route per-operator, not classified (#3035)
 claude-gemini-gcp|gemini-gcp|no|FAK_GEMINI_GCP_KEY|Vertex bearer is a short-lived GCP token; route not yet classified (#3035)
 claude-groq-qwen36|groq-qwen36|no|FAK_GROQ_API_KEY|Groq tier; rate-limited, route not yet classified (#3035)
 claude-groq-compound|groq-compound|no|FAK_GROQ_API_KEY|Groq lower-tier compound; rate/token-capped, route not yet classified (#3035)
