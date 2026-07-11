@@ -1,12 +1,42 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 )
+
+const scoreboardPoisonLedgerEnv = "FAK_SCOREBOARD_POISON_LEDGER"
+
+var scoreboardGitWorktreeList = func(root string) (string, error) {
+	c, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(c, "git", "-C", root, "worktree", "list", "--porcelain")
+	b, err := cmd.Output()
+	return string(b), err
+}
+
+var scoreboardRepoRoot = repoRoot
+
+func liveScoreboardWorktreeStatus() scoreboard.WorktreeStatus {
+	root := scoreboardRepoRoot()
+	porcelain, err := scoreboardGitWorktreeList(root)
+	if err != nil {
+		porcelain = ""
+	}
+	ledger := os.Getenv(scoreboardPoisonLedgerEnv)
+	if ledger == "" {
+		ledger = filepath.Join(root, ".fak", "loops.jsonl")
+	}
+	return scoreboard.FoldWorktreeStatus(porcelain, ledger)
+}
 
 // scoreboardPostFlow is the shared dry-run / channel-resolve / token-resolve / post
 // tail that the scoreboard, node-usage, and product `post` handlers all run once they
@@ -26,6 +56,10 @@ type scoreboardPostOpts struct {
 }
 
 func scoreboardPostFlow(stdout, stderr io.Writer, up scoreboard.Update, o scoreboardPostOpts) int {
+	// Auditor-owned evidence is folded at the common post boundary so every live
+	// scoreboard producer reports whether worker isolation is actually active.
+	// Collection deliberately fails soft: observability must never block a post.
+	up = scoreboard.WithWorktreeStatus(up, liveScoreboardWorktreeStatus())
 	if o.dryRun {
 		fmt.Fprintln(stdout, up.Text())
 		return 0
