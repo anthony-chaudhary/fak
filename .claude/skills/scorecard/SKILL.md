@@ -29,7 +29,7 @@ down by adding the real thing — never by gaming the detector.**
 | code-quality | `tools/code_quality_scorecard.py` | `code_debt` | the Go module (gofmt, tests, god-files) |
 | docs | `tools/docs_scorecard.py` | `doc_debt` | the doc corpus |
 | doc-appeal | `tools/doc_appeal_scorecard.py` | `appeal_debt` | a doc's prose voice (human, not LLM) |
-| seo / aeo | `tools/seo_aeo_scorecard.py` | `seo_debt` | answer-engine / search surface |
+| seo / aeo | `fak score seo` (internal/seoaeoscore) | `seo_debt` | answer-engine / search surface |
 | demo-quality | `tools/demo_quality_scorecard.py` | `demo_debt` | the runnable demos |
 | repo-hygiene | `tools/repo_hygiene_scorecard.py` | `hygiene_debt` | the tree's shape |
 | observability | `tools/observability_scorecard.py` | — | dashboards / alerts / metrics doc |

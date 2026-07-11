@@ -489,8 +489,6 @@ var grandfathered = []string{
 	"tools/scrub_public_copy.py",
 	"tools/security_audit_test.py",
 	"tools/security_audit.py",
-	"tools/seo_aeo_scorecard_test.py",
-	"tools/seo_aeo_scorecard.py",
 	"tools/session_audit_test.py",
 	"tools/session_audit.py",
 	"tools/session_checkpoint_test.py",

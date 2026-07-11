@@ -214,7 +214,7 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 		// Freshness REPORT, not a gate (v1): print the scorecards' verdict lines so a human
 		// sees whether the refresh moved AEO/agent debt. A non-zero scorecard exit is its
 		// ACTION verdict, not a tool failure, so it never fails this command.
-		_ = runPyTool(stdout, stderr, *root, "tools/seo_aeo_scorecard.py")
+		_ = runSEOAEOScore(stdout, stderr, []string{"--workspace", *root})
 		_ = runAgentReadinessScore(stdout, stderr, []string{"--workspace", *root})
 	}
 	return 0

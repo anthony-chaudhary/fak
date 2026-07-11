@@ -76,7 +76,7 @@ var Cards = []Card{
 	{Key: "readme", Debt: "readme_debt", Script: "readme_freshness_audit.py", Label: "readme-freshness"},
 	{Key: "code", Debt: "code_debt", Script: "code_quality_scorecard.py", Label: "code"},
 	{Key: "appeal", Debt: "appeal_debt", Script: "doc_appeal_scorecard.py", Label: "doc-appeal"},
-	{Key: "seo", Debt: "seo_debt", Script: "seo_aeo_scorecard.py", Label: "seo"},
+	{Key: "seo", Debt: "seo_debt", Cmd: "go run ./cmd/fak score seo --json", Label: "seo"},
 	{Key: "demo", Debt: "demo_debt", Script: "demo_quality_scorecard.py", Label: "demo-quality"},
 	{Key: "robustness", Debt: "robustness_debt", Script: "demo_robustness_scorecard.py", Label: "demo-robustness"},
 	{Key: "hygiene", Debt: "hygiene_debt", Script: "repo_hygiene_scorecard.py", Label: "repo-hygiene"},
