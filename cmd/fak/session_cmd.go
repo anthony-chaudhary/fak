@@ -89,6 +89,12 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "branch" {
 		return runSessionBranch(stdout, stderr, args)
 	}
+	// checkpoint (#2760) takes an on-demand durable snapshot of a session — an offline
+	// image-in, image-out capture over internal/sessionimage.SnapshotDir (preserving the id,
+	// source read-only) that never dials a live gateway, dispatched alongside branch.
+	if verb == "checkpoint" {
+		return runSessionCheckpoint(stdout, stderr, args)
+	}
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
 	}
@@ -788,6 +794,9 @@ func sessionUsage(w io.Writer) {
                        [--to-model M] [--to-host H] [--registry PATH] [--json]
                                                offline fork of a checkpoint into a new durable
                                                id (copy-on-write share of the parent's pages)
+  fak session checkpoint <image-dir> --out <snap-dir> [--reason R] [--json]
+                                               offline on-demand snapshot of a session
+                                               (same id, copy-on-write, source unaffected)
 
 flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json
