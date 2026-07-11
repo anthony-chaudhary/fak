@@ -58,6 +58,8 @@ var issueReferenceRE = regexp.MustCompile(`#([1-9][0-9]*)`)
 var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
 var unexpandedIssueTemplateRE = regexp.MustCompile(`(?m)(\$\(@\{|System\.Collections|System\.Management\.Automation|\$\(System\.|\bSource:\s*\$source\b)`)
 var unexpandedIssueTemplateMarkerRE = regexp.MustCompile(`(?m)\$\(@\{[^)\r\n]*\}\.[A-Za-z0-9_]+\)|\$\((?:System\.Collections|System\.Management\.Automation)[^)\r\n]*\)|^\s*(?:[-*]\s*)?Source:\s*\$source[^\r\n]*`)
+var routingFenceOpenRE = regexp.MustCompile("^\\s*`{3,}[ \\t]*routing[ \\t]*$")
+var routingFenceCloseRE = regexp.MustCompile("^\\s*`{3,}[ \\t]*$")
 
 // IssueLabel is the subset of a GitHub label row used by IssueDraft.
 type IssueLabel struct {
@@ -594,6 +596,23 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		return ""
 	}
 	doneWitness := section("Done condition / witness")
+	// A fenced ```routing block, when present, is the machine-authored source of
+	// truth for lane / paths / expected_steps; it wins per key over the prose
+	// sections below, but only for the keys it actually carries — an absent key
+	// keeps its section() fallback.
+	routing, _ := parseRoutingBlock(d.Body)
+	lane := section("Lane")
+	if routing.laneSet {
+		lane = routing.lane
+	}
+	paths := issueDraftPaths(section("Likely files", "Path hints", "Paths", "Files"))
+	if routing.pathsSet {
+		paths = routing.paths
+	}
+	expectedSteps := parseExpectedSteps(section("Expected steps", "Step budget"))
+	if routing.stepsSet {
+		expectedSteps = routing.expectedSteps
+	}
 	return Candidate{
 		Schema:          Schema,
 		IssueNumber:     d.Number,
@@ -606,7 +625,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		WorkingSpine:    section("Working spine"),
 		PriorityContext: section("Priority context", "Spine priority", "Importance"),
 		WorkUnit:        section("Work unit", "Work-unit shape", "Issue shape"),
-		ExpectedSteps:   parseExpectedSteps(section("Expected steps", "Step budget")),
+		ExpectedSteps:   expectedSteps,
 		Scale:           agentSectionValue(section("Work scale", "Scale", "Size tier", "Work size")),
 		Assumptions:     issueDraftAgentNotes(section("Assumptions")),
 		ConfusionRisks:  issueDraftAgentNotes(section("Confusion risks", "Known confusion", "Unknowns")),
@@ -618,8 +637,8 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		DoneCondition:   firstNonEmpty(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
 		Witness:         firstNonEmpty(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
 		AcceptanceGate:  section("Acceptance gate"),
-		Lane:            section("Lane"),
-		Paths:           issueDraftPaths(section("Likely files", "Path hints", "Paths", "Files")),
+		Lane:            lane,
+		Paths:           paths,
 		Dependencies:    ParseIssueDependencies(section("Dependencies", "Dependency markers")),
 		Labels:          issueDraftLabels(d.Labels),
 		BoundaryNotes:   issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
@@ -629,6 +648,78 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),
 		OptimalModelTier:  issueHeaderField(d.Body, "Optimal model tier"),
 	}
+}
+
+// routingBlock is the parsed content of a fenced ```routing key:value block.
+// The block is the machine-authored, unambiguous form of the routing metadata
+// CandidateFromIssueDraft otherwise recovers from prose sections. Each *Set flag
+// records whether that key was PRESENT with a usable value, so a caller can
+// prefer the block per key and fall back to the prose section parse only for the
+// keys the block omits.
+type routingBlock struct {
+	lane          string
+	laneSet       bool
+	paths         []string
+	pathsSet      bool
+	expectedSteps int
+	stepsSet      bool
+}
+
+// parseRoutingBlock scans body for the first fenced ```routing key:value block
+// and returns its parsed routing fields plus whether such a block was found at
+// all. Recognized keys: lane, paths (comma/space separated, each run through the
+// same cleanPathHint as the prose path parse), and expected_steps (a positive
+// int). A key the block omits — or leaves empty / unparseable — stays unset so
+// the caller keeps the prose fallback for that key.
+func parseRoutingBlock(body string) (routingBlock, bool) {
+	var rb routingBlock
+	inBlock := false
+	found := false
+	for _, raw := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		if !inBlock {
+			if routingFenceOpenRE.MatchString(raw) {
+				inBlock = true
+				found = true
+			}
+			continue
+		}
+		if routingFenceCloseRE.MatchString(raw) {
+			break
+		}
+		key, val, ok := strings.Cut(raw, ":")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(strings.Trim(key, "`*_-# ")))
+		key = strings.ReplaceAll(key, " ", "_")
+		val = strings.TrimSpace(val)
+		switch key {
+		case "lane":
+			if lane := strings.TrimSpace(strings.Trim(val, "`")); lane != "" {
+				rb.lane = lane
+				rb.laneSet = true
+			}
+		case "paths", "path":
+			var paths []string
+			for _, tok := range strings.FieldsFunc(val, func(r rune) bool {
+				return r == ',' || r == ' ' || r == '\t'
+			}) {
+				if p := cleanPathHint(tok); p != "" {
+					paths = append(paths, p)
+				}
+			}
+			if len(paths) > 0 {
+				rb.paths = compact(paths)
+				rb.pathsSet = true
+			}
+		case "expected_steps":
+			if n := parseExpectedSteps(val); n > 0 {
+				rb.expectedSteps = n
+				rb.stepsSet = true
+			}
+		}
+	}
+	return rb, found
 }
 
 func prefixedSectionValue(section, prefix string) string {

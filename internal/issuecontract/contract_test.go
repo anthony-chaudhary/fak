@@ -701,6 +701,85 @@ func TestCandidateFromIssueDraftParsesAgentContext(t *testing.T) {
 	}
 }
 
+func TestParseRoutingBlockParsesFencedRouting(t *testing.T) {
+	body := strings.Join([]string{
+		"### Working spine",
+		"Route from a fenced block.",
+		"```routing",
+		"lane: gateway",
+		"paths: internal/gateway/http.go, `internal/gateway/serve.go`",
+		"expected_steps: 5",
+		"```",
+	}, "\n")
+	rb, ok := parseRoutingBlock(body)
+	if !ok {
+		t.Fatalf("parseRoutingBlock ok = false, want a routing block found")
+	}
+	if !rb.laneSet || rb.lane != "gateway" {
+		t.Fatalf("routing lane = %q set=%v, want gateway", rb.lane, rb.laneSet)
+	}
+	if !rb.stepsSet || rb.expectedSteps != 5 {
+		t.Fatalf("routing expected_steps = %d set=%v, want 5", rb.expectedSteps, rb.stepsSet)
+	}
+	if got := strings.Join(rb.paths, ","); !rb.pathsSet || got != "internal/gateway/http.go,internal/gateway/serve.go" {
+		t.Fatalf("routing paths = %v set=%v, want both gateway paths (backtick stripped)", rb.paths, rb.pathsSet)
+	}
+}
+
+func TestCandidateFromIssueDraftPrefersRoutingBlock(t *testing.T) {
+	// The block carries lane + paths but omits expected_steps; the prose
+	// sections carry all three with different values. The block must win per key
+	// for lane/paths, and expected_steps must fall back to the prose section.
+	body := strings.Join([]string{
+		"### Working spine",
+		"Prefer the fenced routing block per key.",
+		"```routing",
+		"lane: gateway",
+		"paths: internal/gateway/http.go",
+		"```",
+		"### Expected steps",
+		"4",
+		"### Lane",
+		"issuecontract",
+		"### Path hints",
+		"- `internal/issuecontract/contract.go`",
+	}, "\n")
+	c := CandidateFromIssueDraft(IssueDraft{Number: 4174, Title: "issuecontract: routing block", Body: body})
+	if c.Lane != "gateway" {
+		t.Fatalf("lane = %q, want gateway from the routing block", c.Lane)
+	}
+	if got := strings.Join(c.Paths, ","); got != "internal/gateway/http.go" {
+		t.Fatalf("paths = %v, want only the routing-block path (block overrides prose)", c.Paths)
+	}
+	if c.ExpectedSteps != 4 {
+		t.Fatalf("expected_steps = %d, want 4 from the prose fallback (block omits the key)", c.ExpectedSteps)
+	}
+}
+
+func TestCandidateFromIssueDraftNoRoutingBlockUsesProse(t *testing.T) {
+	body := strings.Join([]string{
+		"### Expected steps",
+		"3",
+		"### Lane",
+		"issuecontract",
+		"### Path hints",
+		"- `internal/issuecontract/contract.go`",
+	}, "\n")
+	if _, ok := parseRoutingBlock(body); ok {
+		t.Fatalf("parseRoutingBlock ok = true, want no block found in prose-only body")
+	}
+	c := CandidateFromIssueDraft(IssueDraft{Number: 4174, Title: "issuecontract: no routing block", Body: body})
+	if c.Lane != "issuecontract" {
+		t.Fatalf("lane = %q, want the prose lane when no routing block is present", c.Lane)
+	}
+	if got := strings.Join(c.Paths, ","); got != "internal/issuecontract/contract.go" {
+		t.Fatalf("paths = %v, want the prose path when no routing block is present", c.Paths)
+	}
+	if c.ExpectedSteps != 3 {
+		t.Fatalf("expected_steps = %d, want 3 from prose when no routing block is present", c.ExpectedSteps)
+	}
+}
+
 func TestReviewIssueDraftParsesDependencyMarkers(t *testing.T) {
 	body := issueProofSectionBody(
 		"Dependency markers are parsed for dispatch holds.",
