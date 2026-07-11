@@ -141,6 +141,18 @@ type Manifest struct {
 	// Runtime.SubagentDepth.AdmitDepth before brokering a child. See
 	// SubagentDepthRule.
 	SubagentDepth *SubagentDepthRule `json:"subagent_depth,omitempty"`
+	// MountView (issue #2577) is the T1 mount view — the declarative per-session
+	// namespace of what file tree EXISTS to the agent at all. Each MountRule names a
+	// repo-relative subtree that is in view and whether it is read-only or read-write;
+	// a path matching no rule is OUTSIDE the view and does not exist (fail-closed
+	// DEFAULT_DENY), the same deny-by-default shape the tool floor has over tool names.
+	// An empty/omitted MountView means "no view configured" — every path is visible
+	// (the feature is off, backward-compatible). Enforced offline by the reference
+	// monitor MountViewRefusal (mountview.go), driven purely by the manifest with no
+	// model in the loop. Like RateLimit/Isolation/ToolRuntime this is manifest/runtime-
+	// only — NOT an adjudicator.Policy field; wiring it into the live pathscope read
+	// hot path is the named promotion step (see the doc fence, #2358 owns inheritance).
+	MountView []MountRule `json:"mount_view,omitempty"`
 }
 
 // EgressRule is the manifest's network-egress block.
