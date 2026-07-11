@@ -180,6 +180,7 @@ front page.
 
 ### Latest working notes
 
+- [Generation Classification — modver policy-manifest key space (issue #2462)](docs/notes/GENERATION-MODVER-POLICY-KEYSPACE-2026-07-11.md) -- auto-indexed dated note.
 - [Nightrun `.gitignore` hygiene + safe detect-and-refuse gitignore automation (2026-07-11)](docs/notes/NIGHTRUN-GITIGNORE-SAFE-AUTOMATION-2026-07-11.md) -- auto-indexed dated note.
 - [Handoff — #2817 per-fire net-score + fire-gate tuning (gen/next)](docs/notes/HANDOFF-2817-per-fire-net-score-2026-07-11.md) -- auto-indexed dated note.
 - [Concept: the scorer-of-scorers — "an unmeasured axis fails closed, never perfect"](docs/notes/CONCEPT-SCORER-OF-SCORERS-FAILOPEN-2026-07-11.md) -- auto-indexed dated note.
