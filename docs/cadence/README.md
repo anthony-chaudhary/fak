@@ -30,9 +30,14 @@ The four dimensions:
   debt, next-work backlog size, per-rung distribution, and the first
   public-routeable `fak maturity route` seed. Private-boundary maturity rows stay
   visible in the raw backlog and are counted as skipped in the route preview.
-- **work** is read straight from git over a trailing window (7 days by default,
-  `--window N` to change it): the commit count, and the subset that carry a
-  `(fak <leaf>)` ship trailer.
+- **work** is read from git plus the independent DOS commit witness over a trailing
+  window (7 days by default, `--window N` to change it). A ship receives credit only
+  when it is reachable from `origin`'s trunk, carries a real `(fak <leaf>)` stamp,
+  and `dos commit-audit` reports `OK` / `diff-witnessed`. Ship-shaped local commits
+  and published-but-unwitnessed commits remain visible in the report's `work.held`
+  rows as `local_only` / `published_unwitnessed`; neither inflates delivery velocity.
+  A missing DOS witness fails the work dimension closed instead of reverting to a
+  subject-line self-report.
 - **releases** come from `fak release status` run offline: the latest tag
   and the next release action.
 
@@ -60,7 +65,7 @@ across weeks, not just against a single pinned baseline. Each row is one
 | `maturity_score` / `maturity_debt` / `maturity_backlog` | lifecycle index, ladder-skip debt, and next-work count |
 | `maturity_proposed` / `maturity_prototyped` / `maturity_tested` / `maturity_dogfooded` / `maturity_default` | per-rung distribution, so the complete-but-not-dogfooded tail is trendable |
 | `maturity_route_key` / `maturity_route_lane` / `maturity_route_skipped_private` | the top public maturity issue seed and how many private-boundary rows the public issue feeder skipped |
-| `work_window_days` / `work_commits` / `work_ships` | the work-done window and counts |
+| `work_window_days` / `work_commits` / `work_ships` | the work-done window and published+witnessed ship count; per-commit holds live in the report envelope, not this byte-stable ledger row |
 | `release_version` / `release_action` | latest tag and next release action |
 
 The standing fields are the durable alternative to eyeballing whether a bounded
