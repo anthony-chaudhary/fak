@@ -63,7 +63,10 @@ func driveCarryBounded(st session.State) bool {
 // record round-trips through rwDriveCarryEnvelope's encoding: an Unbounded(-1) turn/token
 // axis carries as -1 (rendered "unbounded" on re-seed), a not-configured context/spend axis
 // stays 0 (dropped by omitempty), and a bounded wall-clock budget carries its remaining
-// nanos.
+// nanos. The standing objective pin rides along too (#4121, WithObjectivePin): carrying its
+// safe extractive triple lets a relaunched child re-pin the SAME objective its first reset
+// reconciles as ObjectivePreserved rather than silently ObjectiveDropped (#1583). A session
+// with no pin carries a byte-identical budget-only row (WithObjectivePin no-ops on a zero pin).
 func driveCarryRowFromState(uuid string, st session.State, now time.Time) resume.DriveCarryRow {
 	row := resume.DriveCarryRow{
 		TS:                   now.UTC().Format(time.RFC3339),
@@ -80,5 +83,5 @@ func driveCarryRowFromState(uuid string, st session.State, now time.Time) resume
 	if rem, ok := st.Time.Remaining(now); ok {
 		row.TimeLeftNanos = rem.Nanoseconds()
 	}
-	return row
+	return row.WithObjectivePin(st.ObjectivePin)
 }

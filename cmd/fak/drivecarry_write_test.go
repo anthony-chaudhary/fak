@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -80,6 +81,39 @@ func TestDriveCarryWritePreCompactBounded(t *testing.T) {
 	}
 	if got.Priority != 2 || got.PaceMaxTokensPerTurn != 900 || got.PaceMinTurnGapMs != 250 || got.Generation != 1 {
 		t.Fatalf("carry priority/pace/generation = %+v", got)
+	}
+}
+
+// TestDriveCarryWriteCarriesObjective is the #4121 write-side witness: a live State holding a
+// standing ObjectivePin projects that pin's safe extractive triple onto the carry row, and the
+// reconstructed pin reconciles as ObjectivePreserved against the original — so a relaunched
+// child re-pins the SAME objective (#1583) instead of silently dropping it. This closes the
+// producer half; internal/resume TestObjectivePinCarry proves the record round-trip.
+func TestDriveCarryWriteCarriesObjective(t *testing.T) {
+	const uuid, trace = "uuid-carry-obj", "trace-carry-obj"
+	pin := ctxplan.NewObjectivePin("obj-4121", "ship the drivecarry objective triple", 3)
+	st := session.State{
+		TraceID: trace, Run: session.Running,
+		Budget:       session.Budget{TurnsLeft: 4, TokensLeft: 500}, // bounded so a row is written
+		ObjectivePin: pin,
+	}
+	dir := seedDriveCarryWorld(t, uuid, trace, st)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", uuid)
+
+	if code := runGuardPreCompact(io.Discard, io.Discard, strings.NewReader(""), nil); code != 0 {
+		t.Fatalf("runGuardPreCompact code=%d, want 0", code)
+	}
+	rows := loadDriveCarryRows(t, dir)
+	if len(rows) != 1 {
+		t.Fatalf("carry rows=%d, want exactly 1: %+v", len(rows), rows)
+	}
+	got := rows[0]
+	if got.ObjectivePinID != pin.PinID || got.ObjectiveText != pin.Text || got.ObjectiveDigest != pin.Digest {
+		t.Fatalf("carry objective triple = (%q,%q,%q), want (%q,%q,%q)",
+			got.ObjectivePinID, got.ObjectiveText, got.ObjectiveDigest, pin.PinID, pin.Text, pin.Digest)
+	}
+	if d := ctxplan.ReconcileObjective(pin, got.ObjectivePin()); d.Outcome != ctxplan.ObjectivePreserved {
+		t.Fatalf("reconcile carried objective = %q, want %q", d.Outcome, ctxplan.ObjectivePreserved)
 	}
 }
 
