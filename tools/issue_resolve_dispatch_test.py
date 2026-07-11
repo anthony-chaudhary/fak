@@ -2518,6 +2518,17 @@ class WeeklyCapGateTest(unittest.TestCase):
         "kind=weekly_limit announced_wait=6h50m0s\n"
         "API Error: Request rejected (429) · upstream rate-limited the request (HTTP 429)\n"
     )
+    # #2610 LITERAL witness: the EXACT banner the July-4 overnight tick logged — a
+    # `≈` (approximately, U+2248) separator and a MINUTE-ONLY window (`1h7m`, no
+    # trailing seconds), NOT the synthesized `=`/`6h50m0s` form above. Both the
+    # `_ANNOUNCED_WAIT_RE` separator class `[=:≈~]?` and its optional-seconds
+    # branch have to hold or this real log silently fails to parse and the seat is
+    # reoffered straight back into the cap — the precise #2610 regression.
+    GUARDED_WEEKLY_429_LIVE = (
+        "fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages "
+        "kind=weekly_limit announced_wait≈1h7m\n"
+        "API Error: Request rejected (429)\n"
+    )
 
     def _write_worker(self, runs: Path, name: str, body: str, *, mtime: float,
                       backend: str = "claude", account_tag: str | None = None) -> None:
@@ -2596,6 +2607,39 @@ class WeeklyCapGateTest(unittest.TestCase):
             self.assertEqual(until, now_utc + dt.timedelta(hours=6, minutes=50))
             # Not the 60-min blind fallback, and not clamped to the 90-min session cap.
             self.assertGreater(until, now_utc + dt.timedelta(minutes=90))
+
+    def test_weekly_limit_literal_witness_approx_form_cools_seat(self) -> None:
+        """#2610 acceptance #4, LITERAL form: the exact guard banner the July-4
+        overnight tick logged — ``kind=weekly_limit announced_wait≈1h7m``, a ``≈``
+        separator and a minute-only window — must be detected as a WEEKLY cap and
+        cool the seat to that announced ~1h7m window. Every other weekly fixture
+        uses a synthesized ``=``/``6h50m0s`` form, so this is the ONLY test that
+        pins the ``≈``-separator + optional-seconds branch of ``_ANNOUNCED_WAIT_RE``;
+        a regex 'cleanup' to ``=``-only would leave the whole suite green while the
+        real overnight log silently reoffered the capped seat, the exact #2610 bug."""
+        import datetime as dt
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now)
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-2610-live.log",
+                               self.GUARDED_WEEKLY_429_LIVE, mtime=now - 60,
+                               account_tag="july2-netra")
+            hit = mod._scan_recent_cap_banner(runs, product="claude",
+                                              lookback_min=45, now_ts=now)
+            self.assertIsNotNone(hit)
+            self.assertEqual(hit["kind"], "weekly")
+            self.assertEqual(hit["reset_text"], "1h7m")   # minute-only, ≈-separated
+            out = mod.check_weekly_cap(runs, product="claude",
+                                       account_tag="july2-netra", now_ts=now)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["kind"], "weekly")
+            until = mod._iso_to_utc(out["until"])
+            self.assertEqual(until, now_utc + dt.timedelta(hours=1, minutes=7))
+            # Not the 60-min blind fallback — the announced window is honored.
+            self.assertGreater(until, now_utc + dt.timedelta(minutes=60))
 
     def test_weekly_cap_sidecar_writer_reader_contract(self) -> None:
         """#2610 writer<->reader contract. ``check_weekly_cap`` WRITES the
