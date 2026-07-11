@@ -426,6 +426,7 @@ var tier = map[string]int{
 	"wiki":                  1, // #4277 deepwiki-study: witness-verified repo-wiki core — Structure (L1 #4278) projects the section→page tree from the self-index, VerifyCitations (L3 #4280) resolves Sources:[path:line] code cites vs the tree; composes devindex(1), off the hot path.
 	"projectreport":         1, // the ProjectsV2 board control-pane fold: a pure fold of board item × {Status,Generation,Priority} into the same schema/ok/verdict/finding envelope milestonereport uses, with a fail-closed UNMEASURED verdict for an unreadable board. The `gh` read lives in cmd/fak; this leaf is stdlib-only, imports nothing internal, off the hot path.
 	"catchupscore":          1, // the dev-system CATCH-UP control-pane scorecard (`fak score catchup`): folds intake/measurement/index/trunk/loops into a 0..1 caught-up fraction + an unbounded catchup_backlog headline. Pure fold, stdlib-only, imports nothing internal, off the hot path.
+	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -47,6 +47,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"propagation":         cmdPropagationScorecard,
 	"qa-process":          cmdQAProcessScorecard,
 	"repo-hygiene":        cmdRepoHygieneScorecard,
+	"seo":                 cmdSEOAEOScore,
 	"skill-effectiveness": cmdSkillEffectivenessScorecard,
 	"sota-coverage":       cmdSOTACoverageScorecard,
 	"support-maturity":    cmdSupportMaturityScorecard,
