@@ -1,0 +1,10 @@
+{
+  "schema": "fak.stepadvice.stamp.v1",
+  "trace_id": "guard",
+  "step_class": "bounded",
+  "basis": "token_headroom",
+  "reason": "resident 65.2k of 96.0k budget (68% used)",
+  "resident_tokens": 65184,
+  "budget_tokens": 96000,
+  "phase": "cruising"
+}
