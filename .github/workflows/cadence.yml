@@ -103,6 +103,12 @@ jobs:
       - name: milestone burndown fold self-test
         run: go test ./internal/milestoneburndown/
 
+      # The PROJECT dimension (ProjectsV2 board health) rides the same loop: its
+      # distribution verdict + per-tick trend are only a real signal if the pure fold
+      # + ledger/trend are proven first.
+      - name: project fold self-test
+        run: go test ./internal/projectreport/
+
       # The REPORT. Tolerate a non-zero exit (a flaky sub-tool must not suppress
       # the report) — the verdict is surfaced below, not swallowed.
       - name: cadence report
@@ -219,6 +225,41 @@ jobs:
         if: always()
         run: go run ./cmd/fak milestone post --dry-run --report-json milestone-report.json > milestone-card.txt 2>&1 || true
 
+      # PROJECT (ProjectsV2 board health) on the SAME loop cadence: the board's item
+      # distribution across Status/Generation/Priority + unclassified drift, folded into
+      # the same control-pane envelope and trended on its own durable ledger
+      # (docs/project/history.jsonl). Fail-CLOSED: absent FAK_DISPATCH_PROJECT_NUMBER or
+      # the gh read:project scope, the fold records a visible UNMEASURED row (never a
+      # silent green). --check keeps that unmeasured state on the operator's weekly read.
+      - name: project report (same-cadence append)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          go run ./cmd/fak project report --json --check --append-history > project-report.json
+          echo "project-report-exit=$?"
+          set -e
+          test -s project-report.json || echo '{}' > project-report.json
+          python3 - <<'PY' > project-report.txt || echo "(project report unreadable)" > project-report.txt
+          import json
+          d = json.load(open("project-report.json"))
+          print(f"{d.get('verdict','?')} ({d.get('finding','')}) @{d.get('commit','')} {d.get('date','')}")
+          if d.get("measured"):
+              print(f"  board     {d.get('total',0)} item(s); {len(d.get('unclassified') or [])} unclassified")
+          else:
+              print("  board     unmeasured (set FAK_DISPATCH_PROJECT_NUMBER + gh read:project)")
+          if d.get("trend"):
+              print(f"  trend     {d['trend'].get('summary','')}")
+          if d.get("next_action"):
+              print(f"  -> {d['next_action']}")
+          PY
+          cat project-report.txt
+
+      - name: Render project card
+        if: always()
+        run: go run ./cmd/fak project post --dry-run --report-json project-report.json > project-card.txt 2>&1 || true
+
       - name: Dry-run note
         if: >-
           steps.milestone_arm.outputs.execute != 'true' &&
@@ -248,6 +289,11 @@ jobs:
           fi
           if [ "${{ steps.milestone_arm.outputs.execute }}" = "true" ]; then
             git add docs/milestones/history.jsonl docs/milestones/STATUS.md docs/milestones/burndown.jsonl
+            # The PROJECT trend ledger rides the same execute gate. git add -f is not
+            # needed (docs/ is tracked); the file always exists by here (seeded + the
+            # report step appends this tick), so a board-less repo still commits an
+            # honest UNMEASURED row rather than failing the add.
+            git add docs/project/history.jsonl
             if [ "${{ github.event_name }}" = "schedule" ]; then
               subject="docs(milestones): record same-cadence milestone tick (fak docs)"
             else
@@ -291,6 +337,17 @@ jobs:
             echo '```'
             echo '</details>'
             echo
+            echo "## project board (same-cadence append)"
+            echo '```'
+            cat project-report.txt 2>/dev/null || echo "(no project report)"
+            echo '```'
+            echo '<details><summary>rendered project card</summary>'
+            echo
+            echo '```'
+            cat project-card.txt 2>/dev/null || echo "(no project card)"
+            echo '```'
+            echo '</details>'
+            echo
             echo
             if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
               echo "_Manual execute: cadence and milestone ledger changes were committed when present._"
@@ -315,4 +372,7 @@ jobs:
             milestone-burndown.txt
             milestone-card.txt
             milestone-status-doc.txt
+            project-report.json
+            project-report.txt
+            project-card.txt
           if-no-files-found: ignore

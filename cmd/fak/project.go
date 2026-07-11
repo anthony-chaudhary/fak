@@ -12,8 +12,14 @@ package main
 //	fak project report --json                # the machine-readable envelope
 //	fak project report --check               # advisory gate (exit 1 only if unmeasured)
 //	fak project report --from-items items.json   # fold a fixture hermetically (no gh)
+//	fak project report --append-history      # trend a dated row into docs/project/history.jsonl
 //	fak project post --dry-run               # render the exact Slack card; do not post
 //	fak project post                         # post the card to #project (durable outbox)
+//	fak project selfcheck                    # deterministic fold + ledger/trend proof (no gh, no key)
+//
+// The durable ledger + per-tick trend mirror `fak milestone report`: a scheduled tick
+// (cadence.yml) appends one row per week so the board distribution is trended, not just
+// snapshotted.
 //
 // Live reads are gated on FAK_DISPATCH_PROJECT_NUMBER (the same knob the dispatch
 // reader uses) and need a gh token with read:project scope; absent either, the fold is a
@@ -27,6 +33,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,10 +44,20 @@ import (
 )
 
 func cmdProject(argv []string) {
-	dispatchSubcommands("project", "report | post", argv,
+	dispatchSubcommands("project", "report | post | selfcheck", argv,
 		subcommand{"report", runProjectReport},
 		subcommand{"post", runProjectPost},
+		subcommand{"selfcheck", runProjectSelfcheck},
 	)
+}
+
+// runProjectSelfcheck runs the deterministic source-level proof for the project fold —
+// no gh, no key, no fixtures — the project twin of `fak milestone selfcheck`.
+func runProjectSelfcheck(stdout, stderr io.Writer, argv []string) int {
+	return runReportSelfcheck(stdout, stderr, argv, "project", projectreport.Selfcheck,
+		"SELFCHECK OK -- the project fold is a mirror: a fully-classified board is OK, an "+
+			"unclassified item is ACTION drift, an unreachable board folds to a visible UNMEASURED, "+
+			"and the durable ledger row + per-tick trend round-trip.")
 }
 
 func runProjectReport(stdout, stderr io.Writer, argv []string) int {
@@ -49,6 +66,8 @@ func runProjectReport(stdout, stderr io.Writer, argv []string) int {
 	fromItems := fs.String("from-items", "", "fold the board from this JSON items file instead of reading live (- for stdin). A JSON array of {issue,status,generation,priority}.")
 	asJSON := fs.Bool("json", false, "emit the machine-readable JSON envelope")
 	check := fs.Bool("check", false, "advisory gate: exit non-zero only if the board failed to MEASURE (a drifted-but-measured board still exits 0)")
+	appendHistory := fs.Bool("append-history", false, "append a dated row to the durable ledger ("+projectreport.DefaultLedgerRel+") and trend it")
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+projectreport.DefaultLedgerRel+")")
 	projectNumber := fs.Int("project-number", 0, "ProjectsV2 number to read live (default: $"+dispatchProjectNumberEnv+")")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -62,6 +81,24 @@ func runProjectReport(stdout, stderr io.Writer, argv []string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "fak project report: %v\n", err)
 		return 2
+	}
+
+	// Attach the per-tick trend vs the durable ledger (read-only), and -- only under
+	// --append-history -- durably append this tick so the trend accrues across weeks.
+	ledgerPath := projectLedgerPath(*ledger)
+	report = attachProjectTrend(report, ledgerPath)
+	if *appendHistory {
+		if err := appendLedgerFile(ledgerPath, projectreport.RowFromReport(report), projectreport.AppendLedgerLine); err != nil {
+			fmt.Fprintf(stderr, "fak project report: append ledger: %v\n", err)
+			return 1
+		}
+		if !*asJSON && !*check {
+			rel, relErr := filepath.Rel(repoRoot(), ledgerPath)
+			if relErr != nil || rel == "" {
+				rel = ledgerPath
+			}
+			fmt.Fprintf(stdout, "appended project row -> %s\n", filepath.ToSlash(rel))
+		}
 	}
 
 	if *asJSON {
@@ -107,6 +144,9 @@ func runProjectPost(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak project post: %v\n", err)
 		return 2
 	}
+	// Trend the card against the durable ledger too (a pre-rolled --report-json that
+	// already carries a trend is left untouched by attachProjectTrend).
+	report = attachProjectTrend(report, projectLedgerPath(""))
 
 	src := *source
 	if src == "" {
@@ -123,6 +163,27 @@ func runProjectPost(stdout, stderr io.Writer, argv []string) int {
 		resolveChannel: resolveProjectChannel,
 		resolveToken:   resolveProjectToken,
 	})
+}
+
+// projectLedgerPath resolves the durable project ledger path: an explicit override,
+// else <repo root>/docs/project/history.jsonl (the committed trend ledger).
+func projectLedgerPath(override string) string {
+	if override != "" {
+		return override
+	}
+	return filepath.Join(repoRoot(), filepath.FromSlash(projectreport.DefaultLedgerRel))
+}
+
+// attachProjectTrend folds the per-tick trend vs the durable ledger onto the report
+// (read-only). A report that already carries a trend — e.g. a pre-rolled --report-json
+// appended by a prior tick — is returned untouched, so the trend is never recomputed
+// against a stale ledger.
+func attachProjectTrend(report projectreport.Report, ledgerPath string) projectreport.Report {
+	if report.Trend != nil {
+		return report
+	}
+	prior := readLedgerFile(ledgerPath, projectreport.ParseLedger)
+	return report.WithTrend(projectreport.TrendVsLast(projectreport.RowFromReport(report), prior))
 }
 
 // loadProjectReport builds the report from exactly one source, in precedence order:
@@ -218,6 +279,9 @@ func projectCard(r projectreport.Report, source string) scoreboard.Update {
 	}
 	if line := projectDistLine(r.ByPriority, nil); line != "" {
 		up.Lines = append(up.Lines, "priority "+line)
+	}
+	if r.Trend != nil {
+		up.Lines = append(up.Lines, "trend "+r.Trend.Summary)
 	}
 	return up
 }

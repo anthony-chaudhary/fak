@@ -62,6 +62,10 @@ type Report struct {
 	Commit       string         `json:"commit,omitempty"`
 	GeneratedAt  string         `json:"generated_at,omitempty"`
 	Date         string         `json:"date,omitempty"`
+	// Trend is the per-tick delta vs the previous durable-ledger row (ledger.go),
+	// attached by WithTrend after the pure fold so Fold itself stays trend-free. nil
+	// until a caller trends the report against docs/project/history.jsonl.
+	Trend *Trend `json:"trend,omitempty"`
 }
 
 // Unmeasured builds the fail-closed envelope for a board that could not be read. It is
