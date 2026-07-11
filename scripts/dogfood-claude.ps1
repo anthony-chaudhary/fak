@@ -504,11 +504,29 @@ if ($Mode -eq 'list-accounts') {
 if ($Mode -eq 'install') {
   # Windows twin of the bash `--install`: put launchers on PATH so you can run the
   # dogfood + the repo CLI from any directory. Windows symlinks need elevation/dev-mode,
-  # so (per the install decision) we COPY the built fak.exe and write a .cmd SHIM for the
-  # dogfood launcher (a launcher can't be "copied" like an exe; the shim always runs the
-  # in-tree script). Idempotent: re-running refreshes the fak.exe copy (it goes stale
-  # until then) and rewrites the shim.
+  # so (per the install decision) we COPY the built fak.exe and write a .cmd SHIM for each
+  # launcher (a launcher can't be "copied" like an exe; the shim always runs the in-tree
+  # script). The graduation gate (#3034) means only launchers Get-GraduatedLaunchers
+  # returns get a shim; opt-in ones are reported with their one-command probe recipe.
+  # Idempotent: re-running refreshes the fak.exe copy and rewrites the graduated shims.
   $BinDir = if ($env:FAK_DOGFOOD_BINDIR) { $env:FAK_DOGFOOD_BINDIR } else { Join-Path $UserHome 'bin' }
+  $self = $MyInvocation.MyCommand.Path
+  $installSet = @(Get-GraduatedLaunchers)
+
+  # Dry-run: report exactly what --install would create / skip, then exit BEFORE any
+  # build or shim write. The offline seam the regression test drives on the .sh twin.
+  if ($env:FAK_DOGFOOD_INSTALL_DRYRUN) {
+    foreach ($m in Get-GraduationManifest) {
+      if ($installSet -contains $m.Launcher) {
+        Write-Host ("would-install: {0}" -f $m.Launcher)
+      } else {
+        $keyhint = if ($m.KeyEnv -eq '-') { '' } else { "$($m.KeyEnv)=... " }
+        Write-Host ("opt-in-skip: {0} (run: FAK_DOGFOOD_PRESET={1} {2}{3} --probe ""say pong"")" -f $m.Launcher, $m.Preset, $keyhint, $self)
+      }
+    }
+    exit 0
+  }
+
   if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Force $BinDir | Out-Null }
   if (-not (Test-Path $BinDir)) { Die "could not create bin dir: $BinDir (set FAK_DOGFOOD_BINDIR)" }
 
@@ -516,80 +534,31 @@ if ($Mode -eq 'install') {
   Log "building fak -> $Bin"
   Build-FakBinary -out $Bin
   Copy-Item -Force $Bin (Join-Path $BinDir 'fak.exe')
-
-  # Write the fak-dogfood.cmd shim -> this script, by absolute path.
-  $self = $MyInvocation.MyCommand.Path
-  $shim = Join-Path $BinDir 'fak-dogfood.cmd'
-  $shimBody = "@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($shim, $shimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the fak-qwen36-claude.cmd preset shim: same script, with
-  # FAK_DOGFOOD_PRESET=qwen36-local pinned for the child only.
-  $qwenShim = Join-Path $BinDir 'fak-qwen36-claude.cmd'
-  $qwenShimBody = "@set FAK_DOGFOOD_PRESET=qwen36-local`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($qwenShim, $qwenShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the claude-glm-gcp.cmd preset shim: same script, with FAK_DOGFOOD_PRESET=glm-gcp
-  # pinned for the child only (a .cmd's `set` is local to its own cmd.exe instance).
-  $glmShim = Join-Path $BinDir 'claude-glm-gcp.cmd'
-  $glmShimBody = "@set FAK_DOGFOOD_PRESET=glm-gcp`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($glmShim, $glmShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the claude-gemini-gcp.cmd preset shim: same script, with FAK_DOGFOOD_PRESET=gemini-gcp
-  # pinned for the child only. Fronts GCP Vertex Gemini 3.5 Flash via fak's openai backend; set
-  # FAK_GEMINI_GCP_PROJECT (or GCP_PROJECT) + FAK_GEMINI_GCP_KEY (a GCP access token) first.
-  $geminiShim = Join-Path $BinDir 'claude-gemini-gcp.cmd'
-  $geminiShimBody = "@set FAK_DOGFOOD_PRESET=gemini-gcp`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($geminiShim, $geminiShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the claude-groq-qwen36.cmd preset shim: same script, with FAK_DOGFOOD_PRESET=groq-qwen36
-  # pinned for the child only. Fronts Groq qwen/qwen3.6-27b via fak's openai backend; set
-  # FAK_GROQ_API_KEY first.
-  $groqShim = Join-Path $BinDir 'claude-groq-qwen36.cmd'
-  $groqShimBody = "@set FAK_DOGFOOD_PRESET=groq-qwen36`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($groqShim, $groqShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the claude-groq-compound.cmd preset shim: same script, with
-  # FAK_DOGFOOD_PRESET=groq-compound pinned for the child only. Fronts Groq
-  # groq/compound as a lower-quality request-limited tier via fak's openai backend.
-  $groqCompoundShim = Join-Path $BinDir 'claude-groq-compound.cmd'
-  $groqCompoundShimBody = "@set FAK_DOGFOOD_PRESET=groq-compound`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($groqCompoundShim, $groqCompoundShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the claude-nim-kimi.cmd preset shim: same script, with FAK_DOGFOOD_PRESET=nim-kimi
-  # pinned for the child only. Fronts NVIDIA NIM moonshotai/kimi-k2.6 via fak's openai
-  # backend; set NVIDIA_API_KEY first.
-  $nimKimiShim = Join-Path $BinDir 'claude-nim-kimi.cmd'
-  $nimKimiShimBody = "@set FAK_DOGFOOD_PRESET=nim-kimi`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($nimKimiShim, $nimKimiShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write the claude-nim-deepseek.cmd preset shim: same script, with
-  # FAK_DOGFOOD_PRESET=nim-deepseek-v4-pro pinned for the child only. Fronts NVIDIA
-  # NIM deepseek-ai/deepseek-v4-pro via fak's openai backend; set NVIDIA_API_KEY first.
-  $nimDeepSeekShim = Join-Path $BinDir 'claude-nim-deepseek.cmd'
-  $nimDeepSeekShimBody = "@set FAK_DOGFOOD_PRESET=nim-deepseek-v4-pro`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($nimDeepSeekShim, $nimDeepSeekShimBody, (New-Object System.Text.ASCIIEncoding))
-
-  # Write claude-mac.cmd: same script, preset=mac (fak → Mac fak serve → Qwen3.6-27B).
-  # Uses FAK_MAC_GATEWAY (required; set to http://<tailscale-ip>:8080), FAK_GATEWAY_KEY, and FAK_MAC_MODEL
-  # to route Claude Code through the always-on Mac node without a subscription.
-  $macShim = Join-Path $BinDir 'claude-mac.cmd'
-  $macShimBody = "@set FAK_DOGFOOD_PRESET=mac`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
-  [System.IO.File]::WriteAllText($macShim, $macShimBody, (New-Object System.Text.ASCIIEncoding))
-
   Log "installed: $(Join-Path $BinDir 'fak.exe')  (copied; re-run --install to refresh)"
-  Log "installed: $shim  -> $self"
-  Log "installed: $qwenShim  -> $self (preset qwen36-local)"
-  Log "installed: $glmShim  -> $self (preset glm-gcp)"
-  Log "installed: $geminiShim  -> $self (preset gemini-gcp: fak -> GCP Vertex Gemini 3.5 Flash)"
-  Log "installed: $groqShim  -> $self (preset groq-qwen36: fak -> Groq qwen/qwen3.6-27b)"
-  Log "installed: $groqCompoundShim  -> $self (preset groq-compound: fak -> Groq groq/compound)"
-  Log "installed: $nimKimiShim  -> $self (preset nim-kimi: fak -> NVIDIA NIM moonshotai/kimi-k2.6)"
-  Log "installed: $nimDeepSeekShim  -> $self (preset nim-deepseek-v4-pro: fak -> NVIDIA NIM deepseek-ai/deepseek-v4-pro)"
-  Log "installed: $macShim  -> $self (preset mac: fak -> Mac fak serve -> Qwen3.6-27B)"
+
+  # Write a .cmd shim per graduated launcher (a preset shim pins FAK_DOGFOOD_PRESET for
+  # its own cmd.exe instance only; the generic fak-dogfood shim pins nothing). Opt-in
+  # launchers are reported with how to run and how to force-install them.
+  foreach ($m in Get-GraduationManifest) {
+    $shimPath = Join-Path $BinDir ($m.Launcher + '.cmd')
+    if ($installSet -contains $m.Launcher) {
+      if ($m.Preset) {
+        $shimBody = "@set FAK_DOGFOOD_PRESET=$($m.Preset)`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
+      } else {
+        $shimBody = "@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
+      }
+      [System.IO.File]::WriteAllText($shimPath, $shimBody, (New-Object System.Text.ASCIIEncoding))
+      $presetLabel = if ($m.Preset) { $m.Preset } else { '-' }
+      Log "installed: $shimPath  -> $self (preset $presetLabel)"
+    } else {
+      $keyhint = if ($m.KeyEnv -eq '-') { '' } else { "$($m.KeyEnv)=... " }
+      Log ("opt-in (not installed): {0} - try: `$env:FAK_DOGFOOD_PRESET='{1}'; {2}{3} --probe 'say pong'  [{4}]; force-install with --install-all" -f $m.Launcher, $m.Preset, $keyhint, $self, $m.Caveat)
+    }
+  }
+
   $onPath = (($env:PATH -split ';') | ForEach-Object { $_.TrimEnd('\') }) -contains $BinDir.TrimEnd('\')
   if ($onPath) {
-    Log "ready - run ``fak-dogfood --smoke``, ``fak-qwen36-claude --probe``, ``claude-groq-qwen36 --probe``, ``claude-groq-compound --probe``, ``claude-nim-kimi --probe``, ``claude-nim-deepseek --probe``, or ``fak serve --help`` from anywhere"
+    Log "ready - run ``fak-dogfood --smoke``, ``fak-qwen36-claude --probe``, or ``fak serve --help`` from anywhere (see --graduation for the opt-in launchers)"
   } else {
     Log "add to PATH (current user), then reopen your shell:"
     Log "  setx PATH `"`$env:PATH;$BinDir`""
