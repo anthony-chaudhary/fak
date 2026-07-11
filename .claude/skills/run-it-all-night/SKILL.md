@@ -1,6 +1,6 @@
 ---
 name: run-it-all-night
-description: The agent door to unattended data collection — answer "what is the single most important datum I can collect on THIS box right now?" and then collect it on a loop. Wraps `fak nightrun`, which probes the local box (gpu/weights/datasets/creds), ranks the feasible-here collection tasks (the benchmark grid PLUS the curated open-witness backlog) by novelty × value × staleness, and closes the loop into a durable ledger (docs/nightrun/collected.jsonl). Use when the operator says "run it all night", "collect the next most important data", "what benchmark should I run on this machine", "start an overnight data-collection run", or when an agent on a fresh box (a Mac verify node, an A100, an H200) needs to know — without reading the whole repo — what data is worth gathering here.
+description: The agent door to unattended data collection — answer "what is the single most important datum I can collect on THIS box right now?" and then collect it on a loop. Wraps `fak nightrun`, which probes the local box (gpu/weights/datasets/creds), ranks the feasible-here collection tasks (the benchmark grid PLUS the curated open-witness backlog) by novelty × value × staleness, and closes the loop into a durable runtime ledger (.fak/nightrun/collected.jsonl, gitignored so a collection tick never dirties the shared tree). Use when the operator says "run it all night", "collect the next most important data", "what benchmark should I run on this machine", "start an overnight data-collection run", or when an agent on a fresh box (a Mac verify node, an A100, an H200) needs to know — without reading the whole repo — what data is worth gathering here.
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path discipline + the honesty boundary are load-bearing and not portable per-skill
@@ -71,16 +71,22 @@ point `doc` at the canonical issue/methodology.
 
 ## Committing (shared trunk)
 
-If this pass changes tracked files (the overlay, the witness registry, the
-ledger), commit **only those paths** on the trunk:
+The live collection ledger is **not** a tracked file. As of the 2026-07-11
+migration (#3209), `fak nightrun run --apply` appends to the gitignored runtime
+root `.fak/nightrun/collected.jsonl`, so a collection tick never dirties the
+shared working tree or forces a telemetry-only commit. Don't hand-edit it.
+
+If this pass changes *tracked* files — the operator overlay or the witness
+registry — commit **only those paths** on the trunk:
 
 ```
 git commit -s -- experiments/nightrun/backlog.json   # or the specific paths you changed
 ```
 
 Use a Conventional-Commits subject ending in a `(fak nightrun)` trailer. Never
-`git add -A` (shared multi-session tree). The `collected.jsonl` ledger is durable
-trunk evidence — append to it via `fak nightrun run --apply`, don't hand-edit.
+`git add -A` (shared multi-session tree). To publish collected evidence, copy a
+reviewed, scrubbed snapshot into `docs/nightrun/` and commit that explicit
+publication by path — there is no background auto-committer.
 
 ## When NOT to use
 
