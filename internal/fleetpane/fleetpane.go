@@ -1360,6 +1360,9 @@ func FleetView(ctx context.Context, cfg Config, includeLiveLocal bool, refreshLi
 		totals["actions"] += intValueDefault(machine["actions_count"], 0)
 		totals["auth_blocked"] += intValueDefault(machine["auth_blocked"], 0)
 		totals["auto_resume"] += intValueDefault(machine["auto_resume"], 0)
+		totals["seat_capacity"] += intValueDefault(machine["seat_capacity"], 0)
+		totals["throttled_seats"] += intValueDefault(machine["throttled_seats"], 0)
+		totals["healthy_seats"] += intValueDefault(machine["healthy_seats"], 0)
 		totals["surface"] += intValueDefault(machine["surface"], 0)
 		if accounts := mapValue(machine["accounts"]); len(accounts) > 0 {
 			totals["blocked_accounts"] += intValueDefault(accounts["blocked_count"], len(sliceAny(accounts["blocked"])))

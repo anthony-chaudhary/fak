@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/claimcheck"
+	"github.com/anthony-chaudhary/fak/internal/fleetbottleneck"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
@@ -128,6 +129,9 @@ func guardInfoFleetPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) [
 	rows := []string{" fleet    " + guardInfoFleetHeadText(f)}
 	if totals := guardInfoFleetTotalsText(f); totals != "" {
 		rows = append(rows, "          "+totals)
+	}
+	if ranked := fleetbottleneck.Rank(fleetBottleneckSnapshot(f)); len(ranked) > 0 {
+		rows = append(rows, fmt.Sprintf("          bottleneck: %s (%s)", ranked[0].Class, ranked[0].Evidence))
 	}
 	rows = append(rows, guardInfoFleetMachineRows(f.Rows)...)
 	return rows
@@ -267,4 +271,11 @@ func guardFleetStateGlyph(state string) string {
 	default:
 		return guardFleetGlyphUnknown
 	}
+}
+
+func fleetBottleneckSnapshot(f *gateway.SessionFleet) fleetbottleneck.Snapshot {
+	if f == nil {
+		return fleetbottleneck.Snapshot{}
+	}
+	return fleetbottleneck.Snapshot{Machines: f.Machines, Sessions: f.Sessions, SeatCapacity: f.SeatCapacity, ThrottledSeats: f.ThrottledSeats, HealthySeats: f.HealthySeats, ResumeBacklog: f.ResumeBacklog, HostLoad: f.HostLoad, AuthBlocked: f.AuthBlocked}
 }

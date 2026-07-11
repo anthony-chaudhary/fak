@@ -257,6 +257,10 @@ func guardFleetFromDoc(doc fleetpane.FleetDoc) (gateway.SessionFleet, bool) {
 		Action:            doc.States["ACTION"],
 		Sessions:          doc.Totals["sessions"],
 		AuthBlocked:       doc.Totals["auth_blocked"],
+		ThrottledSeats:    doc.Totals["throttled_seats"],
+		HealthySeats:      doc.Totals["healthy_seats"],
+		SeatCapacity:      doc.Totals["seat_capacity"],
+		ResumeBacklog:     doc.Totals["auto_resume"],
 		VersionMismatches: doc.Totals["version_mismatches"],
 	}
 	rows := make([]gateway.SessionFleetMachine, 0, min(len(doc.Machines), guardFleetMachineRows))

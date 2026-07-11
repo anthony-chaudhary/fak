@@ -36,9 +36,14 @@ type SessionFleet struct {
 	// Sessions is the total live sessions summed across the fleet; AuthBlocked and
 	// VersionMismatches are the rolled-up trouble counts (seats that cannot serve, boxes
 	// running a skewed fak version). Each is omitted when zero so a clean fleet is quiet.
-	Sessions          int `json:"sessions,omitempty"`
-	AuthBlocked       int `json:"auth_blocked,omitempty"`
-	VersionMismatches int `json:"version_mismatches,omitempty"`
+	Sessions          int     `json:"sessions,omitempty"`
+	AuthBlocked       int     `json:"auth_blocked,omitempty"`
+	ThrottledSeats    int     `json:"throttled_seats,omitempty"`
+	HealthySeats      int     `json:"healthy_seats,omitempty"`
+	SeatCapacity      int     `json:"seat_capacity,omitempty"`
+	ResumeBacklog     int     `json:"resume_backlog,omitempty"`
+	HostLoad          float64 `json:"host_load,omitempty"`
+	VersionMismatches int     `json:"version_mismatches,omitempty"`
 	// Rows is a bounded, most-relevant sample of per-machine records (the host caps it so
 	// a large fleet still folds into the aggregate totals rather than a wall of rows).
 	Rows []SessionFleetMachine `json:"rows,omitempty"`

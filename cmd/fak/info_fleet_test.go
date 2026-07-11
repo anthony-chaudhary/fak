@@ -176,3 +176,13 @@ func TestFleetPanelRendersObservedGlyphs(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardInfoFleetShowsBottleneckHeadline(t *testing.T) {
+	f := fleetFixture()
+	f.AuthBlocked = 3
+	ctx := guardInfoPanelCtx{v: guardInfoVars{Fleet: f}, width: 120}
+	got := strings.Join(guardInfoFleetPanelRows(ctx, guardPanelFull), "\n")
+	if !strings.Contains(got, "bottleneck: auth (3 auth-blocked)") {
+		t.Fatalf("rows=%s", got)
+	}
+}
