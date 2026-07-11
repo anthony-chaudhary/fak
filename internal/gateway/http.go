@@ -868,6 +868,22 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 			}
 		}
 	}
+	// Name WHICH account/seat hit an account-scoped block (a 403 wall, a 429 ceiling, a
+	// usage cap) so the operator/wrapped agent reading the message that STOPPED the turn
+	// knows which seat to switch off or wait on — the roster on /debug/vars shows the
+	// active seat, but the blocking message never did, so a multi-account session could not
+	// tell which of its seats got walled. Gated on the SAME trusted-local path as the 400
+	// fold (fak guard, loopback-bound): the seat name is display metadata, but on an
+	// externally-exposed serve the caller may be untrusted, so it stays off there — and it
+	// is empty anyway on a plain serve, which wires no endpoints provider. Purely additive
+	// (the generic message is preserved as a prefix), and only for the account-scoped codes,
+	// so a request-shaped error (bad model, too large) is never dressed up as an account
+	// problem. Reads the live pull provider, so a mid-run failover names the CURRENT seat.
+	if s != nil && s.exposeUpstreamErrorDetail && isAccountBlockCode(code) {
+		if seat := s.activeAccountLabel(); seat != "" {
+			msg = msg + " " + seat
+		}
+	}
 	return status, code, msg
 }
 

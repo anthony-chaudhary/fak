@@ -97,3 +97,59 @@ func isUsageCapReason(reason string) bool {
 		return false
 	}
 }
+
+// isAccountBlockCode reports whether an upstreamErrorStatus code names a block that is
+// SCOPED TO THE ACTIVE ACCOUNT/SEAT — a rate-limit ceiling, a usage/overage cap, or a
+// credential/permission/org wall — as opposed to a request-shaped error (bad model, too
+// large, malformed) that no seat switch could fix. Only these are worth naming the active
+// seat on: they are exactly the conditions where the operator's next move is "which of my
+// seats hit this, and should I switch off it or wait for its reset." The roster (fak info)
+// already shows the active seat, but the message that actually STOPS a turn never did — so
+// when one of these fires, appendActiveAccount folds the live seat name in (trusted path
+// only). The strings are the stable codes minted by upstreamErrorStatus / upstream4xxStatus.
+func isAccountBlockCode(code string) bool {
+	switch code {
+	case "upstream_retry_ceiling", "upstream_usage_cap", "upstream_unauthorized",
+		"upstream_forbidden", "upstream_org_oauth_disabled", "upstream_rate_limited":
+		return true
+	default:
+		return false
+	}
+}
+
+// activeAccountLabel renders the live "which seat" suffix for an account-scoped upstream
+// block: the seat currently serving turns (with its advisory email), plus how many sibling
+// seats a failover already walled this session — so an operator/wrapped agent reading a 403
+// or a 429 ceiling knows WHICH of several accounts hit the wall without cross-referencing
+// the /debug/vars roster by hand. It reads the SAME live pull provider /debug/vars uses
+// (s.sessionEndpoints), so a mid-run failover onto a sibling seat is reflected, and returns
+// "" when no roster is wired or no seat is active (a plain fak serve, or a single-key
+// session) — leaving the message untouched. Display metadata only (seat name + email),
+// never a credential, so it honors the payload-free contract the roster already lives under.
+func (s *Server) activeAccountLabel() string {
+	ep, ok := s.sessionEndpoints()
+	if !ok {
+		return ""
+	}
+	var active *SessionAccount
+	walled := 0
+	for i := range ep.Accounts {
+		if ep.Accounts[i].Active {
+			active = &ep.Accounts[i]
+		}
+		if ep.Accounts[i].Walled {
+			walled++
+		}
+	}
+	if active == nil {
+		return ""
+	}
+	label := "Active account: " + active.Name
+	if active.Email != "" {
+		label += " <" + active.Email + ">"
+	}
+	if walled > 0 {
+		label += fmt.Sprintf(" (%d sibling seat(s) already walled this session)", walled)
+	}
+	return label + "."
+}

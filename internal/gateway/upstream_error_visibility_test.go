@@ -460,6 +460,80 @@ func TestRotationEvidenceSnapshotExposesOnlyCredentialScopedKinds(t *testing.T) 
 	}
 }
 
+// TestUpstreamBlockNamesActiveAccountOnTrustedPath proves the "print the account" fix: an
+// account-scoped block (the pasted 429 retry-ceiling, and a 403 wall) folds the LIVE active
+// seat name — plus how many siblings were already walled this session — into the message
+// that actually stops the turn, on the trusted local path (fak guard). The roster on
+// /debug/vars already showed the active seat; the blocking message never did, so a
+// multi-account session could not tell which seat hit the wall. The fold is purely additive
+// (the generic recovery wording is preserved) and only rides the account-scoped codes.
+func TestUpstreamBlockNamesActiveAccountOnTrustedPath(t *testing.T) {
+	s := &Server{exposeUpstreamErrorDetail: true}
+	s.SetSessionEndpointsProvider(func() SessionEndpoints {
+		return SessionEndpoints{Accounts: []SessionAccount{
+			{Name: "work", Email: "me@work.io", Walled: true},
+			{Name: "personal", Email: "me@home.io", Active: true},
+		}}
+	})
+
+	// The pasted 429 ceiling bail must name the active seat AND keep its recovery steer.
+	cause := &agent.UpstreamStatusError{Status: http.StatusTooManyRequests, RetryAfter: "4200"}
+	rc := &agent.RetryCeilingError{Cause: cause, Wait: 70 * time.Minute, Ceiling: 90 * time.Second}
+	_, code, msg := s.plannerErrorStatus(rc)
+	if code != "upstream_retry_ceiling" {
+		t.Fatalf("code = %q, want upstream_retry_ceiling", code)
+	}
+	if !strings.Contains(msg, "Active account: personal") {
+		t.Fatalf("ceiling message must name the active seat: %q", msg)
+	}
+	if !strings.Contains(msg, "me@home.io") {
+		t.Fatalf("ceiling message should carry the active seat's advisory email: %q", msg)
+	}
+	if !strings.Contains(msg, "1 sibling seat(s) already walled") {
+		t.Fatalf("ceiling message should note the already-walled sibling count: %q", msg)
+	}
+	// The generic recovery wording (the whole point of the ceiling arm) must survive the fold.
+	if !strings.Contains(strings.ToLower(msg), "already retried") || !strings.Contains(strings.ToLower(msg), "park") {
+		t.Fatalf("account fold must be purely additive — the recovery steer is lost: %q", msg)
+	}
+
+	// A genuine 403 wall must ALSO name the seat, so "blocks badly 403" says which account.
+	_, code403, msg403 := s.plannerErrorStatus(&agent.UpstreamStatusError{Status: http.StatusForbidden})
+	if code403 != "upstream_forbidden" {
+		t.Fatalf("code = %q, want upstream_forbidden", code403)
+	}
+	if !strings.Contains(msg403, "Active account: personal") {
+		t.Fatalf("403 wall must name the active seat: %q", msg403)
+	}
+
+	// A request-shaped error (unknown model 404) is NOT account-scoped: it must stay generic
+	// — naming a seat there would wrongly imply switching accounts could fix it.
+	_, _, msg404 := s.plannerErrorStatus(&agent.UpstreamStatusError{Status: http.StatusNotFound})
+	if strings.Contains(msg404, "Active account") {
+		t.Fatalf("a 404 model error must not be dressed up as an account block: %q", msg404)
+	}
+}
+
+// TestUpstreamBlockOmitsAccountOffTrustedPath proves the no-leak boundary: on the
+// externally-exposed serve path (exposeUpstreamErrorDetail off, the default) the account
+// name never rides out even with an endpoints provider wired — the 403 envelope is the
+// generic string byte-for-byte, identical to the pure classifier.
+func TestUpstreamBlockOmitsAccountOffTrustedPath(t *testing.T) {
+	s := &Server{} // exposeUpstreamErrorDetail == false: the external serve default.
+	s.SetSessionEndpointsProvider(func() SessionEndpoints {
+		return SessionEndpoints{Accounts: []SessionAccount{{Name: "personal", Active: true}}}
+	})
+	wantStatus, wantCode, wantMsg := upstreamErrorStatus(&agent.UpstreamStatusError{Status: http.StatusForbidden})
+	status, code, msg := s.plannerErrorStatus(&agent.UpstreamStatusError{Status: http.StatusForbidden})
+	if status != wantStatus || code != wantCode || msg != wantMsg {
+		t.Fatalf("off-path changed the 403 envelope: (%d,%q,%q), want the generic (%d,%q,%q)",
+			status, code, msg, wantStatus, wantCode, wantMsg)
+	}
+	if strings.Contains(msg, "personal") {
+		t.Fatalf("off the trusted path must NOT leak the account name: %q", msg)
+	}
+}
+
 func TestTrusted400NotifiesScrubbedBoundedOperatorDetail(t *testing.T) {
 	var notified string
 	s := &Server{exposeUpstreamErrorDetail: true, upstreamBadRequestNotify: func(detail string) { notified = detail }}
