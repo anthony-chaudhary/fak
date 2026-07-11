@@ -184,9 +184,17 @@ func (img *Image) Rehydrate(ctx context.Context, opt RehydrateOptions) (*Resumed
 		}
 		out.Migrated = true
 		if opt.WriteBack {
-			// Re-stamp UpdatedUnix and persist the new Meta; Parts are unchanged (no
-			// content moved), so the integrity index still verifies.
+			// Re-stamp UpdatedUnix. A re-home crosses hosts/accounts, so re-write the drive
+			// projection through the leak-gate (#4128) — rewriteDriveForReHome scrubs any origin
+			// identity and re-hashes the parts so the integrity index still verifies the freshly
+			// written bytes. The recall content parts are unchanged (no content moved); only
+			// drive.json is re-written, byte-identically for a same-State re-home.
 			out.Meta.UpdatedUnix = mig.WhenUnix
+			parts, err := rewriteDriveForReHome(img.Dir, out.Drive, out.Meta.Parts)
+			if err != nil {
+				return nil, err
+			}
+			out.Meta.Parts = parts
 			img.Meta = out.Meta
 			if err := writeImageJSON(img.Dir, out.Meta); err != nil {
 				return nil, err

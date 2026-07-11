@@ -1,6 +1,8 @@
 package sessionimage
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,4 +153,114 @@ func TestDriveProjection(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestDriveProjectionLeakGate is the #4128 witness: the drive projection is portable ACROSS
+// hosts and accounts, so it must carry NO origin identity. A projection built from a State
+// whose CacheAffinity is populated (an account-scoped cache route) and whose ParentTrace is
+// set, dumped into an image whose Meta.Host/Account are set, produces a drive.json that holds
+// the STRUCTURAL axes (budget/priority/pace/pin/generation) but NONE of the host, account,
+// affinity, or trace tokens — and a re-home Migration to a new host does not reintroduce them.
+// The host/account provenance stays on image.json Meta (the audited record), never the drive.
+func TestDriveProjectionLeakGate(t *testing.T) {
+	const (
+		host      = "boxA"
+		toHost    = "boxB"
+		account   = "acct-7"
+		affinity  = "acct-7-route"
+		fromTrace = "trace-from-acct-7"
+		toTrace   = "trace-to-acct-7"
+		parentTr  = "parent-trace-acct-7"
+	)
+	// The origin tokens a re-home must never carry across the offload boundary. "acct-7" is
+	// listed on its own so a substring leak (affinity/fromTrace all contain it) is caught even
+	// if a fuller token somehow survived.
+	forbidden := []string{host, toHost, account, affinity, fromTrace, toTrace, parentTr}
+
+	// A spent-down drive whose SOURCE State is packed with the account/host-derived lineage the
+	// projection must drop: an account-scoped cache-affinity decision and a parent trace id.
+	st := driveState("sess-leak")
+	st.ParentTrace = parentTr
+	st.CacheAffinity = session.CacheAffinityDecision{
+		Action:      session.CacheAffinityPreserve,
+		AffinityKey: affinity,
+		FromTraceID: fromTrace,
+		ToTraceID:   toTrace,
+	}
+
+	dir := t.TempDir()
+	if _, err := DumpDir(dir, Input{
+		SessionID: "sess-leak",
+		Drive:     st,
+		Host:      host,
+		Account:   account,
+		Now:       1,
+	}); err != nil {
+		t.Fatalf("DumpDir: %v", err)
+	}
+
+	// assertGated re-reads drive.json and asserts it is origin-free with the structural axes
+	// the projection is meant to carry still intact — the same check before and after a re-home.
+	assertGated := func(when string) {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, DriveFile))
+		if err != nil {
+			t.Fatalf("read %s (%s): %v", DriveFile, when, err)
+		}
+		body := string(b)
+		for _, tok := range forbidden {
+			if strings.Contains(body, tok) {
+				t.Errorf("%s leaked origin token %q (%s):\n%s", DriveFile, tok, when, body)
+			}
+		}
+		var dp DriveProjection
+		if err := json.Unmarshal(b, &dp); err != nil {
+			t.Fatalf("decode %s (%s): %v", DriveFile, when, err)
+		}
+		if dp.Budget.TokensLeft != st.Budget.TokensLeft {
+			t.Errorf("tokens_left dropped by the scrub (%s): got %d want %d", when, dp.Budget.TokensLeft, st.Budget.TokensLeft)
+		}
+		if dp.Priority != st.Priority {
+			t.Errorf("priority dropped by the scrub (%s): got %d want %d", when, dp.Priority, st.Priority)
+		}
+		if dp.Pace != st.Pace {
+			t.Errorf("pace dropped by the scrub (%s): got %+v want %+v", when, dp.Pace, st.Pace)
+		}
+		if dp.ObjectivePin.PinID != st.ObjectivePin.PinID || dp.ObjectivePin.Digest != st.ObjectivePin.Digest {
+			t.Errorf("objective pin dropped by the scrub (%s): got %+v", when, dp.ObjectivePin)
+		}
+		if dp.Generation != st.Generation {
+			t.Errorf("generation dropped by the scrub (%s): got %d want %d", when, dp.Generation, st.Generation)
+		}
+	}
+
+	// At dump: the leak-gate held, the structural axes survived.
+	assertGated("after DumpDir")
+
+	// A re-home to a new host re-writes the projection through the leak-gate. It stays
+	// origin-free, the audited Migration is recorded on Meta, and the integrity index still
+	// verifies the freshly written drive.json.
+	img, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	res, err := img.Rehydrate(context.Background(), RehydrateOptions{ToHost: toHost, WriteBack: true, Now: 2})
+	if err != nil {
+		t.Fatalf("Rehydrate re-home: %v", err)
+	}
+	if !res.Migrated {
+		t.Fatalf("re-home to a new host recorded no migration")
+	}
+	assertGated("after re-home Migration")
+
+	// The re-write did not break the sha256 integrity index (LoadDir fails closed otherwise).
+	reloaded, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("image integrity broken after re-home re-write: %v", err)
+	}
+	// The destination host IS recorded on image.json Meta (the audited provenance record) —
+	// proving the token exists in the image, just never in the drive projection.
+	if reloaded.Meta.Host != toHost {
+		t.Fatalf("re-home did not record the destination host on Meta: got %q want %q", reloaded.Meta.Host, toHost)
+	}
 }

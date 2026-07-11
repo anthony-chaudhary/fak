@@ -103,16 +103,67 @@ func projectDrive(st session.State) DriveProjection {
 	}
 }
 
+// scrubForReHome returns the projection guaranteed origin-free — the enforced leak-gate a
+// drive.json passes through before it crosses the model-agnostic offload boundary (issue
+// #4128). The image is portable ACROSS hosts, accounts, and residencies by design (the
+// sessionimage.go offload contract), and a re-home appends a Migration with FromHost/ToHost
+// — so any origin identity riding the projection would leak into the destination image. This
+// is an ALLOWLIST rebuild, not a blocklist strip: it reconstructs the projection from ONLY
+// the origin-safe structural axes (Budget remaining, Priority, Pace, ObjectivePin identity,
+// Generation), so a field added to DriveProjection later is dropped here unless its author
+// consciously threads it through this allowlist — origin-freedom cannot regress by accident.
+// Nothing host/account/trace-derived is reachable: the projection never carries
+// CacheAffinity's AffinityKey/FromTraceID/ToTraceID or ParentTrace (session.State's
+// account-scoped lineage), and the Host/Account/Residency provenance lives on image.json Meta,
+// never here. Generation — the one structural lineage counter — rides through, so a resumed
+// governor still knows how many re-continuations preceded it. writeDriveProjection applies
+// this to EVERY drive.json written (the dump AND the re-home re-write), so no write can carry
+// an origin token regardless of what the source session.State held.
+func (dp DriveProjection) scrubForReHome() DriveProjection {
+	return DriveProjection{
+		Version:      dp.Version,
+		Budget:       dp.Budget,
+		Priority:     dp.Priority,
+		Pace:         dp.Pace,
+		ObjectivePin: DrivePin{PinID: dp.ObjectivePin.PinID, Digest: dp.ObjectivePin.Digest},
+		Generation:   dp.Generation,
+	}
+}
+
 // writeDriveProjection writes the drive sibling deterministically (MarshalIndent over a
 // fixed-field struct is stable), so the part's digest — and therefore the packed archive —
 // are byte-stable across runs, the same determinism the integrity index and the .faksession
-// archive rely on.
+// archive rely on. Every write passes through scrubForReHome (issue #4128): the drive.json
+// that crosses the offload boundary is the enforced-origin-free projection, whatever the
+// caller passes — the dump path and the re-home re-write are both gated here, in one place.
 func writeDriveProjection(path string, dp DriveProjection) error {
-	b, err := json.MarshalIndent(dp, "", "  ")
+	b, err := json.MarshalIndent(dp.scrubForReHome(), "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, b, 0o644)
+}
+
+// rewriteDriveForReHome re-writes drive.json through the leak-gate for a re-home Migration
+// and returns the re-hashed part index (issue #4128). A re-home crosses hosts/accounts, so
+// the projection is re-derived from the (restored) drive and re-written through
+// writeDriveProjection — which scrubs any origin identity — and the parts are re-hashed so
+// image.json's sha256 integrity index still verifies the freshly written bytes. For a
+// same-State re-home the projection is byte-identical (the enforced chokepoint is what a
+// future migration that DID touch the drive would still have to pass); an image that carries
+// no drive.json is left untouched — a pre-#4126 image grows no new part and the caller's
+// existing Parts ride back unchanged.
+func rewriteDriveForReHome(dir string, drive session.State, parts []Part) ([]Part, error) {
+	if _, err := os.Stat(filepath.Join(dir, DriveFile)); err != nil {
+		if os.IsNotExist(err) {
+			return parts, nil
+		}
+		return nil, err
+	}
+	if err := writeDriveProjection(filepath.Join(dir, DriveFile), projectDrive(drive)); err != nil {
+		return nil, err
+	}
+	return indexParts(dir)
 }
 
 // SeedState re-seeds a governor's drive from the checkpoint projection (issue #4127): it
