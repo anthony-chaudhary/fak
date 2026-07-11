@@ -5,7 +5,7 @@
 > hooks (routing, fallback, prompt-cache cost) and agent-security demand hooks such
 > as MCP tool poisoning, the lethal trifecta, and least-privilege tool access.
 >
-> Updated: 2026-07-08T12:19:27Z
+> Updated: 2026-07-10T00:22:15Z
 
 ## core
 
@@ -56,3 +56,19 @@
 - `工具调用防火墙` (zh-Hans) — Chinese discovery term for the default-deny tool-call boundary; the honest page explains why fak is not merely a firewall. Keywords: 工具调用安全, 能力门控, 默认拒绝.
 - `长上下文代理成本` (zh-Hans) — Chinese term for long-context agent cost and prompt-cache preservation. Keywords: 提示缓存, 长会话, token 成本.
 - `模型路由和回退` (zh-Hans) — Chinese term for model routing and fallback, including frontier-model launch patterns like Fable 5-style refusals. Keywords: 模型路由, Fable 5 回退, 成本感知路由.
+- `KI-Agent-Kernel für Tool-Call-Sicherheit` (de) — German search phrase for an AI agent kernel that governs every tool call with a fail-closed, default-deny capability floor; routes readers to the in-language fak entry point. Keywords: KI-Agent-Kernel, Tool-Call-Sicherheit, default-deny capability floor.
+- `DSGVO-konformes Self-Hosting mit EU-AI-Act-Audit-Log` (de) — German search phrase for GDPR (DSGVO) self-hosted agent serving with a tamper-evident EU AI Act Article 12 tool-call audit log; routes readers to the in-language fak entry point. Keywords: DSGVO Self-Hosting, EU AI Act Artikel 12, manipulationssicheres Audit-Log.
+- `noyau d'agent IA : sécurité des tool calls` (fr) — French search phrase for an AI agent kernel that vets every tool call before it runs under a default-deny capability floor; routes readers to the in-language fak entry point. Keywords: agent IA, sécurité tool call, fak agent kernel.
+- `auto-hébergement RGPD et journal d'audit AI Act` (fr) — French search phrase for RGPD-compliant self-host data residency plus the EU AI Act Article 12 tamper-evident tool-call audit log; routes readers to the in-language fak entry point. Keywords: résidence des données RGPD, journal d'audit AI Act article 12, fak self-host.
+- `এআই এজেন্ট কার্নেল — টুল কল সুরক্ষা` (bn) — Bengali search phrase for an AI agent kernel that vets every tool call behind a default-deny capability floor; routes readers to the in-language fak entry point. Keywords: AI এজেন্ট, tool call সুরক্ষা, fak agent kernel.
+- `টোকেন খরচ কমানো DPDP self-host এজেন্ট গেটওয়ে` (bn) — Bengali search phrase for the cost and DPDP data-residency side of fak: cheaper long sessions via prompt-cache-preserving serving on one self-hosted Apache-2.0 binary; routes readers to the in-language fak entry point. Keywords: token খরচ, DPDP self-host, prompt cache.
+- `एजंट कर्नल — प्रत्येक tool call तपासणारी सुरक्षा` (mr) — Marathi search phrase for an AI agent kernel that checks every tool call before it runs; routes readers to the in-language fak entry point. Keywords: AI एजंट, टूल कॉल सुरक्षा, fak agent kernel.
+- `टोकन खर्च कमी करणारा DPDP self-host एजंट गेटवे` (mr) — Marathi search phrase for the cost and DPDP data-residency side of fak: cheaper long sessions via cache-preserving self-hosted agent serving; routes readers to the in-language fak entry point. Keywords: टोकन बचत, prompt cache, DPDP self-host.
+- `AI ஏஜென்ட் கெர்னல் — tool call பாதுகாப்பு` (ta) — Tamil search phrase for an AI agent kernel that checks every tool call with a default-deny capability floor; routes readers to the in-language fak entry point. Keywords: AI ஏஜென்ட் கெர்னல், tool call பாதுகாப்பு, fak agent kernel.
+- `token செலவு குறைக்கும் DPDP self-host ஏஜென்ட் கேட்வே` (ta) — Tamil search phrase for the token-cost and DPDP data-residency side of fak: cheaper long sessions via cache-preserving self-hosted serving (~4.1x less work); routes readers to the in-language fak entry point. Keywords: token செலவு, DPDP self-host residency, prompt cache.
+- `AI ఏజెంట్ కెర్నల్ – టూల్ కాల్ భద్రత` (te) — Telugu search phrase for an AI agent kernel that vets every tool call with a default-deny capability floor; routes readers to the in-language fak entry point. Keywords: AI ఏజెంట్ కెర్నల్, టూల్ కాల్ భద్రత, fak agent kernel.
+- `టోకెన్ ఖర్చు తగ్గించే self-host ఏజెంట్ గేట్‌వే` (te) — Telugu search phrase for the token-cost and DPDP self-host residency side of fak, with cheaper long sessions through cache-preserving serving; routes readers to the in-language fak entry point. Keywords: టోకెన్ ఖర్చు, prompt cache, DPDP self-host.
+- `kernel de seguridad para agentes de IA que valida cada tool call` (es) — Spanish search phrase for an AI-agent kernel that governs every tool call at a default-deny capability floor; routes readers to the in-language fak entry point. Keywords: kernel de agentes IA, seguridad de tool call, capability floor default-deny.
+- `self-host con prompt cache para sesiones largas más baratas y residencia de datos RGPD` (es) — Spanish search phrase for the cost and data-residency lever of self-hosting an agent kernel; routes readers to the in-language fak entry point. Keywords: self-host prompt cache, sesiones largas más baratas, residencia de datos RGPD.
+- `AI エージェントの tool call を実行前に審査するカーネル` (ja) — Japanese search phrase for an AI-agent kernel that vets every tool call before execution with a default-deny capability floor; routes readers to the in-language fak entry point. Keywords: AI エージェント セキュリティ, tool call 審査, default-deny capability floor.
+- `エージェントの長いセッションを安くする self-host データレジデンシー` (ja) — Japanese search phrase for cutting long agent-session cost via cache-preserving self-hosted serving that keeps data on your own infrastructure; routes readers to the in-language fak entry point. Keywords: prompt cache コスト削減, self-host データレジデンシー, 個人情報保護法 APPI.
