@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -84,6 +86,82 @@ func TestCodexLoopHookBlockWritesExactlyOneAuditWitness(t *testing.T) {
 	}
 	if witness.Event != "codex_continuation_guard_block" || witness.SessionID != sessionID || witness.ModelProvider != "openai" || witness.Reason != "codex_session_bypassed_fak_guard" {
 		t.Fatalf("unexpected audit witness: %+v", witness)
+	}
+}
+
+func TestCodexLoopHookDeterminismByteIdentical(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
+	home, sessionID := writeCodexHookSession(t, "openai")
+	payload := `{"session_id":"` + sessionID + `","turn_id":"deterministic"}`
+	var outputs [2][]byte
+	for i := range outputs {
+		var stdout, stderr bytes.Buffer
+		if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+			t.Fatalf("run %d exit=%d stderr=%s", i, code, stderr.String())
+		}
+		outputs[i] = append([]byte(nil), stdout.Bytes()...)
+	}
+	if !bytes.Equal(outputs[0], outputs[1]) {
+		t.Fatalf("block envelope changed across identical runs:\n1=%s\n2=%s", outputs[0], outputs[1])
+	}
+}
+
+func TestCodexLoopHookConcurrentAppendNeverAllowsDirectProvider(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
+	home, sessionID := writeCodexHookSession(t, "openai")
+	path, err := resolveCodexLoopSessionPath(home, sessionID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	writerDone := make(chan error, 1)
+	go func() {
+		fh, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			writerDone <- err
+			return
+		}
+		defer fh.Close()
+		line := []byte(`{"timestamp":"2026-07-11T23:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1}}}}` + "\n")
+		for {
+			select {
+			case <-stop:
+				writerDone <- nil
+				return
+			default:
+			}
+			if _, err := fh.Write(line); err != nil {
+				writerDone <- err
+				return
+			}
+		}
+	}()
+	payload := `{"session_id":"` + sessionID + `"}`
+	const readers = 24
+	var wg sync.WaitGroup
+	errs := make(chan string, readers)
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var stdout, stderr bytes.Buffer
+			code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home})
+			var block codexLoopHookBlock
+			if code != 0 || json.Unmarshal(stdout.Bytes(), &block) != nil || block.Decision != "block" {
+				errs <- fmt.Sprintf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	if err := <-writerDone; err != nil {
+		t.Fatal(err)
+	}
+	close(errs)
+	for got := range errs {
+		t.Error(got)
 	}
 }
 
