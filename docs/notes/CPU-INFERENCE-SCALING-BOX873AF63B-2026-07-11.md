@@ -2,9 +2,11 @@
 title: CPU inference scaling on box-873af63b — model-size, core-count, context-length, decode-depth
 description: >
   Overnight fak-native pure-Go CPU forward characterization on a GPU-less 32-core / 253 GiB box.
-  Four scaling axes measured with modelbench: decode/prefill tok/s vs model size (1.5B→27B),
-  vs core count (2→32 workers), vs context length (256→2048), and decode stability vs KV depth.
-  Plus one witnessed bug: gemma4 Q4_K resident forward panics. All numbers OBSERVED from artifacts.
+  Five scaling axes measured with modelbench: decode/prefill tok/s vs model size (1.5B→27B),
+  vs core count (2→32 workers), vs context length (256→2048), decode stability vs KV depth, and
+  the decode sweet-spot vs model size. Plus one witnessed bug: gemma4 Q4_K resident forward panics,
+  and one methodology finding: sequential multi-model benchmarking contends and under-measures.
+  All numbers OBSERVED from single-experiment artifacts.
 date: 2026-07-11
 ---
 
@@ -17,30 +19,53 @@ date: 2026-07-11
 (`decode.tok_per_sec`, `prefill[].tok_per_sec`). A model that did not decode has no number.
 
 ## TL;DR
-- **Decode is memory-bandwidth-bound, not compute-bound.** Across model size it falls
-  8.05 → 6.31 → 3.64 → 0.82 tok/s for 1.5B → 3B → 7B → 27B. Across core count on the 7B it
-  moves only 2.63 → 3.64 tok/s from 2 → 24 workers (12× the cores, 1.4× the throughput).
-  Reproducibility corroborates it: 27B decodes 0.82 tok/s @24c vs 0.823 @32c — core-independent.
+- **Decode is memory-bandwidth-bound, not compute-bound.** Across model size (clean, 24 workers)
+  it falls 16.4 → 8.9 → 4.0 → 1.05 tok/s for 1.5B → 3B → 7B → 27B — inversely with active
+  bytes/token. Across core count on the 7B it moves only 2.63 → 3.96 tok/s from 2 → 24 workers
+  (12× the cores, 1.5× the throughput) and *regresses* to 3.54 at 32c: once a single stream
+  saturates the memory controller, more cores only add contention.
 - **Prefill is compute-bound and scales with cores.** 7B prefill(256) climbs 17.6 (2c) →
-  102.8 (24c) tok/s. [context-length + full core curve below]
+  115 (24c) tok/s. [context-length + full core curve below]
+- **A measurement caveat that became a finding:** the first pass benchmarked all five models
+  *sequentially in one session*, which contended for cores and bandwidth and depressed absolute
+  throughput — 2.04× for the 1.5B decode, 8.3× for the 27B prefill. Every number in this study is
+  from a **single-experiment** re-run on an otherwise-idle box; the contention factors are in §A.
 - **One bug found:** gemma4-coding Q4_K panics in the resident CPU forward — the generic
   tensor-parallel qk-norm band uses the scalar `HeadDim`, but gemma4 has per-layer head_dim and
   the `-q4k` path never dispatches to its dedicated `gemma4.go` forward. Filed as an issue.
 
-## A. Decode & prefill vs model size (24 workers, budget 0.75)
-Grid: prefill P∈{16,64,256}×3 reps, decode 64 steps×3 reps, 16-tok prompt.
+## A. Decode & prefill vs model size (24 workers, single-experiment)
+Authoritative numbers: each model measured **alone on an idle box** at 24 workers (the clean
+run from the §B/§E/§G core-scaling sweeps). The original concurrent grid under-measured these —
+see the contention correction below.
 
-| Model | Precision | load s | decode tok/s | prefill tok/s (P=16 / 64 / 256) |
-|---|---|---:|---:|---:|
-| Qwen2.5-1.5B | Q8_0 | 3.5 | **8.05** | 121 / 188 / 317 |
-| Qwen2.5-3B | Q8_0 | 5.1 | **6.31** | 100 / 202 / 186 |
-| Qwen2.5-7B | Q8_0 | 9.6 | **3.64** | 56 / 101 / 103 |
-| Qwen3.6-27B | Q4_K/Q8 hybrid | 19.6 | **0.82** | 2.3 / 2.8 / 2.8 |
-| gemma4-coding | Q4_K_M | — | **PANIC** | — (see §F) |
+| Model | Precision | decode tok/s @24c | prefill(256) tok/s @24c |
+|---|---|---:|---:|
+| Qwen2.5-1.5B | Q8_0 | **16.43** | 421 |
+| Qwen2.5-3B | Q8_0 | **8.89** | 196 |
+| Qwen2.5-7B | Q8_0 | **3.96** | 115 |
+| Qwen3.6-27B | Q4_K_M | **1.05** | 23 |
+| gemma4-coding | Q4_K_M | **PANIC** | — (see §F) |
 
-Decode tok/s ≈ scales inversely with active parameter bytes/token, as expected for a
-bandwidth-bound single stream. (27B is Q4_K so its bytes/token are ~½ a Q8 of the same size,
-which is why it is "only" ~4.4× slower than the 7B-Q8 rather than ~8×.)
+Decode scales inversely with active bytes/token, as expected for a bandwidth-bound single stream.
+(The 27B is Q4_K, ~½ the bytes/token of a Q8 of equal params, which is why it is ~3.8× slower than
+the 7B-Q8 rather than the ~8× a naive param-count would predict.)
+
+**Contention correction — a methodology finding.** The first pass benchmarked all five models
+*sequentially in one session*; that stole cores and memory bandwidth and depressed every number,
+**unevenly**. Same `workers=24`, same 16-tok prompt — only the box's idleness differed:
+
+| Model | decode: concurrent → clean | prefill(256): concurrent → clean |
+|---|---:|---:|
+| 1.5B | 8.05 → 16.43 (**2.04×**) | 317 → 421 (1.3×) |
+| 3B | 6.31 → 8.89 (1.41×) | 186 → 196 (1.1×) |
+| 7B | 3.65 → 3.96 (1.09×) | 103 → 115 (1.1×) |
+| 27B | 0.82 → 1.05 (1.28×) | 2.8 → 23.1 (**8.3×**) |
+
+The gradient is itself informative: **decode** contention is worst for the *smallest* model (most
+bandwidth-hungry per unit time), while **prefill** contention is catastrophic for the *largest*
+model (most core-hungry, and near the memory-pressure edge). Lesson baked into the rest of this
+study: measure one model at a time. (This is why the box was kept single-experiment for §B–§G.)
 
 ## B. Decode & prefill vs core count — Qwen2.5-7B-Q8 (FAK_WORKERS pinned)
 Prefill(256)×3, decode 64×3. Worker count pinned exactly via `FAK_WORKERS`.
@@ -94,26 +119,32 @@ Decode 256 steps×3 (vs the 64-step §A/§B).
 streamed per token, so decode stays weight-bandwidth-bound and flat — no degradation cliff in
 this range. (Confirms decode cost is dominated by the per-token weight sweep, not attention.)
 
-## E. Does the decode sweet-spot shift with model size? — 1.5B/3B/7B-Q8 core-scaling
+## E. Does the decode sweet-spot shift with model size? — 1.5B/3B/7B/27B core-scaling
 The §B finding (7B decode peaks at 24 workers, regresses at 32) raised the question: is 24 a
 universal sweet-spot, or does it move with per-token bandwidth pressure? Same sweep (workers
-2/8/16/24/32, prefill 256×3, decode 64×3) on the 1.5B and 3B, folded against §B's 7B.
+2/8/16/24/32, prefill 256, decode 48–64 steps) on the 1.5B, 3B and the 27B, folded against §B's 7B.
+All single-experiment (see the §A contention correction for why that matters).
 
 **Decode tok/s vs workers (peak in bold):**
 
 | model | 2c | 8c | 16c | 24c | 32c | peak | 32c vs peak |
 |---:|---:|---:|---:|---:|---:|---|---:|
 | 1.5B-Q8 | 12.79 | 16.13 | **16.50** | 16.43 | 9.61 | 16.50 @16c | −42% |
-| 3B-Q8 | 6.29 | 7.75 | 8.89 | **8.89** | 5.91 | 8.89 @24c | −34% |
+| 3B-Q8 | 6.29 | 7.75 | **8.89** | **8.89** | 5.91 | 8.89 @16–24c | −34% |
 | 7B-Q8 | 2.63 | 3.56 | 3.94 | **3.96** | 3.54 | 3.96 @24c | −11% |
+| 27B-Q4K | – | – | **1.17** | 1.05 | 0.97 | 1.17 @16c | −17% |
 
-Two effects, both consistent with **memory-bandwidth-bound decode**:
-1. **The sweet-spot moves left as the model shrinks** — 1.5B peaks at **16** workers, the 3B and
-   7B at **24**. A lighter model streams fewer bytes/token, so it saturates the memory controller
-   with fewer cores; cores added past saturation find no more bandwidth to claim.
-2. **Oversubscription past the peak hurts small models most** — going to all 32 cores costs the
-   1.5B −42%, the 3B −34%, the 7B only −11%. With tiny per-token work, thread-coordination
-   overhead is a larger fraction of the token, so 32-way contention bites harder.
+The sweet-spot is **U-shaped in model size, not monotonic** — both the *lightest* (1.5B) and the
+*heaviest* (27B) peak at **16** workers, while the *middle* pair (3B, 7B) reach **24**. Two
+different mechanisms meet at 16 cores:
+- The **1.5B** does so little work per token that thread-coordination overhead dominates past 16c.
+- The **27B** streams the most bytes/token (Q4_K, ~13 GiB/token) and saturates the memory
+  controller with the fewest cores — extra cores find no bandwidth left to claim.
+- The **3B/7B** sit between: enough per-token compute to use 24 cores, not enough bandwidth
+  pressure to saturate before then.
+
+And **all four regress at 32c** — full-core oversubscription is a universal decode pessimization,
+worst for the 1.5B (−42%), mildest for the 7B (−11%).
 
 **Prefill tok/s vs workers** (compute-bound, for contrast):
 
@@ -122,11 +153,14 @@ Two effects, both consistent with **memory-bandwidth-bound decode**:
 | 1.5B-Q8 | 69.2 | 191.0 | 332.3 | **421.5** | 336.7 |
 | 3B-Q8 | 33.8 | 97.3 | 156.3 | **195.6** | 176.5 |
 | 7B-Q8 | 17.6 | 52.0 | 88.9 | 115.3 | **116.3** |
+| 27B-Q4K | – | – | 21.9 | 23.1 | **31.7** |
 
-Prefill peaks at 24c for the two smaller models (and even *they* regress at 32c), while only the
-7B — with GEMMs big enough to amortize thread overhead — is flat-to-rising 24→32c. **Takeaway:
-`FAK_WORKERS≈24` is the robust default for this box; the ideal is 16 for ≤2B models, and all-32
-is a pessimization for both decode and small-model prefill.**
+Prefill runs the *opposite* way to decode: the small models (1.5B/3B) peak at 24c and regress at
+32, while the **larger** models (7B, 27B) — with GEMMs big enough to amortize thread overhead —
+keep rising to 32c (the 27B gains +37% from 16→32c). **Takeaway: `FAK_WORKERS≈24` is the robust
+default. For decode, both extremes (≤2B and the 27B) do best at 16 and all-32 regresses every
+model; for prefill, larger models keep scaling and still gain at 32c. Match workers to the
+workload — decode and prefill want opposite ends for the same big model.**
 
 ## F. Bug: gemma4-coding Q4_K resident CPU forward panics
 Preflight READY (arch `gemma4`, 667 tensors, ~6.86 GiB); panics at first Prefill:
