@@ -1,0 +1,9 @@
+{
+  "version": "fak-policy/v1",
+  "allow_prefix": ["read_", "get_", "list_", "search_"],
+  "mount_view": [
+    { "path": "src", "mode": "rw" },
+    { "path": "docs", "mode": "ro" },
+    { "path": "examples", "mode": "ro" }
+  ]
+}
