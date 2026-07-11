@@ -488,6 +488,7 @@ routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
 | Extend the kernel (plug in → prove correct → prove faster) | [`fak/EXTENDING.md`](EXTENDING.md) · [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Optimize a kernel without re-inventing known art (check prior art first) | [`docs/sota/README.md`](docs/sota/README.md) · `fak sota <op>` |
 | Score agent-steer prose for negative framing (suggests positive reframes) | `fak score negframe --suggest` |
+| Every feature by subsystem, with honest status | [`docs/supported/features.md`](docs/supported/features.md) |
 | What's real vs simulated vs stub | [`fak/CLAIMS.md`](CLAIMS.md) · [`fak/STATUS.md`](STATUS.md) |
 | Every benchmark number (single source of truth) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) |
 | Roll back to a stable version (revert / downgrade / pin) | [`docs/ROLLBACK.md`](docs/ROLLBACK.md) |
