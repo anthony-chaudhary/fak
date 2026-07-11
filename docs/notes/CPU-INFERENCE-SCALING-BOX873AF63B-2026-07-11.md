@@ -94,6 +94,40 @@ Decode 256 steps×3 (vs the 64-step §A/§B).
 streamed per token, so decode stays weight-bandwidth-bound and flat — no degradation cliff in
 this range. (Confirms decode cost is dominated by the per-token weight sweep, not attention.)
 
+## E. Does the decode sweet-spot shift with model size? — 1.5B/3B/7B-Q8 core-scaling
+The §B finding (7B decode peaks at 24 workers, regresses at 32) raised the question: is 24 a
+universal sweet-spot, or does it move with per-token bandwidth pressure? Same sweep (workers
+2/8/16/24/32, prefill 256×3, decode 64×3) on the 1.5B and 3B, folded against §B's 7B.
+
+**Decode tok/s vs workers (peak in bold):**
+
+| model | 2c | 8c | 16c | 24c | 32c | peak | 32c vs peak |
+|---:|---:|---:|---:|---:|---:|---|---:|
+| 1.5B-Q8 | 12.79 | 16.13 | **16.50** | 16.43 | 9.61 | 16.50 @16c | −42% |
+| 3B-Q8 | 6.29 | 7.75 | 8.89 | **8.89** | 5.91 | 8.89 @24c | −34% |
+| 7B-Q8 | 2.63 | 3.56 | 3.94 | **3.96** | 3.54 | 3.96 @24c | −11% |
+
+Two effects, both consistent with **memory-bandwidth-bound decode**:
+1. **The sweet-spot moves left as the model shrinks** — 1.5B peaks at **16** workers, the 3B and
+   7B at **24**. A lighter model streams fewer bytes/token, so it saturates the memory controller
+   with fewer cores; cores added past saturation find no more bandwidth to claim.
+2. **Oversubscription past the peak hurts small models most** — going to all 32 cores costs the
+   1.5B −42%, the 3B −34%, the 7B only −11%. With tiny per-token work, thread-coordination
+   overhead is a larger fraction of the token, so 32-way contention bites harder.
+
+**Prefill tok/s vs workers** (compute-bound, for contrast):
+
+| model | 2c | 8c | 16c | 24c | 32c |
+|---:|---:|---:|---:|---:|---:|
+| 1.5B-Q8 | 69.2 | 191.0 | 332.3 | **421.5** | 336.7 |
+| 3B-Q8 | 33.8 | 97.3 | 156.3 | **195.6** | 176.5 |
+| 7B-Q8 | 17.6 | 52.0 | 88.9 | 115.3 | **116.3** |
+
+Prefill peaks at 24c for the two smaller models (and even *they* regress at 32c), while only the
+7B — with GEMMs big enough to amortize thread overhead — is flat-to-rising 24→32c. **Takeaway:
+`FAK_WORKERS≈24` is the robust default for this box; the ideal is 16 for ≤2B models, and all-32
+is a pessimization for both decode and small-model prefill.**
+
 ## F. Bug: gemma4-coding Q4_K resident CPU forward panics
 Preflight READY (arch `gemma4`, 667 tensors, ~6.86 GiB); panics at first Prefill:
 `panic: model: qk-norm weight length does not match head_dim or projection width`
