@@ -114,6 +114,14 @@ func PreCommitGates() []Gate {
 		// ("clear the CI gofmt gate", v0.32.0 x4 / v0.34.0). Set FLEET_GOFMT_GUARD=block to
 		// hard-enforce it, ALLOW_GOFMT_DRIFT=1 to skip it once.
 		{Name: "GOFMT", ModeEnv: "FLEET_GOFMT_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_GOFMT_DRIFT", Check: gateGofmt},
+		// DUPLICATION is ADVISORY (DefaultMode "warn"): the commit-boundary, in-process twin of
+		// `fak dup guard --staged`. It brings the clonescan clone engine (the same normalized-token
+		// definition the code-slop scorecard grades the whole tree with, a cycle later) to the commit
+		// itself, but scopes each added block's comparison to the OTHER tracked .go files in its own
+		// directory (Go package) — cheap enough to run every commit, and the most actionable clone to
+		// flag ("call the sibling helper"). Cross-package clones stay the whole-tree scorecard's job.
+		// Set FLEET_DUP_GUARD=block to hard-enforce it, ALLOW_DUP=1 to skip it once. It runs LAST.
+		{Name: "DUPLICATION", ModeEnv: "FLEET_DUP_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_DUP", Check: gateDuplication},
 	}
 }
 
