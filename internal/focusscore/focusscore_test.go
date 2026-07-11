@@ -276,3 +276,22 @@ func TestCompareVerdicts(t *testing.T) {
 		t.Errorf("expected fanning-out verdict, got:\n%s", out)
 	}
 }
+
+func TestFocusScoreMiscalibratedScorerAddsDebt(t *testing.T) {
+	rows := []trajctl.Row{obj("a", "", trajctl.StatusActive, 0), obj("b", "", trajctl.StatusActive, 0)}
+	for i, id := range []string{"a", "b"} {
+		truth := float64(i)
+		rows = append(rows,
+			trajctl.ScoreRecord(trajctl.ScoreRow{ObjectiveID: id, Method: trajctl.CommitScorerMethod, Version: "1", Witness: trajctl.W3, Value: truth, UnixMillis: 1}),
+			trajctl.ScoreRecord(trajctl.ScoreRow{ObjectiveID: id, Method: "judge", Version: "1", Witness: trajctl.W1, Value: 1 - truth, UnixMillis: 1}),
+		)
+	}
+	got := buildFromRows(rows, 3)
+	if got.Evidence.CalibrationDebt != 1 || got.Evidence.WorstCalibrated == nil || got.Evidence.WorstCalibrated.Verdict != trajctl.CalibrationMiscalibrated || got.Corpus[DebtKey] != 1 {
+		t.Fatalf("payload=%+v", got)
+	}
+	baseline := buildFromRows([]trajctl.Row{obj("a", "", trajctl.StatusActive, 0), commit("a", .2, 1), commit("a", .8, 2)}, 3)
+	if baseline.Evidence.CalibrationDebt != 0 || baseline.Corpus[DebtKey] != 0 {
+		t.Fatalf("baseline=%+v", baseline)
+	}
+}

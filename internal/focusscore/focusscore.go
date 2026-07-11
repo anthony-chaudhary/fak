@@ -82,10 +82,12 @@ type Evidence struct {
 	Abandoned  int `json:"abandoned"`  // objectives explicitly dropped
 	Open       int `json:"open"`       // active + paused (the steerable fleet)
 
-	Drift         int `json:"drift"`          // open objectives the curve marks DRIFT (declining)
-	Stall         int `json:"stall"`          // open objectives marked STALL (flat while busy)
-	DetourOverrun int `json:"detour_overrun"` // open objectives marked DETOUR_OVERRUN (past budget, parent paused)
-	Healthy       int `json:"healthy"`        // open objectives marked HEALTHY (rising/steady)
+	Drift           int                        `json:"drift"`            // open objectives the curve marks DRIFT (declining)
+	Stall           int                        `json:"stall"`            // open objectives marked STALL (flat while busy)
+	DetourOverrun   int                        `json:"detour_overrun"`   // open objectives marked DETOUR_OVERRUN (past budget, parent paused)
+	Healthy         int                        `json:"healthy"`          // open objectives marked HEALTHY (rising/steady)
+	CalibrationDebt int                        `json:"calibration_debt"` // one when the worst measured scorer is anti-correlated
+	WorstCalibrated *trajctl.ScorerCalibration `json:"worst_calibrated,omitempty"`
 
 	WIPCap      int `json:"wip_cap"`      // the pinned active ceiling this fold graded against
 	ExcessWIP   int `json:"excess_wip"`   // max(0, active - wip_cap): active objectives beyond the cap
@@ -159,6 +161,13 @@ func gatherEvidence(opts Options) Evidence {
 	curves := st.OpenCurves() // active|paused objectives, each with its derived signal
 
 	var ev Evidence
+	calibration := st.Calibrate()
+	if worst, ok := calibration.WorstCalibrated(); ok {
+		ev.WorstCalibrated = &worst
+		if worst.Verdict == trajctl.CalibrationMiscalibrated {
+			ev.CalibrationDebt = 1
+		}
+	}
 	ev.WIPCap = opts.WIPCap
 	ev.LedgerPresent = len(st.Objectives) > 0
 	ev.Objectives = len(st.Objectives)
@@ -266,7 +275,7 @@ var axisWeights = map[string]float64{
 // natural magnitude — one per excess active objective, one per drifting/stalled/overrun
 // open objective — while the per-KPI grade (below) stays a clean pass/fail for the letter.
 func focusDebt(ev Evidence) int {
-	return ev.ExcessWIP + ev.Drift + ev.Stall + ev.DetourOverrun
+	return ev.ExcessWIP + ev.Drift + ev.Stall + ev.DetourOverrun + ev.CalibrationDebt
 }
 
 // toKPI converts one KPIResult into a scorecard.KPI (100/0 per row, HARD→Defect,
@@ -370,6 +379,7 @@ func Build(opts Options) ScorecardPayload {
 			"detour_overrun":    ev.DetourOverrun,
 			"healthy":           ev.Healthy,
 			"loose_detour":      ev.LooseDetour,
+			"calibration_debt":  ev.CalibrationDebt,
 		},
 	})
 
