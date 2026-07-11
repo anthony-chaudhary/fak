@@ -486,7 +486,17 @@ func foldGateway(rows []gatewayusageledger.Row, since time.Time) GatewayRollup {
 		}
 		filtered = append(filtered, r)
 	}
-	g.Sessions = len(filtered)
+	// A carryforward row (gatewayusageledger.Cut, #3490) is the fold of many
+	// pre-cut rows — expand it back to its folded row count so the session total
+	// stays true across a ledger cut. FoldTrend skips carryforward rows itself.
+	g.Sessions = 0
+	for _, r := range filtered {
+		if r.Kind == gatewayusageledger.KindCarryforward && r.Carryforward != nil {
+			g.Sessions += r.Carryforward.FoldedRows
+			continue
+		}
+		g.Sessions++
+	}
 	if trend, ok := gatewayusageledger.FoldTrend(filtered); ok {
 		g.Trend = &trend
 	}
