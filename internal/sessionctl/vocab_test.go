@@ -20,7 +20,7 @@ var (
 	knownCapabilities = []Capability{CapOperatorSend, CapOperatorControl}
 	knownBoundaries   = []Boundary{BoundaryNextTurn, BoundaryQuiesce, BoundaryImmediate}
 	knownWitnesses    = []WitnessKind{
-		WitnessSplice, WitnessDirective, WitnessBoundaryStop,
+		WitnessSplice, WitnessDirective, WitnessBoundaryStop, WitnessSafePointStop,
 		WitnessSameTurnWake, WitnessSamplingCap, WitnessSchedulerRead,
 	}
 )
@@ -76,7 +76,7 @@ func TestVocabularyCoversShippedOps(t *testing.T) {
 	// The shipped live op set: `fak session` drive-state verbs + `fak signal` steer +
 	// #2755 redirect. Kept in lockstep with internal/agent/loop_control_witness_test.go.
 	want := []ControlOp{
-		OpSteer, OpRedirect, OpPause, OpResume, OpCancel, OpThrottle, OpBudget, OpPriority,
+		OpSteer, OpRedirect, OpPause, OpResume, OpCancel, OpTerminate, OpThrottle, OpBudget, OpPriority,
 	}
 	got := Ops()
 	if len(got) != len(want) {

@@ -58,6 +58,12 @@ const (
 	// OpCancel drains the session to a safe stop at its next boundary (the drive-state
 	// verb `fak session stop` maps here — enqueue Draining, finalize at the boundary).
 	OpCancel ControlOp = "cancel"
+	// OpTerminate forcefully stops the session at the next SAFE POINT (#2758): the
+	// in-flight model call's context is cancelled and no further tool call dispatches
+	// (the drive-state verb `fak session terminate` maps here — enqueue Terminating,
+	// abort mid-turn). The deliberate counterpart of OpCancel: cancel finishes the
+	// turn, terminate does not.
+	OpTerminate ControlOp = "terminate"
 	// OpThrottle lowers the per-turn output cap into the current turn's sampling.
 	OpThrottle ControlOp = "throttle"
 	// OpBudget re-allots the session's turn/token/context budget; an exhausted
@@ -130,6 +136,13 @@ const (
 	// stop-reason recorded on ArmMetrics.StoppedBySession (pause holds; cancel drains;
 	// budget exhausts). The record — not the table write — is the proof.
 	WitnessBoundaryStop WitnessKind = "boundary-stop"
+	// WitnessSafePointStop — the running arm HALTS MID-TURN at its next safe point
+	// (#2758): the in-flight model call's context is cancelled and no further tool
+	// call dispatches, with the closed TERMINATED stop-reason recorded on
+	// ArmMetrics.StoppedBySession (terminate). The mid-turn twin of
+	// WitnessBoundaryStop — the record is still the proof, but the arm never waits
+	// for a turn boundary (that wait is exactly what distinguishes cancel's drain).
+	WitnessSafePointStop WitnessKind = "safe-point-stop"
 	// WitnessSameTurnWake — a parked arm WAKES and completes its held turn (resume): a
 	// final answer from exactly the resumed turn, no terminal stop.
 	WitnessSameTurnWake WitnessKind = "same-turn-wake"
@@ -218,6 +231,14 @@ var vocabulary = []OpSpec{
 		Witness:        WitnessBoundaryStop,
 		RefusalReasons: []string{session.ReasonControlSessionTerminal, session.ReasonControlRevStale},
 		Summary:        "enqueued Draining finalized to Stopped at the next boundary; arm stops with StoppedBySession=DRAINING (session.ReasonDrained)",
+	},
+	{
+		Op:             OpTerminate,
+		Capability:     CapOperatorControl,
+		Boundary:       BoundaryImmediate,
+		Witness:        WitnessSafePointStop,
+		RefusalReasons: []string{session.ReasonControlSessionTerminal, session.ReasonControlRevStale},
+		Summary:        "enqueued Terminating wakes the arm mid-turn (level-triggered signal): the in-flight model call's context is cancelled, no further tool call dispatches, and the safe point finalizes Terminating to Stopped with StoppedBySession=TERMINATED (session.ReasonTerminated) — the forceful counterpart of cancel's drain",
 	},
 	{
 		Op:             OpThrottle,
