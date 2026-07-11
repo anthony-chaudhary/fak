@@ -109,6 +109,11 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// notify to the 200.
 	triedRehome := false
 	rehomePending := false
+	// Account-scoped entitlement/org walls use the same one-shot sibling-account failover as
+	// Complete and CompleteStream. Keep this distinct from cap rehome: a hard 403 is not a
+	// cooldown and must not enter the hours-away cap wait path.
+	triedAccountFailover := false
+	accountFailoverPending := false
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	var resp *http.Response
@@ -150,6 +155,10 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			fbState.noteRecovered(p, attempt)
 			// A 200 after a 429/403-account-cap seat rehome is a CONFIRMED rehome (see Complete).
 			notifyRehomeRecovered(p, &rehomePending, attempt)
+			if accountFailoverPending {
+				notifyAccountFailover(p, AccountFailoverRecovered, attempt)
+				accountFailoverPending = false
+			}
 			resp = r
 			break
 		}
@@ -200,6 +209,23 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 				attempt--
 				continue
 			}
+		}
+		// The raw Anthropic SSE path is the path used by an interactive `fak guard -- claude`
+		// turn. It must not diverge from the buffered/planner-stream paths here: once the
+		// transient-403 arm has ruled out a clearing flap, an account-scoped org/entitlement
+		// wall gets one sibling-account swap and an immediate invisible re-send.
+		if classifyUpstream(r.StatusCode, raw, r.Header) == RemedyFailoverAccount && !triedAccountFailover && p.AccountFailoverFunc != nil {
+			if call.failoverAccountCred(p, RemedyFailoverAccount.String()) {
+				triedAccountFailover = true
+				accountFailoverPending = true
+				rs.lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
+				rs.lastStatus = r.StatusCode
+				rs.lastRetryAfter = ""
+				attempt--
+				continue
+			}
+			triedAccountFailover = true
+			notifyAccountFailover(p, AccountFailoverExhausted, attempt)
 		}
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}

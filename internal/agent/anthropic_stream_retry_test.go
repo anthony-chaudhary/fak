@@ -306,6 +306,64 @@ func TestStreamAnthropicRaw_SessionCap429RehomesSeat(t *testing.T) {
 // A persistently-overloaded upstream must fail AFTER exactly maxAttempts streamed tries
 // (pinned low via env so the test is fast), and the returned error must carry the upstream
 // status so the gateway can surface a real 429/503 (and any Retry-After) to the client.
+
+// TestStreamAnthropicRaw_OrgWallFailsOverAccount captures the interactive Claude path: raw SSE
+// must rotate away from an account-scoped 403 instead of surfacing a misleading /login prompt.
+func TestStreamAnthropicRaw_OrgWallFailsOverAccount(t *testing.T) {
+	const walled, freeAccount = "sk-ant-oat01-walled", "sk-ant-oat01-free-account"
+	orgWall := []byte(`{"type":"error","error":{"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}}`)
+	var mu sync.Mutex
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		auth := r.Header.Get("Authorization")
+		gotAuth = append(gotAuth, auth)
+		mu.Unlock()
+		if auth != "Bearer "+freeAccount {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(orgWall)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, anthropicStreamRetrySSE("ok"))
+	}))
+	t.Cleanup(srv.Close)
+	p, err := NewProviderHTTPPlanner("anthropic", srv.URL, "claude-test", walled)
+	if err != nil {
+		t.Fatalf("NewProviderHTTPPlanner: %v", err)
+	}
+	var reasons, outcomes []string
+	p.AccountFailoverFunc = func(reason string) (string, bool) { reasons = append(reasons, reason); return freeAccount, true }
+	p.AccountFailoverNotify = func(outcome string, _ int) { outcomes = append(outcomes, outcome) }
+	rawBody := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	var sawStop bool
+	err = p.StreamAnthropicRaw(context.Background(), rawBody, "", "", func(ev AnthropicSSEEvent) error { sawStop = sawStop || ev.Event == "message_stop"; return nil })
+	if err != nil {
+		t.Fatalf("raw SSE should fail over the org wall: %v", err)
+	}
+	if !sawStop {
+		t.Fatal("did not see message_stop after account failover")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"Bearer " + walled, "Bearer " + freeAccount}
+	if len(gotAuth) != len(want) {
+		t.Fatalf("upstream auth = %q, want %q", gotAuth, want)
+	}
+	for i := range want {
+		if gotAuth[i] != want[i] {
+			t.Errorf("request %d auth = %q, want %q", i, gotAuth[i], want[i])
+		}
+	}
+	if len(reasons) != 1 || reasons[0] != RemedyFailoverAccount.String() {
+		t.Errorf("reasons = %v", reasons)
+	}
+	if len(outcomes) != 1 || outcomes[0] != AccountFailoverRecovered {
+		t.Errorf("outcomes = %v", outcomes)
+	}
+}
+
 func TestStreamAnthropicRaw_FailsAfterMaxAttempts(t *testing.T) {
 	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "2")
 	var n int32
