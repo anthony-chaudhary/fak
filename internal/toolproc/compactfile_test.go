@@ -257,3 +257,73 @@ func TestCompactJournalFileNoopWhenAllLive(t *testing.T) {
 		t.Fatal("all-live journal must be left byte-for-byte unchanged")
 	}
 }
+
+// The bound CompactJournalFile enforces is a CONSTANT ceiling — the last
+// tailKeep events plus every un-exited spawn — not merely "smaller than before".
+// This is the disk-growth guarantee #3488 wired into production: the once-per-
+// session stop firing in cmd/fak/toolproc.go compacts with JournalCompactTailKeep,
+// so an ever-appended journal collapses to a fixed size rather than a
+// proportionally-smaller-but-still-growing one. TestCompactJournalFileBoundsOversized
+// proves the file shrinks for ONE input; this proves the ceiling is independent
+// of how much terminal history was reclaimed — compact two journals whose
+// terminal history differs 8x and the compacted results carry the same bounded
+// event count and a same-order on-disk size. A regression that kept history
+// proportional to the session's length would still pass "after < before" but
+// fail this.
+func TestCompactJournalFileBoundIsConstantCeiling(t *testing.T) {
+	const tailKeep = 64
+	build := func(pairs int) []Event {
+		// One un-exited spawn at the front (kept regardless of age) followed by
+		// `pairs` fully-terminal spawn/exit pairs — all reclaimable but for the tail.
+		evs := []Event{{Kind: EvSpawn, CallID: "live", Tool: "Bash", Session: "s", AtMS: 1}}
+		for i := 0; i < pairs; i++ {
+			id := fmt.Sprintf("done-%d", i)
+			evs = append(evs,
+				Event{Kind: EvSpawn, CallID: id, Tool: "Bash", Session: "s", AtMS: int64(2 + 2*i)},
+				Event{Kind: EvExit, CallID: id, AtMS: int64(3 + 2*i), Status: "ok"})
+		}
+		return evs
+	}
+	compact := func(pairs int) (events int, before, after int64) {
+		path := writeJournal(t, build(pairs))
+		bi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Threshold 1 forces the rewrite; the ceiling is tailKeep events + the live spawn.
+		if _, err := CompactJournalFile(path, 1, tailKeep); err != nil {
+			t.Fatalf("compact(%d pairs): %v", pairs, err)
+		}
+		ai, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := readJournal(t, path) // strict ParseEvents: must stay fold-clean
+		if id, running := hookResolveID("live", got); !running || id != "live" {
+			t.Fatalf("live spawn dropped at %d pairs: id=%q running=%v", pairs, id, running)
+		}
+		return len(got), bi.Size(), ai.Size()
+	}
+
+	smallN, _, smallBytes := compact(500)
+	largeN, largeBefore, largeBytes := compact(4000) // 8x the terminal history
+
+	// The event ceiling is identical across an 8x difference in reclaimed history:
+	// the last tailKeep events plus the one live spawn, nothing proportional to N.
+	if smallN != largeN {
+		t.Fatalf("compacted event count grew with history: %d (500 pairs) vs %d (4000 pairs) — bound is not a constant ceiling", smallN, largeN)
+	}
+	if want := tailKeep + 1; largeN != want {
+		t.Fatalf("compacted to %d events, want tailKeep+live=%d", largeN, want)
+	}
+	// And it holds on disk: the 8x-larger input compacts to a file no bigger than
+	// a small factor of the small one (bytes differ only by ID-string length), and
+	// to a small fraction of its own pre-compaction size — the append-only write
+	// path is genuinely bounded, not just trimmed.
+	if largeBytes >= 2*smallBytes {
+		t.Fatalf("compacted disk size scaled with history: %d bytes (4000 pairs) vs %d bytes (500 pairs)", largeBytes, smallBytes)
+	}
+	if largeBytes >= largeBefore/4 {
+		t.Fatalf("compacted file not bounded on disk: %d bytes from a %d-byte journal", largeBytes, largeBefore)
+	}
+}
