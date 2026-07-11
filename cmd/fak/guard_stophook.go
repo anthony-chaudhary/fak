@@ -339,6 +339,7 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	warnFlag := fs.Int("warn", guardStopHookWarnFromEnv(), "escalate the continue guidance to a relevance-decision warning at this consecutive deny-all depth")
 	finalFlag := fs.Int("final", guardStopHookFinalFromEnv(), "escalate the continue guidance to a final warning at this consecutive deny-all depth")
 	sameStopFlag := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "hard give-up depth on the SAME-ISSUE path: end the session after this many consecutive deny-all turns proposing the IDENTICAL refused action (same tool+reason). A varied session never reaches it")
+	operatorDirectedFlag := fs.String("operator-directed", os.Getenv(guardStopHookOperatorDirectedEnvMode), "headless 'stopped to ask a human' gate: off|shadow|warn|enforce")
 	handoffModeFlag := fs.String("task-handoff-mode", os.Getenv(guardTaskHandoffEnvMode), "completion handoff gate: off|shadow|enforce")
 	handoffFileFlag := fs.String("task-handoff-file", os.Getenv(guardTaskHandoffEnvFile), "path to fak.task-handoff.v1 JSON the agent must write before a clean stop")
 	handoffRepoFlag := fs.String("task-handoff-repo", os.Getenv(guardTaskHandoffEnvRepo), "owner/repo passed to fak task handoff --live")
@@ -495,6 +496,15 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		// a LIVE known-bad signature — surface the fleet's recorded pre-existing blocker so the
 		// agent recognises the red as not-its-own and does not loop re-fixing it. Fails open silent.
 		emitKnownFrictionAdvisory(stderr, transcriptPath)
+		// Operator-directed rung: a clean stop whose final turn asked a human. On a headless run
+		// enforce BLOCKS it (feed the choicetriage remediation back so the agent acts instead of
+		// asking) — precedes the handoff gate, mirroring deny-all-precedes-handoff, so the more
+		// specific "act on your own question" guidance wins over the generic handoff demand.
+		odExit, odDisp, odFired := runGuardOperatorDirectedGate(stderr, *operatorDirectedFlag, rec.Transcript)
+		if odFired && odExit == 2 {
+			rec.Disposition = string(odDisp)
+			return 2
+		}
 		handoffExit := runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
@@ -504,6 +514,10 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		switch {
 		case handoffExit == 2:
 			rec.Disposition = string(stopDispHandoffBlock)
+		case odFired:
+			// The gate fired but allowed the stop (warn/shadow/escalate) and the handoff gate did
+			// not itself block: record the operator-directed disposition, not a bare clean stop.
+			rec.Disposition = string(odDisp)
 		case rec.Transcript != nil && rec.Transcript.NotedNoAllowedPath:
 			rec.Disposition = string(stopDispCleanWrapup)
 		default:
@@ -780,7 +794,7 @@ func guardTaskHandoffConfigOrZero(configs []guardTaskHandoffConfig) guardTaskHan
 // hook is MERGED into it so a single --settings carries both (--settings is a single-value flag;
 // injecting it twice clobbers rather than merges). Otherwise it writes its own settings file and
 // injects --settings. Off mode or a non-claude child is a no-op (command returned unchanged).
-func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN, sameStop int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN, sameStop int, operatorDirectedMode string, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
@@ -805,10 +819,10 @@ func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath st
 			return command, nil, guardStopHookInstall{}, err
 		}
 	}
-	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN, sameStop, handoffConfig...)
+	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN, sameStop, operatorDirectedMode, handoffConfig...)
 }
 
-func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN, sameStop int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN, sameStop int, operatorDirectedMode string, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
@@ -862,6 +876,11 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		// Pin the same-issue give-up depth (default 6, --same-stop) so the installed Stop hook keys its
 		// stand-down on a true repeated same refusal rather than the blind deny-all count.
 		{guardStopHookEnvSameStop, strconv.Itoa(sameStop)},
+		// Pin the RESOLVED operator-directed gate mode. The operator-absent cap
+		// (guardOperatorDirectedEffectiveMode) has already run at the call site, so this value is
+		// authoritative — and it is pinned even when it resolves to `off` (attended interactive) so
+		// the hook never falls back to the warn default the flag would otherwise supply.
+		{guardStopHookOperatorDirectedEnvMode, guardOperatorDirectedNormalizedOrWarn(operatorDirectedMode)},
 	}
 	// #2539: wire the trajctl ledger into the hook children so the Stop hook's turn-end
 	// scorers and the PreCompact boundary twin have a curve to append to. Unresolvable repo

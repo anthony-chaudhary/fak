@@ -317,7 +317,7 @@ func TestInstallGuardStopHookInjectsTrajctlLedger(t *testing.T) {
 	dir := t.TempDir()
 	_, env, install, err := installGuardStopHookAt(
 		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
-		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9, 6)
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9, 6, guardPreCompactModeOff)
 	if err != nil || !install.Applied {
 		t.Fatalf("install: applied=%v err=%v", install.Applied, err)
 	}

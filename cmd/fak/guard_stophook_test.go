@@ -97,6 +97,90 @@ func TestParseGuardStopHookSignalsReadsToolFeedback(t *testing.T) {
 	}
 }
 
+func TestNormalizeSameStop(t *testing.T) {
+	for _, tc := range []struct {
+		in, warn, final, stop int
+	}{
+		{6, 3, 5, 6},  // default: warn=stop-3, final=stop-1
+		{9, 6, 8, 9},  // larger depth keeps the -3/-1 spread
+		{2, 1, 1, 2},  // small depth clamps warn/final up to 1 (no inversion)
+		{3, 1, 2, 3},  // warn clamps to 1, final=2
+		{1, 3, 5, 6},  // < 2 falls back to the default (would otherwise stop on first deny-all)
+		{0, 3, 5, 6},  // 0 falls back to the default
+		{-4, 3, 5, 6}, // negative falls back to the default
+	} {
+		warn, final, stop := normalizeSameStop(tc.in)
+		if warn != tc.warn || final != tc.final || stop != tc.stop {
+			t.Fatalf("normalizeSameStop(%d) = (%d,%d,%d), want (%d,%d,%d)", tc.in, warn, final, stop, tc.warn, tc.final, tc.stop)
+		}
+		if !(warn >= 1 && warn <= final && final < stop) {
+			t.Fatalf("normalizeSameStop(%d) violated warn<=final<stop invariant: (%d,%d,%d)", tc.in, warn, final, stop)
+		}
+	}
+}
+
+func TestGuardStopHookSameDecision(t *testing.T) {
+	// Default give-up depth 6 -> warn=3, final=5, give-up at 6.
+	const stop = guardStopHookSameStopDefault // 6
+	for _, tc := range []struct {
+		name      string
+		same      int
+		stop      int
+		mode      string
+		wantExit  int
+		wantBlock bool
+		wantStage guardStopHookStage
+	}{
+		{"off-never-blocks", 6, stop, guardPreCompactModeOff, 0, false, guardStopHookGiveUp},
+		{"clean-completion", 0, stop, guardPreCompactModeEnforce, 0, false, guardStopHookAllow},
+		// A varied session pins same=1 forever: it rides the NUDGE rung and is NEVER given up.
+		{"varied-nudge", 1, stop, guardPreCompactModeEnforce, 2, true, guardStopHookNudge},
+		{"nudge-high", 2, stop, guardPreCompactModeEnforce, 2, true, guardStopHookNudge},
+		{"warn-low", 3, stop, guardPreCompactModeEnforce, 2, true, guardStopHookWarn},
+		{"warn-high", 4, stop, guardPreCompactModeEnforce, 2, true, guardStopHookWarn},
+		{"final", 5, stop, guardPreCompactModeEnforce, 2, true, guardStopHookFinal},
+		// AT the give-up depth the session stands down (exit 0), so a true repeated same issue
+		// cannot loop forever.
+		{"give-up-at-depth", 6, stop, guardPreCompactModeEnforce, 0, false, guardStopHookGiveUp},
+		{"give-up-above-depth", 20, stop, guardPreCompactModeEnforce, 0, false, guardStopHookGiveUp},
+		// shadow always allows (exit 0) but reports the would-be block + rung.
+		{"shadow-would-block", 3, stop, guardPreCompactModeShadow, 0, true, guardStopHookWarn},
+		{"shadow-give-up", 6, stop, guardPreCompactModeShadow, 0, false, guardStopHookGiveUp},
+		// A garbage give-up depth falls back to the default ladder rather than stopping on turn 1.
+		{"garbage-stop-falls-back", 1, 0, guardPreCompactModeEnforce, 2, true, guardStopHookNudge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exit, block, stage := guardStopHookSameDecision(tc.same, tc.stop, tc.mode)
+			if exit != tc.wantExit || block != tc.wantBlock || stage != tc.wantStage {
+				t.Fatalf("sameDecision(same=%d,stop=%d,%q) = exit %d block %v stage %s, want exit %d block %v stage %s",
+					tc.same, tc.stop, tc.mode, exit, block, stage, tc.wantExit, tc.wantBlock, tc.wantStage)
+			}
+		})
+	}
+}
+
+func TestParseGuardStopHookSignalsReadsSameConsecutive(t *testing.T) {
+	// Gauge present: the value is parsed AND marked seen (so the hook keys on it).
+	signals, err := parseGuardStopHookSignals(strings.Join([]string{
+		"fak_guard_deny_all_consecutive 5",
+		"fak_guard_deny_all_same_consecutive 2",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("parse signals: %v", err)
+	}
+	if signals.DenyAllSameConsecutive != 2 || !signals.DenyAllSameConsecutiveSeen {
+		t.Fatalf("signals = %+v, want same=2 seen=true", signals)
+	}
+	// Gauge absent (older gateway): not seen, so the hook falls back to the blind ladder.
+	old, err := parseGuardStopHookSignals("fak_guard_deny_all_consecutive 5\n")
+	if err != nil {
+		t.Fatalf("parse old signals: %v", err)
+	}
+	if old.DenyAllSameConsecutiveSeen {
+		t.Fatalf("older gateway must leave DenyAllSameConsecutiveSeen false, got %+v", old)
+	}
+}
+
 func TestReadStopHookActive(t *testing.T) {
 	if !readStopHookActive(strings.NewReader(`{"stop_hook_active":true,"session_id":"s"}`)) {
 		t.Fatalf("stop_hook_active true not parsed")
@@ -152,6 +236,85 @@ func TestRunGuardStopHookEnforceBlocksOnDenyAll(t *testing.T) {
 	for _, want := range []string{"TERMINAL", "no allowed path"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("nudge missing the sanctioned clean-stop path %q: %s", want, stderr.String())
+		}
+	}
+}
+
+// TestRunGuardStopHookVariedSessionNeverGivenUp is the behavioral crux of the same-issue fix:
+// a session with a HIGH blind deny-all count but a DIFFERENT refusal each turn (same-issue gauge
+// pinned at 1) must be CONTINUED, never given up — the exact false-give-up the old blind ladder
+// caused. Blind consecutive is 50 (far above --max 3), yet the hook keys on the same-issue gauge
+// and blocks the stop (exit 2) because the session is exploring, not spinning.
+func TestRunGuardStopHookVariedSessionNeverGivenUp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"fak_guard_deny_all_consecutive 50",
+			"fak_guard_deny_all_same_consecutive 1",
+		}, "\n")))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--max", "3", // blind max the OLD logic would have given up on (50 > 3)
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (a varied session must be continued, never given up on the blind count); stderr=%s", code, stderr.String())
+	}
+}
+
+// TestRunGuardStopHookSameIssueGivesUp is the other half: a TRUE repeated same refusal (same-issue
+// gauge at the default give-up depth) stands down (exit 0), and the operator line names the
+// identical refused action so the give-up is legible as a genuine spin, not exploration.
+func TestRunGuardStopHookSameIssueGivesUp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"fak_guard_deny_all_consecutive 6",
+			"fak_guard_deny_all_same_consecutive 6", // == default give-up depth
+		}, "\n")))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (a true repeated same issue stands down); stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"IDENTICAL refused action", "same-issue give-up", "FRESH block each turn is never stopped"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("same-issue give-up line missing %q: %s", want, stderr.String())
+		}
+	}
+}
+
+// TestRunGuardStopHookSameIssueFinalNamesRepeat pins the escalated in-band guidance: at the final
+// same-issue rung the model is told it has proposed the IDENTICAL action and to take a DIFFERENT
+// one, not to retry — the whole reason a repeated deny-all should change tack.
+func TestRunGuardStopHookSameIssueFinalNamesRepeat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"fak_guard_deny_all_consecutive 5",
+			"fak_guard_deny_all_same_consecutive 5", // final rung at default depth 6
+		}, "\n")))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (final rung still continues); stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"IDENTICAL refused action", "last auto-continue", "DIFFERENT action"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("same-issue final guidance missing %q: %s", want, stderr.String())
 		}
 	}
 }
@@ -339,7 +502,7 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 	}
 
 	command, env, stopInstall, err := installGuardStopHookAt(
-		command, guardPreCompactModeEnforce, "http://127.0.0.1:4567", fakBin, "", pcInstall.SettingsPath, 3, 7, 9)
+		command, guardPreCompactModeEnforce, "http://127.0.0.1:4567", fakBin, "", pcInstall.SettingsPath, 3, 7, 9, 6, guardPreCompactModeOff)
 	if err != nil || !stopInstall.Applied {
 		t.Fatalf("stop install: applied=%v err=%v", stopInstall.Applied, err)
 	}
@@ -350,10 +513,10 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 	if n := strings.Count(strings.Join(command, "\x00"), "--settings"); n != 1 {
 		t.Fatalf("command has %d --settings flags, want exactly 1: %v", n, command)
 	}
-	if stopInstall.WarnAt != 3 || stopInstall.FinalAt != 7 || stopInstall.Max != 9 {
-		t.Fatalf("ladder = warn %d final %d max %d, want 3/7/9", stopInstall.WarnAt, stopInstall.FinalAt, stopInstall.Max)
+	if stopInstall.WarnAt != 3 || stopInstall.FinalAt != 7 || stopInstall.Max != 9 || stopInstall.SameStop != 6 {
+		t.Fatalf("ladder = warn %d final %d max %d same-stop %d, want 3/7/9/6", stopInstall.WarnAt, stopInstall.FinalAt, stopInstall.Max, stopInstall.SameStop)
 	}
-	var sawMode, sawWarn, sawFinal, sawMax bool
+	var sawMode, sawWarn, sawFinal, sawMax, sawSame bool
 	for _, kv := range env {
 		switch {
 		case kv[0] == guardStopHookEnvMode && kv[1] == guardPreCompactModeEnforce:
@@ -364,10 +527,12 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 			sawFinal = true
 		case kv[0] == guardStopHookEnvMax && kv[1] == "9":
 			sawMax = true
+		case kv[0] == guardStopHookEnvSameStop && kv[1] == "6":
+			sawSame = true
 		}
 	}
-	if !sawMode || !sawWarn || !sawFinal || !sawMax {
-		t.Fatalf("missing stop-hook env: mode=%v warn=%v final=%v max=%v from %v", sawMode, sawWarn, sawFinal, sawMax, env)
+	if !sawMode || !sawWarn || !sawFinal || !sawMax || !sawSame {
+		t.Fatalf("missing stop-hook env: mode=%v warn=%v final=%v max=%v same-stop=%v from %v", sawMode, sawWarn, sawFinal, sawMax, sawSame, env)
 	}
 
 	// The single settings file now carries BOTH hooks.
@@ -400,7 +565,7 @@ func TestInstallGuardStopHookCreatesOwnSettingsWhenPreCompactOff(t *testing.T) {
 	dir := t.TempDir()
 	command, env, install, err := installGuardStopHookAt(
 		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
-		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9)
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9, 6, guardPreCompactModeOff)
 	if err != nil || !install.Applied {
 		t.Fatalf("install: applied=%v err=%v", install.Applied, err)
 	}
@@ -420,7 +585,7 @@ func TestInstallGuardStopHookInjectsTaskHandoffEnv(t *testing.T) {
 	handoffPath := filepath.Join(dir, "handoff.json")
 	_, env, install, err := installGuardStopHookAt(
 		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
-		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9,
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9, 6, guardPreCompactModeOff,
 		guardTaskHandoffConfig{Mode: guardPreCompactModeEnforce, File: handoffPath, Repo: "owner/repo", Live: true})
 	if err != nil || !install.Applied {
 		t.Fatalf("install: applied=%v err=%v", install.Applied, err)
@@ -449,7 +614,7 @@ func TestInstallGuardStopHookSkipsOffAndNonClaude(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			command, env, install, err := installGuardStopHookAt(tc.command, tc.mode, "http://127.0.0.1:4567", "fak", dir, "", 3, 7, 9)
+			command, env, install, err := installGuardStopHookAt(tc.command, tc.mode, "http://127.0.0.1:4567", "fak", dir, "", 3, 7, 9, 6, guardPreCompactModeOff)
 			if err != nil {
 				t.Fatalf("install: %v", err)
 			}
