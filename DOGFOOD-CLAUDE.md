@@ -250,8 +250,12 @@ claude-glm-gcp                                 # interactive Claude Code on GLM-
 ```
 
 `claude-glm-gcp` is this launcher with `FAK_DOGFOOD_PRESET=glm-gcp`: backend `openai`,
-served id `glm-5.2`, base URL `FAK_GLM_GCP_BASE_URL`. The full playbook — bring-up,
-tunnel, and the honest hardware gate (the live model turn needs the GCP node up) — is
+served id `glm-5.2`, base URL `FAK_GLM_GCP_BASE_URL`. It is an **opt-in** launcher (see
+[the graduation rule](#external-provider-graduation-which-launchers---install-actually-adds-3034))
+— a plain `--install` does not add it, so either run it through the preset env
+(`FAK_DOGFOOD_PRESET=glm-gcp ./scripts/dogfood-claude.sh --probe "…"`) or put the
+launcher on PATH with `--install-all`. The full playbook — bring-up, tunnel, and the
+honest hardware gate (the live model turn needs the GCP node up) — is
 [`docs/fak/claude-glm-gcp.md`](docs/fak/claude-glm-gcp.md).
 
 The launcher raises `API_TIMEOUT_MS` for the child Claude Code process from
