@@ -102,6 +102,20 @@ The dry-run should print a command shaped like:
 fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
+### Continuation guard and intentional direct sessions
+
+The reviewed Codex `UserPromptSubmit` continuation hook runs `fak sessions
+codex-loop-hook` before a continued turn. If the session is using a direct model
+provider, the hook blocks the turn because fak cannot enforce the guard on that model
+call; relaunch with `fak codex` (preferred) or `fak guard -- codex`.
+
+For a deliberately direct-provider continuation, pass `--allow-direct` when invoking
+the hook, or set `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1` in the hook environment. In
+PowerShell use `$env:FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`; on POSIX shells prefix the
+Codex command with `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`. The hook intentionally fails
+open on unreadable/missing session evidence or other internal diagnostic errors, and
+writes a diagnostic to stderr rather than blocking unrelated Codex work.
+
 After the child exits, `fak codex` also tries to find the newest Codex session JSONL
 touched during the run and writes privacy-preserving vCache artifacts: sanitized token
 counters plus a `fak.vcache.score.v1` score under the user config dir

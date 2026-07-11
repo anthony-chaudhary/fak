@@ -36,12 +36,17 @@ func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
 	if got.Decision != "block" {
 		t.Fatalf("decision = %q, want block: %+v", got.Decision, got)
 	}
+	overrideInstruction := "prefix the Codex command with `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`"
+	if runtime.GOOS == "windows" {
+		overrideInstruction = "set `$env:FAK_ALLOW_DIRECT_CODEX_CONTINUE=1` in PowerShell"
+	}
 	for _, want := range []string{
 		"codex_session_bypassed_fak_guard",
 		"model_provider=openai",
 		"fak codex",
 		"fak guard -- codex",
-		codexLoopHookOverrideEnv + "=1",
+		"--allow-direct",
+		overrideInstruction,
 	} {
 		if !strings.Contains(got.Reason, want) {
 			t.Errorf("block reason missing %q: %s", want, got.Reason)

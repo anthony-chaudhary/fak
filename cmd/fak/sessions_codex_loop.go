@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -330,13 +331,20 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 	}
 }
 
+func codexLoopHookOverrideInstruction() string {
+	if runtime.GOOS == "windows" {
+		return "set `$env:" + codexLoopHookOverrideEnv + "=1` in PowerShell"
+	}
+	return "prefix the Codex command with `" + codexLoopHookOverrideEnv + "=1`"
+}
+
 func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, argv []string, diagnose func(io.Reader, string) (codexLoopDiagnosis, error)) int {
 	fs := flag.NewFlagSet("sessions codex-loop-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
 	allowDirect := fs.Bool("allow-direct", false, "explicitly allow this intentional direct-provider continuation")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]")
+		fmt.Fprintf(stderr, "usage: fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct] (or set %s=1)\n", codexLoopHookOverrideEnv)
 	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
@@ -398,8 +406,8 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	reason := codexLoopDiagnosisGateReason(d, "unguarded") +
 		": this active Codex session uses model_provider=" + strings.TrimSpace(d.ModelProvider) +
 		", so fak cannot enforce the guard before the next turn. Relaunch with `fak codex`" +
-		" or `fak guard -- codex`. For an intentional direct session, set " +
-		codexLoopHookOverrideEnv + "=1 and resubmit."
+		" or `fak guard -- codex`. For an intentional direct session, pass `--allow-direct`" +
+		" to the hook or " + codexLoopHookOverrideInstruction() + " and resubmit."
 	if err := json.NewEncoder(stdout).Encode(codexLoopHookBlock{Decision: "block", Reason: reason}); err != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode block: %v\n", err)
 		return 1
