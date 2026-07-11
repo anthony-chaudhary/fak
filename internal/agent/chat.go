@@ -1017,6 +1017,20 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		comp.PreSendQuarantines = call.quarantined
 		comp.PreSendRedactions = call.redacted
 		comp.PreSendRedactionRecords = call.redactions
+		// Write-ahead CLEAR (#4123 — the symmetric other half of #1363's retry checkpoint):
+		// the turn completed, so drop any in-flight checkpoint back to the zero value through
+		// the SAME hook the retry boundary writes (checkpointPending maps (0,0,0) to
+		// SetPendingTurn(trace, PendingTurn{})). This fires on BOTH the retry-recovered path
+		// (429/5xx-then-200, clearing the {attempt,status} the loop just wrote) AND the
+		// first-try 200 — because a RESUMED process re-enters a turn whose RESTORED checkpoint
+		// must be cleared even though THIS process never wrote one, and Complete cannot tell a
+		// fresh first-try from a resumed one, so the clear is unconditional on success. A
+		// restart then reads IsZero() and starts fresh instead of re-attaching a finished turn.
+		// The zero write keeps the wire byte-identical (omitzero); only Rev moves. nil hook =
+		// unchanged (the pre-#1363 path).
+		if p.PendingTurnCheckpoint != nil {
+			p.PendingTurnCheckpoint(0, 0, 0)
+		}
 		return comp, nil
 	}
 	return nil, rs.exhausted("planner: failed after retries")
