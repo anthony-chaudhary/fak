@@ -1467,6 +1467,10 @@ func guardClassifyChildCrash(runErr error, childState *os.ProcessState) (class s
 	if childState != nil {
 		stateStr = strings.ToLower(childState.String())
 	}
+	windowsForcedTermination := runtime.GOOS == "windows" && uint32(code) == 0xffffffff
+	if windowsForcedTermination {
+		code = -1
+	}
 	signaled := code < 0 || strings.Contains(stateStr, "signal")
 	oom := code == 137 || strings.Contains(stateStr, "killed")
 	switch {

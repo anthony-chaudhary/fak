@@ -76,6 +76,14 @@ func TestGuardClassifyChildCrash(t *testing.T) {
 		t.Fatalf("exit 137 -> class=%q code=%d crash=%v, want OOM/137/true", class, code, isCrash)
 	}
 
+	if runtime.GOOS == "windows" {
+		forcedErr, forcedState := runToExit(t, -1)
+		class, code, isCrash := guardClassifyChildCrash(forcedErr, forcedState.ProcessState)
+		if !isCrash || class != journal.CrashSignal || code != -1 {
+			t.Fatalf("Windows forced termination -> class=%q code=%d crash=%v, want SIGNAL_CRASH/-1/true", class, code, isCrash)
+		}
+	}
+
 	// A plain non-zero exit (e.g. a Go panic the runtime turned into a code) is a
 	// NONZERO_EXIT, distinct from a signal.
 	panicErr, panicState := runToExit(t, 2)
