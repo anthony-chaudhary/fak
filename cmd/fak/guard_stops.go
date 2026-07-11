@@ -53,10 +53,17 @@ const (
 	stopDispCleanWrapup     guardStopDisposition = "clean_wrapup"     // agent wrote its sanctioned "no allowed path:" note before stopping
 
 	// continues (the hook BLOCKED the stop to keep the session working)
-	stopDispToolFeedbackContinue guardStopDisposition = "tool_feedback_continue" // block: let the model repair a malformed/misrouted call
-	stopDispDenyAllContinue      guardStopDisposition = "deny_all_continue"      // block: blind deny-all ladder (nudge/warn/final)
-	stopDispSameIssueContinue    guardStopDisposition = "same_issue_continue"    // block: same-issue deny-all ladder
-	stopDispHandoffBlock         guardStopDisposition = "handoff_block"          // block: task-handoff Stop gate held the stop
+	stopDispToolFeedbackContinue     guardStopDisposition = "tool_feedback_continue"     // block: let the model repair a malformed/misrouted call
+	stopDispDenyAllContinue          guardStopDisposition = "deny_all_continue"          // block: blind deny-all ladder (nudge/warn/final)
+	stopDispSameIssueContinue        guardStopDisposition = "same_issue_continue"        // block: same-issue deny-all ladder
+	stopDispHandoffBlock             guardStopDisposition = "handoff_block"              // block: task-handoff Stop gate held the stop
+	stopDispOperatorDirectedContinue guardStopDisposition = "operator_directed_continue" // block: headless turn asked a human; feed the choicetriage remediation back
+
+	// operator-directed non-blocking outcomes (see guard_operator_directed.go): the final
+	// turn addressed a human, but the gate allowed the stop.
+	stopDispOperatorDirectedEscalate guardStopDisposition = "operator_directed_escalate" // allow: HUMAN_RESIDUAL — a genuine escalation, routed not re-prompted
+	stopDispOperatorDirectedWarn     guardStopDisposition = "operator_directed_warn"     // allow: warn soak — remediation printed, stop allowed
+	stopDispOperatorDirectedShadow   guardStopDisposition = "operator_directed_shadow"   // allow: shadow — would-enforce decision logged, stop allowed
 
 	// bounded stand-downs (the hook gave up and ALLOWED the stop after the ladder)
 	stopDispBlindGiveUp     guardStopDisposition = "blind_give_up"      // stood down past --deny-all-max (blind)
@@ -93,15 +100,18 @@ const (
 // decide") rather than silently counting it as a clean stop.
 func guardStopDispositionKind(d guardStopDisposition) guardStopKind {
 	switch d {
-	case stopDispCleanCompletion, stopDispCleanWrapup:
+	case stopDispCleanCompletion, stopDispCleanWrapup, stopDispOperatorDirectedEscalate:
+		// An operator-directed escalate is a legitimate, routed conclusion — the agent was
+		// right to stop on an authority wall — so it rolls up as a clean stop; the
+		// OperatorDirected count keeps it separately visible.
 		return stopKindClean
-	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock:
+	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock, stopDispOperatorDirectedContinue:
 		return stopKindContinue
 	case stopDispBlindGiveUp, stopDispSameIssueGiveUp:
 		return stopKindStandDown
 	case stopDispModeOff:
 		return stopKindOff
-	case stopDispShadow:
+	case stopDispShadow, stopDispOperatorDirectedWarn, stopDispOperatorDirectedShadow:
 		return stopKindShadow
 	default:
 		return stopKindFailOpen
@@ -455,6 +465,15 @@ func renderGuardStopsSummary(sum guardStopsSummary) string {
 	if sum.OperatorDirected > 0 {
 		fmt.Fprintf(&b, "  → %d stop(s) ended with the agent asking a human instead of acting (headless-directed).\n", sum.OperatorDirected)
 		b.WriteString("    An autonomous run has no one to answer; the choicetriage fold says what to do instead (take the action, state the assumption, file a ticket, or escalate). Run `fak headless-lint` on the turn to see the remediation.\n")
+		// Enforcement breakdown: how many of those the operator-directed gate actively acted on
+		// (blocked to make the agent continue, or routed as a HUMAN_RESIDUAL escalation) vs merely
+		// observed (warn soak / shadow). Reads the soak → promote decision straight off the ledger.
+		enforced := sum.ByDisp[stopDispOperatorDirectedContinue] + sum.ByDisp[stopDispOperatorDirectedEscalate]
+		observed := sum.ByDisp[stopDispOperatorDirectedWarn] + sum.ByDisp[stopDispOperatorDirectedShadow]
+		if enforced > 0 || observed > 0 {
+			fmt.Fprintf(&b, "    of these: %d enforced (%d auto-continued, %d escalated), %d observed only (warn/shadow soak).\n",
+				enforced, sum.ByDisp[stopDispOperatorDirectedContinue], sum.ByDisp[stopDispOperatorDirectedEscalate], observed)
+		}
 	}
 
 	// per-disposition breakdown, most frequent first

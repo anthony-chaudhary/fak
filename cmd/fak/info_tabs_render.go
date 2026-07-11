@@ -22,14 +22,13 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 	if width <= 0 {
 		width = 80
 	}
-	ctx := guardInfoPanelCtx{
-		v:      v,
-		tr:     tr,
-		width:  width,
-		sparkW: clampIntTUI(width-26, 8, 28),
-		gaugeW: clampIntTUI(width-28, 6, 20),
+	ctx := newGuardInfoPanelCtx(v, tr, width)
+	ctx.cacheMech = state.cacheMech // expand the clicked ablation mechanism's detail sub-panel
+	topRow := buildInfoTabBar(state.active, state.glossaryOpen).text
+	if state.copyMode {
+		topRow = buildInfoCopyBanner(width) // frozen for copy: swap the tab bar for the how-to banner
 	}
-	rows := []string{buildInfoTabBar(state.active, state.glossaryOpen).text}
+	rows := []string{topRow}
 
 	// bodyHeight is the room left under the tab bar; 0/negative height (unknown pane) means
 	// "roomy", so the body renders in full and the loop's own cap pins it.
@@ -41,7 +40,11 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 	if state.glossaryOpen {
 		body = renderInfoGlossaryBody(state.glossaryTerm, width)
 	} else {
-		body = renderInfoView(state.active, ctx, bodyHeight)
+		// The active view scrolls: build its full un-degraded rows, then window them to the
+		// body height at the view's stored offset. The overview pins its identity row (#3778);
+		// the focused views pin nothing.
+		full, pinned := infoViewFullRows(state.active, ctx)
+		body, _ = scrollInfoWindow(full, pinned, state.scroll[state.active], bodyHeight)
 	}
 	rows = append(rows, body...)
 
@@ -54,42 +57,152 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 	return strings.Join(rows, "\n")
 }
 
-// renderInfoView renders one focused view's body (the rows below the tab bar), fitted to
-// bodyHeight (0/negative = roomy). Overview reuses the full composed panel stack; the rest are
-// single-subsystem projections that show one subsystem without the overview's degradation.
-func renderInfoView(view infoView, ctx guardInfoPanelCtx, bodyHeight int) []string {
-	switch view {
-	case viewAgents:
-		return fitInfoBody(renderInfoAgentsView(ctx.v), bodyHeight)
-	case viewEndpoints:
-		return fitInfoBody(renderInfoEndpointsView(ctx), bodyHeight)
-	case viewCache:
-		return fitInfoBody(renderInfoCacheView(ctx), bodyHeight)
-	case viewSafety:
-		return fitInfoBody(renderInfoSafetyView(ctx.v), bodyHeight)
-	default: // viewOverview
-		// The overview reuses the whole composed panel stack (with its identity row), fitted by
-		// the existing composer to the body height.
-		return composeGuardInfoPanels(ctx, guardInfoPanels(), bodyHeight)
+// buildInfoCopyBanner is the one-line banner that replaces the tab bar while copy/freeze mode is
+// active. It states plainly that the pane is frozen and how to select/copy and resume, so a
+// watcher who pressed 'c' is never left guessing why the frame stopped updating. A trailing rule
+// fills the row so the banner reads as a distinct mode line; the caller width-caps every row, so
+// a narrow pane trims the tail rather than wrapping.
+func buildInfoCopyBanner(width int) string {
+	if width <= 0 {
+		width = 80
+	}
+	msg := "COPY MODE — drag to select, copy with your terminal · c or Ctrl-C to resume "
+	if pad := width - dispWidthTUI(msg); pad > 0 {
+		msg += strings.Repeat("─", pad)
+	}
+	return takeCellsTUI(msg, width)
+}
+
+// newGuardInfoPanelCtx builds the panel render context for a pane of the given width, scaling
+// the sparkline/gauge widths to the pane but keeping them bounded so the trailing label+value
+// always has room. Shared by the visual block, the interactive block, and the scroll clamp so
+// all three size their content identically.
+func newGuardInfoPanelCtx(v guardInfoVars, tr *guardInfoTrend, width int) guardInfoPanelCtx {
+	if width <= 0 {
+		width = 80
+	}
+	return guardInfoPanelCtx{
+		v:      v,
+		tr:     tr,
+		width:  width,
+		sparkW: clampIntTUI(width-26, 8, 28),
+		gaugeW: clampIntTUI(width-28, 6, 20),
 	}
 }
 
-// fitInfoBody caps rows to bodyHeight, folding the remainder into a trailing "+N more" row so a
-// long list (many agents, many deny reasons) can never scroll the pane. bodyHeight<=0 (roomy or
-// unknown) returns rows unchanged.
-func fitInfoBody(rows []string, bodyHeight int) []string {
-	if bodyHeight <= 0 || len(rows) <= bodyHeight {
-		return rows
+// infoViewFullRows builds one view's complete, un-windowed body rows plus the count of leading
+// rows pinned to the top (never scrolled). The overview pins its identity row and scrolls the
+// full panel stack at full detail (#3778 — the scroll model replaces the overview's degradation
+// in the interactive pane); the focused views pin nothing and show one subsystem uncapped, the
+// list the overview's per-panel caps exist to lift.
+func infoViewFullRows(view infoView, ctx guardInfoPanelCtx) (full []string, pinned int) {
+	switch view {
+	case viewAgents:
+		return renderInfoAgentsView(ctx.v), 0
+	case viewEndpoints:
+		return renderInfoEndpointsView(ctx), 0
+	case viewCache:
+		return renderInfoCacheView(ctx), 0
+	case viewSafety:
+		return renderInfoSafetyView(ctx.v), 0
+	default: // viewOverview
+		return guardInfoRoomyPanelRows(ctx), 1
 	}
-	if bodyHeight == 1 {
-		return []string{fmt.Sprintf(" +%d more (pane too short)", len(rows))}
+}
+
+// guardInfoRoomyPanelRows is the overview's full, un-degraded content: the identity row, then
+// every non-silent panel at full detail with its section rule — exactly the layout
+// composeGuardInfoPanels emits when the pane is tall enough for everything. The interactive
+// overview scrolls THIS (identity row pinned) instead of degrading panels to fit, so an operator
+// can page through every subsystem at full detail. The non-interactive visual block still
+// degrades via composeGuardInfoPanels — a piped, non-interactive frame cannot scroll.
+func guardInfoRoomyPanelRows(ctx guardInfoPanelCtx) []string {
+	out := []string{guardInfoVisualIdentityRow(ctx.v)}
+	for _, p := range guardInfoPanels() {
+		full := p.rows(ctx, guardPanelFull)
+		if len(full) == 0 {
+			continue // a silent panel this tick costs nothing
+		}
+		out = append(out, guardInfoRuleTUI(p.name, ctx.width))
+		out = append(out, full...)
 	}
-	kept := rows[:bodyHeight-1]
-	extra := len(rows) - (bodyHeight - 1)
-	out := make([]string, 0, bodyHeight)
-	out = append(out, kept...)
-	out = append(out, fmt.Sprintf(" +%d more", extra))
 	return out
+}
+
+// scrollInfoWindow renders full into a window of height lines, scrolled so that offset scrollable
+// rows are hidden above the visible slice, and returns the visible rows plus the clamped offset
+// actually used (so the loop can persist the clamp and never drift past the ends). The first
+// pinned rows are an anchor: always shown at the top, never scrolled. When the content fits,
+// every row shows and the clamped offset is 0 (so a roomy pane is byte-identical to the pre-scroll
+// render). When it does not, an "↑ N more above" / "↓ N more below" indicator marks the hidden
+// rows on each side that has them. Pure: no I/O, no TTY.
+func scrollInfoWindow(full []string, pinned, offset, height int) (rows []string, clamped int) {
+	if height <= 0 || len(full) <= height { // roomy/unknown, or it already fits — no window
+		return full, 0
+	}
+	if pinned < 0 {
+		pinned = 0
+	}
+	if pinned > len(full) {
+		pinned = len(full)
+	}
+	if height <= pinned { // too short even for the pinned prefix: show what fits, top-down
+		return append([]string(nil), full[:height]...), 0
+	}
+	pinnedRows := full[:pinned]
+	scrollable := full[pinned:]
+	s := len(scrollable)
+	avail := height - pinned          // lines for indicators + scrollable content; avail >= 1, s > avail
+	maxOffset := maxInt(0, s-avail+1) // at maxOffset the window ends at s with an above indicator
+	offset = clampIntTUI(offset, 0, maxOffset)
+
+	above := offset > 0
+	slots := avail
+	if above {
+		slots-- // an "↑ more above" line
+	}
+	below := offset+slots < s
+	if below {
+		slots-- // a "↓ more below" line
+	}
+	if slots < 0 {
+		slots = 0
+	}
+	end := offset + slots
+	if end > s {
+		end = s
+	}
+	out := make([]string, 0, height)
+	out = append(out, pinnedRows...)
+	if above {
+		out = append(out, fmt.Sprintf(" ↑ %d more above", offset))
+	}
+	out = append(out, scrollable[offset:end]...)
+	if below {
+		out = append(out, fmt.Sprintf(" ↓ %d more below", s-end))
+	}
+	return out, offset
+}
+
+// clampInfoScrollToSample pins the active view's stored scroll offset to the content that view
+// currently renders at (width,height), so an offset set past the end (the End key, a page step,
+// or content that shrank) is pulled back to the last page instead of drifting. The loop calls it
+// after applyInfoInput so the stored offset the NEXT keystroke reads is already honest. The
+// glossary overlay does not scroll, so it is returned unchanged. Pure.
+func clampInfoScrollToSample(s infoViewState, v guardInfoVars, tr *guardInfoTrend, width, height int) infoViewState {
+	if s.glossaryOpen {
+		return s
+	}
+	ctx := newGuardInfoPanelCtx(v, tr, width)
+	ctx.cacheMech = s.cacheMech // count the expanded mechanism's detail rows when clamping the scroll
+	bodyHeight := 0
+	if height > 0 {
+		bodyHeight = height - 1
+	}
+	full, pinned := infoViewFullRows(s.active, ctx)
+	_, clamped := scrollInfoWindow(full, pinned, s.scroll[s.active], bodyHeight)
+	s.scroll[s.active] = clamped
+	return s
 }
 
 // renderInfoAgentsView is the expanded Agents view: a fleet-summary header, then one full row per
@@ -148,8 +261,10 @@ func guardInfoSeatDetail(a gateway.SessionAccount) string {
 }
 
 // renderInfoCacheView is the expanded Cache view: the cache gauge + saving verdict + owner split,
-// the trend sparklines (hit/save/work + turns saved), and the raw savings figure — the whole cache
-// economy in one place instead of split across the overview's trends + tasks panels.
+// the raw savings figure, the live per-mechanism cache ABLATION (what each caching mechanism is
+// saving this session — the live twin of the offline `fak ablate` concept bars, sourced from this
+// session's own witnessed counters), and the trend sparklines — the whole cache economy in one
+// place instead of split across the overview's trends + tasks panels.
 func renderInfoCacheView(ctx guardInfoPanelCtx) []string {
 	v := ctx.v
 	cacheRow := fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), ctx.gaugeW), guardInfoHitPct(v), guardInfoSavingWord(v))
@@ -157,6 +272,7 @@ func renderInfoCacheView(ctx guardInfoPanelCtx) []string {
 		cacheRow += " · " + split
 	}
 	rows := []string{cacheRow, fmt.Sprintf(" saved  %s tokens so far", signedTokens(guardInfoSaved(v)))}
+	rows = append(rows, renderInfoCacheAblationRows(ctx)...)
 	rows = append(rows, guardInfoTrendsPanelRows(ctx, guardPanelFull)...)
 	return rows
 }

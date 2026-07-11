@@ -32,3 +32,19 @@ func guardUnattestedBuildWarning(buildStamp string) string {
 		"UNVERIFIABLE (a stale guard looks identical). Rebuild in-repo with `go build ./cmd/fak`, or run " +
 		"`fak self-update --force` to install a stamped origin/main build.\n"
 }
+
+// guardInfoStalenessNote is the info PANE's persistent twin of guardUnattestedBuildWarning. The
+// banner prints its `build WARN` row once at startup and it scrolls off, but `fak info` stays on
+// screen for the whole session — so the pane header is where an operator will actually SEE that
+// the running fak cannot attest its commit. It reuses guardBuildStampUnattested over the SAME
+// build-stamp string the banner and version tag read (guardBannerBuildStamp), so pane, banner,
+// and the header's version tag never disagree about attestation. Returns "" when the build IS
+// attested — the "+"-marked build id in guardInfoVersionTag is then the visible staleness tell,
+// and the pane stays uncluttered — so the header can emit this line unconditionally.
+func guardInfoStalenessNote(buildStamp string) string {
+	if !guardBuildStampUnattested(buildStamp) {
+		return ""
+	}
+	return "stale-build WARN: cannot confirm which commit fak is running (staleness UNVERIFIABLE) — " +
+		"rebuild `go build ./cmd/fak`, or `fak self-update --force`, then relaunch"
+}
