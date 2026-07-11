@@ -116,6 +116,12 @@ type Watcher struct {
 	interval time.Duration
 	onEvent  func(ReloadEvent)
 
+	// readFile reads the manifest bytes. It is a seam (defaults to os.ReadFile in
+	// NewWatcher) so a test can inject a transient read failure — the Windows
+	// sharing-violation / mid-replace delete window that the change gate must
+	// survive without dropping the edit (#4000).
+	readFile func(string) ([]byte, error)
+
 	mu       sync.Mutex
 	lastSig  fileSig
 	lastGood []byte // bytes of the currently-installed manifest (content gate)
@@ -130,7 +136,7 @@ func NewWatcher(path string, live *Live, interval time.Duration, onEvent func(Re
 	if interval <= 0 {
 		interval = DefaultReloadInterval
 	}
-	w := &Watcher{path: path, live: live, interval: interval, onEvent: onEvent}
+	w := &Watcher{path: path, live: live, interval: interval, onEvent: onEvent, readFile: os.ReadFile}
 	// Seed the baseline only when disk still matches the installed policy. The host
 	// loads the manifest before constructing the watcher; if the file changes in that
 	// small window, treating the new bytes as "last-good" would make the edit invisible.
@@ -165,6 +171,14 @@ func (w *Watcher) Run(ctx context.Context) error {
 // failure (e.g. mid-rename of an atomically-replaced file) is treated as no-change —
 // the last-good policy stays installed and the next tick retries — so a reload is
 // never half-applied from a torn write.
+//
+// The change gate (lastSig) is advanced ONLY after the read succeeds (#4000): a
+// stat-success followed by a transient ReadFile failure — a Windows sharing violation
+// while the writer holds the file, or a mid-replace delete window — must leave lastSig
+// un-advanced so the NEXT tick re-reads. Advancing it before the read (the old bug)
+// let a single dropped read wedge the gate: the next tick saw sig == lastSig, judged
+// "unchanged", and silently kept classifying with the old manifest until some later
+// edit changed size/mtime again.
 func (w *Watcher) poll() ReloadEvent {
 	fi, err := os.Stat(w.path)
 	if err != nil {
@@ -173,12 +187,21 @@ func (w *Watcher) poll() ReloadEvent {
 	sig := sigOf(fi)
 	w.mu.Lock()
 	unchanged := sig == w.lastSig && w.lastGood != nil
-	w.lastSig = sig
 	w.mu.Unlock()
 	if unchanged {
 		return ReloadEvent{Path: w.path}
 	}
-	return w.applyFromFile()
+	ev, readOK := w.applyFromFile()
+	if readOK {
+		// Read succeeded: commit the gate now (before/independent of the parse
+		// outcome), so a persistently malformed file de-dups to one reject rather
+		// than re-emitting every tick, while a transient read failure above leaves
+		// the gate open for the next tick to retry.
+		w.mu.Lock()
+		w.lastSig = sig
+		w.mu.Unlock()
+	}
+	return ev
 }
 
 // Reload forces a reload check now, bypassing the size+mtime gate so even an edit
@@ -191,22 +214,29 @@ func (w *Watcher) Reload() ReloadEvent {
 		w.lastSig = sigOf(fi)
 		w.mu.Unlock()
 	}
-	return w.applyFromFile()
+	ev, _ := w.applyFromFile()
+	return ev
 }
 
 // applyFromFile reads the file and, if its content differs from the installed
 // policy, parses+validates it and atomically swaps it in. A parse/validate failure
 // is rejected (last-good kept, rejects incremented). Identical content is a no-op.
-func (w *Watcher) applyFromFile() ReloadEvent {
-	b, err := os.ReadFile(w.path)
+//
+// The second return value reports whether os.ReadFile SUCCEEDED (not whether a swap
+// happened): poll() commits its change gate only on a successful read, so a transient
+// read failure leaves the gate open for the next tick to retry (#4000). It is true for
+// a same-content no-op and a parse-rejected edit alike — both read the bytes — and
+// false only when the read itself failed.
+func (w *Watcher) applyFromFile() (ReloadEvent, bool) {
+	b, err := w.readFile(w.path)
 	if err != nil {
-		return ReloadEvent{Path: w.path} // transient: keep last-good
+		return ReloadEvent{Path: w.path}, false // transient: keep last-good, gate NOT advanced → next tick retries
 	}
 	w.mu.Lock()
 	same := w.lastGood != nil && bytes.Equal(b, w.lastGood)
 	w.mu.Unlock()
 	if same {
-		return ReloadEvent{Path: w.path}
+		return ReloadEvent{Path: w.path}, true
 	}
 	m, perr := ParseManifest(b)
 	if perr != nil {
@@ -221,7 +251,7 @@ func (w *Watcher) applyFromFile() ReloadEvent {
 			Err:     fmt.Errorf("route-manifest reload rejected (last-good kept): %w", perr),
 		}
 		w.emit(ev)
-		return ev
+		return ev, true
 	}
 	mp := &m
 	w.live.Store(mp)
@@ -236,7 +266,7 @@ func (w *Watcher) applyFromFile() ReloadEvent {
 		Rejects:  w.live.Rejects(),
 	}
 	w.emit(ev)
-	return ev
+	return ev, true
 }
 
 func (w *Watcher) emit(ev ReloadEvent) {

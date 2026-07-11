@@ -2,6 +2,7 @@ package modelroute
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -161,6 +162,99 @@ func TestWatcherRejectsMalformedKeepsLastGood(t *testing.T) {
 	}
 	if got := routedModel(live); got != "gamma" {
 		t.Fatalf("post-recovery route = %q, want gamma", got)
+	}
+}
+
+// TestWatcherPollRetriesAfterTransientReadFailure covers #4000: poll() must not
+// advance the cheap size+mtime gate before the read succeeds. When stat sees the edit
+// but ReadFile fails transiently (a Windows sharing violation while the writer holds
+// the file, or a mid-replace delete window), the gate must stay un-advanced so the
+// FOLLOWING poll re-reads and applies v2 — instead of silently dropping the operator's
+// edit until some later change moves size/mtime again.
+func TestWatcherPollRetriesAfterTransientReadFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "route.json")
+	live, w := newTestWatcher(t, path, "alpha")
+	if got := routedModel(live); got != "alpha" {
+		t.Fatalf("initial route = %q, want alpha", got)
+	}
+
+	// Install v2 (beta) on disk, but force the NEXT read to fail exactly once — the
+	// transient sharing-violation / delete window the gate must survive.
+	writeManifestFile(t, path, "beta")
+	failNext := true
+	w.readFile = func(p string) ([]byte, error) {
+		if failNext {
+			failNext = false
+			return nil, errors.New("transient: simulated sharing violation")
+		}
+		return os.ReadFile(p)
+	}
+
+	// First poll: size+mtime changed (beta ≠ alpha) so poll reads — and the injected
+	// failure fires. The edit is NOT applied and last-good (alpha) stays installed.
+	ev := w.poll()
+	if ev.Reloaded {
+		t.Fatalf("poll during transient read failure reported Reloaded=true, want false")
+	}
+	if got := routedModel(live); got != "alpha" {
+		t.Fatalf("route after failed read = %q, want last-good alpha", got)
+	}
+
+	// Second poll: the gate was NOT advanced, so the same unchanged size+mtime still
+	// reads as "changed" and now loads v2. Before #4000 this poll saw sig == lastSig,
+	// judged "unchanged", never re-read, and the beta edit was lost.
+	ev = w.poll()
+	if !ev.Reloaded || ev.Err != nil {
+		t.Fatalf("second poll = %+v, want the beta edit applied after the transient failure", ev)
+	}
+	if got := routedModel(live); got != "beta" {
+		t.Fatalf("route after retry = %q, want beta", got)
+	}
+	if live.Reloads() != 1 {
+		t.Fatalf("Reloads() = %d, want 1", live.Reloads())
+	}
+}
+
+// TestWatcherPollMalformedDeDupsThenRecovers covers #4000's second acceptance
+// criterion at the poll() level: committing the gate AFTER a successful read (before
+// parse) must still de-dup a persistently malformed file to ONE reject — not a reject
+// every tick — while a later valid edit still reloads.
+func TestWatcherPollMalformedDeDupsThenRecovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "route.json")
+	live, w := newTestWatcher(t, path, "alpha")
+
+	// A malformed edit: the first poll reads it, rejects it (last-good kept), and
+	// commits the gate off the successful read.
+	if err := os.WriteFile(path, []byte("{ this is not valid json"), 0o600); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	ev := w.poll()
+	if ev.Err == nil {
+		t.Fatalf("first poll of malformed file = %+v, want a rejection", ev)
+	}
+	if live.Rejects() != 1 {
+		t.Fatalf("Rejects() = %d after first poll, want 1", live.Rejects())
+	}
+
+	// Subsequent polls of the UNCHANGED malformed file must be gate no-ops — no
+	// per-tick reject spam (the property the gate-before-parse commit preserves).
+	for i := 0; i < 3; i++ {
+		if ev := w.poll(); ev.Changed || ev.Err != nil {
+			t.Fatalf("repeat poll %d of unchanged malformed file = %+v, want a silent no-op", i, ev)
+		}
+	}
+	if live.Rejects() != 1 {
+		t.Fatalf("Rejects() = %d after repeat polls, want 1 (no per-tick spam)", live.Rejects())
+	}
+
+	// A corrected edit still reloads: the malformed bytes were never adopted as
+	// last-good, so the fix reads as "changed".
+	writeManifestFile(t, path, "beta")
+	if ev := w.poll(); !ev.Reloaded || ev.Err != nil {
+		t.Fatalf("poll after fixing the file = %+v, want beta reloaded", ev)
+	}
+	if got := routedModel(live); got != "beta" {
+		t.Fatalf("post-recovery route = %q, want beta", got)
 	}
 }
 
