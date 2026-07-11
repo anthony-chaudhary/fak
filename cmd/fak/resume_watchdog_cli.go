@@ -343,6 +343,14 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			"phase": "launched", "attempt": attempt,
 		}
 		rwAppendLedger(ledgerPath, row)
+		// #4139/#4216: record the OS-relaunch reset transaction — the transcript-UUID-keyed
+		// analogue of session.ResetTransaction (#1582) — into its own durable, append-only store
+		// next to the launched ledger row, so a hidden relaunch is no longer invisible to the
+		// reset-transaction audit chain. The pure constructor (#4139) carries no clock and leaves
+		// TS ""; the shell stamps the write time here, mirroring the drivestate store's discipline.
+		relaunchReset := resume.NewRelaunchResetRow(p, attempt)
+		relaunchReset.TS = rwNowISO()
+		rwAppendLedger(rwRelaunchResetLedger(regDir), relaunchReset)
 		// A3 (#4114): refresh the durable uuid<->trace identity row for the just-resumed UUID
 		// so its newest row names the account the resume re-homed onto. The resumed child can
 		// never self-record this — WatchdogChildEnv strips CLAUDE_CODE_SESSION_ID from its env
@@ -1089,6 +1097,31 @@ func rwLoadDriveStates(regDir string) map[string]resume.WatchdogDriveState {
 		return nil
 	}
 	return states
+}
+
+// rwRelaunchResetLedger is the durable, transcript-UUID-keyed store of OS-relaunch reset rows
+// (#4139/#4216) — the resume-keyspace analogue of session's ResetTransactionLog (#1582). It
+// lives in the SAME regDir the tick resolves, next to resume_drivestate.jsonl, so the launch-site
+// writer (rwSpawnResumeLaunch's "launched" block) and this reader always agree on the file. It is
+// append-only and folded last-write-per-session, exactly like the drivestate store it mirrors.
+func rwRelaunchResetLedger(regDir string) string {
+	return filepath.Join(regDir, "resume_relaunch_reset.jsonl")
+}
+
+// rwLoadRelaunchResets reads the append-only relaunch-reset store and folds it — through the pure
+// leaf resume.FoldRelaunchResets — into the latest reset per session id (the Claude transcript
+// UUID the plan row carries). A missing / unreadable / empty store yields a nil map (fail-open),
+// mirroring rwLoadDriveStates: an absent store never strands a legitimately-crashed session.
+func rwLoadRelaunchResets(regDir string) map[string]resume.RelaunchResetRow {
+	raw, err := os.ReadFile(rwRelaunchResetLedger(regDir))
+	if err != nil {
+		return nil
+	}
+	resets := resume.FoldRelaunchResets(jsonlledger.Parse[resume.RelaunchResetRow](string(raw), nil))
+	if len(resets) == 0 {
+		return nil
+	}
+	return resets
 }
 
 // rwLoadIdentity reads the append-only identity store and folds it — through the pure leaf

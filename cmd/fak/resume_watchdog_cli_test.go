@@ -346,6 +346,66 @@ func TestResumeWatchdogReleaseReEnablesResume(t *testing.T) {
 	}
 }
 
+// #4216: a single LIVE OS relaunch writes a well-formed RelaunchResetRow to the durable
+// transcript-UUID-keyed store next to its "launched" ledger row, and the read/fold path
+// (rwLoadRelaunchResets -> resume.FoldRelaunchResets) recovers the latest reset for that
+// session — the OS-relaunch analogue of session.ResetTransactionLog.Append (#1582). Also
+// pins that the shell stamped TS at the write site (the pure #4139 constructor leaves it "").
+func TestRelaunchResetWiredAtLaunchSite(t *testing.T) {
+	rwHoldTestEnv(t)
+	regDir := t.TempDir()
+	logDir := t.TempDir()
+	sid := "sid-relaunch-reset-123"
+	// A plain crashed row re-homed onto a second account: PriorAccount -> RelaunchAccount is
+	// the observable reset across the process boundary. rehomed is left false so the launch
+	// path does not require a transcript copy — this test pins the reset append, not re-home.
+	plan := `{"plan":[{"session":"` + sid + `","account":".claude-a","resume_account":".claude-b",` +
+		`"project":"P","disp":"STOPPED_MIDTOOL"}]}`
+	if err := os.WriteFile(filepath.Join(regDir, "resume_plan.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBroker := launchSpawnBroker
+	oldSpawn := rwSpawnResumeLaunch
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant { return allowLaunchBrokerGrant(a, "unit-test-allow") }
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
+		return 12345, nil
+	}
+	t.Cleanup(func() { launchSpawnBroker = oldBroker; rwSpawnResumeLaunch = oldSpawn })
+
+	var out, errb bytes.Buffer
+	rc := runResumeWatchdog(&out, &errb, []string{
+		"--live", "--no-refresh", "--reg-dir", regDir, "--log-dir", logDir, "--spacing-sec", "0",
+	})
+	if rc != 0 {
+		t.Fatalf("watchdog rc=%d stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	// Sanity: the row actually launched (else there is no reset to record).
+	if led, _ := os.ReadFile(filepath.Join(regDir, "resume_ledger.jsonl")); !strings.Contains(string(led), `"phase":"launched"`) {
+		t.Fatalf("expected a launched ledger row:\n%s", led)
+	}
+
+	// The store exists next to the drivestate store, and the fold recovers the reset for sid.
+	resets := rwLoadRelaunchResets(regDir)
+	got, ok := resets[sid]
+	if !ok {
+		t.Fatalf("fold recovered no relaunch reset for %s: %+v", sid, resets)
+	}
+	if !got.WellFormed() {
+		t.Fatalf("recovered reset is not well-formed: %+v", got)
+	}
+	if got.TS == "" {
+		t.Fatalf("reset TS was not stamped at the write site (pure constructor leaves it \"\"): %+v", got)
+	}
+	if got.Cause != "STOPPED_MIDTOOL" {
+		t.Fatalf("reset Cause = %q, want STOPPED_MIDTOOL: %+v", got.Cause, got)
+	}
+	from, to, changed := got.Rehome()
+	if from != ".claude-a" || to != ".claude-b" || !changed {
+		t.Fatalf("reset re-home marker = (%q -> %q, changed=%v), want (.claude-a -> .claude-b, changed=true)", from, to, changed)
+	}
+}
+
 func TestResumeWatchdogStatusJSONLaunchedNoProgressRed(t *testing.T) {
 	reg := t.TempDir()
 	if err := os.WriteFile(filepath.Join(reg, "resume_plan.json"), []byte(`{"plan":[
