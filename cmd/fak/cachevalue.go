@@ -22,6 +22,7 @@ import (
 //	fak cachevalue feed                                  # fold both cache-value ledgers → Slack card
 //	fak cachevalue feed --dry-run                        # render the exact card; do not post
 //	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger docs/nightrun/cache-savings.jsonl
+//	fak cachevalue weekly --dry-run                      # weekly fleet cache-HEALTH digest (posture adoption + reuse trend + shed + refused upgrades, #3646)
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
 //	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
 //	fak cachevalue metrics                               # the same two-track fold + ablation arms as a Prometheus exposition (Grafana surface)
@@ -47,13 +48,14 @@ import (
 
 //fak:ctxplan verb=cachevalue enters="nothing live — an offline fold over the durable cache-value, cache-savings, and gateway-usage JSONL ledgers on disk" pages="nothing into a model window — it renders a cache-effectiveness P&L card and posts it to the #scoreboard Slack channel (or prints it under --dry-run)" warms="nothing — it REPORTS on whether the kernel prompt-cache method is paying off; it warms no prompt cache or KV itself"
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | shapes | status | review | post | feed | metrics", argv,
+	dispatchSubcommands("cachevalue", "report | shapes | status | review | post | feed | weekly | metrics", argv,
 		subcommand{"report", runCachevalueReport},
 		subcommand{"shapes", runCachevalueShapes},
 		subcommand{"status", runCachevalueStatus},
 		subcommand{"review", runCachevalueReview},
 		subcommand{"post", runCachevaluePost},
 		subcommand{"feed", runCachevalueFeed},
+		subcommand{"weekly", runCachevalueWeekly},
 		subcommand{"metrics", runCachevalueMetrics},
 	)
 }
