@@ -55,17 +55,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
-// ChannelDefault is the #scoreboard channel in the scoreboard Slack workspace (team
-// T0BDEJF1HGB) — the fleet's top-level status channel, where the cache-value P&L now posts
-// by default so it rides alongside the scores instead of in a side channel. It is a PUBLIC
-// channel id (not a secret): the @agent bot is a member and posts here with
-// FAK_SCOREBOARD_TOKEN. Override with --channel or FAK_CACHEVALUE_CHANNEL — e.g. point it
-// at the dedicated #cache-value channel (C0BDSB81XDZ) to split the P&L back out. The
-// resolver reads only FAK_CACHEVALUE_CHANNEL, never FAK_SCOREBOARD_CHANNEL, so the two
-// surfaces stay independently overridable even though they now share a default channel.
-// This mirrors blockerpost/grafanapost/dojopost's posture: the channel id is public, only
-// the token is secret.
-const ChannelDefault = "C0BEF8B8KMW"
+// ChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) in the
+// scoreboard Slack workspace (team T0BDEJF1HGB) — the cache-value P&L is one of the CI/CD
+// reporting feeders folded onto that one channel so it rides alongside the rest of the
+// status reporting instead of in a side channel. It is a PUBLIC channel id (not a
+// secret): the @agent bot is a member and posts here with FAK_SCOREBOARD_TOKEN. Override
+// this surface with --channel or FAK_CACHEVALUE_CHANNEL — e.g. point it at the dedicated
+// #cache-value channel (C0BDSB81XDZ) to split the P&L back out — or the whole reporting
+// family with FAK_CICD_REPORT_CHANNEL. The resolver reads only FAK_CACHEVALUE_CHANNEL,
+// never FAK_SCOREBOARD_CHANNEL, so the surfaces stay independently overridable. This
+// mirrors blockerpost/benchpost's posture: the channel id is public, only the token is
+// secret.
+const ChannelDefault = scoreboard.CICDReportChannel
 
 // tokenEnvs / channelEnvs are the dedicated cache-value keys. The token resolver adds a
 // scoreboard fallback (below); the channel resolver falls back to the public default,
@@ -136,7 +137,7 @@ func ResolveChannel() string {
 	if v := envFileValue("FAK_CACHEVALUE_CHANNEL"); v != "" {
 		return v
 	}
-	return ChannelDefault
+	return scoreboard.ResolveCICDReportChannel()
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating

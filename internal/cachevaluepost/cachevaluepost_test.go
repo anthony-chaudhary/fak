@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 // --- resolution -------------------------------------------------------------
@@ -46,14 +47,16 @@ func TestResolveTokenNeverLeaksLabToken(t *testing.T) {
 	}
 }
 
-func TestResolveChannelDefaultsToPublicScoreboardChannel(t *testing.T) {
+func TestResolveChannelDefaultsToCICDReportSink(t *testing.T) {
 	t.Setenv("FAK_CACHEVALUE_CHANNEL", "")
+	t.Setenv("FAK_CICD_REPORT_CHANNEL", "") // no family override → the built-in sink
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {
-		t.Fatalf("ResolveChannel default = %q, want the public #scoreboard channel %q", got, ChannelDefault)
+		t.Fatalf("ResolveChannel default = %q, want the CI/CD reporting sink %q", got, ChannelDefault)
 	}
-	if ChannelDefault != "C0BEF8B8KMW" {
-		t.Fatalf("ChannelDefault = %q, want the #scoreboard channel C0BEF8B8KMW", ChannelDefault)
+	if ChannelDefault != scoreboard.CICDReportChannel {
+		t.Fatalf("ChannelDefault = %q, want the CI/CD reporting sink scoreboard.CICDReportChannel %q",
+			ChannelDefault, scoreboard.CICDReportChannel)
 	}
 }
 
@@ -63,6 +66,7 @@ func TestResolveChannelDoesNotReadScoreboardChannelEnv(t *testing.T) {
 	// not silently drag the cache-value card along — it moves only when
 	// FAK_CACHEVALUE_CHANNEL says so.
 	t.Setenv("FAK_CACHEVALUE_CHANNEL", "")
+	t.Setenv("FAK_CICD_REPORT_CHANNEL", "") // isolate from the family override
 	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C_SCOREBOARD_OVERRIDE")
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {
