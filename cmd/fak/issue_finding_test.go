@@ -263,6 +263,43 @@ func TestIssueFindingFromIssuesReopenAndDedupe(t *testing.T) {
 	}
 }
 
+// The backlog-flood guard the done-condition names: one subject audited twice
+// in a single batch with NEW evidence (a different receipt digest) must still
+// yield exactly one candidate — the first REFUTE creates, the second appends
+// as UPDATE onto the same finding key, never a second issue.
+func TestIssueFindingNewEvidenceSameSubjectYieldsSingleCandidate(t *testing.T) {
+	first := findingTestReceipt(4800, "sha256:flood00001111aaaa", modelroute.CrossAuditRefute, modelroute.AuditSeverityHigh, "r-4800-a")
+	second := findingTestReceipt(4800, "sha256:flood00001111aaaa", modelroute.CrossAuditRefute, modelroute.AuditSeverityHigh, "r-4800-b")
+	deps := issueFindingDeps{
+		receipts:    []modelroute.IssueAuditReceipt{first, second},
+		receiptsSet: true,
+		gh:          failIfCalledGH(t),
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runIssueFindingWith(&stdout, &stderr, []string{"--json"}, deps); code != 0 {
+		t.Fatalf("dry-run exit=%d stderr=%s", code, stderr.String())
+	}
+	var result issueFindingResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result.Candidates) != 1 {
+		t.Fatalf("same subject with new evidence must not add a second candidate, got %d", len(result.Candidates))
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("want 2 plan items, got %d", len(result.Items))
+	}
+	if result.Items[0].Action != string(modelroute.FindingCreate) {
+		t.Fatalf("first refute: want CREATE, got %s", result.Items[0].Action)
+	}
+	if result.Items[1].Action != string(modelroute.FindingUpdate) || result.Items[1].Reason != modelroute.FindingReasonNewEvidence {
+		t.Fatalf("second refute with new digest: want UPDATE/NEW_EVIDENCE, got %s/%s", result.Items[1].Action, result.Items[1].Reason)
+	}
+	if result.Items[0].Key != result.Items[1].Key {
+		t.Fatalf("both receipts must map to one finding key: %q vs %q", result.Items[0].Key, result.Items[1].Key)
+	}
+}
+
 // A filed finding body must itself re-parse to a dispatchable issue under
 // `fak issue contract --from-issues`, closing the loop that the adapter files
 // contract-clean issues (not just contract-clean candidate structs).
