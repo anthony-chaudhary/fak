@@ -176,11 +176,11 @@ func TestDogfoodInstallGraduationGate(t *testing.T) {
 	for _, want := range []string{
 		"graduation_manifest()",
 		"graduated_launchers()",
-		"fak-qwen36-claude|qwen36-local|yes|",   // a graduated local preset (installed by default)
-		"claude-nim-kimi|nim-kimi|no|",          // an opt-in external provider (NOT installed by default)
-		"--install-all)",                        // the operator override mode
-		"--graduation)",                         // the verdict-preview mode
-		"FAK_DOGFOOD_INSTALL_DRYRUN",            // the offline preview seam the regression drives
+		"fak-qwen36-claude|qwen36-local|yes|",  // a graduated local preset (installed by default)
+		"claude-nim-kimi|nim-kimi|no|",         // an opt-in external provider (NOT installed by default)
+		"--install-all)",                       // the operator override mode
+		"--graduation)",                        // the verdict-preview mode
+		"FAK_DOGFOOD_INSTALL_DRYRUN",           // the offline preview seam the regression drives
 		`ln -sf "$target" "$bindir/$launcher"`, // the single gated install line
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
