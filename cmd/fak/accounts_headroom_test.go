@@ -201,3 +201,15 @@ func TestBuildAccountsSeatDeficitSufficient(t *testing.T) {
 		t.Fatalf("got=%+v", got)
 	}
 }
+
+func TestAccountsRequiredDemandFromForecast(t *testing.T) {
+	t.Setenv("FAK_FLEET_TARGET_IPH", "60")
+	t.Setenv("FAK_FLEET_SESSION_MIN", "10")
+	if got := accountsRequiredDemandFromEnv(); got != 10 {
+		t.Fatalf("required=%d, want 10", got)
+	}
+	t.Setenv("FAK_FLEET_TARGET_IPH", "")
+	if got := accountsRequiredDemandFromEnv(); got != 0 {
+		t.Fatalf("unset required=%d, want 0", got)
+	}
+}

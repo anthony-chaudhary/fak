@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
+	"github.com/anthony-chaudhary/fak/internal/fleetcap"
 )
 
 // accounts_headroom.go — the bridge that makes the config-plane ROTATION (fak accounts
@@ -253,9 +255,18 @@ func buildAccountsSeatDeficit(rows []fleetaccounts.Account, product string, requ
 	return accountsSeatDeficit{Required: required, FreshCeiling: rep.TrueConcurrentCeiling, Shortfall: shortfall, Verdict: rep.Verdict}
 }
 
+func accountsRequiredDemandFromEnv() int {
+	target, _ := strconv.ParseFloat(strings.TrimSpace(os.Getenv("FAK_FLEET_TARGET_IPH")), 64)
+	session, _ := strconv.ParseFloat(strings.TrimSpace(os.Getenv("FAK_FLEET_SESSION_MIN")), 64)
+	if session <= 0 || math.IsNaN(session) || math.IsInf(session, 0) {
+		session = fleetForecastDefaultSessionMinutes
+	}
+	return fleetcap.RequiredWorkers(target, session)
+}
+
 func runAccountsHeadroom(stdout, stderr io.Writer, args []string) int {
 	product := "claude"
-	required := 0
+	required := -1
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--product":
@@ -281,6 +292,9 @@ func runAccountsHeadroom(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintf(stderr, "fak accounts headroom: unknown argument %q\n", args[i])
 			return 2
 		}
+	}
+	if required < 0 {
+		required = accountsRequiredDemandFromEnv()
 	}
 	cwd, _ := os.Getwd()
 	paths := fleetaccounts.ResolvePaths(filepath.Join(findRepoRoot(cwd), "tools"))
