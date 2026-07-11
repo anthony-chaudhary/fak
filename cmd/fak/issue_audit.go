@@ -42,6 +42,8 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	auditorTimeout := fs.Duration("auditor-timeout", 10*time.Minute, "maximum auditor inference time")
 	identityRosterPath := fs.String("identity-roster", "", "authoritative fak-audit-identity-roster/v1 JSON file")
 	repo := fs.String("repo", "", "GitHub OWNER/REPO (default: current repository)")
+	bundleOnly := fs.Bool("bundle-only", false, "fetch and emit the bounded credential-free IssueAuditBundle without calling an auditor")
+	bundleCommit := fs.String("bundle-commit", "", "explicit resolving commit SHA for --bundle-only when GitHub has no closing commit event")
 	asJSON := fs.Bool("json", false, "emit the full typed JSON receipt")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -50,7 +52,39 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		fmt.Fprintf(stderr, "fak issue audit: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	if *issueNumber <= 0 || strings.TrimSpace(*authorManifestPath) == "" || strings.TrimSpace(*auditorTarget) == "" || strings.TrimSpace(*identityRosterPath) == "" {
+	if *issueNumber <= 0 {
+		fmt.Fprintln(stderr, "fak issue audit: --issue is required")
+		return 2
+	}
+	if *auditorTimeout <= 0 {
+		fmt.Fprintln(stderr, "fak issue audit: --auditor-timeout must be positive")
+		return 2
+	}
+	if *bundleOnly {
+		if injectedFetcher == nil {
+			injectedFetcher = &githubIssueAuditFetcher{repo: strings.TrimSpace(*repo), commitRef: strings.TrimSpace(*bundleCommit), runner: defaultIssueAuditRunner}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), *auditorTimeout)
+		defer cancel()
+		evidence, err := injectedFetcher.FetchIssueAuditEvidence(ctx, *issueNumber)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue audit: fetch bundle evidence: %v\n", err)
+			return 1
+		}
+		bundle, err := modelroute.BuildIssueAuditBundle(evidence, modelroute.IssueAuditBundleOptions{})
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if encodeErr := enc.Encode(bundle); encodeErr != nil {
+			fmt.Fprintf(stderr, "fak issue audit: encode bundle: %v\n", encodeErr)
+			return 1
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+			return 3
+		}
+		return 0
+	}
+	if strings.TrimSpace(*authorManifestPath) == "" || strings.TrimSpace(*auditorTarget) == "" || strings.TrimSpace(*identityRosterPath) == "" {
 		fmt.Fprintln(stderr, "fak issue audit: --issue, --author-manifest, --auditor PROVIDER/FAMILY/MODEL, and --identity-roster are required")
 		return 2
 	}
@@ -133,10 +167,6 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		}
 	}
 
-	if *auditorTimeout <= 0 {
-		fmt.Fprintln(stderr, "fak issue audit: --auditor-timeout must be positive")
-		return 2
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), *auditorTimeout)
 	defer cancel()
 	receipt, err := modelroute.AuditIssue(ctx, modelroute.IssueAuditRequest{
@@ -294,18 +324,28 @@ func (f *githubIssueAuditFetcher) FetchIssueAuditEvidence(ctx context.Context, i
 		return modelroute.IssueAuditEvidence{}, fmt.Errorf("invalid GitHub repository %q", repo)
 	}
 
-	args := []string{"issue", "view", strconv.Itoa(issue), "--repo", repo, "--json", "number,title,body,state,closedAt,url,closedByPullRequestsReferences"}
+	args := []string{"issue", "view", strconv.Itoa(issue), "--repo", repo, "--json", "number,title,body,state,closedAt,url,comments,closedByPullRequestsReferences"}
 	out, err = f.runner(ctx, "gh", args...)
 	if err != nil {
 		return modelroute.IssueAuditEvidence{}, err
 	}
 	var issueRow struct {
-		Number               int    `json:"number"`
-		Title                string `json:"title"`
-		Body                 string `json:"body"`
-		State                string `json:"state"`
-		ClosedAt             string `json:"closedAt"`
-		URL                  string `json:"url"`
+		Number   int    `json:"number"`
+		Title    string `json:"title"`
+		Body     string `json:"body"`
+		State    string `json:"state"`
+		ClosedAt string `json:"closedAt"`
+		URL      string `json:"url"`
+		Comments []struct {
+			ID        string `json:"id"`
+			URL       string `json:"url"`
+			Body      string `json:"body"`
+			CreatedAt string `json:"createdAt"`
+			UpdatedAt string `json:"updatedAt"`
+			Author    struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"comments"`
 		ClosedByPullRequests []struct {
 			Number int `json:"number"`
 		} `json:"closedByPullRequestsReferences"`
@@ -321,39 +361,110 @@ func (f *githubIssueAuditFetcher) FetchIssueAuditEvidence(ctx context.Context, i
 	if err != nil {
 		return modelroute.IssueAuditEvidence{}, err
 	}
-	diff, err := f.readClosingDiff(ctx, commit)
+	closing, err := f.readClosingCommitEvidence(ctx, commit)
 	if err != nil {
-		return modelroute.IssueAuditEvidence{}, fmt.Errorf("read closing diff %s: %w", commit, err)
+		return modelroute.IssueAuditEvidence{}, fmt.Errorf("read closing evidence %s: %w", commit, err)
 	}
-	return modelroute.IssueAuditEvidence{
-		IssueNumber: issueRow.Number,
-		IssueURL:    issueRow.URL,
-		Title:       issueRow.Title,
-		Body:        issueRow.Body,
-		State:       issueRow.State,
-		ClosedAt:    issueRow.ClosedAt,
-		CommitSHA:   commit,
-		Diff:        string(diff),
-		Evidence:    []modelroute.EvidenceRef{{Kind: "github-closure", Ref: source}},
-	}, nil
+	commit = closing.SHA
+	comments := make([]modelroute.IssueAuditComment, 0, len(issueRow.Comments))
+	for i, comment := range issueRow.Comments {
+		id := strings.TrimSpace(comment.ID)
+		if id == "" {
+			id = fmt.Sprintf("comment-%04d", i+1)
+		}
+		comments = append(comments, modelroute.IssueAuditComment{
+			ID: id, URL: comment.URL, Author: comment.Author.Login, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, Body: comment.Body,
+		})
+	}
+	evidence := modelroute.IssueAuditEvidence{
+		IssueNumber:    issueRow.Number,
+		IssueURL:       issueRow.URL,
+		Title:          issueRow.Title,
+		Body:           issueRow.Body,
+		Comments:       comments,
+		State:          issueRow.State,
+		ClosedAt:       issueRow.ClosedAt,
+		CommitSHA:      commit,
+		Diff:           closing.Patch,
+		ClosingCommits: []modelroute.IssueAuditClosingCommit{closing},
+		Evidence:       []modelroute.EvidenceRef{{Kind: "github-closure", Ref: source}},
+	}
+	populateIssueAuditEvidenceRefs(&evidence, repo)
+	return evidence, nil
 }
 
-func (f *githubIssueAuditFetcher) readClosingDiff(ctx context.Context, commit string) ([]byte, error) {
+func (f *githubIssueAuditFetcher) readClosingCommitEvidence(ctx context.Context, commit string) (modelroute.IssueAuditClosingCommit, error) {
 	parents, err := f.runner(ctx, "git", "rev-list", "--parents", "-n", "1", commit)
 	if err != nil {
-		return nil, err
+		return modelroute.IssueAuditClosingCommit{}, err
 	}
 	fields := strings.Fields(string(parents))
 	if len(fields) < 2 {
-		return nil, fmt.Errorf("commit %s has no parent to diff", commit)
+		return modelroute.IssueAuditClosingCommit{}, fmt.Errorf("commit %s has no parent to diff", commit)
 	}
-	if len(fields) > 2 {
-		// A normal `git show <merge>` is a combined diff and can be empty even
-		// when the PR changed hundreds of lines. The PR's actual closing change
-		// is the merge result relative to its first parent.
-		return f.runner(ctx, "git", "diff", "--no-ext-diff", "--binary", "--no-renames", fields[1], fields[0])
+	parent := fields[1]
+	patch, err := f.runner(ctx, "git", "diff", "--no-ext-diff", "--binary", "--no-renames", parent, fields[0])
+	if err != nil {
+		return modelroute.IssueAuditClosingCommit{}, err
 	}
-	return f.runner(ctx, "git", "show", "--format=", "--no-ext-diff", "--binary", "--no-renames", fields[0])
+	tree, err := f.runner(ctx, "git", "rev-parse", fields[0]+"^{tree}")
+	if err != nil {
+		return modelroute.IssueAuditClosingCommit{}, err
+	}
+	parentTree, err := f.runner(ctx, "git", "rev-parse", parent+"^{tree}")
+	if err != nil {
+		return modelroute.IssueAuditClosingCommit{}, err
+	}
+	pathsRaw, err := f.runner(ctx, "git", "diff", "--name-only", "-z", "--no-renames", parent, fields[0])
+	if err != nil {
+		return modelroute.IssueAuditClosingCommit{}, err
+	}
+	return modelroute.IssueAuditClosingCommit{
+		SHA: fields[0], FirstParentSHA: parent, TreeOID: strings.TrimSpace(string(tree)), FirstParentTreeOID: strings.TrimSpace(string(parentTree)),
+		Patch: string(patch), PatchSHA256: modelroute.IssueAuditContentDigest(string(patch)), ChangedPaths: splitIssueAuditNUL(pathsRaw),
+	}, nil
+}
+
+func splitIssueAuditNUL(raw []byte) []string {
+	parts := bytes.Split(raw, []byte{0})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if path := strings.TrimSpace(string(part)); path != "" {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+func populateIssueAuditEvidenceRefs(evidence *modelroute.IssueAuditEvidence, repo string) {
+	if evidence == nil || len(evidence.ClosingCommits) == 0 {
+		return
+	}
+	commit := evidence.ClosingCommits[0]
+	evidence.CI = append(evidence.CI, modelroute.EvidenceRef{Kind: "github-check-runs", Ref: repo + "@" + commit.SHA})
+	evidence.DOS = append(evidence.DOS, modelroute.EvidenceRef{Kind: "dos-commit-audit", Ref: "commit:" + commit.SHA})
+	for _, path := range commit.ChangedPaths {
+		normalized := strings.ReplaceAll(path, "\\", "/")
+		if strings.HasSuffix(normalized, "_test.go") || strings.Contains(normalized, "/testdata/") {
+			evidence.Tests = append(evidence.Tests, modelroute.EvidenceRef{Kind: "test-path", Ref: normalized})
+		}
+		if strings.HasPrefix(normalized, ".github/workflows/") {
+			evidence.CI = append(evidence.CI, modelroute.EvidenceRef{Kind: "workflow-path", Ref: normalized})
+		}
+		if strings.Contains(normalized, "/testdata/") || strings.HasPrefix(normalized, "experiments/") || strings.HasSuffix(normalized, ".json") || strings.HasSuffix(normalized, ".jsonl") {
+			evidence.Artifacts = append(evidence.Artifacts, modelroute.EvidenceRef{Kind: "artifact-path", Ref: normalized})
+		}
+	}
+	for _, comment := range evidence.Comments {
+		body := strings.ToLower(comment.Body)
+		if strings.Contains(body, "audit finding") || strings.Contains(body, "[finding]") || strings.Contains(body, "verdict: refute") {
+			ref := comment.URL
+			if strings.TrimSpace(ref) == "" {
+				ref = "comment:" + comment.ID
+			}
+			evidence.PriorFindings = append(evidence.PriorFindings, modelroute.EvidenceRef{Kind: "issue-comment-finding", Ref: ref})
+		}
+	}
 }
 
 func (f *githubIssueAuditFetcher) closingCommit(ctx context.Context, repo string, issue int, prs []struct {
@@ -463,12 +574,16 @@ func newIssueAuditHTTPReviewer(identity modelroute.ModelIdentity, endpoint, apiK
 }
 
 func (r *issueAuditHTTPReviewer) ReviewIssue(ctx context.Context, req modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
+	if err := req.Verify(); err != nil {
+		return modelroute.IssueAuditReviewResult{}, err
+	}
 	client := agent.NewHTTPPlanner(r.endpoint, r.identity.Model, r.apiKey)
 	client.MaxTokens = 512
 	client.Temperature = 0
 	temp := 0.0
 	completion, err := client.Complete(ctx, []agent.Message{
-		{Role: agent.RoleUser, Content: req.Prompt},
+		{Role: agent.RoleSystem, Content: req.TrustedInstruction.Content},
+		{Role: agent.RoleUser, Content: req.UntrustedEvidence.Content},
 	}, nil, agent.WithMaxTokens(512), agent.WithTemperature(&temp))
 	if err != nil {
 		return modelroute.IssueAuditReviewResult{}, err
@@ -497,6 +612,9 @@ func newIssueAuditCLIReviewer(driver string, identity modelroute.ModelIdentity) 
 const issueAuditResultSchema = `{"type":"object","additionalProperties":false,"properties":{"verdict":{"type":"string","enum":["PASS","REFUTE","INCONCLUSIVE"]},"reason":{"type":"string"},"evidence_refs":{"type":"array","items":{"type":"string"}}},"required":["verdict","reason","evidence_refs"]}`
 
 func (r *issueAuditCLIReviewer) ReviewIssue(ctx context.Context, req modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
+	if err := req.Verify(); err != nil {
+		return modelroute.IssueAuditReviewResult{}, err
+	}
 	runner := r.runner
 	if runner == nil {
 		runner = runIssueAuditProcess

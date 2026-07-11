@@ -81,6 +81,13 @@ const (
 	infoInputTabSelect                 // a digit 1-9 — jump to view Index (1-based)
 	infoInputToggleGloss               // '?' / 'g' — toggle the glossary overlay
 	infoInputMouseClick                // an SGR left-button press at (X,Y), 1-based cells
+	infoInputScrollUp                  // up-arrow / wheel-up — scroll the active view up a line
+	infoInputScrollDown                // down-arrow / wheel-down — scroll the active view down a line
+	infoInputPageUp                    // PageUp — scroll the active view up a page
+	infoInputPageDown                  // PageDown — scroll the active view down a page
+	infoInputScrollHome                // Home — jump the active view to the top
+	infoInputScrollEnd                 // End — jump the active view to the bottom
+	infoInputCopyMode                  // 'c' — toggle copy/freeze mode (hand selection back to the terminal)
 )
 
 // infoInput is one decoded input event. Index is meaningful only for infoInputTabSelect; X/Y
@@ -163,6 +170,8 @@ func (s *infoInputScanner) stepGround(b byte) infoInput {
 		return infoInput{Kind: infoInputQuit}
 	case b == '?' || b == 'g' || b == 'G':
 		return infoInput{Kind: infoInputToggleGloss}
+	case b == 'c' || b == 'C':
+		return infoInput{Kind: infoInputCopyMode}
 	case b >= '1' && b <= '9':
 		return infoInput{Kind: infoInputTabSelect, Index: int(b - '0')}
 	}
@@ -178,15 +187,24 @@ func (s *infoInputScanner) stepCSIStart(b byte) infoInput {
 	case 'O':
 		s.reset()
 		return infoInput{Kind: infoInputFocusOut}
-	case 'C': // right arrow
+	case 'C': // right arrow — cycle to the next view
 		s.reset()
 		return infoInput{Kind: infoInputTabNext}
-	case 'D': // left arrow
+	case 'D': // left arrow — cycle to the previous view
 		s.reset()
 		return infoInput{Kind: infoInputTabPrev}
-	case 'A', 'B': // up/down arrow — consumed but inert (no vertical navigation yet)
+	case 'A': // up arrow — scroll the active view up a line
 		s.reset()
-		return infoInput{}
+		return infoInput{Kind: infoInputScrollUp}
+	case 'B': // down arrow — scroll the active view down a line
+		s.reset()
+		return infoInput{Kind: infoInputScrollDown}
+	case 'H': // Home — jump to the top
+		s.reset()
+		return infoInput{Kind: infoInputScrollHome}
+	case 'F': // End — jump to the bottom
+		s.reset()
+		return infoInput{Kind: infoInputScrollEnd}
 	case '<': // SGR (1006) mouse private marker — accumulate the Cb;Cx;Cy params
 		s.priv = '<'
 		s.params = s.params[:0]
@@ -213,6 +231,9 @@ func (s *infoInputScanner) stepCSIParam(b byte) infoInput {
 		if priv == '<' && (final == 'M' || final == 'm') {
 			return parseSGRMouse(params, final)
 		}
+		if priv == 0 && final == '~' {
+			return decodeTildeKey(params)
+		}
 		return infoInput{} // some other CSI (cursor report, mode reply) — inert
 	}
 	s.params = append(s.params, b)
@@ -222,14 +243,32 @@ func (s *infoInputScanner) stepCSIParam(b byte) infoInput {
 	return infoInput{}
 }
 
-// parseSGRMouse turns an SGR (1006) mouse sequence's "Cb;Cx;Cy" params + final byte into a
-// click event. It reports ONLY a left-button PRESS ('M', button 0, no motion/wheel bits) as a
-// click; a release ('m'), a drag (motion bit 0x20), or a wheel (code >= 64) is inert — the pane
-// reacts to a deliberate click, not to hovering or scrolling.
-func parseSGRMouse(params string, final byte) infoInput {
-	if final != 'M' {
-		return infoInput{}
+// decodeTildeKey maps a VT-style keypad sequence "ESC [ N ~" (N in params, an optional
+// ";mods" modifier suffix ignored) to a scroll event: 5=PageUp, 6=PageDown, 1/7=Home,
+// 4/8=End. An N the pane does not navigate on is inert.
+func decodeTildeKey(params string) infoInput {
+	if i := strings.IndexByte(params, ';'); i >= 0 {
+		params = params[:i] // drop a "N;mods" modifier suffix — navigate on the base key
 	}
+	switch params {
+	case "5":
+		return infoInput{Kind: infoInputPageUp}
+	case "6":
+		return infoInput{Kind: infoInputPageDown}
+	case "1", "7":
+		return infoInput{Kind: infoInputScrollHome}
+	case "4", "8":
+		return infoInput{Kind: infoInputScrollEnd}
+	}
+	return infoInput{}
+}
+
+// parseSGRMouse turns an SGR (1006) mouse sequence's "Cb;Cx;Cy" params + final byte into an
+// event. A wheel notch (button bit 6 set) scrolls the active view a line — up on the even code
+// (64), down on the odd (65). Otherwise ONLY a left-button PRESS ('M', button 0, no motion bit)
+// is a click; a release ('m'), a drag (motion bit 0x20), or a non-left button is inert — the
+// pane reacts to a deliberate click, not to hovering.
+func parseSGRMouse(params string, final byte) infoInput {
 	fields := strings.Split(params, ";")
 	if len(fields) != 3 {
 		return infoInput{}
@@ -240,7 +279,19 @@ func parseSGRMouse(params string, final byte) infoInput {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return infoInput{}
 	}
-	if cb&0x20 != 0 || cb >= 64 { // motion/drag or wheel — not a click
+	if cb&0xC0 == 0x40 { // wheel notch (bit 6 set, bit 7 clear); modifiers ride the middle bits
+		if final != 'M' { // a notch is a press; ignore the (rare) release form
+			return infoInput{}
+		}
+		if cb&0x01 == 0 {
+			return infoInput{Kind: infoInputScrollUp}
+		}
+		return infoInput{Kind: infoInputScrollDown}
+	}
+	if final != 'M' { // a release — not a click
+		return infoInput{}
+	}
+	if cb&0x20 != 0 { // motion/drag — not a click
 		return infoInput{}
 	}
 	if cb&0x03 != 0 { // not the left button (low two bits select the button; 0 = left)
@@ -262,7 +313,31 @@ type infoViewState struct {
 	active       infoView
 	glossaryOpen bool
 	glossaryTerm string // the expanded term key, or "" for the whole list
+	// scroll is the per-view scrollable offset (rows hidden above the window), indexed by
+	// view. It is per-view so paging through Agents and coming back to Safety keeps each
+	// view's place. Raw here (only floored at 0 / capped at the End sentinel); the renderer
+	// and the loop's clampInfoScrollToSample pin it to the view's real content each frame.
+	scroll [numInfoViews]int
+	// cacheMech is the 1-based Cache-tab ablation mechanism whose detail sub-panel is expanded
+	// (0 = none). Toggled by clicking a mechanism bar row; see applyInfoCacheMechClick. Kept on
+	// the state (not per-view scroll) because it survives paging away and back to the Cache tab.
+	cacheMech int
+	// copyMode freezes the pane and hands text selection back to the terminal so a watcher can
+	// select + copy the frame without the next tick's in-place redraw erasing it; toggled by 'c'.
+	// The loop (info.go) owns the side effects — disabling mouse reporting, suppressing the redraw,
+	// and making Ctrl-C forgiving here — while the renderer only swaps the tab bar for the banner.
+	copyMode bool
 }
+
+// infoScrollPageStep is how many rows a PageUp/PageDown moves the active view. Fixed (not
+// pane-relative) so the reducer stays pure and TTY-free; the render/clamp step pins the result
+// to the real content, so an over-long page can never scroll past the ends.
+const infoScrollPageStep = 10
+
+// infoScrollToEnd is the End-key sentinel: a large offset the render/clamp step pulls back to
+// the last page. Storing a sentinel (rather than the true max, which the reducer cannot know
+// without the content) keeps End working from any pane height.
+const infoScrollToEnd = 1 << 30
 
 // applyInfoInput folds one decoded event into the UI state. Focus/quit/none are handled by the
 // loop (cadence + teardown), not the UI state, so they pass through unchanged. A mouse click is
@@ -280,6 +355,18 @@ func applyInfoInput(s infoViewState, ev infoInput) infoViewState {
 	case infoInputToggleGloss:
 		s.glossaryOpen = !s.glossaryOpen
 		s.glossaryTerm = ""
+	case infoInputScrollUp:
+		s.scroll[s.active] = maxInt(0, s.scroll[s.active]-1)
+	case infoInputScrollDown:
+		s.scroll[s.active] = maxInt(0, s.scroll[s.active]+1)
+	case infoInputPageUp:
+		s.scroll[s.active] = maxInt(0, s.scroll[s.active]-infoScrollPageStep)
+	case infoInputPageDown:
+		s.scroll[s.active] = maxInt(0, s.scroll[s.active]+infoScrollPageStep)
+	case infoInputScrollHome:
+		s.scroll[s.active] = 0
+	case infoInputScrollEnd:
+		s.scroll[s.active] = infoScrollToEnd
 	case infoInputMouseClick:
 		return applyInfoClick(s, ev.X, ev.Y)
 	}
@@ -390,6 +477,9 @@ func buildInfoTabBar(active infoView, glossaryOpen bool) infoBar {
 	}
 	start, end := bb.segment(glossChip)
 	regions = append(regions, infoTabRegion{view: viewNone, start: start, end: end})
+	// Keyboard-only hint for copy/freeze mode. No click region: entering copy mode disables mouse
+	// reporting (a loop side effect the pure click-fold cannot do), so 'c' is the only way in.
+	bb.sep("   c copy")
 	return infoBar{text: bb.b.String(), regions: regions}
 }
 

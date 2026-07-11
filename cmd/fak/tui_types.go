@@ -91,6 +91,12 @@ type tuiIssueCounts struct {
 	LikelyDup       int `json:"likely_dup"`
 	Bare            int `json:"bare"`
 	Related         int `json:"related,omitempty"`
+	// NeedsYou is the count of surfaced actions the choicetriage fold judged a
+	// genuine human-residual (an unset priority a person must set); AgentClearable
+	// is the rest — actions the fleet takes itself (a runnable gh command or a
+	// fresh-context evaluation). The two partition report.Actions.
+	NeedsYou       int `json:"needs_you"`
+	AgentClearable int `json:"agent_clearable"`
 }
 
 type tuiLane struct {
@@ -109,6 +115,13 @@ type tuiIssueAction struct {
 	Kind    string `json:"kind"`
 	Reason  string `json:"reason"`
 	Command string `json:"cmd,omitempty"`
+	// Disposition/NeedsHuman/Resolve carry the shared choicetriage fold over this
+	// action, so the pane's "needs you" surface is genuine-residual-only: a ready
+	// gh command routes to TAKE_OBVIOUS, an unlabeled triage to FRESH_CONTEXT, and
+	// only an unset-priority review — a person's authority call — stays NeedsHuman.
+	Disposition string `json:"disposition,omitempty"`
+	NeedsHuman  bool   `json:"needs_human,omitempty"`
+	Resolve     string `json:"resolve,omitempty"`
 }
 
 type tuiIssueReport struct {
