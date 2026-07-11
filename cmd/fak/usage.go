@@ -85,11 +85,13 @@ const usageCoreText = `usage:
   fak sync      [check|apply|push] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
                 (SAFE SYNC/PUSH for a dirty shared worktree. check is read-only except
                  optional --fetch and reports the dirty-tree sweep next action. apply
-                 fast-forwards only when every path Git would write is clean at HEAD or
-                 already byte-identical to the remote-tracking version, preserving unrelated
-                 local work. push publishes through the safe push path, retries transient
+                 fast-forwards the immutable SHA assessed by check only when Git's own
+                 last-moment worktree guard accepts every written path; it never pre-cleans
+                 target-identical dirt, and preserves unrelated local work. push publishes
+                 through the safe push path, retries transient
                  moving-trunk races, and reports the remaining dirty-tree next action after
-                 the push. Never uses pull, stash, reset, clean, add, merge, or force-push.
+                 the push. apply uses only merge --ff-only --no-autostash; no sync verb uses
+                 pull, stash, reset, clean, add, a non-fast-forward merge, or force-push.
                  Exit 0 safe/applied/pushed/in-sync, 2 usage, 3 refused, 4 internal.)
   fak merge     --dry-run [--dir DIR] [--target REF | REF] [--trunk B] [--json]
                 (SHARED-TRUNK MERGE PREVIEW: predict 'git merge origin/<trunk>' before
@@ -524,7 +526,7 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak serve-wiring [--md|--check]
                 (audit fak serve flag -> gateway.Config -> runtime-read wiring)
   fak lab       status [--all|--json] | report --id ID --state live|idle|draining|down |
-                readiness [--from-status|--json] | target @lab/glm-5.2 [--json] | ls
+                readiness [--phase CLEAR|WAITING|WORKING|--from-reports|--json] | target @lab/glm-5.2 [--json] | ls
                 (public-safe lab fleet front door: fold scrubbed reports, derive the
                  lab-backed dispatch gate, and validate a local @lab/<model> target
                  alias for 'fak guard --remote-serve' without printing private

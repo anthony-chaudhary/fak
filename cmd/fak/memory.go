@@ -20,6 +20,8 @@ import (
 //
 // The backend is the in-memory demo corpus by default, or a persisted recall core
 // image with --dir. Effects are PROPOSED unless --apply is passed (fail-closed).
+
+//fak:ctxplan verb=memory enters="the memq backend it is pointed at — the in-memory demo corpus by default, or a persisted recall core image with --dir; the recall subcommand reads the markdown memory store (MEMORY.md + fact files, default .claude/memory)" pages="for run/recall, the recalled working set or loop-turn orientation block it selects (budget-bounded, each note artifact claim re-verified at page-in); drivers/explain page nothing — they list or render a plan without executing it" warms="nothing — mutations are PROPOSED unless --apply; it warms no prompt cache or KV"
 func cmdMemory(args []string) {
 	if len(args) == 0 {
 		memoryUsage()

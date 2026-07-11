@@ -28,14 +28,25 @@ func TestInfoInputScannerKeys(t *testing.T) {
 		want infoInputKind
 	}{
 		{"\t", infoInputTabNext},
-		{"\x1b[C", infoInputTabNext},  // right arrow
-		{"\x1b[D", infoInputTabPrev},  // left arrow
-		{"?", infoInputToggleGloss},   //
-		{"g", infoInputToggleGloss},   //
-		{"q", infoInputQuit},          //
-		{"\x03", infoInputQuit},       // Ctrl-C (raw mode delivers the byte)
-		{"\x1b[I", infoInputFocusIn},  //
-		{"\x1b[O", infoInputFocusOut}, //
+		{"\x1b[C", infoInputTabNext},     // right arrow — next view
+		{"\x1b[D", infoInputTabPrev},     // left arrow — prev view
+		{"\x1b[A", infoInputScrollUp},    // up arrow — scroll up
+		{"\x1b[B", infoInputScrollDown},  // down arrow — scroll down
+		{"\x1b[5~", infoInputPageUp},     // PageUp
+		{"\x1b[6~", infoInputPageDown},   // PageDown
+		{"\x1b[H", infoInputScrollHome},  // Home (final-byte form)
+		{"\x1b[1~", infoInputScrollHome}, // Home (keypad form)
+		{"\x1b[7~", infoInputScrollHome}, // Home (rxvt keypad form)
+		{"\x1b[F", infoInputScrollEnd},   // End (final-byte form)
+		{"\x1b[4~", infoInputScrollEnd},  // End (keypad form)
+		{"\x1b[8~", infoInputScrollEnd},  // End (rxvt keypad form)
+		{"\x1b[6;5~", infoInputPageDown}, // Ctrl-PageDown — modifier suffix ignored
+		{"?", infoInputToggleGloss},      //
+		{"g", infoInputToggleGloss},      //
+		{"q", infoInputQuit},             //
+		{"\x03", infoInputQuit},          // Ctrl-C (raw mode delivers the byte)
+		{"\x1b[I", infoInputFocusIn},     //
+		{"\x1b[O", infoInputFocusOut},    //
 	}
 	for _, tc := range cases {
 		evs := feedInfoInput(tc.in)
@@ -71,17 +82,33 @@ func TestInfoInputScannerSplitSequence(t *testing.T) {
 }
 
 // TestInfoInputScannerMouse pins SGR (1006) mouse decoding: a left-button press is a click at
-// (x,y); a release, a drag (motion bit), a wheel (code>=64), and a right/middle button are all
-// inert (the pane reacts only to a deliberate left click).
+// (x,y); a wheel notch scrolls (up on 64, down on 65, direction survives modifier bits); and a
+// release, a drag (motion bit), and a right/middle button are all inert (the pane reacts only to
+// a deliberate left click or a wheel notch).
 func TestInfoInputScannerMouse(t *testing.T) {
 	evs := feedInfoInput("\x1b[<0;14;1M") // left press at col 14, row 1
 	if len(evs) != 1 || evs[0].Kind != infoInputMouseClick || evs[0].X != 14 || evs[0].Y != 1 {
 		t.Fatalf("left press = %+v, want click at (14,1)", evs)
 	}
+	// Wheel notches scroll; x/y are ignored.
+	wheel := []struct {
+		in   string
+		want infoInputKind
+	}{
+		{"\x1b[<64;14;1M", infoInputScrollUp},   // wheel up
+		{"\x1b[<65;14;1M", infoInputScrollDown}, // wheel down
+		{"\x1b[<80;14;1M", infoInputScrollUp},   // wheel up + Ctrl (64|16) — direction is the low bit
+		{"\x1b[<81;14;1M", infoInputScrollDown}, // wheel down + Ctrl
+	}
+	for _, tc := range wheel {
+		if evs := feedInfoInput(tc.in); len(evs) != 1 || evs[0].Kind != tc.want {
+			t.Errorf("wheel %q = %+v, want single %v", tc.in, evs, tc.want)
+		}
+	}
 	for _, in := range []string{
 		"\x1b[<0;14;1m",  // release
 		"\x1b[<35;14;1M", // motion/drag (bit 0x20 set)
-		"\x1b[<64;14;1M", // wheel up (code >= 64)
+		"\x1b[<64;14;1m", // wheel release form (not a press)
 		"\x1b[<2;14;1M",  // right button (low bits != 0)
 	} {
 		if evs := feedInfoInput(in); len(evs) != 0 {
@@ -124,6 +151,111 @@ func TestApplyInfoInputTabs(t *testing.T) {
 	s = applyInfoInput(s, infoInput{Kind: infoInputToggleGloss})
 	if s.glossaryOpen {
 		t.Fatalf("second toggle must close the glossary")
+	}
+}
+
+// TestApplyInfoInputScroll pins the scroll reducer: line/page steps move the active view's
+// offset, Home/End snap to the top/end sentinel, the offset floors at 0 (never negative), and the
+// offset is per-view so paging one view leaves another's place untouched.
+func TestApplyInfoInputScroll(t *testing.T) {
+	s := infoViewState{active: viewAgents}
+	s = applyInfoInput(s, infoInput{Kind: infoInputScrollDown})
+	if s.scroll[viewAgents] != 1 {
+		t.Fatalf("scroll down = %d, want 1", s.scroll[viewAgents])
+	}
+	s = applyInfoInput(s, infoInput{Kind: infoInputPageDown})
+	if s.scroll[viewAgents] != 1+infoScrollPageStep {
+		t.Fatalf("page down = %d, want %d", s.scroll[viewAgents], 1+infoScrollPageStep)
+	}
+	// Up steps floor at 0 rather than going negative.
+	s = applyInfoInput(s, infoInput{Kind: infoInputScrollHome})
+	if s.scroll[viewAgents] != 0 {
+		t.Fatalf("home = %d, want 0", s.scroll[viewAgents])
+	}
+	s = applyInfoInput(s, infoInput{Kind: infoInputScrollUp})
+	if s.scroll[viewAgents] != 0 {
+		t.Fatalf("scroll up past top = %d, want 0 (floored)", s.scroll[viewAgents])
+	}
+	s = applyInfoInput(s, infoInput{Kind: infoInputPageUp})
+	if s.scroll[viewAgents] != 0 {
+		t.Fatalf("page up past top = %d, want 0 (floored)", s.scroll[viewAgents])
+	}
+	// End parks the raw End sentinel (the render/clamp step pulls it to the last page).
+	s = applyInfoInput(s, infoInput{Kind: infoInputScrollEnd})
+	if s.scroll[viewAgents] != infoScrollToEnd {
+		t.Fatalf("end = %d, want the end sentinel %d", s.scroll[viewAgents], infoScrollToEnd)
+	}
+	// The offset is per-view: scrolling Agents leaves Cache at 0.
+	if s.scroll[viewCache] != 0 {
+		t.Fatalf("cache offset must be untouched by agents scroll, got %d", s.scroll[viewCache])
+	}
+	// A scroll targets the ACTIVE view: switch to cache, scroll, agents keeps its sentinel.
+	s.active = viewCache
+	s = applyInfoInput(s, infoInput{Kind: infoInputScrollDown})
+	if s.scroll[viewCache] != 1 || s.scroll[viewAgents] != infoScrollToEnd {
+		t.Fatalf("per-view scroll leaked: cache=%d agents=%d", s.scroll[viewCache], s.scroll[viewAgents])
+	}
+}
+
+// TestScrollInfoWindow pins the windowing helper: content that fits shows verbatim with no
+// indicators (roomy stays byte-identical to the pre-scroll render); content that overflows shows
+// a "more below" tail at the top, both indicators in the middle, and reaches the exact end with
+// only a "more above" indicator at the clamped max; the pinned prefix always leads; and the
+// returned clamped offset never drifts past the ends.
+func TestScrollInfoWindow(t *testing.T) {
+	rows := make([]string, 20)
+	for i := range rows {
+		rows[i] = "row" + string(rune('A'+i))
+	}
+	// Roomy: everything fits → verbatim, clamped 0.
+	got, clamped := scrollInfoWindow(rows, 0, 5, 0)
+	if len(got) != 20 || clamped != 0 {
+		t.Fatalf("roomy window = %d rows clamped %d, want 20 rows clamped 0", len(got), clamped)
+	}
+	// Fits exactly at height == len → verbatim.
+	if got, _ := scrollInfoWindow(rows, 0, 0, 20); len(got) != 20 {
+		t.Fatalf("exact-fit window = %d rows, want 20", len(got))
+	}
+	// Overflow at the top (offset 0): no "above", a "below" tail. Total == height.
+	got, clamped = scrollInfoWindow(rows, 0, 0, 10)
+	if len(got) != 10 || clamped != 0 {
+		t.Fatalf("top window = %d rows clamped %d, want 10/0", len(got), clamped)
+	}
+	if strings.Contains(strings.Join(got, "\n"), "more above") {
+		t.Fatalf("top window must not show an above indicator:\n%s", strings.Join(got, "\n"))
+	}
+	if !strings.Contains(got[len(got)-1], "more below") {
+		t.Fatalf("top window must end with a below indicator:\n%s", strings.Join(got, "\n"))
+	}
+	// Middle (offset 3): both indicators, total == height, first content row is rowD (index 3).
+	got, clamped = scrollInfoWindow(rows, 0, 3, 10)
+	joined := strings.Join(got, "\n")
+	if len(got) != 10 || clamped != 3 {
+		t.Fatalf("mid window = %d rows clamped %d, want 10/3", len(got), clamped)
+	}
+	if !strings.Contains(got[0], "more above") || !strings.Contains(got[len(got)-1], "more below") {
+		t.Fatalf("mid window must show both indicators:\n%s", joined)
+	}
+	// Over-scroll past the end clamps to the last page: window ends exactly at the last row,
+	// only an above indicator, and the returned clamped offset is the real max (< the request).
+	got, clamped = scrollInfoWindow(rows, 0, 999, 10)
+	joined = strings.Join(got, "\n")
+	if clamped >= 999 || len(got) != 10 {
+		t.Fatalf("over-scroll = %d rows clamped %d, want 10 rows clamped to a real max", len(got), clamped)
+	}
+	if strings.Contains(joined, "more below") {
+		t.Fatalf("bottom window must not show a below indicator:\n%s", joined)
+	}
+	if !strings.Contains(got[len(got)-1], "rowT") { // rowT is index 19, the last row
+		t.Fatalf("bottom window must reach the last row:\n%s", joined)
+	}
+	// A pinned prefix always leads, even when scrolled: pin row 0, scroll to the end.
+	got, _ = scrollInfoWindow(rows, 1, 999, 10)
+	if got[0] != "rowA" {
+		t.Fatalf("pinned row must lead the window, got %q\n%s", got[0], strings.Join(got, "\n"))
+	}
+	if !strings.Contains(got[1], "more above") {
+		t.Fatalf("scrolled pinned window must show an above indicator under the pin:\n%s", strings.Join(got, "\n"))
 	}
 }
 
@@ -244,6 +376,67 @@ func TestRenderInteractiveBlockViews(t *testing.T) {
 		if !strings.Contains(safety, want) {
 			t.Fatalf("safety view missing %q:\n%s", want, safety)
 		}
+	}
+}
+
+// TestRenderInteractiveBlockOverviewScrolls proves #3778: at a pane too short for the whole
+// overview, the interactive overview SCROLLS the full panel stack (with a below indicator) instead
+// of degrading panels, and keeps the identity row pinned at the top — both at the top of the
+// scroll and, once scrolled to the end, with the below indicator replaced by an above one.
+func TestRenderInteractiveBlockOverviewScrolls(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	v := richVisualVars()
+	tr.push(v)
+	const h = 8 // a short pane: the overview's full stack cannot fit
+
+	top := renderGuardInfoInteractiveBlock(infoViewState{active: viewOverview}, v, tr, 120, h)
+	topRows := strings.Split(top, "\n")
+	if len(topRows) > h {
+		t.Fatalf("overview must fit the pane height %d, got %d rows:\n%s", h, len(topRows), top)
+	}
+	if !strings.Contains(topRows[1], "replies") { // identity row is pinned directly under the tab bar
+		t.Fatalf("overview must pin the identity row at the top:\n%s", top)
+	}
+	if !strings.Contains(top, "more below") || strings.Contains(top, "more above") {
+		t.Fatalf("short overview at the top must show only a below indicator:\n%s", top)
+	}
+
+	// Scroll to the end: the identity row stays pinned, the indicator flips to "above".
+	end := renderGuardInfoInteractiveBlock(infoViewState{active: viewOverview, scroll: [numInfoViews]int{viewOverview: infoScrollToEnd}}, v, tr, 120, h)
+	endRows := strings.Split(end, "\n")
+	if !strings.Contains(endRows[1], "replies") {
+		t.Fatalf("overview must keep the identity row pinned when scrolled to the end:\n%s", end)
+	}
+	if !strings.Contains(end, "more above") || strings.Contains(end, "more below") {
+		t.Fatalf("overview scrolled to the end must show only an above indicator:\n%s", end)
+	}
+}
+
+// TestClampInfoScrollToSample proves the loop's clamp pulls the End sentinel (and any past-the-end
+// offset) back to the view's real last page, so the stored offset the next keystroke reads is
+// honest instead of a drifting sentinel.
+func TestClampInfoScrollToSample(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	v := richVisualVars()
+	tr.push(v)
+	const h = 8
+
+	s := infoViewState{active: viewOverview}
+	s.scroll[viewOverview] = infoScrollToEnd
+	s = clampInfoScrollToSample(s, v, tr, 120, h)
+	if s.scroll[viewOverview] <= 0 || s.scroll[viewOverview] >= infoScrollToEnd {
+		t.Fatalf("clamp must pull the End sentinel to a real max, got %d", s.scroll[viewOverview])
+	}
+	// Clamping is idempotent: a second clamp keeps the same offset (already at the last page).
+	max := s.scroll[viewOverview]
+	s = clampInfoScrollToSample(s, v, tr, 120, h)
+	if s.scroll[viewOverview] != max {
+		t.Fatalf("clamp must be idempotent, got %d then %d", max, s.scroll[viewOverview])
+	}
+	// A roomy pane (everything fits) clamps any offset back to 0.
+	roomy := clampInfoScrollToSample(infoViewState{active: viewOverview, scroll: [numInfoViews]int{viewOverview: 5}}, v, tr, 120, 0)
+	if roomy.scroll[viewOverview] != 0 {
+		t.Fatalf("roomy clamp must zero the offset, got %d", roomy.scroll[viewOverview])
 	}
 }
 

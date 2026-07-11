@@ -14,12 +14,14 @@ import (
 // one for a recovered panic (exit 2, then re-panicked so the process's own
 // exit code and crash output are unchanged).
 //
-// COVERAGE GAP — read before trusting a usage roll-up's error counts. cmd/fak
-// has ~300 os.Exit(N) call sites scattered inside individual verb handlers
+// COVERAGE GAP — read before trusting a usage roll-up's error counts. The
+// commit/sweep/sync front doors are explicitly routed through
+// runObservedGitOperation, but cmd/fak still has many os.Exit(N) call sites
+// scattered inside other individual verb handlers
 // (a `cmdXxx` function calling os.Exit(1) deep inside its own error path).
 // os.Exit terminates the process immediately WITHOUT running deferred
 // functions, so an invocation that errors via one of those direct calls is
-// NOT recorded here — only the three sites above are. Closing that gap fully
+// NOT recorded here. Closing that remaining gap fully
 // means routing every verb handler's exit through a shared helper, a large
 // mechanical change across ~130 files on a shared trunk; tracked as a
 // follow-up rather than done silently. `fak usage`'s exit-code distribution
@@ -37,6 +39,11 @@ var usageLogExcluded = map[string]bool{
 	"hook": true,
 }
 
+// recordUsageNow is the wall clock used to stop an invocation timer. Keeping it
+// injectable makes the operation-duration witness deterministic without changing
+// the usagelog's own independently-stamped row timestamp.
+var recordUsageNow = time.Now
+
 // usageLogPath is the file the recorder appends to: usagelog.DefaultPath(),
 // overridable with FAK_USAGE_LOG_PATH (mirrors FAK_AUDIT_JOURNAL's role for
 // the decision journal — see guardDefaultAuditPath in cmd/fak/guard.go).
@@ -53,6 +60,10 @@ func usageLogPath() string {
 // surfaced — a meta-observability write must not be able to break or mask a
 // real verb's exit code.
 func recordUsage(verb string, argv []string, exitCode int, start time.Time) {
+	durationMS := recordUsageNow().Sub(start).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
 	if usageLogExcluded[verb] || !usagelog.Enabled() {
 		return
 	}
@@ -71,7 +82,7 @@ func recordUsage(verb string, argv []string, exitCode int, start time.Time) {
 		Argc:       len(argv),
 		ArgsDigest: usagelog.Digest(salt, argv),
 		ExitCode:   exitCode,
-		DurationMS: time.Since(start).Milliseconds(),
+		DurationMS: durationMS,
 		FakVersion: appversion.Current(),
 		Host:       host,
 		PID:        os.Getpid(),

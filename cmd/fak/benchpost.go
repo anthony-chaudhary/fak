@@ -217,7 +217,7 @@ func slackPostTail(stdout, stderr io.Writer, s slackPostSpec) int {
 		fmt.Fprintf(stdout, "%s: enqueued durably to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", s.label, ch, nonce, werr)
 		return 0
 	}
-	if _, err := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."}); err != nil && err != slackoutbox.ErrDrainBusy {
+	if _, err := ob.Drain(ctx(), wire, stdDrainOpts()); err != nil && err != slackoutbox.ErrDrainBusy {
 		fmt.Fprintf(stdout, "%s: enqueued durably to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", s.label, ch, nonce, err)
 		return 0
 	}

@@ -74,9 +74,12 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/blastradius"
 	"github.com/anthony-chaudhary/fak/internal/blockerpost"
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/knownbad"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 func cmdKnownBad(argv []string) {
@@ -85,7 +88,7 @@ func cmdKnownBad(argv []string) {
 
 func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve|revoke|report)")
+		fmt.Fprintln(stderr, "fak knownbad: expected a subcommand (record|match|claim|resolve|revoke|report|correlate)")
 		return 2
 	}
 	switch argv[0] {
@@ -101,11 +104,13 @@ func runKnownBad(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
 		return runKnownBadRevoke(stdout, stderr, argv[1:], nowUnix)
 	case "report":
 		return runKnownBadReport(stdout, stderr, argv[1:], nowUnix)
+	case "correlate":
+		return runKnownBadCorrelate(stdout, stderr, argv[1:], nowUnix)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | revoke | report  (fleet-wide known-bad signature ledger)")
+		fmt.Fprintln(stderr, "fak knownbad: record | match | claim | resolve | revoke | report | correlate  (fleet-wide known-bad signature ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|revoke|report)\n", argv[0])
+		fmt.Fprintf(stderr, "fak knownbad: unknown subcommand %q (want record|match|claim|resolve|revoke|report|correlate)\n", argv[0])
 		return 2
 	}
 }
@@ -777,6 +782,12 @@ func runKnownBadTestsWitness(root string, treeGlobs []string) knownBadWitnessRes
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
+	// `go test` forks the toolchain + the compiled test binary — a descendant tree.
+	// The dispatch helper only hides the window; it is not a tree kill. So on the
+	// 5-minute deadline, bare ctx-cancel reaps only the `go` launcher and orphans the
+	// test-binary subtree (#3106 defect class). Tree-kill on cancel + bound the reap.
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return knownBadWitnessResult{OK: false, Kind: witnessKindTests, Detail: fmt.Sprintf("go test %s not green: %v", strings.Join(pkgs, " "), knownBadFirstLine(out))}
@@ -989,5 +1000,193 @@ func knownBadEmitJSON(stdout, stderr io.Writer, v any) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, string(b))
+	return 0
+}
+
+// knownBadFleetObsRel is the repo-relative fleet-observation feed the gateway appends to
+// (via FAK_FLEET_OBS_PATH) and `correlate` folds by default — the docs/nightrun/*.jsonl
+// idiom the ledger itself uses. It is the CROSS-trace input the per-trace LIVELOCK journal
+// row cannot be: one line per real result-side trip, keyed by content-free failure hash.
+const knownBadFleetObsRel = "docs/nightrun/fleet-observations.jsonl"
+
+// readFleetObservations reads the fleet-observation JSONL feed into the guardrsi shape the
+// correlator folds. A missing feed is not an error — it is simply zero observations (the
+// nightrun has not run yet), so correlate reports no candidates rather than failing. A
+// malformed line is skipped, not fatal, so one bad append never blinds the whole fold.
+func readFleetObservations(path string) ([]guardrsi.FleetObservation, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []guardrsi.FleetObservation
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var o guardrsi.FleetObservation
+		if err := json.Unmarshal([]byte(line), &o); err != nil {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// runKnownBadCorrelate folds the cross-trace fleet-observation feed into known-bad
+// candidates: one per failure hash that at least --k DISTINCT traces hit inside the --window
+// (guardrsi.Correlate — a per-trace loop, k repeats from ONE trace, deliberately does not
+// promote). It is READ-ONLY by default (fold + report); the two write toggles are explicit:
+//
+//	--record       appends one bounded-TTL known-bad ledger row per NEW candidate signature,
+//	               skipping any signature already live in the ledger (the signature is a
+//	               content hash, so re-correlating the same shared failure does not duplicate
+//	               the row; a live shared bug re-fires and the existing row's TTL keeps it
+//	               live, a phantom ages out).
+//	--file-issues  creates or updates ONE deduped gh issue per candidate signature (Layer E),
+//	               bumping an occurrence count in place rather than opening a duplicate.
+//
+// The clock is injected (nowUnix) so the fold, the liveness check, and the recorded rows are
+// deterministic under test.
+func runKnownBadCorrelate(stdout, stderr io.Writer, argv []string, nowUnix int64) int {
+	fs := flag.NewFlagSet("knownbad correlate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	obsPath := fs.String("observations", "", "fleet-observation JSONL feed to fold (default: <root>/"+knownBadFleetObsRel+")")
+	k := fs.Int("k", guardrsi.DefaultCorrelateK, "distinct-trace threshold at/above which a shared failure promotes to a candidate")
+	window := fs.Int64("window", guardrsi.DefaultCorrelateWindowSecs, "correlation window in seconds; observations older than this at now do not count toward k")
+	record := fs.Bool("record", false, "append a bounded-TTL known-bad ledger row for each NEW candidate signature (skips signatures already live)")
+	ttl := fs.Int64("ttl", knownbad.DefaultRecordTTLSeconds, "TTL in seconds for recorded rows (0 = durable no-expiry)")
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
+	fileIssues := fs.Bool("file-issues", false, "create/update one deduped gh issue per candidate signature")
+	repo := fs.String("repo", "", "gh repo (owner/name) for --file-issues; empty uses the gh-detected repo")
+	limit := fs.Int("limit", 300, "max existing issues to fetch when deduping --file-issues")
+	by := fs.String("by", "", "discoverer id stamped on recorded rows (default: $FAK_AGENT_ID, else hostname)")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	path := strings.TrimSpace(*obsPath)
+	if path == "" {
+		path = filepath.Join(repoRoot(), knownBadFleetObsRel)
+	}
+	obs, err := readFleetObservations(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak knownbad correlate: %v\n", err)
+		return 1
+	}
+	candidates := guardrsi.Correlate(obs, *k, *window, nowUnix)
+
+	ledgerPath := knownBadLedgerPath(*ledger)
+	var existingLedger []knownbad.Record
+	if *record {
+		existingLedger, err = readKnownBadLedger(ledgerPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak knownbad correlate: %v\n", err)
+			return 1
+		}
+	}
+	var existingIssues []dogfoodissues.Issue
+	if *fileIssues {
+		existingIssues, err = dogfoodissues.FetchExistingIssues(*repo, *limit)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak knownbad correlate: fetch issues: %v\n", err)
+			return 1
+		}
+	}
+	discoverer := knownBadDiscoverer(*by)
+
+	type outcome struct {
+		Signature   string   `json:"signature"`
+		FailureHash string   `json:"failure_hash"`
+		ReasonClass string   `json:"reason_class"`
+		TreeGlobs   []string `json:"tree_globs"`
+		Distinct    int      `json:"distinct_traces"`
+		Recorded    bool     `json:"recorded"`
+		AlreadyLive bool     `json:"already_live"`
+		IssueAction string   `json:"issue_action,omitempty"`
+		IssueURL    string   `json:"issue_url,omitempty"`
+	}
+	outcomes := make([]outcome, 0, len(candidates))
+
+	for _, cand := range candidates {
+		note := fmt.Sprintf("fleet-correlated: %d distinct traces share this failure within %ds",
+			cand.DistinctTraces, cand.WindowSecs)
+		rec := knownbad.NewRecord(cand.ReasonClass, cand.TreeGlobs, note, discoverer, cand.FailureHash, nowUnix, *ttl)
+		oc := outcome{
+			Signature:   rec.Signature,
+			FailureHash: cand.FailureHash,
+			ReasonClass: rec.ReasonClass,
+			TreeGlobs:   rec.TreeGlobs,
+			Distinct:    cand.DistinctTraces,
+		}
+		if *record {
+			if _, live := knownbad.FindLatestLive(existingLedger, rec.Signature, nowUnix); live {
+				oc.AlreadyLive = true
+			} else if err := appendKnownBadRow(ledgerPath, rec); err != nil {
+				fmt.Fprintf(stderr, "fak knownbad correlate: record %s: %v\n", rec.Signature, err)
+				return 1
+			} else {
+				oc.Recorded = true
+				// Fold the just-appended row back in so a duplicate candidate this batch dedups too.
+				existingLedger = append(existingLedger, rec)
+			}
+		}
+		if *fileIssues {
+			plan := buildKnownBadIssuePlan(rec, cand, existingIssues)
+			oc.IssueAction = plan.Action
+			rows := dogfoodissues.Sync([]dogfoodissues.PlanRow{plan}, *repo, []string{knownBadIssueLabel}, nil)
+			if len(rows) == 1 {
+				oc.IssueURL = rows[0].URL
+			}
+		}
+		outcomes = append(outcomes, oc)
+	}
+
+	if *asJSON {
+		out := struct {
+			Schema       string    `json:"schema"`
+			Observations int       `json:"observations"`
+			K            int       `json:"k"`
+			WindowSecs   int64     `json:"window_secs"`
+			Count        int       `json:"count"`
+			Candidates   []outcome `json:"candidates"`
+		}{
+			Schema:       knownbad.Schema,
+			Observations: len(obs),
+			K:            *k,
+			WindowSecs:   *window,
+			Count:        len(outcomes),
+			Candidates:   outcomes,
+		}
+		return knownBadEmitJSON(stdout, stderr, out)
+	}
+
+	if len(outcomes) == 0 {
+		fmt.Fprintf(stdout, "no fleet-correlated known-bad candidates (%d observation(s), k=%d, window=%ds)\n",
+			len(obs), *k, *window)
+		return 0
+	}
+	fmt.Fprintf(stdout, "%d fleet-correlated known-bad candidate(s) from %d observation(s):\n", len(outcomes), len(obs))
+	for _, oc := range outcomes {
+		fmt.Fprintf(stdout, "  %s reason=%s trees=%s distinct=%d",
+			oc.Signature, oc.ReasonClass, strings.Join(oc.TreeGlobs, ","), oc.Distinct)
+		switch {
+		case oc.AlreadyLive:
+			fmt.Fprint(stdout, " [already live]")
+		case oc.Recorded:
+			fmt.Fprint(stdout, " [recorded]")
+		}
+		if oc.IssueAction != "" {
+			fmt.Fprintf(stdout, " issue:%s", oc.IssueAction)
+			if oc.IssueURL != "" {
+				fmt.Fprintf(stdout, " %s", oc.IssueURL)
+			}
+		}
+		fmt.Fprintln(stdout)
+	}
 	return 0
 }

@@ -84,7 +84,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	codexHome := fs.String("codex-home", "", "Codex home for auth and loop-gate transcript audit (default: $CODEX_HOME or ~/.codex)")
 	loopGate := fs.String("loop-gate", "loop", "before launching, audit recent Codex sessions and refuse at threshold: loop|action|off")
 	loopGateSinceHours := fs.Float64("loop-gate-since-hours", 24, "with --loop-gate, only scan Codex sessions modified within N hours (0 = all)")
-	loopGateLimit := fs.Int("loop-gate-limit", 20, "with --loop-gate, maximum newest Codex sessions to scan")
+	loopGateLimit := fs.Int("loop-gate-limit", 20, "legacy compatibility value; the launch gate evaluates only the newest Codex session")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak codex [launcher flags] [-- <codex args...>]")
 		fmt.Fprintln(stderr, "  e.g. fak codex")
@@ -279,7 +279,7 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 				firstString(strings.TrimSpace(d.ModelProvider), "-"), d.Verdict, firstString(strings.TrimSpace(d.SessionID), "-"))
 		}
 	}
-	rep, err := diagnoseRecentCodexLoops(cfg.CodexHome, cfg.SinceHours, cfg.Limit)
+	rep, _, err := diagnoseNewestCodexLoopForLaunch(cfg.CodexHome, cfg.SinceHours)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak codex: loop gate audit failed: %v\n", err)
 		return 1

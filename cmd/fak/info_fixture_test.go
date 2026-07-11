@@ -45,12 +45,20 @@ func demoOverlayVars() guardInfoVars {
 		Status          string  `json:"status"`
 	}{CacheReadTokens: 142_400, SavedTokenEquiv: 65_144, HitRate: 0.51, Multiplier: 1.60, Status: "PROVEN"}
 	// Owner split: ~46% provider / ~54% fak, matching the screenshot's "split default cache 46%
-	// (~65.1k tok) + fak 54% (~77.3k tok)".
+	// (~65.1k tok) + fak 54% (~77.3k tok)". The sub-fields decompose each owner's net so the Cache
+	// tab's live ablation section draws a full per-mechanism breakdown: provider net 65.1k = a
+	// 67.8k read rebate less a 2.7k unrepaid write premium; fak 77.3k = 52.3k compaction-shed +
+	// 25.0k in-kernel KV-prefix reuse; plus 3 vDSO-memo engine calls avoided.
 	v.CacheAttribution = &guardInfoCacheAttribution{
 		ProviderTokenEquiv:  65_100,
 		FakTokenEquiv:       77_300,
 		TotalTokenEquiv:     142_400,
 		FakVDSOAvoidedCalls: 3,
+
+		ProviderPromptCacheReadTokenEquiv:         67_800,
+		ProviderPromptCacheWritePremiumTokenEquiv: -2_700,
+		FakCompactionShedTokens:                   52_300,
+		FakKVPrefixReusedTokens:                   25_000,
 	}
 
 	// Agents: a main session + one sub-agent, so the agents tab shows lineage.

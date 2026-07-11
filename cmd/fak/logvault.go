@@ -554,7 +554,7 @@ func logvaultNotifySlack(w, ew io.Writer, channel, text string) {
 		fmt.Fprintf(w, "  slack: drain deferred — %v (row stays durably queued)\n", err)
 		return
 	}
-	rep, err := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."})
+	rep, err := ob.Drain(ctx(), wire, stdDrainOpts())
 	switch {
 	case err == slackoutbox.ErrDrainBusy:
 		fmt.Fprintln(w, "  slack: another drainer holds the lock — row stays queued")

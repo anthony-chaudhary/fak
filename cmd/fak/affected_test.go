@@ -226,6 +226,113 @@ func TestBaselineHarnessFailure(t *testing.T) {
 	}
 }
 
+// TestAffectedRerunFailFlaky pins the --rerun-fail inner-loop flake gate: a red package
+// that passes on a same-tree rerun is FLAKY_PASSED_ON_RETRY (exit 0, recorded), a real
+// red that stays red keeps the failing exit, a rerun that is unavailable exonerates
+// nothing (fail-closed), and the classifier composes with --blame on the survivors.
+func TestAffectedRerunFailFlaky(t *testing.T) {
+	origCF, origLG, origRT, origBR, origRR := affectedChangedFiles, affectedListGraph, affectedRunGoTest, affectedBaselineRed, affectedRerunFailed
+	defer func() {
+		affectedChangedFiles, affectedListGraph, affectedRunGoTest, affectedBaselineRed, affectedRerunFailed = origCF, origLG, origRT, origBR, origRR
+	}()
+
+	affectedChangedFiles = func(root, base string) ([]string, error) {
+		return []string{"a/a.go", "b/b.go"}, nil
+	}
+	affectedListGraph = func(root string) (map[string]string, map[string][]string, int, error) {
+		return map[string]string{"a/a.go": "m/a", "b/b.go": "m/b"}, map[string][]string{}, 2, nil
+	}
+	affectedRunGoTest = func(root string, args []string, stdout, stderr io.Writer) (int, error) {
+		fmt.Fprintln(stdout, "FAIL\tm/a\t0.10s")
+		fmt.Fprintln(stdout, "FAIL\tm/b\t0.10s")
+		return 1, nil
+	}
+
+	// Scenario 1 — both failing packages pass on rerun: all-flaky, exit 0, and the report
+	// records the rerun budget and the flaky set for a peer to audit.
+	var rerunAsked []string
+	var rerunFlags []string
+	var rerunAttempts int
+	affectedRerunFailed = func(root string, flags, pkgs []string, attempts int) (map[string]bool, error) {
+		rerunAsked = append([]string(nil), pkgs...)
+		rerunFlags = append([]string(nil), flags...)
+		rerunAttempts = attempts
+		return map[string]bool{"m/a": true, "m/b": true}, nil
+	}
+	report := filepath.Join(t.TempDir(), "report.json")
+	var out, errb bytes.Buffer
+	if code := runAffected(&out, &errb, []string{"--rerun-fail", "2", "--report", report}); code != 0 {
+		t.Fatalf("all-flaky run exit = %d, want 0\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, affectedtests.FlakyPassedOnRetry) || !strings.Contains(s, "passed on rerun") {
+		t.Fatalf("flaky narration missing from stderr:\n%s", s)
+	}
+	if !reflect.DeepEqual(rerunAsked, []string{"m/a", "m/b"}) || rerunAttempts != 2 || len(rerunFlags) != 0 {
+		t.Fatalf("rerun asked pkgs=%v attempts=%d flags=%v, want [m/a m/b] 2 []", rerunAsked, rerunAttempts, rerunFlags)
+	}
+	raw, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	var rep affectedRunReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("report JSON: %v\n%s", err, raw)
+	}
+	if rep.Verdict != affectedtests.FlakyPassedOnRetry || rep.RerunAttempts != 2 || !reflect.DeepEqual(rep.FlakyPackages, []string{"m/a", "m/b"}) {
+		t.Fatalf("report = verdict %q attempts %d flaky %v, want FLAKY_PASSED_ON_RETRY/2/[m/a m/b]", rep.Verdict, rep.RerunAttempts, rep.FlakyPackages)
+	}
+
+	// Scenario 2 — m/a flakes green, m/b stays red: a real regression keeps the red exit,
+	// but m/a is still named flaky so the agent does not chase it.
+	affectedRerunFailed = func(root string, flags, pkgs []string, attempts int) (map[string]bool, error) {
+		return map[string]bool{"m/a": true}, nil
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runAffected(&out, &errb, []string{"--rerun-fail", "3"}); code != 1 {
+		t.Fatalf("partial-flaky run exit = %d, want 1 (m/b genuinely red)\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, "m/a — "+affectedtests.FlakyPassedOnRetry) {
+		t.Fatalf("m/a flaky line missing from stderr:\n%s", s)
+	}
+
+	// Scenario 3 — the rerun itself is unavailable (harness error): exonerate nothing, the
+	// red exit stands, fail-closed.
+	affectedRerunFailed = func(root string, flags, pkgs []string, attempts int) (map[string]bool, error) {
+		return nil, fmt.Errorf("worktree busy")
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runAffected(&out, &errb, []string{"--rerun-fail", "2"}); code != 1 {
+		t.Fatalf("rerun-unavailable run exit = %d, want 1 (fail-closed)\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, "rerun unavailable") || !strings.Contains(s, "fail-closed") {
+		t.Fatalf("fail-closed narration missing from stderr:\n%s", s)
+	}
+
+	// Scenario 4 — composition with --blame: m/a flakes green, m/b stays red and is
+	// peer-preexisting at baseline, so the survivor is attributed to a peer -> exit 0.
+	affectedRerunFailed = func(root string, flags, pkgs []string, attempts int) (map[string]bool, error) {
+		return map[string]bool{"m/a": true}, nil
+	}
+	var baselineAsked []string
+	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, map[string]bool, error) {
+		baselineAsked = append([]string(nil), pkgs...)
+		return map[string]bool{"m/b": true}, map[string]bool{"m/b": true}, nil
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runAffected(&out, &errb, []string{"--rerun-fail", "2", "--blame"}); code != 0 {
+		t.Fatalf("flaky+peer run exit = %d, want 0 (m/a flaky, m/b peer-preexisting)\nstderr=%s", code, errb.String())
+	}
+	if !reflect.DeepEqual(baselineAsked, []string{"m/b"}) {
+		t.Fatalf("baseline asked for %v, want only the rerun survivor [m/b]", baselineAsked)
+	}
+	if s := errb.String(); !strings.Contains(s, "m/a — "+affectedtests.FlakyPassedOnRetry) || !strings.Contains(s, "peer-preexisting") || !strings.Contains(s, "attributed to peers") {
+		t.Fatalf("flaky+blame narration missing from stderr:\n%s", s)
+	}
+}
+
 // TestAffectedTestCommandRouting pins the host routing: on Windows the fast inner-loop
 // gate must route `go test` through test.ps1 -> WSL (native go test is OS-policy-blocked
 // there), the SAME bridge `fak test` uses; on every other host it runs go test directly.

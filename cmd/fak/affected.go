@@ -16,6 +16,9 @@ package main
 //	fak affected --short -- -run TestX   pass-through flags to go test (after --)
 //	fak affected --blame --mine internal/foo/foo.go   attribute each red package
 //	     mine | peer-wip | peer-preexisting (#2138); exit reflects only 'mine' reds
+//	fak affected --rerun-fail 2   on a red run, rerun the failing packages up to 2×;
+//	     a package that fails then passes is FLAKY_PASSED_ON_RETRY — non-deterministic,
+//	     not your diff — exonerated for the loop, fail-closed on harness errors
 //
 // It is the impure shell over internal/affectedtests: it gathers the changed files
 // (`git diff`), the import graph (`go list -json ./...`), folds them through the pure
@@ -48,6 +51,7 @@ var (
 	affectedListGraph    = goListGraph
 	affectedRunGoTest    = runAffectedGoTest
 	affectedBaselineRed  = runAffectedBaselineRed
+	affectedRerunFailed  = runAffectedRerunFailed
 	affectedNow          = time.Now
 )
 
@@ -78,6 +82,10 @@ type affectedRunReport struct {
 	// package tagged mine | peer-wip | peer-preexisting against the clean baseline.
 	BaselineRef string                `json:"baseline_ref,omitempty"`
 	Blame       []affectedtests.Blame `json:"blame,omitempty"`
+	// RerunAttempts + FlakyPackages are the --rerun-fail evidence: how many same-tree
+	// reruns were allowed and which failing packages passed on one (flaky, exonerated).
+	RerunAttempts int      `json:"rerun_attempts,omitempty"`
+	FlakyPackages []string `json:"flaky_packages,omitempty"`
 }
 
 func runAffected(stdout, stderr io.Writer, argv []string) int {
@@ -99,11 +107,16 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	blame := fs.Bool("blame", false, "on a red run, attribute each failing package mine | peer-wip | peer-preexisting (clean-baseline rerun + --mine closure, #2138); the exit code then reflects only 'mine' reds")
 	var mineFiles pathList
 	fs.Var(&mineFiles, "mine", "repo-relative file YOU changed (repeatable; implies --blame — a red package outside these files' affected closure is attributed peer-wip)")
+	rerunFail := fs.Int("rerun-fail", 0, "on a red run, rerun the failing packages up to N× on the same tree; a package that fails then passes is FLAKY_PASSED_ON_RETRY (non-deterministic, not your diff) — exonerated for the loop, fail-closed on harness errors")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *budget < 0 {
 		fmt.Fprintln(stderr, "fak affected: --budget must be non-negative")
+		return 2
+	}
+	if *rerunFail < 0 {
+		fmt.Fprintln(stderr, "fak affected: --rerun-fail must be non-negative")
 		return 2
 	}
 	passthrough := fs.Args() // anything after -- (flag stops at the first non-flag/--)
@@ -171,78 +184,74 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stderr, "fak affected: testing %d/%d package(s) affected by %d changed file(s)%s\n",
 		len(selected), total, len(changedFiles), baseNote(*base))
 
-	args := []string{"test"}
-	if *short {
-		args = append(args, "-short")
-	}
-	if *verbose {
-		args = append(args, "-v")
-	}
-	if *run != "" {
-		args = append(args, "-run", *run)
-	}
-	if *count != 0 {
-		args = append(args, fmt.Sprintf("-count=%d", *count))
-	}
-	if *timeout != "" {
-		args = append(args, "-timeout", *timeout)
-	}
-	args = append(args, passthrough...)
-	args = append(args, selected...)
+	args, goTestFlags := affectedGoTestArgs(*short, *verbose, *run, *count, *timeout, passthrough, selected)
 
-	// With --blame the test stream is additionally teed into a buffer so the
-	// per-package FAIL verdict lines can be parsed for attribution; the operator still
-	// sees the full output live either way.
+	// With --blame or --rerun-fail the test stream is additionally teed into a buffer so
+	// the per-package FAIL verdict lines can be parsed (for attribution / rerun); the
+	// operator still sees the full output live either way.
 	testOut := stdout
 	var teed bytes.Buffer
-	if *blame {
+	if *blame || *rerunFail > 0 {
 		testOut = io.MultiWriter(stdout, &teed)
 	}
 	code, runErr := affectedRunGoTest(root, args, testOut, stderr)
 	elapsed := affectedNow().Sub(start)
-	verdict := "OK"
-	reason := ""
-	if runErr != nil {
-		verdict = "TEST_RUN_ERROR"
-		reason = runErr.Error()
-	} else if code != 0 {
-		verdict = "TEST_FAILED"
-		reason = fmt.Sprintf("go test exited %d", code)
-	} else if *budget > 0 && elapsed > *budget {
-		verdict = "GATE_LATENCY_REGRESSION"
-		reason = fmt.Sprintf("elapsed %s exceeded budget %s", roundDuration(elapsed), *budget)
-	}
+	verdict, reason := affectedInitialVerdict(code, runErr, elapsed, *budget)
 
 	exitCode := code
 	var blames []affectedtests.Blame
+	var flaky []string
 	baselineRef := *base
 	if baselineRef == "" {
 		baselineRef = "HEAD"
 	}
-	if *blame && verdict == "TEST_FAILED" {
-		blames = attributeAffectedFailures(stderr, root, baselineRef, teed.String(), mineFiles, changedFiles, fileToPkg, edges)
-		mineCount := 0
-		for _, b := range blames {
-			if b.Class == affectedtests.BlameMine {
-				mineCount++
+	if verdict == "TEST_FAILED" && (*rerunFail > 0 || *blame) {
+		failing := affectedtests.FailedPackages(teed.String())
+		if len(failing) == 0 {
+			fmt.Fprintln(stderr, "fak affected: could not parse per-package FAIL lines from the test output; keeping the red exit unattributed")
+		} else {
+			// --rerun-fail runs FIRST: a package that is not even reproducibly red on the
+			// same tree is flaky, and there is nothing for --blame to attribute. Only the
+			// packages that stay red after every rerun reach the attribution rung.
+			stillFailing := failing
+			if *rerunFail > 0 {
+				flaky, stillFailing = rerunAffectedFlaky(stderr, root, goTestFlags, failing, *rerunFail)
 			}
-			fmt.Fprintf(stderr, "fak affected blame: %s — %s: %s\n", b.Package, b.Class, b.Evidence)
-		}
-		if len(blames) > 0 && mineCount == 0 {
-			// Every red is positively a peer's: green for THIS diff. The witness the
-			// issue asked for — no stash-and-rerun cycle to prove the red isn't yours.
-			verdict = "PEER_RED_ONLY"
-			reason = fmt.Sprintf("all %d failing package(s) attributed to peers (peer-wip / peer-preexisting); green for your diff — make ci on the merged tree stays the oracle", len(blames))
-			fmt.Fprintf(stderr, "fak affected: %s\n", reason)
-			exitCode = 0
-			// Exoneration clears the red, not the clock: a budget breach the TEST_FAILED
-			// verdict pre-empted still fails the gate.
-			if *budget > 0 && elapsed > *budget {
+			switch {
+			case len(stillFailing) == 0:
+				// Every failing package passed on a same-tree rerun: non-deterministic,
+				// not a deterministic regression from this diff. Green for the loop —
+				// recorded and loud; make ci on the merged tree stays the oracle.
+				verdict = affectedtests.FlakyPassedOnRetry
+				reason = fmt.Sprintf("all %d failing package(s) passed on rerun (flaky); green for your diff — make ci on the merged tree stays the oracle", len(flaky))
+				fmt.Fprintf(stderr, "fak affected: %s\n", reason)
+				exitCode = 0
+			case *blame:
+				blames = attributeAffectedFailures(stderr, root, baselineRef, stillFailing, mineFiles, changedFiles, fileToPkg, edges)
+				mineCount := 0
+				for _, b := range blames {
+					if b.Class == affectedtests.BlameMine {
+						mineCount++
+					}
+					fmt.Fprintf(stderr, "fak affected blame: %s — %s: %s\n", b.Package, b.Class, b.Evidence)
+				}
+				if len(blames) > 0 && mineCount == 0 {
+					// Every remaining red is positively a peer's: green for THIS diff. The
+					// witness the issue asked for — no stash-and-rerun cycle to prove it.
+					verdict = "PEER_RED_ONLY"
+					reason = fmt.Sprintf("all %d failing package(s) attributed to peers (peer-wip / peer-preexisting); green for your diff — make ci on the merged tree stays the oracle", len(blames))
+					fmt.Fprintf(stderr, "fak affected: %s\n", reason)
+					exitCode = 0
+				} else if len(blames) > 0 {
+					reason = fmt.Sprintf("go test exited %d; %d/%d failing package(s) attributed mine", code, mineCount, len(blames))
+				}
+			}
+			// Exoneration (flaky or peer-attributed) clears the red, not the clock: a
+			// budget breach the TEST_FAILED verdict pre-empted still fails the gate.
+			if exitCode == 0 && *budget > 0 && elapsed > *budget {
 				verdict = "GATE_LATENCY_REGRESSION"
-				reason = fmt.Sprintf("elapsed %s exceeded budget %s (all reds peer-attributed)", roundDuration(elapsed), *budget)
+				reason = fmt.Sprintf("elapsed %s exceeded budget %s (reds exonerated)", roundDuration(elapsed), *budget)
 			}
-		} else if len(blames) > 0 {
-			reason = fmt.Sprintf("go test exited %d; %d/%d failing package(s) attributed mine", code, mineCount, len(blames))
 		}
 	}
 
@@ -251,6 +260,10 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 		if len(blames) > 0 {
 			rep.BaselineRef = baselineRef
 			rep.Blame = blames
+		}
+		if *rerunFail > 0 {
+			rep.RerunAttempts = *rerunFail
+			rep.FlakyPackages = flaky
 		}
 		if err := writeAffectedRunReport(*reportPath, rep); err != nil {
 			fmt.Fprintf(stderr, "fak affected: write report: %v\n", err)
@@ -271,20 +284,59 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// affectedGoTestArgs builds the `go test …` argv for the affected run and the goTestFlags
+// slice replayed verbatim on a flaky rerun. goTestFlags is everything between the "test" verb
+// and the selected packages — the -short/-v/-run/… flags plus post-`--` passthrough — so a
+// rerun re-tests exactly what failed under the same filters.
+func affectedGoTestArgs(short, verbose bool, run string, count int, timeout string, passthrough, selected []string) (args, goTestFlags []string) {
+	args = []string{"test"}
+	if short {
+		args = append(args, "-short")
+	}
+	if verbose {
+		args = append(args, "-v")
+	}
+	if run != "" {
+		args = append(args, "-run", run)
+	}
+	if count != 0 {
+		args = append(args, fmt.Sprintf("-count=%d", count))
+	}
+	if timeout != "" {
+		args = append(args, "-timeout", timeout)
+	}
+	args = append(args, passthrough...)
+	args = append(args, selected...)
+	goTestFlags = append([]string(nil), args[1:len(args)-len(selected)]...)
+	return args, goTestFlags
+}
+
+// affectedInitialVerdict classifies the raw go test outcome before any flaky-rerun or blame
+// exoneration: a run error, a non-zero exit, or an over-budget green.
+func affectedInitialVerdict(code int, runErr error, elapsed, budget time.Duration) (verdict, reason string) {
+	verdict = "OK"
+	if runErr != nil {
+		verdict = "TEST_RUN_ERROR"
+		reason = runErr.Error()
+	} else if code != 0 {
+		verdict = "TEST_FAILED"
+		reason = fmt.Sprintf("go test exited %d", code)
+	} else if budget > 0 && elapsed > budget {
+		verdict = "GATE_LATENCY_REGRESSION"
+		reason = fmt.Sprintf("elapsed %s exceeded budget %s", roundDuration(elapsed), budget)
+	}
+	return verdict, reason
+}
+
 // attributeAffectedFailures gathers the two evidence rungs the pure Attribute fold
-// consumes (#2138): the per-package FAIL lines parsed from the teed test output, the
+// consumes (#2138): the caller-supplied set of still-failing packages (parsed from the
+// teed test output, and already reduced by any --rerun-fail flaky exoneration), the
 // affected-set closure of the caller's declared --mine files, and the clean-baseline
 // rerun via the affectedBaselineRed seam. Every degradation fails CLOSED and is
-// narrated: unparseable output attributes nothing (the red exit stands), an unavailable
-// baseline exonerates nothing, and a --mine file that is not among the changed files
-// (a typo'd path would otherwise shrink the closure and exonerate everything as
-// peer-wip) voids the closure rung entirely.
-func attributeAffectedFailures(stderr io.Writer, root, baselineRef, testOutput string, mineFiles, changedFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
-	failing := affectedtests.FailedPackages(testOutput)
-	if len(failing) == 0 {
-		fmt.Fprintln(stderr, "fak affected: --blame could not parse per-package FAIL lines from the test output; keeping the red exit unattributed")
-		return nil
-	}
+// narrated: an unavailable baseline exonerates nothing, and a --mine file that is not
+// among the changed files (a typo'd path would otherwise shrink the closure and
+// exonerate everything as peer-wip) voids the closure rung entirely.
+func attributeAffectedFailures(stderr io.Writer, root, baselineRef string, failing, mineFiles, changedFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
 	var mineClosure map[string]bool
 	if len(mineFiles) > 0 {
 		changed := make(map[string]bool, len(changedFiles))
@@ -400,6 +452,76 @@ func baselineHarnessFailure(output string) string {
 		}
 	}
 	return ""
+}
+
+// rerunAffectedFlaky reruns the failing packages (affectedRerunFailed seam) up to
+// `attempts` times and folds the outcome into the FLAKY set and the set still failing,
+// narrating each. A rerun that is unavailable or harness-broken exonerates nothing
+// (fail-closed): ClassifyReruns leaves every package it never saw pass in stillFailing.
+func rerunAffectedFlaky(stderr io.Writer, root string, flags, failing []string, attempts int) (flaky, stillFailing []string) {
+	fmt.Fprintf(stderr, "fak affected: rerunning %d failing package(s) up to %d× to detect flakiness\n", len(failing), attempts)
+	passed, err := affectedRerunFailed(root, flags, failing, attempts)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak affected: rerun unavailable (%v); no flaky classification — fail-closed\n", err)
+	}
+	flaky, stillFailing = affectedtests.ClassifyReruns(failing, passed)
+	for _, p := range flaky {
+		fmt.Fprintf(stderr, "fak affected flaky: %s — %s: failed then passed on a same-tree rerun (non-deterministic, not your diff); make ci stays the oracle\n", p, affectedtests.FlakyPassedOnRetry)
+	}
+	return flaky, stillFailing
+}
+
+// runAffectedRerunFailed reruns the initially-failing packages up to `attempts` times on
+// the CURRENT working tree (the same tree the red came from — NOT a clean baseline; the
+// question is whether the SAME code is non-deterministic) and returns the set that
+// produced a passing `ok` verdict on some rerun. Each round runs only the packages still
+// failing, forcing a real re-execution with -count=1 (bypassing the test cache) and
+// carrying the same host routing + go-test flags as the original run so the rerun tests
+// exactly what failed. FAIL-CLOSED: a round whose output carries a harness-execution
+// marker (a blocked/unrunnable binary prints FAIL lines indistinguishable from real reds)
+// contributes no exoneration and stops the reruns, and a package is called passed only on
+// positive `ok` evidence — never the mere absence of a repeated FAIL.
+func runAffectedRerunFailed(root string, flags, pkgs []string, attempts int) (map[string]bool, error) {
+	passed := map[string]bool{}
+	remaining := append([]string(nil), pkgs...)
+	for i := 0; i < attempts && len(remaining) > 0; i++ {
+		args := append([]string{"test"}, flags...)
+		args = append(args, "-count=1")
+		args = append(args, remaining...)
+		name, cmdArgs := affectedTestCommand(runtime.GOOS, args)
+		cmd := exec.Command(name, cmdArgs...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		cmd.Dir = root
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if err := cmd.Run(); err != nil {
+			if _, ok := err.(*exec.ExitError); !ok {
+				return passed, fmt.Errorf("rerun go test: %w", err)
+			}
+		}
+		if marker := baselineHarnessFailure(out.String()); marker != "" {
+			return passed, fmt.Errorf("rerun go test could not execute test binaries (%q) — its FAIL lines are harness failures, not flakiness evidence", marker)
+		}
+		stillFailed := map[string]bool{}
+		for _, p := range affectedtests.FailedPackages(out.String()) {
+			stillFailed[p] = true
+		}
+		okd := map[string]bool{}
+		for _, p := range affectedtests.PassedPackages(out.String()) {
+			okd[p] = true
+		}
+		var next []string
+		for _, p := range remaining {
+			if okd[p] && !stillFailed[p] {
+				passed[p] = true // positive green evidence this round -> flaky
+				continue
+			}
+			next = append(next, p) // still red, or produced no verdict — keep trying
+		}
+		remaining = next
+	}
+	return passed, nil
 }
 
 func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (int, error) {

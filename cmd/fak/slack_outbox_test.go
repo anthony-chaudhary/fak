@@ -226,6 +226,79 @@ func TestSlackOutboxDeadAndRetryRoundTrip(t *testing.T) {
 	}
 }
 
+// deleteAwareServer answers post/update/history with ok and counts chat.delete calls — the
+// reaper's transport witness.
+func deleteAwareServer(t *testing.T, deletes *int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "conversations.history"):
+			_, _ = io.WriteString(w, `{"ok":true,"messages":[]}`)
+		case strings.Contains(r.URL.Path, "chat.delete"):
+			if deletes != nil {
+				*deletes++
+			}
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		default:
+			_, _ = io.WriteString(w, `{"ok":true,"ts":"1.23"}`)
+		}
+	}))
+}
+
+func TestSlackOutboxReapDeletesExpired(t *testing.T) {
+	outboxTestDir(t)
+	t.Setenv(ephemeralChannelsEnv, "C1")
+	deletes := 0
+	srv := deleteAwareServer(t, &deletes)
+	defer srv.Close()
+
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ob.Enqueue(slackoutbox.Row{Channel: "C1", Text: "ephemeral"}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runSlackOutbox(&out, &errb, []string{"drain", "--token", "xoxb-test", "--api-base", srv.URL + "/"}); rc != 0 {
+		t.Fatalf("drain rc=%d stderr=%s", rc, errb.String())
+	}
+	if deletes != 0 {
+		t.Fatalf("fresh message reaped during drain (deletes=%d), want 0", deletes)
+	}
+
+	// --ttl 1ns: the posted-at floors to the whole second, so any elapsed time exceeds it.
+	out.Reset()
+	if rc := runSlackOutbox(&out, &errb, []string{"reap", "--ttl", "1ns", "--token", "xoxb-test", "--api-base", srv.URL + "/"}); rc != 0 {
+		t.Fatalf("reap rc=%d stderr=%s", rc, errb.String())
+	}
+	if deletes != 1 {
+		t.Fatalf("reap did not delete the expired message (deletes=%d)", deletes)
+	}
+	if !strings.Contains(out.String(), "deleted 1") {
+		t.Fatalf("reap output missing deletion:\n%s", out.String())
+	}
+	st, _ := ob.Status(time.Now())
+	if st.Reaped != 1 || st.Posted != 0 {
+		t.Fatalf("state after reap: %+v, want reaped 1 posted 0", st)
+	}
+}
+
+func TestSlackOutboxReapNoChannelsHint(t *testing.T) {
+	clearSlackEnv(t)
+	outboxTestDir(t)
+	var out, errb bytes.Buffer
+	if rc := runSlackOutbox(&out, &errb, []string{"reap", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), "would reap") {
+		t.Fatalf("dry-run headline missing:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "no ephemeral channels configured") {
+		t.Fatalf("no-channels hint missing:\n%s", out.String())
+	}
+}
+
 func TestOutboxHealthRungVerdicts(t *testing.T) {
 	dir := outboxTestDir(t)
 	now := time.Now()

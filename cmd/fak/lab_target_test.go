@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
+	"github.com/anthony-chaudhary/fak/internal/linkstate"
 )
 
 func TestLabTargetResolvesReadyGLMTarget(t *testing.T) {
 	env := writeLabTargetEnv(t, labTargetEnvOpts{
-		readiness: fleet.LabReadyForDevWork,
+		readiness: linkstate.Clear,
 		report: fleet.Report{
 			State: fleet.StateLive,
 			Inference: &fleet.InferenceStats{
@@ -45,7 +46,7 @@ func TestLabTargetResolvesReadyGLMTarget(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
 		t.Fatalf("lab target did not emit JSON: %v\n%s", err, out.String())
 	}
-	if res.Status != fleet.LabReadyForDevWork || res.Alias != "@lab/glm-5.2" || res.Model != "glm-5.2" || res.BoxID != "box-a" {
+	if res.Status != string(linkstate.Clear) || res.Alias != "@lab/glm-5.2" || res.Model != "glm-5.2" || res.BoxID != "box-a" {
 		t.Fatalf("resolution = %+v", res)
 	}
 	if res.RemoteServeArg != "@lab/glm-5.2" || res.GuardCommand != labTargetDefaultCommand {
@@ -88,7 +89,7 @@ func TestLabTargetRefusesMissingReadiness(t *testing.T) {
 
 func TestLabTargetDegradesSlowReadyRouteAndGuardRefusesAlias(t *testing.T) {
 	env := writeLabTargetEnv(t, labTargetEnvOpts{
-		readiness: fleet.LabReadyForDevWork,
+		readiness: linkstate.Clear,
 		report: fleet.Report{
 			State: fleet.StateLive,
 			Inference: &fleet.InferenceStats{
@@ -141,7 +142,7 @@ func TestLabTargetUsesPerTargetRoster(t *testing.T) {
 	targetsPath := filepath.Join(root, "lab-targets.json")
 	rosterPath := filepath.Join(root, "private-roster.json")
 
-	rec := fleet.NewLabReadiness("gpu-server", fleet.LabReadyForDevWork, "admit-lab-backed-dispatch", "scrubbed-fleet-report", time.Now())
+	rec := fleet.NewLabReadiness("gpu-server", linkstate.Clear, linkstate.DetailReady, "admit-lab-backed-dispatch", "scrubbed-fleet-report", time.Now())
 	if err := writeIndentedJSONFile(readinessPath, rec); err != nil {
 		t.Fatalf("write readiness: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestLabTargetUsesPerTargetRoster(t *testing.T) {
 
 func TestLabTargetRefusesMissingConfig(t *testing.T) {
 	env := writeLabTargetEnv(t, labTargetEnvOpts{
-		readiness: fleet.LabReadyForDevWork,
+		readiness: linkstate.Clear,
 		report:    readyGLMReport(),
 		noTargets: true,
 	})
@@ -217,7 +218,7 @@ func TestLabTargetRefusesStaleOrNonUsefulReports(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := writeLabTargetEnv(t, labTargetEnvOpts{
-				readiness: fleet.LabReadyForDevWork,
+				readiness: linkstate.Clear,
 				report:    tc.report,
 				stale:     tc.stale,
 				targets: []labTargetConfig{{
@@ -251,7 +252,7 @@ func TestResolveGuardRemoteServeKeepsLiteralHostPath(t *testing.T) {
 }
 
 type labTargetEnvOpts struct {
-	readiness   string
+	readiness   linkstate.Phase
 	noReadiness bool
 	report      fleet.Report
 	stale       bool
@@ -276,11 +277,11 @@ func writeLabTargetEnv(t *testing.T, opts labTargetEnvOpts) labTargetEnv {
 		targetsPath:   filepath.Join(root, "lab-targets.json"),
 	}
 	if !opts.noReadiness {
-		status := opts.readiness
-		if status == "" {
-			status = fleet.LabReadyForDevWork
+		phase := opts.readiness
+		if phase == "" {
+			phase = linkstate.Clear
 		}
-		rec := fleet.NewLabReadiness("gpu-server", status, "admit-lab-backed-dispatch", "scrubbed-fleet-report", time.Now())
+		rec := fleet.NewLabReadiness("gpu-server", phase, "", "admit-lab-backed-dispatch", "scrubbed-fleet-report", time.Now())
 		if err := writeIndentedJSONFile(env.readinessPath, rec); err != nil {
 			t.Fatalf("write readiness: %v", err)
 		}

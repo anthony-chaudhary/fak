@@ -70,6 +70,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accountsDump := fs.Bool("accounts-dump", false, "write the built-in DefaultRoster (the account-switcher starter) to stdout")
 	accountsCheck := fs.String("accounts-check", "", "validate an account roster and print the account + binding surface")
 	accountsStatus := fs.String("accounts-status", "", "validate an account roster and print credential readiness (env presence only; no network, no secret values)")
+	accountsCover := fs.String("accounts-cover", "", "cross-check an account roster against the routing manifest's routed ids and report coverage (exit 1 if any id is unbound)")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
@@ -122,6 +123,8 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprint(stdout, accountReadinessSurface(report))
 		return 0
+	case *accountsCover != "":
+		return runAccountsCover(stdout, stderr, *accountsCover, *asJSON)
 	}
 
 	// Resolve the manifest: an explicit file, else the built-in default.

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/fleetpane"
@@ -21,8 +22,16 @@ func runFleetPane(stdout, stderr io.Writer, argv []string) int {
 	}
 	args := fs.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "fak fleetpane: missing subcommand (status | fleet | loop-list | loop-check | loop-audit)")
+		fmt.Fprintln(stderr, "fak fleetpane: missing subcommand (status | fleet | loop-list | loop-check | loop-audit | selfcheck)")
 		return 2
+	}
+	// selfcheck needs no config/runner — it is the no-I/O proof of the worker-health
+	// decenter fold, so dispatch it before the config load can fail.
+	if args[0] == "selfcheck" {
+		return runReportSelfcheck(stdout, stderr, args[1:], "fleetpane", fleetpane.TriageSelfcheck,
+			"SELFCHECK OK -- decenter-the-human at the fleet pane: an account auth wall waits on a "+
+				"person; dead/stale workers are the launcher's relaunch and the monitor's attention flag "+
+				"is a fresh-context look, not a page.")
 	}
 	cfg, err := loadFleetPaneConfig(*root)
 	if err != nil {
@@ -86,6 +95,15 @@ func runFleetPaneStatus(stdout, stderr io.Writer, cfg fleetpane.Config, opts fle
 		}
 	} else {
 		fmt.Fprintln(stdout, fleetpane.PaneText(doc))
+		// Decenter the human at the source: under FAK_FLEETPANE_TRIAGE_GATE=enforce,
+		// append the worker-health split — the workers that genuinely wait on a person
+		// (an account auth wall) vs the ones the fleet's launcher clears itself. Default
+		// ("", "warn") leaves the pane readout byte-for-byte unchanged while it soaks.
+		if fleetpane.FleetTriageEnforced(os.Getenv("FAK_FLEETPANE_TRIAGE_GATE")) {
+			if line := fleetpane.WorkerHealthTriageLine(doc.WorkerHealth); line != "" {
+				fmt.Fprintln(stdout, line)
+			}
+		}
 	}
 	if *failOnAction && doc.Verdict != "OK" {
 		return 1

@@ -22,6 +22,8 @@ import (
 // clearance alone does not launder it. At READ-TIME, Resolve also reverify-checks
 // concrete artifact claims (SHA/path/flag) against the current checkout before bytes
 // can enter context (#1158). Fully offline + deterministic.
+
+//fak:ctxplan verb=recall enters="a persisted session core image on disk (--dir) — it records a finished session through the write-time gate, then RELOADS it in a fresh session with its own CAS and gate" pages="the demand-paged benign working set for the follow-up --query; poison/secret pages are REFUSED across the boundary, and read-time reverify re-checks each page SHA/path/flag claim against the checkout before bytes may enter context" warms="nothing — offline and deterministic (no model, no transcript replay); it warms no prompt cache or KV"
 func cmdRecall(argv []string) {
 	fs := flag.NewFlagSet("recall", flag.ExitOnError)
 	dir := fs.String("dir", "recall-image", "directory for the persisted core image")
@@ -126,6 +128,8 @@ func cmdRecall(argv []string) {
 // The pass leans on FAK's unusual properties instead: content-addressed pages,
 // witness revocation, and a fresh ctxmmu/canon re-screen before anything can stay
 // resident in the cleaned image.
+
+//fak:ctxplan verb=dream enters="nothing live — an offline pass over a finished session core image on disk (a deterministic demo image is seeded if none exists)" pages="nothing into a live window — it writes a cleaned output core image and a JSON report; the point is to shrink what a LATER reload would page in" warms="nothing — a deterministic clean (page re-screen, refuted-witness revocation, duplicate-blob prune) with no model and no prompt cache or KV"
 func cmdDream(argv []string) {
 	fs := flag.NewFlagSet("dream", flag.ExitOnError)
 	dir := fs.String("dir", "dream-input-image", "core image directory to clean; if missing, a deterministic demo image is created")

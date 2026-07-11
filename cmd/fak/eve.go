@@ -43,11 +43,16 @@ func runEve(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 	switch argv[0] {
 	case "preflight":
 		return runEvePreflight(stdout, stderr, stdin, argv[1:])
+	case "inspect":
+		// #2601: compile the authored agent/ layout (or a compiled .eve/)
+		// into the fak policy/mount inspect manifest. See cmd/fak/eve_inspect.go.
+		return runEveInspect(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		fmt.Fprintln(stderr, "fak eve: preflight connections  (mechanical security preflight over eve MCP/OpenAPI connections)")
+		fmt.Fprintln(stderr, "         inspect [--json] [--policy-draft] [ROOT]  (compile an Eve app's authored shape into the fak policy/mount manifest)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak eve: unknown subcommand %q (want preflight)\n", argv[0])
+		fmt.Fprintf(stderr, "fak eve: unknown subcommand %q (want preflight|inspect)\n", argv[0])
 		return 2
 	}
 }

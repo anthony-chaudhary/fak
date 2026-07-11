@@ -408,7 +408,7 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "  delivery deferred: %v — run `fak slack outbox drain` once configured\n", werr)
 			return 0
 		}
-		rep, derr := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."})
+		rep, derr := ob.Drain(ctx(), wire, stdDrainOpts())
 		switch {
 		case derr == slackoutbox.ErrDrainBusy:
 			fmt.Fprintln(stdout, "  delivery deferred: another drainer holds the lock")

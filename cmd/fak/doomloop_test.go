@@ -128,17 +128,105 @@ func TestDoomloopTickRequiresSession(t *testing.T) {
 	}
 }
 
-func dlNonEmptyLines(s string) []string {
-	var out []string
-	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(l) != "" {
-			out = append(out, l)
+// TestDoomloopSampleObservesNeverCorrects drives the OBSERVE-only input adapter:
+// it derives effort from a growing transcript and progress from the injected
+// region-commit seam, trips a DOOM_LOOP over repeated burning-flat samples, and
+// proves the observe-only contract - the decision ledger records the (dry-run)
+// recommendation but NO nudge is ever queued to the outbox.
+func TestDoomloopSampleObservesNeverCorrects(t *testing.T) {
+	store := t.TempDir()
+	transcript := filepath.Join(t.TempDir(), "w1.jsonl")
+
+	// Flat verified progress: the region never gains a commit. Burning effort:
+	// the transcript grows every sample. Restore the real seam after.
+	prevCount := doomloopCountRegionCommits
+	doomloopCountRegionCommits = func(root string, region []string) (int64, error) { return 0, nil }
+	defer func() { doomloopCountRegionCommits = prevCount }()
+
+	var lastOut bytes.Buffer
+	for i := 0; i < 5; i++ {
+		dlWriteLines(t, transcript, (i+1)*5) // 5,10,15,20,25 non-empty lines => burning
+		lastOut.Reset()
+		var errb bytes.Buffer
+		argv := []string{"sample",
+			"--session", "w1",
+			"--transcript", transcript,
+			"--region", "internal/foo",
+			"--store", store,
+			"--now", dlItoa(int64(3000 + i)),
+		}
+		if rc := runDoomloop(&lastOut, &errb, strings.NewReader(""), argv); rc != 0 {
+			t.Fatalf("sample %d rc=%d stderr=%s", i, rc, errb.String())
 		}
 	}
-	return out
+
+	if !strings.Contains(lastOut.String(), "DOOM_LOOP") {
+		t.Fatalf("final sample did not report DOOM_LOOP:\n%s", lastOut.String())
+	}
+
+	// The derived axes actually landed in the sample history: effort tracks the
+	// transcript line count, progress is the flat region-commit count.
+	sraw, err := os.ReadFile(filepath.Join(store, "samples", "w1.jsonl"))
+	if err != nil {
+		t.Fatalf("read sample history: %v", err)
+	}
+	slines := dlNonEmptyLines(string(sraw))
+	if len(slines) != 5 {
+		t.Fatalf("sample history has %d rows, want 5", len(slines))
+	}
+	var first struct {
+		Effort   int64 `json:"effort"`
+		Progress int64 `json:"progress"`
+		Alive    bool  `json:"alive"`
+	}
+	if err := json.Unmarshal([]byte(slines[0]), &first); err != nil {
+		t.Fatalf("decode first sample: %v", err)
+	}
+	if first.Effort != 5 || first.Progress != 0 {
+		t.Fatalf("first sample effort=%d progress=%d, want 5/0 (derived from transcript+region)", first.Effort, first.Progress)
+	}
+	if !first.Alive {
+		t.Fatalf("first sample alive=false, want true (non-empty transcript is a live worker)")
+	}
+
+	// Observe-only contract: the ledger recorded a doom loop, but nothing was
+	// queued - the last decision is a dry-run recommendation, and the outbox does
+	// not exist (or is empty).
+	ledger := filepath.Join(store, "decisions.jsonl")
+	lraw, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	llines := dlNonEmptyLines(string(lraw))
+	var last dlDecision
+	if err := json.Unmarshal([]byte(llines[len(llines)-1]), &last); err != nil {
+		t.Fatalf("decode last decision: %v", err)
+	}
+	if last.Verdict != "DOOM_LOOP" {
+		t.Fatalf("last verdict = %q, want DOOM_LOOP", last.Verdict)
+	}
+	if last.Applied == "nudge-queued" || last.Artifact != "" {
+		t.Fatalf("observe-only violated: applied=%q artifact=%q (nothing must be queued)", last.Applied, last.Artifact)
+	}
+	if des, err := os.ReadDir(filepath.Join(store, "outbox")); err == nil && len(des) != 0 {
+		t.Fatalf("observe-only violated: outbox has %d packet(s), want 0", len(des))
+	}
 }
 
-func dlItoa(n int64) string { return strconv.FormatInt(n, 10) }
+// TestDoomloopSampleRequiresInputs guards the adapter's required flags.
+func TestDoomloopSampleRequiresInputs(t *testing.T) {
+	cases := [][]string{
+		{"sample", "--transcript", "t", "--region", "r"},  // no --session
+		{"sample", "--session", "w", "--region", "r"},     // no --transcript
+		{"sample", "--session", "w", "--transcript", "t"}, // no --region
+	}
+	for i, argv := range cases {
+		var o, e bytes.Buffer
+		if rc := runDoomloop(&o, &e, strings.NewReader(""), argv); rc != 2 {
+			t.Fatalf("case %d: rc = %d, want 2 (missing required flag); stderr=%s", i, rc, e.String())
+		}
+	}
+}
 
 // TestDoomloopDrainReportsButKeeps proves the OBSERVE-only output drainer: it
 // enumerates a queued nudge with its steer destination, exits 3 (actionable, not

@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memq"
 )
 
+//fak:ctxplan verb=memory-read enters="the on-disk markdown memory store (MEMORY.md + per-fact files, default .claude/memory or --store DIR)" pages="the notes digest it renders to stdout — MEMORY.md plus the per-fact bodies (capped at --max-bytes, or index-only with --index-only) — the orientation block an agent pastes into its window" warms="nothing — a read-only render of the note store; it warms no prompt cache or KV"
 func cmdMemoryRead(argv []string) { os.Exit(runMemoryRead(os.Stdout, os.Stderr, argv)) }
 
 func runMemoryRead(stdout, stderr io.Writer, argv []string) int {

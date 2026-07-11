@@ -9,6 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memorystability"
 )
 
+//fak:ctxplan verb=memory-stability-governor enters="nothing live — an offline fold over a replay-trajectory JSON file and the workspace root, scoring per-reload memory drift" pages="nothing into a window — it emits a memory-stability report (per-reload drift vs tau, cumulative budget, per-cycle floor) as text or JSON" warms="nothing — a governor that grades memory-reload stability; it touches no prompt cache or KV"
 func cmdMemoryStabilityGovernor(argv []string) {
 	os.Exit(runMemoryStabilityGovernor(os.Stdout, os.Stderr, argv))
 }

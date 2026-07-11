@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,78 @@ func TestRecordUsageWritesOneRow(t *testing.T) {
 	}
 	if n, err := usagelog.Verify(path); err != nil || n != 1 {
 		t.Fatalf("Verify() = (%d, %v), want (1, nil)", n, err)
+	}
+}
+
+func TestRunObservedGitOperationRecordsCompositeOutcomeDuration(t *testing.T) {
+	path := withUsagePath(t)
+	t.Setenv("FAK_USAGE_LOG", "")
+	start := time.Unix(1_700_000_000, 0)
+	oldNow := recordUsageNow
+	recordUsageNow = func() time.Time { return start.Add(37 * time.Millisecond) }
+	t.Cleanup(func() { recordUsageNow = oldNow })
+
+	code := runObservedGitOperation(start, gitOperationName("sync", []string{"push", "--json"}), []string{"push", "--json"}, func() int {
+		return syncExitRefused
+	})
+	if code != syncExitRefused {
+		t.Fatalf("code = %d, want %d", code, syncExitRefused)
+	}
+	rows, err := usagelog.ReadRows(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Verb != "sync push" || rows[0].ExitCode != syncExitRefused || rows[0].DurationMS != 37 {
+		t.Fatalf("rows = %+v, want one 37ms refused sync push", rows)
+	}
+	stats := usagelog.FoldRows(rows, usagelog.FoldOptions{}).ByOperationOutcome
+	if len(stats) != 1 || stats[0].Operation != "sync push" || stats[0].Outcome != usagelog.OutcomeRefused || stats[0].P50MS != 37 {
+		t.Fatalf("stats = %+v, want refused sync-push p50=37ms", stats)
+	}
+}
+
+func TestFoldGitOperationsSeparatesTerminalOutcomes(t *testing.T) {
+	rows := []usagelog.Row{
+		{Schema: usagelog.SchemaV1, Verb: "sync push", ExitCode: 0, DurationMS: 900},
+		{Schema: usagelog.SchemaV1, Verb: "sync push", ExitCode: 0, DurationMS: 1100},
+		{Schema: usagelog.SchemaV1, Verb: "sync push", ExitCode: 3, DurationMS: 5},
+		{Schema: usagelog.SchemaV1, Verb: "sync push", ExitCode: 2, DurationMS: 2},
+		{Schema: usagelog.SchemaV1, Verb: "sync push", ExitCode: 4, DurationMS: 7},
+		{Schema: usagelog.SchemaV1, Verb: "dev sync push", ExitCode: 0, DurationMS: 1300},
+		{Schema: usagelog.SchemaV1, Verb: "route", ExitCode: 0, DurationMS: 1},
+	}
+	stats := usagelog.FoldRows(rows, usagelog.FoldOptions{}).ByOperationOutcome
+	if len(stats) != 4 {
+		t.Fatalf("stats = %+v, want four outcome buckets", stats)
+	}
+	want := map[usagelog.TerminalOutcome]int64{usagelog.OutcomeSuccess: 1100, usagelog.OutcomeRefused: 5, usagelog.OutcomeUsage: 2, usagelog.OutcomeError: 7}
+	for _, stat := range stats {
+		if got, ok := want[stat.Outcome]; !ok || stat.P50MS != got {
+			t.Fatalf("stat = %+v, want p50 %d (known=%v)", stat, got, ok)
+		}
+	}
+}
+
+func TestGitOperationNameIsClosedAndArgumentSafe(t *testing.T) {
+	tests := []struct {
+		verb string
+		argv []string
+		want string
+	}{
+		{"commit", []string{"--path", "secret/customer.txt", "-m", "token=do-not-log"}, "commit local"},
+		{"commit", []string{"--push", "--path", "x"}, "commit push"},
+		{"commit", []string{"-m", "--push", "--path", "x"}, "commit local"},
+		{"commit", []string{"--path=--push", "-m=x"}, "commit local"},
+		{"commit", []string{"--", "--push"}, "commit local"},
+		{"dev commit", []string{"--preview", "-m", "x"}, "dev commit"},
+		{"sweep", []string{"--apply", "--push", "--no-origin"}, "sweep apply push"},
+		{"sync", []string{"apply", "--fetch", "--remote", "private-origin"}, "sync apply fetch"},
+		{"sync", []string{"--repo", "secret/path"}, "sync check"},
+	}
+	for _, tc := range tests {
+		if got := gitOperationName(tc.verb, tc.argv); got != tc.want {
+			t.Errorf("gitOperationName(%q, %q) = %q, want %q", tc.verb, tc.argv, got, tc.want)
+		}
 	}
 }
 
@@ -174,5 +247,28 @@ func TestCmdUsageTextAndJSON(t *testing.T) {
 	}
 	if fold.Total != 3 || fold.Errors != 1 {
 		t.Errorf("fold = %+v, want Total=3 Errors=1", fold)
+	}
+}
+
+func TestCmdUsageGitOpsKeepsOutcomeLatencySeparate(t *testing.T) {
+	withUsagePath(t)
+	t.Setenv("FAK_USAGE_LOG", "")
+	recordUsage("sync push", []string{"push"}, 0, time.Now().Add(-900*time.Millisecond))
+	recordUsage("sync push", []string{"push"}, syncExitRefused, time.Now().Add(-5*time.Millisecond))
+
+	text := captureStdout(t, func() { cmdUsage([]string{"--git-ops"}) })
+	for _, want := range []string{"process observation, not a downstream-effect witness", "sync push", "success", "refused"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("git-op usage text missing %q:\n%s", want, text)
+		}
+	}
+
+	jsonOut := captureStdout(t, func() { cmdUsage([]string{"--git-ops", "--json"}) })
+	var stats []usagelog.OperationOutcomeStat
+	if err := json.Unmarshal([]byte(jsonOut), &stats); err != nil {
+		t.Fatalf("unmarshal git-op JSON: %v\n%s", err, jsonOut)
+	}
+	if len(stats) != 2 || stats[0].Outcome != usagelog.OutcomeSuccess || stats[1].Outcome != usagelog.OutcomeRefused {
+		t.Fatalf("git-op stats = %+v, want separate success/refused rows", stats)
 	}
 }

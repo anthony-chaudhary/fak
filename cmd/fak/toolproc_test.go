@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -54,6 +56,86 @@ func TestToolprocHookJournalRoundTrip(t *testing.T) {
 	}
 	if !tab.AttentionNeeded {
 		t.Error("the orphaned survivor must need attention")
+	}
+}
+
+// TestToolprocHookStopCompactsOversizedJournal proves the SessionEnd wiring end
+// to end: a shared journal that has grown past the tail-read window is bounded
+// by the stop firing, which reclaims fully-terminal history while preserving a
+// long-lived spawn that sat far outside the window — the #3488 leak fix.
+func TestToolprocHookStopCompactsOversizedJournal(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+
+	// One live spawn at the very front (older than the 4 MiB window), then enough
+	// terminal spawn/exit pairs to push the file past JournalCompactThresholdBytes.
+	var buf []byte
+	appendEvent := func(ev toolproc.Event) {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf = append(buf, append(line, '\n')...)
+	}
+	appendEvent(toolproc.Event{Kind: toolproc.EvSpawn, CallID: "orphan-live", Tool: "Bash", Session: "s1", AtMS: 1})
+	for i := 0; len(buf) <= toolproc.JournalCompactThresholdBytes+(64<<10); i++ {
+		id := "done-" + strconv.Itoa(i)
+		appendEvent(toolproc.Event{Kind: toolproc.EvSpawn, CallID: id, Tool: "Bash", Session: "s1", AtMS: int64(2 + 2*i)})
+		appendEvent(toolproc.Event{Kind: toolproc.EvExit, CallID: id, AtMS: int64(3 + 2*i), Status: "ok"})
+	}
+	if err := os.WriteFile(journal, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size() <= toolproc.JournalCompactThresholdBytes {
+		t.Fatalf("test fixture must exceed the threshold, got %d", before.Size())
+	}
+
+	// The stop firing appends the session_end and then compacts.
+	if err := toolprocHookOnce(strings.NewReader(`{"session_id":"s1"}`), "stop", journal, toolproc.HookEnvelope{}, 9_000); err != nil {
+		t.Fatalf("stop hook: %v", err)
+	}
+
+	after, err := os.Stat(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() >= before.Size() || after.Size() > toolproc.JournalCompactThresholdBytes {
+		t.Fatalf("stop hook did not bound the journal: before=%d after=%d threshold=%d",
+			before.Size(), after.Size(), int64(toolproc.JournalCompactThresholdBytes))
+	}
+
+	f, err := os.Open(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	events, err := toolproc.ParseEvents(f)
+	if err != nil {
+		t.Fatalf("compacted journal must stay fold-clean: %v", err)
+	}
+	// The long-lived spawn survived compaction and folds to a running (now
+	// orphaned, since its session ended) proc — the whole point of preserving it.
+	tab, err := toolproc.Fold(events, 10_000, toolproc.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live *toolproc.Proc
+	for i := range tab.Procs {
+		if tab.Procs[i].CallID == "orphan-live" {
+			live = &tab.Procs[i]
+		}
+	}
+	if live == nil {
+		t.Fatalf("long-lived spawn dropped by stop-hook compaction: %+v", tab.Counts)
+	}
+	// It must survive as the RUNNING, now-orphaned proc — not merely as a row.
+	// A compaction that kept the spawn but lost its session_end would fold it as
+	// a healthy RUNNING proc, and this assertion is what catches that.
+	if live.State != toolproc.StateRunning || !live.Orphaned {
+		t.Fatalf("preserved spawn not running+orphaned: state=%s orphaned=%v", live.State, live.Orphaned)
 	}
 }
 

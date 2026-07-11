@@ -25,6 +25,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "audit":
 		return runIssueAudit(stdout, stderr, argv[1:])
+	case "audit-loop":
+		return runIssueAuditLoop(stdout, stderr, argv[1:])
 	case "contract":
 		return runIssueContract(stdout, stderr, argv[1:])
 	case "cohort":
@@ -1166,6 +1168,8 @@ func issueUsage(w io.Writer) {
 
   fak issue audit    --issue N --author-manifest A
                      --auditor PROVIDER/FAMILY/MODEL --identity-roster R [--json]
+  fak issue audit-loop --snapshot SUBJECTS.json [--ledger P] [--cursor P]
+                     [--scan-cap N] [--batch-cap N] [--replay N,M] [--json]
   fak issue contract --file CANDIDATE.json [--json]
   fak issue contract --from-plan PLAN.json [--json]
   fak issue contract --from-issues ISSUES.json [--json]
@@ -1207,6 +1211,17 @@ does not trip the reversibility/ESCALATE preview-confirm gate (which is
 correct to keep escalating an agent's own raw gh/git calls). --dry-run
 renders the issue and the exact gh argv without calling gh. Exit 0 created
 (or dry-run ok); exit 2 bad flags; exit 1 gh failure.
+
+The audit-loop command runs one deterministic producer tick of the durable
+cross-model issue-audit background loop (#3856): it plans a bounded batch from a
+discovery snapshot, reconciles the at-most-once receipt ledger and the durable
+scheduler cursor, and reports the typed next decision — ADVANCING (a subject
+reached a terminal PASS/REFUTE this tick), WAIT (eligible work is only
+transiently blocked or everything is settled), STALLED (all pending work has
+exhausted its retry budget), or DARK (no eligible subjects — a potential blind
+spot). It defaults to a dry-run plan that never leases, audits, or mutates the
+ledger; UNAVAILABLE/INCONCLUSIVE subjects never advance the cursor so no
+unavailable row is lost. Exit 0 report; exit 2 bad flags/snapshot.
 
 The contract command reviews machine-created GitHub issue candidates before a
 producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is

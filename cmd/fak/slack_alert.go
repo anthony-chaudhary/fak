@@ -156,7 +156,7 @@ func drainAlertOutbox(stdout io.Writer, token, apiBase string) {
 		fmt.Fprintf(stdout, "  delivery deferred: %v — run `fak slack outbox drain` once configured\n", werr)
 		return
 	}
-	rep, derr := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."})
+	rep, derr := ob.Drain(ctx(), wire, stdDrainOpts())
 	switch {
 	case errors.Is(derr, slackoutbox.ErrDrainBusy):
 		fmt.Fprintln(stdout, "  delivery deferred: another drainer holds the lock")
@@ -242,7 +242,7 @@ func backgroundDrain(token, apiBase string) {
 	}
 	dctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, _ = ob.Drain(dctx, wire, slackoutbox.DrainOpts{Root: "."})
+	_, _ = ob.Drain(dctx, wire, stdDrainOpts())
 }
 
 // chOrDash renders an empty channel as "-" for a log line.

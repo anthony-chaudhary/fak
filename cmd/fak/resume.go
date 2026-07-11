@@ -60,6 +60,8 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeStopped(stdout, stderr, argv[1:])
 	case "status":
 		return runResumeStatus(stdout, stderr, argv[1:])
+	case "self":
+		return runResumeSelf(stdout, stderr, argv[1:])
 	case "admit":
 		return runResumeAdmit(stdout, stderr, argv[1:])
 	case "watchdog":
@@ -72,13 +74,15 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeResolve(stdout, stderr, argv[1:])
 	case "identity":
 		return runResumeIdentity(stdout, stderr, argv[1:])
+	case "drive":
+		return runResumeDrive(stdout, stderr, argv[1:])
 	case "why":
 		return runResumeWhy(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, hold, release, resolve, identity, or why)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, self, admit, watchdog, hold, release, resolve, identity, drive, or why)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -266,9 +270,12 @@ type governorLedgerStats struct {
 
 // scanGovernorLedgerStats reads the ledger JSONL once and classifies each trailing-24h
 // row by phase: gate_fail_open (a launcher ran without the governor), deferred (the
-// gate refused), considered/skipped (ignored), everything else with a timestamp a real
-// launch — the same launch rule scanLaunchLedger applies. A missing/unreadable ledger
-// yields zeros: no record is no activity, never an error.
+// gate refused), any other non-launch phase (broker_denied/considered/skipped/settled…)
+// ignored, and only what remains — "launched" or a legacy phase-less row — a real
+// launch. The launch rule is isNonLaunchPhase, the same one scanLaunchLedger applies,
+// so the two readers cannot drift: a denylist miss here once counted broker_denied as
+// a launch and poisoned the spacing floor. A missing/unreadable ledger yields zeros:
+// no record is no activity, never an error.
 func scanGovernorLedgerStats(path string, now time.Time) governorLedgerStats {
 	var st governorLedgerStats
 	f, err := os.Open(path)
@@ -298,21 +305,27 @@ func scanGovernorLedgerStats(path string, now time.Time) governorLedgerStats {
 			continue
 		}
 		inWindow := ts >= cutoff
-		switch strings.ToLower(strings.TrimSpace(r.Phase)) {
-		case "gate_fail_open":
+		phase := strings.ToLower(strings.TrimSpace(r.Phase))
+		switch {
+		case phase == "gate_fail_open":
 			if inWindow {
 				st.FailOpen24h++
 			}
-		case "deferred":
+		case phase == "deferred":
 			if inWindow {
 				st.Deferred24h++
 			}
-		case "considered", "skipped", "settled", "operator_settled", "consolidated":
-			// non-launch bookkeeping rows: not activity worth surfacing
+		case isNonLaunchPhase(phase):
+			// non-launch bookkeeping rows (broker_denied, settled, considered, …):
+			// not activity worth surfacing, and never a launch — nothing started
 		default:
+			// A real launch: "launched", or a legacy phase-less row (pid/cause only).
 			if inWindow {
 				st.Launched24h++
 			}
+			// Deliberately un-windowed: the posture report wants the TRUE most recent
+			// launch even when it is older than 24h ("last launch <ts>", not "never"),
+			// matching the un-windowed `last` scanLaunchLedger feeds the spacing floor.
 			if ts > st.LastLaunchUnix {
 				st.LastLaunchUnix = ts
 			}
@@ -488,12 +501,19 @@ func scanLaunchLedger(path string) (times []int64, last int64) {
 // fired launch — a deferral or consideration is not launch pressure, so counting it would
 // let the gate's own DEFERs cascade into more refusals. Mirrors launch_admission's
 // _NON_LAUNCH_PHASES set (and the watchdogs' NON_LAUNCH_PHASES, including the
-// gate_fail_open governor-unavailable warning row #2173). An empty phase is a launch
-// (the watchdog's launched rows and the other launchers' phase-less rows both record a
-// real spawn).
+// gate_fail_open governor-unavailable warning row #2173), plus broker_denied — the spawn
+// broker REFUSED, nothing started, so treating it as a launch would poison LastLaunchUnix
+// and trip LAUNCH_SPACING_FLOOR for every following session in the tick — and the
+// status-ledger vocabulary resume.Attempt.IsLaunch already denylists, in case a status
+// row is ever misrouted into the launch ledger. This is the ONE reader-side launch rule
+// in cmd/fak: every ledger scanner classifies through it so the rules cannot drift apart.
+// An empty phase is a launch (the watchdog's launched rows and the other launchers'
+// legacy phase-less rows — pid/cause only — both record a real spawn).
 func isNonLaunchPhase(phase string) bool {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open", "settled", "operator_settled", "consolidated":
+	case "deferred", "considered", "skipped", "gate_fail_open", "broker_denied",
+		"queued", "detected", "status", "tick", "snapshot", "progress",
+		"settled", "operator_settled", "consolidated":
 		return true
 	default:
 		return false
@@ -1157,6 +1177,8 @@ func resumeUsage(w io.Writer) {
 
   fak resume status --store DIR [--ledger FILE] [--max-attempts N] [--all] [--json]
 
+  fak resume self [--session SID] [--store DIR] [--ledger FILE] [--max-attempts N] [--json]
+
   fak resume admit [--max-live N] [--max-per-window N] [--window-sec S]
                    [--min-spacing-sec S] [--ledger FILE] [--policy FILE]
                    [--json] [--quiet] [--explain]
@@ -1173,6 +1195,8 @@ func resumeUsage(w io.Writer) {
                      [--no-probe] [--wait] [--no-wait] [--json]
 
   fak resume identity <uuid|trace> [--reg-dir DIR] [--json]
+
+  fak resume drive <uuid> [--reg-dir DIR] [--json]
 
   fak resume why <session-id> [--home DIR] [--ledger FILE] [--max-attempts N] [--json]
 
@@ -1215,6 +1239,12 @@ recorded handle/account/via provenance — from the durable, GC-immune resume_id
 (so a join survives the descriptor registry's 30-minute GC). Exit 4 on no join. It resolves the
 identity only; it resumes nothing.
 
+drive is the read-only operator lens onto the drive-CARRY channel: given a transcript UUID it
+folds the same durable resume_drivestate.jsonl the watchdog reads and prints the drive-state a
+relaunch would RESTORE for that uuid — the operator hold (if any) plus the carried budget /
+objective — or a "would come up fresh" line when the store holds nothing for it. It is strictly
+read-only: it never launches, admits, or writes a ledger row. --json emits the folded record.
+
 why is the single-session narrative over the same folds: locate the session across every
 ~/.claude* account (no --store to know), read how it died from the transcript's own
 records — including the mid-turn death that writes NO error record and used to vanish
@@ -1247,6 +1277,17 @@ took / re-stranded / gave-up / settled) read from the transcript's own turns, no
 launcher's "launched" ledger row (which alone cannot tell a resume that took from one
 that silently no-op'd). Actionable sessions sort first, so an agent bringing a dead
 batch back reads the ordered list, acts on the top, and re-runs.
+
+self is the WORKER-FACING mirror of status: instead of a store-wide operator sweep, it
+answers the first-person question one guarded session asks about ITSELF — "was I resumed,
+did it take, will another attempt fire, or does a human own me now?" — folding the same
+labels over this session's ledger history plus its own transcript. It is fail-closed: a
+session with no resume history reads the honest floor (pending, nothing to recover), never
+a fabricated "took". Same folds as status and the fak_resume_history MCP tool, so all three
+agree. The session defaults to $CLAUDE_SESSION_ID, else the newest transcript in --store.
+
+example (from inside a guarded session, ask what my own resume posture is):
+  fak resume self --store ~/.claude/projects/<project>
 
 watchdog is ONE TICK of the cross-account resume layer (the Go port of
 tools/fleet_resume_watchdog.py, designed for a ~5-minute schedule and safe by hand):

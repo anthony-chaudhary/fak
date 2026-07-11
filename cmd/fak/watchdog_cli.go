@@ -233,7 +233,7 @@ func postWatchdogHealthDigest(ctx context.Context, stdout, stderr io.Writer, d w
 		fmt.Fprintf(stdout, "fak watchdog status: health digest enqueued to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", channel, nonce, werr)
 		return 0
 	}
-	if _, err := ob.Drain(ctx, wire, slackoutbox.DrainOpts{Root: "."}); err != nil && err != slackoutbox.ErrDrainBusy {
+	if _, err := ob.Drain(ctx, wire, stdDrainOpts()); err != nil && err != slackoutbox.ErrDrainBusy {
 		fmt.Fprintf(stdout, "fak watchdog status: health digest enqueued to %s (nonce=%s); delivery deferred: %v — run `fak slack outbox drain`\n", channel, nonce, err)
 		return 0
 	}

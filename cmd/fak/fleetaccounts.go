@@ -16,11 +16,11 @@ import (
 
 // `fak fleet-accounts` — the native Go port of the READ-ONLY roster/resolve/probe +
 // status fold from tools/fleet_accounts.py. It answers "what is an account, and is it
-// offered right now?" across BOTH product families (Claude Code + opencode) by:
-//   - DISCOVERING config dirs (<home>/.claude*, <config_home>/opencode*),
+// offered right now?" across Claude Code, Codex, and opencode by:
+//   - DISCOVERING config dirs (<home>/.claude*, <home>/.codex*, <config_home>/opencode*),
 //   - classifying each by the operator POLICY (accounts_policy.json) into
 //     worker | excluded | non-account,
-//   - reconciling Claude dirs that share one Anthropic account (duplicate collapse),
+//   - reconciling Claude/Codex dirs that share one provider account (duplicate collapse),
 //   - folding live runtime status (usage throttle / auth block / live sessions) from the
 //     watchdog's sessions.json registry.
 //
@@ -65,7 +65,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	account := fs.String("account", "", "(resolve) pin to this account tag/basename; (status) filter tag/basename substring")
 	workKind := fs.String("work-kind", "", "(resolve) operator work-kind (gardening|engineering|...) — wins over tier")
 	task := fs.String("task", "", "(resolve) task text for the light/hard heuristic")
-	product := fs.String("product", "", "(resolve/seats/status) scope to a product family (claude|opencode)")
+	product := fs.String("product", "", "(resolve/seats/status) scope to a product family (claude|codex|opencode)")
 	provider := fs.String("provider", "", "(status) scope to a derived provider family (anthropic|groq|nvidia-nim|google|...)")
 	tier := fs.Int("tier", 0, "(status) filter by model tier 1|2|3")
 	state := fs.String("state", "", "(status) filter by state (ready|usage|auth|blocked|duplicate|excluded|non-account)")

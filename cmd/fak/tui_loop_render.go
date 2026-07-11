@@ -328,13 +328,31 @@ func renderTUIIssues(report tuiIssueReport, top, width int) string {
 	fmt.Fprintln(&b, "\nRanked Queue")
 	renderTUIIssueRows(&b, rows, minTUI(top, len(rows)), width)
 	if len(report.Actions) > 0 {
-		fmt.Fprintln(&b, "\nReview Actions")
-		limit := minTUI(8, len(report.Actions))
-		for _, action := range report.Actions[:limit] {
-			fmt.Fprintf(&b, "#%-5d %-23s %s\n", action.Number, action.Kind, trimTUI(action.Reason, width-32))
+		fmt.Fprintf(&b, "\nActions  needs-you=%d  agent-clearable=%d\n",
+			report.Counts.NeedsYou, report.Counts.AgentClearable)
+		// Genuine residual first: the choicetriage fold puts the human-residual
+		// actions (a person setting priority) at the top of the list, so the
+		// operator's eye lands on what actually pages them, not on the fleet's own
+		// to-do items below it.
+		ordered := append([]tuiIssueAction(nil), report.Actions...)
+		sort.SliceStable(ordered, func(i, j int) bool {
+			return ordered[i].NeedsHuman && !ordered[j].NeedsHuman
+		})
+		limit := minTUI(8, len(ordered))
+		for _, action := range ordered[:limit] {
+			marker := "  "
+			if action.NeedsHuman {
+				marker = "!!"
+			}
+			disp := action.Disposition
+			if disp == "" {
+				disp = "-"
+			}
+			fmt.Fprintf(&b, "%s #%-5d %-14s %-23s %s\n",
+				marker, action.Number, disp, action.Kind, trimTUI(action.Reason, maxTUI(12, width-50)))
 		}
-		if len(report.Actions) > limit {
-			fmt.Fprintf(&b, "... %d more actions in --json\n", len(report.Actions)-limit)
+		if len(ordered) > limit {
+			fmt.Fprintf(&b, "... %d more actions in --json\n", len(ordered)-limit)
 		}
 	}
 	return b.String()

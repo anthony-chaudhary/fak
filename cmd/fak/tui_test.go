@@ -88,6 +88,65 @@ func TestTUIIssueReportRanksAndLinksEpic(t *testing.T) {
 	}
 }
 
+// TestTUIIssueActionsTriageNeedsYouResidualOnly pins the decenter-the-human fold
+// over the pane's surfaced actions: only a genuine authority call (a person
+// setting priority) stays NeedsHuman; a ready gh command routes to TAKE_OBVIOUS
+// and an unlabeled triage to FRESH_CONTEXT, so the "needs you" surface is
+// residual-only.
+func TestTUIIssueActionsTriageNeedsYouResidualOnly(t *testing.T) {
+	asOf, err := time.Parse("2006-01-02", "2026-06-25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := []tuiIssue{
+		// Unprioritized, unlabeled, recently updated -> review whose reason names
+		// needs-priority -> HUMAN_RESIDUAL (only a person sets priority).
+		{Number: 20, Title: "triage me please", State: "OPEN",
+			CreatedAt: "2026-06-10T00:00:00Z", UpdatedAt: "2026-06-20T00:00:00Z"},
+		// Idle question -> close-dormant-question hands over a ready gh command ->
+		// TAKE_OBVIOUS, never a page.
+		{Number: 21, Title: "how do I wire the loader", State: "OPEN",
+			Labels:    []tuiLabel{{Name: "question"}},
+			CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-05T00:00:00Z"},
+		// Prioritized + owned but missing kind/area -> review with no authority
+		// token -> FRESH_CONTEXT (knowable, evaluate; do not page).
+		{Number: 22, Title: "labeled but unclassified", State: "OPEN",
+			Labels:    []tuiLabel{{Name: "priority/P2"}},
+			Assignees: []tuiUser{{Login: "owner"}},
+			CreatedAt: "2026-06-10T00:00:00Z", UpdatedAt: "2026-06-20T00:00:00Z"},
+	}
+	report := buildTUIIssueReport(issues, "fixture", asOf, 10)
+
+	byNum := map[int]tuiIssueAction{}
+	for _, a := range report.Actions {
+		byNum[a.Number] = a
+	}
+	want := map[int]struct {
+		disp       string
+		needsHuman bool
+	}{
+		20: {"HUMAN_RESIDUAL", true},
+		21: {"TAKE_OBVIOUS", false},
+		22: {"FRESH_CONTEXT", false},
+	}
+	for num, w := range want {
+		got, ok := byNum[num]
+		if !ok {
+			t.Fatalf("issue #%d produced no action; actions=%+v", num, report.Actions)
+		}
+		if got.Disposition != w.disp || got.NeedsHuman != w.needsHuman {
+			t.Fatalf("issue #%d disposition=%q needs_human=%v, want %q/%v",
+				num, got.Disposition, got.NeedsHuman, w.disp, w.needsHuman)
+		}
+	}
+	if report.Counts.NeedsYou != 1 {
+		t.Fatalf("needs_you = %d, want 1 (only #20 sets priority)", report.Counts.NeedsYou)
+	}
+	if report.Counts.AgentClearable != 2 {
+		t.Fatalf("agent_clearable = %d, want 2 (#21 + #22)", report.Counts.AgentClearable)
+	}
+}
+
 func TestTUIIssuesHumanOutputFromFixture(t *testing.T) {
 	path := writeTUIIssuesFixture(t)
 	var stdout, stderr bytes.Buffer

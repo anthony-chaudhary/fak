@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/antipattern"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -142,6 +143,7 @@ func readRecentCommits(root string, n int) []antipattern.Commit {
 	}
 	cmd := exec.Command("git", "-C", root, "log", "--no-merges",
 		fmt.Sprintf("-n%d", n), "--name-only", "--format=format:%x01%h%x1f%s")
+	windowgate.ConfigureBackgroundCommand(cmd) // windowless on Windows: no console flash from a background parent
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard

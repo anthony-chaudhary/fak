@@ -14,6 +14,8 @@ package main
 //	fak slack outbox dead            # list dead rows with their structured reasons
 //	fak slack outbox compact         # fold old settled rows + heartbeats out of the spool
 //	fak slack outbox compact --dry-run --json  # preview what a pass would drop
+//	fak slack outbox reap            # delete ephemeral (bridge-channel) messages idle past their TTL
+//	fak slack outbox reap --dry-run  # show what would be reaped, touch nothing
 //	fak slack outbox limits          # effective retention windows + live occupancy vs them
 //	fak slack outbox calls           # per-source Slack API-call spend vs saved (rate-limit gauge)
 //	fak slack outbox calls --json    # machine-readable, for a before/after noise baseline
@@ -29,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -46,7 +49,51 @@ const (
 	// rung grades the outbox STALLED — generous enough for a long 429 storm, tight
 	// enough that a wedged drain pages within a workday.
 	outboxStallBudget = 2 * time.Hour
+	// ephemeralChannelsEnv lists the channel ids whose posted messages the reaper deletes
+	// by default once idle past its TTL (the dgx-bridge allowlist). Comma- or
+	// whitespace-separated channel ids; unset disables the channel-default reaper (rows
+	// still opt in per message via DeleteAfterS). Env or .env.slack.local.
+	ephemeralChannelsEnv = "FAK_SLACK_EPHEMERAL_CHANNELS"
 )
+
+// resolveEphemeralChannels folds FAK_SLACK_EPHEMERAL_CHANNELS into the set of channel ids
+// whose messages auto-expire by default. Empty when the key is unset or blank.
+func resolveEphemeralChannels() map[string]bool {
+	r := slackenv.Lookup(ephemeralChannelsEnv)
+	if !r.Set() {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, ch := range strings.FieldsFunc(r.Value, func(c rune) bool { return c == ',' || c == ' ' || c == '\t' || c == '\n' }) {
+		if ch != "" {
+			set[ch] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// ephemeralPredicate builds the reaper's channel-default membership test from a set. It
+// returns nil (the reaper's "no channel default" signal) for an empty set, so an unconfigured
+// deployment never auto-deletes anything.
+func ephemeralPredicate(set map[string]bool) func(string) bool {
+	if len(set) == 0 {
+		return nil
+	}
+	return func(channel string) bool { return set[channel] }
+}
+
+// stdDrainOpts is the drain configuration every fak drainer shares: the leak-fence root plus
+// the ephemeral (dgx-bridge) reaper resolved from FAK_SLACK_EPHEMERAL_CHANNELS. Because it
+// rides on every drainer — the guard session-card path, the watchdog, alerts, feeders, `fak
+// slack outbox drain` — any drain in a bridge channel also clears that channel's messages
+// once they go idle past the TTL, so keeping the channels clean needs no separate scheduler.
+// It is a no-op when the allowlist is unset (nil predicate → the reaper touches nothing).
+func stdDrainOpts() slackoutbox.DrainOpts {
+	return slackoutbox.DrainOpts{Root: ".", ReapEphemeral: ephemeralPredicate(resolveEphemeralChannels())}
+}
 
 // resolveOutboxDir applies the documented resolution order for the spool directory.
 func resolveOutboxDir() string {
@@ -94,12 +141,14 @@ func runSlackOutbox(stdout, stderr io.Writer, argv []string) int {
 		return runSlackOutboxDead(stdout, stderr, rest)
 	case "compact":
 		return runSlackOutboxCompact(stdout, stderr, rest)
+	case "reap":
+		return runSlackOutboxReap(stdout, stderr, rest)
 	case "limits":
 		return runSlackOutboxLimits(stdout, stderr, rest)
 	case "calls":
 		return runSlackOutboxCalls(stdout, stderr, rest)
 	default:
-		fmt.Fprintf(stderr, "fak slack outbox: unknown subcommand %q (want status | drain | retry | dead | compact | limits | calls)\n", sub)
+		fmt.Fprintf(stderr, "fak slack outbox: unknown subcommand %q (want status | drain | retry | dead | compact | reap | limits | calls)\n", sub)
 		return 2
 	}
 }
@@ -131,8 +180,8 @@ func runSlackOutboxStatus(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "fak slack outbox — spool %s\n", ob.Dir())
-	fmt.Fprintf(stdout, "  pending %d  posted %d  dead %d  refused %d  superseded %d  corrupt %d\n",
-		st.Pending, st.Posted, st.Dead, st.Refused, st.Superseded, st.Corrupt)
+	fmt.Fprintf(stdout, "  pending %d  posted %d  dead %d  refused %d  superseded %d  reaped %d  corrupt %d\n",
+		st.Pending, st.Posted, st.Dead, st.Refused, st.Superseded, st.Reaped, st.Corrupt)
 	fmt.Fprintf(stdout, "  oldest pending: %s   last drain: %s\n",
 		ageOrDash(st.OldestPendingAgeS), ageOrDash(st.LastDrainAgeS))
 	for _, d := range st.DeadRows {
@@ -188,7 +237,9 @@ func runSlackOutboxDrain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak slack outbox drain: %v\n", err)
 		return 2
 	}
-	rep, err := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: ".", MaxAttempts: *maxAttempts})
+	dopts := stdDrainOpts()
+	dopts.MaxAttempts = *maxAttempts
+	rep, err := ob.Drain(ctx(), wire, dopts)
 	if err == slackoutbox.ErrDrainBusy {
 		fmt.Fprintln(stdout, "another drainer holds the lock — nothing to do")
 		return 0
@@ -197,8 +248,8 @@ func runSlackOutboxDrain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak slack outbox drain: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "drained: posted %d  updated %d  recovered %d  refused %d  superseded %d  failed %d  dead %d  remaining %d\n",
-		rep.Posted, rep.Updated, rep.Recovered, rep.Refused, rep.Superseded, rep.Failed, rep.Dead, rep.Remaining)
+	fmt.Fprintf(stdout, "drained: posted %d  updated %d  recovered %d  refused %d  superseded %d  failed %d  dead %d  reaped %d  remaining %d\n",
+		rep.Posted, rep.Updated, rep.Recovered, rep.Refused, rep.Superseded, rep.Failed, rep.Dead, rep.Reaped, rep.Remaining)
 	return 0
 }
 
@@ -321,6 +372,78 @@ func runSlackOutboxCompact(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "fak slack outbox — spool %s\n  %s\n", ob.Dir(), slackoutbox.CompactReportLine(rep))
+	return 0
+}
+
+// runSlackOutboxReap deletes posted messages in the ephemeral (dgx-bridge) channels that have
+// been idle past their TTL, so those channels stay clean. The channel allowlist comes from
+// FAK_SLACK_EPHEMERAL_CHANNELS (supplemented by --channels); the drain path runs this same
+// pass automatically, so this verb is the manual/one-off and --dry-run inspection surface. A
+// row that opted in per message (DeleteAfterS) is reaped regardless of the allowlist.
+func runSlackOutboxReap(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak slack outbox reap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dryRun := fs.Bool("dry-run", false, "report what would be reaped without deleting or recording anything")
+	asJSON := fs.Bool("json", false, "emit the reap report as JSON")
+	ttl := fs.Duration("ttl", 0, "idle window a message survives before it is reaped (default 30m)")
+	channels := fs.String("channels", "", "comma/space-separated channel ids to reap, on top of FAK_SLACK_EPHEMERAL_CHANNELS")
+	token := fs.String("token", "", "bot token (default: $FAK_SCOREBOARD_TOKEN, then .env.slack.local)")
+	apiBase := fs.String("api-base", "", "override the Slack API base URL (for testing/proxying)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	ob, err := openOutbox()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack outbox reap: %v\n", err)
+		return 1
+	}
+
+	set := resolveEphemeralChannels()
+	if *channels != "" {
+		if set == nil {
+			set = map[string]bool{}
+		}
+		for _, ch := range strings.FieldsFunc(*channels, func(c rune) bool { return c == ',' || c == ' ' || c == '\t' || c == '\n' }) {
+			if ch != "" {
+				set[ch] = true
+			}
+		}
+	}
+	opts := slackoutbox.ReapOpts{Ephemeral: ephemeralPredicate(set), TTL: *ttl, DryRun: *dryRun}
+
+	// A dry run never touches the wire (it stops before the delete), so it needs no token.
+	var wire slackoutbox.Wire
+	if !*dryRun {
+		w, werr := outboxWire(*token, *apiBase)
+		if werr != nil {
+			fmt.Fprintf(stderr, "fak slack outbox reap: %v\n", werr)
+			return 2
+		}
+		wire = w
+	}
+
+	rep, err := ob.Reap(ctx(), wire, opts)
+	if err == slackoutbox.ErrDrainBusy {
+		fmt.Fprintln(stdout, "another drainer holds the lock — nothing to do")
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack outbox reap: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			fmt.Fprintf(stderr, "fak slack outbox reap: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak slack outbox — spool %s\n  %s\n", ob.Dir(), slackoutbox.ReapReportLine(rep))
+	if len(set) == 0 {
+		fmt.Fprintf(stdout, "  (no ephemeral channels configured — set %s or pass --channels; only rows with an explicit delete_after_s are reaped)\n", ephemeralChannelsEnv)
+	}
 	return 0
 }
 

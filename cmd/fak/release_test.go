@@ -170,18 +170,42 @@ func TestReleaseDispatchesStableHelper(t *testing.T) {
 	}
 }
 
-func TestReleaseExecuteCutAddsSkipDryRun(t *testing.T) {
-	args := releaseArgs("cut", []string{"--execute", "--json"})
-	if !reflect.DeepEqual(args, []string{"--execute", "--json", "--skip-dry-run"}) {
-		t.Fatalf("args = %#v", args)
+// The front door must NOT force --skip-dry-run onto an executed cut/tag anymore.
+// The embedded release_dry_run witness reads the latest existing tag (not the
+// just-bumped VERSION), so it passes on a real version bump; the operator's args
+// reach the script verbatim, witness included. (Eliminates release gotcha #1.)
+func TestReleaseExecuteCutRunsDryRunWitness(t *testing.T) {
+	old := releaseRunScript
+	defer func() { releaseRunScript = old }()
+
+	cases := []struct {
+		mode string
+		in   []string
+	}{
+		{"cut", []string{"--execute", "--json"}},
+		{"tag", []string{"--execute", "--json"}},
+		{"cut", []string{"--json"}},
+		// An operator who explicitly opts out is still honored (verbatim).
+		{"tag", []string{"--execute", "--skip-dry-run", "--json"}},
 	}
-	already := releaseArgs("tag", []string{"--execute", "--skip-dry-run", "--json"})
-	if !reflect.DeepEqual(already, []string{"--execute", "--skip-dry-run", "--json"}) {
-		t.Fatalf("already = %#v", already)
-	}
-	dry := releaseArgs("cut", []string{"--json"})
-	if !reflect.DeepEqual(dry, []string{"--json"}) {
-		t.Fatalf("dry = %#v", dry)
+	for _, tc := range cases {
+		var gotScript string
+		var gotArgs []string
+		releaseRunScript = func(root, script string, args []string, stdout, stderr io.Writer) int {
+			gotScript = script
+			gotArgs = append([]string(nil), args...)
+			return 0
+		}
+		rc := runRelease(io.Discard, io.Discard, append([]string{tc.mode}, tc.in...))
+		if rc != 0 {
+			t.Fatalf("%s %v: exit = %d, want 0", tc.mode, tc.in, rc)
+		}
+		if gotScript != releaseScripts[tc.mode] {
+			t.Fatalf("%s: script = %q, want %q", tc.mode, gotScript, releaseScripts[tc.mode])
+		}
+		if !reflect.DeepEqual(gotArgs, tc.in) {
+			t.Fatalf("%s %v: args = %#v, want verbatim pass-through (no --skip-dry-run injected)", tc.mode, tc.in, gotArgs)
+		}
 	}
 }
 

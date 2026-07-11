@@ -35,7 +35,7 @@ import (
 func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	runsDir := fs.String("runs-dir", ".dispatch-runs", "directory of dispatch worker logs")
+	runsDir := fs.String("runs-dir", dispatchProgressRunsDir, "directory of dispatch worker logs")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
 	fileIssues := fs.Bool("file-issues", false, "file a gh issue for each NEW finding fingerprint (default: read-only)")
 	maxIssues := fs.Int("max-issues", 0, "with --file-issues: hard cap on issues filed per run, worst-first (0 = no cap). The anti-storm bound for the scheduled feeder's first run over a large backlog")

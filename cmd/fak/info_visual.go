@@ -166,13 +166,7 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 	}
 	// Sparkline / gauge widths scale with the pane but stay bounded so the trailing label+value
 	// always has room; on a narrow pane they shrink rather than push the value off-screen.
-	ctx := guardInfoPanelCtx{
-		v:      v,
-		tr:     tr,
-		width:  width,
-		sparkW: clampIntTUI(width-26, 8, 28),
-		gaugeW: clampIntTUI(width-28, 6, 20),
-	}
+	ctx := newGuardInfoPanelCtx(v, tr, width)
 	rows := composeGuardInfoPanels(ctx, guardInfoPanels(), height)
 	// Defensive cap: never emit more rows than the pane can hold (keeps the redraw cursor math
 	// exact even if a panel mis-sizes for an odd pane height).

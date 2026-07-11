@@ -47,10 +47,18 @@ func runOperatorHeaviness(stdout, stderr io.Writer, argv []string) int {
 			Law: "The law: keep the OPERATOR surface flat as the repo grows. heaviness_pressure sums how far " +
 				"over the comfortable lines the surface sits (verbs, front-door flags, refusal reasons, " +
 				"meta-verb share); a clean pass holds it flat, and a real consolidation drives it down. The " +
-				"only HARD debt is a steering surface the doc map hides or a missing in-product appeal channel.",
+				"only HARD debt is a steering surface the doc map hides or a missing in-product appeal channel. " +
+				"HONESTY FENCE (#2235): the verb surface splits into frontdoor_verbs (the product tier an operator " +
+				"FACES) and dev_verbs (the `fak dev` tooling tier), classified WITNESSED from internal/devindex and " +
+				"partitioning the flat count by construction (frontdoor_verbs + dev_verbs == verbs). A dev verb stays " +
+				"MEASURED in dev_verbs even after its bare spelling is gated behind `fak dev` -- hidden from the front " +
+				"door, not from the meter -- so the heaviness drop this buys must come from the frontdoor meter ONLY: a " +
+				"future \"move verbs to dev to lower heaviness\" commit must not move the headline unless the verb is " +
+				"actually deleted or product-simplified.",
 			DebtKey: heavinessscore.DebtKey,
-			HeaderExtra: fmt.Sprintf(" - pressure %v - %v verbs - %v front-door flags - %v refusal reasons",
+			HeaderExtra: fmt.Sprintf(" - pressure %v - %v verbs (%v frontdoor / %v dev) - %v front-door flags - %v refusal reasons",
 				payload.Corpus["heaviness_pressure"], payload.Corpus["verbs"],
+				payload.Corpus["frontdoor_verbs"], payload.Corpus["dev_verbs"],
 				payload.Corpus["front_door_flags"], payload.Corpus["refusal_reasons"]),
 		})
 }

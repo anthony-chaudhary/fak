@@ -79,6 +79,15 @@ func TestCachevalueReportJSONReproducesFold(t *testing.T) {
 	dir := t.TempDir()
 	track1, track2 := writeTwoLedgers(t, dir)
 
+	// Pin the CLI clock to the same fixed instant the re-fold uses. The report is
+	// no longer clock-independent: the #3394 freshness row bakes now−lastRow into
+	// component_health, so a real time.Now() in the CLI would diverge from the
+	// fixed twoTrackReportNow() re-fold. Sharing one instant keeps the recompute
+	// byte-exact and deterministic regardless of wall-clock.
+	restore := cachevalueReportNow
+	cachevalueReportNow = twoTrackReportNow
+	defer func() { cachevalueReportNow = restore }()
+
 	var out, errb bytes.Buffer
 	code := runCachevalueReport(&out, &errb, []string{
 		"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--json",
@@ -183,7 +192,7 @@ func TestCachevalueReportIncludesFleetAggregateAndContextBudget(t *testing.T) {
 	dir := t.TempDir()
 	track1, track2 := writeTwoLedgers(t, dir)
 	usage := filepath.Join(dir, "gateway-usage.jsonl")
-	row := gatewayusageledger.NewRow("exit", "guard", "claude", "g-1", 2*time.Minute, gatewayusageledger.Counters{
+	row := gatewayusageledger.NewRow("exit", "guard", "claude", "g-1", 2*time.Minute, nil, gatewayusageledger.Counters{
 		Total:                12,
 		Allowed:              9,
 		Denied:               2,

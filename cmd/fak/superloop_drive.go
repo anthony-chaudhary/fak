@@ -11,10 +11,12 @@ package main
 // altitude. The single ACTION this invocation takes is surfacing the member's OWN front
 // door (a loop member via `fak loop drive` / the dispatch tick; a scorecard member via
 // its enter hint), reached through the shared region hold — the super loop gets NO
-// private spawn path. Live execution of the member's child behind that front door is the
-// named follow-on; this rung admits one member under a lease, surfaces its single action,
-// and re-folds. A driven-but-unwitnessed member keeps the re-fold unsatisfied, so it can
-// never satisfy the intent.
+// private spawn path. With --execute (opt-in, off by default) the drive now also RUNS
+// that front door behind the held lease and lands the member's own witness — its exit
+// code IS the witnessed_done (see superloop_drive_exec.go); a front door it cannot run
+// headless (a skill, a container to descend) is surfaced, never faked. Without --execute
+// it stays surface-only, byte-for-byte. A driven-but-unwitnessed member keeps the re-fold
+// unsatisfied, so it can never satisfy the intent.
 
 import (
 	"flag"
@@ -44,7 +46,11 @@ type superloopDriveReport struct {
 	Outcome   string                  `json:"outcome"`
 	Decision  superloop.DriveDecision `json:"decision"`
 	Admission *superloopDriveAdmit    `json:"admission,omitempty"`
-	Refold    *superloop.WalkReport   `json:"refold,omitempty"`
+	// Exec, when set, records the `--execute` run of the admitted member's own front
+	// door behind the held lease (nil when --execute was not requested). It is the
+	// difference between admit-and-surface and admit-and-run.
+	Exec   *superloopDriveExec   `json:"exec,omitempty"`
+	Refold *superloop.WalkReport `json:"refold,omitempty"`
 }
 
 // superloopDriveAdmit records how the driven member fared at the shared admission gate.
@@ -123,11 +129,14 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	lane := fs.String("lane", "", "dos.toml lane the driven member's writes stay inside; arms region admission (COLLISION_RISK on lease overlap) against the live lease fabric")
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger the drive records its admission witness to")
 	batch := fs.Int("batch", 1, "admit up to N worst-first members whose regions are mutually disjoint (and disjoint from live leases) in one invocation, through the SAME admission gate; 1 (default) is the historical one-member drive, <=0 offers every worklist member")
+	execute := fs.Bool("execute", false, "actually RUN each admitted member's own front door behind the held lease (its exit code is the member's witness); default off = surface the front door only. A skill (/x) or container front door is always surfaced, never run headless")
+	execTimeoutMin := fs.Int("exec-timeout", int(defaultSuperloopExecTimeout/time.Minute), "with --execute, per-member front-door timeout in minutes (0 = no timeout)")
 	var tree repeatedString
 	fs.Var(&tree, "tree", "region glob the driven member's writes stay inside (repeatable); arms region admission against the live lease fabric")
-	if err := fs.Parse(superloopInterspersedFlagArgs(argv, map[string]bool{"workspace": true, "lane": true, "ledger": true, "tree": true, "batch": true})); err != nil {
+	if err := fs.Parse(superloopInterspersedFlagArgs(argv, map[string]bool{"workspace": true, "lane": true, "ledger": true, "tree": true, "batch": true, "exec-timeout": true})); err != nil {
 		return 2
 	}
+	execTimeout := time.Duration(*execTimeoutMin) * time.Minute
 	name := fs.Arg(0)
 	s, ok := superloop.Lookup(name)
 	if !ok {
@@ -156,7 +165,7 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	// signal). This is the same fail-closed opt-in shape as FLEET_TIER_LAUNCH.
 	effBatch := resolveSuperloopBatch(fs, *batch, stderr)
 	if effBatch != 1 {
-		return runSuperloopDriveBatch(stdout, stderr, *asJSON, root, s, *lane, tree, *ledger, effBatch)
+		return runSuperloopDriveBatch(stdout, stderr, *asJSON, root, s, *lane, tree, *ledger, effBatch, *execute, execTimeout)
 	}
 
 	// WALK — read every member's status from the cheap committed surfaces, then SELECT
@@ -200,6 +209,14 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	recordSuperloopDriveAdmit(*ledger, s.Name, decision, loopmgr.StatusAdmitted, "ENTERED",
 		"entered "+string(decision.Member.Kind)+" "+decision.Member.Ref+": "+decision.Action, admit.Lease)
 	report.Outcome = "entered"
+
+	// EXECUTE (opt-in) — with --execute, actually RUN the member's own front door behind
+	// the held lease and land its witness (the follow-on to admit-and-surface, #2224). A
+	// non-runnable front door (skill/container/none) is surfaced, never faked. Without
+	// --execute this is skipped and the drive stays surface-only, byte-for-byte.
+	if *execute {
+		report.Exec = superloopExecuteMember(stderr, *ledger, s.Name, decision, admit.Lease, execTimeout)
+	}
 
 	// RE-FOLD — re-walk and fold; the aggregate re-fold after the member run is the exit
 	// check. A driven-but-unwitnessed member (unmeasured/dark) keeps the re-fold
@@ -277,6 +294,9 @@ type superloopDriveBatchEntry struct {
 	Decision  superloop.DriveDecision `json:"decision"`
 	Admission superloopDriveAdmit     `json:"admission"`
 	Entered   bool                    `json:"entered"`
+	// Exec, when set, records the `--execute` run of this admitted member's front door
+	// behind its member-scoped lease (nil when not requested or the member was refused).
+	Exec *superloopDriveExec `json:"exec,omitempty"`
 }
 
 // runSuperloopDriveBatch is the impure shell for a fan-out drive. It WALKs the
@@ -290,7 +310,7 @@ type superloopDriveBatchEntry struct {
 // door surfaced, an admitted witness recorded); refused members surface their token
 // and are skipped (no private spawn path). One re-fold over the whole intent is the
 // exit check.
-func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, s superloop.Super, lane string, tree []string, ledger string, k int) int {
+func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, s superloop.Super, lane string, tree []string, ledger string, k int, execute bool, execTimeout time.Duration) int {
 	rep := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
 	bdec := superloop.DriveBatch(rep, k)
 	report := superloopDriveBatchReport{Schema: superloop.BatchDriveSchema, Intent: s.Name, Batch: k, Decision: bdec, Offered: len(bdec.Members)}
@@ -327,6 +347,11 @@ func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, 
 			report.Admitted++
 			recordSuperloopDriveAdmit(ledger, s.Name, m, loopmgr.StatusAdmitted, "ENTERED",
 				"entered "+string(m.Member.Kind)+" "+m.Member.Ref+": "+m.Action, admit.Lease)
+			// EXECUTE (opt-in) — run this admitted member's own front door behind its
+			// member-scoped lease. Non-runnable front doors are surfaced, never faked.
+			if execute {
+				entry.Exec = superloopExecuteMember(stderr, ledger, s.Name, m, admit.Lease, execTimeout)
+			}
 		} else {
 			report.Refused++
 			recordSuperloopDriveAdmit(ledger, s.Name, m, loopmgr.StatusRefused, admit.Status, admit.Detail, admit.Lease)
@@ -429,6 +454,7 @@ func renderSuperloopDriveBatch(w io.Writer, r superloopDriveBatchReport) {
 		fmt.Fprintln(w)
 		if e.Entered {
 			fmt.Fprintf(w, "        action: %s\n", d.Action)
+			renderSuperloopDriveExec(w, "        ", e.Exec)
 		}
 	}
 	if r.Outcome == "refused" {
@@ -452,12 +478,21 @@ func renderSuperloopDriveBatch(w io.Writer, r superloopDriveBatchReport) {
 // consulted — the held lease as evidence. Best-effort: the drive's success is the enter
 // + re-fold, not this observability row.
 func recordSuperloopDriveAdmit(ledger, intent string, d superloop.DriveDecision, status loopmgr.RunStatus, reason, detail, leaseID string) {
+	recordSuperloopDriveEvent(ledger, intent, d, loopmgr.EventAdmit, status, reason, detail, leaseID)
+}
+
+// recordSuperloopDriveEvent is the general ledger-append the admit and execute rungs
+// share: same LoopID/Source/evidence shape, but the caller chooses the event KIND —
+// EventAdmit for an admission ruling, EventStart/EventEnd for the `--execute` run's
+// running/witnessed_done/failed witnesses — so the member's own lifecycle reads on the
+// loop ledger with the standing vocabulary. Best-effort, same as the admit row.
+func recordSuperloopDriveEvent(ledger, intent string, d superloop.DriveDecision, kind loopmgr.EventKind, status loopmgr.RunStatus, reason, detail, leaseID string) {
 	if strings.TrimSpace(ledger) == "" {
 		return
 	}
 	ev := loopmgr.Event{
 		LoopID:  "superloop-" + intent,
-		Kind:    loopmgr.EventAdmit,
+		Kind:    kind,
 		Source:  "superloop-drive",
 		Status:  status,
 		Reason:  reason,
@@ -513,6 +548,7 @@ func renderSuperloopDrive(w io.Writer, r superloopDriveReport) {
 		fmt.Fprintf(w, "  → refused: the member's admission gate refused; the token is surfaced, not bypassed\n")
 		return
 	}
+	renderSuperloopDriveExec(w, "  ", r.Exec)
 	if r.Refold != nil {
 		sat := "not yet"
 		if r.Refold.Satisfied {
@@ -522,4 +558,27 @@ func renderSuperloopDrive(w io.Writer, r superloopDriveReport) {
 			r.Refold.Verdict, sat, r.Refold.TotalDebt, r.Refold.Floor, r.Refold.Unmeasured, r.Refold.Dark)
 		fmt.Fprintf(w, "  → %s\n", r.Refold.NextAction)
 	}
+}
+
+// renderSuperloopDriveExec prints the `--execute` outcome for one member (nothing when
+// exec was not requested). A runnable front door that ran shows its exit and whether it
+// witnessed_done; a non-runnable one (skill/container/none) shows it was surfaced, not
+// run — so the operator can always tell a real member run from a surfaced pointer.
+func renderSuperloopDriveExec(w io.Writer, indent string, ex *superloopDriveExec) {
+	if ex == nil {
+		return
+	}
+	if !ex.Ran {
+		fmt.Fprintf(w, "%sexecute: %s front door surfaced, not run — %s\n", indent, ex.Kind, ex.Note)
+		return
+	}
+	verdict := "WITNESSED_DONE"
+	if !ex.Witnessed {
+		verdict = "FAILED"
+	}
+	deadline := ""
+	if ex.TimeoutMinutes > 0 {
+		deadline = fmt.Sprintf(", deadline %dm (%s)", ex.TimeoutMinutes, ex.TimeoutSource)
+	}
+	fmt.Fprintf(w, "%sexecute: ran `%s` → exit %d (%s%s)\n", indent, ex.Command, ex.ExitCode, verdict, deadline)
 }

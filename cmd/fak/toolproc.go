@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/hostfault"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
@@ -37,6 +38,10 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		return runToolprocLeaks(stdout, stderr, argv[1:])
 	case "console-faults":
 		return runToolprocConsoleFaults(stdout, stderr, argv[1:])
+	case "host-faults":
+		return runToolprocHostFaults(stdout, stderr, argv[1:])
+	case "contain":
+		return runToolprocContain(stdout, stderr, argv[1:])
 	case "sample":
 		return runToolprocSample(stdout, stderr, argv[1:])
 	case "hook":
@@ -45,7 +50,7 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | sample | hook)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | hook)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
@@ -123,30 +128,66 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 	if err != nil {
 		return fmt.Errorf("existing journal unreadable: %w", err)
 	}
-	evs, err := toolproc.HookEvents(kind, payload, envFor, nowMS, existing)
-	if err != nil || len(evs) == 0 {
-		return err
-	}
-	var lines []byte
-	for _, ev := range evs {
-		line, err := json.Marshal(ev)
-		if err != nil {
+	evs, evErr := toolproc.HookEvents(kind, payload, envFor, nowMS, existing)
+	if evErr == nil && len(evs) > 0 {
+		var lines []byte
+		for _, ev := range evs {
+			line, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			lines = append(lines, append(line, '\n')...)
+		}
+		if dir := filepath.Dir(journalPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+		}
+		if err := appendJournalLines(journalPath, lines); err != nil {
 			return err
 		}
-		lines = append(lines, append(line, '\n')...)
 	}
-	if dir := filepath.Dir(journalPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+	// Bound the shared journal at the session boundary. It is append-only across
+	// every guarded session and grows without limit, so a long-lived box would
+	// eventually parse (and store) an unbounded file — the O(journal) soft-fault
+	// storm the tail-read window (ParseTailFile) only half-solves, since a live
+	// spawn older than the window falls out of every firing's view. stop fires
+	// once per session end: the natural, rare point to reclaim fully-terminal
+	// history while preserving every still-live spawn (CompactJournal's
+	// invariant), folding the whole journal back inside one tail read.
+	//
+	// This runs even on a DEGRADED stop — one whose payload yielded no events or
+	// whose HookEvents errored (a crash-truncated or session_id-less Stop) —
+	// because compaction is a cheap stat-only no-op below threshold, and a session
+	// that never stops cleanly is exactly where unbounded growth is most likely;
+	// gating it behind the append would skip the cases that need it most. The
+	// fault, if any, propagates to runToolprocHook, which renders it fail-open (a
+	// logged stderr note, exit 0) — the "never blocks the harness" guarantee lives
+	// there, not here. replaceFileAtomic owns the Windows rename-under-contention
+	// retry; a swap still contended after that is left for the next stop.
+	if kind == "stop" {
+		if _, err := toolproc.CompactJournalFile(journalPath, toolproc.JournalCompactThresholdBytes, toolproc.JournalCompactTailKeep); err != nil {
+			return fmt.Errorf("journal compaction: %w", err)
 		}
 	}
-	f, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	return evErr
+}
+
+// appendJournalLines appends lines to the journal at journalPath and closes the
+// handle before returning, so a caller that rewrites the file next (the
+// stop-hook compaction) is never holding an open append handle across the
+// rename. The open shares FILE_SHARE_DELETE on Windows so even the open window
+// itself never blocks a concurrent session's compaction swap (#3555).
+func appendJournalLines(journalPath string, lines []byte) error {
+	f, err := toolproc.OpenAppendShareDelete(journalPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(lines)
-	return err
+	if _, err := f.Write(lines); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func runToolprocPS(stdout, stderr io.Writer, argv []string) int {
@@ -332,6 +373,70 @@ func runToolprocConsoleFaults(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// runToolprocHostFaults folds the host-fault journal (#2170 sibling class) into
+// the operator report — the console-fault precedent applied to HOST-level
+// failures that are NOT a child tool process crashing: Windows Update install
+// failures, the update orchestrator worker faulting, GPU driver live-kernel /
+// TDR watchdog events, and app-termination hangs. Parsing is fail-closed: an
+// unknown class or drifted row refuses the whole report.
+func runToolprocHostFaults(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("toolproc host-faults", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	eventsPath := fs.String("events", "", "JSONL journal of host-fault events to fold (required unless --ingest; '-' reads stdin)")
+	ingest := fs.Bool("ingest", false, "ingest THIS host's Windows event log (WindowsUpdateClient/20 + WER/1001) for live host faults, write the snapshot to --out, and fold it (Windows-only)")
+	outPath := fs.String("out", filepath.Join(".fak", "toolproc", "host-faults.jsonl"), "snapshot file --ingest writes the classified rows to (idempotent projection of the event log)")
+	sinceDays := fs.Int("since-days", 14, "how many days back --ingest scans the event log")
+	maxPerSource := fs.Int("max", 2000, "cap on rows scanned per event-log source (a high-volume class like GPU live-kernel events is bounded, not silently truncated)")
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *ingest {
+		if strings.TrimSpace(*eventsPath) != "" {
+			fmt.Fprintln(stderr, "fak toolproc host-faults: --events and --ingest are mutually exclusive")
+			return 2
+		}
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "fak toolproc host-faults: --ingest takes no positional args")
+			return 2
+		}
+		if *sinceDays < 1 {
+			fmt.Fprintln(stderr, "fak toolproc host-faults: --since-days must be >= 1")
+			return 2
+		}
+		if *maxPerSource < 1 {
+			fmt.Fprintln(stderr, "fak toolproc host-faults: --max must be >= 1")
+			return 2
+		}
+		return runHostFaultIngest(stdout, stderr, *outPath, time.Duration(*sinceDays)*24*time.Hour, *maxPerSource, time.Now().UnixMilli(), *asJSON)
+	}
+	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak toolproc host-faults: --events FILE is required unless --ingest ('-' reads stdin)")
+		return 2
+	}
+	var in io.Reader = os.Stdin
+	if *eventsPath != "-" {
+		f, err := os.Open(*eventsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak toolproc host-faults: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		in = f
+	}
+	events, err := hostfault.ParseHostFaultEvents(in)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak toolproc host-faults: %v\n", err)
+		return 1
+	}
+	report := hostfault.HostFaultReportFromEvents(events)
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, report, "fak toolproc host-faults")
+	}
+	hostfault.RenderHostFaultReport(stdout, report)
+	return 0
+}
+
 func encodeToolprocEventLine(stdout, stderr io.Writer, ev toolproc.Event) int {
 	b, err := json.Marshal(ev)
 	if err != nil {
@@ -376,6 +481,12 @@ func toolprocUsage(w io.Writer) {
                   [--stall-mult F] [--json]
   fak toolproc leaks --events FILE|- [--json]
   fak toolproc console-faults --events FILE|- [--json]
+  fak toolproc console-faults --ingest [--out FILE] [--since-days N] [--json]
+  fak toolproc host-faults --events FILE|- [--json]
+  fak toolproc host-faults --ingest [--out FILE] [--since-days N] [--max N] [--json]
+  fak toolproc contain [--events FILE|-] --surface S [--live N] [--now-ms T] [--json]
+                       [--window-ms N] [--max-per-surface N] [--quarantine-faults N]
+                       [--breaker-faults N] [--breaker-sessions N]
   fak toolproc sample [--json | --journal]
   fak toolproc hook (pre | post | stop) [--journal FILE]
                     [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
@@ -395,6 +506,17 @@ ps exits 0 when nothing needs attention, 3 when any finding advises action
 (gate-able), 1 on an IO/parse refusal, 2 on usage. sample folds a deterministic
 built-in journal exercising every verdict class and always exits 0 (a demo, not
 a gate); --journal prints the raw JSONL instead.
+
+contain is the blast-radius GATE (#2170 enforcement): console-faults answers
+"did a terminal crash?"; contain answers the next question — "given the crashes
+we recorded, should the NEXT spawn proceed?". It folds the same console-fault
+journal into a closed containment verdict for a proposed spawn on --surface and
+exits 0 to ADMIT or 3 to refuse (gate-able), so a launcher consults it before
+starting a child. REFUSE_COLOCATION bounds how many agents one surface hosts;
+QUARANTINE_SURFACE holds a surface in a re-crash loop; BREAKER_OPEN holds ALL
+spawns during a cross-session fault storm. A missing journal fail-opens to
+ADMIT (no recorded faults = no evidence of instability); an unreadable/drifted
+one refuses (1) rather than guess.
 
 hook is the harness adapter (seam 4): wire it as a Claude Code (or compatible)
 PreToolUse / PostToolUse / Stop hook and each firing appends one journal event
@@ -431,6 +553,43 @@ class/surface/tool/session plus one bounded row per fault, so the crash class
 is searchable from the fak surface instead of Windows Event Viewer only.
 Parsing is fail-closed: an unknown class or drifted row refuses the whole
 report rather than folding a fabricated crash record.
+
+--ingest is the LIVE PRODUCER (Windows-only): it reads THIS host's Application
+event log for TWO crash shapes, writes the classified rows to --out (default
+.fak/toolproc/console-faults.jsonl), and folds the result:
+  - .NET Runtime unhandled-exception dumps (Event 1026) carrying a console-host
+    managed stack, each run through ClassifyConsoleFault (input/output/pipe/
+    handle mechanism legible on the stack); and
+  - WER Application Error FailFasts (Event 1000) for a console-host/shell app
+    with the __fastfail exception code 0xc0000409, classified by
+    ClassifyConsoleFaultWER on the banner's STRUCTURED FIELDS (app + code) — the
+    "1026-less" class (#3513) that logs no paired managed stack. From the banner
+    alone the input/output mechanism is indistinguishable, so it folds to the
+    coarse CONSOLE_HOST_FAILFAST. The banner free text is NEVER fed to
+    ClassifyConsoleFault (it names ConsoleHost.dll even for an input crash and
+    would mis-route); the structured-field classifier is used instead.
+It is an idempotent projection of the log window (--since-days, default 14), not
+an append stream, so re-running it does not double-count. A WER FailFast that
+pairs in time with a 1026 fault for the same tool is judged the same crash and
+dropped, so the WER path is purely additive. The crash it surfaces is a
+stale-ConPTY host issue, not a fak spawn bug — remediate with 'fak conpty';
+every fak-spawned shell is already -NonInteractive.
+
+host-faults is the SIBLING surface for the HOST-level fault classes the same
+#2170 audit witnessed but which are deliberately NOT console faults (kept in a
+separate closed vocabulary so they cannot contaminate the terminal/shell/PTY
+boundary): a Windows Update install failure (WindowsUpdateClient Event 20,
+0x80073D02 package-in-use), the update ORCHESTRATOR worker faulting (WER 1001
+MoUpdateOrchestrator / MoUsoCoreWorker), a GPU driver LIVE-KERNEL / TDR watchdog
+event (WER 1001 LiveKernelEvent, video-TDR bucket 141 / vendor watchdog dump),
+and an app-termination hang (WER 1001 AppTermFailureEvent). It answers "was the
+host updating / did the GPU reset while my agents died?" from the fak surface.
+--ingest (Windows-only) reads THIS host's System + Application event logs, runs
+each record through the same fail-closed ClassifyHostFault the fold trusts, and
+writes an idempotent snapshot to --out (default .fak/toolproc/host-faults.jsonl).
+A GPU-signal-less live-kernel event and an unrelated app crash are DROPPED, never
+fabricated into a fault row; --max bounds each source's scan explicitly (the
+GPU class runs to thousands) rather than truncating silently.
 
 This is the decision spine only (pure fold, offline-provable). The enforcement
 wiring - the gateway/guard supervisor emitting spawn/pulse from the live wire,

@@ -103,7 +103,7 @@ func drainOutboxBacklog(stdout io.Writer, ch, tok string) int {
 		return 0
 	}
 	if wire, werr := outboxWire(tok, ""); werr == nil {
-		if rep, derr := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."}); derr == nil && rep.Posted+rep.Updated+rep.Recovered > 0 {
+		if rep, derr := ob.Drain(ctx(), wire, stdDrainOpts()); derr == nil && rep.Posted+rep.Updated+rep.Recovered > 0 {
 			fmt.Fprintf(stdout, "outbox: delivered %d spooled row(s)\n", rep.Posted+rep.Updated+rep.Recovered)
 		}
 	}

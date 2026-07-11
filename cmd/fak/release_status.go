@@ -55,6 +55,19 @@ func runReleaseStatus(stdout, stderr io.Writer, argv []string) int {
 		}
 	} else {
 		fmt.Fprintln(stdout, renderReleaseStatus(status))
+		// Decenter the human at the release-status next-action seam: under
+		// FAK_RELEASESTATUS_TRIAGE_GATE=enforce, append the split for the single operator
+		// move — whether it genuinely waits on a person (cutting/promoting a release, a CI
+		// billing wall) or is the fleet's to drive (fix a red CI, repair a workflow, clean the
+		// worktree). Default ("", "warn") leaves the readout byte-for-byte unchanged while the
+		// fold soaks. See internal/releasestatus/status_triage.go.
+		if releasestatus.ReleaseStatusTriageEnforced(os.Getenv("FAK_RELEASESTATUS_TRIAGE_GATE")) {
+			action := releaseStatusMap(status["next_action"])
+			triageStatus := releasestatus.Status{NextAction: releasestatus.NextAction{Kind: releaseStatusString(action["kind"])}}
+			if line := releasestatus.AttentionTriageLine(triageStatus); line != "" {
+				fmt.Fprintln(stdout, line)
+			}
+		}
 	}
 	if opts.CheckReady {
 		rolling := releaseStatusMap(status["rolling"])

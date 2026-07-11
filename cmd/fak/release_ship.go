@@ -156,7 +156,7 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.BoolVar(&opts.requireCI, "require-ci", opts.requireCI, "require green CI before tagging")
 	fs.BoolVar(&opts.waitCI, "wait-ci", opts.waitCI, "watch a pending CI run before tagging")
 	fs.BoolVar(&opts.skipCI, "skip-ci", false, "skip CI folding in release_tag; intended for emergency/operator use")
-	fs.BoolVar(&opts.skipDryRun, "skip-dry-run", opts.skipDryRun, "pass --skip-dry-run to cut/tag while the dry-run witness still requires a preexisting tag")
+	fs.BoolVar(&opts.skipDryRun, "skip-dry-run", opts.skipDryRun, "emergency escape hatch: skip the release-substrate dry-run witness at the cut (default runs it; it is tag-based and passes on a real bump). The tag step always reuses the cut's same-commit verdict.")
 	fs.DurationVar(&opts.ciAppearTimeout, "ci-appear-timeout", opts.ciAppearTimeout, "how long to wait for a just-pushed CI run to appear before release_tag folds it")
 	fs.BoolVar(&opts.keepWorktree, "keep-worktree", false, "leave the detached worktree on disk")
 	fs.StringVar(&opts.worktreeDir, "worktree-dir", "", "use this detached worktree path instead of a temp dir")
@@ -232,16 +232,19 @@ func defaultReleaseShipOptions(root string) releaseShipOptions {
 		roles = branchrole.Defaults()
 	}
 	opts := releaseShipOptions{
-		sourceBranch:    roles.ReleaseSource,
-		remote:          "origin",
-		trunk:           roles.ReleaseBranch,
-		workflow:        "ci.yml",
-		limitCommits:    50,
-		ttl:             1800,
-		fetch:           true,
-		requireCI:       true,
-		waitCI:          true,
-		skipDryRun:      true,
+		sourceBranch: roles.ReleaseSource,
+		remote:       "origin",
+		trunk:        roles.ReleaseBranch,
+		workflow:     "ci.yml",
+		limitCommits: 50,
+		ttl:          1800,
+		fetch:        true,
+		requireCI:    true,
+		waitCI:       true,
+		// skipDryRun defaults false: the cut runs the release-substrate dry-run
+		// witness, which now reads the latest existing tag (not the just-bumped
+		// VERSION) and so passes on a real version bump. The tag step reuses that
+		// same-commit verdict (see runReleaseShipTag) rather than re-running it.
 		ciAppearTimeout: 2 * time.Minute,
 		pushRetries:     2,
 	}
@@ -572,9 +575,12 @@ func runReleaseShipTag(result *releaseShipResult, wt string, env []string, opts 
 	if opts.waitCI {
 		args = append(args, "--wait-ci")
 	}
-	if opts.skipDryRun {
-		args = append(args, "--skip-dry-run")
-	}
+	// Always skip the tag's own dry-run witness. --ref is result.CommitSHA — the exact
+	// commit release_cut just created and we pushed to trunk — and the cut step already
+	// ran release_dry_run on it. Re-running the full substrate suite here would re-clone
+	// and re-verify byte-identical tree content. The cut is the single witness in the
+	// ship chain; --skip-dry-run on ship only governs whether the cut runs it.
+	args = append(args, "--skip-dry-run")
 	if opts.execute {
 		args = append(args, "--lock-already-held")
 	}
@@ -1584,128 +1590,4 @@ func finishReleaseShipWithCleanup(result *releaseShipResult, root string, opts r
 		result.Cleanup = map[string]any{"ok": true, "kept": true, "path": result.Worktree}
 	}
 	return finishReleaseShip(*result)
-}
-
-func renderReleaseShip(stdout, stderr io.Writer, result releaseShipResult) {
-	if result.OK {
-		fmt.Fprintf(stdout, "release-ship: OK")
-		if result.Tag != "" {
-			fmt.Fprintf(stdout, " %s", result.Tag)
-		}
-		fmt.Fprintln(stdout)
-	} else {
-		fmt.Fprintf(stderr, "release-ship: REFUSED")
-		if result.Tag != "" {
-			fmt.Fprintf(stderr, " %s", result.Tag)
-		}
-		fmt.Fprintln(stderr)
-	}
-	if result.Worktree != "" {
-		fmt.Fprintf(stdout, "  worktree: %s\n", result.Worktree)
-	}
-	if result.CommitSHA != "" {
-		fmt.Fprintf(stdout, "  commit: %s\n", result.CommitSHA)
-	}
-	if result.SourceSHA != "" {
-		status := ""
-		if result.SourceCI != nil {
-			status = stringFromAny(result.SourceCI["status"])
-		}
-		if status != "" {
-			fmt.Fprintf(stdout, "  source: %s %s (ci=%s)\n", result.SourceBranch, result.SourceSHA, status)
-		} else {
-			fmt.Fprintf(stdout, "  source: %s %s\n", result.SourceBranch, result.SourceSHA)
-		}
-	}
-	if result.TargetSHA != "" {
-		status := ""
-		if result.TargetAncestry != nil {
-			status = stringFromAny(result.TargetAncestry["status"])
-		}
-		if status != "" {
-			fmt.Fprintf(stdout, "  target: %s %s (ancestry=%s)\n", result.TargetBranch, result.TargetSHA, status)
-		} else {
-			fmt.Fprintf(stdout, "  target: %s %s\n", result.TargetBranch, result.TargetSHA)
-		}
-	}
-	if result.RemoteBranch != nil {
-		lease := ""
-		if result.RemoteBranchPush != nil {
-			if expected := stringFromAny(result.RemoteBranchPush["lease_expected_sha"]); expected != "" {
-				lease = " (force-with-lease: " + expected + ")"
-			}
-		}
-		fmt.Fprintf(stdout, "  pushed: %s/%s %s%s\n", result.RemoteBranch["remote"], result.RemoteBranch["trunk"], result.RemoteBranch["sha"], lease)
-	}
-	if n := len(result.PushRetries); n > 0 {
-		fmt.Fprintf(stdout, "  push retries: %d (re-cut onto advanced trunk)\n", n)
-	}
-	if result.PromotionBranchPush != nil {
-		branch := stringFromAny(result.PromotionBranchPush["branch"])
-		sha := stringFromAny(result.PromotionBranchPush["sha"])
-		if branch != "" && sha != "" {
-			lease := ""
-			if used, _ := result.PromotionBranchPush["used_force_lease"].(bool); used {
-				if absent, _ := result.PromotionBranchPush["lease_expected_absent"].(bool); absent {
-					lease = " (force-with-lease: absent)"
-				} else if expected := stringFromAny(result.PromotionBranchPush["lease_expected_sha"]); expected != "" {
-					lease = " (force-with-lease: " + expected + ")"
-				} else {
-					lease = " (force-with-lease)"
-				}
-			}
-			fmt.Fprintf(stdout, "  promotion branch: %s %s%s\n", branch, sha, lease)
-		}
-	}
-	if result.Publish != nil {
-		if gh, ok := result.Publish["github_release"].(map[string]any); ok {
-			if url := stringFromAny(gh["url"]); url != "" {
-				fmt.Fprintf(stdout, "  github: %s\n", url)
-			} else if status := stringFromAny(gh["status"]); status != "" {
-				fmt.Fprintf(stdout, "  github: %s\n", status)
-			}
-		}
-	}
-	if result.PullRequest != nil {
-		if url := stringFromAny(result.PullRequest["url"]); url != "" {
-			fmt.Fprintf(stdout, "  pr: %s\n", url)
-		} else if title := stringFromAny(result.PullRequest["title"]); title != "" {
-			fmt.Fprintf(stdout, "  pr (preview): %s -> %s %q\n", stringFromAny(result.PullRequest["head"]), stringFromAny(result.PullRequest["base"]), title)
-		}
-	}
-	for _, warning := range result.Warnings {
-		fmt.Fprintf(stderr, "  warning: %s\n", warning)
-	}
-	for _, err := range result.Errors {
-		fmt.Fprintf(stderr, "  ERROR: %s\n", err)
-	}
-}
-
-func stringFromAny(value any) string {
-	if s, ok := value.(string); ok {
-		return s
-	}
-	return ""
-}
-
-func sameSHA(a, b string) bool {
-	a = strings.TrimSpace(strings.ToLower(a))
-	b = strings.TrimSpace(strings.ToLower(b))
-	return a != "" && b != "" && (a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a))
-}
-
-func jsonTail(value map[string]any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return tail(string(raw))
-}
-
-func tail(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= 500 {
-		return s
-	}
-	return s[len(s)-500:]
 }

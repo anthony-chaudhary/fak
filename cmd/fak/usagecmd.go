@@ -19,10 +19,11 @@ func cmdUsage(args []string) {
 	fs := flag.NewFlagSet("usage", flag.ExitOnError)
 	sinceStr := fs.String("since", "", "only fold rows within this long of now (Go duration, e.g. 24h, 30m)")
 	byVerb := fs.Bool("by-verb", false, "print the per-verb breakdown table")
+	gitOps := fs.Bool("git-ops", false, "print commit/sweep/sync latency split by terminal outcome")
 	asJSON := fs.Bool("json", false, "print the fold as JSON instead of text")
 	topN := fs.Int("top", 0, "how many recent rows to include in the fold (0 = usagelog's default)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: fak usage [--since DUR] [--by-verb] [--json] [--top N]")
+		fmt.Fprintln(os.Stderr, "usage: fak usage [--since DUR] [--by-verb] [--git-ops] [--json] [--top N]")
 		fmt.Fprintln(os.Stderr, "  reads the usage journal (FAK_USAGE_LOG_PATH, else the per-user default)")
 		fmt.Fprintln(os.Stderr, "  and prints how fak itself has been invoked.")
 	}
@@ -45,8 +46,18 @@ func cmdUsage(args []string) {
 		os.Exit(1)
 	}
 	fold := usagelog.FoldRows(rows, usagelog.FoldOptions{SinceUnixNano: sinceUnixNano, TopN: *topN})
+	gitOpStats := fold.ByOperationOutcome
 
 	if *asJSON {
+		if *gitOps {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(gitOpStats); err != nil {
+				fmt.Fprintf(os.Stderr, "fak usage: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(fold); err != nil {
@@ -67,6 +78,15 @@ func cmdUsage(args []string) {
 		fmt.Println("  by verb:")
 		for _, v := range fold.ByVerb {
 			fmt.Printf("    %-28s count=%-6d errors=%-4d p50=%dms\n", v.Verb, v.Count, v.Errors, v.P50MS)
+		}
+	}
+	if *gitOps {
+		fmt.Println("  git operations by terminal outcome (process observation, not a downstream-effect witness):")
+		if len(gitOpStats) == 0 {
+			fmt.Println("    no commit/sweep/sync rows recorded yet")
+		}
+		for _, stat := range gitOpStats {
+			fmt.Printf("    %-28s %-9s count=%-6d p50=%dms\n", stat.Operation, stat.Outcome, stat.Count, stat.P50MS)
 		}
 	}
 }

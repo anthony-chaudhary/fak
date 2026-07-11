@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/choicetriage"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/issuestriage"
 	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -228,15 +230,24 @@ func buildTUIIssueReport(issues []tuiIssue, source string, asOf time.Time, epic 
 		}
 		return rows[i].Number > rows[j].Number
 	})
+	actions := buildTUIActions(rows)
+	counts := countTUIIssues(rows)
+	for _, a := range actions {
+		if a.NeedsHuman {
+			counts.NeedsYou++
+		} else {
+			counts.AgentClearable++
+		}
+	}
 	return tuiIssueReport{
 		Schema:  tuiIssuesSchema,
 		AsOf:    asOf.Format("2006-01-02"),
 		Source:  source,
 		Epic:    epicRow,
-		Counts:  countTUIIssues(rows),
+		Counts:  counts,
 		Lanes:   buildTUILanes(rows),
 		Rows:    rows,
-		Actions: buildTUIActions(rows),
+		Actions: actions,
 	}
 }
 
@@ -489,7 +500,33 @@ func buildTUIActions(rows []tuiIssueRow) []tuiIssueAction {
 			})
 		}
 	}
+	// Fold every surfaced action through the shared decenter-the-human triage so
+	// the pane's "needs you" list is genuine-residual-only. Done as a post-pass
+	// over the built actions (not per-branch) so the three action shapes route
+	// through the one seam.
+	for i := range actions {
+		v := triageIssueAction(actions[i])
+		actions[i].Disposition = string(v.Disposition)
+		actions[i].NeedsHuman = v.NeedsHuman
+		actions[i].Resolve = v.Resolve
+	}
 	return actions
+}
+
+// triageIssueAction folds one surfaced issue action through the shared
+// internal/issuestriage leaf, so this pane, the garden walk, and the operator
+// brief all classify an issue action in one tested place: a close-dormant-question
+// / mark-stale action hands over a ready `gh` command -> TAKE_OBVIOUS; a review
+// whose reason names an unset priority -> HUMAN_RESIDUAL (the PRIORITY authority a
+// person holds); an unlabeled review (needs-kind/needs-area/likely-dup) is knowable
+// but not obvious -> FRESH_CONTEXT. Only HUMAN_RESIDUAL sets NeedsHuman.
+func triageIssueAction(a tuiIssueAction) choicetriage.Verdict {
+	return issuestriage.Triage(issuestriage.Action{
+		Number:  a.Number,
+		Kind:    a.Kind,
+		Reason:  a.Reason,
+		Command: a.Command,
+	})
 }
 
 func tuiHasTag(row tuiIssueRow, tag string) bool {

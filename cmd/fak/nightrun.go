@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/nightrun"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
@@ -56,6 +57,8 @@ func runNightrun(stdout, stderr io.Writer, argv []string) int {
 		return nightrunScore(stdout, stderr, rest)
 	case "post-cache-value":
 		return nightrunPostCacheValue(stdout, stderr, rest)
+	case "cut":
+		return nightrunCut(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		nightrunUsage(stdout)
 		return 0
@@ -78,6 +81,7 @@ usage:
   fak nightrun caps            [--json]                              the probed box capabilities
 	fak nightrun score           [--floor N] [--json]                  check cache-value ledger for regressions (default floor: 0.751 - 75.1% reuse dogfooded from #1114)
   fak nightrun post-cache-value [--dry-run]                         post rolling observed multiplier to scoreboard
+  fak nightrun cut             [--keep N] [--apply] [--json]        fold gateway-usage ledger rows older than the newest N into counter-preserving carryforward rows (dry-run unless --apply)
 
 Start here:
   fak nightrun next      what should I collect right now, and the exact command to do it
@@ -423,6 +427,53 @@ func nightrunPostCacheValue(stdout, stderr io.Writer, argv []string) int {
 		dryRun:        !f.apply,
 		dedupe:        true,
 	})
+}
+
+// nightrunCut is the operator door for gatewayusageledger.Cut (#3490): bound the
+// append-only docs/nightrun/gateway-usage.jsonl by folding everything older than
+// the newest --keep rows into counter-preserving carryforward rows. DRY-RUN by
+// default, mirroring `fak nightrun run` — nothing rewrites a tracked ledger file
+// unless the operator passes --apply. It deliberately does NOT run on any ticker
+// or session path: the ledger stays append-only from a session's point of view.
+func nightrunCut(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("nightrun cut", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	keep := fs.Int("keep", 500, "newest row count to keep at full per-row granularity; everything older folds into carryforward rows")
+	apply := fs.Bool("apply", false, "rewrite the ledger (default: dry-run — report what would fold, write nothing)")
+	ledgerFlag := fs.String("usage-ledger", "", "gateway-usage ledger path (default: <repo-root>/"+gatewayusageledger.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	path := *ledgerFlag
+	if path == "" {
+		path = nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel)
+	}
+	res, err := gatewayusageledger.Cut(path, *keep, !*apply, time.Now().UTC())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak nightrun cut: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		emitNightrunJSON(stdout, res)
+		return 0
+	}
+	mode := "DRY-RUN (nothing written; pass --apply to cut)"
+	if !res.DryRun && res.Performed {
+		mode = "APPLIED (ledger rewritten)"
+	}
+	fmt.Fprintf(stdout, "gateway-usage ledger cut (#3490):\n  ledger: %s\n  %s\n", res.Path, mode)
+	if !res.Performed && res.RowsBefore <= *keep {
+		fmt.Fprintf(stdout, "  nothing to cut — %d rows <= keep %d\n", res.RowsBefore, *keep)
+		return 0
+	}
+	fmt.Fprintf(stdout, "  rows: %d -> %d (folded %d into %d carryforward rows, kept %d)\n",
+		res.RowsBefore, res.RowsAfter, res.FoldedRows, res.CarryforwardRows, res.KeptRows)
+	fmt.Fprintf(stdout, "  bytes: %d -> %d\n", res.BytesBefore, res.BytesAfter)
+	if res.PreservedLines > 0 {
+		fmt.Fprintf(stdout, "  preserved %d undecodable line(s) verbatim\n", res.PreservedLines)
+	}
+	return 0
 }
 
 // renderRunSummary prints the honest record of a run/dry-run session: each

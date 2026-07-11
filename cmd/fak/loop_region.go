@@ -43,6 +43,7 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 	actor := fs.String("actor", "", "who is asking (defaults to the lease-holder identity: FAK_LEASE_OWNER, session id, or host:pid)")
 	selfID := fs.String("self", "", "the caller's own lease id, never counted as a conflict (re-admission/renew)")
 	dir := fs.String("dir", "", "repo whose refs/fak/locks/* and dos.toml are read (default: cwd)")
+	readOnly := fs.Bool("read-only", false, "the act writes nothing (a provably empty footprint): admitted against every live lease, distinct from an absent region (unknown blast radius, which still collides)")
 	jsonOut := fs.Bool("json", false, "emit the decision as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -51,7 +52,10 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak loop region: unexpected positional arguments")
 		return 2
 	}
-	if strings.TrimSpace(*lane) == "" && len(tree) == 0 {
+	// A read-only act declares an EMPTY write footprint, so it needs no region: --lane/--tree
+	// are optional for it (an absent region without --read-only stays unknown blast radius and
+	// is rejected as before).
+	if strings.TrimSpace(*lane) == "" && len(tree) == 0 && !*readOnly {
 		fmt.Fprintln(stderr, "fak loop region: --lane or --tree is required (an empty region is unknown blast radius)")
 		return 2
 	}
@@ -74,7 +78,7 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak loop region: read live leases: %v\n", err)
 		return 1
 	}
-	req := regionadmit.Request{Actor: who, Lane: strings.TrimSpace(*lane), Tree: tree, SelfID: strings.TrimSpace(*selfID)}
+	req := regionadmit.Request{Actor: who, Lane: strings.TrimSpace(*lane), Tree: tree, SelfID: strings.TrimSpace(*selfID), ReadOnly: *readOnly}
 	dec := regionadmit.Decide(req, regionLeases(live), tax)
 
 	if *jsonOut {
@@ -84,6 +88,7 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 			"actor":      who,
 			"lane":       req.Lane,
 			"tree":       append([]string(nil), regionadmit.ResolveTree(req, tax)...),
+			"read_only":  req.ReadOnly,
 			"live_count": len(live),
 		}
 		if !dec.Admit {
@@ -117,8 +122,12 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 }
 
 func regionLabel(req regionadmit.Request, tax regionadmit.Taxonomy) string {
-	if req.Lane != "" {
-		return fmt.Sprintf("lane %q %v", req.Lane, regionadmit.ResolveTree(req, tax))
+	tree := regionadmit.ResolveTree(req, tax)
+	if req.ReadOnly && req.Lane == "" && len(tree) == 0 {
+		return "a read-only region (writes nothing)"
 	}
-	return fmt.Sprintf("%v", regionadmit.ResolveTree(req, tax))
+	if req.Lane != "" {
+		return fmt.Sprintf("lane %q %v", req.Lane, tree)
+	}
+	return fmt.Sprintf("%v", tree)
 }

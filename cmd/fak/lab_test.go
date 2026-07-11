@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
+	"github.com/anthony-chaudhary/fak/internal/linkstate"
 )
 
 // TestLabEmbeddedRosterValid is the load-bearing guard on the shipped default: the
@@ -180,14 +181,14 @@ func TestLabReadinessMissingFailsClosed(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
 		t.Fatalf("readiness --json did not emit a record: %v\n%s", err, out.String())
 	}
-	if rec.Status != fleet.LabIndeterminate || rec.AdmitLabDispatch {
-		t.Fatalf("missing readiness = %+v, want INDETERMINATE and not admitting", rec)
+	if rec.Phase != linkstate.Waiting || rec.Detail != linkstate.DetailIndeterminate || rec.AdmitDispatch {
+		t.Fatalf("missing readiness = %+v, want WAITING/indeterminate and not admitting", rec)
 	}
 	if rec.NextAction != "publish-lab-readiness" || rec.Evidence != "no-readiness-record" {
 		t.Fatalf("missing readiness action/evidence = %+v", rec)
 	}
-	if rec.Commands == nil || !strings.Contains(rec.Commands.MarkReady, "--write-default") {
-		t.Fatalf("missing readiness should include public mark-ready command hints, got %+v", rec.Commands)
+	if rec.Commands == nil || !strings.Contains(rec.Commands.MarkClear, "--write-default") {
+		t.Fatalf("missing readiness should include public mark-clear command hints, got %+v", rec.Commands)
 	}
 }
 
@@ -196,12 +197,12 @@ func TestLabReadinessWriteThenRead(t *testing.T) {
 	var out bytes.Buffer
 	rc := runLab(&out, io.Discard, []string{
 		"readiness",
-		"--status", fleet.LabReadyForDevWork,
+		"--phase", "CLEAR",
 		"--write", path,
 		"--json",
 	})
 	if rc != 0 {
-		t.Fatalf("writing READY_FOR_DEV_WORK should exit 0, got %d: %s", rc, out.String())
+		t.Fatalf("writing CLEAR should exit 0, got %d: %s", rc, out.String())
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("readiness record not written: %v", err)
@@ -210,14 +211,14 @@ func TestLabReadinessWriteThenRead(t *testing.T) {
 	out.Reset()
 	rc = runLab(&out, io.Discard, []string{"readiness", "--file", path, "--json"})
 	if rc != 0 {
-		t.Fatalf("reading READY_FOR_DEV_WORK should exit 0, got %d: %s", rc, out.String())
+		t.Fatalf("reading CLEAR should exit 0, got %d: %s", rc, out.String())
 	}
 	var rec fleet.LabReadiness
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
 		t.Fatalf("readiness read did not emit JSON: %v\n%s", err, out.String())
 	}
-	if rec.Status != fleet.LabReadyForDevWork || !rec.AdmitLabDispatch {
-		t.Fatalf("readiness read = %+v, want READY_FOR_DEV_WORK admitting", rec)
+	if rec.Phase != linkstate.Clear || !rec.AdmitDispatch {
+		t.Fatalf("readiness read = %+v, want CLEAR admitting", rec)
 	}
 }
 
@@ -228,12 +229,12 @@ func TestLabReadinessWriteDefaultUsesConfiguredPath(t *testing.T) {
 	var out bytes.Buffer
 	rc := runLab(&out, io.Discard, []string{
 		"readiness",
-		"--status", fleet.LabWaitPrivateRecover,
+		"--phase", "WAITING",
 		"--write-default",
 		"--json",
 	})
 	if rc != 1 {
-		t.Fatalf("WAIT_PRIVATE_RECOVERY should write but fail closed with exit 1, got %d", rc)
+		t.Fatalf("WAITING should write but fail closed with exit 1, got %d", rc)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("default readiness record not written: %v", err)
@@ -242,14 +243,14 @@ func TestLabReadinessWriteDefaultUsesConfiguredPath(t *testing.T) {
 	out.Reset()
 	rc = runLab(&out, io.Discard, []string{"readiness", "--json"})
 	if rc != 1 {
-		t.Fatalf("reading WAIT_PRIVATE_RECOVERY should fail closed with exit 1, got %d", rc)
+		t.Fatalf("reading WAITING should fail closed with exit 1, got %d", rc)
 	}
 	var rec fleet.LabReadiness
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
 		t.Fatalf("readiness read did not emit JSON: %v\n%s", err, out.String())
 	}
-	if rec.Status != fleet.LabWaitPrivateRecover || rec.AdmitLabDispatch {
-		t.Fatalf("readiness read = %+v, want WAIT_PRIVATE_RECOVERY and not admitting", rec)
+	if rec.Phase != linkstate.Waiting || rec.AdmitDispatch {
+		t.Fatalf("readiness read = %+v, want WAITING and not admitting", rec)
 	}
 }
 
@@ -258,7 +259,7 @@ func TestLabReadinessWriteDefaultRejectsConflictingWrite(t *testing.T) {
 	var stderr bytes.Buffer
 	rc := runLab(io.Discard, &stderr, []string{
 		"readiness",
-		"--status", fleet.LabReadyForDevWork,
+		"--phase", "CLEAR",
 		"--write", path,
 		"--write-default",
 	})
@@ -270,7 +271,7 @@ func TestLabReadinessWriteDefaultRejectsConflictingWrite(t *testing.T) {
 	}
 }
 
-func TestLabReadinessFromStatusAdmitsUsefulInference(t *testing.T) {
+func TestLabReadinessFromReportsAdmitsUsefulInference(t *testing.T) {
 	reportsDir := t.TempDir()
 	readinessPath := filepath.Join(t.TempDir(), "lab-readiness.json")
 	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
@@ -289,16 +290,16 @@ func TestLabReadinessFromStatusAdmitsUsefulInference(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	rc := runLab(&out, io.Discard, []string{"readiness", "--from-status", "--write-default", "--json"})
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-reports", "--write-default", "--json"})
 	if rc != 0 {
-		t.Fatalf("readiness --from-status should admit useful inference, got %d: %s", rc, out.String())
+		t.Fatalf("readiness --from-reports should admit useful inference, got %d: %s", rc, out.String())
 	}
 	var rec fleet.LabReadiness
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
-		t.Fatalf("readiness --from-status did not emit JSON: %v\n%s", err, out.String())
+		t.Fatalf("readiness --from-reports did not emit JSON: %v\n%s", err, out.String())
 	}
-	if rec.Status != fleet.LabReadyForDevWork || !rec.AdmitLabDispatch {
-		t.Fatalf("readiness from useful inference = %+v, want READY_FOR_DEV_WORK admitting", rec)
+	if rec.Phase != linkstate.Clear || !rec.AdmitDispatch {
+		t.Fatalf("readiness from useful inference = %+v, want CLEAR admitting", rec)
 	}
 	if rec.Evidence != "scrubbed-fleet-report" {
 		t.Fatalf("evidence = %q, want scrubbed-fleet-report", rec.Evidence)
@@ -314,12 +315,12 @@ func TestLabReadinessFromStatusAdmitsUsefulInference(t *testing.T) {
 	if err := json.Unmarshal(rawPersisted, &persisted); err != nil {
 		t.Fatalf("persisted readiness is not JSON: %v\n%s", err, rawPersisted)
 	}
-	if persisted.Status != rec.Status || persisted.Evidence != "scrubbed-fleet-report" || !persisted.AdmitLabDispatch {
-		t.Fatalf("persisted readiness = %+v, want emitted READY_FOR_DEV_WORK from scrubbed report %+v", persisted, rec)
+	if persisted.Phase != rec.Phase || persisted.Evidence != "scrubbed-fleet-report" || !persisted.AdmitDispatch {
+		t.Fatalf("persisted readiness = %+v, want emitted CLEAR from scrubbed report %+v", persisted, rec)
 	}
 }
 
-func TestLabReadinessFromStatusHoldsWarmingInference(t *testing.T) {
+func TestLabReadinessFromReportsHoldsWarmingInference(t *testing.T) {
 	reportsDir := t.TempDir()
 	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
 
@@ -331,23 +332,23 @@ func TestLabReadinessFromStatusHoldsWarmingInference(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	rc := runLab(&out, io.Discard, []string{"readiness", "--from-status", "--json"})
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-reports", "--json"})
 	if rc != 1 {
 		t.Fatalf("warming inference should fail closed, got %d: %s", rc, out.String())
 	}
 	var rec fleet.LabReadiness
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
-		t.Fatalf("readiness --from-status did not emit JSON: %v\n%s", err, out.String())
+		t.Fatalf("readiness --from-reports did not emit JSON: %v\n%s", err, out.String())
 	}
-	if rec.Status != fleet.LabWaitPrivateRecover || rec.AdmitLabDispatch {
-		t.Fatalf("readiness from warming inference = %+v, want WAIT_PRIVATE_RECOVERY hold", rec)
+	if rec.Phase != linkstate.Waiting || rec.AdmitDispatch {
+		t.Fatalf("readiness from warming inference = %+v, want WAITING hold", rec)
 	}
 	if rec.NextAction != "wait-lab-inference-ready" {
 		t.Fatalf("next_action = %q, want wait-lab-inference-ready", rec.NextAction)
 	}
 }
 
-func TestLabReadinessFromStatusHoldsSlowProbeLatency(t *testing.T) {
+func TestLabReadinessFromReportsHoldsSlowProbeLatency(t *testing.T) {
 	reportsDir := t.TempDir()
 	t.Setenv("FAK_FLEET_REPORTS", reportsDir)
 
@@ -365,16 +366,16 @@ func TestLabReadinessFromStatusHoldsSlowProbeLatency(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	rc := runLab(&out, io.Discard, []string{"readiness", "--from-status", "--json"})
+	rc := runLab(&out, io.Discard, []string{"readiness", "--from-reports", "--json"})
 	if rc != 1 {
 		t.Fatalf("slow ready inference should fail closed, got %d: %s", rc, out.String())
 	}
 	var rec fleet.LabReadiness
 	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
-		t.Fatalf("readiness --from-status did not emit JSON: %v\n%s", err, out.String())
+		t.Fatalf("readiness --from-reports did not emit JSON: %v\n%s", err, out.String())
 	}
-	if rec.Status != fleet.LabWaitPrivateRecover || rec.AdmitLabDispatch {
-		t.Fatalf("readiness from slow ready inference = %+v, want WAIT_PRIVATE_RECOVERY hold", rec)
+	if rec.Phase != linkstate.Waiting || rec.AdmitDispatch {
+		t.Fatalf("readiness from slow ready inference = %+v, want WAITING hold", rec)
 	}
 	if rec.NextAction != "route-latency-exceeds-dev-budget-refresh-report-or-use-fallback" {
 		t.Fatalf("next_action = %q, want route latency hold", rec.NextAction)
@@ -384,14 +385,32 @@ func TestLabReadinessFromStatusHoldsSlowProbeLatency(t *testing.T) {
 	}
 }
 
-func TestLabReadinessFromStatusRequiresNoManualStatus(t *testing.T) {
+func TestLabReadinessFromReportsRejectsManualPhase(t *testing.T) {
 	var stderr bytes.Buffer
-	rc := runLab(io.Discard, &stderr, []string{"readiness", "--from-status", "--status", fleet.LabReadyForDevWork})
+	rc := runLab(io.Discard, &stderr, []string{"readiness", "--from-reports", "--phase", "CLEAR"})
 	if rc != 2 {
-		t.Fatalf("--from-status + --status should exit 2, got %d", rc)
+		t.Fatalf("--from-reports + --phase should exit 2, got %d", rc)
 	}
-	if !strings.Contains(stderr.String(), "use only one of --status or --from-status") {
+	if !strings.Contains(stderr.String(), "use only one of --phase or --from-reports") {
 		t.Fatalf("missing conflict diagnostic:\n%s", stderr.String())
+	}
+}
+
+// TestLabReadinessStatusAliasCoarsens pins the rollover safety net: the deprecated
+// --status flag still works and coarsens a legacy status onto the new phase+detail,
+// so a caller that has not yet moved to --phase keeps producing valid records.
+func TestLabReadinessStatusAliasCoarsens(t *testing.T) {
+	var out bytes.Buffer
+	rc := runLab(&out, io.Discard, []string{"readiness", "--status", "WAIT_PRIVATE_RECOVERY", "--json"})
+	if rc != 1 {
+		t.Fatalf("deprecated --status WAIT_PRIVATE_RECOVERY should fail closed, got %d: %s", rc, out.String())
+	}
+	var rec fleet.LabReadiness
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatalf("readiness --status did not emit JSON: %v\n%s", err, out.String())
+	}
+	if rec.Phase != linkstate.Waiting || rec.Detail != linkstate.DetailPrivateRecovery || rec.AdmitDispatch {
+		t.Fatalf("deprecated --status should coarsen to WAITING/private-recovery, got %+v", rec)
 	}
 }
 
@@ -405,7 +424,7 @@ func TestLabReadinessFromSnapshotIgnoresStaleUsefulInference(t *testing.T) {
 			Inference: &fleet.InferenceStats{Status: fleet.InferenceReady, Model: "glm-5.2"},
 		}},
 	}, time.Now())
-	if rec.AdmitLabDispatch || rec.Status == fleet.LabReadyForDevWork {
+	if rec.AdmitDispatch || rec.Phase == linkstate.Clear {
 		t.Fatalf("stale ready inference must fail closed, got %+v", rec)
 	}
 	if rec.Evidence != "no-useful-lab-report" {

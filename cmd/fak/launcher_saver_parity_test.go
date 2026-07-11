@@ -88,8 +88,13 @@ func TestGuardArgvDisabledSaversDetects(t *testing.T) {
 		{"vdso off (eq 0)", []string{"fak", "guard", "--vdso=0", "--", "claude"}, []string{"vdso"}},
 		{"vdso off (negated flag)", []string{"fak", "guard", "--no-vdso", "--", "claude"}, []string{"vdso"}},
 		{"two savers off, sorted", []string{"fak", "guard", "--vdso=off", "--compact-history-budget=0", "--", "claude"}, []string{"compacthistory", "vdso"}},
+		{"stale elision off (eq false)", []string{"fak", "guard", "--elide-stale-reads=false", "--", "claude"}, []string{"elidestale"}},
+		{"stale elision off (eq 0)", []string{"fak", "guard", "--elide-stale-reads=0", "--", "claude"}, []string{"elidestale"}},
+		{"three savers off, sorted", []string{"fak", "guard", "--elide-stale-reads=off", "--vdso=false", "--ctx-view-budget=0", "--", "claude"}, []string{"ctxview", "elidestale", "vdso"}},
 
 		{"positive budget keeps saver on", []string{"fak", "guard", "--ctx-view-budget", "8000", "--", "claude"}, nil},
+		{"bare --elide-stale-reads keeps saver on", []string{"fak", "guard", "--elide-stale-reads", "--", "claude"}, nil},
+		{"--elide-stale-reads=true keeps saver on", []string{"fak", "guard", "--elide-stale-reads=true", "--", "claude"}, nil},
 		{"bare --vdso keeps saver on", []string{"fak", "guard", "--vdso", "--", "claude"}, nil},
 		{"--vdso=true keeps saver on", []string{"fak", "guard", "--vdso=true", "--", "claude"}, nil},
 		{"disable after -- is the agent's, not guard's", []string{"fak", "guard", "--", "claude", "--ctx-view-budget", "0"}, nil},

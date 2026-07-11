@@ -115,4 +115,10 @@ fixture candidates and skips live arXiv/GitHub/Hacker News/Reddit fetching for t
 Sources per topic (any subset): arxiv query, github search, hn (Hacker News Algolia
 query) and reddit (Reddit search, sort=new) — the community feeds are newest-first,
 catching trending items within moments of release.
+
+GitHub is walked on two lanes from the same topic query: a stars lane (all-time
+popular, floored at min_stars) and a fresh lane (fresh_per_topic repos sorted by
+most-recently-updated, floored at the lower fresh_min_stars) so newly-created,
+trending, and recently-pushed repos surface instead of only established incumbents.
+Set fresh_per_topic: 0 in --config thresholds to disable the fresh lane.
 `

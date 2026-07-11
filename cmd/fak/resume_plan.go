@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/auditreason"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // runResumePlan is the `fak check-tool-failure --resume` mode: instead of a bare
@@ -111,7 +112,9 @@ func commitPushSteps(dir string) ([]auditreason.ResumeStep, error) {
 // caller reads as "that fact is not established" rather than a hard failure.
 func gitTrim(dir string, args ...string) (string, bool) {
 	full := append([]string{"-C", dir}, args...)
-	out, err := exec.Command("git", full...).Output()
+	cmd := exec.Command("git", full...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", false
 	}

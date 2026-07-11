@@ -35,6 +35,45 @@ func TestWriteConfiguredVCacheSnapshotUsesEnvPath(t *testing.T) {
 	}
 }
 
+// The shared guard/serve shutdown tail (persistCacheValueObservations -> serve.go:396,
+// guard_child.go:1413) persists this session's observed window through
+// writeConfiguredVCacheSnapshot with NO cache flag. This asserts the default emission is
+// BOUNDED to the live window and stays replayable via the ordinary Read path — the #1524
+// done condition ("a finished session leaves a bounded, replayable cache window without
+// extra flags"). A long session must not persist an unbounded per-session log.
+func TestWriteConfiguredVCacheSnapshotBoundsLiveWindow(t *testing.T) {
+	// No override flags: only the destination path is redirected so the test stays hermetic.
+	// The bound itself is the DEFAULT, proving "without extra flags".
+	t.Setenv(vcachesnapshot.EnvWindow, "")
+	path := filepath.Join(t.TempDir(), "cmd-bounded-vcache-turns.jsonl")
+	t.Setenv(vcachesnapshot.EnvPath, path)
+
+	over := vcachesnapshot.DefaultWindowTurns + 25
+	turns := make([]vcacheobserve.Turn, over)
+	for i := range turns {
+		turns[i] = vcacheobserve.Turn{Family: "provider", UnixMillis: int64(i + 1), CacheRead: int64(i)}
+	}
+	got, ok, err := writeConfiguredVCacheSnapshot(turns)
+	if err != nil || !ok {
+		t.Fatalf("writeConfiguredVCacheSnapshot() ok=%v err=%v, want a written window", ok, err)
+	}
+	if got != path {
+		t.Fatalf("snapshot path = %q, want %q", got, path)
+	}
+
+	// Replayable via the same reader `fak vcache score` uses, and bounded to the tail.
+	replay, readOK, err := vcachesnapshot.Read(path)
+	if err != nil || !readOK {
+		t.Fatalf("replay Read() ok=%v err=%v, want a replayable window", readOK, err)
+	}
+	if len(replay) != vcachesnapshot.DefaultWindowTurns {
+		t.Fatalf("default session persisted %d turns, want the bounded %d", len(replay), vcachesnapshot.DefaultWindowTurns)
+	}
+	if replay[len(replay)-1].UnixMillis != int64(over) {
+		t.Fatalf("bounded window dropped the newest turn: last unix_millis=%d, want %d", replay[len(replay)-1].UnixMillis, over)
+	}
+}
+
 func TestWriteConfiguredVCacheSnapshotOffSkips(t *testing.T) {
 	t.Setenv(vcachesnapshot.EnvPath, "off")
 

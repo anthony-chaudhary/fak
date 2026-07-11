@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/brittleness"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -103,6 +104,7 @@ func runBrittlenessScorecard(stdout, stderr io.Writer, argv []string) int {
 // freshness stamp for --flaky findings when the caller did not supply --since.
 func currentHeadSha(root string) string {
 	cmd := exec.Command("git", "-C", root, "rev-parse", "--short", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd) // windowless on Windows: no console flash from a background parent
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
@@ -125,6 +127,7 @@ func readCommitWindowForBrittleness(root string, n int) []brittleness.Commit {
 	}
 	cmd := exec.Command("git", "-C", root, "log", "--no-merges",
 		fmt.Sprintf("-n%d", n), "--name-only", "--format=format:%x01%h%x1f%s")
+	windowgate.ConfigureBackgroundCommand(cmd) // windowless on Windows: no console flash from a background parent
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard

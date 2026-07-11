@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,6 +39,7 @@ func TestIssueAuditCommandEmitsVerifiedReceipt(t *testing.T) {
 	})
 
 	fetcher := modelroute.IssueAuditFetcherFunc(func(context.Context, int) (modelroute.IssueAuditEvidence, error) {
+		patch := "diff --git a/a b/a\n+reviewed\n"
 		return modelroute.IssueAuditEvidence{
 			IssueNumber: 1185,
 			IssueURL:    "https://github.com/anthony-chaudhary/fak/issues/1185",
@@ -46,7 +48,11 @@ func TestIssueAuditCommandEmitsVerifiedReceipt(t *testing.T) {
 			State:       "CLOSED",
 			ClosedAt:    "2026-06-29T05:13:50Z",
 			CommitSHA:   "eb25512f57f1c717e5a53e3d7bde0582b9651bc0",
-			Diff:        "diff --git a/a b/a\n+reviewed\n",
+			Diff:        patch,
+			ClosingCommits: []modelroute.IssueAuditClosingCommit{{
+				SHA: "eb25512f57f1c717e5a53e3d7bde0582b9651bc0", FirstParentSHA: "1111111111111111111111111111111111111111",
+				TreeOID: "tree-closing", FirstParentTreeOID: "tree-parent", Patch: patch, PatchSHA256: modelroute.IssueAuditContentDigest(patch), ChangedPaths: []string{"a", "a_test.go"},
+			}},
 		}, nil
 	})
 	reviewer := modelroute.IssueAuditReviewerFunc(func(context.Context, modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
@@ -71,6 +77,34 @@ func TestIssueAuditCommandEmitsVerifiedReceipt(t *testing.T) {
 	}
 	if parsed.Subject.IssueNumber != 1185 || parsed.Author.Family != "gpt" || parsed.Auditor.Family != "claude" || parsed.Verdict != modelroute.CrossAuditPass {
 		t.Fatalf("emitted receipt = %+v", parsed)
+	}
+}
+
+func TestIssueAuditBundleOnlyEmitsVerifiedBundleWithoutReviewerConfig(t *testing.T) {
+	patch := "diff --git a/a.go b/a.go\n+safe\n"
+	fetcher := modelroute.IssueAuditFetcherFunc(func(_ context.Context, issue int) (modelroute.IssueAuditEvidence, error) {
+		return modelroute.IssueAuditEvidence{
+			IssueNumber: issue, IssueURL: "https://example/issues/42", Title: "bundle only", Body: "## Done condition\nsafe", State: "CLOSED", ClosedAt: "2026-07-10T00:00:00Z", CommitSHA: "abcdef1", Diff: patch,
+			ClosingCommits: []modelroute.IssueAuditClosingCommit{{SHA: "abcdef1", FirstParentSHA: "1234567", TreeOID: "tree-new", FirstParentTreeOID: "tree-old", Patch: patch, PatchSHA256: modelroute.IssueAuditContentDigest(patch), ChangedPaths: []string{"a.go", "a_test.go"}}},
+			Tests:          []modelroute.EvidenceRef{{Kind: "test-path", Ref: "a_test.go"}},
+		}, nil
+	})
+	reviewCalled := false
+	reviewer := modelroute.IssueAuditReviewerFunc(func(context.Context, modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
+		reviewCalled = true
+		return modelroute.IssueAuditReviewResult{}, nil
+	})
+	var stdout, stderr bytes.Buffer
+	code := runIssueAuditWith(&stdout, &stderr, []string{"--issue", "42", "--bundle-only"}, fetcher, reviewer)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("bundle-only exit=%d stderr=%s", code, stderr.String())
+	}
+	bundle, err := modelroute.ParseIssueAuditBundle(stdout.Bytes())
+	if err != nil || !bundle.Complete || bundle.Issue.Number != 42 {
+		t.Fatalf("bundle-only output = %+v err=%v", bundle, err)
+	}
+	if reviewCalled {
+		t.Fatal("bundle-only path called an auditor")
 	}
 }
 
@@ -109,8 +143,14 @@ func TestIssueAuditFetcherBindsExplicitResolvingCommitAndCurrentRepo(t *testing.
 			return []byte("feat(loop): add scout review rung (#1185)\x1f\n"), nil
 		case joined == "git rev-list --parents -n 1 "+sha:
 			return []byte(sha + " 1111111111111111111111111111111111111111\n"), nil
-		case joined == "git show --format= --no-ext-diff --binary --no-renames "+sha:
+		case joined == "git diff --no-ext-diff --binary --no-renames 1111111111111111111111111111111111111111 "+sha:
 			return []byte("diff --git a/a b/a\n+reviewed\n"), nil
+		case joined == "git rev-parse "+sha+"^{tree}":
+			return []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), nil
+		case joined == "git rev-parse 1111111111111111111111111111111111111111^{tree}":
+			return []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"), nil
+		case joined == "git diff --name-only -z --no-renames 1111111111111111111111111111111111111111 "+sha:
+			return []byte("a\x00a_test.go\x00"), nil
 		default:
 			return nil, fmt.Errorf("unexpected command %s", joined)
 		}
@@ -120,7 +160,7 @@ func TestIssueAuditFetcherBindsExplicitResolvingCommitAndCurrentRepo(t *testing.
 	if err != nil {
 		t.Fatalf("FetchIssueAuditEvidence: %v", err)
 	}
-	if evidence.CommitSHA != sha || len(evidence.Evidence) != 1 || !strings.HasPrefix(evidence.Evidence[0].Ref, "author-manifest:") {
+	if evidence.CommitSHA != sha || len(evidence.ClosingCommits) != 1 || evidence.ClosingCommits[0].FirstParentSHA == "" || len(evidence.Evidence) != 1 || !strings.HasPrefix(evidence.Evidence[0].Ref, "author-manifest:") {
 		t.Fatalf("evidence = %+v", evidence)
 	}
 
@@ -144,16 +184,22 @@ func TestIssueAuditFetcherUsesFirstParentDiffForMergeCommit(t *testing.T) {
 			return []byte(merge + " " + firstParent + " " + secondParent + "\n"), nil
 		case "git diff --no-ext-diff --binary --no-renames " + firstParent + " " + merge:
 			return wantDiff, nil
+		case "git rev-parse " + merge + "^{tree}":
+			return []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), nil
+		case "git rev-parse " + firstParent + "^{tree}":
+			return []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"), nil
+		case "git diff --name-only -z --no-renames " + firstParent + " " + merge:
+			return []byte("a.go\x00a_test.go\x00"), nil
 		default:
 			return nil, fmt.Errorf("unexpected command %s", joined)
 		}
 	}}
-	got, err := fetcher.readClosingDiff(context.Background(), merge)
+	got, err := fetcher.readClosingCommitEvidence(context.Background(), merge)
 	if err != nil {
-		t.Fatalf("readClosingDiff: %v", err)
+		t.Fatalf("readClosingCommitEvidence: %v", err)
 	}
-	if !bytes.Equal(got, wantDiff) {
-		t.Fatalf("merge diff = %q, want %q", got, wantDiff)
+	if !bytes.Equal([]byte(got.Patch), wantDiff) || got.FirstParentSHA != firstParent || got.TreeOID == "" || got.FirstParentTreeOID == "" || !reflect.DeepEqual(got.ChangedPaths, []string{"a.go", "a_test.go"}) {
+		t.Fatalf("merge closing evidence = %+v, want exact first-parent patch/trees/paths", got)
 	}
 	for _, call := range calls {
 		if strings.HasPrefix(call, "git show ") {
@@ -171,8 +217,19 @@ func TestParseIssueAuditReviewerOutputSupportsClaudeEnvelope(t *testing.T) {
 }
 
 func TestIssueAuditCLIDriversSendExactBoundPrompt(t *testing.T) {
-	const boundPrompt = "BOUND SYSTEM POLICY\n\nBOUND UNTRUSTED EVIDENCE"
-	req := modelroute.IssueAuditReviewRequest{Prompt: boundPrompt, PromptDigest: "sha256:test"}
+	patch := "diff --git a/a.go b/a.go\n+safe\n"
+	bundle, err := modelroute.BuildIssueAuditBundle(modelroute.IssueAuditEvidence{
+		IssueNumber: 42, IssueURL: "https://example/issues/42", Title: "bound", Body: "done", State: "CLOSED", ClosedAt: "2026-07-10T00:00:00Z", CommitSHA: "abcdef1", Diff: patch,
+		ClosingCommits: []modelroute.IssueAuditClosingCommit{{SHA: "abcdef1", FirstParentSHA: "1234567", TreeOID: "tree-new", FirstParentTreeOID: "tree-old", Patch: patch, PatchSHA256: modelroute.IssueAuditContentDigest(patch), ChangedPaths: []string{"a.go"}}},
+	}, modelroute.IssueAuditBundleOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := modelroute.NewIssueAuditReviewRequest(42, bundle.BundleDigest, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundPrompt := req.Prompt
 
 	t.Run("claude", func(t *testing.T) {
 		var gotStdin, gotName string
@@ -259,12 +316,27 @@ func TestIssueAuditDriverIdentityRejectsObviousFamilyMismatch(t *testing.T) {
 
 func TestIssueAuditHTTPReviewerCarriesUpstreamObservedModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode HTTP audit request: %v", err)
+		}
+		if len(request.Messages) != 2 || request.Messages[0].Role != "system" || request.Messages[1].Role != "user" || request.Messages[0].Content != modelroute.CrossAuditSystemPrompt {
+			t.Errorf("HTTP audit channels = %+v", request.Messages)
+		}
+		if !strings.Contains(request.Messages[1].Content, modelroute.IssueAuditBundleSchema) {
+			t.Errorf("HTTP untrusted channel does not carry bundle: %+v", request.Messages)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"model":"claude-opus-4-6","choices":[{"message":{"role":"assistant","content":"{\"verdict\":\"PASS\",\"reason\":\"ok\",\"evidence_refs\":[]}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	}))
 	defer server.Close()
 	reviewer := newIssueAuditHTTPReviewer(modelroute.AuditIdentity{Model: "gpt-5.6-sol"}, server.URL, "")
-	result, err := reviewer.ReviewIssue(context.Background(), modelroute.IssueAuditReviewRequest{Prompt: "audit"})
+	result, err := reviewer.ReviewIssue(context.Background(), issueAuditTestReviewRequest(t))
 	if err != nil {
 		t.Fatalf("ReviewIssue: %v", err)
 	}
@@ -292,7 +364,11 @@ func TestIssueAuditCommandHTTPDeclaredFamilyMismatchFailsClosed(t *testing.T) {
 	}))
 	defer server.Close()
 	fetcher := modelroute.IssueAuditFetcherFunc(func(context.Context, int) (modelroute.IssueAuditEvidence, error) {
-		return modelroute.IssueAuditEvidence{IssueNumber: 42, IssueURL: "https://example/issues/42", Title: "t", Body: "b", State: "CLOSED", CommitSHA: "abcdef1", Diff: "diff"}, nil
+		patch := "diff"
+		return modelroute.IssueAuditEvidence{
+			IssueNumber: 42, IssueURL: "https://example/issues/42", Title: "t", Body: "b", State: "CLOSED", ClosedAt: "2026-07-10T00:00:00Z", CommitSHA: "abcdef1", Diff: patch,
+			ClosingCommits: []modelroute.IssueAuditClosingCommit{{SHA: "abcdef1", FirstParentSHA: "1234567", TreeOID: "tree-new", FirstParentTreeOID: "tree-old", Patch: patch, PatchSHA256: modelroute.IssueAuditContentDigest(patch), ChangedPaths: []string{"a.go"}}},
+		}, nil
 	})
 	var stdout, stderr bytes.Buffer
 	code := runIssueAuditWith(&stdout, &stderr, []string{
@@ -320,6 +396,23 @@ func writeIssueAuditManifest(t *testing.T, manifest modelroute.AuthorManifest) s
 		t.Fatal(err)
 	}
 	return path
+}
+
+func issueAuditTestReviewRequest(t *testing.T) modelroute.IssueAuditReviewRequest {
+	t.Helper()
+	patch := "diff --git a/a.go b/a.go\n+safe\n"
+	bundle, err := modelroute.BuildIssueAuditBundle(modelroute.IssueAuditEvidence{
+		IssueNumber: 42, IssueURL: "https://example/issues/42", Title: "audit", Body: "done", State: "CLOSED", ClosedAt: "2026-07-10T00:00:00Z", CommitSHA: "abcdef1", Diff: patch,
+		ClosingCommits: []modelroute.IssueAuditClosingCommit{{SHA: "abcdef1", FirstParentSHA: "1234567", TreeOID: "tree-new", FirstParentTreeOID: "tree-old", Patch: patch, PatchSHA256: modelroute.IssueAuditContentDigest(patch), ChangedPaths: []string{"a.go"}}},
+	}, modelroute.IssueAuditBundleOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := modelroute.NewIssueAuditReviewRequest(42, bundle.BundleDigest, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
 }
 
 func writeIssueAuditRoster(t *testing.T, aliases []modelroute.AuditIdentityAlias) string {

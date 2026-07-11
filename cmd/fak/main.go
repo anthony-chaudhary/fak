@@ -64,13 +64,22 @@ func main() {
 		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
 		cmdRunTrace(os.Args[2:])
 	case "commit":
-		cmdCommit(os.Args[2:])
+		verb = gitOperationName(verb, argv)
+		os.Exit(runObservedGitOperation(start, verb, argv, func() int {
+			return runCommitCommand(os.Stdout, os.Stderr, argv)
+		}))
 	case "edit-tx":
 		cmdEditTx(os.Args[2:])
 	case "sweep":
-		cmdSweep(os.Args[2:])
+		verb = gitOperationName(verb, argv)
+		os.Exit(runObservedGitOperation(start, verb, argv, func() int {
+			return runSweep(os.Stdout, os.Stderr, argv)
+		}))
 	case "sync":
-		cmdSync(os.Args[2:])
+		verb = gitOperationName(verb, argv)
+		os.Exit(runObservedGitOperation(start, verb, argv, func() int {
+			return runSync(os.Stdout, os.Stderr, argv)
+		}))
 	case "merge":
 		cmdMerge(os.Args[2:])
 	case "whats-changed":

@@ -44,6 +44,16 @@ var guardSaverBudgetFlags = map[string]string{
 // detector mirrors that parsing rather than guessing.
 const guardVDSOFlag = "--vdso"
 
+// guardSaverBoolFlags maps each guard flag that governs an on-by-default BOOL saver onto its
+// token-defaults lever key. Like --vdso these are bare bools: only an `=<falsey>` form disables
+// them (`--elide-stale-reads=false`); a bare `--elide-stale-reads` or `=true` keeps the saver on,
+// and a space-separated `--elide-stale-reads false` leaves the following token a positional, so it
+// is NOT a disable. vDSO stays out of this table because it also carries the negated `--no-vdso`
+// alias, handled explicitly above.
+var guardSaverBoolFlags = map[string]string{
+	"--elide-stale-reads": "elidestale",
+}
+
 // debug-stats is deliberately NOT in either table. It is the observable per-turn cache/token
 // layer, legitimately silenced by --quiet on a headless worker (no human is watching stderr), and
 // silencing it costs zero tokens — it is observability, not a saver. Only levers whose omission
@@ -73,6 +83,13 @@ func guardArgvDisabledSavers(argv []string) []string {
 			// Bare `--vdso` (or `--vdso=true`) keeps the saver on; only a false-y `--vdso=<v>` disables.
 			if hasEq && valueIsFalsey(val) {
 				disabled["vdso"] = true
+			}
+			continue
+		}
+		if bk, ok := guardSaverBoolFlags[name]; ok {
+			// Same bare-bool rule as --vdso: only an `=<falsey>` form forfeits the saver.
+			if hasEq && valueIsFalsey(val) {
+				disabled[bk] = true
 			}
 			continue
 		}

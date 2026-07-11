@@ -77,29 +77,12 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		return releaseRunStatus(stdout, stderr, rest)
 	}
 
-	return releaseRunScript(repoRoot(), releaseScripts[mode], releaseArgs(mode, rest), stdout, stderr)
-}
-
-func releaseArgs(mode string, args []string) []string {
-	if mode != "cut" && mode != "tag" {
-		return args
-	}
-	if !hasReleaseArg(args, "--execute") || hasReleaseArg(args, "--skip-dry-run") {
-		return args
-	}
-	out := make([]string, 0, len(args)+1)
-	out = append(out, args...)
-	out = append(out, "--skip-dry-run")
-	return out
-}
-
-func hasReleaseArg(args []string, want string) bool {
-	for _, arg := range args {
-		if arg == want {
-			return true
-		}
-	}
-	return false
+	// Pass the operator's args straight through. The release-substrate dry-run
+	// witness (release_dry_run.py, embedded in cut/tag) reads the LATEST EXISTING
+	// tag, not the just-bumped VERSION, so it passes on a real version bump; the
+	// front door no longer force-injects --skip-dry-run. An operator who wants to
+	// skip it for an emergency cut still passes --skip-dry-run explicitly.
+	return releaseRunScript(repoRoot(), releaseScripts[mode], rest, stdout, stderr)
 }
 
 func runReleaseScript(root, script string, args []string, stdout, stderr io.Writer) int {
@@ -202,8 +185,8 @@ tip and retries the leased push up to --push-retries times (default 2); it never
 force-pushes and never tags a lost race — a rewritten/diverged trunk still refuses.
 Under --require-ci it re-witnesses source CI on the peer's new tip before the
 re-cut, so a retry never ships a commit whose CI was not confirmed green.
-When cut/tag are executed through this front door, --skip-dry-run is added unless
-you supplied it already; the real witness is the green trunk plus the post-tag
-release-substrate suite.
+Cut/tag executed through this front door run the release-substrate dry-run witness
+by default (it reads the latest existing tag, so it passes on a real version bump);
+pass --skip-dry-run yourself only for an emergency cut.
 `)
 }

@@ -35,8 +35,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -47,10 +49,14 @@ import (
 const doomloopUsage = `fak doomloop - two-axis doom-loop guard (effort vs verified progress)
 
   tick      ingest one observation for a worker, classify its history, record the decision
+  sample    OBSERVE-only input adapter: derive effort (transcript lines) + progress
+            (region commits) from real sources, classify, record - never corrects
   scan      fold the store into a fleet verdict table (one row per worker)
   drain     output drainer: report queued re-anchor nudges (observe-only by default);
             --deliver POSTs each onto the adjudicated steer bus (fails closed per nudge)
   classify  one-shot: classify a samples JSONL stream from --file or stdin
+  calibrate offline: fold the decision ledger into evidence-backed TripWindows /
+            EscalateWindows proposals (worst-first); INSUFFICIENT below a floor
 
 Common flags:
   --store PATH   state root for sample histories, the decision ledger, and the
@@ -76,12 +82,16 @@ func runDoomloop(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 	switch argv[0] {
 	case "tick":
 		return runDoomloopTick(stdout, stderr, argv[1:])
+	case "sample":
+		return runDoomloopSample(stdout, stderr, argv[1:])
 	case "scan":
 		return runDoomloopScan(stdout, stderr, argv[1:])
 	case "drain":
 		return runDoomloopDrain(stdout, stderr, argv[1:])
 	case "classify":
 		return runDoomloopClassify(stdout, stderr, stdin, argv[1:])
+	case "calibrate":
+		return runDoomloopCalibrate(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, doomloopUsage)
 		return 0
@@ -262,6 +272,45 @@ func dlWriteJSON(path string, v any) error {
 	return os.WriteFile(path, append(raw, '\n'), 0o644)
 }
 
+// doomloopObserve is the shared spine of `tick` and `sample`: it appends one
+// observation to the worker's durable history, classifies the full history,
+// applies the recommended correction (a dry run unless correct), and records the
+// accountability-ledger row. It returns the ledger decision and the classifier
+// result. The only difference between the two callers is where the counters come
+// from (operator-supplied for tick, adapter-derived for sample) and whether
+// correction is permitted at all (sample hard-wires it off).
+func doomloopObserve(store, session string, sample doomloop.Sample, correct bool, ts int64) (dlDecision, doomloop.Result, error) {
+	if err := appendJSONL(dlSamplesPath(store, session), sample); err != nil {
+		return dlDecision{}, doomloop.Result{}, fmt.Errorf("record sample: %w", err)
+	}
+	samples, err := readSamples(dlSamplesPath(store, session))
+	if err != nil {
+		return dlDecision{}, doomloop.Result{}, fmt.Errorf("read history: %w", err)
+	}
+	res := doomloop.Classify(samples, doomloop.DefaultConfig())
+	applied, artifact, err := applyCorrection(store, session, res, correct, ts)
+	if err != nil {
+		return dlDecision{}, doomloop.Result{}, fmt.Errorf("apply correction: %w", err)
+	}
+	dec := dlDecision{
+		UnixMillis:    ts,
+		Session:       session,
+		Verdict:       string(res.Verdict),
+		Correction:    string(res.Correction),
+		Applied:       applied,
+		Reason:        res.Reason,
+		Streak:        res.BurningFlatStreak,
+		EffortDelta:   res.EffortDelta,
+		ProgressDelta: res.ProgressDelta,
+		Samples:       len(samples),
+		Artifact:      artifact,
+	}
+	if err := appendJSONL(filepath.Join(store, "decisions.jsonl"), dec); err != nil {
+		return dlDecision{}, doomloop.Result{}, fmt.Errorf("record decision: %w", err)
+	}
+	return dec, res, nil
+}
+
 // ---- tick -------------------------------------------------------------------
 
 func runDoomloopTick(stdout, stderr io.Writer, argv []string) int {
@@ -286,38 +335,9 @@ func runDoomloopTick(stdout, stderr io.Writer, argv []string) int {
 	ts := dlNow(*now)
 
 	sample := doomloop.Sample{UnixMillis: ts, Effort: *effort, Progress: *progress, Alive: *alive}
-	if err := appendJSONL(dlSamplesPath(st, *session), sample); err != nil {
-		fmt.Fprintf(stderr, "fak doomloop tick: record sample: %v\n", err)
-		return 1
-	}
-	samples, err := readSamples(dlSamplesPath(st, *session))
+	dec, res, err := doomloopObserve(st, *session, sample, *correct, ts)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak doomloop tick: read history: %v\n", err)
-		return 1
-	}
-
-	res := doomloop.Classify(samples, doomloop.DefaultConfig())
-	applied, artifact, err := applyCorrection(st, *session, res, *correct, ts)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak doomloop tick: apply correction: %v\n", err)
-		return 1
-	}
-
-	dec := dlDecision{
-		UnixMillis:    ts,
-		Session:       *session,
-		Verdict:       string(res.Verdict),
-		Correction:    string(res.Correction),
-		Applied:       applied,
-		Reason:        res.Reason,
-		Streak:        res.BurningFlatStreak,
-		EffortDelta:   res.EffortDelta,
-		ProgressDelta: res.ProgressDelta,
-		Samples:       len(samples),
-		Artifact:      artifact,
-	}
-	if err := appendJSONL(filepath.Join(st, "decisions.jsonl"), dec); err != nil {
-		fmt.Fprintf(stderr, "fak doomloop tick: record decision: %v\n", err)
+		fmt.Fprintf(stderr, "fak doomloop tick: %v\n", err)
 		return 1
 	}
 
@@ -327,7 +347,137 @@ func runDoomloopTick(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "%s\t%s\t%s\tstreak=%d\tΔeffort=%d\tΔprogress=%d\t%s\n",
-		*session, res.Verdict, res.Correction, res.BurningFlatStreak, res.EffortDelta, res.ProgressDelta, applied)
+		*session, res.Verdict, res.Correction, res.BurningFlatStreak, res.EffortDelta, res.ProgressDelta, dec.Applied)
+	fmt.Fprintf(stdout, "  %s\n", res.Interpretation())
+	return 0
+}
+
+// ---- sample (the OBSERVE-only input adapter) --------------------------------
+//
+// sample is the concrete evidence adapter the `tick` doc calls for. Instead of
+// taking the two axes as operator-supplied numbers, it DERIVES them from real
+// sources - effort from the worker's transcript line count, verified progress
+// from the count of git commits touching the worker's region - and feeds one
+// observation through the same classify+record spine as `tick`. It is
+// deliberately OBSERVE-only: there is no --correct knob, so wiring the live
+// sampler cannot, by construction, queue or deliver a nudge. Delivery is the
+// separate `drain` seam, also observe-only for now.
+//
+// Both evidence probes are injectable seams (overridden in tests) so the adapter
+// is exercised without a live transcript or git repo. Progress is whatever the
+// git-witnessed region counter reports - never a worker's self-report.
+
+// doomloopCountLines returns the non-empty line count of a file - the effort
+// axis, since a transcript grows monotonically as a session spends. The bool is
+// false when the file is absent: an unstarted or rotated transcript is zero
+// effort, not an error.
+var doomloopCountLines = func(path string) (int64, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	defer f.Close()
+	var n int64
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		if strings.TrimSpace(sc.Text()) != "" {
+			n++
+		}
+	}
+	return n, true, sc.Err()
+}
+
+// doomloopCountRegionCommits returns the number of commits reachable from HEAD
+// that touch the worker's region (repo-relative pathspecs) - the VERIFIED
+// progress axis, git-witnessed, never narrated. A region with no commits yet is
+// a clean zero.
+var doomloopCountRegionCommits = func(root string, region []string) (int64, error) {
+	args := append([]string{"-C", root, "rev-list", "--count", "HEAD", "--"}, region...)
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list: %w", err)
+	}
+	trimmed := strings.TrimSpace(string(out))
+	n, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse rev-list count %q: %w", trimmed, err)
+	}
+	return n, nil
+}
+
+func runDoomloopSample(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("doomloop sample", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	session := fs.String("session", "", "worker/session identifier (required)")
+	transcript := fs.String("transcript", "", "path to the worker's transcript; its line count is the effort axis (required)")
+	root := fs.String("root", ".", "git repo root for the region commit count")
+	var region multiFlag
+	fs.Var(&region, "region", "repo-relative pathspec for the worker's region; commits touching it are the verified-progress axis (repeatable, required)")
+	aliveFlag := fs.Bool("alive", false, "force the liveness axis alive (default: alive iff the transcript exists and is non-empty)")
+	deadFlag := fs.Bool("dead", false, "force the liveness axis not-alive (overrides --alive; use for a frozen worker)")
+	store := fs.String("store", "", "state root (default: .dos/doomloop)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	now := fs.Int64("now", 0, "injectable clock (unix millis); 0 = wall clock")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	if *session == "" {
+		fmt.Fprintln(stderr, "fak doomloop sample: --session is required")
+		return 2
+	}
+	if *transcript == "" {
+		fmt.Fprintln(stderr, "fak doomloop sample: --transcript is required (the effort axis)")
+		return 2
+	}
+	if len(region) == 0 {
+		fmt.Fprintln(stderr, "fak doomloop sample: at least one --region is required (the verified-progress axis)")
+		return 2
+	}
+
+	effort, exists, err := doomloopCountLines(*transcript)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak doomloop sample: read transcript: %v\n", err)
+		return 1
+	}
+	progress, err := doomloopCountRegionCommits(*root, region)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak doomloop sample: count region commits: %v\n", err)
+		return 1
+	}
+
+	// Liveness proxy: a present, non-empty transcript is a live worker. Explicit
+	// flags override, with --dead winning so an operator can force the wedged axis.
+	alive := exists && effort > 0
+	if *aliveFlag {
+		alive = true
+	}
+	if *deadFlag {
+		alive = false
+	}
+
+	st := doomloopStore(*store)
+	ts := dlNow(*now)
+	sample := doomloop.Sample{UnixMillis: ts, Effort: effort, Progress: progress, Alive: alive}
+
+	// OBSERVE-only: correction is hard-wired false. The input adapter samples and
+	// records; it never queues or delivers a correction.
+	dec, res, err := doomloopObserve(st, *session, sample, false, ts)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak doomloop sample: %v\n", err)
+		return 1
+	}
+
+	if *asJSON {
+		raw, _ := json.MarshalIndent(dec, "", "  ")
+		fmt.Fprintln(stdout, string(raw))
+		return 0
+	}
+	fmt.Fprintf(stdout, "%s\t%s\t%s\tstreak=%d\teffort=%d\tprogress=%d\talive=%v\n",
+		*session, res.Verdict, res.Correction, res.BurningFlatStreak, effort, progress, alive)
 	fmt.Fprintf(stdout, "  %s\n", res.Interpretation())
 	return 0
 }
@@ -662,5 +812,67 @@ func runDoomloopClassify(stdout, stderr io.Writer, stdin io.Reader, argv []strin
 	fmt.Fprintf(stdout, "%s\t%s\tstreak=%d\tΔeffort=%d\tΔprogress=%d\n",
 		res.Verdict, res.Correction, res.BurningFlatStreak, res.EffortDelta, res.ProgressDelta)
 	fmt.Fprintf(stdout, "  %s\n", res.Interpretation())
+	return 0
+}
+
+// runDoomloopCalibrate folds the accountability ledger into evidence-backed
+// TripWindows/EscalateWindows proposals (#4149). It is offline and read-only: it
+// touches only <store>/decisions.jsonl (or --file) and never records or corrects.
+func runDoomloopCalibrate(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("doomloop calibrate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	store := fs.String("store", "", "state root (default: .dos/doomloop)")
+	file := fs.String("file", "", "decisions JSONL file (default: <store>/decisions.jsonl)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	minEpisodes := fs.Int("min-episodes", 0, "INSUFFICIENT floor: minimum nudge episodes before proposing (0 = default)")
+	trip := fs.Int("trip", 0, "current TripWindows to calibrate against (0 = classifier default)")
+	escalate := fs.Int("escalate", 0, "current EscalateWindows to calibrate against (0 = classifier default)")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+
+	path := *file
+	if path == "" {
+		path = filepath.Join(doomloopStore(*store), "decisions.jsonl")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak doomloop calibrate: %v\n", err)
+		return 1
+	}
+	defer f.Close()
+
+	cfg := doomloop.DefaultCalibrateConfig()
+	if *trip > 0 {
+		cfg.Base.TripWindows = *trip
+	}
+	if *escalate > 0 {
+		cfg.Base.EscalateWindows = *escalate
+	}
+	if *minEpisodes > 0 {
+		cfg.MinNudgeEpisodes = *minEpisodes
+	}
+
+	rep, err := doomloop.CalibrateReader(f, cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak doomloop calibrate: %v\n", err)
+		return 1
+	}
+
+	if *asJSON {
+		raw, _ := json.MarshalIndent(rep, "", "  ")
+		fmt.Fprintln(stdout, string(raw))
+		return 0
+	}
+	fmt.Fprintf(stdout, "%s\t%s\n", rep.Verdict, rep.Reason)
+	fmt.Fprintf(stdout, "  workers=%d nudge-episodes=%d recovered=%d escalated=%d ongoing=%d self-recovered=%d recovery-rate=%.0f%%\n",
+		rep.Workers, rep.NudgeEpisodes, rep.Recovered, rep.Escalated, rep.Ongoing, rep.SelfRecovered, rep.RecoveryRate*100)
+	for _, p := range rep.Proposals {
+		change := "hold"
+		if p.Delta != 0 {
+			change = fmt.Sprintf("%d -> %d", p.Current, p.Proposed)
+		}
+		fmt.Fprintf(stdout, "  %-16s %s\n      %s\n", p.Name, change, p.Evidence)
+	}
 	return 0
 }

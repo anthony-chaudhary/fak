@@ -28,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
+//fak:ctxplan verb=headroom enters="nothing live — it drives the context-compression seam (internal/headroom noop/native/proxy Compressor plugins) over a blob or corpus you hand it, not a live session" pages="nothing into a model window — it prints the plugin list, plugin/proxy status, or the compressed-vs-original savings; the SELECTED plugin is what shrinks tool outputs before they reach the model in guard/serve, but this verb only proves the seam" warms="nothing — it measures reversible compression savings; it warms no prompt cache or KV"
 func cmdHeadroom(argv []string) {
 	os.Exit(runHeadroom(os.Stdout, os.Stderr, argv))
 }
