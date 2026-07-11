@@ -9,7 +9,7 @@ import (
 // the "Task success rate + safety" family stays the honest gated placeholder — the
 // comparison never claims a success rate it did not grade.
 func TestBuildSuccessRateFamilyGatedWhenNoPredictions(t *testing.T) {
-	fam := buildSuccessRateFamily("")
+	fam := buildSuccessRateFamily("", 0)
 	if fam.Name != "Task success rate + safety" {
 		t.Fatalf("family name = %q", fam.Name)
 	}
@@ -27,7 +27,7 @@ func TestBuildSuccessRateFamilyGatedWhenNoPredictions(t *testing.T) {
 // the row must carry the SPECIFIC reason + the predictions path — never a fabricated rate.
 // The provenance stays "gated" (honest) precisely because the rate was not measured here.
 func TestBuildSuccessRateFamilyFoldsPredictions(t *testing.T) {
-	fam := buildSuccessRateFamily("/nonexistent/preds.json")
+	fam := buildSuccessRateFamily("/nonexistent/preds.json", 0)
 	if fam.Name != "Task success rate + safety" {
 		t.Fatalf("family name = %q", fam.Name)
 	}

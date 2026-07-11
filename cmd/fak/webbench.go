@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -68,14 +69,17 @@ usage:
         then print the DETERMINISTIC prefill-token work-elimination (the value-stack
         floor) across a worker sweep. Fully offline; needs no model, GPU, or network.
 
-  fak webbench eval --predictions preds.json [--run-id ID] [--max-workers N] [--out FILE]
+  fak webbench eval --predictions preds.json [--run-id ID] [--max-workers N]
+        [--timeout 20m] [--out FILE]
         Grade a predictions file into the task success-rate via the official harness
-        (when available). Gated when this box lacks the browser runtime.
+        (when available). Gated when this box lacks the browser runtime. --timeout
+        bounds the harness run (0 = the built-in 15m default).
 
   fak webbench compare [--dataset FILE] [--workers 1,2,4,8] [--predictions preds.json]
-        [--bench-result FILE] [--out FILE] [--md FILE]
+        [--timeout 20m] [--bench-result FILE] [--out FILE] [--md FILE]
         THE comparison: fak's headline metric families keyed to external benchmarks,
-        with optional side-by-side against a benchmark results file.
+        with optional side-by-side against a benchmark results file. --timeout bounds
+        the --predictions harness run (0 = the built-in 15m default).
 
   fak webbench serving --dataset FILE [--tracks ours,sglang,vllm,fak-fronts-fleet]
         [--endpoints track=http://host/v1,...] [--metrics track=http://host/metrics,...]
@@ -167,33 +171,52 @@ func printWebbenchSummary(w *os.File, s webbench.Summary, src, out string) {
 	}
 }
 
-func cmdWebbenchEval(argv []string) {
-	fs := flag.NewFlagSet("webbench eval", flag.ExitOnError)
+// parseWebbenchEvalConfig parses the `fak webbench eval` flags into an EvalConfig
+// plus the --out path. It is split out from cmdWebbenchEval so the flag->config
+// wiring — notably --timeout -> EvalConfig.Timeout (#3913) — is unit-testable
+// without running the (gated) harness. It never calls os.Exit: a missing
+// --predictions or a bad flag comes back as an error for the caller to surface.
+func parseWebbenchEvalConfig(argv []string) (webbench.EvalConfig, string, error) {
+	fs := flag.NewFlagSet("webbench eval", flag.ContinueOnError)
 	preds := fs.String("predictions", "", "path to predictions JSON (required)")
 	benchmark := fs.String("benchmark", "browser-agent", "benchmark name (browser-agent, webvoyager, etc.)")
 	runID := fs.String("run-id", "fak-webbench", "harness run id")
 	maxWorkers := fs.Int("max-workers", 4, "harness parallelism")
 	python := fs.String("python", "", "python interpreter (default: detected)")
 	out := fs.String("out", "", "write the EvalResult JSON here (default: stdout)")
-	_ = fs.Parse(argv)
-
-	if *preds == "" {
-		fmt.Fprintln(os.Stderr, "fak webbench eval: --predictions is required")
-		os.Exit(2)
+	timeout := fs.Duration("timeout", 0, "per-benchmark harness deadline (e.g. 20m); 0 = the built-in 15m default")
+	if err := fs.Parse(argv); err != nil {
+		return webbench.EvalConfig{}, "", err
 	}
-
-	res, err := webbench.RunEval(webbench.EvalConfig{
+	if *preds == "" {
+		return webbench.EvalConfig{}, "", errors.New("--predictions is required")
+	}
+	return webbench.EvalConfig{
 		PredictionsPath: *preds,
 		Benchmark:       *benchmark,
 		RunID:           *runID,
 		MaxWorkers:      *maxWorkers,
 		Python:          *python,
-	})
+		Timeout:         *timeout,
+	}, *out, nil
+}
+
+func cmdWebbenchEval(argv []string) {
+	cfg, out, err := parseWebbenchEvalConfig(argv)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "fak webbench eval: %v\n", err)
+		os.Exit(2)
+	}
+
+	res, err := webbench.RunEval(cfg)
 	must(err)
 
-	if *out != "" {
+	if out != "" {
 		data, _ := json.MarshalIndent(res, "", "  ")
-		must(os.WriteFile(*out, data, 0644))
+		must(os.WriteFile(out, data, 0644))
 	} else {
 		data, _ := json.MarshalIndent(res, "", "  ")
 		fmt.Println(string(data))
@@ -211,8 +234,25 @@ func cmdWebbenchEval(argv []string) {
 	}
 }
 
-func cmdWebbenchCompare(argv []string) {
-	fs := flag.NewFlagSet("webbench compare", flag.ExitOnError)
+// webbenchCompareArgs are the parsed `fak webbench compare` flags. Split out so
+// the --timeout -> CompareInputs.Timeout wiring (#3913) is unit-testable without
+// touching the filesystem: the timeout threads into the --predictions harness
+// run through report.go's RunEval, not through cmd/fak's eval subcommand.
+type webbenchCompareArgs struct {
+	dataset     string
+	workers     []int
+	limit       int
+	preds       string
+	benchResult string
+	out         string
+	md          string
+	timeout     time.Duration
+}
+
+// parseWebbenchCompareArgs parses the compare flags without side effects. It
+// never calls os.Exit; a missing --dataset or a bad flag comes back as an error.
+func parseWebbenchCompareArgs(argv []string) (webbenchCompareArgs, error) {
+	fs := flag.NewFlagSet("webbench compare", flag.ContinueOnError)
 	dataset := fs.String("dataset", "", "path to web task dataset (required)")
 	workersArg := fs.String("workers", "1,2,4,8", "worker sweep")
 	limit := fs.Int("limit", 0, "cap to the first N instances (0 = all)")
@@ -220,56 +260,78 @@ func cmdWebbenchCompare(argv []string) {
 	benchResult := fs.String("bench-result", "", "external benchmark results for side-by-side (optional)")
 	out := fs.String("out", "", "write the Comparison JSON here (default: stdout)")
 	md := fs.String("md", "", "write the markdown report here (optional)")
-	_ = fs.Parse(argv)
-
+	timeout := fs.Duration("timeout", 0, "per-benchmark harness deadline for the --predictions eval (e.g. 20m); 0 = the built-in 15m default")
+	if err := fs.Parse(argv); err != nil {
+		return webbenchCompareArgs{}, err
+	}
 	if *dataset == "" {
-		fmt.Fprintln(os.Stderr, "fak webbench compare: --dataset is required")
-		os.Exit(2)
+		return webbenchCompareArgs{}, errors.New("--dataset is required")
 	}
-
-	d, err := webbench.LoadDataset(*dataset)
-	must(err)
-
-	if *limit > 0 && *limit < d.Len() {
-		d = d.Limit(*limit)
-	}
-
 	workers := parseIntList(*workersArg)
 	if len(workers) == 0 {
 		workers = []int{1, 2, 4, 8}
+	}
+	return webbenchCompareArgs{
+		dataset:     *dataset,
+		workers:     workers,
+		limit:       *limit,
+		preds:       *preds,
+		benchResult: *benchResult,
+		out:         *out,
+		md:          *md,
+		timeout:     *timeout,
+	}, nil
+}
+
+func cmdWebbenchCompare(argv []string) {
+	a, err := parseWebbenchCompareArgs(argv)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "fak webbench compare: %v\n", err)
+		os.Exit(2)
+	}
+
+	d, err := webbench.LoadDataset(a.dataset)
+	must(err)
+
+	if a.limit > 0 && a.limit < d.Len() {
+		d = d.Limit(a.limit)
 	}
 
 	in := webbench.CompareInputs{
 		Dataset:         d,
 		Geometry:        webbench.DefaultGeometryModel(),
-		Workers:         workers,
-		BenchResult:     *benchResult,
-		PredictionsPath: *preds,
+		Workers:         a.workers,
+		BenchResult:     a.benchResult,
+		PredictionsPath: a.preds,
+		Timeout:         a.timeout,
 		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
 	}
 
 	c := webbench.BuildComparison(in)
 
-	if *out != "" {
+	if a.out != "" {
 		data, _ := json.MarshalIndent(c, "", "  ")
-		must(os.WriteFile(*out, data, 0644))
+		must(os.WriteFile(a.out, data, 0644))
 	} else {
 		data, _ := json.MarshalIndent(c, "", "  ")
 		fmt.Println(string(data))
 	}
 
-	if *md != "" {
-		must(os.WriteFile(*md, []byte(webbench.RenderMarkdown(c)), 0644))
+	if a.md != "" {
+		must(os.WriteFile(a.md, []byte(webbench.RenderMarkdown(c)), 0644))
 	}
 
 	fmt.Fprintf(os.Stderr, "\n== fak webbench compare ==\n")
-	fmt.Fprintf(os.Stderr, "source        : %s\n", *dataset)
+	fmt.Fprintf(os.Stderr, "source        : %s\n", a.dataset)
 	fmt.Fprintf(os.Stderr, "instances     : %d\n", c.Summary.Instances)
 	for _, f := range c.Families {
 		fmt.Fprintf(os.Stderr, "  %-30s %-11s %s\n", f.Name, "["+f.Kind+"]", f.Provenance)
 	}
-	if *md != "" {
-		fmt.Fprintf(os.Stderr, "markdown: %s\n", *md)
+	if a.md != "" {
+		fmt.Fprintf(os.Stderr, "markdown: %s\n", a.md)
 	}
 }
 

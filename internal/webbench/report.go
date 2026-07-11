@@ -3,6 +3,7 @@ package webbench
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
@@ -50,7 +51,12 @@ type CompareInputs struct {
 	// (with the specific reason) when this box lacks the harness/runtime — never silently
 	// dropped, so the comparison can't claim a success rate it did not actually grade.
 	PredictionsPath string
-	GeneratedAt     string
+	// Timeout bounds the --predictions harness run (threaded into
+	// EvalConfig.Timeout). Zero falls back to the package default (15m); an
+	// operator raises the ceiling for a slow-but-legitimate benchmark via
+	// `fak webbench compare --timeout` (#3913) without editing code.
+	Timeout     time.Duration
+	GeneratedAt string
 }
 
 // BuildComparison constructs the comparison from inputs.
@@ -83,7 +89,7 @@ func BuildComparison(in CompareInputs) *Comparison {
 			Provenance: "gated", // Would need measurement
 			Rows:       []Row{{Label: "Gated on this box - requires trace data"}},
 		},
-		buildSuccessRateFamily(in.PredictionsPath),
+		buildSuccessRateFamily(in.PredictionsPath, in.Timeout),
 	}
 
 	return c
@@ -95,7 +101,7 @@ func BuildComparison(in CompareInputs) *Comparison {
 // passed/total/success-rate when the harness ran, or a "gated" row naming the SPECIFIC
 // reason (no harness, no browser runtime) when this box can't grade — the OBSERVED success
 // rate is never fabricated and never silently dropped.
-func buildSuccessRateFamily(predictionsPath string) MetricFamily {
+func buildSuccessRateFamily(predictionsPath string, timeout time.Duration) MetricFamily {
 	fam := MetricFamily{
 		Name:       "Task success rate + safety",
 		Kind:       "comparable",
@@ -105,7 +111,7 @@ func buildSuccessRateFamily(predictionsPath string) MetricFamily {
 	if predictionsPath == "" {
 		return fam
 	}
-	res, err := RunEval(EvalConfig{PredictionsPath: predictionsPath, RunID: "webbench-compare"})
+	res, err := RunEval(EvalConfig{PredictionsPath: predictionsPath, RunID: "webbench-compare", Timeout: timeout})
 	if err != nil {
 		fam.Rows = []Row{{
 			Label:  "Eval errored",
