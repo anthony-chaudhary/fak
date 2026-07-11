@@ -113,6 +113,17 @@ type Row struct {
 	// continuity class (Reason) — rides the frozen decision fields above, and
 	// this carries the full correlated record layered on top.
 	Restart *RestartHop `json:"restart,omitempty"`
+
+	// Livelock field (for LIVELOCK: the result-side repeat-loop witness). A livelock
+	// trip is a gateway observation, not a kernel decision — the result-side detector
+	// crossed its repeat threshold on genuinely re-issued calls — so AppendLivelock
+	// writes it directly through the chain, like a crash. NOT part of the hash-chain
+	// pre-image (chainHash lists the chained fields explicitly, so appending it here
+	// leaves every existing journal verifying byte-for-byte); the chained forensic
+	// identity of a trip — Kind, the tool (Tool), the session (TraceID), the failure
+	// class (Reason) — rides the frozen decision fields above, and this carries the
+	// content-free repeat detail layered on top.
+	Livelock *LivelockRow `json:"livelock,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
