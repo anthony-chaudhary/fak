@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
@@ -711,16 +712,31 @@ func dispatchPreflightSeat(root string, _ io.Writer, product string) dispatchtic
 	}
 }
 
+var dispatchKernelCache = struct {
+	sync.Mutex
+	at    time.Time
+	root  string
+	check dispatchtick.KernelCheck
+}{}
+
+const dispatchKernelCacheTTL = 30 * time.Second
+
 func dispatchPreflightKernel(root string) dispatchtick.KernelCheck {
+	now := time.Now()
+	dispatchKernelCache.Lock()
+	defer dispatchKernelCache.Unlock()
+	if dispatchKernelCache.root == root && !dispatchKernelCache.at.IsZero() && now.Sub(dispatchKernelCache.at) < dispatchKernelCacheTTL {
+		return dispatchKernelCache.check
+	}
 	doc, err := dispatchRunExternalJSON(root, 60*time.Second, "dos", "loop", "--workspace", root, "--json")
+	check := dispatchtick.KernelCheck{}
 	if err != nil {
-		return dispatchtick.KernelCheck{Error: err.Error()}
+		check.Error = err.Error()
+	} else {
+		check = dispatchtick.KernelCheck{Alive: intPtrFromAny(doc["alive"]), Target: intPtrFromAny(doc["target"]), Verdict: dispatchMapString(doc, "verdict")}
 	}
-	return dispatchtick.KernelCheck{
-		Alive:   intPtrFromAny(doc["alive"]),
-		Target:  intPtrFromAny(doc["target"]),
-		Verdict: dispatchMapString(doc, "verdict"),
-	}
+	dispatchKernelCache.root, dispatchKernelCache.at, dispatchKernelCache.check = root, now, check
+	return check
 }
 
 var dispatchRunExternalJSON = dispatchRunExternalJSONImpl
