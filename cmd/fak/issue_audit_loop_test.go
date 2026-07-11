@@ -61,6 +61,28 @@ func TestRunIssueAuditLoopDryRunPlansSnapshot(t *testing.T) {
 	}
 }
 
+func TestRunIssueAuditLoopStatusReadsDurableStateWithoutSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "receipts.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
+
+	// A fresh install (no ledger, no cursor) is a valid empty status, not an error.
+	var stdout, stderr bytes.Buffer
+	code := runIssueAuditLoop(&stdout, &stderr, []string{
+		"--status", "--ledger", ledger, "--cursor", cursor, "--json",
+	})
+	if code != 0 {
+		t.Fatalf("status exit %d, stderr=%s", code, stderr.String())
+	}
+	var status issueAuditLoopStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("decode status: %v\nstdout=%s", err, stdout.String())
+	}
+	if status.LedgerPresent || status.LedgerRows != 0 || len(status.SettledIssues) != 0 {
+		t.Fatalf("empty status = %+v, want no ledger / zero rows / no settled", status)
+	}
+}
+
 func TestRunIssueAuditLoopRequiresSnapshot(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runIssueAuditLoop(&stdout, &stderr, nil); code != 2 {

@@ -1170,6 +1170,7 @@ func issueUsage(w io.Writer) {
                      --auditor PROVIDER/FAMILY/MODEL --identity-roster R [--json]
   fak issue audit-loop --snapshot SUBJECTS.json [--ledger P] [--cursor P]
                      [--scan-cap N] [--batch-cap N] [--replay N,M] [--json]
+  fak issue audit-loop --status [--ledger P] [--cursor P] [--json]
   fak issue contract --file CANDIDATE.json [--json]
   fak issue contract --from-plan PLAN.json [--json]
   fak issue contract --from-issues ISSUES.json [--json]
@@ -1221,7 +1222,10 @@ transiently blocked or everything is settled), STALLED (all pending work has
 exhausted its retry budget), or DARK (no eligible subjects — a potential blind
 spot). It defaults to a dry-run plan that never leases, audits, or mutates the
 ledger; UNAVAILABLE/INCONCLUSIVE subjects never advance the cursor so no
-unavailable row is lost. Exit 0 report; exit 2 bad flags/snapshot.
+unavailable row is lost. Exit 0 report; exit 2 bad flags/snapshot. --status is
+the read-only twin: it verifies the ledger hash-chain and folds the cursor to
+report settled coverage, the dead-letter queue, and provider cooldowns without a
+snapshot.
 
 The contract command reviews machine-created GitHub issue candidates before a
 producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is
