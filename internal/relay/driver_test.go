@@ -321,29 +321,40 @@ func TestDriverLoopDoneCheckFailsClosed(t *testing.T) {
 	}
 }
 
-// TestDriverLoopExhaustionFailsClosed pins the driver's own bound: a leg that never
-// reaches a rotation errors — naming the last closed hold — rather than spinning or
-// fabricating an outcome. The park path that will absorb this is rung H5.
-func TestDriverLoopExhaustionFailsClosed(t *testing.T) {
+// TestDriverLoopExhaustionParksUnsafe pins the driver's own bound under H5 (parkunsafe.go,
+// #1898): a leg that never reaches a rotation does NOT error or spin — it hits its window
+// hard ceiling and PARKS with RELAY_PARKED_UNSAFE, writing a resumable baton anchored at the
+// last committed SHA but minting no successor. Parking is the fail-closed behavior: never
+// blow the window to keep going, never fabricate a rotation.
+func TestDriverLoopExhaustionParksUnsafe(t *testing.T) {
 	inFlight := BoundaryObs{
 		Usage:        BudgetUsage{Context: AxisUsage{Used: 90, Cap: 100}},
 		TurnInFlight: true,
 		NextSteps:    []string{"finish the tool call"},
 		AtSHA:        drvSHA1,
 	}
-	rotated := false
-	_, err := DriveLeg(LegConfig{
+	wroteBaton, recontinued := false, false
+	out, err := DriveLeg(LegConfig{
 		RelayID: "RLY-20260708-0004", DoneWhen: "never", TraceID: "trace-leg-0",
 		Triggers: ArmTriggers{SoftMark: 0.5}, MaxBoundaries: 3,
 		Work:       func(Orientation, int) (BoundaryObs, error) { return inFlight, nil },
-		WriteBaton: func([]byte) error { rotated = true; return nil },
-		Recontinue: func(Baton) (string, error) { rotated = true; return "", nil },
+		WriteBaton: func([]byte) error { wroteBaton = true; return nil },
+		Recontinue: func(Baton) (string, error) { recontinued = true; return "", nil },
 	})
-	if err == nil || !strings.Contains(err.Error(), ReasonInFlight) {
-		t.Fatalf("err = %v, want an exhaustion error naming the %s hold", err, ReasonInFlight)
+	if err != nil {
+		t.Fatalf("DriveLeg exhausted leg: err = %v, want a clean park", err)
 	}
-	if rotated {
-		t.Errorf("an exhausted leg must not write a baton or recontinue")
+	if out.Reason != ReasonParkedUnsafe || !out.Parked {
+		t.Errorf("outcome = {Reason:%q Parked:%v}, want a %s park", out.Reason, out.Parked, ReasonParkedUnsafe)
+	}
+	if out.Baton.Tombstone.Reason != ReasonParkedUnsafe || out.Baton.ProgressCursor.StartSHA != drvSHA1 {
+		t.Errorf("park baton = %+v, want %s anchored at the last commit %s", out.Baton.Tombstone, ReasonParkedUnsafe, drvSHA1)
+	}
+	if !wroteBaton {
+		t.Error("a park must write its resumable baton through WriteBaton")
+	}
+	if recontinued || out.SuccessorTrace != "" {
+		t.Errorf("a parked leg must not recontinue (recontinued=%v trace=%q)", recontinued, out.SuccessorTrace)
 	}
 }
 

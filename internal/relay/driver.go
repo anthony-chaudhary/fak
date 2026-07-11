@@ -169,6 +169,13 @@ type LegOutcome struct {
 	SuccessorTrace string
 	// Boundaries is how many work-hook boundaries the leg evaluated.
 	Boundaries int
+	// Parked is true when the leg hit the window hard ceiling before reaching a safe
+	// point and parked with RELAY_PARKED_UNSAFE (H5, parkunsafe.go): a terminal stop,
+	// not a rotation. Like a rotation it writes a Baton (the parked state, resumable
+	// from the pinned anchor), but unlike a rotation it mints NO successor —
+	// SuccessorTrace stays empty. Distinguishes the fail-closed park from the fired
+	// rotation, which both carry a Baton.
+	Parked bool
 	// Holds are the closed reasons (in boundary order) for which an evaluated
 	// boundary declined to rotate — IN_FLIGHT_TOOL_CALL, TREE_DIRTY_UNPARKED,
 	// NO_NEXT_ACTION / AMBIGUOUS_NEXT_ACTION, RELAY_NOT_EXTERNALIZED — the operator
@@ -196,9 +203,10 @@ type LegOutcome struct {
 //     durable pointers, canonically encoded (C2), persisted through WriteBaton, and
 //     only then handed to Recontinue to mint the fresh leg.
 //
-// A leg that exhausts MaxBoundaries without firing is an error naming the last hold
-// (the park path that would absorb it is rung H5, out of scope here) — fail closed,
-// never a fabricated rotation.
+// A leg that exhausts MaxBoundaries without ever reaching a safe point has hit its
+// window hard ceiling: it parks with RELAY_PARKED_UNSAFE (H5, parkunsafe.go), writing
+// a resumable baton anchored at the last committed SHA and minting no successor — fail
+// closed, never a fabricated rotation and never a blown window.
 func DriveLeg(cfg LegConfig) (LegOutcome, error) {
 	if cfg.Work == nil || cfg.WriteBaton == nil || cfg.Recontinue == nil {
 		return LegOutcome{}, fmt.Errorf("relay: driver needs Work, WriteBaton and Recontinue hooks")
@@ -246,6 +254,7 @@ func DriveLeg(cfg LegConfig) (LegOutcome, error) {
 
 	// 3. The work loop, bounded fail-closed.
 	var af ArmFire
+	var park CeilingPark
 	var holds []string
 	lastHold := ""
 	for b := 0; b < cfg.MaxBoundaries; b++ {
@@ -284,6 +293,12 @@ func DriveLeg(cfg LegConfig) (LegOutcome, error) {
 			}
 			holds = append(holds, lastHold)
 		}
+
+		// Fold this boundary into the H5 ceiling-park tracker: pin its observed commit
+		// as the running resume anchor and remember the latest hold, so if the loop
+		// exhausts the window without a safe point the park resumes from the last good
+		// commit rather than stranding it.
+		park.Observe(obs.AtSHA, lastHold)
 
 		// Arm/fire (G2) over the G3 trigger fold. The externalize gate is a
 		// precondition of the safe point the machine may fire at (F2, fail-closed): a
@@ -351,7 +366,40 @@ func DriveLeg(cfg LegConfig) (LegOutcome, error) {
 			Holds:          holds,
 		}, nil
 	}
-	return LegOutcome{}, fmt.Errorf(
-		"relay: leg %d exhausted %d boundaries without reaching a rotation (state=%s, last hold: %s); the park path is rung H5",
-		leg, cfg.MaxBoundaries, af.State(), lastHold)
+	// 5. H5 hard-ceiling park: the leg exhausted its window (MaxBoundaries) without ever
+	// reaching a safe point to rotate. Never blow the window to keep going — park with
+	// RELAY_PARKED_UNSAFE, anchored at the last committed SHA so the parked state is
+	// resumable and no committed work is lost, and stop WITHOUT minting a successor. The
+	// park baton carries the identity and the resume anchor exactly as a rotation would;
+	// only the tombstone reason and the absent successor distinguish it.
+	tomb := park.Park(leg, cfg.MaxBoundaries)
+	parked := project(Baton{
+		Schema:      Schema,
+		RelayID:     relayID,
+		Leg:         leg,
+		ParentTrace: cfg.TraceID,
+		Objective:   objective,
+		DoneWhen:    doneWhen,
+		ProgressCursor: ProgressCursor{
+			StartSHA:   park.Anchor(),
+			LedgerRef:  ledgerRef,
+			HeldRegion: heldRegion,
+		},
+		Tombstone: tomb,
+	})
+	wire, err := Marshal(parked)
+	if err != nil {
+		return LegOutcome{}, fmt.Errorf("relay: encode park baton for leg %d: %w", leg, err)
+	}
+	if err := cfg.WriteBaton(wire); err != nil {
+		return LegOutcome{}, fmt.Errorf("relay: write park baton for leg %d: %w", leg, err)
+	}
+	return LegOutcome{
+		Reason:      ReasonParkedUnsafe,
+		Orientation: o,
+		Baton:       parked,
+		Parked:      true,
+		Boundaries:  cfg.MaxBoundaries,
+		Holds:       holds,
+	}, nil
 }
