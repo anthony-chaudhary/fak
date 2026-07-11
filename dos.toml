@@ -1235,6 +1235,13 @@ summary  = "An out-of-band redirect targeted a session whose current objective i
 fix      = "Start a new session/objective for the new goal instead of redirecting the finished one; redirect only an active or paused objective. Floor: internal/sessionctl EnqueueRedirect + ApplyPendingRedirect against the live objective."
 see_also = ["internal/sessionctl/redirect.go", "internal/agent/loop_redirect_test.go"]
 
+[reasons.BROADCAST_MALFORMED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A fleet/lane-scoped broadcast (issue #2764) had no applicable shape -- an empty selector (an unstated set never means 'every session'), a nil session table, an op outside the closed control vocabulary, or a non-lifecycle op (steer/redirect/budget/priority) that cannot be fanned without a payload -- and was refused whole at the edge, before any session was touched."
+fix      = "State at least one selector axis (--lane / --wave / --label) and fan only a lifecycle op (pause|resume|cancel|terminate|throttle); per-session refusals inside an accepted broadcast surface the drive table's own CONTROL_* tokens. Floor: internal/sessionctl Broadcast edge validation."
+see_also = ["internal/sessionctl/broadcast.go", "internal/sessionctl/broadcast_test.go"]
+
 # #3066 (child [GATE] of the TOON epic #3064): the closed skip-reason vocabulary
 # the pure `toon.Decide(...)` governor returns instead of `Encode:true`. Each token
 # names one checkable condition under which TOON auto-fire must NOT fire (keep JSON);
