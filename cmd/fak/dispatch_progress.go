@@ -252,7 +252,7 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 	if openErr != nil {
 		rec["open_error"] = openErr.Error()
 	}
-	_ = dispatchProgressAppend(runsDir, rec)
+	_ = dispatchProgressAppend(filepath.Join(runsDir, dispatchProgressLogName), rec)
 	if opts.RecordLoop {
 		rec["loop_ledger"] = recordDispatchProgressLoop(root, opts.LoopLedger, rec)
 	}
@@ -796,15 +796,28 @@ func rotateDispatchProgressIfDue(path string, maxBytes int64) error {
 	return os.Rename(path, sealed)
 }
 
-func dispatchProgressAppend(runsDir string, rec map[string]any) error {
-	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+// dispatchProgressAppend appends one JSON record to the progress log at logPath,
+// sealing the active file to logPath+".1" first when it has reached
+// dispatchProgressRotateBytes. Sealing keeps the hot append target bounded (#3475);
+// a single .1 backup is retained (any prior .1 is replaced) so growth is capped at
+// two segments. logPath is the full log-file path, not its directory.
+func dispatchProgressAppend(logPath string, rec map[string]any) error {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return err
+	}
+	if dispatchProgressRotateBytes > 0 {
+		if fi, err := os.Stat(logPath); err == nil && fi.Size() >= dispatchProgressRotateBytes {
+			_ = os.Remove(logPath + ".1")
+			if err := os.Rename(logPath, logPath+".1"); err != nil {
+				return err
+			}
+		}
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(runsDir, dispatchProgressLogName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
