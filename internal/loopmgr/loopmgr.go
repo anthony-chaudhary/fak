@@ -132,7 +132,14 @@ type Event struct {
 type Option func(*appendConfig)
 
 type appendConfig struct {
-	clock func() time.Time
+	clock       func() time.Time
+	rotateBytes int64
+}
+
+// WithRotateBytes overrides the active-ledger size bound. Zero disables automatic
+// rotation (useful for tests and explicit maintenance callers).
+func WithRotateBytes(n int64) Option {
+	return func(cfg *appendConfig) { cfg.rotateBytes = n }
 }
 
 func WithClock(clock func() time.Time) Option {
@@ -160,7 +167,7 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 	if path == "" {
 		return Event{}, errors.New("loop ledger path is required")
 	}
-	cfg := appendConfig{clock: time.Now}
+	cfg := appendConfig{clock: time.Now, rotateBytes: DefaultRotateBytes}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -174,6 +181,16 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return Event{}, fmt.Errorf("create loop ledger dir: %w", err)
+		}
+	}
+
+	// Bound the hot active ledger at its shared write site. RotateIfDue first pays
+	// only an O(1) stat; it acquires the same ledger lock and verifies/seals the
+	// chain only after the threshold is crossed. Every producer therefore inherits
+	// the bound without a per-tick reaper process.
+	if cfg.rotateBytes > 0 {
+		if _, err := RotateIfDue(path, cfg.rotateBytes); err != nil {
+			return Event{}, fmt.Errorf("rotate loop ledger before append: %w", err)
 		}
 	}
 

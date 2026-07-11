@@ -16,6 +16,12 @@ import (
 // SchemaSegmentSeal is the schema tag of a manifest seal row (see segmentSeal).
 const SchemaSegmentSeal = "fak.loop-segment-seal.v1"
 
+// DefaultRotateBytes bounds the active loop ledger while keeping rotations rare.
+// Sealed segments remain readable through LoadAll; only the hot append target is
+// capped. Eight MiB is large enough to amortize chain verification and small enough
+// to prevent a lifetime fleet ledger from becoming an unbounded hot file.
+const DefaultRotateBytes int64 = 8 << 20
+
 // manifestSuffix names the sealed-segment manifest: a tiny, hash-chained sidecar with
 // one row per rotation. It is NOT a *.jsonl/.log name so growthgate's grower filter
 // skips it, and it grows one line per rotation (not per append), so it never becomes a

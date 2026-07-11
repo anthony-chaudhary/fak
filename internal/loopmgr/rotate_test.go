@@ -395,3 +395,35 @@ func TestRotateIfDue(t *testing.T) {
 		t.Fatalf("LoadAll = %d events, want 3 (full history across the seal)", len(all))
 	}
 }
+
+// TestAppendAutoRotatesAtWriteSite proves the lifetime bound is inherited by every
+// producer: once the active file is over the configured threshold, the next Append
+// seals it before writing and continues at seq 1 in a fresh active segment.
+func TestAppendAutoRotatesAtWriteSite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	first, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "test"}, WithRotateBytes(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Append(path, Event{LoopID: "l", Kind: EventAdmit, Source: "test"}, WithRotateBytes(fi.Size()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Seq != 1 || second.PrevHash != "" {
+		t.Fatalf("post-rotation event=%+v, want fresh active chain", second)
+	}
+	all, err := LoadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].Hash != first.Hash || all[1].Hash != second.Hash {
+		t.Fatalf("LoadAll=%+v, want sealed first plus active second", all)
+	}
+	if _, err := os.Stat(segmentPath(path, 1)); err != nil {
+		t.Fatalf("sealed segment missing: %v", err)
+	}
+}
