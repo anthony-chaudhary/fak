@@ -76,8 +76,26 @@ func (k splitKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, i
 	return nil, false
 }
 
+// isSharedExpertWeight matches the ALWAYS-ON shared-expert projections a GLM-style MoE runs for
+// every token in addition to the routed top-k: model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight
+// (glmSharedExperts). The distinguishing substring is ".mlp.shared_experts.".
+func isSharedExpertWeight(name string) bool {
+	return strings.Contains(name, ".mlp.shared_experts.")
+}
+
+// isRoutedExpertWeight matches the PER-TOKEN ROUTED experts (only the router-selected top-k fire per
+// token): model.layers.<l>.mlp.experts.<e>.{gate,up,down}_proj.weight (expertName, moe.go). The
+// substring ".mlp.experts." names them; the "but not shared" guard is belt-and-suspenders — the shared
+// form is ".mlp.shared_experts." so ".mlp.experts." never matches it — but it keeps the two classes
+// provably disjoint even if the naming ever drifts. A bias tensor of an expert
+// (…experts.<e>.gate_proj.bias) also matches, which is correct — its add belongs with its GEMM.
+func isRoutedExpertWeight(name string) bool {
+	return strings.Contains(name, ".mlp.experts.") && !isSharedExpertWeight(name)
+}
+
 // isExpertWeight is the default CPU-offload predicate: it selects the MoE expert and shared-expert
 // projection weights — the parameter bulk a `--n-cpu-moe` split sends to host RAM — and nothing else.
+// It is exactly the OR of the two disjoint expert classes (isRoutedExpertWeight, isSharedExpertWeight).
 // It deliberately does NOT match the router (mlp.gate.weight), the attention/MLA projections, the
 // learned-index projections, or the LM head: those are the small, every-token dense GEMMs that stay
 // on the device. The names are the canonical HF tensor names the GLM-DSA forward reads:
@@ -86,10 +104,9 @@ func (k splitKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, i
 //	shared experts: model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight (glmSharedExperts)
 //
 // so the substrings ".mlp.experts." and ".mlp.shared_experts." partition expert weights from every
-// dense weight exactly (the router mlp.gate.weight contains neither). A bias tensor of an expert
-// (…experts.<e>.gate_proj.bias) also matches, which is correct — its add belongs with its GEMM.
+// dense weight exactly (the router mlp.gate.weight contains neither).
 func isExpertWeight(name string) bool {
-	return strings.Contains(name, ".mlp.experts.") || strings.Contains(name, ".mlp.shared_experts.")
+	return isRoutedExpertWeight(name) || isSharedExpertWeight(name)
 }
 
 // CPUOffloadExpertWeight reports whether the canonical tensor name is routed to host RAM by

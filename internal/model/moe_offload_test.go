@@ -52,6 +52,52 @@ func TestIsExpertWeight(t *testing.T) {
 	}
 }
 
+// TestExpertWeightClassification pins the two disjoint expert-weight classes the offload predicate is
+// built from: isRoutedExpertWeight matches the per-token routed experts (.mlp.experts.<e>.*),
+// isSharedExpertWeight matches the always-on shared experts (.mlp.shared_experts.*), the two never
+// overlap, isExpertWeight is exactly their OR, and NEITHER class ever matches the router/gate weight
+// (routerName) — the router is a dense every-token GEMM that stays on the device. A predicate that
+// classified the router as an expert, or that let the shared form leak into the routed class, is
+// caught here structurally.
+func TestExpertWeightClassification(t *testing.T) {
+	router := routerName(0) // model.layers.0.mlp.gate.weight — the every-token dense router
+	cases := []struct {
+		desc                   string
+		weight                 string
+		wantRouted, wantShared bool
+	}{
+		{"routed gate", expertName(0, 0, "gate_proj.weight"), true, false},
+		{"routed up (other layer/expert)", expertName(3, 7, "up_proj.weight"), true, false},
+		{"routed down", expertName(1, 2, "down_proj.weight"), true, false},
+		{"routed bias rides with its GEMM", expertName(0, 0, "gate_proj.bias"), true, false},
+		{"shared gate", "model.layers.5.mlp.shared_experts.gate_proj.weight", false, true},
+		{"shared down", "model.layers.5.mlp.shared_experts.down_proj.weight", false, true},
+		{"router/gate weight", router, false, false},
+		{"router bias", routerBiasName(0), false, false},
+		{"dense (non-MoE) mlp weight", "model.layers.0.mlp.gate_proj.weight", false, false},
+	}
+	for _, c := range cases {
+		gotRouted, gotShared := isRoutedExpertWeight(c.weight), isSharedExpertWeight(c.weight)
+		if gotRouted != c.wantRouted {
+			t.Errorf("%s: isRoutedExpertWeight(%q) = %v, want %v", c.desc, c.weight, gotRouted, c.wantRouted)
+		}
+		if gotShared != c.wantShared {
+			t.Errorf("%s: isSharedExpertWeight(%q) = %v, want %v", c.desc, c.weight, gotShared, c.wantShared)
+		}
+		if gotRouted && gotShared {
+			t.Errorf("%s: %q classified as BOTH routed and shared — the classes must be disjoint", c.desc, c.weight)
+		}
+		if got, want := isExpertWeight(c.weight), gotRouted || gotShared; got != want {
+			t.Errorf("%s: isExpertWeight(%q) = %v, want OR of routed|shared = %v", c.desc, c.weight, got, want)
+		}
+	}
+	// The task's load-bearing assertion, stated directly: the router/gate weight is neither class.
+	if isRoutedExpertWeight(router) || isSharedExpertWeight(router) {
+		t.Fatalf("router weight %q must classify as neither routed nor shared (it stays on the device), got routed=%v shared=%v",
+			router, isRoutedExpertWeight(router), isSharedExpertWeight(router))
+	}
+}
+
 // recordingKernel is a matKernel that records every weight name routed to it and delegates the
 // arithmetic to an inner kernel unchanged. It makes WHICH names a splitKernel routes to host vs
 // device directly observable, independent of shapes or the author's bookkeeping.
