@@ -29,11 +29,16 @@ var actionVerbs = map[string]bool{
 func TestEveryRefusalLeadsWithAnAction(t *testing.T) {
 	for _, tc := range refusalContract {
 		t.Run(tc.site, func(t *testing.T) {
-			in := spineInput()
-			tc.mutate(&in)
-			_, err := Build(in)
+			var err error
+			if tc.drive != nil {
+				err = tc.drive(t)
+			} else {
+				in := spineInput()
+				tc.mutate(&in)
+				_, err = Build(in)
+			}
 			if err == nil {
-				t.Fatalf("Build accepted the %s input, want a refusal", tc.site)
+				t.Fatalf("the %s input was accepted, want a refusal", tc.site)
 			}
 			msg := err.Error()
 			idx := strings.Index(msg, "—")

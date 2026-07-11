@@ -21,10 +21,12 @@ import (
 
 // refusalContract has exactly one row per refusef call site in the package:
 // the input that trips it, and the substrings proving the message states the
-// violated requirement AND the recovery that clears it.
+// violated requirement AND the recovery that clears it. Rows for refusals
+// outside Build set drive instead of mutate.
 var refusalContract = []struct {
 	site   string
 	mutate func(*Input)
+	drive  func(t *testing.T) error
 	want   []string
 }{
 	{
@@ -60,6 +62,21 @@ var refusalContract = []struct {
 		mutate: func(in *Input) { in.Leaf = "issue fanout" },
 		want:   []string{"fails the issue contract", "fix the input field it names"},
 	},
+	{
+		site: "live filing without a runner",
+		drive: func(t *testing.T) error {
+			plan, err := Build(spineInput())
+			if err != nil {
+				t.Fatalf("Build(spineInput()): %v", err)
+			}
+			res, err := FileLive(plan, nil, LiveOptions{})
+			if !reflect.DeepEqual(res, LiveResult{}) {
+				t.Fatalf("a refused FileLive leaked a partial result: %+v", res)
+			}
+			return err
+		},
+		want: []string{"needs a gh Runner", "set LiveOptions.Runner"},
+	},
 }
 
 // TestBuildRefusalNamesRecovery drives each refusal site and asserts the full
@@ -68,17 +85,23 @@ var refusalContract = []struct {
 func TestBuildRefusalNamesRecovery(t *testing.T) {
 	for _, tc := range refusalContract {
 		t.Run(tc.site, func(t *testing.T) {
-			in := spineInput()
-			tc.mutate(&in)
-			plan, err := Build(in)
+			var err error
+			if tc.drive != nil {
+				err = tc.drive(t)
+			} else {
+				in := spineInput()
+				tc.mutate(&in)
+				var plan Plan
+				plan, err = Build(in)
+				if err != nil && !reflect.DeepEqual(plan, Plan{}) {
+					t.Fatalf("a refused Build leaked a partial plan: %+v", plan)
+				}
+			}
 			if err == nil {
-				t.Fatalf("Build accepted the %s input, want a refusal", tc.site)
+				t.Fatalf("the %s input was accepted, want a refusal", tc.site)
 			}
 			if got := ClassifyOutcome(err); got != OutcomeRefused {
 				t.Fatalf("refusal classified as %q, want %q (a contract rejection must be a *Refusal)", got, OutcomeRefused)
-			}
-			if !reflect.DeepEqual(plan, Plan{}) {
-				t.Fatalf("a refused Build leaked a partial plan: %+v", plan)
 			}
 			for _, want := range tc.want {
 				if !strings.Contains(err.Error(), want) {
