@@ -31,6 +31,10 @@ func runCron(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "emit":
 		return runCronEmit(stdout, stderr, argv[1:])
+	case "fire":
+		return runCronFire(stdout, stderr, argv[1:])
+	case "audit":
+		return runCronAudit(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		cronUsage(stdout)
 		return 0
@@ -309,6 +313,16 @@ func cronUsage(w io.Writer) {
   fak cron emit --target launchd|systemd|taskscheduler [--loop ID | <job>]
                 [--command 'CMD ARG...'] [--interval DUR] [--fak-bin PATH]
                 [--label NAME] [--ledger FILE] [-- TICK-CMD ARG...]
+
+  fak cron fire  --job ID --ledger FILE [--interval DUR] [--at RFC3339] [--slot KEY]
+  fak cron audit --ledger FILE [--job ID] [--json]
+
+Fire is the FIRE WITNESS (#2886): it records each fire in the ledger under a
+(job, slot) compare-and-set guarded by a dup-tick lock, so a duplicate or
+overlapping tick for an already-fired slot is recorded as a `+"`deduped`"+` event
+instead of double-delivering. Exit 0 = fired (run the job), 3 = deduped (skip) —
+so `+"`fak cron fire ... && <run job>`"+` delivers at most once. Audit rolls the
+ledger up per job into fired / missed / deduped counts (--json for machine read).
 
 Emit renders ONE OS scheduler unit. By default its command is `+"`fak loop run --loop <id> ...`"+`
 — fak owns the semantics (overlap-lock via the ledger, missed-run policy) and the OS
