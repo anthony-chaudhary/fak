@@ -135,6 +135,11 @@ func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok boo
 	if headPkgs := commitBuildCheckExistingPackages(headDir, pkgs); len(headPkgs) > 0 {
 		if headDetail, headOK := goBuildPackages(headDir, headPkgs); !headOK && !commitBuildCheckOnlyUnbuildable(headDetail) {
 			fmt.Fprint(stderr, formatPreexistingRedAdvisory(headDetail))
+			// Best-effort fleet witness: fold this per-clone shrug onto a shared class so the
+			// fleet converges on ONE break instead of each clone re-discovering it. Fail-open —
+			// the commit is already admitted; recording never changes that.
+			w := emitTrunkRedWitness(stderr, "commit", headSHA, failingPackagesFromBuild(headDetail), extractUndefinedSymbol(headDetail))
+			fmt.Fprint(stderr, trunkRedWitnessNote(w))
 			return true, "", ""
 		}
 	}

@@ -247,6 +247,14 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		renderPrePushBuild(stdout, res)
 	}
+	// Best-effort fleet witness for a pre-existing trunk red this push was admitted over
+	// (#3618 TRUNK_ALREADY_RED): fold this clone onto the shared class so `fak trunk-red`
+	// shows the whole fleet stuck on ONE break instead of each clone re-discovering it. To
+	// stderr so --json stdout stays pure; fail-open, never changes the push decision.
+	if res.Verdict == "TRUNK_ALREADY_RED" {
+		w := emitTrunkRedWitness(stderr, "pre-push", res.BaseSha, res.PreExistingRed, extractUndefinedSymbol(res.Detail))
+		fmt.Fprint(stderr, trunkRedWitnessNote(w))
+	}
 	if *report != "" {
 		if err := writeIndentedJSONFile(*report, res); err != nil {
 			fmt.Fprintf(stderr, "fak hooks pre-push: write report: %v\n", err)
