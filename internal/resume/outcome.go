@@ -150,7 +150,7 @@ func (a Attempt) IsLaunch() bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(a.Phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated", "rearm":
+	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated", "rearm", "trajectory_decision":
 		return false
 	default:
 		return true

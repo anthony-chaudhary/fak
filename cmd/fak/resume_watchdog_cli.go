@@ -55,6 +55,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/resume/rehome"
 	"github.com/anthony-chaudhary/fak/internal/resumebackoff"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -219,6 +220,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	resumemetrics.Tick()
 	progressRecorded := map[string]bool{}
 	procScan := &rwProcScan{}
+	traceByUUID := rwLoadIdentity(regDir)
 	for _, p := range plan {
 		if launched >= *maxPerTick {
 			note("  per-tick cap reached (%d)", *maxPerTick)
@@ -241,6 +243,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		// Outcome-aware once-gate input: how did the LAST attempt actually end, per the
 		// transcript's own terminal turn (ground truth, never the launcher's ledger row)?
 		hist := history[p.Session]
+		if handled, decision := rwApplyTrajectoryWatchdog(p, hist, procScan, traceByUUID, ledgerPath, *live); handled {
+			note("  %s %s - %s", decision.Action, sid8, decision.Reason)
+			continue
+		}
 		progress := rwReadResumeProgress(home, p.Session, hist)
 		outcome := progress.Outcome
 		// A child may die before writing a terminal transcript event. Its stderr is
@@ -566,6 +572,37 @@ func rwRecordResumeProgress(ledgerPath, mode, sid string, progress rwResumeProgr
 	// Live twin of the ledger's "progress" row: a resume proven to have produced a real
 	// post-launch turn, counted at the moment it is witnessed (#3803).
 	resumemetrics.ProgressWitnessed()
+}
+
+func rwApplyTrajectoryWatchdog(p resume.WatchdogPlanRow, hist []resume.Attempt, scan *rwProcScan, traceByUUID map[string]string, ledgerPath string, live bool) (bool, resume.TrajectoryWatchdogDecision) {
+	anchor := rwResumeAnchor(p.Session)
+	if !anchor.Present || anchor.Curve == nil {
+		return false, resume.TrajectoryWatchdogDecision{}
+	}
+	alive, known := scan.sessionLive(p.Session)
+	if !known {
+		return false, resume.TrajectoryWatchdogDecision{}
+	}
+	nudged := false
+	for _, a := range hist {
+		if strings.EqualFold(strings.TrimSpace(a.Action), "trajectory_nudge") {
+			nudged = true
+		}
+	}
+	decision := resume.DecideTrajectoryWatchdog(resume.TrajectoryWatchdogInput{Alive: alive, Signal: anchor.Curve.Signal, NudgeAttempted: nudged})
+	if decision.Action == resume.TrajectoryReviveAnchor {
+		return false, decision
+	}
+	if decision.Action == resume.TrajectoryNudge && live {
+		trace := traceByUUID[p.Session]
+		ref := sessionctl.EnqueueRedirect(trace, sessionctl.Redirect{ObjectiveID: anchor.ObjectiveID, Goal: anchor.Objective, Witness: anchor.Curve.Detail})
+		row := map[string]any{"ts": rwNowISO(), "session": p.Session, "phase": "trajectory_decision", "action": "trajectory_nudge", "decision": decision, "resume_anchor": anchor, "trace": trace}
+		if ref != nil {
+			row["refusal"] = ref.Error()
+		}
+		rwAppendLedger(ledgerPath, row)
+	}
+	return true, decision
 }
 
 func rwHasProgressWitness(events []resume.WatchdogStatusEvent, sid string, afterUnix int64) bool {

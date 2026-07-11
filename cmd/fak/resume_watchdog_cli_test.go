@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 // The load-bearing watchdog-tick facts these pin (from tools/fleet_resume_watchdog.py):
@@ -1075,5 +1077,40 @@ func TestRwResumeArgvPrependsFreshAnchor(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %s", want, prompt)
 		}
+	}
+}
+
+func TestRwApplyTrajectoryWatchdogNudgesAliveStall(t *testing.T) {
+	const sid, trace = "traj-sid", "traj-trace"
+	oldAnchor, oldProcs := rwResumeAnchor, rwCollectProcCmdlines
+	curve := trajctl.ObjectiveCurve{ObjectiveID: "issue-2559", Signal: trajctl.SignalStall, Latest: .4, Detail: "flat witnessed progress"}
+	rwResumeAnchor = func(string) resume.ResumeAnchor {
+		return resume.ResumeAnchor{Schema: resume.ResumeAnchorSchema, Session: sid, ObjectiveID: curve.ObjectiveID, Objective: "recover trajectory", Curve: &curve, Present: true}
+	}
+	rwCollectProcCmdlines = func() ([]string, bool) { return []string{"claude --resume " + sid}, true }
+	t.Cleanup(func() { rwResumeAnchor, rwCollectProcCmdlines = oldAnchor, oldProcs; sessionctl.ClearObjective(trace) })
+	ledger := filepath.Join(t.TempDir(), "resume.jsonl")
+	handled, got := rwApplyTrajectoryWatchdog(resume.WatchdogPlanRow{Session: sid}, nil, &rwProcScan{}, map[string]string{sid: trace}, ledger, true)
+	if !handled || got.Action != resume.TrajectoryNudge || sessionctl.RedirectPendingLen(trace) != 1 {
+		t.Fatalf("handled=%v decision=%+v pending=%d", handled, got, sessionctl.RedirectPendingLen(trace))
+	}
+	raw, err := os.ReadFile(ledger)
+	if err != nil || !strings.Contains(string(raw), "trajectory_nudge") || !strings.Contains(string(raw), "issue-2559") {
+		t.Fatalf("ledger=%q err=%v", raw, err)
+	}
+}
+
+func TestRwApplyTrajectoryWatchdogDeadFallsThroughToRevive(t *testing.T) {
+	const sid = "dead-sid"
+	oldAnchor, oldProcs := rwResumeAnchor, rwCollectProcCmdlines
+	curve := trajctl.ObjectiveCurve{ObjectiveID: "issue-2559", Signal: trajctl.SignalStall}
+	rwResumeAnchor = func(string) resume.ResumeAnchor {
+		return resume.ResumeAnchor{Session: sid, ObjectiveID: curve.ObjectiveID, Objective: "recover", Curve: &curve, Present: true}
+	}
+	rwCollectProcCmdlines = func() ([]string, bool) { return nil, true }
+	t.Cleanup(func() { rwResumeAnchor, rwCollectProcCmdlines = oldAnchor, oldProcs })
+	handled, got := rwApplyTrajectoryWatchdog(resume.WatchdogPlanRow{Session: sid}, nil, &rwProcScan{}, nil, filepath.Join(t.TempDir(), "resume.jsonl"), true)
+	if handled || got.Action != resume.TrajectoryReviveAnchor {
+		t.Fatalf("handled=%v decision=%+v, want fallthrough revive", handled, got)
 	}
 }

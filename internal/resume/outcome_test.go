@@ -415,3 +415,9 @@ func TestCancelledRelaunchClassification(t *testing.T) {
 		t.Errorf("FoldResumeState(cancelled) = %q, want %q", got, ResumeGaveUp)
 	}
 }
+
+func TestTrajectoryDecisionDoesNotBurnResumeAttempt(t *testing.T) {
+	if (Attempt{Phase: "trajectory_decision", Action: "trajectory_nudge"}).IsLaunch() {
+		t.Fatal("trajectory nudge bookkeeping must not consume a revive attempt")
+	}
+}
