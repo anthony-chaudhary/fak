@@ -420,7 +420,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	}
 	var in codexLoopHookInput
 	if err := json.NewDecoder(io.LimitReader(stdin, 1<<20)).Decode(&in); err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: unreadable hook payload (allowing turn): %v\n", err)
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: unreadable hook payload (allowing turn; recovery: relaunch with `fak codex` or inspect the Codex hook payload): %v\n", err)
 		return 0
 	}
 	sessionID := codexLoopFirstNonEmpty(in.SessionID, in.ThreadID, in.ConversationID, os.Getenv("CODEX_THREAD_ID"))
@@ -431,18 +431,18 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		return 0
 	}
 	if sessionID == "" {
-		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload and CODEX_THREAD_ID have no session identifier (allowing turn)")
+		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload and CODEX_THREAD_ID have no session identifier (allowing turn; recovery: relaunch with `fak codex` or set CODEX_THREAD_ID)")
 		return 0
 	}
 
 	resolved, err := resolveCodexLoopSessionPath(*codexHome, sessionID, "")
 	if err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: %v (allowing turn)\n", err)
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: %v (allowing turn; recovery: verify --codex-home/CODEX_HOME and relaunch with `fak codex`)\n", err)
 		return 0
 	}
 	fh, err := os.Open(resolved)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: open %s: %v (allowing turn)\n", resolved, err)
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: open %s: %v (allowing turn; recovery: verify the transcript is readable and relaunch with `fak codex`)\n", resolved, err)
 		return 0
 	}
 	// Snapshot and close before diagnosis. An injected/slow/panicking diagnose path
@@ -451,7 +451,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, sessionID)
 	closeErr := fh.Close()
 	if diagnoseErr != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn)\n", diagnoseErr)
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn; recovery: inspect the rollout JSONL and relaunch with `fak codex`)\n", diagnoseErr)
 		return 0
 	}
 	if closeErr != nil {
@@ -467,7 +467,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		" or `fak guard -- codex`. For an intentional direct session, pass `--allow-direct`" +
 		" to the hook or " + codexLoopHookOverrideInstruction() + " and resubmit."
 	if err := json.NewEncoder(stdout).Encode(codexLoopHookBlock{Decision: "block", Reason: reason}); err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode block: %v\n", err)
+		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode block: %v (turn not blocked; recovery: relaunch with `fak codex`)\n", err)
 		return 1
 	}
 	if err := appendCodexLoopHookBlockWitness(os.Getenv(codexLoopHookAuditJournalEnv), codexLoopHookBlockWitness{
