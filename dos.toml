@@ -1171,6 +1171,7 @@ see_also = ["internal/dispatchtick/preflight_focus.go", "internal/focusscore/foc
 # gives the ladder's existing fail-closed tail a checkable name.
 
 [reasons.OBJECTIVE_SCORER_MISSING]
+category = "input"
 summary = "A dispatch objective has no attached witnessed scorer."
 fix = "Add a non-empty Witness section to the issue contract that names the independent progress evidence, then dispatch again."
 
