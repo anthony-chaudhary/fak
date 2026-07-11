@@ -96,3 +96,28 @@ func TestOutputNegationSampleRate(t *testing.T) {
 		}
 	}
 }
+
+// TestOutputNegframeWiredIntoRenderMetrics is the #4248 wiring witness: the
+// process-wide outputNegframeAudit singleton is actually folded into the live
+// Server.renderMetrics() surface (metrics_render.go), not merely callable in
+// isolation. The pre-existing tests above exercise the type on a local instance,
+// so a refactor that dropped the outputNegframeAudit.writeMetrics(&b) call from
+// renderMetrics would compile and silently delete the family without reddening a
+// test. This test fails on exactly that "incorrectly wired" regression -- the
+// failure mode the issue's undefined-symbol build break was one instance of. The
+// family is always-armed (observe-only, default-off), so a fresh server declares
+// it at 0 rather than withholding it until a first event.
+func TestOutputNegframeWiredIntoRenderMetrics(t *testing.T) {
+	srv := newTestServer(t)
+	out := srv.renderMetrics()
+	for _, want := range []string{
+		"# TYPE fak_negframe_output_negatives_total counter",
+		`fak_negframe_output_negatives_total{surface="model_output"} 0`,
+		"# TYPE fak_negframe_output_scanned_total counter",
+		`fak_negframe_output_scanned_total{surface="model_output"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("negframe output family not wired into live /metrics render (missing %q):\n%s", want, out)
+		}
+	}
+}
