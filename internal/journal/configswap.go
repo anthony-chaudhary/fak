@@ -65,12 +65,12 @@ const (
 // of one capability-floor / route-manifest hot-swap tied together in a single
 // value, instead of a stderr line the auditor cannot query after the fact.
 type ConfigSwapRow struct {
-	Schema  string `json:"schema"`            // ConfigSwapSchema
-	Kind    string `json:"kind"`              // ConfigSwapFloor | ConfigSwapRoute
-	Source  string `json:"source,omitempty"`  // the manifest path that was (re)installed
-	Digest  string `json:"digest,omitempty"`  // sha256 of the installed bytes ("" when unreadable)
-	Outcome string `json:"outcome"`           // ConfigSwapOK | ConfigSwapRejected
-	Reason  string `json:"reason,omitempty"`  // rejection detail (error text); "" on ok
+	Schema  string `json:"schema"`           // ConfigSwapSchema
+	Kind    string `json:"kind"`             // ConfigSwapFloor | ConfigSwapRoute
+	Source  string `json:"source,omitempty"` // the manifest path that was (re)installed
+	Digest  string `json:"digest,omitempty"` // sha256 of the installed bytes ("" when unreadable)
+	Outcome string `json:"outcome"`          // ConfigSwapOK | ConfigSwapRejected
+	Reason  string `json:"reason,omitempty"` // rejection detail (error text); "" on ok
 }
 
 // AppendConfigSwap records one capability-floor or route-manifest hot-swap as a

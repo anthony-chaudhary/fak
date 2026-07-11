@@ -16,6 +16,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -36,6 +38,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -972,6 +975,12 @@ func reloadPolicy(path string) (policy.Runtime, error) {
 	}
 	rt, err := policy.LoadRuntime(path)
 	if err != nil {
+		// A rejected floor swap is exactly what an auditor asks about (an operator
+		// trying to widen or break the capability floor with a malformed edit), so
+		// record the refused attempt — with the digest of whatever bytes we could
+		// read — before returning. journal.Active() is nil on an unjournaled run and
+		// AppendConfigSwap no-ops, keeping that run byte-identical.
+		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapRejected, err.Error())
 		return policy.Runtime{}, err
 	}
 	// Re-apply the operator allow overlay on hot-reload so a `--policy` swap never
@@ -985,7 +994,25 @@ func reloadPolicy(path string) (policy.Runtime, error) {
 	rt = protectGuardPolicyConfig(rt, overlayPath, path)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
+	// Record the now-live capability floor as a durable CONFIG_SWAP row (#3959): the
+	// security boundary just changed, so an auditor must be able to see which bytes
+	// (source path + sha256) became authoritative and when.
+	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapOK, "")
 	return rt, nil
+}
+
+// configFileDigest returns the sha256 (as "sha256:<hex>") of a config manifest's
+// bytes, for the over-which-bytes field of a CONFIG_SWAP audit row. It reads the
+// file fresh — the swap installs whatever is on disk now — and yields "" on an
+// unreadable file, so a rejected swap still records the attempt, just without a
+// digest.
+func configFileDigest(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func policyReloader(path string) gateway.PolicyReloadFunc {

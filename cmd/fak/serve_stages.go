@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -476,10 +477,17 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		watcher := modelroute.NewWatcher(*sf.routeManifest, live, 0, func(ev modelroute.ReloadEvent) {
 			if ev.Err != nil {
 				fmt.Fprintf(os.Stderr, "fak: route-manifest reload REJECTED: %v\n", ev.Err)
+				// A rejected route swap kept last-good, but the refused edit is exactly what
+				// an auditor asks about (#3959): record it with the digest of the malformed
+				// bytes on disk. Nil journal → no-op, unjournaled serve stays byte-identical.
+				journal.Active().AppendConfigSwap(journal.ConfigSwapRoute, ev.Path, configFileDigest(ev.Path), journal.ConfigSwapRejected, ev.Err.Error())
 				return
 			}
 			if ev.Reloaded {
 				fmt.Fprintf(os.Stderr, "fak: model-routing policy hot-reloaded from %s (reload #%d)\n", *sf.routeManifest, ev.Reloads)
+				// The live model-routing boundary just changed: record which bytes became
+				// authoritative (source path + sha256) as a durable CONFIG_SWAP row (#3959).
+				journal.Active().AppendConfigSwap(journal.ConfigSwapRoute, ev.Path, configFileDigest(ev.Path), journal.ConfigSwapOK, "")
 			}
 		})
 		go func() { _ = watcher.Run(ctx) }()
