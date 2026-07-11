@@ -98,9 +98,11 @@ type codexLoopRecentReport struct {
 }
 
 type codexLoopHookInput struct {
-	SessionID     string `json:"session_id"`
-	HookEventName string `json:"hook_event_name"`
-	TurnID        string `json:"turn_id"`
+	SessionID      string `json:"session_id"`
+	ThreadID       string `json:"thread_id"`
+	ConversationID string `json:"conversation_id"`
+	HookEventName  string `json:"hook_event_name"`
+	TurnID         string `json:"turn_id"`
 }
 
 type codexLoopHookBlock struct {
@@ -331,6 +333,15 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 	}
 }
 
+func codexLoopFirstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func codexLoopHookOverrideInstruction() string {
 	if runtime.GOOS == "windows" {
 		return "set `$env:" + codexLoopHookOverrideEnv + "=1` in PowerShell"
@@ -368,12 +379,13 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: unreadable hook payload (allowing turn): %v\n", err)
 		return 0
 	}
-	if strings.TrimSpace(in.SessionID) == "" {
-		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload has no session_id (allowing turn)")
+	sessionID := codexLoopFirstNonEmpty(in.SessionID, in.ThreadID, in.ConversationID, os.Getenv("CODEX_THREAD_ID"))
+	if sessionID == "" {
+		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload and CODEX_THREAD_ID have no session identifier (allowing turn)")
 		return 0
 	}
 
-	resolved, err := resolveCodexLoopSessionPath(*codexHome, in.SessionID, "")
+	resolved, err := resolveCodexLoopSessionPath(*codexHome, sessionID, "")
 	if err != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: %v (allowing turn)\n", err)
 		return 0

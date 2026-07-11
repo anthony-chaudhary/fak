@@ -84,6 +84,38 @@ func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 // — even when the session's own model_provider would otherwise be diagnosed unguarded and
 // blocked (contrast TestCodexLoopHookBlocksActiveDirectContinuation with the same fixture).
 // This keeps the per-turn hook off the growing session file on the guarded dogfood path.
+func TestCodexLoopHookSessionIdentifierAliases(t *testing.T) {
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "")
+	for _, tc := range []struct {
+		name    string
+		payload func(string) string
+		setEnv  bool
+	}{
+		{name: "ThreadId", payload: func(id string) string { return `{"thread_id":"` + id + `"}` }},
+		{name: "ConversationId", payload: func(id string) string { return `{"conversation_id":"` + id + `"}` }},
+		{name: "EnvFallback", setEnv: true, payload: func(string) string { return `{}` }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, sessionID := writeCodexHookSession(t, "openai")
+			if tc.setEnv {
+				t.Setenv("CODEX_THREAD_ID", sessionID)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(tc.payload(sessionID)), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+				t.Fatalf("hook exit = %d; stderr=%s", code, stderr.String())
+			}
+			var got codexLoopHookBlock
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("decode block: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+			}
+			if got.Decision != "block" || !strings.Contains(got.Reason, "model_provider=openai") {
+				t.Fatalf("unexpected block: %+v", got)
+			}
+		})
+	}
+}
+
 func TestCodexLoopHookGuardedMarkerSkipsReparse(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "") // no explicit direct override in play
 	t.Setenv(guardActiveEnv, "1")          // as if spawned by `fak guard`
