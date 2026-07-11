@@ -210,3 +210,46 @@ func TestDisambiguationTermsIncludePerformanceLens(t *testing.T) {
 		t.Errorf("performance terms should not imply market adoption:\n%s", s)
 	}
 }
+
+func TestLocalizedTermsRouteEveryI18nEntryPoint(t *testing.T) {
+	// Every shipped in-language entry point must be reachable from the AEO
+	// localized roster, and at least one localized term per language must route
+	// into that language's own docs/i18n/<code>/ page. This is the honest fence:
+	// a localized term is a routing hook to a real in-language page, never a
+	// free-floating adoption claim. Asserting the routing target (not the native
+	// string) keeps the test stable as the search phrasings are retuned.
+	wantEntry := map[string]string{
+		"hi":      "docs/i18n/hi/",
+		"zh-Hans": "docs/i18n/zh/",
+		"de":      "docs/i18n/de/",
+		"fr":      "docs/i18n/fr/",
+		"bn":      "docs/i18n/bn/",
+		"mr":      "docs/i18n/mr/",
+		"ta":      "docs/i18n/ta/",
+		"te":      "docs/i18n/te/",
+		"es":      "docs/i18n/es/",
+		"ja":      "docs/i18n/ja/",
+	}
+	routed := map[string]bool{}
+	for _, term := range AEODisambiguationTerms() {
+		if term.Category != "localized" {
+			continue
+		}
+		// Completeness: a localized term with no name, English roster
+		// description, or keywords is not a usable routing hook.
+		if term.Name == "" || term.Description == "" || len(term.Keywords) == 0 {
+			t.Errorf("localized term %q (lang %s) is missing name/description/keywords", term.Name, term.Language)
+		}
+		if term.URL == "" {
+			t.Errorf("localized term %q (lang %s) has no routing URL", term.Name, term.Language)
+		}
+		if frag, ok := wantEntry[term.Language]; ok && strings.Contains(term.URL, frag) {
+			routed[term.Language] = true
+		}
+	}
+	for lang, frag := range wantEntry {
+		if !routed[lang] {
+			t.Errorf("no localized term routes %s to its %s entry point", lang, frag)
+		}
+	}
+}
