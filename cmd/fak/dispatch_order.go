@@ -70,6 +70,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchTick(stdout, stderr, argv[1:])
 	case "wave":
 		return runDispatchWave(stdout, stderr, argv[1:])
+	case "worktree-ab":
+		return runDispatchWorktreeAB(stdout, stderr, argv[1:])
 	case "sweep":
 		return runDispatchSweep(stdout, stderr, argv[1:])
 	case "progress":
@@ -286,6 +288,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
   fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
+  fak dispatch worktree-ab [--in two-arm.json] [--json]
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch status [--runs-dir DIR] [--json | --markdown]
