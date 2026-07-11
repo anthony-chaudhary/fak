@@ -5858,6 +5858,33 @@ def tick_exit_code(payload: dict[str, Any]) -> int:
     return 1
 
 
+def _emit_low_yield_excludes(root: Path) -> int:
+    """Emit the #2062 low-yield soft-exclude lane set as JSON (read-only) and exit.
+
+    The live Go dispatch launcher (``fak dispatch wave`` / ``fak dispatch tick``)
+    shells out for this so the SAME trust-gated fold that soft-demotes a poison-pill
+    lane inside this Python picker (see ``low_yield_soft_excludes`` and its call at the
+    ``evaluate`` busiest-pick) also steers the Go fleet launcher -- instead of the two
+    paths disagreeing, with the Go picker happily re-storming a lane the fold already
+    flagged as >=40 turns / 0 closes. Reuses the exact lane->tree taxonomy resolution
+    the picker uses. Fail-open throughout: any error yields an empty exclude set and a
+    zero exit, so a caller that shells out for it is never starved by this probe.
+    """
+    runs_dir = root / RUNS_DIRNAME
+    try:
+        _concurrent, low_yield_trees = issue_lane_router.lane_taxonomy(root)
+    except Exception:
+        low_yield_trees = {}
+    low_yield = low_yield_soft_excludes(root, runs_dir, lane_trees=low_yield_trees)
+    payload = {
+        "exclude": sorted(str(x) for x in (low_yield.get("exclude") or set())),
+        "lanes": low_yield.get("lanes") or [],
+        "flagged": low_yield.get("flagged") or [],
+    }
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="One guarded tick that spawns an issue-RESOLUTION worker (dry-run by default).")
@@ -5966,9 +5993,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-loop-ledger", action="store_true",
                     help="disable loop-ledger append for this tick")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--low-yield-excludes", action="store_true",
+                    help="emit the #2062 low-yield soft-exclude lane set as JSON and "
+                         "exit (read-only; consumed by the Go dispatch wave/tick picker)")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    if args.low_yield_excludes:
+        return _emit_low_yield_excludes(root)
     if args.issue is not None and not args.lane:
         ap.error("--issue requires --lane so the lane lease/tree matches the pinned issue")
     exclude_lanes = {s.strip() for s in args.exclude_lane.split(",") if s.strip()}
