@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -224,4 +228,67 @@ func liveLoad(r fleetaccounts.Account) int {
 		n = 0
 	}
 	return n
+}
+
+type accountsSeatDeficit struct {
+	Required     int    `json:"required"`
+	FreshCeiling int    `json:"fresh_ceiling"`
+	Shortfall    int    `json:"shortfall"`
+	Verdict      string `json:"verdict"`
+}
+
+type accountsHeadroomPayload struct {
+	Schema      string                    `json:"schema"`
+	Product     string                    `json:"product"`
+	Headroom    accounts.RotationHeadroom `json:"headroom"`
+	SeatDeficit accountsSeatDeficit       `json:"seat_deficit"`
+}
+
+func buildAccountsSeatDeficit(rows []fleetaccounts.Account, product string, required int) accountsSeatDeficit {
+	rep := fleetaccounts.BuildCapacityPreflight(rows, product, required)
+	shortfall := required - rep.TrueConcurrentCeiling
+	if shortfall < 0 {
+		shortfall = 0
+	}
+	return accountsSeatDeficit{Required: required, FreshCeiling: rep.TrueConcurrentCeiling, Shortfall: shortfall, Verdict: rep.Verdict}
+}
+
+func runAccountsHeadroom(stdout, stderr io.Writer, args []string) int {
+	product := "claude"
+	required := 0
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--product":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "fak accounts headroom: --product requires a value")
+				return 2
+			}
+			i++
+			product = args[i]
+		case "--required":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "fak accounts headroom: --required requires a value")
+				return 2
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				fmt.Fprintln(stderr, "fak accounts headroom: --required must be non-negative")
+				return 2
+			}
+			required = n
+		default:
+			fmt.Fprintf(stderr, "fak accounts headroom: unknown argument %q\n", args[i])
+			return 2
+		}
+	}
+	cwd, _ := os.Getwd()
+	paths := fleetaccounts.ResolvePaths(filepath.Join(findRepoRoot(cwd), "tools"))
+	rows := fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, fleetaccounts.LoadPolicy(paths), fleetaccounts.LoadRegistry(paths.RegistryPath))
+	payload := accountsHeadroomPayload{Schema: "fak.accounts-headroom.v1", Product: product, Headroom: headroomFromRoster(rows, time.Now().UTC()), SeatDeficit: buildAccountsSeatDeficit(rows, product, required)}
+	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
 }

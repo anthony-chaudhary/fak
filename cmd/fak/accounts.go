@@ -237,6 +237,9 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 }
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "headroom" {
+		return runAccountsHeadroom(stdout, stderr, argv[1:])
+	}
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "usage: fak accounts <add|enroll-current|remove|restore|backup|restore-credential|set-role|set-default|launch|next|rotation|rehome|list|status|cooldown|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
