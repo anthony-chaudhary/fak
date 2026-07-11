@@ -68,3 +68,56 @@ func TestPersistDispatchLaneQueuesCarriesScoredOrderAcrossProcess(t *testing.T) 
 		t.Fatalf("persisted queue=%+v ok=%v", q, ok)
 	}
 }
+
+func TestPickDispatchLaneConsumesPersistedExplicitLaneWithoutFetch(t *testing.T) {
+	root := t.TempDir()
+	oldView := dispatchTickView
+	dispatchTickView = ""
+	t.Cleanup(func() { dispatchTickView = oldView })
+	key := dispatchcache.Key(root, "", 1000)
+	if err := dispatchcache.WriteQueues(dispatchLaneQueuePath(root), key, map[string][]int{"docs": {42, 17}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	oldTax := dispatchLoadLaneTaxonomy
+	dispatchLoadLaneTaxonomy = func(string) (dispatchtick.LaneTaxonomy, error) {
+		return dispatchtick.LaneTaxonomy{Trees: map[string][]string{"docs": {"docs/**"}}}, nil
+	}
+	t.Cleanup(func() { dispatchLoadLaneTaxonomy = oldTax })
+	fetches := 0
+	stubDispatchIssueFetches(t, nil, func(string, int) ([]dispatchtick.Issue, error) { fetches++; return nil, nil })
+	pick, err := pickDispatchLane(root, io.Discard, "docs", nil, false, "", dispatchGoalProfileThroughput, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 0 {
+		t.Fatalf("full backlog fetches=%d, want 0", fetches)
+	}
+	if pick.Lane != "docs" || len(pick.Numbers) != 2 || pick.Numbers[0] != 42 || pick.Numbers[1] != 17 {
+		t.Fatalf("pick=%+v", pick)
+	}
+}
+
+func TestPickDispatchLaneFallsBackWhenPersistedQueueStale(t *testing.T) {
+	root := t.TempDir()
+	oldView := dispatchTickView
+	dispatchTickView = ""
+	t.Cleanup(func() { dispatchTickView = oldView })
+	key := dispatchcache.Key(root, "", 1000)
+	if err := dispatchcache.WriteQueues(dispatchLaneQueuePath(root), key, map[string][]int{"docs": {42}}, time.Now().Add(-dispatchLaneQueueTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[lanes]\ndocs = [\"docs/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fetches := 0
+	stubDispatchIssueFetches(t, nil, func(string, int) ([]dispatchtick.Issue, error) {
+		fetches++
+		return []dispatchtick.Issue{dispatchViewTestIssue(17)}, nil
+	})
+	if _, err := pickDispatchLane(root, io.Discard, "docs", nil, false, "", dispatchGoalProfileThroughput, 0); err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 1 {
+		t.Fatalf("fallback fetches=%d, want 1", fetches)
+	}
+}

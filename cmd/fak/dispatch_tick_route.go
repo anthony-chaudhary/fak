@@ -251,7 +251,41 @@ func dispatchLastIssueStatus(state string) string {
 	return strings.ToUpper(state)
 }
 
+func dispatchPersistedLanePick(root, lane string, now time.Time) (dispatchLanePick, bool) {
+	const issueLimit = 1000
+	key := dispatchcache.Key(root, dispatchTickView, issueLimit)
+	q, ok := dispatchcache.ReadQueues(dispatchLaneQueuePath(root), key, dispatchLaneQueueTTL, now)
+	if !ok || len(q.Lanes[lane]) == 0 {
+		return dispatchLanePick{}, false
+	}
+	tree := []string(nil)
+	if taxonomy, err := dispatchLoadLaneTaxonomy(root); err == nil {
+		tree = append(tree, taxonomy.Trees[lane]...)
+	}
+	if len(tree) == 0 {
+		tree = []string{fmt.Sprintf("internal/%s/**", lane)}
+	}
+	counts := make(map[string]int, len(q.Lanes))
+	for name, issues := range q.Lanes {
+		counts[name] = len(issues)
+	}
+	return dispatchLanePick{
+		Lane: lane, Numbers: append([]int(nil), q.Lanes[lane]...), Tree: tree,
+		ByLaneCount: counts, ByLaneStepBudget: counts, PathsByIssue: map[int][]string{},
+		IssueByNumber: map[int]dispatchIssueInfo{}, View: strings.TrimSpace(dispatchTickView),
+	}, true
+}
+
 func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation, goalProfile string, targetIssue int) (dispatchLanePick, error) {
+	// A lane-pinned tick can consume the scorer's durable lane ordering directly.
+	// It needs no whole-backlog regroup: live/cooldown filtering still happens in
+	// resolveDispatchTickPick after this return. Auto-pick and target routing retain
+	// the full router because they need cross-lane scores and per-issue scope.
+	if lane := strings.TrimSpace(explicit); lane != "" && targetIssue == 0 && !preferNewest && strings.TrimSpace(generation) == "" {
+		if pick, ok := dispatchPersistedLanePick(root, lane, time.Now()); ok {
+			return pick, nil
+		}
+	}
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		return dispatchLanePick{}, err
