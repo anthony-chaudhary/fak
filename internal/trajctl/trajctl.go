@@ -107,19 +107,21 @@ type ScoreRow struct {
 // Row is the append-only ledger envelope. Exactly one payload is set according to
 // Kind.
 type Row struct {
-	Schema    string         `json:"schema"`
-	Kind      string         `json:"kind"`
-	Objective *Objective     `json:"objective,omitempty"`
-	Score     *ScoreRow      `json:"score,omitempty"`
-	Steer     *SteerDecision `json:"steer,omitempty"`
+	Schema     string         `json:"schema"`
+	Kind       string         `json:"kind"`
+	Objective  *Objective     `json:"objective,omitempty"`
+	Score      *ScoreRow      `json:"score,omitempty"`
+	Steer      *SteerDecision `json:"steer,omitempty"`
+	Annotation *Annotation    `json:"annotation,omitempty"`
 }
 
 // State is the folded ledger: latest objective record by id, plus score and
 // steer-decision history in append order.
 type State struct {
-	Objectives map[string]Objective `json:"objectives"`
-	Scores     []ScoreRow           `json:"scores"`
-	Steers     []SteerDecision      `json:"steers,omitempty"`
+	Objectives  map[string]Objective `json:"objectives"`
+	Scores      []ScoreRow           `json:"scores"`
+	Annotations []Annotation         `json:"annotations,omitempty"`
+	Steers      []SteerDecision      `json:"steers,omitempty"`
 }
 
 // ObjectiveRecord builds a ledger row for an Objective.
@@ -185,6 +187,8 @@ func Fold(rows []Row) State {
 			st.Scores = append(st.Scores, *row.Score)
 		case KindSteer:
 			st.Steers = append(st.Steers, *row.Steer)
+		case KindAnnotation:
+			st.Annotations = append(st.Annotations, *row.Annotation)
 		}
 	}
 	return st
@@ -228,6 +232,14 @@ func Validate(row Row) error {
 			return errors.New("trajctl: score row must carry exactly one score")
 		}
 		return validateScore(*row.Score)
+	case KindAnnotation:
+		if row.Annotation == nil || row.Objective != nil || row.Score != nil || row.Steer != nil {
+			return errors.New("trajctl: annotation row must carry exactly one annotation")
+		}
+		if row.Annotation.ObjectiveID == "" || row.Annotation.Signal == "" {
+			return errors.New("trajctl: annotation objective and signal are required")
+		}
+		return nil
 	case KindSteer:
 		if row.Steer == nil || row.Objective != nil || row.Score != nil {
 			return errors.New("trajctl: steer row must carry exactly one steer decision")

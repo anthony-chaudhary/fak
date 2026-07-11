@@ -127,6 +127,15 @@ func guardTrajctlSampleBounded(stderr io.Writer, label, ledger string, nowMillis
 		win := trajctl.EvidenceWindow{PriorScores: st.Scores, UnixMillis: nowMillis}
 		sample := build(st, win)
 		n, err := trajctl.AppendSample(ledger, sample)
+		if err == nil {
+			post := trajctl.Fold(trajctl.ReadLedgerFile(ledger))
+			for _, annotation := range post.SignalAnnotations(nowMillis) {
+				if appendErr := trajctl.Append(ledger, annotation); appendErr != nil {
+					err = appendErr
+					break
+				}
+			}
+		}
 		done <- guardTrajctlSampleResult{rows: n, failures: sample.Failures, err: err}
 	}()
 	select {
@@ -290,4 +299,21 @@ func stampStepAdviceFailOpen(stderr io.Writer, sessionID, baseURL string) {
 			fmt.Fprintf(stderr, "fak guard: step-advice capture skipped (fail-open): %v\n", err)
 		}
 	}
+}
+
+// guardTrajectoryWarningLine is the advisory WARN rung. It reads the ledger and
+// reports the worst non-healthy open objective without interacting with the session.
+func guardTrajectoryWarningLine() string {
+	ledger := guardTrajctlLedgerConfigured()
+	if ledger == "" {
+		return ""
+	}
+	report := trajctl.Fold(trajctl.ReadLedgerFile(ledger)).OpenCurves()
+	for _, curve := range report.Objectives {
+		if curve.Signal == trajctl.SignalHealthy {
+			continue
+		}
+		return fmt.Sprintf("trajectory warning: objective %s - %s: %s\n", curve.ObjectiveID, curve.Signal, curve.Detail)
+	}
+	return ""
 }

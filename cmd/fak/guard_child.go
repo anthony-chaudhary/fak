@@ -1525,6 +1525,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// surface that count here (silence is not success). Best-effort, empty when
 		// nothing is outstanding.
 		emit(guardToolprocSummary(time.Now()))
+		emit(guardTrajectoryWarningLine())
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075) AND surface it.
 	// Persist both tracks, then — for a non-quiet (interactive) session — print the

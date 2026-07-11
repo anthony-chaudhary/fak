@@ -92,6 +92,7 @@ type ObjectiveCurve struct {
 	Delta       float64         `json:"delta"`
 	Detail      string          `json:"detail"`
 	Methods     []MethodCurve   `json:"methods"`
+	Annotations []Annotation    `json:"annotations,omitempty"`
 }
 
 // CurveReport is the schema-pinned envelope. For a single objective it holds one
@@ -209,6 +210,7 @@ func (s State) CurveFor(objectiveID string) (ObjectiveCurve, bool) {
 		Delta:       delta,
 		Detail:      detail,
 		Methods:     methods,
+		Annotations: annotationsFor(s.Annotations, obj.ID),
 	}, true
 }
 
