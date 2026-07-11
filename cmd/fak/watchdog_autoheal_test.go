@@ -39,6 +39,41 @@ func deadInstalledProbe(context.Context) (watchdogProbe, error) {
 	return watchdogProbe{Installed: true, Alive: false, Detail: "dead"}, nil
 }
 
+func TestWatchdogDiscoveryReadmitsExhaustedDiscoveredService(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	spec := watchdogAutohealSpec{watchdogService: watchdogService{ID: "still-discovered", Manager: "systemd", Unit: "still-discovered.timer"}}
+	st := watchdogHealState{
+		Schema: watchdogAutohealSchema, ID: spec.ID, Attempts: 3,
+		LastFailureUnixNano: now.Add(-time.Minute).UnixNano(), LastReason: watchdogReasonExhausted,
+	}
+	if err := writeWatchdogHealState(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	opts := watchdogAutohealOptions{
+		StateDir: dir, Specs: []watchdogAutohealSpec{spec}, Clock: func() time.Time { return now },
+		RestartPolicy: watchdogRestartPolicy{MaxAttempts: 3}, DiscoveryReconcile: 5 * time.Minute,
+	}
+	reconcileWatchdogDiscovery(opts)
+	got, err := readWatchdogHealState(dir, spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Attempts != 3 {
+		t.Fatalf("first reconcile attempts=%d, want exhausted mark retained", got.Attempts)
+	}
+
+	now = now.Add(5 * time.Minute)
+	reconcileWatchdogDiscovery(opts)
+	got, err = readWatchdogHealState(dir, spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Attempts != 0 || got.LastReason != "" || got.LastFailureUnixNano != 0 {
+		t.Fatalf("stable authoritative discovery did not readmit service: %+v", got)
+	}
+}
+
 func TestWatchdogHealSingleFlightDedupesConcurrentStarts(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	dir := t.TempDir()

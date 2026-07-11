@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -96,6 +99,9 @@ type watchdogAutohealOptions struct {
 	// latch give_up forever (the deadlock: exhausted -> never restarts -> never
 	// alive -> attempts never reset). Zero disables re-arm.
 	RestartReArm time.Duration
+	// DiscoveryReconcile resets soft exhaustion when the authoritative service
+	// inventory remains unchanged for this interval. Zero uses the default.
+	DiscoveryReconcile time.Duration
 }
 
 type watchdogAutohealResult struct {
@@ -414,6 +420,7 @@ func runWatchdogAutoheal(ctx context.Context, opts watchdogAutohealOptions) []wa
 	if opts.Mode == watchdogAutohealOff || len(opts.Specs) == 0 {
 		return nil
 	}
+	reconcileWatchdogDiscovery(opts)
 	results := make([]watchdogAutohealResult, len(opts.Specs))
 	// The specs are four cheap host-global probes. Run them serially: a guarded
 	// session wave must never multiply them into a cold PowerShell spawn storm.
@@ -424,6 +431,57 @@ func runWatchdogAutoheal(ctx context.Context, opts watchdogAutohealOptions) []wa
 		results[i] = r
 	}
 	return results
+}
+
+type watchdogDiscoveryState struct {
+	Fingerprint string `json:"fingerprint"`
+	StableSince int64  `json:"stable_since_unix_nano"`
+}
+
+// reconcileWatchdogDiscovery treats the configured service inventory as the
+// authoritative discovery source. Once unchanged for an interval, exhausted
+// marks are soft-evictions and are cleared for services that remain discovered.
+func reconcileWatchdogDiscovery(opts watchdogAutohealOptions) {
+	if opts.StateDir == "" || len(opts.Specs) == 0 || opts.DiscoveryReconcile <= 0 {
+		return
+	}
+	ids := make([]string, 0, len(opts.Specs))
+	evicted := make(map[string]bool, len(opts.Specs))
+	for _, spec := range opts.Specs {
+		ids = append(ids, spec.ID)
+		if st, err := readWatchdogHealState(opts.StateDir, spec.ID); err == nil &&
+			(st.LastReason == watchdogReasonExhausted || st.Attempts >= opts.RestartPolicy.MaxAttempts) {
+			evicted[spec.ID] = true
+		}
+	}
+	sort.Strings(ids)
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(ids, "\x00"))))
+	now := opts.Clock().UTC()
+	path := filepath.Join(opts.StateDir, "discovery.json")
+	var ds watchdogDiscoveryState
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &ds)
+	}
+	if ds.Fingerprint != fingerprint || ds.StableSince == 0 {
+		ds = watchdogDiscoveryState{Fingerprint: fingerprint, StableSince: now.UnixNano()}
+		_ = os.MkdirAll(opts.StateDir, 0o755)
+		if b, err := json.Marshal(ds); err == nil {
+			_ = os.WriteFile(path, append(b, '\n'), 0o644)
+		}
+		return
+	}
+	stable := now.Sub(time.Unix(0, ds.StableSince)) >= opts.DiscoveryReconcile
+	for _, id := range dispatchtick.ReconcileDiscovery(ids, evicted, stable).Readmitted {
+		st, err := readWatchdogHealState(opts.StateDir, id)
+		if err != nil {
+			continue
+		}
+		st.Attempts = 0
+		st.LastFailureUnixNano = 0
+		st.LastRestartUnixNano = 0
+		st.LastReason = ""
+		_ = writeWatchdogHealState(opts.StateDir, st)
+	}
 }
 
 func normalizeWatchdogAutohealOptions(opts watchdogAutohealOptions) watchdogAutohealOptions {
@@ -444,6 +502,12 @@ func normalizeWatchdogAutohealOptions(opts watchdogAutohealOptions) watchdogAuto
 	}
 	if opts.RestartPolicy.MaxAttempts == 0 {
 		opts.RestartPolicy = watchdogRestartPolicy{MaxAttempts: 3, BaseDelay: 250 * time.Millisecond, MaxDelay: 2 * time.Second}
+	}
+	if opts.RestartReArm <= 0 {
+		opts.RestartReArm = 30 * time.Minute
+	}
+	if opts.DiscoveryReconcile <= 0 {
+		opts.DiscoveryReconcile = 10 * time.Minute
 	}
 	return opts
 }
