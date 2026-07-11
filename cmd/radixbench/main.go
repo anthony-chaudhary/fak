@@ -45,16 +45,20 @@
 //	radixbench                                  # synthetic model (deterministic, no deps)
 //	radixbench -hf <snapshot> -lean             # live wall-clock on a real model
 //	radixbench -out experiments/radixattention/radixbench.json
+//	radixbench -budget-sweep -trace keys.trace  # captured key-trace -> hit-rate/$-vs-budget curve (#3397)
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -326,6 +330,186 @@ func maxReqLen(reqs [][]int) int {
 	return m
 }
 
+// ---- budget sweep (#3397): replay a CAPTURED key-trace across budgets -> savings curve ----
+
+// dollarsPerMTok prices the sweep's $-savings proxy: every matched (cache-hit) token is a
+// prompt token NOT recomputed, valued at this many dollars per MILLION tokens. The default
+// is a round frontier-model input-token list price; -price-per-mtok overrides it for your
+// own contract. The savings column is a PROJECTION (price x tokens saved), not a bill.
+var dollarsPerMTok = 3.0
+
+// SweepRow is one point on the savings-vs-budget curve: the captured trace replayed
+// through radixkv.New(BudgetTokens) — the same bounded replay radixMatched runs — read
+// for hit rate and the dollarsPerMTok savings proxy.
+type SweepRow struct {
+	BudgetTokens  int     `json:"budget_tokens"` // radixkv LRU budget in cached tokens; 0 = unbounded
+	TotalTokens   int     `json:"total_prompt_tokens"`
+	MatchedTokens int     `json:"matched_tokens"`
+	HitRate       float64 `json:"hit_rate"`
+	Evictions     int     `json:"evictions"`
+	SavingsUSD    float64 `json:"savings_usd_proxy"`
+}
+
+// sweepBudgets replays reqs through a FRESH bounded radix cache at each budget (in the
+// order given) and returns the per-budget row: matched tokens, hit rate = matched/total,
+// evictions, and the savings proxy. Pure accounting — no model, file, or network — so an
+// operator's savings-vs-budget curve is a function of (their trace, the matching
+// algorithm, the budget) only, exactly like the hit-rate headline above.
+func sweepBudgets(reqs [][]int, budgets []int) []SweepRow {
+	total := totalTokens(reqs)
+	rows := make([]SweepRow, 0, len(budgets))
+	for _, b := range budgets {
+		matched, evictions, _ := radixMatched(reqs, b)
+		rows = append(rows, SweepRow{
+			BudgetTokens: b, TotalTokens: total, MatchedTokens: matched,
+			HitRate: ratio(matched, total), Evictions: evictions,
+			SavingsUSD: float64(matched) / 1e6 * dollarsPerMTok,
+		})
+	}
+	return rows
+}
+
+// parseTrace reads a captured key-trace: one request per non-blank line, each line the
+// request's token/block ids as space-separated non-negative integers, in arrival order.
+// Lines whose first non-space character is '#' are comments; blank lines are skipped.
+// This is the operator export format — a REAL logged key side-stream (the shape
+// radixMatched consumes), not a synthetic workload.
+func parseTrace(r io.Reader) ([][]int, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024) // one request line can carry many thousands of ids
+	var reqs [][]int
+	line := 0
+	for sc.Scan() {
+		line++
+		text := strings.TrimSpace(sc.Text())
+		if text == "" || strings.HasPrefix(text, "#") {
+			continue
+		}
+		fields := strings.Fields(text)
+		req := make([]int, 0, len(fields))
+		for _, f := range fields {
+			id, err := strconv.Atoi(f)
+			if err != nil || id < 0 {
+				return nil, fmt.Errorf("trace line %d: %q is not a non-negative integer token id", line, f)
+			}
+			req = append(req, id)
+		}
+		reqs = append(reqs, req)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if len(reqs) == 0 {
+		return nil, fmt.Errorf("trace has no requests (every line blank or a # comment)")
+	}
+	return reqs, nil
+}
+
+// parseBudgets parses the -budgets flag: comma-separated non-negative token budgets
+// (0 = unbounded), swept in the order given.
+func parseBudgets(s string) ([]int, error) {
+	var out []int
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		b, err := strconv.Atoi(part)
+		if err != nil || b < 0 {
+			return nil, fmt.Errorf("-budgets: %q is not a non-negative token budget", part)
+		}
+		out = append(out, b)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("-budgets: no budgets given")
+	}
+	return out, nil
+}
+
+// defaultBudgetLadder is what -budget-sweep sweeps when -budgets is not given: anchored to
+// the trace's own shape via L = max request length (the same anchor the per-workload
+// bounded run uses for its single point, L + L/2), it climbs L/2, L, 3L/2, 2L, 4L, 8L and
+// finishes at 0 (unbounded) — the ceiling the curve converges to, so the flat region that
+// says "a bigger cache buys nothing more" is visible on every trace. Zero/duplicate rungs
+// (short traces) are dropped.
+func defaultBudgetLadder(reqs [][]int) []int {
+	l := maxReqLen(reqs)
+	seen := map[int]bool{}
+	var out []int
+	for _, b := range []int{l / 2, l, l + l/2, 2 * l, 4 * l, 8 * l} {
+		if b <= 0 || seen[b] {
+			continue
+		}
+		seen[b] = true
+		out = append(out, b)
+	}
+	return append(out, 0) // unbounded ceiling
+}
+
+// runBudgetSweep is the -budget-sweep mode (#3397): load the captured trace, pick the
+// budget ladder, replay, and emit the savings-vs-budget curve — human rows on stderr and
+// the JSON report to -out or stdout, the same output idiom as the workload run. Everything
+// here is wiring; the accounting lives in parseTrace + sweepBudgets.
+func runBudgetSweep(tracePath, budgetsCSV, outPath string) error {
+	f, err := os.Open(tracePath)
+	if err != nil {
+		return fmt.Errorf("trace open: %w", err)
+	}
+	defer f.Close()
+	reqs, err := parseTrace(f)
+	if err != nil {
+		return fmt.Errorf("trace parse: %w", err)
+	}
+	var budgets []int
+	if budgetsCSV != "" {
+		if budgets, err = parseBudgets(budgetsCSV); err != nil {
+			return err
+		}
+	} else {
+		budgets = defaultBudgetLadder(reqs)
+	}
+	rows := sweepBudgets(reqs, budgets)
+
+	fmt.Fprintf(os.Stderr, "budget-sweep: trace=%s requests=%d tokens=%d price=$%.2f/MTok\n",
+		tracePath, len(reqs), totalTokens(reqs), dollarsPerMTok)
+	for _, r := range rows {
+		label := strconv.Itoa(r.BudgetTokens)
+		if r.BudgetTokens == 0 {
+			label = "unbounded"
+		}
+		fmt.Fprintf(os.Stderr, "  budget %-10s | HIT RATE %5.1f%% | matched %d/%d | evictions %d | saved $%.6f\n",
+			label, 100*r.HitRate, r.MatchedTokens, r.TotalTokens, r.Evictions, r.SavingsUSD)
+	}
+
+	report := map[string]any{
+		"app_version": appversion.Current(),
+		"engine": "fak radixbench -budget-sweep — captured key-trace replayed through radixkv.New(budget) " +
+			"across a budget ladder (#3397, LMCache cache_simulator technique, clean-room)",
+		"trace":               tracePath,
+		"requests":            len(reqs),
+		"total_prompt_tokens": totalTokens(reqs),
+		"dollars_per_mtok":    dollarsPerMTok,
+		"budgets":             rows,
+		"notes": "hit_rate = matched/total prompt tokens at that LRU token budget (0 = unbounded); " +
+			"savings_usd_proxy = matched tokens x dollars_per_mtok / 1e6 — a PROJECTION of recompute avoided at " +
+			"the configured price, not a bill. Replay is arrival-order (FCFS) over the captured trace, so the " +
+			"curve reflects YOUR interleaving, not a synthetic shape.",
+	}
+	blob, _ := benchcli.MarshalReport(report)
+	if outPath != "" {
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "mkdir: %v\n", err)
+		}
+		if err := os.WriteFile(outPath, blob, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", outPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "wrote %s\n", outPath)
+	} else {
+		fmt.Println(string(blob))
+	}
+	return nil
+}
+
 // ---- live wall-clock (a real kernel prefill per request) ----
 
 func liveTiming(m *model.Model, quant bool, reqs [][]int, reps int) (baseMS, radixMS float64, liveMatched int) {
@@ -508,10 +692,30 @@ func main() {
 	workload := flag.String("workload", "", "comma-separated JSON workload files (each: {name,desc,sglang_published,requests:[[ids]...]}) to sweep INSTEAD of the synthetic shapes — your OWN prompt set (#322)")
 	scale := flag.Int("scale", 1, "token-size multiplier for the workloads (1 = quick synthetic; larger for real models)")
 	out := flag.String("out", "", "write JSON report here (default stdout)")
+	budgetSweep := flag.Bool("budget-sweep", false, "replay -trace across a budget ladder and PROJECT hit-rate + $-savings per budget INSTEAD of running the workload benchmark (#3397)")
+	trace := flag.String("trace", "", "captured key-trace file for -budget-sweep: one request per line, space-separated non-negative integer token/block ids; # comments and blank lines skipped")
+	budgets := flag.String("budgets", "", "comma-separated radixkv token budgets to sweep (0 = unbounded); implies -budget-sweep; default = a ladder anchored to the trace's max request length (L/2,L,3L/2,2L,4L,8L,unbounded)")
+	price := flag.Float64("price-per-mtok", dollarsPerMTok, "dollars per million prompt tokens for the sweep's $-savings proxy")
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*dir = pathutil.ExpandTilde(*dir)
 	*hf = pathutil.ExpandTilde(*hf)
+	*trace = pathutil.ExpandTilde(*trace)
+
+	// -budget-sweep (or its implying flags) is a pure-accounting mode over a CAPTURED
+	// trace: no model, no live arm — parse, sweep, report, done.
+	if *budgetSweep || *trace != "" || *budgets != "" {
+		dollarsPerMTok = *price
+		if *trace == "" {
+			fmt.Fprintln(os.Stderr, "budget-sweep: -trace <file> is required (the captured key-trace to replay)")
+			os.Exit(1)
+		}
+		if err := runBudgetSweep(*trace, *budgets, *out); err != nil {
+			fmt.Fprintf(os.Stderr, "budget-sweep: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	var m *model.Model
 	var name string
