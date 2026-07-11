@@ -41,6 +41,14 @@ const (
 	// MaxRubricCriteria caps how many criteria a generated rubric may carry.
 	// Past a handful, criteria stop being attributable and start being prose.
 	MaxRubricCriteria = 8
+
+	// RubricPassThreshold is the per-criterion progress at or above which a
+	// finding counts as a PASS in conjunctive mode (#3926). A conjunctive
+	// rubric credits the objective 1.0 only when EVERY criterion clears this
+	// bar; one finding below it (or missing entirely) drops the whole objective
+	// to 0.0. The bar is fully-met (1.0) by design — "no partial credit" means a
+	// criterion that is anything short of done fails the hard AND.
+	RubricPassThreshold = 1.0
 )
 
 // RubricCriterion is one concrete, checkable criterion of an issue-specific
@@ -56,6 +64,12 @@ type RubricCriterion struct {
 type Rubric struct {
 	Criteria []RubricCriterion `json:"criteria"`
 	Source   string            `json:"source,omitempty"`
+	// Conjunctive, when true, makes the rubric a hard AND of binary pass/fail
+	// criteria (#3926, the EnvCommons/APEX-Agents grader shape): the objective's
+	// W1 value is 1.0 only if EVERY criterion has a finding at or above
+	// RubricPassThreshold, else 0.0 — no partial credit. Opt-in; the zero value
+	// (false) keeps the default soft-progress fold unchanged.
+	Conjunctive bool `json:"conjunctive,omitempty"`
 }
 
 // RubricFinding is one criterion's slice of a judge verdict: how far this
@@ -175,6 +189,32 @@ func FormatRubricForPrompt(r *Rubric) string {
 		fmt.Fprintf(&b, "%d. [%s] %s\n", i+1, c.ID, c.Text)
 	}
 	return b.String()
+}
+
+// conjunctiveValue folds per-criterion findings into a hard AND (#3926): the
+// objective earns 1.0 iff every criterion of the rubric has a finding at or
+// above RubricPassThreshold, and 0.0 otherwise — the EnvCommons grader shape
+// (`reward = 1.0 iff every criterion passes`). It fails closed: a criterion
+// with NO finding, or a finding below the bar, drops the result to 0.0 and is
+// named as failedCriterion so the score row can cite exactly which criterion
+// broke the AND. A nil or empty rubric has nothing to AND over and also fails
+// closed (0.0). It reuses the existing findings and attribution — no new
+// witness rung, no per-score model call.
+func conjunctiveValue(r *Rubric, findings []RubricFinding) (value float64, failedCriterion string) {
+	if r == nil || len(r.Criteria) == 0 {
+		return 0, ""
+	}
+	found := make(map[string]float64, len(findings))
+	for _, f := range findings {
+		found[f.ID] = clamp01(f.Progress)
+	}
+	for _, c := range r.Criteria {
+		p, ok := found[c.ID]
+		if !ok || p < RubricPassThreshold {
+			return 0, c.ID
+		}
+	}
+	return 1, ""
 }
 
 // rubricToolName is the single forced-choice tool a generation call must use;

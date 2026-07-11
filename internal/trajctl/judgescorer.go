@@ -171,9 +171,30 @@ func (s JudgeScorer) Score(obj Objective, win EvidenceWindow) []ScoreRow {
 			Detail: string(fb),
 		})
 	}
+	// Conjunctive fold (#3926): when the cached rubric is marked conjunctive, the
+	// W1 value is a hard AND of the per-criterion findings — 1.0 only if every
+	// criterion passes, else 0.0 — instead of the soft clamp01(progress). The
+	// per-criterion refs above are preserved; a summary ref names which criterion
+	// broke the AND so the failure is attributable. Default (non-conjunctive)
+	// objectives keep the soft-progress fold untouched.
+	value := clamp01(verdict.Progress)
+	if obj.Rubric != nil && obj.Rubric.Conjunctive {
+		v, failed := conjunctiveValue(obj.Rubric, verdict.Criteria)
+		value = v
+		ref := EvidenceRef{Kind: "rubric-conjunctive", Ref: "all-pass", Detail: "all rubric criteria met the pass threshold"}
+		if v == 0 {
+			ref.Ref = "fail"
+			if failed != "" {
+				ref.Detail = fmt.Sprintf("unmet criterion %q broke the conjunctive AND", failed)
+			} else {
+				ref.Detail = "no rubric criteria to satisfy the conjunctive AND"
+			}
+		}
+		evidence = append(evidence, ref)
+	}
 	return []ScoreRow{{
 		ObjectiveID: obj.ID,
-		Value:       clamp01(verdict.Progress),
+		Value:       value,
 		Method:      JudgeScorerMethod,
 		Version:     JudgeScorerVersion,
 		Witness:     W1,
