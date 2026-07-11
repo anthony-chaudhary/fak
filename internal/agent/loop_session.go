@@ -75,6 +75,13 @@ type SessionGate struct {
 	// A restart reading a non-zero checkpoint re-enters that turn instead of a fresh
 	// turn-0. Optional; nil drops the checkpoint, never the turn.
 	Checkpoint func(trace string, attempt, lastStatus int, startedAtUnixNano int64)
+	// ResumeCheckpoint returns the write-ahead turn checkpoint the session carries at loop
+	// entry (#1363/#4124) — the READ twin of Checkpoint. A run keyed on a session that was
+	// Restore'd with a non-zero PendingTurn returns (attempt, lastStatus, startedAtUnixNano)
+	// here so runArm re-enters that turn instead of a fresh turn-0; the zero triple means
+	// nothing was in flight. Optional; nil defers to the concrete table (or, with neither
+	// wired, no resume) — the function-shaped twin of reading table.Get(trace).PendingTurn.
+	ResumeCheckpoint func(trace string) (attempt, lastStatus int, startedAtUnixNano int64)
 	// TerminateSignal returns the channel closed when the session enters Terminating
 	// (#2758) — the function-shaped twin of session.Table.TerminateSignal. When wired,
 	// runArm cancels the in-flight turn's context on the signal and dispatches no
@@ -308,6 +315,26 @@ func (c runConfig) checkpointPending(attempt, lastStatus int, startedAtUnixNano 
 			StartedAtUnixNano: startedAtUnixNano,
 		})
 	}
+}
+
+// resumeCheckpoint reads the in-flight turn's write-ahead checkpoint this run should RE-ENTER at
+// loop entry (#1363/#4124) — the read twin of checkpointPending. Source preference mirrors
+// gateTurn: a wired function-shaped gate.ResumeCheckpoint owns the seam; otherwise the concrete
+// table's Get(trace).PendingTurn. Returns the zero PendingTurn (IsZero) when no session is wired,
+// the trace is empty, or nothing is checkpointed — so a run with no resume state stays byte-for-
+// byte the historical loop and reports a fresh turn-0.
+func (c runConfig) resumeCheckpoint() session.PendingTurn {
+	if c.trace == "" {
+		return session.PendingTurn{}
+	}
+	if c.gate != nil && c.gate.ResumeCheckpoint != nil {
+		attempt, lastStatus, startedAt := c.gate.ResumeCheckpoint(c.trace)
+		return session.PendingTurn{Attempt: attempt, LastStatus: lastStatus, StartedAtUnixNano: startedAt}
+	}
+	if c.table != nil {
+		return c.table.Get(c.trace).PendingTurn
+	}
+	return session.PendingTurn{}
 }
 
 // bindPendingCheckpoint returns the planner RunArm should drive. When this run can record

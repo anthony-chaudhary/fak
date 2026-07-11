@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // SystemPrompt is the agent's standing instruction. It is deliberately neutral
@@ -71,6 +72,15 @@ type ArmMetrics struct {
 	// (final answer or turn cap) or no table was wired. It makes "why did this arm
 	// stop" a field, not an inference — the whole point of first-class session state.
 	StoppedBySession string `json:"stopped_by_session,omitempty"`
+
+	// ResumedPendingTurn is the write-ahead turn checkpoint (#1363) this arm RE-ENTERED on
+	// start: when the run is keyed on a session whose drive state carries a non-zero
+	// PendingTurn — a prior attempt was interrupted mid-retry and the table was Restore'd
+	// from disk — runArm reads it ONCE at loop entry and records it here, so a resumed run
+	// is observably "resuming attempt N" rather than a fresh turn-0 that has forgotten the
+	// lost attempt (#4124). Zero (IsZero) on every historical run — no wired session, or no
+	// checkpoint pending — so the field is a pure add that never touches an unresumed run.
+	ResumedPendingTurn session.PendingTurn `json:"resumed_pending_turn,omitempty,omitzero"`
 }
 
 // RunResult is the full A/B outcome.
@@ -371,6 +381,71 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	}
 	tools := ToolCatalog()
 
+	// Terminate seam (#2758): when a session table/gate wires a terminate signal, the
+	// arm's context is cancelled the moment the session enters Terminating, so the
+	// in-flight model call aborts at once instead of running to its natural end (the
+	// drain behavior). The watcher goroutine is reaped via watchDone on every return
+	// path; terminated() is the non-blocking mid-turn probe the tool loop consults
+	// before dispatching new work.
+	termCh := cfg.terminateSignal()
+	if termCh != nil {
+		var cancelArm context.CancelFunc
+		ctx, cancelArm = context.WithCancel(ctx)
+		defer cancelArm()
+		watchDone := make(chan struct{})
+		defer close(watchDone)
+		go func() {
+			select {
+			case <-termCh:
+				cancelArm()
+			case <-watchDone:
+			}
+		}()
+	}
+	terminated := func() bool {
+		if termCh == nil {
+			return false
+		}
+		select {
+		case <-termCh:
+			return true
+		default:
+			return false
+		}
+	}
+	// stopTerminated finalizes a terminate taken INSIDE the turn: it re-runs the
+	// boundary gate (which finalizes Terminating->Stopped and yields the closed
+	// TERMINATED reason for both the table- and function-shaped sources), stamps the
+	// arm metrics, and reports whether the arm should return. A proceed=true answer
+	// means the cancellation was NOT this session's terminate (e.g. the parent ctx
+	// died) — the caller falls through to its historical path.
+	stopTerminated := func() bool {
+		if !terminated() {
+			return false
+		}
+		_, proceed, stopReason := cfg.gateTurn(ctx)
+		if proceed || stopReason == "" {
+			return false
+		}
+		m.StoppedBySession = stopReason
+		if fak {
+			finalizeFak(k, &m)
+		}
+		return true
+	}
+
+	// Resume re-entry (#1363/#4124): when this run is keyed on a session whose drive state
+	// carries a non-zero write-ahead turn checkpoint — a prior attempt was interrupted
+	// mid-retry and the table was Restore'd from disk — read it ONCE at loop entry and record
+	// it on the metrics, so the run is observably RESUMING that turn (attempt N) rather than
+	// starting a fresh turn-0 that has forgotten the lost attempt. Read-only here: the
+	// checkpoint is cleared by the turn's own completion (checkpointPending's zero value), not
+	// on this read. A no-op with no wired table/gate or a zero checkpoint, so the historical
+	// loop is byte-for-byte unchanged.
+	if resume := cfg.resumeCheckpoint(); !resume.IsZero() {
+		m.ResumedPendingTurn = resume
+	}
+
 	for turn := 0; turn < maxTurns; turn++ {
 		// Session-control gate (no-op when no table is wired): read the session's live
 		// drive state at the turn boundary. A non-proceed verdict ends the arm here —
@@ -418,6 +493,13 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 
 		comp, err := complete(ctx, cfg.promptMessages(ctx, messages), tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
+			// A completion error caused by this session's terminate (#2758) — the watcher
+			// cancelled the in-flight call's context — is the op WORKING, not a failure:
+			// stop typed (StoppedBySession=TERMINATED), no error. Any other error keeps
+			// the historical fail-loud path.
+			if stopTerminated() {
+				return m, nil
+			}
 			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)
 		}
 		m.Turns++
@@ -453,6 +535,13 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		sp.resolve(ctx, authoritativeCall(asst.ToolCalls[0]), &m)
 		var turnResults []*abi.Result
 		for _, tc := range asst.ToolCalls {
+			// Terminate is taken INSIDE the turn (#2758): before dispatching each tool
+			// call, not only at the boundary. A terminated session starts no new work —
+			// the remaining tool calls are never dispatched — where a drain would let
+			// every one of them run.
+			if stopTerminated() {
+				return m, nil
+			}
 			m.ToolCalls++
 			tool := tc.Function.Name
 			rawArgs := tc.Function.Arguments
