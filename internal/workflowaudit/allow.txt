@@ -43,6 +43,11 @@ security-audit.yml:master
 slack-beat.yml:master
 slack-watchdog.yml:master
 steering-guard.yml:master
+cachevalue-weekly.yml:master
+dispatch-session-audit-feed.yml:master
+fanout-cadence.yml:master
+issue-lane-router.yml:master
+negframe-ratchet.yml:master
 
 # --- `fak-v0.1`: the legacy compatibility release branch ---
 # Accepted on dev filters and the bench baseline-upload gate so the v0.1 line keeps a
@@ -52,6 +57,7 @@ ci.yml:fak-v0.1
 ci-fast.yml:fak-v0.1
 cross-platform.yml:fak-v0.1
 security-audit.yml:fak-v0.1
+negframe-ratchet.yml:fak-v0.1
 
 # --- hidden development-trunk assumption (documented, follow-on filed) ---
 # bench.yml fetches the benchmark baseline with `gh run list --branch main`, so it always
