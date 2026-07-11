@@ -132,6 +132,75 @@ func TestLoadMissingFileIsEmptyNotError(t *testing.T) {
 	}
 }
 
+func TestCooldownOverloadLatchClearsOnlyAfterEverySignalAndRepublishesOnChange(t *testing.T) {
+	base := mustTime(t, "2026-07-06T12:00:00Z")
+	s := &CooldownStore{entries: map[string]CooldownEntry{}}
+	reg := Registry{Homes: []Home{active("latched-seat", "acct-latched", "latched@example.test")}}
+	account := UUIDBucketKey("acct-latched")
+	canServe := func() int { return reg.LoginReportAt(s, base.Add(time.Minute)).Summary.CanServe }
+	publishes := 0
+	update := func(signal string, overloaded bool) {
+		_, changed := s.UpdateOverload(account, signal, CooldownRateLimit, overloaded, signal, base, base.Add(time.Hour))
+		if changed {
+			publishes++
+		}
+	}
+
+	update("kv_used_blocks", true) // first crossing latches out and republishes
+	update("kv_used_blocks", true) // same state is change-gated
+	update("active_decode_blocks", true)
+	update("kv_used_blocks", false) // one signal cleared; decode still holds the latch
+	if _, ok := s.CooledDown(account, base.Add(time.Minute)); !ok {
+		t.Fatal("account flapped back into the servable pool while decode remained overloaded")
+	}
+	if got := canServe(); got != 0 {
+		t.Fatalf("servable pool readmitted %d seats while an overload signal remained", got)
+	}
+	update("kv_used_blocks", true)  // oscillation around one threshold
+	update("kv_used_blocks", false) // still held by decode, so neither edge republishes
+	if publishes != 1 {
+		t.Fatalf("intermediate oscillation published %d times, want only the initial latch transition", publishes)
+	}
+	update("active_decode_blocks", false) // every signal clear: unlatch + one republish
+	if _, ok := s.CooledDown(account, base.Add(time.Minute)); ok {
+		t.Fatal("account stayed latched after every overload signal cleared")
+	}
+	if got := canServe(); got != 1 {
+		t.Fatalf("servable pool has %d seats after every signal cleared, want 1", got)
+	}
+	if publishes != 2 {
+		t.Fatalf("pool published %d times, want exactly latch + unlatch transitions", publishes)
+	}
+}
+
+func TestCooldownOverloadLatchSignalsSurviveDiskRoundTrip(t *testing.T) {
+	base := mustTime(t, "2026-07-06T12:00:00Z")
+	path := filepath.Join(t.TempDir(), "cooldown.json")
+	s, err := LoadCooldownStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.UpdateOverload("acct-latched", "kv", CooldownUsageLimit, true, "kv high", base, base.Add(time.Hour))
+	s.UpdateOverload("acct-latched", "decode", CooldownUsageLimit, true, "decode high", base, base.Add(2*time.Hour))
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := LoadCooldownStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, changed := reloaded.UpdateOverload("acct-latched", "kv", CooldownUsageLimit, false, "", base.Add(time.Minute), time.Time{}); changed {
+		t.Fatal("clearing one reloaded signal must not republish while another remains active")
+	}
+	if _, ok := reloaded.CooledDown("acct-latched", base.Add(90*time.Minute)); !ok {
+		t.Fatal("reloaded decode signal did not keep the account latched")
+	}
+	if _, changed := reloaded.UpdateOverload("acct-latched", "decode", CooldownUsageLimit, false, "", base.Add(90*time.Minute), time.Time{}); !changed {
+		t.Fatal("clearing the last reloaded signal must publish the unlatch transition")
+	}
+}
+
 // TestParseResetAbsolute: an explicit RFC3339 reset in the message is parsed to that instant
 // (UTC). ParseReset is the single source both cooldown writers share, so this pins its contract
 // in one place instead of once per writer.

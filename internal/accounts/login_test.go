@@ -31,6 +31,24 @@ func TestLoginStatusPrimaryStates(t *testing.T) {
 	}
 }
 
+func TestLoginStatusActiveStyle(t *testing.T) {
+	// Closed classification: the live/serviceable roster vs terminal/unusable seats.
+	cases := map[LoginStatus]bool{
+		LoginReady:            true,
+		LoginCooledDown:       true,
+		LoginNeedsLogin:       true,
+		LoginIdentityMismatch: true,
+		LoginTombstoned:       false,
+		LoginDisabled:         false,
+		LoginMissingDir:       false,
+	}
+	for st, want := range cases {
+		if got := st.ActiveStyle(); got != want {
+			t.Errorf("ActiveStyle(%q) = %v, want %v", st, got, want)
+		}
+	}
+}
+
 func TestLoginReportWarningsAndSummary(t *testing.T) {
 	disabled := active("disabled", "u-disabled", "disabled@example.test")
 	disabled.Enabled = boolp(false)
@@ -63,6 +81,11 @@ func TestLoginReportWarningsAndSummary(t *testing.T) {
 		report.Summary.ByStatus[string(LoginDisabled)] != 1 ||
 		report.Summary.ByStatus[string(LoginTombstoned)] != 1 {
 		t.Fatalf("unexpected status counts: %+v", report.Summary.ByStatus)
+	}
+	// Active-style denominator excludes the terminal classes (1 disabled + 1
+	// tombstoned): 7 total seats resolve to a 5-seat servable roster.
+	if report.Summary.ActiveStyleSeats != 5 {
+		t.Fatalf("active-style seats = %d, want 5 (7 total minus 1 disabled, 1 tombstoned)", report.Summary.ActiveStyleSeats)
 	}
 
 	byName := map[string]LoginObservation{}

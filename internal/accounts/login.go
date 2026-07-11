@@ -76,7 +76,11 @@ type LoginObservation struct {
 
 // LoginSummary is the rollup over a LoginReport.
 type LoginSummary struct {
-	Total            int            `json:"total"`
+	Total int `json:"total"`
+	// ActiveStyleSeats counts seats in the live, serviceable roster — Total minus
+	// terminal/unusable seats (tombstoned, disabled, missing_dir). It is the honest
+	// denominator for CanServe: the fraction of the working pool that can serve now.
+	ActiveStyleSeats int            `json:"active_style_seats"`
 	CanServe         int            `json:"can_serve"`
 	DistinctAccounts int            `json:"distinct_accounts"`
 	WarningSeats     int            `json:"warning_seats"`
@@ -113,6 +117,26 @@ func (h Home) LoginStatus() LoginStatus {
 // CanServe reports whether this seat is ready to launch directly.
 func (h Home) CanServe() bool { return h.LoginStatus() == LoginReady }
 
+// ActiveStyle reports whether a seat in this login status belongs to the live,
+// serviceable roster — the pool rotation draws from now or after a cooldown/login
+// reset — as opposed to a terminal or unusable seat. Tombstoned (retired),
+// disabled (administratively off), and missing_dir (no config home on disk) seats
+// are not part of the working pool, so they are excluded. Everything else — ready,
+// cooled_down, needs_login, identity_mismatch — is a real seat that is serving,
+// will serve after a reset, or is recoverable by an operator login/rehome.
+//
+// This is the honest denominator for "how many of my seats can serve": a fleet of
+// 36 where 22 are tombstoned is really a 14-seat pool, and reporting 5/36 badly
+// understates the servable fraction.
+func (s LoginStatus) ActiveStyle() bool {
+	switch s {
+	case LoginTombstoned, LoginDisabled, LoginMissingDir:
+		return false
+	default:
+		return true
+	}
+}
+
 // LoginReport folds every home into an observable status record plus a rollup.
 // Call Refresh first when current disk state matters. It applies no cooldown
 // overlay; use LoginReportAt to drop usage-limited seats from the servable pool.
@@ -139,6 +163,9 @@ func (r Registry) LoginReportAt(cd *CooldownStore, now time.Time) LoginReport {
 		report.Seats = append(report.Seats, obs)
 		report.Summary.Total++
 		report.Summary.ByStatus[string(obs.Status)]++
+		if obs.Status.ActiveStyle() {
+			report.Summary.ActiveStyleSeats++
+		}
 		if obs.CanServe {
 			report.Summary.CanServe++
 		}

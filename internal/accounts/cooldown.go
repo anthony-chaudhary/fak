@@ -53,6 +53,11 @@ type CooldownEntry struct {
 	Reason   string       `json:"reason,omitempty"`
 	CooledAt time.Time    `json:"cooled_at"`
 	ResetAt  time.Time    `json:"reset_at"`
+	// Signals is the hysteretic overload latch. Each key is one independent load
+	// signal and its value is that signal's clear deadline. The account remains
+	// non-servable while ANY signal is active and is re-admitted only after ALL
+	// signals clear. Omitted on legacy v1 rows, which are treated as one Kind signal.
+	Signals map[string]time.Time `json:"signals,omitempty"`
 }
 
 // Active reports whether the entry still holds at now (i.e. now is before ResetAt).
@@ -162,10 +167,68 @@ func (s *CooldownStore) CooledDown(account string, now time.Time) (CooldownEntry
 		return CooldownEntry{}, false
 	}
 	e, ok := s.entries[account]
-	if !ok || !e.Active(now) {
+	if !ok {
 		return CooldownEntry{}, false
 	}
+	signals, resetAt := activeCooldownSignals(e, now)
+	if len(signals) == 0 {
+		return CooldownEntry{}, false
+	}
+	e.Signals = signals
+	e.ResetAt = resetAt
 	return e, true
+}
+
+// UpdateOverload folds one independent load signal into the account latch. An over-threshold
+// observation sets/extends that signal. A cleared observation removes only that signal; the
+// account remains latched while any sibling signal is active. changed is true ONLY when pool
+// membership crosses the boundary (servable->latched or latched->servable), so a publisher can
+// republish incrementally without emitting on threshold noise inside either stable state.
+func (s *CooldownStore) UpdateOverload(account, signal string, kind CooldownKind, overloaded bool, reason string, observedAt, resetAt time.Time) (entry CooldownEntry, changed bool) {
+	account = strings.TrimSpace(account)
+	signal = strings.TrimSpace(signal)
+	if account == "" || signal == "" {
+		return CooldownEntry{}, false
+	}
+	beforeEntry, beforeLatched := s.CooledDown(account, observedAt)
+	signals := beforeEntry.Signals
+	if signals == nil {
+		signals = map[string]time.Time{}
+	}
+
+	if !overloaded {
+		delete(signals, signal)
+		if len(signals) == 0 {
+			delete(s.entries, account)
+			return CooldownEntry{}, beforeLatched
+		}
+		beforeEntry.Signals = signals
+		beforeEntry.ResetAt = latestSignalReset(signals)
+		s.entries[account] = beforeEntry
+		return beforeEntry, false
+	}
+
+	if resetAt.IsZero() {
+		resetAt = observedAt.Add(defaultWindowFor(kind))
+	}
+	resetAt = resetAt.UTC()
+	if prior, ok := signals[signal]; !ok || resetAt.After(prior) {
+		signals[signal] = resetAt
+	}
+	cooledAt := observedAt
+	if beforeLatched && !beforeEntry.CooledAt.IsZero() {
+		cooledAt = beforeEntry.CooledAt
+	}
+	entry = CooldownEntry{
+		Account:  account,
+		Kind:     kind,
+		Reason:   reason,
+		CooledAt: cooledAt,
+		ResetAt:  latestSignalReset(signals),
+		Signals:  signals,
+	}
+	s.entries[account] = entry
+	return entry, !beforeLatched
 }
 
 // Cool records (or extends) a cooldown for account. The reset time is the later of
@@ -173,20 +236,7 @@ func (s *CooldownStore) CooledDown(account string, now time.Time) (CooldownEntry
 // shortened by a subsequent transient 429. When resetAt is zero, the kind's
 // default window from cooledAt is used.
 func (s *CooldownStore) Cool(account string, kind CooldownKind, reason string, cooledAt, resetAt time.Time) CooldownEntry {
-	if resetAt.IsZero() {
-		resetAt = cooledAt.Add(defaultWindowFor(kind))
-	}
-	if existing, ok := s.entries[account]; ok && existing.Active(cooledAt) && existing.ResetAt.After(resetAt) {
-		resetAt = existing.ResetAt
-	}
-	e := CooldownEntry{
-		Account:  account,
-		Kind:     kind,
-		Reason:   reason,
-		CooledAt: cooledAt,
-		ResetAt:  resetAt.UTC(),
-	}
-	s.entries[account] = e
+	e, _ := s.UpdateOverload(account, string(kind), kind, true, reason, cooledAt, resetAt)
 	return e
 }
 
@@ -204,10 +254,15 @@ func (s *CooldownStore) Clear(account string) bool {
 func (s *CooldownStore) Prune(now time.Time) int {
 	n := 0
 	for k, e := range s.entries {
-		if !e.Active(now) {
+		signals, resetAt := activeCooldownSignals(e, now)
+		if len(signals) == 0 {
 			delete(s.entries, k)
 			n++
+			continue
 		}
+		e.Signals = signals
+		e.ResetAt = resetAt
+		s.entries[k] = e
 	}
 	return n
 }
@@ -215,13 +270,43 @@ func (s *CooldownStore) Prune(now time.Time) int {
 // Active returns the entries still holding at now, sorted by account.
 func (s *CooldownStore) Active(now time.Time) []CooldownEntry {
 	var out []CooldownEntry
-	for _, e := range s.entries {
-		if e.Active(now) {
+	for account := range s.entries {
+		if e, ok := s.CooledDown(account, now); ok {
 			out = append(out, e)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Account < out[j].Account })
 	return out
+}
+
+func activeCooldownSignals(e CooldownEntry, now time.Time) (map[string]time.Time, time.Time) {
+	active := map[string]time.Time{}
+	if len(e.Signals) == 0 {
+		if e.Active(now) {
+			name := strings.TrimSpace(string(e.Kind))
+			if name == "" {
+				name = "legacy"
+			}
+			active[name] = e.ResetAt.UTC()
+		}
+		return active, latestSignalReset(active)
+	}
+	for signal, resetAt := range e.Signals {
+		if strings.TrimSpace(signal) != "" && now.Before(resetAt) {
+			active[signal] = resetAt.UTC()
+		}
+	}
+	return active, latestSignalReset(active)
+}
+
+func latestSignalReset(signals map[string]time.Time) time.Time {
+	var latest time.Time
+	for _, resetAt := range signals {
+		if resetAt.After(latest) {
+			latest = resetAt
+		}
+	}
+	return latest.UTC()
 }
 
 func defaultWindowFor(kind CooldownKind) time.Duration {
