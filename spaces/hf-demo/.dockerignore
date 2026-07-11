@@ -1,0 +1,7 @@
+# The build context is just this dir (Dockerfile, app.py, README.md). Keep stray
+# local artifacts out of the image build.
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.DS_Store
