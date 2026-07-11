@@ -31,8 +31,9 @@ func TestClaudeGeminiGCPBashLauncherPreset(t *testing.T) {
 		`_gem_host="aiplatform.googleapis.com"`,
 		"/models probe skipped",
 		"FAK_DOGFOOD_PRESET=gemini-gcp needs FAK_GEMINI_GCP_BASE_URL",
-		// installed launcher symlink
-		`gemini_name="claude-gemini-gcp"`,
+		// #3034: claude-gemini-gcp is an opt-in (not-installed-by-default) launcher in the
+		// graduation manifest — the installer no longer hard-codes a per-preset symlink var.
+		`claude-gemini-gcp|gemini-gcp|no|`,
 	} {
 		requireContainsForClaudeGLMGCP(t, sh, want)
 	}
@@ -55,8 +56,10 @@ func TestClaudeGeminiGCPPowerShellLauncherPreset(t *testing.T) {
 		"/models probe skipped",
 		"aiplatform.googleapis.com",
 		"endpoints/openapi",
-		"claude-gemini-gcp.cmd",
-		"FAK_DOGFOOD_PRESET=gemini-gcp",
+		// #3034: the .cmd shim name + preset pin are derived from the graduation manifest
+		// entry at install time, so the launcher->preset mapping is pinned there.
+		"Launcher='claude-gemini-gcp'",
+		"Preset='gemini-gcp'",
 	} {
 		requireContainsForClaudeGLMGCP(t, ps1, want)
 	}
