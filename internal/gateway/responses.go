@@ -257,6 +257,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	asst.ToolCalls = kept
+	// #3567 output-side shadow: classify the MODEL's own outbound prose (sampled,
+	// observe-only) before fak blanks/appends anything -- mirror of the chat path.
+	outputNegframeAudit.observe(asst.Content)
 	if bodyRefused {
 		asst.Content = ""
 	}

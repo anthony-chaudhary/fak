@@ -25,6 +25,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
@@ -181,13 +183,36 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 // is the sole tool path. It returns the per-turn ArmMetrics — the witness that the loop,
 // not an external harness, drove the turn.
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
+	ensureAgentPolicyRung()
 	task := lastUserText(req.Messages)
 	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
 }
 
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink) (agent.ArmMetrics, error) {
+	ensureAgentPolicyRung()
 	task := lastUserText(req.Messages)
 	return agent.RunArmStream(ctx, s.planner, task, true, s.nativeMaxTurns, sink, nil, s.nativeRunOptions(ctx, reqTrace)...)
+}
+
+// ensureAgentPolicyRung guarantees the agent policy adjudicator is present in the
+// kernel's adjudication chain before the owned loop drives a turn. agent.Configure()
+// (which RunArm calls at the start of every run) only SetPolicy's the process-global
+// adjudicator.Default INSTANCE; the RUNG itself is placed in the abi chain by
+// adjudicator's package init, which runs once. On the live serve path that init has
+// already registered the rung, so the loop below finds it and this is a no-op. In a
+// test binary a sibling's abi.ResetForTest wipes every registered rung and Configure
+// does NOT restore the registration — so without this a policy-denied call folds
+// through the emptied chain to the fail-closed DEFAULT_DENY instead of the policy's
+// POLICY_BLOCK, and every tool would deny, starving the owned loop of a final answer.
+// Re-registering here at the rung's canonical rank (100, matching adjudicator.init)
+// self-heals a reset-wiped chain; the presence check keeps it idempotent.
+func ensureAgentPolicyRung() {
+	for _, a := range abi.Adjudicators() {
+		if a == abi.Adjudicator(adjudicator.Default) {
+			return
+		}
+	}
+	abi.RegisterAdjudicator(100, adjudicator.Default)
 }
 
 func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.RunOption {

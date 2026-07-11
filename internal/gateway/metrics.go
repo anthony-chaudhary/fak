@@ -660,6 +660,19 @@ type AdjudicationSummary struct {
 	ToolPruneTurns uint64 `json:"tool_prune_turns"`
 	ToolPruneCount uint64 `json:"tool_prune_count"`
 
+	// DeferCold* folds the OUTBOUND cold-tool DEFERRAL lever (--defer-cold-tools, #3232, the 10x
+	// floor lever under epic #3229) into the same exit summary, WITNESSED (fak authored the splice):
+	// DeferColdTurns is the count of turns on which fak deferred the cold tool tail (marked the
+	// allowed-but-cold custom tools defer_loading:true and injected a tool_search_tool), and
+	// DeferColdCount the total cold defs deferred across them. Unlike the prune lever this does NOT
+	// shrink the request bytes — the reduction is provider-side (the provider loads only the hot
+	// core into context, faulting a cold schema in on demand), so it lands in the OBSERVED usage
+	// relay (input_tokens / cache_read), never in the ESTIMATED byte footprint. The transform is
+	// deterministic + cache-safe, so a counted deferral never bursts the upstream prompt cache.
+	// Zero when the lever is off (its DEFAULT) or when a turn had no cold tools to defer.
+	DeferColdTurns uint64 `json:"defer_cold_turns"`
+	DeferColdCount uint64 `json:"defer_cold_count"`
+
 	// ToolRefTurns / ToolRefConverted witness the tool_reference SANITIZE correctness transform:
 	// the client's INTERNAL tool_reference blocks (emitted inside a ToolSearch tool_result) are not
 	// a valid Anthropic tool_result.content type, so fak rewrites each into a wire-valid text block
@@ -741,6 +754,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
 	// session keeps the JSON field absent (omitempty).
 	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
+	sum.DeferColdTurns, sum.DeferColdCount = m.toolDeferSnapshot()
 	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()

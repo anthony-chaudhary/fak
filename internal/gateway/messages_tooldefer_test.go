@@ -56,8 +56,12 @@ func TestDeferColdToolsMarksColdEagerHotInjectsSearch(t *testing.T) {
 	}
 
 	elems := toolsOf(t, res.Body)
-	if len(elems) != 5 {
-		t.Fatalf("tools len=%d, want 5 (4 original + tool_search_tool)", len(elems))
+	// The transform preserves every original tool and injects exactly one
+	// tool_search_tool, so the output carries one more tool than the input —
+	// asserted as that relation, not a frozen total that drifts with deferBody.
+	inputTools := toolsOf(t, []byte(deferBody))
+	if len(elems) != len(inputTools)+1 {
+		t.Fatalf("tools len=%d, want %d (%d original + tool_search_tool)", len(elems), len(inputTools)+1, len(inputTools))
 	}
 
 	byName := map[string]map[string]json.RawMessage{}

@@ -82,7 +82,24 @@ func TestA2AHandlers(t *testing.T) {
 	})
 
 	t.Run("handleA2AListTasks empty", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/a2a/v1/tasks", nil)
+		// The A2A store is intentionally process-global, so other tests (or other
+		// Server instances) may already have tasks. Prove the filtered empty view
+		// instead of assuming package execution history left the singleton blank.
+		id, err := generateTaskID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := getA2AStore()
+		store.mu.Lock()
+		store.tasks[id] = &a2aTask{TaskID: id, CallerID: "other-test-caller", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+		store.mu.Unlock()
+		t.Cleanup(func() {
+			store.mu.Lock()
+			delete(store.tasks, id)
+			store.mu.Unlock()
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/a2a/v1/tasks?caller_id=empty-"+id, nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
 

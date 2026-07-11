@@ -107,7 +107,7 @@ var trajqueryInputSchema = json.RawMessage(`{
 func trajqueryToolDescriptor() map[string]any {
 	return map[string]any{
 		"name":        "fak_trajquery",
-		"description": "Query your OWN trajectory corpus with a small read-only SQL SELECT, confined to an operator-published SCOPED VIEW — the same scope-enforcing rewrite the `fak trajquery` CLI uses. Pass {view, sql, corpus?}: `view` is the scoped window {name, base, columns, enums, scope}. You may only SELECT/WHERE the allowlisted `columns`; a column listed in `enums` accepts only its declared literal values (on any operator); and the view's `scope` predicates are ANDed into every query and cannot be removed. Your SQL MUST target `view.name` — querying the base relation, projecting a hidden column, or a WHERE value outside an enum's literals is refused as a scope escape and comes back {valid:false, violations:[...]} with NO rows (a first-class refusal, never leaked data). The server validates, rewrites to inline the scope, then executes over `corpus`. Set validate_only to check scope without executing. Returns {schema, valid, violations?, rewritten, rows} — `schema` echoes the view's columns/enums/scope so you always see what bounds the query.",
+		"description": "Run a read-only SQL SELECT over your trajectory corpus inside an operator-published scoped view. Only allowlisted columns and declared enums are valid; the server adds immutable scope predicates, and scope escapes return valid:false with no rows. Pass view, sql, optional corpus or validate_only. Returns schema, rewritten query, violations, and rows.",
 		"inputSchema": trajqueryInputSchema,
 	}
 }

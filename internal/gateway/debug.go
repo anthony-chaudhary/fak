@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
+	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 )
 
 type debugVarsResponse struct {
@@ -54,8 +56,15 @@ type debugVarsResponse struct {
 	// StartupReport is the full human-readable startup report the host recorded at boot
 	// (fak guard's banner + hook/auth notes) — what `fak info --startup` prints when an
 	// attended launch kept the terminal banner compact. Omitted when the host set none.
-	StartupReport string           `json:"startup_report,omitempty"`
-	Metrics       debugMetricsVars `json:"metrics"`
+	StartupReport string `json:"startup_report,omitempty"`
+	// Watchdog is the process-global resume/heal watchdog counter surface (#3803): tick
+	// count, per-verdict action mix, autoheal-result mix, witnessed post-resume progress,
+	// and the last folded monitor/rollup health. Because these are expvars incremented at
+	// the point of decision, this block reflects whatever watchdog/autoheal work ran IN THIS
+	// process (the in-guard autoheal path fills it directly). Omitted on a cold process that
+	// has recorded no watchdog signal at all.
+	Watchdog *resumemetrics.Snapshot `json:"watchdog,omitempty"`
+	Metrics  debugMetricsVars        `json:"metrics"`
 }
 
 // debugInferenceVars surfaces the model-generation throughput the kernel/vDSO counters
@@ -368,6 +377,18 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 	return s.debugVarsContext(context.Background(), now)
 }
 
+// debugWatchdogVars folds the process-global resume/heal watchdog expvars into the /debug/vars
+// response, or nil on a cold process that has recorded no watchdog signal — the same
+// nil-when-empty convention the other optional blocks keep, so the pane omits the block rather
+// than rendering an all-zero one (#3803).
+func debugWatchdogVars() *resumemetrics.Snapshot {
+	if !resumemetrics.Active() {
+		return nil
+	}
+	snap := resumemetrics.Read()
+	return &snap
+}
+
 func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsResponse {
 	m := s.metrics
 	if m == nil {
@@ -464,6 +485,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Harness:          s.debugHarness(),
 		Fleet:            s.debugFleet(),
 		StartupReport:    s.startupReportText(),
+		Watchdog:         debugWatchdogVars(),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -514,34 +536,9 @@ func debugProviderExtraBody(planner agent.Planner) (bool, []string) {
 // REMAINING allotment (what the operator seeded minus what the session consumed), and
 // ElapsedSeconds is live wall-clock. Everything here is a projection of SessionState —
 // no payloads, no transcript text — so the pane stays redaction-safe by construction.
-type debugSessionVars struct {
-	TraceID           string `json:"trace_id"`
-	Run               string `json:"run"`
-	ParentTrace       string `json:"parent_trace,omitempty"`
-	Generation        int    `json:"generation,omitempty"`
-	Priority          int    `json:"priority,omitempty"`
-	TurnsLeft         int    `json:"turns_left"`
-	TokensLeft        int    `json:"tokens_left"`
-	ContextTokensLeft int    `json:"context_tokens_left,omitempty"`
-	ElapsedSeconds    int64  `json:"elapsed_seconds,omitempty"`
-	Assumptions       int    `json:"assumptions,omitempty"`
-	// LastTool is the tool NAME of the last call the gateway ADMITTED for this trace —
-	// the agents pane's "what is it doing" signal (#2627). Payload-free: the identifier
-	// only, never arguments or results. Omitted until the trace has an admitted call.
-	LastTool string `json:"last_tool,omitempty"`
-	// SpawnCount is how many subagent-SHAPED tool calls this trace has had admitted — an
-	// activity signal (is it fanning out?), NOT a live-child census (#2397 owns that).
-	// Omitted while zero.
-	SpawnCount int `json:"spawn_count,omitempty"`
-	// InflightSeconds is the age of the served model request this trace holds RIGHT NOW,
-	// omitted when no request is open. Distinct from IdleSeconds — a row carries one or
-	// the other, never both: in-flight means a request is open now.
-	InflightSeconds int64 `json:"inflight_seconds,omitempty"`
-	// IdleSeconds is the time since this trace's last admitted call with nothing in
-	// flight, omitted while a request is open or before the first call — the "is it stuck
-	// / idle" signal.
-	IdleSeconds int64 `json:"idle_seconds,omitempty"`
-}
+// The wire shape lives in internal/guardvars so the `fak info` pane decodes the exact block
+// this producer emits — one definition, no field-for-field hand-sync to drift (see guardvars).
+type debugSessionVars = guardvars.SessionVars
 
 // debugSessions folds the live session registry into /debug/vars rows. Stopped sessions
 // are dropped (matching debugAssumptions: the pane shows what is running, not history),
@@ -784,17 +781,9 @@ func vcacheVarsFromSnapshot(snap inferenceSnapshot) *debugVCacheVars {
 // token-equiv value is the same input-token currency as the vcache block; VDSO is a separate
 // avoided-call counter (its witness is skipped engine calls, not prompt tokens). Nil until
 // the split has anything nonzero to say.
-type debugCacheAttributionVars struct {
-	ProviderTokenEquiv float64 `json:"provider_token_equiv"` // net: read rebate minus write premium
-	FakTokenEquiv      float64 `json:"fak_token_equiv"`      // compaction shed + in-kernel KV-prefix reuse
-	TotalTokenEquiv    float64 `json:"total_token_equiv"`
-
-	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
-	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"` // negative until reads repay writes
-	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
-	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
-	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"` // avoided engine calls, NOT a token-equiv
-}
+// The wire shape lives in internal/guardvars so the `fak info` pane decodes the exact owner
+// split this producer emits — one definition, no field-for-field hand-sync to drift.
+type debugCacheAttributionVars = guardvars.CacheAttributionVars
 
 // cacheAttributionVars builds the /debug/vars owner-split block from the SAME inputs the
 // /metrics renderer folds (m.adjudicationSummary().MechanismSavings() + kernel VDSOHits +
@@ -819,6 +808,7 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		ProviderPromptCacheReadTokenEquiv:         ms.ProviderPromptCacheReadTokenEquiv,
 		ProviderPromptCacheWritePremiumTokenEquiv: ms.ProviderPromptCacheWritePremiumTokenEquiv,
 		FakCompactionShedTokens:                   ms.FakCompactionShedTokens,
+		FakCompactionCacheReadTokens:              ms.FakCompactionCacheReadTokens,
 		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,
 		FakVDSOAvoidedCalls:                       ms.FakVDSOAvoidedCalls,
 	}
@@ -835,12 +825,9 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 // keys on: the lever is ON but every head refused, so a long idle session pays the 5m
 // re-write the operator opted out of — visible here as a zero-upgrade ACTIVE posture rather
 // than an absent panel.
-type debugManagedCacheVars struct {
-	Active   bool              `json:"active"`
-	Inert    bool              `json:"inert"`
-	Upgraded uint64            `json:"upgraded"`
-	Reasons  map[string]uint64 `json:"reasons,omitempty"`
-}
+// The wire shape lives in internal/guardvars so the `fak info` pane decodes the exact posture
+// block this producer emits — one definition, no field-for-field hand-sync to drift.
+type debugManagedCacheVars = guardvars.ManagedCacheVars
 
 // managedCacheVars builds the /debug/vars managed-cache posture block from the session's
 // resolved lever state (active) and the SAME AdjudicationSummary ttl-upgrade fields the

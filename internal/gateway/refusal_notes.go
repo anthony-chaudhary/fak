@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
 
 // refusalNote is one "actionable half of a refusal" renderer: given a refused
@@ -73,7 +75,11 @@ func denySummary(adjs []ToolAdjudication) string {
 		}
 		parts = append(parts, part)
 	}
-	return "All proposed tool calls were refused by the fak kernel: " + strings.Join(parts, "; ")
+	// Emit-time reframe (#3566): flip any unambiguous negative idiom to lead with the
+	// affordance before this note is pushed to the model. The pass is token-superset
+	// safe, so every structured reason token (POLICY_BLOCK, OFF_TRUNK, ...) and every
+	// load-bearing judgement prohibition ("do not re-propose") survives byte-for-byte.
+	return negframe.Reframe("All proposed tool calls were refused by the fak kernel: " + strings.Join(parts, "; "))
 }
 
 // adjudicationNote renders a short, agent-readable summary of the kernel's
@@ -166,7 +172,11 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		b.WriteString(strings.Join(allowedLoops, "; "))
 		b.WriteString(". This is advisory: do not repeat a successful identical call unchanged unless you can name the new evidence it will produce.")
 	}
-	return b.String()
+	// Emit-time reframe (#3566): route the assembled note through the deterministic,
+	// token-superset-safe positive-voice pass before it reaches the model. Load-bearing
+	// judgement prohibitions and every reason token are preserved verbatim; only an
+	// unambiguous negative idiom (should any interpolated remedy/fix carry one) is flipped.
+	return negframe.Reframe(b.String())
 }
 
 func prependAdjudicationContentNote(content string, adjs []ToolAdjudication) string {

@@ -9,10 +9,11 @@ import "testing"
 // the summary + VDSO the same way the metrics renderer does.
 func TestCacheAttributionVarsMatchesMechanismSplit(t *testing.T) {
 	sum := AdjudicationSummary{
-		CachedPromptTokens:   1000, // provider read rebate = 900 token-equiv
-		CacheCreationTokens:  200,  // provider write premium = -50 token-equiv
-		CompactionShedTokens: 300,
-		KVPrefixReusedTokens: 400,
+		CachedPromptTokens:        1000, // provider read rebate = 900 token-equiv
+		CacheCreationTokens:       200,  // provider write premium = -50 token-equiv
+		CompactionShedTokens:      300,
+		CompactionCacheReadTokens: 200, // warm witness: 200 of the 300 shed priced at the read marginal
+		KVPrefixReusedTokens:      400,
 	}
 	// Mirror the /metrics fold exactly: MechanismSavings() + kernel VDSOHits + inline-served.
 	const vdsoHits, servedInline = int64(7), uint64(3)
@@ -37,6 +38,10 @@ func TestCacheAttributionVarsMatchesMechanismSplit(t *testing.T) {
 	}
 	if got.FakCompactionShedTokens != 300 || got.FakKVPrefixReusedTokens != 400 {
 		t.Errorf("fak mechanism split = (shed %d, kv %d), want (300, 400)", got.FakCompactionShedTokens, got.FakKVPrefixReusedTokens)
+	}
+	// The warm witness rides along so the info tab can explain why the shed prices below its raw count.
+	if got.FakCompactionCacheReadTokens != 200 {
+		t.Errorf("fak compaction warm witness = %d, want 200 (the cache_read the shed prices on)", got.FakCompactionCacheReadTokens)
 	}
 	// VDSO is an avoided-call counter (not a token-equiv), folded exactly as /metrics does.
 	if got.FakVDSOAvoidedCalls != uint64(vdsoHits)+servedInline {

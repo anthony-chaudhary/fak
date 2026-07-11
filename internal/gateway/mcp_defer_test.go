@@ -102,6 +102,36 @@ func TestDeferredToolStillSearchable(t *testing.T) {
 	}
 }
 
+// TestTrimmedHotDescriptionsStayDiscoverable witnesses the #4250 trade: the
+// largest always-sent descriptions are leaner, but intent search must still
+// rank each tool first from the terms that remain.
+func TestTrimmedHotDescriptionsStayDiscoverable(t *testing.T) {
+	srv := newDeferServer(t, true)
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{"trajectory SQL scoped view", "fak_trajquery"},
+		{"managed context pressure headroom", "fak_context_value"},
+		{"restore dropped context sha256", "fak_context_restore"},
+		{"list dropped context spans", "fak_context_spans"},
+		{"resume heal history retry", "fak_resume_history"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			resp, err := srv.toolsSearch(ToolsSearchRequest{Query: tc.query, DetailLevel: "name"})
+			if err != nil {
+				t.Fatalf("toolsSearch(%q): %v", tc.query, err)
+			}
+			if len(resp.Tools) == 0 {
+				t.Fatalf("toolsSearch(%q) returned no tools", tc.query)
+			}
+			if got, _ := resp.Tools[0]["name"].(string); got != tc.want {
+				t.Fatalf("toolsSearch(%q) ranked %q first, want %q", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDeferredToolStillCallable: deferral hides the SCHEMA, never the ROUTE — a
 // cold tool absent from tools/list still dispatches through tools/call.
 func TestDeferredToolStillCallable(t *testing.T) {

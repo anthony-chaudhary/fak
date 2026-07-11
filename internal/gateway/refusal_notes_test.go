@@ -70,6 +70,48 @@ func TestAdjudicationNoteSurfacesComplaintChannel(t *testing.T) {
 	}
 }
 
+// The emit-time reframe pass (#3566) flips an unambiguous negative idiom carried by an
+// interpolated remedy to lead with the affordance, WHILE preserving every structured reason
+// token byte-for-byte. This pins both halves on the real content-channel path: the "do not
+// forget to" idiom becomes "remember to", and the OFF_TRUNK / POLICY_BLOCK contract tokens
+// survive the pass.
+func TestRefusalNotesTokensStable(t *testing.T) {
+	adj := ToolAdjudication{
+		Tool:     "Bash",
+		Admitted: false,
+		Verdict: WireVerdict{
+			Kind:        "DENY",
+			Reason:      "POLICY_BLOCK",
+			Disposition: "TERMINAL",
+			Detail:      map[string]string{"remedy": "do not forget to clear the OFF_TRUNK blocker"},
+		},
+	}
+	note := adjudicationNote([]ToolAdjudication{adj})
+	for name, got := range map[string]string{
+		"adjudicationNote": note,
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+	} {
+		// contract tokens survive the reframe on both content-channel choke points
+		for _, tok := range []string{"POLICY_BLOCK", "OFF_TRUNK"} {
+			if !strings.Contains(got, tok) {
+				t.Fatalf("%s dropped contract token %q:\n%s", name, tok, got)
+			}
+		}
+		// the mechanical idiom was flipped to lead with the affordance
+		if !strings.Contains(got, "remember to clear the OFF_TRUNK blocker") {
+			t.Fatalf("%s did not reframe the negative idiom:\n%s", name, got)
+		}
+		if strings.Contains(got, "do not forget to") {
+			t.Fatalf("%s left the negative idiom unreframed:\n%s", name, got)
+		}
+	}
+	// The load-bearing judgement prohibition (adjudicationNote's re-propose trailer) is preserved
+	// verbatim — the reframe flips mechanical idioms only, never a bare prohibition.
+	if !strings.Contains(strings.ToLower(note), "do not re-propose") {
+		t.Fatalf("adjudicationNote dropped the load-bearing prohibition:\n%s", note)
+	}
+}
+
 // A single-denial appeal must bind its witness: the copy-pasted `fak complain
 // --from-journal` command carries the refused call's args_digest as an exact
 // `--args-digest` selector, so SelectDenial attaches the witnessed verdict instead

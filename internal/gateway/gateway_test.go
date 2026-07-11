@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 	"github.com/anthony-chaudhary/fak/internal/recall"
@@ -127,6 +128,11 @@ func newTestServer(t *testing.T) *Server {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
+	// Restore the "mock" engine that internal/engine's init registered and
+	// ResetForTest just wiped: tests running AFTER this one (in-package order)
+	// construct servers with EngineID "mock" directly and rely on the package-init
+	// invariant that it is always registered.
+	abi.RegisterEngine("mock", engine.MockEngine)
 	abi.RegisterAdjudicator(0, toolAdj{})
 	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
 	if err != nil {

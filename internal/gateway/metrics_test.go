@@ -374,6 +374,44 @@ func TestAdjudicationSummaryReportsInboundToolPrune(t *testing.T) {
 	}
 }
 
+// TestAdjudicationSummaryReportsColdToolDefer is the OUTBOUND twin of the inbound-prune test: the
+// cold-tool-deferral lever (--defer-cold-tools #3232) accumulates deferFiredTurns/deferColdCount,
+// the summary must fold them, and the Prometheus surface must render the SAME two numbers.
+func TestAdjudicationSummaryReportsColdToolDefer(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// A clean run records nothing — a lever-off or all-hot session must not show a vacuous defer
+	// line. A no-op turn (fired=false) and a fired turn with no cold defs both record nothing.
+	m.observeToolDefer(0, true)
+	m.observeToolDefer(4, false)
+	m.observeToolDefer(-2, true) // defensive guard against a negative count
+	if s := m.adjudicationSummary(); s.DeferColdTurns != 0 || s.DeferColdCount != 0 {
+		t.Fatalf("no-defer run = turns %d count %d, want 0/0", s.DeferColdTurns, s.DeferColdCount)
+	}
+
+	// Two turns that deferred the cold tail: 3 defs then 2 defs -> 2 turns, 5 total defs.
+	m.observeToolDefer(3, true)
+	m.observeToolDefer(2, true)
+	s := m.adjudicationSummary()
+	if s.DeferColdTurns != 2 || s.DeferColdCount != 5 {
+		t.Fatalf("cold-tool-defer summary = turns %d count %d, want 2/5", s.DeferColdTurns, s.DeferColdCount)
+	}
+
+	// The Prometheus surface must fold the SAME two numbers and stay WITNESSED-labeled.
+	var b strings.Builder
+	m.writeCompactionMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		"fak_gateway_tool_defer_cold_total 5",
+		"fak_gateway_tool_defer_turns_total 2",
+		"WITNESSED",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prometheus cold-tool-defer surface missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestInferenceMetricsAccumulateAcrossTurns exercises the model-generation family
 // directly: the kernel/vDSO counters stay 0 on a pure chat workload, so this is the
 // signal that makes a busy gateway look busy. Two turns must sum the token totals,

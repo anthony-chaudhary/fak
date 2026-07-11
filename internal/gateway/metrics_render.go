@@ -25,14 +25,19 @@ import (
 // until the floor actually refuses a whole turn.
 func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
 	stops, consec := m.denyAllSnapshot()
+	sameConsec := m.denyAllSameSnapshot()
 	feedbackTurns, feedbackConsec := m.toolFeedbackSnapshot()
 	writeCounter(b, "fak_guard_deny_all_stops_total",
 		"Served turns whose EVERY proposed tool call the capability floor refused, forcing the wire to report end_turn (a stop the agent did not choose; the v0.15.0 contract that keeps the client from hanging on a dropped tool_use block). The guard --deny-all-continue Stop-hook reads the consecutive gauge below to auto-continue the agent past these.",
 		int64(stops))
 	writeHelpType(b, "fak_guard_deny_all_consecutive",
-		"Consecutive deny-all turns ending the most recent served turn (reset to 0 by any turn with a surviving or no tool call). The bounded signal the guard --deny-all-continue Stop-hook polls: 1..MAX continues the agent, above MAX it gives up and lets the turn end.",
+		"Consecutive deny-all turns ending the most recent served turn (reset to 0 by any turn with a surviving or no tool call). Blind to WHICH call was refused — kept for observability; the guard Stop hook now keys its give-up on the same-issue gauge below instead.",
 		"gauge")
 	fmt.Fprintf(b, "fak_guard_deny_all_consecutive %d\n", consec)
+	writeHelpType(b, "fak_guard_deny_all_same_consecutive",
+		"Consecutive deny-all turns proposing the IDENTICAL refused action (same tool + same reason). Reset to 0 by any non-deny-all turn and re-seeded to 1 whenever the refused tool/reason changes, so a session hitting a fresh block each turn pins this at 1. The same-issue signal the guard --deny-all-continue Stop-hook keys its bounded give-up on: only a true repeated same issue (this gauge climbing to the give-up depth) stops the session; a varied session is never stopped.",
+		"gauge")
+	fmt.Fprintf(b, "fak_guard_deny_all_same_consecutive %d\n", sameConsec)
 	writeCounter(b, "fak_guard_tool_feedback_turns_total",
 		"Served turns whose EVERY proposed tool call was rejected as retryable model feedback (for example MALFORMED JSON/args). These turns may need guard auto-continue, but they are NOT hard deny-all stops and do not drive the bounded give-up policy.",
 		int64(feedbackTurns))
@@ -215,8 +220,9 @@ func (s *Server) renderMetrics() string {
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	s.writeServingMetrics(&b, inf)
-	m.writeHarnessMetrics(&b)  // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
-	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
+	m.writeHarnessMetrics(&b)   // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
+	m.writeLogvaultMetrics(&b)  // fak_logvault_* — vault last-capture age/footprint/verify mismatches (#2455)
+	s.writeNativePDMetrics(&b)  // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
 	m.writeVCacheWarmthDemotionMetrics(&b)
@@ -230,11 +236,12 @@ func (s *Server) renderMetrics() string {
 	m.writeDenyAllMetrics(&b)
 	s.writeSessionMetrics(&b) // #1204: live session count by DRIVE run-state token
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
-	m.writeRoutingMetrics(&b)         // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
-	s.resumeProj.writeMetrics(&b)     // #941: resume projected-vs-observed residual (self-contained family)
-	s.writeFleetMembershipMetrics(&b) // #42: live fleet membership/health/drain/failover transitions, per worker
-	s.writeAdmissionMetrics(&b)       // #35: native serving-scheduler admission family (fak_sched_*), when a controller is wired
-	s.writePreemptionMetrics(&b)      // #31: native KV preemption/swap/recompute family, when a preemptor is wired
+	m.writeRoutingMetrics(&b)            // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
+	outputNegframeAudit.writeMetrics(&b) // #3567: negative-framing spans in model OUTPUT prose (sampled shadow, observe-only)
+	s.resumeProj.writeMetrics(&b)        // #941: resume projected-vs-observed residual (self-contained family)
+	s.writeFleetMembershipMetrics(&b)    // #42: live fleet membership/health/drain/failover transitions, per worker
+	s.writeAdmissionMetrics(&b)          // #35: native serving-scheduler admission family (fak_sched_*), when a controller is wired
+	s.writePreemptionMetrics(&b)         // #31: native KV preemption/swap/recompute family, when a preemptor is wired
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
 	// inference accumulators above. fak's product axis is agent-fleet serving
@@ -1185,6 +1192,18 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	writeCounter(b, "fak_gateway_inbound_tools_pruned_total", "WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the provider-side upstream cache.", int64(pruneCount))
 	writeCounter(b, "fak_gateway_inbound_tools_prune_turns_total", "WITNESSED (fak authored): turns on which at least one unreachable tool def was pruned from tools[]. Zero on a harness (e.g. Claude Code) whose single cache_control breakpoint sits on the LAST tool, since nothing is then droppable.", int64(pruneTurns))
 	writeCounter(b, "fak_gateway_inbound_tools_pruned_then_proposed_total", "WITNESSED (fak authored): pruned tool definition names that the model later proposed anyway, counted once per trace/tool. Nonzero means the advertised floor and observed model behavior drifted; call-time adjudication still default-denies the proposal.", int64(m.inboundPrunedToolProposalSnapshot()))
+
+	// The OUTBOUND cold-tool DEFERRAL family (the 10x floor lever, --defer-cold-tools #3232 under
+	// epic #3229) — the OUTBOUND twin of the inbound prune family above, and the render surface the
+	// #3232 follow-up called for. WITNESSED: how many cold tool DEFINITIONS fak marked
+	// defer_loading and handed to the provider's tool-search fault-in. Unlike the prune, this does
+	// NOT shrink request bytes — the reduction is provider-side (only the hot core loads into
+	// context), so these counters witness the deferral fak DROVE; the actual token drop is OBSERVED
+	// via input_tokens/cache_read, not claimed here. Both stay 0 when the lever is off (its DEFAULT)
+	// or when no turn had a cold tool tail to defer.
+	deferTurns, deferCold := m.toolDeferSnapshot()
+	writeCounter(b, "fak_gateway_tool_defer_cold_total", "WITNESSED (fak authored): cumulative cold tool DEFINITIONS marked defer_loading:true on the outbound Anthropic body across the session (the 10x floor lever, --defer-cold-tools #3232). Cache-safe by construction (deterministic, byte-stable tools[] turn-over-turn), so a counted deferral never bursts the upstream prompt cache. The provider-side context/token drop it drives is OBSERVED via input_tokens/cache_read, not claimed by this counter.", int64(deferCold))
+	writeCounter(b, "fak_gateway_tool_defer_turns_total", "WITNESSED (fak authored): turns on which fak deferred the cold tool tail (marked >=1 cold def defer_loading and injected a tool_search_tool). Zero when --defer-cold-tools is off (its default) or when every advertised tool was hot; nonzero means the lever fired that turn.", int64(deferTurns))
 
 	// The tool_reference SANITIZE family (a CORRECTNESS transform, not a cache saving). WITNESSED:
 	// how many Claude-Code-internal tool_reference blocks fak rewrote into wire-valid text blocks so

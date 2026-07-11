@@ -14,9 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/blob" // CAS backend backing the page-out path
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
@@ -44,13 +42,11 @@ func toolReq(defs ...[2]string) *agent.AnthropicMessagesRequest {
 // the catalog), and the two /metrics rows the issue names are exposed.
 func TestToolPages_ByteIdenticalAfterCompaction(t *testing.T) {
 	ctx := context.Background()
-	// Hermetic page-out backend. The "blob" codec is registered by internal/blob's init(), but a
-	// sibling test's abi.ResetForTest() (via the shared newTestServer helper, which re-registers only
-	// an inline RegionBackend — not a PageOutBackend) can strip it process-wide before this test runs,
-	// leaving Evict's abi.PageOut("blob") backend-less and returning false — a silent, order-dependent
-	// flake (this test passes alone, fails after any Coherence-family sibling). Re-register the built-in
-	// default defensively: idempotent, and restores the same "blob" codec production relies on.
-	abi.RegisterPageOutBackend("blob", blob.Default)
+	// The page-out path needs the "blob" codec present. It is registered by internal/blob's
+	// init() and — the flake this test once guarded against — is now RESTORED by every
+	// abi.ResetForTest() (which preserves the built-in page-out baseline rather than emptying
+	// it), so no per-test re-registration is needed: "blob" is present at every point in the
+	// binary's life, whether or not a resetting sibling ran first.
 	s := &Server{toolPages: ctxmmu.NewToolPageTable(ctxmmu.New())}
 
 	readSchema := `{"type":"object","properties":{"path":{"type":"string"}}}`

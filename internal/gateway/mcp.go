@@ -766,7 +766,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "fak_context_value",
-			"description": "Query the managed-context value report for a session BEFORE sizing your next step in a long session. Returns three levels — tokens (resident window, budget headroom, growth per reply; OBSERVED), turns (turns observed, context events, estimated turns to the next compaction; WITNESSED/FORECAST), session (lifecycle phase, cumulative volumes) — plus a closed step_advice verdict: any (wide headroom, a large step fits) | bounded (take a single-concern step) | checkpoint (land in-flight state before the window turns over) | rebuild (the window was just rewritten; re-anchor from durable state first) | unknown (the window edge is not visible; the reason says why). Advice-only; nothing enforces it. Pass {trace_id?}; omitted uses the gateway default trace (your own session under fak guard).",
+			"description": "Inspect managed-context pressure for a session. Returns observed token headroom and growth, a turn/compaction forecast, lifecycle volumes, and step_advice (any | bounded | checkpoint | rebuild | unknown). Read-only; optional trace_id defaults to the current guarded session.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -776,7 +776,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_context_restore",
-			"description": "Page a dropped span back in by its content-address handle. When a long fak guard -- claude session compacts, the stub it leaves may carry a tombstone like \"[fak] originating task (compacted, id=<hex>): \\\"…\\\"\": that id is a callable handle. Pass {id} (the <hex>) to get back the FULL verbatim first-user-turn JSON fak dropped from the wire, plus the orientation excerpt — so a model resuming past the compaction can recover WHAT it was asked to do instead of only the lossy excerpt. The id is content-addressed in ONE shared sha256-hex space (ctxplan/recall/memq), so when the compaction stash does not hold it you may also pass {image_dir} — a persisted recall core image — and a recall PAGE addressed by its recall digest pages back in under that image's trust gate. Read-only recovery: returns bytes fak already had and dropped; never re-enters the request path, never fabricates. Trust-gated: a span an operator later sealed (quarantine) or tombstoned (context control) is REFUSED, not resurrected. An unknown/evicted id returns a miss. Omitted trace_id uses the gateway default trace (your own session under fak guard).",
+			"description": "Restore dropped context by content-addressed sha256 id. Returns verbatim stashed bytes plus orientation; optional trace_id defaults to the current guarded session, and image_dir may page a recall-image digest. Read-only and trust-gated: sealed or tombstoned spans are refused, while unknown or evicted ids return a miss.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "required": ["id"],
@@ -789,7 +789,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_context_spans",
-			"description": "List the restorable content-address handles a session trace currently holds — the DISCOVERY counterpart to fak_context_restore. Returns one SAFE row per dropped span: its id (the sha256-hex handle to pass to fak_context_restore), a descriptor (the orientation excerpt, never the full bytes), its size in bytes (the cost proxy), the evidence cluster/kind edges when a source carries them, and its suppression status. Restorable is the one bit that says whether fak_context_restore would page the handle back in: a span an operator sealed (quarantine) or tombstoned (context control) is LISTED as not restorable, and its bytes are never offered here. Read-only enumeration: it surfaces WHAT is recoverable so a model can decide what to restore, and never pages any bytes back in itself. An empty or unknown trace is a valid empty answer (Count 0), not an error. Pass {trace_id?}; omitted uses the gateway default trace (your own session under fak guard).",
+			"description": "List dropped context spans available to fak_context_restore. Returns safe metadata (id, excerpt, bytes, evidence edges, suppression, restorable) without content or paging; sealed or tombstoned spans remain listed but not restorable. Optional trace_id defaults to the current guarded session; unknown traces return Count 0.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -799,7 +799,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_resume_history",
-			"description": "Self-observe YOUR OWN resume/heal history mid-session — the first-person answer to \"was I resumed after a crash, did that resume take, will another automatic attempt fire, or does a human own me now?\". Folds this session's durable launch ledger through the SAME closed outcome folds the CLI `fak resume self` and the operator `resume status` table use, so all three tell you one story. Returns {resolved, ledger_path, observation} where observation carries attempts (fired launches), resume_state (pending | launched | took | re-stranded | gave-up | settled), retry_blocked + retry_reason (whether a NEW automatic resume is gated, and the closed reason), earned_budget (how many automatic attempts your progress has earned), operator_settled (a human settled you by hand), and next_hint (one-line self-advice). Ledger-only and fail-closed: no launch row folds to has_history=false (nothing to recover), an unresolvable ledger returns resolved=false with the reason, and outcome is read conservatively (never a fabricated \"took\"). Read-only, advice-only — nothing here acts on the answer. Pass {session?, ledger?, max_attempts?}; all optional — omitted self-observes the guarded session against the fleet ledger the environment points at.",
+			"description": "Inspect the current session's durable resume and heal history. Returns attempts, closed resume_state, retry block and reason, earned budget, operator settlement, and next hint; no history is explicit and unresolved ledgers fail closed. Read-only and advice-only. Optional session, ledger, and max_attempts default from the guarded fleet environment.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {
