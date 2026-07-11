@@ -1,0 +1,11 @@
+fak: loaded capability floor from C:\work\fak\examples\dogfood-claude-policy.json
+2026/07/06 08:04:05 fak gateway listening on http://127.0.0.1:18780  (engine=inkernel model=qwen3.6-27b vdso=true auth=false)
+2026/07/06 08:04:05 fak cache: idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)
+2026/07/06 08:04:06 {"bytes":72,"duration_ms":0,"event":"gateway_http_request","method":"GET","path":"/healthz","route":"/healthz","status":200,"trace_id":"gw-1","user_agent":"Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.8737"}
+2026/07/06 08:04:06 {"bytes":72,"duration_ms":0,"event":"gateway_http_request","method":"GET","path":"/healthz","route":"/healthz","status":200,"trace_id":"gw-2","user_agent":"Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.8737"}
+{"schema":"fak.watchdog-autoheal.v1","verb":"serve","summary":true,"elapsed_ms":854,"specs":4,"noop":4}
+2026/07/06 08:04:06 {"bytes":19,"duration_ms":0,"event":"gateway_http_request","method":"HEAD","path":"/","route":"other","status":404,"trace_id":"gw-3","user_agent":"Bun/1.4.0"}
+2026/07/06 08:04:19 {"by":"monitor","duration_ms":0.507,"event":"gateway_operation","operation":"adjudicate","tool":"Read","trace_id":"gw-4","verdict":"ALLOW"}
+2026/07/06 08:04:19 {"bytes":880,"duration_ms":12801.325,"event":"gateway_http_request","method":"POST","path":"/v1/messages","route":"/v1/messages","status":200,"trace_id":"gw-4","user_agent":"claude-cli/2.1.200 (external, sdk-cli)"}
+2026/07/06 08:04:19 {"by":"toolprocgate","duration_ms":0.502,"event":"gateway_operation","operation":"proxy_admit","tool":"Read","trace_id":"gw-5","verdict":"DEFER"}
+2026/07/06 08:04:25 {"bytes":2561,"duration_ms":5749.815,"event":"gateway_http_request","method":"POST","path":"/v1/messages","route":"/v1/messages","status":200,"trace_id":"gw-5","user_agent":"claude-cli/2.1.200 (external, sdk-cli)"}
