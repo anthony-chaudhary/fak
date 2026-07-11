@@ -648,6 +648,24 @@ summary  = "A live worker is spending effort (burning transcript/turns/tokens) w
 fix      = "Deliver the graduated correction the classifier recommends: a soft re-anchor NUDGE to the session steer channel first (reversible), then an operator ESCALATE if the doom persists. Never auto-teardown. Floor: `fak doomloop scan` / `internal/doomloop`."
 see_also = ["fak doomloop", "internal/doomloop", "dos status", "docs/goal-spec.md"]
 
+# The recovery-cost governor (#4146): automatic resume was rationed only by attempt COUNT
+# (the progress-earned EarnedResumeBudget). That misses a session whose recovery is cheap in
+# attempts but expensive in provider spend -- a small number of relaunches each burning a
+# large post-resume token/cost tail. RESUME_COST_EXCEEDED is the SECOND, orthogonal rein: the
+# OBSERVED provider tokens/cost attributed to a session's post-resume turns (resume.
+# FoldRecoveryCost) crossed its declared envelope (resume.RecoveryCostCap). It is a SEPARATE
+# governor -- an OBSERVED spend number is never summed into the witnessed attempt budget --
+# and it is REVERSIBLE-first: a breach defers the next launch at a hold an operator can force
+# past or raise the cap for, never a teardown. Declaring the token here makes
+# `dos_check_reason RESUME_COST_EXCEEDED` classify it as a known OPERATOR_GATE, not
+# UNCLASSIFIED drift. The live spend surfaces on internal/resumemetrics at /debug/vars.
+[reasons.RESUME_COST_EXCEEDED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A session's OBSERVED post-resume provider spend (tokens/cost attributed to turns after the resume launch) crossed its declared recovery-cost envelope. A NEW automatic resume is deferred at a reversible hold -- distinct from the attempt-count budget -- pending an operator force or a raised cap, so an expensive recovery cannot silently burn unbounded spend one relaunch at a time."
+fix      = "Confirm the recovery is worth continuing, then either force this launch past the cost hold (the operator force bit) or raise the session's RecoveryCostCap. Inspect the OBSERVED spend on internal/resumemetrics (fak_resume_recovery_tokens / _cost_micro_usd / _cost_holds at /debug/vars). Floor: `internal/resume` FoldRecoveryCost / RecoveryCostCap / FoldNextAction."
+see_also = ["internal/resume/recoverycost.go", "internal/resume/next.go", "internal/resumemetrics", "dos status"]
+
 [reasons.STEER_NO_OWNED_LOOP]
 category = "MISROUTE"
 refusal  = true
@@ -1303,6 +1321,19 @@ refusal  = true
 summary  = "A guarded assumption is about to be relied on, but its backing evidence has aged past its declared freshness bound relative to the witness's source of truth."
 fix      = "Re-witness the assumption from its declared source (`fak assume check <id>` gathers fresh evidence), discard the stale evidence, then retry once the fresh witness confirms HOLDS. Floor: internal/assumecheck GuardAssumption."
 see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+
+# A2A push-notification delivery rides an admission floor before any dial: the webhook
+# host must be allowlisted, the scheme must be http(s), and an SSRF-range IP literal is
+# refused unless loopback delivery was explicitly enabled. A target that fails is refused
+# with this closed reason and NEVER dialed (refuse, don't guess) -- the exfil-floor
+# discipline the gateway uses everywhere else, projected onto the disconnected-consumer
+# webhook seam.
+[reasons.WEBHOOK_URL_NOT_ALLOWLISTED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "an A2A push-notification webhook target is not admissible -- a non-allowlisted host, a non-http(s) scheme, a malformed URL, or an SSRF-range IP literal that was not explicitly permitted -- so delivery is refused and the outbound client is never dialed."
+fix      = "register the receiver's host on the delivery allowlist (Server.SetA2APushWebhookAllowlist); use an http(s) URL with a public host, or explicitly enable loopback delivery for a deliberately-internal receiver. Floor: internal/gateway a2aWebhookAdmit refuses before any dial."
+see_also = ["internal/gateway/a2a_pushnotify.go", "internal/gateway/a2a.go", "dos check-reason"]
 
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
