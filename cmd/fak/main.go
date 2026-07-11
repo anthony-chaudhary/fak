@@ -138,6 +138,8 @@ func main() {
 		cmdTurnTax(os.Args[2:])
 	case "hooklat":
 		cmdHookLat(os.Args[2:])
+	case "dispatchlat":
+		cmdDispatchLat(os.Args[2:])
 	case "agent":
 		cmdAgent(os.Args[2:])
 	case "api-host":
