@@ -26,8 +26,8 @@ func TestResumeWatchdogInstallerDefaultsToLive(t *testing.T) {
 		"if (-not $DryRun) { $Live = $true }",
 		// contradictory flags fail loud instead of picking a winner
 		"if ($Live -and $DryRun) { throw",
-		// a tick missed while the box slept fires on wake
-		"StartWhenAvailable = $true",
+		// a tick missed while the box slept fires on wake (New-ScheduledTaskSettingsSet switch)
+		"-StartWhenAvailable",
 		// the host-side doctor probe for an installed LIVE action
 		"'install','remove','status','assert-live'",
 	} {
