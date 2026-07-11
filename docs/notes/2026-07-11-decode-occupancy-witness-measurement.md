@@ -96,10 +96,16 @@ memory-bound verdicts; `launch__registers_per_thread` plugs into `FlashDecodeLau
 confirm the per-SM limiter. Introducing `ncu` on the boxes is itself the unbuilt ncu-evidence arm
 (#4101).
 
-## Promotion status
+## Promotion status — filed
 
-The four **FILE** candidates have an *exact analytic* gap (block/byte counts), so the file/no-file
-decision is made; the pending item is the device-% corroboration above. Filing the four tickets
-under the shortlist's umbrella (KernelWiki epic in `2026-07-10-kernelwiki-study.md`) is the residual
-step — held for the go-ahead on whether to file now (analytic-witnessed, device-pending) or after the
-ncu numbers land.
+The four **FILE** candidates were promoted to tickets under umbrella epic
+[#3946](https://github.com/anthony-chaudhary/fak/issues/3946) (disposition summary posted there):
+
+- [#4289](https://github.com/anthony-chaudhary/fak/issues/4289) — persistent/work-stealing decode kernel to fill idle SMs
+- [#4290](https://github.com/anthony-chaudhary/fak/issues/4290) — `__ldcs` streaming loads for the use-once K/V decode stream
+- [#4291](https://github.com/anthony-chaudhary/fak/issues/4291) — CLC/persistent tile scheduling for the decode-GEMV wave-quant tail
+- [#4292](https://github.com/anthony-chaudhary/fak/issues/4292) — fuse the MoE decode expert-GEMV launch ladder
+
+Each cites the exact analytic witness; the device-% corroboration above remains the one pending item
+(bridge transport-blocked). tmem-accumulator-migration was **not** filed (no gap — grid-bound), and
+nvfp4 / PDL / CLC-try-cancel were deferred as not-A100-measurable.
