@@ -267,3 +267,38 @@ func TestPrefixStabilityFeedsProviderCacheFirstDivergeAt(t *testing.T) {
 		t.Fatalf("provider entry not marked cost_latency_only: %+v", v.Meta)
 	}
 }
+
+func TestAlmostHitReportsGapWhenPrefixCachedDeeperThanServableHit(t *testing.T) {
+	// A shared prefix cached 25 tokens deep while only 10 are servable to this
+	// request: 15 tokens materialized ONCE would warm the shared prefix.
+	w := AlmostHit(10, 25)
+	if w.UncachedCommonPrefixTokens != 15 {
+		t.Fatalf("AlmostHit(10, 25).UncachedCommonPrefixTokens = %d, want 15", w.UncachedCommonPrefixTokens)
+	}
+	if !w.Worth {
+		t.Fatalf("AlmostHit(10, 25).Worth = false, want true (positive gap)")
+	}
+}
+
+func TestAlmostHitEqualLengthsIsNotWorthWarming(t *testing.T) {
+	w := AlmostHit(25, 25)
+	if w.UncachedCommonPrefixTokens != 0 || w.Worth {
+		t.Fatalf("AlmostHit(25, 25) = %+v, want {0 false} (no gap)", w)
+	}
+}
+
+func TestAlmostHitClampsNegativeGapToZero(t *testing.T) {
+	// reusable > longest is a degenerate measurement; the gap clamps to 0 rather
+	// than going negative.
+	w := AlmostHit(30, 25)
+	if w.UncachedCommonPrefixTokens != 0 || w.Worth {
+		t.Fatalf("AlmostHit(30, 25) = %+v, want {0 false} (clamped)", w)
+	}
+}
+
+func TestAlmostHitZeroInputsIsNotWorthWarming(t *testing.T) {
+	w := AlmostHit(0, 0)
+	if w.UncachedCommonPrefixTokens != 0 || w.Worth {
+		t.Fatalf("AlmostHit(0, 0) = %+v, want {0 false}", w)
+	}
+}

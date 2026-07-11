@@ -198,6 +198,37 @@ type StabilityReport struct {
 	RecoverableTokens int64 // sum of LintPrefixLayout.StrandedStableTokens — predicted reorder uplift
 }
 
+// WarmCandidate is the "almost-hit" warm signal (#3894), a SIBLING of
+// StabilityReport.RecoverableTokens on the §A3 signal surface. Where
+// RecoverableTokens predicts the uplift from REORDERING a turn's own segments,
+// WarmCandidate reports how far a shared prefix is cached DEEPER in the store than
+// the hit currently servable to this request — i.e. exactly how many tokens would
+// have to be materialized ONCE to warm the shared prefix up to its already-cached
+// depth. It does not change RecoverableTokens' meaning.
+type WarmCandidate struct {
+	// UncachedCommonPrefixTokens is longestCachedPrefixLen - reusableHitLen, clamped
+	// to 0: the token gap between the deepest cached extent of the shared prefix and
+	// the hit this request can actually reuse right now.
+	UncachedCommonPrefixTokens int
+	// Worth is true when the gap is positive — there is warm work that would pay off.
+	Worth bool
+}
+
+// AlmostHit computes the warm-candidate signal from two lengths measured elsewhere:
+// reusableHitLen is the prefix length (tokens) the current request can reuse as a
+// cache hit, and longestCachedPrefixLen is the longest cached extent of the same
+// shared prefix (e.g. the radixkv longest-cached-prefix accessor — deliberately an
+// INPUT here, not a dependency). A non-positive gap (longest <= reusable, including
+// zero or degenerate negative inputs) yields UncachedCommonPrefixTokens=0,
+// Worth=false: there is nothing to warm.
+func AlmostHit(reusableHitLen, longestCachedPrefixLen int) WarmCandidate {
+	gap := longestCachedPrefixLen - reusableHitLen
+	if gap <= 0 {
+		return WarmCandidate{}
+	}
+	return WarmCandidate{UncachedCommonPrefixTokens: gap, Worth: true}
+}
+
 // AnalyzeStability computes the §A3 report over an ordered list of turns (each turn is
 // the full serialized prompt for that request).
 func AnalyzeStability(turns [][]PromptSegment) StabilityReport {
