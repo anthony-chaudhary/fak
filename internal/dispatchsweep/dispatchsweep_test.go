@@ -43,8 +43,8 @@ func TestDryRunPlansExactlyOneTick(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("dry-run must run exactly ONE tick, ran %d", calls)
 	}
-	if settles != 0 {
-		t.Errorf("dry-run must never settle, settled %d", settles)
+	if settles != 1 {
+		t.Errorf("dry-run must settle once, settled %d", settles)
 	}
 	if rec.Mode != "dry-run" || rec.StopVerdict != "DRY_RUN" {
 		t.Errorf("mode/verdict = %q/%q, want dry-run/DRY_RUN", rec.Mode, rec.StopVerdict)
@@ -71,8 +71,8 @@ func TestDrainsUntilRefuseAtCap(t *testing.T) {
 	if rec.StopVerdict != "REFUSE_AT_CAP" {
 		t.Errorf("stop verdict = %q, want REFUSE_AT_CAP", rec.StopVerdict)
 	}
-	if settles != 2 {
-		t.Errorf("settle calls = %d, want 2 (one after each live spawn)", settles)
+	if settles != 3 {
+		t.Errorf("settle calls = %d, want 3 (one after every tick outcome)", settles)
 	}
 	if !rec.OK {
 		t.Errorf("a clean cap-stop must be ok")
@@ -114,7 +114,7 @@ func TestSettleBetweenLiveSpawnsOnly(t *testing.T) {
 	tick := seqTick(spawnedTick(10), spawnedTick(11), refuseTick("NO_ISSUE"))
 	settles := 0
 	RunSweep(cfg(100, true), tick, func() { settles++ })
-	if settles != 2 {
+	if settles != 3 {
 		t.Errorf("settle calls = %d, want 2", settles)
 	}
 }
@@ -160,5 +160,26 @@ func TestSpawnedIssuesNeverNil(t *testing.T) {
 	rec := RunSweep(cfg(100, true), seqTick(refuseTick("NO_LANE")), func() {})
 	if rec.SpawnedIssues == nil {
 		t.Errorf("SpawnedIssues must be a non-nil empty slice for stable JSON")
+	}
+}
+
+func TestRunSweepSettlesEveryOutcome(t *testing.T) {
+	cases := []struct {
+		name string
+		tick TickResult
+		live bool
+	}{
+		{"refusal", TickResult{Action: "refuse", Verdict: "NO_SEAT"}, true},
+		{"dry_run", TickResult{Action: "spawn", Verdict: "WOULD_SPAWN", Issue: 7}, false},
+		{"live_spawn", TickResult{Action: "spawn", Verdict: "SPAWNED", Issue: 7}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settles := 0
+			RunSweep(Config{MaxAgents: 1, Live: tc.live}, func(int) (TickResult, error) { return tc.tick, nil }, func() { settles++ })
+			if settles != 1 {
+				t.Fatalf("settles=%d, want 1", settles)
+			}
+		})
 	}
 }

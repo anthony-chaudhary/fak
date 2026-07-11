@@ -149,6 +149,10 @@ func RunSweep(cfg Config, tick TickFunc, settle func()) Record {
 			PreflightVerdict: tr.PreflightVerdict, Reason: tr.Reason,
 		})
 
+		// Pace every tick outcome. Refusals and dry-runs are exactly the cheap,
+		// fast paths that otherwise form a subprocess storm when a caller retries.
+		settle()
+
 		if !progressActions[tr.Action] {
 			stopVerdict = firstNonEmpty(tr.Verdict, tr.Action, "UNKNOWN")
 			if r, ok := stopReasons[stopVerdict]; ok {
@@ -173,7 +177,6 @@ func RunSweep(cfg Config, tick TickFunc, settle func()) Record {
 			stopReason = fmt.Sprintf("reached the --max-agents best-effort ceiling (%d)", cfg.MaxAgents)
 			break
 		}
-		settle()
 	}
 	if stopVerdict == "" {
 		stopVerdict = "MAX_ITERS"

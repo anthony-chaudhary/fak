@@ -30,21 +30,23 @@ import (
 const loopDriveHandoffFileEnv = "FAK_TASK_HANDOFF_FILE"
 
 type loopDriveOptions struct {
-	GoalPath        string
-	LedgerPath      string
-	PolicyPath      string
-	LoopID          string
-	Source          string
-	Principal       string
-	WitnessOverride string
-	MaxIters        int
-	MaxTokens       int64
-	Deadline        time.Time
-	Command         []string
-	Clock           func() time.Time
-	ReviewModel     string
-	ReviewEndpoint  string
-	ReviewAPIKeyEnv string
+	GoalPath          string
+	LedgerPath        string
+	PolicyPath        string
+	LoopID            string
+	Source            string
+	Principal         string
+	WitnessOverride   string
+	MaxIters          int
+	MaxTokens         int64
+	Deadline          time.Time
+	Command           []string
+	Clock             func() time.Time
+	Sleep             func(time.Duration)
+	MinIterationFloor time.Duration
+	ReviewModel       string
+	ReviewEndpoint    string
+	ReviewAPIKeyEnv   string
 	// HandoffFile is the path the wrapped agent writes a fak.task-handoff.v1
 	// record to before a witnessed-done completion. Empty means the loop driver
 	// allocates a private per-session file and exposes it to the child.
@@ -162,6 +164,14 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 	if clock == nil {
 		clock = time.Now
 	}
+	sleep := opt.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	floor := opt.MinIterationFloor
+	if floor <= 0 {
+		floor = time.Second
+	}
 	goalPath := strings.TrimSpace(opt.GoalPath)
 	if goalPath == "" {
 		goalPath = "GOAL.md"
@@ -178,6 +188,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 	var regionHold *loopDriveRegionHold
 	defer func() { regionHold.release() }()
 	for {
+		iterationStarted := clock()
 		spec, err := loadLoopGoal(goalPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
@@ -344,6 +355,9 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		if witness.Status == loopmgr.StatusWitnessUnavailable {
 			fmt.Fprintf(stderr, "fak loop drive: exit gate refused: %s %s\n", witness.Reason, witness.Summary)
 			return 3
+		}
+		if remain := floor - clock().Sub(iterationStarted); remain > 0 {
+			sleep(remain)
 		}
 	}
 }
