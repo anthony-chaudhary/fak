@@ -1,9 +1,18 @@
 package fleetaccounts
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
+
+// weekdayPrefixRE strips a leading weekday token ("Mon ", "tue ", ...) from a reset
+// string before format matching, mirroring fleet_accounts._reset_is_future's
+// `^(mon|tue|wed|thu|fri|sat|sun)\s+` scrub. Claude stamps its DATED weekly resets as
+// "Mon Jun 25 at 1pm"; without this strip the weekday makes the whole string unparseable,
+// which resetIsFuture reports as nil (unknown) and throttleIsActive then treats fail-closed
+// as a still-active weekly cap — walling a healthy seat indefinitely.
+var weekdayPrefixRE = regexp.MustCompile(`^(mon|tue|wed|thu|fri|sat|sun)\s+`)
 
 // soonness.go — the shared reset-time core behind resetIsFuture, plus the ResetSoonness
 // signal the config-plane rotation uses to break ties AMONG walled buckets (order the
@@ -40,12 +49,19 @@ func resetTime(reset string, now time.Time) (time.Time, bool) {
 	raw = parenAll.ReplaceAllString(raw, "")
 	raw = strings.TrimSpace(raw)
 	raw = strings.ToLower(wsRun.ReplaceAllString(raw, " "))
+	raw = weekdayPrefixRE.ReplaceAllString(raw, "")
 
 	type fmtSpec struct {
 		layout string
 		dated  bool
 	}
+	// Order mirrors fleet_accounts._reset_is_future: the DATED weekly forms first (both
+	// the "at" and comma separators Claude emits — "Jun 25 at 1pm" / "Jun 25, 1pm"), then
+	// the BARE 5-hour rolling forms. Minute-bearing layouts precede their hour-only twin so
+	// "1:30pm" is not eaten by the "1pm" layout.
 	specs := []fmtSpec{
+		{"Jan 2 at 3:04pm", true},
+		{"Jan 2 at 3pm", true},
 		{"Jan 2, 3:04pm", true},
 		{"Jan 2, 3pm", true},
 		{"3:04pm", false},

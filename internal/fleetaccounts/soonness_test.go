@@ -69,6 +69,36 @@ func TestResetSoonnessFarFutureIsZeroButOk(t *testing.T) {
 	}
 }
 
+// TestResetParsesWeeklyAtAndWeekdayForms pins parity with fleet_accounts._reset_is_future on
+// the DATED weekly reset shapes Claude actually emits: an "at" separator and an optional
+// leading weekday token ("Mon Jun 25 at 1pm"). Before the weekday-strip + "at"-layout fix these
+// parsed as nil (unknown), which throttleIsActive treats fail-closed as a still-active weekly
+// cap — walling a healthy seat indefinitely and suppressing its fresh-OK probes. now is well
+// before the reset so every form must read as a live future weekly.
+func TestResetParsesWeeklyAtAndWeekdayForms(t *testing.T) {
+	now := time.Date(2026, time.June, 20, 10, 0, 0, 0, time.UTC)
+	future := []string{
+		"Jun 25 at 1pm",
+		"Jun 25 at 1:30pm",
+		"Mon Jun 25 at 1pm",
+		"Mon Jun 25 at 1:30pm",
+		"Jun 25, 1pm",
+		"Jun 25 at 1pm (America/Los_Angeles)",
+	}
+	for _, f := range future {
+		if _, ok := resetTime(f, now); !ok {
+			t.Errorf("resetTime(%q) not parsed; a real weekly form must parse", f)
+		}
+		if r := resetIsFuture(f, now); r == nil || !*r {
+			t.Errorf("resetIsFuture(%q) = %v, want future — an unparsed weekly walls the seat fail-closed", f, r)
+		}
+	}
+	// A narrative form we do not model stays unknown (nil), matching Python's None.
+	if r := resetIsFuture("resets Monday", now); r != nil {
+		t.Errorf("resetIsFuture(%q) = %v, want nil (unknown)", "resets Monday", r)
+	}
+}
+
 // TestResetIsFutureUnchanged guards the refactor: resetIsFuture now reads the shared resetTime
 // core, and must still report future/expired/unknown exactly as before.
 func TestResetIsFutureUnchanged(t *testing.T) {
