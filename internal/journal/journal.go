@@ -102,7 +102,8 @@ type Row struct {
 	// (Tool), the session (TraceID), and the closed-vocabulary class (Reason) — rides
 	// the frozen decision fields above; ExitCode is a debugging convenience layered
 	// on top.
-	ExitCode int `json:"exit_code,omitempty"` // the child's exit code (-1 when signaled); 0 omitted
+	ExitCode  int               `json:"exit_code,omitempty"` // the child's exit code (-1 when signaled); 0 omitted
+	ChildExit *ChildExitWitness `json:"child_exit,omitempty"`
 
 	// Restart-chain field (for RESTART_HOP: the budget-restart continuity
 	// witness, #3057). Like a crash, a restart is supervision — not a kernel

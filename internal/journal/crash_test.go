@@ -76,3 +76,15 @@ func TestCrashRowSurvivesFileRoundTrip(t *testing.T) {
 		t.Fatalf("read-back crash row = %+v", rows)
 	}
 }
+
+func TestAppendChildExitRecordsCleanWallTimeAndLastHook(t *testing.T) {
+	j := OpenMemory()
+	j.AppendAgentEvent("HOOK_DECISION", "codex-loop-hook", "block")
+	row := j.AppendChildExit("codex", "guard-4213", CrashCleanExit, 0, 1250*time.Millisecond, "HOOK_DECISION:block")
+	if row.Kind != KindChildExit || row.Reason != CrashCleanExit || row.ChildExit == nil {
+		t.Fatalf("exit row = %+v", row)
+	}
+	if row.ChildExit.WallTimeMS != 1250 || row.ChildExit.LastHook != "HOOK_DECISION:block" {
+		t.Fatalf("exit detail = %+v", row.ChildExit)
+	}
+}

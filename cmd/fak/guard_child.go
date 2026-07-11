@@ -1185,6 +1185,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		if guardChildIsLaunchFailure(runErr) {
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 		}
+		appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
 		finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
@@ -1321,6 +1322,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", event.Reason, guardTraceID)
 			}
 			stopGuardChild(child, wait, 2*time.Second)
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -1477,6 +1479,32 @@ func guardClassifyChildCrash(runErr error, childState *os.ProcessState) (class s
 	}
 }
 
+func appendGuardChildExitWitness(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time) journal.Row {
+	if j == nil {
+		return journal.Row{}
+	}
+	class, exitCode := journal.CrashCleanExit, 0
+	if runErr != nil {
+		class, exitCode, _ = guardClassifyChildCrash(runErr, state)
+	}
+	lastHook := ""
+	for _, row := range j.Recent(64) {
+		if row.Seq == 0 || row.Kind == "CHILD_CRASH" || row.Kind == "CHILD_EXIT" {
+			continue
+		}
+		lastHook = row.Kind
+		if row.Reason != "" {
+			lastHook += ":" + row.Reason
+		}
+		break
+	}
+	wall := time.Duration(0)
+	if !started.IsZero() {
+		wall = time.Since(started)
+	}
+	return j.AppendChildExit(agentName, traceID, class, exitCode, wall, lastHook)
+}
+
 func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 	var currentRefusals []guardRefusalCarry
 
@@ -1573,16 +1601,6 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// Flush + fsync the durable trail before exit so a row returned to the agent is
 	// never lost to a buffered write (Close is safe on a nil/in-memory journal).
 	if auditJournal != nil {
-		// If the wrapped child died abnormally, record a durable CHILD_CRASH row BEFORE
-		// close so the guard-RSI loop — which folds only this journal — can see the
-		// crash that verdict rows structurally cannot carry. Written directly through
-		// the chain (a crash is not a kernel decision); a clean exit writes nothing.
-		if class, code, isCrash := guardClassifyChildCrash(runErr, childState); isCrash {
-			row := auditJournal.AppendCrash(agentName, guardTraceID, class, code)
-			if !quiet {
-				fmt.Fprintf(os.Stderr, "fak guard: recorded CHILD_CRASH (%s, exit %d) to the audit journal at seq %d\n", class, code, row.Seq)
-			}
-		}
 		var err error
 		currentRefusals, err = guardWriteRefusalCarryForwardAndReturn(auditJournal, auditSeq0, guardTraceID, guardFindReasonRoot())
 		if err != nil && !quiet {

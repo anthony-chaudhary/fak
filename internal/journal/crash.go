@@ -1,5 +1,7 @@
 package journal
 
+import "time"
+
 // Crash telemetry — the durable witness for a supervised-child ABNORMAL EXIT.
 //
 // The decision journal records what the KERNEL decided over each tool call
@@ -27,12 +29,14 @@ package journal
 // verdict set skips its verdict accounting — but the guard-RSI fold, which keys on
 // Kind, counts it as the worst honesty hole a session can carry.
 const KindChildCrash = "CHILD_CRASH"
+const KindChildExit = "CHILD_EXIT"
 
 // Crash classes — the CLOSED vocabulary for the Reason field of a CHILD_CRASH row.
 // A closed set (mirroring the adjudicator's closed reason vocabulary) keeps the
 // RSI recovery rung's per-class recurrence buckets stable instead of exploding
 // into free-text: every abnormal exit maps to exactly one of these.
 const (
+	CrashCleanExit = "CLEAN_EXIT"
 	// CrashSignal is a child killed by an OS signal (SIGSEGV/SIGABRT/SIGKILL/…): a
 	// genuine crash or an external kill. On a signaled exit os.ProcessState reports
 	// ExitCode() == -1.
@@ -52,6 +56,11 @@ const (
 	CrashRateLimitExit = "RATE_LIMIT_EXIT"
 )
 
+type ChildExitWitness struct {
+	WallTimeMS int64  `json:"wall_time_ms"`
+	LastHook   string `json:"last_hook,omitempty"`
+}
+
 // AppendCrash records one supervised-child abnormal exit as a durable, chained
 // CHILD_CRASH row and returns the committed row (with its stamped Seq/hash). agent
 // is the wrapped agent name (recorded on Tool), traceID is the guard session id
@@ -65,16 +74,25 @@ const (
 // a crash is not a kernel decision. The write is flushed per row by append, so a
 // crash row survives the very exit that produced it.
 func (j *Journal) AppendCrash(agent, traceID, reasonClass string, exitCode int) Row {
+	return j.AppendChildExit(agent, traceID, reasonClass, exitCode, 0, "")
+}
+
+func (j *Journal) AppendChildExit(agent, traceID, reasonClass string, exitCode int, wallTime time.Duration, lastHook string) Row {
 	if j == nil {
 		return Row{}
 	}
+	kind := KindChildExit
+	if reasonClass != CrashCleanExit {
+		kind = KindChildCrash
+	}
 	row := Row{
-		Kind:     KindChildCrash,
-		Tool:     agent,
-		TraceID:  traceID,
-		Reason:   reasonClass,
-		By:       "guard-supervisor",
-		ExitCode: exitCode,
+		Kind:      kind,
+		Tool:      agent,
+		TraceID:   traceID,
+		Reason:    reasonClass,
+		By:        "guard-supervisor",
+		ExitCode:  exitCode,
+		ChildExit: &ChildExitWitness{WallTimeMS: wallTime.Milliseconds(), LastHook: lastHook},
 	}
 	j.mu.Lock()
 	j.appendLocked(row)
