@@ -1691,22 +1691,45 @@ def _run_ships_per_worker_git(root: Path, since_iso: str) -> list[str] | None:
     return [rec for rec in (proc.stdout or "").split("\x1e") if rec.strip()]
 
 
+def _parse_watchdog_query(stdout: str) -> dict[str, Any]:
+    """Pull ``Status`` and ``Last Result`` from ``schtasks /Query /V /FO LIST``
+    output. Returns ``{"status": str|None, "last_result": int|None}``; matches on
+    the field label so a red LastTaskResult (#2636) is captured for the #2642 watch
+    digest, and tolerates absent fields (``None``) instead of raising."""
+    status = None
+    last_result = None
+    for line in (stdout or "").splitlines():
+        label, sep, val = line.partition(":")
+        if not sep:
+            continue
+        label = label.strip().lower()
+        val = val.strip()
+        if label == "status":
+            status = val or None
+        elif label == "last result":
+            toks = val.split()
+            last_result = _int(toks[0]) if toks else None
+    return {"status": status, "last_result": last_result}
+
+
 def watchdog_installed() -> dict[str, Any]:
-    """Is the always-on watchdog scheduled task registered, and is it enabled?"""
+    """Is the always-on watchdog scheduled task registered, and is it enabled?
+
+    Queries verbose (``/V``) so ``Last Result`` is captured alongside ``Status``:
+    the #2642 watch digest consumes that red/green bit to classify a scheduled-task
+    result as clean / self-healing / unresolved (issue Done condition, question 2)."""
     try:
         proc = subprocess.run(
-            ["schtasks", "/Query", "/TN", WATCHDOG_TASK, "/FO", "LIST"],
+            ["schtasks", "/Query", "/TN", WATCHDOG_TASK, "/V", "/FO", "LIST"],
             capture_output=True, text=True, timeout=15,
             creationflags=_win_creationflags())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"installed": None, "error": str(exc)}
     if proc.returncode != 0:
         return {"installed": False, "status": None}
-    status = None
-    for line in proc.stdout.splitlines():
-        if line.lower().strip().startswith("status:"):
-            status = line.split(":", 1)[1].strip()
-    return {"installed": True, "status": status}
+    parsed = _parse_watchdog_query(proc.stdout)
+    return {"installed": True, "status": parsed["status"],
+            "last_result": parsed["last_result"]}
 
 
 def _int(v: Any, d: int | None = None) -> int | None:
@@ -2412,13 +2435,17 @@ def collect(root: Path, *, max_workers: int, fast: bool,
 
     # Watch decision (#2642): explain WHY the health-watch (no-)acts, folded from
     # the trailing window of progress rows. Pure-local read, informational only —
-    # never launches work or changes caps. The scheduled-task classification reuses
-    # the watchdog query; follow-ups are listed when a caller supplies them.
+    # never launches work or changes caps. The scheduled-task classification
+    # consumes the watchdog query's Last Result plus a progress-window recovery
+    # witness (self-healing vs unresolved, question 2); follow-ups are listed when
+    # a caller supplies them.
     now_ts = time.time()
     progress_records = read_dispatch_progress(root)
     watch = watch_decision(
         progress_records, now_ts=now_ts,
-        sched_task={"installed": wd.get("installed"), "status": wd.get("status")})
+        sched_task={"installed": wd.get("installed"), "status": wd.get("status"),
+                    "last_result": wd.get("last_result"),
+                    "recovered": _sched_recovered(progress_records, now_ts=now_ts)})
     # Backlog arrival-vs-service rate (#2634): numeric supply/demand meter folded
     # from the same trailing progress window. Pure-local read, informational only.
     backlog_rate = backlog_rates(progress_records, now_ts=now_ts)
@@ -2598,6 +2625,32 @@ def _watch_row_witness(rec: dict[str, Any]) -> dict[str, Any]:
         "closed_now": _int(rec.get("closed_now")),
         "audit_error": rec.get("audit_error"),
     }
+
+
+def _sched_recovered(progress_records: list[dict[str, Any]], *, now_ts: float,
+                     window_hours: float = WATCH_DEFAULT_WINDOW_HOURS) -> bool:
+    """Did the loop demonstrably advance closures in the trailing window?
+
+    This is the 'next tick recovered' witness the ef59064f watch applied by hand
+    (#2642): a red scheduled-task ``LastTaskResult`` is reclassified self-healing
+    only when the loop kept closing issues after it — otherwise it stays
+    ``unresolved_unknown``. ``closed_by_loop_total`` is monotonic, so max-min > 0
+    over the in-window rows is an order-independent 'advanced' signal."""
+    cutoff = now_ts - window_hours * 3600.0
+    totals: list[int] = []
+    closes = 0
+    for rec in progress_records or []:
+        if not isinstance(rec, dict):
+            continue
+        ep = _iso_epoch(rec.get("utc"))
+        if ep is None or ep < cutoff or ep > now_ts + 3600.0:
+            continue
+        lt = _int(rec.get("closed_by_loop_total"))
+        if lt is not None:
+            totals.append(lt)
+        closes += _int(rec.get("closed_now")) or 0
+    advanced = bool(totals) and (max(totals) - min(totals) > 0)
+    return bool(advanced or closes > 0)
 
 
 def watch_decision(progress_records: list[dict[str, Any]], *, now_ts: float,

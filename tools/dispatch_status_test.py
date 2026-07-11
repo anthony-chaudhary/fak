@@ -2617,6 +2617,76 @@ class WatchDecisionTest(unittest.TestCase):
         self.assertEqual(p["watch_decision"], {})
         self.assertNotIn("watch     :", mod.render(p))
 
+    def test_parse_watchdog_query_extracts_status_and_last_result(self) -> None:
+        # verbose `schtasks /Query /V /FO LIST` shape: a red LastTaskResult must be
+        # captured so the live digest can answer the issue's question 2.
+        mod = load()
+        out = "\r\n".join([
+            "Folder: \\", "HostName:      HOST", "TaskName:      \\fak-watchdog",
+            "Status:        Ready", "Last Run Time: 7/7/2026 1:00:00 AM",
+            "Last Result:   267009", "Author:        HOST\\op",
+        ])
+        got = mod._parse_watchdog_query(out)
+        self.assertEqual(got["status"], "Ready")
+        self.assertEqual(got["last_result"], 267009)
+
+    def test_parse_watchdog_query_green_and_absent_fields(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod._parse_watchdog_query("Status: Running\nLast Result: 0\n"),
+            {"status": "Running", "last_result": 0})
+        # no Last Result line (e.g. non-verbose output) -> None, not a raise
+        self.assertEqual(
+            mod._parse_watchdog_query("Status: Ready\n"),
+            {"status": "Ready", "last_result": None})
+
+    def test_sched_recovered_true_when_closures_advance(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        self.assertTrue(mod._sched_recovered(
+            rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z")))
+
+    def test_sched_recovered_false_when_loop_flat(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=780, closed_now=0),
+        ]
+        self.assertFalse(mod._sched_recovered(
+            rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z")))
+
+    def test_live_red_result_with_recovery_classifies_self_healing(self) -> None:
+        # end-to-end live-wiring shape (what collect() now feeds watch_decision): a
+        # red LastTaskResult whose loop kept closing => self_healing, not a
+        # malfunction — the distinction that was dead code in the live path before.
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        now = self._now(mod, "2026-07-07T00:00:00Z")
+        recovered = mod._sched_recovered(rows, now_ts=now)
+        wd = mod.watch_decision(rows, now_ts=now, sched_task={
+            "installed": True, "status": "Ready",
+            "last_result": 267009, "recovered": recovered})
+        self.assertEqual(wd["scheduled_task"]["classification"], "self_healing")
+
+    def test_live_red_result_without_recovery_stays_unresolved(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=780, closed_now=0),
+        ]
+        now = self._now(mod, "2026-07-07T00:00:00Z")
+        wd = mod.watch_decision(rows, now_ts=now, sched_task={
+            "installed": True, "status": "Ready", "last_result": 267009,
+            "recovered": mod._sched_recovered(rows, now_ts=now)})
+        self.assertEqual(
+            wd["scheduled_task"]["classification"], "unresolved_unknown")
+
 
 class BacklogRateTest(unittest.TestCase):
     """#2634: the numeric arrival-vs-service fold that tells 'outpaced' (healthy
