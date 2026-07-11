@@ -29,7 +29,6 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"propagation",
 		"qa-process",
 		"repo-hygiene",
-		"seo",
 		"skill-effectiveness",
 		"sota-coverage",
 		"support-maturity",
