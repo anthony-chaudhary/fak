@@ -52,6 +52,16 @@ python tools/industry_scorecard.py --json         # competitive map: where parit
 python tools/industry_freshness_cadence.py --json  # what's gone stale / newly moved in the field
 ```
 
+`idea-scout` walks GitHub on **two lanes** (`tools/idea_scout.py`): an all-time
+**stars** lane *and* a recency-sorted **fresh** lane (`--sort updated`, a lower star
+floor) that surfaces **new / trending / recently-updated** repos the stars sort
+buries. Each filed issue's `**Why surfaced**` line carries the score reasons that
+earned it, so a fresh-lane lead is legible right in the body — grep it for
+`trending`, `very fresh`, or `actively updated` to find the repos that just moved
+relative to ours. Those are the leads this loop most exists to catch: a repo that was
+*just open-sourced or is climbing fast* is where the novelty (and the borrow) is
+freshest.
+
 Also skim the durable corpus for a lead someone already flagged but never studied:
 `docs/notes/RESEARCH-*` and `docs/notes/CONCEPT-*`. The crawler is the feeder
 (`docs/dispatch-loop.md` framing: the dispatch loop *resolves*, idea-scout
@@ -62,10 +72,13 @@ studied backlog* the dispatch loop can then resolve.
 
 From the crawl, pick **one** lead that is **repo-shaped** — a GitHub URL, a
 paper-with-code link, a named codebase — and where the field signal says the
-parity-debt or novelty is highest. One lead per pass is the anti-storm bound (the
-same discipline as idea-scout's per-run cap). If nothing fresh is repo-shaped,
-**stop clean** — an empty pass is a valid result; never invent a lead to have
-something to do.
+parity-debt or novelty is highest. **Prefer the fresh-lane leads** (a `**Why
+surfaced**` line marked `trending` / `very fresh` / `actively updated`): a repo that
+just appeared or is climbing relative to ours is the highest-novelty, most-perishable
+lead — study it before it's an incumbent everyone already read. One lead per pass is
+the anti-storm bound (the same discipline as idea-scout's per-run cap). If nothing
+fresh is repo-shaped, **stop clean** — an empty pass is a valid result; never invent
+a lead to have something to do.
 
 Prefer a lead that is *not already studied*: grep `docs/notes/CONCEPT-STUDY-*` and
 `gh issue list --search` for its name first, so the loop doesn't re-study a repo a

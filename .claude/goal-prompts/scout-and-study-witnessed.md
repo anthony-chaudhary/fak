@@ -10,12 +10,18 @@ the backlog; you never resolve it. A crawl is not a borrow; a study is not a shi
    arXiv yourself:
    `gh issue list --search "label:idea-scout" --state open --limit 30 --json number,title,body,url`,
    `python tools/industry_scorecard.py --json`, and skim `docs/notes/RESEARCH-*`.
+   idea-scout walks GitHub on a **fresh/trending lane** as well as the stars lane, so
+   its leads include **new / recently-updated** repos; each issue's `**Why surfaced**`
+   line stamps the reasons (`trending`, `very fresh`, `actively updated`).
 
 2. **SELECT one repo-shaped lead.** Pick the SINGLE highest-value lead that names a
-   codebase (a GitHub URL / paper-with-code). One per pass — the anti-storm bound.
-   Grep `docs/notes/CONCEPT-STUDY-*` and `gh issue list --search "<name>"` first;
-   skip a repo a prior pass already studied. **If nothing fresh is repo-shaped,
-   STOP CLEAN — an empty pass is a valid result. Never invent a lead.**
+   codebase (a GitHub URL / paper-with-code). **Prefer a fresh-lane lead** (its
+   `**Why surfaced**` line marked `trending` / `very fresh` / `actively updated`) — a
+   just-open-sourced or fast-climbing repo relative to ours is the most perishable,
+   highest-novelty lead. One per pass — the anti-storm bound. Grep
+   `docs/notes/CONCEPT-STUDY-*` and `gh issue list --search "<name>"` first; skip a
+   repo a prior pass already studied. **If nothing fresh is repo-shaped, STOP CLEAN —
+   an empty pass is a valid result. Never invent a lead.**
 
 3. **STUDY via /study-repo.** Drive `.claude/skills/study-repo/SKILL.md` — do not
    restate it. Shallow-clone INTO SCRATCH (never `C:\work\fak`), pin the commit
