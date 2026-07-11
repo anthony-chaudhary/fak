@@ -237,6 +237,14 @@
       "fix": "produce the destroy plan for review instead: terraform plan -destroy; applying a destroy is operator-only" }
   ],
 
+  "egress": {
+    "research_allow_hosts": [
+      "github.com",
+      "raw.githubusercontent.com",
+      "api.github.com"
+    ]
+  },
+
   "self_modify_globs": [
     ".git/",
     ".fak/guard/",

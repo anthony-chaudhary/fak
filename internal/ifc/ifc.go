@@ -44,6 +44,7 @@ import (
 	"container/list"
 	"context"
 	"encoding/json"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -286,6 +287,10 @@ type Policy struct {
 	// permits the flow (the explicit-authorization escape CaMeL requires for
 	// legitimate egress). Default nil => no escape (fail-closed).
 	Authorize func(c *abi.ToolCall, into SinkClass) bool
+	// AuthorizedEgressHosts permits tainted read-only WebFetch calls to explicit
+	// research destinations. It is deliberately host-scoped rather than a blanket
+	// WebFetch escape; the adjudicator's hard metadata/private-host floor runs first.
+	AuthorizedEgressHosts []string
 	// DenyResultsOverTaintCeiling hard-refuses a produced result whose source taint
 	// exceeds the trusted ceiling instead of admitting it with a ScopeAgent clamp.
 	// Default false preserves the historical stamp-only result path.
@@ -642,7 +647,8 @@ func (g *SinkGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 
 	// A tainted flow into a sensitive sink. The explicit-authorization escape (a
 	// human-approved or policy-permitted flow) can release it; otherwise refuse.
-	if g.policy.Authorize != nil && g.policy.Authorize(c, sink) {
+	if (g.policy.Authorize != nil && g.policy.Authorize(c, sink)) ||
+		authorizedResearchEgress(ctx, c, sink, g.policy.AuthorizedEgressHosts) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink(authorized)"}
 	}
 	return abi.Verdict{
@@ -668,6 +674,25 @@ func taintName(t abi.TaintLabel) string {
 		return "quarantined"
 	}
 	return "unknown"
+}
+
+func authorizedResearchEgress(ctx context.Context, c *abi.ToolCall, sink SinkClass, allowHosts []string) bool {
+	if sink != SinkEgress || c == nil || !strings.EqualFold(c.Tool, "WebFetch") || len(allowHosts) == 0 {
+		return false
+	}
+	raw, _ := decodeArgs(ctx, c)["url"].(string)
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(strings.Trim(u.Hostname(), "[]"))
+	for _, allowed := range allowHosts {
+		a := strings.ToLower(strings.Trim(strings.TrimSpace(allowed), "[]"))
+		if a != "" && (host == a || strings.HasSuffix(host, "."+a)) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeArgs(ctx context.Context, c *abi.ToolCall) map[string]any {

@@ -2,6 +2,7 @@ package ifc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -459,5 +460,37 @@ func TestDisabledIsNoOp(t *testing.T) {
 	led.Raise("s", abi.TaintQuarantined)
 	if v := NewSinkGate(led, Policy{}).Adjudicate(ctx, &abi.ToolCall{Tool: "send_email", TraceID: "s"}); v.Kind != abi.VerdictDefer {
 		t.Fatalf("disabled sink-gate must Defer, got %v", v.Kind)
+	}
+}
+
+func TestSinkGateAllowsOnlyExplicitResearchWebFetchHost(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	led.Raise("study", abi.TaintTainted)
+	gate := NewSinkGate(led, Policy{AuthorizedEgressHosts: []string{"github.com", "raw.githubusercontent.com"}})
+
+	call := func(tool, rawURL string) abi.Verdict {
+		args := abi.Ref{Kind: abi.RefInline, Inline: []byte(fmt.Sprintf(`{"url":%q}`, rawURL))}
+		return gate.Adjudicate(ctx, &abi.ToolCall{Tool: tool, Args: args, TraceID: "study"})
+	}
+	if v := call("WebFetch", "https://raw.githubusercontent.com/acme/repo/main/README.md"); v.Kind != abi.VerdictDefer || v.By != "ifc-sink(authorized)" {
+		t.Fatalf("allowlisted public source = %+v, want authorized Defer", v)
+	}
+	if v := call("WebFetch", "https://github.com/acme/repo/blob/main/README.md"); v.Kind != abi.VerdictDefer || v.By != "ifc-sink(authorized)" {
+		t.Fatalf("allowlisted GitHub source = %+v, want authorized Defer", v)
+	}
+	for _, tc := range []struct {
+		name, tool, url string
+	}{
+		{"lookalike host", "WebFetch", "https://github.com.evil.example/steal"},
+		{"unlisted host", "WebFetch", "https://example.com/steal"},
+		{"non-fetch egress", "SendMessage", "https://github.com/acme/repo"},
+		{"non-http scheme", "WebFetch", "file://github.com/etc/passwd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if v := call(tc.tool, tc.url); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
+				t.Fatalf("verdict = %+v, want Deny/TRUST_VIOLATION", v)
+			}
+		})
 	}
 }

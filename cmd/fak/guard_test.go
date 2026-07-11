@@ -2409,3 +2409,20 @@ func TestGuardBannerBuildStampIsLabelReady(t *testing.T) {
 		t.Fatalf("guardBannerBuildStamp leaked the 'build: ' prefix; the banner labels the row: %q", stamp)
 	}
 }
+
+func TestGuardDefaultPolicyAuthorizesPublicGitHubResearchEgress(t *testing.T) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		t.Fatalf("ParseRuntime(default guard policy): %v", err)
+	}
+	got := rt.Adjudicator.ResearchEgressAllowHosts
+	for _, want := range []string{"github.com", "raw.githubusercontent.com", "api.github.com"} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("research hosts = %v, missing %q", got, want)
+		}
+	}
+	p := ifcPolicy(rt)
+	if !slices.Equal(p.AuthorizedEgressHosts, got) {
+		t.Fatalf("IFC authorized hosts = %v, want %v", p.AuthorizedEgressHosts, got)
+	}
+}
