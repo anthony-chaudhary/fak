@@ -99,11 +99,17 @@ def _py() -> str:
 
 def run_capture(cmd: list[str], cwd: Path, timeout: int) -> tuple[int, str, str]:
     try:
+        # Pin UTF-8 (what gh/git/dos emit) with errors="replace". On Windows text=True
+        # otherwise defaults to the locale codec (cp1252), which raises mid-read on the
+        # em-dashes / smart-quotes ubiquitous in issue bodies -- so `gh issue view --json
+        # body` would crash and the coverage gate would wrongly hold every such issue as
+        # COVERAGE_UNKNOWN forever (a silent close-volume leak). Decode utf-8 so every
+        # gh/git read is total.
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              timeout=timeout)
+                              encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return 124, "", f"timed out after {timeout}s"
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         return 127, "", str(exc)
     return proc.returncode, proc.stdout, proc.stderr
 

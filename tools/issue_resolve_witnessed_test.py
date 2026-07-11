@@ -760,5 +760,23 @@ class CoverageGateTest(unittest.TestCase):
         self.assertEqual(mod.close_decision("skip_coverage_unknown"), "hold")
 
 
+class RunCaptureEncodingTest(unittest.TestCase):
+    """Regression: gh issue bodies carry em-dashes / smart-quotes; on Windows
+    text=True defaults to cp1252 and crashed run_capture mid-read, so the coverage
+    gate wrongly held every such issue COVERAGE_UNKNOWN. run_capture must decode
+    utf-8 total (errors='replace')."""
+
+    def test_utf8_subprocess_output_decodes_without_crash(self) -> None:
+        mod = load()
+        rc, out, err = mod.run_capture(
+            [sys.executable, "-c",
+             "import sys; sys.stdout.buffer.write("
+             "'em\\u2014dash smart\\u2018q\\u2019 \\u4f60\\u597d\\n'.encode('utf-8'))"],
+            ROOT, timeout=30)
+        self.assertEqual(rc, 0)
+        self.assertIn("em—dash", out)   # U+2014 em-dash survives
+        self.assertIn("你好", out)     # non-latin survives
+
+
 if __name__ == "__main__":
     unittest.main()
