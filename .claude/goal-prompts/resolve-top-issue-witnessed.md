@@ -59,6 +59,11 @@ out-of-scope rule above requires. A named-but-unfiled follow-up is silently
 deferred work, which this repo forbids: it becomes an OPEN issue or it does not
 leave your run. If there is genuinely nothing left, say so plainly.
 
+Self-check before you stop: `fak headless-lint --leftovers --issues-filed <N>`
+folds your final summary against this rule (#3670) — it refuses a summary that
+narrates leftovers while `<N>` (the gh issues you filed this run) is 0, and
+passes once each is filed (or with `--override` for "genuinely nothing left").
+
 Report the outcome faithfully: the issue number, the witnessing commit SHA (or
 `not yet` + the missing witness), the issue numbers of any follow-ups you filed,
 and whether the tree was left clean.

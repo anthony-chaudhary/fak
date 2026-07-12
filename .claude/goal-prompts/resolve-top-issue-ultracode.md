@@ -29,7 +29,10 @@ ULTRACODE overlay for your one leaf:
 Do NOT end by narrating leftover work. Any remaining or out-of-scope follow-up you
 would otherwise list as "two more things" at the end MUST be filed as an open gh
 issue first (dedupe → done-condition → leak-check → label) — a named-but-unfiled
-follow-up is silently-deferred work this repo forbids.
+follow-up is silently-deferred work this repo forbids. Self-check before you stop
+with `fak headless-lint --leftovers --issues-filed <N>`: the fold (#3670) refuses
+a summary that narrates leftovers while zero issues were filed, and passes once
+each is filed (or with `--override` for genuinely nothing left).
 
 Report faithfully: the issue number, the witnessing commit SHA (or `not yet` + the
 missing witness), the issue numbers of any follow-ups you filed, and whether the
