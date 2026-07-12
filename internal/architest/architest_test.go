@@ -152,6 +152,7 @@ var tier = map[string]int{
 	"operatorbrief":        3,                // folds cadence/program/milestone/heaviness report envelopes into one human pacing control pane; composer-only, off the hot path.
 	"productscorecard":     1,                // pure Go port of tools/product_scorecard.py; folds CLAIMS.md + tools/product_scorecard.data into product_debt; stdlib-only, off the hot path.
 	"scorecardpane":        1,                // pure Go port of tools/scorecard_control_pane.py (portfolio debt-ratchet fold) + tools/repo_hygiene_scorecard.py (the tree-wide hygiene fold); stdlib-only, off the hot path.
+	"scdiff":               1,                // shift-left seam for scorecardpane/uiquality: pure ChangedPaths(git diff working-tree-inclusive) + corpus-glob matcher so a card whose corpus is untouched is carried from baseline instead of re-measured; stdlib-only, imports nothing internal, off the hot path.
 	"uiquality":            1,                // UI/UX-quality scorecard over the terminal render source (the fak console panes + fak info overlay + guard --split); stdlib-only, off the hot path.
 	"tuiplugin":            1,                // in-process console-pane registry and descriptor seam; stdlib-only, off the hot path.
 	"scoreboard":           1,                // outbound Slack publisher for scorecard/score/run-event status posts; rides slackwire(1) for transport, keeps token resolution + change-gating, off the hot path.
