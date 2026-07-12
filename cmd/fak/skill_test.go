@@ -236,6 +236,75 @@ func TestSkillFootprintTopLimits(t *testing.T) {
 	}
 }
 
+// --- headless name-only profile (#3612) ------------------------------------
+
+// TestSkillFootprintHeadlessProfileIsSmaller pins the #3612 acceptance: a
+// headless dispatch worker's resident skills floor is name-only and strictly
+// smaller than the interactive name+description floor (#3234), the interactive
+// profile is unchanged, and every skill name survives — so a skill is still
+// invocable by name from a headless worker.
+func TestSkillFootprintHeadlessProfileIsSmaller(t *testing.T) {
+	root := chdirRepo(t)
+	writeSkill(t, root, "alpha", skillFrontmatter("alpha", "1.0.0", "Use when you need a long alpha description that dominates the resident floor"))
+	writeSkill(t, root, "beta", skillFrontmatter("beta", "1.0.0", "Use when you need an even longer beta description here that also dominates the floor"))
+
+	// Interactive (default) profile keeps #3234 behavior: resident floor == description floor.
+	var interOut bytes.Buffer
+	if code := runSkillFootprint(&interOut, io.Discard, []string{"--json"}); code != 0 {
+		t.Fatalf("interactive runSkillFootprint exit=%d", code)
+	}
+	inter := decodeJSON(t, interOut.Bytes())
+	if inter["profile"] != "interactive" {
+		t.Fatalf("default profile=%v, want interactive", inter["profile"])
+	}
+	if inter["resident_floor_bytes"] != inter["description_floor_bytes"] {
+		t.Fatalf("interactive resident_floor_bytes=%v != description_floor_bytes=%v (must keep #3234 behavior)",
+			inter["resident_floor_bytes"], inter["description_floor_bytes"])
+	}
+
+	// Headless profile: the resident floor is name-only and strictly smaller.
+	var headOut bytes.Buffer
+	if code := runSkillFootprint(&headOut, io.Discard, []string{"--profile", "headless", "--json"}); code != 0 {
+		t.Fatalf("headless runSkillFootprint exit=%d", code)
+	}
+	head := decodeJSON(t, headOut.Bytes())
+	if head["profile"] != "headless" {
+		t.Fatalf("profile=%v, want headless", head["profile"])
+	}
+	nameFloor := head["name_floor_bytes"].(float64)
+	descFloor := head["description_floor_bytes"].(float64)
+	if head["resident_floor_bytes"].(float64) != nameFloor {
+		t.Fatalf("headless resident_floor_bytes=%v, want name_floor_bytes=%v", head["resident_floor_bytes"], nameFloor)
+	}
+	if !(nameFloor > 0 && nameFloor < descFloor) {
+		t.Fatalf("headless name-only floor=%v must be >0 and < description floor=%v", nameFloor, descFloor)
+	}
+
+	// Every skill name is still present in the rendered index → invocable by name.
+	names := map[string]bool{}
+	for _, e := range head["entries"].([]any) {
+		names[e.(map[string]any)["name"].(string)] = true
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !names[want] {
+			t.Fatalf("headless index missing skill name %q — not invocable by name", want)
+		}
+	}
+}
+
+// TestSkillFootprintRejectsUnknownProfile pins the closed profile vocabulary:
+// an unrecognized --profile is a usage error, not a silent fallback.
+func TestSkillFootprintRejectsUnknownProfile(t *testing.T) {
+	root := chdirRepo(t)
+	writeSkill(t, root, "x", skillFrontmatter("x", "1.0.0", "Use when x"))
+	_ = root
+
+	var errb bytes.Buffer
+	if code := runSkillFootprint(io.Discard, &errb, []string{"--profile", "bogus", "--json"}); code != 2 {
+		t.Fatalf("unknown profile exit=%d, want 2: %s", code, errb.String())
+	}
+}
+
 // --- swap ------------------------------------------------------------------
 
 func TestSkillSwapPersistsAndResidencyReadsBack(t *testing.T) {
