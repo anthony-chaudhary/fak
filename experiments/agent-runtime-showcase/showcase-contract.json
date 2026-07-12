@@ -1,0 +1,94 @@
+{
+  "schema": "fak.agent-runtime-showcase-contract.v2",
+  "generated_at": "2026-07-12",
+  "issue": 3291,
+  "epic": 3256,
+  "workstream": "E (proof / showcase)",
+  "generation": "gen/next",
+  "status": "BUILT & CAPTURED (dogfood). A runnable governed code-review agent (showcase.py) plus its real captured witness (EXAMPLE-OUTPUT.md) land the governance CORE of #3291 model-free in experiments/: a multi-step task under a least-agency preset, two live kernel DENYs, a cost cap that halts overspend, and an append-only audit tail. Full #3291 closure additionally needs the app promoted into examples/, ONE capture driven by a live model (real proposals + real token bill), and the #D1 quickstart + #D2 `fak init agent` wiring.",
+  "issue_fully_resolved": false,
+  "result_claim_allowed": false,
+  "claim_boundary": {
+    "this_artifact_is": "A runnable reference governed-agent app (showcase.py) built directly on the existing `fak preflight` kernel seam, with a reproducible captured run (EXAMPLE-OUTPUT.md) that discharges the governance-core acceptance sub-claims (A1-A5) model-free, plus this machine-readable map of which sub-claims are witnessed here vs. still open.",
+    "this_artifact_is_not": "Full closure of #3291. It does NOT ship the app in examples/ (a different lane), does NOT contain a LIVE-MODEL capture (proposals are scripted; per-turn cost is illustrative, so the cap proves the mechanism not a real token bill), and does NOT wire #D1/#D2. #3291 stays OPEN pending those."
+  },
+  "witness": {
+    "run": "EXAMPLE-OUTPUT.md",
+    "app": "showcase.py",
+    "captured_utc": "2026-07-12T07:11:07Z",
+    "fak_version": "0.40.0 (build 621b8b41cc93, go1.26.5 windows/amd64)",
+    "repo_head": "621b8b41c",
+    "preset": "examples/presets/coding-agent-safe.json",
+    "result": "7 steps: 4 ALLOW, 3 DENY across three governance paths (POLICY_BLOCK/gitgate, DEFAULT_DENY/monitor, COST_CAP/budget); spend 47c / cap 50c",
+    "model_in_loop": false,
+    "reproduce": "python experiments/agent-runtime-showcase/showcase.py [--json]"
+  },
+  "why_not_fully_closed_this_session": [
+    "The finished deliverable lands in examples/ (a different lane) and in cmd/fak for the `fak init agent` default template (#D2) — outside a single (fak experiments)-trailered commit on the experiments tree.",
+    "The acceptance's spirit ('a captured live run as its proof') is discharged for GOVERNANCE model-free, but a capture driven by a LIVE model (real proposals + a real token-bound cost cap) needs a model/gateway runtime not exercised on this dev host.",
+    "#D2 `fak init agent` does not exist yet (no init-agent command in cmd/fak), so the A6 wiring cannot be completed here."
+  ],
+  "acceptance": [
+    {
+      "id": "A1-multi-step-task",
+      "claim": "A cloneable reference app runs ONE real multi-step task end-to-end through the runtime (a governed code-review agent).",
+      "witnessed_by_this_app": "EXAMPLE-OUTPUT.md — a 7-step review trajectory (Read -> Grep -> go test -> Write -> ...), each step adjudicated by the real kernel via `fak preflight`.",
+      "remaining": "Promote into examples/ as the canonical flagship app; drive the trajectory with a live model so the proposals are real (the kernel adjudication is already real here)."
+    },
+    {
+      "id": "A2-least-agency-preset",
+      "claim": "The task runs under a least-agency preset (#C4).",
+      "witnessed_by_this_app": "showcase.py loads examples/presets/coding-agent-safe.json as its floor for every adjudication; the captured DENYs are that floor refusing.",
+      "remaining": "None for the core; the promoted examples/ app keeps the same floor."
+    },
+    {
+      "id": "A3-visible-deny",
+      "claim": "The run shows a live DENY of a dangerous action at the kernel boundary.",
+      "witnessed_by_this_app": "EXAMPLE-OUTPUT.md — TWO distinct kernel refusal paths in the app's own run: `git push --force` -> POLICY_BLOCK (by gitgate), `delete_account` -> DEFAULT_DENY (by monitor). Raw `fak preflight --json` verdicts are inlined for self-verification.",
+      "remaining": "None — the DENY fires inside the flagship app's own captured session, as the acceptance requires."
+    },
+    {
+      "id": "A4-cost-accounting-and-cap",
+      "claim": "The run shows cost accounting AND a cost cap.",
+      "witnessed_by_this_app": "EXAMPLE-OUTPUT.md — per-turn + cumulative cost accounting, and an ENFORCED ceiling that HALTS step 7 (COST_CAP, by budget: cap 50c would be breached, 47+8).",
+      "remaining": "The cap enforcement mechanism is proven; per-turn cost is an illustrative model-turn estimate. Promotion binds the cap to real model tokens (relates to the runtime seam #B1)."
+    },
+    {
+      "id": "A5-audit-tail",
+      "claim": "The run exposes the audit tail.",
+      "witnessed_by_this_app": "EXAMPLE-OUTPUT.md — an append-only JSON object per adjudication (args_digest, verdict, reason, by, disposition, turn/cum cost); `--json` emits it as JSONL.",
+      "remaining": "None for the core; the promoted app emits the same tail."
+    },
+    {
+      "id": "A6-quickstart-and-init-template",
+      "claim": "The app is referenced from the quickstart (#D1) and is the `fak init agent` default template (#D2).",
+      "witnessed_by_this_app": null,
+      "remaining": "FULLY OPEN. `fak init agent` (#D2) does not exist yet (no init-agent command in cmd/fak). #D1 quickstart wiring is downstream of the promoted examples/ app. Both are out of the experiments lane."
+    }
+  ],
+  "dependencies": {
+    "B1_governed_runtime_pkg": "NOT a blocker for the governance core — this app is built directly on the existing `fak preflight` kernel seam. Still relevant for binding the cost cap to real model tokens (A4 promotion).",
+    "B3_sdk": "NOT a blocker for the governance core — the app shells the kernel directly. An SDK is a promotion convenience, not a gate for the captured witness.",
+    "C4_least_agency_preset": "SATISFIED — examples/presets/coding-agent-safe.json is the app's floor and the captured DENYs are it refusing.",
+    "D1_quickstart": "blocked on the promoted examples/ app (A6).",
+    "D2_fak_init_agent": "MISSING — no `fak init agent` command in cmd/fak; hard blocker for A6."
+  },
+  "promotion_evidence": [
+    "What moves this gen/next dogfood toward `now`: (1) promote showcase.py into examples/agent-review/ keeping examples/presets/coding-agent-safe.json as its floor; (2) capture ONE run driven by a LIVE model on a model-capable host, so the proposals AND the cost bill are real — the ALLOW/DENY/cap/audit STRUCTURE is already proven by EXAMPLE-OUTPUT.md, so this only swaps scripted proposals for model-generated ones; (3) land #D2 `fak init agent` scaffolding it and link it from the #D1 quickstart. Each step is independently checkable."
+  ],
+  "demotion_evidence": [
+    "Retire this experiments/ dogfood once the examples/ app + a live-model capture exist and are wired into #D1/#D2 — the promoted app becomes the canonical showcase and this copy is superseded.",
+    "Also retire if the epic re-scopes Workstream E away from a single flagship app (e.g. decides the existing scattered examples/ demos are sufficient), making a bundled-app showcase moot."
+  ],
+  "invalidating_assumptions": [
+    "TESTED & FALSIFIED: the v1 contract assumed #B1 (runtime pkg) / #B3 (SDK) were hard blockers for ANY showcase. showcase.py is built directly on the existing `fak preflight` seam and its captured run discharges A1-A5 without #B1/#B3 — so the dependency gating was too strict for the governance core. If a maintainer nonetheless rules the showcase MUST sit on the #B1 runtime + #B3 SDK to count, this dogfood is a stepping stone, not the deliverable.",
+    "Assumes 'a captured live run as its proof' is satisfied model-free for GOVERNANCE. If the acceptance means the PROPOSALS must also come from a live model (not a scripted trajectory), then a live-model capture is still required and this witness is partial on that axis (kernel verdicts real; proposals scripted).",
+    "Assumes a cost CAP means an enforced ceiling that halts spend. showcase.py demonstrates exactly that mechanism; if 'cost cap' instead means only a real token-denominated bill, A4 needs the #B1 runtime seam to bind the cap to live tokens."
+  ],
+  "required_before_claim": {
+    "lane_gate": "go test ./internal/experiments -count=1 && go vet ./internal/experiments (must stay green — these data/doc/app artifacts do not touch the Go package).",
+    "app_self_test": "python experiments/agent-runtime-showcase/showcase.py must run and reproduce the EXAMPLE-OUTPUT.md verdicts (4 ALLOW, 3 DENY).",
+    "full_gate": "make ci (build + vet + test + claims-lint) before any commit."
+  },
+  "smallest_next_step": "Promote showcase.py into examples/agent-review/ (a different lane), swap its scripted trajectory for a live model driving the same kernel seam, capture one EXAMPLE-OUTPUT.md with real proposals + a real token-bound cost cap, then land #D2 `fak init agent` pointing at it and link it from the #D1 quickstart."
+}
