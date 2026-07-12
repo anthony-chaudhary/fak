@@ -234,7 +234,7 @@ func TestGateDuplication_TrivialCandidateSkipsGitListing(t *testing.T) {
 func TestGateDuplication_TrivialPruneKeepsQualifyingCandidate(t *testing.T) {
 	d := stagedForDup(
 		map[string]string{
-			"internal/foo/new.go":  siblingFile(dupBlock),        // qualifying -> must still fire
+			"internal/foo/new.go":  siblingFile(dupBlock),         // qualifying -> must still fire
 			"internal/foo/tiny.go": "package foo\n\nvar ok = 1\n", // trivial -> pruned before git read
 		},
 		map[string]string{"internal/foo/existing.go": siblingFile(dupBlock)},
