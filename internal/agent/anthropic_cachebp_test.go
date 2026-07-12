@@ -515,3 +515,90 @@ func TestVolatileHeadClassify(t *testing.T) {
 		t.Fatalf("stable head Warning() = %q, want empty", w)
 	}
 }
+
+// TestRespectsUnicodeEscapedBreakpoint is the #3774 regression: a client whose cache_control key
+// is spelled with a JSON \uXXXX escape decodes to the SAME cache_control key. The byte-literal
+// already-set scan missed it, so placement used to splice a SECOND breakpoint over the client's
+// chosen layout. The guard now detects the escaped form and returns the body unchanged
+// (already_set), exactly as it does for a literal key. Keys use a raw string so `_` reaches
+// the fixture as the 6-byte JSON escape (backslash-u-0-0-5-f), not a decoded underscore.
+func TestRespectsUnicodeEscapedBreakpoint(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{
+			// underscore escaped: cache_control (split so the backslash-u stays literal).
+			name: "underscore_escaped",
+			raw: `{"model":"m","max_tokens":1,` +
+				`"system":[{"type":"text","text":"stable head","cache\` + `u005fcontrol":{"type":"ephemeral"}}],` +
+				`"messages":[{"role":"user","content":"x"}]}`,
+		},
+		{
+			// leading letter escaped: cache_control (the c as c).
+			name: "letter_escaped",
+			raw: `{"model":"m","max_tokens":1,` +
+				`"system":[{"type":"text","text":"stable head","\` + `u0063ache_control":{"type":"ephemeral"}}],` +
+				`"messages":[{"role":"user","content":"x"}]}`,
+		},
+		{
+			// escaped key on a hoist-shaped body (volatile block ahead of a stable one): the guard
+			// must fire BEFORE the star-anchor hoist, so no breakpoint is moved or added.
+			name: "escaped_on_hoist_shape",
+			raw: `{"model":"m","max_tokens":1,` +
+				`"system":[{"type":"text","text":"run 123e4567-e89b-12d3-a456-426614174000"},` +
+				`{"type":"text","text":"a","cache\` + `u005fcontrol":{"type":"ephemeral"}},` +
+				`{"type":"text","text":"b"}],"messages":[{"role":"user","content":"x"}]}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(tc.raw)
+			// Fixture sanity: the literal is genuinely NOT present, but the key decodes to it.
+			if bytes.Contains(raw, []byte("cache_control")) {
+				t.Fatalf("fixture sanity: raw carries the literal, not an escaped key:\n%s", raw)
+			}
+			var probe map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &probe); err != nil {
+				t.Fatalf("fixture sanity: body is not valid JSON: %v", err)
+			}
+			out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+			if oc.Reason != BreakpointReasonAlreadySet {
+				t.Fatalf("reason = %q, want already_set (escaped key must be respected)\nout: %s", oc.Reason, out)
+			}
+			if oc.Rewritten {
+				t.Fatalf("guard fired but body was rewritten — a breakpoint was moved:\n%s", out)
+			}
+			if !bytes.Equal(out, raw) {
+				t.Fatalf("escaped-key body must be returned byte-for-byte unchanged:\nraw: %s\nout: %s", raw, out)
+			}
+		})
+	}
+}
+
+// TestBodyHasCacheControlKey pins the detector directly: the literal and every escaped spelling
+// that decodes to cache_control are caught, while a body with an unrelated \u escape (or none) is
+// not a false positive.
+func TestBodyHasCacheControlKey(t *testing.T) {
+	hits := []string{
+		`{"a":{"cache_control":{"type":"ephemeral"}}}`,                     // literal
+		`{"a":{"cache\` + `u005fcontrol":{"type":"ephemeral"}}}`,           // underscore escaped
+		`{"a":{"\` + `u0063ache_control":{"type":"ephemeral"}}}`,           // leading letter escaped
+		`{"a":{"\` + `u0063ache\` + `u005fcontrol":{"type":"ephemeral"}}}`, // both escaped
+	}
+	for _, s := range hits {
+		if !bodyHasCacheControlKey([]byte(s)) {
+			t.Fatalf("bodyHasCacheControlKey(%s) = false, want true", s)
+		}
+	}
+	misses := []string{
+		`{"system":[{"type":"text","text":"plain"}]}`,                    // no cache_control at all
+		`{"system":[{"type":"text","text":"\` + `u00e9\` + `u00e8 x"}]}`, // \u escapes, but not the key
+		`{"note":"we mention cache control with a space"}`,               // words, not the key
+	}
+	for _, s := range misses {
+		if bodyHasCacheControlKey([]byte(s)) {
+			t.Fatalf("bodyHasCacheControlKey(%s) = true, want false (false positive)", s)
+		}
+	}
+}

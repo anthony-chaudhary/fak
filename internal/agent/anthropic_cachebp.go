@@ -117,17 +117,26 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	}
 
 	// 1. If a cache_control breakpoint already exists ANYWHERE in the body, respect it — never
-	//    override a working layout. A bare substring scan is deliberately conservative: a false
-	//    positive (the literal inside some string value) only means we DON'T place, which is the
-	//    fail-safe direction. The common Claude Code shape already marks its head + recent turns, so
-	//    this stage targets precisely the callers that left caching on the table. This scan runs
-	//    BEFORE the whole-body json.Unmarshal below: the dominant default body already carries
+	//    override a working layout. The scan is deliberately conservative: a false positive (the
+	//    literal inside some string value) only means we DON'T place, which is the fail-safe
+	//    direction. The common Claude Code shape already marks its head + recent turns, so this
+	//    stage targets precisely the callers that left caching on the table. This scan runs BEFORE
+	//    the whole-body json.Unmarshal below: the dominant default body already carries
 	//    cache_control, so returning here skips decoding + COPYING the entire messages array into a
 	//    map[string]json.RawMessage (a full-request-body allocation this stage would otherwise pay on
 	//    every wire only to discard). The skipSpace/'{' + json.Valid check keeps this EXACTLY the old
 	//    decode-first behavior: json.Unmarshal into a map accepts only a well-formed JSON object, so a
 	//    malformed or non-object body carrying the literal still bails NonJSON (identity either way).
-	if bytes.Contains(raw, []byte("cache_control")) {
+	//
+	//    #3774: the detector is bodyHasCacheControlKey, not a bare bytes.Contains. A client whose key
+	//    spells an ASCII letter/underscore as a JSON \uXXXX escape — cache_control — decodes to
+	//    the SAME cache_control key yet slips past a byte-literal scan, so placement would splice a
+	//    SECOND (semantic) breakpoint over the client's own layout, the exact override this guard
+	//    exists to prevent. bodyHasCacheControlKey EXTENDS the scan to the escaped form (only in the
+	//    fail-safe direction: it can add a skip, never remove one) and keeps the byte-literal hot path
+	//    allocation-free. This also aligns the placement guard with the upgrade path, whose
+	//    rawHasCacheControl already decodes escaped keys via json.Unmarshal.
+	if bodyHasCacheControlKey(raw) {
 		if t := skipSpace(raw); len(t) > 0 && t[0] == '{' && json.Valid(raw) {
 			return raw, BreakpointOutcome{Reason: BreakpointReasonAlreadySet}
 		}
@@ -218,6 +227,81 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 		return raw, BreakpointOutcome{Reason: reason}
 	}
 	return out, BreakpointOutcome{Reason: BreakpointReasonNone, Target: target}
+}
+
+// bodyHasCacheControlKey reports whether raw carries a cache_control breakpoint anywhere — the
+// already-set guard's detector (#3774). The dominant Claude Code body marks its head with a
+// LITERAL cache_control, so the byte-literal scan answers first and the hot path stays
+// allocation-free. Only when the literal is ABSENT but the body contains a JSON `\u` escape do we
+// pay for a semantic re-scan: a client whose key spells an ASCII letter or underscore as \uXXXX
+// (e.g. cache_control) decodes to the same cache_control key and would otherwise evade the
+// scan, letting placement splice a SECOND breakpoint over the client's layout. We only ever EXTEND
+// the scan — a false positive here merely skips placement (fail-safe), never a double-mark.
+// cache_control is pure ASCII, so a \uXXXX escape is the sole way to hide it from the literal scan:
+// JSON's other escapes (\" \\ \/ \n ...) cannot spell a letter or underscore.
+func bodyHasCacheControlKey(raw []byte) bool {
+	if bytes.Contains(raw, []byte("cache_control")) {
+		return true
+	}
+	if !bytes.Contains(raw, []byte(`\u`)) {
+		return false // no unicode escape — the byte-literal scan above was already exact
+	}
+	return bytes.Contains(jsonUnescapeASCII(raw), []byte("cache_control"))
+}
+
+// jsonUnescapeASCII returns raw with every JSON \uXXXX escape denoting an ASCII byte (code point
+// <= 0x7F) replaced by that byte, so an escaped key like cache_control collapses to its
+// literal form for the already-set scan. Any other escape (\\ \" \/ \n, or a \uXXXX above 0x7F)
+// is consumed and replaced by a single space: a backslash, quote, or non-ASCII rune can never be
+// part of the pure-ASCII cache_control token, and consuming BOTH bytes of a two-char escape stops
+// an escaped backslash (\\) from being misread as the start of a following \u. This is a scan aid
+// for a substring test, not a general JSON unescaper: it does not validate surrogate pairs.
+func jsonUnescapeASCII(raw []byte) []byte {
+	out := make([]byte, 0, len(raw))
+	for i := 0; i < len(raw); {
+		c := raw[i]
+		if c != '\\' || i+1 >= len(raw) {
+			out = append(out, c)
+			i++
+			continue
+		}
+		if raw[i+1] == 'u' && i+6 <= len(raw) {
+			if cp, ok := parseHex4(raw[i+2 : i+6]); ok {
+				if cp <= 0x7F {
+					out = append(out, byte(cp))
+				} else {
+					out = append(out, ' ')
+				}
+				i += 6
+				continue
+			}
+		}
+		// Any other (or malformed) escape: consume both bytes, emit a non-matching placeholder.
+		out = append(out, ' ')
+		i += 2
+	}
+	return out
+}
+
+// parseHex4 parses exactly four hex digits into a code point; ok is false on any non-hex byte.
+func parseHex4(b []byte) (cp int, ok bool) {
+	if len(b) != 4 {
+		return 0, false
+	}
+	for _, c := range b {
+		cp <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			cp |= int(c - '0')
+		case c >= 'a' && c <= 'f':
+			cp |= int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			cp |= int(c-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return cp, true
 }
 
 // UpgradeAnthropicStableCacheTTL1h upgrades an EXISTING stable-head cache_control breakpoint

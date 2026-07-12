@@ -205,11 +205,12 @@ func checkStarAnchorRewrite(t testing.TB, raw, out []byte) {
 	}
 	anchor := -1
 	for i, el := range newElems {
-		// Detect the anchor by the exact spliced BYTE literal, matching the transform's own
-		// byte-level detector. A semantic decode here is wrong: a _-escaped
-		// cache_control key evades the transform's bytes.Contains guard (so placement
-		// lawfully proceeds) yet decodes to the same key, and would mis-identify the
-		// verbatim escaped element as the anchor (fuzzer-found false failure).
+		// Detect the anchor by the exact spliced BYTE literal — the transform splices that
+		// literal verbatim, so byte-equality identifies precisely the one element it added. A
+		// semantic decode here would be wrong: it must match what was SPLICED, not what a key
+		// decodes to. (Since #3774 the already-set guard rejects escaped cache_control keys
+		// upfront, so a hoisted array no longer even contains one; the byte-literal detector
+		// remains the correct choice regardless.)
 		hasCC := bytes.Contains(el, []byte(cacheControlBreakpoint))
 		key := string(el)
 		if hasCC {
@@ -327,10 +328,12 @@ func FuzzCacheControlByteSafety(f *testing.F) {
 		// Fuzzer-found (2026-07): splicing into an empty `{ }` anchor drops its interior
 		// whitespace — the one sanctioned byte removal.
 		[]byte(`{"system":[{ }]}`),
-		// Review-found (2026-07): a unicode-escaped cache_control key (the underscore as
-		// backslash-u005f) evades the transform's byte-literal already-set guard, so the
-		// star-anchor hoist lawfully proceeds around the escaped element; the oracle must
-		// not mistake it for the spliced anchor.
+		// #3774: a unicode-escaped cache_control key (the underscore as backslash-u005f)
+		// decodes to the same cache_control key. The already-set guard now detects the escaped
+		// form (bodyHasCacheControlKey), so this body bails BreakpointReasonAlreadySet as
+		// identity rather than hoisting a second breakpoint over the client's layout. The oracle
+		// accepts the bail (fail-safe identity), and the star-anchor anchor detector — still
+		// byte-literal — never sees this shape.
 		[]byte(`{"model":"m","max_tokens":1,"system":[{"type":"text","text":"run 123e4567-e89b-12d3-a456-426614174000"},{"type":"text","text":"a","cache\` + `u005fcontrol":{"type":"ephemeral"}},{"type":"text","text":"b"}],"messages":[{"role":"user","content":"hi"}]}`),
 		[]byte(`not json at all`),
 		[]byte(`[]`),
