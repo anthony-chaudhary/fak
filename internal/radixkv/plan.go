@@ -141,9 +141,11 @@ func (t *Tree) ConfirmEvictions() int {
 func (t *Tree) leafCount() int {
 	count := 0
 	var stack []*node
-	for _, c := range t.root.children {
-		stack = append(stack, c)
-	}
+	t.forEachRoot(func(r *node) { // candidate leaves span every namespace root
+		for _, c := range r.children {
+			stack = append(stack, c)
+		}
+	})
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]

@@ -71,12 +71,20 @@ const warmRecency uint64 = 0
 // The warm reuses the proven longest-prefix walk and edge split, so any prefix it shares with
 // already-cached spans is matched, never duplicated.
 func (t *Tree) WarmInsert(tokens []int, kv *model.KVCache) int {
+	return t.WarmInsertNS("", tokens, kv)
+}
+
+// WarmInsertNS is WarmInsert scoped to namespace ns (#3889): the warm lands under ns's
+// virtual root, so an opportunistic prefetch for one tenant / adapter / cache-salt can never
+// be reused by — or displace demand residency of — a different namespace, even on colliding
+// token ids. All of WarmInsert's fence-2 lowest-priority eviction semantics are unchanged.
+func (t *Tree) WarmInsertNS(ns string, tokens []int, kv *model.KVCache) int {
 	if len(tokens) == 0 {
 		return 0
 	}
 	// walk then split-if-mid-edge to a real node boundary, exactly as Lookup does, then hang
 	// the warm suffix off it (shared boundaryFor preamble).
-	boundary, matched := t.boundaryFor(tokens)
+	boundary, matched := t.boundaryFor(t.rootFor(ns), tokens)
 	suffix := tokens[matched:]
 	if len(suffix) == 0 {
 		return 0 // the whole byte-known prefix is already cached — already hot, nothing to warm
@@ -100,13 +108,13 @@ func (t *Tree) WarmTokens() int {
 	total := 0
 	var visit func(n *node)
 	visit = func(n *node) {
-		if n != t.root && n.lastUsed == warmRecency {
+		if n.parent != nil && n.lastUsed == warmRecency { // parent==nil is a namespace root
 			total += len(n.key)
 		}
 		for _, c := range n.children {
 			visit(c)
 		}
 	}
-	visit(t.root)
+	t.forEachRoot(visit) // opportunistic warm residency across every namespace
 	return total
 }

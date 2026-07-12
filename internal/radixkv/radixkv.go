@@ -101,7 +101,17 @@ func (p EvictionPolicy) String() string {
 // Tree is a RadixAttention prefix cache: a radix tree of token sequences with
 // longest-prefix matching, an LRU token budget, and reference counting.
 type Tree struct {
-	root      *node
+	root *node
+	// nsRoots holds the VIRTUAL PER-NAMESPACE ROOTS that give node identity the
+	// (tokens, nsKey) shape SGLang's RadixKey does (#3889): a Lookup/Insert under
+	// namespace ns walks from nsRoots[ns] (root itself for the default "" namespace),
+	// so identical token prefixes under different namespaces — tenant / LoRA adapter /
+	// cache-salt / tool-world — can never share a node or its cached K/V. Lazily
+	// populated by rootFor; the "" namespace always uses root, so every pre-namespace
+	// caller and test stays byte-identical. Eviction and Stats span EVERY root
+	// (forEachRoot): the token budget is ONE global pool, only node IDENTITY is
+	// namespace-scoped. See namespace.go.
+	nsRoots   map[string]*node
 	maxTokens int    // LRU budget in cached tokens; 0 disables eviction (unbounded)
 	tokens    int    // total cached tokens = Σ len(node.key) over all nodes
 	clock     uint64 // logical access clock
@@ -233,12 +243,17 @@ func (t *Tree) SetEvictionPolicy(policy EvictionPolicy) {
 
 func (t *Tree) tick() uint64 { t.clock++; return t.clock }
 
-// walk finds the longest prefix of tokens already in the tree. It returns the deepest
-// node whose full path is a prefix of tokens (a node boundary, nlen tokens), plus — if
-// the next edge only PARTIALLY matches — the child entered (pc) and how far into its key
-// matched (oi, with 0<oi<len(pc.key)). Total matched tokens = nlen + oi.
-func (t *Tree) walk(tokens []int) (n *node, nlen int, pc *node, oi int) {
-	n = t.root
+// walk finds the longest prefix of tokens already in the tree, starting from the namespace
+// root `start` (rootFor(ns) / rootForRead(ns)). It returns the deepest node whose full path
+// is a prefix of tokens (a node boundary, nlen tokens), plus — if the next edge only
+// PARTIALLY matches — the child entered (pc) and how far into its key matched (oi, with
+// 0<oi<len(pc.key)). Total matched tokens = nlen + oi. A nil start (an absent namespace on a
+// read/verdict path) matches nothing.
+func (t *Tree) walk(start *node, tokens []int) (n *node, nlen int, pc *node, oi int) {
+	n = start
+	if n == nil {
+		return nil, 0, nil, 0
+	}
 	i := 0
 	for i < len(tokens) {
 		ch := n.children[tokens[i]]
@@ -266,8 +281,8 @@ func (t *Tree) walk(tokens []int) (n *node, nlen int, pc *node, oi int) {
 // split (t.splits bumps once, via t.split) and mutates nothing else, so both callers observe
 // byte-identical tree state. It does NOT touch recency or leases — each caller applies its own
 // residency policy afterward.
-func (t *Tree) boundaryFor(tokens []int) (boundary *node, matched int) {
-	n, nlen, pc, oi := t.walk(tokens)
+func (t *Tree) boundaryFor(start *node, tokens []int) (boundary *node, matched int) {
+	n, nlen, pc, oi := t.walk(start, tokens)
 	boundary, matched = n, nlen
 	if oi > 0 {
 		boundary = t.split(n, pc, oi)
@@ -276,12 +291,18 @@ func (t *Tree) boundaryFor(tokens []int) (boundary *node, matched int) {
 	return boundary, matched
 }
 
-// MatchLen is the read-only accounting probe: the number of leading tokens of `tokens`
-// already cached (a node boundary or mid-edge), with no mutation, no lock, no split. This
-// is the hit-rate measurement seam — sum it over a workload and divide by total tokens to
-// get the cache hit rate SGLang's paper reports.
-func (t *Tree) MatchLen(tokens []int) int {
-	_, nlen, _, oi := t.walk(tokens)
+// MatchLen is MatchLenNS on the default ("") namespace — the pre-namespace signature every
+// existing caller uses, unchanged.
+func (t *Tree) MatchLen(tokens []int) int { return t.MatchLenNS("", tokens) }
+
+// MatchLenNS is the read-only accounting probe for namespace ns: the number of leading
+// tokens of `tokens` already cached UNDER ns (a node boundary or mid-edge), with no
+// mutation, no lock, no split. Because each namespace has its own virtual root (#3889), a
+// probe under ns "A" never counts a prefix cached only under ns "B" even when the token ids
+// collide. An absent namespace matches nothing (0). This is the hit-rate measurement seam —
+// sum it over a workload and divide by total tokens to get the cache hit rate SGLang reports.
+func (t *Tree) MatchLenNS(ns string, tokens []int) int {
+	_, nlen, _, oi := t.walk(t.rootForRead(ns), tokens)
 	return nlen + oi
 }
 
@@ -311,12 +332,21 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 	return mid
 }
 
-// Lookup matches the longest cached prefix of tokens, SPLITTING an edge if the match
-// lands mid-run so a real node boundary (with a reusable cache) exists there, bumps LRU
-// recency along the matched path, and LEASES the boundary node (refs++) so an eviction
-// cannot reclaim the prefix while the caller is serving from it. Returns the boundary node
-// (call node.KV() for the clone-able reuse cache; nil if nothing matched) and the matched
-// token count. The caller prefills tokens[matched:] and then calls Insert + Done.
+// Lookup is LookupNS on the default ("") namespace — the pre-namespace signature every
+// existing caller uses, unchanged.
+func (t *Tree) Lookup(tokens []int) (*node, int) { return t.LookupNS("", tokens) }
+
+// LookupNS matches the longest cached prefix of tokens WITHIN namespace ns, SPLITTING an
+// edge if the match lands mid-run so a real node boundary (with a reusable cache) exists
+// there, bumps LRU recency along the matched path, and LEASES the boundary node (refs++) so
+// an eviction cannot reclaim the prefix while the caller is serving from it. Returns the
+// boundary node (call node.KV() for the clone-able reuse cache; nil if nothing matched) and
+// the matched token count. The caller prefills tokens[matched:] and then calls Insert + Done.
+//
+// The walk starts from ns's virtual root (#3889), so a request under one namespace can NEVER
+// be served a K/V span cached under another — even when their token prefixes are identical
+// (different tenant / LoRA adapter / cache-salt / tool-world). Insert needs no namespace: it
+// attaches to the boundary node LookupNS returns, which already lives under ns's root.
 //
 // LEASE DISCIPLINE (memory-leak contract — TestLookupLeaseMustBeReleased guards it):
 // Lookup takes a lease (refs++) on the boundary. The caller MUST release it on EVERY
@@ -331,20 +361,21 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 //	defer func() { tree.Done(leaf) }()
 //	... prefill (may fail) ...
 //	leaf = tree.Insert(b, req[m:], kv)   // moves the lease onto the leaf
-func (t *Tree) Lookup(tokens []int) (*node, int) {
-	boundary, matched := t.boundaryFor(tokens)
+func (t *Tree) LookupNS(ns string, tokens []int) (*node, int) {
+	root := t.rootFor(ns)
+	boundary, matched := t.boundaryFor(root, tokens)
 	for p := boundary; p != nil; p = p.parent {
 		p.lastUsed = t.clock + 1 // freshen the whole hot path
 	}
 	t.clock++
 	if matched > 0 {
-		for p := boundary; p != nil && p != t.root; p = p.parent {
-			p.hits++
+		for p := boundary; p != nil && p.parent != nil; p = p.parent {
+			p.hits++ // p.parent==nil marks a namespace root, which never accrues hits
 		}
 	}
 	// Thrash probe (#3393): was this exact request path just evicted? Demand for it is
 	// back — count the evict→reuse gap. Free when the side-map is empty.
-	t.probeThrash(t.root, tokens)
+	t.probeThrash(root, tokens)
 	boundary.refs++
 	return boundary, matched
 }
@@ -471,9 +502,11 @@ func (t *Tree) lruLeaf() *node {
 	var best *node
 	candidates, locked := 0, 0
 	var stack []*node
-	for _, c := range t.root.children {
-		stack = append(stack, c)
-	}
+	t.forEachRoot(func(r *node) { // one global victim pool spanning every namespace root
+		for _, c := range r.children {
+			stack = append(stack, c)
+		}
+	})
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -501,9 +534,11 @@ func (t *Tree) costAwareLeaf() *node {
 	var spans []compute.KVSpanStats
 	candidates, locked := 0, 0
 	var stack []*node
-	for _, c := range t.root.children {
-		stack = append(stack, c)
-	}
+	t.forEachRoot(func(r *node) { // one global victim pool spanning every namespace root
+		for _, c := range r.children {
+			stack = append(stack, c)
+		}
+	})
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -579,7 +614,7 @@ func (t *Tree) removeLeaf(v *node) {
 // should still hold their own session; this drops the SHARED cached copy so no future
 // request can reuse the poisoned prefix.)
 func (t *Tree) EvictNode(n *node) int {
-	if n == nil || n == t.root || n.parent == nil {
+	if n == nil || n.parent == nil { // parent==nil is any namespace root (incl. the default)
 		return 0
 	}
 	freed := subtreeTokens(n)
@@ -611,11 +646,17 @@ func (t *Tree) EvictNode(n *node) int {
 // a node whose cached KV genuinely attended to the poison). A coincidental mid-edge
 // collision on the poison's first divergent token can conservatively evict a benign
 // sibling branch; that is at worst a cache miss (it re-prefills), never a poison replay.
-func (t *Tree) EvictPrefix(tokens []int) int {
+func (t *Tree) EvictPrefix(tokens []int) int { return t.EvictPrefixNS("", tokens) }
+
+// EvictPrefixNS is EvictPrefix scoped to namespace ns (#3889): it walks ns's virtual root
+// and evicts only within that namespace, so quarantining a poisoned prefix under one tenant
+// / adapter / cache-salt never drops a benign identical-token prefix cached under another.
+// An absent namespace is a no-op (returns 0).
+func (t *Tree) EvictPrefixNS(ns string, tokens []int) int {
 	if len(tokens) == 0 {
 		return 0
 	}
-	n, nlen, pc, oi := t.walk(tokens)
+	n, nlen, pc, oi := t.walk(t.rootForRead(ns), tokens)
 	_ = oi
 	switch {
 	case pc != nil:
@@ -623,7 +664,7 @@ func (t *Tree) EvictPrefix(tokens []int) int {
 		// is on pc's edge, so pc's root→pc path includes those (poison) tokens. Evict pc's
 		// whole branch; pc's siblings (which diverged earlier) survive.
 		return t.EvictNode(pc)
-	case nlen == len(tokens) && n != t.root:
+	case nlen == len(tokens) && n != nil && n.parent != nil:
 		// The ENTIRE poisoned token path matched a cached node exactly: that node's KV
 		// attended to the poison. Evict it and its subtree.
 		return t.EvictNode(n)
@@ -738,7 +779,7 @@ func (t *Tree) Stats() Stats {
 	}
 	var visit func(n *node)
 	visit = func(n *node) {
-		if n != t.root {
+		if n.parent != nil { // skip every namespace root (parent==nil); count real nodes once
 			s.Nodes++
 			s.Tokens += len(n.key)
 			if n.kv != nil {
@@ -756,6 +797,6 @@ func (t *Tree) Stats() Stats {
 			visit(c)
 		}
 	}
-	visit(t.root)
+	t.forEachRoot(visit) // one Stats snapshot across every namespace's subtree
 	return s
 }
