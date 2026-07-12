@@ -152,17 +152,21 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 			f := watchdogFoldFor(bySession, e.Session)
 			f.beginCycle(e.DetectedUnix)
 		}
-		switch phase {
-		case "queued", "detected", "auto_resume":
-			watchdogFoldFor(bySession, e.Session).beginCycle(e.UnixSeconds)
-		case "launched", "resumed":
+		if phaseIsLaunchToken(phase) {
+			// A launch token ("launched"/"resumed") — single-sourced with Attempt.IsLaunch
+			// via phaseIsLaunchToken so the two readers never drift on a named token (#4333).
 			launchAt := firstNonZero(e.ResumedUnix, e.UnixSeconds)
 			watchdogFoldFor(bySession, e.Session).recordLaunch(launchAt)
 			if launchAt > lastLedgerLaunchUnix {
 				lastLedgerLaunchUnix = launchAt
 			}
-		case "settled", "operator_settled", "consolidated":
-			watchdogFoldFor(bySession, e.Session).close()
+		} else {
+			switch phase {
+			case "queued", "detected", "auto_resume":
+				watchdogFoldFor(bySession, e.Session).beginCycle(e.UnixSeconds)
+			case "settled", "operator_settled", "consolidated":
+				watchdogFoldFor(bySession, e.Session).close()
+			}
 		}
 		if e.ProgressWitnessUnix > 0 {
 			watchdogFoldFor(bySession, e.Session).recordProgress(e.ProgressWitnessUnix, "progress_witnessed_at")
@@ -463,8 +467,16 @@ func normalizeWatchdogMode(mode string) string {
 // an explicit "launched"/"resumed" phase.
 const watchdogPhaseUnknown = "phase_unknown"
 
-// TODO(#3801): unify this classifier with Attempt.IsLaunch (outcome.go), which still
-// treats phase-less rows as launches — follow-up, out of scope here.
+// normalizeWatchdogPhase folds a ledger row's phase to the token the fold reasons over: a
+// blank phase folds to phase_unknown (never "launched"), so a missing phase stays visible as
+// missing instead of minting a phantom launched_unproven MTTR row (#3801).
+//
+// The launch verdict itself is single-sourced in phaseIsLaunchToken (outcome.go), which both
+// this fold and Attempt.IsLaunch consult, so the two readers agree on every non-empty token
+// (#4333). They diverge on the empty phase ON PURPOSE: this fold treats it as phase_unknown
+// (a launch it cannot prove, excluded from the MTTR view), while IsLaunch counts it as a
+// fired spawn (the pre-phase legacy rows still burn attempt budget). See the shared table
+// test TestPhaseClassifierSharedVocabulary (outcome_test.go).
 func normalizeWatchdogPhase(phase string) string {
 	phase = strings.ToLower(strings.TrimSpace(phase))
 	if phase == "" {

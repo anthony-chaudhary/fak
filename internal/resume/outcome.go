@@ -138,6 +138,24 @@ type Attempt struct {
 	ManualOverride bool `json:"manual_override,omitempty"`
 }
 
+// phaseIsLaunchToken reports whether a NON-EMPTY ledger phase token records a fired resume
+// launch. Real launch rows always write an explicit "launched"/"resumed" phase (#3801), so
+// the launch set is a small allowlist rather than a denylist that has to enumerate every
+// bookkeeping token and silently treats an unrecognized one (broker_denied, a novel token)
+// as a launch. This is the single source of truth both Attempt.IsLaunch (accounting) and the
+// watchdog-status fold (MTTR) consult, so the two readers can never drift on a named token
+// again (#4333, finishing #3801). The phase-less legacy row is NOT a token — each reader
+// resolves the empty case explicitly per its own question (see IsLaunch and, in
+// watchdog_status.go, normalizeWatchdogPhase).
+func phaseIsLaunchToken(phase string) bool {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "launched", "resumed":
+		return true
+	default:
+		return false
+	}
+}
+
 // IsLaunch reports whether this row records a fired resume — the same rule the admit
 // gate's launch-rate window uses: a deferral/consideration/skip is bookkeeping, not an
 // attempt, so counting it would burn a session's attempt budget on rows where nothing ran.
@@ -149,12 +167,18 @@ func (a Attempt) IsLaunch() bool {
 	if a.settled() {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(a.Phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress", "settled", "operator_settled", "consolidated", "rearm", "trajectory_decision":
-		return false
-	default:
+	// A phase-less legacy row (the pre-phase schema — the 114 production rows pinned by
+	// cmd/fak's TestLegacyPhaselessRowIsALaunch, carrying pid/cause) recorded a real spawn, so
+	// accounting counts it as a launch or historical launch accounting silently zeroes out.
+	// This is the ONE deliberate divergence from the watchdog-status fold, which folds a blank
+	// phase to phase_unknown (a launch it cannot prove) for its MTTR view (#3801/#4333): the
+	// two readers answer different questions — did a spawn FIRE (attempt budget) vs. did a
+	// launch PROVE itself (recovery display). Forcing identical empty-phase verdicts would
+	// regress the give-up cap / LAUNCH_SPACING_FLOOR, so the split is intentional and tested.
+	if strings.TrimSpace(a.Phase) == "" {
 		return true
 	}
+	return phaseIsLaunchToken(a.Phase)
 }
 
 // isRearm reports whether this row is a re-arm reclaim marker (#2178): an operator/self-heal row

@@ -460,7 +460,24 @@ func TestResumeWatchdogStatusJSONLaunchedNoProgressRed(t *testing.T) {
 	}
 }
 
-func TestRwLoadWatchdogStatusEventsNormalizesLegacyRows(t *testing.T) {
+// The loader still reads legacy rows (the pre-phase schema): a phase-less row loads with a
+// blank phase, and a manual_override/consolidate row is normalized to "settled". But post-#3801
+// (internal/resume/watchdog_status.go normalizeWatchdogPhase) a blank phase folds to
+// phase_unknown, NOT launched, so a phase-less legacy row is EXCLUDED from the MTTR view rather
+// than minting a phantom launched_unproven row; a settled row is likewise never a launch. So
+// neither legacy row produces an MTTR launch row.
+//
+// NOTE (#4333): #3801's remaining DoD landed — the fold and Attempt.IsLaunch now share ONE
+// launch classifier (internal/resume phaseIsLaunchToken), asserted by the shared table test
+// TestPhaseClassifierSharedVocabulary, so the two readers return identical verdicts for every
+// NON-EMPTY phase token. The phase-less row is the one deliberate, tested divergence: those
+// accounting readers count it as a real launch ON PURPOSE (TestCountAttemptsAndLastLaunch;
+// TestLegacyPhaselessRowIsALaunch — "114 such rows in the production ledger ... or historical
+// launch accounting silently zeroes out"), while this fold folds it to phase_unknown so it
+// never mints a phantom launched_unproven MTTR row. The two readers answer different questions
+// (did a launch PROVE itself, vs. did a spawn FIRE); forcing an identical empty-phase verdict
+// would regress the give-up cap / LAUNCH_SPACING_FLOOR, so the split is intentional.
+func TestRwLoadWatchdogStatusEventsExcludesPhaseLessLegacyRowsFromMTTR(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "resume_ledger.jsonl")
 	body := strings.Join([]string{
@@ -472,17 +489,25 @@ func TestRwLoadWatchdogStatusEventsNormalizesLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The loader normalizes legacy rows: phase-less passes through blank, manual_override -> settled.
+	events := rwLoadWatchdogStatusEvents(path)
+	if len(events) != 2 {
+		t.Fatalf("loaded events = %+v, want the 2 legacy rows", events)
+	}
+	if events[0].Phase != "" {
+		t.Fatalf("phase-less legacy row must load with a blank phase, got %+v", events[0])
+	}
+	if events[1].Phase != "settled" {
+		t.Fatalf("manual_override row must normalize to phase \"settled\", got %+v", events[1])
+	}
+
 	rep := resume.FoldWatchdogStatus(resume.WatchdogStatusInput{
 		Mode:    "LIVE",
 		NowUnix: 2_000,
-		Events:  rwLoadWatchdogStatusEvents(path),
+		Events:  events,
 	})
-	if len(rep.MTTRSessions) != 1 {
-		t.Fatalf("mttr rows = %+v, want only the phase-less legacy launch", rep.MTTRSessions)
-	}
-	row := rep.MTTRSessions[0]
-	if row.Session != "sid-legacy" || row.Status != resume.WatchdogMTTRLaunchedUnproven {
-		t.Fatalf("row = %+v, want sid-legacy launched_unproven", row)
+	if len(rep.MTTRSessions) != 0 {
+		t.Fatalf("mttr rows = %+v, want none: phase-less folds to phase_unknown (non-launch) post-#3801", rep.MTTRSessions)
 	}
 }
 
