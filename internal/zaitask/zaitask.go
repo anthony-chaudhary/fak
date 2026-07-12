@@ -1,0 +1,125 @@
+package zaitask
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const (
+	DefaultBaseURL = "https://api.z.ai/api/coding/paas/v4"
+	DefaultModel   = "glm-5.2"
+)
+
+type Client struct {
+	BaseURL    string
+	APIKey     string
+	HTTPClient *http.Client
+}
+
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type Result struct {
+	Content   string `json:"content"`
+	Model     string `json:"model"`
+	RequestID string `json:"request_id"`
+	Usage     Usage  `json:"usage"`
+	LatencyMS int64  `json:"latency_ms"`
+}
+
+type apiRequest struct {
+	Model     string    `json:"model"`
+	Messages  []message `json:"messages"`
+	MaxTokens int       `json:"max_tokens,omitempty"`
+	Stream    bool      `json:"stream"`
+	Thinking  *thinking `json:"thinking,omitempty"`
+}
+
+type thinking struct {
+	Type string `json:"type"`
+}
+type message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+type apiResponse struct {
+	Choices []struct {
+		Message message `json:"message"`
+	} `json:"choices"`
+	Model     string `json:"model"`
+	RequestID string `json:"request_id"`
+	Usage     Usage  `json:"usage"`
+	Error     *struct {
+		Message string `json:"message"`
+		Code    any    `json:"code"`
+	} `json:"error,omitempty"`
+}
+
+func (c Client) Run(ctx context.Context, prompt, model string, maxTokens int) (Result, error) {
+	if strings.TrimSpace(c.APIKey) == "" {
+		return Result{}, errors.New("ZAI API key is required")
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return Result{}, errors.New("prompt is required")
+	}
+	if model == "" {
+		model = DefaultModel
+	}
+	base := strings.TrimRight(c.BaseURL, "/")
+	if base == "" {
+		base = DefaultBaseURL
+	}
+	body, err := json.Marshal(apiRequest{Model: model, Messages: []message{{Role: "user", Content: prompt}}, MaxTokens: maxTokens, Stream: false, Thinking: &thinking{Type: "disabled"}})
+	if err != nil {
+		return Result{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return Result{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	hc := c.HTTPClient
+	if hc == nil {
+		hc = &http.Client{Timeout: 2 * time.Minute}
+	}
+	start := time.Now()
+	resp, err := hc.Do(req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return Result{}, fmt.Errorf("zai request: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
+	if err != nil {
+		return Result{}, fmt.Errorf("read zai response: %w", err)
+	}
+	if len(raw) > 8<<20 {
+		return Result{}, errors.New("zai response exceeds 8 MiB limit")
+	}
+	var decoded apiResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return Result{}, fmt.Errorf("zai HTTP %d returned invalid JSON: %w", resp.StatusCode, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(raw))
+		if decoded.Error != nil && decoded.Error.Message != "" {
+			msg = decoded.Error.Message
+		}
+		return Result{}, fmt.Errorf("zai HTTP %d: %s", resp.StatusCode, msg)
+	}
+	if len(decoded.Choices) == 0 {
+		return Result{}, errors.New("zai response contained no choices")
+	}
+	return Result{Content: decoded.Choices[0].Message.Content, Model: decoded.Model, RequestID: decoded.RequestID, Usage: decoded.Usage, LatencyMS: latency}, nil
+}

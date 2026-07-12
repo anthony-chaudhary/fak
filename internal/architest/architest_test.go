@@ -430,6 +430,7 @@ var tier = map[string]int{
 	"projectreport":         1, // the ProjectsV2 board control-pane fold: a pure fold of board item × {Status,Generation,Priority} into the same schema/ok/verdict/finding envelope milestonereport uses, with a fail-closed UNMEASURED verdict for an unreadable board. The `gh` read lives in cmd/fak; this leaf is stdlib-only, imports nothing internal, off the hot path.
 	"catchupscore":          1, // the dev-system CATCH-UP control-pane scorecard (`fak score catchup`): folds intake/measurement/index/trunk/loops into a 0..1 caught-up fraction + an unbounded catchup_backlog headline. Pure fold, stdlib-only, imports nothing internal, off the hot path.
 	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
+	"zaitask":               4,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -1024,6 +1025,7 @@ var chatEndpointRole = map[string]string{
 	"trajctl":           "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
 	"deepseekbench":     "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
 	"glm52prefillsweep": "the off-path GLM-5.2 prefill-latency sweep client (#3085/#3086): POSTs a prefill-dominant request (large prompt, max_tokens~1) at each prompt length against a fak serve endpoint to record TTFT / prefill tok/s (not a live planner)",
+	"zaitask":           "the off-path bounded non-streaming Z.AI Coding Plan task runner (not a live kernel planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
