@@ -63,7 +63,19 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+# Robust sibling import: make scorecard_since importable whether this card is run
+# as a script or imported by its test (sys/Path are already imported above, but
+# the path.insert off __file__'s parent is what the sibling import needs).
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import scorecard_since
+
 SCHEMA = "fleet-docs-scorecard/1"
+
+# The corpus whose change could move this card's doc-debt: every markdown doc in
+# the tree. Used only by the --since shift-left skip-gate (all-or-nothing).
+CORPUS_GLOBS = ["**/*.md"]
 
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 VERSION_REL = "VERSION"
@@ -863,6 +875,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--markdown", action="store_true",
                     help="emit the DOCS-SCORECARD.md body")
     ap.add_argument("--stamp", default="", help="date stamp for the markdown header")
+    ap.add_argument("--since", default="", help="shift-left skip-gate: if no corpus file changed vs this git ref, report unchanged without rescanning")
     args = ap.parse_args(argv)
 
     # Docs carry Unicode (×, ≈, ·, —); force UTF-8 stdout so a Windows cp1252
@@ -873,6 +886,15 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
+
+    # Shift-left skip-gate: only on the SCAN path, never a snapshot (--markdown).
+    # If no corpus doc changed since the ref, the holistic debt cannot have moved,
+    # so short-circuit without a whole-tree rescan. Inert when --since is absent.
+    if args.since and not args.markdown:
+        _rc = scorecard_since.since_skip("docs-scorecard", workspace, args.since, CORPUS_GLOBS)
+        if _rc is not None:
+            return _rc
+
     payload = collect(workspace, scope=args.scope)
 
     if args.json:

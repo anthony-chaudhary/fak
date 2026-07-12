@@ -11,6 +11,10 @@ or `python -m pytest tools/docs_scorecard_test.py -q`.
 """
 from __future__ import annotations
 
+import contextlib
+import io
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -259,6 +263,101 @@ def test_live_collect_reachable() -> None:
     p = dsc.collect(root, scope="reachable")
     assert p["scope"] == "reachable"
     assert p["corpus"]["n_docs"] > len(dsc.CORE_DOCS)  # closure is larger
+
+
+# --- --since shift-left skip-gate ------------------------------------------
+
+def _have_git() -> bool:
+    try:
+        subprocess.run(["git", "--version"], capture_output=True)
+        return True
+    except OSError:
+        return False
+
+
+def _git(dir_: str, *args: str) -> None:
+    env = dict(os.environ,
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    proc = subprocess.run(["git", "-C", dir_, *args],
+                          capture_output=True, text=True, env=env)
+    if proc.returncode != 0:
+        raise RuntimeError(f"git {args}: {proc.stderr}")
+
+
+def _run_main(argv: list[str]) -> tuple[int, str]:
+    """Run the card's main() capturing stdout; returns (rc, stdout)."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = dsc.main(argv)
+    return rc, buf.getvalue()
+
+
+def test_since_skips_when_no_corpus_changed(tmp_path: Path) -> None:
+    # A repo whose only change since HEAD is a NON-markdown file: the docs corpus
+    # (**/*.md) is untouched, so the gate must skip the whole scan and exit 0.
+    if not _have_git():
+        return
+    d = str(tmp_path)
+    (tmp_path / "keep.go").write_text("package a\n", encoding="utf-8")
+    _git(d, "init", "-q")
+    _git(d, "add", "-A")
+    _git(d, "commit", "-qm", "base")
+    (tmp_path / "keep.go").write_text("package a\n// edit\n", encoding="utf-8")
+
+    rc, out = _run_main(["--workspace", d, "--since", "HEAD"])
+    assert rc == 0, (rc, out)
+    assert "unchanged since HEAD" in out, out
+    # Proof it did NOT do a full scan: the render header never printed.
+    assert "per-doc (worst first)" not in out, out
+
+
+def test_since_fullscans_when_corpus_changed(tmp_path: Path) -> None:
+    # A markdown file changed since HEAD → the corpus WAS touched → the gate must
+    # fall through to a full scan (no "unchanged" short-circuit).
+    if not _have_git():
+        return
+    d = str(tmp_path)
+    (tmp_path / "README.md").write_text("# Home\n\nhello\n", encoding="utf-8")
+    _git(d, "init", "-q")
+    _git(d, "add", "-A")
+    _git(d, "commit", "-qm", "base")
+    (tmp_path / "README.md").write_text("# Home\n\nhello, edited\n", encoding="utf-8")
+
+    rc, out = _run_main(["--workspace", d, "--since", "HEAD"])
+    assert "unchanged since HEAD" not in out, out
+    assert "per-doc (worst first)" in out, out  # the full render did run
+
+
+def test_since_absent_is_byte_identical() -> None:
+    # Contract preserved: with --since absent the gate is fully inert, so default
+    # and --json output are byte-identical to an explicit empty --since.
+    root = dsc.repo_root()
+    if not (root / "README.md").exists():
+        return
+    rc_a, out_a = _run_main([])
+    rc_b, out_b = _run_main(["--since", ""])
+    assert rc_a == rc_b and out_a == out_b, "default output drifted with empty --since"
+    jrc_a, jout_a = _run_main(["--json"])
+    jrc_b, jout_b = _run_main(["--json", "--since", ""])
+    assert jrc_a == jrc_b and jout_a == jout_b, "--json output drifted with empty --since"
+
+
+def test_since_inert_on_markdown_snapshot(tmp_path: Path) -> None:
+    # The gate must NOT fire in --markdown snapshot mode even with --since set:
+    # a snapshot is a doc render, not a scan, so it always produces its body.
+    if not _have_git():
+        return
+    d = str(tmp_path)
+    (tmp_path / "keep.go").write_text("package a\n", encoding="utf-8")
+    _git(d, "init", "-q")
+    _git(d, "add", "-A")
+    _git(d, "commit", "-qm", "base")
+    (tmp_path / "keep.go").write_text("package a\n// edit\n", encoding="utf-8")
+
+    rc, out = _run_main(["--workspace", d, "--since", "HEAD", "--markdown"])
+    assert "unchanged since HEAD" not in out, out
+    assert "# Core-docs scorecard" in out, out  # the markdown body still rendered
 
 
 # --- self-contained runner (mirrors readme_freshness_audit_test.py) --------

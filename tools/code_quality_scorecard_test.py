@@ -6,6 +6,13 @@ Run:  python -m pytest tools/code_quality_scorecard_test.py -q
 """
 from __future__ import annotations
 
+import contextlib
+import io
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
 import code_quality_scorecard as cq
 
 
@@ -459,6 +466,119 @@ def test_kpi_assertion_strength_clean_and_empty_are_100():
     assert cq.kpi_assertion_strength([], 42)["score"] == 100
     empty = cq.kpi_assertion_strength([], 0)
     assert empty["score"] == 100 and empty["detail"] == "no *testing.T test funcs"
+
+
+# --- --since shift-left skip-gate (tools/scorecard_since.py) ---------------
+
+def _have_git() -> bool:
+    try:
+        subprocess.run(["git", "--version"], capture_output=True)
+        return True
+    except OSError:
+        return False
+
+
+def _git(dir_: str, *args: str) -> None:
+    env = dict(os.environ,
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    proc = subprocess.run(["git", "-C", dir_, *args],
+                          capture_output=True, text=True, env=env)
+    if proc.returncode != 0:
+        raise RuntimeError(f"git {args}: {proc.stderr}")
+
+
+def _write(dir_: str, rel: str, body: str) -> None:
+    p = Path(dir_) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body)
+
+
+def _seed_repo(d: str) -> None:
+    """A hermetic temp repo the card can scan: a go.mod, one .go corpus file, and one
+    non-corpus README, all committed at HEAD (the ref the since-gate diffs against)."""
+    _write(d, "go.mod", "module example.com/x\n\ngo 1.26\n")
+    _write(d, "a.go", "package x\n\nfunc A() {}\n")
+    _write(d, "README.md", "# x\n")
+    _git(d, "init", "-q")
+    _git(d, "add", "-A")
+    _git(d, "commit", "-qm", "base")
+
+
+def test_since_gate_skips_when_no_corpus_changed():
+    # (a) --since at a ref where NO corpus file (**/*.go, go.mod, go.sum) changed:
+    # the card prints "unchanged since" and exits 0 WITHOUT a full scan.
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping since-gate case (a)")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        _write(d, "README.md", "# x\nchanged\n")   # only a non-corpus edit
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cq.main(["--workspace", d, "--json", "--no-toolchain", "--no-dos",
+                          "--since", "HEAD"])
+        out = buf.getvalue()
+        assert rc == 0, rc
+        assert "unchanged since HEAD" in out, out
+        # short-circuited BEFORE collect() — no JSON payload was ever emitted.
+        assert '"schema"' not in out, out
+
+
+def test_since_gate_full_scans_when_corpus_changed():
+    # (b) --since at a ref where a corpus file DID change: the card falls through to a
+    # full scan (emits the JSON payload) and does NOT print "unchanged".
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping since-gate case (b)")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        _write(d, "a.go", "package x\n\nfunc A() {}\n\nfunc B() {}\n")  # a corpus (.go) edit
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cq.main(["--workspace", d, "--json", "--no-toolchain", "--no-dos",
+                          "--since", "HEAD"])
+        out = buf.getvalue()
+        assert '"schema"' in out, out          # a real scan ran (payload emitted)
+        assert "unchanged since" not in out, out
+        assert rc in (0, 1), rc
+
+
+def test_since_gate_inert_and_output_identical_without_since():
+    # (c) contract preserved: with --since absent (default "") the gate is completely
+    # inert, so --json output is byte-identical whether or not an (empty) --since is
+    # passed. No git needed — the inert path never diffs.
+    with tempfile.TemporaryDirectory() as d:
+        _write(d, "go.mod", "module example.com/x\n\ngo 1.26\n")
+        _write(d, "a.go", "package x\n\nfunc A() {}\n")
+        base_argv = ["--workspace", d, "--json", "--no-toolchain", "--no-dos"]
+        buf_a = io.StringIO()
+        with contextlib.redirect_stdout(buf_a):
+            rc_a = cq.main(base_argv)
+        buf_b = io.StringIO()
+        with contextlib.redirect_stdout(buf_b):
+            rc_b = cq.main(base_argv + ["--since", ""])
+        assert rc_a == rc_b
+        assert buf_a.getvalue() == buf_b.getvalue()   # byte-identical: gate is inert
+        assert '"schema"' in buf_a.getvalue()          # really the scorecard, not a skip
+
+
+def test_since_gate_does_not_fire_in_markdown_mode():
+    # The gate must NOT fire when --markdown (the snapshot mode) is set, even with
+    # --since: a snapshot render is not a scan the skip may pre-empt.
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping since-gate markdown case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        _write(d, "README.md", "# x\nchanged\n")   # no corpus change → gate WOULD skip a scan
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cq.main(["--workspace", d, "--markdown", "--no-toolchain", "--no-dos",
+                     "--since", "HEAD"])
+        out = buf.getvalue()
+        assert "unchanged since" not in out, out       # gate stayed inert in markdown mode
+        assert "# Code-quality scorecard" in out, out   # the snapshot rendered
 
 
 def main() -> int:

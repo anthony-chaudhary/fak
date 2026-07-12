@@ -105,6 +105,10 @@ from typing import Any
 # is shipped away, so a lone code_quality_scorecard.py still runs (it just re-flags those
 # two idioms). Mirrors the code_quality<-steerability reuse idiom.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The shared shift-left --since skip-gate (sibling in tools/). The path.insert above
+# puts tools/ on sys.path so this resolves whether the card is run as a script or
+# imported by its test.
+import scorecard_since  # noqa: E402
 try:
     from code_slop_scorecard import _is_reexec_helper_test, _is_does_not_panic_test
 except Exception:  # noqa: BLE001 — stand-alone fallback
@@ -120,6 +124,12 @@ SCHEMA = "fleet-code-quality-scorecard/1"
 GOMOD_REL = "go.mod"
 GOSUM_REL = "go.sum"
 CLAIMS_REL = "CLAIMS.md"
+
+# The set of files whose change could move this card's code-debt: the card scans every
+# .go file and shells the go toolchain (build/vet/gofmt) over the module, so any .go /
+# go.mod / go.sum edit can move a KPI. The --since skip-gate short-circuits the whole
+# (holistic) scan when none of these changed vs a git ref.
+CORPUS_GLOBS = ["**/*.go", "go.mod", "go.sum"]
 
 # ---------------------------------------------------------------------------
 # Thresholds. Generous on purpose: a *legitimately* large file (a tensor
@@ -1159,6 +1169,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="skip the dos review ship-integrity probe")
     ap.add_argument("--range", default="HEAD~20..HEAD",
                     help="git range for the dos ship-integrity KPI")
+    ap.add_argument("--since", default="", help="shift-left skip-gate: if no corpus file changed vs this git ref, report unchanged without rescanning")
     args = ap.parse_args(argv)
 
     try:
@@ -1167,6 +1178,18 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
+
+    # Shift-left --since skip-gate: this card is HOLISTIC (a partial scan would report a
+    # WRONG number), so the only correct incremental mode is all-or-nothing. If no corpus
+    # file changed vs the given git ref, the debt provably cannot have moved — report
+    # unchanged and skip the whole (toolchain-shelling) scan. The gate NEVER fires in the
+    # --markdown snapshot mode, and is completely inert when --since is absent.
+    if args.since and not args.markdown:
+        _rc = scorecard_since.since_skip("code-quality-scorecard", workspace,
+                                         args.since, CORPUS_GLOBS)
+        if _rc is not None:
+            return _rc
+
     payload = collect(workspace, run_toolchain=not args.no_toolchain,
                       run_dos=not args.no_dos, dos_range=args.range)
 

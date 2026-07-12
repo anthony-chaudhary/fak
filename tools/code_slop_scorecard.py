@@ -75,6 +75,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Robust sibling import of the shared shift-left skip-gate (tools/scorecard_since.py).
+# Ensure this file's own directory is importable whether the card is run as a script
+# (`python tools/code_slop_scorecard.py`) or imported by its test, then import the gate.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scorecard_since  # noqa: E402
+
 _CREATE_NO_WINDOW = 0x08000000
 
 
@@ -88,6 +94,14 @@ STAMP_RE = re.compile(r"<!-- code-slop-scorecard:\s*(?P<stamp>[^·<]+?)\s*·")
 
 CLAIMS_REL = "CLAIMS.md"
 VERSION_REL = "VERSION"
+
+# The corpus whose change could move this card's slop-debt: every first-party .go file
+# (all six KPIs are static .go analysis) plus the CLAIMS.md honesty ledger that
+# stub_masquerade reads for its [STUB] suppression set. If none of these changed vs a
+# --since git ref, the debt provably cannot have moved, so the whole scan is skipped
+# (all-or-nothing: the KPIs are holistic cross-file analyses, so a partial rescan would
+# report a wrong number).
+CORPUS_GLOBS = ["**/*.go", "CLAIMS.md", "**/CLAIMS.md"]
 
 # ---------------------------------------------------------------------------
 # Thresholds. Generous on purpose — a measuring stick should find real-but-modest
@@ -1859,6 +1873,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="parity flag — this scorecard is already static (no-op)")
     ap.add_argument("--range", dest="churn_range", default="HEAD~20..HEAD",
                     help="git range for the SOFT churn_bloat axis")
+    ap.add_argument("--since", default="",
+                    help="shift-left skip-gate: if no corpus file (.go or CLAIMS.md) "
+                         "changed vs this git ref, report unchanged without rescanning")
     args = ap.parse_args(argv)
 
     try:
@@ -1871,6 +1888,18 @@ def main(argv: list[str] | None = None) -> int:
     # snapshot/doc-check paths exclude the HEAD-relative SOFT churn axis (it would drift
     # the doc every commit). The human/json paths include it — it's a live advisory.
     snapshot_mode = args.markdown or args.check_doc
+
+    # Shift-left skip-gate: only on the live SCAN path (never for the tree-deterministic
+    # snapshot/doc modes, which must always render). If a --since ref is given and none of
+    # this card's corpus (.go + CLAIMS.md) changed vs it, the debt cannot have moved, so
+    # report "unchanged" and skip the whole scan. On a touched corpus or a failed diff,
+    # since_skip returns None and we fall through to a full scan (fail-open).
+    if args.since and not snapshot_mode:
+        rc = scorecard_since.since_skip("code-slop-scorecard", workspace,
+                                        args.since, CORPUS_GLOBS)
+        if rc is not None:
+            return rc
+
     payload = collect(workspace, run_churn=not snapshot_mode,
                       churn_range=args.churn_range)
 

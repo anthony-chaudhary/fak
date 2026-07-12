@@ -12,6 +12,10 @@ Dual-runnable (the repo runs the suite pytest-free in CI):
 from __future__ import annotations
 
 import builtins
+import contextlib
+import io
+import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -1139,6 +1143,93 @@ def test_gather_go_prefers_tracked_sources_over_untracked_scratch():
     assert list(files) == ["cmd/fak/main.go"]
     assert "tracked" in files["cmd/fak/main.go"]
     assert test_files == {}
+
+
+# --- --since shift-left skip-gate (tools/scorecard_since.py wiring) --------
+
+def _have_git() -> bool:
+    try:
+        subprocess.run(["git", "--version"], capture_output=True)
+        return True
+    except OSError:
+        return False
+
+
+def _git(dir_: str, *args: str) -> None:
+    env = dict(os.environ,
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    proc = subprocess.run(["git", "-C", dir_, "-c", "commit.gpgsign=false", *args],
+                          capture_output=True, text=True, env=env)
+    if proc.returncode != 0:
+        raise RuntimeError(f"git {args}: {proc.stderr}")
+
+
+def _run_card(argv: list[str]) -> tuple[int, str, str]:
+    # invoke the card's real main() in-process, capturing stdout/stderr.
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = cs.main(argv)
+    return rc, out.getvalue(), err.getvalue()
+
+
+def _seed_repo(d: str) -> None:
+    # a minimal first-party repo the card can scan: one tracked .go file (corpus) plus a
+    # non-corpus README.md, committed clean so a later single edit is the only diff.
+    Path(d, "foo.go").write_text(
+        "package a\nfunc helper() int { return 1 }\nfunc Run() int { return helper() }\n",
+        encoding="utf-8")
+    Path(d, "README.md").write_text("# scratch\n", encoding="utf-8")
+    _git(d, "init", "-q")
+    _git(d, "add", "-A")
+    _git(d, "commit", "-qm", "base")
+
+
+def test_since_skips_scan_when_no_corpus_file_changed():
+    # (a) --since at a ref where NO corpus file changed (only a non-.go, non-CLAIMS file)
+    # -> report "unchanged" and exit 0 WITHOUT a full scan (no JSON payload emitted).
+    if not _have_git():
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        Path(d, "README.md").write_text("# scratch edited\n", encoding="utf-8")
+        rc, out, err = _run_card(["--workspace", d, "--json", "--since", "HEAD"])
+        assert rc == 0, (rc, out, err)
+        assert "unchanged since HEAD" in out, out
+        # proof the scan was skipped: the JSON payload keys are absent.
+        assert '"schema"' not in out, out
+        assert '"finding"' not in out, out
+
+
+def test_since_full_scans_when_a_corpus_file_changed():
+    # (b) --since at a ref where a corpus (.go) file DID change -> the gate must NOT skip;
+    # a full scan runs and emits the real JSON payload.
+    if not _have_git():
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        Path(d, "foo.go").write_text(
+            "package a\nfunc helper() int { return 2 }\nfunc Run() int { return helper() }\n",
+            encoding="utf-8")
+        rc, out, err = _run_card(["--workspace", d, "--json", "--since", "HEAD"])
+        assert "unchanged since" not in out, out
+        assert '"schema"' in out, (out, err)  # the real payload was emitted
+
+
+def test_since_absent_is_inert_output_unchanged():
+    # (c) with --since absent (or empty), the gate is inert: output is byte-identical to a
+    # run with no --since at all, on both the default and --json paths.
+    if not _have_git():
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        _, json_default, _ = _run_card(["--workspace", d, "--json"])
+        _, json_empty, _ = _run_card(["--workspace", d, "--json", "--since", ""])
+        assert json_default == json_empty, (json_default, json_empty)
+        assert '"schema"' in json_default, json_default
+        _, human_default, _ = _run_card(["--workspace", d])
+        _, human_empty, _ = _run_card(["--workspace", d, "--since", ""])
+        assert human_default == human_empty, (human_default, human_empty)
 
 
 def main() -> int:
