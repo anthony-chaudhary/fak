@@ -73,3 +73,25 @@ func TestRunRejectsOversizeResponse(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestClassifySuitableWork(t *testing.T) {
+	for _, tc := range []struct{ name, prompt, class string }{
+		{"explicit light", "review these names", "light"},
+		{"gardening", "deduplicate this list", "gardening"},
+		{"short trivial", "reply with OK", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Classify(tc.prompt, tc.class); !got.Suitable {
+				t.Fatalf("Classify() = %+v", got)
+			}
+		})
+	}
+}
+
+func TestClassifyRefusesFrontierWork(t *testing.T) {
+	for _, class := range []string{"hard", "engineering", "apex"} {
+		if got := Classify("implement a security-critical scheduler", class); got.Suitable {
+			t.Fatalf("class %q = %+v, want refusal", class, got)
+		}
+	}
+}

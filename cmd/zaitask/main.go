@@ -20,6 +20,8 @@ func main() {
 	max := fs.Int("max-tokens", 4000, "maximum completion tokens")
 	timeout := fs.Duration("timeout", 3*time.Minute, "request timeout")
 	jsonOut := fs.Bool("json", false, "emit content plus usage receipt as JSON")
+	taskClass := fs.String("task-class", "auto", "routing class: auto, light, gardening, tier3, hard, engineering, or apex")
+	force := fs.Bool("force", false, "run even when fleet classification says the task is unsuitable")
 	_ = fs.Parse(os.Args[1:])
 	prompt := strings.Join(fs.Args(), " ")
 	if prompt == "" {
@@ -29,6 +31,10 @@ func main() {
 		}
 		prompt = string(raw)
 	}
+	classification := zaitask.Classify(prompt, *taskClass)
+	if !classification.Suitable && !*force {
+		fail(fmt.Errorf("task is %s/tier%d, not suitable for bounded GLM-5: %s (use --force to override)", classification.Class, classification.TargetTier, classification.Reason))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	got, err := (zaitask.Client{BaseURL: *base, APIKey: os.Getenv("ZAI_API_KEY")}).Run(ctx, prompt, *model, *max)
@@ -36,7 +42,11 @@ func main() {
 		fail(err)
 	}
 	if *jsonOut {
-		if err := json.NewEncoder(os.Stdout).Encode(got); err != nil {
+		payload := struct {
+			zaitask.Result
+			Routing zaitask.Suitability `json:"routing"`
+		}{got, classification}
+		if err := json.NewEncoder(os.Stdout).Encode(payload); err != nil {
 			fail(err)
 		}
 		return

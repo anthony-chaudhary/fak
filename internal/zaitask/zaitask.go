@@ -10,12 +10,29 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
 const (
 	DefaultBaseURL = "https://api.z.ai/api/coding/paas/v4"
 	DefaultModel   = "glm-5.2"
 )
+
+// Suitability reports whether the fleet taxonomy considers a task safe for the
+// bounded GLM-5 path. Explicit light/gardening/tier-3 classes are accepted;
+// frontier and apex work fail closed instead of silently using a weaker model.
+type Suitability struct {
+	Suitable   bool   `json:"suitable"`
+	Class      string `json:"class"`
+	TargetTier int    `json:"target_tier"`
+	Reason     string `json:"reason"`
+}
+
+func Classify(prompt, taskClass string) Suitability {
+	got := fleetaccounts.ClassifyTask(prompt, taskClass, fleetaccounts.DefaultPolicy())
+	return Suitability{Suitable: got.TargetTier >= fleetaccounts.TierLight, Class: got.Class, TargetTier: got.TargetTier, Reason: got.Reason}
+}
 
 type Client struct {
 	BaseURL    string
