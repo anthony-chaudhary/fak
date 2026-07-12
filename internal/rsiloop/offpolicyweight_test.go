@@ -114,12 +114,12 @@ func TestStaleHeavyTailCannotDominate(t *testing.T) {
 // influence (a K+ old stone decays to 0 but is still weighed).
 func TestWeighArchiveMinesKeptGains(t *testing.T) {
 	archive := []LoopVariantRecord{
-		kept("v0", 0, 100),                                    // gen 0: huge gain but oldest
-		{Variant: LoopVariant{ID: "v1"}, Kept: false},        // REVERT: skipped
-		kept("v2", 3, 3),                                      // zero gain: skipped
-		kept("v3", 0, 5),                                      // gen 3
-		kept("v4", 0, 3),                                      // gen 4
-		kept("v5", 0, 1),                                      // gen 5 (current, fresh)
+		kept("v0", 0, 100), // gen 0: huge gain but oldest
+		{Variant: LoopVariant{ID: "v1"}, Kept: false}, // REVERT: skipped
+		kept("v2", 3, 3), // zero gain: skipped
+		kept("v3", 0, 5), // gen 3
+		kept("v4", 0, 3), // gen 4
+		kept("v5", 0, 1), // gen 5 (current, fresh)
 	}
 	p := AgeDecayArchiveProposer{StalenessK: 5, InfluenceCap: 0}
 	stones := p.WeighArchive(archive)
