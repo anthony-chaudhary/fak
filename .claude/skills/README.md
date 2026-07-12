@@ -49,6 +49,7 @@ are intentionally small local entry points over `dos` verbs and this repo's
 | [`dos-replan`](dos-replan/SKILL.md) | Refresh the portfolio from `dos verify` evidence and surface only the operator decisions that remain. |
 | [`dos-plan-price`](dos-plan-price/SKILL.md) | Price a proposed multi-agent fan-out before launch so overlapping trees are caught before workers start. |
 | [`dos-witness-claim`](dos-witness-claim/SKILL.md) | Verify subagent results before folding them into synthesis; confirmed effects fold, narration does not. |
+| [`verify`](verify/SKILL.md) | Bind a done-claim to a GREEN test run of the changed package, not just diff shape — run the resolving commit's affected tests (WSL-aware) and report `CLAIM_TEST_GREEN` / `CLAIM_TEST_RED` / `CLAIM_TEST_UNRUN`. The always-on consumer of `dispatch_tick_witness`'s additive `test_run_witness` rung; `dos-witness-claim` proves shape, `verify` proves the tests pass. |
 
 ## Fleet / bulk dispatch (launch headless work in bulk)
 
