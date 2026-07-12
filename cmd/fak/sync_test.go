@@ -234,6 +234,69 @@ func TestRunSyncPushInternalErrorStillEmitsVelocityJSON(t *testing.T) {
 	}
 }
 
+// TestRunSyncPushPinsCapturedSource is #4221's push-side witness: `fak sync push` captures
+// the source object ONCE (rev-parse HEAD) and hands SafePush that immutable SHA as the pinned
+// SourceRef → refs/heads/<branch> refspec — never a mutable branch-tip push. So HEAD/branch
+// movement during a retry or backoff cannot sweep a later peer commit into the push: SafePush
+// re-pushes that exact refspec on every attempt (see TestSafePush_SourceRefspecClassifiesAgainstSource).
+func TestRunSyncPushPinsCapturedSource(t *testing.T) {
+	const captured = "0f1e2d3c4b5a60718293a4b5c6d7e8f90a1b2c3d"
+
+	oldCapture := syncCaptureSource
+	syncCaptureSource = func(string) (string, error) { return captured, nil }
+	t.Cleanup(func() { syncCaptureSource = oldCapture })
+
+	var got safesync.PushOptions
+	oldPush := syncSafePush
+	syncSafePush = func(_ context.Context, opts safesync.PushOptions) (safesync.PushResult, error) {
+		got = opts
+		return safesync.PushResult{Pushed: true, Attempts: 1}, nil
+	}
+	t.Cleanup(func() { syncSafePush = oldPush })
+
+	oldWorktree := syncWorktree
+	syncWorktree = func(context.Context, string) (safesync.Worktree, bool) { return safesync.Worktree{}, false }
+	t.Cleanup(func() { syncWorktree = oldWorktree })
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"push", "--repo", t.TempDir(), "--branch", "main"})
+	if code != syncExitOK {
+		t.Fatalf("exit=%d stderr=%q, want ok", code, errb.String())
+	}
+	if got.SourceRef != captured {
+		t.Fatalf("SafePush SourceRef = %q, want the captured HEAD SHA %q — the push is not pinned to the immutable object", got.SourceRef, captured)
+	}
+	if got.TargetRef != "refs/heads/main" {
+		t.Fatalf("SafePush TargetRef = %q, want refs/heads/main (a pinned target, not a mutable branch-tip push)", got.TargetRef)
+	}
+}
+
+// TestRunSyncPushRefusesOnCaptureFailure pins the other half of #4221's safety: if the source
+// object cannot be captured, push REFUSES (INTERNAL) rather than silently falling back to a
+// mutable branch-tip push — "do not convert a refusal into success." SafePush is never called.
+func TestRunSyncPushRefusesOnCaptureFailure(t *testing.T) {
+	oldCapture := syncCaptureSource
+	syncCaptureSource = func(string) (string, error) { return "", errors.New("rev-parse HEAD failed") }
+	t.Cleanup(func() { syncCaptureSource = oldCapture })
+
+	pushCalls := 0
+	oldPush := syncSafePush
+	syncSafePush = func(context.Context, safesync.PushOptions) (safesync.PushResult, error) {
+		pushCalls++
+		return safesync.PushResult{Pushed: true}, nil
+	}
+	t.Cleanup(func() { syncSafePush = oldPush })
+
+	var out, errb bytes.Buffer
+	code := runSync(&out, &errb, []string{"push", "--repo", t.TempDir(), "--branch", "main"})
+	if code != syncExitInternal {
+		t.Fatalf("exit=%d, want internal refusal on capture failure", code)
+	}
+	if pushCalls != 0 {
+		t.Fatalf("SafePush called %d times after a capture failure, want 0 — a failed capture must never fall through to an unpinned push", pushCalls)
+	}
+}
+
 func TestDefaultSyncWorktreeIncludesJunkPaths(t *testing.T) {
 	root := t.TempDir()
 	syncGit(t, root, "init")

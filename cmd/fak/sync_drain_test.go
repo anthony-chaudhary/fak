@@ -136,6 +136,42 @@ func TestSyncDrainGreenWindowSingleFlush(t *testing.T) {
 	}
 }
 
+// TestSyncDrainFlushPinsCapturedSource is #4221's drain-side witness: a green-window flush
+// pushes the CAPTURED source object, threaded through as cfg.sourceSHA, so the queue is cleared
+// only for commits reachable from that immutable SHA. HEAD moving between the stranded read and
+// the flush cannot make drain publish (or clear) a commit that merely rode along on the mutable
+// branch tip — the flush is pinned to the object drain captured, not to whatever HEAD is now.
+func TestSyncDrainFlushPinsCapturedSource(t *testing.T) {
+	snapshotSyncDrainSeams(t)
+	const captured = "0f1e2d3c4b5a60718293a4b5c6d7e8f90a1b2c3d"
+
+	oldCapture := syncCaptureSource
+	syncCaptureSource = func(string) (string, error) { return captured, nil }
+	t.Cleanup(func() { syncCaptureSource = oldCapture })
+
+	flushSource := "<never-called>"
+	syncDrainWindow = func(context.Context, syncDrainConfig) syncDrainWindowVerdict {
+		return syncDrainWindowVerdict{Green: true, BuildVerdict: "OK", PeerState: "ahead"}
+	}
+	syncDrainStranded = func(context.Context, syncDrainConfig) ([]syncDrainEntry, error) {
+		return []syncDrainEntry{{SHA: "aaa0000000000000000000000000000000000000", Subject: "fix: one"}}, nil
+	}
+	syncDrainFlush = func(_ context.Context, cfg syncDrainConfig) (safesync.PushResult, error) {
+		flushSource = cfg.sourceSHA
+		return safesync.PushResult{Pushed: true, Attempts: 1}, nil
+	}
+	syncDrainNow = func() int64 { return 3000 }
+
+	var out, errb bytes.Buffer
+	code := runSyncDrain(&out, &errb, syncDrainConfig{queuePath: filepath.Join(t.TempDir(), "queue.json"), asJSON: true})
+	if code != syncExitOK {
+		t.Fatalf("exit=%d stderr=%q, want ok", code, errb.String())
+	}
+	if flushSource != captured {
+		t.Fatalf("drain flush sourceSHA = %q, want the captured object %q — the flush is not pinned to the immutable source", flushSource, captured)
+	}
+}
+
 // With nothing stranded and an empty queue, drain is a clean idle no-op — no push, no backoff,
 // regardless of the window color.
 func TestSyncDrainNoWorkIsIdle(t *testing.T) {
