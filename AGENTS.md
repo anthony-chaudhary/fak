@@ -165,6 +165,19 @@ follow-up named in prose but left unfiled is silently-deferred work: it becomes 
 issue or it does not leave the run. This binds headless workers, in-session loops, and
 interactive turns alike; if there is genuinely nothing left, say so plainly.
 
+## Version everything: cite `module@rev`, not just a bare SHA
+
+Every module carries a **derived** version — there are no hand-maintained per-module version
+files (×410 they would rot within hours on this shared trunk and spew merge noise). A module's
+`rev` is the count of trunk commits that touched it, rendered `r<rev>+g<shortsha>` (e.g.
+`internal/gateway r652+g1f75c56d`) — monotonic, conflict-free, and computed from history alone.
+Read the table with `fak version modules` (`--json` for machine form, `--scores S.json` to join a
+flat `{"module": score}` map); a nightrun / super-loop turn appends changed-module rows to the
+`fak-module-versions/1` ledger with `fak version modules --stamp` (stamping twice at the same HEAD
+is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@rev` over a bare SHA**
+— it says *which part moved and how far*, which a SHA alone does not. Full doctrine + e2e:
+[`docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md`](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md).
+
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)
 
 **Default: ship.** Once the tree is green, **commit AND push** unprompted.
