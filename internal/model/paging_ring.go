@@ -52,6 +52,13 @@ type pagedRing struct {
 	pageIn int // cold uploads (a miss that was admitted)
 	hit    int // resident reuses (a handle served without upload)
 	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
+
+	// pins is the online-learning resident pin-set (expert_warmpins.go): the workload-personalized
+	// hot-set warm-started from the summed cross-session usage histogram and drifted between turns by
+	// RepinPass. nil until WarmStartPins seeds it — a ring that was never warm-started has no pin-set,
+	// so isExpertPinned reports false and RepinPass is a no-op. Off the live serve path today
+	// (matMulStaged still takes a static `pinned` per call; consulting the set is the #2726 follow-on).
+	pins *ExpertPinSet
 }
 
 // newPagedRing returns a ring over be with the given resident weight-byte budget. A nil backend
