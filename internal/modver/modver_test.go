@@ -508,11 +508,117 @@ func TestJoinScores(t *testing.T) {
 	if rep.Modules[0].Score == nil || *rep.Modules[0].Score != 8.5 {
 		t.Errorf("internal/gateway score = %v, want 8.5", rep.Modules[0].Score)
 	}
+	// A flat score carries NO provenance — it must stay empty, never defaulted
+	// to "witnessed", so a modeled score can never masquerade as a witnessed one.
+	if p := rep.Modules[0].ScoreProvenance; p != "" {
+		t.Errorf("flat-score provenance = %q, want empty", p)
+	}
 	if rep.Modules[1].Score != nil {
 		t.Errorf("cmd/fak score should be unset")
 	}
 	if _, err := LoadScores([]byte(`["not","a","map"]`)); err == nil {
 		t.Errorf("LoadScores should reject a non-map")
+	}
+}
+
+// TestLoadScoresBothShapes is the #2498 witness: LoadScores accepts the flat
+// {module: number} shape and the extended {module: {score, provenance}} shape,
+// mixed freely, and a joined report carries provenance only where it was
+// supplied — flat scores stay unlabeled.
+func TestLoadScoresBothShapes(t *testing.T) {
+	// Flat shape alone still decodes (back-compat).
+	flat, err := LoadScores([]byte(`{"internal/gateway": 8.5}`))
+	if err != nil {
+		t.Fatalf("flat LoadScores: %v", err)
+	}
+	if got := flat["internal/gateway"]; got.Score != 8.5 || got.Provenance != "" {
+		t.Errorf("flat entry = %+v, want {8.5 \"\"}", got)
+	}
+
+	// Extended shape, and a mix of both shapes in one file.
+	mixed, err := LoadScores([]byte(`{
+		"internal/gateway": {"score": 9, "provenance": "witnessed"},
+		"internal/modver":  {"score": 4.2, "provenance": "modeled"},
+		"cmd/fak":          {"score": 6, "provenance": "observed"},
+		"internal/flat":    7.5
+	}`))
+	if err != nil {
+		t.Fatalf("extended LoadScores: %v", err)
+	}
+	for name, want := range map[string]ScoreEntry{
+		"internal/gateway": {Score: 9, Provenance: ProvenanceWitnessed},
+		"internal/modver":  {Score: 4.2, Provenance: ProvenanceModeled},
+		"cmd/fak":          {Score: 6, Provenance: ProvenanceObserved},
+		"internal/flat":    {Score: 7.5, Provenance: ""},
+	} {
+		if got := mixed[name]; got != want {
+			t.Errorf("%s entry = %+v, want %+v", name, got, want)
+		}
+	}
+
+	// JoinScores propagates both score and provenance onto matching rows, and a
+	// DeltaRows stamp carries the provenance label into the ledger row.
+	rep := Report{Head: "deadbee1", Modules: []Module{
+		{Name: "internal/modver", Kind: "internal", Rev: 3, LastCommit: "abc", LastDate: "2026-07-10T00:00:00Z"},
+		{Name: "internal/flat", Kind: "internal", Rev: 1, LastCommit: "def", LastDate: "2026-07-09T00:00:00Z"},
+	}}
+	if n := rep.JoinScores(mixed); n != 2 {
+		t.Fatalf("JoinScores matched %d, want 2", n)
+	}
+	if p := rep.Modules[0].ScoreProvenance; p != ProvenanceModeled {
+		t.Errorf("internal/modver provenance = %q, want %q", p, ProvenanceModeled)
+	}
+	if p := rep.Modules[1].ScoreProvenance; p != "" {
+		t.Errorf("internal/flat (flat score) provenance = %q, want empty", p)
+	}
+
+	rows := DeltaRows(rep, nil, "2026-07-11T00:00:00Z")
+	byName := map[string]LedgerRow{}
+	for _, r := range rows {
+		byName[r.Module] = r
+	}
+	if r := byName["internal/modver"]; r.ScoreProvenance != ProvenanceModeled {
+		t.Errorf("ledger row provenance = %q, want %q", r.ScoreProvenance, ProvenanceModeled)
+	}
+	if r := byName["internal/flat"]; r.ScoreProvenance != "" {
+		t.Errorf("flat-score ledger row provenance = %q, want empty", r.ScoreProvenance)
+	}
+}
+
+// TestLoadScoresRejectsUnknownProvenance locks the closed set: an unrecognized
+// provenance label is refused rather than flowing into the ledger wearing the
+// authority of a real one.
+func TestLoadScoresRejectsUnknownProvenance(t *testing.T) {
+	if _, err := LoadScores([]byte(`{"internal/gateway": {"score": 9, "provenance": "guessed"}}`)); err == nil {
+		t.Errorf("LoadScores should reject an unknown provenance label")
+	}
+	// A malformed value (neither number nor {score, provenance}) is refused too.
+	if _, err := LoadScores([]byte(`{"internal/gateway": "8.5"}`)); err == nil {
+		t.Errorf("LoadScores should reject a string score value")
+	}
+}
+
+// TestDeltaRowsProvenanceChange proves a provenance relabel is a real ledger
+// movement even when the numeric score is unchanged: relabeling modeled->
+// witnessed must append a fresh row so the corrected label is witnessed.
+func TestDeltaRowsProvenanceChange(t *testing.T) {
+	prev := []byte(`{"schema":"fak-module-versions/1","module":"internal/modver","kind":"internal","rev":3,"score":4.2,"score_provenance":"modeled"}` + "\n")
+	s := 4.2
+	rep := Report{Head: "deadbee1", Modules: []Module{
+		{Name: "internal/modver", Kind: "internal", Rev: 3, LastCommit: "abc", LastDate: "2026-07-10T00:00:00Z", Score: &s, ScoreProvenance: ProvenanceWitnessed},
+	}}
+	rows := DeltaRows(rep, prev, "2026-07-11T00:00:00Z")
+	if len(rows) != 1 {
+		t.Fatalf("provenance relabel produced %d rows, want 1", len(rows))
+	}
+	if rows[0].ScoreProvenance != ProvenanceWitnessed {
+		t.Errorf("relabeled row provenance = %q, want %q", rows[0].ScoreProvenance, ProvenanceWitnessed)
+	}
+
+	// No change at all (same rev, same score, same provenance) produces no row.
+	prev2 := []byte(`{"schema":"fak-module-versions/1","module":"internal/modver","kind":"internal","rev":3,"score":4.2,"score_provenance":"witnessed"}` + "\n")
+	if rows := DeltaRows(rep, prev2, "2026-07-11T00:00:00Z"); len(rows) != 0 {
+		t.Errorf("unchanged module produced %d rows, want 0", len(rows))
 	}
 }
 

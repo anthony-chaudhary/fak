@@ -43,6 +43,30 @@ type Module struct {
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"` // committer date (ISO) of the last touch
 	Score      *float64 `json:"score,omitempty"`
+	// ScoreProvenance labels where a joined Score came from — one of the closed
+	// set witnessed|observed|modeled, or "" when the score carries no label.
+	// Empty is deliberately NOT treated as "witnessed": an unlabeled score must
+	// stay visibly distinct so a modeled score never masquerades as a witnessed
+	// one when the series is quoted (#2498).
+	ScoreProvenance string `json:"score_provenance,omitempty"`
+}
+
+// Score provenance is a closed set: the origin-strength of a joined score, so a
+// modeled estimate never masquerades as a witnessed measurement in a trend
+// chart. An unlabeled score carries the empty string, never a defaulted label.
+const (
+	ProvenanceWitnessed = "witnessed" // measured first-hand from a real run/artifact
+	ProvenanceObserved  = "observed"  // seen indirectly, not first-hand witnessed
+	ProvenanceModeled   = "modeled"   // estimated/predicted, not measured
+)
+
+// knownProvenance is the closed set LoadScores accepts in the extended shape;
+// "" (unlabeled) is also allowed but is tracked separately since it is not a
+// positive label.
+var knownProvenance = map[string]bool{
+	ProvenanceWitnessed: true,
+	ProvenanceObserved:  true,
+	ProvenanceModeled:   true,
 }
 
 // Version renders the derived module version: the monotonic revision counter
@@ -268,23 +292,60 @@ func parseLog(logOut []byte, live map[string]bool) []Module {
 	return out
 }
 
-// LoadScores decodes a flat {"<module>": <number>} JSON map — the minimal
-// score-source shape; scorecard-specific adapters are follow-on work.
-func LoadScores(b []byte) (map[string]float64, error) {
-	var scores map[string]float64
-	if err := json.Unmarshal(b, &scores); err != nil {
-		return nil, fmt.Errorf("modver: scores file must be a flat {\"module\": number} JSON map: %w", err)
+// ScoreEntry is one external score with its optional provenance label — the
+// value shape LoadScores yields and JoinScores attaches. Provenance is "" when
+// the source did not label the score.
+type ScoreEntry struct {
+	Score      float64
+	Provenance string
+}
+
+// LoadScores decodes the scores file, accepting BOTH the flat
+// {"<module>": <number>} shape and the extended
+// {"<module>": {"score": <number>, "provenance": "<label>"}} shape, mixed
+// freely per module. The flat shape is preserved unchanged (back-compat); the
+// extended shape carries a provenance label from the closed set
+// witnessed|observed|modeled. An unknown non-empty provenance is rejected so a
+// typo cannot flow into the ledger wearing the authority of a real label; an
+// unlabeled score keeps an empty provenance, never a defaulted "witnessed".
+func LoadScores(b []byte) (map[string]ScoreEntry, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("modver: scores file must be a JSON map of module -> number or {\"score\":number,\"provenance\":label}: %w", err)
+	}
+	scores := make(map[string]ScoreEntry, len(raw))
+	for name, msg := range raw {
+		// Flat shape: a bare number. Try it first — a number never decodes into
+		// the extended struct and vice versa, so the order disambiguates cleanly.
+		var f float64
+		if err := json.Unmarshal(msg, &f); err == nil {
+			scores[name] = ScoreEntry{Score: f}
+			continue
+		}
+		var ext struct {
+			Score      float64 `json:"score"`
+			Provenance string  `json:"provenance"`
+		}
+		if err := json.Unmarshal(msg, &ext); err != nil {
+			return nil, fmt.Errorf("modver: score for %q must be a number or {\"score\":number,\"provenance\":label}: %w", name, err)
+		}
+		if ext.Provenance != "" && !knownProvenance[ext.Provenance] {
+			return nil, fmt.Errorf("modver: score for %q has unknown provenance %q (want witnessed|observed|modeled)", name, ext.Provenance)
+		}
+		scores[name] = ScoreEntry{Score: ext.Score, Provenance: ext.Provenance}
 	}
 	return scores, nil
 }
 
-// JoinScores attaches scores to matching modules and reports how many matched.
-func (r *Report) JoinScores(scores map[string]float64) int {
+// JoinScores attaches scores (and their provenance) to matching modules and
+// reports how many matched.
+func (r *Report) JoinScores(scores map[string]ScoreEntry) int {
 	matched := 0
 	for i := range r.Modules {
 		if v, ok := scores[r.Modules[i].Name]; ok {
-			s := v
+			s := v.Score
 			r.Modules[i].Score = &s
+			r.Modules[i].ScoreProvenance = v.Provenance
 			matched++
 		}
 	}
@@ -359,6 +420,10 @@ type LedgerRow struct {
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"`
 	Score      *float64 `json:"score,omitempty"`
+	// ScoreProvenance is the label of Score when one was joined — an additive
+	// field on the fak-module-versions/1 schema (omitempty keeps existing
+	// flat-score rows byte-identical; a breaking row change would be a /2).
+	ScoreProvenance string `json:"score_provenance,omitempty"`
 }
 
 // DeltaRows computes the ledger rows a stamp should append: one row per module
@@ -367,8 +432,9 @@ type LedgerRow struct {
 // skipped, not fatal — an append-only ledger a fleet writes will have scars.
 func DeltaRows(rep Report, prevLedger []byte, ts string) []LedgerRow {
 	type last struct {
-		rev   int
-		score *float64
+		rev        int
+		score      *float64
+		provenance string
 	}
 	prev := map[string]last{}
 	for _, line := range bytes.Split(prevLedger, []byte{'\n'}) {
@@ -380,25 +446,29 @@ func DeltaRows(rep Report, prevLedger []byte, ts string) []LedgerRow {
 		if err := json.Unmarshal(line, &row); err != nil || row.Module == "" {
 			continue
 		}
-		prev[row.Module] = last{rev: row.Rev, score: row.Score}
+		prev[row.Module] = last{rev: row.Rev, score: row.Score, provenance: row.ScoreProvenance}
 	}
 	var rows []LedgerRow
 	for _, m := range rep.Modules {
-		if p, ok := prev[m.Name]; ok && p.rev == m.Rev && scoreEq(p.score, m.Score) {
+		// A provenance change alone is a real ledger movement — relabeling a
+		// score modeled->witnessed must append a row so the corrected label is
+		// witnessed in the trend, even when the numeric score is unchanged.
+		if p, ok := prev[m.Name]; ok && p.rev == m.Rev && scoreEq(p.score, m.Score) && p.provenance == m.ScoreProvenance {
 			continue
 		}
 		rows = append(rows, LedgerRow{
-			Schema:     Schema,
-			TS:         ts,
-			Head:       rep.Head,
-			AppVersion: rep.AppVersion,
-			Module:     m.Name,
-			Kind:       m.Kind,
-			Rev:        m.Rev,
-			Version:    m.Version(),
-			LastCommit: m.LastCommit,
-			LastDate:   m.LastDate,
-			Score:      m.Score,
+			Schema:          Schema,
+			TS:              ts,
+			Head:            rep.Head,
+			AppVersion:      rep.AppVersion,
+			Module:          m.Name,
+			Kind:            m.Kind,
+			Rev:             m.Rev,
+			Version:         m.Version(),
+			LastCommit:      m.LastCommit,
+			LastDate:        m.LastDate,
+			Score:           m.Score,
+			ScoreProvenance: m.ScoreProvenance,
 		})
 	}
 	return rows
