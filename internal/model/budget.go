@@ -91,6 +91,17 @@ func q8DecodeWorkers() int {
 	return Q8DecodeWorkers()
 }
 
+// Q8DecodeKernel reports the resolved Q8_0 decode inner-kernel tier for this host and whether
+// the FUSED fast decode GEMV (qMatRowsRangeFast) is the active decode path. It answers #3176
+// Q1 — "is the EPYC AVX2/AVX-512 Q8 SIMD decode lane actually engaged, or did it fall back to
+// the reference path?" — as a queryable fact, no wall-clock guess needed. kernel is
+// "avx512"/"avx2"/"scalar" on amd64, "neon-amort"/"neon"/"scalar" on arm64, and "scalar" on a
+// no-SIMD build; fused is true only where the fused row kernel fires (amd64 + AVX-512). It is a
+// static host property (the tier resolves once at package init via CPUID+XGETBV), so it is
+// cheap to read on every decode witness line. Pair it with Q8DecodeWorkers()/
+// Q8DecodeWorkerBudget() for the full "engaged and parallel?" picture.
+func Q8DecodeKernel() (kernel string, fused bool) { return q8DecodeKernel() }
+
 func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) {
 	if workers < 1 {
 		workers = 1

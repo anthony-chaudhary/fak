@@ -708,8 +708,18 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if decodeS > 0 {
 		decTPS = float64(gen) / decodeS
 	}
-	log.Printf("inkernel_chat model=%s q4k=%v prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
-		p.modelID, p.q4k, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+	// #3176 Q1/Q2 decode witness: report the resolved Q8 SIMD kernel tier (+ whether the fused
+	// fast decode GEMV engaged) and the effective decode-worker count, so an operator can SEE —
+	// without wall-clock guessing — that the AVX2/AVX-512 lane fired (not the reference path) and
+	// that decode parallelizes across a modest, capped stream count rather than either 1 core or
+	// an oversubscribed all-core dispatch (the pathology 40e0afd fixed on many-core amd64).
+	q8kern, q8fused := model.Q8DecodeKernel()
+	q8fusedMark := ""
+	if q8fused {
+		q8fusedMark = "+fused"
+	}
+	log.Printf("inkernel_chat model=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
+		p.modelID, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
 	// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
 	// /metrics, not just this log line — the live measurement of the frozen-trajectory
 	// cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md). #3390: BOTH halves —

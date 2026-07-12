@@ -284,3 +284,19 @@ func qdot8GEMV(qw []int8, dw []float32, qv q8Vec, nblk int) float32 {
 func qMatRowsRangeFast(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) bool {
 	return false
 }
+
+// q8DecodeKernel reports this host's resolved Q8_0 decode inner-kernel tier and whether the
+// FUSED fast decode GEMV is the active path — the arm64 half of the build-agnostic
+// Q8DecodeKernel witness (#3176 Q1). fused is always false on arm64: qMatRowsRangeFast declines
+// here (the per-row SDOT qdot8GEMV already saturates decode bandwidth, see above), so the tier
+// name reflects the per-row dot kernel that actually runs.
+func q8DecodeKernel() (kernel string, fused bool) {
+	switch qkernelTier {
+	case tierAmort:
+		return "neon-amort", false
+	case tierNEON:
+		return "neon", false
+	default:
+		return "scalar", false
+	}
+}

@@ -25,6 +25,12 @@ func qMatRowsRangeFast(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) bool {
 	return false
 }
 
+// q8DecodeKernel reports the resolved Q8_0 decode inner-kernel tier — the portable half of the
+// build-agnostic Q8DecodeKernel witness (#3176 Q1). On a no-SIMD build the decode dot is always
+// the scalar reference (qdot8scalar) and no fused fast path exists, so this is unconditionally
+// ("scalar", false).
+func q8DecodeKernel() (kernel string, fused bool) { return "scalar", false }
+
 // qGemm8 on non-amd64 is the portable batched GEMM (no tile asm). FAK_QGEMM=legacy still
 // routes through the old per-element sweep for parity with the amd64 A/B.
 func qGemm8(qt *q8Tensor, qp *q8Panel) []float32 {

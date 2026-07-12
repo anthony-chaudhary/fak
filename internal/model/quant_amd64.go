@@ -158,6 +158,23 @@ func qMatRowsRangeFast(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) bool {
 	return true
 }
 
+// q8DecodeKernel reports this host's resolved Q8_0 decode inner-kernel tier and whether the
+// FUSED fast decode GEMV (qMatRowsRangeFast) is the active path — the amd64 half of the
+// build-agnostic Q8DecodeKernel witness (#3176 Q1: is the AVX2/AVX-512 SIMD lane engaged, or
+// did decode fall back to the reference path?). fused is true only on AVX-512, the one tier
+// where qMatRowsRangeFast fires (the deferred-FMA qdot8gemv512q16 row kernel); AVX2 and scalar
+// run the per-row qdot8GEMV instead (AVX2 still SIMD, scalar the reference dot).
+func q8DecodeKernel() (kernel string, fused bool) {
+	switch qtier {
+	case tierAVX512:
+		return "avx512", true
+	case tierAVX2:
+		return "avx2", false
+	default:
+		return "scalar", false
+	}
+}
+
 // qgemm8tile512 computes a 5(row)×4(token) Q8_0 output tile with AVX-512BW, deferred
 // reduction (see quant_gemm.go). Weight row i, block b at qw + i*in + b*qBlk (scale dw +
 // i*nblk + b); token j, block b at qx + j*in + b*qBlk (scale dx + j*nblk + b); result
