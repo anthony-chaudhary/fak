@@ -257,12 +257,13 @@ type RuntimeStatus struct {
 // identity fold that decides whether a carried weekly cap still belongs to the seat's
 // CURRENT login before a fresh OK is allowed to reopen it (see
 // throttleMatchesCurrentIdentity); "" simply skips the current-config identity candidate.
-// scanProbeRows folds an account's _probe sessions into the two signals
+// scanProbeRows folds an account's _probe sessions into the three signals
 // computeRuntimeStatus needs: whether any probe is fresh-OK (an OK ProbeStatus, or a
-// LIVE session with no explicit status) and the first non-OK probe session (the block
-// witness), if any. Extracted verbatim so computeRuntimeStatus stays under the
-// god-function ceiling — no behavior change.
-func scanProbeRows(acct []Session) (freshProbeOK bool, freshProbeBlock *Session) {
+// LIVE session with no explicit status), the first non-OK probe session (the block
+// witness), and the first fresh-OK probe row itself — its stamped identity is the
+// probe-identity candidate the weekly-cap hold consults, mirroring the Python's
+// `probe_identity = _account_identity_from(row)` over the first OK/LIVE probe row.
+func scanProbeRows(acct []Session) (freshProbeOK bool, freshProbeBlock, freshProbeOKRow *Session) {
 	var probeRows []Session
 	for _, s := range acct {
 		if s.Project == "_probe" {
@@ -274,12 +275,15 @@ func scanProbeRows(acct []Session) (freshProbeOK bool, freshProbeBlock *Session)
 		ps := strings.ToUpper(s.ProbeStatus)
 		if ps == "OK" || (s.Disp == "LIVE" && s.ProbeStatus == "") {
 			freshProbeOK = true
+			if freshProbeOKRow == nil {
+				freshProbeOKRow = &probeRows[i]
+			}
 		}
 		if ps != "" && ps != "OK" && freshProbeBlock == nil {
 			freshProbeBlock = &probeRows[i]
 		}
 	}
-	return freshProbeOK, freshProbeBlock
+	return freshProbeOK, freshProbeBlock, freshProbeOKRow
 }
 
 // countActiveLive tallies an account's sessions: active = not terminal (DONE/USER_CLOSED),
@@ -308,7 +312,7 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		}
 	}
 
-	freshProbeOK, freshProbeBlock := scanProbeRows(acct)
+	freshProbeOK, freshProbeBlock, freshProbeOKRow := scanProbeRows(acct)
 
 	active, live := countActiveLive(acct)
 
@@ -367,7 +371,26 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 
 	thr, hasThr := throttleMap[account]
 	if freshProbeOK {
+		// A fresh synthetic-probe OK clears a carried block, but — exactly as in the
+		// probe-ledger rung below and in the Python's fresh_probe_ok branch — it must
+		// NOT reopen a seat whose WEEKLY cap is still active for the seat's CURRENT
+		// login: the weekly window outlives any single probe. The hold is cleared only
+		// on a proven identity mismatch (a usage limit stamped for a DIFFERENT account
+		// the dir was logged into before a re-login); throttleMatchesCurrentIdentity
+		// holds fail-closed when identity is unknown. The probe row's own stamped
+		// identity is the leading candidate, mirroring the Python's probe_identity. This
+		// rung has no cap_obs (the ledger-derived observation is folded only below), so
+		// the weekly check is the legacy single-shot weeklyThrottleIsActive — matching
+		// the Python's _weekly_throttle_is_active here.
 		if hasThr {
+			var probeIdentity map[string]string
+			if freshProbeOKRow != nil {
+				probeIdentity = sessionIdentity(*freshProbeOKRow)
+			}
+			if weeklyThrottleIsActive(thr) &&
+				throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, probeIdentity) {
+				return applyThrottleStatus(st, thr)
+			}
 			markUsageSoon(&st, thr)
 		}
 		st.StatusSource = "probe"
