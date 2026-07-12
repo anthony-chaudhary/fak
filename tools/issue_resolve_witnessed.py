@@ -37,6 +37,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,14 @@ CLOSE_ALREADY_COUNTED = "already_counted"
 # holds the documented partial closes without stranding ordinary single-scope issues.
 PARTIAL_HOLD = "RESOLVED_PARTIAL"
 COVERAGE_UNKNOWN_HOLD = "COVERAGE_UNKNOWN"
+# Reopen-supersedes-witness gate (#4374): the close-resolved arm cites a witnessing
+# commit, but an auto-reclose must NOT override a `reopened` event unless a commit
+# landed AFTER it. Re-closing on a pre-reopen commit silently undoes a correction
+# reopen -- and in the witnessed #4350 case re-marked a BROKEN main "resolved" (the
+# reopen carried a red-at-HEAD regression the narrow close-gate witness never ran).
+# A reopen with no newer commit stays open; an unreadable timeline fails CLOSED.
+REOPEN_NO_NEW_COMMIT_HOLD = "REOPENED_NO_NEW_COMMIT"
+REOPEN_UNKNOWN_HOLD = "REOPEN_UNKNOWN"
 # `- [ ]` / `* [ ]` GitHub task-list box, unchecked (a `[x]`/`[X]` box never matches).
 _UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s+\[\s\]\s+\S", re.MULTILINE)
 _SPINE_FIRST_RE = re.compile(
@@ -300,6 +309,91 @@ def reachable_from_origin(root: Path, sha: str) -> bool:
     return rc == 0
 
 
+def _parse_iso(ts: str) -> datetime | None:
+    """Parse an ISO-8601 timestamp to an aware datetime, or None if unparseable.
+
+    Handles both the GitHub timeline shape (``2026-07-11T22:52:00Z``) and git's
+    ``%cI`` strict-ISO shape (``2026-07-11T23:05:12+00:00``). A trailing ``Z`` is
+    normalized to ``+00:00`` (``fromisoformat`` only learned ``Z`` in 3.11); a
+    naive stamp is assumed UTC so it still compares against aware stamps rather
+    than raising ``can't compare offset-naive and offset-aware``."""
+    ts = (ts or "").strip()
+    if not ts:
+        return None
+    if ts.endswith(("Z", "z")):
+        ts = ts[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def latest_reopen_ts(root: Path, number: Any) -> tuple[bool, datetime | None]:
+    """(read_ok, most-recent ``reopened`` timeline datetime | None) for #4374.
+
+    ``read_ok`` is False ONLY when the timeline could not be read (gh error): the
+    caller then fails CLOSED (holds the close) rather than guessing the issue was
+    never reopened. A successful read with no ``reopened`` event returns
+    ``(True, None)``. ``gh api`` substitutes ``{owner}``/``{repo}`` from the repo,
+    and ``--paginate`` walks every page, so a reopen on any page is seen; the
+    per-page ``--jq`` emits one ``created_at`` line per reopened event and we take
+    the max (lexical==chronological only within a format, so parse then max)."""
+    if number is None:
+        return True, None
+    rc, out, _ = run_capture(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/issues/{number}/timeline",
+         "--paginate", "--jq", '.[] | select(.event=="reopened") | .created_at'],
+        root, timeout=30)
+    if rc != 0:
+        return False, None
+    stamps = [t for line in out.splitlines() if (t := _parse_iso(line))]
+    return True, (max(stamps) if stamps else None)
+
+
+def commit_committer_ts(root: Path, sha: str) -> datetime | None:
+    """The committer date of ``sha`` as an aware datetime, or None if unreadable."""
+    if not sha:
+        return None
+    rc, out, _ = run_capture(
+        ["git", "show", "-s", "--format=%cI", sha], root, timeout=15)
+    if rc != 0:
+        return None
+    first = out.strip().splitlines()[0] if out.strip() else ""
+    return _parse_iso(first)
+
+
+def reopen_blocks_close(root: Path, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does an unsuperseded reopen forbid re-closing this issue? (#4374)
+
+    The close-resolved arm cites a witnessing commit; an auto-reclose may only
+    override a ``reopened`` event if a commit landed AFTER it. Returns
+    ``(allowed, hold_reason)``:
+      - ``(True, None)``  -> never reopened, or a commit landed since the reopen
+      - ``(False, REOPENED_NO_NEW_COMMIT: ...)`` -> reopened with no newer commit;
+        re-closing would silently undo the correction (the witnessed #4350 harm)
+      - ``(False, REOPEN_UNKNOWN: ...)`` -> timeline (or the witness commit's date)
+        unreadable; fail CLOSED, since we cannot prove no reopen supersedes it.
+    """
+    number = row.get("number")
+    read_ok, reopen = latest_reopen_ts(root, number)
+    if not read_ok:
+        return False, (f"{REOPEN_UNKNOWN_HOLD}: could not read #{number} timeline "
+                       "to confirm no reopen supersedes the witness")
+    if reopen is None:
+        return True, None  # never reopened -> the witness stands
+    commit_ts = commit_committer_ts(root, str(row.get("sha") or ""))
+    if commit_ts is None:
+        return False, (f"{REOPEN_UNKNOWN_HOLD}: #{number} was reopened at "
+                       f"{reopen.isoformat()} but the witness commit date is unreadable")
+    if commit_ts <= reopen:
+        return False, (
+            f"{REOPEN_NO_NEW_COMMIT_HOLD}: #{number} reopened at {reopen.isoformat()} "
+            f"with no commit landed since (witness {str(row.get('sha'))[:10]} dated "
+            f"{commit_ts.isoformat()}); a reopen with no new work stays open")
+    return True, None
+
+
 def readback_state(root: Path, number: Any) -> dict[str, Any]:
     """The AUTHORITATIVE GitHub state of one issue after a close attempt (#2641).
 
@@ -358,6 +452,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
     close_not_persistent = already_counted = 0
     skipped_partial = skipped_coverage_unknown = 0
+    skipped_reopened = skipped_reopen_unknown = 0
     # Unique issue IDs durably closed THIS run — a repeated close tick on an issue
     # already counted here does not inflate the tally (#2641, done condition 3).
     counted: set[int] = set()
@@ -381,6 +476,23 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             item["action"] = "skip_unpushed"
             item["reason"] = "resolving commit not on origin/main yet (not durable)"
             skipped_unpushed += 1
+            results.append(item)
+            continue
+        # #4374: an auto-reclose may not override a `reopened` event unless a commit
+        # landed AFTER it. The arm cites a witnessing commit; if that commit predates
+        # the most recent reopen, re-closing silently undoes a correction reopen (and
+        # in the witnessed #4350 case re-marked a BROKEN main "resolved"). Read-only
+        # timeline probe, runs even in dry-run so the plan reflects the hold; an
+        # unreadable timeline fails CLOSED (skip_reopen_unknown), never a false close.
+        allowed, reopen_hold = reopen_blocks_close(root, row)
+        if not allowed:
+            unknown = str(reopen_hold or "").startswith(REOPEN_UNKNOWN_HOLD)
+            item["action"] = "skip_reopen_unknown" if unknown else "skip_reopened"
+            item["reason"] = reopen_hold
+            if unknown:
+                skipped_reopen_unknown += 1
+            else:
+                skipped_reopened += 1
             results.append(item)
             continue
         # #3870: a diff-witnessed commit closes an issue only when the issue is not
@@ -457,6 +569,8 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             "skipped_nonresolving": skipped_nonresolving,
             "skipped_partial": skipped_partial,
             "skipped_coverage_unknown": skipped_coverage_unknown,
+            "skipped_reopened": skipped_reopened,
+            "skipped_reopen_unknown": skipped_reopen_unknown,
             "skipped_unpushed": skipped_unpushed,
             "close_not_persistent": close_not_persistent,
             "already_counted": already_counted,
@@ -488,6 +602,8 @@ def render(p: dict[str, Any]) -> str:
                  f"nonresolving={c.get('skipped_nonresolving')} "
                  f"partial={c.get('skipped_partial')} "
                  f"coverage_unknown={c.get('skipped_coverage_unknown')} "
+                 f"reopened={c.get('skipped_reopened')} "
+                 f"reopen_unknown={c.get('skipped_reopen_unknown')} "
                  f"unpushed={c.get('skipped_unpushed')} "
                  f"not_persistent={c.get('close_not_persistent')} "
                  f"already_counted={c.get('already_counted')} "
@@ -502,7 +618,8 @@ def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
     if action in {"skip_unwitnessed", "skip_nonresolving", "skip_partial",
-                  "skip_coverage_unknown", "skip_unpushed", CLOSE_ALREADY_COUNTED}:
+                  "skip_coverage_unknown", "skip_reopened", "skip_reopen_unknown",
+                  "skip_unpushed", CLOSE_ALREADY_COUNTED}:
         return "hold"
     if action == CLOSE_NOT_PERSISTENT:
         return "reopened"

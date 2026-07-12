@@ -338,6 +338,9 @@ class EvaluateTest(unittest.TestCase):
         # bind every issue so these cases exercise the pre-coverage close logic and
         # never make the read-only body/label gh probe.
         mod.coverage_binds_closure = lambda root, row: (True, None)
+        # Neutralize the #4374 reopen gate as well (own behavior in ReopenGateTest):
+        # allow every issue so these cases never make the read-only timeline probe.
+        mod.reopen_blocks_close = lambda root, row: (True, None)
 
         def fake_reverify(root, sha):
             return reverify_map[sha]
@@ -431,6 +434,7 @@ class PushedGateTest(unittest.TestCase):
             "witness": "diff-witnessed", "reason": None}
         mod.origin_main_resolvable = lambda root: gate_active
         mod.coverage_binds_closure = lambda root, row: (True, None)  # #3870 inert here
+        mod.reopen_blocks_close = lambda root, row: (True, None)     # #4374 inert here
         # only "onmain" is an ancestor of origin/main; "localonly" is not.
         mod.reachable_from_origin = lambda root, sha: sha == "onmain"
 
@@ -515,6 +519,7 @@ class StateReadbackTest(unittest.TestCase):
         mod.load_audit = lambda root, audit_json, max_commits: audit
         mod.origin_main_resolvable = lambda root: False  # inert durability gate
         mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
+        mod.reopen_blocks_close = lambda root, row: (True, None)     # inert #4374 gate
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
         run, calls = self._fake_gh(view_states)
         mod.run_capture = run
@@ -695,6 +700,7 @@ class CoverageGateTest(unittest.TestCase):
         coverage -- an issue's disposition is then decided purely by #3870."""
         mod.load_audit = lambda root, audit_json, max_commits: audit
         mod.origin_main_resolvable = lambda root: False
+        mod.reopen_blocks_close = lambda root, row: (True, None)  # inert #4374 gate
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -758,6 +764,186 @@ class CoverageGateTest(unittest.TestCase):
         self.assertEqual(p["counts"]["skipped_coverage_unknown"], 1)
         self.assertEqual(p["counts"]["closed"], 0)
         self.assertEqual(mod.close_decision("skip_coverage_unknown"), "hold")
+
+
+class ReopenGateTest(unittest.TestCase):
+    """The #4374 reopen-supersedes-witness gate: an auto-reclose may not override a
+    `reopened` event unless a commit landed AFTER it. The witnessed harm: #4350 was
+    reopened with a broken-main regression, then re-closed citing the SAME pre-reopen
+    commit `c39ffeebc` with no new work. A reopen with no newer commit stays open; an
+    unreadable timeline fails CLOSED (never a false close on a guess)."""
+
+    def test_parse_iso_handles_z_and_offset(self) -> None:
+        mod = load()
+        z = mod._parse_iso("2026-07-11T22:52:00Z")
+        off = mod._parse_iso("2026-07-11T23:05:12+00:00")
+        self.assertIsNotNone(z)
+        self.assertIsNotNone(off)
+        self.assertLess(z, off)  # 22:52Z is before 23:05+00:00
+        self.assertIsNone(mod._parse_iso(""))
+        self.assertIsNone(mod._parse_iso("not-a-date"))
+
+    def test_parse_iso_naive_is_assumed_utc_and_comparable(self) -> None:
+        mod = load()
+        # a stamp with no tz must still compare against an aware stamp (not raise).
+        naive = mod._parse_iso("2026-07-11T22:52:00")
+        aware = mod._parse_iso("2026-07-11T23:00:00Z")
+        self.assertIsNotNone(naive)
+        self.assertLess(naive, aware)
+
+    def test_latest_reopen_ts_read_error_is_not_ok(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (1, "", "gh boom")
+        ok, ts = mod.latest_reopen_ts(ROOT, 4350)
+        self.assertFalse(ok)   # unreadable -> caller fails CLOSED
+        self.assertIsNone(ts)
+
+    def test_latest_reopen_ts_no_reopen_is_ok_none(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "", "")
+        ok, ts = mod.latest_reopen_ts(ROOT, 4350)
+        self.assertTrue(ok)    # read succeeded, just never reopened
+        self.assertIsNone(ts)
+
+    def test_latest_reopen_ts_takes_max_across_pages(self) -> None:
+        mod = load()
+        # --paginate emits one created_at line per reopened event; take the latest.
+        mod.run_capture = lambda cmd, cwd, timeout: (
+            0, "2026-07-01T00:00:00Z\n2026-07-11T22:52:00Z\n2026-07-05T00:00:00Z\n", "")
+        ok, ts = mod.latest_reopen_ts(ROOT, 4350)
+        self.assertTrue(ok)
+        self.assertEqual(ts, mod._parse_iso("2026-07-11T22:52:00Z"))
+
+    def test_latest_reopen_ts_none_number_short_circuits(self) -> None:
+        mod = load()
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("must not shell out for a None issue number")
+
+        mod.run_capture = boom
+        self.assertEqual(mod.latest_reopen_ts(ROOT, None), (True, None))
+
+    def test_commit_committer_ts_parses_git(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "2026-07-11T23:05:12+00:00\n", "")
+        ts = mod.commit_committer_ts(ROOT, "c39ffeeb")
+        self.assertEqual(ts, mod._parse_iso("2026-07-11T23:05:12+00:00"))
+
+    def test_commit_committer_ts_error_is_none(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (128, "", "bad object")
+        self.assertIsNone(mod.commit_committer_ts(ROOT, "deadbeef"))
+
+    def _reopen_at(self, mod, reopen_iso, commit_iso, *, read_ok=True) -> None:
+        mod.latest_reopen_ts = lambda root, number: (
+            read_ok, mod._parse_iso(reopen_iso) if reopen_iso else None)
+        mod.commit_committer_ts = lambda root, sha: (
+            mod._parse_iso(commit_iso) if commit_iso else None)
+
+    def test_never_reopened_allows_close(self) -> None:
+        mod = load()
+        self._reopen_at(mod, None, "2026-07-11T23:05:12Z")
+        self.assertEqual(
+            mod.reopen_blocks_close(ROOT, {"number": 5, "sha": "abc"}), (True, None))
+
+    def test_commit_after_reopen_allows_close(self) -> None:
+        mod = load()
+        self._reopen_at(mod, "2026-07-11T22:52:00Z", "2026-07-11T23:30:00Z")
+        allowed, reason = mod.reopen_blocks_close(ROOT, {"number": 5, "sha": "abc"})
+        self.assertTrue(allowed)  # new work landed after the reopen -> may close
+        self.assertIsNone(reason)
+
+    def test_commit_before_reopen_holds(self) -> None:
+        # the literal #4350 shape: witness commit predates the reopen -> stays open.
+        mod = load()
+        self._reopen_at(mod, "2026-07-11T22:52:00Z", "2026-07-11T20:00:00Z")
+        allowed, reason = mod.reopen_blocks_close(ROOT, {"number": 4350, "sha": "c39ffeeb"})
+        self.assertFalse(allowed)
+        self.assertTrue(reason.startswith(mod.REOPEN_NO_NEW_COMMIT_HOLD))
+        self.assertIn("#4350", reason)
+
+    def test_commit_equal_reopen_holds(self) -> None:
+        # committer date == reopen instant: still "no new work since the reopen".
+        mod = load()
+        self._reopen_at(mod, "2026-07-11T22:52:00Z", "2026-07-11T22:52:00Z")
+        allowed, reason = mod.reopen_blocks_close(ROOT, {"number": 4350, "sha": "c39ffeeb"})
+        self.assertFalse(allowed)
+        self.assertTrue(reason.startswith(mod.REOPEN_NO_NEW_COMMIT_HOLD))
+
+    def test_timeline_unreadable_fails_closed(self) -> None:
+        mod = load()
+        self._reopen_at(mod, "x", "x", read_ok=False)  # read failed -> unknown
+        allowed, reason = mod.reopen_blocks_close(ROOT, {"number": 5, "sha": "abc"})
+        self.assertFalse(allowed)
+        self.assertTrue(reason.startswith(mod.REOPEN_UNKNOWN_HOLD))
+
+    def test_reopened_but_commit_date_unreadable_fails_closed(self) -> None:
+        mod = load()
+        self._reopen_at(mod, "2026-07-11T22:52:00Z", None)  # commit ts None
+        allowed, reason = mod.reopen_blocks_close(ROOT, {"number": 5, "sha": "abc"})
+        self.assertFalse(allowed)
+        self.assertTrue(reason.startswith(mod.REOPEN_UNKNOWN_HOLD))
+
+    def _audit_one(self):
+        return {"closure_rate": 0.5, "issues": [
+            {"number": 4350, "title": "fix(x): codex loop", "bucket": "OPEN_WITNESSED",
+             "witnessed_commits": [{"sha": "c39ffeeb", "subject": "codex loop fix"}]}]}
+
+    def _patch_through_to_reopen(self, mod) -> None:
+        # witness + claim-bind + durability all PASS, so the reopen gate decides.
+        mod.load_audit = lambda root, audit_json, max_commits: self._audit_one()
+        mod.origin_main_resolvable = lambda root: False
+        mod.coverage_binds_closure = lambda root, row: (True, None)
+        mod.reverify = lambda root, sha: {
+            "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+            "claim_kind": "code_effect", "touches_code": True, "reason": None}
+
+    def test_evaluate_holds_reopened_no_new_commit_and_never_closes(self) -> None:
+        mod = load()
+        self._patch_through_to_reopen(mod)
+        mod.latest_reopen_ts = lambda root, number: (True, mod._parse_iso("2026-07-11T22:52:00Z"))
+        mod.commit_committer_ts = lambda root, sha: mod._parse_iso("2026-07-11T20:00:00Z")
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("a reopened-no-new-commit issue must never be re-closed")
+
+        mod.run_capture = boom
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_reopened")
+        self.assertTrue(str(r["reason"]).startswith(mod.REOPEN_NO_NEW_COMMIT_HOLD))
+        self.assertEqual(p["counts"]["skipped_reopened"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(mod.close_decision("skip_reopened"), "hold")
+        self.assertIn("reopened=1", mod.render(p))
+
+    def test_evaluate_reopen_unknown_holds(self) -> None:
+        mod = load()
+        self._patch_through_to_reopen(mod)
+        mod.latest_reopen_ts = lambda root, number: (False, None)  # timeline unreadable
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("an unknown-reopen issue must never be re-closed")
+
+        mod.run_capture = boom
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_reopen_unknown")
+        self.assertEqual(p["counts"]["skipped_reopen_unknown"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(mod.close_decision("skip_reopen_unknown"), "hold")
+
+    def test_evaluate_commit_after_reopen_still_closes(self) -> None:
+        # a genuine post-reopen fix (commit lands AFTER the reopen) closes normally.
+        mod = load()
+        self._patch_through_to_reopen(mod)
+        mod.latest_reopen_ts = lambda root, number: (True, mod._parse_iso("2026-07-11T22:52:00Z"))
+        mod.commit_committer_ts = lambda root, sha: mod._parse_iso("2026-07-12T09:00:00Z")
+        mod.run_capture = gh_close_then_state()  # readback confirms CLOSED
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "closed")
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["skipped_reopened"], 0)
 
 
 class RunCaptureEncodingTest(unittest.TestCase):
