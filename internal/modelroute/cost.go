@@ -57,9 +57,26 @@ var FrontierAnchor = Price{In: 3, Out: 15}
 // so the saved fraction is identical on input and output tokens — i.e. it does
 // NOT depend on a workload's prompt:completion mix. Override any of it with
 // `fak route --prices model=in/out,...`.
+//
+// CANONICAL FABLE 5 TAXONOMY (the one price/role decision this repo routes every
+// Fable-5 question through — #3927). `claude-fable-5` is the RESTRICTED APEX model:
+// the most capable and the PRICIEST tier, ~2x the Opus-class frontier baseline, and
+// reachable only on an explicit operator request (never inferred, never an auto-
+// escalation fallback target). The account-side gate that enforces the "explicit-only"
+// half lives in internal/fleetaccounts/apextier.go (TierApex=0, IsApexModel); this
+// price row is the cost-lens half, and the two are kept in agreement on purpose.
+// So Fable 5 is priced ABOVE the frontier tier here, never below it — a route that
+// lands on fable is a PREMIUM spend, reported as such. Two seams still carry the
+// stale pre-apex-migration framing that called Fable "the cheap model"/"cheaper" and
+// have NOT been reconciled to this decision — the dispatch launch table
+// (internal/dispatchtick/launchprofile.go, which still routes routine/PM/ultra to
+// fable) and the session-audit price book (internal/sessionaudit prices fable at
+// {3,15}, Sonnet-class, i.e. cheaper than Opus). Those are behavioral/product calls
+// tracked as #3927 residue, not silently flipped here. TestFableIsCanonicalApexPrice
+// pins this invariant so it cannot drift back to "cheap" without a deliberate change.
 func DefaultPrices() PriceBook {
 	return PriceBook{
-		"apex": {6, 30}, "fable": {6, 30}, // Fable 5 apex tier — priciest (2x frontier); restricted, use only when clearly needed (see fleetaccounts/apextier.go)
+		"apex": {6, 30}, "fable": {6, 30}, // Fable 5 = restricted APEX tier — priciest (~2x frontier); explicit-only (see the CANONICAL FABLE 5 TAXONOMY note above + fleetaccounts/apextier.go)
 		"frontier": {3, 15}, "large": {3, 15}, // Opus-class — the SOTA baseline tier
 		"mid": {1, 5}, "medium": {1, 5}, "default": {1, 5}, // balanced mid tier
 		"small": {0.25, 1.25}, "tiny": {0.25, 1.25}, "mini": {0.25, 1.25}, "nano": {0.25, 1.25}, // small/fast tier

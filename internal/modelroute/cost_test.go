@@ -116,6 +116,35 @@ func TestDefaultPricesClassifiesGroqCompoundAsSmallTier(t *testing.T) {
 	}
 }
 
+// TestFableIsCanonicalApexPrice pins the reconciled Fable 5 taxonomy (#3927): under
+// this repo's canonical decision `claude-fable-5` is the RESTRICTED APEX model — the
+// priciest tier, strictly ABOVE the Opus-class frontier baseline, never below it. The
+// contradiction this closes was the launch/dispatch side calling Fable "the cheap
+// model"/"a cheaper alias" while apextier.go + this cost lens price it as the priciest
+// apex. This test fails loudly if the cost lens is ever quietly flipped back to
+// pricing Fable at or below frontier without the deliberate, cross-seam decision the
+// issue asks for (dropping the apextier explicit-only gate, re-routing the launch
+// table, and updating the published apex taxonomy doc together).
+func TestFableIsCanonicalApexPrice(t *testing.T) {
+	book := DefaultPrices()
+	fable, apex, frontier := book["fable"], book["apex"], book["frontier"]
+
+	// "fable" and "apex" name the SAME model — one price, no collision on the string.
+	if fable != apex {
+		t.Fatalf("fable %+v and apex %+v must be the same canonical price", fable, apex)
+	}
+	// Apex is the PRICIEST tier: strictly above frontier on BOTH token directions, so a
+	// route landing on fable can never be scored as a saving vs the frontier baseline.
+	if !(fable.In > frontier.In && fable.Out > frontier.Out) {
+		t.Fatalf("fable %+v must be priced strictly above the frontier baseline %+v (canonical apex is the priciest tier)", fable, frontier)
+	}
+	// And it reads as a PREMIUM through the public cost lens, never as "cheaper".
+	h := EstimateSavings(dec("fable"), nil, "").Headline()
+	if strings.Contains(h, "cheaper") {
+		t.Fatalf("a fable route must never read as cheaper than frontier: %q", h)
+	}
+}
+
 // A $0 baseline (all-local book) is honestly "not estimated", never a divide.
 func TestSavingsZeroBaselineNotEstimated(t *testing.T) {
 	s := EstimateSavings(dec("local"), nil, "local")

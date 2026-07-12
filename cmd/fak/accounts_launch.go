@@ -67,9 +67,13 @@ const defaultLaunchModel = "claude-opus-4-8"
 
 // defaultLaunchFallbackModel is the default fallback CHAIN (`--fallback-model`, comma-separated)
 // tried in order when the default Opus 4.8 launch is refused before a session starts because the
-// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. an Opus weekly cap). It
-// lands on the cheaper Fable 5 alias; ultracode is preserved by reusing the same launchOpts. A
-// caller can widen it, e.g. `--fallback-model fable,claude-sonnet-5`.
+// model is unavailable — unknown/invalid OR a usage/rate limit (e.g. an Opus weekly cap). It lands
+// on the Fable 5 alias — reached for its SEPARATE allocation bucket (a capped Opus window does not
+// cap Fable), NOT because Fable is cheaper: under the repo's canonical taxonomy Fable 5 is the
+// restricted, PRICIEST apex model (internal/modelroute/cost.go prices it ~2x the Opus/frontier
+// baseline; internal/fleetaccounts/apextier.go gates it explicit-only — #3927). ultracode is
+// preserved by reusing the same launchOpts. A caller can widen it, e.g. `--fallback-model
+// fable,claude-sonnet-5`.
 const defaultLaunchFallbackModel = "fable"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
