@@ -145,7 +145,9 @@ func capacityState(row Account) (state, until, reason string) {
 	}
 	reason = capacityFirstNonEmpty(derefStr(row.BlockReason), row.Reason, "not currently offerable")
 	blockKind := strings.ToLower(derefStr(row.BlockKind))
-	reset := capacityFirstNonEmpty(derefStr(row.Weekly), derefStr(row.Reset))
+	// weekly-first "when does it free up", shared with the cap-disambiguation core so the
+	// capacity view and the runtime fold agree on precedence.
+	reset := CapState{Weekly: derefStr(row.Weekly), Reset: derefStr(row.Reset)}.EffectiveFreeUp()
 	if derefBool(row.Blocked) && (blockKind == "usage" || derefBool(row.Throttled)) {
 		return CapacityBlockedUntil, reset, reason
 	}

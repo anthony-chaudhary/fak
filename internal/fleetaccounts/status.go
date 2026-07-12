@@ -146,66 +146,37 @@ func resetIsFuture(reset string, now time.Time) *bool {
 	return &r
 }
 
+// throttleIsActive is a thin view over the cap-disambiguation core (capstate.go): a carried
+// throttle is live when DisambiguateCap says so. With the zero CapObservation it reproduces
+// fleet_accounts.throttle_is_active exactly — a WEEKLY cap that is not provably past keeps
+// the throttle active on its own (a present weekly whose reset is future, or unparseable,
+// counts as active; only a weekly proven past falls through to the daily-reset check, whose
+// unknown format also fails closed to active).
 func throttleIsActive(info map[string]any) bool {
-	now := time.Now().UTC()
-	// Mirror fleet_accounts.throttle_is_active: a WEEKLY cap that is not provably
-	// past keeps the throttle active on its own, independent of the daily reset. A
-	// present weekly whose reset is still future — or unparseable (nil), e.g. a bare
-	// "Jul 8" with no time — counts as active; only a weekly proven to be in the past
-	// falls through to the daily-reset check. Dropping this branch let a seat whose
-	// daily window had rolled over reopen while its weekly cap was still closed.
-	if weekly := asString(info["weekly"]); weekly != "" {
-		if state := resetIsFuture(weekly, now); state == nil || *state {
-			return true
-		}
-	}
-	reset := resetText(info)
-	state := resetIsFuture(reset, now)
-	if state != nil && !*state {
-		return false
-	}
-	return true
+	return DisambiguateCap(info, CapObservation{}, time.Now().UTC(), DefaultCapPolicy()).Active
 }
 
-// weeklyThrottleIsActive mirrors fleet_accounts._weekly_throttle_is_active: a carried
-// throttle holds through a fresh OK probe only while its WEEKLY window is still open —
-// no weekly text means no weekly cap, a weekly reset provably in the past means the cap
-// expired, and anything else (unparseable/future) defers to the throttle's own liveness.
+// weeklyThrottleIsActive is the view for the weekly leg's independent liveness (the rung
+// that holds a seat closed through a fresh OK probe). Mirrors
+// fleet_accounts._weekly_throttle_is_active: no weekly text means no weekly cap, a weekly
+// reset provably in the past means the cap expired, and anything else defers to the
+// throttle's own liveness.
 func weeklyThrottleIsActive(info map[string]any) bool {
-	if info == nil {
-		return false
-	}
-	weekly := asString(info["weekly"])
-	if weekly == "" {
-		return false
-	}
-	if state := resetIsFuture(weekly, time.Now().UTC()); state != nil && !*state {
-		return false
-	}
-	return throttleIsActive(info)
+	return DisambiguateCap(info, CapObservation{}, time.Now().UTC(), DefaultCapPolicy()).WeeklyActive
 }
 
-// applyThrottleStatus stamps the carried-throttle block onto st, mirroring
-// fleet_accounts._apply_throttle_status. Python stamps reset/weekly straight from
-// thr.get(...): absent -> None (null), present (even "") -> the value; mirror that
-// presence, not emptiness.
+// applyThrottleStatus stamps the carried-throttle block onto st, reading the disambiguated
+// CapState. Mirrors fleet_accounts._apply_throttle_status: reset/weekly are carried straight
+// from the throttle map (absent -> None/null, present even "" -> the value; CapState.HasReset
+// /HasWeekly preserve that presence, not emptiness), and the block reason is the core's
+// composed "usage limit; resets X; weekly Y".
 func applyThrottleStatus(st RuntimeStatus, thr map[string]any) RuntimeStatus {
-	resetVal, hasReset := thr["reset"]
-	weeklyVal, hasWeekly := thr["weekly"]
-	reset := asString(resetVal)
-	weekly := asString(weeklyVal)
-	reason := "usage limit"
-	if reset != "" {
-		reason = "usage limit; resets " + reset
-	}
-	if weekly != "" {
-		reason += "; weekly " + weekly
-	}
+	cs := DisambiguateCap(thr, CapObservation{}, time.Now().UTC(), DefaultCapPolicy())
 	st.Available, st.Blocked = false, true
 	st.BlockKind, st.hasBlockKind = "usage", true
-	st.BlockReason = reason
-	st.Reset, st.hasReset = reset, hasReset
-	st.Weekly, st.hasWeekly = weekly, hasWeekly
+	st.BlockReason = cs.BlockReason
+	st.Reset, st.hasReset = cs.Reset, cs.HasReset
+	st.Weekly, st.hasWeekly = cs.Weekly, cs.HasWeekly
 	st.Throttled = true
 	return st
 }
@@ -220,11 +191,15 @@ func applyThrottleStatus(st RuntimeStatus, thr map[string]any) RuntimeStatus {
 // holds the seat closed upstream); an absent/expired cap contributes nothing, so a normal
 // serving row gains no field and its byte-parity JSON is unchanged.
 func markUsageSoon(st *RuntimeStatus, thr map[string]any) {
-	if thr == nil || !throttleIsActive(thr) || weeklyThrottleIsActive(thr) {
+	if thr == nil {
 		return
 	}
-	if reset := resetText(thr); reset != "" {
-		st.UsageSoonReset, st.hasUsageSoon = reset, true
+	cs := DisambiguateCap(thr, CapObservation{}, time.Now().UTC(), DefaultCapPolicy())
+	if !cs.Active || cs.WeeklyActive {
+		return
+	}
+	if cs.Reset != "" {
+		st.UsageSoonReset, st.hasUsageSoon = cs.Reset, true
 	}
 }
 
@@ -235,16 +210,6 @@ func markUsageSoon(st *RuntimeStatus, thr map[string]any) {
 // and callers without a prober keep the pure passive fold.
 func shouldConsultProbeLedger() bool {
 	return strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != ""
-}
-
-func resetText(info map[string]any) string {
-	if info == nil {
-		return ""
-	}
-	if r, ok := info["reset"]; ok {
-		return asString(r)
-	}
-	return ""
 }
 
 func normalizeThrottle(throttle map[string]any) map[string]map[string]any {
@@ -436,8 +401,18 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 	// (probe says OK, roster still "resets 11pm"). A ledger verdict within
 	// ProbeLedgerFreshMin is the same authoritative fresh probe. Mirrors
 	// fleet_accounts.runtime_status's probe-ledger rung.
-	if shouldConsultProbeLedger() {
-		if led := FreshProbeFromLedger(account, "", time.Now().UTC(), 0); led != nil {
+	now := time.Now().UTC()
+	// The cap-disambiguation cycles (aging + probe-override) fold a CapObservation drawn
+	// from the SAME probe ledger the fresh-probe rung reads, so gate it on the same switch:
+	// with the ledger unconsulted (or no carried throttle) capObs is zero and
+	// DisambiguateCap stays on its legacy single-shot path at both seams below.
+	consultLedger := shouldConsultProbeLedger()
+	var capObs CapObservation
+	if consultLedger && hasThr {
+		capObs = deriveCapObservation(account, "")
+	}
+	if consultLedger {
+		if led := FreshProbeFromLedger(account, "", now, 0); led != nil {
 			if led.Available {
 				// A fresh OK must not reopen a seat whose WEEKLY cap is still
 				// active: the weekly window outlives any single probe. But the hold
@@ -450,11 +425,18 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 				// probe-identity candidate is nil here: the account-probe ledger
 				// stamps no identity, so — as in the Python on today's ledgers — it
 				// contributes nothing and current-config identity decides.
-				if hasThr && weeklyThrottleIsActive(thr) &&
-					throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, nil) {
-					return applyThrottleStatus(st, thr)
-				}
+				//
+				// A RUN of fresh OKs can also overturn the hold: DisambiguateCap folds
+				// the ledger-derived observation so that ≥2 consecutive OKs past a
+				// passed daily reset clear a stale/unparseable weekly the seat has
+				// demonstrably outgrown. With no such streak the observation is inert
+				// and cs.WeeklyActive equals the legacy weeklyThrottleIsActive(thr).
 				if hasThr {
+					cs := DisambiguateCap(thr, capObs, now, DefaultCapPolicy())
+					if cs.WeeklyActive &&
+						throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, nil) {
+						return applyThrottleStatus(st, thr)
+					}
 					markUsageSoon(&st, thr)
 				}
 				st.StatusSource = "probe-ledger"
@@ -479,7 +461,12 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		}
 	}
 
-	if hasThr && throttleIsActive(thr) {
+	// Carried-throttle fallback (no fresh probe verdict). The aging valve lives here: a
+	// seat blocked past WeeklyMaxAge with a stale/unparseable weekly and no live daily leg
+	// has outlived any real weekly window, so DisambiguateCap releases it via the derived
+	// episode start. Absent that (no ledger history, or a young/parseable-future cap),
+	// cs.Active equals the legacy throttleIsActive(thr).
+	if hasThr && DisambiguateCap(thr, capObs, now, DefaultCapPolicy()).Active {
 		return applyThrottleStatus(st, thr)
 	}
 
