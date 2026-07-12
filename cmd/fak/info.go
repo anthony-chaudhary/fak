@@ -648,6 +648,14 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			block := renderGuardInfoVisualBlock(v, tr, width, height)
 			if focusable {
 				block = renderGuardInfoInteractiveBlock(viewState, v, tr, width, height)
+				// Pad the interactive frame to the full pane height so it ALWAYS bottom-parks. The
+				// mouse path (blockRelativeRow) translates an absolute click row assuming the block
+				// fills the bottom prevRows rows; a frame shorter than the tallest one drawn anchors
+				// higher than that and silently offsets every tab/chip click — the "clicks stop
+				// working after opening a shorter view" bug. A constant full-height frame keeps
+				// prevRows == height, so the translation is exact for every view. Visually identical
+				// to the clear-to-end blanks the redraw already shows below the content.
+				block = padBlockToHeight(block, height)
 			}
 			// Layer color on the finished, width-capped block (a no-op off a TTY / under NO_COLOR).
 			block = colorizeGuardInfoBlock(block, colorOn)

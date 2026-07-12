@@ -356,6 +356,27 @@ func writeGuardInfoFrame(w io.Writer, block string, prevRows int) int {
 	return len(lines)
 }
 
+// padBlockToHeight appends empty rows so the rendered block is exactly height rows tall — a no-op
+// when height <= 0 (unknown pane) or the block already meets/exceeds it. The interactive overlay
+// pads every PAINTED frame (info.go's writeFrame) to the pane height so the in-place block always
+// bottom-parks: it fills the bottom `height` rows of the pane on every tick, whatever view is
+// active. That constant geometry is what keeps blockRelativeRow's absolute→block-row translation
+// exact. Without it, a frame shorter than the tallest one drawn so far (e.g. after switching from
+// the full Overview to a stubby Safety view) anchors HIGHER than height-prevRows, and every tab /
+// chip click silently mis-hits or goes inert — the "clicks work at first, then stop" bug. The pad
+// rows are the same blank cells the redraw's \033[J clear already leaves below the content, so a
+// padded frame is visually identical to an unpadded one; only the parked-block height changes.
+func padBlockToHeight(block string, height int) string {
+	if height <= 0 {
+		return block
+	}
+	rows := strings.Count(block, "\n") + 1
+	if rows >= height {
+		return block
+	}
+	return block + strings.Repeat("\n", height-rows)
+}
+
 // clampIntTUI clamps v to [lo, hi] (lo wins if lo>hi).
 func clampIntTUI(v, lo, hi int) int {
 	if v < lo {
