@@ -247,7 +247,7 @@ func TestJudgeScorerConjunctiveOneFails(t *testing.T) {
 func TestJudgeScorerConjunctiveMissingFinding(t *testing.T) {
 	client := &cannedJudge{
 		verdict: JudgeVerdict{
-			Progress: 1, // model claims fully done…
+			Progress: 1,                                        // model claims fully done…
 			Criteria: []RubricFinding{{ID: "c1", Progress: 1}}, // …but only reported c1
 		},
 		usage: JudgeUsage{Tokens: 40},

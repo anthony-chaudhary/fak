@@ -215,12 +215,12 @@ type ChannelHopScenario struct {
 // is the fak fraction minus the Hermes fraction: the warm continuity Hermes
 // structurally cannot get. Pure and deterministic — same scenario, same numbers.
 type CrossPlatformContinuityResult struct {
-	Harness         string        `json:"harness"`
-	Scenario        ChannelHopScenario `json:"scenario"`
-	HermesColdReSend    ResumeOutcome `json:"hermes_cold_re_send"`
-	FakPrefixReuse      ResumeOutcome `json:"fak_prefix_reuse"`
-	CacheReadFractionLift float64     `json:"cache_read_fraction_lift"`
-	WarmResumeFloor       float64     `json:"warm_resume_floor"`
+	Harness               string             `json:"harness"`
+	Scenario              ChannelHopScenario `json:"scenario"`
+	HermesColdReSend      ResumeOutcome      `json:"hermes_cold_re_send"`
+	FakPrefixReuse        ResumeOutcome      `json:"fak_prefix_reuse"`
+	CacheReadFractionLift float64            `json:"cache_read_fraction_lift"`
+	WarmResumeFloor       float64            `json:"warm_resume_floor"`
 }
 
 // MeasureCrossPlatformContinuity runs one channel-hop resume both ways and returns

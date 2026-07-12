@@ -210,13 +210,13 @@ func TestQ8DecodeWorkersManyCoreAmd64Cap(t *testing.T) {
 		want    int
 		capped  bool
 	}{
-		{12, 12, false},  // small amd64 — unchanged
-		{32, 32, false},  // below the many-core threshold — unchanged
-		{63, 63, false},  // just below — unchanged
-		{64, 8, true},    // 64/8 = 8
-		{128, 16, true},  // 128/8 = 16
-		{192, 16, true},  // 192/8 = 24 -> clamped to 16
-		{256, 16, true},  // the reporter's 256-thread EPYC -> 16
+		{12, 12, false}, // small amd64 — unchanged
+		{32, 32, false}, // below the many-core threshold — unchanged
+		{63, 63, false}, // just below — unchanged
+		{64, 8, true},   // 64/8 = 8
+		{128, 16, true}, // 128/8 = 16
+		{192, 16, true}, // 192/8 = 24 -> clamped to 16
+		{256, 16, true}, // the reporter's 256-thread EPYC -> 16
 	}
 	for _, tc := range cases {
 		got, source := q8DecodeWorkersFor(tc.workers, defaultWorkerBudgetSource, "linux", "amd64")

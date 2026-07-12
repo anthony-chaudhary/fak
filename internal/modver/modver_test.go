@@ -44,9 +44,9 @@ func TestModuleOf(t *testing.T) {
 		{"examples/repo-guard-policy.json", "examples/repo-guard-policy.json", "policy", true},
 		{"examples/customer-support-readonly-policy.json", "examples/customer-support-readonly-policy.json", "policy", true},
 		{"examples\\dev-agent-policy.json", "examples/dev-agent-policy.json", "policy", true}, // backslash-normalized
-		{"examples/README.md", "", "", false},                                                // top-level non-JSON: excluded
-		{"examples/mcp/.mcp.json", "", "", false},                                            // nested demo fixture: excluded
-		{"examples/adjudication-demo/main.go", "", "", false},                                // nested demo: excluded
+		{"examples/README.md", "", "", false},                 // top-level non-JSON: excluded
+		{"examples/mcp/.mcp.json", "", "", false},             // nested demo fixture: excluded
+		{"examples/adjudication-demo/main.go", "", "", false}, // nested demo: excluded
 		{"", "", "", false},
 	}
 	for _, c := range cases {

@@ -55,11 +55,11 @@ var trunkRedNow = time.Now
 type trunkRedRecord struct {
 	Schema     string   `json:"schema"`
 	Ts         string   `json:"ts,omitempty"`
-	Gate       string   `json:"gate"`                 // "commit" | "pre-push"
-	BaseSha    string   `json:"base_sha,omitempty"`   // the trunk commit the red was proven pre-existing at
-	Packages   []string `json:"packages,omitempty"`   // the failing import paths (the shared break)
+	Gate       string   `json:"gate"`                  // "commit" | "pre-push"
+	BaseSha    string   `json:"base_sha,omitempty"`    // the trunk commit the red was proven pre-existing at
+	Packages   []string `json:"packages,omitempty"`    // the failing import paths (the shared break)
 	FirstBreak string   `json:"first_break,omitempty"` // first undefined symbol, when parseable
-	Session    string   `json:"session,omitempty"`    // best-effort session id, so distinct clones are countable
+	Session    string   `json:"session,omitempty"`     // best-effort session id, so distinct clones are countable
 }
 
 // trunkRedClass is the convergence key: the shared break's identity, independent of
@@ -142,8 +142,8 @@ func trunkRedSession() string {
 // distinct sessions are stuck on it.
 type trunkRedWitness struct {
 	Witnessed   bool
-	Occurrences int    // rows sharing this class, including the one just written
-	Sessions    int    // distinct sessions across those rows (min 1 when witnessed)
+	Occurrences int // rows sharing this class, including the one just written
+	Sessions    int // distinct sessions across those rows (min 1 when witnessed)
 	Ledger      string
 	Class       string
 }

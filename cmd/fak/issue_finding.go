@@ -45,20 +45,20 @@ type issueFindingDeps struct {
 }
 
 type issueFindingResult struct {
-	Schema      string                     `json:"schema"`
-	Live        bool                       `json:"live"`
-	DryRun      bool                       `json:"dry_run"`
-	Lane        string                     `json:"lane"`
-	DedupeCap   int                        `json:"dedupe_cap"`
-	MaxApply    int                        `json:"max_apply"`
-	OK          bool                       `json:"ok"`
-	Counts      map[string]int             `json:"counts"`
-	Mutations   int                        `json:"mutations"`
-	Items       []issueFindingItem         `json:"items"`
-	Candidates  []issuecontract.Candidate  `json:"candidates,omitempty"`
-	Escalations []issueFindingEscalation   `json:"escalations,omitempty"`
-	Applied     []issueFindingApplied      `json:"applied,omitempty"`
-	Refusal     string                     `json:"refusal,omitempty"`
+	Schema      string                    `json:"schema"`
+	Live        bool                      `json:"live"`
+	DryRun      bool                      `json:"dry_run"`
+	Lane        string                    `json:"lane"`
+	DedupeCap   int                       `json:"dedupe_cap"`
+	MaxApply    int                       `json:"max_apply"`
+	OK          bool                      `json:"ok"`
+	Counts      map[string]int            `json:"counts"`
+	Mutations   int                       `json:"mutations"`
+	Items       []issueFindingItem        `json:"items"`
+	Candidates  []issuecontract.Candidate `json:"candidates,omitempty"`
+	Escalations []issueFindingEscalation  `json:"escalations,omitempty"`
+	Applied     []issueFindingApplied     `json:"applied,omitempty"`
+	Refusal     string                    `json:"refusal,omitempty"`
 }
 
 type issueFindingItem struct {
@@ -419,24 +419,24 @@ func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeC
 		lane = "crossaudit"
 	}
 	return issuecontract.Candidate{
-		Schema:       issuecontract.Schema,
-		Key:          item.Key,
-		Title:        findingIssueTitle(n),
-		ParentRef:    ref,
-		CurrentState: fmt.Sprintf("Closed issue #%d was re-audited by an independent cross-model auditor, which returned REFUTE (severity %s): %s.", n, sev, detail),
-		WhyNow:       fmt.Sprintf("A resolved issue is failing an independent re-audit right now: #%d's closing change does not hold up, so the working path it claimed is still red and is the current weak point.", n),
-		WorkingSpine: fmt.Sprintf("Restore #%d's resolution to true — land a corrected closing change and prove it with a fresh independent cross-audit PASS, closing the gap the re-audit found.", n),
-		InScope:      fmt.Sprintf("Reproduce the re-audit REFUTE for #%d, land a corrected closing change, and re-run the cross-audit to a PASS.", n),
-		OutOfScope:   "Unrelated refactors or polish, and closing this finding on the auditor's word alone without a witnessed fix and an independent re-audit.",
-		DoneCondition: fmt.Sprintf("A new closing commit for #%d lands AND an independent cross-model re-audit of that commit returns PASS.", n),
-		Witness:       fmt.Sprintf("`fak issue audit --issue %d` returns PASS on the new closing commit (a fresh crossaudit PASS receipt) with the fix commit green under `go test ./...`.", n),
+		Schema:         issuecontract.Schema,
+		Key:            item.Key,
+		Title:          findingIssueTitle(n),
+		ParentRef:      ref,
+		CurrentState:   fmt.Sprintf("Closed issue #%d was re-audited by an independent cross-model auditor, which returned REFUTE (severity %s): %s.", n, sev, detail),
+		WhyNow:         fmt.Sprintf("A resolved issue is failing an independent re-audit right now: #%d's closing change does not hold up, so the working path it claimed is still red and is the current weak point.", n),
+		WorkingSpine:   fmt.Sprintf("Restore #%d's resolution to true — land a corrected closing change and prove it with a fresh independent cross-audit PASS, closing the gap the re-audit found.", n),
+		InScope:        fmt.Sprintf("Reproduce the re-audit REFUTE for #%d, land a corrected closing change, and re-run the cross-audit to a PASS.", n),
+		OutOfScope:     "Unrelated refactors or polish, and closing this finding on the auditor's word alone without a witnessed fix and an independent re-audit.",
+		DoneCondition:  fmt.Sprintf("A new closing commit for #%d lands AND an independent cross-model re-audit of that commit returns PASS.", n),
+		Witness:        fmt.Sprintf("`fak issue audit --issue %d` returns PASS on the new closing commit (a fresh crossaudit PASS receipt) with the fix commit green under `go test ./...`.", n),
 		AcceptanceGate: "The cross-audit re-run on the corrected commit returns PASS and its receipt is appended to the audit ledger.",
 		ClosureBinding: fmt.Sprintf("Close only when witnessed by a new closing commit for #%d AND an independent re-audit PASS — never on this finding report alone.", n),
-		Lane:          lane,
-		Paths:         findingCandidatePaths(item.EvidenceRefs),
-		WorkUnit:      "leaf",
-		ExpectedSteps: 3,
-		Scale:         "S1",
+		Lane:           lane,
+		Paths:          findingCandidatePaths(item.EvidenceRefs),
+		WorkUnit:       "leaf",
+		ExpectedSteps:  3,
+		Scale:          "S1",
 		Assumptions: []string{
 			fmt.Sprintf("The audited commit %s is the change that closed #%d.", findingShortSHA(item.Subject.CommitSHA), n),
 		},

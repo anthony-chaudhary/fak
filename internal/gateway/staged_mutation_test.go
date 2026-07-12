@@ -155,6 +155,6 @@ type fakeHarnessMutation struct {
 	tier   CacheTTL
 }
 
-func (f fakeHarnessMutation) MutationName() string      { return f.name }
-func (f fakeHarnessMutation) StablePrefixTokens() int   { return f.tokens }
-func (f fakeHarnessMutation) CacheTier() CacheTTL       { return f.tier }
+func (f fakeHarnessMutation) MutationName() string    { return f.name }
+func (f fakeHarnessMutation) StablePrefixTokens() int { return f.tokens }
+func (f fakeHarnessMutation) CacheTier() CacheTTL     { return f.tier }

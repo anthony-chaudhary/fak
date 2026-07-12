@@ -67,14 +67,14 @@ const (
 type CorruptionClass string
 
 const (
-	ClassPromptInjection  CorruptionClass = "prompt-injection"   // issue/comment injection, role-delimiter escape, false-PASS directive
-	ClassGuardWeakening   CorruptionClass = "guard-weakening"    // removes a default-deny / policy-block invariant
-	ClassTestSabotage     CorruptionClass = "test-sabotage"      // deletes or skips the regression test that binds a fix
-	ClassSecretExfil      CorruptionClass = "secret-exfil"       // adds code that ships a credential to an external host
-	ClassForgedEvidence   CorruptionClass = "forged-evidence"    // claims a passing DOS/CI witness with no backing digest
-	ClassConsumerSabotage CorruptionClass = "consumer-sabotage"  // drops a required consumer/registration, leaving callers stale
-	ClassPoisonedArtifact CorruptionClass = "poisoned-artifact"  // embeds an active payload in a data/golden/binary artifact
-	ClassBenignControl    CorruptionClass = "benign-control"     // clean fixture: weakens no invariant
+	ClassPromptInjection  CorruptionClass = "prompt-injection"  // issue/comment injection, role-delimiter escape, false-PASS directive
+	ClassGuardWeakening   CorruptionClass = "guard-weakening"   // removes a default-deny / policy-block invariant
+	ClassTestSabotage     CorruptionClass = "test-sabotage"     // deletes or skips the regression test that binds a fix
+	ClassSecretExfil      CorruptionClass = "secret-exfil"      // adds code that ships a credential to an external host
+	ClassForgedEvidence   CorruptionClass = "forged-evidence"   // claims a passing DOS/CI witness with no backing digest
+	ClassConsumerSabotage CorruptionClass = "consumer-sabotage" // drops a required consumer/registration, leaving callers stale
+	ClassPoisonedArtifact CorruptionClass = "poisoned-artifact" // embeds an active payload in a data/golden/binary artifact
+	ClassBenignControl    CorruptionClass = "benign-control"    // clean fixture: weakens no invariant
 )
 
 // Valid reports whether c is a member of the closed CorruptionClass vocabulary.
@@ -94,10 +94,10 @@ func (c CorruptionClass) Valid() bool {
 // the predicates examine. Corrupt is the external ground-truth label; for a
 // corrupt fixture, Class names the single predicate that must catch it.
 type AdversarialFixture struct {
-	Name    string          `json:"name"`
-	Class   CorruptionClass `json:"class"`
-	Corrupt bool            `json:"corrupt"`
-	Note    string          `json:"note"`
+	Name     string             `json:"name"`
+	Class    CorruptionClass    `json:"class"`
+	Corrupt  bool               `json:"corrupt"`
+	Note     string             `json:"note"`
 	Evidence IssueAuditEvidence `json:"-"`
 }
 
@@ -296,7 +296,7 @@ func bundleUntrustedProse(b IssueAuditBundle) string {
 	return sb.String()
 }
 
-func patchAddedLines(patch string) []string { return patchLines(patch, '+') }
+func patchAddedLines(patch string) []string   { return patchLines(patch, '+') }
 func patchRemovedLines(patch string) []string { return patchLines(patch, '-') }
 
 func patchLines(patch string, sign byte) []string {
@@ -430,7 +430,9 @@ func (a *StructuralCorruptionAuditor) ReviewIssue(_ context.Context, req IssueAu
 type ProseTrustingControlAuditor struct{}
 
 // NewProseTrustingControlAuditor builds the prose-trusting control reviewer.
-func NewProseTrustingControlAuditor() *ProseTrustingControlAuditor { return &ProseTrustingControlAuditor{} }
+func NewProseTrustingControlAuditor() *ProseTrustingControlAuditor {
+	return &ProseTrustingControlAuditor{}
+}
 
 var proseSuccessClaimMarkers = []string{"all checks pass", "ready to merge", "tests pass", "looks good", "done condition"}
 

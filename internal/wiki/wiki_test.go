@@ -38,11 +38,11 @@ devindex = ["internal/devindex/**"] # the self-index
 
 func TestStructure_TaxonomyAndLeafPages(t *testing.T) {
 	root := writeRepo(t, twoLeafDosToml, map[string]string{
-		"README.md":                             "# repo\n",
-		"AGENTS.md":                              "agents\n",
-		"internal/gateway/gateway.go":            "package gateway\n",
-		"internal/devindex/devindex.go":          "package devindex\n",
-		"internal/architest/architest_test.go":   "package architest\n",
+		"README.md":                            "# repo\n",
+		"AGENTS.md":                            "agents\n",
+		"internal/gateway/gateway.go":          "package gateway\n",
+		"internal/devindex/devindex.go":        "package devindex\n",
+		"internal/architest/architest_test.go": "package architest\n",
 	})
 	cat, err := devindex.Load(root)
 	if err != nil {
