@@ -36,9 +36,12 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 	fs := flag.NewFlagSet("headless-lint", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		selfTest = fs.Bool("self-test", false, "scan the built-in corpus and exit 0 iff every case scans as labeled")
-		asJSON   = fs.Bool("json", false, "emit the Report as JSON")
-		file     = fs.String("file", "", `read the text to scan from this path ("-" = stdin)`)
+		selfTest    = fs.Bool("self-test", false, "scan the built-in corpus and exit 0 iff every case scans as labeled")
+		asJSON      = fs.Bool("json", false, "emit the Report as JSON")
+		file        = fs.String("file", "", `read the text to scan from this path ("-" = stdin)`)
+		leftovers   = fs.Bool("leftovers", false, "run the RUN-LEVEL end-of-run fold: refuse a final summary that narrates deferred work while zero gh issues were filed")
+		issuesFiled = fs.Int("issues-filed", 0, "with --leftovers: how many gh issues the run filed (or resolved) during its lifetime (the doctrine cross-check)")
+		override    = fs.Bool("override", false, `with --leftovers: the operator escape for "genuinely nothing left" — forces clean even when leftovers are narrated`)
 	)
 	fs.Usage = func() { fmt.Fprint(stderr, headlessLintUsage) }
 	if !parseFlags(fs, argv) {
@@ -59,6 +62,10 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 		return 2
 	}
 
+	if *leftovers {
+		return runHeadlessLeftovers(stdout, stderr, text, *issuesFiled, *override, *asJSON)
+	}
+
 	rep := headlesslint.Scan(text)
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, rep); err != nil {
@@ -72,6 +79,44 @@ func runHeadlessLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) i
 		return 1
 	}
 	return 0
+}
+
+// runHeadlessLeftovers is the RUN-LEVEL fold behind `fak headless-lint --leftovers`:
+// the operator-facing surface over headlesslint.ScanLeftovers, enforcing the AGENTS.md
+// spine-first rule "End of run: file the leftovers, don't narrate them." (#3670). It
+// scans a run's final summary for deferred / out-of-scope narration and cross-checks
+// --issues-filed; exit 1 (LEFTOVERS_UNFILED) when leftovers are narrated but the run
+// filed zero issues and --override was not given, 0 otherwise.
+func runHeadlessLeftovers(stdout, stderr io.Writer, text string, issuesFiled int, override, asJSON bool) int {
+	rep := headlesslint.ScanLeftovers(text, issuesFiled, override)
+	if asJSON {
+		if err := writeIndentedJSON(stdout, rep); err != nil {
+			fmt.Fprintf(stderr, "fak headless-lint: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprint(stdout, renderLeftoversReport(rep))
+	}
+	if rep.Refused() {
+		return 1
+	}
+	return 0
+}
+
+// renderLeftoversReport is the human-readable view of the run-level fold.
+func renderLeftoversReport(rep headlesslint.LeftoversReport) string {
+	if !rep.Refused() {
+		return fmt.Sprintf("fak headless-lint --leftovers: clean — %d narrated leftover(s), %d issue(s) filed; doctrine: %q\n",
+			rep.Narrated, rep.IssuesFiled, rep.Doctrine)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak headless-lint --leftovers: %s — %d leftover(s) narrated but 0 gh issue(s) filed.\n", rep.Verdict, rep.Narrated)
+	fmt.Fprintf(&b, "  doctrine: %q\n\n", rep.Doctrine)
+	for _, h := range rep.Hits {
+		fmt.Fprintf(&b, "  line %-4d %q\n", h.Line, h.Match)
+	}
+	fmt.Fprintf(&b, "\n  instead: %s\n", rep.Resolve)
+	return b.String()
 }
 
 // readHeadlessSource resolves the text to scan: --file (or "-" for stdin), then
@@ -154,6 +199,14 @@ usage:
   fak headless-lint --file out.txt [--json]      ("-" reads the text from stdin)
   fak headless-lint "…text…" [--json]
   … | fak headless-lint [--json]
+  fak headless-lint --leftovers [--issues-filed N] [--override] "…final summary…"
+
+run-level end-of-run fold (--leftovers):
+  Enforces the AGENTS.md rule "End of run: file the leftovers, don't narrate them."
+  Refuses (exit 1) a final summary that narrates deferred / out-of-scope follow-ups
+  ("two more things worth doing", "out of scope", "follow-up", "left to do", "TODO")
+  while --issues-filed is 0. Pass --issues-filed N once the follow-ups are filed as
+  open gh issues, or --override for a genuine "nothing left".
 
 the closed anti-pattern vocabulary (Class -> what to do instead):
   PERMISSION_ASK         asks permission for the obvious next step      -> TAKE_OBVIOUS
