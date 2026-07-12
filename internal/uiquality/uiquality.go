@@ -75,6 +75,16 @@ var renderFiles = []string{
 	"cmd/fak/guard_split.go",
 }
 
+// Corpus returns the render-source paths this card grades (repo-relative, slash
+// form), so a caller can cheaply decide whether a change touched the card's inputs
+// without re-running the full scan. It is the enumerable corpus the `--since`
+// skip-gate intersects against (internal/scdiff.Intersect): an empty intersection
+// means the UI-quality debt cannot have moved, so the rescan is skipped. Returns a
+// copy so callers cannot mutate the package's source list.
+func Corpus() []string {
+	return append([]string(nil), renderFiles...)
+}
+
 // Options configures a Build.
 type Options struct {
 	Root string // workspace root (repo root); "" means the caller resolves it
