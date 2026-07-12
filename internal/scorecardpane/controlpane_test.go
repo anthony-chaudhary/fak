@@ -2,6 +2,7 @@ package scorecardpane
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -118,7 +119,7 @@ func TestOperatorHeavinessScorecardRegistered(t *testing.T) {
 		Cmd:   "go run ./cmd/fak operator heaviness --json",
 		Label: "operator-heaviness",
 	}
-	if *got != want {
+	if !reflect.DeepEqual(*got, want) {
 		t.Fatalf("operator-heaviness card = %+v, want %+v", *got, want)
 	}
 }
@@ -149,7 +150,7 @@ func TestNativeRosterIncludesPythonParityCards(t *testing.T) {
 		}
 	}
 	for key, card := range want {
-		if got[key] != card {
+		if !reflect.DeepEqual(got[key], card) {
 			t.Fatalf("card %s = %+v, want %+v", key, got[key], card)
 		}
 	}

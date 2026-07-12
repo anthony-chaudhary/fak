@@ -59,6 +59,16 @@ type Card struct {
 	Label  string
 	Script string
 	Cmd    string
+	// Corpus is the set of repo-relative file globs whose change could move this
+	// card's debt — its shift-left carry key. On a --since fold a card whose Corpus
+	// is disjoint from the diff is CARRIED from the baseline instead of re-measured.
+	// It MUST be a SUPERSET of everything the card actually reads: an over-broad glob
+	// only costs an unnecessary re-measure, but an under-broad one would silently
+	// carry a stale number (a false skip). A card is annotated only once its corpus
+	// is a verified pure function of tracked tree files; an empty Corpus means
+	// "always measure" (the fail-safe default — never carried), which is correct for
+	// cards that read out-of-tree inputs (session logs, git history, live state).
+	Corpus []string
 }
 
 // Result is one collected scorecard payload paired with the card metadata needed
@@ -72,9 +82,9 @@ type Result struct {
 // The fold folds every Debt key into one portfolio number. GoBacked is derived
 // from a non-empty Cmd containing "go run".
 var Cards = []Card{
-	{Key: "doc", Debt: "doc_debt", Script: "docs_scorecard.py", Label: "docs"},
+	{Key: "doc", Debt: "doc_debt", Script: "docs_scorecard.py", Label: "docs", Corpus: []string{"**/*.md", "**/*.txt"}},
 	{Key: "readme", Debt: "readme_debt", Script: "readme_freshness_audit.py", Label: "readme-freshness"},
-	{Key: "code", Debt: "code_debt", Script: "code_quality_scorecard.py", Label: "code"},
+	{Key: "code", Debt: "code_debt", Script: "code_quality_scorecard.py", Label: "code", Corpus: []string{"**/*.go", "go.mod", "go.sum"}},
 	{Key: "appeal", Debt: "appeal_debt", Script: "doc_appeal_scorecard.py", Label: "doc-appeal"},
 	{Key: "seo", Debt: "seo_debt", Cmd: "go run ./cmd/fak score seo --json", Label: "seo"},
 	{Key: "demo", Debt: "demo_debt", Script: "demo_quality_scorecard.py", Label: "demo-quality"},
@@ -85,10 +95,10 @@ var Cards = []Card{
 	{Key: "product", Debt: "product_debt", Cmd: "go run ./cmd/fak product-scorecard --json", Label: "product"},
 	{Key: "persona", Debt: "persona_debt", Script: "persona_readiness_scorecard.py", Label: "persona"},
 	{Key: "stability", Debt: "stability_debt", Script: "stability_scorecard.py", Label: "stability"},
-	{Key: "slop", Debt: "slop_debt", Script: "code_slop_scorecard.py", Label: "code-slop"},
+	{Key: "slop", Debt: "slop_debt", Script: "code_slop_scorecard.py", Label: "code-slop", Corpus: []string{"**/*.go", "**/CLAIMS.md"}},
 	{Key: "steer", Debt: "steerability_debt", Script: "steerability_scorecard.py", Label: "steerability"},
 	{Key: "conflation", Debt: "conflation_debt", Cmd: "go run ./cmd/fak conflation-scorecard --json", Label: "conflation"},
-	{Key: "ui_quality", Debt: "ui_quality_debt", Cmd: "go run ./cmd/fak ui-quality-scorecard --json", Label: "ui-quality"},
+	{Key: "ui_quality", Debt: "ui_quality_debt", Cmd: "go run ./cmd/fak ui-quality-scorecard --json", Label: "ui-quality", Corpus: []string{"cmd/fak/"}},
 	{Key: "disambiguation", Debt: "disambiguation_debt", Script: "concept_disambiguation_scorecard.py", Label: "concept-disambiguation"},
 	{Key: "intent_literal", Debt: "intent_literal_debt", Script: "intent_literal_scorecard.py", Label: "intent-literal"},
 	{Key: "tokendefaults", Debt: "token_defaults_debt", Cmd: "go run ./cmd/fak token-defaults-scorecard --json", Label: "token-defaults"},
@@ -189,6 +199,11 @@ type Metric struct {
 	Error        string   `json:"error,omitempty"`
 	EffGrade     string   `json:"eff_grade,omitempty"`
 	GradeWeight  *int     `json:"grade_weight,omitempty"`
+	// Carried marks a metric NOT freshly measured this run but reproduced from the
+	// pinned baseline because its corpus was untouched by the --since diff (its debt
+	// provably could not have moved). Zero-value (a measured metric) omits the field,
+	// so a full run's --json bytes are unchanged.
+	Carried bool `json:"carried,omitempty"`
 }
 
 // displayGrade is the single source of truth for a metric's effective letter grade.
@@ -365,6 +380,12 @@ type Payload struct {
 	// matching the Python gated payload.
 	GateExit    *int   `json:"gate_exit,omitempty"`
 	GateMessage string `json:"gate_message,omitempty"`
+	// Incremental is populated only on a --since (shift-left) fold: it records that
+	// some cards were CARRIED from the pinned baseline rather than re-measured. Its
+	// presence marks the payload as an incremental read, NOT a full measurement — so
+	// it must not be pinned or posted as a new floor. A full run leaves it nil (the
+	// field omits), keeping the full-run --json bytes unchanged.
+	Incremental *IncrementalInfo `json:"incremental,omitempty"`
 }
 
 // Fold folds per-scorecard metrics into one control-pane payload + trend. It is a
