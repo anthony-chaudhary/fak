@@ -132,3 +132,71 @@ func GradeDecodeParallelism(tokens int, seconds float64, g PrefillGeometry, perC
 		ts.Speedup >= singleThreadedThreshold // and there was real multi-core headroom to forgo
 	return v
 }
+
+// DecodeNUMALocality is the NUMA-node-aware refinement of the thread-scaling model, added for
+// #3176's newest datapoint: an external report on the issue observed that on the reporter's
+// multi-die EPYC, decode workers spread across NUMA nodes fetch single-node-resident weights over
+// the inter-die fabric (Infinity Fabric) instead of the local memory channels — the "threads
+// roaming across nodes" collapse that drags a 256-thread box to sub-1 tok/s. The flat
+// DecodeThreadScalingProfile above treats the socket as ONE aggregate bandwidth pool; that ceiling
+// is honest only if every streaming core reaches the weights at full bandwidth. For batch-1 decode
+// the weights are resident on a SINGLE node (first-touch on the loading core, or an explicit
+// `numactl -m`), so the real ceiling is that node's LOCAL bandwidth with that node's cores, and
+// workers placed on other nodes stream the same bytes across the fabric — adding latency, not
+// bandwidth. This rung computes the local-node saturating thread count (the "how many threads
+// within one node" the report asks for) and flags when a requested worker count spills off the
+// node. It is a witness, not a scheduler: it does not place threads, it quantifies the lever
+// (`numactl -N k -m k` + a within-node worker count) so an operator or the budget heuristic can.
+type DecodeNUMALocality struct {
+	Nodes                  int     // NUMA nodes across the socket
+	CoresPerNode           int     // cores homed on each node
+	RequestedThreads       int     // decode workers the kernel would dispatch (e.g. the budget's cap)
+	LocalSaturatingThreads int     // workers that saturate ONE node's local bandwidth: min(⌈perNodeBW÷perCore⌉, CoresPerNode) — the recommended within-node decode width
+	LocalCeilingTokPerSec  float64 // tok/s a single-node-resident decode reaches: min(LocalSaturatingThreads·perCore, perNodeBW) ÷ WeightBytesPerToken
+	Roams                  bool    // RequestedThreads > CoresPerNode — workers spill onto remote nodes and fetch weights over the fabric
+	RoamingThreads         int     // how many requested workers land OFF the local node (0 if none) — the fabric-bound remainder
+}
+
+// DecodeNUMALocalityProfile builds the NUMA-locality model for a geometry from the single-core
+// weight-stream bandwidth, ONE node's local memory bandwidth, and the socket's node/core topology.
+// perCoreBytesPerSec is the same per-core figure DecodeThreadScalingProfile takes; perNodeBytesPerSec
+// is a SINGLE node's local memory bandwidth (across that node's controllers only), not the socket
+// aggregate; coresPerNode and nodes describe the die topology; requestedThreads is the worker count
+// whose placement we are judging (e.g. the 16 the many-core cap picks, or an unpinned 256). Guards:
+// a non-positive per-core bandwidth, cores-per-node, node count, thread count, or empty geometry
+// yields the zero model (no locality claim, no divide-by-zero). A per-node bandwidth below a single
+// core's is clamped up to it — a node always reaches at least one of its cores' bandwidth.
+func DecodeNUMALocalityProfile(g PrefillGeometry, perCoreBytesPerSec, perNodeBytesPerSec float64, coresPerNode, nodes, requestedThreads int) DecodeNUMALocality {
+	wb := DecodeWeightBytes(g)
+	m := DecodeNUMALocality{Nodes: nodes, CoresPerNode: coresPerNode, RequestedThreads: requestedThreads}
+	if wb <= 0 || perCoreBytesPerSec <= 0 || coresPerNode <= 0 || nodes <= 0 || requestedThreads <= 0 {
+		return DecodeNUMALocality{} // zero model — no topology or geometry to reason about
+	}
+	perNode := perNodeBytesPerSec
+	if perNode < perCoreBytesPerSec {
+		perNode = perCoreBytesPerSec // a node reaches at least one of its cores' bandwidth
+	}
+	fwb := float64(wb)
+	// Threads that saturate the node's LOCAL bandwidth, but never more cores than the node has.
+	satByBW := int(math.Ceil(perNode / perCoreBytesPerSec))
+	if satByBW < 1 {
+		satByBW = 1
+	}
+	local := satByBW
+	if local > coresPerNode {
+		local = coresPerNode // a node has only this many cores to stream locally
+	}
+	m.LocalSaturatingThreads = local
+	engaged := perCoreBytesPerSec * float64(local)
+	if engaged > perNode {
+		engaged = perNode // the node's local bus caps its own cores
+	}
+	m.LocalCeilingTokPerSec = engaged / fwb
+	// A worker count beyond one node's cores MUST place threads on other nodes, where they fetch
+	// the single-node-resident weights across the fabric — that is the roaming regime.
+	if requestedThreads > coresPerNode {
+		m.Roams = true
+		m.RoamingThreads = requestedThreads - coresPerNode
+	}
+	return m
+}

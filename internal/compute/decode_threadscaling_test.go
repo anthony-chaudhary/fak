@@ -119,3 +119,93 @@ func TestGradeDecodeParallelismSingleCoreBoxNotFlagged(t *testing.T) {
 		t.Fatalf("a true single-core box must NOT be flagged single-threaded (verdict=%+v)", v)
 	}
 }
+
+func TestDecodeNUMALocalityRoamsOffNode(t *testing.T) {
+	g := smallDecodeGeom() // WeightBytesPerToken = 1312
+	// Model the reporter's EPYC as 4 NUMA nodes × 64 cores = 256 threads. One core = 1 tok/s; each
+	// node's LOCAL bandwidth = 32 cores' worth, so a single node saturates at 32 streaming cores.
+	const perCore = 1312.0
+	const perNode = perCore * 32
+	const coresPerNode = 64
+	const nodes = 4
+
+	// The unpinned 256-way dispatch: MUST spill off the local node — only 64 cores live on it, so
+	// 192 workers land on remote dies and fetch the single-node-resident weights over the fabric.
+	full := DecodeNUMALocalityProfile(g, perCore, perNode, coresPerNode, nodes, 256)
+	if full.LocalSaturatingThreads != 32 {
+		t.Fatalf("LocalSaturatingThreads = %d, want 32 (⌈perNodeBW÷perCore⌉, ≤ coresPerNode)", full.LocalSaturatingThreads)
+	}
+	if !decodeFloatNear(full.LocalCeilingTokPerSec, 32.0) {
+		t.Fatalf("LocalCeilingTokPerSec = %v, want 32.0", full.LocalCeilingTokPerSec)
+	}
+	if !full.Roams {
+		t.Fatal("256 workers on a 64-core node MUST roam off-node")
+	}
+	if full.RoamingThreads != 192 {
+		t.Fatalf("RoamingThreads = %d, want 192 (256 − 64)", full.RoamingThreads)
+	}
+
+	// The many-core cap's 16 workers fit WITHIN one 64-core node's core budget, so the model does
+	// not flag a guaranteed off-node spill — but note the recommended within-node width to actually
+	// saturate a node's bandwidth is LocalSaturatingThreads (32), and fitting requires pinning.
+	capped := DecodeNUMALocalityProfile(g, perCore, perNode, coresPerNode, nodes, 16)
+	if capped.Roams || capped.RoamingThreads != 0 {
+		t.Fatalf("16 ≤ 64 must not be a guaranteed off-node spill (got Roams=%v roaming=%d)", capped.Roams, capped.RoamingThreads)
+	}
+	if capped.LocalSaturatingThreads != 32 {
+		t.Fatalf("LocalSaturatingThreads is topology-derived, want 32 regardless of request, got %d", capped.LocalSaturatingThreads)
+	}
+}
+
+func TestDecodeNUMALocalityNodeCoreBound(t *testing.T) {
+	g := smallDecodeGeom()
+	const perCore = 1312.0
+	// A node whose local bandwidth could feed 128 cores, but the node only has 64 — the node's
+	// cores, not its bandwidth, bound the within-node width; local ceiling is 64 cores' worth.
+	const perNode = perCore * 128
+	const coresPerNode = 64
+	m := DecodeNUMALocalityProfile(g, perCore, perNode, coresPerNode, 2, 128)
+	if m.LocalSaturatingThreads != 64 {
+		t.Fatalf("LocalSaturatingThreads = %d, want 64 (bounded by coresPerNode, not bandwidth)", m.LocalSaturatingThreads)
+	}
+	if !decodeFloatNear(m.LocalCeilingTokPerSec, 64.0) {
+		t.Fatalf("LocalCeilingTokPerSec = %v, want 64.0 (core-bound within the node)", m.LocalCeilingTokPerSec)
+	}
+	if !m.Roams || m.RoamingThreads != 64 {
+		t.Fatalf("128 workers on a 64-core node must roam 64 off-node, got Roams=%v roaming=%d", m.Roams, m.RoamingThreads)
+	}
+}
+
+func TestDecodeNUMALocalityGuardsAndClamp(t *testing.T) {
+	g := smallDecodeGeom()
+	const perCore = 1312.0
+	// Guards: any non-positive topology/geometry input yields the zero model (no locality claim).
+	for _, tc := range []struct {
+		name         string
+		gg           PrefillGeometry
+		perCore      float64
+		coresPerNode int
+		nodes        int
+		threads      int
+	}{
+		{"empty geometry", PrefillGeometry{}, perCore, 64, 4, 16},
+		{"zero per-core", g, 0, 64, 4, 16},
+		{"zero cores-per-node", g, perCore, 0, 4, 16},
+		{"zero nodes", g, perCore, 64, 0, 16},
+		{"zero threads", g, perCore, 64, 4, 0},
+	} {
+		got := DecodeNUMALocalityProfile(tc.gg, tc.perCore, perCore*32, tc.coresPerNode, tc.nodes, tc.threads)
+		if got.LocalSaturatingThreads != 0 || got.LocalCeilingTokPerSec != 0 || got.Roams {
+			t.Fatalf("%s: want zero model, got %+v", tc.name, got)
+		}
+	}
+	// Clamp: a per-node bandwidth below one core's is lifted to per-core — a node reaches at least
+	// one of its cores' bandwidth, so the within-node width is 1 and the local ceiling is 1 tok/s.
+	deg := DecodeNUMALocalityProfile(g, perCore, perCore/4, 64, 4, 128)
+	if deg.LocalSaturatingThreads != 1 {
+		t.Fatalf("clamped per-node: LocalSaturatingThreads = %d, want 1", deg.LocalSaturatingThreads)
+	}
+	if !decodeFloatNear(deg.LocalCeilingTokPerSec, 1.0) {
+		t.Fatalf("clamped per-node: LocalCeilingTokPerSec = %v, want 1.0", deg.LocalCeilingTokPerSec)
+	}
+}
