@@ -225,6 +225,110 @@ func attendOne(m *Model, layout kvLayout, layer int, q []float32, rows [][]float
 	return out
 }
 
+// attendOneAbsorbed is the ABSORBED MLA read path (issue #4356, the DeepSeek weight-
+// absorption trick, colibri@1bdaeee c/glm.c:1088). Instead of reconstructing full per-
+// head K/V from the latent and then running ordinary attention (attendOne +
+// reconstructKV, O(T*NumKVHeads*HeadDim) work per query head), it folds W_UK into the
+// query and W_UV in after softmax so each cached position is scored DIRECTLY against
+// the compressed latent c_KV — O(T*KVLatentDim). It never materializes per-head K/V,
+// which is the pure decode-side win when the latent is far narrower than per-head K.
+//
+// It is mathematically identical to attendOne on the MLA layout (only the reduction
+// order differs, so parity holds to float tolerance, not bit-exact — see
+// TestMLAAbsorbedMatchesNaive). Per query head h (kv head kvh = h/GroupSize):
+//   - split q_h into its decoupled-RoPE part q_R (front RopeDim lanes) and content
+//     part q_C (the remaining lanes) — the SAME split reconstructKV/buildMLAQuery use;
+//   - fold W_UK into the query ONCE per step: q'_h = UpK_{kvh,content}^T · q_C, a
+//     KVLatentDim-wide vector (the issue's "precompute q'_h = UpK_h^T * q_nope_h");
+//   - score[j] = (q_R·k_R[j] + q'_h·c_KV[j]) · scale, scored over the latent directly
+//     (k_R[j] is the shared decoupled key, rotated once per position and reused across
+//     heads — exactly the value reconstructKV broadcasts into every head's front lanes);
+//   - softmax, then fold W_UV in AFTER softmax: ctx = Σ_j score[j]·c_KV[j] (KVLatentDim
+//     wide), and out_h = UpV_{kvh} · ctx.
+//
+// rows[j] is position j's raw MLA cache row [c_KV (KVLatentDim) | k_R_raw (RopeDim)] —
+// the same rows mlaProject writes and reconstructKV reads; positions[j] is its absolute
+// RoPE position. q is the full per-head MLA query [NumHeads*HeadDim] (buildMLAQuery).
+func attendOneAbsorbed(m *Model, _ int, q []float32, rows [][]float32, positions []int) []float32 {
+	cfg := m.Cfg
+	mla := m.MLA
+	nH, hd := cfg.NumHeads, cfg.HeadDim
+	grp := cfg.GroupSize()
+	latent, ropeDim := mla.KVLatentDim, mla.RopeDim
+	scale := float32(1.0 / math.Sqrt(float64(hd)))
+	nPos := len(rows)
+
+	// Split each cached row once: the latent c_KV (scored against the folded query) and
+	// the decoupled key k_R = RoPE(k_R_raw, pos), rotated once per position and shared
+	// across all heads — the same k_R reconstructKV broadcasts into every head's front
+	// RopeDim lanes. Doing the rotation here (once/position) not per-head is the point.
+	latents := make([][]float32, nPos)
+	kRs := make([][]float32, nPos)
+	inv := mlaRopeInv(ropeDim, cfg.RopeTheta)
+	for j := 0; j < nPos; j++ {
+		latents[j] = rows[j][:latent]
+		kR := append([]float32(nil), rows[j][latent:latent+ropeDim]...)
+		cos, sin := ropeRowFromInv(inv, positions[j])
+		applyRopeRow(kR, cos, sin)
+		kRs[j] = kR
+	}
+
+	out := make([]float32, nH*hd)
+	for h := 0; h < nH; h++ {
+		kvh := h / grp
+		qh := q[h*hd : (h+1)*hd]
+		qR := qh[:ropeDim]
+
+		// Fold W_UK into the query: q'_h = UpK_{kvh,content}^T · q_C, once per step. Only
+		// the content lanes [RopeDim,HeadDim) participate — the front RopeDim lanes carry
+		// the decoupled key, scored separately via k_R (reconstructKV overwrites those
+		// lanes of the up-projection with k_R, so they contribute nothing to the content).
+		qPrime := make([]float32, latent)
+		for d := ropeDim; d < hd; d++ {
+			qd := qh[d]
+			row := mla.UpK[(kvh*hd+d)*latent : (kvh*hd+d+1)*latent]
+			for c := 0; c < latent; c++ {
+				qPrime[c] += qd * row[c]
+			}
+		}
+
+		// Score directly against the latent: decoupled q_R·k_R plus folded q'·c_KV.
+		scores := make([]float32, nPos)
+		for j := 0; j < nPos; j++ {
+			scores[j] = (dot(qR, kRs[j]) + dot(qPrime, latents[j])) * scale
+		}
+		softmaxInPlace(scores)
+
+		// Fold W_UV in after softmax: ctx = Σ score·c_KV (latent-wide), then up-project
+		// the single pooled latent through this head's V rows — one UpV apply per head,
+		// versus one per cached position in the naive path.
+		ctx := make([]float32, latent)
+		for j := 0; j < nPos; j++ {
+			wj := scores[j]
+			cj := latents[j]
+			for c := 0; c < latent; c++ {
+				ctx[c] += wj * cj[c]
+			}
+		}
+		oh := out[h*hd : (h+1)*hd]
+		for d := 0; d < hd; d++ {
+			oh[d] = dot(mla.UpV[(kvh*hd+d)*latent:(kvh*hd+d+1)*latent], ctx)
+		}
+	}
+	return out
+}
+
+// absorbedMLASelected reports whether the absorbed MLA read path (attendOneAbsorbed)
+// is auto-selected over the naive reconstruct-then-attend path for a step of batch
+// size batchSize. Absorption is a pure decode-side win, so it is chosen only for the
+// small decode/verify shapes it helps (batchSize <= 4) against a genuinely compressed
+// latent (KVLatentDim <= 512, DeepSeek's ~512 regime); prefill (large batch) and wide
+// latents keep the naive reconstruction, matching colibri's batch-shape gate (prefill
+// still reconstructs). A non-MLA model (MLA == nil) is never absorbed.
+func absorbedMLASelected(m *Model, batchSize int) bool {
+	return m.MLA != nil && batchSize <= 4 && m.MLA.KVLatentDim <= 512
+}
+
 // mlaMatRows is the serial, in-order matrix-row product used by the MLA layout
 // reconstruction. It reduces with the plain `dot` (single accumulator, ascending i)
 // so the naive MLA path is deterministic and the hand reference in the test reduces
