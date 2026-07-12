@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/scdiff"
 	"github.com/anthony-chaudhary/fak/internal/uiquality"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -23,6 +24,7 @@ func runUIQualityScore(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown (the committed snapshot body)")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload and prove the debt moved")
+	since := fs.String("since", "", "shift-left skip-gate: when no render source changed vs this git ref, report \"unchanged\" without rescanning (else full rescan)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -33,6 +35,17 @@ func runUIQualityScore(stdout, stderr io.Writer, argv []string) int {
 	root := *workspace
 	if root == "" {
 		root = repoRoot()
+	}
+	// --since is the at-origin skip-gate. The UI-quality KPIs are HOLISTIC over the
+	// render set (they ask "does dispWidthTUI exist anywhere", "are all panes width-
+	// consistent"), so a partial scan of only the changed files would report a wrong
+	// debt. The correct incremental move is therefore all-or-nothing: if none of the
+	// card's corpus is in the diff, the debt cannot have moved -> skip; otherwise fall
+	// through to a full, correct rescan.
+	if *since != "" {
+		if done, code := uiQualitySinceSkip(stdout, stderr, root, *since, *asJSON); done {
+			return code
+		}
 	}
 	payload := uiquality.Build(uiquality.Options{Root: root})
 
@@ -46,4 +59,37 @@ func runUIQualityScore(stdout, stderr io.Writer, argv []string) int {
 			DebtKey:     uiquality.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - %v render file(s)", payload.Corpus["render_files"]),
 		})
+}
+
+// uiQualitySinceSkip implements the --since skip-gate. It returns done=true (with an
+// exit code) when it fully handled the run by reporting "unchanged" — i.e. none of
+// the card's render corpus appears in the diff against `ref`, so the debt provably
+// cannot have moved. It returns done=false to signal "fall through to a full
+// rescan": either the corpus WAS touched, or the diff could not be computed (an
+// unresolvable ref / git failure), in which case a full scan is the safe choice —
+// silently reporting "unchanged" off a failed diff would be a false clean.
+func uiQualitySinceSkip(stdout, stderr io.Writer, root, ref string, asJSON bool) (done bool, code int) {
+	changed, err := scdiff.ChangedPaths(root, ref)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak ui-quality-scorecard: --since %s diff failed (%v); rescanning fully\n", ref, err)
+		return false, 0
+	}
+	touched := scdiff.Intersect(uiquality.Corpus(), changed)
+	if len(touched) > 0 {
+		fmt.Fprintf(stderr, "fak ui-quality-scorecard: %d render source(s) changed since %s; rescanning\n", len(touched), ref)
+		return false, 0
+	}
+	if asJSON {
+		_ = writeIndentedJSON(stdout, map[string]any{
+			"schema":           uiquality.Schema,
+			"ok":               true,
+			"incremental_skip": true,
+			"since":            ref,
+			"changed_corpus":   0,
+			"finding":          "unchanged since " + ref + ": no render source in the changed set",
+		})
+		return true, 0
+	}
+	fmt.Fprintf(stdout, "fak ui-quality-scorecard: unchanged since %s (no render source in the changed set)\n", ref)
+	return true, 0
 }

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/scdiff"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 )
 
@@ -47,6 +48,7 @@ func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
 	check := fs.Bool("check", false, "CI ratchet gate: exit non-zero only if debt regressed above baseline")
 	baselineFlag := fs.String("baseline", "", "baseline JSON path (default: "+scorecardpane.BaselineRel+")")
 	timeoutSec := fs.Int("timeout", 120, "per-scorecard timeout seconds")
+	since := fs.String("since", "", "shift-left incremental fold: measure only cards whose corpus changed vs this git ref; carry the rest from the pinned baseline (requires a baseline; cannot combine with --pin/--post)")
 	post := fs.Bool("post", false, "opt-in: post the freshly-regenerated portfolio number to #scoreboard (also FAK_SCOREBOARD_AUTOPOST=1); off by default, deduped so an unchanged rerun is silent")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -63,15 +65,41 @@ func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
 		baselinePath = filepath.Join(root, filepath.FromSlash(scorecardpane.BaselineRel))
 	}
 
-	metrics := scorecardpane.Collect(root, "", time.Duration(*timeoutSec)*time.Second)
 	baseline := scorecardpane.LoadBaseline(baselinePath)
-	payload := scorecardpane.Fold(metrics, baseline, root, scorecardpane.HeadCommitShort(root))
 
-	// Local producer side of #scoreboard (#998): when the operator opts in, publish
-	// the freshly-regenerated portfolio number the moment it is folded. Notices go to
-	// stderr so a --json/--check stdout stays a clean machine payload.
-	if code := autopostControlPane(stderr, root, payload, *post); code != 0 {
-		return code
+	var payload scorecardpane.Payload
+	if *since != "" {
+		// Shift-left incremental fold. It reproduces carried cards from the baseline,
+		// so it is an approximate read, not a full measurement — it may not seed a new
+		// floor (--pin) nor be published (--post); both demand a full run.
+		if *pin || *post {
+			fmt.Fprintln(stderr, "fak scorecard control-pane: --since is an incremental read and cannot be combined with --pin or --post (both require a full measurement)")
+			return 2
+		}
+		if baseline == nil {
+			fmt.Fprintf(stderr, "fak scorecard control-pane: --since requires a pinned baseline (%s); run `fak scorecard control-pane --pin` first\n", baselinePath)
+			return 2
+		}
+		changed, err := scdiff.ChangedPaths(root, *since)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak scorecard control-pane: --since %s: %v\n", *since, err)
+			return 2
+		}
+		metrics, info := scorecardpane.CollectSince(root, "", time.Duration(*timeoutSec)*time.Second, *since, changed, baseline)
+		payload = scorecardpane.Fold(metrics, baseline, root, scorecardpane.HeadCommitShort(root))
+		payload.Incremental = &info
+		fmt.Fprintf(stderr, "fak scorecard control-pane: incremental vs %s — measured %d card(s), carried %d from baseline @%s (%d changed file(s))\n",
+			*since, info.Measured, info.Carried, info.BaselineCommit, info.ChangedFiles)
+	} else {
+		metrics := scorecardpane.Collect(root, "", time.Duration(*timeoutSec)*time.Second)
+		payload = scorecardpane.Fold(metrics, baseline, root, scorecardpane.HeadCommitShort(root))
+
+		// Local producer side of #scoreboard (#998): when the operator opts in, publish
+		// the freshly-regenerated portfolio number the moment it is folded. Notices go to
+		// stderr so a --json/--check stdout stays a clean machine payload.
+		if code := autopostControlPane(stderr, root, payload, *post); code != 0 {
+			return code
+		}
 	}
 
 	if *pin {
