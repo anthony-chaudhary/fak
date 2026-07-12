@@ -175,6 +175,10 @@ func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 // (f32) K/V to the kernel-owned cache, so Evict/Clone and the KV semantics are unchanged;
 // returns the post-final-norm hidden (caller applies headQ).
 func (s *Session) tokenHiddenQ(id, pos int) []float32 {
+	// Fail closed BY NAME for a per-layer-head_dim arch (gemma4) whose q_norm/k_norm the
+	// generic block path's scalar-HeadDim qk-norm band cannot express — instead of the
+	// cryptic deep panic in applyQKNormCfg on the first token (issue #4274).
+	s.requireResidentQuantForwardSupported()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
