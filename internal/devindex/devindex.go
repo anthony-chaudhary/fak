@@ -16,7 +16,10 @@ package devindex
 //
 // Because it reads the sources rather than caching them, it cannot drift into a
 // parallel reality — a freshness gate (C6 #1293) reds the build if it ever does.
-// Pure and stdlib-only (tier foundation): no network, no hot-path coupling.
+// Foundation tier, off the hot path: no network, no hot-path coupling. It composes a
+// single sibling foundation primitive — internal/trigram — for the fuzzy fallback
+// that kills Search* false-ABSENTs (#3925), so it is a foundation COMPOSITE rather
+// than a pureRoot primitive (see internal/architest pureRoot).
 
 import (
 	"encoding/json"
@@ -25,6 +28,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	"github.com/anthony-chaudhary/fak/internal/trigram"
 )
 
 // Leaf is one entry of fak's lane taxonomy: a lane/leaf name, the tree glob(s) it
@@ -48,6 +54,12 @@ type Leaf struct {
 	// the ledger claims that name a path under this leaf are SHIPPED / SIMULATED /
 	// STUB. The zero value means the honesty ledger names no capability here.
 	Status Status `json:"status"`
+	// Approx marks a leaf returned by the trigram fuzzy fallback (#3925) rather than an
+	// exact substring hit: the query only NEAR-matched this leaf's name/tree/desc, so a
+	// caller can flag it as approximate. False (and omitted) on every exact hit — the
+	// fallback engages only when exact scoring found nothing, so exact and approximate
+	// results never mix in one response.
+	Approx bool `json:"approx,omitempty"`
 }
 
 // Status is a per-leaf rollup of the CLAIMS.md maturity tags that bind to a leaf.
@@ -72,6 +84,9 @@ type Claim struct {
 	Section string   `json:"section,omitempty"` // the nearest `##`/`###` header above it
 	Lanes   []string `json:"lanes,omitempty"`   // leaves the claim's path refs bind to
 	Text    string   `json:"text"`              // the claim prose, tag prefix removed
+	// Approx marks a claim returned by the trigram fuzzy fallback (#3925) — a near-miss
+	// on the lanes/section/text rather than an exact substring hit. Omitted on exact hits.
+	Approx bool `json:"approx,omitempty"`
 }
 
 // Doc is one entry of the curated doc map (INDEX.md): a human title, the path or
@@ -80,6 +95,9 @@ type Doc struct {
 	Title string `json:"title"`
 	Path  string `json:"path"`
 	Blurb string `json:"blurb,omitempty"`
+	// Approx marks a doc returned by the trigram fuzzy fallback (#3925) — a near-miss
+	// on the title/path/blurb rather than an exact substring hit. Omitted on exact hits.
+	Approx bool `json:"approx,omitempty"`
 }
 
 // Catalog is the loaded self-index: the leaf taxonomy and the doc map, plus the
@@ -418,6 +436,8 @@ func (c *Catalog) ClaimsForLeaf(name string) []Claim {
 // lane match weighs most, then the section, then the prose) and ranked best-first.
 // An empty query returns nothing — a ledger search with no terms is a usage error
 // the caller surfaces. This is the "what's shipped vs simulated vs stub for X" ask.
+// When exact scoring yields NO hit, it falls back to a trigram fuzzy pass over the
+// same fields (#3925), returning the best near-misses flagged Approx.
 func (c *Catalog) SearchClaims(query string) []Claim {
 	toks := tokens(query)
 	if len(toks) == 0 {
@@ -445,6 +465,39 @@ func (c *Catalog) SearchClaims(query string) []Claim {
 		}
 		if score > 0 {
 			hits = append(hits, scored{cl, score})
+		}
+	}
+	if len(hits) == 0 {
+		return c.fuzzyClaims(toks)
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].s != hits[j].s {
+			return hits[i].s > hits[j].s
+		}
+		return hits[i].cl.Text < hits[j].cl.Text
+	})
+	out := make([]Claim, len(hits))
+	for i, h := range hits {
+		out[i] = h.cl
+	}
+	return out
+}
+
+// fuzzyClaims is SearchClaims' near-miss fallback: trigram similarity over each
+// claim's lanes/section/text (same weighting as the exact scorer), best-first,
+// flagged Approx. Empty when nothing clears fuzzyThreshold.
+func (c *Catalog) fuzzyClaims(toks []string) []Claim {
+	type fscored struct {
+		cl Claim
+		s  float64
+	}
+	var hits []fscored
+	for _, cl := range c.Claims {
+		lanes := strings.ToLower(strings.Join(cl.Lanes, " "))
+		section, text := strings.ToLower(cl.Section), strings.ToLower(cl.Text)
+		if s := fuzzyScore(toks, wfield{lanes, 3}, wfield{section, 2}, wfield{text, 1}); s > 0 {
+			cl.Approx = true
+			hits = append(hits, fscored{cl, s})
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
@@ -515,10 +568,60 @@ func (c *Catalog) LeafByName(name string) (Leaf, bool) {
 	return Leaf{}, false
 }
 
+// fuzzyThreshold is the minimum trigram similarity a query token must reach against
+// a field word for the fuzzy fallback to treat it as a near-miss match. Below this
+// the two words share too few 3-rune shingles to be a plausible typo or synonym, so
+// admitting them would return noise instead of the intended false-ABSENT fix (#3925).
+const fuzzyThreshold = 0.34
+
+// wfield pairs a lowercased field's text with the rank weight an exact hit there
+// earns, so the fuzzy fallback ranks a near-miss on a name/title/lane above one on a
+// description — mirroring the exact scorer's field weighting.
+type wfield struct {
+	text   string
+	weight int
+}
+
+// fieldWords splits a field into the words the fuzzy scorer shingles against, breaking
+// on any run of non-alphanumeric runes so a path segment ("internal/gateway"), an
+// underscore- or dash-joined identifier, or ordinary prose all yield matchable words.
+func fieldWords(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// fuzzyScore is the fallback scorer the Search* verbs use ONLY when exact substring
+// scoring found nothing. It returns the best weighted trigram similarity between any
+// query token and any word of the given fields, or 0 when nothing clears
+// fuzzyThreshold. Reusing internal/trigram's shingle ratio — rather than standing up a
+// second fuzzy engine — is the whole point of #3925: a synonym or near-miss spelling
+// of a real capability still scores, so fak_feature_query stops returning a
+// false-ABSENT on a capability that exists.
+func fuzzyScore(toks []string, fields ...wfield) float64 {
+	best := 0.0
+	for _, f := range fields {
+		for _, word := range fieldWords(f.text) {
+			for _, tk := range toks {
+				sim := trigram.Similarity(tk, word)
+				if sim < fuzzyThreshold {
+					continue
+				}
+				if s := sim * float64(f.weight); s > best {
+					best = s
+				}
+			}
+		}
+	}
+	return best
+}
+
 // SearchLeaves returns the leaves whose name, tree, or description matches every
 // whitespace-separated query token (case-insensitive), ranked by where the match
-// landed (a name hit outranks a description hit). An empty query returns every
-// leaf in name order.
+// landed (a name hit outranks a description hit). An empty query returns every leaf
+// in name order. When exact substring scoring yields NO hit, it falls back to a
+// trigram fuzzy pass over the same fields (#3925), returning the best near-misses
+// flagged Approx rather than an empty result.
 func (c *Catalog) SearchLeaves(query string) []Leaf {
 	toks := tokens(query)
 	if len(toks) == 0 {
@@ -550,6 +653,39 @@ func (c *Catalog) SearchLeaves(query string) []Leaf {
 			hits = append(hits, scored{l, score})
 		}
 	}
+	if len(hits) == 0 {
+		return c.fuzzyLeaves(toks)
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].s != hits[j].s {
+			return hits[i].s > hits[j].s
+		}
+		return hits[i].l.Name < hits[j].l.Name
+	})
+	out := make([]Leaf, len(hits))
+	for i, h := range hits {
+		out[i] = h.l
+	}
+	return out
+}
+
+// fuzzyLeaves is SearchLeaves' near-miss fallback: it scores every leaf by trigram
+// similarity over its name/tree/desc (same weighting as the exact scorer) and returns
+// those clearing fuzzyThreshold, flagged Approx, best-first. Empty when nothing is
+// close enough — a genuinely absent capability still returns nothing.
+func (c *Catalog) fuzzyLeaves(toks []string) []Leaf {
+	type fscored struct {
+		l Leaf
+		s float64
+	}
+	var hits []fscored
+	for _, l := range c.Leaves {
+		name, tree, desc := strings.ToLower(l.Name), strings.ToLower(l.Tree), strings.ToLower(l.Desc)
+		if s := fuzzyScore(toks, wfield{name, 3}, wfield{tree, 2}, wfield{desc, 1}); s > 0 {
+			l.Approx = true
+			hits = append(hits, fscored{l, s})
+		}
+	}
 	sort.SliceStable(hits, func(i, j int) bool {
 		if hits[i].s != hits[j].s {
 			return hits[i].s > hits[j].s
@@ -566,7 +702,9 @@ func (c *Catalog) SearchLeaves(query string) []Leaf {
 // SearchDocs returns the doc-map entries matching the query, lexically scored
 // (a title hit weighs most, then the path, then the blurb) and ranked best-first.
 // A doc must match at least one query token. An empty query returns nothing — a
-// doc search with no terms is a usage error the caller surfaces.
+// doc search with no terms is a usage error the caller surfaces. When exact scoring
+// yields NO hit, it falls back to a trigram fuzzy pass over the same fields (#3925),
+// returning the best near-misses flagged Approx rather than an empty result.
 func (c *Catalog) SearchDocs(query string) []Doc {
 	toks := tokens(query)
 	if len(toks) == 0 {
@@ -593,6 +731,38 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 		}
 		if score > 0 {
 			hits = append(hits, scored{d, score})
+		}
+	}
+	if len(hits) == 0 {
+		return c.fuzzyDocs(toks)
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].s != hits[j].s {
+			return hits[i].s > hits[j].s
+		}
+		return hits[i].d.Title < hits[j].d.Title
+	})
+	out := make([]Doc, len(hits))
+	for i, h := range hits {
+		out[i] = h.d
+	}
+	return out
+}
+
+// fuzzyDocs is SearchDocs' near-miss fallback: trigram similarity over each doc's
+// title/path/blurb (same weighting as the exact scorer), best-first, flagged Approx.
+// Empty when nothing clears fuzzyThreshold.
+func (c *Catalog) fuzzyDocs(toks []string) []Doc {
+	type fscored struct {
+		d Doc
+		s float64
+	}
+	var hits []fscored
+	for _, d := range c.Docs {
+		title, path, blurb := strings.ToLower(d.Title), strings.ToLower(d.Path), strings.ToLower(d.Blurb)
+		if s := fuzzyScore(toks, wfield{title, 3}, wfield{path, 2}, wfield{blurb, 1}); s > 0 {
+			d.Approx = true
+			hits = append(hits, fscored{d, s})
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool {

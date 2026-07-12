@@ -379,3 +379,82 @@ func names(ls []Leaf) []string {
 	}
 	return out
 }
+
+// TestFuzzyFallback pins #3925: when exact substring scoring returns nothing, the
+// Search* verbs fall back to a trigram near-miss pass and return the correct
+// capability flagged Approx — instead of a false-ABSENT — while exact queries stay
+// exact-only (Approx never set) and a genuinely absent query still returns empty.
+func TestFuzzyFallback(t *testing.T) {
+	c := &Catalog{
+		Leaves: []Leaf{
+			{Name: "arbitrate", Tree: "internal/arbitrate/", Desc: "stop two agents colliding on the same files"},
+			{Name: "gateway", Tree: "internal/gateway/", Desc: "the upstream front door"},
+		},
+		Docs: []Doc{
+			{Title: "gateway", Path: "docs/gateway.md", Blurb: "the upstream front door"},
+		},
+		Claims: []Claim{
+			{Tag: "SHIPPED", Section: "kernel", Lanes: []string{"arbitrate"}, Text: "stop two agents colliding"},
+		},
+	}
+
+	// Exact query is unchanged: it returns the exact hit, ranks it first, and never
+	// sets Approx (the fallback must not engage when exact scoring found something).
+	exact := c.SearchLeaves("arbitrate")
+	if len(exact) != 1 || exact[0].Name != "arbitrate" {
+		t.Fatalf("exact SearchLeaves(arbitrate) = %v, want [arbitrate]", names(exact))
+	}
+	if exact[0].Approx {
+		t.Errorf("exact hit flagged Approx=true, want false")
+	}
+
+	// Near-miss SPELLING of a real leaf name that shares NO substring ("arbitration"
+	// does not contain "arbitrate") returns empty today; the fuzzy fallback must now
+	// surface the arbitrate leaf, flagged approximate.
+	if got := leafContains(c.SearchLeaves("arbitration"), "arbitrate"); !got {
+		t.Fatalf("near-miss SearchLeaves(arbitration) = %v, want it to include arbitrate", names(c.SearchLeaves("arbitration")))
+	}
+	near := c.SearchLeaves("arbitration")
+	if near[0].Name != "arbitrate" || !near[0].Approx {
+		t.Errorf("near-miss top hit = %+v, want arbitrate with Approx=true", near[0])
+	}
+
+	// SYNONYM on the description ("collision" vs the desc word "colliding") — no exact
+	// substring — also falls back to the arbitrate leaf.
+	if syn := c.SearchLeaves("collision"); len(syn) == 0 || syn[0].Name != "arbitrate" || !syn[0].Approx {
+		t.Errorf("synonym SearchLeaves(collision) = %v, want approximate arbitrate", names(syn))
+	}
+
+	// A genuinely absent capability still returns nothing — the fallback must not
+	// manufacture noise from an unrelated query.
+	if got := c.SearchLeaves("quantumfluxcapacitor"); len(got) != 0 {
+		t.Errorf("absent SearchLeaves = %v, want empty", names(got))
+	}
+
+	// Docs: a typo'd title ("gatway") near-matches the gateway doc, flagged Approx.
+	docs := c.SearchDocs("gatway")
+	if len(docs) != 1 || docs[0].Path != "docs/gateway.md" || !docs[0].Approx {
+		t.Errorf("near-miss SearchDocs(gatway) = %+v, want approximate gateway doc", docs)
+	}
+	// And an exact doc query stays exact-only.
+	if ex := c.SearchDocs("gateway"); len(ex) != 1 || ex[0].Approx {
+		t.Errorf("exact SearchDocs(gateway) = %+v, want exact (Approx=false)", ex)
+	}
+
+	// Claims: near-miss lane "arbitration" (section/text hold no substring) falls back
+	// to the arbitrate claim, flagged Approx.
+	claims := c.SearchClaims("arbitration")
+	if len(claims) != 1 || !claims[0].Approx {
+		t.Errorf("near-miss SearchClaims(arbitration) = %+v, want one approximate claim", claims)
+	}
+}
+
+// leafContains reports whether any leaf in ls has the given name.
+func leafContains(ls []Leaf, name string) bool {
+	for _, l := range ls {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
+}

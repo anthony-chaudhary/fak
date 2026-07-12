@@ -122,6 +122,50 @@ func TestRequiredLiteralsSoundness(t *testing.T) {
 	}
 }
 
+// TestSimilarity pins the Sørensen–Dice trigram ratio the devindex fuzzy fallback
+// relies on (#3925): identical strings score 1, a near-miss spelling scores high
+// enough to beat a fuzzy threshold, an unrelated word scores ~0, and short (<3-rune)
+// strings degrade to exact equality rather than dividing by zero.
+func TestSimilarity(t *testing.T) {
+	if got := Similarity("arbitrate", "arbitrate"); got != 1 {
+		t.Errorf("identical strings = %v, want 1", got)
+	}
+	if got := Similarity("", ""); got != 1 {
+		t.Errorf("empty vs empty = %v, want 1", got)
+	}
+	// A near-miss spelling of a real capability name must score well above the
+	// devindex fuzzy threshold (0.34) — this is the false-ABSENT that motivated #3925.
+	if got := Similarity("arbitration", "arbitrate"); got <= 0.34 {
+		t.Errorf("arbitration~arbitrate = %v, want > 0.34 (near-miss must match)", got)
+	}
+	// A synonym sharing a stem ("collision" vs the desc word "colliding") also clears
+	// the bar, which is what lets "stop two agents colliding" find the arbiter.
+	if got := Similarity("collision", "colliding"); got <= 0.34 {
+		t.Errorf("collision~colliding = %v, want > 0.34", got)
+	}
+	// An unrelated word stays well below the fuzzy threshold, so the fallback keeps
+	// quiet on a genuinely absent capability instead of returning noise (a stray
+	// shared shingle like "ate" is not enough to clear the bar).
+	if got := Similarity("arbitrate", "gateway"); got >= 0.34 {
+		t.Errorf("arbitrate~gateway = %v, want < 0.34 (unrelated must stay below the bar)", got)
+	}
+	// No shared trigram at all -> exactly 0 (the disjoint-set path).
+	if got := Similarity("arbitrate", "zzzzzz"); got != 0 {
+		t.Errorf("arbitrate~zzzzzz = %v, want 0 (no shared trigrams)", got)
+	}
+	// Symmetry: Dice is order-independent.
+	if a, b := Similarity("arbitration", "arbitrate"), Similarity("arbitrate", "arbitration"); a != b {
+		t.Errorf("Similarity not symmetric: %v vs %v", a, b)
+	}
+	// Short (<3-rune) strings cannot be shingled: equal -> 1, unequal -> 0.
+	if got := Similarity("go", "go"); got != 1 {
+		t.Errorf("short equal = %v, want 1", got)
+	}
+	if got := Similarity("go", "no"); got != 0 {
+		t.Errorf("short unequal = %v, want 0", got)
+	}
+}
+
 // TestRegexpBruteForceStillCorrect: a wildcard-led pattern with no usable literal
 // falls back to scanning every doc and still finds the true match.
 func TestRegexpBruteForceStillCorrect(t *testing.T) {

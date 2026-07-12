@@ -180,6 +180,38 @@ func (ix *Index) Search(literal string) []Result {
 	return out
 }
 
+// Similarity is the Sørensen–Dice coefficient over the DISTINCT trigram sets of a
+// and b: 2·|A∩B| / (|A|+|B|), a 0..1 lexical closeness that REUSES the same 3-rune
+// shingling the postings index is built on. It is the fuzzy ratio a near-miss or
+// synonym lookup falls back to when exact substring matching finds nothing (the
+// devindex Search* false-ABSENT fix, #3925), so it lives beside the index rather
+// than being re-implemented by every caller.
+//
+// It is case-sensitive (the index is too); callers that want case-folding lowercase
+// both sides first. Two strings too short to shingle (<3 runes) share no trigrams, so
+// they compare by exact equality — identical short strings score 1, otherwise 0. Two
+// equal strings always score 1 (this also defines empty-vs-empty as identical).
+func Similarity(a, b string) float64 {
+	if a == b {
+		return 1
+	}
+	ta, tb := trigrams(a), trigrams(b)
+	if len(ta) == 0 || len(tb) == 0 {
+		return 0 // one side cannot be shingled and they are not equal
+	}
+	set := make(map[Trigram]bool, len(ta))
+	for _, t := range ta {
+		set[t] = true
+	}
+	inter := 0
+	for _, t := range tb {
+		if set[t] {
+			inter++
+		}
+	}
+	return 2 * float64(inter) / float64(len(ta)+len(tb))
+}
+
 // SearchRegexp returns the documents matching pattern. It narrows candidates using
 // the required literals extracted from the regex (an AND of substrings every match
 // must contain), then verifies with the compiled regexp. When no required literal
