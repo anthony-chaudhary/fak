@@ -5,7 +5,7 @@
 // `main`, and folds the result through the same non-forgeable keep-bit
 // (internal/shipgate). The loop author cannot move a KEEP by narrating a number.
 //
-// Two modes:
+// Three modes:
 //
 //	-mode improve  run the closed loop: propose candidate cache sizes, measure each
 //	               in a worktree, keep-or-revert on the keep-bit, advance the running
@@ -13,26 +13,38 @@
 //	-mode track    record ONE measurement of the KPI on `main` to the journal — the
 //	               ongoing benchmark-against-latest-main series, with regression
 //	               detection vs the last recorded point.
+//	-mode meta     the APEX rung (#1195): read the rsiloop journal, fold a BOUNDED
+//	               keep-policy proposal from clustered ESCALATEs, and print it as JSON.
+//	               Propose-only by default (nothing mutates); --apply with a required
+//	               --witness-journal witnesses the proposal through the SAME non-forgeable
+//	               keep-bit and lands it only on a witnessed KEEP. This is RSI applied to
+//	               the keep-GATE itself — the loop-author cannot move a KEEP by narrating.
 //
-// Exit codes: 0 = normal (completed without escalation), 1 = error, 3 = ESCALATE (the
-// breaker tripped after K consecutive non-keeps — hand to a human) or, in track mode, a
-// detected regression on `main` (alert).
+// Exit codes: 0 = normal (completed without escalation; in meta mode: proposal emitted,
+// no proposal, or a witnessed KEEP), 1 = error, 2 = usage (in meta mode: --apply refused
+// for a missing --witness-journal), 3 = ESCALATE (the breaker tripped after K consecutive
+// non-keeps — hand to a human) or, in track mode, a detected regression on `main`, or, in
+// meta mode, a witnessed REVERT (the proposal was rejected by the keep-bit; policy untouched).
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/rsiloop"
+	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
 
 func main() {
-	mode := flag.String("mode", "improve", "improve | track")
+	mode := flag.String("mode", "improve", "improve | track | meta")
 	repo := flag.String("repo", ".", "the fak module root (where go.mod lives)")
-	journalPath := flag.String("journal", "-", "append-only JSONL journal path ('-' = stdout)")
+	journalPath := flag.String("journal", "-", "append-only JSONL journal path ('-' = stdout). "+
+		"In -mode meta this is read as INPUT: the rsiloop journal the fold scans.")
 	baselineRef := flag.String("baseline-ref", "main", "the ref the baseline + candidates fork from")
 	candidates := flag.String("candidates", "6,8,8,10", "comma-separated DefaultCacheSize values to propose")
 	k := flag.Int("k", 3, "escalation breaker: stop after K consecutive non-keeps")
@@ -46,7 +58,33 @@ func main() {
 	dosObserve := flag.Bool("dos-observe", false, "also emit a `dos improve --observe` "+
 		"receipt of each keep/revert verdict to the DOS audit journal (record-only "+
 		"telemetry; never re-gates the loop; no-op when dos is absent) — #588")
+
+	// -mode meta flags (#3975): the apex meta-RSI fold over the journal. The four
+	// config knobs bound the proposal; --apply + --witness-journal witness and land it.
+	dc := rsiloop.DefaultMetaConfig()
+	metaWindow := flag.Int("meta-window", dc.Window, "meta: # of most-recent improve cycles the fold scans")
+	metaMinEsc := flag.Int("meta-min-escalations", dc.MinEscalations, "meta: escalations within the window that trigger a proposal")
+	metaGainStep := flag.Float64("meta-gain-step", dc.GainStep, "meta: bounded increment applied to the strict-gain bar")
+	metaGainCeiling := flag.Float64("meta-gain-ceiling", dc.GainCeiling, "meta: the strict-gain bar is never proposed above this")
+	metaGain := flag.Float64("meta-gain-threshold", 0, "meta: the CURRENT keep-gate strict-gain bar the fold proposes to raise")
+	apply := flag.Bool("apply", false, "meta: witness the folded proposal through the keep-bit and LAND it on a witnessed KEEP (requires --witness-journal); default is propose-only")
+	witnessJournal := flag.String("witness-journal", "", "meta: path to the journal OBSERVED under the proposed policy — the non-author witness --apply re-measures against")
 	flag.Parse()
+
+	if *mode == "meta" {
+		os.Exit(runMeta(metaOptions{
+			journalPath:    *journalPath,
+			witnessJournal: *witnessJournal,
+			apply:          *apply,
+			cur:            rsiloop.KeepPolicy{GainThreshold: *metaGain},
+			cfg: rsiloop.MetaConfig{
+				Window:         *metaWindow,
+				MinEscalations: *metaMinEsc,
+				GainStep:       *metaGainStep,
+				GainCeiling:    *metaGainCeiling,
+			},
+		}, os.Stdout, os.Stderr))
+	}
 
 	h, herr := selectHarness(*harness, *repo, *baselineRef, *candidates, *probePkg, *suitePkgs)
 	if herr != nil {
@@ -71,7 +109,7 @@ func main() {
 		}
 		os.Exit(runImprove(h, j, *k, *maxCycles, obs))
 	default:
-		fmt.Fprintf(os.Stderr, "unknown -mode %q (want improve|track)\n", *mode)
+		fmt.Fprintf(os.Stderr, "unknown -mode %q (want improve|track|meta)\n", *mode)
 		os.Exit(2)
 	}
 }
@@ -177,6 +215,123 @@ func runTrack(h rsiloop.Harness, j *rsiloop.Journal, journalPath string) int {
 		return 3 // a regression on main — alert
 	}
 	return 0
+}
+
+// metaOptions carries the parsed -mode meta inputs so runMeta is testable without the
+// flag package: the journal to fold, the witness journal --apply re-measures against,
+// the explicit allow bit, the current keep-policy, and the bounded fold config.
+type metaOptions struct {
+	journalPath    string
+	witnessJournal string
+	apply          bool
+	cur            rsiloop.KeepPolicy
+	cfg            rsiloop.MetaConfig
+}
+
+// metaProposalView is the readable JSON projection of a Proposal (the library's Knob is
+// an opaque int; here it is its stable token). It is the hypothesis, never an authority.
+type metaProposalView struct {
+	Knob          string  `json:"knob"`
+	Before        float64 `json:"before"`
+	After         float64 `json:"after"`
+	Escalations   int     `json:"escalations"`
+	WindowScanned int     `json:"window_scanned"`
+	Rationale     string  `json:"rationale"`
+}
+
+func proposalView(p rsiloop.Proposal) metaProposalView {
+	return metaProposalView{
+		Knob: p.Knob.String(), Before: p.Before, After: p.After,
+		Escalations: p.Escalations, WindowScanned: p.Window, Rationale: p.Rationale,
+	}
+}
+
+// runMeta reads the rsiloop journal, folds a BOUNDED keep-policy proposal, and prints a
+// self-describing JSON object to out. It is propose-only unless opts.apply is set, in
+// which case it witnesses the proposal through the library's non-forgeable keep-bit
+// (ApplyProposalWithWitness) against the --witness-journal and lands it ONLY on a
+// witnessed KEEP. Nothing mutates on the propose-only or no-proposal paths. Returns the
+// process exit code: 0 (proposal/no-proposal/witnessed KEEP), 1 (read error),
+// 2 (--apply refused for a missing witness — the library's own error), 3 (witnessed
+// REVERT: the keep-bit rejected the proposal; the policy is left untouched).
+func runMeta(opts metaOptions, out, errOut io.Writer) int {
+	if p := strings.TrimSpace(opts.journalPath); p == "" || p == "-" {
+		// meta reads -journal as INPUT; the append-journal default ('-') is almost
+		// certainly a mis-invocation. Warn on stderr, keep stdout pure JSON.
+		fmt.Fprintln(errOut, "rsiloop meta: -journal is the INPUT journal to fold; pass a real path (got "+strconv.Quote(opts.journalPath)+")")
+	}
+	rows, err := rsiloop.ReadJournal(opts.journalPath)
+	if err != nil {
+		fmt.Fprintln(errOut, "rsiloop meta: read journal:", err)
+		return 1
+	}
+
+	p, ok := rsiloop.Fold(rows, opts.cur, opts.cfg)
+	if !ok {
+		writeMetaJSON(out, map[string]any{
+			"has_proposal": false,
+			"journal_rows": len(rows),
+			"reason":       "no clustered escalation in window — nothing to propose",
+		})
+		return 0
+	}
+
+	if !opts.apply {
+		writeMetaJSON(out, map[string]any{
+			"has_proposal": true,
+			"witnessed":    false,
+			"applied":      false,
+			"journal_rows": len(rows),
+			"proposal":     proposalView(p),
+		})
+		return 0
+	}
+
+	// --apply: witness the proposal through the keep-bit. A missing witness ref surfaces
+	// the library's own refusal (exit 2). The witness journal is the downstream journal
+	// OBSERVED under the proposed policy; measure ignores the derived policy and returns
+	// that pre-recorded witness (the file-journal witness the issue specifies).
+	measure := func(rsiloop.KeepPolicy) ([]rsiloop.Row, error) {
+		return rsiloop.ReadJournal(opts.witnessJournal)
+	}
+	rec, err := rsiloop.ApplyProposalWithWitness(opts.cur, rows, p, opts.apply, opts.witnessJournal, measure)
+	if err != nil {
+		fmt.Fprintln(errOut, "rsiloop meta apply:", err)
+		return 2
+	}
+
+	writeMetaJSON(out, map[string]any{
+		"has_proposal": true,
+		"witnessed":    true,
+		"applied":      rec.Applied,
+		"decision":     rec.Decision.String(),
+		"witness_ref":  rec.WitnessRef,
+		"before_rate":  rec.BeforeRate,
+		"after_rate":   rec.AfterRate,
+		"before_rows":  rec.BeforeRows,
+		"after_rows":   rec.AfterRows,
+		"policy": map[string]any{
+			"gain_threshold": rec.Policy.GainThreshold,
+			"breaker_k":      rec.Policy.BreakerK,
+			"throttle":       rec.Policy.Throttle,
+		},
+		"log":      rec.Log,
+		"proposal": proposalView(p),
+	})
+	if rec.Decision != shipgate.KEEP {
+		return 3 // witnessed REVERT — proposal rejected, policy left untouched
+	}
+	return 0
+}
+
+// writeMetaJSON emits v as indented JSON (a single object per run) followed by a newline.
+func writeMetaJSON(out io.Writer, v any) {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		fmt.Fprintln(out, "{}")
+		return
+	}
+	fmt.Fprintln(out, string(b))
 }
 
 func refLabel(r string) string {
