@@ -101,6 +101,57 @@ func TestWithMetricsPanicLogIsStructured(t *testing.T) {
 	}
 }
 
+// panickyPinnedHandler is a named package-level handler so the origin frame the
+// recover pins has a stable, assertable function name (an anonymous closure's
+// name is position-dependent and brittle). It stands in for any downstream
+// gateway handler that raises a recoverable panic.
+func panickyPinnedHandler(http.ResponseWriter, *http.Request) {
+	panic("pinned boom")
+}
+
+// TestWithMetricsPanicLogPinsFaultingHandler pins #2775's core ask: a recovered
+// handler panic must self-identify the FAULTING HANDLER, not just the route. The
+// route ("/v1/messages") is too coarse to name which handler faulted when several
+// share a route, and #2772 forbids re-leaking net/http's multi-line goroutine dump
+// to the guarded child's TTY — so the fix carries a single compact "origin" frame
+// (pkg.Func + file:line) in the structured gateway_recovered_panic event. This test
+// fails on the pre-fix tree (no origin field) and stays green only while the frame
+// is captured, without any "goroutine …" header leaking into logf.
+func TestWithMetricsPanicLogPinsFaultingHandler(t *testing.T) {
+	var lines []string
+	s := &Server{
+		metrics: newGatewayMetrics(time.Now()),
+		logf:    func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) },
+	}
+	h := s.withMetrics(http.HandlerFunc(panickyPinnedHandler))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	req.Header.Set(traceHeader, "gw-panic-origin")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	ev := findLogEvent(t, lines, "gateway_recovered_panic")
+	origin, ok := ev["origin"].(string)
+	if !ok || origin == "" {
+		t.Fatalf("recovered-panic event has no origin frame; the faulting handler is unpinned: %v", ev)
+	}
+	if !strings.Contains(origin, "panickyPinnedHandler") {
+		t.Fatalf("origin %q does not name the faulting handler panickyPinnedHandler", origin)
+	}
+	if !strings.Contains(origin, "metrics_panic_recover_test.go") {
+		t.Fatalf("origin %q does not carry the faulting file:line", origin)
+	}
+	// The origin must stay a single compact field — never a goroutine dump (#2772).
+	for _, l := range lines {
+		if strings.Contains(l, "goroutine ") {
+			t.Fatalf("a goroutine stack reached logf: %q", l)
+		}
+	}
+}
+
 // TestWithMetricsReRaisesErrAbortHandler pins the one panic withMetrics must NOT swallow:
 // http.ErrAbortHandler is net/http's intentional silent-abort sentinel and has to propagate
 // so the server aborts the response as designed rather than reporting a spurious 500.

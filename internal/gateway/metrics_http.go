@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -138,11 +139,17 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 				if p == http.ErrAbortHandler {
 					panic(p)
 				}
+				// Pin the faulting handler HERE, while the panicking frames are
+				// still on the stack (recover has not yet returned control to the
+				// deferring frame), so the log names the exact site instead of the
+				// coarse route alone (#2775). Captured as a single compact frame,
+				// never the multi-line goroutine dump net/http would leak (#2772).
+				origin := panicOriginFrame()
 				s.noteServedPanic(r.URL.Path, p)
 				if rec.status == 0 {
 					writeRecoveredPanicErr(rec, p)
 				}
-				s.logRecoveredPanic(r, route, traceID, p)
+				s.logRecoveredPanic(r, route, traceID, origin, p)
 			}
 			status := rec.status
 			if status == 0 {
@@ -184,12 +191,16 @@ func (s *Server) logHTTPRequest(r *http.Request, route string, status int, dur t
 
 // logRecoveredPanic emits the one structured event that lets a recovered handler
 // panic self-identify in the log stream (#2775 step 3): route + method + path + the
-// panic value + trace id, in the same JSON shape as gateway_http_request so a scraper
-// can aggregate panics by route/trace instead of parsing prose. The "msg" field keeps
-// the human-readable "recovered handler panic" marker that log tails and the #2773
-// containment test grep for, so this stays a drop-in for the prior prose line. Called
-// only from withMetrics' recover, i.e. at most once per served turn.
-func (s *Server) logRecoveredPanic(r *http.Request, route, traceID string, p any) {
+// panic value + trace id + the faulting frame, in the same JSON shape as
+// gateway_http_request so a scraper can aggregate panics by route/trace/origin
+// instead of parsing prose. The "origin" field is the whole point of #2775 — the
+// route alone is too coarse to pin the handler when several handlers share a route,
+// so origin carries the exact "pkg.Func (file:line)" the panic was raised at. The
+// "msg" field keeps the human-readable "recovered handler panic" marker that log
+// tails and the #2773 containment test grep for, so this stays a drop-in for the
+// prior prose line. Called only from withMetrics' recover, i.e. at most once per
+// served turn.
+func (s *Server) logRecoveredPanic(r *http.Request, route, traceID, origin string, p any) {
 	if s == nil || s.logf == nil {
 		return
 	}
@@ -201,6 +212,9 @@ func (s *Server) logRecoveredPanic(r *http.Request, route, traceID string, p any
 		"path":   r.URL.Path,
 		"panic":  fmt.Sprintf("%v", p),
 	}
+	if origin != "" {
+		ev["origin"] = origin
+	}
 	if traceID != "" {
 		ev["trace_id"] = traceID
 	}
@@ -209,6 +223,59 @@ func (s *Server) logRecoveredPanic(r *http.Request, route, traceID string, p any
 		return
 	}
 	s.logf("%s", b)
+}
+
+// panicOriginFrame walks the calling goroutine's stack from inside withMetrics'
+// deferred recover and returns the frame where the panic was actually raised —
+// the first non-runtime frame after runtime.gopanic (which also covers runtime-
+// raised panics that dispatch through sigpanic/panicmem, e.g. a nil dereference
+// or a nil-map write). It returns "pkg.Func (file:line)" with the package path
+// and absolute build path trimmed off, and — critically — with no newline or
+// "goroutine …" header, so the recovered-panic log stays a single short field:
+// #2775 wants the faulting handler pinned, while #2772 forbids re-leaking the
+// multi-line goroutine dump net/http would otherwise write to the guarded
+// child's controlling TTY. Returns "" when no origin can be resolved (e.g. the
+// panicking frames have already been unwound), and the caller then omits the
+// field rather than logging a misleading placeholder. Must be called
+// synchronously within the recover, before it returns to the deferring frame.
+func panicOriginFrame() string {
+	var pcs [64]uintptr
+	// skip=0 keeps every frame walkable regardless of inlining; the loop below
+	// discards this helper and the recover closure by only accepting a frame
+	// that appears AFTER runtime.gopanic.
+	n := runtime.Callers(0, pcs[:])
+	if n == 0 {
+		return ""
+	}
+	frames := runtime.CallersFrames(pcs[:n])
+	sawPanic := false
+	for {
+		fr, more := frames.Next()
+		if strings.HasPrefix(fr.Function, "runtime.") {
+			if fr.Function == "runtime.gopanic" {
+				sawPanic = true
+			}
+			if !more {
+				break
+			}
+			continue
+		}
+		if sawPanic && fr.Function != "" {
+			fn := fr.Function
+			if i := strings.LastIndex(fn, "/"); i >= 0 {
+				fn = fn[i+1:]
+			}
+			file := fr.File
+			if i := strings.LastIndex(file, "/"); i >= 0 {
+				file = file[i+1:]
+			}
+			return fmt.Sprintf("%s (%s:%d)", fn, file, fr.Line)
+		}
+		if !more {
+			break
+		}
+	}
+	return ""
 }
 
 func (s *Server) logGatewayOperation(operation, traceID, tool string, v WireVerdict, opErr error, dur time.Duration) {
