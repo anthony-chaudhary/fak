@@ -56,14 +56,17 @@ func gateDuplication(d *StagedDiff) ([]Finding, error) {
 // duplicationFindings is gateDuplication's core with the neighborhood cap and per-finding match
 // cap as parameters, so a unit test can drive the size-cap branch without thousands of files.
 func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches int) ([]Finding, error) {
-	// Candidate blocks: the concatenated added lines of each staged non-test .go file. A trivial
-	// addition (below clonescan's ~34-token window) yields no query keys and cannot fire, so a
-	// lone `package x` or a one-line tweak is naturally clean.
+	// Candidate blocks: the concatenated added lines of each staged non-test .go file, tokenized to
+	// their qualifying clone-window keys ONCE here. A trivial addition (below clonescan's ~34-token
+	// window) yields an empty want-set — Query would no-op on it — so it is pruned up front and no
+	// directory it lives in is marked `touched`. When EVERY candidate is trivial (the common
+	// small-commit case: a one-line fix, a tiny helper, a bare `package x`) `touched` stays empty,
+	// so trackedGoByDir's `git ls-files` subprocess + sibling disk reads are skipped entirely.
 	type candidate struct {
-		rel   string
-		dir   string
-		line  int
-		block string
+		rel  string
+		dir  string
+		line int
+		want map[string]bool
 	}
 	var candidates []candidate
 	touched := map[string]bool{}
@@ -75,19 +78,24 @@ func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches int) ([]Find
 		if len(lines) == 0 {
 			continue
 		}
-		relSlash := strings.ReplaceAll(rel, "\\", "/")
 		var sb strings.Builder
 		for _, al := range lines {
 			sb.WriteString(al.Text)
 			sb.WriteByte('\n')
 		}
+		want := clonescan.CandidateKeys(sb.String())
+		if len(want) == 0 {
+			continue // no qualifying window: this block cannot clone anything, so it needs no neighborhood
+		}
+		relSlash := strings.ReplaceAll(rel, "\\", "/")
+		dir := path.Dir(relSlash)
 		candidates = append(candidates, candidate{
-			rel:   relSlash,
-			dir:   path.Dir(relSlash),
-			line:  lines[0].New,
-			block: sb.String(),
+			rel:  relSlash,
+			dir:  dir,
+			line: lines[0].New,
+			want: want,
 		})
-		touched[path.Dir(relSlash)] = true
+		touched[dir] = true
 	}
 	if len(candidates) == 0 {
 		return nil, nil
@@ -113,7 +121,7 @@ func duplicationFindings(d *StagedDiff, maxNeighborhood, maxMatches int) ([]Find
 		if index == nil {
 			continue // no siblings, or the directory was over the cap and left to the scorecard
 		}
-		matches := index.Query(clonescan.CandidateKeys(c.block), c.rel, maxMatches)
+		matches := index.Query(c.want, c.rel, maxMatches)
 		if len(matches) == 0 {
 			continue
 		}

@@ -195,3 +195,59 @@ func TestGateDuplication_FailsOpenWhenListingUnavailable(t *testing.T) {
 		t.Errorf("a nil runner should fail open; err = %v, want ErrCouldNotRun", err)
 	}
 }
+
+// A commit whose only added .go block is below clonescan's qualifying window (a lone `package x`,
+// a one-line tweak) fires no finding AND never spends the `git ls-files` subprocess: with no
+// qualifying candidate there is no neighborhood worth reading, so trackedGoByDir is short-circuited
+// entirely. The recording runner witnesses that `ls-files` was never invoked (#4327).
+func TestGateDuplication_TrivialCandidateSkipsGitListing(t *testing.T) {
+	var lsFilesCalls int
+	d := &StagedDiff{
+		Root:        ".",
+		ctx:         context.Background(),
+		AddedByFile: map[string][]AddedLine{"internal/foo/tiny.go": addedLinesOf("package foo\n\nvar enabled = true\n")},
+		run: func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			for _, a := range args {
+				if a == "ls-files" {
+					lsFilesCalls++
+				}
+			}
+			return "internal/foo/existing.go", 0, nil
+		},
+	}
+	findings, err := gateDuplication(d)
+	if err != nil {
+		t.Fatalf("a trivial block must not error; err=%v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("a sub-window block cannot clone; got findings=%+v", findings)
+	}
+	if lsFilesCalls != 0 {
+		t.Errorf("trackedGoByDir ran `git ls-files` %d time(s) for a commit with no qualifying candidate; the short-circuit must skip it (#4327)", lsFilesCalls)
+	}
+}
+
+// Pruning is surgical: a trivial candidate staged alongside a qualifying one drops ONLY the trivial
+// block. The qualifying candidate keeps its directory in the `touched` set, still reads its
+// neighborhood, and fires the exact finding it did before the short-circuit — proving the narrowing
+// never discards a provably-nonempty want-set (#4327).
+func TestGateDuplication_TrivialPruneKeepsQualifyingCandidate(t *testing.T) {
+	d := stagedForDup(
+		map[string]string{
+			"internal/foo/new.go":  siblingFile(dupBlock),        // qualifying -> must still fire
+			"internal/foo/tiny.go": "package foo\n\nvar ok = 1\n", // trivial -> pruned before git read
+		},
+		map[string]string{"internal/foo/existing.go": siblingFile(dupBlock)},
+		[]string{"internal/foo/existing.go"},
+	)
+	findings, err := gateDuplication(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("only the qualifying candidate should fire; got %d: %+v", len(findings), findings)
+	}
+	if findings[0].File != "internal/foo/new.go" {
+		t.Errorf("finding file = %q, want internal/foo/new.go", findings[0].File)
+	}
+}
