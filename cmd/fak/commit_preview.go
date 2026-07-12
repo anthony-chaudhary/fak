@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/modver"
 )
 
 // runCommitPreview lints a proposed commit (message + the paths it would touch) and reports the
@@ -18,17 +19,24 @@ import (
 func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root, expectedBranch string, asJSON, requireIssue bool) int {
 	rep := hooks.LintCommitMessageWithOptions(message, paths, root, requireIssue)
 	coreLockWarns := auditCoreLockPaths(paths)
+	// The modver cross-check (#2495): name the modules whose rev a commit of exactly these
+	// staged paths would bump, so a stamp/lane mismatch ("subject stamps leaf X, but these
+	// paths bump modules Y,Z") is visible at the one fixable moment. Pure path→module
+	// projection (no git, no Snapshot), so it adds no latency beyond the string walk.
+	bumpedModules := modver.ModulesForPaths(paths)
 	if asJSON {
 		payload := struct {
 			hooks.CommitLintReport
 			ExpectedBranch   string            `json:"expected_branch,omitempty"`
 			CoreLockWarnings []coreLockWarning `json:"core_lock_warnings"`
 			CoreLockWarnMode string            `json:"core_lock_warn_mode"`
+			BumpedModules    []string          `json:"bumped_modules"`
 		}{
 			CommitLintReport: rep,
 			ExpectedBranch:   expectedBranch,
 			CoreLockWarnings: coreLockWarns,
 			CoreLockWarnMode: coreLockModeWarning,
+			BumpedModules:    bumpedModules,
 		}
 		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak commit: %v\n", err)
@@ -36,6 +44,7 @@ func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, 
 		}
 	} else {
 		renderPreview(stdout, rep, expectedBranch)
+		renderModuleAdvisory(stdout, bumpedModules)
 		renderCoreLockWarnings(stdout, coreLockWarns)
 	}
 	if rep.OK {
@@ -86,6 +95,19 @@ func renderPreview(w io.Writer, r hooks.CommitLintReport, expectedBranch string)
 	} else if !r.OK && r.SuggestTrailer != "" {
 		fmt.Fprintf(w, "  → suggested trailer: %s\n", r.SuggestTrailer)
 	}
+}
+
+// renderModuleAdvisory prints the version-everything cross-check (#2495): the modules whose rev a
+// commit of exactly these staged paths would bump. It is ADVISORY — a lens beside the stamp/lane
+// doctor ("subject stamps leaf X; these paths bump modules Y,Z"), never an exit-code gate. The
+// module set is a pure, git-free projection of the staged paths (modver.ModulesForPaths), so it
+// adds no latency beyond the string walk. Paths under no tracked keyspace bump no module, so the
+// line is omitted rather than printed empty.
+func renderModuleAdvisory(w io.Writer, bumped []string) {
+	if len(bumped) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  bumps modules: %s\n", strings.Join(bumped, ", "))
 }
 
 func firstCommitLine(message string) string {

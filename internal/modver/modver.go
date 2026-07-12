@@ -254,6 +254,29 @@ func toolsFamily(file string) (fam string, ok bool) {
 	return stem, true
 }
 
+// ModulesForPaths maps a set of repo-relative paths to the deduped, sorted set of
+// module keys those paths touch — the modules whose rev a commit of exactly these
+// paths would bump. It is the cheap, git-free projection of the same keyspace
+// moduleOf defines: no Snapshot, no `git log`, no history walk, since which module
+// a path belongs to is a pure function of the path string. That is what lets the
+// commit-preview advisory (#2495) name the bumped modules within the preview's
+// latency budget — it costs a string split per path, nothing more. Paths under no
+// tracked keyspace (a file directly under a root, docs/*, nested tools/ or
+// examples/ fixtures) bump no module and are simply skipped; an empty or all-
+// untracked path set returns nil.
+func ModulesForPaths(paths []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range paths {
+		if name, _, ok := moduleOf(p); ok && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // parseLog folds `git log --pretty=format:%x1e%h%x09%cI --name-only` output
 // (newest-first) into per-module revisions. A commit touching several files of
 // one module counts once; the first record a module appears in is its last
