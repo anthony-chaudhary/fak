@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
@@ -648,6 +649,53 @@ func dispatchFetchScopedIssues(root string, stderr io.Writer, view string, limit
 	return issues, injected, err
 }
 
+// Closed reason classes for the current-view fail-soft (#4172). When the tick scopes
+// its fetch to a named issue-view but falls back to the full open backlog, exactly one
+// of these names WHY: the view could not be read or resolved (view_unreadable), or it
+// resolved to no dispatchable issue (view_empty). A small closed set keeps the signal
+// machine-observable instead of buried in a free-text WARN line.
+const (
+	dispatchViewFailsoftUnreadable = "view_unreadable"
+	dispatchViewFailsoftEmpty      = "view_empty"
+)
+
+// dispatchViewFailsoftRecord is the structured, machine-observable twin of the two
+// stderr WARN branches in dispatchFetchScopedIssuesWithSignal: which view fell soft,
+// under which closed reason class, and how many times it has fired this process. The
+// fail-soft is otherwise INVISIBLE past the WARN line -- an operator watching a healthy
+// full-backlog tick cannot tell the `current` view silently stopped scoping anything.
+// Purely additive: the WARN text and the router payload's ViewFallbackReason are
+// unchanged; a sibling leaf surfaces this record into the tick --json / metrics.
+type dispatchViewFailsoftRecord struct {
+	View   string `json:"view"`
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+}
+
+var (
+	dispatchViewFailsoftMu   sync.Mutex
+	dispatchViewFailsoftLast dispatchViewFailsoftRecord
+)
+
+// recordDispatchViewFailsoft stamps the latest current-view fail-soft and bumps the
+// process-lifetime count. Called at each WARN branch; safe under concurrent ticks.
+func recordDispatchViewFailsoft(view, reason string) {
+	dispatchViewFailsoftMu.Lock()
+	defer dispatchViewFailsoftMu.Unlock()
+	dispatchViewFailsoftLast.View = view
+	dispatchViewFailsoftLast.Reason = reason
+	dispatchViewFailsoftLast.Count++
+}
+
+// dispatchViewFailsoftSignal returns the latest fail-soft record. Reason is "" and Count
+// 0 until the first fail-soft fires, so a caller can distinguish a scoped tick still
+// routing its real view from one that has silently dropped to the full backlog.
+func dispatchViewFailsoftSignal() dispatchViewFailsoftRecord {
+	dispatchViewFailsoftMu.Lock()
+	defer dispatchViewFailsoftMu.Unlock()
+	return dispatchViewFailsoftLast
+}
+
 func dispatchFetchScopedIssuesWithSignal(root string, stderr io.Writer, view string, limit int) ([]dispatchtick.Issue, bool, string, error) {
 	if stderr == nil {
 		stderr = io.Discard
@@ -658,8 +706,10 @@ func dispatchFetchScopedIssuesWithSignal(root string, stderr io.Writer, view str
 		switch {
 		case err != nil:
 			fmt.Fprintf(stderr, "WARN: --view %q: %v; using full open backlog\n", view, err)
+			recordDispatchViewFailsoft(view, dispatchViewFailsoftUnreadable)
 		case !dispatchAnyDispatchable(viewIssues):
 			fmt.Fprintf(stderr, "WARN: --view %q: no dispatchable issues; using full open backlog\n", view)
+			recordDispatchViewFailsoft(view, dispatchViewFailsoftEmpty)
 		default:
 			return viewIssues, true, "", nil
 		}

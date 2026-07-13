@@ -174,6 +174,82 @@ func TestDispatchScopedFetchFailSoftWhenViewHasNoDispatchableIssue(t *testing.T)
 	}
 }
 
+// TestDispatchViewFailsoftSignalClassifiesReason witnesses #4172: the two fail-soft
+// branches now record a package-level structured signal carrying the view slug, a
+// closed reason class (view_unreadable vs view_empty), and a process-lifetime count --
+// distinct from the free-text WARN the sibling tests assert. A resolved, dispatchable
+// view records nothing, so an operator can tell a still-scoped tick from one that has
+// silently dropped to the full backlog. Assertions are delta-based over the process
+// global so ordering with other tests never matters.
+func TestDispatchViewFailsoftSignalClassifiesReason(t *testing.T) {
+	dispatchable := func(root string, limit int) ([]dispatchtick.Issue, error) {
+		return []dispatchtick.Issue{{Number: 90, Title: "fix(tools): backlog leaf"}}, nil
+	}
+
+	t.Run("view_unreadable on fetch error", func(t *testing.T) {
+		before := dispatchViewFailsoftSignal().Count
+		stubDispatchIssueFetches(t,
+			func(root, slug string, limit int) ([]dispatchtick.Issue, error) {
+				return nil, errors.New("unknown view \"current\" in issue-views.json")
+			}, dispatchable)
+		if _, _, err := dispatchFetchScopedIssues(t.TempDir(), io.Discard, "current", 1000); err != nil {
+			t.Fatalf("scoped fetch: %v", err)
+		}
+		got := dispatchViewFailsoftSignal()
+		if got.Count != before+1 {
+			t.Fatalf("count=%d, want %d (one fail-soft recorded)", got.Count, before+1)
+		}
+		if got.Reason != dispatchViewFailsoftUnreadable {
+			t.Fatalf("reason=%q, want %q", got.Reason, dispatchViewFailsoftUnreadable)
+		}
+		if got.View != "current" {
+			t.Fatalf("view=%q, want current", got.View)
+		}
+	})
+
+	t.Run("view_empty when no dispatchable issue", func(t *testing.T) {
+		epic := dispatchtick.Issue{
+			Number: 7,
+			Title:  "epic(tools): umbrella",
+			Labels: []dispatchtick.IssueLabel{{Name: "epic"}},
+		}
+		before := dispatchViewFailsoftSignal().Count
+		stubDispatchIssueFetches(t,
+			func(root, slug string, limit int) ([]dispatchtick.Issue, error) {
+				return []dispatchtick.Issue{epic}, nil
+			}, dispatchable)
+		if _, _, err := dispatchFetchScopedIssues(t.TempDir(), io.Discard, "current", 1000); err != nil {
+			t.Fatalf("scoped fetch: %v", err)
+		}
+		got := dispatchViewFailsoftSignal()
+		if got.Count != before+1 {
+			t.Fatalf("count=%d, want %d (one fail-soft recorded)", got.Count, before+1)
+		}
+		if got.Reason != dispatchViewFailsoftEmpty {
+			t.Fatalf("reason=%q, want %q", got.Reason, dispatchViewFailsoftEmpty)
+		}
+	})
+
+	t.Run("no signal when the view resolves", func(t *testing.T) {
+		before := dispatchViewFailsoftSignal()
+		stubDispatchIssueFetches(t,
+			func(root, slug string, limit int) ([]dispatchtick.Issue, error) {
+				return []dispatchtick.Issue{dispatchViewTestIssue(41)}, nil
+			},
+			func(root string, limit int) ([]dispatchtick.Issue, error) {
+				t.Fatal("full-backlog fetch must not run when the view resolves")
+				return nil, nil
+			})
+		issues, injected, err := dispatchFetchScopedIssues(t.TempDir(), io.Discard, "current", 1000)
+		if err != nil || !injected || len(issues) != 1 {
+			t.Fatalf("scoped fetch injected=%v issues=%+v err=%v, want the resolved view slice", injected, issues, err)
+		}
+		if got := dispatchViewFailsoftSignal(); got.Count != before.Count {
+			t.Fatalf("a dispatchable view recorded a fail-soft: before=%+v after=%+v", before, got)
+		}
+	})
+}
+
 func TestDispatchViewQueryResolvesConfigSlug(t *testing.T) {
 	root := t.TempDir()
 	cfg := `{"repo": "anthony-chaudhary/fak", "views": [{"slug": "current", "query": "is:open label:current no:assignee"}]}`
