@@ -405,6 +405,91 @@ func TestRunGuardStopHookAllowsValidTaskHandoff(t *testing.T) {
 	}
 }
 
+// TestRunGuardStopHookHandoffStandsDownWhenStopHookActive is the bound half of #A2: the task-handoff
+// gate no longer blocks forever. When the harness is ALREADY re-firing this Stop hook because we
+// blocked last turn (stop_hook_active) and the handoff is STILL missing, the gate stands down and
+// allows the stop instead of spinning the harness with a demand it already made.
+func TestRunGuardStopHookHandoffStandsDownWhenStopHookActive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 0\n"))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader(`{"stop_hook_active": true}`), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--task-handoff-mode", guardPreCompactModeEnforce,
+		"--task-handoff-file", filepath.Join(t.TempDir(), "missing-handoff.json"),
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stand down after a prior block); stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"stop_hook_active", "standing down"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("handoff give-up guidance missing %q: %s", want, stderr.String())
+		}
+	}
+}
+
+// TestRunGuardStopHookGivesUpToolFeedbackPastOwnBound is the bound half of #A6: the retryable
+// tool-feedback continue no longer runs forever. Past its own (separate, generous) ceiling the hook
+// stands down and ALLOWS the stop instead of holding the turn open every turn. The ceiling is
+// independent of the deny-all --max, so a lower --max cannot cut a legitimate multi-turn repair short.
+func TestRunGuardStopHookGivesUpToolFeedbackPastOwnBound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"fak_guard_deny_all_consecutive 0",
+			"fak_guard_tool_feedback_consecutive 4",
+		}, "\n")))
+	}))
+	defer srv.Close()
+	t.Setenv(guardStopHookEnvToolFeedbackMax, "3") // feedback 4 > bound 3 -> stand down
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (tool-feedback continue stands down past its own bound); stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"standing down", "exceeded the continue bound", guardStopHookEnvToolFeedbackMax} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("tool-feedback give-up guidance missing %q: %s", want, stderr.String())
+		}
+	}
+}
+
+// TestRunGuardStopHookSignalIsCleanForCleanStopOnSameIssueGateway is #A7: a clean completion is
+// labeled "clean", never "same-issue", even when the gateway EMITS the same-issue gauge at 0.
+// Before the fix the label keyed on gauge-presence alone, so every clean stop on a current gateway
+// was mis-recorded as a same-issue stop, poisoning the folded ledger's signal tally.
+func TestRunGuardStopHookSignalIsCleanForCleanStopOnSameIssueGateway(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"fak_guard_deny_all_consecutive 0",
+			"fak_guard_deny_all_same_consecutive 0", // gauge SEEN (current gateway) but zero repeats
+		}, "\n")))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeShadow, // shadow logs the resolved signal label to stderr
+		"--metrics-url", srv.URL + "/metrics",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (shadow always allows); stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "signal=clean") {
+		t.Fatalf("clean stop should be labeled signal=clean: %s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "signal=same-issue") {
+		t.Fatalf("clean stop must NOT be mislabeled same-issue: %s", stderr.String())
+	}
+}
+
 func TestRunGuardStopHookDenyAllPrecedesTaskHandoff(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 1\n"))

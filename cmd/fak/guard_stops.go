@@ -66,8 +66,10 @@ const (
 	stopDispOperatorDirectedShadow   guardStopDisposition = "operator_directed_shadow"   // allow: shadow — would-enforce decision logged, stop allowed
 
 	// bounded stand-downs (the hook gave up and ALLOWED the stop after the ladder)
-	stopDispBlindGiveUp     guardStopDisposition = "blind_give_up"      // stood down past --deny-all-max (blind)
-	stopDispSameIssueGiveUp guardStopDisposition = "same_issue_give_up" // stood down at the same-issue depth
+	stopDispBlindGiveUp        guardStopDisposition = "blind_give_up"         // stood down past --deny-all-max (blind)
+	stopDispSameIssueGiveUp    guardStopDisposition = "same_issue_give_up"    // stood down at the same-issue depth
+	stopDispToolFeedbackGiveUp guardStopDisposition = "tool_feedback_give_up" // stood down past the tool-feedback continue bound (#A6)
+	stopDispHandoffGiveUp      guardStopDisposition = "handoff_give_up"       // stood down: handoff still invalid after a prior block (stop_hook_active) (#A2)
 
 	// non-enforcing outcomes
 	stopDispModeOff guardStopDisposition = "mode_off" // --deny-all-continue=off: layer disabled
@@ -107,7 +109,7 @@ func guardStopDispositionKind(d guardStopDisposition) guardStopKind {
 		return stopKindClean
 	case stopDispToolFeedbackContinue, stopDispDenyAllContinue, stopDispSameIssueContinue, stopDispHandoffBlock, stopDispOperatorDirectedContinue:
 		return stopKindContinue
-	case stopDispBlindGiveUp, stopDispSameIssueGiveUp:
+	case stopDispBlindGiveUp, stopDispSameIssueGiveUp, stopDispToolFeedbackGiveUp, stopDispHandoffGiveUp:
 		return stopKindStandDown
 	case stopDispModeOff:
 		return stopKindOff

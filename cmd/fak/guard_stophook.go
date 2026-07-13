@@ -48,6 +48,11 @@ const (
 	// This is the ONLY session-ending knob on the new same-issue path; warn/final rungs derive
 	// from it. A varied session (fresh block each turn) never reaches it and is never stopped.
 	guardStopHookEnvSameStop = "FAK_GUARD_DENYALL_SAME_STOP"
+	// guardStopHookEnvToolFeedbackMax overrides the retryable tool-feedback continue bound (#A6):
+	// the max consecutive tool-feedback turns to auto-continue past before standing down. It is a
+	// SEPARATE, more generous knob than the deny-all --max (a malformed call is model-fixable), but
+	// it does bound what was previously an unbounded continue.
+	guardStopHookEnvToolFeedbackMax = "FAK_GUARD_TOOL_FEEDBACK_MAX"
 
 	guardTaskHandoffEnvMode = "FAK_GUARD_TASK_HANDOFF_MODE"
 	guardTaskHandoffEnvFile = "FAK_GUARD_TASK_HANDOFF_FILE"
@@ -100,6 +105,16 @@ const (
 	// a session hitting a fresh block each turn pins the same-issue gauge at 1 and rides the NUDGE
 	// rung forever. Only a genuine repeat of the same refusal climbs to this depth and stops.
 	guardStopHookSameStopDefault = 6
+
+	// guardStopHookToolFeedbackMaxDefault bounds the retryable tool-feedback continue path (#A6).
+	// It is DELIBERATELY separate from — and far more generous than — the deny-all ceiling: a
+	// malformed/misrouted call is model-fixable, so a handful of repair turns must never be capped
+	// by the deny-all --max (a session may legitimately fix a call over several turns). But an
+	// UNBOUNDED continue lets a model that emits a malformed call every turn hold the turn open
+	// until the harness's own stop_hook_active cutoff. Past this many CONSECUTIVE tool-feedback
+	// turns the hook stands down and ALLOWS the stop, visibly, exactly as the deny-all ladder gives
+	// up past its bound. 25 straight malformed calls with none landing is unambiguously stuck.
+	guardStopHookToolFeedbackMaxDefault = 25
 )
 
 // guardStopHookStage is the rung of the graduated deny-all back-off ladder the current
@@ -141,6 +156,19 @@ const guardStopHookContinueReason = "fak guard: heads-up — your previous turn 
 
 func guardStopHookToolFeedbackMessage(consecutive int) string {
 	return fmt.Sprintf("fak guard: the previous %d turn(s) ended after retryable tool-call feedback, not a session stop. The proposed tool call(s) were just malformed or otherwise model-fixable, so fak returned per-call feedback and kept the task alive. Fix the JSON/arguments/tool shape and continue — this is a routine retry, so keep going.", consecutive)
+}
+
+// guardStopHookToolFeedbackGiveUpMessage is the operator-facing stand-down line (exit 0, NOT fed
+// to the model) printed when the retryable tool-feedback continue passes its bound (#A6): the
+// model emitted malformed/misrouted calls for more consecutive turns than the ceiling without
+// landing one, so the hook stops auto-continuing and allows the stop rather than looping the turn
+// open until the harness's own cutoff. Mirrors the deny-all give-up: a visible, logged stand-down.
+func guardStopHookToolFeedbackGiveUpMessage(consecutive, bound int) string {
+	return fmt.Sprintf("fak guard Stop: standing down — %d consecutive tool-feedback turn(s) exceeded the continue bound (%d). The model kept emitting malformed/misrouted tool calls without landing one, so fak is allowing the stop instead of holding the turn open indefinitely. Raise FAK_GUARD_TOOL_FEEDBACK_MAX to extend the bound.", consecutive, bound)
+}
+
+func guardStopHookToolFeedbackMaxFromEnv() int {
+	return guardStopHookIntFromEnv(guardStopHookEnvToolFeedbackMax, guardStopHookToolFeedbackMaxDefault)
 }
 
 // normalizeDenyAllThresholds makes the ladder a TOTAL, deterministic function of its three
@@ -340,6 +368,7 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	finalFlag := fs.Int("final", guardStopHookFinalFromEnv(), "escalate the continue guidance to a final warning at this consecutive deny-all depth")
 	sameStopFlag := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "hard give-up depth on the SAME-ISSUE path: end the session after this many consecutive deny-all turns proposing the IDENTICAL refused action (same tool+reason). A varied session never reaches it")
 	operatorDirectedFlag := fs.String("operator-directed", os.Getenv(guardStopHookOperatorDirectedEnvMode), "headless 'stopped to ask a human' gate: off|shadow|warn|enforce")
+	hardwareGateFlag := fs.String("hardware-gate", os.Getenv(guardStopHookHardwareGateEnvMode), "headless 'no local hardware' redirect gate: off|shadow|warn|enforce")
 	handoffModeFlag := fs.String("task-handoff-mode", os.Getenv(guardTaskHandoffEnvMode), "completion handoff gate: off|shadow|enforce")
 	handoffFileFlag := fs.String("task-handoff-file", os.Getenv(guardTaskHandoffEnvFile), "path to fak.task-handoff.v1 JSON the agent must write before a clean stop")
 	handoffRepoFlag := fs.String("task-handoff-repo", os.Getenv(guardTaskHandoffEnvRepo), "owner/repo passed to fak task handoff --live")
@@ -419,6 +448,24 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	if consecutive <= 0 && feedbackConsecutive > 0 {
 		rec.Signal = "tool-feedback"
 		rec.Depth = feedbackConsecutive
+		feedbackMax := guardStopHookToolFeedbackMaxFromEnv()
+		rec.Bound = feedbackMax
+		// Bounded give-up (#A6). The tool-feedback continue is DELIBERATELY decoupled from the
+		// deny-all --max (a malformed/misrouted call is model-fixable, so a few repair turns must
+		// not be capped by the deny-all ceiling), but it is no longer UNBOUNDED. Past its own
+		// generous ceiling the hook stands down and ALLOWS the stop — visibly — so a model stuck
+		// emitting malformed calls cannot hold the turn open every turn until the harness's own
+		// stop_hook_active cutoff.
+		if feedbackConsecutive > feedbackMax {
+			if mode == guardPreCompactModeShadow {
+				rec.Disposition = string(stopDispShadow)
+				fmt.Fprintf(stderr, "fak guard Stop: shadow would stand down on tool-feedback past bound (tool_feedback_consecutive=%d bound=%d stop_hook_active=%v)\n", feedbackConsecutive, feedbackMax, active)
+				return 0
+			}
+			rec.Disposition = string(stopDispToolFeedbackGiveUp)
+			fmt.Fprintln(stderr, guardStopHookToolFeedbackGiveUpMessage(feedbackConsecutive, feedbackMax))
+			return 0
+		}
 		if mode == guardPreCompactModeShadow {
 			rec.Disposition = string(stopDispShadow)
 			fmt.Fprintf(stderr, "fak guard Stop: shadow would auto-continue tool-feedback turn(s) (tool_feedback_consecutive=%d stop_hook_active=%v)\n", feedbackConsecutive, active)
@@ -449,8 +496,16 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	} else {
 		exit, block, stage = guardStopHookDecision(consecutive, warnAt, finalAt, maxN, mode)
 	}
+	// Signal names WHICH path actually drove THIS decision, so a folded ledger reads true (#A7).
+	// It is NOT merely whether the gateway emitted the same-issue gauge (useSame): a clean
+	// completion (depth 0) is "clean" even on a gauge-emitting gateway; only a real repeat
+	// (depth > 0) keyed on the same-issue gauge is "same-issue"; a real repeat riding the legacy
+	// blind ladder is "blind". depth already disambiguates, so this only corrects the label.
 	signalName := "blind"
-	if useSame {
+	switch {
+	case depth <= 0:
+		signalName = "clean"
+	case useSame:
 		signalName = "same-issue"
 	}
 	rec.Signal = signalName
@@ -496,6 +551,17 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		// a LIVE known-bad signature — surface the fleet's recorded pre-existing blocker so the
 		// agent recognises the red as not-its-own and does not loop re-fixing it. Fails open silent.
 		emitKnownFrictionAdvisory(stderr, transcriptPath)
+		// Hardware-gate rung: a clean stop whose final turn declared a LOCAL-hardware blocker as
+		// terminal ("no GPU here", "can't run without CUDA"). On a headless run enforce BLOCKS it and
+		// feeds the sanctioned-compute-node redirect back so the agent dispatches to the fleet instead
+		// of stopping at the local boundary. Fires BEFORE the operator-directed rung because it is the
+		// more specific misroute — a concrete "wrong machine" error with a fixed remedy — so its
+		// redirect wins over the generic "act on your own question" guidance.
+		hgExit, hgDisp, hgFired := runGuardHardwareGateGate(stderr, *hardwareGateFlag, transcriptPath)
+		if hgFired && hgExit == 2 {
+			rec.Disposition = string(hgDisp)
+			return 2
+		}
 		// Operator-directed rung: a clean stop whose final turn asked a human. On a headless run
 		// enforce BLOCKS it (feed the choicetriage remediation back so the agent acts instead of
 		// asking) — precedes the handoff gate, mirroring deny-all-precedes-handoff, so the more
@@ -505,15 +571,23 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 			rec.Disposition = string(odDisp)
 			return 2
 		}
-		handoffExit := runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
+		handoffExit, handoffDisp := runGuardTaskHandoffGate(stderr, active, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
 			Repo: *handoffRepoFlag,
 			Live: *handoffLiveFlag,
 		})
 		switch {
-		case handoffExit == 2:
-			rec.Disposition = string(stopDispHandoffBlock)
+		case handoffDisp != "":
+			// The handoff gate reached its own terminal disposition — a block (exit 2) or a
+			// stop_hook_active stand-down (exit 0, #A2). Record it verbatim rather than folding a
+			// give-up into a bare clean stop.
+			rec.Disposition = string(handoffDisp)
+		case hgFired:
+			// The hardware-gate rung fired but allowed the stop (warn/shadow) and the handoff gate
+			// did not itself block: record the hardware-gate disposition, not a bare clean stop. It
+			// precedes odFired for the same reason it fires first — the more specific signal wins.
+			rec.Disposition = string(hgDisp)
 		case odFired:
 			// The gate fired but allowed the stop (warn/shadow/escalate) and the handoff gate did
 			// not itself block: record the operator-directed disposition, not a bare clean stop.
@@ -575,29 +649,43 @@ func emitUnusedSubstrateAdvisory(stderr io.Writer, signals guardStopHookSignals)
 			"(fak_index_work to pull ranked open work; fak_admit before a write). Advisory only — the stop is allowed.")
 }
 
-func runGuardTaskHandoffGate(stderr io.Writer, cfg guardTaskHandoffConfig) int {
+// runGuardTaskHandoffGate is the task-handoff Stop rung. It returns (exit, disposition): the
+// disposition is non-empty ONLY when the gate reached a terminal decision the caller must record
+// verbatim — a block (exit 2, stopDispHandoffBlock) or a stop_hook_active stand-down (exit 0,
+// stopDispHandoffGiveUp, #A2). An empty disposition means "no override" (gate off, shadow, or the
+// handoff is valid) and the caller classifies the clean stop itself.
+//
+// The stopHookActive give-up is the bound (#A2): when the harness is ALREADY re-firing this Stop
+// hook because we blocked last turn, we have demanded the handoff once and it is still not valid —
+// blocking again only spins the harness with no new information, so we stand down and allow the
+// stop, visibly, exactly as the deny-all ladder gives up past its bound.
+func runGuardTaskHandoffGate(stderr io.Writer, stopHookActive bool, cfg guardTaskHandoffConfig) (int, guardStopDisposition) {
 	mode, err := normalizeGuardTaskHandoffMode(cfg.Mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; %v\n", err)
-		return 0
+		return 0, ""
 	}
 	if mode == guardPreCompactModeOff {
-		return 0
+		return 0, ""
 	}
 	file := strings.TrimSpace(cfg.File)
 	if file == "" {
 		fmt.Fprintln(stderr, "fak guard Stop: allowing stop; task handoff gate enabled but no handoff file configured")
-		return 0
+		return 0, ""
 	}
 	handoff, review, err := readAndReviewGuardTaskHandoff(file)
 	if err != nil || !review.OK {
 		msg := guardTaskHandoffRequiredMessage(file, review, err, cfg.Live, cfg.Repo)
 		if mode == guardPreCompactModeShadow {
 			fmt.Fprintf(stderr, "fak guard Stop: shadow would block clean stop for task handoff: %s\n", strings.TrimSpace(msg))
-			return 0
+			return 0, ""
+		}
+		if stopHookActive {
+			fmt.Fprintf(stderr, "fak guard Stop: task handoff still missing/invalid after a prior block (stop_hook_active) — standing down and allowing the stop. Write a valid `%s` to `%s` to hand off next steps next time.\n", taskmgr.SchemaHandoff, file)
+			return 0, stopDispHandoffGiveUp
 		}
 		fmt.Fprintln(stderr, msg)
-		return 2
+		return 2, stopDispHandoffBlock
 	}
 	if cfg.Live && len(handoff.NextSteps) > 0 {
 		var out, errb bytes.Buffer
@@ -610,14 +698,19 @@ func runGuardTaskHandoffGate(stderr io.Writer, cfg guardTaskHandoffConfig) int {
 			msg := fmt.Sprintf("fak guard Stop: task handoff is valid, but live GitHub issue sync failed (exit %d): %s", code, strings.TrimSpace(errb.String()))
 			if mode == guardPreCompactModeShadow {
 				fmt.Fprintln(stderr, "fak guard Stop: shadow would block clean stop: "+msg)
-				return 0
+				return 0, ""
+			}
+			if stopHookActive {
+				fmt.Fprintln(stderr, msg)
+				fmt.Fprintln(stderr, "This Stop hook already blocked once (stop_hook_active) and the live GitHub sync is still failing — standing down and allowing the stop. Use --task-handoff-live=false to require only the validated handoff artifact.")
+				return 0, stopDispHandoffGiveUp
 			}
 			fmt.Fprintln(stderr, msg)
 			fmt.Fprintln(stderr, "Fix the handoff or GitHub sync, then stop again; use --task-handoff-live=false to require only the validated handoff artifact.")
-			return 2
+			return 2, stopDispHandoffBlock
 		}
 	}
-	return 0
+	return 0, ""
 }
 
 func readAndReviewGuardTaskHandoff(file string) (taskmgr.Handoff, taskmgr.HandoffReview, error) {
@@ -881,6 +974,11 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		// authoritative — and it is pinned even when it resolves to `off` (attended interactive) so
 		// the hook never falls back to the warn default the flag would otherwise supply.
 		{guardStopHookOperatorDirectedEnvMode, guardOperatorDirectedNormalizedOrWarn(operatorDirectedMode)},
+		// Pin the hardware-gate mode. It INHERITS the resolved operator-directed posture — both are
+		// headless-only enforcement gates capped by operator-absence, so the same effective mode is
+		// the right default without threading a second install param. An operator who wants to tune
+		// it independently sets FAK_GUARD_HARDWARE_GATE_MODE / --hardware-gate on the child.
+		{guardStopHookHardwareGateEnvMode, guardHardwareGateNormalizedOrWarn(operatorDirectedMode)},
 	}
 	// #2539: wire the trajctl ledger into the hook children so the Stop hook's turn-end
 	// scorers and the PreCompact boundary twin have a curve to append to. Unresolvable repo

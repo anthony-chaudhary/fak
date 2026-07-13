@@ -22,6 +22,8 @@ func TestGuardStopDispositionKind(t *testing.T) {
 		stopDispHandoffBlock:             stopKindContinue,
 		stopDispBlindGiveUp:              stopKindStandDown,
 		stopDispSameIssueGiveUp:          stopKindStandDown,
+		stopDispToolFeedbackGiveUp:       stopKindStandDown,
+		stopDispHandoffGiveUp:            stopKindStandDown,
 		stopDispModeOff:                  stopKindOff,
 		stopDispShadow:                   stopKindShadow,
 		stopDispFailOpenBadArgs:          stopKindFailOpen,
