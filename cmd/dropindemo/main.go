@@ -38,7 +38,6 @@ package main
 
 import (
 	"embed"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -47,6 +46,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 //go:embed page.html
@@ -112,11 +113,6 @@ func gallery(gwURL string) []card {
 	return out
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -139,7 +135,7 @@ func handleGallery(w http.ResponseWriter, r *http.Request) {
 		gw = exampleGateway
 	}
 	cards := gallery(gw)
-	writeJSON(w, map[string]any{
+	cmdutil.WriteJSON(w, map[string]any{
 		"cards":           cards,
 		"agent_count":     len(cards),
 		"example_gateway": gw,

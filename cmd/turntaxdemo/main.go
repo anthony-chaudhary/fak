@@ -44,7 +44,6 @@ package main
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -61,6 +60,8 @@ import (
 	// adjudicator, ctx-MMU, normgate, ifc, witness, engines) is wired before
 	// kernel.New / agent.Configure run inside turnbench.RunWithCalls.
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 //go:embed page.html
@@ -116,11 +117,6 @@ func turnTaxDir() string {
 
 func suitePath(suite string) string { return filepath.Join(turnTaxDir(), suite+".json") }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -157,7 +153,7 @@ func suiteRows() []suiteRow {
 // handleSuites lists the available trace fixtures and which are present on disk.
 func handleSuites(w http.ResponseWriter, r *http.Request) {
 	out := suiteRows()
-	writeJSON(w, map[string]any{
+	cmdutil.WriteJSON(w, map[string]any{
 		"suites":     out,
 		"gomaxprocs": gomax,
 		"dir":        turnTaxDir(),
@@ -196,7 +192,7 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "replay: "+err.Error(), 500)
 		return
 	}
-	writeJSON(w, map[string]any{
+	cmdutil.WriteJSON(w, map[string]any{
 		"suite":  suite,
 		"calls":  calls,
 		"report": rep,

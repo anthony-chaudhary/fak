@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agentdemo"
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 func TestPlan_RoutesKeywords(t *testing.T) {
@@ -139,7 +140,7 @@ func TestRunChat_LiveResponsesArmRecordsModelMeta(t *testing.T) {
 		if req["model"] != "test-model" {
 			t.Fatalf("model = %v, want test-model", req["model"])
 		}
-		writeJSON(w, map[string]any{
+		cmdutil.WriteJSON(w, map[string]any{
 			"model": "test-model-snapshot",
 			"output": []map[string]any{
 				{

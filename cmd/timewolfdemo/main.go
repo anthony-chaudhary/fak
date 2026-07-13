@@ -50,6 +50,8 @@ import (
 	// Wire the full ABI (resolver, vDSO, adjudicator, ctx-MMU, normgate, IFC,
 	// witness, engines) before kernel.Fold runs inside agentdemo.Run.
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 //go:embed page.html
@@ -134,10 +136,6 @@ func findScenario(id string) (scenario, bool) {
 }
 
 // writeJSON encodes v as the JSON body of an API response.
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
 
 // handleIndex serves the embedded browser page at the mount root.
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +167,7 @@ func handleScenarios(w http.ResponseWriter, r *http.Request) {
 	for _, s := range scenarios() {
 		rows = append(rows, scenarioRow{ID: s.id, Label: s.label, Calls: len(s.plan)})
 	}
-	writeJSON(w, map[string]any{
+	cmdutil.WriteJSON(w, map[string]any{
 		"scenarios": rows,
 		"hardware":  demoui.Probe(),
 	})
@@ -194,7 +192,7 @@ func handleRun(ts *agentdemo.Toolset) http.HandlerFunc {
 			http.Error(w, "run: "+err.Error(), 500)
 			return
 		}
-		writeJSON(w, tr)
+		cmdutil.WriteJSON(w, tr)
 	}
 }
 
