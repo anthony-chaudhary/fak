@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,6 +31,25 @@ func seedGuardSessionIndex(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return reg
+}
+
+// TestGuardSessionsDispatch proves the public `fak guard sessions` command reaches
+// the registry browser instead of falling through to the wrapped-agent flag parser.
+func TestGuardSessionsDispatch(t *testing.T) {
+	if os.Getenv("FAK_TEST_GUARD_SESSIONS_DISPATCH") == "1" {
+		cmdGuard([]string{"sessions", "--reg-dir", t.TempDir()})
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGuardSessionsDispatch$")
+	cmd.Env = append(os.Environ(), "FAK_TEST_GUARD_SESSIONS_DISPATCH=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("guard sessions dispatch: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "no recorded guard sessions") {
+		t.Fatalf("guard sessions output = %q, want registry browser output", out)
+	}
 }
 
 func TestRunGuardSessionsListsNewestFirst(t *testing.T) {

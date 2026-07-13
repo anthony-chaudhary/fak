@@ -182,6 +182,12 @@ func cmdGuard(argv []string) {
 	if len(argv) > 0 && argv[0] == "restart-audit" {
 		os.Exit(runGuardRestartAudit(os.Stdout, os.Stderr, argv[1:]))
 	}
+	// `fak guard sessions [id]` is the read-only registry browser. Peel it before the
+	// wrap-a-command parser so the handler is reachable from the public command tree.
+	if len(argv) > 0 && argv[0] == "sessions" {
+		cmdGuardSessions(argv[1:])
+		return
+	}
 	// `fak guard resume <id>` (and the issue's `fak guard --resume <id>` spelling) is the
 	// cache-safe resume PLANNER (#1206, epic #1193 C10): resolve the id against the C1 durable
 	// session registry, consult the C9 cache-resume posture rung, and emit the WARM-SPLICE/

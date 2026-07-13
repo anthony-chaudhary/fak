@@ -88,6 +88,33 @@ func requireIndexUsageError(t *testing.T, sub, wantStderr string) {
 	}
 }
 
+func TestIndexCtxPlansDispatch(t *testing.T) {
+	root := writeIndexRepo(t)
+	write := func(rel, body string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("INDEX.md", "# index\n")
+	write("docs/index.md", "# docs\n")
+	write("docs/fak/index.md", "# fak docs\n")
+	write("docs/fak/concept-glossary.md", "# glossary\n")
+	write("cmd/fak/main.go", "package main\nfunc dispatch() {\n\tswitch os.Args[1] {\n\tcase \"cache-demo\":\n\t}\n}\n")
+	write("cmd/fak/demo.go", "package main\n//fak:ctxplan verb=cache-demo enters=\"prompt\" pages=\"none\" warms=\"none\"\nfunc cmdDemo() {}\n")
+
+	var out, errb bytes.Buffer
+	if rc := runIndex(&out, &errb, []string{"ctxplans", "--json", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex ctxplans rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), `"name": "cache-demo"`) || !strings.Contains(out.String(), `"declared": true`) {
+		t.Fatalf("ctxplans output missing declared cache-demo surface: %s", out.String())
+	}
+}
+
 func TestIndexClaimsNeedsQuery(t *testing.T) {
 	requireIndexUsageError(t, "claims", "fak index claims: needs a search query (a lane, a token, or a capability)\n")
 }

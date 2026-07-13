@@ -114,6 +114,12 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexWork(stdout, stderr, cat, args, *asJSON, *limit)
 	case "refs", "ref":
 		return indexRefs(stdout, stderr, rootDir, args, *asJSON, *limit)
+	case "ctxplans", "ctxplan":
+		if len(args) != 0 {
+			fmt.Fprintln(stderr, "usage: fak index ctxplans [--json] [--root PATH]")
+			return 2
+		}
+		return indexCtxPlans(stdout, stderr, rootDir, *asJSON)
 	case "ctxknobs", "ctxknob":
 		return indexCtxKnobs(stdout, stderr, rootDir, *asJSON)
 	case "knobs", "knob":
