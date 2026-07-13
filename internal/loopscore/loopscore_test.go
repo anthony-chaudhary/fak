@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // base is a fixed clock so the fold is deterministic. Events stamped "old" relative
@@ -88,7 +90,7 @@ func TestFragileCorpusReds(t *testing.T) {
 	if p.OK {
 		t.Fatalf("fragile corpus must red, got OK; reason=%s", p.Reason)
 	}
-	debt := anyInt(p.Corpus["loopscore_debt"])
+	debt := scorecard.IntValue(p.Corpus["loopscore_debt"])
 	if debt < 3 {
 		t.Fatalf("fragile corpus debt = %d, want >=3 (durability+self-report+dogfood gaps)", debt)
 	}
@@ -126,9 +128,9 @@ func TestDurableCorpusGreens(t *testing.T) {
 	p := buildWith(events, registry)
 
 	if !p.OK {
-		t.Fatalf("durable corpus must green, got debt=%d reason=%s", anyInt(p.Corpus["loopscore_debt"]), p.Reason)
+		t.Fatalf("durable corpus must green, got debt=%d reason=%s", scorecard.IntValue(p.Corpus["loopscore_debt"]), p.Reason)
 	}
-	if score := anyInt(p.Corpus["score"]); score < 90 {
+	if score := scorecard.IntValue(p.Corpus["score"]); score < 90 {
 		t.Errorf("durable composite = %d, want >=90 (grade A)", score)
 	}
 	if ev := p.Evidence; ev.Dark != 0 || ev.GuardWrapped != 2 || ev.Witnessed != 1 {

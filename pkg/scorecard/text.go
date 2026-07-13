@@ -54,7 +54,7 @@ func joinSemicolon(parts []string) string {
 // anyInt coerces a JSON-decoded number (or int) to int, tolerating the float64 that
 // encoding/json yields for a number. Ported from guardrsi.go:702 so the kernel's Compare can
 // read a debt integer out of a prior --json payload regardless of its decoded numeric type.
-func anyInt(v any) int {
+func IntValue(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
@@ -105,4 +105,25 @@ func ValueText(v any) string {
 		b, _ := json.Marshal(v)
 		return string(b)
 	}
+}
+
+// MetricText renders the numeric/string values used in scorecard reports.
+// Float values retain their shortest decimal form; unsupported values preserve
+// the cards' historical zero fallback through IntValue.
+func MetricText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case int:
+		return strconv.Itoa(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	default:
+		return strconv.Itoa(IntValue(v))
+	}
+}
+
+// ScoreValueText renders the normalized 0..1 value corresponding to score.
+func ScoreValueText(score int) string {
+	return MetricText(Round3(ValueFromScore(float64(score))))
 }

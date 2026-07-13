@@ -105,13 +105,13 @@ func Compare(p Payload, baseline map[string]any, debtKey string) string {
 	if bc == nil {
 		bc = baseline
 	}
-	cur := anyInt(p.Corpus[debtKey])
+	cur := IntValue(p.Corpus[debtKey])
 	prior, have := bc[debtKey]
 	body := Render(p, debtKey)
 	if !have {
 		return body
 	}
-	pd := anyInt(prior)
+	pd := IntValue(prior)
 	delta := cur - pd
 	verdict := "flat"
 	if delta < 0 {

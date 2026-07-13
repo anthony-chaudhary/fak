@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // buildFromRows folds a hand-built row set through the same path Build uses, bypassing
@@ -154,7 +156,7 @@ func TestFold(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			p := buildFromRows(tc.rows, tc.wipCap)
-			if got := anyInt(p.Corpus[DebtKey]); got != tc.wantDebt {
+			if got := scorecard.IntValue(p.Corpus[DebtKey]); got != tc.wantDebt {
 				t.Errorf("focus_debt = %d, want %d (reason: %s)", got, tc.wantDebt, p.Reason)
 			}
 			if p.OK != tc.wantOK {
@@ -191,7 +193,7 @@ func TestDebtIsMagnitudeNotKPICount(t *testing.T) {
 		rows = append(rows, obj(id, "", trajctl.StatusActive, 0), commit(id, 0.1, 1), commit(id, 0.5, 2))
 	}
 	p := buildFromRows(rows, 3) // 7 active, cap 3 => 4 over
-	if got := anyInt(p.Corpus[DebtKey]); got != 4 {
+	if got := scorecard.IntValue(p.Corpus[DebtKey]); got != 4 {
 		t.Fatalf("focus_debt = %d, want 4 (one per excess active objective, not per-KPI)", got)
 	}
 }
@@ -206,7 +208,7 @@ func TestCleanIsGradeA(t *testing.T) {
 	if !p.OK {
 		t.Fatalf("clean fleet not OK: %s", p.Reason)
 	}
-	if grade := anyStr(p.Corpus["grade"]); grade != "A" {
+	if grade := scorecard.MetricText(p.Corpus["grade"]); grade != "A" {
 		t.Errorf("grade = %q, want A", grade)
 	}
 	if p.Verdict != "OK" {

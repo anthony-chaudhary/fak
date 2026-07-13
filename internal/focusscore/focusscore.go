@@ -341,13 +341,13 @@ func Build(opts Options) ScorecardPayload {
 	next := "hold the line; re-run after a session — keep active objectives within the WIP cap and every open curve rising"
 	var reason string
 	if ok {
-		reason = "focus-score: convergence value " + valueStr(cScore) + ", breadth value " + valueStr(bScore) +
-			", composite value " + valueStr(composite) + " (" + grade + "); " + itoa(ev.Active) + " active within cap " +
+		reason = "focus-score: convergence value " + scorecard.ScoreValueText(cScore) + ", breadth value " + scorecard.ScoreValueText(bScore) +
+			", composite value " + scorecard.ScoreValueText(composite) + " (" + grade + "); " + itoa(ev.Active) + " active within cap " +
 			itoa(ev.WIPCap) + ", " + itoa(ev.Healthy) + "/" + itoa(ev.Open) + " open objective(s) healthy; zero focus debt"
 	} else {
 		finding = "focus_debt"
-		reason = "focus-score carries " + itoa(debt) + " debt (convergence value " + valueStr(cScore) +
-			", breadth value " + valueStr(bScore) + ", composite value " + valueStr(composite) + " " + grade + "): " +
+		reason = "focus-score carries " + itoa(debt) + " debt (convergence value " + scorecard.ScoreValueText(cScore) +
+			", breadth value " + scorecard.ScoreValueText(bScore) + ", composite value " + scorecard.ScoreValueText(composite) + " " + grade + "): " +
 			debtBreakdown(ev)
 		next = "converge worst-first: " + worstFirstNext(ev)
 	}
@@ -452,13 +452,13 @@ func Render(p ScorecardPayload) string {
 	c := p.Corpus
 	lines := []string{
 		"focus-score — " + p.Verdict + " (" + p.Finding + ")",
-		"  focus_debt: " + anyStr(c[DebtKey]) + "   value " + anyStr(c["value"]) +
-			" [" + anyStr(c["grade"]) + "]   (convergence value " + anyStr(c["convergence_value"]) +
-			"; breadth value " + anyStr(c["breadth_value"]) + ")",
-		"  evidence: " + anyStr(c["objectives"]) + " objective(s); " + anyStr(c["active"]) +
-			" active (cap " + anyStr(c["wip_cap"]) + "); " + anyStr(c["paused"]) + " paused; " +
-			anyStr(c["met"]) + " met; " + anyStr(c["healthy"]) + "/" + anyStr(c["open"]) + " open healthy; " +
-			anyStr(c["drift"]) + " drift; " + anyStr(c["stall"]) + " stall; " + anyStr(c["detour_overrun"]) + " overrun",
+		"  focus_debt: " + scorecard.MetricText(c[DebtKey]) + "   value " + scorecard.MetricText(c["value"]) +
+			" [" + scorecard.MetricText(c["grade"]) + "]   (convergence value " + scorecard.MetricText(c["convergence_value"]) +
+			"; breadth value " + scorecard.MetricText(c["breadth_value"]) + ")",
+		"  evidence: " + scorecard.MetricText(c["objectives"]) + " objective(s); " + scorecard.MetricText(c["active"]) +
+			" active (cap " + scorecard.MetricText(c["wip_cap"]) + "); " + scorecard.MetricText(c["paused"]) + " paused; " +
+			scorecard.MetricText(c["met"]) + " met; " + scorecard.MetricText(c["healthy"]) + "/" + scorecard.MetricText(c["open"]) + " open healthy; " +
+			scorecard.MetricText(c["drift"]) + " drift; " + scorecard.MetricText(c["stall"]) + " stall; " + scorecard.MetricText(c["detour_overrun"]) + " overrun",
 		"",
 		"  CONVERGENCE (are the open objectives moving toward their goal?):",
 	}
@@ -481,9 +481,9 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString(`description: "Whether the fleet is CONVERGING on its live goal or fanning out too broad — bounded work-in-progress and every open objective's witnessed progress curve rising — re-derived from the trajectory-control ledger fak writes, never a self-report."` + "\n")
 	b.WriteString("---\n\n")
 	b.WriteString("# fak focus scorecard\n\n")
-	b.WriteString("**focus_debt: " + anyStr(c[DebtKey]) + "**; value **" + anyStr(c["value"]) +
-		" (" + anyStr(c["grade"]) + ")**; convergence value " + anyStr(c["convergence_value"]) +
-		"; breadth value " + anyStr(c["breadth_value"]) + "\n\n")
+	b.WriteString("**focus_debt: " + scorecard.MetricText(c[DebtKey]) + "**; value **" + scorecard.MetricText(c["value"]) +
+		" (" + scorecard.MetricText(c["grade"]) + ")**; convergence value " + scorecard.MetricText(c["convergence_value"]) +
+		"; breadth value " + scorecard.MetricText(c["breadth_value"]) + "\n\n")
 	b.WriteString("> " + p.Reason + "\n\n")
 	b.WriteString("The question: is the fleet *converging on its live goal*, or fanning out too broad — declaring many objectives active at once, taking detours that run past budget while their parent sits paused, letting open objectives drift or stall instead of moving? `internal/trajctl` already classifies a *single* objective's witnessed progress curve (HEALTHY/STALL/DRIFT/DETOUR_OVERRUN); this scorecard folds the whole objective **tree** into one focus number. Every count is re-derived from the trajectory-control ledger (`" + trajctl.DefaultLedgerRel + "`) fak's own `fak trajctl` tooling writes — so the score moves only when the fleet actually converges: close or meet objectives, return detours to their paused parent, get the witnessed curves rising.\n\n")
 	b.WriteString("## Convergence — are the open objectives moving toward their goal?\n\n| ok | criterion | detail |\n|---|---|---|\n")
@@ -499,7 +499,7 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("focus_debt is unbounded and counted at magnitude: each objective over the WIP cap, each open objective the curve fold marks DRIFT / STALL / DETOUR_OVERRUN is one debt. You cannot lower it by editing a file — the counts are re-folded from the witnessed ledger. You lower it by **converging**:\n\n")
 	b.WriteString("1. **Return over-budget detours.** A DETOUR_OVERRUN is a child objective that ran past its declared turn budget while its parent is paused — close it out or hand its remainder back and un-pause the parent.\n")
 	b.WriteString("2. **Arrest drift, unstick stalls.** A DRIFTing objective's witnessed curve is *declining* (e.g. a re-score after a commit went dangling); a STALLed one is busy but flat. Both mean the live work is not producing witnessed progress — fix the objective or abandon it honestly.\n")
-	b.WriteString("3. **Bound the WIP.** More than " + anyStr(c["wip_cap"]) + " active objectives at once is fan-out, not focus. Pause the ones that can wait behind the one live goal so the fleet converges on it first.\n\n")
+	b.WriteString("3. **Bound the WIP.** More than " + scorecard.MetricText(c["wip_cap"]) + " active objectives at once is fan-out, not focus. Pause the ones that can wait behind the one live goal so the fleet converges on it first.\n\n")
 	b.WriteString("Re-run after a session and `--compare` against a pinned `--json` baseline: the verdict reports the debt retired and whether the fleet converged.\n\n")
 	b.WriteString("**Next:** " + p.NextAction + "\n")
 	return b.String()
@@ -510,15 +510,15 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	if bc == nil {
 		bc = baseline
 	}
-	bDebt := anyInt(bc[DebtKey])
-	cDebt := anyInt(current.Corpus[DebtKey])
-	bScore := anyInt(bc["score"])
-	cScore := anyInt(current.Corpus["score"])
+	bDebt := scorecard.IntValue(bc[DebtKey])
+	cDebt := scorecard.IntValue(current.Corpus[DebtKey])
+	bScore := scorecard.IntValue(bc["score"])
+	cScore := scorecard.IntValue(current.Corpus["score"])
 	lines := []string{
 		"focus-score compare:",
 		"  focus_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
-		"  value: " + anyStr(bc["value"]) + " -> " + anyStr(current.Corpus["value"]) +
-			"  grade " + anyStr(bc["grade"]) + " -> " + anyStr(current.Corpus["grade"]),
+		"  value: " + scorecard.MetricText(bc["value"]) + " -> " + scorecard.MetricText(current.Corpus["value"]) +
+			"  grade " + scorecard.MetricText(bc["grade"]) + " -> " + scorecard.MetricText(current.Corpus["grade"]),
 	}
 	switch {
 	case bDebt > 0 && cDebt == 0:
@@ -574,33 +574,3 @@ func boolStr(ok bool, yes, no string) string {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
-
-func valueStr(score int) string {
-	return anyStr(scorecard.Round3(scorecard.ValueFromScore(float64(score))))
-}
-
-func anyStr(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case int:
-		return itoa(x)
-	case float64:
-		return strconv.FormatFloat(x, 'f', -1, 64)
-	default:
-		return itoa(anyInt(v))
-	}
-}
-
-func anyInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	default:
-		return 0
-	}
-}
