@@ -10,6 +10,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/programreport"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable JSON contract for the operator brief.
@@ -297,10 +299,10 @@ type Item struct {
 func Fold(in Inputs) Report {
 	r := Report{
 		Schema:      Schema,
-		Workspace:   firstNonEmpty(in.Workspace, stampWorkspace(in)),
-		Commit:      firstNonEmpty(in.Commit, stampCommit(in)),
-		GeneratedAt: firstNonEmpty(in.GeneratedAt, stampGeneratedAt(in)),
-		Date:        firstNonEmpty(in.Date, stampDate(in)),
+		Workspace:   strmatch.FirstNonBlank(in.Workspace, stampWorkspace(in)),
+		Commit:      strmatch.FirstNonBlank(in.Commit, stampCommit(in)),
+		GeneratedAt: strmatch.FirstNonBlank(in.GeneratedAt, stampGeneratedAt(in)),
+		Date:        strmatch.FirstNonBlank(in.Date, stampDate(in)),
 	}
 
 	r.Sources = append(r.Sources,
@@ -456,9 +458,9 @@ func addHeaviness(r *Report, h scorecard.Payload) {
 	detail := heavinessDetail(h, pressure)
 	switch {
 	case debt > 0 || !h.OK:
-		r.addAgent("heaviness", "retire operator-heaviness debt", firstNonEmpty(h.Reason, h.Finding, detail), firstNonEmpty(h.NextAction, "fix the operator-heaviness scorecard defects"))
+		r.addAgent("heaviness", "retire operator-heaviness debt", strmatch.FirstNonBlank(h.Reason, h.Finding, detail), strmatch.FirstNonBlank(h.NextAction, "fix the operator-heaviness scorecard defects"))
 	case pressure > 0:
-		r.addWatch("heaviness", "operator surface pressure", detail, firstNonEmpty(h.NextAction, "consolidate verbs/flags only when pressure keeps rising"))
+		r.addWatch("heaviness", "operator surface pressure", detail, strmatch.FirstNonBlank(h.NextAction, "consolidate verbs/flags only when pressure keeps rising"))
 	default:
 		r.addBackground("heaviness", "operator surface light", detail, "keep the operator surface flat as agents add capabilities")
 	}
@@ -469,11 +471,11 @@ func (r *Report) finalize() {
 	case len(r.Human) > 0:
 		r.OK, r.Verdict, r.Finding, r.Pace = false, "ACTION", "operator_input_needed", "intervene"
 		r.Reason = fmt.Sprintf("%d human item(s), %d agent item(s), %d watch item(s)", len(r.Human), len(r.Agent), len(r.Watch))
-		r.NextAction = firstNonEmpty(r.Human[0].Action, r.Human[0].Title)
+		r.NextAction = strmatch.FirstNonBlank(r.Human[0].Action, r.Human[0].Title)
 	case len(r.Agent) > 0:
 		r.OK, r.Verdict, r.Finding, r.Pace = true, "OK", "agent_work_ready", "delegate"
 		r.Reason = fmt.Sprintf("no immediate human decision; %d agent item(s), %d watch item(s)", len(r.Agent), len(r.Watch))
-		r.NextAction = firstNonEmpty(r.Agent[0].Action, r.Agent[0].Title)
+		r.NextAction = strmatch.FirstNonBlank(r.Agent[0].Action, r.Agent[0].Title)
 	case len(r.Watch) > 0:
 		r.OK, r.Verdict, r.Finding, r.Pace = true, "OK", "operator_watchlist", "review"
 		r.Reason = fmt.Sprintf("no immediate human decision; %d watch item(s)", len(r.Watch))
@@ -827,7 +829,7 @@ func learningAgendaFor(r *Report) LearningAgenda {
 		return LearningAgenda{
 			Focus:     "witness before judgment",
 			Reason:    "the brief has a human bucket, so at least one source is missing, unmeasured, or asking for an explicit decision",
-			Practice:  firstNonEmpty(top.Action, "restore the missing source report, then rerun `fak operator brief --collect`"),
+			Practice:  strmatch.FirstNonBlank(top.Action, "restore the missing source report, then rerun `fak operator brief --collect`"),
 			Skip:      "skip unrelated transcript review until the top human item has a witness",
 			DrillDown: agendaDrillDown(top, "human", "sources"),
 		}
@@ -836,7 +838,7 @@ func learningAgendaFor(r *Report) LearningAgenda {
 		return LearningAgenda{
 			Focus:     "delegation boundary",
 			Reason:    "the top work is routeable agent work, not a scarce human judgment",
-			Practice:  firstNonEmpty(top.Action, "let agents work the top agent item and ask only for the next witness"),
+			Practice:  strmatch.FirstNonBlank(top.Action, "let agents work the top agent item and ask only for the next witness"),
 			Skip:      "skip hand-driving steps that already have an agent-owned next action",
 			DrillDown: agendaDrillDown(top, "agent", "strengths"),
 		}
@@ -845,7 +847,7 @@ func learningAgendaFor(r *Report) LearningAgenda {
 		return LearningAgenda{
 			Focus:     "watchlist vs page",
 			Reason:    "the brief has measured friction but no immediate human decision",
-			Practice:  firstNonEmpty(top.Action, "compare the watch item against the next brief before slowing dispatch"),
+			Practice:  strmatch.FirstNonBlank(top.Action, "compare the watch item against the next brief before slowing dispatch"),
 			Skip:      "skip converting every watch item into an interruption",
 			DrillDown: agendaDrillDown(top, "watch", "challenges"),
 		}
@@ -1341,15 +1343,6 @@ func stringOrEmpty[T any](ptr *T, f func(*T) string) string {
 		return ""
 	}
 	return f(ptr)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func maxInt(a, b int) int {

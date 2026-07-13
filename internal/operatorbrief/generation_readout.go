@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 func generationReadout(rows []milestonereport.GenerationRow) *Generation {
@@ -128,5 +129,5 @@ func generationHeatSummary(hottest GenerationLane, promotionCandidates, blockedA
 		return "heat clear; no generation lane needs extra attention"
 	}
 	return fmt.Sprintf("hottest=%s score=%d; promotion_candidates=%d blocked_assumptions=%d; stale_age=%s",
-		hottest.Generation, hottest.HeatScore, promotionCandidates, blockedAssumptions, firstNonEmpty(hottest.StaleAge, "no stale-risk issue age to measure"))
+		hottest.Generation, hottest.HeatScore, promotionCandidates, blockedAssumptions, strmatch.FirstNonBlank(hottest.StaleAge, "no stale-risk issue age to measure"))
 }

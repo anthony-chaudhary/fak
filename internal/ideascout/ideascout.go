@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -518,7 +520,7 @@ func ParseArxivAtom(xmlText, topicKey string) []Candidate {
 func ParseGitHubRepos(items []GitHubRepo, topicKey string) []Candidate {
 	var out []Candidate
 	for _, it := range items {
-		full := firstNonEmpty(it.FullName, it.Name)
+		full := strmatch.FirstNonBlank(it.FullName, it.Name)
 		if full == "" {
 			continue
 		}
@@ -526,7 +528,7 @@ func ParseGitHubRepos(items []GitHubRepo, topicKey string) []Candidate {
 		if u == "" {
 			u = "https://github.com/" + full
 		}
-		pushed := firstNonEmpty(it.PushedAt, it.UpdatedAt)
+		pushed := strmatch.FirstNonBlank(it.PushedAt, it.UpdatedAt)
 		out = append(out, Candidate{
 			Source:    "github",
 			SourceID:  "github:" + strings.ToLower(full),
@@ -573,12 +575,12 @@ func ParseHackerNewsJSON(jsonText, topicKey string) []Candidate {
 		if id == "" {
 			continue
 		}
-		title := squashSpace(firstNonEmpty(h.Title, h.StoryTitle))
+		title := squashSpace(strmatch.FirstNonBlank(h.Title, h.StoryTitle))
 		if title == "" {
 			continue
 		}
 		permalink := "https://news.ycombinator.com/item?id=" + id
-		u := firstNonEmpty(h.URL, h.StoryURL, permalink)
+		u := strmatch.FirstNonBlank(h.URL, h.StoryURL, permalink)
 		out = append(out, Candidate{
 			Source:    "hackernews",
 			SourceID:  "hn:" + id,
@@ -640,7 +642,7 @@ func ParseRedditJSON(jsonText, topicKey string) []Candidate {
 		if h.Permalink != "" {
 			permalink = "https://www.reddit.com" + h.Permalink
 		}
-		u := firstNonEmpty(h.URL, permalink)
+		u := strmatch.FirstNonBlank(h.URL, permalink)
 		if u == "" {
 			u = "https://www.reddit.com/comments/" + id
 		}
@@ -659,7 +661,7 @@ func ParseRedditJSON(jsonText, topicKey string) []Candidate {
 			Extra: map[string]any{
 				"points":       h.Score,
 				"num_comments": h.NumComments,
-				"discussion":   firstNonEmpty(permalink, u),
+				"discussion":   strmatch.FirstNonBlank(permalink, u),
 				"subreddit":    h.Subreddit,
 			},
 		})
@@ -1391,15 +1393,6 @@ func sourceLabel(source string) string {
 	default:
 		return source
 	}
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func applyThresholds(cfg *Config, values map[string]any) {

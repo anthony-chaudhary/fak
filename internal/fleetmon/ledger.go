@@ -268,14 +268,5 @@ func Summarize(runID string, rows []LedgerRow) RunLedgerSummary {
 	}
 }
 
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // itoa keeps a local, allocation-free int->string for the renderers.
 func itoa(n int) string { return strconv.Itoa(n) }

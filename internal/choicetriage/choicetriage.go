@@ -27,7 +27,11 @@
 // a stop hook — can fold a surfaced choice through the same taxonomy.
 package choicetriage
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
+)
 
 // Disposition is the closed way a surfaced choice resolves. The four members
 // are exhaustive by construction: Triage always returns exactly one of them.
@@ -177,7 +181,7 @@ func Triage(s Signal) Verdict {
 		return Verdict{
 			Disposition: HumanResidual,
 			Reason:      "names authority only a person holds (policy/auth/release/priority)",
-			Resolve:     firstNonEmpty(s.Action, "make the "+strings.ToLower(firstNonEmpty(s.Source, "policy"))+" decision"),
+			Resolve:     strmatch.FirstNonBlank(s.Action, "make the "+strings.ToLower(strmatch.FirstNonBlank(s.Source, "policy"))+" decision"),
 			NeedsHuman:  true,
 		}
 	}
@@ -194,7 +198,7 @@ func Triage(s Signal) Verdict {
 		return Verdict{
 			Disposition: TakeObvious,
 			Reason:      "one real option surfaced — there is nothing to decide",
-			Resolve:     firstNonEmpty(s.Action, "take the single option"),
+			Resolve:     strmatch.FirstNonBlank(s.Action, "take the single option"),
 		}
 	}
 
@@ -240,11 +244,3 @@ func containsAny(hay string, hints []string) bool {
 }
 
 // firstNonEmpty returns the first non-blank string, or "".
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}

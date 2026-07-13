@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // WatchdogStatusSchema is the machine-readable contract for the live-drain readout.
@@ -141,9 +143,9 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		phase := normalizeWatchdogPhase(e.Phase)
 		at := firstNonZero(e.UnixSeconds, e.DetectedUnix, e.ResumedUnix, e.ProgressWitnessUnix)
 		if phase == "status" || phase == "tick" || phase == "snapshot" {
-			depthSamples = append(depthSamples, watchdogDepthSample{at: at, mode: normalizeWatchdogMode(firstNonEmpty(e.Mode, mode)), depth: e.AutoResumeDepth})
+			depthSamples = append(depthSamples, watchdogDepthSample{at: at, mode: normalizeWatchdogMode(strmatch.FirstNonBlank(e.Mode, mode)), depth: e.AutoResumeDepth})
 			currentDepth = e.AutoResumeDepth
-			lastTickMode = normalizeWatchdogMode(firstNonEmpty(e.Mode, mode))
+			lastTickMode = normalizeWatchdogMode(strmatch.FirstNonBlank(e.Mode, mode))
 		}
 		if e.Session == "" {
 			continue
@@ -549,13 +551,4 @@ func firstNonZero(vals ...int64) int64 {
 		}
 	}
 	return 0
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }

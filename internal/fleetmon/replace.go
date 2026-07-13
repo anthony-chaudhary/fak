@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // ReplaceSchema tags the replacement decision payload.
@@ -55,7 +57,7 @@ func EvaluateReplace(req ReplaceRequest) ReplaceDecision {
 	if idx < 1 {
 		idx = 1
 	}
-	account := firstNonEmpty(req.Account, req.Worker.Account)
+	account := strmatch.FirstNonBlank(req.Account, req.Worker.Account)
 	d.Account = account
 
 	if !eligibleClasses[req.Class] && !req.Force {

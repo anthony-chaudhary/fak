@@ -25,3 +25,14 @@ func FirstContained(haystack string, needles []string) (string, bool) {
 	}
 	return "", false
 }
+
+// FirstNonBlank returns the first value containing non-whitespace text. It
+// preserves the caller's original value rather than returning a trimmed copy.
+func FirstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}

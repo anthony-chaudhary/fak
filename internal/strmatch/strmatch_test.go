@@ -34,3 +34,12 @@ func TestFirstContained(t *testing.T) {
 		t.Fatalf("needle order not honored: got %q, want \"b\"", p)
 	}
 }
+
+func TestFirstNonBlankPreservesOriginalValue(t *testing.T) {
+	if got := FirstNonBlank("", " \t ", "  ready  ", "later"); got != "  ready  " {
+		t.Fatalf("FirstNonBlank = %q, want original non-blank value", got)
+	}
+	if got := FirstNonBlank("", "\n"); got != "" {
+		t.Fatalf("FirstNonBlank(all blank) = %q, want empty", got)
+	}
+}
