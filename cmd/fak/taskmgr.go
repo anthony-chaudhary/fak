@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/taskdecision"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
@@ -340,13 +342,37 @@ func taskHandoffGHArgs(row taskmgr.HandoffIssuePlanRow, repo string, labels []st
 	return args
 }
 
+// taskHandoffGHTimeout bounds every `gh` subprocess the handoff gate spawns. In live
+// mode the Stop hook calls runTaskHandoffGH once per issue-list plus once per plan row,
+// and `gh issue create/edit` does network I/O that can stall on a hung auth prompt or a
+// dead proxy. Without a deadline one wedged gh blocks the Stop hook — and thus the
+// harness's stop — for the session's whole life, contradicting the hook's fail-open
+// posture (#3470). On expiry we fail the existing sync-failed path instead of hanging.
+const taskHandoffGHTimeout = 30 * time.Second
+
 func runTaskHandoffGH(args []string) (string, string, bool) {
-	cmd := exec.Command("gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), taskHandoffGHTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	return runBoundedGHCmd(ctx, cmd, taskHandoffGHTimeout)
+}
+
+// runBoundedGHCmd runs an already deadline-bound gh command and classifies a deadline
+// kill as a failed run carrying a timeout note, so callers surface it on the existing
+// sync-failed path (exit-2 message / shadow log) rather than blocking indefinitely.
+func runBoundedGHCmd(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) (string, string, bool) {
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		if errb.Len() > 0 {
+			errb.WriteByte('\n')
+		}
+		fmt.Fprintf(&errb, "gh timed out after %s", timeout)
+		return out.String(), errb.String(), false
+	}
 	return out.String(), errb.String(), err == nil
 }
 
