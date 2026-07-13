@@ -252,3 +252,14 @@ func TestPrefillQwen35HybridQ4KProfilePrintsHybridSplit(t *testing.T) {
 		}
 	}
 }
+
+func TestQ4KQwen35HybridPrefillTokenLoopEscapeHatch(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	if !q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt) {
+		t.Fatal("baseline Q4_K hybrid prefill gate unexpectedly declined")
+	}
+	t.Setenv("FAK_QWEN35_PREFILL_TOKEN_LOOP", "1")
+	if q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt) {
+		t.Fatal("FAK_QWEN35_PREFILL_TOKEN_LOOP must force the token-loop path")
+	}
+}
