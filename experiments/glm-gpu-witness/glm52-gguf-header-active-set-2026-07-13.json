@@ -1,0 +1,96 @@
+{
+  "schema": "fak.glm52-gguf-header-active-set.v1",
+  "captured_at": "2026-07-13",
+  "issue": 3074,
+  "epic": 3073,
+  "lane": "F",
+  "node": "DGX3 (internal 8x A100-80GB sm_80 datacenter node)",
+  "what_this_closes": "Lane F of epic #3073 rested on ONE unread GGUF-header scalar: glm_moe_dsa expert_used_count (K). The GPU-server roofline ESTIMATED active-params/token (~32B) and active-bytes/token (~13 GiB) and scales inversely with both. This witness reads the full GLM-5.2 header on a node with a shard resident, pins K=8 and every companion active-set scalar (expert_ffn_len, shared count, dense/MoE layer split, MLA ranks), and DERIVES the routed-expert active stream. It replaces the PENDING(K) in the Lane F note and the ceiling doc's active-set estimates with measured header truth.",
+  "model": {
+    "name": "GLM-5.2",
+    "gguf_quant": "UD-Q4_K_M",
+    "shard1": "/mnt/sglang_dv3/glm52-q4/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf",
+    "shards": 11
+  },
+  "tool": {
+    "command": "gguf-dump <shard1>  (llama.cpp gguf-dump; python-gguf 0.18.0 also present on-box)",
+    "reader": "gguf-dump /usr/local/bin (llama.cpp)",
+    "scope": "GGUF header key-value dump only; NO tensor payloads loaded, NO GPU, NO serve",
+    "note": "The fak estimator q4kdiag -plan-only prints the same K + expert_ffn_len via internal/ggufload.applyMoEExpertCounts (committed: fb7737b36, b6fd400f7), but `go` was not on PATH on the node, so the header was read directly with gguf-dump. Values are the raw header, tool-independent."
+  },
+  "header_measured": {
+    "_source": "gguf-dump of shard1, verbatim; key prefix is glm-dsa (glm_moe_dsa arch)",
+    "block_count": 79,
+    "leading_dense_block_count": 3,
+    "moe_block_count_derived": 76,
+    "embedding_length": 6144,
+    "feed_forward_length": 12288,
+    "expert_count": 256,
+    "expert_used_count_K": 8,
+    "expert_feed_forward_length": 2048,
+    "expert_shared_count": 1,
+    "attention": {
+      "head_count": 64,
+      "head_count_kv": 1,
+      "key_length": 576,
+      "value_length": 512,
+      "q_lora_rank": 2048,
+      "kv_lora_rank": 512,
+      "key_length_mla": 256,
+      "value_length_mla": 256,
+      "indexer_head_count": 32,
+      "indexer_key_length": 128,
+      "indexer_top_k": 2048
+    },
+    "rope": {"freq_base": 8000000.0, "dimension_count": 64},
+    "attention_layer_norm_rms_epsilon": 9.999999747378752e-06
+  },
+  "active_set_derived": {
+    "_method": "header arithmetic only; gated FFN = 3 matrices (gate/up/down) of H x expert_ffn per expert; MoE layers = block_count - leading_dense_block_count",
+    "ffn_active_params_per_token": {
+      "routed_experts_B": 22.951,
+      "shared_expert_B": 2.869,
+      "dense_layers_B": 2.038,
+      "ffn_subtotal_B": 27.859,
+      "note": "MoE FFN active = (K + shared) x 3 x H x expert_ffn x 76 MoE layers; dense = 3 x H x feed_forward_length x 3 dense layers x 3 matrices. This is the FFN portion only."
+    },
+    "active_params_per_token_total_B": "~30-33 (FFN 27.86B measured-derived + MLA attention ~4-6B compressed); CONSISTENT with the prior ~32B ESTIMATE, now anchored to measured K=8",
+    "routed_expert_active_bytes_per_token_GiB": 12.95,
+    "routed_expert_active_bytes_method": "K=8 x per_expert_resident; per_expert = routed_band / 256 = 414.5 GiB / 256 = 1.619 GiB; routed_band (all 256 experts) = monolith - replicated = q4_k 256.50 + q5_k 150.56 + q6_k 7.38 GiB (EP-load-plan witness monolith rows minus the replicated non-expert rows). Equals internal/ggufload.RoutedExpertActiveSet.ActivePerToken (K x RoutedResident/NumExperts).",
+    "_correction_2026_07_14": {
+      "corrected_field": "routed_expert_active_bytes_per_token_GiB / _method",
+      "was": {"routed_expert_active_bytes_per_token_GiB": 1.872, "per_expert_GiB": 0.234, "routed_band_GiB": 59.90},
+      "now": {"routed_expert_active_bytes_per_token_GiB": 12.95, "per_expert_GiB": 1.619, "routed_band_GiB": 414.52},
+      "error": "The original derivation used the EP-7 ONE-RANK routed band (q4_k 37.07 + q5_k 21.76 + q6_k 1.07 = 59.90 GiB, which holds ~37 of 256 experts on the busiest rank) but labelled it 'all 256 experts' and divided by 256, giving 0.234 GiB/expert (~7x low). The true routed band spans all 256 experts (monolith q4_k 256.50 + q5_k 150.56 GiB, both entirely routed) = 414.52 GiB; 414.52/256 = 1.619 GiB/expert = 59.90/37. Cross-checked: per-expert params 2.869 B x 256 + non-expert 19.4 B = 753.86 B = the witnessed llama-bench total.",
+      "consequence": "Routed active stream at K=8 is 12.95 GiB (not 1.87), so active-bytes/token = 12.95 routed + 19.31 non-expert = ~32 GiB (upper bound). Routed is ~40% of the active stream, NOT ~9% -- the composition finding below is REVERSED (see _correction). Verified against internal/ggufload.RoutedExpertActiveSet.{ActivePerToken,ActiveBytesPerToken}, which computes 12.95 / 32.26 GiB from the header (unit-tested: gguf_glm_active_set_test.go, gguf_glm_quant_sweep_test.go). The header_measured block above is unaffected (K=8 etc. are the verbatim gguf-dump)."
+    }
+  },
+  "finding_active_bytes_composition": {
+    "_corrected_2026_07_14": "The headline/implication below were derived from the 0.234 GiB/expert error (see active_set_derived._correction_2026_07_14) and are REVERSED. Corrected finding: routed active stream = 12.95 GiB/token at K=8, which MATCHES the ceiling doc's original ~10 GiB expert-stream estimate (it was about right). active-bytes/token = 12.95 routed + 19.31 non-expert = ~32 GiB, so routed is ~40% of the stream and non-expert ~60% -- SAME ORDER, not 10:1. The estimate's real error was UNDER-counting the non-expert band (~3 GiB assumed vs 19.31 measured), making active-bytes ~2.5x the ~13 GiB estimate. Lever implication: the L5 routed quant-sweep is HIGH leverage (routed = 40% of active bytes), AND compressing the replicated attn/shared/output band (60%) helps -- both matter, contrary to the superseded 'routed helps less' claim.",
+    "headline_SUPERSEDED": "The routed-expert active stream is ~1.87 GiB/token at K=8 - roughly 5x SMALLER than the ceiling doc's ~10 GiB 'expert stream' estimate. The active-bytes/token is therefore NOT expert-dominated; it is dominated by the replicated high-precision band (attention + shared-expert + dense), measured resident at ~19.3 GiB (q8_0 18.07 + q6_k 0.73 + f32 0.51 GiB, EP-witness ranks_1 replicated rows).",
+    "implication_SUPERSEDED": "The ceiling doc's active-bytes COMPOSITION (10 GiB expert + 3 GiB replicated) is inverted vs measurement (~1.9 GiB expert + replicated-dominated). Lever priority shifts: quantizing/compressing the attention + shared-expert band buys more single-stream headroom than quantizing the routed experts (the L5 routed quant-sweep helps less than assumed).",
+    "honesty_boundary": "This witness pins the header scalars and DERIVES the ROUTED-expert active stream exactly. It does NOT measure the total active-bytes/token: the per-token-active fraction of the replicated band (which attention weights actually stream each decode step under MLA absorption, minus the embedding/output table) requires the decode per-op byte trace - the separate box-side witness that is the second half of #3074. Total active-bytes/token remains an UPPER BOUND (~32 GiB) PENDING that trace; only its expert component (12.95 GiB) is closed here."
+  },
+  "supersedes_estimates": {
+    "ceiling_doc": "docs/notes/GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md",
+    "corrections": [
+      "K (experts/tok): PENDING -> 8 (measured)",
+      "layers: ~89-92 -> 79 (with 3 leading dense, 76 MoE)",
+      "hidden: ~5120 -> 6144",
+      "expert_ffn_len: (unstated) -> 2048; shared experts: 1",
+      "routed-expert active stream: ~10 GiB (estimate) -> 12.95 GiB (measured-derived at K=8; the earlier 1.87 GiB in this file was an EP-7-band/256 error, corrected 2026-07-14)",
+      "active-bytes/token TOTAL: ~13 GiB (estimate) -> ~32 GiB upper bound (routed 12.95 + non-expert 19.31; estimate under-counted the non-expert band ~3 GiB vs 19.31 measured)"
+    ]
+  },
+  "tests": {
+    "code_under_test_local": [
+      "go test ./internal/ggufload ./cmd/q4kdiag -run 'TestRoutedExpertActiveSet|TestFormatConfigLine|TestEstimateExpertParallel' -count=1"
+    ],
+    "note": "The derivation arithmetic (RoutedExpertActiveSet.ActivePerToken = K x RoutedResident/NumExperts) is committed and unit-tested (internal/ggufload/gguf_glm_active_set_test.go); this witness supplies the measured K it consumes."
+  },
+  "companions": [
+    "experiments/glm-gpu-witness/glm52-ep-load-plan-witness-2026-06-30.json",
+    "docs/notes/GLM52-LANE-F-ACTIVE-SET-FROM-GGUF-HEADER-2026-07-06.md",
+    "docs/notes/GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md"
+  ]
+}
