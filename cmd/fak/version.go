@@ -36,6 +36,12 @@ func cmdVersion(w io.Writer) {
 		os.Exit(runVersionModules(os.Stdout, os.Stderr, os.Args[3:]))
 	}
 
+	// `fak version score-adapter` folds per-file scorecard rows into the flat
+	// module score map consumed by `fak version modules --scores` (#2466).
+	if len(os.Args) > 2 && os.Args[2] == "score-adapter" {
+		os.Exit(runVersionScoreAdapter(os.Stdout, os.Stderr, os.Args[3:]))
+	}
+
 	// `fak version trend` — the historical companion to `modules`: fold the
 	// append-only module-versions ledger into a per-module movement summary
 	// (internal/modver.Trend). Reads only what was stamped; no git, no tree.

@@ -48,6 +48,15 @@ modules moved"). Logic witnesses live in `internal/modver/modver_test.go`
 
 ## Versions → scores (the trend lens)
 
+`fak version score-adapter --input scorecard-files.json` converts a per-file
+scorecard envelope (`{"files":[{"path":"internal/gateway/a.go","score":80}, ...]}`)
+into that flat map. Paths use the same module classifier as the version snapshot.
+The aggregation rule is deliberately simple and explainable: **each file has equal
+weight, and a module's score is the arithmetic mean of its file scores**. Duplicate
+normalized paths and paths that cannot map to a module are refused rather than
+silently skewing or mis-joining the result. The output can be passed directly to
+`--scores` through a temporary file or shell process substitution.
+
 `--scores` joins any flat `{"module": number}` map into the report and the
 ledger rows, so a score series reads against the version series: score deltas
 between rev r47 and r52 of a module are now a query over one JSONL file, not
