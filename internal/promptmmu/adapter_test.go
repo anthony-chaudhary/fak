@@ -1,8 +1,9 @@
 package promptmmu
 
 import (
-	"sort"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // fakeFloor builds a fake DeniesUnconditionally predicate from an explicit set of
@@ -16,15 +17,6 @@ func fakeFloor(unconditionallyDenied ...string) DeniesUnconditionally {
 		deny[n] = true
 	}
 	return func(tool string) bool { return deny[tool] }
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func eqStrs(a, b []string) bool {
@@ -45,7 +37,7 @@ func TestToolPlanFor_BlanketBlockedToolIsDropped(t *testing.T) {
 	advertised := []string{"read_file", "delete_repo", "write_file"}
 	// delete_repo is a blanket block; the other two are allowed.
 	plan := ToolPlanFor(advertised, fakeFloor("delete_repo"))
-	if got := sortedKeys(plan.Drop); !eqStrs(got, []string{"delete_repo"}) {
+	if got := maputil.SortedKeys(plan.Drop); !eqStrs(got, []string{"delete_repo"}) {
 		t.Fatalf("Drop = %v, want [delete_repo]", got)
 	}
 }
@@ -62,7 +54,7 @@ func TestToolPlanFor_ArgConditionalToolIsNotDropped(t *testing.T) {
 		t.Fatalf("arg-conditional tool bash must NOT be in Drop (would remove a real capability)")
 	}
 	if len(plan.Drop) != 0 {
-		t.Fatalf("Drop = %v, want empty", sortedKeys(plan.Drop))
+		t.Fatalf("Drop = %v, want empty", maputil.SortedKeys(plan.Drop))
 	}
 }
 
@@ -88,7 +80,7 @@ func TestToolPlanFor_AllowedAndAbsentToolsAreNotDropped(t *testing.T) {
 func TestToolPlanFor_NilPredicateFailsClosed(t *testing.T) {
 	plan := ToolPlanFor([]string{"a", "b", "c"}, nil)
 	if len(plan.Drop) != 0 {
-		t.Fatalf("nil predicate must yield an empty Drop (fail-closed), got %v", sortedKeys(plan.Drop))
+		t.Fatalf("nil predicate must yield an empty Drop (fail-closed), got %v", maputil.SortedKeys(plan.Drop))
 	}
 }
 
@@ -133,7 +125,7 @@ func TestToolPlanForRequest_SelfDropIsAdvertisedOnlyAndFloorMonotonic(t *testing
 		SelfDrop:   []string{"write_file", "not_advertised", ""},
 	}
 	plan := ToolPlanForRequest(req, fakeFloor("rm_rf"))
-	if got := sortedKeys(plan.Drop); !eqStrs(got, []string{"rm_rf", "write_file"}) {
+	if got := maputil.SortedKeys(plan.Drop); !eqStrs(got, []string{"rm_rf", "write_file"}) {
 		t.Fatalf("Drop = %v, want [rm_rf write_file]", got)
 	}
 	if plan.Drop["not_advertised"] {
@@ -163,7 +155,7 @@ func TestWithSelfDrop_UnionsAndDoesNotMutate(t *testing.T) {
 	// agent in a read-only phase withholds its own write tool.
 	aug := WithSelfDrop(base, []string{"write_file", ""})
 
-	if got := sortedKeys(aug.Drop); !eqStrs(got, []string{"rm_rf", "write_file"}) {
+	if got := maputil.SortedKeys(aug.Drop); !eqStrs(got, []string{"rm_rf", "write_file"}) {
 		t.Fatalf("augmented Drop = %v, want [rm_rf write_file]", got)
 	}
 	if aug.Drop[""] {
@@ -179,7 +171,7 @@ func TestWithSelfDrop_UnionsAndDoesNotMutate(t *testing.T) {
 func TestWithSelfDrop_NilBaseDrop(t *testing.T) {
 	aug := WithSelfDrop(ToolPlan{}, []string{"write_file"})
 	if !aug.Drop["write_file"] {
-		t.Fatalf("self-drop should apply even with a nil base Drop, got %v", sortedKeys(aug.Drop))
+		t.Fatalf("self-drop should apply even with a nil base Drop, got %v", maputil.SortedKeys(aug.Drop))
 	}
 }
 
@@ -202,7 +194,7 @@ func TestBlockPlanFor_GeneralizesByName(t *testing.T) {
 	if plan.Block != BlockSkills {
 		t.Fatalf("Block = %q, want %q", plan.Block, BlockSkills)
 	}
-	if got := sortedKeys(plan.Drop); !eqStrs(got, []string{"old_skill"}) {
+	if got := maputil.SortedKeys(plan.Drop); !eqStrs(got, []string{"old_skill"}) {
 		t.Fatalf("Drop = %v, want [old_skill]", got)
 	}
 }
@@ -211,7 +203,7 @@ func TestBlockPlanFor_GeneralizesByName(t *testing.T) {
 func TestBlockPlanFor_NilPredicateEmpty(t *testing.T) {
 	plan := BlockPlanFor(BlockMemory, []string{"mem_a", "mem_b"}, nil)
 	if len(plan.Drop) != 0 {
-		t.Fatalf("nil drop predicate must yield an empty plan, got %v", sortedKeys(plan.Drop))
+		t.Fatalf("nil drop predicate must yield an empty plan, got %v", maputil.SortedKeys(plan.Drop))
 	}
 	if plan.Block != BlockMemory {
 		t.Fatalf("Block label should still be set, got %q", plan.Block)

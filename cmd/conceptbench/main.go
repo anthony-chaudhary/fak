@@ -46,6 +46,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 const (
@@ -306,8 +308,8 @@ func runReplay(f flags, budget budgetInfo) int {
 		Mode:               "replay",
 		ReplayDir:          filepath.ToSlash(f.replay),
 		Grader:             graderID,
-		Models:             sortedKeys(modelSeen),
-		Concepts:           sortedKeys(conceptSeen),
+		Models:             maputil.SortedKeys(modelSeen),
+		Concepts:           maputil.SortedKeys(conceptSeen),
 		Tasks:              taskIDs,
 		Budget:             budget,
 		ResultClaimAllowed: false,
@@ -361,7 +363,7 @@ func runContract(f flags, budget budgetInfo) int {
 		Kind:               "official-run-contract",
 		Issue:              f.issue,
 		Models:             models,
-		Concepts:           sortedKeys(conceptSeen),
+		Concepts:           maputil.SortedKeys(conceptSeen),
 		TaskIDs:            taskIDs,
 		Budget:             budget,
 		ResultClaimAllowed: false,
@@ -534,13 +536,4 @@ func csvSet(s string) map[string]bool {
 		set[p] = true
 	}
 	return set
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // Schema identifies the machine-readable planner envelope.
@@ -206,8 +208,8 @@ func PlanBatch(intents []Intent, cfg Config) Plan {
 
 	p.OK = len(p.IntentIDs) > 0
 	p.UnionPaths = sortedStringKeys(pathOwners)
-	p.Submitters = sortedKeys(submitters)
-	p.Witnesses = sortedKeys(witnesses)
+	p.Submitters = maputil.SortedKeys(submitters)
+	p.Witnesses = maputil.SortedKeys(witnesses)
 	if p.OK {
 		p.Subject = subjectFor(p.Stamp, p.IntentIDs)
 	}
@@ -226,8 +228,8 @@ func AssertPathset(expected, actual []string) PathsetAssertion {
 	ok := len(missing) == 0 && len(extra) == 0
 	out := PathsetAssertion{
 		OK:       ok,
-		Expected: sortedKeys(expSet),
-		Actual:   sortedKeys(actSet),
+		Expected: maputil.SortedKeys(expSet),
+		Actual:   maputil.SortedKeys(actSet),
 		Missing:  missing,
 		Extra:    extra,
 	}
@@ -282,7 +284,7 @@ func normalizePaths(paths []string) ([]string, Reason) {
 	if len(seen) == 0 {
 		return nil, ReasonMissingPathset
 	}
-	return sortedKeys(seen), ""
+	return maputil.SortedKeys(seen), ""
 }
 
 func normalizePath(p string) (string, Reason) {
@@ -336,15 +338,6 @@ func difference(left, right map[string]bool) []string {
 		if !right[k] {
 			out = append(out, k)
 		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out

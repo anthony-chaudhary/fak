@@ -34,6 +34,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // DefaultLedger is the ledger path both loops of the /question-loop skill share.
@@ -170,11 +172,11 @@ func LintRows(rows []Row) []string {
 			problems = append(problems, fmt.Sprintf("%s: ts must be ISO-8601 UTC (…Z)", tag))
 		}
 		if cat, ok := obj["category"].(string); !ok || !categories[cat] {
-			problems = append(problems, fmt.Sprintf("%s: category %#v not in %v", tag, obj["category"], sortedKeys(categories)))
+			problems = append(problems, fmt.Sprintf("%s: category %#v not in %v", tag, obj["category"], maputil.SortedKeys(categories)))
 		}
 		status, _ := obj["status"].(string)
 		if !statuses[status] {
-			problems = append(problems, fmt.Sprintf("%s: status %#v not in %v", tag, obj["status"], sortedKeys(statuses)))
+			problems = append(problems, fmt.Sprintf("%s: status %#v not in %v", tag, obj["status"], maputil.SortedKeys(statuses)))
 		}
 		for _, field := range []string{"target", "why"} {
 			if v := str(obj, field); strings.TrimSpace(v) == "" {
@@ -232,15 +234,6 @@ func extraKeys(obj map[string]interface{}) []string {
 		if !allowed[k] {
 			out = append(out, k)
 		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out

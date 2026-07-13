@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 const (
@@ -300,16 +302,16 @@ func KPIWellFormed(rows []Row, categories map[string]bool) KPI {
 			defects = append(defects, fmt.Sprintf("%s: category %q not declared in _meta.json", rid, stringValue(r, "category")))
 		}
 		if !surfaces[stringValue(r, "surface")] {
-			defects = append(defects, fmt.Sprintf("%s: surface %q not in %v", rid, stringValue(r, "surface"), sortedKeys(surfaces)))
+			defects = append(defects, fmt.Sprintf("%s: surface %q not in %v", rid, stringValue(r, "surface"), maputil.SortedKeys(surfaces)))
 		}
 		if !maturities[stringValue(r, "maturity")] {
-			defects = append(defects, fmt.Sprintf("%s: maturity %q not in %v", rid, stringValue(r, "maturity"), sortedKeys(maturities)))
+			defects = append(defects, fmt.Sprintf("%s: maturity %q not in %v", rid, stringValue(r, "maturity"), maputil.SortedKeys(maturities)))
 		}
 		if !claimsTags[stringValue(r, "claims_tag")] {
-			defects = append(defects, fmt.Sprintf("%s: claims_tag %q not in %v", rid, stringValue(r, "claims_tag"), sortedKeys(claimsTags)))
+			defects = append(defects, fmt.Sprintf("%s: claims_tag %q not in %v", rid, stringValue(r, "claims_tag"), maputil.SortedKeys(claimsTags)))
 		}
 		if !audiences[stringValue(r, "audience")] {
-			defects = append(defects, fmt.Sprintf("%s: audience %q not in %v", rid, stringValue(r, "audience"), sortedKeys(audiences)))
+			defects = append(defects, fmt.Sprintf("%s: audience %q not in %v", rid, stringValue(r, "audience"), maputil.SortedKeys(audiences)))
 		}
 		if _, ok := verdictRank[stringValue(r, "verdict")]; !ok {
 			defects = append(defects, fmt.Sprintf("%s: verdict %q not in %v", rid, stringValue(r, "verdict"), verdicts))
@@ -352,7 +354,7 @@ func KPIClaimHonest(rows []Row, sectionTags map[string]map[string]bool) KPI {
 				soft = append(soft, fmt.Sprintf("%s: claims_section %q did not match a CLAIMS.md section - cannot cross-check the tag", rid, stringValue(r, "claims_section")))
 			}
 		case claimsTags[tag] && !tags[tag]:
-			defects = append(defects, fmt.Sprintf("%s: claims_tag '%s' but CLAIMS.md section carries only %v - overclaim vs the honesty ledger", rid, tag, sortedKeys(tags)))
+			defects = append(defects, fmt.Sprintf("%s: claims_tag '%s' but CLAIMS.md section carries only %v - overclaim vs the honesty ledger", rid, tag, maputil.SortedKeys(tags)))
 		}
 	}
 	return makeKPI("claim_honest", defects, fmt.Sprintf("every claimed maturity matches CLAIMS.md (%d unmatched section)", len(soft)), soft, fmt.Sprintf("%d maturity overclaim(s) vs CLAIMS.md", len(defects)))
@@ -986,15 +988,6 @@ func containsSection(catalog []Section, norm string) bool {
 		}
 	}
 	return false
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func intValue(v any) int {
