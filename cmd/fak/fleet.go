@@ -230,7 +230,7 @@ func renderFleetCapacity(report fleetaccounts.CapacityPreflight) string {
 			detail = "-"
 		}
 		fmt.Fprintf(&b, "  [%-24s] %-14s %-28s %-3s active=%d live=%d %s\n",
-			truncateFleet(acct.StateLabel, 24), acct.Tag, acct.Account, tier,
+			truncateTableField(acct.StateLabel, 24), acct.Tag, acct.Account, tier,
 			acct.ActiveSessions, acct.LiveSessions, detail)
 	}
 	return b.String()
@@ -370,7 +370,7 @@ func renderMonitorTable(w io.Writer, p fleetmon.MonitorPayload) {
 		if len(s.Reasons) > 0 {
 			why = s.Reasons[0]
 		}
-		fmt.Fprintf(w, "%-6s %-20s %-20s %-6s %-10s %s\n", issue, truncateFleet(s.Session, 20), s.Class, pid, age, why)
+		fmt.Fprintf(w, "%-6s %-20s %-20s %-6s %-10s %s\n", issue, truncateTableField(s.Session, 20), s.Class, pid, age, why)
 	}
 }
 
@@ -467,7 +467,7 @@ func runFleetJanitor(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		fmt.Fprintf(stdout, "  - %s pid %d [%s] age %s (worker pid %d) → %s\n     %s\n",
-			c.Name, c.RootPID, c.Class, (time.Duration(c.AgeSec) * time.Second).Round(time.Second), c.WorkerPID, status, truncateFleet(c.Command, 100))
+			c.Name, c.RootPID, c.Class, (time.Duration(c.AgeSec) * time.Second).Round(time.Second), c.WorkerPID, status, truncateTableField(c.Command, 100))
 	}
 	if len(result.Stale) == 0 {
 		fmt.Fprintf(stdout, "  %s\n", result.NextAction)
@@ -607,7 +607,7 @@ func renderFoldMarkdown(s fleetmon.RunLedgerSummary) string {
 	fmt.Fprintln(&b, "|---|---|---|---:|---|---|")
 	for _, r := range s.Rows {
 		fmt.Fprintf(&b, "| #%d | %s | %s | %d | %s | %s |\n",
-			r.Issue, truncateFleet(r.Session, 24), r.Outcome, len(r.ChangedFiles), truncateFleet(r.Witness, 40), truncateFleet(firstNonEmptyFleet(r.FollowUp, r.Blocker), 48))
+			r.Issue, truncateTableField(r.Session, 24), r.Outcome, len(r.ChangedFiles), truncateTableField(r.Witness, 40), truncateTableField(firstNonEmptyFleet(r.FollowUp, r.Blocker), 48))
 	}
 	if len(s.Defects) > 0 {
 		fmt.Fprintf(&b, "\n## Ledger defects (%d)\n\n", len(s.Defects))
@@ -751,16 +751,6 @@ func discoverWorkers(home string) []fleetmon.PlanWorker {
 }
 
 func itoaFleet(n int) string { return fmt.Sprintf("%d", n) }
-
-func truncateFleet(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return s[:n]
-	}
-	return s[:n-1] + "…"
-}
 
 func firstNonEmptyFleet(vals ...string) string {
 	for _, v := range vals {

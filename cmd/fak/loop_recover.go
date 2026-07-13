@@ -202,7 +202,7 @@ func renderLoopRecover(w io.Writer, ledger string, r looprecover.Result, all boo
 			any = true
 		}
 		fmt.Fprintf(w, "%-12s %-11s %10s %-20s %s\n",
-			shortRunID(x.RunID), x.Disposition, agoString(x.AgeSeconds), truncField(x.LoopID, 20), truncField(x.Unit, 48))
+			shortRunID(x.RunID), x.Disposition, agoString(x.AgeSeconds), truncateTableField(x.LoopID, 20), truncateTableField(x.Unit, 48))
 	}
 	if !any {
 		fmt.Fprintln(w, "no runs to recover — every dispatched run is complete or in progress.")
@@ -240,15 +240,6 @@ func agoString(s int64) string {
 }
 
 // shortRunID trims a run id to a readable width.
-func shortRunID(id string) string { return truncField(id, 12) }
+func shortRunID(id string) string { return truncateTableField(id, 12) }
 
-// truncField clamps s to n runes for table alignment.
-func truncField(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return s[:n]
-	}
-	return s[:n-1] + "…"
-}
+// shortRunID uses the shared byte-width table truncator.

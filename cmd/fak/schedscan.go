@@ -426,7 +426,7 @@ func renderSchedScanTable(w io.Writer, doc schedScanDoc, failingOnly bool) {
 		shown++
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s %s\t%s\t%s\t%d\n",
 			strings.ToUpper(t.Status), t.Name, schedScanDash(t.LogonType),
-			t.Result.Hex, schedScanTrunc(t.Result.Message, 40),
+			t.Result.Hex, truncateTableField(t.Result.Message, 40),
 			schedScanShortTime(t.LastRun), schedScanShortTime(t.NextRun), t.MissedRuns)
 	}
 	tw.Flush()
@@ -491,14 +491,4 @@ func schedScanShortTime(s string) string {
 		return strings.Replace(string(r), "T", " ", 1)
 	}
 	return s
-}
-
-func schedScanTrunc(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return s[:n]
-	}
-	return s[:n-1] + "…"
 }
