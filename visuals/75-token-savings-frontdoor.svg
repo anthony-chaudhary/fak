@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="ts-title ts-desc">
+  <title id="ts-title">Same agent, a fraction of the bill — 74.8% API cost avoided across 495 real guarded sessions</title>
+  <desc id="ts-desc">Token-economics hero card for fak, measured on real guarded sessions. Headline: 74.8% API cost avoided (OBSERVED) across 495 real guarded sessions, vs a no-cache, no-compaction counterfactual at list price. Two independent savings tracks are measured side by side and never blended into one number: the PROVIDER prompt-cache track ($3,264 avoided, OBSERVED — the provider's own cache rebate; fak keeps the prefix byte-identical so it stays warm) and the fak compaction-shed track ($3,404 avoided, WITNESSED — fak-authored; 686M context tokens shed you'd otherwise re-send every turn). fak_share = 42.4% (token-equiv) — how much of the saving is fak-authored vs the provider's own rebate. SOTA-relative fence: 4.1x less work than a tuned warm-cache stack, and 86.7% KV-cache hit = 100% of optimal (SGLang band). Totals: $6,667.78 avoided vs $8,913.82 counterfactual, 495 sessions, 1.62B token-equiv saved. Every number traces to the fak cachevalue report (WITNESSED / OBSERVED ledgers) and BENCHMARK-AUTHORITY.md.</desc>
+  <defs>
+    <linearGradient id="ts-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f9fb"/>
+      <stop offset="55%" stop-color="#eef4f1"/>
+      <stop offset="100%" stop-color="#f8f3ee"/>
+    </linearGradient>
+    <style>
+      .kick    { font: 800 13px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 2px; }
+      .ti      { font: 900 38px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .sub     { font: 400 18px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .hero    { font: 900 120px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .heroLab { font: 800 27px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .heroSub { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .fence   { font: 400 13.5px "Segoe UI", Arial, sans-serif; fill: #6a7a89; }
+      .plab    { font: 800 11px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; letter-spacing: 1.5px; }
+      .ptitP   { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #1c7c92; }
+      .ptitF   { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #b06a2a; }
+      .chipt   { font: 700 12px "Segoe UI", Arial, sans-serif; }
+      .chips   { font: 700 11px "Segoe UI", Arial, sans-serif; }
+      .pbig    { font: 900 40px "Segoe UI", Arial, sans-serif; }
+      .pcap    { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .pbody   { font: 400 12.5px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .shareT  { font: 800 19px "Segoe UI", Arial, sans-serif; fill: #b06a2a; }
+      .shareC  { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .barlab  { font: 700 10px "Segoe UI", Arial, sans-serif; }
+      .sotaN   { font: 900 26px "Segoe UI", Arial, sans-serif; fill: #1c7c92; }
+      .sotaL   { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .tot     { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+      .totsep  { font: 400 17px "Segoe UI", Arial, sans-serif; fill: #ffffff; fill-opacity: 0.55; }
+      .foot    { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #8090a0; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="720" fill="url(#ts-bg)"/>
+  <rect x="20" y="16" width="1160" height="688" rx="12" fill="#ffffff" opacity="0.62" stroke="#d9e1e8"/>
+
+  <!-- header -->
+  <text x="52" y="62" class="kick">TOKEN ECONOMICS · MEASURED ON REAL GUARDED SESSIONS</text>
+  <text x="52" y="106" class="ti">Same agent, a fraction of the bill</text>
+  <text x="52" y="136" class="sub">Two independent savings tracks, measured side by side — the provider's cache rebate</text>
+  <text x="52" y="158" class="sub">and fak's own compaction-shed — never blended into one number.</text>
+  <line x1="52" y1="178" x2="1148" y2="178" stroke="#d9e1e8" stroke-width="1"/>
+
+  <!-- hero zone (left) -->
+  <text x="52" y="312" class="hero">74.8%</text>
+  <rect x="445" y="234" width="92" height="24" rx="12" fill="#e9f3f6" stroke="#1c7c92"/>
+  <text x="491" y="251" class="chipt" text-anchor="middle" style="fill:#155a6b;">OBSERVED</text>
+  <text x="52" y="352" class="heroLab">API cost avoided</text>
+  <text x="52" y="380" class="heroSub">across 495 real guarded sessions</text>
+  <text x="52" y="404" class="fence">vs a no-cache, no-compaction counterfactual · list price</text>
+
+  <!-- two measured tracks (right, side by side, equal) -->
+  <text x="640" y="202" class="plab">TWO TRACKS, MEASURED SIDE BY SIDE</text>
+
+  <!-- track A: provider prompt-cache (blue, OBSERVED) -->
+  <rect x="640" y="212" width="246" height="200" rx="10" fill="#ffffff" stroke="#d9e1e8"/>
+  <rect x="640" y="222" width="5" height="180" rx="2.5" fill="#3a7d9c"/>
+  <text x="664" y="242" class="ptitP">PROVIDER prompt-cache</text>
+  <rect x="664" y="254" width="78" height="18" rx="9" fill="#e9f3f6" stroke="#1c7c92"/>
+  <text x="703" y="267" class="chips" text-anchor="middle" style="fill:#155a6b;">OBSERVED</text>
+  <text x="664" y="320"><tspan class="pbig" style="fill:#1c7c92;">$3,264</tspan><tspan class="pcap" dx="8">avoided</tspan></text>
+  <text x="664" y="346" class="pbody">the provider's own cache rebate —</text>
+  <text x="664" y="364" class="pbody">fak keeps the prefix byte-identical</text>
+  <text x="664" y="382" class="pbody">so it stays warm</text>
+
+  <!-- track B: fak compaction-shed (amber, WITNESSED) -->
+  <rect x="902" y="212" width="246" height="200" rx="10" fill="#ffffff" stroke="#d9e1e8"/>
+  <rect x="902" y="222" width="5" height="180" rx="2.5" fill="#b06a2a"/>
+  <text x="926" y="242" class="ptitF">fak compaction-shed</text>
+  <rect x="926" y="254" width="86" height="18" rx="9" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="969" y="267" class="chips" text-anchor="middle" style="fill:#b06a2a;">WITNESSED</text>
+  <text x="926" y="320"><tspan class="pbig" style="fill:#b06a2a;">$3,404</tspan><tspan class="pcap" dx="8">avoided</tspan></text>
+  <text x="926" y="346" class="pbody">fak-authored — 686M context</text>
+  <text x="926" y="364" class="pbody">tokens shed you'd otherwise</text>
+  <text x="926" y="382" class="pbody">re-send every turn</text>
+
+  <!-- fak_share fence band -->
+  <rect x="52" y="432" width="1096" height="48" rx="8" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="74" y="462"><tspan class="shareT">fak_share = 42.4%</tspan><tspan class="shareC" dx="12">(token-equiv) — how much of the saving is fak-authored vs the provider's own rebate</tspan></text>
+  <rect x="848" y="442" width="118" height="10" rx="3" fill="#b06a2a"/>
+  <rect x="968" y="442" width="160" height="10" rx="3" fill="#3a7d9c"/>
+  <text x="848" y="471" class="barlab" style="fill:#b06a2a;">fak</text>
+  <text x="1128" y="471" class="barlab" text-anchor="end" style="fill:#3a7d9c;">provider</text>
+
+  <!-- SOTA-honest companion strip -->
+  <text x="52" y="502" class="plab">SOTA-RELATIVE FENCE — ALSO MEASURED AGAINST TUNED STACKS, NOT ONLY THE COUNTERFACTUAL</text>
+  <rect x="52" y="512" width="536" height="56" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="76" y="548"><tspan class="sotaN">4.1×</tspan><tspan class="sotaL" dx="12">less work than a tuned warm-cache stack</tspan></text>
+  <rect x="612" y="512" width="536" height="56" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="636" y="548"><tspan class="sotaN">86.7%</tspan><tspan class="sotaL" dx="12">KV-cache hit = 100% of optimal (SGLang band)</tspan></text>
+
+  <!-- totals strip -->
+  <rect x="52" y="586" width="1096" height="52" rx="8" fill="#2e3a47"/>
+  <text x="76" y="618"><tspan class="tot">$6,667.78 avoided vs $8,913.82 counterfactual</tspan><tspan class="totsep" dx="14">·</tspan><tspan class="tot" dx="14">495 sessions</tspan><tspan class="totsep" dx="14">·</tspan><tspan class="tot" dx="14">1.62B token-equiv saved</tspan></text>
+
+  <!-- authority footer -->
+  <line x1="52" y1="656" x2="1148" y2="656" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="52" y="682" class="foot">Every number → fak cachevalue report (WITNESSED / OBSERVED ledgers) + BENCHMARK-AUTHORITY.md</text>
+</svg>
