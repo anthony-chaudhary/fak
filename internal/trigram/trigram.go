@@ -22,6 +22,8 @@ import (
 	"regexp/syntax"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Trigram is three runes packed into a uint64 (21 bits each; Unicode's max code
@@ -141,7 +143,7 @@ func (ix *Index) Candidates(literal string) []int {
 
 // intersectSorted intersects two ascending, de-duplicated int slices.
 func intersectSorted(a, b []int) []int {
-	out := make([]int, 0, min(len(a), len(b)))
+	out := make([]int, 0, mathx.MinInt(len(a), len(b)))
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
 		switch {
@@ -156,13 +158,6 @@ func intersectSorted(a, b []int) []int {
 		}
 	}
 	return out
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // Search returns the documents that contain literal as a substring, verified

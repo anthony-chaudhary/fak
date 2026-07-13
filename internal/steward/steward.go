@@ -17,6 +17,8 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Check is a single invariant probe: it returns (violated, witness).
@@ -109,7 +111,7 @@ func SecretInContext(snapshot func() [][]byte) *FuncSteward {
 	return NewSteward("no-secret-in-context", func(ctx context.Context) (bool, string) {
 		for _, b := range snapshot() {
 			if m := secretRE.Find(b); m != nil {
-				return true, "secret-shaped bytes admitted to context: " + string(m[:min(8, len(m))]) + "…"
+				return true, "secret-shaped bytes admitted to context: " + string(m[:mathx.MinInt(8, len(m))]) + "…"
 			}
 		}
 		return false, ""
@@ -166,13 +168,6 @@ func overlap(a, b string) bool {
 
 func hasPrefix(s, p string) bool {
 	return len(s) >= len(p) && s[:len(p)] == p
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func init() {

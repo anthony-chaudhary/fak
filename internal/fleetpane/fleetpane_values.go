@@ -197,13 +197,6 @@ func firstStrings(values []string, limit int) []string {
 	return append([]string(nil), values[:limit]...)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func max(a, b int) int {
 	if a > b {
 		return a

@@ -68,3 +68,13 @@ func TestFDotFixedReduction(t *testing.T) {
 		t.Fatalf("FDot = %v (%08x), want fixed tree %v (%08x)", got, math.Float32bits(got), want, math.Float32bits(want))
 	}
 }
+
+func TestMinInt(t *testing.T) {
+	for _, tc := range []struct{ a, b, want int }{
+		{7, 3, 3}, {3, 7, 3}, {-2, -5, -5}, {4, 4, 4},
+	} {
+		if got := MinInt(tc.a, tc.b); got != tc.want {
+			t.Fatalf("MinInt(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

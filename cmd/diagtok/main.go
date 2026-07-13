@@ -88,7 +88,7 @@ func main() {
 		prompt = *promptFlag
 	}
 	pids, _ := tok.Encode(prompt)
-	fmt.Printf("\n[prompt] %d ids; first8=%v last8=%v\n", len(pids), pids[:min(8, len(pids))], pids[max(0, len(pids)-8):])
+	fmt.Printf("\n[prompt] %d ids; first8=%v last8=%v\n", len(pids), pids[:mathx.MinInt(8, len(pids))], pids[max(0, len(pids)-8):])
 
 	if *cacheless {
 		// Cacheless greedy: re-run the full Forward over the growing sequence each step.
@@ -131,12 +131,6 @@ func main() {
 	fmt.Printf("\n[greedy full] %q\n", full)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 func max(a, b int) int {
 	if a > b {
 		return a

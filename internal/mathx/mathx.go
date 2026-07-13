@@ -79,3 +79,11 @@ func FDot(r, x []float32) float32 {
 	}
 	return s
 }
+
+// MinInt returns the smaller integer. Equal inputs return that shared value.
+func MinInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

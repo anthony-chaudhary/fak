@@ -20,6 +20,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 const (
@@ -1064,7 +1066,7 @@ func collectGit(ctx context.Context, cfg Config, opts Options) map[string]any {
 			counts["unmerged"]++
 			continue
 		}
-		if strings.Contains(line[:min(2, len(line))], "D") {
+		if strings.Contains(line[:mathx.MinInt(2, len(line))], "D") {
 			counts["deleted"]++
 		} else {
 			counts["modified"]++

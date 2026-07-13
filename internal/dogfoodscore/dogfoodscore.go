@@ -32,6 +32,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/stopfailure"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 const (
@@ -797,7 +799,7 @@ func Render(p ScorecardPayload) string {
 	if len(p.Evidence.ConflationHits) > 0 {
 		lines = append(lines, "", "  conflation examples (success claimed over a reported Stop-hook error):")
 		for _, h := range p.Evidence.ConflationHits {
-			lines = append(lines, "    "+h.Session[:min(8, len(h.Session))]+"  \""+h.Claim+"\"")
+			lines = append(lines, "    "+h.Session[:mathx.MinInt(8, len(h.Session))]+"  \""+h.Claim+"\"")
 		}
 	}
 	lines = append(lines, "", "  -> "+p.NextAction)
@@ -953,11 +955,4 @@ func anyInt(v any) int {
 	default:
 		return 0
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
