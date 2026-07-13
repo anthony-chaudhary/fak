@@ -1,0 +1,17 @@
+{
+  "schema": "fak.sessionreplay.v1",
+  "issue": "#4425",
+  "note": "The plan regime must refuse a whole-file Write. Frozen so a later refactor of the plan/propose-only capability floor that lets the write through fails this golden instead of regressing silently. Flip active_regime to autonomous alone and the identical captured write is admitted (TestReplayIsRegimeConditioned) — proving the fixture is regime-conditioned, not regime-blind.",
+  "turn": {
+    "tool": "Write",
+    "args": {
+      "path": "workspace/report.txt",
+      "content": "shipped"
+    }
+  },
+  "active_regime": "plan",
+  "expect": {
+    "kind": "DENY",
+    "reason": "DEFAULT_DENY"
+  }
+}
