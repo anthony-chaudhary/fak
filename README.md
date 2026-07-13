@@ -11,7 +11,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-<!-- readme-verified: 2026-07-11 vs VERSION 0.39.0 + BENCHMARK-AUTHORITY -->
+<!-- readme-verified: 2026-07-12 vs VERSION 0.40.0 + BENCHMARK-AUTHORITY -->
 
 fak is one small program you run in front of the agent you already use. Your model, IDE, and keys don't change.
 
@@ -30,15 +30,15 @@ fak guard -- claude   # run it in front of your agent: your Pro/Max plan, no API
 
 Every number here traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag — `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
 
-## One guarded session, start to finish
+## Same agent, a fraction of the bill
 
 <p align="center">
-  <img src="visuals/74-session-effectiveness.svg" alt="One fak guard session, replayed from its decision journal: 1,720 hash-chained tool-call decisions over a 7h 11m unattended run — 99.77% allowed to proceed, the 4 dangerous calls blocked (an off-policy git action at the git gate, three tainted-data sinks at the IFC gate), zero hash-chain breaks, across 22 distinct tools. A timeline shows verdicts kept pace across the whole run; a work-mix bar breaks the calls into explore/execute/author/mcp/orchestrate/schedule." width="900">
+  <img src="visuals/75-token-savings-frontdoor.svg" alt="Token-economics card measured over 495 real fak guard sessions: 74.8% of API cost avoided versus a no-cache, no-compaction counterfactual priced at list (OBSERVED). The saving is shown as two independent tracks, side by side and never blended into one number — the provider's own prompt-cache rebate ($3,264 avoided, OBSERVED) and fak's compaction-shed ($3,404 avoided, WITNESSED, 686M context tokens shed). fak_share = 42.4% of the saving is fak-authored. SOTA companions: 4.1x less work than a tuned warm-cache stack, and an 86.7% KV-cache hit rate = 100% of optimal." width="900">
 </p>
 
-This is one real `fak guard` run, replayed from its decision journal. An agent worked for **7 hours unattended** while the kernel put a verdict on **every one of 1,720 tool calls** — waving the work through, blocking only the four that were dangerous, and hash-chaining every decision into a record that can't be edited after the fact. Nothing about it is special: it's the default shape of running any agent behind the gate. As agents run longer and more autonomously, a real-time verdict on every call plus a tamper-evident trail stops being a nice-to-have — a long unattended run that blocks only what's dangerous and can *prove* what it did is where every session is heading.
+Across **495 real guarded sessions**, running your agent behind the kernel avoided **74.8% of the API cost** you'd otherwise pay to re-send the same context every turn (OBSERVED, versus a no-cache / no-compaction counterfactual priced at list). The card keeps the two sources honest and *side by side*, never merged into one number: the provider's own prompt-cache rebate — fak keeps the prefix byte-identical so it stays warm — and fak's own compaction-shed, the 686M context tokens it dropped before you paid to re-send them. Measured against the *best already-shipped* alternative, a tuned warm-cache stack, the reuse win is **~4.1×**; of the total saved, the provider's rebate is the provider's, and fak's own authored share is `fak_share = 42.4%`.
 
-Every number on the card is recomputed from the session's hash-chained journal by [`tools/gen_session_effectiveness_svg.py`](tools/gen_session_effectiveness_svg.py) into a checkable [stats sidecar](visuals/74-session-effectiveness.stats.json); the per-verdict kernel cost traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
+Every dollar traces to `fak cachevalue report` and its WITNESSED / OBSERVED ledgers; the reuse multipliers trace to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ## Start in one command
 
@@ -77,6 +77,14 @@ Tested live with Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses c
 ## Every tool call gets a verdict
 
 The speed seam doubles as a safety floor at no extra cost. A tool call crosses the kernel before it runs and comes back ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — logged with a fixed reason code you can test against (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Untrusted result bytes are quarantined before they can become the model's next instruction, and the model can't widen its own authority with text alone. The floor is a JSON file you copy, trim, and test — no model in the loop; starter floors ship for coding, customer support, DevOps, trading, and clinical/PHI. Point at one with `fak guard --policy examples/<file>`. More: [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) · [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).
+
+<p align="center">
+  <img src="visuals/74-session-effectiveness.svg" alt="One fak guard session, replayed from its decision journal: 1,720 hash-chained tool-call decisions over a 7h 11m unattended run — 99.77% allowed to proceed, the 4 dangerous calls blocked (an off-policy git action at the git gate, three tainted-data sinks at the IFC gate), zero hash-chain breaks, across 22 distinct tools. A timeline shows verdicts kept pace across the whole run; a work-mix bar breaks the calls into explore/execute/author/mcp/orchestrate/schedule." width="900">
+</p>
+
+This is one real `fak guard` run, replayed from its decision journal. An agent worked for **7 hours unattended** while the kernel put a verdict on **every one of 1,720 tool calls** — waving the work through, blocking only the four that were dangerous, and hash-chaining every decision into a record that can't be edited after the fact. Nothing about it is special: it's the default shape of running any agent behind the gate. As agents run longer and more autonomously, a real-time verdict on every call plus a tamper-evident trail stops being a nice-to-have — a long unattended run that blocks only what's dangerous and can *prove* what it did is where every session is heading.
+
+Every number on the card is recomputed from the session's hash-chained journal by [`tools/gen_session_effectiveness_svg.py`](tools/gen_session_effectiveness_svg.py) into a checkable [stats sidecar](visuals/74-session-effectiveness.stats.json); the per-verdict kernel cost traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ## Install
 
