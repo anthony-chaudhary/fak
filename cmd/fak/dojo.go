@@ -27,6 +27,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/dojo"
 	"github.com/anthony-chaudhary/fak/internal/dojopost"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
@@ -153,9 +154,9 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	levers := defaultDojoLevers(ttl, *maxFiles)
+	levers := defaultDojoLevers(root, ttl, *maxFiles)
 	if sel := strings.TrimSpace(*leverSel); sel != "" {
-		levers = filterDojoLevers(allDojoLevers(ttl, *maxFiles), strings.Split(sel, ","))
+		levers = filterDojoLevers(allDojoLevers(root, ttl, *maxFiles), strings.Split(sel, ","))
 		if len(levers) == 0 {
 			fmt.Fprintf(stderr, "fak dojo run: no lever matched %q (see `fak dojo list`)\n", sel)
 			return 2
@@ -250,6 +251,13 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	var episodes []dojo.Episode
 	for _, in := range dojo.ScorableLiveEpisodes(lc) {
 		episodes = append(episodes, dojo.Score("live-episodes", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
+	// The live arm also measures dispatch-yield/verified_ship_rate over the loop
+	// ledger (#4497): the closure yield the dispatch loop itself recorded, folded
+	// alongside the provider-cache rows so `fak dojo run --live` scores the loop's
+	// headline KPI without a transcript corpus.
+	for _, in := range dispatchYieldEpisodesFromLoopLedger(loadLoopLedgerEvents(root)) {
+		episodes = append(episodes, dojo.Score("loop-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
@@ -454,7 +462,7 @@ func runDojoBoard(stdout, stderr io.Writer, argv []string) int {
 		Corpus: *corpus,
 		Note:   "replay of recorded Claude Code transcripts",
 	}
-	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, defaultDojoLevers(ttl, *maxFiles), dojo.DefaultCalibBand())
+	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, defaultDojoLevers(repoRoot(), ttl, *maxFiles), dojo.DefaultCalibBand())
 	for _, re := range runErrs {
 		fmt.Fprintf(stderr, "fak dojo board: lever %q on %q: %s\n", re.Lever, re.Scenario, re.Err)
 	}
@@ -572,7 +580,7 @@ func runDojoScenario(stderr io.Writer, corpus string, levers []dojo.Lever, label
 }
 
 func foldDojoCorpusRun(corpus string, ttl resume.CacheTTL, maxFiles int, root string, stderr io.Writer) dojo.Report {
-	episodes := runDojoScenario(stderr, corpus, defaultDojoLevers(ttl, maxFiles), "post")
+	episodes := runDojoScenario(stderr, corpus, defaultDojoLevers(root, ttl, maxFiles), "post")
 	now := time.Now().UTC()
 	return dojo.Fold(episodes, dojo.FoldOpts{
 		Workspace:   root,
@@ -660,17 +668,26 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "warm_recall", Theory: "the belief recalls every genuinely-warm read it could have predicted (claim 1.0)"},
 			},
 		},
+		{
+			Name:    "dispatch-yield",
+			Summary: "the dispatch loop's closure yield, measured over the workspace loop ledger (.fak/loops.jsonl): diff-witnessed VERIFIED closes per dispatched worker — the loop's first overall-performance KPI (#4497)",
+			Metrics: []dojoMetricInfo{
+				{Name: "verified_ship_rate", Theory: "about half of dispatched workers reconcile as a diff-witnessed VERIFIED close (claim 0.5 — a seeded estimate the RSI loop recalibrates toward measured)"},
+			},
+		},
 	}
 }
 
 // allDojoLevers returns every registered lever, including compactionLever{} — the
 // full set `--lever compaction` selects from. Use defaultDojoLevers for the set a
-// run folds when no --lever filter is given.
-func allDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
+// run folds when no --lever filter is given. root is the workspace root the
+// dispatch-yield lever reads its loop ledger under.
+func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 	return []dojo.Lever{
 		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
 		compactionLever{},
 		vcacheLever{maxFiles: maxFiles},
+		dispatchYieldLever{root: root},
 	}
 }
 
@@ -681,9 +698,9 @@ func allDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 // with an unmeasurable phantom. It stays registered and discoverable (`dojo list`
 // shows it "blocked on #953") and explicitly runnable via `dojo run --lever
 // compaction`, which reads from allDojoLevers instead of this default set.
-func defaultDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
+func defaultDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 	var out []dojo.Lever
-	for _, lv := range allDojoLevers(ttl, maxFiles) {
+	for _, lv := range allDojoLevers(root, ttl, maxFiles) {
 		if lv.Name() == "compaction" {
 			continue
 		}
@@ -866,6 +883,82 @@ func vcacheEpisodesFromObserve(pe vcachecal.PredictionError) []dojo.ScoredInput 
 		})
 	}
 	return out
+}
+
+// --- the dispatch-yield lever -----------------------------------------------
+
+// dispatchYieldLever scores the dispatch loop's own headline number (#4497): the
+// fraction of dispatched issues that reconcile as a diff-witnessed VERIFIED
+// close. Theory is the registered dispatch-yield/verified_ship_rate claim;
+// reality folds from the workspace's loop ledger (.fak/loops.jsonl) — SPAWNED
+// start rows are the dispatched population and the closure auditor's closed_now
+// end-row metrics are the verified closes. The scenario corpus is ignored: the
+// loop ledger, not a transcript replay, is the ground truth for closure yield.
+type dispatchYieldLever struct {
+	root string
+}
+
+func (dispatchYieldLever) Name() string { return "dispatch-yield" }
+
+func (l dispatchYieldLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return dispatchYieldEpisodesFromLoopLedger(loadLoopLedgerEvents(l.root)), nil
+}
+
+// loadLoopLedgerEvents tolerantly reads the workspace's active loop-ledger
+// segment. A missing ledger or a chain break degrades to the recovered prefix
+// (possibly nil) — the dispatch-yield episode then reports itself UNMEASURED
+// instead of failing the run.
+func loadLoopLedgerEvents(root string) []loopmgr.Event {
+	events, _, err := loopmgr.LoadPrefix(filepath.Join(root, defaultLoopLedger()))
+	if err != nil {
+		return nil
+	}
+	return events
+}
+
+// dispatchYieldEpisodesFromLoopLedger adapts loop-ledger rows into the dojo's
+// (prediction, outcome) pair for dispatch-yield/verified_ship_rate. It is pure so
+// the fold is unit-testable without a ledger on disk. Dispatched = start rows
+// with reason SPAWNED (one per spawned worker; both `fak dispatch tick` and the
+// python dispatcher write that row). Verified closes = the sum of closed_now on
+// end rows — the closure auditor's per-tick count of issues it reconciled as a
+// diff-witnessed close (a worker's own exit is never counted; a bare exit 0 is
+// not a witnessed close). Both counts are windowed to the same active ledger
+// segment, so the rate is the loop's spawn-to-close yield over that window. A
+// ledger with no dispatched worker yields one honest UNMEASURED episode, never a
+// fabricated zero rate.
+func dispatchYieldEpisodesFromLoopLedger(events []loopmgr.Event) []dojo.ScoredInput {
+	dispatched := 0
+	var closes int64
+	for _, ev := range events {
+		switch ev.Kind {
+		case loopmgr.EventStart:
+			if ev.Reason == "SPAWNED" {
+				dispatched++
+			}
+		case loopmgr.EventEnd:
+			if n, ok := ev.Metrics["closed_now"]; ok {
+				closes += n
+			}
+		}
+	}
+	pred := dojo.Registry.MustPredict("dispatch-yield", "verified_ship_rate", "fraction")
+	if dispatched == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Source:   "no SPAWNED start rows in the loop ledger — nothing dispatched in this window to score closure yield against",
+			},
+		}}
+	}
+	return []dojo.ScoredInput{{
+		Prediction: pred,
+		Outcome: dojo.Outcome{
+			Realized: float64(closes) / float64(dispatched), Provenance: dojo.Witnessed, Measured: true, Sample: dispatched,
+			Source: "sum(closed_now) on closure-audit end rows / SPAWNED start rows over the active loop-ledger segment (WITNESSED)",
+		},
+	}}
 }
 
 // --- output + durable ledger I/O -------------------------------------------

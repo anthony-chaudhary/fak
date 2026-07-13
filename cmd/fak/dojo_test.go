@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
 	"github.com/anthony-chaudhary/fak/internal/dojopost"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
@@ -312,21 +313,21 @@ func TestRunDojoList(t *testing.T) {
 }
 
 func TestDefaultDojoLeversExcludeCompactionUntilCorpusExists(t *testing.T) {
-	defaultNames := dojoLeverNames(defaultDojoLevers(resume.TTL5m, 0))
+	defaultNames := dojoLeverNames(defaultDojoLevers(".", resume.TTL5m, 0))
 	if dojoHasString(defaultNames, "compaction") {
 		t.Fatalf("default dojo levers must exclude the unmeasured compaction phantom: %v", defaultNames)
 	}
-	for _, want := range []string{"resume-posture", "vcache-warmth"} {
+	for _, want := range []string{"resume-posture", "vcache-warmth", "dispatch-yield"} {
 		if !dojoHasString(defaultNames, want) {
 			t.Fatalf("default dojo levers missing %q: %v", want, defaultNames)
 		}
 	}
 
-	allNames := dojoLeverNames(allDojoLevers(resume.TTL5m, 0))
+	allNames := dojoLeverNames(allDojoLevers(".", resume.TTL5m, 0))
 	if !dojoHasString(allNames, "compaction") {
 		t.Fatalf("all dojo levers must keep compaction discoverable/selectable: %v", allNames)
 	}
-	explicit := filterDojoLevers(allDojoLevers(resume.TTL5m, 0), []string{"compaction"})
+	explicit := filterDojoLevers(allDojoLevers(".", resume.TTL5m, 0), []string{"compaction"})
 	if len(explicit) != 1 || explicit[0].Name() != "compaction" {
 		t.Fatalf("explicit --lever compaction should select only compaction, got %v", dojoLeverNames(explicit))
 	}
@@ -613,6 +614,70 @@ func TestAblateEpisodesNoEngineCalls(t *testing.T) {
 	// An OFF arm that sent zero engine calls has no elision to score.
 	if ins := ablateEpisodesFromArms(metrics.Arm{}, metrics.Arm{}); len(ins) != 0 {
 		t.Fatalf("zero off engine-calls should yield no episode, got %d", len(ins))
+	}
+}
+
+func TestDojoDispatchYieldEpisodesFromLoopLedger(t *testing.T) {
+	// 4 spawned workers; the closure auditor reconciles 1+2 diff-witnessed closes
+	// across two of its end rows -> yield 0.75. The dispatcher's own SPAWNED
+	// end/admit rows carry no closed_now metric and must not count as closes, and
+	// admit rows must not count as dispatched.
+	events := []loopmgr.Event{
+		{Kind: loopmgr.EventStart, Reason: "SPAWNED"},
+		{Kind: loopmgr.EventStart, Reason: "SPAWNED"},
+		{Kind: loopmgr.EventStart, Reason: "SPAWNED"},
+		{Kind: loopmgr.EventStart, Reason: "SPAWNED"},
+		{Kind: loopmgr.EventAdmit, Reason: "SPAWNED"},
+		{Kind: loopmgr.EventEnd, Reason: "SPAWNED"},
+		{Kind: loopmgr.EventStart, Reason: "REPAIR_SPAWNED"}, // grooming, not a dispatch
+		{Kind: loopmgr.EventEnd, Reason: "OK", Metrics: map[string]int64{"closed_now": 1, "open_now": 900}},
+		{Kind: loopmgr.EventEnd, Reason: "OK", Metrics: map[string]int64{"closed_now": 2}},
+	}
+	ins := dispatchYieldEpisodesFromLoopLedger(events)
+	if len(ins) != 1 {
+		t.Fatalf("expected exactly one dispatch-yield episode, got %d", len(ins))
+	}
+	in := ins[0]
+	if in.Prediction.Lever != "dispatch-yield" || in.Prediction.Metric != "verified_ship_rate" {
+		t.Fatalf("episode cell wrong: %s/%s", in.Prediction.Lever, in.Prediction.Metric)
+	}
+	// The pinned claim literal (#4497): a seeded genuine estimate, not a floor.
+	if in.Prediction.Claimed != 0.5 || in.Prediction.IntentionalFloor || in.Prediction.LowerIsBetter {
+		t.Fatalf("pinned dispatch-yield claim drifted: %+v", in.Prediction)
+	}
+	if !in.Outcome.Measured || in.Outcome.Provenance != dojo.Witnessed {
+		t.Fatalf("a ledger with dispatches must measure (WITNESSED): %+v", in.Outcome)
+	}
+	if in.Outcome.Realized != 0.75 || in.Outcome.Sample != 4 {
+		t.Fatalf("yield fold wrong: realized %g sample %d, want 0.75 over 4", in.Outcome.Realized, in.Outcome.Sample)
+	}
+
+	// An empty (or missing) ledger still surfaces the cell — honestly UNMEASURED,
+	// never a fabricated zero rate.
+	empty := dispatchYieldEpisodesFromLoopLedger(nil)
+	if len(empty) != 1 || empty[0].Outcome.Measured {
+		t.Fatalf("an empty ledger must yield one UNMEASURED episode, got %+v", empty)
+	}
+}
+
+func TestDojoCatalogMatchesDispatchYieldEmittedMetrics(t *testing.T) {
+	// the static catalog must match the metrics the dispatch-yield lever emits.
+	emitted := map[string]bool{}
+	for _, in := range dispatchYieldEpisodesFromLoopLedger([]loopmgr.Event{{Kind: loopmgr.EventStart, Reason: "SPAWNED"}}) {
+		emitted[in.Prediction.Metric] = true
+	}
+	for _, lv := range dojoLeverCatalog() {
+		if lv.Name != "dispatch-yield" {
+			continue
+		}
+		for _, m := range lv.Metrics {
+			if !emitted[m.Name] {
+				t.Fatalf("catalog advertises metric %q the lever never emits", m.Name)
+			}
+		}
+		if len(lv.Metrics) != len(emitted) {
+			t.Fatalf("catalog lists %d metrics but the lever emits %d", len(lv.Metrics), len(emitted))
+		}
 	}
 }
 

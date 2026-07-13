@@ -25,6 +25,9 @@ func TestRegistryPreservesPinnedClaims(t *testing.T) {
 		{"vcache-warmth", "warm_recall", 1.0, false, false},
 		{"compaction", "token_shed_ratio", 1.0, false, false},
 		{"compaction", "cache_prefix_preserved", 1.0, false, false},
+		// dispatch-yield is the first overall-performance KPI cell (#4497): a seeded
+		// genuine estimate (not a floor) so the RSI recalibrate arm may move it.
+		{"dispatch-yield", "verified_ship_rate", 0.5, false, false},
 	}
 	if len(Registry) != len(want) {
 		t.Fatalf("registry has %d cells, want %d — a cell was added or dropped without updating the witness", len(Registry), len(want))
@@ -64,9 +67,10 @@ var probeCell = RegisterClaim("kpi-seam-probe", "additive_resolves",
 // witness is unperturbed), and the existing cells still resolve — the seam is
 // additive, not a migration. A duplicate registration panics loud (collision guard).
 func TestRegisterClaimResolvesViaRegistry(t *testing.T) {
-	// The additive registration did not grow the central literal.
-	if len(Registry) != 8 {
-		t.Fatalf("central Registry literal has %d cells, want 8 — additive registration must not grow it", len(Registry))
+	// The additive registration did not grow the central literal (8 extracted
+	// cells + the seeded dispatch-yield KPI cell, #4497).
+	if len(Registry) != 9 {
+		t.Fatalf("central Registry literal has %d cells, want 9 — additive registration must not grow it", len(Registry))
 	}
 	// The registered cell resolves through the composed Lookup.
 	c, ok := Registry.Lookup("kpi-seam-probe", "additive_resolves")

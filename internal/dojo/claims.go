@@ -71,9 +71,14 @@ type claimKey struct {
 type ClaimRegistry map[claimKey]Claim
 
 // Registry is the live dojo claim registry — one anchored literal per cell. Every
-// number here was lifted verbatim from the inline `Claimed:` field it replaced;
-// the pinned-claim tests in cmd/fak/dojo_test.go prove the extraction preserved
-// each value. false_warm_rate and cross_session_warm_hit_rate are floors (the
+// cache/compaction/resume number here was lifted verbatim from the inline
+// `Claimed:` field it replaced; the pinned-claim tests in cmd/fak/dojo_test.go
+// prove the extraction preserved each value. The dispatch-yield KPI cell (#4497)
+// is a SEEDED estimate instead — it lives in this central literal (not the
+// additive RegisterClaim seam) because the RSI recalibrate arm's anchored
+// rewriter targets only this file (dojocal.ClaimsRelPath), and the cell exists
+// precisely to be recalibrated toward the loop-ledger-measured yield.
+// false_warm_rate and cross_session_warm_hit_rate are floors (the
 // lethal false-warm class and the bimodal 0.0 default the loop must not recalibrate
 // up to its empirical rate); every other cell is a genuine estimate.
 var Registry = ClaimRegistry{
@@ -96,6 +101,9 @@ var Registry = ClaimRegistry{
 		"the projected shed (WITNESSED shed_tokens) matches the billed input_tokens delta (OFF - ON)"),
 	{"compaction", "cache_prefix_preserved"}: claim(1.0,
 		"a fired compaction ships the protected prefix byte-identical"),
+
+	{"dispatch-yield", "verified_ship_rate"}: claim(0.5,
+		"seed theory (#4497): about half of dispatched workers reconcile as a diff-witnessed VERIFIED close over the loop-ledger window; a genuine estimate the RSI loop recalibrates toward the measured spawn-to-close yield"),
 }
 
 // registered is the additive claim seam: the composed home for cells a KPI leaf
