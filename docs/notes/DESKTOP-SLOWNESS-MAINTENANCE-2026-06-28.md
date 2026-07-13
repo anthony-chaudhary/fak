@@ -35,6 +35,19 @@ TermService handles climb past ~30k or its working set past ~4 GB, or roughly we
 under heavy fleet use. It kills all live agent sessions, so it is an operator decision
 scheduled for a quiet window -- it is not something an agent should do unattended.
 
+To stop finding out about the sprawl only by *feeling* the lag, a read-only watchdog now
+watches for the reboot-recommend condition and toasts the operator early:
+`tools/reboot_advisor.ps1` measures the busiest WindowsTerminal process (handles/threads)
+plus the TermService svchost (handles/working set) and the uptime, and when any crosses
+its threshold it writes a structured signal to
+`%LOCALAPPDATA%\Fleet\watchdog\reboot_advisor.jsonl` and raises a deduped "Reboot
+recommended" toast (at most once per 6 h). It never kills or reboots -- it only surfaces
+*when* to schedule the operator reboot above. Defaults: WindowsTerminal >=28k handles or
+>=1200 threads, TermService >=30k handles or >=4 GB WS, or uptime >=168 h. Run it ad hoc
+(`pwsh -File tools/reboot_advisor.ps1`) or install it on a 30-min cadence with
+`tools/register_reboot_advisor.ps1` (S4U, windowless, restart-durable); check the logic
+with `-SelfTest`.
+
 ### 2. Windows Defender exclusions for the build tree (preventive, survives reboot)
 Real-time scanning taxes the constant compile/git churn and the ~18 GB
 `%LOCALAPPDATA%\go-build` cache. Note: Defender was NOT observed spiking during the
