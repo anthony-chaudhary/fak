@@ -2,6 +2,7 @@ package dispatchaudit
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchconservation"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 // shell.go is the THIN I/O boundary: it reads the on-disk dispatch artifacts
@@ -27,8 +29,10 @@ var (
 	reHdrBackend  = regexp.MustCompile(`\bbackend=(\S+)`)
 
 	// A self-reported created/shipped commit SHA in raw worker output. This is
-	// quarantined as a claim; only the structured .commit sidecar below can set
-	// Worker.CommitSHA and promote a worker to SHIPPED.
+	// quarantined as a claim; only a structured sidecar below can set
+	// Worker.CommitSHA and promote a worker to SHIPPED — the authoritative
+	// .witness sidecar (a CLAIM_WITNESSED, diff-witnessed grade) first, then the
+	// legacy .commit sidecar.
 	reCommit = regexp.MustCompile("(?i)(?:commit created|✅ commit|shipped|committed)[^0-9a-f]*`?([0-9a-f]{7,40})`?")
 	reSHA    = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
@@ -62,7 +66,7 @@ func ScanDir(runsDir string) ([]Worker, error) {
 // ScanDirSince is ScanDir windowed to logs spawned at/after since: an entry
 // whose spawn stamp (parsed from the log NAME, mirroring
 // dispatchconservation.CollectUnits) — or, for a stampless legacy name, whose
-// mtime — falls before since is skipped BEFORE any open/parse or .commit/.pid
+// mtime — falls before since is skipped BEFORE any open/parse or .witness/.commit/.pid
 // sidecar read, so the scheduled audit stops paying O(total historical runs)
 // on a never-reaped runs dir (#3466). A zero since scans everything
 // (byte-identical to the legacy ScanDir behavior).
@@ -123,7 +127,14 @@ func ScanDirSince(runsDir string, since time.Time) ([]Worker, error) {
 			w.ProgressTicks = p.ticks
 			w.ProgressMoved = p.moved
 		}
-		if sha, ok := readCommitSidecar(filepath.Join(runsDir, base+".commit")); ok {
+		// Source the ship SHA from the AUTHORITATIVE .witness sidecar first (the
+		// grade the tick sweep actually writes), then fall back to the legacy
+		// .commit sidecar. Workers write .witness, not .commit, so without the
+		// former a genuine ship reads as CommitSHA=="" and falls through the
+		// outcome switch to the ErrorLines catch-all → mislabeled ERRORED (#4476).
+		if sha, ok := readWitnessSidecar(filepath.Join(runsDir, base+dispatchtick.WitnessSidecarSuffix)); ok {
+			w.CommitSHA = sha
+		} else if sha, ok := readCommitSidecar(filepath.Join(runsDir, base+".commit")); ok {
 			w.CommitSHA = sha
 		}
 		if pid, ok := readPID(filepath.Join(runsDir, base+".pid")); ok {
@@ -343,6 +354,45 @@ func readCommitSidecar(path string) (string, bool) {
 	}
 	sha := strings.TrimSpace(string(b))
 	return sha, reSHA.MatchString(sha)
+}
+
+// witnessSidecar is the subset of the .witness sidecar payload (written by
+// dispatchtick.WitnessRecord.Map) the audit needs to source a ship SHA. The
+// writer emits explicit JSON nulls for an absent sha/verdict/witness, which
+// decode to the zero string here — exactly what a non-ship record should yield.
+type witnessSidecar struct {
+	SHA     string `json:"sha"`
+	Claim   string `json:"claim"`
+	Verdict string `json:"verdict"`
+	Witness string `json:"witness"`
+}
+
+// readWitnessSidecar reads a <base>.witness sidecar and returns its ship SHA
+// only when the record is an authoritative witnessed commit: a CLAIM_WITNESSED
+// claim that clears the SAME diff-witness keep-bit the tick sweep graded it on
+// (dispatchtick.CommitWitnessed) and carries a well-formed SHA. Anything else —
+// a no-commit / unwitnessed / subject-only record, or a malformed file —
+// returns ("", false), so only a real ship promotes the worker to SHIPPED. This
+// is the fix for the audit/writer drift of #4476: workers write .witness (not
+// the .commit sidecar readCommitSidecar consulted), so a genuine ship went
+// unseen and fell through to the ErrorLines catch-all as a false ERRORED.
+func readWitnessSidecar(path string) (string, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var rec witnessSidecar
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return "", false
+	}
+	if rec.Claim != dispatchtick.ClaimWitnessed || !dispatchtick.CommitWitnessed(rec.Verdict, rec.Witness) {
+		return "", false
+	}
+	sha := strings.TrimSpace(rec.SHA)
+	if !reSHA.MatchString(sha) {
+		return "", false
+	}
+	return sha, true
 }
 
 // parseTimestamp extracts the `timestamp=...` RFC3339 value from an opencode line.
