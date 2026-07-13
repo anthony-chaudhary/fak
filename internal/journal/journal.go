@@ -136,6 +136,17 @@ type Row struct {
 	// (Reason) — rides the frozen decision fields above, and this carries the full
 	// correlated record (source path + sha256 of the installed bytes) on top.
 	ConfigSwap *ConfigSwapRow `json:"config_swap,omitempty"`
+
+	// Quality-quarantine field (for QUALITY_QUARANTINE: the flaky-quality-eval
+	// retry-policy witness, #4569). A quarantine decision is quality supervision,
+	// not a per-call kernel decision, so AppendQualityQuarantine writes it directly
+	// through the chain, like a config swap. NOT part of the hash-chain pre-image
+	// (chainHash lists the chained fields explicitly, so appending it here leaves
+	// every existing journal verifying byte-for-byte); the chained forensic identity
+	// of a case — Kind, the case id (Tool), the folded verdict (Verdict) and its
+	// mirrored class (Reason) — rides the frozen decision fields above, and this
+	// carries the full correlated record (provenance + tier/cost + attempt log) on top.
+	Quality *QualityQuarantineRow `json:"quality,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
