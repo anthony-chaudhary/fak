@@ -1113,6 +1113,14 @@ type Server struct {
 	defaultTraceMu sync.RWMutex
 	defaultTraceID string
 
+	// warmup is the #3051 boot warmup-inference readiness gate behind /healthz:
+	// when the host arms it, /healthz reports ok:false (warmup_pending) until a
+	// synthetic warmup inference returns its first token (MarkWarmupComplete), so
+	// the operator's first real turn is warm-path, not the ~500s cold tax. Exposes
+	// time_to_ready_ms once complete. Default-silent for a serve that never arms it.
+	// See readiness_warmup.go.
+	warmup warmupGate
+
 	// routeWatcher is the model-routing manifest hot-reload seam behind POST
 	// /v1/fak/route/reload (#4003) — the SIGHUP-style manual twin of the background
 	// Watcher.Run poll loop. It is an atomic pointer because the host installs the

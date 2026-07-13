@@ -1552,6 +1552,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.inKernelModelButChatIsMock {
 		health["in_kernel_model_but_chat_is_mock"] = true
 	}
+	// #3051: a local backend that is UP (listener bound) but has not finished its
+	// one-time warmup — weight load, CUDA-graph capture, DeepGEMM/JIT compile — must
+	// not report ready, or the operator's first real turn absorbs the full ~500s
+	// tax. When the host armed the warmup gate at boot, /healthz stays ok:false with
+	// warmup_pending until a synthetic warmup inference returns its first token
+	// (MarkWarmupComplete); after that it exposes time_to_ready_ms so the one-time
+	// tax is visible. A serve that never arms the gate is unaffected. Liveness is not
+	// readiness. See readiness_warmup.go.
+	if s.warmup.pending() {
+		health["ok"] = false
+		health["warmup_pending"] = true
+	} else if ttr, ok := s.warmup.ready(); ok {
+		health["time_to_ready_ms"] = ttr.Milliseconds()
+	}
 	// #2336: a recent recovered panic on a served completion route disqualifies
 	// the unqualified ok:true — a green liveness probe over crashing completions
 	// keeps watchdogs routing work to a broken native serve. Window-bounded
