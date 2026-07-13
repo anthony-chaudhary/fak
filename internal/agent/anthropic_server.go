@@ -14,6 +14,7 @@ package agent
 // (no net/http), keeping all Anthropic-format knowledge in one package.
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 )
@@ -38,6 +39,8 @@ type AnthropicMessagesRequest struct {
 	// the client's prompt-cache prefix survives intact (a real cache hit). Set by
 	// DecodeAnthropicMessagesRequest; otherwise unused.
 	Raw []byte
+	// ContentBlocks preserves each message content value byte-for-byte for ledger replay.
+	ContentBlocks []json.RawMessage
 }
 
 // anthropicInbound mirrors the subset of the Messages API request Claude Code
@@ -118,6 +121,7 @@ func DecodeAnthropicMessagesRequest(raw []byte) (*AnthropicMessagesRequest, erro
 		out.Messages = append(out.Messages, Message{Role: RoleSystem, Content: out.System})
 	}
 	for _, m := range in.Messages {
+		out.ContentBlocks = append(out.ContentBlocks, bytes.Clone(m.Content))
 		out.Messages = append(out.Messages, decodeAnthropicMessage(m)...)
 	}
 	bindAnthropicToolResultNames(out.Messages)

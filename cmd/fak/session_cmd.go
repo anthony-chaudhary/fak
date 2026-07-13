@@ -80,6 +80,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	// diff-out render over internal/sessionreset.DiffReset that never dials a live
 	// gateway, so it is dispatched here before the gateway-shaped arity/flag table
 	// below (which assumes every verb talks to a sessionClient).
+	if verb == "log" {
+		return runSessionLog(stdout, stderr, args)
+	}
 	if verb == "reset-diff" {
 		return runSessionResetDiff(os.Stdin, stdout, stderr, args)
 	}
