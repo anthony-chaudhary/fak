@@ -1,8 +1,11 @@
 package gateway
 
 import (
+	"context"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // readiness_warmup.go is the #3051 warmup-TIMING gate on the local-model
@@ -112,4 +115,34 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 		return
 	}
 	s.warmup.markComplete(d)
+}
+
+// RunWarmup issues one synthetic completion through the server's chat planner and
+// marks the warmup gate complete with the boot->first-token elapsed, returning it.
+// It is the execution half of the #3051/#3083 warm-start: the serve path arms the
+// gate synchronously (ArmWarmupGate) before binding the listener — so /healthz
+// reports warmup_pending from the very first probe — then runs THIS in a goroutine
+// alongside ListenAndServe, and the operator's first real turn is warm-path, not a
+// ~500s cold stall. It calls s.planner.Complete DIRECTLY, deliberately bypassing
+// the served-turn admission/session/metrics bookkeeping (s.complete): a synthetic
+// warm turn must not debit a budget or mutate session state. The prompt is a fixed,
+// code-authored one-token turn — the tax is paid on the FIRST decode, so a single
+// token is enough to force weight load + CUDA-graph capture + JIT compile while
+// wasting no steady-state compute. Safe on a nil Server or nil planner (a serve
+// with no local backend to warm): it releases any armed gate so readiness is never
+// stuck pending.
+func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
+	if s == nil {
+		return 0, nil
+	}
+	if s.planner == nil {
+		s.MarkWarmupComplete(0)
+		return 0, nil
+	}
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "warmup"}}
+	start := time.Now()
+	_, err := s.planner.Complete(ctx, msgs, nil, agent.WithMaxTokens(1))
+	d := time.Since(start)
+	s.MarkWarmupComplete(d)
+	return d, err
 }

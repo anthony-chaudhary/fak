@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // TestWarmupGate pins the #3051 timing policy as a pure state machine: a
@@ -116,6 +119,54 @@ func TestHealthzHoldsUntilWarmup(t *testing.T) {
 	// JSON numbers decode as float64.
 	if got, ok := warm["time_to_ready_ms"].(float64); !ok || got != 1234 {
 		t.Fatalf("warm serve: /healthz time_to_ready_ms = %v (%T), want 1234", warm["time_to_ready_ms"], warm["time_to_ready_ms"])
+	}
+}
+
+// TestRunWarmupCompletesGate pins the warm-start execution half (#3051/#3083): an
+// armed gate holds /healthz not-ready, and RunWarmup — issuing one synthetic
+// completion through the planner — releases it and exposes time_to_ready_ms. Uses
+// the offline MockPlanner, so no live model is needed; the ~500s real backend
+// warmup is the host-blocked DGX residual, not this state-machine witness.
+func TestRunWarmupCompletesGate(t *testing.T) {
+	srv := &Server{planner: agent.NewMockPlanner("warmup-test")}
+	srv.ArmWarmupGate()
+	if !srv.warmup.pending() {
+		t.Fatal("armed gate should be pending before RunWarmup")
+	}
+	if body := warmupHealthzBody(t, srv); body["ok"] != false {
+		t.Fatalf("armed-pending serve: /healthz ok = %v, want false", body["ok"])
+	}
+
+	if _, err := srv.RunWarmup(context.Background()); err != nil {
+		t.Fatalf("RunWarmup err = %v, want nil", err)
+	}
+	if srv.warmup.pending() {
+		t.Fatal("gate still pending after RunWarmup")
+	}
+	body := warmupHealthzBody(t, srv)
+	if body["ok"] != true {
+		t.Fatalf("post-warmup serve: /healthz ok = %v, want true", body["ok"])
+	}
+	if _, present := body["time_to_ready_ms"]; !present {
+		t.Fatalf("post-warmup serve: /healthz missing time_to_ready_ms, got %v", body)
+	}
+}
+
+// TestRunWarmupNilPlannerReleasesGate pins that a serve with no planner (a backend
+// that will never warm) does not get stuck pending: RunWarmup releases the gate
+// rather than leaving readiness held forever.
+func TestRunWarmupNilPlannerReleasesGate(t *testing.T) {
+	srv := &Server{}
+	srv.ArmWarmupGate()
+	d, err := srv.RunWarmup(context.Background())
+	if err != nil {
+		t.Fatalf("nil-planner RunWarmup err = %v, want nil", err)
+	}
+	if d != 0 {
+		t.Fatalf("nil-planner RunWarmup d = %v, want 0", d)
+	}
+	if srv.warmup.pending() {
+		t.Fatal("nil-planner RunWarmup left the gate pending, want released")
 	}
 }
 
