@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // The committed audit report doc and its generated-block markers. The block between the
@@ -39,8 +41,8 @@ func Block(rep Report) string {
 	}
 	fmt.Fprintf(&b, "**Verdict: %s** -- %d reference(s) across %d workflow file(s); roles: development=%s release=%s source=%s front-door=%s\n\n",
 		verdict, len(rep.Refs), rep.Files,
-		dashIfEmpty(rep.Roles.DevelopmentBranch), dashIfEmpty(rep.Roles.ReleaseBranch),
-		dashIfEmpty(rep.Roles.ReleaseSource), dashIfEmpty(rep.Roles.PublicFrontDoor))
+		strmatch.DashIfBlank(rep.Roles.DevelopmentBranch), strmatch.DashIfBlank(rep.Roles.ReleaseBranch),
+		strmatch.DashIfBlank(rep.Roles.ReleaseSource), strmatch.DashIfBlank(rep.Roles.PublicFrontDoor))
 	b.WriteString(docLegend)
 
 	// Class distribution, one row per class in stable render order so an absent class is
@@ -95,13 +97,6 @@ func classMeaning(c RefClass) string {
 	default:
 		return string(c)
 	}
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }
 
 // Extract returns the generated block (markers inclusive) embedded in doc, or ("", false)

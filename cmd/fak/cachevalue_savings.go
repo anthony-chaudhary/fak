@@ -10,6 +10,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -207,7 +209,7 @@ func formatCacheValuePersistenceSummary(label string, rep cacheValuePersistenceR
 			formatWhole(rep.Track1.Turns), formatWhole(rep.Track1.PromptTokens), formatWhole(rep.Track1.ReusedTokens))
 	} else {
 		fmt.Fprintf(&b, "  Track 1 WITNESSED kernel row not written: no KV-prefix reuse turns for %s\n",
-			dashIfEmpty(rep.Track1.Path))
+			strmatch.DashIfBlank(rep.Track1.Path))
 	}
 	if rep.Track2.RowsWritten > 0 {
 		fmt.Fprintf(&b, "  Track 2 OBSERVED-$ rows: wrote %d/%d to %s (provider %s tok-eq, fak compaction %s tok-eq, total %s tok-eq; cache_read %s tok, compact_shed %s tok)\n",
@@ -222,16 +224,9 @@ func formatCacheValuePersistenceSummary(label string, rep cacheValuePersistenceR
 		}
 	} else {
 		fmt.Fprintf(&b, "  Track 2 OBSERVED-$ row not written: no provider-cache or compaction tokens for %s\n",
-			dashIfEmpty(rep.Track2.Path))
+			strmatch.DashIfBlank(rep.Track2.Path))
 	}
 	return b.String()
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }
 
 func formatSignedWholeFloat(v float64) string {

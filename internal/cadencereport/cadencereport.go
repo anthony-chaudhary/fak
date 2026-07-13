@@ -14,6 +14,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable control-pane schema identifier for the report envelope.
@@ -674,14 +676,14 @@ func Render(r Report) string {
 		fmt.Sprintf("cadence report — %s (%s)  @%s  %s", r.Verdict, r.Finding, r.Commit, r.Date),
 		"",
 		fmt.Sprintf("  %s scores      debt %d; grade-debt %d across %d scorecard(s); trend %s",
-			mark(r.Scores.OK, r.Scores.Err), r.Scores.Debt, r.Scores.GradeDebt, r.Scores.Measured, dashIfEmpty(r.Scores.TrendSummary)),
+			mark(r.Scores.OK, r.Scores.Err), r.Scores.Debt, r.Scores.GradeDebt, r.Scores.Measured, strmatch.DashIfBlank(r.Scores.TrendSummary)),
 		fmt.Sprintf("  %s maturity    index %d/100 [%s]; debt %d; backlog %d%s",
-			mark(r.Maturity.OK, r.Maturity.Err), r.Maturity.Score, dashIfEmpty(r.Maturity.Grade),
+			mark(r.Maturity.OK, r.Maturity.Err), r.Maturity.Score, strmatch.DashIfBlank(r.Maturity.Grade),
 			r.Maturity.Debt, r.Maturity.Backlog, maturityNextSuffix(r.Maturity)+maturityRouteSuffix(r.Maturity)),
 		fmt.Sprintf("  %s work        %d commit(s) / %d ship(s) in the last %dd",
 			mark(r.Work.Err == "", r.Work.Err), r.Work.Commits, r.Work.Ships, r.Work.WindowDays),
 		fmt.Sprintf("  %s releases    %s%s; next: %s — %s",
-			mark(r.Releases.OK, r.Releases.Err), r.Releases.Version, publishLagSuffix(r.Releases), dashIfEmpty(r.Releases.ActionKind), dashIfEmpty(r.Releases.ActionDetail)),
+			mark(r.Releases.OK, r.Releases.Err), r.Releases.Version, publishLagSuffix(r.Releases), strmatch.DashIfBlank(r.Releases.ActionKind), strmatch.DashIfBlank(r.Releases.ActionDetail)),
 	}
 	if len(r.Work.ByLane) > 0 {
 		leaves := make([]string, 0, len(r.Work.ByLane))
@@ -792,13 +794,6 @@ func orNoPayload(runErr string) string {
 		return runErr
 	}
 	return "no payload"
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }
 
 func asBool(v any) bool {

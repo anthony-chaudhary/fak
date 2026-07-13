@@ -33,6 +33,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable control-pane schema identifier for the sidecar pane.
@@ -337,7 +339,7 @@ func headline(p Pane) string {
 	}
 	if p.Posture.Measured {
 		fmt.Fprintf(&b, "; posture %s (%d compaction / %d elision)",
-			dashIfEmpty(p.Posture.Posture.CachePosture), p.Posture.Posture.Compactions, p.Posture.Posture.Elisions)
+			strmatch.DashIfBlank(p.Posture.Posture.CachePosture), p.Posture.Posture.Compactions, p.Posture.Posture.Elisions)
 	}
 	if p.Unmeasured > 0 {
 		fmt.Fprintf(&b, "; %d plane(s) unmeasured", p.Unmeasured)
@@ -447,9 +449,9 @@ func (p Pane) postureSection() Section {
 		return s
 	}
 	post := p.Posture.Posture
-	s.Summary = fmt.Sprintf("cache %s, %d joined", dashIfEmpty(post.CachePosture), post.SessionsJoined)
+	s.Summary = fmt.Sprintf("cache %s, %d joined", strmatch.DashIfBlank(post.CachePosture), post.SessionsJoined)
 	s.Lines = []Line{
-		{Key: "posture/cache", Value: dashIfEmpty(post.CachePosture), Prov: p.Posture.Prov},
+		{Key: "posture/cache", Value: strmatch.DashIfBlank(post.CachePosture), Prov: p.Posture.Prov},
 		{Key: "posture/compactions", Value: fmt.Sprintf("%d", post.Compactions), Prov: p.Posture.Prov},
 		{Key: "posture/elisions", Value: fmt.Sprintf("%d", post.Elisions), Prov: p.Posture.Prov},
 		{Key: "posture/joined", Value: fmt.Sprintf("%d", post.SessionsJoined), Prov: p.Posture.Prov},
@@ -479,11 +481,4 @@ func unmeasuredSummary(note string) string {
 		return "unmeasured"
 	}
 	return "unmeasured: " + note
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }

@@ -37,6 +37,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable control-pane schema identifier for the roll-up envelope.
@@ -409,7 +411,7 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 				"Scorecard portfolio only partially measured", e, Observed})
 		}
 		summary += fmt.Sprintf(", debt %d (%s)",
-			asInt(scores["debt"]), dashIfEmpty(asString(scores["trend_direction"])))
+			asInt(scores["debt"]), strmatch.DashIfBlank(asString(scores["trend_direction"])))
 	} else {
 		summary += " (scores not run)"
 	}
@@ -430,7 +432,7 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 		skipped := asInt(maturity["route_skipped_private"])
 		if routeLane != "" {
 			summary += ", route " + routeLane
-			detail := fmt.Sprintf("run `fak maturity route --fetch-existing --limit 3`; %s", dashIfEmpty(routeKey))
+			detail := fmt.Sprintf("run `fak maturity route --fetch-existing --limit 3`; %s", strmatch.DashIfBlank(routeKey))
 			if routeItem != "" {
 				detail += ": " + routeItem
 			}
@@ -675,7 +677,7 @@ func Render(r Rollup) string {
 			measured = "**NO**"
 			summary = "unmeasured: " + p.Err
 		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", p.Name, measured, p.Verdict, dashIfEmpty(summary))
+		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", p.Name, measured, p.Verdict, strmatch.DashIfBlank(summary))
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "> **next:** %s\n", r.NextAction)
@@ -693,13 +695,6 @@ func orNoPayload(runErr string) string {
 		return runErr
 	}
 	return "no payload"
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }
 
 func asBool(v any) bool {

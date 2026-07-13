@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // RenderCompact is the default operator snapshot: one terse line per item with
@@ -16,10 +18,10 @@ import (
 // operator scanning many briefs a day should not read a wall of text per item.
 func RenderCompact(r Report) string {
 	lines := []string{
-		fmt.Sprintf("operator brief - %s %s  @%s  %s", r.Verdict, r.Pace, dashIfEmpty(r.Commit), dashIfEmpty(r.Date)),
+		fmt.Sprintf("operator brief - %s %s  @%s  %s", r.Verdict, r.Pace, strmatch.DashIfBlank(r.Commit), strmatch.DashIfBlank(r.Date)),
 		fmt.Sprintf("  load       human %d, agent %d, watch %d, background %d  |  attention %s %dm",
 			r.Counts.Human, r.Counts.Agent, r.Counts.Watch, r.Counts.Background,
-			dashIfEmpty(r.Attention.Level), r.Attention.BudgetMinutes),
+			strmatch.DashIfBlank(r.Attention.Level), r.Attention.BudgetMinutes),
 	}
 	if r.Delta != nil && r.Delta.Status == "changed" {
 		lines = append(lines, "  since prev "+r.Delta.Summary)
@@ -56,11 +58,11 @@ func appendCompactSection(lines []string, name string, items []Item, limit int) 
 // and action). It is the --full expansion of RenderCompact.
 func Render(r Report) string {
 	lines := []string{
-		fmt.Sprintf("operator brief - %s (%s)  @%s  %s", r.Verdict, r.Finding, dashIfEmpty(r.Commit), dashIfEmpty(r.Date)),
+		fmt.Sprintf("operator brief - %s (%s)  @%s  %s", r.Verdict, r.Finding, strmatch.DashIfBlank(r.Commit), strmatch.DashIfBlank(r.Date)),
 		"",
 		fmt.Sprintf("  pace       %s; human %d, agent %d, watch %d, background %d",
 			r.Pace, r.Counts.Human, r.Counts.Agent, r.Counts.Watch, r.Counts.Background),
-		"  state      " + dashIfEmpty(r.State.OperatorUse),
+		"  state      " + strmatch.DashIfBlank(r.State.OperatorUse),
 		"  attention  " + renderAttention(r.Attention),
 		"  human use  " + renderHumanUse(r.HumanUse),
 		"  coherence  " + renderCoherence(r.Coherence),
@@ -265,9 +267,9 @@ func appendSection(lines []string, name string, items []Item) []string {
 
 func renderAttention(a Attention) string {
 	parts := []string{
-		dashIfEmpty(a.Level),
+		strmatch.DashIfBlank(a.Level),
 		fmt.Sprintf("%d min", a.BudgetMinutes),
-		dashIfEmpty(a.Cadence),
+		strmatch.DashIfBlank(a.Cadence),
 	}
 	if len(a.ReadOrder) > 0 {
 		parts = append(parts, strings.Join(a.ReadOrder, " -> "))
@@ -280,16 +282,16 @@ func renderAttention(a Attention) string {
 
 func renderHumanUse(h HumanUse) string {
 	parts := []string{
-		"human: " + dashIfEmpty(h.UseHumanFor),
-		"agents: " + dashIfEmpty(h.LetAgentsDo),
-		"avoid: " + dashIfEmpty(h.Avoid),
-		"escalate: " + dashIfEmpty(h.EscalateWhen),
+		"human: " + strmatch.DashIfBlank(h.UseHumanFor),
+		"agents: " + strmatch.DashIfBlank(h.LetAgentsDo),
+		"avoid: " + strmatch.DashIfBlank(h.Avoid),
+		"escalate: " + strmatch.DashIfBlank(h.EscalateWhen),
 	}
 	return strings.Join(parts, "; ")
 }
 
 func renderCoherence(c Coherence) string {
-	parts := []string{dashIfEmpty(c.Status), dashIfEmpty(c.Summary)}
+	parts := []string{strmatch.DashIfBlank(c.Status), strmatch.DashIfBlank(c.Summary)}
 	if c.Action != "" {
 		parts = append(parts, c.Action)
 	}

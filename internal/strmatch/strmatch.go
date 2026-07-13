@@ -58,3 +58,12 @@ func FirstTrimmed(values ...string) string {
 	}
 	return ""
 }
+
+// DashIfBlank returns "-" for empty or whitespace-only text and otherwise
+// preserves the original value. It is the compact placeholder used by reports.
+func DashIfBlank(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}

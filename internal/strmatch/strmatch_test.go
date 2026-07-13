@@ -61,3 +61,14 @@ func TestFirstTrimmedReturnsTrimmedValue(t *testing.T) {
 		t.Fatalf("FirstTrimmed(all blank) = %q, want empty", got)
 	}
 }
+
+func TestDashIfBlankPreservesNonblankValue(t *testing.T) {
+	for _, blank := range []string{"", " \t ", "\n"} {
+		if got := DashIfBlank(blank); got != "-" {
+			t.Fatalf("DashIfBlank(%q) = %q, want dash", blank, got)
+		}
+	}
+	if got := DashIfBlank("  ready  "); got != "  ready  " {
+		t.Fatalf("DashIfBlank(nonblank) = %q, want original value", got)
+	}
+}

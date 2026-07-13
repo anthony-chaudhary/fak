@@ -22,6 +22,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable control-pane schema identifier for the report envelope.
@@ -309,7 +311,7 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 			HumanMetricTo:  row.HumanMetric,
 			AdvancingTo:    row.Advancing,
 			Summary: fmt.Sprintf("first program tick (kernel metric %.3f %s, cache metric %.3f %s, human metric %.3f %s; %d advancing)",
-				row.KernelMetric, dashIfEmpty(row.KernelDir), row.CacheMetric, dashIfEmpty(row.CacheDir), row.HumanMetric, dashIfEmpty(row.HumanDir), row.Advancing),
+				row.KernelMetric, strmatch.DashIfBlank(row.KernelDir), row.CacheMetric, strmatch.DashIfBlank(row.CacheDir), row.HumanMetric, strmatch.DashIfBlank(row.HumanDir), row.Advancing),
 		}
 	}
 	kDelta := round3(row.KernelMetric - last.KernelMetric)
@@ -441,13 +443,6 @@ func (r Report) WithGate(code int, message string) Report {
 }
 
 // --- small shared helpers ---------------------------------------------------
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
-}
 
 func round3(f float64) float64 {
 	if f < 0 {

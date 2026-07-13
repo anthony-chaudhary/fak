@@ -1203,7 +1203,7 @@ func releaseNeedsAgent(r cadencereport.Releases) bool {
 }
 
 func releaseDetail(r cadencereport.Releases) string {
-	parts := []string{"version " + dashIfEmpty(r.Version), "next " + dashIfEmpty(r.ActionKind)}
+	parts := []string{"version " + strmatch.DashIfBlank(r.Version), "next " + strmatch.DashIfBlank(r.ActionKind)}
 	if r.CommitsBehind > 0 {
 		parts = append(parts, fmt.Sprintf("@latest %d commit(s) behind", r.CommitsBehind))
 	}
@@ -1217,7 +1217,7 @@ func releaseDetail(r cadencereport.Releases) string {
 }
 
 func signalDetail(s programreport.Signal) string {
-	parts := []string{"frontier " + dashIfEmpty(s.Frontier), s.Direction}
+	parts := []string{"frontier " + strmatch.DashIfBlank(s.Frontier), s.Direction}
 	if s.Activity != 0 {
 		parts = append(parts, fmt.Sprintf("%d shipped move(s)", s.Activity))
 	}
@@ -1359,11 +1359,4 @@ func containsString(vals []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }

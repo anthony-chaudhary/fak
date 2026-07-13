@@ -29,6 +29,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/supportmaturity"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -60,7 +62,7 @@ func Block() string {
 	b.WriteString(Begin)
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "**Climb %s** -- %d/%d cell(s) matured (M4+) -- progress **%.1f%%** across %d (model family x backend) cell(s)\n\n",
-		dashIfEmpty(m.Highest), m.Matured, m.Cells, m.ProgressPct, m.Cells)
+		strmatch.DashIfBlank(m.Highest), m.Matured, m.Cells, m.ProgressPct, m.Cells)
 	b.WriteString(legend)
 
 	// The ladder distribution as a stable table, one row per rung in ladder order so
@@ -148,11 +150,4 @@ func Scaffold() string {
 	b.WriteString(End)
 	b.WriteString("\n")
 	return b.String()
-}
-
-func dashIfEmpty(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }
