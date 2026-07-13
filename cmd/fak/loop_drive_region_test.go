@@ -317,6 +317,49 @@ func TestLoopDriveRegionHoldRefusesDoppelganger(t *testing.T) {
 // TestLoopDriveRegionHoldReacquiresAfterLapse: a lease that expired with no
 // taker (one turn outran the TTL) is not a peer conflict — the next ensure
 // reacquires instead of honest-stopping a contention-free drive.
+func TestLoopDriveRegionHoldRollsBackRacedConflict(t *testing.T) {
+	dir := initRegionTestRepo(t)
+	t.Setenv("FAK_LEASEREF_SYNC", "off")
+
+	hold := newLoopDriveRegionHold(loopDriveOptions{}, loopdrive.Spec{Loop: "region-loop", Lane: "gateway"})
+	now := time.Now()
+	hold.afterAcquire = func() {
+		acquireRegionTestLease(t, dir, "raced-peer", "peer-holder", []string{"internal/gateway/**"})
+	}
+
+	refuse, err := hold.ensure(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refuse == nil {
+		t.Fatal("raced conflicting registration must refuse after acquire")
+	}
+	if refuse.Reason != "COLLISION_RISK" {
+		t.Fatalf("refusal reason = %q, want COLLISION_RISK", refuse.Reason)
+	}
+	if !strings.Contains(refuse.Detail, "rolled back after raced conflict") {
+		t.Fatalf("refusal detail does not witness rollback: %q", refuse.Detail)
+	}
+	if hold.held {
+		t.Fatal("hold must not remain held after raced conflict")
+	}
+
+	live, _, err := hold.store.Live(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make(map[string]bool, len(live))
+	for _, rec := range live {
+		ids[rec.ID] = true
+	}
+	if ids[hold.id] {
+		t.Fatalf("rolled-back lease %q remains live: %+v", hold.id, live)
+	}
+	if !ids["raced-peer"] {
+		t.Fatalf("racing peer lease missing after rollback: %+v", live)
+	}
+}
+
 func TestLoopDriveRegionHoldReacquiresAfterLapse(t *testing.T) {
 	initRegionTestRepo(t)
 

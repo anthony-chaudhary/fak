@@ -59,6 +59,10 @@ type loopDriveRegionHold struct {
 	tree   []string
 	ttl    int64
 	held   bool
+
+	// afterAcquire is a test seam for injecting a registration into the
+	// check-then-write window. Production holds leave it nil.
+	afterAcquire func()
 }
 
 // newLoopDriveRegionHold resolves the drive's region config: flag overrides
@@ -176,8 +180,35 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		}, nil
 	}
 	h.held = true
-	// #2302: a freshly acquired lease ref is a write — publish it so peers see
-	// this hold at their next decide. Nonfatal; the acquire already succeeded.
+	if h.afterAcquire != nil {
+		h.afterAcquire()
+	}
+
+	// #3375: close the admission check-then-write window. A semantically
+	// conflicting registration may use a different lease ID, so the fenced
+	// acquire alone cannot see it. Re-read after committing and roll our own
+	// registration back if a peer raced into that window.
+	live, _, err = h.store.Live(ctx, now)
+	if err != nil {
+		h.release()
+		return nil, fmt.Errorf("reverify region lease %s: %w", h.id, err)
+	}
+	dec = regionadmit.Decide(regionadmit.Request{
+		Actor:  h.holder,
+		Lane:   h.lane,
+		Tree:   h.tree,
+		SelfID: h.id,
+	}, regionLeases(live), h.tax)
+	if !dec.Admit {
+		h.release()
+		return &loopDriveRegionRefusal{
+			Reason: dec.Reason,
+			Detail: fmt.Sprintf("region lease %s rolled back after raced conflict: %s", h.id, dec.Detail),
+		}, nil
+	}
+
+	// #2302: publish only a reverified lease, so peers never observe a hold we
+	// already know must be rolled back.
 	syncLoopDriveTickLeaseRefs(h.store, true)
 	return nil, nil
 }
