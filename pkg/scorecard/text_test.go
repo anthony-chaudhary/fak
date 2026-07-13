@@ -74,3 +74,16 @@ func TestTrueAcceptsOnlyBooleanTrue(t *testing.T) {
 		}
 	}
 }
+
+func TestStringValuePreservesLooseReportRendering(t *testing.T) {
+	for _, tc := range []struct {
+		in   any
+		want string
+	}{
+		{nil, ""}, {"ready", "ready"}, {42, "42"}, {true, "true"},
+	} {
+		if got := StringValue(tc.in); got != tc.want {
+			t.Fatalf("StringValue(%#v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

@@ -35,7 +35,6 @@ package loopfleet
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -44,6 +43,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the versioned payload tag so a `--json` consumer can pin the shape.
@@ -364,8 +365,8 @@ func rollup(loops []LoopHealth, skipped int) Rollup {
 func foldNightrun(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "nightrun"}
 	for _, r := range rows {
-		bumpLastTick(&lp, asString(r["generated_at"]))
-		lp.observe(isSuccess(asString(r["outcome"])), strings.TrimSpace(asString(r["artifact"])) != "")
+		bumpLastTick(&lp, scorecard.StringValue(r["generated_at"]))
+		lp.observe(isSuccess(scorecard.StringValue(r["outcome"])), strings.TrimSpace(scorecard.StringValue(r["artifact"])) != "")
 	}
 	return single(lp)
 }
@@ -375,9 +376,9 @@ func foldNightrun(rows []map[string]any) []rawLoop {
 func foldDojo(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "dojo"}
 	for _, r := range rows {
-		bumpLastTick(&lp, asString(r["generated_at"]))
+		bumpLastTick(&lp, scorecard.StringValue(r["generated_at"]))
 		measured, ok := asFloat(r["measured"])
-		lp.observe(strings.EqualFold(asString(r["verdict"]), "OK"), ok && measured > 0)
+		lp.observe(strings.EqualFold(scorecard.StringValue(r["verdict"]), "OK"), ok && measured > 0)
 	}
 	return single(lp)
 }
@@ -387,8 +388,8 @@ func foldDojo(rows []map[string]any) []rawLoop {
 func foldCadence(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "cadence"}
 	for _, r := range rows {
-		bumpLastTick(&lp, asString(r["generated_at"]))
-		lp.observe(strings.EqualFold(asString(r["verdict"]), "OK"), strings.TrimSpace(asString(r["commit"])) != "")
+		bumpLastTick(&lp, scorecard.StringValue(r["generated_at"]))
+		lp.observe(strings.EqualFold(scorecard.StringValue(r["verdict"]), "OK"), strings.TrimSpace(scorecard.StringValue(r["commit"])) != "")
 	}
 	return single(lp)
 }
@@ -398,7 +399,7 @@ func foldCadence(rows []map[string]any) []rawLoop {
 func foldDispatch(rows []map[string]any) []rawLoop {
 	lp := rawLoop{kind: "dispatch"}
 	for _, r := range rows {
-		bumpLastTick(&lp, asString(r["utc"]))
+		bumpLastTick(&lp, scorecard.StringValue(r["utc"]))
 		kept, _ := r["ok"].(bool)
 		lp.observe(kept, positive(r["closed_now"]) || positive(r["witnessed_open"]))
 	}
@@ -469,16 +470,6 @@ func parseRFC3339(s string) (int64, bool) {
 		return 0, false
 	}
 	return t.UTC().UnixNano(), true
-}
-
-func asString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 func asFloat(v any) (float64, bool) {

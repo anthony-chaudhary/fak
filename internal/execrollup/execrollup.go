@@ -309,7 +309,7 @@ func interpretDispatch(in PlaneInput) (PlaneStatus, []Item) {
 	}
 
 	if tp, ok := in.Payload["throughput"].(map[string]any); ok && !scorecard.True(tp["na"]) {
-		if v := asString(tp["verdict"]); v == "BELOW_TARGET" || v == "AUDIT_ERROR" {
+		if v := scorecard.StringValue(tp["verdict"]); v == "BELOW_TARGET" || v == "AUDIT_ERROR" {
 			rate, _ := asFloatOK(tp["completed_rate_per_hour"])
 			target, _ := asFloatOK(tp["target_per_hour"])
 			win := asInt(tp["primary_window_hours"])
@@ -403,22 +403,22 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 	summary := fmt.Sprintf("%d/%d ship-stamped", ships, commits)
 
 	if scores, ok := in.Payload["scores"].(map[string]any); ok && len(scores) > 0 {
-		if asString(scores["trend_direction"]) == "regressed" {
+		if scorecard.StringValue(scores["trend_direction"]) == "regressed" {
 			items = append(items, Item{LevelWarn, "cadence",
 				"Quality debt regressed vs the last tick",
-				asString(scores["trend_summary"]), Witnessed})
+				scorecard.StringValue(scores["trend_summary"]), Witnessed})
 		}
-		if e := asString(scores["err"]); e != "" {
+		if e := scorecard.StringValue(scores["err"]); e != "" {
 			items = append(items, Item{LevelWarn, "cadence",
 				"Scorecard portfolio only partially measured", e, Observed})
 		}
 		summary += fmt.Sprintf(", debt %d (%s)",
-			asInt(scores["debt"]), strmatch.DashIfBlank(asString(scores["trend_direction"])))
+			asInt(scores["debt"]), strmatch.DashIfBlank(scorecard.StringValue(scores["trend_direction"])))
 	} else {
 		summary += " (scores not run)"
 	}
 	if maturity, ok := in.Payload["maturity"].(map[string]any); ok && len(maturity) > 0 {
-		if e := asString(maturity["err"]); e != "" {
+		if e := scorecard.StringValue(maturity["err"]); e != "" {
 			items = append(items, Item{LevelWarn, "cadence",
 				"Maturity scorecard did not measure", e, Observed})
 		}
@@ -428,9 +428,9 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 				fmt.Sprintf("Maturity ladder-skip debt %d", debt),
 				"run `fak maturity next` and retire the skip rows first", Witnessed})
 		}
-		routeLane := asString(maturity["route_lane"])
-		routeItem := asString(maturity["route_item"])
-		routeKey := asString(maturity["route_key"])
+		routeLane := scorecard.StringValue(maturity["route_lane"])
+		routeItem := scorecard.StringValue(maturity["route_item"])
+		routeKey := scorecard.StringValue(maturity["route_key"])
 		skipped := asInt(maturity["route_skipped_private"])
 		if routeLane != "" {
 			summary += ", route " + routeLane
@@ -466,12 +466,12 @@ func interpretFleet(in PlaneInput) (PlaneStatus, []Item) {
 			if !ok {
 				continue
 			}
-			level := asString(m["level"])
+			level := scorecard.StringValue(m["level"])
 			if level != LevelCrit && level != LevelWarn {
 				continue
 			}
 			items = append(items, Item{level, "fleet",
-				asString(m["title"]), asString(m["detail"]), Observed})
+				scorecard.StringValue(m["title"]), scorecard.StringValue(m["detail"]), Observed})
 		}
 	}
 	total := asInt(in.Payload["total"])
@@ -529,7 +529,7 @@ func signalNoise(dispatch, cadence PlaneInput) SignalNoise {
 		}
 	}
 	if cadence.Err == "" && cadence.Payload != nil {
-		if w, ok := cadence.Payload["work"].(map[string]any); ok && asString(w["err"]) == "" {
+		if w, ok := cadence.Payload["work"].(map[string]any); ok && scorecard.StringValue(w["err"]) == "" {
 			commits := asInt(w["commits"])
 			sn.Commits = commits
 			sn.Ships = asInt(w["ships"])
@@ -697,16 +697,6 @@ func orNoPayload(runErr string) string {
 		return runErr
 	}
 	return "no payload"
-}
-
-func asString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 func asInt(v any) int {

@@ -40,6 +40,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the versioned payload tag so a consumer can pin the shape it folds.
@@ -163,8 +165,8 @@ func foldJournal(path string, windowCap int) (Fold, error) {
 	var f Fold
 	for _, row := range rows {
 		f.RowsConsidered++
-		syscall := strings.ToLower(asString(row["syscall"]))
-		verdict := strings.ToUpper(strings.TrimSpace(asString(row["verdict"])))
+		syscall := strings.ToLower(scorecard.StringValue(row["syscall"]))
+		verdict := strings.ToUpper(strings.TrimSpace(scorecard.StringValue(row["verdict"])))
 		switch syscall {
 		case "improve":
 			switch verdict {
@@ -251,23 +253,13 @@ func render(h Health) string {
 	return strings.Join(lines, "\n")
 }
 
-func asString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
-}
-
 // detailString pulls a string field out of the row's nested "detail" object, "" if absent.
 func detailString(row map[string]any, key string) string {
 	detail, ok := row["detail"].(map[string]any)
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(asString(detail[key]))
+	return strings.TrimSpace(scorecard.StringValue(detail[key]))
 }
 
 // resolveJournal returns the journal path: the explicit --journal, else defaultJournal

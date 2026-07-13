@@ -298,8 +298,8 @@ func Interpret(member Member, payload map[string]any, exitCode int, err string) 
 
 	// Standard control-pane envelope (scorecard, fresh_status).
 	ok := scorecard.True(payload["ok"])
-	verdict := asString(payload["verdict"])
-	detail := asString(payload["reason"])
+	verdict := scorecard.StringValue(payload["verdict"])
+	detail := scorecard.StringValue(payload["reason"])
 	switch {
 	case member.Gates && !ok:
 		base.State = "red"
@@ -636,16 +636,6 @@ func joinLabelParens(rows []MemberResult) string {
 		parts[i] = fmt.Sprintf("%s (%s)", r.Label, r.Detail)
 	}
 	return strings.Join(parts, ", ")
-}
-
-func asString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 // asIntMap normalizes a decoded "counts" object into an int map, tolerating the

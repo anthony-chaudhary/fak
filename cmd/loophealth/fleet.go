@@ -289,8 +289,8 @@ func classifyLoopmgr(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	kind := strings.ToLower(asString(r["kind"]))
-	status := strings.ToLower(asString(r["status"]))
+	kind := strings.ToLower(scorecard.StringValue(r["kind"]))
+	status := strings.ToLower(scorecard.StringValue(r["status"]))
 	kept := status == "claimed-done" || status == "witnessed"
 	return ts, true, kept, kind == "witness"
 }
@@ -300,7 +300,7 @@ func classifyNightrun(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	outcome := strings.ToLower(asString(r["outcome"]))
+	outcome := strings.ToLower(scorecard.StringValue(r["outcome"]))
 	kept := outcome == "collected"
 	_, witnessed := r["number"].(json.Number)
 	return ts, true, kept, witnessed
@@ -311,7 +311,7 @@ func classifyDojo(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	kept := strings.EqualFold(asString(r["verdict"]), "OK")
+	kept := strings.EqualFold(scorecard.StringValue(r["verdict"]), "OK")
 	return ts, true, kept, asInt(r["calibrated"]) > 0
 }
 
@@ -320,7 +320,7 @@ func classifyCadence(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	kept := strings.EqualFold(asString(r["verdict"]), "OK")
+	kept := strings.EqualFold(scorecard.StringValue(r["verdict"]), "OK")
 	return ts, true, kept, asInt(r["work_ships"]) > 0
 }
 
@@ -329,7 +329,7 @@ func classifyRSILoop(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	verdict := strings.ToUpper(asString(r["verdict"]))
+	verdict := strings.ToUpper(scorecard.StringValue(r["verdict"]))
 	return ts, true, verdict == "KEEP", verdict == "KEEP" || verdict == "REVERT"
 }
 
@@ -338,8 +338,8 @@ func classifyGuardRSI(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	kept := !strings.EqualFold(asString(r["decision"]), "deny")
-	return ts, true, kept, asString(r["hash"]) != ""
+	kept := !strings.EqualFold(scorecard.StringValue(r["decision"]), "deny")
+	return ts, true, kept, scorecard.StringValue(r["hash"]) != ""
 }
 
 func classifyDispatch(r map[string]any) (time.Time, bool, bool, bool) {

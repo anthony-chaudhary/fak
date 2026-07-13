@@ -168,7 +168,7 @@ func FoldRows(paths []string) Fold {
 			// accounting below (that would misread its crash-class Reason as a denial
 			// reason and its non-verdict Kind as an unknown verdict). It counts on its
 			// own worst-honesty-hole axis, keyed by the closed crash class.
-			if strings.EqualFold(strings.TrimSpace(asString(row["kind"])), "CHILD_CRASH") {
+			if strings.EqualFold(strings.TrimSpace(scorecard.StringValue(row["kind"])), "CHILD_CRASH") {
 				fold.TotalRows++
 				if class, ok := childRateLimitExitClass(row); ok {
 					fold.RateLimitExit++
@@ -176,14 +176,14 @@ func FoldRows(paths []string) Fold {
 					continue
 				}
 				fold.ChildCrash++
-				class := strings.TrimSpace(asString(row["reason"]))
+				class := strings.TrimSpace(scorecard.StringValue(row["reason"]))
 				if class == "" {
 					class = "UNCLASSIFIED"
 				}
 				fold.ByCrashClass[class]++
 				continue
 			}
-			verdict := normalizeVerdict(asString(row["verdict"]), asString(row["kind"]))
+			verdict := normalizeVerdict(scorecard.StringValue(row["verdict"]), scorecard.StringValue(row["kind"]))
 			if verdict == "" {
 				continue
 			}
@@ -192,7 +192,7 @@ func FoldRows(paths []string) Fold {
 			if !KnownVerdicts[verdict] {
 				fold.UnknownVerdict++
 			}
-			reason := strings.TrimSpace(asString(row["reason"]))
+			reason := strings.TrimSpace(scorecard.StringValue(row["reason"]))
 			if verdict == "DENY" || verdict == "QUARANTINE" {
 				if reason == "" {
 					fold.BlankReasonOnDeny++
@@ -210,9 +210,9 @@ func FoldRows(paths []string) Fold {
 
 func childRateLimitExitClass(row map[string]any) (string, bool) {
 	fields := []string{
-		asString(row["reason"]),
-		asString(row["witness"]),
-		asString(row["args_label"]),
+		scorecard.StringValue(row["reason"]),
+		scorecard.StringValue(row["witness"]),
+		scorecard.StringValue(row["args_label"]),
 	}
 	for _, raw := range fields {
 		low := strings.ToLower(strings.TrimSpace(raw))
@@ -625,16 +625,6 @@ func readText(path string) string {
 		return ""
 	}
 	return string(b)
-}
-
-func asString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 func hasWitness(v any) bool {

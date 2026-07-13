@@ -145,3 +145,15 @@ func True(v any) bool {
 	b, ok := v.(bool)
 	return ok && b
 }
+
+// StringValue renders loose report payload values: nil becomes empty, strings
+// remain unchanged, and other values use fmt's stable default representation.
+func StringValue(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
+}

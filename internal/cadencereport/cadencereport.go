@@ -245,8 +245,8 @@ func InterpretScores(payload map[string]any, runErr string) Scores {
 		s.GradeDebt = minInt(s.Debt, s.Measured*standingGradeDebtPerScorecard)
 	}
 	if tr, ok := payload["trend"].(map[string]any); ok {
-		s.TrendDirection = asString(tr["direction"])
-		s.TrendSummary = asString(tr["summary"])
+		s.TrendDirection = scorecard.StringValue(tr["direction"])
+		s.TrendSummary = scorecard.StringValue(tr["summary"])
 	}
 	if s.TrendDirection == "" {
 		s.TrendDirection = "unknown"
@@ -269,7 +269,7 @@ func MaturityFromScorecard(payload maturityscore.ScorecardPayload) Maturity {
 	m := Maturity{
 		Debt:         asInt(c["maturity_debt"]),
 		Score:        asInt(c["score"]),
-		Grade:        asString(c["grade"]),
+		Grade:        scorecard.StringValue(c["grade"]),
 		Capabilities: asInt(c["capabilities"]),
 		LadderSkips:  asInt(c["ladder_skips"]),
 		Backlog:      asInt(c["backlog"]),
@@ -299,15 +299,15 @@ func InterpretReleases(payload map[string]any, runErr string) Releases {
 		return Releases{Err: orNoPayload(runErr), Verdict: "ERROR"}
 	}
 	r := Releases{
-		Verdict: asString(payload["verdict"]),
+		Verdict: scorecard.StringValue(payload["verdict"]),
 		OK:      scorecard.True(payload["ok"]),
 	}
 	if rolling, ok := payload["rolling"].(map[string]any); ok {
-		r.Version = asString(rolling["last_tag"])
+		r.Version = scorecard.StringValue(rolling["last_tag"])
 	}
 	if action, ok := payload["next_action"].(map[string]any); ok {
-		r.ActionKind = asString(action["kind"])
-		r.ActionDetail = asString(action["detail"])
+		r.ActionKind = scorecard.StringValue(action["kind"])
+		r.ActionDetail = scorecard.StringValue(action["detail"])
 	}
 	if r.Version == "" {
 		r.Version = "(none)"
@@ -796,16 +796,6 @@ func orNoPayload(runErr string) string {
 		return runErr
 	}
 	return "no payload"
-}
-
-func asString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 func asInt(v any) int {
