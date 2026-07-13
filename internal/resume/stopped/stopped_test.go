@@ -77,7 +77,7 @@ func TestAuthInterruptParkedDoneQuietLive(t *testing.T) {
 	cases := []struct {
 		text string
 		age  float64
-		want string
+		want Disp
 	}{
 		{"OAuth token has expired · please run /login", 60, DispStoppedAuth},
 		{"[Request interrupted by user", 60, DispStoppedInterrupt},
@@ -148,7 +148,7 @@ func TestDecideBuckets(t *testing.T) {
 	if d.Rows[0].Session != "v1" {
 		t.Fatalf("rows[0] = %s, want the youngest (v1)", d.Rows[0].Session)
 	}
-	if d.Counts[DispStoppedLimit] != 1 || d.Counts[DispDone] != 1 {
+	if d.Counts[string(DispStoppedLimit)] != 1 || d.Counts[string(DispDone)] != 1 {
 		t.Fatalf("counts = %v", d.Counts)
 	}
 }
@@ -242,8 +242,9 @@ func TestReplaySafetyHonorsPerRowWindowAndFitting(t *testing.T) {
 func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
 	never := func(string) bool { return false }
 	// A live dispatch-loop owns work-key "loop:--lane ci" in project P. A crashed session
-	// (midtool) in the SAME project with the SAME work-key is a duplicate -> SKIP DUP_LIVE,
-	// never resumed. A stopped session with a DIFFERENT key resumes normally. A stopped
+	// (midtool) in the SAME project with the SAME work-key is a duplicate -> SKIP (flagged
+	// DupOfLive, real cause preserved), never resumed. A stopped session with a DIFFERENT key
+	// resumes normally. A stopped
 	// session with an EMPTY key resumes (fail-open). A same-key stopped session in a
 	// DIFFERENT project resumes (dedup is per-project).
 	rows := []Row{
@@ -264,12 +265,19 @@ func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
 		return false
 	}
 	if !inBucket(d.Skip, "dup") {
-		t.Fatalf("dup should be SKIP (DUP_LIVE); skip=%+v", d.Skip)
+		t.Fatalf("dup should be SKIP (duplicate-of-live); skip=%+v", d.Skip)
 	}
 	for _, r := range d.Skip {
 		if r.Session == "dup" {
-			if r.Disp != DispDupLive {
-				t.Fatalf("dup disp = %s, want %s", r.Disp, DispDupLive)
+			if !r.DupOfLive {
+				t.Fatalf("dup must be flagged DupOfLive; got %+v", r)
+			}
+			// #3800: the dedup rides its own axis — the row KEEPS its real stop-cause.
+			if r.Disp != DispStoppedMidtool {
+				t.Fatalf("dup must keep its real cause; disp = %s, want %s", r.Disp, DispStoppedMidtool)
+			}
+			if r.LiveSibling != "loop:--lane ci" {
+				t.Fatalf("dup live_sibling = %q, want the owning work-key", r.LiveSibling)
 			}
 			if r.BlockedBy == "" || !strings.Contains(r.BlockedBy, "loop:--lane ci") {
 				t.Fatalf("dup blocked_by = %q, want the work-key named", r.BlockedBy)
@@ -284,8 +292,20 @@ func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
 			t.Fatalf("%s should resume (not a live-owned duplicate); resume=%+v", sid, d.Resume)
 		}
 	}
-	if d.Counts[DispDupLive] != 1 {
-		t.Fatalf("DUP_LIVE count = %d, want 1", d.Counts[DispDupLive])
+	dupCount := 0
+	for _, r := range d.Skip {
+		if r.DupOfLive {
+			dupCount++
+		}
+	}
+	if dupCount != 1 {
+		t.Fatalf("want exactly 1 dup-of-live row in skip, got %d (skip=%+v)", dupCount, d.Skip)
+	}
+	// The dedup no longer masks the cause: the duplicate is still tallied under its real
+	// STOPPED_MIDTOOL disposition, so Counts stays a per-cause histogram over every row
+	// (midtool: dup + other + nokey + otherproj = 4; live = 1).
+	if d.Counts[string(DispStoppedMidtool)] != 4 || d.Counts[string(DispLive)] != 1 {
+		t.Fatalf("counts must tally preserved causes (midtool=4 live=1), got %v", d.Counts)
 	}
 }
 
@@ -298,7 +318,7 @@ func TestResidualSplitByLastRole(t *testing.T) {
 		name string
 		recs []Record
 		age  float64
-		want string
+		want Disp
 	}{
 		{"assistant-final residual is DONE", []Record{assistant("thinking about the next step")}, 60, DispStoppedDone},
 		{"user-final residual is MIDTURN", []Record{userTurn("tool output: 3 files changed")}, 60, DispStoppedMidturn},
@@ -376,15 +396,16 @@ func TestDecideRoutesMidturnAndDone(t *testing.T) {
 	if !in(d.Defer, "big") || in(d.Resume, "big") {
 		t.Fatalf("over-window STOPPED_MIDTURN should defer on replay-safety; defer=%+v resume=%+v", d.Defer, d.Resume)
 	}
-	if d.Counts[DispStoppedMidturn] != 2 || d.Counts[DispStoppedDone] != 1 {
+	if d.Counts[string(DispStoppedMidturn)] != 2 || d.Counts[string(DispStoppedDone)] != 1 {
 		t.Fatalf("counts must tabulate the split separately, got %v", d.Counts)
 	}
 }
 
-// TestDecideDoneWithLiveSiblingKeepsCause pins that STOPPED_DONE is excluded from the
-// DUP_LIVE relabel (like DONE): a finished session that happens to duplicate a live sibling
-// keeps its cause (STOPPED_DONE) rather than being masked as DUP_LIVE (#3783 / cf. #3800).
-// A STOPPED_MIDTURN duplicate — a genuine would-be resume candidate — is still redirected.
+// TestDecideDoneWithLiveSiblingKeepsCause pins that STOPPED_DONE is excluded from the dedup
+// flag (like DONE): a finished session that happens to duplicate a live sibling keeps its
+// cause (STOPPED_DONE) and is NOT marked DupOfLive — it is not a resume candidate, so the flag
+// would be noise (#3783 / cf. #3800). A STOPPED_MIDTURN duplicate — a genuine would-be resume
+// candidate — is flagged DupOfLive while keeping its real cause.
 func TestDecideDoneWithLiveSiblingKeepsCause(t *testing.T) {
 	never := func(string) bool { return false }
 	rows := []Row{
@@ -403,11 +424,11 @@ func TestDecideDoneWithLiveSiblingKeepsCause(t *testing.T) {
 		return nil
 	}
 	done := find(d.Skip, "done")
-	if done == nil || done.Disp != DispStoppedDone {
-		t.Fatalf("finished duplicate must stay STOPPED_DONE in Skip (cause preserved), got %+v", d.Skip)
+	if done == nil || done.Disp != DispStoppedDone || done.DupOfLive {
+		t.Fatalf("finished duplicate must stay STOPPED_DONE in Skip, not flagged DupOfLive (cause preserved), got %+v", d.Skip)
 	}
 	mt := find(d.Skip, "mt")
-	if mt == nil || mt.Disp != DispDupLive {
-		t.Fatalf("mid-turn duplicate should be redirected to DUP_LIVE; skip=%+v", d.Skip)
+	if mt == nil || !mt.DupOfLive || mt.Disp != DispStoppedMidturn {
+		t.Fatalf("mid-turn duplicate should be flagged DupOfLive with its cause preserved; skip=%+v", d.Skip)
 	}
 }

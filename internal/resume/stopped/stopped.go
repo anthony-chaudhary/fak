@@ -65,58 +65,73 @@ type Record struct {
 	CWD, GitBranch, Version, SessionID string
 }
 
+// Disp is the closed, SINGLE-AXIS stop-cause vocabulary: it answers exactly one question —
+// WHY a session stopped (or that it is live / parked / done). It is deliberately a named
+// type, not a bare string, so the set stays closed and an out-of-vocabulary value cannot be
+// assigned in by accident. The orthogonal "is this a duplicate of a live sibling?" question
+// is NOT a Disp value — it rides its own axis on Row.DupOfLive — so a row can be STOPPED_AUTH
+// *and* a duplicate without either fact erasing the other (#3800).
+type Disp string
+
 // The closed disposition vocabulary.
 const (
 	// DispLive: the transcript was appended to within LiveMinutes — a live agent owns it.
-	DispLive = "LIVE"
+	DispLive Disp = "LIVE"
 	// DispStoppedLimit: the terminal turn is a synthetic usage-limit banner — the owning
 	// account is rate-limited until the named reset.
-	DispStoppedLimit = "STOPPED_LIMIT"
-	// DispStoppedAuth: the terminal text is an auth/credit/access wall.
-	DispStoppedAuth = "STOPPED_AUTH"
+	DispStoppedLimit Disp = "STOPPED_LIMIT"
+	// DispStoppedAuth: the terminal text is an auth/credit/access wall. It OUTRANKS a
+	// co-occurring limit banner (a login wall outlives any reset — waiting out the throttle
+	// would still leave the seat walled), so Classify tests it before the limit; the dropped
+	// limit signal is retained on Row.AlsoSignals rather than silently lost (#3800).
+	DispStoppedAuth Disp = "STOPPED_AUTH"
 	// DispStoppedInterrupt: the terminal text is a login/user interruption.
-	DispStoppedInterrupt = "STOPPED_INTERRUPT"
+	DispStoppedInterrupt Disp = "STOPPED_INTERRUPT"
 	// DispStoppedMidtool: an assistant tool_use never got its tool_result — died mid-work.
-	DispStoppedMidtool = "STOPPED_MIDTOOL"
+	DispStoppedMidtool Disp = "STOPPED_MIDTOOL"
 	// DispParkedWait: the last assistant text says it is awaiting a background task — the
 	// session is parked, not dead.
-	DispParkedWait = "PARKED_WAIT"
+	DispParkedWait Disp = "PARKED_WAIT"
 	// DispDone: the last assistant text reads as a wrap-up.
-	DispDone = "DONE"
+	DispDone Disp = "DONE"
 	// DispStoppedDone: a residual stop whose terminal record is an ASSISTANT turn with
 	// nothing after it — the model finished a turn and the session went idle without a
 	// recognizable wrap-up phrase. Leave alone: a finished turn is not stranded work. Split
 	// out of the STOPPED_QUIET umbrella by last_role (#3783).
-	DispStoppedDone = "STOPPED_DONE"
+	DispStoppedDone Disp = "STOPPED_DONE"
 	// DispStoppedMidturn: a residual stop whose terminal record is a USER turn (a tool_result
 	// or user/file input) — the model was ABOUT TO ACT when the process died, so real work is
 	// stranded mid-turn. Resume-eligible, unfinished work. Split out of the STOPPED_QUIET
 	// umbrella by last_role (#3783). (An unmatched trailing tool_use is the more specific
 	// DispStoppedMidtool, which still wins over this residual split.)
-	DispStoppedMidturn = "STOPPED_MIDTURN"
+	DispStoppedMidturn Disp = "STOPPED_MIDTURN"
 	// DispStoppedQuiet: the residual umbrella — stopped with no recognizable terminal signal
 	// AND no resolvable terminal role (an empty tail). Since #3783 the assistant-final and
 	// user-final residuals are the typed DispStoppedDone / DispStoppedMidturn; this remains
 	// only for the genuinely-unknown tail and as the back-compat alias.
-	DispStoppedQuiet = "STOPPED_QUIET"
-	// DispDupLive: a stopped session whose work a LIVE session in the same project already
-	// owns — a crashed duplicate. Resuming it re-runs work in flight and collides on the
-	// shared trunk, so it is a SKIP (never relaunched). Assigned by Decide, not Classify:
-	// it is a cross-session verdict, not a property of one transcript.
-	DispDupLive = "DUP_LIVE"
+	DispStoppedQuiet Disp = "STOPPED_QUIET"
 )
 
 // Row is the classified verdict for one session transcript — the same fields the Python
 // emitted, so the machine record keeps its shape.
 type Row struct {
-	Disp    string  `json:"disp"`
-	AgeMin  float64 `json:"age_min"`
-	SizeKB  int64   `json:"size_kb"`
-	SeenUTC string  `json:"seen_utc"`
-	Session string  `json:"session"`
-	CWD     string  `json:"cwd,omitempty"`
-	Git     string  `json:"git,omitempty"`
-	Version string  `json:"version,omitempty"`
+	// Disp is the SINGLE-AXIS stop-cause (WHY it stopped). The duplicate-of-live verdict is a
+	// separate axis — see DupOfLive — so a real cause is never overwritten by the dedup pass (#3800).
+	Disp Disp `json:"disp"`
+	// AlsoSignals retains any SECONDARY terminal stop-signal that co-occurred with the primary
+	// Disp cause but lost the documented severity ranking — today only a usage-limit banner that
+	// co-occurs with an auth wall (Disp=STOPPED_AUTH, AlsoSignals=["STOPPED_LIMIT"]). It keeps a
+	// concurrent signal from being silently dropped, so a reader still sees the seat was ALSO
+	// throttled even though auth is what must clear first (#3800). Empty on the common
+	// single-signal turn. Set by Classify.
+	AlsoSignals []string `json:"also_signals,omitempty"`
+	AgeMin      float64  `json:"age_min"`
+	SizeKB      int64    `json:"size_kb"`
+	SeenUTC     string   `json:"seen_utc"`
+	Session     string   `json:"session"`
+	CWD         string   `json:"cwd,omitempty"`
+	Git         string   `json:"git,omitempty"`
+	Version     string   `json:"version,omitempty"`
 	// ThrottleReset is the banner's reset window ONLY when the throttle is current (the
 	// terminal turn is the banner); ThrottleSeen is the last banner seen anywhere in the
 	// tail, kept for observability even when a later clean turn superseded it.
@@ -138,6 +153,15 @@ type Row struct {
 	WorkKey string `json:"work_key,omitempty"`
 	// BlockedBy is filled by Decide on deferred rows: why this session cannot resume now.
 	BlockedBy string `json:"blocked_by,omitempty"`
+	// DupOfLive marks a stopped row whose (project, work-key) a LIVE sibling already owns — a
+	// crashed duplicate Decide routes to Skip so it is never relaunched into work in flight. It
+	// is a SEPARATE axis from Disp: the row KEEPS its real stop-cause on Disp (STOPPED_AUTH,
+	// STOPPED_MIDTOOL, …) while this flag records the dedup verdict, so recovery can still see
+	// WHY it stopped (#3800). Set by Decide; false unless a live sibling owns the same work.
+	DupOfLive bool `json:"dup_of_live,omitempty"`
+	// LiveSibling is the work-key of the live session this row duplicates (equals WorkKey) — the
+	// "why" behind DupOfLive, kept so a reader need not re-derive it. Empty unless DupOfLive.
+	LiveSibling string `json:"live_sibling,omitempty"`
 	// MaxContextTokens is the target model's context window for the session this row would
 	// resume ONTO — the ceiling the replay-safety fit check measures the estimated replayed
 	// transcript against. The shell supplies it per session (from the target model's
@@ -206,13 +230,25 @@ func Classify(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSess
 		lastSynthetic = last.Synthetic
 	}
 	throttleCurrent := throttleSeen != "" && lastSynthetic
+	authWall := sessionsignals.IsAuthError(lt)
 
 	disp := DispStoppedQuiet
+	var alsoSignals []string
 	switch {
+	case authWall:
+		// Auth is tested BEFORE the limit (#3800): a turn that is BOTH a usage-limit banner and
+		// an auth wall must classify as STOPPED_AUTH, because a login wall outlives any reset —
+		// an operator who waited out the throttle would still find the seat walled. This is the
+		// same severity precedence sessionsignals.TerminalFailure encodes.
+		disp = DispStoppedAuth
+		if throttleCurrent {
+			// The co-occurring limit lost the ranking but is NOT dropped: retain it as a
+			// secondary so a reader still sees the seat was also throttled (the drop this issue
+			// names). One axis decides the action; the other stays visible.
+			alsoSignals = append(alsoSignals, string(DispStoppedLimit))
+		}
 	case throttleCurrent:
 		disp = DispStoppedLimit
-	case sessionsignals.IsAuthError(lt):
-		disp = DispStoppedAuth
 	case ageMin <= LiveMinutes:
 		disp = DispLive
 	case interruptRE.MatchString(lt):
@@ -244,7 +280,7 @@ func Classify(recs []Record, ageMin float64, sizeKB int64, seenUTC, fallbackSess
 		throttleReset = throttleSeen
 	}
 	return Row{
-		Disp: disp, AgeMin: math.Round(ageMin*10) / 10, SizeKB: sizeKB, SeenUTC: seenUTC,
+		Disp: disp, AlsoSignals: alsoSignals, AgeMin: math.Round(ageMin*10) / 10, SizeKB: sizeKB, SeenUTC: seenUTC,
 		Session: session, CWD: cwd, Git: git, Version: ver,
 		ThrottleReset: throttleReset, ThrottleSeen: throttleSeen, ThrottleCurrent: throttleCurrent,
 		PendingTool: pendingTool, LastRole: lastRole, Last: clipLast(lt, 300), Path: path,
@@ -354,19 +390,22 @@ func Decide(rows []Row, throttleActive func(reset string) bool) Decisions {
 
 	d := Decisions{AccountThrottle: acctThrottle, Counts: map[string]int{}, Rows: sorted}
 	for _, r := range sorted {
-		// A crashed duplicate of a live session skips before any resume decision. The
-		// leave-alone states (LIVE / DONE / STOPPED_DONE / PARKED) are left to their own
-		// buckets — only a would-be resume candidate is redirected. Excluding STOPPED_DONE
-		// keeps a finished session's cause intact rather than masking it with DUP_LIVE (#3783).
+		// A crashed duplicate of a live session skips before any resume decision, but KEEPS its
+		// real stop-cause on Disp — the dedup verdict rides the separate DupOfLive axis, so recovery
+		// can still see WHY it stopped instead of the cause being masked (#3800). Its cause is still
+		// tallied in Counts like any row. The leave-alone states (LIVE / DONE / STOPPED_DONE /
+		// PARKED) are excluded: they are not resume candidates, so flagging them as duplicates would
+		// be noise, not a saved relaunch (cf. #3783).
 		if r.WorkKey != "" && r.Disp != DispLive && r.Disp != DispDone && r.Disp != DispStoppedDone &&
 			r.Disp != DispParkedWait && liveOwned[r.Project+"\x00"+r.WorkKey] {
-			r.Disp = DispDupLive
+			r.DupOfLive = true
+			r.LiveSibling = r.WorkKey
 			r.BlockedBy = "duplicate of a live session owning the same work (" + r.WorkKey + ")"
-			d.Counts[DispDupLive]++
+			d.Counts[string(r.Disp)]++
 			d.Skip = append(d.Skip, r)
 			continue
 		}
-		d.Counts[r.Disp]++
+		d.Counts[string(r.Disp)]++
 		switch r.Disp {
 		case DispStoppedMidtool, DispStoppedInterrupt, DispStoppedMidturn, DispStoppedQuiet:
 			// Replay-safety precondition first: a resume whose replayed transcript would

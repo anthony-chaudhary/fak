@@ -29,7 +29,7 @@ import (
 func deferSignal(r Row) choicetriage.Signal {
 	return choicetriage.Signal{
 		Source:   "resume",
-		Question: r.Disp,
+		Question: string(r.Disp),
 		Detail:   r.BlockedBy,
 	}
 }
