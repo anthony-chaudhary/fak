@@ -517,6 +517,107 @@ def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, in
     return out
 
 
+
+def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
+    """Return lexical Go function spans as (start, end, signature, body)."""
+    starts = re.finditer(
+        r"(?m)^\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*\s*\([^\n{}]*\)"
+        r"(?:\s*\([^\n{}]*\)|\s+[^\n{]+)?\s*\{", text)
+    out: list[tuple[int, int, str, str]] = []
+    for m in starts:
+        brace = text.find("{", m.start(), m.end())
+        depth, quote, escaped, end = 0, "", False, -1
+        for i in range(brace, len(text)):
+            ch = text[i]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif ch == "\\" and quote != "`":
+                    escaped = True
+                elif ch == quote:
+                    quote = ""
+                continue
+            if ch in {'"', "'", "`"}:
+                quote = ch
+            elif ch == "{": depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end > 0:
+            out.append((m.start(), end, text[m.start():brace].strip(), text[brace + 1:end - 1]))
+    return out
+
+
+def _owning_function(text: str, start_line: int, end_line: int):
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    start = starts[max(0, start_line - 1)]
+    end = starts[end_line] if end_line < len(starts) else len(text)
+    for fstart, fend, signature, body in _function_spans(text):
+        if fstart <= start and start < fend:
+            return signature, body
+    return None
+
+
+def _behavior_fingerprint(text: str) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    """Identifier-insensitive structure plus value-sensitive return expressions.
+
+    Clone discovery deliberately collapses every literal for recall (#780).  This
+    confirmation rung keeps that rule for ordinary tuning constants, but preserves
+    literal values in returns so ``0/0 -> 1`` cannot be grouped with ``0/0 -> 0``.
+    """
+    clean = "\n".join(code_lines_of(text))
+    structure = tuple(tok for tok, _, _ in go_tokens(clean))
+    returns = []
+    for match in re.finditer(r"(?m)\breturn\b([^\n;}]*)", clean):
+        expr = match.group(1)
+        normalized = [tok for tok, _, _ in go_tokens(expr)]
+        literals = re.findall(
+            r'`[^`]*`|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|'
+            r'(?<![A-Za-z_])(?:\d+(?:\.\d*)?|\.\d+)(?:[eEpP][+-]?\d+)?',
+            expr,
+        )
+        returns.append(tuple(normalized + ["VALUE=" + value for value in literals]))
+    return structure, tuple(returns)
+
+
+def _is_pure_builder_preamble(files: dict[str, str], sites: list[tuple[str, int, int]]) -> bool:
+    """True for constructor loops that only project fields and append rows."""
+    blobs = []
+    for path, start, end in sites:
+        owner = _owning_function(files[path], start, end)
+        if owner is None:
+            return False
+        blobs.append(owner[1])
+    for body in blobs:
+        code = "\n".join(code_lines_of(body))
+        if not all(token in code for token in ("make(", "for ", "range ", "append(")):
+            return False
+        if re.search(r"\b(if|switch|select|go|defer|panic)\b", code):
+            return False
+        if re.search(r"[+*/%]|(?:==|!=|<=|>=|&&|\|\|)", code):
+            return False
+        calls = re.findall(r"\b([A-Za-z_]\w*)\s*\(", code)
+        if any(call not in {"make", "append", "len"} for call in calls):
+            return False
+    return True
+
+
+def _behavior_equivalent_group(files: dict[str, str], sites: list[tuple[str, int, int]]) -> bool:
+    """Cross-definition clones count only when signatures and bodies agree."""
+    owners = []
+    for path, start, end in sites:
+        owner = _owning_function(files[path], start, end)
+        if owner is None:
+            return True
+        signature, body = owner
+        signature = re.sub(
+            r"(?s)^(\s*func\s+(?:\([^)]*\)\s*)?)[A-Za-z_]\w*", r"\1NAME", signature)
+        owners.append((_behavior_fingerprint(signature), _behavior_fingerprint(body)))
+    return len(set(owners)) <= 1
+
+
 def _clone_sample(text: str, lineno: int) -> str:
     """A short, human-readable hint for a clone finding: the source line at `lineno`
     (1-based), trimmed. The token engine matches on structure; this just labels it."""
@@ -848,6 +949,16 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
         # Pure-entry-point group -> advisory, not debt. Every site is a cmd/*/main.go
         # command skeleton; de-duplicating across independent binaries worsens
         # readability. One internal/ site keeps the group HARD (see _is_entry_point_only).
+        if _is_pure_builder_preamble(files, sites):
+            soft.append(
+                "builder/loop preamble (projection only): "
+                + ", ".join(f"{f}:{start}" for f, start, _ in sites))
+            continue
+        if not _behavior_equivalent_group(files, sites):
+            soft.append(
+                "behavior-divergent token match (signature/body differ): "
+                + ", ".join(f"{f}:{start}" for f, start, _ in sites))
+            continue
         if _is_entry_point_only(sites):
             f0, s0, e0 = sites[0]
             span = max(1, e0 - s0 + 1)

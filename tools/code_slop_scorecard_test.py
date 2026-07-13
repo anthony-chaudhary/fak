@@ -244,6 +244,108 @@ def test_duplication_catches_reformatted_clone():
 
 # --- duplication sub-category re-projection (payoff taxonomy) --------------
 
+def _semantic_ratio(name: str, zero_result: int) -> str:
+    return f"""func {name}(a, b float64) float64 {{
+    if b == 0 {{
+        return {zero_result}
+    }}
+    result := a / b
+    if result < 0 {{
+        result = -result
+    }}
+    if result > 100 {{
+        result = 100
+    }}
+    return result
+}}
+"""
+
+
+def test_duplication_behavior_gate_splits_itoa_ratio_divergence():
+    files = {
+        "itoa.go": "package x\n" + _semantic_ratio("itoa", 1),
+        "ratio.go": "package x\n" + _semantic_ratio("ratio", 0),
+    }
+    k = cs.kpi_duplication(files)
+    assert k["defects"] == [], k["defects"]
+    assert any("behavior-divergent" in row for row in k["soft"]), k["soft"]
+
+
+def test_duplication_behavior_gate_keeps_equivalent_renamed_functions():
+    files = {
+        "ratio.go": "package x\n" + _semantic_ratio("ratio", 0),
+        "rate.go": "package x\n" + _semantic_ratio("rate", 0),
+    }
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
+def test_duplication_import_block_is_soft_not_extractable():
+    block = """package {pkg}
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "os"
+    "path/filepath"
+    "sort"
+    "strings"
+)
+"""
+    k = cs.kpi_duplication({
+        "a.go": block.format(pkg="a"),
+        "b.go": block.format(pkg="b"),
+    })
+    assert k["defects"] == [], k["defects"]
+
+
+def test_duplication_builder_preamble_is_soft_not_extractable():
+    preamble = """func build{suffix}(items []Item) []Row {{
+    rows := make([]Row, 0, len(items))
+    for _, item := range items {{
+        row := Row{{
+            Name: item.Name,
+            Kind: item.Kind,
+            Path: item.Path,
+        }}
+        rows = append(rows, row)
+    }}
+    return rows
+}}
+"""
+    k = cs.kpi_duplication({
+        "a.go": "package x\n" + preamble.format(suffix="A"),
+        "b.go": "package x\n" + preamble.format(suffix="B"),
+    })
+    assert k["defects"] == [], k["defects"]
+
+
+def test_duplication_post_extraction_calls_do_not_increase_extractable_count():
+    helper = """func sharedRatio(a, b float64) float64 {
+    if b == 0 { return 0 }
+    result := a / b
+    if result < 0 { result = -result }
+    if result > 100 { result = 100 }
+    return result
+}
+"""
+    before = cs.kpi_duplication({
+        "a.go": "package x\n" + _semantic_ratio("ratioA", 0),
+        "b.go": "package x\n" + _semantic_ratio("ratioB", 0),
+        "c.go": "package x\n" + _semantic_ratio("ratioC", 0),
+    })["subcategories"]["extractable"]
+    after = cs.kpi_duplication({
+        "helper.go": "package x\n" + helper,
+        "a.go": "package x\nfunc ratioA(a, b float64) float64 { return sharedRatio(a, b) }\n",
+        "b.go": "package x\nfunc ratioB(a, b float64) float64 { return sharedRatio(a, b) }\n",
+        "c.go": "package x\nfunc ratioC(a, b float64) float64 { return sharedRatio(a, b) }\n",
+    })["subcategories"]["extractable"]
+    assert before >= 1
+    assert after < before
+
+
 def test_duplication_subcategory_extractable_ordered_before_pair():
     # The keystone re-projection: a >=3-site cross-file group (the real missing-helper)
     # must be LABELLED extractable and EMITTED before a 2-site pair, so a /slop-score
