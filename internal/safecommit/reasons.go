@@ -19,6 +19,7 @@ func RefusalReasons() []string {
 		ReasonNothingStaged,
 		ReasonLockBusy,
 		ReasonWindowFull,
+		ReasonWriterLeaseHeld,
 		ReasonStaleBaseDeletion,
 		ReasonSpuriousStagedDeletion,
 		ReasonCachedRemoveWorktreePresent,
@@ -54,7 +55,7 @@ const (
 func RefusalExitCode(reason string) (code int, ok bool) {
 	switch reason {
 	case ReasonOffTrunk, ReasonMergeInProgress, ReasonNothingStaged,
-		ReasonLockBusy, ReasonWindowFull, ReasonStaleBaseDeletion,
+		ReasonLockBusy, ReasonWindowFull, ReasonWriterLeaseHeld, ReasonStaleBaseDeletion,
 		ReasonSpuriousStagedDeletion, ReasonCachedRemoveWorktreePresent,
 		ReasonPreStagedPathOverlap, ReasonCoreSelfModify, ReasonReviewRefuted:
 		return ExitPreCommitRefusal, true

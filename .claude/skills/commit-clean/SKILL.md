@@ -73,6 +73,7 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 | `CORE_SELF_MODIFY` | a hard-self core-lock path — needs an external maintenance witness (`--core-lock-maintenance-witness`). |
 | `REVIEW_REFUTED` | the opt-in scout review refuted the diff — fix the finding before re-committing. |
 | `LOCK_BUSY` / `WINDOW_FULL` | another fak writer holds the lane — retryable, wait and retry. |
+| `WRITER_LEASE_HELD` | a fak-managed sync-apply window holds the #4240 worktree writer lease — retryable, wait for the sync to finish and retry. |
 | `HOOK_REFUSED` | a git/commit hook declined — read the hook output and fix the cause. |
 | `PUSH_REJECTED` | non-fast-forward — integrate via `fak sync apply`, never force. |
 
@@ -82,7 +83,7 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 
 - **0** — success: committed, verified, (pushed if asked).
 - **2** — usage error.
-- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `STALE_BASE_DELETION`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
+- **3** — a PRE-commit refusal: nothing landed, safe to retry or replan. Reasons: `OFF_TRUNK`, `MERGE_IN_PROGRESS`, `NOTHING_STAGED`, `LOCK_BUSY`, `WINDOW_FULL`, `WRITER_LEASE_HELD`, `STALE_BASE_DELETION`, `SPURIOUS_STAGED_DELETION`, `CACHED_REMOVE_WORKTREE_PRESENT`, `PRESTAGED_PATH_OVERLAP`, `CORE_SELF_MODIFY`, `REVIEW_REFUTED`.
 - **1** — a POST-attempt failure: the commit ran but its result is bad — halt and have a human review. Reasons: `PATHSPEC_RACE`, `MESSAGE_RACE`, `SYMLINK_ESCAPE`, `HOOK_REFUSED`, `PUSH_REJECTED`.
 
 ## Steps

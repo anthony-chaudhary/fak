@@ -151,6 +151,8 @@ const (
 	// spuriousdelete.go with the whole-path stale-index guard that emits it.
 	// ReasonCachedRemoveWorktreePresent ("CACHED_REMOVE_WORKTREE_PRESENT") lives in
 	// cachedremove.go with the git-rm-cached/pathspec guard that emits it.
+	// ReasonWriterLeaseHeld ("WRITER_LEASE_HELD") lives in writer_lease.go with the
+	// #4240 worktree-writer-lease wiring (#4611) that emits it.
 )
 
 // Result is the structured outcome. A non-empty Reason is a refusal/race; a clean commit
@@ -278,6 +280,22 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		return res, nil
 	}
 	defer releaseLock()
+
+	// (5b) Honor the cooperative worktree writer lease (#4240 → #4611): sync apply holds
+	// it across its whole assess+apply window, and a managed commit must never mutate the
+	// tree mid-window. Held is a retryable value (WRITER_LEASE_HELD), not an error; on
+	// success the lease is held for the rest of the mutation window so the refusal is
+	// symmetric — a concurrent sync apply is refused while this commit writes.
+	releaseWriterLease, leaseHeldDetail, wlErr := acquireWorktreeWriterLease(opts)
+	if wlErr != nil {
+		return res, wlErr
+	}
+	if leaseHeldDetail != "" {
+		res.Reason = ReasonWriterLeaseHeld
+		res.Detail = leaseHeldDetail
+		return res, nil
+	}
+	defer releaseWriterLease()
 
 	// (6) Capture HEAD, then commit by pathspec with the message in a file.
 	if sha, herr := headSHA(ctx, run, opts.Dir); herr != nil {
