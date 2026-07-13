@@ -6,10 +6,15 @@
 // instead of being re-offered forever (#1777), and so different kinds of
 // failure cool down at different rates instead of all sharing one window
 // (#1778). A held issue additionally carries a structured, queryable
-// BlockReason -- same-error-repeated / distinct-errors / precondition-unmet --
-// and the Route that reason drives (retry, escalate, known-bad), so an operator
-// can tell a genuinely stuck issue from a flaky one instead of reading a bare
-// count (#2860). It never decides WHY an attempt failed; it only counts,
+// BlockReason -- same-error-repeated / distinct-errors / precondition-unmet /
+// transient-exhausted -- and the Route that reason drives (retry, escalate,
+// known-bad), so an operator can tell a genuinely stuck issue from a flaky one
+// instead of reading a bare count (#2860). Crossing the budget is adjudicated,
+// not blunt (#2892): a history whose LAST failure is transient (rate-limit,
+// network flake) keeps retrying under its measured class backoff up to an
+// extended transient ceiling, and only a structural or exhausted verdict --
+// recorded on the Decision -- actually holds the issue. It never decides WHY
+// an attempt failed; it only counts,
 // classifies, and thresholds facts the caller already gathered. Pure: same Input
 // in, same Decision out; zero I/O, zero clock reads -- the caller supplies "now"
 // as data (Input.NowUnix), the same discipline internal/dispatchorder and
@@ -65,6 +70,13 @@ const (
 	// longer than a flaky test (#1778's distinct-window rationale, applied to
 	// the transient class high-concurrency fleets actually hit most).
 	FailureClassRateLimit FailureClass = "rate_limit"
+	// FailureClassNetwork: the attempt failed on a network flake (connection
+	// reset/refused mid-run, DNS blip, unreachable host, broken socket) -- the
+	// other self-clearing transient family (#2892), a short window just above
+	// rate-limit's. A bare "timeout" deliberately does NOT classify here: a
+	// timed-out attempt is as often a wedged worker as a slow wire, and reading
+	// it as transient would defer a block the history has actually earned.
+	FailureClassNetwork FailureClass = "network"
 	// FailureClassAmbiguousScope: the attempt failed because the issue's scope
 	// was unclear or contested (e.g. it collided with a concurrent peer's
 	// area, or the worker could not determine the target package). A long
@@ -94,6 +106,14 @@ func classify(raw string) FailureClass {
 		return FailureClassRateLimit
 	case strmatch.ContainsAny(low, "auth", "credential", "permission", "unauthorized", "forbidden"):
 		return FailureClassAuth
+	// Network is checked AFTER auth so a certificate/permission failure whose
+	// prose also mentions the wire ("certificate signed by unknown authority",
+	// "ssh connection denied: permission") keeps its needs-a-human reading --
+	// misreading a config wall as a self-clearing flake would defer a block
+	// forever -- but BEFORE merge/test, so "connection reset during test run"
+	// reads as the infra flake it is.
+	case strmatch.ContainsAny(low, "network", "connection", "dns", "unreachable", "socket", "broken pipe"):
+		return FailureClassNetwork
 	case strmatch.ContainsAny(low, "merge", "conflict", "rebase"):
 		return FailureClassMerge
 	case strmatch.ContainsAny(low, "test", "assert"):
@@ -119,8 +139,38 @@ var DefaultBackoffSeconds = map[FailureClass]int64{
 	FailureClassMerge:          30 * 60,  // 30m: give trunk time to move
 	FailureClassTest:           10 * 60,  // 10m: cheap to retry, often flaky
 	FailureClassRateLimit:      5 * 60,   // 5m: a shared capacity window reopening on its own
+	FailureClassNetwork:        6 * 60,   // 6m: a wire flake settling; above rate-limit (the documented shortest), below test
 	FailureClassAmbiguousScope: 2 * 3600, // 2h: needs a human to resolve scope
 	FailureClassOther:          60 * 60,  // 1h: moderate default
+}
+
+// transientClass reports whether a classified FailureClass is self-clearing
+// (#2892): the failure says nothing about the issue itself -- the fleet hit a
+// shared capacity window or a wire flake that reopens on its own. These are
+// the classes whose budget crossing is deferred to the transient ceiling
+// instead of holding on the raw count.
+func transientClass(c FailureClass) bool {
+	return c == FailureClassRateLimit || c == FailureClassNetwork
+}
+
+// defaultTransientBudgetMultiplier sizes the extended attempt ceiling a
+// transient-last history earns when Input.TransientBudget is unset: Budget x
+// this. Wide enough that a routine rate-limit window (a handful of throttled
+// attempts under minutes-scale backoff) never exhausts it, small enough that a
+// throttle which NEVER clears still blocks the issue in bounded attempts.
+const defaultTransientBudgetMultiplier = 4
+
+// transientCeiling resolves the extended attempt ceiling applied when the last
+// recorded failure is transient: Input.TransientBudget when positive, else
+// Budget x defaultTransientBudgetMultiplier. Setting TransientBudget equal to
+// Budget deliberately restores the blunt hard stop for transient failures --
+// except the block then carries the exhausted verdict, never a known-bad
+// signature.
+func transientCeiling(in Input) int {
+	if in.TransientBudget > 0 {
+		return in.TransientBudget
+	}
+	return in.Budget * defaultTransientBudgetMultiplier
 }
 
 // BlockReason is the closed, structured vocabulary explaining WHY an issue was
@@ -154,6 +204,38 @@ const (
 	// escalate. Checked FIRST, before repetition, because three identical auth
 	// failures are a precondition problem, not a known-bad code signature.
 	BlockReasonPreconditionUnmet BlockReason = "PRECONDITION_UNMET"
+	// BlockReasonTransientExhausted: the LAST attempt failed on a transient
+	// class (rate-limit, network flake) and the issue is being blocked anyway --
+	// which can only mean the extended transient ceiling is spent (#2892).
+	// Nothing about the issue itself failed, so a known-bad signature would
+	// poison the fleet ledger with a self-clearing wall; but a capacity window
+	// that never reopened across the whole extended budget is an account/infra
+	// condition a human should look at, so it escalates rather than re-offering
+	// yet another worker onto the same wall.
+	BlockReasonTransientExhausted BlockReason = "TRANSIENT_EXHAUSTED"
+)
+
+// Verdict is the closed adjudication of a budget crossing (#2892): what Decide
+// decided once AttemptCount reached Budget, recorded on the Decision so an
+// adjudicator can later verify the call -- witnessed, not just logged. The
+// whole verdict is a pure fold over the recorded per-attempt reasons
+// (Attempt.FailureClass/AtUnix), so re-running Decide over the same history
+// reproduces it exactly. Empty until the budget is actually crossed: there is
+// no adjudication to witness before then.
+type Verdict string
+
+const (
+	// VerdictTransientRetry: the budget was crossed but the last failure is
+	// transient and the extended transient ceiling still has room -- the blunt
+	// hold is deferred and the issue keeps retrying under its measured
+	// class-specific backoff (Hermes would have blocked it here).
+	VerdictTransientRetry Verdict = "transient_retry"
+	// VerdictTransientExhausted: the transient headroom is spent -- held, with
+	// BlockReasonTransientExhausted recorded.
+	VerdictTransientExhausted Verdict = "transient_exhausted"
+	// VerdictStructuralBlock: the last failure is structural (not transient) at
+	// or past the budget -- held, with the #2860 BlockReason recorded.
+	VerdictStructuralBlock Verdict = "structural_block"
 )
 
 // Route is the closed routing verdict a BlockReason drives -- the point of the
@@ -192,15 +274,22 @@ func preconditionClass(c FailureClass) bool {
 // read a genuinely stuck issue as flaky. An empty history yields empty values --
 // there is nothing to explain.
 //
-// Order matters. Precondition is checked before repetition (an unmet
-// precondition repeated N times is still a precondition), and repetition
-// requires at least two attempts, so a known-bad signature is never promoted off
-// a single sample.
+// Order matters. Transient is checked first (#2892): blocking a history whose
+// last failure is self-clearing can only mean the extended transient budget is
+// exhausted, and letting it fall through to repetition would promote a
+// rate-limit storm into a known-bad signature -- the exact ledger poisoning
+// the transient adjudication exists to prevent. Then precondition before
+// repetition (an unmet precondition repeated N times is still a
+// precondition), and repetition requires at least two attempts, so a
+// known-bad signature is never promoted off a single sample.
 func ClassifyBlock(attempts []Attempt) (BlockReason, Route) {
 	if len(attempts) == 0 {
 		return "", ""
 	}
 	last := classify(attempts[len(attempts)-1].FailureClass)
+	if transientClass(last) {
+		return BlockReasonTransientExhausted, RouteEscalate
+	}
 	if preconditionClass(last) {
 		return BlockReasonPreconditionUnmet, RouteEscalate
 	}
@@ -243,6 +332,13 @@ type Input struct {
 	// before the issue is held for triage. A Budget <= 0 means unlimited --
 	// the issue is never held on attempt count alone.
 	Budget int `json:"budget"`
+	// TransientBudget is the extended attempt ceiling applied instead of
+	// Budget when the LAST recorded failure is transient (#2892) -- rate-limit
+	// or network -- so a self-clearing wall keeps retrying under its measured
+	// backoff instead of being blunt-blocked at Budget. <= 0 means the
+	// default, Budget x defaultTransientBudgetMultiplier. Ignored while the
+	// last failure is structural.
+	TransientBudget int `json:"transient_budget,omitempty"`
 	// NowUnix is the caller-supplied clock reading used for backoff math (is
 	// the last attempt's class-specific cooldown window still open?). Zero
 	// means the caller does not care about cooldown timing -- the Decision
@@ -283,12 +379,22 @@ type Decision struct {
 	// Route is the action BlockReason drives -- retry, escalate, or record a
 	// known-bad signature. Set exactly when BlockReason is.
 	Route Route `json:"route,omitempty"`
+	// Verdict is the witnessed adjudication of the budget crossing (#2892):
+	// transient_retry when the blunt hold was deferred for a transient last
+	// failure, transient_exhausted / structural_block when the issue was
+	// actually held. Empty until AttemptCount reaches Budget -- before that
+	// there is no adjudication to witness.
+	Verdict Verdict `json:"verdict,omitempty"`
 }
 
-// Decide folds one issue's Input into a Decision, in this order: HELD once
-// AttemptCount reaches Budget (Budget > 0) -- a hard stop that overrides
-// cooldown; otherwise COOLING_DOWN when NowUnix is positive and still before
-// the last attempt's class-specific CooldownUntilUnix; otherwise
+// Decide folds one issue's Input into a Decision, in this order: once
+// AttemptCount reaches Budget (Budget > 0) the crossing is ADJUDICATED, not
+// blunt (#2892) -- a transient last failure (rate-limit, network) with room
+// under the transient ceiling keeps its cooldown/dispatchable status and
+// records VerdictTransientRetry, while a structural last failure or spent
+// transient headroom is HELD (overriding cooldown) with the verdict and
+// BlockReason recorded; otherwise COOLING_DOWN when NowUnix is positive and
+// still before the last attempt's class-specific CooldownUntilUnix; otherwise
 // DISPATCHABLE. The Decision always carries the LAST recorded attempt's
 // classified BackoffClass/BackoffSeconds/CooldownUntilUnix (when there is a
 // recorded attempt) regardless of Status, so a report can show the policy
@@ -311,11 +417,24 @@ func Decide(in Input) Decision {
 		}
 	}
 	if in.Budget > 0 && d.AttemptCount >= in.Budget {
+		if transientClass(d.BackoffClass) && d.AttemptCount < transientCeiling(in) {
+			// The Hermes-blunt hold is deferred: the last failure says nothing
+			// about the issue itself, so the measured class backoff keeps
+			// pacing retries. The verdict is the witness that the crossing was
+			// adjudicated rather than the budget check having been skipped.
+			d.Verdict = VerdictTransientRetry
+			return d
+		}
 		d.Status = StatusHeld
 		// The block is the only thing that needs explaining, so the structured
 		// reason (and the route it drives) is stamped here rather than on every
 		// dispatchable issue.
 		d.BlockReason, d.Route = ClassifyBlock(in.Attempts)
+		if d.BlockReason == BlockReasonTransientExhausted {
+			d.Verdict = VerdictTransientExhausted
+		} else {
+			d.Verdict = VerdictStructuralBlock
+		}
 	}
 	return d
 }

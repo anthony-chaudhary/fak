@@ -448,6 +448,231 @@ func TestDecide_BlockReasonStampedOnlyOnHeld(t *testing.T) {
 	}
 }
 
+// --- #2892: witnessed transient-vs-structural retry adjudication ---
+
+// TestDecide_RateLimitedTaskRetriesWithBackoffInsteadOfHardBlock is the #2892
+// witness: a task that fails twice for a rate-limit reason at Budget=2 -- the
+// exact history Hermes' failure_limit auto-blocks -- keeps retrying under the
+// measured rate-limit backoff instead of being held, and the deferral is
+// recorded as a verdict an adjudicator can re-derive from the same history.
+func TestDecide_RateLimitedTaskRetriesWithBackoffInsteadOfHardBlock(t *testing.T) {
+	in := Input{
+		IssueID: "rl-2892",
+		Budget:  2,
+		Attempts: []Attempt{
+			{FailureClass: "429 too many requests", AtUnix: 100},
+			{FailureClass: "API rate limit exceeded", AtUnix: 200},
+		},
+	}
+	window := DefaultBackoffSeconds[FailureClassRateLimit]
+
+	// Inside the rate-limit window: cooling down under the measured backoff --
+	// NOT held, even though AttemptCount == Budget.
+	in.NowUnix = 200 + window - 1
+	got := Decide(in)
+	if got.Status == StatusHeld {
+		t.Fatalf("two transient failures at budget must not hard-block, got %q", got.Status)
+	}
+	if got.Status != StatusCoolingDown {
+		t.Fatalf("want cooling_down under the measured backoff, got %q", got.Status)
+	}
+	if got.Verdict != VerdictTransientRetry {
+		t.Fatalf("want witnessed verdict %q, got %q", VerdictTransientRetry, got.Verdict)
+	}
+	if got.BlockReason != "" || got.Route != "" {
+		t.Fatalf("deferred crossing must carry no block reason, got %q/%q", got.BlockReason, got.Route)
+	}
+	if got.CooldownUntilUnix != 200+window {
+		t.Fatalf("want measured cooldown until %d, got %d", 200+window, got.CooldownUntilUnix)
+	}
+
+	// Window elapsed: dispatchable again -- the retry actually happens.
+	in.NowUnix = 200 + window
+	got = Decide(in)
+	if got.Status != StatusDispatchable {
+		t.Fatalf("after the backoff window: want dispatchable, got %q", got.Status)
+	}
+	if got.Verdict != VerdictTransientRetry {
+		t.Fatalf("the deferral verdict must survive the window elapsing, got %q", got.Verdict)
+	}
+}
+
+// TestDecide_NetworkFlakeRetriesInsteadOfHardBlock covers the other transient
+// family the issue names: flaky-network failures classify FailureClassNetwork
+// and defer the block exactly like a rate limit.
+func TestDecide_NetworkFlakeRetriesInsteadOfHardBlock(t *testing.T) {
+	for _, raw := range []string{
+		"network error talking to forge",
+		"connection reset by peer",
+		"dial tcp: lookup api.example.com: dns failure",
+		"host unreachable",
+	} {
+		got := Decide(Input{
+			IssueID: "net-2892",
+			Budget:  2,
+			NowUnix: 300,
+			Attempts: []Attempt{
+				{FailureClass: raw, AtUnix: 100},
+				{FailureClass: raw, AtUnix: 200},
+			},
+		})
+		if got.BackoffClass != FailureClassNetwork {
+			t.Fatalf("%q: want classified %q, got %q", raw, FailureClassNetwork, got.BackoffClass)
+		}
+		if got.Status == StatusHeld {
+			t.Fatalf("%q: a network flake at budget must not hard-block", raw)
+		}
+		if got.Verdict != VerdictTransientRetry {
+			t.Fatalf("%q: want verdict %q, got %q", raw, VerdictTransientRetry, got.Verdict)
+		}
+	}
+}
+
+// TestClassify_BareTimeoutStaysStructural pins the deliberate conservative
+// edge: a bare "timeout" is as often a wedged worker as a slow wire, so it
+// stays FailureClassOther and the budget hold it has earned still applies.
+func TestClassify_BareTimeoutStaysStructural(t *testing.T) {
+	got := Decide(Input{
+		IssueID: "to",
+		Budget:  2,
+		Attempts: []Attempt{
+			{FailureClass: "timeout", AtUnix: 100},
+			{FailureClass: "timeout", AtUnix: 200},
+		},
+	})
+	if got.BackoffClass != FailureClassOther {
+		t.Fatalf("bare timeout: want %q, got %q", FailureClassOther, got.BackoffClass)
+	}
+	if got.Status != StatusHeld {
+		t.Fatalf("bare timeout at budget: want held, got %q", got.Status)
+	}
+}
+
+// TestDecide_TransientExhaustionBlocksWithReason proves the "exhausted"
+// verdict half of the #2892 done condition: transient deferral is bounded --
+// once the extended ceiling (Budget x 4 by default) is spent the issue IS
+// held, with TRANSIENT_EXHAUSTED recorded, routed to a human and NEVER
+// promoted into the known-bad ledger.
+func TestDecide_TransientExhaustionBlocksWithReason(t *testing.T) {
+	mkAttempts := func(n int) []Attempt {
+		a := make([]Attempt, n)
+		for i := range a {
+			a[i] = Attempt{FailureClass: "rate_limit", AtUnix: int64(100 * (i + 1))}
+		}
+		return a
+	}
+	base := Input{IssueID: "rl-exhaust", Budget: 2}
+
+	// One under the default ceiling (2 x 4 = 8): still deferring.
+	under := base
+	under.Attempts = mkAttempts(7)
+	got := Decide(under)
+	if got.Status == StatusHeld {
+		t.Fatalf("under the transient ceiling: must still defer, got %q", got.Status)
+	}
+	if got.Verdict != VerdictTransientRetry {
+		t.Fatalf("want %q under the ceiling, got %q", VerdictTransientRetry, got.Verdict)
+	}
+
+	// At the ceiling: held, exhausted, escalate -- not known_bad.
+	at := base
+	at.Attempts = mkAttempts(8)
+	got = Decide(at)
+	if got.Status != StatusHeld {
+		t.Fatalf("at the transient ceiling: want held, got %q", got.Status)
+	}
+	if got.Verdict != VerdictTransientExhausted {
+		t.Fatalf("want verdict %q, got %q", VerdictTransientExhausted, got.Verdict)
+	}
+	if got.BlockReason != BlockReasonTransientExhausted {
+		t.Fatalf("want reason %q recorded, got %q", BlockReasonTransientExhausted, got.BlockReason)
+	}
+	if got.Route != RouteEscalate {
+		t.Fatalf("want route %q, got %q", RouteEscalate, got.Route)
+	}
+	if got.Route == RouteKnownBad {
+		t.Fatalf("a rate-limit history must never poison the known-bad ledger")
+	}
+
+	// The verdict is queryable on the same wire the CLI emits.
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var round map[string]any
+	if err := json.Unmarshal(b, &round); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if round["verdict"] != string(VerdictTransientExhausted) {
+		t.Fatalf("want verdict %q on the wire, got %v", VerdictTransientExhausted, round["verdict"])
+	}
+}
+
+// TestDecide_StructuralFailureStillBlocksAtBudget proves the adjudication only
+// defers TRANSIENT crossings: a structural last failure at budget holds
+// exactly as before (#1777/#2860 semantics unchanged), now with the verdict
+// recorded -- including a mixed history where an earlier rate limit does not
+// launder a final structural failure.
+func TestDecide_StructuralFailureStillBlocksAtBudget(t *testing.T) {
+	held := Decide(Input{IssueID: "s1", Budget: 2, Attempts: []Attempt{
+		{FailureClass: "test_failure", AtUnix: 100},
+		{FailureClass: "test_failure", AtUnix: 200},
+	}})
+	if held.Status != StatusHeld {
+		t.Fatalf("structural at budget: want held, got %q", held.Status)
+	}
+	if held.Verdict != VerdictStructuralBlock {
+		t.Fatalf("want verdict %q, got %q", VerdictStructuralBlock, held.Verdict)
+	}
+	if held.BlockReason != BlockReasonSameErrorRepeated || held.Route != RouteKnownBad {
+		t.Fatalf("#2860 classification must be unchanged, got %q/%q", held.BlockReason, held.Route)
+	}
+
+	mixed := Decide(Input{IssueID: "s2", Budget: 2, Attempts: []Attempt{
+		{FailureClass: "rate_limit", AtUnix: 100},
+		{FailureClass: "test_failure", AtUnix: 200},
+	}})
+	if mixed.Status != StatusHeld {
+		t.Fatalf("mixed history ending structural: want held, got %q", mixed.Status)
+	}
+	if mixed.Verdict != VerdictStructuralBlock {
+		t.Fatalf("mixed history: want verdict %q, got %q", VerdictStructuralBlock, mixed.Verdict)
+	}
+}
+
+// TestDecide_TransientBudgetOverrideRestoresHardStop proves the operator knob:
+// TransientBudget == Budget restores the blunt hard stop for transient
+// failures, except the block carries the exhausted verdict, never known_bad.
+func TestDecide_TransientBudgetOverrideRestoresHardStop(t *testing.T) {
+	got := Decide(Input{
+		IssueID:         "knob",
+		Budget:          2,
+		TransientBudget: 2,
+		Attempts: []Attempt{
+			{FailureClass: "rate_limit", AtUnix: 100},
+			{FailureClass: "rate_limit", AtUnix: 200},
+		},
+	})
+	if got.Status != StatusHeld {
+		t.Fatalf("TransientBudget=Budget: want the hard stop back, got %q", got.Status)
+	}
+	if got.BlockReason != BlockReasonTransientExhausted || got.Route != RouteEscalate {
+		t.Fatalf("even the restored hard stop must record %q/%q, got %q/%q",
+			BlockReasonTransientExhausted, RouteEscalate, got.BlockReason, got.Route)
+	}
+}
+
+// TestDecide_VerdictEmptyUnderBudget: no adjudication happens before the
+// budget is crossed, so nothing is witnessed.
+func TestDecide_VerdictEmptyUnderBudget(t *testing.T) {
+	got := Decide(Input{IssueID: "u", Budget: 5, Attempts: []Attempt{
+		{FailureClass: "rate_limit", AtUnix: 100},
+	}})
+	if got.Verdict != "" {
+		t.Fatalf("under budget: want no verdict, got %q", got.Verdict)
+	}
+}
+
 func TestDecide_BlockReasonIsQueryableJSON(t *testing.T) {
 	// "First-class, queryable" means it survives the wire the CLI already emits
 	// (`fak dispatch attempt-budget --json`), not just the Go struct.
