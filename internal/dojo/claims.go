@@ -98,12 +98,52 @@ var Registry = ClaimRegistry{
 		"a fired compaction ships the protected prefix byte-identical"),
 }
 
-// Lookup returns the registered Claim for a (lever, metric) cell. ok is false for
-// an unregistered cell so a builder fails loud (a missing registry entry is a
-// programming error) rather than scoring against a silent zero claim.
+// registered is the additive claim seam: the composed home for cells a KPI leaf
+// declares in its OWN file via RegisterClaim, kept separate from the Registry
+// literal so adding a cell never edits — and never conflicts on — that central
+// literal. Lookup folds it in behind the receiver, so Registry.Lookup/Predict
+// resolve an additively registered cell while len(Registry) (the extraction-fidelity
+// witness pinned in claims_test.go) stays the count of cells lifted from the inline
+// builders. One anchored literal per cell still holds: each RegisterClaim call
+// carries exactly one claim(...)/floor(...) literal, the single RSI rewrite target
+// for that cell — now in the cell's own file instead of this shared map.
+var registered = ClaimRegistry{}
+
+// RegisterClaim adds one (lever, metric) cell to the additive seam so a KPI cell
+// lands in its own file — a plain package-level `var _ = RegisterClaim(...)` — with
+// no edit to the central Registry literal, letting parallel KPI-cell workers avoid
+// colliding on one file and one map. It panics on a duplicate (the same cell already
+// present in either Registry or the additive seam): a doubly-registered cell is a
+// programming error, surfaced loudly at init rather than silently shadowing a claim.
+// It returns the Claim so it composes as a var initializer. The one anchored literal
+// for the cell is the Claim the caller passes (built with claim(...)/floor(...)).
+func RegisterClaim(lever, metric string, c Claim) Claim {
+	key := claimKey{Lever: lever, Metric: metric}
+	if _, taken := Registry[key]; taken {
+		panic("dojo: RegisterClaim on a cell already in the central Registry: " + lever + "/" + metric)
+	}
+	if _, taken := registered[key]; taken {
+		panic("dojo: RegisterClaim on an already-registered cell: " + lever + "/" + metric)
+	}
+	registered[key] = c
+	return c
+}
+
+// Lookup returns the registered Claim for a (lever, metric) cell. It resolves the
+// receiver's own cells first, then folds in the additive seam (cells declared in
+// their own files via RegisterClaim) so a KPI leaf resolves without ever editing the
+// central Registry literal. ok is false for an unregistered cell so a builder fails
+// loud (a missing registry entry is a programming error) rather than scoring against
+// a silent zero claim.
 func (r ClaimRegistry) Lookup(lever, metric string) (Claim, bool) {
-	c, ok := r[claimKey{Lever: lever, Metric: metric}]
-	return c, ok
+	key := claimKey{Lever: lever, Metric: metric}
+	if c, ok := r[key]; ok {
+		return c, true
+	}
+	if c, ok := registered[key]; ok {
+		return c, true
+	}
+	return Claim{}, false
 }
 
 // Predict builds the Prediction for a (lever, metric) cell straight from the

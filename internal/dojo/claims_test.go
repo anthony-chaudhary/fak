@@ -50,6 +50,52 @@ func TestRegistryPreservesPinnedClaims(t *testing.T) {
 	}
 }
 
+// probeCell is a KPI-seam probe registered through the additive RegisterClaim seam
+// from THIS test file — i.e. a cell added in its own file with no edit to the central
+// Registry literal. TestRegisterClaimResolvesViaRegistry proves Registry.Lookup /
+// Predict fold it in, exactly the property the additive seam exists to provide.
+var probeCell = RegisterClaim("kpi-seam-probe", "additive_resolves",
+	claim(0.5, "additive-seam probe: resolves via Registry without editing the literal"))
+
+// TestRegisterClaimResolvesViaRegistry is the additive-seam witness: a cell
+// registered via RegisterClaim (in this separate _test file) resolves through
+// Registry.Lookup and Registry.Predict, the central Registry literal is NOT grown by
+// the registration (len stays at the extracted-cell count, so the pinned-claim
+// witness is unperturbed), and the existing cells still resolve — the seam is
+// additive, not a migration. A duplicate registration panics loud (collision guard).
+func TestRegisterClaimResolvesViaRegistry(t *testing.T) {
+	// The additive registration did not grow the central literal.
+	if len(Registry) != 8 {
+		t.Fatalf("central Registry literal has %d cells, want 8 — additive registration must not grow it", len(Registry))
+	}
+	// The registered cell resolves through the composed Lookup.
+	c, ok := Registry.Lookup("kpi-seam-probe", "additive_resolves")
+	if !ok {
+		t.Fatal("Registry.Lookup did not resolve an additively registered cell")
+	}
+	if c != probeCell || c.Claimed != 0.5 {
+		t.Fatalf("resolved cell = %+v, want the registered probe %+v", c, probeCell)
+	}
+	// Predict copies it onto a Prediction just like a central cell.
+	p, ok := Registry.Predict("kpi-seam-probe", "additive_resolves", "fraction")
+	if !ok || p.Claimed != 0.5 || p.Unit != "fraction" || p.Basis == "" {
+		t.Fatalf("Predict on an additively registered cell wrong: %+v (ok=%v)", p, ok)
+	}
+	// A central cell still resolves — the seam did not shadow the literal.
+	if _, ok := Registry.Lookup("vcache-warmth", "warm_recall"); !ok {
+		t.Fatal("a central cell stopped resolving after additive registration")
+	}
+	// RegisterClaim refuses a duplicate (loud collision, not silent shadow).
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("RegisterClaim did not panic on a duplicate cell")
+			}
+		}()
+		RegisterClaim("kpi-seam-probe", "additive_resolves", claim(1.0, "dup"))
+	}()
+}
+
 // TestPredictFillsPredictionFromCell proves Predict copies the whole cell onto the
 // Prediction (Claimed, IntentionalFloor, LowerIsBetter, Basis) plus the caller's
 // unit — the builders rely on this so the floor bit and direction reach Score.
