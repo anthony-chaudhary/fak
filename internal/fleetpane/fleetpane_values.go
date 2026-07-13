@@ -6,15 +6,6 @@ import (
 	"strconv"
 )
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func stringValueFirst(m map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value := stringValue(m[key]); value != "" {

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -147,7 +149,7 @@ func Resolve(rows []Account, home string, req ResolveRequest, pol Policy) Resolv
 	}
 	tt := route.TargetTier
 	return flattenResolved(*route.Account, true,
-		firstNonEmpty(route.Reason, "routed"), route.SelectedTier, &tt, route.FallbackUsed, "")
+		strmatch.FirstNonEmpty(route.Reason, "routed"), route.SelectedTier, &tt, route.FallbackUsed, "")
 }
 
 // PoolKey returns the rate-limit pool a worker dir draws on — the unit a wave must hand

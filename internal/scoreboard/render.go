@@ -7,6 +7,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Update is one scoreboard post, decoupled from where it came from. A scorecard
@@ -55,7 +57,7 @@ func FromPayload(title string, p scorecard.Payload, debtKey string) Update {
 		Title:   title,
 		DebtKey: debtKey,
 		Verdict: p.Verdict,
-		Detail:  firstNonEmpty(p.Finding, p.Reason),
+		Detail:  strmatch.FirstNonBlank(p.Finding, p.Reason),
 	}
 	if p.Corpus != nil {
 		u.Grade = asString(p.Corpus["grade"])
@@ -239,15 +241,6 @@ func (u Update) actionElements() []any {
 		}
 	}
 	return elems
-}
-
-func firstNonEmpty(vs ...string) string {
-	for _, v := range vs {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func asString(v any) string {

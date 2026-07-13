@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -1611,7 +1613,7 @@ func loopCheckSnapshot(check LoopCheck) map[string]any {
 	out := map[string]any{
 		"name":            check.Name,
 		"state":           stringValueDefault(check.State, "UNKNOWN"),
-		"detail":          firstNonEmpty(check.Detail, check.Reason),
+		"detail":          strmatch.FirstNonEmpty(check.Detail, check.Reason),
 		"action":          check.Action,
 		"auto_recover":    check.AutoRecover,
 		"has_recover_cmd": check.HasRecoverCmd,
@@ -1626,7 +1628,7 @@ func loopCheckSnapshotMap(check map[string]any) map[string]any {
 	return map[string]any{
 		"name":            check["name"],
 		"state":           stringValueDefault(check["state"], "UNKNOWN"),
-		"detail":          firstNonEmpty(stringValue(check["detail"]), stringValue(check["reason"])),
+		"detail":          strmatch.FirstNonEmpty(stringValue(check["detail"]), stringValue(check["reason"])),
 		"action":          stringValue(check["action"]),
 		"auto_recover":    boolValue(check["auto_recover"]),
 		"has_recover_cmd": boolValue(check["has_recover_cmd"]),

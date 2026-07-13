@@ -12,6 +12,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/testroute"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -375,7 +377,7 @@ func PrepareWorkspace(ctx context.Context, plan WorkspacePreflight, prep Workspa
 		rep.Steps = append(rep.Steps, out)
 		if err != nil || !lease.Held {
 			rep.Verdict = WorkspaceVerdictBlockedByLease
-			rep.Reason = firstNonEmpty(lease.Reason, ReasonLeaseAcquireFailed)
+			rep.Reason = strmatch.FirstNonBlank(lease.Reason, ReasonLeaseAcquireFailed)
 			rep.Detail = out.Detail
 			return rep
 		}
@@ -390,7 +392,7 @@ func PrepareWorkspace(ctx context.Context, plan WorkspacePreflight, prep Workspa
 		rep.Steps = append(rep.Steps, out)
 		if err != nil || build.Verdict != WorkspaceVerdictReady {
 			rep.Verdict = WorkspaceVerdictWouldBeRed
-			rep.Reason = firstNonEmpty(build.Reason, ReasonBuildCacheWarmFailed)
+			rep.Reason = strmatch.FirstNonBlank(build.Reason, ReasonBuildCacheWarmFailed)
 			rep.Detail = out.Detail
 			return rep
 		}
@@ -402,7 +404,7 @@ func PrepareWorkspace(ctx context.Context, plan WorkspacePreflight, prep Workspa
 		rep.Steps = append(rep.Steps, out)
 		if err != nil || !dev.OK {
 			rep.Verdict = WorkspaceVerdictWouldBeRed
-			rep.Reason = firstNonEmpty(dev.Reason, ReasonDevIndexWarmFailed)
+			rep.Reason = strmatch.FirstNonBlank(dev.Reason, ReasonDevIndexWarmFailed)
 			rep.Detail = out.Detail
 			return rep
 		}
@@ -601,13 +603,4 @@ func errorDetail(err error, fallback string) string {
 		return err.Error()
 	}
 	return fallback
-}
-
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if strings.TrimSpace(x) != "" {
-			return x
-		}
-	}
-	return ""
 }

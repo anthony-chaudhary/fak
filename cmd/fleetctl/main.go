@@ -43,6 +43,8 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // The roster + report + fold + render core lives in the importable internal/fleet
@@ -153,7 +155,7 @@ func cmdValidate(args []string) {
 		}
 		os.Exit(2)
 	}
-	fmt.Printf("ok: %d box(es), schema %s\n", len(ro.Boxes), firstNonEmpty(ro.Schema, RosterSchema))
+	fmt.Printf("ok: %d box(es), schema %s\n", len(ro.Boxes), strmatch.FirstNonEmpty(ro.Schema, RosterSchema))
 }
 
 func cmdLs(args []string) {
@@ -298,11 +300,4 @@ func emitJSON(v any) {
 		fmt.Fprintf(os.Stderr, "fleetctl: encode: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

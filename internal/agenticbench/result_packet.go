@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -124,7 +126,7 @@ func checkResultPacket(root, rel string, doc map[string]any) ResultPacketStatus 
 	}
 	if len(missing) > 0 {
 		packet.Gate = "FAIL"
-		packet.Status = firstNonEmpty(packet.Status, "INCOMPLETE_RESULT_PACKET")
+		packet.Status = strmatch.FirstNonEmpty(packet.Status, "INCOMPLETE_RESULT_PACKET")
 		packet.Detail = fmt.Sprintf("result packet incomplete: %s", strings.Join(missing, "; "))
 		packet.Missing = missing
 		packet.ResultClaimAllowed = false
@@ -202,13 +204,4 @@ func nestedBool(m map[string]any, keys ...string) bool {
 	}
 	v, _ := cur.(bool)
 	return v
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

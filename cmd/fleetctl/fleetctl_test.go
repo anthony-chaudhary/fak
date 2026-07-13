@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
+)
 
 // The roster/report/fold/render logic — and its full test suite — lives in
 // internal/fleet now. What remains CLI-local is the selector and the usage glue, so
@@ -32,10 +36,10 @@ func TestSelectBoxes(t *testing.T) {
 
 // TestFirstNonEmpty pins the tiny CLI helper that prints a roster's effective schema.
 func TestFirstNonEmpty(t *testing.T) {
-	if got := firstNonEmpty("", "fallback"); got != "fallback" {
-		t.Fatalf("firstNonEmpty(\"\", x) = %q, want fallback", got)
+	if got := strmatch.FirstNonEmpty("", "fallback"); got != "fallback" {
+		t.Fatalf("strmatch.FirstNonEmpty(\"\", x) = %q, want fallback", got)
 	}
-	if got := firstNonEmpty("set", "fallback"); got != "set" {
-		t.Fatalf("firstNonEmpty(set, x) = %q, want set", got)
+	if got := strmatch.FirstNonEmpty("set", "fallback"); got != "set" {
+		t.Fatalf("strmatch.FirstNonEmpty(set, x) = %q, want set", got)
 	}
 }

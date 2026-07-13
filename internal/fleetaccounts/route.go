@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // classify_task / route_account / resolve_account port: the tier-aware account picker
@@ -106,14 +108,7 @@ func routeRank(r Account) (int, int, int, string, string) {
 		derefInt(r.LiveSessions),
 		derefInt(r.ActiveSessions),
 		r.Product,
-		firstNonEmpty(r.Tag, r.Account)
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
+		strmatch.FirstNonEmpty(r.Tag, r.Account)
 }
 
 // BlockedAccount is the public projection of a blocked target account.

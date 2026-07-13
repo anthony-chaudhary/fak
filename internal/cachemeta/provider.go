@@ -4,6 +4,8 @@ import (
 	"strconv"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // ProviderCache is the field-only shape a provider-usage adapter lowers into. A
@@ -60,7 +62,7 @@ type ProviderCache struct {
 func FromProviderCache(p ProviderCache, opts ...Option) Entry {
 	owner := p.Owner
 	if owner == "" {
-		owner = firstNonEmpty(p.Provider, "provider")
+		owner = strmatch.FirstNonEmpty(p.Provider, "provider")
 	}
 	// Endpoint, ReasoningMode, ToolSetID, and Region join the identity (§A2 +
 	// #1525): switching the Z.AI Coding-Plan vs general endpoint, the
@@ -172,11 +174,4 @@ func providerTTLMillis(retention string) int64 {
 	default:
 		return 0
 	}
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

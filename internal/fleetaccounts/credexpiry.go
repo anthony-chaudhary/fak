@@ -8,6 +8,8 @@ import (
 	"time"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // credexpiry.go — credential honesty for the seat pool (#2059, #2075).
@@ -132,7 +134,7 @@ func DroppedSeats(rows []Account) []DroppedSeat {
 		if strings.ToLower(derefStr(r.BlockKind)) != "auth" && !accountLoginBlocked(r) {
 			continue
 		}
-		reason := firstNonEmpty(derefStr(r.BlockReason), r.Reason)
+		reason := strmatch.FirstNonEmpty(derefStr(r.BlockReason), r.Reason)
 		if reason == "" {
 			reason = "auth-blocked"
 		}

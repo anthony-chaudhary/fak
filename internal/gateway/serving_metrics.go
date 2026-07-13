@@ -15,6 +15,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // ServingMetricsEmitter returns rows in the normalized fak_serving_* schema.
@@ -654,13 +656,13 @@ type servingScrapeSuccess struct {
 func servingLabelsForPromSample(defaults ServingMetricLabels, labels map[string]string) ServingMetricLabels {
 	out := defaults
 	if out.Worker == "" {
-		out.Worker = firstNonEmpty(labels["worker"], labels["worker_id"], labels["instance"])
+		out.Worker = strmatch.FirstNonBlank(labels["worker"], labels["worker_id"], labels["instance"])
 	}
 	if out.Engine == "" {
-		out.Engine = firstNonEmpty(labels["engine"], labels["engine_name"])
+		out.Engine = strmatch.FirstNonBlank(labels["engine"], labels["engine_name"])
 	}
 	if out.Model == "" {
-		out.Model = firstNonEmpty(labels["model_name"], labels["model"], labels["served_model_name"])
+		out.Model = strmatch.FirstNonBlank(labels["model_name"], labels["model"], labels["served_model_name"])
 	}
 	return out
 }
@@ -919,15 +921,6 @@ func servingPromMetricKind(base string) string {
 	case strings.HasSuffix(base, "prefix_cache_queries") ||
 		strings.HasSuffix(base, "prefix_cache_queries_total"):
 		return "prefix_queries"
-	}
-	return ""
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
 	}
 	return ""
 }
