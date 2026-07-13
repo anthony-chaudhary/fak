@@ -52,15 +52,6 @@ import (
 // architecture gate the Q8 hybrid path uses (q8Qwen35HybridPrefillOK) — the resident-Q4_K
 // path covers the identical Qwen3.5/3.6 hybrid family; only the projection kernel differs.
 func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
-	// Diagnostic correctness escape hatch for real quantized-model parity. The
-	// resident batched prefill is separately synthetic-parity tested, but #4273
-	// shows long-prompt degeneration only on the real Qwen3.6-27B Q4_K_M artifact.
-	// Force the established token-at-a-time resident path so an operator can
-	// distinguish batched-prefill corruption from model/quantization quality.
-	// Default behavior and performance are unchanged when the variable is unset.
-	if os.Getenv("FAK_QWEN35_PREFILL_TOKEN_LOOP") != "" {
-		return false
-	}
 	return q8Qwen35HybridPrefillOK(cfg, promptLen)
 }
 

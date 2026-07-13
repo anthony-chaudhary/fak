@@ -1,6 +1,9 @@
 package model
 
-import "math"
+import (
+	"math"
+	"os"
+)
 
 // qwen35_prefill.go is the Q8 fresh-prefill path for Qwen3.5/Qwen3.6 hybrid
 // Gated-DeltaNet models. The generic Q8 prefill batcher deliberately refuses this
@@ -12,6 +15,12 @@ import "math"
 const qwen35HybridQBatchMinPrompt = 16
 
 func q8Qwen35HybridPrefillOK(cfg Config, promptLen int) bool {
+	// Cross-quant diagnostic for #4273: force the established token-at-a-time
+	// prefill so real-model runs can isolate the batched hybrid prefill from the
+	// tokenizer, sampler, and decode path. Default performance stays unchanged.
+	if os.Getenv("FAK_QWEN35_PREFILL_TOKEN_LOOP") != "" {
+		return false
+	}
 	return cfg.IsQwen35Hybrid() &&
 		promptLen >= qwen35HybridQBatchMinPrompt &&
 		cfg.AttnOutputGate &&
