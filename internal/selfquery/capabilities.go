@@ -3,6 +3,8 @@ package selfquery
 import (
 	"errors"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // capabilities.go answers #1500 (C2 of the #1494 "fak can answer 'what can I
@@ -77,7 +79,7 @@ func (c *Catalog) Capabilities(req CapabilitiesRequest) (CapabilitiesResponse, e
 	q := strings.TrimSpace(req.Query)
 	var all []FeatureCard
 	for _, card := range c.memoryCards() {
-		all = append(all, withCapabilitiesMemoryRequest(withHygieneSynonyms(card), firstNonEmpty(q, "the task at hand")))
+		all = append(all, withCapabilitiesMemoryRequest(withHygieneSynonyms(card), strmatch.FirstTrimmed(q, "the task at hand")))
 	}
 	all = append(all, c.devSurfaceCards()...)
 	all = append(all, kernelVerbCards()...)

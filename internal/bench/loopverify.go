@@ -46,6 +46,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // dos verdicts a turn's commit can carry, mirroring the dos truth syscall:
@@ -438,7 +440,7 @@ func loopEventsToEpisodes(events []loopmgr.Event) ([]Episode, error) {
 				order++
 				t.order = order
 			}
-			t.summary = firstNonEmpty(ev.Summary, ev.Reason, ev.RunID)
+			t.summary = strmatch.FirstTrimmed(ev.Summary, ev.Reason, ev.RunID)
 			t.selfReported = ev.Status == loopmgr.StatusClaimedDone
 			t.slopIntroduced = intMetric(ev.Metrics, "slop_introduced", "slop_delta")
 		case loopmgr.EventWitness:
@@ -484,7 +486,7 @@ func loopEventsToEpisodes(events []loopmgr.Event) ([]Episode, error) {
 				DosVerdict:       VerdictWorking,
 				SlopIntroduced:   ot.slopIntroduced,
 				GateCostUnits:    ot.gateCostUnits,
-				Note:             firstNonEmpty(ot.witnessSummary, ot.summary, ot.runID),
+				Note:             strmatch.FirstTrimmed(ot.witnessSummary, ot.summary, ot.runID),
 			}
 			if ot.selfReported {
 				if !ot.witnessObserved {
@@ -525,15 +527,6 @@ func floatMetric(m map[string]int64, key string) (float64, bool) {
 		return float64(v), true
 	}
 	return 0, false
-}
-
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if s := strings.TrimSpace(x); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func netTrueFinding(naive, gated ArmSummary, d Delta) string {

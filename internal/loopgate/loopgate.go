@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Verdict is the exit-gate decision a loop driver consumes.
@@ -171,8 +173,8 @@ func Adjudicate(ctx context.Context, turn Turn, witness WitnessFunc) Decision {
 	case OutcomeWitnessed:
 		return Decision{
 			Verdict: VerdictWitnessed,
-			Reason:  firstNonEmpty(res.Reason, "WITNESSED"),
-			Summary: firstNonEmpty(res.Detail, "done claim witnessed"),
+			Reason:  strmatch.FirstTrimmed(res.Reason, "WITNESSED"),
+			Summary: strmatch.FirstTrimmed(res.Detail, "done claim witnessed"),
 			Request: req,
 			Witness: res.Rung,
 		}
@@ -180,15 +182,15 @@ func Adjudicate(ctx context.Context, turn Turn, witness WitnessFunc) Decision {
 		return Decision{
 			Verdict: VerdictNotYet,
 			Reason:  ReasonDoneUnwitnessed,
-			Summary: firstNonEmpty(res.Detail, res.Reason, "done claim was not witnessed"),
+			Summary: strmatch.FirstTrimmed(res.Detail, res.Reason, "done claim was not witnessed"),
 			Request: req,
 			Witness: res.Rung,
 		}
 	case OutcomeRefused:
 		return Decision{
 			Verdict: VerdictRefused,
-			Reason:  firstNonEmpty(res.Reason, ReasonSchemaUnreadable),
-			Summary: firstNonEmpty(res.Detail, "witness refused the claim"),
+			Reason:  strmatch.FirstTrimmed(res.Reason, ReasonSchemaUnreadable),
+			Summary: strmatch.FirstTrimmed(res.Detail, "witness refused the claim"),
 			Request: req,
 			Witness: res.Rung,
 		}
@@ -211,7 +213,7 @@ func (t Turn) request() (Request, error) {
 	}
 	req := Request{
 		Kind:      kind,
-		Ref:       firstNonEmpty(c.Ref, t.HeadRef, "HEAD"),
+		Ref:       strmatch.FirstTrimmed(c.Ref, t.HeadRef, "HEAD"),
 		Plan:      strings.TrimSpace(c.Plan),
 		Phase:     strings.TrimSpace(c.Phase),
 		Source:    strings.TrimSpace(c.Source),
@@ -248,13 +250,4 @@ func (t Turn) request() (Request, error) {
 	default:
 		return Request{}, fmt.Errorf("unsupported witness criterion %q", kind)
 	}
-}
-
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if s := strings.TrimSpace(x); s != "" {
-			return s
-		}
-	}
-	return ""
 }

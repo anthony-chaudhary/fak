@@ -16,6 +16,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/internal/memq"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 type Plane string
@@ -284,7 +286,7 @@ func (c *Catalog) devCards() []FeatureCard {
 			RequestShape{Route: "cli", Command: []string{"fak", "index", "leaf", l.Name}, Executed: false}))
 	}
 	for _, d := range c.dev.Docs {
-		out = append(out, card("dev-doc", "doc:"+d.Title, firstNonEmpty(d.Blurb, d.Path),
+		out = append(out, card("dev-doc", "doc:"+d.Title, strmatch.FirstTrimmed(d.Blurb, d.Path),
 			[]string{"dev", "doc", "docs", "index", d.Path},
 			d.Path, EffectRead, "", "devindex", digestOf(d),
 			RequestShape{Route: "cli", Command: []string{"fak", "index", "docs", d.Title}, Executed: false}))
@@ -411,7 +413,7 @@ func (c *Catalog) capabilityCards() []FeatureCard {
 		name := string(cc.Ref.Kind) + ":" + cc.Ref.Name
 		out = append(out, card("capability", name, cc.Trigger,
 			append([]string{"live", "capability", string(cc.Ref.Kind)}, cc.Tags...),
-			capRefString(cc.Ref), EffectRead, "", "capindex", firstNonEmpty(cc.Digest, digestOf(cc)),
+			capRefString(cc.Ref), EffectRead, "", "capindex", strmatch.FirstTrimmed(cc.Digest, digestOf(cc)),
 			RequestShape{
 				Route: "fault-capability-detail",
 				Note:  "fault the selected capability body through its resolver before use",
@@ -702,15 +704,6 @@ func capRefString(ref capindex.CapRef) string {
 
 func normalizeKey(s string) string {
 	return strings.Join(tokens(s), " ")
-}
-
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if strings.TrimSpace(x) != "" {
-			return strings.TrimSpace(x)
-		}
-	}
-	return ""
 }
 
 func shortName(s string) string {

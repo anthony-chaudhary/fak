@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 type PriceHint struct {
@@ -154,7 +156,7 @@ func profileFromMap(raw map[string]any) (SweepProfile, error) {
 			}
 			m := ModelConfig{
 				Name:      str(mm["name"]),
-				Provider:  firstNonEmpty(str(mm["provider"]), "unknown"),
+				Provider:  strmatch.FirstTrimmed(str(mm["provider"]), "unknown"),
 				BaseURL:   str(mm["base_url"]),
 				APIKeyEnv: str(mm["api_key_env"]),
 				LocalShim: str(mm["local_shim"]),
@@ -167,7 +169,7 @@ func profileFromMap(raw map[string]any) (SweepProfile, error) {
 				m.PriceHint = &PriceHint{
 					Input:  floatv(ph["input"]),
 					Output: floatv(ph["output"]),
-					Source: firstNonEmpty(str(ph["source"]), "manual"),
+					Source: strmatch.FirstTrimmed(str(ph["source"]), "manual"),
 				}
 			}
 			if m.Name != "" {
@@ -268,7 +270,7 @@ func renderYAML(p SweepProfile) string {
 	b.WriteString("models:\n")
 	for _, m := range p.Models {
 		fmt.Fprintf(&b, "  - name: %s\n", m.Name)
-		fmt.Fprintf(&b, "    provider: %s\n", firstNonEmpty(m.Provider, "unknown"))
+		fmt.Fprintf(&b, "    provider: %s\n", strmatch.FirstTrimmed(m.Provider, "unknown"))
 		if m.BaseURL != "" {
 			fmt.Fprintf(&b, "    base_url: %s\n", m.BaseURL)
 		}
@@ -282,7 +284,7 @@ func renderYAML(p SweepProfile) string {
 			b.WriteString("    price_hint:\n")
 			fmt.Fprintf(&b, "      input: %g\n", m.PriceHint.Input)
 			fmt.Fprintf(&b, "      output: %g\n", m.PriceHint.Output)
-			fmt.Fprintf(&b, "      source: %s\n", firstNonEmpty(m.PriceHint.Source, "manual"))
+			fmt.Fprintf(&b, "      source: %s\n", strmatch.FirstTrimmed(m.PriceHint.Source, "manual"))
 		}
 		fmt.Fprintf(&b, "    enabled: %t\n", m.Enabled)
 	}
@@ -399,13 +401,4 @@ func anySlice(v any) []any {
 		return a
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }

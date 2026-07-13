@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // TestRefKind is the EvidenceRef.Kind for a targeted command that witnessed the
@@ -58,7 +60,7 @@ func DraftHandoffFromTask(task TaskSnapshot, opt HandoffDraftOptions) Handoff {
 			State:   task.State,
 			Witness: cloneWitness(task.Witness),
 		},
-		CurrentState:        firstNonEmpty(opt.CurrentState, fmt.Sprintf("Task %s is %s.", task.TaskID, task.State)),
+		CurrentState:        strmatch.FirstTrimmed(opt.CurrentState, fmt.Sprintf("Task %s is %s.", task.TaskID, task.State)),
 		Summary:             strings.TrimSpace(opt.Summary),
 		CompletedBy:         strings.TrimSpace(opt.CompletedBy),
 		Labels:              cloneLabels(opt.Labels),

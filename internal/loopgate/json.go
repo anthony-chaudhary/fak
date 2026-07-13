@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // CommitAuditResultFromJSON folds `dos commit-audit --json` into the normalized
@@ -35,12 +37,12 @@ func CommitAuditResultFromJSON(data []byte) (WitnessResult, error) {
 			return WitnessResult{
 				Outcome:    OutcomeNotYet,
 				Reason:     verdict,
-				Detail:     firstNonEmpty(row.Reason, "commit claim was not witnessed by its diff"),
+				Detail:     strmatch.FirstTrimmed(row.Reason, "commit claim was not witnessed by its diff"),
 				RawVerdict: verdict,
 				Rung:       row.Witness,
 			}, nil
 		case "ABSTAIN":
-			abstains = append(abstains, firstNonEmpty(row.Reason, row.SHA, "abstain"))
+			abstains = append(abstains, strmatch.FirstTrimmed(row.Reason, row.SHA, "abstain"))
 		default:
 			return WitnessResult{
 				Outcome:    OutcomeRefused,
@@ -86,7 +88,7 @@ func VerifyResultFromJSON(data []byte) (WitnessResult, error) {
 		return WitnessResult{
 			Outcome:    OutcomeWitnessed,
 			Reason:     "SHIPPED",
-			Detail:     firstNonEmpty(row.Summary, fmt.Sprintf("%s/%s shipped via %s", row.Plan, row.Phase, row.Source)),
+			Detail:     strmatch.FirstTrimmed(row.Summary, fmt.Sprintf("%s/%s shipped via %s", row.Plan, row.Phase, row.Source)),
 			RawVerdict: "SHIPPED",
 			Rung:       row.Source,
 		}, nil
@@ -94,9 +96,9 @@ func VerifyResultFromJSON(data []byte) (WitnessResult, error) {
 	return WitnessResult{
 		Outcome:    OutcomeNotYet,
 		Reason:     "NOT_SHIPPED",
-		Detail:     firstNonEmpty(row.Summary, fmt.Sprintf("%s/%s not shipped", row.Plan, row.Phase)),
+		Detail:     strmatch.FirstTrimmed(row.Summary, fmt.Sprintf("%s/%s not shipped", row.Plan, row.Phase)),
 		RawVerdict: "NOT_SHIPPED",
-		Rung:       firstNonEmpty(row.Source, "none"),
+		Rung:       strmatch.FirstTrimmed(row.Source, "none"),
 	}, nil
 }
 
@@ -118,15 +120,15 @@ func TestWitnessResultFromJSON(data []byte) (WitnessResult, error) {
 		return WitnessResult{
 			Outcome:    OutcomeWitnessed,
 			Reason:     verdict,
-			Detail:     firstNonEmpty(row.Reason, "test discriminates old and new trees"),
+			Detail:     strmatch.FirstTrimmed(row.Reason, "test discriminates old and new trees"),
 			RawVerdict: verdict,
 			Rung:       row.Evidence.Rung,
 		}, nil
 	}
 	return WitnessResult{
 		Outcome:    OutcomeNotYet,
-		Reason:     firstNonEmpty(verdict, "ABSTAIN"),
-		Detail:     firstNonEmpty(row.Reason, "test witness did not discriminate"),
+		Reason:     strmatch.FirstTrimmed(verdict, "ABSTAIN"),
+		Detail:     strmatch.FirstTrimmed(row.Reason, "test witness did not discriminate"),
 		RawVerdict: verdict,
 		Rung:       row.Evidence.Rung,
 	}, nil
@@ -142,7 +144,7 @@ func GenericWitnessResultFromJSON(data []byte) (WitnessResult, error) {
 	}
 	belief := mapField(row, "belief")
 	facts := mapField(row, "facts")
-	rung := firstNonEmpty(
+	rung := strmatch.FirstTrimmed(
 		stringField(row, "accountability"),
 		stringField(row, "rung"),
 		stringField(facts, "accountability"),
@@ -153,8 +155,8 @@ func GenericWitnessResultFromJSON(data []byte) (WitnessResult, error) {
 		strings.EqualFold(stringField(row, "verdict"), "RESOLVED_MATCH") {
 		return WitnessResult{
 			Outcome:    OutcomeWitnessed,
-			Reason:     firstNonEmpty(stringField(row, "verdict"), "BELIEVED"),
-			Detail:     firstNonEmpty(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness believed the effect"),
+			Reason:     strmatch.FirstTrimmed(stringField(row, "verdict"), "BELIEVED"),
+			Detail:     strmatch.FirstTrimmed(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness believed the effect"),
 			RawVerdict: stringField(row, "verdict"),
 			Rung:       rung,
 		}, nil
@@ -162,27 +164,27 @@ func GenericWitnessResultFromJSON(data []byte) (WitnessResult, error) {
 	if boolField(belief, "refuted") {
 		return WitnessResult{
 			Outcome:    OutcomeNotYet,
-			Reason:     firstNonEmpty(stringField(row, "verdict"), stringField(facts, "stance"), "REFUTED"),
-			Detail:     firstNonEmpty(stringField(row, "reason"), stringField(facts, "detail"), stringField(belief, "reason"), "generic witness refuted the effect"),
-			RawVerdict: firstNonEmpty(stringField(row, "verdict"), stringField(facts, "stance")),
+			Reason:     strmatch.FirstTrimmed(stringField(row, "verdict"), stringField(facts, "stance"), "REFUTED"),
+			Detail:     strmatch.FirstTrimmed(stringField(row, "reason"), stringField(facts, "detail"), stringField(belief, "reason"), "generic witness refuted the effect"),
+			RawVerdict: strmatch.FirstTrimmed(stringField(row, "verdict"), stringField(facts, "stance")),
 			Rung:       rung,
 		}, nil
 	}
-	verdict := strings.ToUpper(firstNonEmpty(stringField(row, "verdict"), stringField(facts, "stance")))
+	verdict := strings.ToUpper(strmatch.FirstTrimmed(stringField(row, "verdict"), stringField(facts, "stance")))
 	switch verdict {
 	case "REFUTED", "UNRESOLVED", "RESOLVED_MISMATCH":
 		return WitnessResult{
 			Outcome:    OutcomeNotYet,
 			Reason:     verdict,
-			Detail:     firstNonEmpty(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness refuted the effect"),
+			Detail:     strmatch.FirstTrimmed(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness refuted the effect"),
 			RawVerdict: verdict,
 			Rung:       rung,
 		}, nil
 	case "NO_SIGNAL", "ABSTAIN", "":
 		return WitnessResult{
 			Outcome:    OutcomeNotYet,
-			Reason:     firstNonEmpty(verdict, "ABSTAIN"),
-			Detail:     firstNonEmpty(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness had no accountable signal"),
+			Reason:     strmatch.FirstTrimmed(verdict, "ABSTAIN"),
+			Detail:     strmatch.FirstTrimmed(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness had no accountable signal"),
 			RawVerdict: verdict,
 			Rung:       rung,
 		}, nil

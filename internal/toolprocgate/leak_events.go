@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -240,8 +242,8 @@ func LeakEventFromOutputAdmission(out OutputAdmission, atMS int64) (LeakEvent, b
 		AtMS:            positiveLeakAtMS(atMS),
 		AgentRunID:      safeLeakToken(out.AgentRunID, 256, "unknown"),
 		ParentRunID:     safeLeakToken(out.ParentRunID, 256, "unknown"),
-		ToolCallID:      safeLeakToken(firstNonEmpty(out.ToolCallID, out.CallID), 256, "unknown"),
-		TraceID:         safeLeakToken(firstNonEmpty(out.TraceID, out.CallID, out.ToolCallID), 256, "unknown"),
+		ToolCallID:      safeLeakToken(strmatch.FirstTrimmed(out.ToolCallID, out.CallID), 256, "unknown"),
+		TraceID:         safeLeakToken(strmatch.FirstTrimmed(out.TraceID, out.CallID, out.ToolCallID), 256, "unknown"),
 		PolicyDigest:    safeLeakToken(out.PolicyDigest, 256, "unknown"),
 		Backend:         safeLeakToken(out.Backend, 256, "unknown"),
 		Reason:          reason,
@@ -382,15 +384,6 @@ func safeLeakReason(s, fallback string) string {
 		return s
 	}
 	return fallback
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func renderCounts(m map[string]int) string {

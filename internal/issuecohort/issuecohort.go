@@ -35,6 +35,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable schema tag stamped on the machine-readable plan.
@@ -161,7 +163,7 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 			plan.Dispatchable++
 			leaves = append(leaves, leaf{
 				member: WaveMember{
-					Key:           firstNonEmpty(review.Key, key),
+					Key:           strmatch.FirstTrimmed(review.Key, key),
 					Title:         strings.TrimSpace(c.Title),
 					Lane:          review.Lane,
 					Paths:         append([]string(nil), review.Paths...),
@@ -174,7 +176,7 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 			budget := childIssueBudget(review.ExpectedSteps)
 			plan.ChildIssueTotal += budget
 			plan.Subdivide = append(plan.Subdivide, SubdivideRow{
-				Key:              firstNonEmpty(review.Key, key),
+				Key:              strmatch.FirstTrimmed(review.Key, key),
 				Title:            strings.TrimSpace(c.Title),
 				Reasons:          splitReasons(review.Reasons),
 				ExpectedSteps:    review.ExpectedSteps,
@@ -189,7 +191,7 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 				plan.TriageOnly++
 			}
 			plan.Triage = append(plan.Triage, TriageRow{
-				Key:             firstNonEmpty(review.Key, key),
+				Key:             strmatch.FirstTrimmed(review.Key, key),
 				Title:           strings.TrimSpace(c.Title),
 				Dispatchability: review.Dispatchability,
 				Reasons:         append([]string(nil), review.Reasons...),
@@ -425,13 +427,4 @@ func stepUnits(steps int) int {
 		return steps
 	}
 	return 1
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
 }

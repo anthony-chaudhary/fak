@@ -5,6 +5,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // The subagent FS lane floor (#2891): the wire that decides whether a child's
@@ -112,8 +114,8 @@ func (f LaneFloor) refusalEvent(t FSTouch, reason string) LeakEvent {
 		AtMS:            positiveLeakAtMS(t.AtMS),
 		AgentRunID:      safeLeakToken(g.AgentRunID, 256, "unknown"),
 		ParentRunID:     safeLeakToken(g.ParentRunID, 256, "unknown"),
-		ToolCallID:      safeLeakToken(firstNonEmpty(t.ToolCallID, g.ToolCallID), 256, "unknown"),
-		TraceID:         safeLeakToken(firstNonEmpty(t.TraceID, t.ToolCallID, g.ToolCallID), 256, "unknown"),
+		ToolCallID:      safeLeakToken(strmatch.FirstTrimmed(t.ToolCallID, g.ToolCallID), 256, "unknown"),
+		TraceID:         safeLeakToken(strmatch.FirstTrimmed(t.TraceID, t.ToolCallID, g.ToolCallID), 256, "unknown"),
 		PolicyDigest:    safeLeakToken(g.PolicyDigest, 256, "unknown"),
 		Backend:         safeLeakToken(g.Backend, 256, "unknown"),
 		Reason:          safeLeakReason(reason, "FS_DENIED"),

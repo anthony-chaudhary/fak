@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // OutputChannel names the child-owned surface about to enter parent-visible
@@ -79,8 +81,8 @@ func AdmitChildOutput(ctx context.Context, in ChildOutput) OutputAdmission {
 	if tool == "" {
 		tool = "child_output"
 	}
-	trace := firstNonEmpty(in.TraceID, in.CallID, in.ToolCallID, in.AgentRunID)
-	toolCallID := firstNonEmpty(in.ToolCallID, in.CallID)
+	trace := strmatch.FirstTrimmed(in.TraceID, in.CallID, in.ToolCallID, in.AgentRunID)
+	toolCallID := strmatch.FirstTrimmed(in.ToolCallID, in.CallID)
 	body := append([]byte(nil), in.Bytes...)
 	sum := sha256.Sum256(body)
 	meta := map[string]string{

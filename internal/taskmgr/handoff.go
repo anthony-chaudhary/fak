@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -261,14 +263,14 @@ func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuecontract.Candid
 		WhyNow:          strings.TrimSpace(step.Reason),
 		WorkingSpine:    strings.TrimSpace(step.WorkingSpine),
 		PriorityContext: strings.TrimSpace(step.PriorityContext),
-		WorkUnit:        firstNonEmpty(step.WorkUnit, "leaf"),
+		WorkUnit:        strmatch.FirstTrimmed(step.WorkUnit, "leaf"),
 		ExpectedSteps:   step.ExpectedSteps,
 		Assumptions:     compactStrings(step.Assumptions),
 		ConfusionRisks:  compactStrings(step.ConfusionRisks),
 		Coordination:    compactStrings(step.Coordination),
-		Trigger:         firstNonEmpty(step.Trigger, "Verified task handoff proposed this next step."),
-		BatchPolicy:     firstNonEmpty(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."),
-		InScope:         firstNonEmpty(step.InScope, step.Body),
+		Trigger:         strmatch.FirstTrimmed(step.Trigger, "Verified task handoff proposed this next step."),
+		BatchPolicy:     strmatch.FirstTrimmed(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."),
+		InScope:         strmatch.FirstTrimmed(step.InScope, step.Body),
 		OutOfScope:      strings.TrimSpace(step.OutOfScope),
 		DoneCondition:   strings.TrimSpace(step.DoneCondition),
 		Witness:         strings.TrimSpace(step.Witness),
@@ -373,7 +375,7 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	}
 	writeSection(&b, "Working spine", strings.TrimSpace(step.WorkingSpine), "Not specified by this handoff.")
 	writeSection(&b, "Priority context", strings.TrimSpace(step.PriorityContext), "Not specified by this handoff.")
-	writeSection(&b, "Work unit", firstNonEmpty(step.WorkUnit, "leaf"), "leaf")
+	writeSection(&b, "Work unit", strmatch.FirstTrimmed(step.WorkUnit, "leaf"), "leaf")
 	if step.ExpectedSteps > 0 {
 		writeSection(&b, "Expected steps", strconv.Itoa(step.ExpectedSteps), "Not specified by this handoff.")
 	} else {
@@ -382,9 +384,9 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	writeListSection(&b, "Assumptions", step.Assumptions, "None named.")
 	writeListSection(&b, "Confusion risks", step.ConfusionRisks, "None named.")
 	writeListSection(&b, "Coordination notes", step.Coordination, "No special coordination beyond the lane lease.")
-	writeSection(&b, "Trigger", firstNonEmpty(step.Trigger, "Verified task handoff proposed this next step."), "Verified task handoff proposed this next step.")
-	writeSection(&b, "Batch policy", firstNonEmpty(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."), "At most two follow-up issues per handoff; update by marker key on rerun.")
-	writeSection(&b, "In scope", firstNonEmpty(step.InScope, step.Body), "Not specified by this handoff.")
+	writeSection(&b, "Trigger", strmatch.FirstTrimmed(step.Trigger, "Verified task handoff proposed this next step."), "Verified task handoff proposed this next step.")
+	writeSection(&b, "Batch policy", strmatch.FirstTrimmed(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."), "At most two follow-up issues per handoff; update by marker key on rerun.")
+	writeSection(&b, "In scope", strmatch.FirstTrimmed(step.InScope, step.Body), "Not specified by this handoff.")
 	writeSection(&b, "Out of scope", strings.TrimSpace(step.OutOfScope), "Not specified by this handoff.")
 	writeSection(&b, "Done condition", strings.TrimSpace(step.DoneCondition), "Not specified by this handoff.")
 	writeSection(&b, "Witness", strings.TrimSpace(step.Witness), "Not specified by this handoff.")
@@ -509,13 +511,4 @@ func oneLine(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return strings.Join(strings.Fields(s), " ")
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, val := range vals {
-		if s := strings.TrimSpace(val); s != "" {
-			return s
-		}
-	}
-	return ""
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // ghRunnerTimeout bounds each real gh subprocess so a stalled network call or a
@@ -212,7 +214,7 @@ func IssueBody(r Row) string {
 	section(&b, "Current state", r.CurrentState)
 	section(&b, "Why this is next", r.WhyNow)
 	section(&b, "Working spine", r.WorkingSpine)
-	section(&b, "Work unit", firstNonEmpty(r.WorkUnit, "leaf"))
+	section(&b, "Work unit", strmatch.FirstTrimmed(r.WorkUnit, "leaf"))
 	if r.ExpectedSteps > 0 {
 		section(&b, "Expected steps", strconv.Itoa(r.ExpectedSteps))
 	} else {
@@ -262,15 +264,6 @@ func listSection(b *strings.Builder, title string, values []string, fallback str
 		fmt.Fprintln(b, fallback)
 	}
 	fmt.Fprintln(b)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, val := range vals {
-		if s := strings.TrimSpace(val); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func pathSection(b *strings.Builder, paths []string) {

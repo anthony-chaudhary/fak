@@ -14,6 +14,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Schema is the stable schema tag stamped on the machine-readable result.
@@ -461,7 +463,7 @@ func IssueBody(item ActionItem) string {
 	issueSection(&b, "Closure binding", c.ClosureBinding)
 	fmt.Fprintln(&b, "Suggested next action:")
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, firstNonEmpty(item.NextAction, "Triage this scorecard ACTION row into a scoped, witness-backed leaf before dispatch."))
+	fmt.Fprintln(&b, strmatch.FirstTrimmed(item.NextAction, "Triage this scorecard ACTION row into a scoped, witness-backed leaf before dispatch."))
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "This issue is managed by `fak dogfood-issues`. Re-running the helper updates this issue in place instead of opening duplicates.")
 	return b.String()
@@ -484,12 +486,12 @@ func actionCandidate(item ActionItem) issuecontract.Candidate {
 		Schema:          issuecontract.Schema,
 		Key:             item.Key,
 		Title:           item.Title,
-		ParentRef:       firstNonEmpty(item.ParentRef, "fak dogfood-issues"),
-		CurrentState:    firstNonEmpty(item.CurrentState, scoreState),
-		WhyNow:          firstNonEmpty(item.WhyNow, "The recent-feature dogfood report emitted an ACTION/debt row for this scorecard."),
+		ParentRef:       strmatch.FirstTrimmed(item.ParentRef, "fak dogfood-issues"),
+		CurrentState:    strmatch.FirstTrimmed(item.CurrentState, scoreState),
+		WhyNow:          strmatch.FirstTrimmed(item.WhyNow, "The recent-feature dogfood report emitted an ACTION/debt row for this scorecard."),
 		WorkingSpine:    item.WorkingSpine,
 		PriorityContext: dogfoodPriorityContext(item),
-		WorkUnit:        firstNonEmpty(item.WorkUnit, "leaf"),
+		WorkUnit:        strmatch.FirstTrimmed(item.WorkUnit, "leaf"),
 		ExpectedSteps:   firstPositive(item.ExpectedSteps, 4),
 		Assumptions: appendDefault(item.Assumptions,
 			"The source scorecard row is still current when the worker starts."),
@@ -497,8 +499,8 @@ func actionCandidate(item ActionItem) issuecontract.Candidate {
 			"Do not treat this generated action row as a broad scorecard epic."),
 		Coordination: appendDefault(item.Coordination,
 			"Use the stable marker key before creating siblings so reruns update in place."),
-		Trigger:        firstNonEmpty(item.Trigger, dogfoodIssueTrigger(item)),
-		BatchPolicy:    firstNonEmpty(item.BatchPolicy, "One issue per stable dogfood action key; reruns update the existing marker instead of opening duplicates."),
+		Trigger:        strmatch.FirstTrimmed(item.Trigger, dogfoodIssueTrigger(item)),
+		BatchPolicy:    strmatch.FirstTrimmed(item.BatchPolicy, "One issue per stable dogfood action key; reruns update the existing marker instead of opening duplicates."),
 		InScope:        item.InScope,
 		OutOfScope:     item.OutOfScope,
 		DoneCondition:  item.DoneCondition,
@@ -508,18 +510,18 @@ func actionCandidate(item ActionItem) issuecontract.Candidate {
 		Paths:          append([]string(nil), item.Paths...),
 		Labels:         append([]string(nil), item.Labels...),
 		BoundaryNotes:  append([]string(nil), item.BoundaryNotes...),
-		ClosureBinding: firstNonEmpty(item.ClosureBinding, "Resolving commit must cite `#N` and carry a matching `(fak <leaf>)` trailer."),
+		ClosureBinding: strmatch.FirstTrimmed(item.ClosureBinding, "Resolving commit must cite `#N` and carry a matching `(fak <leaf>)` trailer."),
 	}
 }
 
 func dogfoodIssueTrigger(item ActionItem) string {
-	probe := firstNonEmpty(item.SourceProbe, "dogfood scorecard")
-	finding := firstNonEmpty(item.Finding, item.Key, "ACTION row")
+	probe := strmatch.FirstTrimmed(item.SourceProbe, "dogfood scorecard")
+	finding := strmatch.FirstTrimmed(item.Finding, item.Key, "ACTION row")
 	return fmt.Sprintf("Scorecard probe `%s` emitted ACTION finding `%s`.", probe, finding)
 }
 
 func dogfoodPriorityContext(item ActionItem) string {
-	spine := firstNonEmpty(item.WorkingSpine, "Retire the scorecard ACTION row on the smallest witnessed path.")
+	spine := strmatch.FirstTrimmed(item.WorkingSpine, "Retire the scorecard ACTION row on the smallest witnessed path.")
 	current := fmt.Sprintf("Scorecard `%s` reports `%s` with %s `%d`.", item.SourceProbe, item.Finding, item.DebtName, item.DebtCount)
 	return strings.Join([]string{
 		"Working path: " + spine,
@@ -569,15 +571,6 @@ func issueListSection(b *strings.Builder, title string, items []string) {
 		}
 	}
 	fmt.Fprintln(b)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if s := strings.TrimSpace(value); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // MarkerKey extracts the stable key from an issue body's HTML-comment marker,

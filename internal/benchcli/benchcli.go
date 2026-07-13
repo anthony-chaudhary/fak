@@ -25,6 +25,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // ReadHFConfig loads the Hugging Face config.json from dir into a model.Config.
@@ -268,7 +270,7 @@ func ArtifactFromJSON(lin Lineage, report []byte) BenchmarkArtifact {
 	root := decodeObject(report)
 	hname := envOr("FAK_BENCH_HARNESS_NAME", executableName())
 	hver := envOr("FAK_BENCH_HARNESS_VERSION", BenchmarkHarnessVersion)
-	buildFlags := splitList(firstNonEmpty(os.Getenv("FAK_BENCH_BUILD_FLAGS"), os.Getenv("GOFLAGS")))
+	buildFlags := splitList(strmatch.FirstTrimmed(os.Getenv("FAK_BENCH_BUILD_FLAGS"), os.Getenv("GOFLAGS")))
 	model := extractModel(root)
 	return BenchmarkArtifact{
 		Schema:         BenchmarkArtifactSchema,
@@ -527,7 +529,7 @@ func DecodeArtifact(raw []byte) (BenchmarkArtifact, bool) {
 		var lin Lineage
 		if json.Unmarshal(b, &lin) == nil && (lin.GitCommit != "" || lin.UTC != "") {
 			art := ArtifactFromJSON(lin, raw)
-			art.RunID = firstNonEmpty(stringField(root, "run_id"), art.RunID)
+			art.RunID = strmatch.FirstTrimmed(stringField(root, "run_id"), art.RunID)
 			return art, true
 		}
 	}
@@ -555,23 +557,23 @@ func artifactFromRunManifest(root map[string]any) BenchmarkArtifact {
 		Schema:         BenchmarkArtifactSchema,
 		RunID:          stringField(root, "run_id"),
 		Timestamp:      stringField(root, "timestamp"),
-		FAKCommit:      firstNonEmpty(stringField(git, "rev"), lineageUnknown),
+		FAKCommit:      strmatch.FirstTrimmed(stringField(git, "rev"), lineageUnknown),
 		FAKVersion:     lineageUnknown,
-		HarnessVersion: firstNonEmpty(hv, lineageUnknown),
+		HarnessVersion: strmatch.FirstTrimmed(hv, lineageUnknown),
 		Harness: HarnessInfo{
-			Name:    firstNonEmpty(stringField(harness, "name"), lineageUnknown),
-			Version: firstNonEmpty(hv, lineageUnknown),
+			Name:    strmatch.FirstTrimmed(stringField(harness, "name"), lineageUnknown),
+			Version: strmatch.FirstTrimmed(hv, lineageUnknown),
 		},
 		Machine: MachineInfo{
-			Hostname: firstNonEmpty(stringField(root, "machine_id"), lineageUnknown),
+			Hostname: strmatch.FirstTrimmed(stringField(root, "machine_id"), lineageUnknown),
 			CPU:      lineageUnknown,
 			GPU:      lineageUnknown,
 			OS:       lineageUnknown,
 			Arch:     lineageUnknown,
 		},
 		Model: ModelSnapshot{
-			Name:      firstNonEmpty(stringField(model, "name"), lineageUnknown),
-			Precision: firstNonEmpty(stringField(model, "precision"), lineageUnknown),
+			Name:      strmatch.FirstTrimmed(stringField(model, "name"), lineageUnknown),
+			Precision: strmatch.FirstTrimmed(stringField(model, "precision"), lineageUnknown),
 		},
 		Dependencies: map[string]string{},
 		Config: ConfigSnapshot{
@@ -591,17 +593,17 @@ func artifactFromRunManifest(root map[string]any) BenchmarkArtifact {
 }
 
 func extractModel(root map[string]any) ModelSnapshot {
-	name := firstNonEmpty(os.Getenv("FAK_BENCH_MODEL_NAME"), recursiveString(root, "model"), recursiveString(root, "engine_model"), recursiveString(root, "model_name"))
-	precision := firstNonEmpty(os.Getenv("FAK_BENCH_MODEL_PRECISION"), recursiveString(root, "precision"), recursiveString(root, "quantization"))
-	source := firstNonEmpty(os.Getenv("FAK_BENCH_MODEL_SOURCE_URL"), recursiveString(root, "source_url"), recursiveString(root, "source"), recursiveString(root, "model_filename"))
-	commit := firstNonEmpty(os.Getenv("FAK_BENCH_MODEL_COMMIT"), recursiveString(root, "source_commit"), recursiveString(root, "hf_commit"), snapshotCommitFromPath(source))
-	hash := firstNonEmpty(os.Getenv("FAK_BENCH_MODEL_HASH"), recursiveString(root, "gguf_sha256"), recursiveString(root, "model_sha256"), recursiveString(root, "model_hash"), recursiveString(root, "sha256"))
+	name := strmatch.FirstTrimmed(os.Getenv("FAK_BENCH_MODEL_NAME"), recursiveString(root, "model"), recursiveString(root, "engine_model"), recursiveString(root, "model_name"))
+	precision := strmatch.FirstTrimmed(os.Getenv("FAK_BENCH_MODEL_PRECISION"), recursiveString(root, "precision"), recursiveString(root, "quantization"))
+	source := strmatch.FirstTrimmed(os.Getenv("FAK_BENCH_MODEL_SOURCE_URL"), recursiveString(root, "source_url"), recursiveString(root, "source"), recursiveString(root, "model_filename"))
+	commit := strmatch.FirstTrimmed(os.Getenv("FAK_BENCH_MODEL_COMMIT"), recursiveString(root, "source_commit"), recursiveString(root, "hf_commit"), snapshotCommitFromPath(source))
+	hash := strmatch.FirstTrimmed(os.Getenv("FAK_BENCH_MODEL_HASH"), recursiveString(root, "gguf_sha256"), recursiveString(root, "model_sha256"), recursiveString(root, "model_hash"), recursiveString(root, "sha256"))
 	return ModelSnapshot{
-		Name:         firstNonEmpty(name, lineageUnknown),
-		Precision:    firstNonEmpty(precision, lineageUnknown),
-		SourceCommit: firstNonEmpty(commit, lineageUnknown),
-		SourceURL:    firstNonEmpty(source, lineageUnknown),
-		Hash:         firstNonEmpty(hash, lineageUnknown),
+		Name:         strmatch.FirstTrimmed(name, lineageUnknown),
+		Precision:    strmatch.FirstTrimmed(precision, lineageUnknown),
+		SourceCommit: strmatch.FirstTrimmed(commit, lineageUnknown),
+		SourceURL:    strmatch.FirstTrimmed(source, lineageUnknown),
+		Hash:         strmatch.FirstTrimmed(hash, lineageUnknown),
 	}
 }
 
@@ -710,15 +712,6 @@ func envInt(key string) int {
 		return 0
 	}
 	return n
-}
-
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if s := strings.TrimSpace(x); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func splitList(s string) []string {
