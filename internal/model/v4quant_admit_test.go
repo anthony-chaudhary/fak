@@ -224,6 +224,60 @@ func TestClassifyV4Tensor(t *testing.T) {
 	}
 }
 
+// TestV4RetainedMTPFloorsPrecision is the #4353 witness: a RETAINED MTP/draft head
+// (RetainMTP set) is floored to a non-FP4 minimum. It REFUSES an FP4/int4 admission —
+// which would collapse self-speculation acceptance so the draft head buys nothing — and
+// ADMITS at the FP8 floor (and at HIGH above it). With RetainMTP clear the head is still
+// dropped (SKIP) exactly as before, so the floor is inert on every non-scaffold load and
+// changes no unrelated class. The floor is set by measured draft-acceptance, not by a
+// GEMV-cosine proxy; those acceptance numbers are the DGX-gated deferred witness.
+func TestV4RetainedMTPFloorsPrecision(t *testing.T) {
+	orig := RetainMTP
+	defer func() { RetainMTP = orig }()
+
+	const draftHead = "mtp.head.weight"
+
+	// Retained: FP4/int4 is BELOW the floor and must fail closed with a typed refusal
+	// that names the MTP class.
+	RetainMTP = true
+	if v, err := admitV4Tensor(V4TensorMeta{Name: draftHead, Dtype: "F4_E2M1"}); err == nil {
+		t.Fatalf("retained MTP head at FP4 must REFUSE (below floor), got %+v", v)
+	} else {
+		var fp4Err *UnsupportedFP4TensorError
+		if !errors.As(err, &fp4Err) {
+			t.Fatalf("want *UnsupportedFP4TensorError, got %T: %v", err, err)
+		}
+		if fp4Err.Class != V4ClassMTP {
+			t.Errorf("floor refusal should name class %s, got %q", V4ClassMTP, fp4Err.Class)
+		}
+	}
+
+	// Retained: FP8 (the floor itself) and HIGH (above it) must ADMIT as the MTP class.
+	for _, dtype := range []string{"F8_E4M3", "BF16"} {
+		v, err := admitV4Tensor(V4TensorMeta{Name: draftHead, Dtype: dtype})
+		if err != nil {
+			t.Fatalf("retained MTP head at %s must ADMIT (>= floor), got refusal: %v", dtype, err)
+		}
+		if v.Disposition != V4Admit {
+			t.Errorf("retained MTP head at %s disposition=%s, want ADMIT", dtype, v.Disposition)
+		}
+		if v.Class != V4ClassMTP {
+			t.Errorf("retained MTP head at %s class=%s, want %s", dtype, v.Class, V4ClassMTP)
+		}
+	}
+
+	// Not retained (the default): the head is dropped regardless of dtype — even an FP4
+	// tensor is SKIPPED, never refused, so the floor never bites an unretained checkpoint.
+	RetainMTP = false
+	v, err := admitV4Tensor(V4TensorMeta{Name: draftHead, Dtype: "F4_E2M1"})
+	if err != nil {
+		t.Fatalf("unretained MTP head must SKIP, not refuse, got %v", err)
+	}
+	if v.Disposition != V4Skip {
+		t.Errorf("unretained MTP head disposition=%s, want SKIP", v.Disposition)
+	}
+}
+
 // TestV4AdmitAgreesWithLoaderDrop pins the admission gate to the REAL loader's drop
 // predicate: every tensor skipLoadTensor drops (the mtp.* speculative-decode head and
 // the model.visual.* multimodal tower) must be SKIPPED by the gate, never refused —

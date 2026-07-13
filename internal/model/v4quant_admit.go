@@ -102,8 +102,18 @@ func v4ExpectedPrecisions(class V4TensorClass) []V4Precision {
 		return []V4Precision{V4High, V4FP8}
 	case V4ClassEmbedding:
 		return []V4Precision{V4High}
-	case V4ClassMTP, V4ClassVision:
-		// Dropped at load (MTP head / vision tower); dtype is not asserted.
+	case V4ClassMTP:
+		// A RETAINED MTP/draft head (RetainMTP) is a LOADED tensor, and it is FLOORED to a
+		// non-FP4 minimum: a draft head admitted at FP4/int4 collapses self-speculation
+		// acceptance, so speculation would decode no faster (often slower) than a plain
+		// forward. FP8 is the floor; HIGH is fine above it. When RetainMTP is clear the head
+		// is SKIPPED before this allow-set is ever consulted, so this floor only bites a
+		// retained head (#4353). The floor is set by DRAFT-ACCEPTANCE, not GEMV-cosine: the
+		// measured acceptance numbers that justify FP8-as-floor are DGX-gated (real GLM-5.2
+		// self-spec decode, parent epic #3006); the floor itself is the composable code here.
+		return []V4Precision{V4FP8, V4High}
+	case V4ClassVision:
+		// Vision tower is always dropped at load; its dtype is never asserted.
 		return nil
 	}
 	return nil
@@ -263,7 +273,11 @@ func admitV4Tensor(t V4TensorMeta) (V4TensorVerdict, *UnsupportedFP4TensorError)
 		err := &UnsupportedFP4TensorError{Tensor: t.Name, Dtype: t.Dtype, Why: why}
 		return V4TensorVerdict{Name: t.Name, Precision: prec, Disposition: V4Refuse, Reason: why}, err
 	}
-	if class == V4ClassMTP || class == V4ClassVision {
+	// The vision tower is ALWAYS dropped. The MTP head is dropped by default too, but when
+	// RetainMTP retains it for self-speculation it becomes a LOADED tensor that must clear
+	// the non-FP4 precision FLOOR below (#4353) instead of being skipped — a retained draft
+	// head is only worth keeping if it was not quantized into speculation-collapsing FP4.
+	if class == V4ClassVision || (class == V4ClassMTP && !RetainMTP) {
 		reason := "MTP speculative-decode head dropped by default (retain via RetainMTP)"
 		if class == V4ClassVision {
 			reason = "multimodal vision tower dropped (text forward never reads it)"
