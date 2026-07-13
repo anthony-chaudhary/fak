@@ -47,3 +47,14 @@ func FirstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// FirstTrimmed returns the first value containing non-whitespace text after
+// trimming its surrounding whitespace.
+func FirstTrimmed(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}

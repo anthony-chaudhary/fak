@@ -3,6 +3,8 @@ package loopdrive
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // LeaseRefSyncSurface names the caller surface whose tick is being wrapped with
@@ -178,7 +180,7 @@ func ReportLeaseRefSync(attempts []LeaseRefSyncAttempt) LeaseRefSyncReport {
 			continue
 		}
 		failures = append(failures, fmt.Sprintf("%s %s %s: %s",
-			a.Step.Boundary, a.Step.Direction, firstNonEmpty(a.Step.Remote, "origin"), strings.TrimSpace(a.Err)))
+			a.Step.Boundary, a.Step.Direction, strmatch.FirstTrimmed(a.Step.Remote, "origin"), strings.TrimSpace(a.Err)))
 	}
 	if len(failures) == 0 {
 		return LeaseRefSyncReport{Outcome: LeaseRefSyncOK, Summary: "lease-ref sync boundary clean"}
@@ -190,13 +192,4 @@ func ReportLeaseRefSync(attempts []LeaseRefSyncAttempt) LeaseRefSyncReport {
 		Summary:  "lease-ref sync failed; continuing with local lease evidence",
 		Failures: failures,
 	}
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }

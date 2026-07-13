@@ -1,6 +1,10 @@
 package issuecontract
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
+)
 
 // GenerationFit is an advisory grooming score. It checks whether generation
 // labels match the issue body, proof, and time-horizon cues. It is intentionally
@@ -23,7 +27,7 @@ type GenerationFit struct {
 func generationFit(c Candidate) GenerationFit {
 	labelStream, labelFlags := generationStreamFromLabels(c.Labels)
 	bodyStream := generationStreamFromCandidate(c)
-	stream := firstNonEmpty(labelStream, bodyStream)
+	stream := strmatch.FirstTrimmed(labelStream, bodyStream)
 	flags := append([]string(nil), labelFlags...)
 	if labelStream != "" && bodyStream != "" && labelStream != bodyStream {
 		flags = append(flags, "generation_body_mismatch")

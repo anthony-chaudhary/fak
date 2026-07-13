@@ -3,6 +3,8 @@ package dispatchtick
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -494,10 +496,10 @@ func landSaturated(c LandContention) bool {
 func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool, hostCap *int) (string, string) {
 	switch {
 	case strings.TrimSpace(in.Host.Error) != "" || strings.TrimSpace(in.Kernel.Error) != "":
-		reason := firstNonEmpty(in.Host.Error, in.Kernel.Error, "a preflight safety check could not run")
+		reason := strmatch.FirstTrimmed(in.Host.Error, in.Kernel.Error, "a preflight safety check could not run")
 		return PreflightRefuseInspect, reason
 	case in.Tree.Poisoned:
-		return PreflightRefuseTreePoison, fmt.Sprintf("shared tree build is red: %s", firstNonEmpty(in.Tree.Package, in.Tree.Error, "failing package unknown"))
+		return PreflightRefuseTreePoison, fmt.Sprintf("shared tree build is red: %s", strmatch.FirstTrimmed(in.Tree.Package, in.Tree.Error, "failing package unknown"))
 	case !in.Host.Safe:
 		names := strings.Join(in.Host.FlaggedNames, ", ")
 		if strings.TrimSpace(names) == "" {
@@ -704,15 +706,6 @@ func nonEmpty(in []string) []string {
 		}
 	}
 	return out
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func minInt(a, b int) int {

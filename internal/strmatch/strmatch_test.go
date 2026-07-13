@@ -52,3 +52,12 @@ func TestFirstNonEmptyTreatsWhitespaceAsAValue(t *testing.T) {
 		t.Fatalf("FirstNonEmpty(all empty) = %q, want empty", got)
 	}
 }
+
+func TestFirstTrimmedReturnsTrimmedValue(t *testing.T) {
+	if got := FirstTrimmed("", " \t ", "  ready  ", "later"); got != "ready" {
+		t.Fatalf("FirstTrimmed = %q, want trimmed value", got)
+	}
+	if got := FirstTrimmed("", "\n"); got != "" {
+		t.Fatalf("FirstTrimmed(all blank) = %q, want empty", got)
+	}
+}

@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -421,7 +423,7 @@ func BuildTemplateRepairPlan(d IssueDraft) (TemplateRepairPlan, bool) {
 
 func proposedTemplateRepairHeader(d IssueDraft, c Candidate) string {
 	labelStream, _ := generationStreamFromLabels(c.Labels)
-	stream := firstNonEmpty(labelStream, generationStreamFromCandidate(c), generationStreamFromText(d.Body))
+	stream := strmatch.FirstTrimmed(labelStream, generationStreamFromCandidate(c), generationStreamFromText(d.Body))
 	if stream != "" {
 		return proposedGenerationHeader(d, c, stream)
 	}
@@ -432,7 +434,7 @@ func proposedTemplateRepairHeader(d IssueDraft, c Candidate) string {
 }
 
 func proposedGenerationHeader(d IssueDraft, c Candidate, stream string) string {
-	parent := firstNonEmpty(cleanIssueHeaderValue(issueHeaderField(d.Body, "Parent")), c.ParentRef)
+	parent := strmatch.FirstTrimmed(cleanIssueHeaderValue(issueHeaderField(d.Body, "Parent")), c.ParentRef)
 	lines := []string{
 		"## Generation stream",
 		"- Generation: " + stream,
@@ -447,8 +449,8 @@ func proposedGenerationHeader(d IssueDraft, c Candidate, stream string) string {
 
 func proposedManagedContextHeader(d IssueDraft, c Candidate) string {
 	key := issueDraftMarkerKey(d.Body)
-	track := firstNonEmpty(managedContextTrackFromKey(key), cleanIssueHeaderValue(issueHeaderField(d.Body, "Track")), "needs-track")
-	parent := firstNonEmpty(cleanIssueHeaderValue(issueHeaderField(d.Body, "Parent")), c.ParentRef, "https://github.com/anthony-chaudhary/fak/issues/1570")
+	track := strmatch.FirstTrimmed(managedContextTrackFromKey(key), cleanIssueHeaderValue(issueHeaderField(d.Body, "Track")), "needs-track")
+	parent := strmatch.FirstTrimmed(cleanIssueHeaderValue(issueHeaderField(d.Body, "Parent")), c.ParentRef, "https://github.com/anthony-chaudhary/fak/issues/1570")
 	lines := []string{}
 	if key != "" {
 		lines = append(lines, "<!-- fak-managed-context-key: "+key+" -->")
@@ -479,7 +481,7 @@ func proposedGenericIssueHeader(d IssueDraft, c Candidate) string {
 	if c.Key != "" {
 		lines = append(lines, "- Key: "+c.Key)
 	}
-	if parent := firstNonEmpty(cleanIssueHeaderValue(issueHeaderField(d.Body, "Parent")), c.ParentRef); parent != "" {
+	if parent := strmatch.FirstTrimmed(cleanIssueHeaderValue(issueHeaderField(d.Body, "Parent")), c.ParentRef); parent != "" {
 		lines = append(lines, "- Parent: "+parent)
 	}
 	return strings.Join(lines, "\n")
@@ -634,8 +636,8 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		BatchPolicy:     agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
 		InScope:         section("In scope"),
 		OutOfScope:      section("Out of scope"),
-		DoneCondition:   firstNonEmpty(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
-		Witness:         firstNonEmpty(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
+		DoneCondition:   strmatch.FirstTrimmed(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
+		Witness:         strmatch.FirstTrimmed(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
 		AcceptanceGate:  section("Acceptance gate"),
 		Lane:            lane,
 		Paths:           paths,
@@ -728,15 +730,6 @@ func prefixedSectionValue(section, prefix string) string {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(strings.ToLower(line), prefix) {
 			return strings.TrimSpace(strings.Trim(line[len(prefix):], "` "))
-		}
-	}
-	return ""
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
 		}
 	}
 	return ""
