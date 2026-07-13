@@ -528,6 +528,19 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		fmt.Fprintln(os.Stderr, "fak serve: --addr is required (or pass --stdio)")
 		os.Exit(2)
 	}
+	// #3051/#3083: a local in-kernel GLM serve pays a one-time ~500s backend warmup
+	// (weight load into VRAM, CUDA-graph capture, DeepGEMM/JIT compile) on its first
+	// decode. Arm the readiness gate BEFORE binding the listener so /healthz reports
+	// warmup_pending from the very first probe, then run a synthetic warm turn in the
+	// background alongside ListenAndServe — the operator's first real turn is warm,
+	// not a ~500s stall, and a client's cold-request timeout cannot cancel a
+	// legitimate warmup by racing an early ready mark. The condition mirrors the one
+	// serve.go uses to route chat in-kernel (local model, no upstream base-url, no
+	// replica fleet); a proxy/replica serve pays no such tax and skips warm-start.
+	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
+		rt.srv.ArmWarmupGate()
+		go func() { _, _ = rt.srv.RunWarmup(ctx) }()
+	}
 	if err := rt.srv.ListenAndServe(ctx, *sf.addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		must(err)
 	}
