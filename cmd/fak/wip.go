@@ -370,11 +370,15 @@ func runWipAutoCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-// wipCheckpoint captures the tracked working-tree delta into a stamped commit and
-// anchors it at refs/fak/wip/<session>. It uses a THROWAWAY index (GIT_INDEX_FILE)
-// seeded from HEAD, so `git add -u` stages tracked modifications there without ever
-// touching the real index or working tree, and `git write-tree` captures them. A
-// tree identical to HEAD's means a clean tree — reported, no ref written.
+// wipCheckpoint captures the working-tree delta — tracked modifications AND
+// untracked non-ignored files (#4336) — into a stamped commit and anchors it at
+// refs/fak/wip/<session>. It uses a THROWAWAY index (GIT_INDEX_FILE) seeded from
+// HEAD, so `git add -A` stages the delta there without ever touching the real
+// index or working tree, and `git write-tree` captures it. `.gitignore` is
+// respected (add -A never stages ignored paths), so build artifacts stay out of
+// the snapshot. The clean verdict is decided on the tree written AFTER untracked
+// staging: a tree identical to HEAD's means a clean tree — reported, no ref
+// written — so a pure-untracked WIP is never misreported as clean.
 func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, nowUnix int64) (wipCheckpointResult, error) {
 	res := wipCheckpointResult{Session: session, Ref: wipref.SessionRef(session), Buildable: buildable, Leaves: []string{}}
 
@@ -393,8 +397,8 @@ func wipCheckpoint(ctx context.Context, repo, session string, buildable bool, no
 	if _, err := gitWipOut(ctx, repo, idxEnv, "read-tree", "HEAD"); err != nil {
 		return res, fmt.Errorf("seed temp index: %w", err)
 	}
-	if _, err := gitWipOut(ctx, repo, idxEnv, "add", "-u"); err != nil {
-		return res, fmt.Errorf("stage tracked changes: %w", err)
+	if _, err := gitWipOut(ctx, repo, idxEnv, "add", "-A"); err != nil {
+		return res, fmt.Errorf("stage working-tree changes: %w", err)
 	}
 	tree, err := gitWipOut(ctx, repo, idxEnv, "write-tree")
 	if err != nil {

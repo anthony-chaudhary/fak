@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +91,68 @@ func TestWipCheckpointRestoreByteIdentical(t *testing.T) {
 	}
 	if !bytes.Equal(got, dirty) {
 		t.Fatalf("restored bytes mismatch:\n got  %q\n want %q", got, dirty)
+	}
+}
+
+// TestWipCheckpointUntrackedRoundTrip is the #4336 DONE condition: a tree whose
+// ONLY change is a new untracked file must checkpoint (not report clean, ref
+// written), and after `git clean -fd` wipes it, restore --apply must reproduce
+// the file byte-identical. Ignored untracked files must stay out of the snapshot.
+func TestWipCheckpointUntrackedRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	dir, _ := wipTestRepo(t)
+
+	fresh := filepath.Join(dir, "newleaf.go.txt")
+	body := []byte("package newleaf // brand-new WIP, never git-added\n")
+	if err := os.WriteFile(fresh, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An ignored sibling must NOT be swept into the checkpoint (.gitignore boundary).
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("junk.bin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "junk.bin"), []byte("ignored artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := wipCheckpoint(ctx, dir, "sessU", true, 1000)
+	if err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if res.Clean {
+		t.Fatal("checkpoint reported clean: a new-file-only WIP was dropped under a false all-clear")
+	}
+	if res.Object == "" {
+		t.Fatalf("checkpoint wrote no ref for a pure-untracked delta: %+v", res)
+	}
+	names, err := gitWipOut(ctx, dir, nil, "diff", "--name-only", res.Object+"^1", res.Object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(names, "newleaf.go.txt") {
+		t.Fatalf("checkpoint tree missing the untracked file, got: %q", names)
+	}
+	if strings.Contains(names, "junk.bin") {
+		t.Fatalf("checkpoint swept in a .gitignore'd path: %q", names)
+	}
+
+	// Destroy the untracked WIP the way a `git clean -fd` would.
+	if _, err := gitWipOut(ctx, dir, nil, "clean", "-fd"); err != nil {
+		t.Fatalf("git clean: %v", err)
+	}
+	if _, err := os.Stat(fresh); !os.IsNotExist(err) {
+		t.Fatal("git clean did not remove the untracked file (test precondition)")
+	}
+
+	if rc, err := wipRestore(ctx, dir, "sessU", true, io.Discard); err != nil || rc != 0 {
+		t.Fatalf("restore rc=%d err=%v", rc, err)
+	}
+	got, err := os.ReadFile(fresh)
+	if err != nil {
+		t.Fatalf("restored file unreadable: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("restored bytes mismatch:\n got  %q\n want %q", got, body)
 	}
 }
 

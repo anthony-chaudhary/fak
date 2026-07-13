@@ -75,6 +75,15 @@ func runWipSelfcheck(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	// An untracked new file alongside the tracked edit (#4336) — the most common
+	// shape of new-leaf WIP; the checkpoint must capture BOTH categories.
+	untracked := filepath.Join(dir, "newleaf.txt")
+	untrackedBody := []byte("WIP: a brand-new untracked file worth keeping\n")
+	if err := os.WriteFile(untracked, untrackedBody, 0o644); err != nil {
+		fmt.Fprintf(stderr, "fak wip selfcheck: %v\n", err)
+		return 1
+	}
+
 	res, err := wipCheckpoint(ctx, dir, "selfcheck", true, time.Now().Unix())
 	if err != nil {
 		return fail(fmt.Sprintf("checkpoint failed: %v", err))
@@ -83,12 +92,19 @@ func runWipSelfcheck(stdout, stderr io.Writer, argv []string) int {
 		return fail("checkpoint reported a clean tree despite an uncommitted edit")
 	}
 
-	// Wipe the delta the way an errant `git checkout -- .` would.
+	// Wipe the delta the way an errant `git checkout -- .` plus `git clean -fd`
+	// would: revert the tracked edit AND delete the untracked file.
 	if _, err := gitWipOut(ctx, dir, nil, "checkout", "--", "."); err != nil {
 		return fail(fmt.Sprintf("checkout to wipe delta failed: %v", err))
 	}
 	if wiped, _ := os.ReadFile(file); string(wiped) == string(dirty) {
 		return fail("checkout did not clear the delta — test precondition broken")
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "clean", "-fd"); err != nil {
+		return fail(fmt.Sprintf("clean to wipe untracked file failed: %v", err))
+	}
+	if _, err := os.Stat(untracked); !os.IsNotExist(err) {
+		return fail("git clean did not remove the untracked file — test precondition broken")
 	}
 
 	// status must list exactly the one checkpoint we took.
@@ -110,9 +126,16 @@ func runWipSelfcheck(stdout, stderr io.Writer, argv []string) int {
 	if string(restored) != string(dirty) {
 		return fail("restored working tree does not match the pre-checkpoint delta byte-for-byte")
 	}
+	restoredUntracked, err := os.ReadFile(untracked)
+	if err != nil {
+		return fail(fmt.Sprintf("restore did not re-materialize the untracked file: %v", err))
+	}
+	if string(restoredUntracked) != string(untrackedBody) {
+		return fail("restored untracked file does not match the pre-checkpoint bytes")
+	}
 
 	return wipSelfcheckVerdict(stdout, stderr, *asJSON, true,
-		"checkpoint -> git checkout -- . -> restore reproduced the delta byte-identical; status listed it")
+		"checkpoint -> checkout+clean wipe -> restore reproduced tracked edit AND untracked file byte-identical; status listed it")
 }
 
 func wipSelfcheckVerdict(stdout, stderr io.Writer, asJSON, pass bool, detail string) int {
