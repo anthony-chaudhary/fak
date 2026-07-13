@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 // jsonMap unmarshals a JSON literal into the map[string]any shape the live
@@ -480,7 +482,7 @@ func TestRowFromReportRoundTrip(t *testing.T) {
 		row.WorkCommits != 23 || row.WorkShips != 18 || row.ReleaseVersion != "v1.2.3" || row.ReleaseAction != "wait" {
 		t.Fatalf("row projection = %+v", row)
 	}
-	line, err := AppendLedgerLine(row)
+	line, err := trendreport.AppendLedgerLine(row)
 	if err != nil {
 		t.Fatal(err)
 	}

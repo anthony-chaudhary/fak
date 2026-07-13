@@ -3,6 +3,8 @@ package projectreport
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 func TestRowFromReportNormalizesHorizons(t *testing.T) {
@@ -65,7 +67,7 @@ func TestTrendVsLastSkipsSameGeneration(t *testing.T) {
 
 func TestLedgerRoundTrip(t *testing.T) {
 	row := RowFromReport(Fold([]Item{{Issue: 1, Status: "Todo", Generation: "now"}}, FoldOpts{Date: "2026-07-11"}))
-	line, err := AppendLedgerLine(row)
+	line, err := trendreport.AppendLedgerLine(row)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}

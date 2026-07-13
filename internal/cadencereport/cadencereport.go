@@ -657,9 +657,6 @@ func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline). The
 // caller appends it to the ledger file with a newline; keeping the rendering
 // pure makes the writer testable without touching disk.
-func AppendLedgerLine(row LedgerRow) (string, error) {
-	return trendreport.AppendLedgerLine(row)
-}
 
 // --- render + gate ---------------------------------------------------------
 

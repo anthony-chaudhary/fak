@@ -423,9 +423,6 @@ func ParseLedger(content string) []LedgerRow {
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline); the
 // caller appends the newline. Keeping the rendering pure makes the writer testable
 // without touching disk.
-func AppendLedgerLine(row LedgerRow) (string, error) {
-	return trendreport.AppendLedgerLine(row)
-}
 
 // Trend is the week-over-week direction, driven by the at-risk debt integer (a
 // falling debt is an improvement; a rising one a regression).

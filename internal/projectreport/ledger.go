@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
-	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 // LedgerSchema tags each durable history row so a reader can validate the line.
@@ -102,9 +101,6 @@ func ParseLedger(content string) []LedgerRow {
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline); the caller
 // appends it with a newline. Keeping the rendering pure makes the writer testable
 // without touching disk.
-func AppendLedgerLine(row LedgerRow) (string, error) {
-	return trendreport.AppendLedgerLine(row)
-}
 
 // Trend is the per-tick delta vs the previous ledger row. The direction is driven by
 // the unclassified count (lower is better), then by the tracked item total — a board

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 // TestLedgerLivenessDarkToLive is the revival witness: a ledger whose newest tick
@@ -37,7 +39,7 @@ func TestLedgerLivenessDarkToLive(t *testing.T) {
 		GeneratedAt: now.Format(time.RFC3339),
 		Verdict:     "OK",
 	}
-	line, err := AppendLedgerLine(freshRow)
+	line, err := trendreport.AppendLedgerLine(freshRow)
 	if err != nil {
 		t.Fatalf("AppendLedgerLine: %v", err)
 	}

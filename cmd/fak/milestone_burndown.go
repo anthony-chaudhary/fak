@@ -26,6 +26,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/milestoneburndown"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 // runMilestoneBurndown collects the live milestones, folds the schedule verdicts,
@@ -83,7 +85,7 @@ func runMilestoneBurndown(stdout, stderr io.Writer, argv []string) int {
 	prior := readLedgerFile(ledgerPath, milestoneburndown.ParseLedger)
 	report = report.WithTrend(milestoneburndown.TrendVsLast(row, prior))
 	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, row, milestoneburndown.AppendLedgerLine); err != nil {
+		if err := appendLedgerFile(ledgerPath, row, trendreport.AppendLedgerLine); err != nil {
 			fmt.Fprintf(stderr, "fak milestone burndown: append ledger: %v\n", err)
 			return 1
 		}

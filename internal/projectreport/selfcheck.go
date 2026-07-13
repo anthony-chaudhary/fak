@@ -8,7 +8,11 @@ package projectreport
 // trendreport proof); this one proves THIS package's fold + ledger invariants directly,
 // since the project fold carries its own OK/ACTION/UNMEASURED vocabulary.
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
+)
 
 // Selfcheck proves the fold + ledger + trend invariants deterministically. It returns
 // the first violated invariant, or nil when every oracle holds.
@@ -62,7 +66,7 @@ func Selfcheck() error {
 	}
 
 	// 6. The ledger line marshals and re-parses to the same dated row (round-trip).
-	line, err := AppendLedgerLine(row)
+	line, err := trendreport.AppendLedgerLine(row)
 	if err != nil {
 		return fmt.Errorf("append ledger line: %w", err)
 	}

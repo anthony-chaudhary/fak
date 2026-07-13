@@ -41,6 +41,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/projectreport"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 func cmdProject(argv []string) {
@@ -88,7 +90,7 @@ func runProjectReport(stdout, stderr io.Writer, argv []string) int {
 	ledgerPath := projectLedgerPath(*ledger)
 	report = attachProjectTrend(report, ledgerPath)
 	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, projectreport.RowFromReport(report), projectreport.AppendLedgerLine); err != nil {
+		if err := appendLedgerFile(ledgerPath, projectreport.RowFromReport(report), trendreport.AppendLedgerLine); err != nil {
 			fmt.Fprintf(stderr, "fak project report: append ledger: %v\n", err)
 			return 1
 		}

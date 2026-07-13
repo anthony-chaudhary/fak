@@ -99,7 +99,7 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	trend := cadencereport.TrendVsLast(row, prior)
 	report.Trend = &trend
 	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, row, cadencereport.AppendLedgerLine); err != nil {
+		if err := appendLedgerFile(ledgerPath, row, trendreport.AppendLedgerLine); err != nil {
 			fmt.Fprintf(stderr, "fak cadence: append ledger: %v\n", err)
 			return 1
 		}

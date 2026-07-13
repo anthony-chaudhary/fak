@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/trendreport"
 )
 
 // fixedNow is the injected clock every pure test folds against, so verdicts are
@@ -188,7 +190,7 @@ func TestLedgerRoundTrip(t *testing.T) {
 	row := RowFromReport(Fold(Interpret(
 		[]Milestone{{Number: 1, Title: "x", DueOn: "2026-07-01T00:00:00Z", Open: 2, Closed: 1, ClosedInWindow: 0, WindowDays: 28}},
 		28, fixedNow, ""), FoldOpts{Commit: "abc123", GeneratedAt: "2026-07-10T00:00:00Z", Date: "2026-07-10"}))
-	line, err := AppendLedgerLine(row)
+	line, err := trendreport.AppendLedgerLine(row)
 	if err != nil {
 		t.Fatalf("AppendLedgerLine: %v", err)
 	}
