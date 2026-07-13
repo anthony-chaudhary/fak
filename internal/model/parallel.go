@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
 // numWorkers caps matmul parallelism. Default = GOMAXPROCS, overridable two ways (see
@@ -172,36 +174,7 @@ func parWorkerLoop(w int) {
 	}
 }
 
-// fdot is the inner product r·x with 8 independent accumulators. A single-accumulator
-// reduction has a serial dependency chain (each += waits on the previous), so it runs at
-// FP-add latency, not throughput — the dominant cost in fak's compute-bound batched
-// prefill. Eight accumulators break the chain (instruction-level parallelism) and let
-// the Go compiler vectorize the body. The accumulators are combined in a FIXED order, so
-// fdot is deterministic; using it in matRows, parMatRows AND matMulBatch keeps every
-// fak-vs-fak path mutually bit-identical (the exact rungs R2/R14 compare paths that all
-// route through fdot). It is NOT bit-identical to the old naive single-accumulator sum —
-// the rounding differs at ~1e-6 — but that only shifts fak-vs-HF oracle drift, which
-// stays far inside the argmax-exact / max|Δ|<0.05 oracle tolerance (verified).
-func fdot(r, x []float32) float32 {
-	var s0, s1, s2, s3, s4, s5, s6, s7 float32
-	n := len(r)
-	i := 0
-	for ; i+8 <= n; i += 8 {
-		s0 += r[i] * x[i]
-		s1 += r[i+1] * x[i+1]
-		s2 += r[i+2] * x[i+2]
-		s3 += r[i+3] * x[i+3]
-		s4 += r[i+4] * x[i+4]
-		s5 += r[i+5] * x[i+5]
-		s6 += r[i+6] * x[i+6]
-		s7 += r[i+7] * x[i+7]
-	}
-	s := ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7))
-	for ; i < n; i++ {
-		s += r[i] * x[i]
-	}
-	return s
-}
+func fdot(r, x []float32) float32 { return kernel.FDot(r, x) }
 
 func fdot3(r0, r1, r2, x []float32) (float32, float32, float32) {
 	return fdot3scalar(r0, r1, r2, x)
@@ -336,7 +309,7 @@ func parMatRows(w, x []float32, out, in int) []float32 {
 	y := make([]float32, out)
 	row := func(lo, hi int) {
 		for o := lo; o < hi; o++ {
-			y[o] = fdot(w[o*in:o*in+in], x)
+			y[o] = kernel.FDot(w[o*in:o*in+in], x)
 		}
 	}
 	if out*in < parThreshold {
@@ -361,7 +334,7 @@ func matMulBatch(w, X []float32, out, in, P int) []float32 {
 		for o := lo; o < hi; o++ {
 			r := w[o*in : o*in+in]
 			for t := 0; t < P; t++ {
-				Y[t*out+o] = fdot(r, X[t*in:t*in+in])
+				Y[t*out+o] = kernel.FDot(r, X[t*in:t*in+in])
 			}
 		}
 	}

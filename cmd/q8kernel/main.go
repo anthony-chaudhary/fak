@@ -21,6 +21,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
 const qBlk = 32
@@ -50,27 +52,8 @@ func parFor(n, workers int, body func(lo, hi int)) {
 	wg.Wait()
 }
 
-// --- f32 (the current path) ---
-func fdot(r, x []float32) float32 {
-	var s0, s1, s2, s3, s4, s5, s6, s7 float32
-	n := len(r)
-	i := 0
-	for ; i+8 <= n; i += 8 {
-		s0 += r[i] * x[i]
-		s1 += r[i+1] * x[i+1]
-		s2 += r[i+2] * x[i+2]
-		s3 += r[i+3] * x[i+3]
-		s4 += r[i+4] * x[i+4]
-		s5 += r[i+5] * x[i+5]
-		s6 += r[i+6] * x[i+6]
-		s7 += r[i+7] * x[i+7]
-	}
-	s := ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7))
-	for ; i < n; i++ {
-		s += r[i] * x[i]
-	}
-	return s
-}
+// --- f32 (the current path): shared deterministic kernel.FDot ---
+func fdot(r, x []float32) float32 { return kernel.FDot(r, x) }
 
 // --- int8×int8 (the shipped Q8_0 qdot8) ---
 func qdot8(qw []int8, dw []float32, qx []int8, dx []float32, nblk int) float32 {
@@ -171,7 +154,7 @@ func main() {
 
 	f32Body := func(lo, hi int) {
 		for o := lo; o < hi; o++ {
-			yf[o] = fdot(wf[o*I:o*I+I], x)
+			yf[o] = kernel.FDot(wf[o*I:o*I+I], x)
 		}
 	}
 	i8i8Body := func(lo, hi int) {

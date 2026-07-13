@@ -1,6 +1,10 @@
 package compute
 
-import "math"
+import (
+	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/kernel"
+)
 
 // cpuref.go — the day-1 CPU *reference* backend. It is the only Backend that exists
 // yet, and it is the Reference (held to max|Δ|=0): every method reproduces the exact
@@ -118,7 +122,7 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 	case F32:
 		wf := c.f32(w)
 		for o := 0; o < out; o++ {
-			y[o] = fdot(wf[o*in:o*in+in], xf)
+			y[o] = kernel.FDot(wf[o*in:o*in+in], xf)
 		}
 	case Q8_0:
 		blk := w.Quant.Block
@@ -152,7 +156,7 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		for o := 0; o < out; o++ {
 			r := wf[o*in : o*in+in]
 			for t := 0; t < P; t++ {
-				Y[t*out+o] = fdot(r, Xf[t*in:t*in+in])
+				Y[t*out+o] = kernel.FDot(r, Xf[t*in:t*in+in])
 			}
 		}
 	case Q8_0:
@@ -390,27 +394,7 @@ func (k *cpuKV) Clone() KVStore {
 
 // ---- reference kernels (reproduce model numerics byte-for-byte) ------------------
 
-// fdot: 8-accumulator inner product in the model's exact fixed combine order.
-func fdot(r, x []float32) float32 {
-	var s0, s1, s2, s3, s4, s5, s6, s7 float32
-	n := len(r)
-	i := 0
-	for ; i+8 <= n; i += 8 {
-		s0 += r[i] * x[i]
-		s1 += r[i+1] * x[i+1]
-		s2 += r[i+2] * x[i+2]
-		s3 += r[i+3] * x[i+3]
-		s4 += r[i+4] * x[i+4]
-		s5 += r[i+5] * x[i+5]
-		s6 += r[i+6] * x[i+6]
-		s7 += r[i+7] * x[i+7]
-	}
-	s := ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7))
-	for ; i < n; i++ {
-		s += r[i] * x[i]
-	}
-	return s
-}
+func fdot(r, x []float32) float32 { return kernel.FDot(r, x) }
 
 // dot: single-accumulator in-order (attention scores use this in the model).
 func dot(a, b []float32) float32 {
