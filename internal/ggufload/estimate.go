@@ -183,28 +183,49 @@ func scaleExpertBandBytes(total uint64, band, experts int) (uint64, error) {
 }
 
 // RoutedExpertActiveSet is the header-only MoE active-set Lane F (#3074) pins from the witnessed
-// GGUF header: the resident bytes of ALL routed experts (RoutedResident — the 51.80 GiB band for
-// GLM-5.2 UD-Q4_K_M across 256 experts), the per-expert resident bytes (PerExpert), and — given
-// the header's expert_used_count K (ExpertsUsed) — the routed-expert bytes streamed per decoded
-// token (ActivePerToken = K × PerExpert). It is DERIVED header arithmetic, not the box-side
-// per-op byte trace; it is the single-stream decode ceiling divisor once K is read.
+// GGUF header. It closes BOTH roofline inputs the ceiling doc had only ESTIMATED:
+//
+//   - active-bytes/token — the single-stream decode divisor. RoutedResident is the resident bytes
+//     of ALL routed experts (the full unsharded band — for GLM-5.2 UD-Q4_K_M ~414 GiB across 256
+//     experts, i.e. PerExpert ~1.619 GiB; the 51.80 GiB EP-8 figure is one rank's 32-expert shard,
+//     not the whole band). ActivePerToken = K × PerExpert is the routed stream a token pulls;
+//     ActiveBytesPerToken adds the NonExpertResident (attention / dense / shared-expert / router /
+//     embedding) stream, so it is the full per-token byte divisor (an UPPER BOUND — the true decode
+//     stream is a little lower, since the token-embedding read is a gather, not a full sweep).
+//   - active-params/token — the FLOP divisor. Params are element counts (tensorElems), quant-
+//     independent: PerExpertParams = RoutedParams / NumExperts, and ActiveParamsPerToken =
+//     K × PerExpertParams + NonExpertParams.
+//
+// Everything here is DERIVED header arithmetic, not the box-side per-op byte trace; the per-op trace
+// remains the separate GPU witness. The two active-*/token fields are 0 until K (expert_used_count)
+// is present in the header — the one scalar this derivation waits on.
 type RoutedExpertActiveSet struct {
 	NumExperts     int   // expert_count
-	ExpertsUsed    int   // expert_used_count (K); 0 when the header omits it (active bytes pending)
+	ExpertsUsed    int   // expert_used_count (K); 0 when the header omits it (active-*/token pending)
 	RoutedResident int64 // sum of every batched routed-expert tensor payload (all experts, unsharded)
-	PerExpert      int64 // RoutedResident / NumExperts
-	ActivePerToken int64 // K × PerExpert (0 when K is unread)
+	PerExpert      int64 // RoutedResident / NumExperts — one expert's resident bytes across every MoE layer
+	ActivePerToken int64 // K × PerExpert — routed-expert bytes a decoded token streams (0 when K unread)
+
+	RoutedParams         int64 // routed-expert element count (all experts, unsharded)
+	PerExpertParams      int64 // RoutedParams / NumExperts
+	NonExpertResident    int64 // resident bytes of every tensor that is NOT a batched routed expert
+	NonExpertParams      int64 // element count of every non-routed tensor
+	ActiveBytesPerToken  int64 // ActivePerToken + NonExpertResident — full per-token divisor, UPPER BOUND (0 when K unread)
+	ActiveParamsPerToken int64 // K × PerExpertParams + NonExpertParams (0 when K unread)
 }
 
 // RoutedExpertActiveSet derives the Lane F (#3074) active-set from the header alone — it reads NO
-// tensor payloads. It sums the batched routed-expert tensor bytes straight from the parsed header
-// directory (the same tensors EstimateExpertParallelLoadMemoryPlan shards), divides by expert_count
-// for per-expert resident bytes, and multiplies by expert_used_count (K) for the routed stream a
-// single decoded token pulls: K experts fire per MoE layer and the summed band already spans every
-// MoE layer, so K×(band/experts) is the whole active routed-expert stream. The result is the
-// witnessed-header derivation the GPU-server roofline needs in place of its ESTIMATED active-bytes;
-// the live per-op trace remains the separate box-side witness. ok=false for a model with no batched
-// expert axis (non-MoE, or an arch that does not carry routed experts as batched GGUF blobs).
+// tensor payloads. In one pass over the parsed tensor directory it sums, per tensor, the on-disk
+// block payload (tensorPayloadBytes) and the element count (tensorElems), splitting each into the
+// batched routed-expert band (the tensors EstimateExpertParallelLoadMemoryPlan shards) and the
+// non-expert remainder (attention / dense / shared-expert / router / embedding). Dividing the routed
+// band by expert_count gives per-expert resident bytes and params; multiplying by expert_used_count
+// (K) gives the routed stream a single decoded token pulls — K experts fire per MoE layer and the
+// summed band already spans every MoE layer, so K×(band/experts) is the whole active routed stream.
+// Adding the non-expert remainder yields active-bytes/token and active-params/token, the two divisors
+// the GPU-server roofline had only ESTIMATED; the live per-op trace remains the separate box-side
+// witness. ok=false for a model with no batched expert axis (non-MoE, or an arch that does not carry
+// routed experts as batched GGUF blobs).
 func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, error) {
 	cfg, err := s.File.Config()
 	if err != nil {
@@ -213,38 +234,61 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) || cfg.NumExperts <= 0 {
 		return RoutedExpertActiveSet{}, false, nil
 	}
-	var routed uint64
+	var routedBytes, routedElems, totalBytes, totalElems uint64
 	for _, info := range s.File.Tensors {
-		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); !ok {
-			continue
-		}
 		n, err := tensorPayloadBytes(info)
 		if err != nil {
 			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set tensor %s: %w", info.Name, err)
 		}
-		if routed > math.MaxUint64-n {
-			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: routed-expert byte total overflows uint64")
+		e, err := tensorElems(info)
+		if err != nil {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set tensor %s: %w", info.Name, err)
 		}
-		routed += n
+		if totalBytes > math.MaxUint64-n || totalElems > math.MaxUint64-e {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set totals overflow uint64")
+		}
+		totalBytes += n
+		totalElems += e
+		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+			routedBytes += n
+			routedElems += e
+		}
 	}
-	if routed == 0 {
+	if routedBytes == 0 {
 		return RoutedExpertActiveSet{}, false, nil
 	}
-	if routed > math.MaxInt64 {
-		return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: routed-expert bytes %d overflow int64", routed)
+	if totalBytes > math.MaxInt64 || totalElems > math.MaxInt64 {
+		return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set totals %d/%d overflow int64", totalBytes, totalElems)
 	}
-	perExpert := int64(routed) / int64(cfg.NumExperts)
+	perExpert := int64(routedBytes) / int64(cfg.NumExperts)
+	perExpertParams := int64(routedElems) / int64(cfg.NumExperts)
+	nonExpertBytes := int64(totalBytes - routedBytes)
+	nonExpertParams := int64(totalElems - routedElems)
 	as := RoutedExpertActiveSet{
-		NumExperts:     cfg.NumExperts,
-		ExpertsUsed:    cfg.NumExpertsPerTok,
-		RoutedResident: int64(routed),
-		PerExpert:      perExpert,
+		NumExperts:        cfg.NumExperts,
+		ExpertsUsed:       cfg.NumExpertsPerTok,
+		RoutedResident:    int64(routedBytes),
+		PerExpert:         perExpert,
+		RoutedParams:      int64(routedElems),
+		PerExpertParams:   perExpertParams,
+		NonExpertResident: nonExpertBytes,
+		NonExpertParams:   nonExpertParams,
 	}
 	if cfg.NumExpertsPerTok > 0 {
-		if perExpert != 0 && int64(cfg.NumExpertsPerTok) > math.MaxInt64/perExpert {
+		k := int64(cfg.NumExpertsPerTok)
+		if perExpert != 0 && k > math.MaxInt64/perExpert {
 			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-bytes/token overflows int64")
 		}
-		as.ActivePerToken = perExpert * int64(cfg.NumExpertsPerTok)
+		if perExpertParams != 0 && k > math.MaxInt64/perExpertParams {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-params/token overflows int64")
+		}
+		as.ActivePerToken = perExpert * k
+		routedActiveParams := perExpertParams * k
+		if as.ActivePerToken > math.MaxInt64-nonExpertBytes || routedActiveParams > math.MaxInt64-nonExpertParams {
+			return RoutedExpertActiveSet{}, false, fmt.Errorf("gguf: active-set/token + non-expert overflows int64")
+		}
+		as.ActiveBytesPerToken = as.ActivePerToken + nonExpertBytes
+		as.ActiveParamsPerToken = routedActiveParams + nonExpertParams
 	}
 	return as, true, nil
 }
