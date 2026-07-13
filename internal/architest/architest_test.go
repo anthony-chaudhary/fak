@@ -437,6 +437,7 @@ var tier = map[string]int{
 	"macfit":                2,
 	"roofline":              1, // pure-Go GLM-5.2 roofline dashboard fold (#3090): folds committed benchmark run artifacts × transcribed ceiling estimates into one current-vs-80%target-vs-ceiling table; stdlib-only, imports nothing internal, laptop-composable (no GPU), off the hot path.
 	"supervisoragent":       2, // #4478 (epic #4477, supervisor-seat fence #1): the closed, payload-free SupervisorInput contract a supervisor agent consumes + the pure assembler that projects it. Folds fleetmon(1) per-worker class -> WorkerState and leaseref(1) ArbiterLease -> Lease, passing the dos_status/escalation heads through payload-free; no transcript/free-text field by construction. Off the hot path.
+	"modedebt":              3, // #4416 (epic #4397, permission regimes #2389/#2405): the CONSUMER half of the mode-debt scorer/dispatcher pair. Reads the sibling scorer's scorecard JSON, selects HARD un-lifted permission dials, and maps each onto dogfoodissues(3).ActionItem with a content-stable dedup key, capped at the family --cap. Composer twin of qaprocessscore: imports dogfoodissues(3)+stdlib only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
