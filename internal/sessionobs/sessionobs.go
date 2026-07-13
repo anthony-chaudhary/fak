@@ -42,7 +42,7 @@ package sessionobs
 
 import (
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"io"
 	"sort"
 )
@@ -327,7 +327,7 @@ func Score(corpus []Record, pipe Pipeline) Report {
 		debt += k.Debt
 	}
 	score := compositeScore(kpis)
-	grade := mathx.Grade100(score)
+	grade := scorecard.GradeStd(float64(score))
 
 	rep := Report{
 		Schema: schema,

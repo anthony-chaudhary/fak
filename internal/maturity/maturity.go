@@ -50,7 +50,7 @@ package maturity
 
 import (
 	"bufio"
-	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -311,7 +311,7 @@ func Build(opts Options) ScorecardPayload {
 		}
 		score = int(raw + 0.5)
 	}
-	grade := mathx.Grade100(score)
+	grade := scorecard.GradeStd(float64(score))
 
 	// Rank the backlog: ladder-skips first (real overclaim debt), then lowest
 	// current rung first (the least-mature capability is the most leverage), then

@@ -31,7 +31,7 @@ package agentreadinessscore
 
 import (
 	"encoding/json"
-	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"math"
 	"os"
 	"os/exec"
@@ -1100,7 +1100,7 @@ func buildPayload(workspace string, kpis []KPI, facts map[string]int, errText st
 		frictionDebt += len(k.Defects)
 		nSoft += len(k.Soft)
 	}
-	grade := mathx.Grade100(int(score))
+	grade := scorecard.GradeStd(score)
 	frontier, frontierByTerm := experienceFrontier(facts)
 
 	debtByGroup := map[string]int{"discover": 0, "adopt": 0, "build": 0}

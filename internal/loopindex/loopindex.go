@@ -2,7 +2,7 @@ package loopindex
 
 import (
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"io"
 	"sort"
 )
@@ -191,7 +191,7 @@ func Score(loop Loop) Report {
 		witnessedValue = round3(sumWired / float64(wired))
 		witnessed = int(round(100 * sumWired / float64(wired)))
 	}
-	grade := mathx.Grade100(loopIndex)
+	grade := scorecard.GradeStd(float64(loopIndex))
 
 	rep := Report{
 		Schema: schema,
