@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -200,11 +199,4 @@ func cmdWitnessRunner(dir, name string, args ...string) (string, int, error) {
 		return string(out), ee.ExitCode(), nil
 	}
 	return string(out), -1, err
-}
-
-// witnessArchiveDefault is the conventional archive root for a dirtied witness
-// worktree, mirroring worktree_doctor's archive location. Unused by default (the
-// flag defaults to "" = archiving off) but exported-ish for a future auto-archive.
-func witnessArchiveDefault(root string) string {
-	return filepath.Join(root, ".git", "fak-witness-archive")
 }
