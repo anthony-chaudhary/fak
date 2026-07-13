@@ -28,6 +28,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"strconv"
 )
 
 type statDist struct {
@@ -325,7 +326,7 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 
 	report := map[string]any{
 		"app_version":                   appversion.Current(),
-		"engine":                        "fak fleetserve (transcript replay, Q8=" + boolStr(quant) + ")",
+		"engine":                        "fak fleetserve (transcript replay, Q8=" + strconv.FormatBool(quant) + ")",
 		"model":                         "SmolLM2-135M",
 		"schema":                        "fak.fleetserve-workload.v1",
 		"go_threads":                    runtime.GOMAXPROCS(0),

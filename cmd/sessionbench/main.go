@@ -63,6 +63,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"strconv"
 )
 
 // bestLiveB / bestLiveC run the live arms `reps` times and keep the least-contended (min)
@@ -613,7 +614,7 @@ func main() {
 
 	report := map[string]any{
 		"app_version": appversion.Current(),
-		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + boolStr(quant != 0) + ", metal=" + boolStr(metal) + ")",
+		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + strconv.FormatBool(quant != 0) + ", metal=" + strconv.FormatBool(metal) + ")",
 		"model":       name,
 		"metal":       metal,
 		"metal_note":  "Metal (when true) accelerates arms A/B's per-agent single-session decode + all plain-session prefills, INCLUDING arm C's one shared-prefix prefill — but NOT arm C's batched decode (BatchSession.StepBatch has no Metal path at all, by design gap; see cmd/sessionbench liveC doc comment).",
@@ -674,7 +675,7 @@ func deterministicReport(name string, quant bool, turns, agents []int, prefix, d
 	}
 	return map[string]any{
 		"app_version": appversion.Current(),
-		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + boolStr(quant) + ", counts-only=true)",
+		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + strconv.FormatBool(quant) + ", counts-only=true)",
 		"model":       name,
 		"timing_mode": "deterministic_prefill_token_counts_only",
 		"headline": "deterministic prefill-token floor only; no wall-clock, no live B/C timing, and no model-quality claim. " +
@@ -710,11 +711,4 @@ func sampleLens(prefix, maxCtx int) []int {
 	}
 	sort.Ints(out)
 	return out
-}
-
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }

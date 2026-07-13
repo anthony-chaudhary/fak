@@ -39,6 +39,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"strconv"
 )
 
 func lcgIDs(n, vocab, seed int) []int {
@@ -176,7 +177,7 @@ func main() {
 
 	report := map[string]any{
 		"app_version":                 appversion.Current(),
-		"engine":                      "fak fleetserve (cross-agent shared-prefix, Q8=" + boolStr(*quant) + ")",
+		"engine":                      "fak fleetserve (cross-agent shared-prefix, Q8=" + strconv.FormatBool(*quant) + ")",
 		"model":                       "SmolLM2-135M",
 		"go_threads":                  runtime.GOMAXPROCS(0),
 		"prefix_len":                  *prefixLen,
@@ -234,11 +235,4 @@ func runTurns(bs *model.BatchSession, ids0 []int, resultPrompts [][][]int, decod
 		}
 	}
 	return decodeTotal, resultTotal
-}
-
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }
