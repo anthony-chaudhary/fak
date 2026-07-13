@@ -22,6 +22,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
 // apiTokenEnvs is the dedicated Grafana API token key. It is SEPARATE from the Slack
@@ -42,7 +44,7 @@ func ResolveAPIToken() string {
 			return v
 		}
 	}
-	return envFileValue("FAK_GRAFANA_API_TOKEN")
+	return slackenv.FileValue("FAK_GRAFANA_API_TOKEN")
 }
 
 // Client talks to a live Grafana instance's HTTP API with a bearer API token. BaseURL

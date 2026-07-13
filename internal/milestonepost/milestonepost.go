@@ -85,7 +85,7 @@ func ResolveToken() string {
 			return v
 		}
 	}
-	if v := envFileValue("FAK_MILESTONE_TOKEN"); v != "" {
+	if v := slackenv.FileValue("FAK_MILESTONE_TOKEN"); v != "" {
 		return v
 	}
 	return scoreboard.ResolveToken()
@@ -102,15 +102,8 @@ func ResolveChannel() string {
 			return v
 		}
 	}
-	if v := envFileValue("FAK_MILESTONE_CHANNEL"); v != "" {
+	if v := slackenv.FileValue("FAK_MILESTONE_CHANNEL"); v != "" {
 		return v
 	}
 	return ChannelDefault
-}
-
-// envFileValue resolves key from .env.slack.local, walked up from the cwd, by
-// delegating to internal/slackenv — the single shared, tested resolver every Slack
-// surface uses.
-func envFileValue(key string) string {
-	return slackenv.FileValue(key)
 }

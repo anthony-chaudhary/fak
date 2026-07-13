@@ -31,7 +31,7 @@ func ResolveToken() string {
 			return v
 		}
 	}
-	if v := envFileValue("FAK_MARKETING_TOKEN"); v != "" {
+	if v := slackenv.FileValue("FAK_MARKETING_TOKEN"); v != "" {
 		return v
 	}
 	return scoreboard.ResolveToken()
@@ -46,12 +46,5 @@ func ResolveChannel() string {
 			return v
 		}
 	}
-	return envFileValue("FAK_MARKETING_CHANNEL")
-}
-
-// envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
-// to internal/slackenv — the single shared, tested resolver now used by every Slack
-// surface (the byte-identical per-package walk-up that used to live here is gone).
-func envFileValue(key string) string {
-	return slackenv.FileValue(key)
+	return slackenv.FileValue("FAK_MARKETING_CHANNEL")
 }

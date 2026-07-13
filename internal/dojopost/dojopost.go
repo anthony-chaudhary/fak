@@ -113,13 +113,6 @@ func ResolveChannelWithSource() Resolved {
 	return Resolved{Value: scoreboard.ResolveCICDReportChannel(), Source: "built-in default"}
 }
 
-// envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
-// to internal/slackenv — the single shared, tested resolver now used by every Slack
-// surface (the byte-identical per-package walk-up that used to live here is gone).
-func envFileValue(key string) string {
-	return slackenv.FileValue(key)
-}
-
 func sourceLabel(r slackenv.Resolved) string {
 	if r.Source == slackenv.SourceUnset {
 		return "unset"

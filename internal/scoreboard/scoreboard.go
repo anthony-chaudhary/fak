@@ -107,7 +107,7 @@ func ResolveToken() string {
 			return v
 		}
 	}
-	return envFileValue("FAK_SCOREBOARD_TOKEN")
+	return slackenv.FileValue("FAK_SCOREBOARD_TOKEN")
 }
 
 // ResolveChannel returns the scoreboard channel id from FAK_SCOREBOARD_CHANNEL, then a
@@ -119,7 +119,7 @@ func ResolveChannel() string {
 			return v
 		}
 	}
-	return envFileValue("FAK_SCOREBOARD_CHANNEL")
+	return slackenv.FileValue("FAK_SCOREBOARD_CHANNEL")
 }
 
 // ResolveProductChannel returns the #product channel id from FAK_PRODUCT_CHANNEL, then a
@@ -134,7 +134,7 @@ func ResolveProductChannel() string {
 			return v
 		}
 	}
-	if v := envFileValue("FAK_PRODUCT_CHANNEL"); v != "" {
+	if v := slackenv.FileValue("FAK_PRODUCT_CHANNEL"); v != "" {
 		return v
 	}
 	return ResolveCICDReportChannel()
@@ -166,17 +166,10 @@ func ResolveCICDReportChannel() string {
 	if v := strings.TrimSpace(os.Getenv(CICDReportChannelEnv)); v != "" {
 		return v
 	}
-	if v := envFileValue(CICDReportChannelEnv); v != "" {
+	if v := slackenv.FileValue(CICDReportChannelEnv); v != "" {
 		return v
 	}
 	return CICDReportChannel
-}
-
-// envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
-// to internal/slackenv — the single shared, tested resolver now used by every Slack
-// surface (the byte-identical per-package walk-up that used to live here is gone).
-func envFileValue(key string) string {
-	return slackenv.FileValue(key)
 }
 
 // shouldPost returns true if the update differs from the last posted update
