@@ -613,6 +613,12 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                 (learning-scorecard -> backlog: file at most --cap triage issues for HARD
                  learning-debt defects, deduped by the gitignored seen-cache plus issue-body
                  markers. Dry-run by default; --live is required to call gh and update cache)
+  fak mode-debt-dispatch --scorecard FILE [--cap N] [--live] [--fetch-existing]
+                [--existing-json FILE] [--repo owner/repo] [--json]
+                (mode-debt scorecard -> backlog: file one deduped issue per HARD un-lifted
+                 permission dial, keyed on the content-stable mode-debt/<dial-slug> marker and
+                 routed to the permission-regime backlog (#2389 / #2405). Dry-run by default;
+                 --live is required to call gh. A CLEAN fully-lifted scorecard files nothing)
   fak steering  status | report | alert [--index-delta N] [--pin] | pin
                 [--channel ID] [--scorecard-json FILE] [--dry-run]
                 (the STEERABILITY Slack surface for #steering-guard: status posts the
