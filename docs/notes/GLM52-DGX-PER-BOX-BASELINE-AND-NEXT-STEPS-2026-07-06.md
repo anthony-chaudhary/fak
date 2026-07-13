@@ -70,8 +70,8 @@ The #413 serving witness through fak against the live server-3 endpoint
 | GLM-5.2 concurrency (2 streams) | **0.27×** (worse — serializes) | WITNESSED | 06-28 (shared host bottleneck) |
 | Stock SGLang, Qwen3.6-27B (fits 40 GiB), tp8 bf16 | **93.05** single / 607.7@8 (0 err) | OBSERVED | 06-25 cross-engine |
 
-**The bottleneck is host-bound, not GPU-count-bound.** Under `--cpu-offload-experts` the ~10 GiB/token
-expert stream is read from host RAM and the expert GEMM runs on the CPU — so concurrency makes it
+**The bottleneck is host-bound, not GPU-count-bound.** Under `--cpu-offload-experts` the ~13 GiB/token
+routed-expert stream (K=8 × 1.619 GiB, DERIVED from the header) is read from host RAM and the expert GEMM runs on the CPU — so concurrency makes it
 *worse* (0.27×), and the 7 idle GPUs can't be batched into use as configured. This is the closed-#971
 finding; on 40 GiB cards the resident-experts fix that closed it for server 3 is **not available**.
 
