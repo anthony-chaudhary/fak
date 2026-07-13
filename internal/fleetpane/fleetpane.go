@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -90,6 +91,15 @@ func (OSRunner) Run(ctx context.Context, req RunRequest) RunResult {
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, req.Args[0], req.Args[1:]...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// OSRunner.Run executes an arbitrary caller-supplied argv (a loop status_cmd, the
+	// supervisor/monitor status command, a build/`go test`) that can fork its own
+	// descendant tree. Bare CommandContext ctx-cancel is single-PID (windowgate only
+	// hides the window; it is not a tree kill), so a Timeout/cancel of a hung command
+	// orphans that subtree (#3108, sibling of #2989/#3106). Tree-kill on cancel and
+	// bound the reap, mirroring internal/nightrun/run.go and the other generic-runner
+	// sites (witness/edittx/swebench).
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	if req.Cwd != "" {
 		cmd.Dir = req.Cwd
 	}
