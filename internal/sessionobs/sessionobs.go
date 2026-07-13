@@ -42,6 +42,7 @@ package sessionobs
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"io"
 	"sort"
 )
@@ -326,7 +327,7 @@ func Score(corpus []Record, pipe Pipeline) Report {
 		debt += k.Debt
 	}
 	score := compositeScore(kpis)
-	grade := gradeLetter(score)
+	grade := mathx.Grade100(score)
 
 	rep := Report{
 		Schema: schema,
@@ -427,21 +428,6 @@ func compositeScore(kpis []KPI) int {
 		return 0
 	}
 	return int(round(num / den))
-}
-
-func gradeLetter(score int) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
 }
 
 func frac(a, b int) float64 {

@@ -2,6 +2,7 @@ package loopindex
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"io"
 	"sort"
 )
@@ -190,7 +191,7 @@ func Score(loop Loop) Report {
 		witnessedValue = round3(sumWired / float64(wired))
 		witnessed = int(round(100 * sumWired / float64(wired)))
 	}
-	grade := gradeLetter(loopIndex)
+	grade := mathx.Grade100(loopIndex)
 
 	rep := Report{
 		Schema: schema,
@@ -308,21 +309,6 @@ func witnessList(st Stage, passing bool) string {
 		out += ", " + nm
 	}
 	return out
-}
-
-func gradeLetter(score int) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
 }
 
 func round(x float64) float64 {

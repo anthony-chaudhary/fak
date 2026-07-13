@@ -2,6 +2,7 @@ package loopindex
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"io"
 	"sort"
 	"strings"
@@ -468,7 +469,7 @@ func crossAuditGrade(sc CrossAuditScorecard) string {
 	if sc.Health.DarkLoop {
 		return "F"
 	}
-	return gradeLetter(int(round(100 * sc.Coverage.AuditedRate)))
+	return mathx.Grade100(int(round(100 * sc.Coverage.AuditedRate)))
 }
 
 func crossAuditVerdict(sc CrossAuditScorecard) (verdict, finding, reason, next string) {

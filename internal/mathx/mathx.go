@@ -48,3 +48,21 @@ func ArgmaxF32(v []float32) int {
 	}
 	return bi
 }
+
+// Grade100 maps a conventional 0-100 integer score to the repository's standard
+// A/B/C/D/F bands: 90/80/70/60. Scorecards with intentionally different bands
+// keep their local grader rather than adding modes to this exact primitive.
+func Grade100(score int) string {
+	switch {
+	case score >= 90:
+		return "A"
+	case score >= 80:
+		return "B"
+	case score >= 70:
+		return "C"
+	case score >= 60:
+		return "D"
+	default:
+		return "F"
+	}
+}

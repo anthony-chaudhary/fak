@@ -50,6 +50,7 @@ package maturity
 
 import (
 	"bufio"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -310,7 +311,7 @@ func Build(opts Options) ScorecardPayload {
 		}
 		score = int(raw + 0.5)
 	}
-	grade := GradeLetter(score)
+	grade := mathx.Grade100(score)
 
 	// Rank the backlog: ladder-skips first (real overclaim debt), then lowest
 	// current rung first (the least-mature capability is the most leverage), then
@@ -611,21 +612,6 @@ func lowerFileWords(path string) map[string]struct{} {
 var wordRe = regexp.MustCompile(`[a-z0-9_]+`)
 
 // ---- grade + small helpers (mirror internal/conceptusage) -------------------
-
-func GradeLetter(score int) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
-}
 
 func itoa(n int) string {
 	// small, allocation-free for the common range; falls back for the rest.

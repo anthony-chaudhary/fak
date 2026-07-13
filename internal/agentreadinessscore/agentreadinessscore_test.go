@@ -10,6 +10,7 @@ package agentreadinessscore
 
 import (
 	"encoding/json"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"math"
 	"os"
 	"reflect"
@@ -185,7 +186,7 @@ func TestGradeLetterBands(t *testing.T) {
 		in   float64
 		want string
 	}{{100, "A"}, {90, "A"}, {85, "B"}, {72, "C"}, {61, "D"}, {40, "F"}} {
-		if got := gradeLetter(c.in); got != c.want {
+		if got := mathx.Grade100(int(c.in)); got != c.want {
 			t.Errorf("gradeLetter(%v) = %q, want %q", c.in, got, c.want)
 		}
 	}

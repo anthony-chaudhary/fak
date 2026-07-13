@@ -41,3 +41,12 @@ func TestArgmaxF32(t *testing.T) {
 		}
 	}
 }
+
+func TestGrade100Bands(t *testing.T) {
+	cases := map[int]string{-1: "F", 0: "F", 59: "F", 60: "D", 69: "D", 70: "C", 79: "C", 80: "B", 89: "B", 90: "A", 100: "A", 101: "A"}
+	for score, want := range cases {
+		if got := Grade100(score); got != want {
+			t.Errorf("Grade100(%d) = %q, want %q", score, got, want)
+		}
+	}
+}

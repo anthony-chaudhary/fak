@@ -31,6 +31,7 @@ package agentreadinessscore
 
 import (
 	"encoding/json"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"math"
 	"os"
 	"os/exec"
@@ -300,21 +301,6 @@ func clamp(score float64) int {
 func round1(x float64) float64 {
 	v, _ := strconv.ParseFloat(strconv.FormatFloat(x, 'f', 1, 64), 64)
 	return v
-}
-
-func gradeLetter(score float64) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
 }
 
 // experienceFrontier is the UNBOUNDED agent-experience frontier: sum of weight*count over
@@ -1114,7 +1100,7 @@ func buildPayload(workspace string, kpis []KPI, facts map[string]int, errText st
 		frictionDebt += len(k.Defects)
 		nSoft += len(k.Soft)
 	}
-	grade := gradeLetter(score)
+	grade := mathx.Grade100(int(score))
 	frontier, frontierByTerm := experienceFrontier(facts)
 
 	debtByGroup := map[string]int{"discover": 0, "adopt": 0, "build": 0}
