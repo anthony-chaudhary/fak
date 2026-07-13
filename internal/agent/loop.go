@@ -449,6 +449,17 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
+		if turn > 0 && cfg.toolTerminalWake != nil {
+			select {
+			case <-cfg.toolTerminalWake.signal:
+				wake := cfg.toolTerminalWake.next()
+				cfg.toolTerminalWake.received(wake)
+				payload, _ := json.Marshal(wake)
+				messages = append(messages, Message{Role: RoleUser, Content: string(payload)})
+			case <-ctx.Done():
+				return m, ctx.Err()
+			}
+		}
 		// Session-control gate (no-op when no table is wired): read the session's live
 		// drive state at the turn boundary. A non-proceed verdict ends the arm here —
 		// budget-exhausted / drained / stopped / paused — with the reason recorded, so a

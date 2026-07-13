@@ -27,13 +27,15 @@ import (
 // nowMS on every entry point, so behavior under test is deterministic and an
 // embedder's tick cadence is its own policy choice.
 type Supervisor struct {
-	mu      sync.Mutex
-	cfg     toolproc.Config
-	events  []toolproc.Event
-	cancels map[string]func() // callID -> cancel lever, cleared once fired or terminal
-	spawned map[string]bool   // callIDs ever spawned (journal identity guard)
-	pids    map[string]int    // callID -> bound OS process-tree root (seam 6), cleared with cancels
-	reaper  OSReaper          // OS lever for bound pids; nil = advice-only (no teeth)
+	mu           sync.Mutex
+	cfg          toolproc.Config
+	events       []toolproc.Event
+	cancels      map[string]func() // callID -> cancel lever, cleared once fired or terminal
+	spawned      map[string]bool   // callIDs ever spawned (journal identity guard)
+	pids         map[string]int    // callID -> bound OS process-tree root (seam 6), cleared with cancels
+	reaper       OSReaper
+	terminalSink func(toolproc.Proc)
+	terminalSent map[string]bool // OS lever for bound pids; nil = advice-only (no teeth)
 	// recentFaults is a bounded ring of the last console faults ExitConsoleFault
 	// recorded, kept so AdmitSpawn can fold them into a blast-radius containment
 	// verdict — the memory that lets a crash contain the NEXT spawn instead of
@@ -71,14 +73,23 @@ type TickReport struct {
 	Actions []TickAction   `json:"actions,omitempty"`
 }
 
+// SetTerminalSink registers the loop-wake seam. Tick invokes sink once for
+// each newly observed terminal transition, after folding the authoritative table.
+func (s *Supervisor) SetTerminalSink(sink func(toolproc.Proc)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.terminalSink = sink
+}
+
 // NewSupervisor builds a Supervisor with the given fold config (zero value =
 // toolproc defaults: no default deadline, stall multiplier 3).
 func NewSupervisor(cfg toolproc.Config) *Supervisor {
 	return &Supervisor{
-		cfg:     cfg,
-		cancels: map[string]func(){},
-		spawned: map[string]bool{},
-		pids:    map[string]int{},
+		cfg:          cfg,
+		cancels:      map[string]func(){},
+		spawned:      map[string]bool{},
+		pids:         map[string]int{},
+		terminalSent: map[string]bool{},
 	}
 }
 
@@ -240,6 +251,20 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 		}
 	}
 	report.Table = tab
+	for _, p := range tab.Procs {
+		if p.State != toolproc.StateDone && p.State != toolproc.StateKilled {
+			continue
+		}
+		s.mu.Lock()
+		sink, sent := s.terminalSink, s.terminalSent[p.CallID]
+		if sink != nil && !sent {
+			s.terminalSent[p.CallID] = true
+		}
+		s.mu.Unlock()
+		if sink != nil && !sent {
+			sink(p)
+		}
+	}
 	return report, nil
 }
 

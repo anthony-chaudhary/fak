@@ -11,7 +11,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/toolproc"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -37,6 +40,98 @@ type runConfig struct {
 	spec                  *abi.Speculator
 	contextPlanner        *SessionPlanner
 	contextBaselineOutput int
+	toolTerminalWake      *ToolTerminalWakeQueue
+}
+
+// ToolTerminalWakeKind is the typed reason a background-tool terminal
+// transition re-enters its owning turn loop.
+const ToolTerminalWakeKind = "WAKE_TOOL_TERMINAL"
+
+// ToolTerminalWake carries the folded terminal verdict that caused a loop wake.
+type ToolTerminalWake struct {
+	Kind    string        `json:"kind"`
+	TraceID string        `json:"trace_id"`
+	Session string        `json:"session"`
+	Verdict toolproc.Proc `json:"verdict"`
+}
+
+// ToolTerminalWakeRecord makes enqueue/defer/dispatch decisions inspectable.
+type ToolTerminalWakeRecord struct {
+	Wake   ToolTerminalWake `json:"wake"`
+	Status string           `json:"status"`
+}
+
+// ToolTerminalWakeQueue is an owned, one-session wake mailbox and journal.
+type ToolTerminalWakeQueue struct {
+	trace   string
+	signal  chan struct{}
+	mu      sync.Mutex
+	queued  []ToolTerminalWake
+	records []ToolTerminalWakeRecord
+	pending *ToolTerminalWake
+}
+
+// NewToolTerminalWakeQueue constructs the mailbox for one live session.
+func NewToolTerminalWakeQueue(trace string) *ToolTerminalWakeQueue {
+	return &ToolTerminalWakeQueue{trace: trace, signal: make(chan struct{}, 1)}
+}
+
+// Enqueue is suitable for toolprocgate.Supervisor.SetTerminalSink. Verdicts
+// owned by another session are ignored rather than waking the wrong loop.
+func (q *ToolTerminalWakeQueue) Enqueue(p toolproc.Proc) {
+	if q == nil || p.Session != q.trace || (p.State != toolproc.StateDone && p.State != toolproc.StateKilled) {
+		return
+	}
+	w := ToolTerminalWake{Kind: ToolTerminalWakeKind, TraceID: p.CallID, Session: p.Session, Verdict: p}
+	q.mu.Lock()
+	q.queued = append(q.queued, w)
+	q.records = append(q.records, ToolTerminalWakeRecord{Wake: w, Status: "ENQUEUED"})
+	q.mu.Unlock()
+	select {
+	case q.signal <- struct{}{}:
+	default:
+	}
+}
+
+// Journal returns a stable copy of the wake decision journal.
+func (q *ToolTerminalWakeQueue) Journal() []ToolTerminalWakeRecord {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make([]ToolTerminalWakeRecord, len(q.records))
+	copy(out, q.records)
+	return out
+}
+
+func (q *ToolTerminalWakeQueue) next() ToolTerminalWake {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	w := q.queued[0]
+	q.queued = q.queued[1:]
+	if len(q.queued) > 0 {
+		select {
+		case q.signal <- struct{}{}:
+		default:
+		}
+	}
+	return w
+}
+
+func (q *ToolTerminalWakeQueue) received(w ToolTerminalWake) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.pending = &w
+}
+
+func (q *ToolTerminalWakeQueue) mark(status string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.pending == nil {
+		return
+	}
+	q.records = append(q.records, ToolTerminalWakeRecord{Wake: *q.pending, Status: status})
+	if status == "DISPATCHED" {
+		q.pending = nil
+	}
 }
 
 // SessionGate is the FUNCTION-shaped per-turn session-control seam — the same gate
@@ -101,6 +196,11 @@ func WithSessionTable(table *session.Table, trace string) RunOption {
 		c.table = table
 		c.trace = trace
 	}
+}
+
+// WithToolTerminalWake wires the owned background-tool terminal mailbox.
+func WithToolTerminalWake(q *ToolTerminalWakeQueue) RunOption {
+	return func(c *runConfig) { c.toolTerminalWake = q }
 }
 
 // WithSessionGate wires a FUNCTION-shaped session gate (and the trace id this run is
@@ -239,6 +339,9 @@ func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reaso
 		for {
 			mt, proceed, gap, reason := c.gate.Decide(c.trace)
 			if proceed {
+				if c.toolTerminalWake != nil {
+					c.toolTerminalWake.mark("DISPATCHED")
+				}
 				if gap > 0 {
 					select {
 					case <-ctx.Done():
@@ -247,6 +350,9 @@ func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reaso
 					}
 				}
 				return mt, true, ""
+			}
+			if reason == session.ReasonPaused && c.toolTerminalWake != nil {
+				c.toolTerminalWake.mark("DEFERRED")
 			}
 			if reason != session.ReasonPaused || c.gate.Wait == nil {
 				return 0, false, reason
