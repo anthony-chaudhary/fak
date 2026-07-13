@@ -56,9 +56,9 @@ GLM-5.2-resident node; GPU server 2 is not.** Two boxes, two *different* experim
 |---|---|---|
 | Total params | **753.86 B** | WITNESSED (llama-bench, 2026-06-28) |
 | On-disk / resident | **433.82 GiB** | WITNESSED |
-| Architecture | `glm_moe_dsa` (MoE + DeepSeek-Sparse-Attention), **79 layers, H=6144, 256 experts** (WITNESSED header), K experts/tok = **PENDING** (Lane F header read) + shared expert | WITNESSED GGUF header (`GLM52-LANE-F-ACTIVE-SET-FROM-GGUF-HEADER`, corrects the earlier ~89–92/H≈5120 estimate) |
-| **Active params / token** | **~32 B (ESTIMATE)** | GLM-4.5-class active budget; the ceiling scales `1/active` — **Lane F pins this** |
-| **Active bytes / token @ UD-Q4_K_M** | **~13 GiB (ESTIMATE, range 10–16)** | ~10 GiB expert stream (repo) + ~3 GiB attn/dense/shared/router |
+| Architecture | `glm_moe_dsa` (MoE + DeepSeek-Sparse-Attention), **79 layers (3 dense + 76 MoE), H=6144, 256 experts, K=8 experts/tok, 1 shared expert, expert_ffn=2048** | **WITNESSED GGUF header, measured on GPU server 2026-07-13** (`glm52-gguf-header-active-set-2026-07-13.json`, #3074 Lane F closed; corrects the earlier ~89–92/H≈5120 estimate) |
+| **Active params / token** | **~30–33 B** (compute-active FFN **27.86 B** [routed 22.95 = K8×2.869 + shared 2.87 + dense 2.04] + MLA attn ~4–6 B) | DERIVED from measured K=8; per-expert **2.869 B** cross-checks total **753.86 B** (bytes÷bpw). Confirms the prior ~32 B estimate. (`RoutedExpertActiveSet.ActiveParamsPerToken` reports a **42.4 B** upper bound — it adds the full embd/output/MTP tables the FLOP divisor omits) |
+| **Active bytes / token @ UD-Q4_K_M** | **~32 GiB (DERIVED header, upper bound)**: routed stream **12.95 GiB** (K=8 × **1.619 GiB/expert**) + non-expert band **19.31 GiB** | **Corrects the 07‑13 witness's 1.87 GiB routed figure** — it divided the EP‑7 *one‑rank* 59.9 GiB band by 256 instead of 37 (→ 0.234 GiB/expert). True per‑expert = 414.5 GiB routed band ÷ 256 = **1.619 GiB** (monolith q4_k 256.5 + q5_k 150.6 GiB are all routed; total‑params 753.86 B checks). Routed **~40 %** / non‑expert **~60 %** — same order, **NOT** expert‑tiny. Header‑only via `RoutedExpertActiveSet.ActiveBytesPerToken`; the box‑side per‑op trace remains the exact‑stream witness |
 | 8-way EP band / rank | **~54 GiB** | 433.82 / 8 — **> 40 GiB**, so EP-resident does not fit GPU server 2 either |
 
 ## 3. The ceilings
@@ -67,11 +67,20 @@ GLM-5.2-resident node; GPU server 2 is not.** Two boxes, two *different* experim
 
 Decode at batch 1 streams the active weights once per token; `tok/s = effective_BW ÷ active_bytes`.
 **This ceiling is GPU server 3 only** — it assumes the model is VRAM-resident.
+> **Divisor correction (2026-07-14):** the DERIVED active-bytes/token is **~32 GiB** (routed
+> **12.95 GiB** + non-expert **19.31 GiB**, header arithmetic) — **~2.5× the old ~13 GiB estimate**.
+> The estimate got the routed stream about right (~10 vs 12.95 GiB) but under-counted the replicated
+> high-precision attn/shared/output band (~3 assumed vs **19.31 GiB** measured). The 07-13 witness's
+> ~1.87 GiB *routed* figure was an EP-7-band÷256 slip (see §2, now corrected). **Consequence:** these
+> raw-roofline tok/s divide by ~13 GiB and are therefore ~2.5× HIGH — dividing by ~32 GiB drops the
+> **raw** single-stream roofline from ~1,230 to **~500 tok/s** and the practical ceiling by ~0.4×
+> (to ~60–80). The exact per-token stream (which weights actually move each decode step; token-embd
+> is a gather, not a sweep, so ~32 GiB is an upper bound) still awaits the box-side per-op trace.
 
 | Regime | tok/s | Assumption |
 |---|---|---|
 | **Raw roofline** | **~1,230** | MBU 100 %, perfect 8-way TP, zero collective/launch latency — absolute, unachievable |
-| **Practical ceiling** | **~150–200** | MBU ~65 % + ~92-layer TP collective+launch latency floor (~3.6 ms/tok fixed + ~1.2 ms bandwidth) |
+| **Practical ceiling** | **~150–200** | MBU ~65 % + 79-layer TP collective+launch latency floor (~3.6 ms/tok fixed + ~1.2 ms bandwidth) |
 | **Current WITNESSED (server 3)** | **23.2** | llama.cpp layer-split → **one GPU active per token** (7 idle); ~12–15 % of practical |
 | **80 % target** | **~120–160** | **~5–7× current** — the Lane A drive |
 
@@ -101,8 +110,8 @@ prefill is **unmeasured** (the 46 tok/s in the 07-01 note is an 11-token prompt,
 ### 3.4 GPU server 2's ceiling is a DIFFERENT law — the cpu-offload wall (host-bound)
 
 Because GLM-5.2 does not fit GPU server 2's 320 GiB, that node serves it **cpu-offloaded**
-(`--n-cpu-moe` / `--cpu-offload-experts`): the ~10 GiB/token expert stream is read from host
-RAM and the expert GEMM runs off the GPU. The ceiling is then **host memory-bandwidth + host
+(`--n-cpu-moe` / `--cpu-offload-experts`): the **~13 GiB/token** routed-expert stream (K=8 ×
+1.619 GiB) is read from host RAM and the expert GEMM runs off the GPU. The ceiling is then **host memory-bandwidth + host
 GEMM**, not the GPU roofline above — an order of magnitude lower, and it *does not batch*
 (concurrency measured at **0.27×**, i.e. worse — a shared host-resource bottleneck).
 
