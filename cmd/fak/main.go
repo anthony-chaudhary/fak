@@ -533,6 +533,12 @@ func main() {
 		cmdSkill(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
+	case "quality":
+		// The missing-middle quality ladder spine (epic #4509): `fak quality run|explain`
+		// runs one versioned case through a reference path and an engine path, applies a
+		// deterministic comparator + a rubric scorer, and emits a machine-readable result
+		// with a replayable failure bundle localized to the first divergence.
+		cmdQuality(os.Args[2:])
 	case "score":
 		// Parent verb grouping the meta-scorecards / RSI loops (#1505): `fak score <name>` routes
 		// to the same handler each legacy top-level *-scorecard/*-score/*-rsi verb ran (see
