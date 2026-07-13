@@ -434,6 +434,7 @@ var tier = map[string]int{
 	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
 	"zaitask":               4,
 	"macfit":                2,
+	"roofline":              1, // pure-Go GLM-5.2 roofline dashboard fold (#3090): folds committed benchmark run artifacts × transcribed ceiling estimates into one current-vs-80%target-vs-ceiling table; stdlib-only, imports nothing internal, laptop-composable (no GPU), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
