@@ -94,6 +94,34 @@ func TestDevListingIsDevTierOnly(t *testing.T) {
 			t.Errorf("dev listing missing dev verb %q", strings.TrimSpace(want))
 		}
 	}
+	// Every dev verb appears EXACTLY ONCE (#2231 DoD): the listing is a set, not a
+	// bag. A verb line is an indented ("  name\tsynopsis") row; header/footer sit at
+	// column 0. A duplicate first-field would be a merge bug in devTierVerbs (e.g. a
+	// verb present in both the live catalog and devOnlyVerbs), which this pins.
+	seen := map[string]int{}
+	for _, ln := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(ln, "  ") { // header/footer lines start at column 0
+			continue
+		}
+		f := strings.Fields(ln)
+		if len(f) == 0 {
+			continue
+		}
+		seen[f[0]]++
+	}
+	if len(seen) == 0 {
+		t.Fatalf("no verb lines parsed from the dev listing; head: %.120s", out)
+	}
+	for verb, n := range seen {
+		if n != 1 {
+			t.Errorf("dev verb %q appears %d times in the listing, want exactly 1 (the tier is a set)", verb, n)
+		}
+	}
+	for _, want := range []string{"sweep", "commit", "scorecard", "gh-spam-comments"} {
+		if seen[want] != 1 {
+			t.Errorf("dev verb %q counted %d times, want exactly 1", want, seen[want])
+		}
+	}
 	for _, ln := range strings.Split(out, "\n") {
 		f := strings.Fields(ln)
 		if len(f) > 0 && (f[0] == "guard" || f[0] == "serve" || f[0] == "guard-stophook") {
