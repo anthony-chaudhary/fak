@@ -513,18 +513,18 @@ func Build(opts Options) ScorecardPayload {
 		},
 	})
 	debt := len(hardFail)
-	grade := anyStr(p.Corpus["grade"])
+	grade := scorecard.ValueText(p.Corpus["grade"])
 	if p.OK {
-		p.Reason = "concept-usage: usage value " + anyStr(p.Corpus["usage_value"]) + ", witness value " + anyStr(p.Corpus["witness_value"]) +
-			", composite value " + anyStr(p.Corpus["value"]) + " (" + grade + ", legacy score " + anyStr(p.Corpus["score"]) + "); dev routes through the fak concepts; zero hard gaps"
+		p.Reason = "concept-usage: usage value " + scorecard.ValueText(p.Corpus["usage_value"]) + ", witness value " + scorecard.ValueText(p.Corpus["witness_value"]) +
+			", composite value " + scorecard.ValueText(p.Corpus["value"]) + " (" + grade + ", legacy score " + scorecard.ValueText(p.Corpus["score"]) + "); dev routes through the fak concepts; zero hard gaps"
 	} else {
 		keys := make([]string, len(hardFail))
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		p.Reason = "concept-usage carries " + itoa(debt) + " debt (usage value " + anyStr(p.Corpus["usage_value"]) +
-			", witness value " + anyStr(p.Corpus["witness_value"]) + ", composite value " + anyStr(p.Corpus["value"]) +
-			" " + grade + ", legacy score " + anyStr(p.Corpus["score"]) + "): " +
+		p.Reason = "concept-usage carries " + itoa(debt) + " debt (usage value " + scorecard.ValueText(p.Corpus["usage_value"]) +
+			", witness value " + scorecard.ValueText(p.Corpus["witness_value"]) + ", composite value " + scorecard.ValueText(p.Corpus["value"]) +
+			" " + grade + ", legacy score " + scorecard.ValueText(p.Corpus["score"]) + "): " +
 			strings.Join(keys, ", ")
 	}
 	p.Workspace = root
@@ -551,10 +551,10 @@ func Render(p ScorecardPayload) string {
 	c := p.Corpus
 	lines := []string{
 		"concept-usage — " + p.Verdict + " (" + p.Finding + ")",
-		"  conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "   value " + anyStr(c["value"]) +
-			" [" + anyStr(c["grade"]) + "]   (legacy score " + anyStr(c["score"]) + "; usage value " + anyStr(c["usage_value"]) + "; witness value " + anyStr(c["witness_value"]) + ")",
-		"  evidence: " + anyStr(c["commits_scanned"]) + " commit(s); " + anyStr(c["verify_syscalls"]) +
-			" verify syscall(s); " + anyStr(c["recall_rows"]) + " recall(s); " + anyStr(c["lane_acquires"]) + " lane acquire(s)",
+		"  conceptusage_debt: " + scorecard.ValueText(c["conceptusage_debt"]) + "   value " + scorecard.ValueText(c["value"]) +
+			" [" + scorecard.ValueText(c["grade"]) + "]   (legacy score " + scorecard.ValueText(c["score"]) + "; usage value " + scorecard.ValueText(c["usage_value"]) + "; witness value " + scorecard.ValueText(c["witness_value"]) + ")",
+		"  evidence: " + scorecard.ValueText(c["commits_scanned"]) + " commit(s); " + scorecard.ValueText(c["verify_syscalls"]) +
+			" verify syscall(s); " + scorecard.ValueText(c["recall_rows"]) + " recall(s); " + scorecard.ValueText(c["lane_acquires"]) + " lane acquire(s)",
 		"",
 		"  USAGE (does the dev OUTPUT carry the fak discipline?):",
 	}
@@ -577,10 +577,10 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString(`description: "How much the agentic DEVELOPMENT of fak routes through fak's own concepts — the ship-stamp/DCO/binding-verb commit discipline and lane arbitration (usage breadth), and the verify/improve witness syscalls over passive recall (witness depth), all re-derived from git and the .dos journals."` + "\n")
 	b.WriteString("---\n\n")
 	b.WriteString("# fak concept-usage scorecard\n\n")
-	b.WriteString("**conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "**; value **" + anyStr(c["value"]) +
-		" (" + anyStr(c["grade"]) + ")**; legacy score " + anyStr(c["score"]) +
-		"; usage value " + anyStr(c["usage_value"]) + "; witness value " +
-		anyStr(c["witness_value"]) + "\n\n")
+	b.WriteString("**conceptusage_debt: " + scorecard.ValueText(c["conceptusage_debt"]) + "**; value **" + scorecard.ValueText(c["value"]) +
+		" (" + scorecard.ValueText(c["grade"]) + ")**; legacy score " + scorecard.ValueText(c["score"]) +
+		"; usage value " + scorecard.ValueText(c["usage_value"]) + "; witness value " +
+		scorecard.ValueText(c["witness_value"]) + "\n\n")
 	b.WriteString("> " + p.Reason + "\n\n")
 	b.WriteString("The question: when an agent builds fak, how much does that development route through fak's *own* concepts — committing with the witness contract (ship-stamp, DCO, a binding verb), arbitrating disjoint lanes, and **witnessing its own claims via the verify syscall instead of trusting a self-report** — versus generic agentic dev? Every number is re-derived from `git log` and the `.dos` journals fak's tooling wrote; the score moves only when development actually uses the concepts more.\n\n")
 	b.WriteString("## Usage — does the development OUTPUT carry the fak discipline?\n\n| ok | criterion | detail |\n|---|---|---|\n")
@@ -614,9 +614,9 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	lines := []string{
 		"concept-usage compare:",
 		"  conceptusage_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
-		"  value: " + anyStr(bc["value"]) + " -> " + anyStr(current.Corpus["value"]) +
-			"  legacy score " + anyStr(bc["score"]) + " -> " + anyStr(current.Corpus["score"]) +
-			"  grade " + anyStr(bc["grade"]) + " -> " + anyStr(current.Corpus["grade"]),
+		"  value: " + scorecard.ValueText(bc["value"]) + " -> " + scorecard.ValueText(current.Corpus["value"]) +
+			"  legacy score " + scorecard.ValueText(bc["score"]) + " -> " + scorecard.ValueText(current.Corpus["score"]) +
+			"  grade " + scorecard.ValueText(bc["grade"]) + " -> " + scorecard.ValueText(current.Corpus["grade"]),
 		"  witness_score: " + itoa(bWit) + " -> " + itoa(cWit),
 	}
 	// The 3x program drives the witness axis up; report the multiple on the witness
@@ -678,18 +678,6 @@ func result(key, axis string, hard bool, weight int, label string, passed bool, 
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
-
-func anyStr(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case int:
-		return itoa(x)
-	default:
-		b, _ := json.Marshal(v)
-		return string(b)
-	}
-}
 
 func anyInt(v any) int {
 	switch n := v.(type) {

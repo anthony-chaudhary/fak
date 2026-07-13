@@ -30,6 +30,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -103,7 +105,7 @@ func scanChain(root string, now time.Time) ChainEvidence {
 		ce.ReceiptParseErr = err.Error()
 		return ce
 	}
-	ce.ReceiptMode = anyStr(rec["mode"])
+	ce.ReceiptMode = scorecard.ValueText(rec["mode"])
 	ce.PendingCreates = anyInt(rec["planned_creates"])
 	ce.SyncedOK = anyInt(rec["synced_ok"])
 	ce.SyncedFailed = anyInt(rec["synced_failed"])

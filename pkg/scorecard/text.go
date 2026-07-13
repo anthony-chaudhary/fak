@@ -1,7 +1,9 @@
 package scorecard
 
 import (
+	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -88,4 +90,19 @@ func PassMark(ok bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// ValueText renders the scalar and JSON values carried by scorecard payload maps.
+// Strings stay unquoted, ints use decimal notation, and every other value follows
+// encoding/json. Marshal failures preserve the historical empty-string fallback.
+func ValueText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case int:
+		return strconv.Itoa(x)
+	default:
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
 }

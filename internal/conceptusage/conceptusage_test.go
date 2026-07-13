@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // writeJournal drops a .dos/<name> file under root with the given JSONL lines.
@@ -66,7 +68,7 @@ func TestBuild_HealthyCorpusGreens(t *testing.T) {
 	if anyInt(p.Corpus["conceptusage_debt"]) != 0 {
 		t.Fatalf("expected 0 debt, got %v", p.Corpus["conceptusage_debt"])
 	}
-	if g := anyStr(p.Corpus["grade"]); g != "A" && g != "B" {
+	if g := scorecard.ValueText(p.Corpus["grade"]); g != "A" && g != "B" {
 		t.Fatalf("expected A/B grade for healthy corpus, got %q (composite %v)", g, p.Corpus["score"])
 	}
 }

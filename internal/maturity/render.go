@@ -3,6 +3,8 @@ package maturity
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Render is the terminal view: the headline, the rung distribution as a bar
@@ -12,9 +14,9 @@ func Render(p ScorecardPayload) string {
 	dist, _ := c["distribution"].(map[string]int)
 	lines := []string{
 		"maturity — " + p.Verdict + " (" + p.Finding + ")",
-		"  maturity_debt (ladder-skips): " + anyStr(c["maturity_debt"]) +
-			"   index " + anyStr(c["score"]) + "/100 [" + anyStr(c["grade"]) + "]   over " +
-			anyStr(c["capabilities"]) + " capabilities",
+		"  maturity_debt (ladder-skips): " + scorecard.ValueText(c["maturity_debt"]) +
+			"   index " + scorecard.ValueText(c["score"]) + "/100 [" + scorecard.ValueText(c["grade"]) + "]   over " +
+			scorecard.ValueText(c["capabilities"]) + " capabilities",
 		"  " + p.Reason,
 		"",
 		"  lifecycle ladder (count of capabilities per rung):",
@@ -81,8 +83,8 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString(`description: "Every declared fak capability (one per internal/<leaf> lane) placed on a closed lifecycle ladder — proposed → prototyped → tested → dogfooded → default, with a benchmarked badge — and the next work item that would mature it. Immaturity is not a defect; a ladder-skip (fak relies on a capability yet leaves it untested) is. Re-derived from dos.toml + the tree's import graph + the CLI reference."` + "\n")
 	b.WriteString("---\n\n")
 	b.WriteString("# fak maturity scorecard — lifecycle, not just completeness\n\n")
-	b.WriteString("**maturity_debt (ladder-skips): " + anyStr(c["maturity_debt"]) + "**; maturity index **" +
-		anyStr(c["score"]) + "/100 (" + anyStr(c["grade"]) + ")** over **" + anyStr(c["capabilities"]) +
+	b.WriteString("**maturity_debt (ladder-skips): " + scorecard.ValueText(c["maturity_debt"]) + "**; maturity index **" +
+		scorecard.ValueText(c["score"]) + "/100 (" + scorecard.ValueText(c["grade"]) + ")** over **" + scorecard.ValueText(c["capabilities"]) +
 		"** declared capabilities" + benchmarkedSuffix(c) + ".\n\n")
 	b.WriteString("> " + p.Reason + "\n\n")
 	b.WriteString("A v1 prototype can be legitimately *complete* and still not be tested, dogfooded, " +
@@ -114,7 +116,7 @@ func Markdown(p ScorecardPayload) string {
 	for _, r := range RungName {
 		b.WriteString("| `" + r + "` | " + itoa(dist[r]) + " |\n")
 	}
-	b.WriteString("| `benchmarked` (badge) | " + anyStr(c["benchmarked"]) + " |\n")
+	b.WriteString("| `benchmarked` (badge) | " + scorecard.ValueText(c["benchmarked"]) + " |\n")
 	b.WriteString("\n")
 
 	b.WriteString("## Next work — the agentic-culture backlog\n\n")
@@ -173,8 +175,8 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 		"maturity compare:",
 		"  maturity_debt (ladder-skips): " + itoa(bDebt) + " -> " + itoa(cDebt) +
 			"  (retired " + itoa(bDebt-cDebt) + ")",
-		"  index: " + itoa(bScore) + " -> " + itoa(cScore) + "  grade " + anyStr(bc["grade"]) +
-			" -> " + anyStr(current.Corpus["grade"]),
+		"  index: " + itoa(bScore) + " -> " + itoa(cScore) + "  grade " + scorecard.ValueText(bc["grade"]) +
+			" -> " + scorecard.ValueText(current.Corpus["grade"]),
 		"  at default rung: " + itoa(bDefault) + " -> " + itoa(cDefault),
 	}
 	switch {
@@ -230,18 +232,6 @@ func pad(s string, w int) string {
 
 func mdEsc(s string) string {
 	return strings.ReplaceAll(s, "|", "\\|")
-}
-
-func anyStr(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case int:
-		return itoa(x)
-	default:
-		b, _ := json.Marshal(v)
-		return string(b)
-	}
 }
 
 func anyInt(v any) int {
