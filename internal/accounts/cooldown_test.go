@@ -347,9 +347,11 @@ func TestParseResetAbsolute(t *testing.T) {
 	}
 }
 
-// TestParseResetVagueOrAbsentIsZero: a date-less "in 42 minutes" phrasing and a message with no
-// reset language both yield the zero time — the caller then falls back to the kind's default
-// window rather than a mis-parsed wall-clock.
+// TestParseResetVagueOrAbsentIsZero pins ParseReset's stricter, absolute-only contract: a
+// relative "in 42 minutes" phrasing, a message with no reset language, and a date-less wall-clock
+// all yield the zero time from ParseReset. The relative phrasing is deliberately NOT ParseReset's
+// job — ResolveReset (below) is the tier that anchors it to now; ParseReset must keep refusing an
+// unanchored form so a bare wall-clock is never guessed as absolute.
 func TestParseResetVagueOrAbsentIsZero(t *testing.T) {
 	if got := ParseReset("session limit; resets in 42 minutes"); !got.IsZero() {
 		t.Fatalf("vague reset should be zero, got %s", got)
@@ -360,5 +362,98 @@ func TestParseResetVagueOrAbsentIsZero(t *testing.T) {
 	// A bare wall-clock without a date must NOT be guessed as absolute.
 	if got := ParseReset("weekly limit reached; resets at 15:00"); !got.IsZero() {
 		t.Fatalf("date-less wall-clock should be zero, got %s", got)
+	}
+}
+
+// TestResolveResetRelativeWait: a weekly-limit 429 announces a RELATIVE wait, not an absolute
+// timestamp. ResolveReset anchors that announced window to now so the cooldown lasts the whole
+// wait instead of collapsing to the 1-hour default and re-offering a still-capped seat (#2610).
+func TestResolveResetRelativeWait(t *testing.T) {
+	now := mustTime(t, "2026-07-06T12:00:00Z")
+	for _, tc := range []struct {
+		name string
+		msg  string
+		want time.Duration
+	}{
+		{"announced_wait approx", "weekly limit reached; announced_wait≈1h7m", 67 * time.Minute},
+		{"announced_wait equals compound", "kind=weekly_limit announced_wait=1h5m45s", time.Hour + 5*time.Minute + 45*time.Second},
+		{"resets in words", "session limit; resets in 42 minutes", 42 * time.Minute},
+		{"retry-after bare seconds", "429 too many requests; retry-after: 4020", 4020 * time.Second},
+		{"retry-after compound duration", "Retry-After: 1h7m", 67 * time.Minute},
+		{"please wait seconds", "overloaded — please wait 30 seconds", 30 * time.Second},
+		{"try again in compact", "try again in 2h30m", 2*time.Hour + 30*time.Minute},
+		{"back in hours", "weekly cap; back in 3 hours", 3 * time.Hour},
+		{"available in compact", "usage cap; available in 90m", 90 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveReset(tc.msg, now)
+			want := now.Add(tc.want).UTC()
+			if !got.Equal(want) {
+				t.Fatalf("ResolveReset(%q): got %s want %s (now+%s)", tc.msg, got, want, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveResetAbsoluteWinsOverRelative: when a message carries BOTH an absolute reset and a
+// stray relative phrase, the absolute instant wins — the two tiers never blend, so the shared
+// resolver stays deterministic for both cooldown writers.
+func TestResolveResetAbsoluteWinsOverRelative(t *testing.T) {
+	now := mustTime(t, "2026-07-06T12:00:00Z")
+	got := ResolveReset("usage limit reached; resets at 2026-07-07T15:00:00Z; also wait 5m", now)
+	want := mustTime(t, "2026-07-07T15:00:00Z")
+	if !got.Equal(want) {
+		t.Fatalf("absolute reset must win: got %s want %s", got, want)
+	}
+}
+
+// TestResolveResetNoWindowIsZero: without an absolute reset or a cue-anchored relative wait,
+// ResolveReset returns the zero time so the caller falls back to the kind's default window. A
+// bare wall-clock and a cue-less limit line must not be read as a window.
+func TestResolveResetNoWindowIsZero(t *testing.T) {
+	now := mustTime(t, "2026-07-06T12:00:00Z")
+	for _, msg := range []string{
+		"no limit language here",
+		"usage limit reached", // limit named, but no reset/wait window
+		"weekly limit reached; resets at 15:00",
+	} {
+		if got := ResolveReset(msg, now); !got.IsZero() {
+			t.Fatalf("ResolveReset(%q) should be zero, got %s", msg, got)
+		}
+	}
+}
+
+// TestResolveResetCapsAbsurdWait: a garbled or absurd announced wait is capped at maxRelativeWait
+// so a parse artifact can never pin a seat out of the pool for longer than any real cap.
+func TestResolveResetCapsAbsurdWait(t *testing.T) {
+	now := mustTime(t, "2026-07-06T12:00:00Z")
+	got := ResolveReset("back in 1000h", now)
+	want := now.Add(maxRelativeWait).UTC()
+	if !got.Equal(want) {
+		t.Fatalf("absurd wait must cap at %s: got %s want %s", maxRelativeWait, got, want)
+	}
+}
+
+// TestCoolWeeklyLimitHonorsAnnouncedWait is the weekly-limit fixture #2610 asks for, kept
+// separate from the stale-credential cases: a weekly-limit 429 whose only window is an announced
+// relative wait cools the account for the WHOLE wait, so the seat is still dropped from the pool
+// past the 1-hour DefaultCooldownWindow that used to re-offer it early.
+func TestCoolWeeklyLimitHonorsAnnouncedWait(t *testing.T) {
+	now := mustTime(t, "2026-07-06T12:00:00Z")
+	s := &CooldownStore{entries: map[string]CooldownEntry{}}
+
+	reset := ResolveReset("kind=weekly_limit announced_wait≈1h7m", now)
+	e := s.Cool("acct-weekly", CooldownUsageLimit, "weekly limit", now, reset)
+
+	if want := now.Add(67 * time.Minute).UTC(); !e.ResetAt.Equal(want) {
+		t.Fatalf("weekly cooldown reset: got %s want %s (announced 1h7m, not the 1h default)", e.ResetAt, want)
+	}
+	// Past the old 1-hour default the seat must STILL be cooling (the bug: it was re-offered here).
+	if _, ok := s.CooledDown("acct-weekly", now.Add(time.Hour)); !ok {
+		t.Fatalf("seat re-offered at now+1h — the announced 1h7m window was not honored")
+	}
+	// After the announced window elapses it re-enters the pool on its own.
+	if _, ok := s.CooledDown("acct-weekly", now.Add(68*time.Minute)); ok {
+		t.Fatalf("seat still cooling after its announced window elapsed")
 	}
 }

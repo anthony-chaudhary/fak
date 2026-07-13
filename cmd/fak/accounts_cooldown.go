@@ -139,7 +139,7 @@ func recordLaunchCooldown(stderr io.Writer, account, launchStderr string, kind l
 		fmt.Fprintf(stderr, "fak accounts launch: cooldown store unreadable (%s): %v — not gating this account\n", path, err)
 		return accounts.CooldownEntry{}, false
 	}
-	reset := accounts.ParseReset(launchStderr)
+	reset := accounts.ResolveReset(launchStderr, now)
 	reason := cooldownReasonFromStderr(launchStderr)
 	entry := store.Cool(account, ck, reason, now, reset)
 	if err := store.Save(); err != nil {

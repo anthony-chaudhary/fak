@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,6 +89,101 @@ func ParseReset(message string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// ResolveReset is the reset instant a limit message implies, resolved in two tiers:
+// first the absolute "resets at <RFC3339>" form (ParseReset), then a RELATIVE
+// announced wait anchored to now — the shape a weekly-limit 429 actually carries
+// ("weekly limit reached; announced_wait≈1h7m", "retry-after: 4020", "session
+// limit; resets in 42 minutes"). It returns the zero time only when NEITHER tier is
+// confidently parseable, so the caller still falls back to the cooldown kind's
+// default window. This is the single reset resolver BOTH cooldown writers share
+// (cmd/fak recordLaunchCooldown and guardrotate.PersistCooldownForRehome), so a
+// weekly cap's announced window can never be honored by one writer and dropped by
+// the other. now anchors the relative tier; an absolute reset ignores it.
+//
+// Why relative parsing lives here and not in ParseReset: a bare wall-clock ("resets
+// at 15:00") is genuinely ambiguous (which day? which zone?) and ParseReset must
+// keep refusing it. A relative wait is NOT ambiguous — now+42m is a definite instant
+// — so it is safe to trust, but only ParseReset's absolute form may stand without a
+// now anchor. Keeping the two tiers separate preserves ParseReset's stricter
+// contract while still capturing the weekly-limit window that used to collapse to
+// the 1-hour DefaultCooldownWindow and re-offer a still-capped seat early (#2610).
+func ResolveReset(message string, now time.Time) time.Time {
+	if at := ParseReset(message); !at.IsZero() {
+		return at
+	}
+	if d, ok := parseRelativeWait(message); ok {
+		return now.Add(d).UTC()
+	}
+	return time.Time{}
+}
+
+// maxRelativeWait caps a parsed relative wait so a garbled or absurd announced
+// window (a parse artifact, an upstream typo) can never pin a seat out of the pool
+// for longer than any real cap. 14 days comfortably clears a weekly reset.
+const maxRelativeWait = 14 * 24 * time.Hour
+
+// relativeWaitRE anchors a relative wait to an explicit retry/reset/wait cue so a
+// bare number elsewhere in the message is never mistaken for one. After the cue it
+// captures a compact Go-style duration (1h7m, 1h5m45s, 30s — the announced_wait
+// form) OR a spaced "<n> <unit>" phrase (42 minutes, 2 hours 30 minutes). The `\b`
+// keeps the standalone "wait" cue from firing inside a word like "await".
+var relativeWaitRE = regexp.MustCompile(`(?i)\b(?:announced[ _]?wait|retry[ _-]?after|resets?\s+in|try\s+again\s+in|back\s+in|available\s+in|please\s+wait|wait)\s*[:=≈~]?\s*` +
+	`((?:\d+(?:\.\d+)?\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\s*){1,3})`)
+
+// retryAfterSecsRE matches the bare HTTP "Retry-After: <seconds>" delta form, which
+// carries no unit word and so is invisible to relativeWaitRE. Tried only after the
+// unit-bearing form fails, so "retry-after: 1h7m" is never misread as 1 second.
+var retryAfterSecsRE = regexp.MustCompile(`(?i)\bretry[ _-]?after\s*[:=]?\s*(\d+)\b`)
+
+// parseRelativeWait extracts a positive, cue-anchored relative wait duration from a
+// limit message and reports whether one was found. It never returns a value beyond
+// maxRelativeWait.
+func parseRelativeWait(message string) (time.Duration, bool) {
+	if m := relativeWaitRE.FindStringSubmatch(message); m != nil {
+		if d, ok := normalizeWaitToDuration(m[1]); ok {
+			return d, true
+		}
+	}
+	if m := retryAfterSecsRE.FindStringSubmatch(message); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			return capWait(time.Duration(n) * time.Second), true
+		}
+	}
+	return 0, false
+}
+
+// waitWordReplacer rewrites unit WORDS to Go duration suffixes, longest-form first
+// so "minutes" collapses to "m" rather than "min"+leftover. Compact forms already
+// using h/m/s pass through untouched.
+var waitWordReplacer = strings.NewReplacer(
+	"hours", "h", "hour", "h", "hrs", "h", "hr", "h",
+	"minutes", "m", "minute", "m", "mins", "m", "min", "m",
+	"seconds", "s", "second", "s", "secs", "s", "sec", "s",
+)
+
+// normalizeWaitToDuration turns a captured wait phrase ("42 minutes", "1h 7m",
+// "2 hours 30 minutes") into a Go duration, capped at maxRelativeWait. Reports false
+// for an empty or unparseable phrase.
+func normalizeWaitToDuration(s string) (time.Duration, bool) {
+	s = waitWordReplacer.Replace(strings.ToLower(strings.TrimSpace(s)))
+	s = strings.ReplaceAll(s, " ", "")
+	if s == "" {
+		return 0, false
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, false
+	}
+	return capWait(d), true
+}
+
+func capWait(d time.Duration) time.Duration {
+	if d > maxRelativeWait {
+		return maxRelativeWait
+	}
+	return d
 }
 
 // CooldownStore is the fleet-shared, on-disk set of account cooldowns. It is a
