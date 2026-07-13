@@ -3,6 +3,8 @@ package terminalbench
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 // RehearsalPreflightSchema identifies the host-readiness preflight artifact that
@@ -199,7 +201,7 @@ func RenderRehearsalPreflightMarkdown(p RehearsalPreflight) string {
 		if g.OK {
 			mark = "yes"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", g.Name, mark, mdCell(g.Detail))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", g.Name, mark, cmdutil.MarkdownCell(g.Detail))
 	}
 
 	if len(p.BlockingReasons) > 0 {

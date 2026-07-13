@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 const RawFakContractSchema = "fak.frontierswe-raw-fak-contract.v1"
@@ -283,7 +285,7 @@ func renderContractArms(b *strings.Builder, arms []ContractArm) {
 	fmt.Fprintf(b, "| Arm | Harness | Command | Output |\n")
 	fmt.Fprintf(b, "|---|---|---|---|\n")
 	for _, arm := range arms {
-		fmt.Fprintf(b, "| `%s` | `%s` | `%s` | `%s` |\n", mdCell(arm.Name), mdCell(arm.Harness), mdCell(arm.Command), mdCell(arm.OutputDir))
+		fmt.Fprintf(b, "| `%s` | `%s` | `%s` | `%s` |\n", cmdutil.MarkdownCell(arm.Name), cmdutil.MarkdownCell(arm.Harness), cmdutil.MarkdownCell(arm.Command), cmdutil.MarkdownCell(arm.OutputDir))
 	}
 	fmt.Fprintln(b)
 }
@@ -301,16 +303,9 @@ func renderContractGates(b *strings.Builder, gates []ContractGate) {
 	fmt.Fprintf(b, "| Gate | OK | Detail |\n")
 	fmt.Fprintf(b, "|---|---:|---|\n")
 	for _, gate := range gates {
-		fmt.Fprintf(b, "| `%s` | `%t` | %s |\n", mdCell(gate.Name), gate.OK, mdCell(gate.Detail))
+		fmt.Fprintf(b, "| `%s` | `%t` | %s |\n", cmdutil.MarkdownCell(gate.Name), gate.OK, cmdutil.MarkdownCell(gate.Detail))
 	}
 	fmt.Fprintln(b)
-}
-
-func mdCell(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
 }
 
 func joinContractPath(dir, leaf string) string {

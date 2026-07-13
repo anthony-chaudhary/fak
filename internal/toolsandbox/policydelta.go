@@ -3,6 +3,8 @@ package toolsandbox
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 // Tau2PolicyDeltaContractSchema is the #1069 extension of the #873 Packet E
@@ -282,14 +284,14 @@ func RenderTau2PolicyDeltaContractMarkdown(c Tau2PolicyDeltaContract) string {
 	fmt.Fprintf(&b, "| Arm | Harness | Output | Command |\n")
 	fmt.Fprintf(&b, "|---|---|---|---|\n")
 	for _, arm := range c.Arms {
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, mdCell(arm.Command))
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, cmdutil.MarkdownCell(arm.Command))
 	}
 
 	fmt.Fprintf(&b, "\n## Delta Metrics (provenance-labeled)\n\n")
 	fmt.Fprintf(&b, "| Metric | Provenance | Kind | Detail |\n")
 	fmt.Fprintf(&b, "|---|:---:|---|---|\n")
 	for _, m := range c.DeltaMetrics {
-		fmt.Fprintf(&b, "| `%s` | %s | `%s` | %s |\n", m.Name, m.Provenance, m.Kind, mdCell(m.Detail))
+		fmt.Fprintf(&b, "| `%s` | %s | `%s` | %s |\n", m.Name, m.Provenance, m.Kind, cmdutil.MarkdownCell(m.Detail))
 	}
 
 	fmt.Fprintf(&b, "\n## Honesty Fence\n\n%s\n", c.HonestyFence.Detail)
@@ -302,7 +304,7 @@ func RenderTau2PolicyDeltaContractMarkdown(c Tau2PolicyDeltaContract) string {
 		if gate.OK {
 			mark = "yes"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", gate.Name, mark, mdCell(gate.Detail))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", gate.Name, mark, cmdutil.MarkdownCell(gate.Detail))
 	}
 
 	fmt.Fprintf(&b, "\n## Required Before Any Result Claim\n\n")

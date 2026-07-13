@@ -165,13 +165,6 @@ func RenderOpusSmokeContractMarkdown(c OpusSmokeContract) string {
 	return b.String()
 }
 
-func mdCell(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
-}
-
 func smokeTaskSelection(d *Dataset) ([]string, map[string]int) {
 	if d == nil {
 		return nil, nil

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -66,4 +67,13 @@ func LCGIDs(n, vocab int, seed uint64) []int {
 		ids[i] = int(state % uint64(vocab))
 	}
 	return ids
+}
+
+// MarkdownCell escapes table separators and flattens line breaks while
+// preserving all other bytes for Markdown table cells.
+func MarkdownCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }

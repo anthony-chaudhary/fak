@@ -89,3 +89,9 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+func TestMarkdownCellEscapesPipesAndFlattensLines(t *testing.T) {
+	if got, want := MarkdownCell("a|b\r\nc\nd"), `a\|b c d`; got != want {
+		t.Fatalf("MarkdownCell = %q, want %q", got, want)
+	}
+}

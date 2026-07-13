@@ -3,6 +3,8 @@ package swebench
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 // twoArmNames carries the per-contract labels that distinguish the raw and fak
@@ -110,7 +112,7 @@ func renderSmokeArmsTable(b *strings.Builder, arms []SmokeArm) {
 	fmt.Fprintf(b, "|---|---|---|---|---|\n")
 	for _, arm := range arms {
 		fmt.Fprintf(b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
-			mdCell(arm.Name), mdCell(arm.Harness), mdCell(arm.Model), mdCell(arm.PredictionsPath), mdCell(arm.EvalRunID))
+			cmdutil.MarkdownCell(arm.Name), cmdutil.MarkdownCell(arm.Harness), cmdutil.MarkdownCell(arm.Model), cmdutil.MarkdownCell(arm.PredictionsPath), cmdutil.MarkdownCell(arm.EvalRunID))
 	}
 }
 
@@ -125,7 +127,7 @@ func renderSmokeGatesTable(b *strings.Builder, gates []SmokeGate) {
 		if gate.OK {
 			mark = "yes"
 		}
-		fmt.Fprintf(b, "| `%s` | %s | %s |\n", mdCell(gate.Name), mark, mdCell(gate.Detail))
+		fmt.Fprintf(b, "| `%s` | %s | %s |\n", cmdutil.MarkdownCell(gate.Name), mark, cmdutil.MarkdownCell(gate.Detail))
 	}
 }
 

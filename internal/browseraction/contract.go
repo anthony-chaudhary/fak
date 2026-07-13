@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 const OfficialRunContractSchema = "fak.browseraction-official-run-contract.v1"
@@ -275,7 +277,7 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "|---|---|---|---|\n")
 		for _, candidate := range c.TargetChoice.Candidates {
 			fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n",
-				candidate.Name, candidate.Harness, candidate.AdapterCost, mdCell(candidate.Status))
+				candidate.Name, candidate.Harness, candidate.AdapterCost, cmdutil.MarkdownCell(candidate.Status))
 		}
 		fmt.Fprintf(&b, "\n")
 	}
@@ -299,7 +301,7 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	fmt.Fprintf(&b, "| Arm | Harness | Output | Command |\n")
 	fmt.Fprintf(&b, "|---|---|---|---|\n")
 	for _, arm := range c.Arms {
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, mdCell(arm.Command))
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, cmdutil.MarkdownCell(arm.Command))
 	}
 
 	fmt.Fprintf(&b, "\n## Score Evidence Link\n\n")
@@ -317,7 +319,7 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		if gate.OK {
 			mark = "yes"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", gate.Name, mark, mdCell(gate.Detail))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", gate.Name, mark, cmdutil.MarkdownCell(gate.Detail))
 	}
 
 	fmt.Fprintf(&b, "\n## Required Before Any Result Claim\n\n")
@@ -417,13 +419,6 @@ func contractStatus(gates []ContractGate) string {
 		}
 	}
 	return "READY_FOR_EXTERNAL_HARNESS"
-}
-
-func mdCell(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
 }
 
 func contractTaskCandidates(s ActionMediationSuite) []ContractTaskCandidate {

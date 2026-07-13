@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 )
 
 // FailureTaxonomySchema identifies the machine-readable failure-taxonomy
@@ -416,7 +418,7 @@ func RenderFailureTaxonomyMarkdown(ft FailureTaxonomy) string {
 			continue
 		}
 		fmt.Fprintf(&b, "| `%s` | `%s` | %s | `%s` | %t | %t |\n",
-			c.TaskID, c.Category, mdCell(c.Reason), c.Recovery, c.Retryable, c.SafetyHold)
+			c.TaskID, c.Category, cmdutil.MarkdownCell(c.Reason), c.Recovery, c.Retryable, c.SafetyHold)
 	}
 	return b.String()
 }
