@@ -435,23 +435,26 @@ func guardLogSink(logPath string, stderr io.Writer) (logf func(string, ...any), 
 }
 
 // guardAuditPlan is the PURE decision behind guard's default-on audit journal: it
-// returns the path to enable (""=> do not enable) and whether the off was an
-// explicit opt-out, given the flags and whether a journal is already active at
-// boot (FAK_AUDIT_JOURNAL). Kept side-effect-free so the precedence — boot env
-// wins, then --no-audit / --audit off, then --audit PATH, then the repo-local
-// default — is unit-tested without touching the process-global journal.
-func guardAuditPlan(auditPath string, noAudit, bootActive bool) (enablePath string, optedOut bool) {
+// returns the path to enable (""=> do not enable), whether the off was an explicit
+// opt-out, and whether the path was SYNTHESIZED from the repo-local default (as
+// opposed to an operator-named --audit PATH), given the flags and whether a journal
+// is already active at boot (FAK_AUDIT_JOURNAL). Kept side-effect-free so the
+// precedence — boot env wins, then --no-audit / --audit off, then --audit PATH, then
+// the repo-local default — is unit-tested without touching the process-global
+// journal. The isDefault bit lets the caller degrade a failed default-on enable
+// (unwritable CWD) to a warning instead of a fatal, while still failing hard when the
+// operator explicitly asked for a trail (see guardEnableAudit).
+func guardAuditPlan(auditPath string, noAudit, bootActive bool) (enablePath string, optedOut, isDefault bool) {
 	if bootActive {
-		return "", false // FAK_AUDIT_JOURNAL already registered an emitter; nothing to enable
+		return "", false, false // FAK_AUDIT_JOURNAL already registered an emitter; nothing to enable
 	}
 	if noAudit || strings.EqualFold(strings.TrimSpace(auditPath), "off") {
-		return "", true
+		return "", true, false
 	}
-	p := strings.TrimSpace(auditPath)
-	if p == "" {
-		p = guardDefaultAuditPath()
+	if p := strings.TrimSpace(auditPath); p != "" {
+		return p, false, false
 	}
-	return p, false
+	return guardDefaultAuditPath(), false, true
 }
 
 // guardDefaultAuditPath is where fak guard writes its durable decision journal
@@ -524,9 +527,14 @@ func latestGuardAuditJournalPath() string {
 
 // guardEnableAudit turns the durable, hash-chained decision journal ON for the
 // session per guardAuditPlan and returns a human label for the banner plus the
-// active journal (nil when disabled). A failure to open a REQUESTED path is fatal
-// (must) — an operator who asked for an audit trail and silently got none is worse
-// than a loud failure, mirroring guardLogSink's file-sink contract.
+// active journal (nil when disabled). A failure to open an operator-REQUESTED
+// --audit PATH is fatal (must) — an operator who asked for an audit trail and
+// silently got none is worse than a loud failure, mirroring guardLogSink's file-sink
+// contract. But the DEFAULT-ON path is synthesized by guard, not requested; when its
+// dir is unwritable (e.g. `fak guard` / `fak codex` launched from a non-repo,
+// non-writable CWD like C:\Users) it degrades to no-journal-with-a-warning instead of
+// bricking the launch — the same posture the boot-time FAK_AUDIT_JOURNAL path uses
+// (internal/journal.init), because a missing audit sidecar must not stop adjudication.
 func guardEnableAudit(auditPath string, noAudit bool) (label string, active *journal.Journal) {
 	// A boot-time FAK_AUDIT_JOURNAL already registered an emitter we cannot
 	// unregister; respect it (and note --no-audit cannot turn it off).
@@ -536,7 +544,7 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 		}
 		return "active  (durable, hash-chained; from FAK_AUDIT_JOURNAL)", j
 	}
-	path, optedOut := guardAuditPlan(auditPath, noAudit, false)
+	path, optedOut, isDefault := guardAuditPlan(auditPath, noAudit, false)
 	if path == "" {
 		if optedOut {
 			return "off  (default-on; disabled by --no-audit / --audit off)", nil
@@ -544,7 +552,15 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 		return "off", nil
 	}
 	j, err := journal.Enable(path)
-	must(err)
+	if err != nil {
+		if isDefault {
+			// Default-on trail nobody asked for: warn and continue unaudited rather
+			// than os.Exit the whole guarded launch.
+			fmt.Fprintf(os.Stderr, "fak: audit journal disabled — %v\n", err)
+			return "off  (default-on; unwritable dir — run from a repo, or pass --audit PATH / --no-audit)", nil
+		}
+		must(err) // operator explicitly named --audit PATH; a silent no-trail is worse than a loud stop
+	}
 	return path + "  (durable, hash-chained — verify with: fak audit verify <path>)", j
 }
 

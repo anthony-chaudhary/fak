@@ -1613,28 +1613,29 @@ func TestFormatTurnsTimeSaved(t *testing.T) {
 func TestGuardAuditPlan(t *testing.T) {
 	def := guardDefaultAuditPath()
 	cases := []struct {
-		name       string
-		auditPath  string
-		noAudit    bool
-		bootActive bool
-		wantPath   string
-		wantOptOut bool
+		name        string
+		auditPath   string
+		noAudit     bool
+		bootActive  bool
+		wantPath    string
+		wantOptOut  bool
+		wantDefault bool
 	}{
-		{"boot env active wins (nothing to enable)", "/ignored.jsonl", false, true, "", false},
-		{"boot active beats --no-audit", "", true, true, "", false},
-		{"--no-audit opts out", "", true, false, "", true},
-		{"--audit off opts out", "off", false, false, "", true},
-		{"--audit OFF is case-insensitive + trimmed", "  OFF ", false, false, "", true},
-		{"explicit --audit path", "/tmp/a.jsonl", false, false, "/tmp/a.jsonl", false},
-		{"unset -> repo-local interactive default", "", false, false, def, false},
-		{"trimmed --audit path", "  /tmp/b.jsonl ", false, false, "/tmp/b.jsonl", false},
+		{"boot env active wins (nothing to enable)", "/ignored.jsonl", false, true, "", false, false},
+		{"boot active beats --no-audit", "", true, true, "", false, false},
+		{"--no-audit opts out", "", true, false, "", true, false},
+		{"--audit off opts out", "off", false, false, "", true, false},
+		{"--audit OFF is case-insensitive + trimmed", "  OFF ", false, false, "", true, false},
+		{"explicit --audit path is not the default", "/tmp/a.jsonl", false, false, "/tmp/a.jsonl", false, false},
+		{"unset -> repo-local interactive default", "", false, false, def, false, true},
+		{"trimmed --audit path is not the default", "  /tmp/b.jsonl ", false, false, "/tmp/b.jsonl", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotPath, gotOpt := guardAuditPlan(tc.auditPath, tc.noAudit, tc.bootActive)
-			if gotPath != tc.wantPath || gotOpt != tc.wantOptOut {
-				t.Errorf("guardAuditPlan(%q,%v,%v) = (%q,%v), want (%q,%v)",
-					tc.auditPath, tc.noAudit, tc.bootActive, gotPath, gotOpt, tc.wantPath, tc.wantOptOut)
+			gotPath, gotOpt, gotDefault := guardAuditPlan(tc.auditPath, tc.noAudit, tc.bootActive)
+			if gotPath != tc.wantPath || gotOpt != tc.wantOptOut || gotDefault != tc.wantDefault {
+				t.Errorf("guardAuditPlan(%q,%v,%v) = (%q,%v,%v), want (%q,%v,%v)",
+					tc.auditPath, tc.noAudit, tc.bootActive, gotPath, gotOpt, gotDefault, tc.wantPath, tc.wantOptOut, tc.wantDefault)
 			}
 		})
 	}
@@ -1723,6 +1724,60 @@ func TestGuardEnableAuditDefaultWritesRepoLocalInteractiveJournal(t *testing.T) 
 	}
 	if n, err := journal.Verify(j.Path()); err != nil || n != 1 {
 		t.Fatalf("journal.Verify(%q) = n=%d err=%v, want 1 nil", j.Path(), n, err)
+	}
+}
+
+// A default-on audit trail nobody asked for must NOT brick a guarded launch when its
+// directory is unwritable. This reproduces the `fak codex` / `fak guard` crash from a
+// non-repo, non-writable CWD ("mkdir .dispatch-runs: Access is denied"): findRepoRoot(".")
+// falls back to ".", so the default journal targets a relative .dispatch-runs under the
+// CWD. Here we make that dir uncreatable by planting a FILE where .dispatch-runs would
+// go; guardEnableAudit must soft-disable (nil journal, no os.Exit), matching the
+// boot-time FAK_AUDIT_JOURNAL posture. Before the fix this test would os.Exit(1) via
+// must() and take down the whole test binary.
+func TestGuardEnableAuditDefaultSoftFailsOnUnwritableDir(t *testing.T) {
+	journal.ResetActiveForTest()
+	t.Cleanup(journal.ResetActiveForTest)
+	t.Setenv("FAK_AUDIT_JOURNAL", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	dir := t.TempDir() // no .git ancestor -> findRepoRoot(".") returns "." (relative)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir(%q): %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	// Plant a regular file where the ".dispatch-runs" directory needs to be so that
+	// os.MkdirAll(".dispatch-runs/guard-audit") fails on every platform.
+	blocker := filepath.Join(dir, ".dispatch-runs")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", blocker, err)
+	}
+
+	label, j := guardEnableAudit("", false)
+	if j != nil {
+		_ = j.Close()
+		t.Fatalf("default-on audit on an unwritable dir must soft-disable (nil journal), got %q", j.Path())
+	}
+	if !strings.Contains(label, "off") {
+		t.Errorf("banner label = %q, want an 'off' soft-disable label", label)
+	}
+	if journal.Active() != nil {
+		t.Error("no journal should be registered after a default-on soft-disable")
+	}
+}
+
+// findRepoRoot returns the start dir unchanged when no .git is found up-tree. This is
+// the fallback that (with start ".") degrades guardDefaultAuditPath to a CWD-relative
+// .dispatch-runs — characterized here so a future change that relocates the no-repo
+// default is a deliberate, reviewed decision rather than a silent one.
+func TestFindRepoRootReturnsStartWhenNoGit(t *testing.T) {
+	dir := t.TempDir() // a fresh temp dir has no .git ancestor
+	if got, want := findRepoRoot(dir), filepath.Clean(dir); got != want {
+		t.Errorf("findRepoRoot(%q) = %q, want the start dir unchanged when no .git ancestor", dir, got)
 	}
 }
 
