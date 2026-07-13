@@ -1,0 +1,79 @@
+{
+  "schema": "contamination.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run TestContaminationAudit -count=1",
+    "generated_by": "fak/internal/bench.AuditContamination",
+    "note": "Corpus is a labeled fixture of content HASHES + provenance (never raw eval text): the audit witnesses the dedupe/exposure/provenance gate and the scrubbed replay artifact. Real corpora feed the same report shape by supplying observed hashes, publish dates, and per-case run cost."
+  },
+  "cases": 3,
+  "confirmatory_eligible": [
+    "decode-parity-ascii",
+    "sampling-ci-holdout",
+    "engine-parity-attn"
+  ],
+  "admitted": [
+    {
+      "case": "decode-parity-ascii",
+      "suite": "decode",
+      "status": "admitted",
+      "content_hash": "sha256:decode-01",
+      "model": "fak-decode-ref",
+      "tokenizer": "bpe-v3",
+      "engine": "cpu-q8",
+      "seed_or_oracle": "seed:42",
+      "code_revision": "rev-abc123",
+      "baseline_provenance": "tol=1e-6 vs ref-golden@rev-abc123",
+      "tier": "pr",
+      "runtime_cost_ms": 120
+    },
+    {
+      "case": "sampling-ci-holdout",
+      "suite": "sampling",
+      "status": "admitted",
+      "content_hash": "sha256:sample-02",
+      "model": "fak-decode-ref",
+      "tokenizer": "bpe-v3",
+      "engine": "cpu-q8",
+      "seed_or_oracle": "oracle:closed-form-binomial",
+      "code_revision": "rev-abc123",
+      "baseline_provenance": "CI=[0.48,0.52] vs analytic mean",
+      "tier": "nightly",
+      "runtime_cost_ms": 800
+    },
+    {
+      "case": "engine-parity-attn",
+      "suite": "parity",
+      "status": "admitted",
+      "content_hash": "sha256:parity-03",
+      "model": "fak-decode-ref",
+      "tokenizer": "bpe-v3",
+      "engine": "cuda-fp16",
+      "seed_or_oracle": "seed:7",
+      "code_revision": "rev-abc123",
+      "baseline_provenance": "max-abs-logit-delta \u003c 5e-3 vs cpu-q8 baseline@rev-abc123",
+      "tier": "release",
+      "runtime_cost_ms": 5000
+    }
+  ],
+  "excluded": [],
+  "tier_costs": [
+    {
+      "tier": "pr",
+      "cases": 1,
+      "runtime_cost_ms": 120
+    },
+    {
+      "tier": "nightly",
+      "cases": 1,
+      "runtime_cost_ms": 800
+    },
+    {
+      "tier": "release",
+      "cases": 1,
+      "runtime_cost_ms": 5000
+    }
+  ],
+  "verdict": "contamination_clean",
+  "finding": "all 3 case(s) carry complete provenance, are unique, and show no pre-cutoff exposure: the confirmatory claim set is the full corpus."
+}
