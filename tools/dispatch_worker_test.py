@@ -353,6 +353,18 @@ class DispatchWorkerTest(unittest.TestCase):
         base, _ = mod.measured_claude_guard_baseline("", None)
         self.assertEqual(base, mod.CLAUDE_GUARD_BASELINE_TOKENS)
 
+    def test_guard_wrap_codex_disables_nested_loop_gate(self) -> None:
+        mod = load()
+        raw = ["codex", "exec", "ship issue"]
+        env = {"FLEET_DOGFOOD_GUARD_BASEURL": "http://127.0.0.1:18080/v1"}
+        wrapped = mod.guard_wrap(raw, fak_bin="/usr/bin/fak", lane="loop",
+                                 backend="codex", workspace=ROOT, env=env)
+        self.assertEqual(wrapped[wrapped.index("--provider") + 1], "openai-responses")
+        self.assertIn("--codex-loop-gate", wrapped)
+        gate = wrapped.index("--codex-loop-gate")
+        self.assertEqual(wrapped[gate + 1], "off")
+        self.assertNotIn("--base-url", wrapped)
+        self.assertEqual(wrapped[wrapped.index("--") + 1:], raw)
     def test_guard_wrap_noop_without_fak_bin(self) -> None:
         mod = load()
         raw = mod.build_command("docs", "claude")
