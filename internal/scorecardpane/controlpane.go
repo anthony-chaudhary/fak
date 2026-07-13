@@ -21,6 +21,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema identifiers, byte-identical to the Python tool's constants so a
@@ -273,7 +275,7 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 		RatchetScore: ratchetScorePtr,
 		Value:        valuePtr,
 		Score:        scorePtr,
-		OK:           asBool(payload["ok"]),
+		OK:           scorecard.True(payload["ok"]),
 		Verdict:      asString(payload["verdict"]),
 	}
 	if debt == nil {

@@ -12,6 +12,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the stable control-pane schema identifier for the bundle envelope.
@@ -295,7 +297,7 @@ func Interpret(member Member, payload map[string]any, exitCode int, err string) 
 	}
 
 	// Standard control-pane envelope (scorecard, fresh_status).
-	ok := asBool(payload["ok"])
+	ok := scorecard.True(payload["ok"])
 	verdict := asString(payload["verdict"])
 	detail := asString(payload["reason"])
 	switch {
@@ -634,11 +636,6 @@ func joinLabelParens(rows []MemberResult) string {
 		parts[i] = fmt.Sprintf("%s (%s)", r.Label, r.Detail)
 	}
 	return strings.Join(parts, ", ")
-}
-
-func asBool(v any) bool {
-	b, ok := v.(bool)
-	return ok && b
 }
 
 func asString(v any) string {

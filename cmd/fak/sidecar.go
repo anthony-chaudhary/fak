@@ -37,6 +37,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/sidecar"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 func cmdSidecar(argv []string) { os.Exit(runSidecar(os.Stdout, os.Stderr, argv)) }
@@ -241,10 +243,10 @@ func censusAccounts(census map[string]any) []sidecar.AccountRow {
 		}
 		row := sidecar.AccountRow{Account: asStr(m["account"])}
 		switch {
-		case asBool(m["blocked"]):
+		case scorecard.True(m["blocked"]):
 			row.State = "blocked"
 			row.Detail = asStr(m["block_reason"])
-		case asBool(m["throttled"]):
+		case scorecard.True(m["throttled"]):
 			row.State = "throttled"
 			if reset := asStr(m["reset"]); reset != "" {
 				row.Detail = "resets " + reset
@@ -326,9 +328,4 @@ func asStr(v any) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-func asBool(v any) bool {
-	b, ok := v.(bool)
-	return ok && b
 }

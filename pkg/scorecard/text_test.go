@@ -61,3 +61,16 @@ func TestCountNounPreservesCompactPluralWireForm(t *testing.T) {
 		}
 	}
 }
+
+func TestTrueAcceptsOnlyBooleanTrue(t *testing.T) {
+	for _, tc := range []struct {
+		in   any
+		want bool
+	}{
+		{true, true}, {false, false}, {1, false}, {"true", false}, {nil, false},
+	} {
+		if got := True(tc.in); got != tc.want {
+			t.Fatalf("True(%#v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

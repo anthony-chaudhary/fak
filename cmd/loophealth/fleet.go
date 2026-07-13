@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // FleetSchema is the versioned tag a consumer pins the fleet-health shape to.
@@ -345,7 +347,7 @@ func classifyDispatch(r map[string]any) (time.Time, bool, bool, bool) {
 	if !ok {
 		return time.Time{}, false, false, false
 	}
-	return ts, true, asBool(r["ok"]), asInt(r["closed_now"]) > 0
+	return ts, true, scorecard.True(r["ok"]), asInt(r["closed_now"]) > 0
 }
 
 // tickTime returns the first present timestamp among fields: an integer field is
@@ -403,9 +405,4 @@ func asInt(v any) int64 {
 		return int64(n)
 	}
 	return 0
-}
-
-func asBool(v any) bool {
-	b, ok := v.(bool)
-	return ok && b
 }

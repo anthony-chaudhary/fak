@@ -39,6 +39,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the stable control-pane schema identifier for the roll-up envelope.
@@ -283,7 +285,7 @@ func interpretDispatch(in PlaneInput) (PlaneStatus, []Item) {
 		return ps, nil
 	}
 
-	if cl, ok := in.Payload["closure"].(map[string]any); ok && !asBool(cl["na"]) {
+	if cl, ok := in.Payload["closure"].(map[string]any); ok && !scorecard.True(cl["na"]) {
 		if rate, ok := asFloatOK(cl["closure_rate"]); ok {
 			counts, _ := cl["counts"].(map[string]any)
 			tr, cc := asInt(counts["TRUE_RESOLVED"]), asInt(counts["CLAIMED_CLOSED"])
@@ -306,7 +308,7 @@ func interpretDispatch(in PlaneInput) (PlaneStatus, []Item) {
 		}
 	}
 
-	if tp, ok := in.Payload["throughput"].(map[string]any); ok && !asBool(tp["na"]) {
+	if tp, ok := in.Payload["throughput"].(map[string]any); ok && !scorecard.True(tp["na"]) {
 		if v := asString(tp["verdict"]); v == "BELOW_TARGET" || v == "AUDIT_ERROR" {
 			rate, _ := asFloatOK(tp["completed_rate_per_hour"])
 			target, _ := asFloatOK(tp["target_per_hour"])
@@ -345,7 +347,7 @@ func dispatchSummary(p map[string]any) string {
 			fmt.Fprintf(&b, "backlog %d", asInt(open))
 		}
 	}
-	if tp, ok := p["throughput"].(map[string]any); ok && !asBool(tp["na"]) {
+	if tp, ok := p["throughput"].(map[string]any); ok && !scorecard.True(tp["na"]) {
 		if rate, ok := asFloatOK(tp["completed_rate_per_hour"]); ok {
 			if b.Len() > 0 {
 				b.WriteString(", ")
@@ -515,7 +517,7 @@ func planeGuardItems(in PlaneInput, name string) (PlaneStatus, []Item, bool) {
 func signalNoise(dispatch, cadence PlaneInput) SignalNoise {
 	sn := SignalNoise{ClosureHonest: -1, ShipStampRate: -1}
 	if dispatch.Err == "" && dispatch.Payload != nil {
-		if cl, ok := dispatch.Payload["closure"].(map[string]any); ok && !asBool(cl["na"]) {
+		if cl, ok := dispatch.Payload["closure"].(map[string]any); ok && !scorecard.True(cl["na"]) {
 			if r, ok := asFloatOK(cl["closure_rate"]); ok {
 				sn.ClosureHonest = r
 				sn.ClosureMeasured = true
@@ -695,11 +697,6 @@ func orNoPayload(runErr string) string {
 		return runErr
 	}
 	return "no payload"
-}
-
-func asBool(v any) bool {
-	b, ok := v.(bool)
-	return ok && b
 }
 
 func asString(v any) string {

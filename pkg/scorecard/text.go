@@ -138,3 +138,10 @@ func CountNoun(n int, noun string) string {
 	}
 	return s
 }
+
+// True reports whether v is the boolean true. Non-boolean payload values fail
+// closed to false, matching JSON scorecard readers.
+func True(v any) bool {
+	b, ok := v.(bool)
+	return ok && b
+}

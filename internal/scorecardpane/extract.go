@@ -35,11 +35,6 @@ func asFloat(v any) (float64, bool) {
 	return 0, false
 }
 
-func asBool(v any) bool {
-	b, ok := v.(bool)
-	return ok && b
-}
-
 func asString(v any) string {
 	s, ok := v.(string)
 	if !ok {

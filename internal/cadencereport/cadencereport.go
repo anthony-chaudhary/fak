@@ -16,6 +16,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the stable control-pane schema identifier for the report envelope.
@@ -298,7 +300,7 @@ func InterpretReleases(payload map[string]any, runErr string) Releases {
 	}
 	r := Releases{
 		Verdict: asString(payload["verdict"]),
-		OK:      asBool(payload["ok"]),
+		OK:      scorecard.True(payload["ok"]),
 	}
 	if rolling, ok := payload["rolling"].(map[string]any); ok {
 		r.Version = asString(rolling["last_tag"])
@@ -794,11 +796,6 @@ func orNoPayload(runErr string) string {
 		return runErr
 	}
 	return "no payload"
-}
-
-func asBool(v any) bool {
-	b, ok := v.(bool)
-	return ok && b
 }
 
 func asString(v any) string {
