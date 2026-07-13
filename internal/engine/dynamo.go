@@ -19,6 +19,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // DynamoEngineID is the registered engine id for a Dynamo-managed P/D pool.
@@ -172,8 +174,8 @@ func ParseDynamoPrometheus(defaultWorker, text string) DynamoServingMetrics {
 	prefixRatio := map[string]avg{}
 
 	rowFor := func(s promMetricSample) *ServingMetricsSnapshot {
-		worker := firstNonEmpty(s.labels["worker"], s.labels["worker_id"], s.labels["worker_name"], s.labels["instance"], s.labels["pod"], defaultWorker, "dynamo")
-		role := dynamoRole(firstNonEmpty(s.labels["role"], s.labels["worker_type"], s.labels["component"], s.labels["dynamo_component"], s.labels["worker_role"]))
+		worker := strmatch.FirstNonEmpty(s.labels["worker"], s.labels["worker_id"], s.labels["worker_name"], s.labels["instance"], s.labels["pod"], defaultWorker, "dynamo")
+		role := dynamoRole(strmatch.FirstNonEmpty(s.labels["role"], s.labels["worker_type"], s.labels["component"], s.labels["dynamo_component"], s.labels["worker_role"]))
 		key := worker + "\x00" + role
 		row := rows[key]
 		if row == nil {
@@ -255,7 +257,7 @@ func addServingGauge(dst **float64, value float64) {
 }
 
 func servingSnapshotKey(row ServingMetricsSnapshot) string {
-	return firstNonEmpty(row.Engine, VLLMEngineID) + "\x00" + firstNonEmpty(row.WorkerID, "vllm") + "\x00" + row.WorkerRole
+	return strmatch.FirstNonEmpty(row.Engine, VLLMEngineID) + "\x00" + strmatch.FirstNonEmpty(row.WorkerID, "vllm") + "\x00" + row.WorkerRole
 }
 
 func dynamoRole(raw string) string {

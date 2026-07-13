@@ -43,3 +43,12 @@ func TestFirstNonBlankPreservesOriginalValue(t *testing.T) {
 		t.Fatalf("FirstNonBlank(all blank) = %q, want empty", got)
 	}
 }
+
+func TestFirstNonEmptyTreatsWhitespaceAsAValue(t *testing.T) {
+	if got := FirstNonEmpty("", "  ", "later"); got != "  " {
+		t.Fatalf("FirstNonEmpty = %q, want whitespace value", got)
+	}
+	if got := FirstNonEmpty("", ""); got != "" {
+		t.Fatalf("FirstNonEmpty(all empty) = %q, want empty", got)
+	}
+}

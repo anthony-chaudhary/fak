@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // LLMDEngineID is the registered engine id for an llm-d managed serving pool.
@@ -48,7 +50,7 @@ func EnvLLMDConfig() LLMDConfig {
 		BaseURL:    envFirst("FAK_LLMD_BASE_URL", "FAK_LLM_D_BASE_URL"),
 		Model:      envFirst("FAK_LLMD_MODEL", "FAK_LLM_D_MODEL"),
 		APIKey:     envFirst("FAK_LLMD_API_KEY", "FAK_LLM_D_API_KEY"),
-		WorkerID:   firstNonEmpty(envFirst("FAK_LLMD_WORKER_ID", "FAK_LLM_D_WORKER_ID"), LLMDEngineID),
+		WorkerID:   strmatch.FirstNonEmpty(envFirst("FAK_LLMD_WORKER_ID", "FAK_LLM_D_WORKER_ID"), LLMDEngineID),
 		MetricsURL: envFirst("FAK_LLMD_METRICS_URL", "FAK_LLM_D_METRICS_URL"),
 	}
 }
@@ -179,10 +181,10 @@ func (e *LLMDEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 // ParseLLMDPrometheus maps vLLM-style worker metrics from an llm-d deployment into
 // fak's normalized serving schema, preserving llm-d as the engine identity.
 func ParseLLMDPrometheus(workerID, text string) ServingMetricsSnapshot {
-	snap := ParseVLLMPrometheus(firstNonEmpty(workerID, LLMDEngineID), text)
+	snap := ParseVLLMPrometheus(strmatch.FirstNonEmpty(workerID, LLMDEngineID), text)
 	snap.Engine = LLMDEngineID
 	if snap.WorkerID == "" || snap.WorkerID == VLLMEngineID {
-		snap.WorkerID = firstNonEmpty(workerID, LLMDEngineID)
+		snap.WorkerID = strmatch.FirstNonEmpty(workerID, LLMDEngineID)
 	}
 	return snap
 }

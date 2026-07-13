@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const Schema = "fak.benchscore-report.v1"
@@ -150,9 +152,9 @@ func scanFile(path string) ([]Row, []Issue, []Issue, error) {
 func extractMeta(path string, root doc) meta {
 	m := meta{
 		path:         filepath.ToSlash(path),
-		machine:      firstNonEmpty(stringAt(root, "machine"), stringAt(root, "host")),
-		capturedAt:   firstNonEmpty(stringAt(root, "captured_at"), stringAt(root, "generated_at")),
-		model:        firstNonEmpty(stringAt(root, "model", "name"), stringAt(root, "full_model", "model")),
+		machine:      strmatch.FirstNonEmpty(stringAt(root, "machine"), stringAt(root, "host")),
+		capturedAt:   strmatch.FirstNonEmpty(stringAt(root, "captured_at"), stringAt(root, "generated_at")),
+		model:        strmatch.FirstNonEmpty(stringAt(root, "model", "name"), stringAt(root, "full_model", "model")),
 		sourceKind:   stringAt(root, "model", "source_kind"),
 		status:       stringAt(root, "interpretation", "status"),
 		verification: stringAt(root, "verification", "status"),
@@ -516,15 +518,6 @@ func valueAt(root map[string]any, path ...string) (any, bool) {
 		}
 	}
 	return cur, true
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func summarizeModels(rows []Row) []ModelSummary {

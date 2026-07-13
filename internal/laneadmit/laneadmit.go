@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // ReasonCollisionRisk is the closed-vocabulary refusal every surface shares.
@@ -171,7 +173,7 @@ func conflictDetail(req Request, tree []string, c Conflict) string {
 	}
 	switch c.Kind {
 	case ConflictExclusiveLane:
-		return fmt.Sprintf("requested %s conflicts with live lease %s (exclusive lane %s runs alone)", subject, c.LeaseID, firstNonEmpty(c.Lane, req.Lane))
+		return fmt.Sprintf("requested %s conflicts with live lease %s (exclusive lane %s runs alone)", subject, c.LeaseID, strmatch.FirstNonEmpty(c.Lane, req.Lane))
 	case ConflictSameLane:
 		return fmt.Sprintf("requested %s is already held by live lease %s (same lane serializes even on disjoint trees)", subject, c.LeaseID)
 	default:
@@ -325,13 +327,4 @@ func allDigits(s string) bool {
 		}
 	}
 	return true
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

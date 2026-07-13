@@ -19,6 +19,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // VLLMEngineID is the registered engine id for the vLLM V1 adapter.
@@ -338,7 +340,7 @@ func (r *vllmRequest) assemble() *abi.Result {
 		Engine:   r.engine,
 		Worker:   r.workerID,
 		Endpoint: r.kind,
-		Model:    firstNonEmpty(r.streamModel, r.model),
+		Model:    strmatch.FirstNonEmpty(r.streamModel, r.model),
 		Text:     r.text.String(),
 	})
 	meta := map[string]string{
@@ -347,7 +349,7 @@ func (r *vllmRequest) assemble() *abi.Result {
 		"endpoint":     r.kind,
 		"output_chars": strconv.Itoa(r.text.Len()),
 	}
-	setMetaIfNonEmpty(meta, "model", firstNonEmpty(r.streamModel, r.model))
+	setMetaIfNonEmpty(meta, "model", strmatch.FirstNonEmpty(r.streamModel, r.model))
 	setMetaIfNonEmpty(meta, "finish_reason", r.finishReason)
 	setMetaIfPositive(meta, "input_tokens", r.usage.PromptTokens)
 	setMetaIfPositive(meta, "output_tokens", r.usage.CompletionTokens)
@@ -541,8 +543,8 @@ func (s *VLLMJSONKVEventSource) Close() error {
 // RecordVLLMKVEventBatch folds one decoded vLLM KV-event batch into the
 // per-worker residency index and the shared cache-event recorder.
 func (e *VLLMEngine) RecordVLLMKVEventBatch(batch VLLMKVEventBatch) []CacheEventResult {
-	worker := firstNonEmpty(batch.WorkerID, e.cfg.WorkerID)
-	model := firstNonEmpty(batch.ModelID, e.cfg.Model)
+	worker := strmatch.FirstNonEmpty(batch.WorkerID, e.cfg.WorkerID)
+	model := strmatch.FirstNonEmpty(batch.ModelID, e.cfg.Model)
 	return RecordVLLMKVEventBatch(worker, model, batch.TokenizerID, e.residency, e.cache, batch)
 }
 
@@ -886,7 +888,7 @@ type ServingMetricsSnapshot struct {
 // ParseVLLMPrometheus extracts the vLLM metric names used by vLLM V1 and maps
 // them onto a stable fak_serving_* schema.
 func ParseVLLMPrometheus(workerID, text string) ServingMetricsSnapshot {
-	s := ServingMetricsSnapshot{Engine: VLLMEngineID, WorkerID: firstNonEmpty(workerID, "vllm")}
+	s := ServingMetricsSnapshot{Engine: VLLMEngineID, WorkerID: strmatch.FirstNonEmpty(workerID, "vllm")}
 	for _, line := range strings.Split(text, "\n") {
 		name, value, ok := parsePromSample(line)
 		if !ok {
@@ -1025,15 +1027,15 @@ func sortedServingSnapshots(rows []ServingMetricsSnapshot) []ServingMetricsSnaps
 	out := append([]ServingMetricsSnapshot(nil), rows...)
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		ak := firstNonEmpty(a.Engine, VLLMEngineID) + "\x00" + firstNonEmpty(a.WorkerID, "vllm") + "\x00" + a.WorkerRole
-		bk := firstNonEmpty(b.Engine, VLLMEngineID) + "\x00" + firstNonEmpty(b.WorkerID, "vllm") + "\x00" + b.WorkerRole
+		ak := strmatch.FirstNonEmpty(a.Engine, VLLMEngineID) + "\x00" + strmatch.FirstNonEmpty(a.WorkerID, "vllm") + "\x00" + a.WorkerRole
+		bk := strmatch.FirstNonEmpty(b.Engine, VLLMEngineID) + "\x00" + strmatch.FirstNonEmpty(b.WorkerID, "vllm") + "\x00" + b.WorkerRole
 		return ak < bk
 	})
 	return out
 }
 
 func servingSnapshotLabels(s ServingMetricsSnapshot, includeRole bool) string {
-	labels := `engine="` + promLabel(firstNonEmpty(s.Engine, VLLMEngineID)) + `",worker="` + promLabel(firstNonEmpty(s.WorkerID, "vllm")) + `"`
+	labels := `engine="` + promLabel(strmatch.FirstNonEmpty(s.Engine, VLLMEngineID)) + `",worker="` + promLabel(strmatch.FirstNonEmpty(s.WorkerID, "vllm")) + `"`
 	if includeRole && s.WorkerRole != "" {
 		labels += `,role="` + promLabel(s.WorkerRole) + `"`
 	}
@@ -1096,15 +1098,6 @@ func writeHelpType(b *strings.Builder, name, help, typ string) {
 
 func promFloat(v float64) string {
 	return strconv.FormatFloat(v, 'g', -1, 64)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func envDefault(k, def string) string {

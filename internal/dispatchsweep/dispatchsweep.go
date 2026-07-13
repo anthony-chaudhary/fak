@@ -31,7 +31,11 @@
 // no sleep. The production tick (cmd/fak) runs the Go dispatch tick evaluator directly.
 package dispatchsweep
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
+)
 
 // Schema tags the machine-readable sweep record.
 const Schema = "fleet-issue-dispatch-sweep/1"
@@ -154,7 +158,7 @@ func RunSweep(cfg Config, tick TickFunc, settle func()) Record {
 		settle()
 
 		if !progressActions[tr.Action] {
-			stopVerdict = firstNonEmpty(tr.Verdict, tr.Action, "UNKNOWN")
+			stopVerdict = strmatch.FirstNonEmpty(tr.Verdict, tr.Action, "UNKNOWN")
 			if r, ok := stopReasons[stopVerdict]; ok {
 				stopReason = r
 			} else {
@@ -201,13 +205,4 @@ func RunSweep(cfg Config, tick TickFunc, settle func()) Record {
 		Ticks:         ticks,
 		OK:            !faultVerdicts[stopVerdict],
 	}
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

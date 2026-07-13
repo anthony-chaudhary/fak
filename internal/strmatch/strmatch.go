@@ -36,3 +36,14 @@ func FirstNonBlank(values ...string) string {
 	}
 	return ""
 }
+
+// FirstNonEmpty returns the first value that is not exactly empty. Unlike
+// FirstNonBlank, whitespace is a value and is returned unchanged.
+func FirstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}

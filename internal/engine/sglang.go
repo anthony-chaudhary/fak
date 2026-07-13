@@ -44,6 +44,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // SGLangEngineID is the registered engine id for the SGLang adapter. It is the SAME
@@ -231,7 +233,7 @@ func (e *SGLangEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetrics
 // schema). Unmapped sglang:* names are ignored — only fields the shared schema
 // already carries are populated, so the output never leaks SGLang-only metric names.
 func ParseSGLangPrometheus(workerID, text string) ServingMetricsSnapshot {
-	s := ServingMetricsSnapshot{Engine: SGLangEngineID, WorkerID: firstNonEmpty(workerID, "sglang")}
+	s := ServingMetricsSnapshot{Engine: SGLangEngineID, WorkerID: strmatch.FirstNonEmpty(workerID, "sglang")}
 	var hitRatio *float64
 	for _, line := range strings.Split(text, "\n") {
 		name, value, ok := parsePromSample(line)
@@ -357,8 +359,8 @@ func (e *SGLangEngine) RunRadixPoll(ctx context.Context, interval time.Duration)
 // residency index. The snapshot is a full residency picture, so the worker's prior
 // rows are CLEARED before the snapshot rows are stored.
 func RecordSGLangRadixSnapshot(worker, model string, idx *PrefixResidencyIndex, snap SGLangRadixSnapshot) []PrefixResidency {
-	worker = firstNonEmpty(snap.WorkerID, worker, "sglang")
-	model = firstNonEmpty(snap.ModelID, model)
+	worker = strmatch.FirstNonEmpty(snap.WorkerID, worker, "sglang")
+	model = strmatch.FirstNonEmpty(snap.ModelID, model)
 	tokenizer := snap.TokenizerID
 	at := time.Unix(0, 0)
 	if snap.TS > 0 {
@@ -367,7 +369,7 @@ func RecordSGLangRadixSnapshot(worker, model string, idx *PrefixResidencyIndex, 
 	}
 	rows := make([]PrefixResidency, 0, len(snap.Resident))
 	for _, p := range snap.Resident {
-		digest := firstNonEmpty(p.Digest, p.Hash)
+		digest := strmatch.FirstNonEmpty(p.Digest, p.Hash)
 		if digest == "" {
 			continue
 		}
