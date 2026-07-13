@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/demoui"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 func main() {
@@ -367,7 +369,7 @@ func runPrint(suite string) int {
 		saidSomething = true
 		fmt.Printf("  %s\n", p.paint(p.bold+p.green, fmt.Sprintf(
 			"→ WIN 1 (model context): fak keeps %s tokens out of the model — %d /bad call%s refused, the result never produced (only a %d-tok deny verdict enters).",
-			commaInt(l.ContextTokensKept), l.Denies, plural(l.Denies), denyVerdictTokens)))
+			commaInt(l.ContextTokensKept), l.Denies, numfmt.PluralSuffix(l.Denies), denyVerdictTokens)))
 		fmt.Printf("  %s\n", p.paint(p.dim,
 			"The SAFETY value of refusing it (the destructive op never runs) is a SEPARATE axis — see `guarddemo -print`."))
 	}
@@ -375,7 +377,7 @@ func runPrint(suite string) int {
 		saidSomething = true
 		fmt.Printf("  %s\n", p.paint(p.bold+p.green, fmt.Sprintf(
 			"→ WIN 2 (tool-side): %d re-read%s served from cache — the tool executed %d times, not %d (%s tool-result tokens not re-fetched).",
-			l.RoundtripsCollapsed, plural(l.RoundtripsCollapsed), l.ToolRunsWith, l.ToolRunsWithout, commaInt(l.ToolTokensFromCache))))
+			l.RoundtripsCollapsed, numfmt.PluralSuffix(l.RoundtripsCollapsed), l.ToolRunsWith, l.ToolRunsWithout, commaInt(l.ToolTokensFromCache))))
 		fmt.Printf("  %s\n", p.paint(p.dim,
 			"HONEST: the cached content is still RETURNED to the model, so this is a tool-side latency/compute/$ win, not a model-context cut. "+
 				"The model-side prefill/KV reuse that would also cut the re-read's tokens is `ctxdemo`'s axis (KV-eviction half: mechanism-proven, see FAQ)."))
@@ -387,13 +389,6 @@ func runPrint(suite string) int {
 	}
 	fmt.Println()
 	return 0
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // ---------------------------------------------------------------------------

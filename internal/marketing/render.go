@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 // render.go — the marketing Artifact and its Slack render. An Artifact is one rendered
@@ -96,12 +98,12 @@ func claimBullet(c Claim) string {
 // and how many other commits the window held (never folded into the ship count), plus a
 // note when ships were withheld by the CLAIMS.md gate.
 func (a Artifact) footer() string {
-	parts := []string{fmt.Sprintf("%d witnessed ship%s", len(a.Claims), plural(len(a.Claims)))}
+	parts := []string{fmt.Sprintf("%d witnessed ship%s", len(a.Claims), numfmt.PluralSuffix(len(a.Claims)))}
 	other := a.Activity.Commits - a.Activity.Ships
 	if other < 0 {
 		other = 0
 	}
-	parts = append(parts, fmt.Sprintf("%d other commit%s", other, plural(other)))
+	parts = append(parts, fmt.Sprintf("%d other commit%s", other, numfmt.PluralSuffix(other)))
 	if n := len(a.Excluded); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d held (CLAIMS.md stub/simulated)", n))
 	}
@@ -172,11 +174,4 @@ func sortedClaims(claims []Claim) []Claim {
 	out := append([]Claim(nil), claims...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Ship.Date.After(out[j].Ship.Date) })
 	return out
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }

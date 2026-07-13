@@ -25,6 +25,8 @@ import (
 	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 const (
@@ -196,19 +198,12 @@ func useAfterFreeReason(s ShedSpanStat) string {
 		reason += "s"
 	}
 	if len(s.RefSeqs) > 0 {
-		reason += " (turn" + plural(len(s.RefSeqs)) + " " + joinInts(s.RefSeqs) + ")"
+		reason += " (turn" + numfmt.PluralSuffix(len(s.RefSeqs)) + " " + joinInts(s.RefSeqs) + ")"
 	}
 	if len(s.RefKinds) > 0 {
 		reason += " via " + joinStrings(s.RefKinds)
 	}
 	return reason
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 func joinInts(xs []int) string {

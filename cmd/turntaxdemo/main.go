@@ -64,6 +64,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 
 	"github.com/anthony-chaudhary/fak/internal/demoutil"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 //go:embed page.html
@@ -467,7 +469,7 @@ func runPrint(suite string) int {
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
 	forced := rep.TurnKinds.Forced // fak vs the TUNED agent — the honest headline
 	total := rep.Net.TurnsSaved    // per-turn normalizer only (the report's per-turn rate denominator)
-	leftScore := fmt.Sprintf("tuned SOTA agent: %d forced round-trip%s", forced, plural(forced))
+	leftScore := fmt.Sprintf("tuned SOTA agent: %d forced round-trip%s", forced, numfmt.PluralSuffix(forced))
 	fmt.Printf("  %s  %s\n",
 		p.paint(p.bold+p.red, ttPad(leftScore, lw+2+cw)),
 		p.paint(p.bold+p.green, "fak: 0 extra round-trips"))
@@ -481,7 +483,7 @@ func runPrint(suite string) int {
 	if forced > 0 {
 		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
 			"vs even a TUNED 2026 agent, fak deletes %d forced round-trip%s ≈ %.1fs and $%.4f at hosted-flash rates (1.5s/turn).",
-			forced, plural(forced), float64(forced)*perLatS, float64(forced)*perDollar)))
+			forced, numfmt.PluralSuffix(forced), float64(forced)*perLatS, float64(forced)*perDollar)))
 		fmt.Printf("  %s\n", p.paint(p.dim, "the safety floor (poison paged out, destructive op refused) is a SEPARATE axis — see `guarddemo -print`."))
 	} else {
 		fmt.Printf("  %s\n", p.paint(p.dim,
@@ -490,11 +492,4 @@ func runPrint(suite string) int {
 	}
 	fmt.Println()
 	return 0
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }

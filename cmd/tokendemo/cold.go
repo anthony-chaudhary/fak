@@ -36,6 +36,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 // coldResultTokens is the per-key result size used by the cold probe — a modeled knob
@@ -313,7 +315,7 @@ func runColdPrint(workers, trials int, delay time.Duration) int {
 	fmt.Printf("  engine calls per key: min %d  max %d  mean %.1f\n",
 		proof.MinEngineCallsPerKey, proof.MaxEngineCallsPerKey, proof.MeanEngineCallsPerKey)
 	fmt.Printf("  cold fill races: %d total across %d trial%s (%d raced)   vDSO hits per key: %d total\n",
-		proof.TotalColdFillRaces, proof.Trials, plural(proof.Trials), proof.TrialsWithRace, proof.TotalVDSOHits)
+		proof.TotalColdFillRaces, proof.Trials, numfmt.PluralSuffix(proof.Trials), proof.TrialsWithRace, proof.TotalVDSOHits)
 	fmt.Printf("  wall (sum over trials): raw %.3fms   fak %.3fms\n",
 		nsToMs(proof.RawWallTotalNs), nsToMs(proof.FakWallTotalNs))
 	fmt.Printf("  per-call p50/p95: raw %s/%sms   fak %s/%sms\n\n",

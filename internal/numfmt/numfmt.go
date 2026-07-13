@@ -76,3 +76,11 @@ func EnvPositiveInt(key string, def int) int {
 	}
 	return def
 }
+
+// PluralSuffix returns "s" for every count except exactly one.
+func PluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}

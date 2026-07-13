@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 // generate.go — the event -> Artifact generators. Each takes witnessed ships (already
@@ -174,7 +176,7 @@ func EpicBlurb(epicTitle string, ships []Ship, excluded []ExcludedShip) Artifact
 	return Artifact{
 		Kind:      KindEpicBlurb,
 		Title:     title,
-		Lead:      fmt.Sprintf("%d witnessed ship%s closed this epic.", len(claims), plural(len(claims))),
+		Lead:      fmt.Sprintf("%d witnessed ship%s closed this epic.", len(claims), numfmt.PluralSuffix(len(claims))),
 		Claims:    claims,
 		Activity:  Activity{Commits: len(ships), Ships: len(ships)},
 		Excluded:  excluded,
@@ -188,7 +190,7 @@ func ReleaseHighlight(version, notesLead string, ships []Ship, excluded []Exclud
 	claims, _ := buildClaims(ships)
 	lead := notesLead
 	if lead == "" {
-		lead = fmt.Sprintf("%d witnessed ship%s in this release.", len(claims), plural(len(claims)))
+		lead = fmt.Sprintf("%d witnessed ship%s in this release.", len(claims), numfmt.PluralSuffix(len(claims)))
 	}
 	return Artifact{
 		Kind:      KindReleaseHighlight,

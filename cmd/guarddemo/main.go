@@ -66,6 +66,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 
 	"github.com/anthony-chaudhary/fak/internal/demoutil"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 //go:embed page.html
@@ -413,7 +415,7 @@ func runPrint(scenario string) int {
 		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
 			"fak refused %d destructive op%s and paged out %d injection%s — and still ran the %d legitimate call%s. "+
 				"A completion/integrity delta that holds on ANY backend (the refusal never reads a content detector).",
-			des, plural(des), inj, plural(inj), passes, plural(passes))))
+			des, numfmt.PluralSuffix(des), inj, numfmt.PluralSuffix(inj), passes, numfmt.PluralSuffix(passes))))
 	} else {
 		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
 			"A clean session breaches nothing on either arm (the anti-fear-mongering control): "+
@@ -421,13 +423,6 @@ func runPrint(scenario string) int {
 	}
 	fmt.Println()
 	return 0
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // scenarioExpect is the documented safety-floor invariant for a known fixture — the

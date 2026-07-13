@@ -43,3 +43,14 @@ func TestEnvPositiveInt(t *testing.T) {
 		})
 	}
 }
+
+func TestPluralSuffix(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{{0, "s"}, {1, ""}, {2, "s"}, {-1, "s"}} {
+		if got := PluralSuffix(tc.n); got != tc.want {
+			t.Fatalf("PluralSuffix(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}
