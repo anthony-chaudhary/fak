@@ -504,6 +504,11 @@ func main() {
 		cmdUnwiredDebtDispatch(os.Args[2:])
 	case "qa-process-debt-dispatch":
 		cmdQAProcessDebtDispatch(os.Args[2:])
+	case "mode-debt-dispatch":
+		// The permission-regime fan-out (#4416, epic #4397): consume the sibling
+		// mode-debt scorecard and file one deduped issue per HARD un-lifted dial,
+		// routed to the permission-regime backlog (#2389 / #2405).
+		cmdModeDebtDispatch(os.Args[2:])
 	case "checkpoint-scorecard":
 		cmdCheckpointScorecard(os.Args[2:])
 	case "checkpoint-debt-dispatch":
