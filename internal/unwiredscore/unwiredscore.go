@@ -229,7 +229,7 @@ func Build(root string) scorecard.Payload {
 	finding := "every code-complete internal package is wired into a default path"
 	next := "hold -- re-run after a new package lands; a regression means a code-complete package shipped wired to nothing"
 	if len(unwired) > 0 {
-		finding = fmt.Sprintf("%s: code complete but wired into no default path", plural(len(unwired), "orphaned package"))
+		finding = fmt.Sprintf("%s: code complete but wired into no default path", scorecard.CountNoun(len(unwired), "orphaned package"))
 		next = "run `fak unwired-debt-dispatch` to fan out one tracked issue per orphan, then wire-or-retire worst-first (biggest stranded investment first)"
 	}
 
@@ -318,12 +318,4 @@ func hasTestdataSegment(relPath string) bool {
 		}
 	}
 	return false
-}
-
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
 }

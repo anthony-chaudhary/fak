@@ -282,7 +282,7 @@ func kpiNoFalseAttribution(surfaces map[string][]string) scorecard.KPI {
 	detail := "no observed-miss-blamed-on-fak prose"
 	if len(defects) > 0 {
 		score = 0.0
-		detail = plural(len(defects), "false-attribution string")
+		detail = scorecard.CountNoun(len(defects), "false-attribution string")
 	}
 	return scorecard.KPI{
 		Key: "no_false_attribution", Group: "honesty", Score: score,
@@ -464,7 +464,7 @@ func Build(root string) scorecard.Payload {
 	finding := "every reported fact labels its provenance and blames no provider-side miss on fak"
 	next := "hold -- re-run after a new reporting surface lands"
 	if debt > 0 {
-		finding = plural(debt, "conflation defect") + ": a reported value is unlabeled, a cache dollar names no valuation basis, or a provider miss is attributed to a fak action"
+		finding = scorecard.CountNoun(debt, "conflation defect") + ": a reported value is unlabeled, a cache dollar names no valuation basis, or a provider miss is attributed to a fak action"
 		next = "fix " + worstKPI(kpis) + ": label external values OBSERVED / name the cache-dollar valuation basis / correct the attribution"
 	}
 	p := scorecard.Fold(Schema, kpis, DebtKey, nil, scorecard.Messages{
@@ -577,13 +577,6 @@ func detailCounts(have, total int, suffix string) string {
 
 // plural renders "N noun" with a trailing "(s)" when N != 1, matching the Python f-strings
 // that wrote "{n} conflation defect(s)".
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
-}
 
 func worstKPI(kpis []scorecard.KPI) string {
 	worst := kpis[0]

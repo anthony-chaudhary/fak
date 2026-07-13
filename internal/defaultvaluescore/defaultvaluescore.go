@@ -465,7 +465,7 @@ func Build(root string) scorecard.Payload {
 	finding := "every value-flag ships default-on (or gated with a reason), no exit line folds vacuous kernel.Counters on the proxy, and no score surface defaults to a modeled headline"
 	next := "hold -- re-run after a new value-flag or score surface lands"
 	if debt > 0 {
-		finding = plural(debt, "default-value defect") + ": a value feature ships not-fully-enabled, an exit line folds kernel.Counters on the proxy, or a score surface defaults to a modeled headline"
+		finding = scorecard.CountNoun(debt, "default-value defect") + ": a value feature ships not-fully-enabled, an exit line folds kernel.Counters on the proxy, or a score surface defaults to a modeled headline"
 		next = "retire worst-first (" + worstKPI(kpis) + ") -- maps onto epic #1089's children #1090-#1095"
 	}
 
@@ -548,13 +548,6 @@ func lastSegment(path string) string {
 }
 
 // plural renders "N noun" with a trailing "(s)" when N != 1.
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
-}
 
 func worstKPI(kpis []scorecard.KPI) string {
 	worst := kpis[0]

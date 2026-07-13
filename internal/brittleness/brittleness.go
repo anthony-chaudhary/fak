@@ -226,7 +226,7 @@ func Fold(findings []Finding) scorecard.Payload {
 	next := "hold -- re-run after new commits land or a rerun flakes; capture the seam while it is fresh, before the next agent re-derives it"
 	if total > 0 {
 		finding = fmt.Sprintf("%s across %s (brittleness_pressure=%d): %s",
-			plural(total, "brittle seam"), plural(coveredClasses(counts), "class"), pressure, topClassSummary(counts))
+			scorecard.CountNoun(total, "brittle seam"), scorecard.CountNoun(coveredClasses(counts), "class"), pressure, topClassSummary(counts))
 		next = "work the worklist worst-first (highest recurrence first): de-flake the shared gate, root-cause the recurring fix, capture the revert reason"
 	}
 
@@ -287,12 +287,4 @@ func topClassSummary(counts map[Class]int) string {
 		}
 	}
 	return strings.Join(parts, ", ")
-}
-
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
 }

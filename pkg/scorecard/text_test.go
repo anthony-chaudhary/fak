@@ -48,3 +48,16 @@ func TestMetricTextPreservesScorecardNumericWireForms(t *testing.T) {
 		t.Fatalf("ScoreValueText(87) = %q, want 0.87", got)
 	}
 }
+
+func TestCountNounPreservesCompactPluralWireForm(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
+		{0, "0 defect(s)"}, {1, "1 defect"}, {2, "2 defect(s)"}, {-1, "-1 defect(s)"},
+	} {
+		if got := CountNoun(tc.n, "defect"); got != tc.want {
+			t.Fatalf("CountNoun(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}

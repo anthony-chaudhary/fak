@@ -330,7 +330,7 @@ func Build(root string) scorecard.Payload {
 	finding := "every proven scorecard convention has fanned out to the whole family"
 	next := "hold -- re-run after a new card or convention lands; a regression means an improvement stopped propagating"
 	if debt > 0 {
-		finding = fmt.Sprintf("%s: a proven scorecard convention has not fanned out to every sibling", plural(debt, "un-propagated convention gap"))
+		finding = fmt.Sprintf("%s: a proven scorecard convention has not fanned out to every sibling", scorecard.CountNoun(debt, "un-propagated convention gap"))
 		next = "run `fak propagation-debt-dispatch` to fan out one tracked issue per gap, then extend the laggards worst-first"
 	}
 
@@ -408,12 +408,4 @@ func baseName(p string) string {
 		return p[i+1:]
 	}
 	return p
-}
-
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
 }

@@ -325,7 +325,7 @@ func Fold(findings []Finding, universe map[Class]int) scorecard.Payload {
 	next := "hold -- re-run after new commits land; a regression means work was redone or landed wired to nothing"
 	if total > 0 {
 		finding = fmt.Sprintf("%s across %s: %s",
-			plural(total, "anti-pattern finding"), plural(coveredClasses(counts), "class"), topClassSummary(counts))
+			scorecard.CountNoun(total, "anti-pattern finding"), scorecard.CountNoun(coveredClasses(counts), "class"), topClassSummary(counts))
 		next = "clear worst-first: route each finding to its class cure -- " + topCure(counts)
 	}
 
@@ -436,12 +436,4 @@ func topClassSummary(counts map[Class]int) string {
 		}
 	}
 	return strings.Join(parts, ", ")
-}
-
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
 }

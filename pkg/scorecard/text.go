@@ -2,6 +2,7 @@ package scorecard
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -126,4 +127,14 @@ func MetricText(v any) string {
 // ScoreValueText renders the normalized 0..1 value corresponding to score.
 func ScoreValueText(score int) string {
 	return MetricText(Round3(ValueFromScore(float64(score))))
+}
+
+// CountNoun renders the compact scorecard count phrase used by debt reports.
+// The established wire form appends literal "(s)" for every count except one.
+func CountNoun(n int, noun string) string {
+	s := fmt.Sprintf("%d %s", n, noun)
+	if n != 1 {
+		s += "(s)"
+	}
+	return s
 }

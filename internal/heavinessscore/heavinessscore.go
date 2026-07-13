@@ -472,7 +472,7 @@ func Build(root string) scorecard.Payload {
 	finding := fmt.Sprintf("operator surface clean of hard friction; heaviness pressure %d (watch the drift signals)", pressure)
 	next := "hold -- re-run after a verb, a front-door flag, or a refusal reason is added; drive pressure down by consolidating, not by deleting a real guard"
 	if debt > 0 {
-		finding = plural(debt, "operator-friction defect") + ": a steering surface is undiscoverable or the appeal channel is unwired"
+		finding = scorecard.CountNoun(debt, "operator-friction defect") + ": a steering surface is undiscoverable or the appeal channel is unwired"
 		next = "fix " + worstHardKPI(kpis) + ": index the steering surface in the doc map / wire the appeal channel"
 	}
 
@@ -506,14 +506,6 @@ func Build(root string) scorecard.Payload {
 }
 
 // --- small local helpers -----------------------------------------------------------------------
-
-func plural(n int, noun string) string {
-	s := fmt.Sprintf("%d %s", n, noun)
-	if n != 1 {
-		s += "(s)"
-	}
-	return s
-}
 
 // worstHardKPI names the KPI carrying the most HARD defects, for the next-action pointer.
 func worstHardKPI(kpis []scorecard.KPI) string {
