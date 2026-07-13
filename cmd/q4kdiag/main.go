@@ -132,18 +132,29 @@ func formatConfigLine(cfg model.Config) string {
 }
 
 // formatActiveSetLine renders the DERIVED Lane F (#3074) active-set: the routed-expert resident
-// band, the per-expert resident bytes, and — once experts_used (K) is read — the active
-// routed-expert bytes streamed per decoded token, the single-stream decode ceiling divisor the
-// GPU-server roofline needs MEASURED rather than estimated. It is header arithmetic (no serve, no
-// per-op trace); when K is unread (experts_used=0) it prints the band + per-expert and flags the
-// per-token bytes PENDING(K) rather than guessing.
+// band, the per-expert resident bytes, the non-expert (attention/dense/shared/embedding) remainder,
+// and — once experts_used (K) is read — the two per-token roofline divisors the GPU-server roofline
+// needs MEASURED rather than estimated: active-bytes/token (K×per-expert + non-expert stream, the
+// single-stream decode divisor, an upper bound) and active-params/token (K×per-expert params +
+// non-expert params, the FLOP divisor). It is header arithmetic (no serve, no per-op trace); when K
+// is unread (experts_used=0) it prints the band + per-expert + non-expert and flags the per-token
+// divisors PENDING(K) rather than guessing.
 func formatActiveSetLine(as ggufload.RoutedExpertActiveSet) string {
+	base := fmt.Sprintf("active_set experts=%d routed_expert_resident=%.2fGiB per_expert=%.4fGiB non_expert_resident=%.2fGiB",
+		as.NumExperts, bytesGiB(as.RoutedResident), bytesGiB(as.PerExpert), bytesGiB(as.NonExpertResident))
 	if as.ExpertsUsed <= 0 {
-		return fmt.Sprintf("active_set experts=%d routed_expert_resident=%.2fGiB per_expert=%.4fGiB experts_used=0 active_expert_bytes_per_tok=PENDING(K)",
-			as.NumExperts, bytesGiB(as.RoutedResident), bytesGiB(as.PerExpert))
+		return base + " experts_used=0 active_bytes_per_tok=PENDING(K) active_params_per_tok=PENDING(K)"
 	}
-	return fmt.Sprintf("active_set experts=%d routed_expert_resident=%.2fGiB per_expert=%.4fGiB experts_used=%d active_expert_bytes_per_tok=%.4fGiB (DERIVED header arithmetic; box-side per-op trace is the witness)",
-		as.NumExperts, bytesGiB(as.RoutedResident), bytesGiB(as.PerExpert), as.ExpertsUsed, bytesGiB(as.ActivePerToken))
+	return fmt.Sprintf("%s experts_used=%d active_bytes_per_tok=%.4fGiB active_params_per_tok=%.2fB (DERIVED header arithmetic; box-side per-op trace is the witness)",
+		base, as.ExpertsUsed, bytesGiB(as.ActiveBytesPerToken), paramsB(as.ActiveParamsPerToken))
+}
+
+// paramsB renders an element count as billions of parameters (the roofline's active-params unit).
+func paramsB(n int64) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / 1e9
 }
 
 func printMemoryPlan(name string, plan compute.MemoryPlan) {
