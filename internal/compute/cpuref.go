@@ -3,7 +3,7 @@ package compute
 import (
 	"math"
 
-	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // cpuref.go — the day-1 CPU *reference* backend. It is the only Backend that exists
@@ -122,7 +122,7 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 	case F32:
 		wf := c.f32(w)
 		for o := 0; o < out; o++ {
-			y[o] = kernel.FDot(wf[o*in:o*in+in], xf)
+			y[o] = mathx.FDot(wf[o*in:o*in+in], xf)
 		}
 	case Q8_0:
 		blk := w.Quant.Block
@@ -156,7 +156,7 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		for o := 0; o < out; o++ {
 			r := wf[o*in : o*in+in]
 			for t := 0; t < P; t++ {
-				Y[t*out+o] = kernel.FDot(r, Xf[t*in:t*in+in])
+				Y[t*out+o] = mathx.FDot(r, Xf[t*in:t*in+in])
 			}
 		}
 	case Q8_0:
@@ -394,7 +394,7 @@ func (k *cpuKV) Clone() KVStore {
 
 // ---- reference kernels (reproduce model numerics byte-for-byte) ------------------
 
-func fdot(r, x []float32) float32 { return kernel.FDot(r, x) }
+func fdot(r, x []float32) float32 { return mathx.FDot(r, x) }
 
 // dot: single-accumulator in-order (attention scores use this in the model).
 func dot(a, b []float32) float32 {

@@ -21,7 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // numWorkers caps matmul parallelism. Default = GOMAXPROCS, overridable two ways (see
@@ -174,7 +174,7 @@ func parWorkerLoop(w int) {
 	}
 }
 
-func fdot(r, x []float32) float32 { return kernel.FDot(r, x) }
+func fdot(r, x []float32) float32 { return mathx.FDot(r, x) }
 
 func fdot3(r0, r1, r2, x []float32) (float32, float32, float32) {
 	return fdot3scalar(r0, r1, r2, x)
@@ -309,7 +309,7 @@ func parMatRows(w, x []float32, out, in int) []float32 {
 	y := make([]float32, out)
 	row := func(lo, hi int) {
 		for o := lo; o < hi; o++ {
-			y[o] = kernel.FDot(w[o*in:o*in+in], x)
+			y[o] = mathx.FDot(w[o*in:o*in+in], x)
 		}
 	}
 	if out*in < parThreshold {
@@ -334,7 +334,7 @@ func matMulBatch(w, X []float32, out, in, P int) []float32 {
 		for o := lo; o < hi; o++ {
 			r := w[o*in : o*in+in]
 			for t := 0; t < P; t++ {
-				Y[t*out+o] = kernel.FDot(r, X[t*in:t*in+in])
+				Y[t*out+o] = mathx.FDot(r, X[t*in:t*in+in])
 			}
 		}
 	}

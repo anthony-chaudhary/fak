@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 const qBlk = 32
@@ -52,8 +52,8 @@ func parFor(n, workers int, body func(lo, hi int)) {
 	wg.Wait()
 }
 
-// --- f32 (the current path): shared deterministic kernel.FDot ---
-func fdot(r, x []float32) float32 { return kernel.FDot(r, x) }
+// --- f32 (the current path): shared deterministic mathx.FDot ---
+func fdot(r, x []float32) float32 { return mathx.FDot(r, x) }
 
 // --- int8×int8 (the shipped Q8_0 qdot8) ---
 func qdot8(qw []int8, dw []float32, qx []int8, dx []float32, nblk int) float32 {
@@ -154,7 +154,7 @@ func main() {
 
 	f32Body := func(lo, hi int) {
 		for o := lo; o < hi; o++ {
-			yf[o] = kernel.FDot(wf[o*I:o*I+I], x)
+			yf[o] = mathx.FDot(wf[o*I:o*I+I], x)
 		}
 	}
 	i8i8Body := func(lo, hi int) {
