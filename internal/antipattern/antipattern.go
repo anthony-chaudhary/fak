@@ -71,7 +71,8 @@ const (
 	// GroupRepetition: work redone that was already done.
 	GroupRepetition Group = "repetition"
 	// GroupLostWork: work landed but wired into nothing.
-	GroupLostWork Group = "lost-work"
+	GroupLostWork     Group = "lost-work"
+	GroupGraderGaming Group = "grader-gaming"
 )
 
 // Rung is the note's detection-maturity ladder. The registry records each class's rung
@@ -137,6 +138,14 @@ type Spec struct {
 // registry is the canonical, ordered class table. The order is the render/KPI order:
 // repetition first (the newest, most operator-visible loss), then lost-work coarse-to-fine.
 var registry = []Spec{
+	{
+		Class:      CheckerGames,
+		Group:      GroupGraderGaming,
+		Title:      "solution games the checker",
+		Mitigation: "remove the shortcut and make the real assertion exercise the produced behavior",
+		Cure:       "manual: inspect the named artifact and replace the shortcut with real behavior",
+		Rung:       RungScored,
+	},
 	{
 		Class:      ClassRedundantRework,
 		Group:      GroupRepetition,

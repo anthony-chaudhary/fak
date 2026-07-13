@@ -23,6 +23,8 @@ func Collect(root string, commits []Commit) ([]Finding, map[Class]int) {
 	var findings []Finding
 	universe := map[Class]int{}
 
+	findings = append(findings, detectCheckerGames(root)...)
+
 	findings = append(findings, DetectRedundantRework(commits)...)
 
 	up, upUniverse := unwiredPkgFindings(root)
