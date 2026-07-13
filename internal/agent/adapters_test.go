@@ -17,6 +17,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 func adapterTestMessages(toolResult string) []Message {
@@ -182,7 +184,7 @@ func (canonicalLookupAdmitter) Admit(ctx context.Context, c *abi.ToolCall, r *ab
 	if c == nil || c.Tool != "lookup" || r == nil {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "test-canon"}
 	}
-	body := refBytes(ctx, r.Payload)
+	body := refutil.Bytes(ctx, r.Payload)
 	if f := canon.Scan(body); f.Injection {
 		return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonTrustViolation, By: "test-canon"}
 	}

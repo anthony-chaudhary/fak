@@ -8,6 +8,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // TestPipelineEngineAdmitRunsServeBandWorker is the EngineDriver reachability gate
@@ -64,7 +66,7 @@ func TestPipelineEngineAdmitRunsServeBandWorker(t *testing.T) {
 	}
 
 	call := inlineCall("search_flights", `{"from":"SFO","to":"JFK"}`)
-	prompt := tokenize(call.Tool, refBytes(ctx, call.Args), cfg.VocabSize)
+	prompt := tokenize(call.Tool, refutil.Bytes(ctx, call.Args), cfg.VocabSize)
 	want := mono.NewSession().Generate(prompt, genTokens)
 
 	req, err := abi.AdmitOrShim(ctx, eng, call)

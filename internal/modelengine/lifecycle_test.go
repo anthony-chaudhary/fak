@@ -8,6 +8,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // TestAdmitStreamsThenAssembles proves the lifecycle path streams exactly genTokens
@@ -124,7 +126,7 @@ func TestEngineAdmitUsesNativeContinuousBatching(t *testing.T) {
 
 	want := make([][]int, len(calls))
 	for i, c := range calls {
-		prompt := e.buildPrompt(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)
+		prompt := e.buildPrompt(c.Tool, refutil.Bytes(ctx, c.Args), m.Cfg.VocabSize)
 		want[i] = serialGreedyTokens(m, prompt)
 	}
 

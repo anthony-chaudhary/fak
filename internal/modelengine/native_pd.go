@@ -15,6 +15,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 const nativePDDefaultBlockTokens = 16
@@ -405,7 +407,7 @@ func (c *NativePDCluster) promptFor(ctx context.Context, req NativePDRequest) []
 	if req.Call == nil {
 		return nil
 	}
-	return tokenize(req.Call.Tool, refBytes(ctx, req.Call.Args), c.m.Cfg.VocabSize)
+	return tokenize(req.Call.Tool, refutil.Bytes(ctx, req.Call.Args), c.m.Cfg.VocabSize)
 }
 
 func (c *NativePDCluster) prefixSegments(req NativePDRequest, fallbackKey string) []string {

@@ -51,6 +51,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // enabled is the runtime toggle (FAK_IFC=off makes both gates no-ops) so the
@@ -696,7 +698,7 @@ func authorizedResearchEgress(ctx context.Context, c *abi.ToolCall, sink SinkCla
 }
 
 func decodeArgs(ctx context.Context, c *abi.ToolCall) map[string]any {
-	b := refBytes(ctx, c.Args)
+	b := refutil.Bytes(ctx, c.Args)
 	if len(b) == 0 {
 		return nil
 	}
@@ -705,18 +707,6 @@ func decodeArgs(ctx context.Context, c *abi.ToolCall) map[string]any {
 		return nil
 	}
 	return m
-}
-
-func refBytes(ctx context.Context, r abi.Ref) []byte {
-	if r.Kind == abi.RefInline {
-		return r.Inline
-	}
-	if res := abi.ActiveResolver(); res != nil {
-		if b, err := res.Resolve(ctx, r); err == nil {
-			return b
-		}
-	}
-	return nil
 }
 
 // vdsoTaintEmitter closes the vDSO taint-laundering hole. A vDSO fast-path hit is

@@ -38,6 +38,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // EngineID is the registered id the kernel selects this backend by.
@@ -209,7 +211,7 @@ func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, er
 func (e *Engine) nativeScheduler() *NativeScheduler {
 	e.schedOnce.Do(func() {
 		sched := newNativeScheduler(e.model(), func(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
-			args := refBytes(ctx, c.Args)
+			args := refutil.Bytes(ctx, c.Args)
 			return schedPrepare{
 				prompt: e.buildPrompt(c.Tool, args, m.Cfg.VocabSize),
 				tok:    e.tok,
@@ -313,17 +315,6 @@ func tokenize(tool string, args []byte, vocab int) []int {
 }
 
 // refBytes materializes a Ref through the active resolver (mirrors engine.refBytes).
-func refBytes(ctx context.Context, r abi.Ref) []byte {
-	if r.Kind == abi.RefInline {
-		return r.Inline
-	}
-	if res := abi.ActiveResolver(); res != nil {
-		if b, err := res.Resolve(ctx, r); err == nil {
-			return b
-		}
-	}
-	return nil
-}
 
 // putBytes stores result bytes via the active resolver, returning an inline Ref as
 // a last resort so a missing backend never drops the payload.

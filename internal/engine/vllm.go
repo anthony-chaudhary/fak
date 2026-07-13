@@ -21,6 +21,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // VLLMEngineID is the registered engine id for the vLLM V1 adapter.
@@ -164,7 +166,7 @@ func (e *VLLMEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result
 // shapes the matching request body with model injected. It is shared by every
 // OpenAI-frontend engine (vLLM, Dynamo, llm-d) so the lowering lives once.
 func buildOpenAIRequest(ctx context.Context, baseURL, model string, c *abi.ToolCall) (endpoint, kind string, body []byte, err error) {
-	args := refBytes(ctx, c.Args)
+	args := refutil.Bytes(ctx, c.Args)
 	kind = vllmEndpointKind(c)
 	path := "/chat/completions"
 	if kind == "completions" {

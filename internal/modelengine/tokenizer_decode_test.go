@@ -7,6 +7,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // register the Ref resolver (CAS backend)
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // genResultText is the result-payload shape AFTER #463: it carries the additive
@@ -52,7 +54,7 @@ func (f *fakeTok) Decode(ids []int) (string, error) {
 
 func decodeGenText(t *testing.T, ctx context.Context, r *abi.Result) genResultText {
 	t.Helper()
-	b := refBytes(ctx, r.Payload)
+	b := refutil.Bytes(ctx, r.Payload)
 	var g genResultText
 	if err := json.Unmarshal(b, &g); err != nil {
 		t.Fatalf("result payload is not the generated-token JSON: %v (%s)", err, b)

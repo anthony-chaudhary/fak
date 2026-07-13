@@ -46,6 +46,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // SGLangEngineID is the registered engine id for the SGLang adapter. It is the SAME
@@ -138,7 +140,7 @@ func (e *SGLangEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 	if err != nil {
 		return nil, err
 	}
-	body, err := e.buildGenerateBody(c, refBytes(ctx, c.Args))
+	body, err := e.buildGenerateBody(c, refutil.Bytes(ctx, c.Args))
 	if err != nil {
 		return nil, err
 	}

@@ -33,6 +33,8 @@ import (
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // OnDeviceEngineID is the default engine id the residency floor recognizes as on-box.
@@ -99,7 +101,7 @@ func (e *OnDeviceEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Re
 		return &abi.Result{Call: c, Status: abi.StatusError,
 			Meta: map[string]string{"engine": e.ID, "error": "on-device runtime not wired"}}, nil
 	}
-	prompt := onDevicePrompt(c, refBytes(ctx, c.Args))
+	prompt := onDevicePrompt(c, refutil.Bytes(ctx, c.Args))
 	out, err := e.Runtime.Generate(ctx, prompt)
 	if err != nil {
 		return &abi.Result{Call: c, Status: abi.StatusError,

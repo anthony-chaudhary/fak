@@ -22,6 +22,8 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // FieldType is a minimal JSON Schema scalar type.
@@ -116,7 +118,7 @@ func (l *Ladder) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	l.total++
 	l.mu.Unlock()
 
-	args := refBytes(ctx, c.Args)
+	args := refutil.Bytes(ctx, c.Args)
 
 	// rung 0: static parse. Empty args is well-formed (no body). Non-empty must
 	// parse as a JSON object.
@@ -259,18 +261,6 @@ func typeOK(v any, ty FieldType) bool {
 		return ok
 	}
 	return true
-}
-
-func refBytes(ctx context.Context, r abi.Ref) []byte {
-	if r.Kind == abi.RefInline {
-		return r.Inline
-	}
-	if res := abi.ActiveResolver(); res != nil {
-		if b, err := res.Resolve(ctx, r); err == nil {
-			return b
-		}
-	}
-	return nil
 }
 
 func callHash(c *abi.ToolCall) string {

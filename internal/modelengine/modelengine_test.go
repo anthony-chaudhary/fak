@@ -9,6 +9,8 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // register the Ref resolver (CAS backend)
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // genResult is the JSON shape Complete writes to the result payload.
@@ -25,7 +27,7 @@ func inlineCall(tool, args string) *abi.ToolCall {
 
 func decodeGen(t *testing.T, ctx context.Context, r *abi.Result) genResult {
 	t.Helper()
-	b := refBytes(ctx, r.Payload)
+	b := refutil.Bytes(ctx, r.Payload)
 	var g genResult
 	if err := json.Unmarshal(b, &g); err != nil {
 		t.Fatalf("result payload is not the generated-token JSON: %v (%s)", err, b)

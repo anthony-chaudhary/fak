@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // odCall builds a tool call routed to a given engine with a given share scope — the
@@ -39,7 +41,7 @@ func TestOnDeviceEngineCompletes(t *testing.T) {
 	if res.Status != abi.StatusOK {
 		t.Fatalf("status = %v, want StatusOK", res.Status)
 	}
-	if got := string(refBytes(context.Background(), res.Payload)); got != `{"battery":"87%"}` {
+	if got := string(refutil.Bytes(context.Background(), res.Payload)); got != `{"battery":"87%"}` {
 		t.Fatalf("payload = %q, want the runtime output", got)
 	}
 	if res.Meta["engine"] != OnDeviceEngineID {
@@ -132,7 +134,7 @@ func Example_onDeviceEngine() {
 	fmt.Printf("engine: %s\n", res.Meta["engine"])
 	fmt.Printf("on-device tenant call denied: %v\n", onBox.Kind == abi.VerdictDeny)
 	fmt.Printf("remote tenant call denied:    %v\n", leaky.Kind == abi.VerdictDeny)
-	fmt.Printf("result: %s\n", refBytes(ctx, res.Payload))
+	fmt.Printf("result: %s\n", refutil.Bytes(ctx, res.Payload))
 	// Output:
 	// engine: on-device
 	// on-device tenant call denied: false

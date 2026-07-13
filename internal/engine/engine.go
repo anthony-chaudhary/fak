@@ -24,6 +24,8 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // Usage is the token accounting extracted from a completion (unit 42).
@@ -54,7 +56,7 @@ func (m *Mock) Caps() []abi.Capability { return nil }
 
 func (m *Mock) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
 	m.calls++
-	in := refBytes(ctx, c.Args)
+	in := refutil.Bytes(ctx, c.Args)
 	body := fmt.Sprintf(`{"tool":%q,"echo":%q,"ok":true}`, c.Tool, truncate(in, 256))
 	ref := putBytes(ctx, []byte(body))
 	u := estimateOfflineUsage(len(in), len(body))
@@ -166,7 +168,7 @@ func NewCassetteEngine(c *Cassette) *CassetteEngine { return &CassetteEngine{c} 
 func (e *CassetteEngine) Caps() []abi.Capability { return nil }
 
 func (e *CassetteEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	args := refBytes(ctx, c.Args)
+	args := refutil.Bytes(ctx, c.Args)
 	key := callKey(c.Tool, args)
 	e.c.mu.Lock()
 	ent, ok := e.c.entries[key]
@@ -189,18 +191,6 @@ func (e *CassetteEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Re
 // ---------------------------------------------------------------------------
 // helpers + registration
 // ---------------------------------------------------------------------------
-
-func refBytes(ctx context.Context, r abi.Ref) []byte {
-	if r.Kind == abi.RefInline {
-		return r.Inline
-	}
-	if res := abi.ActiveResolver(); res != nil {
-		if b, err := res.Resolve(ctx, r); err == nil {
-			return b
-		}
-	}
-	return nil
-}
 
 func putBytes(ctx context.Context, b []byte) abi.Ref {
 	if res := abi.ActiveResolver(); res != nil {

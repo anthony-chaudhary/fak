@@ -18,6 +18,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // PipelineEngineID is the default id for a PP head engine when a host registers one.
@@ -100,7 +102,7 @@ func (e *PipelineEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 		tokens: make(chan abi.EngineToken, 1),
 		done:   make(chan struct{}),
 	}
-	args := refBytes(ctx, c.Args)
+	args := refutil.Bytes(ctx, c.Args)
 	prompt := buildPipelinePrompt(e.tok, c.Tool, args, e.first.Model.Cfg.VocabSize)
 	go e.run(r, ctx, c.Tool, prompt)
 	return r, nil

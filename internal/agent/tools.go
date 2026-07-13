@@ -11,6 +11,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/preflight"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // The local toolset is a small, deterministic airline-support world (the same
@@ -230,7 +232,7 @@ func (localEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, 
 // The map is always non-nil (an empty/undecodable body yields an empty map), so callers can
 // index it without a nil guard. Shared by the package-local engine Complete paths.
 func decodeCallArgs(ctx context.Context, args abi.Ref) (body []byte, m map[string]any) {
-	body = refBytes(ctx, args)
+	body = refutil.Bytes(ctx, args)
 	m = map[string]any{}
 	if len(body) > 0 {
 		_ = json.Unmarshal(body, &m)

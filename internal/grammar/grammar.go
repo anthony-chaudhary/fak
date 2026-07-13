@@ -25,6 +25,8 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // Param is one named parameter in a tool's grammar.
@@ -137,7 +139,7 @@ func (r *Rung) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "grammar"} // fail-open
 	}
 
-	args := refBytes(ctx, c.Args)
+	args := refutil.Bytes(ctx, c.Args)
 	var m map[string]any
 	if len(args) > 0 {
 		_ = json.Unmarshal(args, &m)
@@ -236,18 +238,6 @@ func (r *Rung) Stats() (repairs, denies int64) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.repairs, r.denies
-}
-
-func refBytes(ctx context.Context, r abi.Ref) []byte {
-	if r.Kind == abi.RefInline {
-		return r.Inline
-	}
-	if res := abi.ActiveResolver(); res != nil {
-		if b, err := res.Resolve(ctx, r); err == nil {
-			return b
-		}
-	}
-	return nil
 }
 
 func putJSON(ctx context.Context, m map[string]any) (abi.Ref, bool) {

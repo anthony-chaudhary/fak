@@ -10,6 +10,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 func BenchmarkEngineContinuousBatching(b *testing.B) {
@@ -51,7 +53,7 @@ func benchLegacyLifecycle(b *testing.B, m *model.Model, calls []*abi.ToolCall) {
 	for i := 0; i < b.N; i++ {
 		reqs := make([]*legacyBenchRequest, len(calls))
 		for j, c := range calls {
-			prompt := tokenize(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)
+			prompt := tokenize(c.Tool, refutil.Bytes(ctx, c.Args), m.Cfg.VocabSize)
 			reqs[j] = startLegacyBenchRequest(ctx, m, c.Tool, prompt)
 		}
 		drainLegacyBenchRequests(b, reqs)

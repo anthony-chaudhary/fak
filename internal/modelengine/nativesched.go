@@ -22,6 +22,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 var errSchedClosed = errors.New("modelengine: native scheduler closed")
@@ -35,7 +37,7 @@ type schedPrepare struct {
 type schedPrepareFunc func(context.Context, *abi.ToolCall, *model.Model) schedPrepare
 
 func defaultSchedPrepare(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
-	return schedPrepare{prompt: tokenize(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)}
+	return schedPrepare{prompt: tokenize(c.Tool, refutil.Bytes(ctx, c.Args), m.Cfg.VocabSize)}
 }
 
 // NativeScheduler is the continuous-batching LifecycleEngine used by the registered

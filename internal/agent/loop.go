@@ -11,6 +11,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
+
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // SystemPrompt is the agent's standing instruction. It is deliberately neutral
@@ -196,7 +198,7 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 	r, v := k.Syscall(ctx, tc)
 	ev.Verdict = verdictName(v.Kind)
 	ev.By = v.By
-	body := refBytes(ctx, r.Payload)
+	body := refutil.Bytes(ctx, r.Payload)
 
 	switch {
 	case v.Kind == abi.VerdictDeny:
@@ -632,18 +634,6 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-func refBytes(ctx context.Context, r abi.Ref) []byte {
-	if r.Kind == abi.RefInline {
-		return r.Inline
-	}
-	if res := abi.ActiveResolver(); res != nil {
-		if b, err := res.Resolve(ctx, r); err == nil {
-			return b
-		}
-	}
-	return nil
-}
 
 func putBytes(ctx context.Context, b []byte) abi.Ref {
 	if res := abi.ActiveResolver(); res != nil {
