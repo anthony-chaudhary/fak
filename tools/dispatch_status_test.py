@@ -2462,6 +2462,45 @@ class ShipsPerWorkerFoldTest(unittest.TestCase):
         self.assertEqual(out["attributed_ships"], 0)
 
 
+class CommitDroughtTest(unittest.TestCase):
+    """The loop-level drought witness: zero fleet-attributed commits over the
+    window is ``dry``; git-unavailable fails open (no false drought); and the
+    Slack render surfaces the alarm only once the caller derives ``droughty``
+    (``dry`` AND armed)."""
+
+    def test_zero_commits_is_dry(self) -> None:
+        mod = load()
+        out = mod.commit_drought(ROOT, now_ts=0.0, runner=lambda root, since: [])
+        self.assertTrue(out["dry"])
+        self.assertEqual(out["commit_count"], 0)
+        self.assertNotIn("unavailable", out)
+
+    def test_commits_present_not_dry(self) -> None:
+        mod = load()
+        recs = ["feat: a\n(fak-worker acct-a)", "fix: b\n(fak-worker acct-b)"]
+        out = mod.commit_drought(ROOT, now_ts=0.0, runner=lambda root, since: recs)
+        self.assertFalse(out["dry"])
+        self.assertEqual(out["commit_count"], 2)
+
+    def test_git_unavailable_fails_open(self) -> None:
+        mod = load()
+        out = mod.commit_drought(ROOT, now_ts=0.0, runner=lambda root, since: None)
+        self.assertTrue(out.get("unavailable"))
+        self.assertNotIn("dry", out)  # caller ANDs dry with armed; no dry -> no alarm
+
+    def test_slack_surfaces_drought_alarm(self) -> None:
+        mod = load()
+        txt = mod.render_slack({"commit_drought": {"droughty": True, "hours": 3.0}})
+        self.assertIn("drought", txt.lower())
+
+    def test_slack_no_alarm_when_not_droughty(self) -> None:
+        mod = load()
+        txt = mod.render_slack(
+            {"commit_drought": {"dry": True, "droughty": False, "hours": 3.0},
+             "ok": True})
+        self.assertNotIn("drought", txt.lower())
+
+
 class ShipsPerWorkerPayloadTest(unittest.TestCase):
     """build_payload folds the injected ships-per-worker rollup into payload + a reason,
     and render/render_md surface it — never flipping ok (#2065)."""

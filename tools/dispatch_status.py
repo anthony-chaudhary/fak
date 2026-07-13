@@ -1701,6 +1701,41 @@ def _run_ships_per_worker_git(root: Path, since_iso: str) -> list[str] | None:
     return [rec for rec in (proc.stdout or "").split("\x1e") if rec.strip()]
 
 
+_COMMIT_DROUGHT_HOURS = 3.0
+
+
+def commit_drought(
+    root: Path,
+    *,
+    hours: float = _COMMIT_DROUGHT_HOURS,
+    now_ts: float | None = None,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Loop-level drought witness: ZERO fleet-attributed commits over the last
+    ``hours``.
+
+    The per-worker cards (``silent_workers``, ``ships_per_worker``) catch an
+    individual dud worker, but they stay green when the WHOLE loop quietly ships
+    nothing — the exact blind spot that lets an armed fleet sit at zero commits
+    unnoticed. This folds the same ``(fak-worker <id>)`` trailer scan over a
+    wall-clock window and reports ``dry`` when the count is zero. The ALARM bit
+    (``droughty``) is derived by the caller, which ANDs ``dry`` with the
+    armed/watchdog-installed state (a drought while disarmed is idle, not an
+    alarm). Fail-open: if git cannot answer (``runner`` -> ``None``) we report
+    ``unavailable`` rather than a false drought. ``runner``/``now_ts`` are
+    injectable so the witness is testable without a real repo or clock."""
+    now_ts = time.time() if now_ts is None else now_ts
+    since_iso = time.strftime(
+        "%Y-%m-%dT%H:%M:%S +0000",
+        time.gmtime(max(0.0, now_ts - hours * 3600.0)))
+    run = runner or _run_ships_per_worker_git
+    records = run(root, since_iso)
+    if records is None:
+        return {"hours": hours, "unavailable": True}
+    count = len([rec for rec in records if rec.strip()])
+    return {"hours": hours, "commit_count": count, "dry": count == 0}
+
+
 def _parse_watchdog_query(stdout: str) -> dict[str, Any]:
     """Pull ``Status`` and ``Last Result`` from ``schtasks /Query /V /FO LIST``
     output. Returns ``{"status": str|None, "last_result": int|None}``; matches on
@@ -2634,6 +2669,40 @@ def _watch_row_witness(rec: dict[str, Any]) -> dict[str, Any]:
         "closed_by_loop_total": _int(rec.get("closed_by_loop_total")),
         "closed_now": _int(rec.get("closed_now")),
         "audit_error": rec.get("audit_error"),
+    }
+
+
+def _watch_child_failures(breakdown: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Compact the #2635 SPAWN_FAILED cause breakdown into the cited child-failure
+    summary the watch digest carries (issue #2642 Done condition: the section cites
+    'any classified child failures').
+
+    This is the witness for the digest's question 2 — a red scheduled-task bit or a
+    SPAWN_FAILED event is a self-healing *child* failure, not a dispatcher
+    malfunction, exactly when its noise is ATTRIBUTED to named causes. Folds
+    ``by_cause`` down to nonzero {cause: count} with a deterministic ``top_cause``
+    (highest count, alphabetical tiebreak). Returns None when nothing was folded
+    (no attribution oracle, or a clean window) so the digest simply omits it rather
+    than asserting a false zero. Pure and informational — consumes #2635's output,
+    computes no attribution of its own."""
+    if not isinstance(breakdown, dict):
+        return None
+    spawn_failed = _int(breakdown.get("spawn_failed"), 0) or 0
+    spawns = _int(breakdown.get("spawns"), 0) or 0
+    counts = {
+        str(cause): n
+        for cause, info in (breakdown.get("by_cause") or {}).items()
+        if (n := _int((info or {}).get("count"), 0) or 0) > 0
+    }
+    if spawn_failed <= 0 and not counts:
+        return None
+    top_cause = min(counts, key=lambda c: (-counts[c], c)) if counts else None
+    return {
+        "spawns": spawns,
+        "spawn_failed": spawn_failed,
+        "rate": breakdown.get("rate"),
+        "by_cause": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "top_cause": top_cause,
     }
 
 
@@ -3618,6 +3687,11 @@ def render(p: dict[str, Any]) -> str:
             f"{spw.get('worker_count')} worker(s) [{bits}]"
             + (f" +{unk} unattributed" if unk else "")
             + " (aid, #2065)")
+    cd = p.get("commit_drought") or {}
+    if cd.get("droughty"):
+        lines.append(
+            f"║ DROUGHT   : 0 fleet commits in {cd.get('hours')}h while ARMED — the "
+            f"loop is shipping nothing; check spawn/preflight/backlog")
     bh = p.get("backend_health") or {}
     flagged_rates = [r for r in (bh.get("stub_rate") or []) if r.get("majority_stub")]
     if flagged_rates:
@@ -4537,7 +4611,12 @@ def render_slack(payload: dict[str, Any]) -> str:
         rows = buckets[label]
         if rows:
             lines.append(f"{label}: {_join_limited(rows)}")
-    if not any(buckets.values()) and payload.get("ok"):
+    cd = payload.get("commit_drought") or {}
+    if cd.get("droughty"):
+        lines.append(
+            f"🔴 drought: 0 fleet commits in {cd.get('hours')}h while armed — "
+            f"loop shipping nothing")
+    if not any(buckets.values()) and not cd.get("droughty") and payload.get("ok"):
         lines.append("healthy: nothing needs an operator")
     return "\n".join(lines) if lines else "(no dispatcher signal)"
 
@@ -4642,6 +4721,14 @@ def main(argv: list[str] | None = None) -> int:
     fast = args.fast and not args.md and not live_slack
     payload = collect(root, max_workers=args.max_workers, fast=fast,
                       closure_commits=args.closure_commits)
+    # Loop-level drought alarm: fold AFTER collect so the witness rides every
+    # output (json/slack/md/human). droughty = zero fleet commits in the window
+    # AND the loop is armed (a drought while the watchdog is not installed is an
+    # intentional idle, not an alarm).
+    drought = commit_drought(root)
+    _wd = payload.get("watchdog") or {}
+    drought["droughty"] = bool(drought.get("dry") and _wd.get("installed"))
+    payload["commit_drought"] = drought
 
     if args.slack is not None:
         channel = "" if args.slack == "__env__" else args.slack
