@@ -125,9 +125,9 @@ func chainResults(ce ChainEvidence, windowHours int) []KPIResult {
 	case ce.Reports == 0:
 		freshDetail = "no packet evidence under " + chainEvidenceRel + " on this host — run `make dogfood-recent` so friction is found by the loop, not by an outsider"
 	case !fresh:
-		freshDetail = "newest packet report is " + itoa(int(ce.NewestAgeHours)) + "h old (> " + itoa(windowHours) + "h window) — re-run `make dogfood-recent`"
+		freshDetail = "newest packet report is " + strconv.Itoa(int(ce.NewestAgeHours)) + "h old (> " + strconv.Itoa(windowHours) + "h window) — re-run `make dogfood-recent`"
 	default:
-		freshDetail = "newest packet report is " + itoa(int(ce.NewestAgeHours)) + "h old (within the " + itoa(windowHours) + "h window): " + filepath.Base(filepath.Dir(ce.NewestReport))
+		freshDetail = "newest packet report is " + strconv.Itoa(int(ce.NewestAgeHours)) + "h old (within the " + strconv.Itoa(windowHours) + "h window): " + filepath.Base(filepath.Dir(ce.NewestReport))
 	}
 
 	bridged := false
@@ -143,14 +143,14 @@ func chainResults(ce ChainEvidence, windowHours int) []KPIResult {
 		bridgeDetail = "bridge receipt predates the newest report — re-run `fak dogfood-issues --live`"
 	case ce.ReceiptMode == "live" && ce.SyncedFailed == 0:
 		bridged = true
-		bridgeDetail = itoa(ce.SyncedOK) + " action(s) filed/updated as deduped tracker issues (receipt mode live)"
+		bridgeDetail = strconv.Itoa(ce.SyncedOK) + " action(s) filed/updated as deduped tracker issues (receipt mode live)"
 	case ce.ReceiptMode == "live":
-		bridgeDetail = itoa(ce.SyncedFailed) + " gh sync failure(s) in the bridge receipt — re-run `fak dogfood-issues --live`"
+		bridgeDetail = strconv.Itoa(ce.SyncedFailed) + " gh sync failure(s) in the bridge receipt — re-run `fak dogfood-issues --live`"
 	case ce.ReceiptMode == "fetch-existing" && ce.PendingCreates == 0:
 		bridged = true
 		bridgeDetail = "all extracted actions are already tracked (receipt mode fetch-existing, 0 pending creates)"
 	case ce.ReceiptMode == "fetch-existing":
-		bridgeDetail = itoa(ce.PendingCreates) + " unfiled action(s) in the bridge receipt — run `fak dogfood-issues --live`"
+		bridgeDetail = strconv.Itoa(ce.PendingCreates) + " unfiled action(s) in the bridge receipt — run `fak dogfood-issues --live`"
 	default:
 		bridgeDetail = "unrecognized bridge receipt mode " + strconv.Quote(ce.ReceiptMode) + " — re-run `fak dogfood-issues --live`"
 	}

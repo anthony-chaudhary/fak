@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/devindex"
+	"strconv"
 )
 
 // Tree is the whole wiki structure: an ordered list of sections, each a list of
@@ -133,5 +134,5 @@ func archFiles(root string) []string {
 }
 
 func laneSummary(nLeaves int) string {
-	return "The declared lane taxonomy and import-tier map: " + itoa(nLeaves) + " leaves."
+	return "The declared lane taxonomy and import-tier map: " + strconv.Itoa(nLeaves) + " leaves."
 }

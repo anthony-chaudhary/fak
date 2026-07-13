@@ -225,19 +225,19 @@ func convergenceResults(ev Evidence) []KPIResult {
 		result("no_drift", axis, true, 3,
 			"no open objective is DRIFTing — none has a declining witnessed progress curve",
 			notDrifting,
-			itoa(ev.Drift)+"/"+itoa(ev.Open)+" open objective(s) drifting (declining progress)"),
+			strconv.Itoa(ev.Drift)+"/"+strconv.Itoa(ev.Open)+" open objective(s) drifting (declining progress)"),
 		result("no_detour_overrun", axis, true, 3,
 			"no detour has run past its turn budget while its parent is paused — no unreturned side-quest",
 			noOverrun,
-			itoa(ev.DetourOverrun)+"/"+itoa(ev.Open)+" open objective(s) past a detour budget"),
+			strconv.Itoa(ev.DetourOverrun)+"/"+strconv.Itoa(ev.Open)+" open objective(s) past a detour budget"),
 		result("no_stall", axis, true, 2,
 			"no open objective is STALLed — none is flat-and-busy (activity without witnessed movement)",
 			notStalled,
-			itoa(ev.Stall)+"/"+itoa(ev.Open)+" open objective(s) stalled (flat while active)"),
+			strconv.Itoa(ev.Stall)+"/"+strconv.Itoa(ev.Open)+" open objective(s) stalled (flat while active)"),
 		result("progress_banked", axis, false, 1,
 			"at least one objective has reached MET — convergence is banked, not only promised",
 			ev.Open == 0 || ev.Met > 0,
-			itoa(ev.Met)+" objective(s) met of "+itoa(ev.Objectives)+" declared"),
+			strconv.Itoa(ev.Met)+" objective(s) met of "+strconv.Itoa(ev.Objectives)+" declared"),
 	}
 }
 
@@ -249,11 +249,11 @@ func breadthResults(ev Evidence) []KPIResult {
 		result("wip_bounded", axis, true, 3,
 			"active objectives stay within the WIP cap — the fleet is not declaring more live goals than it can converge",
 			ev.ExcessWIP == 0,
-			itoa(ev.Active)+" active vs cap "+itoa(ev.WIPCap)+" ("+itoa(ev.ExcessWIP)+" over)"),
+			strconv.Itoa(ev.Active)+" active vs cap "+strconv.Itoa(ev.WIPCap)+" ("+strconv.Itoa(ev.ExcessWIP)+" over)"),
 		result("detours_park_parent", axis, false, 2,
 			"every open detour has a PAUSED parent — a side-quest was taken only after parking the main goal",
 			ev.LooseDetour == 0,
-			itoa(ev.LooseDetour)+" open detour(s) whose parent is not paused"),
+			strconv.Itoa(ev.LooseDetour)+" open detour(s) whose parent is not paused"),
 		result("ledger_present", axis, true, 1,
 			"the fleet declares its objectives to the trajctl ledger at all — focus is measurable, not implicit",
 			ev.LedgerPresent,
@@ -342,11 +342,11 @@ func Build(opts Options) ScorecardPayload {
 	var reason string
 	if ok {
 		reason = "focus-score: convergence value " + scorecard.ScoreValueText(cScore) + ", breadth value " + scorecard.ScoreValueText(bScore) +
-			", composite value " + scorecard.ScoreValueText(composite) + " (" + grade + "); " + itoa(ev.Active) + " active within cap " +
-			itoa(ev.WIPCap) + ", " + itoa(ev.Healthy) + "/" + itoa(ev.Open) + " open objective(s) healthy; zero focus debt"
+			", composite value " + scorecard.ScoreValueText(composite) + " (" + grade + "); " + strconv.Itoa(ev.Active) + " active within cap " +
+			strconv.Itoa(ev.WIPCap) + ", " + strconv.Itoa(ev.Healthy) + "/" + strconv.Itoa(ev.Open) + " open objective(s) healthy; zero focus debt"
 	} else {
 		finding = "focus_debt"
-		reason = "focus-score carries " + itoa(debt) + " debt (convergence value " + scorecard.ScoreValueText(cScore) +
+		reason = "focus-score carries " + strconv.Itoa(debt) + " debt (convergence value " + scorecard.ScoreValueText(cScore) +
 			", breadth value " + scorecard.ScoreValueText(bScore) + ", composite value " + scorecard.ScoreValueText(composite) + " " + grade + "): " +
 			debtBreakdown(ev)
 		next = "converge worst-first: " + worstFirstNext(ev)
@@ -412,16 +412,16 @@ func Build(opts Options) ScorecardPayload {
 func debtBreakdown(ev Evidence) string {
 	var parts []string
 	if ev.DetourOverrun > 0 {
-		parts = append(parts, itoa(ev.DetourOverrun)+" detour-overrun")
+		parts = append(parts, strconv.Itoa(ev.DetourOverrun)+" detour-overrun")
 	}
 	if ev.Drift > 0 {
-		parts = append(parts, itoa(ev.Drift)+" drifting")
+		parts = append(parts, strconv.Itoa(ev.Drift)+" drifting")
 	}
 	if ev.Stall > 0 {
-		parts = append(parts, itoa(ev.Stall)+" stalled")
+		parts = append(parts, strconv.Itoa(ev.Stall)+" stalled")
 	}
 	if ev.ExcessWIP > 0 {
-		parts = append(parts, itoa(ev.ExcessWIP)+" over WIP cap")
+		parts = append(parts, strconv.Itoa(ev.ExcessWIP)+" over WIP cap")
 	}
 	if len(parts) == 0 {
 		return "clean"
@@ -434,13 +434,13 @@ func debtBreakdown(ev Evidence) string {
 func worstFirstNext(ev Evidence) string {
 	switch {
 	case ev.DetourOverrun > 0:
-		return "return " + itoa(ev.DetourOverrun) + " over-budget detour(s) to their paused parent"
+		return "return " + strconv.Itoa(ev.DetourOverrun) + " over-budget detour(s) to their paused parent"
 	case ev.Drift > 0:
-		return "arrest " + itoa(ev.Drift) + " drifting objective(s) — the witnessed progress curve is declining"
+		return "arrest " + strconv.Itoa(ev.Drift) + " drifting objective(s) — the witnessed progress curve is declining"
 	case ev.Stall > 0:
-		return "unstick " + itoa(ev.Stall) + " stalled objective(s) — activity without witnessed movement"
+		return "unstick " + strconv.Itoa(ev.Stall) + " stalled objective(s) — activity without witnessed movement"
 	case ev.ExcessWIP > 0:
-		return "pause or meet " + itoa(ev.ExcessWIP) + " active objective(s) to get back under the WIP cap of " + itoa(ev.WIPCap)
+		return "pause or meet " + strconv.Itoa(ev.ExcessWIP) + " active objective(s) to get back under the WIP cap of " + strconv.Itoa(ev.WIPCap)
 	default:
 		return "converge the open objectives"
 	}
@@ -516,7 +516,7 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	cScore := scorecard.IntValue(current.Corpus["score"])
 	lines := []string{
 		"focus-score compare:",
-		"  focus_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
+		"  focus_debt: " + strconv.Itoa(bDebt) + " -> " + strconv.Itoa(cDebt) + "  (retired " + strconv.Itoa(bDebt-cDebt) + ")",
 		"  value: " + scorecard.MetricText(bc["value"]) + " -> " + scorecard.MetricText(current.Corpus["value"]) +
 			"  grade " + scorecard.MetricText(bc["grade"]) + " -> " + scorecard.MetricText(current.Corpus["grade"]),
 	}
@@ -524,9 +524,9 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	case bDebt > 0 && cDebt == 0:
 		lines = append(lines, "  VERDICT: fleet converged — all focus debt retired")
 	case cDebt < bDebt:
-		lines = append(lines, "  VERDICT: converging ("+itoa(bDebt)+" -> "+itoa(cDebt)+" debt, composite "+itoa(bScore)+" -> "+itoa(cScore)+")")
+		lines = append(lines, "  VERDICT: converging ("+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+" debt, composite "+strconv.Itoa(bScore)+" -> "+strconv.Itoa(cScore)+")")
 	case cDebt > bDebt:
-		lines = append(lines, "  VERDICT: fanning out ("+itoa(bDebt)+" -> "+itoa(cDebt)+" debt)")
+		lines = append(lines, "  VERDICT: fanning out ("+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+" debt)")
 	default:
 		lines = append(lines, "  VERDICT: no change")
 	}
@@ -572,5 +572,3 @@ func boolStr(ok bool, yes, no string) string {
 	}
 	return no
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }

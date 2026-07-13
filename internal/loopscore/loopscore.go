@@ -275,7 +275,7 @@ func pctStr(num, den int) string {
 	if den <= 0 {
 		return "n/a"
 	}
-	return itoa(int(math.Round(100*float64(num)/float64(den)))) + "%"
+	return strconv.Itoa(int(math.Round(100*float64(num)/float64(den)))) + "%"
 }
 
 // durabilityResults grade auto-restart on system restart: would the fleet come back
@@ -286,15 +286,15 @@ func durabilityResults(ev Evidence) []KPIResult {
 		result("firing_loops_registered", axis, true, 3,
 			"every loop that actually fires is registered with a cadence, so the OS scheduler re-arms it after a reboot",
 			shareOK(ev.FiredRegistered, ev.Fired),
-			itoa(ev.FiredRegistered)+"/"+itoa(ev.Fired)+" ("+pctStr(ev.FiredRegistered, ev.Fired)+") firing loops are registered"),
+			strconv.Itoa(ev.FiredRegistered)+"/"+strconv.Itoa(ev.Fired)+" ("+pctStr(ev.FiredRegistered, ev.Fired)+") firing loops are registered"),
 		result("registered_armed", axis, true, 2,
 			"registered jobs are armed (a stopped/disabled job will NOT re-fire after a restart)",
 			shareOK(ev.Armed, ev.Registered),
-			itoa(ev.Armed)+"/"+itoa(ev.Registered)+" ("+pctStr(ev.Armed, ev.Registered)+") registered jobs armed"),
+			strconv.Itoa(ev.Armed)+"/"+strconv.Itoa(ev.Registered)+" ("+pctStr(ev.Armed, ev.Registered)+") registered jobs armed"),
 		result("cron_emittable", axis, false, 1,
 			"registered jobs carry a cadence `fak cron emit` can project to a launchd/systemd/task-scheduler unit",
 			shareOK(ev.CronEmittable, ev.Registered),
-			itoa(ev.CronEmittable)+"/"+itoa(ev.Registered)+" ("+pctStr(ev.CronEmittable, ev.Registered)+") cron-emittable"),
+			strconv.Itoa(ev.CronEmittable)+"/"+strconv.Itoa(ev.Registered)+" ("+pctStr(ev.CronEmittable, ev.Registered)+") cron-emittable"),
 	}
 }
 
@@ -305,15 +305,15 @@ func selfReportResults(ev Evidence) []KPIResult {
 		result("no_dark_loop", axis, true, 3,
 			"no active loop is dark — every registered/firing loop is observably ticking, not silent",
 			ev.Dark == 0,
-			itoa(ev.Dark)+" dark loop(s) across "+itoa(ev.ActiveLoops)+" active loop(s)"),
+			strconv.Itoa(ev.Dark)+" dark loop(s) across "+strconv.Itoa(ev.ActiveLoops)+" active loop(s)"),
 		result("outcome_recorded", axis, true, 2,
 			"loops that fire also record an end outcome in the ledger (not fire-and-forget)",
 			shareOK(ev.TotalEnds, ev.TotalFires),
-			itoa(ev.TotalEnds)+"/"+itoa(ev.TotalFires)+" ("+pctStr(ev.TotalEnds, ev.TotalFires)+") fires recorded an end"),
+			strconv.Itoa(ev.TotalEnds)+"/"+strconv.Itoa(ev.TotalFires)+" ("+pctStr(ev.TotalEnds, ev.TotalFires)+") fires recorded an end"),
 		result("heartbeat_or_notify", axis, false, 2,
 			"loops self-report liveness via heartbeat/notify events, not just fire/end",
 			ev.ActiveLoops == 0 || ev.HeartbeatOrNotify > 0,
-			itoa(ev.HeartbeatOrNotify)+"/"+itoa(ev.ActiveLoops)+" loop(s) emit a heartbeat or notify self-report"),
+			strconv.Itoa(ev.HeartbeatOrNotify)+"/"+strconv.Itoa(ev.ActiveLoops)+" loop(s) emit a heartbeat or notify self-report"),
 	}
 }
 
@@ -324,7 +324,7 @@ func dogfoodResults(ev Evidence) []KPIResult {
 		result("guard_wrapped", axis, true, 3,
 			"loop runs route through `fak guard` (guard_enabled=1) — the containment wrapper, not raw exec",
 			shareOK(ev.GuardWrapped, ev.RanViaFakLoop),
-			itoa(ev.GuardWrapped)+"/"+itoa(ev.RanViaFakLoop)+" ("+pctStr(ev.GuardWrapped, ev.RanViaFakLoop)+") runs guard-wrapped"),
+			strconv.Itoa(ev.GuardWrapped)+"/"+strconv.Itoa(ev.RanViaFakLoop)+" ("+pctStr(ev.GuardWrapped, ev.RanViaFakLoop)+") runs guard-wrapped"),
 		result("canonical_ledger", axis, true, 1,
 			"the loops append to the canonical hash-chained loop ledger (fak loop), not an ad-hoc log",
 			ev.LedgerPresent,
@@ -332,7 +332,7 @@ func dogfoodResults(ev Evidence) []KPIResult {
 		result("runs_witnessed", axis, false, 2,
 			"loop runs reach a witnessed-done verdict — the loop dogfoods the witness contract",
 			ev.ActiveLoops == 0 || ev.Witnessed > 0,
-			itoa(ev.Witnessed)+"/"+itoa(ev.ActiveLoops)+" loop(s) reached a witnessed-done verdict"),
+			strconv.Itoa(ev.Witnessed)+"/"+strconv.Itoa(ev.ActiveLoops)+" loop(s) reached a witnessed-done verdict"),
 	}
 }
 
@@ -428,7 +428,7 @@ func Build(opts Options) ScorecardPayload {
 	finding, next, reason := "loops_durable_observable_native", "hold the line; re-run after a loop session — keep firing loops registered and guard-wrapped", ""
 	if ok {
 		reason = "loop-score: durability value " + scorecard.ScoreValueText(dScore) + ", self-report value " + scorecard.ScoreValueText(sScore) +
-			", dogfood value " + scorecard.ScoreValueText(gScore) + ", composite value " + scorecard.ScoreValueText(composite) + " (" + grade + ", legacy score " + itoa(composite) +
+			", dogfood value " + scorecard.ScoreValueText(gScore) + ", composite value " + scorecard.ScoreValueText(composite) + " (" + grade + ", legacy score " + strconv.Itoa(composite) +
 			"); the background loops are registered, observable, and fak-native; zero hard gaps"
 	} else {
 		finding = "loopscore_debt"
@@ -436,9 +436,9 @@ func Build(opts Options) ScorecardPayload {
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		reason = "loop-score carries " + itoa(debt) + " debt (durability value " + scorecard.ScoreValueText(dScore) +
+		reason = "loop-score carries " + strconv.Itoa(debt) + " debt (durability value " + scorecard.ScoreValueText(dScore) +
 			", self-report value " + scorecard.ScoreValueText(sScore) + ", dogfood value " + scorecard.ScoreValueText(gScore) + ", composite value " +
-			scorecard.ScoreValueText(composite) + " " + grade + ", legacy score " + itoa(composite) + "): " + strings.Join(keys, ", ")
+			scorecard.ScoreValueText(composite) + " " + grade + ", legacy score " + strconv.Itoa(composite) + "): " + strings.Join(keys, ", ")
 		lead := hardFail[0]
 		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
 	}
@@ -569,9 +569,9 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	cScore := scorecard.IntValue(current.Corpus["score"])
 	lines := []string{
 		"loop-score compare:",
-		"  loopscore_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
+		"  loopscore_debt: " + strconv.Itoa(bDebt) + " -> " + strconv.Itoa(cDebt) + "  (retired " + strconv.Itoa(bDebt-cDebt) + ")",
 		"  value: " + scorecard.MetricText(bc["value"]) + " -> " + scorecard.MetricText(current.Corpus["value"]) +
-			"  legacy score " + itoa(bScore) + " -> " + itoa(cScore) +
+			"  legacy score " + strconv.Itoa(bScore) + " -> " + strconv.Itoa(cScore) +
 			"  grade " + scorecard.MetricText(bc["grade"]) + " -> " + scorecard.MetricText(current.Corpus["grade"]),
 	}
 	// The loop program drives the composite up; report the multiple on the composite
@@ -580,11 +580,11 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	case bDebt > 0 && cDebt == 0:
 		lines = append(lines, "  VERDICT: all loopscore debt retired")
 	case bScore > 0 && cScore >= 3*bScore:
-		lines = append(lines, "  VERDICT: >=3x composite lift ("+itoa(bScore)+" -> "+itoa(cScore)+")")
+		lines = append(lines, "  VERDICT: >=3x composite lift ("+strconv.Itoa(bScore)+" -> "+strconv.Itoa(cScore)+")")
 	case bScore > 0 && cScore >= 2*bScore:
-		lines = append(lines, "  VERDICT: >=2x composite lift ("+itoa(bScore)+" -> "+itoa(cScore)+")")
+		lines = append(lines, "  VERDICT: >=2x composite lift ("+strconv.Itoa(bScore)+" -> "+strconv.Itoa(cScore)+")")
 	case cScore > bScore || cDebt < bDebt:
-		lines = append(lines, "  VERDICT: improved ("+itoa(bDebt)+" -> "+itoa(cDebt)+" debt, composite "+itoa(bScore)+" -> "+itoa(cScore)+")")
+		lines = append(lines, "  VERDICT: improved ("+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+" debt, composite "+strconv.Itoa(bScore)+" -> "+strconv.Itoa(cScore)+")")
 	default:
 		lines = append(lines, "  VERDICT: no improvement")
 	}
@@ -632,5 +632,3 @@ func boolStr(ok bool, yes, no string) string {
 	}
 	return no
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }

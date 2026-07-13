@@ -569,18 +569,18 @@ func conflationDetail(ev Evidence) string {
 		return "transcripts unreachable from here — cannot witness conflation (the realized half is honestly unscored, not falsely green)"
 	}
 	if ev.ConflationTurns == 0 {
-		return "0 conflation turns across " + itoa(ev.TranscriptsScanned) + " recent transcript(s) (" +
-			itoa(ev.TranscriptsWithError) + " reported a Stop-hook error, none narrated over it)"
+		return "0 conflation turns across " + strconv.Itoa(ev.TranscriptsScanned) + " recent transcript(s) (" +
+			strconv.Itoa(ev.TranscriptsWithError) + " reported a Stop-hook error, none narrated over it)"
 	}
-	return itoa(ev.ConflationTurns) + " turn(s) claimed success in the same turn the harness reported a Stop-hook error — the model narrated a WITNESSED success over an OBSERVED hook failure"
+	return strconv.Itoa(ev.ConflationTurns) + " turn(s) claimed success in the same turn the harness reported a Stop-hook error — the model narrated a WITNESSED success over an OBSERVED hook failure"
 }
 
 func stopHealthDetail(ev Evidence) string {
 	if ev.StopMarkers == 0 {
 		return "no Stop-failure breaker markers — the loop has not wedged"
 	}
-	return itoa(ev.RecentWedged) + " of " + itoa(ev.RecentMarkers) + " recent session(s) wedged (consecutive>0); " +
-		itoa(ev.StopMarkers) + " total marker(s), max consecutive " + itoa(ev.MaxConsecutive)
+	return strconv.Itoa(ev.RecentWedged) + " of " + strconv.Itoa(ev.RecentMarkers) + " recent session(s) wedged (consecutive>0); " +
+		strconv.Itoa(ev.StopMarkers) + " total marker(s), max consecutive " + strconv.Itoa(ev.MaxConsecutive)
 }
 
 // axisWeights turns the two-axis (wiring 0.4 / honesty 0.6) composite this card has always
@@ -729,18 +729,18 @@ func Build(opts Options) ScorecardPayload {
 	verdict := "OK"
 	reason := "dogfood loop: wiring value " + scorecard.ValueText(p.Corpus["wiring_value"]) + ", honesty value " + scorecard.ValueText(p.Corpus["honesty_value"]) +
 		", chain value " + scorecard.ValueText(p.Corpus["chain_value"]) +
-		", composite value " + scorecard.ValueText(p.Corpus["value"]) + " (" + grade + ", legacy score " + itoa(composite) + "); zero hard gaps; " +
-		itoa(ev.ConflationTurns) + " conflation turn(s) across " + itoa(ev.TranscriptsScanned) + " recent transcript(s)"
+		", composite value " + scorecard.ValueText(p.Corpus["value"]) + " (" + grade + ", legacy score " + strconv.Itoa(composite) + "); zero hard gaps; " +
+		strconv.Itoa(ev.ConflationTurns) + " conflation turn(s) across " + strconv.Itoa(ev.TranscriptsScanned) + " recent transcript(s)"
 	if debt > 0 {
 		verdict = "ACTION"
 		keys := make([]string, len(hardFail))
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		reason = "dogfood loop carries " + itoa(debt) + " debt (wiring value " + scorecard.ValueText(p.Corpus["wiring_value"]) +
+		reason = "dogfood loop carries " + strconv.Itoa(debt) + " debt (wiring value " + scorecard.ValueText(p.Corpus["wiring_value"]) +
 			", honesty value " + scorecard.ValueText(p.Corpus["honesty_value"]) + ", chain value " + scorecard.ValueText(p.Corpus["chain_value"]) +
 			", composite value " + scorecard.ValueText(p.Corpus["value"]) +
-			" " + grade + ", legacy score " + itoa(composite) + "): " +
+			" " + grade + ", legacy score " + strconv.Itoa(composite) + "): " +
 			strings.Join(keys, ", ")
 	}
 
@@ -844,7 +844,7 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	delta := bDebt - cDebt
 	lines := []string{
 		"dogfood compare:",
-		"  dogfood_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(delta) + ")",
+		"  dogfood_debt: " + strconv.Itoa(bDebt) + " -> " + strconv.Itoa(cDebt) + "  (retired " + strconv.Itoa(delta) + ")",
 		"  value: " + scorecard.ValueText(bc["value"]) + " -> " + scorecard.ValueText(current.Corpus["value"]) +
 			"  legacy score " + scorecard.ValueText(bc["score"]) + " -> " + scorecard.ValueText(current.Corpus["score"]) +
 			"  grade " + scorecard.ValueText(bc["grade"]) + " -> " + scorecard.ValueText(current.Corpus["grade"]),
@@ -852,13 +852,13 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	}
 	switch {
 	case bDebt > 0 && cDebt*3 <= bDebt:
-		lines = append(lines, "  VERDICT: >=3x improvement (debt "+itoa(bDebt)+" -> "+itoa(cDebt)+", <= 1/3 of baseline)")
+		lines = append(lines, "  VERDICT: >=3x improvement (debt "+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+", <= 1/3 of baseline)")
 	case bDebt > 0 && cDebt*2 <= bDebt:
-		lines = append(lines, "  VERDICT: >=2x improvement (debt "+itoa(bDebt)+" -> "+itoa(cDebt)+")")
+		lines = append(lines, "  VERDICT: >=2x improvement (debt "+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+")")
 	case bDebt > 0 && cDebt < bDebt:
-		lines = append(lines, "  VERDICT: improved but < 2x (debt "+itoa(bDebt)+" -> "+itoa(cDebt)+")")
+		lines = append(lines, "  VERDICT: improved but < 2x (debt "+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+")")
 	case bDebt > 0:
-		lines = append(lines, "  VERDICT: no improvement (debt "+itoa(bDebt)+" -> "+itoa(cDebt)+")")
+		lines = append(lines, "  VERDICT: no improvement (debt "+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+")")
 	}
 	return strings.Join(lines, "\n")
 }
@@ -938,8 +938,6 @@ func clip(s string, n int) string {
 	}
 	return s[:n-1] + "…"
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 func anyInt(v any) int {
 	switch n := v.(type) {

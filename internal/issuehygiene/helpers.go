@@ -7,7 +7,6 @@ import (
 )
 
 // itoa is strconv.Itoa under a short name (the defect strings call it a lot).
-func itoa(n int) string { return strconv.Itoa(n) }
 
 // stripBOM drops a leading UTF-8 byte-order mark (PowerShell redirection stamps
 // one on `gh ... > file`). Built from the rune so no BOM byte sits in source.
@@ -16,7 +15,7 @@ func stripBOM(s string) string { return strings.TrimPrefix(s, string(rune(0xFEFF
 // plural renders "<n> <noun>" and appends "s" when n != 1 (unless the noun
 // already ends in s). Deterministic; no locale.
 func plural(n int, noun string) string {
-	s := itoa(n) + " " + noun
+	s := strconv.Itoa(n) + " " + noun
 	if n != 1 && !strings.HasSuffix(noun, "s") {
 		s += "s"
 	}
@@ -66,5 +65,5 @@ func triageBacklogSoft(n int) []string {
 	if n <= 0 {
 		return nil
 	}
-	return []string{itoa(n) + " open issue(s) carry a triage/provenance label (idea-scout / needs-triage / triage-only) awaiting human triage"}
+	return []string{strconv.Itoa(n) + " open issue(s) carry a triage/provenance label (idea-scout / needs-triage / triage-only) awaiting human triage"}
 }

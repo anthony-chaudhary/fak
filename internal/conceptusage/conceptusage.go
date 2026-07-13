@@ -367,23 +367,23 @@ func usageResults(ev Evidence) []KPIResult {
 		result("ship_stamp", axis, true, 3,
 			"recent commits carry the (fak <leaf>) ship-stamp the dos verify referee binds",
 			ev.Commits > 0 && stampPct >= 90,
-			itoa(ev.Stamped)+"/"+itoa(ev.Commits)+" ("+itoa(stampPct)+"%) carry the (fak <leaf>) trailer"),
+			strconv.Itoa(ev.Stamped)+"/"+strconv.Itoa(ev.Commits)+" ("+strconv.Itoa(stampPct)+"%) carry the (fak <leaf>) trailer"),
 		result("dco_signoff", axis, true, 2,
 			"recent commits are DCO signed-off (git commit -s)",
 			ev.Commits > 0 && signPct >= 90,
-			itoa(ev.Signed)+"/"+itoa(ev.Commits)+" ("+itoa(signPct)+"%) signed-off"),
+			strconv.Itoa(ev.Signed)+"/"+strconv.Itoa(ev.Commits)+" ("+strconv.Itoa(signPct)+"%) signed-off"),
 		result("conventional_type", axis, true, 2,
 			"recent commits use a Conventional-Commits type",
 			ev.Commits > 0 && convPct >= 90,
-			itoa(ev.Conventional)+"/"+itoa(ev.Commits)+" ("+itoa(convPct)+"%) conventional"),
+			strconv.Itoa(ev.Conventional)+"/"+strconv.Itoa(ev.Commits)+" ("+strconv.Itoa(convPct)+"%) conventional"),
 		result("binding_verb", axis, false, 2,
 			"recent commit subjects lead with a verb the witness BINDS (not surface/print)",
 			ev.Commits > 0 && bindPct >= 70,
-			itoa(ev.BindingVerb)+"/"+itoa(ev.Commits)+" ("+itoa(bindPct)+"%) lead with a binding verb"),
+			strconv.Itoa(ev.BindingVerb)+"/"+strconv.Itoa(ev.Commits)+" ("+strconv.Itoa(bindPct)+"%) lead with a binding verb"),
 		result("lane_arbitration", axis, false, 1,
 			"concurrent dev arbitrated disjoint lanes (dos_arbitrate ACQUIRE/RELEASE rows)",
 			ev.LaneAcquires > 0,
-			itoa(ev.LaneAcquires)+" lane ACQUIRE(s) across "+itoa(ev.DistinctLanes)+" distinct lane(s)"),
+			strconv.Itoa(ev.LaneAcquires)+" lane ACQUIRE(s) across "+strconv.Itoa(ev.DistinctLanes)+" distinct lane(s)"),
 	}
 }
 
@@ -406,19 +406,19 @@ func witnessResults(ev Evidence) []KPIResult {
 		result("verify_syscall_used", axis, true, 3,
 			"development proactively witnessed claims via the verify/improve syscall",
 			proactive > 0,
-			itoa(ev.VerifySyscalls)+" verify + "+itoa(ev.ImproveCalls)+" improve syscall(s) in the journal"),
+			strconv.Itoa(ev.VerifySyscalls)+" verify + "+strconv.Itoa(ev.ImproveCalls)+" improve syscall(s) in the journal"),
 		result("witness_share", axis, true, 3,
 			"a healthy share of RECENT dev decisions are evidence-grounded (verify/improve), not recall-only",
 			windowPoints > 0 && witnessShare >= 15,
-			itoa(witnessShare)+"% of the last "+itoa(windowPoints)+" dev decision(s) used a proactive witness syscall (target >=15%; "+itoa(ev.WindowNoise)+" passive UNVERIFIABLE auto-recalls excluded as non-decisions)"),
+			strconv.Itoa(witnessShare)+"% of the last "+strconv.Itoa(windowPoints)+" dev decision(s) used a proactive witness syscall (target >=15%; "+strconv.Itoa(ev.WindowNoise)+" passive UNVERIFIABLE auto-recalls excluded as non-decisions)"),
 		result("recall_reverified", axis, false, 2,
 			"recalled memory was re-verified against ground truth, not left UNVERIFIABLE",
 			ev.RecallRows == 0 || recallFreshPct >= 40,
-			itoa(ev.RecallResolved)+"/"+itoa(ev.RecallRows)+" ("+itoa(recallFreshPct)+"%) recalls resolved to a checked verdict"),
+			strconv.Itoa(ev.RecallResolved)+"/"+strconv.Itoa(ev.RecallRows)+" ("+strconv.Itoa(recallFreshPct)+"%) recalls resolved to a checked verdict"),
 		result("journal_present", axis, true, 1,
 			"the verdict journal exists — development actually ran the witnessing syscalls",
 			ev.JournalPresent && ev.VerdictRows > 0,
-			itoa(ev.VerdictRows)+" verdict-journal row(s)"),
+			strconv.Itoa(ev.VerdictRows)+" verdict-journal row(s)"),
 	}
 }
 
@@ -522,7 +522,7 @@ func Build(opts Options) ScorecardPayload {
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		p.Reason = "concept-usage carries " + itoa(debt) + " debt (usage value " + scorecard.ValueText(p.Corpus["usage_value"]) +
+		p.Reason = "concept-usage carries " + strconv.Itoa(debt) + " debt (usage value " + scorecard.ValueText(p.Corpus["usage_value"]) +
 			", witness value " + scorecard.ValueText(p.Corpus["witness_value"]) + ", composite value " + scorecard.ValueText(p.Corpus["value"]) +
 			" " + grade + ", legacy score " + scorecard.ValueText(p.Corpus["score"]) + "): " +
 			strings.Join(keys, ", ")
@@ -613,11 +613,11 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	cWit := anyInt(current.Corpus["witness_score"])
 	lines := []string{
 		"concept-usage compare:",
-		"  conceptusage_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
+		"  conceptusage_debt: " + strconv.Itoa(bDebt) + " -> " + strconv.Itoa(cDebt) + "  (retired " + strconv.Itoa(bDebt-cDebt) + ")",
 		"  value: " + scorecard.ValueText(bc["value"]) + " -> " + scorecard.ValueText(current.Corpus["value"]) +
 			"  legacy score " + scorecard.ValueText(bc["score"]) + " -> " + scorecard.ValueText(current.Corpus["score"]) +
 			"  grade " + scorecard.ValueText(bc["grade"]) + " -> " + scorecard.ValueText(current.Corpus["grade"]),
-		"  witness_score: " + itoa(bWit) + " -> " + itoa(cWit),
+		"  witness_score: " + strconv.Itoa(bWit) + " -> " + strconv.Itoa(cWit),
 	}
 	// The 3x program drives the witness axis up; report the multiple on the witness
 	// score (the lever) as well as the debt.
@@ -625,11 +625,11 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	case bDebt > 0 && cDebt == 0:
 		lines = append(lines, "  VERDICT: all concept-usage debt retired")
 	case bWit > 0 && cWit >= 3*bWit:
-		lines = append(lines, "  VERDICT: >=3x witness-axis lift ("+itoa(bWit)+" -> "+itoa(cWit)+")")
+		lines = append(lines, "  VERDICT: >=3x witness-axis lift ("+strconv.Itoa(bWit)+" -> "+strconv.Itoa(cWit)+")")
 	case bWit > 0 && cWit >= 2*bWit:
-		lines = append(lines, "  VERDICT: >=2x witness-axis lift ("+itoa(bWit)+" -> "+itoa(cWit)+")")
+		lines = append(lines, "  VERDICT: >=2x witness-axis lift ("+strconv.Itoa(bWit)+" -> "+strconv.Itoa(cWit)+")")
 	case cWit > bWit || cDebt < bDebt:
-		lines = append(lines, "  VERDICT: improved ("+itoa(bDebt)+" -> "+itoa(cDebt)+" debt, witness "+itoa(bWit)+" -> "+itoa(cWit)+")")
+		lines = append(lines, "  VERDICT: improved ("+strconv.Itoa(bDebt)+" -> "+strconv.Itoa(cDebt)+" debt, witness "+strconv.Itoa(bWit)+" -> "+strconv.Itoa(cWit)+")")
 	default:
 		lines = append(lines, "  VERDICT: no improvement")
 	}
@@ -676,8 +676,6 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 func anyInt(v any) int {
 	switch n := v.(type) {

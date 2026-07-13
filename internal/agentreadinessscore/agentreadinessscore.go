@@ -1165,15 +1165,15 @@ func buildPayload(workspace string, kpis []KPI, facts map[string]int, errText st
 	var verdict, finding, reason, nextAction string
 	if frictionDebt == 0 {
 		ok, verdict, finding = true, "OK", "agent_ready"
-		reason = "experience-frontier " + itoa(frontier) + " (unbounded; higher = better) · baseline score " +
-			ftoa(score) + "/100 (grade " + grade + "), zero friction-debt across " + itoa(len(kpis)) +
-			" KPIs (" + standing + "; " + itoa(nSoft) + " advisory). An agent can discover, adopt, and build on fak with no missing affordance — and the frontier still has headroom: onboard a harness, map a refusal, expose a --json surface"
+		reason = "experience-frontier " + strconv.Itoa(frontier) + " (unbounded; higher = better) · baseline score " +
+			ftoa(score) + "/100 (grade " + grade + "), zero friction-debt across " + strconv.Itoa(len(kpis)) +
+			" KPIs (" + standing + "; " + strconv.Itoa(nSoft) + " advisory). An agent can discover, adopt, and build on fak with no missing affordance — and the frontier still has headroom: onboard a harness, map a refusal, expose a --json surface"
 		nextAction = "climb the frontier — add the next real affordance (a new integration recipe / harness config, a refusal mapped to a recovery, a tool given --json); hold friction-debt at 0; re-run to prove the climb"
 	} else {
 		ok, verdict, finding = false, "ACTION", "friction_debt"
 		worst := breakdown[0]
-		reason = "experience-frontier " + itoa(frontier) + " (unbounded) · " + itoa(frictionDebt) + " unit(s) of friction-debt; baseline score " +
-			ftoa(score) + "/100 (grade " + grade + "); heaviest: " + worst.Kpi + " (" + itoa(worst.Debt) + " defect(s)); standing " + standing
+		reason = "experience-frontier " + strconv.Itoa(frontier) + " (unbounded) · " + strconv.Itoa(frictionDebt) + " unit(s) of friction-debt; baseline score " +
+			ftoa(score) + "/100 (grade " + grade + "); heaviest: " + worst.Kpi + " (" + strconv.Itoa(worst.Debt) + " defect(s)); standing " + standing
 		nextAction = "retire friction-debt worst-first (see corpus.breakdown + per-KPI defects): fix the agents.md entry point, the doc-map, the quotable identity, dead orientation links, the first command, the install one-liner, the tagged ledger, the per-agent recipes, the leaf scaffold, the surfaced guardrails, the contributor contract; re-run to prove the drop"
 	}
 
@@ -1658,8 +1658,6 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 // ftoa renders a score float the way Python str(float) does (shortest round-trip, but a
 // whole number keeps its ".0": str(100.0) == "100.0"). Used everywhere Python interpolates a

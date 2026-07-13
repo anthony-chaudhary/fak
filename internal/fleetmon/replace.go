@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+	"strconv"
 )
 
 // ReplaceSchema tags the replacement decision payload.
@@ -135,7 +136,7 @@ func RenderReplacementPrompt(w PlanWorker, template string) string {
 		area = "(unspecified — read the issue to scope it)"
 	}
 	r := strings.NewReplacer(
-		"{{issue}}", itoa(w.Issue),
+		"{{issue}}", strconv.Itoa(w.Issue),
 		"{{issue_url}}", url,
 		"{{area}}", area,
 	)

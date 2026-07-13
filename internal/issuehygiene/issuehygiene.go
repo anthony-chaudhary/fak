@@ -53,6 +53,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/issuededup"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
+	"strconv"
 )
 
 // Parse decodes cached `gh issue list --json
@@ -328,7 +329,7 @@ func Score(issues []Issue, ref Reference) scorecard.Payload {
 			pickupReady++
 		}
 		if !is.assigned() && staleDaysSince(is.UpdatedAt, ref.NowUnix) > staleDays {
-			staleSoft = append(staleSoft, ref0(is, "open+unassigned, untouched > "+itoa(staleDays)+"d"))
+			staleSoft = append(staleSoft, ref0(is, "open+unassigned, untouched > "+strconv.Itoa(staleDays)+"d"))
 		}
 	}
 
@@ -396,13 +397,13 @@ func Score(issues []Issue, ref Reference) scorecard.Payload {
 		{
 			Key: "triage_backlog", Group: "waste",
 			Score:  triageBacklogScore(triageBacklog),
-			Detail: itoa(triageBacklog) + " open issue(s) waiting in the triage inbox (advisory)",
+			Detail: strconv.Itoa(triageBacklog) + " open issue(s) waiting in the triage inbox (advisory)",
 			Soft:   triageBacklogSoft(triageBacklog),
 		},
 		{
 			Key: "staleness", Group: "waste",
 			Score:  pct(nDisp-len(staleSoft), nDisp),
-			Detail: plural(len(staleSoft), "dispatchable issue") + " stale (unassigned, untouched > " + itoa(staleDays) + "d) (advisory)",
+			Detail: plural(len(staleSoft), "dispatchable issue") + " stale (unassigned, untouched > " + strconv.Itoa(staleDays) + "d) (advisory)",
 			Soft:   staleSoft,
 		},
 	}
@@ -412,7 +413,7 @@ func Score(issues []Issue, ref Reference) scorecard.Payload {
 
 	findingClean := "every dispatchable issue is class+priority tagged, contract-complete, de-duplicated -- the backlog is pickup-ready"
 	nextClean := "hold -- re-run `fak score issue-hygiene --live` after the next batch of issues lands"
-	findingDebt := plural(debt, "issue-hygiene defect") + ": " + itoa(nDisp-pickupReady) + " of " + itoa(nDisp) + " dispatchable issues are not pickup-ready (untagged, contract-incomplete, or duplicated)"
+	findingDebt := plural(debt, "issue-hygiene defect") + ": " + strconv.Itoa(nDisp-pickupReady) + " of " + strconv.Itoa(nDisp) + " dispatchable issues are not pickup-ready (untagged, contract-incomplete, or duplicated)"
 	nextDebt := "tag class+priority, complete the worker-ready body, or close the duplicate on the offending issues; run `python tools/issue_lane_router.py --apply-labels --apply-labels-write` to backfill class:*"
 
 	p := scorecard.Fold(Schema, kpis, DebtKey, nil, scorecard.Messages{
@@ -455,7 +456,7 @@ func dedupeDefects(all []Issue, dispatchable []Issue) []string {
 		verdicts := ix.Check(issuededup.Candidate{Number: is.Number, Title: is.Title, Body: is.Body}, 0, dupThreshold)
 		for _, v := range verdicts {
 			if v.IssueNumber < is.Number {
-				defects = append(defects, ref0(is, "near-duplicate of #"+itoa(v.IssueNumber)+" ("+sim(v.Similarity)+" "+v.MatchedOn+"); close or merge"))
+				defects = append(defects, ref0(is, "near-duplicate of #"+strconv.Itoa(v.IssueNumber)+" ("+sim(v.Similarity)+" "+v.MatchedOn+"); close or merge"))
 				break // one defect per redundant issue
 			}
 		}
@@ -470,5 +471,5 @@ func ref0(is Issue, msg string) string {
 	if len(title) > 60 {
 		title = title[:57] + "..."
 	}
-	return "#" + itoa(is.Number) + " \"" + title + "\" -- " + msg
+	return "#" + strconv.Itoa(is.Number) + " \"" + title + "\" -- " + msg
 }

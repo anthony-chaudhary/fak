@@ -3,7 +3,6 @@ package fleetmon
 import (
 	"encoding/json"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -267,6 +266,3 @@ func Summarize(runID string, rows []LedgerRow) RunLedgerSummary {
 		Defects:   ValidateLedger(rows),
 	}
 }
-
-// itoa keeps a local, allocation-free int->string for the renderers.
-func itoa(n int) string { return strconv.Itoa(n) }

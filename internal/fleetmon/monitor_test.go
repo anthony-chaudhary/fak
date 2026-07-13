@@ -1,6 +1,7 @@
 package fleetmon
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -230,4 +231,4 @@ func TestWitnessThirtyWorkerRun(t *testing.T) {
 	}
 }
 
-func sess(i int) string { return "issue-" + itoa(1000+i) }
+func sess(i int) string { return "issue-" + strconv.Itoa(1000+i) }

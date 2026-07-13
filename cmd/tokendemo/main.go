@@ -491,7 +491,7 @@ func buildLedger(ctx context.Context, suite string) (ledger, error) {
 			row.CtxWithout, row.CtxWith = R, denyVerdictTokens
 			row.CtxSaved = R - denyVerdictTokens
 			row.ToolRanWithout, row.ToolRanWith = 1, 0
-			row.Why = "prefilter — refused pre-execution; only a bounded deny verdict enters the model, not the op's " + itoa(R) + "-tok result"
+			row.Why = "prefilter — refused pre-execution; only a bounded deny verdict enters the model, not the op's " + strconv.Itoa(R) + "-tok result"
 			if row.CtxSaved > 0 {
 				l.ContextTokensKept += row.CtxSaved
 			}
@@ -1441,5 +1441,3 @@ func tokenDir() string {
 }
 
 func suitePath(suite string) string { return filepath.Join(tokenDir(), suite+".json") }
-
-func itoa(n int) string { return strconv.Itoa(n) }

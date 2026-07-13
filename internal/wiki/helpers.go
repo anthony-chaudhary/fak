@@ -3,7 +3,6 @@ package wiki
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 // repoName is the base name of the repo root, used as the wiki's Repo label. An
@@ -26,7 +25,3 @@ func fileExists(root, rel string) bool {
 	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
 	return err == nil && !info.IsDir()
 }
-
-// itoa is strconv.Itoa under a local name so structure.go reads without an extra
-// import line in a file that otherwise needs none.
-func itoa(n int) string { return strconv.Itoa(n) }

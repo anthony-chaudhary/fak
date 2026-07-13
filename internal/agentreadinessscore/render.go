@@ -3,6 +3,7 @@ package agentreadinessscore
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -122,7 +123,7 @@ func Render(p Payload) string {
 	var terms []string
 	for _, dim := range frontierDims {
 		if _, ok := fbt[dim]; ok {
-			terms = append(terms, dim+":"+itoa(fbt[dim]))
+			terms = append(terms, dim+":"+strconv.Itoa(fbt[dim]))
 		}
 	}
 	frontierTerms := strings.Join(terms, "  ")
@@ -131,7 +132,7 @@ func Render(p Payload) string {
 		"agent-readiness-scorecard: " + p.Verdict + " (" + p.Finding + ")",
 		"  " + p.Reason,
 		"",
-		"EXPERIENCE-FRONTIER " + itoa(corpusInt(c, "experience_frontier")) +
+		"EXPERIENCE-FRONTIER " + strconv.Itoa(corpusInt(c, "experience_frontier")) +
 			"  (unbounded · higher = better · a frontier, not a % — there is always one more harness to serve)",
 	}
 	if frontierTerms != "" {
@@ -141,12 +142,12 @@ func Render(p Payload) string {
 	}
 	lines = append(lines,
 		"baseline: score "+ftoa(corpusFloat(c, "score"))+"/100 (grade "+corpusStr(c, "grade")+") · FRICTION-DEBT "+
-			itoa(corpusInt(c, "friction_debt"))+" · "+itoa(corpusInt(c, "soft_signals"))+" advisory",
+			strconv.Itoa(corpusInt(c, "friction_debt"))+" · "+strconv.Itoa(corpusInt(c, "soft_signals"))+" advisory",
 		"agent journey:  discover "+fmt0(gs["discover"])+"  ·  adopt "+fmt0(gs["adopt"])+"  ·  build "+fmt0(gs["build"]),
 	)
 	var debtParts []string
 	for _, g := range groups {
-		debtParts = append(debtParts, g+":"+itoa(debtByGroup[g]))
+		debtParts = append(debtParts, g+":"+strconv.Itoa(debtByGroup[g]))
 	}
 	lines = append(lines,
 		"debt by step: "+strings.Join(debtParts, "  "),
@@ -169,7 +170,7 @@ func Render(p Payload) string {
 			continue
 		}
 		anyDefect = true
-		lines = append(lines, "  "+k.Kpi+" ("+itoa(len(k.Defects))+"):")
+		lines = append(lines, "  "+k.Kpi+" ("+strconv.Itoa(len(k.Defects))+"):")
 		lim := k.Defects
 		if len(lim) > 12 {
 			lim = lim[:12]
@@ -178,7 +179,7 @@ func Render(p Payload) string {
 			lines = append(lines, "      - "+it)
 		}
 		if len(k.Defects) > 12 {
-			lines = append(lines, "      ... and "+itoa(len(k.Defects)-12)+" more")
+			lines = append(lines, "      ... and "+strconv.Itoa(len(k.Defects)-12)+" more")
 		}
 	}
 	if !anyDefect {
@@ -248,7 +249,7 @@ func Markdown(p Payload, stamp string) string {
 			continue
 		}
 		if _, ok := fbt[dim]; ok {
-			frontierTermParts = append(frontierTermParts, dim+" "+itoa(fbt[dim]))
+			frontierTermParts = append(frontierTermParts, dim+" "+strconv.Itoa(fbt[dim]))
 		}
 	}
 	frontierTerms := strings.Join(frontierTermParts, " · ")
@@ -256,17 +257,17 @@ func Markdown(p Payload, stamp string) string {
 	out = append(out,
 		"| Metric | Value |",
 		"|---|---|",
-		"| **Experience-frontier (unbounded · higher = better)** | **"+itoa(corpusInt(c, "experience_frontier"))+"** |",
+		"| **Experience-frontier (unbounded · higher = better)** | **"+strconv.Itoa(corpusInt(c, "experience_frontier"))+"** |",
 	)
 	if frontierTerms != "" {
 		out = append(out, "| Frontier by affordance (weight×count) | "+frontierTerms+" |")
 	}
 	out = append(out,
-		"| Friction-debt (total HARD defects) | "+itoa(corpusInt(c, "friction_debt"))+" |",
+		"| Friction-debt (total HARD defects) | "+strconv.Itoa(corpusInt(c, "friction_debt"))+" |",
 		"| Baseline coverage score | "+ftoa(corpusFloat(c, "score"))+"/100 (grade "+corpusStr(c, "grade")+") |",
 		"| Agent journey | discover "+fmt0(gs["discover"])+" · adopt "+fmt0(gs["adopt"])+" · build "+fmt0(gs["build"])+" |",
-		"| Advisory (soft) signals | "+itoa(corpusInt(c, "soft_signals"))+" |",
-		"| Debt by step | discover:"+itoa(intMap(c["debt_by_group"])["discover"])+" · adopt:"+itoa(intMap(c["debt_by_group"])["adopt"])+" · build:"+itoa(intMap(c["debt_by_group"])["build"])+" |",
+		"| Advisory (soft) signals | "+strconv.Itoa(corpusInt(c, "soft_signals"))+" |",
+		"| Debt by step | discover:"+strconv.Itoa(intMap(c["debt_by_group"])["discover"])+" · adopt:"+strconv.Itoa(intMap(c["debt_by_group"])["adopt"])+" · build:"+strconv.Itoa(intMap(c["debt_by_group"])["build"])+" |",
 		"",
 		"### The two questions (why two headline numbers)",
 		"",
@@ -274,7 +275,7 @@ func Markdown(p Payload, stamp string) string {
 
 	var weightParts []string
 	for _, d := range frontierDims {
-		weightParts = append(weightParts, "`"+d+"`×"+itoa(funits[d]))
+		weightParts = append(weightParts, "`"+d+"`×"+strconv.Itoa(funits[d]))
 	}
 	out = append(out,
 		"**Friction-debt** (lower = better, floor 0) is the BASELINE gate — are the "+
@@ -293,7 +294,7 @@ func Markdown(p Payload, stamp string) string {
 		"",
 		"## The three steps an agent walks",
 		"",
-		itoa(len(p.KPIs))+" KPIs, each 0–100, grouped by the step they gate. "+
+		strconv.Itoa(len(p.KPIs))+" KPIs, each 0–100, grouped by the step they gate. "+
 			"`debt` = units of HARD friction-debt. The presence KPIs ask "+
 			"does-the-affordance-exist; the paste-and-run / executable-truth KPIs ask the "+
 			"question presence can't reach — does an agent who pastes the docs actually "+
@@ -311,7 +312,7 @@ func Markdown(p Payload, stamp string) string {
 		"|---|---|---:|:--:|---|",
 	)
 	for _, b := range breakdownRows(c["breakdown"]) {
-		out = append(out, "| "+b.Group+" | `"+b.Kpi+"` | "+itoa(b.Score)+" | "+itoa(b.Debt)+" | "+b.Detail+" |")
+		out = append(out, "| "+b.Group+" | `"+b.Kpi+"` | "+strconv.Itoa(b.Score)+" | "+strconv.Itoa(b.Debt)+" | "+b.Detail+" |")
 	}
 	out = append(out, "", "## Friction-debt work-list", "")
 
@@ -325,7 +326,7 @@ func Markdown(p Payload, stamp string) string {
 			continue
 		}
 		anyDefect = true
-		out = append(out, "### `"+k.Kpi+"` ("+k.Group+") — "+itoa(len(k.Defects))+" defect(s), score "+itoa(k.Score))
+		out = append(out, "### `"+k.Kpi+"` ("+k.Group+") — "+strconv.Itoa(len(k.Defects))+" defect(s), score "+strconv.Itoa(k.Score))
 		for _, it := range k.Defects {
 			out = append(out, "- "+it)
 		}
@@ -370,8 +371,8 @@ func Compare(cur Payload, baseline map[string]any) string {
 	}
 
 	lines := []string{
-		"experience-frontier: " + itoa(bf) + " -> " + itoa(cf) + "   (" + fmt.Sprintf("%+d", fdelta) + ", " + fpct + ")   [unbounded — the headline]",
-		"friction-debt:       " + itoa(bd) + " -> " + itoa(cd) + "   (" + ratio + " fewer defects)",
+		"experience-frontier: " + strconv.Itoa(bf) + " -> " + strconv.Itoa(cf) + "   (" + fmt.Sprintf("%+d", fdelta) + ", " + fpct + ")   [unbounded — the headline]",
+		"friction-debt:       " + strconv.Itoa(bd) + " -> " + strconv.Itoa(cd) + "   (" + ratio + " fewer defects)",
 		"baseline score:      " + ftoa(bo) + "/100 -> " + ftoa(co) + "/100   (" + fmt.Sprintf("%+.1f", co-bo) + ")",
 	}
 	bbt := intMap(b["frontier_by_term"])
@@ -390,22 +391,22 @@ func Compare(cur Payload, baseline map[string]any) string {
 
 	goal := float64(bf) * 1.35
 	if bf != 0 && float64(cf) >= goal {
-		lines = append(lines, "VERDICT: experience-frontier +35% achieved ("+itoa(bf)+" -> "+itoa(cf)+"; goal >= "+fmt0(goal)+").")
+		lines = append(lines, "VERDICT: experience-frontier +35% achieved ("+strconv.Itoa(bf)+" -> "+strconv.Itoa(cf)+"; goal >= "+fmt0(goal)+").")
 	} else if bf != 0 {
-		lines = append(lines, "VERDICT: not yet +35% on the frontier — at "+itoa(cf)+", need >= "+fmt0(goal)+
-			" (add ~"+fmt0(goal-float64(cf))+" more points: a recipe ×"+itoa(frontierUnits["integration_recipes"])+
-			", a config ×"+itoa(frontierUnits["harness_configs"])+", a refusal ×"+itoa(frontierUnits["refusal_recoveries"])+").")
+		lines = append(lines, "VERDICT: not yet +35% on the frontier — at "+strconv.Itoa(cf)+", need >= "+fmt0(goal)+
+			" (add ~"+fmt0(goal-float64(cf))+" more points: a recipe ×"+strconv.Itoa(frontierUnits["integration_recipes"])+
+			", a config ×"+strconv.Itoa(frontierUnits["harness_configs"])+", a refusal ×"+strconv.Itoa(frontierUnits["refusal_recoveries"])+").")
 	} else {
-		lines = append(lines, "VERDICT: frontier baseline "+itoa(cf)+" (no prior frontier to compare).")
+		lines = append(lines, "VERDICT: frontier baseline "+strconv.Itoa(cf)+" (no prior frontier to compare).")
 	}
 	target := bd / 2
 	if target < 0 {
 		target = 0
 	}
 	if cd <= target {
-		lines = append(lines, "  (gate) >=2x friction-debt reduction held ("+itoa(bd)+" -> "+itoa(cd)+").")
+		lines = append(lines, "  (gate) >=2x friction-debt reduction held ("+strconv.Itoa(bd)+" -> "+strconv.Itoa(cd)+").")
 	} else {
-		lines = append(lines, "  (gate) friction-debt not yet 2x — need <= "+itoa(target)+" (now "+itoa(cd)+").")
+		lines = append(lines, "  (gate) friction-debt not yet 2x — need <= "+strconv.Itoa(target)+" (now "+strconv.Itoa(cd)+").")
 	}
 	return strings.Join(lines, "\n")
 }
