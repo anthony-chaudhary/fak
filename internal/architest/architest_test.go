@@ -86,9 +86,9 @@ var tier = map[string]int{
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "fleetaccounts": 1, "fleetbottleneck": 1, "flock": 1, "ghspam": 1, "issuecontractrepair": 1, "jsonlledger": 1, "kvbudget": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
 	"deepseekbench": 1, "deepseekv4kv": 1, "deepseekv4moe": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench/KV/MoE fixture cores (#3014/#3017/#3018), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
 	"guardvars": 1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
-	"glm52prefillsweep": 1, "turnkind": 1, // glm52prefillsweep: pure GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); stdlib-only (net/http+os/exec live path), imports nothing internal. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
+	"glm52prefillsweep": 1, "turnkind": 1, // glm52prefillsweep: GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); imports windowgate(1) for hidden subprocesses. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
 	"questionledger":       1,                // /question-loop ledger discipline (Go port of tools/question_ledger.py): lint/next-id/dedupe-check/stats over docs/questions/asked.jsonl; stdlib-only, off the hot path.
-	"trunkbuildprobe":      1,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; stdlib-only, off the hot path.
+	"trunkbuildprobe":      1,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; imports windowgate(1) for hidden subprocesses, off the hot path.
 	"godsplitplan":         1,                // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
 	"refactorverify":       2,                // proves a god-split dropped no top-level decl (Go port of tools/refactor_verify.py): folds each touched package's decl multiset before/after via godsplitplan.Compute; imports godsplitplan, off the hot path.
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
@@ -460,7 +460,7 @@ var pureRoot = map[string]bool{
 	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
-	"frontierswe": true, "fusedturn": true, "ghspam": true, "glm52prefillsweep": true, "godsplitplan": true, "growthgate": true,
+	"frontierswe": true, "fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
 	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true, "hwgatelint": true,
 	"intlist": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
 	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true,
@@ -474,8 +474,7 @@ var pureRoot = map[string]bool{
 	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "signals": true, "simhash": true, "slackenv": true,
 	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "stepbaton": true, "stopfailure": true,
 	"strmatch": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
-	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "trunkbuildprobe": true,
-	"tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
+	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
 	"wipattr": true, "wiprecon": true, "wipref": true, "workerenvelope": true, "workflow": true, "workflowlint": true,
 	"worklog": true, "worktreewitness": true, "worktype": true, "xprobe": true,
 }
