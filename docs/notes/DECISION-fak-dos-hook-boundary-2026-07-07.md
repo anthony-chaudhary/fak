@@ -164,3 +164,59 @@ alignment) are not implemented. Migration steps below are adjusted to that reali
 `git revert` the single settings commit — it restores today's known-good (slow but
 working) Python wiring verbatim. The wrapper is stateless and the journal schema is
 unchanged, so there is no seat-side or `.dos/` state to migrate back.
+
+## Ordering & fence adjudication (addendum, 2026-07-12, #2704)
+
+This note was reopened after its first landing (comment on #2704): the deliverable
+satisfies done-condition clauses (a)/(b)/(c), **but the issue's own acceptance-gate
+fence — "No `.claude/settings.json` change lands before this note" (stated three times:
+Deliverable, Confusion risks, Batch policy) — was falsified.** The Migration section
+above *narrated around* the out-of-order landing (§"State at landing") instead of
+flagging it as a fence violation. This addendum flags it explicitly and adjudicates it,
+so the note is self-contained about its own precondition.
+
+### The violation (git-witnessed)
+
+| Fact | Evidence |
+|---|---|
+| Sibling **#2705** rewired `.claude/settings.json`'s dos `PreToolUse`/`PostToolUse` entries to `tools/dos_hook.py` | commit `80b38ecf`, subject `feat(tools): … wire the dos hooks to it (#2705)` |
+| It landed **before** this decision note | `git merge-base --is-ancestor 80b38ecf b26c24deb` → true |
+| **24 minutes before** | `80b38ecf` 2026-07-07 07:11:44 −0700 → note `b26c24deb` 07:35:21 −0700 |
+
+The epic's strict sequence is measure (#2703) → **decide (this #2704)** → implement
+(#2705). #2705 (implement) committed the settings wiring while this decide-note was
+still unwritten. The fence's ordering was therefore violated, factually.
+
+### Adjudication — procedural slip, not the fleet-wide incident the fence guards
+
+The fence exists for one reason, stated in epic #2702 and this issue: *"a bad shared-hook
+edit is a fleet-wide incident (every agent's every tool call)."* Its purpose is to stop a
+**wedging** settings edit from landing on an undecided boundary. Judge the landing against
+that purpose, not only its clock:
+
+- **What landed is the safe thing, and exactly what this note decides.** #2705's
+  `tools/dos_hook.py` is the Option-2 §Decision-1 versioned contract verbatim — buffer
+  stdin once, native `tools/.bin/dos-hook[.exe]` first, `python -m dos.cli` fallback, and
+  **always exit 0** (argparse `exit 2` is coerced to 0; `_rc` is discarded on purpose —
+  `tools/dos_hook.py:136`, docstring `tools/dos_hook.py:121-126`). It **removes** the
+  `dos.cli`-internals-wedge coupling the epic exists to kill; it cannot introduce it.
+- **So the fence's spirit was honored; only its letter (ordering) was broken.** The edit
+  that jumped the queue is not "a bad shared-hook edit" — it is the good one this note
+  would have prescribed. The concrete harm the fence guards against (a wedge blocking
+  every tool call) did not and cannot occur through an always-exit-0 launcher.
+- **Recommendation for the maintainer's accept-vs-incident call:** accept the note
+  post-hoc. Do **not** revert #2705 — reverting reinstates the slow, `dos.cli`-internals,
+  exit-2-capable Python wiring (the actual latent wedge). Record the ordering slip as a
+  process note against the epic (implement child should gate its start on the decide-note
+  commit existing), not as a rollback.
+
+### Current wiring (verified 2026-07-12, HEAD)
+
+Since this note first landed, the wiring advanced *past* the §Migration "State at landing"
+snapshot: **all three** dos entries — `PreToolUse`, `PostToolUse`, **and `Stop`** — now
+route through `tools/dos_hook.py --workspace <root>` (Migration step 2's `Stop` move is
+done); the non-dos `repoguard` `PreToolUse` entry is untouched, as decided. Still open for
+the implement child (unchanged by this addendum): §Decision 2 (plugin-presence skip) and
+§Decision 3 (`PostToolUse` matcher alignment to `Read|Bash|Grep|Glob` — it remains
+un-matched today). This addendum touches **only this note**; `.claude/settings.json` is
+not modified here, honoring the fence going forward.
