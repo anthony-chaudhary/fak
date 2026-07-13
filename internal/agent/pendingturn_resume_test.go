@@ -72,6 +72,40 @@ func TestRunArmNoPendingTurnIsFreshTurnZero(t *testing.T) {
 	}
 }
 
+// TestPendingTurnResumeReadIsNonDestructive isolates the READ-ONLY contract of the #4124 loop-entry
+// resume read, and doubles as the witness the issue's documented acceptance selector
+// (`go test ./internal/agent -run 'PendingTurnResume'`) actually SELECTS: the pre-existing witnesses
+// are named "...ResumesPendingTurn..." / "...PendingTurnKill9Resume...", none of which the literal
+// 'PendingTurnResume' pattern matches, so that command otherwise reports "no tests to run" — a
+// vacuous green. Observing the checkpoint at loop entry must NOT consume it: clearing an in-flight
+// turn is the turn's OWN job on completion (#4123, via the HTTP retry path), never a side effect of
+// the read. The offline MockPlanner installs no checkpoint-clear hook (bindPendingCheckpoint no-ops
+// off the *HTTPPlanner path), so a checkpoint that survives the whole run proves the entry read left
+// it intact — a destructive read would have zeroed it.
+func TestPendingTurnResumeReadIsNonDestructive(t *testing.T) {
+	tbl := session.NewTable()
+	const trace = "resume-readonly"
+	pt := session.PendingTurn{Attempt: 3, LastStatus: 503, StartedAtUnixNano: 1_781_000_000_000_000_000}
+	if _, ok := tbl.SetPendingTurn(trace, pt); !ok {
+		t.Fatal("setup: SetPendingTurn rejected on a live session")
+	}
+
+	m, err := RunArm(context.Background(), NewMockPlanner("mock"), DefaultTask, false, 20, nil,
+		WithSessionTable(tbl, trace))
+	if err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	// The loop RE-ENTERED the checkpointed turn (attempt 3), not a fresh turn-0.
+	if m.ResumedPendingTurn != pt {
+		t.Fatalf("resume seam = %+v, want the restored checkpoint %+v", m.ResumedPendingTurn, pt)
+	}
+	// ...and reading it did NOT clear it: the table still carries the exact checkpoint after the run,
+	// because the mock path installs no clear hook. A destructive loop-entry read would zero this.
+	if got := tbl.Get(trace).PendingTurn; got != pt {
+		t.Fatalf("loop-entry read mutated the checkpoint: table now carries %+v, want the untouched %+v", got, pt)
+	}
+}
+
 // TestRunArmResumesPendingTurnViaGate proves the function-shaped path: the gateway native loop
 // carries Decide/ResumeCheckpoint hooks, not a *session.Table, so it reads the checkpoint through
 // the gate's ResumeCheckpoint twin — the same seam WithSessionGate.Checkpoint writes.
