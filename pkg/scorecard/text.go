@@ -79,3 +79,13 @@ func anyFloat(v any) (float64, bool) {
 		return 0, false
 	}
 }
+
+// PassMark renders the compact yes/no token used by human and Markdown
+// scorecard rows. Keeping it here prevents each card from carrying an identical
+// local branch while preserving the established lowercase wire text.
+func PassMark(ok bool) string {
+	if ok {
+		return "yes"
+	}
+	return "no"
+}

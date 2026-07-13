@@ -463,11 +463,11 @@ func Render(p ScorecardPayload) string {
 		"  CONVERGENCE (are the open objectives moving toward their goal?):",
 	}
 	for _, r := range p.Convergence {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  BREADTH (is concurrency bounded, or fanning out too broad?):")
 	for _, r := range p.Breadth {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  NEXT: "+p.NextAction)
 	return strings.Join(lines, "\n")
@@ -488,11 +488,11 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("The question: is the fleet *converging on its live goal*, or fanning out too broad — declaring many objectives active at once, taking detours that run past budget while their parent sits paused, letting open objectives drift or stall instead of moving? `internal/trajctl` already classifies a *single* objective's witnessed progress curve (HEALTHY/STALL/DRIFT/DETOUR_OVERRUN); this scorecard folds the whole objective **tree** into one focus number. Every count is re-derived from the trajectory-control ledger (`" + trajctl.DefaultLedgerRel + "`) fak's own `fak trajctl` tooling writes — so the score moves only when the fleet actually converges: close or meet objectives, return detours to their paused parent, get the witnessed curves rising.\n\n")
 	b.WriteString("## Convergence — are the open objectives moving toward their goal?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Convergence {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Breadth — is concurrency bounded, or fanning out too broad?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Breadth {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Run it\n\n```bash\ngo run ./cmd/fak focus-score             # score the fleet's convergence on its goal\ngo run ./cmd/fak focus-score --markdown  # regenerate this doc\ngo run ./cmd/fak focus-score --json      # control-pane payload (corpus.focus_debt)\ngo test ./internal/focusscore/...        # prove the fold over a broad vs converged corpus\n```\n\n")
 	b.WriteString("## Driving focus_debt down\n\n")
@@ -564,13 +564,6 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
-}
-
-func passMark(ok bool) string {
-	if ok {
-		return "yes"
-	}
-	return "no"
 }
 
 func boolStr(ok bool, yes, no string) string {

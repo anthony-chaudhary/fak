@@ -559,11 +559,11 @@ func Render(p ScorecardPayload) string {
 		"  USAGE (does the dev OUTPUT carry the fak discipline?):",
 	}
 	for _, r := range p.Usage {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  WITNESS (does dev TRUST EVIDENCE over self-report?):")
 	for _, r := range p.Witness {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  NEXT: "+p.NextAction)
 	return strings.Join(lines, "\n")
@@ -585,11 +585,11 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("The question: when an agent builds fak, how much does that development route through fak's *own* concepts — committing with the witness contract (ship-stamp, DCO, a binding verb), arbitrating disjoint lanes, and **witnessing its own claims via the verify syscall instead of trusting a self-report** — versus generic agentic dev? Every number is re-derived from `git log` and the `.dos` journals fak's tooling wrote; the score moves only when development actually uses the concepts more.\n\n")
 	b.WriteString("## Usage — does the development OUTPUT carry the fak discipline?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Usage {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Witness — does development TRUST EVIDENCE over self-report?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Witness {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Run it\n\n```bash\ngo run ./cmd/fak concept-usage-score            # score this tree's concept dogfooding\ngo run ./cmd/fak concept-usage-score --markdown # regenerate this doc\ngo test ./internal/conceptusage/...             # prove the fold over a thin vs healthy corpus\n```\n\n")
 	b.WriteString("## The 3× program — grow the witness axis honestly\n\n")
@@ -675,13 +675,6 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
-}
-
-func passMark(ok bool) string {
-	if ok {
-		return "yes"
-	}
-	return "no"
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

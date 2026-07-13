@@ -507,15 +507,15 @@ func Render(p ScorecardPayload) string {
 		"  DURABILITY (auto-restart on system restart):",
 	}
 	for _, r := range p.Durability {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  SELF-REPORT (does each loop surface its own status?):")
 	for _, r := range p.SelfReport {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  DOGFOOD (does the loop run THROUGH fak's tooling?):")
 	for _, r := range p.Dogfood {
-		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+		lines = append(lines, "    "+scorecard.PassMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
 	}
 	lines = append(lines, "", "  NEXT: "+p.NextAction)
 	return strings.Join(lines, "\n")
@@ -537,15 +537,15 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("The question: are fak's always-on background loops — the issue dispatchers, the resolve-progress tracker, the freshness cadences, the smoke loops — *first-class durable processes*, or fire-and-forget scripts that vanish on the next reboot and report nothing? Every number is re-derived from the loop ledger (`.fak/loops.jsonl`) and the job registry (`tools/loop-registry.json`) fak's own `fak loop` tooling writes, folded with the same `loopmgr` projection `fak loop status` / `fak loop health` use — so the score moves only when the loops actually become more durable, observable, and fak-native.\n\n")
 	b.WriteString("## Durability — auto-restart on system restart\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Durability {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Self-report — does each loop surface its own status?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.SelfReport {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Dogfood — does the loop run THROUGH fak's tooling?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Dogfood {
-		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+		b.WriteString("| " + scorecard.PassMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Run it\n\n```bash\ngo run ./cmd/fak loop-score             # score this box's background loops\ngo run ./cmd/fak loop-score --markdown  # regenerate this doc\ngo run ./cmd/fak loop-score --json      # control-pane payload (corpus.loopscore_debt)\ngo test ./internal/loopscore/...        # prove the fold over a fragile vs durable corpus\n```\n\n")
 	b.WriteString("## The 3× program — make the loops durable, observable, and fak-native\n\n")
@@ -624,13 +624,6 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
-}
-
-func passMark(ok bool) string {
-	if ok {
-		return "yes"
-	}
-	return "no"
 }
 
 func boolStr(ok bool, yes, no string) string {

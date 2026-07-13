@@ -327,3 +327,12 @@ func TestComparePressureTrend(t *testing.T) {
 		t.Errorf("no pressure line expected for a pre-pressure baseline: %q", old)
 	}
 }
+
+func TestPassMark(t *testing.T) {
+	if got := PassMark(true); got != "yes" {
+		t.Fatalf("PassMark(true) = %q, want yes", got)
+	}
+	if got := PassMark(false); got != "no" {
+		t.Fatalf("PassMark(false) = %q, want no", got)
+	}
+}
