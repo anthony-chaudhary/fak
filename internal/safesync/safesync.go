@@ -41,6 +41,15 @@ type Options struct {
 	Runner              Runner           `json:"-"`
 	Now                 func() time.Time `json:"-"`
 	ApplyVelocityBudget time.Duration    `json:"-"`
+	// LeaseOwner labels this process in the cooperative worktree-writer lease Apply holds
+	// across its assess+apply window (default: a pid-derived id).
+	LeaseOwner string `json:"lease_owner,omitempty"`
+	// WriterLeaseTTL bounds how long the lease is honored before a peer may reclaim it as
+	// crash residue (default DefaultWriterLeaseTTL).
+	WriterLeaseTTL time.Duration `json:"-"`
+	// barrier is a test-only seam fired while Apply holds the writer lease, so a
+	// concurrency test can prove a second managed writer is refused mid-window.
+	barrier func()
 }
 
 type Entry struct {
@@ -64,6 +73,14 @@ type Assessment struct {
 	PushAudit     *PushAudit   `json:"push_audit,omitempty"`
 	Worktree      *Worktree    `json:"worktree,omitempty"`
 	ApplyVelocity PushVelocity `json:"apply_velocity"`
+	// Indeterminate is set when a fast-forward failed partway (a partial checkout, an
+	// in-progress MERGE_HEAD, or HEAD moved despite a non-zero exit): the worktree may be
+	// partially updated, so Apply neither claims a clean refusal nor swallows a plain
+	// error. Recover (`git status`, `git merge --abort`) before re-syncing.
+	Indeterminate bool `json:"indeterminate,omitempty"`
+	// Lease names the peer worktree-writer lease holder when Apply refused to enter its
+	// assess/apply window because a cooperative fak-managed writer already held the lease.
+	Lease *WriterLeaseInfo `json:"lease,omitempty"`
 }
 
 // PushAudit is optional, read-only evidence attached by higher-level callers when an
@@ -217,6 +234,29 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	defer func() { info.ApplyVelocity = ScoreApplyVelocity(info, now().Sub(started), budget, err) }()
 	opts = normalizeOptions(opts)
 	run := opts.Runner
+
+	// Hold the cooperative worktree writer lease for the WHOLE assess+apply window, so a
+	// fak-managed peer writer cannot edit a classified path between Assess and the
+	// checkout (#4240). A live peer holding it means we must not enter the window at all:
+	// refuse without touching the tree. Released on every return path.
+	lease, lerr := AcquireWriterLease(opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL)
+	if lerr != nil {
+		var held *WriterLeaseHeldError
+		if errors.As(lerr, &held) {
+			holder := held.Info
+			info.OK = false
+			info.Applied = false
+			info.Lease = &holder
+			info.Reason = fmt.Sprintf("worktree writer lease held by %s; refusing to enter the assess/apply window so a peer writer's bytes are never overwritten", holder.Owner)
+			return info, nil
+		}
+		return info, lerr // an I/O failure taking the lease is an infrastructure error
+	}
+	defer func() { _ = lease.Release() }()
+	if opts.barrier != nil {
+		opts.barrier()
+	}
+
 	info, err = Assess(ctx, opts)
 	if err != nil {
 		return info, err
@@ -228,9 +268,19 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		info.Applied = false
 		return info, nil
 	}
-	applied, detail, err := applyFastForward(ctx, run, opts.Repo, info)
+	applied, detail, indeterminate, err := applyFastForward(ctx, run, opts.Repo, info)
 	if err != nil {
 		return info, err
+	}
+	if indeterminate {
+		info.OK = false
+		info.Applied = false
+		info.Indeterminate = true
+		info.Reason = "fast-forward failed in an indeterminate state; the worktree may be partially updated — inspect with `git status` and recover (`git merge --abort`) before re-syncing"
+		if detail != "" {
+			info.Reason += ": " + detail
+		}
+		return info, nil
 	}
 	if !applied {
 		info.OK = false
@@ -425,7 +475,7 @@ func worktreeBytes(repo, path string) ([]byte, bool) {
 	return b, true
 }
 
-func applyFastForward(ctx context.Context, run Runner, repo string, info Assessment) (applied bool, detail string, err error) {
+func applyFastForward(ctx context.Context, run Runner, repo string, info Assessment) (applied bool, detail string, indeterminate bool, err error) {
 	// The assessment is a snapshot, not a lease over arbitrary raw file writers. Do not pre-clean
 	// "identical" paths here: a peer can edit or create one after classify reads it,
 	// and checkout/remove would then destroy that newer work. Git's merge worktree
@@ -436,35 +486,66 @@ func applyFastForward(ctx context.Context, run Runner, repo string, info Assessm
 	// tracking ref. A concurrent fetch may advance TargetRef between these calls,
 	// but it cannot change the tree identified by Target.
 	if strings.TrimSpace(info.Target) == "" {
-		return false, "", fmt.Errorf("assessed target SHA is empty")
+		return false, "", false, fmt.Errorf("assessed target SHA is empty")
 	}
 	branch, err := currentBranch(ctx, run, repo)
 	if err != nil {
-		return false, "", err
+		return false, "", false, err
 	}
 	if info.Branch != "" && branch != info.Branch {
-		return false, "branch changed after assessment", nil
+		return false, "branch changed after assessment", false, nil
 	}
 	head, err := rev(ctx, run, repo, "HEAD")
 	if err != nil {
-		return false, "", err
+		return false, "", false, err
 	}
 	if info.Head != "" && head != info.Head {
-		return false, "HEAD changed after assessment", nil
+		return false, "HEAD changed after assessment", false, nil
 	}
 	args := []string{"merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", info.Target}
 	res := run(ctx, repo, args...)
 	if res.Err != nil {
-		return false, "", res.Err
+		return false, "", false, res.Err
 	}
 	if res.Code != 0 {
 		detail := runDetail(res)
 		if safeFastForwardRefusal(detail) {
-			return false, pushFirstLine(detail), nil
+			return false, pushFirstLine(detail), false, nil
 		}
-		return false, "", &GitError{Args: args, Code: res.Code, Detail: detail}
+		// Not a recognized clean pre-merge refusal. Probe whether the tree is provably
+		// untouched (a pre-mutation infra failure, e.g. index.lock) or the fast-forward
+		// died partway (a partial checkout, an in-progress MERGE_HEAD, or HEAD moved).
+		// The latter is INDETERMINATE: the worktree may be half-updated, so Apply must
+		// neither claim a clean refusal nor swallow it as a plain error.
+		if partialFastForward(ctx, run, repo, info.Head) {
+			return false, pushFirstLine(detail), true, nil
+		}
+		return false, "", false, &GitError{Args: args, Code: res.Code, Detail: detail}
 	}
-	return true, "", nil
+	return true, "", false, nil
+}
+
+// partialFastForward reports whether a failed fast-forward left the worktree/index in a
+// partial state — an in-progress MERGE_HEAD, an unmerged index entry, or HEAD advanced
+// despite the non-zero exit. Each is positive evidence the merge started mutating and
+// did not cleanly finish; the absence of all three (HEAD unmoved, no MERGE_HEAD, clean
+// index — the index.lock class) means the tree is provably untouched and the caller
+// keeps the honest infrastructure error.
+func partialFastForward(ctx context.Context, run Runner, repo, assessedHead string) bool {
+	if res := run(ctx, repo, "rev-parse", "--verify", "-q", "MERGE_HEAD"); res.Err == nil && res.Code == 0 {
+		return true
+	}
+	if res := run(ctx, repo, "ls-files", "-u"); res.Err == nil && res.Code == 0 && len(bytes.TrimSpace(res.Stdout)) > 0 {
+		return true
+	}
+	if strings.TrimSpace(assessedHead) != "" {
+		if res := run(ctx, repo, "rev-parse", "--verify", "HEAD"); res.Err == nil && res.Code == 0 {
+			if strings.TrimSpace(string(res.Stdout)) != assessedHead {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // safeFastForwardRefusal recognizes only merge failures that establish a
