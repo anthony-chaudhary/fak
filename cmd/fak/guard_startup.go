@@ -214,6 +214,35 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	return rt, floorSource, policyDigest, dur
 }
 
+// guardReloadDefaultFloor re-derives and re-applies the built-in guard capability floor
+// (the embedded guardDefaultPolicyJSON) unioned with the operator allow overlay — the
+// empty-path (no --policy) branch of guardResolvePolicy, expressed as a hot reload. It
+// exists so POST /v1/fak/policy/reload works on the MOST COMMON guard launch (#3957):
+// the default-floor guard used to wire a nil reloader, so the route 404'd and `fak guard
+// allow`'s "or POST .../policy/reload on a running gateway" advice was false — an overlay
+// edit demanded a relaunch. A malformed overlay is TOLERATED here (not fatal), matching
+// reloadPolicy's on-reload overlay handling: the loud failure already fired at launch,
+// and a live gateway must not wedge over a bad out-of-band edit.
+func guardReloadDefaultFloor() (policy.Runtime, error) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		return policy.Runtime{}, err
+	}
+	overlayPath := guardAllowOverlayPath()
+	if ov, ovErr := loadGuardAllowOverlay(overlayPath); ovErr == nil {
+		guardApplyAllowOverlay(&rt, ov)
+	}
+	rt = protectGuardPolicyConfig(rt, overlayPath, "")
+	adjudicator.Default.SetPolicy(rt.Adjudicator)
+	applyRuntime(rt)
+	// Audit parity with the --policy reload path (reloadPolicy): the security boundary was
+	// just re-applied, so record which bytes are authoritative. The embedded floor digest
+	// is stable; the mutable part an operator changes between reloads is the overlay, folded
+	// into rt above. journal.Active() no-ops on an unjournaled run, keeping it byte-identical.
+	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapOK, "")
+	return rt, nil
+}
+
 func protectGuardPolicyConfig(rt policy.Runtime, paths ...string) policy.Runtime {
 	seen := map[string]bool{}
 	for _, existing := range rt.Adjudicator.SelfModifyGlobs {

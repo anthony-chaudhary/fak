@@ -174,6 +174,67 @@ func TestPolicyReloaderSwapsAdjudicatorPolicy(t *testing.T) {
 	}
 }
 
+// TestGuardPolicyReloaderDefaultFloorAppliesOverlay covers #3957: a guard launched
+// WITHOUT --policy (the built-in floor, the most common launch) must still expose a
+// working POST /v1/fak/policy/reload — previously policyReloader("") returned nil and
+// the route 404'd. The reloader must re-derive the embedded floor + operator allow
+// overlay so an overlay edit takes effect with no relaunch (add AND remove).
+func TestGuardPolicyReloaderDefaultFloorAppliesOverlay(t *testing.T) {
+	overlay := filepath.Join(t.TempDir(), "allow.json")
+	t.Setenv(guardAllowOverlayEnv, overlay)
+	defer func() {
+		adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy())
+		ifc.ConfigureDefaultPolicy(ifc.Policy{})
+	}()
+
+	reload := guardPolicyReloader("") // empty path == built-in guard floor
+	if reload == nil {
+		t.Fatal("guardPolicyReloader(\"\") returned nil — default-floor reload route would 404 (#3957)")
+	}
+
+	const probe = "reload_probe_tool" // not on the built-in floor: DEFAULT_DENY until overlaid
+	verdict := func() abi.Verdict {
+		return adjudicator.Default.Adjudicate(context.Background(), &abi.ToolCall{
+			Tool: probe,
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+		})
+	}
+
+	// Establish the built-in floor as live, then confirm the probe is denied by default.
+	if _, err := reload(context.Background()); err != nil {
+		t.Fatalf("initial reload: %v", err)
+	}
+	if v := verdict(); v.Kind == abi.VerdictAllow {
+		t.Fatalf("precondition: %s already allowed by the bare floor", probe)
+	}
+
+	// Add the overlay entry AFTER launch, then reload — it must be admitted, no relaunch.
+	if err := os.WriteFile(overlay, []byte(`{"allow":["`+probe+`"]}`), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	resp, err := reload(context.Background())
+	if err != nil {
+		t.Fatalf("reload after add: %v", err)
+	}
+	if !resp.Reloaded || resp.Source != "built-in guard floor + operator allow overlay" {
+		t.Fatalf("reload response = %+v, want reloaded + built-in floor source", resp)
+	}
+	if v := verdict(); v.Kind != abi.VerdictAllow {
+		t.Fatalf("after overlay add + reload: %s = %v/%s, want Allow", probe, v.Kind, abi.ReasonName(v.Reason))
+	}
+
+	// Remove the overlay entry, reload: the out-of-band admission is withdrawn.
+	if err := os.WriteFile(overlay, []byte(`{"allow":[]}`), 0o600); err != nil {
+		t.Fatalf("rewrite overlay: %v", err)
+	}
+	if _, err := reload(context.Background()); err != nil {
+		t.Fatalf("reload after remove: %v", err)
+	}
+	if v := verdict(); v.Kind == abi.VerdictAllow {
+		t.Fatalf("after overlay remove + reload: %s still allowed, want denied", probe)
+	}
+}
+
 func TestResetTraceClearsIFCLedger(t *testing.T) {
 	const trace = "cmd-reset-trace"
 	ifc.Default.Reset(trace)

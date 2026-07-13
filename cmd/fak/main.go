@@ -1055,6 +1055,30 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 	}
 }
 
+// guardPolicyReloader is the reloader `fak guard` wires (guard.go). For an explicit
+// --policy FILE it is exactly policyReloader (the file-reload path, unchanged). For the
+// default built-in floor (empty path) it returns a working reloader that re-derives the
+// embedded floor + operator allow overlay — instead of policyReloader's nil, which had
+// disabled POST /v1/fak/policy/reload (404) on the most common guard launch (#3957).
+// `fak serve` keeps calling policyReloader directly, so its non-guard no-`--policy`
+// default stays byte-identical, as does `--policy` everywhere.
+func guardPolicyReloader(policyPath string) gateway.PolicyReloadFunc {
+	if strings.TrimSpace(policyPath) != "" {
+		return policyReloader(policyPath)
+	}
+	return func(context.Context) (gateway.PolicyReloadResponse, error) {
+		rt, err := guardReloadDefaultFloor()
+		if err != nil {
+			return gateway.PolicyReloadResponse{}, err
+		}
+		return gateway.PolicyReloadResponse{
+			Reloaded: true,
+			Source:   "built-in guard floor + operator allow overlay",
+			Summary:  policy.SummaryRuntime(rt),
+		}, nil
+	}
+}
+
 func resetTrace(_ context.Context, traceID string) error {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
