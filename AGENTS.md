@@ -113,6 +113,28 @@ go build -o fak ./cmd/fak
 The first `go build` compiles the binary (~30–60s, plus a one-time Go-1.26 toolchain fetch);
 later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-packet.md).
 
+## The local machine is the control point, not the compute boundary
+
+That the *kernel proof* needs no GPU (above) is not license to stop when a task **genuinely**
+needs one. The workstation you run on plans, dispatches, and ledgers — it is the **control
+point**. It is **not** the compute boundary. When a task needs a CUDA/GPU device, a specific
+accelerator arch, DC-network reach, or heavy CPU, **dispatch it to a fleet node that has it**
+and report the real result.
+
+**Never end a turn with `not yet — no GPU on this host`** (or any "blocked for lack of local
+hardware") as a terminal answer. There is always a route: a sanctioned compute node, or — if its
+credential/bridge session is missing — the exact ready-to-run command sequence handed to the
+operator. Both count as "used the lab"; only `no local hardware` does not. The nodes and how to
+reach each are the SSOT in **[`docs/fleet-compute-nodes.md`](docs/fleet-compute-nodes.md)**
+(GCP `fak-realmodel` L4 for a live CUDA serve; the GPU server via `dgxbridge` for a device-GEMM
+witness; `da33` for DC/CPU; the nightrun pipeline for a nightly ledger).
+
+This is guard-enforced, not honor-system: `fak hwgate-lint` scans a final turn for the stop
+pattern and types each hit to a sanctioned-node redirect (the hardware-gate dual of
+`fak headless-lint`), and `fak guard`'s Stop hook blocks a headless stop that declares a
+local-hardware blocker as terminal (`--hardware-gate enforce`), feeding the redirect back so the
+agent dispatches instead of stopping. `fak guard-stops` tallies the pattern for the soak → promote read.
+
 ## Proof by default (every issue fix ships its evidence)
 
 This kernel exists because a self-report is not a fact. Hold your own fixes to the same bar:
@@ -506,6 +528,7 @@ routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
 | Learn every concept in prerequisite order (a course, join at your level) | [`LEARNING-PATH.md`](LEARNING-PATH.md) |
 | Install / run tiers (offline → gateway → in-kernel model) | [`fak/GETTING-STARTED.md`](GETTING-STARTED.md) |
 | Put fak in front of *your* agent (Claude Code / Cursor / MCP) | [`docs/integrations/`](docs/integrations/) · [`fak/examples/mcp/`](examples/mcp/) |
+| Run hardware-gated work (no local GPU) — the sanctioned compute nodes | [`docs/fleet-compute-nodes.md`](docs/fleet-compute-nodes.md) · `fak hwgate-lint` |
 | The deployable capability floor (policy manifests) | [`fak/POLICY.md`](POLICY.md) · [`fak/examples/README.md`](examples/README.md) |
 | Extend the kernel (plug in → prove correct → prove faster) | [`fak/EXTENDING.md`](EXTENDING.md) · [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Optimize a kernel without re-inventing known art (check prior art first) | [`docs/sota/README.md`](docs/sota/README.md) · `fak sota <op>` |
