@@ -435,6 +435,7 @@ var tier = map[string]int{
 	"zaitask":               4,
 	"macfit":                2,
 	"roofline":              1, // pure-Go GLM-5.2 roofline dashboard fold (#3090): folds committed benchmark run artifacts × transcribed ceiling estimates into one current-vs-80%target-vs-ceiling table; stdlib-only, imports nothing internal, laptop-composable (no GPU), off the hot path.
+	"supervisoragent":       2, // #4478 (epic #4477, supervisor-seat fence #1): the closed, payload-free SupervisorInput contract a supervisor agent consumes + the pure assembler that projects it. Folds fleetmon(1) per-worker class -> WorkerState and leaseref(1) ArbiterLease -> Lease, passing the dos_status/escalation heads through payload-free; no transcript/free-text field by construction. Off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
