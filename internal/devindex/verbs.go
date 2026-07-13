@@ -209,6 +209,7 @@ var verbManifest = []Verb{
 	{Name: "mlp-score", Synopsis: "MLP (first-lovable-cut) grade: pure internal/mlpscore fold over a committed HEAD snapshot (--json/--markdown)", Lane: "cmd"},
 	{Name: "model", Synopsis: "resolve an hf:// URI to a locally cached file path (Hub download + SHA256 verify)", Lane: "cmd"},
 	{Name: "multisubmit", Synopsis: "multi-submission planner: lay out N profiles for a resolved issue, seat round-robin over the rotation pool", Lane: "cmd"},
+	{Name: "negate", Synopsis: "the negation operator: detect/resolve/reframe a negative over internal/negframe (positive-complement L2 registry)", Lane: "cmd"},
 	{Name: "new-leaf", Synopsis: "scaffold a new leaf package at a layering tier, optionally registering its defconfig blank-import", Lane: "cmd"},
 	{Name: "new-model", Synopsis: "scaffold a new model adapter/leaf", Lane: "cmd"},
 	{Name: "news", Synopsis: "the news Slack surface for source-linked external industry/SOTA/OSS research updates", Lane: "cmd"},

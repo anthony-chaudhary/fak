@@ -283,6 +283,11 @@ func main() {
 		cmdToolCoverageAudit(os.Args[2:])
 	case "answer-shape":
 		cmdAnswerShape(os.Args[2:])
+	case "negate":
+		// The negation operator (#4461/#4472, negframe L2): `fak negate detect|resolve|reframe`
+		// exposes detect (Classify), resolve (positive-complement over the L2 registry), and
+		// reframe (emit-time Reframe) as one callable primitive over internal/negframe.
+		cmdNegate(os.Args[2:])
 	case "claim-check":
 		cmdClaimCheck(os.Args[2:])
 	case "headless-lint":
