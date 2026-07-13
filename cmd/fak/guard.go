@@ -36,9 +36,14 @@ const guardResourceSampleInterval = 2 * time.Second
 // the operator names no --policy. It is embedded in the binary so `fak guard` works
 // from ANY directory (a repo or not, an installed binary with no source tree). It
 // allows the standard coding-agent tool set and denies the genuine-danger classes:
-// destructive removal, privilege escalation, disk wipe, fork bomb, RCE pipe, writes
-// that escape the working tree, and writes into credential/SSH/secret paths. Print or
-// fork it with `fak guard --dump-policy`.
+// destructive removal, privilege escalation, disk wipe, fork bomb, RCE pipe,
+// `../`-relative tree-escape redirects, and writes into credential/SSH/secret paths.
+// This is a DENYLIST of named-dangerous patterns (`self_modify_globs` matched by
+// substring + a handful of `../`-relative Bash arg-rules), NOT a working-tree
+// boundary: an absolute-path write outside the repo that matches no guarded glob and
+// is not spelled `../` is still ALLOWED — the floor does not confine a wrapped agent
+// to the repo. Making that boundary real is the optional hardening follow-on in #1466.
+// Print or fork it with `fak guard --dump-policy`.
 //
 // The allow-list also admits the host harness's ORCHESTRATION + deferred-tool-loading +
 // read-only-MCP surface (Agent/Task*/SendMessage/Monitor/ScheduleWakeup/EnterPlanMode/
