@@ -149,6 +149,7 @@ var tier = map[string]int{
 	"heavinessscore":       1,                // operator-heaviness scorecard over the cmd/fak dispatch table + guard flag set + dos.toml reasons + llms.txt doc map; imports pkg/scorecard, off the hot path.
 	"choicetriage":         1,                // closed disposition vocabulary that decenters the human from a surfaced choice (TAKE_OBVIOUS / FRESH_CONTEXT / FILE_TICKET / HUMAN_RESIDUAL): the decision-side dual of waiting(1). Pure, stdlib-only, imports nothing internal, off the hot path.
 	"headlesslint":         1,                // sensor-side dual of choicetriage(1): a closed vocabulary of operator-directed "pesky note" classes (PERMISSION_ASK / PREFERENCE_ASK / CLARIFICATION_REQUEST / REVIEW_REQUEST / CONFIRMATION_WAIT / DEFERRED_WORK / SUGGESTION_PUNT / OPEN_OFFER) that scans agent final-output text and folds each hit to a choicetriage disposition. Imports choicetriage(1) only, off the hot path.
+	"hwgatelint":           1,                // hardware-gate dual of headlesslint(1): a closed vocabulary of "local machine is the compute boundary" stop classes (NO_LOCAL_GPU / NO_LOCAL_RUNTIME / LOCAL_BOUNDARY) that scans agent final-output text and carries the fixed sanctioned-compute-node redirect. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"operatorbrief":        3,                // folds cadence/program/milestone/heaviness report envelopes into one human pacing control pane; composer-only, off the hot path.
 	"productscorecard":     1,                // pure Go port of tools/product_scorecard.py; folds CLAIMS.md + tools/product_scorecard.data into product_debt; stdlib-only, off the hot path.
 	"scorecardpane":        1,                // pure Go port of tools/scorecard_control_pane.py (portfolio debt-ratchet fold) + tools/repo_hygiene_scorecard.py (the tree-wide hygiene fold); stdlib-only, off the hot path.
@@ -431,7 +432,7 @@ var tier = map[string]int{
 	"catchupscore":          1, // the dev-system CATCH-UP control-pane scorecard (`fak score catchup`): folds intake/measurement/index/trunk/loops into a 0..1 caught-up fraction + an unbounded catchup_backlog headline. Pure fold, stdlib-only, imports nothing internal, off the hot path.
 	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
 	"zaitask":               4,
-	"macfit": 2,
+	"macfit":                2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -447,33 +448,32 @@ var tier = map[string]int{
 // to > from, so a tier-1 leaf quietly importing a fat tier-1 composite is an intra-tier
 // (1->1) edge it never sees (#3945).
 var pureRoot = map[string]bool{
-	"accountobs": true, "accountprobe": true, "affectedtests": true, "agenticbench": true, "agentsindex": true, "ailuminate": true,
+	"accountobs": true, "accountprobe": true, "affectedtests": true, "agentsindex": true, "ailuminate": true,
 	"answershape": true, "apihostprobe": true, "appversion": true, "astquery": true, "auditreason": true, "benchauthority": true,
-	"benchckpt": true, "benchids": true, "benchruns": true, "benchscore": true, "bgloop": true, "binstamp": true,
+	"benchckpt": true, "benchids": true, "benchruns": true, "bgloop": true, "binstamp": true,
 	"blob": true, "boundarylint": true, "brittleness": true, "buildwitness": true, "cacheobs": true, "cacheprice": true,
-	"callavoid": true, "canon": true, "chatops": true, "chatopsdetach": true, "choicetriage": true, "claimcheck": true,
+	"callavoid": true, "canon": true, "chatops": true, "chatopsdetach": true, "claimcheck": true,
 	"clonescan": true, "closureaudit": true, "closurerate": true, "cmdutil": true, "codegraph": true, "codelint": true,
-	"codexmemory": true, "commitintent": true, "commitissuelink": true, "commitrollup": true, "compactcohere": true, "conflationscore": true,
+	"codexmemory": true, "commitintent": true, "commitissuelink": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deepseekbench": true,
 	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "devexmeter": true,
-	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true,
-	"dispatchsweep": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
-	"evebridge": true, "eveimport": true, "eveparity": true, "execrollup": true, "fakrpc": true, "fleetcap": true,
+	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
+	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
 	"frontierswe": true, "fusedturn": true, "ghspam": true, "glm52prefillsweep": true, "godsplitplan": true, "growthgate": true,
-	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true,
-	"intlist": true, "issuecontract": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
-	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true, "loopgate": true,
+	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true, "hwgatelint": true,
+	"intlist": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
+	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true,
 	"loopindex": true, "looporphan": true, "looprecover": true, "loopunblock": true, "macbench": true, "maputil": true,
 	"mathx": true, "memorycotravel": true, "memoryread": true, "memorystability": true, "metalgemm": true, "modelscore": true,
 	"mutationbudget": true, "negframe": true, "newleaf": true, "newmodel": true, "nodecompare": true, "numfmt": true,
 	"orphanscan": true, "pathlint": true, "pathutil": true, "planaudit": true, "polymodel": true, "popularizationtickets": true,
-	"productscorecard": true, "promalert": true, "promptaudit": true, "promptlint": true, "provenance": true, "questionledger": true,
+	"promalert": true, "promptaudit": true, "promptlint": true, "provenance": true,
 	"qwen36parity": true, "randhex": true, "releasestale": true, "renameconcept": true, "repoguard": true, "resumemetrics": true,
 	"rsl": true, "savingsvector": true, "seatpark": true, "sensecheck": true, "sessionaudit": true, "sessiondesc": true,
-	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "sidecar": true, "signals": true, "simhash": true, "slackenv": true,
+	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "signals": true, "simhash": true, "slackenv": true,
 	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "stepbaton": true, "stopfailure": true,
-	"strmatch": true, "sweepconfig": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
+	"strmatch": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
 	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "trunkbuildprobe": true,
 	"tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
 	"wipattr": true, "wiprecon": true, "wipref": true, "workerenvelope": true, "workflow": true, "workflowlint": true,
