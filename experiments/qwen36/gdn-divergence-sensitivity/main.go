@@ -161,6 +161,22 @@ func quantF16(x float32) float32 {
 
 // ---- parallel f32 GEMM: Y[P,out] = X[P,in] * W[out,in]^T ----
 
+func depthwiseCausalSilu(dst, src, weights []float32, steps, channels, kernel int) {
+	for t := 0; t < steps; t++ {
+		outRow := dst[t*channels : (t+1)*channels]
+		for c := 0; c < channels; c++ {
+			var acc float32
+			base := c * kernel
+			for j := 0; j < kernel; j++ {
+				source := t + j - (kernel - 1)
+				if source >= 0 {
+					acc += weights[base+j] * src[source*channels+c]
+				}
+			}
+			outRow[c] = silu(acc)
+		}
+	}
+}
 func parMatmul(Y, X, W []float32, P, outDim, inDim int) {
 	workers := runtime.GOMAXPROCS(0)
 	var wg sync.WaitGroup
@@ -281,21 +297,7 @@ func gdnLayer(lw *layerWeights, X []float32, P int, mode scanMode, eps float32) 
 
 	// causal depthwise conv1d + SiLU (verbatim core.go:145-169), fresh-prefill (no history).
 	convOut := make([]float32, P*convDim)
-	for t := 0; t < P; t++ {
-		outRow := convOut[t*convDim : (t+1)*convDim]
-		for c := 0; c < convDim; c++ {
-			var acc float32
-			cb := c * K
-			for j := 0; j < K; j++ {
-				src := t + j - (K - 1)
-				if src < 0 {
-					continue
-				}
-				acc += lw.conv[cb+j] * mixed[src*convDim+c]
-			}
-			outRow[c] = silu(acc)
-		}
-	}
+	depthwiseCausalSilu(convOut, mixed, lw.conv, P, convDim, K)
 
 	// q/k per-head L2-norm + 1/sqrt(kHd) query scale (verbatim core.go:186-201).
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
