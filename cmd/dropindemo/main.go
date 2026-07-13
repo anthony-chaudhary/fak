@@ -48,6 +48,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 
 	"github.com/anthony-chaudhary/fak/internal/cmdutil"
+
+	"github.com/anthony-chaudhary/fak/internal/demoutil"
 )
 
 //go:embed page.html
@@ -113,20 +115,6 @@ func gallery(gwURL string) []card {
 	return out
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	b, err := pageFS.ReadFile("page.html")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(b)
-}
-
 // handleGallery returns the resolved entry-point cards plus the hardware probe. The
 // browser renders one tile per card; each tile is the live resolution, not a fixture.
 func handleGallery(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +153,7 @@ func main() {
 	}
 
 	app := http.NewServeMux()
-	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/", demoutil.IndexHandler(pageFS))
 	app.HandleFunc("/api/gallery", handleGallery)
 	mux := http.NewServeMux()
 	base := demoui.MountWithBasePath(mux, *basePath, app)

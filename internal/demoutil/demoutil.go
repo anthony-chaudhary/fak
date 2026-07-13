@@ -7,6 +7,7 @@ package demoutil
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 )
 
@@ -30,4 +31,23 @@ func (s *SSEWriter) Emit(e Event) {
 	b, _ := json.Marshal(e)
 	fmt.Fprintf(s.W, "data: %s\n\n", b)
 	s.Flusher.Flush()
+}
+
+// IndexHandler serves page.html from pages only at the root path. It pins the
+// shared demo behavior: non-root paths 404, read failures 500, and successful
+// responses carry the UTF-8 HTML content type.
+func IndexHandler(pages fs.FS) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := fs.ReadFile(pages, "page.html")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(body)
+	}
 }

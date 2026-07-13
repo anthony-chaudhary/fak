@@ -62,6 +62,8 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
 
 	"github.com/anthony-chaudhary/fak/internal/cmdutil"
+
+	"github.com/anthony-chaudhary/fak/internal/demoutil"
 )
 
 //go:embed page.html
@@ -116,20 +118,6 @@ func turnTaxDir() string {
 }
 
 func suitePath(suite string) string { return filepath.Join(turnTaxDir(), suite+".json") }
-
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	b, err := pageFS.ReadFile("page.html")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(b)
-}
 
 type suiteRow struct {
 	ID      string `json:"id"`
@@ -261,7 +249,7 @@ func main() {
 	}
 
 	app := http.NewServeMux()
-	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/", demoutil.IndexHandler(pageFS))
 	app.HandleFunc("/api/suites", handleSuites)
 	app.HandleFunc("/api/run", handleRun)
 	mux := http.NewServeMux()

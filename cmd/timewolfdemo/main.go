@@ -52,6 +52,8 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
 
 	"github.com/anthony-chaudhary/fak/internal/cmdutil"
+
+	"github.com/anthony-chaudhary/fak/internal/demoutil"
 )
 
 //go:embed page.html
@@ -138,19 +140,6 @@ func findScenario(id string) (scenario, bool) {
 // writeJSON encodes v as the JSON body of an API response.
 
 // handleIndex serves the embedded browser page at the mount root.
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	b, err := pageFS.ReadFile("page.html")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(b)
-}
 
 // scenarioRow is the picker entry the browser renders one option per. It is the
 // demo's own catalog (id + label + planned call count), not a kernel verdict.
@@ -245,7 +234,7 @@ func main() {
 	// Default: serve the browser surface. The same scenarios the headless paths
 	// render are folded live per request through the real kernel (handleRun).
 	app := http.NewServeMux()
-	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/", demoutil.IndexHandler(pageFS))
 	app.HandleFunc("/api/scenarios", handleScenarios)
 	app.HandleFunc("/api/run", handleRun(ts))
 	mux := http.NewServeMux()

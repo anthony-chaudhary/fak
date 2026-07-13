@@ -63,6 +63,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
+
+	"github.com/anthony-chaudhary/fak/internal/demoutil"
 )
 
 //go:embed page.html
@@ -390,7 +392,7 @@ func main() {
 
 	ev := runExperiment()
 	app := http.NewServeMux()
-	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/", demoutil.IndexHandler(pageFS))
 	app.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
@@ -419,20 +421,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
-}
-
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	b, err := pageFS.ReadFile("page.html")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(b)
 }
 
 // --- headless modes ----------------------------------------------------------------------
