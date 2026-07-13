@@ -42,6 +42,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Schema is the control-pane schema id (unchanged from the Python tool).
@@ -1621,7 +1623,7 @@ func gather(root string) ([]KPI, map[string]int) {
 	facts := map[string]int{
 		"integration_recipes": substantiveRecipes,
 		"harness_configs":     substantiveConfigs,
-		"refusal_recoveries":  maxInt(0, len(reasonTokens)-len(unmappedReasons)),
+		"refusal_recoveries":  mathx.MaxInt(0, len(reasonTokens)-len(unmappedReasons)),
 		"machine_consumable":  jsonTools,
 	}
 	return kpis, facts
@@ -1650,13 +1652,6 @@ func max1(n int) int {
 		return 1
 	}
 	return n
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // ftoa renders a score float the way Python str(float) does (shortest round-trip, but a

@@ -48,3 +48,11 @@ func ArgmaxF32(v []float32) int {
 	}
 	return bi
 }
+
+// MaxInt returns the larger integer. Equal inputs return that shared value.
+func MaxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

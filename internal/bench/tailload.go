@@ -40,6 +40,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // TailLoadSchema versions the tail-under-load artifact.
@@ -79,10 +81,10 @@ func (c TailLoadConfig) withDefaults() TailLoadConfig {
 		c.Warmup = 5_000
 	}
 	if c.StreamWorkers <= 0 {
-		c.StreamWorkers = maxInt(2, runtime.NumCPU()/4)
+		c.StreamWorkers = mathx.MaxInt(2, runtime.NumCPU()/4)
 	}
 	if c.ChurnWorkers <= 0 {
-		c.ChurnWorkers = maxInt(2, runtime.NumCPU()/4)
+		c.ChurnWorkers = mathx.MaxInt(2, runtime.NumCPU()/4)
 	}
 	if c.SessionIDs <= 0 {
 		c.SessionIDs = 512
@@ -264,11 +266,4 @@ func hardwareLabel() string {
 		return hw
 	}
 	return "unspecified (set FAK_BENCH_HW to name the host)"
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

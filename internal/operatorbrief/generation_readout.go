@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
@@ -24,7 +25,7 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 			Discrete:            row.Discrete,
 			Closed:              row.Closed,
 			Total:               row.Total,
-			OpenDiscrete:        maxInt(0, row.Total-row.Closed),
+			OpenDiscrete:        mathx.MaxInt(0, row.Total-row.Closed),
 			OverallPct:          row.OverallPct,
 			Errored:             row.Errored,
 			DebtScore:           row.DebtScore,

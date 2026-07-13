@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Cache-aware fleet routing POLICY — the per-worker prefix-residency index + the
@@ -507,7 +509,7 @@ func (p *CacheAwarePolicy) pickWorker(workers []string, prefix []string, ext fun
 	bal := p.balanceTarget(workers, ext)
 
 	maxL, minL := p.loadRange(workers, ext)
-	skewed := maxL-minL >= p.skew.AbsLoad && float64(maxL) >= p.skew.RelLoad*float64(maxInt(minL, 1))
+	skewed := maxL-minL >= p.skew.AbsLoad && float64(maxL) >= p.skew.RelLoad*float64(mathx.MaxInt(minL, 1))
 
 	pick := loc
 	if skewed {
@@ -586,13 +588,6 @@ func (p *CacheAwarePolicy) Pick(candidates []PlannerReplica, prefix []string, lo
 		return PlannerReplica{}, false
 	}
 	return byName[chosen], true
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // CacheAwareRoutingResult is the measured witness for the cache-aware-beats-round-robin

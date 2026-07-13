@@ -9,6 +9,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Schema is the report envelope schema id; LedgerSchema is the durable trend row.
@@ -208,7 +210,7 @@ func interpretOne(m Milestone, windowDays int, now time.Time) Row {
 	}
 
 	// Future due date: required pace to finish in time.
-	r.RequiredRate = round2(float64(m.Open) / float64(maxInt(r.DaysToDue, 1)))
+	r.RequiredRate = round2(float64(m.Open) / float64(mathx.MaxInt(r.DaysToDue, 1)))
 
 	if !r.HasVelocity {
 		// Degraded path (no pace signal): assert only urgency. Live collection
@@ -536,13 +538,6 @@ func pct(closed, total int) float64 {
 }
 
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

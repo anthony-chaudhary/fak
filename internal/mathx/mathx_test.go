@@ -41,3 +41,13 @@ func TestArgmaxF32(t *testing.T) {
 		}
 	}
 }
+
+func TestMaxInt(t *testing.T) {
+	for _, tc := range []struct{ a, b, want int }{
+		{7, 3, 7}, {3, 7, 7}, {-2, -5, -2}, {4, 4, 4},
+	} {
+		if got := MaxInt(tc.a, tc.b); got != tc.want {
+			t.Fatalf("MaxInt(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

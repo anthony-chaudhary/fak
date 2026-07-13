@@ -16,14 +16,9 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
-)
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+	"github.com/anthony-chaudhary/fak/internal/mathx"
+)
 
 func main() {
 	full := flag.Bool("full", false, "print every tensor name (default: a representative sample)")
@@ -66,7 +61,7 @@ func main() {
 				head = data[:6]
 			}
 			fmt.Printf("  %-40s type=%s n=%d mean=%.5f min=%.5f max=%.5f head=%v\n",
-				name, info.Type, n, sum/float64(maxInt(n, 1)), mn, mx, head)
+				name, info.Type, n, sum/float64(mathx.MaxInt(n, 1)), mn, mx, head)
 		}
 		return
 	}

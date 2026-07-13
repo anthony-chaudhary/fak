@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 const (
@@ -370,7 +372,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 	if in.Kernel.Target != nil && *in.Kernel.Target > 0 && in.Kernel.Alive != nil {
 		aliveKernelForCap = *in.Kernel.Alive
 	}
-	live := maxInt(aliveKernelForCap, in.OSWorkerProcs)
+	live := mathx.MaxInt(aliveKernelForCap, in.OSWorkerProcs)
 	seat := accountUnattributedLiveSlots(in.Seat, live)
 	headroom := capacity - live
 
@@ -424,9 +426,9 @@ func accountUnattributedLiveSlots(seat SeatCheck, live int) SeatCheck {
 		seat.Free = IntPtr(adjusted)
 	} else {
 		occupied := minInt(live, total)
-		seat.Free = IntPtr(maxInt(0, total-occupied))
+		seat.Free = IntPtr(mathx.MaxInt(0, total-occupied))
 	}
-	seat.Leased = IntPtr(maxInt(leased, minInt(live, total)))
+	seat.Leased = IntPtr(mathx.MaxInt(leased, minInt(live, total)))
 	seat.Depleted = seat.Depleted || intValue(seat.Free) == 0
 	seat.UnattributedLive = missing
 	return seat
@@ -710,13 +712,6 @@ func nonEmpty(in []string) []string {
 
 func minInt(a, b int) int {
 	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
 		return a
 	}
 	return b

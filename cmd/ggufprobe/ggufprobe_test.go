@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 func TestSummarize(t *testing.T) {
@@ -111,8 +113,8 @@ func TestMaxInt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("max(%d,%d)", tt.a, tt.b), func(t *testing.T) {
-			if got := maxInt(tt.a, tt.b); got != tt.want {
-				t.Errorf("maxInt(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+			if got := mathx.MaxInt(tt.a, tt.b); got != tt.want {
+				t.Errorf("mathx.MaxInt(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
 			}
 		})
 	}

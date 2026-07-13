@@ -1345,13 +1345,6 @@ func stringOrEmpty[T any](ptr *T, f func(*T) string) string {
 	return f(ptr)
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func containsString(vals []string, want string) bool {
 	for _, v := range vals {
 		if v == want {
