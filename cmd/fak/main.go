@@ -226,6 +226,8 @@ func main() {
 		cmdClaudeMacFak(os.Args[2:])
 	case "macbench":
 		cmdMacBench(os.Args[2:])
+	case "macfit":
+		cmdMacFit(os.Args[2:])
 	case "codex":
 		cmdCodex(os.Args[2:])
 	case "codex-mcp-health":
