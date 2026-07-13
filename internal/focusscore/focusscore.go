@@ -327,7 +327,7 @@ func Build(opts Options) ScorecardPayload {
 	cScore := axisScore(convergence)
 	bScore := axisScore(breadth)
 	composite := int(math.Round(convergenceWeight*float64(cScore) + breadthWeight*float64(bScore)))
-	grade := GradeLetter(composite)
+	grade := scorecard.GradeStd(float64(composite))
 
 	kpis := make([]scorecard.KPI, len(all))
 	for i, r := range all {
@@ -547,10 +547,6 @@ func axisScore(rows []KPIResult) int {
 		return 0
 	}
 	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-func GradeLetter(score int) string {
-	return scorecard.GradeStd(float64(score))
 }
 
 func kpiPayloads(rows []KPIResult) []KPIPayload {

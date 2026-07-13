@@ -724,7 +724,7 @@ func Build(opts Options) ScorecardPayload {
 	})
 
 	composite := int(math.Round(wShare*float64(wScore) + hShare*float64(hScore) + cShare*float64(cScore)))
-	grade := GradeLetter(composite)
+	grade := scorecard.GradeStd(float64(composite))
 	debt := anyInt(p.Corpus["dogfood_debt"])
 	scorecard.StampLegacyScore(p.Corpus, float64(composite))
 	p.Corpus["grade"] = grade
@@ -883,10 +883,6 @@ func axisScore(rows []KPIResult) int {
 		return 0
 	}
 	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-func GradeLetter(score int) string {
-	return scorecard.GradeStd(float64(score))
 }
 
 func kpiPayloads(rows []KPIResult) []KPIPayload {

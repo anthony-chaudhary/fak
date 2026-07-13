@@ -407,7 +407,7 @@ func Build(opts Options) ScorecardPayload {
 	// preserved here so porting onto the shared kernel cannot shift a grade at a
 	// boundary the old int-rounding-then-grade order would not have crossed.
 	composite := int(math.Round(durabilityWeight*float64(dScore) + selfReportWeight*float64(sScore) + dogfoodWeight*float64(gScore)))
-	grade := GradeLetter(composite)
+	grade := scorecard.GradeStd(float64(composite))
 
 	kpis := make([]scorecard.KPI, len(all))
 	for i, r := range all {
@@ -605,10 +605,6 @@ func axisScore(rows []KPIResult) int {
 		return 0
 	}
 	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-func GradeLetter(score int) string {
-	return scorecard.GradeStd(float64(score))
 }
 
 // kpiPayloads renders the local KPIPayload JSON shape from the same per-row

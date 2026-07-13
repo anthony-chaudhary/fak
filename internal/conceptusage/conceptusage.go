@@ -652,10 +652,6 @@ func axisScore(rows []KPIResult) int {
 	return int(math.Round(100 * float64(got) / float64(total)))
 }
 
-func GradeLetter(score int) string {
-	return scorecard.GradeStd(float64(score))
-}
-
 func kpiPayloads(rows []KPIResult) []KPIPayload {
 	out := make([]KPIPayload, 0, len(rows))
 	for _, r := range rows {

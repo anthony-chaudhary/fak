@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/stopfailure"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // jsonl builds a transcript line for an assistant text event in the nested shape.
@@ -473,7 +475,7 @@ func cwdFragileReasons(command string, args []string) []string {
 func TestGradeLetter(t *testing.T) {
 	cases := map[int]string{100: "A", 90: "A", 85: "B", 75: "C", 65: "D", 40: "F"}
 	for score, want := range cases {
-		if got := GradeLetter(score); got != want {
+		if got := scorecard.GradeStd(float64(score)); got != want {
 			t.Errorf("GradeLetter(%d) = %q, want %q", score, got, want)
 		}
 	}
