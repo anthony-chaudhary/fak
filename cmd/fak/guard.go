@@ -1027,7 +1027,7 @@ func cmdGuard(argv []string) {
 		VDSO:                  true,
 		Invalidation:          "global",
 		Version:               appversion.Current(),
-		ReloadPolicy:          policyReloader(*policyPath),
+		ReloadPolicy:          guardPolicyReloader(*policyPath),
 		ResetTrace:            resetTrace,
 		ObserveTrace:          observeTrace,
 		ObserveSession:        observeSession,
