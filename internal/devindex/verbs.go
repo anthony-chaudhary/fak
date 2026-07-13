@@ -175,6 +175,7 @@ var verbManifest = []Verb{
 	{Name: "hooklat", Synopsis: "guard-hook latency rollup: fold the DOS hook-observation streams into percentiles, gate the p99 tail", Lane: "cmd"},
 	{Name: "hooks", Synopsis: "the commit-boundary git-hook gates in one process (pre-commit / commit-msg)", Lane: "cmd"},
 	{Name: "horizon-recovery", Synopsis: "recover stranded / stalled long-horizon work", Lane: "cmd"},
+	{Name: "hwgate-lint", Synopsis: "scan agent output for local-hardware stops (no GPU here) and redirect each to a sanctioned compute node", Lane: "cmd"},
 	{Name: "hygiene", Synopsis: "the whole-tree hygiene gates in one process (the --audit-tree twin of fak hooks)", Lane: "cmd"},
 	{Name: "idempotency", Synopsis: "retry-safe execution for non-idempotent tool ops: key by op+token, dedupe a post-hang retry (run/selfcheck)", Lane: "cmd"},
 	{Name: "index", Synopsis: "queryable self-index: lane/leaf/docs/claims/verbs/refs (query, don't survey)", Aliases: []string{"devindex"}, Lane: "devindex", Doc: "AGENTS.md"},

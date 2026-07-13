@@ -180,6 +180,7 @@ var verbTiers = map[string]VerbTier{
 	"hooklat":                       TierDev,
 	"hooks":                         TierDev,
 	"horizon-recovery":              TierDev,
+	"hwgate-lint":                   TierDev,
 	"hygiene":                       TierDev,
 	"idempotency":                   TierDev,
 	"index":                         TierDev,
