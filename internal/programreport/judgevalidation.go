@@ -198,14 +198,14 @@ type JudgeMetrics struct {
 
 // JudgeVerdict is the adjudicated result of validating one judge case.
 type JudgeVerdict struct {
-	CaseID          string          `json:"case_id"`
-	JudgeID         string          `json:"judge_id"`
-	Pass            bool            `json:"pass"`
-	FirstDivergence JudgeAxis       `json:"first_divergence,omitempty"`
-	DivergenceKind  string          `json:"divergence_kind,omitempty"`
-	Reason          string          `json:"reason"`
-	Metrics         JudgeMetrics    `json:"metrics"`
-	Replay          *JudgeReplay    `json:"replay,omitempty"` // present iff Pass is false
+	CaseID          string       `json:"case_id"`
+	JudgeID         string       `json:"judge_id"`
+	Pass            bool         `json:"pass"`
+	FirstDivergence JudgeAxis    `json:"first_divergence,omitempty"`
+	DivergenceKind  string       `json:"divergence_kind,omitempty"`
+	Reason          string       `json:"reason"`
+	Metrics         JudgeMetrics `json:"metrics"`
+	Replay          *JudgeReplay `json:"replay,omitempty"` // present iff Pass is false
 }
 
 // JudgeReplay is the scrubbed, self-contained record a failing case emits so the
