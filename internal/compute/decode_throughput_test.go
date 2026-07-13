@@ -77,6 +77,47 @@ func TestTokPerSecCeiling(t *testing.T) {
 	}
 }
 
+func TestFLOPBoundTokPerSecCeiling(t *testing.T) {
+	p := DecodeProfile(smallDecodeGeom()) // FLOPsPerToken = 656
+	// peak FLOP/s == FLOPs/token ⇒ exactly one token/second (compute-bound).
+	if got := p.FLOPBoundTokPerSecCeiling(656); !decodeFloatNear(got, 1.0) {
+		t.Fatalf("FLOPBoundTokPerSecCeiling(656) = %v, want 1.0", got)
+	}
+	if got := p.FLOPBoundTokPerSecCeiling(6560); !decodeFloatNear(got, 10.0) {
+		t.Fatalf("FLOPBoundTokPerSecCeiling(6560) = %v, want 10.0", got)
+	}
+	// Zero-guards: no compute peak, or an empty geometry, yields 0 (never a divide-by-zero).
+	if got := p.FLOPBoundTokPerSecCeiling(0); got != 0 {
+		t.Fatalf("FLOPBoundTokPerSecCeiling(0) = %v, want 0", got)
+	}
+	if got := (DecodeRoofline{}).FLOPBoundTokPerSecCeiling(1e9); got != 0 {
+		t.Fatalf("empty-roofline FLOP ceiling = %v, want 0", got)
+	}
+}
+
+func TestRooflineTokPerSecCeiling(t *testing.T) {
+	p := DecodeProfile(smallDecodeGeom()) // FLOPsPerToken = 656, WeightBytesPerToken = 1312
+	// Memory binds: compute ceiling 10 tok/s (6560 FLOP/s), memory ceiling 1 tok/s (1312 B/s).
+	if got := p.RooflineTokPerSecCeiling(6560, 1312); !decodeFloatNear(got, 1.0) {
+		t.Fatalf("roofline(compute 10, memory 1) = %v, want the min 1.0", got)
+	}
+	// Compute binds: compute ceiling 1 tok/s (656 FLOP/s), memory ceiling 10 tok/s (13120 B/s).
+	if got := p.RooflineTokPerSecCeiling(656, 13120); !decodeFloatNear(got, 1.0) {
+		t.Fatalf("roofline(compute 1, memory 10) = %v, want the min 1.0", got)
+	}
+	// One peak unknown ⇒ the other single bound stands (drop-out discipline).
+	if got := p.RooflineTokPerSecCeiling(0, 1312); !decodeFloatNear(got, 1.0) {
+		t.Fatalf("roofline(_, memory 1) = %v, want 1.0 (memory bound alone)", got)
+	}
+	if got := p.RooflineTokPerSecCeiling(656, 0); !decodeFloatNear(got, 1.0) {
+		t.Fatalf("roofline(compute 1, _) = %v, want 1.0 (compute bound alone)", got)
+	}
+	// Both peaks unknown ⇒ 0 (no bound to report).
+	if got := p.RooflineTokPerSecCeiling(0, 0); got != 0 {
+		t.Fatalf("roofline(0, 0) = %v, want 0", got)
+	}
+}
+
 func TestObservedTokPerSec(t *testing.T) {
 	// The issue's one measurement: ~500 tokens in >10 minutes.
 	if got := ObservedTokPerSec(500, 600); !decodeFloatNear(got, 500.0/600.0) {

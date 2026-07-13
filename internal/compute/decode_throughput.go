@@ -110,6 +110,46 @@ func (r DecodeRoofline) TokPerSecCeiling(peakBytesPerSec float64) float64 {
 	return peakBytesPerSec / float64(r.WeightBytesPerToken)
 }
 
+// FLOPBoundTokPerSecCeiling is the COMPUTE-bound upper bound on decode throughput (tokens/second)
+// at a device's peak compute rate (peakFLOPsPerSec, FLOP/s): peakFLOPsPerSec ÷ FLOPsPerToken.
+// Since FLOPsPerToken counts every weight-GEMM multiply-add as 2 flops over the active parameter
+// set, this is exactly the theoretical-ceiling law tok/s = tensor_FLOP/s ÷ (2·active_params) — the
+// aggregate/compute ceiling in tok/s form — evaluated at this geometry. It is a ceiling because a
+// decoder cannot emit a token without performing every weight-GEMM FLOP at least once, so no
+// kernel can beat it. peakFLOPsPerSec is the caller's (measured on the box); no FLOP constant is
+// baked in. A non-positive peak or an empty geometry yields 0 (no divide-by-zero). For single-token
+// decode this ceiling normally sits ABOVE the memory-bound TokPerSecCeiling (decode is memory-bound,
+// per this file's thesis), so it is the LOOSER of the two bounds on its own — exposed separately so
+// the compute and memory ceilings can be compared, and folded into RooflineTokPerSecCeiling.
+func (r DecodeRoofline) FLOPBoundTokPerSecCeiling(peakFLOPsPerSec float64) float64 {
+	if peakFLOPsPerSec <= 0 || r.FLOPsPerToken <= 0 {
+		return 0
+	}
+	return peakFLOPsPerSec / float64(r.FLOPsPerToken)
+}
+
+// RooflineTokPerSecCeiling is the honest full decode roofline in tok/s: the MINIMUM of the
+// compute-bound (FLOPBoundTokPerSecCeiling) and memory-bound (TokPerSecCeiling) ceilings — a
+// decoder can beat neither the FLOP floor nor the bandwidth floor, so the binding constraint is
+// whichever is smaller. It transposes prefill.go RooflineSeconds' max()-of-bounds in TIME to a
+// tok/s RATE (the binding term is the min, not the max). Each peak is the caller's; a non-positive
+// or unknown peak drops its term out, so supplying only one peak yields that single bound (the
+// same drop-out discipline RooflineSeconds keeps). Returns 0 only when BOTH ceilings are 0.
+func (r DecodeRoofline) RooflineTokPerSecCeiling(peakFLOPsPerSec, peakBytesPerSec float64) float64 {
+	compute := r.FLOPBoundTokPerSecCeiling(peakFLOPsPerSec)
+	memory := r.TokPerSecCeiling(peakBytesPerSec)
+	switch {
+	case compute <= 0:
+		return memory // compute bound unknown → memory bound stands alone (0 if both unknown)
+	case memory <= 0:
+		return compute // memory bound unknown → compute bound stands alone
+	case compute < memory:
+		return compute
+	default:
+		return memory
+	}
+}
+
 // ObservedTokPerSec converts a single wall-clock observation — tokens produced over a duration
 // in seconds — into throughput. It is the ONE measurement issue #3176 reports (~500 tokens in
 // >10 minutes ≈ 0.8 tok/s), and exists so an operator can compare a lone stopwatch reading
