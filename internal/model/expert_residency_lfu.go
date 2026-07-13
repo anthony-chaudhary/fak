@@ -67,13 +67,13 @@ type ExpertResidencyPolicyRow struct {
 // value-aware ring thrashed the page-in path less than LRU, and HitDelta>=0 means it did so
 // without giving up hits. Both flat/negative is the demotion signal.
 type ExpertResidencyLFUReport struct {
-	Name               string                 `json:"name"`
-	Source             string                 `json:"source"`
-	BudgetBytes        int64                  `json:"budget_bytes"`
-	DecayEveryAccesses int                    `json:"decay_every_accesses"`
-	HysteresisMargin   string                 `json:"hysteresis_margin"`
-	LFUDecay           ExpertResidencyPolicyRow `json:"lfu_decay"`
-	LRU                compute.KVReplayResult `json:"lru"`
+	Name               string                       `json:"name"`
+	Source             string                       `json:"source"`
+	BudgetBytes        int64                        `json:"budget_bytes"`
+	DecayEveryAccesses int                          `json:"decay_every_accesses"`
+	HysteresisMargin   string                       `json:"hysteresis_margin"`
+	LFUDecay           ExpertResidencyPolicyRow     `json:"lfu_decay"`
+	LRU                compute.KVReplayResult       `json:"lru"`
 	Oracle             compute.KVReplayOracleResult `json:"oracle"`
 	// EvictionDelta = LRU.Evictions - LFUDecay.Evictions (positive = value-aware thrashes less).
 	EvictionDelta int `json:"eviction_delta"`
