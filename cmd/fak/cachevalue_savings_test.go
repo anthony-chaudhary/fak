@@ -112,6 +112,64 @@ func TestAppendObservedCacheSavingsThreadsUpgradedCreationTokens(t *testing.T) {
 
 func approxSavingsTest(a, b float64) bool { return math.Abs(a-b) <= 1e-9 }
 
+// TestAppendObservedCacheSavingsThreadsCompactionCacheReadWitness is the closing
+// witness for the durable-vs-live shed-valuation divergence: the warm witness
+// gateway.AdjudicationSummary.CompactionCacheReadTokens must reach the Track-2 ledger
+// row so cacheprice.ShedTokenEquiv prices a WARM shed at the cache-read marginal (0.1x),
+// exactly as the live split (cache_pricing.go) and guard banner already do. Before this
+// wire, appendObservedCacheSavingsTo dropped the field, so the durable row always saw
+// warmWitness=0 and booked every shed at FULL_INPUT (1.0x) — the ~10x over-valuation
+// #2794/#2798 corrected everywhere EXCEPT this producer, so the same `fak guard` exit
+// printed the shed two ways (blended banner vs full-input persistence line) that disagreed
+// ~10x on a warm session. The parallel of the #2179 CacheCreationTokensUpgraded wire above.
+func TestAppendObservedCacheSavingsThreadsCompactionCacheReadWitness(t *testing.T) {
+	clearCachevaluePriceEnv(t)
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "cache-savings.jsonl")
+	// Fully-warm session: the observed provider cache_read at the fires (4000) exceeds the
+	// shed (1000), so all 1000 shed tokens were being served cheaply — worth the 0.1x
+	// read marginal, not full input.
+	sum := gateway.AdjudicationSummary{
+		InputTokens:               20,
+		CachedPromptTokens:        60,
+		CacheCreationTokens:       20,
+		OutputTokens:              3,
+		CompactionShedTokens:      1000,
+		CompactionCacheReadTokens: 4000,
+		CompactionFired:           9,
+	}
+
+	res := appendObservedCacheSavingsTo(path, "guard", "anthropic", "claude", sum, now)
+	if res.Err != nil {
+		t.Fatalf("append savings returned error: %v", res.Err)
+	}
+	// 1000 warm shed tokens * 0.1x = 100 token-equiv. A dropped witness would instead book
+	// the shed at full input = 1000 token-equiv — the ~10x over-count this wire closes.
+	if !approxSavingsTest(res.FakCompactionTokenEquiv, 100) {
+		t.Fatalf("FakCompactionTokenEquiv = %.4f, want 100 (warm shed at the 0.1x cache-read marginal); a value near 1000 means the warm witness was dropped and the shed was booked at FULL_INPUT",
+			res.FakCompactionTokenEquiv)
+	}
+
+	rows := cachevaluereport.ReadSavingsLedgerFile(path)
+	var compaction *cachevaluereport.SavingsRow
+	for i := range rows {
+		if rows[i].Mechanism == "compaction_shed" {
+			compaction = &rows[i]
+			break
+		}
+	}
+	if compaction == nil {
+		t.Fatalf("warm session must write a compaction_shed row; got %d rows: %+v", len(rows), rows)
+	}
+	if compaction.CompactionCacheReadTokens != 4000 {
+		t.Fatalf("ledger row CompactionCacheReadTokens = %d, want 4000 (the gateway summary's warm witness must be threaded, not dropped)", compaction.CompactionCacheReadTokens)
+	}
+	if compaction.ValuationBasis != cachevaluereport.ValuationBasisCacheReadMarginal {
+		t.Fatalf("warm shed valuation_basis = %q, want %q; FULL_INPUT here means the witness was dropped and the shed over-valued ~10x",
+			compaction.ValuationBasis, cachevaluereport.ValuationBasisCacheReadMarginal)
+	}
+}
+
 func TestAppendObservedCacheSavingsEnvOverridesDefaultPricing(t *testing.T) {
 	t.Setenv(cachevalueInputPriceEnv, "7")
 	t.Setenv(cachevalueOutputPriceEnv, "11")

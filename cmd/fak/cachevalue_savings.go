@@ -46,11 +46,18 @@ func appendObservedCacheSavingsTo(path, sessionType, provider, context string, s
 		CacheCreationTokensUpgraded: sum.CacheCreationTokensUpgraded,
 		OutputTokens:                sum.OutputTokens,
 		CompactionShedTokens:        sum.CompactionShedTokens,
-		CompactionFired:             sum.CompactionFired,
-		CompactionBailed:            sum.CompactionBailed,
-		CompactionAnchorStarved:     sum.CompactionAnchorStarved,
-		CompactionBudget:            sum.CompactionBudget,
-		Pricing:                     cachevalueSavingsPricing(provider, context),
+		// CompactionCacheReadTokens is the warm witness cacheprice.ShedTokenEquiv prices the
+		// shed on. Without it the durable Track-2 row always sees warmWitness=0 and books every
+		// shed at FULL_INPUT (1.0x) even on a warm session, diverging ~10x from the live split
+		// and guard banner, which DO thread it (cache_pricing.go, serve.go). It is the ONE
+		// argument that kept "ShedTokenEquiv is one source" from holding across surfaces by
+		// construction (#2794/#2798).
+		CompactionCacheReadTokens: sum.CompactionCacheReadTokens,
+		CompactionFired:           sum.CompactionFired,
+		CompactionBailed:          sum.CompactionBailed,
+		CompactionAnchorStarved:   sum.CompactionAnchorStarved,
+		CompactionBudget:          sum.CompactionBudget,
+		Pricing:                   cachevalueSavingsPricing(provider, context),
 	}, now)
 	res := cacheValueAppendResult{RowsPlanned: len(rows)}
 	for _, row := range rows {
