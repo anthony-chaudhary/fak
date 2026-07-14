@@ -74,11 +74,11 @@ type ClaimRegistry map[claimKey]Claim
 // cache/compaction/resume number here was lifted verbatim from the inline
 // `Claimed:` field it replaced; the pinned-claim tests in cmd/fak/dojo_test.go
 // prove the extraction preserved each value. The dispatch-yield (#4497),
-// provider-turns (#4505), and provider-cache (#4504) KPI cells are SEEDED
-// estimates instead — they live in this central literal (not the additive
-// RegisterClaim seam) because the RSI recalibrate arm's anchored rewriter
-// targets only this file (dojocal.ClaimsRelPath), and those cells exist
-// precisely to be recalibrated toward their corpus-measured values.
+// provider-turns (#4505), provider-cache (#4504), and provider-toolcall (#4507)
+// KPI cells are SEEDED estimates instead — they live in this central literal
+// (not the additive RegisterClaim seam) because the RSI recalibrate arm's
+// anchored rewriter targets only this file (dojocal.ClaimsRelPath), and those
+// cells exist precisely to be recalibrated toward their corpus-measured values.
 // false_warm_rate and cross_session_warm_hit_rate are floors (the
 // lethal false-warm class and the bimodal 0.0 default the loop must not recalibrate
 // up to its empirical rate); every other cell is a genuine estimate.
@@ -111,6 +111,9 @@ var Registry = ClaimRegistry{
 
 	{"provider-cache", "cache_read_share"}: claim(0.8,
 		"seed theory (#4504): ~80% of the input tokens a provider bills on a warm agentic session corpus (input + cache_read + cache_creation) are served as cache reads; a genuine estimate the RSI loop recalibrates toward the measured shares, and the per-provider spread of the same cell is the cross-provider cache-economy leaderboard"),
+
+	{"provider-toolcall", "tool_call_success_rate"}: claim(0.9,
+		"seed theory (#4507): ~90% of tool calls on an agentic session corpus succeed on the first try (non-errored tool_result / total tool_result); a genuine estimate the RSI loop recalibrates toward the measured rates, and the per-provider spread of the same cell is the cross-provider tool-reliability leaderboard"),
 }
 
 // registered is the additive claim seam: the composed home for cells a KPI leaf
