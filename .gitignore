@@ -180,6 +180,9 @@ internal/compute/spirv/
 
 # Editor-local settings
 .vscode/
+# Ad-hoc Codex launchers historically created sibling .codex-*-runs directories.
+# Keep raw transcripts unstageable; new launchers use `fak lab private-path --create`.
+/.codex-*-runs/
 .codex/
 # Project lifecycle hooks are shared enforcement, not editor-local state. Keep every
 # other Codex file ignored while admitting the one reviewed repo hook manifest.

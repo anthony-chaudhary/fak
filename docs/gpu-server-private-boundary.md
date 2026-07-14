@@ -97,3 +97,20 @@ and it is private GPU-server control-plane code.
 - `.gitignore`: keeps private GPU-server run outputs and bridge working copies out of status
 - `tools/scrub_public_copy.py`: strips private GPU-server machine runs and lab identifiers from
   exported copies
+## Private run directories: opaque and outside this checkout
+
+Control-plane prompts, stdout/stderr, worker manifests, bridge transcripts, and raw benchmark
+artifacts are private even when their contents appear harmless. Do not create machine-named or
+campaign-named directories in the public checkout (for example, `.codex-<machine>-runs`). Resolve
+an opaque destination first:
+
+```powershell
+$RunDir = fak lab private-path --create
+```
+
+The default is `<paired-private-repo>/fleet-runs/codex/<UTC>-<random>`, with the private root
+resolved from `FAK_PRIVATE_ROOT` or the sibling `../fak-private` checkout. The command deliberately
+accepts no hardware, channel, customer, model, or campaign label, so private identifiers do not
+leak through directory names or process arguments. It fails closed when the paired private root is
+unavailable or points inside the public checkout. Only separately scrubbed, reproducible summaries
+belong in this repository.

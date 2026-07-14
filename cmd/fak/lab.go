@@ -51,7 +51,7 @@ func cmdLab(argv []string) { os.Exit(runLab(os.Stdout, os.Stderr, argv)) }
 
 func runLab(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak lab <status|report|readiness|target|ls> [flags]")
+		fmt.Fprintln(stderr, "usage: fak lab <status|report|readiness|target|ls|private-path> [flags]")
 		fmt.Fprintln(stderr, "       fak lab status            # which lab nodes are alive right now?")
 		fmt.Fprintln(stderr, "       fak lab readiness --json  # public-safe lab dispatch gate")
 		fmt.Fprintln(stderr, "       fak lab target @lab/glm-5.2 --json  # validate a local lab inference alias")
@@ -69,16 +69,19 @@ func runLab(stdout, stderr io.Writer, argv []string) int {
 		return labTarget(stdout, stderr, argv[1:])
 	case "ls", "list":
 		return labLs(stdout, stderr, argv[1:])
+	case "private-path":
+		return runPrivatePath(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, "usage: fak lab <status|report|readiness|target|ls> [flags]")
+		fmt.Fprintln(stdout, "usage: fak lab <status|report|readiness|target|ls|private-path> [flags]")
 		fmt.Fprintln(stdout, "  status   fold the lab roster against the reports dir and render the fleet view")
 		fmt.Fprintln(stdout, "  report   write one fak.fleet.report/v1 line for a box (self-report; no bridge)")
 		fmt.Fprintln(stdout, "  readiness read or write the public fak.lab_readiness/v1 dispatch gate")
 		fmt.Fprintln(stdout, "  target   validate a public-safe @lab/<model> alias for fak guard --remote-serve")
 		fmt.Fprintln(stdout, "  ls       list the boxes in the (default or --roster) lab roster")
+		fmt.Fprintln(stdout, "  private-path resolve an opaque run directory in the paired private repo")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak lab: unknown subcommand %q (want status|report|readiness|target|ls)\n", argv[0])
+		fmt.Fprintf(stderr, "fak lab: unknown subcommand %q (want status|report|readiness|target|ls|private-path)\n", argv[0])
 		return 2
 	}
 }
