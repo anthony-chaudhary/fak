@@ -59,6 +59,10 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 	live := fs.Bool("live", false, "file child issues and link parents (default: dry-run plan only)")
 	allowStubs := fs.Bool("allow-stubs", false, "permit --live filing of scaffold stub children (default: scaffolds are dry-run only)")
 	maxCreate := fs.Int("max-create", 20, "blast-radius fuse: refuse --live if total child issues to create exceeds this")
+	parentBaseline := fs.Float64("parent-baseline-points", 0, "parent production-scope baseline points (required with --live)")
+	completionStandard := fs.String("completion-standard", "production", "generated child maturity (default production)")
+	targetEnvelope := fs.String("target-envelope", "", "production target operating envelope")
+	witnessedEnvelope := fs.String("witnessed-envelope", "", "currently witnessed operating envelope")
 	repo := fs.String("repo", "", "owner/name override passed to gh")
 	root := fs.String("C", "", "workspace root for the live open-issue fetch (default: cwd)")
 	asJSON := fs.Bool("json", false, "emit the machine-readable plan/result")
@@ -110,13 +114,17 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 				fileable += len(r.Children)
 			}
 		}
+		if fileable > 0 && *parentBaseline <= 0 {
+			fmt.Fprintln(stderr, "fak issue decompose: --live child creation requires --parent-baseline-points")
+			return 2
+		}
 		if fileable > *maxCreate {
 			fmt.Fprintf(stderr, "fak issue decompose: --live would create %d child issues, over --max-create=%d; narrow with --issue or raise --max-create\n", fileable, *maxCreate)
 			return 2
 		}
 	}
 
-	anyFail := applyDecompose(&result, byNumber, *live, *allowStubs, *repo, runner, stderr)
+	anyFail := applyDecompose(&result, byNumber, *live, *allowStubs, *repo, runner, stderr, *parentBaseline, *completionStandard, *targetEnvelope, *witnessedEnvelope)
 	tallyDecompose(&result)
 
 	exit := 0
@@ -420,7 +428,7 @@ func decomposeRowFileable(r decomposeRow, allowStubs bool) bool {
 // that parent was created and numbered, so a partially-filed epic is never left
 // with a misleading dependency edge — the created children are reported so a
 // rerun can be narrowed with --issue.
-func applyDecompose(result *decomposeResult, byNumber map[int]issuecontract.IssueDraft, live, allowStubs bool, repo string, runner issueCreateRunner, stderr io.Writer) bool {
+func applyDecompose(result *decomposeResult, byNumber map[int]issuecontract.IssueDraft, live, allowStubs bool, repo string, runner issueCreateRunner, stderr io.Writer, parentBaseline float64, standard, targetEnvelope, witnessedEnvelope string) bool {
 	run := runner
 	if run == nil {
 		run = runTaskHandoffGH
@@ -438,6 +446,11 @@ func applyDecompose(result *decomposeResult, byNumber map[int]issuecontract.Issu
 		}
 		if !decomposeRowFileable(*r, allowStubs) {
 			skippedStubs++
+			continue
+		}
+		if err := authorDecomposeChildren(r, parentBaseline, standard, targetEnvelope, witnessedEnvelope); err != nil {
+			r.Error = err.Error()
+			anyFail = true
 			continue
 		}
 		created := decomposeFileChildren(r, repo, run)
@@ -459,6 +472,36 @@ func applyDecompose(result *decomposeResult, byNumber map[int]issuecontract.Issu
 		fmt.Fprintf(stderr, "fak issue decompose: %d scaffold epic(s) not filed — supply real children via --from-plan, or pass --allow-stubs to file the stubs\n", skippedStubs)
 	}
 	return anyFail
+}
+
+func decomposeArgValue(args []string, name string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func authorDecomposeChildren(r *decomposeRow, baseline float64, standard, target, witnessed string) error {
+	for i := range r.Children {
+		body := decomposeArgValue(r.Children[i].Args, "--body")
+		points := float64(issuecontract.MaxDispatchExpectedSteps)
+		if points > baseline {
+			points = baseline
+		}
+		authored, err := issuecontract.AuthorBatchProjectWork(body, issuecontract.BatchProjectWork{ParentIssue: r.Parent, EstimatePoints: points, ParentBaseline: baseline, CompletionStandard: standard, TargetEnvelope: target, WitnessedEnvelope: witnessed})
+		if err != nil {
+			return err
+		}
+		for j := 0; j+1 < len(r.Children[i].Args); j++ {
+			if r.Children[i].Args[j] == "--body" {
+				r.Children[i].Args[j+1] = authored
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // decomposeFileChildren creates each child of a row and returns the numbers of
