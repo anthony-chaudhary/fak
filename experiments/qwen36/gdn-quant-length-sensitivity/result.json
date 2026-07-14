@@ -1,0 +1,76 @@
+{
+  "schema": "qwen36-gdn-quant-length-sensitivity/v1",
+  "issue": "#4273 (long-context quantized repetition collapse); length sibling of gdn-divergence-sensitivity",
+  "host": "windows/amd64 (CGO_ENABLED=0); device-independent, no Mac / no GPU / no 27B artifact",
+  "model": "Qwen3.6-27B GDN shapes (H=1024 nK=16 nV=48 kHd=128 vHd=128 K=4), projections round-tripped Q8_0 / Q4_K",
+  "hidden": 1024,
+  "a_log_mean_decay_knob": -2,
+  "gdn_layers": 48,
+  "positions_swept": [
+    16,
+    128,
+    512,
+    1757
+  ],
+  "assumed_logit_scale": 20,
+  "rho_destabilize_threshold": 0.0875,
+  "modes": [
+    {
+      "mode": "Q8_0 (per-32 symmetric int8; the compute dtype of the GDN projections in BOTH failing paths)",
+      "points": [
+        {
+          "positions": 16,
+          "final_rho_last_token": 0.0008217778330768874,
+          "implied_logit_delta_at_logit_scale_20": 0.01643555666153775
+        },
+        {
+          "positions": 128,
+          "final_rho_last_token": 0.0008221290996643516,
+          "implied_logit_delta_at_logit_scale_20": 0.016442581993287034
+        },
+        {
+          "positions": 512,
+          "final_rho_last_token": 0.0008232128369892561,
+          "implied_logit_delta_at_logit_scale_20": 0.016464256739785122
+        },
+        {
+          "positions": 1757,
+          "final_rho_last_token": 0.0008517730075196569,
+          "implied_logit_delta_at_logit_scale_20": 0.017035460150393138
+        }
+      ],
+      "rho_growth_ratio_maxP_over_minP": 1.036500345026906,
+      "max_rho": 0.0008517730075196569,
+      "reaches_destabilizing_rho_at_max_P": false
+    },
+    {
+      "mode": "Q4_K (per-32 affine 4-bit sub-block; lower bound — real Q4_K also quantizes the sub-scales)",
+      "points": [
+        {
+          "positions": 16,
+          "final_rho_last_token": 0.012267089412205825,
+          "implied_logit_delta_at_logit_scale_20": 0.2453417882441165
+        },
+        {
+          "positions": 128,
+          "final_rho_last_token": 0.011948070707853411,
+          "implied_logit_delta_at_logit_scale_20": 0.23896141415706823
+        },
+        {
+          "positions": 512,
+          "final_rho_last_token": 0.011917073119549095,
+          "implied_logit_delta_at_logit_scale_20": 0.2383414623909819
+        },
+        {
+          "positions": 1757,
+          "final_rho_last_token": 0.012570054875859424,
+          "implied_logit_delta_at_logit_scale_20": 0.2514010975171885
+        }
+      ],
+      "rho_growth_ratio_maxP_over_minP": 1.0246974203474988,
+      "max_rho": 0.012570054875859424,
+      "reaches_destabilizing_rho_at_max_P": false
+    }
+  ],
+  "verdict": "INSUFFICIENT: quant-induced rho stays small and roughly FLAT in decode length (no material compounding). Weight-quantization MAGNITUDE alone cannot explain #4273 -\u003e the quantized long-context path has an ALGORITHMIC defect (dequant/scale/tensor-mapping), not a precision-magnitude one. The decisive next witness is the on-artifact early token/logit comparison vs llama.cpp/HF on the real 27B Q4_K_M."
+}
