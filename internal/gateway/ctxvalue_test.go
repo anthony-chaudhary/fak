@@ -297,3 +297,17 @@ func TestCtxValueMCPTool(t *testing.T) {
 		t.Fatalf("MCP report advice = %+v, want a decidable class + reason", r.StepAdvice)
 	}
 }
+
+func TestObserveCtxValueCompactionFiresAutoCheckpoint(t *testing.T) {
+	fired := make(chan string, 1)
+	s := &Server{compactHistoryBudget: 1000, autoCheckpoint: func(session, reason string) { fired <- session + ":" + reason }}
+	s.observeCtxValue("session-ctx", 500, 100, 100, 10, true)
+	select {
+	case got := <-fired:
+		if got != "session-ctx:compaction" {
+			t.Fatalf("callback=%q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("compaction rebuild advice did not auto-checkpoint")
+	}
+}

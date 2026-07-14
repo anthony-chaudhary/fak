@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
 // wipTestRepo inits a throwaway git repo with one committed tracked file (built
@@ -213,5 +215,35 @@ func TestWipRestoreMissingSession(t *testing.T) {
 	rc, err := wipRestore(ctx, dir, "ghost", false, io.Discard)
 	if err == nil || rc == 0 {
 		t.Fatalf("expected error for missing session, got rc=%d err=%v", rc, err)
+	}
+}
+
+func TestWipAutoCheckpointDebouncesUnchangedTree(t *testing.T) {
+	dir, file := wipTestRepo(t)
+	if err := os.WriteFile(file, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errout bytes.Buffer
+	args := []string{"-C", dir, "--session", "autosess", "--reason", "stop", "--json"}
+	if code := runWipAutoCheckpoint(&out, &errout, args); code != 0 {
+		t.Fatalf("first code=%d err=%s", code, errout.String())
+	}
+	firstBytes, err := gitWipOut(context.Background(), dir, nil, "rev-parse", wipref.SessionRef("autosess"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := strings.TrimSpace(string(firstBytes))
+	out.Reset()
+	errout.Reset()
+	if code := runWipAutoCheckpoint(&out, &errout, args); code != 0 {
+		t.Fatalf("second code=%d err=%s", code, errout.String())
+	}
+	secondBytes, err := gitWipOut(context.Background(), dir, nil, "rev-parse", wipref.SessionRef("autosess"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := strings.TrimSpace(string(secondBytes))
+	if second != first {
+		t.Fatalf("unchanged tree minted duplicate ref: %s -> %s", first, second)
 	}
 }

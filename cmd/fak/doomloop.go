@@ -224,6 +224,7 @@ func applyCorrection(store, session string, res doomloop.Result, correct bool, n
 		if !correct {
 			return "recorded (dry-run: would queue NUDGE)", "", nil
 		}
+		_ = runWipAutoCheckpoint(io.Discard, io.Discard, []string{"--session", session, "--reason", "doomloop"})
 		pkt := nudgePacket{
 			UnixMillis: now,
 			Session:    session,

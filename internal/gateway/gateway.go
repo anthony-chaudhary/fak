@@ -532,6 +532,9 @@ type Config struct {
 	// other wire. Sibling of CtxViewBudget: compaction drops a contiguous suffix of old
 	// turns, ctxview stubs the planner's non-contiguous resident-set misses (#927).
 	CompactHistoryBudget int
+	// AutoCheckpoint is a best-effort risky-boundary callback. It runs asynchronously
+	// when context step advice reaches checkpoint/rebuild; gateway service never waits.
+	AutoCheckpoint func(session, reason string)
 	// CtxExpenseWarnTokens / CtxExpenseBlockTokens set the per-turn as-sent-volume lines the
 	// context-expense arm (ctxexpense.go) warns and blocks on — the total volume of context
 	// (system + tools + history + tail) that would be re-shipped on ONE turn, in ESTIMATED
@@ -1450,6 +1453,7 @@ type Server struct {
 	// budget while preserving the cached-prefix bytes (agent.CompactAnthropicHistory). 0
 	// (the default) leaves the body byte-for-byte unchanged.
 	compactHistoryBudget int
+	autoCheckpoint       func(session, reason string)
 
 	// compactAnchorHead mirrors Config.CompactAnchorHead: false (the default) keeps the
 	// warm-cache-safe agent.CompactAnchorFirstBP anchor; true re-anchors compaction on
@@ -1777,6 +1781,7 @@ func New(cfg Config) (*Server, error) {
 		admissionCtl:               admissionCtl,
 		ctxView:                    ctxView,
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
+		autoCheckpoint:             cfg.AutoCheckpoint,
 		ctxExpenseWarn:             ctxExpenseThresholdOr(cfg.CtxExpenseWarnTokens, ctxExpenseWarnTokensDefault),
 		ctxExpenseBlock:            ctxExpenseThresholdOr(cfg.CtxExpenseBlockTokens, ctxExpenseBlockTokensDefault),
 		ctxExpenseGate:             cfg.CtxExpenseGate || envEnabled("FAK_CTX_EXPENSE_GATE"),

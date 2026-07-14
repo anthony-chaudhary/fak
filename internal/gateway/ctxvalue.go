@@ -404,6 +404,11 @@ func (s *Server) observeCtxValue(trace string, uncachedPrompt, cacheRead, cacheC
 	}
 	v.totalOutput += int64(maxNonNeg(completion))
 	v.totalResidentTurns += int64(resident)
+	advice := adviseCtxStep(ctxValueState{Turns: v.turns, ContextEvents: v.contextEvents, TurnsSinceEvent: v.turnsSinceEvent, LastTurnEvent: v.lastTurnEvent, Resident: v.lastResident, Budget: s.compactHistoryBudget, GrowthPerTurn: v.growthPerTurn()})
+	checkpoint := s.autoCheckpoint
+	if checkpoint != nil && (advice.StepClass == StepClassCheckpoint || advice.StepClass == StepClassRebuild) {
+		go checkpoint(trace, "compaction")
+	}
 }
 
 // ctxValueForLocked mints the per-trace record lazily, bounding the table

@@ -1088,10 +1088,13 @@ func cmdGuard(argv []string) {
 		DebugStatsf:          debugStatsSink(debugStatsStderr),
 		CtxViewBudget:        *ctxViewBudget,
 		CompactHistoryBudget: *compactHistoryBudget,
-		CompactAnchorHead:    *compactAnchorHead,
-		AssumeSessionTurns:   *assumeSessionTurns,
-		ElideResultBytes:     *elideResultBytes,
-		ElideStaleReads:      *elideStaleReads,
+		AutoCheckpoint: func(session, reason string) {
+			_ = runWipAutoCheckpoint(io.Discard, io.Discard, []string{"--session", session, "--reason", reason})
+		},
+		CompactAnchorHead:  *compactAnchorHead,
+		AssumeSessionTurns: *assumeSessionTurns,
+		ElideResultBytes:   *elideResultBytes,
+		ElideStaleReads:    *elideStaleReads,
 		// Managed-cache posture (--managed-cache, epic #1844 C6): when active, the gateway
 		// upgrades the stable-prefix cache_control breakpoint to the 1h TTL tier on the
 		// outbound Anthropic wire (maybeUpgradeAnthropicCacheTTL1H). Resolved above from

@@ -347,6 +347,8 @@ func cmdGuardStopHook(argv []string) {
 // fails OPEN — any bad args, unknown mode, missing metrics URL, or unreachable gateway returns
 // 0 so the hook can never wedge the agent — exactly the posture guard-precompact takes.
 func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit int) {
+	// Capture WIP before any Stop decision; best-effort and tree-preserving.
+	_ = runWipAutoCheckpoint(io.Discard, io.Discard, []string{"--reason", "stop"})
 	// One typed, countable row per invocation (see guard_stops.go): the disposition is
 	// classified at each return below, and a single defer stamps the exit/kind and appends
 	// the row. FAIL-OPEN and gated on the wired ledger env, so recording is a no-op for any
