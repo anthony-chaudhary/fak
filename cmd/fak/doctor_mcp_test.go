@@ -61,6 +61,62 @@ func TestDoctorMCPMalformedPolicyIsTyped(t *testing.T) {
 	}
 }
 
+func TestDoctorMCPInitializeTimeoutIsTyped(t *testing.T) {
+	cmd := "cmd.exe"
+	args := []string{"/d", "/c", "ping -n 6 127.0.0.1 >nul"}
+	if runtime.GOOS != "windows" {
+		cmd = "sh"
+		args = []string{"-c", "sleep 5"}
+	}
+	rep := diagnoseMCP("fixture", "", cmd, args, 50*time.Millisecond)
+	if got := stageCause(rep, "initialize_response"); got != "INITIALIZE_TIMEOUT" {
+		t.Fatalf("cause=%q stages=%+v", got, rep.Stages)
+	}
+}
+
+func TestDoctorMCPPermissionFailureIsTyped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows executable ACL fixture is host-policy dependent")
+	}
+	path := filepath.Join(t.TempDir(), "not-executable")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep := diagnoseMCP("fixture", "", path, nil, time.Second)
+	if got := stageCause(rep, "child_spawn"); got != "SPAWN_FAILED" {
+		t.Fatalf("cause=%q stages=%+v", got, rep.Stages)
+	}
+}
+
+func TestDoctorMCPCorruptProductionRegistryIsUntouched(t *testing.T) {
+	exe := buildDoctorSelfcheck(t)
+	registry := filepath.Join(t.TempDir(), "production-registry.json")
+	before := []byte("{corrupt-production-state")
+	if err := os.WriteFile(registry, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(sessionRegistryEnv, registry)
+	policy := filepath.Join(repoRootForDoctorTest(t), "examples", "dev-agent-policy.json")
+	rep := diagnoseMCP("self", "", exe, []string{"serve", "--stdio", "--policy", policy}, 10*time.Second)
+	if !rep.OK {
+		t.Fatalf("probe failed: %+v", rep.Stages)
+	}
+	after, err := os.ReadFile(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("production registry mutated: before=%q after=%q", before, after)
+	}
+	matches, err := filepath.Glob(registry + ".corrupt-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("diagnosis quarantined production state: %v", matches)
+	}
+}
+
 func TestDoctorMCPStdoutContaminationAndEarlyExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		rep := diagnoseMCP("fixture", "", "cmd.exe", []string{"/d", "/c", "echo banner"}, 2*time.Second)
@@ -75,6 +131,19 @@ func TestDoctorMCPStdoutContaminationAndEarlyExit(t *testing.T) {
 }
 
 func TestDoctorMCPLiveSelfCheck(t *testing.T) {
+	exe := buildDoctorSelfcheck(t)
+	policy := filepath.Join(repoRootForDoctorTest(t), "examples", "dev-agent-policy.json")
+	rep := diagnoseMCP("self", "", exe, []string{"serve", "--stdio", "--policy", policy}, 10*time.Second)
+	if !rep.OK {
+		t.Fatalf("live self-check failed: %+v", rep.Stages)
+	}
+	if got := stageStatus(rep, "initialize_response"); got != "pass" {
+		t.Fatalf("initialize=%q", got)
+	}
+}
+
+func buildDoctorSelfcheck(t *testing.T) string {
+	t.Helper()
 	exe := filepath.Join(t.TempDir(), "fak-doctor-selfcheck")
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
@@ -84,14 +153,7 @@ func TestDoctorMCPLiveSelfCheck(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build self-check binary: %v\n%s", err, out)
 	}
-	policy := filepath.Join(repoRootForDoctorTest(t), "examples", "dev-agent-policy.json")
-	rep := diagnoseMCP("self", "", exe, []string{"serve", "--stdio", "--policy", policy}, 10*time.Second)
-	if !rep.OK {
-		t.Fatalf("live self-check failed: %+v", rep.Stages)
-	}
-	if got := stageStatus(rep, "initialize_response"); got != "pass" {
-		t.Fatalf("initialize=%q", got)
-	}
+	return exe
 }
 
 func stageCause(r doctorMCPReport, name string) string {

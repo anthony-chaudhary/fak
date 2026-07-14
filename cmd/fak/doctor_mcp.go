@@ -118,6 +118,11 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, resolved, args...)
+	// A diagnosis must not touch the operator's production descriptor store. The served
+	// child gets an isolated scratch registry; a corrupt production file therefore remains
+	// byte-identical and cannot be quarantined merely by probing initialize.
+	isolatedRegistry := filepath.Join(os.TempDir(), fmt.Sprintf("fak-doctor-mcp-%d-session-registry.json", os.Getpid()))
+	cmd.Env = append(os.Environ(), sessionRegistryEnv+"="+isolatedRegistry)
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return mcpStageFail(rep, "child_spawn", "SPAWN_FAILED", err, "check executable permissions")
@@ -154,6 +159,7 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		add(doctorMCPStage{Name: "initialize_response", Status: "fail", Cause: "INITIALIZE_TIMEOUT", Detail: timeout.String(), Remediation: "run the configured command directly; inspect blocking startup work and stderr"})
+		add(doctorMCPStage{Name: "exit_status", Status: "fail", Cause: "CHILD_TIMEOUT", Detail: ctx.Err().Error(), Remediation: "remove blocking startup work or raise --timeout after measuring it"})
 		return rep
 	}
 	stderrBytes, _ := io.ReadAll(io.LimitReader(errPipe, 4096))
