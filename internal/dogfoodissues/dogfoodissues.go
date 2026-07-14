@@ -420,8 +420,17 @@ func ExtractActionItems(report map[string]any, reportPath string) []ActionItem {
 }
 
 // IssueBody renders the stable, marker-stamped issue body for an item.
-func IssueBody(item ActionItem) string {
+func IssueBody(item ActionItem) string { return IssueBodyWithOptions(item, BuildOptions{}) }
+func IssueBodyWithOptions(item ActionItem, opt BuildOptions) string {
 	c := actionCandidate(item)
+	if opt.ParentBaseline > 0 {
+		points := float64(c.ExpectedSteps)
+		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
+		c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
+		c.TargetEnvelope = opt.TargetEnvelope
+		c.WitnessedEnvelope = opt.WitnessedEnvelope
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-dogfood-action-key: %s -->\n", item.Key)
 	fmt.Fprintln(&b, "# Dogfood scorecard ACTION")
@@ -463,6 +472,15 @@ func IssueBody(item ActionItem) string {
 	issueSection(&b, "Done condition", item.DoneCondition)
 	issueSection(&b, "Witness", item.Witness)
 	issueSection(&b, "Acceptance gate", item.AcceptanceGate)
+	issueSection(&b, "Work estimate", c.WorkEstimate)
+	issueSection(&b, "Overall completion contribution", c.ScopeContribution)
+	issueSection(&b, "Completion standard", c.CompletionStandard)
+	if c.TargetEnvelope != "" {
+		issueSection(&b, "Target operating envelope", c.TargetEnvelope)
+	}
+	if c.WitnessedEnvelope != "" {
+		issueSection(&b, "Witnessed operating envelope", c.WitnessedEnvelope)
+	}
 	issueListSection(&b, "Boundary notes", item.BoundaryNotes)
 	issueSection(&b, "Closure binding", c.ClosureBinding)
 	fmt.Fprintln(&b, "Suggested next action:")
@@ -489,7 +507,7 @@ func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
 		Live:              opt.Live,
 		DedupeChecked:     opt.DedupeChecked,
 		DedupeCap:         opt.DedupeCap,
-		StrictProjectWork: opt.ParentBaseline > 0,
+		StrictProjectWork: true,
 	})
 }
 
@@ -681,7 +699,7 @@ func CohortPlan(items []ActionItem, opt BuildOptions) issuecohort.Plan {
 			Live:              opt.Live,
 			DedupeChecked:     opt.DedupeChecked,
 			DedupeCap:         opt.DedupeCap,
-			StrictProjectWork: opt.ParentBaseline > 0,
+			StrictProjectWork: true,
 		},
 	})
 }
@@ -696,7 +714,7 @@ func planRowWithOptions(item ActionItem, opt BuildOptions) PlanRow {
 		Key:          item.Key,
 		Title:        item.Title,
 		Milestone:    milestone,
-		Body:         IssueBody(item),
+		Body:         IssueBodyWithOptions(item, opt),
 		Score:        item.Score,
 		Grade:        item.Grade,
 		DebtCount:    item.DebtCount,
