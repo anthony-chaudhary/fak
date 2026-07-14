@@ -539,7 +539,8 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
                 continue
             if ch in {'"', "'", "`"}:
                 quote = ch
-            elif ch == "{": depth += 1
+            elif ch == "{":
+                depth += 1
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
@@ -553,7 +554,6 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
 def _owning_function(text: str, start_line: int, end_line: int):
     starts = [0] + [m.end() for m in re.finditer("\n", text)]
     start = starts[max(0, start_line - 1)]
-    end = starts[end_line] if end_line < len(starts) else len(text)
     for fstart, fend, signature, body in _function_spans(text):
         if fstart <= start and start < fend:
             return signature, body

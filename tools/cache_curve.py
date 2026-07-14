@@ -792,8 +792,8 @@ def render_costcurve_svg(turns=50, delta=2_000, read_mult=READ_MULT):
     wl = [
         f'cache-read share: {witnessed_ceiling * 100:.1f}% machine-wide',
         f'(session_audit.py, {ANCHOR["sessions"]} sessions; I:O {ANCHOR["io_ratio"]:.1f}:1)',
-        f'fleet reuse: ~4.1&#215; vs tuned warm-cache',
-        f'(50-turn &#215; 5-agent, M3 Pro); ~60&#215; vs naive*',
+        'fleet reuse: ~4.1&#215; vs tuned warm-cache',
+        '(50-turn &#215; 5-agent, M3 Pro); ~60&#215; vs naive*',
     ]
     for i, line in enumerate(wl):
         L.append(f'<text x="{bx0 + 12}" y="{by0 + 46 + i * 20}" font-size="11" '

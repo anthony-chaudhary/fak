@@ -126,13 +126,13 @@ class LowYieldFoldTest(unittest.TestCase):
             write_log(runs, 100, "tools", 25, stamp="20260707-120000")
             live = write_log(runs, 101, "tools", 25, stamp="20260707-130000")
 
-            keep_all = m.low_yield_lanes(runs, closes_counter=lambda l, t: 0,
+            keep_all = m.low_yield_lanes(runs, closes_counter=lambda lane, t: 0,
                                          lane_trees=TREES)
             self.assertEqual({r["lane"]: r["verdict"] for r in keep_all["lanes"]},
                              {"tools": "LOW_YIELD"})
 
             finished_only = m.low_yield_lanes(
-                runs, closes_counter=lambda l, t: 0, lane_trees=TREES,
+                runs, closes_counter=lambda lane, t: 0, lane_trees=TREES,
                 include_log=lambda p: p.name != live.name)
             rows = {r["lane"]: r for r in finished_only["lanes"]}
             self.assertEqual(rows["tools"]["verdict"], "OK")
@@ -146,7 +146,7 @@ class LowYieldFoldTest(unittest.TestCase):
             runs = Path(d)
             log = write_log(runs, 100, "tools", 0, stamp="20260707-120000")
             fold = m.low_yield_lanes(
-                runs, closes_counter=lambda l, t: 0, lane_trees=TREES,
+                runs, closes_counter=lambda lane, t: 0, lane_trees=TREES,
                 turns_of_log=lambda p: 99 if p.name == log.name else 0,
                 # one session with 99 turns still needs no min-session floor here
             )
@@ -156,7 +156,7 @@ class LowYieldFoldTest(unittest.TestCase):
 
     def test_missing_runs_dir_is_empty_fold(self):
         fold = m.low_yield_lanes(Path("no-such-runs-dir"),
-                                 closes_counter=lambda l, t: 0, lane_trees=TREES)
+                                 closes_counter=lambda lane, t: 0, lane_trees=TREES)
         self.assertEqual(fold["lanes"], [])
         self.assertEqual(fold["low_yield_count"], 0)
         self.assertEqual(fold["schema"], m._LOW_YIELD_SCHEMA)

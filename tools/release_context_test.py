@@ -288,7 +288,6 @@ class ReleaseContextTest(unittest.TestCase):
         rc, rd = load(), load_decide()
         root = self._repo()
         shas = self._commits(root, 3)
-        head = shas[-1]
         trunk = [
             {"conclusion": "failure", "headSha": "0" * 40, "updatedAt": None},
             {"conclusion": "success", "headSha": shas[0], "updatedAt": None},
@@ -314,7 +313,6 @@ class ReleaseContextTest(unittest.TestCase):
         rc, rd = load(), load_decide()
         root = self._repo()
         shas = self._commits(root, 3)
-        head = shas[-1]
         trunk = [
             {"conclusion": "failure", "headSha": shas[1], "updatedAt": None},
             {"conclusion": "success", "headSha": shas[0], "updatedAt": None},
