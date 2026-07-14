@@ -8,6 +8,30 @@ Every dispatchable ticket declares:
 - `## Overall completion contribution` — `N/M points`, binding the ticket to its parent's declared production baseline;
 - `## Completion standard` — production by default, or an explicit narrower maturity.
 
+
+## Maturity vocabulary
+
+| Standard | What a close proves | Production credit |
+|---|---|---:|
+| `research` / `experiment` | A question was investigated or a hypothesis measured. | 0 |
+| `prototype` / `demo` | A bounded example works; toy inputs and manual setup are allowed when declared. | 0 |
+| `development` / `dev` | The implementation works in a development path but has not crossed integration/operations gates. | 0 |
+| `integrated` / `staging` | The real integration path works in a pre-production environment. | 0 |
+| `production` | The declared supported path, operating envelope, failure handling, observability, operator/docs path, and matched witness are complete. | Full declared contribution |
+
+Use the maturity word with the claim: `demo complete`, `prototype complete`, or `production complete`. Bare `complete`, `done`, `shipped`, `ready`, and `model ready` are production claims by default.
+
+## Estimation and author checklist
+
+Points are relative work units, not elapsed-time promises. Use one stable local scale (for example 1/2/3/5/8), include uncertainty in prose, and keep estimate points equal to contribution points. Before filing, verify:
+
+1. The parent issue owns a named production scope and point baseline.
+2. This ticket states `Estimate: N points`.
+3. Its contribution states `N/M points`, where `M` is that parent baseline.
+4. Its completion standard is explicit; omit custom wording only when production is intended.
+5. Done/witness conditions match the completion standard and target operating envelope.
+6. Sibling contributions cover the baseline; unknown or deferred work remains visible rather than guessed away.
+
 Project progress is weighted, not an issue count. Run:
 
 ```powershell

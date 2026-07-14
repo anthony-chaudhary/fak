@@ -1,5 +1,7 @@
 # Start Here: Run AI on Your Computer
 
+- **Planning or reporting project progress?** Use [Production completion and project scope](docs/project-production-completion.md): tickets declare estimates and parent contribution, and bare “complete” means production complete.
+
 This page gets you from zero to chatting with a local AI model in under 10 minutes.
 
 ## What you can do

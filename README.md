@@ -21,6 +21,8 @@ fak guard -- claude   # run it in front of your agent: your Pro/Max plan, no API
 
 **Pick your path:** [wrap your agent](#start-in-one-command) · [15-min tutorial — no key, no GPU](docs/fak/tutorial.md) · [see it on video](visuals/hero-video.mp4) · [install](#install)
 
+> **Project truth default:** every dispatchable ticket estimates its work and share of its parent production scope; unqualified “complete” means production complete. See [Production completion and project scope](docs/project-production-completion.md).
+
 ## Why people run it
 
 - 💸 **Pay less for the same run** — **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on bigger models). Every agent shares one cached setup instead of rebuilding it each turn, on top of your provider's cache discount.
