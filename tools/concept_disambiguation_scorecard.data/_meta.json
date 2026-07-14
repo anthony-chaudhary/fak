@@ -48,7 +48,10 @@
                  "guardtaskhandoffeffectivemode", "guardtrajectorywarningline",
                  "installguardmcpregistration", "newguardlaunchnonce",
                  "readguardstoptranscript", "summarizeguardstops",
-                 "fleetbarecommitguard"],
+                 "fleetbarecommitguard",
+                 "guardstoptranscript",
+                 "guardstophookoutputstyleenvmode",
+                 "guardwireretryhop"],
       "min_files": 3,
       "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates."
     },

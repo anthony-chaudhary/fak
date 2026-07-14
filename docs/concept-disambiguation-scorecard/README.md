@@ -14,7 +14,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 | Metric | Value |
 |---|---|
 | **Score** | **93.6/100** (grade A) = 9.4/10 |
-| **Coverage** | **90.2%** (1785/1979 confusable tree tokens positioned) |
+| **Coverage** | **90.1%** (1775/1969 confusable tree tokens positioned) |
 | **Disambiguation-debt** | **194** (clarity 0 + coverage 194) |
 | Crystal-clear concepts | 196 of 1550 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
@@ -57,12 +57,12 @@ clarity mix by family (each cell = one concept):
   witness-proof    ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 18 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ########################.... 156/182
+  session-runtime  ########################.... 154/180
   cache            #########################... 202/226
   render-materialize ########################.... 142/165
-  context-ctx      ########################.... 154/176
+  context-ctx      ########################.... 153/175
   plan             ##########################.. 270/288
-  policy-capability ########################.... 102/117
+  policy-capability ########################.... 99/114
   witness-proof    #########################... 110/124
   gateway-engine   ##########################.. 150/162
   score-debt       ########################.... 68/78
@@ -75,11 +75,11 @@ coverage by family (positioned / discovered):
   pool             ##########################.. 35/37
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  guard-gate       ############################ 286/286
+  guard-gate       ############################ 281/281
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 90.2%  (1785/1979 confusable tokens positioned)
+namespace coverage  [#############################...] 90.1%  (1775/1969 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1531,9 +1531,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | session-runtime | **sessionActivity** - sessionActivity (built by newSessionActivity) is the gateway package's private tracker recording each live trace's in-flight/idle age, projected onto debugSessionVars. |
 | o | defined | subsystem | session-runtime | **sessionctl (package)** - internal/sessionctl owns the redirect control op (out-of-band objective-change, #2755/#2756): payload, validation, and the per-session next-boundary mailbox plus live-objective store. |
 | o | defined | symbol | session-runtime | **SessionEndpoints** - gateway.SessionEndpoints aggregates the roster `fak info`/guard-endpoints surfaces render: Accounts, Nodes, and an embedded Harness together. |
-| o | defined | symbol | session-runtime | **SessionFleet** - gateway.SessionFleet aggregates a cross-MACHINE fleet view of SessionFleetMachine rows for `fak info`; it exists only behind the wip_sessionfleet build tag (guard_fleet.go), not yet committed to the default build. |
+| o | defined | symbol | session-runtime | **SessionFleet** - gateway.SessionFleet aggregates a cross-MACHINE fleet view of SessionFleetMachine rows for `fak info`; it exists only behind the wip_sessionfleet build tag (info_fleet.go), not yet committed to the default build. |
 | o | defined | symbol | session-runtime | **SessionFleetMachine** - gateway.SessionFleetMachine is one machine's row within the GATED-WIP SessionFleet aggregate, folded from a fleetpane.FleetDoc snapshot. |
-| o | defined | config | session-runtime | **wip_sessionfleet (build tag)** - The `//go:build wip_sessionfleet` tag gates guard_fleet.go/guard_spine.go/info_fleet.go out of the default build until gateway.SessionFleet et al. land for real. |
+| o | defined | config | session-runtime | **wip_sessionfleet (build tag)** - The `//go:build wip_sessionfleet` tag gates info_fleet.go out of the default build until gateway.SessionFleet et al. land for real (guard_fleet.go/guard_spine.go were removed in #4689). |
 | o | defined | symbol | session-runtime | **SessionHarness** - gateway.SessionHarness is embedded in SessionEndpoints, describing the harness/runner surface (set via a SetSessionHarnessProvider hook) shown alongside accounts and nodes. |
 | o | defined | concept | session-runtime | **SessionLedger (planned, #2392)** - A not-yet-built append-only session-scoped ledger referenced only as a forward pointer (#2392) from atif/doc.go, session/scratch_lease.go, and worklog/worklog.go; those call sites deliberately stay silent on entry format pending that work. |
 | o | defined | symbol | session-runtime | **SessionNode** - gateway.SessionNode describes one machine/node entry within SessionEndpoints' roster. |
@@ -1690,12 +1690,12 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   policy-capability / abi.Verdict
 
 abstraction overclaims (16) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: repo-hygiene-scorecard = defined)
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: observability-scorecard = defined)
   ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: pace = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-usage = defined)
   ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: scorecardpane-native-fold = defined)
-  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewdropped = defined)
-  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-buildplanwithoptions = defined)
+  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: ctxview = defined)
+  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-launchplan = defined)
   ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
   ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
@@ -1712,34 +1712,34 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | repo-hygiene-scorecard = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | observability-scorecard = defined |
 | o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | secretgate = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | pace = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | session-usage = defined |
 | o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | scorecardpane-native-fold = defined |
-| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewdropped = defined |
-| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-buildplanwithoptions = defined |
+| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | ctxview = defined |
+| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-launchplan = defined |
 | o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
-| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | span-attention = defined |
+| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | turn-mass = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
 | o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-toolfeedback = defined |
 | o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | prove-recall = defined |
-| o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended-mass = defined |
+| o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended = defined |
 | o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index-request = defined |
-| o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchange-apply = defined |
+| o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
 | o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
 | o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-control-plane = crystal |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-detour-objective = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | managed-cache = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-creation-tokens = crystal |
-| * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | guard-kernel = crystal |
-| * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compactionview = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-control = crystal |
+| * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
+| * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
 | * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
-| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
-| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | verdict = crystal |
+| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
+| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
 
@@ -1759,12 +1759,12 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 156 | 182 | 26 |
+| session-runtime | 154 | 180 | 26 |
 | cache | 202 | 226 | 24 |
 | render-materialize | 142 | 165 | 23 |
-| context-ctx | 154 | 176 | 22 |
+| context-ctx | 153 | 175 | 22 |
 | plan | 270 | 288 | 18 |
-| policy-capability | 102 | 117 | 15 |
+| policy-capability | 99 | 114 | 15 |
 | witness-proof | 110 | 124 | 14 |
 | gateway-engine | 150 | 162 | 12 |
 | score-debt | 68 | 78 | 10 |
@@ -1777,7 +1777,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | pool | 35 | 37 | 2 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| guard-gate | 286 | 286 | 0 |
+| guard-gate | 281 | 281 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 

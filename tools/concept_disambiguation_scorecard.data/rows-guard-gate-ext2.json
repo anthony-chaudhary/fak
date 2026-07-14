@@ -200,7 +200,7 @@
       "definition": "The off|shadow|enforce mode constants for `fak guard`'s Claude-Code PreCompact / Stop hooks: guardPreCompactModeOff disables, guardPreCompactModeShadow logs the would-block while exiting 0, and guardPreCompactModeEnforce returns the blocking exit code.",
       "distinction": "It is the THREE-WAY MODE config for the hook actuators (the compaction/stop posture), NOT a tool-call adjudication gate and NOT the guard kernel.",
       "distinct_from": ["guard-kernel", "gate"],
-      "aliases": ["guardprecompactmodeoff", "guardprecompactmodeshadow"],
+      "aliases": ["guardprecompactmodeoff", "guardprecompactmodeshadow", "guardprecompactmode"],
       "grounding": "guardprecompactmodeenforce",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
