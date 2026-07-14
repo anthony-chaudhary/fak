@@ -148,3 +148,12 @@ func TestBenchFleetA100UsesProvisionedGPURecipe(t *testing.T) {
 		}
 	}
 }
+
+func TestBenchFleetL4ServeUsesLiveDecodeRecipe(t *testing.T) {
+	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-g2-l4-32", Benchmark: "gpu-benchmark", Command: "generic"})
+	for _, want := range []string{"FAK_BENCH_NODE=", "FAK_BENCH_HTTP=", "/v1/chat/completions", "max_tokens"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("command %q missing %q", cmd, want)
+		}
+	}
+}
