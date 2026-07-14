@@ -132,10 +132,12 @@ func q4kMatRowsInto(qt *q4kTensor, x, y []float32) {
 		// 32-wide sub-blocks align 1:1 with q8Vec's blocks, so no padding/re-quant. The f32 path
 		// below is untouched and stays byte-identical (TestQ4KMatRowsMatchesF32).
 		qv := quantizeVecQ8(x)
-		parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { q4kMatRowsRangeInt8(qt, qv, y, lo, hi) })
+		// Cap decode workers below GOMAXPROCS on many-core NUMA hosts (witnessed: uncapped
+		// 256-worker Q4_K decode collapses; ~workers/4 is 2.35x faster). See Q4KDecodeWorkers.
+		parForRangeWorkers(qt.out, qt.out*qt.in, q4kDecodeWorkers(), func(lo, hi int) { q4kMatRowsRangeInt8(qt, qv, y, lo, hi) })
 		return
 	}
-	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) {
+	parForRangeWorkers(qt.out, qt.out*qt.in, q4kDecodeWorkers(), func(lo, hi int) {
 		// AVX2 f32 kernel (bit-identical to the scalar reference) on an AVX2+ box; scalar otherwise.
 		if !q4kMatRowsRangeArch(qt, x, y, lo, hi) {
 			q4kMatRowsRange(qt, x, y, lo, hi)

@@ -293,11 +293,19 @@ func parFor(n, workers int, body func(lo, hi int)) {
 // regardless of which branch runs. work is the caller's cost estimate (typically out×in,
 // or out×in×P for a batched GEMM).
 func parForRange(n, work int, body func(lo, hi int)) {
-	if numWorkers <= 1 || work < parThreshold {
+	parForRangeWorkers(n, work, numWorkers, body)
+}
+
+// parForRangeWorkers is parForRange with an explicit worker count. The batch-1 decode GEMV
+// paths cap workers BELOW the global numWorkers to dodge the parFor barrier collapse across
+// NUMA nodes (see Q4KDecodeWorkers / Q8DecodeWorkers). The [lo,hi) contract is identical, so
+// the result stays bit-identical to the serial reference regardless of the worker count.
+func parForRangeWorkers(n, work, workers int, body func(lo, hi int)) {
+	if workers <= 1 || work < parThreshold {
 		body(0, n)
 		return
 	}
-	parFor(n, numWorkers, body)
+	parFor(n, workers, body)
 }
 
 // parMatRows is matRows parallelized across OUTPUT ROWS. y[o] = sum_i w[o*in+i]*x[i] is

@@ -144,6 +144,64 @@ func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) 
 	return workers, source
 }
 
+// Q4KDecodeWorkers reports the worker count for resident-Q4_K batch-1 decode GEMVs
+// (q4kMatRowsInto). Like Q8DecodeWorkers it caps the many-core amd64 default to dodge the
+// parFor barrier collapse across NUMA nodes, but at a HIGHER cap than Q8. Witnessed on a
+// dual EPYC-7742 (256 threads, 8 NUMA) with real Qwen3.6-27B-Q4_K_M weights
+// (experiments/qwen36/cpu-decode-int8-q4k-numa-witness-2026-07-14.md): int8 Q4_K decode
+// tok/s vs FAK_WORKERS under `numactl --interleave=all` was 256->0.593 (the UNCAPPED default,
+// the worst config), 16->0.566, 32->0.971, 64->1.395, 128->1.392. The uncapped 256-worker
+// default collapses and ~64 (= workers/4) is 2.35x faster. The Q8 cap of workers/8 (<=16) is
+// too aggressive here (16->0.566): the int8 Q4_K path streams half the bytes/token, so it
+// tolerates ~4x the workers before the barrier dominates. A NUMA-node-aware size is the C2
+// (#4625) follow-up; this flat workers/4 (<=64) matches the witnessed knee (= 8 workers/node
+// x 8 nodes). Operators override with FAK_WORKERS/FAK_BUDGET (non-default source bypasses it).
+func Q4KDecodeWorkers() int {
+	w, _ := q4kDecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	return w
+}
+
+func q4kDecodeWorkers() int { return Q4KDecodeWorkers() }
+
+// Q4KDecodeWorkerBudget reports how Q4KDecodeWorkers was derived (for a bench JSON line).
+func Q4KDecodeWorkerBudget() string {
+	_, source := q4kDecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	return source
+}
+
+func q4kDecodeWorkersFor(workers int, source, goos, goarch string) (int, string) {
+	if workers < 1 {
+		workers = 1
+	}
+	if source != defaultWorkerBudgetSource {
+		return workers, source // explicit FAK_WORKERS/FAK_BUDGET/-budget wins, cap bypassed
+	}
+	// Apple Silicon: reuse the Q8 half-cap (same shared-memory batch-1 pathology).
+	if goos == "darwin" && goarch == "arm64" && workers >= 8 {
+		w := (workers + 1) / 2
+		if w > 6 {
+			w = 6
+		}
+		if w < 1 {
+			w = 1
+		}
+		return w, defaultWorkerBudgetSource + "; q4k_decode=darwin/arm64-half-cap"
+	}
+	// Many-core amd64: cap to workers/4 (<=64), the witnessed int8 Q4_K knee. Only the
+	// genuinely many-core regime (>=64) is capped, so desktop/small-server amd64 is unchanged.
+	if goarch == "amd64" && workers >= 64 {
+		w := workers / 4
+		if w > 64 {
+			w = 64
+		}
+		if w < 8 {
+			w = 8
+		}
+		return w, defaultWorkerBudgetSource + "; q4k_decode=amd64-manycore-cap"
+	}
+	return workers, source
+}
+
 // budgetToWorkers maps a raw fraction-or-percent number + machine width to a worker
 // count in [1,cores], shared by the env path (parseBudgetFraction) and the flag path
 // (SetWorkerBudget) so both round and floor identically.

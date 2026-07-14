@@ -244,3 +244,49 @@ func TestQ8DecodeWorkersManyCoreAmd64HonorsExplicitBudget(t *testing.T) {
 		}
 	}
 }
+
+// TestQ4KDecodeWorkersManyCoreAmd64Cap pins the resident-Q4_K decode cap: many-core amd64 caps
+// to workers/4 (<=64), a HIGHER cap than Q8's workers/8 (<=16), because the int8 Q4_K path
+// streams half the bytes/token and tolerates ~4x the workers before the NUMA parFor barrier
+// dominates. Witnessed knee on a 256-thread / 8-NUMA EPYC-7742 with real Qwen3.6-27B weights:
+// FAK_WORKERS 256->0.593 (uncapped, worst), 64->1.395 (2.35x). Sub-64-thread amd64 is unchanged.
+func TestQ4KDecodeWorkersManyCoreAmd64Cap(t *testing.T) {
+	cases := []struct {
+		workers int
+		want    int
+		capped  bool
+	}{
+		{12, 12, false},  // small amd64 — unchanged
+		{32, 32, false},  // below the many-core threshold — unchanged
+		{63, 63, false},  // just below — unchanged
+		{64, 16, true},   // 64/4 = 16
+		{128, 32, true},  // 128/4 = 32
+		{192, 48, true},  // 192/4 = 48
+		{256, 64, true},  // the 256-thread EPYC witness -> 64 (the measured knee)
+		{512, 64, true},  // 512/4 = 128 -> clamped to 64
+	}
+	for _, tc := range cases {
+		got, source := q4kDecodeWorkersFor(tc.workers, defaultWorkerBudgetSource, "linux", "amd64")
+		if got != tc.want {
+			t.Errorf("workers=%d -> q4k decode workers=%d, want %d", tc.workers, got, tc.want)
+		}
+		capped := source != defaultWorkerBudgetSource
+		if capped != tc.capped {
+			t.Errorf("workers=%d -> capped=%v (source=%q), want capped=%v", tc.workers, capped, source, tc.capped)
+		}
+	}
+}
+
+// TestQ4KDecodeWorkersHonorsExplicitBudget: an explicit FAK_WORKERS/FAK_BUDGET/-budget source
+// bypasses the cap (the operator's exact choice wins), same contract as the Q8 path.
+func TestQ4KDecodeWorkersHonorsExplicitBudget(t *testing.T) {
+	for _, source := range []string{"FAK_WORKERS=200", "FAK_BUDGET=0.9", "-budget=0.9"} {
+		got, gotSource := q4kDecodeWorkersFor(200, source, "linux", "amd64")
+		if got != 200 {
+			t.Errorf("source=%s -> q4k decode workers=%d, want explicit 200", source, got)
+		}
+		if gotSource != source {
+			t.Errorf("source=%s -> q4k decode source=%s", source, gotSource)
+		}
+	}
+}
