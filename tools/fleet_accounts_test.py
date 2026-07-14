@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import io
 import json
 import os
@@ -1624,6 +1625,169 @@ class ProbeLedgerConsultTest(unittest.TestCase):
             status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
         self.assertFalse(status["available"])
         self.assertNotIn("usage_soon_reset", status)
+
+
+def _future_reset_str(minutes: float) -> str:
+    """A DATED reset string `minutes` from now, in a format _reset_is_future parses (mirror of
+    Go futureResetStr's "Jan 2, 3:04pm"). Negative minutes => a provably-passed daily reset."""
+    when = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=minutes)
+    return when.strftime("%b %d, %I:%M%p")
+
+
+class CapDisambiguationCycleTest(unittest.TestCase):
+    """The Phase-3 cap-disambiguation cycles (aging valve + probe-override), mirrored from Go
+    (internal/fleetaccounts/status_capcycles_test.go + capstate_test.go + capobs_test.go).
+
+    fleet_accounts.py is a compatibility shim held byte-parity with the Go account contract, so
+    these prove the SAME wiring end-to-end through runtime_status: a _CapObservation derived from
+    the probe ledger reaches both _disambiguate_cap seams and flips the seat's status. The cap
+    math is unit-tested with an injected clock; the wiring tests drive a real ledger + registry."""
+
+    ACCT = ".claude-capcycle-acct"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.reg_dir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        # The ledger snapshot is memoized on the file's (mtime, size); a stale cache from another
+        # test would mask a fresh write, so reset it around each case (as ProbeLedgerConsultTest).
+        fleet_accounts._PROBE_LEDGER_CACHE.update(key=None, by_account={}, ages={}, obs={})
+        self.addCleanup(lambda: fleet_accounts._PROBE_LEDGER_CACHE.update(
+            key=None, by_account={}, ages={}, obs={}))
+
+    def _write_ledger(self, entries: list[dict]) -> None:
+        """Append-ordered probe ledger; each entry is {status, age_min, **extra}."""
+        lines = []
+        for e in entries:
+            ts = (dt.datetime.now(dt.timezone.utc)
+                  - dt.timedelta(minutes=e["age_min"])).isoformat()
+            row = {"ts": ts, "account": self.ACCT, "tag": "capcycle",
+                   "status": e["status"]}
+            row.update({k: v for k, v in e.items() if k not in ("status", "age_min")})
+            lines.append(json.dumps(row))
+        (self.reg_dir / "probe_ledger.jsonl").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8")
+
+    def _status(self, throttle: dict) -> dict:
+        registry = {"generated_utc": "2026-06-17T00:00:00+00:00",
+                    "throttle": {self.ACCT: throttle}, "sessions": []}
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            return fleet_accounts.runtime_status(self.ACCT, registry=registry)
+
+    # --- wiring: aging valve at the carried-throttle seam -------------------------------------
+    def test_ledger_aging_reopens_stale_weekly(self) -> None:
+        # Mirror of Go TestLedgerAgingReopensStaleWeekly: an 8-day-old LIMIT episode with an
+        # unparseable weekly and no daily leg has outlived any real weekly window -> reopen.
+        # Deterministic: the episode age is read from the ledger ts, not the wall clock.
+        self._write_ledger([{"status": "LIMIT", "age_min": 8 * 24 * 60,
+                             "weekly": "sometime never"}])
+        st = self._status({"weekly": "sometime never"})
+        self.assertTrue(st["available"], f"an 8-day episode must age out and reopen: {st}")
+        self.assertFalse(st["blocked"])
+        self.assertFalse(st.get("throttled"))
+
+    def test_ledger_aging_holds_young_weekly(self) -> None:
+        # Age-threshold control (Go TestLedgerAgingHoldsYoungWeekly): 3 days in is still within
+        # _WEEKLY_MAX_AGE, so aging must not fire early and the seat stays walled.
+        self._write_ledger([{"status": "LIMIT", "age_min": 3 * 24 * 60,
+                             "weekly": "sometime never"}])
+        st = self._status({"weekly": "sometime never"})
+        self.assertFalse(st["available"], f"a 3-day episode is within the window: {st}")
+        self.assertTrue(st["blocked"])
+        self.assertTrue(st.get("throttled"))
+
+    # --- wiring: probe-override at the fresh-OK seam ------------------------------------------
+    def test_ledger_ok_streak_overrides_stale_weekly(self) -> None:
+        # Mirror of Go TestLedgerOKStreakOverridesStaleWeekly: two consecutive OKs past a passed
+        # daily reset overturn a stale/unparseable weekly the seat has demonstrably outgrown.
+        self._write_ledger([
+            {"status": "OK", "age_min": 12.0},
+            {"status": "OK", "age_min": 3.0},  # latest is fresh -> led.available
+        ])
+        st = self._status({"reset": _future_reset_str(minutes=-30),  # provably-passed daily
+                           "weekly": "sometime never"})              # fail-closed without streak
+        self.assertTrue(st["available"], f"a 2-OK streak must overturn the stale weekly: {st}")
+        self.assertFalse(st["blocked"])
+        self.assertFalse(st.get("throttled"))
+        self.assertEqual(st["status_source"], "probe-ledger")
+
+    def test_ledger_single_ok_holds_unparseable_weekly(self) -> None:
+        # Streak-threshold control (Go TestLedgerSingleOKHoldsUnparseableWeekly): a lone fresh OK
+        # (streak 1) is not enough to overturn the fail-closed weekly, so the seat stays walled.
+        self._write_ledger([{"status": "OK", "age_min": 3.0}])
+        st = self._status({"reset": _future_reset_str(minutes=-30),
+                           "weekly": "sometime never"})
+        self.assertFalse(st["available"], f"a lone fresh OK must not overturn the weekly: {st}")
+        self.assertTrue(st["blocked"])
+        self.assertTrue(st.get("throttled"))
+
+    # --- unit: the cap math with an injected clock (mirror capstate_test.go) ------------------
+    def test_disambiguate_cap_aging_releases_stale_weekly(self) -> None:
+        now = dt.datetime(2026, 6, 20, tzinfo=dt.timezone.utc)
+        obs = fleet_accounts._CapObservation(
+            first_seen=now - dt.timedelta(days=8), ok_streak=0)
+        cs = fleet_accounts._disambiguate_cap({"weekly": "sometime never"}, obs, now)
+        self.assertTrue(cs.aged_out)
+        self.assertFalse(cs.weekly_active)
+        self.assertFalse(cs.active, "no live daily leg -> the aged-out seat is fully released")
+
+    def test_disambiguate_cap_young_weekly_holds(self) -> None:
+        now = dt.datetime(2026, 6, 20, tzinfo=dt.timezone.utc)
+        obs = fleet_accounts._CapObservation(
+            first_seen=now - dt.timedelta(days=3), ok_streak=0)
+        cs = fleet_accounts._disambiguate_cap({"weekly": "sometime never"}, obs, now)
+        self.assertFalse(cs.aged_out)
+        self.assertTrue(cs.weekly_active)
+        self.assertTrue(cs.active)
+
+    def test_disambiguate_cap_probe_override(self) -> None:
+        now = dt.datetime(2026, 6, 20, 12, 0, tzinfo=dt.timezone.utc)
+        passed = (now - dt.timedelta(minutes=30)).strftime("%b %d, %I:%M%p")
+        obs = fleet_accounts._CapObservation(ok_streak=2)
+        cs = fleet_accounts._disambiguate_cap(
+            {"reset": passed, "weekly": "sometime never"}, obs, now)
+        self.assertEqual(cs.overridden_by, 2)
+        self.assertFalse(cs.weekly_active)
+        self.assertFalse(cs.active)
+
+    def test_disambiguate_cap_zero_obs_equals_legacy_views(self) -> None:
+        # The load-bearing invariant: with the zero observation the two views are unchanged, so
+        # every non-ledger caller keeps its legacy single-shot behavior.
+        now = dt.datetime(2026, 6, 20, 12, 0, tzinfo=dt.timezone.utc)
+        for info in ({"weekly": "sometime never"},
+                     {"reset": "Dec 31, 11pm"},
+                     {"reset": (now - dt.timedelta(minutes=30)).strftime("%b %d, %I:%M%p")},
+                     "Dec 31, 11pm", None):
+            cs = fleet_accounts._disambiguate_cap(info, None, now)
+            self.assertEqual(cs.active, fleet_accounts.throttle_is_active(info, now), info)
+            self.assertEqual(cs.weekly_active,
+                             fleet_accounts._weekly_throttle_is_active(info, now), info)
+
+    # --- unit: observation derivation from the ledger (mirror capobs_test.go) -----------------
+    def test_derive_cap_observation_ok_streak_and_episode(self) -> None:
+        base = dt.datetime(2026, 6, 20, tzinfo=dt.timezone.utc)
+
+        def line(status: str, mins: int) -> dict:
+            return {"account": self.ACCT, "status": status,
+                    "ts": (base + dt.timedelta(minutes=mins)).isoformat()}
+
+        # Blocked episode then a 2-OK recovery tail: streak counts the tail, and first_seen is
+        # cleared because the tail is OK (no live episode).
+        obs = fleet_accounts._cap_observation_from(
+            [line("LIMIT", 0), line("LIMIT", 5), line("OK", 10), line("OK", 15)])
+        self.assertEqual(obs.ok_streak, 2)
+        self.assertIsNone(obs.first_seen)
+
+        # A trailing blocked run: streak 0, first_seen is the START of that run (the first LIMIT).
+        obs2 = fleet_accounts._cap_observation_from(
+            [line("OK", 0), line("LIMIT", 5), line("LIMIT", 10)])
+        self.assertEqual(obs2.ok_streak, 0)
+        self.assertEqual(obs2.first_seen, base + dt.timedelta(minutes=5))
+
+    def test_derive_cap_observation_empty_is_zero(self) -> None:
+        obs = fleet_accounts._cap_observation_from([])
+        self.assertEqual(obs.ok_streak, 0)
+        self.assertIsNone(obs.first_seen)
 
 
 def _seat_row(tag: str, *, available: bool = True, block_kind: str | None = None,

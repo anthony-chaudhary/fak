@@ -97,6 +97,16 @@ def _read_ledger(path: str) -> list[dict[str, Any]]:
     return out
 
 
+def read_ledger(rd: str | None = None) -> list[dict[str, Any]]:
+    """All probe-ledger entries in append (oldest-first) order.
+
+    The public face of ``_read_ledger`` for fleet_accounts' cap-observation fold, which needs
+    the FULL per-account history (OK streak + blocked-episode start), not just the latest entry
+    ``last_probe_by_account`` returns. Mirrors ``internal/accountprobe.ReadLedger`` so the Go
+    and Python cap-disambiguation cores read the ledger through one shape."""
+    return _read_ledger(probe_ledger_path(rd))
+
+
 def last_probe_by_account(rd: str | None = None) -> dict[str, dict[str, Any]]:
     """Most-recent ledger entry per account (account basename -> entry)."""
     latest: dict[str, dict[str, Any]] = {}

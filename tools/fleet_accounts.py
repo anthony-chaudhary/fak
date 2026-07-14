@@ -761,12 +761,16 @@ def _accounts_registry_exclusion(row: dict, registry_index: dict | None) -> str:
 # re-parses the whole probe_ledger.jsonl ~10x per roster render. Memoize the parsed snapshot
 # keyed on the ledger file's (mtime, size): a render reads it once, and a new probe (which
 # changes size) invalidates it immediately. Keeps runtime_status's signature unchanged.
-_PROBE_LEDGER_CACHE: dict = {"key": None, "by_account": {}, "ages": {}}
+_PROBE_LEDGER_CACHE: dict = {"key": None, "by_account": {}, "ages": {}, "obs": {}}
 
 
 def _probe_ledger_snapshot():
     """(latest-entry-by-account, age-min-by-account) from account_probe's ledger, memoized on
-    the file's mtime+size so one roster render parses it once. Empty on any read failure."""
+    the file's mtime+size so one roster render parses it once. Empty on any read failure.
+
+    The same key-gated parse also folds each account's FULL history into a _CapObservation
+    (OK streak + blocked-episode start) under the cache's ``obs`` map, read via _cap_observation
+    -- so the cap-disambiguation cycles cost no extra ledger read per roster row."""
     try:
         import account_probe  # lazy: account_probe imports fleet_accounts, not vice-versa
     except ImportError:
@@ -781,10 +785,61 @@ def _probe_ledger_snapshot():
         try:
             by_account = account_probe.last_probe_by_account()
             ages = {a: account_probe.recent_probe_age_min(a) for a in by_account}
+            obs = _derive_cap_observations(account_probe.read_ledger())
         except Exception:
-            by_account, ages = {}, {}
-        _PROBE_LEDGER_CACHE.update(key=key, by_account=by_account, ages=ages)
+            by_account, ages, obs = {}, {}, {}
+        _PROBE_LEDGER_CACHE.update(key=key, by_account=by_account, ages=ages, obs=obs)
     return _PROBE_LEDGER_CACHE["by_account"], _PROBE_LEDGER_CACHE["ages"]
+
+
+def _probe_is_ok(status: object) -> bool:
+    """Whether a ledger status string is the clean-availability OK verdict (mirror of Go
+    probeIsOK)."""
+    return str(status or "").strip().upper() == "OK"
+
+
+def _cap_observation_from(entries: list[dict]) -> "_CapObservation":
+    """Distill one account's append-ordered ledger entries into a _CapObservation.
+
+    Mirror of internal/fleetaccounts/capobs.go deriveCapObservation: OK streak is the run of
+    consecutive OK verdicts at the tail; first_seen is the start of the trailing blocked
+    episode and is set only while the seat is CURRENTLY blocked (the tail is non-OK) -- a tail
+    of OKs means no live episode, so aging stays dormant and the override is the live cycle."""
+    obs = _CapObservation()
+    if not entries:
+        return obs
+    streak = 0
+    for e in reversed(entries):
+        if not _probe_is_ok(e.get("status")):
+            break
+        streak += 1
+    obs.ok_streak = streak
+    if not _probe_is_ok(entries[-1].get("status")):
+        episode_start = entries[-1]
+        for e in reversed(entries):
+            if _probe_is_ok(e.get("status")):
+                break
+            episode_start = e
+        obs.first_seen = _parse_utc(episode_start.get("ts"))
+    return obs
+
+
+def _derive_cap_observations(entries: list[dict]) -> dict:
+    """account basename -> _CapObservation, from the whole append-ordered ledger."""
+    by_acct: dict[str, list[dict]] = {}
+    for e in entries:
+        acct = e.get("account")
+        if acct:
+            by_acct.setdefault(acct, []).append(e)
+    return {a: _cap_observation_from(rows) for a, rows in by_acct.items()}
+
+
+def _cap_observation(account: str) -> "_CapObservation":
+    """The ledger-derived _CapObservation for one account (zero observation when the ledger is
+    absent/unreadable or the account has no history -- which keeps _disambiguate_cap on its
+    legacy single-shot path)."""
+    _probe_ledger_snapshot()  # refresh the memoized cache for the current ledger file
+    return _PROBE_LEDGER_CACHE.get("obs", {}).get(account) or _CapObservation()
 
 
 def _fresh_probe_from_ledger(account: str, fresh_min: float = PROBE_LEDGER_FRESH_MIN
@@ -961,26 +1016,108 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
     return None
 
 
+# --- Cap-disambiguation core (mirror of internal/fleetaccounts/capstate.go) -------------
+# throttle_is_active / _weekly_throttle_is_active are thin VIEWS over _disambiguate_cap: one
+# place folds the daily+weekly reset states into a _CapState, then layers two ledger-driven
+# cycles on top of the single-shot rule -- an AGING valve (a weekly episode older than
+# _WEEKLY_MAX_AGE with no live daily leg has outlived any real window) and a probe-OVERRIDE
+# (a run of >= _OVERRIDE_STREAK fresh OKs past a passed daily reset overturns a stale weekly
+# the seat has demonstrably outgrown). Both cycles read a _CapObservation derived from the
+# probe ledger; with the ZERO observation the two views reduce exactly to the legacy
+# predicates, so a caller that passes no observation is behaviorally unchanged. Mirrors the Go
+# split so the two ports stay in lockstep (fix behavior in Go first -- see the module header).
+_WEEKLY_MAX_AGE = dt.timedelta(days=7)
+_OVERRIDE_STREAK = 2
+
+
+class _CapObservation:
+    """Ledger-derived signals the cap cycles consume (mirror of Go CapObservation).
+
+    first_seen: start of the current contiguous blocked episode (None unless the seat is
+    currently blocked). ok_streak: run of consecutive OK verdicts at the ledger tail."""
+    __slots__ = ("first_seen", "ok_streak")
+
+    def __init__(self, first_seen: dt.datetime | None = None, ok_streak: int = 0) -> None:
+        self.first_seen = first_seen
+        self.ok_streak = ok_streak
+
+
+class _CapState:
+    """Folded verdict for one carried throttle (mirror of Go CapState)."""
+    __slots__ = ("active", "weekly_active", "reset", "weekly", "aged_out", "overridden_by")
+
+    def __init__(self) -> None:
+        self.active = False
+        self.weekly_active = False
+        self.reset: str | None = None
+        self.weekly: str | None = None
+        self.aged_out = False
+        self.overridden_by = 0
+
+
+def _disambiguate_cap(info: dict | str | None,
+                      obs: "_CapObservation | None" = None,
+                      now: dt.datetime | None = None,
+                      weekly_max_age: dt.timedelta = _WEEKLY_MAX_AGE,
+                      override_streak: int = _OVERRIDE_STREAK) -> "_CapState":
+    obs = obs or _CapObservation()
+    st = _CapState()
+    st.reset = _reset_text(info)
+    st.weekly = _weekly_reset_text(info)
+
+    weekly_present = bool(st.weekly)
+    weekly_future = _reset_is_future(st.weekly, now)      # True / False / None
+    weekly_provably_past = weekly_present and weekly_future is False
+    reset_future = _reset_is_future(st.reset, now)
+    reset_provably_past = reset_future is False
+
+    # Base single-shot rule -- identical to the legacy throttle_is_active / weekly predicate.
+    if weekly_present and not weekly_provably_past:
+        st.active = True
+    else:
+        st.active = not reset_provably_past
+    st.weekly_active = weekly_present and not weekly_provably_past and st.active
+
+    # AGING valve: a live weekly episode older than weekly_max_age with no provably-future
+    # daily leg has outlived any real weekly window -- release it. An unknown/absent daily no
+    # longer walls the seat; only a provably-future daily still holds it (as a plain daily cap).
+    if st.weekly_active and obs.first_seen is not None:
+        if _now_utc(now) - obs.first_seen >= weekly_max_age:
+            st.aged_out = True
+            st.weekly_active = False
+            st.active = reset_future is True
+
+    # Probe-OVERRIDE: a run of fresh OKs past a passed daily reset overturns a stale/unparseable
+    # weekly the seat has demonstrably outgrown. Distinct from aging -- keyed on recovery
+    # evidence (the OK streak), not elapsed time -- and never fires once aged_out already
+    # released the seat.
+    if (st.weekly_active and not st.aged_out
+            and obs.ok_streak >= override_streak and reset_provably_past):
+        st.overridden_by = obs.ok_streak
+        st.weekly_active = False
+        st.active = False
+
+    return st
+
+
+def _now_utc(now: dt.datetime | None) -> dt.datetime:
+    """A tz-aware UTC instant for the aging comparison, consistent with the ledger's
+    _parse_utc timestamps. Mirrors the single ``now`` Go threads through DisambiguateCap."""
+    if now is None:
+        return dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    return now.astimezone(dt.timezone.utc)
+
+
 def throttle_is_active(info: dict | str | None,
                        now: dt.datetime | None = None) -> bool:
-    if isinstance(info, dict) and info.get("weekly"):
-        weekly_state = _reset_is_future(_weekly_reset_text(info), now)
-        if weekly_state is not False:
-            return True
-    reset_state = _reset_is_future(_reset_text(info), now)
-    if reset_state is False:
-        return False
-    return True
+    return _disambiguate_cap(info, None, now).active
 
 
 def _weekly_throttle_is_active(info: dict | str | None,
                                now: dt.datetime | None = None) -> bool:
-    if not isinstance(info, dict) or not info.get("weekly"):
-        return False
-    weekly_state = _reset_is_future(_weekly_reset_text(info), now)
-    if weekly_state is False:
-        return False
-    return throttle_is_active(info, now)
+    return _disambiguate_cap(info, None, now).weekly_active
 
 
 def _account_identity_from(info: dict | None) -> dict:
@@ -1234,11 +1371,22 @@ def runtime_status(account: str, registry: dict | None = None,
     # fresh manual/watchdog probe would otherwise be invisible here and the carried throttle
     # below would win (the day24 incident: probe OK, roster still "resets 11pm"). A ledger
     # verdict within PROBE_LEDGER_FRESH_MIN is treated as the same authoritative fresh probe.
-    if _should_consult_probe_ledger(registry, probe_ledger):
+    #
+    # The cap-disambiguation cycles (aging + probe-override) fold a _CapObservation drawn from
+    # the SAME probe ledger, so gate it on the same switch: with the ledger unconsulted (or no
+    # carried throttle) cap_obs is the zero observation and _disambiguate_cap stays on its
+    # legacy single-shot path at both seams below. Mirrors computeRuntimeStatus in Go.
+    consult_ledger = _should_consult_probe_ledger(registry, probe_ledger)
+    cap_obs = _cap_observation(account) if (consult_ledger and thr) else _CapObservation()
+    if consult_ledger:
         led = _fresh_probe_from_ledger(account)
         if led is not None:
             if led.get("available"):
-                if thr and _weekly_throttle_is_active(thr) \
+                # A fresh OK must not reopen a still-active WEEKLY cap for the seat's CURRENT
+                # login; a >= _OVERRIDE_STREAK run of OKs past a passed daily reset overturns a
+                # stale/unparseable weekly it has outgrown (folded by _disambiguate_cap). With no
+                # streak the observation is inert and this equals _weekly_throttle_is_active(thr).
+                if thr and _disambiguate_cap(thr, cap_obs).weekly_active \
                         and _throttle_matches_current_identity(
                             account, thr, reg, acct_sessions, led):
                     return _apply_throttle_status(status, thr)
@@ -1256,7 +1404,11 @@ def runtime_status(account: str, registry: dict | None = None,
             })
             return status
 
-    if thr and throttle_is_active(thr):
+    # Carried-throttle fallback (no fresh probe verdict). The aging valve lives here: a seat
+    # blocked past _WEEKLY_MAX_AGE with a stale/unparseable weekly and no live daily leg has
+    # outlived any real weekly window, so _disambiguate_cap releases it via the derived episode
+    # start. Absent that history (or a young/parseable-future cap) this equals throttle_is_active.
+    if thr and _disambiguate_cap(thr, cap_obs).active:
         return _apply_throttle_status(status, thr)
 
     if auth_current:
