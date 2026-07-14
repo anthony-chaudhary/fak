@@ -6,6 +6,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -251,5 +253,54 @@ func TestHiddenTapFromEnv(t *testing.T) {
 	t.Setenv("FAK_HIDDEN_TAP_OPS", "0")
 	if tp := hiddenTapFromEnv(); tp == nil || tp.ops {
 		t.Fatalf("FAK_HIDDEN_TAP_OPS=0 should disable per-op taps, got %+v", tp)
+	}
+}
+
+func TestHiddenTapWritesTopLogitFingerprint(t *testing.T) {
+	dir := t.TempDir()
+	tap := &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: 1756}
+	tap.dumpLogits([]float32{0.5, 3, -2, 3, 1.25})
+	blob, err := os.ReadFile(dir + ".logits.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(blob)), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("top-logit lines=%d want=5: %q", len(lines), blob)
+	}
+	want := []string{
+		"1756\t1\t1\t3", // ties are deterministic: lower token id first
+		"1756\t2\t3\t3",
+		"1756\t3\t4\t1.25",
+		"1756\t4\t0\t0.5",
+		"1756\t5\t2\t-2",
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("line %d=%q want=%q", i, lines[i], want[i])
+		}
+	}
+}
+
+func TestSessionTokenWritesTopLogitsOnlyAtTappedPosition(t *testing.T) {
+	m := tinyObserverModel(t)
+	dir := t.TempDir()
+	s := m.NewSession()
+	s.tap = &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: 1}
+	_ = s.Step(1) // pos 0: not selected
+	if _, err := os.Stat(dir + ".logits.tsv"); !os.IsNotExist(err) {
+		t.Fatalf("untapped position wrote logits: err=%v", err)
+	}
+	logits := s.Step(2) // pos 1: selected
+	blob, err := os.ReadFile(dir + ".logits.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(blob)), "\n")
+	if got, want := len(lines), 10; got != want {
+		t.Fatalf("top-logit lines=%d want=%d", got, want)
+	}
+	if fields := strings.Split(lines[0], "\t"); len(fields) != 4 || fields[0] != "1" || fields[1] != "1" || fields[2] != strconv.Itoa(argmaxF32(logits)) {
+		t.Fatalf("top row=%q does not identify tapped argmax=%d", lines[0], argmaxF32(logits))
 	}
 }

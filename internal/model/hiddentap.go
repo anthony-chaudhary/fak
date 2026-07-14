@@ -17,7 +17,7 @@ import (
 // experiments/qwen36/token3-drift-investigation-2026-06-28.md §3b/§5 step 3). It turns the
 // abstract "fak and llama.cpp agree for two tokens then diverge on the third" into capturable
 // evidence: when armed for the single decode forward at absolute position `pos`, it writes the
-// residual-stream hidden after EVERY decoder layer (`layer_NN.f32`) plus, inside each
+// residual-stream hidden after EVERY decoder layer (`layer_NN.f32`) a sibling `<dir>.logits.tsv` containing the top-10 token ids/logits at that position, plus, inside each
 // linear_attention (Gated-DeltaNet) layer, the named GDN per-op intermediates
 // (`layer_NN_op_<name>.f32`), and a `meta.json` describing the dump — exactly the on-disk format
 // the probe's comparator consumes. The Mac/27B + llama.cpp side of the capture is the gated
@@ -33,10 +33,11 @@ import (
 // two concurrent sessions sharing the SAME env tap dir would write the same filenames. Run one
 // model at a time.
 type hiddenTap struct {
-	dir       string // output directory (created on first write)
-	pos       int    // absolute position whose forward to dump (FAK_HIDDEN_TAP_POS)
-	ops       bool   // also dump the per-op GDN intermediates inside linear_attention layers
-	promptIDs []int  // optional provenance carried into meta.json
+	dir        string // output directory (created on first write)
+	logitsPath string // sibling top-logit TSV for the selected position
+	pos        int    // absolute position whose forward to dump (FAK_HIDDEN_TAP_POS)
+	ops        bool   // also dump the per-op GDN intermediates inside linear_attention layers
+	promptIDs  []int  // optional provenance carried into meta.json
 
 	mu       sync.Mutex
 	dirReady bool
@@ -59,7 +60,7 @@ func hiddenTapFromEnv() *hiddenTap {
 		}
 	}
 	ops := os.Getenv("FAK_HIDDEN_TAP_OPS") != "0"
-	return &hiddenTap{dir: dir, pos: pos, ops: ops}
+	return &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: pos, ops: ops}
 }
 
 var (
@@ -132,6 +133,53 @@ func (t *hiddenTap) writeF32(name string, v []float32) {
 // kinds live in meta.json) but kept in the signature so the call site reads self-documenting.
 func (t *hiddenTap) dumpLayer(l int, kind string, x []float32) {
 	t.writeF32(fmt.Sprintf("layer_%02d.f32", l), x)
+}
+
+// dumpLogits appends a compact top-logit fingerprint for the selected absolute position.
+// A sibling TSV preserves the binary hidden-vector contract while giving #4273 a direct
+// token-id/logit comparison seam against llama.cpp or Hugging Face.
+func (t *hiddenTap) dumpLogits(logits []float32) {
+	if t == nil || t.logitsPath == "" || len(logits) == 0 {
+		return
+	}
+	type ranked struct {
+		id    int
+		logit float32
+	}
+	const topN = 10
+	top := make([]ranked, 0, topN)
+	for id, value := range logits {
+		at := len(top)
+		for i := range top {
+			if value > top[i].logit || value == top[i].logit && id < top[i].id {
+				at = i
+				break
+			}
+		}
+		if at >= topN {
+			continue
+		}
+		top = append(top, ranked{})
+		copy(top[at+1:], top[at:])
+		top[at] = ranked{id: id, logit: value}
+		if len(top) > topN {
+			top = top[:topN]
+		}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f, err := os.OpenFile(t.logitsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.reportErr(err)
+		return
+	}
+	defer f.Close()
+	for rank, item := range top {
+		if _, err := fmt.Fprintf(f, "%d\t%d\t%d\t%.9g\n", t.pos, rank+1, item.id, item.logit); err != nil {
+			t.reportErr(err)
+			return
+		}
+	}
 }
 
 // dumpOp writes one GDN per-op intermediate inside layer l. op is one of the canonical names the

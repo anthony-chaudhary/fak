@@ -184,33 +184,40 @@ func (s *Session) requirePreNorm(path string) {
 	}
 }
 
+func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
+	if tap := s.activeTap(); tap != nil && tap.pos == pos {
+		tap.dumpLogits(logits)
+	}
+	return logits
+}
+
 func (s *Session) token(id, pos int) []float32 {
 	if s.Backend != nil {
 		s.requirePreNorm("HAL decode")
-		return s.tokenHAL(id, pos)
+		return s.tappedLogitsAt(pos, s.tokenHAL(id, pos))
 	}
 	if s.Q4 {
-		return s.headQ4(s.tokenHiddenQ(id, pos))
+		return s.tappedLogitsAt(pos, s.headQ4(s.tokenHiddenQ(id, pos)))
 	}
 	if s.Q4K {
 		// Resident Q4_K decode: block matmuls dispatch per name (raw q4_k majority + Q8
 		// minority); the LM head is whichever resident format it loaded as, so headResident
 		// picks q4k/q8/f32 rather than assuming Q8.
-		return s.headResident(s.tokenHiddenQ(id, pos))
+		return s.tappedLogitsAt(pos, s.headResident(s.tokenHiddenQ(id, pos)))
 	}
 	if s.GPTQ {
-		return s.headResident(s.tokenHiddenGPTQ(id, pos))
+		return s.tappedLogitsAt(pos, s.headResident(s.tokenHiddenGPTQ(id, pos)))
 	}
 	if s.Quant {
 		// GPU-resident decode forward (#67): run the whole token — forward + final norm + LM head —
 		// in one Metal command buffer and return logits directly (metal_decode.go). Returns nil for a
 		// hybrid/MoE model or when the resident path declines, so this is a cheap gate on the CPU path.
 		if logits := s.metalDecodeLogitsQ8(id, pos); logits != nil {
-			return logits
+			return s.tappedLogitsAt(pos, logits)
 		}
-		return s.headQ(s.tokenHiddenQ(id, pos))
+		return s.tappedLogitsAt(pos, s.headQ(s.tokenHiddenQ(id, pos)))
 	}
-	return s.head(s.tokenHidden(id, pos))
+	return s.tappedLogitsAt(pos, s.head(s.tokenHidden(id, pos)))
 }
 
 func (s *Session) requireGLMDsaSession() {
