@@ -53,6 +53,13 @@ func colorizeGuardInfoBlock(block string, color bool) string {
 	for i, r := range rows {
 		if sgr := guardInfoRowSGR(r); sgr != "" {
 			rows[i] = sgr + r + tuiSGRReset
+			continue
+		}
+		// The 1-row tiny fallback is renderGuardInfoLine's compact packed line (colon-gutter
+		// tokens, " · "-separated), not a panel row — color its tokens in place so it carries
+		// the same cache/safety signal as the full pane.
+		if strings.HasPrefix(strings.TrimLeft(r, " "), "cache:") {
+			rows[i] = colorizeGuardInfoCompactLine(r, true)
 		}
 	}
 	return strings.Join(rows, "\n")
@@ -108,4 +115,48 @@ func guardInfoRowSGR(row string) string {
 		return tuiSGRGreen
 	}
 	return ""
+}
+
+// guardInfoCompactTokenSGR maps one " · "-delimited token of the compact status line
+// (renderGuardInfoLine) to its SGR color, mirroring guardInfoRowSGR's self-produced-token
+// palette for the colon-gutter spelling the compact line uses ("cache: …", "safety: …").
+// Returns "" for a token it does not own, so every other token passes through plain.
+func guardInfoCompactTokenSGR(tok string) string {
+	t := strings.TrimLeft(tok, " ")
+	switch {
+	case strings.HasPrefix(t, "safety:"):
+		// "nothing blocked" is the clean all-clear (green); any other safety text means fak
+		// blocked/fixed/set-aside a call — a warm highlight, not an alarm.
+		if strings.Contains(t, "nothing blocked") {
+			return tuiSGRGreen
+		}
+		return tuiSGRYellowBold
+	case strings.HasPrefix(t, "cache:"):
+		// Green only once re-use has paid for itself ("saving money"); otherwise neutral so the
+		// line never shows a premature green.
+		if strings.Contains(t, "saving money") {
+			return tuiSGRGreen
+		}
+		return ""
+	}
+	return ""
+}
+
+// colorizeGuardInfoCompactLine layers TTY color onto the compact one-line status used by the
+// tiny fallback and --style line. Unlike the full pane (one concern per row, colored by
+// colorizeGuardInfoBlock), the compact line packs every concern into one row of " · "-separated
+// tokens, so it wraps each SELF-PRODUCED token in its own SGR pair in place — the visible width
+// after stripping SGR is unchanged (whole-token wrap only). color=false (non-TTY / NO_COLOR)
+// returns the line verbatim.
+func colorizeGuardInfoCompactLine(line string, color bool) string {
+	if !color || line == "" {
+		return line
+	}
+	toks := strings.Split(line, " · ")
+	for i, tok := range toks {
+		if sgr := guardInfoCompactTokenSGR(tok); sgr != "" {
+			toks[i] = sgr + tok + tuiSGRReset
+		}
+	}
+	return strings.Join(toks, " · ")
 }

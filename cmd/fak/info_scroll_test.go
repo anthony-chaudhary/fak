@@ -77,7 +77,9 @@ func TestRunInfoOverlayNarrowTTYNeverWraps(t *testing.T) {
 		if i := strings.IndexAny(status, "\r\n"); i >= 0 {
 			status = status[:i]
 		}
-		if dw := dispWidthTUI(status); dw > width {
+		// The redraw may carry SGR color (#3244); escapes are zero display cells, so strip
+		// them before measuring, matching the width-under-color checks in info_color_test.go.
+		if dw := dispWidthTUI(stripSGR(status)); dw > width {
 			t.Errorf("redrawn status row is %d cells wide, must be <= %d: %q", dw, width, status)
 		}
 	}

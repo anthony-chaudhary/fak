@@ -152,3 +152,33 @@ func TestGuardInfoOverlayColorMode(t *testing.T) {
 		t.Fatalf("NO_COLOR should beat always, got true")
 	}
 }
+
+func TestGuardInfoCompactLineColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	line := "cache: saving money — reused 80% · safety: nothing blocked · replies 3"
+	got := colorizeGuardInfoCompactLine(line, true)
+	if got == line {
+		t.Fatal("expected SGR on a TTY line, got verbatim")
+	}
+	if !strings.Contains(got, tuiSGRGreen+"cache: saving money") {
+		t.Errorf("cache token not green-wrapped: %q", got)
+	}
+	if !strings.Contains(got, tuiSGRGreen+"safety: nothing blocked"+tuiSGRReset) {
+		t.Errorf("safety all-clear not green-wrapped: %q", got)
+	}
+	// stripping the SGR pairs must recover the original (width preserved, whole-token wrap)
+	stripped := strings.NewReplacer(tuiSGRGreen, "", tuiSGRYellowBold, "", tuiSGRReset, "").Replace(got)
+	if stripped != line {
+		t.Errorf("SGR strip != original\n got %q\nwant %q", stripped, line)
+	}
+	// non-TTY / color=false is byte-clean
+	if colorizeGuardInfoCompactLine(line, false) != line {
+		t.Error("color=false must be verbatim")
+	}
+	// blocked safety -> yellow, not green
+	line2 := "cache: not saving yet · safety: blocked 2 · replies 1"
+	got2 := colorizeGuardInfoCompactLine(line2, true)
+	if !strings.Contains(got2, tuiSGRYellowBold+"safety: blocked 2") {
+		t.Errorf("blocked safety not yellow-wrapped: %q", got2)
+	}
+}

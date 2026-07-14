@@ -677,7 +677,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			// Redraw one row in place, capped to the pane width so the line can never wrap
 			// onto a second row (a wrapped status line is the scroll corruptor: the next
 			// tick's \r returns only to the start of the wrapped row, never clearing it).
-			fmt.Fprintf(stdout, "\r\033[K%s", fitGuardInfoStatus(renderGuardInfoLine(v), width))
+			fmt.Fprintf(stdout, "\r\033[K%s", colorizeGuardInfoCompactLine(fitGuardInfoStatus(renderGuardInfoLine(v), width), colorOn))
 			dirty = true
 			return
 		}
