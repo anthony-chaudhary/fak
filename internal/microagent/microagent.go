@@ -38,6 +38,7 @@ const (
 	EventDone   EventKind = "done"   // Step reported done
 	EventCancel EventKind = "cancel" // retired by Cancel/Close before done
 	EventRetry  EventKind = "retry"  // Step failed and its evidence was fed back
+	EventVerify EventKind = "verify" // Independent evidence accepted or refused completion
 	EventError  EventKind = "error"  // Step returned a non-cancel error
 )
 
@@ -85,6 +86,8 @@ type Config struct {
 	// when the Microagent implements RetryFeedback, so a failure can never be
 	// retried blindly. The count is a hard per-agent ceiling.
 	MaxRetries int
+	// Verifier independently checks completion. Nil preserves baseline behavior.
+	Verifier Verifier
 }
 
 // Defaults for Config zero values.
@@ -121,6 +124,7 @@ type Host struct {
 	sessions   *session.Table
 	audit      AuditSink
 	maxRetries int
+	verifier   Verifier
 
 	queue chan *job
 
@@ -163,6 +167,7 @@ func NewHost(gw Gateway, cfg Config) (*Host, error) {
 		sessions:   sessions,
 		audit:      audit,
 		maxRetries: max(0, cfg.MaxRetries),
+		verifier:   cfg.Verifier,
 		queue:      make(chan *job, queue),
 		live:       map[string]*job{},
 	}
@@ -340,7 +345,38 @@ func (h *Host) run(j *job) {
 			h.retire(j, steps, false, err)
 			return
 		case done:
-			h.retire(j, steps, true, nil)
+			if h.verifier == nil {
+				h.retire(j, steps, true, nil)
+				return
+			}
+			verifyErr := h.verifier.Verify(j.ctx, VerificationInput{
+				Agent: j.id,
+				Steps: steps,
+			})
+			event := Event{Agent: j.id, Kind: EventVerify, Steps: steps}
+			if verifyErr != nil {
+				event.Err = verifyErr.Error()
+			}
+			h.mu.Lock()
+			h.audit.Record(event)
+			h.mu.Unlock()
+			if verifyErr == nil {
+				h.retire(j, steps, true, nil)
+				return
+			}
+			verification := &VerificationError{Evidence: verifyErr}
+			if canRetry && retries < h.maxRetries {
+				if feedbackErr := feedback.RetryFeedback(j.ctx, verification); feedbackErr != nil {
+					h.retire(j, steps, false, errors.Join(verification, feedbackErr))
+					return
+				}
+				retries++
+				h.mu.Lock()
+				h.audit.Record(Event{Agent: j.id, Kind: EventRetry, Steps: steps, Err: verification.Error()})
+				h.mu.Unlock()
+				continue
+			}
+			h.retire(j, steps, false, verification)
 			return
 		}
 	}
