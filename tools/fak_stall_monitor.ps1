@@ -86,13 +86,21 @@ if ($Install) {
 }
 
 $fak = Resolve-Fak
+
+$hostCrashLog = Join-Path (Split-Path -Parent $Log) 'host-crashes.jsonl'
+
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Log) -ErrorAction SilentlyContinue | Out-Null
-Write-Host "[stall-mon] fak=$fak interval=${Interval}s log=$Log autoMitigate=$AutoMitigate"
+Write-Host "[stall-mon] fak=$fak interval=${Interval}s log=$Log hostCrashLog=$hostCrashLog autoMitigate=$AutoMitigate"
 
 $stallRun = 0
 $lastMitigate = [DateTime]::MinValue
 
 while ($true) {
+  # Poll Event 1000 in the same always-on task. --once avoids orphan watcher
+  # processes across task restarts; the durable signal ledger makes overlap safe.
+  & $fak host-crash --once --since 5m --log $hostCrashLog 2>&1 | ForEach-Object {
+    Write-Host "[host-crash] $_"
+  }
   # One snapshot via the shipped classifier; JSON so we can read the verdict.
   $raw = & $fak stallscan --json 2>$null
   $rc = $LASTEXITCODE

@@ -198,6 +198,8 @@ func main() {
 		cmdToolproc(os.Args[2:])
 	case "stallscan":
 		cmdStallscan(os.Args[2:])
+	case "host-crash":
+		cmdHostCrash(os.Args[2:])
 	case "schedscan":
 		cmdSchedScan(os.Args[2:])
 	case "growthgate":
