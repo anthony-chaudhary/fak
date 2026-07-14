@@ -514,8 +514,8 @@ ledger. One writes the witness row; the other renders its convergence payoff.
 
 ### other witness concepts positioned (#4719)
 
-Six more witness-rooted names discovered by the coverage engine, each a genuine concept
-a reader could not pin, not an inflection.
+Seven more witness-rooted names, each a genuine concept a reader could not pin, not an
+inflection.
 
 - **WitnessedEnvelope** (`issuecontract.WitnessedEnvelope`, JSON
   `witnessed_operating_envelope`) - the OBSERVED operating-envelope section on a
@@ -557,6 +557,14 @@ a reader could not pin, not an inflection.
   experiments/agent-live for Mac parity witnesses). *Not* a world-state witness and *not*
   the WitnessResolver. Where witnesses are STORED vs what they BIND vs what RESOLVES them.
 
+- **WitnessSameTasks** (`benchcatalog.WitnessSameTasks`) - the FAIRNESS FENCE for any
+  two-arm (raw vs fak) benchmark ablation: a pure function that takes the task ids each
+  arm RECORDED consuming and reports whether they match in order, so the delta is
+  attributable to fak BECAUSE both arms ran the same problems (empty is a mismatch, never
+  a silent pass). *Not* a world-state witness (a cache-coherence binding) and *not*
+  WitnessTask (the taskmgr entry point that applies a witness to a task's claim). It
+  witnesses BENCHMARK FAIRNESS (same problem set), not a cache entry or a claim.
+
 ### ignored false friends in the witness-proof family
 
 Two discovered tokens are NOT concepts and are ignored by the family's `ignore` list:
@@ -568,6 +576,12 @@ Two discovered tokens are NOT concepts and are ignored by the family's `ignore` 
 - **nwitness** - a scanner artifact: the identifier regex reads `\nWitness` / `\nwitness`
   in Go string literals (where `\n` is a newline escape) as the identifier `nWitness` /
   `nwitness`. It is not a real identifier or concept.
+
+- **witnesssametaskids** - a non-existent variant: the `WitnessSameTasks` function
+  witnesses that two benchmark arms consumed the same task ids, but no identifier
+  `WitnessSameTaskIDs` (or `witness_same_task_ids`) exists in the tree. The token is the
+  conceptual reading of the function's purpose, not a real symbol; `witnesssametasks`
+  (the function itself) is positioned as its own row.
 
 ---
 

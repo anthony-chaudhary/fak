@@ -223,6 +223,22 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "covg4719-witness-proof-witnesssametasks",
+      "canonical": "WitnessSameTasks (fairness fence)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "benchcatalog.WitnessSameTasks is the fairness fence for any two-arm (raw vs fak) benchmark ablation: a pure function that takes the task ids each arm RECORDED consuming and reports whether they match in order, so the delta is attributable to fak BECAUSE both arms ran the same problems (empty is a mismatch, never a silent pass; order matters, so a reordered slice is drift the fence catches).",
+      "distinction": "It witnesses BENCHMARK FAIRNESS (same problem set across two arms), not a world-state witness (a cache-coherence binding in vdso) and not WitnessTask (the taskmgr entry point that applies a witness to a task's claim). A fairness fence over consumed task ids vs a cache-entry binding vs a claim-corroboration entry point.",
+      "distinct_from": ["world-state-witness", "x-goal25-witness-proof-witnesstask", "witness-outcome"],
+      "aliases": ["WitnessSameTasks"],
+      "grounding": "WitnessSameTasks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

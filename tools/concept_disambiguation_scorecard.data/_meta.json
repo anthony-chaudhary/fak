@@ -74,9 +74,9 @@
       "name": "Witness / evidence family",
       "roots": ["witness", "refut", "revoc", "trustepoch"],
       "ignore": ["witnessing", "witnessable", "witnessed", "witnesses", "refuted", "refutes", "revocations", "refutations",
-                 "refutil", "nwitness"],
+                 "refutil", "nwitness", "witnesssametaskids"],
       "min_files": 3,
-      "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims. Ignored false friends: refutil (internal/refutil is 'ref util' - reference-utility helpers, not 'refute') and nwitness (a scanner artifact of \\nWitness / \\nwitness in Go string literals where the newline escape's n concatenates with Witness in the identifier regex)."
+      "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims. Ignored false friends: refutil (internal/refutil is 'ref util' - reference-utility helpers, not 'refute'), nwitness (a scanner artifact of \\nWitness / \\nwitness in Go string literals where the newline escape's n concatenates with Witness in the identifier regex), and witnesssametaskids (a non-existent variant of WitnessSameTasks - the function witnesses same task ids but no identifier WitnessSameTaskIDs exists in the tree; witnesssametasks itself is positioned as its own row)."
     },
     {
       "id": "gateway-engine",
