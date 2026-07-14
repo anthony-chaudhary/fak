@@ -125,6 +125,10 @@ recover from, but any efficiency gain must be measured against the real alternat
 | Can fak bypass the limit? | No. Fak can manage work around observed capacity but cannot change Anthropic's quota. |
 | Where should I verify remaining usage? | In Claude's authenticated usage/plan surface for the account doing the work. |
 
+## More specific Claude usage answers
+
+- [Claude Code usage limits](claude-code-usage-limits.md): shared web/desktop/Code capacity, `/status`, session and weekly resets, and exhaustion recovery.
+- [Claude extra usage](claude-extra-usage.md): credits, spending limits, billing, and why paid continuation is not a quota bypass.
 ## Related guides
 
 - [Claude Code / Anthropic API integration](integrations/claude.md)

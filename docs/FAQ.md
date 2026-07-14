@@ -1674,6 +1674,54 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
         "@type": "Answer",
         "text": "No. Fak cannot increase, reset, or bypass Anthropic's quota. It can adjudicate tool calls, stop destructive retry loops, preserve recoverable long-run state, and route work from observed capacity. Those controls can reduce avoidable waste, but Claude still enforces the account's usage limit. See Claude usage and usage limits."
       }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Claude Code have a separate usage limit from Claude on the web?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, not when Claude Code uses the same Pro or Max subscription. Claude Code and Claude on web, desktop, and mobile draw from shared usage, so activity on one surface can reduce what remains on another. Direct API billing is a separate capacity path. See Claude Code usage limits."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I check my Claude Code usage?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Run /status in Claude Code to confirm client account and plan information, then use Claude's authenticated usage view for remaining capacity and reset timestamps. A fak gateway summary shows requests and tool decisions, not Anthropic's remaining quota."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Claude Code have a weekly usage limit?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Claude can apply longer weekly limits as well as shorter session windows. The limits that apply depend on the account, plan, and current provider policy. Use the authenticated usage view: a shorter window reopening does not prove that a weekly model-specific or aggregate limit has reset."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is Claude extra usage?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Claude extra usage is optional paid capacity for an eligible account after included plan usage is exhausted. It uses purchased usage credits and remains bounded by spending controls and provider limits. It is not unlimited and does not reset the included allowance. See Claude extra usage and spending limits."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Claude extra usage reset or bypass the usage limit?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Extra usage supplies a separately billed continuation path when enabled and funded; it does not move the included plan's reset time or remove usage controls. Saying work continued is not evidence that the original limit was bypassed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is Claude extra usage not working?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Verify account eligibility, that extra usage is enabled, that credits remain, that the spending limit is not exhausted, and that an administrator does not control the setting. Also distinguish usage exhaustion from context-length, authentication, model, and API rate-limit errors."
+      }
     }
   ]
 }
@@ -2855,3 +2903,43 @@ No. Fak cannot increase, reset, or bypass Anthropic's quota. It can adjudicate t
 stop destructive retry loops, preserve recoverable long-run state, and route work from
 observed capacity. Those controls can reduce avoidable waste, but Claude still enforces the
 account's usage limit. See [Claude usage and usage limits](claude-usage-limits.md).
+
+## Does Claude Code have a separate usage limit from Claude on the web?
+
+No, not when Claude Code uses the same Pro or Max subscription. Claude Code and Claude on
+web, desktop, and mobile draw from shared usage, so activity on one surface can reduce what
+remains on another. Direct API billing is a separate capacity path. See
+[Claude Code usage limits](claude-code-usage-limits.md).
+
+## How do I check my Claude Code usage?
+
+Run `/status` in Claude Code to confirm client account and plan information, then use Claude's
+authenticated usage view for remaining capacity and reset timestamps. A fak gateway summary
+shows requests and tool decisions, not Anthropic's remaining quota.
+
+## Does Claude Code have a weekly usage limit?
+
+Claude can apply longer weekly limits as well as shorter session windows. The limits that
+apply depend on the account, plan, and current provider policy. Use the authenticated usage
+view: a shorter window reopening does not prove that a weekly model-specific or aggregate
+limit has reset.
+
+## What is Claude extra usage?
+
+Claude extra usage is optional paid capacity for an eligible account after included plan
+usage is exhausted. It uses purchased usage credits and remains bounded by spending controls
+and provider limits. It is not unlimited and does not reset the included allowance. See
+[Claude extra usage and spending limits](claude-extra-usage.md).
+
+## Does Claude extra usage reset or bypass the usage limit?
+
+No. Extra usage supplies a separately billed continuation path when enabled and funded; it
+does not move the included plan's reset time or remove usage controls. Saying work continued
+is not evidence that the original limit was bypassed.
+
+## Why is Claude extra usage not working?
+
+Verify account eligibility, that extra usage is enabled, that credits remain, that the
+spending limit is not exhausted, and that an administrator does not control the setting.
+Also distinguish usage exhaustion from context-length, authentication, model, and API
+rate-limit errors.
