@@ -89,7 +89,9 @@ func TestEnqueueGuardSessionThreadDefaultsToDedicatedChannel(t *testing.T) {
 	if got.Channel != guardSessionsChannelDefault || got.Source != guardSessionThreadSource || got.ThreadTS != "" {
 		t.Fatalf("spooled row = %+v", got)
 	}
-	if !strings.Contains(got.Text, "trace_id: trace-a") || !strings.Contains(got.Text, "agent: claude") {
+	if !strings.Contains(got.Text, "guard session · STARTING") ||
+		!strings.Contains(got.Text, "claude/anthropic") ||
+		!strings.Contains(got.Text, "trace `trace-a`") {
 		t.Fatalf("spooled row text missing guard identity:\n%s", got.Text)
 	}
 }
