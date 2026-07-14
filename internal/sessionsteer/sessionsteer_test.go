@@ -166,6 +166,19 @@ func TestManagedRuleNamesTheTools(t *testing.T) {
 	}
 }
 
+// TestManagedRuleBindsClosingShape pins the proactive TEACH half of the closing-shape rung: the
+// managed posture must carry the scannable-close clause (verdict first, bulleted body, next step
+// as the final bullet) so the guard's output-style Stop-hook enforce rung rarely has to fire.
+// This clause targets the same headless/long-horizon population the gate caps to.
+func TestManagedRuleBindsClosingShape(t *testing.T) {
+	rule := SessionStartRule(Steer(SteerInput{Headless: true, DurableStore: true}))
+	for _, want := range []string{"lead with the verdict", "scannable", "next checkable step"} {
+		if !contains(rule, want) {
+			t.Errorf("managed rule missing closing-shape clause %q", want)
+		}
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

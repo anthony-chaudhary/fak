@@ -230,7 +230,9 @@ func SessionStartRule(d SteerDirective) string {
 		"As the window fills you will be told to CHECKPOINT (land durable state — commit, write the " +
 		"plan/ledger/handoff) or to REBUILD (re-anchor from durable state after a context event); treat " +
 		"those as directives, not FYIs. Durable state — commits, the plan file, the task ledger, memory " +
-		"— is what survives a window rewrite; the active window is not memory. Session-state tools: " +
+		"— is what survives a window rewrite; the active window is not memory. Close each operator-facing " +
+		"turn in a shape the operator can scan: lead with the verdict, carry the body as scannable " +
+		"bullets, and make the last line a bullet naming the next checkable step. Session-state tools: " +
 		"mcp__fak__fak_context_value (window left + step advice), mcp__fak__fak_context_spans / " +
 		"mcp__fak__fak_context_restore (recover a compacted originating task)."
 }
