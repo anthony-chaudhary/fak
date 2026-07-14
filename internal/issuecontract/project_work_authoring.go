@@ -88,3 +88,34 @@ func AppendProjectWorkDefaults(body string, a ProjectWorkAuthoring) (string, err
 
 func finitePositive(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
 func formatPoints(v float64) string { return fmt.Sprintf("%g", v) }
+
+// BatchProjectWork describes deterministic metadata for a generated child. The
+// producer must know the parent denominator; this helper never guesses it.
+type BatchProjectWork struct {
+	ParentIssue        int
+	EstimatePoints     float64
+	ParentBaseline     float64
+	CompletionStandard string
+	TargetEnvelope     string
+	WitnessedEnvelope  string
+}
+
+// AuthorBatchProjectWork adds canonical project-work sections to a generated
+// body, defaulting unqualified maturity to production.
+func AuthorBatchProjectWork(body string, in BatchProjectWork) (string, error) {
+	if in.ParentIssue <= 0 {
+		return "", fmt.Errorf("batch project work: parent issue must be positive")
+	}
+	if !finitePositive(in.EstimatePoints) || !finitePositive(in.ParentBaseline) || in.EstimatePoints > in.ParentBaseline {
+		return "", fmt.Errorf("batch project work: estimate and baseline must be positive and estimate cannot exceed baseline")
+	}
+	standard := normalizeCompletionStandard(in.CompletionStandard)
+	if standard == "" {
+		standard = "production"
+	}
+	return AppendProjectWorkDefaults(body, ProjectWorkAuthoring{
+		EstimatePoints: in.EstimatePoints, ContributionPoints: in.EstimatePoints,
+		ParentBaseline: in.ParentBaseline, CompletionStandard: standard,
+		TargetEnvelope: in.TargetEnvelope, WitnessedEnvelope: in.WitnessedEnvelope,
+	})
+}
