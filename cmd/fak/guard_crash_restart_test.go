@@ -141,7 +141,9 @@ func TestGuardParentSurvivesHarnessCrash(t *testing.T) {
 	observedPath := filepath.Join(dir, "observed.jsonl")
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	cmd := exec.Command(os.Args[0])
+	// Keep a real verb-shaped argv for recordGuardUsage, while TestMain takes the guard
+	// command from guardE2EHelperEnv. The production binary always has os.Args[1]="guard".
+	cmd := exec.Command(os.Args[0], "guard")
 	guardArgs := strings.Join([]string{
 		"--quiet", "--provider", "anthropic",
 		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",

@@ -29,6 +29,15 @@ import (
 const guardE2EHelperEnv = "FAK_GUARD_E2E_HELPER"
 
 func TestMain(m *testing.M) {
+	// #4686 process witness: a guard-launched copy of this test binary is the child
+	// harness, not another test runner. This must precede guardE2EHelperEnv because the
+	// child inherits the parent guard helper environment.
+	for _, arg := range os.Args[1:] {
+		if arg == "--fak-guard-crash-witness-child" {
+			runGuardCrashWitnessChild()
+			os.Exit(0)
+		}
+	}
 	// #3103 keystone reap witness stand-ins: turns this binary into the wrapped
 	// child / grandchild when the reap guards are set, else a no-op (see reap3103_test.go).
 	dispatchReleaseShipReap3103()
