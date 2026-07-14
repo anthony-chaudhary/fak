@@ -223,6 +223,7 @@ var tier = map[string]int{
 	"ctxplan":          1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
 	"relay":            1, // pure relay-baton value (#1870): the closed Baton schema + deterministic Parse/project round-trip for the handoff/resume relay; imports ctxplan(1)+stdlib, off the hot path.
 	"session":          1, // per-session DRIVE state: a TraceID-keyed, bounded-LRU, live-mutable control-state value (run-state/budget/priority/pace), the structural twin of ifc.Ledger widened past one value; stdlib-only, imports nothing internal.
+	"sessionledger":    1, // content-addressed, hash-chained session event log with O(1) fork (#2416); stdlib-only value store, imports no internal package, off the hot path.
 	"sessionread":      1, // the read/query/observe-op VOCABULARY spine (#4176/#4191): the closed set of shipped session READ seams, each carrying its capability/disclosure/evidence/refusal contract; the outbound twin of sessionctl(3), but pure — stdlib-only, imports nothing internal, off the hot path.
 	"wirescreen":       2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default â€” the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
 	"advmodel":         2,
