@@ -729,7 +729,8 @@ func evaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, works
 		violations := classifyCommand(command, workspaceRoot, safeRoots)
 		violations = append(violations, classifyInteractive(command)...)
 		violations = append(violations, classifyWorkspaceCd(command, workspaceRoot)...)
-		return append(violations, classifySleepWait(command)...)
+		violations = append(violations, classifySleepWait(command)...)
+		return append(violations, classifyForegroundNetworkLoop(command)...)
 	case "PowerShell":
 		// The PowerShell tool gets ONLY the advisory sleep rung: the
 		// out-of-tree and interactive classifiers parse POSIX shell syntax
@@ -776,7 +777,7 @@ func readPath(m map[string]any) string {
 }
 
 func renderReason(violations []Violation) string {
-	var outOfTree, interactive, sleeps, liveMonitorReads, workspaceCd []Violation
+	var outOfTree, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops []Violation
 	for _, v := range violations {
 		switch v.Reason {
 		case ReasonInteractiveHang:
@@ -787,6 +788,8 @@ func renderReason(violations []Violation) string {
 			liveMonitorReads = append(liveMonitorReads, v)
 		case ReasonWorkspacePathUnmapped:
 			workspaceCd = append(workspaceCd, v)
+		case ReasonForegroundNetworkLoop:
+			networkLoops = append(networkLoops, v)
 		default:
 			outOfTree = append(outOfTree, v)
 		}
@@ -806,6 +809,9 @@ func renderReason(violations []Violation) string {
 	}
 	if len(workspaceCd) > 0 {
 		blocks = append(blocks, renderWorkspaceCdReason(workspaceCd))
+	}
+	if len(networkLoops) > 0 {
+		blocks = append(blocks, renderNetworkLoopReason(networkLoops))
 	}
 	return strings.Join(blocks, " | ")
 }

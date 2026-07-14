@@ -1,7 +1,8 @@
 // severity.go — the per-reason severity model for the repo-guard PreToolUse hook.
 //
 // Every classifier rung in this package (OUT_OF_TREE_WRITE, INTERACTIVE_HANG,
-// LIVE_MONITOR_OUTPUT_READ, FOREGROUND_SLEEP) is a best-effort heuristic — the
+// LIVE_MONITOR_OUTPUT_READ, FOREGROUND_SLEEP, WORKSPACE_PATH_UNMAPPED,
+// FOREGROUND_NETWORK_LOOP) is a best-effort heuristic — the
 // docs say so plainly ("it raises the floor, it is not a sandbox"). Hard-denying
 // a tool call on a heuristic is too rigid: cross-repo work in a fleet host's
 // `work/` tree of sibling repos is ROUTINE, not anomalous, and even a *warning*
@@ -79,6 +80,7 @@ var defaultSeverity = map[string]Severity{
 	ReasonInteractiveHang:       SeverityWarn,   // the non-interactive-form hint avoids a wasted turn
 	ReasonForegroundSleep:       SeverityWarn,   // the background-wait hint avoids a wasted turn
 	ReasonWorkspacePathUnmapped: SeverityWarn,   // the correct-path hint avoids a wasted turn
+	ReasonForegroundNetworkLoop: SeverityWarn,   // the batch/background hint avoids a killed-mid-loop turn
 }
 
 // DefaultSeverity returns the default severity for a reason. An UNKNOWN reason

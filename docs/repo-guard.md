@@ -113,6 +113,7 @@ swallowed **without** touching stderr, so silent stays silent.
 | `INTERACTIVE_HANG` | `warn` | the non-interactive-form hint genuinely helps the agent avoid a wasted turn |
 | `FOREGROUND_SLEEP` | `warn` | the background-wait hint helps |
 | `WORKSPACE_PATH_UNMAPPED` | `warn` | a `cd` into the drive-stripped workspace root (`cd /work/fak` for a `C:/work/fak` checkout) resolves nowhere on the host; the correct-path hint avoids a wasted turn |
+| `FOREGROUND_NETWORK_LOOP` | `warn` | a foreground `for … in <list>; do gh/curl/git fetch …; done` makes one network round trip per item; the serialized calls blow the turn budget and the command is killed mid-loop. Fires only on `for` loops (batchable fan-outs), body calls only. The batch/background hint (`gh issue list --json`, `gh api --paginate`, or `run_in_background`) avoids the wasted turn |
 
 A reason with no default entry resolves to `deny` (fail-safe: any refusal-class reason
 added later denies until explicitly softened).
