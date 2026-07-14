@@ -106,6 +106,10 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 	repo := fs.String("repo", "", "owner/name override for live gh mutations")
 	live := fs.Bool("live", false, "arm bounded live GitHub mutations (default: dry-run plan only)")
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue-scan cap proven before live sync (required with --live)")
+	parentBaseline := fs.Float64("parent-baseline-points", 0, "audited issue production-scope baseline points (required for REFUTE create)")
+	completionStandard := fs.String("completion-standard", "production", "finding maturity (default production)")
+	targetEnvelope := fs.String("target-envelope", "", "production target operating envelope")
+	witnessedEnvelope := fs.String("witnessed-envelope", "", "currently witnessed operating envelope")
 	maxApply := fs.Int("max-apply", 10, "refuse the run if planned mutations exceed this cap")
 	asJSON := fs.Bool("json", false, "emit the machine-readable plan/result")
 	if !parseFlags(fs, argv) {
@@ -181,14 +185,16 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 		reviewCap = 1
 	}
 	contractOpts := issuecontract.Options{
-		Live:             true,
-		DedupeChecked:    true,
-		DedupeCap:        reviewCap,
-		StrictModelTier:  true,
-		StrictScale:      true,
-		StrictBornRouted: true,
+		Live:              true,
+		DedupeChecked:     true,
+		DedupeCap:         reviewCap,
+		StrictModelTier:   true,
+		StrictScale:       true,
+		StrictBornRouted:  true,
+		StrictProjectWork: true,
 	}
 
+	authoring := findingProjectWork{Baseline: *parentBaseline, Standard: *completionStandard, TargetEnvelope: *targetEnvelope, WitnessedEnvelope: *witnessedEnvelope}
 	createIndex := map[string]int{} // finding key -> index into result.Candidates
 	for _, item := range plan.Items {
 		result.Counts[string(item.Action)]++
@@ -204,7 +210,14 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 		}
 		switch item.Action {
 		case modelroute.FindingCreate:
-			candidate := buildFindingCandidate(item, result.Lane, reviewCap)
+			candidate, authorErr := buildFindingCandidateWithProjectWork(item, result.Lane, reviewCap, authoring)
+			if authorErr != nil {
+				v := false
+				row.ContractOK = &v
+				result.OK = false
+				result.Items = append(result.Items, row)
+				continue
+			}
 			review := issuecontract.ReviewCandidate(candidate, contractOpts)
 			ok := review.OK && review.Dispatchability == issuecontract.Dispatchable
 			row.Dispatchable = review.Dispatchability
@@ -238,7 +251,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 	}
 
 	if *live {
-		if code := applyFindingLive(stdout, stderr, plan, &result, *repo, deps.gh); code != 0 {
+		if code := applyFindingLive(stdout, stderr, plan, &result, *repo, deps.gh, authoring); code != 0 {
 			// applyFindingLive has already populated result / printed context.
 			result.OK = false
 			emitFindingResult(stdout, stderr, result, *asJSON)
@@ -259,7 +272,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 // applyFindingLive performs the bounded, armed mutations. It requires a proven
 // dedupe cap and a clean plan (all candidates dispatchable, under the blast-radius
 // cap) before it touches GitHub. Returns 0 on success, or a non-zero exit code.
-func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, result *issueFindingResult, repo string, runner issueCreateRunner) int {
+func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, result *issueFindingResult, repo string, runner issueCreateRunner, authoring findingProjectWork) int {
 	if result.DedupeCap <= 0 {
 		fmt.Fprintln(stderr, "fak issue finding: --live requires --dedupe-cap N (a bounded issue-scan cap)")
 		result.Refusal = "live sync not armed: missing dedupe cap"
@@ -281,7 +294,7 @@ func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, res
 		if !item.Action.Mutating() {
 			continue
 		}
-		args, ok := findingMutationArgs(item, repo)
+		args, ok := findingMutationArgs(item, repo, authoring)
 		if !ok {
 			// A non-create mutation targeting a finding created earlier in this same
 			// batch has no issue number yet; it is folded into the create, so skip.
@@ -311,7 +324,7 @@ func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, res
 // findingMutationArgs renders the gh argv for one mutating item. CREATE always
 // resolves; the edit/comment/reopen family needs a real target issue number
 // (ok=false when the target is a finding opened earlier in this batch).
-func findingMutationArgs(item modelroute.FindingPlanItem, repo string) ([]string, bool) {
+func findingMutationArgs(item modelroute.FindingPlanItem, repo string, authoring findingProjectWork) ([]string, bool) {
 	withRepo := func(args []string) []string {
 		if strings.TrimSpace(repo) != "" {
 			args = append(args, "--repo", repo)
@@ -321,7 +334,10 @@ func findingMutationArgs(item modelroute.FindingPlanItem, repo string) ([]string
 	switch item.Action {
 	case modelroute.FindingCreate:
 		title := findingIssueTitle(item.AuditedIssue)
-		body := renderFindingIssueBody(item)
+		body, err := renderFindingIssueBodyWithProjectWork(item, authoring)
+		if err != nil {
+			return nil, false
+		}
 		args := []string{"issue", "create", "--title", title, "--body", body}
 		for _, label := range findingIssueLabels() {
 			args = append(args, "--label", label)
@@ -393,6 +409,30 @@ func renderFindingResult(r issueFindingResult) string {
 		lines = append(lines, fmt.Sprintf("  applied %s %s -> %s", applied.Action, applied.Key, status))
 	}
 	return strings.Join(lines, "\n")
+}
+
+type findingProjectWork struct {
+	Baseline                                    float64
+	Standard, TargetEnvelope, WitnessedEnvelope string
+}
+
+func buildFindingCandidateWithProjectWork(item modelroute.FindingPlanItem, lane string, cap int, a findingProjectWork) (issuecontract.Candidate, error) {
+	c := buildFindingCandidate(item, lane, cap)
+	points := float64(c.ExpectedSteps)
+	c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+	c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, a.Baseline)
+	c.CompletionStandard = strings.TrimSpace(a.Standard)
+	if c.CompletionStandard == "" {
+		c.CompletionStandard = "production"
+	}
+	if c.CompletionStandard == "production" {
+		c.TargetEnvelope = strings.TrimSpace(a.TargetEnvelope)
+		c.WitnessedEnvelope = strings.TrimSpace(a.WitnessedEnvelope)
+	}
+	if a.Baseline <= 0 {
+		return c, fmt.Errorf("finding create requires --parent-baseline-points")
+	}
+	return c, nil
 }
 
 // buildFindingCandidate renders one REFUTE finding as a fully-scoped,
@@ -504,7 +544,14 @@ func findingCandidatePaths(refs []modelroute.EvidenceRef) []string {
 // sections so the filed issue re-parses to the same dispatchable candidate under
 // `fak issue contract --from-issues`.
 func renderFindingIssueBody(item modelroute.FindingPlanItem) string {
-	c := buildFindingCandidate(item, "crossaudit", 1)
+	body, _ := renderFindingIssueBodyWithProjectWork(item, findingProjectWork{Baseline: float64(buildFindingCandidate(item, "crossaudit", 1).ExpectedSteps), Standard: "demo"})
+	return body
+}
+func renderFindingIssueBodyWithProjectWork(item modelroute.FindingPlanItem, a findingProjectWork) (string, error) {
+	c, err := buildFindingCandidateWithProjectWork(item, "crossaudit", 1, a)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-crossaudit-finding-key: %s -->\n", item.Key)
 	if item.ReceiptDigest != "" {
@@ -522,6 +569,15 @@ func renderFindingIssueBody(item modelroute.FindingPlanItem) string {
 	fmt.Fprintf(&b, "## Out of scope\n%s\n\n", c.OutOfScope)
 	fmt.Fprintf(&b, "## Done condition / witness\nDone condition: %s\nWitness: %s\n\n", c.DoneCondition, c.Witness)
 	fmt.Fprintf(&b, "## Acceptance gate\n%s\n\n", c.AcceptanceGate)
+	fmt.Fprintf(&b, "## Work estimate\n%s\n\n", c.WorkEstimate)
+	fmt.Fprintf(&b, "## Overall completion contribution\n%s\n\n", c.ScopeContribution)
+	fmt.Fprintf(&b, "## Completion standard\n%s\n\n", c.CompletionStandard)
+	if c.TargetEnvelope != "" {
+		fmt.Fprintf(&b, "## Target operating envelope\n%s\n\n", c.TargetEnvelope)
+	}
+	if c.WitnessedEnvelope != "" {
+		fmt.Fprintf(&b, "## Witnessed operating envelope\n%s\n\n", c.WitnessedEnvelope)
+	}
 	fmt.Fprintf(&b, "## Closure binding\n%s\n\n", c.ClosureBinding)
 	fmt.Fprintf(&b, "## Lane\n%s\n\n", c.Lane)
 	b.WriteString("## Likely files\n")
@@ -549,7 +605,7 @@ func renderFindingIssueBody(item modelroute.FindingPlanItem) string {
 	fmt.Fprintf(&b, "\n## Trigger\n%s\n\n", c.Trigger)
 	fmt.Fprintf(&b, "## Batch policy\n%s\n\n", c.BatchPolicy)
 	fmt.Fprintf(&b, "Required model tier: %s\nOptimal model tier: %s\n", c.RequiredModelTier, c.OptimalModelTier)
-	return b.String()
+	return b.String(), nil
 }
 
 func findingComment(item modelroute.FindingPlanItem) string {
