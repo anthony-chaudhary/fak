@@ -37,6 +37,9 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		serviceUsage(stderr)
 		return 2
 	}
+	if args[0] == "windows-run" {
+		return runWindowsServiceDispatcher(stdout, stderr)
+	}
 	if args[0] == "run" {
 		return runServiceLoop(stdout, stderr, args[1:])
 	}
@@ -61,6 +64,14 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	var manager, name, path, definition string
 	var install, status, uninstall func() error
 	switch runtime.GOOS {
+	case "windows":
+		result, rc := windowsServiceAction(action, stdout, stderr, *dry)
+		if *asJSON {
+			_ = json.NewEncoder(stdout).Encode(result)
+		} else if rc == 0 {
+			fmt.Fprintf(stdout, "%s %s %s\n", result.Manager, action, result.Path)
+		}
+		return rc
 	case "linux":
 		manager = "systemd-user"
 		name = systemservice.SystemdUnitName
@@ -162,6 +173,20 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stdout, "%s %s %s\n", manager, action, path)
 	}
 	return 0
+}
+func runServiceLoopContext(ctx context.Context, stdout, stderr io.Writer, interval time.Duration) int {
+	for {
+		if rc := serviceTick(stdout, stderr); rc != 0 {
+			return rc
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0
+		case <-timer.C:
+		}
+	}
 }
 func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("service run", flag.ContinueOnError)
