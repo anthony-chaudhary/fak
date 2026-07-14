@@ -1,0 +1,106 @@
+{
+  "schema": "floorreloadcache.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run FloorReloadCache",
+    "generated_by": "fak/internal/bench.BuildFloorReloadCacheReport",
+    "note": "Hermetic ANALYTIC prefix-cache model of ONE mid-session floor reload busting the tools[] cache prefix (#3971). It witnesses the MEASUREMENT and the token-split definitions under the named constants in `model`; #2916's live break-event metric is the promotion seam that can feed a MEASURED forfeited-token count into the same report shape and confirm or demote these numbers."
+  },
+  "model": {
+    "system_prefix_tokens": 4000,
+    "tools_block_tokens": 3000,
+    "growth_per_turn_tokens": 6000,
+    "cache_read_mult": 0.1,
+    "cache_write_mult": 1.25,
+    "reload_at_frac": 0.5
+  },
+  "sweep": [
+    {
+      "session_turns": 50,
+      "reload_at_turn": 25,
+      "baseline": {
+        "reused_tokens": 7399000,
+        "fresh_tokens": 301000,
+        "billed_tokens": 1116150
+      },
+      "reload": {
+        "reused_tokens": 7252000,
+        "fresh_tokens": 448000,
+        "billed_tokens": 1285200
+      },
+      "forfeited_cached_tokens": 147000,
+      "reload_extra_billed_tokens": 169050,
+      "fraction_of_session_spend": 0.1315,
+      "avg_per_turn_baseline_billed": 22323,
+      "turns_to_amortize": 7.5729
+    },
+    {
+      "session_turns": 100,
+      "reload_at_turn": 50,
+      "baseline": {
+        "reused_tokens": 29799000,
+        "fresh_tokens": 601000,
+        "billed_tokens": 3731150
+      },
+      "reload": {
+        "reused_tokens": 29502000,
+        "fresh_tokens": 898000,
+        "billed_tokens": 4072700
+      },
+      "forfeited_cached_tokens": 297000,
+      "reload_extra_billed_tokens": 341550,
+      "fraction_of_session_spend": 0.0839,
+      "avg_per_turn_baseline_billed": 37311.5,
+      "turns_to_amortize": 9.154
+    },
+    {
+      "session_turns": 200,
+      "reload_at_turn": 100,
+      "baseline": {
+        "reused_tokens": 119599000,
+        "fresh_tokens": 1201000,
+        "billed_tokens": 13461150
+      },
+      "reload": {
+        "reused_tokens": 119002000,
+        "fresh_tokens": 1798000,
+        "billed_tokens": 14147700
+      },
+      "forfeited_cached_tokens": 597000,
+      "reload_extra_billed_tokens": 686550,
+      "fraction_of_session_spend": 0.0485,
+      "avg_per_turn_baseline_billed": 67305.75,
+      "turns_to_amortize": 10.2005
+    }
+  ],
+  "headline": {
+    "session_turns": 200,
+    "reload_at_turn": 100,
+    "baseline": {
+      "reused_tokens": 119599000,
+      "fresh_tokens": 1201000,
+      "billed_tokens": 13461150
+    },
+    "reload": {
+      "reused_tokens": 119002000,
+      "fresh_tokens": 1798000,
+      "billed_tokens": 14147700
+    },
+    "forfeited_cached_tokens": 597000,
+    "reload_extra_billed_tokens": 686550,
+    "fraction_of_session_spend": 0.0485,
+    "avg_per_turn_baseline_billed": 67305.75,
+    "turns_to_amortize": 10.2005
+  },
+  "finding": "One mid-session floor reload forfeits the tools block plus every conversation turn resident behind it (ToolsBlockTokens + (k-1)*GrowthPerTurn) back to cache-write price; its share of session spend shrinks as the session length that amortizes it grows.",
+  "assumptions": [
+    "SIMULATED, not a live provider run: the token split is an analytic prefix-cache model under the named constants in `model`, not a provider-billed total.",
+    "The cache_control breakpoint sits on the stable head that PRECEDES tools[], so a reload busts from the tools block onward and the system prefix survives (gateway.go ToolFloorDenies / CompactInboundTools byte splice).",
+    "Exactly ONE reload fires, mid-session at ReloadAtFrac, flipping one tool's reachability so the tools[] bytes change on the next turn. Multiple reloads in one session add linearly, each re-forfeiting the resident prefix at its turn.",
+    "Context grows by a fixed GrowthPerTurn each turn with no compaction/relay rotation in the window — so the only prefix bust modeled is the reload itself.",
+    "Cache prices are Anthropic-style multipliers (read ~0.1x, write ~1.25x base); a provider with different cache economics moves the surcharge proportionally."
+  ],
+  "promotion": "Promote by feeding #2916's live floor-reload break-event metric (measured forfeited cached tokens per reload) into this same report shape; a MEASURED count that matches the modeled ToolsBlockTokens + (k-1)*GrowthPerTurn confirms the model and flips provenance to OBSERVED, mirroring #2915's contract and the adjudication_latency_test projected-\u003emeasured precedent.",
+  "demotion_or_retirement": "Demote/retire if #2916 measures a materially different forfeit (e.g. the provider caches tools[] independently of the conversation, or the breakpoint placement changes so the bust does not extend from the tools block onward), or if the floor-reload path is removed so tools[] no longer mutates mid-session.",
+  "invalidating_assumption": "The load-bearing unknown is the breakpoint's true position relative to tools[]: if the provider prefix-cache boundary falls AFTER tools[] (tools cached in a separate segment), a reload would forfeit far fewer tokens than modeled here."
+}
