@@ -94,7 +94,7 @@ Every number on the card is recomputed from the session's hash-chained journal b
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
-Go 1.26+ is required; no external Go dependencies, no `go.sum`. From a clone: `go build -o fak ./cmd/fak`. Prebuilt archives and containers: [INSTALL.md](INSTALL.md). Build/test/ship: [CONTRIBUTING.md](CONTRIBUTING.md).
+Go 1.26+ is required (as of 2026-07-14; source: [`go.mod`](go.mod)); no external Go dependencies, no `go.sum`. From a clone: `go build -o fak ./cmd/fak`. Prebuilt archives and containers: [INSTALL.md](INSTALL.md). Build/test/ship: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The honest fence
 
