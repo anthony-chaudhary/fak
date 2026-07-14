@@ -24,13 +24,18 @@ import (
 //
 // It defaults to the LIVE DefaultLedgerRel (.fak/nightrun/gateway-usage.jsonl), NOT the
 // committed docs mirror, so a stale published copy cannot masquerade as a recent cliff.
+// --ledger is REPEATABLE: pass it more than once to fold several ledgers in one view (e.g.
+// the live copy AND the docs mirror), which is how a regime comparison spanning both
+// windows becomes a single command — rows that appear in more than one ledger are deduped
+// by (pid, unix_millis, generated_at) so an overlapping session is never double-counted.
 // --since floors the fold to rows on/after the date; --json emits the CompactionReport.
 //
-//fak:ctxplan verb="cachevalue compaction" enters="nothing live — an offline fold over the gateway-usage JSONL ledger on disk" pages="nothing into a model window — it prints a compaction-by-regime table (or --json report) to stdout" warms="nothing — it REPORTS compaction shed/fire/bail health; it warms no prompt cache or KV itself"
+//fak:ctxplan verb="cachevalue compaction" enters="nothing live — an offline fold over the gateway-usage JSONL ledger(s) on disk" pages="nothing into a model window — it prints a compaction-by-regime table (or --json report) to stdout" warms="nothing — it REPORTS compaction shed/fire/bail health; it warms no prompt cache or KV itself"
 func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak cachevalue compaction", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	ledger := fs.String("ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger to fold (defaults to the LIVE .fak/nightrun copy, not the committed docs mirror)")
+	var ledgers ablationPathList
+	fs.Var(&ledgers, "ledger", "gateway usage ledger to fold (repeatable; defaults to the LIVE .fak/nightrun copy, not the committed docs mirror — pass twice to merge live + docs mirror)")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	asJSON := fs.Bool("json", false, "emit the CompactionReport as JSON instead of the table")
 	if !parseFlags(fs, argv) {
@@ -42,8 +47,11 @@ func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 	}
+	if len(ledgers) == 0 {
+		ledgers = ablationPathList{gatewayusageledger.DefaultLedgerRel}
+	}
 
-	rows := filterGatewayUsageSince(gatewayusageledger.ReadLedgerFile(*ledger), *since)
+	rows := filterGatewayUsageSince(readGatewayLedgersDedup(ledgers), *since)
 	report := gatewayusageledger.FoldCompaction(rows, *since)
 
 	if *asJSON {
@@ -57,4 +65,26 @@ func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprint(stdout, gatewayusageledger.RenderCompaction(report))
 	return 0
+}
+
+// readGatewayLedgersDedup reads every ledger path in order and concatenates their rows,
+// dropping any row already seen under an identical (pid, unix_millis, generated_at) key.
+// That triple identifies one process's one emitted snapshot, so a session exit present in
+// BOTH a live ledger and its published docs mirror (the overlapping window) folds exactly
+// once — the merge that lets a single invocation span two ledger windows without inflating
+// the corpus. First occurrence wins; a single-path call is unchanged (nothing to dedup).
+func readGatewayLedgersDedup(paths []string) []gatewayusageledger.Row {
+	seen := map[string]bool{}
+	var out []gatewayusageledger.Row
+	for _, p := range paths {
+		for _, r := range gatewayusageledger.ReadLedgerFile(p) {
+			key := fmt.Sprintf("%d|%d|%s", r.PID, r.UnixMillis, r.GeneratedAt)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, r)
+		}
+	}
+	return out
 }
