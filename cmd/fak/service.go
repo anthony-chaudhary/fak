@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -44,80 +45,112 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "machine-readable result")
 	dry := fs.Bool("dry-run", false, "render/validate without changing service manager")
-	unitDir := fs.String("unit-dir", "", "override systemd user unit directory")
+	unitDir := fs.String("unit-dir", "", "override service definition directory")
 	stateDir := fs.String("state-dir", "", "durable control-plane state directory")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return 2
 	}
-	if runtime.GOOS != "linux" {
-		fmt.Fprintln(stderr, "fak service: systemd user service is available on Linux")
-		return 2
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if *unitDir == "" {
-		*unitDir = filepath.Join(home, ".config", "systemd", "user")
-	}
-	if *stateDir == "" {
-		*stateDir = filepath.Join(home, ".local", "state", "fak")
-	}
-	path := filepath.Join(*unitDir, systemservice.SystemdUnitName)
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	unit, err := systemservice.RenderSystemdUserUnit(systemservice.SystemdConfig{Executable: exe, StateDir: *stateDir})
+	var manager, name, path, definition string
+	var install, status, uninstall func() error
+	switch runtime.GOOS {
+	case "linux":
+		manager = "systemd-user"
+		name = systemservice.SystemdUnitName
+		if *unitDir == "" {
+			*unitDir = filepath.Join(home, ".config", "systemd", "user")
+		}
+		if *stateDir == "" {
+			*stateDir = filepath.Join(home, ".local", "state", "fak")
+		}
+		path = filepath.Join(*unitDir, name)
+		definition, err = systemservice.RenderSystemdUserUnit(systemservice.SystemdConfig{Executable: exe, StateDir: *stateDir})
+		cmd := func(argv ...string) error {
+			c := serviceCommand("systemctl", append([]string{"--user"}, argv...)...)
+			c.Stdout = stdout
+			c.Stderr = stderr
+			return c.Run()
+		}
+		install = func() error {
+			if e := cmd("daemon-reload"); e != nil {
+				return e
+			}
+			return cmd("enable", "--now", name)
+		}
+		status = func() error { return cmd("is-active", name) }
+		uninstall = func() error { _ = cmd("disable", "--now", name); return cmd("daemon-reload") }
+	case "darwin":
+		manager = "launchd-user"
+		name = systemservice.LaunchdLabel
+		if *unitDir == "" {
+			*unitDir = filepath.Join(home, "Library", "LaunchAgents")
+		}
+		if *stateDir == "" {
+			*stateDir = filepath.Join(home, "Library", "Application Support", "fak")
+		}
+		logDir := filepath.Join(*stateDir, "logs")
+		path = filepath.Join(*unitDir, name+".plist")
+		definition, err = systemservice.RenderLaunchAgent(systemservice.LaunchdConfig{Executable: exe, StateDir: *stateDir, StdoutPath: filepath.Join(logDir, "guard-control.out.log"), StderrPath: filepath.Join(logDir, "guard-control.err.log")})
+		domain := "gui/" + strconv.Itoa(os.Getuid())
+		target := domain + "/" + name
+		cmd := func(argv ...string) error {
+			c := serviceCommand("launchctl", argv...)
+			c.Stdout = stdout
+			c.Stderr = stderr
+			return c.Run()
+		}
+		install = func() error {
+			_ = cmd("bootout", target)
+			if e := cmd("bootstrap", domain, path); e != nil {
+				return e
+			}
+			return cmd("kickstart", "-k", target)
+		}
+		status = func() error { return cmd("print", target) }
+		uninstall = func() error { return cmd("bootout", target) }
+	default:
+		fmt.Fprintln(stderr, "fak service: supported on Linux systemd and macOS launchd")
+		return 2
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	result := serviceResult{Manager: "systemd-user", Unit: systemservice.SystemdUnitName, Path: path}
-	run := func(argv ...string) error {
-		if *dry {
-			return nil
+	result := serviceResult{Manager: manager, Unit: name, Path: path}
+	if *dry {
+		if action == "install" {
+			fmt.Fprint(stdout, definition)
 		}
-		cmd := serviceCommand("systemctl", append([]string{"--user"}, argv...)...)
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-		return cmd.Run()
+		if *asJSON {
+			_ = json.NewEncoder(stdout).Encode(result)
+		}
+		return 0
 	}
 	switch action {
 	case "install":
-		if *dry {
-			fmt.Fprint(stdout, unit)
-		} else {
-			if err := os.MkdirAll(*unitDir, 0o755); err != nil {
-				return 1
-			}
-			if err := os.MkdirAll(*stateDir, 0o700); err != nil {
-				return 1
-			}
-			if err := writeFileAtomic(path, []byte(unit), 0o644); err != nil {
-				return 1
-			}
-			if run("daemon-reload") != nil || run("enable", "--now", systemservice.SystemdUnitName) != nil {
-				return 1
-			}
+		if os.MkdirAll(*unitDir, 0o755) != nil || os.MkdirAll(*stateDir, 0o700) != nil || os.MkdirAll(filepath.Join(*stateDir, "logs"), 0o700) != nil {
+			return 1
+		}
+		if writeFileAtomic(path, []byte(definition), 0o644) != nil || install() != nil {
+			return 1
 		}
 	case "status":
-		if err := run("is-active", systemservice.SystemdUnitName); err == nil {
+		if status() == nil {
 			result.Active = true
-		} else if !*dry {
+		} else {
 			return 3
 		}
 	case "uninstall":
-		if !*dry {
-			_ = run("disable", "--now", systemservice.SystemdUnitName)
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return 1
-			}
-			if run("daemon-reload") != nil {
-				return 1
-			}
+		_ = uninstall()
+		if e := os.Remove(path); e != nil && !os.IsNotExist(e) {
+			return 1
 		}
 	default:
 		serviceUsage(stderr)
@@ -125,8 +158,8 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	}
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(result)
-	} else if action != "install" || !*dry {
-		fmt.Fprintf(stdout, "%s %s %s\n", result.Manager, action, strings.TrimSpace(path))
+	} else {
+		fmt.Fprintf(stdout, "%s %s %s\n", manager, action, path)
 	}
 	return 0
 }
@@ -135,7 +168,7 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 15*time.Second, "control-plane tick interval")
 	once := fs.Bool("once", false, "run one tick and exit")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *interval <= 0 {
+	if fs.Parse(args) != nil || fs.NArg() != 0 || *interval <= 0 {
 		return 2
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -172,21 +205,23 @@ func writeFileAtomic(path string, b []byte, mode os.FileMode) error {
 			_ = os.Remove(name)
 		}
 	}()
-	if err := tmp.Chmod(mode); err != nil {
+	if err = tmp.Chmod(mode); err != nil {
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
+	if _, err = tmp.Write(b); err != nil {
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err = tmp.Sync(); err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(name, path); err != nil {
+	if err = os.Rename(name, path); err != nil {
 		return err
 	}
 	ok = true
 	return nil
 }
+
+var _ = strings.TrimSpace
