@@ -641,6 +641,10 @@ def _dispatch_state(payload: dict[str, Any] | None) -> str:
 def _fleet_state(snap: dict[str, Any] | None) -> str:
     if not snap:
         return "skipped"
+    # A failed scan is unknowable, not healthy — #4651: never let an empty/failed read
+    # collapse the status word to "healthy" beside a numeric-zero session line.
+    if snap.get("error"):
+        return "unknown (scan failed)"
     sysv = snap.get("system") or {}
     verdict = str(sysv.get("verdict") or fleet_top.VERDICT_HEALTHY)
     word = fleet_top.VERDICT_WORD.get(verdict, verdict).lower()
@@ -669,6 +673,10 @@ def _rollup_severity(dispatch_payload: dict[str, Any] | None,
     if (dispatch_buckets.get("auto-solving") or dispatch_buckets.get("expected")
             or int(fleet_sys.get("self_healing", 0) or 0)):
         return "🔵", "BEING HANDLED"
+    # A failed fleet scan is not a healthy fleet — don't paint it green (#4651). With no
+    # dispatch action and no live signal, an unreadable scan is UNKNOWN, not HEALTHY.
+    if (fleet_snap or {}).get("error"):
+        return "🟡", "UNKNOWN"
     return "🟢", "HEALTHY"
 
 
@@ -705,12 +713,56 @@ def _issue_work_line(payload: dict[str, Any] | None) -> str:
     return "issue work: " + ("; ".join(parts) if parts else "no local signal")
 
 
+# Fold fleet_top's session categories (LIVE/INFRA/HANGING/AGENT/USER) into the four
+# operator-meaningful buckets #4651 asks the roll-up to separate, so the unqualified word
+# "sessions" never again reads as live fleet scale when >99% of it is terminal history:
+#   live             — LIVE         (running right now)
+#   resumable        — INFRA        (context-exhausted / auth / throttle: the operator or
+#                                     the resume-watchdog can bring these back)
+#   stuck            — HANGING      (parked/hung: needs a look)
+#   terminal-history — AGENT + USER (completed or user-stopped transcripts: not actionable)
+_SESSION_BUCKETS: list[tuple[str, tuple[str, ...]]] = [
+    ("live", ("LIVE",)),
+    ("resumable", ("INFRA",)),
+    ("stuck", ("HANGING",)),
+    ("terminal-history", ("AGENT", "USER")),
+]
+
+
+def _session_bucket_counts(sess: dict[str, Any]) -> list[tuple[str, int]]:
+    """Fold ``sessions.by_category`` into the four operator buckets. Any category
+    fleet_top grows later that we do not map yet lands in terminal-history rather than
+    being silently dropped, so the parts still sum to ``sessions.total``."""
+    by_cat = sess.get("by_category") or {}
+    mapped = {c for _, cats in _SESSION_BUCKETS for c in cats}
+    out: list[tuple[str, int]] = []
+    for label, cats in _SESSION_BUCKETS:
+        n = sum(int(by_cat.get(c, 0) or 0) for c in cats)
+        if label == "terminal-history":
+            n += sum(int(v or 0) for c, v in by_cat.items() if c not in mapped)
+        out.append((label, n))
+    return out
+
+
 def _session_line(snap: dict[str, Any] | None) -> str:
     if not snap:
         return "agent sessions: skipped"
+    # A failed scan must not collapse to a healthy-looking "0 ... ; 0/0 accounts usable"
+    # (#4651): render UNKNOWN with the reason so the operator reads "we could not measure"
+    # rather than "the fleet is empty and fine". (An empty-but-successful scan carries no
+    # error and honestly reads "0 live".)
+    if snap.get("error"):
+        return f"agent sessions: UNKNOWN (scan failed: {snap.get('error')})"
     sess = snap.get("sessions") or {}
     acc = snap.get("accounts") or {}
-    return (f"agent sessions: {sess.get('total', 0)} in the last {snap.get('window_h')}h; "
+    counts = _session_bucket_counts(sess)
+    live = dict(counts).get("live", 0)
+    # Lead with live; append only the non-zero non-live buckets so a quiet fleet still
+    # reads cleanly, and always name terminal-history explicitly when present so the
+    # total is never mistaken for active scale.
+    tail = [f"{n} {label}" for label, n in counts if label != "live" and n]
+    body = f"{live} live" + (", " + ", ".join(tail) if tail else "")
+    return (f"agent sessions: {body} in the last {snap.get('window_h')}h; "
             f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable")
 
 

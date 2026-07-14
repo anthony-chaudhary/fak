@@ -140,6 +140,62 @@ class RollupTextTest(unittest.TestCase):
         self.assertNotIn("plane:", text)
         self.assertNotIn("```", text)
 
+    def test_session_line_separates_live_from_terminal_history(self):
+        # #4651 render-witness: a terminal-history-dominated window (3 live beside
+        # thousands of stopped/terminal records) must NOT headline as active fleet scale.
+        # The primary line separates the four operator buckets and never emits an
+        # unqualified "N sessions" total that reads as live scale.
+        mod = load()
+        rows = ([{"category": "LIVE"}] * 3
+                + [{"category": "INFRA"}] * 10756
+                + [{"category": "HANGING"}] * 8
+                + [{"category": "AGENT"}] * 745
+                + [{"category": "USER"}] * 1)
+        snap = mod.fleet_top.build_snapshot(
+            {"rows": rows, "accounts": [], "throttle": {}},
+            workspace="C:/work/fak", window_h=10.0, now="2026-06-29T18:00:00Z")
+
+        line = mod._session_line(snap)
+
+        self.assertIn("3 live", line)
+        self.assertIn("10756 resumable", line)
+        self.assertIn("8 stuck", line)
+        self.assertIn("746 terminal-history", line)  # AGENT + USER
+        # The conflated total never appears as an unqualified session count.
+        self.assertNotIn(f"{len(rows)} in the last", line)
+
+    def test_session_line_and_state_render_unknown_on_failed_scan(self):
+        # #4651 render-witness: a failed scan must render UNKNOWN, never a healthy numeric
+        # zero ("0 ... ; 0/0 accounts usable; sessions healthy").
+        mod = load()
+        snap = mod.fleet_top.build_snapshot(
+            {"rows": [], "accounts": [], "throttle": {}},
+            workspace="C:/work/fak", window_h=10.0, now="2026-06-29T18:00:00Z",
+            error="fleet_sessions.py exited 1")
+
+        line = mod._session_line(snap)
+        state = mod._fleet_state(snap)
+        _glyph, severity = mod._rollup_severity(None, snap)
+
+        self.assertIn("UNKNOWN", line)
+        self.assertIn("scan failed", line)
+        self.assertNotIn("0/0 accounts usable", line)
+        self.assertNotIn("healthy", state)
+        self.assertEqual(severity, "UNKNOWN")
+
+    def test_session_line_empty_but_clean_scan_reads_zero_live(self):
+        # A genuinely empty window (no error) is honest to render as "0 live", distinct
+        # from the failed-scan UNKNOWN case above.
+        mod = load()
+        snap = mod.fleet_top.build_snapshot(
+            {"rows": [], "accounts": [], "throttle": {}},
+            workspace="C:/work/fak", window_h=10.0, now="2026-06-29T18:00:00Z")
+
+        line = mod._session_line(snap)
+
+        self.assertIn("0 live", line)
+        self.assertNotIn("UNKNOWN", line)
+
     def test_rollup_clean_state_says_no_human_action(self):
         mod = load()
         dispatch_payload = mod.fixture_dispatch_payload(ROOT)
