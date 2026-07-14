@@ -253,6 +253,11 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		return info, lerr // an I/O failure taking the lease is an infrastructure error
 	}
 	defer func() { _ = lease.Release() }()
+	// Heartbeat the lease for the whole window (#4612): an apply that outlives the TTL
+	// (a pathologically slow fast-forward) renews itself instead of being reclaimed
+	// mid-window as crash residue. Stopped (and joined) before the deferred Release.
+	stopHeartbeat := lease.keepAlive(now)
+	defer stopHeartbeat()
 	if opts.barrier != nil {
 		opts.barrier()
 	}

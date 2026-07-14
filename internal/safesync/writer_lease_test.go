@@ -2,6 +2,7 @@ package safesync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -123,6 +124,201 @@ func TestWriterLeaseReleaseFreesAndStaleIsReclaimed(t *testing.T) {
 	}
 	if err := recovered.Release(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestApplyHeartbeatOutlivesTTLWithoutSelfReclaim is the #4612 barrier witness for the
+// "apply fits inside the TTL" assumption: an apply window parked PAST its own lease TTL
+// must not have its live lease reclaimed mid-window as crash residue — the keepAlive
+// heartbeat renews the record, so a concurrent managed writer stays refused for the whole
+// long window. The barrier first WITNESSES a moment where the wall clock has outlived
+// acquire+ttl while the on-disk record is still fresh, then judges the peer at that
+// pinned instant, so the refuse-vs-reclaim decision never races the next heartbeat tick.
+func TestApplyHeartbeatOutlivesTTLWithoutSelfReclaim(t *testing.T) {
+	clone := behindClone(t)
+	const ttl = 2 * time.Second
+	leasePath := filepath.Join(clone, ".git", writerLeaseFile)
+
+	var (
+		peerErr        error
+		witnessedNow   time.Time
+		witnessed      WriterLeaseInfo
+		renewedPastTTL bool
+	)
+	opts := Options{Repo: clone, Remote: "origin", Branch: "work", LeaseOwner: "slow-apply", WriterLeaseTTL: ttl}
+	opts.barrier = func() {
+		start := time.Now()
+		deadline := start.Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			if now := time.Now(); now.Sub(start) > ttl {
+				rec, err := readLease(leasePath)
+				if err == nil && !leaseStale(rec, now, ttl) {
+					witnessedNow, witnessed, renewedPastTTL = now, rec, true
+					break
+				}
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		if !renewedPastTTL {
+			return // let apply finish; the assertion below reports the missing renewal
+		}
+		// The peer judges staleness at the witnessed instant (a pinned clock).
+		l, err := AcquireWriterLease(clone, "peer", func() time.Time { return witnessedNow }, ttl)
+		peerErr = err
+		if l != nil {
+			_ = l.Release()
+		}
+	}
+
+	info, err := Apply(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !renewedPastTTL {
+		rec, rerr := readLease(leasePath)
+		t.Fatalf("lease was never observed fresh past its TTL — the heartbeat did not renew it: record=%+v readErr=%v", rec, rerr)
+	}
+	if !info.Applied || !info.OK {
+		t.Fatalf("apply did not land after its long window: %+v", info)
+	}
+	if witnessed.RenewedUnix <= witnessed.AcquiredUnix {
+		t.Fatalf("record was never renewed past its acquire stamp: %+v", witnessed)
+	}
+	// The counterfactual that makes this a real barrier: judged by its ACQUIRE stamp
+	// alone (pre-#4612 behavior), the record was already reclaimable at the witnessed
+	// instant — only the renew kept the window protected.
+	if unrenewed := (WriterLeaseInfo{AcquiredUnix: witnessed.AcquiredUnix}); !leaseStale(unrenewed, witnessedNow, ttl) {
+		t.Fatal("witness instant does not lie past the TTL; the barrier broke too early")
+	}
+	var held *WriterLeaseHeldError
+	if !errors.As(peerErr, &held) {
+		t.Fatalf("peer writer past the TTL = %v, want WriterLeaseHeldError (no self-reclaim mid-window)", peerErr)
+	}
+	if held.Info.Owner != "slow-apply" {
+		t.Fatalf("refusal names holder %q, want slow-apply", held.Info.Owner)
+	}
+	// The heartbeat stopped with the window and the lease was released: it is free again.
+	l, err := AcquireWriterLease(clone, "after", nil, 0)
+	if err != nil {
+		t.Fatalf("lease not free after apply returned (heartbeat still running?): %v", err)
+	}
+	_ = l.Release()
+}
+
+// TestWriterLeaseCrossHostPeerIsHonored is the #4612 cross-host witness: the lock file
+// is exactly as cross-machine as the worktree it protects (a writer on another host
+// reaches these bytes only through a shared mount, which carries the per-worktree git
+// dir — hence this lock — with it), so honoring must key on the shared file + TTL
+// ALONE. A foreign host's record carries a pid that means nothing locally; any local
+// pid/hostname liveness probe would misjudge the live peer as dead and reclaim
+// mid-window. And a crashed peer HOST must still not wedge the mount: TTL — the only
+// liveness rule valid cross-host — reclaims its residue exactly as a local crash.
+func TestWriterLeaseCrossHostPeerIsHonored(t *testing.T) {
+	clone := behindClone(t)
+	leasePath := filepath.Join(clone, ".git", writerLeaseFile)
+
+	// A live peer-host writer on the same shared-mount checkout: foreign hostname, a pid
+	// that exists on no local process table, fresh acquire stamp.
+	foreign := WriterLeaseInfo{Owner: "peer-host-writer", PID: 1 << 30, Host: "other-machine", AcquiredUnix: time.Now().Unix()}
+	enc, err := json.Marshal(foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leasePath, enc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var held *WriterLeaseHeldError
+	if _, err := AcquireWriterLease(clone, "local-writer", nil, time.Minute); !errors.As(err, &held) {
+		t.Fatalf("cross-host fak-managed writer was not refused while the peer host holds the lease: %v", err)
+	}
+	if held.Info.Host != "other-machine" || held.Info.Owner != "peer-host-writer" {
+		t.Fatalf("refusal does not carry the peer host's record: %+v", held.Info)
+	}
+	if !strings.Contains(held.Error(), "on other-machine") {
+		t.Fatalf("refusal is not diagnosable cross-machine (no holder host): %q", held.Error())
+	}
+
+	// Apply — the #4240 window itself — refuses the same way, as a value naming the holder.
+	info, aerr := Apply(context.Background(), Options{Repo: clone, Remote: "origin", Branch: "work"})
+	if aerr != nil {
+		t.Fatal(aerr)
+	}
+	if info.OK || info.Applied || info.Lease == nil || info.Lease.Host != "other-machine" {
+		t.Fatalf("apply did not refuse on the peer host's live lease: %+v", info)
+	}
+
+	// A crashed peer host's residue: same foreign identity, acquire stamp far past TTL.
+	stale := WriterLeaseInfo{Owner: "crashed-peer-host", PID: 1 << 30, Host: "other-machine", AcquiredUnix: 1000}
+	enc, err = json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leasePath, enc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := AcquireWriterLease(clone, "local-writer", nil, time.Minute)
+	if err != nil {
+		t.Fatalf("crashed peer host's stale lease was not reclaimed (cross-host wedge): %v", err)
+	}
+	_ = l.Release()
+}
+
+// TestWriterLeaseRefreshMovesWindowAndIsOwnerChecked pins Refresh's contract (#4612): a
+// renew moves the staleness window forward for a record we still own (even one already
+// past its TTL — identity, not freshness, decides), Release keeps working after a renew,
+// and a holder that LOST the lease to a reclaiming peer gets ErrWriterLeaseLost and never
+// clobbers the peer's live record — nor recreates a released one.
+func TestWriterLeaseRefreshMovesWindowAndIsOwnerChecked(t *testing.T) {
+	clone := behindClone(t)
+	leasePath := filepath.Join(clone, ".git", writerLeaseFile)
+
+	// Acquired far in the past: already reclaimable. A refresh with the real clock makes
+	// it fresh again, so a peer is refused where it would have reclaimed.
+	past := func() time.Time { return time.Unix(1000, 0) }
+	l1, err := AcquireWriterLease(clone, "long-window", past, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l1.Refresh(nil); err != nil {
+		t.Fatalf("refresh of our own (expired but unreclaimed) record: %v", err)
+	}
+	var held *WriterLeaseHeldError
+	if _, err := AcquireWriterLease(clone, "peer", nil, time.Minute); !errors.As(err, &held) {
+		t.Fatalf("refreshed lease was reclaimed by a peer: %v", err)
+	}
+	if held.Info.RenewedUnix == 0 {
+		t.Fatalf("peer's refusal does not carry the renewed record: %+v", held.Info)
+	}
+
+	// Release still works after a renew: the owner-check tracks the renewed record.
+	if err := l1.Release(); err != nil {
+		t.Fatal(err)
+	}
+	l2, err := AcquireWriterLease(clone, "next-holder", nil, time.Minute)
+	if err != nil {
+		t.Fatalf("lease not free after a renewed release: %v", err)
+	}
+
+	// The old holder lost the lease: its refresh reports the loss and leaves the live
+	// peer record untouched.
+	if err := l1.Refresh(nil); !errors.Is(err, ErrWriterLeaseLost) {
+		t.Fatalf("refresh after losing the lease = %v, want ErrWriterLeaseLost", err)
+	}
+	cur, err := readLease(leasePath)
+	if err != nil || cur.Owner != "next-holder" {
+		t.Fatalf("lost holder's refresh clobbered the live peer record: %+v (err=%v)", cur, err)
+	}
+
+	// Refresh after release reports the loss too, and never recreates the lock file.
+	if err := l2.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := l2.Refresh(nil); !errors.Is(err, ErrWriterLeaseLost) {
+		t.Fatalf("refresh after release = %v, want ErrWriterLeaseLost", err)
+	}
+	if _, err := os.Stat(leasePath); !os.IsNotExist(err) {
+		t.Fatalf("refresh recreated a released lease: stat err=%v", err)
 	}
 }
 
