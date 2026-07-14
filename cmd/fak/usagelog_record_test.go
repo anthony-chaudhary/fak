@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,5 +271,36 @@ func TestCmdUsageGitOpsKeepsOutcomeLatencySeparate(t *testing.T) {
 	}
 	if len(stats) != 2 || stats[0].Outcome != usagelog.OutcomeSuccess || stats[1].Outcome != usagelog.OutcomeRefused {
 		t.Fatalf("git-op stats = %+v, want separate success/refused rows", stats)
+	}
+}
+
+func TestRecordGuardUsageClosesDirectExitGap(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_USAGE_LOG", "")
+	t.Setenv("FAK_USAGE_LOG_PATH", filepath.Join(dir, "usage.jsonl"))
+	oldNow, oldStart, oldOnce, oldArgs := recordUsageNow, guardUsageStart, guardUsageOnce, os.Args
+	t.Cleanup(func() { recordUsageNow, guardUsageStart, guardUsageOnce, os.Args = oldNow, oldStart, oldOnce, oldArgs })
+	start := time.Unix(1_700_000_000, 0)
+	recordUsageNow = func() time.Time { return start.Add(1500 * time.Millisecond) }
+	guardUsageStart = start
+	guardUsageOnce = new(sync.Once)
+	os.Args = []string{"fak", "guard", "--", "claude"}
+
+	recordGuardUsage(7)
+	recordGuardUsage(0)
+	data, err := os.ReadFile(filepath.Join(dir, "usage.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("got %d rows, want one: %s", len(lines), data)
+	}
+	var row usagelog.Row
+	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Verb != "guard" || row.ExitCode != 7 || row.DurationMS != 1500 {
+		t.Fatalf("guard usage row = %+v", row)
 	}
 }

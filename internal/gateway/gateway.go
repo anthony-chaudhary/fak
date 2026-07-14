@@ -1683,7 +1683,7 @@ func New(cfg Config) (*Server, error) {
 	// phase as we complete it.
 	startup := newStartupProfile(cfg.StartTime)
 	for _, ph := range cfg.StartupPhases {
-		startup.phase(ph.Name, ph.Dur)
+		startup.phaseWithProvenance(ph.Name, ph.Dur, ph.Provenance)
 	}
 
 	proxyURLs, err := proxyBaseURLs(cfg)
@@ -2191,6 +2191,18 @@ func cloneConfigHeaders(in map[string]string) map[string]string {
 // MarkReady stamps the instant the gateway became able to serve requests, closing
 // the boot timeline (fak_gateway_time_to_ready_seconds / fak_gateway_ready_time_
 // seconds). Idempotent and safe on a nil-startup Server; the first call wins.
+
+// RecordStartupPhase appends a host-timed startup stage, including work after MarkReady.
+func (s *Server) RecordStartupPhase(name string, dur time.Duration, provenance string) {
+	s.startup.phaseWithProvenance(name, dur, provenance)
+}
+
+// BeginChildStartup starts the external child cold-start observation window.
+func (s *Server) BeginChildStartup(at time.Time) { s.startup.beginChildStartup(at) }
+
+// MarkChildUsable closes the child window at the first authenticated API request.
+func (s *Server) MarkChildUsable(at time.Time) { s.startup.markChildUsable(at) }
+
 func (s *Server) MarkReady() {
 	if s == nil {
 		return

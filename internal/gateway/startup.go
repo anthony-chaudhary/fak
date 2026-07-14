@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,16 +26,23 @@ type StartupPhase struct {
 	Name string
 	// Dur is the wall-clock the phase took.
 	Dur time.Duration
+	// Provenance disambiguates fak-timed phases from externally observed boundaries.
+	Provenance string
+	// PostReady distinguishes gateway boot from child/session startup tail.
+	PostReady bool
 }
 
 // startupProfile records the boot timeline: the process start instant, the per-
 // phase costs observed while coming up, and the instant the gateway became able to
 // serve. It is read at scrape time by renderMetrics.
 type startupProfile struct {
-	mu     sync.Mutex
-	start  time.Time
-	ready  time.Time
-	phases []StartupPhase
+	mu           sync.Mutex
+	start        time.Time
+	ready        time.Time
+	phases       []StartupPhase
+	childSpawn   time.Time
+	childUsable  bool
+	childPending atomic.Bool
 	// report is the host's full human-readable startup report — see SetStartupReport
 	// (startup_report.go) for the contract and the `fak info --startup` reader.
 	report string
@@ -50,12 +58,46 @@ func newStartupProfile(start time.Time) *startupProfile {
 // phase records a completed boot phase. A zero or negative duration is still
 // recorded (a phase that ran is worth showing even at sub-microsecond cost).
 func (p *startupProfile) phase(name string, dur time.Duration) {
+	p.phaseWithProvenance(name, dur, "measured")
+}
+
+func (p *startupProfile) phaseWithProvenance(name string, dur time.Duration, provenance string) {
 	if p == nil || name == "" {
 		return
 	}
+	if provenance == "" {
+		provenance = "measured"
+	}
 	p.mu.Lock()
-	p.phases = append(p.phases, StartupPhase{Name: name, Dur: dur})
+	p.phases = append(p.phases, StartupPhase{Name: name, Dur: dur, Provenance: provenance, PostReady: !p.ready.IsZero()})
 	p.mu.Unlock()
+}
+
+func (p *startupProfile) beginChildStartup(at time.Time) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.childSpawn, p.childUsable = at, false
+	p.childPending.Store(true)
+	p.mu.Unlock()
+}
+
+func (p *startupProfile) childStartupPending() bool {
+	return p != nil && p.childPending.Load()
+}
+
+func (p *startupProfile) markChildUsable(at time.Time) {
+	if p == nil || !p.childPending.CompareAndSwap(true, false) {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.childUsable || p.childSpawn.IsZero() || at.Before(p.childSpawn) {
+		return
+	}
+	p.childUsable = true
+	p.phases = append(p.phases, StartupPhase{Name: "child-spawn-to-first-usable", Dur: at.Sub(p.childSpawn), Provenance: "observed", PostReady: !p.ready.IsZero()})
 }
 
 // markReady stamps the instant the gateway became able to serve. The FIRST call
@@ -316,6 +358,8 @@ func (s *Server) writeStartupMetrics(b *strings.Builder) {
 	// time-to-ready the named phases do NOT explain.
 	writeHelpType(b, "fak_gateway_startup_phase_duration_seconds", "Wall-clock cost of each fak gateway boot phase (flag-parse, policy-load, planner-init, vdso-config, kernel-init, listener-bind, and model-load with --gguf).", "gauge")
 	sums := map[string]float64{}
+	provenance := map[string]string{}
+	stage := map[string]string{}
 	order := make([]string, 0, len(snap.phases))
 	var phaseTotal float64
 	for _, ph := range snap.phases {
@@ -323,11 +367,29 @@ func (s *Server) writeStartupMetrics(b *strings.Builder) {
 			order = append(order, ph.Name)
 		}
 		sums[ph.Name] += ph.Dur.Seconds()
+		if ph.PostReady {
+			stage[ph.Name] = "post-ready"
+		} else {
+			stage[ph.Name] = "gateway-boot"
+		}
+		if ph.Provenance == "" {
+			provenance[ph.Name] = "measured"
+		} else {
+			provenance[ph.Name] = ph.Provenance
+		}
 	}
 	for _, name := range order {
 		v := sums[name]
-		phaseTotal += v
+		for _, ph := range snap.phases {
+			if ph.Name == name && !ph.PostReady {
+				phaseTotal += ph.Dur.Seconds()
+			}
+		}
 		fmt.Fprintf(b, "fak_gateway_startup_phase_duration_seconds{phase=\"%s\"} %s\n", promQuote(name), promFloat(v))
+	}
+	writeHelpType(b, "fak_gateway_startup_phase_info", "Startup phase provenance: measured is directly timed by fak; observed is an external boundary visible to fak.", "gauge")
+	for _, name := range order {
+		fmt.Fprintf(b, "fak_gateway_startup_phase_info{phase=\"%s\",provenance=\"%s\",stage=\"%s\"} 1\n", promQuote(name), promQuote(provenance[name]), promQuote(stage[name]))
 	}
 
 	// Unaccounted boot time is the "is startup fully instrumented" signal: boot

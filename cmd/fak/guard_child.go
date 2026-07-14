@@ -1254,6 +1254,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		childStarted := time.Now()
+		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		runErr := windowgate.RunInNewJob(child)
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
@@ -1338,6 +1339,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		}
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		childStarted := time.Now()
+		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		job, err := windowgate.StartInNewJob(child)
 		if err != nil {
@@ -1755,6 +1757,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		guardExitCode = 1
 	}
 	guardSessionCardHandle.finalizeOutcome(guardExitCode, srv.AdjudicationSummary())
+	recordGuardUsage(guardExitCode)
 	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
 	// scripts see what the agent returned).
 	if runErr != nil {

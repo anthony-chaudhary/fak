@@ -326,6 +326,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				return
 			}
 		}
+		if s.startup.childStartupPending() && strings.HasPrefix(r.URL.Path, "/v1/") && !strings.HasPrefix(r.URL.Path, "/v1/fak/") {
+			s.MarkChildUsable(time.Now())
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -303,5 +305,52 @@ func TestListenAndServeBindsBeforeReady(t *testing.T) {
 	got := srv.renderMetrics()
 	if !strings.Contains(got, `fak_gateway_startup_phase_duration_seconds{phase="listener-bind"}`) {
 		t.Fatalf("listener-bind boot phase missing from metrics\n--- metrics ---\n%s", got)
+	}
+}
+
+func TestPostReadyStartupSpansDisambiguateMeasuredAndObserved(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	s := &Server{startup: newStartupProfile(start)}
+	s.MarkReady()
+	s.RecordStartupPhase("guard-installers", 12*time.Millisecond, "measured")
+	s.RecordStartupPhase("mcp-registration", 4*time.Millisecond, "measured")
+	s.BeginChildStartup(start.Add(time.Second))
+	s.MarkChildUsable(start.Add(1250 * time.Millisecond))
+	s.MarkChildUsable(start.Add(2 * time.Second)) // first observation wins
+
+	var b strings.Builder
+	s.writeStartupMetrics(&b)
+	got := b.String()
+	for _, want := range []string{
+		`fak_gateway_startup_phase_duration_seconds{phase="guard-installers"} 0.012`,
+		`fak_gateway_startup_phase_duration_seconds{phase="mcp-registration"} 0.004`,
+		`fak_gateway_startup_phase_duration_seconds{phase="child-spawn-to-first-usable"} 0.25`,
+		`fak_gateway_startup_phase_info{phase="guard-installers",provenance="measured",stage="post-ready"} 1`,
+		`fak_gateway_startup_phase_info{phase="child-spawn-to-first-usable",provenance="observed",stage="post-ready"} 1`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestAuthenticatedAgentRequestMarksChildUsable(t *testing.T) {
+	start := time.Now().Add(-time.Second)
+	s := &Server{startup: newStartupProfile(start), requireKey: "secret"}
+	s.BeginChildStartup(start)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+
+	unauthorized := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	s.withAuth(next).ServeHTTP(httptest.NewRecorder(), unauthorized)
+	if got := len(s.startup.snapshot().phases); got != 0 {
+		t.Fatalf("unauthenticated request recorded %d phases", got)
+	}
+
+	authorized := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	authorized.Header.Set("Authorization", "Bearer secret")
+	s.withAuth(next).ServeHTTP(httptest.NewRecorder(), authorized)
+	phases := s.startup.snapshot().phases
+	if len(phases) != 1 || phases[0].Name != "child-spawn-to-first-usable" || phases[0].Provenance != "observed" || phases[0].Dur <= 0 {
+		t.Fatalf("first authenticated request phase = %+v", phases)
 	}
 }

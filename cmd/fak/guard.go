@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -166,6 +167,8 @@ func effectiveGuardExposeProfile(flagValue string) string {
 }
 
 func cmdGuard(argv []string) {
+	guardUsageStart = time.Now()
+	guardUsageOnce = new(sync.Once)
 	// `fak guard allow …` is the OPERATOR control surface for the always-allow overlay
 	// — add / --list / --remove / --from-journal — peeled off before the wrap-a-command
 	// flag parse. The wrap form always names the agent after `--`, so a bare leading
@@ -1266,6 +1269,7 @@ func cmdGuard(argv []string) {
 	injected := guardInjectedEnv(up, *envName, gwURL)
 	var preCompactInstall guardPreCompactInstall
 	var preCompactEnv [][2]string
+	installersStarted := time.Now()
 	command, preCompactEnv, preCompactInstall, err = installGuardPreCompactHook(command, *preCompactHook, gwURL)
 	if err != nil {
 		cancel()
@@ -1390,7 +1394,10 @@ func cmdGuard(argv []string) {
 	// Live discovery (#1499): register fak's fak_index_*/fak_memory_*/fak_tools_search
 	// MCP tools into the wrapped Claude child by default, so a default `fak guard --
 	// claude` session can reach them with no manual .mcp.json setup.
+	srv.RecordStartupPhase("guard-installers", time.Since(installersStarted), "measured")
+	mcpStarted := time.Now()
 	command, mcpInstall, err := installGuardMCPRegistration(command, *mcpRegister, gwURL)
+	srv.RecordStartupPhase("mcp-registration", time.Since(mcpStarted), "measured")
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude MCP registration setup failed: %v\n", err)

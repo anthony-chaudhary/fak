@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -52,6 +53,17 @@ func usageLogPath() string {
 		return p
 	}
 	return usagelog.DefaultPath()
+}
+
+var guardUsageStart time.Time
+var guardUsageOnce *sync.Once = new(sync.Once)
+
+func recordGuardUsage(exitCode int) {
+	guardUsageOnce.Do(func() {
+		if !guardUsageStart.IsZero() {
+			recordUsage("guard", os.Args[2:], exitCode, guardUsageStart)
+		}
+	})
 }
 
 // recordUsage appends one best-effort usage row. It never changes the
