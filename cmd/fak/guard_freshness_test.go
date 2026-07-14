@@ -115,7 +115,7 @@ func TestGuardInfoStalenessNote(t *testing.T) {
 // DISTINCTIVE phrase (not the shared "stale-build WARN" prefix) so the attested-but-behind skew
 // note — which shares that prefix — cannot be mistaken for this one.
 func TestGuardInfoStartupHeaderStalenessConsistency(t *testing.T) {
-	header := guardInfoStartupHeader("anthropic", 2*time.Second, 0)
+	header := guardInfoStartupHeader("anthropic", "", 2*time.Second, 0)
 	wantNote := guardInfoStalenessNote(guardBannerBuildStamp()) != ""
 	gotNote := strings.Contains(header, "cannot confirm which commit fak is running")
 	if gotNote != wantNote {
