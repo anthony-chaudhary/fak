@@ -60,9 +60,11 @@ import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 from lane_yield import (  # noqa: E402  (shared low-yield fold, #2062)
     count_lane_ancestry_closes,
     low_yield_lanes,
-    _log_turn_count,
-    _LOW_YIELD_SCHEMA,
-    _LOW_YIELD_TURNS_FLOOR,
+    # Re-exported for back-compat so dispatch_status.<name> keeps resolving
+    # (redundant alias marks the intentional re-export; #2062).
+    _log_turn_count as _log_turn_count,
+    _LOW_YIELD_SCHEMA as _LOW_YIELD_SCHEMA,
+    _LOW_YIELD_TURNS_FLOOR as _LOW_YIELD_TURNS_FLOOR,
     _LOW_YIELD_LOOKBACK_MIN,
 )
 
@@ -1499,6 +1501,12 @@ def silent_workers(
 
 _SPAWN_FAILED_CAUSE_SCHEMA = "fak.spawn-failed-cause-breakdown.v1"
 _SPAWN_CAUSE_LOOKBACK_MIN = 24 * 60  # default trailing window (24h)
+# A trailing stale_cred (permanent-auth) spawn-failure rate at/above this fraction
+# of ALL spawns is the drain signature of a needs_login seat bleeding the fleet
+# (#4590). It reddens the DEFAULT card instead of hiding behind --spawn-causes.
+# Floored at a minimum spawn count so a 1-of-2 fluke never trips the alarm.
+_SPAWN_STALE_CRED_RED_RATE = 0.10
+_SPAWN_STALE_CRED_RED_MIN_SPAWNS = 8
 
 
 def spawn_failed_cause_breakdown(
@@ -1616,6 +1624,31 @@ def render_spawn_causes(b: dict[str, Any]) -> str:
     if not failed:
         lines.append("  (no early-exit events in window — nothing to attribute)")
     return "\n".join(lines)
+
+
+def spawn_stale_cred_alarm(breakdown: dict[str, Any] | None) -> dict[str, Any]:
+    """Classify a :func:`spawn_failed_cause_breakdown` for the default-card
+    stale_cred drain alarm (#4590). A trailing stale_cred rate-of-spawns at/above
+    ``_SPAWN_STALE_CRED_RED_RATE`` (with at least ``_..._MIN_SPAWNS`` spawns to be
+    real, not a small-sample fluke) is the needs_login-seat drain signature — the
+    one spawn signal that FLIPS the card verdict to red. Returns
+    ``{red, rate, spawns, count, reason}`` (reason non-empty only when red)."""
+    b = breakdown or {}
+    spawns = int(b.get("spawns") or 0)
+    bucket = (b.get("by_cause") or {}).get("stale_cred") or {}
+    count = int(bucket.get("count") or 0)
+    rate = float(bucket.get("rate_of_spawns") or 0.0)
+    red = (spawns >= _SPAWN_STALE_CRED_RED_MIN_SPAWNS
+           and rate >= _SPAWN_STALE_CRED_RED_RATE)
+    reason = ""
+    if red:
+        win_h = round(int(b.get("lookback_min") or 0) / 60, 1)
+        reason = (f"stale-cred spawn-failure drain: {count}/{spawns} spawns "
+                  f"({int(round(rate * 100))}%) early-exited on stale credentials over "
+                  f"the trailing {win_h}h — a needs_login seat is draining the fleet; "
+                  f"re-login/replace the seat (#4590)")
+    return {"red": red, "rate": rate, "spawns": spawns, "count": count,
+            "reason": reason}
 
 
 def parse_ships_per_worker(records: list[str]) -> dict[str, Any]:
@@ -2435,6 +2468,10 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         backend_stub_rate_f = pool.submit(backend_stub_rates, root / RUNS_DIRNAME)
         hook_failures_f = pool.submit(backend_hook_failures, root / RUNS_DIRNAME)
         guard_f = pool.submit(guard_coverage, root / RUNS_DIRNAME)
+        # Spawn-failed cause mix (#4590): the SAME read-only disk fold --spawn-causes
+        # emits, now folded into the default card so a rising stale_cred rate reddens
+        # instead of hiding behind the sub-flag. Pure-local, so --fast keeps it.
+        spawn_causes_f = pool.submit(spawn_failed_cause_breakdown, root / RUNS_DIRNAME)
         run_status_f = pool.submit(read_run_status_digests, root)
         merge_f = pool.submit(merge_state, root)
         leases_f = pool.submit(read_lease_state, root, backlog)
@@ -2465,6 +2502,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         backend_stub_rate = backend_stub_rate_f.result()
         hook_failures = hook_failures_f.result()
         guard = guard_f.result()
+        spawn_causes = spawn_causes_f.result()
         run_status = run_status_f.result()
         merge = merge_f.result()
         leases = leases_f.result()
@@ -2510,7 +2548,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          lab_readiness=lab_readiness, resolve_ticks=resolve_ticks,
                          resolver_preflight=resolver_preflight,
                          low_yield=low_yield, ships=ships, watch=watch,
-                         backlog_rate=backlog_rate, route_health=route_health)
+                         backlog_rate=backlog_rate, spawn_causes=spawn_causes,
+                         route_health=route_health)
 
 
 # ---------------------------------------------------------------------------
@@ -3033,6 +3072,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   ships: dict[str, Any] | None = None,
                   watch: dict[str, Any] | None = None,
                   backlog_rate: dict[str, Any] | None = None,
+                  spawn_causes: dict[str, Any] | None = None,
                   route_health: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
@@ -3175,6 +3215,33 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
             f"({guard.get('empty_sessions', 0)} empty) — workers booted under guard "
             f"but proposed no adjudicated tool call")
+
+    # Spawn-failed cause mix (#4590): surface the trailing SPAWN_FAILED cause mix on
+    # the DEFAULT card (previously reachable only via the --spawn-causes sub-flag),
+    # and REDDEN when the stale_cred (permanent-auth) rate crosses the drain
+    # threshold — the needs_login-seat drain signature. This is the one spawn signal
+    # that FLIPS ok: a dead seat bleeding the fleet is breakage, not a steady state.
+    spawn_causes = spawn_causes or {}
+    spawn_alarm = spawn_stale_cred_alarm(spawn_causes)
+    if spawn_causes.get("schema"):
+        sc_by_cause = spawn_causes.get("by_cause") or {}
+        sc_failed = _int(spawn_causes.get("spawn_failed"), 0) or 0
+        if sc_failed:
+            mix = ", ".join(
+                f"{c}={_int((sc_by_cause.get(c) or {}).get('count'), 0)}"
+                for c in sorted(sc_by_cause,
+                                key=lambda c: -(_int((sc_by_cause.get(c) or {}).get("count"), 0) or 0))
+                if _int((sc_by_cause.get(c) or {}).get("count"), 0))
+            reasons.append(
+                f"spawn-failed mix: {sc_failed}/{_int(spawn_causes.get('spawns'), 0)} spawns "
+                f"early-exited (rate {spawn_causes.get('rate')}) [{mix}] (#4590)")
+    if spawn_alarm["red"]:
+        # Flip a healthy verdict to red; leave an already-failing verdict (host
+        # flagged / merge in progress) as the more urgent one, only adding the reason.
+        if ok:
+            ok = False
+            verdict = "SPAWN_STALE_CRED_DRAIN"
+        reasons.insert(0, spawn_alarm["reason"])
 
     if not tp_na:
         tp_verdict = throughput.get("verdict")
@@ -3420,6 +3487,15 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         },
         "watch_decision": watch or {},
         "backlog_rate": backlog_rate or {},
+        "spawn_causes": {
+            "na": not bool(spawn_causes.get("schema")),
+            "schema": spawn_causes.get("schema"),
+            "spawns": spawn_causes.get("spawns"),
+            "spawn_failed": spawn_causes.get("spawn_failed"),
+            "rate": spawn_causes.get("rate"),
+            "by_cause": spawn_causes.get("by_cause") or {},
+            "stale_cred_alarm": spawn_alarm,
+        },
         "route_health": route_health or {},
         "workers": {
             "silent_count": len(silent),
@@ -3669,6 +3745,17 @@ def render(p: dict[str, Any]) -> str:
     if sc:
         nums = ", ".join(f"#{s['issue']}" for s in (w.get("silent") or [])[:6])
         lines.append(f"║ workers   : {sc} silent (<= {_STUB_LOG_MAX_BYTES} B log, exited) [{nums}]")
+    scz = p.get("spawn_causes") or {}
+    if scz.get("schema") and _int(scz.get("spawn_failed"), 0):
+        by = scz.get("by_cause") or {}
+        bits = ", ".join(
+            f"{c}={_int((by.get(c) or {}).get('count'), 0)}"
+            for c in sorted(by, key=lambda c: -(_int((by.get(c) or {}).get("count"), 0) or 0))
+            if _int((by.get(c) or {}).get("count"), 0))
+        flag = " STALE_CRED_DRAIN" if (scz.get("stale_cred_alarm") or {}).get("red") else ""
+        lines.append(
+            f"║ spawn-fail: {scz.get('spawn_failed')}/{scz.get('spawns')} early-exit "
+            f"(rate {scz.get('rate')}) [{bits}]{flag} (#4590)")
     ly = p.get("low_yield") or {}
     if ly.get("low_yield_count"):
         flagged = [r for r in (ly.get("lanes") or []) if r.get("verdict") == "LOW_YIELD"]
@@ -3963,7 +4050,7 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"- closure audit: {watch.get('audit_status')}",
                 f"- scheduled task: {sched.get('classification')} "
                 f"(status={sched.get('status') or '-'})",
-                f"- follow-up tickets from this watch: "
+                "- follow-up tickets from this watch: "
                 + (", ".join(f"#{n}" for n in fu) if fu else "none listed")]
 
     leases = payload.get("leases") or {}
@@ -4305,7 +4392,7 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     a = d.get("account") or {}
     b = payload.get("backlog") or {}
     c = payload.get("closure") or {}
-    l = payload.get("leases") or {}
+    lz = payload.get("leases") or {}
     wl = payload.get("worker_lease_check") or {}
 
     parts: list[str] = []
@@ -4329,9 +4416,9 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
         hk = c.get("honest_close_rate")
         parts.append(f"closure {_rate_str(c.get('closure_rate'))}"
                      + (f"/{_rate_str(hk)}" if hk is not None else ""))
-    if l.get("active_count"):
-        parts.append(f"leases {l.get('active_count')} active"
-                     + (f" ({l.get('blocking_count')} blocking)" if l.get("blocking_count") else ""))
+    if lz.get("active_count"):
+        parts.append(f"leases {lz.get('active_count')} active"
+                     + (f" ({lz.get('blocking_count')} blocking)" if lz.get("blocking_count") else ""))
     if wl and wl.get("available") is not False:
         parts.append(f"lease-check clean {wl.get('clean_count', 0)}"
                      f"/orphan-proc {wl.get('orphan_process_count', 0)}"

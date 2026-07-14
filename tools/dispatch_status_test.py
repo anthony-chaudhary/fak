@@ -162,6 +162,30 @@ def resolver_preflight(*, backend: str = "opencode",
     }
 
 
+def spawn_causes(*, spawns: int = 20, stale_cred: int = 0, child_crash: int = 0,
+                 lookback_min: int = 24 * 60) -> dict:
+    """A synthetic spawn_failed_cause_breakdown (#4590) with a controllable
+    stale_cred count so a test can force (or stay under) the drain threshold."""
+    failed = stale_cred + child_crash
+    by_cause: dict = {}
+    for cause, n in (("stale_cred", stale_cred), ("child_crash", child_crash)):
+        by_cause[cause] = {
+            "count": n,
+            "rate_of_failed": round(n / failed, 3) if failed else 0.0,
+            "rate_of_spawns": round(n / spawns, 4) if spawns else 0.0,
+            "evidence": [],
+        }
+    return {
+        "schema": "fak.spawn-failed-cause-breakdown.v1",
+        "lookback_min": lookback_min,
+        "spawns": spawns,
+        "spawn_failed": failed,
+        "rate": round(failed / spawns, 4) if spawns else 0.0,
+        "by_cause": by_cause,
+        "events": [],
+    }
+
+
 def build(mod, **over):
     kw = dict(
         root=ROOT, pre=pre(), sup=sup(), wd={"installed": True, "status": "Ready"},
@@ -220,6 +244,62 @@ class VerdictTest(unittest.TestCase):
         p = build(mod, pre=pre("REFUSE_INSPECT"))
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "INSPECT")
+
+
+class SpawnCauseCardTest(unittest.TestCase):
+    """#4590: the trailing spawn-failed cause mix folds onto the DEFAULT card, and a
+    stale_cred rate over threshold reddens the verdict — no --spawn-causes needed."""
+
+    def test_default_card_folds_the_spawn_failed_mix(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  spawn_causes=spawn_causes(spawns=20, child_crash=2))
+        # Healthy: 2 child_crash / 20 spawns, zero stale_cred → no drain flip.
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertFalse(p["spawn_causes"]["na"])
+        self.assertFalse(p["spawn_causes"]["stale_cred_alarm"]["red"])
+        self.assertTrue(any("spawn-failed mix" in r for r in p["reasons"]))
+        self.assertIn("spawn-fail:", mod.render(p))
+
+    def test_high_stale_cred_rate_reddens_the_verdict(self) -> None:
+        mod = load()
+        # 4 stale_cred / 20 spawns = 20% >= 10% threshold, 20 spawns >= floor.
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  spawn_causes=spawn_causes(spawns=20, stale_cred=4))
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SPAWN_STALE_CRED_DRAIN")
+        alarm = p["spawn_causes"]["stale_cred_alarm"]
+        self.assertTrue(alarm["red"])
+        self.assertEqual(alarm["count"], 4)
+        self.assertTrue(any("stale-cred spawn-failure drain" in r for r in p["reasons"]))
+        self.assertIn("STALE_CRED_DRAIN", mod.render(p))
+
+    def test_small_sample_stale_cred_does_not_trip_the_alarm(self) -> None:
+        mod = load()
+        # 1 stale_cred / 4 spawns = 25% rate but only 4 spawns (< min floor 8).
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  spawn_causes=spawn_causes(spawns=4, stale_cred=1))
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertFalse(p["spawn_causes"]["stale_cred_alarm"]["red"])
+
+    def test_stale_cred_drain_does_not_stomp_a_flagged_host(self) -> None:
+        mod = load()
+        # An already-failing verdict (host flagged) stays the more urgent one; the
+        # drain still adds its reason line so the operator sees both.
+        p = build(mod, pre=pre("SPAWN_OK", host_safe=False),
+                  spawn_causes=spawn_causes(spawns=20, stale_cred=4))
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "HOST_FLAGGED")
+        self.assertTrue(any("stale-cred spawn-failure drain" in r for r in p["reasons"]))
+
+    def test_missing_spawn_causes_folds_to_na_without_reddening(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"))
+        self.assertTrue(p["spawn_causes"]["na"])
+        self.assertFalse(p["spawn_causes"]["stale_cred_alarm"]["red"])
+        self.assertTrue(p["ok"])
 
 
 class LimiterStatusTest(unittest.TestCase):
