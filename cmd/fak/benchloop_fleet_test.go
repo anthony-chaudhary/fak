@@ -1,0 +1,94 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.json")
+	plan := `{"per_machine_next":{
+		"a100":{"machine_id":"a100","workload_kind":"gpu-benchmark","model":"qwen","precision":"Q8_0","reason":"coverage","suggested_command":"on a100: go run -tags cuda ./cmd/gpucheck  # HINT"},
+		"cpu-server-a":{"machine_id":"cpu-server-a","workload_kind":"model-benchmark","model":"smollm","precision":"q8_0","reason":"coverage","suggested_command":"on cpu: go run ./cmd/modelbench -quant  # HINT"},
+		"node-macos-a":{"machine_id":"node-macos-a","workload_kind":"livecodebench","model":"qwen","precision":"official","reason":"coverage","suggested_command":"on mac: go run ./cmd/livecodebench --check --json  # HINT"}
+	}}`
+	if err := os.WriteFile(planPath, []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	queue := filepath.Join(dir, "queue")
+
+	var out, errOut bytes.Buffer
+	code := runBenchFleet(&out, &errOut, []string{"--apply", "--json", "--plan-json", planPath, "--queue", queue})
+	if code != 0 {
+		t.Fatalf("first run code=%d stderr=%s", code, errOut.String())
+	}
+	var got benchFleetReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Machines != 3 || got.Enqueued != 3 || got.Existing != 0 {
+		t.Fatalf("first report=%+v", got)
+	}
+	entries, err := os.ReadDir(queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("queue entries=%d want 3", len(entries))
+	}
+	classes := map[string]bool{}
+	for _, req := range got.Requests {
+		classes[req.NodeClass] = true
+		if req.State != "queued" {
+			t.Fatalf("state=%s", req.State)
+		}
+	}
+	for _, class := range []string{"gpu", "cpu", "mac"} {
+		if !classes[class] {
+			t.Fatalf("missing class %s: %#v", class, classes)
+		}
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = runBenchFleet(&out, &errOut, []string{"--apply", "--json", "--plan-json", planPath, "--queue", queue})
+	if code != 0 {
+		t.Fatalf("second run code=%d stderr=%s", code, errOut.String())
+	}
+	got = benchFleetReport{}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Enqueued != 0 || got.Existing != 3 {
+		t.Fatalf("second report=%+v", got)
+	}
+}
+
+func TestBenchFleetDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.json")
+	queue := filepath.Join(dir, "queue")
+	if err := os.WriteFile(planPath, []byte(`{"per_machine_next":{"gcp-g2-l4":{"machine_id":"gcp-g2-l4","workload_kind":"gpu-benchmark","suggested_command":"on l4: gpucheck  # HINT"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runBenchFleet(&out, &errOut, []string{"--json", "--plan-json", planPath, "--queue", queue}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if _, err := os.Stat(queue); !os.IsNotExist(err) {
+		t.Fatalf("dry run created queue: %v", err)
+	}
+	var got benchFleetReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Enqueued != 0 || got.Requests[0].State != "planned" || got.Requests[0].NodeClass != "gpu" {
+		t.Fatalf("report=%+v", got)
+	}
+}

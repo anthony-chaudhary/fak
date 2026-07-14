@@ -28,6 +28,10 @@ func runBenchLoop(stdout, stderr io.Writer, argv []string) int {
 		return benchLoopWalk(stdout, stderr, rest)
 	case "run", "collect":
 		return nightrunRun(stdout, stderr, rest)
+	case "fleet":
+		return runBenchFleet(stdout, stderr, rest)
+	case "install":
+		return runBenchFleetInstall(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		benchLoopUsage(stdout)
 		return 0
@@ -165,9 +169,13 @@ usage:
   fak bench-loop next   [--json] [--workspace DIR] [--now STAMP]
   fak bench-loop walk   [--json]
   fak bench-loop run    [nightrun run flags...]
+  fak bench-loop fleet  [status] [--apply] [--json] [--now STAMP] [--plan-json FILE]
+  fak bench-loop install [--interval MINUTES] [--remove]
 
 status folds the benchmark registry, recorded run catalog, nightrun ledger,
 local capability-aware next selection, and benchmark-authority gap. run delegates
-to fak nightrun run, which is dry-run unless --apply is passed.
+to fak nightrun run, which is dry-run unless --apply is passed. fleet walks the
+benchmark machine plan and queues one idempotent request per node; install keeps that
+tick always on via the Windows Task Scheduler (use cron elsewhere).
 `)
 }

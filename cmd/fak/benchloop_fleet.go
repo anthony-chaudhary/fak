@@ -1,0 +1,323 @@
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+)
+
+const benchFleetSchema = "fak.bench-loop.fleet.v1"
+
+type benchFleetPlan struct {
+	PerMachineNext map[string]struct {
+		MachineID        string `json:"machine_id"`
+		Benchmark        string `json:"workload_kind"`
+		Model            string `json:"model"`
+		Precision        string `json:"precision"`
+		Reason           string `json:"reason"`
+		SuggestedCommand string `json:"suggested_command"`
+	} `json:"per_machine_next"`
+}
+type benchFleetRequest struct {
+	Schema      string `json:"schema"`
+	ID          string `json:"id"`
+	Machine     string `json:"machine"`
+	NodeClass   string `json:"node_class"`
+	Benchmark   string `json:"benchmark"`
+	Model       string `json:"model"`
+	Precision   string `json:"precision"`
+	Reason      string `json:"reason"`
+	Command     string `json:"command"`
+	State       string `json:"state"`
+	RequestedAt string `json:"requested_at"`
+	Path        string `json:"path,omitempty"`
+}
+type benchFleetReport struct {
+	Schema      string              `json:"schema"`
+	GeneratedAt string              `json:"generated_at"`
+	Apply       bool                `json:"apply"`
+	Queue       string              `json:"queue"`
+	Machines    int                 `json:"machines"`
+	Enqueued    int                 `json:"enqueued"`
+	Existing    int                 `json:"existing"`
+	Requests    []benchFleetRequest `json:"requests"`
+	Next        string              `json:"next"`
+}
+
+func runBenchFleet(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "status" {
+		return runBenchFleetStatus(stdout, stderr, argv[1:])
+	}
+	fs := flag.NewFlagSet("fak bench-loop fleet", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	apply := fs.Bool("apply", false, "persist one deduplicated work request per benchmark node")
+	jsonOut := fs.Bool("json", false, "emit the machine-readable report")
+	nowArg := fs.String("now", "", "planner time in yyyyMMddTHHmmssZ form")
+	queueArg := fs.String("queue", "", "queue directory")
+	workspace := fs.String("workspace", ".", "repository root")
+	python := fs.String("python", "python", "Python executable used by the benchmark planner")
+	planJSON := fs.String("plan-json", "", "read planner JSON from this file")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak bench-loop fleet [--apply] [--json] [--now STAMP] [--plan-json FILE]")
+		return 2
+	}
+	root, err := filepath.Abs(*workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop fleet: root: %v\n", err)
+		return 1
+	}
+	queue := *queueArg
+	if queue == "" {
+		queue = filepath.Join(root, ".fak", "bench-fleet", "requests")
+	}
+	stamp := *nowArg
+	if stamp == "" {
+		stamp = time.Now().UTC().Format("20060102T150405Z")
+	}
+	payload, err := loadBenchFleetPlan(root, stamp, *python, *planJSON)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop fleet: %v\n", err)
+		return 1
+	}
+	var plan benchFleetPlan
+	if err := json.Unmarshal(payload, &plan); err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop fleet: decode planner: %v\n", err)
+		return 1
+	}
+	report := benchFleetReport{Schema: benchFleetSchema, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Apply: *apply, Queue: filepath.ToSlash(queue), Machines: len(plan.PerMachineNext)}
+	machines := make([]string, 0, len(plan.PerMachineNext))
+	for machine := range plan.PerMachineNext {
+		machines = append(machines, machine)
+	}
+	sort.Strings(machines)
+	for _, machine := range machines {
+		row := plan.PerMachineNext[machine]
+		if row.MachineID == "" {
+			row.MachineID = machine
+		}
+		command := cleanBenchSuggestedCommand(row.SuggestedCommand)
+		sum := sha256.Sum256([]byte(strings.Join([]string{row.MachineID, row.Benchmark, row.Model, row.Precision, command}, "\x00")))
+		id := hex.EncodeToString(sum[:8])
+		req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: id, Machine: row.MachineID, NodeClass: benchNodeClass(row.MachineID), Benchmark: row.Benchmark, Model: row.Model, Precision: row.Precision, Reason: row.Reason, Command: command, State: "planned", RequestedAt: report.GeneratedAt}
+		path := filepath.Join(queue, safeBenchMachine(row.MachineID)+"-"+id+".json")
+		req.Path = filepath.ToSlash(path)
+		if *apply {
+			if _, err := os.Stat(path); err == nil {
+				req.State = "already_queued"
+				report.Existing++
+			} else if !os.IsNotExist(err) {
+				fmt.Fprintf(stderr, "fak bench-loop fleet: inspect %s: %v\n", path, err)
+				return 1
+			} else {
+				req.State = "queued"
+				if err := writeBenchFleetRequest(path, req); err != nil {
+					fmt.Fprintf(stderr, "fak bench-loop fleet: queue %s: %v\n", row.MachineID, err)
+					return 1
+				}
+				report.Enqueued++
+			}
+		}
+		report.Requests = append(report.Requests, req)
+	}
+	if *apply {
+		report.Next = "node runners claim queued requests; reruns are idempotent until the plan changes"
+	} else {
+		report.Next = "rerun with --apply to persist the per-node work queue"
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+	} else {
+		renderBenchFleet(stdout, report)
+	}
+	return 0
+}
+
+func runBenchFleetStatus(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak bench-loop fleet status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "emit machine-readable status")
+	workspace := fs.String("workspace", ".", "repository root")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	root, err := filepath.Abs(*workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop fleet status: %v\n", err)
+		return 1
+	}
+	queue := filepath.Join(root, ".fak", "bench-fleet", "requests")
+	entries, err := os.ReadDir(queue)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "fak bench-loop fleet status: %v\n", err)
+		return 1
+	}
+	type status struct {
+		Schema   string              `json:"schema"`
+		Queue    string              `json:"queue"`
+		Queued   int                 `json:"queued"`
+		Requests []benchFleetRequest `json:"requests"`
+	}
+	got := status{Schema: "fak.bench-loop.fleet-status.v1", Queue: filepath.ToSlash(queue)}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		b, e := os.ReadFile(filepath.Join(queue, entry.Name()))
+		if e != nil {
+			continue
+		}
+		var req benchFleetRequest
+		if json.Unmarshal(b, &req) == nil {
+			got.Requests = append(got.Requests, req)
+		}
+	}
+	got.Queued = len(got.Requests)
+	sort.Slice(got.Requests, func(i, j int) bool { return got.Requests[i].Machine < got.Requests[j].Machine })
+	if *jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(got)
+	} else {
+		fmt.Fprintf(stdout, "bench fleet queue: %d request(s) in %s\n", got.Queued, got.Queue)
+		for _, req := range got.Requests {
+			fmt.Fprintf(stdout, "- %s: %s (%s)\n", req.Machine, req.Command, req.State)
+		}
+	}
+	return 0
+}
+
+func loadBenchFleetPlan(root, stamp, python, path string) ([]byte, error) {
+	if path != "" {
+		return os.ReadFile(path)
+	}
+	cmd := exec.Command(python, filepath.Join(root, "tools", "bench_plan.py"), "--workspace", root, "--now", stamp, "--json")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("planner: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+func cleanBenchSuggestedCommand(s string) string {
+	if i := strings.Index(s, ": "); i >= 0 {
+		s = s[i+2:]
+	}
+	if i := strings.Index(s, "  #"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+func benchNodeClass(machine string) string {
+	m := strings.ToLower(machine)
+	switch {
+	case strings.Contains(m, "a100") || strings.Contains(m, "h100") || strings.Contains(m, "l4") || strings.Contains(m, "gpu"):
+		return "gpu"
+	case strings.Contains(m, "cpu"):
+		return "cpu"
+	case strings.Contains(m, "mac"):
+		return "mac"
+	default:
+		return "control"
+	}
+}
+func safeBenchMachine(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+func writeBenchFleetRequest(path string, req benchFleetRequest) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp := path + fmt.Sprintf(".%d.tmp", os.Getpid())
+	if err = os.WriteFile(tmp, b, 0644); err != nil {
+		return err
+	}
+	if err = os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+func renderBenchFleet(w io.Writer, r benchFleetReport) {
+	mode := "DRY_RUN"
+	if r.Apply {
+		mode = "APPLIED"
+	}
+	fmt.Fprintf(w, "bench fleet %s: %d nodes, %d queued, %d existing\n", mode, r.Machines, r.Enqueued, r.Existing)
+	for _, x := range r.Requests {
+		fmt.Fprintf(w, "- %-16s %-7s %-14s %s\n", x.Machine, x.NodeClass, x.State, x.Command)
+	}
+	fmt.Fprintf(w, "next: %s\n", r.Next)
+}
+
+func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak bench-loop install", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	interval := fs.Int("interval", 15, "cadence in minutes")
+	task := fs.String("task", "FakBenchmarkFleetLoop", "Windows Scheduled Task name")
+	remove := fs.Bool("remove", false, "remove the Scheduled Task")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if runtime.GOOS != "windows" {
+		fmt.Fprintln(stderr, "fak bench-loop install: use `fak bench-loop fleet --apply` from cron on non-Windows hosts")
+		return 1
+	}
+	if *interval < 1 {
+		fmt.Fprintln(stderr, "fak bench-loop install: --interval must be positive")
+		return 2
+	}
+	if *remove {
+		out, err := exec.Command("schtasks.exe", "/Delete", "/TN", *task, "/F").CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
+			return 1
+		}
+		fmt.Fprintf(stdout, "removed %s\n", *task)
+		return 0
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop install: executable: %v\n", err)
+		return 1
+	}
+	root, _ := filepath.Abs(".")
+	tr := fmt.Sprintf("\"%s\" bench-loop fleet --apply --json --workspace \"%s\"", exe, root)
+	cmd := exec.Command("schtasks.exe", "/Create", "/TN", *task, "/SC", "MINUTE", "/MO", fmt.Sprint(*interval), "/TR", tr, "/F", "/RL", "LIMITED")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
+		return 1
+	}
+	fmt.Fprintf(stdout, "installed %s every %dm: %s\n", *task, *interval, tr)
+	return 0
+}
