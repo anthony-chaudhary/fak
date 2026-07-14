@@ -241,6 +241,69 @@ class RoutingRungTest(unittest.TestCase):
         self.assertEqual(r["blocked_lane"], "abi")
 
 
+class ExclusiveLaneDerivationTest(unittest.TestCase):
+    """#4027: the exclusive-lane set is derived from `dos doctor` lanes.exclusive
+    (a single source of truth), not a hand-maintained literal, with a drift guard
+    pinning it to the repo dos.toml so a lane newly marked exclusive/renamed there
+    fails HERE instead of silently desyncing from the router's refusal gate."""
+
+    REPO_ROOT = SCRIPT.resolve().parent.parent
+
+    def _taxonomy_with(self, exclusive):
+        """Run lane_taxonomy against a stubbed `dos doctor` payload (hermetic —
+        no real dos binary), so the derivation wiring is exercised in isolation."""
+        import json as _json
+        payload = {"lanes": {
+            "concurrent": ["gateway", "tools"],
+            "trees": {"gateway": ["internal/gateway/**"], "tools": ["tools/**"]},
+            "exclusive": exclusive,
+        }}
+        orig = m.run_text
+        m.run_text = lambda cmd, cwd, **kw: {"stdout": _json.dumps(payload), "returncode": 0}
+        try:
+            return m.lane_taxonomy(self.REPO_ROOT)
+        finally:
+            m.run_text = orig
+
+    def test_lane_taxonomy_returns_exclusive_from_doctor(self):
+        _concurrent, _trees, exclusive = self._taxonomy_with(["abi", "release", "dos", "global"])
+        self.assertEqual(exclusive, {"abi", "release", "dos", "global"})
+
+    def test_lane_taxonomy_falls_back_when_doctor_omits_exclusive(self):
+        # An older `dos` (no exclusive field) or a bad workspace → the module
+        # literal is the documented fallback, never an empty (block-nothing) set.
+        _concurrent, _trees, exclusive = self._taxonomy_with([])
+        self.assertEqual(exclusive, set(m.EXCLUSIVE_LANES))
+        self.assertTrue(exclusive)
+
+    def test_dos_lane_refused_by_derivation_not_literal(self):
+        # The #4027 regression made concrete: `dos` is exclusive in dos.toml but
+        # absent from the module literal. A DERIVED exclusive set refuses a
+        # dos-scoped issue; the stale literal silently did not.
+        iss = issue(4027, "dos: retune the exclusive lane roster", body="edit dos.toml")
+        derived = m.route_issue(iss, LANES + ["dos"], TREES,
+                                exclusive={"abi", "release", "dos", "global"})
+        self.assertIsNone(derived["lane"])
+        self.assertEqual(derived["blocked_lane"], "dos")
+        self.assertEqual(derived["blocked_policy"], "exclusive")
+        # With the pre-#4027 literal (no `dos`), the SAME issue is not held.
+        literal = m.route_issue(iss, LANES + ["dos"], TREES,
+                                exclusive={"abi", "release", "global"})
+        self.assertNotEqual(literal.get("blocked_lane"), "dos")
+
+    def test_repo_dos_toml_marks_dos_exclusive(self):
+        # Drift guard against the authoritative source. `dos doctor` echoes
+        # dos.toml `[lanes].exclusive`, so pinning the router's derivation to this
+        # file catches a lane newly marked exclusive/renamed in dos.toml.
+        import tomllib
+        with (self.REPO_ROOT / "dos.toml").open("rb") as fh:
+            data = tomllib.load(fh)
+        declared = {str(x) for x in (data.get("lanes", {}).get("exclusive") or [])}
+        self.assertIn("dos", declared,
+                      "dos.toml [lanes].exclusive must carry `dos` (#4027 drift)")
+        self.assertTrue({"abi", "release", "global"} <= declared)
+
+
 class PayloadTest(unittest.TestCase):
     def _payload(self, routes, **kw):
         return m.build_payload(workspace="C:/work/fleet", routes=routes, trees=TREES, **kw)
@@ -374,7 +437,7 @@ class CollectWiringTest(unittest.TestCase):
     def test_collect_uses_injected_fetcher_and_taxonomy(self):
         # Patch lane_taxonomy to avoid a real dos doctor call.
         orig = m.lane_taxonomy
-        m.lane_taxonomy = lambda ws: (LANES, TREES)
+        m.lane_taxonomy = lambda ws: (LANES, TREES, {"abi", "release", "global"})
         try:
             p = m.collect(
                 Path("C:/work/fleet"),
@@ -388,7 +451,7 @@ class CollectWiringTest(unittest.TestCase):
 
     def test_collect_flags_fetch_error_on_no_lanes(self):
         orig = m.lane_taxonomy
-        m.lane_taxonomy = lambda ws: ([], {})
+        m.lane_taxonomy = lambda ws: ([], {}, {"abi", "release", "global"})
         try:
             p = m.collect(Path("C:/work/fleet"), fetcher=lambda _ws: [issue(1, "fix(gateway): a")])
         finally:
@@ -422,7 +485,7 @@ class DispatchabilityTest(unittest.TestCase):
 
     def test_collect_skips_epics_routes_the_rest(self):
         orig = m.lane_taxonomy
-        m.lane_taxonomy = lambda ws: (LANES, TREES)
+        m.lane_taxonomy = lambda ws: (LANES, TREES, {"abi", "release", "global"})
         try:
             p = m.collect(
                 Path("C:/work/fleet"),
@@ -480,7 +543,7 @@ class InjectedIssuesTest(unittest.TestCase):
         # A view slice flows straight into routing; coverage is "complete" (the slice
         # IS the intended backlog), never the silent-truncation ACTION verdict.
         orig = m.lane_taxonomy
-        m.lane_taxonomy = lambda root: (LANES, TREES)
+        m.lane_taxonomy = lambda root: (LANES, TREES, {"abi", "release", "global"})
         try:
             rows = [issue(30, "fix(gateway): x"), issue(31, "fix(tools): y")]
             p = m.collect(Path("."), fetcher=lambda ws: rows, injected=True)
@@ -493,7 +556,7 @@ class InjectedIssuesTest(unittest.TestCase):
 
     def test_injected_empty_is_not_a_fetch_error(self):
         orig = m.lane_taxonomy
-        m.lane_taxonomy = lambda root: (LANES, TREES)
+        m.lane_taxonomy = lambda root: (LANES, TREES, {"abi", "release", "global"})
         try:
             p = m.collect(Path("."), fetcher=lambda ws: [], injected=True)
         finally:

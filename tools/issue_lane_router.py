@@ -100,6 +100,14 @@ def body_declared_lane(body: str | None) -> str | None:
 
 # Lanes that are exclusive in dos.toml — NEVER auto-route a worker onto these from
 # a heuristic; that is exactly the collision the arbiter exists to prevent.
+#
+# This literal is only a FALLBACK. The EFFECTIVE exclusive set is derived from
+# `dos doctor --json` `lanes.exclusive` at route time (`lane_taxonomy`, threaded
+# into `route_issue(..., exclusive=...)`), so a lane newly marked exclusive or
+# renamed in dos.toml is refused by DERIVATION, not by a hand-edited literal that
+# has already drifted once (#4027: `dos` was exclusive in dos.toml but missing
+# here, masked only incidentally by the `global` `**/*` tree). It is consulted
+# only when `dos doctor` yields no exclusive list (e.g. run outside a workspace).
 EXCLUSIVE_LANES = {"abi", "release", "global"}
 EXCLUSIVE_UNBLOCK_ACTION = (
     "operator: handle this issue on the human-owned lane or split out a non-exclusive "
@@ -356,15 +364,25 @@ def read_json_from_text(text: str) -> dict[str, Any]:
 # Lane taxonomy (from dos doctor) + glob matching
 # ---------------------------------------------------------------------------
 
-def lane_taxonomy(workspace: Path) -> tuple[list[str], dict[str, list[str]]]:
-    """Return (concurrent_lanes, {lane: [tree globs]}) from `dos doctor --json`."""
+def lane_taxonomy(
+    workspace: Path,
+) -> tuple[list[str], dict[str, list[str]], set[str]]:
+    """Return (concurrent_lanes, {lane: [tree globs]}, exclusive_lanes) from
+    `dos doctor --json`.
+
+    The exclusive set is the single source of truth for the exclusive-lane
+    refusal (#4027): it is read from `lanes.exclusive` here rather than a
+    hand-maintained literal, so a lane newly marked exclusive in dos.toml is
+    refused by derivation. Falls back to :data:`EXCLUSIVE_LANES` only when the
+    payload carries no exclusive list (e.g. an older `dos` or a bad workspace)."""
     payload = read_json_from_text(
         run_text(["dos", "doctor", "--workspace", str(workspace), "--json"], workspace)["stdout"]
     )
     lanes = payload.get("lanes") or {}
     concurrent = [str(x) for x in (lanes.get("concurrent") or [])]
     trees = {str(k): [str(g) for g in v] for k, v in (lanes.get("trees") or {}).items()}
-    return concurrent, trees
+    exclusive = {str(x) for x in (lanes.get("exclusive") or [])} or set(EXCLUSIVE_LANES)
+    return concurrent, trees, exclusive
 
 
 def _glob_to_re(glob: str) -> re.Pattern[str]:
@@ -475,7 +493,7 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
     dgx/nvidia) in the title/body — else []. The dispatcher's capability gate skips an
     issue whose required_caps a node lacks, leaving it OPEN + visible for a GPU-capable
     node's dispatcher to claim; it does NOT stop or cool the issue. Pure + deterministic."""
-    labels = {l.lower() for l in _label_names(issue)}
+    labels = {ln.lower() for ln in _label_names(issue)}
     if labels & GPU_CAP_LABELS:
         return ["gpu"]
     scope = _scope_token(str(issue.get("title") or ""))
@@ -575,11 +593,18 @@ def route_issue(
     scope_alias: dict[str, str] | None = None,
     label_alias: dict[str, str] | None = None,
     keyword_alias: dict[str, str] | None = None,
+    exclusive: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Route one issue to a lane via the confidence ladder. Pure + deterministic."""
+    """Route one issue to a lane via the confidence ladder. Pure + deterministic.
+
+    ``exclusive`` is the exclusive-lane set to refuse auto-routing onto; callers
+    pass the value derived from `dos doctor` (`lane_taxonomy`'s third element).
+    When omitted it falls back to the module :data:`EXCLUSIVE_LANES` literal so
+    existing fixture-only callers keep their prior behavior (#4027)."""
     scope_alias = scope_alias or SCOPE_ALIAS
     label_alias = label_alias or LABEL_ALIAS
     keyword_alias = keyword_alias or KEYWORD_ALIAS
+    exclusive = EXCLUSIVE_LANES if exclusive is None else exclusive
     title = str(issue.get("title") or "")
     body = str(issue.get("body") or "")
     lane_set = set(concurrent)
@@ -603,7 +628,7 @@ def route_issue(
     # Rung 2: exact scope == lane.
     scope_lane = None
     scope_conf = None
-    if scope and scope in lane_set and scope not in EXCLUSIVE_LANES:
+    if scope and scope in lane_set and scope not in exclusive:
         scope_lane, scope_conf = scope, "exact-scope"
     # Rung 3: alias scope -> lane.
     elif scope and scope in scope_alias and scope_alias[scope] in lane_set:
@@ -629,20 +654,20 @@ def route_issue(
             keyword, keyword_lane = key, lane
             break
 
-    blocked_path_lanes = sorted(l for l in path_lanes if l in EXCLUSIVE_LANES)
+    blocked_path_lanes = sorted(ln for ln in path_lanes if ln in exclusive)
     if blocked_path_lanes:
         lane = blocked_path_lanes[0]
         return _blocked_route(issue, lane, f"path:{lane}", "exclusive")
 
     # Exclusive-lane scope is operator-gated, never auto-routed.
-    if scope in EXCLUSIVE_LANES:
+    if scope in exclusive:
         return _blocked_route(issue, scope, f"exclusive-scope:{scope}", "exclusive")
-    if scope_lane in EXCLUSIVE_LANES:
+    if scope_lane in exclusive:
         token = scope if scope in scope_alias else typ
         return _blocked_route(issue, scope_lane, f"scope:{token}->{scope_lane}", "exclusive")
-    if label_lane in EXCLUSIVE_LANES:
+    if label_lane in exclusive:
         return _blocked_route(issue, label_lane, f"label->{label_lane}", "exclusive")
-    if keyword_lane in EXCLUSIVE_LANES:
+    if keyword_lane in exclusive:
         return _blocked_route(issue, keyword_lane, f"keyword:{keyword}->{keyword_lane}", "exclusive")
 
     # Witness-vs-binding demotion (#2609): `.github/**` is the fleet's most-cited
@@ -657,18 +682,18 @@ def route_issue(
     # issue (#978) still routes ci. Runs AFTER the exclusive holds above, which
     # decide on the full original path set and never weaken.
     body_lane = body_declared_lane(body)
-    if body_lane is not None and (body_lane not in lane_set or body_lane in EXCLUSIVE_LANES):
+    if body_lane is not None and (body_lane not in lane_set or body_lane in exclusive):
         body_lane = None
     witness_demoted: list[str] = []
     demote_note = ""
-    witness_only = [l for l in path_lanes
-                    if all(p.startswith(".github/") for p in lane_paths.get(l, []))]
+    witness_only = [ln for ln in path_lanes
+                    if all(p.startswith(".github/") for p in lane_paths.get(ln, []))]
     if witness_only:
-        others = [l for l in path_lanes if l not in witness_only]
+        others = [ln for ln in path_lanes if ln not in witness_only]
         binding_lanes: list[str] = []
         for p in _BINDING_PATH_RE.findall(title + "\n" + body):
             for lane in path_matches_lane(p, trees):
-                if (lane in lane_set and lane not in EXCLUSIVE_LANES
+                if (lane in lane_set and lane not in exclusive
                         and lane not in witness_only and lane not in others
                         and lane not in binding_lanes):
                     binding_lanes.append(lane)
@@ -699,8 +724,8 @@ def route_issue(
     if path_ambiguous:
         # Tie-break: prefer the body-declared lane (only armed by a witness
         # demotion), then the lane also matching scope/label; else lexicographic.
-        routable_path_lanes = [l for l in path_lanes
-                               if l not in EXCLUSIVE_LANES]
+        routable_path_lanes = [ln for ln in path_lanes
+                               if ln not in exclusive]
         prefer = (body_lane if (witness_demoted and body_lane in routable_path_lanes)
                   else (scope_lane if scope_lane in routable_path_lanes
                         else (label_lane if label_lane in routable_path_lanes else None)))
@@ -1016,7 +1041,7 @@ def collect(
     injected: bool = False,
 ) -> dict[str, Any]:
     root = workspace.resolve()
-    concurrent, trees = lane_taxonomy(root)
+    concurrent, trees, exclusive = lane_taxonomy(root)
     fetch = fetcher or (lambda ws: fetch_issues(ws, limit=issue_limit))
     issues = fetch(root)
     if injected:
@@ -1045,7 +1070,7 @@ def collect(
         fetch_error = "gh returned no open issues (auth/network?)"
     routes = [
         route_issue(i, concurrent, trees, scope_alias=scope_alias, label_alias=label_alias,
-                    keyword_alias=keyword_alias)
+                    keyword_alias=keyword_alias, exclusive=exclusive)
         for i in routable
     ]
     return build_payload(
