@@ -438,5 +438,47 @@ class TrendWiringTest(unittest.TestCase):
             self.assertEqual(fleet_trend.tail(path, 24), [])  # dry-run never records
 
 
+class ThroughputTest(unittest.TestCase):
+    def test_build_snapshot_embeds_throughput_when_provided(self):
+        snap = fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z",
+            throughput={"lands": 4170, "resumes": 15, "lands_witness": "git"},
+        )
+        self.assertEqual(snap["throughput"]["lands"], 4170)
+        self.assertEqual(snap["throughput"]["lands_witness"], "git")
+
+    def test_build_snapshot_omits_throughput_when_absent(self):
+        # A snapshot that could not read counters stays clean — no empty/zero block.
+        snap = fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z",
+        )
+        self.assertNotIn("throughput", snap)
+        snap2 = fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z",
+            throughput={},
+        )
+        self.assertNotIn("throughput", snap2)
+
+    def test_resume_attempt_count_counts_spawned_only(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            reg = Path(d)
+            with open(reg / "resume_ledger.jsonl", "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"phase": "launched", "sid": "a"}) + "\n")
+                fh.write(json.dumps({"phase": "resumed", "sid": "b"}) + "\n")
+                fh.write(json.dumps({"phase": "deferred", "sid": "c"}) + "\n")  # not spawned
+                fh.write(json.dumps({"phase": "gate_fail_open"}) + "\n")        # not spawned
+                fh.write("not json\n")                                          # tolerated
+            self.assertEqual(fleet_top.resume_attempt_count(reg), 2)
+
+    def test_resume_attempt_count_absent_ledger_is_none(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(fleet_top.resume_attempt_count(Path(d)))
+
+
 if __name__ == "__main__":
     unittest.main()

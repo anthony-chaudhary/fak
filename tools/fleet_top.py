@@ -150,6 +150,82 @@ def load_sessions_doc(
         return {}, f"fleet_sessions emitted non-JSON: {exc}"
 
 
+def _git_land_count(root: Path, *, timeout_s: int = 10) -> int | None:
+    """Total commits reachable from HEAD — the git-WITNESSED count of work landed on
+    this trunk. Monotonic as workers land, so diffing it across the trend window is
+    literal HEAD advancement (the numerator of goodput and the flat-line HEAD-stall
+    reads off it). None on any git failure (no git, not a repo) so the counter is
+    honestly absent rather than a fabricated 0."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        return int((proc.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def resume_attempt_count(reg_dir: Path) -> int | None:
+    """Cumulative auto-resume launches from the durable resume ledger — the fleet's
+    "a worker was (re)spawned" signal that HEAD-stall detection pairs against lands
+    (spinning = lands flat while resumes climb). Counts the unambiguous spawned-attempt
+    rows (phase launched/resumed), mirroring fleet_resume_watchdog.is_resume_attempt_record's
+    explicit branch. The ledger compacts only rows older than its multi-day retention,
+    so within the hours-long trend window the count is monotonic. None when the ledger
+    is absent, so the rate reads as honest n/a rather than 0."""
+    path = reg_dir / "resume_ledger.jsonl"
+    if not path.exists():
+        return None
+    n = 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("phase") in ("launched", "resumed"):
+                    n += 1
+    except OSError:
+        return None
+    return n
+
+
+def collect_throughput(root: Path) -> dict[str, Any]:
+    """The cumulative throughput counters the trend ledger diffs into the goodput /
+    HEAD-stall SLO: git-witnessed lands (trunk commits) and resume-launch attempts.
+    Impure (git + disk) — kept OUT of the pure build_snapshot and folded in by the
+    snapshot() wrapper. Best-effort: a probe that fails is simply omitted, so a window
+    without it honestly reports that rate absent (fleet_trend renders n/a, never a
+    fabricated 0). Deaths — the goodput denominator — is a documented follow-on; until
+    a witnessed death counter is wired goodput stays n/a rather than half-invented."""
+    tp: dict[str, Any] = {}
+    lands = _git_land_count(root)
+    if lands is not None:
+        tp["lands"] = lands
+        # Provenance the consumer surfaces: counted from the git commit graph, so a
+        # flat run is a real HEAD stall, not a self-reported number passing as witnessed.
+        tp["lands_witness"] = "git"
+    reg_dir = Path(os.environ.get("FLEET_REG_DIR") or (root / "tools" / "_registry"))
+    resumes = resume_attempt_count(reg_dir)
+    if resumes is not None:
+        tp["resumes"] = resumes
+    return tp
+
+
 def build_snapshot(
     doc: dict[str, Any],
     *,
@@ -157,11 +233,15 @@ def build_snapshot(
     window_h: float,
     now: str,
     error: str = "",
+    throughput: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fold a fleet_sessions json doc into the render-ready top snapshot.
 
-    Pure: no clock, no disk, no subprocess — everything comes from `doc` and the
-    passed-in `now`, so the renderer and the tests share one deterministic shape.
+    Pure: no clock, no disk, no subprocess — everything comes from `doc`, the passed-in
+    `now`, and the pre-collected `throughput` counters, so the renderer and the tests
+    share one deterministic shape. `throughput` (git-witnessed lands + resume launches)
+    is embedded only when non-empty, so a snapshot that could not read it stays clean
+    and the trend rate reads as honest absence downstream.
     """
     rows = list(doc.get("rows") or [])
     accounts = list(doc.get("accounts") or [])
@@ -183,7 +263,7 @@ def build_snapshot(
 
     attention = _attention(rows, accounts, available, throttle)
 
-    return {
+    snap: dict[str, Any] = {
         "schema": SCHEMA,
         "generated_utc": now,
         "workspace": workspace,
@@ -222,6 +302,9 @@ def build_snapshot(
         },
         "attention": attention,
     }
+    if throughput:
+        snap["throughput"] = throughput
+    return snap
 
 
 def _attention(
@@ -714,7 +797,8 @@ def snapshot(root: Path, window_h: float, *, now: str | None = None) -> dict[str
     doc, error = load_sessions_doc(root, window_h)
     stamp = now or (doc.get("now") if not error else None) or _iso_now()
     return build_snapshot(
-        doc, workspace=str(root), window_h=window_h, now=stamp, error=error
+        doc, workspace=str(root), window_h=window_h, now=stamp, error=error,
+        throughput=collect_throughput(root),
     )
 
 

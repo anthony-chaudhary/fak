@@ -51,6 +51,19 @@ METRICS: list[tuple[str, str]] = [
     ("escalate", "escalate"),  # operator-actionable items the lifecycle can't heal
 ]
 
+# Cumulative throughput counters, persisted alongside the gauges so the goodput /
+# HEAD-stall SLO (computed by internal/fleettrend on read) can diff them across the
+# window. They are NOT rendered by render_line — only recorded. A snapshot carrying no
+# throughput block simply never sets them, so a counter-free history honestly reports
+# its rates as absent rather than a fabricated zero. Key names mirror internal/fleettrend
+# Counters exactly so the Go reader picks them straight off the ledger rows this writes.
+COUNTERS: list[tuple[str, str]] = [
+    ("lands", "lands"),                      # git-witnessed lands (trunk commit total)
+    ("resumes", "resumes"),                  # auto-resume launches
+    ("deaths", "deaths"),                    # worker crash/exhaust exits
+    ("lands_witnessed", "lands_witnessed"),  # 1 when lands is git-witnessed, else absent
+]
+
 # Sparkline ramp, low→high. Eight levels is the most a proportional font renders
 # distinctly on a phone; a flat series collapses to the lowest block.
 _BLOCKS = "▁▂▃▄▅▆▇█"
@@ -67,12 +80,24 @@ def metrics_of(snap: dict[str, Any]) -> dict[str, float]:
     by_cat = sess.get("by_category") or {}
     acc = snap.get("accounts") or {}
     sysv = snap.get("system") or {}
-    return {
+    m = {
         "usable": float(acc.get("usable") or 0),
         "live": float(by_cat.get("LIVE") or 0),
         "sessions": float(sess.get("total") or 0),
         "escalate": float(sysv.get("escalate") or 0),
     }
+    # Cumulative throughput counters ride in an optional "throughput" block; a snapshot
+    # that carries none leaves them unset (honest absence). lands_witness is a provenance
+    # string the producer stamps "git" when lands was counted from the commit graph — we
+    # fold it to a 1 flag under the key internal/fleettrend reads.
+    tp = snap.get("throughput")
+    if isinstance(tp, dict) and tp:
+        for c in ("lands", "resumes", "deaths"):
+            if tp.get(c) is not None:
+                m[c] = float(tp[c] or 0)
+        if tp.get("lands_witness") in ("git", "witnessed"):
+            m["lands_witnessed"] = 1.0
+    return m
 
 
 def append(path: str, metrics: dict[str, float], now: str, *, cap: int = DEFAULT_CAP) -> dict[str, Any]:
@@ -84,6 +109,11 @@ def append(path: str, metrics: dict[str, float], now: str, *, cap: int = DEFAULT
     history. The directory is created if absent."""
     row = {"ts": now}
     for k, _ in METRICS:
+        if k in metrics:
+            row[k] = _num(metrics[k])
+    # Persist the cumulative counters too when present, so the goodput / HEAD-stall SLO
+    # is computable on read. Absent from `metrics` ⇒ absent from the row (never a 0).
+    for k, _ in COUNTERS:
         if k in metrics:
             row[k] = _num(metrics[k])
     rows = _read_rows(path)

@@ -54,6 +54,26 @@ class MetricsOfTest(unittest.TestCase):
             {"usable": 0.0, "live": 0.0, "sessions": 0.0, "escalate": 0.0},
         )
 
+    def test_throughput_counters_extracted_and_witness_folded(self):
+        snap = {
+            "sessions": {"total": 5, "by_category": {"LIVE": 2}},
+            "accounts": {"usable": 1},
+            "system": {"escalate": 0},
+            "throughput": {"lands": 4170, "resumes": 15, "lands_witness": "git"},
+        }
+        m = fleet_trend.metrics_of(snap)
+        self.assertEqual(m["lands"], 4170.0)
+        self.assertEqual(m["resumes"], 15.0)
+        self.assertEqual(m["lands_witnessed"], 1.0)
+        # deaths was not produced → honestly absent, never a fabricated 0.
+        self.assertNotIn("deaths", m)
+
+    def test_no_throughput_block_leaves_counters_unset(self):
+        # A gauges-only snapshot must not sprout a fabricated zero counter.
+        m = fleet_trend.metrics_of({"accounts": {"usable": 1}})
+        for k in ("lands", "resumes", "deaths", "lands_witnessed"):
+            self.assertNotIn(k, m)
+
 
 class LedgerTest(unittest.TestCase):
     def setUp(self):
@@ -70,6 +90,27 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(rows[0]["usable"], 3)
         self.assertEqual(rows[-1]["escalate"], 1)
         self.assertEqual(rows[-1]["ts"], "2026-07-01T01:00:00Z")
+
+    def test_append_persists_throughput_counters(self):
+        # Counters present in metrics land in the row (so the Go goodput/HEAD-stall
+        # reader picks them straight off the ledger); counters absent stay absent.
+        fleet_trend.append(
+            self.path,
+            {"usable": 3, "live": 1, "sessions": 4, "escalate": 0,
+             "lands": 4170, "resumes": 15, "lands_witnessed": 1},
+            "2026-07-01T00:00:00Z",
+        )
+        fleet_trend.append(
+            self.path,
+            {"usable": 3, "live": 1, "sessions": 4, "escalate": 0},  # gauges only
+            "2026-07-01T01:00:00Z",
+        )
+        rows = fleet_trend.tail(self.path, 24)
+        self.assertEqual(rows[0]["lands"], 4170)
+        self.assertEqual(rows[0]["resumes"], 15)
+        self.assertEqual(rows[0]["lands_witnessed"], 1)
+        self.assertNotIn("lands", rows[1])
+        self.assertNotIn("deaths", rows[0])
 
     def test_append_is_bounded_to_cap(self):
         for i in range(10):
