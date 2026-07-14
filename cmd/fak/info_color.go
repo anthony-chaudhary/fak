@@ -26,6 +26,19 @@ func guardInfoColorEnabled(isTTY bool) bool {
 	return isTTY && os.Getenv("NO_COLOR") == ""
 }
 
+// resolveGuardInfoColorMode maps the --color flag (auto|always|never) + TTY + NO_COLOR
+// to a colorOn decision, matching fak tui --color precedence (NO_COLOR always wins).
+func resolveGuardInfoColorMode(mode string, isTTY bool) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "always":
+		return os.Getenv("NO_COLOR") == ""
+	case "never":
+		return false
+	default:
+		return guardInfoColorEnabled(isTTY)
+	}
+}
+
 // colorizeGuardInfoBlock layers TTY color onto an already-assembled, already-width-capped info
 // block. It splits the block into rows and, for each row whose structural role it recognizes,
 // wraps the WHOLE row in an SGR pair. A row it does not recognize passes through untouched, so the

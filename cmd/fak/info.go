@@ -300,6 +300,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	width := fs.Int("width", 0, "with --from-fixture: render at this fixed pane width in cells (0 = the overlay's roomy default). A fixed width makes the captured frame byte-deterministic across terminals.")
 	height := fs.Int("height", 0, "with --from-fixture: render at this fixed pane height in rows (0 = roomy — the body renders in full). A fixed height crops/fits the frame exactly as a live pane of that size would.")
 	startup := fs.Bool("startup", false, "print the guarded session's FULL startup report (the banner + hook/MCP/auth notes) and exit. This is the on-demand door to the detail an attended `fak guard -- claude` launch keeps compact: the guard records the full text on its gateway at boot, and this reads it back any time during the session (startup_report on /debug/vars). Relaunching with `fak guard --banner=full` streams it at boot instead.")
+	color := fs.String("color", "auto", "colorize the info overlay on a TTY: auto (TTY && NO_COLOR unset), always (force on unless NO_COLOR), or never")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -317,6 +318,12 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	case "visual", "line":
 	default:
 		fmt.Fprintf(stderr, "fak info: --style must be visual or line, got %q\n", *style)
+		return 2
+	}
+	switch strings.ToLower(strings.TrimSpace(*color)) {
+	case "auto", "always", "never":
+	default:
+		fmt.Fprintf(stderr, "fak info: --color must be auto, always, or never, got %q\n", *color)
 		return 2
 	}
 	base, err := normalizeTUIAgentGatewayURL(*gatewayURL)
@@ -379,7 +386,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 	}
-	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style, *maxIdle)
+	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style, *color, *maxIdle)
 }
 
 // prefixTranscriptTurnResult is one line of `fak info --prefix-transcript` output: the
@@ -535,7 +542,7 @@ func loadPrefixTranscriptTurns(path string) ([][]cachemeta.PromptSegment, error)
 // gateway was torn down — so the overlay prints a closing line and exits 0, which lets the
 // pane close itself rather than spin forever on a dead port. --once (once=true) is a scripted
 // one-shot: it prints a single line with no header/legend and exits non-zero on a failed fetch.
-func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string, maxIdleOpt ...time.Duration) int {
+func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string, colorMode string, maxIdleOpt ...time.Duration) int {
 	// maxIdle is an OPTIONAL trailing arg (variadic) so the seven existing call sites — and the
 	// non-watch one-shots — stay byte-for-byte unchanged; only the real watch launch (runInfo) and
 	// the focused #2340 test pass it. idleLimit lowers that duration to a consecutive-unreachable
@@ -584,7 +591,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 	}
 
-	visual, colorOn := guardInfoOverlayIntro(stdout, c, interval, tty, width, style)
+	visual, colorOn := guardInfoOverlayIntro(stdout, c, interval, tty, width, style, colorMode)
 
 	tr := newGuardInfoTrend(guardInfoTrendCap)
 	sawHealthy := false
@@ -867,9 +874,9 @@ func runGuardInfoOnce(stdout, stderr io.Writer, c *claudeMacDebugClient) int {
 // redrawn in place); it needs a TTY for cursor control, so off a TTY and under --style line the
 // single compact status line is kept. colorOn gates print-time SGR color for the live block: a
 // real TTY that has not set NO_COLOR (info_color.go), computed once here.
-func guardInfoOverlayIntro(stdout io.Writer, c *claudeMacDebugClient, interval time.Duration, tty bool, width int, style string) (visual, colorOn bool) {
+func guardInfoOverlayIntro(stdout io.Writer, c *claudeMacDebugClient, interval time.Duration, tty bool, width int, style string, colorMode string) (visual, colorOn bool) {
 	visual = tty && strings.EqualFold(strings.TrimSpace(style), "visual")
-	colorOn = guardInfoColorEnabled(tty)
+	colorOn = resolveGuardInfoColorMode(colorMode, tty)
 	if visual {
 		// A compact intro line scrolls into history above the live block; the block carries its
 		// own labels, so the verbose status-line legend is not printed in visual mode.

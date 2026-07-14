@@ -210,7 +210,7 @@ func healthyThenGoneClient(t *testing.T, serveHealthy int) *claudeMacDebugClient
 func TestRunInfoOverlayNonTTYAppends(t *testing.T) {
 	c := healthyThenGoneClient(t, 1)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/, 0 /*height*/, "line")
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/, 0 /*height*/, "line", "auto")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
@@ -232,7 +232,7 @@ func TestRunInfoOverlayNonTTYAppends(t *testing.T) {
 func TestRunInfoOverlayTTYRedrawsInPlace(t *testing.T) {
 	c := healthyThenGoneClient(t, 2)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, 0 /*width*/, 0 /*height*/, "line")
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, 0 /*width*/, 0 /*height*/, "line", "auto")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
@@ -256,7 +256,7 @@ func TestRunInfoOverlayMaxIdleExitsWhenGatewayNeverAnswers(t *testing.T) {
 	c := healthyThenGoneClient(t, 0) // every poll fails; the gateway is never once healthy
 	var stdout, stderr bytes.Buffer
 	// interval 1ms + max-idle 3ms => a 3-tick budget: the loop gives up after 3 unreachable polls.
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/, 0 /*height*/, "line", 3*time.Millisecond)
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/, 0 /*height*/, "line", "auto", 3*time.Millisecond)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
@@ -280,7 +280,7 @@ func TestRunInfoOverlayMaxIdleDefersToHealthyClose(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// max-idle 1s is ~1000 ticks at a 1ms interval, far larger than the 3-miss healthy-close budget,
 	// so the healthy-close path must win the race and the loop still terminates on its own (~3ms).
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, false, 0, 0, "line", time.Second)
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, false, 0, 0, "line", "auto", time.Second)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}

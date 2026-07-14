@@ -37,7 +37,7 @@ func TestFitGuardInfoStatus(t *testing.T) {
 // TestGuardInfoStartupHeaderNarrowVsWide pins the legend sizing: a narrow pane gets the single
 // compact legend line (no 4-line block to wrap), a wide/unknown pane keeps the full legend.
 func TestGuardInfoStartupHeaderNarrowVsWide(t *testing.T) {
-	narrow := guardInfoStartupHeader("http://127.0.0.1:8080", 2*time.Second, 40)
+	narrow := guardInfoStartupHeader("http://127.0.0.1:8080", "", 2*time.Second, 40)
 	if strings.Contains(narrow, "fak re-uses text it already sent") {
 		t.Errorf("narrow pane must not print the verbose guide block:\n%s", narrow)
 	}
@@ -48,7 +48,7 @@ func TestGuardInfoStartupHeaderNarrowVsWide(t *testing.T) {
 		t.Errorf("narrow header should be header + one compact guide line (<=2 newlines), got %d:\n%s", n, narrow)
 	}
 	for _, w := range []int{0, 120} {
-		full := guardInfoStartupHeader("http://127.0.0.1:8080", 2*time.Second, w)
+		full := guardInfoStartupHeader("http://127.0.0.1:8080", "", 2*time.Second, w)
 		if !strings.Contains(full, "fak re-uses text it already sent") {
 			t.Errorf("width %d must keep the full guide:\n%s", w, full)
 		}
@@ -62,7 +62,7 @@ func TestRunInfoOverlayNarrowTTYNeverWraps(t *testing.T) {
 	const width = 30
 	c := healthyThenGoneClient(t, 2)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, width, 0 /*height*/, "line")
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, width, 0 /*height*/, "line", "auto")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}

@@ -259,7 +259,7 @@ func TestWriteGuardInfoFrame(t *testing.T) {
 func TestRunInfoOverlayVisualTTY(t *testing.T) {
 	c := healthyThenGoneClient(t, 2)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, 80 /*width*/, 8 /*height*/, "visual")
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, 80 /*width*/, 8 /*height*/, "visual", "auto")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}

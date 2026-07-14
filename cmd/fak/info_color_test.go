@@ -110,7 +110,7 @@ func TestRunInfoOverlayVisualColorGated(t *testing.T) {
 		t.Setenv("NO_COLOR", "")
 		c := healthyThenGoneClient(t, 2)
 		var stdout, stderr bytes.Buffer
-		code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, true /*tty*/, 80, 8, "visual")
+		code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, true /*tty*/, 80, 8, "visual", "auto")
 		if code != 0 {
 			t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 		}
@@ -122,7 +122,7 @@ func TestRunInfoOverlayVisualColorGated(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
 		c := healthyThenGoneClient(t, 2)
 		var stdout, stderr bytes.Buffer
-		code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, true /*tty*/, 80, 8, "visual")
+		code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false, true /*tty*/, 80, 8, "visual", "auto")
 		if code != 0 {
 			t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 		}
@@ -130,4 +130,25 @@ func TestRunInfoOverlayVisualColorGated(t *testing.T) {
 			t.Fatalf("NO_COLOR must suppress every SGR color escape:\n%q", stdout.String())
 		}
 	})
+}
+
+func TestGuardInfoOverlayColorMode(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	// never -> off even on a TTY
+	if got := resolveGuardInfoColorMode("never", true); got {
+		t.Fatalf("never should be off, got true")
+	}
+	// always -> on even without a TTY
+	if got := resolveGuardInfoColorMode("always", false); !got {
+		t.Fatalf("always should be on, got false")
+	}
+	// auto -> follows TTY
+	if got := resolveGuardInfoColorMode("auto", false); got {
+		t.Fatalf("auto non-TTY should be off, got true")
+	}
+	// NO_COLOR wins over always
+	t.Setenv("NO_COLOR", "1")
+	if got := resolveGuardInfoColorMode("always", true); got {
+		t.Fatalf("NO_COLOR should beat always, got true")
+	}
 }

@@ -191,7 +191,7 @@ func TestStartGuardInfoFocusReader(t *testing.T) {
 func TestRunInfoOverlayNonTTYEmitsNoFocusBytes(t *testing.T) {
 	c := healthyThenGoneClient(t, 2)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0, 0, "visual")
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0, 0, "visual", "auto")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
