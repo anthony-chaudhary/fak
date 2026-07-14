@@ -29,6 +29,8 @@ import (
 //	fak cachevalue metrics --serve --addr 127.0.0.1:9097 # serve /metrics, re-folding the ledgers on each scrape
 //	fak cachevalue shapes --since 2026-06-22             # the WITNESSED ledger folded by session shape (length × realized-reuse outcome)
 //	fak cachevalue shapes --json                         # emit the ShapeReport for downstream posting
+//	fak cachevalue compaction --since 2026-07-09         # compaction shed/fire/bail SEGMENTED by budget regime × session-length band (keeps 48k/96k regimes apart)
+//	fak cachevalue compaction --json                     # emit the CompactionReport for downstream posting
 //	fak cachevalue status --json                         # cache-plane health, owner, dependency, fidelity, and next action
 //	fak cachevalue status --session transcript.jsonl --vcache-score-report score.json
 //	fak cachevalue status --artifact-dir diagnostics/cache
@@ -48,9 +50,10 @@ import (
 
 //fak:ctxplan verb=cachevalue enters="nothing live — an offline fold over the durable cache-value, cache-savings, and gateway-usage JSONL ledgers on disk" pages="nothing into a model window — it renders a cache-effectiveness P&L card and posts it to the #scoreboard Slack channel (or prints it under --dry-run)" warms="nothing — it REPORTS on whether the kernel prompt-cache method is paying off; it warms no prompt cache or KV itself"
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | shapes | status | review | post | feed | weekly | metrics", argv,
+	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | metrics", argv,
 		subcommand{"report", runCachevalueReport},
 		subcommand{"shapes", runCachevalueShapes},
+		subcommand{"compaction", runCachevalueCompaction},
 		subcommand{"status", runCachevalueStatus},
 		subcommand{"review", runCachevalueReview},
 		subcommand{"post", runCachevaluePost},
