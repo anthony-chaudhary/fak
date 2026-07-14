@@ -275,10 +275,16 @@ func indexArgPredicates(preds []ArgPredicate) map[string][]ArgPredicate {
 func (a *Adjudicator) Caps() []abi.Capability { return nil }
 
 // writeShaped reports whether a tool name looks like it mutates state (used to
-// scope the self-modify check to write-shaped calls).
-func writeShaped(tool string) bool {
+// scope the self-modify check to write-shaped calls). It folds case itself for
+// cold callers; Adjudicate folds once and uses writeShapedLower (#4007).
+func writeShaped(tool string) bool { return writeShapedLower(strings.ToLower(tool)) }
+
+// writeShapedLower is writeShaped for an ALREADY lower-cased name. Capitalized
+// tool names ("Bash", "Edit") made the old per-probe ToLower allocate on every
+// prefix, on every adjudication; the fold pays it once per decision.
+func writeShapedLower(lowerTool string) bool {
 	for _, p := range []string{"write", "edit", "delete", "patch", "put", "exec", "run", "modify", "create"} {
-		if strings.Contains(strings.ToLower(tool), p) {
+		if strings.Contains(lowerTool, p) {
 			return true
 		}
 	}
@@ -287,18 +293,23 @@ func writeShaped(tool string) bool {
 
 // lowRiskReadShaped reports whether a default-denied call is safe for the
 // admit-and-log posture. It is intentionally name-based and conservative: caller
-// Meta is model-controlled and cannot widen authority.
+// Meta is model-controlled and cannot widen authority. Folds case itself for
+// cold callers; Adjudicate-path callers use lowRiskReadShapedLower.
 func lowRiskReadShaped(tool string) bool {
-	tool = strings.ToLower(tool)
-	if tool == "" || writeShaped(tool) {
+	return lowRiskReadShapedLower(strings.ToLower(tool))
+}
+
+// lowRiskReadShapedLower is lowRiskReadShaped for an ALREADY lower-cased name.
+func lowRiskReadShapedLower(lowerTool string) bool {
+	if lowerTool == "" || writeShapedLower(lowerTool) {
 		return false
 	}
 	for _, p := range []string{"read_", "get_", "search_", "list_", "lookup_", "find_", "calc"} {
-		if strings.HasPrefix(tool, p) {
+		if strings.HasPrefix(lowerTool, p) {
 			return true
 		}
 	}
-	return tool == "calculate"
+	return lowerTool == "calculate"
 }
 
 // targetPath best-effort extracts a path-like argument from the call for the
@@ -320,9 +331,14 @@ func targetPath(args map[string]any) string {
 // Adjudicate is the decision. It is pure and allocation-light on the deny/allow
 // paths; only the (rare) TRANSFORM path resolves + re-stores args.
 func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+	lowerTool := strings.ToLower(c.Tool) // folded ONCE; every case-insensitive rung below reuses it (#4007)
+
 	a.mu.RLock()
 	p := a.policy
-	argPreds := a.argByTool[strings.ToLower(c.Tool)] // predicates targeting THIS tool (case-insensitive)
+	var argPreds []ArgPredicate
+	if a.argByTool != nil { // nil index (no arg predicates, the default floor) pays nothing
+		argPreds = a.argByTool[lowerTool] // predicates targeting THIS tool (case-insensitive)
+	}
 	a.mu.RUnlock()
 
 	// Explicit provable refusal. Routed through soften like every monitor deny:
@@ -342,13 +358,13 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	pr := p.Profile
 	var cl class
 	if pr != nil {
-		cl = riskClass(c.Tool, args)
+		cl = riskClassLower(lowerTool, args)
 	}
 
 	// SELF_MODIFY: a write-shaped call whose target matches a protected glob is a
 	// PROVABLE refusal. Bounded disclosure: the witness carries ONLY the offending
 	// glob, never the whole policy (deny channel is not a policy oracle).
-	if pr.runs(cl, rungSelfModify) && writeShaped(c.Tool) {
+	if pr.runs(cl, rungSelfModify) && writeShapedLower(lowerTool) {
 		if g := matchGlob(targetPath(args), p.SelfModifyGlobs); g != "" {
 			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
@@ -478,7 +494,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// Hard refusals above still win first, and a normally denied call is not handed
 	// a preview token it cannot use.
 	confirmedWithToken := false
-	if pr.runs(cl, rungReversibility) && (redacted || wouldAdmit(p, c.Tool)) {
+	if pr.runs(cl, rungReversibility) && (redacted || wouldAdmit(p, c.Tool, lowerTool)) {
 		env, ok := ReversibilityConfirmed(c.Tool, args)
 		if !ok {
 			return reversibilityGateVerdict(env)
@@ -527,12 +543,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	}
 
 	// Nothing affirmatively allowed it — fail-closed default deny.
-	if confirmedWithToken && (p.admitAndLog(c.Tool) || p.AdvisoryReasons[abi.ReasonDefaultDeny]) {
+	if confirmedWithToken && (p.admitAndLogLower(c.Tool, lowerTool) || p.AdvisoryReasons[abi.ReasonDefaultDeny]) {
 		if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
 			return v
 		}
 	}
-	return defaultDeny(p, c.Tool, advisoryNotes)
+	return defaultDeny(p, c.Tool, lowerTool, advisoryNotes)
 }
 
 // complainFor reports whether a tool is in the per-tool complain set (#670). A nil
@@ -546,11 +562,18 @@ func (p *Policy) complainFor(tool string) bool {
 // (#670). It gates ONLY the default-deny rung — the hard-refusal rungs (explicit Deny,
 // self-modify, arg violations) return before defaultDeny, so neither path can admit one.
 func (p *Policy) admitAndLog(tool string) bool {
-	return (p.Posture == PostureAdmitAndLog && lowRiskReadShaped(tool)) || p.complainFor(tool)
+	return p.admitAndLogLower(tool, strings.ToLower(tool))
 }
 
-func wouldAdmit(p Policy, tool string) bool {
-	if p.Allow[tool] || p.admitAndLog(tool) || p.AdvisoryReasons[abi.ReasonDefaultDeny] {
+// admitAndLogLower is admitAndLog with the case fold already paid (#4007). The
+// complain set stays keyed on the RAW name as authored; only the read-shape
+// predicate is case-insensitive.
+func (p *Policy) admitAndLogLower(tool, lowerTool string) bool {
+	return (p.Posture == PostureAdmitAndLog && lowRiskReadShapedLower(lowerTool)) || p.complainFor(tool)
+}
+
+func wouldAdmit(p Policy, tool, lowerTool string) bool {
+	if p.Allow[tool] || p.admitAndLogLower(tool, lowerTool) || p.AdvisoryReasons[abi.ReasonDefaultDeny] {
 		return true
 	}
 	for _, pre := range p.AllowPrefix {
@@ -620,8 +643,8 @@ func (p Policy) NeverAdmits(tool string) bool {
 	return !p.admitAndLog(tool) && !p.AdvisoryReasons[abi.ReasonDefaultDeny]
 }
 
-func defaultDeny(p Policy, tool string, advisoryNotes []string) abi.Verdict {
-	if p.admitAndLog(tool) {
+func defaultDeny(p Policy, tool, lowerTool string, advisoryNotes []string) abi.Verdict {
+	if p.admitAndLogLower(tool, lowerTool) {
 		// Admit-and-log record (#671): the default-deny rung is the refusal being
 		// suppressed, so the record carries would_deny = its reason name via
 		// abi.ReasonName — the forensic field the promotion ledger (#672) folds. Both

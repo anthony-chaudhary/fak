@@ -67,6 +67,29 @@ func BenchmarkDecideReadClass(b *testing.B) {
 	})
 }
 
+// BenchmarkDecideCapitalizedTool is the #4007 allocation arm: Claude Code tool
+// names are capitalized ("Bash", "Read", "WebFetch"), so a case-insensitive shape
+// probe that re-lowers the name per prefix pays an allocation on every probe.
+// This benchmark counts those allocations on the default floor for exactly that
+// name shape; the read-class arms above use lower-case names where ToLower
+// returns its input unallocated and cannot see the regression. Run with
+//
+//	go test ./internal/adjudicator -bench BenchmarkDecideCapitalizedTool -benchmem
+func BenchmarkDecideCapitalizedTool(b *testing.B) {
+	ctx := context.Background()
+	calls := []*abi.ToolCall{
+		inlineCall("Bash", `{"command":"ls"}`),
+		inlineCall("Read", `{"file_path":"notes.txt"}`),
+		inlineCall("WebFetch", `{"url":"https://example.com/x"}`),
+	}
+	a := New(DefaultPolicy())
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = a.Adjudicate(ctx, calls[i%len(calls)])
+	}
+}
+
 // BenchmarkDecideArgPredicateCanonicalized is the #2407 latency arm: it times
 // the ArgDenyRegex rung with the canonicalization stage against a baseline
 // with no ArgPredicates configured, so a regression that made

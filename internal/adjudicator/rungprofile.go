@@ -1,5 +1,7 @@
 package adjudicator
 
+import "strings"
+
 // rungprofile.go — the coarse RISK CLASS of a tool call (epic #663). Adjudicate
 // runs a fixed sequence of refusal rungs; most are write-shaped (self-modify, the
 // shell/synth-tool write floor, the lint-write grammar) and are inert for a plain
@@ -41,10 +43,16 @@ const (
 //     treating such a call as a write keeps the read class safe to elide them for);
 //   - any other (ambiguous) name is classWrite (the higher class, fail-closed).
 func riskClass(tool string, args map[string]any) class {
-	if writeShaped(tool) {
+	return riskClassLower(strings.ToLower(tool), args)
+}
+
+// riskClassLower is riskClass for an ALREADY lower-cased tool name — Adjudicate
+// folds the name once and threads it through every shape probe (#4007).
+func riskClassLower(lowerTool string, args map[string]any) class {
+	if writeShapedLower(lowerTool) {
 		return classWrite
 	}
-	if lowRiskReadShaped(tool) {
+	if lowRiskReadShapedLower(lowerTool) {
 		if hasWritePayload(args) {
 			return classWrite
 		}
