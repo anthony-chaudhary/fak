@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -314,16 +315,27 @@ func (m *gatewayMetrics) observeInboundToolPrune(n int) {
 
 // observeToolDefer records a tool-deferral turn (#3232, the 10x floor lever): cold is
 // the number of cold defs marked defer_loading this turn, fired reports whether the
-// transform changed the body. A no-op turn (fired=false, or nothing cold) records
-// nothing — the same posture as observeInboundToolPrune, so an operator can tell a
-// turn that deferred the cold tail from one that stood down.
-func (m *gatewayMetrics) observeToolDefer(cold int, fired bool) {
+// transform changed the body, and names are the deferred custom tool names (#3647). A
+// no-op turn (fired=false, or nothing cold) records nothing — the same posture as
+// observeInboundToolPrune, so an operator can tell a turn that deferred the cold tail
+// from one that stood down. names fold into a distinct set so the deterministic per-turn
+// defer of the same tail does not multiply-list a tool.
+func (m *gatewayMetrics) observeToolDefer(cold int, fired bool, names ...string) {
 	if m == nil || !fired || cold <= 0 {
 		return
 	}
 	m.deferMu.Lock()
 	m.deferFiredTurns++
 	m.deferColdCount += uint64(cold)
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		if m.deferColdNames == nil {
+			m.deferColdNames = map[string]struct{}{}
+		}
+		m.deferColdNames[n] = struct{}{}
+	}
 	m.deferMu.Unlock()
 }
 
@@ -335,6 +347,25 @@ func (m *gatewayMetrics) toolDeferSnapshot() (turns, cold uint64) {
 	m.deferMu.Lock()
 	defer m.deferMu.Unlock()
 	return m.deferFiredTurns, m.deferColdCount
+}
+
+// toolDeferNamesSnapshot returns the DISTINCT deferred custom tool names, sorted for a
+// stable operator render (#3647). Nil when the lever never fired.
+func (m *gatewayMetrics) toolDeferNamesSnapshot() []string {
+	if m == nil {
+		return nil
+	}
+	m.deferMu.Lock()
+	defer m.deferMu.Unlock()
+	if len(m.deferColdNames) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m.deferColdNames))
+	for n := range m.deferColdNames {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // observeInboundPrunedToolProposal records that a model later proposed a tool name fak had
