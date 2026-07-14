@@ -219,8 +219,8 @@ func TestManagedAgentTermsCoverQueryClusterAndStayInScope(t *testing.T) {
 			managed = append(managed, term)
 		}
 	}
-	if len(managed) < 7 {
-		t.Fatalf("managed-agent terms = %d, want at least 7", len(managed))
+	if len(managed) < 17 {
+		t.Fatalf("managed-agent terms = %d, want at least 17", len(managed))
 	}
 
 	// Cover intent, comparison, and deployment phrasings rather than repeating
@@ -234,14 +234,29 @@ func TestManagedAgentTermsCoverQueryClusterAndStayInScope(t *testing.T) {
 		"agent runtime vs ai gateway",
 		"agent sdk vs managed runtime",
 		"managed agent infrastructure",
+		"managed agent platform",
+		"managed agent operations",
+		"managed agent orchestration",
+		"managed agent control plane",
+		"managed agent governance",
+		"managed agent observability",
+		"managed agent deployment",
+		"enterprise managed agents",
+		"serverless agent runtime",
+		"agent as a service",
 	} {
 		if !strings.Contains(blob, want) {
 			t.Errorf("managed-agent query cluster missing %q:\n%s", want, blob)
 		}
 	}
 
-	const runtimeExplainer = "docs/explainers/runtime-vs-client.md"
+	allowedRoutes := []string{
+		"docs/explainers/runtime-vs-client.md",
+		"docs/standards/agent-tool-governance-gateway.md",
+		"docs/enterprise-positioning.md",
+	}
 	seenNames := map[string]bool{}
+	seenRoutes := map[string]bool{}
 	for _, term := range managed {
 		if term.Language != "en" {
 			t.Errorf("managed-agent term %q language = %q, want en", term.Name, term.Language)
@@ -249,14 +264,27 @@ func TestManagedAgentTermsCoverQueryClusterAndStayInScope(t *testing.T) {
 		if term.Name == "" || term.Description == "" || len(term.Keywords) < 3 {
 			t.Errorf("managed-agent term %#v is not a complete query hook", term)
 		}
-		if !strings.Contains(term.URL, runtimeExplainer) {
-			t.Errorf("managed-agent term %q routes to %q, want runtime explainer", term.Name, term.URL)
+		routed := false
+		for _, route := range allowedRoutes {
+			if strings.Contains(term.URL, route) {
+				routed = true
+				seenRoutes[route] = true
+				break
+			}
+		}
+		if !routed {
+			t.Errorf("managed-agent term %q routes to unsupported page %q", term.Name, term.URL)
 		}
 		name := strings.ToLower(term.Name)
 		if seenNames[name] {
 			t.Errorf("duplicate managed-agent term name %q", term.Name)
 		}
 		seenNames[name] = true
+	}
+	for _, route := range allowedRoutes {
+		if !seenRoutes[route] {
+			t.Errorf("managed-agent cluster has no term routed to %q", route)
+		}
 	}
 
 	// Honesty fence: the native managed-agent runtime is shipped but emerging;

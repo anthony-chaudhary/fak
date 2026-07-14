@@ -5,7 +5,7 @@
 > hooks (routing, fallback, prompt-cache cost) and agent-security demand hooks such
 > as MCP tool poisoning, the lethal trifecta, and least-privilege tool access.
 >
-> Updated: 2026-07-14T20:06:50Z
+> Updated: 2026-07-14T20:28:49Z
 
 ## core
 
@@ -36,6 +36,16 @@
 - `agent runtime vs AI gateway` (en) — An agent runtime owns the application loop; an AI gateway governs model traffic. fak exposes both roles from one binary as fak serve --native and fak serve, so the deployment question starts by naming which runtime is meant. Keywords: AI gateway vs agent platform, agent runtime vs inference gateway, managed agent vs AI gateway.
 - `agent SDK vs managed runtime` (en) — An agent SDK is code used to build or call an agent; a managed runtime is the deployed service that executes its loop. fak can be embedded as a Go package or run as the native agent application runtime. Keywords: agent SDK vs runtime, agent framework vs managed service, client SDK vs agent runtime.
 - `managed agent infrastructure` (en) — The runtime layer that operates agent loops and their model-and-tool execution path. For fak, the native managed-agent surface is emerging and should not be confused with the production-mature gateway and guard surfaces. Keywords: AI agent infrastructure, agent runtime infrastructure, managed agent stack.
+- `managed agent platform` (en) — A platform that hosts or operates agent application loops. The phrase should identify who owns loop execution, tool effects, and runtime state rather than collapsing an agent SDK, model endpoint, and AI gateway into one product category. Keywords: AI agent platform, hosted agent platform, managed agent runtime platform.
+- `managed agent operations` (en) — Operating agent loops requires observable allow, deny, quarantine, and revocation decisions at the tool boundary. fak defines those governance operations without claiming to be a complete hosted operations suite. Keywords: AI agent operations, agent runtime operations, managed agent ops.
+- `managed agent orchestration` (en) — The runtime responsibility for driving an agent's model-and-tool loop. fak's emerging native runtime owns one loop; broader multi-agent workflow scheduling is a separate orchestration concern. Keywords: AI agent orchestration, agent loop orchestration, hosted agent orchestration.
+- `managed agent control plane` (en) — An out-of-agent enforcement layer that can govern, pause, or refuse agent effects. fak supplies a runtime checkpoint and capability floor; it does not claim every fleet-management feature implied by a full enterprise control plane. Keywords: AI agent control plane, agent runtime control plane, agent enforcement plane.
+- `managed agent governance` (en) — Policy enforcement for agent tool calls and results at a runtime boundary the model cannot bypass. The governance contract covers observable decisions and revocation, not merely a prompt-level safety instruction. Keywords: AI agent governance, agent runtime governance, managed agent policy.
+- `managed agent observability` (en) — Audit evidence for runtime decisions across proposed calls, returned results, quarantine, and revocation. This is tool-boundary observability; it is not a claim that fak replaces a general telemetry platform. Keywords: AI agent observability, agent runtime monitoring, managed agent audit logs.
+- `managed agent deployment` (en) — Deployment of a service that owns agent-loop execution, distinct from deploying only an inference gateway or shipping a client SDK. fak exposes the emerging native loop and mature gateway roles from one binary. Keywords: deploy AI agents, agent runtime deployment, hosted agent deployment.
+- `enterprise managed agents` (en) — Managed agents deployed with runtime enforcement, non-human identity, audit, and cost controls. fak ships part of that enforcement substrate and labels incomplete enterprise packaging rather than presenting the entire stack as finished. Keywords: enterprise AI agents, managed enterprise agents, enterprise agent runtime.
+- `serverless agent runtime` (en) — A deployment model where provider infrastructure starts and operates agent execution on demand. fak defines the agent-runtime boundary but does not claim that the open-source binary itself is a hosted serverless service. Keywords: serverless AI agent, on-demand agent runtime, managed serverless agents.
+- `agent as a service` (en) — A hosted service interface backed by an operated agent loop, rather than a raw model endpoint. fak can supply the runtime boundary but is software you deploy, not a vendor-hosted agent service. Keywords: AI agent as a service, hosted agent service, managed agent API.
 
 ## routing
 

@@ -168,6 +168,96 @@
     },
     {
       "@type": "DefinedTerm",
+      "name": "managed agent platform",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "A platform that hosts or operates agent application loops. The phrase should identify who owns loop execution, tool effects, and runtime state rather than collapsing an agent SDK, model endpoint, and AI gateway into one product category.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "AI agent platform, hosted agent platform, managed agent runtime platform"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent operations",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Operating agent loops requires observable allow, deny, quarantine, and revocation decisions at the tool boundary. fak defines those governance operations without claiming to be a complete hosted operations suite.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/standards/agent-tool-governance-gateway.md",
+      "keywords": "AI agent operations, agent runtime operations, managed agent ops"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent orchestration",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "The runtime responsibility for driving an agent's model-and-tool loop. fak's emerging native runtime owns one loop; broader multi-agent workflow scheduling is a separate orchestration concern.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "AI agent orchestration, agent loop orchestration, hosted agent orchestration"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent control plane",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "An out-of-agent enforcement layer that can govern, pause, or refuse agent effects. fak supplies a runtime checkpoint and capability floor; it does not claim every fleet-management feature implied by a full enterprise control plane.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/enterprise-positioning.md",
+      "keywords": "AI agent control plane, agent runtime control plane, agent enforcement plane"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent governance",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Policy enforcement for agent tool calls and results at a runtime boundary the model cannot bypass. The governance contract covers observable decisions and revocation, not merely a prompt-level safety instruction.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/standards/agent-tool-governance-gateway.md",
+      "keywords": "AI agent governance, agent runtime governance, managed agent policy"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent observability",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Audit evidence for runtime decisions across proposed calls, returned results, quarantine, and revocation. This is tool-boundary observability; it is not a claim that fak replaces a general telemetry platform.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/standards/agent-tool-governance-gateway.md",
+      "keywords": "AI agent observability, agent runtime monitoring, managed agent audit logs"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent deployment",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Deployment of a service that owns agent-loop execution, distinct from deploying only an inference gateway or shipping a client SDK. fak exposes the emerging native loop and mature gateway roles from one binary.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "deploy AI agents, agent runtime deployment, hosted agent deployment"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "enterprise managed agents",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Managed agents deployed with runtime enforcement, non-human identity, audit, and cost controls. fak ships part of that enforcement substrate and labels incomplete enterprise packaging rather than presenting the entire stack as finished.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/enterprise-positioning.md",
+      "keywords": "enterprise AI agents, managed enterprise agents, enterprise agent runtime"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "serverless agent runtime",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "A deployment model where provider infrastructure starts and operates agent execution on demand. fak defines the agent-runtime boundary but does not claim that the open-source binary itself is a hosted serverless service.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "serverless AI agent, on-demand agent runtime, managed serverless agents"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "agent as a service",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "A hosted service interface backed by an operated agent loop, rather than a raw model endpoint. fak can supply the runtime boundary but is software you deploy, not a vendor-hosted agent service.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "AI agent as a service, hosted agent service, managed agent API"
+    },
+    {
+      "@type": "DefinedTerm",
       "name": "cost-aware model routing for agents",
       "termCode": "routing",
       "inLanguage": "en",
@@ -599,5 +689,5 @@
       "keywords": "self-host prompt cache, uzun oturum ucuz, KVKK"
     }
   ],
-  "dateModified": "2026-07-14T20:06:50Z"
+  "dateModified": "2026-07-14T20:28:49Z"
 }
