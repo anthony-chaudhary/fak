@@ -684,6 +684,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 			},
 		},
 		{
+			Name:    "guard-integrity",
+			Summary: "the Stop guard leak rate over its durable decision ledger: bounded stand-downs and fail-opens divided by all would-be-bad stops; a zero-tolerance floor (#4485)",
+			Metrics: []dojoMetricInfo{
+				{Name: "bad_stop_leak_rate", Theory: "the guard allows zero would-be-bad stops (floor 0.0, lower is better); any stand-down or fail-open breaches the floor"},
+			},
+		},
+		{
 			Name:    "dispatch-yield",
 			Summary: "the dispatch loop's closure yield, measured over the workspace loop ledger (.fak/loops.jsonl): diff-witnessed VERIFIED closes per dispatched worker — the loop's first overall-performance KPI (#4497)",
 			Metrics: []dojoMetricInfo{
@@ -716,6 +723,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
 		compactionLever{},
 		vcacheLever{maxFiles: maxFiles},
+		guardIntegrityLever{root: root},
 		dispatchYieldLever{root: root},
 		providerTurnsLever{},
 		providerCacheLever{},
