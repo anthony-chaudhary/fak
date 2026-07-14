@@ -65,6 +65,18 @@ function Resolve-Fak {
 }
 
 if ($Install) {
+  $ErrorActionPreference = 'Stop'
+  $fak = Resolve-Fak
+  $fakCmd = Get-Command $fak -ErrorAction SilentlyContinue
+  if ($fakCmd -and -not $fakCmd.Source) { $fakCmd = $null }
+  if (-not $fakCmd -or -not (Test-Path -LiteralPath $fakCmd.Source -PathType Leaf)) {
+    throw 'fak executable not found; install/build fak and put it on PATH before -Install'
+  }
+  $fak = $fakCmd.Source
+  $fakDir = Split-Path -Parent $fak
+  if (-not ($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_.TrimEnd('\') -ieq $fakDir.TrimEnd('\') })) {
+    throw "fak executable directory is not on PATH: $fakDir"
+  }
   $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
   if (-not $pwsh) { $pwsh = 'powershell.exe' }
   $self = $MyInvocation.MyCommand.Path
@@ -81,7 +93,11 @@ if ($Install) {
   # survives TermService tearing an interactive logon session down.
   $trigger = New-ScheduledTaskTrigger -AtStartup
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
+  try {
+    Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force -ErrorAction Stop | Out-Null
+  } catch {
+    throw "FakStallMonitor registration failed (run an elevated PowerShell): $($_.Exception.Message)"
+  }
 
   # Session-0 cannot activate an AppX WT window in a user desktop. Keep the
   # long-lived watchdog S4U and register only this on-demand UI adapter as
@@ -93,8 +109,16 @@ if ($Install) {
   $brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
   $brokerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $brokerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
-  Register-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Action $brokerAction -Principal $brokerPrincipal -Trigger $brokerTrigger -Settings $brokerSettings -Force | Out-Null
-  Write-Host "[stall-mon] installed FakStallMonitor (AtStartup/S4U) + on-demand FakHostRelaunchBroker (InteractiveToken adapter)."
+  try {
+    Register-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Action $brokerAction -Principal $brokerPrincipal -Trigger $brokerTrigger -Settings $brokerSettings -Force -ErrorAction Stop | Out-Null
+  } catch {
+    throw "FakHostRelaunchBroker registration failed (run an elevated PowerShell): $($_.Exception.Message)"
+  }
+  $watchdog = Get-ScheduledTask -TaskName 'FakStallMonitor' -ErrorAction Stop
+  $broker = Get-ScheduledTask -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop
+  if ($watchdog.Principal.LogonType -ne 'S4U') { throw "FakStallMonitor principal is $($watchdog.Principal.LogonType), want S4U" }
+  if ($broker.Principal.LogonType -ne 'InteractiveToken') { throw "FakHostRelaunchBroker principal is $($broker.Principal.LogonType), want InteractiveToken" }
+  if ($broker.Actions.Execute -ne $fak -or $broker.Actions.Arguments -notmatch '^host-relaunch-broker(?:\s|$)') { throw 'FakHostRelaunchBroker action read-back mismatch' }  Write-Host "[stall-mon] installed FakStallMonitor (AtStartup/S4U) + on-demand FakHostRelaunchBroker (InteractiveToken adapter)."
   Write-Host "[stall-mon] UNDO: Unregister-ScheduledTask -TaskName 'FakStallMonitor' -Confirm:`$false; Unregister-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Confirm:`$false"
   return
 }
