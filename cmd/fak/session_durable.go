@@ -95,10 +95,41 @@ func configureServeSessionDurability(tbl *session.Table, path string, stderr io.
 		sessionDurabilityMeta(meta...),
 	)
 	if err := mirror.restore(tbl); err != nil {
-		return err
+		if !session.IsCorruptDescriptorFile(err) {
+			return err
+		}
+		quarantined, quarantineErr := quarantineCorruptSessionRegistry(path)
+		if quarantineErr != nil {
+			return fmt.Errorf("%w; quarantine corrupt registry: %v", err, quarantineErr)
+		}
+		warnf("fak: corrupt session registry quarantined at %s; starting with an empty registry: %v", quarantined, err)
+		if err := mirror.restore(tbl); err != nil {
+			return err
+		}
 	}
 	serveSessionDurability = mirror
 	return nil
+}
+
+func quarantineCorruptSessionRegistry(path string) (string, error) {
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	base := path + ".corrupt-" + stamp
+	for attempt := 0; attempt < 100; attempt++ {
+		dst := base
+		if attempt > 0 {
+			dst = fmt.Sprintf("%s-%d", base, attempt)
+		}
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if err := os.Rename(path, dst); err != nil {
+			return "", err
+		}
+		return dst, nil
+	}
+	return "", errors.New("could not allocate corrupt session registry quarantine path")
 }
 
 func defaultSessionRegistryPath() string {

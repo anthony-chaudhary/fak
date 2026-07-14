@@ -515,3 +515,27 @@ func TestDescriptorBranchParentLink(t *testing.T) {
 		t.Fatalf("parent_id dropped on update: %q", d2.ParentID)
 	}
 }
+
+func TestFileStoreClassifiesCorruptIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-registry.json")
+	if err := os.WriteFile(path, []byte{0, 0, 0}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFileStore(path).List()
+	if err == nil {
+		t.Fatal("List() unexpectedly accepted corrupt descriptor JSON")
+	}
+	if !IsCorruptDescriptorFile(err) {
+		t.Fatalf("IsCorruptDescriptorFile(%v) = false, want true", err)
+	}
+}
+
+func TestFileStoreDoesNotClassifyReadFailureAsCorruption(t *testing.T) {
+	_, err := NewFileStore(t.TempDir()).List()
+	if err == nil {
+		t.Fatal("List() unexpectedly read a directory as a descriptor file")
+	}
+	if IsCorruptDescriptorFile(err) {
+		t.Fatalf("IsCorruptDescriptorFile(%v) = true, want false", err)
+	}
+}
