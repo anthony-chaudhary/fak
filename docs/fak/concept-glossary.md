@@ -440,6 +440,135 @@ separates them is *what is being witnessed and where*.
   **WitnessResolver** (corroborate a claim) vs **resolveWitness** (the kernel driver that
   folds the registered resolvers at adjudication). Three stages of one pipeline.
 
+### witness grading on issue contracts (#4719)
+
+Three names in `internal/issuecontract` that grade a ticket's done-condition witness
+before dispatch. The readout, its strongest value, and the flag that escalates
+non-strong grades to holds.
+
+- **WitnessGrade** (`issuecontract.WitnessGrade`) - the advisory-first pre-dispatch
+  FORGEABILITY readout for a ticket's done condition: grades the witness as strong
+  (independent oracle named), weak (no oracle), forgeable (self-claim only), or missing
+  (no witness declared). *Not* a WitnessOutcome (a gate-level corroboration verdict) and
+  *not* the WitnessResolver (the engine that corroborates). It grades an ISSUE'S witness
+  before dispatch, not a claim at adjudication.
+
+- **WitnessGradeStrong** (`issuecontract.WitnessGradeStrong`, const `"strong"`) - the
+  strongest of four WitnessGrade values, meaning the done-condition witness names an
+  independent oracle (go test, make ci, fak, dos, git show, a fixture, a render, an exit
+  code, a ledger, etc.) that can corroborate the claimed effect. *Not* WitnessGrade (the
+  readout struct that holds it) and *not* WitnessConfirmed (a gate-level outcome). A grade
+  value vs the grade readout vs a corroboration outcome.
+
+- **StrictWitness** (`issuecontract.StrictWitness`, CLI `--strict-witness`) - the POLICY
+  FLAG that promotes any non-strong WitnessGrade to a hold: when true, an issue whose
+  done-condition witness is weak, forgeable, or missing is held for triage instead of
+  dispatched. *Not* WitnessGrade (the readout it gates) and *not* WitnessGradeStrong (the
+  grade value it checks against). A gate on a grade vs the grade itself vs its strongest
+  value.
+
+### loop governor witness health (#4719)
+
+Three names in `internal/loopmgr` for the witnessed/claimed-ratio health of a loop. The
+policy floor, the refuse reason, and the health descriptor.
+
+- **MinWitnessRate** (`loopmgr.Policy.MinWitnessRate`, JSON `min_witness_rate`) - the
+  governor POLICY FLOOR: a loop whose witnessed/claimed completion ratio drops below this
+  rate is refused new admissions, because its runs are predominantly self-reported rather
+  than independently confirmed. *Not* ReasonWitnessCollapse (the refuse reason the
+  governor emits when below it) and *not* WitnessCollapse (the health descriptor that
+  reports the majority-unwitnessed state). Threshold vs reason vs descriptor.
+
+- **ReasonWitnessCollapse** (`loopmgr.ReasonWitnessCollapse`, const `"WITNESS_COLLAPSE"`)
+  - the structured REFUSE REASON the loop governor emits when it denies admission to a
+  loop whose witnessed/claimed completion ratio fell below Policy.MinWitnessRate. *Not*
+  MinWitnessRate (the policy floor it enforces) and *not* WitnessCollapse (the health
+  descriptor that reports the state without refusing). A reason code vs a threshold vs a
+  descriptor.
+
+- **WitnessCollapse** (`loopmgr.WitnessCollapse`, bool on HealthRow / int on HealthRollup)
+  - the advisory HEALTH DESCRIPTOR: true on a per-loop row when a MAJORITY of ended runs
+  went unwitnessed (Witnessed*2 < Runs), and the fleet-wide count of such loops on the
+  rollup. It is descriptive, not a gate. *Not* ReasonWitnessCollapse (the governor refuse
+  reason) and *not* MinWitnessRate (the policy floor). It describes the symptom; the
+  governor acts on the threshold.
+
+### trunk-red witness ledger (#4719)
+
+Two names in `cmd/fak/trunk_red_ledger.go` for the shared pre-existing-red admission
+ledger. One writes the witness row; the other renders its convergence payoff.
+
+- **emitTrunkRedWitness** (`cmd/fak.emitTrunkRedWitness`) - the RECORDER function that
+  appends one pre-existing-red admission to the shared trunk-red ledger (FAIL-OPEN: a
+  no-op when recording is disabled or no failing package was parsed), folding the ledger
+  to return occurrence and session counts. *Not* buildwitness (a structural compile guard)
+  and *not* worktreewitness (a detached-trunk command harness). Each witnesses a different
+  kind of build fact.
+
+- **trunkRedWitnessNote** (`cmd/fak.trunkRedWitnessNote`) - the RENDERER of the
+  convergence line appended to a gate's pre-existing-red advisory, ONLY when the row was
+  actually written, making the shared-break payoff visible (how many clones are stuck on
+  this break across how many sessions). *Not* emitTrunkRedWitness (the recorder that
+  writes the ledger row it reads from). One writes the witness; the other renders its
+  payoff.
+
+### other witness concepts positioned (#4719)
+
+Six more witness-rooted names discovered by the coverage engine, each a genuine concept
+a reader could not pin, not an inflection.
+
+- **WitnessedEnvelope** (`issuecontract.WitnessedEnvelope`, JSON
+  `witnessed_operating_envelope`) - the OBSERVED operating-envelope section on a
+  project-work item / issue contract / handoff: the baseline, target, and
+  completion-standard envelope an operator has directly verified, distinct from the
+  TargetEnvelope that is merely declared. *Not* a world-state witness (a cache-coherence
+  binding) and *not* a WitnessOutcome (a gate verdict). It witnesses an ISSUE'S scope, not
+  a cache entry or a claim.
+
+- **CrossAuditRefute** (`modelroute.CrossAuditRefute`, `CrossAuditVerdict = "REFUTE"`) -
+  the cross-audit verdict meaning a model-route quality audit found evidence that
+  CONTRADICTS a model's claimed routing behavior, alongside CrossAuditPass /
+  CrossAuditInconclusive / CrossAuditUnavailable. *Not* the cache-coherence Refutation (a
+  local invalidation of a world-state witness) and *not* abi.WitnessRefuted (a gate-level
+  outcome). Three refusals in three subsystems sharing the refute root.
+
+- **ContinuityWitness** (`resume.ContinuityWitness`) - the per-RESUME verified-progress
+  verdict: a fold of trajctl W3 ScoreRows across the launch boundary that reports whether
+  the objective's witnessed curve actually advanced (Witnessed + Advanced), or whether the
+  resume only produced turns without moving verified progress. *Not* a world-state witness
+  and *not* a WitnessOutcome. It witnesses resume PROGRESS, not a cache entry or a claim.
+
+- **ReconstructionWitness** (`modelscore.ReconstructionWitness`, JSON
+  `reconstruction_witness`) - the PROVENANCE string on a model-score record naming how the
+  model was reconstructed (e.g. "committed benchmark snapshot"), required for the
+  reconstructed-from-blog provenance tier. *Not* a world-state witness and *not*
+  ProvenanceWitnessed (an evidence-strength label on a context-envelope). It witnesses a
+  MODEL'S ORIGIN, not a cache entry or a context row.
+
+- **WitnessName** (`deletioncert.WitnessName`, JSON `witness_name`) - the NAME FIELD on a
+  deletion certificate carrying the vDSO world-state witness identifier under which the
+  evicted entries were admitted (empty if none). *Not* the world-state witness value
+  itself and *not* the WitnessResolver. A reference to a witness vs the witness vs the
+  resolver.
+
+- **WitnessDir** (`mlpscore.WitnessDir`, `qwen36parity.WitnessDir`) - the on-disk
+  DIRECTORY constant where witness artifacts are stored, declared independently in
+  multiple packages with different paths (docs/mlp/witnesses for MLP manifests,
+  experiments/agent-live for Mac parity witnesses). *Not* a world-state witness and *not*
+  the WitnessResolver. Where witnesses are STORED vs what they BIND vs what RESOLVES them.
+
+### ignored false friends in the witness-proof family
+
+Two discovered tokens are NOT concepts and are ignored by the family's `ignore` list:
+
+- **refutil** (`internal/refutil`) - a false friend: the package name is "ref util"
+  (reference-utility helpers for materializing ABI refs), not "refute". The `refut` root
+  matches it by substring coincidence only.
+
+- **nwitness** - a scanner artifact: the identifier regex reads `\nWitness` / `\nwitness`
+  in Go string literals (where `\n` is a newline escape) as the identifier `nWitness` /
+  `nwitness`. It is not a real identifier or concept.
+
 ---
 
 ## The session / scheduling family
