@@ -17,7 +17,7 @@ var brokerExecCommand = exec.Command
 func runHostRelaunchBroker(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("host-relaunch-broker", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dir := fs.String("dir", hostRelaunchBrokerDefaultDir(), "durable S4U-to-desktop request spool")
+	dir := fs.String("dir", hostRelaunchBrokerDefaultDir(), "durable machine-control-plane-to-desktop request spool")
 	dryRun := fs.Bool("dry-run", false, "validate and print WT argv without launching")
 	if err := fs.Parse(argv); err != nil || fs.NArg() != 0 {
 		return 2
@@ -65,6 +65,12 @@ func runHostRelaunchBroker(stdout, stderr io.Writer, argv []string) int {
 func hostRelaunchBrokerDefaultDir() string {
 	if d := strings.TrimSpace(os.Getenv("FAK_HOST_RELAUNCH_DIR")); d != "" {
 		return d
+	}
+	if programData := strings.TrimSpace(os.Getenv("ProgramData")); programData != "" {
+		machine := filepath.Join(programData, "fak", "guard-control", "relaunch")
+		if st, err := os.Stat(machine); err == nil && st.IsDir() {
+			return machine
+		}
 	}
 	base, e := os.UserConfigDir()
 	if e != nil || base == "" {

@@ -169,6 +169,20 @@ func effectiveGuardExposeProfile(flagValue string) string {
 	return profile
 }
 
+func recordInteractiveSessionRows(row guardsessions.Row) error {
+	if err := guardsessions.Record(resolveSweepRegDir(""), row); err != nil {
+		return err
+	}
+	// Mirror into the machine control-plane registry when SCM is installed. A user
+	// Guard can write only because installation grants Authenticated Users append;
+	// SCM remains the sole policy/actuator owner.
+	if machine := machineGuardRegistryDir(); machine != "" {
+		if err := guardsessions.Record(machine, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func guardOwnsInteractiveTerminal() bool {
 	// Dispatcher-owned sessions already have a restart owner and must never be
 	// double-launched by the terminal-host actuator.
@@ -875,11 +889,11 @@ func cmdGuard(argv []string) {
 	if guardOwnsInteractiveTerminal() {
 		cwd, _ := os.Getwd()
 		row := guardsessions.NewInteractiveRow(guardTraceID, command[0], os.Getpid(), cwd, auditJournal.Path(), "", time.Now(), command)
-		if err := guardsessions.Record(resolveSweepRegDir(""), row); err != nil && !*quiet {
+		if err := recordInteractiveSessionRows(row); err != nil && !*quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: interactive session registry start: %v\n", err)
 		}
 		defer func() {
-			if err := guardsessions.Record(resolveSweepRegDir(""), row.Ended(time.Now())); err != nil && !*quiet {
+			if err := recordInteractiveSessionRows(row.Ended(time.Now())); err != nil && !*quiet {
 				fmt.Fprintf(os.Stderr, "fak guard: interactive session registry exit: %v\n", err)
 			}
 		}()

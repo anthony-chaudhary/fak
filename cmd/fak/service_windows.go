@@ -24,7 +24,7 @@ func (h fakWindowsService) Execute(_ []string, changes <-chan svc.ChangeRequest,
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan int, 1)
-	go func() { done <- runServiceLoopContext(ctx, h.stdout, h.stderr, 15*time.Second) }()
+	go func() { done <- runWindowsControlLoop(ctx, h.stdout, h.stderr, 15*time.Second) }()
 	statuses <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for {
 		select {
@@ -43,6 +43,35 @@ func (h fakWindowsService) Execute(_ []string, changes <-chan svc.ChangeRequest,
 	}
 }
 
+func windowsServiceStateDir() string {
+	return filepath.Join(os.Getenv("ProgramData"), "fak", "guard-control")
+}
+
+var windowsControlCrashTick = func(stdout, stderr io.Writer, state string) int {
+	return runHostCrash(stdout, stderr, []string{"--once", "--since", "5m", "--log", filepath.Join(state, "host-crashes.jsonl"), "--reg-dir", filepath.Join(state, "registry"), "--resurrect"})
+}
+var windowsControlResumeTick = serviceTick
+
+func runWindowsControlLoop(ctx context.Context, stdout, stderr io.Writer, interval time.Duration) int {
+	state := windowsServiceStateDir()
+	_ = os.Setenv("FLEET_REG_DIR", filepath.Join(state, "registry"))
+	_ = os.Setenv("FAK_HOST_RELAUNCH_DIR", filepath.Join(state, "relaunch"))
+	for {
+		if rc := windowsControlCrashTick(stdout, stderr, state); rc != 0 {
+			return rc
+		}
+		if rc := windowsControlResumeTick(stdout, stderr); rc != 0 {
+			return rc
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0
+		case <-timer.C:
+		}
+	}
+}
 func runWindowsServiceDispatcher(stdout, stderr io.Writer) int {
 	isService, err := svc.IsWindowsService()
 	if err != nil || !isService {
@@ -69,12 +98,24 @@ func secureWindowsServiceState(path string) error {
 	}
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }
+func secureWindowsSharedDir(path string) error {
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)(A;OICI;GRGW;;;AU)")
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+}
+
 func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (serviceResult, int) {
 	exe, err := os.Executable()
 	if err != nil {
 		return serviceResult{}, 1
 	}
-	state := filepath.Join(os.Getenv("ProgramData"), "fak", "guard-control")
+	state := windowsServiceStateDir()
 	result := serviceResult{Manager: "windows-scm", Unit: windowsGuardServiceName, Path: exe}
 	if dry {
 		return result, 0
@@ -89,6 +130,19 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 	case "install":
 		if err := os.MkdirAll(state, 0o700); err != nil {
 			return result, 1
+		}
+		if err := secureWindowsServiceState(state); err != nil {
+			fmt.Fprintln(stderr, "secure state:", err)
+			return result, 1
+		}
+		for _, shared := range []string{filepath.Join(state, "registry"), filepath.Join(state, "relaunch")} {
+			if err := os.MkdirAll(shared, 0o770); err != nil {
+				return result, 1
+			}
+			if err := secureWindowsSharedDir(shared); err != nil {
+				fmt.Fprintln(stderr, "secure shared dir:", err)
+				return result, 1
+			}
 		}
 		s, err := m.OpenService(windowsGuardServiceName)
 		if err == nil {
