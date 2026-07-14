@@ -250,6 +250,7 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	violations = append(violations, repoguard.ClassifyInteractive(command)...)
 	violations = append(violations, repoguard.ClassifySleepWait(command)...)
 	violations = append(violations, repoguard.ClassifyForegroundNetworkLoop(command)...)
+	violations = append(violations, repoguard.ClassifyForegroundPowerShellInventory(command)...)
 	if violations == nil {
 		violations = []repoguard.Violation{} // marshal as [] (matches the Python --json shape), never null
 	}

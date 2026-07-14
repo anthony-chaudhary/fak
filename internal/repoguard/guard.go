@@ -732,10 +732,11 @@ func evaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, works
 		violations = append(violations, classifySleepWait(command)...)
 		return append(violations, classifyForegroundNetworkLoop(command)...)
 	case "PowerShell":
-		// The PowerShell tool gets ONLY the advisory sleep rung: the
-		// out-of-tree and interactive classifiers parse POSIX shell syntax
-		// and would misread PowerShell forms.
-		return classifySleepWait(stringField(toolInput, "command"))
+		// PowerShell has its own syntax-aware inventory rung in addition to
+		// the cross-shell foreground-wait advisory.
+		command := stringField(toolInput, "command")
+		violations := classifySleepWait(command)
+		return append(violations, classifyForegroundPowerShellInventory(command)...)
 	case "Read":
 		return classifyLiveMonitorOutputRead(readPath(toolInput), liveMonitorIDs)
 	case "Write", "Edit", "MultiEdit", "NotebookEdit":
