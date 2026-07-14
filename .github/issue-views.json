@@ -180,6 +180,12 @@
       "note": "Dispatchable leaves of milestone M9."
     },
     {
+      "slug": "dispatch-loop",
+      "title": "Background loop (agentic dispatch)",
+      "query": "is:open label:dispatch -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee sort:created-asc",
+      "note": "The background-loop / agentic-dispatch work surface: the `dispatch` label = DOS dispatch + supervisor loops (worker backend, cadence, lane leases). Oldest-first to drain the long-waiting backlog. Tighter than `infra` (which folds in CI/build/testing) and deeper than the M9/M6 milestone views (which are subsets). Used to steer an unattended fable dispatch fleet at the loop backlog."
+    },
+    {
       "slug": "m10-model-support",
       "title": "M10 · Model support & routing",
       "query": "is:open milestone:\"Model support & routing parity (Ornith + ensembles)\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
