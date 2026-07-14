@@ -34,6 +34,34 @@ func TestGateBareCommitSweep_UnvettedStagedSetFires(t *testing.T) {
 	}
 }
 
+// TestGateBareCommitSweep_AdvisoryDoesNotRecommendItsOwnTrigger is the A5 regression: the
+// advisory must point ONLY at the vetted `fak commit --path` remedy, and must NOT offer a raw
+// `git commit -- <yours>` as an "equivalent" — that bare-pathspec form is itself unvetted (a
+// pre-commit hook never sees the pathspec, so no FAK_SAFECOMMIT_VETTED handshake), so following
+// it re-draws this very advisory. Before the fix the remedy read "... (sets the vetted marker),
+// or `git commit -- <yours>`", recommending its own trigger.
+func TestGateBareCommitSweep_AdvisoryDoesNotRecommendItsOwnTrigger(t *testing.T) {
+	d := &StagedDiff{StagedPaths: []string{"internal/a/y.go"}}
+	findings, err := gateBareCommitSweep(d)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("expected one finding, got %+v err=%v", findings, err)
+	}
+	detail := findings[0].Detail
+	// The vetted remedy is still recommended.
+	if !strings.Contains(detail, "fak commit --path") {
+		t.Fatalf("advisory should point at the vetted `fak commit --path` remedy; got %q", detail)
+	}
+	// The self-referential "equivalent" offer is gone.
+	if strings.Contains(detail, "or `git commit -- <yours>`") {
+		t.Fatalf("advisory must not offer a raw `git commit -- <yours>` as an equivalent remedy (it is unvetted and re-draws this advisory); got %q", detail)
+	}
+	// It explains WHY the bare-pathspec form is not the remedy, so a reader who reaches for it
+	// understands it stays unvetted rather than silently hitting the same advisory again.
+	if !strings.Contains(detail, "unvetted") || !strings.Contains(detail, "re-draw this same advisory") {
+		t.Fatalf("advisory should explain the bare-pathspec form stays unvetted and re-draws this advisory; got %q", detail)
+	}
+}
+
 func TestGateBareCommitSweep_VettedMarkerStandsDown(t *testing.T) {
 	t.Setenv(bareCommitVettedEnv, "1")
 	d := &StagedDiff{StagedPaths: []string{"internal/a/y.go"}}

@@ -106,8 +106,10 @@ func bareCommitDetail(paths []string) string {
 	return fmt.Sprintf(
 		"a commit outside `fak commit` would sweep %d staged path(s) into one commit: %s — "+
 			"none declared to fak (no FAK_SAFECOMMIT_VETTED handshake), so a peer's staged hunk in the "+
-			"index would land under your message. Commit by explicit pathspec instead: "+
-			"`fak commit --path <yours> ...` (sets the vetted marker), or `git commit -- <yours>`. "+
+			"index would land under your message. Commit through fak's vetted path instead: "+
+			"`fak commit --path <yours> ...` — the only form that sets the vetted marker. "+
+			"(A raw `git commit -- <yours>` is NOT offered here: a pre-commit hook never sees the "+
+			"pathspec, so that form stays unvetted and would re-draw this same advisory.) "+
 			"(advisory; FLEET_BARE_COMMIT_GUARD=block enforces, ALLOW_BARE_COMMIT=1 skips once, "+
 			"FAK_PRESTAGED_PATH_GUARD=off disables the family)",
 		len(paths), list,
