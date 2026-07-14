@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/hostfault"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
@@ -554,5 +556,47 @@ func writeRowsFile(t *testing.T, path string, rows []journal.Row) {
 	}
 	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunAuditDiagnoseChildCrashWithoutTerminationMarkerIsExternalUnknown(t *testing.T) {
+	t.Setenv("FAK_STALL_DIR", t.TempDir())
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	row, _ := mintRow(1, "", journal.Row{TSUnixNano: time.Now().UnixNano(), Kind: "CHILD_CRASH", Reason: "NONZERO_EXIT"})
+	writeRowsFile(t, path, []journal.Row{row})
+	var out, errb bytes.Buffer
+	if code := runAuditDiagnose(&out, &errb, path, true); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var got auditDiagnosis
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.HostTerminationCause != "EXTERNAL_UNKNOWN" || got.HostTermination != nil {
+		t.Fatalf("markerless crash diagnosis=%+v", got)
+	}
+}
+
+func TestRunAuditDiagnoseCorrelatesObservedControlTeardown(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_STALL_DIR", dir)
+	wave := time.Now().UTC()
+	marker := hostfault.HostTerminationMarker{Schema: hostfault.HostTerminationSchema, ControlType: "CTRL_CLOSE_EVENT", GuardPID: 42, ConsoleSession: 7, ObservedAt: wave.Format(time.RFC3339Nano)}
+	if err := hostfault.AppendHostTermination(defaultHostCrashLogPath(), marker); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	row, _ := mintRow(1, "", journal.Row{TSUnixNano: wave.UnixNano(), Kind: "CHILD_CRASH", Reason: "NONZERO_EXIT"})
+	writeRowsFile(t, path, []journal.Row{row})
+	var out, errb bytes.Buffer
+	if code := runAuditDiagnose(&out, &errb, path, true); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var got auditDiagnosis
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.HostTerminationCause != "CTRL_CLOSE_EVENT" || got.HostTermination == nil || got.HostTermination.GuardPID != 42 {
+		t.Fatalf("observed crash diagnosis=%+v", got)
 	}
 }

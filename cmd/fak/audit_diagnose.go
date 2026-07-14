@@ -7,8 +7,10 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/hostfault"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
@@ -91,7 +93,9 @@ type auditDiagnosis struct {
 	Verdict string `json:"verdict"`
 
 	// Friction: what the floor decided across the corpus (verdict + reason counts).
-	Friction guardrsi.Fold `json:"friction"`
+	Friction             guardrsi.Fold                    `json:"friction"`
+	HostTerminationCause string                           `json:"host_termination_cause,omitempty"`
+	HostTermination      *hostfault.HostTerminationMarker `json:"host_termination,omitempty"`
 
 	// AllowRowsMissingArgsLabel counts ALLOW rows whose call shape cannot be rendered
 	// without falling back to a digest. It is an observability gap, not an integrity
@@ -138,6 +142,22 @@ func runAuditDiagnose(stdout, stderr io.Writer, path string, asJSON bool) int {
 	}
 	d := diagnoseRows(path, rows)
 	d.Friction = guardrsi.FoldRows([]string{path})
+	if d.Friction.ChildCrash > 0 {
+		d.HostTerminationCause = "EXTERNAL_UNKNOWN"
+		if markers, readErr := hostfault.ReadHostTerminations(defaultHostCrashLogPath()); readErr == nil {
+			var wave time.Time
+			for _, row := range rows {
+				if row.Kind == "CHILD_CRASH" {
+					wave = time.Unix(0, row.TSUnixNano)
+					break
+				}
+			}
+			if marker, ok := hostfault.CorrelateHostTermination(markers, wave, 5*time.Second); ok {
+				d.HostTerminationCause = marker.ControlType
+				d.HostTermination = &marker
+			}
+		}
+	}
 
 	if asJSON {
 		if code := encodeJSONOrFail(stdout, stderr, d, "fak audit diagnose"); code != 0 {
@@ -487,6 +507,9 @@ func renderAuditDiagnosis(d auditDiagnosis) string {
 		}
 	}
 	if f.ChildCrash > 0 {
+		if d.HostTerminationCause != "" {
+			out("  host termination: %s\n", d.HostTerminationCause)
+		}
 		for _, c := range sortedKeys(f.ByCrashClass) {
 			out("    child crash: %-12s x%d\n", c, f.ByCrashClass[c])
 		}
