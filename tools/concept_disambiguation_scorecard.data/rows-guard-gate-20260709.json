@@ -95,7 +95,7 @@
    "definition": "The internal/hooks helper that reads a positive-integer operator tuning knob from the environment for the SIZE hygiene gates (GOD_FILE_GROWTH, FILE_ADMISSION), falling back to a default on unset/unparseable/non-positive input.",
    "distinction": "It is a GENERIC env-parsing utility shared by gate ceilings, not FAK_GITGATE, a specific gate on/off toggle, and not any one hygiene gate itself.",
    "distinct_from": [
-    "FAK_GITGATE (gate env toggles)",
+    "x2-guard-gate-envtoggles",
     "guard-gate-hygienegate"
    ],
    "aliases": [
@@ -116,7 +116,7 @@
    "definition": "The `fak guard allow` operator control-surface subcommand (cmd/fak/guard_allow.go, entry cmdGuardAllow) for inspecting and editing the guard's runtime allow overlay.",
    "distinction": "It is the CLI SUBCOMMAND an operator runs, not guardApplyAllowOverlay, the existing mechanism that applies the overlay file this subcommand edits.",
    "distinct_from": [
-    "guard allow-overlay (guardApplyAllowOverlay)"
+    "x-goal-guard-gate-guard-allow-overlay"
    ],
    "aliases": [
     "guard allow",
@@ -200,7 +200,7 @@
    "definition": "The cmd/dispatchworker/guard.go function building a per-session guard decision-journal path under .dispatch-runs/guard-audit/, keyed by lane+backend plus a pid+random-token discriminator so concurrent dispatch workers never braid one hash-chained journal.",
    "distinction": "It is the DISPATCH-WORKER fleet path (pid + random token), not guardDefaultAuditPath, the interactive `fak guard -- claude` default keyed by pid + repo hash, and not guardAuditDir, the plain directory helper the interactive path composes into.",
    "distinct_from": [
-    "guardDefaultAuditPath (decision-journal path)",
+    "x2-guard-gate-auditpath",
     "guard-gate-guardauditdir"
    ],
    "aliases": [
@@ -262,7 +262,7 @@
    "definition": "The cmd/fak/guard_child.go injectable var (defaults to procguard.KillPID) used as the destructive escalation that kills a wrapped child's whole process tree when it does not exit within the graceful-interrupt window.",
    "distinction": "It is the ESCALATION KILL primitive for a hung child, not FleetProcResourceGuard, the OS-level scheduled task killing runaway fleet processes, and not guardRestartRelaunchCommand, the relaunch that may follow a kill.",
    "distinct_from": [
-    "FleetProcResourceGuard (runaway-process guard)",
+    "x2-guard-gate-procresourceguard",
     "guard-gate-guardrestartrelaunchcommand"
    ],
    "aliases": [
@@ -283,7 +283,7 @@
    "definition": "The cmd/fak/guard_format_layout.go function that layers TTY color onto an already-assembled guard exit summary at print time, dimming structural chrome without re-parsing the value-bearing rows.",
    "distinction": "It is a PRINT-TIME color layer over an already-formatted string, not the guard report layout (guardRow/guardSection) that structurally formats it, and not printGuardCompactBanner, a different render surface.",
    "distinct_from": [
-    "guard report layout (guardRow / guardSection)",
+    "x-goal-guard-gate-guard-report-layout",
     "guard-gate-printguardcompactbanner"
    ],
    "aliases": [
@@ -494,7 +494,7 @@
    "distinction": "It is the specific PRE-LAUNCH, fail-open cooldown-rotation mechanism (one half of the broader guard account rotation / failover concept), not GuardRotation, the unrelated internal/relay in-flight-turn rotation assertion.",
    "distinct_from": [
     "guard-gate-guardrotation",
-    "guard account rotation / failover (guardRotate)"
+    "x-goal-guard-gate-guard-failover"
    ],
    "aliases": [
     "guardRotateOffCooldown"
@@ -535,7 +535,7 @@
    "definition": "The cmd/fak/guard_session_pressure.go family (runGuardSessionPressureGate over guardSessionPressureGateConfig) that reads sessionaudit compaction-pressure history and can refuse a `fak guard` launch when a namespace's recent compact-action pressure crosses an operator threshold.",
    "distinction": "It is a PRE-LAUNCH pressure/compaction-history gate, not the PreCompact hook, which fires mid-session on the wrapped agent's own compaction, and not the Stop-hook deny-all-continue install this row's sibling covers.",
    "distinct_from": [
-    "guardPreCompactClaudeCommand (Claude hook command row)",
+    "x-issue1420-guard-gate-guardprecompactclaudecommand",
     "guard-gate-guardstophookinstall"
    ],
    "aliases": [
@@ -558,7 +558,7 @@
    "definition": "The cmd/fak/guard_stophook.go struct recording what installGuardStopHook did (Applied/Mode/WarnAt/FinalAt/Max/SameStop/StopsLedger/Reason) when wiring the deny-all-continue Stop hook into a child's settings.",
    "distinction": "It is the RESULT RECORD for the Stop-hook install, not guardStopHook, the deny-all continue hook mechanism itself, and not guardPreCompactInstall/guardMCPInstall, its sibling install records for other hooks.",
    "distinct_from": [
-    "guardStopHook (deny-all continue hook)",
+    "x2-guard-gate-stophook",
     "guard-gate-guardprecompactinstall"
    ],
    "aliases": [
@@ -600,7 +600,7 @@
    "definition": "The internal/guardvars package holding the canonical wire shapes (e.g. SessionVars) shared field-for-field by the /debug/vars gateway producer and the `fak info` cmd/fak consumer, so a new field cannot silently drop between the two.",
    "distinction": "It is the SHARED TYPE-DEFINITION leaf preventing producer/consumer field drift, not guardInfoVars, the cmd/fak info-pane consumer alias of these types, and not the gateway debug producer itself.",
    "distinct_from": [
-    "guardInfoVars"
+    "x-goal25b-guard-gate-guardinfovars"
    ],
    "aliases": [
     "guardvars"
@@ -620,8 +620,8 @@
    "definition": "The internal/hooks/tree.go struct type (Name, Check, DefaultOff) describing one whole-tree `fak hygiene` audit gate; HygieneGates() returns the ordered slice of them that `make hygiene`/CI run.",
    "distinction": "It is the per-gate STRUCT TYPE (one row's shape), not 'hygiene gates', the existing doc-term for the whole audited family, and not a staged pre-commit Gate, which carries a ModeEnv/EscapeEnv this struct deliberately omits.",
    "distinct_from": [
-    "hygiene gates (whole-tree audit gates)",
-    "git-hook gate"
+    "x-goal-guard-gate-hygiene-gates",
+    "git-hook-gate"
    ],
    "aliases": [
     "HygieneGate"
@@ -662,8 +662,8 @@
    "definition": "The internal/frontierswe/run.go struct (Runnable/DockerPresent/IntegrityOK/Reason/RemoteCommand) reporting whether the real C7 SWE-bench environment could be stood up on this host, and the exact remote command to run it where it cannot.",
    "distinction": "It is a SWE-bench harness HOST-CAPABILITY report, unrelated to a tool-call adjudication gate; distinct from PreflightGate, the rehearsal host-capability gate for a different harness, and from the generic decision-point gate concept.",
    "distinct_from": [
-    "PreflightGate (rehearsal host-capability gate)",
-    "gate (decision point)"
+    "x-goal-guard-gate-preflight-gate",
+    "gate"
    ],
    "aliases": [
     "RunGate"
@@ -683,8 +683,8 @@
    "definition": "The cmd/fak/accounts_launch.go launchOpts field deciding whether `fak accounts launch` wraps the started agent in `fak guard` (kernel adjudication + vCache) or execs it bare.",
    "distinction": "It is the LAUNCH-TIME boolean choosing whether to wrap in the guard kernel, not cmdGuard, the guard entry point itself, and not guardedLaunchCommand, the dispatch/session-side equivalent wiring.",
    "distinct_from": [
-    "cmdGuard (fak guard entry point)",
-    "guardedLaunchCommand (guarded-launch wiring)"
+    "x2-guard-gate-cmdguard",
+    "x2-guard-gate-launchcfg"
    ],
    "aliases": [
     "useGuard"
