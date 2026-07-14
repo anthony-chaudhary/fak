@@ -62,6 +62,30 @@ func TestServiceRunOnceTicksControlPlane(t *testing.T) {
 		t.Fatalf("rc=%d calls=%d", rc, calls)
 	}
 }
+
+func TestInstallServiceExecutableStagesImmutableCopy(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-fak")
+	destination := filepath.Join(dir, "libexec", "fak-guard-control")
+	if err := os.WriteFile(source, []byte("v1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installServiceExecutable(source, destination); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("mutated"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil || string(got) != "v1" {
+		t.Fatalf("staged=%q err=%v", got, err)
+	}
+	if st, err := os.Stat(destination); err != nil {
+		t.Fatal(err)
+	} else if runtime.GOOS != "windows" && st.Mode().Perm() != 0o755 {
+		t.Fatalf("mode=%v", st.Mode())
+	}
+}
 func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "unit")

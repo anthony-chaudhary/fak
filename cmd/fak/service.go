@@ -21,10 +21,11 @@ import (
 )
 
 type serviceResult struct {
-	Manager string `json:"manager"`
-	Unit    string `json:"unit"`
-	Path    string `json:"path,omitempty"`
-	Active  bool   `json:"active,omitempty"`
+	Manager    string `json:"manager"`
+	Unit       string `json:"unit"`
+	Path       string `json:"path,omitempty"`
+	Active     bool   `json:"active,omitempty"`
+	Executable string `json:"executable,omitempty"`
 }
 
 var serviceCommand = exec.Command
@@ -52,6 +53,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	unitDir := fs.String("unit-dir", "", "override service definition directory")
 	stateDir := fs.String("state-dir", "", "durable control-plane state directory")
 	principal := fs.String("principal", "", "unprivileged account used by the system service")
+	execPath := fs.String("exec-path", "", "stable OS-owned executable path")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -59,7 +61,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		return 1
 	}
-	var manager, name, path, definition string
+	var manager, name, path, definition, stagedExecutable string
 	var install, status, uninstall func() error
 	switch runtime.GOOS {
 	case "windows":
@@ -79,8 +81,12 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		if *stateDir == "" {
 			*stateDir = filepath.Join(string(filepath.Separator), "var", "lib", "fak")
 		}
+		if *execPath == "" {
+			*execPath = filepath.Join(string(filepath.Separator), "usr", "local", "libexec", "fak-guard-control")
+		}
+		stagedExecutable = *execPath
 		path = filepath.Join(*unitDir, name)
-		definition, err = systemservice.RenderSystemdSystemUnit(systemservice.SystemdConfig{Executable: exe, StateDir: *stateDir})
+		definition, err = systemservice.RenderSystemdSystemUnit(systemservice.SystemdConfig{Executable: stagedExecutable, StateDir: *stateDir})
 		cmd := func(argv ...string) error {
 			c := serviceCommand("systemctl", argv...)
 			c.Stdout = stdout
@@ -105,11 +111,15 @@ func runService(stdout, stderr io.Writer, args []string) int {
 			*stateDir = filepath.Join(string(filepath.Separator), "var", "db", "fak")
 		}
 		if *principal == "" {
-			*principal = "_fakguard"
+			*principal = "nobody"
 		}
+		if *execPath == "" {
+			*execPath = filepath.Join(string(filepath.Separator), "usr", "local", "libexec", "fak-guard-control")
+		}
+		stagedExecutable = *execPath
 		logDir := filepath.Join(*stateDir, "logs")
 		path = filepath.Join(*unitDir, name+".plist")
-		definition, err = systemservice.RenderLaunchDaemon(systemservice.LaunchdConfig{Executable: exe, StateDir: *stateDir, StdoutPath: filepath.Join(logDir, "guard-control.out.log"), StderrPath: filepath.Join(logDir, "guard-control.err.log"), UserName: *principal})
+		definition, err = systemservice.RenderLaunchDaemon(systemservice.LaunchdConfig{Executable: stagedExecutable, StateDir: *stateDir, StdoutPath: filepath.Join(logDir, "guard-control.out.log"), StderrPath: filepath.Join(logDir, "guard-control.err.log"), UserName: *principal})
 		domain := "system"
 		target := domain + "/" + name
 		cmd := func(argv ...string) error {
@@ -135,7 +145,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	result := serviceResult{Manager: manager, Unit: name, Path: path}
+	result := serviceResult{Manager: manager, Unit: name, Path: path, Executable: stagedExecutable}
 	if *dry {
 		if action == "install" {
 			fmt.Fprint(stdout, definition)
@@ -149,6 +159,12 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	case "install":
 		if os.MkdirAll(*unitDir, 0o755) != nil || os.MkdirAll(*stateDir, 0o700) != nil || os.MkdirAll(filepath.Join(*stateDir, "logs"), 0o700) != nil {
 			return 1
+		}
+		if stagedExecutable != "" {
+			if err := installServiceExecutable(exe, stagedExecutable); err != nil {
+				fmt.Fprintln(stderr, "fak service: stage executable:", err)
+				return 1
+			}
 		}
 		if runtime.GOOS == "darwin" {
 			if err := chownServiceState(*stateDir, *principal); err != nil {
@@ -224,6 +240,20 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak service install|status|uninstall|run [--dry-run] [--json]")
 }
+func installServiceExecutable(source, destination string) error {
+	if filepath.Clean(source) == filepath.Clean(destination) {
+		return nil
+	}
+	b, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomic(destination, b, 0o755)
+}
+
 func chownServiceState(path, principal string) error {
 	u, err := user.Lookup(principal)
 	if err != nil {
