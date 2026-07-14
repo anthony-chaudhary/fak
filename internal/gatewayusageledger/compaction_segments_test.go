@@ -87,6 +87,18 @@ func TestFoldCompactionSegmentsByRegime(t *testing.T) {
 	if seg96long.TopBailReason != "under_budget" {
 		t.Fatalf("96k/40-80 TopBailReason = %q, want under_budget", seg96long.TopBailReason)
 	}
+	// The bail slice is {under_budget:40, burst_unprofitable:24} = 64 classified bails, so
+	// the top reason's share is 40/64 = 0.625 — a SPLIT mix (burst_unprofitable eats 37%),
+	// exactly the state the bare label hides and the share exposes.
+	if seg96long.TopBailShare < 0.624 || seg96long.TopBailShare > 0.626 {
+		t.Fatalf("96k/40-80 TopBailShare = %.4f, want 0.625 (40/64)", seg96long.TopBailShare)
+	}
+	if seg96long.BailReasons["under_budget"] != 40 || seg96long.BailReasons["burst_unprofitable"] != 24 {
+		t.Fatalf("96k/40-80 BailReasons did not surface the full mix: %+v", seg96long.BailReasons)
+	}
+	if seg48long.BailReasons != nil {
+		t.Fatalf("48k/40-80 BailReasons = %+v, want nil (nothing bailed → omitted)", seg48long.BailReasons)
+	}
 	if seg96long.BudgetRegime != "headless" {
 		t.Fatalf("96k regime label = %q, want headless", seg96long.BudgetRegime)
 	}
@@ -112,6 +124,12 @@ func TestFoldCompactionSegmentsByRegime(t *testing.T) {
 	}
 	if !strings.Contains(out, "interactive(48000)") || !strings.Contains(out, "headless(96000)") {
 		t.Fatalf("render missing regime labels:\n%s", out)
+	}
+	// The top_bail column carries the reason's share, not just the label: the 96k cell's
+	// split mix reads under_budget·62% (40/64, half-to-even), the health read the bare
+	// label hid — under_budget dominates but burst_unprofitable eats the other ~38%.
+	if !strings.Contains(out, "under_budget·62%") {
+		t.Fatalf("render missing top_bail share (want under_budget·62%%):\n%s", out)
 	}
 }
 

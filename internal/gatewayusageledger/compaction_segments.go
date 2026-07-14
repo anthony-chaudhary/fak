@@ -109,6 +109,22 @@ type CompactionSegment struct {
 	// (empty when nothing bailed), the WHY behind a low shed slice.
 	TopBailReason string `json:"top_bail_reason,omitempty"`
 
+	// TopBailShare is the top reason's fraction of all CLASSIFIED bails in the cell
+	// (0 when nothing bailed). It separates a bail slice that is ONE dominant reason —
+	// e.g. under_budget·0.89, a headless band correctly declining under a right-sized
+	// budget — from a split mix where a second reason (burst_unprofitable, a tuning
+	// call) is quietly eating fires. TopBailReason alone cannot tell those apart: both
+	// render the same label, so a real tuning regression hides behind a correct-by-design
+	// one until the mix is read.
+	TopBailShare float64 `json:"top_bail_share,omitempty"`
+
+	// BailReasons is the full per-reason bail breakdown (the closed agent.CompactReason*
+	// vocabulary) for this cell, surfaced so a consumer reads the WHY behind a low shed
+	// slice without re-folding the ledger — the durable twin of TopBailReason/Share the
+	// metrics exposition projects per (regime × band × reason). nil/omitted when nothing
+	// bailed, so a clean cell stays terse.
+	BailReasons map[string]uint64 `json:"bail_reasons,omitempty"`
+
 	bailReasons map[string]uint64
 	fracs       []float64
 }
@@ -197,7 +213,10 @@ func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionRep
 		}
 		seg.ShedPctMedian = medianPct(seg.fracs)
 		seg.ShedPctMean = meanPct(seg.fracs)
-		seg.TopBailReason = topReason(seg.bailReasons)
+		seg.TopBailReason, seg.TopBailShare = topReasonWithShare(seg.bailReasons)
+		if len(seg.bailReasons) > 0 {
+			seg.BailReasons = seg.bailReasons
+		}
 		rep.Segments = append(rep.Segments, *seg)
 	}
 	sort.Slice(rep.Segments, func(i, j int) bool {
@@ -276,12 +295,19 @@ func meanPct(fracs []float64) float64 {
 	return sum / float64(len(fracs)) * 100
 }
 
-func topReason(m map[string]uint64) string {
-	best, bestN := "", uint64(0)
+// topReasonWithShare returns the most common reason AND its fraction of all classified
+// bails in the map (the total of every reason's count). The share is what turns the bare
+// label into a health read: under_budget at 0.89 is a headless band correctly declining,
+// while under_budget at 0.51 means a second reason is eating nearly half the attempts —
+// same TopBailReason, different diagnosis. Keys are sorted for a deterministic tie-break
+// so the render is stable. Empty map → ("", 0).
+func topReasonWithShare(m map[string]uint64) (string, float64) {
+	best, bestN, total := "", uint64(0), uint64(0)
 	// Sort keys for a deterministic tie-break so the render is stable.
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
+		total += m[k]
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
@@ -289,7 +315,10 @@ func topReason(m map[string]uint64) string {
 			best, bestN = k, m[k]
 		}
 	}
-	return best
+	if total == 0 {
+		return "", 0
+	}
+	return best, float64(bestN) / float64(total)
 }
 
 // RenderCompaction renders the report as a terse, deterministic table grouped by budget
@@ -341,9 +370,16 @@ func RenderCompaction(rep CompactionReport) string {
 		if s.ValidDenomRows > 0 {
 			shed = fmt.Sprintf("%7.1f%%", s.ShedPctMedian)
 		}
+		// top_bail carries the reason's SHARE of classified bails, not just the label, so a
+		// reader tells a dominant correct-by-design decline (under_budget·89%) from a split
+		// mix (under_budget·51%) where a tuning-driven reason is quietly eating fires.
+		topBail := s.TopBailReason
+		if topBail != "" {
+			topBail = fmt.Sprintf("%s·%.0f%%", topBail, s.TopBailShare*100)
+		}
 		regime := fmt.Sprintf("%s(%d)", s.BudgetRegime, s.Budget)
 		fmt.Fprintf(&b, "  %-19s %-8s %5d %6d %6d %6d %8s  %8.2f  %s\n",
-			regime, s.Band, s.Sessions, s.FiredSessions, s.Fires, s.Bails, shed, s.BailRate, s.TopBailReason)
+			regime, s.Band, s.Sessions, s.FiredSessions, s.Fires, s.Bails, shed, s.BailRate, topBail)
 	}
 	return b.String()
 }
