@@ -54,7 +54,7 @@ func TestGuardMaybeRestartOnCrash(t *testing.T) {
 		}
 	})
 
-	t.Run("disabled by default never restarts", func(t *testing.T) {
+	t.Run("explicit zero disables restart", func(t *testing.T) {
 		for _, limit := range []int{0, -1} {
 			if _, _, ok := guardMaybeRestartOnCrash(crashErr, crashState.ProcessState, 0, limit); ok {
 				t.Fatalf("crash admitted with limit=%d (crash-restart must be off)", limit)
@@ -63,32 +63,32 @@ func TestGuardMaybeRestartOnCrash(t *testing.T) {
 	})
 }
 
-// TestGuardCrashRestartLimit pins the env knob: unset/0/garbage/negative all read as OFF, a positive
-// integer is the budget. The default MUST be 0 so a crash tears the master down exactly as today
-// until an operator opts in.
+// TestGuardCrashRestartLimit pins default-on child isolation and the explicit env override.
 func TestGuardCrashRestartLimit(t *testing.T) {
-	cases := []struct {
-		set  bool
+	old, had := os.LookupEnv(guardCrashRestartLimitEnv)
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(guardCrashRestartLimitEnv, old)
+		} else {
+			_ = os.Unsetenv(guardCrashRestartLimitEnv)
+		}
+	})
+	_ = os.Unsetenv(guardCrashRestartLimitEnv)
+	if got := guardCrashRestartLimit(); got != guardCrashRestartDefaultLimit {
+		t.Fatalf("unset limit=%d, want default %d", got, guardCrashRestartDefaultLimit)
+	}
+	for _, c := range []struct {
 		val  string
 		want int
 	}{
-		{false, "", 0},
-		{true, "", 0},
-		{true, "0", 0},
-		{true, "-2", 0},
-		{true, "abc", 0},
-		{true, "3", 3},
-		{true, " 5 ", 5},
-	}
-	for _, c := range cases {
-		if c.set {
-			t.Setenv("FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT", c.val)
-		} else {
-			// t.Setenv is the only way to guarantee cleanup; an unset case just sets empty above.
-			t.Setenv("FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT", "")
+		{"", guardCrashRestartDefaultLimit}, {"0", 0}, {"-2", guardCrashRestartDefaultLimit},
+		{"abc", guardCrashRestartDefaultLimit}, {"3", 3}, {" 5 ", 5},
+	} {
+		if err := os.Setenv(guardCrashRestartLimitEnv, c.val); err != nil {
+			t.Fatal(err)
 		}
 		if got := guardCrashRestartLimit(); got != c.want {
-			t.Fatalf("guardCrashRestartLimit() with %q = %d, want %d", c.val, got, c.want)
+			t.Fatalf("limit with %q=%d, want %d", c.val, got, c.want)
 		}
 	}
 }
@@ -107,6 +107,15 @@ func TestGuardCrashRestartHopReattaches(t *testing.T) {
 	}
 	if hop.Hop != 2 || hop.Schema != journal.RestartChainSchema {
 		t.Fatalf("crash hop = hop=%d schema=%q, want 2/%s", hop.Hop, hop.Schema, journal.RestartChainSchema)
+	}
+}
+
+func TestGuardCrashRestartBackoff(t *testing.T) {
+	want := []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second}
+	for attempt, expected := range want {
+		if got := guardCrashRestartDelay(attempt); got != expected {
+			t.Fatalf("attempt %d delay=%s, want %s", attempt, got, expected)
+		}
 	}
 }
 
@@ -155,7 +164,6 @@ func TestGuardParentSurvivesHarnessCrash(t *testing.T) {
 		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
 		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
 		"FAK_GUARD_CRASH_WITNESS_OBSERVED="+observedPath,
-		"FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=1",
 	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -1247,7 +1247,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
-	// the opt-in crashLimit (0 = off, the default) so a systematic crash is surfaced, not masked.
+	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
 	for {
@@ -1277,6 +1277,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
 			crashRestarts++
 			guardReportCrashRestart(os.Stderr, agentName, class, code, crashRestarts, crashLimit, command)
+			time.Sleep(guardCrashRestartDelay(crashRestarts))
 			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
 			guardEmitRestartHop(auditJournal, os.Stderr, agentName, guardTraceID, guardCrashRestartHop(guardTraceID, agentName, crashRestarts))
 			command = guardRestartRelaunchCommand(command, agentName)
@@ -1335,7 +1336,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	progressHead := sessionStartSHA()
 	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
-	// the opt-in crashLimit (0 = off, the default) so a systematic crash is surfaced, not masked.
+	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
 	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
@@ -1393,6 +1394,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
 				crashRestarts++
 				guardReportCrashRestart(restarter.stderr, agentName, class, code, crashRestarts, crashLimit, command)
+				time.Sleep(guardCrashRestartDelay(crashRestarts))
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
 				guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID, guardCrashRestartHop(guardTraceID, agentName, crashRestarts))
 				command = guardRestartRelaunchCommand(command, agentName)

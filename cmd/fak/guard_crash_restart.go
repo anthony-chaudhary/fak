@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
@@ -19,23 +20,45 @@ import (
 // an OOM (exit 137), an arbitrary non-zero status — matches none of them and falls straight through
 // to finishGuardChildAndReport, which cancel()s the gateway context and os.Exit()s the whole guard
 // process. So a crash in the HARNESS takes the MASTER (and its gateway) down with it — the opposite
-// of run isolation. This seam closes that gap: an opt-in, bounded, loud in-place restart of the
+// of run isolation. This seam closes that gap: a default-on, bounded, loud in-place restart of the
 // harness under the same master session.
 
-// guardCrashRestartLimit resolves the per-session in-place crash-restart budget from the
-// environment. DEFAULT 0 = OFF: this first slice (#4686) is strictly opt-in, so a generic crash
-// tears the master down exactly as it does today until an operator sets the knob. A negative or
-// garbage override also reads as 0 (off). Env-only for now — the front-door --restart-on-crash /
-// --crash-restart-limit flags and the default-on validation gate are the separate #4688 rung;
-// backoff and the progress-aware crashloop reap are #4687. Mirrors the env-knob shape of
-// guardNoProgressRestartLimit().
+// guardCrashRestartLimit resolves the per-session crash-restart budget. The guard parent and
+// harness child are separate failure domains by default: one child crash must not tear down the
+// parent. An explicit env value, including 0, remains the fleet/operator override.
+const (
+	guardCrashRestartLimitEnv     = "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT"
+	guardCrashRestartDefaultLimit = 3
+	guardCrashRestartInitialDelay = 250 * time.Millisecond
+	guardCrashRestartMaxDelay     = 2 * time.Second
+)
+
 func guardCrashRestartLimit() int {
-	if v := strings.TrimSpace(os.Getenv("FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
+	raw, set := os.LookupEnv(guardCrashRestartLimitEnv)
+	if !set || strings.TrimSpace(raw) == "" {
+		return guardCrashRestartDefaultLimit
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 0 {
+		return guardCrashRestartDefaultLimit
+	}
+	return n
+}
+
+// guardCrashRestartDelay is the bounded exponential pause before attempt (1-based). It prevents
+// a boot-crashing harness from hot-spinning the parent or hammering an upstream.
+func guardCrashRestartDelay(attempt int) time.Duration {
+	if attempt <= 0 {
+		return 0
+	}
+	d := guardCrashRestartInitialDelay
+	for i := 1; i < attempt && d < guardCrashRestartMaxDelay; i++ {
+		d *= 2
+		if d > guardCrashRestartMaxDelay {
+			d = guardCrashRestartMaxDelay
 		}
 	}
-	return 0
+	return d
 }
 
 // guardMaybeRestartOnCrash is the generic-crash admission decision, wired at the SAME two recovery
