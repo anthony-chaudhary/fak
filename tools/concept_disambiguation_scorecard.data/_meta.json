@@ -150,9 +150,11 @@
       "id": "render-materialize",
       "name": "Render / materialize family",
       "roots": ["render", "RenderPlan", "RenderItem", "Rendered", "materialize"],
-      "ignore": ["rendered", "rendering", "renders", "materializes", "materialized", "materializers"],
+      "ignore": ["rendered", "rendering", "renders", "materializes", "materialized", "materializers",
+                 "rendertuioverviewsavingshero", "rendertuisessioncontrollegend",
+                 "indexrenderhits", "metricsrender", "priorwtrendercrash", "tuioverviewsavingsrender"],
       "min_files": 2,
-      "note": "Three disjoint render/materialize concepts: prompt-assembly layout (RenderPlan), memq cell materialization (RenderItem), and ctxplan span paging (Rendered)."
+      "note": "Three disjoint render/materialize concepts: prompt-assembly layout (RenderPlan), memq cell materialization (RenderItem), and ctxplan span paging (Rendered). Ignored tokens: TUI sub-renderer helpers already covered by the renderTUI* family (rendertuioverviewsavingshero, rendertuisessioncontrollegend), a generic table-rendering callback in fak index (indexrenderhits), filename references in comments (metricsrender from metrics_render.go, tuioverviewsavingsrender from tui_overview_savings_render.go), and a terminal-risk diagnostic field whose 'render' means Windows Terminal GPU rendering crash not a fak render function (priorwtrendercrash)."
     },
     {
       "id": "plan",

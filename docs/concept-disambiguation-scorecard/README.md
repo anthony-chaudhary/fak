@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **95.2/100** (grade A) = 9.5/10 |
-| **Coverage** | **92.6%** (1811/1955 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **144** (clarity 0 + coverage 144) |
-| Crystal-clear concepts | 210 of 1583 positioned |
+| **Score** | **95.8/100** (grade A) = 9.6/10 |
+| **Coverage** | **93.6%** (1831/1957 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **126** (clarity 0 + coverage 126) |
+| Crystal-clear concepts | 210 of 1603 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,11 +24,11 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1583 concepts - score 95.2/100 (grade A) - disambiguation-debt 144
+concept-disambiguation chart - 1603 concepts - score 95.8/100 (grade A) - disambiguation-debt 126
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####........................ 210
-  o defined       ############################ 1373
+  o defined       ############################ 1393
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -48,7 +48,7 @@ clarity mix by family (each cell = one concept):
   plan             ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (216 concept(s); 15 crystal)
   policy-capability ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (84 concept(s); 6 crystal)
   pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
-  render-materialize ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (118 concept(s); 3 crystal)
+  render-materialize ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (138 concept(s); 3 crystal)
   score-debt       ***oooooooooooooooooooooooooooooooooooooooooooooooooo (53 concept(s); 3 crystal)
   session-runtime  ***************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 15 crystal)
   support-maturity *****oooooooooooooooo (21 concept(s); 5 crystal)
@@ -57,11 +57,10 @@ clarity mix by family (each cell = one concept):
   witness-proof    ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 18 crystal)
 
 coverage by family (positioned / discovered):
-  render-materialize ########################.... 142/165
   context-ctx      #########################... 156/175
-  plan             ##########################.. 270/288
+  plan             ##########################.. 270/289
   policy-capability ########################.... 99/114
-  witness-proof    #########################... 110/124
+  witness-proof    #########################... 110/125
   gateway-engine   ##########################.. 151/162
   score-debt       ########################.... 68/78
   attention        #########################... 61/68
@@ -69,17 +68,18 @@ coverage by family (positioned / discovered):
   evict            ########################.... 36/42
   loop             #########################... 49/55
   support-maturity ########################.... 29/34
+  guard-gate       ############################ 281/284
   layout           ######################...... 12/15
   pool             ##########################.. 35/37
   cache            ############################ 222/222
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  guard-gate       ############################ 281/281
+  render-materialize ############################ 162/162
   session-runtime  ############################ 170/170
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 92.6%  (1811/1955 confusable tokens positioned)
+namespace coverage  [##############################..] 93.6%  (1831/1957 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1380,6 +1380,26 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | render-materialize | **renderTUIGuardStyled (colorized TUI guard pane)** - Renders a tuiGuardReport as styled text at a given width, applying tuiGuardRenderStyle's optional ANSI color painting to each line (cmd/fak/tui_guard_report.go). |
 | o | defined | symbol | render-materialize | **renderWorkspaceCdReason (workspace-cd refusal text)** - Joins each workspace-cd Violation's target and fix into the refusal message repoguard shows for a workspace-cd violation (internal/repoguard/cdmap.go). |
 | o | defined | config | render-materialize | **tuiGuardRenderStyle (TUI guard color style)** - Struct carrying the single Color bool flag (plus its paint method) that toggles ANSI coloring for the TUI guard-journal pane (cmd/fak/tui_guard_report.go). |
+| o | defined | symbol | render-materialize | **RenderJSON (device-spine serialization)** - internal/metrics RenderJSON serializes a DeviceMetrics snapshot into JSON bytes, omitting unread (nil) devices so the normalized-optional contract survives to the wire; a nil snapshot renders as an empty array, not null. |
+| o | defined | symbol | render-materialize | **RenderCSV (device-spine CSV)** - internal/metrics RenderCSV serializes a DeviceMetrics snapshot into spreadsheet-friendly CSV with a self-describing header row; a nil snapshot renders the header alone, not an error, and values use non-scientific formatting so large byte counts stay spreadsheet-friendly. |
+| o | defined | symbol | render-materialize | **RenderProm (device-spine Prometheus)** - internal/metrics RenderProm renders a DeviceMetrics snapshot as OpenMetrics/Prometheus text via the shared descriptor table, delegating to RenderOpenMetricsText; it is a stateless reader over the same snapshot RenderJSON consumes (the one-collection-path guarantee). |
+| o | defined | symbol | render-materialize | **RenderOpenMetricsText (metrics text exposition)** - internal/metrics RenderOpenMetricsText renders OpenMetricFamily records into deterministic OpenMetrics text exposition, sorting families by name and validating metric names and types; it is the shared text serializer RenderProm delegates to. |
+| o | defined | symbol | render-materialize | **RenderHostFaultReport (host-fault operator view)** - internal/hostfault RenderHostFaultReport writes the operator text view of a HostFaultReport: one summary line, class counts sorted for stable output, then one line per fault event row (class, source, app, code). |
+| o | defined | symbol | render-materialize | **RenderCompaction (compaction report table)** - gatewayusageledger RenderCompaction renders a CompactionReport as a terse, deterministic table grouped by budget regime x session length, with shed percentile shown only for valid-denominator fired cells and a dash marking an honest absence. |
+| o | defined | symbol | render-materialize | **RenderCompareMarkdown (FrontierSWE comparison)** - frontierswe RenderCompareMarkdown renders a CompareReport as the raw-vs-fak Markdown table a FRONTIERSWE-RESULTS.md row is recorded from, with the parity gate and provenance stated before the ratio so the table reads in the honest order. |
+| o | defined | symbol | render-materialize | **renderEvidenceEnvelope (issue-contract evidence)** - issuecontract renderEvidenceEnvelope formats the scale-evidence EnvelopeValue list as a one-line-per-dimension text block (dimension, value, unit) for an issue contract's evidence section. |
+| o | defined | symbol | render-materialize | **RenderLaunchAgent (macOS launchd plist)** - systemservice RenderLaunchAgent hand-renders a macOS launchd plist XML from a LaunchdConfig, XML-escaping every operator-supplied path so ProgramArguments stays a well-formed array. |
+| o | defined | symbol | render-materialize | **RenderLive (issuefanout live result)** - issuefanout RenderLive prints the fanout --live result for a human: the filed/skipped/failed fold, one line per candidate row, and a rerun-clean notice when every candidate was already filed. |
+| o | defined | symbol | render-materialize | **renderNetworkLoopReason (repoguard network-loop refusal)** - repoguard renderNetworkLoopReason formats the advisory refusal block for FOREGROUND_NETWORK_LOOP findings: the reason, each violating op->target with its fix, and the silence-env guidance. |
+| o | defined | symbol | render-materialize | **renderPrePushBuild (trunk-build-gate verdict)** - cmd/fak renderPrePushBuild writes the trunk-build-gate verdict line (OK, NOOP, GATE_LATENCY_REGRESSION, SKIPPED_CONTENDED, COULD_NOT_RUN, TRUNK_ALREADY_RED, TRUNK_WOULD_NOT_COMPILE) to the push output. |
+| o | defined | symbol | render-materialize | **renderSyncPushVelocity (sync push velocity)** - cmd/fak renderSyncPushVelocity writes the one human projection of PushResult.Velocity: elapsed/budget ratio, score/grade when qualified, or the UNSCORED reason when the push did not publish. |
+| o | defined | symbol | render-materialize | **renderSyncApplyVelocity (sync apply velocity)** - cmd/fak renderSyncApplyVelocity writes the apply-velocity result: score/grade/elapsed/budget when qualified, or the UNSCORED reason (no fast-forward effect) when not. |
+| o | defined | symbol | render-materialize | **RenderSystemdUserUnit (Linux systemd unit)** - systemservice RenderSystemdUserUnit generates a systemd user unit file from a SystemdConfig, with hardening directives (NoNewPrivileges, ProtectSystem, ProtectKernelModules) and a 15s service interval. |
+| o | defined | symbol | render-materialize | **RenderTaskBudget (session-audit task budget)** - sessionaudit RenderTaskBudget renders a TaskBudget readout as one inline line: spend (with target fraction and OVER flag), turns, tool-call count, and the coarse reads/edits/other breakdown. |
+| o | defined | symbol | render-materialize | **RenderThroughput (fleet-trend throughput row)** - fleettrend RenderThroughput renders the one fleet-status throughput row: lands/resumes/deaths rates, goodput percentage, and the window label, with a provenance tag so self-reported goodput never reads as witnessed. |
+| o | defined | symbol | render-materialize | **RenderTOC (agentsindex resident TOC)** - agentsindex Doc.RenderTOC returns the resident table-of-contents block body: a one-line orientation, then one title-only row per level>=2 section with its slug and estimated token price, bounded by TOCBudgetTokens. |
+| o | defined | symbol | render-materialize | **renderVelocity (milestone code-movement lens)** - milestonereport renderVelocity renders the code-movement lens beside the epic roadmap: a header counting movers vs total modules, then the top lane rev movers; an unmeasured ledger renders one honest line rather than a fabricated zero. |
+| o | defined | symbol | render-materialize | **releaseStatusRenderContents (release contents digest)** - cmd/fak releaseStatusRenderContents renders the release-contents digest as one compact human line: commit/lane counts, top 3 lanes by commit, and up to 4 resolved-issue numbers. |
 | o | defined | symbol | render-materialize | **Materialize (ctxplan view)** - ctxplan.Materialize re-derives a budgeted View of the lossless context store each turn: PlanCells picks which spans fit the budget, the selected ones are paged in through the trust gate, and a faithfulness Witness reconciles rendered-vs-refused so every elided span stays recoverable. |
 | o | defined | symbol | render-materialize | **MaterializeLayout (ctxplan)** - ctxplan.MaterializeLayout is the layout-aware peer of Materialize: it uses a four-area Layout to choose the bounded candidate set and per-area precision, then renders the selected exact spans through the same trust gate and witness reconciliation as the default path. |
 | o | defined | symbol | render-materialize | **MaterializeVerdict (cachemeta gate)** - cachemeta.MaterializeVerdict is the central cache gate: given the runtime materialization view, the stored Entry, the requested key, and quality evidence, it returns a LookupVerdict deciding whether a cached prefix/KV span may be served (Hit) or must be refused (Miss). |
@@ -1723,14 +1743,14 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   policy-capability / abi.Verdict
 
 abstraction overclaims (16) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: steerability-scorecard = defined)
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: release-readiness-scorecard = defined)
   ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: runstate = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: new-session = defined)
   ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: total-debt = defined)
-  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewdropped = defined)
+  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewshed = defined)
   ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-orderlanecandidates = defined)
   ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
-  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
+  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
   ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: recallproof = defined)
@@ -1745,33 +1765,33 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | steerability-scorecard = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | release-readiness-scorecard = defined |
 | o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | normgate = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | runstate = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | new-session = defined |
 | o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | total-debt = defined |
-| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewdropped = defined |
+| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewshed = defined |
 | o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-orderlanecandidates = defined |
-| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
-| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | attention-accumulator = defined |
+| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
+| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | span-attention = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
-| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-denyall = defined |
+| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-toolfeedback = defined |
 | o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | recallproof = defined |
-| o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended = defined |
-| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index = defined |
+| o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended-mass = defined |
+| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index-request = defined |
 | o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
 | o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
-| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-witness-rung = crystal |
+| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-placeanthropiccachebreakpointwithoutcome = defined |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-regime-gate = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | fak-ablate-ttl-1h = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-creation-tokens = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-read = crystal |
 | * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
 | * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
 | * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
-| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
+| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
 | * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
@@ -1780,7 +1800,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 24 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1583 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1603 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1792,11 +1812,10 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| render-materialize | 142 | 165 | 23 |
 | context-ctx | 156 | 175 | 19 |
-| plan | 270 | 288 | 18 |
+| plan | 270 | 289 | 19 |
 | policy-capability | 99 | 114 | 15 |
-| witness-proof | 110 | 124 | 14 |
+| witness-proof | 110 | 125 | 15 |
 | gateway-engine | 151 | 162 | 11 |
 | score-debt | 68 | 78 | 10 |
 | attention | 61 | 68 | 7 |
@@ -1804,12 +1823,13 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | evict | 36 | 42 | 6 |
 | loop | 49 | 55 | 6 |
 | support-maturity | 29 | 34 | 5 |
+| guard-gate | 281 | 284 | 3 |
 | layout | 12 | 15 | 3 |
 | pool | 35 | 37 | 2 |
 | cache | 222 | 222 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| guard-gate | 281 | 281 | 0 |
+| render-materialize | 162 | 162 | 0 |
 | session-runtime | 170 | 170 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
