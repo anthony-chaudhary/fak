@@ -1,0 +1,27 @@
+{
+  "cases_evaluated": 3,
+  "first_actionable_divergence": {
+    "case": "decode-greedy-basic",
+    "classification": "tokenizer/normalize (stream misaligned from position 0)",
+    "expected_id": 1,
+    "got_id": 2,
+    "position": 0
+  },
+  "injected_defect": "bos-drop",
+  "injected_defect_desc": "tokenizer normalization drops the leading <bos> (a real class: prompt-template / special-token regression)",
+  "provenance": {
+    "baseline": "frozen@witness-v1",
+    "code_revision": "witness-v1",
+    "cost": "sub-second, no hardware",
+    "engine": "reference-cpu",
+    "model": "toy-decoder-8",
+    "oracle": "exact-token-match",
+    "seed": 0,
+    "tier": "pr",
+    "tokenizer": "toy-bpe-v1",
+    "tolerance": "exact"
+  },
+  "result": "fail",
+  "revision": "witness-v1",
+  "schema": "fak-quality-regression-witness/1"
+}
