@@ -35,4 +35,3 @@ func TestWindowsControlLoopOwnsCrashSensorAndMachinePaths(t *testing.T) {
 		t.Fatalf("spool=%q", got)
 	}
 }
-func TestWindowsServiceHandlerReportsRunningAndStops(t *testing.T) { _ = io.Discard }

@@ -25,6 +25,34 @@ func TestServiceDryRunRendersHardenedSystemdUnit(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceDryRunUsesSystemManagerContracts(t *testing.T) {
+	var out, errout bytes.Buffer
+	tmp := t.TempDir()
+	rc := runService(&out, &errout, []string{"install", "--dry-run", "--unit-dir", tmp, "--state-dir", filepath.Join(tmp, "state"), "--principal", "fak-test"})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errout.String())
+	}
+	switch runtime.GOOS {
+	case "linux":
+		for _, want := range []string{"DynamicUser=yes", "WantedBy=multi-user.target", "FAK_SERVICE_MANAGER=systemd-system"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("missing %q in %s", want, out.String())
+			}
+		}
+		for _, forbidden := range []string{"--user", "WantedBy=default.target"} {
+			if strings.Contains(out.String(), forbidden) {
+				t.Fatalf("user-manager dependency %q in %s", forbidden, out.String())
+			}
+		}
+	case "darwin":
+		for _, want := range []string{"<key>UserName</key><string>fak-test</string>", "launchd-system"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("missing %q in %s", want, out.String())
+			}
+		}
+	}
+}
 func TestServiceRunOnceTicksControlPlane(t *testing.T) {
 	old := serviceTick
 	calls := 0

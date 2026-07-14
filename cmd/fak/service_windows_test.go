@@ -11,9 +11,10 @@ import (
 )
 
 func TestWindowsServiceHandlerReportsRunningAndStops(t *testing.T) {
-	old := serviceTick
-	serviceTick = func(io.Writer, io.Writer) int { time.Sleep(5 * time.Millisecond); return 0 }
-	t.Cleanup(func() { serviceTick = old })
+	oldCrash, oldResume := windowsControlCrashTick, windowsControlResumeTick
+	windowsControlCrashTick = func(io.Writer, io.Writer, string) int { return 0 }
+	windowsControlResumeTick = func(io.Writer, io.Writer) int { return 0 }
+	t.Cleanup(func() { windowsControlCrashTick, windowsControlResumeTick = oldCrash, oldResume })
 	changes := make(chan svc.ChangeRequest, 1)
 	statuses := make(chan svc.Status, 8)
 	done := make(chan struct{})

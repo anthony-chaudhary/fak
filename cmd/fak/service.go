@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -50,12 +51,9 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	dry := fs.Bool("dry-run", false, "render/validate without changing service manager")
 	unitDir := fs.String("unit-dir", "", "override service definition directory")
 	stateDir := fs.String("state-dir", "", "durable control-plane state directory")
+	principal := fs.String("principal", "", "unprivileged account used by the system service")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return 2
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return 1
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -73,18 +71,18 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		}
 		return rc
 	case "linux":
-		manager = "systemd-user"
+		manager = "systemd-system"
 		name = systemservice.SystemdUnitName
 		if *unitDir == "" {
-			*unitDir = filepath.Join(home, ".config", "systemd", "user")
+			*unitDir = filepath.Join(string(filepath.Separator), "etc", "systemd", "system")
 		}
 		if *stateDir == "" {
-			*stateDir = filepath.Join(home, ".local", "state", "fak")
+			*stateDir = filepath.Join(string(filepath.Separator), "var", "lib", "fak")
 		}
 		path = filepath.Join(*unitDir, name)
-		definition, err = systemservice.RenderSystemdUserUnit(systemservice.SystemdConfig{Executable: exe, StateDir: *stateDir})
+		definition, err = systemservice.RenderSystemdSystemUnit(systemservice.SystemdConfig{Executable: exe, StateDir: *stateDir})
 		cmd := func(argv ...string) error {
-			c := serviceCommand("systemctl", append([]string{"--user"}, argv...)...)
+			c := serviceCommand("systemctl", argv...)
 			c.Stdout = stdout
 			c.Stderr = stderr
 			return c.Run()
@@ -98,18 +96,21 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		status = func() error { return cmd("is-active", name) }
 		uninstall = func() error { _ = cmd("disable", "--now", name); return cmd("daemon-reload") }
 	case "darwin":
-		manager = "launchd-user"
+		manager = "launchd-system"
 		name = systemservice.LaunchdLabel
 		if *unitDir == "" {
-			*unitDir = filepath.Join(home, "Library", "LaunchAgents")
+			*unitDir = filepath.Join(string(filepath.Separator), "Library", "LaunchDaemons")
 		}
 		if *stateDir == "" {
-			*stateDir = filepath.Join(home, "Library", "Application Support", "fak")
+			*stateDir = filepath.Join(string(filepath.Separator), "var", "db", "fak")
+		}
+		if *principal == "" {
+			*principal = "_fakguard"
 		}
 		logDir := filepath.Join(*stateDir, "logs")
 		path = filepath.Join(*unitDir, name+".plist")
-		definition, err = systemservice.RenderLaunchAgent(systemservice.LaunchdConfig{Executable: exe, StateDir: *stateDir, StdoutPath: filepath.Join(logDir, "guard-control.out.log"), StderrPath: filepath.Join(logDir, "guard-control.err.log")})
-		domain := "gui/" + strconv.Itoa(os.Getuid())
+		definition, err = systemservice.RenderLaunchDaemon(systemservice.LaunchdConfig{Executable: exe, StateDir: *stateDir, StdoutPath: filepath.Join(logDir, "guard-control.out.log"), StderrPath: filepath.Join(logDir, "guard-control.err.log"), UserName: *principal})
+		domain := "system"
 		target := domain + "/" + name
 		cmd := func(argv ...string) error {
 			c := serviceCommand("launchctl", argv...)
@@ -148,6 +149,12 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	case "install":
 		if os.MkdirAll(*unitDir, 0o755) != nil || os.MkdirAll(*stateDir, 0o700) != nil || os.MkdirAll(filepath.Join(*stateDir, "logs"), 0o700) != nil {
 			return 1
+		}
+		if runtime.GOOS == "darwin" {
+			if err := chownServiceState(*stateDir, *principal); err != nil {
+				fmt.Fprintln(stderr, "fak service: prepare launchd state:", err)
+				return 1
+			}
 		}
 		if writeFileAtomic(path, []byte(definition), 0o644) != nil || install() != nil {
 			return 1
@@ -217,6 +224,27 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak service install|status|uninstall|run [--dry-run] [--json]")
 }
+func chownServiceState(path, principal string) error {
+	u, err := user.Lookup(principal)
+	if err != nil {
+		return fmt.Errorf("lookup principal %q: %w", principal, err)
+	}
+	uid64, err := strconv.ParseInt(u.Uid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parse uid for %q: %w", principal, err)
+	}
+	gid64, err := strconv.ParseInt(u.Gid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parse gid for %q: %w", principal, err)
+	}
+	return filepath.Walk(path, func(p string, _ os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		return os.Chown(p, int(uid64), int(gid64))
+	})
+}
+
 func writeFileAtomic(path string, b []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".fak-service-*")
 	if err != nil {

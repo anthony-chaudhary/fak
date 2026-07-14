@@ -5,22 +5,36 @@ import (
 	"testing"
 )
 
-func TestRenderSystemdUserUnitOwnsAndHardensControlPlane(t *testing.T) {
-	u, err := RenderSystemdUserUnit(SystemdConfig{Executable: "/home/a b/fak", StateDir: "/home/a/.local/state/fak"})
+func TestRenderSystemdSystemUnitIsPID1OwnedAndHardened(t *testing.T) {
+	u, err := RenderSystemdSystemUnit(SystemdConfig{Executable: "/opt/fak/bin/fak", StateDir: "/var/lib/fak"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ExecStart=\"/home/a b/fak\" service run --interval 15s", "Restart=always", "KillMode=control-group", "NoNewPrivileges=yes", "MemoryMax=1G", "TasksMax=256", "CPUQuota=50%", "WantedBy=default.target"} {
+	for _, want := range []string{
+		"DynamicUser=yes", "StateDirectory=fak", "StateDirectoryMode=0700", "ExecStart=\"/opt/fak/bin/fak\" service run --interval 15s",
+		"Restart=always", "KillMode=control-group", "NoNewPrivileges=yes", "ProtectSystem=strict",
+		"ReadWritePaths=\"/var/lib/fak\"", "MemoryMax=1G", "TasksMax=256", "CPUQuota=50%",
+		"WantedBy=multi-user.target", "FAK_SERVICE_MANAGER=systemd-system",
+	} {
 		if !strings.Contains(u, want) {
 			t.Fatalf("unit missing %q:\n%s", want, u)
 		}
 	}
-	if strings.Contains(u, "Terminal") || strings.Contains(u, "DISPLAY=") {
-		t.Fatalf("control-plane unit depends on UI: %s", u)
+	for _, forbidden := range []string{"WantedBy=default.target", "DISPLAY=", "graphical-session.target", "--user"} {
+		if strings.Contains(u, forbidden) {
+			t.Fatalf("PID-1 control-plane unit contains user/UI ownership %q: %s", forbidden, u)
+		}
 	}
 }
-func TestRenderSystemdRejectsNewlines(t *testing.T) {
-	if _, e := RenderSystemdUserUnit(SystemdConfig{Executable: "/tmp/fak\nExecStart=evil", StateDir: "/tmp"}); e == nil {
-		t.Fatal("injection accepted")
+
+func TestRenderSystemdRejectsInjectionAndMissingPrincipal(t *testing.T) {
+	for _, c := range []SystemdConfig{
+		{Executable: "/tmp/fak\nExecStart=evil", StateDir: "/var/lib/fak"},
+		{Executable: "/opt/fak", StateDir: ""},
+		{Executable: "/opt/fak", StateDir: "/var/lib/fak\nReadWritePaths=/"},
+	} {
+		if _, e := RenderSystemdSystemUnit(c); e == nil {
+			t.Fatalf("unsafe config accepted: %+v", c)
+		}
 	}
 }

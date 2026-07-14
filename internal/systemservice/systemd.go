@@ -1,5 +1,5 @@
 // Package systemservice renders service-manager definitions that keep fak's
-// control plane outside terminal and compositor process trees.
+// control plane outside terminal, compositor, and login-session process trees.
 package systemservice
 
 import (
@@ -15,44 +15,64 @@ type SystemdConfig struct {
 	StateDir   string
 }
 
-func RenderSystemdUserUnit(c SystemdConfig) (string, error) {
-	if strings.TrimSpace(c.Executable) == "" || strings.ContainsAny(c.Executable, "\r\n") {
-		return "", fmt.Errorf("invalid executable")
-	}
-	if strings.TrimSpace(c.StateDir) == "" || strings.ContainsAny(c.StateDir, "\r\n") {
-		return "", fmt.Errorf("invalid state directory")
+// RenderSystemdSystemUnit renders a PID-1-owned system service. systemd allocates
+// a transient, unprivileged identity while PID 1 retains lifecycle and durable-
+// directory ownership; no login account or user manager is in the dependency chain.
+func RenderSystemdSystemUnit(c SystemdConfig) (string, error) {
+	for name, value := range map[string]string{"executable": c.Executable, "state directory": c.StateDir} {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\x00\r\n") {
+			return "", fmt.Errorf("invalid %s", name)
+		}
 	}
 	exec := systemdQuote(c.Executable)
 	state := systemdQuote(c.StateDir)
 	return `[Unit]
 Description=fak Guard OS-owned control plane
 Documentation=https://github.com/anthony-chaudhary/fak
-After=network-online.target
+After=local-fs.target network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+DynamicUser=yes
+StateDirectory=fak
+StateDirectoryMode=0700
+RuntimeDirectory=fak
+RuntimeDirectoryMode=0700
 ExecStart=` + exec + ` service run --interval 15s
 Restart=always
 RestartSec=3s
 KillMode=control-group
+UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=full
+ProtectSystem=strict
+ProtectHome=read-only
 ProtectControlGroups=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+ReadWritePaths=` + state + `
 MemoryMax=1G
 TasksMax=256
 CPUQuota=50%
-Environment=FAK_SERVICE_MANAGER=systemd
+Environment=FAK_SERVICE_MANAGER=systemd-system
 Environment=FLEET_REG_DIR=` + state + `
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 `, nil
 }
+
+// RenderSystemdUserUnit remains as a source-compatible alias, but deliberately
+// renders the system-owned contract. New callers should use the explicit name.
+func RenderSystemdUserUnit(c SystemdConfig) (string, error) { return RenderSystemdSystemUnit(c) }
 
 func systemdQuote(s string) string { return strconv.Quote(s) }

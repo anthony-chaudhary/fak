@@ -9,30 +9,24 @@ import (
 
 const LaunchdLabel = "com.fak.guard-control"
 
-type LaunchdConfig struct{ Executable, StateDir, StdoutPath, StderrPath string }
-
-type launchdPlist struct {
-	XMLName xml.Name    `xml:"plist"`
-	Version string      `xml:"version,attr"`
-	Dict    launchdDict `xml:"dict"`
-}
-type launchdDict struct {
-	Items []launchdItem `xml:",any"`
-}
-type launchdItem struct {
-	XMLName  xml.Name
-	Value    string        `xml:",chardata"`
-	Children []launchdItem `xml:",any"`
+type LaunchdConfig struct {
+	Executable string
+	StateDir   string
+	StdoutPath string
+	StderrPath string
+	UserName   string
 }
 
-func RenderLaunchAgent(c LaunchdConfig) (string, error) {
-	for _, v := range []string{c.Executable, c.StateDir, c.StdoutPath, c.StderrPath} {
+// RenderLaunchDaemon renders a system-domain launchd service. It is loaded by
+// PID 1 from /Library/LaunchDaemons and survives Terminal, WindowServer, and
+// GUI-login teardown. UserName may drop data-plane privileges while launchd
+// retains lifecycle ownership.
+func RenderLaunchDaemon(c LaunchdConfig) (string, error) {
+	for name, v := range map[string]string{"executable": c.Executable, "state directory": c.StateDir, "stdout path": c.StdoutPath, "stderr path": c.StderrPath, "user": c.UserName} {
 		if strings.TrimSpace(v) == "" || strings.ContainsAny(v, "\x00\r\n") {
-			return "", fmt.Errorf("invalid launchd path")
+			return "", fmt.Errorf("invalid launchd %s", name)
 		}
 	}
-	// Hand-render the tiny plist so ProgramArguments remains an array and every
-	// operator-supplied path is XML-escaped by encoding/xml.
 	var b bytes.Buffer
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -43,13 +37,17 @@ func RenderLaunchAgent(c LaunchdConfig) (string, error) {
 <key>ProgramArguments</key><array><string>`)
 	_ = xml.EscapeText(&b, []byte(c.Executable))
 	b.WriteString(`</string><string>service</string><string>run</string><string>--interval</string><string>15s</string></array>
-<key>EnvironmentVariables</key><dict><key>FAK_SERVICE_MANAGER</key><string>launchd</string><key>FLEET_REG_DIR</key><string>`)
+<key>UserName</key><string>`)
+	_ = xml.EscapeText(&b, []byte(c.UserName))
+	b.WriteString(`</string>
+<key>EnvironmentVariables</key><dict><key>FAK_SERVICE_MANAGER</key><string>launchd-system</string><key>FLEET_REG_DIR</key><string>`)
 	_ = xml.EscapeText(&b, []byte(c.StateDir))
 	b.WriteString(`</string></dict>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>3</integer>
 <key>ProcessType</key><string>Background</string>
+<key>EnableTransactions</key><true/>
 <key>SoftResourceLimits</key><dict><key>NumberOfFiles</key><integer>4096</integer><key>NumberOfProcesses</key><integer>256</integer></dict>
 <key>StandardOutPath</key><string>`)
 	_ = xml.EscapeText(&b, []byte(c.StdoutPath))
@@ -61,3 +59,7 @@ func RenderLaunchAgent(c LaunchdConfig) (string, error) {
 `)
 	return b.String(), nil
 }
+
+// RenderLaunchAgent remains as a source-compatible alias, but deliberately
+// renders the system-domain contract. New callers should use RenderLaunchDaemon.
+func RenderLaunchAgent(c LaunchdConfig) (string, error) { return RenderLaunchDaemon(c) }
