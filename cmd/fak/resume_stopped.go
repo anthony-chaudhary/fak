@@ -51,6 +51,25 @@ func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
 	}
 	fs := flag.NewFlagSet("resume stopped", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	// --help documents the TWO independent axes each row carries (#3800): the flag dump
+	// alone cannot teach that disp is single-axis and the dedup verdict rides its own fields.
+	fs.Usage = func() {
+		w := fs.Output()
+		fmt.Fprint(w, `fak resume stopped [--window-h H] [--home DIR] [--json] — stopped-session triage
+
+Each row carries TWO independent axes (#3800):
+  disp          the single-axis stop-cause ONLY: STOPPED_LIMIT / STOPPED_AUTH /
+                STOPPED_MIDTOOL / STOPPED_INTERRUPT / STOPPED_MIDTURN / STOPPED_DONE /
+                STOPPED_QUIET / PARKED_WAIT / DONE / LIVE. When a terminal turn carries
+                BOTH an auth wall and a current limit banner, auth wins (a login wall
+                outlives any reset) and the outranked limit is retained on also_signals.
+  dup_of_live   the dedup verdict: a stopped row whose (project, work-key) a LIVE
+                sibling already owns is skipped, with the owning key on live_sibling —
+                disp KEEPS the real stop-cause; a duplicate never masks WHY it stopped.
+
+`)
+		fs.PrintDefaults()
+	}
 	windowH := fs.Float64("window-h", 10, "only sessions whose transcript changed within N hours")
 	asJSON := fs.Bool("json", false, "emit the full machine record (rows + decisions)")
 	homeFlag := fs.String("home", "", "user home holding the .claude* account dirs (default: $FLEET_USER_HOME, else discovered)")

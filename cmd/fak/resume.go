@@ -1278,6 +1278,11 @@ tools/stopped_sessions.py): a current synthetic limit banner (STOPPED_LIMIT), an
 (STOPPED_AUTH), a tool_use that never got its result (STOPPED_MIDTOOL — died mid-work), an
 interruption, a parked background wait, a wrap-up, or a quiet stop — then decides
 resume / defer / skip, deferring any session whose ACCOUNT is throttled. It resumes nothing.
+Each row carries TWO independent axes (#3800): disp is ONLY the stop-cause; the dedup
+verdict rides its own dup_of_live + live_sibling fields (a stopped duplicate of a live
+sibling is skipped with its real cause preserved), and when one terminal turn carries both
+an auth wall and a current limit banner, auth wins and the outranked limit is retained on
+also_signals instead of being silently dropped.
 
 status is the PROVE-THE-RESUME-TOOK runbook over the same store plus the durable resume
 ledger. For every crashed-or-resumed session it folds one label (pending / launched /

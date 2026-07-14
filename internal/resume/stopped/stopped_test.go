@@ -309,6 +309,81 @@ func TestDecideDupLiveSkipsCrashedDuplicate(t *testing.T) {
 	}
 }
 
+// TestDualAuthLimitSignalKeepsBoth pins the #3800 severity order and retention on a
+// fixture turn that carries BOTH stop-signals at once: a current synthetic usage-limit
+// banner whose text is ALSO an auth wall. Auth must win (a login wall outlives any
+// reset — waiting out the throttle would still leave the seat walled), and the
+// outranked limit must be RETAINED on AlsoSignals rather than silently dropped, so an
+// operator sees both facts and acts on the one that actually blocks.
+func TestDualAuthLimitSignalKeepsBoth(t *testing.T) {
+	r := Classify([]Record{
+		assistant("working on it"),
+		{Type: "assistant", Role: "assistant", Synthetic: true,
+			Text: "You've hit your usage limit · resets 6pm (America/Los_Angeles). " +
+				"OAuth token has expired · please run /login"},
+	}, 60, 10, "", "sid", "p")
+	if r.Disp != DispStoppedAuth {
+		t.Fatalf("dual-signal disp = %s, want STOPPED_AUTH (auth outranks a co-occurring limit)", r.Disp)
+	}
+	if len(r.AlsoSignals) != 1 || r.AlsoSignals[0] != string(DispStoppedLimit) {
+		t.Fatalf("also_signals = %v, want the outranked limit retained as [STOPPED_LIMIT]", r.AlsoSignals)
+	}
+	// The throttle facts stay observable alongside the auth verdict.
+	if !r.ThrottleCurrent || r.ThrottleReset == "" {
+		t.Fatalf("dual-signal turn must keep the throttle facts: current=%v reset=%q",
+			r.ThrottleCurrent, r.ThrottleReset)
+	}
+
+	// Single-signal paths carry NO secondary: an auth-only wall and a limit-only banner
+	// each classify as before with also_signals empty (no fabricated co-signal).
+	r = Classify([]Record{assistant("OAuth token has expired · please run /login")},
+		60, 10, "", "sid", "p")
+	if r.Disp != DispStoppedAuth || len(r.AlsoSignals) != 0 {
+		t.Fatalf("auth-only turn: disp=%s also_signals=%v, want STOPPED_AUTH with none",
+			r.Disp, r.AlsoSignals)
+	}
+	r = Classify([]Record{
+		{Type: "assistant", Role: "assistant", Synthetic: true,
+			Text: "You've hit your session limit · resets 6pm (America/Los_Angeles)"},
+	}, 60, 10, "", "sid", "p")
+	if r.Disp != DispStoppedLimit || len(r.AlsoSignals) != 0 {
+		t.Fatalf("limit-only turn: disp=%s also_signals=%v, want STOPPED_LIMIT with none",
+			r.Disp, r.AlsoSignals)
+	}
+}
+
+// TestAuthDuplicateOfLiveReportsBothFacts pins the #3800 headline scenario end to end: a
+// session that stopped on an AUTH WALL and happens to have a live sibling on the same
+// (project, work-key) must report BOTH facts — the cause on disp (STOPPED_AUTH, tallied
+// under auth in counts) and the dedup verdict on dup_of_live/live_sibling — instead of the
+// dedup pass erasing the cause the way the old DUP_LIVE disposition did.
+func TestAuthDuplicateOfLiveReportsBothFacts(t *testing.T) {
+	never := func(string) bool { return false }
+	rows := []Row{
+		{Disp: DispLive, Account: "a1", AgeMin: 1, Session: "live", Project: "P", WorkKey: "issue:#3800"},
+		{Disp: DispStoppedAuth, Account: "a2", AgeMin: 30, Session: "walled", Project: "P", WorkKey: "issue:#3800"},
+	}
+	d := Decide(rows, never)
+	var walled *Row
+	for i := range d.Skip {
+		if d.Skip[i].Session == "walled" {
+			walled = &d.Skip[i]
+		}
+	}
+	if walled == nil {
+		t.Fatalf("auth duplicate must be routed to Skip; skip=%+v resume=%+v defer=%+v", d.Skip, d.Resume, d.Defer)
+	}
+	if walled.Disp != DispStoppedAuth {
+		t.Fatalf("duplicate's cause erased: disp = %s, want STOPPED_AUTH kept on its own axis", walled.Disp)
+	}
+	if !walled.DupOfLive || walled.LiveSibling != "issue:#3800" {
+		t.Fatalf("dedup verdict missing: dup_of_live=%v live_sibling=%q", walled.DupOfLive, walled.LiveSibling)
+	}
+	if d.Counts[string(DispStoppedAuth)] != 1 {
+		t.Fatalf("counts must tally the duplicate under its real auth cause, got %v", d.Counts)
+	}
+}
+
 // TestResidualSplitByLastRole pins #3783: the residual STOPPED_QUIET is split by the
 // terminal record's role — assistant-final => STOPPED_DONE (idle, leave alone), user-final
 // => STOPPED_MIDTURN (stranded work, resume), empty tail => the STOPPED_QUIET umbrella. The
