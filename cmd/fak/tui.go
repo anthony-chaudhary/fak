@@ -529,6 +529,10 @@ func canonicalGuardJournalPath() string {
 func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64, style tuiGuardRenderStyle) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	offset := int64(0)
+	if info, err := os.Stat(path); err == nil {
+		offset = info.Size()
+	}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -536,10 +540,11 @@ func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64
 		case <-ctx.Done():
 			return 0
 		case <-ticker.C:
-			rows, err := journal.ReadRows(path)
+			rows, next, err := journal.ReadRowsFrom(path, offset)
 			if err != nil {
-				continue // transient (mid-rotate / I/O blip): keep tailing
+				continue
 			}
+			offset = next
 			for _, r := range rows {
 				if r.Seq <= lastSeq {
 					continue

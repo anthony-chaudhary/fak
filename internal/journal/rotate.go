@@ -213,3 +213,24 @@ func ReadAllSegments(path string) ([]Row, error) {
 	}
 	return out, nil
 }
+
+// CutIfOversized bounds a live file-backed journal without changing callers'
+// append semantics. It is a no-op below maxBytes.
+func CutIfOversized(j *Journal, maxBytes int64) (bool, error) {
+	if j == nil || maxBytes <= 0 {
+		return false, nil
+	}
+	path := j.Path()
+	if path == "" {
+		return false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	if info.Size() <= maxBytes {
+		return false, nil
+	}
+	_, err = j.Cut()
+	return err == nil, err
+}

@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,5 +293,35 @@ func TestNonDenyDecisionsStillRecordDecideRow(t *testing.T) {
 		if r.Kind != "DECIDE" {
 			t.Fatalf("non-deny decision must be a DECIDE row, got %q", r.Kind)
 		}
+	}
+}
+
+func TestReadRowsFromConsumesOnlyAppendedCompleteRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	first := Row{Seq: 1, Kind: "DECIDE"}
+	second := Row{Seq: 2, Kind: "DENY"}
+	b1, _ := json.Marshal(first)
+	b2, _ := json.Marshal(second)
+	if err := os.WriteFile(path, append(b1, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows, off, err := ReadRowsFrom(path, 0)
+	if err != nil || len(rows) != 1 || rows[0].Seq != 1 {
+		t.Fatalf("first rows=%+v off=%d err=%v", rows, off, err)
+	}
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	half := len(b2) / 2
+	f.Write(b2[:half])
+	f.Close()
+	rows, same, err := ReadRowsFrom(path, off)
+	if err != nil || len(rows) != 0 || same != off {
+		t.Fatalf("partial rows=%+v off=%d/%d err=%v", rows, same, off, err)
+	}
+	f, _ = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.Write(append(b2[half:], '\n'))
+	f.Close()
+	rows, next, err := ReadRowsFrom(path, off)
+	if err != nil || len(rows) != 1 || rows[0].Seq != 2 || next <= off {
+		t.Fatalf("append rows=%+v next=%d err=%v", rows, next, err)
 	}
 }

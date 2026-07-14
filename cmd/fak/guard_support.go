@@ -552,6 +552,9 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 		return "off", nil
 	}
 	j, err := journal.Enable(path)
+	if err == nil {
+		_, _ = journal.CutIfOversized(j, 64<<20)
+	}
 	if err != nil {
 		if isDefault {
 			// Default-on trail nobody asked for: warn and continue unaudited rather

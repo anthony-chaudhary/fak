@@ -41,6 +41,7 @@ package journal
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -1006,4 +1007,43 @@ func init() {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "fak: audit journal -> %s (durable, hash-chained)\n", path)
+}
+
+// ReadRowsFrom decodes complete JSONL rows beginning at byte offset and returns
+// the next safe offset. A partial trailing row is left for the next poll.
+func ReadRowsFrom(path string, offset int64) ([]Row, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, offset, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, offset, err
+	}
+	if offset < 0 || offset > info.Size() {
+		offset = 0
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, offset, err
+	}
+	r := bufio.NewReader(f)
+	var rows []Row
+	next := offset
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			var row Row
+			if json.Unmarshal(bytes.TrimSpace(line), &row) == nil {
+				rows = append(rows, row)
+			}
+			next += int64(len(line))
+		}
+		if err != nil {
+			if err == io.EOF {
+				return rows, next, nil
+			}
+			return rows, next, err
+		}
+	}
 }

@@ -165,3 +165,29 @@ func TestVerifySegmentsDetectsTamperAcrossCut(t *testing.T) {
 		t.Fatalf("tampered archived segment must fail VerifySegments")
 	}
 }
+
+func TestCutIfOversizedProductionBound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	j, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8; i++ {
+		j.append(Row{Kind: "DECIDE", Tool: strings.Repeat("x", 64)})
+	}
+	cut, err := CutIfOversized(j, 1)
+	if err != nil || !cut {
+		t.Fatalf("cut=%v err=%v", cut, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("successor lacks cut anchor")
+	}
+	segs, err := Segments(path)
+	if err != nil || len(segs) != 2 {
+		t.Fatalf("segments=%v err=%v", segs, err)
+	}
+}
