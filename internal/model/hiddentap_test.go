@@ -42,6 +42,33 @@ func tapFileExists(p string) bool {
 //     linear_attention layer and NONE inside the full_attention layer, and
 //   - that the dumped last-layer residual, run through finalNorm, reproduces the forward's own
 //     returned hidden — i.e. the tap captured the real computation, not a stale or empty buffer.
+
+func TestHiddenTapFromEnvAcceptsPositionSet(t *testing.T) {
+	t.Setenv("FAK_HIDDEN_TAP", t.TempDir())
+	t.Setenv("FAK_HIDDEN_TAP_POS", "1486, 1490,1491")
+	tap := hiddenTapFromEnv()
+	if tap == nil {
+		t.Fatal("hiddenTapFromEnv returned nil")
+	}
+	for _, pos := range []int{1486, 1490, 1491} {
+		if !tap.wants(pos) {
+			t.Errorf("wants(%d)=false", pos)
+		}
+	}
+	if tap.wants(1489) {
+		t.Fatal("position outside configured set was selected")
+	}
+}
+
+func TestHiddenTapFromEnvSinglePositionRemainsCompatible(t *testing.T) {
+	t.Setenv("FAK_HIDDEN_TAP", t.TempDir())
+	t.Setenv("FAK_HIDDEN_TAP_POS", "42")
+	tap := hiddenTapFromEnv()
+	if tap == nil || !tap.wants(42) || tap.wants(41) {
+		t.Fatalf("single-position compatibility broken: %#v", tap)
+	}
+}
+
 func TestHiddenTapDumpsPerLayerAndPerOp(t *testing.T) {
 	cfg := qwen35HybridTestCfg() // 4 layers: linear,linear,linear,full; hidden=32
 	m := NewSynthetic(cfg)

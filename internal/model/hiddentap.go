@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -33,11 +34,12 @@ import (
 // two concurrent sessions sharing the SAME env tap dir would write the same filenames. Run one
 // model at a time.
 type hiddenTap struct {
-	dir        string // output directory (created on first write)
-	logitsPath string // sibling top-logit TSV for the selected position
-	pos        int    // absolute position whose forward to dump (FAK_HIDDEN_TAP_POS)
-	ops        bool   // also dump the per-op GDN intermediates inside linear_attention layers
-	promptIDs  []int  // optional provenance carried into meta.json
+	dir        string       // output directory (created on first write)
+	logitsPath string       // sibling top-logit TSV for the selected position
+	pos        int          // first absolute position whose forward to dump
+	positions  map[int]bool // optional absolute-position set; nil preserves the single-pos contract
+	ops        bool         // also dump the per-op GDN intermediates inside linear_attention layers
+	promptIDs  []int        // optional provenance carried into meta.json
 
 	mu       sync.Mutex
 	dirReady bool
@@ -54,13 +56,22 @@ func hiddenTapFromEnv() *hiddenTap {
 		return nil
 	}
 	pos := 0
+	positions := map[int]bool{}
 	if v := os.Getenv("FAK_HIDDEN_TAP_POS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			pos = n
+		for _, raw := range strings.Split(v, ",") {
+			if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+				positions[n] = true
+				if len(positions) == 1 {
+					pos = n
+				}
+			}
 		}
 	}
+	if len(positions) < 2 {
+		positions = nil
+	}
 	ops := os.Getenv("FAK_HIDDEN_TAP_OPS") != "0"
-	return &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: pos, ops: ops}
+	return &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: pos, positions: positions, ops: ops}
 }
 
 var (
@@ -82,6 +93,16 @@ func (s *Session) activeTap() *hiddenTap {
 		return s.tap
 	}
 	return envTap()
+}
+
+func (t *hiddenTap) wants(pos int) bool {
+	if t == nil {
+		return false
+	}
+	if t.positions != nil {
+		return t.positions[pos]
+	}
+	return pos == t.pos
 }
 
 // layerKindLabel names layer l for the probe's per-layer metadata. The qwen35 hybrid

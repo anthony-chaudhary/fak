@@ -185,7 +185,7 @@ func (s *Session) requirePreNorm(path string) {
 }
 
 func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
-	if tap := s.activeTap(); tap != nil && tap.pos == pos {
+	if tap := s.activeTap(); tap != nil && tap.wants(pos) {
 		tap.dumpLogits(logits)
 	}
 	return logits
@@ -309,7 +309,7 @@ func (s *Session) tokenHidden(id, pos int) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	tap := s.activeTap()
-	if tap != nil && tap.pos != pos {
+	if tap != nil && !tap.wants(pos) {
 		tap = nil
 	}
 	prevTap := s.tapActive

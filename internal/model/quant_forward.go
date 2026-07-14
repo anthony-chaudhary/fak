@@ -193,7 +193,7 @@ func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 	// meta.json would be written for the probe to load. The per-op GDN taps ride the shared
 	// blockStep→linearAttnStep path (the slow, resident-Q4_K/Q8 branch the hybrid always takes).
 	tap := s.activeTap()
-	if tap != nil && tap.pos != pos {
+	if tap != nil && !tap.wants(pos) {
 		tap = nil
 	}
 	prevTap := s.tapActive
