@@ -1102,6 +1102,10 @@ func renderIssueContract(r issueContractResult) string {
 				review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Target),
 				len(review.OperatingEnvelope.Witnessed), len(review.OperatingEnvelope.Gaps))
 		}
+		if len(review.ScaleEvidence.Records) > 0 || len(review.ScaleEvidence.RequiredStages) > 0 {
+			line += fmt.Sprintf(" scale_evidence=%d required_stages=%d missing_stages=%d",
+				len(review.ScaleEvidence.Records), len(review.ScaleEvidence.RequiredStages), len(review.ScaleEvidence.MissingStages))
+		}
 		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
@@ -1123,6 +1127,12 @@ func renderIssueContract(r issueContractResult) string {
 		}
 		for _, gap := range review.OperatingEnvelope.Gaps {
 			lines = append(lines, fmt.Sprintf("    envelope_gap: %s: %s", gap.Dimension, gap.Reason))
+		}
+		for _, invalid := range review.ScaleEvidence.Invalid {
+			lines = append(lines, "    scale_evidence_invalid: "+invalid)
+		}
+		for _, stage := range review.ScaleEvidence.MissingStages {
+			lines = append(lines, "    scale_evidence_missing_stage: "+stage)
 		}
 		for _, flag := range review.BornRouted.Flags {
 			lines = append(lines, "    born_routed_flag: "+flag)

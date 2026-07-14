@@ -47,3 +47,33 @@ tracked by #4638.
 A small-scope item uses exactly the same contract. If a local command's real supported
 scope is one user for one minute, target and witness can both declare those values and the
 review reports `met`; it does not manufacture a thousand-unit load requirement.
+
+## Staged scale evidence
+
+A single witnessed envelope can now be replaced by provenance-labeled stages:
+
+```markdown
+## Required scale stages
+toy, target-load, soak, recovery
+
+## Scale evidence
+- toy; witnessed; concurrency: 1 requests, duration: 1 minutes; environment=dev
+- target-load; modeled; concurrency: 1000 requests, duration: 60 minutes; workload=synthetic
+- soak; witnessed; concurrency: 1000 requests, duration: 60 minutes; environment=staging
+- recovery; observed; concurrency: 1000 requests, duration: 60 minutes
+```
+
+The record form is `stage; provenance; dimensions; optional key=value attributes`.
+Supported stages are `toy`, `development`, `representative`, `soak`, `target-load`,
+`overload`, `degradation`, and `recovery`. Provenance is `witnessed`, `observed`,
+`modeled`, or `extrapolated`. Optional attributes are `duration`, `workload`, and
+`environment`.
+
+Only directly `witnessed` or `observed` values qualify toward the target envelope.
+Modeled and extrapolated records remain visible in JSON but cannot silently satisfy a
+production target. The ticket selects relevant required stages; omitted stages are not
+manufactured, but every selected stage must appear or review returns
+`ISSUE_SCALE_EVIDENCE_STAGE_MISSING`. Malformed stages/provenance/attributes return
+`ISSUE_SCALE_EVIDENCE_INVALID`. This lets a one-user local command require only its
+`target-load` witness while a serving model can explicitly require target load, soak,
+overload, and recovery.

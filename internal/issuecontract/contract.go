@@ -52,6 +52,8 @@ const (
 	ReasonTargetEnvelopeMissing = "ISSUE_TARGET_ENVELOPE_MISSING"
 	ReasonEnvelopeInvalid       = "ISSUE_OPERATING_ENVELOPE_INVALID"
 	ReasonEnvelopeUnderTarget   = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
+	ReasonScaleEvidenceInvalid  = "ISSUE_SCALE_EVIDENCE_INVALID"
+	ReasonScaleStageMissing     = "ISSUE_SCALE_EVIDENCE_STAGE_MISSING"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -145,6 +147,8 @@ type Candidate struct {
 	CompletionStandard string        `json:"completion_standard,omitempty"`
 	TargetEnvelope     string        `json:"target_operating_envelope,omitempty"`
 	WitnessedEnvelope  string        `json:"witnessed_operating_envelope,omitempty"`
+	ScaleEvidence       string        `json:"scale_evidence,omitempty"`
+	RequiredScaleStages string        `json:"required_scale_stages,omitempty"`
 	// RequiredModelTier / OptimalModelTier are the body-field FALLBACK for an
 	// issue whose namespaced tier/T?-required|optimal labels are unavailable
 	// (the issue's own stated assumption). A namespaced label always wins over
@@ -240,6 +244,7 @@ type Review struct {
 	ModelTier       ModelTier       `json:"model_tier"`
 	Scale             ScaleFit                 `json:"scale"`
 	OperatingEnvelope OperatingEnvelopeReadout `json:"operating_envelope"`
+	ScaleEvidence      ScaleEvidenceReadout      `json:"scale_evidence"`
 	BornRouted      BornRouted      `json:"born_routed"`
 }
 
@@ -294,7 +299,17 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.StrictBornRouted && len(bornRoutedReadout.Flags) > 0 {
 		reasons.add(ReasonNotBornRouted)
 	}
+	evidenceReadout := scaleEvidence(c)
+	if len(evidenceReadout.Records) > 0 {
+		c.WitnessedEnvelope = renderEvidenceEnvelope(evidenceReadout.Qualifying)
+	}
 	envelopeReadout := operatingEnvelope(c)
+	if len(evidenceReadout.Invalid) > 0 {
+		reasons.add(ReasonScaleEvidenceInvalid)
+	}
+	if len(evidenceReadout.MissingStages) > 0 {
+		reasons.add(ReasonScaleStageMissing)
+	}
 	if envelopeReadout.Required && len(envelopeReadout.Target) == 0 {
 		reasons.add(ReasonTargetEnvelopeMissing)
 	}
@@ -350,6 +365,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		ModelTier:      modelTier,
 		Scale:             scaleReadout,
 		OperatingEnvelope: envelopeReadout,
+		ScaleEvidence:      evidenceReadout,
 		BornRouted:     bornRoutedReadout,
 	}
 	out.OK = len(out.Reasons) == 0
@@ -667,6 +683,8 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		CompletionStandard: section("Completion standard"),
 		TargetEnvelope:     section("Target operating envelope", "Target envelope"),
 		WitnessedEnvelope:  section("Witnessed operating envelope", "Observed operating envelope", "Witnessed envelope"),
+		ScaleEvidence:       section("Scale evidence", "Operating envelope evidence"),
+		RequiredScaleStages: section("Required scale stages", "Required evidence stages"),
 		// Body fallback for the tier tags — used only when the namespaced
 		// tier/T?-required|optimal GitHub labels are absent (see modelTier).
 		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),
