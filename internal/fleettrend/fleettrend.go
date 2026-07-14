@@ -272,8 +272,16 @@ func WindowRates(rows []map[string]any) (Rates, bool) {
 	out.Resumes = counterRate(rows, "resumes")
 	out.Deaths = counterRate(rows, "deaths")
 	if out.Lands.Present && out.Deaths.Present {
-		if denom := out.Lands.Delta + out.Deaths.Delta; denom > 0 {
+		switch denom := out.Lands.Delta + out.Deaths.Delta; {
+		case denom > 0:
+			// Some work resolved this window (shipped and/or died): the real ship-vs-churn ratio.
 			out.Goodput = out.Lands.Delta / denom
+			out.GoodputPresent = true
+		case out.Resumes.Present && out.Resumes.Delta > 0:
+			// Nothing shipped AND nothing died, yet workers were actively resuming this window:
+			// that is a real 0% conversion (the fleet spun without shipping), NOT "no data". Only
+			// n/a when there is truly no activity to convert — an idle window with no resumes.
+			out.Goodput = 0
 			out.GoodputPresent = true
 		}
 	}
@@ -351,7 +359,52 @@ func RenderThroughput(rows []map[string]any) string {
 			line += " [lands: self-reported]"
 		}
 	}
+	if stall := HeadStallTicks(rows); stall > 0 {
+		// The fleet is spinning without advancing HEAD — surfaced only when it is actually
+		// happening, so a healthy window's line is unchanged.
+		line += fmt.Sprintf(" [HEAD stalled %d %s]", stall, pluralTicks(stall))
+	}
 	return line
+}
+
+// HeadStallTicks reports the number of trailing consecutive ticks that landed NO new work while
+// workers were still active (resuming) — the fleet is spinning without advancing HEAD (Obs #2). It
+// reads the per-tick lands counter (git-witnessed commits when LandsWitnessed is set, so a flat run
+// is a literal HEAD stall) alongside resumes: the maximal trailing run where lands stays flat but
+// resumes climbs. It returns 0 when HEAD advanced on the latest tick, when no worker was active to
+// stall on, or when fewer than two lands-bearing snapshots exist — so a quiet fleet never reads as
+// stalled. Pure function of the ledger rows; no clock or git read.
+func HeadStallTicks(rows []map[string]any) int {
+	var lands, resumes []float64
+	for _, row := range rows {
+		l, ok := counterValue(row["lands"])
+		if !ok {
+			continue
+		}
+		r, _ := counterValue(row["resumes"]) // absent → 0; a stall needs a positive resumes delta below
+		lands = append(lands, l)
+		resumes = append(resumes, r)
+	}
+	if len(lands) < 2 {
+		return 0
+	}
+	stall := 0
+	for i := len(lands) - 1; i > 0; i-- {
+		// HEAD flat (no land) AND a worker resumed since the prior snapshot = one stalled tick.
+		if lands[i] == lands[i-1] && resumes[i] > resumes[i-1] {
+			stall++
+			continue
+		}
+		break
+	}
+	return stall
+}
+
+func pluralTicks(n int) string {
+	if n == 1 {
+		return "tick"
+	}
+	return "ticks"
 }
 
 func fmtRate(r Rate) string {

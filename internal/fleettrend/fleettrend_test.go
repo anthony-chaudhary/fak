@@ -213,6 +213,79 @@ func TestWindowRatesGuards(t *testing.T) {
 	}
 }
 
+func TestWindowRatesGoodputZeroWhenSpunButNothingShipped(t *testing.T) {
+	// Obs #1: workers actively resumed this window (100→130) but NOTHING shipped and NOTHING
+	// died (lands and deaths flat). That is a real 0% conversion — the fleet spun without
+	// shipping — and must render "0%", not the "no data" n/a that hides the churn.
+	spun := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 5, "resumes": 100, "deaths": 2},
+		{"ts": "2026-07-01T06:00:00Z", "lands": 5, "resumes": 130, "deaths": 2},
+	}
+	r, ok := WindowRates(spun)
+	if !ok {
+		t.Fatal("WindowRates(spun rows) reported no data")
+	}
+	if !r.GoodputPresent || r.Goodput != 0 {
+		t.Fatalf("goodput = %v (present=%v), want 0%% present — spun without shipping is 0%%, not n/a", r.Goodput, r.GoodputPresent)
+	}
+	if !strings.Contains(RenderThroughput(spun), "goodput 0%") {
+		t.Fatalf("throughput must render goodput 0%%, got %q", RenderThroughput(spun))
+	}
+
+	// An IDLE window — lands and deaths flat AND no resumes either — has nothing to convert, so
+	// it correctly stays n/a (not a fabricated 0%).
+	idle := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 5, "resumes": 100, "deaths": 2},
+		{"ts": "2026-07-01T06:00:00Z", "lands": 5, "resumes": 100, "deaths": 2},
+	}
+	if r, _ := WindowRates(idle); r.GoodputPresent {
+		t.Fatalf("idle window (no ships, no deaths, no resumes) must stay n/a, got goodput present: %+v", r)
+	}
+}
+
+func TestHeadStallTicks(t *testing.T) {
+	// Obs #2: three trailing ticks landed nothing while workers kept resuming → HEAD stalled 3.
+	stalled := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 10, "resumes": 100},
+		{"ts": "2026-07-01T01:00:00Z", "lands": 10, "resumes": 105},
+		{"ts": "2026-07-01T02:00:00Z", "lands": 10, "resumes": 110},
+		{"ts": "2026-07-01T03:00:00Z", "lands": 10, "resumes": 115},
+	}
+	if got := HeadStallTicks(stalled); got != 3 {
+		t.Fatalf("HeadStallTicks = %d, want 3", got)
+	}
+	if !strings.Contains(RenderThroughput(stalled), "HEAD stalled 3 ticks") {
+		t.Fatalf("throughput must flag the stall, got %q", RenderThroughput(stalled))
+	}
+
+	// A fresh land on the latest tick clears the stall — HEAD advanced.
+	advanced := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 10, "resumes": 100},
+		{"ts": "2026-07-01T01:00:00Z", "lands": 10, "resumes": 105},
+		{"ts": "2026-07-01T02:00:00Z", "lands": 12, "resumes": 110},
+	}
+	if got := HeadStallTicks(advanced); got != 0 {
+		t.Fatalf("HeadStallTicks after a fresh land = %d, want 0", got)
+	}
+	if strings.Contains(RenderThroughput(advanced), "HEAD stalled") {
+		t.Fatalf("a window that advanced HEAD must not flag a stall, got %q", RenderThroughput(advanced))
+	}
+
+	// Idle: HEAD flat but NO worker resuming → not a stall (nothing was trying to ship).
+	idle := []map[string]any{
+		{"ts": "2026-07-01T00:00:00Z", "lands": 10, "resumes": 100},
+		{"ts": "2026-07-01T01:00:00Z", "lands": 10, "resumes": 100},
+	}
+	if got := HeadStallTicks(idle); got != 0 {
+		t.Fatalf("idle window (no resumes) must not read as stalled, got %d", got)
+	}
+
+	// A single snapshot cannot witness a stall.
+	if got := HeadStallTicks(stalled[:1]); got != 0 {
+		t.Fatalf("single snapshot = %d, want 0", got)
+	}
+}
+
 func TestRenderThroughput(t *testing.T) {
 	if got := RenderThroughput(nil); got != "" {
 		t.Fatalf("empty throughput = %q, want empty", got)
