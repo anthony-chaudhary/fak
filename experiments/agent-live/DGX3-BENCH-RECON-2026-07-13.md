@@ -69,5 +69,5 @@ A full serve+sweep was **not** completed this session: the Slack-relayed control
 readback degraded (self-inflicted rate-limiting + channel congestion), making the
 multi-step long-running job unreliable to drive and verify. No benchmark numbers are
 reported because none could be measured and read back with confidence. The verified
-state above (idle GPU server, no serve) is the gathered data; the plan above is ready to
+state above (idle `lab-dgx3`, no serve) is the gathered data; the plan above is ready to
 execute once the control plane is quiet or from a direct on-box shell.
