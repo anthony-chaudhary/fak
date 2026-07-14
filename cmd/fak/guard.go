@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/fleetspine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
@@ -1135,7 +1136,13 @@ func cmdGuard(argv []string) {
 	//    process in the group, so the child receives and handles its own either way.
 	signal.Ignore(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
-
+	fleetLogf := fleetspine.Logf(nil)
+	if !*quiet {
+		fleetLogf = func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "fak guard: "+format+"\n", args...)
+		}
+	}
+	installGuardFleetProvider(srv, ctx, fleetLogf)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()
 

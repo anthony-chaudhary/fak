@@ -79,6 +79,24 @@ func (s *Server) SetSessionFleetProvider(fn func() (SessionFleet, bool)) {
 // sessionFleet pulls the current fleet snapshot for /debug/vars. It returns ok=false when
 // no provider is set OR the provider reports nothing to show (cold gateway / plain serve /
 // an operator with no peers), so the debug block is omitted rather than emitted empty.
+// SessionFleetProviderInstalled reports whether the host attached a fleet pull source.
+// It exposes wiring state, not fleet data, and is safe for startup tests and diagnostics.
+func (s *Server) SessionFleetProviderInstalled() bool {
+	if s == nil {
+		return false
+	}
+	s.sessionFleetMu.Lock()
+	defer s.sessionFleetMu.Unlock()
+	return s.sessionFleetProvider != nil
+}
+
+// SessionFleetSnapshot reads the currently installed fleet provider through the same
+// omission rules used by /debug/vars. It is primarily a wiring witness for hosts: ok=false
+// means no provider, no sample, or an empty fleet.
+func (s *Server) SessionFleetSnapshot() (SessionFleet, bool) {
+	return s.sessionFleet()
+}
+
 func (s *Server) sessionFleet() (SessionFleet, bool) {
 	if s == nil {
 		return SessionFleet{}, false

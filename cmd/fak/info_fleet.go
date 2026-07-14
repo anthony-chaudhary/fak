@@ -1,8 +1,3 @@
-//go:build wip_sessionfleet
-
-// GATED WIP — see guard_fleet.go: depends on the not-yet-committed gateway.SessionFleet surface,
-// fenced behind //go:build wip_sessionfleet so the default build stays green. Remove this line
-// once gateway.SessionFleet lands.
 package main
 
 import (
