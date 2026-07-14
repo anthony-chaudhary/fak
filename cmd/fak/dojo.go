@@ -691,6 +691,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 			},
 		},
 		{
+			Name:    "guard-stop",
+			Summary: "the Stop guard catch rate over its durable decision ledger: blocked continue decisions divided by all labeled would-be-bad stops; a 100% floor (#4499)",
+			Metrics: []dojoMetricInfo{
+				{Name: "bad_stop_block_rate", Theory: "the guard blocks every would-be-bad stop (floor 1.0, higher is better); stand-down or fail-open decisions breach the floor"},
+			},
+		},
+		{
 			Name:    "dispatch-yield",
 			Summary: "the dispatch loop's closure yield, measured over the workspace loop ledger (.fak/loops.jsonl): diff-witnessed VERIFIED closes per dispatched worker — the loop's first overall-performance KPI (#4497)",
 			Metrics: []dojoMetricInfo{
@@ -724,6 +731,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		compactionLever{},
 		vcacheLever{maxFiles: maxFiles},
 		guardIntegrityLever{root: root},
+		guardStopLever{root: root},
 		dispatchYieldLever{root: root},
 		providerTurnsLever{},
 		providerCacheLever{},
