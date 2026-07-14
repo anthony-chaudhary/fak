@@ -1192,6 +1192,22 @@ summary  = "Verification-ladder rung could not CONCLUSIVELY decide the claim che
 fix      = "Consult a costlier rung that can conclusively decide (require-witness / CI / git-evidence / isolated-worktree keep-bit / human ESCALATE), or accept the fail-closed deny. The ladder is DATA: declare a sufficient rung whose max_risk covers the claim's risk class in the dos.toml [ladder] (docs/standards/verification-ladder-spec.md). Floor: go test ./internal/kernel (the shipped lazy fold + residual-Indeterminate-fails-closed)."
 see_also = ["docs/standards/verification-ladder-spec.md", "docs/notes/verification-ladder-doctrine.md", "internal/abi/types.go", "internal/kernel/kernel.go"]
 
+# CHECKER_TAMPERED (checker-pin integrity, internal/safecommit/checkerpin.go): the grade-arm twin
+# of STALE_RECALL. A run declares the checker/test file its grade is judged against and PinCheckers
+# fingerprints it at declare-time; if those bytes move before grade-time, the grade is keyed on a
+# checker that CHANGED -- the "grade the grader" hole where a red result is flipped green by editing
+# the checker instead of the code. STALE_CLAIM, not OPERATOR_GATE: exactly like a stale recall, the
+# pass claim is stale relative to its pinned witness, so a close arm refuses it rather than ratifies
+# it. Declaring the token here makes `dos_check_reason CHECKER_TAMPERED` classify it as a known,
+# refusable STALE_CLAIM (not UNCLASSIFIED prose-drift) and `dos_refuse_reasons` list it. Producer:
+# safecommit.GuardCheckerPin, consulted by a witness/close arm; floor: go test ./internal/safecommit.
+[reasons.CHECKER_TAMPERED]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "A run's DECLARED checker/test file changed bytes between declare-time (when its content was pinned) and grade-time, so the grade is judged against a checker that MOVED and is not evidence: the 'grade the grader' hole where a red result is flipped green by editing the checker instead of the code. The pass claim is stale relative to its pinned witness."
+fix      = "Restore the checker to its declared bytes and re-grade, or -- if the checker change was intentional -- re-declare the run so its baseline is re-pinned against the new checker before grading. Producer: safecommit.GuardCheckerPin(root, baseline); an unchanged checker passes through untouched. Floor: go test ./internal/safecommit (checkerpin_test.go: changed->refused, unchanged->pass-through)."
+see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
+
 # #2522 (integration follow-on of the spine-first + fan-out epic #2510): the
 # issue fanout planner's own contract rejections (internal/issuefanout.Refusal,
 # e.g. a missing spine_ref, a cap below MinFanout, an unknown area filter, or --
