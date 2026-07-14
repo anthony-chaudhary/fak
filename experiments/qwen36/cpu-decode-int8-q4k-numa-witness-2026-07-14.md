@@ -98,6 +98,33 @@ STREAM-Triad (dependency-free Go, 24 B/elem, 1 GiB arrays), and the f32-vs-int8 
   (The Go triad undercounts absolute peak vs a hand-tuned C STREAM, but it is the honest ceiling
   for what the Go decode kernel can reach in the same runtime.)
 
+## 5. NUMA additivity witness — the replication ceiling is lower than STREAM suggested
+
+To test whether per-node bandwidth is **additive** (the load-bearing assumption behind per-node
+replication), 8 decodes were run **concurrently**, each pinned to one node
+(`numactl --cpunodebind=N --membind=N`, `FAK_WORKERS=24`, int8 Q4_K, 20 tokens):
+
+| node | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | **aggregate** |
+|---|---|---|---|---|---|---|---|---|---|
+| tok/s | 0.54 | 0.54 | 0.61 | 0.54 | 0.64 | 0.57 | 0.54 | 0.54 | **4.53** |
+
+(all kept `first_token_id=248068`.) Reading this:
+- **Additivity is real but imperfect.** Per-node dropped from the isolated 0.829 (32 threads,
+  §2) to ~0.566 (24 threads, all 8 nodes busy) — part worker-count, part memory-controller/xGMI
+  contention. Aggregate 4.53 tok/s ≈ **68 GB/s effective**, only **~32% of the 215 GB/s
+  node-local STREAM ceiling** (§4). **The decode kernel does not saturate per-node memory
+  bandwidth — it is partly compute/kernel-bound per node** (the int8 reduction + activation
+  quant), not purely bandwidth-bound.
+- **Honest revised ceiling for per-node replication:** single-stream **~5–7 tok/s**
+  (24 workers/node → 4.5 aggregate; 32 workers/node ≈ 0.83 × 8 ≈ 6.6 if additivity held), **not
+  the ~14 tok/s the raw STREAM roofline implied.** The STREAM estimate in §4 is the memory wall;
+  the kernel reaches only ~1/3 of it.
+- **So 10 tok/s needs replication PLUS one more lever:** either a **bytes/token cut** (C5 #4628
+  sub-4-bit MLP, 15.2 → ~10 GB/tok, ~1.5×) or a **~2× more efficient per-node kernel**
+  (prefetch / non-temporal streaming loads / more effective workers-per-node). Replication is
+  necessary but, on this kernel, **not sufficient** for 10 tok/s. This refines the epic #4623
+  ladder: C2 → ~5–7 tok/s, then C5 (or kernel work) → ~10.
+
 ## Provenance
 - Host: AVX2 EPYC-7742 CPU server, dual-socket, 8 NUMA nodes (128 GB/node), 256 threads, ~1 TB RAM.
 - Model: `Qwen3.6-27B-Q4_K_M.gguf` (16.5 GB, resident on local NVMe), fak checkout HEAD `df8499eb`, go1.26.5.
