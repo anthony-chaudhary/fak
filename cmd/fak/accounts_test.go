@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,6 +120,57 @@ func TestAccountsTombstonedHiddenByDefault(t *testing.T) {
 				t.Fatalf("%s --all should print no collapse note:\n%s", sub, got)
 			}
 		})
+	}
+}
+
+// TestRunAccountsListJSONRoster pins #4593: `list --json` must emit the per-seat
+// LoginReport roster (schema+summary+seats[]) — the same machine shape `status --json`
+// produces — NOT the raw registry persistence wrapper whose seats hide under .homes.
+// A consumer that iterates the top level must reach real per-seat can_serve records.
+func TestRunAccountsListJSONRoster(t *testing.T) {
+	home := t.TempDir()
+	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
+	needs := mkHome(t, home, ".claude-needs-seat", "needs@example.test", false)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"ready-seat","dir":"` + jsonPath(ready) + `"},` +
+		`{"name":"needs-seat","dir":"` + jsonPath(needs) + `"}` +
+		`],"roles":{"active":"ready-seat","anchor":"ready-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"list", "--json", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("list --json rc=%d stderr=%s", rc, errb.String())
+	}
+
+	// The top level must decode as the LoginReport roster, not the registry wrapper:
+	// a real seats[] array (never nested under .homes) carrying per-seat can_serve.
+	var report accounts.LoginReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("list --json must decode as a LoginReport: %v\n%s", err, out.String())
+	}
+	if report.Schema != "fak.accounts.login.v1" {
+		t.Fatalf("list --json schema=%q, want fak.accounts.login.v1:\n%s", report.Schema, out.String())
+	}
+	if len(report.Seats) == 0 {
+		t.Fatalf("list --json must carry a top-level seats[] roster, got none:\n%s", out.String())
+	}
+	var sawReady bool
+	for _, s := range report.Seats {
+		if s.Name == "ready-seat" && s.CanServe {
+			sawReady = true
+		}
+	}
+	if !sawReady {
+		t.Fatalf("list --json seats[] must carry per-seat can_serve (ready-seat can_serve=true):\n%s", out.String())
+	}
+	// Guard against a regression back to the registry wrapper: it would surface the
+	// seats under a top-level ".homes" key rather than the "seats" roster.
+	if strings.Contains(out.String(), `"homes"`) {
+		t.Fatalf("list --json must not emit the raw registry wrapper (top-level .homes):\n%s", out.String())
 	}
 }
 

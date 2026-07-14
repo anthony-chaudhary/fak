@@ -272,7 +272,14 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		reg = reg.Refresh()
 		if *asJSON {
-			stdout.Write(reg.JSON())
+			// Emit the per-seat LoginReport roster (schema+summary+seats[]) that the
+			// sibling `status --json` path produces, not the raw registry persistence
+			// wrapper whose seats hide under .homes with empty scalar fields: a machine
+			// consumer that iterates the top level then gets the real seat roster with
+			// per-seat can_serve/status/warnings, not one empty-fielded object. (#4593)
+			report := loginReportWithCooldown(stderr, reg)
+			stdout.Write(mustJSON(report))
+			fmt.Fprintln(stdout)
 			return 0
 		}
 		printAccountsTable(stdout, reg, *listAll)
