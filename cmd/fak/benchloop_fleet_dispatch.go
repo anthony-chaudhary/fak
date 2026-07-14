@@ -52,7 +52,7 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 	fs.SetOutput(stderr)
 	root := fs.String("workspace", ".", "repository root")
 	queueFlag := fs.String("queue", "", "request queue")
-	max := fs.Int("max", 4, "maximum requests per tick")
+	max := fs.Int("max", 16, "maximum requests per tick")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -137,8 +137,11 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 	w.Output = string(out)
 	w.ExitCode = exit
 	if runErr != nil {
-		if w.Route == "dgxbridge" && (strings.Contains(strings.ToLower(w.Output), "no slack channel") || strings.Contains(strings.ToLower(w.Output), "missing")) {
+		lowerOutput := strings.ToLower(w.Output)
+		if w.Route == "dgxbridge" && (strings.Contains(lowerOutput, "no slack channel") || strings.Contains(lowerOutput, "missing")) {
 			w.State = "waiting_credentials"
+		} else if strings.HasPrefix(w.Route, "gcp:") && (strings.Contains(lowerOutput, "no such file or directory") || strings.Contains(lowerOutput, "command not found") || strings.Contains(lowerOutput, "need -hf")) {
+			w.State = "waiting_provision"
 		} else {
 			w.State = "failed"
 		}

@@ -120,3 +120,12 @@ func TestBenchNodeWitnessRequiresResolvedIdentity(t *testing.T) {
 		t.Fatal("rejected resolved identity")
 	}
 }
+
+func TestBenchFleetGCPProvisionFailureIsRetryable(t *testing.T) {
+	w := executeBenchFleetRequest(t.TempDir(), benchFleetRequest{ID: "setup", Machine: "gcp-g2-l4", Command: "gpucheck"}, func(string, ...string) ([]byte, int, error) {
+		return []byte("FAK_BENCH_NODE=l4\nbash: go: command not found"), 127, errors.New("exit 127")
+	})
+	if w.State != "waiting_provision" {
+		t.Fatalf("witness=%+v", w)
+	}
+}
