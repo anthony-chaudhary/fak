@@ -1,0 +1,62 @@
+{
+  "schema": "fak.kvprefix-cachebite-witness.v1",
+  "issue": 1012,
+  "title": "fak in-kernel KV-prefix cache bite on live GLM-5.2 in-kernel gateway",
+  "verdict": "WITNESSED",
+  "cache_bit": true,
+  "generated": "2026-07-13",
+  "host": "lab-dgx2",
+  "gpu": "A100-SXM4-40GB x8 (device 0 used; all idle at launch)",
+  "host_ram_gb": 1007,
+  "gateway": {
+    "planner": "inkernel",
+    "engine": "inkernel",
+    "model_id_label": "mock",
+    "model_id_note": "model-id STRING defaults to 'mock' (cosmetic, no --model set); compute is genuinely GLM-5.2 Q4 (planner=inkernel, q4k=true, 0.2 tok/s prefill != instant mock)",
+    "served_model": "GLM-5.2 Q4_K_M",
+    "gguf": "/mnt/glm/glm52-q4/GLM-5.2-Q4_K_M-00001-of-00008.gguf",
+    "backend": "cuda",
+    "cpu_offload_experts": true,
+    "resident_total_mib": 437273.85,
+    "resident_breakdown": "Q4_K=49732 tensors/339796.82MiB, rawExpertQuant=9216/90720.00MiB, Q8=195/3122.43MiB, f32=438/3634.59MiB",
+    "decode_mem_traffic_per_tok": "423.47GiB/tok",
+    "context_tokens": 46618,
+    "fak_version": "0.40.0",
+    "fak_head": "471c3d9",
+    "build": "go build -tags cuda ./cmd/fak (libfakcuda.a sm_80 prebuilt)"
+  },
+  "experiment": {
+    "endpoint": "/v1/completions",
+    "trace_id": "cachebite-1783963811",
+    "trace_id_fixed_across_turns": true,
+    "max_tokens": 1,
+    "temperature": 0,
+    "prefix_shared_tokens": 140,
+    "design": "turn1 primes a bounded ~140-tok solved-ticket prefix; turn2 replays the same prefix + a short suffix under the SAME X-Trace-Id; max_tokens=1 so reuse is witnessed at prefill time without paying the GLM decode wall"
+  },
+  "turns": [
+    {"n": 1, "role": "cold prime", "prompt_tokens": 154, "cacheable_tokens": 0, "reused_tokens": 0, "prefill_tokens": 154, "prefill_seconds": 720.62, "prefill_tok_s": 0.2},
+    {"n": 2, "role": "replay+suffix", "prompt_tokens": 160, "cacheable_tokens": 140, "reused_tokens": 140, "prefill_tokens": 20, "prefill_seconds": 105.84, "prefill_tok_s": 0.2}
+  ],
+  "metrics_delta": {
+    "fak_gateway_kv_prefix_reused_tokens_total": {"before": 0, "after": 140, "delta": 140},
+    "fak_gateway_kv_prefix_prompt_tokens_total": {"before": 0, "after": 314, "delta": 314},
+    "fak_gateway_inference_cached_prompt_tokens_total": {"before": 0, "after": 0, "delta": 0},
+    "fak_cache_saved_by_mechanism{owner=fak,mechanism=kv_prefix_reuse}": 140,
+    "fak_cache_saved_token_equiv_by_mechanism{owner=fak,mechanism=kv_prefix_reuse}": 140,
+    "fak_cache_saved_by_mechanism{owner=provider,mechanism=provider_prompt_cache_read}": 0
+  },
+  "realized_reuse": {
+    "turn2_prompt_reused_fraction": 0.875,
+    "aggregate_reused_over_prompt": 0.4459,
+    "note": "turn2 reused 140 of 160 prompt tokens (87.5%); aggregate 140/314 across both turns"
+  },
+  "provenance": {
+    "witnessed_vs_observed": "WITNESSED — reused_tokens is fak's OWN in-kernel RadixAttention KV-prefix reuse, recorded at prefill. Provider cache_read (fak_gateway_inference_cached_prompt_tokens_total) is 0 and never summed into the fak-owned figure.",
+    "prior_failure_modes_neutralized": [
+      "turn2 never completed (GLM decode wall) -> fixed with max_tokens=1 (reuse is a prefill-time property)",
+      "turn2 in a different trace scope -> fixed with a FIXED X-Trace-Id header on both turns",
+      "mock planner masquerade -> gated on /healthz planner==inkernel before trusting"
+    ]
+  }
+}
