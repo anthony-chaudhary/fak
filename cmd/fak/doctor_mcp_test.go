@@ -46,12 +46,19 @@ func TestDoctorMCPMissingExecutableIsTyped(t *testing.T) {
 
 func TestDoctorMCPMalformedPolicyIsTyped(t *testing.T) {
 	policy := filepath.Join(t.TempDir(), "bad.json")
-	if err := os.WriteFile(policy, []byte("{broken"), 0o600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(policy, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cmd := "cmd.exe"
 	args := []string{"/d", "/c", "exit 0", "--policy", policy}
-	if runtime.GOOS != "windows" { cmd = "sh"; args = []string{"-c", "exit 0", "--policy", policy} }
+	if runtime.GOOS != "windows" {
+		cmd = "sh"
+		args = []string{"-c", "exit 0", "--policy", policy}
+	}
 	rep := diagnoseMCP("fixture", "", cmd, args, time.Second)
-	if got := stageCause(rep, "policy_readability"); got != "POLICY_MALFORMED" { t.Fatalf("cause=%q stages=%+v", got, rep.Stages) }
+	if got := stageCause(rep, "policy_readability"); got != "POLICY_MALFORMED" {
+		t.Fatalf("cause=%q stages=%+v", got, rep.Stages)
+	}
 }
 
 func TestDoctorMCPStdoutContaminationAndEarlyExit(t *testing.T) {
