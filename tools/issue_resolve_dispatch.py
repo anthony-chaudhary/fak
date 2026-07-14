@@ -3227,7 +3227,7 @@ def lane_tree(root: Path, lane: str) -> list[str]:
         trees = {}
         try:
             import issue_lane_router  # noqa: PLC0415  (lazy: keep the import optional)
-            _concurrent, trees = issue_lane_router.lane_taxonomy(root)
+            _concurrent, trees, _exclusive = issue_lane_router.lane_taxonomy(root)
         except Exception:  # noqa: BLE001  (fail-open: any failure -> convention fallback)
             trees = {}
         _LANE_TREE_CACHE[key] = trees
@@ -3291,7 +3291,7 @@ def scan_multi_lane_scope(root: Path, text: str, chosen_lane: str) -> dict[str, 
     never wedge the loop — the same discipline as the contract and lease gates."""
     try:
         import issue_lane_router as ilr  # noqa: PLC0415
-        concurrent, trees = ilr.lane_taxonomy(root)
+        concurrent, trees, _exclusive = ilr.lane_taxonomy(root)
     except Exception as exc:  # noqa: BLE001  (fail-open: no taxonomy -> no guard)
         return {"multi_lane": False, "unavailable": True, "reason": str(exc)}
     if not trees:
@@ -4934,7 +4934,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # fail-open: any error yields no soft exclude. lane_issue_numbers applies the
     # starvation floor (re-seats the last eligible lane under low_yield_relief).
     try:
-        _concurrent, low_yield_trees = issue_lane_router.lane_taxonomy(root)
+        _concurrent, low_yield_trees, _exclusive = issue_lane_router.lane_taxonomy(root)
     except Exception:
         low_yield_trees = {}
     low_yield = low_yield_soft_excludes(root, runs_dir, lane_trees=low_yield_trees)
@@ -5956,7 +5956,7 @@ def _emit_low_yield_excludes(root: Path) -> int:
     """
     runs_dir = root / RUNS_DIRNAME
     try:
-        _concurrent, low_yield_trees = issue_lane_router.lane_taxonomy(root)
+        _concurrent, low_yield_trees, _exclusive = issue_lane_router.lane_taxonomy(root)
     except Exception:
         low_yield_trees = {}
     low_yield = low_yield_soft_excludes(root, runs_dir, lane_trees=low_yield_trees)
