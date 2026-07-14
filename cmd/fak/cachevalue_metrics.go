@@ -120,8 +120,15 @@ func (s cachevalueMetricsSources) render() string {
 	})
 	report.Since = s.since
 
+	// Fold the SAME usage rows into the compaction-by-regime segmentation so the
+	// exposition carries the regime×band split, not just the blended fleet-total shed.
+	// This is what keeps a deliberate 48k→96k budget switch from reading as a phantom
+	// compaction regression on a Grafana panel (the failure mode the CLI table already
+	// prevents; #887e8026f). Same fold `fak cachevalue compaction` renders.
+	compaction := gatewayusageledger.FoldCompaction(usage, s.since)
+
 	arms := s.loadAblationReports()
-	return renderCachevalueExposition(report, arms, now)
+	return renderCachevalueExposition(report, arms, compaction, now)
 }
 
 // loadAblationReports gathers ablate report JSONs from --ablation-dir (globbed, sorted
@@ -232,7 +239,7 @@ func writeFileAtomicProm(path, content string) error {
 // Prometheus text-exposition format. It is PURE (report + arms + clock in, text out) so
 // the golden test can pin it. Every family carries a HELP line naming its provenance
 // (WITNESSED vs OBSERVED/projected) so the fence survives into Grafana.
-func renderCachevalueExposition(rep cachevaluereport.TwoTrackReport, arms []ablate.Report, now time.Time) string {
+func renderCachevalueExposition(rep cachevaluereport.TwoTrackReport, arms []ablate.Report, compaction gatewayusageledger.CompactionReport, now time.Time) string {
 	w := newPromWriter()
 
 	// --- meta: presence + freshness + verdict (so "No data" != "present but zero") ---
@@ -293,8 +300,49 @@ func renderCachevalueExposition(rep cachevaluereport.TwoTrackReport, arms []abla
 	w.gauge("fak_cachevalue_usage_rows", "WITNESSED: gateway/guard usage rows folded into the fleet aggregate.", float64(fb.UsageRows))
 	w.gauge("fak_cachevalue_kernel_decisions", "WITNESSED: cumulative kernel admission decisions over the usage rows.", float64(fb.KernelDecisions))
 
+	renderCompactionSegments(w, compaction)
 	renderAblationArms(w, arms)
 	return w.String()
+}
+
+// renderCompactionSegments projects the compaction-by-(budget-regime × length-band)
+// segmentation into the fak_cachevalue_compaction_* families, one sample per segment
+// labelled (regime, budget, band). It exists so a Grafana panel can hold the interactive
+// 48k and headless 96k regimes as SEPARATE series: the two budgets fire against
+// structurally different resident shapes, so a blended fleet-total shed reads a deliberate
+// budget switch as a compaction regression (see gatewayusageledger.FoldCompaction). These
+// are WITNESSED gateway-usage counters, never a live provider claim.
+//
+// The shed-percent gauge is emitted ONLY for a segment with valid-denominator fired rows —
+// a segment where every row bailed or was quarantined has no honest shed fraction, so it is
+// absent (not a misleading 0), exactly like the table's dash. The quarantined-row count is
+// surfaced corpus-level so the phantom-100% class (shed>0 but cached+input==0) stays visible
+// rather than silently inflating a percentile.
+func renderCompactionSegments(w *promWriter, rep gatewayusageledger.CompactionReport) {
+	present := 0.0
+	if rep.ExitRows > 0 {
+		present = 1
+	}
+	w.gauge("fak_cachevalue_compaction_segments_present", "1 when the compaction segmentation folded at least one exit row (distinguishes a dead fold from a real zero).", present)
+	w.gauge("fak_cachevalue_compaction_exit_rows", "WITNESSED: gateway-usage exit rows folded into the compaction segmentation.", float64(rep.ExitRows))
+	w.gauge("fak_cachevalue_compaction_quarantined_rows", "WITNESSED: fired rows with shed>0 but cached+input==0 (phantom-100%% class), counted but excluded from every shed%% percentile.", float64(rep.QuarantinedRows))
+
+	for _, s := range rep.Segments {
+		lbl := []string{"regime", s.BudgetRegime, "budget", strconv.Itoa(s.Budget), "band", s.Band}
+		w.gauge("fak_cachevalue_compaction_sessions", "WITNESSED: exit rows in this (regime × band) cell.", float64(s.Sessions), lbl...)
+		w.gauge("fak_cachevalue_compaction_fired_sessions", "WITNESSED: rows in this cell that fired compaction at least once.", float64(s.FiredSessions), lbl...)
+		w.gauge("fak_cachevalue_compaction_fires", "WITNESSED: compaction fires summed over this cell.", float64(s.Fires), lbl...)
+		w.gauge("fak_cachevalue_compaction_bails", "WITNESSED: compaction bails summed over this cell.", float64(s.Bails), lbl...)
+		w.gauge("fak_cachevalue_compaction_bail_rate", "WITNESSED: bails / (fires + bails) for this cell; 0 when neither fired nor bailed.", s.BailRate, lbl...)
+		w.gauge("fak_cachevalue_compaction_shed_tokens_by_segment", "WITNESSED: context tokens shed by compaction in this cell.", float64(s.ShedTokens), lbl...)
+		w.gauge("fak_cachevalue_compaction_valid_denom_rows", "WITNESSED: fired rows with a usable shed denominator (cached+input>0) — the rows the shed%% folds over.", float64(s.ValidDenomRows), lbl...)
+		w.gauge("fak_cachevalue_compaction_denom_zero_rows", "WITNESSED: fired rows quarantined from the shed%% (shed>0 but cached+input==0).", float64(s.DenomZeroRows), lbl...)
+		// Honest absence: only a segment with valid-denominator fired rows has a real
+		// shed fraction. A zero here would read as "0%% shed" rather than "no data".
+		if s.ValidDenomRows > 0 {
+			w.gauge("fak_cachevalue_compaction_shed_pct_median", "WITNESSED: median per-session shed fraction (%%) over this cell's valid-denominator fired rows.", s.ShedPctMedian, lbl...)
+		}
+	}
 }
 
 // renderAblationArms projects the offline feature-ablation reports into the

@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ablate"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
@@ -105,8 +106,32 @@ func twoArmReport() ablate.Report {
 	}
 }
 
+// richCompaction is a compaction segmentation with one healthy shedding cell (headless
+// 40-80, valid-denom fired rows → a shed percentile), one all-bail cell (interactive 0-20,
+// no valid-denom rows → shed% must be ABSENT), and a quarantined phantom-100% row.
+func richCompaction() gatewayusageledger.CompactionReport {
+	return gatewayusageledger.CompactionReport{
+		ExitRows:        204,
+		QuarantinedRows: 3,
+		Segments: []gatewayusageledger.CompactionSegment{
+			{
+				Budget: 48000, BudgetRegime: "interactive", Band: "0-20",
+				Sessions: 120, FiredSessions: 0, Fires: 0, Bails: 44, BailRate: 1.0,
+				ShedTokens: 0, ValidDenomRows: 0, DenomZeroRows: 3, ShedPctMedian: 0, ShedPctMean: 0,
+				TopBailReason: "under_budget",
+			},
+			{
+				Budget: 96000, BudgetRegime: "headless", Band: "40-80",
+				Sessions: 30, FiredSessions: 28, Fires: 900, Bails: 300, BailRate: 0.25,
+				ShedTokens: 12_500_000, ValidDenomRows: 28, DenomZeroRows: 0,
+				ShedPctMedian: 43.3, ShedPctMean: 41.7, TopBailReason: "under_budget",
+			},
+		},
+	}
+}
+
 func TestRenderCachevalueExposition_Families(t *testing.T) {
-	out := renderCachevalueExposition(richReport(), []ablate.Report{twoArmReport()}, fixedNow(t))
+	out := renderCachevalueExposition(richReport(), []ablate.Report{twoArmReport()}, richCompaction(), fixedNow(t))
 
 	// presence + verdict + freshness
 	if got := sampleLine(t, out, "fak_cachevalue_report_present", ""); got != "fak_cachevalue_report_present 1" {
@@ -172,12 +197,51 @@ func TestRenderCachevalueExposition_Families(t *testing.T) {
 	}
 }
 
+func TestRenderCachevalueExposition_CompactionSegments(t *testing.T) {
+	out := renderCachevalueExposition(richReport(), nil, richCompaction(), fixedNow(t))
+
+	// corpus-level: present, exit rows, quarantined phantom-100% class all surfaced.
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_segments_present", ""); got != "fak_cachevalue_compaction_segments_present 1" {
+		t.Errorf("segments_present = %q, want 1", got)
+	}
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_exit_rows", ""); got != "fak_cachevalue_compaction_exit_rows 204" {
+		t.Errorf("exit_rows = %q, want 204", got)
+	}
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_quarantined_rows", ""); got != "fak_cachevalue_compaction_quarantined_rows 3" {
+		t.Errorf("quarantined_rows = %q, want 3", got)
+	}
+
+	// the healthy headless 40-80 cell carries a shed percentile and its regime/budget/band labels.
+	headless := sampleLine(t, out, "fak_cachevalue_compaction_shed_pct_median", `band="40-80"`)
+	if !strings.Contains(headless, `regime="headless"`) || !strings.Contains(headless, `budget="96000"`) {
+		t.Errorf("headless shed_pct_median missing regime/budget labels: %q", headless)
+	}
+	if !strings.Contains(headless, "43.3") {
+		t.Errorf("headless shed_pct_median = %q, want ~43.3", headless)
+	}
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_bail_rate", `regime="headless"`); !strings.HasSuffix(got, "0.25") {
+		t.Errorf("headless bail_rate = %q, want 0.25", got)
+	}
+
+	// the all-bail interactive 0-20 cell must NOT emit a shed percentile (honest absence,
+	// not a misleading 0), but its sessions/bails and quarantine count must be present.
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_shed_pct_median", `regime="interactive"`); got != "" {
+		t.Errorf("interactive 0-20 (no valid-denom rows) must not emit shed_pct_median: %q", got)
+	}
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_sessions", `regime="interactive"`); !strings.HasSuffix(got, "120") {
+		t.Errorf("interactive sessions = %q, want 120", got)
+	}
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_denom_zero_rows", `regime="interactive"`); !strings.HasSuffix(got, "3") {
+		t.Errorf("interactive denom_zero_rows = %q, want 3", got)
+	}
+}
+
 func TestRenderCachevalueExposition_HonestAbsence(t *testing.T) {
 	// A nil pointer field is omitted (honest absence, not a zero sample).
 	rep := richReport()
 	rep.FleetBenefit.FakSharePct = nil
 	rep.Verdict = "INSUFFICIENT"
-	out := renderCachevalueExposition(rep, nil, fixedNow(t))
+	out := renderCachevalueExposition(rep, nil, gatewayusageledger.CompactionReport{}, fixedNow(t))
 
 	if strings.Contains(out, "fak_cachevalue_fak_share_pct") {
 		t.Error("fak_share_pct must be absent when the pointer is nil")
@@ -202,7 +266,7 @@ func TestRenderCachevalueExposition_NonFiniteSkipped(t *testing.T) {
 	rep := richReport()
 	rep.CumulativeNetUSD = math.Inf(1)
 	rep.LatestNetUSD = math.NaN()
-	out := renderCachevalueExposition(rep, nil, fixedNow(t))
+	out := renderCachevalueExposition(rep, nil, gatewayusageledger.CompactionReport{}, fixedNow(t))
 	if sampleLine(t, out, "fak_cachevalue_cumulative_net_usd", "") != "" {
 		t.Error("an +Inf value must be skipped, not emitted")
 	}
@@ -216,7 +280,7 @@ var sampleRE = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{[^}]*\})? (.+)$
 // TestExpositionWellFormed asserts every sample line parses and every sampled family
 // carries a preceding # TYPE declaration (the contract Prometheus enforces on scrape).
 func TestExpositionWellFormed(t *testing.T) {
-	out := renderCachevalueExposition(richReport(), []ablate.Report{twoArmReport()}, fixedNow(t))
+	out := renderCachevalueExposition(richReport(), []ablate.Report{twoArmReport()}, richCompaction(), fixedNow(t))
 	declared := map[string]bool{}
 	for _, ln := range strings.Split(out, "\n") {
 		if strings.HasPrefix(ln, "# TYPE ") {
