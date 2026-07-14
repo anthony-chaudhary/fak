@@ -256,14 +256,14 @@ func TestQ4KDecodeWorkersManyCoreAmd64Cap(t *testing.T) {
 		want    int
 		capped  bool
 	}{
-		{12, 12, false},  // small amd64 — unchanged
-		{32, 32, false},  // below the many-core threshold — unchanged
-		{63, 63, false},  // just below — unchanged
-		{64, 16, true},   // 64/4 = 16
-		{128, 32, true},  // 128/4 = 32
-		{192, 48, true},  // 192/4 = 48
-		{256, 64, true},  // the 256-thread EPYC witness -> 64 (the measured knee)
-		{512, 64, true},  // 512/4 = 128 -> clamped to 64
+		{12, 12, false}, // small amd64 — unchanged
+		{32, 32, false}, // below the many-core threshold — unchanged
+		{63, 63, false}, // just below — unchanged
+		{64, 16, true},  // 64/4 = 16
+		{128, 32, true}, // 128/4 = 32
+		{192, 48, true}, // 192/4 = 48
+		{256, 64, true}, // the 256-thread EPYC witness -> 64 (the measured knee)
+		{512, 64, true}, // 512/4 = 128 -> clamped to 64
 	}
 	for _, tc := range cases {
 		got, source := q4kDecodeWorkersFor(tc.workers, defaultWorkerBudgetSource, "linux", "amd64")
