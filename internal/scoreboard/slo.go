@@ -140,11 +140,11 @@ type SLOReport struct {
 	Budget    float64 `json:"budget"`
 
 	// Population accounting: what was considered, what was set aside, and why.
-	Eligible    int      `json:"eligible"`      // denominator: good + bad
-	Good        int      `json:"good"`          // effective pass
-	Bad         int      `json:"bad"`           // effective fail / stale / inconclusive / no-data — all consume budget
-	Skipped     int      `json:"skipped"`       // deliberately not run; outside the denominator, still witnessed
-	OutOfWindow int      `json:"out_of_window"` // evidence older than the window
+	Eligible    int      `json:"eligible"`           // denominator: good + bad
+	Good        int      `json:"good"`               // effective pass
+	Bad         int      `json:"bad"`                // effective fail / stale / inconclusive / no-data — all consume budget
+	Skipped     int      `json:"skipped"`            // deliberately not run; outside the denominator, still witnessed
+	OutOfWindow int      `json:"out_of_window"`      // evidence older than the window
 	Excluded    []string `json:"excluded,omitempty"` // contract exclusions that actually hit
 
 	// Burn math (witnessed): BadFraction = Bad/Eligible; BurnRate =
