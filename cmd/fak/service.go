@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/systemservice"
 )
 
@@ -157,7 +158,18 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	}
 	switch action {
 	case "install":
+		registryDir := filepath.Join(*stateDir, "registry")
 		if os.MkdirAll(*unitDir, 0o755) != nil || os.MkdirAll(*stateDir, 0o700) != nil || os.MkdirAll(filepath.Join(*stateDir, "logs"), 0o700) != nil {
+			return 1
+		}
+		if runtime.GOOS == "linux" {
+			if err := os.Chmod(*stateDir, 0o711); err != nil {
+				fmt.Fprintln(stderr, "fak service: prepare state traversal:", err)
+				return 1
+			}
+		}
+		if err := prepareSharedGuardRegistry(registryDir); err != nil {
+			fmt.Fprintln(stderr, "fak service: prepare shared registry:", err)
 			return 1
 		}
 		if stagedExecutable != "" {
@@ -167,7 +179,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 			}
 		}
 		if runtime.GOOS == "darwin" {
-			if err := chownServiceState(*stateDir, *principal); err != nil {
+			if err := chownServiceStateExcept(*stateDir, *principal, registryDir); err != nil {
 				fmt.Fprintln(stderr, "fak service: prepare launchd state:", err)
 				return 1
 			}
@@ -240,6 +252,24 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak service install|status|uninstall|run [--dry-run] [--json]")
 }
+func prepareSharedGuardRegistry(registryDir string) error {
+	if err := os.MkdirAll(registryDir, 0o733); err != nil {
+		return err
+	}
+	if err := os.Chmod(registryDir, os.ModeSticky|0o733); err != nil {
+		return err
+	}
+	index := guardsessions.IndexPath(registryDir)
+	f, err := os.OpenFile(index, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(index, 0o666)
+}
+
 func installServiceExecutable(source, destination string) error {
 	if filepath.Clean(source) == filepath.Clean(destination) {
 		return nil
@@ -254,7 +284,7 @@ func installServiceExecutable(source, destination string) error {
 	return writeFileAtomic(destination, b, 0o755)
 }
 
-func chownServiceState(path, principal string) error {
+func chownServiceStateExcept(path, principal, excluded string) error {
 	u, err := user.Lookup(principal)
 	if err != nil {
 		return fmt.Errorf("lookup principal %q: %w", principal, err)
@@ -267,9 +297,13 @@ func chownServiceState(path, principal string) error {
 	if err != nil {
 		return fmt.Errorf("parse gid for %q: %w", principal, err)
 	}
+	excluded = filepath.Clean(excluded)
 	return filepath.Walk(path, func(p string, _ os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if filepath.Clean(p) == excluded {
+			return filepath.SkipDir
 		}
 		return os.Chown(p, int(uid64), int(gid64))
 	})

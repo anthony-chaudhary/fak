@@ -63,6 +63,42 @@ func TestServiceRunOnceTicksControlPlane(t *testing.T) {
 	}
 }
 
+func TestLinuxServiceStateAllowsOnlyTraversalToSharedRegistry(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux mode semantics")
+	}
+	state := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(state, 0o711); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareSharedGuardRegistry(filepath.Join(state, "registry")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(state)
+	if err != nil || st.Mode().Perm() != 0o711 {
+		t.Fatalf("state mode=%v err=%v", st.Mode(), err)
+	}
+}
+func TestPrepareSharedGuardRegistryAllowsSessionFactsWithoutStateOwnership(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "registry")
+	if err := prepareSharedGuardRegistry(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "guard_sessions.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if st, err := os.Stat(dir); err != nil || st.Mode().Perm() != 0o733 || st.Mode()&os.ModeSticky == 0 {
+			t.Fatalf("dir mode=%v err=%v", st.Mode(), err)
+		}
+		if st, err := os.Stat(filepath.Join(dir, "guard_sessions.jsonl")); err != nil || st.Mode().Perm() != 0o666 {
+			t.Fatalf("index mode=%v err=%v", st.Mode(), err)
+		}
+	}
+}
 func TestInstallServiceExecutableStagesImmutableCopy(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source-fak")

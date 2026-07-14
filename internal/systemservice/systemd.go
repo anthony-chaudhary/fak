@@ -35,8 +35,6 @@ Wants=network-online.target
 [Service]
 Type=simple
 DynamicUser=yes
-StateDirectory=fak
-StateDirectoryMode=0700
 RuntimeDirectory=fak
 RuntimeDirectoryMode=0700
 ExecStart=` + exec + ` service run --interval 15s
