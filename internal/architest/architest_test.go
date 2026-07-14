@@ -355,6 +355,7 @@ var tier = map[string]int{
 	"issuecatalog":     3, // performance-enablement issue-catalog planner/syncer; reads curated rows, reviews them through issuecontract(1), and shells to gh only behind --live; off the hot path.
 	"safesync":         2, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
 	"hostfault":        1, // pure closed host-fault classification vocabulary; stdlib-only, off hot path.
+	"hostresurrect":    2, // composes host-fault signals with durable guard-session inventory into bounded relaunch requests.
 	"issuestriage":     1, // pure issue-action triage classifier; stdlib-only, off hot path.
 	"wipfence":         2, // pure shared-trunk WIP build-fence text engine; no hot-path dependency.
 	"usagelog":         1, // durable, append-only, hash-chained CLI-invocation journal (epic #1601/#1608): one redacted row per top-level fak verb + the `fak usage` read fold; stdlib-only, imports nothing internal, off the hot path.
