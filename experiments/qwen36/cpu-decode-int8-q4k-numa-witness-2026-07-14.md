@@ -74,6 +74,30 @@ vs `FAK_WORKERS` under `numactl --interleave=all`, int8 Q4_K:
   currently uncapped at 256 → the witnessed 0.593 collapse), at a Q4_K-appropriate ~workers/4
   (≤ 64), overridable by `FAK_WORKERS`.
 
+## 4. Memory-bandwidth roofline (C3 #4626) — 10 tok/s is reachable
+
+STREAM-Triad (dependency-free Go, 24 B/elem, 1 GiB arrays), and the f32-vs-int8 cell:
+
+| config | single-thread GB/s | all-core GB/s |
+|---|---|---|
+| default (first-touch → node 0) | 12.4 | 20.7 |
+| `--interleave=all` (striped over 8 nodes) | 10.5 | **82.8** |
+| node0 local (`--cpunodebind=0 --membind=0`, 32 threads) | 16.3 | **26.9** |
+
+- **Current decode is at ~25% of the interleave ceiling.** 1.395 tok/s × 15.2 GB/tok ≈ 21 GB/s
+  effective, vs the 82.8 GB/s interleave STREAM ceiling (→ ~5.4 tok/s). The gap is the parFor
+  barrier + per-worker inefficiency, not the memory wall — consistent with §2.
+- **int8 ≈ f32 at these worker counts** (f32 interleave/32 = **1.213** vs int8/32 = 0.971): we
+  are barrier-bound, so int8's half-bytes/token buys nothing yet. **int8 (C1) pays off only once
+  the barrier is fixed and decode is bandwidth-bound** — an ordering insight for the campaign.
+- **The replication ceiling → ~14 tok/s.** Interleave (82.8 GB/s) is limited because 7/8 of
+  reads are remote (xGMI-capped). Node-**local** bandwidth is 26.9 GB/s/node; **8 node-local
+  replicas → ~215 GB/s aggregate → ~14 tok/s** at 15.2 GB/tok. So C2's per-NUMA-node weight
+  replication + a barrier-free per-node schedule makes the **10 tok/s target quantifiably
+  reachable** (2.6× the interleave bandwidth, and it removes the remote-access penalty).
+  (The Go triad undercounts absolute peak vs a hand-tuned C STREAM, but it is the honest ceiling
+  for what the Go decode kernel can reach in the same runtime.)
+
 ## Provenance
 - Host: AVX2 EPYC-7742 CPU server, dual-socket, 8 NUMA nodes (128 GB/node), 256 threads, ~1 TB RAM.
 - Model: `Qwen3.6-27B-Q4_K_M.gguf` (16.5 GB, resident on local NVMe), fak checkout HEAD `df8499eb`, go1.26.5.
