@@ -40,12 +40,6 @@ const (
 	guardToolprocJournalRel = ".fak/toolproc/journal.jsonl"
 )
 
-// guardPromptHookType is the hook `type` value denoting an LLM-in-the-loop
-// (model-judged approve/deny) hook, as opposed to the deterministic "command"
-// hooks fak installs. fak recognizes the type only to VALIDATE its placement; it
-// wires no model call here (issue #4055, borrow-study epic #4040).
-const guardPromptHookType = "prompt"
-
 // promptHookAdmissibleEvents is the closed set of harness events at which a model
 // verdict is admissible — the only events whose protocol lets a hook's answer act
 // (approve/deny). Ports validate-hook-schema.sh:124 from
