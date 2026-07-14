@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 )
 
@@ -235,6 +236,9 @@ func writeLiveMarker(t *testing.T, dir, name, command string) {
 // score — that they are not yet scorable.
 func TestRunDojoLiveDiscoversAndDegrades(t *testing.T) {
 	root := t.TempDir()
+	// Isolate the provider-turns session-corpus fold (#4505) from the host's real
+	// ~/.claude corpus so the run stays deterministically unmeasured.
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	liveDir := filepath.Join(root, ".dojo", "live-episodes")
 	if err := os.MkdirAll(liveDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -265,6 +269,7 @@ func TestRunDojoLiveDiscoversAndDegrades(t *testing.T) {
 // live-episode corpus must not error the command (it reports the empty state).
 func TestRunDojoLiveFailsOpen(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	var out, errb bytes.Buffer
 	code := runDojoRun(&out, &errb, []string{"--live", "--workspace", root})
 	if code == 2 {
@@ -280,6 +285,7 @@ func TestRunDojoLiveFailsOpen(t *testing.T) {
 // disk state in one object.
 func TestRunDojoLiveJSON(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	liveDir := filepath.Join(root, ".dojo", "live-episodes")
 	if err := os.MkdirAll(liveDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -317,7 +323,7 @@ func TestDefaultDojoLeversExcludeCompactionUntilCorpusExists(t *testing.T) {
 	if dojoHasString(defaultNames, "compaction") {
 		t.Fatalf("default dojo levers must exclude the unmeasured compaction phantom: %v", defaultNames)
 	}
-	for _, want := range []string{"resume-posture", "vcache-warmth", "dispatch-yield"} {
+	for _, want := range []string{"resume-posture", "vcache-warmth", "dispatch-yield", "provider-turns"} {
 		if !dojoHasString(defaultNames, want) {
 			t.Fatalf("default dojo levers missing %q: %v", want, defaultNames)
 		}
@@ -668,6 +674,87 @@ func TestDojoCatalogMatchesDispatchYieldEmittedMetrics(t *testing.T) {
 	}
 	for _, lv := range dojoLeverCatalog() {
 		if lv.Name != "dispatch-yield" {
+			continue
+		}
+		for _, m := range lv.Metrics {
+			if !emitted[m.Name] {
+				t.Fatalf("catalog advertises metric %q the lever never emits", m.Name)
+			}
+		}
+		if len(lv.Metrics) != len(emitted) {
+			t.Fatalf("catalog lists %d metrics but the lever emits %d", len(lv.Metrics), len(emitted))
+		}
+	}
+}
+
+func TestDojoProviderTurnsEpisodesFromSessions(t *testing.T) {
+	mc := func(model string, turns int64) map[string]sessionaudit.ModelCounts {
+		return map[string]sessionaudit.ModelCounts{model: {Turns: turns}}
+	}
+	sessions := []sessionaudit.Session{
+		// Three claude tasks: the fold must report the middle value (7), not the
+		// mean the 100-turn tail would drag to 36.7.
+		{AssistantTurns: 3, PerModel: mc("claude-opus-4-8", 3)},
+		{AssistantTurns: 7, PerModel: mc("claude-sonnet-5", 7)},
+		{AssistantTurns: 100, PerModel: mc("claude-fable-5", 100)},
+		// Two gpt tasks: an even sample takes the midpoint median (15).
+		{AssistantTurns: 10, PerModel: mc("gpt-5.2-codex", 10)},
+		{AssistantTurns: 20, PerModel: mc("o3-pro", 20)},
+		// One glm task routed through fak: the DOMINANT billed model keys the
+		// session, but the task's realized turns count every assistant turn.
+		{AssistantTurns: 12, PerModel: map[string]sessionaudit.ModelCounts{
+			"glm-5.2": {Turns: 11}, "<synthetic>": {Turns: 1},
+		}},
+		// Not completed tasks: unreadable, turn-less, and synthetic-only sessions
+		// must not fold.
+		{Error: "unreadable", AssistantTurns: 9, PerModel: mc("claude-opus-4-8", 9)},
+		{AssistantTurns: 0},
+		{AssistantTurns: 2, PerModel: mc("<synthetic>", 2)},
+	}
+	ins := providerTurnsEpisodesFromSessions(sessions)
+	if len(ins) != 3 {
+		t.Fatalf("expected one episode per provider (claude, glm, gpt), got %d: %+v", len(ins), ins)
+	}
+	// Providers render in stable sorted order so ticks stay comparable.
+	claude, glm, gpt := ins[0], ins[1], ins[2]
+	if claude.Prediction.Lever != "provider-turns" || claude.Prediction.Metric != "turns_per_task" {
+		t.Fatalf("episode cell wrong: %s/%s", claude.Prediction.Lever, claude.Prediction.Metric)
+	}
+	// The pinned claim literal (#4505): a seeded genuine estimate, not a floor.
+	if claude.Prediction.Claimed != 20.0 || claude.Prediction.IntentionalFloor || claude.Prediction.LowerIsBetter {
+		t.Fatalf("pinned provider-turns claim drifted: %+v", claude.Prediction)
+	}
+	if !claude.Outcome.Measured || claude.Outcome.Provenance != dojo.Observed {
+		t.Fatalf("a corpus with completed sessions must measure (OBSERVED): %+v", claude.Outcome)
+	}
+	if claude.Outcome.Realized != 7 || claude.Outcome.Sample != 3 || !strings.Contains(claude.Outcome.Source, "claude") {
+		t.Fatalf("claude fold wrong: %+v, want median 7 over 3", claude.Outcome)
+	}
+	if glm.Outcome.Realized != 12 || glm.Outcome.Sample != 1 || !strings.Contains(glm.Outcome.Source, "glm") {
+		t.Fatalf("glm fold wrong: %+v, want median 12 over 1", glm.Outcome)
+	}
+	if gpt.Outcome.Realized != 15 || gpt.Outcome.Sample != 2 || !strings.Contains(gpt.Outcome.Source, "gpt") {
+		t.Fatalf("gpt fold wrong: %+v, want median 15 over 2", gpt.Outcome)
+	}
+
+	// An empty corpus still surfaces the cell — honestly UNMEASURED, never a
+	// fabricated median.
+	empty := providerTurnsEpisodesFromSessions(nil)
+	if len(empty) != 1 || empty[0].Outcome.Measured {
+		t.Fatalf("an empty corpus must yield one UNMEASURED episode, got %+v", empty)
+	}
+}
+
+func TestDojoCatalogMatchesProviderTurnsEmittedMetrics(t *testing.T) {
+	// the static catalog must match the metrics the provider-turns lever emits.
+	emitted := map[string]bool{}
+	for _, in := range providerTurnsEpisodesFromSessions([]sessionaudit.Session{
+		{AssistantTurns: 5, PerModel: map[string]sessionaudit.ModelCounts{"claude-opus-4-8": {Turns: 5}}},
+	}) {
+		emitted[in.Prediction.Metric] = true
+	}
+	for _, lv := range dojoLeverCatalog() {
+		if lv.Name != "provider-turns" {
 			continue
 		}
 		for _, m := range lv.Metrics {

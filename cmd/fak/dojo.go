@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -258,6 +260,13 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	// headline KPI without a transcript corpus.
 	for _, in := range dispatchYieldEpisodesFromLoopLedger(loadLoopLedgerEvents(root)) {
 		episodes = append(episodes, dojo.Score("loop-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
+	// And provider-turns/turns_per_task (#4505) from the local multi-provider
+	// session corpus: one episode per provider, each the median assistant turns
+	// per completed session, so the live run renders where every provider —
+	// including the ones fak routes to — sits on turns to completion.
+	for _, in := range providerTurnsEpisodesFromSessions(loadProviderTurnsSessions()) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
@@ -675,6 +684,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "verified_ship_rate", Theory: "about half of dispatched workers reconcile as a diff-witnessed VERIFIED close (claim 0.5 — a seeded estimate the RSI loop recalibrates toward measured)"},
 			},
 		},
+		{
+			Name:    "provider-turns",
+			Summary: "median turns to completion per provider (claude/gpt/gemini/deepseek/glm/kimi), folded from the local multi-provider session corpus — the first cross-provider leaderboard cell, one episode per provider against the one registered claim (#4505)",
+			Metrics: []dojoMetricInfo{
+				{Name: "turns_per_task", Theory: "a provider completes a task in about twenty assistant turns, median per completed session (claim 20 — a seeded estimate the RSI loop recalibrates toward the measured medians)"},
+			},
+		},
 	}
 }
 
@@ -688,6 +704,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		compactionLever{},
 		vcacheLever{maxFiles: maxFiles},
 		dispatchYieldLever{root: root},
+		providerTurnsLever{},
 	}
 }
 
@@ -959,6 +976,166 @@ func dispatchYieldEpisodesFromLoopLedger(events []loopmgr.Event) []dojo.ScoredIn
 			Source: "sum(closed_now) on closure-audit end rows / SPAWNED start rows over the active loop-ledger segment (WITNESSED)",
 		},
 	}}
+}
+
+// --- the provider-turns lever ------------------------------------------------
+
+// providerTurnsLever is the first cross-provider leaderboard cell (#4505):
+// median turns to completion PER PROVIDER, so the dojo can state where fak's
+// routed providers sit against each other on this axis instead of calibrating
+// only fak-internal levers. Theory is the one registered
+// provider-turns/turns_per_task claim; reality folds from the local
+// multi-provider session corpus (the transcripts under ~/.claude*/projects),
+// one episode per provider keyed by the session's dominant billed model. The
+// scenario corpus is ignored: the session corpus, not a replay, is the ground
+// truth for turns to completion.
+type providerTurnsLever struct{}
+
+func (providerTurnsLever) Name() string { return "provider-turns" }
+
+func (providerTurnsLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return providerTurnsEpisodesFromSessions(loadProviderTurnsSessions()), nil
+}
+
+// providerTurnsSinceDays bounds the corpus fold to a recent window so the
+// median reflects current provider behavior (and the scan stays proportionate).
+const providerTurnsSinceDays = 30.0
+
+// loadProviderTurnsSessions discovers and analyzes the local session corpus the
+// provider-turns fold reads. Subagent transcripts are excluded (a subagent run
+// is a delegated slice of its parent task, not a completed task of its own).
+// Fail-open: a missing or unreadable corpus yields nil and the fold reports
+// itself UNMEASURED, never a fabricated median.
+func loadProviderTurnsSessions() []sessionaudit.Session {
+	since := providerTurnsSinceDays
+	recs, err := sessionaudit.Discover(sessionaudit.DiscoverOptions{SinceDays: &since})
+	if err != nil {
+		return nil
+	}
+	sessions := make([]sessionaudit.Session, 0, len(recs))
+	for _, rec := range recs {
+		sessions = append(sessions, sessionaudit.Analyze(rec.Path))
+	}
+	return sessions
+}
+
+// providerTurnsEpisodesFromSessions adapts the session corpus into the dojo's
+// (prediction, outcome) pairs for provider-turns/turns_per_task — one episode
+// per provider, every episode scored against the SAME registered claim so the
+// recalibrate arm still rewrites exactly one literal while the report renders
+// the per-provider spread. It is pure so the fold is unit-testable without a
+// corpus on disk. A completed task = a readable session with at least one
+// assistant turn; its turn count is the session's assistant turns and its
+// provider is the dominant billed model's provider key. A corpus with no
+// completed session yields one honest UNMEASURED episode.
+func providerTurnsEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.ScoredInput {
+	pred := dojo.Registry.MustPredict("provider-turns", "turns_per_task", "turns")
+	byProvider := map[string][]float64{}
+	for _, s := range sessions {
+		if s.Error != "" || s.AssistantTurns == 0 {
+			continue
+		}
+		provider := providerTurnsDominantProvider(s)
+		if provider == "" {
+			continue // only harness-synthetic turns — no billed provider to key by
+		}
+		byProvider[provider] = append(byProvider[provider], float64(s.AssistantTurns))
+	}
+	if len(byProvider) == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Source:   "no completed sessions in the local session corpus — nothing to fold a per-provider turn median from",
+			},
+		}}
+	}
+	providers := make([]string, 0, len(byProvider))
+	for p := range byProvider {
+		providers = append(providers, p)
+	}
+	sort.Strings(providers)
+	out := make([]dojo.ScoredInput, 0, len(providers))
+	for _, p := range providers {
+		turns := byProvider[p]
+		out = append(out, dojo.ScoredInput{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Realized:   providerTurnsMedian(turns),
+				Provenance: dojo.Observed,
+				Measured:   true,
+				Sample:     len(turns),
+				Source:     "provider " + p + ": median assistant turns per completed session over the local multi-provider corpus (OBSERVED)",
+			},
+		})
+	}
+	return out
+}
+
+// providerTurnsDominantProvider keys a session by the provider that carried it:
+// the provider key with the most billed assistant turns across the session's
+// per-model counts (ties break lexicographically for determinism). Empty when
+// no turn maps to a billable provider.
+func providerTurnsDominantProvider(s sessionaudit.Session) string {
+	turnsByProvider := map[string]int64{}
+	for model, pm := range s.PerModel {
+		key := providerTurnsKey(model)
+		if key == "" {
+			continue
+		}
+		turnsByProvider[key] += pm.Turns
+	}
+	best, bestTurns := "", int64(0)
+	for p, n := range turnsByProvider {
+		if n > bestTurns || (n == bestTurns && best != "" && p < best) {
+			best, bestTurns = p, n
+		}
+	}
+	return best
+}
+
+// providerTurnsKey maps a billed model name to its stable leaderboard provider
+// key — the six providers the cell compares (#4505) plus "other" so an
+// unlisted-but-billed model still folds honestly instead of vanishing. Keys
+// stay stable so the recalibrate arm keeps rewriting the one literal while the
+// per-provider episodes stay comparable across ticks. Empty for a
+// harness-synthetic (non-billed) model.
+func providerTurnsKey(model string) string {
+	m := strings.ToLower(model)
+	if m == "" || m == "?" || m == "<synthetic>" {
+		return ""
+	}
+	for _, b := range []struct {
+		key  string
+		subs []string
+	}{
+		{"claude", []string{"claude", "opus", "sonnet", "haiku", "fable"}},
+		{"gpt", []string{"gpt", "o1-", "o3-", "o4-", "codex", "davinci"}},
+		{"gemini", []string{"gemini", "gemma"}},
+		{"deepseek", []string{"deepseek"}},
+		{"glm", []string{"glm"}},
+		{"kimi", []string{"kimi", "moonshot"}},
+	} {
+		for _, sub := range b.subs {
+			if strings.Contains(m, sub) {
+				return b.key
+			}
+		}
+	}
+	return "other"
+}
+
+// providerTurnsMedian is the median of a non-empty sample — the central
+// tendency the cell claims, robust to the long-session tail an agentic corpus
+// always carries (a mean would let one 300-turn run swamp a provider's column).
+func providerTurnsMedian(values []float64) float64 {
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 1 {
+		return sorted[mid]
+	}
+	return (sorted[mid-1] + sorted[mid]) / 2
 }
 
 // --- output + durable ledger I/O -------------------------------------------
