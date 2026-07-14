@@ -44,6 +44,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 // ---- dump format ----
@@ -309,7 +312,162 @@ func runProbe(fakDir, llamaDir string, threshold float64, auto bool, baselineN i
 	return w, nil
 }
 
+type logitRow struct {
+	Position int
+	Rank     int
+	TokenID  int
+	Logit    float64
+}
+
+type logitComparison struct {
+	Position          int     `json:"position"`
+	FakArgmax         int     `json:"fak_argmax"`
+	ReferenceArgmax   int     `json:"reference_argmax"`
+	ArgmaxMatch       bool    `json:"argmax_match"`
+	TopTokenOverlap   int     `json:"top_token_overlap"`
+	ComparedLogits    int     `json:"compared_logits"`
+	MaxCommonLogitAbs float64 `json:"max_common_logit_abs_delta"`
+}
+
+type logitReport struct {
+	Schema                string            `json:"schema"`
+	FakPath               string            `json:"fak_path"`
+	ReferencePath         string            `json:"reference_path"`
+	Comparisons           []logitComparison `json:"comparisons"`
+	FirstArgmaxDivergence *int              `json:"first_argmax_divergence_position,omitempty"`
+	Pass                  bool              `json:"pass"`
+	Reason                string            `json:"reason,omitempty"`
+}
+
+func readLogitTSV(path string) (map[int][]logitRow, error) {
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int][]logitRow)
+	for lineNo, line := range strings.Split(strings.TrimSpace(string(blob)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("%s:%d: want 4 tab-separated fields", path, lineNo+1)
+		}
+		pos, e1 := strconv.Atoi(fields[0])
+		rank, e2 := strconv.Atoi(fields[1])
+		id, e3 := strconv.Atoi(fields[2])
+		logit, e4 := strconv.ParseFloat(fields[3], 64)
+		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || rank <= 0 || !isFinite(logit) {
+			return nil, fmt.Errorf("%s:%d: invalid position/rank/token/logit", path, lineNo+1)
+		}
+		out[pos] = append(out[pos], logitRow{Position: pos, Rank: rank, TokenID: id, Logit: logit})
+	}
+	for pos := range out {
+		sort.Slice(out[pos], func(i, j int) bool { return out[pos][i].Rank < out[pos][j].Rank })
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: no logit rows", path)
+	}
+	return out, nil
+}
+
+func compareLogitTSV(fakPath, refPath string) (logitReport, error) {
+	fak, err := readLogitTSV(fakPath)
+	if err != nil {
+		return logitReport{}, err
+	}
+	ref, err := readLogitTSV(refPath)
+	if err != nil {
+		return logitReport{}, err
+	}
+	report := logitReport{Schema: "fak-qwen36-logit-compare/1", FakPath: fakPath, ReferencePath: refPath, Pass: true}
+	positions := make([]int, 0)
+	for pos := range fak {
+		if _, ok := ref[pos]; ok {
+			positions = append(positions, pos)
+		} else {
+			report.Pass = false
+			report.Reason = "position set mismatch"
+		}
+	}
+	for pos := range ref {
+		if _, ok := fak[pos]; !ok {
+			report.Pass = false
+			report.Reason = "position set mismatch"
+		}
+	}
+	sort.Ints(positions)
+	if len(positions) == 0 {
+		report.Pass = false
+		report.Reason = "no shared positions"
+		return report, nil
+	}
+	for _, pos := range positions {
+		fr, rr := fak[pos], ref[pos]
+		c := logitComparison{Position: pos, FakArgmax: fr[0].TokenID, ReferenceArgmax: rr[0].TokenID, ArgmaxMatch: fr[0].TokenID == rr[0].TokenID}
+		refByID := make(map[int]float64, len(rr))
+		for _, row := range rr {
+			refByID[row.TokenID] = row.Logit
+		}
+		for _, row := range fr {
+			if rv, ok := refByID[row.TokenID]; ok {
+				c.TopTokenOverlap++
+				c.ComparedLogits++
+				d := math.Abs(row.Logit - rv)
+				if d > c.MaxCommonLogitAbs {
+					c.MaxCommonLogitAbs = d
+				}
+			}
+		}
+		if !c.ArgmaxMatch && report.FirstArgmaxDivergence == nil {
+			x := pos
+			report.FirstArgmaxDivergence = &x
+			report.Pass = false
+			report.Reason = "argmax diverged"
+		}
+		report.Comparisons = append(report.Comparisons, c)
+	}
+	return report, nil
+}
+
+func isFinite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+func runLogitCompare(args []string) int {
+	fs := flag.NewFlagSet("logits", flag.ContinueOnError)
+	fakPath := fs.String("fak", "", "fak top-logit TSV")
+	refPath := fs.String("reference", "", "reference top-logit TSV")
+	out := fs.String("out", "", "optional JSON report path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *fakPath == "" || *refPath == "" {
+		fmt.Fprintln(os.Stderr, "usage: token3-divergence-probe logits -fak FAK.tsv -reference REF.tsv [-out report.json]")
+		return 2
+	}
+	report, err := compareLogitTSV(*fakPath, *refPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	blob, _ := json.MarshalIndent(report, "", "  ")
+	blob = append(blob, '\n')
+	if *out != "" {
+		if err := os.WriteFile(*out, blob, 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+	}
+	os.Stdout.Write(blob)
+	if !report.Pass {
+		return 1
+	}
+	return 0
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "logits" {
+		os.Exit(runLogitCompare(os.Args[2:]))
+	}
 	fakDir := flag.String("fak", "", "directory of fak per-layer dumps (layer_NN.f32 + meta.json)")
 	llamaDir := flag.String("llama", "", "directory of llama.cpp per-layer dumps")
 	threshold := flag.Float64("threshold", 0.9999, "cosine threshold below which a layer is 'diverged'")
