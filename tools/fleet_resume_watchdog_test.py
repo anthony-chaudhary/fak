@@ -252,8 +252,8 @@ def test_gate_fail_open_row_is_not_an_attempt(tmp_path):
 # only: the launch path uses Start-Process -WindowStyle, and the crash class under test
 # (#2170/#2172) is a Windows one.
 
-import shutil as _shutil
-import subprocess as _subprocess
+import shutil as _shutil  # noqa: E402  (section-local: behavioral PS1 harness below)
+import subprocess as _subprocess  # noqa: E402
 
 _POWERSHELL = _shutil.which("powershell") or _shutil.which("pwsh")
 _ps1_behavioral = __import__("pytest").mark.skipif(
@@ -821,9 +821,9 @@ def test_py_and_ps1_name_the_same_posture_env_knobs():
 # site, the tick/notification logs rotate at a size cap, and the resume-once
 # ledger compacts past its window (which also bounds the per-tick re-parse).
 
-import json as _jsonmod
-import time as _time
-from datetime import datetime as _dtc, timezone as _tzc
+import json as _jsonmod  # noqa: E402  (section-local: bounded-artifact tests below)
+import time as _time  # noqa: E402
+from datetime import datetime as _dtc, timezone as _tzc  # noqa: E402
 
 
 def _aged(path, days):
