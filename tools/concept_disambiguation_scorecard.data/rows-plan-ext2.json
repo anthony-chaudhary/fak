@@ -164,7 +164,9 @@
       "distinct_from": [
         "HTTPPlanner (agent client)"
       ],
-      "aliases": [],
+      "aliases": [
+        "buildrunplanner"
+      ],
       "grounding": "newinkernelplanner",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -302,7 +304,8 @@
       ],
       "aliases": [
         "requestfromplan",
-        "loadplan"
+        "loadplan",
+        "planjson"
       ],
       "grounding": "benchplan",
       "grounding_kind": "symbol",

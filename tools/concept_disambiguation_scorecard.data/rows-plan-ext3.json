@@ -1,0 +1,223 @@
+{
+  "rows": [
+    {
+      "id": "x3-plan-existingsessionplanner",
+      "canonical": "existingSessionPlanner (gateway retained SessionPlanner getter)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's existingSessionPlanner returns the retained per-trace agent.SessionPlanner without minting one — the read-only counterpart of sessionPlannerFor, used by the context-restore path (#3062) so a restore for a trace that never planned is a plain miss.",
+      "distinction": "It READS an already-retained per-trace planner, NOT the in-kernel NewInKernelPlanner constructor nor the HTTPPlanner network client.",
+      "distinct_from": [
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [],
+      "grounding": "existingsessionplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-findingplan",
+      "canonical": "FindingPlan (cross-audit finding planner output)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/modelroute's FindingPlan is the deterministic output of PlanCrossAuditFindings: one FindingPlanItem per audit receipt plus per-action counts, and PlannedSubjects lists the issue numbers a cross-audit loop tick planned to audit.",
+      "distinction": "It plans cross-audit FINDING ACTIONS (create/update/reopen/escalate per receipt), NOT a conversation resident view (ctxplan) nor an issue-sync BuildPlan.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [
+        "plancrossauditfindings",
+        "plannedsubjects"
+      ],
+      "grounding": "findingplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-findingplanitem",
+      "canonical": "FindingPlanItem (one cross-audit finding action)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/modelroute's FindingPlanItem is one planned action for one audit receipt, carrying the action, verdict, severity, subject, and evidence refs the adapter needs to render or update a finding.",
+      "distinction": "It is a single row of a FindingPlan, NOT the whole FindingPlan that produces the slice nor an issue-sync PlanRow.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [],
+      "grounding": "findingplanitem",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-plananthropicsystemanchor",
+      "canonical": "planAnthropicSystemAnchor (Anthropic cache-bp system-prompt plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's planAnthropicSystemAnchor classifies Anthropic system-prompt elements as stable vs volatile and returns the anchor plan (order, rewritten flag, layout recommendation) for cache-breakpoint placement.",
+      "distinction": "It plans the SYSTEM-PROMPT anchor for Anthropic cache breakpoints, NOT a ctxplan conversation resident view nor a compute MemoryPlan headroom fit.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "plananthropicsystemanchor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-planboundedeviction",
+      "canonical": "PlanBoundedEviction (radix-KV ratio-capped eviction tick)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/radixkv's Tree.PlanBoundedEviction runs one ratio-capped eviction tick: it stages at most ceil(ratio*N) victims into the confirmed-delete ledger, detaching each from the tree, and stops early once within budget.",
+      "distinction": "It plans ONE bounded eviction tick on the radix-KV tree, NOT a ctxplan conversation resident view nor a compute MemoryPlan host-fit.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "planboundedeviction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-plantuisessioncontrolkey",
+      "canonical": "planTUISessionControlKey (TUI session control key plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak's planTUISessionControlKey maps a keypress on the highlighted TUI session to the control request it would emit — the pure core of the keybinding with no I/O, enforcing the drain-confirm and redirect-defer gates.",
+      "distinction": "It plans a TUI session CONTROL request from a keypress, NOT a conversation resident view (ctxplan) nor a GitHub-issue sync plan.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "plantuisessioncontrolkey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-prplancommit",
+      "canonical": "prPlanCommit (PR release plan commit row)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak's prPlanCommit is one parsed commit in a PR release plan: SHA, subject, leaf, type, resolves/mentions issue numbers, and files, folded by foldPRPlanUnits into prPlanUnit groups.",
+      "distinction": "It is one commit row of a PR RELEASE plan, NOT an issue-sync PlanRow nor a ctxplan resident view.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [],
+      "grounding": "prplancommit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-setpointplan",
+      "canonical": "setpointPlan (dispatch concurrency setpoint plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak's setpointPlan is the ReconcileSetpoint output folded from FAK_DISPATCH_SETPOINT into the dispatch-tick preflight input, carrying the active mode, desired cap, contraction target, and draining flag.",
+      "distinction": "It plans operator CONCURRENCY SETPOINT for dispatch admits, NOT a ctxplan conversation resident view nor an issue-sync plan.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "setpointplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-warmcandidate",
+      "canonical": "WarmCandidate (prefix-stability almost-hit warm signal)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/cachemeta's WarmCandidate is the #3894 'almost-hit' signal: how many tokens would have to be materialized once to warm a shared prefix up to its already-cached depth, computed by AlmostHit.",
+      "distinction": "It is a prefix-stability WARM signal (almost-hit gap), NOT a ctxplan resident-view Candidate span nor a compute PrewarmCandidate admission boundary.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [],
+      "grounding": "warmcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-candidatekeys",
+      "canonical": "CandidateKeys (clonescan candidate block key set)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/clonescan's CandidateKeys returns the set of qualifying window keys for a candidate block, fed to TreeIndex.Query for clone-detection matching.",
+      "distinction": "It is the KEY SET for a clonescan candidate block, NOT a ctxplan resident-view Candidate span nor a scored recalibration candidate.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [],
+      "grounding": "candidatekeys",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-dispatchlanecandidate",
+      "canonical": "DispatchLaneCandidate (dispatch lane scoring input)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/dispatchtick's DispatchLaneCandidate is the normalized input to unattended whole-lane scoring: lane, priority, step budget, count, and core flag, scored by DispatchLaneScorer functions.",
+      "distinction": "It is a DISPATCH LANE scoring candidate, NOT a ctxplan resident-view Candidate span nor a clonescan CandidateKeys block.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [],
+      "grounding": "dispatchlanecandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-indexctxplans",
+      "canonical": "indexCtxPlans (fak index ctxplans verb)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak's indexCtxPlans is the `fak index ctxplans` verb (#2202): it enumerates context-touching surfaces (cmd verbs + skills) marked DECLARED or UNDECLARED for the ctxplan-required advisory lint.",
+      "distinction": "It is the INDEXING verb for ctxplan declarations, NOT a ctxplan resident view itself nor a PlanCells selection primitive.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "indexctxplans",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
