@@ -171,10 +171,14 @@ type IssueMilestone struct {
 // rows into dispatchable issues. The legacy BuildPlan path is left unreviewed
 // for tests and older callers; effectful callers should use BuildPlanWithOptions.
 type BuildOptions struct {
-	Live             bool
-	DedupeChecked    bool
-	DedupeCap        int
-	DefaultMilestone string
+	Live               bool
+	DedupeChecked      bool
+	DedupeCap          int
+	DefaultMilestone   string
+	ParentBaseline     float64
+	CompletionStandard string
+	TargetEnvelope     string
+	WitnessedEnvelope  string
 }
 
 func toInt(v any, def int) int {
@@ -472,10 +476,20 @@ func IssueBody(item ActionItem) string {
 // ReviewActionItem grades one ACTION item against the shared machine-created
 // issue contract.
 func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
-	return issuecontract.ReviewCandidate(actionCandidate(item), issuecontract.Options{
-		Live:          opt.Live,
-		DedupeChecked: opt.DedupeChecked,
-		DedupeCap:     opt.DedupeCap,
+	c := actionCandidate(item)
+	if opt.ParentBaseline > 0 {
+		points := float64(c.ExpectedSteps)
+		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
+		c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
+		c.TargetEnvelope = opt.TargetEnvelope
+		c.WitnessedEnvelope = opt.WitnessedEnvelope
+	}
+	return issuecontract.ReviewCandidate(c, issuecontract.Options{
+		Live:              opt.Live,
+		DedupeChecked:     opt.DedupeChecked,
+		DedupeCap:         opt.DedupeCap,
+		StrictProjectWork: opt.ParentBaseline > 0,
 	})
 }
 
@@ -664,9 +678,10 @@ func CohortPlan(items []ActionItem, opt BuildOptions) issuecohort.Plan {
 	}
 	return issuecohort.Build(candidates, issuecohort.Options{
 		Options: issuecontract.Options{
-			Live:          opt.Live,
-			DedupeChecked: opt.DedupeChecked,
-			DedupeCap:     opt.DedupeCap,
+			Live:              opt.Live,
+			DedupeChecked:     opt.DedupeChecked,
+			DedupeCap:         opt.DedupeCap,
+			StrictProjectWork: opt.ParentBaseline > 0,
 		},
 	})
 }
