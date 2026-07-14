@@ -27,9 +27,9 @@ import (
 // INSUFFICIENT verdicts via StochasticVerdict. INVALID is a malformed spec (bad statistics or
 // provenance); UNDERPOWERED is a real, load-bearing "cannot conclude".
 const (
-	VerdictAdequate    = "ADEQUATELY_POWERED"
+	VerdictAdequate     = "ADEQUATELY_POWERED"
 	VerdictUnderpowered = "UNDERPOWERED"
-	VerdictInvalid     = "INVALID"
+	VerdictInvalid      = "INVALID"
 )
 
 // Tier is the run cadence a stochastic case is assigned to — an explicit contract the epic
