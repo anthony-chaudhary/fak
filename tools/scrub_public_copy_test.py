@@ -37,6 +37,7 @@ ORG = "".join(["netra", "systems"]) + ".ai"
 # private fleet topology. Assemble it so this non-self-referential test file does
 # not trip the very gate it proves.
 LAB_ALIAS = "lab-" + "dgx2"
+BARE_GPU_ALIAS = "dgx" + "2"
 
 
 def _git(repo: str, *args: str) -> str:
@@ -180,6 +181,24 @@ def main() -> int:
         os.remove(os.path.join(repo, "docs", LAB_ALIAS + "-report.md"))
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "remove derived lab aliases")
+        # 3c) A bare node label has the same private-host shape even without
+        # the optional lab- prefix. Cover prose, data, and path.
+        bare_base = _git(repo, "rev-parse", "HEAD")
+        _write(repo, "docs/bare.md", "ran on `%s`\n" % BARE_GPU_ALIAS)
+        _write(repo, "bare.json", '{"host":"%s"}\n' % BARE_GPU_ALIAS)
+        _write(repo, "docs/%s-report.md" % BARE_GPU_ALIAS, "clean body\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "add bare GPU aliases")
+        rc, out = _audit_range(repo, f"{bare_base}..HEAD")
+        check("bare GPU alias exits 1", rc == 1, out)
+        check("bare GPU alias catches content and paths",
+              "docs/bare.md" in out and "bare.json" in out and BARE_GPU_ALIAS + "-report.md" in out, out)
+        os.remove(os.path.join(repo, "docs", "bare.md"))
+        os.remove(os.path.join(repo, "bare.json"))
+        os.remove(os.path.join(repo, "docs", BARE_GPU_ALIAS + "-report.md"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "remove bare GPU aliases")
+
         # 4) SELF_REFERENTIAL exemption: the same needle inside the denylist file
         #    itself must NOT trip the gate (it has to name needles to enforce them).
         safe_head = _git(repo, "rev-parse", "HEAD")

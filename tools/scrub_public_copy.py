@@ -303,8 +303,8 @@ CASE_INSENSITIVE_REPLACEMENTS = [
 # JSON and Markdown code spans), then enforce the same regex as an always-on
 # PUBLIC_LEAK audit shape below.
 REGEX_REPLACEMENTS = [
-    (re.compile(r"\blab[-_ ]dgx[0-9]+\b", re.IGNORECASE),
-     "gpu-server", "private GPU host alias (lab-dgxN) -> generic machine class"),
+    (re.compile(r"\b(?:lab[-_ ])?dgx[0-9]+\b", re.IGNORECASE),
+     "gpu-server", "private GPU host alias (dgxN) -> generic machine class"),
 ]
 
 # Directories whose NAME carries an owner/personal identifier. Content
@@ -401,7 +401,7 @@ AUDIT_REGEXES = [
     # e.g. internal/canon + internal/wirescreen, carry fake PEM fixtures on purpose.)
     (re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com"),
      "GCP service-account email"),
-] + [(rx, "private GPU host alias (lab-dgxN)") for rx, _replacement, _desc in REGEX_REPLACEMENTS]
+] + [(rx, "private GPU host alias (dgxN)") for rx, _replacement, _desc in REGEX_REPLACEMENTS]
 
 # Pulled-from-private REAL needle file (gitignored: tools/_registry is ignored).
 # The HARD-CUT model edits the public copy DIRECTLY instead of regenerating it

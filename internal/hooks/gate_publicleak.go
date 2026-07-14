@@ -43,7 +43,7 @@ var auditRegexes = []struct {
 }{
 	{regexp.MustCompile(`xox[bp]-\d{8,}-\d{8,}-[A-Za-z0-9]{16,}`), "live Slack token (xoxb/xoxp)"},
 	{regexp.MustCompile(`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com`), "GCP service-account email"},
-	{regexp.MustCompile(`(?i)\blab[-_ ]dgx[0-9]+\b`), "private GPU host alias (lab-dgxN)"},
+	{regexp.MustCompile(`(?i)\b(?:lab[-_ ])?dgx[0-9]+\b`), "private GPU host alias (dgxN)"},
 }
 
 // selfReferentialLeak — files exempt from the needle scan (scrub_public_copy.py L463-467), path
