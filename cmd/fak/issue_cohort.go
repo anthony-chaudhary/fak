@@ -24,6 +24,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	dedupeChecked := fs.Bool("dedupe-checked", false, "producer proved marker dedupe against existing issues")
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
 	maxWave := fs.Int("max-wave", 0, "cap leaves per concurrency-safe wave (0 = disjoint-tree bound only)")
+	strictProjectWork := fs.Bool("strict-project-work", true, "hold tickets missing estimate, parent contribution, or completion standard (default true)")
 	asJSON := fs.Bool("json", false, "emit the machine-readable cohort plan")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -81,9 +82,10 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 
 	plan := issuecohort.Build(candidates, issuecohort.Options{
 		Options: issuecontract.Options{
-			Live:          *live,
-			DedupeChecked: *dedupeChecked,
-			DedupeCap:     *dedupeCap,
+			Live:              *live,
+			DedupeChecked:     *dedupeChecked,
+			DedupeCap:         *dedupeCap,
+			StrictProjectWork: *strictProjectWork,
 		},
 		MaxWave: *maxWave,
 	})
