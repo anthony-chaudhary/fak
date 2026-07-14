@@ -452,6 +452,9 @@ type Config struct {
 	// applied before the model turn is served. Nil keeps the historical observe-only
 	// admission path.
 	DecideSession SessionDecideFunc
+
+	// StopGate checks declared completion evidence at a model-final boundary. Nil disables it.
+	StopGate StopGateFunc
 	// DebitSession reports the just-served turn's token usage after the planner
 	// returns, so TokensLeft and the long-context budget can be debited from the
 	// live session table. Nil is a no-op for embedders that have not wired the
@@ -1035,6 +1038,17 @@ type SessionVerdict struct {
 // internal/session into gateway.
 type SessionDecideFunc func(ctx context.Context, traceID string) SessionVerdict
 
+// StopGateResult is the evidence check at an owned-loop completion boundary.
+// Witness names the declaration in audit and model feedback when Satisfied is false.
+type StopGateResult struct {
+	Satisfied bool
+	Witness   string
+}
+
+// StopGateFunc evaluates declared completion evidence. It must read an external
+// effect, not trust the model's completion prose.
+type StopGateFunc func(ctx context.Context, traceID string) StopGateResult
+
 // SessionUsage is the gateway's session-table-neutral token accounting for one
 // served request. CompletionTokens debits the historical output budget; ContextTokens
 // is the provider-normalized prompt/context window for the long-session reset budget.
@@ -1107,6 +1121,7 @@ type Server struct {
 	steerSession   SteerSessionFunc
 	listSessions   SessionListFunc
 	decideSession  SessionDecideFunc
+	stopGate       StopGateFunc
 	debitSession   SessionDebitFunc
 	resetOnBudget  ResetOnBudgetFunc
 	budgetDrained  BudgetExhaustedFunc
@@ -1731,6 +1746,7 @@ func New(cfg Config) (*Server, error) {
 		steerSession:               cfg.SteerSession,
 		listSessions:               cfg.ListSessions,
 		decideSession:              cfg.DecideSession,
+		stopGate:                   cfg.StopGate,
 		debitSession:               cfg.DebitSession,
 		resetOnBudget:              cfg.ResetOnBudget,
 		budgetDrained:              cfg.OnBudgetExhausted,

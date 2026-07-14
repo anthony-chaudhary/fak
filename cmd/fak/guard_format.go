@@ -38,6 +38,15 @@ func formatJournalSummary(j *journal.Journal, seq0 uint64) string {
 		appended += fmt.Sprintf("  (%d write error(s))", writeErr)
 	}
 	b.WriteString(guardRow("appended", appended))
+	holds := 0
+	for _, row := range j.Recent(0) {
+		if row.Seq > seq0 && row.Reason == gateway.ReasonStopUnwitnessedName {
+			holds++
+		}
+	}
+	if holds > 0 {
+		b.WriteString(guardRow("stop-gate holds", fmt.Sprintf("%d", holds)))
+	}
 	b.WriteString(guardRow("chain now holds", fmt.Sprintf("%d hash-chained row(s)", seq)))
 	b.WriteString(guardRow("at", path))
 	b.WriteString(guardRow("verify the chain", "fak audit verify "+path))

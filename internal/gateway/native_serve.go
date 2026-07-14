@@ -191,6 +191,16 @@ func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesR
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink) (agent.ArmMetrics, error) {
 	ensureAgentPolicyRung()
 	task := lastUserText(req.Messages)
+	if s.stopGate != nil {
+		// A rejected final answer must never leak as an SSE delta. Buffer stop-gated
+		// turns through the non-streaming planner path and emit only the final answer
+		// whose declared witness passed.
+		m, err := agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
+		if err == nil && m.FinalAnswer != "" && sink != nil {
+			err = sink(m.FinalAnswer)
+		}
+		return m, err
+	}
 	return agent.RunArmStream(ctx, s.planner, task, true, s.nativeMaxTurns, sink, nil, s.nativeRunOptions(ctx, reqTrace)...)
 }
 
@@ -230,6 +240,15 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.
 				s.debitSession(ctx, trace, SessionUsage{CompletionTokens: out, ContextTokens: cx})
 			},
 		}, reqTrace))
+	}
+	if s.stopGate != nil {
+		opts = append(opts, agent.WithFinalGate(func() (bool, string) {
+			result := s.stopGate(ctx, reqTrace)
+			if !result.Satisfied {
+				s.recordStopGateHold(reqTrace, result.Witness)
+			}
+			return result.Satisfied, result.Witness
+		}))
 	}
 	if s.route != nil {
 		if mfst := s.route.Manifest(); mfst != nil {

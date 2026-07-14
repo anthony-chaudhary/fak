@@ -28,6 +28,13 @@ import (
 // breaks an existing positional call site.
 type RunOption func(*runConfig)
 
+// WithFinalGate requires an independently checked post-condition before a model
+// final answer may end the owned loop. A failed check returns the fact to the model
+// in-band and the next iteration re-runs the normal session/budget gate first.
+func WithFinalGate(check func() (satisfied bool, missingWitness string)) RunOption {
+	return func(c *runConfig) { c.finalGate = check }
+}
+
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
@@ -41,6 +48,7 @@ type runConfig struct {
 	contextPlanner        *SessionPlanner
 	contextBaselineOutput int
 	toolTerminalWake      *ToolTerminalWakeQueue
+	finalGate             func() (bool, string)
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal

@@ -2553,3 +2553,23 @@ func TestGuardDefaultPolicyAuthorizesPublicGitHubResearchEgress(t *testing.T) {
 		t.Fatalf("IFC authorized hosts = %v, want %v", p.AuthorizedEgressHosts, got)
 	}
 }
+
+func TestFormatJournalSummaryReportsStopGateHolds(t *testing.T) {
+	// The exit formatter runs only for a file-backed audit journal.
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	fileJournal, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fileJournal.Close()
+	for _, emitter := range []abi.Emitter{fileJournal} {
+		emitter.Emit(abi.Event{
+			Kind:    abi.EvDeny,
+			Call:    &abi.ToolCall{Tool: "session.stop", TraceID: "trace"},
+			Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: gateway.ReasonStopUnwitnessed, Payload: abi.WitnessPayload{Claim: "proof"}},
+		})
+	}
+	if got := formatJournalSummary(fileJournal, 0); !strings.Contains(got, "stop-gate holds") || !strings.Contains(got, "1") {
+		t.Fatalf("summary missing hold count:\n%s", got)
+	}
+}
