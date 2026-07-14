@@ -18,7 +18,7 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := func(name string, args ...string) ([]byte, int, error) {
-		return []byte("node=fak-cuda-build-l4\ngpu=NVIDIA L4\n"), 0, nil
+		return []byte("FAK_BENCH_NODE=fak-cuda-build-l4\ngpu=NVIDIA L4\n"), 0, nil
 	}
 	var out, errOut bytes.Buffer
 	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 0 {
@@ -99,6 +99,13 @@ func TestBenchFleetDGXCredentialFailureIsTypedWaiting(t *testing.T) {
 		return []byte("no Slack channel set"), 1, errors.New("exit 1")
 	})
 	if w.State != "waiting_credentials" {
+		t.Fatalf("witness=%+v", w)
+	}
+}
+
+func TestBenchFleetRejectsEmptyRemoteSuccess(t *testing.T) {
+	w := executeBenchFleetRequest(t.TempDir(), benchFleetRequest{ID: "empty", Machine: "gcp-g2-l4", Command: "true"}, func(string, ...string) ([]byte, int, error) { return nil, 0, nil })
+	if w.State != "failed" || w.Error != "remote witness missing FAK_BENCH_NODE marker" {
 		t.Fatalf("witness=%+v", w)
 	}
 }

@@ -81,7 +81,7 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 			continue
 		}
 		report.Considered++
-		if req.State != "queued" {
+		if req.State != "queued" && !strings.HasPrefix(req.State, "waiting_") {
 			continue
 		}
 		lock, err := os.OpenFile(path+".claim", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -143,6 +143,9 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 			w.State = "failed"
 		}
 		w.Error = runErr.Error()
+	} else if !strings.Contains(w.Output, "FAK_BENCH_NODE=") {
+		w.State = "failed"
+		w.Error = "remote witness missing FAK_BENCH_NODE marker"
 	} else {
 		w.State = "succeeded"
 	}
@@ -151,7 +154,7 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 }
 
 func benchFleetRoute(root string, req benchFleetRequest) (string, []string, string, string, error) {
-	remote := "cd ~/fak && " + req.Command
+	remote := "printf 'FAK_BENCH_NODE=%s\\n' '$(hostname)' && cd ~/fak && " + req.Command
 	switch req.Machine {
 	case "gcp-g2-l4":
 		return "gcloud", []string{"compute", "ssh", "fak-cuda-build-l4", "--zone", "us-central1-b", "--quiet", "--command", remote}, "gcp:ssh/fak-cuda-build-l4", "running", nil
