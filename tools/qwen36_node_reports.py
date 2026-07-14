@@ -22,6 +22,13 @@ _BASE = ROOT / "fak" if (ROOT / "fak" / "experiments").is_dir() else ROOT
 DEFAULT_INBOX = ROOT / "tools" / "_registry" / "qwen36-report-inbox"
 DEFAULT_OUT_DIR = _BASE / "experiments" / "qwen36" / "node-reports"
 
+# `tailscale file get` is a network round-trip. The watch loop polls it with
+# wait=False every tick, so an unbounded run wedges the loop; a manual --wait
+# blocks for a file to arrive but must still cap a hung daemon rather than hang
+# forever (#3477).
+_TAILDROP_TIMEOUT_S = 120         # per-poll (wait=False)
+_TAILDROP_WAIT_TIMEOUT_S = 3600   # explicit --wait: bounded 1h ceiling
+
 
 def find_tailscale() -> str:
     exe = shutil.which("tailscale")
@@ -43,7 +50,25 @@ def receive_taildrop(inbox: Path, wait: bool) -> dict[str, Any]:
     if wait:
         cmd.append("--wait")
     cmd.append(str(inbox))
-    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    timeout = _TAILDROP_WAIT_TIMEOUT_S if wait else _TAILDROP_TIMEOUT_S
+    try:
+        proc = subprocess.run(
+            cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        # A wedged `tailscale file get` must not hang the caller — the watch loop
+        # polls this (wait=False) every tick. Report the bound structurally so the
+        # next tick re-polls instead of stalling the loop.
+        return {
+            "ran": True,
+            "command": cmd,
+            "timed_out": True,
+            "timeout_s": timeout,
+            "stdout": (e.stdout or "")[-2000:] if isinstance(e.stdout, str) else "",
+            "stderr": (e.stderr or "")[-2000:] if isinstance(e.stderr, str) else "",
+            "inbox": str(inbox),
+        }
     return {
         "ran": True,
         "command": cmd,

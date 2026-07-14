@@ -25,6 +25,11 @@ DEFAULT_HOST = "remote-node"
 DEFAULT_INBOX = ROOT / "tools" / "_registry" / "taildrop-inbox"
 DEFAULT_NODES = ROOT / "fak" / "experiments" / "fleet-nodes"
 
+# `tailscale file get` is a network call; --wait blocks until a file arrives.
+# Bound both so a hung daemon cannot wedge the caller forever (#3477).
+_TAILDROP_TIMEOUT_S = 120         # without --wait
+_TAILDROP_WAIT_TIMEOUT_S = 3600   # with --wait: 1h ceiling
+
 
 def find_tailscale():
     exe = shutil.which("tailscale")
@@ -36,9 +41,9 @@ def find_tailscale():
     return None
 
 
-def run(cmd, *, check=True):
+def run(cmd, *, check=True, timeout=None):
     print("+ " + " ".join(str(c) for c in cmd), file=sys.stderr)
-    return subprocess.run(cmd, cwd=ROOT, check=check)
+    return subprocess.run(cmd, cwd=ROOT, check=check, timeout=timeout)
 
 
 def receive_taildrop(inbox, wait):
@@ -51,7 +56,12 @@ def receive_taildrop(inbox, wait):
     if wait:
         cmd.append("--wait")
     cmd.append(str(inbox))
-    run(cmd, check=False)
+    timeout = _TAILDROP_WAIT_TIMEOUT_S if wait else _TAILDROP_TIMEOUT_S
+    try:
+        run(cmd, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"tailscale file get timed out after {timeout}s; skipping receive",
+              file=sys.stderr)
 
 
 def archive_candidates(inbox, host):
