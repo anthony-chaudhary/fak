@@ -89,6 +89,7 @@ REFUSE_NO_ACCOUNT = "REFUSE_NO_ACCOUNT"  # switcher has no available worker acco
 REFUSE_NO_SEAT = "REFUSE_NO_SEAT"    # seat pool depleted: every seat leased to a live worker
 REFUSE_AT_CAP = "REFUSE_AT_CAP"      # live workers already at/over the operator/dos cap
 REFUSE_INSPECT = "REFUSE_INSPECT"    # a check could not run (fail-safe → refuse)
+REFUSE_WEEKLY_CAPPED = "REFUSE_WEEKLY_CAPPED"  # routed account hit a weekly-limit 429; cooling until reset (#2610)
 
 def _env_pos_int(name: str, default: int) -> int:
     """A positive-int env override, falling back to ``default`` on unset/garbage.
@@ -321,6 +322,85 @@ def seat_check(root: Path, *, product: str) -> dict[str, Any]:
             "free": _int(doc.get("free_seats")),
             "leased": _int(doc.get("leased_seats")),
             "depleted": bool(doc.get("depleted"))}
+
+
+# --- weekly-limit seat cooldown (#2610) ------------------------------------- #
+# A weekly-limit 429 (`kind=weekly_limit`) is NOT a stale credential (#2059/#2075):
+# the login is valid, but the provider seat is temporarily quota-capped until its
+# announced reset window. The always-on resolve dispatcher detects that banner and
+# persists a hold in `.dispatch-runs/account-cap-<product>[-<account>].json`
+# (issue_resolve_dispatch.check_weekly_cap, which parses the guard's
+# `announced_wait=<dur>` window); dispatch_status reads the SAME file to render the
+# WEEKLY_CAPPED card. This preflight honors that hold so a routed-but-capped seat is
+# NOT re-offered for a fresh spawn — and, because issue_dispatch.py gates on this
+# preflight verdict, it stops offering the seat too. Stdlib-only + FAIL-OPEN: any
+# read/parse error resolves to "not capped", so the gate can only ever ADD a refusal,
+# never wedge spawning on a malformed sidecar. The hold self-expires at its announced
+# `until`, so a seat is cooled, never permanently walled.
+
+def _naive_utc_from_iso(text: str) -> dt.datetime | None:
+    """Parse a persisted `until` ISO stamp (a trailing 'Z' or an explicit offset) to a
+    naive-UTC datetime, or None. Mirrors the write side's `<naive-iso>+'Z'` and the
+    tolerant read in dispatch_status.read_active_weekly_cap."""
+    s = (text or "").strip()
+    if not s:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def weekly_cap_check(root: Path, *, product: str, account_tag: str | None,
+                     now_ts: float | None = None) -> dict[str, Any]:
+    """Is the routed ``account_tag`` under an active weekly-limit cooldown right now?
+
+    Reads the persisted holds the resolve dispatcher writes
+    (`.dispatch-runs/account-cap-*.json`) and returns the soonest-expiring UNEXPIRED
+    hold matching this product+account as ``{"capped": True, "until", "reset_text",
+    "kind", "account", "evidence_log"}`` — else ``{"capped": False}``. A hold whose
+    ``account`` is null is a legacy generic hold and matches any tag (mirrors
+    dispatch_status.read_active_weekly_cap); a hold for a DIFFERENT product/account is
+    ignored, so a capped claude seat never walls an uncapped opencode one. An expired
+    hold is ignored — the cooldown self-expires at the announced window, so a seat is
+    cooled, not permanently walled. FAIL-OPEN: any error → not capped."""
+    try:
+        runs_dir = root / RUNS_DIRNAME
+        if not runs_dir.is_dir():
+            return {"capped": False}
+        now = (dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)
+               if now_ts is not None
+               else dt.datetime.now(dt.timezone.utc).replace(tzinfo=None))
+        best: tuple[dict[str, Any], dt.datetime] | None = None
+        for path in runs_dir.glob("account-cap-*.json"):
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(state, dict):
+                continue
+            if state.get("product") not in (None, "", product):
+                continue
+            if account_tag and state.get("account") not in (None, "", account_tag):
+                continue
+            until = _naive_utc_from_iso(str(state.get("until") or ""))
+            if until is None or now >= until:
+                continue
+            if best is None or until < best[1]:
+                best = (state, until)
+        if best is None:
+            return {"capped": False}
+        state = best[0]
+        return {"capped": True, "until": state.get("until"),
+                "reset_text": state.get("reset_text") or "",
+                "kind": state.get("kind") or "weekly",
+                "account": state.get("account"),
+                "evidence_log": state.get("evidence_log") or ""}
+    except Exception:
+        return {"capped": False}
 
 
 def kernel_alive(root: Path) -> dict[str, Any]:
@@ -1436,12 +1516,22 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
                                host_cap_info=host_cap_info, seat=seat,
                                live=live, cap=cap)
 
+    # Weekly-limit seat cooldown (#2610): a 429 with kind=weekly_limit is a VALID
+    # credential whose seat is temporarily quota-capped (distinct from the stale-cred
+    # cases #2059/#2075). The always-on resolve dispatcher persists that hold in
+    # .dispatch-runs/account-cap-*.json (with the announced reset window); honor it
+    # here so a routed-but-capped seat is not re-offered. Only meaningful once the
+    # switcher actually routed an account — a no-account state is REFUSE_NO_ACCOUNT.
+    weekly = (weekly_cap_check(root, product=product, account_tag=acct.get("tag"))
+              if acct.get("available") and acct.get("tag") else {"capped": False})
+
     # Fail-safe ordering, evaluated top to bottom:
     #   1. an un-runnable host/kernel safety check  -> REFUSE_INSPECT (never assume safe)
     #   2. a flagged host                            -> REFUSE_HOST
     #   3. a depleted seat pool (seats are binding)  -> REFUSE_NO_SEAT
     #   4. at/over the worker cap                    -> REFUSE_AT_CAP
     #   5. no available account (incl. switcher err) -> REFUSE_NO_ACCOUNT
+    #   6. routed account weekly-limit capped        -> REFUSE_WEEKLY_CAPPED (#2610)
     # An account check that merely errored is just "no account available", which
     # branch 5 already reports — it does not need to pre-empt host/cap.
     # A depleted seat pool (every routable seat already leased to a live worker) is its
@@ -1481,6 +1571,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         reason = ("switcher has no available worker account at the requested tier"
                   + (f" (blocked: {blocked})" if blocked else "")
                   + f": {acct.get('reason') or acct.get('error') or ''}".rstrip())
+    elif weekly.get("capped"):
+        verdict = REFUSE_WEEKLY_CAPPED
+        reason = (f"account '{acct.get('tag')}' hit a weekly-limit 429 "
+                  f"(kind={weekly.get('kind') or 'weekly'}"
+                  + (f", resets {weekly.get('reset_text')}" if weekly.get('reset_text') else "")
+                  + f"): cooling until {weekly.get('until')} — not re-offering the seat "
+                  "until its announced reset window elapses (distinct from a stale "
+                  "credential; #2610)")
     else:
         verdict = OK_VERDICT
         reason = (f"safe to spawn: host clean, account '{acct.get('tag')}' "
@@ -1501,6 +1599,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "host_capacity": host_cap_info,
         "capacity_limiter": limiter,
         "seat": seat,
+        "weekly_cap": weekly,
         "host": host,
         "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model")},
         "kernel": kern,
@@ -1528,14 +1627,21 @@ def render(p: dict[str, Any]) -> str:
     host_cap_str = (f"host_cap={host_cap}"
                     + (f" (bound by {hc.get('binding')})" if hc.get("binding") else "")
                     if host_cap is not None else "host_cap=n/a")
-    return "\n".join([
+    lines = [
         f"dispatch preflight: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})",
         f"  reason: {p.get('reason')}",
         f"  live={p.get('live')}/{p.get('cap')} (headroom {p.get('headroom')})  "
         f"host={_host_state(p.get('host') or {})}  "
         f"account={a.get('tag') or '-'} (t{a.get('tier')})  {host_cap_str}",
         f"  limiter={limiter.get('primary') or '-'} ({_capacity_limiter_terms(limiter)})",
-    ])
+    ]
+    weekly = p.get("weekly_cap") or {}
+    if weekly.get("capped"):
+        lines.append(
+            f"  weekly-cap: {weekly.get('account') or a.get('tag') or '-'} cooling "
+            f"until {weekly.get('until')} (kind={weekly.get('kind') or 'weekly'}, "
+            f"resets {weekly.get('reset_text') or '?'})")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:

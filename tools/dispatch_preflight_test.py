@@ -10,6 +10,7 @@ _int) and the cap = min(max_workers, dos target) rule. No subprocess runs.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -43,7 +44,7 @@ def load_fleet_accounts():
 
 
 def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res=None,
-                 seat=None):
+                 seat=None, weekly=None):
     """Replace the shelling-out checks with constant synthetic results.
 
     ``host_res`` stubs the host-resource probe (#1337); the default is a roomy box
@@ -57,7 +58,13 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
     assert. A test exercising the seat pool passes an explicit ``{total, free, leased,
     depleted}`` of its own. Stubbing this keeps evaluate() hermetic: without it the
     seat fold would shell out to fleet_accounts.py and leak the real box's seat count
-    into every test."""
+    into every test.
+
+    ``weekly`` stubs the weekly-limit cooldown probe (#2610); the default
+    ``{"capped": False}`` means "no cooldown active" so the pre-cooldown verdict logic
+    is unchanged. Stubbing keeps evaluate() hermetic: without it the cooldown fold
+    would read the real box's `.dispatch-runs/account-cap-*.json` holds into every
+    test. A test exercising the cooldown passes an explicit capped hold of its own."""
     host = host if host is not None else {"safe": True, "flagged": 0, "flagged_names": []}
     account = account if account is not None else {
         "available": True, "tag": "worker-a", "dir": "/acct/a", "tier": 1,
@@ -66,12 +73,14 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
     host_res = host_res if host_res is not None else {
         "cores": 64, "free_ram_mb": 128_000, "total_threads": 1000}
     seat = seat if seat is not None else {"total": None}
+    weekly = weekly if weekly is not None else {"capped": False}
     mod.host_check = lambda root, **kw: host
     mod.account_check = lambda root, **kw: account
     mod.kernel_alive = lambda root: kernel
     mod.proc_worker_count = lambda root=None, *, product=None: procs
     mod.host_resources = lambda: host_res
     mod.seat_check = lambda root, *, product=None: seat
+    mod.weekly_cap_check = lambda root, **kw: weekly
 
 
 def run_eval(mod, **kw):
@@ -1340,6 +1349,173 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
             os.environ.pop("FAK_HOST_CORES_PER_WORKER", None)
             if old is not None:
                 os.environ["FAK_HOST_CORES_PER_WORKER"] = old
+
+
+class WeeklyCapCooldownTest(unittest.TestCase):
+    """#2610: a weekly-limit 429 (`kind=weekly_limit`) cools the routed seat until its
+    announced reset window instead of re-offering it. This is DISTINCT from the
+    stale-credential cases (#2059/#2075 -> REFUSE_NO_ACCOUNT): the credential is valid,
+    only the seat is temporarily quota-capped. The persisted hold
+    (`.dispatch-runs/account-cap-*.json`, written by the resolve dispatcher's
+    check_weekly_cap and read by dispatch_status) is honored here so a fresh preflight
+    refuses the capped seat — and, because issue_dispatch.py gates on this verdict, it
+    stops offering the seat too."""
+
+    NOW_TS = 1_000_000.0  # naive-UTC 1970-01-12T13:46:40
+    ACTIVE_UNTIL = "1970-01-12T14:46:40Z"   # 1h after NOW -> cooldown still active
+    EXPIRED_UNTIL = "1970-01-12T12:46:40Z"  # 1h before NOW -> cooldown elapsed
+
+    def _write_hold(self, runs: Path, *, product="claude", account="worker-a",
+                    until=ACTIVE_UNTIL, kind="weekly", reset_text="1h7m0s",
+                    name=None) -> Path:
+        runs.mkdir(parents=True, exist_ok=True)
+        path = runs / (name or f"account-cap-{product}-{account}.json")
+        path.write_text(json.dumps({
+            "product": product, "account": account, "kind": kind,
+            "reset_text": reset_text, "evidence_log": "resolve-2610-20260704-000000.log",
+            "detected": "1970-01-12T13:40:00Z", "until": until}), encoding="utf-8")
+        return path
+
+    # --- the pure reader ---------------------------------------------------- #
+    def test_active_hold_marks_account_capped(self) -> None:
+        import json as _json  # noqa: F401  (json imported at module top)
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._write_hold(root / mod.RUNS_DIRNAME)
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["until"], self.ACTIVE_UNTIL)
+            self.assertEqual(out["reset_text"], "1h7m0s")
+            self.assertEqual(out["kind"], "weekly")
+
+    def test_expired_hold_is_ignored_so_seat_is_not_permanently_walled(self) -> None:
+        # The cooldown self-expires at its announced window (a confusion risk the issue
+        # names): once `until` has passed, the seat is offered again.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._write_hold(root / mod.RUNS_DIRNAME, until=self.EXPIRED_UNTIL)
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertFalse(out["capped"])
+
+    def test_hold_for_a_different_account_does_not_wall_this_seat(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._write_hold(root / mod.RUNS_DIRNAME, account="worker-b")
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertFalse(out["capped"])
+
+    def test_hold_for_a_different_product_does_not_wall_this_seat(self) -> None:
+        # A capped claude seat must not wall an uncapped opencode account of the same
+        # tag — the pools are independent.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._write_hold(root / mod.RUNS_DIRNAME, product="opencode",
+                             account="worker-a")
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertFalse(out["capped"])
+
+    def test_legacy_null_account_hold_matches_any_tag(self) -> None:
+        # A pre-account-scoped generic hold (account: null) is honored for the routed
+        # tag, mirroring dispatch_status.read_active_weekly_cap.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._write_hold(root / mod.RUNS_DIRNAME, account=None,
+                             name="account-cap-claude.json")
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertTrue(out["capped"])
+
+    def test_malformed_hold_is_fail_open_not_capped(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir(parents=True, exist_ok=True)
+            (runs / "account-cap-claude-worker-a.json").write_text(
+                "{ not json", encoding="utf-8")
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertFalse(out["capped"])
+
+    def test_no_runs_dir_is_not_capped(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.weekly_cap_check(Path(d), product="claude",
+                                       account_tag="worker-a", now_ts=self.NOW_TS)
+            self.assertFalse(out["capped"])
+
+    def test_soonest_expiring_active_hold_wins(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            self._write_hold(runs, until="1970-01-12T18:00:00Z",
+                             reset_text="far", name="account-cap-claude.json")
+            self._write_hold(runs, until="1970-01-12T15:00:00Z", reset_text="near",
+                             name="account-cap-claude-worker-a.json")
+            out = mod.weekly_cap_check(root, product="claude", account_tag="worker-a",
+                                       now_ts=self.NOW_TS)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["reset_text"], "near")
+
+    # --- the evaluate() verdict --------------------------------------------- #
+    def _capped(self, **over):
+        hold = {"capped": True, "until": self.ACTIVE_UNTIL, "reset_text": "1h7m0s",
+                "kind": "weekly", "account": "worker-a", "evidence_log": "resolve.log"}
+        hold.update(over)
+        return hold
+
+    def test_evaluate_refuses_a_weekly_capped_routed_seat(self) -> None:
+        mod = load()
+        patch_checks(mod, weekly=self._capped())
+        p = run_eval(mod)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], mod.REFUSE_WEEKLY_CAPPED)
+        self.assertIn("1h7m0s", p["reason"])           # the announced reset window
+        self.assertIn(self.ACTIVE_UNTIL, p["reason"])  # the cooldown deadline
+        self.assertTrue(p["weekly_cap"]["capped"])
+
+    def test_evaluate_spawn_ok_when_no_cooldown_active(self) -> None:
+        mod = load()
+        patch_checks(mod)  # default weekly = {"capped": False}
+        p = run_eval(mod)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+        self.assertFalse(p["weekly_cap"]["capped"])
+
+    def test_weekly_cap_is_distinct_from_stale_credential(self) -> None:
+        # The issue's core distinction: a stale/blocked credential is REFUSE_NO_ACCOUNT
+        # (no seat routed at all), while a VALID but quota-capped seat is
+        # REFUSE_WEEKLY_CAPPED (routed, but cooling). A no-account state must NEVER be
+        # mislabeled as a weekly cap, and vice versa.
+        mod = load()
+        patch_checks(mod, account={"available": False, "tag": None, "tier": None,
+                                   "reason": "all throttled", "blocked": ["worker-a"]},
+                     weekly=self._capped())
+        stale = run_eval(mod)
+        self.assertEqual(stale["verdict"], mod.REFUSE_NO_ACCOUNT)
+
+        patch_checks(mod, weekly=self._capped())  # valid seat, but weekly-capped
+        capped = run_eval(mod)
+        self.assertEqual(capped["verdict"], mod.REFUSE_WEEKLY_CAPPED)
+
+    def test_render_names_cooldown_reason_and_retry_window(self) -> None:
+        mod = load()
+        patch_checks(mod, weekly=self._capped())
+        text = mod.render(run_eval(mod))
+        self.assertIn("REFUSE_WEEKLY_CAPPED", text)
+        self.assertIn("weekly-cap:", text)
+        self.assertIn(self.ACTIVE_UNTIL, text)  # retry window named on the status line
+        self.assertIn("1h7m0s", text)
 
 
 if __name__ == "__main__":
