@@ -205,7 +205,12 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 	key := livelockKey(obs)
 	run := d.byTrace[obs.TraceID]
 	if run.key == key {
-		run.count++
+		// Saturate at the terminal abort rung. Once the structural loop-break is
+		// armed, a hostile/stuck caller cannot grow this per-trace counter without
+		// bound across further ticks; the terminal envelope remains sticky.
+		if d.abort <= 0 || run.count < d.abort+1 {
+			run.count++
+		}
 		run.last = obs
 	} else {
 		run = livelockRun{key: key, count: 1, last: obs}

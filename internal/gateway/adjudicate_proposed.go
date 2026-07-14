@@ -337,13 +337,14 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 			if id := adjs[h.idx].ToolCallID; id != "" {
 				fused[id] = struct{}{}
 			}
-		case env.Escalate && !adjs[h.idx].Admitted && toolRejectionIsRetryableFeedback(adjs[h.idx].Verdict):
+		case env.Escalate && !adjs[h.idx].Admitted:
 			// An ALREADY-denied call the model keeps re-proposing past the abort count:
 			// its per-tool refusal is being ignored just like the admitted loop, so lift
 			// its retryable disposition to TERMINAL and let the all-refused turn escalate
 			// to a deny-all stop. (MALFORMED/MISROUTE reasons stay retryable by classifier
 			// design — those are genuinely fixable, not a stuck loop.)
 			adjs[h.idx].Verdict.Disposition = "TERMINAL"
+			adjs[h.idx].Verdict.By = "livelock-abort"
 		}
 	}
 	return fused

@@ -1,6 +1,10 @@
 package gateway
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+)
 
 // TestAnnotateToolLivelockFusesRepeatedAdmittedCall proves the structural backstop:
 // an identical ADMITTED call repeated past the fuse count stops being admitted. The
@@ -106,5 +110,28 @@ func TestAnnotateToolLivelockFuseDropsKeptCall(t *testing.T) {
 	adjs := []ToolAdjudication{{Tool: "Bash", Admitted: false, Verdict: v}}
 	if got := adjudicationOutcomeForTurn(adjs, 0, 0); got != adjudicationOutcomeToolFeedback {
 		t.Fatalf("a fully-fused turn = %v, want tool-feedback (not a deny-all session stop)", got)
+	}
+}
+
+func TestRepeatedTerminalSecretDenialSaturatesAndStaysBroken(t *testing.T) {
+	s := &Server{}
+	var last []ToolAdjudication
+	for i := 0; i < 110; i++ {
+		last = []ToolAdjudication{{ToolCallID: "tc-secret", Tool: "PowerShell", ArgsDigest: "sha256:44136fa355b3", Admitted: false,
+			Verdict: WireVerdict{Kind: "DENY", Reason: "SECRET_EXFIL", By: "policy", Disposition: "TERMINAL"}}}
+		s.annotateToolLivelock("interactive-36304", last)
+	}
+	if last[0].Livelock == nil || !last[0].Livelock.Escalate {
+		t.Fatalf("110 identical terminal denials must carry a loop-break envelope: %+v", last[0])
+	}
+	want := guardrsi.DefaultLivelockThreshold*guardrsi.DefaultLivelockAbortFactor + 1
+	if last[0].Livelock.RepeatCount != want {
+		t.Fatalf("repeat counter=%d, want saturated abort threshold %d", last[0].Livelock.RepeatCount, want)
+	}
+	if last[0].Verdict.By != "livelock-abort" || last[0].Verdict.Disposition != "TERMINAL" {
+		t.Fatalf("loop break verdict=%+v", last[0].Verdict)
+	}
+	if got := adjudicationOutcomeForTurn(last, 0, 0); got != adjudicationOutcomeDenyAll {
+		t.Fatalf("terminal repeated denial outcome=%v, want deny-all stop", got)
 	}
 }
