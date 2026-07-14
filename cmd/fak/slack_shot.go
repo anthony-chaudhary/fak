@@ -8,9 +8,9 @@ package main
 // sensibly to a human — was to alt-tab into Slack and scroll. `fak slack shot` closes
 // that dogfooding loop from the terminal:
 //
-//   - it READS the channel back (conversations.history via internal/slackwire) and
-//     renders a faithful transcript to stdout — a text "screenshot" an agent or human
-//     can eyeball;
+//   - it READS the channel back (conversations.history + conversations.replies via
+//     internal/slackwire) and renders a faithful transcript to stdout — a text
+//     "screenshot" an agent or human can eyeball;
 //   - with --out FILE.html it writes a self-contained HTML capture that reproduces the
 //     channel visually (author, timestamp, message bubbles) and opens in any browser
 //     WITHOUT Slack — the artifact you attach to a dogfood note;
@@ -52,6 +52,11 @@ import (
 // Twenty covers "did the last few posts render right?" without a wall of backlog.
 const slackShotDefaultLimit = 20
 
+// slackShotReplyLimit bounds one conversations.replies call. A capture is an operator
+// sample, not an archive export; 100 rows show a substantial thread without letting one
+// runaway conversation dominate memory or API time.
+const slackShotReplyLimit = 100
+
 // teamEnv names the workspace team id used to build the Slack deep link / web URL. It is
 // public (T…), not a secret; when unset the shot resolves it from auth.test.
 const teamEnv = "FAK_SLACK_TEAM"
@@ -67,6 +72,19 @@ var slackShotHistory = func(token, apiBase, channel string, limit int) ([]slackw
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return c.History(ctx, channel, "", limit)
+}
+
+// slackShotReplies reads one thread. Kept as a separate seam so tests can prove the
+// operator capture nests real replies without touching Slack.
+var slackShotReplies = func(token, apiBase, channel, threadTS string, limit int) ([]slackwire.Message, error) {
+	var opts []slackwire.Option
+	if apiBase != "" {
+		opts = append(opts, slackwire.WithAPIBase(apiBase))
+	}
+	c := slackwire.New(token, opts...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return c.Replies(ctx, channel, threadTS, limit)
 }
 
 // slackShotTeam resolves the workspace team id (for the launch URLs) from auth.test. It is
@@ -93,6 +111,7 @@ type shotResult struct {
 	Channel  string `json:"channel"`
 	Team     string `json:"team,omitempty"`
 	Count    int    `json:"count"`
+	Replies  int    `json:"replies,omitempty"`
 	DeepLink string `json:"deep_link"`
 	WebURL   string `json:"web_url"`
 	Out      string `json:"out,omitempty"`
@@ -211,8 +230,13 @@ func runSlackShot(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak slack shot: history: %v\n", err)
 		return 1
 	}
+	msgs, err = expandSlackShotThreads(tok, *apiBase, chID, msgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack shot: replies: %v\n", err)
+		return 1
+	}
 	msgs = sortMessagesChrono(msgs)
-	res.Count = len(msgs)
+	res.Count, res.Replies = slackShotCounts(msgs)
 
 	title := chID
 	if surfaceName != "" {
@@ -303,6 +327,67 @@ func sortMessagesChrono(msgs []slackwire.Message) []slackwire.Message {
 	return out
 }
 
+// expandSlackShotThreads joins history roots with their replies. History exposes a
+// reply_count but not the reply bodies; conversations.replies returns the parent as its
+// first row, so that duplicate is dropped. A row missing thread_ts is defensively bound
+// to the root being read — Slack normally sets it on replies, but the capture should keep
+// the hierarchy even when a test/proxy omits the redundant field.
+func expandSlackShotThreads(token, apiBase, channel string, roots []slackwire.Message) ([]slackwire.Message, error) {
+	out := append([]slackwire.Message(nil), roots...)
+	for _, root := range roots {
+		if root.ThreadTS != "" || root.ReplyCount <= 0 || root.TS == "" {
+			continue
+		}
+		rows, err := slackShotReplies(token, apiBase, channel, root.TS, slackShotReplyLimit)
+		if err != nil {
+			return nil, fmt.Errorf("thread %s: %w", root.TS, err)
+		}
+		for _, reply := range rows {
+			if reply.TS == root.TS {
+				continue // conversations.replies repeats the parent first
+			}
+			if reply.ThreadTS == "" {
+				reply.ThreadTS = root.TS
+			}
+			out = append(out, reply)
+		}
+	}
+	return out, nil
+}
+
+func slackShotCounts(msgs []slackwire.Message) (roots, replies int) {
+	for _, m := range msgs {
+		if m.ThreadTS == "" {
+			roots++
+		} else {
+			replies++
+		}
+	}
+	return roots, replies
+}
+
+// slackShotThreaded returns top-level roots plus replies keyed by parent, all ordered
+// oldest-first. Orphan replies are promoted into the root list rather than hidden.
+func slackShotThreaded(msgs []slackwire.Message) ([]slackwire.Message, map[string][]slackwire.Message) {
+	ordered := sortMessagesChrono(msgs)
+	knownRoots := make(map[string]bool)
+	for _, m := range ordered {
+		if m.ThreadTS == "" {
+			knownRoots[m.TS] = true
+		}
+	}
+	var roots []slackwire.Message
+	replies := make(map[string][]slackwire.Message)
+	for _, m := range ordered {
+		if m.ThreadTS != "" && knownRoots[m.ThreadTS] {
+			replies[m.ThreadTS] = append(replies[m.ThreadTS], m)
+			continue
+		}
+		roots = append(roots, m)
+	}
+	return roots, replies
+}
+
 // tsSeconds parses a Slack ts ("1719600000.000100") to a float for ordering; unparseable
 // ts sort first (0) so a malformed row never hides a real one at the bottom.
 func tsSeconds(ts string) float64 {
@@ -339,13 +424,15 @@ func messageAuthor(m slackwire.Message) string {
 // message (stamp, author, text). Pure — the unit tests pin its exact shape.
 func renderShotText(title string, msgs []slackwire.Message) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s — %d message(s), oldest first\n", title, len(msgs))
+	roots, replies := slackShotThreaded(msgs)
+	_, replyCount := slackShotCounts(msgs)
+	fmt.Fprintf(&b, "%s — %d message(s), oldest first · %d threaded %s\n", title, len(roots), replyCount, pluralWord(replyCount, "reply", "replies"))
 	b.WriteString(strings.Repeat("─", 60) + "\n")
 	if len(msgs) == 0 {
 		b.WriteString("(channel is empty, or the bot cannot read its history)\n")
 		return b.String()
 	}
-	for _, m := range msgs {
+	for _, m := range roots {
 		fmt.Fprintf(&b, "[%s] %s\n", formatSlackTS(m.TS), messageAuthor(m))
 		text := strings.TrimRight(m.Text, "\n")
 		if text == "" {
@@ -353,6 +440,16 @@ func renderShotText(title string, msgs []slackwire.Message) string {
 		}
 		for _, line := range strings.Split(text, "\n") {
 			b.WriteString("    " + line + "\n")
+		}
+		for _, reply := range replies[m.TS] {
+			fmt.Fprintf(&b, "    ↳ [%s] %s\n", formatSlackTS(reply.TS), messageAuthor(reply))
+			replyText := strings.TrimRight(reply.Text, "\n")
+			if replyText == "" {
+				replyText = "(no text — blocks/attachment only)"
+			}
+			for _, line := range strings.Split(replyText, "\n") {
+				b.WriteString("        " + line + "\n")
+			}
 		}
 	}
 	return b.String()
@@ -363,6 +460,8 @@ func renderShotText(title string, msgs []slackwire.Message) string {
 // links back to the live channel. Pure and fully escaped.
 func renderShotHTML(title, webURL string, msgs []slackwire.Message) string {
 	var b strings.Builder
+	roots, replies := slackShotThreaded(msgs)
+	_, replyCount := slackShotCounts(msgs)
 	b.WriteString("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
 	fmt.Fprintf(&b, "<title>%s — fak slack shot</title>\n", html.EscapeString(title))
@@ -372,6 +471,7 @@ func renderShotHTML(title, webURL string, msgs []slackwire.Message) string {
 	b.WriteString("header h1{font-size:18px;margin:0 0 4px}header a{color:#1d9bd1;text-decoration:none;font-size:13px}\n")
 	b.WriteString(".feed{padding:12px 20px;max-width:900px}\n")
 	b.WriteString(".msg{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #26282c}\n")
+	b.WriteString(".reply{margin-left:34px;padding-left:12px;border-left:2px solid #35373b}\n")
 	b.WriteString(".who{color:#e8e8e8;font-weight:700}.ts{color:#9a9c9f;font-size:12px;margin-left:8px}\n")
 	b.WriteString(".body{white-space:pre-wrap;word-break:break-word;margin-top:2px}\n")
 	b.WriteString(".empty{color:#9a9c9f;padding:20px}\n")
@@ -380,26 +480,37 @@ func renderShotHTML(title, webURL string, msgs []slackwire.Message) string {
 	if webURL != "" {
 		fmt.Fprintf(&b, "<a href=\"%s\">open in Slack ↗</a>", html.EscapeString(webURL))
 	}
-	fmt.Fprintf(&b, "<div class=\"ts\">%d message(s), captured by fak slack shot</div></header>\n", len(msgs))
+	fmt.Fprintf(&b, "<div class=\"ts\">%d message(s), %d threaded %s, captured by fak slack shot</div></header>\n", len(roots), replyCount, pluralWord(replyCount, "reply", "replies"))
 	b.WriteString("<div class=\"feed\">\n")
 	if len(msgs) == 0 {
 		b.WriteString("<div class=\"empty\">Channel is empty, or the bot cannot read its history.</div>\n")
 	}
-	for _, m := range msgs {
-		text := m.Text
-		if strings.TrimSpace(text) == "" {
-			text = "(no text — blocks/attachment only)"
+	for _, m := range roots {
+		renderShotHTMLMessage(&b, m, false)
+		for _, reply := range replies[m.TS] {
+			renderShotHTMLMessage(&b, reply, true)
 		}
-		b.WriteString("<div class=\"msg\"><div><div><span class=\"who\">")
-		b.WriteString(html.EscapeString(messageAuthor(m)))
-		b.WriteString("</span><span class=\"ts\">")
-		b.WriteString(html.EscapeString(formatSlackTS(m.TS)))
-		b.WriteString("</span></div><div class=\"body\">")
-		b.WriteString(html.EscapeString(text))
-		b.WriteString("</div></div></div>\n")
 	}
 	b.WriteString("</div></body></html>\n")
 	return b.String()
+}
+
+func renderShotHTMLMessage(b *strings.Builder, m slackwire.Message, reply bool) {
+	text := m.Text
+	if strings.TrimSpace(text) == "" {
+		text = "(no text — blocks/attachment only)"
+	}
+	class := "msg"
+	if reply {
+		class += " reply"
+	}
+	fmt.Fprintf(b, "<div class=\"%s\"><div><div><span class=\"who\">", class)
+	b.WriteString(html.EscapeString(messageAuthor(m)))
+	b.WriteString("</span><span class=\"ts\">")
+	b.WriteString(html.EscapeString(formatSlackTS(m.TS)))
+	b.WriteString("</span></div><div class=\"body\">")
+	b.WriteString(html.EscapeString(text))
+	b.WriteString("</div></div></div>\n")
 }
 
 // slackDeepLink builds the desktop-client deep link for a channel (opens the installed

@@ -43,6 +43,23 @@ func TestRenderShotTextShape(t *testing.T) {
 	}
 }
 
+func TestRenderShotTextNestsThreadReplies(t *testing.T) {
+	msgs := []slackwire.Message{
+		{Type: "message", TS: "1.0", BotID: "B1", Text: "session running"},
+		{Type: "message", TS: "2.0", ThreadTS: "1.0", BotID: "B1", Text: "launch context"},
+		{Type: "message", TS: "3.0", ThreadTS: "1.0", BotID: "B1", Text: "session failed"},
+	}
+	got := renderShotText("#guard-sessions", msgs)
+	for _, want := range []string{"1 message(s), oldest first · 2 threaded replies", "↳", "launch context", "session failed"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("thread capture missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "session running") > strings.Index(got, "launch context") {
+		t.Fatalf("reply rendered before its root:\n%s", got)
+	}
+}
+
 func TestRenderShotTextEmpty(t *testing.T) {
 	got := renderShotText("#dispatch (C0ABC123)", nil)
 	if !strings.Contains(got, "0 message(s)") || !strings.Contains(got, "channel is empty") {
@@ -64,6 +81,19 @@ func TestRenderShotHTMLEscapesAndLinks(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "<!doctype html>") {
 		t.Fatalf("not a standalone HTML document:\n%.40s", got)
+	}
+}
+
+func TestRenderShotHTMLNestsThreadReplies(t *testing.T) {
+	msgs := []slackwire.Message{
+		{Type: "message", TS: "1.0", BotID: "B1", Text: "guard session · RUNNING"},
+		{Type: "message", TS: "2.0", ThreadTS: "1.0", BotID: "B1", Text: "terminal outcome: <failed>"},
+	}
+	got := renderShotHTML("#guard-sessions", "", msgs)
+	for _, want := range []string{"1 threaded reply", `class="msg reply"`, "terminal outcome: &lt;failed&gt;"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("HTML thread capture missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -192,6 +222,36 @@ func TestRunSlackShotCapturesInjectedHistory(t *testing.T) {
 	htmlDoc := string(b)
 	if !strings.HasPrefix(htmlDoc, "<!doctype html>") || !strings.Contains(htmlDoc, "kicking off the run") {
 		t.Fatalf("HTML capture wrong:\n%s", htmlDoc)
+	}
+}
+
+func TestRunSlackShotReadsAndCapturesReplies(t *testing.T) {
+	prevHist, prevReplies, prevTeam := slackShotHistory, slackShotReplies, slackShotTeam
+	defer func() { slackShotHistory, slackShotReplies, slackShotTeam = prevHist, prevReplies, prevTeam }()
+
+	slackShotHistory = func(token, apiBase, channel string, limit int) ([]slackwire.Message, error) {
+		return []slackwire.Message{{Type: "message", TS: "1.0", BotID: "B1", Text: "root", ReplyCount: 1}}, nil
+	}
+	slackShotReplies = func(token, apiBase, channel, threadTS string, limit int) ([]slackwire.Message, error) {
+		if channel != "C0ABC123" || threadTS != "1.0" || limit != slackShotReplyLimit {
+			t.Fatalf("reply read channel/thread/limit = %q/%q/%d", channel, threadTS, limit)
+		}
+		return []slackwire.Message{
+			{Type: "message", TS: "1.0", BotID: "B1", Text: "root"},
+			{Type: "message", TS: "2.0", ThreadTS: "1.0", BotID: "B1", Text: "useful outcome"},
+		}, nil
+	}
+	slackShotTeam = func(token, apiBase string) string { return "T1" }
+
+	var out, errb bytes.Buffer
+	code := runSlackShot(&out, &errb, []string{"--channel", "C0ABC123", "--token", "xoxb-test"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	for _, want := range []string{"1 threaded reply", "↳", "useful outcome"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("capture missing %q:\n%s", want, out.String())
+		}
 	}
 }
 

@@ -45,13 +45,13 @@ func TestGuardSessionThreadRowIsRootPost(t *testing.T) {
 		t.Fatalf("guard session row must be a root post, got thread_ts=%q update_ts=%q", row.ThreadTS, row.UpdateTS)
 	}
 	for _, want := range []string{
-		"fak guard session started",
-		"session_thread_id: nonce-1",
-		"trace_id: trace one trace two",
-		"agent: claude",
-		"provider: anthropic",
-		"started_utc: 1970-01-01T00:16:40Z",
-		"audit: audit.jsonl",
+		"guard session · STARTING",
+		"session `nonce-1`",
+		"claude/anthropic",
+		"started 1970-01-01T00:16:40Z",
+		"trace `trace one trace two`",
+		"audit `audit.jsonl`",
+		"open thread for launch context and outcome",
 	} {
 		if !strings.Contains(row.Text, want) {
 			t.Fatalf("row text missing %q:\n%s", want, row.Text)
@@ -103,8 +103,8 @@ func TestGuardSessionControlPointRowsThreadUnderRoot(t *testing.T) {
 		Provider:   "anthropic",
 		GatewayURL: "http://127.0.0.1:8080",
 	})
-	if len(rows) != 2 {
-		t.Fatalf("want 1 banner + 1 context reply, got %d rows", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("want 1 progress + 1 banner + 1 context reply, got %d rows", len(rows))
 	}
 	for _, r := range rows {
 		if r.ParentNonce != "root-nonce" {
@@ -114,7 +114,10 @@ func TestGuardSessionControlPointRowsThreadUnderRoot(t *testing.T) {
 			t.Fatalf("reply must be a deferred post: %+v", r)
 		}
 	}
-	banner, context := rows[0], rows[1]
+	progress, banner, context := rows[0], rows[1], rows[2]
+	if progress.Source != guardSessionThreadSource+":progress" || !strings.Contains(progress.Text, "launch prepared") {
+		t.Fatalf("progress reply wrong: %+v", progress)
+	}
 	if banner.Source != guardSessionThreadSource+":banner" || !strings.Contains(banner.Text, "line one\nline two") {
 		t.Fatalf("banner reply wrong: %+v", banner)
 	}
@@ -149,8 +152,8 @@ func TestGuardSessionControlPointRowsChunkLongBanner(t *testing.T) {
 
 func TestGuardSessionControlPointRowsEmptyBannerStillPostsContext(t *testing.T) {
 	rows := guardSessionControlPointRows("root", "CCHAN", "", guardSessionControlContext{Trace: "t"})
-	if len(rows) != 1 || rows[0].Source != guardSessionThreadSource+":context" {
-		t.Fatalf("empty banner should leave only the context reply, got %d rows", len(rows))
+	if len(rows) != 2 || rows[0].Source != guardSessionThreadSource+":progress" || rows[1].Source != guardSessionThreadSource+":context" {
+		t.Fatalf("empty banner should leave progress + context replies, got %d rows", len(rows))
 	}
 }
 
@@ -168,8 +171,8 @@ func TestEnqueueGuardSessionControlPointsSpoolsThreadedReplies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Fatalf("queued %d replies, want 2 (banner + context)", n)
+	if n != 3 {
+		t.Fatalf("queued %d replies, want 3 (progress + banner + context)", n)
 	}
 	ob, err := openOutbox()
 	if err != nil {
@@ -179,13 +182,69 @@ func TestEnqueueGuardSessionControlPointsSpoolsThreadedReplies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Rows) != 2 {
-		t.Fatalf("spool rows = %d, want 2", len(snap.Rows))
+	if len(snap.Rows) != 3 {
+		t.Fatalf("spool rows = %d, want 3", len(snap.Rows))
 	}
 	for _, r := range snap.Rows {
 		if r.ParentNonce != "root-1" {
 			t.Fatalf("reply not deferred-threaded under the root: %+v", r)
 		}
+	}
+}
+
+// TestRenderGuardStartupReportWiresTheSessionThread is the regression witness for the
+// live operator defect: the render path used to enqueue ONLY the root even though all
+// control-point/card primitives already existed. A real guard therefore produced a
+// header-only channel. The production startup path must now bind the card handle and
+// spool banner/context replies under the root nonce in one transaction-shaped pass.
+func TestRenderGuardStartupReportWiresTheSessionThread(t *testing.T) {
+	clearSlackEnv(t)
+	outboxTestDir(t)
+	guardSessionCardHandle = nil
+	t.Cleanup(func() {
+		guardSessionCardHandle.stopUpdater()
+		guardSessionCardHandle = nil
+	})
+
+	report := renderGuardStartupReport(guardStartupView{
+		up:           "anthropic",
+		command:      []string{"claude", "-p", "audit"},
+		gwURL:        "http://127.0.0.1:8080",
+		floorSource:  "test floor",
+		logLabel:     "off",
+		auditLabel:   "audit.jsonl",
+		guardTraceID: "trace-1",
+	})
+	if guardSessionCardHandle == nil {
+		t.Fatal("startup left the session card handle nil")
+	}
+	if !strings.Contains(report, "queued 3 control replies") {
+		t.Fatalf("startup did not report the banner/context replies:\n%s", report)
+	}
+
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ob.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Rows) != 4 {
+		t.Fatalf("startup spooled %d rows, want root + progress + banner + context", len(snap.Rows))
+	}
+	rootNonce := guardSessionCardHandle.rootNonce
+	roots, replies := 0, 0
+	for _, row := range snap.Rows {
+		switch {
+		case row.Nonce == rootNonce && row.ParentNonce == "":
+			roots++
+		case row.ParentNonce == rootNonce:
+			replies++
+		}
+	}
+	if roots != 1 || replies != 3 {
+		t.Fatalf("thread shape roots/replies = %d/%d, want 1/3", roots, replies)
 	}
 }
 
@@ -253,17 +312,67 @@ func TestGuardSessionCardFinalizeWithoutTokenStaysDurable(t *testing.T) {
 
 func TestGuardSessionLiveAndFinalLines(t *testing.T) {
 	sum := gateway.AdjudicationSummary{Total: 7, InputTokens: 120, OutputTokens: 40, CachedPromptTokens: 90, Denied: 2}
-	live := guardSessionLiveLine(sum, 65*time.Second)
-	for _, want := range []string{"status: running", "turns=7", "in=120 out=40 cached=90", "denied=2", "elapsed=1m5s"} {
+	live := guardSessionLiveLine("session-123", sum, 65*time.Second)
+	for _, want := range []string{"guard session · RUNNING", "session `session-`", "turns=7", "in=120 out=40 cached=90", "denied=2", "elapsed=1m5s"} {
 		if !strings.Contains(live, want) {
 			t.Fatalf("live line missing %q: %s", want, live)
 		}
 	}
-	if got := guardSessionFinalLine(0, sum, time.Second); !strings.Contains(got, "status: completed (exit=0)") {
+	if got := guardSessionFinalLine("session-123", 0, sum, time.Second); !strings.Contains(got, "guard session · COMPLETED") || !strings.Contains(got, "exit=0") {
 		t.Fatalf("final(0) = %s", got)
 	}
-	if got := guardSessionFinalLine(2, sum, time.Second); !strings.Contains(got, "status: failed (exit=2)") {
+	if got := guardSessionFinalLine("session-123", 2, sum, time.Second); !strings.Contains(got, "guard session · FAILED") || !strings.Contains(got, "exit=2") {
 		t.Fatalf("final(2) = %s", got)
+	}
+}
+
+// TestGuardSessionCardFinalizeWinsImmediateExitRace is the captured fast-failure witness:
+// finalize runs while the root is still pending, yet the synchronous two-pass drain must
+// post the root, thread the terminal outcome, then edit the root to the same final state.
+func TestGuardSessionCardFinalizeWinsImmediateExitRace(t *testing.T) {
+	clearSlackEnv(t)
+	outboxTestDir(t)
+	t.Setenv(guardSessionsTokenEnv, "xoxb-test")
+	posts := 0
+	srv := okSlackServer(t, &posts)
+	defer srv.Close()
+	previousWire := guardSessionWire
+	guardSessionWire = func(token string) (slackoutbox.Wire, error) {
+		return outboxWire(token, srv.URL+"/")
+	}
+	t.Cleanup(func() { guardSessionWire = previousWire })
+
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ob.Enqueue(slackoutbox.Row{Channel: "C1", Text: "starting", Nonce: "root-immediate"}); err != nil {
+		t.Fatal(err)
+	}
+	card := newGuardSessionCard("C1", "root-immediate", time.Now())
+	card.finalize(guardSessionFinalLine(card.sessionID, 2, gateway.AdjudicationSummary{}, time.Second))
+
+	snap, err := ob.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.PostedTS("root-immediate"); got != "1.23" {
+		t.Fatalf("root posted ts = %q, want 1.23", got)
+	}
+	outcome, finalEdit := false, false
+	for _, row := range snap.Rows {
+		if row.ParentNonce == "root-immediate" && row.Source == guardSessionThreadSource+":outcome" && strings.Contains(row.Text, "FAILED") {
+			outcome = true
+		}
+		if row.UpdateTS == "1.23" && strings.Contains(row.Text, "FAILED") {
+			finalEdit = true
+		}
+	}
+	if !outcome || !finalEdit {
+		t.Fatalf("immediate exit did not preserve reply/edit: outcome=%v final_edit=%v rows=%+v", outcome, finalEdit, snap.Rows)
+	}
+	if posts < 3 {
+		t.Fatalf("Slack calls = %d, want root + outcome + final edit", posts)
 	}
 }
 

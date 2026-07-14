@@ -100,13 +100,12 @@ func guardSessionThreadRow(m guardSessionThreadMeta) slackoutbox.Row {
 		started = time.Now().UTC()
 	}
 	text := fmt.Sprintf(
-		"fak guard session started\nsession_thread_id: %s\ntrace_id: %s\nagent: %s\nprovider: %s\npid: %d\nstarted_utc: %s\naudit: %s",
-		guardSlackField(nonce),
-		guardSlackField(m.TraceID),
+		":large_blue_circle: *guard session · STARTING* — session `%s` · %s/%s\nstarted %s · trace `%s` · audit `%s` · open thread for launch context and outcome",
+		guardSessionShortID(nonce),
 		guardSlackField(m.Agent),
 		guardSlackField(m.Provider),
-		m.PID,
 		started.Format(time.RFC3339),
+		guardSlackField(m.TraceID),
 		guardSlackAuditRef(m.AuditPath),
 	)
 	return slackoutbox.Row{
@@ -115,6 +114,15 @@ func guardSessionThreadRow(m guardSessionThreadMeta) slackoutbox.Row {
 		Text:    text,
 		Source:  guardSessionThreadSource,
 	}
+}
+
+func guardSessionShortID(nonce string) string {
+	nonce = guardSlackField(nonce)
+	const visible = 8
+	if len(nonce) > visible {
+		return nonce[:visible]
+	}
+	return nonce
 }
 
 func guardSessionAgentName(command []string) string {
@@ -135,6 +143,13 @@ func guardSlackField(s string) string {
 		return "-"
 	}
 	return strings.Join(strings.Fields(s), " ")
+}
+
+func pluralWord(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
 }
 
 func guardSlackAuditRef(s string) string {
@@ -193,6 +208,12 @@ type guardSessionControlContext struct {
 // queue, so neither the launch path nor the teardown has to branch on Slack being available.
 var guardSessionCardHandle *guardSessionCard
 
+// guardSessionWire keeps the production transport fixed while letting the immediate-exit
+// witness point the synchronous final drain at an in-process Slack server.
+var guardSessionWire = func(token string) (slackoutbox.Wire, error) {
+	return outboxWire(token, "")
+}
+
 // guardSessionCard is the in-memory handle to a guard session's live-updating root card.
 // It is nil whenever a root did not queue (Slack unconfigured), and every method is a
 // no-op on a nil receiver, so callers never have to branch on Slack being available.
@@ -204,6 +225,7 @@ var guardSessionCardHandle *guardSessionCard
 type guardSessionCard struct {
 	channel   string
 	rootNonce string
+	sessionID string
 	startedAt time.Time
 
 	srv  guardSessionMetricsSource
@@ -224,7 +246,12 @@ func newGuardSessionCard(channel, rootNonce string, startedAt time.Time) *guardS
 	if channel == "" || rootNonce == "" {
 		return nil
 	}
-	return &guardSessionCard{channel: channel, rootNonce: rootNonce, startedAt: startedAt}
+	return &guardSessionCard{
+		channel:   channel,
+		rootNonce: rootNonce,
+		sessionID: guardSessionShortID(rootNonce),
+		startedAt: startedAt,
+	}
 }
 
 // startUpdater spawns the goroutine that edits the root card on a fixed cadence with the
@@ -282,7 +309,7 @@ func (c *guardSessionCard) tick(now time.Time) bool {
 	if !changed && !keepaliveDue {
 		return false // unchanged and keepalive not due — spend no API call
 	}
-	sent, err := c.enqueueUpdateSent(guardSessionLiveLine(sum, now.Sub(c.startedAt)))
+	sent, err := c.enqueueUpdateSent(guardSessionLiveLine(c.sessionID, sum, now.Sub(c.startedAt)))
 	if err != nil || !sent {
 		return false // root not posted yet, or enqueue failed — retry next tick, keep gate state
 	}
@@ -290,6 +317,31 @@ func (c *guardSessionCard) tick(now time.Time) bool {
 	c.lastSentAt = now
 	startGuardSessionThreadDrain()
 	return true
+}
+
+// enqueueReply durably appends one lifecycle checkpoint under the session root. ParentNonce
+// lets the outbox bind it after Slack assigns the root ts, including when guard exits before
+// the asynchronous startup drain wins its first pass.
+func (c *guardSessionCard) enqueueReply(text, source string) error {
+	if c == nil {
+		return nil
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	ob, err := openOutbox()
+	if err != nil {
+		return err
+	}
+	_, err = ob.Enqueue(slackoutbox.Row{
+		Nonce:       slackoutbox.NewNonce(),
+		Channel:     c.channel,
+		Text:        text,
+		ParentNonce: c.rootNonce,
+		Source:      guardSessionThreadSource + ":" + source,
+	})
+	return err
 }
 
 // guardSessionCardKey folds the SUBSTANTIVE fields of the adjudication summary — the ones a
@@ -344,17 +396,21 @@ func (c *guardSessionCard) enqueueUpdateSent(text string) (bool, error) {
 	return true, nil
 }
 
-// finalize writes the final outcome edit and flushes it SYNCHRONOUSLY: guard calls
-// os.Exit immediately after, so a background drain would be cut off. Update rows coalesce
-// on the card key, so this final line supersedes any pending periodic edit. With no token
-// the edit stays durable in the spool for a later drain.
+// finalize writes the terminal outcome as BOTH a durable reply and a root-card edit, then
+// flushes synchronously: guard calls os.Exit immediately after, so a background drain would
+// be cut off. The reply is queued first via ParentNonce, which preserves the final truth even
+// when a very fast child failure beats the startup drain and the root has no Slack ts yet.
+// After that first drain posts the root, the edit is retried so the channel-level card also
+// settles on the terminal state. With no token, the outcome reply remains durable for a later
+// drain even though the root edit cannot yet resolve.
 func (c *guardSessionCard) finalize(text string) {
 	if c == nil {
 		return
 	}
-	if err := c.enqueueUpdate(text); err != nil {
+	if err := c.enqueueReply(text, "outcome"); err != nil {
 		return
 	}
+	sent, updateErr := c.enqueueUpdateSent(text)
 	token := resolveGuardSessionsToken()
 	if token == "" {
 		return
@@ -363,24 +419,39 @@ func (c *guardSessionCard) finalize(text string) {
 	if err != nil {
 		return
 	}
-	wire, err := outboxWire(token, "")
+	wire, err := guardSessionWire(token)
 	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), guardSessionFinalDrainTimeout)
 	defer cancel()
-	// A periodic drain kicked by the last tick may still hold the lock; retry within the
-	// bounded window until it releases so the final edit actually ships.
-	for {
-		if _, derr := ob.Drain(ctx, wire, stdDrainOpts()); !errors.Is(derr, slackoutbox.ErrDrainBusy) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(200 * time.Millisecond):
+	drain := func() error {
+		// A periodic drain kicked by the last tick may still hold the lock; retry within the
+		// bounded window until it releases so the final reply/edit actually ships.
+		for {
+			_, derr := ob.Drain(ctx, wire, stdDrainOpts())
+			if !errors.Is(derr, slackoutbox.ErrDrainBusy) {
+				return derr
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
 		}
 	}
+	if updateErr != nil || drain() != nil {
+		return
+	}
+	if sent {
+		return
+	}
+	// The first pass posted an unposted root and its deferred outcome reply. Resolve the
+	// fresh ts now, enqueue the terminal root edit, and flush once more.
+	if sent, err = c.enqueueUpdateSent(text); err != nil || !sent {
+		return
+	}
+	_ = drain()
 }
 
 // finalizeOutcome stops the live updater and writes the terminal outcome edit for the
@@ -393,7 +464,7 @@ func (c *guardSessionCard) finalizeOutcome(exitCode int, sum gateway.Adjudicatio
 		return
 	}
 	c.stopUpdater()
-	c.finalize(guardSessionFinalLine(exitCode, sum, time.Since(c.startedAt)))
+	c.finalize(guardSessionFinalLine(c.sessionID, exitCode, sum, time.Since(c.startedAt)))
 }
 
 // enqueueGuardSessionControlPoints queues the launch replies (banner + context) under the
@@ -418,9 +489,9 @@ func enqueueGuardSessionControlPoints(rootNonce, channel, launchBanner string, c
 	return n, nil
 }
 
-// guardSessionControlPointRows builds the deferred-threaded launch replies: the full
-// startup banner (chunked under the text ceiling) followed by a launch-context row. Each
-// carries ParentNonce=rootNonce so the drainer threads it once the root posts. Pure —
+// guardSessionControlPointRows builds the deferred-threaded launch replies: a lifecycle
+// checkpoint, the full startup banner (chunked under the text ceiling), and launch context.
+// Each carries ParentNonce=rootNonce so the drainer threads it once the root posts. Pure —
 // no I/O — so it is unit-tested directly.
 func guardSessionControlPointRows(rootNonce, channel, launchBanner string, cx guardSessionControlContext) []slackoutbox.Row {
 	channel = strings.TrimSpace(channel)
@@ -429,7 +500,12 @@ func guardSessionControlPointRows(rootNonce, channel, launchBanner string, cx gu
 	}
 	rootNonce = strings.TrimSpace(rootNonce)
 
-	var rows []slackoutbox.Row
+	rows := []slackoutbox.Row{{
+		Channel:     channel,
+		Text:        "lifecycle: launch prepared · waiting for child process · progress stays on the root card · terminal outcome will reply here",
+		ParentNonce: rootNonce,
+		Source:      guardSessionThreadSource + ":progress",
+	}}
 	chunks := guardSessionChunk(strings.TrimRight(launchBanner, "\n"), guardSessionReplyTextLimit)
 	for i, chunk := range chunks {
 		if strings.TrimSpace(chunk) == "" {
@@ -505,24 +581,27 @@ func guardSessionChunk(s string, max int) []string {
 	return chunks
 }
 
-// guardSessionLiveLine renders the running-session status edit.
-func guardSessionLiveLine(sum gateway.AdjudicationSummary, elapsed time.Duration) string {
+// guardSessionLiveLine renders the running-session status edit while preserving the stable
+// session identity that lets an operator scan successive cards without opening each thread.
+func guardSessionLiveLine(sessionID string, sum gateway.AdjudicationSummary, elapsed time.Duration) string {
 	return fmt.Sprintf(
-		"status: running · turns=%d · in=%d out=%d cached=%d · denied=%d · elapsed=%s",
-		sum.Total, sum.InputTokens, sum.OutputTokens, sum.CachedPromptTokens, sum.Denied,
+		":large_blue_circle: *guard session · RUNNING* — session `%s` · turns=%d · in=%d out=%d cached=%d · denied=%d · elapsed=%s",
+		guardSessionShortID(sessionID), sum.Total, sum.InputTokens, sum.OutputTokens, sum.CachedPromptTokens, sum.Denied,
 		guardSessionElapsed(elapsed),
 	)
 }
 
 // guardSessionFinalLine renders the terminal outcome edit.
-func guardSessionFinalLine(exitCode int, sum gateway.AdjudicationSummary, elapsed time.Duration) string {
+func guardSessionFinalLine(sessionID string, exitCode int, sum gateway.AdjudicationSummary, elapsed time.Duration) string {
 	state := "completed"
+	icon := ":white_check_mark:"
 	if exitCode != 0 {
 		state = "failed"
+		icon = ":red_circle:"
 	}
 	return fmt.Sprintf(
-		"status: %s (exit=%d) · turns=%d · in=%d out=%d cached=%d · denied=%d · elapsed=%s",
-		state, exitCode, sum.Total, sum.InputTokens, sum.OutputTokens, sum.CachedPromptTokens, sum.Denied,
+		"%s *guard session · %s* — session `%s` · exit=%d · turns=%d · in=%d out=%d cached=%d · denied=%d · elapsed=%s",
+		icon, strings.ToUpper(state), guardSessionShortID(sessionID), exitCode, sum.Total, sum.InputTokens, sum.OutputTokens, sum.CachedPromptTokens, sum.Denied,
 		guardSessionElapsed(elapsed),
 	)
 }

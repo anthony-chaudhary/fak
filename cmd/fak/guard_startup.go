@@ -134,8 +134,34 @@ func renderGuardStartupReport(v guardStartupView) string {
 	if v.auditJournal != nil {
 		auditThreadPath = v.auditJournal.Path()
 	}
-	if row, err := enqueueGuardSessionThread(v.guardTraceID, v.up, v.command, auditThreadPath, time.Now()); err == nil {
+	// Clear the process-wide handle before attempting this session's root. A guard process
+	// owns exactly one session in production; the reset also keeps repeated in-process test
+	// runs from inheriting a prior card when the next enqueue fails.
+	guardSessionCardHandle = nil
+	startedAt := time.Now()
+	if row, err := enqueueGuardSessionThread(v.guardTraceID, v.up, v.command, auditThreadPath, startedAt); err == nil {
 		fmt.Fprintf(&startupReport, "fak guard: slack thread — queued root in %s (nonce=%s)\n", row.Channel, row.Nonce)
+		guardSessionCardHandle = newGuardSessionCard(row.Channel, row.Nonce, startedAt)
+
+		// The root alone is only a header. Queue the launch banner + operator context under
+		// it BEFORE starting the drainer, using ParentNonce so one pass can post the root and
+		// resolve every reply onto that exact thread. This is the production wiring for the
+		// already-tested control-point rows; without it the live channel carried 100/100
+		// start-only roots even though the renderer existed.
+		cwd, _ := os.Getwd()
+		n, replyErr := enqueueGuardSessionControlPoints(row.Nonce, row.Channel, startupReport.String(), guardSessionControlContext{
+			Command:    v.command,
+			Cwd:        cwd,
+			Audit:      auditThreadPath,
+			Trace:      v.guardTraceID,
+			Provider:   v.up,
+			GatewayURL: v.gwURL,
+		})
+		if replyErr != nil {
+			fmt.Fprintf(&startupReport, "fak guard: slack thread — control replies unavailable: %v\n", replyErr)
+		} else {
+			fmt.Fprintf(&startupReport, "fak guard: slack thread — queued %d control %s\n", n, pluralWord(n, "reply", "replies"))
+		}
 		startGuardSessionThreadDrain()
 	} else {
 		fmt.Fprintf(&startupReport, "fak guard: slack thread — unavailable: %v\n", err)

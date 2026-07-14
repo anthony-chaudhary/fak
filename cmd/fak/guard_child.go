@@ -1240,6 +1240,10 @@ func guardWriteLaunchFailReport(w io.Writer, report string, enabled bool) {
 // (guardChildIsLaunchFailure) — set by the caller for every banner mode except --banner=full,
 // which already streamed it at boot.
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+	// The startup renderer created the card and queued its control replies. Bind its
+	// periodic status fold to the live gateway before the child starts; finalizeOutcome
+	// below stops the updater and replaces the root with the terminal state.
+	guardSessionCardHandle.startUpdater(srv)
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, rotation.launcher())
@@ -1301,6 +1305,9 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 }
 
 func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+	// Same live card as the unsupervised path; child restarts stay one session and one
+	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
+	guardSessionCardHandle.startUpdater(srv)
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0

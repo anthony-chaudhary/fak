@@ -153,7 +153,7 @@ func TestHistoryPassesOldestAndLimitAndDecodes(t *testing.T) {
 		gotQuery = r.URL.Query()
 		_, _ = io.WriteString(w, `{"ok":true,"messages":[
 			{"type":"message","ts":"2.0","thread_ts":"1.0","user":"U1","text":"hi"},
-			{"type":"message","subtype":"bot_message","ts":"3.0","bot_id":"B9","text":"beep"}]}`)
+			{"type":"message","subtype":"bot_message","ts":"3.0","bot_id":"B9","text":"beep","reply_count":2}]}`)
 	}))
 	defer srv.Close()
 
@@ -178,8 +178,42 @@ func TestHistoryPassesOldestAndLimitAndDecodes(t *testing.T) {
 	if m.Type != "message" || m.TS != "2.0" || m.ThreadTS != "1.0" || m.User != "U1" || m.Text != "hi" {
 		t.Fatalf("message 0 decoded wrong: %+v", m)
 	}
-	if msgs[1].Subtype != "bot_message" || msgs[1].BotID != "B9" {
+	if msgs[1].Subtype != "bot_message" || msgs[1].BotID != "B9" || msgs[1].ReplyCount != 2 {
 		t.Fatalf("message 1 decoded wrong: %+v", msgs[1])
+	}
+}
+
+func TestRepliesPassesThreadAndLimitAndDecodes(t *testing.T) {
+	var gotPath string
+	var gotQuery map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		_, _ = io.WriteString(w, `{"ok":true,"messages":[
+			{"type":"message","ts":"1.0","bot_id":"B1","text":"root"},
+			{"type":"message","ts":"2.0","thread_ts":"1.0","user":"U1","text":"reply"}]}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv)
+	msgs, err := c.Replies(context.Background(), "C1", "1.0", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/conversations.replies" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	for key, want := range map[string]string{"channel": "C1", "ts": "1.0", "limit": "17", "include_all_metadata": "true"} {
+		got := ""
+		if values := gotQuery[key]; len(values) > 0 {
+			got = values[0]
+		}
+		if got != want {
+			t.Fatalf("query[%s] = %q, want %q", key, got, want)
+		}
+	}
+	if len(msgs) != 2 || msgs[1].ThreadTS != "1.0" || msgs[1].Text != "reply" {
+		t.Fatalf("replies decoded wrong: %+v", msgs)
 	}
 }
 

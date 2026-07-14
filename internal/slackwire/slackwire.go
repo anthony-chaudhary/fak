@@ -141,14 +141,15 @@ func (e *APIError) Error() string {
 // Message is one Slack channel message — the subset of conversations.history the
 // inbound surfaces (chatrelay, chatops) decide on.
 type Message struct {
-	Type     string           `json:"type"`               // "message" for a real post
-	Subtype  string           `json:"subtype"`            // non-empty for edits/joins/bot posts
-	TS       string           `json:"ts"`                 // "1719600000.000100" — the message id + thread anchor
-	ThreadTS string           `json:"thread_ts"`          // parent thread ts when the message is a threaded reply
-	User     string           `json:"user"`               // posting user id ("" for a bot post)
-	BotID    string           `json:"bot_id"`             // non-empty when posted by a bot
-	Text     string           `json:"text"`               // message body
-	Metadata *MessageMetadata `json:"metadata,omitempty"` // message metadata (History requests it; see IdemNonce)
+	Type       string           `json:"type"`               // "message" for a real post
+	Subtype    string           `json:"subtype"`            // non-empty for edits/joins/bot posts
+	TS         string           `json:"ts"`                 // "1719600000.000100" — the message id + thread anchor
+	ThreadTS   string           `json:"thread_ts"`          // parent thread ts when the message is a threaded reply
+	ReplyCount int              `json:"reply_count"`        // top-level message's threaded reply count (history)
+	User       string           `json:"user"`               // posting user id ("" for a bot post)
+	BotID      string           `json:"bot_id"`             // non-empty when posted by a bot
+	Text       string           `json:"text"`               // message body
+	Metadata   *MessageMetadata `json:"metadata,omitempty"` // message metadata (History requests it; see IdemNonce)
 }
 
 // MessageMetadata is Slack message metadata — an event_type plus a free-form payload,
@@ -273,6 +274,29 @@ func (c *Client) History(ctx context.Context, channel, oldestTS string, limit in
 		Messages []Message `json:"messages"`
 	}
 	if err := c.callGet(ctx, "conversations.history", q, &r); err != nil {
+		return nil, err
+	}
+	return r.Messages, nil
+}
+
+// Replies calls conversations.replies for one top-level thread. Slack includes the
+// parent as the first row followed by its replies; callers that already hold the
+// parent commonly drop that first row. Keeping the transport faithful avoids a
+// second, hand-rolled Slack client in operator capture surfaces such as `fak slack
+// shot`.
+func (c *Client) Replies(ctx context.Context, channel, threadTS string, limit int) ([]Message, error) {
+	q := url.Values{}
+	q.Set("channel", channel)
+	q.Set("ts", threadTS)
+	q.Set("include_all_metadata", "true")
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	var r struct {
+		envelope
+		Messages []Message `json:"messages"`
+	}
+	if err := c.callGet(ctx, "conversations.replies", q, &r); err != nil {
 		return nil, err
 	}
 	return r.Messages, nil
