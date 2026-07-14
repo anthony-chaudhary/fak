@@ -184,6 +184,7 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 	existingJSON := fs.String("existing-json", "", "fixture/list of existing gh issues for dry-run tests")
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
 	live := fs.Bool("live", false, "create/update GitHub issues with gh")
+	project := addDogfoodProjectFlags(fs)
 	asJSON := fs.Bool("json", false, "emit machine-readable review/plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
@@ -211,11 +212,20 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	for i := range handoff.NextSteps {
+		points := float64(handoff.NextSteps[i].ExpectedSteps)
+		handoff.NextSteps[i].WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+		handoff.NextSteps[i].ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, project.baseline())
+		handoff.NextSteps[i].CompletionStandard = *project.standard
+		handoff.NextSteps[i].TargetEnvelope = *project.target
+		handoff.NextSteps[i].WitnessedEnvelope = *project.witnessed
+	}
+
 	review := taskmgr.ReviewHandoffWithOptions(handoff, taskmgr.HandoffReviewOptions{
-		StrictScope:   true,
+		StrictScope: true, StrictProjectWork: true,
 		Live:          *live,
 		DedupeChecked: *live || *fetchExisting || *existingJSON != "",
-		DedupeCap:     taskHandoffIssueScanLimit(*limit),
+		DedupeCap:     taskHandoffIssueScanLimit(*limit), ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	})
 	mode := "dry-run"
 	if *live {

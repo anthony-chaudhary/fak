@@ -82,6 +82,11 @@ type HandoffNextStep struct {
 	Labels                  []string      `json:"labels,omitempty"`
 	BoundaryNotes           []string      `json:"boundary_notes,omitempty"`
 	ClosureBinding          string        `json:"closure_binding,omitempty"`
+	WorkEstimate            string        `json:"work_estimate,omitempty"`
+	ScopeContribution       string        `json:"scope_contribution,omitempty"`
+	CompletionStandard      string        `json:"completion_standard,omitempty"`
+	TargetEnvelope          string        `json:"target_operating_envelope,omitempty"`
+	WitnessedEnvelope       string        `json:"witnessed_operating_envelope,omitempty"`
 	EvidenceRefs            []EvidenceRef `json:"evidence_refs,omitempty"`
 }
 
@@ -115,10 +120,15 @@ type HandoffReview struct {
 // be rewritten, so this comment restates the closure binding explicitly for the
 // grep-based referee.
 type HandoffReviewOptions struct {
-	StrictScope   bool
-	Live          bool
-	DedupeChecked bool
-	DedupeCap     int
+	StrictScope        bool
+	StrictProjectWork  bool
+	Live               bool
+	DedupeChecked      bool
+	DedupeCap          int
+	ParentBaseline     float64
+	CompletionStandard string
+	TargetEnvelope     string
+	WitnessedEnvelope  string
 }
 
 // HandoffIssue is the subset of a GitHub issue needed to dedupe handoff-created
@@ -221,10 +231,20 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 		issueReviews = make([]issuecontract.Review, 0, nextCount)
 		for i, step := range h.NextSteps {
 			prefix := "NEXT_STEP_" + strconv.Itoa(i+1) + "_"
-			ir := issuecontract.ReviewCandidate(handoffIssueCandidate(h, step), issuecontract.Options{
-				Live:          opt.Live,
-				DedupeChecked: opt.DedupeChecked,
-				DedupeCap:     opt.DedupeCap,
+			c := handoffIssueCandidate(h, step)
+			if opt.StrictProjectWork {
+				points := float64(c.ExpectedSteps)
+				c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+				c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
+				c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
+				c.TargetEnvelope = opt.TargetEnvelope
+				c.WitnessedEnvelope = opt.WitnessedEnvelope
+			}
+			ir := issuecontract.ReviewCandidate(c, issuecontract.Options{
+				Live:              opt.Live,
+				DedupeChecked:     opt.DedupeChecked,
+				DedupeCap:         opt.DedupeCap,
+				StrictProjectWork: opt.StrictProjectWork,
 			})
 			issueReviews = append(issueReviews, ir)
 			for _, reason := range ir.Reasons {
@@ -281,6 +301,7 @@ func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuecontract.Candid
 		Priority:        strings.TrimSpace(step.Priority),
 		BoundaryNotes:   compactStrings(step.BoundaryNotes),
 		ClosureBinding:  strings.TrimSpace(step.ClosureBinding),
+		WorkEstimate:    step.WorkEstimate, ScopeContribution: step.ScopeContribution, CompletionStandard: step.CompletionStandard, TargetEnvelope: step.TargetEnvelope, WitnessedEnvelope: step.WitnessedEnvelope,
 	}
 }
 
