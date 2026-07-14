@@ -177,6 +177,8 @@ func validateCodexLaunchSplit(mode, where string) error {
 	}
 }
 
+const codexCompactTokenLimit = 96000
+
 func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 	argv := []string{
 		fakBin,
@@ -226,6 +228,13 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 	}
 
 	argv = append(argv, "--", "codex")
+	// fak's history compactor is intentionally attached to the Anthropic Messages
+	// wire. Codex uses the OpenAI Responses wire, so its equivalent shed line must
+	// be configured in Codex itself. Without this override fakc inherits Codex's
+	// near-window default (~245K on a 258K effective window), which made guarded
+	// sessions appear never to compact and left headless workers above the 96K
+	// budget tracked by #4253. A later user-supplied -c remains authoritative.
+	argv = append(argv, "-c", fmt.Sprintf("model_auto_compact_token_limit=%d", codexCompactTokenLimit))
 	if o.skipPermissions {
 		if flag := launchSkipPermsFlag("codex"); flag != "" {
 			argv = append(argv, flag)

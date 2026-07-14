@@ -436,6 +436,7 @@ CLAUDE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
 # host threads for its whole (unbounded) lifespan. Backed off DEFAULT_TIMEOUT_S so the
 # in-guard drain still precedes launch()'s hard-kill on the synchronous path.
 OPENCODE_GUARD_MAX_DURATION = f"{DEFAULT_TIMEOUT_S - 60}s"
+CODEX_COMPACT_TOKEN_LIMIT = 96000
 
 
 def claude_guard_budget_args(
@@ -834,6 +835,12 @@ def guard_wrap(
     if backend != "claude":
         e = env if env is not None else os.environ
         if backend == "codex":
+            # fak's --compact-history-budget is Anthropic-only. Put Codex's native
+            # Responses-wire equivalent before the exec/TUI subcommand; a later
+            # operator -c remains authoritative.
+            cmd = [cmd[0], "-c",
+                   f"model_auto_compact_token_limit={CODEX_COMPACT_TOKEN_LIMIT}",
+                   *cmd[1:]]
             # Codex subscription auth is resolved from CODEX_HOME/auth.json by guard.
             # Do not inherit the opencode/local-upstream base URL: pointing guard at
             # that endpoint both bypasses ChatGPT auth and makes it demand an API key.

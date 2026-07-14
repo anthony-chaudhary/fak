@@ -434,11 +434,27 @@ func randToken() string {
 //     FLEET_DOGFOOD_GUARD_BASEURL names that upstream. We refuse to misroute.
 //
 // Mirrors dispatch_worker.guard_wrap.
+const codexCompactTokenLimit = 96000
+
+func withCodexCompactLimit(command []string) []string {
+	if len(command) == 0 {
+		return command
+	}
+	out := make([]string, 0, len(command)+2)
+	out = append(out, command[0], "-c", fmt.Sprintf("model_auto_compact_token_limit=%d", codexCompactTokenLimit))
+	return append(out, command[1:]...)
+}
+
 func guardWrap(command []string, fakBin, lane, backend, workspace, workerModel string, env map[string]string) []string {
 	if len(command) == 0 || fakBin == "" {
 		return command
 	}
 	provider := guardProvider(backend)
+	if backend == "codex" {
+		// --compact-history-budget is Anthropic-only. On the Responses wire,
+		// configure Codex's native compactor before its exec/TUI subcommand.
+		command = withCodexCompactLimit(command)
+	}
 	var extra []string
 	audit := guardAuditPath(workspace, lane, backend)
 	if backend == "claude" {

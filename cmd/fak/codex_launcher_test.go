@@ -27,6 +27,7 @@ func TestBuildCodexLaunchArgvDefault(t *testing.T) {
 		"--split-interval", "2s",
 		"--",
 		"codex",
+		"-c", "model_auto_compact_token_limit=96000",
 		"--dangerously-bypass-approvals-and-sandbox",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -75,11 +76,27 @@ func TestBuildCodexLaunchArgvAdvancedFlagsAndPassthrough(t *testing.T) {
 		"--codex-home", "codex-home",
 		"--",
 		"codex",
+		"-c", "model_auto_compact_token_limit=96000",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"exec", "--json", "summarize AGENTS.md",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildCodexLaunchArgv advanced = %#v\nwant %#v", got, want)
+	}
+}
+
+func TestBuildCodexLaunchArgvCompactionLimitAllowsExplicitOverride(t *testing.T) {
+	got := buildCodexLaunchArgv("fak", codexLaunchOptions{
+		splitInterval: time.Second,
+		codexConfig:   true,
+		passthrough: []string{
+			"-c", "model_auto_compact_token_limit=120000", "exec", "work",
+		},
+	})
+	joined := strings.Join(got, " ")
+	want := "codex -c model_auto_compact_token_limit=96000 -c model_auto_compact_token_limit=120000 exec work"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("Codex compaction defaults/override order = %q, want substring %q", joined, want)
 	}
 }
 
@@ -101,6 +118,7 @@ func TestBuildCodexLaunchArgvManagedCache(t *testing.T) {
 		"--managed-cache", "on",
 		"--",
 		"codex",
+		"-c", "model_auto_compact_token_limit=96000",
 		"--dangerously-bypass-approvals-and-sandbox",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -132,7 +150,7 @@ func TestBuildCodexLaunchArgvSkipPermissionsOff(t *testing.T) {
 		codexConfig:     true,
 		passthrough:     []string{"exec", "do x"},
 	})
-	want := []string{"fak", "guard", "--split", "off", "--split-where", "bottom", "--split-interval", "1s", "--", "codex", "exec", "do x"}
+	want := []string{"fak", "guard", "--split", "off", "--split-where", "bottom", "--split-interval", "1s", "--", "codex", "-c", "model_auto_compact_token_limit=96000", "exec", "do x"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("skip-permissions off argv = %#v\nwant %#v", got, want)
 	}

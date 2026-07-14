@@ -364,7 +364,26 @@ class DispatchWorkerTest(unittest.TestCase):
         gate = wrapped.index("--codex-loop-gate")
         self.assertEqual(wrapped[gate + 1], "off")
         self.assertNotIn("--base-url", wrapped)
-        self.assertEqual(wrapped[wrapped.index("--") + 1:], raw)
+        self.assertEqual(
+            wrapped[wrapped.index("--") + 1:],
+            ["codex", "-c", "model_auto_compact_token_limit=96000",
+             "exec", "ship issue"],
+        )
+
+    def test_guard_wrap_codex_injects_native_compact_limit(self) -> None:
+        mod = load()
+        raw = ["codex", "exec", "work"]
+        wrapped = mod.guard_wrap(
+            raw, fak_bin="/usr/bin/fak", lane="gateway", backend="codex",
+            workspace=Path("."), env={})
+        self.assertIn("--", wrapped)
+        child = wrapped[wrapped.index("--") + 1:]
+        self.assertEqual(
+            child,
+            ["codex", "-c", "model_auto_compact_token_limit=96000",
+             "exec", "work"],
+        )
+
     def test_guard_wrap_noop_without_fak_bin(self) -> None:
         mod = load()
         raw = mod.build_command("docs", "claude")

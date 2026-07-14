@@ -312,6 +312,18 @@ func TestGuardWrapClaudeFrontsWithFakGuardAnthropic(t *testing.T) {
 	}
 }
 
+func TestGuardWrapCodexInjectsNativeCompactLimit(t *testing.T) {
+	raw := []string{"codex", "exec", "work"}
+	wrapped := guardWrap(raw, "/usr/bin/fak", "gateway", "codex", ".", "", map[string]string{
+		"FLEET_DOGFOOD_GUARD_BASEURL": "http://127.0.0.1:8131/v1",
+	})
+	joined := strings.Join(wrapped, " ")
+	want := "-- codex -c model_auto_compact_token_limit=96000 exec work"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("guardWrap(codex) = %q, want substring %q", joined, want)
+	}
+}
+
 func TestGuardWrapNoopWithoutFakBin(t *testing.T) {
 	raw, _ := buildCommand("docs", "claude")
 	if got := guardWrap(raw, "", "docs", "claude", ".", "", map[string]string{}); !sliceEqual(got, raw) {
