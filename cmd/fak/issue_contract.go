@@ -168,6 +168,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
 	strictModelTier := fs.Bool("strict-model-tier", false, "hold issues with missing/invalid/contradictory model-tier metadata triage-only")
 	strictScale := fs.Bool("strict-scale", false, "hold issues with an undeclared work size or a witness smaller than the work triage-only")
+	strictProjectWork := fs.Bool("strict-project-work", false, "hold issues missing/invalid effort, parent contribution, or completion-standard metadata triage-only")
 	strictBornRouted := fs.Bool("strict-born-routed", false, "hold issues missing a lane, class label, or priority label triage-only")
 	asJSON := fs.Bool("json", false, "emit machine-readable review/result")
 	if !parseFlags(fs, argv) {
@@ -211,12 +212,13 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		OK:     true,
 	}
 	opts := issuecontract.Options{
-		Live:             *live,
-		DedupeChecked:    *dedupeChecked,
-		DedupeCap:        *dedupeCap,
-		StrictModelTier:  *strictModelTier,
-		StrictScale:      *strictScale,
-		StrictBornRouted: *strictBornRouted,
+		Live:              *live,
+		DedupeChecked:     *dedupeChecked,
+		DedupeCap:         *dedupeCap,
+		StrictModelTier:   *strictModelTier,
+		StrictScale:       *strictScale,
+		StrictBornRouted:  *strictBornRouted,
+		StrictProjectWork: *strictProjectWork,
 	}
 	if mode == "issues" {
 		issues, err := decodeIssueContractIssues(b)
@@ -1108,6 +1110,11 @@ func renderIssueContract(r issueContractResult) string {
 			line += fmt.Sprintf(" scale_evidence=%d required_stages=%d missing_stages=%d",
 				len(review.ScaleEvidence.Records), len(review.ScaleEvidence.RequiredStages), len(review.ScaleEvidence.MissingStages))
 		}
+		if review.ProjectWork.Status != issuecontract.ProjectWorkUndeclared {
+			line += fmt.Sprintf(" project_work=%s estimate=%g contribution=%g/%g completion=%s",
+				review.ProjectWork.Status, review.ProjectWork.EstimatePoints, review.ProjectWork.Contribution,
+				review.ProjectWork.ParentBaseline, issueContractBucketValue(review.ProjectWork.CompletionStandard, "?"))
+		}
 		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
@@ -1135,6 +1142,12 @@ func renderIssueContract(r issueContractResult) string {
 		}
 		for _, stage := range review.ScaleEvidence.MissingStages {
 			lines = append(lines, "    scale_evidence_missing_stage: "+stage)
+		}
+		for _, invalid := range review.ProjectWork.Invalid {
+			lines = append(lines, "    project_work_invalid: "+invalid)
+		}
+		for _, repair := range review.ProjectWork.Repair {
+			lines = append(lines, "    project_work_repair: "+repair)
 		}
 		for _, flag := range review.BornRouted.Flags {
 			lines = append(lines, "    born_routed_flag: "+flag)

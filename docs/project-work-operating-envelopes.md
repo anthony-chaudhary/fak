@@ -102,3 +102,34 @@ Its closed status vocabulary is:
 Every non-aligned result exits 3, sets `production_credit_current=false`, and emits an
 exact action. This makes the command suitable for both a periodic loop and an on-demand
 status/dispatch preflight. Supplying `--now` makes freshness witnesses reproducible.
+
+## Canonical project-work contract
+
+`fak issue contract --strict-project-work` turns project maturity and weighted scope into
+a dispatch gate. Every dispatchable ticket must provide:
+
+```markdown
+## Work estimate
+Estimate: 5 points (medium). Uncertainty: consumer inventory.
+
+## Overall completion contribution
+Parent scope baseline: #4636 rollout, 47 points. Contribution: 5/47 points (10.6%).
+
+## Completion standard
+production
+```
+
+The estimate and contribution must be positive, contribution cannot exceed the parent
+baseline, and estimate points must equal contribution points so the work estimate and
+portfolio numerator cannot silently diverge. `Parent context` must bind a `#N` parent.
+The normalized completion vocabulary is `research`, `experiment`, `prototype`, `demo`,
+`development`/`dev`, `integrated`, `staging`, or `production`.
+
+JSON emits `project_work` with normalized points, denominator, contribution share,
+completion standard, production-credit eligibility, invalid fields, and repair actions.
+An explicit non-production ticket is valid but has `production_credit=false`. Strict
+review returns `ISSUE_PROJECT_WORK_MISSING` for an undeclared legacy ticket and
+`ISSUE_PROJECT_WORK_INVALID` for malformed or contradictory metadata. Without the strict
+flag, the readout remains advisory for the measured migration in #4642; first-party
+producers turn strict-compatible production defaults on under #4638 rather than guessing
+legacy values.
