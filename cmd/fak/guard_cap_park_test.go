@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -180,6 +181,23 @@ func TestGuardCapParkWait(t *testing.T) {
 			t.Errorf("a no-park decision slept, want no sleep")
 		}
 	})
+}
+
+func TestGuardCapParkWaitSurfacesParkedUntil(t *testing.T) {
+	// Fixed clock so the absolute reset time is deterministic: 14:34 + 90m = 16:04.
+	base := time.Date(2026, 1, 1, 14, 34, 0, 0, time.UTC)
+	dec := guardCapParkDecision{
+		Park:        true,
+		LimitReason: "session_limit",
+		Wait:        90 * time.Minute,
+		Relaunch:    []string{"claude", "--continue"},
+	}
+	var out bytes.Buffer
+	guardCapParkWait(dec, 0, func() time.Time { return base }, func(time.Duration) {}, &out)
+	got := out.String()
+	if !strings.Contains(got, "parked until 16:04") {
+		t.Errorf("park line missing absolute reset time: %q", got)
+	}
 }
 
 // writeTranscriptAt writes a `.jsonl` at the given path with the given mtime, creating parents.

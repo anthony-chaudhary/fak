@@ -175,8 +175,9 @@ func guardCapParkWait(dec guardCapParkDecision, budget time.Duration, now func()
 		wait = budget
 	}
 	if stderr != nil {
-		fmt.Fprintf(stderr, "fak guard: parked — %s: riding out the reset for %s before relaunching `%s` (FAK_GUARD_PARK_BUDGET clamps this; 0-length disables the cap park).\n",
-			dec.LimitReason, wait.Round(time.Second), strings.Join(dec.Relaunch, " "))
+		until := now().Add(wait)
+		fmt.Fprintf(stderr, "fak guard: parked until %s — %s: riding out the reset for %s before relaunching `%s` (FAK_GUARD_PARK_BUDGET clamps this; 0-length disables the cap park).\n",
+			until.Format("15:04"), dec.LimitReason, wait.Round(time.Second), strings.Join(dec.Relaunch, " "))
 	}
 	start := now()
 	sleep(wait)
