@@ -195,6 +195,12 @@ func guardEmitRestartHop(j *journal.Journal, stderr io.Writer, agentName, guardT
 // provenance — where the evidence came from ("journal" = a recorded RESTART_HOP
 // row; "backfill" = a seed file with NO recorded hop, the pre-#3057 orphans)
 // and when it happened (row timestamp, or seed-file mtime for a backfill).
+type guardRestartGiveUp struct {
+	Agent   string `json:"agent,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
+	Reason  string `json:"reason"`
+	Source  string `json:"source,omitempty"`
+}
 type guardRestartAuditHop struct {
 	journal.RestartHop
 	Agent      string `json:"agent,omitempty"`
@@ -213,6 +219,7 @@ type guardRestartAuditReport struct {
 	Seeds    int                    `json:"seeds_scanned"`
 	Hops     []guardRestartAuditHop `json:"hops"`
 	Counts   map[string]int         `json:"counts"`
+	GiveUps  []guardRestartGiveUp   `json:"give_ups,omitempty"`
 	Notes    []string               `json:"notes,omitempty"`
 }
 
@@ -252,6 +259,10 @@ func guardRestartAuditScan(journalDir string, seedDirs []string, trace string) g
 			}
 			rep.Journals++
 			for _, row := range rows {
+				if row.Kind == "CHILD_CRASH" && row.Reason == guardCrashRestartExhaustedReason {
+					rep.GiveUps = append(rep.GiveUps, guardRestartGiveUp{Agent: row.Tool, TraceID: row.TraceID, Reason: row.Reason, Source: f})
+					continue
+				}
 				if row.Kind != journal.KindRestartHop {
 					continue
 				}
@@ -379,6 +390,9 @@ func guardRestartChainSection(w io.Writer, rep guardRestartAuditReport, color bo
 		rep.Counts[journal.RestartHopBreak], rep.Counts[journal.RestartHopLoss], rep.Journals, rep.Seeds)
 	for _, h := range rep.Hops {
 		fmt.Fprintf(w, "  %s\n", guardRestartAuditHopLine(h, color))
+	}
+	for _, g := range rep.GiveUps {
+		fmt.Fprintf(w, "  give-up: reason=%s agent=%s trace=%s source=%s\n", g.Reason, g.Agent, g.TraceID, g.Source)
 	}
 	for _, n := range rep.Notes {
 		fmt.Fprintf(w, "  note: %s\n", n)

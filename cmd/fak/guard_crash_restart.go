@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
 // In-place harness-crash restart (#4686) — the generic-crash counterpart of the four narrow
@@ -51,14 +52,50 @@ func guardCrashRestartDelay(attempt int) time.Duration {
 	if attempt <= 0 {
 		return 0
 	}
-	d := guardCrashRestartInitialDelay
-	for i := 1; i < attempt && d < guardCrashRestartMaxDelay; i++ {
-		d *= 2
-		if d > guardCrashRestartMaxDelay {
-			d = guardCrashRestartMaxDelay
+	policy := loopmgr.RestartPolicy{
+		MaxAttempts: ^uint64(0),
+		BaseDelay:   guardCrashRestartInitialDelay,
+		MaxDelay:    guardCrashRestartMaxDelay,
+	}
+	return policy.BackoffDelay(uint64(attempt-1), nil)
+}
+
+const (
+	guardCrashRestartExhaustedReason = "CRASH_RESTART_EXHAUSTED"
+	guardCrashNoProgressLimitEnv     = "FLEET_CLAUDE_GUARD_CRASH_NO_PROGRESS_LIMIT"
+	guardCrashNoProgressLimitDefault = 2
+)
+
+func guardCrashNoProgressLimit(crashLimit int) int {
+	raw := strings.TrimSpace(os.Getenv(guardCrashNoProgressLimitEnv))
+	limit := guardCrashNoProgressLimitDefault
+	if raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			limit = n
 		}
 	}
-	return d
+	// A no-progress reap is useful only when it can fire before the flat budget.
+	if crashLimit > 1 && limit >= crashLimit {
+		limit = crashLimit - 1
+	}
+	return limit
+}
+
+// guardCrashNoProgressStep applies the same HEAD-advance discipline as budget restarts.
+// A crash that shipped earns a reset; K consecutive crashes at the same HEAD are reaped.
+func guardCrashNoProgressStep(prevHead, currentHead string, stalled, limit int) (nextHead string, nextStalled int, reap bool) {
+	nextHead, nextStalled = guardNoProgressStep(prevHead, currentHead, stalled)
+	return nextHead, nextStalled, limit > 0 && nextStalled >= limit
+}
+
+func guardCrashRestartGiveUpStatus(limit int, traceID string) string {
+	return fmt.Sprintf("fak guard: %s: harness crash restart reaped after %d consecutive crash(es) without HEAD progress (trace %s); refusing another relaunch", guardCrashRestartExhaustedReason, limit, strings.TrimSpace(traceID))
+}
+
+func guardRecordCrashRestartGiveUp(auditJournal *journal.Journal, agentName, traceID string) {
+	if auditJournal != nil {
+		auditJournal.AppendCrash(agentName, traceID, guardCrashRestartExhaustedReason, -1)
+	}
 }
 
 // guardMaybeRestartOnCrash is the generic-crash admission decision, wired at the SAME two recovery

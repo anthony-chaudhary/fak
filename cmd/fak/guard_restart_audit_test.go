@@ -17,6 +17,23 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
+func TestGuardRestartAuditSurfacesCrashGiveUpReason(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	j, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardRecordCrashRestartGiveUp(j, "claude", "trace-crash")
+
+	var out bytes.Buffer
+	if code := runGuardRestartAudit(&out, &out, []string{"--journal-dir", dir, "--scan-temp=false", "--json"}); code != 0 {
+		t.Fatalf("runGuardRestartAudit code=%d output=%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), guardCrashRestartExhaustedReason) {
+		t.Fatalf("restart audit output %q does not surface typed give-up reason", out.String())
+	}
+}
 func TestRestartChainHopFromEvent(t *testing.T) {
 	full := guardBudgetRestartEvent{
 		Schema:      "fak.guard.budget_restart.v1",

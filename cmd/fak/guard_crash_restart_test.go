@@ -110,6 +110,54 @@ func TestGuardCrashRestartHopReattaches(t *testing.T) {
 	}
 }
 
+func TestGuardCrashRestartNoProgressReap(t *testing.T) {
+	head, stalled, reap := guardCrashNoProgressStep("sha-a", "sha-a", 0, 2)
+	if head != "sha-a" || stalled != 1 || reap {
+		t.Fatalf("first stall = head %q count %d reap %v", head, stalled, reap)
+	}
+	head, stalled, reap = guardCrashNoProgressStep(head, "sha-a", stalled, 2)
+	if stalled != 2 || !reap {
+		t.Fatalf("second stall = count %d reap %v, want early reap", stalled, reap)
+	}
+	head, stalled, reap = guardCrashNoProgressStep(head, "sha-b", stalled, 2)
+	if head != "sha-b" || stalled != 0 || reap {
+		t.Fatalf("HEAD progress = head %q count %d reap %v, want reset", head, stalled, reap)
+	}
+}
+
+func TestGuardCrashRestartGiveUpReason(t *testing.T) {
+	line := guardCrashRestartGiveUpStatus(2, "trace-crash")
+	for _, want := range []string{guardCrashRestartExhaustedReason, "2 consecutive", "trace-crash"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("give-up status %q missing %q", line, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	j, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardRecordCrashRestartGiveUp(j, "claude", "trace-crash")
+	rows := j.Recent(1)
+	if len(rows) != 1 || rows[0].Kind != "CHILD_CRASH" || rows[0].Reason != guardCrashRestartExhaustedReason {
+		t.Fatalf("give-up audit row = %+v", rows)
+	}
+}
+
+func TestGuardCrashNoProgressLimit(t *testing.T) {
+	t.Setenv(guardCrashNoProgressLimitEnv, "")
+	if got := guardCrashNoProgressLimit(3); got != 2 {
+		t.Fatalf("default limit = %d, want 2", got)
+	}
+	t.Setenv(guardCrashNoProgressLimitEnv, "1")
+	if got := guardCrashNoProgressLimit(3); got != 1 {
+		t.Fatalf("override limit = %d, want 1", got)
+	}
+	t.Setenv(guardCrashNoProgressLimitEnv, "0")
+	if got := guardCrashNoProgressLimit(3); got != 0 {
+		t.Fatalf("disabled limit = %d, want 0", got)
+	}
+}
 func TestGuardCrashRestartBackoff(t *testing.T) {
 	want := []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second}
 	for attempt, expected := range want {

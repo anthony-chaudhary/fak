@@ -1250,6 +1250,9 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
+	crashProgressHead := sessionStartSHA()
+	crashNoProgress := 0
+	crashNoProgressLimit := guardCrashNoProgressLimit(crashLimit)
 	wireRetries := 0
 	wireLimit := guardWireRetryLimit()
 	for {
@@ -1286,6 +1289,14 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
 			crashRestarts++
+			var reap bool
+			crashProgressHead, crashNoProgress, reap = guardCrashNoProgressStep(crashProgressHead, sessionStartSHA(), crashNoProgress, crashNoProgressLimit)
+			if reap {
+				guardRecordCrashRestartGiveUp(auditJournal, agentName, guardTraceID)
+				fmt.Fprintln(os.Stderr, guardCrashRestartGiveUpStatus(crashNoProgressLimit, guardTraceID))
+				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			guardReportCrashRestart(os.Stderr, agentName, class, code, crashRestarts, crashLimit, command)
 			time.Sleep(guardCrashRestartDelay(crashRestarts))
 			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
@@ -1349,6 +1360,9 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
+	crashProgressHead := sessionStartSHA()
+	crashNoProgress := 0
+	crashNoProgressLimit := guardCrashNoProgressLimit(crashLimit)
 	wireRetries := 0
 	wireLimit := guardWireRetryLimit()
 	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
@@ -1413,6 +1427,13 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
 				crashRestarts++
+				var reap bool
+				crashProgressHead, crashNoProgress, reap = guardCrashNoProgressStep(crashProgressHead, sessionStartSHA(), crashNoProgress, crashNoProgressLimit)
+				if reap {
+					guardRecordCrashRestartGiveUp(auditJournal, agentName, guardTraceID)
+					fmt.Fprintln(restarter.stderr, guardCrashRestartGiveUpStatus(crashNoProgressLimit, guardTraceID))
+					break
+				}
 				guardReportCrashRestart(restarter.stderr, agentName, class, code, crashRestarts, crashLimit, command)
 				time.Sleep(guardCrashRestartDelay(crashRestarts))
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
