@@ -168,8 +168,18 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
-	if req.Machine == "gcp-g2-l4" && req.Benchmark == "gpu-benchmark" {
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=sm_89 bash internal/compute/build_cuda.sh binary ./cmd/gpucheck /tmp/fak-gpucheck && /tmp/fak-gpucheck -hf ~/models/qwen05 -n 4"
+	if req.Benchmark == "gpu-benchmark" {
+		arch := ""
+		switch req.Machine {
+		case "gcp-g2-l4":
+			arch = "sm_89"
+		case "gcp-a3-high-h100-1g":
+			// The current catalog ID is fulfilled by the sanctioned A100 serve node.
+			arch = "sm_80"
+		}
+		if arch != "" {
+			return prefix + "export PATH=$HOME/.local/go/bin:$PATH; CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=" + arch + " bash internal/compute/build_cuda.sh binary ./cmd/gpucheck /tmp/fak-gpucheck && /tmp/fak-gpucheck -hf ~/models/qwen05 -n 4"
+		}
 	}
 	return prefix + req.Command
 }

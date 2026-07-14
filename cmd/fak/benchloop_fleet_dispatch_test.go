@@ -139,3 +139,12 @@ func TestBenchFleetL4UsesProvisionedGPURecipe(t *testing.T) {
 		}
 	}
 }
+
+func TestBenchFleetA100UsesProvisionedGPURecipe(t *testing.T) {
+	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-a3-high-h100-1g", Benchmark: "gpu-benchmark", Command: "generic"})
+	for _, want := range []string{"FAK_CUDA_ARCH=sm_80", "build_cuda.sh binary", "~/models/qwen05"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("command %q missing %q", cmd, want)
+		}
+	}
+}
