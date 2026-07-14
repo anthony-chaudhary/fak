@@ -143,7 +143,7 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 			w.State = "failed"
 		}
 		w.Error = runErr.Error()
-	} else if !strings.Contains(w.Output, "FAK_BENCH_NODE=") {
+	} else if !hasBenchNodeWitness(w.Output) {
 		w.State = "failed"
 		w.Error = "remote witness missing FAK_BENCH_NODE marker"
 	} else {
@@ -153,8 +153,18 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 	return w
 }
 
+func hasBenchNodeWitness(output string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "FAK_BENCH_NODE="); ok {
+			value = strings.TrimSpace(value)
+			return value != "" && !strings.ContainsAny(value, "$()")
+		}
+	}
+	return false
+}
+
 func benchFleetRoute(root string, req benchFleetRequest) (string, []string, string, string, error) {
-	remote := "printf 'FAK_BENCH_NODE=%s\\n' '$(hostname)' && cd ~/fak && " + req.Command
+	remote := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && " + req.Command
 	switch req.Machine {
 	case "gcp-g2-l4":
 		return "gcloud", []string{"compute", "ssh", "fak-cuda-build-l4", "--zone", "us-central1-b", "--quiet", "--command", remote}, "gcp:ssh/fak-cuda-build-l4", "running", nil

@@ -109,3 +109,14 @@ func TestBenchFleetRejectsEmptyRemoteSuccess(t *testing.T) {
 		t.Fatalf("witness=%+v", w)
 	}
 }
+
+func TestBenchNodeWitnessRequiresResolvedIdentity(t *testing.T) {
+	for _, bad := range []string{"", "FAK_BENCH_NODE=", "FAK_BENCH_NODE=$(hostname)"} {
+		if hasBenchNodeWitness(bad) {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	if !hasBenchNodeWitness("noise\nFAK_BENCH_NODE=fak-cuda-build-l4\n") {
+		t.Fatal("rejected resolved identity")
+	}
+}
