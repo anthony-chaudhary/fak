@@ -152,6 +152,17 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("agentbenchdemo-selfcheck", ("go", "run", "./cmd/agentbenchdemo", "-selfcheck"), ("the self-tax invariants hold",)),
     Witness("agentbenchdemo-json", ("go", "run", "./cmd/agentbenchdemo", "-json"), ('"iterations"', '"calls"')),
     Witness(
+        "fanoutdemo",
+        ("go", "run", "./cmd/fanoutdemo"),
+        ("the spine-first fan-out planner", "contract-ready follow-ons for issue fanout planner", "spine_ref is required"),
+    ),
+    Witness("fanoutdemo-selfcheck", ("go", "run", "./cmd/fanoutdemo", "-selfcheck"), ("the fan-out invariants hold",)),
+    Witness(
+        "fanoutdemo-json",
+        ("go", "run", "./cmd/fanoutdemo", "-json"),
+        ('"spine_first_refusal"', '"schema": "fak.issue-fanout-plan.v1"', '"fanout-issuefanout-qa-edge-sweep"'),
+    ),
+    Witness(
         "trychatdemo-print",
         ("go", "run", "./cmd/trychatdemo", "-print"),
         ("the try-it agentic chat", "It's 11:58"),
