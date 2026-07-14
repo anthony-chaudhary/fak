@@ -892,6 +892,51 @@ class LoopLedgerTest(unittest.TestCase):
         self.assertIn(("tree", "internal/gateway/**"), rows[1]["evidence"])
 
 
+class FleetTrendTickTest(unittest.TestCase):
+    """#4594: each live dispatcher tick feeds the fleet-status trend ledger."""
+
+    def test_appends_partial_live_row_from_preflight(self) -> None:
+        import json
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            payload = {"preflight": {"verdict": "SPAWN_OK", "cap": 4, "live": 3}}
+            out = mod.append_fleet_trend_row(root, payload, now="2026-07-14T12:00:00Z")
+            self.assertTrue(out["ok"])
+            ledger = root / ".fak" / "nightrun" / "fleet-status-history.jsonl"
+            self.assertTrue(ledger.exists())
+            rows = [json.loads(l) for l in ledger.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["ts"], "2026-07-14T12:00:00Z")
+            self.assertEqual(rows[0]["live"], 3.0)
+            # the fleet_top-only aggregates stay honestly absent, never a zero
+            for absent in ("usable", "sessions", "escalate"):
+                self.assertNotIn(absent, rows[0])
+            mod.append_fleet_trend_row(root, payload, now="2026-07-14T12:05:00Z")
+            rows = [json.loads(l) for l in ledger.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 2)
+
+    def test_missing_preflight_records_zero_live(self) -> None:
+        import json
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = mod.append_fleet_trend_row(root, {}, now="2026-07-14T12:00:00Z")
+            self.assertTrue(out["ok"])
+            row = json.loads(Path(out["ledger"]).read_text(encoding="utf-8").strip())
+            self.assertEqual(row["live"], 0.0)
+
+    def test_append_failure_never_raises(self) -> None:
+        mod = load()
+
+        def boom(path, metrics, now, **kw):
+            raise OSError("disk full")
+
+        out = mod.append_fleet_trend_row(Path("z:/nope"), {}, append=boom)
+        self.assertFalse(out["ok"])
+        self.assertIn("disk full", out["error"])
+
+
 class EvaluateTest(unittest.TestCase):
     SPAWN_OK = {
         "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
@@ -968,6 +1013,44 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["lane"], "gateway")
         self.assertEqual(p["target_issue"], 467)
         self.assertIn("467", p["reason"])
+
+    def test_live_tick_appends_fleet_trend_row(self) -> None:
+        import json
+        mod = load()
+        refuse = {
+            "verdict": "REFUSE_AT_CAP", "reason": "at cap", "cap": 2, "live": 2,
+            "account": {"tag": "worker-a", "tier": 1, "model": "opus", "dir": "/acct/a"},
+        }
+        self._patch(mod, pre=refuse,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.witness_exited_workers = lambda *a, **k: {"skipped": True}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=True)
+            self.assertEqual(p["action"], "refused")
+            ft = p.get("fleet_trend") or {}
+            self.assertTrue(ft.get("ok"), msg=str(ft))
+            ledger = root / ".fak" / "nightrun" / "fleet-status-history.jsonl"
+            self.assertTrue(ledger.exists())
+            row = json.loads(
+                ledger.read_text(encoding="utf-8").strip().splitlines()[-1])
+            self.assertEqual(row["live"], 2.0)
+            self.assertIn("ts", row)
+
+    def test_dry_run_tick_never_writes_fleet_trend(self) -> None:
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=False)
+            self.assertNotIn("fleet_trend", p)
+            self.assertFalse(
+                (root / ".fak" / "nightrun" / "fleet-status-history.jsonl").exists())
 
     def test_would_spawn_unguarded_is_not_launch_ready(self) -> None:
         mod = load()
@@ -1846,7 +1929,6 @@ class EvaluateTest(unittest.TestCase):
         mod.issue_contract_review = self._thin_contract_review
         # A live tick reaches spawn; patch it so we can assert the pre-spawn ledger
         # write without launching a real worker.
-        spawned = {}
         mod.spawn_issue_worker = lambda *a, **k: {
             "pid": 4321, "issue": 467, "log": "resolve-467.log",
             "early_exit": {"checked": True, "alive": True}}
@@ -4836,6 +4918,60 @@ class TickExitCodeTest(unittest.TestCase):
         self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
 
 
+class AppendFleetTrendRowTest(unittest.TestCase):
+    """#4594: every LIVE dispatcher tick feeds one partial ``{ts, live}`` row to the
+    fleet-status trend ledger so climbing-vs-draining renders unattended instead of
+    "(no history yet)". The producer is best-effort — an append error records the
+    failure but never crashes the tick — and the ledger stays bounded because it
+    delegates to ``fleet_trend.append`` (whose cap the reader honors)."""
+
+    def test_live_tick_appends_partial_row_from_preflight_live(self) -> None:
+        mod = load()
+        import fleet_trend
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            ledger = str(root / fleet_trend.DEFAULT_LEDGER)
+            res = mod.append_fleet_trend_row(
+                root, {"preflight": {"live": 3}}, now="2026-07-14T17:00:00Z")
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["ledger"], ledger)
+            rows = fleet_trend.tail(ledger, 24)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["ts"], "2026-07-14T17:00:00Z")
+            self.assertEqual(rows[0]["live"], 3.0)
+            # a second live tick APPENDS (a trend needs history), never overwrites.
+            mod.append_fleet_trend_row(
+                root, {"preflight": {"live": 1}}, now="2026-07-14T17:05:00Z")
+            self.assertEqual([r["live"] for r in fleet_trend.tail(ledger, 24)],
+                             [3.0, 1.0])  # both ticks recorded, oldest→newest
+
+    def test_missing_preflight_live_records_honest_zero(self) -> None:
+        # A tick whose preflight carries no live count records a real 0 gauge point
+        # rather than crashing the producer — the row is still a valid trend sample.
+        mod = load()
+        import fleet_trend
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            ledger = str(root / fleet_trend.DEFAULT_LEDGER)
+            res = mod.append_fleet_trend_row(root, {}, now="2026-07-14T17:00:00Z")
+            self.assertTrue(res["ok"])
+            self.assertEqual(fleet_trend.tail(ledger, 24)[0]["live"], 0.0)
+
+    def test_append_error_is_swallowed_never_fails_the_tick(self) -> None:
+        # Best-effort: an append that raises must be reported, not propagated — a
+        # trend-ledger hiccup can never take down the dispatcher tick that feeds it.
+        mod = load()
+
+        def boom(*_a, **_k):
+            raise OSError("disk full")
+
+        with tempfile.TemporaryDirectory() as d:
+            res = mod.append_fleet_trend_row(
+                Path(d), {"preflight": {"live": 2}}, append=boom, now="t")
+            self.assertFalse(res["ok"])
+            self.assertIn("disk full", res["error"])
+
+
 class MultiLaneScopeTest(unittest.TestCase):
     """The #2615 guard: refuse an issue whose named file families fall outside the
     chosen lane's LEASE TREE (the collision authority), not just its label. Pure —
@@ -5363,7 +5499,9 @@ class BackendHealthSpawnGateTest(unittest.TestCase):
 class TestOpencodeGatewayGate(unittest.TestCase):
     def test_gateway_down_suppresses_tick_with_legible_reason(self):
         mod = load()
-        down = lambda _row: {"status": "GATEWAY_DOWN", "block_reason": "connection refused"}
+
+        def down(_row):
+            return {"status": "GATEWAY_DOWN", "block_reason": "connection refused"}
         planned, reason = mod.gate_opencode_gateway(3, {"name": "glm"}, probe=down)
         self.assertEqual(planned, 0)
         self.assertIn("gateway_down", reason)
@@ -5371,7 +5509,9 @@ class TestOpencodeGatewayGate(unittest.TestCase):
 
     def test_healthy_gateway_resumes_next_tick(self):
         mod = load()
-        healthy = lambda _row: {"status": "OK"}
+
+        def healthy(_row):
+            return {"status": "OK"}
         self.assertEqual(mod.gate_opencode_gateway(3, {"name": "glm"}, probe=healthy), (3, None))
 
     def test_probe_error_fails_open(self):

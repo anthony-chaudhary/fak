@@ -78,6 +78,7 @@ import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 import lane_yield  # noqa: E402  (shared low-yield lane fold, #2062)
 import issue_lane_router  # noqa: E402  (lane_taxonomy: dos.toml lane→tree map, #2062)
+import fleet_trend  # noqa: E402  (per-tick fleet-status-history append, #4594)
 import lane_core  # noqa: E402  (core-source / trust-critical lane predicates, mirror of internal/dispatchtick/selfmodify.go)
 import tier_launch  # noqa: E402  (per-issue tier launch profile, mirror of internal/dispatchtick/launchprofile.go)
 
@@ -1608,7 +1609,7 @@ def multi_lane_held_records(
                 "lane": str(row.get("lane") or ""),
                 "title": str(row.get("title") or "")[:200],
                 "reason": str(row.get("reason") or "")[:240],
-                "uncovered_lanes": [str(l) for l in uncovered_lanes if l][:24],
+                "uncovered_lanes": [str(ln) for ln in uncovered_lanes if ln][:24],
             }
             prev = held.get(n)
             if prev is None or ts > prev[0] or (ts == prev[0] and idx > prev[1]):
@@ -1651,8 +1652,8 @@ def record_multi_lane_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                     "lane": str(r.get("lane") or "")[:80],
                     "title": str(r.get("title") or "")[:200],
                     "reason": str(r.get("reason") or "")[:240],
-                    "uncovered_lanes": [str(l) for l in
-                                        (r.get("uncovered_lanes") or []) if l][:24],
+                    "uncovered_lanes": [str(ln) for ln in
+                                        (r.get("uncovered_lanes") or []) if ln][:24],
                 }, ensure_ascii=False) + "\n")
     except OSError:
         pass  # fail-open: a missed skip repeats one refusal, never blocks work
@@ -3272,11 +3273,11 @@ def multi_lane_scope(text: str, chosen_lane: str, chosen_tree: list[str],
         if ilr.path_matches_lane(p, lease_view):
             covered.append(p)
             continue
-        other = sorted(l for l in ilr.path_matches_lane(p, trees)
-                       if l in lane_set and l != chosen_lane)
+        other = sorted(ln for ln in ilr.path_matches_lane(p, trees)
+                       if ln in lane_set and ln != chosen_lane)
         if other:
             uncovered.append({"path": p, "lanes": other})
-    uncovered_lanes = sorted({l for u in uncovered for l in u["lanes"]})
+    uncovered_lanes = sorted({ln for u in uncovered for ln in u["lanes"]})
     return {"multi_lane": bool(uncovered), "chosen_lane": chosen_lane,
             "chosen_tree": list(chosen_tree or []), "covered_paths": covered,
             "uncovered": uncovered, "uncovered_lanes": uncovered_lanes}
@@ -4280,6 +4281,29 @@ def record_loop_tick(root: Path, payload: dict[str, Any],
     }
 
 
+def append_fleet_trend_row(root: Path, payload: dict[str, Any], *,
+                           append: Any | None = None,
+                           now: str | None = None) -> dict[str, Any]:
+    """#4594: feed the fleet-status trend ledger one partial row per live tick.
+
+    A single tick natively knows only its preflight live-worker count; the
+    tolerant fleet_trend reader accepts a partial ``{ts, live}`` row, which is
+    exactly the gauge the net-worker-decline alarm (#4591) consumes. The
+    ``usable``/``sessions``/``escalate`` aggregates come from a `fleet_top`
+    snapshot, not a tick, so they stay honestly absent rather than a fabricated
+    zero. Best-effort: a trend append must never fail the tick."""
+    do_append = append or fleet_trend.append
+    pre = payload.get("preflight") or {}
+    ledger = str(root / fleet_trend.DEFAULT_LEDGER)
+    ts = now or dt.datetime.now(dt.timezone.utc).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
+    try:
+        row = do_append(ledger, {"live": float(pre.get("live") or 0)}, ts)
+        return {"ok": True, "ledger": ledger, "row": row}
+    except Exception as exc:
+        return {"ok": False, "ledger": ledger, "error": str(exc)}
+
+
 def _contract_missing_fields(contract: dict[str, Any]) -> list[str]:
     review = contract.get("review") if isinstance(contract.get("review"), dict) else {}
     return [str(m) for m in (review.get("missing_fields") or []) if m]
@@ -4585,6 +4609,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
         if record_loop:
             payload["loop_ledger"] = record_loop_tick(root, payload, ledger=loop_ledger)
+        # #4594: every LIVE tick feeds the fleet-status trend ledger so
+        # climbing-vs-draining renders unattended. Dry runs never mutate
+        # runtime state (same posture as the lease/witness sweeps above).
+        if live:
+            payload["fleet_trend"] = append_fleet_trend_row(root, payload)
         _record(root / RUNS_DIRNAME, payload)
         return payload
 
