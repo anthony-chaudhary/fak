@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **94.3/100** (grade A) = 9.4/10 |
-| **Coverage** | **91.2%** (1792/1964 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **172** (clarity 0 + coverage 172) |
-| Crystal-clear concepts | 204 of 1564 positioned |
+| **Score** | **95.2/100** (grade A) = 9.5/10 |
+| **Coverage** | **92.6%** (1811/1955 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **144** (clarity 0 + coverage 144) |
+| Crystal-clear concepts | 210 of 1583 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,18 +24,18 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1564 concepts - score 94.3/100 (grade A) - disambiguation-debt 172
+concept-disambiguation chart - 1583 concepts - score 95.2/100 (grade A) - disambiguation-debt 144
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####........................ 204
-  o defined       ############################ 1360
+  * crystal       ####........................ 210
+  o defined       ############################ 1373
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
   attention        ooooooooooooooooooooooooooooooooooooooooooooooooooooooo (55 concept(s); 0 crystal)
-  cache            **********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (157 concept(s); 22 crystal)
+  cache            ****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (176 concept(s); 28 crystal)
   context-ctx      *********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (140 concept(s); 9 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****oooooooooooooooooo (22 concept(s); 4 crystal)
@@ -57,13 +57,12 @@ clarity mix by family (each cell = one concept):
   witness-proof    ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 18 crystal)
 
 coverage by family (positioned / discovered):
-  cache            #########################... 202/226
   render-materialize ########################.... 142/165
-  context-ctx      #########################... 155/175
-  plan             ##########################.. 270/289
-  policy-capability ########################.... 99/115
-  witness-proof    ########################.... 110/126
-  gateway-engine   ##########################.. 150/162
+  context-ctx      #########################... 156/175
+  plan             ##########################.. 270/288
+  policy-capability ########################.... 99/114
+  witness-proof    #########################... 110/124
+  gateway-engine   ##########################.. 151/162
   score-debt       ########################.... 68/78
   attention        #########################... 61/68
   decision         ########################.... 35/41
@@ -72,14 +71,15 @@ coverage by family (positioned / discovered):
   support-maturity ########################.... 29/34
   layout           ######################...... 12/15
   pool             ##########################.. 35/37
+  cache            ############################ 222/222
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  guard-gate       ############################ 282/282
+  guard-gate       ############################ 281/281
   session-runtime  ############################ 170/170
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 91.2%  (1792/1964 confusable tokens positioned)
+namespace coverage  [##############################..] 92.6%  (1811/1955 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -98,6 +98,12 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | | Verdict | Kind | Family | Canonical - definition |
 |---|---|---|---|---|
+| * | crystal | cli-verb | cache | **cachesweep (stale-cache reaping verb)** - internal/cachesweep (the package) and `fak cachesweep` (the verb) reap stale or orphaned cache artifacts the dispatcher and session layers leave behind, bounded by a lane-aware scan so a sweep never touches a live session's working set. |
+| * | crystal | subsystem | cache | **dispatchcache (per-lane dispatch result cache)** - internal/dispatchcache is the per-lane dispatch result cache that memoizes a dispatch tick's issue-to-worker routing decisions so a re-tick does not recompute the full pairwise scan, backed by a bounded queue and a backlog. |
+| * | crystal | config | cache | **CacheTTL5m (default ephemeral cache tier)** - gateway.CacheTTL5m ("5m") is the const pinning the default ephemeral provider cache tier - the 5-minute TTL window a prefix lives at when the managed-cache posture is OFF or auto-unupgraded, mirrored by the ablate package and the warm-resume scale-to-zero path. |
+| * | crystal | symbol | cache | **messageHasCacheControlForElide (deep cache_control detector)** - agent.messageHasCacheControlForElide reports whether a tool_result block's content array carries a cache_control breakpoint at ANY nesting depth, the deep variant the elision shrinker needs because it can reach nested tool_result content. |
+| * | crystal | concept | cache | **prefix_cache (provider prefix-cache concept)** - The prefix cache is the provider-side (vLLM / SGLang) or fak in-kernel (RadixKV) prefix-reuse cache observed via prefix_cache_hit_rate / prefix_cache_{queries,hits} metrics, the concept behind the webbench parity benchmark and the quality/prefix_cache.go parity child. |
+| * | crystal | doc-term | cache | **kvcached (external KV-cache management tool)** - kvcached is the external kernel-module-level KV-cache management tool studied in BORROW-KVCACHED-STUDY-2026-07-10 for its in_shrink guard (where available_size() floors to prevent reclaim storms), referenced as a prior-art anchor in dispatchtick's predictive preflight. |
 | * | crystal | subsystem | cache | **KV cache** - The kernel-owned raw attention state: per-position Key and Value tensor rows for the running model, supporting in-place eviction and prefix reuse. |
 | * | crystal | subsystem | cache | **vCache** - The virtual API cache: a page-table abstraction that models a remote provider's prefix cache as virtual pages, with a manifest of canonical prefix chains and warmth belief. |
 | * | crystal | subsystem | cache | **cachemeta** - The typed metadata contract (tier 1): owns no payloads, names reusable cache entries, and carries their validity / security / residency metadata and typed lookup verdicts. |
@@ -357,6 +363,19 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | config | attention | **num_attention_heads (HF head-count key)** - The HuggingFace config key `num_attention_heads` that benchcli/batchbench read into cfg.NumHeads (and from which HeadDim is derived as hidden_size/num_attention_heads when head_dim is absent). |
 | o | defined | symbol | attention | **k_flash_attention** - k_flash_attention (internal/compute/cuda.go) is the CUDA flash-attention decode kernel - tiled over the KV window with a running max/sum so no full score buffer materializes. |
 | o | defined | symbol | attention | **linearAttnDims** - Config.linearAttnDims (internal/model/qwen35.go) returns the linear-attention head/dim geometry for hybrid models. |
+| o | defined | metric | cache | **CacheReadFraction (prompt-served-from-cache share)** - cachevaluereport.CacheReadFraction is the share of prompt tokens the provider served from its prompt cache (cache_read / prompt_tokens), surfaced in the cache-value audit row and the TUI savings overview. |
+| o | defined | metric | cache | **FakCompactionCacheReadTokens (compaction-point cache_read counter)** - gateway.FakCompactionCacheReadTokens is the OBSERVED provider cache_read token count at a session's compaction point - the tokens the provider evidenced as cache_reads, surfaced in cache_pricing and the /debug/vars attribution block. |
+| o | defined | metric | cache | **CacheTTLUpgradesUpgraded (managed-cache TTL-upgrade counter)** - gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture upgraded a stable prefix to the 1h TTL tier and why, surfaced in the weekly cache-value report. |
+| o | defined | concept | cache | **MiniCache (memq outlier exemption)** - memq's MiniCache (#4018) is the opt-in divergence-outlier exemption that carves the top-K most-divergent cells out of a lossy fold set before the fold, keeping them bit-exact so the most information-dense cells survive a lossy compression step. |
+| o | defined | symbol | cache | **ReplayKVCacheMulti (offline eviction-policy replay)** - compute.ReplayKVCacheMulti replays every requested KVEvictPolicy against an offline KV-replay event trace and scores each by realized reuse under a token budget, the oracle behind the kvreplay benchmark and the expert-residency LFU comparison. |
+| o | defined | symbol | cache | **CacheBreakEvent (witnessed cache-prefix break)** - metrics.CacheBreakEvent is the struct type for one witnessed cache-prefix break - the cause, the token cost, and the event count - produced by WitnessCacheBreak and accumulated into a CacheBreakReport via FoldCacheBreaks. |
+| o | defined | symbol | cache | **CacheBreakReport (per-session cache-break readout)** - metrics.CacheBreakReport is the per-session operator readout folded from the session's witnessed CacheBreakEvent slice by FoldCacheBreaks, surfaced via the gateway's cacheBreakReport() accessor. |
+| o | defined | symbol | cache | **CacheState (free-text session cache-warmth label)** - CacheState is the free-text per-session cache-warmth label ("cold" / "warm-prefix" / "l3-shared" / "stable" / "mutated" / "unknown") surfaced in cmd/fak info, the provenance run manifest, and the scorecardpane context-status renderer. |
+| o | defined | symbol | cache | **DuplicateRiskCache (dispatch dedup memo)** - dispatchtick.DuplicateRiskCache memoizes the last duplicate-risk issue-number scan result so a dispatch re-tick does not recompute the pairwise duplicate scan, held as a long-lived singleton in cmd/fak/dispatch_tick_route.go. |
+| o | defined | config | cache | **FAK_CACHEVALUE_* (cache-value env/metrics namespace)** - The FAK_CACHEVALUE_* prefix is the env-var and Prometheus-metrics namespace for the cache-value reporting surface: FAK_CACHEVALUE_*_PER_MTOK_USD env overrides for per-MTok pricing, and the fak_cachevalue_* metrics family for the cache-value gauge and ablation expositions. |
+| o | defined | metric | cache | **fak_gateway_inference_cached_prompt_tokens_total (provider cache_read metric)** - The fak_gateway_inference_cached_prompt_tokens_total Prometheus counter is the normalized, provider-agnostic count of prompt (input) tokens the upstream PROVIDER served from its own prompt cache across served turns, reading 0 on the in-kernel path (no provider). |
+| o | defined | metric | cache | **ProviderPromptCacheTokenEq (provider savings token-equivalence)** - cachevaluereport.ProviderPromptCacheTokenEq (and ProviderPromptCacheTokenEquiv) is the token-equivalence count of provider-side prompt-cache savings - the tokens the provider's cache_read saved, normalized for the cache-value report's fleet-benefit track. |
+| o | defined | symbol | cache | **toolResultContentHasCacheControl (tool_result cache_control detector)** - agent.toolResultContentHasCacheControl reports whether a tool_result block's content array carries a cache_control breakpoint, the detector the elision shrinker and stale-span marker use alongside rawHasCacheControl. |
 | o | defined | subsystem | cache | **vcachecal (M1 calibrate)** - internal/vcachecal is the vCache M1 observe-and-calibrate decision layer (#716): the warmth-belief estimator plus the offline probe harness that fits the T/M_min/r warmth law and reports false-warm/false-cold prediction error, off the hot path. |
 | o | defined | subsystem | cache | **vcachescore (operator scorecard)** - internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachestar/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact. |
 | o | defined | subsystem | cache | **vcachewarm (M3 warming)** - internal/vcachewarm is the vCache M3 dedicated-warming decision layer (#718): the Anthropic max_tokens:0-vs-decode-1 gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. |
@@ -1704,17 +1723,17 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   policy-capability / abi.Verdict
 
 abstraction overclaims (16) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: observability-scorecard = defined)
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: steerability-scorecard = defined)
   ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
   ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: runstate = defined)
   ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: total-debt = defined)
   ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewdropped = defined)
-  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-buildplanwithoptions = defined)
+  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-orderlanecandidates = defined)
   ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
-  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
+  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
-  ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: prove-recall = defined)
+  ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: recallproof = defined)
   ! loopmgr: abstraction declares 'crystal' but rolls up to 'defined' (weakest: default-loop-policy = defined)
   ! policy-manifest: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! turn: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-turn = defined)
@@ -1726,42 +1745,42 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | observability-scorecard = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | steerability-scorecard = defined |
 | o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | normgate = defined |
 | o! | **Session** (`session`) | defined | crystal | 10 | 0 | runstate = defined |
 | o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | total-debt = defined |
 | o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewdropped = defined |
-| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-buildplanwithoptions = defined |
-| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
+| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-orderlanecandidates = defined |
+| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
 | o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | attention-accumulator = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
-| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-signal = defined |
-| o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | prove-recall = defined |
+| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-denyall = defined |
+| o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | recallproof = defined |
 | o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended = defined |
 | o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index = defined |
 | o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
-| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-iscontextflagname = defined |
-| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-placeanthropiccachebreakpointwithoutcome = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-detour-objective = crystal |
-| * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | managed-cache = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-read = crystal |
+| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
+| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-witness-rung = crystal |
+| * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | fak-ablate-ttl-1h = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-creation-tokens = crystal |
 | * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
 | * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
-| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | sweepguard = crystal |
-| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
+| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
+| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
 | * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 20 kind/grounding mismatch |
+| honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 24 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1564 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1583 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1773,13 +1792,12 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| cache | 202 | 226 | 24 |
 | render-materialize | 142 | 165 | 23 |
-| context-ctx | 155 | 175 | 20 |
-| plan | 270 | 289 | 19 |
-| policy-capability | 99 | 115 | 16 |
-| witness-proof | 110 | 126 | 16 |
-| gateway-engine | 150 | 162 | 12 |
+| context-ctx | 156 | 175 | 19 |
+| plan | 270 | 288 | 18 |
+| policy-capability | 99 | 114 | 15 |
+| witness-proof | 110 | 124 | 14 |
+| gateway-engine | 151 | 162 | 11 |
 | score-debt | 68 | 78 | 10 |
 | attention | 61 | 68 | 7 |
 | decision | 35 | 41 | 6 |
@@ -1788,9 +1806,10 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | support-maturity | 29 | 34 | 5 |
 | layout | 12 | 15 | 3 |
 | pool | 35 | 37 | 2 |
+| cache | 222 | 222 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| guard-gate | 282 | 282 | 0 |
+| guard-gate | 281 | 281 | 0 |
 | session-runtime | 170 | 170 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |

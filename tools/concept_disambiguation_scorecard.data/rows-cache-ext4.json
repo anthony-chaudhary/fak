@@ -408,7 +408,7 @@
       "definition": "frontierswe.CacheWitnessSeries is the folded trajectory FoldCacheWitness produces: a Schema id, the per-interval Points ([]CacheWitnessPoint), and the realized cache-reuse rate for a frontierswe run, threaded through run.go's report.",
       "distinction": "It is the WHOLE folded trajectory struct, not CacheWitnessPoint (one element inside its Points slice) and not CacheSample (the raw per-scrape input it was folded FROM).",
       "distinct_from": ["x4-cache-cachewitnesspoint", "x4-cache-cachesample"],
-      "aliases": ["CacheWitnessSeries"],
+      "aliases": ["CacheWitnessSeries", "CacheSeries"],
       "grounding": "cachewitnessseries",
       "grounding_kind": "symbol",
       "glossary_anchor": "",

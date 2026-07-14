@@ -21,7 +21,8 @@
                  "infercachedtokens", "lastcacherd", "fakcachevalueinputpermtokusd", "prefixcachehits",
                  "prefixcachequeries", "promptcachehittokens", "promptcachemisstokens", "cachettlupgraded",
                  "observecachettlupgrade", "maybeupgradeanthropiccachettl1h", "cachereadmult",
-                 "cachewritemult", "cacherow", "defaultcacheandresidency"],
+                 "cachewritemult",                   "cacherow", "defaultcacheandresidency",
+                  "cachemech", "applyinfocachemechclick", "cachebreakevents", "droppedcachedtokens"],
       "min_files": 3,
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta)."
     },

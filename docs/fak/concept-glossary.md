@@ -161,6 +161,41 @@ different sense entirely:
   resident transcript. *Not* the guard posture above (live wire vs restart
   pricing) and *not* the ctxplanner / memq `Plan` types (see the plan family).
 
+### cache coverage extension (#4681) - six more names that confused readers
+
+These six were discovered by the coverage engine but never positioned; each is a
+genuine cache concept a reader could not pin, not an inflection.
+
+- **cachesweep** (`fak cachesweep`, `internal/cachesweep`) - a HOUSEKEEPING verb that
+  reaps stale or orphaned cache artifacts the dispatcher and session layers leave
+  behind. *Not* the KV cache (live tensor storage) and *not* cachemeta (the metadata
+  contract whose expired entries it may reap).
+
+- **dispatchcache** (`internal/dispatchcache`) - a per-lane DISPATCH-ROUTING
+  memoization cache so a re-tick does not recompute the full pairwise issue-to-worker
+  scan. *Not* the KV cache (inference tensor storage) and *not* DuplicateRiskCache
+  (the narrower memo that caches only the duplicate-risk scan).
+
+- **CacheTTL5m** (`gateway.CacheTTL5m`, `"5m"`) - the default EPHEMERAL provider cache
+  tier: the 5-minute TTL window a prefix lives at when the managed-cache posture is OFF
+  or auto-unupgraded. *Not* CacheTTL1h (the upgraded 1-hour tier the managed-cache
+  posture drives toward) and *not* DefaultVCacheAnchor (the star-anchor gate default).
+
+- **messageHasCacheControlForElide** (`agent.messageHasCacheControlForElide`) - the
+  DEEP, any-depth `cache_control` detector the elision shrinker needs because it can
+  reach nested tool_result content. *Not* messageHasCacheControl (the shallow,
+  one-level variant the compaction guards use) and *not* toolResultContentHasCacheControl
+  (the tool_result-content-only variant).
+
+- **prefix_cache** - the provider-side (vLLM / SGLang) or fak in-kernel (RadixKV)
+  prefix-reuse cache, observed via `prefix_cache_hit_rate` / `prefix_cache_{queries,hits}`
+  metrics. *Not* the KV cache (the raw tensor storage it indexes into) and *not* the
+  prompt cache (the Anthropic `cache_control` breakpoint mechanism).
+
+- **kvcached** - an EXTERNAL kernel-module-level KV-cache management tool studied in
+  `BORROW-KVCACHED-STUDY-2026-07-10` for its `in_shrink` guard. *Not* the KV cache
+  (fak's own tensor storage) and *not* vCache (fak's virtual cache control plane).
+
 ---
 
 ## The guard / gate family
