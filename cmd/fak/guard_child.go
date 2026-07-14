@@ -1245,6 +1245,11 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	// below stops the updater and replaces the root with the terminal state.
 	guardSessionCardHandle.startUpdater(srv)
 	spawnBroker := toolprocgate.NewSpawnBroker()
+	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
+	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
+	// the opt-in crashLimit (0 = off, the default) so a systematic crash is surfaced, not masked.
+	crashRestarts := 0
+	crashLimit := guardCrashRestartLimit()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, rotation.launcher())
 		if err != nil {
@@ -1267,6 +1272,14 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {
 			command = next
+			continue
+		}
+		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
+			crashRestarts++
+			guardReportCrashRestart(os.Stderr, agentName, class, code, crashRestarts, crashLimit, command)
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
+			guardEmitRestartHop(auditJournal, os.Stderr, agentName, guardTraceID, guardCrashRestartHop(guardTraceID, agentName, crashRestarts))
+			command = guardRestartRelaunchCommand(command, agentName)
 			continue
 		}
 		if guardChildIsLaunchFailure(runErr) {
@@ -1320,6 +1333,11 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	noProgressRestarts := 0
 	noProgressLimit := guardNoProgressRestartLimit()
 	progressHead := sessionStartSHA()
+	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
+	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
+	// the opt-in crashLimit (0 = off, the default) so a systematic crash is surfaced, not masked.
+	crashRestarts := 0
+	crashLimit := guardCrashRestartLimit()
 	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
 	// --max-duration envelope is actually ENFORCED here, not merely armed/persisted/displayed.
 	// guardTimeBudgetExhausted is a no-op for an unbounded/paused/still-fine session, so a run
@@ -1370,6 +1388,14 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {
 				command = next
+				continue
+			}
+			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
+				crashRestarts++
+				guardReportCrashRestart(restarter.stderr, agentName, class, code, crashRestarts, crashLimit, command)
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
+				guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID, guardCrashRestartHop(guardTraceID, agentName, crashRestarts))
+				command = guardRestartRelaunchCommand(command, agentName)
 				continue
 			}
 			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)

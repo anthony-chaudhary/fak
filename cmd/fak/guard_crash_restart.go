@@ -1,0 +1,112 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/journal"
+)
+
+// In-place harness-crash restart (#4686) — the generic-crash counterpart of the four narrow
+// child-survival seams (auth-expiry, account rotation, cap park, budget restart) and the direct
+// sibling of the transient-wire retry (#3514). Those seams already keep the guard MASTER (the
+// process that owns the in-process gateway goroutine, the stable guardTraceID, the audit journal,
+// and the one Slack session card) alive while only the wrapped harness is stopped and relaunched
+// under the same session. A GENERIC crash — a panic surfaced as a non-zero exit, a SIGSEGV/SIGABRT,
+// an OOM (exit 137), an arbitrary non-zero status — matches none of them and falls straight through
+// to finishGuardChildAndReport, which cancel()s the gateway context and os.Exit()s the whole guard
+// process. So a crash in the HARNESS takes the MASTER (and its gateway) down with it — the opposite
+// of run isolation. This seam closes that gap: an opt-in, bounded, loud in-place restart of the
+// harness under the same master session.
+
+// guardCrashRestartLimit resolves the per-session in-place crash-restart budget from the
+// environment. DEFAULT 0 = OFF: this first slice (#4686) is strictly opt-in, so a generic crash
+// tears the master down exactly as it does today until an operator sets the knob. A negative or
+// garbage override also reads as 0 (off). Env-only for now — the front-door --restart-on-crash /
+// --crash-restart-limit flags and the default-on validation gate are the separate #4688 rung;
+// backoff and the progress-aware crashloop reap are #4687. Mirrors the env-knob shape of
+// guardNoProgressRestartLimit().
+func guardCrashRestartLimit() int {
+	if v := strings.TrimSpace(os.Getenv("FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// guardMaybeRestartOnCrash is the generic-crash admission decision, wired at the SAME two recovery
+// sites as its siblings (runGuardChildAndReport / runGuardChildSupervisedAndReport), AFTER the
+// auth / rotation / cap / wire-retry seams have each declined to claim the exit and BEFORE the
+// fall-through to finishGuardChildAndReport. It reuses guardClassifyChildCrash (the existing, until
+// now journal-only OOM/SIGNAL/NONZERO_EXIT taxonomy) and answers whether the exit was a genuine
+// crash that should be RESTARTED IN PLACE under the same master session.
+//
+// It is a PURE decision — no I/O, no relaunch, no sleep — so the admission discipline is
+// unit-tested without standing the supervision loop up. ok=true requires ALL of:
+//   - crash-restart is enabled (limit > 0) — default OFF, strictly opt-in;
+//   - the exit is a real crash (guardClassifyChildCrash reports isCrash) — a clean exit (nil runErr
+//     or a zero code) NEVER matches, because the agent FINISHED and the master should exit as today,
+//     and neither does a spawn failure (reported by the caller's launch-failure path);
+//   - the per-session crash-restart budget is not yet spent (restartsSoFar < limit) — once spent the
+//     crash is SURFACED (the master exits), never masked by an unbounded relaunch (the explicit
+//     concern #3514 raised about a bare NONZERO_EXIT trigger; the bound is the safety valve until
+//     #4687 adds backoff + a progress-aware reap + a typed give-up).
+//
+// On ok=true it returns the crash class (a journal.Crash* constant) and the child's exit code so the
+// caller can emit a loud, typed witness. Every other case returns ok=false and the caller's existing
+// report/exit path proceeds byte-identically to today.
+func guardMaybeRestartOnCrash(runErr error, childState *os.ProcessState, restartsSoFar, limit int) (class string, code int, ok bool) {
+	if limit <= 0 {
+		return "", 0, false // crash-restart disabled (the default) — master exits on crash as today
+	}
+	class, code, isCrash := guardClassifyChildCrash(runErr, childState)
+	if !isCrash {
+		return "", 0, false // clean exit or spawn failure — never restart in place
+	}
+	if restartsSoFar >= limit {
+		return "", 0, false // budget spent — surface the crash rather than mask a systematic fault
+	}
+	return class, code, true
+}
+
+// guardReportCrashRestart makes generic crash recovery visible at the supervision boundary.
+// The paired CHILD_CRASH and RESTART_HOP journal rows are durable evidence; this line is the
+// immediate operator signal, including the typed crash class, OS exit code, and bounded attempt.
+func guardReportCrashRestart(stderr io.Writer, agentName, class string, code, attempt, limit int, command []string) {
+	if stderr == nil {
+		return
+	}
+	fmt.Fprintf(stderr, "fak guard: %s harness crashed (%s, exit %d); guard remains up and is restarting the child in place (crash restart %d/%d) `%s`\n", agentName, class, code, attempt, limit, strings.Join(guardRestartRelaunchCommand(command, agentName), " "))
+}
+
+// guardCrashRestartHop builds the correlated RESTART_HOP record for an in-place crash restart
+// (#4686) so a generic-crash relaunch folds into the SAME restart chain (and `fak guard
+// restart-audit`) as a budget restart or a wire retry, rather than being an invisible relaunch.
+// It mirrors guardWireRetryHop: the relaunch is a --continue reattach under the SAME trace (the
+// crashed session resumes in place — no new continuation trace is minted and no seed is written),
+// so from/to/child are all guardTraceID, handback is "continue", and status is ok. It degrades to
+// the ORPHANED/inert shape for an unrecognized agent (for which fak cannot guess a resume syntax,
+// so guardRestartRelaunchCommand leaves the command cold), for symmetry with guardWireRetryHop. The
+// crash CLASS itself rides the paired CHILD_CRASH witness (appendGuardChildExitWitness), which the
+// guard-RSI fold already consumes; this hop carries the lineage.
+func guardCrashRestartHop(guardTraceID, agentName string, hop int) journal.RestartHop {
+	handback := guardRestartHandbackOrphaned
+	status := journal.RestartHopInert
+	if _, ok := guardContinueFlagForAgent(agentName); ok {
+		handback = guardRestartHandbackContinue
+		status = journal.RestartHopOK
+	}
+	return journal.RestartHop{
+		Schema:    journal.RestartChainSchema,
+		Hop:       hop,
+		FromTrace: guardTraceID,
+		ToTrace:   guardTraceID,
+		Handback:  handback,
+		Child:     guardTraceID,
+		Status:    status,
+	}
+}
