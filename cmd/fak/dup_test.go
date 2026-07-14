@@ -84,6 +84,26 @@ func tallyItems(items []int) int {
 	}
 }
 
+func TestDupGuardGateBoundary(t *testing.T) {
+	cases := []struct {
+		warned int
+		gate   int
+		want   int
+	}{
+		{0, -1, 0}, // omitted gate preserves advisory behavior
+		{3, -1, 0},
+		{0, 0, 0},
+		{1, 0, 1},
+		{2, 2, 0}, // count == N is admitted
+		{3, 2, 1}, // count == N+1 blocks
+	}
+	for _, tc := range cases {
+		if got := dupGuardGateExitCode(tc.warned, tc.gate); got != tc.want {
+			t.Errorf("warned=%d gate=%d: got %d want %d", tc.warned, tc.gate, got, tc.want)
+		}
+	}
+}
+
 // plusPrefix turns a source block into diff '+'-prefixed added lines.
 func plusPrefix(src string) string {
 	var sb strings.Builder

@@ -46,11 +46,11 @@ func cmdDup(args []string) {
 func dupUsage() {
 	fmt.Fprintln(os.Stderr, "usage: fak dup query --file <candidate.go> [--k 5] [--json]   (tracked sites similar to the candidate)")
 	fmt.Fprintln(os.Stderr, "       fak dup query --stdin [--k 5] [--json]                  (read the candidate block from stdin)")
-	fmt.Fprintln(os.Stderr, "       fak dup guard [--staged | --range A..B] [--json]         (advisory: warn if added Go blocks clone a tracked site)")
+	fmt.Fprintln(os.Stderr, "       fak dup guard [--staged | --range A..B] [--gate N] [--json] (warn if added Go blocks clone a tracked site)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Ask \"does a block like this already exist?\" BEFORE writing it. Same normalized")
 	fmt.Fprintln(os.Stderr, "token-window clone definition as the code-slop scorecard, run as a forward query.")
-	fmt.Fprintln(os.Stderr, "guard is ADVISORY — it warns and always exits 0; it never blocks a commit.")
+	fmt.Fprintln(os.Stderr, "guard is advisory unless --gate N is set; then it exits 1 when warned files exceed N.")
 }
 
 // cmdDupQuery answers the query against the git-tracked .go tree.
@@ -124,8 +124,13 @@ func cmdDupGuard(args []string) {
 	staged := fs.Bool("staged", false, "check the staged (git diff --cached) added Go lines")
 	rng := fs.String("range", "", "check the added Go lines of a commit range, e.g. origin/main..HEAD")
 	asJSON := fs.Bool("json", false, "emit warnings as JSON")
+	gate := fs.Int("gate", -1, "exit 1 when warned file count exceeds N; omitted keeps advisory exit 0")
 	_ = fs.Parse(args)
 
+	if *gate < -1 {
+		fmt.Fprintln(os.Stderr, "fak dup guard: --gate must be >= 0")
+		os.Exit(2)
+	}
 	if (*staged) == (*rng != "") {
 		fmt.Fprintln(os.Stderr, "fak dup guard: pass exactly one of --staged or --range A..B")
 		os.Exit(2)
@@ -173,6 +178,9 @@ func cmdDupGuard(args []string) {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(warnings)
+		if dupGuardGateExitCode(len(warnings), *gate) != 0 {
+			os.Exit(1)
+		}
 		return
 	}
 	if len(warnings) == 0 {
@@ -187,6 +195,19 @@ func cmdDupGuard(args []string) {
 		}
 	}
 	fmt.Println("\na shared helper may already exist — this is advisory, the commit is not blocked.")
+	if *gate >= 0 {
+		fmt.Printf("dup guard gate: %d warned file(s), threshold %d.\n", len(warnings), *gate)
+	}
+	if dupGuardGateExitCode(len(warnings), *gate) != 0 {
+		os.Exit(1)
+	}
+}
+
+func dupGuardGateExitCode(warnedFiles, gate int) int {
+	if gate >= 0 && warnedFiles > gate {
+		return 1
+	}
+	return 0
 }
 
 // addedGoByFile returns, per changed .go file, the concatenated ADDED source lines

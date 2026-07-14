@@ -261,6 +261,38 @@ if [ -z "$(git rev-list "$range" 2>/dev/null)" ]; then
 	exit 0
 fi
 
+# Cross-package duplication push gate (#4329). The scan remains advisory by
+# default and blocks only when explicitly promoted. It reuses the bounded push
+# range and the existing `fak dup guard` implementation; no second clone engine.
+dup_mode="${FLEET_DUP_GUARD:-warn}"
+if [ "$dup_mode" != "off" ] && [ "${ALLOW_DUP:-0}" != "1" ]; then
+	dup_bin="$(command -v fak 2>/dev/null)"
+	if [ -n "$dup_bin" ]; then
+		dup_out="$(cd "$root" && "$dup_bin" dup guard --range "$range" --gate 0 2>&1)"
+		dup_status=$?
+	elif command -v go >/dev/null 2>&1; then
+		dup_out="$(cd "$root" && go run ./cmd/fak dup guard --range "$range" --gate 0 2>&1)"
+		dup_status=$?
+	else
+		echo "DUPLICATION (warn): neither fak nor go is on PATH; push scan skipped." >&2
+		dup_status=2
+	fi
+	if [ "$dup_status" -eq 1 ]; then
+		if [ "$dup_mode" = "block" ]; then
+			echo "DUPLICATION (blocked): added Go code clones a tracked site in $range." >&2
+			echo "$dup_out" >&2
+			echo "  fix: reuse/extract the shared helper, or ALLOW_DUP=1 git push after operator review." >&2
+			exit 1
+		else
+			echo "DUPLICATION (advisory): added Go code clones a tracked site in $range." >&2
+			echo "$dup_out" >&2
+		fi
+	elif [ "$dup_status" -ne 0 ] && [ "$dup_status" -ne 2 ]; then
+		echo "DUPLICATION (warn): push scan could not run; push allowed." >&2
+		echo "$dup_out" >&2
+	fi
+fi
+
 out="$("$dos_bin" review --workspace "$root" "$range" 2>&1)"
 status=$?
 
