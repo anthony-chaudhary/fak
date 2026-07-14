@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# glm52_stage_serve_dgx3.sh - durable stage+build+serve of GLM-5.2 on an A100 (sm_80) node
+# glm52_stage_serve_gpu_server.sh - durable stage+build+serve of GLM-5.2 on an A100 (sm_80) node
 # via llama.cpp MLA + CPU expert-offload. The self-staging, unsloth-GGUF sibling of
 # tools/glm52_serve.sh.
 #
@@ -31,7 +31,7 @@
 # tools/glm52_serve_preflight.py first for the footprint gate.
 #
 # Usage (RUN ON THE GPU HOST, detached so a disconnect does not orphan a ~466 GB load):
-#   systemd-run --user --unit=glm52stage --collect bash tools/glm52_stage_serve_dgx3.sh
+#   systemd-run --user --unit=glm52stage --collect bash tools/glm52_stage_serve_gpu_server.sh
 # then poll:  cat "$GLM_DIR/PHASE"   and on GLM52_SERVE_READY run the #413 witness.
 set -uo pipefail
 

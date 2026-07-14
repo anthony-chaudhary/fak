@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# glm52_e2e_after_serve_dgx3.sh - the end-to-end proof to run AFTER the GLM-5.2
-# serve runner reaches GLM52_SERVE_READY (tools/glm52_stage_serve_dgx3.sh).
+# glm52_e2e_after_serve_gpu_server.sh - the end-to-end proof to run AFTER the GLM-5.2
+# serve runner reaches GLM52_SERVE_READY (tools/glm52_stage_serve_gpu_server.sh).
 #
 # It exercises the full goal against the LOCALLY-SERVED GLM-5.2 on the A100 node:
 #   1. the #413 serving witness (direct + fak-gateway + quarantine flows), and
@@ -13,7 +13,7 @@
 # Asserts no throughput/quality number of its own; the witness records the measured
 # evidence. RUN ON THE GPU HOST once :8000 serves glm-5.2.
 #
-# Usage:  FAK=/path/to/fak SRC=/path/to/fak-checkout bash tools/glm52_e2e_after_serve_dgx3.sh
+# Usage:  FAK=/path/to/fak SRC=/path/to/fak-checkout bash tools/glm52_e2e_after_serve_gpu_server.sh
 set -uo pipefail
 export HOME="${HOME:-/root}" GOCACHE="${GOCACHE:-/tmp/gocache}" GOPATH="${GOPATH:-/tmp/gopath}"
 export PATH="/usr/local/go/bin:/usr/local/cuda-12.8/bin:$PATH"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# deepseekv4_stage_serve_dgx3.sh - durable stage+build+serve of DeepSeek-V4-Flash on an
+# deepseekv4_stage_serve_gpu_server.sh - durable stage+build+serve of DeepSeek-V4-Flash on an
 # A100 (sm_80) node via a V4-aware llama.cpp fork. The DeepSeek-V4 sibling of
-# tools/glm52_stage_serve_dgx3.sh, and the sm_80 counterpart to scripts/dgx-deepseek-serve.sh
+# tools/glm52_stage_serve_gpu_server.sh, and the sm_80 counterpart to scripts/dgx-deepseek-serve.sh
 # (which fronts a *stock* vLLM/SGLang engine and correctly REFUSES below sm_90).
 #
 # WHY THIS EXISTS (the A100 "V4 not supported" overcome):
@@ -15,7 +15,7 @@
 #   (compressor decode, hyperconnection, lightning indexer, FP8-KV simulation, NextN
 #   heads) with CUDA kernels, and on sm_80 falls into the *software-emulated* FP8 path
 #   (correct, just not HW-accelerated) - the same "llama.cpp overcomes the sm_90 kernel
-#   floor" move already proven for GLM-5.2 on dgx3.
+#   floor" move already proven for GLM-5.2 on GPU server.
 #
 #   MATCHED PAIRS (fork <-> GGUF must agree; they are different code paths):
 #     * teamblobfish GGUF  <-> cchuter fork  feat/v4-port-cuda  (5 V4 ops, CUDA-validated)
@@ -35,11 +35,11 @@
 # up, health-checks it, and records a three-rung WIRE witness (models roster / non-stream
 # completion with usage / streamed completion to [DONE]) - the same rungs as the self-host
 # runbook (docs/benchmarks/DEEPSEEK-V4-SELFHOST-BASELINE-RUNBOOK.md), captured on-box via
-# curl because dgx3 has no Go toolchain for the Go smoke. The served quant is recorded
+# curl because GPU server has no Go toolchain for the Go smoke. The served quant is recorded
 # in-band so nothing is over-claimed. Any perf headline is deferred to a tuned baseline.
 #
 # Usage (RUN ON THE GPU HOST, detached so a disconnect does not orphan a ~100+ GB load):
-#   tmux new-session -d -s dsv4 'bash tools/deepseekv4_stage_serve_dgx3.sh > /tmp/fakgpu/dsv4.log 2>&1'
+#   tmux new-session -d -s dsv4 'bash tools/deepseekv4_stage_serve_gpu_server.sh > /tmp/fakgpu/dsv4.log 2>&1'
 # then poll:  cat "$DSV4_DIR/PHASE"   and on DSV4_SERVE_READY read "$DSV4_DIR/WITNESS".
 set -uo pipefail
 
@@ -62,7 +62,7 @@ PHASE="$DSV4_DIR/PHASE"
 LOG="$DSV4_DIR/stage_serve.log"
 WITNESS="$DSV4_DIR/WITNESS"
 
-# CUDA toolkit bin on PATH for the sm_80 build. dgx3 ships CUDA 12.8; prefer CUDA_BIN, then
+# CUDA toolkit bin on PATH for the sm_80 build. GPU server ships CUDA 12.8; prefer CUDA_BIN, then
 # the generic symlink, then known versions, so the same script builds on the DGX A100 and a
 # GCP A100 node with no edit.
 for _cuda in "${CUDA_BIN:-}" /usr/local/cuda/bin /usr/local/cuda-12.9/bin /usr/local/cuda-12.8/bin; do
