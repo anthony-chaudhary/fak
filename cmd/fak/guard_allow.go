@@ -190,7 +190,8 @@ func cmdGuardAllow(argv []string) {
 	prefix := fs.Bool("prefix", false, "treat the positional args as allow_prefix entries (a tool-name PREFIX) rather than exact names")
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
 	journalPath := fs.String("journal", "", "the audit journal --from-journal reads (default: the newest repo-local guard journal)")
-	addAll := fs.Bool("add-all", false, "with --from-journal, add EVERY blocked tool found to the overlay in one step")
+	fromClaudeSettings := fs.Bool("from-claude-settings", false, "import permissions.allow from Claude settings.json (+ settings.local.json, or a positional path) into the overlay; name-level entries only")
+	addAll := fs.Bool("add-all", false, "with --from-journal / --from-claude-settings, add EVERY mappable entry found to the overlay in one step")
 	_ = fs.Parse(argv)
 
 	path := guardAllowOverlayPath()
@@ -203,6 +204,8 @@ func cmdGuardAllow(argv []string) {
 	switch {
 	case *fromJournal:
 		os.Exit(runGuardAllowFromJournal(os.Stdout, os.Stderr, path, &ov, *journalPath, *addAll))
+	case *fromClaudeSettings:
+		os.Exit(runGuardAllowFromClaudeSettings(os.Stdout, os.Stderr, path, &ov, fs.Args(), *addAll))
 	case *list:
 		printGuardAllowOverlay(os.Stdout, path, ov)
 	default:
@@ -343,6 +346,8 @@ func guardAllowUsage() string {
 		"  fak guard allow --list                 print the current overlay and its path",
 		"  fak guard allow --from-journal         list what a guarded session BLOCKED + the command to allow each",
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
+		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",
+		"  fak guard allow --from-claude-settings --add-all   apply that import to the overlay",
 		"",
 		"The overlay is an operator-authored file the guard floor UNIONS into its allow-list at launch",
 		"(default .fak/guard/allow.json; override with $" + guardAllowOverlayEnv + "). It only WIDENS what is",
