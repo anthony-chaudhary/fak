@@ -187,6 +187,9 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "model-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/modelbench -hf ~/models/smollm2-135m -quant -tokens 4 -warmup 1"
+	}
 	if req.Benchmark == "gpu-benchmark" {
 		if req.Machine == "gcp-g2-l4-32" {
 			return "printf 'FAK_BENCH_NODE='; hostname; curl -fsS -o /tmp/fak-bench-response -w 'FAK_BENCH_HTTP=%{http_code} FAK_BENCH_SECONDS=%{time_total}' -H 'Content-Type: application/json' -d '{\"model\":\"qwen2.5-0.5b-gpu\",\"messages\":[{\"role\":\"user\",\"content\":\"Say benchmark ok\"}],\"max_tokens\":4}' http://127.0.0.1:8082/v1/chat/completions && echo && cat /tmp/fak-bench-response"
