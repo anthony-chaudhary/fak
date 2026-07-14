@@ -1,4 +1,4 @@
-package tools_test
+package repoguard_test
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 )
 
 func TestRepoGuardHookFallsBackFromStaleBinary(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", ".claude", "settings.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".claude", "settings.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
