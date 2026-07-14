@@ -1,0 +1,105 @@
+# LiveCodeBench — next steps on `lab-dgx2` — 2026-07-13
+
+**Objective:** determine the concrete next action to advance the LiveCodeBench
+campaign (#2085 / #3060) using the `lab-dgx2` box, and state honestly what is
+executable now versus what is blocked.
+
+**Operator:** autonomous benchmark loop. **Session limitation:** this session ran
+from the Windows dev box; `fak-private/tools/dgxsh.py` (the Slack control-hub
+bridge used to reach the lab boxes in #1012) is **not** checked out in this tree,
+so **no `lab-dgx2` command was driven from here**. Everything below is a verified-state
+synthesis plus a ready-to-run recipe for an operator with the bridge (or an
+on-box shell).
+
+## Verified state (not fabricated — read from the repo + today's sibling artifacts)
+
+| Fact | Value | Source |
+|---|---|---|
+| LCB CLI arms shipped | `fetch`, `raw`, `fak`, `ab`, `export`, `contract`, `report`, `preflight` | `cmd/livecodebench/{main,raw,fak}.go` |
+| Official grader runs end-to-end over **real** `release_v2` problems | pass@1 = 0.5 on 2 correct / 2 wrong hand-authored solutions | `experiments/livecodebench/glm52-run/RUN-LOG.md` (#3060) |
+| The gap that grader run left open | generation half used **hand-authored** code — no model endpoint was reachable | same RUN-LOG, "honest boundary" |
+| Real GLM-5.2 Q4 in-kernel serve **works on `lab-dgx2`** | `planner=inkernel`, GLM-5.2 Q4_K_M, `:8090`, witnessed | `issue-1012-...-glm52-dgx-20260713.md` |
+| `lab-dgx2` decode speed | **~0.2 tok/s** (154-tok prefill = 720 s) under `--cpu-offload-experts` | #1012 per-turn table |
+| Why offload is forced on `lab-dgx2` | model resident ≈ 427 GB > 320 GB aggregate VRAM (8× **40** GB GPUs) | #1012 (resident 437,273 MiB) |
+| `lab-dgx3` alternative | 8× **80** GB GPUs = **640 GB**, powered up and **idle**, no serve resident | `DGX3-BENCH-RECON-2026-07-13.md` |
+
+**Bottom line:** the LCB pipeline is fully wired and the official grader is proven
+over real problems. The **only** missing evidence is *generations produced by a
+real served model on real LCB problems, then officially graded*. The submission
+gate (`LIVECODEBENCH-SUBMISSION-PACKET.md`, #2115) stays `BLOCKED_PRECREDENTIAL`
+until that exists.
+
+## The fork
+
+Producing real served-model generations needs a serve fast enough for the target
+problem count. That splits into two distinct next actions:
+
+### Option A — bounded wiring-witness (cheap, closes the #3060 gap)
+
+Prove the **one** unproven seam — *real served-model generations → official
+grade* — without paying the GLM offload wall. Point the `fak` arm at **any fast
+on-GPU serve that fits in a single 40 GB card** (a small model, decode at normal
+speed) over a **tiny real release-pinned slice**, then grade with the official
+evaluator.
+
+```bash
+# 1. tiny real slice (network fetch of a pinned release), e.g. 3 problems
+fak livecodebench fetch --release-version release_v6 --scenario codegeneration \
+    --fetch --limit 3 --out suite.json
+
+# 2. fak arm against a fast on-GPU serve (endpoint = whatever is served)
+fak livecodebench fak --suite suite.json --model <served-id> \
+    --endpoint http://127.0.0.1:8090/v1 --n 1 --temperature 0 \
+    --max-tokens 512 --out fak-report.json
+
+# 3. grade via the official custom-evaluator (handoff pinned by `contract`)
+fak livecodebench export --format custom-evaluator --out custom_output.json ...
+python -m lcb_runner.runner.custom_evaluator \
+    --custom_output_file custom_output.json --release_version release_v6
+```
+
+This is **not** a publishable pass@1 (too few problems; `result_claim_allowed`
+stays false). It is the honest next datum: *the full fak→official-grade pipe run
+with a real model on a real GPU.* **Fastest way to retire the last unproven seam.**
+
+> Note the export seam: `livecodebench export` currently reads a fixture-shaped
+> file, not the `fak`-arm report directly. Confirm/adapt the report→custom-evaluator
+> binding on-box before trusting step 3; the exact grading command is pinned by
+> `fak livecodebench contract`.
+
+### Option B — publishable pure-kernel GLM-5.2 number (target `lab-dgx3`, not `lab-dgx2`)
+
+A leaderboard-grade pure-kernel run needs hundreds of problems × n samples. On
+**`lab-dgx2`** that is impractical: at ~0.2 tok/s a single ~600-token LCB prompt is
+~45 min of prefill alone, so a real sweep is many days.
+
+The offload wall is a **VRAM** problem, and **`lab-dgx3` does not have it**: 640 GB
+aggregate holds the ~427 GB Q4 model fully on-GPU, so experts need not offload to
+host RAM and decode should be far faster. `lab-dgx3` is idle today. **Hypothesis to
+verify on-box:** that the in-kernel CUDA backend can shard GLM-5.2 Q4 experts
+across 8× 80 GB with no `--cpu-offload-experts` — confirm resident placement and
+measured tok/s before committing a full sweep.
+
+**Recommendation:** `lab-dgx2`'s role is the Option-A wiring-witness and staging; the
+publishable pure-kernel GLM-5.2 run belongs on **`lab-dgx3`**.
+
+## `lab-dgx2` serve recipe (proven working in #1012 — reuse verbatim)
+
+```
+fak serve --gguf /mnt/glm/glm52-q4/GLM-5.2-Q4_K_M-00001-of-00008.gguf \
+    --backend cuda --cpu-offload-experts --addr :8090
+# gate before trusting anything: /healthz planner must == "inkernel"
+```
+
+fak v0.40.0 @ `471c3d9`, `go build -tags cuda` (libfakcuda.a sm_80 prebuilt).
+Transport recipe (control channel is congested): fresh private session
+(`dgxsh.py newsess`), detached `bg` job with an on-box waiter writing a durable
+log, `-transcript` readback. Default `SLACK_CHANNEL` already points at `lab-dgx2`
+(`<slack-channel-id>`).
+
+## Honest boundary
+
+No `lab-dgx2` command was executed this session (no bridge in-tree). The results
+scaffold cells (`pass@1`, `pass@5`, `Engine (pure-kernel arm)`) stay
+`pending run` / `pending GPU run` and this artifact promotes nothing. It records
+the verified pipeline state, the two-way fork, and ready-to-run recipes.
