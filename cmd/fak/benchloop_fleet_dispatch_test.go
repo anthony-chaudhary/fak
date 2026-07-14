@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -127,5 +128,14 @@ func TestBenchFleetGCPProvisionFailureIsRetryable(t *testing.T) {
 	})
 	if w.State != "waiting_provision" {
 		t.Fatalf("witness=%+v", w)
+	}
+}
+
+func TestBenchFleetL4UsesProvisionedGPURecipe(t *testing.T) {
+	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-g2-l4", Benchmark: "gpu-benchmark", Command: "generic"})
+	for _, want := range []string{"FAK_BENCH_NODE=", "$HOME/.local/go/bin", "build_cuda.sh binary", "~/models/qwen05"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("command %q missing %q", cmd, want)
+		}
 	}
 }

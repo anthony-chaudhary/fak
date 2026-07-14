@@ -166,8 +166,16 @@ func hasBenchNodeWitness(output string) bool {
 	return false
 }
 
+func benchFleetRemoteCommand(req benchFleetRequest) string {
+	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Machine == "gcp-g2-l4" && req.Benchmark == "gpu-benchmark" {
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=sm_89 bash internal/compute/build_cuda.sh binary ./cmd/gpucheck /tmp/fak-gpucheck && /tmp/fak-gpucheck -hf ~/models/qwen05 -n 4"
+	}
+	return prefix + req.Command
+}
+
 func benchFleetRoute(root string, req benchFleetRequest) (string, []string, string, string, error) {
-	remote := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && " + req.Command
+	remote := benchFleetRemoteCommand(req)
 	switch req.Machine {
 	case "gcp-g2-l4":
 		return "gcloud", []string{"compute", "ssh", "fak-cuda-build-l4", "--zone", "us-central1-b", "--quiet", "--command", remote}, "gcp:ssh/fak-cuda-build-l4", "running", nil
