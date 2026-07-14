@@ -93,8 +93,29 @@ func TestResolveFakBinaryFallsBackToPath(t *testing.T) {
 	}
 }
 
-func TestResolveFakCommandUsesGoRunWhenSourceIsNewer(t *testing.T) {
-	dir, _ := writeFakcDevCheckout(t)
+func TestResolveFakCommandDoesNotReplaceInstalledBinaryWithNewerCheckoutSource(t *testing.T) {
+	dir := t.TempDir()
+	fak := filepath.Join(dir, "fak.exe")
+	if err := os.WriteFile(fak, []byte("installed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/fak\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "fak", "main.go"), []byte("not valid Go: peer WIP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	newer := time.Now()
+	if err := os.Chtimes(fak, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "cmd", "fak", "main.go"), newer, newer); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := resolveFakCommand(
 		func(string) string { return "" },
@@ -108,70 +129,10 @@ func TestResolveFakCommandUsesGoRunWhenSourceIsNewer(t *testing.T) {
 		func() (string, error) { return dir, nil },
 		"windows",
 	)
-	if err != nil {
-		t.Fatalf("resolve command: %v", err)
+	want := []string{fak}
+	if err != nil || !reflect.DeepEqual(got.Argv, want) {
+		t.Fatalf("resolve installed binary beside newer checkout = %#v,%v; want argv=%#v", got, err, want)
 	}
-	want := []string{"C:/Go/bin/go.exe", "run", filepath.Join(dir, "cmd", "fak")}
-	if !reflect.DeepEqual(got.Argv, want) || got.Display != "go run ./cmd/fak" {
-		t.Fatalf("resolve command = %#v, want argv=%#v display go run ./cmd/fak", got, want)
-	}
-
-}
-
-func TestResolveFakCommandUsesGoRunForStaleEnvBinary(t *testing.T) {
-	dir, fak := writeFakcDevCheckout(t)
-
-	got, err := resolveFakCommand(
-		func(k string) string {
-			if k == "FAK_BIN" {
-				return fak
-			}
-			return ""
-		},
-		func() (string, error) { return filepath.Join(dir, "fakc.exe"), nil },
-		func(name string) (string, error) {
-			if name == "go" {
-				return "C:/Go/bin/go.exe", nil
-			}
-			return "", errors.New("no path")
-		},
-		func() (string, error) { return dir, nil },
-		"windows",
-	)
-	if err != nil {
-		t.Fatalf("resolve command: %v", err)
-	}
-	want := []string{"C:/Go/bin/go.exe", "run", filepath.Join(dir, "cmd", "fak")}
-	if !reflect.DeepEqual(got.Argv, want) {
-		t.Fatalf("resolve stale FAK_BIN command = %#v, want %#v", got.Argv, want)
-	}
-}
-
-func writeFakcDevCheckout(t *testing.T) (dir, fak string) {
-	t.Helper()
-	dir = t.TempDir()
-	mustWrite := func(path, body string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	fak = filepath.Join(dir, "fak.exe")
-	mustWrite(fak, "old")
-	mustWrite(filepath.Join(dir, "go.mod"), "module example.com/fak\n")
-	mustWrite(filepath.Join(dir, "cmd", "fak", "main.go"), "package main\nfunc main(){}\n")
-	old := time.Now().Add(-2 * time.Hour)
-	newer := time.Now()
-	if err := os.Chtimes(fak, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(filepath.Join(dir, "cmd", "fak", "main.go"), newer, newer); err != nil {
-		t.Fatal(err)
-	}
-	return dir, fak
 }
 
 func TestRunFakcDryRunWithoutFakStillPrintsDelegation(t *testing.T) {
