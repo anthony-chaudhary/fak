@@ -439,6 +439,7 @@ var tier = map[string]int{
 	"roofline":              1, // pure-Go GLM-5.2 roofline dashboard fold (#3090): folds committed benchmark run artifacts × transcribed ceiling estimates into one current-vs-80%target-vs-ceiling table; stdlib-only, imports nothing internal, laptop-composable (no GPU), off the hot path.
 	"supervisoragent":       2, // #4478 (epic #4477, supervisor-seat fence #1): the closed, payload-free SupervisorInput contract a supervisor agent consumes + the pure assembler that projects it. Folds fleetmon(1) per-worker class -> WorkerState and leaseref(1) ArbiterLease -> Lease, passing the dos_status/escalation heads through payload-free; no transcript/free-text field by construction. Off the hot path.
 	"modedebt":              3, // #4416 (epic #4397, permission regimes #2389/#2405): the CONSUMER half of the mode-debt scorer/dispatcher pair. Reads the sibling scorer's scorecard JSON, selects HARD un-lifted permission dials, and maps each onto dogfoodissues(3).ActionItem with a content-stable dedup key, capped at the family --cap. Composer twin of qaprocessscore: imports dogfoodissues(3)+stdlib only, off the hot path.
+	"deploymanifest":        1, // unified fak.toml all-in-one deployment manifest (#3421, epic #3256): typed schema for the eight deployment sections + a fail-closed loader (unknown/typo'd key refuses at load with a closed-vocabulary reason) + the `fak init` minimal-emit bytes; stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -462,7 +463,7 @@ var pureRoot = map[string]bool{
 	"clonescan": true, "closureaudit": true, "closurerate": true, "cmdutil": true, "codegraph": true, "codelint": true,
 	"codexmemory": true, "commitintent": true, "commitissuelink": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deepseekbench": true,
-	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "devexmeter": true,
+	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "deploymanifest": true, "devexmeter": true,
 	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
