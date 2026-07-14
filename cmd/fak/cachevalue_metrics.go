@@ -342,6 +342,24 @@ func renderCompactionSegments(w *promWriter, rep gatewayusageledger.CompactionRe
 		if s.ValidDenomRows > 0 {
 			w.gauge("fak_cachevalue_compaction_shed_pct_median", "WITNESSED: median per-session shed fraction (%%) over this cell's valid-denominator fired rows.", s.ShedPctMedian, lbl...)
 		}
+		// Bail-reason mix: one sample per (regime × band × reason) so a panel/alert reads
+		// the WHY the single bail_rate gauge cannot carry — an under_budget-dominated slice
+		// is a band correctly declining under its budget, while a burst_unprofitable share
+		// creeping up is a tuning call worth watching. Reasons sorted for a deterministic
+		// exposition. The top reason's SHARE is emitted alongside so a dashboard can gate on
+		// "the dominant reason no longer dominates" without summing the per-reason series.
+		reasons := make([]string, 0, len(s.BailReasons))
+		for r := range s.BailReasons {
+			reasons = append(reasons, r)
+		}
+		sort.Strings(reasons)
+		for _, r := range reasons {
+			w.gauge("fak_cachevalue_compaction_bail_reason", "WITNESSED: compaction bails in this cell attributed to one CompactReason (under_budget is correct-by-design; burst_unprofitable/too_few_msgs are the tuning-sensitive slices).", float64(s.BailReasons[r]), "regime", s.BudgetRegime, "budget", strconv.Itoa(s.Budget), "band", s.Band, "reason", r)
+		}
+		if s.TopBailReason != "" {
+			topLbl := []string{"regime", s.BudgetRegime, "budget", strconv.Itoa(s.Budget), "band", s.Band, "reason", s.TopBailReason}
+			w.gauge("fak_cachevalue_compaction_top_bail_share", "WITNESSED: the top bail reason's fraction of this cell's classified bails (1.0 = one dominant reason; a falling share means a second reason is eating attempts).", s.TopBailShare, topLbl...)
+		}
 	}
 }
 

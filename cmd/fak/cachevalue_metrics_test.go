@@ -118,13 +118,15 @@ func richCompaction() gatewayusageledger.CompactionReport {
 				Budget: 48000, BudgetRegime: "interactive", Band: "0-20",
 				Sessions: 120, FiredSessions: 0, Fires: 0, Bails: 44, BailRate: 1.0,
 				ShedTokens: 0, ValidDenomRows: 0, DenomZeroRows: 3, ShedPctMedian: 0, ShedPctMean: 0,
-				TopBailReason: "under_budget",
+				TopBailReason: "under_budget", TopBailShare: 1.0,
+				BailReasons: map[string]uint64{"under_budget": 44},
 			},
 			{
 				Budget: 96000, BudgetRegime: "headless", Band: "40-80",
 				Sessions: 30, FiredSessions: 28, Fires: 900, Bails: 300, BailRate: 0.25,
 				ShedTokens: 12_500_000, ValidDenomRows: 28, DenomZeroRows: 0,
-				ShedPctMedian: 43.3, ShedPctMean: 41.7, TopBailReason: "under_budget",
+				ShedPctMedian: 43.3, ShedPctMean: 41.7, TopBailReason: "under_budget", TopBailShare: 0.8,
+				BailReasons: map[string]uint64{"under_budget": 240, "burst_unprofitable": 60},
 			},
 		},
 	}
@@ -233,6 +235,21 @@ func TestRenderCachevalueExposition_CompactionSegments(t *testing.T) {
 	}
 	if got := sampleLine(t, out, "fak_cachevalue_compaction_denom_zero_rows", `regime="interactive"`); !strings.HasSuffix(got, "3") {
 		t.Errorf("interactive denom_zero_rows = %q, want 3", got)
+	}
+
+	// the bail-reason MIX is projected per (regime × band × reason): the headless cell's
+	// burst_unprofitable slice (the tuning-sensitive one) must be its own series so an alert
+	// can watch it independently of the correct-by-design under_budget mass.
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_bail_reason", `reason="burst_unprofitable"`); !strings.HasSuffix(got, "60") {
+		t.Errorf("headless burst_unprofitable bail_reason = %q, want 60", got)
+	}
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_bail_reason", `regime="headless",budget="96000",band="40-80",reason="under_budget"`); !strings.HasSuffix(got, "240") {
+		t.Errorf("headless under_budget bail_reason = %q, want 240", got)
+	}
+	// the top reason's share rides its own gauge so a dashboard gates on "dominance fell"
+	// without summing the per-reason series.
+	if got := sampleLine(t, out, "fak_cachevalue_compaction_top_bail_share", `regime="headless"`); !strings.HasSuffix(got, "0.8") {
+		t.Errorf("headless top_bail_share = %q, want 0.8", got)
 	}
 }
 
