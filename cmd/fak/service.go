@@ -162,7 +162,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		if os.MkdirAll(*unitDir, 0o755) != nil || os.MkdirAll(*stateDir, 0o700) != nil || os.MkdirAll(filepath.Join(*stateDir, "logs"), 0o700) != nil {
 			return 1
 		}
-		if runtime.GOOS == "linux" {
+		if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 			if err := os.Chmod(*stateDir, 0o711); err != nil {
 				fmt.Fprintln(stderr, "fak service: prepare state traversal:", err)
 				return 1
@@ -181,6 +181,10 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		if runtime.GOOS == "darwin" {
 			if err := chownServiceStateExcept(*stateDir, *principal, registryDir); err != nil {
 				fmt.Fprintln(stderr, "fak service: prepare launchd state:", err)
+				return 1
+			}
+			if err := os.Chmod(*stateDir, 0o711); err != nil {
+				fmt.Fprintln(stderr, "fak service: preserve registry traversal:", err)
 				return 1
 			}
 		}

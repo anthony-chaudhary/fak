@@ -63,9 +63,9 @@ func TestServiceRunOnceTicksControlPlane(t *testing.T) {
 	}
 }
 
-func TestLinuxServiceStateAllowsOnlyTraversalToSharedRegistry(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("Linux mode semantics")
+func TestUnixServiceStateAllowsOnlyTraversalToSharedRegistry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix mode semantics")
 	}
 	state := filepath.Join(t.TempDir(), "state")
 	if err := os.MkdirAll(state, 0o700); err != nil {
