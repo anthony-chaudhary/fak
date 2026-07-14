@@ -337,6 +337,8 @@ func main() {
 		cmdReleaseStaleness(os.Args[2:])
 	case "watchdog":
 		cmdWatchdog(os.Args[2:])
+	case "service":
+		cmdService(os.Args[2:])
 	case "micro":
 		// The native in-process Go microagent runtime front door (see cmdMicro).
 		cmdMicro(os.Args[2:])
