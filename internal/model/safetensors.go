@@ -465,6 +465,46 @@ func appendSafetensorsFileInto(sf *safetensorsFile, man map[string]tensorMeta, r
 				continue
 			}
 		}
+		// FP8 e4m3 128x128 block-scale weight paired with a `weight_scale_inv` companion —
+		// the DeepSeek-V3/V4 / GLM-FP8 layout (#4360). Gate on the cheap map lookup for the
+		// companion (no per-tensor unmarshal on the common non-fp8 path); only then confirm
+		// the weight is F8_E4M3 and decode per-128x128 tile to f32, consuming the scale so it
+		// is not loaded as a spurious standalone tensor. Sorted name order guarantees the
+		// weight is visited before its `_scale_inv` companion, so the consume always lands.
+		if scaleRaw, ok := sf.hdr[name+"_scale_inv"]; ok {
+			var we stEntry
+			if err := json.Unmarshal(sf.hdr[name], &we); err != nil {
+				return fmt.Errorf("safetensors: entry %s: %w", name, err)
+			}
+			if we.Dtype == "F8_E4M3" {
+				scaleName := name + "_scale_inv"
+				var scaleEntry stEntry
+				if err := json.Unmarshal(scaleRaw, &scaleEntry); err != nil {
+					return fmt.Errorf("safetensors: entry %s: %w", scaleName, err)
+				}
+				weightBytes, err := sf.tensorBytes(we)
+				if err != nil {
+					return fmt.Errorf("safetensors: tensor %s: %w", name, err)
+				}
+				scaleBytes, err := sf.tensorBytes(scaleEntry)
+				if err != nil {
+					return fmt.Errorf("safetensors: tensor %s: %w", scaleName, err)
+				}
+				scaleF32, err := decodeSafetensorF32(scaleName, scaleEntry, scaleBytes)
+				if err != nil {
+					return err
+				}
+				f32, shape, err := decodeFP8BlockScaleTensor(name, we.Shape, weightBytes, scaleF32)
+				if err != nil {
+					return err
+				}
+				man[name] = tensorMeta{Dtype: "f32", Shape: shape, Offset: *off, Nbytes: len(f32)}
+				*raw = append(*raw, f32...)
+				*off += len(f32)
+				consumed[scaleName] = true
+				continue
+			}
+		}
 		if skipped, err := decodeAppendF32Tensor(sf, name, man, raw, off); err != nil {
 			return err
 		} else if skipped {

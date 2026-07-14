@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 )
@@ -92,4 +93,36 @@ func decodeFP8BlockScale(name string, O, I int, weight []byte, scaleInv []float3
 		}
 	}
 	return out, nil
+}
+
+// decodeFP8BlockScaleTensor is the safetensors-load adapter over decodeFP8BlockScale:
+// it takes a rank-2 [O,I] float8_e4m3fn weight's raw bytes plus its companion
+// `weight_scale_inv` already widened to little-endian f32 bytes, and returns the
+// dequantized tensor as little-endian f32 bytes and its [O,I] shape — the byte form the
+// safetensors load loop appends into the resident f32 buffer, exactly like
+// decodeMXFP4Blocks. The loader widens F32/BF16/F16 scale bytes uniformly (via
+// decodeSafetensorF32) before calling in, so this stays pure of scale-dtype decode and
+// only reinterprets f32. Rank other than 2 is a fail-closed error: the block-scale
+// layout is defined for 2-D weights, so an unexpected rank is refused, not guessed.
+func decodeFP8BlockScaleTensor(name string, weightShape []int, weight, scaleF32 []byte) ([]byte, []int, error) {
+	if len(weightShape) != 2 {
+		return nil, nil, fmt.Errorf("fp8 block-scale %s: shape %v, want rank-2 [O,I]", name, weightShape)
+	}
+	O, I := weightShape[0], weightShape[1]
+	if len(scaleF32)%4 != 0 {
+		return nil, nil, fmt.Errorf("fp8 block-scale %s: scale byte length %d not divisible by 4", name, len(scaleF32))
+	}
+	scaleInv := make([]float32, len(scaleF32)/4)
+	for i := range scaleInv {
+		scaleInv[i] = math.Float32frombits(binary.LittleEndian.Uint32(scaleF32[i*4:]))
+	}
+	f32, err := decodeFP8BlockScale(name, O, I, weight, scaleInv)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]byte, len(f32)*4)
+	for i, v := range f32 {
+		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(v))
+	}
+	return out, []int{O, I}, nil
 }
