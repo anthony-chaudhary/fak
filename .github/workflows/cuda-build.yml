@@ -85,14 +85,33 @@ jobs:
         run: go vet -tags cuda ./internal/compute/ ./internal/model/
 
   # ---- deep tier: nvcc container, NO GPU, paths-filtered -----------------------------------
+  # A matrix over the arches whose codegen we must guard. sm_89 stays on the 12.6 line so it
+  # AGREES with internal/compute/setup_cuda_wsl.sh's local-dev pin; the Blackwell arches
+  # (sm_100 datacenter B200/GB200, sm_120 consumer) run on a 12.8 toolkit because the
+  # compute_100/compute_120 targets simply do not exist in 12.6's nvcc. That is deliberate:
+  # a tcgen05/TMEM/NVFP4 intrinsic that is invalid for Blackwell (added under #4189/#4190)
+  # only fails to compile on the sm_100/sm_120 legs, which is the whole point of #4186.
+  # fail-fast: false so one arch's break still lets the others report.
   nvcc:
-    name: nvcc compile kernels · go build -tags cuda (links stub libs, no GPU)
+    name: nvcc compile kernels (${{ matrix.arch }}) · go build -tags cuda (stub libs, no GPU)
     runs-on: ubuntu-latest
     if: ${{ github.repository == 'anthony-chaudhary/fak' }}
-    # Pinned to the 12.6 line so it AGREES with internal/compute/setup_cuda_wsl.sh's pin; a
-    # silent CUDA-minor bump can't change behavior under the gate. -devel ships nvcc + cuBLAS
-    # headers + the cudart/cublas stub libs the cgo link needs (no GPU).
-    container: nvidia/cuda:12.6.2-devel-ubuntu22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: sm_89
+            image: nvidia/cuda:12.6.2-devel-ubuntu22.04
+          - arch: sm_100
+            image: nvidia/cuda:12.8.1-devel-ubuntu22.04
+          - arch: sm_120
+            image: nvidia/cuda:12.8.1-devel-ubuntu22.04
+    # -devel ships nvcc + cuBLAS headers + the cudart/cublas stub libs the cgo link needs (no
+    # GPU). The image is pinned per-arch (above) and documented; keep the arch set consistent
+    # with internal/compute/cuda_arch.txt (the authoritative set) and Dockerfile.cuda. The
+    # 12.8 pin for the Blackwell legs is intentionally NEWER than the 12.6 local-dev pin —
+    # 12.6 cannot emit compute_100/compute_120 at all.
+    container: ${{ matrix.image }}
     steps:
       - name: toolchain (the -devel image lacks git/build-essential by default)
         run: |
@@ -106,15 +125,18 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Compile the kernels with build_cuda.sh's EXACT flags (sm_89, the default) so the gate
-      # exercises the real build path. One arch is enough for a compile gate — nvcc is
-      # arch-portable here, and build_portable scores the full sm_80/89/90/100 matrix.
-      - name: nvcc compile cuda_kernels.cu -> libfakcuda.a (sm_89)
+      # Compile the kernels with build_cuda.sh's EXACT gencode shape for this arch so the gate
+      # exercises the real build path: arch=compute_<cc>,code=sm_<cc> matches build_cuda.sh's
+      # single-arch form (code=${ARCH}). The Blackwell legs additionally prove that
+      # compute_100/compute_120 are reachable in the pinned toolkit.
+      - name: nvcc compile cuda_kernels.cu -> libfakcuda.a (${{ matrix.arch }})
         working-directory: internal/compute
         run: |
-          nvcc -O3 -std=c++14 -arch=sm_89 -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
+          cc="${{ matrix.arch }}"; cc="${cc#sm_}"
+          nvcc -O3 -std=c++14 -gencode "arch=compute_${cc},code=${{ matrix.arch }}" \
+            -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
           ar rcs libfakcuda.a cuda_kernels.o
-          echo "built libfakcuda.a ($(wc -c < libfakcuda.a) bytes)"
+          echo "built libfakcuda.a for ${{ matrix.arch }} ($(wc -c < libfakcuda.a) bytes)"
 
       # Link the -tags cuda variant against the resident archive + the image's cudart/cublas
       # STUB libs. This LINKS but never RUNS — no device is touched.
