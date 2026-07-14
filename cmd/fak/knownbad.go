@@ -148,6 +148,7 @@ func runKnownBadRecord(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 	note := fs.String("note", "", "free-text note describing the known-bad")
 	by := fs.String("by", "", "discoverer id (default: $FAK_AGENT_ID, else hostname)")
 	failureHash := fs.String("failure-hash", "", "optional guardrsi failure hash to fold into the signature")
+	derivedFrom := fs.String("derived-from", "", "optional parent signature (or candidate id) this attempt was derived from — the genealogy edge that links a rejected attempt to the one it mutated")
 	ttl := fs.Int64("ttl", knownbad.DefaultRecordTTLSeconds, "bounded time-to-live in seconds after which the signature auto-expires (stops matching, hold auto-lifts); pass 0 for a durable no-expiry signature")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+knownbad.DefaultLedgerRel+")")
 	asJSON := fs.Bool("json", false, "emit the recorded row as JSON")
@@ -162,7 +163,8 @@ func runKnownBadRecord(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 		fmt.Fprintln(stderr, "fak knownbad record: --reason is required")
 		return 2
 	}
-	rec := knownbad.NewRecord(*reason, []string(trees), *note, knownBadDiscoverer(*by), *failureHash, nowUnix, *ttl)
+	rec := knownbad.NewRecord(*reason, []string(trees), *note, knownBadDiscoverer(*by), *failureHash, nowUnix, *ttl).
+		WithDerivedFrom(*derivedFrom)
 	if len(rec.TreeGlobs) == 0 {
 		fmt.Fprintln(stderr, "fak knownbad record: --tree produced no valid repo-relative globs")
 		return 2
@@ -175,8 +177,12 @@ func runKnownBadRecord(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 	if *asJSON {
 		return knownBadEmitJSON(stdout, stderr, rec)
 	}
-	fmt.Fprintf(stdout, "recorded known-bad %s reason=%s trees=%s -> %s\n",
-		rec.Signature, rec.ReasonClass, strings.Join(rec.TreeGlobs, ","), path)
+	derived := ""
+	if rec.Derived() {
+		derived = " derived_from=" + rec.DerivedFrom
+	}
+	fmt.Fprintf(stdout, "recorded known-bad %s reason=%s trees=%s%s -> %s\n",
+		rec.Signature, rec.ReasonClass, strings.Join(rec.TreeGlobs, ","), derived, path)
 	return 0
 }
 

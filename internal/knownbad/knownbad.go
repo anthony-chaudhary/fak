@@ -105,6 +105,14 @@ type Record struct {
 	Status           string   `json:"status"`
 	Note             string   `json:"note,omitempty"`
 	FailureHash      string   `json:"failure_hash,omitempty"`
+	// DerivedFrom is the parent signature (or candidate id) this row was derived
+	// from — the attempt-genealogy edge (#4100). A rejected attempt links to the
+	// parent it mutated, turning the flat ledger into a traversable attempt tree so
+	// a later loop can read "approach X was tried and lost" instead of re-deriving
+	// it. It is a BIRTH attribute (set once at record time, like FailureHash), never
+	// a lifecycle transition. Empty on a root/hand-recorded row; omitempty keeps a
+	// pre-#4100 row byte-identical, so the genealogy is fully backward-compatible.
+	DerivedFrom string `json:"derived_from,omitempty"`
 	// ClaimedBy names the single elected fixer that holds the exclusive lease
 	// electing it as this signature's sole owner-of-the-fix (W5, #2717). It is
 	// bookkeeping the scope-hold (W4) and operator (W7) surfaces read to point a
@@ -468,6 +476,25 @@ func (r Record) WithClaim(claimant string, claimedAtUnix int64) Record {
 	out.ClaimedAtUnix = claimedAtUnix
 	return out
 }
+
+// WithDerivedFrom returns a copy of r stamped with the parent signature (or
+// candidate id) it was derived from — the attempt-genealogy edge (#4100). Unlike
+// the lifecycle With* stamps (claim/resolve/revoke), which supersede an earlier
+// row on a state transition, this records a BIRTH attribute set at record time, so
+// it is a builder that threads the optional edge onto NewRecord's result rather
+// than churning the constructor's many call sites. An empty parent leaves the row
+// flat and byte-identical to a pre-#4100 row (omitempty drops the key), so the
+// genealogy is opt-in and fully backward-compatible.
+func (r Record) WithDerivedFrom(parent string) Record {
+	out := r
+	out.DerivedFrom = strings.TrimSpace(parent)
+	return out
+}
+
+// Derived reports whether a row links to a parent it was derived from (a non-empty
+// DerivedFrom) — the predicate a lineage read folds over to distinguish a root
+// signature from a rejected-attempt child (#4100).
+func (r Record) Derived() bool { return strings.TrimSpace(r.DerivedFrom) != "" }
 
 // FindLatestLive returns the current LIVE record carrying signature and whether one
 // was found. Later rows supersede earlier ones (the append-to-supersede idiom), so

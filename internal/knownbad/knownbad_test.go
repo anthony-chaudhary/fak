@@ -334,3 +334,52 @@ func TestParseLedgerRobust(t *testing.T) {
 		t.Errorf("round-trip lost data: %+v", got[0])
 	}
 }
+
+// WithDerivedFrom stamps the attempt-genealogy edge (#4100): a non-empty parent
+// sets DerivedFrom (trimmed) and lights Derived(); it survives a JSONL round-trip;
+// and — the load-bearing backward-compat property — an empty parent leaves the row
+// byte-identical to a pre-#4100 row (omitempty drops the key entirely).
+func TestWithDerivedFromGenealogy(t *testing.T) {
+	root := NewRecord("build", []string{"internal/foo/**"}, "root attempt", "agent-1", "", 100, 0)
+
+	// A root row is flat: no edge, and the JSON carries no derived_from key.
+	if root.Derived() {
+		t.Errorf("a root row reports Derived()=true with DerivedFrom=%q", root.DerivedFrom)
+	}
+	rootLine, err := MarshalLine(root)
+	if err != nil {
+		t.Fatalf("MarshalLine(root): %v", err)
+	}
+	if strings.Contains(rootLine, "derived_from") {
+		t.Errorf("empty DerivedFrom must be omitted (not byte-identical to a pre-#4100 row): %s", rootLine)
+	}
+
+	// A child derived from the root's signature carries the edge, trimmed.
+	child := NewRecord("build", []string{"internal/foo/bar.go"}, "mutated variant", "agent-2", "", 200, 0).
+		WithDerivedFrom("  " + root.Signature + "  ")
+	if !child.Derived() || child.DerivedFrom != root.Signature {
+		t.Fatalf("WithDerivedFrom did not stamp+trim the parent: Derived=%v DerivedFrom=%q want %q",
+			child.Derived(), child.DerivedFrom, root.Signature)
+	}
+
+	// The edge survives a ledger round-trip.
+	childLine, err := MarshalLine(child)
+	if err != nil {
+		t.Fatalf("MarshalLine(child): %v", err)
+	}
+	got := ParseLedger([]byte(childLine))
+	if len(got) != 1 || got[0].DerivedFrom != root.Signature {
+		t.Fatalf("round-trip lost the genealogy edge: %+v", got)
+	}
+
+	// A whitespace-only parent collapses to empty (flat row), same as a root.
+	if blank := root.WithDerivedFrom("   "); blank.Derived() || blank.DerivedFrom != "" {
+		t.Errorf("whitespace-only parent must collapse to empty, got %q", blank.DerivedFrom)
+	}
+
+	// WithDerivedFrom is a birth stamp: it must not disturb the signature/tree/reason
+	// or the lifecycle bookkeeping the supersede fold reads.
+	if child.Signature != NewRecord("build", []string{"internal/foo/bar.go"}, "mutated variant", "agent-2", "", 200, 0).Signature {
+		t.Errorf("WithDerivedFrom must not change the signature")
+	}
+}
