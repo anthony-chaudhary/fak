@@ -40,6 +40,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fleet_version  # noqa: E402
 import fleet_trend  # noqa: E402
+from dispatch_worker import install_no_window_subprocess_defaults  # noqa: E402
+
+# Suppress the console-window flash both git spawns below (_read_fleet_sessions,
+# _git_land_count) would otherwise pop under Windows background automation — the same
+# global no-window default the sibling fleet tools install (auto_push_on_lag, etc.).
+install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fleet-top/1"
 
