@@ -1634,6 +1634,46 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
         "@type": "Answer",
         "text": "It guarantees that when policy evicts a tool-result span from the KV cache, the model's next-token logits are byte-identical to a run that never saw that span, proven at max|Δ| of exactly zero with a non-vacuity control that confirms keeping the poison genuinely moves the distribution. That is a strong but narrow claim: it shows reuse and eviction are a faithful shortcut, not a numerical approximation. It does not prove the model is correct, does not prove the detector caught the poison, and for the quarantine-drives-KV-eviction bridge specifically it is witnessed on a synthetic model in internal/kvmmu and is not yet wired into the live fak agent HTTP loop. The deletion certificate that binds such an eviction to an audit journal is also self-attesting in v1 (integrity, not third-party independence) and proves removal only from the inference working set, not from weights, embeddings, backups, or replicas."
       }
+    },
+    {
+      "@type": "Question",
+      "name": "What is Claude usage?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Claude usage is the share of an account's available model capacity consumed by requests. It is not just a message count: plan, model, conversation length, files, tools, and other compute-intensive features can change how much a request consumes. See the Claude usage guide for the full answer."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do Claude usage limits work?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Claude usage limits are provider-enforced, time-windowed capacity controls. There is no one fixed prompt allowance for every user because the effective limit depends on the account, plan, model, workload, and Anthropic's current policy. The authenticated Claude usage screen is the source of truth for remaining capacity and reset time."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "When does the Claude usage limit reset?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Use the reset timestamp shown by Claude for the exhausted limit. Session and longer-period limits can reset on different schedules, so one window reopening does not prove that every limit has reset. Fak records observed cooldown evidence but does not invent or change the provider's reset time."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the Claude usage limit the same as the context-window limit?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. A usage limit caps account capacity over time; a context-window or length limit caps how much a request or conversation can carry. Shorten context for a length error. For an exhausted usage allowance, follow Claude's displayed reset or an available account capacity option."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak increase or bypass the Claude usage limit?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Fak cannot increase, reset, or bypass Anthropic's quota. It can adjudicate tool calls, stop destructive retry loops, preserve recoverable long-run state, and route work from observed capacity. Those controls can reduce avoidable waste, but Claude still enforces the account's usage limit. See Claude usage and usage limits."
+      }
     }
   ]
 }
@@ -2781,3 +2821,37 @@ Because the reuse win comes from owning the KV cache as a kernel object, and an 
 ## What does the max|Δ|=0 bit-exactness proof actually guarantee, and what does it not?
 
 It guarantees that when policy evicts a tool-result span from the KV cache, the model's next-token logits are byte-identical to a run that never saw that span, proven at `max|Δ|` of exactly zero with a non-vacuity control that confirms keeping the poison genuinely moves the distribution. That is a strong but narrow claim: it shows reuse and eviction are a faithful shortcut, not a numerical approximation. It does not prove the model is correct, does not prove the detector caught the poison, and for the quarantine-drives-KV-eviction bridge specifically it is witnessed on a synthetic model in `internal/kvmmu` and is not yet wired into the live `fak agent` HTTP loop. The deletion certificate that binds such an eviction to an audit journal is also self-attesting in v1 (integrity, not third-party independence) and proves removal only from the inference working set, not from weights, embeddings, backups, or replicas.
+
+## What is Claude usage?
+
+Claude usage is the share of an account's available model capacity consumed by requests.
+It is not just a message count: plan, model, conversation length, files, tools, and other
+compute-intensive features can change how much a request consumes. See the
+[Claude usage guide](claude-usage-limits.md) for the full answer.
+
+## How do Claude usage limits work?
+
+Claude usage limits are provider-enforced, time-windowed capacity controls. There is no one
+fixed prompt allowance for every user because the effective limit depends on the account,
+plan, model, workload, and Anthropic's current policy. The authenticated Claude usage screen
+is the source of truth for remaining capacity and reset time.
+
+## When does the Claude usage limit reset?
+
+Use the reset timestamp shown by Claude for the exhausted limit. Session and longer-period
+limits can reset on different schedules, so one window reopening does not prove that every
+limit has reset. Fak records observed cooldown evidence but does not invent or change the
+provider's reset time.
+
+## Is the Claude usage limit the same as the context-window limit?
+
+No. A usage limit caps account capacity over time; a context-window or length limit caps how
+much a request or conversation can carry. Shorten context for a length error. For an exhausted
+usage allowance, follow Claude's displayed reset or an available account capacity option.
+
+## Does fak increase or bypass the Claude usage limit?
+
+No. Fak cannot increase, reset, or bypass Anthropic's quota. It can adjudicate tool calls,
+stop destructive retry loops, preserve recoverable long-run state, and route work from
+observed capacity. Those controls can reduce avoidable waste, but Claude still enforces the
+account's usage limit. See [Claude usage and usage limits](claude-usage-limits.md).
