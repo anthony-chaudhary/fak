@@ -446,6 +446,7 @@ var tier = map[string]int{
 	"systemservice":         1, // pure service-manager definition renderer; stdlib-only and off the hot path.
 	"guardcompile":          3,
 	"operatorquestion": 2,
+	"operatorresolve": 3,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

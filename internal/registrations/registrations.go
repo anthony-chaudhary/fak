@@ -137,4 +137,5 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
 	_ "github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	_ "github.com/anthony-chaudhary/fak/internal/operatorquestion"
+	_ "github.com/anthony-chaudhary/fak/internal/operatorresolve"
 )
