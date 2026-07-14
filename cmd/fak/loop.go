@@ -197,7 +197,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	source := fs.String("source", "manual", "trigger source, such as cron|launchd|task-scheduler|manual")
 	principal := fs.String("principal", "", "authenticated principal or producer id")
 	asJSON := fs.Bool("json", false, "emit a JSON run report")
-	notifySlack := fs.Bool("notify-slack", false, "post a witnessed dispatch-result card to the dispatch Slack channel when the run ends")
+	notifySlack := fs.Bool("notify-slack", false, "opt in to one per-run dispatch Slack card (start, final edit, threaded witness)")
 	dispatchChannel := fs.String("dispatch-channel", "", "override dispatch channel id (default: $FAK_DISPATCH_CHANNEL / .env.slack.local)")
 	dispatchToken := fs.String("dispatch-token", "", "override dispatch bot token (default: $FAK_DISPATCH_TOKEN, then scoreboard token)")
 	noGuard := fs.Bool("no-guard", false, "explicitly disable the default fak guard containment wrapper for this run (logged in the loop ledger)")
@@ -326,11 +326,11 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	// Live run card (#2263, epic #2259): when a dispatch channel resolves, the
-	// channel sees the run START as one card line now; the SAME message is edited
-	// into the witnessed verdict when the run ends. Best-effort like the rest of
-	// the Slack surface — a nil card means unarmed/unavailable, never a failed run.
-	card := openDispatchRunCard(stderr, *dispatchChannel, *dispatchToken, dispatchpost.Result{
+	// Per-run Slack is EXPLICITLY armed: --notify-slack uses the resolved channel,
+	// while --dispatch-channel is itself an explicit destination. Merely inheriting
+	// the machine-wide FAK_DISPATCH_CHANNEL must not turn every scheduler/test/scout
+	// loop into top-level operator-channel traffic (#4677, parent #4652).
+	card := openDispatchRunCardIfRequested(stderr, *notifySlack, *dispatchChannel, *dispatchToken, dispatchpost.Result{
 		LoopID:  *loopID,
 		RunID:   *runID,
 		Command: filepath.Base(cmdArgs[0]),
@@ -1250,11 +1250,25 @@ func drainDispatchCard(stderr io.Writer, card *dispatchpost.RunCard, tokenOverri
 	}
 }
 
-// openDispatchRunCard arms the live run card (#2263) when a dispatch channel
-// resolves: it opens (or, after a restart, resumes) the run's card over the
-// durable outbox spool, enqueues the start post, and drains once so the channel
-// sees the run begin. nil means unarmed (no channel) or unavailable (reported);
-// the dispatch itself is never affected.
+func dispatchSlackRequested(notify bool, channelOverride string) bool {
+	return notify || strings.TrimSpace(channelOverride) != ""
+}
+
+// openDispatchRunCardIfRequested keeps ambient machine-wide channel configuration from
+// arming per-run traffic. Explicit --notify-slack may resolve that ambient destination;
+// explicit --dispatch-channel is also sufficient intent.
+func openDispatchRunCardIfRequested(stderr io.Writer, notify bool, channelOverride, tokenOverride string, res dispatchpost.Result) *dispatchpost.RunCard {
+	if !dispatchSlackRequested(notify, channelOverride) {
+		return nil
+	}
+	return openDispatchRunCard(stderr, channelOverride, tokenOverride, res)
+}
+
+// openDispatchRunCard arms the live run card (#2263) after the caller has established
+// explicit notification intent: it opens (or, after a restart, resumes) the run's card
+// over the durable outbox spool, enqueues the start post, and drains once so the channel
+// sees the run begin. nil means unarmed (no channel) or unavailable (reported); the
+// dispatch itself is never affected.
 func openDispatchRunCard(stderr io.Writer, channelOverride, tokenOverride string, res dispatchpost.Result) *dispatchpost.RunCard {
 	ch := channelOverride
 	if ch == "" {
@@ -1283,12 +1297,14 @@ func openDispatchRunCard(stderr io.Writer, channelOverride, tokenOverride string
 // in the card's thread — one channel line per run. Without a card (or when the
 // card path fails) it falls back to the legacy terminal post.
 //
-// It is gated and best-effort. The post is attempted when --notify-slack is set OR a
-// dispatch channel resolves from the environment/.env.slack.local; otherwise it is a
-// silent no-op so an unconfigured box runs the dispatch normally. Any error (no
-// channel under --notify-slack, no token, a Slack API failure) is reported to stderr
-// and NEVER changes the run's exit code — the dispatch result stands on its own.
+// It is gated and best-effort. The post is attempted only when --notify-slack is set or
+// an explicit --dispatch-channel was supplied; an ambient channel alone is a silent no-op.
+// Any error (no channel under --notify-slack, no token, a Slack API failure) is reported
+// to stderr and NEVER changes the run's exit code — the dispatch result stands on its own.
 func postDispatchResult(stderr io.Writer, notify bool, channelOverride, tokenOverride string, card *dispatchpost.RunCard, res dispatchpost.Result) {
+	if !dispatchSlackRequested(notify, channelOverride) {
+		return
+	}
 	ch := channelOverride
 	if ch == "" {
 		ch = dispatchpost.ResolveChannel()

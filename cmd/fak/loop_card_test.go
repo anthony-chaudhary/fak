@@ -119,7 +119,8 @@ func TestLoopRunCardPostsOnceAndFinalizesInPlace(t *testing.T) {
 
 	var stderr bytes.Buffer
 	res := dispatchpost.Result{LoopID: "nightly", RunID: "r-7", Command: "job.ps1"}
-	card := openDispatchRunCard(&stderr, "C7", "test-token", res)
+	// An explicit destination is notification intent even without --notify-slack.
+	card := openDispatchRunCardIfRequested(&stderr, false, "C7", "test-token", res)
 	if card == nil {
 		t.Fatalf("card did not arm: %s", stderr.String())
 	}
@@ -147,6 +148,35 @@ func TestLoopRunCardPostsOnceAndFinalizesInPlace(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "dispatch run card finalized") {
 		t.Fatalf("card path did not report success: %s", stderr.String())
+	}
+}
+
+// TestLoopRunCardAmbientChannelDoesNotOptIn is the transport witness for #4677:
+// a machine-wide operator channel may exist for roll-ups, but an ordinary loop that did
+// not request per-run notification must produce ZERO top-level or threaded Slack traffic.
+func TestLoopRunCardAmbientChannelDoesNotOptIn(t *testing.T) {
+	slack := &loopCardSlack{}
+	srv := httptest.NewServer(slack.handler())
+	defer srv.Close()
+	oldBase := dispatchAPIBase
+	dispatchAPIBase = srv.URL + "/"
+	defer func() { dispatchAPIBase = oldBase }()
+	t.Setenv("FAK_DISPATCH_CHANNEL", "C-operator")
+	t.Setenv("FAK_DISPATCH_TOKEN", "test-token")
+	t.Setenv("FAK_SLACK_OUTBOX_DIR", filepath.Join(t.TempDir(), "outbox"))
+
+	var stderr bytes.Buffer
+	res := dispatchpost.Result{LoopID: "scheduler-test", RunID: "r-ambient", Command: "test.ps1"}
+	card := openDispatchRunCardIfRequested(&stderr, false, "", "", res)
+	if card != nil {
+		t.Fatal("ambient FAK_DISPATCH_CHANNEL armed a per-run card without explicit opt-in")
+	}
+	postDispatchResult(&stderr, false, "", "", card, res)
+	if got := len(slack.topLevel("C-operator")); got != 0 {
+		t.Fatalf("ambient loop emitted %d top-level operator messages, want 0", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("silent no-op wrote stderr: %s", stderr.String())
 	}
 }
 
