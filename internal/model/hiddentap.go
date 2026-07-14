@@ -159,7 +159,7 @@ func (t *hiddenTap) dumpLayer(l int, kind string, x []float32) {
 // dumpLogits appends a compact top-logit fingerprint for the selected absolute position.
 // A sibling TSV preserves the binary hidden-vector contract while giving #4273 a direct
 // token-id/logit comparison seam against llama.cpp or Hugging Face.
-func (t *hiddenTap) dumpLogits(logits []float32) {
+func (t *hiddenTap) dumpLogits(pos int, logits []float32) {
 	if t == nil || t.logitsPath == "" || len(logits) == 0 {
 		return
 	}
@@ -196,7 +196,7 @@ func (t *hiddenTap) dumpLogits(logits []float32) {
 	}
 	defer f.Close()
 	for rank, item := range top {
-		if _, err := fmt.Fprintf(f, "%d\t%d\t%d\t%.9g\n", t.pos, rank+1, item.id, item.logit); err != nil {
+		if _, err := fmt.Fprintf(f, "%d\t%d\t%d\t%.9g\n", pos, rank+1, item.id, item.logit); err != nil {
 			t.reportErr(err)
 			return
 		}

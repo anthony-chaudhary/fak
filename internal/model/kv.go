@@ -186,7 +186,7 @@ func (s *Session) requirePreNorm(path string) {
 
 func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
 	if tap := s.activeTap(); tap != nil && tap.wants(pos) {
-		tap.dumpLogits(logits)
+		tap.dumpLogits(pos, logits)
 	}
 	return logits
 }

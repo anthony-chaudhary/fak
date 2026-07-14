@@ -286,7 +286,7 @@ func TestHiddenTapFromEnv(t *testing.T) {
 func TestHiddenTapWritesTopLogitFingerprint(t *testing.T) {
 	dir := t.TempDir()
 	tap := &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: 1756}
-	tap.dumpLogits([]float32{0.5, 3, -2, 3, 1.25})
+	tap.dumpLogits(1756, []float32{0.5, 3, -2, 3, 1.25})
 	blob, err := os.ReadFile(dir + ".logits.tsv")
 	if err != nil {
 		t.Fatal(err)
