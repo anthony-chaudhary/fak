@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-g2-l4-bench-fleet-ed971feb9d0bf6de-20260714T234529Z",
+  "machine_id": "gcp-g2-l4",
+  "timestamp": "20260714T234529Z",
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "rev": "unknown"
+  },
+  "harness": {
+    "name": "fak-bench-fleet",
+    "version": "1"
+  },
+  "model": {
+    "name": "SmolLM2-135M-Instruct",
+    "precision": "q8_0"
+  },
+  "config": {
+    "benchmark": "model-benchmark",
+    "request_id": "ed971feb9d0bf6de",
+    "route": "gcp:ssh/fak-cuda-build-l4"
+  },
+  "tags": [
+    "bench-fleet",
+    "gpu",
+    "model-benchmark"
+  ],
+  "artifacts": {
+    "witness": "witness.json"
+  }
+}

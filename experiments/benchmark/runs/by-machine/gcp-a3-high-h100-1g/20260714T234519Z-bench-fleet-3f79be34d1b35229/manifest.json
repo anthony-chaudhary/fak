@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-a3-high-h100-1g-bench-fleet-3f79be34d1b35229-20260714T234519Z",
+  "machine_id": "gcp-a3-high-h100-1g",
+  "timestamp": "20260714T234519Z",
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "rev": "unknown"
+  },
+  "harness": {
+    "name": "fak-bench-fleet",
+    "version": "1"
+  },
+  "model": {
+    "name": "SmolLM2-135M-Instruct",
+    "precision": "q8_0"
+  },
+  "config": {
+    "benchmark": "model-benchmark",
+    "request_id": "3f79be34d1b35229",
+    "route": "gcp:ssh/fak-qwen-serve"
+  },
+  "tags": [
+    "bench-fleet",
+    "gpu",
+    "model-benchmark"
+  ],
+  "artifacts": {
+    "witness": "witness.json"
+  }
+}

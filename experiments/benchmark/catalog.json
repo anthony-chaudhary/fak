@@ -238,7 +238,7 @@
       ]
     }
   },
-  "last_updated": "2026-07-14T23:29:40Z",
+  "last_updated": "2026-07-14T23:45:29Z",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -279,10 +279,10 @@
       "gpu": "NVIDIA H100 (Hopper)",
       "hostname": "gcp-a3-highgpu-1g",
       "id": "gcp-a3-high-h100-1g",
-      "last_run": "20260715T054347Z",
+      "last_run": "20260714T234519Z",
       "os": "GCP Deep Learning VM (CUDA)",
       "role": "bench-node",
-      "runs": 2
+      "runs": 3
     },
     "gcp-g2-l4": {
       "arch": "x86_64",
@@ -290,10 +290,10 @@
       "gpu": "NVIDIA L4",
       "hostname": "gcp-g2-standard-8",
       "id": "gcp-g2-l4",
-      "last_run": "20260715T053520Z",
+      "last_run": "20260714T234529Z",
       "os": "GCP Deep Learning VM (CUDA)",
       "role": "bench-node",
-      "runs": 4
+      "runs": 5
     },
     "gcp-g2-l4-32": {
       "arch": "x86_64",
@@ -1324,6 +1324,34 @@
         "concept-benchmark"
       ],
       "timestamp": "20260714T232940Z"
+    },
+    {
+      "machine_id": "gcp-a3-high-h100-1g",
+      "model": "SmolLM2-135M-Instruct",
+      "path": "experiments/benchmark/runs/by-machine/gcp-a3-high-h100-1g/20260714T234519Z-bench-fleet-3f79be34d1b35229",
+      "precision": "q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-a3-high-h100-1g-bench-fleet-3f79be34d1b35229-20260714T234519Z",
+      "tags": [
+        "bench-fleet",
+        "gpu",
+        "model-benchmark"
+      ],
+      "timestamp": "20260714T234519Z"
+    },
+    {
+      "machine_id": "gcp-g2-l4",
+      "model": "SmolLM2-135M-Instruct",
+      "path": "experiments/benchmark/runs/by-machine/gcp-g2-l4/20260714T234529Z-bench-fleet-ed971feb9d0bf6de",
+      "precision": "q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-g2-l4-bench-fleet-ed971feb9d0bf6de-20260714T234529Z",
+      "tags": [
+        "bench-fleet",
+        "gpu",
+        "model-benchmark"
+      ],
+      "timestamp": "20260714T234529Z"
     }
   ],
   "version": "1.0",
