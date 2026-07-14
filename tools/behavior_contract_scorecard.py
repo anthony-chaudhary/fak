@@ -728,7 +728,6 @@ def render(payload: dict[str, Any]) -> str:
     if payload.get("error"):
         return f"behavior-contract-scorecard: ERROR — {payload['error']}"
     kpi = payload.get("kpi") or {}
-    counts = payload.get("counts") or {}
     lines = [
         f"behavior-contract-scorecard: {'OK' if payload['ok'] else 'ACTION'} "
         f"(contract_ratio {payload.get('contract_ratio')})",

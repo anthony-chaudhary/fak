@@ -210,7 +210,6 @@ def build(d):
 
     # ---- three panels -----------------------------------------------------
     py = 360
-    ph = 452
     pw = 424
     px = [40, 508, 976]
 
@@ -307,7 +306,6 @@ def build(d):
         ("ifc-sink", d["by"].get("ifc-sink", 0), "blocked tainted-data sinks", C.red),
     ]
     ey = py + 224
-    emax = max(v for _, v, _, _ in enf)
     for name, v, what, col in enf:
         P.append(R(cx0, ey, pw, 52, C.card, rx=8, stroke=C.border))
         P.append(R(cx0, ey, 5, 52, col, rx=2.5))

@@ -212,7 +212,6 @@ def audit_manifest(root: str, m: dict, today: dt.date) -> tuple[list[dict], list
         return fails, warns
     doc_lines = doc.splitlines()
     snap_dir = m["snapshot_dir"]
-    sources = m.get("sources", {})
 
     for c in m.get("claims", []):
         cid = c["id"]

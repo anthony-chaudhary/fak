@@ -17,7 +17,6 @@ Plus the surrounding contract:
 """
 from __future__ import annotations
 
-import io
 import unittest
 from pathlib import Path
 
