@@ -31,3 +31,31 @@ import "math"
 func DecodeE5M2(b byte) float32 {
 	return math.Float32frombits(f16bitsToF32(uint16(b) << 8))
 }
+
+// DecodeE4M3 decodes one OCP float8_e4m3fn (1 sign / 4 exponent, bias 7 / 3 mantissa) byte
+// to a float32. Unlike E5M2, e4m3 is NOT a prefix of any IEEE float (its 4-bit exponent has
+// bias 7, binary16's 5-bit exponent has bias 15), so there is no bit-identity shortcut — the
+// value is reconstructed arithmetically. The "fn" (finite) variant has NO infinities: the sole
+// non-finite encoding is S.1111.111 (0x7F / 0xFF), which is NaN; every other exponent-15 code
+// is a normal number, giving a max finite magnitude of 448. Exponent 0 is the subnormal range
+// (2^(1-7) * man/8), and man==0 there is signed zero. Every e4m3 value is exactly representable
+// in f32, so this is an exact identity, not an approximation — the same numeric contract the
+// safetensors weight path pins in internal/model (fp8E4M3ToF32); it is duplicated here rather
+// than shared because model imports compute, not the reverse, so the compute HAL must own its
+// FP8 element decode to be self-sufficient (#4209 step 2).
+func DecodeE4M3(b byte) float32 {
+	sign := 1.0
+	if b&0x80 != 0 {
+		sign = -1.0
+	}
+	exp := int(b>>3) & 0x0f
+	man := int(b) & 0x07
+	switch {
+	case exp == 0x0f && man == 0x07:
+		return float32(math.NaN()) // the single NaN pattern; e4m3fn has no infinities
+	case exp == 0:
+		return float32(sign * math.Ldexp(float64(man)/8, 1-7)) // subnormal; man==0 => signed zero
+	default:
+		return float32(sign * math.Ldexp(1+float64(man)/8, exp-7)) // normal
+	}
+}
