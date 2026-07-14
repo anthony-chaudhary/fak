@@ -99,6 +99,7 @@ func PreCommitGates() []Gate {
 		// PRIOR_ART is ADVISORY: DefaultMode "warn" so it never blocks a commit out of the box —
 		// it only prints the SOTA reference + a `Prior-art:` suggestion. Set FLEET_PRIORART_GUARD=block
 		// to hard-enforce it, or ALLOW_NO_PRIOR_ART=1 to skip it once. It runs LAST.
+		{Name: "TRUST_WIDENING", ModeEnv: "FLEET_TRUST_WIDENING_GUARD", DefaultMode: "warn", EscapeEnv: "FLEET_ALLOW_TRUST_WIDENING", Check: gateTrustWidening},
 		{Name: "PRIOR_ART", ModeEnv: "FLEET_PRIORART_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_PRIOR_ART", Check: gatePriorArt},
 		// UNTIERED_LEAF is ADVISORY (issue #3614): DefaultMode "warn" so it never reds a shared
 		// trunk out of the box. It is the STAGED, commit-boundary twin of the whole-tree
