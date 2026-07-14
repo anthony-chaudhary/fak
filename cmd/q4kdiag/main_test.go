@@ -102,7 +102,7 @@ func TestDecodeTokS(t *testing.T) {
 // and the parse-stable field keys. A rename of these keys silently breaks the sweep parser,
 // so this pins the contract.
 func TestFormatDecodeResultEchoesKnobs(t *testing.T) {
-	got := formatDecodeResult(64, 3, 2*time.Second, 248068)
+	got := formatDecodeResult(64, 3, 2*time.Second, 248068, 0, 0, false)
 	for _, want := range []string{
 		"RESULT ",
 		"decode_tok_s=32.0000",
@@ -117,5 +117,26 @@ func TestFormatDecodeResultEchoesKnobs(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("decode RESULT line missing %q\n  got: %s", want, got)
 		}
+	}
+}
+
+func TestFormatDecodeResultIncludesFailClosedRoofline(t *testing.T) {
+	got := formatDecodeResult(40, 2, 25*time.Second, 248068, 15_000_000_000, 90, true)
+	for _, want := range []string{
+		"decode_tok_s=1.6000",
+		"bytes_per_token=15000000000",
+		"stream_peak_gbps=90.0000",
+		"achieved_gbps=24.0000",
+		"decode_bw_util_%=26.67",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatDecodeResult() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestDecodeBandwidthRejectsZeroPeak(t *testing.T) {
+	if achieved, util := decodeBandwidth(15_000_000_000, 1.6, 0); achieved != 0 || util != 0 {
+		t.Fatalf("decodeBandwidth(zero peak)=(%v,%v), want (0,0)", achieved, util)
 	}
 }

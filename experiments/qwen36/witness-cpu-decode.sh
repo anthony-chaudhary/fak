@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# witness-cpu-decode.sh — turnkey CPU-decode witness for the Qwen3.6-27B → 10 tok/s
+# witness-cpu-decode.sh â€” turnkey CPU-decode witness for the Qwen3.6-27B â†’ 10 tok/s
 # campaign (epic #4623). ONE command produces the campaign's core witness set on the
 # target box (dual EPYC-7742, 8 NUMA), with no serve/curl/slope harness:
 #
 #   * memory-bandwidth roofline  (STREAM-Triad, dependency-free Go)      -> C3 #4626
 #   * header/active-set + decode ceiling  (q4kdiag -plan-only -membw)    -> C3 #4626
 #   * first-token int8-vs-f32 agreement   (q4kdiag -decode, id 248068)   -> C1 #4624
-#   * decode tok/s A/B over {placement × int8 × workers}                 -> C1/C2 #4625
+#   * decode tok/s A/B over {placement Ã— int8 Ã— workers}                 -> C1/C2 #4625
+#
+# A zero STREAM peak is a hard failure. Every successful decode row carries bytes_per_token,
+# stream_peak_gbps, achieved_gbps, and the literal decode_bw_util_% field. On NUMA hosts the
+# same run records every node plus the aggregate interleaved peak before decode starts.
 #
 # The int8 Q4_K reducer is env-selected (FAK_KQ_INT8) and worker count is env-selected
 # (FAK_WORKERS), so the whole A/B is just this script wrapping q4kdiag in numactl+env.
@@ -34,7 +38,7 @@ CELL_TIMEOUT="${CELL_TIMEOUT:-1800}"
 WORKERS_SWEEP="${WORKERS_SWEEP:-32 64}"
 FAST="${FAST:-0}"
 
-# Timestamp without Date.now() flakiness concerns — plain date on the box.
+# Timestamp without Date.now() flakiness concerns â€” plain date on the box.
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 HOST="$(hostname 2>/dev/null || echo unknown-host)"
 OUTDIR="${2:-experiments/qwen36/witness-${HOST}-${TS}}"
@@ -148,16 +152,33 @@ BW_LINE="$(timeout 300 go run "$TRIAD_SRC" 2>>"$LOG")"
 log "stage1: $BW_LINE"
 ALLCORE_GBPS="$(echo "$BW_LINE" | grep -oE 'allcore_gbps=[0-9.]+' | cut -d= -f2)"
 [ -z "$ALLCORE_GBPS" ] && ALLCORE_GBPS=0
-# interleaved bandwidth under numactl --interleave=all (the aggregate NUMA number)
+# Record every NUMA node independently, then the aggregate interleaved ceiling. A representative
+# node0 row is not per-node coverage: #4626 requires the complete node vector from this same run.
 BW_INTERLEAVE=""
+NODE_STREAM_JSON="[]"
 if [ "$HAVE_NUMACTL" = 1 ]; then
+  NODE_STREAM_JSON="["
+  sep=""
+  node=0
+  while [ "$node" -lt "${NUMA_NODES:-0}" ]; do
+    node_bw="$(timeout 300 numactl --cpunodebind="$node" --membind="$node" go run "$TRIAD_SRC" 2>>"$LOG" | grep -oE 'allcore_gbps=[0-9.]+' | cut -d= -f2)"
+    [ -n "$node_bw" ] || { log "FATAL: STREAM node $node returned zero/empty"; exit 1; }
+    awk -v v="$node_bw" 'BEGIN { exit !(v > 0) }' || { log "FATAL: STREAM node $node is not positive: $node_bw"; exit 1; }
+    log "stage1: node=$node allcore_gbps=$node_bw"
+    emit "{\"stage\":\"bandwidth_node\",\"node\":$node,\"stream_peak_gbps\":$node_bw}"
+    NODE_STREAM_JSON="${NODE_STREAM_JSON}${sep}{\"node\":${node},\"stream_peak_gbps\":${node_bw}}"
+    sep=","
+    node=$((node + 1))
+  done
+  NODE_STREAM_JSON="${NODE_STREAM_JSON}]"
   BW_INTERLEAVE="$(timeout 300 numactl --interleave=all go run "$TRIAD_SRC" 2>>"$LOG" | grep -oE 'allcore_gbps=[0-9.]+' | cut -d= -f2)"
   log "stage1: interleave allcore_gbps=$BW_INTERLEAVE"
 fi
-emit "{\"stage\":\"bandwidth\",\"stream_line\":\"$BW_LINE\",\"allcore_gbps\":$ALLCORE_GBPS,\"interleave_allcore_gbps\":\"${BW_INTERLEAVE:-}\"}"
-# The roofline number fed to -membw: prefer interleaved aggregate if measured.
+# Prefer the interleaved aggregate, and fail closed rather than emitting bogus utilization.
 MEMBW="$ALLCORE_GBPS"
 [ -n "$BW_INTERLEAVE" ] && MEMBW="$BW_INTERLEAVE"
+awk -v v="$MEMBW" 'BEGIN { exit !(v > 0) }' || { log "FATAL: aggregate STREAM peak must be >0 (got $MEMBW)"; exit 1; }
+emit "{\"stage\":\"bandwidth\",\"stream_line\":\"$BW_LINE\",\"allcore_gbps\":$ALLCORE_GBPS,\"interleave_allcore_gbps\":${BW_INTERLEAVE:-0},\"stream_peak_gbps\":$MEMBW,\"nodes\":$NODE_STREAM_JSON}"
 
 # ---- stage 2: header plan + decode ceiling (no full load if -plan-only) ----
 log "stage2: q4kdiag -plan-only (+ -membw $MEMBW ceiling)"
@@ -181,20 +202,30 @@ run_cell(){
   log "cell[$label]: placement=$placement int8=$int8 workers=$workers"
   local out
   out="$(timeout "$CELL_TIMEOUT" "${nc[@]}" env FAK_Q4K=1 "FAK_KQ_INT8=$int8" "${wenv[@]}" \
-        "$BIN" -gguf "$GGUF" -decode "$DECODE_N" -warmup "$WARMUP" -membw "$MEMBW" 2>>"$LOG")"
+        "$BIN" -gguf "$GGUF" -decode "$DECODE_N" -warmup "$WARMUP" -membw "$MEMBW" -require-roofline 2>>"$LOG")"
   local rc=$?
   local rline
   rline="$(echo "$out" | grep -E '^RESULT ' | head -1)"
   if [ -z "$rline" ]; then
-    log "cell[$label]: NO RESULT (rc=$rc; likely load OOM/timeout — see $LOG)"
+    log "cell[$label]: NO RESULT (rc=$rc; likely load OOM/timeout â€” see $LOG)"
     emit "{\"stage\":\"decode_cell\",\"label\":\"$label\",\"placement\":\"$placement\",\"int8\":\"$int8\",\"workers\":\"$workers\",\"rc\":$rc,\"ok\":false}"
     return
   fi
-  local tokS ftid
+  local tokS ftid bytesPerToken achieved util peak
   tokS="$(echo "$rline" | grep -oE 'decode_tok_s=[0-9.]+' | cut -d= -f2)"
   ftid="$(echo "$rline" | grep -oE 'first_token_id=[0-9]+' | cut -d= -f2)"
-  log "cell[$label]: tok/s=$tokS first_token_id=$ftid"
-  emit "{\"stage\":\"decode_cell\",\"label\":\"$label\",\"placement\":\"$placement\",\"int8\":\"$int8\",\"workers\":\"$workers\",\"decode_tok_s\":$tokS,\"first_token_id\":$ftid,\"result\":\"$(echo "$rline" | sed 's/\"/\\\"/g')\",\"ok\":true}"
+  bytesPerToken="$(echo "$rline" | grep -oE 'bytes_per_token=[0-9]+' | cut -d= -f2)"
+  peak="$(echo "$rline" | grep -oE 'stream_peak_gbps=[0-9.]+' | cut -d= -f2)"
+  achieved="$(echo "$rline" | grep -oE 'achieved_gbps=[0-9.]+' | cut -d= -f2)"
+  util="$(echo "$rline" | grep -oE 'decode_bw_util_%=[0-9.]+' | cut -d= -f2)"
+  if [ -z "$bytesPerToken" ] || [ -z "$peak" ] || [ -z "$achieved" ] || [ -z "$util" ]; then
+    log "cell[$label]: missing fail-closed roofline fields"
+    emit "{\"stage\":\"decode_cell\",\"label\":\"$label\",\"rc\":3,\"ok\":false,\"reason\":\"missing_roofline_fields\"}"
+    return 3
+  fi
+  log "cell[$label]: tok/s=$tokS first_token_id=$ftid decode_bw_util_%=$util"
+  emit "{\"stage\":\"decode_cell\",\"label\":\"$label\",\"placement\":\"$placement\",\"int8\":\"$int8\",\"workers\":\"$workers\",\"decode_tok_s\":$tokS,\"first_token_id\":$ftid,\"bytes_per_token\":$bytesPerToken,\"stream_peak_gbps\":$peak,\"achieved_gbps\":$achieved,\"decode_bw_util_%\":$util,\"result\":\"$(echo "$rline" | sed 's/"/\\"/g')\",\"ok\":true}"
+
 }
 
 # ---- stage 3: first-token int8-vs-f32 agreement (C1 blocker) ---------------
@@ -204,9 +235,9 @@ log "stage3: first-token agreement (int8=0 vs int8=1, default placement)"
 run_cell "ftok-f32"  default 0 default
 run_cell "ftok-int8" default 1 default
 
-# ---- stage 4: placement × workers decode sweep (C1/C2) ---------------------
+# ---- stage 4: placement Ã— workers decode sweep (C1/C2) ---------------------
 if [ "$FAST" != 1 ]; then
-  log "stage4: decode tok/s sweep over {placement × int8 × workers}"
+  log "stage4: decode tok/s sweep over {placement Ã— int8 Ã— workers}"
   # Baseline: today's uncapped path (default placement, all workers).
   run_cell "int8-default-allworkers" default 1 default
   # Placement lever: spread weights across nodes.
@@ -236,8 +267,8 @@ cat > "$MANIFEST" <<JSONEOF
   "harness": { "name": "q4kdiag-decode-witness", "version": "1", "tool": "cmd/q4kdiag -decode" },
   "box": { "nproc": ${NPROC:-0}, "numa_nodes": ${NUMA_NODES:-0}, "numactl": ${HAVE_NUMACTL}, "go": "${GOVER}" },
   "gguf": { "path": "${GGUF}", "bytes": ${GGUF_BYTES:-0} },
-  "bandwidth": { "allcore_gbps": ${ALLCORE_GBPS:-0}, "interleave_allcore_gbps": "${BW_INTERLEAVE:-}", "membw_fed_to_ceiling": ${MEMBW:-0} },
-  "method": "In-process greedy decode via cmd/q4kdiag -decode N (Prefill the 22-token 'Say OK.' oracle, then time N Step() calls after warmup). decode_tok_s = N / timed_wall. int8 Q4_K reducer selected by FAK_KQ_INT8; worker count by FAK_WORKERS; NUMA placement by numactl wrapper. first_token_id must be 248068 (oracle argmax) on every cell.",
+  "bandwidth": { "allcore_gbps": ${ALLCORE_GBPS:-0}, "interleave_allcore_gbps": ${BW_INTERLEAVE:-0}, "stream_peak_gbps": ${MEMBW:-0}, "nodes": $NODE_STREAM_JSON },
+  "method": "In-process greedy decode via cmd/q4kdiag -decode N -require-roofline (Prefill the 22-token 'Say OK.' oracle, then time N Step() calls after warmup). decode_tok_s = N / timed_wall; achieved_gbps = decode_bytes_per_token * decode_tok_s / 1e9; decode_bw_util_% = 100 * achieved_gbps / same-run stream_peak_gbps. int8 Q4_K reducer selected by FAK_KQ_INT8; worker count by FAK_WORKERS; NUMA placement by numactl wrapper. first_token_id must be 248068 (oracle argmax) on every cell.",
   "config": { "decode_n": ${DECODE_N}, "warmup": ${WARMUP}, "cell_timeout_s": ${CELL_TIMEOUT}, "workers_sweep": "${WORKERS_SWEEP}", "fast": ${FAST} },
   "results_file": "result.jsonl",
   "tags": ["cpu-only","no-gpu","qwen3.6-27b","q4_k","int8-q4k","numa","decode-witness","epic-4623"]

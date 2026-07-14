@@ -30,6 +30,7 @@ var oraclePrompt = []int{
 func main() {
 	gguf := flag.String("gguf", "", "GGUF path")
 	membw := flag.Float64("membw", 0, "machine memory bandwidth GB/s; if >0, print the bandwidth-bound decode tok/s ceiling")
+	requireRoofline := flag.Bool("require-roofline", false, "fail closed unless -membw is positive; include decode_bw_util_% in decode RESULT")
 	planOnly := flag.Bool("plan-only", false, "print header-only GGUF memory plans and exit before loading tensors")
 	expertParallel := flag.Int("expert-parallel", 1, "expert-parallel ranks for -plan-only per-rank memory plan")
 	decodeN := flag.Int("decode", 0, "if >0, greedily generate N decode steps from the oracle prefill and print measured decode tok/s (the C1/C2 witness: set FAK_KQ_INT8=0|1, FAK_WORKERS=W, wrap in numactl to A/B the int8 path, worker count, and NUMA placement)")
@@ -39,6 +40,10 @@ func main() {
 	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" {
 		fmt.Fprintln(os.Stderr, "usage: q4kdiag -gguf <model.gguf> [-membw 100] [-plan-only -expert-parallel N]")
+		os.Exit(2)
+	}
+	if *requireRoofline && *membw <= 0 {
+		fmt.Fprintln(os.Stderr, "roofline: -require-roofline requires -membw > 0")
 		os.Exit(2)
 	}
 	if *planOnly {
@@ -104,7 +109,7 @@ func main() {
 		wall := time.Since(t0)
 		fmt.Fprintln(os.Stderr, formatDecodeLine(*decodeN, *warmup, wall, firstID))
 		// Machine-parseable single line for the sweep runner to grep.
-		fmt.Fprintln(os.Stdout, formatDecodeResult(*decodeN, *warmup, wall, firstID))
+		fmt.Fprintln(os.Stdout, formatDecodeResult(*decodeN, *warmup, wall, firstID, rep.DecodeBytesPerToken, *membw, *requireRoofline))
 	}
 
 	var ms runtime.MemStats
@@ -250,8 +255,23 @@ func formatDecodeLine(steps, warmup int, wall time.Duration, firstTokenID int) s
 // formatDecodeResult is the machine-parseable one-liner (stdout) the sweep runner greps. It
 // echoes the knobs (GOMAXPROCS, FAK_WORKERS, FAK_KQ_INT8, FAK_Q4K) so each numactl/env sweep
 // row is self-describing without the launcher threading them back in.
-func formatDecodeResult(steps, warmup int, wall time.Duration, firstTokenID int) string {
-	return fmt.Sprintf("RESULT decode_tok_s=%.4f first_token_id=%d steps=%d warmup=%d wall_s=%.4f gomaxprocs=%d fak_workers=%q fak_kq_int8=%q fak_q4k=%q",
-		decodeTokS(steps, wall), firstTokenID, steps, warmup, wall.Seconds(),
+func decodeBandwidth(bytesPerToken int64, tokPerSec, streamPeakGBps float64) (achievedGBps, utilPct float64) {
+	if bytesPerToken <= 0 || tokPerSec <= 0 || streamPeakGBps <= 0 {
+		return 0, 0
+	}
+	achievedGBps = float64(bytesPerToken) * tokPerSec / 1e9
+	return achievedGBps, 100 * achievedGBps / streamPeakGBps
+}
+
+func formatDecodeResult(steps, warmup int, wall time.Duration, firstTokenID int, bytesPerToken int64, streamPeakGBps float64, requireRoofline bool) string {
+	tokS := decodeTokS(steps, wall)
+	base := fmt.Sprintf("RESULT decode_tok_s=%.4f first_token_id=%d steps=%d warmup=%d wall_s=%.4f gomaxprocs=%d fak_workers=%q fak_kq_int8=%q fak_q4k=%q",
+		tokS, firstTokenID, steps, warmup, wall.Seconds(),
 		runtime.GOMAXPROCS(0), os.Getenv("FAK_WORKERS"), os.Getenv("FAK_KQ_INT8"), os.Getenv("FAK_Q4K"))
+	if !requireRoofline {
+		return base
+	}
+	achieved, util := decodeBandwidth(bytesPerToken, tokS, streamPeakGBps)
+	return fmt.Sprintf("%s bytes_per_token=%d stream_peak_gbps=%.4f achieved_gbps=%.4f decode_bw_util_%%=%.2f",
+		base, bytesPerToken, streamPeakGBps, achieved, util)
 }
