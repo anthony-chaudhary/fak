@@ -125,6 +125,11 @@ type WitnessRecord struct {
 	// slot (no resolving commit -> no test rung at all), so a no-commit sidecar stays
 	// byte-identical to before this rung.
 	TestClaim string
+	// FootprintClaim is additive advisory evidence comparing the resolving commit's
+	// changed paths with the worker's declared lease tree (#4599). Empty means the
+	// footprint could not be graded (including an absent/empty lease tree).
+	FootprintClaim     string
+	OutOfLanePathCount int
 }
 
 // Map renders the record in the exact sidecar shape the Python dispatcher writes:
@@ -162,6 +167,10 @@ func (r WitnessRecord) Map() map[string]any {
 	// it empty, so its sidecar stays byte-identical to before this rung.
 	if r.TestClaim != "" {
 		out["test_claim"] = r.TestClaim
+	}
+	if r.FootprintClaim != "" {
+		out["footprint_claim"] = r.FootprintClaim
+		out["out_of_lane_path_count"] = r.OutOfLanePathCount
 	}
 	return out
 }

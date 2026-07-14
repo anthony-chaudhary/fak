@@ -42,6 +42,7 @@ var dispatchWitnessCommitAudit = dispatchWitnessCommitAuditDos
 // OPT-IN (env-gated), so the hot dispatch loop is never destabilized by an in-tick
 // `go test`; the always-on live consumer of this rung is the `verify` skill.
 var dispatchWitnessTestRun = dispatchWitnessTestRunGo
+var dispatchWitnessCommitPaths = dispatchWitnessCommitPathsGit
 
 // dispatchWitnessTestRunEnv gates the default in-tick runner. Unset/false -> the rung
 // records CLAIM_TEST_UNRUN (a valid, surfaced state — #3838 out-of-scope: not every
@@ -184,6 +185,17 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			ran, passed := dispatchWitnessTestRun(root, sha)
 			rec.TestClaim = dispatchtick.GradeTestRun(ran, passed)
 		}
+		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
+		if len(tree) > 0 {
+			if changed, ok := dispatchWitnessCommitPaths(root, sha); ok {
+				rec.OutOfLanePathCount = dispatchCountPathsOutsideTrees(changed, tree)
+				if rec.OutOfLanePathCount > 0 {
+					rec.FootprintClaim = "CLAIM_OUT_OF_LANE"
+				} else {
+					rec.FootprintClaim = "CLAIM_SCOPE_CLEAN"
+				}
+			}
+		}
 		// Layer 5b: scrape the model the slot was pinned to from its .model sidecar (absent
 		// for a floor/seat-default worker -> Model stays ""). It feeds both the .witness
 		// record's model key and the Layer-2 downgrade decision (which next chain model to
@@ -258,6 +270,44 @@ func dispatchWitnessResolvingSHAGit(root string, issue int, baseSHA string) stri
 		return ""
 	}
 	return dispatchtick.FirstResolvingSHA(string(out), issue)
+}
+
+func dispatchWitnessCommitPathsGit(root, sha string) ([]string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "show", "--pretty=format:", "--name-only", sha)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	var paths []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if path := strings.TrimSpace(line); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths, true
+}
+
+func dispatchCountPathsOutsideTrees(changed, trees []string) int {
+	outside := 0
+	for _, path := range changed {
+		path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
+		inside := false
+		for _, tree := range trees {
+			tree = strings.Trim(strings.ReplaceAll(tree, "\\", "/"), "/")
+			if tree != "" && (path == tree || strings.HasPrefix(path, tree+"/")) {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			outside++
+		}
+	}
+	return outside
 }
 
 // dispatchWitnessCommitAuditDos grades sha through `dos commit-audit --json` and

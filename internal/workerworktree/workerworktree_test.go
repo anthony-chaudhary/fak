@@ -49,6 +49,11 @@ func (f *fakeGit) run(root string, args []string) (int, string) {
 	if len(args) > 0 {
 		verb = args[0]
 	}
+	if queue := f.replies[verb]; len(queue) > 0 {
+		r := queue[0]
+		f.replies[verb] = queue[1:]
+		return r.rc, r.out
+	}
 	if r, ok := f.byVerb[verb]; ok {
 		return r.rc, r.out
 	}
@@ -640,5 +645,30 @@ func TestCountOnlyCountsOurWorktrees(t *testing.T) {
 	}
 	if len(paths) != 1 || !strings.HasSuffix(paths[0], "fak-worker-wt-tools-deadbeef") {
 		t.Fatalf("count paths wrong: %v", paths)
+	}
+}
+
+func TestLandReportsDroppedOutOfLanePaths(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
+	t.Setenv(LandReadbackEnv, "0")
+	g := newFakeGit()
+	g.replies = map[string][]struct {
+		rc  int
+		out string
+	}{
+		"diff": {
+			{0, "patch"},
+			{0, "internal/tools/a.go\ndocs/escaped.md\n"},
+		},
+	}
+	g.reply("log", 0, "feat(tools): witness lane (fak tools)")
+	g.reply("apply", 0, "")
+	g.reply("commit", 0, "committed")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "", []string{"internal/tools"}, nil, g.run)
+	if !res.OK || !res.Committed {
+		t.Fatalf("Land() = %+v", res)
+	}
+	if res.DroppedOutOfLane != 1 {
+		t.Fatalf("DroppedOutOfLane = %d, want 1", res.DroppedOutOfLane)
 	}
 }

@@ -592,3 +592,61 @@ func TestDispatchLandVerify(t *testing.T) {
 		t.Fatalf("green verify must land the diff (applied+committed), got %+v", green)
 	}
 }
+
+func TestWitnessExitedWorkersGradesCommittedFootprintAgainstLeaseTree(t *testing.T) {
+	oldResolve, oldAudit, oldTest, oldPaths := dispatchWitnessResolvingSHA, dispatchWitnessCommitAudit, dispatchWitnessTestRun, dispatchWitnessCommitPaths
+	defer func() {
+		dispatchWitnessResolvingSHA, dispatchWitnessCommitAudit, dispatchWitnessTestRun, dispatchWitnessCommitPaths = oldResolve, oldAudit, oldTest, oldPaths
+	}()
+	dispatchWitnessResolvingSHA = func(string, int, string) string { return "abc123" }
+	dispatchWitnessCommitAudit = func(string, string) (string, string) { return "OK", dispatchtick.WitnessOK }
+	dispatchWitnessTestRun = func(string, string) (bool, bool) { return false, false }
+
+	for _, tc := range []struct {
+		name        string
+		tree        []string
+		paths       []string
+		ok          bool
+		wantClaim   string
+		wantOutside int
+	}{
+		{"inside", []string{"internal/tools"}, []string{"internal/tools/a.go"}, true, "CLAIM_SCOPE_CLEAN", 0},
+		{"outside", []string{"internal/tools"}, []string{"internal/tools/a.go", "docs/escaped.md"}, true, "CLAIM_OUT_OF_LANE", 1},
+		{"empty-tree", nil, []string{"docs/escaped.md"}, true, "", 0},
+		{"git-unknown", []string{"internal/tools"}, nil, false, "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stem := filepath.Join(dir, "resolve-4599-20260714-120000")
+			if err := os.WriteFile(stem+".log", []byte("done\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(stem+".pid", []byte("99999999"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.tree != nil {
+				b, _ := json.Marshal(tc.tree)
+				if err := os.WriteFile(stem+dispatchLeaseTreeSidecarSuffix, b, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dispatchWitnessCommitPaths = func(string, string) ([]string, bool) { return tc.paths, tc.ok }
+			_, records := witnessExitedWorkers(".", dir, true)
+			if len(records) != 1 {
+				t.Fatalf("records = %d", len(records))
+			}
+			got := records[0]
+			if got.FootprintClaim != tc.wantClaim || got.OutOfLanePathCount != tc.wantOutside {
+				t.Fatalf("footprint = (%q,%d), want (%q,%d)", got.FootprintClaim, got.OutOfLanePathCount, tc.wantClaim, tc.wantOutside)
+			}
+			row := got.Map()
+			_, emitted := row["footprint_claim"]
+			if emitted != (tc.wantClaim != "") {
+				t.Fatalf("footprint_claim emitted=%v row=%v", emitted, row)
+			}
+			if got.Claim != dispatchtick.ClaimWitnessed || got.TestClaim != dispatchtick.ClaimTestUnrun {
+				t.Fatalf("existing rungs changed: %+v", got)
+			}
+		})
+	}
+}

@@ -91,6 +91,10 @@ type Result struct {
 	Removed   bool   `json:"removed,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Detail    string `json:"detail,omitempty"`
+	// DroppedOutOfLane is the number of changed worktree paths outside the
+	// caller-declared lease tree. Path-scoped land commits omit those paths;
+	// surfacing the count makes that otherwise-silent loss observable (#4599).
+	DroppedOutOfLane int `json:"dropped_out_of_lane,omitempty"`
 }
 
 // VerifyHook is a build/adjudication witness run IN the isolated worktree before
@@ -361,6 +365,25 @@ func Reap(root, wtPath string, git GitRunner) Result {
 // when non-empty, scopes the commit to the worker's declared region — never an
 // add -A. verify (when non-nil) is a witness run in the worktree before anything
 // touches the trunk; a failed witness refuses the land. FAIL-OPEN on git errors.
+func countPathsOutsideTrees(changed, trees []string) int {
+	outside := 0
+	for _, path := range changed {
+		path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
+		inside := false
+		for _, tree := range trees {
+			tree = strings.Trim(strings.ReplaceAll(tree, "\\", "/"), "/")
+			if tree != "" && (path == tree || strings.HasPrefix(path, tree+"/")) {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			outside++
+		}
+	}
+	return outside
+}
+
 func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner) Result {
 	diffRef := baseSHA
 	if diffRef == "" {
@@ -375,6 +398,12 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		// commit-witness (dos commit-audit) decides whether the slot was productive.
 		return Result{OK: true, Applied: false, Committed: false,
 			Reason: "no net diff in worktree vs " + diffRef + " to land"}
+	}
+	droppedOutOfLane := 0
+	if len(paths) > 0 {
+		if namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef}); namesRC == 0 {
+			droppedOutOfLane = countPathsOutsideTrees(strings.Fields(names), paths)
+		}
 	}
 	if verify != nil {
 		if ok, detail := verify(wtPath); !ok {
@@ -399,6 +428,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// safe isolated form here).
 	if isolatedLandEnabled() && len(paths) > 0 {
 		if res, handled := landIsolated(root, diff, msgFile, paths, git, isolatedGitEnv); handled {
+			res.DroppedOutOfLane = droppedOutOfLane
 			return res
 		}
 	}
@@ -414,7 +444,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		commitArgs = append(commitArgs, paths...)
 	}
 	rc, out := run(git, root, commitArgs)
-	res := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300)}
+	res := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
 	// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
 	// actually carries our intended paths. A missing path means our staged change
 	// was swept into a concurrent commit on the shared index (#3547); refuse rather
