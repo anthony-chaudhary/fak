@@ -42,6 +42,9 @@ func TestClassify(t *testing.T) {
 		{"commit no-gpg-sign", "git commit --no-gpg-sign -m x", true, "skip-signing"},
 		{"global hooksPath", "git -c core.hooksPath=/dev/null commit -m x", true, "skip-hooks"},
 		{"global hooksPath case", "git -c CORE.HooksPath= commit -m x", true, "skip-hooks"},
+		// A different -c key whose value merely mentions the string is not a hooks
+		// override — key-scoped, not substring-matched.
+		{"global editor mentions hooksPath OK", `git -c core.editor=vim-core.hooksPath status`, false, ""},
 
 		// ---- amend ----------------------------------------------------------
 		{"amend", "git commit --amend", true, "amend"},

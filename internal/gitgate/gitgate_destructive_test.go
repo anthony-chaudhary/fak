@@ -69,6 +69,11 @@ func TestClassifyDestructiveAndOffTrunk(t *testing.T) {
 		{"config hooksPath get OK", "git config --get core.hooksPath", false, ""},
 		{"config hooksPath unset OK", "git config --unset core.hooksPath", false, ""},
 		{"config unrelated OK", "git config user.name Alice", false, ""},
+		// A different key whose VALUE merely mentions the string is not a hooks
+		// disable — the substring-match false positives the key-scoping closes.
+		{"config alias value mentions hooksPath OK", `git config alias.st "status; note core.hooksPath"`, false, ""},
+		{"config editor value mentions hooksPath OK", `git config core.editor "vim ; echo core.hooksPath"`, false, ""},
+		{"config safe.dir path contains hooksPath OK", "git config --add safe.directory /repo/core.hooksPathBackup", false, ""},
 
 		// ---- persistent signing-disable via config --------------------------
 		{"config gpgsign false", "git config commit.gpgsign false", true, "skip-signing"},

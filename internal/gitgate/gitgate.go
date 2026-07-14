@@ -558,12 +558,21 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 			if i+1 < len(args) {
 				val = args[i+1]
 			}
-			if a == "-c" && strings.Contains(strings.ToLower(val), "core.hookspath") {
-				return "skip-hooks refused: `git -c core.hooksPath=...` disables hooks for this invocation.", true
+			// `-c core.hooksPath=...` disables hooks for this one invocation. Key-scope
+			// the match (split the key=value operand on '='): a DIFFERENT key whose value
+			// merely mentions the string — e.g. `-c core.editor='vim core.hooksPath'` — is
+			// not a hooks override and must not be refused.
+			if a == "-c" {
+				if key, _, _ := splitConfigKey(strings.ToLower(val)); key == "core.hookspath" {
+					return "skip-hooks refused: `git -c core.hooksPath=...` disables hooks for this invocation.", true
+				}
 			}
 			i += 2 // consume the option AND its value
 		case strings.HasPrefix(a, "--") && strings.Contains(a, "="):
-			if strings.Contains(strings.ToLower(a), "core.hookspath") {
+			// A joined long global (e.g. --git-dir=...). Only an override whose KEY is
+			// core.hooksPath disables hooks; key-scope so a path value that merely
+			// contains the string (--git-dir=/repo/core.hooksPathBackup) is not refused.
+			if key, _, _ := splitConfigKey(strings.ToLower(strings.TrimPrefix(a, "--"))); key == "core.hookspath" {
 				return "skip-hooks refused: a core.hooksPath override disables hooks for this invocation.", true
 			}
 			i++ // a joined long global, e.g. --git-dir=...
@@ -653,11 +662,16 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 			case "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--unset", "--unset-all":
 				isReadOrUnset = true
 			}
-			if strings.Contains(lt, "core.hookspath") {
+			// Key-scope both detections off the config KEY (splitConfigKey), never a
+			// substring: a write of a different key whose value merely mentions the
+			// string — `git config alias.st "note core.hooksPath"` — is not a guard
+			// disable. hooksPath as a bare key or joined key=value; gpgsign additionally
+			// requires a false-spelling value (bare next operand or joined).
+			key, val, joined := splitConfigKey(lt)
+			if key == "core.hookspath" {
 				hasHooksPath = true
 			}
-			// commit.gpgsign as a bare key (value is the next operand) or joined key=value.
-			if key, val, joined := splitConfigKey(lt); key == "commit.gpgsign" {
+			if key == "commit.gpgsign" {
 				v := val
 				if !joined && i+1 < len(rest) {
 					v = strings.ToLower(rest[i+1])
