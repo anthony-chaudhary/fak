@@ -897,6 +897,27 @@ func hasString(items []string, want string) bool {
 	return false
 }
 
+func TestIssueContractStrictWitnessFlagHoldsForgeableCandidate(t *testing.T) {
+	c := completeIssueCandidate()
+	c.Witness = "agent reports that it completed the task"
+	path := writeIssueContractJSON(t, c)
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--strict-witness", "--json"})
+	if code != 3 {
+		t.Fatalf("exit = %d, want 3\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
+	}
+	var got issueContractResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Reviews) != 1 || got.Reviews[0].WitnessGrade.Grade != issuecontract.WitnessGradeForgeable {
+		t.Fatalf("review = %+v", got.Reviews)
+	}
+	if !containsString(got.Reviews[0].Reasons, issuecontract.ReasonWitnessForgeable) {
+		t.Fatalf("reasons = %+v", got.Reviews[0].Reasons)
+	}
+}
+
 func completeIssueCandidate() issuecontract.Candidate {
 	return issuecontract.Candidate{
 		Schema:          issuecontract.Schema,

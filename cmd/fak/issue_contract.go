@@ -168,6 +168,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
 	strictModelTier := fs.Bool("strict-model-tier", false, "hold issues with missing/invalid/contradictory model-tier metadata triage-only")
 	strictScale := fs.Bool("strict-scale", false, "hold issues with an undeclared work size or a witness smaller than the work triage-only")
+	strictWitness := fs.Bool("strict-witness", false, "hold issues whose done-condition witness is missing, weak, or forgeable triage-only")
 	strictProjectWork := fs.Bool("strict-project-work", false, "hold issues missing/invalid effort, parent contribution, or completion-standard metadata triage-only")
 	strictBornRouted := fs.Bool("strict-born-routed", false, "hold issues missing a lane, class label, or priority label triage-only")
 	asJSON := fs.Bool("json", false, "emit machine-readable review/result")
@@ -217,6 +218,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		DedupeCap:         *dedupeCap,
 		StrictModelTier:   *strictModelTier,
 		StrictScale:       *strictScale,
+		StrictWitness:     *strictWitness,
 		StrictBornRouted:  *strictBornRouted,
 		StrictProjectWork: *strictProjectWork,
 	}

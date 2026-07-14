@@ -54,6 +54,7 @@ const (
 	ReasonEnvelopeUnderTarget   = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
 	ReasonScaleEvidenceInvalid  = "ISSUE_SCALE_EVIDENCE_INVALID"
 	ReasonScaleStageMissing     = "ISSUE_SCALE_EVIDENCE_STAGE_MISSING"
+	ReasonWitnessForgeable      = "ISSUE_WITNESS_FORGEABLE"
 	ReasonProjectWorkMissing    = "ISSUE_PROJECT_WORK_MISSING"
 	ReasonProjectWorkInvalid    = "ISSUE_PROJECT_WORK_INVALID"
 )
@@ -181,6 +182,7 @@ type Options struct {
 	// dispatchability unless strict mode is requested — the same advisory→hold
 	// discipline as StrictModelTier.
 	StrictScale      bool
+	StrictWitness    bool // advisory by default; hold non-strong witness grades when true
 	StrictBornRouted bool
 	// StrictProjectWork holds dispatchable tickets missing or contradicting the
 	// canonical effort/contribution/completion contract.
@@ -253,6 +255,7 @@ type Review struct {
 	OperatingEnvelope OperatingEnvelopeReadout `json:"operating_envelope"`
 	ScaleEvidence     ScaleEvidenceReadout     `json:"scale_evidence"`
 	ProjectWork       ProjectWorkReadout       `json:"project_work"`
+	WitnessGrade      WitnessGrade             `json:"witness_grade"`
 	BornRouted        BornRouted               `json:"born_routed"`
 }
 
@@ -306,6 +309,10 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	bornRoutedReadout := bornRouted(c)
 	if opt.StrictBornRouted && len(bornRoutedReadout.Flags) > 0 {
 		reasons.add(ReasonNotBornRouted)
+	}
+	witnessGradeReadout := witnessGrade(c, opt.StrictWitness)
+	if opt.StrictWitness && witnessGradeReadout.Grade != WitnessGradeStrong {
+		reasons.add(ReasonWitnessForgeable)
 	}
 	projectWorkReadout := projectWork(c)
 	if opt.StrictProjectWork {
@@ -384,6 +391,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		OperatingEnvelope: envelopeReadout,
 		ScaleEvidence:     evidenceReadout,
 		ProjectWork:       projectWorkReadout,
+		WitnessGrade:      witnessGradeReadout,
 		BornRouted:        bornRoutedReadout,
 	}
 	out.OK = len(out.Reasons) == 0
