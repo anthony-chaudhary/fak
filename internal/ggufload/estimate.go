@@ -192,6 +192,8 @@ func scaleExpertBandBytes(total uint64, band, experts int) (uint64, error) {
 //     ActiveBytesPerToken adds the NonExpertResident (attention / dense / shared-expert / router /
 //     embedding) stream, so it is the full per-token byte divisor (an UPPER BOUND — the true decode
 //     stream is a little lower, since the token-embedding read is a gather, not a full sweep).
+//     ActiveBytesPerTokenSwept applies exactly that correction: when embeddings are UNTIED it drops
+//     the input token_embd table (a get_rows gather, not swept), giving the header-tight sweep.
 //   - active-params/token — the FLOP divisor. Params are element counts (tensorElems), quant-
 //     independent: PerExpertParams = RoutedParams / NumExperts, and ActiveParamsPerToken =
 //     K × PerExpertParams + NonExpertParams.
@@ -212,6 +214,15 @@ type RoutedExpertActiveSet struct {
 	NonExpertParams      int64 // element count of every non-routed tensor
 	ActiveBytesPerToken  int64 // ActivePerToken + NonExpertResident — full per-token divisor, UPPER BOUND (0 when K unread)
 	ActiveParamsPerToken int64 // K × PerExpertParams + NonExpertParams (0 when K unread)
+
+	// Embedding-gather correction (the one named looseness in the ActiveBytesPerToken UPPER BOUND).
+	// The input token-embedding is read by a get_rows GATHER at decode — one row (~hidden bytes) per
+	// token, not the whole [vocab×hidden] table — yet the full table sits in NonExpertResident. When
+	// embeddings are UNTIED (a distinct output.weight/lm_head carries the output projection, which IS
+	// swept per token), that table is counted but not swept, so the upper bound overcounts it.
+	InputEmbedResident       int64 // token_embd.weight resident bytes (0 if absent from the header)
+	InputEmbedGather         int64 // bytes subtracted for the input-embedding gather: InputEmbedResident when UNTIED, else 0 (tied ⇒ the table IS the swept output projection, no saving)
+	ActiveBytesPerTokenSwept int64 // ActiveBytesPerToken − InputEmbedGather — the header-tight per-token sweep (≤ the upper bound). 0 when K unread.
 }
 
 // RoutedExpertActiveSet derives the Lane F (#3074) active-set from the header alone — it reads NO
@@ -234,7 +245,7 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) || cfg.NumExperts <= 0 {
 		return RoutedExpertActiveSet{}, false, nil
 	}
-	var routedBytes, routedElems, totalBytes, totalElems uint64
+	var routedBytes, routedElems, totalBytes, totalElems, inputEmbedBytes uint64
 	for _, info := range s.File.Tensors {
 		n, err := tensorPayloadBytes(info)
 		if err != nil {
@@ -252,6 +263,9 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 			routedBytes += n
 			routedElems += e
+		}
+		if strings.EqualFold(info.Name, "token_embd.weight") {
+			inputEmbedBytes = n
 		}
 	}
 	if routedBytes == 0 {
@@ -289,6 +303,18 @@ func (s *WeightSource) RoutedExpertActiveSet() (RoutedExpertActiveSet, bool, err
 		}
 		as.ActiveBytesPerToken = as.ActivePerToken + nonExpertBytes
 		as.ActiveParamsPerToken = routedActiveParams + nonExpertParams
+
+		// Embedding-gather correction. The input token-embedding is a get_rows GATHER at decode
+		// (one row per token, ~hidden bytes — negligible), not a full sweep of the [vocab×hidden]
+		// table. When embeddings are UNTIED, a distinct output.weight/lm_head carries the swept
+		// output projection, so the token_embd table sits in NonExpertResident yet is not swept:
+		// subtract it to get the header-tight per-token sweep. When TIED, the same table IS the
+		// swept output projection (there is no separate output.weight), so there is no saving.
+		as.InputEmbedResident = int64(inputEmbedBytes)
+		if !cfg.TieWordEmbeddings && inputEmbedBytes > 0 && int64(inputEmbedBytes) < as.ActiveBytesPerToken {
+			as.InputEmbedGather = int64(inputEmbedBytes)
+		}
+		as.ActiveBytesPerTokenSwept = as.ActiveBytesPerToken - as.InputEmbedGather
 	}
 	return as, true, nil
 }
