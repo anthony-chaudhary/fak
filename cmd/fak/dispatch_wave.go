@@ -271,9 +271,12 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	if !*live {
 		limit = 1
 	}
+	discovery := subscribeDispatchWaveDiscovery(root, limit)
+	defer closeDispatchDiscoverySubscriptions(discovery)
 	for i := 0; i < limit; i++ {
 		row := executionPlan[i]
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, dispatchSplitCSV(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit), stderr)
+		snapshot := <-discovery[i].Snapshots
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, dispatchSplitCSV(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot), stderr)
 		if err != nil {
 			ticks = append(ticks, map[string]any{"ok": false, "error": err.Error(), "rank": i})
 			rec["stop_reason"] = err.Error()
@@ -776,9 +779,14 @@ func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []strin
 	if len(plan) == 0 {
 		return nil
 	}
+	// Every prelaunch decider observes the same discovery source. The keyed registry opens
+	// one upstream watch for the wave and tears it down after the last decider drops.
+	subs := subscribeDispatchWaveDiscovery(root, len(plan))
+	defer closeDispatchDiscoverySubscriptions(subs)
 	out := make([]dispatchWaveExecutionAudit, 0, len(plan))
-	for _, row := range plan {
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, maxWorkers, exclude, row, false, false, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit), io.Discard)
+	for i, row := range plan {
+		snapshot := <-subs[i].Snapshots
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, maxWorkers, exclude, row, false, false, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit, snapshot), io.Discard)
 		audit := dispatchWaveExecutionAudit{
 			Rank:    row.Rank,
 			Target:  row.Target,
@@ -803,7 +811,7 @@ func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []strin
 	return out
 }
 
-func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []string, row dispatchWaveExecutionPlan, live bool, refresh bool, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) dispatchTickOptions {
+func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []string, row dispatchWaveExecutionPlan, live bool, refresh bool, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int, discovery ...*runsSnapshot) dispatchTickOptions {
 	acct := dispatchWaveAccountFromPlan(row.Account)
 	mem := dispatchtick.Membership{
 		Rank:      row.Rank,
@@ -811,7 +819,7 @@ func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []str
 		Size:      row.WaveSize,
 		Shortfall: row.Shortfall,
 	}
-	return dispatchTickOptions{
+	opts := dispatchTickOptions{
 		Workspace:               root,
 		MaxWorkers:              maxWorkers,
 		WorkKind:                row.WorkKind,
@@ -833,6 +841,10 @@ func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []str
 		Account:                 &acct,
 		Membership:              &mem,
 	}
+	if len(discovery) > 0 {
+		opts.DiscoverySnapshot = discovery[0]
+	}
+	return opts
 }
 
 func dispatchWaveAccountFromPlan(m map[string]any) dispatchtick.Account {

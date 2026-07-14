@@ -83,9 +83,10 @@ type dispatchTickOptions struct {
 	// objective is refused (FOCUS_WIP_SATURATED) instead of merely advised. Continuation of
 	// an already-open objective is never held. Default off (warn), so the fleet is
 	// byte-identical until an operator opts in via --focus-hold / FLEET_DISPATCH_FOCUS_HOLD.
-	FocusHold  bool
-	Account    *dispatchtick.Account
-	Membership *dispatchtick.Membership
+	FocusHold         bool
+	Account           *dispatchtick.Account
+	Membership        *dispatchtick.Membership
+	DiscoverySnapshot *runsSnapshot
 }
 
 type dispatchLanePick struct {
@@ -372,7 +373,10 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 	// One runs-directory scan feeds every live/cooldown/collision view this tick needs
 	// (held lanes, live issue details, cooldown set + rows, and the per-pick tree-collision
 	// gate below), instead of re-globbing/re-statting the sidecars once per view (#3593).
-	snap := scanRunsSnapshot(runsDir, time.Now())
+	snap := opts.DiscoverySnapshot
+	if snap == nil {
+		snap = scanRunsSnapshot(runsDir, time.Now())
+	}
 	scopes := snap.liveScopes()
 	held := snap.liveLanes()
 	exclude := map[string]bool{}
