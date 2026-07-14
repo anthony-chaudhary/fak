@@ -73,12 +73,12 @@ type ClaimRegistry map[claimKey]Claim
 // Registry is the live dojo claim registry — one anchored literal per cell. Every
 // cache/compaction/resume number here was lifted verbatim from the inline
 // `Claimed:` field it replaced; the pinned-claim tests in cmd/fak/dojo_test.go
-// prove the extraction preserved each value. The dispatch-yield (#4497) and
-// provider-turns (#4505) KPI cells are SEEDED estimates instead — they live in
-// this central literal (not the additive RegisterClaim seam) because the RSI
-// recalibrate arm's anchored rewriter targets only this file
-// (dojocal.ClaimsRelPath), and those cells exist precisely to be recalibrated
-// toward their corpus-measured values.
+// prove the extraction preserved each value. The dispatch-yield (#4497),
+// provider-turns (#4505), and provider-cache (#4504) KPI cells are SEEDED
+// estimates instead — they live in this central literal (not the additive
+// RegisterClaim seam) because the RSI recalibrate arm's anchored rewriter
+// targets only this file (dojocal.ClaimsRelPath), and those cells exist
+// precisely to be recalibrated toward their corpus-measured values.
 // false_warm_rate and cross_session_warm_hit_rate are floors (the
 // lethal false-warm class and the bimodal 0.0 default the loop must not recalibrate
 // up to its empirical rate); every other cell is a genuine estimate.
@@ -108,6 +108,9 @@ var Registry = ClaimRegistry{
 
 	{"provider-turns", "turns_per_task"}: claim(20.0,
 		"seed theory (#4505): a provider completes a task in about twenty assistant turns — the median turns per completed session in the multi-provider session corpus; a genuine estimate the RSI loop recalibrates toward the measured medians, and the per-provider spread of the same cell is the cross-provider leaderboard"),
+
+	{"provider-cache", "cache_read_share"}: claim(0.8,
+		"seed theory (#4504): ~80% of the input tokens a provider bills on a warm agentic session corpus (input + cache_read + cache_creation) are served as cache reads; a genuine estimate the RSI loop recalibrates toward the measured shares, and the per-provider spread of the same cell is the cross-provider cache-economy leaderboard"),
 }
 
 // registered is the additive claim seam: the composed home for cells a KPI leaf

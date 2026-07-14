@@ -31,6 +31,9 @@ func TestRegistryPreservesPinnedClaims(t *testing.T) {
 		// provider-turns is the first cross-provider leaderboard cell (#4505): median
 		// turns to completion per provider, also a seeded genuine estimate.
 		{"provider-turns", "turns_per_task", 20.0, false, false},
+		// provider-cache is the cross-provider cache-economy cell (#4504): billed
+		// cache_read share of total input per provider, also a seeded genuine estimate.
+		{"provider-cache", "cache_read_share", 0.8, false, false},
 	}
 	if len(Registry) != len(want) {
 		t.Fatalf("registry has %d cells, want %d — a cell was added or dropped without updating the witness", len(Registry), len(want))
@@ -71,9 +74,10 @@ var probeCell = RegisterClaim("kpi-seam-probe", "additive_resolves",
 // additive, not a migration. A duplicate registration panics loud (collision guard).
 func TestRegisterClaimResolvesViaRegistry(t *testing.T) {
 	// The additive registration did not grow the central literal (8 extracted
-	// cells + the seeded dispatch-yield and provider-turns KPI cells, #4497/#4505).
-	if len(Registry) != 10 {
-		t.Fatalf("central Registry literal has %d cells, want 10 — additive registration must not grow it", len(Registry))
+	// cells + the seeded dispatch-yield, provider-turns, and provider-cache KPI
+	// cells, #4497/#4505/#4504).
+	if len(Registry) != 11 {
+		t.Fatalf("central Registry literal has %d cells, want 11 — additive registration must not grow it", len(Registry))
 	}
 	// The registered cell resolves through the composed Lookup.
 	c, ok := Registry.Lookup("kpi-seam-probe", "additive_resolves")

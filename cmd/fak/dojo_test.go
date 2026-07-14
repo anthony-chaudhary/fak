@@ -323,7 +323,7 @@ func TestDefaultDojoLeversExcludeCompactionUntilCorpusExists(t *testing.T) {
 	if dojoHasString(defaultNames, "compaction") {
 		t.Fatalf("default dojo levers must exclude the unmeasured compaction phantom: %v", defaultNames)
 	}
-	for _, want := range []string{"resume-posture", "vcache-warmth", "dispatch-yield", "provider-turns"} {
+	for _, want := range []string{"resume-posture", "vcache-warmth", "dispatch-yield", "provider-turns", "provider-cache"} {
 		if !dojoHasString(defaultNames, want) {
 			t.Fatalf("default dojo levers missing %q: %v", want, defaultNames)
 		}

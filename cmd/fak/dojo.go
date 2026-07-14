@@ -261,11 +261,17 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range dispatchYieldEpisodesFromLoopLedger(loadLoopLedgerEvents(root)) {
 		episodes = append(episodes, dojo.Score("loop-ledger", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
-	// And provider-turns/turns_per_task (#4505) from the local multi-provider
-	// session corpus: one episode per provider, each the median assistant turns
-	// per completed session, so the live run renders where every provider —
-	// including the ones fak routes to — sits on turns to completion.
-	for _, in := range providerTurnsEpisodesFromSessions(loadProviderTurnsSessions()) {
+	// And the cross-provider leaderboard cells from ONE load of the local
+	// multi-provider session corpus: provider-turns/turns_per_task (#4505), one
+	// episode per provider of median assistant turns per completed session, and
+	// provider-cache/cache_read_share (#4504), one episode per provider of the
+	// billed cache_read / total-input share — so the live run renders where every
+	// provider fak routes to sits on turns AND cache economy.
+	sessionCorpus := loadProviderTurnsSessions()
+	for _, in := range providerTurnsEpisodesFromSessions(sessionCorpus) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
+	for _, in := range providerCacheEpisodesFromSessions(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
 	dojo.SortEpisodes(episodes)
@@ -691,6 +697,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "turns_per_task", Theory: "a provider completes a task in about twenty assistant turns, median per completed session (claim 20 — a seeded estimate the RSI loop recalibrates toward the measured medians)"},
 			},
 		},
+		{
+			Name:    "provider-cache",
+			Summary: "billed cache-read share of total input tokens per provider (claude/gpt/gemini/deepseek/glm/kimi), folded from the local multi-provider session corpus — the cross-provider cache-economy leaderboard cell, one episode per provider against the one registered claim (#4504)",
+			Metrics: []dojoMetricInfo{
+				{Name: "cache_read_share", Theory: "~80% of the input tokens a provider bills on a warm agentic corpus are served as cache reads (claim 0.8 — a seeded estimate the RSI loop recalibrates toward the measured shares)"},
+			},
+		},
 	}
 }
 
@@ -705,6 +718,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		vcacheLever{maxFiles: maxFiles},
 		dispatchYieldLever{root: root},
 		providerTurnsLever{},
+		providerCacheLever{},
 	}
 }
 
@@ -1136,6 +1150,102 @@ func providerTurnsMedian(values []float64) float64 {
 		return sorted[mid]
 	}
 	return (sorted[mid-1] + sorted[mid]) / 2
+}
+
+// --- the provider-cache lever -------------------------------------------------
+
+// providerCacheLever is the cross-provider cache-economy cell (#4504): the share
+// of a provider's total billed input tokens served as cache reads, PER PROVIDER,
+// so the dojo can state where fak sits versus other providers on cache economy
+// instead of calibrating only fak-internal cache levers. Theory is the one
+// registered provider-cache/cache_read_share claim; reality folds from the same
+// local multi-provider session corpus (and the same provider keying) as the
+// provider-turns leaderboard cell, one episode per provider. The scenario corpus
+// is ignored: the session corpus, not a replay, is the ground truth for billed
+// cache share.
+type providerCacheLever struct{}
+
+func (providerCacheLever) Name() string { return "provider-cache" }
+
+func (providerCacheLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return providerCacheEpisodesFromSessions(loadProviderTurnsSessions()), nil
+}
+
+// providerCacheEpisodesFromSessions adapts the session corpus into the dojo's
+// (prediction, outcome) pairs for provider-cache/cache_read_share — one episode
+// per provider, every episode scored against the SAME registered claim so the
+// recalibrate arm still rewrites exactly one literal while the report renders
+// the per-provider spread. It is pure so the fold is unit-testable without a
+// corpus on disk. A provider's share is billed cache_read / (input + cache_read
+// + cache_creation) summed over its billed turns — cache reads as a fraction of
+// every input token the provider priced. A provider whose rows carry NO cache
+// fields at all (neither cache_read nor cache_creation ever billed) scores
+// UNMEASURED, never a fabricated 0.0 share: this transcript shape cannot tell
+// "billed cold everywhere" apart from "the provider relays no cache-read field"
+// (#4490's honesty rule; cache_creation>0 proves the field family is relayed, so
+// a real all-cold window still measures as 0.0). A corpus with no billed
+// provider at all yields one honest UNMEASURED episode.
+func providerCacheEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.ScoredInput {
+	pred := dojo.Registry.MustPredict("provider-cache", "cache_read_share", "fraction")
+	sums := map[string]sessionaudit.ModelCounts{}
+	for _, s := range sessions {
+		if s.Error != "" {
+			continue
+		}
+		for model, pm := range s.PerModel {
+			key := providerTurnsKey(model) // the shared leaderboard keying (#4505)
+			if key == "" {
+				continue
+			}
+			agg := sums[key]
+			agg.Turns += pm.Turns
+			agg.Input += pm.Input
+			agg.CacheRead += pm.CacheRead
+			agg.CacheCreate += pm.CacheCreate
+			sums[key] = agg
+		}
+	}
+	if len(sums) == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Source:   "no billed provider rows in the local session corpus — nothing to fold a per-provider cache-read share from",
+			},
+		}}
+	}
+	providers := make([]string, 0, len(sums))
+	for p := range sums {
+		providers = append(providers, p)
+	}
+	sort.Strings(providers)
+	out := make([]dojo.ScoredInput, 0, len(providers))
+	for _, p := range providers {
+		agg := sums[p]
+		if agg.CacheRead == 0 && agg.CacheCreate == 0 {
+			out = append(out, dojo.ScoredInput{
+				Prediction: pred,
+				Outcome: dojo.Outcome{
+					Measured: false,
+					Sample:   int(agg.Turns),
+					Source:   "provider " + p + ": billed turns but no cache_read/cache_creation fields observed — the provider relays no cache billing here, so the share is UNMEASURED rather than a fabricated 0.0",
+				},
+			})
+			continue
+		}
+		total := agg.Input + agg.CacheRead + agg.CacheCreate
+		out = append(out, dojo.ScoredInput{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Realized:   float64(agg.CacheRead) / float64(total),
+				Provenance: dojo.Observed,
+				Measured:   true,
+				Sample:     int(agg.Turns),
+				Source:     "provider " + p + ": billed cache_read / (input + cache_read + cache_creation) over the local multi-provider corpus (OBSERVED)",
+			},
+		})
+	}
+	return out
 }
 
 // --- output + durable ledger I/O -------------------------------------------
