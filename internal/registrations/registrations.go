@@ -131,6 +131,7 @@ import (
 	// invariant ships dark (the leaf's init() never runs). `fak lint` is the same
 	// rules run out of band.
 	_ "github.com/anthony-chaudhary/fak/internal/a2achan"
+	_ "github.com/anthony-chaudhary/fak/internal/guardcompile"
 	_ "github.com/anthony-chaudhary/fak/internal/headroom"
 	_ "github.com/anthony-chaudhary/fak/internal/l3kv"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"

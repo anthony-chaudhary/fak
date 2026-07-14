@@ -211,6 +211,11 @@ func cmdGuard(argv []string) {
 		cmdGuardAllow(argv[1:])
 		return
 	}
+	// `fak guard compile` performs one authoring-time model extraction and emits
+	// a review-only policy diff. Runtime policy enforcement remains model-free.
+	if len(argv) > 0 && argv[0] == "compile" {
+		os.Exit(runGuardCompile(os.Stdout, os.Stderr, argv[1:]))
+	}
 	// `fak guard restart-audit` is the read-only restart-chain scanner (#3057):
 	// joins RESTART_HOP journal rows against carryover seed files and backfills
 	// the orphans. Peeled like `allow` — a bare leading verb, never a program to
