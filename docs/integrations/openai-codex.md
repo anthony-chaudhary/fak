@@ -655,3 +655,29 @@ fak-side references:
 - [Policy manifest guide](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - [Supported APIs and protocols](../supported/apis-and-protocols.md)
 - [Compatibility matrix](compatibility-matrix.md)
+
+
+## Diagnose an MCP startup before Codex
+
+When Codex reports only `connection closed: initialize response`, run the same configured
+stdio child through the read-only staged probe:
+
+```powershell
+fak doctor mcp --server fak
+fak doctor mcp --server fak --json
+```
+
+The command reads `[mcp_servers.fak]` from `$CODEX_HOME/config.toml` (or
+`~/.codex/config.toml`), never renders its `env` table, resolves the executable and version,
+checks the policy path, spawns the child, writes a real MCP `initialize`, and classifies the
+first stdout frame. The stable `fak-doctor-mcp/1` JSON report names stages such as
+`CONFIG_INVALID`, `EXECUTABLE_MISSING`, `POLICY_UNREADABLE`, `POLICY_MALFORMED`,
+`SPAWN_FAILED`, `INITIALIZE_TIMEOUT`, `EARLY_EXIT`, and `STDOUT_CONTAMINATION`, each with a
+checkable recovery action. It only probes and terminates the child; it never quarantines or
+rewrites production state.
+
+To diagnose an exact command instead of Codex config, put its arguments after the flags:
+
+```powershell
+fak doctor mcp --command C:\path\to\fak.exe serve --stdio --policy C:\path\policy.json
+```

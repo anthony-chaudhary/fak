@@ -65,6 +65,9 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "terminal-risk" {
 		return runDoctorTerminalRisk(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "mcp" {
+		return runDoctorMCP(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "doctor")
