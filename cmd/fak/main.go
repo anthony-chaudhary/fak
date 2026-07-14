@@ -300,6 +300,9 @@ func main() {
 		cmdCheckToolFailure(os.Args[2:])
 	case "doctor":
 		cmdDoctor(os.Args[2:])
+	case "init":
+		// Emit a minimal, valid fak.toml deployment manifest (#3421).
+		cmdInit(os.Args[2:])
 	case "feature":
 		cmdFeature(os.Args[2:])
 	case "index", "devindex":
