@@ -135,6 +135,10 @@ type Provenance struct {
 	// heavy/thin split (headHorizonHeavyResidentFloor) is only meaningful when compaction
 	// was armed, so this lets a reader exclude compaction-off rows from that analysis.
 	CompactHistoryBudget int `json:"compact_history_budget,omitempty"`
+	// ExposeProfile is the resolved tool-surface profile that produced the row. Empty
+	// means the full interactive surface; callers normalize that to "interactive" so
+	// headless and interactive cohorts remain distinguishable even at equal budgets.
+	ExposeProfile string `json:"expose_profile,omitempty"`
 	// BuildRevision is the VCS revision of the fak binary that produced the row (binstamp),
 	// suffixed "-dirty" for an uncommitted build. It ties a distribution shift to the code
 	// that produced it, so a recalibration can scope to rows from a known-good build.

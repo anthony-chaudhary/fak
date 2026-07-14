@@ -216,3 +216,26 @@ func findSeg(t *testing.T, rep CompactionReport, budget int, band string) Compac
 	t.Fatalf("segment (%d,%s) not found in %+v", budget, band, rep.Segments)
 	return CompactionSegment{}
 }
+
+func TestFoldCompactionSeparatesExposeProfilesAtSameBudget(t *testing.T) {
+	row := func(profile string, shed uint64) Row {
+		return Row{
+			Kind:       "exit",
+			Provenance: &Provenance{CompactHistoryBudget: 48000, ExposeProfile: profile},
+			Counters:   Counters{ObservedTurns: 50, CompactionFired: 1, CompactionShedTokens: shed, InputTokens: 100},
+		}
+	}
+	rep := FoldCompaction([]Row{row("interactive", 10), row("headless", 90)}, "all")
+	if len(rep.Segments) != 2 {
+		t.Fatalf("segments = %d, want 2 profile-separated cells: %#v", len(rep.Segments), rep.Segments)
+	}
+	if rep.Segments[0].ExposeProfile != "headless" || rep.Segments[1].ExposeProfile != "interactive" {
+		t.Fatalf("profiles = %q, %q, want stable headless/interactive split", rep.Segments[0].ExposeProfile, rep.Segments[1].ExposeProfile)
+	}
+	got := RenderCompaction(rep)
+	for _, want := range []string{"profile", "headless", "interactive"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q:\n%s", want, got)
+		}
+	}
+}

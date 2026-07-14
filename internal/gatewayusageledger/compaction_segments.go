@@ -86,6 +86,7 @@ type CompactionSegment struct {
 	// --by day|week (day = "2006-01-02", week = ISO "2006-Www"); empty for the default
 	// un-bucketed single-window fold, so the existing render/JSON stays byte-for-byte.
 	Period        string  `json:"period,omitempty"`
+	ExposeProfile string  `json:"expose_profile"`
 	Budget        int     `json:"budget"`
 	BudgetRegime  string  `json:"budget_regime"`
 	Band          string  `json:"band"`
@@ -157,10 +158,10 @@ func FoldCompaction(rows []Row, since string) CompactionReport {
 // period, then budget ascending, then the canonical band order.
 func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionReport {
 	rep := CompactionReport{Since: since}
-	cells := map[[3]string]*CompactionSegment{}
+	cells := map[[4]string]*CompactionSegment{}
 	// keyFor preserves a total, stable ordering for the later sort.
-	keyFor := func(period string, budget int, band string) [3]string {
-		return [3]string{period, fmt.Sprintf("%012d", budget), band}
+	keyFor := func(period, profile string, budget int, band string) [4]string {
+		return [4]string{period, profile, fmt.Sprintf("%012d", budget), band}
 	}
 
 	for _, r := range rows {
@@ -169,20 +170,25 @@ func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionRep
 		}
 		rep.ExitRows++
 		budget := 0
+		profile := "unknown"
 		if r.Provenance != nil {
 			budget = r.Provenance.CompactHistoryBudget
+			if recorded := strings.ToLower(strings.TrimSpace(r.Provenance.ExposeProfile)); recorded != "" {
+				profile = recorded
+			}
 		}
 		band := compactionBandFor(r.Counters.ObservedTurns)
 		period := compactionPeriodKey(r.GeneratedAt, granularity)
-		k := keyFor(period, budget, band)
+		k := keyFor(period, profile, budget, band)
 		seg := cells[k]
 		if seg == nil {
 			seg = &CompactionSegment{
-				Period:       period,
-				Budget:       budget,
-				BudgetRegime: compactionBudgetRegimeLabel(budget),
-				Band:         band,
-				bailReasons:  map[string]uint64{},
+				Period:        period,
+				ExposeProfile: profile,
+				Budget:        budget,
+				BudgetRegime:  compactionBudgetRegimeLabel(budget),
+				Band:          band,
+				bailReasons:   map[string]uint64{},
 			}
 			cells[k] = seg
 		}
@@ -222,6 +228,9 @@ func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionRep
 	sort.Slice(rep.Segments, func(i, j int) bool {
 		if rep.Segments[i].Period != rep.Segments[j].Period {
 			return rep.Segments[i].Period < rep.Segments[j].Period
+		}
+		if rep.Segments[i].ExposeProfile != rep.Segments[j].ExposeProfile {
+			return rep.Segments[i].ExposeProfile < rep.Segments[j].ExposeProfile
 		}
 		if rep.Segments[i].Budget != rep.Segments[j].Budget {
 			return rep.Segments[i].Budget < rep.Segments[j].Budget
@@ -342,12 +351,13 @@ func RenderCompaction(rep CompactionReport) string {
 	}
 	b.WriteString("\n\n")
 
-	header := fmt.Sprintf("  %-19s %-8s %5s %6s %6s %6s %8s  %-9s  %s",
-		"regime", "band", "sess", "fired", "fires", "bails", "shed%med", "bailrate", "top_bail")
+	header := fmt.Sprintf("  %-11s %-19s %-8s %5s %6s %6s %6s %8s  %-9s  %s",
+		"profile", "regime", "band", "sess", "fired", "fires", "bails", "shed%med", "bailrate", "top_bail")
 	b.WriteString(header + "\n")
 
 	const noPeriod = "\x00" // sentinel distinct from a real "" (default un-bucketed) period
 	lastPeriod := noPeriod
+	lastProfile := ""
 	lastBudget := -1
 	for _, s := range rep.Segments {
 		if s.Period != lastPeriod {
@@ -358,6 +368,14 @@ func RenderCompaction(rep CompactionReport) string {
 				fmt.Fprintf(&b, "  [%s]\n", s.Period)
 			}
 			lastPeriod = s.Period
+			lastProfile = ""
+			lastBudget = -1
+		}
+		if s.ExposeProfile != lastProfile {
+			if lastProfile != "" {
+				b.WriteByte('\n')
+			}
+			lastProfile = s.ExposeProfile
 			lastBudget = -1
 		}
 		if s.Budget != lastBudget {
@@ -378,8 +396,8 @@ func RenderCompaction(rep CompactionReport) string {
 			topBail = fmt.Sprintf("%s·%.0f%%", topBail, s.TopBailShare*100)
 		}
 		regime := fmt.Sprintf("%s(%d)", s.BudgetRegime, s.Budget)
-		fmt.Fprintf(&b, "  %-19s %-8s %5d %6d %6d %6d %8s  %8.2f  %s\n",
-			regime, s.Band, s.Sessions, s.FiredSessions, s.Fires, s.Bails, shed, s.BailRate, topBail)
+		fmt.Fprintf(&b, "  %-11s %-19s %-8s %5d %6d %6d %6d %8s  %8.2f  %s\n",
+			s.ExposeProfile, regime, s.Band, s.Sessions, s.FiredSessions, s.Fires, s.Bails, shed, s.BailRate, topBail)
 	}
 	return b.String()
 }
