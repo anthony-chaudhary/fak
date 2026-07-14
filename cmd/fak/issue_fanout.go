@@ -33,6 +33,11 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	leaf := fs.String("leaf", "", "owning leaf/lane (stamps keys, lane, default paths)")
 	spine := fs.String("spine", "", "spine witness: commit SHA, demo command, or doc path")
 	parent := fs.String("parent", "", "epic/issue ref the fan-out hangs off (default: --spine)")
+	parentIssue := fs.Int("parent-issue", 0, "parent issue number for project-work denominator binding")
+	parentBaseline := fs.Float64("parent-baseline-points", 0, "declared parent production-scope baseline points")
+	completionStandard := fs.String("completion-standard", "production", "generated child maturity (default production)")
+	targetEnvelope := fs.String("target-envelope", "", "production target operating envelope")
+	witnessedEnvelope := fs.String("witnessed-envelope", "", "currently witnessed operating envelope")
 	paths := fs.String("paths", "", "comma-separated file trees (default internal/<leaf>/)")
 	areas := fs.String("areas", "", "comma-separated area filter ("+strings.Join(issuefanout.AreaNames(), ",")+")")
 	maxN := fs.Int("max", 0, "cap candidates (0 = full taxonomy; floor "+fmt.Sprint(issuefanout.MinFanout)+")")
@@ -74,13 +79,18 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	}
 
 	plan, err := issuefanout.Build(issuefanout.Input{
-		Title:     *title,
-		Leaf:      *leaf,
-		SpineRef:  *spine,
-		ParentRef: *parent,
-		Paths:     issueFanoutSplit(*paths),
-		Areas:     issueFanoutSplit(*areas),
-		Max:       *maxN,
+		Title:              *title,
+		Leaf:               *leaf,
+		SpineRef:           *spine,
+		ParentRef:          *parent,
+		Paths:              issueFanoutSplit(*paths),
+		Areas:              issueFanoutSplit(*areas),
+		Max:                *maxN,
+		ParentIssue:        *parentIssue,
+		ParentBaseline:     *parentBaseline,
+		CompletionStandard: *completionStandard,
+		TargetEnvelope:     *targetEnvelope,
+		WitnessedEnvelope:  *witnessedEnvelope,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak issue fanout: %v\n", err)

@@ -29,13 +29,19 @@ const MinFanout = 3
 
 // Input describes the working spine the fan-out hardens.
 type Input struct {
-	Title     string   `json:"title"`                // human name of the spine, e.g. "issue fanout planner"
-	Leaf      string   `json:"leaf"`                 // owning leaf/lane, e.g. "issuefanout"
-	SpineRef  string   `json:"spine_ref"`            // spine witness: commit SHA, demo command, or doc path
-	ParentRef string   `json:"parent_ref,omitempty"` // epic/issue the fan-out hangs off (defaults to SpineRef)
-	Paths     []string `json:"paths,omitempty"`      // file trees the follow-ons work in (default internal/<leaf>/)
-	Areas     []string `json:"areas,omitempty"`      // area filter (empty = full taxonomy)
-	Max       int      `json:"max,omitempty"`        // cap candidates (0 = full taxonomy; floor MinFanout)
+	Title              string   `json:"title"`                // human name of the spine, e.g. "issue fanout planner"
+	Leaf               string   `json:"leaf"`                 // owning leaf/lane, e.g. "issuefanout"
+	SpineRef           string   `json:"spine_ref"`            // spine witness: commit SHA, demo command, or doc path
+	ParentRef          string   `json:"parent_ref,omitempty"` // epic/issue the fan-out hangs off (defaults to SpineRef)
+	Paths              []string `json:"paths,omitempty"`      // file trees the follow-ons work in (default internal/<leaf>/)
+	Areas              []string `json:"areas,omitempty"`      // area filter (empty = full taxonomy)
+	Max                int      `json:"max,omitempty"`
+	ParentIssue        int      `json:"parent_issue,omitempty"`
+	ParentBaseline     float64  `json:"parent_baseline_points,omitempty"`
+	CompletionStandard string   `json:"completion_standard,omitempty"`
+	TargetEnvelope     string   `json:"target_envelope,omitempty"`
+	WitnessedEnvelope  string   `json:"witnessed_envelope,omitempty"`
+	// Max caps candidates (0 = full taxonomy; floor MinFanout).
 }
 
 // Plan is the fan-out: contract-ready candidates in fixed taxonomy order.
@@ -430,7 +436,7 @@ func expand(t template, in Input) issuecontract.Candidate {
 		"{spine}", in.SpineRef,
 		"{paths}", strings.Join(paths, ", "),
 	)
-	return issuecontract.Candidate{
+	c := issuecontract.Candidate{
 		Key:           "fanout-" + in.Leaf + "-" + t.slug,
 		Title:         r.Replace(t.title),
 		Generation:    t.generation,
@@ -459,6 +465,22 @@ func expand(t template, in Input) issuecontract.Candidate {
 		Priority:       t.priority,
 		ClosureBinding: "Close via a commit whose body carries `Closes #<n>` and whose diff lands the witness above.",
 	}
+	if in.ParentIssue > 0 && in.ParentBaseline > 0 {
+		points := float64(t.steps)
+		standard := strings.TrimSpace(in.CompletionStandard)
+		if standard == "" {
+			standard = "production"
+		}
+		c.ParentRef = fmt.Sprintf("#%d", in.ParentIssue)
+		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
+		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, in.ParentBaseline)
+		c.CompletionStandard = standard
+		if standard == "production" {
+			c.TargetEnvelope = strings.TrimSpace(in.TargetEnvelope)
+			c.WitnessedEnvelope = strings.TrimSpace(in.WitnessedEnvelope)
+		}
+	}
+	return c
 }
 
 // Render prints the plan for a human: one line per candidate plus the next step.
