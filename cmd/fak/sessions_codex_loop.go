@@ -257,6 +257,10 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
 		return 1
 	}
+	// The provider name in session_meta is operator-controlled. Bind the plain
+	// diagnostic path to the same durable guard-launch witness used by the hook,
+	// recent-session report, and pre-spawn launcher gate before classifying it.
+	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, d.SessionID)
 	gateCode, ok := codexLoopFailOnDiagnosisExitCode(d, *failOn)
 	if !ok {
 		fmt.Fprintf(stderr, "fak sessions codex-loop: invalid --fail-on %q (want none, loop, action, or unguarded)\n", *failOn)
@@ -933,6 +937,10 @@ func diagnoseCurrentCodexLoop(codexHome string) (codexLoopDiagnosis, bool, error
 	if err != nil {
 		return codexLoopDiagnosis{}, true, err
 	}
+	// Current-thread consumers include the pre-spawn launcher and dispatch gates.
+	// They must bind the provider metadata to the durable launch witness just like
+	// the explicit and recent-session diagnostic paths do.
+	d.GuardWitnessed = codexGuardWitnessExists(codexHome, d.SessionID)
 	return d, true, nil
 }
 

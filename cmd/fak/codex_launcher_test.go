@@ -220,6 +220,9 @@ func TestRunCodexExecSeam(t *testing.T) {
 func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
 	orig := codexLaunchRun
 	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
 		t.Fatal("codex child spawned despite loop gate refusal")
@@ -461,6 +464,36 @@ func TestRunCodexLoopGateRefusesCurrentDirectThread(t *testing.T) {
 	}
 }
 
+func TestRunCodexLoopGateAllowsCurrentGuardWitnessedThread(t *testing.T) {
+	home, threadID := codexLauncherCurrentThreadFixture(t)
+	t.Setenv("CODEX_THREAD_ID", threadID)
+	if err := writeCodexGuardWitness(home, threadID); err != nil {
+		t.Fatal(err)
+	}
+	orig := codexLaunchRun
+	spawned := false
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+		spawned = true
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate", "loop",
+		"--loop-gate-since-hours", "0",
+		"--",
+		"exec", "do x",
+	})
+	if rc != 17 || !spawned {
+		t.Fatalf("guard-witnessed current-thread gate rc=%d spawned=%v, want child rc=17; stdout=%s stderr=%s", rc, spawned, out.String(), errb.String())
+	}
+	if strings.Contains(errb.String(), "current-thread gate REFUSE") {
+		t.Fatalf("durably witnessed current thread was misclassified as unguarded:\n%s", errb.String())
+	}
+}
 func TestRunCodexLoopGateOffAllowsSpawn(t *testing.T) {
 	home := codexLauncherLoopFixture(t)
 	orig := codexLaunchRun

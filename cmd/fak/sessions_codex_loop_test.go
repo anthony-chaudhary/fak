@@ -175,6 +175,35 @@ func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 	}
 }
 
+func TestSessionsCodexLoopPlainDiagnosisUsesGuardWitness(t *testing.T) {
+	home := t.TempDir()
+	sessionID := "88888888-8888-4888-8888-888888888888"
+	path := filepath.Join(home, "rollout.jsonl")
+	writeCodexLoopFixture(t, path, []string{
+		`{"timestamp":"2026-07-14T18:00:00Z","type":"session_meta","payload":{"id":"` + sessionID + `","model_provider":"fak"}}`,
+		`{"timestamp":"2026-07-14T18:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"inspect"}}`,
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := sessionsCodexLoop(&stdout, &stderr, []string{"--path", path, "--codex-home", home, "--json", "--fail-on", "unguarded"}); code != 1 {
+		t.Fatalf("unguarded code=%d want 1 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if err := writeCodexGuardWitness(home, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := sessionsCodexLoop(&stdout, &stderr, []string{"--path", path, "--codex-home", home, "--json", "--fail-on", "unguarded"}); code != 0 {
+		t.Fatalf("guarded code=%d want 0 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var after codexLoopDiagnosis
+	if err := json.Unmarshal(stdout.Bytes(), &after); err != nil {
+		t.Fatalf("decode guarded diagnosis: %v\n%s", err, stdout.String())
+	}
+	if !after.GuardWitnessed {
+		t.Fatalf("guarded diagnosis omitted durable witness: %+v", after)
+	}
+}
 func TestSessionsCodexLoopDefaultsToCurrentCodexThread(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-home")
 	sessionsDir := filepath.Join(home, "sessions", "2026", "07", "06")
