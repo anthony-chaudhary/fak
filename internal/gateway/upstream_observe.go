@@ -1,6 +1,12 @@
 package gateway
 
-import "net/http"
+import (
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"strings"
+)
 
 // upstream_observe.go is the host's read-only window onto UPSTREAM provider
 // responses. The proxy planners speak to the provider through their own
@@ -16,8 +22,9 @@ import "net/http"
 // observer is called after headers arrive (before the body is read), so a
 // streaming response is observed at stream open.
 type upstreamObserveTransport struct {
-	base    http.RoundTripper
-	observe func(status int, header http.Header)
+	base         http.RoundTripper
+	observe      func(status int, header http.Header)
+	observeError func(error)
 }
 
 func (t *upstreamObserveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -25,19 +32,42 @@ func (t *upstreamObserveTransport) RoundTrip(req *http.Request) (*http.Response,
 	if resp != nil && t.observe != nil {
 		t.observe(resp.StatusCode, resp.Header)
 	}
+	if err != nil && t.observeError != nil && transientUpstreamTransportError(err) {
+		t.observeError(err)
+	}
 	return resp, err
 }
 
 // wrapUpstreamObserver installs observe onto client's transport. A nil observer or
 // client leaves everything untouched, so the default (no Config.
 // UpstreamResponseObserver) path keeps its transport byte-for-byte.
-func wrapUpstreamObserver(client *http.Client, observe func(status int, header http.Header)) {
-	if client == nil || observe == nil {
+func wrapUpstreamObserver(client *http.Client, observe func(status int, header http.Header), observeError func(error)) {
+	if client == nil || (observe == nil && observeError == nil) {
 		return
 	}
 	base := client.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	client.Transport = &upstreamObserveTransport{base: base, observe: observe}
+	client.Transport = &upstreamObserveTransport{base: base, observe: observe, observeError: observeError}
+}
+
+func transientUpstreamTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && (ne.Timeout() || ne.Temporary()) {
+		return true
+	}
+	low := strings.ToLower(err.Error())
+	for _, needle := range []string{"connection reset", "connection refused", "broken pipe", "server closed idle connection", "tls handshake timeout"} {
+		if strings.Contains(low, needle) {
+			return true
+		}
+	}
+	return false
 }

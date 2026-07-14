@@ -125,6 +125,32 @@ func guardRestartHopFromEventHandback(ev guardBudgetRestartEvent, hop int, agent
 	}
 }
 
+// guardWireRetryHop builds the correlated RESTART_HOP record for a transient-wire-crash relaunch
+// (#3514) so a supervisor-level wire retry folds into the SAME restart chain (and `fak guard
+// restart-audit`) as a budget restart, rather than being an invisible relaunch. The relaunch is a
+// --continue reattach under the SAME trace (the crashed session resumes in place — no new
+// continuation trace is minted and no seed is written), so from/to/child are all guardTraceID,
+// handback is "continue", and status is ok. It degrades to the ORPHANED/inert shape for an
+// unrecognized agent for symmetry with guardRestartHopFromEventHandback, though the wire-retry arm
+// only ever fires for a recognized agent (guardMaybeRetryTransientWireCrash gates on the resume flag).
+func guardWireRetryHop(guardTraceID, agentName string, hop int) journal.RestartHop {
+	handback := guardRestartHandbackOrphaned
+	status := journal.RestartHopInert
+	if _, ok := guardContinueFlagForAgent(agentName); ok {
+		handback = guardRestartHandbackContinue
+		status = journal.RestartHopOK
+	}
+	return journal.RestartHop{
+		Schema:    journal.RestartChainSchema,
+		Hop:       hop,
+		FromTrace: guardTraceID,
+		ToTrace:   guardTraceID,
+		Handback:  handback,
+		Child:     guardTraceID,
+		Status:    status,
+	}
+}
+
 // guardRestartHopShrink reports whether the relaunch this hop records SHRANK the exhausted context
 // window ("yes") or RE-INFLATED it ("no") — the fix-#2 no-shrink signal. Only the seed-prompt
 // handback boots the child fresh on the bounded distilled seed (and strips --continue), so only it

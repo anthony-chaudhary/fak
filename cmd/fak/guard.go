@@ -1021,6 +1021,8 @@ func cmdGuard(argv []string) {
 	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "listener-bind", Dur: listenDur})
 	gatewayModel := guardCodexGatewayModel(command, *model, up)
 
+	wireErrors := &guardWireErrorGauge{}
+
 	srv, err := gateway.New(gateway.Config{
 		EngineID: "inkernel",
 		Model:    gatewayModel,
@@ -1032,8 +1034,9 @@ func cmdGuard(argv []string) {
 		// "check model/roles/ranges" failure into the provider's exact rejected field
 		// (the call_id-vs-item-id bug reported input[3].id). A guard explicitly bound
 		// beyond loopback keeps the no-leak default, matching fak serve.
-		ExposeUpstreamErrorDetail: guardLoopbackOnly(ln.Addr().String()),
-		UpstreamBadRequestNotify:  guardUpstreamBadRequestAuditNotify(auditJournal, guardTraceID),
+		ExposeUpstreamErrorDetail:      guardLoopbackOnly(ln.Addr().String()),
+		UpstreamBadRequestNotify:       guardUpstreamBadRequestAuditNotify(auditJournal, guardTraceID),
+		UpstreamTransportErrorObserver: func(err error) { wireErrors.Observe(time.Now(), err) },
 		// Re-resolve the pinned subscription OAuth token per request so a long session
 		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every
 		// non-pinned path leaves the static-APIKey behavior byte-for-byte unchanged.
@@ -1502,8 +1505,8 @@ func cmdGuard(argv []string) {
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 }

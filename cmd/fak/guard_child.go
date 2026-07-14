@@ -1239,7 +1239,7 @@ func guardWriteLaunchFailReport(w io.Writer, report string, enabled bool) {
 // dumpStartupOnLaunchFail spills the full startup report to stderr if the child never starts
 // (guardChildIsLaunchFailure) — set by the caller for every banner mode except --banner=full,
 // which already streamed it at boot.
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	// The startup renderer created the card and queued its control replies. Bind its
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
 	// below stops the updater and replaces the root with the terminal state.
@@ -1250,6 +1250,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
+	wireRetries := 0
+	wireLimit := guardWireRetryLimit()
 	for {
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, rotation.launcher())
 		if err != nil {
@@ -1263,6 +1265,14 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		runErr := windowgate.RunInNewJob(child)
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
+			command = next
+			continue
+		}
+		if next, ok := guardMaybeRetryTransientWireCrash(runErr, child.ProcessState, command, agentName, wireErrors.Consume(time.Now()), wireRetries, wireLimit, true, nil); ok {
+			wireRetries++
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
+			guardEmitRestartHop(auditJournal, os.Stderr, agentName, guardTraceID, guardWireRetryHop(guardTraceID, agentName, wireRetries))
+			time.Sleep(guardCrashRestartDelay(wireRetries))
 			command = next
 			continue
 		}
@@ -1319,7 +1329,7 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 	return false, ""
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	// Same live card as the unsupervised path; child restarts stay one session and one
 	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
 	guardSessionCardHandle.startUpdater(srv)
@@ -1339,6 +1349,8 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
+	wireRetries := 0
+	wireLimit := guardWireRetryLimit()
 	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
 	// --max-duration envelope is actually ENFORCED here, not merely armed/persisted/displayed.
 	// guardTimeBudgetExhausted is a no-op for an unbounded/paused/still-fine session, so a run
@@ -1380,6 +1392,14 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case guardChildCompleted:
 			runErr := event.RunErr
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
+				command = next
+				continue
+			}
+			if next, ok := guardMaybeRetryTransientWireCrash(runErr, child.ProcessState, command, agentName, wireErrors.Consume(time.Now()), wireRetries, wireLimit, true, nil); ok {
+				wireRetries++
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
+				guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID, guardWireRetryHop(guardTraceID, agentName, wireRetries))
+				time.Sleep(guardCrashRestartDelay(wireRetries))
 				command = next
 				continue
 			}

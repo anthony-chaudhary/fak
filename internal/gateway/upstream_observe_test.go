@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -95,3 +96,25 @@ func TestProxyPlannerForwardsExtraHeaders(t *testing.T) {
 		t.Fatalf("ChatGPT-Account-Id = %q, want acct-gateway", gotAccount)
 	}
 }
+
+func TestUpstreamObserverReportsOnlyTransientTransportErrors(t *testing.T) {
+	transient := errors.New("read: connection reset by peer")
+	seen := 0
+	tr := &upstreamObserveTransport{base: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, transient }), observeError: func(error) { seen++ }}
+	req, _ := http.NewRequest(http.MethodGet, "http://provider.invalid", nil)
+	_, _ = tr.RoundTrip(req)
+	if seen != 1 {
+		t.Fatalf("transient transport observations=%d, want 1", seen)
+	}
+
+	seen = 0
+	tr.base = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("permanent malformed request") })
+	_, _ = tr.RoundTrip(req)
+	if seen != 0 {
+		t.Fatalf("permanent transport error observed as transient")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

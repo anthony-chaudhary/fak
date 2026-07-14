@@ -320,6 +320,8 @@ type Config struct {
 	// account is. Read-only by contract: it must not mutate the response. nil (the
 	// default) leaves the planners' transports byte-for-byte unchanged.
 	UpstreamResponseObserver func(status int, header http.Header)
+	// UpstreamTransportErrorObserver reports only transient dial/read/EOF/reset failures.
+	UpstreamTransportErrorObserver func(error)
 	// EngineCacheEngine optionally selects a self-hosted serving-engine cache reset
 	// endpoint to call when inbound tool-result admission quarantines bytes before
 	// an upstream proxy turn. Empty disables remote cache reset.
@@ -2149,7 +2151,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 		p.ForceResponsesStream = cfg.ForceResponsesStream
-		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
+		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
 		return p, nil
 	}
 	replicas := make([]PlannerReplica, 0, len(baseURLs))
@@ -2171,7 +2173,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 		p.ForceResponsesStream = cfg.ForceResponsesStream
-		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
+		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
 		replicas = append(replicas, PlannerReplica{
 			Name:    name,
 			Planner: p,
