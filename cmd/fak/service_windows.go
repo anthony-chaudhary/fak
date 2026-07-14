@@ -96,7 +96,7 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 			fmt.Fprintln(stderr, "service already exists")
 			return result, 1
 		}
-		cfg := mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, DisplayName: "fak Guard control plane", Description: "Session-0 Guard sensor, policy, durable state, and recovery control plane", ServiceStartName: "NT AUTHORITY\\LocalService", SidType: 1}
+		cfg := mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, DisplayName: "fak Guard control plane", Description: "Session-0 Guard sensor, policy, durable state, and recovery control plane", ServiceStartName: "NT AUTHORITY\\LocalService", SidType: windows.SERVICE_SID_TYPE_RESTRICTED}
 		s, err = m.CreateService(windowsGuardServiceName, exe, cfg, "service", "windows-run")
 		if err != nil {
 			fmt.Fprintln(stderr, err)
@@ -104,6 +104,9 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 		}
 		defer s.Close()
 		if err = s.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 3 * time.Second}, {Type: mgr.ServiceRestart, Delay: 10 * time.Second}, {Type: mgr.ServiceRestart, Delay: 30 * time.Second}}, 86400); err != nil {
+			return result, 1
+		}
+		if err = s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
 			return result, 1
 		}
 		if err = s.Start(); err != nil {
