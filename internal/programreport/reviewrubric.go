@@ -275,9 +275,9 @@ type ReplayArtifact struct {
 	Provenance     ReviewProvenance `json:"provenance"` // scrubbed
 	Dimension      ReviewDimension  `json:"dimension"`  // the first actionable divergence
 	Kind           string           `json:"kind"`
-	Anchor         string           `json:"anchor,omitempty"`       // published anchor at the observed level
-	RaterScores    map[string]int   `json:"rater_scores"`           // per-rater score on the divergent axis
-	SubjectExcerpt string           `json:"subject_excerpt"`        // scrubbed
+	Anchor         string           `json:"anchor,omitempty"` // published anchor at the observed level
+	RaterScores    map[string]int   `json:"rater_scores"`     // per-rater score on the divergent axis
+	SubjectExcerpt string           `json:"subject_excerpt"`  // scrubbed
 	Reason         string           `json:"reason"`
 }
 
