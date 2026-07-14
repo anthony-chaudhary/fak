@@ -33,6 +33,7 @@ func cmdDogfoodIssues(argv []string) { os.Exit(runDogfoodIssues(os.Stdout, os.St
 func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dogfood-issues", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	project := addDogfoodProjectFlags(fs)
 	workspace := fs.String("workspace", "", "workspace root for the default newest-report lookup (default: repo root)")
 	repo := fs.String("repo", "", "owner/repo for gh; default is current repo")
 	limit := fs.Int("limit", 300, "existing issue scan limit for live/fetch modes")
@@ -142,6 +143,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		DedupeChecked:    *live || *fetchExisting || *existingJSON != "",
 		DedupeCap:        issueSyncScanLimit(*limit),
 		DefaultMilestone: strings.TrimSpace(*milestone),
+		ParentBaseline:   project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
 	cohort := dogfoodissues.CohortPlan(items, buildOpt)
@@ -209,4 +211,20 @@ func (l *stringList) String() string {
 func (l *stringList) Set(v string) error {
 	*l = append(*l, v)
 	return nil
+}
+
+type dogfoodProjectFlags struct {
+	parent                      *int
+	baselinePoints              *float64
+	standard, target, witnessed *string
+}
+
+func addDogfoodProjectFlags(fs *flag.FlagSet) *dogfoodProjectFlags {
+	return &dogfoodProjectFlags{parent: fs.Int("parent-issue", 0, "parent issue number for project scope"), baselinePoints: fs.Float64("parent-baseline-points", 0, "parent production-scope baseline points"), standard: fs.String("completion-standard", "production", "generated issue maturity"), target: fs.String("target-envelope", "", "production target operating envelope"), witnessed: fs.String("witnessed-envelope", "", "currently witnessed operating envelope")}
+}
+func (p *dogfoodProjectFlags) baseline() float64 {
+	if p == nil {
+		return 0
+	}
+	return *p.baselinePoints
 }

@@ -99,13 +99,17 @@ func (f Finding) actionItem(evidence string) dogfoodissues.ActionItem {
 
 // EmitOptions carries the cross-sink knobs. Live flips a sink from dry-run to committing.
 type EmitOptions struct {
-	Live     bool
-	Repo     string   // GitHub owner/repo ("" = current repo)
-	Cap      int      // max findings to act on in one run (<=0 = no cap)
-	Dir      string   // LocalDBSink workspace root (the ledger lands under <Dir>/.fak)
-	Labels   []string // extra labels for created GitHub issues
-	Evidence string   // default evidence path for synthesized issues
-	Limit    int      // existing-issue scan limit for the GitHub sink (0 = 300)
+	Live               bool
+	Repo               string   // GitHub owner/repo ("" = current repo)
+	Cap                int      // max findings to act on in one run (<=0 = no cap)
+	Dir                string   // LocalDBSink workspace root (the ledger lands under <Dir>/.fak)
+	Labels             []string // extra labels for created GitHub issues
+	Evidence           string   // default evidence path for synthesized issues
+	Limit              int      // existing-issue scan limit for the GitHub sink (0 = 300)
+	ParentBaseline     float64
+	CompletionStandard string
+	TargetEnvelope     string
+	WitnessedEnvelope  string
 }
 
 // Row is one sink outcome for one finding.
@@ -348,9 +352,10 @@ func (s GitHubSink) Emit(findings []Finding, opt EmitOptions) (Report, error) {
 		dedupeCap = opt.Cap
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{
-		Live:          opt.Live,
-		DedupeChecked: opt.Live,
-		DedupeCap:     dedupeCap,
+		Live:           opt.Live,
+		DedupeChecked:  opt.Live,
+		DedupeCap:      dedupeCap,
+		ParentBaseline: opt.ParentBaseline, CompletionStandard: opt.CompletionStandard, TargetEnvelope: opt.TargetEnvelope, WitnessedEnvelope: opt.WitnessedEnvelope,
 	})
 	rep.Planned = len(plan)
 	rep.Skipped = len(skipped)

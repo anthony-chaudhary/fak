@@ -29,6 +29,7 @@ func cmdModeDebtDispatch(argv []string) {
 func runModeDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak mode-debt-dispatch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	project := addDogfoodProjectFlags(fs)
 	scorecardPath := fs.String("scorecard", "", "mode-debt scorecard JSON emitted by the scorer leaf")
 	capN := fs.Int("cap", 10, "maximum HARD un-lifted dials to fan out into issues in one run")
 	repo := fs.String("repo", "", "owner/repo for gh; default is the current repo")
@@ -100,9 +101,10 @@ func runModeDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	buildOpt := dogfoodissues.BuildOptions{
-		Live:          *live,
-		DedupeChecked: *existingJSON != "" || *fetchExisting || *live,
-		DedupeCap:     *capN,
+		Live:           *live,
+		DedupeChecked:  *existingJSON != "" || *fetchExisting || *live,
+		DedupeCap:      *capN,
+		ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
 	cohort := dogfoodissues.CohortPlan(items, buildOpt)

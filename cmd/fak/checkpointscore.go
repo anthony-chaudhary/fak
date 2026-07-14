@@ -77,6 +77,7 @@ func cmdCheckpointDebtDispatch(argv []string) {
 func runCheckpointDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak checkpoint-debt-dispatch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	project := addDogfoodProjectFlags(fs)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	capN := fs.Int("cap", 10, "maximum gaps to fan out in one run")
 	sinkName := fs.String("sink", "stdout", "finding sink: stdout | localdb | github")
@@ -118,13 +119,14 @@ func runCheckpointDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	findings := findingsink.FromActionItems(items)
 
 	rep, err := sink.Emit(findings, findingsink.EmitOptions{
-		Live:     *live,
-		Repo:     *repo,
-		Cap:      *capN,
-		Dir:      root,
-		Labels:   []string(labels),
-		Evidence: "fak checkpoint-scorecard --json",
-		Limit:    *limit,
+		Live:           *live,
+		Repo:           *repo,
+		Cap:            *capN,
+		Dir:            root,
+		Labels:         []string(labels),
+		Evidence:       "fak checkpoint-scorecard --json",
+		Limit:          *limit,
+		ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak checkpoint-debt-dispatch: %v\n", err)

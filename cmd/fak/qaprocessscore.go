@@ -193,6 +193,7 @@ func cmdQAProcessDebtDispatch(argv []string) {
 func runQAProcessDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak qa-process-debt-dispatch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	project := addDogfoodProjectFlags(fs)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	commitsN := fs.Int("commits", 200, "size of the recent-commit window scanned for reverted landings (0 disables)")
 	coverProfile := fs.String("coverprofile", "", "path to a `go test -coverprofile` file; when set, also fans coverage_discipline gaps")
@@ -275,9 +276,10 @@ func runQAProcessDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	buildOpt := dogfoodissues.BuildOptions{
-		Live:          *live,
-		DedupeChecked: *existingJSON != "" || *fetchExisting || *live,
-		DedupeCap:     *capN,
+		Live:           *live,
+		DedupeChecked:  *existingJSON != "" || *fetchExisting || *live,
+		DedupeCap:      *capN,
+		ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
 	cohort := dogfoodissues.CohortPlan(items, buildOpt)

@@ -29,13 +29,17 @@ const codexLoopGateIssueLabel = "codex-loop-gate"
 // codexLoopIssueOptions carries the effectful knobs for the issue bridge. They are
 // only meaningful alongside --recent --sync-issues.
 type codexLoopIssueOptions struct {
-	Live          bool
-	FetchExisting bool
-	Repo          string
-	Milestone     string
-	ExistingJSON  string
-	Limit         int
-	Labels        []string
+	Live               bool
+	FetchExisting      bool
+	Repo               string
+	Milestone          string
+	ExistingJSON       string
+	Limit              int
+	Labels             []string
+	ProjectBaseline    float64
+	CompletionStandard string
+	TargetEnvelope     string
+	WitnessedEnvelope  string
 	// Runner injects the gh subprocess for tests; nil uses the real gh CLI. The
 	// command wiring always leaves this nil.
 	Runner dogfoodissues.Runner
@@ -201,6 +205,7 @@ func runCodexLoopSyncIssues(stdout, stderr io.Writer, r codexLoopRecentReport, a
 		DedupeChecked:    opt.Live || opt.FetchExisting || strings.TrimSpace(opt.ExistingJSON) != "",
 		DedupeCap:        opt.Limit,
 		DefaultMilestone: strings.TrimSpace(opt.Milestone),
+		ParentBaseline:   opt.ProjectBaseline, CompletionStandard: opt.CompletionStandard, TargetEnvelope: opt.TargetEnvelope, WitnessedEnvelope: opt.WitnessedEnvelope,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
 	result := dogfoodissues.Result{

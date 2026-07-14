@@ -193,6 +193,9 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 	}
 	res := LiveResult{Schema: LiveSchema, Input: plan.Input, DedupeCap: dedupeCap, Scanned: len(existing)}
 	for _, c := range plan.Candidates {
+		if plan.Input.ParentIssue <= 0 || plan.Input.ParentBaseline <= 0 {
+			return res, refusef("issuefanout: live filing requires --parent-issue and --parent-baseline-points")
+		}
 		row := FileRow{Key: c.Key, Title: c.Title}
 		if n, seen := seenIn(existing, c.Key); seen {
 			row.Action = "skipped"

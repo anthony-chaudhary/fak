@@ -166,6 +166,7 @@ type codexOutcomeAccum struct {
 func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("sessions codex-loop", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	project := addDogfoodProjectFlags(fs)
 	sessionID := fs.String("session", "", "Codex session id to find under --codex-home/sessions (default: $CODEX_THREAD_ID when set)")
 	path := fs.String("path", "", "explicit Codex session JSONL path")
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
@@ -206,13 +207,14 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		}
 		if *syncIssues {
 			return runCodexLoopSyncIssues(stdout, stderr, r, *asJSON, codexLoopIssueOptions{
-				Live:          *issueLive,
-				FetchExisting: *issueFetchExisting,
-				Repo:          strings.TrimSpace(*issueRepo),
-				Milestone:     strings.TrimSpace(*issueMilestone),
-				ExistingJSON:  strings.TrimSpace(*issueExistingJSON),
-				Limit:         *issueLimit,
-				Labels:        []string(issueLabels),
+				Live:            *issueLive,
+				FetchExisting:   *issueFetchExisting,
+				Repo:            strings.TrimSpace(*issueRepo),
+				Milestone:       strings.TrimSpace(*issueMilestone),
+				ExistingJSON:    strings.TrimSpace(*issueExistingJSON),
+				Limit:           *issueLimit,
+				Labels:          []string(issueLabels),
+				ProjectBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 			})
 		}
 		gateCode, ok := codexLoopFailOnRecentExitCode(r, *failOn)

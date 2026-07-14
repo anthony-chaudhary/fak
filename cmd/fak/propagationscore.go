@@ -76,6 +76,7 @@ func cmdPropagationDebtDispatch(argv []string) {
 func runPropagationDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak propagation-debt-dispatch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	project := addDogfoodProjectFlags(fs)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	capN := fs.Int("cap", 10, "maximum gaps to fan out into issues in one run")
 	repo := fs.String("repo", "", "owner/repo for gh; default is the current repo")
@@ -134,9 +135,10 @@ func runPropagationDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	buildOpt := dogfoodissues.BuildOptions{
-		Live:          *live,
-		DedupeChecked: *existingJSON != "" || *fetchExisting || *live,
-		DedupeCap:     *capN,
+		Live:           *live,
+		DedupeChecked:  *existingJSON != "" || *fetchExisting || *live,
+		DedupeCap:      *capN,
+		ParentBaseline: project.baseline(), CompletionStandard: *project.standard, TargetEnvelope: *project.target, WitnessedEnvelope: *project.witnessed,
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, buildOpt)
 	cohort := dogfoodissues.CohortPlan(items, buildOpt)
