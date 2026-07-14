@@ -95,6 +95,14 @@ type Event struct {
 	// uncorrelated-events gap is about.
 	Via string `json:"via,omitempty"`
 
+	// spawn only (optional): the CallID of the tool call that spawned this one —
+	// the additive parent-call edge that turns the flat journal into a run tree
+	// (#4332). Same additive shape as Via above: empty means top-level (no known
+	// parent), preserving the pre-edge behavior byte-for-byte for existing
+	// journals. The fold threads it onto Proc; Table.Subtree walks it to render a
+	// descendant tree (#2361) or size a lineage kill's blast radius (#2357).
+	ParentCallID string `json:"parent_call_id,omitempty"`
+
 	// spawn only (optional): how strongly this brokered launch is bound to a
 	// supervisable child. A brokered call that hands the supervisor a PID/cancel
 	// handle is "pid-bound" (full lifecycle coverage); one that journals a spawn
@@ -171,6 +179,12 @@ type Proc struct {
 	Session string `json:"session,omitempty"`
 	State   State  `json:"state"`
 
+	// ParentCallID is the CallID of the spawning tool call, folded from the
+	// spawn row's additive parent edge (#4332). Empty = top-level. Table.Subtree
+	// walks these edges to yield a call's descendant procs — the substrate the
+	// obs pstree (#2361) and the lineage-kill cascade (#2357) build on.
+	ParentCallID string `json:"parent_call_id,omitempty"`
+
 	// Coverage classifies how strongly a brokered launch binds to a
 	// supervisable child (CoveragePIDBound | CoverageAdviceOnly), folded from
 	// the spawn row. Empty for hook-fed rows. An advice-only proc is honestly
@@ -246,6 +260,46 @@ type Table struct {
 // TableSchema stamps the fold output.
 const TableSchema = "fak.toolproc-table.v1"
 
+// Subtree returns the transitive descendant procs of callID — every proc whose
+// ParentCallID chain leads back to callID — in the table's own deterministic
+// order (StartMS then CallID). The root call itself is NOT included: the result
+// is its logical blast radius, the descendant set an obs pstree indents under it
+// (#2361) and a lineage kill must account for (#2357). A proc with an empty
+// ParentCallID is top-level and is never anyone's descendant. The walk is
+// cycle-safe (a visited set) even though ValidateEvent already forbids a
+// self-parent — a two-node parent cycle across separate spawns stays bounded.
+func (t Table) Subtree(callID string) []Proc {
+	if callID == "" {
+		return nil
+	}
+	children := map[string][]string{} // parent CallID -> child CallIDs, in table order
+	for _, p := range t.Procs {
+		if p.ParentCallID != "" {
+			children[p.ParentCallID] = append(children[p.ParentCallID], p.CallID)
+		}
+	}
+	inSub := map[string]bool{}
+	queue := []string{callID}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		for _, child := range children[parent] {
+			if inSub[child] || child == callID {
+				continue // already walked, or a cycle back to the root
+			}
+			inSub[child] = true
+			queue = append(queue, child)
+		}
+	}
+	var out []Proc
+	for _, p := range t.Procs { // emit in table order, not walk order
+		if inSub[p.CallID] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // maxEventLineBytes caps a single journal line for both the strict fold read
 // (ParseEvents) and the lenient compaction read (parseEventsLenient). Sharing
 // the bound keeps the two readers agreeing on which rows are oversized: a row
@@ -289,6 +343,9 @@ func ValidateEvent(ev Event) error {
 	if ev.Monitor && ev.Kind != EvSpawn {
 		return fmt.Errorf("event %q: monitor flag is spawn-only", ev.Kind)
 	}
+	if ev.ParentCallID != "" && ev.Kind != EvSpawn {
+		return fmt.Errorf("event %q: parent_call_id is spawn-only", ev.Kind)
+	}
 	switch ev.Kind {
 	case EvSpawn:
 		if ev.CallID == "" {
@@ -305,6 +362,9 @@ func ValidateEvent(ev Event) error {
 		}
 		if ev.Coverage != "" && ev.Coverage != CoveragePIDBound && ev.Coverage != CoverageAdviceOnly {
 			return fmt.Errorf("spawn %s: coverage must be %q|%q, got %q", ev.CallID, CoveragePIDBound, CoverageAdviceOnly, ev.Coverage)
+		}
+		if ev.ParentCallID == ev.CallID {
+			return fmt.Errorf("spawn %s: parent_call_id must not be the call itself (no self-parent cycle)", ev.CallID)
 		}
 	case EvPulse:
 		if ev.CallID == "" {
@@ -393,8 +453,10 @@ func Fold(events []Event, nowMS int64, cfg Config) (Table, error) {
 			procs[ev.CallID] = &proc{Proc: Proc{
 				CallID: ev.CallID, Tool: ev.Tool, Session: ev.Session,
 				State: StateRunning, StartMS: ev.AtMS, Coverage: ev.Coverage,
-				DeadlineMS: deadline, HeartbeatEveryMS: ev.HeartbeatEveryMS,
-				Monitor: ev.Monitor,
+				ParentCallID:     ev.ParentCallID,
+				DeadlineMS:       deadline,
+				HeartbeatEveryMS: ev.HeartbeatEveryMS,
+				Monitor:          ev.Monitor,
 			}}
 			order = append(order, ev.CallID)
 		case EvPulse:
