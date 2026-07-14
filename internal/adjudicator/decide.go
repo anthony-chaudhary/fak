@@ -1018,7 +1018,8 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// the real `rm` command word (exempting quoted text and `git rm`), and scans all
 			// of rm's argv flags for a recursive OR force option.
 			if isRmRfArgRule(pr) {
-				if present && commandHasRecursiveForcedDelete(val) {
+				ws, scratch := outOfTreeRoots()
+				if present && commandHasUnsafeRecursiveForcedDelete(val, ws, scratch) {
 					if pr.Advisory {
 						note(pr, "rm_rf recursive/forced delete")
 						continue

@@ -64,6 +64,14 @@ func isRmRfArgRule(pr *ArgPredicate) bool {
 // deletion via a different tool (`find -delete`, `shred`) — the last class was
 // never caught by the raw regex either, so it is no regression.
 func commandHasRecursiveForcedDelete(cmd string) bool {
+	return commandHasUnsafeRecursiveForcedDelete(cmd, "", nil)
+}
+
+// commandHasUnsafeRecursiveForcedDelete keeps the shipped fail-closed verdict
+// except when every recursive/forced delete target is a literal path strictly
+// below a declared scratchpad root. Workspace paths are deliberately NOT
+// exempt: recursive cleanup there can destroy real work even when it is in-tree.
+func commandHasUnsafeRecursiveForcedDelete(cmd, ws string, scratch []string) bool {
 	for _, src := range rceShellSources(cmd) {
 		for _, seg := range rceShellSegments(src) {
 			i := rmDeleteCommandWord(seg.argv)
@@ -72,17 +80,92 @@ func commandHasRecursiveForcedDelete(cmd string) bool {
 			}
 			switch rceProgramBasename(seg.argv[i]) {
 			case "rm":
-				if argvHasRecursiveOrForce(seg.argv[i+1:]) {
+				args := seg.argv[i+1:]
+				if argvHasRecursiveOrForce(args) && !rmDeleteTargetsInScratch(args, ws, scratch) {
 					return true
 				}
 			case strings.ToLower("Remove" + "-Item"):
-				if argvHasPowerShellRecursiveOrForce(seg.argv[i+1:]) {
+				args := seg.argv[i+1:]
+				if argvHasPowerShellRecursiveOrForce(args) && !psDeleteTargetsInScratch(args, ws, scratch) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+func rmDeleteTargetsInScratch(args []string, ws string, scratch []string) bool {
+	var targets []string
+	optionsDone := false
+	for _, arg := range args {
+		if !optionsDone && arg == "--" {
+			optionsDone = true
+			continue
+		}
+		if !optionsDone && strings.HasPrefix(arg, "-") {
+			continue
+		}
+		targets = append(targets, arg)
+	}
+	return deleteTargetsStrictlyInScratch(targets, ws, scratch)
+}
+
+func psDeleteTargetsInScratch(args []string, ws string, scratch []string) bool {
+	var targets []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		lower := strings.ToLower(arg)
+		switch lower {
+		case "-path", "-literalpath":
+			if i+1 >= len(args) {
+				return false
+			}
+			i++
+			targets = append(targets, args[i])
+		default:
+			if strings.HasPrefix(arg, "-") || strings.Contains(arg, ":") && strings.HasPrefix(lower, "-confirm:") {
+				continue
+			}
+			targets = append(targets, arg)
+		}
+	}
+	return deleteTargetsStrictlyInScratch(targets, ws, scratch)
+}
+
+func deleteTargetsStrictlyInScratch(targets []string, ws string, scratch []string) bool {
+	if len(targets) == 0 || len(scratch) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		ct, ok := canonicalizeArgValue(target)
+		if !ok || ct == "" || strings.ContainsAny(ct, "$*?") {
+			return false
+		}
+		abs := ct
+		if !isAbsPath(abs) {
+			if ws == "" {
+				return false
+			}
+			abs = cleanRooted(ws + "/" + abs)
+		} else {
+			abs = cleanRooted(abs)
+		}
+		contained := false
+		for _, root := range scratch {
+			root = cleanRooted(root)
+			// Deleting the scratch root itself is too broad. The carve-out is for
+			// per-session children such as a throwaway clone directory.
+			if !strings.EqualFold(strings.TrimRight(abs, "/"), strings.TrimRight(root, "/")) && isUnder(abs, root) {
+				contained = true
+				break
+			}
+		}
+		if !contained {
+			return false
+		}
+	}
+	return true
 }
 
 // rmDeleteCommandWord resolves the effective command-word index of argv, first via

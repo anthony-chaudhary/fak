@@ -232,6 +232,12 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if n := guardApplyAllowOverlay(&rt, allowOverlay); n > 0 {
 		floorSource += fmt.Sprintf(" + operator allow overlay (%d extra tool(s); fak guard allow --list)", n)
 	}
+	// The adjudicator runs in this parent process. Declare the narrow Claude
+	// scratch tree here so structural write/delete gates can prove containment;
+	// never widen this default to the whole OS temp directory.
+	if strings.TrimSpace(os.Getenv("FAK_GUARD_SCRATCHPAD_ROOTS")) == "" {
+		_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", filepath.Join(os.TempDir(), "claude"))
+	}
 	policyDigest = guardPolicyDigest(policyBytes)
 	rt = protectGuardPolicyConfig(rt, overlayPath, policyPath)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
