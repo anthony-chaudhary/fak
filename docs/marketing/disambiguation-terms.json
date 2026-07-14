@@ -105,6 +105,69 @@
     },
     {
       "@type": "DefinedTerm",
+      "name": "managed agent runtime",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "A provider-operated application runtime that owns and executes an AI agent loop. In fak this is the emerging native path, fak serve --native; it is distinct from the mature fak serve AI-gateway path that governs model traffic.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "managed AI agent runtime, provider-managed agent, managed agent platform"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed AI agent",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "An AI agent whose loop is hosted and operated by an agent application runtime rather than driven entirely by the caller. fak's native runtime is real but emerging; the gateway runtime remains its mature default.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "hosted AI agent, provider hosted agent, fully managed AI agent"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "hosted agent runtime",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Runtime infrastructure that hosts the agent loop, model calls, and tool-call cycle. This names the application-runtime role, not an inference endpoint or a client SDK.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "hosted agent execution, AI agent hosting, agent execution runtime"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent execution",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "Execution of the model-and-tool loop inside a managed agent runtime, including the checkpoint where proposed tool effects cross the kernel boundary. It does not mean that the model provider automatically governs every tool effect.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "managed agent loop, agent execution platform, managed agent service"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "agent runtime vs AI gateway",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "An agent runtime owns the application loop; an AI gateway governs model traffic. fak exposes both roles from one binary as fak serve --native and fak serve, so the deployment question starts by naming which runtime is meant.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "AI gateway vs agent platform, agent runtime vs inference gateway, managed agent vs AI gateway"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "agent SDK vs managed runtime",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "An agent SDK is code used to build or call an agent; a managed runtime is the deployed service that executes its loop. fak can be embedded as a Go package or run as the native agent application runtime.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "agent SDK vs runtime, agent framework vs managed service, client SDK vs agent runtime"
+    },
+    {
+      "@type": "DefinedTerm",
+      "name": "managed agent infrastructure",
+      "termCode": "managed-agent",
+      "inLanguage": "en",
+      "description": "The runtime layer that operates agent loops and their model-and-tool execution path. For fak, the native managed-agent surface is emerging and should not be confused with the production-mature gateway and guard surfaces.",
+      "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md",
+      "keywords": "AI agent infrastructure, agent runtime infrastructure, managed agent stack"
+    },
+    {
+      "@type": "DefinedTerm",
       "name": "cost-aware model routing for agents",
       "termCode": "routing",
       "inLanguage": "en",
@@ -536,5 +599,5 @@
       "keywords": "self-host prompt cache, uzun oturum ucuz, KVKK"
     }
   ],
-  "dateModified": "2026-07-11T16:41:07Z"
+  "dateModified": "2026-07-14T20:06:50Z"
 }

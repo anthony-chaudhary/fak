@@ -211,6 +211,75 @@ func TestDisambiguationTermsIncludePerformanceLens(t *testing.T) {
 	}
 }
 
+func TestManagedAgentTermsCoverQueryClusterAndStayInScope(t *testing.T) {
+	terms := AEODisambiguationTerms()
+	var managed []DisambiguationTerm
+	for _, term := range terms {
+		if term.Category == "managed-agent" {
+			managed = append(managed, term)
+		}
+	}
+	if len(managed) < 7 {
+		t.Fatalf("managed-agent terms = %d, want at least 7", len(managed))
+	}
+
+	// Cover intent, comparison, and deployment phrasings rather than repeating
+	// one exact-match keyword. Each phrase is an operator query fak can answer.
+	blob := strings.ToLower(LlmsTermsText(time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)))
+	for _, want := range []string{
+		"managed agent runtime",
+		"managed ai agent",
+		"hosted agent runtime",
+		"managed agent execution",
+		"agent runtime vs ai gateway",
+		"agent sdk vs managed runtime",
+		"managed agent infrastructure",
+	} {
+		if !strings.Contains(blob, want) {
+			t.Errorf("managed-agent query cluster missing %q:\n%s", want, blob)
+		}
+	}
+
+	const runtimeExplainer = "docs/explainers/runtime-vs-client.md"
+	seenNames := map[string]bool{}
+	for _, term := range managed {
+		if term.Language != "en" {
+			t.Errorf("managed-agent term %q language = %q, want en", term.Name, term.Language)
+		}
+		if term.Name == "" || term.Description == "" || len(term.Keywords) < 3 {
+			t.Errorf("managed-agent term %#v is not a complete query hook", term)
+		}
+		if !strings.Contains(term.URL, runtimeExplainer) {
+			t.Errorf("managed-agent term %q routes to %q, want runtime explainer", term.Name, term.URL)
+		}
+		name := strings.ToLower(term.Name)
+		if seenNames[name] {
+			t.Errorf("duplicate managed-agent term name %q", term.Name)
+		}
+		seenNames[name] = true
+	}
+
+	// Honesty fence: the native managed-agent runtime is shipped but emerging;
+	// none of these hooks may blur it into fak's mature gateway default.
+	for _, want := range []string{"emerging", "gateway", "application runtime"} {
+		found := false
+		for _, term := range managed {
+			if strings.Contains(strings.ToLower(term.Description), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("managed-agent descriptions do not preserve %q scope", want)
+		}
+	}
+	for _, forbidden := range []string{"market leader", "widely adopted", "production-ready native"} {
+		if strings.Contains(blob, forbidden) {
+			t.Errorf("managed-agent roster makes unsupported claim %q", forbidden)
+		}
+	}
+}
+
 func TestLocalizedTermsRouteEveryI18nEntryPoint(t *testing.T) {
 	// Every shipped in-language entry point must be reachable from the AEO
 	// localized roster, and at least one localized term per language must route

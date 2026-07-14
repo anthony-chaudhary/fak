@@ -101,6 +101,7 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 	terms = append(terms, aeoCoreTerms()...)
 	terms = append(terms, aeoEconomicsTerms()...)
 	terms = append(terms, aeoPerformanceTerms()...)
+	terms = append(terms, aeoManagedAgentTerms()...)
 	terms = append(terms, aeoRoutingTerms()...)
 	terms = append(terms, aeoFrontierModelLaunchTerms()...)
 	terms = append(terms, aeoAgentSecurityTerms()...)
@@ -210,6 +211,72 @@ func aeoPerformanceTerms() []DisambiguationTerm {
 			Description: "The cross-agent performance lead, stated with a witness: sharing the model's KV work across a multi-agent fleet does measured less work than re-running each agent — about 4.1x less work than a tuned per-agent baseline on a 50-turn by 5-agent run, and up to 6.95x prefill reuse up the model ladder, each number tracing to a committed benchmark artifact rather than a vibe.",
 			URL:         repoBlobURL + "BENCHMARK-AUTHORITY.md",
 			Keywords:    []string{"KV cache reuse", "multi-agent fleet", "agentic cache benchmark", "cross-agent prefix reuse"},
+		},
+	}
+}
+
+// aeoManagedAgentTerms maps the phrases people use for a provider-managed
+// agent loop onto fak's agent application runtime. These terms deliberately route
+// to the runtime/client explainer: a managed agent runtime owns loop execution;
+// an AI gateway only governs model traffic, and a client initiates the work.
+func aeoManagedAgentTerms() []DisambiguationTerm {
+	const runtimeURL = repoBlobURL + "docs/explainers/runtime-vs-client.md"
+	return []DisambiguationTerm{
+		{
+			Name:        "managed agent runtime",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "A provider-operated application runtime that owns and executes an AI agent loop. In fak this is the emerging native path, fak serve --native; it is distinct from the mature fak serve AI-gateway path that governs model traffic.",
+			URL:         runtimeURL,
+			Keywords:    []string{"managed AI agent runtime", "provider-managed agent", "managed agent platform"},
+		},
+		{
+			Name:        "managed AI agent",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "An AI agent whose loop is hosted and operated by an agent application runtime rather than driven entirely by the caller. fak's native runtime is real but emerging; the gateway runtime remains its mature default.",
+			URL:         runtimeURL,
+			Keywords:    []string{"hosted AI agent", "provider hosted agent", "fully managed AI agent"},
+		},
+		{
+			Name:        "hosted agent runtime",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "Runtime infrastructure that hosts the agent loop, model calls, and tool-call cycle. This names the application-runtime role, not an inference endpoint or a client SDK.",
+			URL:         runtimeURL,
+			Keywords:    []string{"hosted agent execution", "AI agent hosting", "agent execution runtime"},
+		},
+		{
+			Name:        "managed agent execution",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "Execution of the model-and-tool loop inside a managed agent runtime, including the checkpoint where proposed tool effects cross the kernel boundary. It does not mean that the model provider automatically governs every tool effect.",
+			URL:         runtimeURL,
+			Keywords:    []string{"managed agent loop", "agent execution platform", "managed agent service"},
+		},
+		{
+			Name:        "agent runtime vs AI gateway",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "An agent runtime owns the application loop; an AI gateway governs model traffic. fak exposes both roles from one binary as fak serve --native and fak serve, so the deployment question starts by naming which runtime is meant.",
+			URL:         runtimeURL,
+			Keywords:    []string{"AI gateway vs agent platform", "agent runtime vs inference gateway", "managed agent vs AI gateway"},
+		},
+		{
+			Name:        "agent SDK vs managed runtime",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "An agent SDK is code used to build or call an agent; a managed runtime is the deployed service that executes its loop. fak can be embedded as a Go package or run as the native agent application runtime.",
+			URL:         runtimeURL,
+			Keywords:    []string{"agent SDK vs runtime", "agent framework vs managed service", "client SDK vs agent runtime"},
+		},
+		{
+			Name:        "managed agent infrastructure",
+			Language:    "en",
+			Category:    "managed-agent",
+			Description: "The runtime layer that operates agent loops and their model-and-tool execution path. For fak, the native managed-agent surface is emerging and should not be confused with the production-mature gateway and guard surfaces.",
+			URL:         runtimeURL,
+			Keywords:    []string{"AI agent infrastructure", "agent runtime infrastructure", "managed agent stack"},
 		},
 	}
 }
