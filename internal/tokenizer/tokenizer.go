@@ -417,42 +417,7 @@ func byteLevelEncode(s string) string {
 	return b.String()
 }
 
-func (t *Tokenizer) bpe(encoded string) ([]string, error) {
-	var syms []string
-	for _, r := range encoded {
-		syms = append(syms, string(r))
-	}
-	if len(syms) == 0 {
-		return nil, nil
-	}
-	for {
-		bestRank := len(t.mergeRank)
-		best := tokenPair{}
-		found := false
-		for i := 0; i+1 < len(syms); i++ {
-			pair := tokenPair{left: syms[i], right: syms[i+1]}
-			rank, ok := t.mergeRank[pair]
-			if ok && rank < bestRank {
-				bestRank = rank
-				best = pair
-				found = true
-			}
-		}
-		if !found {
-			return syms, nil
-		}
-		next := syms[:0]
-		for i := 0; i < len(syms); i++ {
-			if i+1 < len(syms) && syms[i] == best.left && syms[i+1] == best.right {
-				next = append(next, best.left+best.right)
-				i++
-				continue
-			}
-			next = append(next, syms[i])
-		}
-		syms = next
-	}
-}
+// bpe (the incremental merge-frontier implementation) lives in bpe_merge.go (#4263).
 
 // preTokenizeByteLevel implements the GPT-2 ByteLevel(+Digits) pre-tokenizer used
 // by SmolLM2 and bare-BPE fixtures: a leading space attaches only to a following
