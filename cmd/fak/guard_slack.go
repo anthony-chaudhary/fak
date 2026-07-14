@@ -56,10 +56,11 @@ func resolveGuardSessionsChannel() string {
 }
 
 func resolveGuardSessionsToken() string {
+	// Guard sessions are a dedicated delivery surface. A token that can post to the
+	// scoreboard is not evidence that its bot belongs to the guard-sessions channel;
+	// silently borrowing it produced a durable channel_not_found dead-letter storm.
+	// Require an explicitly provisioned token and let `fak slack check` report it absent.
 	if r := slackenv.Lookup(guardSessionsTokenEnv); r.Set() {
-		return strings.TrimSpace(r.Value)
-	}
-	if r := slackenv.Lookup(scoreboardTokenKey); r.Set() {
 		return strings.TrimSpace(r.Value)
 	}
 	return ""

@@ -84,7 +84,7 @@ var slackSurfaces = []slackSurface{
 	{"news", "external industry / SOTA / OSS research updates", "", "FAK_NEWS_CHANNEL", "", false},
 	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", nodeusagepost.ChannelDefault, false},
 	{"steering", "steering-guard surface", "", "FAK_STEERING_CHANNEL", steeringChannelDefault, false},
-	{"guard-sessions", "one root thread per fak guard session", guardSessionsTokenEnv, guardSessionsChannelEnv, guardSessionsChannelDefault, false},
+	{Name: "guard-sessions", Purpose: "one root thread per fak guard session", TokenEnv: guardSessionsTokenEnv, ChannelEnv: guardSessionsChannelEnv, ChannelDefault: guardSessionsChannelDefault},
 	{"chatrelay", "Slack <-> served-model chat bridge", "FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL", "", true},
 }
 
@@ -103,8 +103,10 @@ func (s slackSurface) token() resolvedField {
 			return resolvedField{r.Value, string(r.Source) + ":" + r.Key}
 		}
 	}
-	if r := slackenv.Lookup(scoreboardTokenKey); r.Set() {
-		return resolvedField{r.Value, "scoreboard-fallback (" + string(r.Source) + ":" + r.Key + ")"}
+	if s.Name != "guard-sessions" {
+		if r := slackenv.Lookup(scoreboardTokenKey); r.Set() {
+			return resolvedField{r.Value, "scoreboard-fallback (" + string(r.Source) + ":" + r.Key + ")"}
+		}
 	}
 	return resolvedField{}
 }
@@ -140,6 +142,12 @@ type channelAccessReport struct {
 }
 
 // surfaceReport is one row of `fak slack check`, JSON-serializable for --json.
+type deliveryReport struct {
+	Pending int    `json:"pending"`
+	Dead    int    `json:"dead"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 type surfaceReport struct {
 	Name          string               `json:"name"`
 	Purpose       string               `json:"purpose"`
@@ -148,8 +156,9 @@ type surfaceReport struct {
 	TokenSource   string               `json:"token_source,omitempty"`   //
 	Channel       string               `json:"channel,omitempty"`        //
 	ChannelSource string               `json:"channel_source,omitempty"` //
-	Ready         bool                 `json:"ready"`                    // token AND channel resolved
+	Ready         bool                 `json:"ready"`                    // token AND channel resolved and no durable delivery failure
 	Optional      bool                 `json:"optional,omitempty"`       // no dedicated channel yet — INCOMPLETE is expected, not a regression
+	Delivery      *deliveryReport      `json:"delivery,omitempty"`       // durable outbox health for this producing surface
 	Auth          *authReport          `json:"auth,omitempty"`           //
 	ChannelAccess *channelAccessReport `json:"channel_access,omitempty"` // conversations.history read-back witness (with --auth)
 	SignalNoise   slackmeta.Score      `json:"signal_noise"`             // S/N meta self-score
@@ -192,6 +201,7 @@ func runSlackCheck(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	reports := buildSurfaceReports()
+	applyOutboxDeliveryHealth(reports)
 	if *doAuth {
 		runAuthChecks(reports, *apiBase)
 		runChannelAccessChecks(reports, *apiBase)
@@ -211,6 +221,44 @@ func runSlackCheck(stdout, stderr io.Writer, argv []string) int {
 		renderSurfaceReports(stdout, reports, *doAuth)
 	}
 	return checkExit(reports, *doAuth)
+}
+
+// applyOutboxDeliveryHealth folds durable producer failures into readiness. A configured
+// token/channel is not READY while the outbox proves that this surface is dead-lettering.
+var slackCheckOpenOutbox = openOutbox
+
+func applyOutboxDeliveryHealth(reports []*surfaceReport) {
+	ob, err := slackCheckOpenOutbox()
+	if err != nil {
+		return
+	}
+	stats, err := ob.CallStats(time.Now())
+	if err != nil {
+		return
+	}
+	var pending, dead int
+	for _, source := range stats.Sources {
+		if source.Source == guardSessionThreadSource || strings.HasPrefix(source.Source, guardSessionThreadSource+":") {
+			pending += source.Pending
+			dead += source.Dead
+		}
+	}
+	if pending == 0 && dead == 0 {
+		return
+	}
+	for _, report := range reports {
+		if report.Name != "guard-sessions" {
+			continue
+		}
+		report.Delivery = &deliveryReport{Pending: pending, Dead: dead}
+		if dead > 0 {
+			report.Delivery.Reason = "OUTBOX_DEAD_LETTER"
+			report.Ready = false
+		} else if pending >= 3 {
+			report.Delivery.Reason = "OUTBOX_DELIVERY_STALLED"
+			report.Ready = false
+		}
+	}
 }
 
 // buildSurfaceReports resolves every surface offline (no network).
@@ -369,6 +417,11 @@ func classifyChannelAccessError(err error) *channelAccessReport {
 // checkExit returns 1 when --auth ran and a resolved token or configured channel failed its
 // live probe. An unset token/channel remains "incomplete", not "failed", and does not trip.
 func checkExit(reports []*surfaceReport, doAuth bool) int {
+	for _, r := range reports {
+		if r.Delivery != nil && r.Delivery.Reason != "" {
+			return 1
+		}
+	}
 	if !doAuth {
 		return 0
 	}

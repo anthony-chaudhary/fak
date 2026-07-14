@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
@@ -36,6 +38,11 @@ func clearSlackEnv(t *testing.T) {
 	}
 	// A temp cwd with no .env.slack.local removes the file fallback.
 	t.Chdir(t.TempDir())
+	originalOpen := slackCheckOpenOutbox
+	slackCheckOpenOutbox = func() (*slackoutbox.Outbox, error) {
+		return slackoutbox.Open(t.TempDir())
+	}
+	t.Cleanup(func() { slackCheckOpenOutbox = originalOpen })
 }
 
 func reportByName(reports []*surfaceReport, name string) *surfaceReport {
@@ -88,8 +95,8 @@ func TestBuildSurfaceReportsScoreboardFallback(t *testing.T) {
 	if guardSessions.Channel != guardSessionsChannelDefault || guardSessions.ChannelSource != "built-in default" {
 		t.Fatalf("guard-sessions should default to %s: %+v", guardSessionsChannelDefault, guardSessions)
 	}
-	if !guardSessions.TokenSet || !strings.Contains(guardSessions.TokenSource, "scoreboard-fallback") {
-		t.Fatalf("guard-sessions should fall back to the scoreboard token: %+v", guardSessions)
+	if guardSessions.TokenSet || guardSessions.Ready {
+		t.Fatalf("guard-sessions must require its dedicated channel-member token: %+v", guardSessions)
 	}
 }
 
@@ -295,6 +302,7 @@ func TestSlackCheckAuthOK(t *testing.T) {
 func TestSlackCheckAuthChannelNotFoundFailsReady(t *testing.T) {
 	clearSlackEnv(t)
 	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-ok")
+	t.Setenv(guardSessionsTokenEnv, "bottok-guard")
 	t.Setenv("FAK_GUARD_SESSIONS_CHANNEL", "CSTALE")
 	originalSurfaces := slackSurfaces
 	slackSurfaces = []slackSurface{{
@@ -384,5 +392,59 @@ func TestSlackCheckOfflineExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "S/N self-score") {
 		t.Fatalf("offline check should carry S/N metadata: %s", out.String())
+	}
+}
+
+type failingSlackWire struct{}
+
+func (failingSlackWire) PostMessageIdem(context.Context, string, string, []any, string, string) (string, error) {
+	return "", &slackwire.APIError{Method: "chat.postMessage", Status: 200, Code: "channel_not_found"}
+}
+func (failingSlackWire) UpdateMessage(context.Context, string, string, string, []any) error {
+	return &slackwire.APIError{Method: "chat.update", Status: 200, Code: "channel_not_found"}
+}
+func (failingSlackWire) History(context.Context, string, string, int) ([]slackwire.Message, error) {
+	return nil, nil
+}
+func (failingSlackWire) DeleteMessage(context.Context, string, string) error { return nil }
+
+func TestSlackCheckGuardSessionsDeadLettersFailReady(t *testing.T) {
+	clearSlackEnv(t)
+	t.Setenv(guardSessionsTokenEnv, "dedicated-token")
+	dir := t.TempDir()
+	t.Setenv(outboxDirEnv, dir)
+	ob, err := slackoutbox.Open(dir)
+	if err == nil {
+		slackCheckOpenOutbox = func() (*slackoutbox.Outbox, error) { return slackoutbox.Open(dir) }
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := ob.Enqueue(slackoutbox.Row{
+			Channel: guardSessionsChannelDefault,
+			Text:    "guard session root",
+			Source:  guardSessionThreadSource,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := ob.Drain(context.Background(), failingSlackWire{}, slackoutbox.DrainOpts{MaxAttempts: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out, errb bytes.Buffer
+	if code := runSlackCheck(&out, &errb, []string{"--json"}); code != 1 {
+		t.Fatalf("dead-lettering surface exit=%d want 1; stderr=%s out=%s", code, errb.String(), out.String())
+	}
+	var reports []*surfaceReport
+	if err := json.Unmarshal(out.Bytes(), &reports); err != nil {
+		t.Fatal(err)
+	}
+	guard := reportByName(reports, "guard-sessions")
+	if guard == nil || guard.Ready || guard.Delivery == nil || guard.Delivery.Dead != 3 || guard.Delivery.Reason != "OUTBOX_DEAD_LETTER" {
+		t.Fatalf("guard-sessions dead letters did not fail readiness: %+v", guard)
 	}
 }
