@@ -19,6 +19,15 @@
 // and registering them — it does not edit these cores.
 package quality
 
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"strings"
+)
+
 // CaseSchema is the versioned envelope tag for a quality case. Bumping the
 // trailing version is a breaking change to the case shape; readers reject an
 // unknown major so a stale corpus can never masquerade as current.
@@ -47,6 +56,70 @@ type QualityCase struct {
 	// Rubric configures the rubric scorer(s) for this case (grounding phrases,
 	// forbidden claims, threshold). Optional; empty means no rubric dimension.
 	Rubric RubricSpec `json:"rubric,omitempty"`
+	// Metadata pins the execution and baseline provenance required by canonical
+	// v1 corpus fixtures. LoadCase rejects a fixture when any required lineage,
+	// determinism, tier, or resource-cost field is absent.
+	Metadata CaseMetadata `json:"metadata,omitempty"`
+	Tags     []string     `json:"tags,omitempty"`
+}
+
+// CaseMetadata pins every external input needed to reproduce and route a case.
+type CaseMetadata struct {
+	Model     Revision       `json:"model"`
+	Tokenizer Revision       `json:"tokenizer"`
+	Engine    EngineSpec     `json:"engine"`
+	Code      Revision       `json:"code"`
+	Oracle    OracleEvidence `json:"oracle"`
+	Tolerance ToleranceSpec  `json:"tolerance"`
+	Baseline  BaselineSpec   `json:"baseline"`
+	Tier      TierSpec       `json:"tier"`
+	Cost      CostSpec       `json:"cost"`
+}
+
+// Revision identifies immutable model, tokenizer, or code/module content.
+type Revision struct {
+	Name     string `json:"name"`
+	Revision string `json:"revision"`
+}
+
+// EngineSpec identifies the implementation and backend plus replay-affecting flags.
+type EngineSpec struct {
+	Name    string            `json:"name"`
+	Backend string            `json:"backend"`
+	Flags   map[string]string `json:"flags,omitempty"`
+}
+
+// OracleEvidence describes deterministic evidence when a case is not seed-pinned.
+type OracleEvidence struct {
+	Kind     string `json:"kind"`
+	Revision string `json:"revision"`
+}
+
+// ToleranceSpec names the tolerance policy and its immutable source.
+type ToleranceSpec struct {
+	Metric   string  `json:"metric"`
+	Absolute float64 `json:"absolute,omitempty"`
+	Relative float64 `json:"relative,omitempty"`
+	Revision string  `json:"revision"`
+}
+
+// BaselineSpec pins the independently produced baseline artifact.
+type BaselineSpec struct {
+	ID       string `json:"id"`
+	Revision string `json:"revision"`
+}
+
+// TierSpec routes a case to exactly one validation cadence.
+type TierSpec struct {
+	Name string `json:"name"`
+}
+
+// CostSpec documents expected runtime and peak resource requirements.
+type CostSpec struct {
+	RuntimeSeconds int64 `json:"runtime_seconds"`
+	CPU            int   `json:"cpu"`
+	MemoryMiB      int64 `json:"memory_mib"`
+	Accelerators   int   `json:"accelerators,omitempty"`
 }
 
 // SamplingParams is the decode configuration a case is pinned to. It is part of
@@ -99,4 +172,73 @@ func (c QualityCase) Valid() (bool, string) {
 		return false, "case declares no oracles (a case that checks nothing is not green)"
 	}
 	return true, ""
+}
+
+// ValidateCanonical enforces the complete v1 corpus contract. Valid remains the
+// compatibility admission gate for cases constructed by older in-package helpers;
+// persisted fixtures enter through LoadCase and always receive this stricter check.
+func (c QualityCase) ValidateCanonical() error {
+	if ok, why := c.Valid(); !ok {
+		return fmt.Errorf("%s", why)
+	}
+	if c.Version != 1 {
+		return fmt.Errorf("version must be 1")
+	}
+	if strings.TrimSpace(c.Prompt) == "" {
+		return fmt.Errorf("prompt is empty")
+	}
+	if c.Params.MaxTokens <= 0 {
+		return fmt.Errorf("params.max_tokens must be positive")
+	}
+	m := c.Metadata
+	for name, rev := range map[string]Revision{"model": m.Model, "tokenizer": m.Tokenizer, "code": m.Code} {
+		if strings.TrimSpace(rev.Name) == "" || strings.TrimSpace(rev.Revision) == "" {
+			return fmt.Errorf("metadata.%s requires name and revision", name)
+		}
+	}
+	if strings.TrimSpace(m.Engine.Name) == "" || strings.TrimSpace(m.Engine.Backend) == "" || len(m.Engine.Flags) == 0 {
+		return fmt.Errorf("metadata.engine requires name, backend, and replay flags")
+	}
+	if c.Params.Seed == 0 && (strings.TrimSpace(m.Oracle.Kind) == "" || strings.TrimSpace(m.Oracle.Revision) == "") {
+		return fmt.Errorf("case requires a non-zero seed or metadata.oracle kind and revision")
+	}
+	if strings.TrimSpace(m.Tolerance.Metric) == "" || strings.TrimSpace(m.Tolerance.Revision) == "" {
+		return fmt.Errorf("metadata.tolerance requires metric and revision")
+	}
+	if math.IsNaN(m.Tolerance.Absolute) || math.IsNaN(m.Tolerance.Relative) || math.IsInf(m.Tolerance.Absolute, 0) || math.IsInf(m.Tolerance.Relative, 0) || m.Tolerance.Absolute < 0 || m.Tolerance.Relative < 0 {
+		return fmt.Errorf("metadata.tolerance values must be finite and non-negative")
+	}
+	if strings.TrimSpace(m.Baseline.ID) == "" || strings.TrimSpace(m.Baseline.Revision) == "" {
+		return fmt.Errorf("metadata.baseline requires id and revision")
+	}
+	switch m.Tier.Name {
+	case "pr", "nightly", "release":
+	default:
+		return fmt.Errorf("metadata.tier.name must be pr, nightly, or release")
+	}
+	if m.Cost.RuntimeSeconds <= 0 || m.Cost.CPU <= 0 || m.Cost.MemoryMiB <= 0 || m.Cost.Accelerators < 0 {
+		return fmt.Errorf("metadata.cost requires positive runtime_seconds, cpu, and memory_mib")
+	}
+	return nil
+}
+
+// LoadCase decodes one canonical v1 fixture, refusing unknown fields, trailing
+// documents, malformed provenance, and fixtures that cannot prove determinism.
+func LoadCase(data []byte) (QualityCase, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var c QualityCase
+	if err := dec.Decode(&c); err != nil {
+		return QualityCase{}, fmt.Errorf("decode quality case: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return QualityCase{}, fmt.Errorf("decode quality case: trailing document")
+		}
+		return QualityCase{}, fmt.Errorf("decode quality case: %w", err)
+	}
+	if err := c.ValidateCanonical(); err != nil {
+		return QualityCase{}, fmt.Errorf("invalid canonical case %q: %w", c.ID, err)
+	}
+	return c, nil
 }

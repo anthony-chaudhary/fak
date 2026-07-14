@@ -2,6 +2,7 @@ package quality
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -51,6 +52,7 @@ type FailureBundle struct {
 	Reference       Trace       `json:"reference"`
 	Engine          Trace       `json:"engine"`
 	Detail          string      `json:"detail"`
+	Scrubbed        bool        `json:"scrubbed"`
 }
 
 // Result is the stable machine-readable outcome of one quality run (#4519): a
@@ -75,6 +77,12 @@ type Result struct {
 func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 	if ok, why := c.Valid(); !ok {
 		return Result{}, fmt.Errorf("invalid case %q: %s", c.ID, why)
+	}
+	if len(oracles) == 0 {
+		return Result{}, fmt.Errorf("case %q has no executable oracle evidence", c.ID)
+	}
+	if ref == nil || eng == nil {
+		return Result{}, fmt.Errorf("case %q requires reference and engine runners", c.ID)
 	}
 	refTrace, err := ref.Run(c)
 	if err != nil {
@@ -117,7 +125,7 @@ func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 		},
 	}
 	if !pass && firstFail != nil {
-		res.FailureBundle = &FailureBundle{
+		res.FailureBundle = scrubFailureBundle(FailureBundle{
 			CaseID:          c.ID,
 			Case:            c,
 			FailingOracle:   firstFail.Oracle,
@@ -126,9 +134,37 @@ func RunCase(c QualityCase, ref, eng Runner, oracles []Oracle) (Result, error) {
 			Reference:       refTrace,
 			Engine:          engTrace,
 			Detail:          firstFail.Detail,
-		}
+		})
 	}
 	return res, nil
+}
+
+var replaySecret = regexp.MustCompile(`(?i)(api[_-]?key|authorization|token|password)\s*[:=]\s*[^\s,;]+`)
+
+func scrubFailureBundle(f FailureBundle) *FailureBundle {
+	redact := func(s string) string { return replaySecret.ReplaceAllString(s, "$1=[REDACTED]") }
+	f.Case.Prompt = redact(f.Case.Prompt)
+	f.Case.Reference.Text = redact(f.Case.Reference.Text)
+	for i := range f.Case.Reference.Tokens {
+		f.Case.Reference.Tokens[i] = redact(f.Case.Reference.Tokens[i])
+	}
+	f.Reference.Text = redact(f.Reference.Text)
+	f.Engine.Text = redact(f.Engine.Text)
+	for i := range f.Reference.Tokens {
+		f.Reference.Tokens[i] = redact(f.Reference.Tokens[i])
+	}
+	for i := range f.Engine.Tokens {
+		f.Engine.Tokens[i] = redact(f.Engine.Tokens[i])
+	}
+	f.Detail = redact(f.Detail)
+	if f.FirstDivergence != nil {
+		d := *f.FirstDivergence
+		d.Reference = redact(d.Reference)
+		d.Engine = redact(d.Engine)
+		f.FirstDivergence = &d
+	}
+	f.Scrubbed = true
+	return &f
 }
 
 func oracleNames(os []Oracle) []string {
