@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **92.7/100** (grade A) = 9.3/10 |
-| **Coverage** | **88.8%** (1780/2005 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **225** (clarity 0 + coverage 225) |
-| Crystal-clear concepts | 189 of 1543 positioned |
+| **Score** | **93.6/100** (grade A) = 9.4/10 |
+| **Coverage** | **90.2%** (1785/1979 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **194** (clarity 0 + coverage 194) |
+| Crystal-clear concepts | 196 of 1550 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,10 +24,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1543 concepts - score 92.7/100 (grade A) - disambiguation-debt 225
+concept-disambiguation chart - 1550 concepts - score 93.6/100 (grade A) - disambiguation-debt 194
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####........................ 189
+  * crystal       ####........................ 196
   o defined       ############################ 1354
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -42,7 +42,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***ooooooooooooooooooooooooooo (30 concept(s); 3 crystal)
   gateway-engine   ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (112 concept(s); 6 crystal)
-  guard-gate       ****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (196 concept(s); 40 crystal)
+  guard-gate       ***********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (203 concept(s); 47 crystal)
   layout           ***oooooooo        (11 concept(s); 3 crystal)
   loop             **************oooooooooooooooooooooo (36 concept(s); 14 crystal)
   plan             ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (216 concept(s); 15 crystal)
@@ -57,14 +57,13 @@ clarity mix by family (each cell = one concept):
   witness-proof    ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 18 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       #########################... 281/309
   session-runtime  ########################.... 156/182
   cache            #########################... 202/226
   render-materialize ########################.... 142/165
   context-ctx      ########################.... 154/176
-  plan             ##########################.. 270/289
-  policy-capability ########################.... 102/118
-  witness-proof    ########################.... 110/126
+  plan             ##########################.. 270/288
+  policy-capability ########################.... 102/117
+  witness-proof    #########################... 110/124
   gateway-engine   ##########################.. 150/162
   score-debt       ########################.... 68/78
   attention        #########################... 61/68
@@ -76,10 +75,11 @@ coverage by family (positioned / discovered):
   pool             ##########################.. 35/37
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
+  guard-gate       ############################ 286/286
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 88.8%  (1780/2005 confusable tokens positioned)
+namespace coverage  [#############################...] 90.2%  (1785/1979 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -176,6 +176,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | config | guard-gate | **FAK_ABLATE_PREFIX_GUARD (prefix-guard ablation knob)** - The FAK_ABLATE_PREFIX_GUARD env knob (internal/ablate, internal/gateway): when set, it DISABLES the cacheable-prefix stability guard so its value can be A/B measured by ablation. |
 | * | crystal | metric | guard-gate | **fak_prefix_guard metric family (prefix-stability witness)** - The fak_prefix_guard_* metric family (internal/gateway, observePrefixGuard): the determinism witness that measures whether the cacheable prompt prefix is actually stable turn-to-turn. |
 | * | crystal | config | guard-gate | **FAK_PRESTAGED_PATH_GUARD (pre-staged bare-commit guard knob)** - The FAK_PRESTAGED_PATH_GUARD env opt-out (internal/hooks/gate_barecommitsweep.go): the git-hook gate family that refuses committing paths staged outside the sanctioned by-path flow; setting it to `off` disables the whole family. |
+| * | crystal | subsystem | guard-gate | **hwgate (hardware-gate guard rung)** - The guard rung that decides what to do when an agent stops for lack of local hardware, folding hwgatelint findings through the off|shadow|warn|enforce ladder. |
+| * | crystal | subsystem | guard-gate | **hwgatelint (hardware-gate lint sensor)** - The sensor package (internal/hwgatelint) that scans agent final-output text for local-hardware stop patterns and returns sanctioned-compute-node redirects. |
+| * | crystal | symbol | guard-gate | **StopGate (gateway completion-evidence gate)** - A gateway-level gate (internal/gateway) that checks declared completion evidence at a model-final boundary before allowing a stop to finalize. |
+| * | crystal | subsystem | guard-gate | **guard-stops (stop tally command)** - The fak guard-stops subcommand that folds the guard's stop-history ledger into a tally for the soak to promote read. |
+| * | crystal | symbol | guard-gate | **SweepGuard (attribution-aware WIP sweep guard)** - The gitgate rung (internal/gitgate/sweepguard.go) that classifies each dirty hunk a path-scoped git op would sweep as OWNED-by-self/OWNED-by-peer/SHARED/ORPHAN and refuses the irrecoverable ORPHAN case. |
+| * | crystal | concept | guard-gate | **OPERATOR_GATE (refusal-reason category)** - A closed-vocabulary refusal-reason CATEGORY that routes a stop to the operator instead of auto-replanning (RELAY_NO_PROGRESS, RELAY_PARKED_UNSAFE, UNTIERED_LEAF). |
+| * | crystal | symbol | guard-gate | **guardStopDisposition (stop-outcome vocabulary)** - The closed set of typed terminal outcomes the guard stop hook can produce (hardware_gate_continue, hardware_gate_warn, hardware_gate_shadow, operator_directed, etc.). |
 | * | crystal | subsystem | guard-gate | **guardaccuracy (guard-classifier accuracy corpus)** - The internal/guardaccuracy package: a labeled command corpus (testdata/corpus.json, schema fak-guard-accuracy-corpus/1) that measures the guard reversibility preview classifier's accuracy. Each row pairs a (tool, args) command with the reversibility class the guard MUST assign, so a benign row escalated counts as a false positive and a dangerous row left reversible as a false negative; the corpus is grown as a ratchet - every wild misfire becomes a permanent row, never just a local test patch. |
 | * | crystal | subsystem | guard-gate | **guard (fak guard kernel)** - The kernel itself: the in-process adjudication system that runs the decision chain and admits results, launched as `fak guard`. |
 | * | crystal | concept | guard-gate | **gate (decision point)** - One decision point inside a guard, splitting by WHEN it fires: pre-call adjudicators, post-call result admitters, and git-hook gates. |
@@ -1647,15 +1654,15 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 26 top-level abstraction(s), 35 head(s) total, max depth 3 (105 concepts in the forest)
+concept-disambiguation roll-up: 28 top-level abstraction(s), 37 head(s) total, max depth 3 (111 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
 
      rolled       head         size debt  mix                  family / canonical
   !o defined     crystal        14    0  **oooooooooooo       score-debt / scorecard
+  !o defined     crystal        10    0  ********oo           guard-gate / gate (decision point)
   !o defined     crystal        10    0  ***ooooooo           session-runtime / Session
-  !o defined     crystal         9    0  *******oo            guard-gate / gate (decision point)
   !o defined     crystal         6    0  *ooooo               score-debt / scorecard control pane
   !o defined     crystal         6    0  *ooooo               context-ctx / CtxViewPlanner
   !o defined     crystal         6    0  *ooooo               plan / Plan (planner)
@@ -1676,18 +1683,20 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         5    0  *****                trajectory-control / trajectory control (trajctl)
    * crystal     crystal         4    0  ****                 cache / managed cache
    * crystal     crystal         4    0  ****                 cache / Prompt cache
+   * crystal     crystal         3    0  ***                  guard-gate / guard (fak guard kernel)
    * crystal     crystal         2    0  **                   context-ctx / compaction
+   * crystal     crystal         2    0  **                   guard-gate / gitgate (adjudicator)
    * crystal     crystal         2    0  **                   cache / Hardware-aware cache
    * crystal     crystal         2    0  **                   policy-capability / abi.Verdict
 
 abstraction overclaims (16) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: bench-dx-scorecard = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-turn = defined)
-  ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
-  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: scorecardpane-native-fold = defined)
-  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewevents = defined)
-  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-launchplan = defined)
-  ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: release-readiness-scorecard = defined)
+  ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: budget = defined)
+  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: total-debt = defined)
+  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewdropped = defined)
+  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-buildplanwithoptions = defined)
+  ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
   ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
@@ -1703,32 +1712,34 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | bench-dx-scorecard = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | session-turn = defined |
-| o! | **gate (decision point)** (`gate`) | defined | crystal | 9 | 0 | normgate = defined |
-| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | scorecardpane-native-fold = defined |
-| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewevents = defined |
-| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-launchplan = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | release-readiness-scorecard = defined |
+| o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | secretgate = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | budget = defined |
+| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | total-debt = defined |
+| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewdropped = defined |
+| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-buildplanwithoptions = defined |
 | o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
-| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | turn-mass = defined |
+| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | attention-accumulator = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
-| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-toolfeedback = defined |
+| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-denyall = defined |
 | o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | prove-recall = defined |
 | o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended-mass = defined |
-| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index-request = defined |
-| o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
+| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index = defined |
+| o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchange-apply = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
 | o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-iscontextflagname = defined |
-| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-control-plane = crystal |
+| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-placeanthropiccachebreakpointwithoutcome = defined |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-regime-gate = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | config-cachettl1h = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | prompt-cache = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-read = crystal |
+| * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | guard-kernel = crystal |
 | * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
+| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | sweepguard = crystal |
 | * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
-| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
+| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | verdict = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
 
@@ -1736,7 +1747,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 20 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 24 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1543 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1550 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1748,14 +1759,13 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 281 | 309 | 28 |
 | session-runtime | 156 | 182 | 26 |
 | cache | 202 | 226 | 24 |
 | render-materialize | 142 | 165 | 23 |
 | context-ctx | 154 | 176 | 22 |
-| plan | 270 | 289 | 19 |
-| policy-capability | 102 | 118 | 16 |
-| witness-proof | 110 | 126 | 16 |
+| plan | 270 | 288 | 18 |
+| policy-capability | 102 | 117 | 15 |
+| witness-proof | 110 | 124 | 14 |
 | gateway-engine | 150 | 162 | 12 |
 | score-debt | 68 | 78 | 10 |
 | attention | 61 | 68 | 7 |
@@ -1767,6 +1777,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | pool | 35 | 37 | 2 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
+| guard-gate | 286 | 286 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 

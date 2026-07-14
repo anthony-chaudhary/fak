@@ -300,6 +300,55 @@ Config / metric knobs on the prefix and pre-staged guards:
   sanctioned by-path flow. `=off` disables the whole FAMILY, distinct from
   **ALLOW_BARE_COMMIT**, which skips the check ONCE.
 
+### hardware-gate rung vs hardware-gate sensor
+
+- **hwgate** (`cmd/fak/guard_hardware_gate.go`) - the guard RUNG that decides what to
+  do when an agent stops for lack of local hardware, folding hwgatelint findings through
+  the off|shadow|warn|enforce ladder. A DECISION logic, NOT a scanner.
+- **hwgatelint** (`internal/hwgatelint`) - the SENSOR package that scans agent
+  final-output text for local-hardware stop patterns (NO_LOCAL_GPU / NO_LOCAL_RUNTIME /
+  LOCAL_BOUNDARY) and returns sanctioned-compute-node redirects. A TEXT SCANNER, NOT the
+  decision rung that folds its findings. The `fak hwgate-lint` CLI command is the
+  operator shell over this sensor.
+
+### gateway stop gate vs guard stop hook
+
+- **StopGate** (`internal/gateway/gateway.go`) - a GATEWAY-level gate that checks
+  declared completion evidence at a model-final boundary before allowing a stop to
+  finalize. It gates a MODEL's stop, not an agent's tool call. Distinct from the
+  **guard stop hook** (`x2-guard-gate-stophook`), which is the guard's post-turn stop
+  logic that produces stop dispositions.
+
+### guard-stops tally vs stop disposition vs stop hook
+
+Three closely named concepts in the guard's stop subsystem:
+
+- **guard-stops** (`fak guard-stops`) - the operator-facing TALLY COMMAND that folds the
+  guard's stop-history ledger into a summary for the soak to promote read. A TOOL, not a
+  type or a hook.
+- **guardStopDisposition** (`cmd/fak/guard_stops.go`) - the closed VOCABULARY of typed
+  terminal outcomes each stop carries (hardware_gate_continue, hardware_gate_warn,
+  hardware_gate_shadow, operator_directed, etc.). A TYPE, not a command or a hook.
+- **guard stop hook** (`x2-guard-gate-stophook`) - the HOOK that produces stops and
+  emits dispositions. A MECHANISM, not a command or a type.
+
+### sweep guard vs gitgate vs trunk guard
+
+- **SweepGuard** (`internal/gitgate/sweepguard.go`, `internal/wipattr/sweep.go`) - the
+  attribution-aware sweep guard that classifies each dirty hunk a path-scoped git op
+  would sweep as OWNED-by-self / OWNED-by-peer / SHARED / ORPHAN and refuses the
+  irrecoverable ORPHAN case. It makes gitgate's blunt shared-tree mutation refusal
+  PRECISE by consulting wipattr attribution. A specific GITGATE RUNG, not the general
+  gitgate adjudicator and not the branch-state trunk guard.
+
+### OPERATOR_GATE vs gate vs guardrail
+
+- **OPERATOR_GATE** - a closed-vocabulary refusal-reason CATEGORY that routes a stop to
+  the operator instead of auto-replanning (RELAY_NO_PROGRESS, RELAY_PARKED_UNSAFE,
+  UNTIERED_LEAF). A REASON CLASS, not a gate TYPE (a decision point) and not guardrail
+  (the safety-boundary concept). A gate DECIDES a call; OPERATOR_GATE CLASSIFIES a
+  refusal's routing.
+
 ---
 
 ## The witness / evidence family
