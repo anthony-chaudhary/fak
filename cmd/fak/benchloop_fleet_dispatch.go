@@ -188,7 +188,7 @@ func hasBenchNodeWitness(output string) bool {
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
 	if req.Benchmark == "model-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/modelbench -hf ~/models/smollm2-135m -quant -tokens 4 -warmup 1"
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/modelbench -hf ~/models/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
 	}
 	if req.Benchmark == "gpu-benchmark" {
 		if req.Machine == "gcp-g2-l4-32" {
