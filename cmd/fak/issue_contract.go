@@ -1097,6 +1097,11 @@ func renderIssueContract(r issueContractResult) string {
 			line += fmt.Sprintf(" scale=%s(%s)",
 				string(review.Scale.Effective), issueContractBucketValue(review.Scale.Source, "?"))
 		}
+		if review.OperatingEnvelope.Status != "" && review.OperatingEnvelope.Status != issuecontract.EnvelopeUndeclared {
+			line += fmt.Sprintf(" envelope=%s target=%d witnessed=%d gaps=%d",
+				review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Target),
+				len(review.OperatingEnvelope.Witnessed), len(review.OperatingEnvelope.Gaps))
+		}
 		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
@@ -1112,6 +1117,12 @@ func renderIssueContract(r issueContractResult) string {
 		}
 		for _, flag := range review.Scale.Flags {
 			lines = append(lines, "    scale_flag: "+flag)
+		}
+		for _, invalid := range review.OperatingEnvelope.Invalid {
+			lines = append(lines, "    envelope_invalid: "+invalid)
+		}
+		for _, gap := range review.OperatingEnvelope.Gaps {
+			lines = append(lines, fmt.Sprintf("    envelope_gap: %s: %s", gap.Dimension, gap.Reason))
 		}
 		for _, flag := range review.BornRouted.Flags {
 			lines = append(lines, "    born_routed_flag: "+flag)

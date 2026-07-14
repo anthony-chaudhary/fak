@@ -49,6 +49,9 @@ const (
 	ReasonModelTierIncomplete  = "ISSUE_MODEL_TIER_INCOMPLETE"
 	ReasonScaleUndeclared      = "ISSUE_SCALE_UNDECLARED"
 	ReasonWitnessScaleMismatch = "ISSUE_WITNESS_SCALE_MISMATCH"
+	ReasonTargetEnvelopeMissing = "ISSUE_TARGET_ENVELOPE_MISSING"
+	ReasonEnvelopeInvalid       = "ISSUE_OPERATING_ENVELOPE_INVALID"
+	ReasonEnvelopeUnderTarget   = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -138,7 +141,10 @@ type Candidate struct {
 	Priority       string          `json:"priority,omitempty"`
 	BoundaryNotes  []string        `json:"boundary_notes,omitempty"`
 	Private        bool            `json:"private,omitempty"`
-	ClosureBinding string          `json:"closure_binding,omitempty"`
+	ClosureBinding    string          `json:"closure_binding,omitempty"`
+	CompletionStandard string        `json:"completion_standard,omitempty"`
+	TargetEnvelope     string        `json:"target_operating_envelope,omitempty"`
+	WitnessedEnvelope  string        `json:"witnessed_operating_envelope,omitempty"`
 	// RequiredModelTier / OptimalModelTier are the body-field FALLBACK for an
 	// issue whose namespaced tier/T?-required|optimal labels are unavailable
 	// (the issue's own stated assumption). A namespaced label always wins over
@@ -232,7 +238,8 @@ type Review struct {
 	AgentContext    AgentContext    `json:"agent_context"`
 	GenerationFit   GenerationFit   `json:"generation_fit"`
 	ModelTier       ModelTier       `json:"model_tier"`
-	Scale           ScaleFit        `json:"scale"`
+	Scale             ScaleFit                 `json:"scale"`
+	OperatingEnvelope OperatingEnvelopeReadout `json:"operating_envelope"`
 	BornRouted      BornRouted      `json:"born_routed"`
 }
 
@@ -287,6 +294,17 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.StrictBornRouted && len(bornRoutedReadout.Flags) > 0 {
 		reasons.add(ReasonNotBornRouted)
 	}
+	envelopeReadout := operatingEnvelope(c)
+	if envelopeReadout.Required && len(envelopeReadout.Target) == 0 {
+		reasons.add(ReasonTargetEnvelopeMissing)
+	}
+	if len(envelopeReadout.Invalid) > 0 {
+		reasons.add(ReasonEnvelopeInvalid)
+	}
+	if len(envelopeReadout.Gaps) > 0 {
+		reasons.add(ReasonEnvelopeUnderTarget)
+	}
+
 	scaleReadout := scaleFit(c)
 	// A feature/epic/program-scale unit (S2+) is structurally not a dispatch leaf:
 	// it must decompose before a worker runs it. This is the same always-on gate as
@@ -330,7 +348,8 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		AgentContext:   agentContext,
 		GenerationFit:  generationFit,
 		ModelTier:      modelTier,
-		Scale:          scaleReadout,
+		Scale:             scaleReadout,
+		OperatingEnvelope: envelopeReadout,
 		BornRouted:     bornRoutedReadout,
 	}
 	out.OK = len(out.Reasons) == 0
@@ -644,7 +663,10 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		Dependencies:    ParseIssueDependencies(section("Dependencies", "Dependency markers")),
 		Labels:          issueDraftLabels(d.Labels),
 		BoundaryNotes:   issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
-		ClosureBinding:  section("Closure binding"),
+		ClosureBinding:     section("Closure binding"),
+		CompletionStandard: section("Completion standard"),
+		TargetEnvelope:     section("Target operating envelope", "Target envelope"),
+		WitnessedEnvelope:  section("Witnessed operating envelope", "Observed operating envelope", "Witnessed envelope"),
 		// Body fallback for the tier tags — used only when the namespaced
 		// tier/T?-required|optimal GitHub labels are absent (see modelTier).
 		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),
