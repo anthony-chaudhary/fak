@@ -1,0 +1,3 @@
+{"placement":"default","single_gbps":12.8,"allcore_gbps":33.1,"ncpu":256,"probe":"go-triad-f64-128Mi"}
+{"placement":"interleave","single_gbps":9.1,"allcore_gbps":89.5,"ncpu":256,"probe":"go-triad-f64-128Mi"}
+{"placement":"node0","single_gbps":15.5,"allcore_gbps":27.0,"ncpu":32,"probe":"go-triad-f64-128Mi"}

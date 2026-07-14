@@ -1,0 +1,8 @@
+{"cell":"base","placement":"default","int8":1,"workers":256,"decode_tok_s":0.5818,"first_token_id":248068,"wall_s":68.7486}
+{"cell":"il-def","placement":"interleave","int8":1,"workers":256,"decode_tok_s":0.6336,"first_token_id":248068,"wall_s":63.1320}
+{"cell":"il-w16","placement":"interleave","int8":1,"workers":16,"decode_tok_s":0.5762,"first_token_id":248068,"wall_s":69.4157}
+{"cell":"il-w32","placement":"interleave","int8":1,"workers":32,"decode_tok_s":0.9943,"first_token_id":248068,"wall_s":40.2281}
+{"cell":"il-w64","placement":"interleave","int8":1,"workers":64,"decode_tok_s":1.4075,"first_token_id":248068,"wall_s":28.4188}
+{"cell":"il-w128","placement":"interleave","int8":1,"workers":128,"decode_tok_s":1.3485,"first_token_id":248068,"wall_s":29.6628}
+{"cell":"node0-w32","placement":"node0-local","int8":1,"workers":32,"decode_tok_s":0.8302,"first_token_id":248068,"wall_s":48.1836}
+{"cell":"f32-il32","placement":"interleave","int8":0,"workers":32,"decode_tok_s":1.1881,"first_token_id":248068,"wall_s":33.6661}
