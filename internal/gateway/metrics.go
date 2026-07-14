@@ -162,6 +162,11 @@ type gatewayMetrics struct {
 	deferMu         sync.Mutex
 	deferFiredTurns uint64 // WITNESSED: turns where the cold tool tail was deferred
 	deferColdCount  uint64 // WITNESSED: total cold defs marked defer_loading across those turns
+	// deferColdNames is the DISTINCT set of custom tool names fak marked defer_loading across
+	// those turns (#3647) — the "which tools were deferred" the operator pane names. Held as a
+	// set so the deterministic per-turn defer of the same cold tail does not multiply-list a
+	// name; nil until the lever first fires.
+	deferColdNames map[string]struct{}
 
 	// toolRefMu guards the tool_reference SANITIZE accumulators (a correctness transform, not a
 	// cache saving): the client's INTERNAL `tool_reference` blocks — emitted inside a ToolSearch
@@ -242,7 +247,7 @@ type gatewayMetrics struct {
 
 	// upstreamErrMu guards the upstream-error visibility family: a count of proxy/planner
 	// turn FAILURES keyed by a KIND (stalled / unreachable / oom / rate_limited / auth /
-	// forbidden / status_4xx / status_5xx / other), so an operator can scrape WHY turns are
+	// forbidden / transport / status_4xx / status_5xx / other), so an operator can scrape WHY turns are
 	// failing — including telling a rate-limit storm apart from an auth-failure storm — not
 	// just that the route returned a 502/504. This is the metric twin of the per-turn `fak-turn … FAILED` debug
 	// line: the line is glanceable-per-turn, this is cumulative-per-session. Observational
@@ -507,6 +512,14 @@ func upstreamErrorKind(err error) string {
 		}
 		return "status_5xx"
 	}
+	// A TRANSIENT transport failure (mid-flight reset, truncated read, I/O timeout) that
+	// exhausted the planner's in-handler retry and surfaced to the wrapped agent. Split from
+	// the coarse "other" bucket so `fak guard`'s supervisor has a specific signal for a wire
+	// crash worth one bounded relaunch (#3514), distinct from the deterministic "unreachable"
+	// already handled above. Checked last so a typed status/stall/oom error always wins.
+	if transientTransportError(err) {
+		return "transport"
+	}
 	return "other"
 }
 
@@ -688,6 +701,10 @@ type AdjudicationSummary struct {
 	// Zero when the lever is off (its DEFAULT) or when a turn had no cold tools to defer.
 	DeferColdTurns uint64 `json:"defer_cold_turns"`
 	DeferColdCount uint64 `json:"defer_cold_count"`
+	// DeferColdToolNames is the DISTINCT set of custom tool names fak deferred across those
+	// turns (#3647) — surfaced so the operator pane can name WHICH tools were made cold, not
+	// just how many. Sorted for a stable render; empty/absent when the lever never fired.
+	DeferColdToolNames []string `json:"defer_cold_tool_names,omitempty"`
 
 	// ToolRefTurns / ToolRefConverted witness the tool_reference SANITIZE correctness transform:
 	// the client's INTERNAL tool_reference blocks (emitted inside a ToolSearch tool_result) are not
@@ -771,6 +788,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	// session keeps the JSON field absent (omitempty).
 	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
 	sum.DeferColdTurns, sum.DeferColdCount = m.toolDeferSnapshot()
+	sum.DeferColdToolNames = m.toolDeferNamesSnapshot()
 	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()

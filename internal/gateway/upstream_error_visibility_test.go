@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -93,6 +95,7 @@ func TestUpstreamErrorKind_ClassifiesEveryArm(t *testing.T) {
 		{"status_4xx", &agent.UpstreamStatusError{Status: 404}, "status_4xx"},
 		{"status_4xx_400", &agent.UpstreamStatusError{Status: 400}, "status_4xx"},
 		{"status_5xx", &agent.UpstreamStatusError{Status: 503}, "status_5xx"},
+		{"transport", &net.OpError{Op: "read", Err: syscall.ECONNRESET}, "transport"},
 		{"other", http.ErrHandlerTimeout, "other"},
 	}
 	for _, c := range cases {

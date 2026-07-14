@@ -640,6 +640,12 @@ type Config struct {
 	// or matches ZERO known tools, so a typo aborts startup rather than silently
 	// shrinking the surface to nothing. Set by `fak serve --expose`.
 	ExposeTools []string
+	// ExposeProfile is the operative expose-profile label ("headless" | "interactive")
+	// this session launched under, recorded verbatim so a gateway-usage provenance stamp
+	// can scope calibration to a known surface (a headless dispatch worker runs a pruned
+	// fak_* registry; an interactive child the full one). Purely descriptive — the actual
+	// pruning is driven by ExposeTools; empty is read back as "interactive" by the caller.
+	ExposeProfile string
 	// DeferMCPTools, when true, makes the fak MCP server's tools/list return only a
 	// small BOOTSTRAP set (the hot syscall/read/adjudicate core + the fak_tools_search
 	// entry) instead of the full ~24-tool registry, so the cold fak_* schemas are
@@ -1136,6 +1142,14 @@ type Server struct {
 	// See readiness_warmup.go.
 	warmup warmupGate
 
+	// startupDecode is the #3051-sibling boot fixed-prompt decode-coherence gate
+	// behind /healthz: SetStartupDecodeProbe records the host's deterministic probe
+	// output and classifyDecode folds a degenerate decode (empty/punctuation/repeated
+	// token) into an ok:false reason until the process restarts and re-probes. Zero
+	// value == not probed, so a proxy/mock serve that never calls it is unaffected.
+	// See readiness_decode.go.
+	startupDecode startupDecodeProbe
+
 	// routeWatcher is the model-routing manifest hot-reload seam behind POST
 	// /v1/fak/route/reload (#4003) — the SIGHUP-style manual twin of the background
 	// Watcher.Run poll loop. It is an atomic pointer because the host installs the
@@ -1446,6 +1460,10 @@ type Server struct {
 	// assumed session length when no bounded turn horizon is wired. Positive fires the shed
 	// early on a warm continuously-active long session; 0 keeps the conservative behavior.
 	assumeSessionTurns int
+
+	// exposeProfile mirrors Config.ExposeProfile: the descriptive surface label
+	// ("headless"|"interactive") a usage-provenance stamp reads back via ExposeProfile().
+	exposeProfile string
 
 	// elideResultBytes mirrors Config.ElideResultBytes: when > 0 the flagship Anthropic
 	// passthrough shrinks oversized tool_result bodies in the un-cached, non-recent middle to a
@@ -1764,6 +1782,7 @@ func New(cfg Config) (*Server, error) {
 		ctxExpenseGate:             cfg.CtxExpenseGate || envEnabled("FAK_CTX_EXPENSE_GATE"),
 		compactAnchorHead:          cfg.CompactAnchorHead,
 		assumeSessionTurns:         cfg.AssumeSessionTurns,
+		exposeProfile:              cfg.ExposeProfile,
 		elideResultBytes:           ablateUncachedTrimBytes(cfg.ElideResultBytes),
 		elideStaleReads:            cfg.ElideStaleReads,
 		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
@@ -2247,6 +2266,17 @@ func (s *Server) CompactHistoryBudget() int {
 		return 0
 	}
 	return s.compactHistoryBudget
+}
+
+// ExposeProfile returns the descriptive expose-profile label this session launched under
+// (Config.ExposeProfile; "" when unset), the sibling provenance knob to AssumeSessionTurns
+// and CompactHistoryBudget. Safe on a nil Server (returns ""); the caller normalizes an
+// empty value to "interactive".
+func (s *Server) ExposeProfile() string {
+	if s == nil {
+		return ""
+	}
+	return s.exposeProfile
 }
 
 // VCacheTurnsSnapshot returns a copy of the per-turn provider-cache window this session
@@ -3308,4 +3338,22 @@ func (s *Server) RotationEvidenceSnapshot() map[string]uint64 {
 		}
 	}
 	return out
+}
+
+// TransientWireErrorSnapshot returns the cumulative count of TRANSIENT upstream transport
+// failures observed this session (the "transport" upstream-error kind: a mid-flight
+// connection drop/reset, truncated read, or I/O timeout that exhausted the planner's
+// in-handler retry and surfaced to the wrapped agent). `fak guard`'s supervisor snapshots
+// this before a child starts and again after it exits: a positive delta is the evidence a
+// transient wire crash — not a systematic failure — drove a non-zero exit, so a single
+// bounded relaunch is warranted (#3514). Deterministic dial failures are intentionally
+// absent: those land in the "unreachable" kind and a relaunch would only re-trip them. A nil
+// server or metrics returns 0, so a caller may snapshot unconditionally.
+func (s *Server) TransientWireErrorSnapshot() uint64 {
+	if s == nil || s.metrics == nil {
+		return 0
+	}
+	s.metrics.upstreamErrMu.Lock()
+	defer s.metrics.upstreamErrMu.Unlock()
+	return s.metrics.upstreamErrors["transport"]
 }
