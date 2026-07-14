@@ -2,7 +2,10 @@
 
 package windowgate
 
-import "os/exec"
+import (
+	"errors"
+	"os/exec"
+)
 
 // ConfigureBackgroundCommand is a no-op off Windows. POSIX helpers do not create
 // Windows console windows, and callers keep their ordinary process semantics.
@@ -21,6 +24,26 @@ func (j *JobObject) Close() error { return nil }
 // Windows Job Object concern. POSIX callers keep their existing process-group
 // behavior, applied where they already spawn (dispatch process-group setup).
 func ConfigureWorkerCommand(_ *exec.Cmd) {}
+
+// StartInNewJob preserves the ordinary asynchronous exec lifecycle off Windows.
+// The nil job handle is safe to close after Wait.
+func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
+	if cmd == nil {
+		return nil, errors.New("windowgate: StartInNewJob requires a command")
+	}
+	return nil, cmd.Start()
+}
+
+// RunInNewJob is the cross-platform guard-child runner. Non-Windows platforms
+// use the ordinary exec lifecycle; Windows supplies job-object containment.
+func RunInNewJob(cmd *exec.Cmd) error {
+	job, err := StartInNewJob(cmd)
+	if err != nil {
+		return err
+	}
+	defer job.Close()
+	return cmd.Wait()
+}
 
 // AssignToNewJobObject is a no-op off Windows, returning a nil job and nil error.
 // There is nothing to reap via a job handle; POSIX teardown signals the group.

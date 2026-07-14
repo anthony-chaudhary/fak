@@ -1255,7 +1255,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		childStarted := time.Now()
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
-		runErr := child.Run()
+		runErr := windowgate.RunInNewJob(child)
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
 			continue
@@ -1339,13 +1339,19 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		maybeStartGuardChildHarnessTerminalRestorePulse(command)
 		childStarted := time.Now()
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
-		if err := child.Start(); err != nil {
-			// child.Start() failing IS a launch failure (the child never ran); spill the detail.
+		job, err := windowgate.StartInNewJob(child)
+		if err != nil {
+			// Start/containment failing IS a launch failure: either the child never ran, or
+			// StartInNewJob reaped it because the teardown invariant could not be armed.
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
-		go func() { wait <- child.Wait() }()
+		go func() {
+			runErr := child.Wait()
+			_ = job.Close()
+			wait <- runErr
+		}()
 		event := waitGuardChild(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {
 			return guardTimeBudgetExhausted(serveSessions, guardTraceID, now)
 		})

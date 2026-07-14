@@ -25,3 +25,12 @@ func TestWorkerJobShimIsNoopOffWindows(t *testing.T) {
 		t.Fatalf("nil JobObject.Close returned error: %v", err)
 	}
 }
+
+func TestRunInNewJobPreservesExitErrorOffWindows(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 7")
+	err := RunInNewJob(cmd)
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 7 {
+		t.Fatalf("RunInNewJob error = %T %v, want *exec.ExitError code 7", err, err)
+	}
+}

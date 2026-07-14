@@ -19,6 +19,11 @@ const CreateNoWindow = 0x08000000
 // (CTRL_BREAK_EVENT) reaches the whole tree instead of only the top process.
 const CreateNewProcessGroup = 0x00000200
 
+// createSuspended is CREATE_SUSPENDED. StartInNewJob uses it so no child code
+// can run (or fork an escaping descendant) between CreateProcess and assignment
+// to the job object. The primary thread is resumed only after assignment.
+const createSuspended = 0x00000004
+
 // jobObjectLimitKillOnJobClose is JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: when the
 // last handle to the job closes — normal owner exit OR abnormal teardown — every
 // process still assigned to the job is terminated in one syscall. This is the
@@ -32,8 +37,9 @@ const jobObjectExtendedLimitInformationClass = 9
 
 // Access rights AssignProcessToJobObject requires on the target process handle.
 const (
-	processTerminate = 0x0001
-	processSetQuota  = 0x0100
+	processTerminate    = 0x0001
+	processSetQuota     = 0x0100
+	threadSuspendResume = 0x0002
 )
 
 // Kept on syscall.NewLazyDLL rather than a typed wrapper so this package stays
@@ -44,7 +50,16 @@ var (
 	procCreateJobObjectW        = kernel32.NewProc("CreateJobObjectW")
 	procSetInformationJobObject = kernel32.NewProc("SetInformationJobObject")
 	procAssignProcessToJobObj   = kernel32.NewProc("AssignProcessToJobObject")
+	procOpenThread              = kernel32.NewProc("OpenThread")
+	procResumeThread            = kernel32.NewProc("ResumeThread")
+	procThread32First           = kernel32.NewProc("Thread32First")
+	procThread32Next            = kernel32.NewProc("Thread32Next")
 )
+
+// assignToNewJobObject is the one injectable syscall seam StartInNewJob uses.
+// Production always points at AssignToNewJobObject; tests replace it to prove
+// the fail-closed branch reaps a child that started but could not be contained.
+var assignToNewJobObject = AssignToNewJobObject
 
 // jobObjectBasicLimitInformation mirrors JOBOBJECT_BASIC_LIMIT_INFORMATION.
 // Field widths and order match the Win32 struct so the amd64 layout (with the
@@ -80,6 +95,19 @@ type jobObjectExtendedLimitInformation struct {
 	JobMemoryLimit        uintptr
 	PeakProcessMemoryUsed uintptr
 	PeakJobMemoryUsed     uintptr
+}
+
+// threadEntry32 mirrors THREADENTRY32 for the one suspended primary thread
+// StartInNewJob resumes after job assignment. This is the same Toolhelp seam the
+// Go runtime's Windows process tests use for CREATE_SUSPENDED children.
+type threadEntry32 struct {
+	Size           uint32
+	Usage          uint32
+	ThreadID       uint32
+	OwnerProcessID uint32
+	BasePri        int32
+	DeltaPri       int32
+	Flags          uint32
 }
 
 // JobObject owns a Windows Job Object created with KILL_ON_JOB_CLOSE. The owner
@@ -125,6 +153,91 @@ func ConfigureWorkerCommand(cmd *exec.Cmd) {
 	}
 	ConfigureBackgroundCommand(cmd)
 	cmd.SysProcAttr.CreationFlags |= CreateNewProcessGroup
+}
+
+// StartInNewJob starts cmd as the root of a KILL_ON_JOB_CLOSE job. The caller
+// owns the returned job until cmd.Wait completes. Windows closes that handle
+// even when the caller is force-terminated (for example when a Windows Terminal
+// tab is closed), so a stopped or otherwise non-cooperative child cannot outlive
+// its guard session.
+//
+// This intentionally does not call ConfigureWorkerCommand: guard children are
+// interactive and must retain their inherited terminal handles and window mode.
+func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
+	if cmd == nil {
+		return nil, errors.New("windowgate: StartInNewJob requires a command")
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= createSuspended
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	job, err := assignToNewJobObject(cmd)
+	if err != nil {
+		// Assignment is the teardown invariant. Do not leave an uncontained child
+		// running when that invariant cannot be established.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("windowgate: contain process tree: %w", err)
+	}
+	if err := resumeSuspendedProcess(cmd.Process.Pid); err != nil {
+		// A contained but permanently suspended child is just as broken as an
+		// uncontained one. Closing the job reaps the whole (still inert) tree.
+		_ = job.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("windowgate: resume contained process: %w", err)
+	}
+	return job, nil
+}
+
+// RunInNewJob is the synchronous StartInNewJob/Wait lifecycle. Keeping the
+// asynchronous start seam separate lets supervisors retain their select loop
+// without weakening the same job-object containment invariant.
+func RunInNewJob(cmd *exec.Cmd) error {
+	job, err := StartInNewJob(cmd)
+	if err != nil {
+		return err
+	}
+	defer job.Close()
+	return cmd.Wait()
+}
+
+func resumeSuspendedProcess(pid int) error {
+	if pid <= 0 {
+		return errors.New("invalid suspended process pid")
+	}
+	snapshot, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return fmt.Errorf("snapshot threads: %w", err)
+	}
+	defer syscall.CloseHandle(snapshot)
+
+	entry := threadEntry32{Size: uint32(unsafe.Sizeof(threadEntry32{}))}
+	ok, _, callErr := procThread32First.Call(uintptr(snapshot), uintptr(unsafe.Pointer(&entry)))
+	if ok == 0 {
+		return fmt.Errorf("Thread32First: %w", callErr)
+	}
+	for {
+		if entry.OwnerProcessID == uint32(pid) {
+			h, _, callErr := procOpenThread.Call(threadSuspendResume, 0, uintptr(entry.ThreadID))
+			if h == 0 {
+				return fmt.Errorf("OpenThread(%d): %w", entry.ThreadID, callErr)
+			}
+			defer syscall.CloseHandle(syscall.Handle(h))
+			previous, _, callErr := procResumeThread.Call(h)
+			if previous == 0xffffffff {
+				return fmt.Errorf("ResumeThread(%d): %w", entry.ThreadID, callErr)
+			}
+			return nil
+		}
+		ok, _, callErr = procThread32Next.Call(uintptr(snapshot), uintptr(unsafe.Pointer(&entry)))
+		if ok == 0 {
+			return fmt.Errorf("suspended process %d thread not found: %w", pid, callErr)
+		}
+	}
 }
 
 // AssignToNewJobObject creates a fresh Job Object with KILL_ON_JOB_CLOSE and
