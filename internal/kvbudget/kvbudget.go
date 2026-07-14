@@ -14,7 +14,7 @@
 //
 // Every number here reproduces the landed triage doc
 //
-//	docs/notes/GLM52-DGX2-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md
+//	docs/notes/GLM52-GPU-SERVER-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md
 //
 // which computes the {ctx, KV GiB/stream, max streams that fit} columns from
 // GLM-5.2's MLA + DeepSeek-Sparse-Attention (DSA) cache shape. Per its §3.1,

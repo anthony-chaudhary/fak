@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # glm52_fak_native_serve.sh - durable stage + build + serve of GLM-5.2 on an A100 (sm_80)
 # node via fak's OWN in-kernel engine (the PURE FAK KERNEL), not llama.cpp. It is the
-# pure-fak-kernel sibling of tools/glm52_stage_serve_dgx3.sh (which stands up the SAME
+# pure-fak-kernel sibling of tools/glm52_stage_serve_gpu_server.sh (which stands up the SAME
 # checkpoint under llama.cpp as the BENCHMARK baseline). Prefer THIS; keep llama.cpp for
 # the apples-to-apples comparison.
 #
@@ -35,7 +35,7 @@
 # the resident-Q4_K serve path is not yet cosine-witnessed. Default to UD-Q4_K_S here because
 # the mixed UD-Q4_K_M experts include Q5_K/Q6_K tensors that currently route through the slow
 # host k-quant seam; the pure-Q4_K expert path is the performant CUDA demo target. Run
-# tools/glm52_e2e_after_serve_dgx3.sh against this endpoint for the #413 evidence.
+# tools/glm52_e2e_after_serve_gpu_server.sh against this endpoint for the #413 evidence.
 #
 # Usage (RUN ON THE GPU HOST, detached so a disconnect does not orphan a large load):
 #   systemd-run --unit=glm52serve --collect bash tools/glm52_fak_native_serve.sh

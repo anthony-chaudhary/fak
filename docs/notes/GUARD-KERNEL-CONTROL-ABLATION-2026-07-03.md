@@ -129,7 +129,7 @@ the code:
 - **The sm_80 8-GPU class (8×80 GB = 640 GB aggregate)**: Q4_K_M weights fit aggregate VRAM with
   `--expert-parallel` / `--tensor-parallel` sharding; KV + activation headroom is
   tight and is itself a first datum (staging script exists:
-  `tools/glm52_stage_serve_dgx3.sh`, `tools/glm52_mgpu_serve.sh`,
+  `tools/glm52_stage_serve_gpu_server.sh`, `tools/glm52_mgpu_serve.sh`,
   `tools/dgx_pure_kernel_bench.sh`, sm_80).
 - **The sm_90+ 8-GPU class (8×141 GB = 1128 GB aggregate)**: fits with real headroom; also the
   lane for the K2 arm (`tools/glm52_sglang_vllm_serve.sh`) and the open

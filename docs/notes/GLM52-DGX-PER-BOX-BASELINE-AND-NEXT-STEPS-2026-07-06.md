@@ -57,7 +57,7 @@ Ranked by expected single-stream multiplier (see ceiling §5):
    llama.cpp baseline). → #1482.
 
 The #413 serving witness through fak against the live server-3 endpoint
-(`tools/glm52_e2e_after_serve_dgx3.sh`) is the natural end-to-end checkpoint on top of any lever.
+(`tools/glm52_e2e_after_serve_gpu_server.sh`) is the natural end-to-end checkpoint on top of any lever.
 
 ## GPU server 2 — 8×40 GiB/card (320 GiB) — GLM-5.2 does NOT fit resident
 

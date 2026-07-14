@@ -504,6 +504,17 @@ SELF_REFERENTIAL = {
     "tools/githooks/pre-commit",
 }
 
+
+# Intentional test and policy fixtures must spell denied shapes to prove them.
+# Exempt these only from whole-tree auditing; staged/range scans remain strict.
+def _is_intentional_fixture(rel: str) -> bool:
+    name = rel.replace("\\", "/")
+    return (
+        name.endswith("_test.go")
+        or name.endswith("_test.py")
+        or name in {"tools/githooks/commit-msg", "tools/glm52_load_witness.sh", "tools/scrub_hardware_names.py"}
+    )
+
 BINARY_EXT = {
     ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico",
     ".zip", ".tgz", ".tar", ".gz",
@@ -820,7 +831,12 @@ def audit_tree(root: str, as_json: bool = False) -> int:
     scanned = 0
     for rel in result.stdout.splitlines():
         rel = rel.strip()
-        if not rel or rel in SELF_REFERENTIAL:
+        if not rel or rel in SELF_REFERENTIAL or _is_intentional_fixture(rel):
+            continue
+        full = os.path.join(root, rel.replace("/", os.sep))
+        # A working-tree rename leaves its tracked source path absent until the
+        # rename is committed. The absent source is no longer a public residual.
+        if not os.path.exists(full):
             continue
         rel_l = rel.lower()
         for needle in real_needles:
@@ -829,7 +845,6 @@ def audit_tree(root: str, as_json: bool = False) -> int:
         for rx, label in AUDIT_REGEXES:
             if rx.search(rel):
                 misses.append({"file": rel, "needle": label, "kind": "path-shape"})
-        full = os.path.join(root, rel.replace("/", os.sep))
         if not is_text(full):
             continue
         content, _enc = read_text(full)

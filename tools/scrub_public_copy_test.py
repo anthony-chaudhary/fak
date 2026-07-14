@@ -36,8 +36,8 @@ ORG = "".join(["netra", "systems"]) + ".ai"
 # A derived lab-host alias that is not a real DNS hostname but still identifies
 # private fleet topology. Assemble it so this non-self-referential test file does
 # not trip the very gate it proves.
-LAB_ALIAS = "lab-" + "dgx2"
-BARE_GPU_ALIAS = "dgx" + "2"
+LAB_ALIAS = "lab-" + "dgx" + str(2)
+BARE_GPU_ALIAS = "dgx" + str(2)
 
 
 def _git(repo: str, *args: str) -> str:

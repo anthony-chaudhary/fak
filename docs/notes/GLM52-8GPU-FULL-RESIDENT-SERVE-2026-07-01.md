@@ -58,4 +58,4 @@ after verification; the small fak gateway process was left running.
 - Single-stream only; no concurrency sweep, no quality claim (UD-Q4_K_M dynamic 4-bit
   quant), ctx 8192. The 46 tok/s prompt-eval row is an 11-token prompt, not prefill
   at depth. The #413 serving witness against this endpoint is the natural next
-  checkable step (`tools/glm52_e2e_after_serve_dgx3.sh`).
+  checkable step (`tools/glm52_e2e_after_serve_gpu_server.sh`).

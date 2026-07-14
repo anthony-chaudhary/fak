@@ -22,7 +22,7 @@
 #                 the forward is bit-exact vs the CPU reference (cosine 1.0, witnessed on
 #                 sm_80). PREFERRED — fak runs the weights, not an external engine.
 #   * llamacpp  — the BENCHMARK baseline: the SAME checkpoint under llama.cpp MLA + CPU
-#                 expert-offload (tools/glm52_stage_serve_dgx3.sh, the DGX A100 example).
+#                 expert-offload (tools/glm52_stage_serve_gpu_server.sh, the DGX A100 example).
 #                 Stand it up to compare fak apples-to-apples. SERVE=llamacpp.
 #   * sglang|vllm — stock DSA engines, sm_90+ only (tools/glm52_sglang_vllm_serve.sh), gated
 #                 by tools/glm52_serve_preflight.py (fails CLOSED below sm_90). DEFAULT on
@@ -379,7 +379,7 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=HF_HUB_ENABLE_HF_TRANSFER=1 \\
   --setenv=HF_XET_HIGH_PERFORMANCE=1 \\
   --property=Restart=on-failure --property=RestartSec=15 \\
-  /usr/bin/env bash /opt/fak/tools/glm52_stage_serve_dgx3.sh
+  /usr/bin/env bash /opt/fak/tools/glm52_stage_serve_gpu_server.sh
 TAIL
 }
 

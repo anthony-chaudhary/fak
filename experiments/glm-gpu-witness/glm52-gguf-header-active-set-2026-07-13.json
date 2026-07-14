@@ -4,7 +4,7 @@
   "issue": 3074,
   "epic": 3073,
   "lane": "F",
-  "node": "DGX3 (internal 8x A100-80GB sm_80 datacenter node)",
+  "node": "datacenter GPU server (8x A100-80GB, sm_80)",
   "what_this_closes": "Lane F of epic #3073 rested on ONE unread GGUF-header scalar: glm_moe_dsa expert_used_count (K). The GPU-server roofline ESTIMATED active-params/token (~32B) and active-bytes/token (~13 GiB) and scales inversely with both. This witness reads the full GLM-5.2 header on a node with a shard resident, pins K=8 and every companion active-set scalar (expert_ffn_len, shared count, dense/MoE layer split, MLA ranks), and DERIVES the routed-expert active stream. It replaces the PENDING(K) in the Lane F note and the ceiling doc's active-set estimates with measured header truth.",
   "model": {
     "name": "GLM-5.2",

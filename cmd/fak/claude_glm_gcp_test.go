@@ -534,7 +534,7 @@ func TestClaudeGLMGCPA100LlamacppBenchmarkPlan(t *testing.T) {
 	// SERVE=llamacpp stands up the private GPU-server example (llama.cpp MLA) as the benchmark baseline.
 	for _, want := range []string{
 		"a2-ultragpu-8g",
-		"glm52_stage_serve_dgx3.sh",
+		"glm52_stage_serve_gpu_server.sh",
 		"BENCHMARK",
 	} {
 		requireContainsForClaudeGLMGCP(t, text, want)

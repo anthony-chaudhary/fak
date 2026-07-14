@@ -53,14 +53,14 @@ per-lane triage notes linked per row below.
 | **LF** | active-set from GGUF header | #3074 | server 2 (box-agnostic) | ceiling-truth | de-risks every ceiling; K=4 vs 8 moves target ~2× (COMPUTED) | **S** | ready | **1** | [Lane F](GLM52-LANE-F-ACTIVE-SET-FROM-GGUF-HEADER-2026-07-06.md) |
 | **L8** | warm-start + compile caches + bench harness | #3082/#3083/#3084 | both | iteration (kills ~500 s cold tax) | makes every lever <10 min/node (COMPUTED) | **M** | needs-wiring | **1** | [#3051](GLM52-READINESS-WARMUP-GATE-CONTRACT-3051-2026-07-06.md) · [#3052](GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md) · [cold-start](GLM52-COLD-START-VS-CACHING-ABLATION-2026-07-06.md) |
 | **L1** | 8-GPU tensor/row split (kill `-sm layer`) | #3075 | server 3 | A single-stream | **~3–6×** (23.2→~70–140) (COMPUTED) | **S**→M | needs-wiring | **2** | this doc §5 |
-| **L2** | continuous batching + KV budget | #3079/#3080 | server 3 | B aggregate | **10–40× aggregate** (→~9–11k @80%) (COMPUTED) | **M** | needs-wiring | **3** | [cont-batch](GLM52-DGX2-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md) · [KV budget](GLM52-DGX2-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md) |
-| **L4** | flash-attention + CUDA graphs | #3076 | server 3 | A single-stream | 1.2–1.8× (COMPUTED) | **S–M** | ready | **4** | [Lane A L4](GLM52-DGX3-LANEA-L4-FA-CUDAGRAPH-TRIAGE-2026-07-06.md) |
+| **L2** | continuous batching + KV budget | #3079/#3080 | server 3 | B aggregate | **10–40× aggregate** (→~9–11k @80%) (COMPUTED) | **M** | needs-wiring | **3** | [cont-batch](GLM52-GPU-SERVER-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md) · [KV budget](GLM52-GPU-SERVER-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md) |
+| **L4** | flash-attention + CUDA graphs | #3076 | server 3 | A single-stream | 1.2–1.8× (COMPUTED) | **S–M** | ready | **4** | [Lane A L4](GLM52-GPU-SERVER-LANEA-L4-FA-CUDAGRAPH-TRIAGE-2026-07-06.md) |
 | **L3** | speculative decoding (n-gram / draft) | #3078 | server 3 | A single-stream | 1.5–2.5× (acceptance-driven) (COMPUTED) | **M** | needs-wiring | **5** | this doc §5 |
 | **L9** | real prefill path (chunked + FA) | #3085/#3086 | server 3 | C prefill | stands up Ceiling C (~11–14k target) (COMPUTED) | **M** | needs-wiring | **6** | this doc §5 |
 | **L5** | decode quant sweep (Q4_K fast path) | #3077 | server 3 | A single-stream | 1.1–1.5× (COMPUTED) | **M** | ready | **7** | [L5 quant](GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md) |
 | **L6** | INT8 tensor-core expert GEMM | #3087 | server 3 | B aggregate | up to ~2× aggregate (ESTIMATED) | **L** | needs-wiring | **8** | this doc §5 |
 | **L10** | native fak resident-EP device-NCCL | #3089 / #1482 | server 3 | ceiling-truth | pure-fak kernel witness vs 23.2 baseline (ESTIMATED) | **M–L** | needs-wiring | **9** | [pure-fak gap](GLM52-PURE-FAK-BENCHMARK-GAP-2026-07-06.md) |
-| **L7** | true DSA sparsity (not full-MLA) | #3088 | server 3 | A/C long-ctx | ctx-dependent; ~1.0–1.1× @8k, material only 32k+ (ESTIMATED) | **M**(curve)/**L**(kernel) | needs-wiring | **10** | [Lane E L7](GLM52-DGX3-LANEE-L7-DSA-TRUE-SPARSE-TRIAGE-2026-07-06.md) · this doc §5 |
+| **L7** | true DSA sparsity (not full-MLA) | #3088 | server 3 | A/C long-ctx | ctx-dependent; ~1.0–1.1× @8k, material only 32k+ (ESTIMATED) | **M**(curve)/**L**(kernel) | needs-wiring | **10** | [Lane E L7](GLM52-GPU-SERVER-LANEE-L7-DSA-TRUE-SPARSE-TRIAGE-2026-07-06.md) · this doc §5 |
 
 ## 4. Prioritized dispatch order
 
@@ -150,7 +150,7 @@ Independent of L1 (compute-bound), so it can interleave once the endpoint is up;
 **Witness:**
 ```bash
 curl -sf -m8 http://127.0.0.1:8000/v1/models | grep -q glm-5.2 \
-  || CTX=8192 bash tools/glm52_stage_serve_dgx3.sh                  # EXISTING; waits GLM52_SERVE_READY
+  || CTX=8192 bash tools/glm52_stage_serve_gpu_server.sh                  # EXISTING; waits GLM52_SERVE_READY
 # #3085 baseline sweep — PROPOSED (new harness): TTFT = wall to first SSE token
 OUT=experiments/benchmark/runs/by-machine/gpu-server-3/glm52-prefill-sweep-$(date -u +%Y%m%dT%H%M%SZ)
 for N in 128 512 2048 4096 8192; do
@@ -162,7 +162,7 @@ for N in 128 512 2048 4096 8192; do
 done
 # #3086 A/B — PROPOSED: relaunch with  -fa  -ub 512  (sweep 256/512/1024) + a concurrent-decode stream
 ```
-**Blocker:** step-0 endpoint; `glm52_stage_serve_dgx3.sh` does not yet pass `-fa`/`-ub`.
+**Blocker:** step-0 endpoint; `glm52_stage_serve_gpu_server.sh` does not yet pass `-fa`/`-ub`.
 
 ### L6 — INT8 tensor-core expert GEMM (sm_80) · #3087 · server 3 · Lane B/E
 **Mechanism.** At concurrency the expert GEMMs become **compute-bound** (Ceiling B). sm_80 has no FP8; its
@@ -177,7 +177,7 @@ to help in until batching stands up).
 **Witness:**
 ```bash
 DEVICES=0,1,2,3,4,5,6,7 PORT=8000 bash tools/glm52_mgpu_serve.sh    # EXISTING resident bring-up
-bash tools/glm52_e2e_after_serve_dgx3.sh                            # EXISTING e2e witness (#413)
+bash tools/glm52_e2e_after_serve_gpu_server.sh                            # EXISTING e2e witness (#413)
 # PROPOSED fak-kernel A/B: FAK_INT8_EXPERTS off then on, fixed concurrency C, via the native EP path
 for INT8 in 0 1; do
   FAK_INT8_EXPERTS=$INT8 FAK_Q4K=1 RANKS=8 FIRST_GPU=0 PORT=8071 \

@@ -245,7 +245,7 @@ TIERS: tuple[AccelTier, ...] = (
             "Ampere (sm_80): BELOW the sm_90 DSA kernel floor, so stock SGLang/vLLM "
             "cannot serve GLM-5.2 here (vLLM #35021). The bring-up wires the "
             "llama.cpp MLA + CPU expert-offload path instead "
-            "(tools/glm52_stage_serve_dgx3.sh) -- the SAME 8x A100-80GB / 640 GB-VRAM "
+            "(tools/glm52_stage_serve_gpu_server.sh) -- the SAME 8x A100-80GB / 640 GB-VRAM "
             "shape as the DGX A100 example, with the ~466 GB unsloth UD-Q4_K_M "
             "experts offloaded to the 1,360 GB host RAM. The pragmatic 'A100 is what "
             "is actually available' GLM-5.2 serving tier. a2-ultragpu auto-attaches "

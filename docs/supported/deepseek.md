@@ -137,7 +137,7 @@ OpenAI server on `:8000`, health-checks `/models`, and prints the exact `fak ser
 > serves **V4-Flash** on sm_80 via CUDA V4-op kernels + a software-emulated FP8 path
 > — the same route that overcame the sm_90 wall for GLM-5.2 on A100. V4-Flash GGUFs
 > (≈103–162 GB) fit **resident** on 8×A100-80 GB. The turnkey harness is
-> [`tools/deepseekv4_stage_serve_dgx3.sh`](../../tools/deepseekv4_stage_serve_dgx3.sh).
+> [`tools/deepseekv4_stage_serve_gpu_server.sh`](../../tools/deepseekv4_stage_serve_gpu_server.sh).
 > This is the interim serve path; the fak-native V4 kernel is a separate track
 > ([#3016](https://github.com/anthony-chaudhary/fak/issues/3016)–[#3019](https://github.com/anthony-chaudhary/fak/issues/3019)).
 
