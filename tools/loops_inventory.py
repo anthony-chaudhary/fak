@@ -400,11 +400,11 @@ def _sort_key(rec: dict[str, Any]) -> tuple[Any, ...]:
 
 def summarize(loops: list[dict[str, Any]]) -> dict[str, Any]:
     """Roll the loop list into the headline counts the Slack card + doc lead with."""
-    tasks = [l for l in loops if l["surface"] == "scheduled-task"]
-    workflows = [l for l in loops if l["surface"] == "github-actions"]
+    tasks = [lp for lp in loops if lp["surface"] == "scheduled-task"]
+    workflows = [lp for lp in loops if lp["surface"] == "github-actions"]
     by_sink: dict[str, int] = {}
-    for l in loops:
-        by_sink[l["sink"]] = by_sink.get(l["sink"], 0) + 1
+    for lp in loops:
+        by_sink[lp["sink"]] = by_sink.get(lp["sink"], 0) + 1
     return {
         "total": len(loops),
         "tasks": len(tasks),
@@ -420,8 +420,8 @@ def summarize(loops: list[dict[str, Any]]) -> dict[str, Any]:
 # ----- renderers (pure) ------------------------------------------------------
 
 def _fastest(loops: list[dict[str, Any]], n: int = 4) -> list[dict[str, Any]]:
-    ranked = [l for l in loops if l.get("cadence_minutes") is not None]
-    ranked.sort(key=lambda l: l["cadence_minutes"])
+    ranked = [lp for lp in loops if lp.get("cadence_minutes") is not None]
+    ranked.sort(key=lambda lp: lp["cadence_minutes"])
     return ranked[:n]
 
 
@@ -443,27 +443,27 @@ def render_md(inv: dict[str, Any], now: str) -> str:
                f"issues, {s['repo']} → repo doc, {s['local']} → operator-local.")
     out.append("")
 
-    tasks = [l for l in loops if l["surface"] == "scheduled-task"]
+    tasks = [lp for lp in loops if lp["surface"] == "scheduled-task"]
     if tasks:
         out.append("## OS Scheduled Tasks (operator-local, Windows)")
         out.append("")
         out.append("| Task | Cadence | Reports to | Runs | Purpose | Source |")
         out.append("| --- | --- | --- | --- | --- | --- |")
-        for l in tasks:
-            out.append(f"| {l['name']} | {l['cadence']} | {l['sink']} | "
-                       f"{_md_cell(l['tick'])} | {_md_cell(l['purpose'])} | "
-                       f"`{l['source']}` |")
+        for lp in tasks:
+            out.append(f"| {lp['name']} | {lp['cadence']} | {lp['sink']} | "
+                       f"{_md_cell(lp['tick'])} | {_md_cell(lp['purpose'])} | "
+                       f"`{lp['source']}` |")
         out.append("")
 
-    workflows = [l for l in loops if l["surface"] == "github-actions"]
+    workflows = [lp for lp in loops if lp["surface"] == "github-actions"]
     if workflows:
         out.append("## GitHub Actions (cron)")
         out.append("")
         out.append("| Workflow | Cadence | Reports to | Purpose | Source |")
         out.append("| --- | --- | --- | --- | --- |")
-        for l in workflows:
-            out.append(f"| {l['name']} | {l['cadence']} | {l['sink']} | "
-                       f"{_md_cell(l['purpose'])} | `{l['source']}` |")
+        for lp in workflows:
+            out.append(f"| {lp['name']} | {lp['cadence']} | {lp['sink']} | "
+                       f"{_md_cell(lp['purpose'])} | `{lp['source']}` |")
         out.append("")
 
     out.append("_\"Reports to\" is inferred from each loop's declaration text; the Source "
@@ -486,7 +486,7 @@ def render_slack(inv: dict[str, Any], trend: str = "") -> str:
                  f"repo-doc {s['repo']} · local {s['local']}")
     fast = _fastest(inv["loops"])
     if fast:
-        parts = " · ".join(f"{l['name']} {l['cadence']}" for l in fast)
+        parts = " · ".join(f"{lp['name']} {lp['cadence']}" for lp in fast)
         lines.append("fastest: " + parts)
     if trend:
         lines.append(trend)

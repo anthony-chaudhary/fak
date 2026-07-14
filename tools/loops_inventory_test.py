@@ -360,7 +360,7 @@ class DiscoverTest(unittest.TestCase):
 
     def test_discovers_both_surfaces_and_skips_noise(self):
         inv = li.discover(str(self.root))
-        names = {l["name"] for l in inv["loops"]}
+        names = {lp["name"] for lp in inv["loops"]}
         self.assertEqual(names, {"FleetSlackStatus", "FleetDispatchStatusDoc", "Score signal"})
         self.assertEqual(inv["summary"]["tasks"], 2)
         self.assertEqual(inv["summary"]["workflows"], 1)
