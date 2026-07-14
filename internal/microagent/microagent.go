@@ -37,6 +37,7 @@ const (
 	EventReject EventKind = "reject" // spawn refused (bounded queue full)
 	EventDone   EventKind = "done"   // Step reported done
 	EventCancel EventKind = "cancel" // retired by Cancel/Close before done
+	EventRetry  EventKind = "retry"  // Step failed and its evidence was fed back
 	EventError  EventKind = "error"  // Step returned a non-cancel error
 )
 
@@ -79,6 +80,11 @@ type Config struct {
 	Sessions *session.Table
 	// Audit is the host's ONE audit sink. Default: a no-op sink.
 	Audit AuditSink
+	// MaxRetries enables evidence-grounded retries after a failed Step. Zero
+	// (the default) preserves the no-retry baseline. A retry is attempted only
+	// when the Microagent implements RetryFeedback, so a failure can never be
+	// retried blindly. The count is a hard per-agent ceiling.
+	MaxRetries int
 }
 
 // Defaults for Config zero values.
@@ -111,9 +117,10 @@ type job struct {
 // worker Step loop → retire (done / cancel / error) → Reap. Drain refuses new
 // spawns and waits for the fleet to finish; Close cancels everything.
 type Host struct {
-	gw       Gateway
-	sessions *session.Table
-	audit    AuditSink
+	gw         Gateway
+	sessions   *session.Table
+	audit      AuditSink
+	maxRetries int
 
 	queue chan *job
 
@@ -152,11 +159,12 @@ func NewHost(gw Gateway, cfg Config) (*Host, error) {
 		audit = nopSink{}
 	}
 	h := &Host{
-		gw:       gw,
-		sessions: sessions,
-		audit:    audit,
-		queue:    make(chan *job, queue),
-		live:     map[string]*job{},
+		gw:         gw,
+		sessions:   sessions,
+		audit:      audit,
+		maxRetries: max(0, cfg.MaxRetries),
+		queue:      make(chan *job, queue),
+		live:       map[string]*job{},
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	for i := 0; i < workers; i++ {
@@ -304,7 +312,8 @@ func (h *Host) worker() {
 // run drives ONE agent: Step through the shared gateway until done, error, or
 // cancel, re-checking the agent's context at every step boundary.
 func (h *Host) run(j *job) {
-	steps := 0
+	steps, retries := 0, 0
+	feedback, canRetry := j.m.(RetryFeedback)
 	for {
 		if j.ctx.Err() != nil {
 			h.retire(j, steps, false, j.ctx.Err())
@@ -313,6 +322,20 @@ func (h *Host) run(j *job) {
 		done, err := j.m.Step(j.ctx, h.gw)
 		steps++
 		switch {
+		case err != nil && j.ctx.Err() != nil:
+			h.retire(j, steps, false, j.ctx.Err())
+			return
+		case err != nil && canRetry && retries < h.maxRetries:
+			// The failed Step's actual error is the retry evidence. Feedback must
+			// accept it before another Step is allowed; this makes blind retry
+			// structurally impossible.
+			if feedbackErr := feedback.RetryFeedback(j.ctx, err); feedbackErr != nil {
+				h.retire(j, steps, false, errors.Join(err, feedbackErr))
+				return
+			}
+			retries++
+			h.audit.Record(Event{Agent: j.id, Kind: EventRetry, Steps: steps, Err: err.Error()})
+			continue
 		case err != nil:
 			h.retire(j, steps, false, err)
 			return
