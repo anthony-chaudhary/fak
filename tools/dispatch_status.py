@@ -556,6 +556,13 @@ def read_resolve_ticks(root: Path, *, now_ts: float | None = None,
             "lane": doc.get("lane"),
             "target_issue": doc.get("target_issue"),
             "reason": doc.get("reason"),
+            # #4589: stop dropping the three drain/plateau signals the producer
+            # stamps (issue_resolve_dispatch.py) — the seat ramp-cap binding term,
+            # the spawn-failure streak, and the spawn-failure cause — so the status
+            # card can re-surface WHY fan-out is pinned or spawns are failing.
+            "seat_adaptive": doc.get("seat_adaptive") or {},
+            "spawn_failed_streak": doc.get("spawn_failed_streak"),
+            "cause": doc.get("cause"),
             "contract_repair": doc.get("contract_repair") or {},
             "safe_lanes_busy": doc.get("safe_lanes_busy") or [],
             "self_modify_held": doc.get("self_modify_held") or [],
@@ -3663,6 +3670,21 @@ def render(p: dict[str, Any]) -> str:
             f"age={_age_text(latest_tick.get('age_min'))} next={next_action}")
         if latest_tick.get("live_command_text") and not preflight_blocker:
             lines.append(f"║ launch    : {latest_tick.get('live_command_text')}")
+        # #4589: re-surface the seat ramp-cap binding term + spawn-fail streak/cause
+        # the producer stamps but the card used to drop — so an operator sees WHY
+        # fan-out is pinned (a +N/tick ramp plateau) or spawns are failing (stale
+        # credential), without a source dive for --seat-ramp-delta.
+        sa = latest_tick.get("seat_adaptive") or {}
+        if sa.get("signal_available"):
+            lines.append(
+                f"║ seat cap  : adaptive {sa.get('effective_target')} "
+                f"(bound by {sa.get('binding')}, ramp +{sa.get('ramp_delta')}/tick; "
+                f"live {sa.get('live')} + free {sa.get('seat_free')}, "
+                f"ceiling {sa.get('hard_ceiling')})")
+        streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
+        if streak > 0:
+            cause_bit = f", cause={latest_tick.get('cause')}" if latest_tick.get("cause") else ""
+            lines.append(f"║ spawn-fail: streak {streak}{cause_bit} (#4589)")
     resolver_pre = p.get("resolver_preflight") or {}
     if resolver_pre.get("schema"):
         seat = resolver_pre.get("seat") or {}
@@ -3925,6 +3947,17 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             f"next `{latest_tick.get('next_action') or '-'}`")
         if latest_tick.get("live_command_text") and not preflight_blocker:
             out.append(f"- **approved live command**: `{latest_tick.get('live_command_text')}`")
+        # #4589: the seat ramp-cap binding + spawn-fail streak/cause the card used to drop.
+        sa = latest_tick.get("seat_adaptive") or {}
+        if sa.get("signal_available"):
+            out.append(
+                f"- **seat cap**: adaptive {sa.get('effective_target')} "
+                f"(bound by `{sa.get('binding')}`, ramp +{sa.get('ramp_delta')}/tick; "
+                f"live {sa.get('live')} + free {sa.get('seat_free')}, ceiling {sa.get('hard_ceiling')})")
+        streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
+        if streak > 0:
+            cause_bit = f", cause `{latest_tick.get('cause')}`" if latest_tick.get("cause") else ""
+            out.append(f"- **spawn-fail streak**: {streak}{cause_bit}")
     resolver_pre = payload.get("resolver_preflight") or {}
     resolver_pre_line = _resolver_preflight_summary(resolver_pre)
     if resolver_pre_line:

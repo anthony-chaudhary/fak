@@ -86,7 +86,10 @@ def cap_limiter(primary: str = "configured_max", term: str = "max_workers") -> d
 
 def resolver_tick(*, verdict: str = "WOULD_SPAWN", action: str = "would_spawn",
                   ready: bool | None = True, blocker: str | None = None,
-                  next_action: str = "", live: bool = False) -> dict:
+                  next_action: str = "", live: bool = False,
+                  seat_adaptive: dict | None = None,
+                  spawn_failed_streak: int | None = None,
+                  cause: str | None = None) -> dict:
     gate = {}
     if ready is not None:
         gate = {
@@ -113,6 +116,9 @@ def resolver_tick(*, verdict: str = "WOULD_SPAWN", action: str = "would_spawn",
         "next_action": next_action,
         "age_min": 1.0,
         "fresh": True,
+        "seat_adaptive": seat_adaptive or {},
+        "spawn_failed_streak": spawn_failed_streak,
+        "cause": cause,
     }
     if ready is True and action == "would_spawn":
         latest["live_command"] = [
@@ -300,6 +306,63 @@ class SpawnCauseCardTest(unittest.TestCase):
         self.assertTrue(p["spawn_causes"]["na"])
         self.assertFalse(p["spawn_causes"]["stale_cred_alarm"]["red"])
         self.assertTrue(p["ok"])
+
+
+class SeatAdaptiveTickCardTest(unittest.TestCase):
+    """#4589: read_resolve_ticks stops dropping seat_adaptive / spawn_failed_streak /
+    cause, and render()/render_md() surface the ramp cap + spawn-fail streak."""
+
+    def test_read_resolve_ticks_keeps_seat_adaptive_streak_and_cause(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td) / mod.RUNS_DIRNAME
+            runs.mkdir(parents=True)
+            (runs / "last-resolve-tick-claude.json").write_text(json.dumps({
+                "backend": "claude", "verdict": "WOULD_SPAWN", "lane": "docs",
+                "seat_adaptive": {"signal_available": True, "binding": "ramp_delta",
+                                  "ramp_delta": 2, "effective_target": 6},
+                "spawn_failed_streak": 3, "cause": "stale_cred",
+            }), encoding="utf-8")
+            out = mod.read_resolve_ticks(Path(td))
+        row = out["latest"]
+        self.assertEqual(row["seat_adaptive"]["binding"], "ramp_delta")
+        self.assertEqual(row["spawn_failed_streak"], 3)
+        self.assertEqual(row["cause"], "stale_cred")
+
+    def test_render_surfaces_ramp_cap_and_spawn_fail_streak(self) -> None:
+        mod = load()
+        ticks = resolver_tick(
+            seat_adaptive={"signal_available": True, "binding": "ramp_delta",
+                           "ramp_delta": 2, "effective_target": 6,
+                           "live": 4, "seat_free": 2, "hard_ceiling": 8},
+            spawn_failed_streak=3, cause="stale_cred")
+        p = build(mod, resolve_ticks=ticks)
+        card = mod.render(p)
+        self.assertIn("seat cap", card)
+        self.assertIn("bound by ramp_delta", card)
+        self.assertIn("ramp +2/tick", card)
+        self.assertIn("streak 3", card)
+        self.assertIn("cause=stale_cred", card)
+
+    def test_render_md_surfaces_ramp_cap_and_streak(self) -> None:
+        mod = load()
+        ticks = resolver_tick(
+            seat_adaptive={"signal_available": True, "binding": "ramp_delta",
+                           "ramp_delta": 2, "effective_target": 6,
+                           "live": 4, "seat_free": 2, "hard_ceiling": 8},
+            spawn_failed_streak=3, cause="stale_cred")
+        p = build(mod, resolve_ticks=ticks)
+        md = mod.render_md(p, date="2026-07-14")
+        self.assertIn("seat cap", md)
+        self.assertIn("spawn-fail streak", md)
+
+    def test_no_seat_adaptive_signal_emits_no_ramp_line(self) -> None:
+        mod = load()
+        # A tick with no adaptive signal and zero streak → neither line renders.
+        p = build(mod, resolve_ticks=resolver_tick())
+        card = mod.render(p)
+        self.assertNotIn("seat cap", card)
+        self.assertNotIn("spawn-fail: streak", card)
 
 
 class LimiterStatusTest(unittest.TestCase):
