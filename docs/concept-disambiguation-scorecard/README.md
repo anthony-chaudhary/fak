@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **95.8/100** (grade A) = 9.6/10 |
-| **Coverage** | **93.6%** (1831/1957 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **126** (clarity 0 + coverage 126) |
-| Crystal-clear concepts | 210 of 1605 positioned |
+| **Score** | **96.4/100** (grade A) = 9.6/10 |
+| **Coverage** | **94.5%** (1849/1956 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **107** (clarity 0 + coverage 107) |
+| Crystal-clear concepts | 210 of 1623 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,11 +24,11 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1605 concepts - score 95.8/100 (grade A) - disambiguation-debt 126
+concept-disambiguation chart - 1623 concepts - score 96.4/100 (grade A) - disambiguation-debt 107
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####........................ 210
-  o defined       ############################ 1395
+  o defined       ############################ 1413
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -36,7 +36,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ooooooooooooooooooooooooooooooooooooooooooooooooooooooo (55 concept(s); 0 crystal)
   cache            ****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (176 concept(s); 28 crystal)
-  context-ctx      *********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (140 concept(s); 9 crystal)
+  context-ctx      *********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 9 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****oooooooooooooooooo (22 concept(s); 4 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -57,7 +57,6 @@ clarity mix by family (each cell = one concept):
   witness-proof    ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 18 crystal)
 
 coverage by family (positioned / discovered):
-  context-ctx      #########################... 156/175
   plan             ##########################.. 270/289
   policy-capability ########################.... 99/114
   witness-proof    #########################... 110/125
@@ -72,6 +71,7 @@ coverage by family (positioned / discovered):
   layout           ######################...... 12/15
   pool             ##########################.. 35/37
   cache            ############################ 222/222
+  context-ctx      ############################ 174/174
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   render-materialize ############################ 162/162
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 93.6%  (1831/1957 confusable tokens positioned)
+namespace coverage  [##############################..] 94.5%  (1849/1956 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -596,6 +596,24 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | metric | context-ctx | **recall_value_witnessed (memvaluescore KPI)** - recall_value_witnessed is the internal/memvaluescore KPI key (Group "value") measuring whether a memory-store recall actually got used, witnessed rather than merely claimed. |
 | o | defined | symbol | context-ctx | **ResidentContextTokens** - ResidentContextTokens is the JSON field (on the gateway's outbound turn envelope and on session.Usage/session.Observation) carrying one turn's resident prompt/context token count - the debit applied against a session's context budget. |
 | o | defined | config | context-ctx | **maxCtxValueSessions** - maxCtxValueSessions is the internal/gateway constant (8192) bounding the per-session ctxValue table; on overflow the whole table takes a generational reset, mirroring maxCtxRestoreSessions for the restore stash. |
+| o | defined | subsystem | context-ctx | **compaction_ab (ablate A/B arm)** - compaction_ab.go (internal/ablate, #2805) is the LIVE compaction ON-vs-OFF A/B arm: a controlled split over MATCHED real guard sessions that reports the net dollar delta (shed saving MINUS the cache-creation burst compaction causes when it rewrites history), never gross shed. |
+| o | defined | symbol | context-ctx | **compaction_on_vs_off (AB arm id)** - compaction_on_vs_off is the internal/ablate CompactionABArmID string constant naming the sweep-row arm for the ON-vs-OFF net-of-burst dollar delta the compaction_ab file reports. |
+| o | defined | symbol | context-ctx | **CompactionReport (usage-ledger fold)** - CompactionReport is the internal/gatewayusageledger struct folding compaction-ledger rows into a (budget x length-band) segmentation over a --since window, carrying exit/quarantined row counts and per-segment shed totals for `fak cachevalue compaction`. |
+| o | defined | symbol | context-ctx | **FoldCompaction (usage-ledger)** - FoldCompaction is the internal/gatewayusageledger function that folds ledger rows into the (budget x length-band) CompactionReport segmentation over the whole --since window (FoldCompactionByPeriod with no time bucketing). |
+| o | defined | symbol | context-ctx | **CtxExpense (expense verdict)** - CtxExpense is the internal/gateway struct surfacing the per-session expense verdict beside the OBSERVED tokens in a CtxValueReport: a closed 3-level decision (ok/warn/block) graded on the ESTIMATED per-turn as-sent volume, never the observed resident count. |
+| o | defined | config | context-ctx | **ctxExpenseWarn (Server threshold)** - ctxExpenseWarn is the internal/gateway Server field holding the effective per-turn-as-sent-volume token threshold above which assessCtxExpense returns the warn tier (0 = the built-in 120k default; negative = that tier disabled). |
+| o | defined | config | context-ctx | **ctxExpenseBlock (Server threshold)** - ctxExpenseBlock is the internal/gateway Server field holding the effective per-turn-as-sent-volume token threshold above which assessCtxExpense returns the block tier (0 = the built-in 180k default; negative = that tier disabled). |
+| o | defined | symbol | context-ctx | **ctxExpenseNoteOnce (gate method)** - ctxExpenseNoteOnce is the internal/gateway Server method behind FAK_CTX_EXPENSE_GATE: the opt-in, once-per-session in-band [fak] advisory a block-tier expense verdict emits, telling the agent to checkpoint and end the turn - never refusing the request. |
+| o | defined | symbol | context-ctx | **ctxFootprintBytes (raw byte accumulator)** - ctxFootprintBytes is the internal/gateway per-trace accumulator's raw byte record of the latest inbound footprint: the exact, additive byte split (system + built-in tools + MCP tools + history + tail) that CtxValueFootprint renders into ESTIMATED tokens. |
+| o | defined | subsystem | context-ctx | **ctxrestore_store (generalized restore router)** - ctxrestore_store.go (internal/gateway, #3062) is the GENERALIZED restore-by-digest router: the adapter that lets a fak_context_restore call resolve bytes from any content-addressed ctxplan.Store, not just the compaction-tombstone stash in ctxrestore.go. |
+| o | defined | symbol | context-ctx | **OpContextRestore (read-op vocab)** - OpContextRestore is the internal/sessionread ReadOp enum value ('context-restore') naming the one full-disclosure read op: pages one dropped span back in by its content-address handle, honoring the ctxplan seal/tombstone trust gate. |
+| o | defined | symbol | context-ctx | **adviseCtxStep (step-advice policy)** - adviseCtxStep is the internal/gateway pure step-advice policy: a closed StepClass verdict (any/bounded/checkpoint/rebuild/unknown) graded on the rolling session's turns, context events, resident growth, and budget - advice-only, never enforced. |
+| o | defined | symbol | context-ctx | **CtxValueSnapshot (multi-session body)** - CtxValueSnapshot is the internal/gateway multi-session HTTP body: every tracked session's CtxValueReport rendered at once (optionally filtered to one trace), returned by the fleet-wide ctxvalue endpoint. |
+| o | defined | config | context-ctx | **DefaultContextCap (microagent)** - DefaultContextCap is the internal/microagent constant (8192) that NewContext(0) selects as the token ceiling for a mini-SWE-agent's bounded linear history - a usable starting default, not a model-specific window. |
+| o | defined | symbol | context-ctx | **NewContext (microagent constructor)** - NewContext is the internal/microagent constructor building an empty bounded linear-history Context whose FIFO history is capped at tokenCap tokens (DefaultContextCap when 0), enforced with the same tokenizer the guard boot path uses. |
+| o | defined | symbol | context-ctx | **NewCtxStore (recall adapter constructor)** - NewCtxStore is the internal/recall constructor wrapping a reloaded *Session as a ctxplan.Store - the first REAL store implementation the ctxplan planner views, so a sealed page reads as a Sealed Span and a tombstoned page as a Tombstoned one. |
+| o | defined | symbol | context-ctx | **principalFromContext (isolation principal)** - principalFromContext is the internal/gateway function returning the request-scoped isolation principal (or empty) from a Go context.Context - the per-principal boundary that scopes restore/spans reads to the caller's own trace. |
+| o | defined | config | context-ctx | **RequiredContext (capacity signal)** - RequiredContext is the internal/modelroute CapacitySignal field carrying the minimum context-window tokens a target model must offer to accept a reroute - the routing-side dual of context-window, checked against a target's usable context. |
 | o | defined | symbol | context-ctx | **SpeculationContext** - Transient state for brainstorm epochs: (Speculative, Epoch, ParentEpoch) marking provisional effects produced under speculation. |
 | o | defined | symbol | context-ctx | **ContextChangeRequest** - Negative-only context mutation request: one persisted recall-page tombstone with reason, requestor, and witness. |
 | o | defined | symbol | context-ctx | **RecallProof** - Self-describing proof of a recall cost calculation: shows the gate's work (PrefixTokens, UnitTokens, ReadMult, siblings, cost breakdown). |
@@ -1709,7 +1727,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 28 top-level abstraction(s), 37 head(s) total, max depth 3 (111 concepts in the forest)
+concept-disambiguation roll-up: 33 top-level abstraction(s), 42 head(s) total, max depth 3 (123 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
@@ -1722,6 +1740,7 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
   !o defined     crystal         6    0  *ooooo               context-ctx / CtxViewPlanner
   !o defined     crystal         6    0  *ooooo               plan / Plan (planner)
   !o defined     crystal         4    0  **oo                 cache / KV cache
+   o defined     defined         4    0  oooo                 context-ctx / CtxExpense (expense verdict)
    o defined     defined         3    0  ooo                  attention / AttentionAccumulator
   !o defined     crystal         3    0  **o                  policy-capability / capability floor
   !o defined     crystal         3    0  **o                  gateway-engine / engine
@@ -1733,7 +1752,11 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
   !o defined     crystal         2    0  *o                   loop / fak loop (loopmgr ledger + governor)
   !o defined     crystal         2    0  *o                   cache / vCache
   !o defined     crystal         2    0  *o                   witness-proof / WitnessResolver
+   o defined     defined         2    0  oo                   context-ctx / compaction_ab (ablate A/B arm)
+   o defined     defined         2    0  oo                   context-ctx / CompactionReport (usage-ledger fold)
    o defined     defined         2    0  oo                   context-ctx / ctxknobs (manual-overlay counter)
+   o defined     defined         2    0  oo                   context-ctx / CtxStore (recall's ctxplan.Store adapter)
+   o defined     defined         2    0  oo                   context-ctx / CtxValueReport
    o defined     defined         2    0  oo                   cache / anthropic_cachebp (offensive cache-breakpoint placement module)
    * crystal     crystal         5    0  *****                trajectory-control / trajectory control (trajctl)
    * crystal     crystal         4    0  ****                 cache / managed cache
@@ -1745,17 +1768,17 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   policy-capability / abi.Verdict
 
 abstraction overclaims (16) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: observability-scorecard = defined)
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: bench-dx-scorecard = defined)
   ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: new-session = defined)
-  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: grade-debt = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: budget = defined)
+  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: total-debt = defined)
   ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: ctxview = defined)
-  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-reviewcandidate = defined)
+  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-launchplan = defined)
   ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
+  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
-  ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: prove-recall = defined)
+  ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: recallproof = defined)
   ! loopmgr: abstraction declares 'crystal' but rolls up to 'defined' (weakest: default-loop-policy = defined)
   ! policy-manifest: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! turn: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-turn = defined)
@@ -1767,34 +1790,39 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | observability-scorecard = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | bench-dx-scorecard = defined |
 | o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | secretgate = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | new-session = defined |
-| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | grade-debt = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | budget = defined |
+| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | total-debt = defined |
 | o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | ctxview = defined |
-| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-reviewcandidate = defined |
-| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
-| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | turn-mass = defined |
+| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-launchplan = defined |
+| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
+| o | **CtxExpense (expense verdict)** (`x-context-ctx-ctxexpense`) | defined | defined | 4 | 0 | x-context-ctx-ctxexpenseblock = defined |
+| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | attention-accumulator = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
-| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-toolfeedback = defined |
-| o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | prove-recall = defined |
-| o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended-mass = defined |
-| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index = defined |
-| o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchange-apply = defined |
+| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-denyall = defined |
+| o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | recallproof = defined |
+| o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended = defined |
+| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index-request = defined |
+| o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
-| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
+| o | **compaction_ab (ablate A/B arm)** (`x-context-ctx-compactionab`) | defined | defined | 2 | 0 | x-context-ctx-compactionab = defined |
+| o | **CompactionReport (usage-ledger fold)** (`x-context-ctx-compactionreport`) | defined | defined | 2 | 0 | x-context-ctx-foldcompaction = defined |
+| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-iscontextflagname = defined |
+| o | **CtxStore (recall's ctxplan.Store adapter)** (`x-context-ctx-ctxstore`) | defined | defined | 2 | 0 | x-context-ctx-ctxstore = defined |
+| o | **CtxValueReport** (`x-context-ctx-ctxvaluereport`) | defined | defined | 2 | 0 | x-context-ctx-ctxvaluesnapshot = defined |
 | o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-regime-gate = crystal |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-detour-objective = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | managed-cache-posture = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-read = crystal |
-| * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | guard-kernel = crystal |
-| * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-creation-tokens = crystal |
+| * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
+| * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compactionview = crystal |
 | * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | sweepguard = crystal |
-| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
-| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | verdict = crystal |
+| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
+| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
 
@@ -1802,7 +1830,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 24 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1605 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1623 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1814,7 +1842,6 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| context-ctx | 156 | 175 | 19 |
 | plan | 270 | 289 | 19 |
 | policy-capability | 99 | 114 | 15 |
 | witness-proof | 110 | 125 | 15 |
@@ -1829,6 +1856,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | layout | 12 | 15 | 3 |
 | pool | 35 | 37 | 2 |
 | cache | 222 | 222 | 0 |
+| context-ctx | 174 | 174 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | render-materialize | 162 | 162 | 0 |

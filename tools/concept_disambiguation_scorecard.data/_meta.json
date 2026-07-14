@@ -98,9 +98,10 @@
       "name": "Context-management family",
       "roots": ["ctx", "context", "recall", "compaction"],
       "ignore": ["contexts", "recalling", "recalled",
-                 "context", "ctx", "cctx", "compactions", "recalls"],
+                 "context", "ctx", "cctx", "compactions", "recalls",
+                 "ctxsleep"],
       "min_files": 3,
-      "note": "context-MMU (gates result bytes) vs KV-MMU (evicts K/V spans) vs recall (the persisted core dump) vs compaction (provider prefix reuse) vs the ctx* planners."
+      "note": "context-MMU (gates result bytes) vs KV-MMU (evicts K/V spans) vs recall (the persisted core dump) vs compaction (provider prefix reuse) vs the ctx* planners. Ignored: ctxsleep is a Go context.Context sleep helper in slackwire/slackoutbox (429-retry pacing) - a false friend where 'ctx' means Go's context, not LLM context."
     },
     {
       "id": "score-debt",
