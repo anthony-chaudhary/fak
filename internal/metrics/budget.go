@@ -17,7 +17,10 @@
 // authorship, and a category missing its label fails the gate.
 package metrics
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // BudgetReadoutSchema stamps the JSON envelope so a reader can bind the shape.
 const BudgetReadoutSchema = "fak-task-budget-readout/1"
@@ -38,6 +41,25 @@ type BudgetSpend struct {
 	Turns uint64
 	// ToolCalls is the count of tool calls fak's kernel adjudicated for the task.
 	ToolCalls uint64
+	// ToolVerbs is the finer reads/edits/other split of those adjudicated calls,
+	// folded from the decision-journal Tool field (the gateway-usage ledger carries
+	// only the aggregate ToolCalls count, so this needs the per-tool journal sink —
+	// #3674). Zero value (Present=false) means no decision journal was read for the
+	// task; the readout then omits the split rather than reporting a witnessed zero.
+	ToolVerbs BudgetToolVerbs
+}
+
+// BudgetToolVerbs is the per-tool-verb reads/edits/other split of a task's
+// adjudicated tool calls, folded from the decision journal (journal.Row.Tool,
+// classified by ClassifyToolVerb). It is a WITNESSED signal — fak's kernel
+// authored every journal row at adjudication time. Present distinguishes "no
+// journal read" (omit the split) from a real all-zero journal, so a task with no
+// journal never surfaces a fabricated witnessed zero.
+type BudgetToolVerbs struct {
+	Present bool
+	Reads   uint64 // read-family calls (Read/Glob/Grep/…)
+	Edits   uint64 // edit-family calls (Edit/Write/…)
+	Other   uint64 // every other adjudicated call (Bash/…)
 }
 
 // BudgetTarget is the operator's SOFT target for the task. A zero field means
@@ -98,13 +120,40 @@ func foldAxis(spent, target uint64) BudgetAxis {
 	return a
 }
 
+// ClassifyToolVerb maps a decision-journal tool name to its budget bucket:
+// "reads", "edits", or "other". The match is case-insensitive and hint-based so
+// both the harness verb names (Read, Edit, Write, Bash) and the kernel/ABI names
+// (read_webpage, write_file, shell_command) land in the same bucket. Edit hints
+// are checked first (a name like NotebookEdit carries no read hint but must count
+// as an edit); anything unrecognized is "other" — a conservative default that
+// never inflates the reads/edits signal from a name fak does not know.
+func ClassifyToolVerb(tool string) string {
+	t := strings.ToLower(strings.TrimSpace(tool))
+	if t == "" {
+		return "other"
+	}
+	editHints := []string{"edit", "write", "patch", "create", "apply", "mutate", "delete", "remove"}
+	for _, h := range editHints {
+		if strings.Contains(t, h) {
+			return "edits"
+		}
+	}
+	readHints := []string{"read", "glob", "grep", "cat", "view", "search", "list", "fetch", "find"}
+	for _, h := range readHints {
+		if strings.Contains(t, h) {
+			return "reads"
+		}
+	}
+	return "other"
+}
+
 // FoldBudget is the PURE fold: a per-task spend snapshot + a soft target in, the
 // labeled readout out. Deterministic — no I/O, no clock, no wall-time read.
 // Token spend is input+output (cached prompt tokens are reported separately as a
 // saving, never added to spend). session labels which task the numbers belong to.
 func FoldBudget(session string, spend BudgetSpend, target BudgetTarget) BudgetReadout {
 	totalTokens := spend.InputTokens + spend.OutputTokens
-	return BudgetReadout{
+	r := BudgetReadout{
 		Schema:       BudgetReadoutSchema,
 		Session:      session,
 		Tokens:       foldAxis(totalTokens, target.Tokens),
@@ -122,8 +171,24 @@ func FoldBudget(session string, spend BudgetSpend, target BudgetTarget) BudgetRe
 			{Name: "tool_calls", Spent: spend.ToolCalls, Unit: "calls", Provenance: SpendWitnessed,
 				Note: "tool calls fak's kernel adjudicated this task"},
 		},
-		Note: "categories are the coarse model/turn/tool axes the gateway-usage ledger carries; a finer per-tool reads/edits split needs the decision-journal by-kind sink (follow-on)",
+		Note: "categories are the coarse model/turn/tool axes the gateway-usage ledger carries; a finer per-tool reads/edits split needs the decision-journal by-kind sink (pass --journal)",
 	}
+	// The finer per-tool split is present only when a decision journal was read for
+	// the task. Each bucket is WITNESSED — fak's kernel authored the journal rows at
+	// adjudication time — and folds into the same closed provenance vocabulary.
+	if spend.ToolVerbs.Present {
+		v := spend.ToolVerbs
+		r.Categories = append(r.Categories,
+			BudgetCategory{Name: "tool_reads", Spent: v.Reads, Unit: "calls", Provenance: SpendWitnessed,
+				Note: "read-family tool calls (Read/Glob/Grep/…) from the decision journal"},
+			BudgetCategory{Name: "tool_edits", Spent: v.Edits, Unit: "calls", Provenance: SpendWitnessed,
+				Note: "edit-family tool calls (Edit/Write/…) from the decision journal"},
+			BudgetCategory{Name: "tool_other", Spent: v.Other, Unit: "calls", Provenance: SpendWitnessed,
+				Note: "other tool calls (Bash/…) from the decision journal"},
+		)
+		r.Note = "token/turn/tool axes are folded from the gateway-usage ledger; the reads/edits/other split is folded from the decision journal (per-tool, WITNESSED)"
+	}
+	return r
 }
 
 // GateBudgetLabeled is the unlabeled-category gate, mirroring GateSpendLabeled:

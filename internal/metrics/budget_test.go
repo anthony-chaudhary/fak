@@ -104,6 +104,81 @@ func TestFoldBudgetNoTargetAndOver(t *testing.T) {
 	}
 }
 
+// TestClassifyToolVerb pins the reads/edits/other mapping for both harness verb
+// names (Read/Edit/Bash) and kernel/ABI names (read_webpage/write_file/
+// shell_command), and the conservative "other" default for an unknown name.
+func TestClassifyToolVerb(t *testing.T) {
+	cases := map[string]string{
+		"Read":          "reads",
+		"read":          "reads",
+		"Glob":          "reads",
+		"Grep":          "reads",
+		"read_webpage":  "reads",
+		"LS":            "other", // no read hint; unknown → other (conservative)
+		"Edit":          "edits",
+		"Write":         "edits",
+		"MultiEdit":     "edits",
+		"NotebookEdit":  "edits",
+		"write_file":    "edits",
+		"Bash":          "other",
+		"shell_command": "other",
+		"fetch_policy":  "reads",
+		"":              "other",
+		"  ":            "other",
+		"weird_tool":    "other",
+	}
+	for tool, want := range cases {
+		if got := ClassifyToolVerb(tool); got != want {
+			t.Errorf("ClassifyToolVerb(%q) = %q, want %q", tool, got, want)
+		}
+	}
+}
+
+// TestFoldBudgetToolVerbSplit is the #3674 done-condition witness at the fold
+// layer: when a decision journal was read (Present), the readout carries the
+// reads/edits/other split as three WITNESSED categories beside the coarse axes;
+// when absent, the split is omitted rather than fabricated as a witnessed zero.
+func TestFoldBudgetToolVerbSplit(t *testing.T) {
+	spend := BudgetSpend{
+		InputTokens: 10, OutputTokens: 20, Turns: 3, ToolCalls: 12,
+		ToolVerbs: BudgetToolVerbs{Present: true, Reads: 7, Edits: 3, Other: 2},
+	}
+	r := FoldBudget("s", spend, BudgetTarget{})
+
+	want := map[string]uint64{"tool_reads": 7, "tool_edits": 3, "tool_other": 2}
+	got := map[string]bool{}
+	for _, c := range r.Categories {
+		if exp, ok := want[c.Name]; ok {
+			got[c.Name] = true
+			if c.Spent != exp {
+				t.Errorf("category %q spent = %d, want %d", c.Name, c.Spent, exp)
+			}
+			if c.Provenance != SpendWitnessed {
+				t.Errorf("category %q provenance = %q, want WITNESSED", c.Name, c.Provenance)
+			}
+			if c.Unit != "calls" {
+				t.Errorf("category %q unit = %q, want calls", c.Name, c.Unit)
+			}
+		}
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("missing tool-verb category %q", name)
+		}
+	}
+	if defects := GateBudgetLabeled(r); len(defects) > 0 {
+		t.Errorf("GateBudgetLabeled failed a labeled split readout: %v", defects)
+	}
+
+	// Absent journal (Present=false) → no tool_* split categories fabricated.
+	bare := FoldBudget("s", BudgetSpend{ToolCalls: 12}, BudgetTarget{})
+	for _, c := range bare.Categories {
+		if c.Name == "tool_reads" || c.Name == "tool_edits" || c.Name == "tool_other" {
+			t.Errorf("split category %q present without a journal read", c.Name)
+		}
+	}
+}
+
 // TestGateBudgetCatchesUnlabeled proves the gate refuses a category with a
 // provenance outside the closed set — the honesty fence, not decoration.
 func TestGateBudgetCatchesUnlabeled(t *testing.T) {
