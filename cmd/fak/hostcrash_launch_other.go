@@ -20,5 +20,7 @@ func launchHostSessionPlatform(req hostresurrect.Request) (int, error) {
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
-	return cmd.Process.Pid, nil
+	pid := cmd.Process.Pid
+	go func() { _ = cmd.Wait() }()
+	return pid, nil
 }

@@ -36,6 +36,14 @@ func TestPlanReplacesStaleResumeHandle(t *testing.T) {
 	}
 }
 
+func TestPlanReplacesContinueWithExplicitResume(t *testing.T) {
+	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}
+	rows := []guardsessions.Row{{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--continue"}, ResumeHandle: "g"}}
+	got := Plan(sig, rows, nil, 1)
+	if len(got) != 1 || len(got[0].Command) != 3 || got[0].Command[1] != "--resume" || got[0].Command[2] != "g" {
+		t.Fatalf("Plan=%+v", got)
+	}
+}
 func TestRecentCountUsesRollingWindow(t *testing.T) {
 	now := time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC)
 	if got := RecentCount([]time.Time{now.Add(-299 * time.Second), now.Add(-301 * time.Second), now.Add(time.Second)}, now, 300*time.Second); got != 1 {

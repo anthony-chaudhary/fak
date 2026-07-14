@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestResurrectHostCrashSessionsHonorsGlobalLaunchRate(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "host.jsonl")
 	now := time.Now().UTC()
-	for i := 0; i < hostResurrectionWaveLimit; i++ {
+	for i := 0; i < hostresurrect.MaxLaunchesPerWindow; i++ {
 		if err := appendHostResurrectionReceipt(hostResurrectionReceiptPath(logPath), hostResurrectionReceipt{Schema: hostresurrect.Schema, Key: "old|" + string(rune('a'+i)), EventID: "old", Session: "s", LaunchedAt: now.Format(time.RFC3339Nano)}); err != nil {
 			t.Fatal(err)
 		}
@@ -58,5 +59,26 @@ func TestResurrectHostCrashSessionsHonorsGlobalLaunchRate(t *testing.T) {
 	got, err := resurrectHostCrashSessions(logPath, dir, []hostfault.HostCrashSignal{sig}, func(hostresurrect.Request) (int, error) { t.Fatal("launch called above cap"); return 0, nil }, now)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+func TestResurrectHostCrashSessionsFailedLaunchIsStillDeduped(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 14, 21, 0, 0, 0, time.UTC)
+	row := guardsessions.NewInteractiveRow("trace-fail", "claude", 1, dir, "", "", now, []string{"claude"})
+	if err := guardsessions.Record(dir, row); err != nil {
+		t.Fatal(err)
+	}
+	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-fail", Class: hostfault.HostCrashGeneric}
+	calls := 0
+	launcher := func(req hostresurrect.Request) (int, error) { calls++; return 0, errors.New("spawn failed") }
+	if _, err := resurrectHostCrashSessions(filepath.Join(dir, "host.jsonl"), dir, []hostfault.HostCrashSignal{sig}, launcher, now); err == nil {
+		t.Fatal("want launch error")
+	}
+	got, err := resurrectHostCrashSessions(filepath.Join(dir, "host.jsonl"), dir, []hostfault.HostCrashSignal{sig}, launcher, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 || calls != 1 {
+		t.Fatalf("retry relaunched reserved session: receipts=%+v calls=%d", got, calls)
 	}
 }

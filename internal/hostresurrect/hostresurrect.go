@@ -61,14 +61,18 @@ func resumeCommand(original []string, handle string) []string {
 	if len(original) == 0 || handle == "" {
 		return nil
 	}
-	command := append([]string(nil), original...)
-	for i, arg := range command {
-		if arg == "--resume" {
-			if i+1 < len(command) {
-				command[i+1] = handle
-				return command
+	command := make([]string, 0, len(original)+2)
+	for i := 0; i < len(original); i++ {
+		switch original[i] {
+		case "--resume":
+			if i+1 < len(original) {
+				i++
 			}
-			return append(command, handle)
+			continue
+		case "--continue", "-c":
+			continue
+		default:
+			command = append(command, original[i])
 		}
 	}
 	return append(command, "--resume", handle)

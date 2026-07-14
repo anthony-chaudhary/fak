@@ -21,7 +21,7 @@ func TestLaunchHostSessionPlatformQueuesBeforeInteractiveBroker(t *testing.T) {
 		return os.ErrNotExist
 	}
 	t.Cleanup(func() { runInteractiveBrokerTask = old })
-	req := hostresurrect.Request{Schema: hostresurrect.Schema, EventID: "evt", Session: "g1", CWD: `C:\work`, Command: []string{"claude"}, ResumeHandle: "g1"}
+	req := hostresurrect.Request{Schema: hostresurrect.Schema, EventID: "evt", Session: "g1", CWD: `C:\work`, Command: []string{"claude", "--resume", "g1"}, ResumeHandle: "g1"}
 	if _, err := launchHostSessionPlatform(req); err != nil {
 		t.Fatal(err)
 	}

@@ -15,11 +15,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
 )
 
-const (
-	hostResurrectionWaveLimit = 10
-	hostResurrectionWindow    = 5 * time.Minute
-)
-
 type hostResurrectionReceipt struct {
 	Schema     string `json:"schema"`
 	Key        string `json:"key"`
@@ -46,8 +41,16 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 		return nil, err
 	}
 	defer lock.Close()
-	if err := flock.TryLock(lock); err != nil {
-		return nil, fmt.Errorf("relaunch ledger lock: %w", err)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err = flock.TryLock(lock)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, flock.ErrLockBusy) || time.Now().After(deadline) {
+			return nil, fmt.Errorf("relaunch ledger lock: %w", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	defer flock.Unlock(lock) //nolint:errcheck
 
@@ -55,7 +58,7 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 	if err != nil {
 		return nil, err
 	}
-	remaining := hostResurrectionWaveLimit - hostresurrect.RecentCount(times, now, hostResurrectionWindow)
+	remaining := hostresurrect.MaxLaunchesPerWindow - hostresurrect.RecentCount(times, now, hostresurrect.LaunchWindow)
 	if remaining <= 0 {
 		return nil, nil
 	}
@@ -63,15 +66,19 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 	var written []hostResurrectionReceipt
 	for _, signal := range signals {
 		for _, req := range hostresurrect.Plan(signal, rows, seen, remaining) {
-			pid, err := launch(req)
-			if err != nil {
-				return written, fmt.Errorf("relaunch %s: %w", req.Session, err)
-			}
-			receipt := hostResurrectionReceipt{Schema: hostresurrect.Schema, Key: hostresurrect.Key(req.EventID, req.Session), EventID: req.EventID, Session: req.Session, LaunchedAt: now.UTC().Format(time.RFC3339Nano), PID: pid}
+			// Reserve before spawn, matching FleetResumeWatchdog's ledger-first rule:
+			// if this process crashes after Start, a repeated Event-Log poll cannot
+			// double-launch the same event/session pair.
+			receipt := hostResurrectionReceipt{Schema: hostresurrect.Schema, Key: hostresurrect.Key(req.EventID, req.Session), EventID: req.EventID, Session: req.Session, LaunchedAt: now.UTC().Format(time.RFC3339Nano)}
 			if err := appendHostResurrectionReceipt(path, receipt); err != nil {
 				return written, err
 			}
 			seen[receipt.Key] = true
+			pid, err := launch(req)
+			if err != nil {
+				return written, fmt.Errorf("relaunch %s: %w", req.Session, err)
+			}
+			receipt.PID = pid
 			written = append(written, receipt)
 			remaining--
 			if remaining == 0 {
