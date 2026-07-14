@@ -57,6 +57,9 @@ const (
 	ReasonWitnessForgeable      = "ISSUE_WITNESS_FORGEABLE"
 	ReasonProjectWorkMissing    = "ISSUE_PROJECT_WORK_MISSING"
 	ReasonProjectWorkInvalid    = "ISSUE_PROJECT_WORK_INVALID"
+	ReasonClosureWitnessMissing  = "ISSUE_CLOSURE_WITNESS_MISSING"
+	ReasonClosureWitnessMismatch = "ISSUE_CLOSURE_WITNESS_MISMATCH"
+	ReasonClosureProductionGap   = "ISSUE_CLOSURE_PRODUCTION_GAP"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -147,6 +150,8 @@ type Candidate struct {
 	BoundaryNotes       []string        `json:"boundary_notes,omitempty"`
 	Private             bool            `json:"private,omitempty"`
 	ClosureBinding      string          `json:"closure_binding,omitempty"`
+	ClosureClaim        string          `json:"closure_claim,omitempty"`
+	ClosureWitnessStandard string       `json:"closure_witness_standard,omitempty"`
 	CompletionStandard  string          `json:"completion_standard,omitempty"`
 	TargetEnvelope      string          `json:"target_operating_envelope,omitempty"`
 	WitnessedEnvelope   string          `json:"witnessed_operating_envelope,omitempty"`
@@ -255,6 +260,7 @@ type Review struct {
 	OperatingEnvelope OperatingEnvelopeReadout `json:"operating_envelope"`
 	ScaleEvidence     ScaleEvidenceReadout     `json:"scale_evidence"`
 	ProjectWork       ProjectWorkReadout       `json:"project_work"`
+	Closure           ClosureReadout           `json:"closure"`
 	WitnessGrade      WitnessGrade             `json:"witness_grade"`
 	BornRouted        BornRouted               `json:"born_routed"`
 }
@@ -328,6 +334,10 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		c.WitnessedEnvelope = renderEvidenceEnvelope(evidenceReadout.Qualifying)
 	}
 	envelopeReadout := operatingEnvelope(c)
+	closureReadout := closureGate(c, projectWorkReadout, witnessGradeReadout, envelopeReadout, evidenceReadout)
+	for _, reason := range closureReadout.Reasons {
+		reasons.add(reason)
+	}
 	if len(evidenceReadout.Invalid) > 0 {
 		reasons.add(ReasonScaleEvidenceInvalid)
 	}
@@ -391,6 +401,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		OperatingEnvelope: envelopeReadout,
 		ScaleEvidence:     evidenceReadout,
 		ProjectWork:       projectWorkReadout,
+		Closure:           closureReadout,
 		WitnessGrade:      witnessGradeReadout,
 		BornRouted:        bornRoutedReadout,
 	}
@@ -706,6 +717,8 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		Labels:              issueDraftLabels(d.Labels),
 		BoundaryNotes:       issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
 		ClosureBinding:      section("Closure binding"),
+		ClosureClaim:        section("Closure claim", "Ship claim"),
+		ClosureWitnessStandard: section("Closure witness standard", "Witnessed completion standard"),
 		CompletionStandard:  section("Completion standard"),
 		TargetEnvelope:      section("Target operating envelope", "Target envelope"),
 		WitnessedEnvelope:   section("Witnessed operating envelope", "Observed operating envelope", "Witnessed envelope"),
@@ -1063,6 +1076,8 @@ func normalize(c Candidate) Candidate {
 	c.Lane = strings.TrimSpace(c.Lane)
 	c.Priority = strings.TrimSpace(c.Priority)
 	c.ClosureBinding = strings.TrimSpace(c.ClosureBinding)
+	c.ClosureClaim = strings.TrimSpace(c.ClosureClaim)
+	c.ClosureWitnessStandard = strings.TrimSpace(c.ClosureWitnessStandard)
 	c.RequiredModelTier = strings.TrimSpace(c.RequiredModelTier)
 	c.OptimalModelTier = strings.TrimSpace(c.OptimalModelTier)
 	c.Paths = compact(c.Paths)

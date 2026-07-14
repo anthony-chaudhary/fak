@@ -959,3 +959,21 @@ func writeIssueContractJSON(t *testing.T, c issuecontract.Candidate) string {
 	}
 	return path
 }
+
+func TestRenderIssueContractClosureGate(t *testing.T) {
+	review := issuecontract.ReviewCandidate(issuecontract.Candidate{
+		Schema: issuecontract.Schema, Key: "closure/4641", Title: "demo closure", ParentRef: "#4636",
+		CurrentState: "toy passes", WhyNow: "closure requested", WorkingSpine: "contract -> close gate",
+		WorkUnit: "leaf", ExpectedSteps: 3, InScope: "closure verification", OutOfScope: "load generator",
+		DoneCondition: "demo may close", Witness: "go test ./internal/issuecontract passes", AcceptanceGate: "go test ./internal/issuecontract",
+		Lane: "issuecontract", Paths: []string{"internal/issuecontract/**"}, ClosureBinding: "commit cites #4641",
+		WorkEstimate: "Estimate: 3 points", ScopeContribution: "Contribution: 3/34 points", CompletionStandard: "demo",
+		ClosureClaim: "complete", ClosureWitnessStandard: "demo",
+	}, issuecontract.Options{})
+	got := renderIssueContract(issueContractResult{Schema: "test", Reviews: []issuecontract.Review{review}})
+	for _, want := range []string{"closure=refused", "claim=production", "production_credit=false", "closure_refuses: ISSUE_CLOSURE_WITNESS_MISMATCH", "closure_repair:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q:\n%s", want, got)
+		}
+	}
+}

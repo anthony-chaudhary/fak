@@ -1117,6 +1117,11 @@ func renderIssueContract(r issueContractResult) string {
 				review.ProjectWork.Status, review.ProjectWork.EstimatePoints, review.ProjectWork.Contribution,
 				review.ProjectWork.ParentBaseline, issueContractBucketValue(review.ProjectWork.CompletionStandard, "?"))
 		}
+		if review.Closure.Status != issuecontract.ClosureNotRequested {
+			line += fmt.Sprintf(" closure=%s claim=%s witnessed=%s production_credit=%t",
+				review.Closure.Status, issueContractBucketValue(review.Closure.ClaimedStandard, "?"),
+				issueContractBucketValue(review.Closure.WitnessedStandard, "?"), review.Closure.ProductionCredit)
+		}
 		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
@@ -1150,6 +1155,12 @@ func renderIssueContract(r issueContractResult) string {
 		}
 		for _, repair := range review.ProjectWork.Repair {
 			lines = append(lines, "    project_work_repair: "+repair)
+		}
+		for _, reason := range review.Closure.Reasons {
+			lines = append(lines, "    closure_refuses: "+reason)
+		}
+		for _, repair := range review.Closure.Repair {
+			lines = append(lines, "    closure_repair: "+repair)
 		}
 		for _, flag := range review.BornRouted.Flags {
 			lines = append(lines, "    born_routed_flag: "+flag)
