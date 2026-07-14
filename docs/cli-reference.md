@@ -180,6 +180,7 @@ fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simu
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
 fak vcache    status | prove | prove-telemetry | actions | apply-actions | score   # virtual provider-cache status, planned/applied action ledgers, and token-savings proof/refutation scorecard
 fak cachevalue report|review|feed [--since DATE] [--usage-ledger FILE] [--context-budget-tokens N] [--json] [--append-ledger FILE] [--markdown-out FILE] # cache-effectiveness P&L, cumulative fleet savings/session-extension aggregate, plus generated cache-frontier review artifacts
+fak cachevalue shapes [--since DATE] [--json] [--trend] [--ledger FILE]   # cluster the WITNESSED Track-1 kernel ledger by session SHAPE — length band (single/short/long) × realized-reuse outcome (n/a/cold/partial/warm) — so a reader sees WHICH KINDS of sessions earn KV-prefix reuse, a fact the week×session_type trend hides (#3115); --trend swaps the static snapshot for each shape's week-over-week reuse-share drift. #1066 fence: outcome bands cut on WITNESSED realized reuse only, never the vs-naive re-prefill multiple
 fak kvbm      replay|trace [--artifact/--trace FILE] [--json] [--check]   # KVBM eviction validation: replay proves pin/restore safety; trace proves cost-aware>=LRU, oracle score, and no-thrash stability
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
 fak cadence   [--json] [--check] [--append-history] [--window N]   # consolidated regular-cadence report: folds scores + maturity + work-done + releases into one control-pane envelope, including the top public `fak maturity route` seed; --append-history writes the durable ledger with standing_score + difficulty fields (docs/cadence/history.jsonl)
@@ -372,6 +373,40 @@ fak garden walk --register            # arm the durable 6h walk loop (loopmgr; s
 Every run appends a witnessed run-end to the loop ledger (walked / attention / acted / deferred /
 skipped), so `fak loop health` shows the walk living. `--register` installs the durable
 `garden-item-walk` loop unit (6 h cadence) the same way the stale-work tick registers itself.
+
+### Fan a shipped spine out into its follow-on backlog — `fak issue fanout`
+
+`fak issue fanout` ([#2510](https://github.com/anthony-chaudhary/fak/issues/2510),
+spine `5b8f0bd1`, `internal/issuefanout`) is the **spine-first** producer that *fills* the
+backlog the garden → dispatch boundary below *drains*: it expands one shipped working spine
+into its contract-ready follow-on issues across the fan-out area taxonomy
+(`qa,dogfood,product,observability,integration,docs,release`). It **plans by default** —
+printing the candidate set and touching nothing — and only files when asked. The synopsis is
+the one `fak issue` prints, so the reference and `--help` read the same truth:
+
+```
+fak issue fanout   --title T --leaf L --spine REF [--parent REF]
+                   [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
+```
+
+The planning flags, exactly as `fak issue fanout --help` describes them:
+
+- `--title` — human name of the shipped spine.
+- `--leaf` — owning leaf/lane (stamps keys, lane, default paths).
+- `--spine` — spine witness: commit SHA, demo command, or doc path.
+- `--parent` — epic/issue ref the fan-out hangs off (default: `--spine`).
+- `--paths` — comma-separated file trees (default `internal/<leaf>/`).
+- `--areas` — comma-separated area filter (`qa,dogfood,product,observability,integration,docs,release`).
+- `--max` — cap candidates (`0` = full taxonomy; floor `3`).
+- `--json` — emit the machine-readable fan-out plan (feed to `fak issue cohort --from-plan`).
+
+Two further modes ride the same verb. `--live` files the planned candidates as GitHub issues
+via `gh`, after a bounded marker-key (`fanout-<leaf>-<slug>`) dedupe against existing issues so
+a rerun files zero — `--repo owner/repo` targets a non-current repo, `--dedupe-cap N` bounds the
+existing-issue scan (default `300`), and `--existing-json FILE` swaps a fixture in for the live
+`gh` query. `--adoption` measures the default instead of planning: given `--leaves` (shipped
+leaves to audit) and `--markers` (the filed `fanout-<leaf>-<slug>` keys), it reports which leaves
+cleared the fan-out floor versus which are gaps, exiting `1` on any gap.
 
 ### The garden → dispatch boundary
 
