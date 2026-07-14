@@ -187,6 +187,8 @@ follow-up named in prose but left unfiled is silently-deferred work: it becomes 
 issue or it does not leave the run. This binds headless workers, in-session loops, and
 interactive turns alike; if there is genuinely nothing left, say so plainly.
 
+**Close operator-facing turns with scannable bullets, verdict first; make the last line a bullet carrying the next checkable step.** This binds the summaries and handoffs an operator reads — headless workers, in-session loops, and interactive turns alike; tool-call arguments, commit subjects, and PR bodies keep their own conventions. One claim per line, evidence and paths inline. A short single-line closer ("nothing left; pushed abc123") already ends clean, so the "genuinely nothing left, say so plainly" escape above still holds.
+
 ## Version everything: cite `module@rev`, not just a bare SHA
 
 Every module carries a **derived** version — there are no hand-maintained per-module version
@@ -540,3 +542,4 @@ routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
 | A curated map of all the docs | [`llms.txt`](llms.txt) |
 
 License: [Apache-2.0](LICENSE).
+
