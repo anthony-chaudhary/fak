@@ -29,6 +29,9 @@ import (
 // windows becomes a single command — rows that appear in more than one ledger are deduped
 // by (pid, unix_millis, generated_at) so an overlapping session is never double-counted.
 // --since floors the fold to rows on/after the date; --json emits the CompactionReport.
+// --by day|week adds a TIME axis within each regime×band so the trend the single-window
+// fold hides — "is shed% still declining WITHIN the headless regime this week?" — becomes
+// legible, the temporal question a point-in-time table structurally cannot answer.
 //
 //fak:ctxplan verb="cachevalue compaction" enters="nothing live — an offline fold over the gateway-usage JSONL ledger(s) on disk" pages="nothing into a model window — it prints a compaction-by-regime table (or --json report) to stdout" warms="nothing — it REPORTS compaction shed/fire/bail health; it warms no prompt cache or KV itself"
 func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
@@ -37,6 +40,7 @@ func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
 	var ledgers ablationPathList
 	fs.Var(&ledgers, "ledger", "gateway usage ledger to fold (repeatable; defaults to the LIVE .fak/nightrun copy, not the committed docs mirror — pass twice to merge live + docs mirror)")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
+	by := fs.String("by", "", "bucket the fold by time within each regime×band to see a trend: day | week (default: one window over the whole --since span)")
 	asJSON := fs.Bool("json", false, "emit the CompactionReport as JSON instead of the table")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -47,12 +51,18 @@ func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 	}
+	switch *by {
+	case "", "none", "day", "week":
+	default:
+		fmt.Fprintf(stderr, "fak cachevalue compaction: --by must be day or week (got %q)\n", *by)
+		return 2
+	}
 	if len(ledgers) == 0 {
 		ledgers = ablationPathList{gatewayusageledger.DefaultLedgerRel}
 	}
 
 	rows := filterGatewayUsageSince(readGatewayLedgersDedup(ledgers), *since)
-	report := gatewayusageledger.FoldCompaction(rows, *since)
+	report := gatewayusageledger.FoldCompactionByPeriod(rows, *since, *by)
 
 	if *asJSON {
 		b, err := json.MarshalIndent(report, "", "  ")

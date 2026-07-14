@@ -30,6 +30,7 @@ import (
 //	fak cachevalue shapes --since 2026-06-22             # the WITNESSED ledger folded by session shape (length × realized-reuse outcome)
 //	fak cachevalue shapes --json                         # emit the ShapeReport for downstream posting
 //	fak cachevalue compaction --since 2026-07-09         # compaction shed/fire/bail SEGMENTED by budget regime × session-length band (keeps 48k/96k regimes apart)
+//	fak cachevalue compaction --by week                  # same segmentation with a TIME axis, so a within-regime trend ("did shed% decline recently?") is legible
 //	fak cachevalue compaction --json                     # emit the CompactionReport for downstream posting
 //	fak cachevalue status --json                         # cache-plane health, owner, dependency, fidelity, and next action
 //	fak cachevalue status --session transcript.jsonl --vcache-score-report score.json

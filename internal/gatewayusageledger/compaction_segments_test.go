@@ -1,6 +1,7 @@
 package gatewayusageledger
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +113,70 @@ func TestFoldCompactionSegmentsByRegime(t *testing.T) {
 	if !strings.Contains(out, "interactive(48000)") || !strings.Contains(out, "headless(96000)") {
 		t.Fatalf("render missing regime labels:\n%s", out)
 	}
+}
+
+// TestFoldCompactionByPeriod pins the --by day time axis: rows from the SAME regime×band
+// but different calendar days must land in SEPARATE segments carrying their day, so a
+// within-regime trend is legible; the render must print a day header per bucket. The
+// default (granularity "") must stay byte-for-byte identical to FoldCompaction — the
+// invariant that keeps the metrics exposition and the golden regime test untouched.
+func TestFoldCompactionByPeriod(t *testing.T) {
+	b96 := &Provenance{CompactHistoryBudget: 96000}
+	// Mon 2026-07-13 and Tue 2026-07-14 — distinct calendar days, same ISO week (weeks
+	// start Monday, so a Sun/Mon pair would straddle the boundary; this pair does not).
+	day1 := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	day2 := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	rows := []Row{
+		// 96k/40-80 on day 1: sheds 60%.
+		NewRow("exit", "guard", "claude", "", 0, b96, Counters{
+			ObservedTurns: 50, CompactionFired: 10, CompactionShedTokens: 600, CachedPromptTokens: 400,
+		}, day1),
+		// 96k/40-80 on day 2: sheds 20% — a within-regime DROP the single-window fold would blur.
+		NewRow("exit", "guard", "claude", "", 0, b96, Counters{
+			ObservedTurns: 50, CompactionFired: 10, CompactionShedTokens: 200, CachedPromptTokens: 800,
+		}, day2),
+	}
+
+	// Default fold collapses both days into one cell → one segment, empty Period.
+	flat := FoldCompaction(rows, "")
+	if len(flat.Segments) != 1 || flat.Segments[0].Period != "" {
+		t.Fatalf("default fold = %d segs (period %q), want 1 seg with empty period", len(flat.Segments), segPeriod(flat))
+	}
+
+	// --by day splits the same rows into one segment per day, each carrying its date.
+	byDay := FoldCompactionByPeriod(rows, "", "day")
+	if len(byDay.Segments) != 2 {
+		t.Fatalf("--by day segments = %d, want 2 (one per calendar day)", len(byDay.Segments))
+	}
+	if byDay.Segments[0].Period != "2026-07-13" || byDay.Segments[1].Period != "2026-07-14" {
+		t.Fatalf("--by day periods = [%q,%q], want [2026-07-13, 2026-07-14] (sorted ascending)",
+			byDay.Segments[0].Period, byDay.Segments[1].Period)
+	}
+	if byDay.Segments[0].ShedPctMedian != 60.0 || byDay.Segments[1].ShedPctMedian != 20.0 {
+		t.Fatalf("--by day shed%% = [%.1f,%.1f], want [60.0, 20.0] (the trend the flat fold hides)",
+			byDay.Segments[0].ShedPctMedian, byDay.Segments[1].ShedPctMedian)
+	}
+
+	out := RenderCompaction(byDay)
+	if !strings.Contains(out, "[2026-07-13]") || !strings.Contains(out, "[2026-07-14]") {
+		t.Fatalf("--by day render missing per-day headers:\n%s", out)
+	}
+
+	// --by week folds both days (same ISO week) back into one bucket, labelled by the week.
+	byWeek := FoldCompactionByPeriod(rows, "", "week")
+	if len(byWeek.Segments) != 1 {
+		t.Fatalf("--by week segments = %d, want 1 (both days in the same ISO week)", len(byWeek.Segments))
+	}
+	if y, w := day1.ISOWeek(); byWeek.Segments[0].Period != fmt.Sprintf("%04d-W%02d", y, w) {
+		t.Fatalf("--by week period = %q, want %04d-W%02d", byWeek.Segments[0].Period, y, w)
+	}
+}
+
+func segPeriod(rep CompactionReport) string {
+	if len(rep.Segments) == 0 {
+		return ""
+	}
+	return rep.Segments[0].Period
 }
 
 // TestRenderCompactionEmpty — a report with no exit rows renders the live-ledger hint,

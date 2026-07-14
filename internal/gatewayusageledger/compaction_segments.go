@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // compaction_segments.go — the compaction-effectiveness fold, SEGMENTED by budget
@@ -81,6 +82,10 @@ func compactionBudgetRegimeLabel(budget int) string {
 // can have Sessions>0 yet an absent (NaN-free) percentile if every row bailed or every
 // row was quarantined — DenomZeroRows and FiredSessions tell those two zeroes apart.
 type CompactionSegment struct {
+	// Period is the time bucket this segment falls in when the fold is bucketed by
+	// --by day|week (day = "2006-01-02", week = ISO "2006-Www"); empty for the default
+	// un-bucketed single-window fold, so the existing render/JSON stays byte-for-byte.
+	Period        string  `json:"period,omitempty"`
 	Budget        int     `json:"budget"`
 	BudgetRegime  string  `json:"budget_regime"`
 	Band          string  `json:"band"`
@@ -117,17 +122,29 @@ type CompactionReport struct {
 	Segments        []CompactionSegment `json:"segments"`
 }
 
-// FoldCompaction folds the ledger rows into the (budget × length-band) segmentation.
-// Only Kind=="exit" rows are folded (periodic/carryforward snapshots would double-count
-// a live session). Rows are assumed already --since filtered by the caller; the fold does
-// not re-read the clock, keeping it pure. Segments are returned sorted by budget ascending
-// then by the canonical band order.
+// FoldCompaction folds the ledger rows into the (budget × length-band) segmentation over
+// the whole --since window. It is FoldCompactionByPeriod with no time bucketing, kept as
+// the stable entry point the metrics exposition and the default CLI path call: the report
+// it returns is byte-for-byte what it always was (every segment's Period is empty).
 func FoldCompaction(rows []Row, since string) CompactionReport {
+	return FoldCompactionByPeriod(rows, since, "")
+}
+
+// FoldCompactionByPeriod is FoldCompaction with an optional time axis. granularity "" (or
+// "none") keeps the single-window fold; "day" buckets each cell by GeneratedAt's calendar
+// day, "week" by its ISO week. Bucketing turns the point-in-time regime×band table into a
+// trend — the shape that answers "did shed% move WITHIN a regime recently?", which the
+// un-bucketed fold structurally cannot (it collapses the whole window into one number per
+// cell). Only Kind=="exit" rows are folded (periodic/carryforward snapshots would
+// double-count a live session). Rows are assumed already --since filtered by the caller;
+// the fold does not re-read the clock, keeping it pure. Segments are returned sorted by
+// period, then budget ascending, then the canonical band order.
+func FoldCompactionByPeriod(rows []Row, since, granularity string) CompactionReport {
 	rep := CompactionReport{Since: since}
-	cells := map[[2]string]*CompactionSegment{}
-	// keyOrder preserves first-seen insertion so the later sort is total and stable.
-	keyFor := func(budget int, band string) [2]string {
-		return [2]string{fmt.Sprintf("%012d", budget), band}
+	cells := map[[3]string]*CompactionSegment{}
+	// keyFor preserves a total, stable ordering for the later sort.
+	keyFor := func(period string, budget int, band string) [3]string {
+		return [3]string{period, fmt.Sprintf("%012d", budget), band}
 	}
 
 	for _, r := range rows {
@@ -140,10 +157,12 @@ func FoldCompaction(rows []Row, since string) CompactionReport {
 			budget = r.Provenance.CompactHistoryBudget
 		}
 		band := compactionBandFor(r.Counters.ObservedTurns)
-		k := keyFor(budget, band)
+		period := compactionPeriodKey(r.GeneratedAt, granularity)
+		k := keyFor(period, budget, band)
 		seg := cells[k]
 		if seg == nil {
 			seg = &CompactionSegment{
+				Period:       period,
 				Budget:       budget,
 				BudgetRegime: compactionBudgetRegimeLabel(budget),
 				Band:         band,
@@ -182,12 +201,44 @@ func FoldCompaction(rows []Row, since string) CompactionReport {
 		rep.Segments = append(rep.Segments, *seg)
 	}
 	sort.Slice(rep.Segments, func(i, j int) bool {
+		if rep.Segments[i].Period != rep.Segments[j].Period {
+			return rep.Segments[i].Period < rep.Segments[j].Period
+		}
 		if rep.Segments[i].Budget != rep.Segments[j].Budget {
 			return rep.Segments[i].Budget < rep.Segments[j].Budget
 		}
 		return bandOrder(rep.Segments[i].Band) < bandOrder(rep.Segments[j].Band)
 	})
 	return rep
+}
+
+// compactionPeriodKey derives the time-bucket label for a row's GeneratedAt under the
+// requested granularity. "" / "none" (no bucketing) returns "" so the default fold keeps a
+// single window and the byte-for-byte render is preserved. "day" returns the calendar day
+// (2006-01-02), "week" the ISO week (2006-Www). A GeneratedAt that will not parse falls
+// back to its leading 10 chars (day) or "unknown" (week), so a malformed timestamp lands in
+// its own visible bucket rather than crashing the fold or silently joining a real period.
+func compactionPeriodKey(generatedAt, granularity string) string {
+	switch granularity {
+	case "", "none":
+		return ""
+	case "day":
+		if t, err := time.Parse(time.RFC3339, generatedAt); err == nil {
+			return t.UTC().Format("2006-01-02")
+		}
+		if len(generatedAt) >= 10 {
+			return generatedAt[:10]
+		}
+		return "unknown"
+	case "week":
+		if t, err := time.Parse(time.RFC3339, generatedAt); err == nil {
+			y, w := t.UTC().ISOWeek()
+			return fmt.Sprintf("%04d-W%02d", y, w)
+		}
+		return "unknown"
+	default:
+		return ""
+	}
 }
 
 func bandOrder(band string) int {
@@ -266,8 +317,20 @@ func RenderCompaction(rep CompactionReport) string {
 		"regime", "band", "sess", "fired", "fires", "bails", "shed%med", "bailrate", "top_bail")
 	b.WriteString(header + "\n")
 
+	const noPeriod = "\x00" // sentinel distinct from a real "" (default un-bucketed) period
+	lastPeriod := noPeriod
 	lastBudget := -1
 	for _, s := range rep.Segments {
+		if s.Period != lastPeriod {
+			if lastPeriod != noPeriod {
+				b.WriteByte('\n')
+			}
+			if s.Period != "" {
+				fmt.Fprintf(&b, "  [%s]\n", s.Period)
+			}
+			lastPeriod = s.Period
+			lastBudget = -1
+		}
 		if s.Budget != lastBudget {
 			if lastBudget != -1 {
 				b.WriteByte('\n')
