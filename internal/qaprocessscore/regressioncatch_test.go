@@ -90,6 +90,19 @@ func TestRegressionCatch(t *testing.T) {
 			wantDefects: 1,
 			wantRef:     "h002",
 		},
+		{
+			// The heuristic is revert-level, not per-package: a revert that reverted code in
+			// TWO packages but bundled a _test.go for only ONE of them still counts as
+			// "caught" -- the revert got an accompanying regression test, which is all the
+			// coarse "a _test.go touching the same package" signal asks for. (#3841)
+			name: "multi-package revert: a test in ONE reverted package catches it (revert-level heuristic)",
+			commits: []brittleness.Commit{
+				c("m001", `Revert "feat(multi): touch two packages"`,
+					"internal/a/a.go", "internal/a/a_test.go", "internal/b/b.go"),
+			},
+			wantScore:   100,
+			wantDefects: 0,
+		},
 	}
 
 	for _, tc := range tests {
@@ -116,6 +129,29 @@ func TestRegressionCatch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A revert that reverted production code in MORE THAN ONE package with no accompanying
+// _test.go in any of them is one gap whose work item must name EVERY reverted package --
+// the worst-first list has to point at all the coverage holes the revert exposed, not just
+// the first. This exercises the multi-package Packages rendering that the single-package
+// table fixtures never reach. (#3841)
+func TestRegressionCatchGapNamesEveryRevertedPackage(t *testing.T) {
+	kpi := RegressionCatch([]brittleness.Commit{
+		c("m101", `Revert "feat(multi): risky two-package change"`,
+			"internal/a/a.go", "internal/b/b.go"),
+	})
+	if kpi.Score != 0 {
+		t.Errorf("Score = %v, want 0 (detail: %q)", kpi.Score, kpi.Detail)
+	}
+	if len(kpi.Defects) != 1 {
+		t.Fatalf("got %d defects, want 1: %v", len(kpi.Defects), kpi.Defects)
+	}
+	for _, pkg := range []string{"internal/a", "internal/b"} {
+		if !strings.Contains(kpi.Defects[0], pkg) {
+			t.Errorf("defect %q does not name reverted package %q", kpi.Defects[0], pkg)
+		}
 	}
 }
 
