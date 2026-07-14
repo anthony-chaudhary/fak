@@ -373,15 +373,15 @@
       "canonical": "witness cache",
       "family": "cache",
       "kind": "doc-term",
-      "definition": "witness cache is the doc-level name for the witness Resolver's memoized verification results (internal/witness/cache.go).",
+      "definition": "witness cache is the doc-level name for the witness Resolver's memoized verdict cache (internal/witness/cache.go); WitnessCacheDir locates the shared cache directory.",
       "distinction": "A memo of verification RESULTS, not a token cache: nothing model-facing is stored.",
       "distinct_from": [
         "kv-cache",
         "vcache"
       ],
       "aliases": [],
-      "grounding": "witnesscache",
-      "grounding_kind": "doc",
+      "grounding": "WitnessCacheDir",
+      "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
@@ -1416,24 +1416,6 @@
       "aliases": [],
       "grounding": "witnessJSON",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
-      "id": "x-goal25b-witness-proof-witnesstestgo",
-      "canonical": "witness_test.go",
-      "family": "witness-proof",
-      "kind": "doc-term",
-      "definition": "witness_test.go is the doc-referenced test-file name anchoring witness-behavior claims in docs/claims - a pointer to where witness behavior is proven.",
-      "distinction": "A DOC pointer to the proving test file, not a production witness symbol.",
-      "distinct_from": [
-        "witness-resolver"
-      ],
-      "aliases": [],
-      "grounding": "witnesstestgo",
-      "grounding_kind": "doc",
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
