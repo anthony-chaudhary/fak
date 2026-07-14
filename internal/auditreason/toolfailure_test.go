@@ -162,6 +162,22 @@ func TestToolFailurePayloadForCommandPreFillsPowerShell(t *testing.T) {
 	}
 }
 
+func TestExit127CommandNotFoundClassifiesShellMismatchWithPowerShellRecovery(t *testing.T) {
+	payload, ok := ToolFailurePayloadForCommand(
+		"Bash exited with exit status 127: Get-ChildItem: command not found",
+		"Get-ChildItem | Select-Object -First 5",
+	)
+	if !ok {
+		t.Fatal("exit-127 command-not-found did not classify")
+	}
+	if payload.Code != ToolFailureShellMismatch {
+		t.Fatalf("code=%s, want %s", payload.Code, ToolFailureShellMismatch)
+	}
+	if !strings.Contains(strings.ToLower(payload.NextCommand), "powershell") || !strings.Contains(payload.NextCommand, "Get-ChildItem") {
+		t.Fatalf("next_command=%q, want runnable PowerShell recovery", payload.NextCommand)
+	}
+}
+
 func TestToolFailurePayloadUnrecognized(t *testing.T) {
 	if _, ok := ToolFailurePayloadFromMessage("everything succeeded"); ok {
 		t.Fatal("success text must not fabricate a failure payload")
