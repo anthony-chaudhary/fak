@@ -433,6 +433,35 @@ separates them is *what is being witnessed and where*.
   holds the per-session RUN-CONTROL state (run-state / budget / pace). Context planning
   vs run control.
 
+- **sessionjournal** vs **ScratchJournal** vs **SessionLedger** - sessionjournal
+  (internal/sessionjournal) is the CRASH-RECOVERY journal: a boot-epoch fold of
+  open/beat/close lifecycle events that classifies each session LIVE/CRASHED/STALE/CLOSED
+  for resume targeting. ScratchJournal is the in-process append-only ledger scratch_lease
+  implements today. SessionLedger is the planned #2392 generalization of ScratchJournal.
+  Crash-recovery classification vs current in-process ledger vs planned generalization.
+
+- **sessionread** vs **sessionctl** vs **sessionsearch** - sessionread is the closed
+  READ vocabulary spine (outbound session-read seams: context-restore, context-spans,
+  context-value, each scope-checked); sessionctl is the redirect CONTROL op (an inbound
+  steer); sessionsearch is cross-session RECALL over the guard journal. Read vs control
+  vs recall.
+
+- **CLAUDE_SESSION_ID** vs **FAK_SESSION_ID** - CLAUDE_SESSION_ID is the env var carrying
+  the UPSTREAM Claude Code harness's session identity, resolved by resume/mcp when the
+  caller omits an explicit session id. FAK_SESSION_ID is the env var carrying a FAK-SERVED
+  session's identity across a guard relaunch. Upstream harness identity vs fak-served
+  identity.
+
+- **sessionCtxRestore** vs **sessionCtxValue** - sessionCtxRestore is the per-trace
+  ordered stash of context-RESTORE entries (oldest first, backing the sessionread
+  OpContextRestore seam); sessionCtxValue is the per-session rolling managed-CONTEXT
+  accumulator (tracking resident token count, growth-per-turn, ring state). Restore
+  entries vs context-value accumulator.
+
+- **SessionRef** vs **SessionFromRef** - SessionRef BUILDS the fully-qualified checkpoint
+  ref by prepending the refs/fak/locks/ namespace to a session id; SessionFromRef PARSES
+  the bare session id back out of a ref by stripping that prefix. Build vs parse.
+
 ---
 
 ## The gateway / engine family

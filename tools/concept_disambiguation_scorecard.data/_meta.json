@@ -59,9 +59,14 @@
       "id": "session-runtime",
       "name": "Session / scheduling family",
       "roots": ["session", "slot", "scheduler"],
-      "ignore": ["sessions", "scheduling", "scheduled", "schedulers", "slots"],
+      "ignore": ["sessions", "scheduling", "scheduled", "schedulers", "slots",
+                 "sessionids", "slotting", "guardsessiontempdir",
+                 "defaultclaudesessionsperaccount", "confusedsessions",
+                 "sessionsaudited", "topsessions", "totalslots",
+                 "tuisessionrow", "runtuisessions", "interactivesession",
+                 "requireminimaxsession", "restartfreshsession"],
       "min_files": 3,
-      "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner)."
+      "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner). Ignored tokens: plurals/inflections (sessionids, slotting), a guard-hook helper that belongs to the guard-gate family (guardsessiontempdir), a model-package method whose Session is the inference type not the drive record (requireminimaxsession), session-audit count fields (confusedsessions, sessionsaudited, topsessions), a total-slots metric also used by GPU compute (totalslots), TUI rendering/verb types (tuisessionrow, runtuisessions), a stale empty dir (interactivesession), an action string literal (restartfreshsession), and a capacity default const already covered by AccountSessionCap (defaultclaudesessionsperaccount)."
     },
     {
       "id": "witness-proof",

@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **93.6/100** (grade A) = 9.4/10 |
-| **Coverage** | **90.1%** (1775/1969 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **194** (clarity 0 + coverage 194) |
-| Crystal-clear concepts | 196 of 1550 positioned |
+| **Score** | **94.3/100** (grade A) = 9.4/10 |
+| **Coverage** | **91.2%** (1792/1964 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **172** (clarity 0 + coverage 172) |
+| Crystal-clear concepts | 204 of 1564 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,11 +24,11 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1550 concepts - score 93.6/100 (grade A) - disambiguation-debt 194
+concept-disambiguation chart - 1564 concepts - score 94.3/100 (grade A) - disambiguation-debt 172
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####........................ 196
-  o defined       ############################ 1354
+  * crystal       ####........................ 204
+  o defined       ############################ 1360
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -50,20 +50,19 @@ clarity mix by family (each cell = one concept):
   pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
   render-materialize ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (118 concept(s); 3 crystal)
   score-debt       ***oooooooooooooooooooooooooooooooooooooooooooooooooo (53 concept(s); 3 crystal)
-  session-runtime  *******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (137 concept(s); 7 crystal)
+  session-runtime  ***************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 15 crystal)
   support-maturity *****oooooooooooooooo (21 concept(s); 5 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ******************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (95 concept(s); 18 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ########################.... 154/180
   cache            #########################... 202/226
   render-materialize ########################.... 142/165
-  context-ctx      ########################.... 153/175
-  plan             ##########################.. 270/288
-  policy-capability ########################.... 99/114
-  witness-proof    #########################... 110/124
+  context-ctx      #########################... 155/175
+  plan             ##########################.. 270/289
+  policy-capability ########################.... 99/115
+  witness-proof    ########################.... 110/126
   gateway-engine   ##########################.. 150/162
   score-debt       ########################.... 68/78
   attention        #########################... 61/68
@@ -75,11 +74,12 @@ coverage by family (positioned / discovered):
   pool             ##########################.. 35/37
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  guard-gate       ############################ 281/281
+  guard-gate       ############################ 282/282
+  session-runtime  ############################ 170/170
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 90.1%  (1775/1969 confusable tokens positioned)
+namespace coverage  [#############################...] 91.2%  (1792/1964 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -253,6 +253,14 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | score-debt | **scorecard** - One deterministic measurement of a surface that folds reality into a single *_debt integer plus an A-F grade (the family is documented in the scorecard skill). |
 | * | crystal | subsystem | score-debt | **scorecard control pane** - The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline. |
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
+| * | crystal | symbol | session-runtime | **SessionFleet** - gateway.SessionFleet aggregates the cross-MACHINE SessionFleetMachine rows that the live `fak guard` provider exposes through `/debug/vars` for `fak info`. |
+| * | crystal | subsystem | session-runtime | **sessionjournal (package)** - internal/sessionjournal is the crash-survivable session-event journal: a boot-epoch fold of open/beat/close events over guard_sessions.jsonl that classifies each session LIVE/CRASHED/STALE/CLOSED for resume targeting. |
+| * | crystal | subsystem | session-runtime | **sessionread (package)** - internal/sessionread is the closed read/query/observe-op vocabulary spine (#4176/#4191): each shipped session READ seam carries its own capability/disclosure/evidence/refusal contract, the outbound twin of sessionctl. |
+| * | crystal | config | session-runtime | **CLAUDE_SESSION_ID** - CLAUDE_SESSION_ID is the env var carrying the upstream Claude Code harness's session identity, resolved by resume/mcp when the caller omits an explicit session id. |
+| * | crystal | symbol | session-runtime | **sessionCtxRestore** - sessionCtxRestore is the gateway's per-trace ordered stash of context-restore entries (oldest first, overflow drops oldest), backing the sessionread OpContextRestore read seam. |
+| * | crystal | symbol | session-runtime | **sessionCtxValue** - sessionCtxValue is the gateway's per-session rolling managed-context accumulator: every field tracks resident token count, growth-per-turn, and ring state for the context-value report and expense lens. |
+| * | crystal | symbol | session-runtime | **SessionFromRef** - SessionFromRef recovers the bare session id from a fully-qualified checkpoint ref by stripping the refs/fak/locks/ namespace prefix. |
+| * | crystal | symbol | session-runtime | **SessionRef** - SessionRef builds the fully-qualified checkpoint ref a session's checkpoint lives at by prepending the refs/fak/locks/ namespace to the session id. |
 | * | crystal | subsystem | session-runtime | **Session** - The full drive record for one served run (run-state, budget, priority, pace), keyed by TraceID and persisting across turns. |
 | * | crystal | concept | session-runtime | **Turn** - One model round-trip within a session: the agent submits input, the model generates output, and results are admitted to context. |
 | * | crystal | symbol | session-runtime | **Slot** - The immutable free/busy signal emitted when a session leaves the eligible set (budget exhaustion, pause, drain, stop), freeing scheduling capacity. |
@@ -1531,9 +1539,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | session-runtime | **sessionActivity** - sessionActivity (built by newSessionActivity) is the gateway package's private tracker recording each live trace's in-flight/idle age, projected onto debugSessionVars. |
 | o | defined | subsystem | session-runtime | **sessionctl (package)** - internal/sessionctl owns the redirect control op (out-of-band objective-change, #2755/#2756): payload, validation, and the per-session next-boundary mailbox plus live-objective store. |
 | o | defined | symbol | session-runtime | **SessionEndpoints** - gateway.SessionEndpoints aggregates the roster `fak info`/guard-endpoints surfaces render: Accounts, Nodes, and an embedded Harness together. |
-| o | defined | symbol | session-runtime | **SessionFleet** - gateway.SessionFleet aggregates a cross-MACHINE fleet view of SessionFleetMachine rows for `fak info`; it exists only behind the wip_sessionfleet build tag (info_fleet.go), not yet committed to the default build. |
 | o | defined | symbol | session-runtime | **SessionFleetMachine** - gateway.SessionFleetMachine is one machine's row within the GATED-WIP SessionFleet aggregate, folded from a fleetpane.FleetDoc snapshot. |
-| o | defined | config | session-runtime | **wip_sessionfleet (build tag)** - The `//go:build wip_sessionfleet` tag gates info_fleet.go out of the default build until gateway.SessionFleet et al. land for real (guard_fleet.go/guard_spine.go were removed in #4689). |
 | o | defined | symbol | session-runtime | **SessionHarness** - gateway.SessionHarness is embedded in SessionEndpoints, describing the harness/runner surface (set via a SetSessionHarnessProvider hook) shown alongside accounts and nodes. |
 | o | defined | concept | session-runtime | **SessionLedger (planned, #2392)** - A not-yet-built append-only session-scoped ledger referenced only as a forward pointer (#2392) from atif/doc.go, session/scratch_lease.go, and worklog/worklog.go; those call sites deliberately stay silent on entry format pending that work. |
 | o | defined | symbol | session-runtime | **SessionNode** - gateway.SessionNode describes one machine/node entry within SessionEndpoints' roster. |
@@ -1545,6 +1551,14 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | concept | session-runtime | **Supersession (note retirement)** - The structural retirement relation behind a memory note's author-declared supersedes edge, resolved by ResolveSupersession so a withheld (superseded) note stops surfacing while its own supersedes edge still retires its target. |
 | o | defined | config | session-runtime | **tuiSessionsSchema** - tuiSessionsSchema is the const naming the TUI overview-sessions payload schema version (fak.tui.sessions.v1). |
 | o | defined | symbol | session-runtime | **ScratchJournal** - session.ScratchJournal is the append-only ledger interface a scratchpad lifecycle records onto TODAY - the real, currently-implemented mechanism SessionLedger (#2392) is a planned future generalization of. |
+| o | defined | symbol | session-runtime | **sessionFeed** - sessionFeed is the gateway's bounded ring of SessionChangeEvents fed by the host's PublishSessionRevision, drained by the /v1/fak/session/changes subscribe route. |
+| o | defined | symbol | session-runtime | **tuiSessionReport** - tuiSessionReport is the TUI overview-sessions report struct built by buildTUISessionReport from a gateway SessionListResponse, carrying the rows, counts, and lanes the TUI sessions view renders. |
+| o | defined | symbol | session-runtime | **ParentSessionID** - ParentSessionID is the json field (parent_session_id) on eveimport and Codex-loop session records identifying the parent session that spawned a subagent, enabling parent-child session linkage. |
+| o | defined | symbol | session-runtime | **sessionStartSHA** - sessionStartSHA captures the git HEAD SHA at session start, used as the progress-head baseline by the guard no-progress detector and the durable-session setup. |
+| o | defined | symbol | session-runtime | **StoppedBySession** - StoppedBySession is the ArmMetrics field (json stopped_by_session) carrying the session-control stop reason (BudgetTurns, BudgetContext, Paused, Drained, Terminated) when a wired session.Table ended the arm. |
+| o | defined | subsystem | session-runtime | **sessionreplay (package)** - internal/sessionreplay freezes one turn's regime-conditioned harness decision as a fak.sessionreplay.v1 fixture and re-adjudicates it through the REAL adjudicator over an internal/policy regime floor for regression testing. |
+| o | defined | symbol | session-runtime | **handleFakSession** - handleFakSession is the HTTP handler behind POST/GET /v1/fak/session/{id}/{verb}, the session DRIVE-state control surface routing pause/resume/priority/pace/subscribe/observe verbs. |
+| o | defined | symbol | session-runtime | **launchHostSessionPlatform** - launchHostSessionPlatform is the S4U watchdog's session-0 resurrection launcher, called by resurrectHostCrashSessions to hand a typed hostresurrect.Request to the interactive broker after a host crash. |
 | o | defined | symbol | session-runtime | **Budget** - A session's remaining work allotment across three independent axes: turns (round-trips), output tokens, and context tokens. |
 | o | defined | symbol | session-runtime | **Pace** - The per-turn throttle: max output tokens and minimum gap between turns, applied cooperatively without pausing the session. |
 | o | defined | symbol | session-runtime | **RunState** - A served session's lifecycle position in a small total state machine: Running, Throttled, Paused, Draining, or Stopped. |
@@ -1691,13 +1705,13 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
 
 abstraction overclaims (16) - head reads clearer than its subtree supports:
   ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: observability-scorecard = defined)
-  ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-usage = defined)
-  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: scorecardpane-native-fold = defined)
-  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: ctxview = defined)
-  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-launchplan = defined)
-  ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
+  ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: runstate = defined)
+  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: total-debt = defined)
+  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewdropped = defined)
+  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-buildplanwithoptions = defined)
+  ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
+  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
   ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: prove-recall = defined)
@@ -1713,31 +1727,31 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
 | o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | observability-scorecard = defined |
-| o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | secretgate = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | session-usage = defined |
-| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | scorecardpane-native-fold = defined |
-| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | ctxview = defined |
-| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-launchplan = defined |
-| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
-| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | turn-mass = defined |
+| o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | normgate = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | runstate = defined |
+| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | total-debt = defined |
+| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewdropped = defined |
+| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-buildplanwithoptions = defined |
+| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
+| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | attention-accumulator = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
-| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-toolfeedback = defined |
+| o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-signal = defined |
 | o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | prove-recall = defined |
 | o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended = defined |
-| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index-request = defined |
+| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index = defined |
 | o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
-| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
-| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
+| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-iscontextflagname = defined |
+| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-placeanthropiccachebreakpointwithoutcome = defined |
 | * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-detour-objective = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | managed-cache = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-control = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-read = crystal |
 | * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
 | * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
-| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
+| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | sweepguard = crystal |
 | * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
 | * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
 
@@ -1747,7 +1761,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 20 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 24 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1550 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1564 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1759,13 +1773,12 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 154 | 180 | 26 |
 | cache | 202 | 226 | 24 |
 | render-materialize | 142 | 165 | 23 |
-| context-ctx | 153 | 175 | 22 |
-| plan | 270 | 288 | 18 |
-| policy-capability | 99 | 114 | 15 |
-| witness-proof | 110 | 124 | 14 |
+| context-ctx | 155 | 175 | 20 |
+| plan | 270 | 289 | 19 |
+| policy-capability | 99 | 115 | 16 |
+| witness-proof | 110 | 126 | 16 |
 | gateway-engine | 150 | 162 | 12 |
 | score-debt | 68 | 78 | 10 |
 | attention | 61 | 68 | 7 |
@@ -1777,7 +1790,8 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | pool | 35 | 37 | 2 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| guard-gate | 281 | 281 | 0 |
+| guard-gate | 282 | 282 | 0 |
+| session-runtime | 170 | 170 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 
