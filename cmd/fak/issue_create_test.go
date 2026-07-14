@@ -19,7 +19,7 @@ func TestIssueCreateDryRunDoesNotInvokeRunner(t *testing.T) {
 	code := runIssueCreateWith(&out, &errb, []string{
 		"--title", "feat: per-session activity cell",
 		"--body", "add a pane row",
-		"--dry-run",
+		"--raw-body", "--dry-run",
 	}, runner)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb.String())
@@ -43,7 +43,7 @@ func TestIssueCreateBuildsExpectedGHArgs(t *testing.T) {
 		"--title", "feat: thing",
 		"--body", "body text",
 		"--labels", "agent-handoff,next-step",
-		"--repo", "owner/repo",
+		"--repo", "owner/repo", "--raw-body",
 	}, runner)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb.String())
@@ -76,7 +76,7 @@ func TestIssueCreateBodyFileReadsContent(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runIssueCreateWith(&out, &errb, []string{
 		"--title", "t",
-		"--body-file", path,
+		"--body-file", path, "--raw-body",
 	}, runner)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb.String())
@@ -109,7 +109,7 @@ func TestIssueCreateReportsGHFailure(t *testing.T) {
 		return "", "HTTP 422: validation failed", false
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", "b"}, runner)
+	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", "b", "--raw-body"}, runner)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1", code)
 	}
@@ -123,7 +123,7 @@ func TestIssueCreateJSONOutput(t *testing.T) {
 		return "https://example.test/issues/3", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", "b", "--json"}, runner)
+	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", "b", "--raw-body", "--json"}, runner)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb.String())
 	}
@@ -133,5 +133,53 @@ func TestIssueCreateJSONOutput(t *testing.T) {
 	}
 	if !got.OK || got.URL != "https://example.test/issues/3" {
 		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestIssueCreateDefaultsProjectWorkToProduction(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "scoped", "--body", "## Parent context\n#4638", "--estimate-points", "3", "--parent-baseline-points", "8", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run", "--json"}, nil)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var result issueCreateResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	body := ""
+	for i := range result.Args {
+		if result.Args[i] == "--body" && i+1 < len(result.Args) {
+			body = result.Args[i+1]
+		}
+	}
+	for _, want := range []string{"Estimate: 3 points", "Contribution: 3/8 points", "## Completion standard\nproduction"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body=%q missing %q", body, want)
+		}
+	}
+}
+
+func TestIssueCreatePreservesExplicitDemo(t *testing.T) {
+	body := "## Parent context\n#4638\n\n## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\ndemo"
+	var stdout, stderr bytes.Buffer
+	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "demo", "--body", body, "--dry-run", "--json"}, nil)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var result issueCreateResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(result.Args, "\n")
+	if !strings.Contains(joined, "## Completion standard\ndemo") || strings.Contains(joined, "## Completion standard\nproduction") {
+		t.Fatalf("args=%q", result.Args)
+	}
+}
+
+func TestIssueCreateRefusesMissingProjectWorkNumbers(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "unknown", "--body", "body", "--dry-run"}, nil)
+	if code != 2 || !strings.Contains(stderr.String(), "estimate-points") {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 }

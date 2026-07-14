@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 )
 
 // issueCreateRunner is the injectable gh-argv executor behind runIssueCreateWith — same
@@ -46,6 +48,13 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	body := fs.String("body", "", "issue body text (exactly one of --body/--body-file)")
 	bodyFile := fs.String("body-file", "", "path to a file containing the issue body")
 	labels := fs.String("labels", "", "comma-separated labels")
+	estimatePoints := fs.Float64("estimate-points", 0, "project-work estimate points (required when body lacks Work estimate)")
+	parentBaselinePoints := fs.Float64("parent-baseline-points", 0, "parent production-scope baseline points (required when body lacks Overall completion contribution)")
+	contributionPoints := fs.Float64("contribution-points", 0, "parent contribution points (default: estimate-points)")
+	completionStandard := fs.String("completion-standard", "production", "production|integrated|staging|development|demo|prototype|experiment|research")
+	targetEnvelope := fs.String("target-envelope", "", "production target envelope entries (required unless body declares them)")
+	witnessedEnvelope := fs.String("witnessed-envelope", "", "directly witnessed envelope entries (required unless body declares them)")
+	rawBody := fs.Bool("raw-body", false, "do not append/review project-work metadata (only for non-dispatchable administrative issues)")
 	repo := fs.String("repo", "", "owner/name override (default: gh infers from cwd)")
 	dryRun := fs.Bool("dry-run", false, "render the issue + gh argv without calling gh")
 	asJSON := fs.Bool("json", false, "emit the machine-readable result")
@@ -76,6 +85,27 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	if strings.TrimSpace(resolvedBody) == "" {
 		fmt.Fprintln(stderr, "fak issue create: --body or --body-file is required")
 		return 2
+	}
+	if !*rawBody {
+		var err error
+		resolvedBody, err = issuecontract.AppendProjectWorkDefaults(resolvedBody, issuecontract.ProjectWorkAuthoring{
+			EstimatePoints: *estimatePoints, ParentBaseline: *parentBaselinePoints,
+			ContributionPoints: *contributionPoints, CompletionStandard: *completionStandard,
+			TargetEnvelope: *targetEnvelope, WitnessedEnvelope: *witnessedEnvelope,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue create: %v\n", err)
+			return 2
+		}
+		review := issuecontract.ReviewIssueDraft(issuecontract.IssueDraft{Title: strings.TrimSpace(*title), Body: resolvedBody}, issuecontract.Options{StrictProjectWork: true})
+		if review.ProjectWork.Status != issuecontract.ProjectWorkValid {
+			fmt.Fprintf(stderr, "fak issue create: generated project-work contract is %s: %s\n", review.ProjectWork.Status, strings.Join(review.ProjectWork.Invalid, "; "))
+			return 2
+		}
+		if review.OperatingEnvelope.Required && review.OperatingEnvelope.Status != issuecontract.EnvelopeMet {
+			fmt.Fprintf(stderr, "fak issue create: generated production operating envelope is %s; gaps=%d invalid=%s\n", review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Gaps), strings.Join(review.OperatingEnvelope.Invalid, "; "))
+			return 2
+		}
 	}
 
 	labelList := issueFanoutSplit(*labels)
