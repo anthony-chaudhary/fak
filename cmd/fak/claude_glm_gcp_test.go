@@ -691,3 +691,33 @@ func requireContainsForClaudeGLMGCP(t *testing.T, text, want string) {
 		t.Fatalf("missing %q", want)
 	}
 }
+
+func TestGCPQwenLauncherPinsQwen36ModelIdentity(t *testing.T) {
+	launcher := filepath.Join("..", "..", "tools", "qwen36_a100_fak_serve.sh")
+	b, err := os.ReadFile(launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	for _, want := range []string{
+		`REPO="${QWEN_REPO:-unsloth/Qwen3.6-27B-GGUF}"`,
+		`QWEN_FILE_GLOB="${QWEN_FILE_GLOB:-Qwen3.6-27B-Q4_K_M.gguf}"`,
+		`MODEL_ID="${MODEL_ID:-qwen3.6-27b}"`,
+		`EXPECTED_SHA256="5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0"`,
+		`MODEL_CONTRACT_FAIL`,
+		`MODEL_IDENTITY_OK`,
+		`backend=cuda`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Qwen3.6 launcher identity contract missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`QWEN_REPO:-bartowski/Qwen2.5-Coder-14B-Instruct-GGUF`,
+		`MODEL_ID:-qwen2.5-coder-14b`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("legacy model can still be the Qwen3.6 default: %q", forbidden)
+		}
+	}
+}

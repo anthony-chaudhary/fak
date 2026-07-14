@@ -26,21 +26,21 @@ The whole **infra** is proven end-to-end on a single GCP datacenter GPU: `--appl
 build (sm_80) → GGUF load → gateway → connect from the laptop → a real coding turn comes back.
 But two honest constraints shape what to serve:
 
-- **The literal `Qwen3.6-27B` does NOT run on fak's forward yet.** That checkpoint
-  (`lmstudio-community/Qwen3.6-27B-GGUF`) is a **Gated-DeltaNet/SSM hybrid** (every layer is a
-  fused `attn_qkv` + `attn_gate` + a full `ssm_*` recurrence — no `self_attn.q_proj`). fak's
-  in-kernel forward implements the standard separate-projection attention path, so it loads and
-  binds but **panics on the first decode**. Tracked as **#934** (the real blocker; #65/#67 family).
-- **The working default is `Qwen2.5-Coder-14B`** — a standard dense arch fak's forward *does*
-  serve. Witnessed: correct code out, **~6.7 tok/s** (the decode is launch/op bound — the perf
-  levers are #483/#279/#401), ~16 GiB Q8-resident + a 32K context fits one datacenter GPU. A standard
-  **32B** is ~32 GiB Q8-resident — no KV room on 40GB (use the 80GB tier for 32B).
+- **The launcher now pins the literal `Qwen3.6-27B` artifact.** The architecture/load/forward
+  floor shipped in #934. The default is `unsloth/Qwen3.6-27B-GGUF` /
+  `Qwen3.6-27B-Q4_K_M.gguf`, with exact size and SHA-256 checked before build or serve; a legacy
+  Qwen2.5 override cannot emit the Qwen3.6 ready marker.
+- **CUDA GDN/SSM execution is still `not yet`.** #934 did not prove backend parity, and fresh DG2
+  validation found no GPU-resident Qwen3.6-27B turn. #4714 owns that fail-closed CUDA seam. Until
+  it lands and a capacity window produces the hardware artifact, the launcher contract is model
+  identity evidence—not #4379 throughput/correctness evidence.
 - **Keep `--cuda-graph` OFF** (the default). At 14B/datacenter GPU it was witnessed to *crash* the serve
   (lazy KV `cudaMalloc` during graph capture, **#932**), not speed it up — until KV is
   pre-allocated before capture.
 
-So `scripts/gcp-qwen-serve.sh` and `tools/qwen36_a100_fak_serve.sh` default to the **supported
-coder**; point them at Qwen3.6-27B (via `QWEN_REPO`/`MODEL_ID`) once #934 lands.
+`scripts/gcp-qwen-serve.sh` and `tools/qwen36_a100_fak_serve.sh` therefore default to the pinned
+Qwen3.6-27B artifact and fail closed on a different repository/file. Live readiness remains
+blocked on #4714 plus an independently read-back A100 run.
 
 ## Why a single datacenter GPU is enough
 

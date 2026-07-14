@@ -39,23 +39,22 @@
 # then poll:  cat "$QWEN_DIR/PHASE"   and on QWEN36_A100_FAK_SERVE_READY connect from the client.
 set -uo pipefail
 
-# MODEL SUPPORT (witnessed on a live A100-40GB, 2026-06-27):
-#   * Qwen2.5-Coder-14B (standard dense arch) WORKS on fak's in-kernel forward — this is the
-#     DEFAULT: ~16 GiB Q8-resident + 32K KV fits one A100-40GB, real code out at ~6.7 tok/s
-#     (the decode is launch/op bound; the perf levers are #483/#279/#401).
-#   * The literal Qwen3.6-27B (lmstudio-community/Qwen3.6-27B-GGUF) is a Gated-DeltaNet/SSM
-#     HYBRID (fused attn_qkv + per-layer ssm_*, no self_attn.q_proj) that fak's forward does
-#     NOT yet support — it loads + binds but PANICS on the first decode (#934). Point this at
-#     it (QWEN_REPO=lmstudio-community/Qwen3.6-27B-GGUF MODEL_ID=qwen3.6-27b) only once #934 lands.
-#   * A standard 32B (Qwen2.5-Coder-32B) is ~32 GiB Q8-resident — does NOT leave KV room on a
-#     40GB A100 (FitTooBig). Use the 80GB tier for 32B, or the 14B here.
+# MODEL SUPPORT:
+#   * The default is the exact Qwen3.6-27B Q4_K_M artifact whose model-support floor shipped
+#     in #934. Its identity is pinned below so a moving repository or a legacy Qwen2.5 override
+#     cannot emit the Qwen3.6 readiness marker.
+#   * CUDA GDN/SSM execution remains fail-closed at the runtime/backend seam tracked by #4714;
+#     this launcher contract must not be read as that hardware witness.
 QWEN_DIR="${QWEN_DIR:-/opt/fak-serve-model}"
-REPO="${QWEN_REPO:-bartowski/Qwen2.5-Coder-14B-Instruct-GGUF}"
-# Glob that matches the q4_k_m shard in the repo (the file name carries the quant tag).
-QWEN_FILE_GLOB="${QWEN_FILE_GLOB:-*[Qq]4_[Kk]_[Mm]*.gguf}"
+REPO="${QWEN_REPO:-unsloth/Qwen3.6-27B-GGUF}"
+QWEN_FILE_GLOB="${QWEN_FILE_GLOB:-Qwen3.6-27B-Q4_K_M.gguf}"
+MODEL_ID="${MODEL_ID:-qwen3.6-27b}"
+EXPECTED_REPO="unsloth/Qwen3.6-27B-GGUF"
+EXPECTED_FILE="Qwen3.6-27B-Q4_K_M.gguf"
+EXPECTED_SHA256="5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0"
+EXPECTED_SIZE="16817244384"
 PORT="${PORT:-8080}"
 ADDR="${ADDR:-0.0.0.0:${PORT}}"
-MODEL_ID="${MODEL_ID:-qwen2.5-coder-14b}"
 FAK_BIN="${FAK_BIN:-/usr/local/bin/fak}"
 GO_VERSION="${GO_VERSION:-1.26.4}"
 # Context budget: caps the planned KV cache (the in-kernel default plans the model's FULL
@@ -81,6 +80,12 @@ ph(){ echo "$(date -u +%H:%M:%S) $*" | tee -a "$LOG"; echo "$*" > "$PHASE"; }
 
 export PATH="/usr/local/go/bin:${CUDA_HOME}/bin:$PATH"
 
+if [ "$REPO" != "$EXPECTED_REPO" ] || [ "$QWEN_FILE_GLOB" != "$EXPECTED_FILE" ]; then
+  ph "MODEL_CONTRACT_FAIL expected_repo=$EXPECTED_REPO expected_file=$EXPECTED_FILE got_repo=$REPO got_file=$QWEN_FILE_GLOB"
+  exit 12
+fi
+ph "MODEL_CONTRACT_OK repo=$EXPECTED_REPO file=$EXPECTED_FILE sha256=$EXPECTED_SHA256 bytes=$EXPECTED_SIZE"
+
 # 1. Ensure Go. The GCP Deep-Learning CUDA image ships nvcc but not always the Go toolchain
 #    build_cuda.sh expects at /usr/local/go/bin; install it once if missing.
 if ! command -v go >/dev/null 2>&1; then
@@ -105,6 +110,15 @@ fi
 GGUF=$(ls "$QWEN_DIR"/$QWEN_FILE_GLOB 2>/dev/null | sort | head -1)
 ph "DOWNLOAD_DONE rc=$DL_RC gguf=$GGUF"
 [ "${DL_RC:-1}" -eq 0 ] && [ -n "$GGUF" ] && [ -f "$GGUF" ] || { ph "DOWNLOAD_FAIL"; exit 20; }
+ACTUAL_SIZE=$(wc -c < "$GGUF" | tr -d '[:space:]')
+[ "$ACTUAL_SIZE" = "$EXPECTED_SIZE" ] || { ph "MODEL_SIZE_FAIL expected=$EXPECTED_SIZE got=$ACTUAL_SIZE"; exit 21; }
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL_SHA256=$(sha256sum "$GGUF" | awk '{print $1}')
+  [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ] || { ph "MODEL_SHA256_FAIL expected=$EXPECTED_SHA256 got=$ACTUAL_SHA256"; exit 22; }
+else
+  ph "NO_SHA256SUM"; exit 22
+fi
+ph "MODEL_IDENTITY_OK repo=$REPO file=$(basename "$GGUF") sha256=$ACTUAL_SHA256 bytes=$ACTUAL_SIZE"
 
 # 3. Build the -tags cuda fak binary (libfakcuda sm_80 + cmd/fak) via the canonical recipe.
 if [ ! -x "$FAK_BIN" ] || [ "${REBUILD_FAK:-0}" = "1" ]; then
@@ -150,7 +164,7 @@ for _ in $(seq 1 90); do
       -d "{\"model\":\"$MODEL_ID\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}],\"max_tokens\":8}")
     echo "SMOKE: $smoke" >>"$LOG"
     if printf '%s' "$smoke" | grep -q '"content"' && ! printf '%s' "$smoke" | grep -q '"error"'; then
-      ph "QWEN36_A100_FAK_SERVE_READY port=$PORT model=$MODEL_ID"; exit 0
+      ph "QWEN36_A100_FAK_SERVE_READY port=$PORT model=$MODEL_ID repo=$REPO file=$(basename "$GGUF") sha256=$ACTUAL_SHA256 backend=cuda"; exit 0
     fi
     ph "SMOKE_FAIL"; exit 41
   fi
