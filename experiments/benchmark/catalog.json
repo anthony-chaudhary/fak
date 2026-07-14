@@ -238,7 +238,7 @@
       ]
     }
   },
-  "last_updated": "2026-07-14T23:25:05Z",
+  "last_updated": "2026-07-14T23:29:40Z",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -329,10 +329,10 @@
       "gpu": "NVIDIA GeForce RTX 4070 Laptop GPU",
       "hostname": "workstation-a",
       "id": "workstation-a",
-      "last_run": "20260715T062106Z",
+      "last_run": "20260714T232940Z",
       "os": "Windows",
       "role": "bench-node",
-      "runs": 1
+      "runs": 2
     }
   },
   "runs": [
@@ -1310,6 +1310,20 @@
         "livecodebench"
       ],
       "timestamp": "20260715T062106Z"
+    },
+    {
+      "machine_id": "workstation-a",
+      "model": "",
+      "path": "experiments/benchmark/runs/by-machine/workstation-a/20260714T232940Z-bench-fleet-6a57fc5d83c48046",
+      "precision": "n/a",
+      "provenance": "measured",
+      "run_id": "workstation-a-bench-fleet-6a57fc5d83c48046-20260714T232940Z",
+      "tags": [
+        "bench-fleet",
+        "control",
+        "concept-benchmark"
+      ],
+      "timestamp": "20260714T232940Z"
     }
   ],
   "version": "1.0",
