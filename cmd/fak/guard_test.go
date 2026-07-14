@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
@@ -965,6 +966,70 @@ func TestGuardBudgetRestarterRecontinuesAndEmitsSeed(t *testing.T) {
 	fresh := observeSession(context.Background(), child)
 	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Budget.ContextTokensLeft != 50 {
 		t.Fatalf("fresh state = %+v, want recontinued child with fresh context budget", fresh)
+	}
+}
+
+// TestGuardBudgetRestartCarriesObjectiveBaton forces the production budget-restart
+// seam with a verified ObjectivePin and proves the compact reseed carries both the
+// content-addressed objective and a re-verifiable git progress cursor (#3585).
+func TestGuardBudgetRestartCarriesObjectiveBaton(t *testing.T) {
+	const cursor = "0123456789abcdef0123456789abcdef01234567"
+	pin := ctxplan.NewObjectivePin("guard-3585", "ship the restart baton", 2)
+	r := newGuardBudgetRestarter(true, 50, 0, t.TempDir(), io.Discard)
+	r.progressCursor = func() string { return cursor }
+
+	const parent, child = "guard-baton-parent", "guard-baton-child"
+	t.Cleanup(func() { serveSessions.Reset(parent); serveSessions.Reset(child) })
+	serveSessions.Restore(parent, session.State{
+		TraceID: parent, Run: session.Draining, ContinuationID: child, ObjectivePin: pin,
+	})
+	st := gateway.SessionState{TraceID: parent, ContinuationID: child}
+	r.OnBudgetExhausted(context.Background(), st, []agent.Message{
+		{Role: agent.RoleUser, Content: "thin carryover"},
+	})
+
+	select {
+	case ev := <-r.events:
+		for _, want := range []string{"BATON", pin.Digest, cursor, "next_action="} {
+			if !strings.Contains(ev.SeedText, want) {
+				t.Fatalf("seed text = %q, want %q", ev.SeedText, want)
+			}
+		}
+		if got := guardRestartLimitStatus(1, ev); !strings.Contains(got, "continuity=baton") {
+			t.Fatalf("restart status = %q, want continuity=baton", got)
+		}
+		data, err := os.ReadFile(ev.SeedFile)
+		if err != nil {
+			t.Fatalf("read seed file: %v", err)
+		}
+		if !bytes.Contains(data, []byte(pin.Digest)) || !bytes.Contains(data, []byte(cursor)) {
+			t.Fatalf("seed file omitted baton digest/cursor: %s", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("restarter did not emit a restart event")
+	}
+}
+
+// TestGuardBudgetRestartWithoutObjectiveKeepsDegradedContinuity is the additive
+// compatibility witness: an unpinned session keeps the pre-baton seed/status shape.
+func TestGuardBudgetRestartWithoutObjectiveKeepsDegradedContinuity(t *testing.T) {
+	r := newGuardBudgetRestarter(true, 50, 0, t.TempDir(), io.Discard)
+	r.progressCursor = func() string { return "cursor-must-not-appear" }
+	const parent, child = "guard-no-baton-parent", "guard-no-baton-child"
+	t.Cleanup(func() { serveSessions.Reset(parent); serveSessions.Reset(child) })
+	serveSessions.Restore(parent, session.State{
+		TraceID: parent, Run: session.Draining, ContinuationID: child,
+	})
+	r.OnBudgetExhausted(context.Background(), gateway.SessionState{
+		TraceID: parent, ContinuationID: child,
+	}, []agent.Message{{Role: agent.RoleUser, Content: "legacy seed"}})
+
+	ev := <-r.events
+	if ev.Baton.valid() || strings.Contains(ev.SeedText, "BATON") {
+		t.Fatalf("unpinned restart unexpectedly gained baton: %+v", ev)
+	}
+	if got := guardRestartLimitStatus(1, ev); !strings.Contains(got, "continuity=degraded") {
+		t.Fatalf("restart status = %q, want continuity=degraded", got)
 	}
 }
 

@@ -872,15 +872,23 @@ func maybeLandlockCommand(command []string) []string {
 	return guard.TrampolineArgv(fakBin, spec, command)
 }
 
+type guardRestartBaton struct {
+	ObjectivePinID  string `json:"objective_pin_id"`
+	ObjectiveDigest string `json:"objective_digest"`
+	ProgressCursor  string `json:"progress_cursor"`
+	NextAction      string `json:"next_action"`
+}
+
 type guardBudgetRestartEvent struct {
-	Schema      string          `json:"schema"`
-	FromTraceID string          `json:"from_trace_id"`
-	ToTraceID   string          `json:"to_trace_id"`
-	Reason      string          `json:"reason,omitempty"`
-	SeedFile    string          `json:"seed_file,omitempty"`
-	Seed        []agent.Message `json:"seed_messages,omitempty"`
-	SeedText    string          `json:"seed_text,omitempty"`
-	Note        string          `json:"note"`
+	Schema      string            `json:"schema"`
+	FromTraceID string            `json:"from_trace_id"`
+	ToTraceID   string            `json:"to_trace_id"`
+	Reason      string            `json:"reason,omitempty"`
+	SeedFile    string            `json:"seed_file,omitempty"`
+	Seed        []agent.Message   `json:"seed_messages,omitempty"`
+	SeedText    string            `json:"seed_text,omitempty"`
+	Baton       guardRestartBaton `json:"baton,omitempty,omitzero"`
+	Note        string            `json:"note"`
 }
 
 type guardBudgetRestarter struct {
@@ -891,9 +899,10 @@ type guardBudgetRestarter struct {
 	// seedHandback selects the #3056 headless/no-continue handback: inject the carryover
 	// seed_text as the recognized child's initial prompt on relaunch instead of the default
 	// #3055 --continue transcript reattach. Set from the --restart-seed-handback knob.
-	seedHandback bool
-	stderr       io.Writer
-	events       chan guardBudgetRestartEvent
+	seedHandback   bool
+	stderr         io.Writer
+	progressCursor func() string
+	events         chan guardBudgetRestartEvent
 }
 
 func newGuardBudgetRestarter(enabled bool, freshContextTokens, limit int, seedDir string, stderr io.Writer) *guardBudgetRestarter {
@@ -903,6 +912,7 @@ func newGuardBudgetRestarter(enabled bool, freshContextTokens, limit int, seedDi
 		limit:              limit,
 		seedDir:            strings.TrimSpace(seedDir),
 		stderr:             stderr,
+		progressCursor:     sessionStartSHA,
 		events:             make(chan guardBudgetRestartEvent, 1),
 	}
 }
@@ -930,6 +940,13 @@ func (r *guardBudgetRestarter) OnBudgetExhausted(ctx context.Context, st gateway
 		SeedText:    guardSeedText(seed),
 		Note:        "context budget exhausted; fak guard is relaunching the child under the continuation trace",
 	}
+	pin := serveSessions.Get(st.TraceID).ObjectivePin
+	if pin.Verify() && r.progressCursor != nil {
+		ev.Baton = newGuardRestartBaton(pin.PinID, pin.Digest, r.progressCursor())
+		if text := guardRestartBatonText(ev.Baton); text != "" {
+			ev.SeedText = strings.TrimSpace(ev.SeedText + "\n\n" + text)
+		}
+	}
 	if path, err := writeGuardRestartSeedFile(r.seedDir, ev); err == nil {
 		ev.SeedFile = path
 	} else if r.stderr != nil {
@@ -942,6 +959,31 @@ func (r *guardBudgetRestarter) OnBudgetExhausted(ctx context.Context, st gateway
 			fmt.Fprintf(r.stderr, "fak guard: budget restart event for %s dropped; restart already pending\n", st.TraceID)
 		}
 	}
+}
+
+func newGuardRestartBaton(pinID, digest, cursor string) guardRestartBaton {
+	b := guardRestartBaton{
+		ObjectivePinID:  strings.TrimSpace(pinID),
+		ObjectiveDigest: strings.TrimSpace(digest),
+		ProgressCursor:  strings.TrimSpace(cursor),
+		NextAction:      "verify the progress cursor, then continue the pinned objective",
+	}
+	if !b.valid() {
+		return guardRestartBaton{}
+	}
+	return b
+}
+
+func (b guardRestartBaton) valid() bool {
+	return b.ObjectivePinID != "" && b.ObjectiveDigest != "" && b.ProgressCursor != "" && b.NextAction != ""
+}
+
+func guardRestartBatonText(b guardRestartBaton) string {
+	if !b.valid() {
+		return ""
+	}
+	return fmt.Sprintf("BATON\nobjective_pin_id=%s\nobjective_digest=%s\nprogress_cursor=%s\nnext_action=%s\nEND BATON",
+		b.ObjectivePinID, b.ObjectiveDigest, b.ProgressCursor, b.NextAction)
 }
 
 func guardSeedText(seed []agent.Message) string {
@@ -1110,6 +1152,9 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 		reason = "BUDGET_CONTEXT_EXHAUSTED"
 	}
 	continuity := "degraded"
+	if ev.Baton.valid() && strings.Contains(ev.SeedText, "BATON\n") {
+		continuity = "baton"
+	}
 	if strings.TrimSpace(ev.ToTraceID) == "" && strings.TrimSpace(ev.SeedFile) == "" && strings.TrimSpace(ev.SeedText) == "" {
 		continuity = "blocked"
 	}
