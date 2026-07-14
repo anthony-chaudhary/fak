@@ -445,6 +445,7 @@ var tier = map[string]int{
 	"deploymanifest":        1, // unified fak.toml all-in-one deployment manifest (#3421, epic #3256): typed schema for the eight deployment sections + a fail-closed loader (unknown/typo'd key refuses at load with a closed-vocabulary reason) + the `fak init` minimal-emit bytes; stdlib-only, imports nothing internal, off the hot path.
 	"systemservice":         1, // pure service-manager definition renderer; stdlib-only and off the hot path.
 	"guardcompile":          3,
+	"operatorquestion": 2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
