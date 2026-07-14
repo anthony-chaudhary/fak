@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -513,6 +514,29 @@ func guardAppendContinueFlag(command []string, flag string) []string {
 	return append(out, flag)
 }
 
+// guardStripContinueFlag removes the agent's resume/--continue flag (and only that flag) from
+// command, leaving the binary (command[0]) and every other argument intact. It is the inverse of
+// guardAppendContinueFlag: when a relaunch boots FRESH on a distilled carryover seed, any --continue
+// left on the command from a prior fallback restart would ALSO reattach — and re-inflate — the
+// exhausted transcript underneath the seed, defeating the shrink. A no-op for an unrecognized agent
+// (no known resume flag) or a command that never carried the flag. The input is never mutated in
+// place. --continue is a boolean flag (no value), so only the token itself is dropped.
+func guardStripContinueFlag(command []string, agentName string) []string {
+	flag, ok := guardContinueFlagForAgent(agentName)
+	if !ok || len(command) == 0 {
+		return command
+	}
+	out := make([]string, 0, len(command))
+	out = append(out, command[0])
+	for _, a := range command[1:] {
+		if a == flag {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // guardSeedPromptFlagForAgent returns the prompt entrypoint fak knows is SAFE to inject a carryover
 // seed_text through as a fresh initial prompt on a headless/no-continue relaunch (#3056), keyed off
 // the SAME recognized-agent allowlist as guardContinueFlagForAgent (#3055 / "#A"). Claude Code is
@@ -1010,11 +1034,15 @@ func guardRestartRelaunchCommand(command []string, agentName string) []string {
 }
 
 // guardSeedPromptTokenBudget is the documented ceiling on a carryover seed re-injected as a
-// relaunch prompt (#3056). Measured in guardApproxTokens' ~4-bytes/token gauge, so ~8 KB of seed
-// prose. A relaunch prompt is a task RE-ORIENTATION — the load-bearing "what were you doing"
-// carryover — not the whole transcript (reattaching that is the --continue path's job, #3055), so a
-// few thousand tokens is the ceiling; anything past it is truncated AND logged, never silently.
-const guardSeedPromptTokenBudget = 2000
+// relaunch prompt (#3056). Measured in guardApproxTokens' ~4-bytes/token gauge, so ~64 KB of seed
+// prose. Now that the seed is the AUTHORITATIVE restart context by default (the relaunch boots
+// fresh on it and strips --continue rather than reattaching the exhausted transcript), it must
+// carry enough of the load-bearing "what were you doing / where did you get to" carryover to
+// re-orient the child without the transcript — so the ceiling is raised 8× from the original 2000.
+// It stays well under any real context window (a distilled seed, not the whole transcript), so a
+// fresh boot on it genuinely SHRINKS the window that exhaustion overflowed; anything past the
+// ceiling is truncated AND logged, never silently.
+const guardSeedPromptTokenBudget = 16000
 
 // guardBoundSeedPrompt truncates seed to at most tokenBudget approx-tokens (guardApproxTokens'
 // 4-bytes/token gauge), cutting on a UTF-8 rune boundary so a multi-byte rune is never split. It
@@ -1100,6 +1128,60 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 	}
 	return fmt.Sprintf("fak guard: managed-context status reset_limit limit=%d reason=%s continuity=%s next_action=%q",
 		limit, reason, continuity, next)
+}
+
+// guardNoProgressRestartLimitDefault is the K-consecutive-no-progress reap threshold (#4609):
+// after this many budget restarts that each landed NO new commit (HEAD unchanged since the prior
+// restart), the guard reaps a degenerate restart-storming worker EARLY rather than let it ride the
+// raw --restart-limit all the way to the wall-clock backstop doing nothing. A restart that DID move
+// HEAD resets the counter, so a healthy-but-slow COMMITTING worker earns back its full runway and is
+// never reaped here — the raw --restart-limit (16, pinned by TestClaudeGuardRestartLimit) stays the
+// healthy-worker bound. This reap is a strictly earlier, progress-aware trip on top of it, NOT a
+// replacement, which is why the raw cap value is deliberately left unchanged (see #4609: lowering it
+// to 6 would reap a healthy committing worker at ~40% of its runway).
+const guardNoProgressRestartLimitDefault = 6
+
+// guardNoProgressRestartLimit resolves the no-progress reap threshold from the environment, falling
+// back to guardNoProgressRestartLimitDefault. A value of 0 (or a negative/garbage override) disables
+// the reap, leaving only the raw --restart-limit backstop — the same fail-safe the reap already takes
+// when git offers no HEAD signal.
+func guardNoProgressRestartLimit() int {
+	if v := strings.TrimSpace(os.Getenv("FLEET_CLAUDE_GUARD_NO_PROGRESS_LIMIT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return guardNoProgressRestartLimitDefault
+}
+
+// guardNoProgressStep folds one restart's HEAD observation into the (checkpoint, counter) pair the
+// #4609 reap rides: a HEAD that advanced past the checkpoint resets the counter and moves the
+// checkpoint (a commit landed — the worker earns back its runway); an unchanged HEAD increments the
+// counter. An empty cur (git offered no signal at this restart) leaves BOTH untouched, so a transient
+// read miss neither trips nor resets the reap. Pure, so the reset/increment discipline is unit-tested
+// without standing up the supervision loop.
+func guardNoProgressStep(prevHead, cur string, counter int) (string, int) {
+	if strings.TrimSpace(cur) == "" {
+		return prevHead, counter
+	}
+	if cur != prevHead {
+		return cur, 0
+	}
+	return prevHead, counter + 1
+}
+
+// guardNoProgressReapStatus is the one-line stderr banner the no-progress reap emits, mirroring
+// guardRestartLimitStatus's managed-context-status shape so an operator greps both reap paths the
+// same way. It names the consecutive-no-progress depth that tripped and the originating trace, and
+// points at the tuning knob.
+func guardNoProgressReapStatus(limit int, ev guardBudgetRestartEvent) string {
+	reason := strings.TrimSpace(ev.Reason)
+	if reason == "" {
+		reason = "BUDGET_CONTEXT_EXHAUSTED"
+	}
+	return fmt.Sprintf("fak guard: managed-context status no_progress_reap limit=%d reason=%s from_trace=%s next_action=%q",
+		limit, reason, strings.TrimSpace(ev.FromTraceID),
+		"worker restarted with no new commit; raise FLEET_CLAUDE_GUARD_NO_PROGRESS_LIMIT or investigate the stall")
 }
 
 // guardChildIsLaunchFailure reports whether runErr is a FAILURE TO LAUNCH (a spawn/exec error
@@ -1222,6 +1304,14 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0
+	// #4609 progress-aware early reap: track HEAD across budget restarts so a worker that keeps
+	// restarting WITHOUT landing a commit is reaped early, while a committing worker keeps its
+	// full runway. progressHead is the HEAD SHA at the last restart that made progress (seeded at
+	// the loop's start SHA); "" when git offers no signal (e.g. a generic `fak guard` off a repo),
+	// which disables the reap — as does noProgressLimit == 0.
+	noProgressRestarts := 0
+	noProgressLimit := guardNoProgressRestartLimit()
+	progressHead := sessionStartSHA()
 	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
 	// --max-duration envelope is actually ENFORCED here, not merely armed/persisted/displayed.
 	// guardTimeBudgetExhausted is a no-op for an unbounded/paused/still-fine session, so a run
@@ -1271,6 +1361,24 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			return
 		case guardChildRestart:
 			ev := event.Restart
+			// #4609: advance or reset the no-progress counter by whether HEAD moved since the
+			// last progress checkpoint. A restart that landed a commit (HEAD advanced) resets both
+			// the counter and the checkpoint — a committing worker earns back its full runway; one
+			// that did not increments it. Skipped entirely when the reap is disabled or git offers
+			// no HEAD signal. This is a strictly EARLIER, progress-aware trip that sits on top of
+			// the raw --restart-limit backstop below (16, pinned by TestClaudeGuardRestartLimit),
+			// never a replacement for it.
+			if noProgressLimit > 0 && progressHead != "" {
+				progressHead, noProgressRestarts = guardNoProgressStep(progressHead, sessionStartSHA(), noProgressRestarts)
+			}
+			if noProgressLimit > 0 && progressHead != "" && noProgressRestarts >= noProgressLimit {
+				if restarter.stderr != nil {
+					fmt.Fprintln(restarter.stderr, guardNoProgressReapStatus(noProgressLimit, ev))
+				}
+				runErr := <-wait
+				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			if restarter.limit > 0 && restarts >= restarter.limit {
 				if restarter.stderr != nil {
 					fmt.Fprintln(restarter.stderr, guardRestartLimitStatus(restarter.limit, ev))
@@ -1284,21 +1392,28 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			// hop recorded below matches the command actually launched.
 			handback := ""
 			if restarter.seedHandback {
-				// #3056: headless/no-continue handback — inject the bounded carryover seed as the
-				// recognized child's initial prompt (--append-system-prompt) instead of reattaching
-				// the transcript. A no-op for an unrecognized agent or an empty seed, which falls
-				// through to the #3055 default below.
+				// #3056 + authoritative-seed default (--restart-seed-handback, now ON by default):
+				// inject the bounded carryover seed as the recognized child's initial prompt
+				// (--append-system-prompt) AND strip any --continue, so the relaunch boots FRESH on the
+				// distilled seed instead of reattaching the exhausted transcript. Reattaching would
+				// re-inflate the very context window that just overflowed, so the child re-exhausts and
+				// restarts again (the restart loop this fix breaks); booting on the seed shrinks the
+				// window. A no-op for an unrecognized agent or an empty seed, which falls through to the
+				// #3055 default below.
 				if next, hb, injected := guardSeedPromptRelaunchCommand(command, agentName, ev.SeedText, restarter.stderr); injected {
-					command, handback = next, hb
+					command, handback = guardStripContinueFlag(next, agentName), hb
 				}
 			}
 			if handback == "" {
-				// #3055: reattach the existing transcript on relaunch. The FAK_RESET_* env vars
-				// set below are advisory only (Claude Code reads none of them), so continuity comes
-				// from the wrapped agent's own resume flag — a recognized child resumes the captured
-				// conversation instead of booting cold and losing the task. Idempotent across repeated
-				// restarts; an unrecognized agent is relaunched unchanged (handback derives to
-				// continue/ORPHANED in the hop below).
+				// #3055 fallback: no usable seed (empty seed, or an unrecognized agent whose prompt
+				// syntax fak will not guess), or --restart-seed-handback=false. Reattach the existing
+				// transcript on relaunch. The FAK_RESET_* env vars set below are advisory only (Claude
+				// Code reads none of them), so continuity comes from the wrapped agent's own resume flag
+				// — a recognized child resumes the captured conversation instead of booting cold and
+				// losing the task. Idempotent across repeated restarts; an unrecognized agent is
+				// relaunched unchanged (handback derives to continue/ORPHANED in the hop below). This
+				// path RE-INFLATES the exhausted window (no context shrink) — the hop one-liner marks it
+				// shrink=no so an operator can spot the restart that did not reduce the window.
 				command = guardRestartRelaunchCommand(command, agentName)
 			}
 			// #3057: ONE correlated record per restart — a RESTART_HOP row in the

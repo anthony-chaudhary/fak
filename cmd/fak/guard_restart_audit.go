@@ -125,6 +125,20 @@ func guardRestartHopFromEventHandback(ev guardBudgetRestartEvent, hop int, agent
 	}
 }
 
+// guardRestartHopShrink reports whether the relaunch this hop records SHRANK the exhausted context
+// window ("yes") or RE-INFLATED it ("no") — the fix-#2 no-shrink signal. Only the seed-prompt
+// handback boots the child fresh on the bounded distilled seed (and strips --continue), so only it
+// reduces the window; a --continue reattach, or an ORPHANED cold relaunch that leaves the seed
+// unread, does not. Derived purely from the handback mode the RESTART_HOP row already carries, so no
+// new durable field is needed: an operator watching restarts can spot a shrink=no hop as the one at
+// risk of re-exhausting and looping.
+func guardRestartHopShrink(hop journal.RestartHop) string {
+	if hop.Handback == guardRestartHandbackSeedPrompt {
+		return "yes"
+	}
+	return "no"
+}
+
 // guardRestartHopOneLiner renders the correlated stderr line for one live hop —
 // the single line that replaces the old "context budget exhausted…" +
 // "carryover seed written…" pair, carrying every axis of the record so a
@@ -132,8 +146,8 @@ func guardRestartHopFromEventHandback(ev guardBudgetRestartEvent, hop int, agent
 // forward-slash-normalized for the same reason guardRestartLimitStatus's
 // next_action is: byte-identical output on every OS.
 func guardRestartHopOneLiner(hop journal.RestartHop) string {
-	line := fmt.Sprintf("fak guard: restart #%d from=%s to=%s seed=%dtok handback=%s child=%s status=%s",
-		hop.Hop, hop.FromTrace, hop.ToTrace, hop.SeedTokens, hop.Handback, hop.Child, hop.Status)
+	line := fmt.Sprintf("fak guard: restart #%d from=%s to=%s seed=%dtok handback=%s child=%s status=%s shrink=%s",
+		hop.Hop, hop.FromTrace, hop.ToTrace, hop.SeedTokens, hop.Handback, hop.Child, hop.Status, guardRestartHopShrink(hop))
 	if hop.SeedFile != "" {
 		line += " seed_file=" + strings.ReplaceAll(filepath.ToSlash(hop.SeedFile), "\\", "/")
 	}

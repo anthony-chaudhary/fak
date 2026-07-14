@@ -861,6 +861,72 @@ func TestGuardRestartLimitStatusSeedPathSurvivesQuoting(t *testing.T) {
 	}
 }
 
+// TestGuardNoProgressStep pins the #4609 reap's counter discipline: a HEAD that advances resets the
+// counter and moves the checkpoint (a commit landed → the worker earns back its runway), an unchanged
+// HEAD increments it, and an empty observation (git offered no signal this restart) leaves BOTH
+// untouched so a transient read miss neither trips nor resets the reap.
+func TestGuardNoProgressStep(t *testing.T) {
+	// Two restarts with an unchanged HEAD climb the counter.
+	head, n := "sha-a", 0
+	head, n = guardNoProgressStep(head, "sha-a", n)
+	head, n = guardNoProgressStep(head, "sha-a", n)
+	if head != "sha-a" || n != 2 {
+		t.Fatalf("two no-progress restarts: got head=%q n=%d, want head=sha-a n=2", head, n)
+	}
+	// A commit (HEAD advances) resets the counter and moves the checkpoint.
+	head, n = guardNoProgressStep(head, "sha-b", n)
+	if head != "sha-b" || n != 0 {
+		t.Fatalf("progress restart: got head=%q n=%d, want head=sha-b n=0", head, n)
+	}
+	// An empty observation is a no-op on both fields; the next unchanged HEAD climbs from there.
+	head, n = guardNoProgressStep(head, "", n)
+	head, n = guardNoProgressStep(head, "sha-b", n)
+	if head != "sha-b" || n != 1 {
+		t.Fatalf("empty then no-progress: got head=%q n=%d, want head=sha-b n=1", head, n)
+	}
+}
+
+// TestGuardNoProgressRestartLimitEnv pins the reap-threshold resolution: the default when unset/empty,
+// an explicit positive override, 0 to disable, and a garbage/negative value falling back to default.
+func TestGuardNoProgressRestartLimitEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  string
+		want int
+	}{
+		{"empty is default", "", guardNoProgressRestartLimitDefault},
+		{"explicit override", "3", 3},
+		{"zero disables", "0", 0},
+		{"negative falls back", "-2", guardNoProgressRestartLimitDefault},
+		{"garbage falls back", "nope", guardNoProgressRestartLimitDefault},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FLEET_CLAUDE_GUARD_NO_PROGRESS_LIMIT", tc.val)
+			if got := guardNoProgressRestartLimit(); got != tc.want {
+				t.Fatalf("guardNoProgressRestartLimit()=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGuardNoProgressReapStatus pins the reap banner shape: the managed-context-status prefix an
+// operator greps, the depth that tripped, the defaulted reason, the originating trace, and the knob.
+func TestGuardNoProgressReapStatus(t *testing.T) {
+	line := guardNoProgressReapStatus(6, guardBudgetRestartEvent{FromTraceID: "stuck-worker"})
+	for _, want := range []string{
+		"managed-context status",
+		"no_progress_reap",
+		"limit=6",
+		"reason=BUDGET_CONTEXT_EXHAUSTED", // defaulted when ev.Reason is empty
+		"from_trace=stuck-worker",
+		"FLEET_CLAUDE_GUARD_NO_PROGRESS_LIMIT",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("no-progress reap status missing %q:\n%s", want, line)
+		}
+	}
+}
+
 func TestGuardBudgetRestarterRecontinuesAndEmitsSeed(t *testing.T) {
 	const trace = "guard-restart-test"
 	var child string

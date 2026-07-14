@@ -159,6 +159,48 @@ func TestGuardSeedPromptHopContinuityVerdict(t *testing.T) {
 	}
 }
 
+func TestGuardStripContinueFlag(t *testing.T) {
+	// Recognized agent: --continue is removed; the binary and every other arg are preserved.
+	if got := guardStripContinueFlag([]string{"claude", "--continue", "-p", "task"}, "claude"); strings.Join(got, " ") != "claude -p task" {
+		t.Fatalf("strip = %v, want [claude -p task]", got)
+	}
+	// No --continue present: unchanged.
+	if got := guardStripContinueFlag([]string{"claude", "-p"}, "claude"); strings.Join(got, " ") != "claude -p" {
+		t.Fatalf("no-op strip changed the command: %v", got)
+	}
+	// Unrecognized agent: fak knows no resume flag for it, so it never strips (no-op) — it must not
+	// guess that a foreign tool's "--continue" means the same thing.
+	if got := guardStripContinueFlag([]string{"codex", "--continue"}, "codex"); strings.Join(got, " ") != "codex --continue" {
+		t.Fatalf("unrecognized agent must be a no-op, got %v", got)
+	}
+	// The input command must not be mutated in place.
+	in := []string{"claude", "--continue", "run"}
+	_ = guardStripContinueFlag(in, "claude")
+	if strings.Join(in, " ") != "claude --continue run" {
+		t.Fatalf("input command was mutated: %v", in)
+	}
+}
+
+func TestGuardSeedHandbackBootsFreshStrippingContinue(t *testing.T) {
+	// Fix #2 (authoritative restart seed): a command carrying a stale --continue from a prior fallback
+	// restart must, on the seed path, BOTH gain the bounded seed prompt AND lose --continue, so the
+	// child boots fresh on the distilled seed instead of reattaching — and re-inflating — the exhausted
+	// transcript. This mirrors exactly what the supervision loop does on a restart.
+	command := []string{"claude", "-p", "--continue"}
+	next, hb, injected := guardSeedPromptRelaunchCommand(command, "claude", "resume the triage task", nil)
+	if !injected || hb != guardRestartHandbackSeedPrompt {
+		t.Fatalf("expected seed-prompt injection, got injected=%v hb=%q", injected, hb)
+	}
+	next = guardStripContinueFlag(next, "claude")
+	joined := strings.Join(next, " ")
+	if strings.Contains(joined, "--continue") {
+		t.Fatalf("--continue must be stripped on the seed path (no transcript re-inflation): %v", next)
+	}
+	if !strings.Contains(joined, "--append-system-prompt resume the triage task") {
+		t.Fatalf("bounded seed must ride along as the fresh prompt: %v", next)
+	}
+}
+
 func TestGuardBoundSeedPrompt(t *testing.T) {
 	// Under budget: untouched, zero dropped.
 	if b, d := guardBoundSeedPrompt("hello", 100); b != "hello" || d != 0 {

@@ -87,6 +87,23 @@ func TestRestartChainOneLiner(t *testing.T) {
 	}
 }
 
+func TestRestartChainShrinkSignal(t *testing.T) {
+	// Fix #2 no-shrink signal: only a seed-prompt handback boots fresh on the distilled seed (and
+	// strips --continue), so only it SHRINKS the exhausted window. A --continue reattach or an
+	// ORPHANED cold relaunch re-inflates (or leaves the seed unread) → shrink=no, the hop an operator
+	// should watch for a re-exhaustion loop.
+	seed := journal.RestartHop{Hop: 1, Handback: guardRestartHandbackSeedPrompt, Status: journal.RestartHopOK}
+	if guardRestartHopShrink(seed) != "yes" || !strings.Contains(guardRestartHopOneLiner(seed), "shrink=yes") {
+		t.Fatalf("seed-prompt hop must report shrink=yes, got %q", guardRestartHopOneLiner(seed))
+	}
+	for _, hb := range []string{guardRestartHandbackContinue, guardRestartHandbackOrphaned} {
+		h := journal.RestartHop{Hop: 2, Handback: hb, Status: journal.RestartHopOK}
+		if guardRestartHopShrink(h) != "no" || !strings.Contains(guardRestartHopOneLiner(h), "shrink=no") {
+			t.Fatalf("%s hop must report shrink=no (re-inflates), got %q", hb, guardRestartHopOneLiner(h))
+		}
+	}
+}
+
 func TestRestartChainEmitWritesRowAndLine(t *testing.T) {
 	j := journal.OpenMemory()
 	var stderr bytes.Buffer
