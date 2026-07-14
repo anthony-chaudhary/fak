@@ -54,20 +54,22 @@ const (
 	// so the switch is never overloaded as a path). The Python module reuses
 	// FLEET_WORKER_WORKTREE as the path marker; the Go wiring keeps them separate.
 	WorktreeDirEnv = "FLEET_WORKER_WORKTREE_DIR"
-	// LandReadbackEnv, when truthy, makes Land re-read trunk HEAD after a
-	// path-scoped commit and confirm it actually carries the worker's intended
-	// paths — turning the silent shared-index-race false-success (#3547) into an
-	// honest LAND_READBACK_MISMATCH refusal. DEFAULT OFF so the baseline land path
-	// is byte-for-byte unchanged (the #3165 opt-in, fail-open, A/B-able doctrine);
-	// the epic owner flips it on to measure the false-refuse rate under real load.
+	// LandReadbackEnv makes Land re-read trunk HEAD after a path-scoped commit and
+	// confirm it actually carries the worker's intended paths — turning the silent
+	// shared-index-race false-success (#3547) into an honest LAND_READBACK_MISMATCH
+	// refusal. DEFAULT ON since #3619 (the concurrent-land soak proved the layer-2
+	// isolated path race-free; this layer-1 honest refusal rides on by default too);
+	// set it to 0/false/off to force the pre-#3619 byte-for-byte baseline as an escape.
 	LandReadbackEnv = "FAK_LAND_READBACK_VERIFY"
-	// IsolatedLandEnv, when truthy, makes Land stage+commit through a THROWAWAY index
-	// (GIT_INDEX_FILE) and move the branch with a compare-and-swap ref update, so a
-	// worker's change is never in the SHARED index for a concurrent commit to sweep —
-	// the race-free layer-2 fix for #3547 (layer 1 is LandReadbackEnv's honest refusal).
-	// DEFAULT OFF; on ANY hiccup (detached HEAD, apply conflict, lost CAS, unresolved
-	// identity, git error) it FALLS BACK to the baseline shared path, so enabling it can
-	// only ever REDUCE race exposure on the happy path, never do worse than today.
+	// IsolatedLandEnv makes Land stage+commit through a THROWAWAY index (GIT_INDEX_FILE)
+	// and move the branch with a compare-and-swap ref update, so a worker's change is
+	// never in the SHARED index for a concurrent commit to sweep — the race-free layer-2
+	// fix for #3547 (layer 1 is LandReadbackEnv's honest refusal). DEFAULT ON since #3619
+	// (TestConcurrentLandSoakIsolatedIsRaceFree witnesses it clean under -race while the
+	// baseline soak reproduces the sweep); on ANY hiccup (detached HEAD, apply conflict,
+	// lost CAS, unresolved identity, git error) it FALLS BACK to the baseline shared path,
+	// so it can only ever REDUCE race exposure, never do worse. Set 0/false/off to force
+	// the shared-index baseline as an escape.
 	IsolatedLandEnv = "FAK_LAND_ISOLATED_INDEX"
 	keyHashLen      = 12
 )
@@ -616,17 +618,22 @@ func composeSignedMsg(msgFile, name, email string) (string, func(), error) {
 	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
-// landReadbackEnabled reports whether the opt-in post-commit readback (LandReadbackEnv)
-// is on. Truthy = any value other than "", "0", "false", "off" (case-insensitive).
-func landReadbackEnabled() bool { return envTruthy(LandReadbackEnv) }
+// landReadbackEnabled reports whether the post-commit readback (LandReadbackEnv)
+// is on. DEFAULT ON since #3619; only an explicit 0/false/off forces it off.
+func landReadbackEnabled() bool { return envDefaultOn(LandReadbackEnv) }
 
-func isolatedLandEnabled() bool { return envTruthy(IsolatedLandEnv) }
+// isolatedLandEnabled reports whether the race-free isolated-index land
+// (IsolatedLandEnv) is on. DEFAULT ON since #3619; only an explicit 0/false/off
+// forces the shared-index baseline.
+func isolatedLandEnabled() bool { return envDefaultOn(IsolatedLandEnv) }
 
-// envTruthy reads a boolean opt-in env gate: set and not one of 0/false/off (any
-// case) counts as on. Empty/unset is off, keeping every gated path default-OFF.
-func envTruthy(name string) bool {
+// envDefaultOn reads a boolean gate that DEFAULTS ON: unset/empty counts as on;
+// only an explicit 0/false/off (any case) forces it off. The shape a gate takes
+// once its soak has proven it safe to default on (#3619), keeping the env as an
+// operator escape hatch back to the old behavior.
+func envDefaultOn(name string) bool {
 	v := strings.TrimSpace(os.Getenv(name))
-	return v != "" && v != "0" && !strings.EqualFold(v, "false") && !strings.EqualFold(v, "off")
+	return v == "" || (v != "0" && !strings.EqualFold(v, "false") && !strings.EqualFold(v, "off"))
 }
 
 // landReadbackVerify confirms trunk HEAD, right after a path-scoped commit, carries

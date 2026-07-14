@@ -293,6 +293,10 @@ func TestReapRefusesNonWorkerWorktree(t *testing.T) {
 // ---- Land ----------------------------------------------------------------- //
 
 func TestLandLandsDiffOntoTrunkByPathSignedOff(t *testing.T) {
+	// Exercises the shared-index baseline apply+commit mechanics; force both #3619
+	// safety gates off (default-ON since #3619) so this fake need not stub them.
+	t.Setenv(IsolatedLandEnv, "0")
+	t.Setenv(LandReadbackEnv, "0")
 	g := newFakeGit().
 		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
 		reply("apply", 0, "").
@@ -442,7 +446,7 @@ func TestLandReadbackVerifyRefusesWhenPathSweptByRace(t *testing.T) {
 	}
 }
 
-func TestLandReadbackDefaultOffLeavesBaselineUnchanged(t *testing.T) {
+func TestLandReadbackForcedOffLeavesBaselineUnchanged(t *testing.T) {
 	t.Setenv(LandReadbackEnv, "0") // explicit off — baseline path
 	// A diff-tree that WOULD fail the check must never be consulted when off.
 	g := newFakeGit().
@@ -584,8 +588,11 @@ func TestLandIsolatedMissingIdentityFallsBack(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedDefaultOffLeavesBaselineUnchanged(t *testing.T) {
+func TestLandIsolatedForcedOffLeavesBaselineUnchanged(t *testing.T) {
+	// The env is the operator escape hatch back to the shared-index baseline now
+	// that #3619 flipped both gates default-ON; force both off here.
 	t.Setenv(IsolatedLandEnv, "0")
+	t.Setenv(LandReadbackEnv, "0")
 	g := newFakeGit().
 		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
 		reply("apply", 0, "").
