@@ -200,6 +200,8 @@ func main() {
 		cmdStallscan(os.Args[2:])
 	case "host-crash":
 		cmdHostCrash(os.Args[2:])
+	case "host-relaunch-broker":
+		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, os.Args[2:]))
 	case "schedscan":
 		cmdSchedScan(os.Args[2:])
 	case "growthgate":

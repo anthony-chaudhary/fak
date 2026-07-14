@@ -77,11 +77,25 @@ if ($Install) {
   $conhost = "$env:SystemRoot\System32\conhost.exe"
   $action  = New-ScheduledTaskAction -Execute $conhost -Argument "--headless `"$pwsh`" $args"
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
-  $trigger = New-ScheduledTaskTrigger -AtLogOn
+  # AtStartup, not AtLogOn: the control plane is born independently of RDP/WT and
+  # survives TermService tearing an interactive logon session down.
+  $trigger = New-ScheduledTaskTrigger -AtStartup
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
   Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
-  Write-Host "[stall-mon] installed Scheduled Task 'FakStallMonitor' (runs at logon)."
-  Write-Host "[stall-mon] UNDO: Unregister-ScheduledTask -TaskName 'FakStallMonitor' -Confirm:`$false"
+
+  # Session-0 cannot activate an AppX WT window in a user desktop. Keep the
+  # long-lived watchdog S4U and register only this on-demand UI adapter as
+  # InteractiveToken. The broker drains a typed durable spool and does no sensing,
+  # policy, retry, or ownership work.
+  $brokerSpool = Join-Path (Split-Path -Parent $Log) 'relaunch'
+  $brokerArgs = "host-relaunch-broker --dir `"$brokerSpool`""
+  $brokerAction = New-ScheduledTaskAction -Execute $fak -Argument $brokerArgs
+  $brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $brokerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $brokerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+  Register-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Action $brokerAction -Principal $brokerPrincipal -Trigger $brokerTrigger -Settings $brokerSettings -Force | Out-Null
+  Write-Host "[stall-mon] installed FakStallMonitor (AtStartup/S4U) + on-demand FakHostRelaunchBroker (InteractiveToken adapter)."
+  Write-Host "[stall-mon] UNDO: Unregister-ScheduledTask -TaskName 'FakStallMonitor' -Confirm:`$false; Unregister-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Confirm:`$false"
   return
 }
 

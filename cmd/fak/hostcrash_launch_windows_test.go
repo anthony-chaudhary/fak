@@ -3,40 +3,37 @@
 package main
 
 import (
-	"os"
-	"os/exec"
-	"strings"
-	"testing"
-
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
+	"os"
+	"testing"
 )
 
-func TestLaunchHostSessionPlatformUsesFreshWindowCWDAndResumeContext(t *testing.T) {
-	if os.Getenv("FAK_WT_LAUNCH_HELPER") == "1" {
-		if os.Getenv("FAK_RESUME_HANDLE") != "g123" || os.Getenv("FAK_HOST_CRASH_EVENT") != "evt" {
-			os.Exit(3)
+func TestLaunchHostSessionPlatformQueuesBeforeInteractiveBroker(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_HOST_RELAUNCH_DIR", dir)
+	old := runInteractiveBrokerTask
+	called := false
+	runInteractiveBrokerTask = func(task string) error {
+		called = true
+		if task != "FakHostRelaunchBroker" {
+			t.Fatalf("task=%q", task)
 		}
-		os.Exit(0)
+		return os.ErrNotExist
 	}
-	old := hostSessionExecCommand
-	var gotName string
-	var gotArgs []string
-	hostSessionExecCommand = func(name string, args ...string) *exec.Cmd {
-		gotName, gotArgs = name, append([]string(nil), args...)
-		cmd := exec.Command(os.Args[0], "-test.run=TestLaunchHostSessionPlatformUsesFreshWindowCWDAndResumeContext")
-		cmd.Env = append(os.Environ(), "FAK_WT_LAUNCH_HELPER=1")
-		return cmd
+	t.Cleanup(func() { runInteractiveBrokerTask = old })
+	req := hostresurrect.Request{Schema: hostresurrect.Schema, EventID: "evt", Session: "g1", CWD: `C:\work`, Command: []string{"claude"}, ResumeHandle: "g1"}
+	if _, err := launchHostSessionPlatform(req); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { hostSessionExecCommand = old })
-	pid, err := launchHostSessionPlatform(hostresurrect.Request{EventID: "evt", CWD: `C:\work\repo`, Command: []string{"claude", "--continue"}, ResumeHandle: "g123"})
-	if err != nil || pid <= 0 {
-		t.Fatalf("launch pid=%d err=%v", pid, err)
+	if !called {
+		t.Fatal("broker not signaled")
 	}
-	if gotName != "wt.exe" {
-		t.Fatalf("launcher=%q", gotName)
+	pending, err := hostresurrect.Pending(dir)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending=%v err=%v", pending, err)
 	}
-	joined := strings.Join(gotArgs, "|")
-	if joined != `-w|new|new-tab|-d|C:\work\repo|claude|--continue` {
-		t.Fatalf("args=%q", joined)
+	got, err := hostresurrect.ReadQueued(pending[0])
+	if err != nil || got.Session != "g1" {
+		t.Fatalf("got=%+v err=%v", got, err)
 	}
 }
