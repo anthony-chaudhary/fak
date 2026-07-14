@@ -46,8 +46,9 @@ import (
 )
 
 func cmdProject(argv []string) {
-	dispatchSubcommands("project", "report | post | selfcheck", argv,
+	dispatchSubcommands("project", "report | completion | post | selfcheck", argv,
 		subcommand{"report", runProjectReport},
+		subcommand{"completion", runProjectCompletion},
 		subcommand{"post", runProjectPost},
 		subcommand{"selfcheck", runProjectSelfcheck},
 	)
