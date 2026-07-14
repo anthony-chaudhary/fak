@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -10,12 +11,41 @@ import (
 func mustCompare(t *testing.T) Comparison {
 	t.Helper()
 	ctx := context.Background()
-	im, err := attachFixtureImage(ctx)
+	im, dir, err := attachFixtureImage(ctx)
 	if err != nil {
 		t.Fatalf("attach: %v", err)
 	}
+	t.Cleanup(func() { os.RemoveAll(dir) }) // reap the wfmem-* image tree (#3508)
 	tombstoneStalePreference(im)
 	return Compare(ctx, im, benchRequest(), reproCommand)
+}
+
+// TestAttachFixtureImageReturnsReapableDir is the #3508 regression: attachFixtureImage
+// must hand its temp dir back so the caller can reap it (the old signature swallowed the
+// dir, leaking one wfmem-* image tree per invocation). Because the attached image resolves
+// from memory, removing the dir after attach is safe AND leaves the image usable — the
+// invariant that lets the call-site bound reclaim the leak without a reaper.
+func TestAttachFixtureImageReturnsReapableDir(t *testing.T) {
+	ctx := context.Background()
+	im, dir, err := attachFixtureImage(ctx)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if dir == "" {
+		t.Fatal("attachFixtureImage returned an empty dir — the caller cannot reap the temp image tree (#3508 leak)")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("temp image dir missing before reap: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll(dir) failed — the call-site bound cannot reclaim the leak: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("temp image dir survived reap: stat err = %v", err)
+	}
+	if got := im.Pages(); got == 0 {
+		t.Fatal("attached image reports 0 pages after reap — it should resolve from memory, not disk")
+	}
 }
 
 func armsByName(cmp Comparison) map[string]ArmReport {

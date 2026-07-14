@@ -44,12 +44,26 @@ func main() {
 	flag.StringVar(&outDir, "out", "", "if set, write wfmembench.json + WFMEMBENCH-RESULTS.md under this directory")
 	flag.Parse()
 
-	ctx := context.Background()
-	im, err := attachFixtureImage(ctx)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "attach:", err)
+	if err := run(context.Background(), outDir); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// run is the benchmark body, split out of main so the deferred temp-dir reap below
+// actually fires: main's error handling calls os.Exit, which skips defers, so a defer
+// placed in main would leak on the marshal/write-artifacts error paths. Every exit
+// leaves through run's return instead (#3508).
+func run(ctx context.Context, outDir string) error {
+	im, dir, err := attachFixtureImage(ctx)
+	if err != nil {
+		return fmt.Errorf("attach: %w", err)
+	}
+	// The attached image resolves entirely from memory (recall.Load reads the CAS
+	// into RAM), so the on-disk wfmem-* tree can be reaped the moment the benchmark is
+	// done with the image — bounding the per-invocation leak at the call site (#3508).
+	defer os.RemoveAll(dir)
+
 	// Exercise the tombstone hazard before scoring: the agent suppresses the
 	// superseded preference page, so every arm but the full transcript drops it.
 	tombstoneStalePreference(im)
@@ -58,44 +72,56 @@ func main() {
 
 	js, err := benchcli.MarshalReport(cmp)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "marshal:", err)
-		os.Exit(1)
+		return fmt.Errorf("marshal: %w", err)
 	}
 	fmt.Println(string(js))
 
 	if outDir != "" {
 		if err := writeArtifacts(outDir, cmp, js); err != nil {
-			fmt.Fprintln(os.Stderr, "write artifacts:", err)
-			os.Exit(1)
+			return fmt.Errorf("write artifacts: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "wrote %s/{wfmembench.json,WFMEMBENCH-RESULTS.md}\n", outDir)
 	}
+	return nil
 }
 
 // attachFixtureImage ingests the embedded benchmark transcript, persists it as a
 // core image, and attaches a debugger to it — the same ingest -> persist -> attach
-// path a real recorded session takes.
-func attachFixtureImage(ctx context.Context) (*cdb.Image, error) {
-	dir, err := os.MkdirTemp("", "wfmem-*")
+// path a real recorded session takes. It returns the temp dir holding the persisted
+// image so the caller can reap it after use; on any failure it removes the partial
+// tree itself (returning dir="") so a failed attach never leaks either (#3508).
+func attachFixtureImage(ctx context.Context) (im *cdb.Image, dir string, err error) {
+	dir, err = os.MkdirTemp("", "wfmem-*")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(dir)
+			dir = ""
+		}
+	}()
 	src := filepath.Join(dir, "session.jsonl")
-	if err := os.WriteFile(src, fixtureJSONL, 0o600); err != nil {
-		return nil, err
+	if err = os.WriteFile(src, fixtureJSONL, 0o600); err != nil {
+		return nil, "", err
 	}
-	rec, st, err := cdb.IngestSession(ctx, src, "wfmem-bench")
-	if err != nil {
-		return nil, err
+	rec, st, ierr := cdb.IngestSession(ctx, src, "wfmem-bench")
+	if ierr != nil {
+		err = ierr
+		return nil, "", err
 	}
 	if st.Pages == 0 {
-		return nil, fmt.Errorf("ingest recorded no pages")
+		err = fmt.Errorf("ingest recorded no pages")
+		return nil, "", err
 	}
 	imgdir := filepath.Join(dir, "image")
-	if err := rec.Persist(imgdir); err != nil {
-		return nil, err
+	if err = rec.Persist(imgdir); err != nil {
+		return nil, "", err
 	}
-	return cdb.Attach(imgdir)
+	if im, err = cdb.Attach(imgdir); err != nil {
+		return nil, "", err
+	}
+	return im, dir, nil
 }
 
 // recallTombstone builds a tombstone context-change request for one page step.
