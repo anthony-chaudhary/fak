@@ -1,0 +1,127 @@
+# reproducible.yml — the double-build byte-identity witness for the release binary
+# (#3711, epic #3708).
+#
+# WHY THIS EXISTS: release archives ship SHA256SUMS + SLSA provenance
+# (release-artifacts.yml), but those answer "these are the bytes we published" — not
+# "anyone rebuilding this commit gets the same bytes". Nothing in CI proved that two
+# independent builds of the same commit are byte-identical, so a nondeterminism
+# regression (an embedded host path, a stray timestamp, map-iteration order leaking
+# into a generated table) would sail through. This workflow closes that gap.
+#
+# WHAT IT PROVES (and how it stays honest):
+#   - Builds the pinned linux/amd64 release target TWICE, each from its own detached
+#     git worktree (two distinct absolute build paths — this is what exercises
+#     -trimpath) and each with its own GOCACHE (so the second build cannot smuggle
+#     the first build's object cache and trivially "agree" with it).
+#   - Both builds route through the ONE canonical recipe, scripts/build.sh (#3709);
+#     this job deliberately defines NO flag string of its own, so the witness proves
+#     the same recipe the release matrix ships (release-artifacts.yml calls the same
+#     script). Anti-drift on that single-sourcing is tools/build_entrypoint_test.py.
+#   - Emits both SHA-256 sums into the log + step summary as the witness, surfaces
+#     the recorded build settings (`go version -m`) so an independent rebuilder can
+#     confirm inputs, and FAILS if the sums differ.
+#
+# SCOPE (documented in docs/supply-chain-reproducibility.md):
+#   - Pure-Go targets only: byte-identity rests on CGO_ENABLED=0 + -trimpath +
+#     go.mod/go.sum hash determinism. Go embeds no wall-clock build timestamp.
+#   - The Dockerfile.cuda path (CGO_ENABLED=1, nvcc-linked) is OUT of the guarantee
+#     until its C toolchain is pinned. SOURCE_DATE_EPOCH is documented intent for
+#     the archive/image layer only — the Go binary does not consume it, and this job
+#     builds no tar/image, so there is no witnessed artifact for it here.
+#
+# NOT a required check while paths-filtered (a filtered required check deadlocks
+# branch protection on PRs that touch none of the paths) — same posture as
+# cuda-build.yml. The weekly cron is the backstop for drift with no matching push.
+name: reproducible
+
+on:
+  push:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "VERSION"
+      - "scripts/build.sh"
+      - ".github/workflows/reproducible.yml"
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "VERSION"
+      - "scripts/build.sh"
+      - ".github/workflows/reproducible.yml"
+  schedule:
+    - cron: "17 5 * * 1" # weekly backstop: catches toolchain/runner drift with no matching push
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reproducible-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  double-build:
+    name: double-build SHA-256 byte-identity (linux/amd64, release profile)
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'anthony-chaudhary/fak' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: build twice from distinct paths + caches (canonical scripts/build.sh)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          set -eu
+          VERSION="$(cat VERSION)"
+
+          # Two builds, each from its own worktree (distinct absolute source path —
+          # the -trimpath witness) and its own GOCACHE (independent object caches —
+          # the second build must re-derive every byte, not replay the first).
+          # GOMODCACHE stays shared: module downloads are go.sum-verified inputs.
+          for n in 1 2; do
+            W="${RUNNER_TEMP}/repro${n}"
+            git worktree add --detach "${W}/src" HEAD
+            ( cd "${W}/src" && \
+              GOCACHE="${W}/gocache" OUT="${W}/fak" VERSION="${VERSION}" \
+              sh scripts/build.sh )
+          done
+
+          S1="$(sha256sum "${RUNNER_TEMP}/repro1/fak" | awk '{print $1}')"
+          S2="$(sha256sum "${RUNNER_TEMP}/repro2/fak" | awk '{print $1}')"
+
+          # The witness: both sums in the log AND the step summary.
+          echo "build 1 sha256: ${S1}"
+          echo "build 2 sha256: ${S2}"
+          {
+            echo "## reproducible: double-build byte-identity (linux/amd64, release)"
+            echo ""
+            echo "| build | sha256 |"
+            echo "|---|---|"
+            echo "| 1 | \`${S1}\` |"
+            echo "| 2 | \`${S2}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # Recorded build settings, so an independent rebuilder can confirm inputs
+          # (toolchain, flags, VCS revision) — the `go version -m` surface of #3711.
+          go version -m "${RUNNER_TEMP}/repro1/fak"
+
+          if [ "${S1}" != "${S2}" ]; then
+            echo "REPRODUCIBILITY BROKEN: two builds of the same commit differ" >&2
+            echo "**FAIL: sums differ — reproducibility regression**" >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "byte-identity OK: the release recipe is reproducible at this commit"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "byte-identity **OK**" >> "${GITHUB_STEP_SUMMARY}"
