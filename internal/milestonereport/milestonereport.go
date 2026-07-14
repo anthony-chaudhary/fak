@@ -389,6 +389,7 @@ type Report struct {
 	Epics             Epics              `json:"epics"`
 	ProgramScorecards []ProgramScorecard `json:"program_scorecards,omitempty"`
 	Trend             *Trend             `json:"trend,omitempty"`
+	Velocity          *Velocity          `json:"velocity,omitempty"`
 }
 
 // ProgramScorecard is a neutral milestone projection of a program-specific
@@ -667,6 +668,10 @@ func Render(r Report) string {
 			lines = append(lines, "        "+programRowLine(row))
 		}
 	}
+	// The code-movement lens renders beside the roadmap: epic bars say what CLOSED,
+	// module velocity says where the code actually MOVED (#2494). append(_, nil...) is
+	// a no-op, so a report with no lens attached renders exactly as before.
+	lines = append(lines, renderVelocity(r.Velocity)...)
 	for _, card := range r.ProgramScorecards {
 		mark := "."
 		if card.Verdict == "lovable" {
