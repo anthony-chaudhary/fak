@@ -519,7 +519,8 @@ feeder that has since posted) verifies clean on the next run; a config or token 
 the host first. Nothing here is fixed by a commit to this repo.
 
 ```bash
-fak slack check --auth   # resolution + does each token work? (offline-by-default)
+fak slack check --auth   # token auth + one bounded history read per configured channel; inaccessible => ready=false
+fak slack check --auth --json  # adds channel_access {ok, reason, remediation, error}; ready now includes live access
 fak slack health         # + did a post actually land inside each feeder's cadence?
 fak slack health --json  # machine-readable verdict for the watchdog / a dashboard
 fak slack beat           # post a one-line liveness pulse even when nothing else posted

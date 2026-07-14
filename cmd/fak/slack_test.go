@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 // clearSlackEnv blanks every Slack env key the surface table consults so a test runs in a
@@ -244,12 +246,18 @@ func TestSlackCheckAuthOK(t *testing.T) {
 	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-ok")
 	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C0SCORE")
 
-	var calls int
+	var calls, historyCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "auth.test") {
 			calls++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":true,"team":"Acme","user":"fakbot"}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "conversations.history") {
+			historyCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
 			return
 		}
 		http.Error(w, "unexpected", http.StatusNotFound)
@@ -265,6 +273,9 @@ func TestSlackCheckAuthOK(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("auth.test should be called once per distinct token, got %d", calls)
 	}
+	if historyCalls == 0 {
+		t.Fatal("check --auth did not prove any configured channel access")
+	}
 	var reports []*surfaceReport
 	if err := json.Unmarshal(out.Bytes(), &reports); err != nil {
 		t.Fatalf("decode json report: %v\n%s", err, out.String())
@@ -272,6 +283,73 @@ func TestSlackCheckAuthOK(t *testing.T) {
 	sb := reportByName(reports, "scoreboard")
 	if sb.Auth == nil || !sb.Auth.OK || sb.Auth.Team != "Acme" || sb.Auth.User != "fakbot" {
 		t.Fatalf("scoreboard auth not reported OK: %+v", sb.Auth)
+	}
+	if sb.ChannelAccess == nil || !sb.ChannelAccess.OK || !sb.Ready {
+		t.Fatalf("scoreboard channel access not reported ready: %+v", sb)
+	}
+}
+
+// TestSlackCheckAuthChannelNotFoundFailsReady captures the live operator defect from
+// #4655: auth.test can succeed while conversations.history says channel_not_found. The
+// surface must be false-ready no longer, with a typed reason and actionable remediation.
+func TestSlackCheckAuthChannelNotFoundFailsReady(t *testing.T) {
+	clearSlackEnv(t)
+	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-ok")
+	t.Setenv("FAK_GUARD_SESSIONS_CHANNEL", "CSTALE")
+	originalSurfaces := slackSurfaces
+	slackSurfaces = []slackSurface{{
+		Name:       "guard-sessions",
+		Purpose:    "one root thread per fak guard session",
+		TokenEnv:   guardSessionsTokenEnv,
+		ChannelEnv: guardSessionsChannelEnv,
+	}}
+	t.Cleanup(func() { slackSurfaces = originalSurfaces })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "auth.test"):
+			_, _ = w.Write([]byte(`{"ok":true,"team":"Acme","user":"fakbot"}`))
+		case strings.HasSuffix(r.URL.Path, "conversations.history"):
+			_, _ = w.Write([]byte(`{"ok":false,"error":"channel_not_found"}`))
+		default:
+			http.Error(w, "unexpected", http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errb bytes.Buffer
+	code := runSlackCheck(&out, &errb, []string{"--auth", "--json", "--api-base", srv.URL + "/"})
+	if code != 1 {
+		t.Fatalf("channel_not_found must fail readiness, exit=%d stderr=%s\n%s", code, errb.String(), out.String())
+	}
+	var reports []*surfaceReport
+	if err := json.Unmarshal(out.Bytes(), &reports); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out.String())
+	}
+	guard := reportByName(reports, "guard-sessions")
+	if guard == nil || guard.Auth == nil || !guard.Auth.OK {
+		t.Fatalf("token auth should remain independently true: %+v", guard)
+	}
+	if guard.Ready || guard.ChannelAccess == nil || guard.ChannelAccess.OK {
+		t.Fatalf("inaccessible channel was called ready: %+v", guard)
+	}
+	if guard.ChannelAccess.Reason != "CHANNEL_NOT_FOUND" || !strings.Contains(guard.ChannelAccess.Remediation, "invite") {
+		t.Fatalf("missing typed/actionable access failure: %+v", guard.ChannelAccess)
+	}
+}
+
+func TestClassifyChannelAccessErrorReasons(t *testing.T) {
+	for code, want := range map[string]string{
+		"channel_not_found": "CHANNEL_NOT_FOUND",
+		"not_in_channel":    "BOT_NOT_IN_CHANNEL",
+		"missing_scope":     "MISSING_HISTORY_SCOPE",
+		"token_revoked":     "TOKEN_AUTH_FAILED",
+	} {
+		got := classifyChannelAccessError(&slackwire.APIError{Method: "conversations.history", Status: 200, Code: code})
+		if got.OK || got.Reason != want || got.Remediation == "" {
+			t.Fatalf("code %s => %+v, want reason %s with remediation", code, got, want)
+		}
 	}
 }
 

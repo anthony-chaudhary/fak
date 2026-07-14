@@ -10,7 +10,7 @@ package main
 // surfaced as a cryptic chat.postMessage error deep in a feed job.
 //
 //	fak slack check            # resolution report for every surface (offline)
-//	fak slack check --auth     # + call auth.test per token: does it actually work?
+//	fak slack check --auth     # + verify token auth AND bounded channel read access
 //	fak slack check --json     # machine-readable, for a CI gate or a dashboard
 //	fak slack walk             # registry + refresh command map for every surface
 //	fak slack refresh          # dry-run every locally refreshable feed
@@ -24,6 +24,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 // scoreboardTokenKey is the shared workspace bot token every non-scoreboard surface falls
@@ -127,19 +129,30 @@ type authReport struct {
 	Err  string `json:"error,omitempty"`
 }
 
+// channelAccessReport is the bounded conversations.history verdict for one configured
+// channel. Reason is a stable operator token; Remediation turns Slack's terse API code into
+// the exact next move without exposing the channel id or token.
+type channelAccessReport struct {
+	OK          bool   `json:"ok"`
+	Reason      string `json:"reason,omitempty"`
+	Remediation string `json:"remediation,omitempty"`
+	Err         string `json:"error,omitempty"`
+}
+
 // surfaceReport is one row of `fak slack check`, JSON-serializable for --json.
 type surfaceReport struct {
-	Name          string          `json:"name"`
-	Purpose       string          `json:"purpose"`
-	TokenSet      bool            `json:"token_set"`
-	Token         string          `json:"token,omitempty"`          // redacted
-	TokenSource   string          `json:"token_source,omitempty"`   //
-	Channel       string          `json:"channel,omitempty"`        //
-	ChannelSource string          `json:"channel_source,omitempty"` //
-	Ready         bool            `json:"ready"`                    // token AND channel resolved
-	Optional      bool            `json:"optional,omitempty"`       // no dedicated channel yet — INCOMPLETE is expected, not a regression
-	Auth          *authReport     `json:"auth,omitempty"`           //
-	SignalNoise   slackmeta.Score `json:"signal_noise"`             // S/N meta self-score
+	Name          string               `json:"name"`
+	Purpose       string               `json:"purpose"`
+	TokenSet      bool                 `json:"token_set"`
+	Token         string               `json:"token,omitempty"`          // redacted
+	TokenSource   string               `json:"token_source,omitempty"`   //
+	Channel       string               `json:"channel,omitempty"`        //
+	ChannelSource string               `json:"channel_source,omitempty"` //
+	Ready         bool                 `json:"ready"`                    // token AND channel resolved
+	Optional      bool                 `json:"optional,omitempty"`       // no dedicated channel yet — INCOMPLETE is expected, not a regression
+	Auth          *authReport          `json:"auth,omitempty"`           //
+	ChannelAccess *channelAccessReport `json:"channel_access,omitempty"` // conversations.history read-back witness (with --auth)
+	SignalNoise   slackmeta.Score      `json:"signal_noise"`             // S/N meta self-score
 
 	tokenValue string // raw token, for the auth probe; never serialized
 }
@@ -165,12 +178,13 @@ func cmdSlack(argv []string) {
 }
 
 // runSlackCheck reports token/channel resolution for every surface, optionally verifying
-// each token with auth.test. Exit 0 for a plain report; with --auth, exit 1 if any resolved
-// token fails auth (so `fak slack check --auth` can gate CI).
+// each token with auth.test and every distinct token/channel pair with a one-row history
+// probe. Exit 0 for a plain report; with --auth, exit 1 if auth or channel access fails (so
+// `fak slack check --auth` cannot call an inaccessible surface ready).
 func runSlackCheck(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak slack check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	doAuth := fs.Bool("auth", false, "call Slack auth.test for each resolved token to verify it actually works")
+	doAuth := fs.Bool("auth", false, "verify each resolved token and configured channel can actually be read")
 	asJSON := fs.Bool("json", false, "emit the resolution report as JSON")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (default https://slack.com/api/; for testing/proxying)")
 	if !parseFlags(fs, argv) {
@@ -180,6 +194,7 @@ func runSlackCheck(stdout, stderr io.Writer, argv []string) int {
 	reports := buildSurfaceReports()
 	if *doAuth {
 		runAuthChecks(reports, *apiBase)
+		runChannelAccessChecks(reports, *apiBase)
 		for _, r := range reports {
 			r.refreshSignalNoise()
 		}
@@ -240,7 +255,14 @@ func (r *surfaceReport) refreshSignalNoise() {
 			noise++
 		}
 	}
-	r.SignalNoise = slackmeta.New(signal, noise, "resolved Slack surface wiring vs missing config/auth failures")
+	if r.ChannelAccess != nil {
+		if r.ChannelAccess.OK {
+			signal++
+		} else {
+			noise++
+		}
+	}
+	r.SignalNoise = slackmeta.New(signal, noise, "resolved Slack surface wiring vs config/auth/channel-access failures")
 }
 
 // runAuthChecks calls auth.test once per DISTINCT resolved token (many surfaces share the
@@ -281,14 +303,80 @@ func probeAuth(token, apiBase string) *authReport {
 	return &authReport{OK: true, Team: info.Team, User: info.User}
 }
 
-// checkExit returns 1 only when --auth ran and a resolved token failed auth — an unset
-// token is "incomplete", not "failed", and never trips the gate.
+// runChannelAccessChecks probes each DISTINCT token/channel pair once, then maps the same
+// verdict onto every surface sharing that pair. A valid auth.test is necessary but not
+// sufficient: Slack returns channel_not_found for a stale id or a private channel the bot
+// was never invited to, which is exactly the false-ready state this rung closes.
+func runChannelAccessChecks(reports []*surfaceReport, apiBase string) {
+	cache := map[string]*channelAccessReport{}
+	for _, rep := range reports {
+		if !rep.TokenSet || rep.Channel == "" {
+			rep.Ready = false
+			continue
+		}
+		if rep.Auth == nil || !rep.Auth.OK {
+			rep.Ready = false
+			continue
+		}
+		key := rep.tokenValue + "\x00" + rep.Channel
+		access, ok := cache[key]
+		if !ok {
+			access = probeChannelAccess(rep.tokenValue, rep.Channel, apiBase)
+			cache[key] = access
+		}
+		rep.ChannelAccess = access
+		rep.Ready = access.OK
+	}
+}
+
+func probeChannelAccess(token, channel, apiBase string) *channelAccessReport {
+	var opts []slackwire.Option
+	if apiBase != "" {
+		opts = append(opts, slackwire.WithAPIBase(apiBase))
+	}
+	client := slackwire.New(token, opts...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.History(ctx, channel, "", 1); err != nil {
+		return classifyChannelAccessError(err)
+	}
+	return &channelAccessReport{OK: true, Reason: "CHANNEL_ACCESS_OK"}
+}
+
+func classifyChannelAccessError(err error) *channelAccessReport {
+	report := &channelAccessReport{OK: false, Reason: "CHANNEL_ACCESS_FAILED", Err: err.Error(), Remediation: "inspect the Slack API error and repair the surface channel wiring"}
+	var apiErr *slackwire.APIError
+	if !errors.As(err, &apiErr) {
+		return report
+	}
+	switch apiErr.Code {
+	case "channel_not_found":
+		report.Reason = "CHANNEL_NOT_FOUND"
+		report.Remediation = "verify the configured channel and invite the bot/app to it"
+	case "not_in_channel":
+		report.Reason = "BOT_NOT_IN_CHANNEL"
+		report.Remediation = "invite the bot/app to the configured channel"
+	case "missing_scope":
+		report.Reason = "MISSING_HISTORY_SCOPE"
+		report.Remediation = "grant the matching channel-history scope and reinstall the Slack app"
+	case "invalid_auth", "not_authed", "token_revoked":
+		report.Reason = "TOKEN_AUTH_FAILED"
+		report.Remediation = "replace or reinstall the Slack bot token"
+	}
+	return report
+}
+
+// checkExit returns 1 when --auth ran and a resolved token or configured channel failed its
+// live probe. An unset token/channel remains "incomplete", not "failed", and does not trip.
 func checkExit(reports []*surfaceReport, doAuth bool) int {
 	if !doAuth {
 		return 0
 	}
 	for _, r := range reports {
 		if r.Auth != nil && !r.Auth.OK {
+			return 1
+		}
+		if r.ChannelAccess != nil && !r.ChannelAccess.OK {
 			return 1
 		}
 	}
@@ -320,6 +408,14 @@ func renderSurfaceReports(w io.Writer, reports []*surfaceReport, auth bool) {
 				fmt.Fprintf(w, "    auth    OK — %s as %s\n", slackOrDash(r.Auth.Team), slackOrDash(r.Auth.User))
 			} else {
 				fmt.Fprintf(w, "    auth    FAIL — %s\n", r.Auth.Err)
+			}
+		}
+		if auth && r.ChannelAccess != nil {
+			if r.ChannelAccess.OK {
+				fmt.Fprintln(w, "    access  OK — bounded conversations.history read succeeded")
+			} else {
+				fmt.Fprintf(w, "    access  FAIL [%s] — %s\n", r.ChannelAccess.Reason, r.ChannelAccess.Err)
+				fmt.Fprintf(w, "    fix     %s\n", r.ChannelAccess.Remediation)
 			}
 		}
 		fmt.Fprintf(w, "    S/N     %s\n", r.SignalNoise.Line())
