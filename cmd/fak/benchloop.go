@@ -169,13 +169,13 @@ usage:
   fak bench-loop next   [--json] [--workspace DIR] [--now STAMP]
   fak bench-loop walk   [--json]
   fak bench-loop run    [nightrun run flags...]
-  fak bench-loop fleet  [status] [--apply] [--json] [--now STAMP] [--plan-json FILE]
+  fak bench-loop fleet  [status|dispatch] [--apply] [--json] [--now STAMP] [--plan-json FILE]
   fak bench-loop install [--interval MINUTES] [--remove]
 
 status folds the benchmark registry, recorded run catalog, nightrun ledger,
 local capability-aware next selection, and benchmark-authority gap. run delegates
 to fak nightrun run, which is dry-run unless --apply is passed. fleet walks the
-benchmark machine plan and queues one idempotent request per node; install keeps that
+benchmark machine plan and queues one idempotent request per node; fleet dispatch atomically claims and witnesses requests; install keeps both
 tick always on via the Windows Task Scheduler (use cron elsewhere).
 `)
 }

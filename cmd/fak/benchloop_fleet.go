@@ -55,6 +55,9 @@ type benchFleetReport struct {
 }
 
 func runBenchFleet(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "dispatch" {
+		return runBenchFleetDispatch(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "status" {
 		return runBenchFleetStatus(stdout, stderr, argv[1:])
 	}
@@ -312,7 +315,13 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	root, _ := filepath.Abs(".")
-	tr := fmt.Sprintf("\"%s\" bench-loop fleet --apply --json --workspace \"%s\"", exe, root)
+	runner := filepath.Join(os.TempDir(), "fak-bench-fleet-tick.cmd")
+	script := fmt.Sprintf("@echo off\r\n\"%s\" bench-loop fleet --apply --json --workspace \"%s\"\r\nif errorlevel 1 exit /b %%errorlevel%%\r\n\"%s\" bench-loop fleet dispatch --json --workspace \"%s\"\r\n", exe, root, exe, root)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop install: runner: %v\n", err)
+		return 1
+	}
+	tr := fmt.Sprintf("cmd.exe /d /s /c \"%s\"", runner)
 	cmd := exec.Command("schtasks.exe", "/Create", "/TN", *task, "/SC", "MINUTE", "/MO", fmt.Sprint(*interval), "/TR", tr, "/F", "/RL", "LIMITED")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
