@@ -84,7 +84,7 @@ func installGuardPiExtension(command []string, enabled bool, gwURL string) ([]st
 	if len(command) == 0 || !guardIsPi(command[0]) {
 		return command, guardPiInstall{Reason: "non-pi-child"}, nil
 	}
-	dir, err := os.MkdirTemp("", "fak-guard-pi-*")
+	dir, err := guardSessionTempDir("pi")
 	if err != nil {
 		return command, guardPiInstall{}, err
 	}

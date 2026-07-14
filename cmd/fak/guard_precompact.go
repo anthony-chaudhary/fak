@@ -177,7 +177,7 @@ func installGuardPreCompactHook(command []string, mode, gwURL string) ([]string,
 	if err != nil || strings.TrimSpace(fakBin) == "" {
 		fakBin = "fak"
 	}
-	dir, err := os.MkdirTemp("", "fak-guard-precompact-*")
+	dir, err := guardSessionTempDir("precompact")
 	if err != nil {
 		return command, nil, guardPreCompactInstall{}, err
 	}

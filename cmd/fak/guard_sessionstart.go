@@ -165,7 +165,7 @@ func installGuardSessionStartHook(command []string, mode string, managed bool, e
 	}
 	dir := ""
 	if strings.TrimSpace(existingSettingsPath) == "" {
-		dir, err = os.MkdirTemp("", "fak-guard-sessionstart-*")
+		dir, err = guardSessionTempDir("sessionstart")
 		if err != nil {
 			return command, guardSessionStartInstall{}, err
 		}

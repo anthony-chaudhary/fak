@@ -103,7 +103,7 @@ func installGuardToolprocHooks(command []string, mode, existingSettingsPath stri
 	}
 	dir := ""
 	if strings.TrimSpace(existingSettingsPath) == "" {
-		dir, err = os.MkdirTemp("", "fak-guard-toolproc-*")
+		dir, err = guardSessionTempDir("toolproc")
 		if err != nil {
 			return command, nil, guardToolprocInstall{}, err
 		}

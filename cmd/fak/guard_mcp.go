@@ -60,7 +60,7 @@ func installGuardMCPRegistration(command []string, enabled bool, gwURL string) (
 	if len(command) == 0 || !guardPreCompactIsClaudeCommand(command) {
 		return command, guardMCPInstall{Reason: "non-claude-child"}, nil
 	}
-	dir, err := os.MkdirTemp("", "fak-guard-mcp-*")
+	dir, err := guardSessionTempDir("mcp")
 	if err != nil {
 		return command, guardMCPInstall{}, err
 	}
