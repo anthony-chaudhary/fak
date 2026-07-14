@@ -1,0 +1,15 @@
+{
+  "kind": "eve-agent-compiled-manifest",
+  "version": 36,
+  "tools": [
+    {"name": "read_file", "logicalPath": "tools/read_file.ts"},
+    {"name": "greet", "logicalPath": "tools/greet.ts"}
+  ],
+  "connections": [{"connectionName": "github", "logicalPath": "connections/github.ts"}],
+  "subagents": [{"name": "researcher", "logicalPath": "subagents/researcher/agent.ts", "agent": {"tools": [{"name": "summarize", "logicalPath": "subagents/researcher/tools/summarize.ts"}]}}],
+  "schedules": [{"name": "daily", "logicalPath": "schedules/daily.ts"}],
+  "channels": [{"name": "web", "logicalPath": "channels/web.ts"}],
+  "eval_ids": [{"name": "quality", "logicalPath": "evals/quality.ts"}],
+  "sandboxWorkspaces": [{"logicalPath": "sandbox/workspace", "sourcePath": "/src/agent/sandbox/workspace"}],
+  "disabledFrameworkTools": ["read_file", "write_file"]
+}
