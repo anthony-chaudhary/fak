@@ -71,9 +71,9 @@ type Domain struct {
 //
 //   - boolean       -- the two truth values; "not true" resolves exactly to "false".
 //   - lock-mode     -- the arbiter's two lease lock modes (internal/leaseref, dos_arbitrate);
-//                      "not shared" resolves exactly to "exclusive".
+//     "not shared" resolves exactly to "exclusive".
 //   - lane-kind     -- the dispatch router's lane kinds (cluster/keyword/global); "not global"
-//                      is a candidate set {cluster, keyword}, no single positive.
+//     is a candidate set {cluster, keyword}, no single positive.
 //   - lease-outcome -- the two admission verdicts a lease request ends in; "not refused" == "granted".
 //   - polarity      -- the negation program's own axis; "not negative" == "positive".
 //

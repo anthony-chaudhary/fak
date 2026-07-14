@@ -20,18 +20,18 @@ func TestRenderCensusNamesEvidenceNotBareVerdict(t *testing.T) {
 	md := RenderCensus(Census(censusBacklog, 0, 0))
 
 	wants := []string{
-		"# Backlog duplicate census",                          // the gardener's report header
-		"**#3001**",                                           // the proposed canonical (keep) issue
-		"#3001 ↔ #3002",                                       // the twin pair, named — not an anonymous count
-		"(title ",                                             // the title-only axis score is shown...
-		"/ body ",                                             // ...alongside the title+body axis score (both, never one)
-		"on " + MatchedOnTitleBody,                            // which axis the link matched on
-		"shared labels: ",                                     // shared-label evidence surfaced
-		"loader",                                              // ...the actual shared label, not just the header
-		"safetensors",                                         // matched excerpt prose (evidence, not a bare number)
-		"  - #3001: ",                                         // the excerpt cell for the kept issue
-		"Advisory — confirm before closing as dup",            // the confirm-before-closing discipline stands
-		"never writes to GitHub",                              // the census is read-only/advisory, stated in-report
+		"# Backlog duplicate census", // the gardener's report header
+		"**#3001**",                  // the proposed canonical (keep) issue
+		"#3001 ↔ #3002",              // the twin pair, named — not an anonymous count
+		"(title ",                    // the title-only axis score is shown...
+		"/ body ",                    // ...alongside the title+body axis score (both, never one)
+		"on " + MatchedOnTitleBody,   // which axis the link matched on
+		"shared labels: ",            // shared-label evidence surfaced
+		"loader",                     // ...the actual shared label, not just the header
+		"safetensors",                // matched excerpt prose (evidence, not a bare number)
+		"  - #3001: ",                // the excerpt cell for the kept issue
+		"Advisory — confirm before closing as dup", // the confirm-before-closing discipline stands
+		"never writes to GitHub",                   // the census is read-only/advisory, stated in-report
 	}
 	for _, w := range wants {
 		if !strings.Contains(md, w) {
