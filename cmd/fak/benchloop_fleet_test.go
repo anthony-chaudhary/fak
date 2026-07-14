@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
@@ -90,5 +92,14 @@ func TestBenchFleetDryRunWritesNothing(t *testing.T) {
 	}
 	if got.Enqueued != 0 || got.Requests[0].State != "planned" || got.Requests[0].NodeClass != "gpu" {
 		t.Fatalf("report=%+v", got)
+	}
+}
+func TestBenchFleetTaskSpawnsAreWindowless(t *testing.T) {
+	src, err := os.ReadFile("benchloop_fleet.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := windowgate.GoExecViolations("cmd/fak/benchloop_fleet.go", string(src)); len(findings) != 0 {
+		t.Fatalf("Scheduled Task helper can flash a console window: %v", findings)
 	}
 }

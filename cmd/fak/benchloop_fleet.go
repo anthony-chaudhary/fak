@@ -296,7 +296,9 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if *remove {
-		out, err := exec.Command("schtasks.exe", "/Delete", "/TN", *task, "/F").CombinedOutput()
+		cmd := exec.Command("schtasks.exe", "/Delete", "/TN", *task, "/F")
+		configureDispatchHelperCommand(cmd)
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
 			return 1
@@ -313,6 +315,7 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 	tr := fmt.Sprintf("\"%s\" bench-loop fleet --apply --json --workspace \"%s\"", exe, root)
 	cmd := exec.Command("schtasks.exe", "/Create", "/TN", *task, "/SC", "MINUTE", "/MO", fmt.Sprint(*interval), "/TR", tr, "/F", "/RL", "LIMITED")
 	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
