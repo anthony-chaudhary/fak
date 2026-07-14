@@ -169,6 +169,12 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	if err != nil {
 		return nil, err
 	}
+	// Capture the default-off W3 decision once. Worker goroutines and GEMV loops never
+	// re-read process environment, so a load has one immutable selection contract.
+	w3Requested := model.W3MLPRequested()
+	if w3Requested && (!cfg.IsQwen35Hybrid() || cfg.IsMoE()) {
+		return nil, fmt.Errorf("gguf: FAK_W3_MLP requires a dense Qwen3.5-family hybrid model")
+	}
 	loadOpts, err := resolveQ4KLoadOptions(cfg, opts)
 	if err != nil {
 		return nil, err
@@ -183,6 +189,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	// read-only Config), so it is safe to run from many workers at once.
 	computeFn := func(info TensorInfo) tensorWork {
 		tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
+		// Normally unused text sidecars are dropped before canonical mapping. Under an
+		// explicit W3 request, an IQ3 sidecar is instead a forbidden partial selection:
+		// fail closed rather than silently accepting IQ3 vision/MTP bytes outside MLP.
+		if w3Requested && info.Type == TensorIQ3_XXS &&
+			archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+			tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", info.Name)
+			return tw
+		}
 		// Drop the MTP ("nextn") head + any vision tower the text forward never reads, for every
 		// arch that ships them as sidecars (GLM-5.2, DeepSeek, Qwen3.5/3.6). Ungated union: the
 		// MTP head has no canonical slot to materialize into yet even under model.RetainMTP, so
@@ -274,6 +288,18 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			return tw
 		}
 		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors = info.Type.String(), false, tensorOnDiskBytes(info), 1
+		w3Eligible := info.Type == TensorIQ3_XXS && model.ResidentW3MLPEligible(cfg, canon)
+		switch {
+		case w3Eligible && w3Requested:
+			// The source artifact is already IQ3_XXS. Tag only the exact dense MLP
+			// gate/up/down band; there is no encoder or runtime Q4->IQ3 conversion.
+			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+			tw.acctResident = true
+			return tw
+		case info.Type == TensorIQ3_XXS && w3Requested:
+			tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", canon)
+			return tw
+		}
 		// Direct-resident-Q4_K fast path: an eligible Q4_K matmul weight is wrapped raw,
 		// skipping dequantF32 (Q4→f32) and the f32→Q8 re-quant entirely. raw is a fresh
 		// TensorBytes copy, so handing it straight to the builder is safe.
@@ -299,6 +325,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// on the host under --cpu-offload-experts, stay raw-resident in kqw.
 		if _, _, residentable := residentExpertBlockGeometry(info.Type); residentable &&
 			info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
+			!w3Eligible &&
 			model.ResidentKQuantEligible(cfg, canon) {
 			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 			tw.acctResident = true
@@ -323,7 +350,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	// applyFn owns all shared mutable state (builder, KV-b merge buffer, profiler) and runs
 	// on the single collector goroutine in original tensor order.
 	applyFn := func(tw tensorWork) error {
-		return applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf)
+		return applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf, w3Requested)
 	}
 
 	if err := s.parallelQuantLoad(computeFn, applyFn); err != nil {
@@ -335,7 +362,16 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	if p != nil {
 		p.EmitLoadPathSummary(p.Progress)
 	}
-	return builder.Build()
+	m, err := builder.Build()
+	if err != nil {
+		return nil, err
+	}
+	if w3Requested {
+		if err := m.ValidateResidentW3MLP(); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
 }
 
 // applyQ4KTensorWork is the collector-side apply step of QuantModelQ4KProfileOptions,
@@ -343,7 +379,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 // mutations (KV-b half buffering + merge, resident raw-quant adds, f32 adds) in order. It
 // owns all shared mutable state (builder, KV-b merge buffer, profiler) and must only run
 // on the single collector goroutine in original tensor order.
-func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builder *model.QuantBuilder, kvbHalf map[int]glmKVBHalf) error {
+func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builder *model.QuantBuilder, kvbHalf map[int]glmKVBHalf, w3Requested bool) error {
 	p.Tick(tw.tickBytes)
 	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
 	for _, pt := range tw.pending {
@@ -373,7 +409,11 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 					return err
 				}
 			case TensorIQ3_XXS:
-				if err := builder.AddResidentIQ3XXS(pt.name, pt.shape, pt.raw); err != nil {
+				add := builder.AddResidentIQ3XXS
+				if w3Requested && model.ResidentW3MLPEligible(cfg, pt.name) {
+					add = builder.AddResidentW3MLPIQ3XXS
+				}
+				if err := add(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
 			case TensorIQ4_XS:

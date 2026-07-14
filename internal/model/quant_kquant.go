@@ -93,6 +93,7 @@ func (k kQuantKind) String() string {
 type kQuantTensor struct {
 	out, in, nblk int
 	kind          kQuantKind
+	w3MLP         bool
 	raw           []byte
 }
 
@@ -189,6 +190,17 @@ func kQuantMatRows(qt *kQuantTensor, x []float32) []float32 {
 
 func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 	y = y[:qt.out]
+	if qt.w3MLP {
+		// The W3 path is deliberately decode-only: a pre-quantized IQ3_XXS dense-MLP
+		// tensor carries this load-time tag, so one Q8 activation is shared by every
+		// output row. Untagged IQ3 (including the established expert path) keeps the
+		// f32 dequant route below, and kQuantMatRowsIntoBatch remains unchanged.
+		qv := quantizeVecQ8(x)
+		parForRangeWorkers(qt.out, qt.out*qt.in, q4kDecodeWorkers(), func(lo, hi int) {
+			iq3xxsMatRowsRangeInt8(qt, qv, y, lo, hi)
+		})
+		return
+	}
 	if kQuantSDOTEnabled(qt.kind) {
 		// int8 k-quant decode path: quantize the activation ONCE and reuse it across every output
 		// row, so the per-row work is the compact int8 reduction instead of a 256-wide f32
@@ -358,6 +370,13 @@ func (b *QuantBuilder) AddResidentIQ3XXS(canon string, shape []int, raw []byte) 
 	return b.addResidentKQuant(canon, shape, raw, kindIQ3XXS)
 }
 
+// AddResidentW3MLPIQ3XXS stores an IQ3_XXS tensor selected by the default-off dense-MLP
+// loader gate. This is the only builder entrypoint that sets w3MLP; generic IQ3 experts
+// remain untagged and keep their established dispatch.
+func (b *QuantBuilder) AddResidentW3MLPIQ3XXS(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuantTagged(canon, shape, raw, kindIQ3XXS, true)
+}
+
 func (b *QuantBuilder) AddResidentIQ4XS(canon string, shape []int, raw []byte) error {
 	return b.addResidentKQuant(canon, shape, raw, kindIQ4XS)
 }
@@ -367,6 +386,10 @@ func (b *QuantBuilder) AddResidentQ8_0(canon string, shape []int, raw []byte) er
 }
 
 func (b *QuantBuilder) addResidentKQuant(canon string, shape []int, raw []byte, kind kQuantKind) error {
+	return b.addResidentKQuantTagged(canon, shape, raw, kind, false)
+}
+
+func (b *QuantBuilder) addResidentKQuantTagged(canon string, shape []int, raw []byte, kind kQuantKind, w3MLP bool) error {
 	name, ok, err := b.residentQuantTarget(canon, shape)
 	if !ok || err != nil {
 		return err
@@ -374,6 +397,8 @@ func (b *QuantBuilder) addResidentKQuant(canon string, shape []int, raw []byte, 
 	if b.m.kqw == nil {
 		b.m.kqw = map[string]*kQuantTensor{}
 	}
-	b.m.kqw[name] = quantizeKQuantFromRaw(raw, shape[0], shape[1], kind)
+	qt := quantizeKQuantFromRaw(raw, shape[0], shape[1], kind)
+	qt.w3MLP = w3MLP
+	b.m.kqw[name] = qt
 	return nil
 }
