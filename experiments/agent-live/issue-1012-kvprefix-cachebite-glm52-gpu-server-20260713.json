@@ -5,7 +5,7 @@
   "verdict": "WITNESSED",
   "cache_bit": true,
   "generated": "2026-07-13",
-  "host": "lab-dgx2",
+  "machine_class": "8x 40GB datacenter GPUs",
   "gpu": "A100-SXM4-40GB x8 (device 0 used; all idle at launch)",
   "host_ram_gb": 1007,
   "gateway": {
@@ -14,7 +14,7 @@
     "model_id_label": "mock",
     "model_id_note": "model-id STRING defaults to 'mock' (cosmetic, no --model set); compute is genuinely GLM-5.2 Q4 (planner=inkernel, q4k=true, 0.2 tok/s prefill != instant mock)",
     "served_model": "GLM-5.2 Q4_K_M",
-    "gguf": "/mnt/glm/glm52-q4/GLM-5.2-Q4_K_M-00001-of-00008.gguf",
+    "gguf": "<model-path>/GLM-5.2-Q4_K_M-00001-of-00008.gguf",
     "backend": "cuda",
     "cpu_offload_experts": true,
     "resident_total_mib": 437273.85,

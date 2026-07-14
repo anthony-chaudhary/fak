@@ -2,8 +2,8 @@
 
 - Generated: `2026-07-13`
 - Verdict: **`WITNESSED`** — `CACHE_BIT=YES`
-- Host: `lab-dgx2` (8× A100-40GB, all idle; 1 TB host RAM)
-- Sidecar: `experiments/agent-live/issue-1012-kvprefix-cachebite-glm52-dgx-20260713.json`
+- Machine class: 8× 40 GB datacenter GPUs (all idle at launch; 1 TB host RAM)
+- Sidecar: `experiments/agent-live/issue-1012-kvprefix-cachebite-glm52-gpu-server-20260713.json`
 
 ## What this proves
 
@@ -16,7 +16,7 @@ This is distinct from provider prompt caching: `fak_gateway_inference_cached_pro
 | field | value |
 |---|---|
 | `/healthz` planner | `inkernel` (real `InKernelPlanner`, not the scripted mock) |
-| served model | GLM-5.2 Q4_K_M (`/mnt/glm/glm52-q4/GLM-5.2-Q4_K_M-00001-of-00008.gguf`) |
+| served model | GLM-5.2 Q4_K_M (`<model-path>/GLM-5.2-Q4_K_M-00001-of-00008.gguf`) |
 | serve flags | `--gguf … --backend cuda --cpu-offload-experts --addr :8090` |
 | resident | 437,273.85 MiB (Q4_K experts on host RAM, dense+KV on GPU 0) |
 | decode traffic | 423.47 GiB/tok (the cpu-offload wall) |
@@ -50,4 +50,6 @@ Realized reuse: **87.5 %** of turn 2's prompt (140/160); 44.6 % aggregate across
 2. **Turn 2 in a different trace scope** → **fixed `X-Trace-Id`** on both turns (the gateway keys the KV-prefix session off that header).
 3. **Mock-planner masquerade** → gate on `/healthz` `planner=="inkernel"` before trusting anything.
 
-Run harness: `scratchpad/glm_cachebite.sh` (self-contained build → serve → gate → 2 turns → metric delta → sentinel), launched detached via `fak-private/tools/dgxsh.py bg` + an on-box waiter. Transport unblock (fresh session when the persistent bridge sessions wedge): `dgxsh.py newsess`.
+The self-contained private harness performs build → serve → gate → two turns → metric
+delta → sentinel. Its transport commands, raw readback, and recovery details remain in
+`fak-private`; this public artifact contains only the scrubbed result witness.
