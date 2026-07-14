@@ -33,6 +33,10 @@ NEEDLE = ".".join(["100", "95", "5", "23"])
 # gate on its own commit). Used to prove DCO/co-author trailers are exempt while
 # the same string in the body is still caught.
 ORG = "".join(["netra", "systems"]) + ".ai"
+# A derived lab-host alias that is not a real DNS hostname but still identifies
+# private fleet topology. Assemble it so this non-self-referential test file does
+# not trip the very gate it proves.
+LAB_ALIAS = "lab-" + "dgx2"
 
 
 def _git(repo: str, *args: str) -> str:
@@ -84,6 +88,14 @@ def _audit_message(repo: str, text: str):
         f.write(text)
     out = subprocess.run(
         [sys.executable, SCRUB, "--audit-message", msg, "--root", repo],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return out.returncode, out.stdout + out.stderr
+
+
+def _export(repo: str):
+    out = subprocess.run(
+        [sys.executable, SCRUB, "--export-dir", repo],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     return out.returncode, out.stdout + out.stderr
@@ -149,6 +161,25 @@ def main() -> int:
         rc, out = _audit_range(repo, f"{leak_head}..HEAD")
         check("removing a needle is not a hit", rc == 0, out)
 
+        # 3b) A derived lab-host alias is a standing shape rule: it must be
+        # caught in Markdown inline code AND structured/non-Markdown evidence,
+        # without depending on the optional private-needle sidecar.
+        alias_base = _git(repo, "rev-parse", "HEAD")
+        _write(repo, "docs/alias.md", "ran on `%s`\n" % LAB_ALIAS)
+        _write(repo, "alias.json", '{"host":"%s"}\n' % LAB_ALIAS)
+        _write(repo, "docs/%s-report.md" % LAB_ALIAS, "clean body\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "add derived lab aliases")
+        rc, out = _audit_range(repo, f"{alias_base}..HEAD")
+        check("derived lab alias exits 1", rc == 1, out)
+        check("derived lab alias catches Markdown and JSON",
+              "docs/alias.md" in out and "alias.json" in out, out)
+        check("derived lab alias catches paths", LAB_ALIAS + "-report.md" in out, out)
+        os.remove(os.path.join(repo, "docs", "alias.md"))
+        os.remove(os.path.join(repo, "alias.json"))
+        os.remove(os.path.join(repo, "docs", LAB_ALIAS + "-report.md"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "remove derived lab aliases")
         # 4) SELF_REFERENTIAL exemption: the same needle inside the denylist file
         #    itself must NOT trip the gate (it has to name needles to enforce them).
         safe_head = _git(repo, "rev-parse", "HEAD")
@@ -207,6 +238,21 @@ def main() -> int:
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "remove renamed key")
 
+        # 7c) The derived lab-host alias is also an always-on tree shape. It
+        # must fail closed even when no private sidecar has been pulled.
+        _write(repo, "host.json", '{"host":"%s"}\n' % LAB_ALIAS)
+        _write(repo, "%s-report.json" % LAB_ALIAS, '{"status":"clean"}\n')
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "add derived lab alias")
+        rc, out = _audit_tree(repo)
+        check("audit-tree catches derived lab alias in shape-only mode", rc == 1, out)
+        check("audit-tree names derived lab alias file", "host.json" in out, out)
+        check("audit-tree catches derived lab alias path", LAB_ALIAS + "-report.json" in out, out)
+        os.remove(os.path.join(repo, "host.json"))
+        os.remove(os.path.join(repo, LAB_ALIAS + "-report.json"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "remove derived lab alias")
+
         # 8) FULL mode: a pulled private needle in a tracked file is caught; the
         #    sidecar itself (ignored, untracked) is NOT scanned, so no self-hit.
         real = ".".join(["10", "11", "12", "13"])
@@ -243,6 +289,18 @@ def main() -> int:
         check("root-hoisted dgx run glob is declared",
               "experiments/benchmark/runs/by-machine/dgx*" in scrub.DELETE_GLOBS,
               str(scrub.DELETE_GLOBS))
+
+    # ---- export transform: derived alias content + path -------------------
+    with tempfile.TemporaryDirectory() as repo:
+        _write(repo, "reports/%s.json" % LAB_ALIAS, '{"host":"%s"}\n' % LAB_ALIAS)
+        rc, out = _export(repo)
+        generic = os.path.join(repo, "reports", "gpu-server.json")
+        check("export rewrites derived lab alias content and path", rc == 0 and os.path.isfile(generic), out)
+        body = ""
+        if os.path.isfile(generic):
+            with open(generic, encoding="utf-8") as f:
+                body = f.read()
+        check("export leaves no derived lab alias in artifact", LAB_ALIAS not in body and "gpu-server" in body, body)
 
     # ---- §6 commit-gate EXPORT/identity-tier fold (its own repo) ------------
     # Under the hard cut the PUBLIC clone has no export step left to rewrite the

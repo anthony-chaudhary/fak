@@ -297,6 +297,16 @@ CASE_INSENSITIVE_REPLACEMENTS = [
     ("the A100 ", "the GPU "),
 ]
 
+# Shape-based replacements for derived private aliases. These are not real DNS
+# names and therefore do not belong in the pulled literal sidecar, but they still
+# disclose private fleet topology. Apply them to EVERY text format (including
+# JSON and Markdown code spans), then enforce the same regex as an always-on
+# PUBLIC_LEAK audit shape below.
+REGEX_REPLACEMENTS = [
+    (re.compile(r"\blab[-_ ]dgx[0-9]+\b", re.IGNORECASE),
+     "gpu-server", "private GPU host alias (lab-dgxN) -> generic machine class"),
+]
+
 # Directories whose NAME carries an owner/personal identifier. Content
 # replacement cannot touch path components, so these are renamed at export
 # (bottom-up, after replacements). The operator's own machine label `anthony`
@@ -391,7 +401,7 @@ AUDIT_REGEXES = [
     # e.g. internal/canon + internal/wirescreen, carry fake PEM fixtures on purpose.)
     (re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com"),
      "GCP service-account email"),
-]
+] + [(rx, "private GPU host alias (lab-dgxN)") for rx, _replacement, _desc in REGEX_REPLACEMENTS]
 
 # Pulled-from-private REAL needle file (gitignored: tools/_registry is ignored).
 # The HARD-CUT model edits the public copy DIRECTLY instead of regenerating it
@@ -609,6 +619,14 @@ def _scan_added_lines(diff_text: str, needles: list[str] | None = None):
             # every edit to the denylist itself trips the gate and forces
             # FLEET_ALLOW_LEAK=1 on routine scrub maintenance.
             self_ref = (current_file or "").replace("\\", "/") in SELF_REFERENTIAL
+            if not self_ref:
+                path_l = current_file.lower()
+                for needle in needle_list:
+                    if needle.lower() in path_l:
+                        hits.append((current_file, 0, needle, current_file[:80]))
+                for rx, label in AUDIT_REGEXES:
+                    if rx.search(current_file):
+                        hits.append((current_file, 0, label, current_file[:80]))
         elif line.startswith("@@"):
             m = hunk_re.match(line)
             new_line_no = int(m.group(1)) if m else 0
@@ -804,6 +822,13 @@ def audit_tree(root: str, as_json: bool = False) -> int:
         rel = rel.strip()
         if not rel or rel in SELF_REFERENTIAL:
             continue
+        rel_l = rel.lower()
+        for needle in real_needles:
+            if needle.lower() in rel_l:
+                misses.append({"file": rel, "needle": needle, "kind": "path-needle"})
+        for rx, label in AUDIT_REGEXES:
+            if rx.search(rel):
+                misses.append({"file": rel, "needle": label, "kind": "path-shape"})
         full = os.path.join(root, rel.replace("/", os.sep))
         if not is_text(full):
             continue
@@ -944,6 +969,11 @@ def main() -> int:
                     changed = pat.sub(replacement, changed)
                     desc = f"{needle} -> {replacement} (case-insensitive)"
                     file_touches[desc] = file_touches.get(desc, 0) + len(hits)
+            for pat, replacement, desc in REGEX_REPLACEMENTS:
+                hits = pat.findall(changed)
+                if hits:
+                    changed = pat.sub(replacement, changed)
+                    file_touches[desc] = file_touches.get(desc, 0) + len(hits)
             # Code-aware bare-token pass for markdown PROSE: the CASE_INSENSITIVE
             # rules above soften the SKU/machine forms ("8x A100-SXM4-40GB", "A100
             # DGX") but deliberately leave BARE "DGX"/"A100" (a blind string-replace
@@ -962,6 +992,28 @@ def main() -> int:
                 with open(full, "w", encoding=enc) as f:
                     f.write(changed)
                 touched[os.path.relpath(full, export_dir)] = file_touches
+
+    # Derived private aliases can occur in path components as well as content.
+    # Rewrite files and directories bottom-up so the post-export path audit is
+    # fail-closed without leaving an alias in an otherwise-clean artifact name.
+    regex_renamed_paths = []
+    for dirpath, dirnames, filenames in os.walk(export_dir, topdown=False):
+        for name in filenames + dirnames:
+            new_name = name
+            for pat, replacement, _desc in REGEX_REPLACEMENTS:
+                new_name = pat.sub(replacement, new_name)
+            if new_name == name:
+                continue
+            old_path = os.path.join(dirpath, name)
+            new_path = os.path.join(dirpath, new_name)
+            if os.path.exists(new_path):
+                print(f"ERROR: scrubbed path collision: {old_path} -> {new_path}", file=sys.stderr)
+                return 1
+            os.rename(old_path, new_path)
+            regex_renamed_paths.append(
+                (os.path.relpath(old_path, export_dir).replace(os.sep, "/"),
+                 os.path.relpath(new_path, export_dir).replace(os.sep, "/"))
+            )
 
     # Strip PRIVATE_MACHINE_PREFIXES (DGX) runs from the aggregate catalog.json.
     # DELETE_GLOBS already removed the run dirs; this removes their surviving
@@ -993,6 +1045,10 @@ def main() -> int:
         print(f"\nRenamed {len(renamed_dirs)} owner-named director{'y' if len(renamed_dirs)==1 else 'ies'}:")
         for old, new in sorted(renamed_dirs):
             print(f"  - {old}  ->  {new}")
+    if regex_renamed_paths:
+        print(f"\nRenamed {len(regex_renamed_paths)} private-alias path(s):")
+        for old, new in sorted(regex_renamed_paths):
+            print(f"  - {old}  ->  {new}")
     print(f"\nDeleted {len(deleted_dirs)} director{'y' if len(deleted_dirs)==1 else 'ies'}:")
     for rel, n in sorted(deleted_dirs):
         print(f"  - {rel}  ({n} files)")
@@ -1017,13 +1073,22 @@ def main() -> int:
     for dirpath, _d, filenames in os.walk(export_dir):
         for name in filenames:
             full = os.path.join(dirpath, name)
-            if not is_text(full):
-                continue
             # Normalize to forward slashes: SELF_REFERENTIAL keys are POSIX-style,
             # but os.path.relpath yields OS-native separators (backslash on
             # Windows), which would otherwise defeat the exemption there.
             rel = os.path.relpath(full, export_dir).replace(os.sep, "/")
             if rel in SELF_REFERENTIAL:
+                continue
+            rel_l = rel.lower()
+            for needle in EXPORT_AUDIT_NEEDLES:
+                if needle.lower() in rel_l:
+                    print(f"  MISS: {needle} in path {rel}")
+                    misses += 1
+            for rx, label in AUDIT_REGEXES:
+                if rx.search(rel):
+                    print(f"  MISS: {label} in path {rel}")
+                    misses += 1
+            if not is_text(full):
                 continue
             content, _enc = read_text(full)
             if content is None:

@@ -29,11 +29,12 @@ func hasFindingFor(fs []Finding, gate, substr string) bool {
 	return false
 }
 
-func leakIPFixture() string       { return "100" + ".64.0.10" }
-func gcpSAFixture() string        { return "svc@proj." + "iam." + "gserviceaccount.com" }
-func mslHostFixture() string      { return "msl" + "-build-01" }
-func labHostFixture() string      { return "secret" + ".lab" }
-func operatorNameFixture() string { return "anth" + "ony" }
+func leakIPFixture() string          { return "100" + ".64.0.10" }
+func gcpSAFixture() string           { return "svc@proj." + "iam." + "gserviceaccount.com" }
+func mslHostFixture() string         { return "msl" + "-build-01" }
+func labHostFixture() string         { return "secret" + ".lab" }
+func operatorNameFixture() string    { return "anth" + "ony" }
+func privateLabAliasFixture() string { return "lab-" + "dgx2" }
 func userPathFixture(suffix string) string {
 	return `C:\Users\` + operatorNameFixture() + suffix
 }
@@ -65,6 +66,42 @@ func TestPublicLeak_backslashUsersNeedle(t *testing.T) {
 	f, _ := gatePublicLeak(d)
 	if len(f) == 0 {
 		t.Fatalf("expected a leak for a Windows user path; got none")
+	}
+}
+
+func TestPublicLeak_privateLabAliasAcrossTextSurfaces(t *testing.T) {
+	alias := privateLabAliasFixture()
+	d := diffOf("/r", map[string][]string{
+		"docs/run.md":           {"ran on `" + alias + "`"},
+		"run.json":              {`{"host":"` + alias + `"}`},
+		"docs/" + alias + ".md": {"clean body"},
+	})
+	f, _ := gatePublicLeak(d)
+	if !hasFindingFor(f, "PUBLIC_LEAK", "private GPU host alias") {
+		t.Fatalf("derived lab alias must be caught outside the Markdown hardware lint; got %+v", f)
+	}
+	if len(f) != 3 {
+		t.Fatalf("Markdown, JSON, and path aliases must all be caught, got %d findings: %+v", len(f), f)
+	}
+}
+
+func TestPublicLeakTree_privateLabAliasInPathAndContent(t *testing.T) {
+	root := t.TempDir()
+	alias := privateLabAliasFixture()
+	pathAlias := "docs/" + alias + ".md"
+	writeFile(t, root, pathAlias, "clean body\n")
+	writeFile(t, root, "run.json", `{"host":"`+alias+`"}`+"\n")
+	tree := &TrackedTree{
+		Root:      root,
+		Paths:     []string{pathAlias, "run.json"},
+		fileCache: map[string]fileEntry{},
+	}
+	f, mode := scanPublicLeakTree(tree)
+	if mode != "shape-only" {
+		t.Fatalf("mode = %q, want shape-only without sidecar", mode)
+	}
+	if len(f) != 2 {
+		t.Fatalf("tree scan must catch alias in path and content, got %d findings: %+v", len(f), f)
 	}
 }
 

@@ -166,6 +166,9 @@ def scrub_transform(text: str, root: str = REPO_ROOT) -> str:
         old, new = triple[0], triple[1]
         if old and old.lower() != new.lower():
             out = re.sub(re.escape(old), new, out, flags=re.IGNORECASE)
+    for triple in getattr(_scrub, "REGEX_REPLACEMENTS", []):
+        pattern, new = triple[0], triple[1]
+        out = pattern.sub(new, out)
     return out
 
 

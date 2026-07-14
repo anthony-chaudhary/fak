@@ -130,6 +130,21 @@ def test_public_route_posts_clean_body_via_mock():
     assert "session checkpoint" in captured["body"]
 
 
+def test_public_route_scrubs_derived_lab_alias_before_post():
+    alias = "lab-" + "dgx2"
+    body = sc.render_md(_rec(in_flight="benchmark ran on `%s`" % alias))
+    captured = {}
+
+    def fake_post(target, b):
+        captured["body"] = b
+        return 0, "ok"
+
+    res = sc.route_public(body, public_target="123", dry=False, post_fn=fake_post)
+    assert res["ok"] is True and res["posted"] is True
+    assert alias not in captured["body"]
+    assert "gpu-server" in captured["body"]
+
+
 # --- both: private is the floor ----------------------------------------------------
 def test_both_writes_private_even_when_public_refused(tmp_path):
     # in_flight carries a needle: public must refuse, but the PRIVATE gate refuses too here

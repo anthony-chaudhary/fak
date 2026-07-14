@@ -163,13 +163,16 @@ func parityLeakIP() string { return "100" + ".64.0.10" }
 func parityGCPEmail() string {
 	return "svc@proj." + "iam." + "gserviceaccount.com"
 }
-func parityInternalHost() string { return "ms" + "l-bui" + "ld-7" }
+func parityInternalHost() string    { return "ms" + "l-bui" + "ld-7" }
+func parityPrivateLabAlias() string { return "lab-" + "dgx2" }
 
 func TestParity_PublicLeak(t *testing.T) {
 	runParity(t, "PUBLIC_LEAK", "scrub_public_copy.py", []parityCase{
 		{"clean", map[string]string{"docs/a.md": "a perfectly normal doc line\n"}, false},
 		{"ip-needle", map[string]string{"docs/a.md": "the host is " + parityLeakIP() + " internally\n"}, true},
 		{"gcp-regex", map[string]string{"docs/a.md": "key " + parityGCPEmail() + "\n"}, true},
+		{"derived-lab-alias", map[string]string{"run.json": "{\"host\":\"" + parityPrivateLabAlias() + "\"}\n"}, true},
+		{"derived-lab-alias-path", map[string]string{"docs/" + parityPrivateLabAlias() + ".md": "clean\n"}, true},
 	})
 }
 

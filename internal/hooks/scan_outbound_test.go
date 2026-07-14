@@ -17,6 +17,14 @@ func TestScanOutboundTextCleanPayloadPasses(t *testing.T) {
 	}
 }
 
+func TestScanOutboundTextFlagsDerivedLabAlias(t *testing.T) {
+	alias := "lab-" + "dgx2"
+	got := ScanOutboundText("benchmark ran on "+alias, "")
+	if len(got) != 1 || got[0].Gate != "PUBLIC_LEAK" || !strings.Contains(got[0].Detail, "private GPU host alias") {
+		t.Fatalf("derived lab alias must be refused before outbound send, got %+v", got)
+	}
+}
+
 func TestScanOutboundTextFlagsNeedleWithLineNumber(t *testing.T) {
 	needle := "node-" + "windows-a" // a base audit needle, assembled at runtime
 	payload := "line one is fine\nhost " + needle + " did the work"

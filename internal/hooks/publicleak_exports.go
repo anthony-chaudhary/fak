@@ -90,6 +90,7 @@ func scanPublicLeakTree(t *TrackedTree) ([]Finding, string) {
 		if selfReferentialLeak[norm] {
 			continue
 		}
+		findings = append(findings, publicLeakLineFindings(norm, 0, norm, needles)...)
 		body, ok := t.FileBytes(f)
 		if !ok {
 			continue

@@ -43,6 +43,7 @@ var auditRegexes = []struct {
 }{
 	{regexp.MustCompile(`xox[bp]-\d{8,}-\d{8,}-[A-Za-z0-9]{16,}`), "live Slack token (xoxb/xoxp)"},
 	{regexp.MustCompile(`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com`), "GCP service-account email"},
+	{regexp.MustCompile(`(?i)\blab[-_ ]dgx[0-9]+\b`), "private GPU host alias (lab-dgxN)"},
 }
 
 // selfReferentialLeak — files exempt from the needle scan (scrub_public_copy.py L463-467), path
@@ -69,6 +70,7 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 		if selfReferentialLeak[norm] {
 			continue
 		}
+		findings = append(findings, publicLeakLineFindings(norm, 0, norm, needles)...)
 		for _, al := range d.AddedByFile[f] {
 			payloadL := strings.ToLower(al.Text)
 			for _, n := range needles {
