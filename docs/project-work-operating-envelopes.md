@@ -77,3 +77,28 @@ manufactured, but every selected stage must appear or review returns
 `ISSUE_SCALE_EVIDENCE_INVALID`. This lets a one-user local command require only its
 `target-load` witness while a serving model can explicitly require target load, soak,
 overload, and recovery.
+
+## Continuous reconciliation
+
+`fak issue reconcile --file SNAPSHOT.json [--now RFC3339] [--json]` compares the
+previous contractual target, current target, direct witness, observed operating scope,
+and witness freshness. The snapshot uses the same typed envelope values emitted by
+`fak issue contract` and adds `witnessed_at`, `max_age`, and an optional
+`contraction_reason`.
+
+Its closed status vocabulary is:
+
+- `aligned`: current witness covers the unchanged target before its freshness deadline;
+  production credit remains current.
+- `gap`: witness does not cover a target dimension.
+- `stale`: witness is retained, but its declared maximum age elapsed.
+- `expanded`: a target increased, a new target dimension appeared, or observed demand
+  exceeded the declared capacity target; re-test is required.
+- `contracted`: target scope decreased or a dimension disappeared; an operator reason
+  and parent-denominator audit are required before credit can return.
+- `unknown`: required data is absent or units/operators are incompatible; conversion is
+  never guessed.
+
+Every non-aligned result exits 3, sets `production_credit_current=false`, and emits an
+exact action. This makes the command suitable for both a periodic loop and an on-demand
+status/dispatch preflight. Supplying `--now` makes freshness witnesses reproducible.

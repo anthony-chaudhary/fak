@@ -29,6 +29,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueAuditLoop(stdout, stderr, argv[1:])
 	case "contract":
 		return runIssueContract(stdout, stderr, argv[1:])
+	case "reconcile":
+		return runIssueReconcile(stdout, stderr, argv[1:])
 	case "cohort":
 		return runIssueCohort(stdout, stderr, argv[1:])
 	case "fanout":
