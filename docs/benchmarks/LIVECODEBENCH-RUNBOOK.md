@@ -195,10 +195,11 @@ alongside the generation-artifact digest.
 
 The honest fence, identical to the SWE-bench pure-kernel arm: the device kernels are
 argmax-exact against the CPU reference and `fak serve --engine inkernel` is a landed,
-tested serving path, but **no LCB codegen pass rate has been produced through it.** The
-`pass@1` / `pass@5` cells stay `pending GPU run` until a real GPU run over the in-kernel
-arm returns a number from the official evaluator. Do not claim a pure-kernel LCB codegen
-pass rate before that number exists.
+tested serving path. A bounded 8-problem CPU-reference run through the pure-kernel arm
+was officially graded on 2026-07-14 (pass@1 `0.0`; see the results ledger), proving the
+live generation-to-official-evaluator wiring. The full-window `pass@1` / `pass@5` cells
+stay pending until the complete pinned release/date window runs over the intended device
+backend. Do not promote a bounded wiring witness as a full benchmark result.
 
 ## 4. Export Custom-Evaluator Input
 

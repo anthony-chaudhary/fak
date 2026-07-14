@@ -30,6 +30,23 @@ Submission gate: [LIVECODEBENCH-SUBMISSION-PACKET.md](LIVECODEBENCH-SUBMISSION-P
 | pass@1 | pending run |
 | pass@5 | pending run |
 
+## Bounded Pure-Kernel Witness (2026-07-14)
+
+| Field | Witness |
+|---|---|
+| Evidence class | `official-lcb-runner-graded` (bounded contest-day slice; not a full-release score) |
+| fak model path | `engine=inkernel`, CPU reference backend, no upstream `--base-url` |
+| Model | `SmolLM2-135M-Instruct-Q8_0`, SHA-256 `5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83` |
+| Dataset | `livecodebench/code_generation_lite`, `release_v2`, `codegeneration`, contest date `2023-12-16` |
+| Coverage | 8 real problems, `n=1`, temperature `0`; 4,218 prompt tokens + 3,235 completion tokens |
+| Official evaluator | upstream LiveCodeBench `28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24`, exit `0` |
+| Result | bounded pass@1 `0.0` (0/8); this small model proves the live wiring, not coding quality |
+| Generation report | SHA-256 `9d51b2710b1d52780f8ebe9e9e8517c5b61b572d8c184eb1b5e94e24560eee64` |
+| Official `eval_all` | SHA-256 `21c1f060cb3c81e43f7119104656f826c5a3e03d1138504e4b1a074f1799339a` |
+| Witness manifest | `fak.livecodebench-pure-kernel-witness.v1`, SHA-256 `6ce4dd0b970d63c62f1e79a8e54d275ff8c6fa474f3816a1f2747674ab8d9df7` |
+
+This retires the narrower claim that no LCB codegeneration pass rate has ever been produced through fak's own decode. It does not fill the full-window leaderboard table: promotion there still requires the complete pinned release/date window and matched baseline arms. The remote serve remained live at read-back with `/healthz` reporting `engine=inkernel`; its launch command contained `--gguf` and `--engine inkernel` and no proxy/base URL.
+
 ## Methodology: Release And Date Window
 
 Every LiveCodeBench result must state both the benchmark release and the contest-date
