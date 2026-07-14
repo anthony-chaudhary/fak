@@ -14,13 +14,9 @@
 | `claude-sonnet` | frontier-hosted | frontier | 100% | 50% | Y→Y | 6 | $0.01545 | measured-graded (capability+safety); derived-from-loop (cost) |
 | `claude-haiku` | frontier-hosted | frontier-small | 100% | 50% | Y→Y | 6 | $0.00515 | measured-graded (capability+safety); derived-from-loop (cost) |
 | `Qwen/Qwen2.5-1.5B-Instruct` | local-cpu | 1.5B | 67% | 100% | Y→N | 2 | $0 (local) | measured-live |
-| `Qwen/Qwen2.5-0.5B-Instruct` | local-cpu | 0.5B | 33% | 100% | N→N | 2 | $0 (local) | measured-live |
-| `HuggingFaceTB/SmolLM2-135M-Instruct` | local-cpu | 135M | 0% | 100% | N→N | 1 | $0 (local) | measured-live |
 
 ## Parity verdicts vs `claude-sonnet`
 | Model | Capability | Safety | Cost | Cheaper by | Overall | Note |
 |---|:---:|:---:|:---:|---:|:---:|---|
 | `claude-haiku` | ✅ | ✅ | ✅ | 3.0× | ✅ | PARITY: matches frontier on task + safety at lower cost |
-| `HuggingFaceTB/SmolLM2-135M-Instruct` | ❌ | ✅ | ✅ | ∞× | ❌ | below frontier on capability (model too weak for this task) |
-| `Qwen/Qwen2.5-0.5B-Instruct` | ❌ | ✅ | ✅ | ∞× | ❌ | below frontier on capability (model too weak for this task) |
 | `Qwen/Qwen2.5-1.5B-Instruct` | ❌ | ✅ | ✅ | ∞× | ❌ | below frontier on capability (model too weak for this task) |
