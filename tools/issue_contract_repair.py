@@ -191,7 +191,8 @@ def template_repair_plan(workspace: Path, issue: dict[str, Any],
 
 
 def build_repair_row(workspace: Path, issue: dict[str, Any],
-                     concurrent: list[str], trees: dict[str, list[str]]) -> dict[str, Any] | None:
+                     concurrent: list[str], trees: dict[str, list[str]],
+                     exclusive: set[str] | None = None) -> dict[str, Any] | None:
     """One issue -> one manifest row, or None if the contract already passes
     (nothing to repair)."""
     number = int(issue.get("number") or 0)
@@ -223,7 +224,7 @@ def build_repair_row(workspace: Path, issue: dict[str, Any],
     }
 
     if "route" in kinds:
-        route = ilr.route_issue(issue, concurrent, trees)
+        route = ilr.route_issue(issue, concurrent, trees, exclusive=exclusive)
         if route.get("lane"):
             row["proposed_lane"] = route["lane"]
             row["route_confidence"] = route.get("confidence")
@@ -244,13 +245,13 @@ def build_repair_row(workspace: Path, issue: dict[str, Any],
 
 def build_manifest(workspace: Path, *, lane: str | None, limit: int,
                    as_of: str) -> dict[str, Any]:
-    concurrent, trees = ilr.lane_taxonomy(workspace)
+    concurrent, trees, exclusive = ilr.lane_taxonomy(workspace)
     issues = fetch_open_issues(workspace)
 
     if lane:
         filtered = []
         for issue in issues:
-            route = ilr.route_issue(issue, concurrent, trees)
+            route = ilr.route_issue(issue, concurrent, trees, exclusive=exclusive)
             if route.get("lane") == lane or route.get("blocked_lane") == lane:
                 filtered.append(issue)
         issues = filtered
@@ -259,7 +260,7 @@ def build_manifest(workspace: Path, *, lane: str | None, limit: int,
 
     rows: list[dict[str, Any]] = []
     for issue in issues:
-        row = build_repair_row(workspace, issue, concurrent, trees)
+        row = build_repair_row(workspace, issue, concurrent, trees, exclusive)
         if row is not None:
             rows.append(row)
 

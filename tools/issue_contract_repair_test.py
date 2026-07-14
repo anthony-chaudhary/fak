@@ -30,7 +30,7 @@ def load():
 
 def _issue(number, title="an issue", body="", labels=None):
     return {"number": number, "title": title, "body": body,
-            "labels": [{"name": l} for l in (labels or [])]}
+            "labels": [{"name": ln} for ln in (labels or [])]}
 
 
 def _contract(*, ok=False, score=0, reasons=None, missing_fields=None, lane=None):
@@ -192,7 +192,7 @@ class BuildRepairRowTest(unittest.TestCase):
 class ManifestTest(unittest.TestCase):
     def test_manifest_schema_and_counts(self) -> None:
         mod = load()
-        mod.ilr.lane_taxonomy = lambda *a, **k: (["docs", "tools"], {})
+        mod.ilr.lane_taxonomy = lambda *a, **k: (["docs", "tools"], {}, {"abi", "release", "global"})
         mod.fetch_open_issues = lambda *a, **k: [
             _issue(1207, "a"), _issue(1852, "b"), _issue(2000, "c")]
 
@@ -212,7 +212,7 @@ class ManifestTest(unittest.TestCase):
 
     def test_lane_filter_keeps_only_matching_or_blocked_lane(self) -> None:
         mod = load()
-        mod.ilr.lane_taxonomy = lambda *a, **k: (["docs", "tools"], {})
+        mod.ilr.lane_taxonomy = lambda *a, **k: (["docs", "tools"], {}, {"abi", "release", "global"})
         mod.fetch_open_issues = lambda *a, **k: [
             _issue(1, "a"), _issue(2, "b"), _issue(3, "c")]
 
