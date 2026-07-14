@@ -109,7 +109,39 @@ func saveGuardAllowOverlay(path string, ov guardAllowOverlay) error {
 		return err
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644)
+	return writeGuardAllowOverlayAtomic(path, b)
+}
+
+func writeGuardAllowOverlayAtomic(path string, body []byte) error {
+	dir := filepath.Dir(path)
+	if dir == "" {
+		dir = "."
+	}
+	tmp, err := os.CreateTemp(dir, ".allow-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("guard allow overlay: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("guard allow overlay: chmod temp: %w", err)
+	}
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("guard allow overlay: write temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("guard allow overlay: sync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("guard allow overlay: close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("guard allow overlay: replace %s: %w", path, err)
+	}
+	return nil
 }
 
 // guardApplyAllowOverlay unions the overlay's allow/allow_prefix into a runtime floor,

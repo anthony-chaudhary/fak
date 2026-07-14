@@ -52,7 +52,7 @@ func TestReloadPolicyProtectsResolvedConfigurationPaths(t *testing.T) {
 		adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy())
 	})
 
-	rt, err := reloadPolicy(manifest)
+	rt, _, err := reloadPolicy(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

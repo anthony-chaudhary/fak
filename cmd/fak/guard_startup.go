@@ -255,14 +255,17 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 // edit demanded a relaunch. A malformed overlay is TOLERATED here (not fatal), matching
 // reloadPolicy's on-reload overlay handling: the loud failure already fired at launch,
 // and a live gateway must not wedge over a bad out-of-band edit.
-func guardReloadDefaultFloor() (policy.Runtime, error) {
+func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
 	if err != nil {
-		return policy.Runtime{}, err
+		return policy.Runtime{}, "", err
 	}
 	overlayPath := guardAllowOverlayPath()
+	overlayWarning := ""
 	if ov, ovErr := loadGuardAllowOverlay(overlayPath); ovErr == nil {
 		guardApplyAllowOverlay(&rt, ov)
+	} else {
+		overlayWarning = "overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, overlayPath, "")
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
@@ -272,7 +275,7 @@ func guardReloadDefaultFloor() (policy.Runtime, error) {
 	// is stable; the mutable part an operator changes between reloads is the overlay, folded
 	// into rt above. journal.Active() no-ops on an unjournaled run, keeping it byte-identical.
 	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapOK, "")
-	return rt, nil
+	return rt, overlayWarning, nil
 }
 
 func protectGuardPolicyConfig(rt policy.Runtime, paths ...string) policy.Runtime {

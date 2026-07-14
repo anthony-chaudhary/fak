@@ -1011,14 +1011,14 @@ func applyPolicy(path string) {
 	if path == "" {
 		return
 	}
-	_, err := reloadPolicy(path)
+	_, _, err := reloadPolicy(path)
 	must(err)
 	fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s\n", path)
 }
 
-func reloadPolicy(path string) (policy.Runtime, error) {
+func reloadPolicy(path string) (policy.Runtime, string, error) {
 	if path == "" {
-		return policy.Runtime{}, errors.New("policy reload requires --policy FILE")
+		return policy.Runtime{}, "", errors.New("policy reload requires --policy FILE")
 	}
 	rt, err := policy.LoadRuntime(path)
 	if err != nil {
@@ -1028,15 +1028,18 @@ func reloadPolicy(path string) (policy.Runtime, error) {
 		// read — before returning. journal.Active() is nil on an unjournaled run and
 		// AppendConfigSwap no-ops, keeping that run byte-identical.
 		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapRejected, err.Error())
-		return policy.Runtime{}, err
+		return policy.Runtime{}, "", err
 	}
 	// Re-apply the operator allow overlay on hot-reload so a `--policy` swap never
 	// silently drops the out-of-band always-allow list (`fak guard allow`). A missing
 	// overlay is the common no-op; a malformed one is tolerated on reload rather than
 	// wedging a live gateway (the loud failure already fired at launch).
 	overlayPath := guardAllowOverlayPath()
+	overlayWarning := ""
 	if ov, ovErr := loadGuardAllowOverlay(overlayPath); ovErr == nil {
 		guardApplyAllowOverlay(&rt, ov)
+	} else {
+		overlayWarning = "overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, overlayPath, path)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
@@ -1045,7 +1048,7 @@ func reloadPolicy(path string) (policy.Runtime, error) {
 	// security boundary just changed, so an auditor must be able to see which bytes
 	// (source path + sha256) became authoritative and when.
 	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapOK, "")
-	return rt, nil
+	return rt, overlayWarning, nil
 }
 
 // configFileDigest returns the sha256 (as "sha256:<hex>") of a config manifest's
@@ -1067,15 +1070,16 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 		return nil
 	}
 	return func(context.Context) (gateway.PolicyReloadResponse, error) {
-		rt, err := reloadPolicy(path)
+		rt, overlayWarning, err := reloadPolicy(path)
 		if err != nil {
 			return gateway.PolicyReloadResponse{}, err
 		}
-		return gateway.PolicyReloadResponse{
-			Reloaded: true,
-			Source:   path,
-			Summary:  policy.SummaryRuntime(rt),
-		}, nil
+		summary := policy.SummaryRuntime(rt)
+		if overlayWarning != "" {
+			fmt.Fprintln(os.Stderr, "fak policy reload warning:", overlayWarning)
+			summary += "\n" + overlayWarning
+		}
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary}, nil
 	}
 }
 
@@ -1091,15 +1095,16 @@ func guardPolicyReloader(policyPath string) gateway.PolicyReloadFunc {
 		return policyReloader(policyPath)
 	}
 	return func(context.Context) (gateway.PolicyReloadResponse, error) {
-		rt, err := guardReloadDefaultFloor()
+		rt, overlayWarning, err := guardReloadDefaultFloor()
 		if err != nil {
 			return gateway.PolicyReloadResponse{}, err
 		}
-		return gateway.PolicyReloadResponse{
-			Reloaded: true,
-			Source:   "built-in guard floor + operator allow overlay",
-			Summary:  policy.SummaryRuntime(rt),
-		}, nil
+		summary := policy.SummaryRuntime(rt)
+		if overlayWarning != "" {
+			fmt.Fprintln(os.Stderr, "fak guard reload warning:", overlayWarning)
+			summary += "\n" + overlayWarning
+		}
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: "built-in guard floor + operator allow overlay", Summary: summary}, nil
 	}
 }
 
