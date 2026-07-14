@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -58,6 +59,63 @@ func TestFormatActiveSetLineDivisors(t *testing.T) {
 	for _, want := range []string{"active_bytes_per_tok=PENDING(K)", "active_params_per_tok=PENDING(K)"} {
 		if !strings.Contains(pending, want) {
 			t.Errorf("K-unread active-set line missing %q\n  got: %s", want, pending)
+		}
+	}
+}
+
+// TestArgmaxLocal witnesses the alloc-free argmax the -decode loop uses to pick the next
+// token: it must return the index of the single max logit, ties resolving to the first.
+func TestArgmaxLocal(t *testing.T) {
+	cases := []struct {
+		v    []float32
+		want int
+	}{
+		{[]float32{0.1, 0.9, 0.3}, 1},
+		{[]float32{-5, -1, -9}, 1},
+		{[]float32{2, 2, 2}, 0},   // tie → first
+		{[]float32{7}, 0},         // singleton
+		{[]float32{-1, -1, 0}, 2}, // max at tail
+	}
+	for _, c := range cases {
+		if got := argmaxLocal(c.v); got != c.want {
+			t.Errorf("argmaxLocal(%v)=%d want %d", c.v, got, c.want)
+		}
+	}
+}
+
+// TestDecodeTokS witnesses the throughput math and its guards: steps÷wall, and a zero
+// (never a NaN/Inf) for the degenerate steps≤0 / wall≤0 inputs the timer can hand it.
+func TestDecodeTokS(t *testing.T) {
+	if got := decodeTokS(64, 2*time.Second); got != 32 {
+		t.Errorf("decodeTokS(64,2s)=%v want 32", got)
+	}
+	if got := decodeTokS(0, time.Second); got != 0 {
+		t.Errorf("decodeTokS(0,1s)=%v want 0", got)
+	}
+	if got := decodeTokS(10, 0); got != 0 {
+		t.Errorf("decodeTokS(10,0)=%v want 0 (no div-by-zero)", got)
+	}
+}
+
+// TestFormatDecodeResultEchoesKnobs witnesses that the machine-parseable RESULT line the
+// sweep runner greps carries the decoded tok/s, the first-token id (the C1 argmax witness),
+// and the parse-stable field keys. A rename of these keys silently breaks the sweep parser,
+// so this pins the contract.
+func TestFormatDecodeResultEchoesKnobs(t *testing.T) {
+	got := formatDecodeResult(64, 3, 2*time.Second, 248068)
+	for _, want := range []string{
+		"RESULT ",
+		"decode_tok_s=32.0000",
+		"first_token_id=248068",
+		"steps=64",
+		"warmup=3",
+		"gomaxprocs=",
+		"fak_workers=",
+		"fak_kq_int8=",
+		"fak_q4k=",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("decode RESULT line missing %q\n  got: %s", want, got)
 		}
 	}
 }

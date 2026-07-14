@@ -32,6 +32,8 @@ func main() {
 	membw := flag.Float64("membw", 0, "machine memory bandwidth GB/s; if >0, print the bandwidth-bound decode tok/s ceiling")
 	planOnly := flag.Bool("plan-only", false, "print header-only GGUF memory plans and exit before loading tensors")
 	expertParallel := flag.Int("expert-parallel", 1, "expert-parallel ranks for -plan-only per-rank memory plan")
+	decodeN := flag.Int("decode", 0, "if >0, greedily generate N decode steps from the oracle prefill and print measured decode tok/s (the C1/C2 witness: set FAK_KQ_INT8=0|1, FAK_WORKERS=W, wrap in numactl to A/B the int8 path, worker count, and NUMA placement)")
+	warmup := flag.Int("warmup", 3, "decode warmup steps excluded from the timed window (lets caches/branch-predictors settle before measuring)")
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*gguf = pathutil.ExpandTilde(*gguf)
@@ -78,9 +80,31 @@ func main() {
 	s.Q4K = true
 	logits := s.Prefill(oraclePrompt)
 	top := topK(logits, 8)
+	firstID := top[0].id
 	fmt.Fprintf(os.Stderr, "first-token top-8 (oracle wants 248068=<think> ~28.3):\n")
 	for _, t := range top {
 		fmt.Fprintf(os.Stderr, "  id=%-7d logit=%.4f\n", t.id, t.logit)
+	}
+
+	// Decode micro-benchmark (opt-in via -decode N). Greedily continues the oracle
+	// prefill and times N Step() calls after a warmup, so a single deterministic run
+	// reports BOTH the first-token id (the C1 argmax-agreement witness) and the decode
+	// tok/s. Because the int8 Q4_K reducer is selected by env (FAK_KQ_INT8) and worker
+	// count by env (FAK_WORKERS), the A/B for int8-vs-f32, worker-count, and NUMA
+	// placement is just: numactl <p> env FAK_KQ_INT8=0|1 FAK_WORKERS=W q4kdiag -decode N.
+	if *decodeN > 0 {
+		id := firstID
+		for i := 0; i < *warmup; i++ { // untimed: let caches/predictors settle
+			id = argmaxLocal(s.Step(id))
+		}
+		t0 := time.Now()
+		for i := 0; i < *decodeN; i++ {
+			id = argmaxLocal(s.Step(id))
+		}
+		wall := time.Since(t0)
+		fmt.Fprintln(os.Stderr, formatDecodeLine(*decodeN, *warmup, wall, firstID))
+		// Machine-parseable single line for the sweep runner to grep.
+		fmt.Fprintln(os.Stdout, formatDecodeResult(*decodeN, *warmup, wall, firstID))
 	}
 
 	var ms runtime.MemStats
@@ -193,4 +217,41 @@ func topK(logits []float32, k int) []kv {
 		k = len(out)
 	}
 	return out[:k]
+}
+
+// argmaxLocal returns the index of the max logit in a single alloc-free pass. Used by the
+// -decode loop instead of topK(…,1) so the argmax cost does not distort the timed window.
+func argmaxLocal(v []float32) int {
+	bi := 0
+	best := float32(-3.4e38)
+	for i, x := range v {
+		if x > best {
+			best, bi = x, i
+		}
+	}
+	return bi
+}
+
+// decodeTokS is the decode throughput: timed steps ÷ wall seconds. Isolated so the timing
+// math has a unit-test hook that needs no resident 27B model.
+func decodeTokS(steps int, wall time.Duration) float64 {
+	if steps <= 0 || wall <= 0 {
+		return 0
+	}
+	return float64(steps) / wall.Seconds()
+}
+
+// formatDecodeLine is the human-readable -decode summary (stderr).
+func formatDecodeLine(steps, warmup int, wall time.Duration, firstTokenID int) string {
+	return fmt.Sprintf("decode: steps=%d warmup=%d wall=%.3fs tok/s=%.3f first_token_id=%d (oracle 248068)",
+		steps, warmup, wall.Seconds(), decodeTokS(steps, wall), firstTokenID)
+}
+
+// formatDecodeResult is the machine-parseable one-liner (stdout) the sweep runner greps. It
+// echoes the knobs (GOMAXPROCS, FAK_WORKERS, FAK_KQ_INT8, FAK_Q4K) so each numactl/env sweep
+// row is self-describing without the launcher threading them back in.
+func formatDecodeResult(steps, warmup int, wall time.Duration, firstTokenID int) string {
+	return fmt.Sprintf("RESULT decode_tok_s=%.4f first_token_id=%d steps=%d warmup=%d wall_s=%.4f gomaxprocs=%d fak_workers=%q fak_kq_int8=%q fak_q4k=%q",
+		decodeTokS(steps, wall), firstTokenID, steps, warmup, wall.Seconds(),
+		runtime.GOMAXPROCS(0), os.Getenv("FAK_WORKERS"), os.Getenv("FAK_KQ_INT8"), os.Getenv("FAK_Q4K"))
 }
