@@ -202,6 +202,15 @@ func TestBenchFleetA100UsesProvisionedGPURecipe(t *testing.T) {
 	}
 }
 
+func TestBenchFleetCOSModelBenchmarkUsesContainerRecipe(t *testing.T) {
+	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-g2-l4-32", Benchmark: "model-benchmark", Command: "generic"})
+	for _, want := range []string{"FAK_BENCH_NODE=", "docker run --rm", "golang:1.26", "/usr/local/go/bin/go", "/models/smollm2-135m"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("command %q missing %q", cmd, want)
+		}
+	}
+}
+
 func TestBenchFleetL4ServeUsesLiveDecodeRecipe(t *testing.T) {
 	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-g2-l4-32", Benchmark: "gpu-benchmark", Command: "generic"})
 	for _, want := range []string{"FAK_BENCH_NODE=", "FAK_BENCH_HTTP=", "/v1/chat/completions", "max_tokens"} {

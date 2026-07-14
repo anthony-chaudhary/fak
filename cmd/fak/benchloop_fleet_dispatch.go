@@ -188,6 +188,11 @@ func hasBenchNodeWitness(output string) bool {
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
 	if req.Benchmark == "model-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+		if req.Machine == "gcp-g2-l4-32" {
+			// Container-Optimized OS mounts the persistent home filesystem noexec.
+			// Run the provisioned source and weights in the pinned Go container instead.
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -v $HOME/models/smollm2-135m:/models/smollm2-135m -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/modelbench -hf /models/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
+		}
 		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/modelbench -hf ~/models/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
 	}
 	if req.Benchmark == "gpu-benchmark" {
