@@ -692,6 +692,35 @@ func requireContainsForClaudeGLMGCP(t *testing.T, text, want string) {
 	}
 }
 
+func TestGCPQwenProvisionerPropagatesPinnedQwen36Artifact(t *testing.T) {
+	provisioner := filepath.Join("..", "..", "scripts", "gcp-qwen-serve.sh")
+	b, err := os.ReadFile(provisioner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	for _, want := range []string{
+		`QWEN_REPO="${QWEN_REPO:-unsloth/Qwen3.6-27B-GGUF}"`,
+		`QWEN_FILE_GLOB="${QWEN_FILE_GLOB:-Qwen3.6-27B-Q4_K_M.gguf}"`,
+		`MODEL_ID="${MODEL_ID:-qwen3.6-27b}"`,
+		`--setenv=QWEN_REPO="${QWEN_REPO}"`,
+		`--setenv=QWEN_FILE_GLOB="${QWEN_FILE_GLOB}"`,
+		`--setenv=MODEL_ID="${MODEL_ID}"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Qwen3.6 provisioner contract missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`QWEN_REPO:-bartowski/Qwen2.5-Coder-14B-Instruct-GGUF`,
+		`MODEL_ID:-qwen2.5-coder-14b`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("legacy model can still be the provisioner default: %q", forbidden)
+		}
+	}
+}
+
 func TestGCPQwenLauncherPinsQwen36ModelIdentity(t *testing.T) {
 	launcher := filepath.Join("..", "..", "tools", "qwen36_a100_fak_serve.sh")
 	b, err := os.ReadFile(launcher)
