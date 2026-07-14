@@ -36,27 +36,27 @@ const (
 	TriageOnly   = "triage_only"
 	Refused      = "refused"
 
-	ReasonScopeIncomplete       = "ISSUE_SCOPE_INCOMPLETE"
-	ReasonUnrouted              = "ISSUE_UNROUTED"
-	ReasonNotBornRouted         = "ISSUE_NOT_BORN_ROUTED"
-	ReasonPrivateBoundary       = "ISSUE_PRIVATE_BOUNDARY"
-	ReasonLiveUnarmored         = "ISSUE_LIVE_UNARMORED"
-	ReasonNotDispatchLeaf       = "ISSUE_NOT_DISPATCH_LEAF"
-	ReasonOversizedSteps        = "ISSUE_OVERSIZED_EXPECTED_STEPS"
-	ReasonNoiseIncomplete       = "ISSUE_NOISE_CONTROL_INCOMPLETE"
-	ReasonAgentIncomplete       = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
-	ReasonUnexpandedTemplate    = "ISSUE_UNEXPANDED_TEMPLATE"
-	ReasonModelTierIncomplete   = "ISSUE_MODEL_TIER_INCOMPLETE"
-	ReasonScaleUndeclared       = "ISSUE_SCALE_UNDECLARED"
-	ReasonWitnessScaleMismatch  = "ISSUE_WITNESS_SCALE_MISMATCH"
-	ReasonTargetEnvelopeMissing = "ISSUE_TARGET_ENVELOPE_MISSING"
-	ReasonEnvelopeInvalid       = "ISSUE_OPERATING_ENVELOPE_INVALID"
-	ReasonEnvelopeUnderTarget   = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
-	ReasonScaleEvidenceInvalid  = "ISSUE_SCALE_EVIDENCE_INVALID"
-	ReasonScaleStageMissing     = "ISSUE_SCALE_EVIDENCE_STAGE_MISSING"
-	ReasonWitnessForgeable      = "ISSUE_WITNESS_FORGEABLE"
-	ReasonProjectWorkMissing    = "ISSUE_PROJECT_WORK_MISSING"
-	ReasonProjectWorkInvalid    = "ISSUE_PROJECT_WORK_INVALID"
+	ReasonScopeIncomplete        = "ISSUE_SCOPE_INCOMPLETE"
+	ReasonUnrouted               = "ISSUE_UNROUTED"
+	ReasonNotBornRouted          = "ISSUE_NOT_BORN_ROUTED"
+	ReasonPrivateBoundary        = "ISSUE_PRIVATE_BOUNDARY"
+	ReasonLiveUnarmored          = "ISSUE_LIVE_UNARMORED"
+	ReasonNotDispatchLeaf        = "ISSUE_NOT_DISPATCH_LEAF"
+	ReasonOversizedSteps         = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	ReasonNoiseIncomplete        = "ISSUE_NOISE_CONTROL_INCOMPLETE"
+	ReasonAgentIncomplete        = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
+	ReasonUnexpandedTemplate     = "ISSUE_UNEXPANDED_TEMPLATE"
+	ReasonModelTierIncomplete    = "ISSUE_MODEL_TIER_INCOMPLETE"
+	ReasonScaleUndeclared        = "ISSUE_SCALE_UNDECLARED"
+	ReasonWitnessScaleMismatch   = "ISSUE_WITNESS_SCALE_MISMATCH"
+	ReasonTargetEnvelopeMissing  = "ISSUE_TARGET_ENVELOPE_MISSING"
+	ReasonEnvelopeInvalid        = "ISSUE_OPERATING_ENVELOPE_INVALID"
+	ReasonEnvelopeUnderTarget    = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
+	ReasonScaleEvidenceInvalid   = "ISSUE_SCALE_EVIDENCE_INVALID"
+	ReasonScaleStageMissing      = "ISSUE_SCALE_EVIDENCE_STAGE_MISSING"
+	ReasonWitnessForgeable       = "ISSUE_WITNESS_FORGEABLE"
+	ReasonProjectWorkMissing     = "ISSUE_PROJECT_WORK_MISSING"
+	ReasonProjectWorkInvalid     = "ISSUE_PROJECT_WORK_INVALID"
 	ReasonClosureWitnessMissing  = "ISSUE_CLOSURE_WITNESS_MISSING"
 	ReasonClosureWitnessMismatch = "ISSUE_CLOSURE_WITNESS_MISMATCH"
 	ReasonClosureProductionGap   = "ISSUE_CLOSURE_PRODUCTION_GAP"
@@ -131,34 +131,34 @@ type Candidate struct {
 	// like leaf/feature/epic). It is optional and, when absent, derived from
 	// ExpectedSteps / WorkUnit — see scaleFit. It exists so "done" can be typed to
 	// the size of the thing instead of reusing one word across every magnitude.
-	Scale               string          `json:"scale,omitempty"`
-	Assumptions         []string        `json:"assumptions,omitempty"`
-	ConfusionRisks      []string        `json:"confusion_risks,omitempty"`
-	Coordination        []string        `json:"coordination,omitempty"`
-	Trigger             string          `json:"trigger,omitempty"`
-	BatchPolicy         string          `json:"batch_policy,omitempty"`
-	InScope             string          `json:"in_scope,omitempty"`
-	OutOfScope          string          `json:"out_of_scope,omitempty"`
-	DoneCondition       string          `json:"done_condition,omitempty"`
-	Witness             string          `json:"witness,omitempty"`
-	AcceptanceGate      string          `json:"acceptance_gate,omitempty"`
-	Lane                string          `json:"lane,omitempty"`
-	Paths               []string        `json:"paths,omitempty"`
-	Dependencies        []DependencyRef `json:"dependencies,omitempty"`
-	Labels              []string        `json:"labels,omitempty"`
-	Priority            string          `json:"priority,omitempty"`
-	BoundaryNotes       []string        `json:"boundary_notes,omitempty"`
-	Private             bool            `json:"private,omitempty"`
-	ClosureBinding      string          `json:"closure_binding,omitempty"`
-	ClosureClaim        string          `json:"closure_claim,omitempty"`
-	ClosureWitnessStandard string       `json:"closure_witness_standard,omitempty"`
-	CompletionStandard  string          `json:"completion_standard,omitempty"`
-	TargetEnvelope      string          `json:"target_operating_envelope,omitempty"`
-	WitnessedEnvelope   string          `json:"witnessed_operating_envelope,omitempty"`
-	ScaleEvidence       string          `json:"scale_evidence,omitempty"`
-	RequiredScaleStages string          `json:"required_scale_stages,omitempty"`
-	WorkEstimate        string          `json:"work_estimate,omitempty"`
-	ScopeContribution   string          `json:"scope_contribution,omitempty"`
+	Scale                  string          `json:"scale,omitempty"`
+	Assumptions            []string        `json:"assumptions,omitempty"`
+	ConfusionRisks         []string        `json:"confusion_risks,omitempty"`
+	Coordination           []string        `json:"coordination,omitempty"`
+	Trigger                string          `json:"trigger,omitempty"`
+	BatchPolicy            string          `json:"batch_policy,omitempty"`
+	InScope                string          `json:"in_scope,omitempty"`
+	OutOfScope             string          `json:"out_of_scope,omitempty"`
+	DoneCondition          string          `json:"done_condition,omitempty"`
+	Witness                string          `json:"witness,omitempty"`
+	AcceptanceGate         string          `json:"acceptance_gate,omitempty"`
+	Lane                   string          `json:"lane,omitempty"`
+	Paths                  []string        `json:"paths,omitempty"`
+	Dependencies           []DependencyRef `json:"dependencies,omitempty"`
+	Labels                 []string        `json:"labels,omitempty"`
+	Priority               string          `json:"priority,omitempty"`
+	BoundaryNotes          []string        `json:"boundary_notes,omitempty"`
+	Private                bool            `json:"private,omitempty"`
+	ClosureBinding         string          `json:"closure_binding,omitempty"`
+	ClosureClaim           string          `json:"closure_claim,omitempty"`
+	ClosureWitnessStandard string          `json:"closure_witness_standard,omitempty"`
+	CompletionStandard     string          `json:"completion_standard,omitempty"`
+	TargetEnvelope         string          `json:"target_operating_envelope,omitempty"`
+	WitnessedEnvelope      string          `json:"witnessed_operating_envelope,omitempty"`
+	ScaleEvidence          string          `json:"scale_evidence,omitempty"`
+	RequiredScaleStages    string          `json:"required_scale_stages,omitempty"`
+	WorkEstimate           string          `json:"work_estimate,omitempty"`
+	ScopeContribution      string          `json:"scope_contribution,omitempty"`
 	// RequiredModelTier / OptimalModelTier are the body-field FALLBACK for an
 	// issue whose namespaced tier/T?-required|optimal labels are unavailable
 	// (the issue's own stated assumption). A namespaced label always wins over
@@ -688,44 +688,44 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		expectedSteps = routing.expectedSteps
 	}
 	return Candidate{
-		Schema:              Schema,
-		IssueNumber:         d.Number,
-		Key:                 issueDraftKey(d),
-		Title:               d.Title,
-		Generation:          issueDraftGeneration(d, section("Generation stream", "Generation")),
-		ParentRef:           section("Parent context", "Parent ref", "Parent issue", "Source"),
-		CurrentState:        section("Current state"),
-		WhyNow:              section("Why this is next", "Why now"),
-		WorkingSpine:        section("Working spine"),
-		PriorityContext:     section("Priority context", "Spine priority", "Importance"),
-		WorkUnit:            section("Work unit", "Work-unit shape", "Issue shape"),
-		ExpectedSteps:       expectedSteps,
-		Scale:               agentSectionValue(section("Work scale", "Scale", "Size tier", "Work size")),
-		Assumptions:         issueDraftAgentNotes(section("Assumptions")),
-		ConfusionRisks:      issueDraftAgentNotes(section("Confusion risks", "Known confusion", "Unknowns")),
-		Coordination:        issueDraftAgentNotes(section("Coordination", "Coordination notes", "Handoff notes")),
-		Trigger:             agentSectionValue(section("Trigger", "Creation trigger")),
-		BatchPolicy:         agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
-		InScope:             section("In scope"),
-		OutOfScope:          section("Out of scope"),
-		DoneCondition:       strmatch.FirstTrimmed(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
-		Witness:             strmatch.FirstTrimmed(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
-		AcceptanceGate:      section("Acceptance gate"),
-		Lane:                lane,
-		Paths:               paths,
-		Dependencies:        ParseIssueDependencies(section("Dependencies", "Dependency markers")),
-		Labels:              issueDraftLabels(d.Labels),
-		BoundaryNotes:       issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
-		ClosureBinding:      section("Closure binding"),
-		ClosureClaim:        section("Closure claim", "Ship claim"),
+		Schema:                 Schema,
+		IssueNumber:            d.Number,
+		Key:                    issueDraftKey(d),
+		Title:                  d.Title,
+		Generation:             issueDraftGeneration(d, section("Generation stream", "Generation")),
+		ParentRef:              section("Parent context", "Parent ref", "Parent issue", "Source"),
+		CurrentState:           section("Current state"),
+		WhyNow:                 section("Why this is next", "Why now"),
+		WorkingSpine:           section("Working spine"),
+		PriorityContext:        section("Priority context", "Spine priority", "Importance"),
+		WorkUnit:               section("Work unit", "Work-unit shape", "Issue shape"),
+		ExpectedSteps:          expectedSteps,
+		Scale:                  agentSectionValue(section("Work scale", "Scale", "Size tier", "Work size")),
+		Assumptions:            issueDraftAgentNotes(section("Assumptions")),
+		ConfusionRisks:         issueDraftAgentNotes(section("Confusion risks", "Known confusion", "Unknowns")),
+		Coordination:           issueDraftAgentNotes(section("Coordination", "Coordination notes", "Handoff notes")),
+		Trigger:                agentSectionValue(section("Trigger", "Creation trigger")),
+		BatchPolicy:            agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
+		InScope:                section("In scope"),
+		OutOfScope:             section("Out of scope"),
+		DoneCondition:          strmatch.FirstTrimmed(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
+		Witness:                strmatch.FirstTrimmed(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
+		AcceptanceGate:         section("Acceptance gate"),
+		Lane:                   lane,
+		Paths:                  paths,
+		Dependencies:           ParseIssueDependencies(section("Dependencies", "Dependency markers")),
+		Labels:                 issueDraftLabels(d.Labels),
+		BoundaryNotes:          issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
+		ClosureBinding:         section("Closure binding"),
+		ClosureClaim:           section("Closure claim", "Ship claim"),
 		ClosureWitnessStandard: section("Closure witness standard", "Witnessed completion standard"),
-		CompletionStandard:  section("Completion standard"),
-		TargetEnvelope:      section("Target operating envelope", "Target envelope"),
-		WitnessedEnvelope:   section("Witnessed operating envelope", "Observed operating envelope", "Witnessed envelope"),
-		ScaleEvidence:       section("Scale evidence", "Operating envelope evidence"),
-		RequiredScaleStages: section("Required scale stages", "Required evidence stages"),
-		WorkEstimate:        section("Work estimate"),
-		ScopeContribution:   section("Overall completion contribution", "Scope contribution"),
+		CompletionStandard:     section("Completion standard"),
+		TargetEnvelope:         section("Target operating envelope", "Target envelope"),
+		WitnessedEnvelope:      section("Witnessed operating envelope", "Observed operating envelope", "Witnessed envelope"),
+		ScaleEvidence:          section("Scale evidence", "Operating envelope evidence"),
+		RequiredScaleStages:    section("Required scale stages", "Required evidence stages"),
+		WorkEstimate:           section("Work estimate"),
+		ScopeContribution:      section("Overall completion contribution", "Scope contribution"),
 		// Body fallback for the tier tags — used only when the namespaced
 		// tier/T?-required|optimal GitHub labels are absent (see modelTier).
 		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),

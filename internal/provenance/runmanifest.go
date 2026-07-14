@@ -16,7 +16,7 @@
 //
 //   - "equivalent runs normalize identically / one changed flag is visible"
 //     -> Normalize + Fingerprint + Equivalent (same fingerprint) and
-//        FirstDivergence (the changed flag, localized and readable).
+//     FirstDivergence (the changed flag, localized and readable).
 //   - "each case records model, tokenizer, engine/backend, seed or deterministic
 //     oracle, code/module revision, tolerance/baseline provenance" -> the named
 //     RunManifest fields, all required by Validate.

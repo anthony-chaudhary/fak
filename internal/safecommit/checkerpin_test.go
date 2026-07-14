@@ -152,7 +152,7 @@ func TestVerifyCheckers_MultiCheckerDeterministic(t *testing.T) {
 	c := writeChecker(t, root, "c_test.go", "c=3\n")
 	base := mustPin(t, root, c, a, b) // pin order intentionally unsorted
 
-	writeChecker(t, root, b, "b=999\n")                            // change
+	writeChecker(t, root, b, "b=999\n")                                 // change
 	if err := os.Remove(filepath.Join(root, "a_test.go")); err != nil { // delete
 		t.Fatalf("remove a: %v", err)
 	}

@@ -157,7 +157,7 @@ const reloadNone = -1
 // the system prefix and everything from the tools block onward is re-sent fresh.
 func simulateFloorSession(m FloorReloadModel, turns, reloadAt int) FloorReloadArm {
 	prefix := m.SystemPrefixTokens + m.ToolsBlockTokens
-	resident := prefix // input re-sent at the start of a turn, before this turn's growth
+	resident := prefix  // input re-sent at the start of a turn, before this turn's growth
 	cacheValidUpTo := 0 // tokens of the resident prefix already cached from prior turns
 	var reused, fresh int
 	var billed float64
