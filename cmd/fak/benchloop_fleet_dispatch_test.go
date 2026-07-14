@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -45,13 +46,37 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 	}
 }
 
-func TestBenchFleetRoutesUnavailableNodesToTypedWait(t *testing.T) {
+func TestBenchFleetRouteLeavesUnconfiguredMacWaiting(t *testing.T) {
+	t.Setenv("FAK_BENCH_MAC_HOST", "")
 	_, _, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "node-macos-a"})
-	if err == nil || route != "mac" || state != "waiting_session" {
-		t.Fatalf("route=%s state=%s err=%v", route, state, err)
+	if err == nil || route != "mac:tailscale" || state != "waiting_session" {
+		t.Fatalf("route=%q state=%q err=%v", route, state, err)
 	}
 }
 
+func TestBenchFleetRouteUsesConfiguredMacSession(t *testing.T) {
+	t.Setenv("FAK_BENCH_MAC_HOST", "mac-node")
+	name, args, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "node-macos-a", Command: "go run ./cmd/livecodebench --check --json"})
+	if err != nil || name != "tailscale" || route != "mac:tailscale/mac-node" || state != "running" {
+		t.Fatalf("name=%q args=%q route=%q state=%q err=%v", name, args, route, state, err)
+	}
+	if got := strings.Join(args, " "); !strings.Contains(got, "ssh mac-node") || !strings.Contains(got, "FAK_BENCH_NODE") {
+		t.Fatalf("args=%q", args)
+	}
+}
+
+func TestBenchFleetRouteRunsWorkstationLocally(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows control route")
+	}
+	name, args, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a", Command: "go run ./cmd/livecodebench --check --json"})
+	if err != nil || name != "powershell.exe" || route != "local-control" || state != "running" {
+		t.Fatalf("name=%q args=%q route=%q state=%q err=%v", name, args, route, state, err)
+	}
+	if got := strings.Join(args, " "); !strings.Contains(got, "FAK_BENCH_NODE") || !strings.Contains(got, "livecodebench") {
+		t.Fatalf("args=%q", args)
+	}
+}
 func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) {
 	dir := t.TempDir()
 	q := filepath.Join(dir, "requests")
@@ -84,6 +109,34 @@ func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) 
 	}
 	if report.Claimed != 0 {
 		t.Fatalf("failed request reclaimed: %+v", report)
+	}
+}
+
+func TestBenchFleetSuccessfulWitnessIsIngestedAsRunArtifact(t *testing.T) {
+	root := t.TempDir()
+	q := filepath.Join(root, ".fak", "bench-fleet", "requests")
+	if err := os.MkdirAll(q, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "abc", Machine: "gcp-g2-l4", NodeClass: "gpu", Benchmark: "gpu-benchmark", Model: "qwen", Precision: "q8", Command: "echo ok", State: "queued"}
+	if err := writeBenchFleetRequest(filepath.Join(q, "gcp-abc.json"), req); err != nil {
+		t.Fatal(err)
+	}
+	fake := func(string, ...string) ([]byte, int, error) { return []byte("FAK_BENCH_NODE=node\nOK\n"), 0, nil }
+	var out, errOut bytes.Buffer
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--workspace", root, "--json"}, fake); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "gcp-g2-l4", "*-bench-fleet-abc", "manifest.json"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("matches=%q err=%v", matches, err)
+	}
+	b, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"request_id": "abc"`)) || !bytes.Contains(b, []byte(`"witness": "witness.json"`)) {
+		t.Fatalf("manifest=%s", b)
 	}
 }
 

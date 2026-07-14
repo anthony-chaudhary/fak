@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,6 +21,9 @@ type benchFleetWitness struct {
 	Schema     string   `json:"schema"`
 	RequestID  string   `json:"request_id"`
 	Machine    string   `json:"machine"`
+	Benchmark  string   `json:"benchmark,omitempty"`
+	Model      string   `json:"model,omitempty"`
+	Precision  string   `json:"precision,omitempty"`
 	State      string   `json:"state"`
 	Route      string   `json:"route"`
 	Command    []string `json:"command,omitempty"`
@@ -101,6 +105,19 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 		if b, e := json.MarshalIndent(witness, "", "  "); e == nil {
 			_ = writeAtomic(filepath.Join(witnessDir, req.ID+".json"), append(b, '\n'))
 		}
+		if witness.State == "succeeded" {
+			if err := ingestBenchFleetWitness(*root, req, witness); err != nil {
+				witness.State = "failed"
+				witness.Error = "ingest benchmark witness: " + err.Error()
+				req.State = witness.State
+				_ = writeBenchFleetRequest(path, req)
+			} else if err := updateBenchFleetCatalog(*root); err != nil {
+				witness.State = "failed"
+				witness.Error = "update benchmark catalog: " + err.Error()
+				req.State = witness.State
+				_ = writeBenchFleetRequest(path, req)
+			}
+		}
 		report.Witnesses = append(report.Witnesses, witness)
 		switch witness.State {
 		case "succeeded":
@@ -123,7 +140,7 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 }
 
 func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleetExec) benchFleetWitness {
-	w := benchFleetWitness{Schema: "fak.bench-fleet.witness.v1", RequestID: req.ID, Machine: req.Machine, StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	w := benchFleetWitness{Schema: "fak.bench-fleet.witness.v1", RequestID: req.ID, Machine: req.Machine, Benchmark: req.Benchmark, Model: req.Model, Precision: req.Precision, StartedAt: time.Now().UTC().Format(time.RFC3339)}
 	name, args, route, state, err := benchFleetRoute(root, req)
 	w.Route = route
 	w.State = state
@@ -140,6 +157,8 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 		lowerOutput := strings.ToLower(w.Output)
 		if w.Route == "dgxbridge" && (strings.Contains(lowerOutput, "no slack channel") || strings.Contains(lowerOutput, "missing")) {
 			w.State = "waiting_credentials"
+		} else if strings.HasPrefix(w.Route, "mac:") && (strings.Contains(lowerOutput, "timed out") || strings.Contains(lowerOutput, "timeout") || strings.Contains(lowerOutput, "502 bad gateway") || strings.Contains(lowerOutput, "failed to respond") || strings.Contains(lowerOutput, "connection closed")) {
+			w.State = "waiting_session"
 		} else if strings.HasPrefix(w.Route, "gcp:") && (strings.Contains(lowerOutput, "no such file or directory") || strings.Contains(lowerOutput, "command not found") || strings.Contains(lowerOutput, "need -hf")) {
 			w.State = "waiting_provision"
 		} else {
@@ -206,12 +225,162 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 		}
 		return bridge, []string{"run", remote}, "dgxbridge", "running", nil
 	case "workstation-a":
-		return "", nil, "local-control", "waiting_operator", errors.New("control-node benchmark requires an explicit local runner")
+		if runtime.GOOS != "windows" {
+			return "", nil, "local-control", "waiting_session", errors.New("workstation runner is only available on its Windows control node")
+		}
+		command := "Write-Output ('FAK_BENCH_NODE=' + $env:COMPUTERNAME); Set-Location -LiteralPath '" + strings.ReplaceAll(root, "'", "''") + "'; " + req.Command
+		return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", command}, "local-control", "running", nil
 	case "node-macos-a":
-		return "", nil, "mac", "waiting_session", errors.New("mac runner session unavailable")
+		host := benchFleetMacHost(root)
+		if host == "" {
+			return "", nil, "mac:tailscale", "waiting_session", errors.New("mac runner host is not configured")
+		}
+		return "tailscale", []string{"ssh", host, remote}, "mac:tailscale/" + host, "running", nil
 	default:
 		return "", nil, "unknown", "waiting_route", fmt.Errorf("no route for machine %q", req.Machine)
 	}
+}
+
+type benchFleetRouteConfig struct {
+	MacHost string `json:"mac_host"`
+}
+
+func benchFleetMacHost(root string) string {
+	if host := strings.TrimSpace(os.Getenv("FAK_BENCH_MAC_HOST")); host != "" {
+		return host
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".fak", "bench-fleet", "routes.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg benchFleetRouteConfig
+	if json.Unmarshal(b, &cfg) != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.MacHost)
+}
+
+type benchFleetRunManifest struct {
+	Schema    string            `json:"$schema"`
+	RunID     string            `json:"run_id"`
+	MachineID string            `json:"machine_id"`
+	Timestamp string            `json:"timestamp"`
+	Git       map[string]any    `json:"git"`
+	Harness   map[string]any    `json:"harness"`
+	Model     map[string]any    `json:"model"`
+	Config    map[string]any    `json:"config"`
+	Tags      []string          `json:"tags"`
+	Artifacts map[string]string `json:"artifacts"`
+}
+
+func ingestBenchFleetWitness(root string, req benchFleetRequest, witness benchFleetWitness) error {
+	t, err := time.Parse(time.RFC3339, witness.FinishedAt)
+	if err != nil {
+		return err
+	}
+	timestamp := t.UTC().Format("20060102T150405Z")
+	runID := req.Machine + "-bench-fleet-" + req.ID + "-" + timestamp
+	dir := filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", req.Machine, timestamp+"-bench-fleet-"+req.ID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	witnessName := "witness.json"
+	wb, err := json.MarshalIndent(witness, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeAtomic(filepath.Join(dir, witnessName), append(wb, '\n')); err != nil {
+		return err
+	}
+	manifest := benchFleetRunManifest{
+		Schema: "benchmark/run-manifest.v1", RunID: runID, MachineID: req.Machine, Timestamp: timestamp,
+		Git:     map[string]any{"rev": "unknown", "branch": "main", "dirty": false},
+		Harness: map[string]any{"name": "fak-bench-fleet", "version": "1"},
+		Model:   map[string]any{"name": req.Model, "precision": req.Precision},
+		Config:  map[string]any{"benchmark": req.Benchmark, "route": witness.Route, "request_id": req.ID},
+		Tags:    []string{"bench-fleet", req.NodeClass, req.Benchmark}, Artifacts: map[string]string{"witness": witnessName},
+	}
+	mb, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Join(dir, "manifest.json"), append(mb, '\n'))
+}
+
+func updateBenchFleetCatalog(root string) error {
+	path := filepath.Join(root, "experiments", "benchmark", "catalog.json")
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var catalog map[string]json.RawMessage
+	if err := json.Unmarshal(b, &catalog); err != nil {
+		return err
+	}
+	var machines map[string]map[string]any
+	if err := json.Unmarshal(catalog["machines"], &machines); err != nil {
+		return err
+	}
+	var runs []map[string]any
+	if err := json.Unmarshal(catalog["runs"], &runs); err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(runs))
+	for _, run := range runs {
+		if id, _ := run["run_id"].(string); id != "" {
+			seen[id] = true
+		}
+	}
+	pattern := filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "*", "*-bench-fleet-*", "manifest.json")
+	manifests, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	for _, path := range manifests {
+		mb, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var m benchFleetRunManifest
+		if err := json.Unmarshal(mb, &m); err != nil {
+			return err
+		}
+		if seen[m.RunID] {
+			continue
+		}
+		model, _ := m.Model["name"].(string)
+		precision, _ := m.Model["precision"].(string)
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		runs = append(runs, map[string]any{"run_id": m.RunID, "machine_id": m.MachineID, "timestamp": m.Timestamp, "model": model, "precision": precision, "path": filepath.ToSlash(rel), "provenance": "measured", "tags": m.Tags})
+		seen[m.RunID] = true
+		if machine := machines[m.MachineID]; machine != nil {
+			count, _ := machine["runs"].(float64)
+			machine["runs"] = int(count) + 1
+			machine["last_run"] = m.Timestamp
+		}
+	}
+	machinesJSON, err := json.Marshal(machines)
+	if err != nil {
+		return err
+	}
+	runsJSON, err := json.Marshal(runs)
+	if err != nil {
+		return err
+	}
+	catalog["machines"] = machinesJSON
+	catalog["runs"] = runsJSON
+	catalog["last_updated"] = json.RawMessage(strconv.Quote(time.Now().UTC().Format(time.RFC3339)))
+	out, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, append(out, '\n'))
 }
 
 func readBenchFleetRequest(path string) (benchFleetRequest, error) {
