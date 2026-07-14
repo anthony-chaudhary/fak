@@ -14,11 +14,17 @@ package tools_test
 //
 // This file ships the deny-by-structure RULE plus its contract test — the gen/next
 // foundation. The classifier (envReadIsSecret), the source scanner (scanGoEnvReads),
-// and the ratchet core (classifyEnvReads) are pure and hermetically tested, mirroring
-// internal/pythongate's offensesAgainst. The whole-tree scan (TestEnvConfigLintTreeReadout)
-// is deliberately ADVISORY — a dogfood readout that never reds the shared trunk —
-// because the current tree carries many grandfathered behavioral FAK_* reads. See that
-// test for the promotion evidence that turns this into a hard CI gate.
+// the ratchet core (classifyEnvReads), and the DIFF-MODE core (addedEnvReads /
+// classifyEnvDiff) are pure and hermetically tested, mirroring internal/pythongate's
+// offensesAgainst. Diff-mode is the issue's literal spine — "a lint that diffs new env
+// reads against a declared-secret allowlist": it judges only the env reads on ADDED ('+')
+// lines of a unified diff, so a NEW non-secret read is caught while a grandfathered read
+// that merely appears as unchanged context is ignored by construction. The whole-tree scan
+// (TestEnvConfigLintTreeReadout) is deliberately ADVISORY — a dogfood readout that never
+// reds the shared trunk — because the current tree carries many grandfathered behavioral
+// FAK_* reads (347 at last count); a whole-tree hard gate would red every session, which is
+// exactly why the enforceable path is the diff, not the tree. See that scan for the
+// promotion evidence that wires this into a real CI/pre-commit gate.
 
 import (
 	"os"
@@ -87,6 +93,34 @@ func classifyEnvReads(names []string, file string, baseline map[string]bool) []e
 	return out
 }
 
+// addedEnvReads returns the distinct env-var names read via os.Getenv / os.LookupEnv on
+// the ADDED lines of a unified diff — lines that start with '+' but are not the '+++'
+// file header. This is the diff-mode core (issue #2863's literal "diff new env reads"):
+// only newly-introduced reads are judged, so a grandfathered read that appears as
+// unchanged context (a ' ' line) or is being removed (a '-' line) is never seen. Names
+// come back in first-seen order via the same pure scanner the whole-tree readout uses.
+func addedEnvReads(unifiedDiff string) []string {
+	var added strings.Builder
+	for _, line := range strings.Split(unifiedDiff, "\n") {
+		if strings.HasPrefix(line, "+++") || !strings.HasPrefix(line, "+") {
+			continue // file header, context, deletion, or hunk header — not an added source line
+		}
+		added.WriteString(line[1:]) // drop the '+' marker, keep the added source text
+		added.WriteByte('\n')
+	}
+	return scanGoEnvReads(added.String())
+}
+
+// classifyEnvDiff returns the offenses a unified diff INTRODUCES: non-secret env reads on
+// its added lines. This is the enforceable form of the rule — the shape a pre-commit or CI
+// hook wraps around `git diff` — layered on the same pure classifier as the whole-tree
+// readout so a NEW non-secret read fails while an added secret (or an unchanged read) is
+// clean. No baseline is needed: added-line filtering already restricts the verdict to
+// reads this diff brings into the tree.
+func classifyEnvDiff(unifiedDiff, file string) []envConfigOffense {
+	return classifyEnvReads(addedEnvReads(unifiedDiff), file, nil)
+}
+
 // TestEnvConfigLintContract is the hermetic contract test: it pins the classifier, the
 // source scanner, the ratchet core, and the codemod message on synthetic inputs (no
 // git, no tree). This is the gen/next proof bar.
@@ -120,6 +154,40 @@ func TestEnvConfigLintContract(t *testing.T) {
 	// Grandfathering: baselining FOO_MODE clears the offense (the ratchet never nags a known read).
 	if off := classifyEnvReads(got, "x.go", map[string]bool{"FOO_MODE": true}); len(off) != 0 {
 		t.Fatalf("baselined FOO_MODE: want 0 offenses, got %v", off)
+	}
+}
+
+// TestEnvConfigLintDiffMode is the hermetic contract for the diff-mode core — issue
+// #2863's literal ask, "a lint that diffs new env reads against a declared-secret
+// allowlist." It pins the enforceable behavior on synthetic unified diffs (no git, no
+// tree): an ADDED non-secret read is exactly one offense carrying the codemod message, an
+// ADDED secret is clean, and a read seen only as unchanged context or a deletion is never
+// judged. This is the deny-by-structure verdict a CI / pre-commit shell would run.
+func TestEnvConfigLintDiffMode(t *testing.T) {
+	// A diff that ADDS a non-secret behavioral read is caught, with the codemod suggestion.
+	addNonSecret := "--- a/server.go\n+++ b/server.go\n@@ -1,3 +1,4 @@\n func f() {\n+\tttl := os.Getenv(\"FAK_TIMEOUT_MS\")\n \treturn\n }\n"
+	off := classifyEnvDiff(addNonSecret, "server.go")
+	if len(off) != 1 || off[0].Name != "FAK_TIMEOUT_MS" {
+		t.Fatalf("classifyEnvDiff(add non-secret) = %v, want one offense FAK_TIMEOUT_MS", off)
+	}
+	if want := "server.go: env read FAK_TIMEOUT_MS is not a declared secret; move it to the config surface (CONFIG_NOT_ENV)"; off[0].String() != want {
+		t.Errorf("offense string = %q, want %q", off[0].String(), want)
+	}
+	// A diff that ADDS a declared secret is clean — secrets legitimately live in .env.
+	addSecret := "+++ b/auth.go\n@@\n+\ttok := os.Getenv(\"GITHUB_TOKEN\")\n"
+	if off := classifyEnvDiff(addSecret, "auth.go"); len(off) != 0 {
+		t.Fatalf("classifyEnvDiff(add secret) = %v, want 0 offenses", off)
+	}
+	// A read seen ONLY as unchanged context (' ' prefix) or a deletion ('-') introduces
+	// nothing new, so it is never flagged — this is grandfathering-by-diff.
+	contextOnly := "--- a/old.go\n+++ b/old.go\n@@ -1,2 +1,2 @@\n \tmode := os.Getenv(\"LEGACY_MODE\")\n-\tx := os.Getenv(\"OLD_FLAG\")\n+\treturn mode\n"
+	if off := classifyEnvDiff(contextOnly, "old.go"); len(off) != 0 {
+		t.Fatalf("classifyEnvDiff(context/deletion only) = %v, want 0 offenses", off)
+	}
+	// A diff adding BOTH a secret and a non-secret read yields exactly the non-secret offense.
+	addMixed := "+++ b/mix.go\n@@\n+\tk := os.Getenv(\"API_KEY\")\n+\tlvl, _ := os.LookupEnv(\"LOG_LEVEL\")\n"
+	if off := classifyEnvDiff(addMixed, "mix.go"); len(off) != 1 || off[0].Name != "LOG_LEVEL" {
+		t.Fatalf("classifyEnvDiff(mixed) = %v, want one offense LOG_LEVEL", off)
 	}
 }
 
