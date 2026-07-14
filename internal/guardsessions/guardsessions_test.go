@@ -137,3 +137,65 @@ func TestIndexPath(t *testing.T) {
 		t.Fatalf("IndexPath = %q, want %q", got, want)
 	}
 }
+
+func TestLiveInteractiveReadbackAndCleanExit(t *testing.T) {
+	dir := t.TempDir()
+	oldWindow, hadWindow := os.LookupEnv("WT_WINDOW")
+	oldTab, hadTab := os.LookupEnv("WT_TAB_ID")
+	t.Cleanup(func() {
+		if hadWindow {
+			_ = os.Setenv("WT_WINDOW", oldWindow)
+		} else {
+			_ = os.Unsetenv("WT_WINDOW")
+		}
+		if hadTab {
+			_ = os.Setenv("WT_TAB_ID", oldTab)
+		} else {
+			_ = os.Unsetenv("WT_TAB_ID")
+		}
+	})
+	_ = os.Setenv("WT_WINDOW", "main")
+	_ = os.Setenv("WT_TAB_ID", "tab-7")
+
+	start := time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC)
+	var rows []Row
+	for i := 0; i < 3; i++ {
+		r := NewInteractiveRow("trace-"+string(rune('a'+i)), "claude", 100+i,
+			filepath.Join(dir, string(rune('a'+i))), filepath.Join(dir, "audit.jsonl"), "", start.Add(time.Duration(i)*time.Second),
+			[]string{"claude", "--continue"})
+		if err := Record(dir, r); err != nil {
+			t.Fatalf("Record row %d: %v", i, err)
+		}
+		rows = append(rows, r)
+	}
+	live := LiveInteractive(Load(dir))
+	if len(live) != 3 {
+		t.Fatalf("live rows = %d, want 3: %+v", len(live), live)
+	}
+	for _, r := range live {
+		if r.CWD == "" || len(r.Command) != 2 || r.ResumeHandle == "" || r.WindowID != "main" || r.TabID != "tab-7" {
+			t.Fatalf("incomplete relaunch row: %+v", r)
+		}
+	}
+
+	if err := Record(dir, rows[1].Ended(start.Add(time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	live = LiveInteractive(Load(dir))
+	if len(live) != 2 {
+		t.Fatalf("live rows after clean exit = %d, want 2: %+v", len(live), live)
+	}
+	for _, r := range live {
+		if r.Handle == rows[1].Handle {
+			t.Fatalf("cleanly-ended row remained live: %+v", r)
+		}
+	}
+}
+
+func TestLiveInteractiveExcludesDispatcherAndIncompleteRows(t *testing.T) {
+	legacy := NewRow("legacy", "claude", 1, `C:\work`, "", "", time.Now())
+	incomplete := NewInteractiveRow("bad", "claude", 2, "", "", "", time.Now(), nil)
+	if got := LiveInteractive([]Row{legacy, incomplete}); len(got) != 0 {
+		t.Fatalf("LiveInteractive = %+v, want none", got)
+	}
+}

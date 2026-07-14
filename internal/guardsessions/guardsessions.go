@@ -46,9 +46,18 @@ type Row struct {
 	CWD       string `json:"cwd,omitempty"`
 	AuditPath string `json:"audit,omitempty"`
 	StartedAt string `json:"started_utc"`
-	// Nonce is the Slack root-post nonce (session_thread_id) when the session queued a
-	// thread, so the local index and the Slack thread cross-reference. Optional.
-	Nonce string `json:"nonce,omitempty"`
+	Nonce     string `json:"nonce,omitempty"`
+
+	// Relaunch fields are the OS-independent contract consumed by the host-crash
+	// actuator. Interactive distinguishes operator tabs from dispatcher-owned workers.
+	Interactive  bool     `json:"interactive,omitempty"`
+	ResumeHandle string   `json:"resume_handle,omitempty"`
+	Command      []string `json:"command,omitempty"`
+	WindowID     string   `json:"window_id,omitempty"`
+	TabID        string   `json:"tab_id,omitempty"`
+	GoalState    string   `json:"goal_state,omitempty"`
+	LoopState    string   `json:"loop_state,omitempty"`
+	EndedAt      string   `json:"ended_at,omitempty"`
 }
 
 // Handle derives a short, stable, human-referenceable id for a guard session from its
@@ -81,6 +90,31 @@ func NewRow(traceID, agent string, pid int, cwd, auditPath, nonce string, starte
 
 // IndexPath is the index file under a registry dir.
 func IndexPath(regDir string) string { return filepath.Join(regDir, IndexFileName) }
+
+// NewInteractiveRow builds the durable relaunch specification for an operator-owned
+// Guard session. Command is an argv vector, not a shell string, so the actuator can
+// reconstruct it without lossy quoting or command injection.
+func NewInteractiveRow(traceID, agent string, pid int, cwd, auditPath, nonce string, startedAt time.Time, command []string) Row {
+	r := NewRow(traceID, agent, pid, cwd, auditPath, nonce, startedAt)
+	r.Interactive = true
+	r.ResumeHandle = r.Handle
+	r.Command = append([]string(nil), command...)
+	r.WindowID = strings.TrimSpace(os.Getenv("WT_WINDOW"))
+	r.TabID = strings.TrimSpace(os.Getenv("WT_TAB_ID"))
+	r.GoalState = strings.TrimSpace(os.Getenv("FAK_GOAL_ID"))
+	r.LoopState = strings.TrimSpace(os.Getenv("FAK_LOOP_ID"))
+	return r
+}
+
+// Ended returns a clean-exit tombstone. A host crash cannot execute this transition,
+// so its latest row remains live for the resurrection watchdog.
+func (r Row) Ended(at time.Time) Row {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	r.EndedAt = at.UTC().Format(time.RFC3339Nano)
+	return r
+}
 
 // Record appends one row to the index under regDir, creating the dir and file as needed.
 // Best-effort by contract: a guard launch must never fail because its index append failed,
@@ -213,4 +247,16 @@ func Resolve(rows []Row, query string) ResolveResult {
 	default:
 		return ResolveResult{Matched: len(hits), Candidates: hits}
 	}
+}
+
+// LiveInteractive returns actuator-ready sessions whose latest lifecycle row is not a
+// clean-exit tombstone. Dispatched workers and incomplete legacy rows are excluded.
+func LiveInteractive(rows []Row) []Row {
+	out := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		if r.Interactive && strings.TrimSpace(r.EndedAt) == "" && strings.TrimSpace(r.CWD) != "" && len(r.Command) > 0 && strings.TrimSpace(r.ResumeHandle) != "" {
+			out = append(out, r)
+		}
+	}
+	return out
 }

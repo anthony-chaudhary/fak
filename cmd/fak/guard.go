@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -164,6 +166,22 @@ func effectiveGuardExposeProfile(flagValue string) string {
 		profile = env // env overrides the launch flag — the fleet-wide opt-out kill switch
 	}
 	return profile
+}
+
+func guardOwnsInteractiveTerminal() bool {
+	// Dispatcher-owned sessions already have a restart owner and must never be
+	// double-launched by the terminal-host actuator.
+	if strings.TrimSpace(os.Getenv("FAK_DISPATCH_ID")) != "" || strings.TrimSpace(os.Getenv("FAK_HEADLESS")) != "" || strings.EqualFold(strings.TrimSpace(os.Getenv("CI")), "true") {
+		return false
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return strings.TrimSpace(os.Getenv("WT_SESSION")) != "" || strings.TrimSpace(os.Getenv("WT_WINDOW")) != ""
+	case "darwin":
+		return strings.TrimSpace(os.Getenv("TERM_PROGRAM")) != ""
+	default:
+		return strings.TrimSpace(os.Getenv("TERM")) != "" || strings.TrimSpace(os.Getenv("SSH_TTY")) != ""
+	}
 }
 
 func cmdGuard(argv []string) {
@@ -850,6 +868,21 @@ func cmdGuard(argv []string) {
 		CacheKey: sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), "", command),
 	}, newGuardLaunchNonce())
 	maybeRecordGuardSessionIndex(auditJournal, guardTraceID, command, time.Now())
+	// Record the operator-owned terminal session before its child starts. Normal
+	// return appends a tombstone; WT/RDP teardown cannot run the defer, leaving an
+	// actuator-ready crash row independent of the terminal host.
+	if guardOwnsInteractiveTerminal() {
+		cwd, _ := os.Getwd()
+		row := guardsessions.NewInteractiveRow(guardTraceID, command[0], os.Getpid(), cwd, auditJournal.Path(), "", time.Now(), command)
+		if err := guardsessions.Record(resolveSweepRegDir(""), row); err != nil && !*quiet {
+			fmt.Fprintf(os.Stderr, "fak guard: interactive session registry start: %v\n", err)
+		}
+		defer func() {
+			if err := guardsessions.Record(resolveSweepRegDir(""), row.Ended(time.Now())); err != nil && !*quiet {
+				fmt.Fprintf(os.Stderr, "fak guard: interactive session registry exit: %v\n", err)
+			}
+		}()
+	}
 	// Wall-clock budget (issue #1584): an INDEPENDENT axis from --context-budget-tokens
 	// above — a managed run may be fine on tokens but out of real time, or vice versa.
 	// StartTimeBudget both configures the envelope and arms the clock at the current
@@ -1102,6 +1135,7 @@ func cmdGuard(argv []string) {
 	//    process in the group, so the child receives and handles its own either way.
 	signal.Ignore(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
+
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()
 
