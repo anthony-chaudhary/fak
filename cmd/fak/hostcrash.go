@@ -27,11 +27,13 @@ func runHostCrash(stdout, stderr io.Writer, args []string) int {
 	since := fs.Duration("since", 5*time.Minute, "event lookback window per poll")
 	logPath := fs.String("log", defaultHostCrashLogPath(), "durable host-crash JSONL signal path")
 	fixture := fs.String("fixture", "", "read Event-1000 fixture JSON instead of Windows Event Log")
+	regDir := fs.String("reg-dir", "", "interactive-session registry directory (default: fleet registry)")
+	resurrect := fs.Bool("resurrect", false, "relaunch live interactive rows for each new host-crash signal")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: fak host-crash [--once] [--interval 15s] [--since 5m] [--log PATH] [--fixture PATH]")
+		fmt.Fprintln(stderr, "usage: fak host-crash [--once] [--interval 15s] [--since 5m] [--log PATH] [--fixture PATH] [--resurrect] [--reg-dir DIR]")
 		return 2
 	}
 	if *interval <= 0 || *since <= 0 {
@@ -58,6 +60,17 @@ func runHostCrash(stdout, stderr io.Writer, args []string) int {
 		for _, signal := range emitted {
 			b, _ := json.Marshal(signal)
 			fmt.Fprintln(stdout, string(b))
+		}
+		if *resurrect {
+			receipts, err := resurrectHostCrashSessions(*logPath, resolveSweepRegDir(*regDir), emitted, launchHostSessionPlatform, time.Now())
+			if err != nil {
+				fmt.Fprintf(stderr, "fak host-crash: resurrect: %v\n", err)
+				return 1
+			}
+			for _, receipt := range receipts {
+				b, _ := json.Marshal(receipt)
+				fmt.Fprintln(stdout, string(b))
+			}
 		}
 		return 0
 	}
