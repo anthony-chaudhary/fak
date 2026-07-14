@@ -184,6 +184,21 @@ func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
 	grp := cfg.GroupSize()
 	eps := float32(cfg.RMSNormEps)
+	// Arm the FAK_HIDDEN_TAP decode-time hidden dump for THIS forward when it is the
+	// tapped position — exactly as the f32 tokenHidden does. This is the real failing
+	// path (the 27B GGUF runs s.Quant): the token-3 drift and #4273 long-context collapse
+	// both live here, so without arming the tap the "decisive next witness" capture
+	// (FAK_HIDDEN_TAP=… fak run --model qwen3.6-27b-q4_k_m.gguf) would dump nothing —
+	// blockStep's dumpLayer / linearAttnStep's dumpOp are all gated on s.tapActive, and no
+	// meta.json would be written for the probe to load. The per-op GDN taps ride the shared
+	// blockStep→linearAttnStep path (the slow, resident-Q4_K/Q8 branch the hybrid always takes).
+	tap := s.activeTap()
+	if tap != nil && tap.pos != pos {
+		tap = nil
+	}
+	prevTap := s.tapActive
+	s.tapActive = tap
+	defer func() { s.tapActive = prevTap }()
 	if !q8FastDecodeSessionOK(s, cfg) {
 		mat := matKernel(sessionQ8Kernel{s})
 		if s.Q4 && m.q4w != nil {
@@ -210,6 +225,9 @@ func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 			x = s.blockStep(l, pos, x, cos, sin, mat)
 		}
 		s.Cache.pos = append(s.Cache.pos, pos)
+		if tap != nil {
+			tap.writeMeta(cfg, H, pos)
+		}
 		return rmsnormCfg(x, m.tensor("model.norm.weight"), eps, cfg)
 	}
 	w := nKV * hd

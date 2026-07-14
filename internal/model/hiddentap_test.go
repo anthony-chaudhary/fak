@@ -126,6 +126,90 @@ func TestHiddenTapDumpsPerLayerAndPerOp(t *testing.T) {
 	}
 }
 
+// TestHiddenTapQuantDecodeDumpsPerLayerAndPerOp is the regression witness for the actual failing
+// path: the 27B GGUF runs the QUANTIZED decode (s.Quant → tokenHiddenQ), where the token-3 drift
+// and #4273 long-context collapse live. The tap arming + meta.json write used to exist ONLY in the
+// f32 tokenHidden, so FAK_HIDDEN_TAP against a real q4_k_m model dumped nothing — no meta.json (the
+// probe's loadMeta fails) and no layer files (dumpLayer/dumpOp no-op on the nil s.tapActive). This
+// drives the quantized hybrid through one decode forward with the tap armed and asserts the same
+// on-disk artifacts the f32 test checks, so the quantized capture the probe consumes is real.
+func TestHiddenTapQuantDecodeDumpsPerLayerAndPerOp(t *testing.T) {
+	cfg := qwen35HybridTestCfg() // 4 layers: linear,linear,linear,full; hidden=32
+	m := NewSynthetic(cfg)
+	m.Quantize()
+
+	prompt := []int{3, 7, 11, 5, 17, 19, 23}
+	s := m.NewSession()
+	s.Quant = true // the real 27B path: decode goes through tokenHiddenQ, not tokenHidden
+	s.Prefill(prompt)
+
+	dir := t.TempDir()
+	const decodePos = 7 // first decode step (== len(prompt)); the forward we tap
+	s.tap = &hiddenTap{dir: dir, pos: decodePos, ops: true, promptIDs: prompt}
+
+	hidden := s.tokenHiddenQ(29, decodePos) // one QUANTIZED decode forward at the armed position
+	if s.tap.err != nil {
+		t.Fatalf("tap reported a write error: %v", s.tap.err)
+	}
+
+	// ---- meta.json exists and describes the dump (the probe's loadMeta consumes this first) ----
+	mb, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if err != nil {
+		t.Fatalf("read meta.json (quant path never wrote it): %v", err)
+	}
+	var md hiddenTapMeta
+	if err := json.Unmarshal(mb, &md); err != nil {
+		t.Fatalf("parse meta.json: %v", err)
+	}
+	if md.Hidden != cfg.HiddenSize || md.DecodeStep != decodePos || len(md.Layers) != cfg.NumLayers {
+		t.Fatalf("meta = {hidden:%d step:%d layers:%d}, want {%d %d %d}",
+			md.Hidden, md.DecodeStep, len(md.Layers), cfg.HiddenSize, decodePos, cfg.NumLayers)
+	}
+	wantKind := []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"}
+	for l, lm := range md.Layers {
+		if lm.Index != l || lm.Kind != wantKind[l] {
+			t.Fatalf("meta layer %d = {%d,%s}, want {%d,%s}", l, lm.Index, lm.Kind, l, wantKind[l])
+		}
+	}
+
+	// ---- per-layer residual files, correct width ----
+	for l := 0; l < cfg.NumLayers; l++ {
+		v := readTapF32(t, filepath.Join(dir, "layer_0"+string(rune('0'+l))+".f32"))
+		if len(v) != cfg.HiddenSize {
+			t.Fatalf("layer %d dump width = %d, want %d", l, len(v), cfg.HiddenSize)
+		}
+	}
+
+	// ---- the dump is the REAL residual: finalNorm(last layer) == the forward's returned hidden ----
+	last := readTapF32(t, filepath.Join(dir, "layer_03.f32"))
+	got := m.finalNorm(last)
+	if d := maxAbsDelta(got, hidden); d > 1e-4 {
+		t.Fatalf("finalNorm(dumped last residual) differs from returned hidden, max|delta|=%g", d)
+	}
+
+	// ---- per-op GDN taps present in the linear layers, absent in the full-attn layer ----
+	keyDim := cfg.LinearNumKeyHeads * cfg.LinearKeyHeadDim
+	valDim := cfg.LinearNumValueHeads * cfg.LinearValueHeadDim
+	convDim := 2*keyDim + valDim
+	wantOpWidth := map[string]int{
+		"convOut": convDim, "qk_norm": keyDim, "recurrent": valDim,
+		"gated_norm": valDim, "out": cfg.HiddenSize,
+	}
+	for _, l := range []int{0, 1, 2} {
+		for op, w := range wantOpWidth {
+			v := readTapF32(t, filepath.Join(dir, "layer_0"+string(rune('0'+l))+"_op_"+op+".f32"))
+			if len(v) != w {
+				t.Fatalf("layer %d op %s width = %d, want %d", l, op, len(v), w)
+			}
+		}
+	}
+	for op := range wantOpWidth {
+		if tapFileExists(filepath.Join(dir, "layer_03_op_"+op+".f32")) {
+			t.Fatalf("full_attention layer 3 unexpectedly wrote a GDN op tap: %s", op)
+		}
+	}
+}
+
 // TestHiddenTapNonTargetPositionDumpsNothing pins the cost/safety contract: a tap armed for a
 // position the forward never reaches writes NOTHING (no meta.json, no layer files), so prefill and
 // non-target decode steps are untouched.
