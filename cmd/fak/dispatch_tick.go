@@ -461,6 +461,23 @@ func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOpt
 // seedDispatchTickPayload builds the base tick payload (including the startup bundle)
 // shared by every downstream verdict branch. Pure code motion out of
 // evaluateDispatchTick; behavior is unchanged.
+func dispatchTickSeatSelection(root, workKind, product, selectedTag string) (dispatchtick.SeatSelection, bool) {
+	rows, err := dispatchReadAccountRoster(root)
+	if err != nil {
+		return dispatchtick.SeatSelection{}, false
+	}
+	route := dispatchtick.RouteAccount(dispatchtick.AccountRouteInput{Rows: rows, Product: product, WorkKind: workKind})
+	selection := route.SeatSelection
+	// An explicit --account override remains authoritative. Keep the ranked roster,
+	// but say plainly when the launched winner differs from RouteAccount's winner.
+	if selectedTag != "" && selectedTag != selection.WinnerTag {
+		selection.WinnerTag = selectedTag
+		selection.WinnerReason = "explicit account override"
+		selection.Summary = fmt.Sprintf("picked %s over %d (explicit account override)", selectedTag, max(len(selection.Candidates)-1, 0))
+	}
+	return selection, len(selection.Candidates) > 0
+}
+
 func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map[string]any, account dispatchtick.Account, pr dispatchTickPick) map[string]any {
 	startup := dispatchStartupBundle(root, opts, pre, account, pr.pick, pr.leaseID, pr.target, pr.hasTarget, pr.held, pr.liveIssues, pr.cooled, pr.cooldownStatus)
 	preflight := map[string]any{
@@ -683,6 +700,9 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 
 	tSeed := time.Now()
 	payload := seedDispatchTickPayload(root, opts, reg, pre, account, pickRes)
+	if selection, ok := dispatchTickSeatSelection(root, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend), account.Tag); ok {
+		payload["seat_selection"] = selection
+	}
 	dispatchStampMs(timings, "startup_bundle", tSeed)
 	if hasTarget {
 		payload["target_issue"] = target

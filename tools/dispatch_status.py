@@ -561,6 +561,7 @@ def read_resolve_ticks(root: Path, *, now_ts: float | None = None,
             # the spawn-failure streak, and the spawn-failure cause — so the status
             # card can re-surface WHY fan-out is pinned or spawns are failing.
             "seat_adaptive": doc.get("seat_adaptive") or {},
+            "seat_selection": doc.get("seat_selection") or {},
             "spawn_failed_streak": doc.get("spawn_failed_streak"),
             "cause": doc.get("cause"),
             "contract_repair": doc.get("contract_repair") or {},
@@ -3681,6 +3682,9 @@ def render(p: dict[str, Any]) -> str:
                 f"(bound by {sa.get('binding')}, ramp +{sa.get('ramp_delta')}/tick; "
                 f"live {sa.get('live')} + free {sa.get('seat_free')}, "
                 f"ceiling {sa.get('hard_ceiling')})")
+        selection = latest_tick.get("seat_selection") or {}
+        if selection.get("summary"):
+            lines.append(f"║ seat pick : {selection.get('summary')}")
         streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
         if streak > 0:
             cause_bit = f", cause={latest_tick.get('cause')}" if latest_tick.get("cause") else ""
@@ -3954,6 +3958,9 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"- **seat cap**: adaptive {sa.get('effective_target')} "
                 f"(bound by `{sa.get('binding')}`, ramp +{sa.get('ramp_delta')}/tick; "
                 f"live {sa.get('live')} + free {sa.get('seat_free')}, ceiling {sa.get('hard_ceiling')})")
+        selection = latest_tick.get("seat_selection") or {}
+        if selection.get("summary"):
+            lines.append(f"- **seat pick**: {selection.get('summary')}")
         streak = _int(latest_tick.get("spawn_failed_streak"), 0) or 0
         if streak > 0:
             cause_bit = f", cause `{latest_tick.get('cause')}`" if latest_tick.get("cause") else ""

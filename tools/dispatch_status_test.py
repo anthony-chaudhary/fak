@@ -308,6 +308,28 @@ class SpawnCauseCardTest(unittest.TestCase):
         self.assertTrue(p["ok"])
 
 
+
+class SeatSelectionCardTest(unittest.TestCase):
+    def test_read_and_render_surface_seat_selection_summary(self) -> None:
+        mod = load()
+        selection = {
+            "winner_tag": "dead",
+            "winner_reason": "chosen despite auth_failed",
+            "summary": "picked dead over 8 (chosen despite auth_failed)",
+            "candidates": [{"rank": 1, "tag": "dead", "skip_reason": ""}],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td) / mod.RUNS_DIRNAME
+            runs.mkdir(parents=True)
+            (runs / "last-resolve-tick-claude.json").write_text(json.dumps({
+                "backend": "claude", "verdict": "WOULD_SPAWN", "lane": "docs",
+                "seat_selection": selection,
+            }), encoding="utf-8")
+            ticks = mod.read_resolve_ticks(Path(td))
+        self.assertEqual(ticks["latest"]["seat_selection"]["winner_reason"], "chosen despite auth_failed")
+        card = mod.render(build(mod, resolve_ticks=ticks))
+        self.assertIn("picked dead over 8 (chosen despite auth_failed)", card)
+
 class SeatAdaptiveTickCardTest(unittest.TestCase):
     """#4589: read_resolve_ticks stops dropping seat_adaptive / spawn_failed_streak /
     cause, and render()/render_md() surface the ramp cap + spawn-fail streak."""

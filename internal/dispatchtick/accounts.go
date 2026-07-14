@@ -51,6 +51,24 @@ type AccountRouteInput struct {
 	WorkKind string
 }
 
+type SeatSelectionCandidate struct {
+	Rank       int    `json:"rank"`
+	Tag        string `json:"tag"`
+	Tier       int    `json:"tier"`
+	Cooldown   bool   `json:"cooldown"`
+	SeatFree   bool   `json:"seat_free"`
+	CanServe   bool   `json:"can_serve"`
+	Score      int    `json:"score"`
+	SkipReason string `json:"skip_reason,omitempty"`
+}
+
+type SeatSelection struct {
+	WinnerTag    string                   `json:"winner_tag,omitempty"`
+	WinnerReason string                   `json:"winner_reason"`
+	Summary      string                   `json:"summary"`
+	Candidates   []SeatSelectionCandidate `json:"candidates"`
+}
+
 type AccountRouteResult struct {
 	OK                    bool
 	Reason                string
@@ -59,6 +77,7 @@ type AccountRouteResult struct {
 	FallbackUsed          bool
 	Account               AccountRow
 	BlockedTargetAccounts []AccountRow
+	SeatSelection         SeatSelection
 }
 
 type AccountWaveInput struct {
@@ -288,7 +307,9 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 		if product != "" {
 			reason = "no worker accounts match product filter"
 		}
-		return AccountRouteResult{OK: false, Reason: reason, TargetTier: target}
+		res := AccountRouteResult{OK: false, Reason: reason, TargetTier: target}
+		res.SeatSelection = buildSeatSelection(workers, target, res)
+		return res
 	}
 	tierOrder := []int{target}
 	if target == 2 {
@@ -308,7 +329,7 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 			continue
 		}
 		sort.Slice(candidates, func(i, j int) bool { return accountRouteLess(candidates[i], candidates[j]) })
-		return AccountRouteResult{
+		res := AccountRouteResult{
 			OK:                    true,
 			Reason:                chooseString(tier == target, "selected target tier", "selected fallback tier"),
 			TargetTier:            target,
@@ -317,6 +338,8 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 			Account:               candidates[0],
 			BlockedTargetAccounts: append(blockedTierAccounts(workers, target), overCapTierAccounts(workers, target)...),
 		}
+		res.SeatSelection = buildSeatSelection(workers, target, res)
+		return res
 	}
 	reason := fmt.Sprintf("no available tier %d account", target)
 	if atCap > 0 {
@@ -325,12 +348,64 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 	if target == 1 {
 		reason += " (tier-1 fallback disabled)"
 	}
-	return AccountRouteResult{
+	res := AccountRouteResult{
 		OK:                    false,
 		Reason:                reason,
 		TargetTier:            target,
 		BlockedTargetAccounts: append(blockedTierAccounts(workers, target), overCapTierAccounts(workers, target)...),
 	}
+	res.SeatSelection = buildSeatSelection(workers, target, res)
+	return res
+}
+
+func buildSeatSelection(rows []AccountRow, target int, res AccountRouteResult) SeatSelection {
+	ranked := append([]AccountRow(nil), rows...)
+	sort.SliceStable(ranked, func(i, j int) bool { return accountRouteLess(ranked[i], ranked[j]) })
+	out := SeatSelection{WinnerTag: res.Account.Tag, WinnerReason: res.Reason, Candidates: make([]SeatSelectionCandidate, 0, len(ranked))}
+	for i, row := range ranked {
+		canServe := row.Available
+		if row.CanServe != nil {
+			canServe = *row.CanServe
+		}
+		free := underSessionCap(row)
+		cooldown := strings.Contains(strings.ToLower(row.BlockReason), "cooldown")
+		skip := ""
+		switch {
+		case row.Tag == res.Account.Tag && res.OK:
+		case cooldown:
+			skip = "cooldown"
+		case !canServe || !row.Available:
+			skip = chooseString(strings.TrimSpace(row.LoginStatus) != "", strings.TrimSpace(row.LoginStatus), strings.TrimSpace(row.BlockReason))
+			if skip == "" {
+				skip = "unavailable"
+			}
+		case !free:
+			skip = "session_cap"
+		case row.ModelTier != target && !res.FallbackUsed:
+			skip = "non_target_tier"
+		default:
+			skip = "lower_rank"
+		}
+		out.Candidates = append(out.Candidates, SeatSelectionCandidate{Rank: i + 1, Tag: row.Tag, Tier: row.ModelTier, Cooldown: cooldown, SeatFree: free, CanServe: canServe, Score: row.RouteWeight, SkipReason: skip})
+	}
+	if res.OK {
+		competitors := len(out.Candidates) - 1
+		out.Summary = fmt.Sprintf("picked %s over %d (%s)", res.Account.Tag, maxInt(competitors, 0), res.Reason)
+		if !res.Account.Available || (res.Account.CanServe != nil && !*res.Account.CanServe) || strings.EqualFold(strings.TrimSpace(res.Account.LoginStatus), "auth_failed") {
+			out.WinnerReason = "chosen despite auth_failed"
+			out.Summary = fmt.Sprintf("picked %s over %d (chosen despite auth_failed)", res.Account.Tag, maxInt(competitors, 0))
+		}
+	} else {
+		out.Summary = "picked none (" + res.Reason + ")"
+	}
+	return out
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func AllocateWave(in AccountWaveInput) AccountWaveResult {

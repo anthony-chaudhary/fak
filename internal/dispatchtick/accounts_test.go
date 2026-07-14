@@ -42,6 +42,40 @@ func accountRowsFixture() []AccountRow {
 	}
 }
 
+func TestRouteAccountEmitsRankedSeatSelectionReasons(t *testing.T) {
+	t.Setenv(SessionsPerAccountEnv, "4")
+	no := false
+	rows := []AccountRow{
+		{Account: "healthy", Tag: "healthy", Product: "claude", Kind: "worker", ModelTier: 1, Available: true, CanServe: boolPtr(true), RouteWeight: 9},
+		{Account: "capped", Tag: "capped", Product: "claude", Kind: "worker", ModelTier: 1, Available: true, CanServe: boolPtr(true), LiveSessions: DefaultClaudeSessionsPerAccount},
+		{Account: "dead", Tag: "dead", Product: "claude", Kind: "worker", ModelTier: 1, Available: false, CanServe: &no, LoginStatus: "auth_failed", BlockReason: "stale credential"},
+		{Account: "cooled", Tag: "cooled", Product: "claude", Kind: "worker", ModelTier: 1, Available: false, CanServe: boolPtr(true), BlockReason: "account in cooldown"},
+	}
+	got := RouteAccount(AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "implementation"})
+	if !got.OK || got.SeatSelection.WinnerTag != "healthy" || len(got.SeatSelection.Candidates) != 4 {
+		t.Fatalf("selection = %+v", got.SeatSelection)
+	}
+	reasons := map[string]string{}
+	for _, c := range got.SeatSelection.Candidates {
+		reasons[c.Tag] = c.SkipReason
+	}
+	if reasons["capped"] != "session_cap" || reasons["dead"] != "auth_failed" || reasons["cooled"] != "cooldown" {
+		t.Fatalf("skip reasons = %+v", reasons)
+	}
+	if got.SeatSelection.Summary != "picked healthy over 3 (selected target tier)" {
+		t.Fatalf("summary = %q", got.SeatSelection.Summary)
+	}
+}
+
+func TestSeatSelectionNamesChosenDespiteAuthFailed(t *testing.T) {
+	no := false
+	res := AccountRouteResult{OK: true, Reason: "selected target tier", TargetTier: 1, Account: AccountRow{Account: "dead", Tag: "dead", ModelTier: 1, Available: true, CanServe: &no, LoginStatus: "auth_failed"}}
+	got := buildSeatSelection([]AccountRow{res.Account}, 1, res)
+	if got.WinnerReason != "chosen despite auth_failed" || !strings.Contains(got.Summary, "chosen despite auth_failed") {
+		t.Fatalf("selection = %+v", got)
+	}
+}
+
 func TestRouteAccountPicksTierOneByLoadAndWeight(t *testing.T) {
 	t.Setenv(SessionsPerAccountEnv, "")
 	got := RouteAccount(AccountRouteInput{Rows: accountRowsFixture(), Product: "claude", WorkKind: "engineering"})
