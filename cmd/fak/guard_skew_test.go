@@ -66,7 +66,7 @@ func TestGuardInfoSkewNote(t *testing.T) {
 // checkout that is usually Fresh/Dirty/Unknown, so no note). It keys on the skew-distinctive
 // phrasing so the unattested note — which shares the "stale-build WARN" prefix — is never counted.
 func TestGuardInfoStartupHeaderSkewConsistency(t *testing.T) {
-	header := guardInfoStartupHeader("anthropic", 2*time.Second, 0)
+	header := guardInfoStartupHeader("anthropic", "", 2*time.Second, 0)
 	wantNote := guardInfoSkewNote(guardBuildSkewAssessment()) != ""
 	gotNote := strings.Contains(header, "provably BEHIND") || strings.Contains(header, "OFF the trunk line")
 	if gotNote != wantNote {
