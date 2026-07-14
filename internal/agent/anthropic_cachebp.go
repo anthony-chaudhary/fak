@@ -35,7 +35,8 @@ package agent
 //     step DOWN from a volatile tools+system head to caching just the stable tools head, and bail to
 //     identity (BreakpointReasonVolatileHead) when no stable span remains. This is the fail-safe,
 //     single-body half of #806 bullet 2 (keep the stable spans byte-stable); the aggressive form
-//     (STRIP/normalize the volatile token in place) needs a redaction spec + soak and is deferred.
+//     (STRIP/normalize the volatile token in place) is the spec-governed, opt-in redaction retry
+//     in anthropic_cachebp_redact.go (#2191) — default OFF until its soak + ablation row land.
 //
 // Like CompactAnthropicHistory this is a REQUEST-side transform on the wire bytes only. It
 // never touches the decoded req.Messages the kernel adjudicates, so the trust boundary is
@@ -77,6 +78,15 @@ type BreakpointOutcome struct {
 	Rewritten       bool   // true when M2 hoisted volatile system blocks behind the cacheable anchor
 	MovedVolatile   int
 	PredictedUplift int64
+
+	// Redaction witness (#2191): set only when the volatile_head refusal path ran with the
+	// FAK_CACHEBP_REDACT lever in play. Redacted=true means the placement above happened on a
+	// spec-normalized head (RedactedUUID/RedactedTimestamp count the tokens replaced); on a
+	// refusal, RedactReason labels why the redaction retry did not convert it.
+	Redacted          bool
+	RedactedUUID      int
+	RedactedTimestamp int
+	RedactReason      string
 }
 
 const (
@@ -95,6 +105,12 @@ const (
 type TTLUpgradeOutcome struct {
 	Reason string
 	Target string // "system" | "tools"
+
+	// Redaction witness (#2191) — same contract as BreakpointOutcome's redaction fields.
+	Redacted          bool
+	RedactedUUID      int
+	RedactedTimestamp int
+	RedactReason      string
 }
 
 // PlaceAnthropicCacheBreakpoint splices a cache_control breakpoint onto the stable system+tools
@@ -110,8 +126,22 @@ func PlaceAnthropicCacheBreakpoint(raw []byte) []byte {
 // PlaceAnthropicCacheBreakpointWithOutcome is PlaceAnthropicCacheBreakpoint plus the observable
 // outcome (placed-and-where vs the labeled bail reason). The byte-level guarantees are identical:
 // the bytes before the new breakpoint are byte-identical to the input, and the result re-decodes
-// as a valid request — or the input is returned unchanged.
+// as a valid request — or the input is returned unchanged. A volatile_head refusal gets ONE
+// spec-governed redaction retry (anthropic_cachebp_redact.go, opt-in via FAK_CACHEBP_REDACT);
+// with the lever off (the default) the refusal is returned exactly as before.
 func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOutcome) {
+	out, oc := placeAnthropicCacheBreakpointOnce(raw)
+	if oc.Reason != BreakpointReasonVolatileHead {
+		return out, oc
+	}
+	return retryPlaceWithRedactedHead(raw, oc)
+}
+
+// placeAnthropicCacheBreakpointOnce is one un-retried placement pass — the whole original
+// pipeline (already-set guard, stable-head pick, M2 hoist, splice-and-prove). The redaction
+// retry above composes AFTER its volatile_head refusal, so hoisting keeps first claim and the
+// default path is byte-for-byte the pre-#2191 behavior.
+func placeAnthropicCacheBreakpointOnce(raw []byte) ([]byte, BreakpointOutcome) {
 	if len(raw) == 0 {
 		return raw, BreakpointOutcome{Reason: BreakpointReasonNonJSON}
 	}
@@ -312,8 +342,19 @@ func parseHex4(b []byte) (cp int, ok bool) {
 // The edit is deliberately narrower than placement: it never moves a breakpoint and never
 // re-marshals the body. Bytes before the cache_control object are copied verbatim; the only change
 // is inside that existing metadata object. On ambiguity, an existing non-1h ttl, or an obviously
-// volatile head, the body is returned unchanged.
+// volatile head, the body is returned unchanged. A volatile_head refusal gets ONE spec-governed
+// redaction retry (anthropic_cachebp_redact.go, opt-in via FAK_CACHEBP_REDACT); with the lever
+// off (the default) the refusal is returned exactly as before.
 func UpgradeAnthropicStableCacheTTL1h(raw []byte) ([]byte, TTLUpgradeOutcome) {
+	out, oc := upgradeAnthropicStableCacheTTL1hOnce(raw)
+	if oc.Reason != TTLUpgradeReasonVolatileHead {
+		return out, oc
+	}
+	return retryUpgradeWithRedactedHead(raw, oc)
+}
+
+// upgradeAnthropicStableCacheTTL1hOnce is one un-retried upgrade pass — the original edit.
+func upgradeAnthropicStableCacheTTL1hOnce(raw []byte) ([]byte, TTLUpgradeOutcome) {
 	if len(raw) == 0 {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
 	}
