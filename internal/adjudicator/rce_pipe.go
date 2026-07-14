@@ -275,7 +275,51 @@ func rceInterpreterCommand(argv []string) bool {
 	if i < 0 {
 		return false
 	}
-	return rceDangerInterpreter(rceProgramBasename(argv[i]))
+	base := rceProgramBasename(argv[i])
+	if hasNumericSuffix(base, "python") && rcePythonFixedProgramConsumesData(argv[i+1:]) {
+		return false
+	}
+	return rceDangerInterpreter(base)
+}
+
+// rcePythonFixedProgramConsumesData distinguishes a visible, fixed -c program
+// from Python's stdin-as-source modes. `download | python -` and bare
+// `download | python` execute fetched bytes and remain denied. With -c, stdin is
+// data unless the fixed program explicitly feeds it to an execution sink; that
+// source-execution shape remains denied too.
+func rcePythonFixedProgramConsumesData(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-c" {
+			if i+1 >= len(args) {
+				return false
+			}
+			return !rcePythonCodeExecutesStdin(args[i+1])
+		}
+		if strings.HasPrefix(arg, "-c") && len(arg) > 2 {
+			return !rcePythonCodeExecutesStdin(arg[2:])
+		}
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			return false
+		}
+	}
+	return false
+}
+
+func rcePythonCodeExecutesStdin(code string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(code), ""))
+	readsStdin := strings.Contains(normalized, "sys.stdin.read(") ||
+		strings.Contains(normalized, "sys.stdin.buffer.read(") ||
+		strings.Contains(normalized, "open(0).read(")
+	if !readsStdin {
+		return false
+	}
+	for _, sink := range []string{"exec(", "eval(", "compile(", "os.system(", "subprocess."} {
+		if strings.Contains(normalized, sink) {
+			return true
+		}
+	}
+	return false
 }
 
 func rceCommandWord(argv []string) int {
