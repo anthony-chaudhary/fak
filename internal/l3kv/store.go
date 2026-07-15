@@ -17,10 +17,12 @@ import (
 // span by — NOT by a hash of the payload. That distinction is load-bearing: a
 // content-addressed CAS (internal/blobfs) keys bytes by SHA256(bytes), but a
 // RestoreSpan arrives with the span digest and no payload, so the residency store
-// must look up by that digest. Hence a purpose-built span-keyed durable K/V rather
-// than a blobfs Resolve. The interface is small on purpose so a blobfs- or
-// storedrv-backed implementation (with its own span→content manifest) can slot in
-// behind it later without touching the backend.
+// must look up by that digest. Hence a span-keyed durable K/V rather than a bare
+// blobfs Resolve. The interface is small on purpose so implementations slot in
+// behind it without touching the backend: routerStore (routerstore.go) is the
+// registered default — the storedrv router with a durable span→content manifest —
+// and diskStore below is the self-contained flat-file stand-in the witness suite
+// also exercises.
 type Store interface {
 	// Put durably records payload under key (the span residency digest). It is
 	// atomic and crash-safe: after Put returns nil, a Get(key) — in this process or
@@ -68,9 +70,12 @@ var (
 )
 
 // diskStore is a crash-safe, restart-surviving durable K/V rooted at a directory,
-// keyed by span digest. Each record is the versioned envelope above, so a read
-// re-verifies the payload against its own hash and refuses corrupt/tampered or
-// unknown-format bytes (the "verify, don't trust" admission guard, fail-closed).
+// keyed by span digest — the self-contained flat-file Store (no router, no
+// manifest; one record file per span). The registered backend now composes
+// routerStore instead, but this implementation stays as the zero-composition
+// stand-in and the on-disk witness for the versioned record envelope above: a
+// read re-verifies the payload against its own hash and refuses corrupt/tampered
+// or unknown-format bytes (the "verify, don't trust" admission guard, fail-closed).
 // Writes commit via a temp file + fsync + atomic rename, the same durability point
 // internal/blobfs uses — an interrupted write leaves only a temp file, never a half
 // record under a valid key.

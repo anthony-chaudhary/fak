@@ -153,15 +153,23 @@ func Factory(store Store) abi.KVBackendFactory {
 // init registers the durable L3 KV backend LAST-WINS when FAK_L3_KVBACKEND names a
 // store directory. It runs after internal/modelengine's init (which registers the
 // in-process default) because internal/registrations blank-imports modelengine
-// before this leaf, so this registration wins. Unset env, or a store directory that
-// cannot be opened, leaves the in-process default live (fail-closed to the default —
-// a broken tier is never registered).
+// before this leaf, so this registration wins. The store routes span content
+// through the storedrv router (blobfs local stand-in, plus the FAK_BLOB_HTTP_URL
+// remote pool when set) behind a durable span→content manifest. Unset env, or a
+// store that cannot be opened (unreadable manifest included), leaves the
+// in-process default live (fail-closed to the default — a broken tier is never
+// registered).
 func init() {
 	dir := os.Getenv(EnvSpec)
 	if dir == "" {
 		return
 	}
-	store, err := newDiskStore(dir)
+	// The L3 tier stages spans to an OFF-BOX content pool when FAK_BLOB_HTTP_URL is
+	// set (the SAME opt-in env internal/blobhttp's own registration uses; bearer token
+	// via FAK_BLOB_HTTP_TOKEN, read identically). Set, the pool becomes the router's
+	// primary put tier (a demote is confirmed off-box or FAULTs) with blobfs mirroring
+	// locally; unset, the durable on-box stand-in alone serves.
+	store, err := newRouterStore(dir, os.Getenv("FAK_BLOB_HTTP_URL"), os.Getenv("FAK_BLOB_HTTP_TOKEN"))
 	if err != nil {
 		return
 	}
