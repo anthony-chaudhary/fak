@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"errors"
 	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
@@ -78,6 +79,16 @@ func QuantizeQ8(be Backend, shape []int, w []float32, block int) Tensor {
 // Upload is identity for the CPU reference: host data is already resident, so it ignores `as` and returns t unchanged.
 func (c *cpuBackend) Upload(t Tensor, as Dtype) Tensor { return t } // identity: host data already resident
 func (c *cpuBackend) Free(Tensor)                      {}           // host GC owns it
+func (c *cpuBackend) CloneTensor(t Tensor) (Tensor, error) {
+	out := t
+	out.Shape = append([]int(nil), t.Shape...)
+	h, ok := t.buf.(*hostBuf)
+	if !ok || h == nil {
+		return Tensor{}, errors.New("cpu-ref: CloneTensor requires host buffer")
+	}
+	out.buf = &hostBuf{f32: append([]float32(nil), h.f32...), i8: append([]int8(nil), h.i8...)}
+	return out, nil
+}
 
 func (c *cpuBackend) Host(t Tensor) ([]float32, bool) {
 	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
@@ -380,6 +391,8 @@ func (k *cpuKV) Evict(from, n int) int {
 }
 
 // Clone deep-copies the KV store (every layer's K/Kraw/V and the shared pos) for prefix reuse.
+func (k *cpuKV) Free() {}
+
 func (k *cpuKV) Clone() KVStore {
 	n := &cpuKV{be: k.be, cfg: k.cfg,
 		K: make([][]float32, len(k.K)), Kraw: make([][]float32, len(k.Kraw)), V: make([][]float32, len(k.V)),

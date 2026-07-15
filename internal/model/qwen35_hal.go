@@ -82,21 +82,57 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 	s.qwen35HAL = state
 }
 
+// cloneQwen35HALState deep-copies the recurrent Qwen3.5/3.6 device state. The
+// state is semantically part of the prefix just as much as attention KV is: restoring
+// only halKV yields plausible but incorrect continuations after a GDN layer.
+func cloneQwen35HALState(src *qwen35HALState, backend compute.Backend) (*qwen35HALState, error) {
+	if src == nil {
+		return nil, nil
+	}
+	cloner, ok := backend.(compute.TensorCloner)
+	if !ok {
+		return nil, fmt.Errorf("model: backend %T cannot clone Qwen3.5 recurrent state", backend)
+	}
+	out := &qwen35HALState{backend: src.backend, layers: make([]qwen35HALLayerState, len(src.layers))}
+	for i := range src.layers {
+		if src.layers[i].conv.Buf() == nil && src.layers[i].recurrent.Buf() == nil {
+			continue
+		}
+		var err error
+		out.layers[i].conv, err = cloner.CloneTensor(src.layers[i].conv)
+		if err != nil {
+			out.free(backend)
+			return nil, fmt.Errorf("model: clone Qwen3.5 layer %d convolution state: %w", i, err)
+		}
+		out.layers[i].recurrent, err = cloner.CloneTensor(src.layers[i].recurrent)
+		if err != nil {
+			out.free(backend)
+			return nil, fmt.Errorf("model: clone Qwen3.5 layer %d recurrent state: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+func (q *qwen35HALState) free(backend compute.Backend) {
+	if q == nil || backend == nil {
+		return
+	}
+	for i := range q.layers {
+		if q.layers[i].conv.Buf() != nil {
+			backend.Free(q.layers[i].conv)
+		}
+		if q.layers[i].recurrent.Buf() != nil {
+			backend.Free(q.layers[i].recurrent)
+		}
+		q.layers[i] = qwen35HALLayerState{}
+	}
+}
+
 func (s *Session) closeQwen35HALState() {
 	if s == nil || s.qwen35HAL == nil || s.Backend == nil {
 		return
 	}
-	for l := range s.qwen35HAL.layers {
-		state := &s.qwen35HAL.layers[l]
-		if state.conv.Buf() != nil {
-			s.Backend.Free(state.conv)
-			state.conv = compute.Tensor{}
-		}
-		if state.recurrent.Buf() != nil {
-			s.Backend.Free(state.recurrent)
-			state.recurrent = compute.Tensor{}
-		}
-	}
+	s.qwen35HAL.free(s.Backend)
 	s.qwen35HAL = nil
 }
 

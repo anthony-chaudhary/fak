@@ -387,3 +387,27 @@ func kvLen(c *model.KVCache) interface{} {
 	}
 	return c.Len()
 }
+
+func TestDeviceSnapshotLookupFallsBackToNearestExactAncestor(t *testing.T) {
+	cfg := model.Config{NumLayers: 1, NumKVHeads: 1, HeadDim: 1}
+	cache := model.NewKVCache(cfg)
+	snap := &model.PrefixSnapshot{Cache: cache}
+	tree := New(0)
+	root, _ := tree.Lookup([]int{1, 2})
+	leaf := tree.InsertSnapshot(root, []int{1, 2}, snap, []float32{7})
+	tree.Done(leaf)
+	// Extending the radix path without a device snapshot must still restore the nearest
+	// valid snapshot and prefill only the divergent suffix.
+	b, _ := tree.Lookup([]int{1, 2, 3})
+	extended := tree.InsertWithLogits(b, []int{3}, model.NewKVCache(cfg), nil)
+	tree.Done(extended)
+	b, got, matched, err := tree.LookupSnapshot([]int{1, 2, 3, 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Done(b)
+	if got == nil || matched != 2 {
+		t.Fatalf("snapshot=%v matched=%d want ancestor at 2", got, matched)
+	}
+	got.Close()
+}

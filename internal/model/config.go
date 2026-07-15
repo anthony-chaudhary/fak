@@ -820,7 +820,7 @@ func (c Config) usesMLAMoELayout() bool {
 // the DSA attention/index cache remains the ordinary host KVCache (Session.Cache.glm).
 // That makes prefix clones exact for GLM-DSA even when Backend is non-nil.
 func (c Config) InKernelBackendPrefixReuseSupported() bool {
-	return c.isGLMMoeDsa()
+	return c.isGLMMoeDsa() || c.IsQwen35Hybrid()
 }
 
 // isMiniMax reports a MiniMax-family model (model_type / architectures such as

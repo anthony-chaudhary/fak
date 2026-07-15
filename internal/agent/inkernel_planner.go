@@ -1146,28 +1146,54 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if reuse {
 		owner, scoped := prefixCacheIdentityFromContext(ctx)
 		var matchedKV *model.KVCache
+		var matchedSnapshot *model.PrefixSnapshot
 		var m int
 		if scoped && p.scopedTree != nil {
-			matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
+			if p.backend != nil {
+				matchedSnapshot, cachedLogits, m, _, err = p.scopedTree.LookupSnapshot(owner, ids)
+			} else {
+				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
+			}
 		} else {
 			p.mu.Lock()
-			b, legacyMatched := p.tree.Lookup(ids)
-			m = legacyMatched
-			if k := b.KV(); k != nil {
-				matchedKV = k.Clone()
+			if p.backend != nil {
+				b, snap, legacyMatched, lookupErr := p.tree.LookupSnapshot(ids)
+				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
 				if m >= len(ids) {
 					cachedLogits = b.Logits()
 				}
+				p.tree.Done(b)
+			} else {
+				b, legacyMatched := p.tree.Lookup(ids)
+				m = legacyMatched
+				if k := b.KV(); k != nil {
+					matchedKV = k.Clone()
+					if m >= len(ids) {
+						cachedLogits = b.Logits()
+					}
+				}
+				p.tree.Done(b)
 			}
-			p.tree.Done(b)
 			p.mu.Unlock()
+		}
+		if err != nil {
+			return
 		}
 		// The lookup-side (cacheability) half of the #3390 split: m tokens matched the
 		// radix index at this instant, whether or not the servability checks below (nil
 		// KV, exact-hit refeed, unsupported truncate) let all of them be served. The
 		// realized `matched` can only stay at or fall below this.
 		cacheable = m
-		if matchedKV != nil {
+		if matchedSnapshot != nil {
+			s = p.m.NewBackendSession(p.backend)
+			if err = matchedSnapshot.Restore(s); err != nil {
+				matchedSnapshot.Close()
+				s.Close()
+				return
+			}
+			matchedSnapshot.Close()
+			closeSession, matched = true, m
+		} else if matchedKV != nil {
 			s = p.sessionFromPrefixClone(matchedKV)
 			closeSession = p.backend != nil
 			matched = m
@@ -1235,18 +1261,39 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// fresh Lookup→Insert→Done. The snapshot covers the FULL ids prefix, so it is a valid
 	// leaf kv no matter how much a concurrent turn may have inserted since step 1.
 	if reuse {
-		snap := s.Cache.Clone()
-		if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
-			if admitErr := p.scopedTree.AdmitPrivate(owner, ids, snap, logits); admitErr != nil {
-				err = admitErr
+		if p.backend != nil {
+			var snap *model.PrefixSnapshot
+			snap, err = s.PrefixSnapshot()
+			if err != nil {
 				return
 			}
+			if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+				if admitErr := p.scopedTree.AdmitPrivateSnapshot(owner, ids, snap, logits); admitErr != nil {
+					snap.Close()
+					err = admitErr
+					return
+				}
+			} else {
+				p.mu.Lock()
+				b, m := p.tree.Lookup(ids)
+				leaf := p.tree.InsertSnapshot(b, ids[m:], snap, logits)
+				p.tree.Done(leaf)
+				p.mu.Unlock()
+			}
 		} else {
-			p.mu.Lock()
-			b, m := p.tree.Lookup(ids)
-			leaf := p.tree.InsertWithLogits(b, ids[m:], snap, logits)
-			p.tree.Done(leaf)
-			p.mu.Unlock()
+			snap := s.Cache.Clone()
+			if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+				if admitErr := p.scopedTree.AdmitPrivate(owner, ids, snap, logits); admitErr != nil {
+					err = admitErr
+					return
+				}
+			} else {
+				p.mu.Lock()
+				b, m := p.tree.Lookup(ids)
+				leaf := p.tree.InsertWithLogits(b, ids[m:], snap, logits)
+				p.tree.Done(leaf)
+				p.mu.Unlock()
+			}
 		}
 	}
 

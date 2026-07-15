@@ -105,6 +105,56 @@ func (s *ScopedTree) Admit(scope ShareScope, owner CacheIdentity, tokens []int, 
 	return nil
 }
 
+// AdmitPrivateSnapshot stores a complete backend prefix at tenant scope.
+func (s *ScopedTree) AdmitPrivateSnapshot(owner CacheIdentity, tokens []int, snap *model.PrefixSnapshot, logits []float32) error {
+	ns, err := scopeNamespace(ScopeTenant, owner)
+	if err != nil {
+		return err
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	boundary, matched := s.tree.LookupNS(ns, tokens)
+	leaf := s.tree.InsertSnapshot(boundary, tokens[matched:], snap, logits)
+	s.tree.Done(leaf)
+	return nil
+}
+
+// LookupSnapshot returns the longest visible independently owned backend prefix.
+func (s *ScopedTree) LookupSnapshot(owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, error) {
+	if strings.TrimSpace(owner.Tenant) == "" {
+		return nil, nil, 0, ScopeTenant, ErrCacheIdentity
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	checks := []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet}
+	bestScope, bestMatched := ScopeTenant, 0
+	var best *node
+	for _, scope := range checks {
+		if scope == ScopeAgent && strings.TrimSpace(owner.Agent) == "" {
+			continue
+		}
+		ns, err := scopeNamespace(scope, owner)
+		if err != nil {
+			continue
+		}
+		n, matched := s.tree.LookupNS(ns, tokens)
+		if n != nil && matched > bestMatched {
+			best, bestMatched, bestScope = n, matched, scope
+		}
+		if n != nil {
+			s.tree.Done(n)
+		}
+	}
+	for candidate := best; candidate != nil; candidate = candidate.parent {
+		if candidate.snapshot == nil {
+			continue
+		}
+		snap, err := candidate.snapshot.Clone()
+		return snap, candidate.Logits(), candidate.plen, bestScope, err
+	}
+	return nil, nil, 0, bestScope, nil
+}
+
 // Lookup returns the longest reusable prefix visible to owner. Agent-private is
 // checked first, then tenant-private, then explicitly promoted fleet state.
 func (s *ScopedTree) Lookup(owner CacheIdentity, tokens []int) (*model.KVCache, []float32, int, ShareScope, error) {

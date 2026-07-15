@@ -25,6 +25,101 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // budget, priority, pace — is internal/session.Table / session.State; the wire
 // DTO of that drive state is gateway.SessionState. See the vocabulary worklist at
 // docs/notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md.
+// PrefixSnapshot is an independently owned inference prefix. For legacy/host
+// sessions Cache is sufficient. Device hybrid sessions additionally carry attention
+// KV and recurrent Qwen state; keeping all three in one owner prevents partial restores.
+type PrefixSnapshot struct {
+	Cache   *KVCache
+	halKV   compute.KVStore
+	qwen35  *qwen35HALState
+	Backend compute.Backend
+	Tokens  int
+}
+
+// PrefixSnapshot captures a deep clone suitable for shared-prefix admission.
+func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
+	if s == nil || s.Cache == nil {
+		return nil, fmt.Errorf("model: cannot snapshot nil session cache")
+	}
+	out := &PrefixSnapshot{Cache: s.Cache.Clone(), Backend: s.Backend, Tokens: s.Cache.Len()}
+	if s.Backend == nil {
+		return out, nil
+	}
+	if s.halKV == nil {
+		return nil, fmt.Errorf("model: backend session has no device KV store")
+	}
+	out.halKV = s.halKV.Clone()
+	var err error
+	out.qwen35, err = cloneQwen35HALState(s.qwen35HAL, s.Backend)
+	if err != nil {
+		out.Close()
+		return nil, err
+	}
+	return out, nil
+}
+
+// Clone makes a second independent owner for lookup; the cache retains the original.
+func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
+	if p == nil || p.Cache == nil {
+		return nil, nil
+	}
+	out := &PrefixSnapshot{Cache: p.Cache.Clone(), Backend: p.Backend, Tokens: p.Tokens}
+	if p.Backend == nil {
+		return out, nil
+	}
+	if p.halKV == nil {
+		return nil, fmt.Errorf("model: device prefix snapshot has no KV store")
+	}
+	out.halKV = p.halKV.Clone()
+	var err error
+	out.qwen35, err = cloneQwen35HALState(p.qwen35, p.Backend)
+	if err != nil {
+		out.Close()
+		return nil, err
+	}
+	return out, nil
+}
+
+// Restore installs this snapshot into a fresh backend session and transfers ownership.
+func (p *PrefixSnapshot) Restore(s *Session) error {
+	if p == nil || s == nil || p.Cache == nil {
+		return fmt.Errorf("model: invalid prefix snapshot restore")
+	}
+	if p.Backend != s.Backend {
+		return fmt.Errorf("model: prefix snapshot backend mismatch")
+	}
+	if s.Backend != nil {
+		if p.halKV == nil {
+			return fmt.Errorf("model: device prefix snapshot missing KV")
+		}
+		if s.halKV != nil {
+			s.halKV.Free()
+		}
+		s.closeQwen35HALState()
+		s.halKV, s.qwen35HAL = p.halKV, p.qwen35
+		p.halKV, p.qwen35 = nil, nil
+	}
+	s.Cache = p.Cache
+	p.Cache = nil
+	return nil
+}
+
+// Close releases all device ownership held by a cache node or failed clone.
+func (p *PrefixSnapshot) Close() {
+	if p == nil {
+		return
+	}
+	if p.halKV != nil {
+		p.halKV.Free()
+		p.halKV = nil
+	}
+	if p.qwen35 != nil {
+		p.qwen35.free(p.Backend)
+		p.qwen35 = nil
+	}
+	p.Cache = nil
+}
+
 type Session struct {
 	M     *Model
 	Cache *KVCache

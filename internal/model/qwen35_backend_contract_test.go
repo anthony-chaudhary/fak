@@ -56,6 +56,7 @@ type recordingQwen35Backend struct {
 	stateIdentity   map[int][2]compute.Buffer
 	stateTicks      map[compute.Buffer]float32
 	stateContinuous bool
+	cloneCalls      int
 	badRoute        string
 	failAt          int
 }
@@ -105,6 +106,15 @@ func (b *recordingQwen35Backend) Read(t compute.Tensor) []float32 {
 func (b *recordingQwen35Backend) Free(t compute.Tensor) {
 	b.freeCalls[t.Buf()]++
 	b.Backend.Free(t)
+}
+
+func (b *recordingQwen35Backend) CloneTensor(t compute.Tensor) (compute.Tensor, error) {
+	b.cloneCalls++
+	cloner, ok := b.Backend.(compute.TensorCloner)
+	if !ok {
+		return compute.Tensor{}, errors.New("recording backend cannot clone tensor")
+	}
+	return cloner.CloneTensor(t)
 }
 
 func (b *recordingQwen35Backend) MatMul(w, x compute.Tensor) compute.Tensor {
@@ -436,4 +446,43 @@ func totalFreeCalls(be *recordingQwen35Backend) int {
 		total += calls
 	}
 	return total
+}
+
+func TestQwen35PrefixSnapshotClonesAndRestoresAllHybridDeviceState(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	be := newRecordingQwen35Backend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Prefill([]int{3, 7, 11})
+	snap, err := s.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+	clone, err := snap.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := clone.Restore(restored); err != nil {
+		t.Fatal(err)
+	}
+	clone.Close()
+	defer restored.Close()
+	if restored.Cache.Len() != s.Cache.Len() || restored.halKV.Len() != s.halKV.Len() {
+		t.Fatalf("restored positions host=%d/%d device=%d/%d", restored.Cache.Len(), s.Cache.Len(), restored.halKV.Len(), s.halKV.Len())
+	}
+	if restored.qwen35HAL == nil || len(restored.qwen35HAL.layers) != len(s.qwen35HAL.layers) {
+		t.Fatal("recurrent state omitted")
+	}
+	linear := len(be.linearLayers)
+	if be.cloneCalls < 4*linear {
+		t.Fatalf("clone calls=%d want at least %d", be.cloneCalls, 4*linear)
+	}
 }

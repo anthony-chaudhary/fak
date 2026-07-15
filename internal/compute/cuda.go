@@ -668,6 +668,26 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 
 // Free releases a tensor's VRAM — both the codes buffer and any Q8_0 scale side-channel —
 // and evicts its (host ptr, dtype, layout) entry from the upload cache so a re-upload re-stages.
+// CloneTensor makes an independently owned device-to-device copy. It deliberately
+// uses the backend stream rather than Download+Upload: prefix-cache hits must not cross
+// the PCIe/host boundary merely to fork recurrent state.
+func (c *cudaBackend) CloneTensor(t Tensor) (Tensor, error) {
+	b, ok := t.buf.(*cudaBuf)
+	if !ok || b == nil || b.ptr == nil {
+		return Tensor{}, fmt.Errorf("cuda: CloneTensor requires a live cuda tensor")
+	}
+	n := b.n
+	if n <= 0 {
+		return Tensor{}, fmt.Errorf("cuda: CloneTensor invalid allocation size %d", n)
+	}
+	dup := c.dallocClass(n, b.class, "prefix_snapshot")
+	C.fcuda_d2d(dup.ptr, b.ptr, C.size_t(n))
+	out := t
+	out.Shape = append([]int(nil), t.Shape...)
+	out.buf = dup
+	return out, nil
+}
+
 func (c *cudaBackend) Free(t Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

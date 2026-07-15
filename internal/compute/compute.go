@@ -286,6 +286,7 @@ type KVStore interface {
 	// primitive). Returns positions removed.
 	Evict(from, n int) int
 	Clone() KVStore // deep copy for prefix reuse (the vDSO payoff)
+	Free()          // release externally owned residency; host implementations may no-op
 }
 
 // KVGeometry is the optional shape side-channel for KVStore implementations that are not
@@ -315,6 +316,14 @@ type WeightSource interface {
 // the CPU reference delegates to the model's exact arithmetic (see cpuref.go), so
 // routing the loop through this interface adds only a method indirection, not a numeric
 // change.
+// TensorCloner is the optional device-to-device snapshot seam used by stateful
+// backend sessions. Implementations must return an independently owned tensor with
+// identical metadata and values; callers release it with Backend.Free. A backend that
+// cannot clone without a host round trip should not implement this interface.
+type TensorCloner interface {
+	CloneTensor(Tensor) (Tensor, error)
+}
+
 type Backend interface {
 	Name() string            // stable id, e.g. "cpu-ref"
 	Tier() string            // private capability probe result, e.g. "scalar","avx512","sm90"

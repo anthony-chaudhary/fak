@@ -65,7 +65,8 @@ type node struct {
 	// kv is the kernel-owned KV cache for the FULL prefix root→node (every token on the
 	// path, post-prefill). nil in pure-accounting mode (no model attached); set by Insert
 	// to the cache the caller built, and by split to a truncated clone of a child's cache.
-	kv *model.KVCache
+	kv       *model.KVCache
+	snapshot *model.PrefixSnapshot // optional full device/hybrid prefix owner
 	// logits is the final-token distribution for this exact full prefix, when the caller
 	// provided it. It lets an exact-hit replay sample the first generated token without
 	// refeeding the prompt's final token just to recover logits. Splits intentionally do
@@ -408,6 +409,32 @@ func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
 	return t.InsertWithLogits(boundary, suffix, kv, nil)
 }
 
+// LookupSnapshot is Lookup plus a deep clone of an exact device/hybrid snapshot.
+func (t *Tree) LookupSnapshot(tokens []int) (*node, *model.PrefixSnapshot, int, error) {
+	n, _ := t.Lookup(tokens)
+	for candidate := n; candidate != nil; candidate = candidate.parent {
+		if candidate.snapshot == nil {
+			continue
+		}
+		snap, err := candidate.snapshot.Clone()
+		return n, snap, candidate.plen, err
+	}
+	return n, nil, 0, nil
+}
+
+// InsertSnapshot transfers an independently owned device/hybrid snapshot to the tree.
+func (t *Tree) InsertSnapshot(boundary *node, suffix []int, snap *model.PrefixSnapshot, logits []float32) *node {
+	if snap == nil {
+		return t.InsertWithLogits(boundary, suffix, nil, logits)
+	}
+	n := t.InsertWithLogits(boundary, suffix, snap.Cache, logits)
+	if n.snapshot != nil {
+		n.snapshot.Close()
+	}
+	n.snapshot = snap
+	return n
+}
+
 // InsertWithLogits is Insert plus an optional exact-prefix logits payload. The logits are
 // copied on admission because quantized sessions may reuse their logits buffer on the next
 // Step/Prefill. Passing nil preserves Insert's historical behavior.
@@ -589,6 +616,10 @@ func (t *Tree) removeLeaf(v *node) {
 	}
 	delete(v.parent.children, v.key[0])
 	t.tokens -= len(v.key)
+	if v.snapshot != nil {
+		v.snapshot.Close()
+		v.snapshot = nil
+	}
 	v.kv = nil
 }
 
@@ -604,6 +635,7 @@ func (t *Tree) EvictNode(n *node) int {
 		return 0
 	}
 	freed := subtreeTokens(n)
+	closeSubtreeSnapshots(n)
 	delete(n.parent.children, n.key[0])
 	t.tokens -= freed
 	t.policyEvictions++
@@ -658,6 +690,19 @@ func (t *Tree) EvictPrefixNS(ns string, tokens []int) int {
 		// nlen < len(tokens): the cached path ended before `tokens` was consumed — the
 		// poison continuation was never cached here, so there is nothing poisoned to drop.
 		return 0
+	}
+}
+
+func closeSubtreeSnapshots(n *node) {
+	if n == nil {
+		return
+	}
+	if n.snapshot != nil {
+		n.snapshot.Close()
+		n.snapshot = nil
+	}
+	for _, child := range n.children {
+		closeSubtreeSnapshots(child)
 	}
 }
 
