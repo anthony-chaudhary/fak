@@ -171,6 +171,79 @@ func TestFoldFleetBenefitRunRateSettledSpan(t *testing.T) {
 	}
 }
 
+// TestFoldFleetBenefitFakShareBasisSweep witnesses the #2807 basis sweep: the SAME
+// fleet fak_share recomputed with the fak compaction shed valued at 1.0x (gross),
+// 0.1x (marginal), and the honest per-row warm/cold blend (net = FakSharePct). A
+// blended shed (warm+cold) makes all three distinct and ordered marginal <= net <=
+// gross, and the gross-net gap is the overstatement the report makes visible.
+func TestFoldFleetBenefitFakShareBasisSweep(t *testing.T) {
+	track2 := []SavingsRow{
+		{
+			Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+			CacheReadTokens: 400, SavedTokenEquiv: 360, NetSavedTokenEquiv: 360,
+		},
+		{
+			// shed 1000 with a warm witness of 400 → net = 400*0.1 + 600 = 640 (blended),
+			// so gross (1000), net (640), and marginal (100) are all distinct.
+			Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_shed",
+			CompactionShedTokens: 1000, CompactionCacheReadTokens: 400,
+			SavedTokenEquiv: 640, NetSavedTokenEquiv: 640,
+		},
+	}
+	rep := FoldFleetBenefit(nil, track2, nil, FleetBenefitOptions{})
+
+	// Net (honest blend) is the existing headline: fak 640 / (provider 360 + fak 640) = 64%.
+	if rep.FakSharePct == nil || !approxTrack2(*rep.FakSharePct, 64.0) {
+		t.Fatalf("net fak_share = %v, want 64.0%%", rep.FakSharePct)
+	}
+	// Raw shed captured from the savings row (distinct from the absent usage count).
+	if rep.FakCompactionShedTokensSavings != 1000 {
+		t.Fatalf("savings-row shed = %d, want 1000", rep.FakCompactionShedTokensSavings)
+	}
+	// Gross books the whole shed at 1.0x: fak 1000 / (360 + 1000).
+	if rep.FakShareGrossPct == nil || !approxTrack2(*rep.FakShareGrossPct, 100.0*1000.0/1360.0) {
+		t.Fatalf("gross fak_share = %v, want %.6f%%", rep.FakShareGrossPct, 100.0*1000.0/1360.0)
+	}
+	// Marginal books it at 0.1x: fak 100 / (360 + 100).
+	if rep.FakShareMarginalPct == nil || !approxTrack2(*rep.FakShareMarginalPct, 100.0*100.0/460.0) {
+		t.Fatalf("marginal fak_share = %v, want %.6f%%", rep.FakShareMarginalPct, 100.0*100.0/460.0)
+	}
+	// The sweep is ordered marginal <= net <= gross by construction (#2807/#2798).
+	if !(*rep.FakShareMarginalPct <= *rep.FakSharePct && *rep.FakSharePct <= *rep.FakShareGrossPct) {
+		t.Fatalf("sweep not ordered marginal<=net<=gross: %.4f / %.4f / %.4f",
+			*rep.FakShareMarginalPct, *rep.FakSharePct, *rep.FakShareGrossPct)
+	}
+	out := RenderFleetBenefit(rep)
+	for _, want := range []string{
+		"fak_share basis sweep (shed valued 3 ways; #2807)",
+		"gross(1.0x)=73.5294%",
+		"marginal(0.1x)=21.7391%",
+		"net(observed)=64.0000%",
+		"(overstatement)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("basis-sweep render missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestFoldFleetBenefitFakShareBasisSweepAbsentWithoutShed pins that a provider-only
+// corpus (no fak compaction shed) leaves the sweep nil and prints no sweep line, so
+// the extra observability never fabricates a gap where there is nothing to reprice.
+func TestFoldFleetBenefitFakShareBasisSweepAbsentWithoutShed(t *testing.T) {
+	rep := FoldFleetBenefit(nil, []SavingsRow{
+		{Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+			CacheReadTokens: 400, SavedTokenEquiv: 360, NetSavedTokenEquiv: 360},
+	}, nil, FleetBenefitOptions{})
+	if rep.FakCompactionShedTokensSavings != 0 || rep.FakShareGrossPct != nil || rep.FakShareMarginalPct != nil {
+		t.Fatalf("no-shed corpus must leave the sweep empty: shed=%d gross=%v marginal=%v",
+			rep.FakCompactionShedTokensSavings, rep.FakShareGrossPct, rep.FakShareMarginalPct)
+	}
+	if strings.Contains(RenderFleetBenefit(rep), "basis sweep") {
+		t.Fatalf("no-shed render must not print a basis sweep line:\n%s", RenderFleetBenefit(rep))
+	}
+}
+
 func TestFoldFleetBenefitFallsBackToSavingsRowsForExtensionWhenUsageMissing(t *testing.T) {
 	rep := FoldFleetBenefit(nil, []SavingsRow{
 		{Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_shed", CompactionShedTokens: 100},

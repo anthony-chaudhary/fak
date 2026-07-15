@@ -90,6 +90,29 @@ type FleetBenefitReport struct {
 	FakAuthoredTokenEq          float64  `json:"fak_authored_token_equiv"`
 	TotalSavedTokenEq           float64  `json:"total_saved_token_equiv"`
 	FakSharePct                 *float64 `json:"fak_share_pct,omitempty"`
+
+	// FakCompactionShedTokensSavings is the raw fak-authored compaction shed tokens
+	// summed from the Track-2 SAVINGS rows — the denominator the #2807 basis sweep
+	// reprices. It is DISTINCT from CompactionShedTokens above (the usage-ledger
+	// operational count) and never summed with it; the savings rows are the axis the
+	// fak_share token-equiv is actually folded from, so the sweep reprices exactly the
+	// shed that backs FakCompactionTokenEq.
+	FakCompactionShedTokensSavings uint64 `json:"fak_compaction_shed_tokens_savings,omitempty"`
+
+	// FakShareGrossPct / FakShareMarginalPct are the fleet fak_share recomputed with
+	// the fak compaction-shed token-equiv valued at two extra price bases, so the
+	// valuation assumption behind the headline fak_share (FakSharePct, the honest
+	// per-row warm/cold blend) is VISIBLE instead of buried (#2807). WITNESSED
+	// KV-prefix reuse and the provider token-equiv are held fixed across all three;
+	// only the shed is repriced. Gross books every shed token at full input (1.0x) —
+	// the pre-#2794 overstatement; Marginal books it at the 0.1x cache-read marginal
+	// (the conservative floor). By construction Marginal <= Net(FakSharePct) <= Gross,
+	// and the Gross−Net gap is the overstatement made visible. Each is nil when the
+	// recomputed total is not positive, mirroring FakSharePct so an empty/upside-down
+	// corpus never renders a 0%/100% claim.
+	FakShareGrossPct    *float64 `json:"fak_share_gross_pct,omitempty"`
+	FakShareMarginalPct *float64 `json:"fak_share_marginal_pct,omitempty"`
+
 	ObservedActualSpendUSD      float64  `json:"observed_actual_spend_usd"`
 	ObservedAPICostAvoidedUSD   float64  `json:"observed_api_cost_avoided_usd"`
 	ObservedCounterfactualUSD   float64  `json:"observed_counterfactual_usd"`
@@ -218,6 +241,7 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 			rep.ProviderCacheReadTokens += row.CacheReadTokens
 		case isFak:
 			rep.FakCompactionTokenEq += fakTokenEqFromRow(row)
+			rep.FakCompactionShedTokensSavings += row.CompactionShedTokens
 			fallbackContextExtension += row.CompactionShedTokens
 		}
 		if row.DollarStatus != SavingsDollarStatusBlind {
@@ -248,6 +272,23 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 	if rep.TotalSavedTokenEq > 0 {
 		pct := 100 * rep.FakAuthoredTokenEq / rep.TotalSavedTokenEq
 		rep.FakSharePct = &pct
+	}
+	// Basis sweep (#2807): reprice the fak compaction shed at 1.0x (gross) and 0.1x
+	// (marginal), holding WITNESSED KV reuse and provider token-equiv fixed, so the
+	// gap between the headline honest-blend fak_share (FakSharePct) and its full-input
+	// overstatement is visible instead of buried. The 0.1x marginal READS the canonical
+	// providerCacheReadMultiplier so it can never drift from the value the fold and the
+	// fire gate price a cached token at.
+	// Populated only when there is a shed to reprice; with no fak compaction shed all
+	// three bases collapse to the KV-reuse-only share, so the sweep is left nil (and
+	// omitted from JSON) rather than echoing FakSharePct three times.
+	if shed := float64(rep.FakCompactionShedTokensSavings); shed > 0 {
+		if g, ok := fakShareAtBasis(rep.FakKVPrefixReusedTokens, rep.ProviderPromptCacheTokenEq, shed); ok {
+			rep.FakShareGrossPct = &g
+		}
+		if m, ok := fakShareAtBasis(rep.FakKVPrefixReusedTokens, rep.ProviderPromptCacheTokenEq, shed*providerCacheReadMultiplier); ok {
+			rep.FakShareMarginalPct = &m
+		}
 	}
 	rep.ObservedCounterfactualUSD = rep.ObservedActualSpendUSD + rep.ObservedAPICostAvoidedUSD
 	if rep.ObservedCounterfactualUSD != 0 {
@@ -302,6 +343,21 @@ func fakTokenEqFromRow(row SavingsRow) float64 {
 	return fakAuthoredTokenEquiv(row.NetSavedTokenEquiv, row.CompactionShedTokens, row.CompactionCacheReadTokens)
 }
 
+// fakShareAtBasis recomputes the fleet fak_share (percent) with the fak
+// compaction-shed token-equiv set to shedTeq, holding the WITNESSED KV-prefix
+// reuse and the provider token-equiv fixed — the ONE place the #2807 basis sweep
+// reprices the share. It returns ok=false when the recomputed total is not
+// positive, mirroring FakSharePct so an empty/upside-down corpus never renders a
+// 0%/100% claim.
+func fakShareAtBasis(kvReusedTokens uint64, providerTeq, shedTeq float64) (float64, bool) {
+	fakAuthored := float64(kvReusedTokens) + shedTeq
+	total := providerTeq + fakAuthored
+	if total <= 0 {
+		return 0, false
+	}
+	return 100 * fakAuthored / total, true
+}
+
 func (r *FleetBenefitReport) fillFinding() {
 	if r.UsageRows == 0 && r.Track1Sessions == 0 && r.TotalSavedTokenEq == 0 {
 		r.Finding = "no fleet usage or savings rows recorded yet"
@@ -345,6 +401,15 @@ func RenderFleetBenefit(r FleetBenefitReport) string {
 		fmt.Fprintf(&b, " fak_share=%.4f%%", *r.FakSharePct)
 	}
 	b.WriteByte('\n')
+	// Basis sweep (#2807): show the fleet fak_share under the three price bases side
+	// by side so the valuation assumption is visible instead of buried. Only rendered
+	// when a fak compaction shed exists to reprice (otherwise all three collapse to
+	// the KV-reuse-only share); a fully-cold shed honestly makes gross==net (1.0x IS
+	// the cold basis) while a warm/blended shed opens the gross−net gap.
+	if r.FakCompactionShedTokensSavings > 0 && r.FakShareGrossPct != nil && r.FakShareMarginalPct != nil && r.FakSharePct != nil {
+		fmt.Fprintf(&b, "  fak_share basis sweep (shed valued 3 ways; #2807): gross(1.0x)=%.4f%% marginal(0.1x)=%.4f%% net(observed)=%.4f%% — gross−net gap=%.4f pp (overstatement)\n",
+			*r.FakShareGrossPct, *r.FakShareMarginalPct, *r.FakSharePct, *r.FakShareGrossPct-*r.FakSharePct)
+	}
 	if r.ObservedCounterfactualUSD != 0 || r.ObservedActualSpendUSD != 0 || r.ObservedAPICostAvoidedUSD != 0 {
 		reduction := "-"
 		if r.ObservedAPICostReductionPct != nil {
