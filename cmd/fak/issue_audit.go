@@ -45,6 +45,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	bundleOnly := fs.Bool("bundle-only", false, "fetch and emit the bounded credential-free IssueAuditBundle without calling an auditor")
 	bundleCommit := fs.String("bundle-commit", "", "explicit resolving commit SHA for --bundle-only when GitHub has no closing commit event")
 	asJSON := fs.Bool("json", false, "emit the full typed JSON receipt")
+	ledgerPath := fs.String("ledger", "", "append the verified receipt to this hash-chained ledger")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -191,10 +192,23 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		fmt.Fprintf(stderr, "fak issue audit: internal receipt verification failed: %v\n", err)
 		return 1
 	}
+	var ledger *modelroute.AuditReceiptAppendResult
+	if strings.TrimSpace(*ledgerPath) != "" {
+		result, err := modelroute.AppendAuditReceiptLedger(*ledgerPath, receipt)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue audit: append receipt ledger: %v\n", err)
+			return 1
+		}
+		ledger = &result
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(receipt); err != nil {
+		var payload any = receipt
+		if ledger != nil {
+			payload = issueAuditLedgerOutput{Receipt: receipt, Ledger: *ledger}
+		}
+		if err := enc.Encode(payload); err != nil {
 			fmt.Fprintf(stderr, "fak issue audit: encode receipt: %v\n", err)
 			return 1
 		}
@@ -203,11 +217,27 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 			receipt.Verdict, receipt.Subject.IssueNumber, receipt.Subject.CommitSHA,
 			receipt.Author.Provider, receipt.Author.Family, receipt.Auditor.Provider, receipt.Auditor.Family, receipt.ReceiptDigest)
 		fmt.Fprintf(stdout, "reason: %s\n", receipt.Reason)
+		if ledger != nil {
+			fmt.Fprint(stdout, renderIssueAuditLedger(*ledger))
+		}
 	}
 	if receipt.Verdict != modelroute.CrossAuditPass {
 		return 1
 	}
 	return 0
+}
+
+type issueAuditLedgerOutput struct {
+	Receipt modelroute.IssueAuditReceipt        `json:"receipt"`
+	Ledger  modelroute.AuditReceiptAppendResult `json:"ledger"`
+}
+
+func renderIssueAuditLedger(result modelroute.AuditReceiptAppendResult) string {
+	status := "appended"
+	if result.Duplicate {
+		status = "duplicate"
+	}
+	return fmt.Sprintf("ledger: %s rows=%d head_hash=%s\n", status, result.Cursor.Rows, result.Cursor.HeadHash)
 }
 
 func validIssueAuditEffort(effort string) bool {

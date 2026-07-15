@@ -427,3 +427,110 @@ func writeIssueAuditRoster(t *testing.T, aliases []modelroute.AuditIdentityAlias
 	}
 	return path
 }
+
+func TestIssueAuditLedgerAppendDuplicateAndJSONCursor(t *testing.T) {
+	manifestPath, rosterPath, fetcher, reviewer := issueAuditLedgerFixtures(t)
+	ledger := filepath.Join(t.TempDir(), "receipts.jsonl")
+	base := []string{
+		"--issue", "42", "--author-manifest", manifestPath, "--identity-roster", rosterPath,
+		"--auditor", "anthropic/claude/claude-review", "--auditor-weights", "claude-w46",
+		"--auditor-driver", "claude", "--auditor-reasoning", "high", "--ledger", ledger,
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runIssueAuditWith(&stdout, &stderr, base, fetcher, reviewer); code != 0 {
+		t.Fatalf("append code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ledger: appended rows=1 head_hash=") {
+		t.Fatalf("append output=%s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runIssueAuditWith(&stdout, &stderr, base, fetcher, reviewer); code != 0 {
+		t.Fatalf("duplicate code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ledger: duplicate rows=1 head_hash=") {
+		t.Fatalf("duplicate output=%s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runIssueAuditWith(&stdout, &stderr, append(base, "--json"), fetcher, reviewer); code != 0 {
+		t.Fatalf("json code=%d stderr=%s", code, stderr.String())
+	}
+	var payload issueAuditLedgerOutput
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Ledger.Duplicate || payload.Ledger.Cursor.Rows != 1 || payload.Ledger.Cursor.HeadHash == "" {
+		t.Fatalf("json ledger=%+v", payload.Ledger)
+	}
+	if v, err := modelroute.VerifyAuditReceiptLedger(ledger); err != nil || v.Rows != 1 {
+		t.Fatalf("ledger verification=%+v err=%v", v, err)
+	}
+}
+
+func TestIssueAuditLedgerSameKeyConflictFailsLoud(t *testing.T) {
+	manifestPath, rosterPath, fetcher, reviewer := issueAuditLedgerFixtures(t)
+	ledger := filepath.Join(t.TempDir(), "receipts.jsonl")
+	args := []string{
+		"--issue", "42", "--author-manifest", manifestPath, "--identity-roster", rosterPath,
+		"--auditor", "anthropic/claude/claude-review", "--auditor-weights", "claude-w46",
+		"--auditor-driver", "claude", "--auditor-reasoning", "high", "--ledger", ledger,
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runIssueAuditWith(&stdout, &stderr, args, fetcher, reviewer); code != 0 {
+		t.Fatalf("seed: %s", stderr.String())
+	}
+	conflictReviewer := modelroute.IssueAuditReviewerFunc(func(context.Context, modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
+		return modelroute.IssueAuditReviewResult{Verdict: modelroute.CrossAuditPass, Reason: "different verified review"}, nil
+	})
+	stdout.Reset()
+	stderr.Reset()
+	if code := runIssueAuditWith(&stdout, &stderr, args, fetcher, conflictReviewer); code == 0 {
+		t.Fatalf("same-key conflict succeeded: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), modelroute.ErrAuditReceiptKeyConflict.Error()) {
+		t.Fatalf("typed conflict missing: %s", stderr.String())
+	}
+}
+
+func issueAuditLedgerFixtures(t *testing.T) (string, string, modelroute.IssueAuditFetcher, modelroute.IssueAuditReviewer) {
+	t.Helper()
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "author.json")
+	rosterPath := filepath.Join(dir, "roster.json")
+	manifest := modelroute.AuthorManifest{
+		Schema:         modelroute.CrossAuditAuthorSchema,
+		Author:         modelroute.AuditIdentity{Harness: "codex", Provider: "openai", Family: "gpt", Model: "gpt-author", WeightsRevision: "gpt-w54", EndpointClass: "remote", AccountClass: "subscription", ReasoningPosture: "xhigh"},
+		SourceEvidence: []modelroute.EvidenceRef{{Kind: "session", Ref: "author-session"}}, CommitRange: "abc123..def456",
+	}
+	mb, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, mb, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	roster := modelroute.AuditIdentityRoster{Schema: modelroute.AuditIdentityRosterSchema, Aliases: []modelroute.AuditIdentityAlias{
+		{Alias: "gpt-author", CanonicalModel: "gpt-5.4", Provider: "openai", Family: "gpt", WeightsRevision: "gpt-w54", ProvenanceSource: "roster:author"},
+		{Alias: "claude-review", CanonicalModel: "claude-opus-4-6", Provider: "anthropic", Family: "claude", WeightsRevision: "claude-w46", ProvenanceSource: "roster:auditor"},
+	}}
+	rb, err := json.Marshal(roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rosterPath, rb, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	patch := "diff --git a/thing.go b/thing.go\n+fixed\n"
+	fetcher := modelroute.IssueAuditFetcherFunc(func(context.Context, int) (modelroute.IssueAuditEvidence, error) {
+		return modelroute.IssueAuditEvidence{
+			IssueNumber: 42, IssueURL: "https://github.com/example/repo/issues/42", Title: "fix thing", Body: "done", State: "CLOSED", ClosedAt: "2026-07-10T00:00:00Z", CommitSHA: "def456", Diff: patch,
+			ClosingCommits: []modelroute.IssueAuditClosingCommit{{SHA: "def456", FirstParentSHA: "abc123", TreeOID: "tree-new", FirstParentTreeOID: "tree-old", Patch: patch, PatchSHA256: modelroute.IssueAuditContentDigest(patch), ChangedPaths: []string{"thing.go"}}},
+			Tests:          []modelroute.EvidenceRef{{Kind: "test-path", Ref: "thing_test.go"}}, CI: []modelroute.EvidenceRef{{Kind: "check", Ref: "ci/unit"}}, DOS: []modelroute.EvidenceRef{{Kind: "dos-commit-audit", Ref: "commit:def456"}}, Evidence: []modelroute.EvidenceRef{{Kind: "issue-event", Ref: "referenced:def456"}},
+		}, nil
+	})
+	reviewer := modelroute.IssueAuditReviewerFunc(func(context.Context, modelroute.IssueAuditReviewRequest) (modelroute.IssueAuditReviewResult, error) {
+		return modelroute.IssueAuditReviewResult{Verdict: modelroute.CrossAuditPass, Reason: "verified review"}, nil
+	})
+	return manifestPath, rosterPath, fetcher, reviewer
+}

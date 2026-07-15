@@ -579,7 +579,7 @@ func AppendAuditReceiptLedger(path string, receipt IssueAuditReceipt) (AuditRece
 			if row.AuditKey != ledgerKey {
 				continue
 			}
-			if row.Receipt.ReceiptDigest == receipt.ReceiptDigest {
+			if row.Receipt.ReceiptDigest == receipt.ReceiptDigest || auditReceiptsEquivalentForRetry(row.Receipt, receipt) {
 				result = AuditReceiptAppendResult{Row: row, Duplicate: true, Cursor: auditReceiptLedgerCursor(rows)}
 				return nil
 			}
@@ -617,6 +617,16 @@ func AppendAuditReceiptLedger(path string, receipt IssueAuditReceipt) (AuditRece
 		return nil
 	})
 	return result, err
+}
+
+// auditReceiptsEquivalentForRetry treats a re-run of the same independently
+// authored audit as idempotent even though wall-clock timing necessarily changes.
+// Every substantive receipt field remains comparison-bound; a changed verdict,
+// reason, evidence, identity, usage, policy, or subject is still a typed conflict.
+func auditReceiptsEquivalentForRetry(a, b IssueAuditReceipt) bool {
+	a.Timing, b.Timing = nil, nil
+	a.ReceiptDigest, b.ReceiptDigest = "", ""
+	return hashJSON(a) == hashJSON(b)
 }
 
 func readAuditReceiptLedger(path string) ([]AuditReceiptLedgerRow, error) {
