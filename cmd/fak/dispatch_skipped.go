@@ -78,7 +78,7 @@ func runDispatchSkipped(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch skipped: %v\n", err)
 		return 1
 	}
-	blocked := humanBlockedSkipped(router)
+	blocked := mergeHumanBlockedSkipped(humanBlockedSkipped(router), humanBlockedGuardEscalations(guardStopsLedgerResolved()))
 	card := renderSkippedHumanBlockedCard(blocked, *repoURL)
 	// A live known-bad hold (#2716) is a DISTINCT row class from the human-blocked set:
 	// dynamic, ledger-driven, and cleared by releasing the signature (not by a human
