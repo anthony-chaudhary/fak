@@ -83,13 +83,13 @@ type FleetBenefitReport struct {
 	ContextExtensionPct     *float64 `json:"context_extension_pct,omitempty"`
 	EquivalentContextWindow *float64 `json:"equivalent_context_windows,omitempty"`
 
-	Track1Sessions              int      `json:"track1_sessions"`
-	ProviderPromptCacheTokenEq  float64  `json:"provider_prompt_cache_token_equiv"`
-	FakKVPrefixReusedTokens     uint64   `json:"fak_kv_prefix_reused_tokens"`
-	FakCompactionTokenEq        float64  `json:"fak_compaction_token_equiv"`
-	FakAuthoredTokenEq          float64  `json:"fak_authored_token_equiv"`
-	TotalSavedTokenEq           float64  `json:"total_saved_token_equiv"`
-	FakSharePct                 *float64 `json:"fak_share_pct,omitempty"`
+	Track1Sessions             int      `json:"track1_sessions"`
+	ProviderPromptCacheTokenEq float64  `json:"provider_prompt_cache_token_equiv"`
+	FakKVPrefixReusedTokens    uint64   `json:"fak_kv_prefix_reused_tokens"`
+	FakCompactionTokenEq       float64  `json:"fak_compaction_token_equiv"`
+	FakAuthoredTokenEq         float64  `json:"fak_authored_token_equiv"`
+	TotalSavedTokenEq          float64  `json:"total_saved_token_equiv"`
+	FakSharePct                *float64 `json:"fak_share_pct,omitempty"`
 
 	// FakCompactionShedTokensSavings is the raw fak-authored compaction shed tokens
 	// summed from the Track-2 SAVINGS rows — the denominator the #2807 basis sweep
