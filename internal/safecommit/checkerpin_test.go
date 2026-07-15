@@ -1,6 +1,7 @@
 package safecommit
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -282,4 +283,45 @@ func keysOf(m CheckerBaseline) []string {
 		ks = append(ks, k)
 	}
 	return ks
+}
+
+func TestCommitWithRefusesTamperedDeclaredCheckerBeforeGit(t *testing.T) {
+	root := t.TempDir()
+	checker := writeChecker(t, root, "checker_test.go", "original\n")
+	base := mustPin(t, root, checker)
+	writeChecker(t, root, checker, "weakened\n")
+
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	opts.Dir = root
+	opts.CheckerBaseline = base
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("CommitWith error: %v", err)
+	}
+	if res.Reason != ReasonCheckerTampered {
+		t.Fatalf("reason=%q, want %q", res.Reason, ReasonCheckerTampered)
+	}
+	if len(g.calls) != 0 {
+		t.Fatalf("checker drift must refuse before git effects; calls=%v", g.calls)
+	}
+}
+
+func TestCommitWithUnchangedDeclaredCheckerPassesThrough(t *testing.T) {
+	root := t.TempDir()
+	checker := writeChecker(t, root, "checker_test.go", "original\n")
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	opts.Dir = root
+	opts.CheckerBaseline = mustPin(t, root, checker)
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("CommitWith error: %v", err)
+	}
+	if res.Reason == ReasonCheckerTampered {
+		t.Fatalf("unchanged checker refused: %+v", res)
+	}
+	if !g.sawSubcommand("commit") {
+		t.Fatalf("unchanged checker did not reach commit; calls=%v result=%+v", g.calls, res)
+	}
 }

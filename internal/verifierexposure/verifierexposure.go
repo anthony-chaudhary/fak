@@ -79,6 +79,9 @@ func Score(g Gate) GateExposure {
 	if g.CheckerBytesPinned {
 		score -= 0.15
 		reasons = append(reasons, "checker bytes pinned -0.15")
+	} else {
+		score += 0.35
+		reasons = append(reasons, "checker bytes mutable +0.35")
 	}
 	if g.SchemaPinned {
 		score -= 0.10

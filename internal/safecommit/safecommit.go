@@ -95,7 +95,11 @@ type Options struct {
 	// CoreLockWitnessResolver is injectable for tests; nil uses the real git-backed
 	// resolver through the same runner seam as the rest of safecommit.
 	CoreLockWitnessResolver abi.WitnessResolver
-	Now                     func() time.Time // optional test clock for lock-hold measurement
+	// CheckerBaseline pins the bytes of the checker(s) grading this commit. When
+	// non-empty, CommitWith re-reads them immediately before any git effect and
+	// refuses CHECKER_TAMPERED on drift.
+	CheckerBaseline CheckerBaseline
+	Now             func() time.Time // optional test clock for lock-hold measurement
 }
 
 type ReviewFunc func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error)
@@ -179,6 +183,12 @@ type Result struct {
 	CoreLockPaths    []string                 `json:"core_lock_paths,omitempty"`
 	CoreLockWitness  string                   `json:"core_lock_witness,omitempty"`
 	Review           *modelroute.ReviewResult `json:"review,omitempty"`
+	// Velocity is the effect-qualified ship-speed reading (#4241): separate local and
+	// push legs, each scored only after the command's authoritative effect fields
+	// qualify it (Committed&&Verified for local, additionally Pushed for push). It is
+	// distinct from Score (outcome quality) and always populated by CommitWith; a
+	// refusal/no-op still carries it with UNSCORED legs and retained timing.
+	Velocity *CommitVelocity `json:"velocity,omitempty"`
 }
 
 // Commit runs the safe-commit algorithm against the real git binary and a real advisory
@@ -213,8 +223,35 @@ func buildCommitArgs(signOff bool, msgPath string, paths []string) []string {
 // a fake Runner + fake LockFunc exercise the whole step-ordered algorithm — including the
 // race remedy — with no git and no repo. See the package doc for the discipline it encodes.
 func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (res Result, err error) {
+	// Authoritative clock for the effect-qualified velocity legs (#4241). It shares
+	// opts.Now with the lock-hold timer so a test's injected clock drives both, and is
+	// read ONLY after the lock is acquired — never on a pre-lock refusal path — so a
+	// fast no-op cannot manufacture an elapsed reading.
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	var velStart time.Time
+	var velStarted bool
+	var localElapsed, pushElapsed time.Duration
+	var localStamped, pushStamped bool
 	defer func() {
 		res = ScoreResult(res)
+		// Legs that never reached their qualifying boundary still retain timing: an
+		// unstamped leg is measured to the terminal instant so a refusal/race reports
+		// how long it took, while ScoreCommitVelocity keeps it UNSCORED (nil score).
+		localE, pushE := localElapsed, pushElapsed
+		if velStarted && (!localStamped || !pushStamped) {
+			term := now()
+			if !localStamped {
+				localE = term.Sub(velStart)
+			}
+			if !pushStamped {
+				pushE = term.Sub(velStart)
+			}
+		}
+		v := ScoreCommitVelocity(res, localE, pushE, DefaultVelocityBudgets)
+		res.Velocity = &v
 	}()
 
 	trunk := ExpectedTrunk(opts.Dir, opts.Trunk)
@@ -229,6 +266,11 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 	if strings.TrimSpace(opts.Message) == "" {
 		res.Reason = ReasonEmptyMessage
+		return res, nil
+	}
+	if reason, refused := GuardCheckerPin(opts.Dir, opts.CheckerBaseline); refused {
+		res.Reason = reason
+		res.Detail = "declared checker bytes drifted since task declaration"
 		return res, nil
 	}
 	if release, admitted := opts.Window.TryAcquire(); !admitted {
@@ -271,7 +313,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 
 	// (5) Acquire the advisory lock (bounded). Busy is a value, not an error.
-	releaseLock, busyReason, lockErr := acquireCommitLock(lock, opts, &res)
+	releaseLock, lockStart, busyReason, lockErr := acquireCommitLock(lock, opts, &res)
 	if lockErr != nil {
 		return res, lockErr
 	}
@@ -280,6 +322,9 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		return res, nil
 	}
 	defer releaseLock()
+	// The velocity clock starts at lock acquisition (#4241): only work that held the
+	// lock has an effect boundary to time, so velStart is set past the busy return.
+	velStart, velStarted = lockStart, true
 
 	// (5b) Honor the cooperative worktree writer lease (#4240 → #4611): sync apply holds
 	// it across its whole assess+apply window, and a managed commit must never mutate the
@@ -400,6 +445,9 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		return res, nil
 	}
 	res.Verified = true
+	// Local effect boundary reached: stamp the local velocity leg at the verified-commit
+	// instant (#4241), before the lock is released and any push is attempted.
+	localElapsed, localStamped = now().Sub(velStart), true
 	recordPathspec = true
 	recordVerdict, recordReason, recordAssertion = witness.VerdictAssertPass, "", "committed-set==requested-set"
 
@@ -414,7 +462,14 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// safesync.SafePush so transient transport/non-ff races get the same retry and
 	// integrate-through-`fak sync apply` guidance as `fak sync push`. We never pull --rebase
 	// --autostash (it strands .git/rebase-merge).
-	return applyVerifiedPush(ctx, run, opts, trunk, res)
+	res, err = applyVerifiedPush(ctx, run, opts, trunk, res)
+	// Push effect boundary reached only on a verified push: stamp the push velocity leg
+	// when the commit actually landed on the remote (#4241). A rejected push leaves the
+	// leg unstamped, so it retains terminal timing but stays UNSCORED.
+	if err == nil && res.Pushed {
+		pushElapsed, pushStamped = now().Sub(velStart), true
+	}
+	return res, err
 }
 
 // applyVerifiedPush performs step (8): the optional push of the already-verified commit. It
@@ -449,19 +504,22 @@ func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk stri
 // CommitWith so the executor core stays under its ceiling; res is a pointer to the
 // caller's named result so the release closure records LockHoldNS exactly where the
 // original in-function closure did.
-func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock func(), busyReason string, err error) {
+func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock func(), lockStart time.Time, busyReason string, err error) {
 	unlock, err := lock(opts.Lock)
 	if err != nil {
 		if errors.Is(err, ErrLockBusy) {
-			return nil, ReasonLockBusy, nil
+			return nil, time.Time{}, ReasonLockBusy, nil
 		}
-		return nil, "", fmt.Errorf("safecommit: lock: %w", err)
+		return nil, time.Time{}, "", fmt.Errorf("safecommit: lock: %w", err)
 	}
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
-	lockStart := now()
+	// lockStart is the lock-acquisition instant: it anchors both the lock-hold timer
+	// and the velocity legs' start (#4241), so the clock is read exactly once here and
+	// never before the lock is held.
+	lockStart = now()
 	lockReleased := false
 	release := func() {
 		if lockReleased {
@@ -474,7 +532,7 @@ func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock fu
 		unlock()
 		lockReleased = true
 	}
-	return release, "", nil
+	return release, lockStart, "", nil
 }
 
 // runLockRidingMutation runs one lock-riding git mutation (the pathspec-scoped add, then
