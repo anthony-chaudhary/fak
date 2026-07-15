@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **98.1/100** (grade A) = 9.8/10 |
-| **Coverage** | **97.0%** (1895/1954 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **59** (clarity 0 + coverage 59) |
-| Crystal-clear concepts | 230 of 1666 positioned |
+| **Score** | **98.6/100** (grade A) = 9.9/10 |
+| **Coverage** | **97.8%** (1912/1955 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **43** (clarity 0 + coverage 43) |
+| Crystal-clear concepts | 230 of 1683 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,11 +24,11 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1666 concepts - score 98.1/100 (grade A) - disambiguation-debt 59
+concept-disambiguation chart - 1683 concepts - score 98.6/100 (grade A) - disambiguation-debt 43
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####........................ 230
-  o defined       ############################ 1436
+  o defined       ############################ 1453
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -41,15 +41,15 @@ clarity mix by family (each cell = one concept):
   decision         ****oooooooooooooooooo (22 concept(s); 4 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***ooooooooooooooooooooooooooo (30 concept(s); 3 crystal)
-  gateway-engine   ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (112 concept(s); 6 crystal)
+  gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 6 crystal)
   guard-gate       ***********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (203 concept(s); 47 crystal)
   layout           ***oooooooo        (11 concept(s); 3 crystal)
   loop             **************oooooooooooooooooooooo (36 concept(s); 14 crystal)
   plan             ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 15 crystal)
-  policy-capability ***********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (100 concept(s); 11 crystal)
+  policy-capability ***********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (101 concept(s); 11 crystal)
   pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
   render-materialize ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (140 concept(s); 3 crystal)
-  score-debt       ***oooooooooooooooooooooooooooooooooooooooooooooooooo (53 concept(s); 3 crystal)
+  score-debt       ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (62 concept(s); 3 crystal)
   session-runtime  ***************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (151 concept(s); 15 crystal)
   support-maturity *****oooooooooooooooo (21 concept(s); 5 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
@@ -57,29 +57,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    *********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 33 crystal)
 
 coverage by family (positioned / discovered):
-  gateway-engine   ##########################.. 152/162
-  score-debt       ########################.... 68/78
   attention        #########################... 61/68
   decision         ########################.... 35/41
   evict            ########################.... 36/42
   loop             #########################... 49/55
-  support-maturity ########################.... 29/34
+  support-maturity #######################..... 29/35
   guard-gate       ############################ 281/285
   layout           ######################...... 12/15
+  plan             ############################ 286/288
+  policy-capability ############################ 116/118
   pool             ##########################.. 35/37
   cache            ############################ 222/222
   context-ctx      ############################ 174/174
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  plan             ############################ 286/286
-  policy-capability ############################ 115/115
+  gateway-engine   ############################ 159/159
   render-materialize ############################ 162/162
+  score-debt       ############################ 77/77
   session-runtime  ############################ 170/170
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 124/124
 
-namespace coverage  [###############################.] 97.0%  (1895/1954 confusable tokens positioned)
+namespace coverage  [###############################.] 97.8%  (1912/1955 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -758,6 +758,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | metric | gateway-engine | **KernelIOWriteBytes (harness axis)** - A gateway.SessionHarness field (json kernel_io_write_bytes) carrying harnessres.Half.IOWriteBytes for the guard+in-process-gateway "kernel" half, populated by guardHarnessToSession when k.HaveIO is set alongside KernelIOReadBytes. |
 | o | defined | metric | gateway-engine | **KernelRSSBytes (harness axis)** - A gateway.SessionHarness field (json kernel_rss_bytes) carrying harnessres.Half.RSSBytes - the live resident-set-size reading for the guard+in-process-gateway "kernel" half - populated by guardHarnessToSession when k.HaveRSS is set and rendered via guardInfoBytesText in the guard's live status line. |
 | o | defined | symbol | gateway-engine | **logGatewayOperation (per-call metrics)** - A gateway.Server method (internal/gateway/metrics_http.go, called from gateway.go's adjudicate/syscall paths and gateway_admit.go) that records ONE gateway operation's outcome inline into the live fak_gateway_operation_duration_seconds/fak_gateway_operations_total counters at call time. |
+| o | defined | symbol | gateway-engine | **q8DecodeKernel (witness)** - The build-agnostic witness function (model.Q8DecodeKernel / internal q8DecodeKernel) that reports which Q8_0 decode inner-kernel tier this host resolved and whether the fused fast-decode GEMV is the active path, answering 'is the SIMD decode lane engaged?' at the /metrics surface. |
+| o | defined | metric | gateway-engine | **fak_gateway_tool_defer (metric family)** - The Prometheus metric-name prefix grouping the cold-tool-deferral counters (fak_gateway_tool_defer_cold_total, fak_gateway_tool_defer_turns_total) the gateway emits when --defer-cold-tools marks cold tool definitions defer_loading on the outbound body. |
+| o | defined | symbol | gateway-engine | **GatewayJudgeClient (trajctl)** - The trajctl JudgeClient implementation (internal/trajctl/judgeclient.go) backed by an OpenAI-compatible chat gateway, used by the rubric scorer to obtain an LLM verdict on a trajectory segment over HTTP. |
+| o | defined | symbol | gateway-engine | **KernelCheck (dispatchtick preflight)** - The dispatchtick preflight struct (internal/dispatchtick/preflight.go) that captures the DOS kernel loop liveness probe, recording whether `dos loop --json` reports a live, admitting loop behind the dispatch preflight's kernel field. |
+| o | defined | symbol | gateway-engine | **DemoEngine (quality runner)** - The quality regression-bisect helper (internal/quality/runner.go) that returns a ScriptedRunner engine for the demo case with an optional injected defect, exercising the expected-gate path via a scripted engine rather than a real inference backend. |
+| o | defined | symbol | gateway-engine | **GatewaySteer (trajctl actuator)** - The trajctl steer actuator constructor (internal/trajctl/steer.go) that returns a SteerFunc POSTing a steer packet to an existing OpenAI-compatible gateway's /v1/fak/session/{id}/steer endpoint, the production wiring for delivering trajectory-control nudges. |
+| o | defined | doc-term | gateway-engine | **LiveKernelEvent (WER hostfault)** - The Windows Error Reporting event class (WER 1001 LiveKernelEvent) that internal/hostfault classifies as a GPU driver live-kernel/TDR watchdog event, carrying a video-TDR bucket-141 or vendor watchdog dump signal, to gate the GPU_LIVEKERNEL hostfault class. |
 | o | defined | symbol | gateway-engine | **matKernel (compute)** - The internal/model interface that selects which arithmetic a single decode block's weight matmuls run through — prep turns a normed activation into the kernel's operand form once, and mul applies a named weight to it — so the f32 and Q8 decode blocks share one block skeleton. |
 | o | defined | symbol | gateway-engine | **f32Kernel (compute)** - The matKernel that runs a decode block fully in f32 — prep is the identity and every matmul routes through parMatRows (the in-order row-parallel GEMV), preserving the bit-exact reduction order. |
 | o | defined | symbol | gateway-engine | **q8Kernel (compute)** - The matKernel that runs a decode block in Q8_0, quantizing the activation once per prep into a q8Vec and multiplying it against the prebuilt Q8_0 weight via qMatRows. |
@@ -1231,7 +1238,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | plan | **LaneCandidate (dispatchtick)** - dispatchtick.LaneCandidate is one orderable issue in a dispatch lane: its number and the priority signal orderLaneCandidates ranks it by. |
 | o | defined | symbol | plan | **dispatchWaveCandidate** - cmd/fak dispatchWaveCandidate is one lane chosen to run in a dispatch wave - a RunTarget in the wave price, the lane-level unit the wave admits under disjointness. |
 | o | defined | concept | policy-capability | **adjudicating (the decision act)** - Adjudicating is the act of evaluating a proposed tool call (or a buffered turn of them) against the loaded policy and refusal rungs to produce an admit/refuse verdict, exercised on the gateway's served fast path (adjudicateProposedServed), its full-turn gate (adjudicateProposedTurn), and folded into the deny-all counter by recordAdjudicationOutcome. |
-| o | defined | config | policy-capability | **posture enum value (per-subsystem stance)** - These are named stance constants on different subsystems' Posture enums: resume's PostureCold/PostureWarm/PostureUnknown classify whether a session's provider prefix is still cache-warm, compactcohere's PostureBlock is the PreCompact-hook stance that exits 2 to block harness auto-compaction, and adjudicator's PostureFailClosed is the default-deny tool-admission stance. |
+| o | defined | config | policy-capability | **posture enum value (per-subsystem stance)** - These are named stance constants on different subsystems' Posture enums: resume's PostureCold/PostureWarm/PostureUnknown classify whether a session's provider prefix is still cache-warm, compactcohere's PostureBlock is the PreCompact-hook stance that exits 2 to block harness auto-compaction, and adjudicator's PostureFailClosed (default-deny) and PostureAdmitAndLog (admit low-risk reads with forensic metadata) are the two tool-admission stances. |
 | o | defined | symbol | policy-capability | **DispatchPreflight (dispatch admission)** - DispatchPreflight (cmd/fak) folds host safety, account availability, kernel capacity, and seat-pool checks (its PreflightInput) into a verdict on whether a new issue-resolution worker may safely spawn, with PreflightReady the ggufload load-time gate verdict that says a model header parsed and fits. |
 | o | defined | symbol | policy-capability | **fetch_policy (benchmark refund-doc tool)** - fetch_policy (internal/agent toolFetchDoc) and its sibling read_refund_policy are the agent-benchmark tool names for fetching an airline refund document whose body carries an indirect prompt injection, the call the context-MMU quarantines at result admission to prove the floor. |
 | o | defined | symbol | policy-capability | **TierPolicy (ctxresidency tier)** - TierPolicy (internal/ctxresidency) is the always-resident context-residency tier holding the versioned deny/allow and safety-critical floor spans, which are never paged out under budget pressure during context compression. |
@@ -1265,6 +1272,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | policy-capability | **readMemPolicy (compute)** - compute.readMemPolicy detects the process's strict NUMA confinement from /proc/self/numa_maps (MPOL_BIND via numactl --membind) and the cpuset/cgroup mems restriction, returning the memPolicy cached once for the process lifetime. |
 | o | defined | metric | policy-capability | **PostureAdoptionPct (cachevaluereport)** - cachevaluereport.PostureAdoptionPct ('posture_adoption_pct') is the 0..100 percentage of exit sessions this week that ran under an ACTIVE managed-cache posture - the cache-value weekly digest's adoption measure, nil when no sessions exited. |
 | o | defined | config | policy-capability | **workerModelPolicy (cmd)** - cmd/fak workerModelPolicy is the resolved launch decision for one dispatch worker: the Model to pin (empty => seat default + fallback chain), the ordered downgrade Chain a Layer-2 model switch tries, the Source that decided it, and the tier-profile Effort/Ultracode knobs carried into WorkerLaunch. |
+| o | defined | symbol | policy-capability | **DeliveryPolicy** - egressfloor.DeliveryPolicy is the deny-by-default capability floor that maps each delivery platform to allowed destinations and adjudicates an outbound Delivery into a witnessed DeliveryRecord. |
 | o | defined | symbol | policy-capability | **RegisterCapability (abi)** - abi.RegisterCapability is the registry writer that adds a negotiable feature token to the kernel's process-global Supported() capability set, called from a driver's init(). |
 | o | defined | symbol | policy-capability | **RegisterAdjudicator (abi)** - abi.RegisterAdjudicator inserts a PDP/PEP adjudicator link into the kernel's pre-call decision chain at a numeric rank (lower rank runs first) and rebuilds the registry snapshot. |
 | o | defined | symbol | policy-capability | **WithAdjudicators (kernel)** - kernel.WithAdjudicators constructs a kernel that folds an EXPLICIT caller-supplied adjudicator chain instead of the process-global registry, so K replay arms each carry their own monitor without colliding. |
@@ -1518,6 +1526,15 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | score-debt | **runProductScorecard** - The cmd/fak Go func that implements the `fak product-scorecard` verb's body (invoked from main.go's product-scorecard dispatch and from score.go's "product" registry entry), taking stdout/stderr/argv and returning an exit code. |
 | o | defined | config | score-debt | **ScorecardSchema constant** - The per-package Go string constant named ScorecardSchema (e.g. milestonereport.ScorecardSchema = "fak-milestone-scorecard/1", independently redeclared in internal/guardrsi and internal/issuefanout) that tags a scorecard.Payload with its control-pane schema id. |
 | o | defined | metric | score-debt | **unwired_debt** - The headline corpus integer (corpus.unwired_debt) that internal/unwiredscore.Build folds: a count of code-complete internal packages imported by no .go file, via the package-granularity oracle. |
+| o | defined | metric | score-debt | **negframe_debt** - The debt integer emitted by the negframe scorecard (internal/negframe DebtKey "negframe_debt"): the count of mechanical negative-frame steer-prose defects with a positive reframe attached, folded from the document corpus. |
+| o | defined | metric | score-debt | **qa_process_debt** - The debt integer emitted by the qa-process scorecard (internal/qaprocessscore DebtKey "qa_process_debt"): HARD gaps in the test process - reverted landings with no regression test, packages below coverage floor - that are in-tree-mendable holes, not failing tests. |
+| o | defined | symbol | score-debt | **skip_debt** - The boundarylint.SkipDebt rule (Code "SKIP_DEBT") that flags a test removing itself from the suite with a bare, unconditional t.Skip - a SOFT signal feeding the qa-process scorecard's skip_debt KPI, never a gate. |
+| o | defined | metric | score-debt | **debt_by_kpi** - The standard scorecard payload field (json "debt_by_kpi"): a map[string]int breaking one scorecard's total debt down by its KPI names (lint, tests, structure, ...), emitted by every scorecard's corpus fold. |
+| o | defined | metric | score-debt | **debt_delta** - The trend int field (DebtDelta / json "debt_delta") on cadencereport and milestoneburndown Trend structs: the signed change in a scorecard's debt between two cadence snapshots, and the docfreshrsi score component measuring rewrite paydown. |
+| o | defined | metric | score-debt | **friction_debt** - The HARD-gate debt integer emitted by the agent-readiness scorecard (friction_debt): the count of concrete cold-agent friction defects - missing entry points, dead orientation links, no copy-pasteable first command - that block an AI agent from adopting fak. |
+| o | defined | metric | score-debt | **seo_debt** - The debt integer emitted by the seo/aeo scorecard (internal/seoaeoscore Corpus.SEODebt / json "seo_debt"): the total count of discoverability defects across pages and site-level checks (meta, links, JSON-LD, sitemap, crawlability). |
+| o | defined | metric | score-debt | **mode_debt** - The debt integer emitted by the mode-debt scorer/dispatcher pair (internal/modedebt DebtKey "mode_debt"): HARD un-lifted permission-regime dials - operator-facing mode switches that lack a dogfood witness or a documented lift path. |
+| o | defined | symbol | score-debt | **ProgramScorecard** - The milestonereport.ProgramScorecard struct (attached via WithProgramScorecard): one program-optimization card (e.g. kernel-optimization, cache-optimization) pinned to a milestone with a verdict (not-yet / lovable / ...), composing into the milestone report alongside the climb and roadmap dimensions. |
 | o | defined | subsystem | score-debt | **agent-readiness scorecard** - The scorecard that measures how easy fak is for an AI agent (Claude Code, Codex, Cursor, an MCP client) to discover, adopt, and build on - missing entry points, harness configs, copy-pasteable first commands, per-agent recipes (tools/agent_readiness_scorecard.py). |
 | o | defined | subsystem | score-debt | **persona-readiness scorecard** - The scorecard that measures whether fak serves its top human personas - the free-tier dev, the infra engineer, the researcher - each with the entry path they need (prebuilt binary, deploy guide, determinism witness) (tools/persona_readiness_scorecard.py). |
 | o | defined | subsystem | score-debt | **doc-appeal scorecard** - The scorecard that measures whether a reader-facing doc reads like a person wrote it: em-dash flood, bold-emphasis flood, run-on sentences, walls of text, LLM-scaffolding phrases (tools/doc_appeal_scorecard.py). |
@@ -1770,16 +1787,16 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 36 top-level abstraction(s), 46 head(s) total, max depth 3 (132 concepts in the forest)
+concept-disambiguation roll-up: 36 top-level abstraction(s), 46 head(s) total, max depth 3 (140 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
 
      rolled       head         size debt  mix                  family / canonical
-  !o defined     crystal        14    0  **oooooooooooo       score-debt / scorecard
+  !o defined     crystal        15    0  **ooooooooooooo      score-debt / scorecard
+  !o defined     crystal        13    0  *oooooooooooo        score-debt / scorecard control pane
   !o defined     crystal        10    0  ********oo           guard-gate / gate (decision point)
   !o defined     crystal        10    0  ***ooooooo           session-runtime / Session
-  !o defined     crystal         6    0  *ooooo               score-debt / scorecard control pane
   !o defined     crystal         6    0  *ooooo               context-ctx / CtxViewPlanner
   !o defined     crystal         6    0  *ooooo               plan / Plan (planner)
   !o defined     crystal         4    0  **oo                 cache / KV cache
@@ -1814,14 +1831,14 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   cache / Hardware-aware cache
 
 abstraction overclaims (18) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: concept-disambiguation-scorecard = defined)
-  ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: budget = defined)
-  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: scorecardpane-native-fold = defined)
-  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewevents = defined)
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: release-readiness-scorecard = defined)
+  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: hygiene-debt = defined)
+  ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-usage = defined)
+  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: ctxview = defined)
   ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-reviewcandidate = defined)
-  ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
+  ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
+  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
   ! policy-capability-audit-independence-policy: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-capability-independence-policy-field = defined)
@@ -1838,14 +1855,14 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | concept-disambiguation-scorecard = defined |
-| o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | secretgate = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | budget = defined |
-| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | scorecardpane-native-fold = defined |
-| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewevents = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 15 | 0 | release-readiness-scorecard = defined |
+| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 13 | 0 | hygiene-debt = defined |
+| o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | normgate = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | session-usage = defined |
+| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | ctxview = defined |
 | o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-reviewcandidate = defined |
-| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
-| o | **CtxExpense (expense verdict)** (`x-context-ctx-ctxexpense`) | defined | defined | 4 | 0 | x-context-ctx-ctxexpensenoteonce = defined |
+| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
+| o | **CtxExpense (expense verdict)** (`x-context-ctx-ctxexpense`) | defined | defined | 4 | 0 | x-context-ctx-ctxexpense = defined |
 | o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | span-attention = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
@@ -1860,15 +1877,15 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 | o! | **ContainmentPolicy (toolprocgate)** (`policy-capability-containment-policy`) | defined | crystal | 2 | 0 | policy-capability-default-containment-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
-| o | **compaction_ab (ablate A/B arm)** (`x-context-ctx-compactionab`) | defined | defined | 2 | 0 | x-context-ctx-compactiononvsoff = defined |
-| o | **CompactionReport (usage-ledger fold)** (`x-context-ctx-compactionreport`) | defined | defined | 2 | 0 | x-context-ctx-compactionreport = defined |
-| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-iscontextflagname = defined |
+| o | **compaction_ab (ablate A/B arm)** (`x-context-ctx-compactionab`) | defined | defined | 2 | 0 | x-context-ctx-compactionab = defined |
+| o | **CompactionReport (usage-ledger fold)** (`x-context-ctx-compactionreport`) | defined | defined | 2 | 0 | x-context-ctx-foldcompaction = defined |
+| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
 | o | **CtxStore (recall's ctxplan.Store adapter)** (`x-context-ctx-ctxstore`) | defined | defined | 2 | 0 | x-context-ctx-newctxstore = defined |
-| o | **CtxValueReport** (`x-context-ctx-ctxvaluereport`) | defined | defined | 2 | 0 | x-context-ctx-ctxvaluesnapshot = defined |
-| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-placeanthropiccachebreakpointwithoutcome = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-witness-rung = crystal |
-| * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | fak-ablate-ttl-1h = crystal |
-| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-creation-tokens = crystal |
+| o | **CtxValueReport** (`x-context-ctx-ctxvaluereport`) | defined | defined | 2 | 0 | x-context-ctx-ctxvaluereport = defined |
+| o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-regime-gate = crystal |
+| * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | config-cachettl1h = crystal |
+| * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | prompt-cache = crystal |
 | * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
 | * | **abi.Verdict** (`verdict`) | crystal | crystal | 3 | 0 | reason-code = crystal |
 | * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compactionview = crystal |
@@ -1881,7 +1898,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 26 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1666 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1683 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1893,23 +1910,23 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| gateway-engine | 152 | 162 | 10 |
-| score-debt | 68 | 78 | 10 |
 | attention | 61 | 68 | 7 |
 | decision | 35 | 41 | 6 |
 | evict | 36 | 42 | 6 |
 | loop | 49 | 55 | 6 |
-| support-maturity | 29 | 34 | 5 |
+| support-maturity | 29 | 35 | 6 |
 | guard-gate | 281 | 285 | 4 |
 | layout | 12 | 15 | 3 |
+| plan | 286 | 288 | 2 |
+| policy-capability | 116 | 118 | 2 |
 | pool | 35 | 37 | 2 |
 | cache | 222 | 222 | 0 |
 | context-ctx | 174 | 174 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| plan | 286 | 286 | 0 |
-| policy-capability | 115 | 115 | 0 |
+| gateway-engine | 159 | 159 | 0 |
 | render-materialize | 162 | 162 | 0 |
+| score-debt | 77 | 77 | 0 |
 | session-runtime | 170 | 170 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |

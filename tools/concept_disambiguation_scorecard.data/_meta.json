@@ -108,9 +108,9 @@
       "id": "score-debt",
       "name": "Scorecard / debt family",
       "roots": ["scorecard", "debt"],
-      "ignore": ["scorecards"],
+      "ignore": ["scorecards", "scorecardPath"],
       "min_files": 3,
-      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member."
+      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans >= min_files only because the path is threaded through BuildPlan/IssueBody."
     },
     {
       "id": "support-maturity",
