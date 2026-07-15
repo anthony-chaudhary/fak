@@ -27,7 +27,7 @@ param(
   [string]$At = '03:30',                     # daily run time (HH:mm, 24h)
   [int]$EveryHours = 4,                      # also repeat every N hours within the day (0 = daily only)
   [string[]]$AllowBranch = @('fak-v0.1'),    # long-lived worktree branches to RETAIN, never prune
-  [string]$TaskName = 'FleetWorktreeDoctor'
+  [string]$TaskName = ''
 )
 $ErrorActionPreference = 'Stop'
 
@@ -35,6 +35,12 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Repo      = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $Doctor    = Join-Path $ScriptDir 'worktree_doctor.py'
+# Task Scheduler names are machine-global. Derive a stable per-checkout suffix so
+# sibling repositories cannot silently overwrite or inspect each other's janitor.
+if (-not $TaskName) {
+  $repoSlug = ([IO.Path]::GetFileName($Repo) -replace '[^A-Za-z0-9_.-]', '-')
+  $TaskName = "FleetWorktreeDoctor-$repoSlug"
+}
 $LogDir    = Join-Path $env:LOCALAPPDATA 'Fleet\watchdog'
 $Log       = Join-Path $LogDir 'worktree_doctor.log'
 
