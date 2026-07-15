@@ -222,15 +222,13 @@ func SessionStartRule(d SteerDirective) string {
 	if !d.Managed() {
 		return ""
 	}
-	return "fak long-horizon session posture (managed context is ON). The gateway sheds old turns " +
-		"from the active window while preserving the cached prefix, so you can keep working long past " +
-		"the point a raw window would fill — do not stop or wind down merely because the context feels " +
-		"long. Keep going while checkable work remains: when you finish a unit, commit it and pick up " +
-		"the next; only end the turn when the task's done-condition holds or you are genuinely blocked. " +
-		"As the window fills you will be told to CHECKPOINT (land durable state — commit, write the " +
-		"plan/ledger/handoff) or to REBUILD (re-anchor from durable state after a context event); treat " +
-		"those as directives, not FYIs. Durable state — commits, the plan file, the task ledger, memory " +
-		"— is what survives a window rewrite; the active window is not memory. Close each operator-facing " +
+	return "Keep working while checkable work remains; managed context is ON. Finish each unit, " +
+		"commit its durable state, and pick up the next. End the turn when the task's done-condition " +
+		"holds or a genuine blocker remains. The gateway preserves the cached prefix while shedding old " +
+		"turns from the active window, extending the session beyond a raw context window. When directed " +
+		"to CHECKPOINT, land durable state in a commit, plan, ledger, or handoff. When directed to REBUILD, " +
+		"re-anchor from that durable state after the context event. Commits, plans, ledgers, handoffs, and " +
+		"memory survive a window rewrite; treat the active window as working state. Close each operator-facing " +
 		"turn in a shape the operator can scan: lead with the verdict, carry the body as scannable " +
 		"bullets, and make the last line a bullet naming the next checkable step. Session-state tools: " +
 		"mcp__fak__fak_context_value (window left + step advice), mcp__fak__fak_context_spans / " +

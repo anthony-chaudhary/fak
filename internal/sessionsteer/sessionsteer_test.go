@@ -1,6 +1,9 @@
 package sessionsteer
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestSteerGolden is the spine witness (#3512): the pure decision core over a golden table of
 // the load-bearing session snapshots. Every row asserts the full typed directive, so a change
@@ -155,11 +158,28 @@ func TestNormalizeAdvice(t *testing.T) {
 	}
 }
 
+func TestManagedRuleAffordanceFirst(t *testing.T) {
+	rule := SessionStartRule(Steer(SteerInput{Headless: true, DurableStore: true}))
+	if !strings.HasPrefix(rule, "Keep working while checkable work remains; managed context is ON.") {
+		t.Fatalf("rule does not lead with the allowed action: %q", rule)
+	}
+	for _, forbidden := range []string{"do not stop", "only end", "not memory"} {
+		if strings.Contains(strings.ToLower(rule), forbidden) {
+			t.Fatalf("rule retains negation-first framing %q: %q", forbidden, rule)
+		}
+	}
+	for _, token := range []string{"managed context is ON", "CHECKPOINT", "REBUILD", "mcp__fak__fak_context_value", "mcp__fak__fak_context_restore"} {
+		if !strings.Contains(rule, token) {
+			t.Fatalf("rule dropped must-keep token %q: %q", token, rule)
+		}
+	}
+}
+
 // TestManagedRuleNamesTheTools guards the rule's load-bearing content: a managed rule must tell
 // the agent to keep going AND name the context-state tools, or the injection is inert.
 func TestManagedRuleNamesTheTools(t *testing.T) {
 	rule := SessionStartRule(Steer(SteerInput{Headless: true, DurableStore: true}))
-	for _, want := range []string{"managed context is ON", "keep working", "CHECKPOINT", "REBUILD", "fak_context_value"} {
+	for _, want := range []string{"managed context is ON", "Keep working", "CHECKPOINT", "REBUILD", "fak_context_value"} {
 		if !contains(rule, want) {
 			t.Errorf("managed rule missing %q", want)
 		}
