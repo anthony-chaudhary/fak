@@ -487,6 +487,14 @@ func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context st
 // override sessions and scope to a known build. The build revision is the short VCS SHA
 // (binstamp), suffixed "-dirty" for an uncommitted build; an unstamped build (e.g. `go
 // run`) leaves it empty, which the ledger omits.
+func resolvedGatewayExposeProfile(profile string) string {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	if profile == "" {
+		return "interactive"
+	}
+	return profile
+}
+
 func gatewayUsageProvenance(srv *gateway.Server) *gatewayusageledger.Provenance {
 	rev := binstamp.Self().Revision
 	if len(rev) > 12 {
@@ -498,6 +506,7 @@ func gatewayUsageProvenance(srv *gateway.Server) *gatewayusageledger.Provenance 
 	return &gatewayusageledger.Provenance{
 		AssumeSessionTurns:   srv.AssumeSessionTurns(),
 		CompactHistoryBudget: srv.CompactHistoryBudget(),
+		ExposeProfile:        resolvedGatewayExposeProfile(srv.ExposeProfile()),
 		BuildRevision:        rev,
 	}
 }
@@ -1015,6 +1024,12 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int,
 	})
 }
 
+func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
+	if backend == nil {
+		return nil
+	}
+	return []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+}
 func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if ggufPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
@@ -1027,6 +1042,10 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 	// Q8/f32 arms have no shard seam, so a sharded serve that would land on one is REFUSED here —
 	// loading a full model on a rank sized only for its band would OOM or silently defeat the shard.
 	var q4kOpts []ggufload.Q4KLoadOption
+	// Device Q4_K sessions currently stage Q4_K and Q8 matrices, but not dense Q5_K/Q6_K/IQ
+	// tensors. Route those mixed-quant dense weights through the loader's dequant-to-Q8 arm;
+	// otherwise they are stranded in the host-only k-quant store and warmup cannot resolve them.
+	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
 		q4kArm := cpuOffloadExperts || os.Getenv("FAK_Q4K") != ""
