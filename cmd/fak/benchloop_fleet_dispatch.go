@@ -218,10 +218,19 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 	remote := benchFleetRemoteCommand(req)
 	switch req.Machine {
 	case "gcp-g2-l4":
+		if req.Benchmark == "qwen36" {
+			return "", nil, "gcp:ssh/fak-cuda-build-l4", "waiting_provision", errors.New("qwen3.6-27b runner is not provisioned on fak-cuda-build-l4")
+		}
 		return "gcloud", []string{"compute", "ssh", "fak-cuda-build-l4", "--zone", "us-central1-b", "--quiet", "--command", remote}, "gcp:ssh/fak-cuda-build-l4", "running", nil
 	case "gcp-g2-l4-32":
+		if req.Benchmark == "qwen36" {
+			return "", nil, "gcp:ssh/fak-realmodel", "waiting_provision", errors.New("qwen3.6-27b runner is not provisioned on fak-realmodel")
+		}
 		return "gcloud", []string{"compute", "ssh", "fak-realmodel", "--zone", "us-central1-a", "--quiet", "--command", remote}, "gcp:ssh/fak-realmodel", "running", nil
 	case "gcp-a3-high-h100-1g":
+		if req.Benchmark == "qwen36" {
+			return "", nil, "gcp:ssh/fak-qwen-serve", "waiting_provision", errors.New("qwen3.6-27b runner is not provisioned on fak-qwen-serve")
+		}
 		return "gcloud", []string{"compute", "ssh", "fak-qwen-serve", "--zone", "us-central1-f", "--quiet", "--command", remote}, "gcp:ssh/fak-qwen-serve", "running", nil
 	case "a100", "cpu-server-a":
 		bridge := filepath.Clean(filepath.Join(root, "..", "fak-private", ".dgxbridge-verify", "dgxbridge-fresh.exe"))
@@ -236,7 +245,13 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 		if runtime.GOOS != "windows" {
 			return "", nil, "local-control", "waiting_session", errors.New("workstation runner is only available on its Windows control node")
 		}
-		command := "Write-Output ('FAK_BENCH_NODE=' + $env:COMPUTERNAME); Set-Location -LiteralPath '" + strings.ReplaceAll(root, "'", "''") + "'; " + req.Command
+		requestCommand := req.Command
+		if req.Benchmark == "session-benchmark" {
+			// Keep the recurring control-node witness bounded and weight-independent.
+			// The synthetic tiny shape drives all three real session-cache arms.
+			requestCommand = "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -prefix 64 -result 16 -decode 4 -reps 1 -val-scale 32,2,1,4,8"
+		}
+		command := "Write-Output ('FAK_BENCH_NODE=' + $env:COMPUTERNAME); Set-Location -LiteralPath '" + strings.ReplaceAll(root, "'", "''") + "'; " + requestCommand
 		return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", command}, "local-control", "running", nil
 	case "node-macos-a":
 		host := benchFleetMacHost(root)

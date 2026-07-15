@@ -184,6 +184,34 @@ func TestBenchFleetGCPProvisionFailureIsRetryable(t *testing.T) {
 	}
 }
 
+func TestBenchFleetQwen36HintIsNeverExecutedLiterally(t *testing.T) {
+	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
+		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "qwen36", Command: "fak serve + fak agent (qwen3.6-27b via gateway)"})
+		if err == nil || state != "waiting_provision" {
+			t.Fatalf("%s: state=%q err=%v, want waiting_provision error", machine, state, err)
+		}
+		if name != "" || len(args) != 0 {
+			t.Fatalf("%s: executable hint leaked into route: %q %q", machine, name, args)
+		}
+	}
+}
+
+func TestBenchFleetWorkstationSessionUsesBoundedRecipe(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("workstation route is Windows-only")
+	}
+	_, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a", Benchmark: "session-benchmark", Command: "go run ./cmd/sessionbench"})
+	if err != nil || state != "running" {
+		t.Fatalf("state=%q err=%v", state, err)
+	}
+	command := strings.Join(args, " ")
+	for _, want := range []string{"sessionbench", "-synthetic tiny", "-agents 2", "-turns 2", "FAK_BENCH_NODE="} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("command %q missing %q", command, want)
+		}
+	}
+}
+
 func TestBenchFleetL4UsesProvisionedGPURecipe(t *testing.T) {
 	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-g2-l4", Benchmark: "gpu-benchmark", Command: "generic"})
 	for _, want := range []string{"FAK_BENCH_NODE=", "$HOME/.local/go/bin", "build_cuda.sh binary", "~/models/qwen05"} {
