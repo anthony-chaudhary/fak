@@ -144,9 +144,9 @@
       "id": "decision",
       "name": "Decision family",
       "roots": ["decision"],
-      "ignore": [],
+      "ignore": ["gooddecisionratio", "appendsteerdecisions", "kinddecisionsabout"],
       "min_files": 3,
-      "note": "Four disjoint Decision types: witness adjudication verdict, kernel tool-call explanation trace, scheduler loop admission advisory, and shared-task execution state tracking."
+      "note": "Decision structs across disjoint subsystems: witness adjudication verdict, kernel tool-call explanation trace, scheduler loop admission advisory, shared-task execution state, cachemeta placement, gateway reset, vCache governor, trajctl steer, gardenbundle walk, toolprocgate containment, and dispatch calibration. Ignored incidental helpers: gooddecisionratio (a metric field scoring expert-residency keep/evict decision quality, not a decision concept), appendsteerdecisions (the writer function that persists SteerDecision records to the trajctl ledger, not a decision itself), and kinddecisionsabout (a sessionread query Kind enum filtering assistant decision turns in a transcript, not a fak decision concept)."
     },
     {
       "id": "render-materialize",

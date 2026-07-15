@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "x-decision-containmentdecision",
+      "canonical": "ContainmentDecision (toolprocgate)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The closed verdict-plus-evidence struct returned by DecideContainment in internal/toolprocgate that adjudicates whether a tool-process spawn is admitted, deferred, or refused based on crash-blast-radius containment policy (fleet breaker, surface quarantine, co-location cap), carrying the ContainmentVerdict, the one-bit Admit gate, a reason, and the fault-window evidence so a refusal is auditable.",
+      "distinction": "It is the SPAWN-ADMISSION verdict on a tool process's crash blast radius, NOT the kernel's tool-call adjudication verdict (decision-kernel, which explains a tool-call Allow/Deny) nor the gateway's cache-health cut-vs-reset advisory (ResetDecision, which decides context trimming).",
+      "distinct_from": [
+        "decision-kernel",
+        "x-decision-resetdecision"
+      ],
+      "aliases": [],
+      "grounding": "containmentdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-steerdecision",
+      "canonical": "SteerDecision (trajctl)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "One regime-gate steering decision for one objective at one turn boundary (internal/trajctl/steer.go): an Action (nudge/arm/suppress/none) plus the Signal that triggered it and the ObjectiveID it targets, produced by DecideNudge or SteerSweep when the recent score curve is unhealthy (STALL/DRIFT/DETOUR_OVERRUN) and ledgered as one JSONL row via AppendSteerDecisions.",
+      "distinction": "It intervenes on a LIVE objective's score curve (the controller's own actuator decision), NOT the kernel's tool-call verdict explanation (decision-kernel, which records a past call's adjudication) nor the witness adjudication verdict (decision-witness, which confirms/refutes git evidence after the fact).",
+      "distinct_from": [
+        "decision-kernel",
+        "decision-witness"
+      ],
+      "aliases": [],
+      "grounding": "steerdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-walkdecision",
+      "canonical": "WalkDecision (gardenbundle)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "One budgeted item's triage outcome from a garden walk (internal/gardenbundle/walk.go): a Disposition (act/review/defer), the ready Action command to run, a Reason, and a Perform flag, emitted worst-first for each issue the walk inspected so the dispatch garden can split human-needed from fleet-drivable work.",
+      "distinction": "It triages one issue's HANDLING disposition in a garden walk, NOT the super loop's per-invocation worklist selection (DriveDecision, which picks the worst-first member to enter) nor the dispatcher's tier-calibration record (TierDecision, which joins a past dispatch tier to its witnessed outcome).",
+      "distinct_from": [
+        "x-decision-drivedecision",
+        "x-decision-tierdecision"
+      ],
+      "aliases": [],
+      "grounding": "walkdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

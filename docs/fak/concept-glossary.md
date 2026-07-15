@@ -794,6 +794,25 @@ Two discovered tokens are NOT concepts and are ignored by the family's `ignore` 
   record with a decision ID and state machine transitions. *Not* scheduler Decision
   (that advises on loop firing, not task reconciliation).
 
+- **ContainmentDecision (toolprocgate)** - the closed verdict-plus-evidence struct
+  returned by DecideContainment that adjudicates whether a tool-process spawn is
+  admitted, deferred, or refused based on crash-blast-radius containment policy
+  (fleet breaker, surface quarantine, co-location cap). *Not* kernel Decision (that
+  explains a tool-call Allow/Deny, not a spawn-admission gate) and *not* ResetDecision
+  (that decides gateway cache-health cut-vs-reset, not process blast radius).
+
+- **SteerDecision (trajctl)** - one regime-gate steering decision for one objective at
+  one turn boundary: an Action (nudge/arm/suppress/none) plus the Signal that triggered
+  it, produced when the recent score curve is unhealthy. *Not* kernel Decision (that
+  records a past call's adjudication, not a live-run intervention) and *not* witness
+  Decision (that confirms/refutes git evidence after the fact, not a controller actuator).
+
+- **WalkDecision (gardenbundle)** - one budgeted item's triage outcome from a garden
+  walk: a Disposition (act/review/defer), the ready command, and a reason. *Not*
+  DriveDecision (that picks the worst-first super-loop member to enter, not one issue's
+  handling) and *not* TierDecision (that joins a past dispatch tier to its witnessed
+  outcome, not a forward triage disposition).
+
 ---
 
 ## The render / materialize family
