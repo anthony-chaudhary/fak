@@ -121,6 +121,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s IQ3_XXS element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
 		return elems / qkK * blockIQ3XXSBytes, nil
+	case TensorQ2_0:
+		if elems%128 != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s Q2_0 element count %d is not a multiple of 128", t.Name, elems)
+		}
+		return elems / 128 * blockQ2_0Bytes, nil
 	default:
 		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
 	}
@@ -279,6 +284,11 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, err
 		}
 		dequantQ4_0(out, raw)
+	case TensorQ2_0:
+		if _, err := checkQuantPayload(t, elems, raw, 128, blockQ2_0Bytes, "Q2_0"); err != nil {
+			return nil, err
+		}
+		dequantQ2_0Scalar(out, raw)
 	case TensorQ4_1:
 		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_1Bytes, "Q4_1"); err != nil {
 			return nil, err
@@ -381,6 +391,17 @@ func checkQuantPayload(t TensorInfo, elems uint64, raw []byte, qk, blockBytes ui
 // nibble of byte j is element j, the high nibble is element j+qk4/2, and each code is
 // re-centered by -8 before scaling: y = (nibble-8)*d. This is the 4-bit sibling of
 // dequantQ5_0 with no 5th high bit.
+func dequantQ2_0Scalar(out []float32, raw []byte) {
+	for block, base := 0, 0; block < len(out)/128; block, base = block+1, base+blockQ2_0Bytes {
+		d := f16At(raw, base)
+		qs := raw[base+2 : base+blockQ2_0Bytes]
+		for j := 0; j < 128; j++ {
+			q := (qs[j/4] >> (2 * uint(j%4))) & 0x03
+			out[block*128+j] = float32(int(q)-1) * d
+		}
+	}
+}
+
 func dequantQ4_0(out []float32, raw []byte) {
 	dequantBlocks(out, raw, qk4, blockQ4_0Bytes, dequantQ4_0Scalar)
 }

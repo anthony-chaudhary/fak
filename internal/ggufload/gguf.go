@@ -46,6 +46,7 @@ const (
 	// iq3xxsGrid) followed by qkK/8 = 32 scale/sign bytes (one u32 per sub-block: top
 	// 4 bits = scale, low 28 bits = four 7-bit sign selectors). 98 bytes per super-block.
 	blockIQ3XXSBytes = 2 + 3*qkK/8
+	blockQ2_0Bytes   = 34 // 128 elements: f16 scale + 2-bit codes
 )
 
 // ValueType is the GGUF metadata value type tag (uint8/int32/string/array/... per the
@@ -91,6 +92,7 @@ const (
 	TensorIQ4_XS  TensorType = 23
 	TensorBF16    TensorType = 30
 	TensorMXFP4   TensorType = 39
+	TensorQ2_0    TensorType = 42
 )
 
 // Value is one decoded GGUF metadata value: its ValueType tag and the Go value it
@@ -149,6 +151,8 @@ func (t TensorType) String() string {
 		return "BF16"
 	case TensorMXFP4:
 		return "MXFP4"
+	case TensorQ2_0:
+		return "Q2_0"
 	default:
 		return fmt.Sprintf("TensorType(%d)", t)
 	}
