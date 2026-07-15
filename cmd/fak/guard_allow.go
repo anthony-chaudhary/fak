@@ -55,13 +55,76 @@ type guardAllowOverlay struct {
 	AllowPrefix []string `json:"allow_prefix,omitempty"`
 }
 
-// guardAllowOverlayPath resolves the overlay file: the env override wins, else the
-// repo-local default beside the guard audit journal's discovery root.
+type guardAllowOverlayLayer struct {
+	Name string
+	Path string
+}
+
+func guardAllowUserOverlayPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".fak", "guard", "allow.json")
+}
+
+// guardAllowOverlayPaths returns the effective ordered layers. An explicit env
+// override remains the sole layer for backward compatibility; otherwise the
+// per-user layer is unioned before the repo-local layer.
+func guardAllowOverlayPaths() []guardAllowOverlayLayer {
+	if p := strings.TrimSpace(os.Getenv(guardAllowOverlayEnv)); p != "" {
+		return []guardAllowOverlayLayer{{Name: "env", Path: p}}
+	}
+	layers := make([]guardAllowOverlayLayer, 0, 2)
+	if p := guardAllowUserOverlayPath(); p != "" {
+		layers = append(layers, guardAllowOverlayLayer{Name: "user", Path: p})
+	}
+	return append(layers, guardAllowOverlayLayer{Name: "repo", Path: filepath.Join(findRepoRoot("."), ".fak", "guard", "allow.json")})
+}
+
+// guardAllowOverlayPath is the default WRITE target: env override when set,
+// otherwise repo-local. Reads use guardAllowOverlayPaths.
 func guardAllowOverlayPath() string {
 	if p := strings.TrimSpace(os.Getenv(guardAllowOverlayEnv)); p != "" {
 		return p
 	}
 	return filepath.Join(findRepoRoot("."), ".fak", "guard", "allow.json")
+}
+
+func guardAllowWritePath(user bool) (string, error) {
+	if !user {
+		return guardAllowOverlayPath(), nil
+	}
+	p := guardAllowUserOverlayPath()
+	if p == "" {
+		return "", errors.New("user home directory is unavailable")
+	}
+	return p, nil
+}
+
+func guardAllowOverlayLayerPaths() []string {
+	layers := guardAllowOverlayPaths()
+	out := make([]string, 0, len(layers))
+	for _, layer := range layers {
+		out = append(out, layer.Path)
+	}
+	return out
+}
+
+func loadGuardAllowOverlayLayers() (guardAllowOverlay, []guardAllowOverlayLayer, error) {
+	merged := guardAllowOverlay{Version: guardAllowOverlayVersion}
+	layers := guardAllowOverlayPaths()
+	for _, layer := range layers {
+		ov, err := loadGuardAllowOverlay(layer.Path)
+		if err != nil {
+			return guardAllowOverlay{}, layers, err
+		}
+		merged.Allow = append(merged.Allow, ov.Allow...)
+		merged.AllowPrefix = append(merged.AllowPrefix, ov.AllowPrefix...)
+	}
+	merged.Allow = guardAllowNormalize(merged.Allow)
+	merged.AllowPrefix = guardAllowNormalize(merged.AllowPrefix)
+	return merged, layers, nil
 }
 
 // loadGuardAllowOverlay reads and validates the overlay. A MISSING file is not an
@@ -234,7 +297,8 @@ func guardAllowSubtract(in, remove []string) []string {
 func cmdGuardAllow(argv []string) {
 	fs := flag.NewFlagSet("guard allow", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, guardAllowUsage()) }
-	list := fs.Bool("list", false, "print the current operator allow overlay and its path, then exit")
+	list := fs.Bool("list", false, "print effective allow layers with per-layer provenance, then exit")
+	user := fs.Bool("user", false, "write the per-user home overlay instead of the repo-local overlay")
 	remove := fs.Bool("remove", false, "remove the named tool(s)/prefix(es) from the overlay instead of adding")
 	prefix := fs.Bool("prefix", false, "treat the positional args as allow_prefix entries (a tool-name PREFIX) rather than exact names")
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
@@ -243,7 +307,11 @@ func cmdGuardAllow(argv []string) {
 	addAll := fs.Bool("add-all", false, "with --from-journal / --from-claude-settings, add EVERY mappable entry found to the overlay in one step")
 	_ = fs.Parse(argv)
 
-	path := guardAllowOverlayPath()
+	path, err := guardAllowWritePath(*user)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard allow:", err)
+		os.Exit(1)
+	}
 	ov, err := loadGuardAllowOverlay(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak guard allow:", err)
@@ -256,7 +324,15 @@ func cmdGuardAllow(argv []string) {
 	case *fromClaudeSettings:
 		os.Exit(runGuardAllowFromClaudeSettings(os.Stdout, os.Stderr, path, &ov, fs.Args(), *addAll))
 	case *list:
-		printGuardAllowOverlay(os.Stdout, path, ov)
+		for _, layer := range guardAllowOverlayPaths() {
+			layerOverlay, layerErr := loadGuardAllowOverlay(layer.Path)
+			if layerErr != nil {
+				fmt.Fprintln(os.Stderr, "fak guard allow:", layerErr)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stdout, "[%s layer]\n", layer.Name)
+			printGuardAllowOverlay(os.Stdout, layer.Path, layerOverlay)
+		}
 	default:
 		names := guardAllowNormalize(fs.Args())
 		if len(names) == 0 {
@@ -395,7 +471,8 @@ func guardAllowUsage() string {
 		"  fak guard allow <tool>...              add exact tool name(s) to the always-allow overlay",
 		"  fak guard allow --prefix <prefix>...   add an allow_prefix (a tool-name PREFIX family) instead",
 		"  fak guard allow --remove <name>...     remove entr(ies) from the overlay",
-		"  fak guard allow --list                 print the current overlay and its path",
+		"  fak guard allow --list                 print effective user/repo layers and provenance",
+		"  fak guard allow --user <tool>...       write the per-user home layer instead of repo-local",
 		"  fak guard allow --from-journal         list what a guarded session BLOCKED + the command to allow each",
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
 		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",

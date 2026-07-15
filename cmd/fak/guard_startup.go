@@ -223,8 +223,7 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	// denies below stay intact — so an operator can re-admit a DEFAULT_DENY'd tool
 	// out-of-band from the agent without ever loosening the genuine-danger floor. A
 	// missing overlay is the common no-op; a malformed one fails loud (see guard_allow.go).
-	overlayPath := guardAllowOverlayPath()
-	allowOverlay, overlayErr := loadGuardAllowOverlay(overlayPath)
+	allowOverlay, _, overlayErr := loadGuardAllowOverlayLayers()
 	if overlayErr != nil {
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", overlayErr)
 		os.Exit(2)
@@ -251,7 +250,7 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 		_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", filepath.Join(os.TempDir(), "claude"))
 	}
 	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay, denyOverlay)
-	rt = protectGuardPolicyConfig(rt, overlayPath, denyPath, policyPath)
+	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, policyPath)...)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	dur = time.Since(tPolicy)
@@ -272,10 +271,9 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 	if err != nil {
 		return policy.Runtime{}, "", err
 	}
-	overlayPath := guardAllowOverlayPath()
 	denyPath := guardDenyOverlayPath()
 	overlayWarning := ""
-	if ov, ovErr := loadGuardAllowOverlay(overlayPath); ovErr == nil {
+	if ov, _, ovErr := loadGuardAllowOverlayLayers(); ovErr == nil {
 		guardApplyAllowOverlay(&rt, ov)
 	} else {
 		overlayWarning = "overlay_error: " + ovErr.Error()
@@ -287,7 +285,7 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 	} else {
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
-	rt = protectGuardPolicyConfig(rt, overlayPath, denyPath, "")
+	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath)...)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	// Audit parity with the --policy reload path (reloadPolicy): the security boundary was

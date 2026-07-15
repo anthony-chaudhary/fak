@@ -535,7 +535,7 @@ func guardEffectivePolicyDigest(policyBytes []byte, allow guardAllowOverlay, den
 }
 
 func guardCurrentEffectivePolicyDigest(policyBytes []byte) string {
-	allow, err := loadGuardAllowOverlay(guardAllowOverlayPath())
+	allow, _, err := loadGuardAllowOverlayLayers()
 	if err != nil {
 		allow = guardAllowOverlay{Version: guardAllowOverlayVersion}
 	}
