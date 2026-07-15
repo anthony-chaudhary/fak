@@ -219,3 +219,45 @@ func TestBenchFleetL4ServeUsesLiveDecodeRecipe(t *testing.T) {
 		}
 	}
 }
+
+func TestBenchFleetCatalogDoesNotRegressLastRun(t *testing.T) {
+	root := t.TempDir()
+	runDir := filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "node-a", "20260101T000000Z-bench-fleet-old")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"last_updated":"2026-01-02T00:00:00Z","machines":{"node-a":{"runs":1,"last_run":"20260102T000000Z"}},"runs":[{"run_id":"newer","machine_id":"node-a","timestamp":"20260102T000000Z"}]}`
+	catalogPath := filepath.Join(root, "experiments", "benchmark", "catalog.json")
+	if err := os.MkdirAll(filepath.Dir(catalogPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(catalogPath, []byte(catalog), 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := benchFleetRunManifest{Schema: "fak.benchmark.run.v1", RunID: "older", MachineID: "node-a", Timestamp: "20260101T000000Z"}
+	b, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "manifest.json"), b, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateBenchFleetCatalog(root); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Machines map[string]struct {
+			LastRun string `json:"last_run"`
+		} `json:"machines"`
+	}
+	out, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Machines["node-a"].LastRun != "20260102T000000Z" {
+		t.Fatalf("last_run regressed to %q", got.Machines["node-a"].LastRun)
+	}
+}

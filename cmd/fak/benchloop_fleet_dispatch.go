@@ -370,7 +370,10 @@ func updateBenchFleetCatalog(root string) error {
 		if machine := machines[m.MachineID]; machine != nil {
 			count, _ := machine["runs"].(float64)
 			machine["runs"] = int(count) + 1
-			machine["last_run"] = m.Timestamp
+			lastRun, _ := machine["last_run"].(string)
+			if m.Timestamp > lastRun {
+				machine["last_run"] = m.Timestamp
+			}
 		}
 	}
 	machinesJSON, err := json.Marshal(machines)
