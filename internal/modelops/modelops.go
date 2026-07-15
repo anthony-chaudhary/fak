@@ -43,23 +43,45 @@ type Observation struct {
 }
 
 type Input struct {
-	RequiredTier int           `json:"required_tier"`
-	Candidate    string        `json:"candidate"`
-	Policies     []Policy      `json:"policies"`
-	Observations []Observation `json:"observations"`
+	RequiredTier int                 `json:"required_tier"`
+	Candidate    string              `json:"candidate"`
+	Policies     []Policy            `json:"policies"`
+	Observations []Observation       `json:"observations"`
+	Outcomes     []InvocationOutcome `json:"outcomes,omitempty"`
+}
+
+type InvocationOutcome struct {
+	InvocationID string `json:"invocation_id"`
+	Model        string `json:"model"`
+	Action       Action `json:"action"`
+}
+
+type OutcomeCount struct {
+	Model    string `json:"model"`
+	Promote  int    `json:"promote"`
+	Rollback int    `json:"rollback"`
+	Hold     int    `json:"hold"`
+	Total    int    `json:"total"`
 }
 
 type Decision struct {
-	Schema       string   `json:"schema"`
-	Action       Action   `json:"action"`
-	Candidate    string   `json:"candidate"`
-	Selected     string   `json:"selected,omitempty"`
-	RequiredTier int      `json:"required_tier"`
-	Reasons      []string `json:"reasons"`
+	Schema        string         `json:"schema"`
+	Action        Action         `json:"action"`
+	Candidate     string         `json:"candidate"`
+	Selected      string         `json:"selected,omitempty"`
+	RequiredTier  int            `json:"required_tier"`
+	Reasons       []string       `json:"reasons"`
+	OutcomeCounts []OutcomeCount `json:"outcome_counts,omitempty"`
 }
 
 func Evaluate(in Input) Decision {
 	out := Decision{Schema: Schema, Action: Hold, Candidate: in.Candidate, RequiredTier: in.RequiredTier}
+	outcomeCounts, outcomeReasons := FoldOutcomes(in.Outcomes)
+	out.OutcomeCounts = outcomeCounts
+	if len(outcomeReasons) > 0 {
+		out.Reasons = outcomeReasons
+		return out
+	}
 	policies, observations, reasons := index(in)
 	if len(reasons) > 0 {
 		out.Reasons = reasons
@@ -171,6 +193,54 @@ func index(in Input) (map[string]Policy, map[string]Observation, []string) {
 	}
 	sort.Strings(reasons)
 	return policies, observations, reasons
+}
+
+func FoldOutcomes(outcomes []InvocationOutcome) ([]OutcomeCount, []string) {
+	byModel := make(map[string]*OutcomeCount)
+	seen := make(map[string]InvocationOutcome)
+	var reasons []string
+	for _, outcome := range outcomes {
+		if outcome.InvocationID == "" {
+			reasons = append(reasons, "outcome invocation_id is required")
+			continue
+		}
+		if prior, ok := seen[outcome.InvocationID]; ok {
+			if prior != outcome {
+				reasons = append(reasons, "conflicting outcome invocation_id: "+outcome.InvocationID)
+			}
+			continue
+		}
+		seen[outcome.InvocationID] = outcome
+		if outcome.Model == "" {
+			reasons = append(reasons, "outcome "+outcome.InvocationID+": model is required")
+			continue
+		}
+		count := byModel[outcome.Model]
+		if count == nil {
+			count = &OutcomeCount{Model: outcome.Model}
+			byModel[outcome.Model] = count
+		}
+		switch outcome.Action {
+		case Promote:
+			count.Promote++
+		case Rollback:
+			count.Rollback++
+		case Hold:
+			count.Hold++
+		}
+		count.Total++
+	}
+	models := make([]string, 0, len(byModel))
+	for model := range byModel {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	counts := make([]OutcomeCount, 0, len(models))
+	for _, model := range models {
+		counts = append(counts, *byModel[model])
+	}
+	sort.Strings(reasons)
+	return counts, reasons
 }
 
 func validRate(v float64) bool { return v >= 0 && v <= 1 }

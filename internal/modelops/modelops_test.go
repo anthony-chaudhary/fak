@@ -1,6 +1,8 @@
 package modelops
 
 import (
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -113,5 +115,35 @@ func TestEvaluateRejectsInvalidThresholdsAndObservations(t *testing.T) {
 				t.Fatalf("decision = %+v, want validation HOLD containing %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEvaluateFoldsExactModelInvocationOutcomes(t *testing.T) {
+	in := topThreeInput(opus, 1)
+	in.Outcomes = []InvocationOutcome{
+		{InvocationID: "run-001", Model: "claude-opus-4-8", Action: Rollback},
+		{InvocationID: "run-002", Model: "claude-opus-4-8", Action: Hold},
+		{InvocationID: "run-003", Model: "claude-sonnet-4-6", Action: Promote},
+		{InvocationID: "run-003", Model: "claude-sonnet-4-6", Action: Promote}, // idempotent replay
+	}
+	got := Evaluate(in)
+	want := []OutcomeCount{
+		{Model: "claude-opus-4-8", Rollback: 1, Hold: 1, Total: 2},
+		{Model: "claude-sonnet-4-6", Promote: 1, Total: 1},
+	}
+	if !reflect.DeepEqual(got.OutcomeCounts, want) {
+		t.Fatalf("outcome counts = %#v, want %#v", got.OutcomeCounts, want)
+	}
+}
+
+func TestEvaluateHoldsOnConflictingOutcomeReplay(t *testing.T) {
+	in := topThreeInput(opus, 1)
+	in.Outcomes = []InvocationOutcome{
+		{InvocationID: "run-001", Model: "claude-opus-4-8", Action: Promote},
+		{InvocationID: "run-001", Model: "claude-opus-4-8", Action: Rollback},
+	}
+	got := Evaluate(in)
+	if got.Action != Hold || !slices.Contains(got.Reasons, "conflicting outcome invocation_id: run-001") {
+		t.Fatalf("decision = %+v, want fail-closed conflicting replay", got)
 	}
 }

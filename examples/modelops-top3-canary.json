@@ -10,5 +10,11 @@
     {"model":"claude-opus-4-8","samples":30,"success_rate":0.50,"provider_error_rate":0.01,"invalid_tool_rate":0,"p95_latency_ms":4000,"throttle_rate":0.01,"fallback_rate":0.02},
     {"model":"claude-sonnet-4-6","samples":30,"success_rate":0.98,"provider_error_rate":0.01,"invalid_tool_rate":0,"p95_latency_ms":4000,"throttle_rate":0.01,"fallback_rate":0.02},
     {"model":"claude-haiku-4-5-20251001","samples":30,"success_rate":0.98,"provider_error_rate":0.01,"invalid_tool_rate":0,"p95_latency_ms":4000,"throttle_rate":0.01,"fallback_rate":0.02}
+  ],
+  "outcomes": [
+    {"invocation_id":"canary-20260715-001","model":"claude-opus-4-8","action":"ROLLBACK"},
+    {"invocation_id":"canary-20260715-002","model":"claude-opus-4-8","action":"HOLD"},
+    {"invocation_id":"canary-20260715-003","model":"claude-sonnet-4-6","action":"PROMOTE"},
+    {"invocation_id":"canary-20260715-004","model":"claude-sonnet-4-6","action":"PROMOTE"}
   ]
 }
