@@ -227,6 +227,30 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 	return e.sched
 }
 
+// SetKVPreemptionPolicy reconfigures this engine's live native scheduler. If the
+// scheduler has not started yet, this initializes the env-backed scheduler first.
+func (e *Engine) SetKVPreemptionPolicy(p NativePreemptionPolicy) {
+	e.nativeScheduler().SetKVPreemptionPolicy(p)
+}
+
+// SetMaxRunning reconfigures this engine's live native scheduler concurrency cap.
+// n <= 0 restores the scheduler's unbounded default.
+func (e *Engine) SetMaxRunning(n int) { e.nativeScheduler().SetMaxRunning(n) }
+
+// KVPreemptionStats reads this engine's live preemption state.
+func (e *Engine) KVPreemptionStats() NativePreemptionStats {
+	return e.nativeScheduler().KVPreemptionStats()
+}
+
+// SetKVPreemptionPolicy updates the package Default engine.
+func SetKVPreemptionPolicy(p NativePreemptionPolicy) { Default.SetKVPreemptionPolicy(p) }
+
+// SetMaxRunning updates the package Default engine.
+func SetMaxRunning(n int) { Default.SetMaxRunning(n) }
+
+// KVPreemptionStats reads the package Default engine's live preemption state.
+func KVPreemptionStats() NativePreemptionStats { return Default.KVPreemptionStats() }
+
 func nativeMaxRunningFromEnv() int {
 	raw := os.Getenv("FAK_NATIVE_MAX_RUNNING")
 	if raw == "" {

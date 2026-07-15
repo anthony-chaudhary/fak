@@ -83,6 +83,7 @@ func (s *NativeScheduler) SetMaxRunning(n int) {
 	s.mu.Lock()
 	s.maxRunning = n
 	s.mu.Unlock()
+	s.signal()
 }
 
 // MaxObservedRunning reports the peak running-set size the loop reached — the witness
