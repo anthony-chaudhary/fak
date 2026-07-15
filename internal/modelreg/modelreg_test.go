@@ -163,20 +163,14 @@ func TestCodingAliasesResolveAndAreFlagged(t *testing.T) {
 	}
 }
 
-// TestNarratorAliasResolvesAndIsNotCoding pins the qwen3.6-27b narrator alias: the
-// weekly-report narrator's "stronger model" on the CPU-only lane must resolve by its short
-// name to a concrete single-file hf:// GGUF, and must NOT be flagged coding — it is a dense
-// hybrid reasoning/chat model, not a Coder-tuned tool-call model, so the `fak ls` coding
-// column stays discriminating.
-func TestNarratorAliasResolvesAndIsNotCoding(t *testing.T) {
+// TestNarratorAliasFailsClosed pins the Qwen3.6 narrator contract after its
+// downloadable source was independently witnessed returning HTTP 404.
+func TestNarratorAliasFailsClosed(t *testing.T) {
 	withCacheRoot(t)
 	const alias = "qwen3.6-27b"
 	got, expanded := Resolve(alias)
-	if !expanded {
-		t.Fatalf("Resolve(%q) did not expand; got %q", alias, got)
-	}
-	if want := Catalog[alias]; got != want || want == "" {
-		t.Fatalf("Resolve(%q) = %q; want embedded target %q", alias, got, want)
+	if expanded || got != alias {
+		t.Fatalf("Resolve(%q) = %q, %v; want unresolved alias", alias, got, expanded)
 	}
 	if IsCoding(alias) {
 		t.Errorf("IsCoding(%q) = true; the narrator reasoning model must not be flagged coding", alias)
@@ -258,6 +252,23 @@ func TestResolveNormalizesDashesToColons(t *testing.T) {
 	if !expanded || got != Catalog["qwen2.5:1.5b"] {
 		t.Errorf("Resolve(qwen2.5:1.5b) = (%q, %v); want expanded to embedded target",
 			got, expanded)
+	}
+}
+
+func TestQwen36AliasFailsClosedWithExactStagingContract(t *testing.T) {
+	if got, ok := Resolve("qwen3.6-27b"); ok || got != "qwen3.6-27b" {
+		t.Fatalf("Resolve(qwen3.6-27b) = %q, %v; want unresolved alias", got, ok)
+	}
+
+	got, ok := Blocked(" QWEN3.6-27B ")
+	if !ok {
+		t.Fatal("qwen3.6-27b missing fail-closed contract")
+	}
+	if got.Filename != "Qwen3.6-27B-Q4_K_M.gguf" || got.Bytes != 16547398784 || got.SHA256 != "33625d8dc3a5dd8d88c324d47db58561b11f7072816287078bfe58b4c55782f9" {
+		t.Fatalf("Blocked(qwen3.6-27b) = %+v; want exact pinned artifact", got)
+	}
+	if got.Reason == "" {
+		t.Fatal("blocked source must explain why the registry refuses it")
 	}
 }
 

@@ -40,6 +40,24 @@ import (
 // `fak pull <name>` without auth. Re-verify with a HEAD on the resolve URL if you add
 // one; HF returns 401 (not 404) for a nonexistent repo, so a typo'd repo path silently
 // looks like an auth wall.
+// BlockedSource describes a model alias whose former downloadable mapping is
+// known to be unusable. Callers must fail closed rather than guess a replacement.
+type BlockedSource struct {
+	Filename string
+	Bytes    int64
+	SHA256   string
+	Reason   string
+}
+
+var blockedSources = map[string]BlockedSource{
+	"qwen3.6-27b": {
+		Filename: "Qwen3.6-27B-Q4_K_M.gguf",
+		Bytes:    16547398784,
+		SHA256:   "33625d8dc3a5dd8d88c324d47db58561b11f7072816287078bfe58b4c55782f9",
+		Reason:   "the registry source is known stale (HTTP 404)",
+	},
+}
+
 var Catalog = map[string]string{
 	// SmolLM2-135M-Instruct — the smallest "it actually chats" GGUF, ideal for
 	// `fak run smollm2 "hi"` on a laptop with no GPU. bartowski is the canonical
@@ -61,7 +79,6 @@ var Catalog = map[string]string{
 	// REASONING model (emits <think>…</think> before the answer); any consumer that
 	// injects/posts its output must strip the think-trace first (see the confluence
 	// weekly-report summarizer's run_fak_summary).
-	"qwen3.6-27b": "hf://bartowski/Qwen_Qwen3.6-27B-GGUF/Qwen_Qwen3.6-27B-Q4_K_M.gguf",
 	// Qwen2.5-Coder instruct GGUFs — the CODING-tuned, TOOL-CALL-capable tier the
 	// `fak guard --local`/`--gguf` coding loop wants (#1058, epic #1056). They emit the
 	// Qwen2.5 == Hermes `<tool_call>` dialect the in-kernel planner already lifts into
@@ -257,6 +274,12 @@ func (r *Registry) lookup(name string) (Entry, bool) {
 	}
 	e, ok := r.entries[name]
 	return e, ok
+}
+
+// Blocked resolves a friendly alias to a fail-closed staging contract.
+func Blocked(name string) (BlockedSource, bool) {
+	b, ok := blockedSources[strings.ToLower(strings.TrimSpace(name))]
+	return b, ok
 }
 
 // Resolve is the package-level convenience over a freshly loaded registry, for the

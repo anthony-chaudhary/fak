@@ -136,7 +136,20 @@ func cmdModelLoad(args []string) {
 // already a local path, otherwise downloads the hf:// URI and prints the resulting local path.
 // label names the command in messages ("pull" / "model load"); notFoundExit is the exit code
 // used when the ref is neither an hf:// URI nor an existing path.
+func blockedModelMessage(arg, label string) (string, bool) {
+	blocked, ok := modelreg.Blocked(arg)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("fak %s: model %q is unavailable: %s; stage a provenance-verified %s (%d bytes, sha256 %s) and pass its local path directly",
+		label, arg, blocked.Reason, blocked.Filename, blocked.Bytes, blocked.SHA256), true
+}
+
 func resolveAndFetchModelRef(arg, label string, notFoundExit int) {
+	if message, blocked := blockedModelMessage(arg, label); blocked {
+		fmt.Fprintln(os.Stderr, message)
+		os.Exit(1)
+	}
 	ref, expanded := modelreg.Resolve(arg)
 	if expanded {
 		fmt.Fprintf(os.Stderr, "fak %s: %s → %s\n", label, arg, ref)
