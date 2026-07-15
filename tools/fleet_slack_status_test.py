@@ -131,8 +131,8 @@ class RollupTextTest(unittest.TestCase):
         self.assertIn("capacity trend: usable 3→1", text)
         self.assertIn("status: issue work needs operator", text)
         self.assertIn("sessions need attention", text)
-        self.assertIn("returned no output", text)
-        self.assertIn("ticket closes below target", text)
+        self.assertIn("no output in", text)
+        self.assertIn("Raise close rate", text)
         self.assertNotIn("READY_TO_GROW (ACTION)", text)
         self.assertNotIn("majority-stub", text)
         self.assertNotIn("BELOW_TARGET", text)
@@ -296,7 +296,7 @@ class RollupTextTest(unittest.TestCase):
 
         self.assertEqual(
             mod._operator_action("claude majority-stub (10/17 recent logs); inspect backend output"),
-            "claude returned no output in 10/17 recent logs; inspect logs before adding capacity",
+            "Inspect claude backend logs (no output in 10/17 recent logs) before adding capacity",
         )
         self.assertEqual(
             mod._operator_handled(
@@ -307,7 +307,7 @@ class RollupTextTest(unittest.TestCase):
         self.assertEqual(
             mod._operator_action(
                 "worker/lease orphans: clean=0, orphan-process=0, orphan-lease=1"),
-            "cleanup needed: 1 stale lease; inspect dispatch status before launching more",
+            "Clean up 1 stale lease (inspect dispatch status before launching more)",
         )
 
     def test_rollup_dedupes_account_login_actions(self):
@@ -336,7 +336,7 @@ class RollupTextTest(unittest.TestCase):
 
         text = mod.rollup_text(dispatch_payload, fleet_snap)
 
-        self.assertIn("login failed for gem7-netra", text)
+        self.assertIn("Re-login seat(s) gem7-netra", text)
         self.assertNotIn("agent sessions: login gem7-netra", text)
 
     def test_rollup_rewords_session_status_codes(self):
@@ -363,16 +363,43 @@ class RollupTextTest(unittest.TestCase):
         self.assertIn("\n• ", text)
         self.assertNotIn("operator moves: none", text)
 
-    def test_section_lines_inline_vs_block(self):
+    def test_section_lines_full_enumeration_no_dead_pointer(self):
         mod = load()
         # 0 items -> nothing; 1 -> plain inline (keeps the label: value adjacency);
-        # >=2 -> bold header + bullets, overflow past the limit collapses to '+N more'.
-        self.assertEqual(mod._section_lines("being handled", [], limit=3), [])
-        self.assertEqual(mod._section_lines("being handled", ["  ", "only one"], limit=3),
+        # >=2 -> bold header + one bullet per item. EVERY item renders: a '+N more'
+        # overflow is a dead pointer in a single-message roll-up (no thread to expand
+        # into), so the tail is never hidden behind a count (#4654).
+        self.assertEqual(mod._section_lines("being handled", []), [])
+        self.assertEqual(mod._section_lines("being handled", ["  ", "only one"]),
                          ["being handled: only one"])
         self.assertEqual(
-            mod._section_lines("operator moves", ["a", "b", "c"], limit=2),
-            ["*operator moves:*", "• a", "• b", "• +1 more"])
+            mod._section_lines("operator moves", ["a", "b", "c"]),
+            ["*operator moves:*", "• a", "• b", "• c"])
+        # However long the list, no dead overflow marker is ever emitted.
+        out = mod._section_lines("operator moves", [f"m{i}" for i in range(9)])
+        self.assertEqual(len(out), 10)  # header + 9 bullets
+        self.assertFalse(any("more" in line for line in out))
+
+    def test_operator_moves_lead_with_a_verb(self):
+        mod = load()
+        # DC1: each human move is one bullet beginning with a concrete imperative verb
+        # and carrying its reason/state. Every _operator_action rewording and the
+        # low-yield aggregate lead with a verb.
+        cases = {
+            "auth_failed=1 [gem7-netra]; next action: run `fak accounts status` "
+            "and re-login or remove the named seat(s)": "Re-login",
+            "claude majority-stub (10/17 recent logs); inspect backend output": "Inspect",
+            "claude guard hooks unbound (2 workers); workers ran unhooked": "Restart",
+            "throughput BELOW_TARGET: 0.4 vs target 0.7": "Raise",
+            "worker/lease orphans: clean=0, orphan-process=0, orphan-lease=1": "Clean up",
+        }
+        for row, verb in cases.items():
+            self.assertTrue(mod._operator_action(row).startswith(verb),
+                            f"{row!r} -> {mod._operator_action(row)!r} (want verb {verb!r})")
+        low, _ = mod._aggregate_low_yield([
+            "lane docs low-yield: 52 turns / 4 session(s), "
+            "0 ancestry-closes; re-scope or exclude the lane"])
+        self.assertTrue(low.startswith("Re-scope or drop"), low)
 
     def test_rollup_aggregates_low_yield_lanes(self):
         mod = load()

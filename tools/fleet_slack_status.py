@@ -428,30 +428,30 @@ def _strip_prefix(line: str, prefix: str) -> str:
     return line[len(prefix):].strip() if line.startswith(prefix) else line
 
 
-def _limited_join(rows: list[str], *, limit: int = 3) -> str:
-    kept = [r for r in rows if str(r).strip()][:limit]
-    if len(rows) > limit:
-        kept.append(f"+{len(rows) - limit} more")
-    return "; ".join(kept)
+def _limited_join(rows: list[str]) -> str:
+    """Join non-empty rows with ``; ``. Every row is shown: a truncated ``+N more`` is a
+    dead pointer in a single-message roll-up — there is no thread to expand it into — so
+    the tail is never hidden behind a count (#4654)."""
+    return "; ".join(str(r).strip() for r in rows if str(r).strip())
 
 
-def _section_lines(label: str, items: list[str], *, limit: int) -> list[str]:
+def _section_lines(label: str, items: list[str]) -> list[str]:
     """Render one operator section as scannable lines instead of a ``;``-joined
     run-on. 0 items → nothing; exactly 1 → a plain inline ``label: item`` line (keeps
     quiet states compact and the ``label: value`` adjacency the tests pin); 2+ → a bold
     ``*label:*`` header followed by one ``• item`` bullet per line, so a phone reader
-    scans a list rather than a wall. Overflow past ``limit`` collapses to a trailing
-    ``• +N more`` bullet."""
+    scans a list rather than a wall.
+
+    EVERY item is rendered — no ``• +N more`` overflow. The roll-up posts one Slack
+    message with no thread to expand into, so a truncated tail would point nowhere; an
+    operator's checklist has to show every move, not hide the last few behind a dead
+    count (#4654)."""
     clean = [str(i).strip() for i in items if str(i).strip()]
     if not clean:
         return []
     if len(clean) == 1:
         return [f"{label}: {clean[0]}"]
-    kept = clean[:limit]
-    bullets = [f"• {c}" for c in kept]
-    if len(clean) > limit:
-        bullets.append(f"• +{len(clean) - limit} more")
-    return [f"*{label}:*"] + bullets
+    return [f"*{label}:*"] + [f"• {c}" for c in clean]
 
 
 # The per-lane low-yield action row (dispatch_status emits one, verbatim, per lane):
@@ -478,8 +478,8 @@ def _aggregate_low_yield(rows: list[str]) -> tuple[str, list[str]]:
     if not lanes:
         return "", rows
     bits = ", ".join(f"{lane} {turns}t/{sess}s" for lane, turns, sess in lanes)
-    line = (f"{len(lanes)} low-yield lane(s) burning turns with nothing closed: "
-            f"{bits}; re-scope or drop them")
+    line = (f"Re-scope or drop {len(lanes)} low-yield lane(s) "
+            f"(burning turns, nothing closed): {bits}")
     return line, rest
 
 
@@ -522,18 +522,19 @@ def _operator_action(row: str) -> str:
         r"^auth_failed=\d+ \[([^\]]+)\]; next action: run `fak accounts status` "
         r"and re-login or remove the named seat\(s\)$", row)
     if m:
-        return f"login failed for {m.group(1)}; run `fak accounts status`, then re-login/remove it"
+        return (f"Re-login seat(s) {m.group(1)} (login failed); "
+                f"run `fak accounts status`, or remove them")
     m = re.match(r"^([A-Za-z0-9_.-]+) majority-stub \(([^)]+)\); inspect backend output$", row)
     if m:
         product = m.group(1)
-        return f"{product} returned no output in {m.group(2)}; inspect logs before adding capacity"
+        return f"Inspect {product} backend logs (no output in {m.group(2)}) before adding capacity"
     m = re.match(
         r"^([A-Za-z0-9_.-]+) guard hooks unbound \(([^)]+)\); workers ran unhooked$", row)
     if m:
-        return f"{m.group(1)} guard not attached ({m.group(2)}); restart before trusting them"
+        return f"Restart {m.group(1)} (guard unbound in {m.group(2)}, workers ran unhooked)"
     m = re.match(r"^throughput BELOW_TARGET: ([^ ]+) vs target ([^ ]+)$", row)
     if m:
-        return f"ticket closes below target: {m.group(1)} vs {m.group(2)}"
+        return f"Raise close rate ({m.group(1)} vs target {m.group(2)})"
     m = re.match(
         r"^worker/lease orphans: clean=([0-9]+), orphan-process=([0-9]+), orphan-lease=([0-9]+)$",
         row,
@@ -547,7 +548,7 @@ def _operator_action(row: str) -> str:
         if ol:
             bits.append(f"{ol} stale lease" + ("" if ol == 1 else "s"))
         what = ", ".join(bits) if bits else "stale worker state"
-        return f"cleanup needed: {what}; inspect dispatch status before launching more"
+        return f"Clean up {what} (inspect dispatch status before launching more)"
     return row
 
 
@@ -814,7 +815,7 @@ def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
     try:
         joined = fleet_top._join_attention(items)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
-        joined = _limited_join([str(i.get("title") or i) for i in items], limit=2)
+        joined = _limited_join([str(i.get("title") or i) for i in items])
     # A too-long resume command is inlined by fleet_top as a wordy "command omitted…"
     # clause; trim the prose to a terse pointer so it stops jumbling the attention line.
     joined = joined.replace(
@@ -869,7 +870,9 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
                 if not (i.get("kind") == "login" and str(i.get("tag") or "") in dispatch_login_tags)
             ]
         healing = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_SELF_HEALING]
-        line = _attention_line("agent sessions", escalate)
+        # Escalations are an operator move → verb-first ("Check ..."); self-healing is
+        # supporting context in "being handled" → the plain noun prefix reads fine there.
+        line = _attention_line("Check agent sessions", escalate)
         if line:
             needs.append(line)
         line = _attention_line("agent sessions", healing)
@@ -884,14 +887,14 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
         f"status: issue work {_dispatch_state(dispatch_payload)}; sessions {_fleet_state(fleet_snap)}",
     ]
     if needs:
-        lines.extend(_section_lines("operator moves", needs, limit=4))
+        lines.extend(_section_lines("operator moves", needs))
     else:
         lines.append("operator moves: none")
     lines.append(_issue_work_line(dispatch_payload))
     lines.append(_session_line(fleet_snap))
     lines.extend(_trend_lines(dispatch_payload, fleet_snap))
-    lines.extend(_section_lines("being handled", handled, limit=3))
-    lines.extend(_section_lines("waiting", waiting, limit=2))
+    lines.extend(_section_lines("being handled", handled))
+    lines.extend(_section_lines("waiting", waiting))
     return "\n".join(line for line in lines if line)
 
 
