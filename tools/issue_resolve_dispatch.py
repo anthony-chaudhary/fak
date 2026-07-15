@@ -265,6 +265,7 @@ BACKENDS = ("claude", "opencode", "codex")
 _BACKEND_PRODUCT = {"claude": "claude", "opencode": "opencode", "codex": "codex"}
 OPENCODE_PROMPT_NOTICE = "Resolve GitHub issue # from the attached dispatch prompt."
 OPENCODE_PROMPT_FILE_SUFFIX = ".prompt.txt"
+CLAUDE_PROMPT_FILE_SUFFIX = ".prompt.txt"
 
 # Operator directive: claude issue-resolution workers run Opus 4.8 at xhigh
 # reasoning effort. Pinned here (not read from the per-account settings.json
@@ -1847,7 +1848,8 @@ def build_worker_command(backend: str, prompt: str, model: str | None,
             cmd += ["--settings", tier_launch.ULTRACODE_SETTINGS_ARG]
         elif effort:
             cmd += ["--effort", effort]  # reasoning effort; no settings.json field
-        cmd.append(prompt)
+        # Detached Claude workers receive the prompt on stdin in spawn_issue_worker.
+        # Keeping it out of argv avoids Windows CreateProcess's command-line limit.
         return cmd
     if backend == "opencode":
         # Keep the full dispatch prompt out of argv. The live spawn path writes it
@@ -2220,6 +2222,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"{log_prefix}-{issue}-{stamp}.log"
     prompt_file: Path | None = None
+    prompt_stdin = None
     if backend == "opencode":
         if prompt_payload is None:
             raise ValueError("opencode worker spawn requires prompt_payload")
@@ -2227,6 +2230,10 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
         prompt_file.write_text(prompt_payload, encoding="utf-8")
         command = resolve_opencode_command(
             attach_opencode_prompt_file(command, prompt_file))
+    elif backend == "claude" and prompt_payload is not None:
+        prompt_file = out_log.with_suffix(CLAUDE_PROMPT_FILE_SUFFIX)
+        prompt_file.write_text(prompt_payload, encoding="utf-8")
+        prompt_stdin = open(prompt_file, "r", encoding="utf-8")
     exe = resolve_worker_executable(backend, command[0])
     argv = [exe, *command[1:]]
     if membership is not None:
@@ -2246,9 +2253,12 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
         fh.write("# fak-spawn %s issue=%s lane=%s backend=%s argv0=%s\n" % (
             stamp, issue, lane, backend, os.path.basename(exe)))
         fh.flush()
-        proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+        proc = subprocess.Popen(argv, cwd=str(cwd), env=env,
+                                stdin=prompt_stdin if prompt_stdin is not None else subprocess.DEVNULL,
                                 stdout=fh, stderr=subprocess.STDOUT, **kwargs)
     finally:
+        if prompt_stdin is not None:
+            prompt_stdin.close()
         fh.close()
     (out_log.with_suffix(".pid")).write_text(str(proc.pid), encoding="utf-8")
     # Per-worker backend sidecar: makes each run's backend traceable from disk,
@@ -4395,7 +4405,7 @@ def _maybe_dispatch_contract_repair(
     spawned = spawn_issue_worker(command, env, root, runs_dir, rec["issues"][0],
                                  REPAIR_LANE, backend, account=acct,
                                  spawn_probe_s=spawn_probe_s, log_prefix="repair",
-                                 prompt_payload=rec["prompt"] if backend == "opencode" else None)
+                                 prompt_payload=rec["prompt"] if backend in ("claude", "opencode") else None)
     try:
         Path(str(spawned.get("log") or "")).with_suffix(
             REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(nums, encoding="utf-8")
@@ -5667,7 +5677,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
                                  account=acct, lease=lease, base_sha=base_sha,
                                  spawn_probe_s=spawn_probe_s,
-                                 prompt_payload=rec["prompt"] if backend == "opencode" else None)
+                                 prompt_payload=rec["prompt"] if backend in ("claude", "opencode") else None)
     early = spawned.get("early_exit") or {}
     if early.get("checked") and not early.get("alive"):
         if lease.get("acquired"):

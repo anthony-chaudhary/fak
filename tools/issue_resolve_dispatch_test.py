@@ -2312,14 +2312,14 @@ class BuildWorkerCommandTest(unittest.TestCase):
         mod = load()
         self.assertEqual(
             mod.build_worker_command("claude", "PROMPT", None),
-            ["claude", "-p", "--permission-mode", "bypassPermissions", "PROMPT"])
+            ["claude", "-p", "--permission-mode", "bypassPermissions"])
 
     def test_claude_command_pins_model_and_effort(self) -> None:
         mod = load()
         self.assertEqual(
             mod.build_worker_command("claude", "PROMPT", "claude-opus-4-8", "xhigh"),
             ["claude", "-p", "--permission-mode", "bypassPermissions",
-             "--model", "claude-opus-4-8", "--effort", "xhigh", "PROMPT"])
+             "--model", "claude-opus-4-8", "--effort", "xhigh"])
 
     def test_claude_command_effort_only_when_model_absent(self) -> None:
         # A model-less claude worker still carries its reasoning effort flag.
@@ -2327,7 +2327,7 @@ class BuildWorkerCommandTest(unittest.TestCase):
         self.assertEqual(
             mod.build_worker_command("claude", "PROMPT", None, "xhigh"),
             ["claude", "-p", "--permission-mode", "bypassPermissions",
-             "--effort", "xhigh", "PROMPT"])
+             "--effort", "xhigh"])
 
     def test_worker_model_effort_pins_claude_to_opus48_xhigh(self) -> None:
         # A cloud claude account is pinned to Opus 4.8 xhigh regardless of the
@@ -3571,6 +3571,32 @@ class WaveMembershipTest(unittest.TestCase):
             self.assertNotIn(full_prompt, argv)
             prompt_file = Path(res["prompt_file"])
             self.assertEqual(prompt_file.read_text(encoding="utf-8"), full_prompt)
+
+    def test_claude_long_prompt_is_streamed_via_stdin_file(self) -> None:
+        mod = load()
+        captured = {}
+        full_prompt = "resolve #4779 " + ("x" * 40000)
+
+        class _FakePopen:
+            pid = 1234
+            def __init__(self, argv, **kwargs):
+                captured["argv"] = argv
+                captured["stdin_text"] = kwargs["stdin"].read()
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+            runs = Path(d)
+            command = mod.build_worker_command("claude", full_prompt, None)
+            res = mod.spawn_issue_worker(
+                command, {}, runs, runs, issue=4779, lane="tools",
+                backend="claude", prompt_payload=full_prompt)
+            prompt_copy = Path(res["prompt_file"]).read_text(encoding="utf-8")
+
+        self.assertNotIn(full_prompt, captured["argv"])
+        self.assertEqual(captured["stdin_text"], full_prompt)
+        self.assertEqual(prompt_copy, full_prompt)
 
     def test_spawn_without_membership_writes_no_wave_sidecar(self) -> None:
         # The default single-worker path is unchanged: no membership -> no .wave file.
