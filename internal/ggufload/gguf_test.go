@@ -305,6 +305,11 @@ func TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward(t *testing.T) 
 	convHF := scaledSequenceF32ForTest(900, 64*4)
 	outHF := scaledSequenceF32ForTest(1000, 32*32)
 	aLogHF := []float32{0, 0.25, 0.5, 0.75}
+	aLogLoaded := make([]float32, len(aLogHF))
+	for i, v := range aLogHF {
+		decay := -float32(math.Exp(float64(v)))
+		aLogLoaded[i] = float32(math.Log(float64(-decay)))
+	}
 	dtHF := []float32{0.1, 0.2, 0.3, 0.4}
 	if err := os.WriteFile(path, tinyQwen35HybridGGUF(t, qHF, kHF), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -346,7 +351,7 @@ func TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward(t *testing.T) 
 	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.in_proj_b.weight", []int{4, 32}, bHF)
 	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.conv1d.weight", []int{64, 4}, convHF)
 	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.out_proj.weight", []int{32, 32}, outHF)
-	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.A_log", []int{4}, aLogHF)
+	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.A_log", []int{4}, aLogLoaded)
 	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.dt_bias", []int{4}, dtHF)
 	assertModelTensorForTest(t, byName, "model.layers.0.linear_attn.norm.weight", []int{8}, onesF32ForTest(8))
 	assertModelTensorForTest(t, byName, "model.layers.3.self_attn.q_proj.weight", []int{64, 32}, qHF)
@@ -907,7 +912,11 @@ func tinyQwen35HybridGGUF(t *testing.T, qHF, kHF []float32) []byte {
 		add(p+"ffn_gate.weight", []uint64{H, I}, nil)
 		add(p+"ffn_up.weight", []uint64{H, I}, nil)
 		add(p+"post_attention_norm.weight", []uint64{H}, onesF32ForTest(H))
-		add(p+"ssm_a", []uint64{linValueHeads}, interleaveQwen35ValueRowsForTest(aLogHF, linKeyHeads, linValueHeads, 1, 1))
+		decayGGUF := make([]float32, len(aLogHF))
+		for i, v := range aLogHF {
+			decayGGUF[i] = -float32(math.Exp(float64(v)))
+		}
+		add(p+"ssm_a", []uint64{linValueHeads}, interleaveQwen35ValueRowsForTest(decayGGUF, linKeyHeads, linValueHeads, 1, 1))
 		add(p+"ssm_alpha.weight", []uint64{H, linValueHeads}, interleaveQwen35ValueRowsForTest(aHF, linKeyHeads, linValueHeads, 1, H))
 		add(p+"ssm_beta.weight", []uint64{H, linValueHeads}, interleaveQwen35ValueRowsForTest(bHF, linKeyHeads, linValueHeads, 1, H))
 		add(p+"ssm_conv1d.weight", []uint64{4, convDim}, interleaveQwen35QKVRowsForTest(convHF, linKeyDim, linKeyHeads, linValueHeads, linHeadDim, 4))

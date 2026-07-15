@@ -102,8 +102,23 @@ func normalizeQwen35LinearTensor(name string, src []float32, cfg model.Config) (
 	case strings.HasSuffix(name, ".linear_attn.out_proj.weight"):
 		out, err := reorderQwen35InterleavedValueCols(name, src, cfg.HiddenSize, nK, nV, vHd)
 		return out, true, err
-	case strings.HasSuffix(name, ".linear_attn.A_log"),
-		strings.HasSuffix(name, ".linear_attn.dt_bias"):
+	case strings.HasSuffix(name, ".linear_attn.A_log"):
+		out, err := reorderQwen35InterleavedValueVector(name, src, nK, nV)
+		if err != nil {
+			return nil, true, err
+		}
+		// GGUF's blk.*.ssm_a stores the already-transformed negative decay
+		// coefficient (-exp(A_log)); fak's canonical tensor and forward expect
+		// the pre-transform A_log. Undo the export transform here so every
+		// runtime path computes exp(-exp(A_log)*softplus(dt)) exactly once.
+		for i, decay := range out {
+			if decay >= 0 || math.IsNaN(float64(decay)) {
+				return nil, true, fmt.Errorf("gguf: tensor %s decay[%d]=%g, want finite negative -exp(A_log)", name, i, decay)
+			}
+			out[i] = float32(math.Log(float64(-decay)))
+		}
+		return out, true, nil
+	case strings.HasSuffix(name, ".linear_attn.dt_bias"):
 		out, err := reorderQwen35InterleavedValueVector(name, src, nK, nV)
 		return out, true, err
 	case strings.HasSuffix(name, ".linear_attn.norm.weight"):
