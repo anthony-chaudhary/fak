@@ -2605,6 +2605,12 @@ func (s *Server) existingSessionPlanner(trace string) *agent.SessionPlanner {
 // that produced no tokens is not a generation); the error is returned untouched so
 // the caller's existing error handling is unchanged.
 func (s *Server) complete(ctx context.Context, trace string, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+	// Bind authenticated request identity to in-kernel prefix-cache visibility.
+	// Empty principal preserves legacy single-user reuse; authenticated prefixes
+	// enter tenant-private storage and cannot shape another tenant's hit timing.
+	if principal := principalFromContext(ctx); principal != "" {
+		ctx = agent.WithPrefixCacheIdentity(ctx, principal, "")
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			if evictErr, ok := recoverRecurrentEvictUnsupported(r); ok {

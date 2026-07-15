@@ -8,6 +8,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
+
+	"context"
 )
 
 // inkernel_reuse_test.go is the candidate-#13(+#14) witness suite for RadixAttention
@@ -649,4 +651,36 @@ func TestInKernelPlannerRadixReuseIsDefaultOnForInkernelEngine(t *testing.T) {
 		t.Fatal("FAK_INKERNEL_RADIX=off must disable reuse (the A/B tree-OFF arm)")
 	}
 	t.Logf("DEFAULT[#14]: --engine inkernel enables radix/prefix reuse with no env opt-in and no harness; reused %d-token shared prefix, off-arm disables it", len(sys))
+}
+
+func TestInKernelAuthenticatedPrefixPrivateUntilPromoted(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	cfg := tinyCfg()
+	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false)
+	p.quant = false
+	ids := synthIDs(cfg.VocabSize, 12, 4774)
+	ctxA := WithPrefixCacheIdentity(context.Background(), "tenant-a", "")
+	ctxB := WithPrefixCacheIdentity(context.Background(), "tenant-b", "")
+	run := func(ctx context.Context) (cacheable, matched int) {
+		_, _, cacheable, matched, _, _, _, err := p.generateReusedContextWithBias(ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cacheable, matched
+	}
+	if cacheable, matched := run(ctxA); cacheable != 0 || matched != 0 {
+		t.Fatalf("first tenant-A request cacheable=%d matched=%d", cacheable, matched)
+	}
+	if cacheable, matched := run(ctxA); cacheable != len(ids) || matched != len(ids) {
+		t.Fatalf("same-tenant request cacheable=%d matched=%d, want %d/%d", cacheable, matched, len(ids), len(ids))
+	}
+	if cacheable, matched := run(ctxB); cacheable != 0 || matched != 0 {
+		t.Fatalf("tenant-B observed tenant-A private hit: cacheable=%d matched=%d", cacheable, matched)
+	}
+	if err := p.scopedTree.Promote(radixkv.ScopeTenant, radixkv.CacheIdentity{Tenant: "tenant-a"}, ids); err != nil {
+		t.Fatal(err)
+	}
+	if cacheable, matched := run(ctxB); cacheable != len(ids) || matched != len(ids) {
+		t.Fatalf("promoted fleet request cacheable=%d matched=%d, want %d/%d", cacheable, matched, len(ids), len(ids))
+	}
 }

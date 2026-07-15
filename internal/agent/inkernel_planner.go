@@ -67,8 +67,9 @@ type InKernelPlanner struct {
 	// FAK_NATIVE_KV_VICTIM_RULE=cost-aware selects the KVBM victim rule for budget pressure.
 	// Operators serving long sessions should set a budget; bounding the deep-chain
 	// footprint is tracked.
-	mu   sync.Mutex
-	tree *radixkv.Tree
+	mu         sync.Mutex
+	tree       *radixkv.Tree
+	scopedTree *radixkv.ScopedTree
 
 	// devMu serializes the WHOLE device forward pass (Prefill + the decode loop) when a
 	// backend is wired. The CUDA backend is single-stream by construction (one g_stream, one
@@ -173,6 +174,7 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	// radix tree safely skips repeated prefill on the live GCP GLM path.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && inKernelPlannerPrefixReuseSupported(m, backend) {
 		p.tree = radixkv.NewWithEvictionPolicy(envInt("FAK_INKERNEL_RADIX_BUDGET", 0), inKernelRadixEvictionPolicyFromEnv())
+		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
 	// default-off / fail-open posture as the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a
@@ -1142,23 +1144,34 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	closeSession := false
 	var cachedLogits []float32
 	if reuse {
-		p.mu.Lock()
-		b, m := p.tree.Lookup(ids)
+		owner, scoped := prefixCacheIdentityFromContext(ctx)
+		var matchedKV *model.KVCache
+		var m int
+		if scoped && p.scopedTree != nil {
+			matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
+		} else {
+			p.mu.Lock()
+			b, legacyMatched := p.tree.Lookup(ids)
+			m = legacyMatched
+			if k := b.KV(); k != nil {
+				matchedKV = k.Clone()
+				if m >= len(ids) {
+					cachedLogits = b.Logits()
+				}
+			}
+			p.tree.Done(b)
+			p.mu.Unlock()
+		}
 		// The lookup-side (cacheability) half of the #3390 split: m tokens matched the
 		// radix index at this instant, whether or not the servability checks below (nil
 		// KV, exact-hit refeed, unsupported truncate) let all of them be served. The
 		// realized `matched` can only stay at or fall below this.
 		cacheable = m
-		if k := b.KV(); k != nil {
-			s = p.sessionFromPrefixClone(k.Clone()) // an independent clone; cache.Len() == m
+		if matchedKV != nil {
+			s = p.sessionFromPrefixClone(matchedKV)
 			closeSession = p.backend != nil
 			matched = m
-			if matched >= len(ids) {
-				cachedLogits = b.Logits()
-			}
 		}
-		p.tree.Done(b) // release the lease — we have our clone (or matched nothing)
-		p.mu.Unlock()
 		// Fully cached (an exact-duplicate transcript): the cached KV has the prefix but
 		// decode still needs the last-token logits to sample the first generated token. New
 		// leaves carry those logits; older/split leaves may not. When absent, refeed only
@@ -1223,11 +1236,18 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// leaf kv no matter how much a concurrent turn may have inserted since step 1.
 	if reuse {
 		snap := s.Cache.Clone()
-		p.mu.Lock()
-		b, m := p.tree.Lookup(ids)
-		leaf := p.tree.InsertWithLogits(b, ids[m:], snap, logits)
-		p.tree.Done(leaf)
-		p.mu.Unlock()
+		if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+			if admitErr := p.scopedTree.AdmitPrivate(owner, ids, snap, logits); admitErr != nil {
+				err = admitErr
+				return
+			}
+		} else {
+			p.mu.Lock()
+			b, m := p.tree.Lookup(ids)
+			leaf := p.tree.InsertWithLogits(b, ids[m:], snap, logits)
+			p.tree.Done(leaf)
+			p.mu.Unlock()
+		}
 	}
 
 	// 4) Decode. The per-token step (sample → token-ID stop → penalty count → string-suffix
