@@ -215,9 +215,12 @@ func New(p Policy) *Adjudicator {
 func (a *Adjudicator) SetPolicy(p Policy) {
 	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
+	// Build the immutable predicate index before excluding readers. The lock then
+	// protects only the atomic policy+index pair swap, not O(predicate-count) work.
+	argByTool := indexArgPredicates(p.ArgPredicates)
 	a.mu.Lock()
 	a.policy = p
-	a.argByTool = indexArgPredicates(p.ArgPredicates)
+	a.argByTool = argByTool
 	a.mu.Unlock()
 }
 
