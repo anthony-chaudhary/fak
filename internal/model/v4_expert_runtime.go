@@ -10,23 +10,25 @@ import (
 var ErrV4ExpertRuntime = errors.New("v4 expert runtime failure")
 
 type v4ExpertRuntimeStats struct {
-	ExpertOpenCount int
-	ExpertReadCount int
-	HashOpenCount   int
-	HashReadCount   int
-	HashReadBytes   int64
-	SourceReads     int64
-	SourceBytes     int64
-	PageIns         int
-	Hits            int
-	Evictions       int
-	ResidentBytes   int64
-	PeakResident    int64
-	RingBudget      int64
-	WorldSize       int
-	Rank            int
-	LocalSelected   int64
-	RemoteSelected  int64
+	ExpertOpenCount     int
+	ExpertReadCount     int
+	HashOpenCount       int
+	HashReadCount       int
+	HashReadBytes       int64
+	SourceReads         int64
+	SourceBytes         int64
+	PageIns             int
+	Hits                int
+	Evictions           int
+	ResidentBytes       int64
+	PeakResident        int64
+	RingBudget          int64
+	WorldSize           int
+	Rank                int
+	LocalSelected       int64
+	RemoteSelected      int64
+	TransportDispatches int64
+	TransportPartials   int64
 }
 
 type v4ExpertRuntime struct {
@@ -37,6 +39,7 @@ type v4ExpertRuntime struct {
 	closed    bool
 	stats     v4ExpertRuntimeStats
 	placement V4ExpertPlacement
+	transport v4ExpertTransport
 }
 
 func newV4ExpertRuntime(dir string, cfg Config, be compute.Backend, ringByteCap int64, maxOpen int) (*v4ExpertRuntime, error) {
@@ -137,8 +140,23 @@ func (r *v4ExpertRuntime) forwardSelected(layer int, picks []routePick, x comput
 	r.stats.LocalSelected += int64(local)
 	r.stats.RemoteSelected += int64(len(picks) - local)
 	if r.placement.WorldSize > 1 && local != len(picks) {
-		return nil, fmt.Errorf("%w: placement rank %d/%d selected %d remote experts; transport is not configured", ErrV4ExpertRuntime, r.placement.Rank, r.placement.WorldSize, len(picks)-local)
+		if r.transport == nil {
+			return nil, fmt.Errorf("%w: placement rank %d/%d selected %d remote experts; transport is not configured", ErrV4ExpertRuntime, r.placement.Rank, r.placement.WorldSize, len(picks)-local)
+		}
+		r.stats.TransportDispatches++
+		output, partials, err := r.transport.Forward(dispatch, func(rankPicks []routePick) ([]float32, error) {
+			return r.forwardLocalSelected(layer, rankPicks, x)
+		})
+		r.stats.TransportPartials += int64(partials)
+		if err != nil {
+			return nil, fmt.Errorf("%w: transport: %v", ErrV4ExpertRuntime, err)
+		}
+		return output, nil
 	}
+	return r.forwardLocalSelected(layer, picks, x)
+}
+
+func (r *v4ExpertRuntime) forwardLocalSelected(layer int, picks []routePick, x compute.Tensor) ([]float32, error) {
 	selected := make([]int, len(picks))
 	routes := make([]v4RoutedExpert, len(picks))
 	for i, pick := range picks {
