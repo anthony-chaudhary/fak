@@ -154,3 +154,33 @@ func packageExistsOnDisk(root, pkg string) bool {
 	}
 	return false
 }
+
+// ScopeTierDeclaredFindings applies the committed-push ownership boundary to
+// whole-tree findings. When scoped is false (no remote/trunk read-back), it keeps
+// every finding blocking. Non-TIER_DECLARED findings are never changed.
+func ScopeTierDeclaredFindings(findings []Finding, changedPaths []string, scoped bool) []Finding {
+	if !scoped {
+		return findings
+	}
+	touched := map[string]bool{}
+	for _, path := range changedPaths {
+		slash := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(path)), "./")
+		parts := strings.Split(slash, "/")
+		if len(parts) >= 2 && parts[0] == "internal" {
+			touched[parts[1]] = true
+		}
+	}
+	out := append([]Finding(nil), findings...)
+	for i := range out {
+		if out[i].Gate != "TIER_DECLARED" {
+			continue
+		}
+		slash := strings.TrimPrefix(filepath.ToSlash(out[i].File), "./")
+		parts := strings.Split(slash, "/")
+		if len(parts) >= 2 && parts[0] == "internal" && !touched[parts[1]] {
+			out[i].Advisory = true
+			out[i].Detail += " This push does not touch that leaf; its owner must declare it."
+		}
+	}
+	return out
+}

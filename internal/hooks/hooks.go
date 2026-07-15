@@ -48,10 +48,11 @@ type AddedLine struct {
 
 // Finding is one gate violation. A gate returns zero findings for a clean staged set.
 type Finding struct {
-	Gate   string `json:"gate"`   // PUBLIC_LEAK, SECRET_SHAPE, ...
-	File   string `json:"file"`   // repo-relative path ("" when not file-scoped)
-	Line   int    `json:"line"`   // 0 when not applicable
-	Detail string `json:"detail"` // the human message (matches the Python wording where it matters)
+	Gate     string `json:"gate"`               // PUBLIC_LEAK, SECRET_SHAPE, ...
+	File     string `json:"file"`               // repo-relative path ("" when not file-scoped)
+	Line     int    `json:"line"`               // 0 when not applicable
+	Detail   string `json:"detail"`             // the human message
+	Advisory bool   `json:"advisory,omitempty"` // visible but non-blocking in this push
 }
 
 // Gate is one commit-boundary check. ModeEnv/EscapeEnv name the env vars that soften or skip

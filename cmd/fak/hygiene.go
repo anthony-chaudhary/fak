@@ -68,10 +68,30 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		if len(findings) == 0 {
 			continue
 		}
+		if g.PushScoped {
+			findings = scopeHygieneFindingsToPush(r, findings)
+		}
 		allFindings = append(allFindings, findings...)
-		blocked = true
+		for _, finding := range findings {
+			if !finding.Advisory {
+				blocked = true
+			}
+		}
 		if !*asJSON {
-			printGateFindings(stderr, g.Name, findings)
+			var hard, advisory []hooks.Finding
+			for _, finding := range findings {
+				if finding.Advisory {
+					advisory = append(advisory, finding)
+				} else {
+					hard = append(hard, finding)
+				}
+			}
+			if len(hard) > 0 {
+				printGateFindings(stderr, g.Name, hard)
+			}
+			if len(advisory) > 0 {
+				printGateFindings(stderr, g.Name+" (advisory; outside this push)", advisory)
+			}
 		}
 	}
 

@@ -96,6 +96,9 @@ type HygieneGate struct {
 	// while its migration is in flight (so it never reds the shared trunk against known,
 	// not-yet-migrated debt) and flips on with a one-line change once the tree is clean.
 	DefaultOff bool
+	// PushScoped demotes findings outside the committed push delta to advisory.
+	// It is used by TIER_DECLARED so a peer's undeclared leaf cannot wedge all pushes.
+	PushScoped bool
 }
 
 // HygieneGates returns the tree-mode gates that have a parity-proven Go twin, in the order
@@ -104,47 +107,47 @@ type HygieneGate struct {
 // under #928 A5; each port appends its gate here.
 func HygieneGates() []HygieneGate {
 	return []HygieneGate{
-		{"DOC_PLACEMENT", gateDocPlacementTree, false},
-		{"BROKEN_LINK", gateBrokenLinkTree, false},
-		{"FILE_ADMISSION", gateFileAdmissionTree, false},
-		{"SECRET_SHAPE", gateSecretShapeTree, false},
-		{"PROVENANCE_LABEL", gateProvenanceLabelTree, false},
-		{"INDEX_SYNC", gateIndexSyncTree, false},
-		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false},
-		{"TIER_DECLARED", gateTierDeclaredTree, false},
-		{"NEW_PYTHON_TOOL", gatePythonToolTree, false},
+		{"DOC_PLACEMENT", gateDocPlacementTree, false, false},
+		{"BROKEN_LINK", gateBrokenLinkTree, false, false},
+		{"FILE_ADMISSION", gateFileAdmissionTree, false, false},
+		{"SECRET_SHAPE", gateSecretShapeTree, false, false},
+		{"PROVENANCE_LABEL", gateProvenanceLabelTree, false, false},
+		{"INDEX_SYNC", gateIndexSyncTree, false, false},
+		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false, false},
+		{"TIER_DECLARED", gateTierDeclaredTree, false, true},
+		{"NEW_PYTHON_TOOL", gatePythonToolTree, false, false},
 		// GOD_FILE_GROWTH ships default-ON like NEW_PYTHON_TOOL: the grandfathered
 		// baseline (godfile_baseline.go) freezes today's offenders at-size, so the
 		// tree is clean the moment the gate lands — only NEW growth can red it.
-		{"GOD_FILE_GROWTH", gateGodFileGrowthTree, false},
-		{"HARDWARE_TELL", gateHardwareTreeTell, false},
+		{"GOD_FILE_GROWTH", gateGodFileGrowthTree, false, false},
+		{"HARDWARE_TELL", gateHardwareTreeTell, false, false},
 		// DEAD_CODE (the slop-prevention twin of NEW_PYTHON_TOOL) is DefaultOff: the tree still
 		// carries pre-existing dead unexported symbols the /slop-score loop is retiring, so it
 		// would red the shared trunk against known debt. It is the always-available audit sweep
 		// (`fak hygiene --gates DEAD_CODE`) that proves the retirement, and flips DefaultOff:false
 		// — the enforcement gate that HOLDS the line at zero — once the tree is clean.
-		{"DEAD_CODE", gateDeadCodeTree, true},
+		{"DEAD_CODE", gateDeadCodeTree, true, false},
 		// BARE_DEV_SPELLING (C4 of epic #2228, #2233) is DefaultOff: it is the reusable
 		// audit sweep the migration batches run via `fak hygiene --gates BARE_DEV_SPELLING`,
 		// and it flips DefaultOff:false (the C5 enforcement gate) once the tree is migrated
 		// to zero bare dev spellings outside bare_dev_allowlist.txt.
-		{"BARE_DEV_SPELLING", gateBareDevSpellingTree, true},
+		{"BARE_DEV_SPELLING", gateBareDevSpellingTree, true, false},
 		// SWALLOWED_ERROR (issue #2899, hermes-inspiration epic #2871) is DefaultOff: the tree
 		// still carries pre-existing `_ = <call>()` error discards (the Go `except: pass`) that
 		// predate the floor, so wiring it always-on would red `make ci` against known debt. It is
 		// the always-available audit sweep (`fak hygiene --gates SWALLOWED_ERROR`) that proves the
 		// retirement, and flips DefaultOff:false — the enforcement gate that HOLDS the line at zero
 		// un-witnessed discards — once the tree is clean.
-		{"SWALLOWED_ERROR", gateSwallowedErrorTree, true},
+		{"SWALLOWED_ERROR", gateSwallowedErrorTree, true, false},
 		// DEMO_COMMAND (issue #928 A4) ships default-ON: it is a faithful port of
 		// tools/demo_command_audit.py, which `make hygiene` already runs green over the real
 		// tree, so the gate lands clean and only a NEW stale demo-command reference can red it.
-		{"DEMO_COMMAND", gateDemoCommandTree, false},
+		{"DEMO_COMMAND", gateDemoCommandTree, false, false},
 		// BROWSER_CONTRACT (issue #928 A5) ships default-ON: it is a faithful port of
 		// tools/demo_browser_contract.py, which `make hygiene` already runs green over the real
 		// tree, so the gate lands clean and only NEW browser-demo metadata drift (a moved default
 		// port, a dropped demoui helper, a stale run/public doc, a bad lifecycle decision) can red it.
-		{"BROWSER_CONTRACT", gateBrowserContractTree, false},
+		{"BROWSER_CONTRACT", gateBrowserContractTree, false, false},
 	}
 }
 

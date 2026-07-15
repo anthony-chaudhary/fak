@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -150,5 +151,27 @@ func TestTierDeclared_FailsOpenOnUnreadableTable(t *testing.T) {
 	}
 	if _, err := gateTierDeclaredTree(tree); err != ErrCouldNotRun {
 		t.Fatalf("want ErrCouldNotRun on a missing tier table, got %v", err)
+	}
+}
+
+func TestScopeTierDeclaredFindingsBlocksOnlyPushOwnedLeaf(t *testing.T) {
+	in := []Finding{
+		{Gate: "TIER_DECLARED", File: "internal/owned/", Detail: "owned missing"},
+		{Gate: "TIER_DECLARED", File: "internal/peer/", Detail: "peer missing"},
+		{Gate: "BROKEN_LINK", File: "internal/peer/doc.md", Detail: "unrelated gate"},
+	}
+	got := ScopeTierDeclaredFindings(in, []string{"internal/owned/new.go"}, true)
+	if got[0].Advisory {
+		t.Fatalf("push-owned leaf was demoted: %+v", got[0])
+	}
+	if !got[1].Advisory || !strings.Contains(got[1].Detail, "does not touch") {
+		t.Fatalf("peer leaf not advisory: %+v", got[1])
+	}
+	if got[2].Advisory {
+		t.Fatalf("unrelated gate was demoted: %+v", got[2])
+	}
+	fallback := ScopeTierDeclaredFindings(in[:1], nil, false)
+	if fallback[0].Advisory {
+		t.Fatalf("no-trunk fallback demoted finding: %+v", fallback[0])
 	}
 }
