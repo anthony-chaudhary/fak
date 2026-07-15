@@ -155,10 +155,29 @@ func main() {
 	expectStr := flag.String("expect", "", "comma-separated expected generated ids; exits non-zero on mismatch")
 	jsonOnly := flag.Bool("json", false, "write only the structured JSON result to stdout")
 	out := flag.String("out", "", "write the structured JSON result to this path")
+	backend := flag.String("backend", "", "acceptance backend: cpu-ref or cuda")
+	reference := flag.String("reference", "", "acceptance reference manifest path (write for cpu-ref; read for cuda)")
+	teacherForcedStr := flag.String("teacher-forced", "", "comma-separated teacher-forced token ids for acceptance")
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*dir = pathutil.ExpandTilde(*dir)
 	*gguf = pathutil.ExpandTilde(*gguf)
+	*reference = pathutil.ExpandTilde(*reference)
+	*out = pathutil.ExpandTilde(*out)
+
+	if acceptanceRequested(*backend, *reference, *teacherForcedStr) {
+		must(runAcceptance(acceptanceOptions{
+			GGUF:          *gguf,
+			Dir:           *dir,
+			Backend:       *backend,
+			Reference:     *reference,
+			Out:           *out,
+			IDs:           *idsStr,
+			TeacherForced: *teacherForcedStr,
+			JSONOnly:      *jsonOnly,
+		}))
+		return
+	}
 
 	var cfg model.Config
 	var m *model.Model
