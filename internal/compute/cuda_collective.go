@@ -148,6 +148,11 @@ func (c *cudaBackend) collectDevice(parts []Tensor, requireEqualLen bool) ([]uns
 		if !ok || db.ptr == nil {
 			return nil, 0, fmt.Errorf("compute: collective rank %d tensor has no device buffer", r)
 		}
+		// Ready checked the same poison bit above. Recheck through the shared
+		// submission predicate under cudaMu so no invalidation can race the C ABI.
+		if db.invalidForSubmit() {
+			return nil, 0, fmt.Errorf("compute: collective rank %d tensor is not ready", r)
+		}
 		if db.device != r {
 			return nil, 0, fmt.Errorf("compute: collective rank %d tensor is resident on CUDA device %d, want device %d", r, db.device, r)
 		}
@@ -194,7 +199,7 @@ func (c *cudaBackend) AllReduceSum(parts []Tensor) (Tensor, error) {
 	if err != nil {
 		return Tensor{}, err
 	}
-	C.fcuda_d2d_on(0, out.buf.(*cudaBuf).ptr, ptrs[0], C.size_t(count*4))
+	C.fcuda_d2d_on(0, c.cudaBufForSubmit(out).ptr, ptrs[0], C.size_t(count*4))
 	return out, nil
 }
 

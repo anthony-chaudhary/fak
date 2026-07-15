@@ -78,6 +78,9 @@ func (c *cudaBackend) AllReduceSumPG(t Tensor) (Tensor, error) {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if db.invalidForSubmit() {
+		return Tensor{}, fmt.Errorf("compute: AllReduceSumPG tensor is not ready")
+	}
 	count := t.Numel()
 	if rc := int(C.fcuda_nccl_pg_allreduce_f32(db.ptr, C.int(count))); rc != 0 {
 		return Tensor{}, fmt.Errorf("compute: fcuda_nccl_pg_allreduce_f32 rc=%d", rc)

@@ -30,9 +30,7 @@ package compute
 import "C"
 
 import (
-	"fmt"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -78,11 +76,6 @@ func applyCUDATF32() {
 	}
 }
 
-// q8DeviceBlock is the Q8_0 per-block size the device narrow-at-H2D quant uses (llama.cpp block_q8_0
-// = 32, the cpuref default). The resident weight carries it in QuantSpec.Block so the GEMM kernel
-// reconstructs nblk = in/block; `in` must be divisible by it.
-const q8DeviceBlock = 32
-
 func init() {
 	var name [256]C.char
 	var sm C.int
@@ -106,148 +99,6 @@ func init() {
 	applyCUDATF32()
 }
 
-// cudaBudgetBytes reads FAK_GPU_BUDGET_MB — the device-local weight budget in MiB. 0 / unset /
-// invalid = unbounded (place every explicit weight allocation with cudaMalloc, the prior behavior).
-// A positive value caps CUDA device-local weight residency; weights past the cap go into
-// cudaMallocManaged so the driver can page them on demand instead of losing the allocation race and
-// hard-panicking.
-func cudaBudgetBytes() int64 {
-	s := os.Getenv("FAK_GPU_BUDGET_MB")
-	if s == "" {
-		return 0
-	}
-	mb, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || mb <= 0 {
-		return 0
-	}
-	return mb * 1024 * 1024
-}
-
-var cudaDev *cudaBackend
-
-// cudaBuf is a device-resident Buffer: a VRAM pointer + byte length. Op OUTPUTS (allocated
-// via devTr) are ASYNC under #482 — enqueued on g_stream and NOT host-observable until a host
-// fence (Read/Argmax) drains the stream — so each records the backend's fence generation at
-// enqueue time and Ready() reports whether a later fence has bumped past it. Buffers that are
-// synchronous on return (weights, whose Upload H2D is a blocking cudaMemcpy; KV views; the
-// argmax scalar) carry be==nil and are always Ready.
-type cudaBuf struct {
-	ptr     unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
-	n       int            // bytes at ptr
-	class   MemoryClass    // allocation purpose retained for strict mutable-state validation
-	device  int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
-	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
-	hostDt  Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
-	hostLo  Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
-	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
-	bornGen uint64         // fence generation in which this async buffer was enqueued
-	managed bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
-	// invalid is set when an in-place Qwen GDN operation reports a launch or
-	// asynchronous execution failure. Such a buffer may be freed, but never read
-	// or submitted again as a usable state/output.
-	invalid uint32
-	// budgetedWeightBytes/managedWeight account only explicit resident WEIGHT buffers (F16/Q8/Q4K
-	// uploads). Generic F32 Upload is also used for per-token inputs, so it stays outside this budget.
-	budgetedWeightBytes int64
-	managedWeight       bool
-	// scales is the SECOND VRAM buffer a resident Q8_0 weight carries (#485): the per-block(32)
-	// f32 scales living beside the int8 codes in ptr. Q4_K keeps d/dmin/scales/codes packed in the
-	// raw super-block bytes at ptr, so it leaves scales==nil. Freed alongside ptr in Free.
-	scales  unsafe.Pointer
-	scalesN int // bytes at scales (0 when there is no scale side-channel)
-}
-
-// residentBytes is the total VRAM the weight occupies — codes (ptr) plus any scale side-channel.
-// The #485 VRAM witness reads it to prove a Q8_0/Q4_K weight stays narrow (≈ int8/int4 size, not
-// the f32 size a dequant-to-f32 upload would have paid).
-func (b *cudaBuf) residentBytes() int { return b.n + b.scalesN }
-
-// Ready reports whether the buffer's producing kernel has been fenced host-ward. An async op
-// output is ready once a Read/Argmax has bumped the fence generation past the one it was
-// enqueued in: the single g_stream is FIFO and a host fence drains all prior work, so one
-// generation bump materializes every buffer enqueued before it. Synchronous buffers (be==nil)
-// are ready on return. This is the bit the model loop reads to know the logits are still
-// device-resident mid-step (#482) — it never gates device execution, which is stream-ordered.
-func (b *cudaBuf) Ready() bool {
-	if b == nil {
-		return false
-	}
-	if atomic.LoadUint32(&b.invalid) != 0 {
-		return false
-	}
-	if b.be == nil {
-		return true
-	}
-	return atomic.LoadUint64(&b.be.fenceGen) > b.bornGen
-}
-
-// uploadCache shares one VRAM copy per distinct host weight buffer across all sessions. A model's
-// weights are zero-copy views into one blob (m.tensor(name) returns the SAME pointer every
-// call), so without this each NewBackendSession re-uploaded the whole model — N sessions ×
-// the full weight set, which exhausts VRAM in a multi-session bench. Only rank >= 2 tensors enter
-// this pointer-keyed cache: rank-1 uploads are activations, norms, or biases and must copy their
-// current bytes. Go may recycle a dead rank-1 slice at the same address for the next token; caching
-// it would return the prior token's VRAM buffer and make decode deterministically degenerate.
-//
-// The key is (host pointer, narrowed dtype, layout), NOT the pointer alone: under #484 the SAME
-// host weight may be uploaded as F32 and as F16, or as F16 in two layouts (RowMajor vs the
-// ColMajor transpose-repack), and those are DISTINCT resident buffers. Keying on the pointer
-// alone would alias them and hand back the wrong layout/dtype.
-type ucKey struct {
-	hp uintptr
-	dt Dtype
-	lo Layout
-}
-
-var uploadCache = map[ucKey]Tensor{}
-
-type cudaBackend struct {
-	name string
-	tier string
-	// totalMem is the device's total VRAM in bytes (totalGlobalMem from fcuda_init), KEPT so
-	// the backend can satisfy DeviceCapacity — fak's one programmatic "does this fit on this
-	// device?" number, which init() previously read into a local and threw away.
-	totalMem int64
-	// fenceGen counts host fences (Read/Argmax — the ONLY two). Each async op output records
-	// the generation it was enqueued in (cudaBuf.bornGen); a fence bumps fenceGen, flipping
-	// every buffer enqueued before it to Ready (#482). Read/written atomically: producers hold
-	// cudaMu but Ready() readers (the model loop / the witness test) do not take the lock.
-	fenceGen uint64
-	// transient holds per-token op-output buffers (NOT weights or KV). Recycle() returns
-	// them all to the C-side pool at a token boundary so steady-state decode stops paying
-	// cudaMalloc per op. Guarded by cudaMu (every appender holds it).
-	transient []*cudaBuf
-	// Device-local residency budget (Stage-1 offload parity with Vulkan). budgetBytes caps
-	// cudaMalloc-backed resident WEIGHT bytes; 0 = unbounded. dlUsed tracks bytes placed with
-	// cudaMalloc while under the cap. When the next explicit weight would exceed the cap, it is
-	// deliberately placed in managed memory (cudaMallocManaged) in upload order, so early/hot
-	// layers stay device-local and the cold tail spills by choice instead of OOM. Guarded by
-	// cudaMu (mutated only inside locked upload/free paths).
-	budgetBytes int64
-	dlUsed      int64
-	managedN    int
-}
-
-func (c *cudaBackend) CUDADebugResidencyBudget() (budgetBytes, dlUsed int64, managedN int) {
-	cudaMu.Lock()
-	defer cudaMu.Unlock()
-	return c.budgetBytes, c.dlUsed, c.managedN
-}
-
-func (c *cudaBackend) CUDADebugSetResidencyBudget(budgetBytes int64) (oldBudgetBytes, oldDLUsed int64, oldManagedN int) {
-	cudaMu.Lock()
-	defer cudaMu.Unlock()
-	oldBudgetBytes, oldDLUsed, oldManagedN = c.budgetBytes, c.dlUsed, c.managedN
-	c.budgetBytes, c.dlUsed, c.managedN = budgetBytes, 0, 0
-	return oldBudgetBytes, oldDLUsed, oldManagedN
-}
-
-func (c *cudaBackend) CUDADebugRestoreResidencyBudget(budgetBytes, dlUsed int64, managedN int) {
-	cudaMu.Lock()
-	defer cudaMu.Unlock()
-	c.budgetBytes, c.dlUsed, c.managedN = budgetBytes, dlUsed, managedN
-}
-
 // Recycle returns every transient op-output buffer allocated since the last Recycle to the
 // pooled allocator. The HAL calls it at each token boundary (after Read), where all
 // intermediates are dead — the KV cache has already copied what it keeps, and weights are
@@ -263,6 +114,47 @@ func (c *cudaBackend) Recycle() {
 		}
 	}
 	c.transient = c.transient[:0]
+}
+
+// releaseTransientBuffers immediately returns an operation-owned subset of
+// transients to the C-side pool and detaches it from the later Recycle sweep.
+// The caller holds cudaMu and has already fenced/drained any kernel that may
+// still reference the buffers.
+func (c *cudaBackend) releaseTransientBuffers(buffers []*cudaBuf) {
+	if len(buffers) == 0 {
+		return
+	}
+	for _, target := range buffers {
+		if target != nil && target.ptr != nil {
+			C.fcuda_free(target.ptr)
+			target.ptr = nil
+		}
+	}
+	kept := c.transient[:0]
+	for _, live := range c.transient {
+		release := false
+		for _, target := range buffers {
+			if live == target {
+				release = true
+				break
+			}
+		}
+		if !release {
+			kept = append(kept, live)
+		}
+	}
+	clear(c.transient[len(kept):])
+	c.transient = kept
+}
+
+// cudaAllocationCountsForTest is the allocation witness for failure-path tests.
+// live counts C-side allocations currently checked out of the pool; transient
+// counts Go handles awaiting Recycle. Both are read under the allocator mutex so
+// one assertion observes a coherent instant.
+func (c *cudaBackend) cudaAllocationCountsForTest() (transient, live int) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return len(c.transient), int(C.fcuda_live_allocations())
 }
 
 // TrimLarge frees cached allocator buckets larger than maxKeepBytes while preserving the
@@ -339,36 +231,6 @@ func (c *cudaBackend) GraphAbort() {
 	C.fcuda_graph_abort()
 }
 
-// Name returns the registry id of this backend ("cuda").
-func (c *cudaBackend) Name() string            { return c.name }
-func (c *cudaBackend) Tier() string            { return c.tier }
-func (c *cudaBackend) Class() CorrectnessClass { return Approx } // device GEMM != fdot order
-func (c *cudaBackend) Caps() Caps {
-	// Async (#482): ops enqueue on g_stream and return unready Buffers; the SOLE host fences
-	// are Read and Argmax. DeviceMemory: resident tensors (incl. the KV cache) are not host-
-	// addressable. GraphCompile (#483): the fixed per-token decode op stream is capturable into
-	// a cudaGraph_t on g_stream and replayable as ONE cudaGraphLaunch (instead of N kernel
-	// launches). It is advertised true exactly when that path is live (graphEnabled /
-	// FAK_CUDA_GRAPH=1) so it stays consistent with GraphBegin's consent — a consumer that reads
-	// false cleanly falls back to the synchronous per-op core (the cpu-ref/Metal default).
-	// UploadDtype (#484/#485): Upload(t, F16) narrows weights to __half at H2D (with a ColMajor
-	// transpose-repack) for tensor-core HGEMM; Upload(t, Q8_0) narrows an f32 weight to resident
-	// int8 codes + f32 scales, and a Q4_K host weight uploads its raw super-block bytes verbatim —
-	// MatMul/BatchedMatMul then run the native quantized device GEMMs (no dequant-to-f32), keeping
-	// the weight narrow in VRAM. FusedAttn (#486): Attention lowers to ONE fused flash/online-softmax
-	// kernel (k_flash_attention) — tiled over the KV window with a running max/sum so no scores[nPos]
-	// row is materialized; the naive kernel is retained only as the microbench baseline.
-	// CapacityProbe (capacity.go): the backend can REPORT its VRAM ceiling (DeviceMemory),
-	// the report half of the hardware-capacity bridge. It is the one number this backend has
-	// always held (totalGlobalMem) but used to discard.
-	_, _, hostKnown := hostSystemMemory()
-	// Collective is advertised true ONLY once a real NCCL communicator is up (fcuda_nccl_init
-	// succeeded over >1 device, recorded in cudaNCCLWorld). Until then it stays false so a host
-	// never picks the device collective path before it can actually all-reduce across GPUs — the
-	// honesty line (#971): no multi-GPU claim until a device tensor reduces across 2 GPUs.
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown, Collective: atomic.LoadInt32(&cudaNCCLWorld) > 1}
-}
-
 // DeviceMemory reports CUDA VRAM total plus the current free bytes from cudaMemGetInfo.
 // If the runtime cannot provide a fresh snapshot, it preserves the capacity contract by
 // returning the init-time total with free=FreeUnknown rather than failing closed.
@@ -384,10 +246,6 @@ func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
 		return uint64ToCapInt64(uint64(totalMem)), uint64ToCapInt64(uint64(freeMem)), true
 	}
 	return c.totalMem, FreeUnknown, true
-}
-
-func (c *cudaBackend) HostMemory() (total, free int64, known bool) {
-	return hostSystemMemory()
 }
 
 // ---- residency ------------------------------------------------------------------
@@ -418,6 +276,9 @@ func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *c
 // UVM migration would invalidate its device-residency/zero-transfer contract.
 // Caller holds cudaMu.
 func (c *cudaBackend) dallocDeviceOnlyClass(nbytes int, class MemoryClass, site string) (*cudaBuf, error) {
+	if err := qwen35GDNInjectedAllocationFailure(site, nbytes); err != nil {
+		return nil, err
+	}
 	p := C.fcuda_malloc(C.size_t(nbytes))
 	if p == nil {
 		return nil, &Qwen35GDNAllocationError{Operand: site, Bytes: nbytes}
@@ -447,19 +308,6 @@ func (c *cudaBackend) dallocWeight(nbytes int) *cudaBuf {
 	buf := c.dallocClass(nbytes, MemoryWeights, "dallocWeight")
 	c.accountWeightPlacement(buf, nbytes)
 	return buf
-}
-
-func (c *cudaBackend) accountWeightPlacement(buf *cudaBuf, nbytes int) {
-	if c.budgetBytes == 0 || buf == nil || buf.ptr == nil {
-		return
-	}
-	if buf.managed {
-		c.managedN++
-		buf.managedWeight = true
-		return
-	}
-	c.dlUsed += int64(nbytes)
-	buf.budgetedWeightBytes = int64(nbytes)
 }
 
 func (c *cudaBackend) dev(shape []int, dt Dtype) (Tensor, *cudaBuf) {
@@ -803,8 +651,8 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 		return hb.f32 // host-resident: nothing crosses the bus and no device work is fenced
 	}
 	db := t.buf.(*cudaBuf)
-	if atomic.LoadUint32(&db.invalid) != 0 {
-		panic(&Qwen35GDNInvalidStateError{Operand: "buffer"})
+	if err := db.invalidStateError("buffer"); err != nil {
+		panic(err)
 	}
 	out := make([]float32, t.Numel())
 	if len(out) > 0 {
@@ -857,21 +705,13 @@ func (c *cudaBackend) Free(t Tensor) {
 // ---- primitives -----------------------------------------------------------------
 
 func (c *cudaBackend) cf(t Tensor) *C.float {
-	b := t.buf.(*cudaBuf)
-	if atomic.LoadUint32(&b.invalid) != 0 {
-		panic(&Qwen35GDNInvalidStateError{Operand: "buffer"})
-	}
-	return (*C.float)(b.ptr)
+	return (*C.float)(c.cudaBufForSubmit(t).ptr)
 }
 
 // cptr is the raw device pointer (void*), for dtypes whose element type is not *C.float — the
 // F16 weight buffer (__half) the HGEMM path reads.
 func (c *cudaBackend) cptr(t Tensor) unsafe.Pointer {
-	b := t.buf.(*cudaBuf)
-	if atomic.LoadUint32(&b.invalid) != 0 {
-		panic(&Qwen35GDNInvalidStateError{Operand: "buffer"})
-	}
-	return b.ptr
+	return c.cudaBufForSubmit(t).ptr
 }
 
 // colMajorFlag reports w's HGEMM layout selector: 1 when the weight was transpose-repacked to
@@ -903,14 +743,14 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		// native Q8_0 GEMV (#485): int8 codes + per-block f32 scales resident, the activation
 		// quantized to int8 ON DEVICE; integer per-block dot scaled by (weight·activation block
 		// scales), F32 accumulate. No dequant-to-f32 round trip — the weight stays int8 in VRAM.
-		wb := w.buf.(*cudaBuf)
+		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
 			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
 	case Q4_K:
 		// native Q4_K GEMV (#485): the dequant (w = d·scale·code − dmin·min) is fused into the
 		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.
-		wb := w.buf.(*cudaBuf)
+		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
 	default:
@@ -943,14 +783,14 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q8_0:
 		// native Q8_0 prefill GEMM (#485): each of the P activation rows is quantized to int8 on
 		// device, then the per-block integer dot against the resident int8 weight, F32 accumulate.
-		wb := w.buf.(*cudaBuf)
+		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
 			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
 	case Q4_K:
 		// native Q4_K prefill GEMM (#485): dequant fused into the tile off the resident super-block
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
-		wb := w.buf.(*cudaBuf)
+		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
 	default:
@@ -980,8 +820,9 @@ func (c *cudaBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 func (c *cudaBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	xbuf := c.cudaBufForSubmit(x)
 	y, ybuf := c.devTr(append([]int(nil), x.Shape...), F32)
-	C.fcuda_d2d(ybuf.ptr, x.buf.(*cudaBuf).ptr, C.size_t(x.Numel()*4))
+	C.fcuda_d2d(ybuf.ptr, xbuf.ptr, C.size_t(x.Numel()*4))
 	C.fcuda_rope_f32(c.cf(y), C.int(pos), C.int(nHeads), C.int(headDim), C.double(theta))
 	return y
 }
@@ -1252,6 +1093,7 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	for _, allocation := range allocations {
 		tensor, buffer, allocErr := c.devTrDeviceOnly(allocation.shape, F32, "qwen35-gdn-"+allocation.name)
 		if allocErr != nil {
+			c.releaseTransientBuffers(strictBuffers)
 			return Tensor{}, Tensor{}, Tensor{}, allocErr
 		}
 		strictTensors = append(strictTensors, tensor)
@@ -1282,6 +1124,10 @@ func (c *cudaBackend) Qwen35GDNDecode(
 		}
 		atomic.StoreUint32(&convState.buf.(*cudaBuf).invalid, 1)
 		atomic.StoreUint32(&recurrentState.buf.(*cudaBuf).invalid, 1)
+		// The ABI has drained/fenced the stream on every failure return, so all
+		// operation-owned buffers are safe to free immediately. Durable mutable
+		// state remains caller-owned, allocated, and poisoned for explicit cleanup.
+		c.releaseTransientBuffers(strictBuffers)
 		return Tensor{}, Tensor{}, Tensor{}, &Qwen35GDNKernelError{
 			Stage: qwen35GDNKernelStage(status),
 			Code:  status,
@@ -1293,96 +1139,6 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	return output, convState, recurrentState, nil
 }
 
-func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
-	if t.Backend() != c {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is not owned by this CUDA backend"}
-	}
-	if t.Dtype != F32 {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; whole-operation kernel requires resident f32"}
-	}
-	if t.Layout != RowMajor {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "layout is not row-major"}
-	}
-	buf, ok := t.buf.(*cudaBuf)
-	if !ok || buf == nil || buf.ptr == nil {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor has no live CUDA allocation (Upload is required before the operation)"}
-	}
-	if atomic.LoadUint32(&buf.invalid) != 0 {
-		return &Qwen35GDNInvalidStateError{Operand: name}
-	}
-	if buf.device != 0 {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is resident on a non-default CUDA device"}
-	}
-	if buf.managed {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "managed memory is forbidden; strict whole-operation operands must be device-only"}
-	}
-	required, ok := qwen35GDNShapeBytes(t.Shape, F32.Bytes())
-	if !ok {
-		return &Qwen35GDNGeometryError{Operand: name, Reason: "shape byte size overflows host allocation capacity"}
-	}
-	if buf.n < required {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: fmt.Sprintf("CUDA allocation capacity is %d bytes, shape requires %d", buf.n, required)}
-	}
-	return nil
-}
-
-func (c *cudaBackend) validateQwen35GDNStateOperands(operands []struct {
-	name string
-	t    Tensor
-}, convState, recurrentState Tensor) error {
-	convBuf := convState.buf.(*cudaBuf)
-	recurrentBuf := recurrentState.buf.(*cudaBuf)
-	states := []struct {
-		name   string
-		buffer *cudaBuf
-	}{
-		{"conv_state", convBuf},
-		{"recurrent_state", recurrentBuf},
-	}
-	for _, state := range states {
-		if state.buffer.class != MemoryKVCache {
-			return &Qwen35GDNResidencyError{
-				Operand: state.name,
-				Reason:  fmt.Sprintf("mutable state allocation class is %q, want %q for durable in-place state", state.buffer.class, MemoryKVCache),
-			}
-		}
-	}
-	if convBuf.ptr == recurrentBuf.ptr {
-		return &Qwen35GDNResidencyError{Operand: "state", Reason: "conv_state and recurrent_state alias the same CUDA allocation"}
-	}
-	for _, operand := range operands[:len(operands)-2] {
-		readOnly := operand.t.buf.(*cudaBuf)
-		if readOnly.ptr == convBuf.ptr || readOnly.ptr == recurrentBuf.ptr {
-			return &Qwen35GDNResidencyError{Operand: operand.name, Reason: "read-only operand aliases mutable GDN state"}
-		}
-	}
-	return nil
-}
-
-func qwen35GDNKernelStage(status int) string {
-	if status < 0 {
-		return "abi-validation"
-	}
-	switch status / 10000 {
-	case 1:
-		return "preflight"
-	case 2:
-		return "fused-input-projections"
-	case 3:
-		return "causal-conv-state"
-	case 4:
-		return "qk-normalization"
-	case 5:
-		return "recurrent-gated-norm"
-	case 6:
-		return "output-projection"
-	case 7:
-		return "stream-synchronize"
-	default:
-		return "unknown"
-	}
-}
-
 // ---- AWQ (Activation-aware Weight Quantization) 4-bit matmul -------------------
 
 // AWQMatMul computes y = W @ x where W is an AWQ 4-bit quantized tensor.
@@ -1391,12 +1147,15 @@ func (c *cudaBackend) AWQMatMul(w, scales, x Tensor) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	wbuf := c.cudaBufForSubmit(w)
+	sbuf := c.cudaBufForSubmit(scales)
+	xbuf := c.cudaBufForSubmit(x)
 	y, _ := c.devTr([]int{out}, F32)
 
 	// Get device pointers
-	wp := w.buf.(*cudaBuf).ptr
-	sp := scales.buf.(*cudaBuf).ptr
-	xp := x.buf.(*cudaBuf).ptr
+	wp := wbuf.ptr
+	sp := sbuf.ptr
+	xp := xbuf.ptr
 	yp := c.cf(y)
 
 	C.fcuda_awq_gemv((*C.uint8_t)(wp), (*C.float)(sp), (*C.float)(xp), yp, C.int(out), C.int(in))
@@ -1410,12 +1169,15 @@ func (c *cudaBackend) AWQBatchedMatMul(w, scales, X Tensor, P int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	wbuf := c.cudaBufForSubmit(w)
+	sbuf := c.cudaBufForSubmit(scales)
+	xbuf := c.cudaBufForSubmit(X)
 	y, _ := c.devTr([]int{P, out}, F32)
 
 	// Get device pointers
-	wp := w.buf.(*cudaBuf).ptr
-	sp := scales.buf.(*cudaBuf).ptr
-	xp := X.buf.(*cudaBuf).ptr
+	wp := wbuf.ptr
+	sp := sbuf.ptr
+	xp := xbuf.ptr
 	yp := c.cf(y)
 
 	C.fcuda_awq_gemm((*C.uint8_t)(wp), (*C.float)(sp), (*C.float)(xp), yp, C.int(out), C.int(in), C.int(P))
@@ -1438,16 +1200,24 @@ func (c *cudaBackend) AWQBatchedMatMul(w, scales, X Tensor, P int) Tensor {
 func (c *cudaBackend) GPTQMatMul(qweight, qzeros, scales, gidx, x Tensor, out, in, bits, groupSize, nGroups int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	wbuf := c.cudaBufForSubmit(qweight)
+	zbuf := c.cudaBufForSubmit(qzeros)
+	sbuf := c.cudaBufForSubmit(scales)
+	xbuf := c.cudaBufForSubmit(x)
+	var gbuf *cudaBuf
+	if gidx.buf != nil {
+		gbuf = c.cudaBufForSubmit(gidx)
+	}
 	y, _ := c.devTr([]int{out}, F32)
 
-	wp := (*C.uint32_t)(qweight.buf.(*cudaBuf).ptr)
-	zp := (*C.uint32_t)(qzeros.buf.(*cudaBuf).ptr)
-	sp := (*C.float)(scales.buf.(*cudaBuf).ptr)
+	wp := (*C.uint32_t)(wbuf.ptr)
+	zp := (*C.uint32_t)(zbuf.ptr)
+	sp := (*C.float)(sbuf.ptr)
 	var gp *C.int32_t
-	if gidx.buf != nil {
-		gp = (*C.int32_t)(gidx.buf.(*cudaBuf).ptr)
+	if gbuf != nil {
+		gp = (*C.int32_t)(gbuf.ptr)
 	}
-	xp := (*C.float)(x.buf.(*cudaBuf).ptr)
+	xp := (*C.float)(xbuf.ptr)
 	yp := c.cf(y)
 
 	C.fcuda_gptq_gemv(wp, zp, sp, gp, xp, yp,
@@ -1534,9 +1304,14 @@ func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	w := k.stride()
-	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*cudaBuf).ptr, w, "kv-pre-rope-key-grow layer "+itoaC(layer))
-	k.be.growAppend(&k.K[layer], kRoPE.buf.(*cudaBuf).ptr, w, "kv-key-grow layer "+itoaC(layer))
-	k.be.growAppend(&k.V[layer], v.buf.(*cudaBuf).ptr, w, "kv-value-grow layer "+itoaC(layer))
+	// Preflight all three sources before the first append so a poisoned second or
+	// third operand cannot leave a partially advanced KV row.
+	kRawBuf := k.be.cudaBufForSubmit(kRaw)
+	kRoPEBuf := k.be.cudaBufForSubmit(kRoPE)
+	vBuf := k.be.cudaBufForSubmit(v)
+	k.be.growAppend(&k.Kraw[layer], kRawBuf.ptr, w, "kv-pre-rope-key-grow layer "+itoaC(layer))
+	k.be.growAppend(&k.K[layer], kRoPEBuf.ptr, w, "kv-key-grow layer "+itoaC(layer))
+	k.be.growAppend(&k.V[layer], vBuf.ptr, w, "kv-value-grow layer "+itoaC(layer))
 	if layer == 0 {
 		k.pos = append(k.pos, pos)
 	}

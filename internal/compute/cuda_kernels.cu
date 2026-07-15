@@ -173,6 +173,10 @@ extern "C" void fcuda_free(void *d) {
   }
 }
 
+extern "C" size_t fcuda_live_allocations(void) {
+  return g_live.size() + g_managed_live.size();
+}
+
 // fcuda_graph_prewarm deepens every pool bucket by `extra` spare buffers (#969). The warm
 // forward before capture pools ONE set of each transient size, but a single captured decodeChain
 // holds several same-size transients live AT ONCE (e.g. the per-layer RMSNorm outputs), so the

@@ -194,36 +194,87 @@ func TestCUDAQwen35GDNLaunchAndAsyncFailuresInvalidateState(t *testing.T) {
 			t.Cleanup(be.Recycle)
 			t.Cleanup(func() { qwen35GDNInjectFaultForTest(0) })
 			g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 3, eps: 1e-5}
-			o := newCUDAGDNOperands(t, be, g)
-			be.ResetQwen35GDNOperationCount()
-			qwen35GDNInjectFaultForTest(tc.stage)
-			out, nextConv, nextRecurrent, err := o.decode(be, g)
-			var kernel *Qwen35GDNKernelError
-			if !errors.As(err, &kernel) || kernel.Stage != tc.stageName {
-				t.Fatalf("fault stage %d error = %T %v, want stage %q", tc.stage, err, err, tc.stageName)
-			}
-			if out.Backend() != nil || nextConv.Backend() != nil || nextRecurrent.Backend() != nil {
-				t.Fatal("failed operation returned usable output/state tensors")
-			}
-			if got := be.Qwen35GDNOperationCount(); got != 0 {
-				t.Fatalf("failed operation count = %d, want 0", got)
-			}
-			if o.convState.Ready() || o.recurrentState.Ready() {
-				t.Fatal("failed in-place state still reports Ready")
-			}
-			for name, state := range map[string]Tensor{"conv_state": o.convState, "recurrent_state": o.recurrentState} {
-				func() {
-					defer func() {
-						recovered := recover()
-						var invalid *Qwen35GDNInvalidStateError
-						if !errors.As(asErrorCompute(recovered), &invalid) {
-							t.Fatalf("Read(%s) panic = %T %v, want *Qwen35GDNInvalidStateError", name, recovered, recovered)
-						}
+			for attempt := 0; attempt < 3; attempt++ {
+				o := newCUDAGDNOperands(t, be, g)
+				convBuf := o.convState.buf.(*cudaBuf)
+				recurrentBuf := o.recurrentState.buf.(*cudaBuf)
+				convPtr, recurrentPtr := convBuf.ptr, recurrentBuf.ptr
+				beforeTransient, beforeLive := be.cudaAllocationCountsForTest()
+				be.ResetQwen35GDNOperationCount()
+				qwen35GDNInjectFaultForTest(tc.stage)
+				out, nextConv, nextRecurrent, err := o.decode(be, g)
+				var kernel *Qwen35GDNKernelError
+				if !errors.As(err, &kernel) || kernel.Stage != tc.stageName {
+					t.Fatalf("attempt %d fault stage %d error = %T %v, want stage %q", attempt, tc.stage, err, err, tc.stageName)
+				}
+				if out.Backend() != nil || nextConv.Backend() != nil || nextRecurrent.Backend() != nil {
+					t.Fatal("failed operation returned usable output/state tensors")
+				}
+				if got := be.Qwen35GDNOperationCount(); got != 0 {
+					t.Fatalf("failed operation count = %d, want 0", got)
+				}
+				afterTransient, afterLive := be.cudaAllocationCountsForTest()
+				if afterTransient != beforeTransient || afterLive != beforeLive {
+					t.Fatalf("attempt %d retained strict allocations: transient %d->%d live %d->%d", attempt, beforeTransient, afterTransient, beforeLive, afterLive)
+				}
+				if convBuf.ptr != convPtr || recurrentBuf.ptr != recurrentPtr || convBuf.ptr == nil || recurrentBuf.ptr == nil {
+					t.Fatal("failed operation freed or detached caller-owned mutable state")
+				}
+				if o.convState.Ready() || o.recurrentState.Ready() {
+					t.Fatal("failed in-place state still reports Ready")
+				}
+				requireCUDAInvalidStatePanic(t, func() {
+					be.RoPE(o.recurrentState, 0, 1, g.vHd, 10000)
+				})
+				for name, state := range map[string]Tensor{"conv_state": o.convState, "recurrent_state": o.recurrentState} {
+					func() {
+						defer func() {
+							recovered := recover()
+							var invalid *Qwen35GDNInvalidStateError
+							if !errors.As(asErrorCompute(recovered), &invalid) {
+								t.Fatalf("Read(%s) panic = %T %v, want *Qwen35GDNInvalidStateError", name, recovered, recovered)
+							}
+						}()
+						_ = be.Read(state)
 					}()
-					_ = be.Read(state)
-				}()
+				}
 			}
 		})
+	}
+}
+
+func TestCUDAQwen35GDNPartialAllocationFailureReclaimsStrictTransients(t *testing.T) {
+	be := cudaGDNBackend(t)
+	t.Cleanup(be.Recycle)
+	t.Cleanup(func() { qwen35GDNInjectAllocationFailureForTest(-1) })
+	g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 3, eps: 1e-5}
+	o := newCUDAGDNOperands(t, be, g)
+	convBuf := o.convState.buf.(*cudaBuf)
+	recurrentBuf := o.recurrentState.buf.(*cudaBuf)
+	convPtr, recurrentPtr := convBuf.ptr, recurrentBuf.ptr
+
+	for attempt, failAfter := range []int{4, 8, 4, 8} {
+		beforeTransient, beforeLive := be.cudaAllocationCountsForTest()
+		be.ResetQwen35GDNOperationCount()
+		qwen35GDNInjectAllocationFailureForTest(failAfter)
+		out, nextConv, nextRecurrent, err := o.decode(be, g)
+		var allocation *Qwen35GDNAllocationError
+		if !errors.As(err, &allocation) {
+			t.Fatalf("attempt %d error = %T %v, want *Qwen35GDNAllocationError", attempt, err, err)
+		}
+		if out.Backend() != nil || nextConv.Backend() != nil || nextRecurrent.Backend() != nil {
+			t.Fatal("partial allocation failure returned usable output/state tensors")
+		}
+		afterTransient, afterLive := be.cudaAllocationCountsForTest()
+		if afterTransient != beforeTransient || afterLive != beforeLive {
+			t.Fatalf("attempt %d retained partial strict allocations: transient %d->%d live %d->%d", attempt, beforeTransient, afterTransient, beforeLive, afterLive)
+		}
+		if got := be.Qwen35GDNOperationCount(); got != 0 {
+			t.Fatalf("attempt %d partial allocation failure operation count = %d, want 0", attempt, got)
+		}
+		if convBuf.ptr != convPtr || recurrentBuf.ptr != recurrentPtr || !o.convState.Ready() || !o.recurrentState.Ready() {
+			t.Fatal("pre-launch allocation refusal freed, detached, or invalidated caller-owned state")
+		}
 	}
 }
 

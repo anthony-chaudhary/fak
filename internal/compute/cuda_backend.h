@@ -31,6 +31,10 @@ int fcuda_mem_info(size_t *free_mem, size_t *total_mem);
 void *fcuda_malloc(size_t bytes);
 void *fcuda_malloc_managed(size_t bytes);
 void fcuda_free(void *d);
+/* Number of pooled/managed allocations currently checked out by callers. This
+ * is an additive diagnostic ABI used to prove failed whole operations retain
+ * no transient allocations; pooled free buffers are deliberately excluded. */
+size_t fcuda_live_allocations(void);
 void fcuda_trim_pool_large(size_t max_keep_bytes);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
 void fcuda_d2h(void *h, const void *d, size_t bytes);
