@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **98.2/100** (grade A) = 9.8/10 |
-| **Coverage** | **97.2%** (1944/2001 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **57** (clarity 0 + coverage 57) |
-| Crystal-clear concepts | 242 of 1711 positioned |
+| **Score** | **97.7/100** (grade A) = 9.8/10 |
+| **Coverage** | **96.4%** (1947/2019 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **72** (clarity 0 + coverage 72) |
+| Crystal-clear concepts | 245 of 1714 positioned |
 | As of |  (fak ) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,10 +24,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1711 concepts - score 98.2/100 (grade A) - disambiguation-debt 57
+concept-disambiguation chart - 1714 concepts - score 97.7/100 (grade A) - disambiguation-debt 72
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####....................... 242
+  * crystal       #####....................... 245
   o defined       ############################ 1469
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -44,7 +44,7 @@ clarity mix by family (each cell = one concept):
   gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (119 concept(s); 6 crystal)
   guard-gate       ********************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (212 concept(s); 56 crystal)
   layout           ***oooooooo        (11 concept(s); 3 crystal)
-  loop             **************oooooooooooooooooooooooooooo (42 concept(s); 14 crystal)
+  loop             *****************oooooooooooooooooooooooooooo (45 concept(s); 17 crystal)
   plan             ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 15 crystal)
   policy-capability ***********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (101 concept(s); 11 crystal)
   pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
@@ -57,18 +57,18 @@ clarity mix by family (each cell = one concept):
   witness-proof    *********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 33 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########################.. 290/310
-  plan             ###########################. 286/294
-  policy-capability ###########################. 117/122
+  guard-gate       #########################... 291/322
+  plan             ###########################. 286/295
+  policy-capability ###########################. 118/123
   score-debt       ##########################.. 78/83
+  render-materialize ###########################. 162/166
+  cache            ############################ 222/225
   evict            ##########################.. 40/43
   session-runtime  ############################ 173/176
   support-maturity #########################... 29/32
   attention        ###########################. 68/70
-  cache            ############################ 222/224
   gateway-engine   ############################ 159/161
-  render-materialize ############################ 162/164
-  witness-proof    ############################ 124/126
+  witness-proof    ############################ 125/127
   decision         ###########################. 38/39
   loop             ############################ 57/58
   pool             ###########################. 35/36
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.2%  (1944/2001 confusable tokens positioned)
+namespace coverage  [###############################.] 96.4%  (1947/2019 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -242,6 +242,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | subsystem | loop | **rsiloop (RSI keep-or-revert loop)** - The recursive-self-improvement loop (internal/rsiloop): proposes a change, measures a witness-verified metric gain, and keeps-or-reverts on a non-forgeable keep-bit. |
 | * | crystal | subsystem | loop | **loopmap (loop-family map surface)** - The package (internal/loopmap, fak loopmap) that renders the loop-family map: which mechanism plays which role (timer / selector / executor / witness) and where the names collide. |
 | * | crystal | concept | loop | **loopback (network 127.0.0.1)** - The networking term: the 127.0.0.1 loopback address / same-host bind (isLoopback, loopbackOnly), swallowed by the `loop` root but from a different domain entirely. |
+| * | crystal | concept | loop | **normal loop (leaf intent)** - A NORMAL loop: keyed on a task + cadence, each tick does one unit of concrete work, with no members, no read-first phase and no selection step - a LEAF in the composition DAG (superloop.IntentNode.LeafIntent, descends nothing). The dispatch loop, a garden tick, and `fak loop drive` are all normal loops. |
+| * | crystal | subsystem | loop | **meta loop (trajctl meta-loop)** - The trajctl META LOOP (internal/trajctl/metaloop.go), fenced at exactly one level: it declares 'raise base scorer X's calibration' as a first-class objective whose own W3 score is the calibration meter's delta - a loop whose target is another SCORER, not the codebase. |
+| * | crystal | subsystem | loop | **meta-RSI (rsiloop keep-gate RSI)** - The apex RSI rung (internal/rsiloop/metarsi.go): RSI applied to the keep-GATE itself - it consumes the shipgate ESCALATE breaker's clustered escalations and PROPOSES a bounded keep-policy adjustment, re-measured by the same non-forgeable keep-bit it tunes (propose-only until a human-gated Apply). |
 | * | crystal | symbol | plan | **CandidateBlockedBy (dispatch prereq grammar)** - dispatchtick.CandidateBlockedBy parses a dispatch candidate's blocked-by grammar - which other candidates a candidate must wait on before it becomes eligible for a lane. |
 | * | crystal | symbol | plan | **buildKnownBadIssuePlan (known-bad issue-filing plan)** - cmd/fak/knownbad.go buildKnownBadIssuePlan builds the create/update PLAN for filing a known-bad record as a deduped GitHub issue (title, body, occurrence escalation). |
 | * | crystal | symbol | plan | **candidateIDs (rescore/route candidate id vector)** - candidateIDs (internal/kvmmu/rescore.go, internal/modelroute/audit_route.go) is the parallel vector of identifiers for the items being scored - KV spans under rescore, or routes under audit - whose results line up index-for-index. |
@@ -1926,7 +1929,7 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 26 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1711 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 1714 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1938,18 +1941,18 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 290 | 310 | 20 |
-| plan | 286 | 294 | 8 |
-| policy-capability | 117 | 122 | 5 |
+| guard-gate | 291 | 322 | 31 |
+| plan | 286 | 295 | 9 |
+| policy-capability | 118 | 123 | 5 |
 | score-debt | 78 | 83 | 5 |
+| render-materialize | 162 | 166 | 4 |
+| cache | 222 | 225 | 3 |
 | evict | 40 | 43 | 3 |
 | session-runtime | 173 | 176 | 3 |
 | support-maturity | 29 | 32 | 3 |
 | attention | 68 | 70 | 2 |
-| cache | 222 | 224 | 2 |
 | gateway-engine | 159 | 161 | 2 |
-| render-materialize | 162 | 164 | 2 |
-| witness-proof | 124 | 126 | 2 |
+| witness-proof | 125 | 127 | 2 |
 | decision | 38 | 39 | 1 |
 | loop | 57 | 58 | 1 |
 | pool | 35 | 36 | 1 |

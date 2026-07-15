@@ -1158,7 +1158,11 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	if len(grant.Argv) > 0 {
 		argv = grant.Argv
 	}
+	argv, promptStdin, _ := guardPromptStdinTransport(argv)
 	cmd := exec.Command(argv[0], argv[1:]...)
+	if promptStdin != "" {
+		cmd.Stdin = strings.NewReader(promptStdin)
+	}
 	cmd.Dir = wd
 	// The child env drops the parent's guard-gateway/model-API wiring and harness
 	// identity, and pins CLAUDE_CONFIG_DIR to the target seat (resume.WatchdogChildEnv —

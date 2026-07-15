@@ -155,6 +155,9 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	}
 	passthrough := append([]string(nil), fs.Args()...)
 	if *probe {
+		// This macOS-only convenience path has a fixed default prompt and accepts an
+		// operator override. Its child is launched by runTUI, whose Windows launch
+		// seam moves any large -p value to stdin before exec.
 		// Claude Code prompt-mode examples put `-p PROMPT` before output flags.
 		// The generic TUI appends --prompt after passthrough args, so probe mode
 		// injects the prompt directly into Claude's argv to keep the live command

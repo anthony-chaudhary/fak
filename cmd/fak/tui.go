@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1356,13 +1357,21 @@ func tuiExecutable() string {
 	return "fak"
 }
 
+func tuiAgentPromptTransport(launch []string, goos string) ([]string, string, bool) {
+	return guardPromptStdinTransportForOS(launch, goos)
+}
+
 func launchTUIAgent(stdout, stderr io.Writer, report tuiAgentReport) int {
 	if len(report.Launch) == 0 {
 		fmt.Fprintln(stderr, "fak console agent: empty launch command")
 		return 1
 	}
-	child := exec.Command(report.Launch[0], report.Launch[1:]...)
+	launch, promptStdin, moved := tuiAgentPromptTransport(report.Launch, runtime.GOOS)
+	child := exec.Command(launch[0], launch[1:]...)
 	child.Stdin = os.Stdin
+	if moved {
+		child.Stdin = strings.NewReader(promptStdin)
+	}
 	child.Stdout = stdout
 	child.Stderr = stderr
 	child.Env = mergeTUIAgentEnv(os.Environ(), report.Env)

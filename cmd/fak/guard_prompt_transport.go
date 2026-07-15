@@ -20,11 +20,11 @@ func guardPromptStdinTransportForOS(command []string, goos string) ([]string, st
 	if goos != "windows" || len(command) < 3 {
 		return command, "", false
 	}
-	name := strings.TrimSuffix(strings.ToLower(filepath.Base(command[0])), ".exe")
-	if name != "claude" {
+	claudeIndex := guardClaudeCommandIndex(command)
+	if claudeIndex < 0 {
 		return command, "", false
 	}
-	for i := 1; i+1 < len(command); i++ {
+	for i := claudeIndex + 1; i+1 < len(command); i++ {
 		if command[i] != "-p" && command[i] != "--print" {
 			continue
 		}
@@ -38,6 +38,19 @@ func guardPromptStdinTransportForOS(command []string, goos string) ([]string, st
 		return out, prompt, true
 	}
 	return command, "", false
+}
+
+func guardClaudeCommandIndex(command []string) int {
+	for i, arg := range command {
+		if i > 0 && command[i-1] != "--" {
+			continue
+		}
+		name := strings.TrimSuffix(strings.ToLower(filepath.Base(arg)), ".exe")
+		if name == "claude" {
+			return i
+		}
+	}
+	return -1
 }
 
 func applyGuardPromptStdinTransport(child *exec.Cmd, command []string, goos string) ([]string, bool) {

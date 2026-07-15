@@ -63,3 +63,31 @@ func TestApplyGuardPromptStdinTransportPreservesPromptBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardPromptStdinTransportMovesGuardFrontedClaudePrompt(t *testing.T) {
+	prompt := strings.Repeat("resume-carry", 4000)
+	in := []string{"fak.exe", "guard", "--provider", "anthropic", "--", "claude.exe", "--resume", "session", "-p", prompt, "--dangerously-skip-permissions"}
+	got, stdin, moved := guardPromptStdinTransportForOS(in, "windows")
+	if !moved || stdin != prompt {
+		t.Fatalf("guard-fronted prompt transport = moved %v stdin bytes %d", moved, len(stdin))
+	}
+	for _, arg := range got {
+		if arg == prompt {
+			t.Fatal("guard-fronted prompt remains on argv")
+		}
+	}
+}
+
+func TestTUIAgentPromptTransportMovesLargeWindowsPrompt(t *testing.T) {
+	prompt := strings.Repeat("tui-prompt", 4000)
+	launch := []string{"claude.exe", "--permission-mode", "bypassPermissions", "-p", prompt}
+	got, stdin, moved := tuiAgentPromptTransport(launch, "windows")
+	if !moved || stdin != prompt {
+		t.Fatalf("TUI prompt transport = moved %v stdin bytes %d", moved, len(stdin))
+	}
+	for _, arg := range got {
+		if arg == prompt {
+			t.Fatal("TUI prompt remains on argv")
+		}
+	}
+}

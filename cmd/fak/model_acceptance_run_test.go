@@ -97,7 +97,7 @@ func TestRunModelAcceptanceFixture(t *testing.T) {
 func TestRunModelAcceptanceRunWritesRetainedReport(t *testing.T) {
 	old := acceptanceClaudeCommand
 	defer func() { acceptanceClaudeCommand = old }()
-	acceptanceClaudeCommand = func(_ context.Context, _ string, args, env []string) ([]byte, []byte, error) {
+	acceptanceClaudeCommand = func(_ context.Context, _ string, args, env []string, _ string) ([]byte, []byte, error) {
 		var model string
 		for i := range args {
 			if args[i] == "--model" {
@@ -189,5 +189,16 @@ func TestClassifyAcceptanceFailureClasses(t *testing.T) {
 	refusal := modelaccept.Task{Expected: "FAK_ACCEPTANCE_RESULT=REFUSED", ResultMatch: "sentinel_line", ExpectedRefusal: "policy"}
 	if class, _ := classifyAcceptanceFailure(refusal, modelaccept.Run{Result: refusal.Expected}, nil, nil); class != "policy_refusal" {
 		t.Fatalf("refusal failure class = %q", class)
+	}
+}
+
+func TestAcceptancePromptTransportMovesLargeWindowsPrompt(t *testing.T) {
+	prompt := strings.Repeat("acceptance-task", 4000)
+	got, stdin, moved := acceptancePromptTransport("claude.exe", []string{"-p", prompt, "--model", "test"}, "windows")
+	if !moved || stdin != prompt {
+		t.Fatalf("acceptance prompt transport = moved %v stdin bytes %d", moved, len(stdin))
+	}
+	if strings.Join(got, "\x00") != strings.Join([]string{"claude.exe", "-p", "--model", "test"}, "\x00") {
+		t.Fatalf("acceptance argv = %#v", got)
 	}
 }

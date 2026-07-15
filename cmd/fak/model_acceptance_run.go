@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -49,8 +50,11 @@ type claudeStreamEvent struct {
 	claudeAcceptanceResult
 }
 
-var acceptanceClaudeCommand = func(ctx context.Context, exe string, args, env []string) ([]byte, []byte, error) {
+var acceptanceClaudeCommand = func(ctx context.Context, exe string, args, env []string, stdin string) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, exe, args...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	cmd.Env = env
 	var out, errout bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errout
@@ -172,7 +176,8 @@ func executeAcceptanceRun(opts acceptanceRunOptions, fixture, mcpPath, model str
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()
 	env := directClaudeEnvironment(opts.ClaudeConfigDir)
-	out, errout, cmdErr := acceptanceClaudeCommand(ctx, opts.Claude, argv, env)
+	command, stdin, _ := acceptancePromptTransport(opts.Claude, argv, runtime.GOOS)
+	out, errout, cmdErr := acceptanceClaudeCommand(ctx, command[0], command[1:], env, stdin)
 	raw := append([]byte(nil), out...)
 	parsed, parseErr := parseClaudeAcceptance(out, model, task)
 	r.ActualModel = parsed.actualModel
@@ -191,6 +196,10 @@ func executeAcceptanceRun(opts acceptanceRunOptions, fixture, mcpPath, model str
 		return r, raw, errout, cmdErr
 	}
 	return r, raw, errout, parseErr
+}
+
+func acceptancePromptTransport(exe string, args []string, goos string) ([]string, string, bool) {
+	return guardPromptStdinTransportForOS(append([]string{exe}, args...), goos)
 }
 
 func directClaudeEnvironment(configDir string) []string {

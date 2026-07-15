@@ -1139,3 +1139,22 @@ func TestRwApplyTrajectoryWatchdogDeadFallsThroughToRevive(t *testing.T) {
 		t.Fatalf("handled=%v decision=%+v, want fallthrough revive", handled, got)
 	}
 }
+
+func TestResumeWatchdogPromptTransportMovesGuardFrontedWindowsPrompt(t *testing.T) {
+	argv := rwResumeArgv("fak.exe", "claude.exe", "session", []string{"--provider", "anthropic"})
+	for i, arg := range argv {
+		if arg == resumeWatchdogPrompt {
+			argv[i] = strings.Repeat(arg, 200)
+			break
+		}
+	}
+	got, stdin, moved := guardPromptStdinTransportForOS(argv, "windows")
+	if !moved || stdin == "" {
+		t.Fatalf("resume prompt transport = moved %v stdin bytes %d", moved, len(stdin))
+	}
+	for _, arg := range got {
+		if arg == stdin {
+			t.Fatal("resume prompt remains on argv")
+		}
+	}
+}

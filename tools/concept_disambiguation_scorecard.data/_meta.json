@@ -94,6 +94,11 @@
           "category": "incidental",
           "reason": "Private Windows quoting implementation detail used by the existing guard spawn gate.",
           "token": "guardWindowsQuotedArgUnits"
+        },
+        {
+          "category": "incidental",
+          "reason": "private parser helper that locates the Claude executable inside a direct or guard-fronted argv; not a new operator-facing guard concept",
+          "token": "guardClaudeCommandIndex"
         }
       ],
       "exclude": [
@@ -114,6 +119,7 @@
         "gates",
         "gatew",
         "gating",
+        "guardClaudeCommandIndex",
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
