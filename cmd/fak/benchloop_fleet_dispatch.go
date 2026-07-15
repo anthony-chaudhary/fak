@@ -368,8 +368,14 @@ func updateBenchFleetCatalog(root string) error {
 		runs = append(runs, map[string]any{"run_id": m.RunID, "machine_id": m.MachineID, "timestamp": m.Timestamp, "model": model, "precision": precision, "path": filepath.ToSlash(rel), "provenance": "measured", "tags": m.Tags})
 		seen[m.RunID] = true
 		if machine := machines[m.MachineID]; machine != nil {
-			count, _ := machine["runs"].(float64)
-			machine["runs"] = int(count) + 1
+			count := 0
+			switch value := machine["runs"].(type) {
+			case float64:
+				count = int(value)
+			case int:
+				count = value
+			}
+			machine["runs"] = count + 1
 			lastRun, _ := machine["last_run"].(string)
 			if m.Timestamp > lastRun {
 				machine["last_run"] = m.Timestamp

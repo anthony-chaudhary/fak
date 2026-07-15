@@ -248,6 +248,7 @@ func TestBenchFleetCatalogDoesNotRegressLastRun(t *testing.T) {
 	var got struct {
 		Machines map[string]struct {
 			LastRun string `json:"last_run"`
+			Runs    int    `json:"runs"`
 		} `json:"machines"`
 	}
 	out, err := os.ReadFile(catalogPath)
@@ -259,5 +260,8 @@ func TestBenchFleetCatalogDoesNotRegressLastRun(t *testing.T) {
 	}
 	if got.Machines["node-a"].LastRun != "20260102T000000Z" {
 		t.Fatalf("last_run regressed to %q", got.Machines["node-a"].LastRun)
+	}
+	if got.Machines["node-a"].Runs != 2 {
+		t.Fatalf("runs = %d, want 2", got.Machines["node-a"].Runs)
 	}
 }
