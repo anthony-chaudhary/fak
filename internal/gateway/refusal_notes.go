@@ -72,7 +72,7 @@ func denySummary(adjs []ToolAdjudication) string {
 		constraint := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, reasonOrKind(a.Verdict), a.Verdict.Disposition)
 		notes, _ := renderRefusalNotes(a)
 		if notes == "" {
-			notes = "choose an allowed alternative"
+			notes = errorAffordance(reasonOrKind(a.Verdict))
 		}
 		parts = append(parts, notes+" Constraint: "+constraint)
 	}
@@ -106,7 +106,7 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 			constraint := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
 			notes, recipe := renderRefusalNotes(a)
 			if notes == "" {
-				notes = "choose an allowed alternative"
+				notes = errorAffordance(reasonOrKind(a.Verdict))
 			}
 			entry := notes + " Constraint: " + constraint
 			if recipe {
