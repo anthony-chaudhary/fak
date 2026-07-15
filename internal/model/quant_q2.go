@@ -31,13 +31,20 @@ import (
 
 const qBlk2 = 32
 
-// q2Tensor is a resident int2 weight matrix [out, in], in == nblk*qBlk2. Scales and codes
-// are separate per-row slices so a row's codes prefetch alongside its scales (the same
-// layout discipline as q8Tensor/q4Tensor).
+// q2Tensor is a resident int2 weight matrix [out, in]. It carries one of two block
+// geometries (see quant_q2_resident.go for the reconciliation):
+//
+//   - g32 quantize-at-load form (raw == nil): in == nblk*qBlk2, separate per-row f32
+//     scales and packed codes (the same layout discipline as q8Tensor/q4Tensor), code
+//     offset -2.
+//   - g128 GGUF-resident form (raw != nil): in == nblk*qBlk2G128, raw holds the GGUF
+//     Q2_0 blocks VERBATIM (34 B each: f16 scale + 128 2-bit codes, offset -1), row-major
+//     like q4kTensor.raw; d and q stay nil.
 type q2Tensor struct {
 	out, in, nblk int
-	d             []float32 // out*nblk per-block f32 scales
-	q             []byte    // out*nblk*8 packed 2-bit codes (4 per byte, low code first)
+	d             []float32 // g32: out*nblk per-block f32 scales (nil for g128)
+	q             []byte    // g32: out*nblk*8 packed 2-bit codes (4 per byte, low code first; nil for g128)
+	raw           []byte    // g128: out*nblk*34 GGUF Q2_0 block bytes verbatim (nil for g32)
 }
 
 // quantizeQ2Block stores the 32 weights of src as one (d, 8 packed bytes) block at dst,
@@ -116,8 +123,11 @@ func quantizeQ2(w []float32, out, in int) *q2Tensor {
 
 // dequantQ2Tensor reconstructs the full [out,in] f32 matrix from the int2 codes. Used by
 // the witness (GEMV-vs-reference) and by any consumer that wants the dense weights back;
-// it is the whole-tensor inverse of quantizeQ2.
+// it is the whole-tensor inverse of quantizeQ2 (g32) / the resident wrap (g128).
 func dequantQ2Tensor(qt *q2Tensor) []float32 {
+	if qt.raw != nil {
+		return dequantQ2G128Tensor(qt)
+	}
 	w := make([]float32, qt.out*qt.in)
 	quarter := qBlk2 / 4
 	parFor(qt.out, numWorkers, func(lo, hi int) {
@@ -131,9 +141,13 @@ func dequantQ2Tensor(qt *q2Tensor) []float32 {
 }
 
 // footprintBytes is the resident size of the int2 tensor: 8 code bytes + one f32 scale per
-// 32-wide block. Exposed so the memory-reduction witness can compare it against the Q4/Q8
-// footprints without reaching into the unexported fields.
+// 32-wide block (g32), or the verbatim GGUF block bytes (g128: 34 B per 128 weights).
+// Exposed so the memory-reduction witness can compare it against the Q4/Q8 footprints
+// without reaching into the unexported fields.
 func (qt *q2Tensor) footprintBytes() int {
+	if qt.raw != nil {
+		return len(qt.raw)
+	}
 	return len(qt.q) + 4*len(qt.d)
 }
 
@@ -154,6 +168,12 @@ func q2MatRowsInto(qt *q2Tensor, x, y []float32) {
 }
 
 func q2MatRowsRange(qt *q2Tensor, x, y []float32, lo, hi int) {
+	if qt.raw != nil {
+		// g128 GGUF-resident variant: decode the 34-byte Q2_0 blocks in place
+		// (quant_q2_resident.go); the g32 body below reads the nil d/q slices.
+		q2G128MatRowsRange(qt, x, y, lo, hi)
+		return
+	}
 	blk := make([]float32, qBlk2)
 	nblk := qt.nblk
 	quarter := qBlk2 / 4

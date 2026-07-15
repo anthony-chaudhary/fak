@@ -92,6 +92,11 @@ func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok
 		return qkK, blockIQ3XXSBytes, true
 	case TensorIQ4_XS:
 		return qkK, blockIQ4XSBytes, true
+	case TensorQ2_0:
+		// Ternary group-128 blocks (f16 scale + 128 2-bit codes, 34 B; #4868 T1). Resident
+		// target is the model's ternary store (AddResidentQ2 → q2MatRows, #4870): the raw
+		// GGUF bytes feed the CPU GEMV directly, no re-quantize and no ~15× f32 round trip.
+		return 128, blockQ2_0Bytes, true
 	}
 	return 0, 0, false
 }

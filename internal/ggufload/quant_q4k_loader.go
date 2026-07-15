@@ -431,6 +431,10 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				if err := builder.AddResidentQ8_0(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
+			case TensorQ2_0:
+				if err := builder.AddResidentQ2(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
 			default: // TensorQ4_K
 				if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
 					return err
