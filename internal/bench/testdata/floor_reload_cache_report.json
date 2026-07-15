@@ -1,0 +1,49 @@
+{
+  "schema": "fak.floor-reload-cache/1",
+  "assumptions": {
+    "cache_read_rate": "0.1x token-equivalent",
+    "promotion_path": "replace modeled bust counts with live #2916 metrics before a performance claim",
+    "reload_effect": "one reachability flip changes tools[] and busts the stable prefix once"
+  },
+  "results": [
+    {
+      "scenario": {
+        "turns": 8,
+        "reload_turn": 4,
+        "stable_prefix_tokens": 35800,
+        "fresh_tokens_per_turn": 2000
+      },
+      "baseline_cost_tokens": 76860,
+      "reload_cost_tokens": 109080,
+      "forfeited_cached_tokens": 35800,
+      "spend_fraction": 0.2953795379537954,
+      "turns_to_amortize": 17
+    },
+    {
+      "scenario": {
+        "turns": 32,
+        "reload_turn": 16,
+        "stable_prefix_tokens": 35800,
+        "fresh_tokens_per_turn": 2000
+      },
+      "baseline_cost_tokens": 210780,
+      "reload_cost_tokens": 243000,
+      "forfeited_cached_tokens": 35800,
+      "spend_fraction": 0.1325925925925926,
+      "turns_to_amortize": 17
+    },
+    {
+      "scenario": {
+        "turns": 128,
+        "reload_turn": 64,
+        "stable_prefix_tokens": 35800,
+        "fresh_tokens_per_turn": 2000
+      },
+      "baseline_cost_tokens": 746460,
+      "reload_cost_tokens": 778680,
+      "forfeited_cached_tokens": 35800,
+      "spend_fraction": 0.04137771613499769,
+      "turns_to_amortize": 17
+    }
+  ]
+}
