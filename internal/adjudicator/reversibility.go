@@ -66,12 +66,13 @@ func ReversibilityConfirmed(tool string, args map[string]any) (ReversibilityEnve
 }
 
 // ReversibilityConfirmToken derives the stable preview token. Confirmation keys
-// AND incidental annotation keys (a Bash call's free-text "description") are
-// excluded from the hashed payload, and the action-bearing command text is
-// whitespace-normalized (see normalizeCommandForToken), so the token binds only
-// to the call's effect-bearing subject and is stable across a re-proposal even
-// when the client's confirm key, prose annotation, OR cosmetic command spacing
-// drifts between proposals.
+// AND incidental keys (a Bash call's free-text "description", and the client
+// supervision knobs "timeout"/"timeout_ms"/"run_in_background" — see
+// isIncidentalTokenKey) are excluded from the hashed payload, and the
+// action-bearing command text is whitespace-normalized (see normalizeCommandForToken),
+// so the token binds only to the call's effect-bearing subject and is stable across a
+// re-proposal even when the client's confirm key, prose annotation, supervision knobs,
+// OR cosmetic command spacing drift between proposals.
 //
 // The annotation exclusion is the fix for the confirm-loop that wedged a fleet
 // session (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md): Claude Code's Bash
@@ -1102,14 +1103,37 @@ func foldLineContinuations(s string) string {
 	return b.String()
 }
 
-// isIncidentalTokenKey reports whether an argument is a pure human-readable
-// annotation with no execution effect — the free-text "description" Claude Code
-// attaches to every Bash call, or the "explanation" other harnesses use. Clients
-// regenerate these each turn, so folding them into the confirm token rotated it
-// on every re-proposal and made the preview-confirm handshake unsatisfiable.
+// isIncidentalTokenKey reports whether an argument is incidental to the call's
+// EFFECT — carried by the client for its own bookkeeping, never changing what the
+// call does to the outside world. Clients re-emit these fields per turn, so folding
+// them into the confirm token rotated it on every re-proposal and made the
+// preview-confirm handshake unsatisfiable. Two categories qualify:
+//
+//   - Human-readable annotation: the free-text "description" Claude Code attaches to
+//     every Bash call, or the "explanation" other harnesses use (#2777).
+//   - Client supervision knobs: how long the CALLER waits ("timeout"/"timeout_ms")
+//     and whether it detaches ("run_in_background"). These say how the caller
+//     SUPERVISES the call, not what it does — `git push` pushes the same commits to
+//     the same remote at any timeout, foreground or background — and none is read by
+//     the classifier or rendered into the preview the operator acknowledges. They are
+//     the residual axis of the confirm-loop (fak-private#21): the gate advertises
+//     "re-propose byte-identical … the free-text description need not match", but a
+//     model that re-proposed the identical outward-facing publish while nudging its timeout
+//     (the ordinary reaction to a slow or timed-out call over a flaky remote bridge)
+//     drew a FRESH token, so the advertised recovery could never converge and the
+//     operator's repeated approval never became executable.
+//
+// Excluding a key here cannot weaken the floor: the token must bind to exactly the
+// effect-bearing subject the preview shows, and every argument that steers the effect
+// — a command's text, an MCP git_push `force`/`branch`, a `dangerouslyDisableSandbox`,
+// a `workdir` — is still hashed verbatim, so a confirm can never be transplanted onto
+// a materially different call. Hashing everything by default and excluding a NAMED
+// incidental is deliberate: a novel effect-bearing arg binds automatically.
 func isIncidentalTokenKey(k string) bool {
 	switch strings.ToLower(k) {
 	case "description", "explanation":
+		return true
+	case "timeout", "timeout_ms", "run_in_background":
 		return true
 	default:
 		return false
