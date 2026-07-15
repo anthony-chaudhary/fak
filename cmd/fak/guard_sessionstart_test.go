@@ -391,3 +391,22 @@ func TestInstallGuardSessionStartHookAtWiring(t *testing.T) {
 		}
 	})
 }
+
+func TestGuardSessionStartHintPositiveFirst(t *testing.T) {
+	if !strings.HasPrefix(guardSessionStartHint, "Reach for the fak substrate verbs") {
+		t.Fatalf("hint does not lead with affordance: %q", guardSessionStartHint)
+	}
+	for _, forbidden := range []string{"before working as", "must invoke", "will not", "do not", "never"} {
+		if strings.Contains(strings.ToLower(guardSessionStartHint), forbidden) {
+			t.Fatalf("hint retains negation-first clause %q: %q", forbidden, guardSessionStartHint)
+		}
+	}
+	for _, token := range []string{"`mcp__fak__fak_index_work`", "`mcp__fak__fak_admit`", "`mcp__fak__fak_adjudicate`", "`mcp__fak__fak_memory_run`", "`mcp__fak__fak_tools_search`"} {
+		if !strings.Contains(guardSessionStartHint, token) {
+			t.Fatalf("hint dropped %s", token)
+		}
+	}
+	if got := negframe.Reframe(guardSessionStartHint); got != guardSessionStartHint {
+		t.Fatalf("positive source is not reframe-idempotent:\n got %q\nwant %q", got, guardSessionStartHint)
+	}
+}
