@@ -280,6 +280,14 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range cacheReadShareEpisodeFromSessions(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the cross-provider cost-to-close economics cell (#4488): one episode per
+	// provider of billed USD per completed session (the corpus proxy for a verified
+	// close), priced by the existing sessionaudit per-model table — so the live run
+	// renders where every provider fak routes to sits on cost-to-close, UNMEASURED
+	// for a provider with no priced billing rather than a fabricated $0.00.
+	for _, in := range providerCostEpisodesFromSessions(sessionCorpus) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{
@@ -731,6 +739,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "billed_cache_read_share", Theory: "~80% of the billed input-side tokens across the whole multi-provider corpus (input + cache_read + cache_creation) are served as cache reads (claim 0.8 — a seeded estimate the RSI loop recalibrates toward the measured top-line share)"},
 			},
 		},
+		{
+			Name:    "provider-cost",
+			Summary: "billed USD per completed issue per provider (claude/gpt/gemini/deepseek/glm/kimi), folded from the local multi-provider session corpus priced by the existing sessionaudit table — the cross-provider cost-to-close economics leaderboard cell, one episode per provider against the one registered claim; a provider with no priced billing is UNMEASURED, never a fabricated $0.00 (#4488)",
+			Metrics: []dojoMetricInfo{
+				{Name: "cost_per_completed_issue", Theory: "a provider spends about three billed US dollars per completed issue, the mean billed USD per completed session (claim 3.0 — a seeded estimate the RSI loop recalibrates toward the measured per-provider means)"},
+			},
+		},
 	}
 }
 
@@ -749,6 +764,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		providerTurnsLever{},
 		providerCacheLever{},
 		cacheReadShareLever{},
+		providerCostLever{},
 	}
 }
 
@@ -1348,6 +1364,118 @@ func cacheReadShareEpisodeFromSessions(sessions []sessionaudit.Session) []dojo.S
 			Source:     "billed cache_read / (input + cache_read + cache_creation) summed across EVERY provider row in the local session corpus — the WITNESSED top-line cache-read fraction (OBSERVED)",
 		},
 	}}
+}
+
+// --- the provider-cost lever --------------------------------------------------
+
+// providerCostLever is the cross-provider economics cell (#4488): the billed USD a
+// provider spends per completed issue (cost_per_completed_issue), PER PROVIDER, so
+// the dojo can state where fak sits versus other providers on the generic
+// cost-to-close KPI instead of calibrating only fak-internal levers. Theory is the
+// one registered provider-cost/cost_per_completed_issue claim; reality folds from
+// the same local multi-provider session corpus (and the same provider keying) as
+// the provider-turns and provider-cache leaderboard cells, one episode per
+// provider. The scenario corpus is ignored: the session corpus, not a replay, is
+// the ground truth for billed cost.
+type providerCostLever struct{}
+
+func (providerCostLever) Name() string { return "provider-cost" }
+
+func (providerCostLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return providerCostEpisodesFromSessions(loadProviderTurnsSessions()), nil
+}
+
+// providerCostEpisodesFromSessions adapts the session corpus into the dojo's
+// (prediction, outcome) pairs for provider-cost/cost_per_completed_issue — one
+// episode per provider, every episode scored against the SAME registered claim so
+// the recalibrate arm still rewrites exactly one literal while the report renders
+// the per-provider spread. It is pure so the fold is unit-testable without a corpus
+// on disk. A completed session = a readable session (Error=="") with at least one
+// assistant turn, keyed to its dominant billed provider — the same completed-task
+// unit provider-turns (#4505) folds, used here as the corpus proxy for a verified
+// close. A provider's cost_per_completed_issue is its billed USD (the EXISTING
+// sessionaudit per-model price table, NOT a new one) summed over ITS OWN billed
+// models across its completed sessions, divided by that provider's completed-session
+// count; billing only the provider's own models keeps a stray cross-provider turn
+// from contaminating (or fabricating) a provider's cost. A provider whose completed
+// sessions carry NO priced billing — every one of its models is unpriced in the
+// sessionaudit table, so its billed USD is 0 — scores UNMEASURED, never a fabricated
+// $0.00 per issue: fak having no price for a provider is not the same as a genuinely
+// free close (#4490's honesty rule). A corpus with no completed session at all
+// yields one honest UNMEASURED episode.
+func providerCostEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.ScoredInput {
+	pred := dojo.Registry.MustPredict("provider-cost", "cost_per_completed_issue", "usd")
+	type acc struct {
+		count int
+		usd   float64
+	}
+	sums := map[string]*acc{}
+	for _, s := range sessions {
+		if s.Error != "" || s.AssistantTurns == 0 {
+			continue
+		}
+		provider := providerTurnsDominantProvider(s)
+		if provider == "" {
+			continue // only harness-synthetic turns — no billed provider to key by
+		}
+		// Bill only the dominant provider's OWN models, so a stray cross-provider
+		// turn never contaminates this provider's cost (and never fabricates a
+		// nonzero cost for an otherwise-unpriced provider).
+		var usd float64
+		for model, pm := range s.PerModel {
+			if providerTurnsKey(model) != provider {
+				continue
+			}
+			usd += sessionaudit.ModelCost(model, pm)
+		}
+		a := sums[provider]
+		if a == nil {
+			a = &acc{}
+			sums[provider] = a
+		}
+		a.count++
+		a.usd += usd
+	}
+	if len(sums) == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Source:   "no completed sessions in the local session corpus — nothing to fold a per-provider cost per completed issue from",
+			},
+		}}
+	}
+	providers := make([]string, 0, len(sums))
+	for p := range sums {
+		providers = append(providers, p)
+	}
+	sort.Strings(providers)
+	out := make([]dojo.ScoredInput, 0, len(providers))
+	for _, p := range providers {
+		a := sums[p]
+		if a.usd == 0 {
+			out = append(out, dojo.ScoredInput{
+				Prediction: pred,
+				Outcome: dojo.Outcome{
+					Measured: false,
+					Sample:   a.count,
+					Source:   "provider " + p + ": completed sessions but no priced billing — the sessionaudit price table has no entry for this provider's models, so cost per completed issue is UNMEASURED rather than a fabricated $0.00",
+				},
+			})
+			continue
+		}
+		out = append(out, dojo.ScoredInput{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Realized:   a.usd / float64(a.count),
+				Provenance: dojo.Observed,
+				Measured:   true,
+				Sample:     a.count,
+				Source:     "provider " + p + ": billed USD (sessionaudit per-model price table) per completed session over the local multi-provider corpus (OBSERVED)",
+			},
+		})
+	}
+	return out
 }
 
 // --- output + durable ledger I/O -------------------------------------------
