@@ -1513,6 +1513,11 @@ func cmdGuard(argv []string) {
 	srv.SetStartupReport(startupReport)
 	emitGuardStartupBanner(view, startupReport)
 
+	// Seed the guard child into the opt-in process task manager at origin, with the
+	// durable policy/budget/Stop-ledger paths that already exist before launch.
+	policyEvidence := writeGuardPolicyOriginEvidence(guardTraceID, *policyPath)
+	budgetEvidence := writeGuardBudgetEnvelopeEvidence(guardTraceID, contextBudgetLimit, maxDurationLimit.String())
+	registerGuardChildOriginTask(guardTraceID, command[0], policyEvidence, "", budgetEvidence, stopHookInstall.StopsLedger)
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	rotationRuntime := guardRotationRuntimeFor(command, resolvedRotateMode)
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)

@@ -18,7 +18,7 @@ func init() {
 }
 
 var (
-	procTaskMgrOnce sync.Once
+	procTaskMgrOnce = &sync.Once{}
 	procTaskMgr     *taskmgr.Manager
 )
 
@@ -38,7 +38,7 @@ func taskManagerEnabled() bool {
 // a separate integration step.
 func processTaskManager() *taskmgr.Manager {
 	procTaskMgrOnce.Do(func() {
-		procTaskMgr = taskmgr.NewManager()
+		procTaskMgr = taskmgr.NewManager(taskmgr.WithDefaultOriginWitnesses())
 		if task, err := procTaskMgr.StartTask(taskmgr.TaskSpec{TaskID: "fak_serve", Title: "fak serve process"}); err == nil {
 			_, _ = task.StartObserveStep("serve_observe", "serve process observe")
 		}
