@@ -1,0 +1,24 @@
+{
+  "schema": "fak.bench-fleet.witness.v1",
+  "request_id": "90be86c7d03a1ede",
+  "machine": "gcp-g2-l4",
+  "benchmark": "turn-tax",
+  "precision": "n/a",
+  "state": "succeeded",
+  "route": "gcp:ssh/fak-cuda-build-l4",
+  "command": [
+    "gcloud",
+    "compute",
+    "ssh",
+    "fak-cuda-build-l4",
+    "--zone",
+    "us-central1-b",
+    "--quiet",
+    "--command",
+    "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak \u0026\u0026 export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/fak turntax -suite turntax-airline -out /tmp/fak-turntax-report.json"
+  ],
+  "started_at": "2026-07-15T02:19:06Z",
+  "finished_at": "2026-07-15T02:19:11Z",
+  "exit_code": 0,
+  "output": "FAK_BENCH_NODE=fak-cuda-build-l4\n== fak turntax: turntax-airline  (14 calls, hash 71c788f2c57aeb10) ==\nconsistency guard (counters==classification, not an independent oracle): ok\n\n-- class breakdown (live kernel verdicts) --\n  grammar repair (TRANSFORM)  : 2   -\u003e saved 2 baseline reparse turns\n  vdso tier-1 pure            : 2\n  vdso tier-2 dedup (cache)   : 3\n  vdso tier-3 static          : 2\n  vdso total                  : 7   -\u003e saved 7 baseline round-trip turns\n  quarantine (poison held)    : 1   [safety floor]\n  deny (capability floor)     : 1   [safety floor]\n  pass (allow+engine, control): 3   -\u003e 0 saved (both arms pay it)\n\n-- NET turn-tax (happy path, deterministic) --\n  turns saved                 : 9  (forced 5 = grammar+dedup; elision 4 = pure+static)\n  tokens saved                : 11880  (@ 1200+120 tok/turn)\n  dollars saved               : $0.04860\n  latency saved               : 13.50 s  (@ 1500 ms/turn; 1-shot serve p50 = 11239 ns)\n\n-- vDSO ablation (REAL ON/OFF path swap) --\n  turns saved  vdso ON  : 9\n  turns saved  vdso OFF : 2\n  vdso lever contribution: 7 turns  (== VDSOHits 7)\n\n-- safety floor (deterministic moat, NOT a turn count) --\n  injections admitted   baseline=1  fak=0\n  destructive executed  baseline=1  fak=0\n\n-- ablation levers --\n  grammar-repair [turn-tax] turns=2    TRANSFORM in-syscall (alias-\u003ecanonical)\n  vdso           [turn-tax] turns=7    3-tier local serve (pure / content-cache / static)\n  quarantine     [safety-floor] turns=0    context-MMU result admission (poison paged out)\n  deny           [safety-floor] turns=0    capability-floor adjudication (deny-as-value)\n  NET (1-shot)   [turn-tax] turns=9    all levers — turns the baseline pays and fak does not\n\n-- cost sensitivity (turns fixed by the kernel; per-turn price varies) --\n  local-fast (400ms, 600tok)     tokens=6480     $0.03240  3.60s\n  hosted-flash (1.5s, 1200tok)   tokens=11880    $0.04860  13.50s\n  frontier (4s, 4000tok)         tokens=37080    $0.12420  36.00s\n\nreport written              : /tmp/fak-turntax-report.json\n"
+}

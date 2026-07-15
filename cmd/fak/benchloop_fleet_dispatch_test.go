@@ -220,6 +220,27 @@ func TestBenchFleetGCPAgentLiveUsesBoundedGatewayRecipe(t *testing.T) {
 	}
 }
 
+func TestBenchFleetGCPTurnTaxUsesBoundedIsolatedRecipe(t *testing.T) {
+	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
+		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "turn-tax", Command: "go run ./cmd/fak turntax --suite turntax-airline"})
+		if err != nil || state != "running" || name != "gcloud" {
+			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
+		}
+		command := strings.Join(args, " ")
+		for _, want := range []string{"FAK_BENCH_NODE=", "turntax", "-suite turntax-airline", "-out /tmp/fak-turntax-report.json"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s: command missing %q: %q", machine, want, command)
+			}
+		}
+		if strings.Contains(command, "--suite") {
+			t.Fatalf("%s: planner's invalid double-dash flag leaked into command: %q", machine, command)
+		}
+		if machine == "gcp-g2-l4-32" && !strings.Contains(command, "docker run") {
+			t.Fatalf("COS route must use container: %q", command)
+		}
+	}
+}
+
 func TestBenchFleetGCPSessionUsesBoundedSyntheticRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
 		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "session-benchmark", Command: "go run ./cmd/sessionbench"})

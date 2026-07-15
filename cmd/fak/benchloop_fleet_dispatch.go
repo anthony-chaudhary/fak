@@ -187,6 +187,16 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "turn-tax" && strings.HasPrefix(req.Machine, "gcp-") {
+		// Replay the committed airline trace with output isolated under /tmp. This is
+		// bounded, deterministic real turn-tax execution on every provisioned node.
+		run := "go run ./cmd/fak turntax -suite turntax-airline -out /tmp/fak-turntax-report.json"
+		if req.Machine == "gcp-g2-l4-32" {
+			// Container-Optimized OS mounts the persistent home filesystem noexec.
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/fak turntax -suite turntax-airline -out /tmp/fak-turntax-report.json"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
+	}
 	if req.Benchmark == "session-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
 		// Use the same bounded synthetic session workload on every node so the fleet
 		// compares the real session execution path without an unbounded model load.

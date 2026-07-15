@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-a3-high-h100-1g-bench-fleet-b60cc6b49d74f50f-20260715T021822Z",
+  "machine_id": "gcp-a3-high-h100-1g",
+  "timestamp": "20260715T021822Z",
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "rev": "unknown"
+  },
+  "harness": {
+    "name": "fak-bench-fleet",
+    "version": "1"
+  },
+  "model": {
+    "name": "",
+    "precision": "n/a"
+  },
+  "config": {
+    "benchmark": "turn-tax",
+    "request_id": "b60cc6b49d74f50f",
+    "route": "gcp:ssh/fak-qwen-serve"
+  },
+  "tags": [
+    "bench-fleet",
+    "gpu",
+    "turn-tax"
+  ],
+  "artifacts": {
+    "witness": "witness.json"
+  }
+}
