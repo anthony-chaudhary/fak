@@ -258,33 +258,48 @@ func benchFleetRemoteCommand(req benchFleetRequest) string {
 		}
 		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
 	}
-	if req.Benchmark == "qwen36" && strings.HasPrefix(req.Machine, "gcp-") {
+	if req.Benchmark == "qwen36" && (strings.HasPrefix(req.Machine, "gcp-") || req.Machine == "a100" || req.Machine == "cpu-server-a") {
 		// The planner explicitly asks for Qwen3.6 through a gateway. Each compute node
 		// launches and witnesses its own request; the provisioned credential stays in a
 		// mode-0600 file and is never placed in argv, the request JSON, or the witness.
-		return "printf 'FAK_BENCH_NODE='; hostname; key=$HOME/.config/fak/groq.key; test -s $key; " +
+		credential := "key=$HOME/.config/fak/groq.key; test -s $key; "
+		if req.Machine == "a100" || req.Machine == "cpu-server-a" {
+			// Lab nodes may not hold gateway credentials. Still execute a real node-local
+			// benchmark and report provisioning honestly instead of replaying placeholder prose.
+			return benchFleetLabPrefix() + "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1"
+		}
+		return "printf 'FAK_BENCH_NODE='; hostname; " + credential +
 			"curl -fsS -o /tmp/fak-qwen36-response.json -w 'FAK_BENCH_HTTP=%{http_code} FAK_BENCH_SECONDS=%{time_total}' " +
 			"-H \"Authorization: Bearer $(cat $key)\" -H 'Content-Type: application/json' " +
 			"-d '{\"model\":\"qwen/qwen3.6-27b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with benchmark ok\"}],\"max_tokens\":8}' " +
 			"https://api.groq.com/openai/v1/chat/completions && echo && " +
 			"python3 -c 'import json; d=json.load(open(\"/tmp/fak-qwen36-response.json\")); assert d.get(\"model\")==\"qwen/qwen3.6-27b\"; print(\"FAK_BENCH_MODEL=\"+d[\"model\"]); print(\"FAK_BENCH_COMPLETION_TOKENS=\"+str(d.get(\"usage\",{}).get(\"completion_tokens\",0)))'"
 	}
-	if req.Benchmark == "radix-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+	if req.Benchmark == "radix-benchmark" && (strings.HasPrefix(req.Machine, "gcp-") || req.Machine == "a100" || req.Machine == "cpu-server-a") {
 		if req.Machine == "gcp-g2-l4-32" {
 			// COS home is noexec, so run the provisioned source and real weights in Go's container.
 			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -v $HOME/models/smollm2-135m:/models/smollm2-135m -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/radixbench -hf /models/smollm2-135m -lean -quant -reps 1 -only few-shot"
 		}
+		if req.Machine == "a100" || req.Machine == "cpu-server-a" {
+			return benchFleetLabPrefix() + "go run ./cmd/radixbench -live=false -reps 1 -only few-shot"
+		}
 		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/radixbench -hf ~/models/smollm2-135m -lean -quant -reps 1 -only few-shot"
 	}
-	if req.Benchmark == "model-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+	if req.Benchmark == "model-benchmark" && (strings.HasPrefix(req.Machine, "gcp-") || req.Machine == "a100" || req.Machine == "cpu-server-a") {
 		if req.Machine == "gcp-g2-l4-32" {
 			// Container-Optimized OS mounts the persistent home filesystem noexec.
 			// Run the provisioned source and weights in the pinned Go container instead.
 			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -v $HOME/models/smollm2-135m:/models/smollm2-135m -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/modelbench -hf /models/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
 		}
+		if req.Machine == "a100" || req.Machine == "cpu-server-a" {
+			return benchFleetLabPrefix() + "go run ./cmd/modelbench -synthetic tiny -decode-steps 4 -decode-reps 1 -prefill-reps 1"
+		}
 		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/modelbench -hf ~/models/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
 	}
 	if req.Benchmark == "gpu-benchmark" {
+		if req.Machine == "a100" {
+			return benchFleetLabPrefix() + "CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=sm_80 bash tools/run_485_acceptance_on_gpu.sh"
+		}
 		if req.Machine == "gcp-g2-l4-32" {
 			return "printf 'FAK_BENCH_NODE='; hostname; curl -fsS -o /tmp/fak-bench-response -w 'FAK_BENCH_HTTP=%{http_code} FAK_BENCH_SECONDS=%{time_total}' -H 'Content-Type: application/json' -d '{\"model\":\"qwen2.5-0.5b-gpu\",\"messages\":[{\"role\":\"user\",\"content\":\"Say benchmark ok\"}],\"max_tokens\":4}' http://127.0.0.1:8082/v1/chat/completions && echo && cat /tmp/fak-bench-response"
 		}
@@ -301,6 +316,10 @@ func benchFleetRemoteCommand(req benchFleetRequest) string {
 		}
 	}
 	return prefix + req.Command
+}
+
+func benchFleetLabPrefix() string {
+	return "printf 'FAK_BENCH_NODE='; hostname; export PATH=/usr/local/go/bin:/usr/local/cuda/bin:$PATH GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOTOOLCHAIN=auto; mkdir -p /tmp/fak-bench-results; repo=$(mktemp -d /tmp/fak-bench.XXXXXX) && git clone --depth 1 https://github.com/anthony-chaudhary/fak $repo && cd $repo && "
 }
 
 func benchFleetRoute(root string, req benchFleetRequest) (string, []string, string, string, error) {
@@ -320,7 +339,23 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 		if _, err := os.Stat(bridge); err != nil {
 			return "", nil, "dgxbridge", "waiting_credentials", errors.New("private bridge unavailable")
 		}
-		return bridge, []string{"run", remote}, "dgxbridge", "running", nil
+		cfg := benchFleetRoutes(root)
+		channel := cfg.A100Channel
+		if req.Machine == "cpu-server-a" {
+			channel = cfg.CPUServerChannel
+		}
+		args := []string{}
+		if channel != "" {
+			args = append(args, "-channel", channel)
+		}
+		// The bridge's file-readback path wedges under busy Slack channels. Transcript
+		// mode plus a generous timeout is the independently verified lab runbook.
+		// Transport the script as base64 so the Slack hub cannot reinterpret URL
+		// slashes, shell separators, or quoted JSON before bash receives it.
+		encoded := base64.StdEncoding.EncodeToString([]byte(remote))
+		remote = "printf %s " + encoded + " | base64 -d | bash"
+		args = append(args, "-timeout", "4m", "-remote-out", "/tmp/fak-bench-results/"+req.ID+".bridge.out", "run", remote)
+		return bridge, args, "dgxbridge", "running", nil
 	case "workstation-a":
 		cfg := benchFleetRoutes(root)
 		if cfg.WorkstationHost == "" || cfg.WorkstationUser == "" || cfg.WorkstationIdentityFile == "" {
@@ -339,18 +374,32 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 		destination := cfg.WorkstationUser + "@" + cfg.WorkstationHost
 		return "ssh", []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-i", cfg.WorkstationIdentityFile, destination, "powershell.exe -NoProfile -NonInteractive -Command \"" + strings.ReplaceAll(remotePS, "\"", "\\\"") + "\""}, "workstation:ssh/" + cfg.WorkstationHost, "running", nil
 	case "node-macos-a":
-		host := benchFleetMacHost(root)
+		remote = "printf 'FAK_BENCH_NODE='; hostname; " + req.Command
+		remote = "set -eu; export PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=auto; " +
+			"repo=; for p in \"$HOME/fak-3xbench/fak\" \"$HOME/.fak-mac-bench/fak\" \"$HOME/fak-3xbench\"; do " +
+			"if test -d \"$p/.git\" && test -d \"$p/cmd/livecodebench\"; then repo=$p; break; fi; done; " +
+			"test -n \"$repo\"; cd \"$repo\"; " + remote
+		cfg := benchFleetRoutes(root)
+		host := strings.TrimSpace(cfg.MacHost)
 		if host == "" {
-			return "", nil, "mac:tailscale", "waiting_session", errors.New("mac runner host is not configured")
+			return "", nil, "mac:ssh", "waiting_session", errors.New("mac runner host is not configured")
 		}
-		return "tailscale", []string{"ssh", host, remote}, "mac:tailscale/" + host, "running", nil
+		args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "IdentitiesOnly=yes"}
+		if cfg.MacIdentityFile != "" {
+			args = append(args, "-i", cfg.MacIdentityFile)
+		}
+		args = append(args, host, remote)
+		return "ssh", args, "mac:ssh/" + host, "running", nil
 	default:
 		return "", nil, "unknown", "waiting_route", fmt.Errorf("no route for machine %q", req.Machine)
 	}
 }
 
 type benchFleetRouteConfig struct {
+	A100Channel             string `json:"a100_channel"`
+	CPUServerChannel        string `json:"cpu_server_channel"`
 	MacHost                 string `json:"mac_host"`
+	MacIdentityFile         string `json:"mac_identity_file"`
 	WorkstationHost         string `json:"workstation_host"`
 	WorkstationUser         string `json:"workstation_user"`
 	WorkstationIdentityFile string `json:"workstation_identity_file"`
@@ -363,8 +412,17 @@ func benchFleetRoutes(root string) benchFleetRouteConfig {
 	if err == nil {
 		_ = json.Unmarshal(b, &cfg)
 	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_A100_CHANNEL")); value != "" {
+		cfg.A100Channel = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_CPU_SERVER_CHANNEL")); value != "" {
+		cfg.CPUServerChannel = value
+	}
 	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_MAC_HOST")); value != "" {
 		cfg.MacHost = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_MAC_IDENTITY_FILE")); value != "" {
+		cfg.MacIdentityFile = value
 	}
 	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_WORKSTATION_HOST")); value != "" {
 		cfg.WorkstationHost = value

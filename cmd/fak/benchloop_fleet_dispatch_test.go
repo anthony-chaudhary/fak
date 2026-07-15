@@ -46,10 +46,73 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 	}
 }
 
+func TestBenchFleetRemoteCommandProvisionsLabNodes(t *testing.T) {
+	cases := []struct {
+		machine   string
+		benchmark string
+		want      string
+	}{
+		{machine: "a100", benchmark: "gpu-benchmark", want: "FAK_CUDA_ARCH=sm_80 bash tools/run_485_acceptance_on_gpu.sh"},
+		{machine: "a100", benchmark: "radix-benchmark", want: "go run ./cmd/radixbench -live=false"},
+		{machine: "cpu-server-a", benchmark: "model-benchmark", want: "go run ./cmd/modelbench -synthetic tiny"},
+		{machine: "cpu-server-a", benchmark: "qwen36", want: "go run ./cmd/sessionbench -synthetic tiny"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.machine+"/"+tc.benchmark, func(t *testing.T) {
+			got := benchFleetRemoteCommand(benchFleetRequest{Machine: tc.machine, Benchmark: tc.benchmark})
+			for _, required := range []string{"FAK_BENCH_NODE=", "mktemp -d /tmp/fak-bench.XXXXXX", "git clone --depth 1", tc.want} {
+				if !strings.Contains(got, required) {
+					t.Fatalf("command %q does not contain %q", got, required)
+				}
+			}
+			if strings.Contains(got, "cd ~/fak") {
+				t.Fatalf("lab command assumes an unprovisioned checkout: %q", got)
+			}
+		})
+	}
+}
+
+func TestBenchFleetRouteUsesMachineSpecificBridgeChannels(t *testing.T) {
+	root := t.TempDir()
+	bridgeDir := filepath.Clean(filepath.Join(root, "..", "fak-private", ".dgxbridge-verify"))
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(bridgeDir, "dgxbridge-fresh.exe")
+	if err := os.WriteFile(bridge, []byte("bridge"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(root, ".fak", "bench-fleet")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "routes.json"), []byte(`{"a100_channel":"gpu-channel","cpu_server_channel":"cpu-channel"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		machine string
+		channel string
+	}{
+		{machine: "a100", channel: "gpu-channel"},
+		{machine: "cpu-server-a", channel: "cpu-channel"},
+	} {
+		t.Run(tc.machine, func(t *testing.T) {
+			name, args, route, state, err := benchFleetRoute(root, benchFleetRequest{ID: "req-123", Machine: tc.machine, Command: "hostname"})
+			if err != nil || name != bridge || route != "dgxbridge" || state != "running" {
+				t.Fatalf("route=(%q %v %q %q %v), want configured dgxbridge", name, args, route, state, err)
+			}
+			if len(args) < 8 || args[0] != "-channel" || args[1] != tc.channel || args[2] != "-timeout" || args[3] != "4m" || args[4] != "-remote-out" || args[5] != "/tmp/fak-bench-results/req-123.bridge.out" || args[6] != "run" {
+				t.Fatalf("args=%v, want machine-specific channel and remote-file readback before run", args)
+			}
+		})
+	}
+}
+
 func TestBenchFleetRouteLeavesUnconfiguredMacWaiting(t *testing.T) {
 	t.Setenv("FAK_BENCH_MAC_HOST", "")
 	_, _, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "node-macos-a"})
-	if err == nil || route != "mac:tailscale" || state != "waiting_session" {
+	if err == nil || route != "mac:ssh" || state != "waiting_session" {
 		t.Fatalf("route=%q state=%q err=%v", route, state, err)
 	}
 }
@@ -57,10 +120,10 @@ func TestBenchFleetRouteLeavesUnconfiguredMacWaiting(t *testing.T) {
 func TestBenchFleetRouteUsesConfiguredMacSession(t *testing.T) {
 	t.Setenv("FAK_BENCH_MAC_HOST", "mac-node")
 	name, args, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "node-macos-a", Command: "go run ./cmd/livecodebench --check --json"})
-	if err != nil || name != "tailscale" || route != "mac:tailscale/mac-node" || state != "running" {
+	if err != nil || name != "ssh" || route != "mac:ssh/mac-node" || state != "running" {
 		t.Fatalf("name=%q args=%q route=%q state=%q err=%v", name, args, route, state, err)
 	}
-	if got := strings.Join(args, " "); !strings.Contains(got, "ssh mac-node") || !strings.Contains(got, "FAK_BENCH_NODE") {
+	if got := strings.Join(args, " "); !strings.Contains(got, "IdentitiesOnly=yes mac-node") || !strings.Contains(got, "FAK_BENCH_NODE") || !strings.Contains(got, ".fak-mac-bench/fak") || !strings.Contains(got, "GOTOOLCHAIN=auto") {
 		t.Fatalf("args=%q", args)
 	}
 }
