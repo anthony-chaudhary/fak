@@ -49,6 +49,11 @@ static std::unordered_map<void *, size_t> g_managed_live;      // live cudaMallo
 // host-ward, not the full logits vector. Monotonic; the test resets it around each step.
 static size_t g_host_bytes = 0;
 
+// Whole-operation Qwen3.5/3.6 GDN witness (#4725). This counts successful
+// enqueues, not individual component kernels; the Go fixture reads it together
+// with g_host_bytes to prove one real recurrent operation ran without D2H staging.
+static size_t g_qwen35_gdn_operations = 0;
+
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
   if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) return 1;
@@ -257,6 +262,248 @@ extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
 // async host-transfer witness accessors (#482): see g_host_bytes above.
 extern "C" size_t fcuda_hostxfer_bytes(void) { return g_host_bytes; }
 extern "C" void fcuda_hostxfer_reset(void) { g_host_bytes = 0; }
+
+// ---- Qwen3.5/3.6 whole-operation Gated-DeltaNet decode (#4725) -----------------
+
+__device__ __forceinline__ float qwen35_gdn_silu(float x) {
+  return x / (1.0f + (float)exp((double)-x));
+}
+
+__device__ __forceinline__ float qwen35_gdn_softplus(float x) {
+  if (x > 20.0f) return x;
+  return (float)log1p(exp((double)x));
+}
+
+// One block computes one output row. Unlike four separate Backend.MatMul calls, the
+// grid spans qkv, z, beta, and decay projections in ONE launch; every block selects
+// its source weight/result band while sharing the resident normalized input.
+__global__ void k_qwen35_gdn_fused_in_proj(
+    const float *x,
+    const float *wQKV, const float *wZ, const float *wB, const float *wA,
+    float *mixed, float *z, float *b, float *a,
+    int hidden, int convDim, int valueDim, int nV) {
+  int globalRow = blockIdx.x;
+  int row = globalRow;
+  const float *w = wQKV;
+  float *dst = mixed;
+  if (row >= convDim) {
+    row -= convDim;
+    w = wZ; dst = z;
+    if (row >= valueDim) {
+      row -= valueDim;
+      w = wB; dst = b;
+      if (row >= nV) {
+        row -= nV;
+        w = wA; dst = a;
+      }
+    }
+  }
+  float sum = 0.0f;
+  const float *wr = w + (size_t)row * hidden;
+  for (int i = threadIdx.x; i < hidden; i += blockDim.x) sum += wr[i] * x[i];
+  __shared__ float red[256];
+  red[threadIdx.x] = sum;
+  __syncthreads();
+  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+    if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) dst[row] = red[0];
+}
+
+// Depthwise causal conv over [oldest ... newest, current], followed by SiLU.
+// The same channel thread shifts its K-1 history in place, so no cross-thread state
+// race exists and the returned conv state already carries the current mixed row.
+__global__ void k_qwen35_gdn_conv_state(
+    const float *mixed, const float *convW, float *convState, float *convOut,
+    int convDim, int K) {
+  int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= convDim) return;
+  float acc = 0.0f;
+  const float *cw = convW + (size_t)c * K;
+  for (int j = 0; j < K - 1; j++) acc += cw[j] * convState[(size_t)j * convDim + c];
+  acc += cw[K - 1] * mixed[c];
+  convOut[c] = qwen35_gdn_silu(acc);
+  for (int j = 0; j < K - 2; j++)
+    convState[(size_t)j * convDim + c] = convState[(size_t)(j + 1) * convDim + c];
+  convState[(size_t)(K - 2) * convDim + c] = mixed[c];
+}
+
+// Normalize each distinct q/k head once. q is additionally scaled by 1/sqrt(kHd),
+// matching the existing CPU recurrence before value-head group expansion.
+__global__ void k_qwen35_gdn_qk_norm(
+    const float *convOut, float *qNorm, float *kNorm, int nK, int kHd) {
+  int h = blockIdx.x;
+  int d = threadIdx.x;
+  if (h >= nK) return;
+  int keyDim = nK * kHd;
+  extern __shared__ float smem[];
+  float *qss = smem;
+  float *kss = smem + blockDim.x;
+  float qv = d < kHd ? convOut[h * kHd + d] : 0.0f;
+  float kv = d < kHd ? convOut[keyDim + h * kHd + d] : 0.0f;
+  qss[d] = qv * qv;
+  kss[d] = kv * kv;
+  __syncthreads();
+  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+    if (d < off) {
+      qss[d] += qss[d + off];
+      kss[d] += kss[d + off];
+    }
+    __syncthreads();
+  }
+  if (d < kHd) {
+    float qinv = (float)(1.0 / sqrt((double)qss[0] + 1e-6));
+    float kinv = (float)(1.0 / sqrt((double)kss[0] + 1e-6));
+    float scale = (float)(1.0 / sqrt((double)kHd));
+    qNorm[h * kHd + d] = qv * qinv * scale;
+    kNorm[h * kHd + d] = kv * kinv;
+  }
+}
+
+// One value head per block; one value dimension per thread. A thread owns every
+// recurrent_state[h,i,d] element for its d, so it can perform decay, k^T S,
+// rank-1 update, and q^T S without atomics. The block then reduces the per-head
+// readout norm and applies norm[d] * RMS(core[d]) * silu(z[h,d]) in the same launch.
+__global__ void k_qwen35_gdn_recurrent_gated_norm(
+    const float *convOut, const float *qNorm, const float *kNorm,
+    const float *z, const float *b, const float *a,
+    const float *aLog, const float *dtBias, const float *norm,
+    float *state, float *core,
+    int nK, int nV, int kHd, int vHd, float eps) {
+  int h = blockIdx.x;
+  int d = threadIdx.x;
+  if (h >= nV) return;
+  int repeat = nV / nK;
+  int kh = h / repeat;
+  int keyDim = nK * kHd;
+  float beta = 1.0f / (1.0f + (float)exp((double)-b[h]));
+  float aa = (float)exp((double)aLog[h]);
+  float dt = qwen35_gdn_softplus(a[h] + dtBias[h]);
+  float decayArg = -aa * dt;
+  float decay = (float)exp((double)decayArg);
+  float readout = 0.0f;
+  if (d < vHd) {
+    float kvmem = 0.0f;
+    for (int i = 0; i < kHd; i++) {
+      size_t si = ((size_t)h * kHd + i) * vHd + d;
+      float sd = state[si] * decay;
+      state[si] = sd;
+      kvmem += sd * kNorm[kh * kHd + i];
+    }
+    float v = convOut[2 * keyDim + h * vHd + d];
+    float delta = (v - kvmem) * beta;
+    for (int i = 0; i < kHd; i++) {
+      size_t si = ((size_t)h * kHd + i) * vHd + d;
+      float sd = state[si] + kNorm[kh * kHd + i] * delta;
+      state[si] = sd;
+      readout += sd * qNorm[kh * kHd + i];
+    }
+    core[h * vHd + d] = readout;
+  }
+  extern __shared__ float ss[];
+  ss[d] = d < vHd ? readout * readout : 0.0f;
+  __syncthreads();
+  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+    if (d < off) ss[d] += ss[d + off];
+    __syncthreads();
+  }
+  if (d < vHd) {
+    float inv = (float)(1.0 / sqrt((double)ss[0] / (double)vHd + (double)eps));
+    int vd = h * vHd + d;
+    core[vd] = norm[d] * (readout * inv) * qwen35_gdn_silu(z[vd]);
+  }
+}
+
+__global__ void k_qwen35_gdn_out_proj(
+    const float *w, const float *x, float *out, int hidden, int valueDim) {
+  int row = blockIdx.x;
+  float sum = 0.0f;
+  const float *wr = w + (size_t)row * valueDim;
+  for (int i = threadIdx.x; i < valueDim; i += blockDim.x) sum += wr[i] * x[i];
+  __shared__ float red[256];
+  red[threadIdx.x] = sum;
+  __syncthreads();
+  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+    if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) out[row] = red[0];
+}
+
+static int qwen35_gdn_threads(int n) {
+  int threads = 1;
+  while (threads < n && threads < 1024) threads <<= 1;
+  return threads;
+}
+
+static int qwen35_gdn_launch_status(int stage) {
+  cudaError_t e = cudaPeekAtLastError();
+  if (e == cudaSuccess) return 0;
+  fprintf(stderr, "fak-cuda: Qwen3.5 GDN stage %d launch failed: %s\n", stage, cudaGetErrorString(e));
+  return stage * 10000 + (int)e;
+}
+
+extern "C" int fcuda_qwen35_gdn_decode_f32(
+    const float *dX,
+    const float *dInQKV, const float *dInZ, const float *dInB, const float *dInA,
+    const float *dConvW, const float *dALog, const float *dDtBias,
+    const float *dNorm, const float *dOutW,
+    float *dConvState, float *dRecurrentState, float *dOut,
+    float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
+    float *dQNorm, float *dKNorm, float *dCore,
+    int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps) {
+  if (!dX || !dInQKV || !dInZ || !dInB || !dInA || !dConvW || !dALog ||
+      !dDtBias || !dNorm || !dOutW || !dConvState || !dRecurrentState || !dOut ||
+      !dMixed || !dZ || !dB || !dA || !dConvOut || !dQNorm || !dKNorm || !dCore ||
+      hidden <= 0 || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 || convKernel < 2 ||
+      nV % nK != 0 || kHd > 1024 || vHd > 1024 || !(rmsEps > 0.0f) || !isfinite(rmsEps))
+    return -1;
+  long long keyDim64 = (long long)nK * kHd;
+  long long valueDim64 = (long long)nV * vHd;
+  long long convDim64 = 2 * keyDim64 + valueDim64;
+  long long fusedRows64 = convDim64 + valueDim64 + 2LL * nV;
+  if (keyDim64 > 2147483647LL || valueDim64 > 2147483647LL ||
+      convDim64 > 2147483647LL || fusedRows64 > 2147483647LL) return -1;
+  int valueDim = (int)valueDim64;
+  int convDim = (int)convDim64;
+
+  int prior = qwen35_gdn_launch_status(1);
+  if (prior != 0) return prior;
+  k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
+      dX, dInQKV, dInZ, dInB, dInA, dMixed, dZ, dB, dA,
+      hidden, convDim, valueDim, nV);
+  int status = qwen35_gdn_launch_status(2);
+  if (status != 0) return status;
+
+  k_qwen35_gdn_conv_state<<<(convDim + 255) / 256, 256, 0, g_stream>>>(
+      dMixed, dConvW, dConvState, dConvOut, convDim, convKernel);
+  status = qwen35_gdn_launch_status(3);
+  if (status != 0) return status;
+
+  int qThreads = qwen35_gdn_threads(kHd);
+  k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, nK, kHd);
+  status = qwen35_gdn_launch_status(4);
+  if (status != 0) return status;
+
+  int vThreads = qwen35_gdn_threads(vHd);
+  k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+      dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps);
+  status = qwen35_gdn_launch_status(5);
+  if (status != 0) return status;
+
+  k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(dOutW, dCore, dOut, hidden, valueDim);
+  status = qwen35_gdn_launch_status(6);
+  if (status != 0) return status;
+
+  g_qwen35_gdn_operations++;
+  return 0;
+}
+
+extern "C" size_t fcuda_qwen35_gdn_operations(void) { return g_qwen35_gdn_operations; }
+extern "C" void fcuda_qwen35_gdn_operations_reset(void) { g_qwen35_gdn_operations = 0; }
 
 // y[P,out] = x[P,in] @ W[out,in]^T, all row-major. Column-major cuBLAS recipe:
 // treat row-major W[out,in] as col-major [in,out] (op=T), row-major X[P,in] as col-major

@@ -30,6 +30,8 @@ package compute
 import "C"
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -1068,6 +1070,250 @@ func (c *cudaBackend) Argmax(logits Tensor) int {
 // ResetHostXfer zeroes it. These are used only by the -tags cuda witness/benchmarks.
 func (c *cudaBackend) HostXferBytes() uint64 { return uint64(C.fcuda_hostxfer_bytes()) }
 func (c *cudaBackend) ResetHostXfer()        { C.fcuda_hostxfer_reset() }
+
+// ---- Qwen3.5/3.6 Gated-DeltaNet whole-operation decode (#4725) -----------------
+
+// Qwen35GDNPath is the stable structural identity consumed by
+// model.Qwen35GDNBackend. The compute package cannot import model, so the method
+// returns the cycle-free constant declared beside the typed refusals.
+func (c *cudaBackend) Qwen35GDNPath() string { return Qwen35GDNCUDAPath }
+
+// Qwen35GDNOperationCount reports successful whole GDN operations enqueued since
+// the last reset. It is a device-path witness, not a performance estimate: the
+// deterministic CUDA fixture pairs it with HostXferBytes to prove the measured
+// call ran and did not stage an intermediate through the host.
+func (c *cudaBackend) Qwen35GDNOperationCount() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_qwen35_gdn_operations())
+}
+
+func (c *cudaBackend) ResetQwen35GDNOperationCount() {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_qwen35_gdn_operations_reset()
+}
+
+// Qwen35GDNDecode executes one complete recurrent linear-attention token mixer:
+// one fused qkv/z/b/a projection launch, causal depthwise conv + conv-state
+// update, q/k L2 normalization, decay/beta delta-rule state update fused with
+// the per-head gated RMSNorm, and the output projection. Every pointer handed to
+// the C ABI is a validated CUDA allocation. The method never calls Host/Read,
+// never constructs a []float32, and never enters generic QKV attention or a CPU
+// fallback. Conv/recurrent states are updated in place and returned as the next
+// device-resident states.
+func (c *cudaBackend) Qwen35GDNDecode(
+	normalizedInput,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) (output, nextConvState, nextRecurrentState Tensor, err error) {
+	hidden, keyDim, valueDim, convDim, err := validateQwen35GDNGeometry(
+		normalizedInput,
+		inProjQKV, inProjZ, inProjB, inProjA,
+		conv1D, aLog, dtBias, norm, outProj,
+		convState, recurrentState,
+		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel,
+		rmsNormEpsilon,
+	)
+	if err != nil {
+		return Tensor{}, Tensor{}, Tensor{}, err
+	}
+	operands := []struct {
+		name string
+		t    Tensor
+	}{
+		{"normalized_input", normalizedInput},
+		{"in_proj_qkv", inProjQKV}, {"in_proj_z", inProjZ},
+		{"in_proj_b", inProjB}, {"in_proj_a", inProjA},
+		{"conv1d", conv1D}, {"A_log", aLog}, {"dt_bias", dtBias},
+		{"norm", norm}, {"out_proj", outProj},
+		{"conv_state", convState}, {"recurrent_state", recurrentState},
+	}
+	for _, operand := range operands {
+		if err := c.validateQwen35GDNTensor(operand.name, operand.t); err != nil {
+			return Tensor{}, Tensor{}, Tensor{}, err
+		}
+	}
+
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+
+	// All scratch is device-resident and lives until the token-boundary Recycle,
+	// so the single CUDA stream can consume every intermediate asynchronously.
+	mixed, _ := c.devTr([]int{convDim}, F32)
+	z, _ := c.devTr([]int{valueDim}, F32)
+	b, _ := c.devTr([]int{numValueHeads}, F32)
+	a, _ := c.devTr([]int{numValueHeads}, F32)
+	convOut, _ := c.devTr([]int{convDim}, F32)
+	qNorm, _ := c.devTr([]int{keyDim}, F32)
+	kNorm, _ := c.devTr([]int{keyDim}, F32)
+	core, _ := c.devTr([]int{valueDim}, F32)
+	output, _ = c.devTr([]int{hidden}, F32)
+
+	status := int(C.fcuda_qwen35_gdn_decode_f32(
+		c.cf(normalizedInput),
+		c.cf(inProjQKV), c.cf(inProjZ), c.cf(inProjB), c.cf(inProjA),
+		c.cf(conv1D), c.cf(aLog), c.cf(dtBias), c.cf(norm), c.cf(outProj),
+		c.cf(convState), c.cf(recurrentState), c.cf(output),
+		c.cf(mixed), c.cf(z), c.cf(b), c.cf(a), c.cf(convOut),
+		c.cf(qNorm), c.cf(kNorm), c.cf(core),
+		C.int(hidden), C.int(numKeyHeads), C.int(numValueHeads),
+		C.int(keyHeadDim), C.int(valueHeadDim), C.int(convKernel),
+		C.float(rmsNormEpsilon),
+	))
+	if status != 0 {
+		return Tensor{}, Tensor{}, Tensor{}, &Qwen35GDNKernelError{
+			Stage: qwen35GDNKernelStage(status),
+			Code:  status,
+		}
+	}
+	return output, convState, recurrentState, nil
+}
+
+func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
+	if t.Backend() != c {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is not owned by this CUDA backend"}
+	}
+	if t.Dtype != F32 {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; whole-operation kernel requires resident f32"}
+	}
+	if t.Layout != RowMajor {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "layout is not row-major"}
+	}
+	buf, ok := t.buf.(*cudaBuf)
+	if !ok || buf == nil || buf.ptr == nil {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor has no live CUDA allocation (Upload is required before the operation)"}
+	}
+	if buf.device != 0 {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is resident on a non-default CUDA device"}
+	}
+	return nil
+}
+
+func validateQwen35GDNGeometry(
+	normalizedInput,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) (hidden, keyDim, valueDim, convDim int, err error) {
+	if len(normalizedInput.Shape) != 1 || normalizedInput.Shape[0] <= 0 {
+		return 0, 0, 0, 0, qwen35GDNShapeError("normalized_input", normalizedInput.Shape, "[hidden], hidden > 0")
+	}
+	hidden = normalizedInput.Shape[0]
+	if numKeyHeads <= 0 || numValueHeads <= 0 || keyHeadDim <= 0 || valueHeadDim <= 0 || convKernel < 2 {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "head counts/dimensions must be positive and conv_kernel must be >= 2"}
+	}
+	if numValueHeads%numKeyHeads != 0 {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "num_value_heads must be divisible by num_key_heads"}
+	}
+	if keyHeadDim > 1024 || valueHeadDim > 1024 {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "key/value head dimensions must fit one CUDA block (<= 1024)"}
+	}
+	if !(rmsNormEpsilon > 0) || math.IsInf(float64(rmsNormEpsilon), 0) {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "rms_norm_epsilon", Reason: "epsilon must be finite and > 0"}
+	}
+	const maxCInt = int64(1<<31 - 1)
+	for _, d := range []int{hidden, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel} {
+		if int64(d) > maxCInt {
+			return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "a scalar dimension overflows the CUDA int ABI"}
+		}
+	}
+	if int64(numKeyHeads) > maxCInt/int64(keyHeadDim) || int64(numValueHeads) > maxCInt/int64(valueHeadDim) {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "derived dimensions overflow the CUDA int ABI"}
+	}
+	key64 := int64(numKeyHeads) * int64(keyHeadDim)
+	value64 := int64(numValueHeads) * int64(valueHeadDim)
+	if key64 > (maxCInt-value64)/2 {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "derived dimensions overflow the CUDA int ABI"}
+	}
+	conv64 := 2*key64 + value64
+	if int64(convKernel) > maxCInt/conv64 || int64(convKernel-1) > maxCInt/conv64 ||
+		int64(hidden) > maxCInt/conv64 || int64(hidden) > maxCInt/value64 ||
+		int64(hidden) > maxCInt/int64(numValueHeads) ||
+		int64(numValueHeads) > maxCInt/int64(keyHeadDim) ||
+		int64(numValueHeads)*int64(keyHeadDim) > maxCInt/int64(valueHeadDim) {
+		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "weight/state element count overflows the CUDA int ABI"}
+	}
+	keyDim, valueDim, convDim = int(key64), int(value64), int(conv64)
+
+	require := func(name string, t Tensor, shapes ...[]int) error {
+		for _, shape := range shapes {
+			if qwen35GDNSameShape(t.Shape, shape) {
+				return nil
+			}
+		}
+		want := ""
+		for i, shape := range shapes {
+			if i > 0 {
+				want += " or "
+			}
+			want += fmt.Sprint(shape)
+		}
+		return qwen35GDNShapeError(name, t.Shape, want)
+	}
+	checks := []error{
+		require("in_proj_qkv", inProjQKV, []int{convDim, hidden}),
+		require("in_proj_z", inProjZ, []int{valueDim, hidden}),
+		require("in_proj_b", inProjB, []int{numValueHeads, hidden}),
+		require("in_proj_a", inProjA, []int{numValueHeads, hidden}),
+		require("conv1d", conv1D, []int{convDim, convKernel}, []int{convDim, 1, convKernel}, []int{convDim * convKernel}),
+		require("A_log", aLog, []int{numValueHeads}),
+		require("dt_bias", dtBias, []int{numValueHeads}),
+		require("norm", norm, []int{valueHeadDim}),
+		require("out_proj", outProj, []int{hidden, valueDim}),
+		require("conv_state", convState, []int{convKernel - 1, convDim}),
+		require("recurrent_state", recurrentState, []int{numValueHeads, keyHeadDim, valueHeadDim}),
+	}
+	for _, check := range checks {
+		if check != nil {
+			return 0, 0, 0, 0, check
+		}
+	}
+	return hidden, keyDim, valueDim, convDim, nil
+}
+
+func qwen35GDNSameShape(got, want []int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func qwen35GDNShapeError(name string, got []int, want string) error {
+	return &Qwen35GDNGeometryError{Operand: name, Got: append([]int(nil), got...), Want: want}
+}
+
+func qwen35GDNKernelStage(status int) string {
+	if status < 0 {
+		return "abi-validation"
+	}
+	switch status / 10000 {
+	case 1:
+		return "preflight"
+	case 2:
+		return "fused-input-projections"
+	case 3:
+		return "causal-conv-state"
+	case 4:
+		return "qk-normalization"
+	case 5:
+		return "recurrent-gated-norm"
+	case 6:
+		return "output-projection"
+	default:
+		return "unknown"
+	}
+}
 
 // ---- AWQ (Activation-aware Weight Quantization) 4-bit matmul -------------------
 

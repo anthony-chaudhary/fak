@@ -56,6 +56,30 @@ void fcuda_d2d_on(int device, void *dst, const void *src, size_t bytes);
 size_t fcuda_hostxfer_bytes(void);
 void fcuda_hostxfer_reset(void);
 
+/* Qwen3.5/3.6 Gated-DeltaNet decode, one complete recurrent token-mixer operation.
+ * Every pointer is already resident f32 device memory. The operation launches, in order:
+ * a single fused qkv/z/b/a GEMV, causal depthwise conv + in-place conv-state shift,
+ * per-key-head q/k L2 normalization, per-value-head decay/beta delta-rule recurrence
+ * fused with gated RMSNorm, and the output GEMV. conv_state [(K-1),convDim] and
+ * recurrent_state [nV,kHd,vHd] are updated in place; out [hidden] remains resident.
+ * Scratch buffers are caller-owned device allocations. No host pointer/copy or generic
+ * attention primitive occurs inside this ABI. Returns 0 after all stages enqueue, or a
+ * stage-coded non-zero CUDA launch error; invalid ABI arguments return -1. */
+int fcuda_qwen35_gdn_decode_f32(
+    const float *dX,
+    const float *dInQKV, const float *dInZ, const float *dInB, const float *dInA,
+    const float *dConvW, const float *dALog, const float *dDtBias,
+    const float *dNorm, const float *dOutW,
+    float *dConvState, float *dRecurrentState, float *dOut,
+    float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
+    float *dQNorm, float *dKNorm, float *dCore,
+    int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
+
+/* Whole-operation execution witness. The counter increments once only after every GDN
+ * stage above has enqueued without an immediate CUDA launch error. */
+size_t fcuda_qwen35_gdn_operations(void);
+void fcuda_qwen35_gdn_operations_reset(void);
+
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
 void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P);
 
