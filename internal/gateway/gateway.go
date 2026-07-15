@@ -1346,6 +1346,11 @@ type Server struct {
 	turnSafetyMu sync.Mutex
 	turnSafety   map[string]turnSafetyDelta
 
+	// pastCompactRuns is the bounded per-trace consecutive-nudge ladder (#2638).
+	// A compact/checkpoint turn or any return below the threshold clears the run.
+	pastCompactMu   sync.Mutex
+	pastCompactRuns map[string]int
+
 	// placementFired records, per trace, whether fak's OFFENSIVE cache-breakpoint placement
 	// (agent.PlaceAnthropicCacheBreakpoint) actually PLACED a breakpoint on THIS turn — i.e. the
 	// caller sent no cache_control of its own and fak spliced one onto the stable head. That is the

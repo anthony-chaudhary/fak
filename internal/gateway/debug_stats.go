@@ -237,7 +237,9 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	// returns "") until the volume crosses the warn line, like the nudge=/safety= fields.
 	expense, haveExpense := s.peekCtxExpense(trace)
 	line := formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety)
-	s.debugStatsf("%s", line+formatHarnessCoherenceField(sum.HarnessRewrites, sum.QuarantineAtRisk)+formatExpenseField(expense, haveExpense))
+	past := compactionBudgetPast(prompt, completion, cacheRead, cacheCreate, s.compactHistoryBudget)
+	escalation := s.observePastCompact(trace, past, compacted)
+	s.debugStatsf("%s", line+formatPastCompactEscalation(escalation)+formatHarnessCoherenceField(sum.HarnessRewrites, sum.QuarantineAtRisk)+formatExpenseField(expense, haveExpense))
 }
 
 // formatHarnessCoherenceField renders the harness-coherence collision fields for the per-turn
@@ -431,6 +433,14 @@ func livelockCallLabel(env guardrsi.LivelockEnvelope) string {
 }
 
 const compactionNudgeNearPercent = 80
+
+func compactionBudgetPast(prompt, completion, cacheRead, cacheCreate, compactBudget int) bool {
+	if compactBudget <= 0 {
+		return false
+	}
+	resident := maxNonNeg(prompt) + maxNonNeg(cacheRead) + maxNonNeg(cacheCreate)
+	return resident >= compactBudget
+}
 
 func formatCompactionBudgetNudge(prompt, completion, cacheRead, cacheCreate, compactBudget int) string {
 	if compactBudget <= 0 {
