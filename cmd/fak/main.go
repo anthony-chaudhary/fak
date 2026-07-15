@@ -31,7 +31,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
@@ -1026,7 +1025,9 @@ func applyPolicy(path string) {
 	if path == "" {
 		return
 	}
-	_, _, err := reloadPolicy(path)
+	policyReloadMu.Lock()
+	_, _, err := loadAndApplyPolicyLocked(path, false)
+	policyReloadMu.Unlock()
 	must(err)
 	fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s\n", path)
 }
@@ -1034,6 +1035,10 @@ func applyPolicy(path string) {
 func reloadPolicy(path string) (policy.Runtime, string, error) {
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()
+	return loadAndApplyPolicyLocked(path, true)
+}
+
+func loadAndApplyPolicyLocked(path string, enforceWideningGate bool) (policy.Runtime, string, error) {
 	if path == "" {
 		return policy.Runtime{}, "", errors.New("policy reload requires --policy FILE")
 	}
@@ -1047,10 +1052,8 @@ func reloadPolicy(path string) (policy.Runtime, string, error) {
 		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapRejected, err.Error())
 		return policy.Runtime{}, "", err
 	}
-	// Re-apply the operator allow overlay on hot-reload so a `--policy` swap never
-	// silently drops the out-of-band always-allow list (`fak guard allow`). A missing
-	// overlay is the common no-op; a malformed one is tolerated on reload rather than
-	// wedging a live gateway (the loud failure already fired at launch).
+	// Re-apply the operator overlays before comparing effective floors. This keeps
+	// the gate from mistaking a persisted always-allow entry for a manifest widening.
 	denyPath := guardDenyOverlayPath()
 	overlayWarning := ""
 	if ov, _, ovErr := loadGuardAllowOverlayLayers(); ovErr == nil {
@@ -1066,12 +1069,12 @@ func reloadPolicy(path string) (policy.Runtime, string, error) {
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, path)...)
-	adjudicator.Default.SetPolicy(rt.Adjudicator)
-	applyRuntime(rt)
-	// Record the now-live capability floor as a durable CONFIG_SWAP row (#3959): the
-	// security boundary just changed, so an auditor must be able to see which bytes
-	// (source path + sha256) became authoritative and when.
-	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapOK, "")
+
+	digest := configFileDigest(path)
+	overlayWarning, err = applyPolicyRuntimeLocked(rt, path, digest, overlayWarning, enforceWideningGate)
+	if err != nil {
+		return policy.Runtime{}, "", err
+	}
 	return rt, overlayWarning, nil
 }
 

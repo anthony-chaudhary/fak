@@ -430,6 +430,14 @@ injected by the host CLI, so the gateway stays policy-schema blind.
 **Response** (`PolicyReloadResponse`): `{ "reloaded": true, "source": "<path>",
 "summary": "…" }`.
 
+Reloads that only narrow or relabel the effective floor apply normally. A reload that
+adds an allow entry/prefix, removes a deny or `self_modify_glob`, or changes
+`fail_closed` to `admit_and_log` returns `400`, keeps the last-good floor live, and
+includes the deterministic widening delta in both the error and the `CONFIG_SWAP` journal.
+Set `FAK_POLICY_RELOAD_ALLOW_WIDEN=1` on the running process to explicitly confirm such
+a reload; the successful response summary and journal then carry `confirmed_widening:`
+plus the same delta. Initial `--policy` installation is not subject to this hot-reload gate.
+
 | Status | When |
 |---|---|
 | `404` | Policy reload is not configured for this deployment. |

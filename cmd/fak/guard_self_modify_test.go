@@ -42,6 +42,7 @@ func TestProtectGuardPolicyConfigAddsResolvedPaths(t *testing.T) {
 }
 
 func TestReloadPolicyProtectsResolvedConfigurationPaths(t *testing.T) {
+	t.Setenv(policyReloadWidenConfirmEnv, "1")
 	overlay := filepath.Join(t.TempDir(), "custom", "allow.json")
 	manifest := filepath.Join(t.TempDir(), "policy.json")
 	t.Setenv("FAK_GUARD_ALLOW_OVERLAY", overlay)

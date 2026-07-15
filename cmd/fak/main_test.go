@@ -322,6 +322,7 @@ func TestResolveRequiredKeyFailsClosed(t *testing.T) {
 }
 
 func TestReloadPolicySerializesCompositeRuntimeSwap(t *testing.T) {
+	t.Setenv(policyReloadWidenConfirmEnv, "1")
 	dir := t.TempDir()
 	p1 := filepath.Join(dir, "one.json")
 	p2 := filepath.Join(dir, "two.json")
