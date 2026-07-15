@@ -16,8 +16,9 @@ const (
 func topThreeInput(candidate string, requiredTier int) Input {
 	policy := func(model string, tier int, fallbacks ...string) Policy {
 		return Policy{Model: model, CapabilityTier: tier, Fallbacks: fallbacks,
-			Alert:      AlertContract{Owner: "modelops-oncall", Route: "model-provider-incidents", AckSLAMinutes: 10, Runbook: "docs/model-production-readiness-inventory.md"},
-			MinSamples: 20, MinSuccessRate: .95, MaxProviderErrorRate: .02, MaxInvalidToolRate: .01,
+			Alert:         AlertContract{Owner: "modelops-oncall", Route: "model-provider-incidents", AckSLAMinutes: 10, Runbook: "docs/model-production-readiness-inventory.md"},
+			WindowMinutes: 60,
+			MinSamples:    20, MinSuccessRate: .95, MaxProviderErrorRate: .02, MaxInvalidToolRate: .01,
 			MaxP95LatencyMS: 5000, MaxThrottleRate: .03, MaxFallbackRate: .05}
 	}
 	healthy := func(model string) Observation {
@@ -43,6 +44,9 @@ func TestEvaluatePromotesHealthyExactModel(t *testing.T) {
 	if got.Action != Promote || got.Selected != sonnet || got.Schema != Schema {
 		t.Fatalf("decision = %+v, want Sonnet promotion", got)
 	}
+	if got.WindowMinutes != 60 {
+		t.Fatalf("window_minutes = %d, want 60", got.WindowMinutes)
+	}
 }
 
 func TestEvaluateEverySLOBreachRollsBack(t *testing.T) {
@@ -66,6 +70,9 @@ func TestEvaluateEverySLOBreachRollsBack(t *testing.T) {
 			got := Evaluate(in)
 			if got.Action != Rollback || got.Selected != sonnet || !strings.Contains(strings.Join(got.Reasons, " "), tt.want) {
 				t.Fatalf("decision = %+v, want Opus rollback to Sonnet for %s", got, tt.want)
+			}
+			if got.WindowMinutes != 60 {
+				t.Fatalf("window_minutes = %d, want selected fallback window 60", got.WindowMinutes)
 			}
 		})
 	}
@@ -101,6 +108,7 @@ func TestEvaluateRejectsInvalidThresholdsAndObservations(t *testing.T) {
 		edit func(*Input)
 		want string
 	}{
+		{"zero window", func(in *Input) { in.Policies[0].WindowMinutes = 0 }, "window_minutes must be positive"},
 		{"zero samples", func(in *Input) { in.Policies[0].MinSamples = 0 }, "min_samples must be positive"},
 		{"zero latency", func(in *Input) { in.Policies[0].MaxP95LatencyMS = 0 }, "max_p95_latency_ms must be positive"},
 		{"policy rate", func(in *Input) { in.Policies[0].MinSuccessRate = 1.1 }, "min_success_rate must be within [0,1]"},

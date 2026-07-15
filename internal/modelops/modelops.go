@@ -30,6 +30,7 @@ type Policy struct {
 	CapabilityTier       int           `json:"capability_tier"`
 	Fallbacks            []string      `json:"fallbacks,omitempty"`
 	Alert                AlertContract `json:"alert"`
+	WindowMinutes        int           `json:"window_minutes"`
 	MinSamples           int           `json:"min_samples"`
 	MinSuccessRate       float64       `json:"min_success_rate"`
 	MaxProviderErrorRate float64       `json:"max_provider_error_rate"`
@@ -81,6 +82,7 @@ type Decision struct {
 	Reasons       []string       `json:"reasons"`
 	OutcomeCounts []OutcomeCount `json:"outcome_counts,omitempty"`
 	Alert         AlertContract  `json:"alert"`
+	WindowMinutes int            `json:"window_minutes"`
 }
 
 func Evaluate(in Input) Decision {
@@ -99,6 +101,7 @@ func Evaluate(in Input) Decision {
 	candidate, ok := policies[in.Candidate]
 	if ok {
 		out.Alert = candidate.Alert
+		out.WindowMinutes = candidate.WindowMinutes
 	}
 	if !ok {
 		out.Reasons = []string{"candidate policy is missing"}
@@ -134,6 +137,7 @@ func Evaluate(in Input) Decision {
 		out.Action = Rollback
 		out.Selected = name
 		out.Alert = fallback.Alert
+		out.WindowMinutes = fallback.WindowMinutes
 		out.Reasons = append(out.Reasons, "selected first healthy capability-safe fallback")
 		return out
 	}
@@ -161,6 +165,9 @@ func index(in Input) (map[string]Policy, map[string]Observation, []string) {
 		}
 		if p.CapabilityTier < 0 {
 			reasons = append(reasons, "policy "+p.Model+": capability_tier must be non-negative")
+		}
+		if p.WindowMinutes <= 0 {
+			reasons = append(reasons, "policy "+p.Model+": window_minutes must be positive")
 		}
 		if p.MinSamples <= 0 {
 			reasons = append(reasons, "policy "+p.Model+": min_samples must be positive")
