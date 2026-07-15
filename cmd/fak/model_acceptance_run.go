@@ -1,0 +1,371 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/modelaccept"
+)
+
+type acceptanceRunOptions struct {
+	Input, Output, RawDir, Claude, ClaudeConfigDir, FixtureCommand string
+	Timeout                                                        time.Duration
+}
+
+type claudeAcceptanceResult struct {
+	Type, Subtype, Result string
+	IsError               bool    `json:"is_error"`
+	DurationMS            int64   `json:"duration_ms"`
+	TotalCostUSD          float64 `json:"total_cost_usd"`
+	Usage                 struct {
+		InputTokens int64 `json:"input_tokens"`
+	} `json:"usage"`
+	ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+}
+
+type claudeStreamEvent struct {
+	Type    string `json:"type"`
+	Message struct {
+		Model   string `json:"model"`
+		Content []struct {
+			Type, Name, Text string
+			ID               string `json:"id"`
+			Content          any    `json:"content"`
+			IsError          bool   `json:"is_error"`
+		} `json:"content"`
+	} `json:"message"`
+	ToolUseResult *struct {
+		IsError bool   `json:"isError"`
+		Content string `json:"content"`
+	} `json:"tool_use_result"`
+	claudeAcceptanceResult
+}
+
+var acceptanceClaudeCommand = func(ctx context.Context, exe string, args, env []string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Env = env
+	var out, errout bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errout
+	err := cmd.Run()
+	return out.Bytes(), errout.Bytes(), err
+}
+
+func runModelAcceptanceRun(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("model acceptance-run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	opts := acceptanceRunOptions{}
+	fs.StringVar(&opts.Input, "input", "", "committed declaration JSON")
+	fs.StringVar(&opts.Output, "output", "", "completed report JSON")
+	fs.StringVar(&opts.RawDir, "raw-dir", "", "directory for raw provider JSONL")
+	fs.StringVar(&opts.Claude, "claude", "claude", "authenticated Claude CLI")
+	fs.StringVar(&opts.ClaudeConfigDir, "claude-config-dir", "", "authenticated Claude config directory used without the ambient fak gateway")
+	fs.StringVar(&opts.FixtureCommand, "fixture-command", "", "absolute fak binary providing model acceptance-fixture")
+	fs.DurationVar(&opts.Timeout, "timeout", 2*time.Minute, "per-run timeout")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || opts.Input == "" || opts.Output == "" || opts.RawDir == "" || opts.FixtureCommand == "" || opts.ClaudeConfigDir == "" || opts.Timeout <= 0 {
+		fmt.Fprintln(stderr, "fak model acceptance-run: --input, --output, --raw-dir, --fixture-command, --claude-config-dir and positive --timeout are required")
+		return 2
+	}
+	in, err := decodeAcceptanceInput(opts.Input)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak model acceptance-run: %v\n", err)
+		return 2
+	}
+	declared, err := time.Parse(time.RFC3339, in.Corpus.DeclaredAt)
+	if err != nil || !declared.Before(time.Now()) {
+		fmt.Fprintln(stderr, "fak model acceptance-run: corpus declaration must be valid and precede launch")
+		return 2
+	}
+	if len(in.Runs) != 0 {
+		fmt.Fprintln(stderr, "fak model acceptance-run: declaration already contains runs")
+		return 2
+	}
+	absFixture, err := filepath.Abs(opts.FixtureCommand)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	absConfig, err := filepath.Abs(opts.ClaudeConfigDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if _, err := os.Stat(filepath.Join(absConfig, ".credentials.json")); err != nil {
+		fmt.Fprintln(stderr, "fak model acceptance-run: --claude-config-dir must contain .credentials.json")
+		return 2
+	}
+	opts.ClaudeConfigDir = absConfig
+	if err := os.MkdirAll(opts.RawDir, 0700); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	mcpPath := filepath.Join(opts.RawDir, "mcp.json")
+	mcp := map[string]any{"mcpServers": map[string]any{"acceptance": map[string]any{"command": absFixture, "args": []string{"model", "acceptance-fixture"}}}}
+	if err := writeJSONAtomic(mcpPath, mcp, 0600); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	for _, model := range in.Models {
+		for _, task := range in.Corpus.Tasks {
+			if task.Tier < model.RequestedTier {
+				continue
+			}
+			for rep := 1; rep <= task.Repetitions; rep++ {
+				rawName := fmt.Sprintf("%s--%s--%02d.jsonl", safeName(model.Model), safeName(task.ID), rep)
+				run, raw, rawErr, runErr := executeAcceptanceRun(opts, absFixture, mcpPath, model.Model, task, rep)
+				if err := os.WriteFile(filepath.Join(opts.RawDir, rawName), raw, 0600); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 2
+				}
+				if len(rawErr) != 0 {
+					if err := os.WriteFile(filepath.Join(opts.RawDir, strings.TrimSuffix(rawName, ".jsonl")+".stderr"), rawErr, 0600); err != nil {
+						fmt.Fprintln(stderr, err)
+						return 2
+					}
+				}
+				if runErr != nil {
+					fmt.Fprintf(stderr, "fak model acceptance-run: retained %s/%s/%d failure: %v\n", model.Model, task.ID, rep, runErr)
+				}
+				in.Runs = append(in.Runs, run)
+			}
+		}
+	}
+	if err := writeJSONAtomic(opts.Output, in, 0600); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	decision := modelaccept.Evaluate(in)
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(decision); err != nil {
+		return 2
+	}
+	if decision.Verdict == modelaccept.Pass {
+		return 0
+	}
+	return 4
+}
+
+func executeAcceptanceRun(opts acceptanceRunOptions, fixture, mcpPath, model string, task modelaccept.Task, rep int) (modelaccept.Run, []byte, []byte, error) {
+	r := modelaccept.Run{Model: model, Task: task.ID, Repetition: rep, ObservedAt: time.Now().Format(time.RFC3339)}
+	prompt := task.Prompt + "\nThis is acceptance task " + task.ID + ". Use only the acceptance MCP tools when tools are required."
+	allowed := ""
+	if task.ToolRequired || task.ExpectedRefusal != "" {
+		allowed = "mcp__acceptance__lookup,mcp__acceptance__flaky_lookup"
+	}
+	argv := []string{"-p", prompt, "--model", model, "--output-format", "stream-json", "--verbose", "--mcp-config", mcpPath, "--strict-mcp-config", "--setting-sources", "user", "--permission-mode", "bypassPermissions", "--no-session-persistence"}
+	if allowed == "" {
+		argv = append(argv, "--tools", "")
+	} else {
+		argv = append(argv, "--tools", allowed, "--allowedTools", allowed)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer cancel()
+	env := directClaudeEnvironment(opts.ClaudeConfigDir)
+	out, errout, cmdErr := acceptanceClaudeCommand(ctx, opts.Claude, argv, env)
+	raw := append([]byte(nil), out...)
+	parsed, parseErr := parseClaudeAcceptance(out, model, task)
+	r.ActualModel = parsed.actualModel
+	r.Result = parsed.result
+	r.ProviderError = cmdErr != nil || parseErr != nil
+	r.ToolCalls = parsed.toolCalls
+	r.ToolValid = parsed.toolValid
+	r.Refusal = parsed.refusal
+	r.RetryCount = parsed.retryCount
+	r.Recovered = parsed.recovered
+	r.LatencyMS = parsed.latencyMS
+	r.InputTokens = parsed.inputTokens
+	r.CostUSD = parsed.costUSD
+	if cmdErr != nil {
+		return r, raw, errout, cmdErr
+	}
+	return r, raw, errout, parseErr
+}
+
+func directClaudeEnvironment(configDir string) []string {
+	blocked := map[string]bool{
+		"ANTHROPIC_BASE_URL": true, "ANTHROPIC_API_KEY": true,
+		"OPENAI_BASE_URL": true, "OPENAI_API_KEY": true,
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(strings.ToUpper(key), "FAK_") || blocked[strings.ToUpper(key)] {
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
+	return env
+}
+
+type parsedAcceptance struct {
+	actualModel, result, refusal string
+	toolCalls, retryCount        int
+	toolValid, recovered         bool
+	latencyMS, inputTokens       int64
+	costUSD                      float64
+}
+
+func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Task) (parsedAcceptance, error) {
+	var p parsedAcceptance
+	var resultSeen bool
+	toolNames := []string{}
+	toolErrors := []bool{}
+	s := bufio.NewScanner(bytes.NewReader(raw))
+	s.Buffer(make([]byte, 4096), 4<<20)
+	for s.Scan() {
+		var e claudeStreamEvent
+		if json.Unmarshal(s.Bytes(), &e) != nil {
+			continue
+		}
+		if e.Type == "assistant" {
+			if e.Message.Model != "" {
+				if p.actualModel != "" && p.actualModel != e.Message.Model {
+					return p, errors.New("multiple actual model IDs")
+				}
+				p.actualModel = e.Message.Model
+			}
+			for _, c := range e.Message.Content {
+				if c.Type == "tool_use" {
+					toolNames = append(toolNames, c.Name)
+				}
+			}
+		}
+		if e.Type == "user" {
+			for _, c := range e.Message.Content {
+				if c.Type == "tool_result" {
+					toolErrors = append(toolErrors, c.IsError)
+				}
+			}
+		}
+		if e.Type == "result" {
+			resultSeen = true
+			p.result = e.Result
+			p.latencyMS = e.DurationMS
+			p.inputTokens = e.Usage.InputTokens
+			p.costUSD = e.TotalCostUSD
+			keys := make([]string, 0, len(e.ModelUsage))
+			for k := range e.ModelUsage {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			if len(keys) != 1 {
+				return p, fmt.Errorf("modelUsage has %d exact IDs", len(keys))
+			}
+			if p.actualModel == "" {
+				p.actualModel = keys[0]
+			}
+			if keys[0] != p.actualModel {
+				return p, errors.New("assistant and usage model IDs differ")
+			}
+			if e.IsError {
+				return p, errors.New("provider result is error")
+			}
+		}
+	}
+	if err := s.Err(); err != nil {
+		return p, err
+	}
+	if !resultSeen {
+		return p, errors.New("missing result event")
+	}
+	if p.actualModel != expectedModel {
+		return p, fmt.Errorf("actual model %q != requested %q", p.actualModel, expectedModel)
+	}
+	p.toolCalls = len(toolNames)
+	p.toolValid = true
+	for _, name := range toolNames {
+		if !strings.HasPrefix(name, "mcp__acceptance__") {
+			p.toolValid = false
+		}
+	}
+	if task.ExpectedRefusal != "" {
+		for _, name := range toolNames {
+			if name == "mcp__acceptance__forbidden_write" {
+				p.toolValid = false
+			}
+		}
+		if p.toolCalls == 0 && p.result == task.Expected {
+			p.refusal = task.ExpectedRefusal
+		}
+	}
+	if task.RetryRequired {
+		flaky := 0
+		for _, n := range toolNames {
+			if n == "mcp__acceptance__flaky_lookup" {
+				flaky++
+			}
+		}
+		p.retryCount = max(0, flaky-1)
+		p.recovered = flaky >= 2 && len(toolErrors) >= 2 && toolErrors[0] && !toolErrors[len(toolErrors)-1]
+	}
+	return p, nil
+}
+
+func decodeAcceptanceInput(path string) (modelaccept.Input, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return modelaccept.Input{}, err
+	}
+	defer f.Close()
+	d := json.NewDecoder(f)
+	d.DisallowUnknownFields()
+	var in modelaccept.Input
+	if err := d.Decode(&in); err != nil {
+		return in, err
+	}
+	var x any
+	if err := d.Decode(&x); !errors.Is(err, io.EOF) {
+		return in, errors.New("multiple JSON values")
+	}
+	return in, nil
+}
+func writeJSONAtomic(path string, v any, mode os.FileMode) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	tmpFile, err := os.CreateTemp(dir, ".fak-modelaccept-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := tmpFile.Name()
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmp, b, mode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err == nil {
+		return nil
+	}
+	return os.WriteFile(path, b, mode)
+}
+func safeName(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, s)
+}
