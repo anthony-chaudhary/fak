@@ -2,6 +2,7 @@ package negframe
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -150,5 +151,40 @@ func TestResolveIdempotentOnExact(t *testing.T) {
 	back := Resolve(first.Positive, "lock-mode")
 	if back.Kind != Exact || back.Positive != "shared" {
 		t.Errorf("round-trip: Resolve(%q) = %+v, want exact shared", first.Positive, back)
+	}
+}
+
+func TestComplementRoutesExactBoundedOpen(t *testing.T) {
+	tests := []struct {
+		name, original, term, domain string
+		class                        ComplementClass
+		want                         string
+	}{
+		{"exact", "not shared", "shared", "lock-mode", ComplementExact, "exclusive"},
+		{"bounded", "not global", "global", "lane-kind", ComplementBounded, "one of cluster, keyword (constraint: not global)"},
+		{"open", "not blue", "blue", "color-space", ComplementOpen, "not blue"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Complement(tc.original, tc.term, tc.domain)
+			if got.Class != tc.class || got.Text != tc.want {
+				t.Fatalf("Complement() = %+v, want class=%s text=%q", got, tc.class, tc.want)
+			}
+		})
+	}
+}
+
+func TestComplementBoundedPreservesMustKeepToken(t *testing.T) {
+	got := Complement("not global under `OFF_TRUNK`", "global", "lane-kind")
+	if got.Class != ComplementBounded || !strings.Contains(got.Text, "`OFF_TRUNK`") {
+		t.Fatalf("bounded route dropped token: %+v", got)
+	}
+}
+
+func TestReframeResultCarriesComplementTelemetry(t *testing.T) {
+	r := ReframePass("Do not forget to test.")
+	r.ComplementClasses = append(r.ComplementClasses, Complement("not shared", "shared", "lock-mode").Class)
+	if !reflect.DeepEqual(r.ComplementClasses, []ComplementClass{ComplementExact}) {
+		t.Fatalf("complement telemetry = %v", r.ComplementClasses)
 	}
 }

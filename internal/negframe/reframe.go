@@ -38,9 +38,10 @@ import (
 // judgement-tier negatives remain (the soft residual a human could still reword).
 type ReframeResult struct {
 	Text              string
-	Applied           int // mechanical idioms flipped to their positive inverse
-	VerbatimFallback  int // mechanical candidates refused (would drop a must-keep token) -> original span kept
-	ResidualNegatives int // judgement-tier negatives left in place (advisory; never auto-rewritten)
+	Applied           int               // mechanical idioms flipped to their positive inverse
+	VerbatimFallback  int               // mechanical candidates refused (would drop a must-keep token) -> original span kept
+	ResidualNegatives int               // judgement-tier negatives left in place (advisory; never auto-rewritten)
+	ComplementClasses []ComplementClass // optional complement-routing telemetry, one class per routed span
 }
 
 // mustKeepTokenRE matches a contract token a reframe must preserve byte-for-byte: a `backticked`

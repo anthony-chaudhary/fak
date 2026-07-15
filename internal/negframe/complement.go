@@ -28,6 +28,38 @@ import (
 	"strings"
 )
 
+// ComplementClass is the routing view of ResolutionKind. Exact substitutions
+// may replace the negation, Bounded resolutions frame all candidates while
+// retaining the residual constraint, and Open resolutions stay byte-identical.
+type ComplementClass string
+
+const (
+	ComplementExact   ComplementClass = "exact"
+	ComplementBounded ComplementClass = "bounded"
+	ComplementOpen    ComplementClass = "open"
+)
+
+type ComplementRoute struct {
+	Class      ComplementClass `json:"class"`
+	Text       string          `json:"text"`
+	Resolution Resolution      `json:"resolution"`
+}
+
+// Complement resolves a negated term over a domain and renders the safe route.
+// original is returned byte-identically for Open; Bounded names the complete
+// candidate set and retains original as the residual negation.
+func Complement(original, term, domain string) ComplementRoute {
+	resolution := Resolve(term, domain)
+	switch resolution.Kind {
+	case Exact:
+		return ComplementRoute{Class: ComplementExact, Text: resolution.Positive, Resolution: resolution}
+	case Candidates:
+		return ComplementRoute{Class: ComplementBounded, Text: "one of " + strings.Join(resolution.Members, ", ") + " (constraint: " + original + ")", Resolution: resolution}
+	default:
+		return ComplementRoute{Class: ComplementOpen, Text: original, Resolution: resolution}
+	}
+}
+
 // ResolutionKind is the closed outcome vocabulary of a complement resolution.
 type ResolutionKind string
 
