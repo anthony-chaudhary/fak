@@ -248,6 +248,20 @@ type Model struct {
 	// The observer is diagnostic only and never changes a pick or eviction policy.
 	expertRouteObs ExpertRouteObserver
 
+	// routeObs is the optional per-token MoE expert-routing witness (#2623), the routing
+	// analogue of attnObs (#852): when set via SetRouteObserver, route()/glmRoute() emit a
+	// COPY of each token's top-k (expert, gate-weight) picks. nil by default — the
+	// unobserved forward pass is byte-identical and allocation-identical (emission only,
+	// the routing math is untouched). See route_observer.go. Unlike expertRouteObs (which
+	// carries expert ids only, for residency replay), routeObs carries the gate weights the
+	// per-span expert_hist descriptor needs. routePos is the position, within the sequence
+	// chunk the current forward pass processes, of the token whose picks are being emitted;
+	// mlpSeq stamps it before each per-token FFN apply and route() reads it. It is only
+	// meaningful while routeObs is set (mlpSeq only writes it then), so the off path never
+	// touches it.
+	routeObs RouteObserver
+	routePos int
+
 	// lora is the optional set of active LoRA adapters applied dynamically at the
 	// named-projection seam (#291). nil by default — residentMatRows is then
 	// byte-identical and allocation-identical. When set via SetLoRA, each named

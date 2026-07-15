@@ -294,6 +294,7 @@ func route(m *Model, layer int, xn any, mat matKernel) []routePick {
 	if cfg.isGPTOSS() {
 		picks := routeTopKSoftmax(logits, K)
 		m.emitExpertRoute(layer, picks)
+		m.emitRouteObserved(layer, picks)
 		return picks
 	}
 	probs := softmaxOf(logits)
@@ -320,6 +321,7 @@ func route(m *Model, layer int, xn any, mat matKernel) []routePick {
 		}
 	}
 	m.emitExpertRoute(layer, picks)
+	m.emitRouteObserved(layer, picks)
 	return picks
 }
 
@@ -674,6 +676,7 @@ func glmRoute(m *Model, layer int, xn any, mat matKernel) []routePick {
 		return picks[i].expert < picks[j].expert
 	})
 	m.emitExpertRoute(layer, picks)
+	m.emitRouteObserved(layer, picks)
 	return picks
 }
 

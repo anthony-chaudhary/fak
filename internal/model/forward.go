@@ -338,6 +338,12 @@ func (m *Model) mlpSeq(l int, xn [][]float32) [][]float32 {
 	ffn := m.ffnForLayer(l)
 	mat := residentKernel{m}
 	for t := range xn {
+		// Stamp the per-token position the routing observer (#2623) reports as tokenPos,
+		// but ONLY when one is installed — the unobserved path performs zero extra work and
+		// stays byte-identical. route() reads m.routePos from inside ffn.apply.
+		if m.routeObs != nil {
+			m.routePos = t
+		}
 		out[t] = ffn.apply(m, l, mat.prep(xn[t]), mat)
 	}
 	return out

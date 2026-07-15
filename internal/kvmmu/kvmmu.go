@@ -158,6 +158,16 @@ type Segment struct {
 	traj     []float64
 	trajHead int
 	trajLen  int
+
+	// expertHist is the witnessed per-span MoE expert-routing histogram (#2623), the
+	// routing analogue of Attended: for every token this span owns, RouteObserver folds that
+	// token's top-k (expert, gate_weight) picks in here — counts[e] is how many picks landed
+	// on expert e and gateSum[e] the summed gate weight (mean gate = gateSum/count). It is a
+	// WITHIN-MODEL, WITHIN-RUN clustering/dedup key, NOT a semantic/topic label (see #2623
+	// honest scope and expert_hist.go). Bounded to expertHistCap distinct experts per span;
+	// picks past the cap bump Overflow instead of growing the map. Zeroed on evict — a held
+	// span's routing history is moot, exactly as Attended clears. nil until the first pick.
+	expertHist *ExpertHist
 }
 
 // Gate is the decision the bridge ENFORCES on the KV cache. It answers, for a
@@ -573,6 +583,7 @@ func (c *Context) evict(seg *Segment) int {
 	seg.traj = seg.traj[:0]
 	seg.trajHead = 0
 	seg.trajLen = 0
+	seg.expertHist = nil // the routing histogram (#2623) clears with the span's attention history
 	return n
 }
 
