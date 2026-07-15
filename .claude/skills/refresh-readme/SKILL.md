@@ -175,12 +175,39 @@ the new VERSION) — the auditor catches the bump immediately.
 
 ---
 
+## This is already a durable loop — you don't have to remember to run it
+
+The front page does **not** rely on someone thinking to check it. The checking
+half runs on a fixed cadence, and this skill is the acting half it hands work to:
+
+1. **The auditor is a registered gardening loop.** `readme-freshness` is an
+   `enabled` entry in [`tools/control_pane.loops.json`](../../../tools/control_pane.loops.json),
+   wired to `python tools/readme_freshness_audit.py --json`. It sits alongside the
+   other front-door checking layers (`memory-recall-audit`, `docs-scorecard`, …).
+2. **It runs daily, unattended.** [`.github/workflows/garden.yml`](../../../.github/workflows/garden.yml)
+   runs `fak garden` on a daily `cron` (06:23 UTC), and `fak garden` folds the
+   fleet **loop-audit** — which runs every enabled gardening loop once, this one
+   included. So the README is re-checked against the filesystem, `VERSION`, and
+   `BENCHMARK-AUTHORITY` every day, whether or not anyone asked.
+3. **The loop itself is watched.** The `gardening-loops-audit` meta-loop flags
+   `readme-freshness` as BROKEN if its status command ever stops running — the
+   loop can't silently rot into a no-op.
+4. **This skill is the acting half.** When the daily audit returns `ACTION`
+   (`ok:false` — a FAIL), that verdict names `/refresh-readme` as the runbook.
+   You (or a supervisor turn) run the pass below; the loop closes.
+
+So "a durable README loop that routinely gardens the front page" already exists
+end to end: **daily audit → ACTION verdict → this skill → commit the README lane.**
+The section below is what you do when the loop hands you an ACTION (or when one of
+the triggers fires early).
+
 ## When to run this
 
 - After a `/release` or any `VERSION` bump (the stamp + any pin go stale at once).
 - When a headline number changes in `BENCHMARK-AUTHORITY`.
 - When a doc the README links to moves or is renamed.
-- On a `/loop` cadence to keep the front page from drifting.
+- When the daily `readme-freshness` loop (above) returns `ACTION`, or on a manual
+  `/loop` cadence to garden the front page ahead of the daily tick.
 
 The auditor is read-only; this skill's only writes are `README.md` and re-running
 the tool. It never edits a deep-dive doc — the front page is the only surface in
