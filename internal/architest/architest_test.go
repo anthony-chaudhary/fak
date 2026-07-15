@@ -2439,6 +2439,7 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 //   - "mock"       â€” engine: the routing/mock engine used by the engine-route capability.
 //   - "dynamo"     â€” engine: the Dynamo EngineDriver adapter for ridden P/D pools.
 //   - "llm-d"      â€” engine: the llm-d EngineDriver adapter for ridden Kubernetes P/D pools.
+//   - "mlx"        â€” engine: the MLX ride-adapter fronting mlx-lm/vllm-mlx on Apple Silicon.
 //
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
@@ -2448,6 +2449,7 @@ var engineDriverRole = map[string]map[string]string{
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
 	"llm-d":      {"engine": "the llm-d EngineDriver adapter for ridden Kubernetes P/D serving pools"},
 	"localtools": {"agent": "the local tool-call engine wired by cmd/fak"},
+	"mlx":        {"engine": "the MLX ride-adapter fronting mlx-lm/vllm-mlx on Apple Silicon over the OpenAI-compatible wire"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
 	"sglang":     {"engine": "the SGLang EngineDriver adapter for hosted generation, metrics, and radix-cache observations"},
 	"vllm":       {"engine": "the vLLM EngineDriver adapter for hosted OpenAI-compatible generation, metrics, and KV events"},

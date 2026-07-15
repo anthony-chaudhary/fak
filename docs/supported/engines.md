@@ -36,6 +36,7 @@ own deployment.
 | [SGLang](https://docs.sglang.ai/backend/openai_api_completions.html) | `http://localhost:30000/v1` | `fak serve --provider openai --base-url http://<host>:30000/v1` (launched via `python3 -m sglang.launch_server`) |
 | [llama.cpp (llama-server)](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) | `http://localhost:8080/v1` | `fak serve --provider openai --base-url http://<host>:8080/v1` (`llama-server -m model.gguf --host 0.0.0.0 --port 8080`) |
 | [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) | `http://localhost:1234/v1` | `fak serve --provider openai --base-url http://<host>:1234/v1` (start the server in the Developer tab, port configurable in the app) |
+| [MLX (mlx-lm / vllm-mlx)](https://github.com/ml-explore/mlx-lm) | `http://localhost:8080/v1` (mlx-lm `mlx_lm.server`), `http://localhost:8000/v1` (vllm-mlx) | `fak serve --provider openai --base-url http://<host>:8080/v1` (Apple Silicon; the current-SOTA local Mac runtime). For the registered `mlx` lifecycle adapter (OpenAI dispatch, vllm-mlx `vllm:*` Prometheus normalized under `engine="mlx"`, honest whole-prefix cache-control), select the engine id: `fak serve --engine mlx` with `FAK_MLX_BASE_URL` and `FAK_MLX_MODEL` (optional `FAK_MLX_API_KEY` / `FAK_MLX_METRICS_URL`). |
 | A local transformers shim (Windows dogfood path) | set by the dogfood launcher | The committed [`dogfood-claude.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/scripts/dogfood-claude.ps1) launcher starts a transformers-backed `local_shim.py` (expected at `experiments/agent-live/local_shim.py`) instead of Ollama, defaulting to `SmolLM2-135M` for CPU-friendly serving. The launcher is committed; the shim helper itself is not. |
 
 Once the engine answers, the wiring is the same for all of them. Verify the upstream with
@@ -89,6 +90,26 @@ The route-manifest preset at
 uses `llm-d` as the default dispatch target while keeping common sensitivity labels on
 `inkernel`. Validate it with `fak route --check examples/routing-presets/llm-d.json`
 before using it with `--route-manifest`.
+
+### MLX details (Apple Silicon)
+
+MLX is Apple Silicon's current SOTA serving path. Both `mlx-lm`'s server and
+`vllm-mlx` expose an OpenAI-compatible `/v1` frontend, so fak fronts them the same
+"ride, don't fork" way it fronts vLLM/SGLang/llm-d:
+
+```bash
+export FAK_MLX_BASE_URL="http://<host>:8080/v1"
+export FAK_MLX_MODEL="<served-model>"
+fak serve --engine mlx --model "<served-model>"
+```
+
+The `mlx` adapter deliberately uses only the public OpenAI-compatible frontend plus,
+when `vllm-mlx` exposes it, the vLLM-format Prometheus surface (normalized under
+`engine="mlx"`). It is a **ride** adapter — it fronts an external MLX server, not a
+native MLX/Metal reimplementation inside fak's kernel (that is separate work). It
+does not import MLX internals and does not claim exact remote KV-span eviction: like
+the other three ride adapters its control-plane boundary is whole-prefix reset only
+(`enginecache.SupportsExactSpan` stays false for it).
 
 ## 2. The in-kernel reference engine
 
