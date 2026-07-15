@@ -380,12 +380,25 @@ func Apply(plan Plan) error {
 
 // ProductionCorpus reports whether a token is grounded outside tests and build-tag-only files.
 func ProductionCorpus(root, raw string) (bool, error) {
-	want := token(raw)
-	if want == "" {
-		return false, nil
+	found, err := ProductionCorpusMany(root, []string{raw})
+	return found[token(raw)], err
+}
+
+// ProductionCorpusMany resolves many grounding tokens with one bounded tree walk.
+// A per-row walk made current-catalog validation scale as rows times corpus size.
+func ProductionCorpusMany(root string, raw []string) (map[string]bool, error) {
+	wants := map[string]bool{}
+	for _, v := range raw {
+		if n := token(v); n != "" {
+			wants[n] = true
+		}
+	}
+	found := map[string]bool{}
+	if len(wants) == 0 {
+		return found, nil
 	}
 	skip := map[string]bool{".git": true, "vendor": true, "node_modules": true, "concept_disambiguation_scorecard.data": true}
-	found := false
+	var corpus strings.Builder
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -417,15 +430,17 @@ func ProductionCorpus(root, raw string) (bool, error) {
 				return nil
 			}
 			first = false
-			if strings.Contains(token(line), want) {
-				found = true
-				return filepath.SkipAll
-			}
+			corpus.WriteString(token(line))
+			corpus.WriteByte('\n')
 		}
 		return nil
 	})
-	if err == filepath.SkipAll {
-		err = nil
+	if err != nil {
+		return nil, err
 	}
-	return found, err
+	body := corpus.String()
+	for want := range wants {
+		found[want] = strings.Contains(body, want)
+	}
+	return found, nil
 }

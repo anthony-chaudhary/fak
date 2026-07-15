@@ -98,6 +98,38 @@ func LoadDir(dir string) (Catalog, error) {
 	return c, nil
 }
 
+// ValidateTree adds the cross-tree grounding invariant: a row cannot be grounded
+// exclusively by tests or build-tag-only source. It is separate from ValidateStrict
+// because in-memory fixture catalogs do not necessarily have a repository root.
+func ValidateTree(c Catalog, root string) []Diagnostic {
+	out := Validate(c)
+	groundings := make([]string, 0, len(c.Rows))
+	for _, r := range c.Rows {
+		groundings = append(groundings, r.Grounding)
+	}
+	found, err := ProductionCorpusMany(root, groundings)
+	for _, r := range c.Rows {
+		if strings.TrimSpace(r.Grounding) == "" {
+			continue
+		}
+		if err != nil {
+			out = append(out, diag(r, "grounding", r.Grounding, "grounding_check_failed", fmt.Sprintf("inspect the production corpus: %v", err)))
+		} else if !found[token(r.Grounding)] {
+			out = append(out, diag(r, "grounding", r.Grounding, "excluded_corpus_grounding", "add this grounding to production corpus; tests and build-tag-only files do not count"))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].File != out[j].File {
+			return out[i].File < out[j].File
+		}
+		if out[i].RowID != out[j].RowID {
+			return out[i].RowID < out[j].RowID
+		}
+		return out[i].Field < out[j].Field
+	})
+	return out
+}
+
 func norm(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 func token(s string) string {
 	var b strings.Builder
@@ -198,7 +230,15 @@ func ValidateStrict(c Catalog) []Diagnostic {
 		canon[norm(r.Canonical)] = r
 	}
 	aliases := map[string]Row{}
+	groundings := map[string]Row{}
 	for _, r := range c.Rows {
+		if g := token(r.Grounding); g != "" {
+			if p, ok := groundings[g]; ok {
+				out = append(out, diag(r, "grounding", r.Grounding, "duplicate_grounding", "use a distinct production grounding; already owned by "+p.ID))
+			} else {
+				groundings[g] = r
+			}
+		}
 		if ignored[norm(r.Family)][token(r.Grounding)] {
 			out = append(out, diag(r, "grounding", r.Grounding, "classification_conflict", "remove this token from family ignore/exclude metadata because a catalog row positions it"))
 		}
