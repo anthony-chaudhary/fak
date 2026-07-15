@@ -20,7 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
-// fak codex-mcp installs an immutable, versioned fak binary and points Codex's
+// fak codex mcp installs an immutable, versioned fak binary and points Codex's
 // stdio MCP entry at it (#4657). Fixing server code does not help until Codex
 // actually launches a fixed, non-worktree artifact: the in-tree fak.exe can be
 // held open by a running Codex on Windows (blocking replacement), its revision
@@ -104,14 +104,14 @@ func runCodexMCP(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stdout, codexMCPUsage())
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak codex-mcp: unknown subcommand %q\n%s\n", sub, codexMCPUsage())
+		fmt.Fprintf(stderr, "fak codex mcp: unknown subcommand %q\n%s\n", sub, codexMCPUsage())
 		return 2
 	}
 }
 
 func codexMCPUsage() string {
 	return strings.TrimSpace(`
-usage: fak codex-mcp <install|status|uninstall> [flags]
+usage: fak codex mcp <install|status|uninstall> [flags]
   install    copy an immutable versioned fak into the Codex install dir and point mcp_servers.<server> at it
   status     verify the installed binary (present, checksum, arch, freshness) with an initialize handshake
   uninstall  remove the owned config entry and installed artifacts (idempotent)
@@ -135,7 +135,7 @@ func codexMCPManifestPath(configPath string) string {
 // ---- install ----------------------------------------------------------------
 
 func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("codex-mcp install", flag.ContinueOnError)
+	fs := flag.NewFlagSet("codex mcp install", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	server := fs.String("server", "fak", "Codex mcp_servers entry name")
 	config := fs.String("config", defaultCodexConfigPath(), "Codex config.toml path")
@@ -147,6 +147,15 @@ func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit a stable JSON report")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if !validCodexServerName(*server) {
+		return codexMCPFail(stderr, asJSON, "install", "SERVER_NAME", fmt.Sprintf("invalid --server %q: use letters, digits, '-' or '_' (it is written into a TOML table header)", *server))
+	}
+	// Absolutize the config path so the derived install dir and the recorded
+	// launch command never depend on the caller's cwd (a relative --config would
+	// otherwise plant artifacts under whatever directory Codex happens to start in).
+	if abs, err := filepath.Abs(*config); err == nil {
+		*config = abs
 	}
 	if *rollback {
 		return runCodexMCPRollback(stdout, stderr, *config, *server, *asJSON)
@@ -218,9 +227,16 @@ func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
 	if err != nil {
 		return codexMCPFail(stderr, asJSON, "install", "CONFIG_READ", err.Error())
 	}
-
-	if err := patchCodexMCPConfig(*config, *server, installedCmd, args); err != nil {
-		return codexMCPFail(stderr, asJSON, "install", "CONFIG_PATCH", err.Error())
+	// On a re-install or upgrade the entry we are about to replace is our own
+	// fak-managed entry, not the operator's original. Capturing it as "prior"
+	// would make rollback restore a fak entry (or nothing) instead of the
+	// pre-fak config. Carry the original forward from the existing manifest so
+	// rollback still restores what the operator had before fak ever touched it.
+	if existing, mErr := readCodexMCPManifest(*config); mErr == nil {
+		if priorCmd == existing.InstalledCommand || (priorCmd != "" && withinDir(dir, priorCmd)) {
+			priorSection = existing.PriorConfigSection
+			priorCmd = existing.PriorCommand
+		}
 	}
 
 	man := codexMCPManifest{
@@ -240,8 +256,16 @@ func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
 		PriorConfigSection: priorSection,
 		PriorCommand:       priorCmd,
 	}
+	// Persist the backup manifest BEFORE the destructive config rewrite. If the
+	// patch fails (or the process dies) after this point, the prior entry is
+	// still both in the live config and recorded here, so rollback recovers it;
+	// writing the manifest afterwards would leave a crash window with the prior
+	// entry overwritten and no record of it.
 	if err := writeCodexMCPManifest(*config, man); err != nil {
 		return codexMCPFail(stderr, asJSON, "install", "MANIFEST_WRITE", err.Error())
+	}
+	if err := patchCodexMCPConfig(*config, *server, installedCmd, args); err != nil {
+		return codexMCPFail(stderr, asJSON, "install", "CONFIG_PATCH", err.Error())
 	}
 
 	verified := false
@@ -263,10 +287,10 @@ func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
 				"installed": true,
 			}
 			if *asJSON {
-				return encodeJSONOrFail(stdout, stderr, report, "fak codex-mcp install")
+				return encodeJSONOrFail(stdout, stderr, report, "fak codex mcp install")
 			}
-			fmt.Fprintf(stderr, "fak codex-mcp install: installed %s but initialize probe failed (%s)\n", installedCmd, verifyCause)
-			fmt.Fprintf(stderr, "  run `fak codex-mcp status --server %s` to diagnose; `--rollback` restores the prior entry\n", *server)
+			fmt.Fprintf(stderr, "fak codex mcp install: installed %s but initialize probe failed (%s)\n", installedCmd, verifyCause)
+			fmt.Fprintf(stderr, "  run `fak codex mcp status --server %s` to diagnose; `--rollback` restores the prior entry\n", *server)
 			return 1
 		}
 	}
@@ -285,7 +309,7 @@ func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
 			"server":    *server,
 			"verified":  verified,
 			"installed": true,
-		}, "fak codex-mcp install")
+		}, "fak codex mcp install")
 	}
 	fmt.Fprintf(stdout, "installed fak codex MCP: %s\n", installedCmd)
 	fmt.Fprintf(stdout, "  policy:   %s\n", installedPolicy)
@@ -323,7 +347,7 @@ func runCodexMCPRollback(stdout, stderr io.Writer, config, server string, asJSON
 			"config":  config,
 			"server":  server,
 			"command": man.PriorCommand,
-		}, "fak codex-mcp rollback")
+		}, "fak codex mcp rollback")
 	}
 	if man.PriorCommand == "" {
 		fmt.Fprintf(stdout, "rolled back: removed mcp_servers.%s (no prior entry)\n", server)
@@ -351,7 +375,7 @@ type codexMCPStatusReport struct {
 }
 
 func runCodexMCPStatus(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("codex-mcp status", flag.ContinueOnError)
+	fs := flag.NewFlagSet("codex mcp status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	server := fs.String("server", "fak", "Codex mcp_servers entry name")
 	config := fs.String("config", defaultCodexConfigPath(), "Codex config.toml path")
@@ -361,9 +385,12 @@ func runCodexMCPStatus(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	if abs, err := filepath.Abs(*config); err == nil {
+		*config = abs
+	}
 	rep := classifyCodexMCPStatus(*config, *server, *timeout, !*noProbe)
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, rep, "fak codex-mcp status")
+		return encodeJSONOrFail(stdout, stderr, rep, "fak codex mcp status")
 	}
 	writeCodexMCPStatusHuman(stdout, rep)
 	if !rep.OK {
@@ -460,7 +487,7 @@ func classifyCodexMCPStatus(config, server string, timeout time.Duration, probe 
 }
 
 func writeCodexMCPStatusHuman(w io.Writer, rep codexMCPStatusReport) {
-	fmt.Fprintf(w, "== fak codex-mcp status: %s ==\n", rep.Server)
+	fmt.Fprintf(w, "== fak codex mcp status: %s ==\n", rep.Server)
 	fmt.Fprintf(w, "state:   %s\n", rep.State)
 	if rep.Command != "" {
 		fmt.Fprintf(w, "command: %s\n", rep.Command)
@@ -478,8 +505,56 @@ func writeCodexMCPStatusHuman(w io.Writer, rep codexMCPStatusReport) {
 
 // ---- uninstall --------------------------------------------------------------
 
+// removeCodexOwnedArtifact deletes one installed artifact, distinguishing the
+// three outcomes uninstall must treat differently: removed, absent (idempotent
+// no-op), or held open by a live Codex (locked → retry, not a failure). It clears
+// the installed read-only bit first so the OS permits the delete, but never
+// follows a symlink when doing so — a link planted under the install dir must not
+// redirect the chmod onto its target.
+func removeCodexOwnedArtifact(p string) (removed, locked bool, err error) {
+	if p == "" {
+		return false, false, nil
+	}
+	if fi, lerr := os.Lstat(p); lerr == nil && fi.Mode()&os.ModeSymlink == 0 {
+		_ = os.Chmod(p, 0o644)
+	}
+	switch rmErr := os.Remove(p); {
+	case rmErr == nil:
+		return true, false, nil
+	case errors.Is(rmErr, os.ErrNotExist):
+		return false, false, nil
+	case isSharingViolation(rmErr):
+		return false, true, nil
+	default:
+		return false, false, rmErr
+	}
+}
+
+// codexMCPUninstallLocked reports the atomic-abort outcome: the current binary is
+// held open, so uninstall changed nothing (config included) and the operator
+// should stop Codex and re-run. Kept a distinct exit-1 path so scripts see the
+// uninstall did not complete, while a retry after Codex exits converges cleanly.
+func codexMCPUninstallLocked(stdout, stderr io.Writer, asJSON *bool, config, server, command string) int {
+	if asJSON != nil && *asJSON {
+		return encodeJSONOrFail(stdout, stderr, map[string]any{
+			"schema":          codexMCPManifestSchema,
+			"action":          "uninstall",
+			"ok":              false,
+			"cause":           "BINARY_LOCKED",
+			"config":          config,
+			"server":          server,
+			"command":         command,
+			"removed_section": false,
+			"removed_files":   []string{},
+		}, "fak codex mcp uninstall")
+	}
+	fmt.Fprintf(stderr, "fak codex mcp uninstall: installed binary is held open (Codex still running?): %s\n", command)
+	fmt.Fprintln(stderr, "  nothing was changed; stop Codex and re-run `fak codex mcp uninstall` (it is idempotent)")
+	return 1
+}
+
 func runCodexMCPUninstall(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("codex-mcp uninstall", flag.ContinueOnError)
+	fs := flag.NewFlagSet("codex mcp uninstall", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	server := fs.String("server", "fak", "Codex mcp_servers entry name")
 	config := fs.String("config", defaultCodexConfigPath(), "Codex config.toml path")
@@ -487,6 +562,56 @@ func runCodexMCPUninstall(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit a stable JSON report")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if abs, err := filepath.Abs(*config); err == nil {
+		*config = abs
+	}
+
+	dir := codexMCPInstallDir(*config)
+	removedFiles := []string{}
+	lockedFiles := []string{}
+
+	// Artifacts first, config second: the current binary is the one a live Codex
+	// most likely holds open, so we gate on it. If it is locked we change nothing
+	// (config included) and tell the operator to retry — a half-removed state that
+	// stripped the config while leaving a live binary must never happen.
+	if !*keepBinaries {
+		if man, err := readCodexMCPManifest(*config); err == nil {
+			removed, locked, rmErr := removeCodexOwnedArtifact(man.InstalledCommand)
+			if rmErr != nil {
+				return codexMCPFail(stderr, asJSON, "uninstall", "ARTIFACT_REMOVE", rmErr.Error())
+			}
+			if locked {
+				return codexMCPUninstallLocked(stdout, stderr, asJSON, *config, *server, man.InstalledCommand)
+			}
+			if removed {
+				removedFiles = append(removedFiles, man.InstalledCommand)
+			}
+			// Reap every other artifact the install dir owns: the current policy
+			// plus any binaries/policies orphaned by prior upgrades (versioned
+			// filenames mean an upgrade leaves the superseded pair behind). Older
+			// binaries may be held open by other live sessions; skip those
+			// best-effort rather than block the whole uninstall on them.
+			owned, _ := filepath.Glob(filepath.Join(dir, "fak-*"))
+			if pol, _ := filepath.Glob(filepath.Join(dir, "policy-*.json")); len(pol) > 0 {
+				owned = append(owned, pol...)
+			}
+			for _, p := range owned {
+				if p == man.InstalledCommand {
+					continue // gated above
+				}
+				removed, locked, rmErr := removeCodexOwnedArtifact(p)
+				if rmErr != nil {
+					return codexMCPFail(stderr, asJSON, "uninstall", "ARTIFACT_REMOVE", rmErr.Error())
+				}
+				switch {
+				case removed:
+					removedFiles = append(removedFiles, p)
+				case locked:
+					lockedFiles = append(lockedFiles, p)
+				}
+			}
+		}
 	}
 
 	removedSection := false
@@ -497,33 +622,19 @@ func runCodexMCPUninstall(stdout, stderr io.Writer, argv []string) int {
 		removedSection = true
 	}
 
-	removedFiles := []string{}
-	if !*keepBinaries {
-		man, err := readCodexMCPManifest(*config)
-		if err == nil {
-			// Remove only artifacts this manifest owns.
-			for _, p := range []string{man.InstalledCommand, man.PolicyPath} {
-				if p != "" && withinDir(codexMCPInstallDir(*config), p) {
-					// Installed binaries are read-only (0555); clear that first so
-					// Windows permits the delete.
-					_ = os.Chmod(p, 0o644)
-					if err := os.Remove(p); err == nil {
-						removedFiles = append(removedFiles, p)
-					} else if !errors.Is(err, os.ErrNotExist) {
-						return codexMCPFail(stderr, asJSON, "uninstall", "ARTIFACT_REMOVE", err.Error())
-					}
-				}
-			}
-			manPath := codexMCPManifestPath(*config)
-			if err := os.Remove(manPath); err == nil {
-				removedFiles = append(removedFiles, manPath)
-			}
-			// Drop the install dir if now empty; ignore if not.
-			_ = os.Remove(codexMCPInstallDir(*config))
+	if !*keepBinaries && len(lockedFiles) == 0 {
+		// Everything owned is gone: drop the manifest and the dir (if empty).
+		// When artifacts remain locked we keep the manifest so a later uninstall
+		// can still find and reap them.
+		manPath := codexMCPManifestPath(*config)
+		if err := os.Remove(manPath); err == nil {
+			removedFiles = append(removedFiles, manPath)
 		}
+		_ = os.Remove(dir) // drops the dir only if now empty
 	}
 
 	sort.Strings(removedFiles)
+	sort.Strings(lockedFiles)
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
 			"schema":          codexMCPManifestSchema,
@@ -533,15 +644,19 @@ func runCodexMCPUninstall(stdout, stderr io.Writer, argv []string) int {
 			"server":          *server,
 			"removed_section": removedSection,
 			"removed_files":   removedFiles,
-		}, "fak codex-mcp uninstall")
+			"locked_files":    lockedFiles,
+		}, "fak codex mcp uninstall")
 	}
-	if !removedSection && len(removedFiles) == 0 {
+	if !removedSection && len(removedFiles) == 0 && len(lockedFiles) == 0 {
 		fmt.Fprintf(stdout, "uninstall: nothing owned for mcp_servers.%s (already clean)\n", *server)
 		return 0
 	}
 	fmt.Fprintf(stdout, "uninstalled mcp_servers.%s from %s\n", *server, *config)
 	for _, p := range removedFiles {
 		fmt.Fprintf(stdout, "  removed %s\n", p)
+	}
+	for _, p := range lockedFiles {
+		fmt.Fprintf(stdout, "  deferred (held open, retry after Codex exits): %s\n", p)
 	}
 	return 0
 }
@@ -557,8 +672,16 @@ func patchCodexMCPConfig(configPath, server, command string, args []string) erro
 	if err != nil {
 		return err
 	}
+	section := "mcp_servers." + server
+	// Refuse to append a plain [section] next to an existing [[section]]
+	// array-of-tables: that yields a config TOML itself rejects as a duplicate
+	// key, and we would not own either entry cleanly.
+	lines := strings.Split(existing, "\n")
+	if start, _ := findTOMLSection(lines, section); start < 0 && tomlArrayTableExists(lines, section) {
+		return fmt.Errorf("config declares [[%s]] as an array-of-tables; remove that form before installing (fak manages a plain [%s] table)", section, section)
+	}
 	block := renderCodexMCPSection(server, command, args)
-	out, _, _ := replaceTOMLSection(existing, "mcp_servers."+server, block)
+	out, _, _ := replaceTOMLSection(existing, section, block)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return err
 	}
@@ -691,26 +814,40 @@ func extractTOMLSection(text, section string) string {
 	return strings.Join(lines[start:end], "\n")
 }
 
-// findTOMLSection locates [start,end) line indices for a table header and its
-// child sub-tables. Returns start=-1 when absent.
+// findTOMLSection locates [start,end) line indices for a plain table header and
+// its plain child sub-tables (`section.*`). Two invariants keep an install or
+// uninstall from ever deleting unrelated config:
+//
+//   - An array-of-tables header (`[[x]]`) is ALWAYS a boundary, never absorbed.
+//     Without this the span would run from the fak table straight through any
+//     `[[foo]]` block that happened to follow it (until the next plain table),
+//     silently deleting it on the next rewrite.
+//   - Trailing blank/comment lines immediately before the boundary are excluded
+//     from the span: they document the following table, so replacing or removing
+//     the fak block must leave them attached to what comes after.
+//
+// Returns start=-1 when absent.
 func findTOMLSection(lines []string, section string) (start, end int) {
 	start = -1
 	for i, raw := range lines {
-		name, ok := tomlHeaderName(raw)
+		name, ok, array := tomlHeaderName(raw)
 		if !ok {
 			continue
 		}
 		if start < 0 {
-			if name == section {
+			// Only a plain table defines the section we manage; a stray
+			// `[[section]]` array-of-tables is a foreign construct, not our start.
+			if name == section && !array {
 				start = i
 			}
 			continue
 		}
-		// We are inside the target section; stop at the next non-child header.
-		if name == section || strings.HasPrefix(name, section+".") {
+		// Inside the target section: a plain child sub-table stays in the span;
+		// any other header (including every array-of-tables) ends it.
+		if !array && (name == section || strings.HasPrefix(name, section+".")) {
 			continue
 		}
-		return start, i
+		return start, trimTrailingBlankComment(lines, start, i)
 	}
 	if start < 0 {
 		return -1, -1
@@ -718,22 +855,52 @@ func findTOMLSection(lines []string, section string) (start, end int) {
 	return start, len(lines)
 }
 
-// tomlHeaderName extracts the table name from a `[a.b.c]` header line, ignoring a
-// trailing inline comment. Returns ok=false for non-header lines.
-func tomlHeaderName(raw string) (string, bool) {
+// trimTrailingBlankComment pulls end back past a run of blank or comment lines
+// directly preceding it, so those lines are not counted as part of the section.
+// It never trims past start+1, so the header line always survives.
+func trimTrailingBlankComment(lines []string, start, end int) int {
+	for end > start+1 {
+		s := strings.TrimSpace(lines[end-1])
+		if s != "" && !strings.HasPrefix(s, "#") {
+			break
+		}
+		end--
+	}
+	return end
+}
+
+// tomlArrayTableExists reports whether the document declares `section` as an
+// array-of-tables (`[[section]]`) — a form fak does not manage and must refuse to
+// collide with, rather than appending a conflicting plain `[section]` table.
+func tomlArrayTableExists(lines []string, section string) bool {
+	for _, raw := range lines {
+		if name, ok, array := tomlHeaderName(raw); ok && array && name == section {
+			return true
+		}
+	}
+	return false
+}
+
+// tomlHeaderName extracts the table name from a `[a.b.c]` or `[[a.b.c]]` header
+// line, ignoring a trailing inline comment. Returns ok=false for non-header
+// lines and array=true for an array-of-tables header (`[[x]]`).
+func tomlHeaderName(raw string) (name string, ok, array bool) {
 	line := strings.TrimSpace(raw)
 	if !strings.HasPrefix(line, "[") {
-		return "", false
+		return "", false, false
 	}
-	// Array-of-tables `[[x]]` is not a plain table header we manage.
 	if strings.HasPrefix(line, "[[") {
-		return "", false
+		end := strings.Index(line, "]]")
+		if end < 0 {
+			return "", false, false
+		}
+		return strings.TrimSpace(line[2:end]), true, true
 	}
 	end := strings.IndexByte(line, ']')
 	if end < 0 {
-		return "", false
+		return "", false, false
 	}
-	return strings.TrimSpace(line[1:end]), true
+	return strings.TrimSpace(line[1:end]), true, false
 }
 
 // ---- manifest IO ------------------------------------------------------------
@@ -747,7 +914,9 @@ func writeCodexMCPManifest(configPath string, man codexMCPManifest) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(codexMCPManifestPath(configPath), b, 0o644)
+	// 0o600: the manifest embeds the operator's prior config section, which may
+	// hold API keys or other secrets carried in the entry we replaced.
+	return writeFileAtomic(codexMCPManifestPath(configPath), b, 0o600)
 }
 
 func readCodexMCPManifest(configPath string) (codexMCPManifest, error) {
@@ -871,14 +1040,51 @@ func exeSuffix() string {
 	return ""
 }
 
+// sanitizeVersion maps an arbitrary version string to a filesystem-safe token for
+// the versioned artifact name. It keeps only an allowlist of characters safe on
+// every target filesystem — anything else (path separators, the Windows-reserved
+// `:*?"<>|`, control bytes) becomes '-' — then trims trailing dots/spaces, which
+// Windows silently strips from filenames. The <sha8> suffix on the final name
+// keeps installs distinct even if two versions collapse to the same token.
 func sanitizeVersion(v string) string {
-	v = strings.TrimSpace(v)
-	repl := strings.NewReplacer("/", "-", " ", "-", string(filepath.Separator), "-", "\\", "-")
-	v = repl.Replace(v)
-	if v == "" {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(v) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '-', r == '_', r == '+':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), ". ")
+	// Fall back to "dev" when nothing alphanumeric survived (empty input, or a
+	// version that was all separators/reserved chars) — a token of only '-'/'_'/
+	// '+'/'.' is a useless filename fragment; the <sha8> suffix still keeps
+	// installs distinct.
+	if strings.Trim(out, "-_+.") == "" {
 		return "dev"
 	}
-	return v
+	return out
+}
+
+// validCodexServerName gates the --server value before it is written into a TOML
+// table header (`[mcp_servers.<name>]`). Restricting it to an unambiguous
+// identifier keeps a crafted name from injecting extra tables or breaking the
+// exact-string match uninstall relies on to own its entry.
+func validCodexServerName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func shortOr(s, fallback string) string {
@@ -925,6 +1131,6 @@ func codexMCPFail(stderr io.Writer, asJSON *bool, action, cause, detail string) 
 		fmt.Fprintln(stderr, string(b))
 		return 1
 	}
-	fmt.Fprintf(stderr, "fak codex-mcp %s: %s: %s\n", action, cause, detail)
+	fmt.Fprintf(stderr, "fak codex mcp %s: %s: %s\n", action, cause, detail)
 	return 1
 }
