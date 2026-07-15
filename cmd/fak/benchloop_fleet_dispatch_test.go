@@ -212,6 +212,22 @@ func TestBenchFleetWorkstationSessionUsesBoundedRecipe(t *testing.T) {
 	}
 }
 
+func TestBenchFleetWorkstationModelUsesProvisionedSnapshot(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("workstation route is Windows-only")
+	}
+	_, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a", Benchmark: "model-benchmark", Command: "go run ./cmd/modelbench -quant"})
+	if err != nil || state != "running" {
+		t.Fatalf("state=%q err=%v", state, err)
+	}
+	command := strings.Join(args, " ")
+	for _, want := range []string{"modelbench", "-hf internal/model/.cache/smollm2-135m", "-decode-steps 4", "FAK_BENCH_NODE="} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("command %q missing %q", command, want)
+		}
+	}
+}
+
 func TestBenchFleetL4UsesProvisionedGPURecipe(t *testing.T) {
 	cmd := benchFleetRemoteCommand(benchFleetRequest{Machine: "gcp-g2-l4", Benchmark: "gpu-benchmark", Command: "generic"})
 	for _, want := range []string{"FAK_BENCH_NODE=", "$HOME/.local/go/bin", "build_cuda.sh binary", "~/models/qwen05"} {

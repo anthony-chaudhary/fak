@@ -246,10 +246,14 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 			return "", nil, "local-control", "waiting_session", errors.New("workstation runner is only available on its Windows control node")
 		}
 		requestCommand := req.Command
-		if req.Benchmark == "session-benchmark" {
+		switch req.Benchmark {
+		case "session-benchmark":
 			// Keep the recurring control-node witness bounded and weight-independent.
 			// The synthetic tiny shape drives all three real session-cache arms.
 			requestCommand = "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -prefix 64 -result 16 -decode 4 -reps 1 -val-scale 32,2,1,4,8"
+		case "model-benchmark":
+			// The planner hint omits the Hugging Face snapshot needed by modelbench.
+			requestCommand = "go run ./cmd/modelbench -hf internal/model/.cache/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
 		}
 		command := "Write-Output ('FAK_BENCH_NODE=' + $env:COMPUTERNAME); Set-Location -LiteralPath '" + strings.ReplaceAll(root, "'", "''") + "'; " + requestCommand
 		return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", command}, "local-control", "running", nil
