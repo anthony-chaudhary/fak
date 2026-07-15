@@ -13,6 +13,17 @@ import (
 
 const descriptorFileVersion = "fak.session-descriptors.v1"
 
+// fileStoreFaultHook is a test-only crash-boundary seam. Production leaves it nil.
+// Tests install it only in isolated helper processes, so concurrent callers never
+// share mutable hook state.
+var fileStoreFaultHook func(stage string)
+
+func fileStoreBoundary(stage string) {
+	if fileStoreFaultHook != nil {
+		fileStoreFaultHook(stage)
+	}
+}
+
 // FileStore persists Descriptor rows into one JSON file. It is the production
 // DescriptorStore for the live session registry: Put/Delete rewrite the small
 // descriptor index, while List reads the current file back. The file is an index
@@ -54,6 +65,8 @@ type descriptorFile struct {
 }
 
 // Put writes one descriptor keyed by ID, replacing any prior row for that ID.
+// The cross-process lock orders writers: for the same ID, the last Put that
+// acquires the lock wins, regardless of the descriptor's embedded Rev value.
 func (s *FileStore) Put(d Descriptor) error {
 	if d.ID == "" {
 		return errBlankDescriptorID
@@ -63,6 +76,14 @@ func (s *FileStore) Put(d Descriptor) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockDescriptorFile(s.path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := cleanupDescriptorTemps(s.path); err != nil {
+		return err
+	}
 	byID, err := s.loadLocked()
 	if err != nil {
 		return err
@@ -78,6 +99,14 @@ func (s *FileStore) Delete(id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockDescriptorFile(s.path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := cleanupDescriptorTemps(s.path); err != nil {
+		return err
+	}
 	byID, err := s.loadLocked()
 	if err != nil {
 		return err
@@ -112,7 +141,7 @@ func (s *FileStore) loadLocked() (map[string]Descriptor, error) {
 	if s == nil || s.path == "" {
 		return nil, registryError("descriptor file path must be non-empty")
 	}
-	b, err := os.ReadFile(s.path)
+	b, err := readDescriptorFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return map[string]Descriptor{}, nil
 	}
@@ -172,25 +201,19 @@ func (s *FileStore) saveLocked(byID map[string]Descriptor) error {
 		_ = tmp.Close()
 		return fmt.Errorf("encode session descriptor file: %w", err)
 	}
+	fileStoreBoundary("encode")
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("flush session descriptor file: %w", err)
+	}
+	fileStoreBoundary("flush")
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close session descriptor file: %w", err)
 	}
+	fileStoreBoundary("close")
 	if err := replaceFile(tmpName, s.path); err != nil {
 		return err
 	}
 	committed = true
-	return nil
-}
-
-func replaceFile(tmpName, path string) error {
-	if err := os.Rename(tmpName, path); err == nil {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("replace session descriptor file: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replace session descriptor file: %w", err)
-	}
 	return nil
 }
