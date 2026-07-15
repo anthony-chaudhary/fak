@@ -235,6 +235,15 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if attached := guardAllowShellAttachments(allowOverlay.Allow); len(attached) > 0 {
 		floorSource += fmt.Sprintf("; inherited shell danger rules attached: %s", strings.Join(attached, ", "))
 	}
+	denyPath := guardDenyOverlayPath()
+	denyOverlay, denyErr := loadGuardDenyOverlay(denyPath)
+	if denyErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v\n", denyErr)
+		os.Exit(2)
+	}
+	if n := guardApplyDenyOverlay(&rt, denyOverlay); n > 0 {
+		floorSource += fmt.Sprintf(" + repo-local deny overlay (%d tool(s); fak guard deny --list)", n)
+	}
 	// The adjudicator runs in this parent process. Declare the narrow Claude
 	// scratch tree here so structural write/delete gates can prove containment;
 	// never widen this default to the whole OS temp directory.
@@ -242,7 +251,7 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 		_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", filepath.Join(os.TempDir(), "claude"))
 	}
 	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay)
-	rt = protectGuardPolicyConfig(rt, overlayPath, policyPath)
+	rt = protectGuardPolicyConfig(rt, overlayPath, denyPath, policyPath)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	dur = time.Since(tPolicy)
@@ -264,13 +273,21 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 		return policy.Runtime{}, "", err
 	}
 	overlayPath := guardAllowOverlayPath()
+	denyPath := guardDenyOverlayPath()
 	overlayWarning := ""
 	if ov, ovErr := loadGuardAllowOverlay(overlayPath); ovErr == nil {
 		guardApplyAllowOverlay(&rt, ov)
 	} else {
 		overlayWarning = "overlay_error: " + ovErr.Error()
 	}
-	rt = protectGuardPolicyConfig(rt, overlayPath, "")
+	if ov, ovErr := loadGuardDenyOverlay(denyPath); ovErr == nil {
+		guardApplyDenyOverlay(&rt, ov)
+	} else if overlayWarning == "" {
+		overlayWarning = "deny_overlay_error: " + ovErr.Error()
+	} else {
+		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
+	}
+	rt = protectGuardPolicyConfig(rt, overlayPath, denyPath, "")
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	// Audit parity with the --policy reload path (reloadPolicy): the security boundary was

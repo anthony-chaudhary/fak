@@ -120,6 +120,10 @@ func cmdGuard(argv []string) {
 		cmdGuardAllow(argv[1:])
 		return
 	}
+	if len(argv) > 0 && argv[0] == "deny" {
+		cmdGuardDeny(argv[1:])
+		return
+	}
 	// `fak guard compile` performs one authoring-time model extraction and emits
 	// a review-only policy diff. Runtime policy enforcement remains model-free.
 	if len(argv) > 0 && argv[0] == "compile" {

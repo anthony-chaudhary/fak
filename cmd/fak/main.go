@@ -1042,13 +1042,21 @@ func reloadPolicy(path string) (policy.Runtime, string, error) {
 	// overlay is the common no-op; a malformed one is tolerated on reload rather than
 	// wedging a live gateway (the loud failure already fired at launch).
 	overlayPath := guardAllowOverlayPath()
+	denyPath := guardDenyOverlayPath()
 	overlayWarning := ""
 	if ov, ovErr := loadGuardAllowOverlay(overlayPath); ovErr == nil {
 		guardApplyAllowOverlay(&rt, ov)
 	} else {
 		overlayWarning = "overlay_error: " + ovErr.Error()
 	}
-	rt = protectGuardPolicyConfig(rt, overlayPath, path)
+	if ov, ovErr := loadGuardDenyOverlay(denyPath); ovErr == nil {
+		guardApplyDenyOverlay(&rt, ov)
+	} else if overlayWarning == "" {
+		overlayWarning = "deny_overlay_error: " + ovErr.Error()
+	} else {
+		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
+	}
+	rt = protectGuardPolicyConfig(rt, overlayPath, denyPath, path)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	// Record the now-live capability floor as a durable CONFIG_SWAP row (#3959): the
