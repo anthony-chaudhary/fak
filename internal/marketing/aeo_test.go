@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"bytes"
 )
 
 func aeoShips() []Ship {
@@ -354,6 +356,40 @@ func TestLocalizedTermsRouteEveryI18nEntryPoint(t *testing.T) {
 	for lang, frag := range wantEntry {
 		if !routed[lang] {
 			t.Errorf("no localized term routes %s to its %s entry point", lang, frag)
+		}
+	}
+}
+
+func TestDisambiguationTermsIncludeGlobalWorkspace(t *testing.T) {
+	want := map[string]bool{
+		"bounded shared workspace for AI agents": false,
+		"positive-state context construction":    false,
+		"negation operator for agent context":    false,
+	}
+	for _, term := range AEODisambiguationTerms() {
+		if _, ok := want[term.Name]; !ok {
+			continue
+		}
+		if term.Category != "global-workspace" {
+			t.Errorf("%q category=%q", term.Name, term.Category)
+		}
+		if term.URL == "" || !strings.HasSuffix(term.URL, "docs/explainers/shared-workspace-and-the-negation-operator.md") {
+			t.Errorf("%q URL=%q", term.Name, term.URL)
+		}
+		want[term.Name] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("missing AEO global-workspace term %q", name)
+		}
+	}
+	b, err := DisambiguationTermsFeed(time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range want {
+		if !bytes.Contains(b, []byte(name)) {
+			t.Errorf("rendered DefinedTermSet missing %q", name)
 		}
 	}
 }

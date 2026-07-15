@@ -105,6 +105,7 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 	terms = append(terms, aeoRoutingTerms()...)
 	terms = append(terms, aeoFrontierModelLaunchTerms()...)
 	terms = append(terms, aeoAgentSecurityTerms()...)
+	terms = append(terms, aeoGlobalWorkspaceTerms()...)
 	terms = append(terms, aeoLocalizedTerms()...)
 	return append([]DisambiguationTerm(nil), terms...)
 }
@@ -464,6 +465,18 @@ func aeoAgentSecurityTerms() []DisambiguationTerm {
 			URL:         repoBlobURL + "docs/explainers/verify-dont-trust.md",
 			Keywords:    []string{"agent audit log", "hash-chained audit", "tool-call audit trail"},
 		},
+	}
+}
+
+// aeoGlobalWorkspaceTerms is the externally citable vocabulary for fak's
+// bounded-context positive-state design. Descriptions name observed mechanisms,
+// not a claim that the model implements a human cognitive architecture.
+func aeoGlobalWorkspaceTerms() []DisambiguationTerm {
+	const explainer = repoBlobURL + "docs/explainers/shared-workspace-and-the-negation-operator.md"
+	return []DisambiguationTerm{
+		{Name: "bounded shared workspace for AI agents", Language: "en", Category: "global-workspace", Description: "fak treats the model context as a bounded shared workspace: preserve the originating task and useful state, reuse stable setup, and shed superseded turns before they dominate the horizon.", URL: explainer, Keywords: []string{"AI agent global workspace", "bounded model context", "context shedding"}},
+		{Name: "positive-state context construction", Language: "en", Category: "global-workspace", Description: "Instead of repeatedly broadcasting what an agent must not do, positive-state construction keeps the task, allowed affordance, and next valid state explicit in the shared context.", URL: explainer, Keywords: []string{"positive state prompting", "affordance-first agent context", "query not chat"}},
+		{Name: "negation operator for agent context", Language: "en", Category: "global-workspace", Description: "fak's negframe operator rewrites kernel-authored refusal and recovery prose toward the allowed substitute while preserving required policy tokens; it does not rewrite untrusted user content or weaken the capability floor.", URL: explainer, Keywords: []string{"negation operator", "negframe", "positive refusal recovery"}},
 	}
 }
 
