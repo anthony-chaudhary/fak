@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 )
@@ -183,7 +184,7 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	// Emit-time reframe (#3566/#4430): only fak-authored framing enters the
 	// positive-voice pass. Tool names, remedies, notes, and other external spans remain
 	// byte-identical, even when they contain text that resembles a reframe idiom.
-	return negframe.ReframeFakOnly(fragments...)
+	return journalReframeFragments(reframeJournalPath(), "", reframeJournalArm(), fragments, time.Now())
 }
 
 func prependAdjudicationContentNote(content string, adjs []ToolAdjudication) string {
