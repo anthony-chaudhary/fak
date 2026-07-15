@@ -162,6 +162,22 @@ class RenderTest(unittest.TestCase):
         self.assertIn("live 1→1", line)
         self.assertNotIn("live 1→1 ▁▁▁ (", line)
 
+    def test_session_total_series_is_labelled_not_bare(self):
+        # #4651 DC#3: the session TOTAL series is a historical count (live + resumable +
+        # stuck + terminal-history) and must be labelled explicitly, never rendered as the
+        # bare word "sessions" next to the live series where it reads as live fleet scale.
+        rows = [
+            {"ts": "a", "usable": 3, "live": 1, "sessions": 40, "escalate": 0},
+            {"ts": "b", "usable": 2, "live": 1, "sessions": 42, "escalate": 0},
+        ]
+        line = fleet_trend.render_line(rows)
+        self.assertIn("all-sessions 40→42", line)   # explicit historical-total label
+        # the bare-word regression would render "· sessions 40→42"; "all-sessions" has a
+        # hyphen before "sessions", so a space-delimited " sessions " can only appear if
+        # the label reverted to the unqualified word.
+        self.assertNotIn(" sessions ", line)
+        self.assertIn("live 1→1", line)               # the actionable series stays distinct
+
 
 if __name__ == "__main__":
     unittest.main()

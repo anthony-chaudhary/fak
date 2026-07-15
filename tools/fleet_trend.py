@@ -47,7 +47,12 @@ DEFAULT_LEDGER = os.path.join(".fak", "nightrun", "fleet-status-history.jsonl")
 METRICS: list[tuple[str, str]] = [
     ("usable", "usable"),      # worker accounts usable right now (capacity)
     ("live", "live"),          # live sessions (throughput in flight)
-    ("sessions", "sessions"),  # total sessions in the window
+    # The window's session TOTAL (live + resumable + stuck + terminal-history). The
+    # ledger key stays "sessions" for history compat, but the rendered label is the
+    # explicit "all-sessions": a bare "sessions N→M" misreads as live fleet scale when
+    # the count is terminal-history-dominated, so the trend never shows the unqualified
+    # word next to the live series (#4651). "live" above is the actionable series.
+    ("sessions", "all-sessions"),
     ("escalate", "escalate"),  # operator-actionable items the lifecycle can't heal
 ]
 
