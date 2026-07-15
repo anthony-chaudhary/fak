@@ -1,0 +1,698 @@
+[
+  {
+    "id": "incomplete_done_condition-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:b11150b6c9470e24f482154a8c6864dc7015c358a67f138107d00d7c17b6b910",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:b7ef6633eb62e99f3202332e227f2f7666372f483de2e652fdc7251f5ee70406",
+    "duration_nanos": 28817718000,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "incomplete_done_condition-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "INCONCLUSIVE",
+    "bundle_digest": "sha256:7834f951ceb3d3f62e581aa14af075b7cdd5d5957db34ca12d390582d95bea46",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:e4eaf94424b05d0c1d59658de5740b1bcf3903a41e569c78f429b6522b7c8da6",
+    "duration_nanos": 46230833800,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "wrong_edge_case-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:d92984ebb30c2b79028269e0c0f96214c9123b68e767a6f87a55ca360d9e1066",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:ca87bc432b6deca9b7a0e1cb413e9c69a9ae783063fbb293a3f06b2b349dc337",
+    "duration_nanos": 30027757800,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "wrong_edge_case-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:32c0034734c99826ba70c9759fad6137e0a39fb67bb07c8817ede844b3283b4c",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:b780c6544f29d2cff4559ee9188d6ec4ae37e0aa4ede5d290aded1d7bd88ac58",
+    "duration_nanos": 48041342800,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "swallowed_error-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:bdb50939f8afd2bd4d99c2711fae6769101449f986315d60131fdf60ccd8d94c",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:8a8080eecd8c37efe28a7b562c752e3d84af54259438d282a18009b95a57e855",
+    "duration_nanos": 21866381500,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "swallowed_error-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "INCONCLUSIVE",
+    "bundle_digest": "sha256:b6e779a7d05f328ed228e16db427aedbae89f25e8bb23b90bece0076053686c7",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:692f992d212a90785fa036456bbd9cbdc71ccf0079a3b836bfeca6af4edd95f1",
+    "duration_nanos": 31743003700,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "stale_consumer-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:16bd32e10fc067d81ddfb3e82d16de4ce9a3b7a4f0f699870c695a795738f877",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:0827ac2f4e9ba3da735dddc6a84a07dddcc96bf90bdf29f6eec6f711b88e65ad",
+    "duration_nanos": 48868037700,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "stale_consumer-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:4c743d99f064e0f3a1a6c32b752eb83f161965df65f02729dd8daee4f2d94876",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:30f8af98e2d9b04be17307793c0d694e1f5c2bb0efdd4c1ee663ca927881a406",
+    "duration_nanos": 41436659900,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "missing_failure_test-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:d60bdedcf88286b331d7ccbca07815bbc8c1af78080b26ac731cf89dd78c305c",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:89b9164f6724f4f27501d952705e2f7e2b7363dd1626c36a225211af2e5ac33e",
+    "duration_nanos": 15696988300,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "missing_failure_test-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:acadb0b35bd1bcb171d6a1c16f5fd7f5ec889e06bc21361b3456df54e6e8a5a5",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:efaabe0075568b4d96a9ec5b35475220a42a8d17b1c5cb01c5220055f8a50a26",
+    "duration_nanos": 24005337100,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "race_lost_update-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:1e48eed3673365b7f5d48ed7bfaa3fc365fe518b5348fc52ae943f65b7d31e76",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:03c878ef2159d0724f16aa23f81cb3c43a5e6bfb2269df65c45b23fd300fbffc",
+    "duration_nanos": 15579677400,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "race_lost_update-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:1cbe0ecfa41bba8335d2e5d6eb98c6b239085f46d78cd21e5ecea6d03678f6a0",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:1beac17a6f5e149b780bfc2f8d09a049cc19e96115c96ea8060c5e39cf42bd40",
+    "duration_nanos": 47331011800,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "partial_rename-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:f02fb74241c7368805c7fc37af22af140b858c5badcfaef675d4a7def30eec79",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:4726416b5db04896d5e856a3054779410f3c79bd34fbe795e3895e5a1f897824",
+    "duration_nanos": 23163830400,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "partial_rename-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:27b6b02a49cb48fe0316dfda4d40a106f1e6c8f3a28a91c78dae5153ed15b3a1",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:b83c919b9b2554feccf4f986a1740dd729566720e1234223750611c5aa41bea9",
+    "duration_nanos": 16512862900,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "build_poison-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:c965d424c4f4093bfbdd25273c477eac683ffd3e023b4348d59989d8a0114226",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:00bb5ffe23aa4351557484318391f373076b88713e9ce773a6520d9012e40605",
+    "duration_nanos": 31839769900,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "build_poison-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:c55c1e933b9e25240f9f73ae0ed5db3700b081001b250c4912d92b3b7d3274c7",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:4d33aadf9654534ce878d990c8b87857453dc450d2d97d1e4bc8951600168942",
+    "duration_nanos": 47708420000,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "docs_cli_drift-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:a589c55b418e297cc32ed6753df65f09281b4c88a414caa163197b223b9cbe0b",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:a8cabca515ecc10862f22c2ce29bb8041e9bfc01eff98bc497fa883f377145ba",
+    "duration_nanos": 29677988700,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "docs_cli_drift-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:537a738ab8119923dc3576709fe29bfe7fb9f91e51437b6a20dc06a9239163fa",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:5a5a10d6da09caddd0476d7f0230d3e06d8af8f1206d4047297402cf5b807293",
+    "duration_nanos": 43799710900,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "over_broad_rewrite-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:22e6072bd99b6174d201d436afbcacc9ec96bb74ac7d3177acf63323b21a2ad1",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:bd53e1b2e7973d2cfe3c9c66f909e9e0594d9f1511ce8132e6c450dc0cfff268",
+    "duration_nanos": 19836700800,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "over_broad_rewrite-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:4fe6f25933ad1df9881702157f36942155e9b2c6391ae5f8fa8ecc891a5c9bf8",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:01fdbf5a692806e31b43d11a253eb2cf7b8e5a4173e251606f4f194d5f119cc0",
+    "duration_nanos": 16981951600,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "reverted_safety_check-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:8034d2948150e1c690d37d17f321364ee6e710977be57cb5b90d141ec766890a",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:743209941ac852623356ef8d86c8376a755c7c237c64bd545e1f8fb81d914abb",
+    "duration_nanos": 14922516900,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "reverted_safety_check-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:491820d97d3bbb5c950fc18333df0d36d70286339264606cd96e812b5fd80579",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:04ae7e4e3fa98040584e67053c59515c29858601cd42d14f61373348d7731591",
+    "duration_nanos": 19141168900,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "clean_hard_refactor-corrupt",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "REFUTE",
+    "bundle_digest": "sha256:f366982dee1d6f232afe3f0af2138e7986c7166d2eaab535b604e7f12ddbb1f8",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:2b1f912a7ea52ab268b41f53c2c3b83f85434647e8cea35be7fe1ba2cadd4764",
+    "duration_nanos": 16804244200,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  },
+  {
+    "id": "clean_hard_refactor-clean",
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "driver": "codex"
+    },
+    "verdict": "PASS",
+    "bundle_digest": "sha256:2c0a4e3ac2dad1fd5accc96dd0e3cd0c09da5e92421cc730a9776a897e13c058",
+    "policy_digest": "sha256:f5cce061abaaa1d0ebf38adafc4c4f3b2f08b2d75fcd6bfd3a871b280cd77812",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:3e2ccfca4ede3df544fb24379342548ac9cf88c3797dc7281baccacaa92c2d05",
+    "duration_nanos": 17302638200,
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "",
+      "basis": ""
+    }
+  }
+]

@@ -1,0 +1,63 @@
+{
+  "schema": "fak-crossaudit-calibration-run/v1",
+  "corpus": "fak-crossaudit-accidental-corpus/v1",
+  "max_samples_per_arm": 24,
+  "max_cost_micros_usd": 5000000,
+  "holdout_pair_prefixes": ["docs_cli_drift", "clean_hard_refactor"],
+  "high_severity_classes": ["reverted_safety_check", "build_poison", "race_lost_update"],
+  "min_high_severity_recall": 0.90,
+  "max_false_positive_rate": 0.10,
+  "arms": [
+    {
+      "name": "gpt-xhigh",
+      "auditor": {
+        "harness": "codex-cli",
+        "provider": "openai",
+        "family": "gpt",
+        "model": "gpt-5.6-sol",
+        "weights_revision": "service-revision-unreported-2026-07-15",
+        "account_class": "cli-auth",
+        "endpoint_class": "hosted-cli",
+        "reasoning_posture": "xhigh",
+        "provenance_source": "codex-cli-readback",
+        "driver": "codex"
+      },
+      "receipt_file": "gpt-xhigh-observations.json",
+      "status": "available"
+    },
+    {
+      "name": "claude-high",
+      "auditor": {
+        "harness": "claude-cli",
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "opus",
+        "weights_revision": "claude-opus-4-8-service-2026-07-15",
+        "account_class": "cli-auth",
+        "endpoint_class": "hosted-cli",
+        "reasoning_posture": "high",
+        "provenance_source": "claude-cli-readback",
+        "driver": "claude"
+      },
+      "receipt_file": "claude-high-observations.json",
+      "status": "available"
+    },
+    {
+      "name": "local-open-weight",
+      "auditor": {
+        "harness": "openai-compatible-http",
+        "provider": "local",
+        "family": "open-weight",
+        "model": "operator-configured-local",
+        "weights_revision": "not-connected-2026-07-15",
+        "account_class": "local-no-key",
+        "endpoint_class": "sanctioned-compute-node",
+        "reasoning_posture": "provider-default",
+        "provenance_source": "docs/fleet-compute-nodes.md",
+        "driver": "http"
+      },
+      "status": "not-yet",
+      "not_yet_reason": "No authenticated sanctioned-node bridge is active in this session; run the same frozen manifest through the lab endpoint before enabling any gate."
+    }
+  ]
+}
