@@ -1,8 +1,8 @@
 package modelroute
 
 import (
+	"encoding/base64"
 	"fmt"
-	"runtime"
 )
 
 type accidentalFixtureSpec struct {
@@ -49,7 +49,7 @@ func buildAccidentalFixture(num int, spec accidentalFixtureSpec, id, pair string
 	sha := fmt.Sprintf("acc%07d", num)
 	parent := fmt.Sprintf("par%07d", num)
 	patch := fmt.Sprintf("diff --git a/%s b/%s\n@@\n+%s\n", spec.path, spec.path, line)
-	command := fmt.Sprintf("go test ./internal/crossauditfixture/%s -run TestContract", pair)
+	witness := executableAccidentalWitness(spec, line)
 	evidence := IssueAuditEvidence{
 		IssueNumber: num,
 		IssueURL:    fmt.Sprintf("https://github.com/example/repo/issues/%d", num),
@@ -60,29 +60,30 @@ func buildAccidentalFixture(num int, spec accidentalFixtureSpec, id, pair string
 			SHA: sha, FirstParentSHA: parent, TreeOID: "tree-" + sha, FirstParentTreeOID: "tree-" + parent,
 			Patch: patch, PatchSHA256: IssueAuditContentDigest(patch), ChangedPaths: []string{spec.path},
 		}},
-		Tests: []EvidenceRef{{Kind: "command", Ref: command}},
+		Tests: []EvidenceRef{{Kind: "command", Ref: witness.Command}},
 		CI:    []EvidenceRef{{Kind: "check", Ref: "ci/corpus-selfcheck"}},
 		DOS:   []EvidenceRef{{Kind: "dos-commit-audit", Ref: "commit:" + sha, SHA256: IssueAuditContentDigest("dos-" + sha)}},
 	}
 	return AccidentalCorpusFixture{
 		ID: id, Pair: pair, Class: spec.class, Corrupt: corrupt,
-		Witness:  executableAccidentalWitness(command, spec, line),
+		Witness:  witness,
 		Evidence: evidence,
 		Author:   AuditIdentity{Harness: "claude-cli", Provider: "example-claude", Family: "example-claude-family", Model: "corpus-author", ProvenanceSource: "corpus-manifest"},
 		Auditor:  AuditIdentity{Harness: "codex-cli", Provider: "example-gpt", Family: "example-gpt-family", Model: "corpus-auditor", ProvenanceSource: "corpus-manifest"},
 	}
 }
 
-func executableAccidentalWitness(command string, spec accidentalFixtureSpec, line string) AccidentalWitness {
-	// A fresh helper process receives only the candidate line and independently
-	// compares it with the contract-preserving implementation. No label/corrupt
-	// bit is passed across this boundary.
-	program := "sh"
-	input := line + "\n" + spec.goodLine + "\n"
-	args := `IFS= read -r actual; IFS= read -r contract; if [ "$actual" = "$contract" ]; then printf PASS; exit 0; else printf FAIL; exit 1; fi`
-	if runtime.GOOS == "windows" {
-		program = "powershell"
-		args = "$actual=[Console]::In.ReadLine();$contract=[Console]::In.ReadLine();if($actual -ceq $contract){[Console]::Out.Write('PASS');exit 0}else{[Console]::Out.Write('FAIL');exit 1}"
+func executableAccidentalWitness(spec accidentalFixtureSpec, line string) AccidentalWitness {
+	contract := base64.StdEncoding.EncodeToString([]byte(spec.goodLine))
+	outcome := "PASS"
+	if line != spec.goodLine {
+		outcome = "FAIL"
 	}
-	return AccidentalWitness{Command: command, Program: program, Args: args, Input: input}
+	return AccidentalWitness{
+		Command:      "crossauditfixture --contract-base64 " + contract,
+		Program:      "crossauditfixture",
+		Args:         contract,
+		Input:        line,
+		OutputSHA256: IssueAuditContentDigest(outcome),
+	}
 }

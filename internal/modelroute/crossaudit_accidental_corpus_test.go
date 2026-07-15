@@ -2,11 +2,15 @@ package modelroute
 
 import (
 	"encoding/json"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestAccidentalCorpusPairsHaveDeterministicGroundTruth(t *testing.T) {
+	installAccidentalFixtureBinary(t)
 	fixtures := AccidentalCorpus()
 	if err := SelfCheckAccidentalCorpus(fixtures); err != nil {
 		t.Fatalf("accidental corpus selfcheck: %v", err)
@@ -35,6 +39,7 @@ func TestAccidentalCorpusPairsHaveDeterministicGroundTruth(t *testing.T) {
 }
 
 func TestAccidentalCorpusLabelFlipBreaksSelfCheck(t *testing.T) {
+	installAccidentalFixtureBinary(t)
 	fixtures := AccidentalCorpus()
 	fixtures[0].Corrupt = !fixtures[0].Corrupt
 	if err := SelfCheckAccidentalCorpus(fixtures); err == nil || !strings.Contains(err.Error(), "label=false") {
@@ -61,4 +66,17 @@ func TestAccidentalCorpusCoversRequestedFailureClasses(t *testing.T) {
 			t.Errorf("class %s missing clean/corrupt pair", class)
 		}
 	}
+}
+
+func installAccidentalFixtureBinary(t *testing.T) {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "crossauditfixture")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", bin, "../../cmd/crossauditfixture")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build crossauditfixture: %v\n%s", err, out)
+	}
+	t.Setenv("FAK_CROSSAUDIT_FIXTURE_BIN", bin)
 }

@@ -1,8 +1,11 @@
 package modelroute
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -45,10 +48,11 @@ func (c AccidentalFailureClass) Valid() bool {
 // The regexp is applied to the bounded issue bundle and Expected is the result
 // required for the fixture's declared clean/corrupt label.
 type AccidentalWitness struct {
-	Command string `json:"command"`
-	Program string `json:"program"`
-	Args    string `json:"args"`
-	Input   string `json:"input"`
+	Command      string `json:"command"`
+	Program      string `json:"program"`
+	Args         string `json:"args"`
+	Input        string `json:"input"`
+	OutputSHA256 string `json:"output_sha256"`
 }
 
 // AccidentalCorpusFixture is one member of a clean/corrupt pair.
@@ -91,7 +95,16 @@ func (f AccidentalCorpusFixture) Bundle() (IssueAuditBundle, error) {
 }
 
 func runAccidentalWitness(f AccidentalCorpusFixture) (bool, error) {
-	cmd := exec.Command(f.Witness.Program, witnessProgramArgs(f.Witness.Program, f.Witness.Args)...)
+	program := f.Witness.Program
+	args := witnessProgramArgs(program, f.Witness.Args)
+	declared := strings.TrimSpace(strings.Join(append([]string{program}, args...), " "))
+	if declared != strings.TrimSpace(f.Witness.Command) {
+		return false, fmt.Errorf("%s witness command=%q, structured command=%q", f.ID, f.Witness.Command, declared)
+	}
+	if override := strings.TrimSpace(os.Getenv("FAK_CROSSAUDIT_FIXTURE_BIN")); program == "crossauditfixture" && override != "" {
+		program = override
+	}
+	cmd := exec.Command(program, args...)
 	cmd.Stdin = strings.NewReader(f.Witness.Input)
 	out, err := cmd.CombinedOutput()
 	exitCode := 0
@@ -103,6 +116,11 @@ func runAccidentalWitness(f AccidentalCorpusFixture) (bool, error) {
 		exitCode = exitErr.ExitCode()
 	}
 	outcome := strings.TrimSpace(string(out))
+	digest := sha256.Sum256([]byte(outcome))
+	gotDigest := "sha256:" + hex.EncodeToString(digest[:])
+	if gotDigest != f.Witness.OutputSHA256 {
+		return false, fmt.Errorf("%s witness output digest=%s, want %s", f.ID, gotDigest, f.Witness.OutputSHA256)
+	}
 	switch {
 	case exitCode == 0 && outcome == "PASS":
 		return false, nil
@@ -204,9 +222,9 @@ func BuildAccidentalCorpusManifest(fixtures []AccidentalCorpusFixture) (Accident
 	return manifest, nil
 }
 
-func witnessProgramArgs(program, script string) []string {
-	if strings.EqualFold(program, "powershell") {
-		return []string{"-NoProfile", "-NonInteractive", "-Command", script}
+func witnessProgramArgs(program, arg string) []string {
+	if program == "crossauditfixture" {
+		return []string{"--contract-base64", arg}
 	}
-	return []string{"-c", script}
+	return []string{"-c", arg}
 }
