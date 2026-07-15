@@ -680,6 +680,38 @@ def _rollup_severity(dispatch_payload: dict[str, Any] | None,
     return "🟢", "HEALTHY"
 
 
+def _worker_slot_phrase(payload: dict[str, Any]) -> str:
+    """The roll-up's single, explicitly-scoped worker-slot capacity phrase (#4649).
+
+    The roll-up shows exactly ONE capacity scope — the dispatcher's worker-slot target
+    — so name it ("worker slots"), never a bare "workers active" that a reader mistakes
+    for the resolver/host admission pool a sibling card reports. It also refuses every
+    self-contradictory reading the old raw render produced:
+      * a missing read is ``UNKNOWN`` (not a numeric zero that looks like an idle fleet);
+      * an over-subscribed dispatcher (live > cap) is stated as ``N over the M-slot
+        target`` — never a negative "slots open" ("-1 slots open" was the bug);
+      * fullness is reconciled with the AT_CAP preflight, so "full" can never sit beside
+        a positive "N free" for the same scope."""
+    d = payload.get("dispatcher") or {}
+    live = d.get("live")
+    cap = d.get("cap")
+    if live is None or cap is None:
+        return "worker slots UNKNOWN (dispatcher read incomplete)"
+    headroom = d.get("headroom")
+    if not isinstance(headroom, int):
+        headroom = (cap - live) if isinstance(cap, int) and isinstance(live, int) else None
+    at_cap = (str(payload.get("verdict") or "").upper() == "AT_CAP"
+              or str(d.get("preflight_verdict") or "").upper() == "REFUSE_AT_CAP")
+    phrase = f"{live}/{cap} worker slots used"
+    if isinstance(headroom, int) and headroom < 0:
+        return f"{phrase}, {-headroom} over the {cap}-slot target"
+    if at_cap or headroom == 0:
+        return f"{phrase}, full"
+    if isinstance(headroom, int) and headroom > 0:
+        return f"{phrase}, {headroom} free"
+    return phrase
+
+
 def _issue_work_line(payload: dict[str, Any] | None) -> str:
     if not payload:
         return "issue work: skipped"
@@ -689,9 +721,7 @@ def _issue_work_line(payload: dict[str, Any] | None) -> str:
     c = payload.get("closure") or {}
     parts: list[str] = []
     if d.get("live") is not None or d.get("cap") is not None:
-        headroom = d.get("headroom")
-        parts.append(f"{d.get('live')}/{d.get('cap')} workers active"
-                     + (f", {headroom} slots open" if isinstance(headroom, int) else ""))
+        parts.append(_worker_slot_phrase(payload))
     if not b.get("na") and b.get("open_issues") is not None:
         ticket = f"{b.get('open_issues')} open tickets"
         if b.get("unrouted"):

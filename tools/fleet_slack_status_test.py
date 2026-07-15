@@ -196,6 +196,45 @@ class RollupTextTest(unittest.TestCase):
         self.assertIn("0 live", line)
         self.assertNotIn("UNKNOWN", line)
 
+    def test_issue_work_over_subscribed_reads_over_target_not_negative(self):
+        # #4649 render-witness: an over-subscribed dispatcher (live > cap) must never
+        # render a nonsense "3/2 workers active, -1 slots open". State the overshoot
+        # against the named scope instead.
+        mod = load()
+        line = mod._issue_work_line(
+            {"dispatcher": {"live": 3, "cap": 2, "headroom": -1}})
+        self.assertIn("3/2 worker slots used", line)
+        self.assertIn("1 over the 2-slot target", line)
+        self.assertNotIn("-1", line)
+        self.assertNotIn("slots open", line)
+        self.assertNotIn("workers active", line)
+
+    def test_issue_work_missing_capacity_reads_unknown_not_zero(self):
+        # #4649 render-witness: a missing/incomplete dispatcher read becomes UNKNOWN,
+        # never a numeric zero (or a literal "None/None") that looks like an idle fleet.
+        mod = load()
+        line = mod._issue_work_line({"dispatcher": {"live": 0, "cap": None}})
+        self.assertIn("worker slots UNKNOWN", line)
+        self.assertNotIn("None", line)
+        self.assertNotIn("0/None", line)
+
+    def test_issue_work_full_reconciles_with_at_cap(self):
+        # #4649 render-witness: when the preflight refuses AT_CAP the scope is full —
+        # "full" must not sit beside a positive "N free" for the same worker-slot scope.
+        mod = load()
+        line = mod._issue_work_line(
+            {"dispatcher": {"live": 1, "cap": 2, "headroom": 1,
+                            "preflight_verdict": "REFUSE_AT_CAP"}})
+        self.assertIn("worker slots used, full", line)
+        self.assertNotIn("1 free", line)
+
+    def test_issue_work_free_slots_read_cleanly(self):
+        # Baseline: a healthy under-cap dispatcher names its free worker slots.
+        mod = load()
+        line = mod._issue_work_line(
+            {"dispatcher": {"live": 1, "cap": 2, "headroom": 1}})
+        self.assertIn("1/2 worker slots used, 1 free", line)
+
     def test_rollup_clean_state_says_no_human_action(self):
         mod = load()
         dispatch_payload = mod.fixture_dispatch_payload(ROOT)
