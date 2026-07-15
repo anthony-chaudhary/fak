@@ -295,6 +295,27 @@ fails closed to not-reclaimable). Each row carries the `evidence` comparison
 that decided it. Reclaiming still goes through the fenced `acquire` — this view
 only tells an agent which refusals are worth contesting.
 
+### Exact-model rollout gate: `fak model canary-gate`
+
+```text
+fak model canary-gate --input <path|->
+```
+
+`canary-gate` reads one strict JSON `modelops.Input` value from `--input` (`-` means
+stdin), checks the candidate's exact model ID against its checked-in SLO policy, and emits
+one indented JSON decision. The action and process exit status are intentionally paired:
+
+| Action | Exit | Meaning |
+|---|---:|---|
+| `PROMOTE` | `0` | The candidate has enough samples and meets every declared threshold. |
+| `ROLLBACK` | `3` | The candidate failed a threshold and an ordered fallback satisfies the required capability tier. |
+| `HOLD` | `4` | Evidence is insufficient or no capability-safe fallback is healthy; do not silently downgrade. |
+
+Malformed input, unknown JSON fields, trailing JSON values, unreadable files, and unexpected
+arguments exit `2`. Run `fak model canary-gate --help` for the live usage text. The canonical
+top-three policy and rollback witness are
+[`examples/model-canary-top3.json`](../examples/model-canary-top3.json) and
+[`docs/notes/model-canary-rollback-witness.json`](notes/model-canary-rollback-witness.json).
 ### Region admission: `fak loop region` + the loop drive's region hold
 
 The lease fabric above answers *"who holds what"*; **region admission**

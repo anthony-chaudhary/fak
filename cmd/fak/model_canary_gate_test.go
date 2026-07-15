@@ -70,3 +70,16 @@ func TestRunModelCanaryGateRejectsTrailingJSON(t *testing.T) {
 		t.Fatalf("exit = %d, want 2", code)
 	}
 }
+
+func TestRunModelCanaryGateHelpMatchesModelUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runModelCanaryGate(&stdout, &stderr, []string{"--help"}); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("usage: "+modelCanaryGateSynopsis)) {
+		t.Fatalf("help missing synopsis %q: %s", modelCanaryGateSynopsis, stderr.String())
+	}
+	if !bytes.Contains([]byte(modelUsage), []byte(modelCanaryGateSynopsis)) {
+		t.Fatalf("parent usage missing synopsis %q: %s", modelCanaryGateSynopsis, modelUsage)
+	}
+}

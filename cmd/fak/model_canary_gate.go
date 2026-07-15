@@ -11,11 +11,21 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelops"
 )
 
+const modelCanaryGateSynopsis = "fak model canary-gate --input <path|->"
+
 func runModelCanaryGate(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("model canary-gate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "usage: %s\n", modelCanaryGateSynopsis)
+		fmt.Fprintln(stderr, "Fold exact-model observations into PROMOTE, ROLLBACK, or HOLD.")
+		fs.PrintDefaults()
+	}
 	input := fs.String("input", "-", "JSON input path ('-' reads stdin)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if fs.NArg() != 0 {

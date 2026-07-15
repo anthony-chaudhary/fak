@@ -16,7 +16,7 @@ const modelUsage = "usage: fak model <load|pull|ls|canary-gate|acceptance-gate|a
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
-	"  fak model canary-gate     fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
+	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
 	"  fak model acceptance-run execute a predeclared exact-model campaign\n" +
 	"  fak model readiness-inventory join exact-ID acceptance provenance into readiness rows\n"
