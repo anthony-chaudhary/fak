@@ -51,10 +51,10 @@
                  "readguardstoptranscript", "summarizeguardstops",
                  "fleetbarecommitguard",
                  "guardstoptranscript",
-                 "guardstophookoutputstyleenvmode",
-                 "guardwireretryhop"],
+                 "guardstophookoutputstyleenvmode", "guardwireretryhop",
+                 "guardstopsledgerresolved", "readguardstopsledger"],
       "min_files": 3,
-      "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates."
+      "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates. Ignored incidental helpers and false friends: the guard/gate inflections (gated/gates/guarded/guards/gating/ungated/unguarded/guarding/guardrails), guard-hook helper functions that belong to the guard operator verb not a distinct concept (guardsessiontempdir, gateresult, guardoperatordirectedeffectivemode, guardbudgetrestartevent, guardbuildskewassessment, guarddefaultaccountsregistrypath, guardskewbuildwarning, guardstartup, guardtaskhandoffeffectivemode, guardtrajectorywarningline, installguardmcpregistration, newguardlaunchnonce, readguardstoptranscript, summarizeguardstops, fleetbarecommitguard, guardstoptranscript, guardstophookoutputstyleenvmode, guardwireretryhop), and the guard-stops-ledger helpers added by the Stop-health Slack card (#4345): guardstopsledgerresolved (guardStopsLedgerResolved resolves the ledger file PATH the `fak guard-stops` reader uses) and readguardstopsledger (readGuardStopsLedger reads that ledger file - a missing file is a valid empty view); both are the `fak guard-stops` operator verb's file plumbing, not a distinct guard/gate decision concept."
     },
     {
       "id": "session-runtime",
@@ -74,25 +74,26 @@
       "name": "Witness / evidence family",
       "roots": ["witness", "refut", "revoc", "trustepoch"],
       "ignore": ["witnessing", "witnessable", "witnessed", "witnesses", "refuted", "refutes", "revocations", "refutations",
-                 "refutil", "nwitness", "witnesssametaskids"],
+                 "refutil", "nwitness", "witnesssametaskids", "withdefaultoriginwitnesses"],
       "min_files": 3,
-      "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims. Ignored false friends: refutil (internal/refutil is 'ref util' - reference-utility helpers, not 'refute'), nwitness (a scanner artifact of \\nWitness / \\nwitness in Go string literals where the newline escape's n concatenates with Witness in the identifier regex), and witnesssametaskids (a non-existent variant of WitnessSameTasks - the function witnesses same task ids but no identifier WitnessSameTaskIDs exists in the tree; witnesssametasks itself is positioned as its own row)."
+      "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims. Ignored false friends: refutil (internal/refutil is 'ref util' - reference-utility helpers, not 'refute'), nwitness (a scanner artifact of \\nWitness / \\nwitness in Go string literals where the newline escape's n concatenates with Witness in the identifier regex), witnesssametaskids (a non-existent variant of WitnessSameTasks - the function witnesses same task ids but no identifier WitnessSameTaskIDs exists in the tree; witnesssametasks itself is positioned as its own row), and withdefaultoriginwitnesses (taskmgr.WithDefaultOriginWitnesses in internal/taskmgr is the Option constructor that installs the built-in ORIGIN witnesses for the task-manager ref registry - a task-handoff provenance helper where 'witness' means a registered origin/path-existence check for a task handoff, not the cache-coherence or claim-corroboration witness this family disambiguates)."
     },
     {
       "id": "gateway-engine",
       "name": "Gateway / engine family",
       "roots": ["gateway", "engine", "vdso", "kernel"],
-      "ignore": ["engineering", "engineer", "engineered", "engineers", "gateways", "kernels", "kernel32", "kernelwiki"],
+      "ignore": ["engineering", "engineer", "engineered", "engineers", "gateways", "kernels", "kernel32", "kernelwiki", "convkernel"],
       "min_files": 3,
-      "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass). Ignored false friends: engineered/engineers (the English adjective/verb in prose comments, not the engine dispatch seam), kernelwiki (the external mit-han-lab/KernelWiki project name referenced in study notes, where 'kernel' means GPU compute kernels, not the fak coordinator)."
+      "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass). Ignored false friends: engineered/engineers (the English adjective/verb in prose comments, not the engine dispatch seam), kernelwiki (the external mit-han-lab/KernelWiki project name referenced in study notes, where 'kernel' means GPU compute kernels, not the fak coordinator), and convkernel (convKernel int in internal/compute qwen35 GDN - the 1D convolution kernel SIZE parameter for qwen3.5's depthwise conv, a signal-processing/GPU term where 'kernel' means the conv1d weight span, not the fak coordinator kernel)."
     },
     {
       "id": "policy-capability",
       "name": "Policy / authorization family",
       "roots": ["policy", "capability", "posture", "adjudicat", "preflight"],
-      "ignore": ["policies", "adjudicators", "capabilities", "postures", "adjudication", "adjudicate", "adjudicated", "adjudicates", "policyblocks"],
+      "ignore": ["policies", "adjudicators", "capabilities", "postures", "adjudication", "adjudicate", "adjudicated", "adjudicates", "policyblocks",
+                 "numareplicapolicyunsupported", "policylabel"],
       "min_files": 3,
-      "note": "Capability floor (intent) vs policy manifest (on-disk JSON) vs loaded Policy (compiled table) vs the adjudicator (enforcer) vs verdict/reason-code (its output)."
+      "note": "Capability floor (intent) vs policy manifest (on-disk JSON) vs loaded Policy (compiled table) vs the adjudicator (enforcer) vs verdict/reason-code (its output). Ignored false friends: numareplicapolicyunsupported (numaReplicaPolicy iota zero value returned on a host with no NUMA topology in internal/compute - a NUMA-replica placement constant, not the authorization/capability Policy; already ignored in the support-maturity family where 'unsupported' is the host-availability sense) and policylabel (numaStatus.PolicyLabel / mempolicy.PolicyLabel string in internal/compute - the raw NUMA memory-policy token e.g. 'bind:0', a NUMA mempolicy field, not the authorization Policy manifest)."
     },
     {
       "id": "context-ctx",
@@ -171,26 +172,27 @@
                  "planned", "notplanned", "planted", "planners",
                  "plannedcumtok", "plannedcumtokens",
                  "planting", "fitandplanserveggufexpertparallelpathondevice",
-                 "plants", "nplan", "plano", "candidatemean"],
+                 "plants", "nplan", "plano", "candidatemean",
+                 "planresolve", "planapproval"],
       "min_files": 2,
-      "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner."
+      "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner. Ignored false friends: planresolve (internal/planresolve + planresolve.Verdict is the OPERATOR-QUESTION plan-approval resolver - the guard/operator flow that resolves an operatorquestion of kind PlanApproval, not an execution Plan data type) and planapproval (operatorquestion.PlanApproval, the Kind enum value for an operator plan-approval question - same operator flow, not an execution Plan type). The family disambiguates Plan TYPES; the operator-approval resolver and its Kind are a different sense of 'plan'."
     },
     {
       "id": "pool",
       "name": "Pool family",
       "roots": ["pool", "Pool", "PoolProfile"],
       "exclude": ["spool"],
-      "ignore": [],
+      "ignore": ["kvpoolbytes", "poolspanscores"],
       "min_files": 2,
-      "note": "Two disjoint pool concepts: session bounded-LRU container vs cachemeta pooling character profile describing a tier's host/coherence/share properties."
+      "note": "Two disjoint pool concepts: session bounded-LRU container vs cachemeta pooling character profile describing a tier's host/coherence/share properties. Ignored false friends: kvpoolbytes (macfit.KVPoolBytes in internal/macfit is a host-fit CAPACITY-sizing field - bytes of KV pool the Mac can hold, a hardware-fit metric, not a pool container/profile concept) and poolspanscores (memq/spanpool.poolSpanScores is the neighborhood-POOLING pass behind RankRelevanceSpan (#4014) - where 'pool' is the VERB of pooling neighboring relevance spans for ranking, not a pool container)."
     },
     {
       "id": "layout",
       "name": "Layout family",
       "roots": ["layout", "Layout", "kvLayout"],
-      "ignore": ["layouts"],
+      "ignore": ["layouts", "defaultlayout", "usesmlamoelayout", "archusesmlamoelayout"],
       "min_files": 2,
-      "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout)."
+      "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout). Ignored false friends / constructors: defaultlayout (DefaultLayout() in internal/ctxplan/layout.go is the seed four-area profile CONSTRUCTOR of Layout (ctxplan), already positioned as layout-ctxplan - not a distinct layout concept), and usesmlamoelayout / archusesmlamoelayout (Config.usesMLAMoELayout / archUsesMLAMoELayout in internal/model + internal/ggufload are model-architecture PREDICATES reporting whether a GGUF model shares the MLA-latent-attention + MoE tensor architecture - a model-loading concern where 'layout' means the model's MLA+MoE arrangement, not the KV-cache layout variant the family disambiguates; the cache-variant interface it selects is already positioned as the MLA KV layout seam)."
     },
     {
       "id": "loop",
