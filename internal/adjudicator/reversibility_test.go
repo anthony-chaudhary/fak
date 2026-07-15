@@ -576,6 +576,50 @@ func TestReversibilityConfirmTokenIgnoresDescriptionDrift(t *testing.T) {
 	}
 }
 
+// TestReversibilityConfirmTokenIgnoresCommandWhitespaceDrift is the second half of
+// #2777: after description exclusion, a command reflowed with cosmetic whitespace —
+// extra spaces between the SAME tokens, or leading/trailing padding — must still
+// hash to the same confirm token so the re-proposal converges. Whitespace INSIDE a
+// quoted span stays significant (a genuinely different action), so the binding is
+// not weakened. This test fails on the per-arg hash that kept the command verbatim
+// and passes once the command is whitespace-normalized for the token.
+func TestReversibilityConfirmTokenIgnoresCommandWhitespaceDrift(t *testing.T) {
+	base := map[string]any{"command": "rm -rf build/cache"}
+	reflowed := map[string]any{"command": "rm   -rf    build/cache  "}
+
+	t1 := ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", base)
+	t2 := ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", reflowed)
+	if t1 != t2 {
+		t.Fatalf("confirm token rotated on cosmetic command whitespace: %q != %q", t1, t2)
+	}
+
+	// End to end: the reflowed re-proposal echoing the first token must confirm,
+	// not draw a fresh refusal — the exact loop #2777 describes.
+	env, ok := ReversibilityConfirmed("Bash", base)
+	if ok {
+		t.Fatalf("unconfirmed destructive call was allowed: %+v", env)
+	}
+	if env.ConfirmToken == "" {
+		t.Fatalf("gate issued no confirm token: %+v", env)
+	}
+	reproposed := map[string]any{
+		"command":               "rm   -rf    build/cache",
+		ReversibilityConfirmArg: env.ConfirmToken,
+	}
+	if _, ok := ReversibilityConfirmed("Bash", reproposed); !ok {
+		t.Fatalf("confirm token rotated on command whitespace drift — #2777 not fixed")
+	}
+
+	// Binding preserved: whitespace INSIDE a quoted span is significant, so two
+	// commands that differ ONLY there must still get different tokens — a confirm
+	// cannot be transplanted between semantically distinct commands.
+	q1 := ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", map[string]any{"command": `rm "a  b"`})
+	q2 := ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", map[string]any{"command": `rm "a b"`})
+	if q1 == q2 {
+		t.Fatalf("confirm token ignored quoted whitespace — binding weakened")
+	}
+}
+
 // TestAdjudicateReversibilityTokenStableAcrossDescriptionDrift drives the FULL
 // adjudicate path (rung ordering -> wouldAdmit -> ClassifyReversibility ->
 // reversibilityGateVerdict -> Meta["confirm_token"]) for an outward-facing git push

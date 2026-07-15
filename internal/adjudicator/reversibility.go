@@ -67,9 +67,11 @@ func ReversibilityConfirmed(tool string, args map[string]any) (ReversibilityEnve
 
 // ReversibilityConfirmToken derives the stable preview token. Confirmation keys
 // AND incidental annotation keys (a Bash call's free-text "description") are
-// excluded from the hashed payload, so the token binds only to the call's
-// effect-bearing arguments and is stable across byte-identical *commands* even
-// when the client's confirm key or prose annotation drifts between proposals.
+// excluded from the hashed payload, and the action-bearing command text is
+// whitespace-normalized (see normalizeCommandForToken), so the token binds only
+// to the call's effect-bearing subject and is stable across a re-proposal even
+// when the client's confirm key, prose annotation, OR cosmetic command spacing
+// drifts between proposals.
 //
 // The annotation exclusion is the fix for the confirm-loop that wedged a fleet
 // session (docs/notes/CONFIRM-GATE-DEADLOCK-2026-07-04.md): Claude Code's Bash
@@ -1026,9 +1028,43 @@ func argsForToken(args map[string]any) map[string]any {
 		if isConfirmationKey(k) || isIncidentalTokenKey(k) {
 			continue
 		}
+		// Cosmetic whitespace in the action-bearing command text (the model
+		// re-indenting or padding runs of spaces between the SAME words) rotated
+		// the nonce just like a reworded description did, so normalize it here —
+		// the second half of the #2777 convergence fix. Only command-bearing
+		// string keys are touched; every other argument is hashed verbatim.
+		if s, ok := v.(string); ok && isCommandBearingKey(k) {
+			out[k] = normalizeCommandForToken(s)
+			continue
+		}
 		out[k] = v
 	}
 	return out
+}
+
+// commandBearingTokenKeys are the argument keys whose value IS the action-bearing
+// command text (mirrors commandText's string-key list). Only these are whitespace-
+// normalized in the confirm token; a benign non-command field that happens to
+// carry incidental spacing is left byte-exact.
+var commandBearingTokenKeys = map[string]bool{
+	"command": true, "cmd": true, "shell": true, "script": true,
+}
+
+func isCommandBearingKey(k string) bool {
+	return commandBearingTokenKeys[strings.ToLower(k)]
+}
+
+// normalizeCommandForToken collapses cosmetic whitespace in a command for the
+// confirm-token hash: leading/trailing whitespace is trimmed and every run of
+// UNQUOTED whitespace between tokens becomes a single space, while whitespace
+// INSIDE a quoted span is preserved byte-for-byte. Collapsing only unquoted runs
+// is semantically faithful — the shell already word-splits on unquoted
+// whitespace, so `rm  foo` and `rm foo` are the same action — and cannot let two
+// different commands collide, because quoted content (the only whitespace the
+// shell keeps) is left untouched. This is why the fix does not weaken the token's
+// binding while still letting a reflowed re-proposal converge (#2777).
+func normalizeCommandForToken(cmd string) string {
+	return strings.Join(quoteAwareFields(cmd), " ")
 }
 
 // isIncidentalTokenKey reports whether an argument is a pure human-readable
