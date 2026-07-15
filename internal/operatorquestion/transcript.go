@@ -35,3 +35,19 @@ func LastFromTranscript(path, harnessCommand string) (q OperatorQuestion, found 
 	}
 	return q, found, nil
 }
+
+// LastFromTranscriptAny tries the registered first-class harness projections and returns
+// the last recognized gate. A transcript belongs to one harness in practice; this helper
+// lets Stop-hook consumers remain harness-agnostic when the hook payload names only a path.
+func LastFromTranscriptAny(path string) (OperatorQuestion, bool, error) {
+	for _, harness := range []string{"claude", "codex"} {
+		q, found, err := LastFromTranscript(path, harness)
+		if err != nil {
+			return OperatorQuestion{}, false, err
+		}
+		if found {
+			return q, true, nil
+		}
+	}
+	return OperatorQuestion{}, false, nil
+}

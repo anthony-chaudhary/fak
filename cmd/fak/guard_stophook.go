@@ -573,6 +573,18 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 			rec.Disposition = string(odDisp)
 			return 2
 		}
+		// Evidence-first operator-question rung: consumes native tool inputs from the
+		// transcript and runs after the linguistic operator-directed sensor. It is
+		// harness-agnostic and shares that rung's install-time mode/operator-absence cap.
+		oqExit, oqDisp, oqHarness, oqFired := runGuardOperatorQuestionGate(stderr, *operatorDirectedFlag, transcriptPath)
+		if oqFired {
+			rec.Disposition = string(oqDisp)
+			rec.Kind = "operator-question:" + oqHarness
+			rec.Signal = string(oqDisp)
+		}
+		if oqFired && oqExit == 2 {
+			return 2
+		}
 		handoffExit, handoffDisp := runGuardTaskHandoffGate(stderr, active, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
