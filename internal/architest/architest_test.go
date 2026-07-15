@@ -217,6 +217,7 @@ var tier = map[string]int{
 	"answershape":      1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
 	"codelint":         1,
 	"polymodel":        1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
+	"reachdelta":       3, // typed policy reach-expansion referee (#4220): composes adjudicator policy sets with knownbad accepted-risk records; off the hot path.
 	"rulesynth":        3, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
 	"residency":        2,
 	"ctxresidency":     3,
@@ -445,9 +446,9 @@ var tier = map[string]int{
 	"deploymanifest":        1, // unified fak.toml all-in-one deployment manifest (#3421, epic #3256): typed schema for the eight deployment sections + a fail-closed loader (unknown/typo'd key refuses at load with a closed-vocabulary reason) + the `fak init` minimal-emit bytes; stdlib-only, imports nothing internal, off the hot path.
 	"systemservice":         1, // pure service-manager definition renderer; stdlib-only and off the hot path.
 	"guardcompile":          3,
-	"operatorquestion": 2,
-	"operatorresolve": 3,
-	"planresolve": 3,
+	"operatorquestion":      2,
+	"operatorresolve":       3,
+	"planresolve":           3,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
