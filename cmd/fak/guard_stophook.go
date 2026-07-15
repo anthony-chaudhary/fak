@@ -569,6 +569,9 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		// asking) — precedes the handoff gate, mirroring deny-all-precedes-handoff, so the more
 		// specific "act on your own question" guidance wins over the generic handoff demand.
 		odExit, odDisp, odFired := runGuardOperatorDirectedGate(stderr, *operatorDirectedFlag, rec.Transcript)
+		if odFired {
+			routeGuardOperatorEscalationFailOpen(rec.Session, odDisp, rec.Transcript)
+		}
 		if odFired && odExit == 2 {
 			rec.Disposition = string(odDisp)
 			return 2
