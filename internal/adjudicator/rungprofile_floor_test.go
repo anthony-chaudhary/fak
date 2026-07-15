@@ -40,7 +40,7 @@ func TestSanitizeProfileClampsWriteFloorButKeepsReadElision(t *testing.T) {
 		elide(classRead, rungSelfModify, rungCmdSelfModify, rungSynthTool, rungLintWrite)
 
 	a := New(Policy{Profile: pr})
-	got := a.policy.Profile
+	got := a.PolicySnapshot().Profile
 
 	// Write class: the mandatory refusal rungs were clamped back ON.
 	for _, r := range []rung{rungSelfModify, rungCmdSelfModify, rungSynthTool, rungLintWrite} {
@@ -63,8 +63,8 @@ func TestSanitizeProfileNilStaysNil(t *testing.T) {
 		t.Fatal("sanitizeProfile(nil) must stay nil")
 	}
 	a := New(DefaultPolicy())
-	if a.policy.Profile != nil {
-		t.Fatalf("DefaultPolicy must carry a nil Profile, got %+v", a.policy.Profile)
+	if a.PolicySnapshot().Profile != nil {
+		t.Fatalf("DefaultPolicy must carry a nil Profile, got %+v", a.PolicySnapshot().Profile)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestSetPolicyAppliesProfileSanitize(t *testing.T) {
 		Allow:   map[string]bool{"x": true},
 		Profile: (&RungProfile{}).elide(classWrite, rungLintWrite),
 	})
-	if !a.policy.Profile.runs(classWrite, rungLintWrite) {
+	if !a.PolicySnapshot().Profile.runs(classWrite, rungLintWrite) {
 		t.Fatal("SetPolicy must clamp an illegal write-class elision")
 	}
 	// And the clamped profile changes no verdict: an allowed tool still allows.

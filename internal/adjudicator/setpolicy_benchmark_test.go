@@ -103,3 +103,33 @@ func TestSetPolicyLargeIndexDoesNotBlockReadersForBuildDuration(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkAdjudicateParallel(b *testing.B) {
+	a := New(reloadLatencyBenchmarkPolicy())
+	call := &abi.ToolCall{Tool: "read", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"x":"safe"}`)}}
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			a.Adjudicate(ctx, call)
+		}
+	})
+}
+
+func BenchmarkNeverAdmitsParallel(b *testing.B) {
+	a := New(reloadLatencyBenchmarkPolicy())
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			a.NeverAdmits("unknown_tool")
+		}
+	})
+}
+
+func reloadLatencyBenchmarkPolicy() Policy {
+	return Policy{
+		Posture:       PostureFailClosed,
+		Allow:         map[string]bool{"read": true},
+		ArgPredicates: []ArgPredicate{{Tool: "read", Arg: "x", Kind: ArgDenyRegex, Re: regexp.MustCompile("^blocked$"), Reason: abi.ReasonPolicyBlock}},
+	}
+}

@@ -43,7 +43,8 @@ func TestComplainSetAdmitsNonReadShapedDefaultDeny(t *testing.T) {
 func TestComplainEmptySetByteIdenticalToHead(t *testing.T) {
 	ctx := context.Background()
 	a := New(Policy{}) // zero policy: nil Complain
-	if a.policy.complainFor("anything") {
+	snapshot := a.PolicySnapshot()
+	if snapshot.complainFor("anything") {
 		t.Fatal("nil Complain set must admit nothing")
 	}
 	// Fail-closed default deny for an unknown tool (HEAD behavior).

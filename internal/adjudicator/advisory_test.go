@@ -75,7 +75,7 @@ func TestAdvisoryClampNeverSoftensGenuineDanger(t *testing.T) {
 	a := New(p)
 
 	// The clamp kept only the eligible reason.
-	if got := a.policy.AdvisoryReasons; len(got) != 1 || !got[abi.ReasonSelfModify] {
+	if got := a.PolicySnapshot().AdvisoryReasons; len(got) != 1 || !got[abi.ReasonSelfModify] {
 		t.Fatalf("sanitizeAdvisoryReasons must clamp to eligible reasons, got %v", got)
 	}
 	// The destructive-Bash rule still denies.
@@ -130,7 +130,7 @@ func TestAdvisoryDefaultDenyAdmitsAnyToolWithRecord(t *testing.T) {
 	if v.Meta["posture"] != "advisory" || v.Meta["would_deny"] != abi.ReasonName(abi.ReasonDefaultDeny) {
 		t.Fatalf("advisory admit must carry posture=advisory + would_deny=DEFAULT_DENY, got %v", v.Meta)
 	}
-	if a.policy.NeverAdmits("provision_widget") {
+	if a.PolicySnapshot().NeverAdmits("provision_widget") {
 		t.Fatal("NeverAdmits must be false under advisory DEFAULT_DENY (the tool CAN be admitted; do not prune its def)")
 	}
 }
@@ -184,7 +184,7 @@ func TestAdvisoryNameDenyWithEligibleReason(t *testing.T) {
 	if v.Kind != abi.VerdictAllow || v.Meta["would_deny"] != abi.ReasonName(abi.ReasonSelfModify) {
 		t.Fatalf("advisory name deny: got %v meta=%v, want advisory Allow", v.Kind, v.Meta)
 	}
-	if a.policy.NeverAdmits("patch_kernel") {
+	if a.PolicySnapshot().NeverAdmits("patch_kernel") {
 		t.Fatal("NeverAdmits must be false for a name deny whose reason is advisory")
 	}
 	// A deny citing a NON-eligible reason is untouched by any advisory set.
@@ -193,7 +193,7 @@ func TestAdvisoryNameDenyWithEligibleReason(t *testing.T) {
 		Deny:            map[string]abi.ReasonCode{"exfiltrate": abi.ReasonSecretExfil},
 		AdvisoryReasons: map[abi.ReasonCode]bool{abi.ReasonSelfModify: true},
 	})
-	if !a.policy.NeverAdmits("exfiltrate") {
+	if !a.PolicySnapshot().NeverAdmits("exfiltrate") {
 		t.Fatal("NeverAdmits must stay true for a hard name deny")
 	}
 }

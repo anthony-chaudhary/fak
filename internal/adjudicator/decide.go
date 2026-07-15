@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/egressfloor"
@@ -184,17 +185,13 @@ type ArgPredicate struct {
 
 // Adjudicator is the reference monitor. Construct with New; the default instance
 // registers itself in init().
-type Adjudicator struct {
-	mu     sync.RWMutex
-	policy Policy
-	// argByTool is p.ArgPredicates grouped by Tool, rebuilt on every SetPolicy. It
-	// is the hot-path index for issue #9: Adjudicate evaluates only the predicates
-	// that target the call's tool — O(predicates-for-this-tool) — instead of
-	// scanning every predicate in the policy on every call. Without it, a policy
-	// with N per-tool arg rules costs O(N) per call even for tools with no rules,
-	// so the floor's per-call cost grew with total policy size, not the call's own
-	// rule count.
+type policyState struct {
+	policy    Policy
 	argByTool map[string][]ArgPredicate
+}
+
+type Adjudicator struct {
+	state atomic.Pointer[policyState]
 	// authored is the per-run ledger of agent-authored script paths (#543): the set
 	// of scripts THIS agent wrote earlier in the run, used to recognize a later
 	// `python helper.py` as a self-synthesized-tool invocation rather than an opaque
@@ -208,7 +205,9 @@ type Adjudicator struct {
 func New(p Policy) *Adjudicator {
 	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
-	return &Adjudicator{policy: p, argByTool: indexArgPredicates(p.ArgPredicates)}
+	a := &Adjudicator{}
+	a.state.Store(&policyState{policy: p, argByTool: indexArgPredicates(p.ArgPredicates)})
+	return a
 }
 
 // SetPolicy swaps the policy (used by tests + the bench harness).
@@ -218,10 +217,7 @@ func (a *Adjudicator) SetPolicy(p Policy) {
 	// Build the immutable predicate index before excluding readers. The lock then
 	// protects only the atomic policy+index pair swap, not O(predicate-count) work.
 	argByTool := indexArgPredicates(p.ArgPredicates)
-	a.mu.Lock()
-	a.policy = p
-	a.argByTool = argByTool
-	a.mu.Unlock()
+	a.state.Store(&policyState{policy: p, argByTool: argByTool})
 }
 
 // ResetRun clears the per-run synthesized-tool ledger (#543). The authored-script
@@ -245,12 +241,11 @@ func (a *Adjudicator) ResetRun() {
 // chain) and the policy Deny would never fire. Returns a fresh slice; reads under
 // the RLock so a concurrent SetPolicy cannot tear the map.
 func (a *Adjudicator) DeniedTools() []string {
-	a.mu.RLock()
-	out := make([]string, 0, len(a.policy.Deny))
-	for t := range a.policy.Deny {
+	state := a.state.Load()
+	out := make([]string, 0, len(state.policy.Deny))
+	for t := range state.policy.Deny {
 		out = append(out, t)
 	}
-	a.mu.RUnlock()
 	sort.Strings(out)
 	return out
 }
@@ -339,13 +334,12 @@ func targetPath(args map[string]any) string {
 func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	lowerTool := strings.ToLower(c.Tool) // folded ONCE; every case-insensitive rung below reuses it (#4007)
 
-	a.mu.RLock()
-	p := a.policy
+	state := a.state.Load()
+	p := state.policy
 	var argPreds []ArgPredicate
-	if a.argByTool != nil { // nil index (no arg predicates, the default floor) pays nothing
-		argPreds = a.argByTool[lowerTool] // predicates targeting THIS tool (case-insensitive)
+	if state.argByTool != nil { // nil index (no arg predicates, the default floor) pays nothing
+		argPreds = state.argByTool[lowerTool] // predicates targeting THIS tool (case-insensitive)
 	}
-	a.mu.RUnlock()
 
 	// Explicit provable refusal. Routed through soften like every monitor deny:
 	// a name-level deny only downgrades when the operator declared its CITED
@@ -618,9 +612,7 @@ func wouldAdmit(p Policy, tool, lowerTool string) bool {
 // to call per request from the serving path (where the floor lives in adjudicator.Default
 // rather than a host-held Policy value). A pure read: it never mutates run-state.
 func (a *Adjudicator) NeverAdmits(tool string) bool {
-	a.mu.RLock()
-	p := a.policy
-	a.mu.RUnlock()
+	p := a.state.Load().policy
 	return p.NeverAdmits(tool)
 }
 

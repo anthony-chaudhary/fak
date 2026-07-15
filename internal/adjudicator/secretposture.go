@@ -106,7 +106,6 @@ func (p Policy) SecretVerdict(tool string) abi.Verdict { return p.SecretPosture.
 // this at admit time; with no manifest loaded the zero posture (quarantine) + nil
 // patterns reproduce today's behavior.
 func (a *Adjudicator) SecretPolicy() (SecretPosture, []*regexp.Regexp) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.policy.SecretPosture, a.policy.SecretPatterns
+	p := a.state.Load().policy
+	return p.SecretPosture, p.SecretPatterns
 }

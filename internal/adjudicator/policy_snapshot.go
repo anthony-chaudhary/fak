@@ -5,10 +5,7 @@ import "github.com/anthony-chaudhary/fak/internal/abi"
 // PolicySnapshot returns an isolated copy of the currently installed capability
 // floor. Callers may diff or retain the result without racing a later SetPolicy.
 func (a *Adjudicator) PolicySnapshot() Policy {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	p := a.policy
+	p := a.state.Load().policy
 	p.Allow = cloneBoolMap(p.Allow)
 	p.AllowPrefix = append([]string(nil), p.AllowPrefix...)
 	p.Deny = cloneReasonMap(p.Deny)
