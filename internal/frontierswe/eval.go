@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -22,13 +21,15 @@ import (
 //
 //   - PRODUCE (honestly gated). A reward.json comes from standing the task's verifier
 //     up in its environment (the Modal sandbox / [environment] docker_image) under the
-//     [verifier] timeout_sec budget — a heavyweight, long-horizon Linux job. Absent a
-//     reward.json, RunEval returns an honest available:false result carrying the EXACT
-//     remote command to produce one, and never a fabricated score. Like `fak
-//     frontierswe run`'s live drive, standing the real verifier up is deferred to the
-//     C7 environment path — the operator runs the emitted command on a Docker/Modal
-//     box, then re-runs eval with --reward to score the reward.json it produces. eval
-//     itself never spawns the container as a side effect of a grade call.
+//     [verifier] timeout_sec budget — a heavyweight, long-horizon Linux job, so eval
+//     never spawns it as a silent side effect of a grade call: --run-verifier is the
+//     explicit consent. With it, on a Docker-capable host, eval stands the verifier up,
+//     captures the reward.json + /logs/verifier artifacts it produces, and scores them
+//     (eval_verify.go — the #1719 acceptance path); an incapable host still refuses
+//     honestly. Without it, RunEval returns an honest available:false result carrying
+//     the EXACT remote command to produce one, and never a fabricated score — the
+//     operator runs that on a Docker/Modal box, then re-runs eval with --reward to
+//     score the reward.json it produces.
 //
 // The gate reason and the remote command come straight from the C7 env-adapter plan,
 // so eval's honest "can't grade here" is the same witness as the run driver's.
@@ -57,6 +58,19 @@ type EvalConfig struct {
 	OutDir           string  // capture the raw reward.json + verifier logs here (optional)
 	AntiCheatFlagged bool    // a trial flagged in scoring/anticheat.json scores 0 (C3 anti-cheat)
 	SSIMThreshold    float64 // revideo-perf-opt SSIM gate (0 => the library default 0.99)
+
+	// RunVerifier consents to standing the verifier up HERE when this host is
+	// capable (Docker present + the no-internet boundary holds): the heavyweight
+	// [verifier] timeout_sec job never runs as a silent side effect of a grade
+	// call. On an incapable host the consented call still refuses honestly.
+	RunVerifier bool
+
+	// runner overrides how the verifier invocation is executed (nil = the real
+	// docker exec) — the seam that makes the available-path wiring testable
+	// offline. capability, when non-nil, overrides the detected local capability
+	// so tests can pin the host shape deterministically on any box.
+	runner     verifierRunner
+	capability *EnvAdapterCapability
 }
 
 // EvalResult is the fak.frontierswe.eval.v1 grade payload. Available is true only
@@ -102,11 +116,13 @@ func ParseReward(b []byte) (*Reward, error) {
 }
 
 // RunEval grades one FrontierSWE submission into the C3 leaderboard number. It scores
-// an existing/handed-in reward.json offline (RUNNABLE NOW); absent one it returns an
-// honest available:false result carrying the exact remote command to produce one on a
-// capable box. It never fabricates a score, and never spawns the verifier container as
-// a side effect. The error return is reserved for local I/O / malformed-reward faults;
-// an honest gate is a valid result, not an error.
+// an existing/handed-in reward.json offline (RUNNABLE NOW); absent one it stands the
+// verifier up here only under explicit RunVerifier consent on a capable host, and
+// otherwise returns an honest available:false result carrying the exact remote command
+// to produce one on a capable box. It never fabricates a score, and never spawns the
+// verifier container as a silent side effect. The error return is reserved for local
+// I/O / verifier-run / malformed-reward faults; an honest gate is a valid result, not
+// an error.
 func RunEval(cfg EvalConfig) (EvalResult, error) {
 	task := cfg.Task
 	if task == nil {
@@ -123,8 +139,12 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 	// The capability gate + remote command come from the C7 env-adapter plan so
 	// eval's honest gate is the same witness as run/env-adapter. BuildEnvAdapterPlan
 	// starts nothing — it only reports whether Docker is present and the no-internet
-	// boundary holds.
+	// boundary holds. Tests pin the capability so both gate branches are checkable
+	// offline regardless of what the box running them has installed.
 	plan := BuildEnvAdapterPlan(EnvAdapterConfig{Task: task})
+	if cfg.capability != nil {
+		plan.Capability = *cfg.capability
+	}
 	res.DockerPresent = plan.Capability.DockerPresent
 	res.IntegrityOK = plan.Integrity.OK
 	verifyCmd := verifyCommand(task)
@@ -151,20 +171,36 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 	}
 
 	// 2) No reward.json present → the verifier must produce one. That is a heavyweight
-	// C7 Linux job (a docker_image pull + up to [verifier] timeout_sec of work), so —
-	// like the run driver's live drive — eval does not spawn it as a side effect of a
-	// grade call. It refuses honestly with the exact remote command; the operator runs
-	// that on a Docker/Modal box, then re-runs eval with --reward to score the produced
-	// reward.json. A missing verifier environment is folded into the reason so the
-	// refusal is specific about why this host can't produce the reward.
-	res.Available = false
-	res.Source = "none"
+	// C7 Linux job (a docker_image pull + up to [verifier] timeout_sec of work), so
+	// eval never spawns it as a silent side effect of a grade call: RunVerifier is the
+	// explicit consent. With it, the verifier is stood up here when this host is
+	// capable and the reward.json it produces is scored; an incapable host still
+	// refuses honestly (eval_verify.go). Without it, eval refuses with the exact
+	// remote command; the operator runs that on a Docker/Modal box (or re-runs with
+	// --run-verifier on one), then scores the produced reward.json with --reward. A
+	// missing verifier environment is folded into the reason so the refusal is
+	// specific about why this host can't produce the reward.
+	if cfg.RunVerifier {
+		if err := runVerifierAndScore(&res, cfg, task, plan.Capability, verifyCmd); err != nil {
+			return res, err
+		}
+		return res, nil
+	}
 	if plan.Capability.Runnable {
-		res.Reason = fmt.Sprintf("%s: no reward.json to score; run the verifier command to produce one, then re-run with --reward", EvalGatedReason)
+		res.gate("no reward.json to score; re-run with --run-verifier to stand the verifier up here, or run the verifier command and re-run with --reward")
 	} else {
-		res.Reason = fmt.Sprintf("%s: %s", EvalGatedReason, plan.Capability.Reason)
+		res.gate(plan.Capability.Reason)
 	}
 	return res, nil
+}
+
+// gate marks res honestly ungraded: Available=false, Source=none, Score left 0,
+// and a reason prefixed with the EvalGatedReason token so every refusal — no
+// reward, incapable host, empty-handed verifier — is one grep-able shape.
+func (res *EvalResult) gate(cause string) {
+	res.Available = false
+	res.Source = "none"
+	res.Reason = fmt.Sprintf("%s: %s", EvalGatedReason, cause)
 }
 
 // scoreAndCapture runs the C3 scorer over reward and folds the correctness, speedup,
@@ -212,48 +248,13 @@ func verifyCommand(task *Task) string {
 	return DefaultVerifyCommand
 }
 
-// verifierDockerCommand builds the exact command that stands the task's verifier up
-// in its [environment] docker_image against the submission tree, honoring the task's
-// resource envelope. The submission is mounted read-only at /submission and the
-// verifier artifact dir at /logs/verifier; both are conveyed by mount + env rather
-// than invented CLI flags, so the verify command stays faithful to the task's oracle.
-// It is the command eval prints when gated and runs when capable — one witness.
+// verifierDockerCommand renders the copy-pasteable form of the verifier invocation
+// (verifierDockerArgs, shell-quoted): the exact command eval prints when gated and
+// execs when --run-verifier consents on a capable host — one witness. The rendered
+// form keeps the relative ./logs/verifier artifact mount so it is portable to
+// whatever box the operator pastes it on.
 func verifierDockerCommand(task *Task, submissionDir, verifyCmd string) string {
-	name := "unknown"
-	image := ""
-	if task != nil {
-		if task.Name != "" {
-			name = task.Name
-		}
-		image = task.Environment.DockerImage
-	}
-	if image == "" {
-		image = "ghcr.io/proximal-labs/frontier-swe/" + name + ":v6"
-	}
-	sub := strings.TrimSpace(submissionDir)
-	if sub == "" {
-		sub = "./submission"
-	}
-
-	args := []string{"docker", "run", "--rm"}
-	if task != nil {
-		if task.Environment.CPUs > 0 {
-			args = append(args, "--cpus", strconv.Itoa(task.Environment.CPUs))
-		}
-		if task.Environment.MemoryMB > 0 {
-			args = append(args, "--memory", fmt.Sprintf("%dm", task.Environment.MemoryMB))
-		}
-		if task.Environment.GPUs > 0 {
-			args = append(args, "--gpus", strconv.Itoa(task.Environment.GPUs))
-		}
-	}
-	args = append(args,
-		"-v", sub+":/submission:ro",
-		"-v", "./logs/verifier:/logs/verifier",
-		"-e", "FRONTIERSWE_SUBMISSION=/submission",
-		"-e", "FRONTIERSWE_VERIFIER_OUT=/logs/verifier",
-		image, "/bin/sh", "-lc", verifyCmd,
-	)
+	args := verifierDockerArgs(task, submissionDir, "", verifyCmd)
 	for i, a := range args {
 		args[i] = shWord(a)
 	}
