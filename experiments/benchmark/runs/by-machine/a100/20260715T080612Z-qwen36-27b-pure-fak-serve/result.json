@@ -1,0 +1,28 @@
+{
+  "schema": "fak.qwen36-27b.serve-result.v1",
+  "claim_status": "OBSERVED",
+  "http_status": 200,
+  "response_text": "7",
+  "response_exact_match": true,
+  "finish_reason": "stop",
+  "prompt_tokens": 23,
+  "completion_tokens": 1,
+  "total_tokens": 24,
+  "wall_seconds": 200,
+  "prefill": {
+    "tokens": 23,
+    "seconds": 192.63,
+    "tokens_per_second_reported": 0.1
+  },
+  "decode": {
+    "tokens": 1,
+    "seconds": 7.08,
+    "tokens_per_second_reported": 0.1
+  },
+  "duration_ms": 199965.093,
+  "gpu_memory_free_mib_before": 16555,
+  "gpu_memory_free_mib_after": 16537,
+  "cosine": null,
+  "device_path_identity": null,
+  "acceptance": "NOT_YET"
+}
