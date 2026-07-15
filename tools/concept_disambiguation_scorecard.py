@@ -546,7 +546,7 @@ def abstraction_rollup(rows: list[dict[str, Any]], row_debt: dict[str, int],
         mix = {v: 0 for v in VERDICTS}
         debt = 0
         worst_id, worst_rank = head, -1
-        for n in subtree:
+        for n in sorted(subtree):
             r = byid.get(n)
             if r is None:
                 continue

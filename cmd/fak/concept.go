@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 
 func runConcept(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak concept <position|classify|validate|admission> [flags]")
+		fmt.Fprintln(stderr, "usage: fak concept <position|classify|validate|freshness|admission> [flags]")
 		return 2
 	}
 	root, err := conceptRoot()
@@ -34,6 +35,52 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 		return runConceptPosition(stdout, stderr, c, args[1:])
 	case "classify":
 		return runConceptClassify(stdout, stderr, c, args[1:])
+	case "freshness":
+		fs := flag.NewFlagSet("concept freshness", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		check := fs.Bool("check", true, "check tracked generated artifacts")
+		jsonOut := fs.Bool("json", false, "emit JSON")
+		if fs.Parse(args[1:]) != nil {
+			return 2
+		}
+		if !*check {
+			fmt.Fprintln(stderr, "fak concept freshness: --check=false is unsupported; use: "+conceptcatalog.RegenerateCommand)
+			return 2
+		}
+		res, e := conceptcatalog.CheckFresh(root)
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(res)
+		}
+		if e != nil {
+			fmt.Fprintln(stderr, "fak concept freshness:", e)
+			return 1
+		}
+		if !res.Fresh {
+			if !*jsonOut {
+				fmt.Fprintln(stderr, "stale generated concept artifacts:")
+				for _, p := range res.StalePaths {
+					fmt.Fprintln(stderr, " -", p)
+				}
+				fmt.Fprintln(stderr, "regenerate:", res.Regenerate)
+			}
+			return 1
+		}
+		if !*jsonOut {
+			fmt.Fprintln(stdout, "concept generated artifacts fresh")
+		}
+		return 0
+	case "generate":
+		cmd := exec.Command("python", filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), "--workspace", root, "--markdown-dir", filepath.Join(root, "docs", "concept-disambiguation-scorecard"))
+		cmd.Dir = root
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
+		cmd.Env = os.Environ()
+		if e := cmd.Run(); e != nil {
+			if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(conceptcatalog.GeneratedReadme))); statErr != nil {
+				return 1
+			}
+		}
+		return 0
 	case "validate":
 		ds := conceptcatalog.Validate(c)
 		if len(ds) > 0 {

@@ -81,6 +81,7 @@ func PreCommitGates() []Gate {
 		{Name: "FILE_ADMISSION", ModeEnv: "FLEET_FILE_GUARD", EscapeEnv: "ALLOW_STRAY_FILE", Check: gateFileAdmission},
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
 		{Name: "CONCEPT_ADMISSION", ModeEnv: "FLEET_CONCEPT_GUARD", EscapeEnv: "ALLOW_CONCEPT_GAP", Check: gateConceptAdmission},
+		{Name: "CONCEPT_FRESHNESS", ModeEnv: "FLEET_CONCEPT_FRESHNESS_GUARD", EscapeEnv: "ALLOW_STALE_CONCEPT_DOCS", Check: checkConceptFreshness},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
 		// BARE_COMMIT_SWEEP is ADVISORY (issue #3615): DefaultMode "warn" so it never reds a shared

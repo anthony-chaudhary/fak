@@ -54,6 +54,12 @@ jobs:
         if: github.event_name == 'pull_request'
         run: go run ./cmd/fak concept admission --base "${{ github.event.pull_request.base.sha }}" --tip "${{ github.sha }}" --json
 
+      # CI-spec impact (#4760): generated scorecard freshness is now an unconditional CI contract.
+      # Consumer migrated: local hooks select relevant paths; CI validates the clean committed tree.
+      # Cutover is additive; rollback removes this step and leaves generation behavior unchanged.
+      - name: concept generated-artifact freshness
+        run: go run ./cmd/fak concept freshness --check --json
+
       # Build/test cache: setup-go's built-in cache is off (no go.sum to key on), but the
       # GOCACHE — compiled packages AND cached test results — is the biggest CI-time lever
       # on this zero-dep module. `go build ./...` and `go test ./...` otherwise recompile and
