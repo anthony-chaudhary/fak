@@ -358,7 +358,9 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	defer func() {
 		rec.Exit = exit
 		rec.Blocked = exit == 2
-		rec.Kind = string(guardStopDispositionKind(guardStopDisposition(rec.Disposition)))
+		if rec.Kind == "" {
+			rec.Kind = string(guardStopDispositionKind(guardStopDisposition(rec.Disposition)))
+		}
 		emitGuardStopRecord(stderr, rec)
 	}()
 	fs := flag.NewFlagSet("guard-stophook", flag.ContinueOnError)
@@ -372,6 +374,7 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	operatorDirectedFlag := fs.String("operator-directed", os.Getenv(guardStopHookOperatorDirectedEnvMode), "headless 'stopped to ask a human' gate: off|shadow|warn|enforce")
 	hardwareGateFlag := fs.String("hardware-gate", os.Getenv(guardStopHookHardwareGateEnvMode), "headless 'no local hardware' redirect gate: off|shadow|warn|enforce")
 	handoffModeFlag := fs.String("task-handoff-mode", os.Getenv(guardTaskHandoffEnvMode), "completion handoff gate: off|shadow|enforce")
+	witnessedDoneFlag := fs.String("witnessed-done", os.Getenv(guardWitnessedDoneModeEnv), "off|shadow|enforce (require narrated completion to name a witnessed stamped commit)")
 	handoffFileFlag := fs.String("task-handoff-file", os.Getenv(guardTaskHandoffEnvFile), "path to fak.task-handoff.v1 JSON the agent must write before a clean stop")
 	handoffRepoFlag := fs.String("task-handoff-repo", os.Getenv(guardTaskHandoffEnvRepo), "owner/repo passed to fak task handoff --live")
 	handoffLiveFlag := fs.Bool("task-handoff-live", guardTaskHandoffLiveFromEnv(), "when true, sync valid next steps to GitHub with fak task handoff --live")
@@ -588,6 +591,15 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 		if oqFired && oqExit == 2 {
 			return 2
 		}
+		wdExit, wdDisp, wdReason, wdFired := runGuardWitnessedDoneGate(stderr, *witnessedDoneFlag, transcriptPath, repoRoot(), rec.Session, guardWitnessedDoneMaxFromEnv())
+		if wdFired {
+			rec.Disposition = string(wdDisp)
+			rec.Kind = string(guardWitnessedDoneKind(wdDisp))
+			rec.Signal = wdReason
+		}
+		if wdFired && wdExit == 2 {
+			return 2
+		}
 		handoffExit, handoffDisp := runGuardTaskHandoffGate(stderr, active, guardTaskHandoffConfig{
 			Mode: *handoffModeFlag,
 			File: *handoffFileFlag,
@@ -605,6 +617,10 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 			// did not itself block: record the hardware-gate disposition, not a bare clean stop. It
 			// precedes odFired for the same reason it fires first — the more specific signal wins.
 			rec.Disposition = string(hgDisp)
+		case wdFired:
+			// The witnessed-done rung fired but allowed the stop (confirmed, shadow, or bounded
+			// stand-down) and handoff did not override it: preserve its typed disposition.
+			rec.Disposition = string(wdDisp)
 		case odFired:
 			// The gate fired but allowed the stop (warn/shadow/escalate) and the handoff gate did
 			// not itself block: record the operator-directed disposition, not a bare clean stop.
