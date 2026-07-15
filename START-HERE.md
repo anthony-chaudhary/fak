@@ -1,116 +1,38 @@
-# Start Here: Run AI on Your Computer
+# Start here
 
-- **Planning or reporting project progress?** Use [Production completion and project scope](docs/project-production-completion.md): tickets declare estimates and parent contribution, and bare “complete” means production complete.
+This page is the human route map for **fak**. Choose the job you have now; each route points to its current authority and one next action. For the product overview and first commands, use the [README](README.md).
 
-This page gets you from zero to chatting with a local AI model in under 10 minutes.
+**Default:** if you are evaluating fak for the first time, run the [one-minute offline proof](docs/repro-packet.md). It needs no key, model download, or GPU.
 
-## What you can do
+## Choose your route
 
-After following these steps, you'll have an AI running on your own computer that works
-offline, costs nothing (no API keys, no cloud bills), keeps your data on your machine,
-and runs on CPU — no GPU needed for small models.
+| You want to… | Current route | Next action |
+|---|---|---|
+| Understand what fak manages | [README](README.md) | Choose `fak guard`, `fak serve`, or the offline proof from the first-screen table. |
+| Evaluate the kernel locally | [Reproducibility packet](docs/repro-packet.md) | Run its copy-paste proof and compare the three expected results. |
+| Add fak beside one agent | [`fak guard` quickstart](README.md#manage-one-local-agent-fak-guard) | Launch the agent you already use through `fak guard`. |
+| Run a shared or durable endpoint | [Server quickstart](docs/fak/server-quickstart.md) | Start `fak serve`, then call its health and model endpoints. |
+| Integrate a client or agent | [Integration guides](docs/integrations/) | Select the guide for your client and follow its smallest working path. |
+| Operate or deploy fak | [Deployment guide](docs/fak/deployment-guide.md) | Choose the topology and health checks for your environment. |
+| Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | Read the repository workflow, then choose a scoped issue. |
+| Study architecture or evidence | [Documentation index](INDEX.md) | Enter through architecture, proofs, benchmarks, or research history. |
 
-## Pick your path
+## Current product paths
 
-| I want to... | Follow this |
-|---------------|-------------|
-| **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
-| **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](cmd/simpledemo/README.md) — 5 minutes |
-| **Cut the token bill on the agent you already run** (cheaper long sessions, one command) | [Main README](README.md#get-started-with-fak-guard) — `fak guard -- claude` |
-| **See the performance benchmarks** | [Benchmark Authority](BENCHMARK-AUTHORITY.md) |
-| **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
-| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 99 courses, six levels ⭐ |
-| **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
-| **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](docs/integrations/README.md) — repoint one base URL, no agent-side code change |
-| **Understand what fak actually does** | [Main README](README.md) |
-| **Put a tool-call control plane in front of my AI** | [Getting Started](GETTING-STARTED.md) — 10 minutes |
-| **Prove the tool-call boundary in 60 seconds** (no model, no download, no key) | [The boundary proof](README.md#tool-call-controls) — one structural DENY |
-| **Watch the 60-second proof without running anything** (recorded terminal cast) | [Install to first DENY verdict](docs/adoption/casts/README.md) — annotated cast + still frame |
-| **See the boundary handle a live attack fixture** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](examples/agentdojo-redteam/README.md) |
+The routes above describe the current generation of fak unless a page marks itself historical, experimental, simulated, or superseded.
 
-## Quick: Try the chat demo (5 minutes)
+- **`fak guard`** manages one existing local agent and is the default integration path.
+- **`fak serve`** runs the same kernel as a shared or durable OpenAI, Anthropic, or MCP endpoint.
+- **Offline proof** demonstrates adjudication and agent behavior without external compute.
 
-### 1. Get the code
+Deployment support depends on the selected backend and environment. Each quickstart names its own prerequisites and supported boundary; the [README](README.md#one-managed-agent-two-ways-to-run-the-kernel) is authoritative for choosing a mode.
 
-The demo lives inside this repo, so clone it first (this creates a `fak/` folder):
+## Deeper maps
 
-```bash
-git clone https://github.com/anthony-chaudhary/fak.git && cd fak
-```
+- **Machines and coding agents:** [`llms.txt`](llms.txt) maps tasks to authoritative files.
+- **All documentation:** [`INDEX.md`](INDEX.md) is the curated repository-wide index.
+- **Repository agents:** [`AGENTS.md`](AGENTS.md) contains build, proof, commit, and shared-tree rules.
+- **Claims:** [`CLAIMS.md`](CLAIMS.md) records shipped, simulated, and stub status.
+- **Project evolution:** [`docs/notes/`](docs/notes/) preserves dated research, decisions, and historical context.
 
-Every command below runs from inside that `fak/` folder.
-
-### 2. Download a model
-
-Pick one:
-- **[Qwen2.5-1.5B-Q8](https://huggingface.co/mradermacher/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q8_0.gguf)** (1.6 GB) — Fast, good quality
-- **[Qwen2.5-3B-Q8](https://huggingface.co/mradermacher/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q8_0.gguf)** (3.2 GB) — Better quality
-
-Also download: **[tokenizer.json](https://huggingface.co/mradermacher/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/tokenizer.json)**
-
-Save both to the same folder (e.g., `~/Downloads/` or `C:\Users\You\Downloads\`).
-
-### 3. Run it
-
-**Linux/macOS (one line):**
-```bash
-go run ./cmd/simpledemo -gguf ~/Downloads/Qwen2.5-1.5B-Instruct-Q8_0.gguf -tok ~/Downloads
-```
-
-**Windows PowerShell (one line):**
-```powershell
-go run ./cmd/simpledemo -gguf $env:USERPROFILE\Downloads\Qwen2.5-1.5B-Instruct-Q8_0.gguf -tok $env:USERPROFILE\Downloads
-```
-
-### 4. Chat!
-
-**What you'll see:** the model loads, then a `You:` prompt appears — type a question and the AI streams an answer back, like this:
-
-```
-You: Explain quantum computing like I'm 12
-AI: Imagine a regular computer is like a light switch — it's either ON (1) or OFF (0)...
-```
-
-## What is fak?
-
-**fak** is **one Go binary** that sits between your AI agents and the tools they call.
-Everything runs inside that one process — the gateway, permission checks, cache,
-quarantine, routing, and metrics — so there are no sidecars, no separate authorizer,
-and no multi-tier ops:
-
-- **Self-contained** — one static Go binary, zero external dependencies, no complex setup
-- **Controlled** — gives every tool call a reviewable verdict before it runs
-- **Cheaper for fleets** — does the shared setup work once instead of every turn
-
-For fleets of AI agents that share setup (long system prompts, tool lists), the savings
-compound: the first agent pays for the shared work, everyone after reads it for free.
-
-## How fast is it?
-
-On a measured 50-turn × 5-agent session, the honest gain over a *tuned* warm-cache
-stack is a few-fold (**~4×**). Versus a **naive re-send-everything loop** — whose cost
-balloons because it reprocesses the whole growing conversation every turn — the same
-session drops from ~19 hours to ~19 minutes (~60×), but that eye-catching number holds
-only against the naive pattern. The reuse win is **self-host only** and applies to
-read-heavy fleets.
-
-See [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) for every number traced to
-its commit and artifact.
-
-## Next steps
-
-1. Run the [Simple Demo](cmd/simpledemo/README.md)
-2. Read [Getting Started](GETTING-STARTED.md) for the full feature set
-3. Explore [examples](examples/) of policy manifests and tool gates
-4. Check the [main README](README.md) for architecture and benchmarks
-
-## Requirements
-
-- **A clone of this repo** (`git clone https://github.com/anthony-chaudhary/fak.git`) — the demo runs from inside it
-- **Go 1.26+** (as of 2026-07-14; source: [`go.mod`](go.mod); the toolchain auto-upgrades once the repo is cloned)
-- **4-8 GB RAM** (depends on model size)
-- That's it!
-
----
-
-**Lost?** Each subdirectory has its own README with detailed instructions. Start with [Simple Demo](cmd/simpledemo/README.md).
+If you are still deciding, use the default: [run the one-minute offline proof](docs/repro-packet.md).
