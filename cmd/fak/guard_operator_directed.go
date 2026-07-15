@@ -19,7 +19,12 @@ package main
 // Two guardrails, both structural:
 //   - Only enforce when the OPERATOR IS ABSENT. guardOperatorDirectedEffectiveMode caps an attended
 //     interactive session at warn (or off), exactly like guardTaskHandoffEffectiveMode caps the
-//     handoff gate — so an `enforce` ever reaching the hook means the child was headless.
+//     handoff gate — so an `enforce` ever reaching the hook means the operator was absent: the child
+//     was headless, OR an orchestrator marked an interactive child unattended (a fleet/remote session
+//     driven by an agent, not a responsive human — guardOperatorUnattendedEnv). That operator-driven
+//     interactive corner (#4951) is the reason "interactive" alone is not "a human is present": the
+//     unattended flag is the first-class signal that lifts the attended cap so a prose "stopped to ask
+//     a human" question is escalated, not silently stalled, in exactly the sessions no human watches.
 //   - HUMAN_RESIDUAL routes to a typed ESCALATION, not a re-prompt. An authority/approval wall
 //     (a release gate, a sign-off) is a legitimate stop; blocking-and-reprompting it would just spin.
 //     The gate allows that stop and emits a typed escalation line for the operator to route.
@@ -27,6 +32,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
@@ -36,8 +42,19 @@ const (
 	// guardStopHookOperatorDirectedEnvMode is the resolved operator-directed gate mode the guard
 	// installer injects into the Stop-hook child. The install-time resolution
 	// (guardOperatorDirectedEffectiveMode) has already applied the operator-absent cap, so the value
-	// here is authoritative: an `enforce` means the child was headless.
+	// here is authoritative: an `enforce` means the operator was absent — the child was headless, or an
+	// interactive child an orchestrator marked unattended (guardOperatorUnattendedEnv).
 	guardStopHookOperatorDirectedEnvMode = "FAK_GUARD_OPERATOR_DIRECTED_MODE"
+
+	// guardOperatorUnattendedEnv marks an INTERACTIVE child (no `-p`, so guardChildInteractive is
+	// true) as operator-driven: a fleet/remote orchestrator drives the session and no responsive human
+	// is at the TUI. Set truthy (1|true|yes|on), it lifts the attended cap in
+	// guardOperatorDirectedEffectiveMode so the operator-directed gate is FIRST-CLASS for the session —
+	// its configured off|shadow|warn|enforce is honored (a prose "stopped to ask a human" turn escalates
+	// instead of hanging), exactly as for a headless `-p` worker. Default false: an ordinary attended
+	// `fak guard -- claude` is byte-for-byte unchanged. This is the #4951 gap's operator-presence axis:
+	// "interactive" is a weak proxy for "a human can answer", and this env is the explicit override.
+	guardOperatorUnattendedEnv = "FAK_GUARD_OPERATOR_UNATTENDED"
 
 	// guardOperatorDirectedModeWarn is the SOAK rung between shadow and enforce and the shipped
 	// default for a headless child: the choicetriage remediation is printed for the operator to see,
@@ -74,23 +91,40 @@ func guardOperatorDirectedNormalizedOrWarn(mode string) string {
 	return normalized
 }
 
+// guardOperatorUnattended reports whether the current interactive session was marked operator-driven
+// (no responsive human at the TUI) via guardOperatorUnattendedEnv. It is the operator-presence signal
+// that guardOperatorDirectedEffectiveMode consults to decide whether the attended cap applies; on a
+// headless child the value is irrelevant (the cap never applies there anyway).
+func guardOperatorUnattended() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(guardOperatorUnattendedEnv))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // guardOperatorDirectedEffectiveMode resolves the operator-directed gate mode for a session,
-// applying the operator-absent cap. It mirrors guardTaskHandoffEffectiveMode: an attended
-// interactive TUI child (a human is present to answer a genuine question) must never have a stop
-// BLOCKED by this gate, so:
-//   - not explicitly set + interactive -> off (no friction in an attended session at all)
-//   - explicit enforce + interactive   -> capped to warn (surface the remediation, never block)
-//   - explicit off/shadow/warn         -> honored as given
-//   - headless child                   -> the configured mode verbatim (warn by default)
+// applying the operator-absent cap. It mirrors guardTaskHandoffEffectiveMode: an ATTENDED interactive
+// TUI child (a human is present to answer a genuine question) must never have a stop BLOCKED by this
+// gate. The load-bearing distinction (#4951) is that "interactive" alone is a weak proxy for "a human
+// is present": a fleet/remote orchestrator can drive an interactive `claude` (no `-p`) with no human
+// watching, and there a prose "stopped to ask a human" turn hangs exactly like a headless one. The
+// operatorUnattended axis (guardOperatorUnattendedEnv) is the explicit override for that corner, so:
+//   - headless child, OR interactive+unattended -> the configured mode verbatim (warn by default): the
+//     operator is absent, so the full off|shadow|warn|enforce ladder is first-class for the session.
+//   - attended interactive, not explicitly set  -> off (no friction in an attended session at all)
+//   - attended interactive, explicit enforce     -> capped to warn (surface the remediation, never block)
+//   - attended interactive, explicit off/shadow/warn -> honored as given
 //
-// So an `enforce` value ever seen by the Stop hook implies the child was headless: the operator is
-// absent by construction, and blocking the false stop cannot silence a real human question.
-func guardOperatorDirectedEffectiveMode(configured string, explicitlySet, childInteractive bool) string {
+// So an `enforce` value ever seen by the Stop hook implies the operator was absent — headless, or an
+// interactive child an orchestrator marked unattended — and blocking that false stop cannot silence a
+// real human question, because there is no human present to have asked one.
+func guardOperatorDirectedEffectiveMode(configured string, explicitlySet, childInteractive, operatorUnattended bool) string {
 	mode, err := normalizeGuardOperatorDirectedMode(configured)
 	if err != nil {
 		mode = guardOperatorDirectedModeWarn // fail safe to the soak default, never to enforce
 	}
-	if !childInteractive {
+	if !childInteractive || operatorUnattended {
 		return mode
 	}
 	if !explicitlySet {

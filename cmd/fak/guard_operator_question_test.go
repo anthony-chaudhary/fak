@@ -98,7 +98,7 @@ func TestOperatorQuestionGateWarnAndOffNeverActuate(t *testing.T) {
 	if exit, _, _, fired := runGuardOperatorQuestionGate(&bytes.Buffer{}, guardPreCompactModeOff, path); fired || exit != 0 {
 		t.Fatalf("off fired=%v exit=%d", fired, exit)
 	}
-	if got := guardOperatorDirectedEffectiveMode(guardPreCompactModeEnforce, true, true); got != guardOperatorDirectedModeWarn {
+	if got := guardOperatorDirectedEffectiveMode(guardPreCompactModeEnforce, true, true, false); got != guardOperatorDirectedModeWarn {
 		t.Fatalf("attended enforce cap=%q", got)
 	}
 }

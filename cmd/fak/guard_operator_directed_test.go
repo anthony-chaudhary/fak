@@ -52,42 +52,74 @@ func TestNormalizeGuardOperatorDirectedMode(t *testing.T) {
 	}
 }
 
-// TestGuardOperatorDirectedEffectiveMode pins the operator-absent cap: an attended interactive child
-// (a human is present to answer) must never have a stop BLOCKED by this gate, so an unset default
-// goes off and an explicit enforce is capped to warn; a headless child keeps the configured mode
-// verbatim. Only a headless child ever reaches enforce, so acting on enforce can never silence a real
-// human question. Mirrors [[TestGuardTaskHandoffEffectiveMode]].
+// TestGuardOperatorDirectedEffectiveMode pins the operator-absent cap AND the operator-presence axis
+// that governs it (#4951). An ATTENDED interactive child (a human is present to answer) must never
+// have a stop BLOCKED by this gate, so an unset default goes off and an explicit enforce is capped to
+// warn; a headless child — OR an interactive child an orchestrator marked unattended (no responsive
+// human, a fleet/remote-driven session) — keeps the configured mode verbatim and can reach enforce.
+// The invariant preserved is "enforce ⇒ operator absent", now satisfied by headless OR unattended, so
+// acting on enforce can never silence a real human question. Mirrors [[TestGuardTaskHandoffEffectiveMode]].
 func TestGuardOperatorDirectedEffectiveMode(t *testing.T) {
 	for _, tc := range []struct {
-		name             string
-		configured       string
-		explicitlySet    bool
-		childInteractive bool
-		want             string
+		name               string
+		configured         string
+		explicitlySet      bool
+		childInteractive   bool
+		operatorUnattended bool
+		want               string
 	}{
 		// Default on an attended interactive child: fully off (no friction where a human can answer).
-		{"default interactive -> off", guardOperatorDirectedModeWarn, false, true, guardPreCompactModeOff},
+		{"default interactive -> off", guardOperatorDirectedModeWarn, false, true, false, guardPreCompactModeOff},
 		// Default headless: the shipped warn soak is kept.
-		{"default headless -> keep warn", guardOperatorDirectedModeWarn, false, false, guardOperatorDirectedModeWarn},
-		// Explicit enforce on an interactive child is capped to warn — surface, never block.
-		{"explicit enforce interactive -> warn", guardPreCompactModeEnforce, true, true, guardOperatorDirectedModeWarn},
+		{"default headless -> keep warn", guardOperatorDirectedModeWarn, false, false, false, guardOperatorDirectedModeWarn},
+		// Explicit enforce on an attended interactive child is capped to warn — surface, never block.
+		{"explicit enforce interactive -> warn", guardPreCompactModeEnforce, true, true, false, guardOperatorDirectedModeWarn},
 		// Explicit enforce headless: the whole point — a headless run reaches enforce.
-		{"explicit enforce headless -> enforce", guardPreCompactModeEnforce, true, false, guardPreCompactModeEnforce},
+		{"explicit enforce headless -> enforce", guardPreCompactModeEnforce, true, false, false, guardPreCompactModeEnforce},
 		// Explicit shadow/off are honored as-given on either child.
-		{"explicit shadow interactive -> shadow", guardPreCompactModeShadow, true, true, guardPreCompactModeShadow},
-		{"explicit off interactive -> off", guardPreCompactModeOff, true, true, guardPreCompactModeOff},
-		{"explicit warn headless -> warn", guardOperatorDirectedModeWarn, true, false, guardOperatorDirectedModeWarn},
+		{"explicit shadow interactive -> shadow", guardPreCompactModeShadow, true, true, false, guardPreCompactModeShadow},
+		{"explicit off interactive -> off", guardPreCompactModeOff, true, true, false, guardPreCompactModeOff},
+		{"explicit warn headless -> warn", guardOperatorDirectedModeWarn, true, false, false, guardOperatorDirectedModeWarn},
 		// A bad configured string fails safe to warn, then the cap applies (interactive+unset -> off).
-		{"bad string interactive unset -> off", "loud", false, true, guardPreCompactModeOff},
-		{"bad string headless -> warn", "loud", false, false, guardOperatorDirectedModeWarn},
+		{"bad string interactive unset -> off", "loud", false, true, false, guardPreCompactModeOff},
+		{"bad string headless -> warn", "loud", false, false, false, guardOperatorDirectedModeWarn},
+
+		// #4951 operator-presence axis: an interactive child marked UNATTENDED is treated like headless
+		// (the operator is absent), so the attended cap is lifted and the full ladder is first-class.
+		// The whole point of the gap fix: an operator-driven interactive session reaches enforce.
+		{"unattended interactive explicit enforce -> enforce", guardPreCompactModeEnforce, true, true, true, guardPreCompactModeEnforce},
+		// Unattended + unset keeps the warn soak (headless-equivalent default), NOT the attended off.
+		{"unattended interactive default -> warn", guardOperatorDirectedModeWarn, false, true, true, guardOperatorDirectedModeWarn},
+		// Unattended honors shadow verbatim, same as headless.
+		{"unattended interactive shadow -> shadow", guardPreCompactModeShadow, true, true, true, guardPreCompactModeShadow},
+		// The unattended flag is inert on a headless child (already operator-absent) — no double effect.
+		{"unattended headless enforce -> enforce", guardPreCompactModeEnforce, true, false, true, guardPreCompactModeEnforce},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := guardOperatorDirectedEffectiveMode(tc.configured, tc.explicitlySet, tc.childInteractive)
+			got := guardOperatorDirectedEffectiveMode(tc.configured, tc.explicitlySet, tc.childInteractive, tc.operatorUnattended)
 			if got != tc.want {
-				t.Errorf("guardOperatorDirectedEffectiveMode(%q, set=%v, interactive=%v) = %q, want %q",
-					tc.configured, tc.explicitlySet, tc.childInteractive, got, tc.want)
+				t.Errorf("guardOperatorDirectedEffectiveMode(%q, set=%v, interactive=%v, unattended=%v) = %q, want %q",
+					tc.configured, tc.explicitlySet, tc.childInteractive, tc.operatorUnattended, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGuardOperatorUnattendedEnv pins the operator-presence env grammar: only 1|true|yes|on (any
+// case, trimmed) mark the interactive session operator-driven; everything else — unset, empty, "0",
+// "off", junk — leaves the attended cap in force, so an ordinary `fak guard -- claude` is unchanged.
+func TestGuardOperatorUnattendedEnv(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want bool
+	}{
+		{"1", true}, {"true", true}, {"TRUE", true}, {"Yes", true}, {" on ", true},
+		{"", false}, {"0", false}, {"off", false}, {"no", false}, {"maybe", false},
+	} {
+		t.Setenv(guardOperatorUnattendedEnv, tc.val)
+		if got := guardOperatorUnattended(); got != tc.want {
+			t.Errorf("guardOperatorUnattended() with %q = %v, want %v", tc.val, got, tc.want)
+		}
 	}
 }
 
