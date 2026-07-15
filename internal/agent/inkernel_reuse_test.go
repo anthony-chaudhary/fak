@@ -684,3 +684,25 @@ func TestInKernelAuthenticatedPrefixPrivateUntilPromoted(t *testing.T) {
 		t.Fatalf("promoted fleet request cacheable=%d matched=%d, want %d/%d", cacheable, matched, len(ids), len(ids))
 	}
 }
+
+func TestInKernelSnapshotCheckpointCreatesStableSiblingBoundary(t *testing.T) {
+	tests := []struct {
+		name            string
+		matched, prompt int
+		want            int
+	}{
+		{name: "short prompt", prompt: 63, want: 0},
+		{name: "one block plus suffix", prompt: 65, want: 64},
+		{name: "exact block stays leaf", prompt: 64, want: 0},
+		{name: "long prompt uses deepest boundary", prompt: 570, want: 512},
+		{name: "restored boundary is not repeated", matched: 512, prompt: 570, want: 0},
+		{name: "restored older prefix advances once", matched: 256, prompt: 570, want: 512},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inKernelSnapshotCheckpoint(tt.matched, tt.prompt); got != tt.want {
+				t.Fatalf("checkpoint(%d, %d)=%d want %d", tt.matched, tt.prompt, got, tt.want)
+			}
+		})
+	}
+}

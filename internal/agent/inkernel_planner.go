@@ -1250,11 +1250,33 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		s.MetalQ4K = p.q4k
 	}
 
-	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss).
+	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss). Device hybrid
+	// snapshots cannot be truncated when a radix edge later splits: recurrent GDN state is
+	// position-dependent. Materialize one stable block boundary before the leaf so sibling
+	// prompts can restore a complete snapshot rather than merely matching an unusable
+	// mid-edge token run. The boundary is deliberately bounded to one per request; Qwen
+	// snapshots own substantial recurrent state even when the token prefix is short.
 	logits := cachedLogits
 	if logits == nil {
 		tp := time.Now()
-		logits = s.Prefill(ids[matched:])
+		prefillAt := matched
+		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
+		if p.backend != nil && checkpoint > prefillAt {
+			logits = s.Prefill(ids[prefillAt:checkpoint])
+			var checkpointSnapshot *model.PrefixSnapshot
+			checkpointSnapshot, err = s.PrefixSnapshot()
+			if err != nil {
+				return
+			}
+			if err = p.admitPrefixSnapshot(ctx, ids[:checkpoint], checkpointSnapshot, logits); err != nil {
+				checkpointSnapshot.Close()
+				return
+			}
+			prefillAt = checkpoint
+		}
+		if prefillAt < len(ids) {
+			logits = s.Prefill(ids[prefillAt:])
+		}
 		prefillS = time.Since(tp).Seconds()
 	}
 	if err = ctx.Err(); err != nil {
@@ -1271,26 +1293,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			if err != nil {
 				return
 			}
-			if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
-				if admitErr := p.scopedTree.AdmitPrivateSnapshot(owner, ids, snap, logits); admitErr != nil {
-					snap.Close()
-					err = admitErr
-					return
-				}
-			} else {
-				p.mu.Lock()
-				b, m := p.tree.Lookup(ids)
-				var admitErr error
-				leaf, admitErr := p.tree.InsertSnapshot(b, ids[m:], snap, logits)
-				if leaf != nil {
-					p.tree.Done(leaf)
-				}
-				p.mu.Unlock()
-				if admitErr != nil {
-					snap.Close()
-					err = admitErr
-					return
-				}
+			if err = p.admitPrefixSnapshot(ctx, ids, snap, logits); err != nil {
+				snap.Close()
+				return
 			}
 		} else {
 			snap := s.Cache.Clone()
@@ -1481,6 +1486,38 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 			}
 		}
 	}
+}
+
+const inKernelSnapshotCheckpointTokens = 64
+
+// inKernelSnapshotCheckpoint returns the deepest fixed block boundary strictly before
+// the prompt and after the already restored prefix. A strict-before boundary preserves
+// the full leaf for exact hits while creating a reusable ancestor for sibling suffixes.
+func inKernelSnapshotCheckpoint(matched, promptTokens int) int {
+	if promptTokens <= 1 {
+		return 0
+	}
+	checkpoint := ((promptTokens - 1) / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
+	if checkpoint <= matched {
+		return 0
+	}
+	return checkpoint
+}
+
+// admitPrefixSnapshot transfers snapshot ownership to the same scoped/unscoped tree
+// used by lookup. On error ownership remains with the caller.
+func (p *InKernelPlanner) admitPrefixSnapshot(ctx context.Context, ids []int, snap *model.PrefixSnapshot, logits []float32) error {
+	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+		return p.scopedTree.AdmitPrivateSnapshot(owner, ids, snap, logits)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	b, matched := p.tree.Lookup(ids)
+	leaf, err := p.tree.InsertSnapshot(b, ids[matched:], snap, logits)
+	if leaf != nil {
+		p.tree.Done(leaf)
+	}
+	return err
 }
 
 func (p *InKernelPlanner) sessionFromPrefixClone(prefix *model.KVCache) *model.Session {
