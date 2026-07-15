@@ -47,39 +47,6 @@ func uploadModelGDNFixture(t *testing.T, be compute.Backend, shape []int, data [
 	return resident
 }
 
-func qwen35GDNFixtureInput(step, hidden int) []float32 {
-	x := make([]float32, hidden)
-	for i := range x {
-		// Four deterministic, distinct, well-scaled normalized-input vectors.
-		v := ((step+1)*(i+5)*17 + i*i*3 + 11) % 101
-		x[i] = (float32(v) - 50) / 53
-	}
-	return x
-}
-
-func qwen35GDNCPUConvState(state linearAttnLayerState, keep, convDim int) []float32 {
-	out := make([]float32, keep*convDim)
-	start := keep - len(state.conv)
-	if start < 0 {
-		start = 0
-	}
-	for i, row := range state.conv {
-		if i+start >= keep {
-			break
-		}
-		copy(out[(i+start)*convDim:(i+start+1)*convDim], row)
-	}
-	return out
-}
-
-func qwen35GDNCPURecurrentState(state linearAttnLayerState) []float32 {
-	var out []float32
-	for _, head := range state.recurrent {
-		out = append(out, head...)
-	}
-	return out
-}
-
 type qwen35GDNParityStats struct {
 	cosine, maxAbs, referenceNorm, deviceNorm float64
 }
@@ -119,48 +86,63 @@ func compareQwen35GDNVector(t *testing.T, label string, reference, device []floa
 	}
 }
 
-// TestCUDAQwen35GDNMultiStepMatchesModelCPU is the closure-grade fixture for
-// #4738. Its oracle is the existing Session.linearAttnStep implementation, not a
-// test-local transcription. Four distinct inputs start from zero state, fill and
+// TestCUDAQwen35GDNMultiStepMatchesModelCPU consumes the external #4789 CPU
+// corpus verbatim. It never constructs a Model or invokes the CPU oracle on the
+// CUDA node. Four distinct inputs start from the serialized zero state, fill and
 // roll the convolution window, and reuse the same in-place device state across a
 // Recycle boundary after every step.
 func TestCUDAQwen35GDNMultiStepMatchesModelCPU(t *testing.T) {
+	required := os.Getenv(cudaGDNRequiredEnv) == "1"
+	corpusPath, skip, err := selectQwen35GDNCorpus(required, os.Getenv(qwen35GDNCorpusPathEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skip {
+		t.Skipf("external GDN corpus not configured (set %s=<corpus-dir>; %s=1 prohibits this skip)", qwen35GDNCorpusPathEnv, cudaGDNRequiredEnv)
+	}
+	corpus, err := loadQwen35GDNCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("load required external GDN corpus: %v", err)
+	}
 	be := requiredCUDAGDNParityBackend(t)
 	t.Cleanup(be.Recycle)
 	if Qwen35GDNCUDAPath != compute.Qwen35GDNCUDAPath || be.Qwen35GDNPath() != Qwen35GDNCUDAPath {
 		t.Fatalf("GDN path mismatch: model=%q compute=%q backend=%q", Qwen35GDNCUDAPath, compute.Qwen35GDNCUDAPath, be.Qwen35GDNPath())
 	}
 
-	cfg := qwen35HybridTestCfg()
-	m := NewSynthetic(cfg)
-	cpu := m.NewSession()
-	nK, nV, kHd, vHd, keyDim, valueDim, convDim := cfg.linearAttnDims()
-	_ = keyDim // carried explicitly below through the backend geometry.
-	hidden, kernel := cfg.HiddenSize, cfg.LinearConvKernelDim
-	p := func(suffix string) string { return layerName(0, suffix) }
+	g := corpus.Metadata.Geometry
+	nK, nV, kHd, vHd, valueDim, convDim := g.NumKeyHeads, g.NumValueHeads, g.KeyHeadDim, g.ValueHeadDim, g.ValueDim, g.ConvDim
+	hidden, kernel := g.HiddenSize, g.ConvKernel
+	tensor := func(name string) []float32 {
+		data, ok := corpus.Tensors[name]
+		if !ok {
+			t.Fatalf("verified corpus omitted tensor %q", name)
+		}
+		return data
+	}
 	weight := func(name string, shape []int) compute.Tensor {
-		return uploadModelGDNFixture(t, be, shape, m.tensor(p(name)), compute.MemoryWeights, "qwen35-gdn-weight "+name)
+		return uploadModelGDNFixture(t, be, shape, tensor(name), compute.MemoryWeights, "qwen35-gdn-weight "+name)
 	}
 
-	inQKV := weight("linear_attn.in_proj_qkv.weight", []int{convDim, hidden})
-	inZ := weight("linear_attn.in_proj_z.weight", []int{valueDim, hidden})
-	inB := weight("linear_attn.in_proj_b.weight", []int{nV, hidden})
-	inA := weight("linear_attn.in_proj_a.weight", []int{nV, hidden})
-	convW := weight("linear_attn.conv1d.weight", []int{convDim, 1, kernel})
-	aLog := weight("linear_attn.A_log", []int{nV})
-	dtBias := weight("linear_attn.dt_bias", []int{nV})
-	norm := weight("linear_attn.norm.weight", []int{vHd})
-	outW := weight("linear_attn.out_proj.weight", []int{hidden, valueDim})
-	convState := uploadModelGDNFixture(t, be, []int{kernel - 1, convDim}, make([]float32, (kernel-1)*convDim), compute.MemoryKVCache, "qwen35-gdn-conv-state")
-	recurrentState := uploadModelGDNFixture(t, be, []int{nV, kHd, vHd}, make([]float32, nV*kHd*vHd), compute.MemoryKVCache, "qwen35-gdn-recurrent-state")
+	inQKV := weight(qwen35GDNWeightInQKV, []int{convDim, hidden})
+	inZ := weight(qwen35GDNWeightInZ, []int{valueDim, hidden})
+	inB := weight(qwen35GDNWeightInB, []int{nV, hidden})
+	inA := weight(qwen35GDNWeightInA, []int{nV, hidden})
+	convW := weight(qwen35GDNWeightConv, []int{convDim, 1, kernel})
+	aLog := weight(qwen35GDNWeightALog, []int{nV})
+	dtBias := weight(qwen35GDNWeightDT, []int{nV})
+	norm := weight(qwen35GDNWeightNorm, []int{vHd})
+	outW := weight(qwen35GDNWeightOut, []int{hidden, valueDim})
+	convState := uploadModelGDNFixture(t, be, []int{kernel - 1, convDim}, tensor(qwen35GDNInitialConvState), compute.MemoryKVCache, "qwen35-gdn-conv-state")
+	recurrentState := uploadModelGDNFixture(t, be, []int{nV, kHd, vHd}, tensor(qwen35GDNInitialRecurrentState), compute.MemoryKVCache, "qwen35-gdn-recurrent-state")
 	convIdentity, recurrentIdentity := convState.Buf(), recurrentState.Buf()
 
-	for step := 0; step < 4; step++ {
-		input := qwen35GDNFixtureInput(step, hidden)
-		wantOutput := cpu.linearAttnStep(0, input, residentKernel{m})
-		cpuState := cpu.Cache.linear.layers[0]
-		wantConv := qwen35GDNCPUConvState(cpuState, kernel-1, convDim)
-		wantRecurrent := qwen35GDNCPURecurrentState(cpuState)
+	for _, stepMeta := range corpus.Metadata.Steps {
+		step := stepMeta.Index
+		input := tensor(stepMeta.Input)
+		wantOutput := tensor(stepMeta.Output.Tensor)
+		wantConv := tensor(stepMeta.ConvState.Tensor)
+		wantRecurrent := tensor(stepMeta.RecurrentState.Tensor)
 
 		x := uploadModelGDNFixture(t, be, []int{hidden}, input, compute.MemoryActivation, "qwen35-gdn-step-input")
 		be.ResetHostXfer()
@@ -170,7 +152,7 @@ func TestCUDAQwen35GDNMultiStepMatchesModelCPU(t *testing.T) {
 		gotOutputDev, nextConv, nextRecurrent, err := be.Qwen35GDNDecode(
 			x, inQKV, inZ, inB, inA, convW, aLog, dtBias, norm, outW,
 			convState, recurrentState,
-			nK, nV, kHd, vHd, kernel, float32(cfg.RMSNormEps),
+			nK, nV, kHd, vHd, kernel, float32(corpus.Metadata.Epsilon),
 		)
 		be.Free(x)
 		if err != nil {
@@ -207,8 +189,8 @@ func TestCUDAQwen35GDNMultiStepMatchesModelCPU(t *testing.T) {
 		outputStats := compareQwen35GDNVector(t, "output", wantOutput, gotOutput)
 		convStats := compareQwen35GDNVector(t, "conv_state", wantConv, gotConv)
 		recurrentStats := compareQwen35GDNVector(t, "recurrent_state", wantRecurrent, gotRecurrent)
-		t.Logf("step=%d path=%s operations=%d h2d_inside=%d d2h_inside=%d output_cosine=%.9f output_max_abs=%.3e output_norm_cpu=%.6g output_norm_cuda=%.6g conv_cosine=%.9f conv_max_abs=%.3e conv_norm_cpu=%.6g conv_norm_cuda=%.6g recurrent_cosine=%.9f recurrent_max_abs=%.3e recurrent_norm_cpu=%.6g recurrent_norm_cuda=%.6g",
-			step, be.Qwen35GDNPath(), opsDelta, h2dInside, d2hInside,
+		t.Logf("step=%d corpus=%s manifest_sha256=%s path=%s operations=%d h2d_inside=%d d2h_inside=%d state_identity=true state_durable=true output_cosine=%.9f output_max_abs=%.3e output_norm_cpu=%.6g output_norm_cuda=%.6g conv_cosine=%.9f conv_max_abs=%.3e conv_norm_cpu=%.6g conv_norm_cuda=%.6g recurrent_cosine=%.9f recurrent_max_abs=%.3e recurrent_norm_cpu=%.6g recurrent_norm_cuda=%.6g",
+			step, corpus.Metadata.Format, corpus.ManifestSHA256, be.Qwen35GDNPath(), opsDelta, h2dInside, d2hInside,
 			outputStats.cosine, outputStats.maxAbs, outputStats.referenceNorm, outputStats.deviceNorm,
 			convStats.cosine, convStats.maxAbs, convStats.referenceNorm, convStats.deviceNorm,
 			recurrentStats.cosine, recurrentStats.maxAbs, recurrentStats.referenceNorm, recurrentStats.deviceNorm)
