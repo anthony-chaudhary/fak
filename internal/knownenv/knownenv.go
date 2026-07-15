@@ -272,3 +272,50 @@ func MarshalLine(sig Signature) (string, error) {
 	}
 	return string(b), nil
 }
+
+// EffectiveRegistry merges the compiled-in seed with a fleet ledger's parsed
+// signatures: the seed is the floor, the ledger the live extension. Rows are
+// deduplicated by ID (after whitespace trimming). A fleet row sharing a seed
+// row's id OVERRIDES (refines) it but keeps the seed row's position — the floor
+// slot is stable; the fleet just updates its contents. A fleet row with a new id
+// is appended after all seed rows, in fleet order; two fleet rows sharing an id
+// resolve last-wins. A row that is not Matchable, or whose trimmed id is empty
+// (the banner cites the id, so an id-less row is unusable), never enters the
+// effective registry — so a blank fleet row can neither fire nor displace a seed
+// floor entry. Pure: returns a fresh slice and mutates neither input.
+func EffectiveRegistry(seed, fleet []Signature) []Signature {
+	out := make([]Signature, 0, len(seed)+len(fleet))
+	index := make(map[string]int, len(seed)+len(fleet))
+	admit := func(s Signature) {
+		id := strings.TrimSpace(s.ID)
+		if id == "" || !s.Matchable() {
+			return
+		}
+		if at, ok := index[id]; ok {
+			out[at] = s
+			return
+		}
+		index[id] = len(out)
+		out = append(out, s)
+	}
+	for _, s := range seed {
+		admit(s)
+	}
+	for _, s := range fleet {
+		admit(s)
+	}
+	return out
+}
+
+// AnnotateFromLedger is the one-call entrypoint the (future) impure shell uses so
+// the dirty-lane wiring stays thin: it folds raw fleet-registry JSONL bytes
+// through ParseRegistry, merges them over the compiled-in seed via
+// EffectiveRegistry (seed floor ⊕ fleet extension), and annotates the given tool
+// output + exit code against the result. The shell reads the file (see
+// DefaultRegistryRel); this function never touches disk — nil or empty
+// fleetJSONL degrades cleanly to annotating against the seed alone. Pure: the
+// same (output, exitCode, fleetJSONL) always yields the same annotations.
+func AnnotateFromLedger(output string, exitCode int, fleetJSONL []byte) []Annotation {
+	effective := EffectiveRegistry(DefaultRegistry(), ParseRegistry(fleetJSONL))
+	return Annotate(output, exitCode, effective)
+}
