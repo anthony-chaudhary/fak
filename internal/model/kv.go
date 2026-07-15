@@ -263,6 +263,7 @@ type Session struct {
 	// allocate O(n²) score bytes over an n-token generation — pure GC-pressure relief, no
 	// arithmetic change (TestDecodeStepAllocationStaysBounded guards the bound).
 	decodeScores []float32
+	v4Expert     v4LiveExpertRuntime
 }
 
 // NewSession starts a fresh generation session.

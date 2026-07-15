@@ -89,6 +89,10 @@ func (s *Session) Close() {
 	if kv, ok := s.halKV.(interface{ Free() }); ok {
 		kv.Free()
 	}
+	if s.v4Expert != nil {
+		_ = s.v4Expert.Close()
+		s.v4Expert = nil
+	}
 	if r, ok := s.Backend.(interface{ Recycle() }); ok {
 		r.Recycle()
 	}
@@ -231,6 +235,7 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 			return s.weightHALQ4K(name, qt)
 		}
 	}
+
 	if s.useHALF16Weights() {
 		return s.weightHALF16(name)
 	}
@@ -479,34 +484,40 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			addMatMul(x, s.matWeightHAL(p("self_attn.o_proj.weight")), attnOut)
 		}
 
-		var g, u compute.Tensor
 		postAttnNorm := s.normWeightHAL(p("post_attention_layernorm.weight"))
-		if fused, ok := be.(rmsNormMatMul2Backend); ok {
-			g, u = fused.RMSNormMatMul2(
-				s.matWeightHAL(p("mlp.gate_proj.weight")),
-				s.matWeightHAL(p("mlp.up_proj.weight")),
-				x,
-				postAttnNorm,
-				eps,
-			)
+		if cfg.IsDeepSeekV4() {
+			if err := s.applyV4ExpertHAL(l, id, x, postAttnNorm, eps); err != nil {
+				panic(err)
+			}
 		} else {
-			xn2 := be.RMSNorm(x, postAttnNorm, eps)
-			if fused, ok := be.(matMul2Backend); ok {
-				g, u = fused.MatMul2(
+			var g, u compute.Tensor
+			if fused, ok := be.(rmsNormMatMul2Backend); ok {
+				g, u = fused.RMSNormMatMul2(
 					s.matWeightHAL(p("mlp.gate_proj.weight")),
 					s.matWeightHAL(p("mlp.up_proj.weight")),
-					xn2,
+					x,
+					postAttnNorm,
+					eps,
 				)
 			} else {
-				g = be.MatMul(s.matWeightHAL(p("mlp.gate_proj.weight")), xn2)
-				u = be.MatMul(s.matWeightHAL(p("mlp.up_proj.weight")), xn2)
+				xn2 := be.RMSNorm(x, postAttnNorm, eps)
+				if fused, ok := be.(matMul2Backend); ok {
+					g, u = fused.MatMul2(
+						s.matWeightHAL(p("mlp.gate_proj.weight")),
+						s.matWeightHAL(p("mlp.up_proj.weight")),
+						xn2,
+					)
+				} else {
+					g = be.MatMul(s.matWeightHAL(p("mlp.gate_proj.weight")), xn2)
+					u = be.MatMul(s.matWeightHAL(p("mlp.up_proj.weight")), xn2)
+				}
 			}
-		}
-		if fused, ok := be.(swigluMatMulAddBackend); ok {
-			fused.SwiGLUMatMulAddInPlace(x, s.matWeightHAL(p("mlp.down_proj.weight")), g, u)
-		} else {
-			ff := be.SwiGLU(g, u)
-			addMatMul(x, s.matWeightHAL(p("mlp.down_proj.weight")), ff)
+			if fused, ok := be.(swigluMatMulAddBackend); ok {
+				fused.SwiGLUMatMulAddInPlace(x, s.matWeightHAL(p("mlp.down_proj.weight")), g, u)
+			} else {
+				ff := be.SwiGLU(g, u)
+				addMatMul(x, s.matWeightHAL(p("mlp.down_proj.weight")), ff)
+			}
 		}
 		if useQ8Weights && batch != nil && halQ8BatchLayers > 0 && (l+1)%halQ8BatchLayers == 0 && l+1 < cfg.NumLayers {
 			batch.FlushBatch()

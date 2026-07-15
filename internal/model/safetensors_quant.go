@@ -131,6 +131,9 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 	}
 
 	m := &Model{Cfg: cfg, manifest: map[string]tensorMeta{}, q8w: map[string]*q8Tensor{}}
+	if cfg.IsDeepSeekV4() {
+		m.sourceDir = dir
+	}
 	var raw []byte
 	off := 0
 	for _, sh := range shards {
@@ -238,6 +241,13 @@ func quantizeFileInto(sf *safetensorsFile, m *Model, tied bool, raw *[]byte, off
 	// norm, untied lm_head) report layer -1 and are always kept. The default
 	// window keeps every layer, so a plain load is unchanged (no-op gate).
 	keepLayer := func(name string) bool {
+		if m.Cfg.IsDeepSeekV4() {
+			if class, ok := classifyV4Tensor(name); ok && class == V4ClassRoutedExpert {
+				// V4 routed experts are range-read lazily by v4ExpertRuntime. Keeping
+				// them here would decode the entire routed payload at load.
+				return false
+			}
+		}
 		return lo.window.keepsLayer(tensorLayerForWindow(name))
 	}
 	return quantizeNamedTensorsInto(safetensorsTensorNames(sf.hdr), sf.hdr, sf.tensorBytes, keepLayer, m, tied, raw, off)

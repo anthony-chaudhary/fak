@@ -235,6 +235,8 @@ type Model struct {
 	// consumes it; only a load with RetainVision set (the --mmproj flag, #4032) ever
 	// populates it. See vision.go.
 	Vision *VisionTower
+	// sourceDir anchors V4 lazy expert/index range reads to the admitted snapshot.
+	sourceDir string
 
 	// attnObs is the optional attention-mass witness (#852). nil by default — the
 	// unobserved forward pass is byte-identical and allocation-identical. When set via
@@ -314,6 +316,11 @@ type Model struct {
 // exactly once. On a Llama-shaped checkpoint with no aliases and no fused tensor,
 // both steps are no-ops, so this path stays bit-identical for non-Phi models.
 func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error) {
+	if cfg.IsDeepSeekV4() {
+		if err := AdmitDeepSeekV4Config(cfg); err != nil {
+			return nil, err
+		}
+	}
 	if err := materializeQwen35Tensors(cfg, man); err != nil {
 		return nil, err
 	}
