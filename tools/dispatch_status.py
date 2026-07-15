@@ -634,12 +634,13 @@ def _resolver_preflight_summary(pre: dict[str, Any]) -> str:
         return f"resolver product preflight unavailable: {err}" if err else ""
     backend = pre.get("_backend") or pre.get("product") or "?"
     seat = pre.get("seat") or {}
+    live, cap = pre.get("live"), pre.get("cap")
     bits = [
         f"{backend}",
         str(pre.get("verdict") or "UNKNOWN"),
-        f"live={pre.get('live')}/{pre.get('cap')}",
-        f"headroom={pre.get('headroom')}",
-        f"seats free={seat.get('free')} leased={seat.get('leased')}",
+        f"live={_or_unknown(live)}/{_or_unknown(cap)}",
+        _slots_headroom_note(live, cap),
+        f"seats free={_or_unknown(seat.get('free'))} leased={_or_unknown(seat.get('leased'))}",
     ]
     unattributed = _int(seat.get("unattributed_live"), 0) or 0
     if unattributed:
@@ -648,6 +649,65 @@ def _resolver_preflight_summary(pre: dict[str, Any]) -> str:
     if os_workers is not None:
         bits.append(f"os_workers={os_workers}")
     return "selected resolver preflight: " + " ".join(bits)
+
+
+def _or_unknown(v: Any) -> Any:
+    """A missing capacity read renders ``UNKNOWN``, never a literal ``None`` that an
+    operator reads as a real zero (#4649)."""
+    return "UNKNOWN" if v is None else v
+
+
+def _slots_headroom_note(live: Any, cap: Any) -> str:
+    """The honest headroom note for a live/cap worker-slot (or seat) pair (#4649).
+
+    Spare capacity keeps the familiar ``headroom N``; an over-subscribed pool
+    (live > cap) reads ``N over the M-slot target`` instead of a bare negative headroom
+    an operator misreads as spare capacity; an unread pair is ``headroom UNKNOWN``, never
+    a literal ``None``. The headroom is recomputed from live/cap here so an upstream
+    ``max(0, …)`` clamp cannot mask an overshoot at the card. Mirrors the Slack roll-up's
+    ``_worker_slot_phrase`` so the card and the roll-up agree."""
+    if not isinstance(live, int) or not isinstance(cap, int):
+        return "headroom UNKNOWN"
+    room = int(cap) - int(live)
+    if room < 0:
+        return f"{-room} over the {cap}-slot target"
+    return f"headroom {room}"
+
+
+def _workers_live_clause(d: dict[str, Any]) -> str:
+    """``live/cap live (headroom …)`` for the dispatcher card, honest about a missing
+    read and an over-subscribed pool (#4649)."""
+    live, cap = d.get("live"), d.get("cap")
+    if not isinstance(live, int) or not isinstance(cap, int):
+        return "UNKNOWN (dispatcher read incomplete)"
+    return f"{live}/{cap} live ({_slots_headroom_note(live, cap)})"
+
+
+def _capacity_reconcile(resolver_pre: dict[str, Any], dispatcher: dict[str, Any]) -> str:
+    """Reconcile the two capacity scopes the operator card shows (#4649).
+
+    The resolver-target pool (free seats for the selected product) and the host
+    worker-slot pool are different capacities, so the card can show host headroom right
+    next to a resolver refusal. When the two disagree, name which scope actually gates a
+    launch — otherwise two capacity numbers read as a contradiction. Returns '' when the
+    scopes agree or either is unread."""
+    live, cap = dispatcher.get("live"), dispatcher.get("cap")
+    if not isinstance(live, int) or not isinstance(cap, int):
+        return ""
+    host_room = int(cap) - int(live)
+    verdict = str(resolver_pre.get("verdict") or "").upper()
+    if not verdict:
+        return ""
+    if host_room > 0 and verdict.startswith("REFUSE_"):
+        return (f"- **capacity reconcile**: {host_room} host worker-slot(s) free but the "
+                f"resolver target refuses (`{verdict}`) — a launch is gated by the "
+                f"resolver, not host slots")
+    if host_room <= 0 and verdict == "SPAWN_OK":
+        state = "at" if host_room == 0 else f"{-host_room} over"
+        return (f"- **capacity reconcile**: resolver target is ready (`SPAWN_OK`) but host "
+                f"slots are {state} the {cap}-slot cap — a launch is gated by host slots, "
+                f"not the resolver")
+    return ""
 
 
 def _utilization_blocker(code: str, scope: str, next_action: str,
@@ -3628,7 +3688,7 @@ def render(p: dict[str, Any]) -> str:
     wd = d.get("watchdog") or {}
     lines = [
         f"╔═ DISPATCHER: {p.get('verdict')} ({'ok' if p.get('ok') else 'ACTION'})",
-        f"║ workers   : {d.get('live')}/{d.get('cap')} live (headroom {d.get('headroom')})  "
+        f"║ workers   : {_workers_live_clause(d)}  "
         f"host={'clean' if d.get('host_safe') else 'FLAGGED'}",
         f"║ limiter   : {(d.get('limiter') or {}).get('primary') or '-'} "
         f"({_dispatch_limiter_terms(d.get('limiter') or {})})",
@@ -3696,10 +3756,11 @@ def render(p: dict[str, Any]) -> str:
         unattributed_bit = f" unattributed={unattributed}" if unattributed else ""
         lines.append(
             f"║ plan gate : {resolver_pre.get('_backend') or resolver_pre.get('product') or '-'} "
-            f"{resolver_pre.get('verdict') or '-'} live={resolver_pre.get('live')}/"
-            f"{resolver_pre.get('cap')} headroom={resolver_pre.get('headroom')} "
-            f"seat={seat.get('free')}/{seat.get('leased')}{unattributed_bit} "
-            f"os={resolver_pre.get('os_worker_procs')}")
+            f"{resolver_pre.get('verdict') or '-'} "
+            f"live={_or_unknown(resolver_pre.get('live'))}/{_or_unknown(resolver_pre.get('cap'))} "
+            f"{_slots_headroom_note(resolver_pre.get('live'), resolver_pre.get('cap'))} "
+            f"seat={_or_unknown(seat.get('free'))}/{_or_unknown(seat.get('leased'))}{unattributed_bit} "
+            f"os={_or_unknown(resolver_pre.get('os_worker_procs'))}")
     util = p.get("utilization") or {}
     if util.get("schema"):
         slots = util.get("worker_slots") or {}
@@ -3907,8 +3968,7 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         "",
         f"- **dispatcher**: `{payload.get('verdict')}` "
         f"({'ok' if payload.get('ok') else 'ACTION'})",
-        f"- **workers**: {d.get('live')}/{d.get('cap')} live "
-        f"(headroom {d.get('headroom')}); host "
+        f"- **workers**: {_workers_live_clause(d)}; host "
         f"{'clean' if d.get('host_safe') else '**FLAGGED**'}",
         f"- **primary limiter**: `{(d.get('limiter') or {}).get('primary') or '-'}` "
         f"({_dispatch_limiter_terms(d.get('limiter') or {})})",
@@ -3976,7 +4036,10 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         out.append(
             f"- **utilization**: `{util.get('state')}`; "
             f"worker slots {slots.get('live')}/{slots.get('cap')} "
-            f"(headroom {slots.get('headroom')}); next {actions}")
+            f"({_slots_headroom_note(slots.get('live'), slots.get('cap'))}); next {actions}")
+    recon = _capacity_reconcile(resolver_pre, payload.get("dispatcher") or {})
+    if recon:
+        out.append(recon)
     rs = payload.get("run_status") or {}
     if rs.get("count"):
         out.append(f"- **run status source**: `dos status` digests for {rs.get('count')} RID(s), "
@@ -4437,9 +4500,8 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
 
     parts: list[str] = []
     if d.get("live") is not None or d.get("cap") is not None:
-        hr = d.get("headroom")
-        parts.append(f"worker slots {d.get('live')}/{d.get('cap')} active"
-                     + (f" ({hr} free)" if isinstance(hr, int) else ""))
+        parts.append(f"worker slots {d.get('live')}/{d.get('cap')} active "
+                     f"({_slots_headroom_note(d.get('live'), d.get('cap'))})")
     limiter = d.get("limiter") or {}
     if limiter.get("primary"):
         parts.append(f"limiter {limiter.get('primary')} ({_dispatch_limiter_terms(limiter)})")

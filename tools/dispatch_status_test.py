@@ -3091,5 +3091,80 @@ class SpawnFailedCauseBreakdownTest(unittest.TestCase):
             self.assertEqual(out["rate"], 0.0)
 
 
+class CapacityHonestyTest(unittest.TestCase):
+    """#4649 residual: the dispatcher card renders capacity honestly — a missing read is
+    UNKNOWN (never a literal None), an over-subscribed pool shows the overshoot (never a
+    bare negative headroom, and never hidden behind a clamped `headroom 0`), and the two
+    capacity scopes are reconciled by name when they disagree. Parity with the Slack
+    roll-up's `_worker_slot_phrase`."""
+
+    def test_headroom_note_missing_read_is_unknown(self) -> None:
+        mod = load()
+        self.assertEqual(mod._slots_headroom_note(None, None), "headroom UNKNOWN")
+        self.assertEqual(mod._slots_headroom_note(1, None), "headroom UNKNOWN")
+        self.assertEqual(mod._or_unknown(None), "UNKNOWN")
+        self.assertEqual(mod._or_unknown(0), 0)  # a real zero survives; only None -> UNKNOWN
+
+    def test_headroom_note_oversubscription_shows_overshoot_not_bare_negative(self) -> None:
+        mod = load()
+        note = mod._slots_headroom_note(3, 2)  # live 3 > cap 2
+        self.assertEqual(note, "1 over the 2-slot target")
+        self.assertNotIn("-1", note)
+
+    def test_headroom_note_spare_capacity_keeps_familiar_term(self) -> None:
+        mod = load()
+        self.assertEqual(mod._slots_headroom_note(1, 4), "headroom 3")
+        self.assertEqual(mod._slots_headroom_note(4, 4), "headroom 0")
+
+    def test_dispatcher_clause_missing_read_is_unknown(self) -> None:
+        mod = load()
+        self.assertEqual(mod._workers_live_clause({}),
+                         "UNKNOWN (dispatcher read incomplete)")
+
+    def test_card_renders_oversubscription_across_box_md_and_utilization(self) -> None:
+        # A full-card witness: with live 3 > cap 2 the overshoot appears in the box, the
+        # markdown workers line, AND the utilization worker-slots line — the last proves
+        # the render recomputes headroom from live/cap, so the upstream max(0,…) clamp
+        # (which stores a misleading headroom 0) can no longer hide an overshoot.
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK", cap=2, live=3),
+                  resolver_preflight=resolver_preflight())
+        self.assertEqual((p["utilization"]["worker_slots"])["headroom"], 0)  # clamped upstream
+        box = mod.render(p)
+        md = mod.render_md(p, date="2026-07-05")
+        for text in (box, md):
+            self.assertIn("3/2 live (1 over the 2-slot target)", text)  # dispatcher
+            self.assertNotIn("headroom -1", text)
+        self.assertIn("worker slots 3/2 (1 over the 2-slot target)", md)  # utilization
+
+    def test_reconcile_names_resolver_binding_when_host_has_free_slots(self) -> None:
+        # host has 2 free worker slots (live 0/cap 2) but the resolver target refuses:
+        # a launch is gated by the resolver, not host slots — say so, so two capacity
+        # numbers on the card do not read as a contradiction.
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK", cap=2, live=0),
+                  resolver_preflight=resolver_preflight())  # REFUSE_NO_SEAT
+        md = mod.render_md(p, date="2026-07-05")
+        self.assertIn("capacity reconcile", md)
+        self.assertIn("gated by the resolver", md)
+
+    def test_reconcile_names_host_binding_when_resolver_ready_but_slots_full(self) -> None:
+        mod = load()
+        rp = resolver_preflight()
+        rp["verdict"] = "SPAWN_OK"
+        p = build(mod, pre=pre("SPAWN_OK", cap=2, live=2), resolver_preflight=rp)
+        md = mod.render_md(p, date="2026-07-05")
+        self.assertIn("capacity reconcile", md)
+        self.assertIn("gated by host slots", md)
+
+    def test_no_reconcile_line_when_the_two_scopes_agree(self) -> None:
+        # host at cap AND resolver refuses -> both say "no room"; nothing to reconcile.
+        mod = load()
+        p = build(mod, pre=pre("REFUSE_AT_CAP", cap=2, live=2),
+                  resolver_preflight=resolver_preflight())
+        md = mod.render_md(p, date="2026-07-05")
+        self.assertNotIn("capacity reconcile", md)
+
+
 if __name__ == "__main__":
     unittest.main()
