@@ -115,7 +115,14 @@ type Tree struct {
 	maxTokens int    // LRU budget in cached tokens; 0 disables eviction (unbounded)
 	tokens    int    // total cached tokens = Σ len(node.key) over all nodes
 	clock     uint64 // logical access clock
-	policy    EvictionPolicy
+
+	// policy is the legacy two-value enum, retained as the back-compat knob and the
+	// selector for the cost-aware eviction counter (Stats.CostEvictions). strategy is the
+	// open victim seam (#3890, eviction_strategy.go): a nil strategy is pure LRU, so a bare
+	// New() tree is byte-identical to before. SetEvictionPolicy routes through the strategy
+	// registry and keeps policy in sync, so both dials share one victimLeaf argmin.
+	policy   EvictionPolicy
+	strategy VictimStrategy
 
 	// retention is the signed prefix-cache retention override (#4039): once set via
 	// SetRetention it supersedes maxTokens with ctxresidency's signed grammar --
@@ -131,7 +138,7 @@ type Tree struct {
 	policyEvictions int // EvictNode calls (the fak differentiator)
 	splits          int // edge splits performed (a structural RadixAttention event)
 
-	lastEvictPolicy       EvictionPolicy
+	lastEvictPolicy       string
 	lastEvictCandidates   int
 	lastEvictLocked       int
 	lastEvictVictimCost   float64
@@ -231,14 +238,12 @@ func (t *Tree) effectiveMaxTokens() int {
 	return 0
 }
 
-// SetEvictionPolicy changes the budget-pressure victim rule for future evictions only.
+// SetEvictionPolicy changes the budget-pressure victim rule for future evictions only. It
+// is the legacy two-value dial; it routes through the open strategy registry (#3890) so
+// both dials share one victim seam. An unknown enum value maps to "lru" (String()'s
+// default), preserving the fail-closed-to-LRU contract callers relied on.
 func (t *Tree) SetEvictionPolicy(policy EvictionPolicy) {
-	switch policy {
-	case EvictionLRU, EvictionCostAware:
-		t.policy = policy
-	default:
-		t.policy = EvictionLRU
-	}
+	_ = t.SetEvictionStrategy(policy.String()) // enum names are always registered — never errors
 }
 
 func (t *Tree) tick() uint64 { t.clock++; return t.clock }
@@ -495,18 +500,17 @@ func (t *Tree) evictToBudget() {
 	}
 }
 
+// victimLeaf selects the budget-pressure victim: a single argmin over the active strategy's
+// Priority key across every unlocked leaf — SGLang's heappush((strategy.get_priority(node),
+// node)) collapsed to one pass. One traversal, one comparison rule; the tuple ordering in
+// victimKey does the tiering, so lru / cost-aware / slru all share this loop with no
+// per-policy branch (#3890). Leased leaves (refs>0) are counted as locked and skipped,
+// never scored, so a prefix being served is never a victim. Returns nil when every
+// budget-excess leaf is locked — the signal evictToBudget bails on.
 func (t *Tree) victimLeaf() *node {
-	switch t.policy {
-	case EvictionCostAware:
-		return t.costAwareLeaf()
-	default:
-		return t.lruLeaf()
-	}
-}
-
-// lruLeaf returns the unlocked leaf (no children, not the root) with the smallest lastUsed.
-func (t *Tree) lruLeaf() *node {
+	strat := t.evictionStrategy()
 	var best *node
+	var bestKey victimKey
 	candidates, locked := 0, 0
 	var stack []*node
 	t.forEachRoot(func(r *node) { // one global victim pool spanning every namespace root
@@ -523,8 +527,9 @@ func (t *Tree) lruLeaf() *node {
 				locked++
 				continue
 			}
-			if best == nil || n.lastUsed < best.lastUsed {
-				best = n
+			k := strat.Priority(n)
+			if best == nil || k.less(bestKey) {
+				best, bestKey = n, k
 			}
 			continue
 		}
@@ -532,44 +537,8 @@ func (t *Tree) lruLeaf() *node {
 			stack = append(stack, c)
 		}
 	}
-	t.recordEvictChoice(EvictionLRU, candidates, locked, best)
+	t.recordEvictChoice(strat.Name(), candidates, locked, best)
 	return best
-}
-
-func (t *Tree) costAwareLeaf() *node {
-	var leaves []*node
-	var spans []compute.KVSpanStats
-	candidates, locked := 0, 0
-	var stack []*node
-	t.forEachRoot(func(r *node) { // one global victim pool spanning every namespace root
-		for _, c := range r.children {
-			stack = append(stack, c)
-		}
-	})
-	for len(stack) > 0 {
-		n := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if len(n.children) == 0 {
-			candidates++
-			leaves = append(leaves, n)
-			if n.refs > 0 {
-				locked++
-			}
-			spans = append(spans, n.kvSpanStats())
-			continue
-		}
-		for _, c := range n.children {
-			stack = append(stack, c)
-		}
-	}
-	idx := compute.PickEvictionVictim(spans)
-	if idx < 0 {
-		t.recordEvictChoice(EvictionCostAware, candidates, locked, nil)
-		return nil
-	}
-	v := leaves[idx]
-	t.recordEvictChoice(EvictionCostAware, candidates, locked, v)
-	return v
 }
 
 func (n *node) kvSpanStats() compute.KVSpanStats {
@@ -582,8 +551,18 @@ func (n *node) kvSpanStats() compute.KVSpanStats {
 	}
 }
 
-func (t *Tree) recordEvictChoice(policy EvictionPolicy, candidates, locked int, victim *node) {
-	t.lastEvictPolicy = policy
+// lastEvictPolicyName is the strategy name of the most recent eviction choice, defaulting
+// to "lru" before any eviction has run — preserving the reading the EvictionPolicy-zero
+// value gave (its String() was "lru") for every legacy Stats reader.
+func (t *Tree) lastEvictPolicyName() string {
+	if t.lastEvictPolicy == "" {
+		return "lru"
+	}
+	return t.lastEvictPolicy
+}
+
+func (t *Tree) recordEvictChoice(strategyName string, candidates, locked int, victim *node) {
+	t.lastEvictPolicy = strategyName
 	t.lastEvictCandidates = candidates
 	t.lastEvictLocked = locked
 	t.lastEvictVictimCost = 0
@@ -765,8 +744,8 @@ func (t *Tree) Stats() Stats {
 		PolicyEvictions:       t.policyEvictions,
 		Splits:                t.splits,
 		MaxTokens:             t.effectiveMaxTokens(),
-		EvictionPolicy:        t.policy.String(),
-		LastEvictPolicy:       t.lastEvictPolicy.String(),
+		EvictionPolicy:        t.evictionStrategy().Name(),
+		LastEvictPolicy:       t.lastEvictPolicyName(),
 		LastEvictCandidates:   t.lastEvictCandidates,
 		LastEvictLocked:       t.lastEvictLocked,
 		LastEvictVictimCost:   t.lastEvictVictimCost,
