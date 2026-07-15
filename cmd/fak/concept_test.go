@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -50,5 +52,20 @@ func TestConceptPositionRejectsTestOnlyGrounding(t *testing.T) {
 	code := runConceptPosition(&out, &errb, c, []string{"--id", "x", "--canonical", "X", "--family", "cache", "--definition", "d", "--distinction", "not a", "--grounding", "OnlyTestGrounding", "--glossary", "docs/glossary.md", "--distinct-from", "cache-a", "--dry-run"})
 	if code == 0 || !strings.Contains(errb.String(), "production corpus") {
 		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+}
+
+func TestConceptGitHelperSuppressesBackgroundWindow(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows console-window contract")
+	}
+	cmd := exec.Command("git", "--version")
+	configureDispatchHelperCommand(cmd)
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
+		t.Fatalf("concept git helper is not window-suppressed: %#v", cmd.SysProcAttr)
+	}
+	const createNoWindow = uint32(0x08000000)
+	if cmd.SysProcAttr.CreationFlags&createNoWindow == 0 {
+		t.Fatalf("concept git helper creation flags %#x omit CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
 	}
 }
