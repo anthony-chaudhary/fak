@@ -37,11 +37,11 @@ Readiness percentage is `passed gates / 6`; it is a coverage measure, not a prob
 
 | Model | Configured | Used | Protocol + cache | Capability | Cost truth | Reliability + rollback | Coverage | Production verdict |
 |---|---|---|---|---|---|---|---:|---|
-| Opus 4.8 | PASS | PASS | PARTIAL | PASS | PARTIAL | HOLD | **3/6 (50%)** | **HOLD** |
-| Sonnet 4.6 | PASS | PASS | PARTIAL | PASS | PARTIAL | HOLD | **3/6 (50%)** | **HOLD** |
-| Haiku 4.5 | PASS | PASS | PARTIAL | PASS | HOLD | HOLD | **3/6 (50%)** | **HOLD** |
+| Opus 4.8 | PASS | PASS | PARTIAL | PASS | PARTIAL | PASS | **4/6 (67%)** | **HOLD** |
+| Sonnet 4.6 | PASS | PASS | PARTIAL | PASS | PARTIAL | PASS | **4/6 (67%)** | **HOLD** |
+| Haiku 4.5 | PASS | PASS | PARTIAL | PASS | HOLD | PASS | **4/6 (67%)** | **HOLD** |
 
-**Portfolio verdict: heavily used, not yet proven production-ready.** The bounded pilot capability gate now passes for all three exact IDs, while the portfolio remains HOLD. The common-path implementation is substantial, but the remaining evidence is model-scoped: full protocol/cache conformance, exact identity/cost truth, and operable SLO/canary/rollback.
+**Portfolio verdict: heavily used, not yet proven production-ready.** The bounded pilot capability and reliability/rollback gates now pass for all three exact IDs, while the portfolio remains HOLD. The remaining evidence is model-scoped: full protocol/cache conformance and exact identity/cost truth.
 
 ### Exact-ID capability provenance
 
@@ -64,7 +64,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Protocol + cache — PARTIAL:** Anthropic gateway/agent suites cover messages, tools, compaction/elision and cache semantics; `docs/benchmarks/ABLATE-RESULTS.md` also records a measured Opus 4.8 run. There is no single exact-model production conformance artifact that closes the full gate.
 - **Capability — PASS (bounded pilot):** exact ID `claude-opus-4-8` passed 9/9 applicable T0 samples in the predeclared acceptance corpus and is witnessed at tier 0. This does not close protocol/cache, cost, or reliability gates. #4633.
 - **Cost truth — PARTIAL:** the audit emits an estimate and cache-price tests exist, but production needs raw/canonical-ID provenance and fail-closed unknown handling. #4635.
-- **Reliability + rollback — HOLD:** no exact Opus 4.8 SLO/canary/rollback drill was found. #4634.
+- **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy reports this exact ID, the clean-checkout dogfood gate rolled unhealthy Opus back to exact Sonnet, and the live provider-seam drill witnessed exact Opus failure attribution plus recovered Sonnet traffic. #4634.
 
 #### `claude-sonnet-4-6`
 
@@ -73,7 +73,7 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Protocol + cache — PARTIAL:** Sonnet traverses the shared Anthropic path, but shared-path tests alone do not prove exact-model streaming/tool/cache behavior in production.
 - **Capability — PASS (bounded pilot):** exact ID `claude-sonnet-4-6` passed 6/6 applicable T1 samples in the predeclared acceptance corpus and is witnessed at tier 1. This does not close protocol/cache, cost, or reliability gates. #4633.
 - **Cost truth — PARTIAL:** tier cost is estimated, but exact identity and cache-price provenance need the canonical report. #4635.
-- **Reliability + rollback — HOLD:** no exact Sonnet 4.6 SLO or exercised Opus→Sonnet / Sonnet→hold fallback contract was found. #4634.
+- **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy and alert contract name exact Sonnet; the live drill recovered through Sonnet and the no-safe-fallback control held rather than selecting tier-2 Haiku for tier-1 work. #4634.
 - **Configuration debt:** #3929 already tracks the contradictory ultra-bucket launch table versus preset/docs and must close before the matrix can be called coherent.
 
 #### `claude-haiku-4-5-20251001`
@@ -83,7 +83,19 @@ These PASS rows cover only this bounded pilot corpus. They do not relax any conf
 - **Protocol + cache — PARTIAL:** real traffic proves reachability, not model-scoped tool/cache conformance.
 - **Capability — PASS (bounded pilot):** exact ID `claude-haiku-4-5-20251001` passed 3/3 applicable T2 samples in the predeclared acceptance corpus and is witnessed at tier 2. This does not prove capability above T2 or close protocol/cache, cost, or reliability gates. #4633.
 - **Cost truth — HOLD:** the exact dated emitted name is the known alias hazard documented in `notes/BORROW-ROUTING-SIGNALS-GATEWAY-PLANO-STUDY-2026-07-13.md`; unknown or mismatched catalog names must not become `$0`. #4635.
-- **Reliability + rollback — HOLD:** Haiku is the bottom of this production set, so failure must hold/escalate rather than silently downgrade; that drill is missing. #4634.
+- **Reliability + rollback — PASS:** the checked-in 60-minute SLO policy and alert contract name exact Haiku; executable evaluator tests witness Haiku failure holding/escalating with no lower fallback, while the live tier-1 control proves Haiku is not used as an unsafe downgrade. #4634.
+
+### Reliability + rollback
+
+The exact-model operations gate is reproducible from committed inputs:
+
+```powershell
+fak model canary-gate --input examples/modelops-top3-canary.json
+```
+
+[`examples/modelops-top3-canary.json`](../examples/modelops-top3-canary.json) is the machine-readable report source: observations, outcome counters, thresholds, and alert contracts are keyed separately by `claude-opus-4-8`, `claude-sonnet-4-6`, and `claude-haiku-4-5-20251001`. Every policy declares a 60-minute window, 20-sample minimum, 95% success floor, 2% provider-error ceiling, 1% invalid-tool ceiling, 5,000 ms p95 latency ceiling, 3% throttle ceiling, and 5% fallback ceiling. Every breach routes to owner `modelops-oncall` via `model-provider-incidents`, with a 10-minute acknowledgement SLA and this runbook. Missing/malformed windows, thresholds, ownership, exact-ID observations, or capability-safe fallback data fail closed to `HOLD`.
+
+The executable command returns typed statuses: `0` PROMOTE, `3` ROLLBACK, and `4` HOLD. The clean-checkout [dogfood readout](nightrun/MODELOPS-TOP3-DOGFOOD-2026-07-15.md) captures deterministic Opus→Sonnet rollback with exact-ID counters. The bounded [live provider drill](nightrun/MODELOPS-LIVE-PROVIDER-DRILL-2026-07-15.md) captures exact Opus provider failure, recovered exact Sonnet traffic through the same provider seam, and a no-safe-fallback `HOLD` control that refuses to downgrade tier-1 work to Haiku. Haiku's terminal failure behavior is independently executable in `internal/modelops` tests and holds/escalates because no lower production model exists. Together these artifacts satisfy #4634's report separation, checked-in SLO window/threshold/owner, executable canary/rollback, safe traffic drain, recovery read-back, and bottom-tier hold requirements.
 
 ### Delivery map
 
