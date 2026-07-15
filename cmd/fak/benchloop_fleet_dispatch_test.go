@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
@@ -217,6 +218,17 @@ func TestBenchFleetGCPAgentLiveUsesBoundedGatewayRecipe(t *testing.T) {
 		if strings.Contains(command, "<task>") {
 			t.Fatalf("%s: planner placeholder leaked into command: %q", machine, command)
 		}
+	}
+}
+
+func TestBenchFleetExecCommandBoundsRuntimeAndPipeWait(t *testing.T) {
+	cmd, cancel := newBenchFleetExecCommand("definitely-not-a-real-fak-command", 25*time.Millisecond)
+	defer cancel()
+	if cmd.WaitDelay != benchFleetWaitDelay {
+		t.Fatalf("WaitDelay=%s want %s", cmd.WaitDelay, benchFleetWaitDelay)
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("CommandContext cancellation is not configured")
 	}
 }
 

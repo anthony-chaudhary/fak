@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -502,9 +503,25 @@ func writeAtomic(path string, b []byte) error {
 	}
 	return os.Rename(tmp, path)
 }
-func defaultBenchFleetExec(name string, args ...string) ([]byte, int, error) {
-	c := exec.Command(name, args...)
+
+const (
+	benchFleetExecTimeout = 10 * time.Minute
+	benchFleetWaitDelay   = 5 * time.Second
+)
+
+func newBenchFleetExecCommand(name string, timeout time.Duration, args ...string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	c := exec.CommandContext(ctx, name, args...)
+	// Some launchers return while a descendant still owns the redirected pipe handles.
+	// Bound that wait so one route cannot pin the recurring scheduled tick forever.
+	c.WaitDelay = benchFleetWaitDelay
 	configureDispatchHelperCommand(c)
+	return c, cancel
+}
+
+func defaultBenchFleetExec(name string, args ...string) ([]byte, int, error) {
+	c, cancel := newBenchFleetExecCommand(name, benchFleetExecTimeout, args...)
+	defer cancel()
 	var b bytes.Buffer
 	c.Stdout = &b
 	c.Stderr = &b
@@ -513,8 +530,8 @@ func defaultBenchFleetExec(name string, args ...string) ([]byte, int, error) {
 	// inherited redirected handles. A direct gcloud retry provides the independent
 	// node marker instead of accepting an empty exit-0 witness.
 	if err == nil && b.Len() == 0 && name == "gcloud" {
-		c = exec.Command("gcloud.cmd", args...)
-		configureDispatchHelperCommand(c)
+		cancel()
+		c, cancel = newBenchFleetExecCommand("gcloud.cmd", benchFleetExecTimeout, args...)
 		c.Stdout = &b
 		c.Stderr = &b
 		err = c.Run()
