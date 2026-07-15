@@ -53,12 +53,20 @@ func ExpertShardForRank(numExperts, ranks, rank int) (ExpertShard, error) {
 }
 
 type q4kLoadOptions struct {
-	expertShardSet bool
-	expertShard    ExpertShard
+	expertShardSet      bool
+	expertShard         ExpertShard
+	residentDenseKQuant bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
 type Q4KLoadOption func(*q4kLoadOptions)
+
+// WithDenseKQuantResident controls whether eligible dense Q5_K/Q6_K/IQ tensors stay in
+// the raw k-quant store. Backends without dense k-quant kernels must disable this so those
+// tensors follow the proven dequant-to-Q8 path instead of becoming unreachable at decode.
+func WithDenseKQuantResident(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.residentDenseKQuant = enabled }
+}
 
 // WithExpertShard keeps only routed experts in [lo,hi) when splitting batched MoE expert GGUF
 // tensors. Use this for expert-parallel per-rank loads; omit it for the historical full load.
@@ -70,7 +78,7 @@ func WithExpertShard(lo, hi int) Q4KLoadOption {
 }
 
 func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptions, error) {
-	var out q4kLoadOptions
+	out := q4kLoadOptions{residentDenseKQuant: true}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&out)
@@ -323,7 +331,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// GLM-5.2 cpu-offload serve regression, 2026-07-01). GLM dense non-Q4_K k-quants keep the
 		// dequant→Q8 route (the 2026-06-27-witnessed layout); only the routed experts, which run
 		// on the host under --cpu-offload-experts, stay raw-resident in kqw.
-		if _, _, residentable := residentExpertBlockGeometry(info.Type); residentable &&
+		if _, _, residentable := residentExpertBlockGeometry(info.Type); loadOpts.residentDenseKQuant && residentable &&
 			info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
 			model.ResidentKQuantEligible(cfg, canon) {
 			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}

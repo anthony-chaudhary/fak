@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // TestLoadModelQ4KRoutesByIdentityNorm is the small-scale (27B-free) integration test for
@@ -125,5 +127,43 @@ func TestLoadModelQ4KProfileTicksProgress(t *testing.T) {
 	}
 	if out := progress.String(); !strings.Contains(out, "100% (4/4 tensors") {
 		t.Fatalf("progress output missing final 100%% line:\n%s", out)
+	}
+}
+
+func TestQ4KLoadOptionCanRouteDenseKQuantToQ8(t *testing.T) {
+	cfg := model.Config{ModelType: "qwen35", HiddenSize: 256, IntermediateSize: 256}
+	name := "model.layers.0.mlp.down_proj.weight"
+	shape := []int{256, 256}
+	// Q6_K is the exact mixed-quant type used by Qwen3.6 q4_k_m down_proj tensors.
+	raw := make([]byte, (shape[0]*shape[1]/256)*210)
+	for i := range raw {
+		raw[i] = byte(i*31 + 7)
+	}
+	info := TensorInfo{Name: "blk.0.ffn_down.weight", Dims: []uint64{256, 256}, Type: TensorQ6_K}
+	data, err := dequantF32(info, raw)
+	if err != nil {
+		t.Fatalf("dequant Q6_K fixture: %v", err)
+	}
+	b := model.NewQuantBuilder(cfg, false)
+	if err := b.AddF32Tensor(name, shape, data); err != nil {
+		t.Fatalf("route dense Q6_K through Q8: %v", err)
+	}
+	m, err := b.Build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !m.HasQ8(name) {
+		t.Fatalf("dense Q6_K %q missing from Q8 store", name)
+	}
+	if m.HasQ4K(name) {
+		t.Fatalf("dense Q6_K %q unexpectedly entered Q4_K store", name)
+	}
+
+	opts, err := resolveQ4KLoadOptions(cfg, []Q4KLoadOption{WithDenseKQuantResident(false)})
+	if err != nil {
+		t.Fatalf("resolve option: %v", err)
+	}
+	if opts.residentDenseKQuant {
+		t.Fatal("WithDenseKQuantResident(false) did not disable dense raw k-quant residency")
 	}
 }
