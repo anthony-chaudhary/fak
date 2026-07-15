@@ -86,6 +86,14 @@ func (k *pagedHALKV) hostRow(name string, t compute.Tensor) []float32 {
 
 func (k *pagedHALKV) Len() int { return len(k.pos) }
 
+func (k *pagedHALKV) ResidentBytes() int64 {
+	if k == nil || k.seq == nil {
+		return 0
+	}
+	rows := int64(k.seq.Len()) * int64(k.cfg.NumLayers) * int64(k.kcfg.NumKVHeads*k.kcfg.HeadDim)
+	return rows*3*int64(compute.F32.Bytes()) + int64(len(k.pos))*8
+}
+
 func (k *pagedHALKV) KeysView(layer int) compute.Tensor {
 	return compute.NewF32(k.be, []int{k.seq.Len(), k.kcfg.NumKVHeads * k.kcfg.HeadDim}, k.seq.GatherK(layer))
 }

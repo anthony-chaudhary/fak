@@ -1208,6 +1208,14 @@ type vulkanKV struct {
 
 func (k *vulkanKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
+func (k *vulkanKV) ResidentBytes() int64 {
+	var floats int64
+	for i := range k.K {
+		floats += int64(k.K[i].len + k.Kraw[i].len + k.V[i].len)
+	}
+	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+}
+
 func (k *vulkanKV) AppendKV(layer int, kRaw, kRoPE, val Tensor, pos int) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()

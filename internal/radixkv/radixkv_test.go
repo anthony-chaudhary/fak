@@ -394,7 +394,10 @@ func TestDeviceSnapshotLookupFallsBackToNearestExactAncestor(t *testing.T) {
 	snap := &model.PrefixSnapshot{Cache: cache}
 	tree := New(0)
 	root, _ := tree.Lookup([]int{1, 2})
-	leaf := tree.InsertSnapshot(root, []int{1, 2}, snap, []float32{7})
+	leaf, err := tree.InsertSnapshot(root, []int{1, 2}, snap, []float32{7})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tree.Done(leaf)
 	// Extending the radix path without a device snapshot must still restore the nearest
 	// valid snapshot and prefill only the divergent suffix.

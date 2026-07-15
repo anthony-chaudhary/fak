@@ -173,7 +173,11 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	// backend path uses host DSA KV (Config.InKernelBackendPrefixReuseSupported), so the same
 	// radix tree safely skips repeated prefill on the live GCP GLM path.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && inKernelPlannerPrefixReuseSupported(m, backend) {
-		p.tree = radixkv.NewWithEvictionPolicy(envInt("FAK_INKERNEL_RADIX_BUDGET", 0), inKernelRadixEvictionPolicyFromEnv())
+		p.tree = radixkv.NewWithBudgetsAndEvictionPolicy(
+			envInt("FAK_INKERNEL_RADIX_BUDGET", 0),
+			envInt64("FAK_INKERNEL_RADIX_SNAPSHOT_BYTES", 0),
+			inKernelRadixEvictionPolicyFromEnv(),
+		)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
@@ -1276,9 +1280,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			} else {
 				p.mu.Lock()
 				b, m := p.tree.Lookup(ids)
-				leaf := p.tree.InsertSnapshot(b, ids[m:], snap, logits)
-				p.tree.Done(leaf)
+				var admitErr error
+				leaf, admitErr := p.tree.InsertSnapshot(b, ids[m:], snap, logits)
+				if leaf != nil {
+					p.tree.Done(leaf)
+				}
 				p.mu.Unlock()
+				if admitErr != nil {
+					snap.Close()
+					err = admitErr
+					return
+				}
 			}
 		} else {
 			snap := s.Cache.Clone()
@@ -1493,6 +1505,15 @@ func inKernelRefeedLastTokenForExactHit(s *model.Session, promptLen int) bool {
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
 	}

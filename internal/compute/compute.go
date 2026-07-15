@@ -285,8 +285,9 @@ type KVStore interface {
 	// is byte-for-byte what it would be had the span never been seen (the KV quarantine
 	// primitive). Returns positions removed.
 	Evict(from, n int) int
-	Clone() KVStore // deep copy for prefix reuse (the vDSO payoff)
-	Free()          // release externally owned residency; host implementations may no-op
+	Clone() KVStore       // deep copy for prefix reuse (the vDSO payoff)
+	ResidentBytes() int64 // owned KV payload from metadata only; never copies device data
+	Free()                // release externally owned residency; host implementations may no-op
 }
 
 // KVGeometry is the optional shape side-channel for KVStore implementations that are not

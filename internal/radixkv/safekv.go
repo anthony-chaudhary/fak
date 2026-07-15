@@ -114,9 +114,11 @@ func (s *ScopedTree) AdmitPrivateSnapshot(owner CacheIdentity, tokens []int, sna
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	boundary, matched := s.tree.LookupNS(ns, tokens)
-	leaf := s.tree.InsertSnapshot(boundary, tokens[matched:], snap, logits)
-	s.tree.Done(leaf)
-	return nil
+	leaf, err := s.tree.InsertSnapshot(boundary, tokens[matched:], snap, logits)
+	if leaf != nil {
+		s.tree.Done(leaf)
+	}
+	return err
 }
 
 // LookupSnapshot returns the longest visible independently owned backend prefix.

@@ -1379,6 +1379,14 @@ type cudaKV struct {
 
 func (k *cudaKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
+func (k *cudaKV) ResidentBytes() int64 {
+	var floats int64
+	for i := range k.K {
+		floats += int64(k.K[i].len + k.Kraw[i].len + k.V[i].len)
+	}
+	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+}
+
 func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

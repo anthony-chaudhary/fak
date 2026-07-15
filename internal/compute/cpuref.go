@@ -328,6 +328,14 @@ func (k *cpuKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
 func (k *cpuKV) KVConfig() KVConfig { return k.cfg }
 
+func (k *cpuKV) ResidentBytes() int64 {
+	var floats int64
+	for i := range k.K {
+		floats += int64(len(k.K[i]) + len(k.Kraw[i]) + len(k.V[i]))
+	}
+	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+}
+
 func (k *cpuKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	hb := k.be.(*cpuBackend)
 	k.Kraw[layer] = append(k.Kraw[layer], hb.f32(kRaw)...)
