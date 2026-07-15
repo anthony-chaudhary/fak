@@ -74,12 +74,14 @@ func Hint(c Category) string { return categoryHint[c] }
 
 // Finding is one negatively-framed span located in a document.
 type Finding struct {
-	Path     string   `json:"path"`
-	Line     int      `json:"line"` // 1-based line number within Path
-	Category Category `json:"category"`
-	Text     string   `json:"text"`    // the clipped source phrase that matched
-	Suggest  string   `json:"suggest"` // the positive rewrite (mechanical tier) or "" (judgement)
-	Hint     string   `json:"hint"`    // the category hint (judgement tier) or "" (mechanical)
+	Path     string        `json:"path"`
+	Line     int           `json:"line"` // 1-based line number within Path
+	Category Category      `json:"category"`
+	Text     string        `json:"text"`    // the clipped source phrase that matched
+	Suggest  string        `json:"suggest"` // the positive rewrite (mechanical tier) or "" (judgement)
+	Hint     string        `json:"hint"`    // the category hint (judgement tier) or "" (mechanical)
+	Tier     BroadcastTier `json:"broadcast_tier"`
+	Weight   int           `json:"broadcast_weight"`
 }
 
 // Mechanical reports whether this finding carries a confident positive rewrite (HARD debt).
@@ -143,6 +145,7 @@ var Categories = []Category{Prohibition, Absence, Refusal, Hedge}
 // two findings, but the same idiom is not double-counted by an overlapping generic rule.
 func Classify(path, text string) []Finding {
 	var out []Finding
+	tier := broadcastTierForPath(path)
 	inFence := false
 	for i, raw := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(raw)
@@ -156,6 +159,8 @@ func Classify(path, text string) []Finding {
 		for _, f := range classifyLine(raw) {
 			f.Path = path
 			f.Line = i + 1
+			f.Tier = tier
+			f.Weight = tier.Weight()
 			out = append(out, f)
 		}
 	}

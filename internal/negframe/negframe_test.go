@@ -1,6 +1,8 @@
 package negframe
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -187,5 +189,55 @@ func TestHedgeNotUnFalsePositives(t *testing.T) {
 				t.Errorf("%q: rule emitted a bogus mechanical hedge %q", line, f.Suggest)
 			}
 		}
+	}
+}
+
+func TestWeightHotFindingOutranksColdFinding(t *testing.T) {
+	hot := Classify("cmd/fak/guard_runtime.go", "do not forget to recover")
+	cold := Classify(".claude/skills/cold/SKILL.md", "do not forget to recover")
+	if len(hot) != 1 || len(cold) != 1 {
+		t.Fatalf("hot=%v cold=%v", hot, cold)
+	}
+	if hot[0].Tier != TierPerTurn || cold[0].Tier != TierCold || hot[0].Weight <= cold[0].Weight {
+		t.Fatalf("tier/weight mismatch hot=%+v cold=%+v", hot[0], cold[0])
+	}
+
+	root := t.TempDir()
+	for path, text := range map[string]string{
+		"cmd/fak/guard_runtime.go":     "do not forget to recover",
+		".claude/skills/cold/SKILL.md": "do not forget to recover",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := AllFindings(root, []string{".claude/skills/cold/SKILL.md", "cmd/fak/guard_runtime.go"})
+	if len(got) != 2 || got[0].Path != "cmd/fak/guard_runtime.go" {
+		t.Fatalf("weighted order=%+v", got)
+	}
+}
+
+func TestWeightBuildExposesWeightedDebtWithoutChangingFlatDebt(t *testing.T) {
+	root := t.TempDir()
+	paths := []string{"AGENTS.md", ".claude/skills/cold/SKILL.md"}
+	for _, path := range paths {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("do not forget to recover"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := Build(root, paths)
+	if got := payload.Corpus["mechanical_debt"]; got != 2 {
+		t.Fatalf("flat debt=%v want 2", got)
+	}
+	if got := payload.Corpus["weighted_debt"]; got != TierPerSession.Weight()+TierCold.Weight() {
+		t.Fatalf("weighted debt=%v want %d", got, TierPerSession.Weight()+TierCold.Weight())
 	}
 }

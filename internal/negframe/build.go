@@ -21,6 +21,21 @@ var DefaultTargetFiles = []string{"AGENTS.md", "CLAUDE.md"}
 // gardened without editing this list.
 var DefaultTargetGlobDirs = []string{".claude/skills"}
 
+// broadcastTierForPath assigns corpus defaults: instruction files are paid once
+// per session; skill/docs are cold; explicit guard-runtime source surfaces are
+// paid per turn. Unknown paths conservatively use the cold tier.
+func broadcastTierForPath(path string) BroadcastTier {
+	p := filepath.ToSlash(path)
+	switch {
+	case strings.HasPrefix(p, "cmd/fak/guard_"), strings.Contains(p, "refusal_notes"):
+		return TierPerTurn
+	case p == "AGENTS.md", p == "CLAUDE.md":
+		return TierPerSession
+	default:
+		return TierCold
+	}
+}
+
 // ResolveTargets returns the default corpus paths (repo-relative, slash form) that exist under
 // root: the singleton instruction files plus every *.md under the skill dirs. Missing files are
 // skipped so a partial checkout degrades to what is present, never a crash.
@@ -129,6 +144,7 @@ func Build(root string, paths []string) scorecard.Payload {
 		NextActionClean: next,
 		ExtraCorpus: map[string]any{
 			"documents":       len(docs),
+			"weighted_debt":   weightedMechanicalDebt(docs),
 			"sentences":       totalSentences,
 			"mechanical_debt": mechTotal,
 			"judgement_soft":  countTier(docs, false),
@@ -149,6 +165,15 @@ func AllFindings(root string, paths []string) []Finding {
 		text := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(rel)))
 		out = append(out, Classify(rel, text)...)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Weight != out[j].Weight {
+			return out[i].Weight > out[j].Weight
+		}
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Line < out[j].Line
+	})
 	return out
 }
 
@@ -183,4 +208,16 @@ func countTier(docs []DocResult, mechanical bool) int {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func weightedMechanicalDebt(docs []DocResult) int {
+	total := 0
+	for _, d := range docs {
+		for _, f := range d.Findings {
+			if f.Mechanical() {
+				total += f.Weight
+			}
+		}
+	}
+	return total
 }
