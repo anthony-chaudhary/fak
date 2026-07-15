@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -138,5 +141,40 @@ func TestFormatDecodeResultIncludesFailClosedRoofline(t *testing.T) {
 func TestDecodeBandwidthRejectsZeroPeak(t *testing.T) {
 	if achieved, util := decodeBandwidth(15_000_000_000, 1.6, 0); achieved != 0 || util != 0 {
 		t.Fatalf("decodeBandwidth(zero peak)=(%v,%v), want (0,0)", achieved, util)
+	}
+}
+
+// TestRequireRooflineFailsClosedBeforeLoad witnesses the process-level acceptance guard #4626
+// calls out ("hard-fail if STREAM measures 0 rather than reporting a bogus 100% util"): with
+// -require-roofline set but no positive -membw, main() must refuse with a non-zero exit and the
+// roofline message BEFORE touching the model. TestDecodeBandwidthRejectsZeroPeak only pins the
+// soft helper (returns 0,0); if the CLI guard regressed, decodeBandwidth would still emit a
+// bogus "decode_bw_util_%=0.00 stream_peak_gbps=0.0000" row instead of failing closed. This
+// re-execs the test binary so the real main() exit path is exercised, not a stubbed copy.
+func TestRequireRooflineFailsClosedBeforeLoad(t *testing.T) {
+	if os.Getenv("Q4KDIAG_FAILCLOSED_CHILD") == "1" {
+		// -gguf is non-empty so the usage guard passes; the ONLY exit-2 path left with these
+		// args is the roofline guard. A missing model file can never be reached.
+		os.Args = []string{"q4kdiag", "-gguf", "/nonexistent/model.gguf", "-require-roofline"}
+		main()
+		return // unreachable: main() must os.Exit before here.
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRequireRooflineFailsClosedBeforeLoad$", "-test.v")
+	cmd.Env = append(os.Environ(), "Q4KDIAG_FAILCLOSED_CHILD=1")
+	out, err := cmd.CombinedOutput()
+
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("child did not exit non-zero; err=%v\noutput:\n%s", err, out)
+	}
+	if ee.ExitCode() != 2 {
+		t.Fatalf("fail-closed exit code = %d, want 2\noutput:\n%s", ee.ExitCode(), out)
+	}
+	if !strings.Contains(string(out), "-require-roofline requires -membw > 0") {
+		t.Fatalf("missing fail-closed reason in child stderr\noutput:\n%s", out)
+	}
+	// The bogus-row regression must NOT appear: a fail-closed refusal never prints a decode row.
+	if strings.Contains(string(out), "decode_bw_util_%=") {
+		t.Fatalf("guard leaked a decode_bw_util_%% row instead of failing closed\noutput:\n%s", out)
 	}
 }
