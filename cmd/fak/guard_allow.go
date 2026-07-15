@@ -304,7 +304,8 @@ func cmdGuardAllow(argv []string) {
 	fromJournal := fs.Bool("from-journal", false, "list the tools a guarded session BLOCKED (DEFAULT_DENY) from an audit journal, each with the exact command to allow it")
 	journalPath := fs.String("journal", "", "the audit journal --from-journal reads (default: the newest repo-local guard journal)")
 	fromClaudeSettings := fs.Bool("from-claude-settings", false, "import permissions.allow from Claude settings.json (+ settings.local.json, or a positional path) into the overlay; name-level entries only")
-	addAll := fs.Bool("add-all", false, "with --from-journal / --from-claude-settings, add EVERY mappable entry found to the overlay in one step")
+	fromMCPConfig := fs.Bool("from-mcp-config", false, "import one coarse allow_prefix per mcpServers key from .mcp.json (or a positional path)")
+	addAll := fs.Bool("add-all", false, "with an import source, add EVERY mappable entry found to the overlay in one step")
 	_ = fs.Parse(argv)
 
 	path, err := guardAllowWritePath(*user)
@@ -323,6 +324,8 @@ func cmdGuardAllow(argv []string) {
 		os.Exit(runGuardAllowFromJournal(os.Stdout, os.Stderr, path, &ov, *journalPath, *addAll))
 	case *fromClaudeSettings:
 		os.Exit(runGuardAllowFromClaudeSettings(os.Stdout, os.Stderr, path, &ov, fs.Args(), *addAll))
+	case *fromMCPConfig:
+		os.Exit(runGuardAllowFromMCPConfig(os.Stdout, os.Stderr, path, &ov, fs.Args(), *addAll))
 	case *list:
 		for _, layer := range guardAllowOverlayPaths() {
 			layerOverlay, layerErr := loadGuardAllowOverlay(layer.Path)
@@ -477,6 +480,8 @@ func guardAllowUsage() string {
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
 		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",
 		"  fak guard allow --from-claude-settings --add-all   apply that import to the overlay",
+		"  fak guard allow --from-mcp-config [path]   list one coarse allow prefix per .mcp.json server",
+		"  fak guard allow --from-mcp-config --add-all   add every server prefix to the overlay",
 		"",
 		"The overlay is an operator-authored file the guard floor UNIONS into its allow-list at launch",
 		"(default .fak/guard/allow.json; override with $" + guardAllowOverlayEnv + "). It only WIDENS what is",
