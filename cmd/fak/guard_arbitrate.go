@@ -1,0 +1,265 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/regionadmit"
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+)
+
+const (
+	guardArbitrateModeOff     = "off"
+	guardArbitrateModeShadow  = "shadow"
+	guardArbitrateModeEnforce = "enforce"
+	guardArbitrateTTL         = 30 * time.Second
+)
+
+type guardArbitrateConfig struct {
+	Mode  string
+	Lane  string
+	Tree  []string
+	Force bool
+	Root  string
+}
+
+type guardArbitrateLease struct {
+	store       *leaseref.Store
+	record      leaseref.Record
+	stop        chan struct{}
+	done        chan struct{}
+	releaseOnce sync.Once
+}
+
+func normalizeGuardArbitrateMode(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", guardArbitrateModeShadow:
+		return guardArbitrateModeShadow, nil
+	case guardArbitrateModeOff:
+		return guardArbitrateModeOff, nil
+	case guardArbitrateModeEnforce:
+		return guardArbitrateModeEnforce, nil
+	default:
+		return "", fmt.Errorf("invalid --arbitrate mode %q (want off, shadow, or enforce)", raw)
+	}
+}
+
+func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbitrateConfig) (*guardArbitrateLease, error) {
+	mode, err := normalizeGuardArbitrateMode(cfg.Mode)
+	if err != nil {
+		return nil, err
+	}
+	if mode == guardArbitrateModeOff {
+		return nil, nil
+	}
+	root := strings.TrimSpace(cfg.Root)
+	if root == "" {
+		wd, wdErr := os.Getwd()
+		if wdErr != nil {
+			fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; working tree unavailable: %v\n", wdErr)
+			return nil, nil
+		}
+		root = findRepoRoot(wd)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; working tree unavailable: %v\n", err)
+		return nil, nil
+	}
+	tax, err := regionadmit.LoadTaxonomy(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; lane taxonomy unavailable: %v\n", err)
+		return nil, nil
+	}
+	requestTree := cleanGuardArbitrateTree(cfg.Tree)
+	if len(requestTree) == 0 && strings.TrimSpace(cfg.Lane) == "" {
+		requestTree = []string{"**/*"}
+	}
+	store := leaseref.NewInDir(root)
+	lock, err := gpulease.Acquire(gpulease.Options{Path: filepath.Join(root, ".git", "fak-guard-arbitrate.lock"), Timeout: 2 * time.Second, Logf: func(string, ...any) {}})
+	if err != nil {
+		if errors.Is(err, gpulease.ErrBusy) || errors.Is(err, gpulease.ErrTimeout) {
+			if mode == guardArbitrateModeShadow {
+				fmt.Fprintf(stderr, "fak guard: arbitrate shadow would refuse: COLLISION_RISK admission serialization is busy: %v\n", err)
+				return nil, nil
+			}
+			return nil, fmt.Errorf("COLLISION_RISK: guard admission serialization is busy: %w", err)
+		}
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; admission lock unavailable: %v\n", err)
+		return nil, nil
+	}
+	unlock := func() { lock.Release() }
+	lockOwned := true
+	defer func() {
+		if lockOwned {
+			unlock()
+		}
+	}()
+	live, _, err := store.Live(ctx, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; live lease ledger unavailable: %v\n", err)
+		return nil, nil
+	}
+	req := regionadmit.Request{
+		Actor: guardArbitrateHolder(),
+		Lane:  strings.TrimSpace(cfg.Lane),
+		Tree:  requestTree,
+	}
+	dec := regionadmit.Decide(req, regionLeases(live), tax)
+	if !dec.Admit && cfg.Force && dec.Rung != regionadmit.RungExclusiveLive {
+		dec = regionadmit.Decision{Admit: true}
+	}
+	if !dec.Admit {
+		conflict := "unknown"
+		if dec.Conflict != nil {
+			conflict = dec.Conflict.ID
+		}
+		if mode == guardArbitrateModeShadow {
+			fmt.Fprintf(stderr, "fak guard: arbitrate shadow would refuse %s: %s conflict=%s detail=%s\n", regionLabel(req, tax), dec.Reason, conflict, dec.Detail)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%s: conflicting lease %s: %s", dec.Reason, conflict, dec.Detail)
+	}
+	if mode == guardArbitrateModeShadow {
+		return nil, nil
+	}
+
+	// Re-read immediately before publishing. This narrows the decision/write window and,
+	// after publication, the read-back below makes a same-window contender converge on one
+	// deterministic winner instead of allowing two overlapping guard leases to survive.
+	live, _, err = store.Live(ctx, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; live lease ledger unavailable before acquire: %v\n", err)
+		return nil, nil
+	}
+	dec = regionadmit.Decide(req, regionLeases(live), tax)
+	if !dec.Admit && !(cfg.Force && dec.Rung != regionadmit.RungExclusiveLive) {
+		conflict := "unknown"
+		if dec.Conflict != nil {
+			conflict = dec.Conflict.ID
+		}
+		return nil, fmt.Errorf("%s: conflicting lease %s: %s", dec.Reason, conflict, dec.Detail)
+	}
+
+	id := guardArbitrateLeaseID()
+	rec := leaseref.Record{
+		ID:          id,
+		TreeGlobs:   append([]string(nil), regionadmit.ResolveTree(req, tax)...),
+		Holder:      req.Actor,
+		AcquiredAt:  time.Now().Unix(),
+		TTLSeconds:  int64(guardArbitrateTTL / time.Second),
+		Description: "fak guard lifecycle lease",
+	}
+	if _, err := store.Acquire(ctx, rec); err != nil {
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; lease publish unavailable: %v\n", err)
+		return nil, nil
+	}
+	lease := &guardArbitrateLease{store: store, record: rec, stop: make(chan struct{}), done: make(chan struct{})}
+	if err := lease.confirmWinner(ctx, req, tax); err != nil {
+		lease.release(context.Background())
+		return nil, err
+	}
+	unlock()
+	lockOwned = false
+	go lease.renew()
+	return lease, nil
+}
+
+func (g *guardArbitrateLease) confirmWinner(ctx context.Context, req regionadmit.Request, tax regionadmit.Taxonomy) error {
+	live, _, err := g.store.Live(ctx, time.Now())
+	if err != nil {
+		return fmt.Errorf("confirm guard lease: %w", err)
+	}
+	selfFound := false
+	for _, r := range live {
+		if r.ID == g.record.ID {
+			selfFound = true
+		}
+	}
+	if !selfFound {
+		return errors.New("guard lease publication was not visible on read-back")
+	}
+	// If two launchers raced through the pre-publish read, the lexically smaller lease id
+	// wins. Every contender computes the same order from the shared ledger.
+	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
+	for _, r := range live {
+		if r.ID == g.record.ID {
+			continue
+		}
+		dec := regionadmit.Decide(regionadmit.Request{Actor: req.Actor, Lane: req.Lane, Tree: req.Tree, SelfID: g.record.ID}, []regionadmit.Lease{regionLeases([]leaseref.Record{r})[0]}, tax)
+		if !dec.Admit && r.ID < g.record.ID {
+			return fmt.Errorf("%s: conflicting lease %s won concurrent guard admission: %s", dec.Reason, r.ID, dec.Detail)
+		}
+	}
+	return nil
+}
+
+func (g *guardArbitrateLease) Close() {
+	if g == nil {
+		return
+	}
+	g.releaseOnce.Do(func() {
+		close(g.stop)
+		<-g.done
+		g.release(context.Background())
+	})
+}
+
+func (g *guardArbitrateLease) release(ctx context.Context) {
+	_, _ = g.store.ReleaseFenced(ctx, g.record.ID, g.record.Holder, g.record.Generation, time.Now())
+}
+
+func (g *guardArbitrateLease) renew() {
+	defer close(g.done)
+	ticker := time.NewTicker(guardArbitrateTTL / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-g.stop:
+			return
+		case now := <-ticker.C:
+			rec, verdict, err := g.store.Renew(context.Background(), g.record.ID, g.record.Holder, int64(guardArbitrateTTL/time.Second), now)
+			if err == nil && verdict.OK {
+				g.record = rec
+			}
+		}
+	}
+}
+
+func cleanGuardArbitrateTree(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		v := filepath.ToSlash(strings.TrimSpace(raw))
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func guardArbitrateHolder() string {
+	host, _ := os.Hostname()
+	if strings.TrimSpace(host) == "" {
+		host = "host"
+	}
+	return fmt.Sprintf("guard:%s:%d", host, os.Getpid())
+}
+
+func guardArbitrateLeaseID() string {
+	return "guard-" + strconv.Itoa(os.Getpid()) + "-" + strings.ToLower(slackoutbox.NewNonce()[:12])
+}
