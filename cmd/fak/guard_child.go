@@ -797,7 +797,10 @@ func guardChildSpawnAttempt(command []string, injected [][2]string, pinUpstream 
 	}, nil
 }
 
+var guardPromptTransportOS = runtime.GOOS
+
 func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, broker *toolprocgate.SpawnBroker, launcher guardChildLauncher, extraEnv ...[2]string) (toolprocgate.SpawnGrant, *exec.Cmd, error) {
+	command, stdinPrompt, promptOnStdin := guardPromptStdinTransportForOS(command, guardPromptTransportOS)
 	if broker == nil {
 		broker = toolprocgate.NewSpawnBroker()
 	}
@@ -815,6 +818,9 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	child, err := launcher(grant)
 	if err != nil {
 		return toolprocgate.SpawnGrant{}, nil, err
+	}
+	if promptOnStdin {
+		child.Stdin = strings.NewReader(stdinPrompt)
 	}
 	return grant, child, nil
 }
