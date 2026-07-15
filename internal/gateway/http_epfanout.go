@@ -17,12 +17,12 @@ import (
 
 const epFollowerHeader = "X-Fak-EP-Follower"
 
-// epFanoutClient carries the loopback follower requests. It MUST have a timeout:
-// a hung or slow follower rank must not pin the front rank's fanout goroutine
-// forever (boundarylint MISSING_HTTP_TIMEOUT). The fanout body is a full chat
-// request replayed to a same-host follower, so the ceiling is generous and
-// env-tunable, matching http.go's FAK_HTTP_* convention.
-var epFanoutClient = &http.Client{Timeout: durEnv("FAK_EP_FANOUT_TIMEOUT_S", 120*time.Second)}
+// epFanoutClient carries loopback follower requests. It deliberately has no
+// independent wall-clock timeout: the follower forward must live exactly as long as
+// the front-rank request, including slow cold GLM/MoE turns. NewRequestWithContext
+// below propagates the inbound deadline and cancellation, so a disconnected caller
+// still releases every follower without a shorter transport timer splitting ranks.
+var epFanoutClient = &http.Client{}
 
 // startEPFanoutFollowers mirrors an inbound non-streaming chat request from the EP
 // front rank to its follower rank endpoints before the front rank enters the local

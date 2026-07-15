@@ -1,11 +1,13 @@
 package gateway
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEPFanoutURLsFromEnv(t *testing.T) {
@@ -77,5 +79,35 @@ func TestStartEPFanoutFollowersSkipsFollowerRequests(t *testing.T) {
 	case <-called:
 		t.Fatal("follower request recursively fanned out")
 	default:
+	}
+}
+
+func TestEPFanoutClientInheritsRequestCancellation(t *testing.T) {
+	if epFanoutClient.Timeout != 0 {
+		t.Fatalf("epFanoutClient.Timeout = %s, want 0 so the inbound request owns the deadline", epFanoutClient.Timeout)
+	}
+
+	started := make(chan struct{})
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer peer.Close()
+	t.Setenv("FAK_EP_FANOUT_ADDRS", peer.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"slow"}]}`)).WithContext(ctx)
+	wait, ok := (&Server{logf: t.Logf}).startEPFanoutFollowers(httptest.NewRecorder(), req)
+	if !ok {
+		t.Fatal("fanout refused")
+	}
+	<-started
+	cancel()
+	done := make(chan struct{})
+	go func() { wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("fanout did not inherit inbound request cancellation")
 	}
 }
