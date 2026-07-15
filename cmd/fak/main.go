@@ -1233,10 +1233,14 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 		if traceID == "" || child == "" {
 			return "", nil, false
 		}
+		rearmTokens := freshContextTokens
+		if st.Budget.ContextTokensCap > 0 {
+			rearmTokens = st.Budget.ContextTokensCap
+		}
 		resetInput := sessionreset.Input{
 			Trace:          traceID,
 			Messages:       resetMsgs(messages),
-			FreshBudgetTok: freshContextTokens,
+			FreshBudgetTok: rearmTokens,
 		}
 		seed := sessionreset.BuildSeed(resetInput)
 		if strings.TrimSpace(seed.Recap) == "" {
@@ -1246,7 +1250,7 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 		childState := serveSessions.RecontinueWithTransaction(traceID, child, session.Budget{
 			TurnsLeft:         session.Unbounded,
 			TokensLeft:        session.Unbounded,
-			ContextTokensLeft: freshContextTokens,
+			ContextTokensLeft: rearmTokens,
 		}, resetTx)
 		resetTransactions.Append(childState.ResetTransaction)
 		persistServeSessionRevision(ctx, child, childState)

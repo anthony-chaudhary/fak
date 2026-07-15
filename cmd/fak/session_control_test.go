@@ -292,8 +292,8 @@ func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
 	}
 
 	fresh := observeSession(context.Background(), child)
-	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Generation != 1 || fresh.Budget.ContextTokensLeft != 50 {
-		t.Fatalf("fresh child state = %+v, want running child with parent/generation/context budget", fresh)
+	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Generation != 1 || fresh.Budget.ContextTokensLeft != 5 {
+		t.Fatalf("fresh child state = %+v, want running child with draining session context cap", fresh)
 	}
 	tx := fresh.ResetTransaction
 	if tx.Schema != session.ResetTransactionSchema || tx.OldTrace != trace || tx.NewTrace != child {
@@ -302,8 +302,8 @@ func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
 	if tx.SeedDigest == "" || len(tx.Contributors) == 0 || len(tx.OmittedSpans) == 0 {
 		t.Fatalf("reset transaction missing replay proof fields: %+v", tx)
 	}
-	if tx.BudgetRearm.ContextTokensLeft != 50 || tx.BudgetRearm.ContextTokensCap != 50 {
-		t.Fatalf("reset transaction budget rearm = %+v, want 50/50", tx.BudgetRearm)
+	if tx.BudgetRearm.ContextTokensLeft != 5 || tx.BudgetRearm.ContextTokensCap != 5 {
+		t.Fatalf("reset transaction budget rearm = %+v, want draining cap 5/5", tx.BudgetRearm)
 	}
 
 	logged, ok := resetTransactions.Latest()
@@ -315,6 +315,57 @@ func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
 	}
 	if verdicts, allMatch := resetTransactions.Replay(); !allMatch {
 		t.Fatalf("process reset-transaction log must replay clean: %+v", verdicts)
+	}
+}
+
+func TestResetServedSessionOnBudgetUsesLiveContextCap(t *testing.T) {
+	const trace = "reset-live-cap"
+	serveSessions.Reset(trace)
+	serveSessions.Restore(trace, session.State{TraceID: trace, Run: session.Running, Budget: session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 5, ContextTokensCap: 5}})
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+	if _, ok := serveSessions.SetBudget(trace, session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 77}); !ok {
+		t.Fatal("set live budget")
+	}
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{ContextTokens: 78})
+	child := st.ContinuationID
+	if child == "" {
+		t.Fatalf("drain state=%+v", st)
+	}
+	t.Cleanup(func() { serveSessions.Reset(child) })
+	hook := resetServedSessionOnBudget(50)
+	_, _, ok := hook(context.Background(), trace, []agent.Message{{Role: agent.RoleUser, Content: "preserve live cap"}})
+	if !ok {
+		t.Fatal("reset hook refused")
+	}
+	fresh := serveSessions.Get(child)
+	if fresh.Budget.ContextTokensLeft != 77 || fresh.Budget.ContextTokensCap != 77 {
+		t.Fatalf("fresh budget=%+v want live 77", fresh.Budget)
+	}
+	if fresh.ResetTransaction.BudgetRearm.ContextTokensLeft != 77 {
+		t.Fatalf("transaction=%+v", fresh.ResetTransaction.BudgetRearm)
+	}
+}
+
+func TestResetServedSessionOnBudgetFallsBackToLaunchCap(t *testing.T) {
+	const trace = "reset-launch-cap"
+	serveSessions.Reset(trace)
+	serveSessions.Restore(trace, session.State{TraceID: trace, Run: session.Running, Budget: session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 5, ContextTokensCap: 5}})
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{ContextTokens: 6})
+	child := st.ContinuationID
+	t.Cleanup(func() { serveSessions.Reset(child) })
+	// Simulate a legacy/cap-unset draining record while preserving its continuation id.
+	cur := serveSessions.Get(trace)
+	cur.Budget.ContextTokensCap = 0
+	serveSessions.Restore(trace, cur)
+	hook := resetServedSessionOnBudget(50)
+	_, _, ok := hook(context.Background(), trace, []agent.Message{{Role: agent.RoleUser, Content: "fallback"}})
+	if !ok {
+		t.Fatal("reset hook refused")
+	}
+	fresh := serveSessions.Get(child)
+	if fresh.Budget.ContextTokensLeft != 50 {
+		t.Fatalf("fresh budget=%+v want launch 50", fresh.Budget)
 	}
 }
 
