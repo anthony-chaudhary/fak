@@ -1908,6 +1908,9 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		guardExitCode = 1
 	}
 	guardSessionCardHandle.finalizeOutcome(guardExitCode, srv.AdjudicationSummary())
+	if !quiet {
+		renderGuardPromotionOffers(os.Stderr)
+	}
 	recordGuardUsage(guardExitCode)
 	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
 	// scripts see what the agent returned).

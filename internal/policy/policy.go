@@ -65,6 +65,7 @@ type Manifest struct {
 	Posture         string            `json:"posture,omitempty"`
 	Allow           []string          `json:"allow,omitempty"`
 	AllowPrefix     []string          `json:"allow_prefix,omitempty"`
+	Complain        []string          `json:"complain,omitempty"`
 	Deny            map[string]string `json:"deny,omitempty"`
 	SelfModifyGlobs []string          `json:"self_modify_globs,omitempty"`
 	RedactFields    []string          `json:"redact_fields,omitempty"`
@@ -352,8 +353,17 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	p := adjudicator.Policy{
 		Posture:         posture,
 		AllowPrefix:     cloneSlice(m.AllowPrefix),
+		Complain:        make(map[string]bool, len(m.Complain)),
 		SelfModifyGlobs: cloneSlice(m.SelfModifyGlobs),
 		RedactFields:    cloneSlice(m.RedactFields),
+	}
+	for _, tool := range m.Complain {
+		if tool = strings.TrimSpace(tool); tool != "" {
+			p.Complain[tool] = true
+		}
+	}
+	if len(p.Complain) == 0 {
+		p.Complain = nil
 	}
 	if m.Egress != nil && len(m.Egress.DenyHosts) > 0 {
 		p.EgressExtraDenyHosts = cloneSlice(m.Egress.DenyHosts)
