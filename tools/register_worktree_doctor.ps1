@@ -127,7 +127,13 @@ $taskDesc     = "Keep this checkout at one-worktree-on-master, safely (worktree_
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings `
-  -Principal $taskPrincipal -Description $taskDesc -Force | Out-Null
+  -Principal $taskPrincipal -Description $taskDesc -Force -ErrorAction Stop | Out-Null
+# Register-ScheduledTask can emit a non-terminating Access Denied while the script keeps
+# running and prints "installed". Read the effect back before claiming success.
+$installedTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if (-not $installedTask) {
+  throw "scheduled task '$TaskName' was not installed; run from an elevated PowerShell or ask the operator to register it"
+}
 
 $mode = if ($ReportOnly) {
   'REPORT-ONLY (no removals)'
