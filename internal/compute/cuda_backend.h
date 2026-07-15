@@ -78,9 +78,13 @@ void fcuda_h2dxfer_reset(void);
  * both in-place state buffers at the Go boundary. */
 int fcuda_qwen35_gdn_decode_f32(
     const float *dX,
-    const float *dInQKV, const float *dInZ, const float *dInB, const float *dInA,
+    const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
+    const void *dInZ, const float *dInZScale, int inZQ8,
+    const void *dInB, const float *dInBScale, int inBQ8,
+    const void *dInA, const float *dInAScale, int inAQ8,
     const float *dConvW, const float *dALog, const float *dDtBias,
-    const float *dNorm, const float *dOutW,
+    const float *dNorm,
+    const void *dOutW, const float *dOutWScale, int outWQ8,
     float *dConvState, float *dRecurrentState, float *dOut,
     float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
     float *dQNorm, float *dKNorm, float *dCore,
@@ -164,6 +168,16 @@ void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, in
 
 /* RoPE (HF non-interleaved rotate_half) on x[nHeads*headDim] at absolute position pos. */
 void fcuda_rope_f32(float *dX, int pos, int nHeads, int headDim, double theta);
+/* Qwen3.5/3.6 partial RoPE: preserve the unrotated tail of each head while rotating
+ * only rotaryDim values. Inputs remain unchanged; qOut/kOut are full-width copies. */
+void fcuda_partial_rope_qk_f32(const float *dQ, const float *dK, float *dQOut, float *dKOut,
+                               int pos, int nQHeads, int nKHeads, int headDim,
+                               int rotaryDim, double theta);
+/* In-place x *= sigmoid(gate), used by Qwen3.5/3.6's full-attention output gate. */
+void fcuda_sigmoid_mul_f32(float *dX, const float *dGate, int n);
+/* Split Qwen3.5/3.6 head-interleaved [query,gate] projection output on device. */
+void fcuda_split_qwen35_qg_f32(const float *dQG, float *dQ, float *dGate,
+                               int nHeads, int headDim);
 
 /* SwiGLU: y = silu(g) * u, elementwise, length n. */
 void fcuda_swiglu_f32(const float *dG, const float *dU, float *dY, int n);

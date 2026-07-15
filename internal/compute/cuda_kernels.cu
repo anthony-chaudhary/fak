@@ -297,38 +297,58 @@ __device__ __forceinline__ float qwen35_gdn_softplus(float x) {
 // One block computes one output row. Unlike four separate Backend.MatMul calls, the
 // grid spans qkv, z, beta, and decay projections in ONE launch; every block selects
 // its source weight/result band while sharing the resident normalized input.
+
+__device__ __forceinline__ float qwen35_gdn_weight(
+    const void *weight, const float *scale, int q8, size_t index, int rowWidth) {
+  if (!q8) return ((const float *)weight)[index];
+  int row = (int)(index / (size_t)rowWidth);
+  int col = (int)(index - (size_t)row * rowWidth);
+  int nblk = rowWidth / 32;
+  return (float)((const signed char *)weight)[index] * scale[(size_t)row * nblk + col / 32];
+}
+
 __global__ void k_qwen35_gdn_fused_in_proj(
     const float *x,
-    const float *wQKV, const float *wZ, const float *wB, const float *wA,
+    const void *wQKV, const float *sQKV, int qQKV,
+    const void *wZ, const float *sZ, int qZ,
+    const void *wB, const float *sB, int qB,
+    const void *wA, const float *sA, int qA,
     float *mixed, float *z, float *b, float *a,
     int hidden, int convDim, int valueDim, int nV) {
   int globalRow = blockIdx.x;
   int row = globalRow;
-  const float *w = wQKV;
+  const void *w = wQKV;
+  const float *scale = sQKV;
+  int q8 = qQKV;
   float *dst = mixed;
   if (row >= convDim) {
     row -= convDim;
-    w = wZ; dst = z;
+    w = wZ; scale = sZ; q8 = qZ; dst = z;
     if (row >= valueDim) {
       row -= valueDim;
-      w = wB; dst = b;
+      w = wB; scale = sB; q8 = qB; dst = b;
       if (row >= nV) {
         row -= nV;
-        w = wA; dst = a;
+        w = wA; scale = sA; q8 = qA; dst = a;
       }
     }
   }
   float sum = 0.0f;
-  const float *wr = w + (size_t)row * hidden;
-  for (int i = threadIdx.x; i < hidden; i += blockDim.x) sum += wr[i] * x[i];
-  __shared__ float red[256];
-  red[threadIdx.x] = sum;
+  size_t base = (size_t)row * hidden;
+  for (int i = threadIdx.x; i < hidden; i += blockDim.x)
+    sum += qwen35_gdn_weight(w, scale, q8, base + i, hidden) * x[i];
+  __shared__ float warpSums[8];
+  int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int off = 16; off > 0; off >>= 1) sum += __shfl_down_sync(0xffffffff, sum, off);
+  if (lane == 0) warpSums[warp] = sum;
   __syncthreads();
-  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
-    if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
-    __syncthreads();
+  if (warp == 0) {
+    sum = lane < 8 ? warpSums[lane] : 0.0f;
+#pragma unroll
+    for (int off = 16; off > 0; off >>= 1) sum += __shfl_down_sync(0xffffffff, sum, off);
+    if (lane == 0) dst[row] = sum;
   }
-  if (threadIdx.x == 0) dst[row] = red[0];
 }
 
 // Depthwise causal conv over [oldest ... newest, current], followed by SiLU.
@@ -440,19 +460,25 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
 }
 
 __global__ void k_qwen35_gdn_out_proj(
-    const float *w, const float *x, float *out, int hidden, int valueDim) {
+    const void *w, const float *scale, int q8,
+    const float *x, float *out, int hidden, int valueDim) {
   int row = blockIdx.x;
   float sum = 0.0f;
-  const float *wr = w + (size_t)row * valueDim;
-  for (int i = threadIdx.x; i < valueDim; i += blockDim.x) sum += wr[i] * x[i];
-  __shared__ float red[256];
-  red[threadIdx.x] = sum;
+  size_t base = (size_t)row * valueDim;
+  for (int i = threadIdx.x; i < valueDim; i += blockDim.x)
+    sum += qwen35_gdn_weight(w, scale, q8, base + i, valueDim) * x[i];
+  __shared__ float warpSums[8];
+  int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int off = 16; off > 0; off >>= 1) sum += __shfl_down_sync(0xffffffff, sum, off);
+  if (lane == 0) warpSums[warp] = sum;
   __syncthreads();
-  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
-    if (threadIdx.x < off) red[threadIdx.x] += red[threadIdx.x + off];
-    __syncthreads();
+  if (warp == 0) {
+    sum = lane < 8 ? warpSums[lane] : 0.0f;
+#pragma unroll
+    for (int off = 16; off > 0; off >>= 1) sum += __shfl_down_sync(0xffffffff, sum, off);
+    if (lane == 0) out[row] = sum;
   }
-  if (threadIdx.x == 0) out[row] = red[0];
 }
 
 static int qwen35_gdn_threads(int n) {
@@ -490,9 +516,13 @@ extern "C" void fcuda_qwen35_gdn_test_fault(int stage) {
 
 extern "C" int fcuda_qwen35_gdn_decode_f32(
     const float *dX,
-    const float *dInQKV, const float *dInZ, const float *dInB, const float *dInA,
+    const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
+    const void *dInZ, const float *dInZScale, int inZQ8,
+    const void *dInB, const float *dInBScale, int inBQ8,
+    const void *dInA, const float *dInAScale, int inAQ8,
     const float *dConvW, const float *dALog, const float *dDtBias,
-    const float *dNorm, const float *dOutW,
+    const float *dNorm,
+    const void *dOutW, const float *dOutWScale, int outWQ8,
     float *dConvState, float *dRecurrentState, float *dOut,
     float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
     float *dQNorm, float *dKNorm, float *dCore,
@@ -520,8 +550,12 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
     return qwen35_gdn_drain_after_error(10000 + (int)stale);
   }
   k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
-      dX, dInQKV, dInZ, dInB, dInA, dMixed, dZ, dB, dA,
-      hidden, convDim, valueDim, nV);
+      dX,
+      dInQKV, dInQKVScale, inQKVQ8,
+      dInZ, dInZScale, inZQ8,
+      dInB, dInBScale, inBQ8,
+      dInA, dInAScale, inAQ8,
+      dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV);
   int status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
@@ -544,7 +578,8 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
-  k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(dOutW, dCore, dOut, hidden, valueDim);
+  k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
+      dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim);
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
@@ -774,61 +809,48 @@ __device__ void getScaleMinK4_dev(int j, const unsigned char *q, unsigned char *
   }
 }
 
-// k_q4k_gemm: Y[t,o] = Σ over the row's Q4_K super-blocks of the dequant-fused dot. Each 256-elem
-// super-block is 144 bytes — f16 d (0..1), f16 dmin (2..3), 12 packed sub-scale bytes (4..15), 128
-// 4-bit code bytes (16..143). The weight is dequantized FUSED into the tile: w = d·scale·code −
-// dmin·min, with (scale,min) per 32-elem sub-block from getScaleMinK4_dev — exactly the GGUF
-// loader's dequantQ4K — and dotted with the f32 activation, F32 accumulate. No activation quant on
-// this path (the weight, not the activation, is the narrow operand). One block per (o,t); threads
-// stride the super-blocks.
+// k_q4k_gemm: Y[t,o] = sum over the row's Q4_K super-blocks. One warp cooperates on each
+// 256-value super-block instead of assigning all 256 serial FMAs to one lane. Qwen3.6's hidden
+// width has only about 20 super-blocks, so the former one-thread-per-super-block mapping left most
+// of this block idle. Eight warps now cover eight super-blocks concurrently; the byte mapping and
+// f32 accumulation semantics remain the GGUF Q4_K definition.
 __global__ void k_q4k_gemm(const unsigned char *Q4K, const float *X, float *Y, int out, int in, int P) {
-  int o = blockIdx.x, t = blockIdx.y;
+  constexpr int warps = 8;
+  int lane = threadIdx.x & 31;
+  int warp = threadIdx.x >> 5;
+  int o = blockIdx.x * warps + warp;
+  int t = blockIdx.y;
   if (o >= out || t >= P) return;
-  int nsb = in / 256; // super-blocks per row
+  int nsb = in / 256;
   const unsigned char *wrow = Q4K + (size_t)o * nsb * 144;
   const float *xrow = X + (size_t)t * in;
-  __shared__ float red[256];
-  float local = 0.f;
-  for (int sb = threadIdx.x; sb < nsb; sb += blockDim.x) {
+  float sum = 0.f;
+  for (int sb = 0; sb < nsb; sb++) {
     const unsigned char *blk = wrow + (size_t)sb * 144;
     float d = __half2float(*(const __half *)(blk));
     float dmin = __half2float(*(const __half *)(blk + 2));
-    const unsigned char *scales = blk + 4;  // 12 packed sub-scale bytes
-    const unsigned char *q = blk + 16;      // 128 4-bit code bytes
+    const unsigned char *scales = blk + 4;
+    const unsigned char *q = blk + 16;
     const float *xb = xrow + (size_t)sb * 256;
-    int qi = 0, is = 0;
-    float acc = 0.f;
-    for (int j = 0; j < 256; j += 64) {
+#pragma unroll
+    for (int group = 0; group < 8; group++) {
       unsigned char sc, mn;
-      getScaleMinK4_dev(is, scales, &sc, &mn);
-      float d1 = d * sc, m1 = dmin * mn;
-      getScaleMinK4_dev(is + 1, scales, &sc, &mn);
-      float d2 = d * sc, m2 = dmin * mn;
-      for (int l = 0; l < 32; l++) {
-        float w = d1 * (float)(q[qi + l] & 0x0f) - m1;
-        acc += w * xb[j + l];
-      }
-      for (int l = 0; l < 32; l++) {
-        float w = d2 * (float)(q[qi + l] >> 4) - m2;
-        acc += w * xb[j + 32 + l];
-      }
-      qi += 32;
-      is += 2;
+      getScaleMinK4_dev(group, scales, &sc, &mn);
+      int qi = (group >> 1) * 32 + lane;
+      unsigned char packed = q[qi];
+      int code = (group & 1) ? (packed >> 4) : (packed & 0x0f);
+      sum += (d * (float)sc * (float)code - dmin * (float)mn) * xb[group * 32 + lane];
     }
-    local += acc;
   }
-  red[threadIdx.x] = local;
-  __syncthreads();
-  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
-    __syncthreads();
-  }
-  if (threadIdx.x == 0) Y[(size_t)t * out + o] = red[0];
+#pragma unroll
+  for (int delta = 16; delta > 0; delta >>= 1) sum += __shfl_down_sync(0xffffffff, sum, delta);
+  if (lane == 0) Y[(size_t)t * out + o] = sum;
 }
 
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
-  k_q4k_gemm<<<dim3(out, P), 256, 0, g_stream>>>((const unsigned char *)dQ4K, dX, dY, out, in, P);
+  k_q4k_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>(
+      (const unsigned char *)dQ4K, dX, dY, out, in, P);
 }
 
 // ---- RMSNorm: one block per row -------------------------------------------------
@@ -870,6 +892,58 @@ __global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta)
 extern "C" void fcuda_rope_f32(float *dX, int pos, int nHeads, int headDim, double theta) {
   int total = nHeads * (headDim / 2);
   k_rope<<<(total + 127) / 128, 128, 0, g_stream>>>(dX, pos, nHeads, headDim, theta);
+}
+
+
+__global__ void k_partial_rope_copy(float *out, const float *in, int pos,
+                                    int nHeads, int headDim, int rotaryDim,
+                                    double theta) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int n = nHeads * headDim;
+  if (i >= n) return;
+  int d = i % headDim;
+  int h = i / headDim;
+  if (d >= rotaryDim) { out[i] = in[i]; return; }
+  int half = rotaryDim / 2;
+  int j = d < half ? d : d - half;
+  double freq = pow(theta, -(2.0 * j) / rotaryDim);
+  float cs = cos((double)pos * freq), sn = sin((double)pos * freq);
+  float a = in[h * headDim + j], b = in[h * headDim + j + half];
+  out[i] = d < half ? a * cs - b * sn : b * cs + a * sn;
+}
+extern "C" void fcuda_partial_rope_qk_f32(const float *dQ, const float *dK,
+                                             float *dQOut, float *dKOut, int pos,
+                                             int nQHeads, int nKHeads, int headDim,
+                                             int rotaryDim, double theta) {
+  int qn = nQHeads * headDim, kn = nKHeads * headDim;
+  k_partial_rope_copy<<<(qn+255)/256,256,0,g_stream>>>(dQOut,dQ,pos,nQHeads,headDim,rotaryDim,theta);
+  CK(cudaGetLastError());
+  k_partial_rope_copy<<<(kn+255)/256,256,0,g_stream>>>(dKOut,dK,pos,nKHeads,headDim,rotaryDim,theta);
+  CK(cudaGetLastError());
+}
+__global__ void k_sigmoid_mul(float *x, const float *gate, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) x[i] *= 1.0f / (1.0f + expf(-gate[i]));
+}
+extern "C" void fcuda_sigmoid_mul_f32(float *dX, const float *dGate, int n) {
+  k_sigmoid_mul<<<(n+255)/256,256,0,g_stream>>>(dX,dGate,n);
+  CK(cudaGetLastError());
+}
+__global__ void k_split_qwen35_qg(const float *qg, float *q, float *gate,
+                                    int nHeads, int headDim) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int n = nHeads * headDim;
+  if (i >= n) return;
+  int h = i / headDim, d = i % headDim;
+  int src = h * 2 * headDim + d;
+  q[i] = qg[src];
+  gate[i] = qg[src + headDim];
+}
+extern "C" void fcuda_split_qwen35_qg_f32(const float *dQG, float *dQ, float *dGate,
+                                             int nHeads, int headDim) {
+  int n = nHeads * headDim;
+  k_split_qwen35_qg<<<(n+255)/256,256,0,g_stream>>>(dQG,dQ,dGate,nHeads,headDim);
+  CK(cudaGetLastError());
 }
 
 // ---- SwiGLU / residual add / bias add -------------------------------------------

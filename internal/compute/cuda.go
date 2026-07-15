@@ -827,6 +827,48 @@ func (c *cudaBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Te
 	return y
 }
 
+// PartialRoPEQK applies Qwen3.5/3.6's rotate-half RoPE to rotaryDim values of
+// every Q/K head while preserving the unrotated tail. Both results stay resident.
+func (c *cudaBackend) PartialRoPEQK(
+	q, k Tensor,
+	pos, nQHeads, nKHeads, headDim, rotaryDim int,
+	theta float64,
+) (Tensor, Tensor) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	qOut, _ := c.devTr([]int{nQHeads * headDim}, F32)
+	kOut, _ := c.devTr([]int{nKHeads * headDim}, F32)
+	C.fcuda_partial_rope_qk_f32(
+		c.cf(q), c.cf(k), c.cf(qOut), c.cf(kOut),
+		C.int(pos), C.int(nQHeads), C.int(nKHeads),
+		C.int(headDim), C.int(rotaryDim), C.double(theta),
+	)
+	return qOut, kOut
+}
+
+// SigmoidMulInPlace applies x *= sigmoid(gate) without crossing the host boundary.
+func (c *cudaBackend) SigmoidMulInPlace(x, gate Tensor) {
+	if x.Numel() != gate.Numel() {
+		panic("compute/cuda: sigmoid gate shape mismatch")
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_sigmoid_mul_f32(c.cf(x), c.cf(gate), C.int(x.Numel()))
+}
+
+// SplitQwen35QueryGate separates Qwen's per-head [query, gate] projection rows on device.
+func (c *cudaBackend) SplitQwen35QueryGate(qg Tensor, nHeads, headDim int) (Tensor, Tensor) {
+	if qg.Numel() != 2*nHeads*headDim {
+		panic("compute/cuda: Qwen query/gate projection shape mismatch")
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	q, _ := c.devTr([]int{nHeads * headDim}, F32)
+	gate, _ := c.devTr([]int{nHeads * headDim}, F32)
+	C.fcuda_split_qwen35_qg_f32(c.cf(qg), c.cf(q), c.cf(gate), C.int(nHeads), C.int(headDim))
+	return q, gate
+}
+
 // SwiGLU computes silu(gate)*up element-wise on device, returning a new F32-resident tensor of
 // gate's shape.
 func (c *cudaBackend) SwiGLU(gate, up Tensor) Tensor {
@@ -1103,10 +1145,26 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	convOut, qNorm, kNorm, core := strictTensors[4], strictTensors[5], strictTensors[6], strictTensors[7]
 	output = strictTensors[8]
 
+	q8Args := func(t Tensor) (unsafe.Pointer, *C.float, C.int) {
+		buf := c.cudaBufForSubmit(t)
+		if t.Dtype == Q8_0 {
+			return buf.ptr, (*C.float)(buf.scales), 1
+		}
+		return buf.ptr, nil, 0
+	}
+	qkvPtr, qkvScale, qkvQ8 := q8Args(inProjQKV)
+	zPtr, zScale, zQ8 := q8Args(inProjZ)
+	bPtr, bScale, bQ8 := q8Args(inProjB)
+	aPtr, aScale, aQ8 := q8Args(inProjA)
+	outPtr, outScale, outQ8 := q8Args(outProj)
 	status := int(C.fcuda_qwen35_gdn_decode_f32(
 		c.cf(normalizedInput),
-		c.cf(inProjQKV), c.cf(inProjZ), c.cf(inProjB), c.cf(inProjA),
-		c.cf(conv1D), c.cf(aLog), c.cf(dtBias), c.cf(norm), c.cf(outProj),
+		qkvPtr, qkvScale, qkvQ8,
+		zPtr, zScale, zQ8,
+		bPtr, bScale, bQ8,
+		aPtr, aScale, aQ8,
+		c.cf(conv1D), c.cf(aLog), c.cf(dtBias), c.cf(norm),
+		outPtr, outScale, outQ8,
 		c.cf(convState), c.cf(recurrentState), c.cf(output),
 		c.cf(mixed), c.cf(z), c.cf(b), c.cf(a), c.cf(convOut),
 		c.cf(qNorm), c.cf(kNorm), c.cf(core),

@@ -37,6 +37,22 @@ type qwen35HALLayerState struct {
 	recurrent compute.Tensor
 }
 
+type qwen35PartialRoPEBackend interface {
+	PartialRoPEQK(
+		q, k compute.Tensor,
+		pos, nQHeads, nKHeads, headDim, rotaryDim int,
+		theta float64,
+	) (compute.Tensor, compute.Tensor)
+}
+
+type qwen35SigmoidGateBackend interface {
+	SigmoidMulInPlace(x, gate compute.Tensor)
+}
+
+type qwen35QueryGateSplitBackend interface {
+	SplitQwen35QueryGate(qg compute.Tensor, nHeads, headDim int) (compute.Tensor, compute.Tensor)
+}
+
 func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
 		return
@@ -123,15 +139,15 @@ func (s *Session) qwen35LinearHAL(layer int, residual compute.Tensor, eps float3
 	oldConv, oldRecurrent := state.conv, state.recurrent
 	output, nextConv, nextRecurrent, err := s.qwen35HAL.backend.Qwen35GDNDecode(
 		xn,
-		s.weightHAL(p("linear_attn.in_proj_qkv.weight")),
-		s.weightHAL(p("linear_attn.in_proj_z.weight")),
-		s.weightHAL(p("linear_attn.in_proj_b.weight")),
-		s.weightHAL(p("linear_attn.in_proj_a.weight")),
+		s.matWeightHAL(p("linear_attn.in_proj_qkv.weight")),
+		s.matWeightHAL(p("linear_attn.in_proj_z.weight")),
+		s.matWeightHAL(p("linear_attn.in_proj_b.weight")),
+		s.matWeightHAL(p("linear_attn.in_proj_a.weight")),
 		s.weightHAL(p("linear_attn.conv1d.weight")),
 		s.weightHAL(p("linear_attn.A_log")),
 		s.weightHAL(p("linear_attn.dt_bias")),
 		s.weightHAL(p("linear_attn.norm.weight")),
-		s.weightHAL(p("linear_attn.out_proj.weight")),
+		s.matWeightHAL(p("linear_attn.out_proj.weight")),
 		oldConv, oldRecurrent,
 		nK, nV, kHd, vHd, cfg.LinearConvKernelDim, eps,
 	)
@@ -203,10 +219,32 @@ func splitQwen35HeadInterleavedRows(src []float32, nHeads, headDim, rowWidth int
 	return query, gate
 }
 
+func dequantQ8Tensor(qt *q8Tensor) []float32 {
+	out := make([]float32, qt.out*qt.in)
+	for row := 0; row < qt.out; row++ {
+		for col := 0; col < qt.in; col++ {
+			out[row*qt.in+col] = float32(qt.q[row*qt.in+col]) * qt.d[row*qt.nblk+col/qBlk]
+		}
+	}
+	return out
+}
+
 func (s *Session) qwen35QueryWeightsHAL(layer int) (query, gate compute.Tensor) {
 	cfg := s.M.Cfg
 	name := layerName(layer, "self_attn.q_proj.weight")
-	q, g := splitQwen35HeadInterleavedRows(s.M.tensor(name), cfg.NumHeads, cfg.HeadDim, cfg.HiddenSize)
+	var src []float32
+	switch {
+	case s.M.has(name):
+		src = s.M.tensor(name)
+	case s.M.q8w[name] != nil:
+		// Qwen3.6's gated q_proj is normalize-sensitive, so the GGUF loader holds the
+		// already-normalized matrix in Q8 only. Split that resident copy once at session
+		// setup rather than incorrectly requiring a discarded f32 manifest tensor.
+		src = dequantQ8Tensor(s.M.q8w[name])
+	default:
+		panic("model: missing tensor " + name)
+	}
+	q, g := splitQwen35HeadInterleavedRows(src, cfg.NumHeads, cfg.HeadDim, cfg.HiddenSize)
 	rows := cfg.NumHeads * cfg.HeadDim
 	return s.derivedWeightHAL(name+"#query", []int{rows, cfg.HiddenSize}, q),
 		s.derivedWeightHAL(name+"#gate", []int{rows, cfg.HiddenSize}, g)
@@ -243,11 +281,9 @@ func qwen35HALKVLayer(cfg Config, layer int) int {
 }
 
 // qwen35FullAttentionHAL retains the hybrid's ordinary full-attention layers. The
-// current generic HAL has no split-query/output-gate or partial-RoPE primitives, so this
-// correctness spine performs only those full-attention transforms through explicit host
-// readback. The linear-attention branch above never reaches this function and remains
-// wholly backend-resident; a future full-attention fused operation can replace this
-// bounded bridge without changing GDN dispatch or state ownership.
+// Optional device capabilities keep split-query partial RoPE and output gating resident.
+// Backends without those capabilities retain the explicit host correctness fallback. The
+// linear-attention branch above never reaches this function and remains wholly resident.
 func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor, eps, scale float32, grp int) {
 	be, cfg := s.Backend, s.M.Cfg
 	hd, nH, nKV := cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads
@@ -256,21 +292,30 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 
 	var q, gate compute.Tensor
 	if cfg.AttnOutputGate {
-		qWeight, gateWeight := s.qwen35QueryWeightsHAL(layer)
-		q, gate = be.MatMul(qWeight, xn), be.MatMul(gateWeight, xn)
+		if splitter, ok := be.(qwen35QueryGateSplitBackend); ok {
+			qg := be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+			if cfg.AttentionBias {
+				be.AddBias(qg, s.weightHAL(p("self_attn.q_proj.bias")))
+			}
+			q, gate = splitter.SplitQwen35QueryGate(qg, nH, hd)
+		} else {
+			qWeight, gateWeight := s.qwen35QueryWeightsHAL(layer)
+			q, gate = be.MatMul(qWeight, xn), be.MatMul(gateWeight, xn)
+			if cfg.AttentionBias {
+				qBias, gateBias := s.qwen35QueryBiasHAL(layer)
+				be.AddBias(q, qBias)
+				be.AddBias(gate, gateBias)
+			}
+		}
 	} else {
 		q = be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+		if cfg.AttentionBias {
+			be.AddBias(q, s.weightHAL(p("self_attn.q_proj.bias")))
+		}
 	}
 	kRaw := be.MatMul(s.matWeightHAL(p("self_attn.k_proj.weight")), xn)
 	v := be.MatMul(s.matWeightHAL(p("self_attn.v_proj.weight")), xn)
 	if cfg.AttentionBias {
-		if cfg.AttnOutputGate {
-			qBias, gateBias := s.qwen35QueryBiasHAL(layer)
-			be.AddBias(q, qBias)
-			be.AddBias(gate, gateBias)
-		} else {
-			be.AddBias(q, s.weightHAL(p("self_attn.q_proj.bias")))
-		}
 		be.AddBias(kRaw, s.weightHAL(p("self_attn.k_proj.bias")))
 		be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))
 	}
@@ -278,13 +323,21 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	kvLayer := qwen35HALKVLayer(cfg, layer)
 	theta := cfg.ropeThetaForLayer(layer)
 	if cfg.rotaryDim() != hd {
-		qHost := s.readQwen35FullAttention(layer, "partial-RoPE query read", q)
-		kHost := s.readQwen35FullAttention(layer, "partial-RoPE key read", kRaw)
-		cos, sin := ropeRowForLayer(cfg, layer, pos)
-		ropeRowQKInto(qHost, kHost, cos, sin, hd, nH, nKV)
-		q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-rope-q")
-		kRope := s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-rope-k")
-		s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+		// The device capability takes theta directly, so use it only for the unscaled
+		// Qwen path. Scaled/YaRN configurations retain the exact cached-inv-freq fallback.
+		if partial, ok := be.(qwen35PartialRoPEBackend); ok && cfg.RopeScaling == "" && cfg.LongRope == nil {
+			var kRope compute.Tensor
+			q, kRope = partial.PartialRoPEQK(q, kRaw, pos, nH, nKV, hd, cfg.rotaryDim(), theta)
+			s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+		} else {
+			qHost := s.readQwen35FullAttention(layer, "partial-RoPE query read", q)
+			kHost := s.readQwen35FullAttention(layer, "partial-RoPE key read", kRaw)
+			cos, sin := ropeRowForLayer(cfg, layer, pos)
+			ropeRowQKInto(qHost, kHost, cos, sin, hd, nH, nKV)
+			q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-rope-q")
+			kRope := s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-rope-k")
+			s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+		}
 	} else {
 		if rope, ok := be.(ropeInPlaceBackend); ok {
 			q = rope.RoPEInPlace(q, pos, nH, hd, theta)
@@ -301,15 +354,19 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 
 	attnOut := be.Attention(q, s.halKV, kvLayer, true, grp, scale)
 	if cfg.AttnOutputGate {
-		gateHost := s.readQwen35FullAttention(layer, "full-attention gate read", gate)
-		outHost := s.readQwen35FullAttention(layer, "full-attention output read", attnOut)
-		if len(gateHost) != len(outHost) {
-			s.failBackendForward(layer, "full-attention output gate", fmt.Errorf("gate width %d does not match attention width %d", len(gateHost), len(outHost)))
+		if gated, ok := be.(qwen35SigmoidGateBackend); ok {
+			gated.SigmoidMulInPlace(attnOut, gate)
+		} else {
+			gateHost := s.readQwen35FullAttention(layer, "full-attention gate read", gate)
+			outHost := s.readQwen35FullAttention(layer, "full-attention output read", attnOut)
+			if len(gateHost) != len(outHost) {
+				s.failBackendForward(layer, "full-attention output gate", fmt.Errorf("gate width %d does not match attention width %d", len(gateHost), len(outHost)))
+			}
+			for i := range outHost {
+				outHost[i] *= sigmoidf(gateHost[i])
+			}
+			attnOut = s.uploadHostF32([]int{nH * hd}, outHost, compute.MemoryActivation, "qwen35-full-attn-gated-output")
 		}
-		for i := range outHost {
-			outHost[i] *= sigmoidf(gateHost[i])
-		}
-		attnOut = s.uploadHostF32([]int{nH * hd}, outHost, compute.MemoryActivation, "qwen35-full-attn-gated-output")
 	}
 	out := be.MatMul(s.matWeightHAL(p("self_attn.o_proj.weight")), attnOut)
 	if cfg.AttentionBias && s.M.has(p("self_attn.o_proj.bias")) {
