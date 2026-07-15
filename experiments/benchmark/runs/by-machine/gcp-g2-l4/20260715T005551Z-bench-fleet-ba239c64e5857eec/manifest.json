@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-g2-l4-bench-fleet-ba239c64e5857eec-20260715T005551Z",
+  "machine_id": "gcp-g2-l4",
+  "timestamp": "20260715T005551Z",
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "rev": "unknown"
+  },
+  "harness": {
+    "name": "fak-bench-fleet",
+    "version": "1"
+  },
+  "model": {
+    "name": "qwen3.6-27b",
+    "precision": "q8"
+  },
+  "config": {
+    "benchmark": "qwen36",
+    "request_id": "ba239c64e5857eec",
+    "route": "gcp:ssh/fak-cuda-build-l4"
+  },
+  "tags": [
+    "bench-fleet",
+    "gpu",
+    "qwen36"
+  ],
+  "artifacts": {
+    "witness": "witness.json"
+  }
+}

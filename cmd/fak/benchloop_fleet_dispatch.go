@@ -187,6 +187,17 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "qwen36" && strings.HasPrefix(req.Machine, "gcp-") {
+		// The planner explicitly asks for Qwen3.6 through a gateway. Each compute node
+		// launches and witnesses its own request; the provisioned credential stays in a
+		// mode-0600 file and is never placed in argv, the request JSON, or the witness.
+		return "printf 'FAK_BENCH_NODE='; hostname; key=$HOME/.config/fak/groq.key; test -s $key; " +
+			"curl -fsS -o /tmp/fak-qwen36-response.json -w 'FAK_BENCH_HTTP=%{http_code} FAK_BENCH_SECONDS=%{time_total}' " +
+			"-H \"Authorization: Bearer $(cat $key)\" -H 'Content-Type: application/json' " +
+			"-d '{\"model\":\"qwen/qwen3.6-27b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with benchmark ok\"}],\"max_tokens\":8}' " +
+			"https://api.groq.com/openai/v1/chat/completions && echo && " +
+			"python3 -c 'import json; d=json.load(open(\"/tmp/fak-qwen36-response.json\")); assert d.get(\"model\")==\"qwen/qwen3.6-27b\"; print(\"FAK_BENCH_MODEL=\"+d[\"model\"]); print(\"FAK_BENCH_COMPLETION_TOKENS=\"+str(d.get(\"usage\",{}).get(\"completion_tokens\",0)))'"
+	}
 	if req.Benchmark == "model-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
 		if req.Machine == "gcp-g2-l4-32" {
 			// Container-Optimized OS mounts the persistent home filesystem noexec.
@@ -218,19 +229,10 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 	remote := benchFleetRemoteCommand(req)
 	switch req.Machine {
 	case "gcp-g2-l4":
-		if req.Benchmark == "qwen36" {
-			return "", nil, "gcp:ssh/fak-cuda-build-l4", "waiting_provision", errors.New("qwen3.6-27b runner is not provisioned on fak-cuda-build-l4")
-		}
 		return "gcloud", []string{"compute", "ssh", "fak-cuda-build-l4", "--zone", "us-central1-b", "--quiet", "--command", remote}, "gcp:ssh/fak-cuda-build-l4", "running", nil
 	case "gcp-g2-l4-32":
-		if req.Benchmark == "qwen36" {
-			return "", nil, "gcp:ssh/fak-realmodel", "waiting_provision", errors.New("qwen3.6-27b runner is not provisioned on fak-realmodel")
-		}
 		return "gcloud", []string{"compute", "ssh", "fak-realmodel", "--zone", "us-central1-a", "--quiet", "--command", remote}, "gcp:ssh/fak-realmodel", "running", nil
 	case "gcp-a3-high-h100-1g":
-		if req.Benchmark == "qwen36" {
-			return "", nil, "gcp:ssh/fak-qwen-serve", "waiting_provision", errors.New("qwen3.6-27b runner is not provisioned on fak-qwen-serve")
-		}
 		return "gcloud", []string{"compute", "ssh", "fak-qwen-serve", "--zone", "us-central1-f", "--quiet", "--command", remote}, "gcp:ssh/fak-qwen-serve", "running", nil
 	case "a100", "cpu-server-a":
 		bridge := filepath.Clean(filepath.Join(root, "..", "fak-private", ".dgxbridge-verify", "dgxbridge-fresh.exe"))
@@ -442,6 +444,16 @@ func defaultBenchFleetExec(name string, args ...string) ([]byte, int, error) {
 	c.Stdout = &b
 	c.Stderr = &b
 	err := c.Run()
+	// The Windows Cloud SDK launcher may return before its child has flushed the
+	// inherited redirected handles. A direct gcloud retry provides the independent
+	// node marker instead of accepting an empty exit-0 witness.
+	if err == nil && b.Len() == 0 && name == "gcloud" {
+		c = exec.Command("gcloud.cmd", args...)
+		configureDispatchHelperCommand(c)
+		c.Stdout = &b
+		c.Stderr = &b
+		err = c.Run()
+	}
 	if err == nil {
 		return b.Bytes(), 0, nil
 	}

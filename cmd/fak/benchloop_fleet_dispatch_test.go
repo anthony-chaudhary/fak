@@ -184,14 +184,20 @@ func TestBenchFleetGCPProvisionFailureIsRetryable(t *testing.T) {
 	}
 }
 
-func TestBenchFleetQwen36HintIsNeverExecutedLiterally(t *testing.T) {
+func TestBenchFleetQwen36UsesProvisionedGatewayRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
 		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "qwen36", Command: "fak serve + fak agent (qwen3.6-27b via gateway)"})
-		if err == nil || state != "waiting_provision" {
-			t.Fatalf("%s: state=%q err=%v, want waiting_provision error", machine, state, err)
+		if err != nil || state != "running" || name != "gcloud" {
+			t.Fatalf("%s: name=%q state=%q err=%v, want running gcloud route", machine, name, state, err)
 		}
-		if name != "" || len(args) != 0 {
-			t.Fatalf("%s: executable hint leaked into route: %q %q", machine, name, args)
+		command := strings.Join(args, " ")
+		for _, want := range []string{"FAK_BENCH_NODE=", "qwen/qwen3.6-27b", ".config/fak/groq.key", "api.groq.com/openai/v1/chat/completions", "FAK_BENCH_MODEL="} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s: command missing %q: %q", machine, want, command)
+			}
+		}
+		if strings.Contains(command, "fak serve + fak agent") {
+			t.Fatalf("%s: planner prose leaked into executable command: %q", machine, command)
 		}
 	}
 }

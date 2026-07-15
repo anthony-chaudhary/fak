@@ -1,0 +1,25 @@
+{
+  "schema": "fak.bench-fleet.witness.v1",
+  "request_id": "ba239c64e5857eec",
+  "machine": "gcp-g2-l4",
+  "benchmark": "qwen36",
+  "model": "qwen3.6-27b",
+  "precision": "q8",
+  "state": "succeeded",
+  "route": "gcp:ssh/fak-cuda-build-l4",
+  "command": [
+    "gcloud",
+    "compute",
+    "ssh",
+    "fak-cuda-build-l4",
+    "--zone",
+    "us-central1-b",
+    "--quiet",
+    "--command",
+    "printf 'FAK_BENCH_NODE='; hostname; key=$HOME/.config/fak/groq.key; test -s $key; curl -fsS -o /tmp/fak-qwen36-response.json -w 'FAK_BENCH_HTTP=%{http_code} FAK_BENCH_SECONDS=%{time_total}' -H \"Authorization: Bearer $(cat $key)\" -H 'Content-Type: application/json' -d '{\"model\":\"qwen/qwen3.6-27b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with benchmark ok\"}],\"max_tokens\":8}' https://api.groq.com/openai/v1/chat/completions \u0026\u0026 python3 -c 'import json; d=json.load(open(\"/tmp/fak-qwen36-response.json\")); assert d.get(\"model\")==\"qwen/qwen3.6-27b\"; print(\"FAK_BENCH_MODEL=\"+d[\"model\"]); print(\"FAK_BENCH_COMPLETION_TOKENS=\"+str(d.get(\"usage\",{}).get(\"completion_tokens\",0)))'"
+  ],
+  "started_at": "2026-07-15T00:55:44Z",
+  "finished_at": "2026-07-15T00:55:51Z",
+  "exit_code": 0,
+  "output": "FAK_BENCH_NODE=fak-cuda-build-l4\nFAK_BENCH_HTTP=200 FAK_BENCH_SECONDS=0.312941FAK_BENCH_MODEL=qwen/qwen3.6-27b\nFAK_BENCH_COMPLETION_TOKENS=8\n"
+}
