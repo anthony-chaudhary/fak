@@ -56,6 +56,13 @@ type codexLoopGateConfig struct {
 var codexLaunchRun = execCodexLaunchChild
 
 func cmdCodex(argv []string) {
+	// MCP lifecycle operations are local installer/status work, not Codex launches.
+	// Route them before the seat/loop gate so `fak codex mcp ...` never consumes a
+	// provider turn and remains usable while the launcher is otherwise held.
+	if len(argv) > 0 && argv[0] == "mcp" {
+		cmdCodexMCP(argv[1:])
+		return
+	}
 	os.Exit(runCodex(os.Stdout, os.Stderr, argv))
 }
 

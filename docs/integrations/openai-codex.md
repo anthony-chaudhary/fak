@@ -78,6 +78,35 @@ Expected shape:
 
 That proves the capability floor is structural, not a model judgment.
 
+## Install an immutable MCP server (recommended)
+
+Codex keeps its MCP child executable open for the life of a session. Pointing it at the
+mutable worktree binary can therefore block upgrades on Windows and can silently separate
+the source revision from the process Codex is actually running. Install a content-addressed,
+self-contained copy instead:
+
+```powershell
+fak codex mcp install --policy C:\absolute\path\to\policy.json
+fak codex mcp status
+```
+
+`install` copies the binary and policy outside the worktree, records the module revision and
+SHA-256 checksum, atomically patches only `[mcp_servers.fak]`, backs up the previous entry,
+and performs a bounded MCP `initialize` handshake. Each upgrade gets a new filename, so an
+old Codex session may keep the previous binary open while new sessions select the new copy.
+Restart or reload Codex after install/upgrade; existing sessions do not reread `config.toml`.
+
+Useful recovery operations:
+
+```powershell
+fak codex mcp install --rollback   # restore the prior known-good entry
+fak codex mcp uninstall            # remove only installer-owned config/artifacts
+```
+
+`status` reports checksum/config drift, missing or wrong-architecture artifacts, stale source
+revisions, and initialize-probe failures. It never prints credentials. Use `--config` to test
+against an isolated Codex config fixture; all policy and command paths written to TOML are
+absolute.
 ## Path 1: Current Codex CLI or IDE extension via MCP
 
 Build the binary:
