@@ -109,3 +109,40 @@ func TestReframeEmptyAndPlain(t *testing.T) {
 const SampleRuntimeSteer = "fak posture: keep going while checkable work remains. " +
 	"Do not forget to land durable state before a context event. " +
 	"Do not re-propose a refused call unchanged; the OFF_TRUNK blocker must clear first."
+
+func TestReframePolarityPreservation(t *testing.T) {
+	tests := []struct {
+		name   string
+		before string
+		after  string
+		want   bool
+	}{
+		{"never softened", "Never deploy `OFF_TRUNK`.", "Deploy `OFF_TRUNK`.", false},
+		{"must-not softened", "You must not force-push `MAIN`.", "Force-push `MAIN`.", false},
+		{"do-not preserved", "Do not bypass POLICY_BLOCK.", "Never bypass POLICY_BLOCK.", true},
+		{"no-token softened", "No `OFF_TRUNK` deployment.", "Allow `OFF_TRUNK` deployment.", false},
+		{"obligation is not prohibition", "Do not forget to preserve `OFF_TRUNK`.", "Remember to preserve `OFF_TRUNK`.", true},
+		{"unbound token", "Never guess. Report `OFF_TRUNK` separately.", "Avoid guessing. Report `OFF_TRUNK` separately.", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := polarityPreserved(tc.before, tc.after); got != tc.want {
+				t.Fatalf("polarityPreserved(%q, %q) = %v, want %v", tc.before, tc.after, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReframeLineRefusesPolarityFlip(t *testing.T) {
+	before := "Never deploy `OFF_TRUNK`."
+	if got := Reframe(before); got != before {
+		t.Fatalf("Reframe softened load-bearing prohibition: %q", got)
+	}
+	candidate := "Deploy `OFF_TRUNK`."
+	if !tokenSuperset(mustKeepSet(before), mustKeepSet(candidate)) {
+		t.Fatal("fixture must pass the older token-superset gate")
+	}
+	if polarityPreserved(before, candidate) {
+		t.Fatal("polarity gate admitted a permissive rewrite")
+	}
+}

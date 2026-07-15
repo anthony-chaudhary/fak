@@ -72,6 +72,42 @@ func tokenSuperset(before, after map[string]int) bool {
 	return true
 }
 
+// prohibitionMarkerRE finds load-bearing negative operators. A token is considered
+// bound when it occurs later in the same clause. The narrow do-not-forget family is
+// excluded: it expresses a positive obligation, not a prohibition on the token.
+var prohibitionMarkerRE = regexp.MustCompile(`(?i)\b(?:never|must\s+not|do\s+not)\b|\bno\b`)
+var obligationMarkerRE = regexp.MustCompile(`(?i)^do\s+not\s+(?:forget|fail|neglect)\b`)
+var clauseEndRE = regexp.MustCompile(`[.!?;\n]`)
+
+// polarityProtectedSet returns the multiset of must-keep tokens governed by a
+// prohibition in s. Counts matter for lines that state the same contract twice.
+func polarityProtectedSet(s string) map[string]int {
+	protected := map[string]int{}
+	for _, marker := range prohibitionMarkerRE.FindAllStringIndex(s, -1) {
+		tail := s[marker[0]:]
+		if obligationMarkerRE.MatchString(tail) {
+			continue
+		}
+		end := len(tail)
+		if loc := clauseEndRE.FindStringIndex(tail); loc != nil {
+			end = loc[0]
+		}
+		clause := tail[:end]
+		for _, token := range mustKeepTokenRE.FindAllString(clause, -1) {
+			protected[token]++
+		}
+	}
+	return protected
+}
+
+// polarityPreserved reports whether every must-keep token protected by a
+// load-bearing prohibition before remains protected after. Keeping the literal
+// token is insufficient: "never deploy `OFF_TRUNK`" must not become "deploy
+// `OFF_TRUNK`".
+func polarityPreserved(before, after string) bool {
+	return tokenSuperset(polarityProtectedSet(before), polarityProtectedSet(after))
+}
+
 // Reframe returns text with every unambiguous negative idiom flipped to its positive inverse,
 // leaving load-bearing judgement-tier prose and every must-keep token untouched. It is the
 // convenience wrapper over ReframePass for callers that want only the string.
@@ -150,8 +186,8 @@ func reframeLine(line string) (string, int, int, int) {
 			}
 			repl := r.Pattern.ReplaceAllString(line[s:e], r.Template)
 			candidate := line[:s] + repl + line[e:]
-			if !tokenSuperset(before, mustKeepSet(candidate)) {
-				refused++ // would drop a must-keep token -> emit the original span verbatim
+			if !tokenSuperset(before, mustKeepSet(candidate)) || !polarityPreserved(line, candidate) {
+				refused++ // would drop a token or its prohibition -> emit the original span verbatim
 				continue
 			}
 			edits = append(edits, edit{s, e, repl})
