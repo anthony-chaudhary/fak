@@ -64,6 +64,12 @@ tools/_walltime.*
 # Per-session agent scratch dirs (issue-comment drafts, scratch src/test, index dumps).
 .scratch/
 .cscratch/
+# Per-session `go build -overlay` scratch: the overlay JSON specs (ov_build.json,
+# overlay*.json) plus the substitute/emptied `.go` sources they swap in to hide a peer's
+# untracked WIP from a compile-check (the `fak buildcheck` overlay mechanism; AGENTS.md).
+# Regenerated per probe run, never a build input to the tracked tree — private-by-default
+# so a probe copy of guard.go/a test can never be `git add`-ed onto the shared trunk.
+.probe/
 
 # Scratch / temp leaks that occasionally land in the tree when a tool writes to a relative
 # path instead of an absolute temp dir (e.g. a flattened C...scratchpad...json at the repo
