@@ -346,6 +346,7 @@ func loadBearingUntrackedFiles(root string, untracked []string) ([]string, error
 	}
 	cmd := exec.Command("git", "ls-files", "--", "*.go")
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
