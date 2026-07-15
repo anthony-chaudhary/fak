@@ -168,13 +168,19 @@ func guardToolprocSetHooks(settings *guardPreCompactClaudeSettings, fakBin, jour
 		"PostToolUse": "post",
 		"SessionEnd":  "stop",
 	} {
-		settings.Hooks[event] = []guardPreCompactClaudeMatcher{{
+		matcher := guardPreCompactClaudeMatcher{
 			Hooks: []guardPreCompactClaudeCommand{{
 				Type:    "command",
 				Command: guardPreCompactHookCommand(fakBin),
 				Args:    []string{"toolproc", "hook", kind, "--journal", journalPath},
 			}},
-		}}
+		}
+		if event == "PreToolUse" {
+			// Preserve the commit-boundary gate when toolproc observation is merged later.
+			settings.Hooks[event] = append(guardCommitGateMatchers(fakBin), matcher)
+		} else {
+			settings.Hooks[event] = []guardPreCompactClaudeMatcher{matcher}
+		}
 	}
 }
 
