@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/usagelog"
 )
 
@@ -93,36 +96,59 @@ func auditJournalPathArg(name, usage string, args []string) string {
 
 func cmdAuditVerify(args []string) {
 	path := auditJournalPathArg("audit verify", "usage: fak audit verify <journal.jsonl>", args)
-	if isUsageLog(path) {
+	os.Exit(runAuditVerify(os.Stdout, os.Stderr, path))
+}
+
+func runAuditVerify(stdout, stderr io.Writer, path string) int {
+	switch auditVerifySchema(path) {
+	case usagelog.SchemaV1:
 		n, err := usagelog.Verify(path)
-		auditVerifyVerdict(path, "usage ", n, err)
-		return
+		return renderAuditVerifyVerdict(stdout, stderr, path, "usage ", n, err)
+	case modelroute.AuditReceiptLedgerRowSchema:
+		v, err := modelroute.VerifyAuditReceiptLedger(path)
+		if err != nil {
+			n := auditReceiptSoundRows(err)
+			fmt.Fprintf(stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "fak audit verify: %s — OK: %d hash-chained cross-audit receipt row(s), unique_audits=%d verdicts=%v head_hash=%s\n",
+			path, v.Rows, v.UniqueAudits, v.VerdictCounts, v.HeadHash)
+		return 0
+	default:
+		n, err := journal.Verify(path)
+		return renderAuditVerifyVerdict(stdout, stderr, path, "", n, err)
 	}
-	n, err := journal.Verify(path)
-	auditVerifyVerdict(path, "", n, err)
 }
 
-// auditVerifyVerdict prints the shared TAMPERED/OK verdict for a chain
-// verifier's result and exits 1 on a broken chain; rowKind is "usage " for a
-// usagelog journal, "" for a decision journal.
+func auditReceiptSoundRows(err error) int {
+	var integrity *modelroute.AuditReceiptLedgerIntegrityError
+	if errors.As(err, &integrity) {
+		return integrity.Integrity.Recovered
+	}
+	return 0
+}
+
+// auditVerifyVerdict retains the command helper used by older callers.
 func auditVerifyVerdict(path, rowKind string, n int, err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
-		os.Exit(1)
-	}
-	fmt.Printf("fak audit verify: %s — OK: %d hash-chained %srow(s), chain intact (no edit since written)\n", path, n, rowKind)
+	os.Exit(renderAuditVerifyVerdict(os.Stdout, os.Stderr, path, rowKind, n, err))
 }
 
-// isUsageLog peeks the first well-formed line of path to tell a usage journal
-// (internal/usagelog, schema "fak-usage-log/1") apart from a decision journal
-// (internal/journal, no schema field) so 'fak audit verify' dispatches to the
-// matching Verify without a separate --kind flag. A file that can't be opened
-// or whose first line doesn't parse falls through to the decision-journal
-// path, which reports the real error.
-func isUsageLog(path string) bool {
+func renderAuditVerifyVerdict(stdout, stderr io.Writer, path, rowKind string, n int, err error) int {
+	if err != nil {
+		fmt.Fprintf(stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "fak audit verify: %s — OK: %d hash-chained %srow(s), chain intact (no edit since written)\n", path, n, rowKind)
+	return 0
+}
+
+// auditVerifySchema peeks the first well-formed row's schema so audit verify
+// dispatches each chain dialect to its own verifier. Schema-less and unreadable
+// inputs return "" and retain the decision-journal path's existing error text.
+func auditVerifySchema(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
@@ -136,12 +162,14 @@ func isUsageLog(path string) bool {
 			Schema string `json:"schema"`
 		}
 		if err := json.Unmarshal(line, &probe); err != nil {
-			return false
+			return ""
 		}
-		return probe.Schema == usagelog.SchemaV1
+		return probe.Schema
 	}
-	return false
+	return ""
 }
+
+func isUsageLog(path string) bool { return auditVerifySchema(path) == usagelog.SchemaV1 }
 
 // cmdAuditExport re-emits a journal as JSONL on stdout. It opens the file-backed
 // journal (append mode, recovering the chain head) and streams its durable history
