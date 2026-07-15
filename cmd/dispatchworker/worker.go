@@ -229,17 +229,18 @@ func newLaunchCmd(ctx context.Context, resolved []string, cwd string, env map[st
 }
 
 type payload struct {
-	Schema    string            `json:"schema"`
-	OK        bool              `json:"ok"`
-	Lane      string            `json:"lane"`
-	Backend   string            `json:"backend"`
-	Guarded   bool              `json:"guarded"`
-	Workspace string            `json:"workspace"`
-	DryRun    bool              `json:"dry_run"`
-	Command   []string          `json:"command"`
-	Env       map[string]string `json:"env"`
-	Result    *launchResult     `json:"result"`
-	Error     string            `json:"error,omitempty"`
+	Schema           string            `json:"schema"`
+	OK               bool              `json:"ok"`
+	Lane             string            `json:"lane"`
+	Backend          string            `json:"backend"`
+	Guarded          bool              `json:"guarded"`
+	GuardAuditPruned int               `json:"guard_audit_pruned"`
+	Workspace        string            `json:"workspace"`
+	DryRun           bool              `json:"dry_run"`
+	Command          []string          `json:"command"`
+	Env              map[string]string `json:"env"`
+	Result           *launchResult     `json:"result"`
+	Error            string            `json:"error,omitempty"`
 	// GuardBaselineTokens/GuardContextBudgetTokens are the OBSERVABLE for the measured
 	// launch-prompt baseline and the context budget the claude guard was seeded with
 	// (guard.go). Emitted only for the claude backend, so fleet drift in the launch

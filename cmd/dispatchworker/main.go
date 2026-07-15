@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func main() {
@@ -70,8 +71,11 @@ func main() {
 		guardEnvAugment(env)
 	}
 	timeout, bounded := normalizeTimeout(*timeoutS)
+	guardAuditPruned := pruneGuardAuditTick(workspace, time.Now())
 	result := launch(command, workspace, env, nil, timeout, bounded)
-	emit(buildPayload(*lane, backend, workspace, false, &result, "", command, guarded), *asJSON)
+	p := buildPayload(*lane, backend, workspace, false, &result, "", command, guarded)
+	p.GuardAuditPruned = guardAuditPruned
+	emit(p, *asJSON)
 	os.Exit(result.ReturnCode)
 }
 

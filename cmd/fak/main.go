@@ -249,6 +249,8 @@ func main() {
 		cmdCron(os.Args[2:])
 	case "logvault":
 		cmdLogvault(os.Args[2:])
+	case "guard-audit":
+		cmdGuardAudit(os.Args[2:])
 	case "snapshot":
 		cmdSnapshot(os.Args[2:])
 	case "traj":
