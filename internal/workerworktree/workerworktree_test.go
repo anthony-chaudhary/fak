@@ -554,6 +554,45 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 	}
 }
 
+func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing.T) {
+	g := isolatedHappyFake()
+	oldRead := readDisambiguation
+	defer func() { readDisambiguation = oldRead }()
+	reads := 0
+	readDisambiguation = func(repo, tree string) DisambiguationWitness {
+		reads++
+		w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, FamilyCoverage: map[string]float64{"loop": 100}}
+		if reads == 3 {
+			w.SemanticValid = false
+			w.CriticalClean = false
+			w.Detail = "post-apply duplicate grounding"
+		}
+		return w
+	}
+	res, handled := landIsolated("/repo", "/worker", "diff --git a/tools/concept_disambiguation_scorecard.data/rows-loop-family.json b/tools/concept_disambiguation_scorecard.data/rows-loop-family.json\n@@\n-old\n+new\n", writeMsg(t, "feat: x"), []string{"tools/concept_disambiguation_scorecard.data/rows-loop-family.json"}, g.run, g.runEnv)
+	if !handled || res.OK || res.Committed {
+		t.Fatalf("post-apply rejection must be handled before a durable commit: handled=%v result=%+v", handled, res)
+	}
+	if res.Disambiguation.PostApply.Detail == "" || res.Disambiguation.PostApply.SemanticValid {
+		t.Fatalf("machine-readable refusal witness missing: %+v", res.Disambiguation)
+	}
+	if res.Disambiguation.Before.Tree == "" || res.Disambiguation.Worktree.Tree == "" || res.Disambiguation.PostApply.Tree == "" {
+		t.Fatalf("all three refusal witnesses must be retained: %+v", res.Disambiguation)
+	}
+	countVerb := func(verb string) int {
+		n := 0
+		for _, call := range g.calls {
+			if len(call) > 0 && call[0] == verb {
+				n++
+			}
+		}
+		return n
+	}
+	if countVerb("commit-tree") != 0 || countVerb("update-ref") != 0 || countVerb("reset") != 0 || countVerb("checkout") != 0 {
+		t.Fatalf("refusal changed trunk/index/worker state: calls=%v", g.calls)
+	}
+}
+
 func TestLandIsolatedApplyConflictFallsBackNotCommits(t *testing.T) {
 	g := isolatedHappyFake().reply("apply", 1, "error: patch does not apply")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
