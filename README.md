@@ -8,7 +8,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-<!-- readme-verified: 2026-07-14 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-07-15 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
 fak is one small program you run in front of the agent you already use. Your model, IDE, and keys don't change.
 
@@ -16,9 +16,7 @@ fak is one small program you run in front of the agent you already use. Your mod
 fak guard -- claude   # run it in front of your agent: your Pro/Max plan, no API key, every tool call gets a verdict
 ```
 
-**Pick your path:** [wrap your agent](#start-in-one-command) · [15-min tutorial — no key, no GPU](docs/fak/tutorial.md) · [see it on video](visuals/hero-video.mp4) · [install](#install)
-
-> **Project truth default:** every dispatchable ticket estimates its work and share of its parent production scope; unqualified “complete” means production complete. See [Production completion and project scope](docs/project-production-completion.md).
+**Pick your path:** [wrap your agent](#start-in-one-command) · [run it at the level you need](#run-it-at-the-level-you-need) · [15-min tutorial — no key, no GPU](docs/fak/tutorial.md) · [see it on video](visuals/hero-video.mp4) · [install](#install)
 
 ## Why people run it
 
@@ -35,9 +33,9 @@ Every number here traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), an
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Token-economics card measured over 495 real fak guard sessions: 74.8% of API cost avoided versus a no-cache, no-compaction counterfactual priced at list (OBSERVED). The saving is shown as two independent tracks, side by side and never blended into one number — the provider's own prompt-cache rebate ($3,264 avoided, OBSERVED) and fak's compaction-shed ($3,404 avoided, WITNESSED, 686M context tokens shed). fak_share = 42.4% of the saving is fak-authored. SOTA companions: 4.1x less work than a tuned warm-cache stack, and an 86.7% KV-cache hit rate = 100% of optimal." width="900">
 </p>
 
-Across **495 real guarded sessions**, running your agent behind the kernel avoided **74.8% of the API cost** you'd otherwise pay to re-send the same context every turn (OBSERVED, versus a no-cache / no-compaction counterfactual priced at list). The card keeps the two sources honest and *side by side*, never merged into one number: the provider's own prompt-cache rebate — fak keeps the prefix byte-identical so it stays warm — and fak's own compaction-shed, the 686M context tokens it dropped before you paid to re-send them. Measured against the *best already-shipped* alternative, a tuned warm-cache stack, the reuse win is **~4.1×**; of the total saved, the provider's rebate is the provider's, and fak's own authored share is `fak_share = 42.4%`.
+The savings aren't "fak randomly drops turns." fak's core job is to make several **caching layers work together safely** instead of fighting each other, all on by default: it keeps the cached prompt prefix **byte-identical** so the provider's prompt-cache discount never busts, sheds stale mid-session history before you pay to re-send it, and — when fak runs the model itself — owns the KV cache directly for exact prefix reuse. One coordinated system, and it never changes your model's answers. Across **495 real guarded sessions** that added up to **74.8%** of the API cost avoided (OBSERVED, versus a no-cache / no-compaction counterfactual priced at list); the card keeps each source's saving side by side, never blended — the provider's own rebate and fak's own compaction-shed (686M context tokens dropped). Against the *best already-shipped* alternative, a **tuned warm-cache stack**, the reuse win is **~4.1×**.
 
-Every dollar traces to `fak cachevalue report` and its WITNESSED / OBSERVED ledgers; the reuse multipliers trace to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
+Every dollar traces to `fak cachevalue report` and its WITNESSED / OBSERVED ledgers; the reuse multipliers trace to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Plain-English tour of the defaults: [what "managed cache" is](docs/explainers/what-is-managed-cache.md).
 
 ## Start in one command
 
@@ -49,41 +47,37 @@ fak guard --api-key-env ANTHROPIC_API_KEY -- claude   # bill the Anthropic API i
 fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # any OpenAI-compatible agent
 ```
 
-The gateway runs in-process on loopback and your credential passes through untouched. Every tool call on that boundary gets a verdict, and on exit you get a savings-and-decisions summary. Walkthrough + proof a real `/v1/messages` turn crossed the gateway: [docs/integrations/claude.md](docs/integrations/claude.md).
+Your credential passes through untouched; every tool call on that boundary gets a verdict, and on exit you get a savings-and-decisions summary. Proof a real `/v1/messages` turn crossed the gateway: [docs/integrations/claude.md](docs/integrations/claude.md).
 
-## Try it now — no key, no GPU
-
-No clone, no model, no card. (Install is one line, [below](#install).)
+**Try it now — no key, no GPU** (install is one line, [below](#install)):
 
 ```bash
 fak routebench                                    # -> COST / LATENCY / QUALITY vs a one-model baseline
 fak preflight --tool refund_payment --args "{}"   # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
 ```
 
-## More ways to run it
+## Run it at the level you need
 
-| You want | Run | See |
+fak isn't only a wrapper. The same kernel scales up — from a drop-in in front of your agent, to running a model itself, to an always-on service that comes up on its own — carrying the same policy floor and cache coordination at every level.
+
+| Level | Run | What you get |
 |---|---|---|
-| A local model in the kernel | `fak guard --gguf qwen2.5:7b -- claude` — **~120 tok/s** on a single RTX 4070, no key, no network | a small local model is a quality ramp, not a frontier coder — [head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md) · [hardware matrix](docs/HARDWARE-MATRIX.md) |
-| An always-on gateway | `fak node` installs `fak serve` as a real system service | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
-| Crash recovery | `fak resume watchdog` relaunches dead sessions (dry-run by default); `fak resume plan` prices a warm vs cold restart | — |
-| Codex / Cursor / MCP hosts | keep the normal model wire; ask the kernel for verdicts over MCP | [Codex](docs/integrations/openai-codex.md) · [Cursor](docs/integrations/cursor.md) · [examples/mcp](examples/mcp) |
-| Any OpenAI/Anthropic client | `fak serve` in front of a model endpoint | [the serving side](docs/serving/README.md) · [GETTING-STARTED.md](GETTING-STARTED.md) · [docs/fak/api-reference.md](docs/fak/api-reference.md) |
-| Slack | a durable run-card per session; `fak chatrelay` bridges a served model into a channel | [docs/fak/slack-sessions.md](docs/fak/slack-sessions.md) |
+| **Wrap your agent** *(start here)* | `fak guard -- claude` | your Pro/Max plan, no API key, a verdict on every tool call |
+| **A local model in the kernel** | `fak guard --gguf qwen2.5:7b -- claude` | **~120 tok/s** on a single RTX 4070, no key, no network — a quality ramp, not a frontier coder |
+| **An always-on service** | `fak node` installs `fak serve` as a system service | the kernel comes up on its own; any OpenAI/Anthropic client or MCP host points at it |
+| **Codex / Cursor / MCP hosts** | keep your normal model wire; ask the kernel for verdicts over MCP | the policy floor without touching your agent |
 
-Tested live with Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses connect with a single base-URL change ([the catalogue](docs/supported/README.md)).
+Tested live with Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses connect with a single base-URL change. Deep links: [local head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md) · [node setup](docs/fak/node-setup.md) · [the serving side](docs/serving/README.md) · [Codex](docs/integrations/openai-codex.md) · [Cursor](docs/integrations/cursor.md) · [the catalogue](docs/supported/README.md).
 
 ## Every tool call gets a verdict
 
-The speed seam doubles as a safety floor at no extra cost. A tool call crosses the kernel before it runs and comes back ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — logged with a fixed reason code you can test against (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Untrusted result bytes are quarantined before they can become the model's next instruction, and the model can't widen its own authority with text alone. The floor is a JSON file you copy, trim, and test — no model in the loop; starter floors ship for coding, customer support, DevOps, trading, and clinical/PHI. Point at one with `fak guard --policy examples/<file>`. More: [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) · [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).
+The speed seam doubles as a safety floor at no extra cost. A tool call crosses the kernel before it runs and comes back ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — logged with a fixed reason code you can test against (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Untrusted result bytes are quarantined before they can become the model's next instruction. The floor is a JSON file you copy, trim, and test — no model in the loop; starter floors ship for coding, support, DevOps, trading, and clinical/PHI. Point at one with `fak guard --policy examples/<file>`. More: [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) · [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).
 
 <p align="center">
   <img src="visuals/74-session-effectiveness.svg" alt="One fak guard session, replayed from its decision journal: 1,720 hash-chained tool-call decisions over a 7h 11m unattended run — 99.77% allowed to proceed, the 4 dangerous calls blocked (an off-policy git action at the git gate, three tainted-data sinks at the IFC gate), zero hash-chain breaks, across 22 distinct tools. A timeline shows verdicts kept pace across the whole run; a work-mix bar breaks the calls into explore/execute/author/mcp/orchestrate/schedule." width="900">
 </p>
 
-This is one real `fak guard` run, replayed from its decision journal. An agent worked for **7 hours unattended** while the kernel put a verdict on **every one of 1,720 tool calls** — waving the work through, blocking only the four that were dangerous, and hash-chaining every decision into a record that can't be edited after the fact. Nothing about it is special: it's the default shape of running any agent behind the gate. As agents run longer and more autonomously, a real-time verdict on every call plus a tamper-evident trail stops being a nice-to-have — a long unattended run that blocks only what's dangerous and can *prove* what it did is where every session is heading.
-
-Every number on the card is recomputed from the session's hash-chained journal by [`tools/gen_session_effectiveness_svg.py`](tools/gen_session_effectiveness_svg.py) into a checkable [stats sidecar](visuals/74-session-effectiveness.stats.json); the per-verdict kernel cost traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
+One real `fak guard` run, replayed from its hash-chained decision journal: an agent worked **7 hours unattended** while the kernel put a verdict on **every one of 1,720 tool calls** — waving the work through, blocking only the four that were dangerous, and chaining every decision into a record that can't be edited after the fact. Nothing about it is special; it's the default shape of any agent behind the gate. Every number recomputes from the journal into a checkable [stats sidecar](visuals/74-session-effectiveness.stats.json); the per-verdict cost traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ## Install
 
@@ -91,15 +85,15 @@ Every number on the card is recomputed from the session's hash-chained journal b
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
-Go 1.26+ is required (as of 2026-07-14; source: [`go.mod`](go.mod)); no external Go dependencies, no `go.sum`. From a clone: `go build -o fak ./cmd/fak`. Prebuilt archives and containers: [INSTALL.md](INSTALL.md). Build/test/ship: [CONTRIBUTING.md](CONTRIBUTING.md).
+Go 1.26+ is required (as of 2026-07-15; source: [`go.mod`](go.mod)); no external Go dependencies, no `go.sum`. From a clone: `go build -o fak ./cmd/fak`. Prebuilt archives and containers: [INSTALL.md](INSTALL.md). Build/test/ship: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The honest fence
 
-For raw token throughput, reach for vLLM or SGLang — fak is the agent kernel around them, not a replacement. Putting a model *behind* the kernel — running the gateway, riding an engine, and scaling out KV reuse — is the other half of `fak`, with its own home: [the serving side](docs/serving/README.md). Prompt-injection classifiers help, but tool authority comes from your policy file, not the model. Keep irreversible or data-exfiltrating tools off the allow-list. Full list: [what fak is not](docs/explainers/what-fak-is-not.md).
+For raw token throughput, reach for vLLM or SGLang — fak is the agent kernel around them, not a replacement. Prompt-injection classifiers help, but tool authority comes from your policy file, not the model. Keep irreversible or data-exfiltrating tools off the allow-list. Full list: [what fak is not](docs/explainers/what-fak-is-not.md).
 
 ## Docs
 
-Going deeper starts at the [front-page overflow](docs/README-legacy.md) — why now, the per-domain use-case catalogue, model routing, vCache, and everything moved off this page.
+Going deeper starts at the [front-page overflow](docs/README-legacy.md) — why now, the per-domain use-case catalogue, model routing, vCache, Slack sessions, and everything moved off this page.
 
 | If you want... | Read |
 |---|---|
