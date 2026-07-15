@@ -62,6 +62,8 @@ import functools
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -265,27 +267,51 @@ def _codex_ambient_account() -> dict[str, Any]:
             "model": None, "reason": "no ~/.codex/auth.json — run `codex login`"}
 
 
+def _fak_command(root: Path) -> list[str] | None:
+    """Resolve the trusted Go account router without compiling in the live tree."""
+    configured = os.environ.get("FAK_BIN", "").strip()
+    if configured:
+        return shlex.split(configured, posix=os.name != "nt")
+    for candidate in (root / "fak.exe", root / "fak"):
+        if candidate.is_file():
+            return [str(candidate)]
+    found = shutil.which("fak")
+    return [found] if found else None
+
+
 def account_check(root: Path, *, work_kind: str, product: str) -> dict[str, Any]:
-    """fleet_accounts.py route ⇒ the switcher's pick. ok+account ⇒ a free worker.
+    """Native account route returns a credential-ready worker seat, or fails closed.
+
+    The Go router owns refreshed ``login_status``/``can_serve`` truth. Do not use
+    the legacy Python roster here: its enabled/available flags can lag an empty or
+    expired OAuth token, making preflight disagree with the spawn guard.
 
     Codex is the exception: it has no switcher roster (single ambient login), so its
     availability is read straight from ``~/.codex`` rather than the switcher."""
     if product == "codex":
         return _codex_ambient_account()
-    sw = root / "tools" / "fleet_accounts.py"
-    if not sw.exists():
-        return {"available": False, "error": f"switcher not found: {sw}"}
-    cmd = [_py(), str(sw), "route", "--product", product, "--work-kind", work_kind]
+    fak = _fak_command(root)
+    if not fak:
+        return {"available": False, "error": "fak account router not found"}
+    cmd = [*fak, "fleet-accounts", "resolve", "--product", product,
+           "--task", work_kind, "--work-kind", work_kind, "--json"]
     doc = run_json(cmd, root, timeout=45, ok_codes={0, 1})
     if doc.get("_error") and "ok" not in doc:
         return {"available": False, "error": doc["_error"]}
-    acct = doc.get("account") or {}
-    return {"available": bool(doc.get("ok")) and bool(acct),
-            "tag": acct.get("tag"), "dir": acct.get("dir"),
-            "tier": doc.get("selected_tier"), "model": acct.get("model"),
-            "reason": doc.get("reason"),
-            "blocked": [b.get("tag") for b in (doc.get("blocked_target_accounts") or [])]}
-
+    # ``fleet-accounts resolve`` intentionally returns a flat credential-safe row:
+    # token material never crosses this boundary, while login/can-serve does.
+    login_status = str(doc.get("login_status") or "").strip().lower()
+    can_serve = doc.get("can_serve") is True
+    ready = bool(doc.get("ok")) and bool(doc.get("tag")) and login_status == "ready" and can_serve
+    reason = doc.get("reason")
+    if doc.get("tag") and not ready:
+        reason = (doc.get("block_reason") or
+                  f"account login_status={login_status or 'unknown'} can_serve={can_serve}")
+    return {"available": ready,
+            "tag": doc.get("tag"), "dir": doc.get("config_dir"),
+            "tier": doc.get("selected_tier"), "model": doc.get("model"),
+            "login_status": login_status or None, "can_serve": can_serve,
+            "reason": reason, "blocked": []}
 
 def seat_check(root: Path, *, product: str) -> dict[str, Any]:
     """fleet_accounts.py seats ⇒ the explicit seat-pool size for this product.
@@ -1601,7 +1627,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "seat": seat,
         "weekly_cap": weekly,
         "host": host,
-        "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model")},
+        "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model", "login_status", "can_serve")},
         "kernel": kern,
         "os_worker_procs": alive_proc,
     }

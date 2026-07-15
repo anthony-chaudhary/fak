@@ -1,0 +1,51 @@
+{
+  "schema": "fak-dispatch-account-routing-witness/v1",
+  "issue": 4780,
+  "captured_at": "2026-07-15T14:36:57.2368883Z",
+  "candidate_paths": [
+    "tools/dispatch_preflight.py",
+    "tools/dispatch_preflight_test.py"
+  ],
+  "preflight": {
+    "verdict": "SPAWN_OK",
+    "account": {
+      "tag": "july8-netra",
+      "tier": 1,
+      "model": "opus",
+      "dir": "C:\\Users\\USER\\.claude-july8-netra"
+    },
+    "login_status": "ready",
+    "can_serve": true
+  },
+  "launch": {
+    "verdict": "SPAWNED",
+    "guarded": true,
+    "issue": 4508,
+    "lane": "compute",
+    "selected_account": {
+      "tag": "july8-netra",
+      "tier": 1,
+      "model": "opus",
+      "dir": "C:\\Users\\USER\\.claude-july8-netra"
+    },
+    "sidecar_account": {
+      "dir": "C:\\Users\\USER\\.claude-july8-netra",
+      "model": "opus",
+      "tag": "july8-netra",
+      "tier": 1
+    },
+    "startup_gate": {
+      "checked": true,
+      "alive": true,
+      "wait_s": 5.0
+    }
+  },
+  "guard_readback": {
+    "log_sha256": "sha256:049798c1c26391cead54fda6a7d1787c0171fdfe21296f487d9db03d8e91d69b",
+    "selected_config_home_matches": true,
+    "excerpt": [
+      "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from <selected account config home>)"
+    ],
+    "post_startup_outcome": "After the required 5-second alive gate passed, the provider returned an organization-level OAuth/subscription 403. This is not a needs_login/empty-token refusal; no claim is made that the later provider authorization succeeded."
+  }
+}

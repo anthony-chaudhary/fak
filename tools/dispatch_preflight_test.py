@@ -4,7 +4,7 @@
 The spawn gate composes four INDEPENDENT checks (host_check, account_check,
 kernel_alive, proc_worker_count). All of those shell out to other tools, so here
 we replace them on the module with synthetic results and assert the verdict
-logic — SPAWN_OK and every typed REFUSE_* — plus the pure helpers (_last_json,
+logic â€” SPAWN_OK and every typed REFUSE_* â€” plus the pure helpers (_last_json,
 _int) and the cap = min(max_workers, dos target) rule. No subprocess runs.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ def load():
 
 
 def load_fleet_accounts():
-    """Import tools/fleet_accounts.py the same hermetic way — the explicit seat pool
+    """Import tools/fleet_accounts.py the same hermetic way â€” the explicit seat pool
     (#1336: ``seat_pool`` / ``live_seat_leases``) lives there, so the SeatPool and
     LiveSeatLeases tests load and exercise it directly."""
     fa = ROOT / "tools" / "fleet_accounts.py"
@@ -49,12 +50,12 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
 
     ``host_res`` stubs the host-resource probe (#1337); the default is a roomy box
     (64 cores, 128 GB free, 1k threads) whose derived host_cap (32) sits well above
-    every small cap the verdict tests assert, so it never perturbs them — a test
+    every small cap the verdict tests assert, so it never perturbs them â€” a test
     that wants host_cap to BIND passes a scarce host_res of its own.
 
     ``seat`` stubs the explicit seat-pool view (#1336); the default ``{"total": None}``
     means "no seat view" so the seat fold is SKIPPED and the cap is governed by the
-    static/host caps alone — exactly the pre-seat behavior the other verdict tests
+    static/host caps alone â€” exactly the pre-seat behavior the other verdict tests
     assert. A test exercising the seat pool passes an explicit ``{total, free, leased,
     depleted}`` of its own. Stubbing this keeps evaluate() hermetic: without it the
     seat fold would shell out to fleet_accounts.py and leak the real box's seat count
@@ -169,7 +170,7 @@ class HostCheckProtectedTest(unittest.TestCase):
         # #2252: the advisory demotion is for FOREIGN protected processes only.
         # A fleet agent backend (here a claude worker that landed in the guard's
         # protected pid set) is fleet-spawned and fleet-reapable, so its flag
-        # stays actionable — safe=False, never an advisory.
+        # stays actionable â€” safe=False, never an advisory.
         mod = load()
         host = self._host(mod, {
             "schema": "fleet-proc-resource-guard/1", "ok": True,
@@ -282,7 +283,7 @@ class EvaluateVerdictTest(unittest.TestCase):
         # hermetic: no command-line workers, two live issue-resolution sidecars.
         mod._cmdline_worker_pids = lambda: set()
         mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101, 102}
-        # Exercise the REAL union/scoping logic: an unscoped count is cmdline ∪
+        # Exercise the REAL union/scoping logic: an unscoped count is cmdline âˆª
         # sidecars; a product-scoped count is the sidecars for that product. Here
         # the patched witnesses ignore product, so both views see {101, 102}.
         def _count(root=None, *, product=None):
@@ -330,7 +331,7 @@ class EvaluateVerdictTest(unittest.TestCase):
         # Regression for the #517 wedge: `dos [supervise].target` is 0 in this repo
         # (the emit-only `dos loop` keeps no standing loop alive), but the cron-armed
         # issue-dispatch self-spawner must still spawn up to its own --max-workers. A
-        # zero target must NOT pin the cap to 0 — that silently froze the live
+        # zero target must NOT pin the cap to 0 â€” that silently froze the live
         # issue-closer for ~12h. (A positive target below max_workers still throttles;
         # see test_cap_is_min_of_max_workers_and_dos_target.)
         mod = load()
@@ -412,7 +413,7 @@ class HostCapFoldTest(unittest.TestCase):
 
     def test_host_cap_throttles_even_when_dos_target_is_zero(self) -> None:
         # The adaptive promise: target=0 (emit-only loop) no longer means "fill to
-        # --max-workers" — the live host headroom still throttles the spawn count.
+        # --max-workers" â€” the live host headroom still throttles the spawn count.
         mod = load()
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
                      host_res={"cores": 4, "free_ram_mb": 3000, "total_threads": 1000})
@@ -556,7 +557,7 @@ class WorkerCountTest(unittest.TestCase):
         mod._cmdline_worker_pids = (
             lambda product=None: {4242} if product == "claude" else set())
         self.assertEqual(mod.proc_worker_count(Path("/nonexistent"), product="claude"), 1)
-        # a sibling product's cap is unaffected — independent per-pool headroom.
+        # a sibling product's cap is unaffected â€” independent per-pool headroom.
         self.assertEqual(mod.proc_worker_count(Path("/nonexistent"), product="opencode"), 0)
 
     def test_worker_pids_from_process_rows_filters_backend_and_collapses_children(self) -> None:
@@ -658,7 +659,7 @@ class WorkerCountTest(unittest.TestCase):
     def test_live_repair_worker_pid_counts_toward_cap(self) -> None:
         # A contract-repair worker (repair-<N>-<stamp>.pid, spawned by the
         # dispatcher when its whole contract-scan window fails the gate) burns
-        # the same account seat a resolution worker does — it must pin the cap.
+        # the same account seat a resolution worker does â€” it must pin the cap.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
@@ -754,7 +755,7 @@ class WorkerCountTest(unittest.TestCase):
         # cmdline-marked dos-dispatch-loop workers whose process image is that
         # product's backend (they carry no `.backend` sidecar, so the image is the
         # only pool signal). A SIBLING product's workers never pin this pool's cap,
-        # so the two account pools still fill independently — but a claude dos-loop
+        # so the two account pools still fill independently â€” but a claude dos-loop
         # worker now correctly pins the claude pool (closing the undercount that
         # authorized an over-subscribing spawn).
         mod = load()
@@ -769,11 +770,11 @@ class WorkerCountTest(unittest.TestCase):
             seen["product"] = kw.get("product")
             return {201, 202} if kw.get("product") == "opencode" else {201, 202, 203}
         mod.live_resolve_worker_pids = fake_pids
-        # Unscoped: cmdline ∪ all sidecars = {999, 201, 202, 203} = 4
+        # Unscoped: cmdline âˆª all sidecars = {999, 201, 202, 203} = 4
         self.assertEqual(mod.proc_worker_count(ROOT), 4)
-        # claude pool: its sidecars ∪ its cmdline worker {999} = 4
+        # claude pool: its sidecars âˆª its cmdline worker {999} = 4
         self.assertEqual(mod.proc_worker_count(ROOT, product="claude"), 4)
-        # opencode pool: only its sidecars — the claude cmdline worker does NOT pin it
+        # opencode pool: only its sidecars â€” the claude cmdline worker does NOT pin it
         self.assertEqual(mod.proc_worker_count(ROOT, product="opencode"), 2)
         self.assertEqual(seen["product"], "opencode")
 
@@ -854,8 +855,46 @@ class WorkerCountTest(unittest.TestCase):
         self.assertEqual(p["live"], 10)
         self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
 
+    def test_account_check_native_route_rejects_needs_login(self) -> None:
+        mod = load()
+        # Models an enabled registry home whose credential file exists but whose
+        # OAuth accessToken is empty; native resolve folds it to needs_login/false.
+        blocked = {"ok": False, "selected_tier": 1,
+            "tag": "logged-out", "config_dir": "/tmp/logged-out", "model": "opus",
+            "login_status": "needs_login", "can_serve": False,
+            "block_reason": "credential has no usable access token"}
+        with mock.patch.object(mod, "_fak_command", return_value=["fak"]), \
+             mock.patch.object(mod, "run_json", return_value=blocked) as run:
+            got = mod.account_check(ROOT, work_kind="issue", product="claude")
+        self.assertFalse(got["available"])
+        self.assertEqual(got["login_status"], "needs_login")
+        self.assertFalse(got["can_serve"])
+        self.assertIn("no usable access token", got["reason"])
+        self.assertEqual(run.call_args.args[0][:3],
+                         ["fak", "fleet-accounts", "resolve"])
+
+    def test_account_check_native_route_selects_ready_account(self) -> None:
+        mod = load()
+        ready = {"ok": True, "selected_tier": 1,
+            "tag": "ready-seat", "config_dir": "/tmp/ready", "model": "opus",
+            "login_status": "ready", "can_serve": True}
+        with mock.patch.object(mod, "_fak_command", return_value=["fak"]), \
+             mock.patch.object(mod, "run_json", return_value=ready):
+            got = mod.account_check(ROOT, work_kind="issue", product="claude")
+        self.assertTrue(got["available"])
+        self.assertEqual(got["tag"], "ready-seat")
+        self.assertEqual(got["login_status"], "ready")
+        self.assertTrue(got["can_serve"])
+
+    def test_account_check_missing_native_router_fails_closed(self) -> None:
+        mod = load()
+        with mock.patch.object(mod, "_fak_command", return_value=None):
+            got = mod.account_check(ROOT, work_kind="issue", product="claude")
+        self.assertFalse(got["available"])
+        self.assertIn("not found", got["error"])
+
     def test_account_check_codex_uses_ambient_login(self) -> None:
-        # Codex has no switcher roster — its availability is read from ~/.codex.
+        # Codex has no switcher roster â€” its availability is read from ~/.codex.
         import tempfile
         import os as _os
         mod = load()
@@ -910,7 +949,7 @@ class GoalBreadcrumbTest(unittest.TestCase):
     """#2226: a detached /goal worker is fed its goal via STDIN (`claude -p` with
     no prompt argument), so the cmdline scan is blind to it until it leases a
     lane. The launcher's `.goal-runs/<tag>-<stamp>.pid` breadcrumb must occupy a
-    cap slot from the instant of launch — and a dead-pid breadcrumb must NEVER
+    cap slot from the instant of launch â€” and a dead-pid breadcrumb must NEVER
     inflate the count and wedge spawning."""
 
     NOW = 1_000_000.0
@@ -941,7 +980,7 @@ class GoalBreadcrumbTest(unittest.TestCase):
                 {4711})
 
     def test_dead_pid_breadcrumb_is_ignored(self) -> None:
-        # Stale-breadcrumb hygiene: the worker exited, its breadcrumb remains —
+        # Stale-breadcrumb hygiene: the worker exited, its breadcrumb remains â€”
         # it must contribute NOTHING to the live count.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
@@ -953,7 +992,7 @@ class GoalBreadcrumbTest(unittest.TestCase):
 
     def test_recycled_pid_created_after_breadcrumb_is_rejected(self) -> None:
         # Windows pid reuse: a LATER claude session recycled the dead worker's
-        # pid. Alive + right image is not enough — the create time sits outside
+        # pid. Alive + right image is not enough â€” the create time sits outside
         # the breadcrumb's spawn window, so it must not consume a cap slot.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
@@ -966,7 +1005,7 @@ class GoalBreadcrumbTest(unittest.TestCase):
 
     def test_recycled_shell_pid_in_window_is_rejected(self) -> None:
         # A bare shell that recycled the pid inside the spawn window is NOT a
-        # worker — same guard as the resolve sidecars.
+        # worker â€” same guard as the resolve sidecars.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
@@ -1010,7 +1049,7 @@ class GoalBreadcrumbTest(unittest.TestCase):
 
     def test_evaluate_counts_goal_breadcrumb_toward_cap(self) -> None:
         # End to end (the issue's done-condition rung): one live stdin-fed /goal
-        # worker — no lane lease, no cmdline marker, ONLY its breadcrumb — and the
+        # worker â€” no lane lease, no cmdline marker, ONLY its breadcrumb â€” and the
         # preflight already sees live=1 and refuses at cap=1.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
@@ -1030,7 +1069,7 @@ class GoalBreadcrumbTest(unittest.TestCase):
 
     def test_stale_breadcrumb_never_wedges_spawning(self) -> None:
         # Same wiring, but the breadcrumb's pid is DEAD: live stays 0 and the
-        # gate stays SPAWN_OK — a stale entry can never pin the cap.
+        # gate stays SPAWN_OK â€” a stale entry can never pin the cap.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -1196,7 +1235,7 @@ class SeatRefusalTest(unittest.TestCase):
     on depletion (#1336): N>M wave -> exactly M, remainder structurally refused."""
 
     def test_seat_count_is_the_effective_cap(self) -> None:
-        # An N>M ask (max_workers=100) with a free pool of M=4 caps at 4, not 100 —
+        # An N>M ask (max_workers=100) with a free pool of M=4 caps at 4, not 100 â€”
         # the effective concurrency cap becomes the seat count.
         mod = load()
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
@@ -1248,7 +1287,7 @@ class SeatRefusalTest(unittest.TestCase):
 
     def test_all_blocked_pool_is_no_account_not_no_seat(self) -> None:
         # A pool with no free seat because every seat is THROTTLED (none leased) is a
-        # REFUSE_NO_ACCOUNT, not a REFUSE_NO_SEAT — depletion-by-lease and
+        # REFUSE_NO_ACCOUNT, not a REFUSE_NO_SEAT â€” depletion-by-lease and
         # depletion-by-block are distinct typed refusals.
         mod = load()
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
@@ -1274,12 +1313,12 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
     """The raised static ceiling (DEFAULT_MAX_WORKERS ->20, env-tunable via
     FAK_MAX_WORKERS) is safe iff it stays strictly bounded by the adaptive gates.
     These tests pin the new default, prove the env knob retunes it both ways, and
-    prove the raise can never exceed host_cap or the seat pool — i.e. raising the
+    prove the raise can never exceed host_cap or the seat pool â€” i.e. raising the
     operator ceiling only realizes concurrency the box and roster can carry."""
 
     def _load_with_env(self, value: str | None):
         """Load the module with FAK_MAX_WORKERS pinned (None = unset), hermetic to
-        whatever the real box exports — the constant is resolved at import time."""
+        whatever the real box exports â€” the constant is resolved at import time."""
         old = os.environ.pop("FAK_MAX_WORKERS", None)
         if value is not None:
             os.environ["FAK_MAX_WORKERS"] = value
@@ -1304,7 +1343,7 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
 
     def test_default_ceiling_fills_on_a_roomy_box_with_seats(self) -> None:
         # The win: a roomy box with >=20 free session slots and no dos throttle lets
-        # the default ceiling fill to 20 — governed only by the adaptive gates.
+        # the default ceiling fill to 20 â€” governed only by the adaptive gates.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
@@ -1314,7 +1353,7 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_default_ceiling_still_throttles_on_a_loaded_box(self) -> None:
-        # Safety: raising the ceiling cannot saturate a loaded host — host_cap pulls
+        # Safety: raising the ceiling cannot saturate a loaded host â€” host_cap pulls
         # the effective cap back below 20 (here to the floor), exactly as before.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
@@ -1326,7 +1365,7 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
         self.assertLess(p["cap"], mod.DEFAULT_MAX_WORKERS)
 
     def test_default_ceiling_still_bounded_by_a_smaller_seat_pool(self) -> None:
-        # Safety: raising the ceiling cannot overbook accounts — a 3-slot roster
+        # Safety: raising the ceiling cannot overbook accounts â€” a 3-slot roster
         # caps the raised ceiling at 3, not 20.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
@@ -1358,7 +1397,7 @@ class WeeklyCapCooldownTest(unittest.TestCase):
     only the seat is temporarily quota-capped. The persisted hold
     (`.dispatch-runs/account-cap-*.json`, written by the resolve dispatcher's
     check_weekly_cap and read by dispatch_status) is honored here so a fresh preflight
-    refuses the capped seat — and, because issue_dispatch.py gates on this verdict, it
+    refuses the capped seat â€” and, because issue_dispatch.py gates on this verdict, it
     stops offering the seat too."""
 
     NOW_TS = 1_000_000.0  # naive-UTC 1970-01-12T13:46:40
@@ -1412,7 +1451,7 @@ class WeeklyCapCooldownTest(unittest.TestCase):
 
     def test_hold_for_a_different_product_does_not_wall_this_seat(self) -> None:
         # A capped claude seat must not wall an uncapped opencode account of the same
-        # tag — the pools are independent.
+        # tag â€” the pools are independent.
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
