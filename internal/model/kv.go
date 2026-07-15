@@ -384,6 +384,7 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 			return s.linearAttnStep(l, xn, mat)
 		})
 		if tap := s.tapActive; tap != nil {
+			tap.applySteer(l, qpos, out)
 			tap.dumpLayer(l, layerKindLabel(cfg, l), out)
 		}
 		return out
@@ -479,6 +480,7 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 	}
 	out := runBlock(attnBody)
 	if tap := s.tapActive; tap != nil {
+		tap.applySteer(l, qpos, out)
 		tap.dumpLayer(l, layerKindLabel(cfg, l), out)
 	}
 	return out

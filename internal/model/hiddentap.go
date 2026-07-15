@@ -39,7 +39,8 @@ type hiddenTap struct {
 	pos        int          // first absolute position whose forward to dump
 	positions  map[int]bool // optional absolute-position set; nil preserves the single-pos contract
 	ops        bool         // also dump the per-op GDN intermediates inside linear_attention layers
-	promptIDs  []int        // optional provenance carried into meta.json
+	steer      DirectionSteer
+	promptIDs  []int // optional provenance carried into meta.json
 
 	mu       sync.Mutex
 	dirReady bool
@@ -71,7 +72,7 @@ func hiddenTapFromEnv() *hiddenTap {
 		positions = nil
 	}
 	ops := os.Getenv("FAK_HIDDEN_TAP_OPS") != "0"
-	return &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: pos, positions: positions, ops: ops}
+	return &hiddenTap{dir: dir, logitsPath: dir + ".logits.tsv", pos: pos, positions: positions, ops: ops, steer: directionSteerFromEnv()}
 }
 
 var (
@@ -207,6 +208,12 @@ func (t *hiddenTap) dumpLogits(pos int, logits []float32) {
 // probe localizes over: convOut, qk_norm, recurrent, gated_norm, out.
 func (t *hiddenTap) dumpOp(l int, op string, v []float32) {
 	t.writeF32(fmt.Sprintf("layer_%02d_op_%s.f32", l, op), v)
+}
+
+func (t *hiddenTap) applySteer(layer, position int, hidden []float32) {
+	if t != nil {
+		t.steer.Apply(layer, position, hidden)
+	}
 }
 
 type hiddenTapLayerMeta struct {

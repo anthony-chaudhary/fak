@@ -1,0 +1,12 @@
+{
+  "schema": "fak.verbalizable_direction.v1",
+  "status": "not-yet-live",
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "served_arch": "qwen2",
+  "backend": "cuda",
+  "compute": "sanctioned GCP L4 node",
+  "concept": "positive-versus-negative instruction framing",
+  "required_artifacts": ["positive-layer-*.f32", "negative-layer-*.f32", "direction.f32", "steer-*.jsonl", "meta.json"],
+  "missing_witness": "the deployed fak image predates the bidirectional hidden hook; rebuild the CUDA image from the ship commit, capture contrastive hidden dumps, derive direction.f32, and rerun +/- steering",
+  "ready_command": "FAK_HIDDEN_TAP=/tmp/positive FAK_HIDDEN_TAP_POS=<pos> fak serve --gguf /models/qwen2.5-0.5b-instruct-q8_0.gguf --backend cuda; repeat for negative, derive direction.f32, then set FAK_HIDDEN_STEER, FAK_HIDDEN_STEER_LAYER, FAK_HIDDEN_STEER_POS, and FAK_HIDDEN_STEER_ALPHA"
+}
