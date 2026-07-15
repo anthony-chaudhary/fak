@@ -100,9 +100,8 @@ func TestAdjudicationNoteCarriesReversibilityConfirmRecipe(t *testing.T) {
 		// contradiction that wedged a fleet session (the agent obeyed the
 		// prohibition, never echoed the token, and the push never happened).
 		"A preview-confirm refusal is a pause, not a denial",
-		// The trailer joins the note's terminal period without doubling it
-		// (the old unconditional ". Do not..." rendered "first.. Do not").
-		"git push --dry-run. A preview-confirm refusal",
+		// The allowed path leads the trailing structured reason/constraint.
+		"sanctioned alternative: push with the safe compiled verb: fak sync push",
 		"This is per-tool feedback, not a session stop",
 		"A session stop only comes from a declared stop policy",
 	} {

@@ -27,11 +27,11 @@ type refusalNote struct {
 }
 
 // refusalNotes is the ordered registry of actionable-half renderers. Order is
-// load-bearing: it fixes the in-band rendering order (reversibility recipe, then
-// the sanctioned alternative, then the livelock nudge) that the wire tests pin.
+// load-bearing: the allowed/sanctioned alternative leads, while the confirm
+// recipe and livelock constraint trail it. The wire tests pin this order.
 var refusalNotes = []refusalNote{
-	{render: reversibilityGateNote, confirmRecipe: true},
 	{render: remedyNote},
+	{render: reversibilityGateNote, confirmRecipe: true},
 	{render: livelockInBandNote},
 }
 
@@ -69,18 +69,19 @@ func compiledSidestepRemedy(a ToolAdjudication) bool {
 func denySummary(adjs []ToolAdjudication) string {
 	parts := make([]string, 0, len(adjs))
 	for _, a := range adjs {
-		part := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, reasonOrKind(a.Verdict), a.Verdict.Disposition)
-		if notes, _ := renderRefusalNotes(a); notes != "" {
-			part += " " + notes
+		constraint := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, reasonOrKind(a.Verdict), a.Verdict.Disposition)
+		notes, _ := renderRefusalNotes(a)
+		if notes == "" {
+			notes = "choose an allowed alternative"
 		}
-		parts = append(parts, part)
+		parts = append(parts, notes+" Constraint: "+constraint)
 	}
 	// Emit-time reframe (#3566): flip any unambiguous negative idiom to lead with the
 	// affordance before this note is pushed to the model. The pass is token-superset
 	// safe, so every structured reason token (POLICY_BLOCK, OFF_TRUNK, ...) and every
 	// load-bearing judgement prohibition ("do not re-propose") survives byte-for-byte.
 	return negframe.ReframeFakOnly(
-		negframe.Fak("All proposed tool calls were refused by the fak kernel: "),
+		negframe.Fak("Allowed next step for each refused tool call: "),
 		negframe.Opaque(strings.Join(parts, "; ")),
 	)
 }
@@ -102,17 +103,19 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	for _, a := range adjs {
 		switch {
 		case !a.Admitted:
-			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
-			if notes, recipe := renderRefusalNotes(a); notes != "" {
-				entry += " " + notes
-				if recipe {
-					hasConfirmRecipe = true
-					// A compiled sidestep (a `fak` verb that avoids the gate
-					// entirely) is the resolution to LEAD with; the confirm-token
-					// dance is the fallback for when only the raw call will do.
-					if compiledSidestepRemedy(a) {
-						hasCompiledSidestep = true
-					}
+			constraint := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
+			notes, recipe := renderRefusalNotes(a)
+			if notes == "" {
+				notes = "choose an allowed alternative"
+			}
+			entry := notes + " Constraint: " + constraint
+			if recipe {
+				hasConfirmRecipe = true
+				// A compiled sidestep (a `fak` verb that avoids the gate
+				// entirely) is the resolution to LEAD with; the confirm-token
+				// dance is the fallback for when only the raw call will do.
+				if compiledSidestepRemedy(a) {
+					hasCompiledSidestep = true
 				}
 			}
 			denied = append(denied, entry)
@@ -131,9 +134,9 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	writeOpaque := func(text string) { fragments = append(fragments, negframe.Opaque(text)) }
 	writeFak("[fak] ")
 	if len(denied) > 0 {
-		writeFak("refused ")
+		writeFak("Allowed next step for ")
 		writeFak(strconv.Itoa(len(denied)))
-		writeFak(" tool call(s): ")
+		writeFak(" refused tool call(s): ")
 		joined := strings.Join(denied, "; ")
 		writeOpaque(joined)
 		if !strings.HasSuffix(joined, ".") {

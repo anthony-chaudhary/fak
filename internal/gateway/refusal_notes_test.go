@@ -12,6 +12,32 @@ import (
 // had to hand-stitch another note call at each site; this test pins that a fresh
 // kind now rides the generic fold instead.
 
+func TestRefusalNotesLeadWithAllowedPathAndTrailReason(t *testing.T) {
+	adj := ToolAdjudication{
+		Tool: "git push", Admitted: false,
+		Verdict: WireVerdict{
+			Kind: "DENY", Reason: "REVERSIBILITY_CONFIRM", Disposition: "RETRYABLE",
+			Detail: map[string]string{
+				"confirm_token": "tok", "confirm_key": "_fak_confirm",
+				"remedy": "use fak sync push",
+			},
+		},
+	}
+	for name, got := range map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
+	} {
+		allowed := strings.Index(got, "sanctioned alternative: use fak sync push")
+		reason := strings.Index(got, "REVERSIBILITY_CONFIRM")
+		if allowed < 0 || reason < 0 {
+			t.Fatalf("%s missing contract fields: %q", name, got)
+		}
+		if allowed >= reason {
+			t.Fatalf("%s order = allowed:%d reason:%d; want allowed < reason: %q", name, allowed, reason, got)
+		}
+	}
+}
+
 func TestReframeUserSpanUntouched(t *testing.T) {
 	userTool := "Do not forget `USER_LITERAL`; never rewrite my words."
 	adj := ToolAdjudication{
@@ -96,11 +122,8 @@ func TestAdjudicationNoteSurfacesComplaintChannel(t *testing.T) {
 	}
 }
 
-// The emit-time reframe pass (#3566) flips an unambiguous negative idiom carried by an
-// interpolated remedy to lead with the affordance, WHILE preserving every structured reason
-// token byte-for-byte. This pins both halves on the real content-channel path: the "do not
-// forget to" idiom becomes "remember to", and the OFF_TRUNK / POLICY_BLOCK contract tokens
-// survive the pass.
+// External remedy text is opaque (#4430), while its allowed path still leads every
+// structured refusal token (#4439). This pins both properties on the real content path.
 func TestRefusalNotesTokensStable(t *testing.T) {
 	adj := ToolAdjudication{
 		Tool:     "Bash",
@@ -123,12 +146,12 @@ func TestRefusalNotesTokensStable(t *testing.T) {
 				t.Fatalf("%s dropped contract token %q:\n%s", name, tok, got)
 			}
 		}
-		// the mechanical idiom was flipped to lead with the affordance
-		if !strings.Contains(got, "remember to clear the OFF_TRUNK blocker") {
-			t.Fatalf("%s did not reframe the negative idiom:\n%s", name, got)
+		remedy := "sanctioned alternative: do not forget to clear the OFF_TRUNK blocker"
+		if !strings.Contains(got, remedy) {
+			t.Fatalf("%s changed opaque remedy bytes:\n%s", name, got)
 		}
-		if strings.Contains(got, "do not forget to") {
-			t.Fatalf("%s left the negative idiom unreframed:\n%s", name, got)
+		if strings.Index(got, remedy) >= strings.Index(got, "POLICY_BLOCK") {
+			t.Fatalf("%s did not lead with the allowed path:\n%s", name, got)
 		}
 	}
 	// The load-bearing judgement prohibition (adjudicationNote's re-propose trailer) is preserved
@@ -202,10 +225,8 @@ func TestComplaintHintAbsentWithoutDenial(t *testing.T) {
 	}
 }
 
-// The seam must preserve the pinned rendering ORDER of the existing notes
-// (reversibility recipe, then sanctioned alternative) - the wire tests read the
-// confirm token adjacent to the recipe, so a reordered fold would be a silent
-// regression.
+// The seam pins the allowed-first rendering order: sanctioned alternative,
+// then the preview-confirm constraint.
 func TestRefusalNoteSeamPreservesOrderAndConfirmRecipe(t *testing.T) {
 	adj := reversibilityRefusal()
 	adj.Verdict.Detail["remedy"] = "run git push --dry-run"
@@ -218,7 +239,7 @@ func TestRefusalNoteSeamPreservesOrderAndConfirmRecipe(t *testing.T) {
 	if recipeIdx < 0 || fixIdx < 0 {
 		t.Fatalf("seam dropped a note: recipe=%d fix=%d in %q", recipeIdx, fixIdx, notes)
 	}
-	if recipeIdx > fixIdx {
-		t.Fatalf("seam reordered notes (recipe must precede the sanctioned alternative):\n%s", notes)
+	if fixIdx > recipeIdx {
+		t.Fatalf("seam reordered notes (sanctioned alternative must precede recipe):\n%s", notes)
 	}
 }

@@ -171,7 +171,7 @@ func TestResponsesAllDeniedSynthesizesText(t *testing.T) {
 	if len(functionCallItems(resp.Output)) != 0 {
 		t.Errorf("all-denied turn still emitted function_call items: %+v", resp.Output)
 	}
-	if !strings.Contains(messageText(resp.Output), "refused by the fak kernel") {
+	if !strings.Contains(messageText(resp.Output), "Allowed next step for each refused tool call") {
 		t.Errorf("output_text = %q, want the deny summary", messageText(resp.Output))
 	}
 }

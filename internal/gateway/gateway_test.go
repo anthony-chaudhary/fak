@@ -1990,7 +1990,7 @@ func TestChatProxyAllDeniedYieldsStopWithSummary(t *testing.T) {
 	if len(ch.Message.ToolCalls) != 0 {
 		t.Errorf("no tool calls should survive, got %d", len(ch.Message.ToolCalls))
 	}
-	if !strings.Contains(ch.Message.Content, "refused by the fak kernel") {
+	if !strings.Contains(ch.Message.Content, "Allowed next step for each refused tool call") {
 		t.Errorf("a fak-unaware client needs an in-band summary, got %q", ch.Message.Content)
 	}
 }
