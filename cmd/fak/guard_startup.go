@@ -232,6 +232,9 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if n := guardApplyAllowOverlay(&rt, allowOverlay); n > 0 {
 		floorSource += fmt.Sprintf(" + operator allow overlay (%d extra tool(s); fak guard allow --list)", n)
 	}
+	if attached := guardAllowShellAttachments(allowOverlay.Allow); len(attached) > 0 {
+		floorSource += fmt.Sprintf("; inherited shell danger rules attached: %s", strings.Join(attached, ", "))
+	}
 	// The adjudicator runs in this parent process. Declare the narrow Claude
 	// scratch tree here so structural write/delete gates can prove containment;
 	// never widen this default to the whole OS temp directory.

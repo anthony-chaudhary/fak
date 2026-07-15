@@ -126,3 +126,33 @@ func TestLintHarnessProfilesHarnessMissingRequiredToolFails(t *testing.T) {
 		t.Fatalf("expected the lint to flag the uncovered required tool; got %v", problems)
 	}
 }
+
+func TestShellDangerRulesForNamespacedShells(t *testing.T) {
+	cases := []struct {
+		name string
+		sets string
+	}{
+		{"opencode.bash", "posix_shell"},
+		{"mcp__x__bash", "posix_shell"},
+		{"mcp__x__pwsh", "windows_shell"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rules, ok := ShellDangerRulesFor(tc.name)
+			if !ok || len(rules) == 0 {
+				t.Fatalf("ShellDangerRulesFor(%q) = %d, %v; want inherited rules", tc.name, len(rules), ok)
+			}
+			if got := strings.Join(ShellDangerRuleSetsFor(tc.name), ","); got != tc.sets {
+				t.Fatalf("rule sets = %q, want %q", got, tc.sets)
+			}
+			for _, rule := range rules {
+				if rule.Tool != tc.name || rule.Arg != "command" || rule.DenyRegex == "" {
+					t.Fatalf("bad inherited rule: %+v", rule)
+				}
+			}
+		})
+	}
+	if rules, ok := ShellDangerRulesFor("mcp__x__search"); ok || len(rules) != 0 {
+		t.Fatalf("non-shell inherited rules = %+v, %v; want none", rules, ok)
+	}
+}

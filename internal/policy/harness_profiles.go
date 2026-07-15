@@ -87,12 +87,100 @@ var shellProgramNames = map[string]bool{
 	"zsh": true, "fish": true, "ksh": true, "csh": true, "tcsh": true,
 }
 
-func looksShellLike(tool string) bool {
+func shellToolSegment(tool string) string {
 	last := tool
-	if i := strings.LastIndex(tool, "."); i >= 0 {
-		last = tool[i+1:]
+	if i := strings.LastIndex(last, "."); i >= 0 {
+		last = last[i+1:]
 	}
-	return shellProgramNames[strings.ToLower(last)]
+	if i := strings.LastIndex(last, "__"); i >= 0 {
+		last = last[i+2:]
+	}
+	return strings.ToLower(last)
+}
+
+func looksShellLike(tool string) bool {
+	return shellProgramNames[shellToolSegment(tool)]
+}
+
+// ShellDangerRuleSetsFor returns the inherited danger classes for a shell-like
+// tool name. It recognizes committed aliases plus namespaced dot and MCP `__`
+// forms whose final segment is an unambiguous shell program.
+func ShellDangerRuleSetsFor(tool string) []string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return nil
+	}
+	var prof harnessProfilesDoc
+	if err := json.Unmarshal(harnessProfilesJSON, &prof); err != nil {
+		return nil // embedded data is CI-linted; fail closed at its callers
+	}
+	for _, alias := range prof.ShellAliases {
+		if strings.EqualFold(alias.Name, tool) {
+			return append([]string(nil), alias.Inherits...)
+		}
+	}
+	switch shellToolSegment(tool) {
+	case "powershell", "pwsh":
+		return []string{"windows_shell"}
+	case "bash", "sh", "zsh", "fish", "ksh", "csh", "tcsh":
+		return []string{"posix_shell"}
+	default:
+		return nil
+	}
+}
+
+// ShellDangerRulesFor materializes the shared danger classes for tool as
+// manifest rules. The returned rules are fresh values and can be compiled into
+// a live Runtime without mutating the embedded profile data.
+func ShellDangerRulesFor(tool string) ([]ArgRule, bool) {
+	var prof harnessProfilesDoc
+	if err := json.Unmarshal(harnessProfilesJSON, &prof); err != nil {
+		return nil, false
+	}
+	sets := ShellDangerRuleSetsFor(tool)
+	if len(sets) == 0 {
+		return nil, false
+	}
+	var out []ArgRule
+	for _, setName := range sets {
+		set, ok := prof.ShellRuleSets[setName]
+		if !ok {
+			return nil, false
+		}
+		for _, entry := range set.Rules {
+			out = append(out, ArgRule{Tool: tool, Arg: set.Arg, DenyRegex: entry.DenyRegex})
+		}
+	}
+	return out, len(out) > 0
+}
+
+// AttachShellDangerRules compiles and appends the inherited danger rules for a
+// newly admitted shell-like tool. It returns the rule-set names attached.
+func AttachShellDangerRules(rt *Runtime, tool string) []string {
+	if rt == nil {
+		return nil
+	}
+	rules, ok := ShellDangerRulesFor(tool)
+	if !ok {
+		return nil
+	}
+	preds, err := compileArgRules(rules)
+	if err != nil {
+		return nil // embedded patterns are compile-tested by the profile lint
+	}
+	for _, candidate := range preds {
+		duplicate := false
+		for _, existing := range rt.Adjudicator.ArgPredicates {
+			if strings.EqualFold(existing.Tool, candidate.Tool) && existing.Arg == candidate.Arg && existing.Kind == candidate.Kind && existing.Re != nil && candidate.Re != nil && existing.Re.String() == candidate.Re.String() {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			rt.Adjudicator.ArgPredicates = append(rt.Adjudicator.ArgPredicates, candidate)
+		}
+	}
+	return ShellDangerRuleSetsFor(tool)
 }
 
 // LintHarnessProfiles compares a guard-floor manifest against the committed

@@ -160,6 +160,7 @@ func guardApplyAllowOverlay(rt *policy.Runtime, ov guardAllowOverlay) int {
 				rt.Adjudicator.Allow[t] = true
 				added++
 			}
+			policy.AttachShellDangerRules(rt, t)
 		}
 	}
 	if len(ov.AllowPrefix) > 0 {
@@ -180,6 +181,22 @@ func guardApplyAllowOverlay(rt *policy.Runtime, ov guardAllowOverlay) int {
 
 // guardAllowNormalize trims, de-dupes, and sorts a name list so the overlay file and
 // its rendered summary are deterministic no matter the input order.
+func guardAllowShellAttachments(names []string) []string {
+	var out []string
+	for _, name := range guardAllowNormalize(names) {
+		if sets := policy.ShellDangerRuleSetsFor(name); len(sets) > 0 {
+			out = append(out, name+"="+strings.Join(sets, "+"))
+		}
+	}
+	return out
+}
+
+func printGuardAllowShellAttachments(w io.Writer, names []string) {
+	if attached := guardAllowShellAttachments(names); len(attached) > 0 {
+		fmt.Fprintf(w, "  Attached inherited shell danger rules: %s.\n", strings.Join(attached, ", "))
+	}
+}
+
 func guardAllowNormalize(in []string) []string {
 	seen := make(map[string]bool, len(in))
 	out := make([]string, 0, len(in))
@@ -268,6 +285,9 @@ func cmdGuardAllow(argv []string) {
 			os.Exit(1)
 		}
 		fmt.Printf("fak guard allow: added %s to the operator allow overlay.\n", strings.Join(names, ", "))
+		if !*prefix {
+			printGuardAllowShellAttachments(os.Stdout, names)
+		}
 		fmt.Println("  Takes effect on the next `fak guard` launch (or POST /v1/fak/policy/reload on a running gateway).")
 		printGuardAllowOverlay(os.Stdout, path, ov)
 	}
