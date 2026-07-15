@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -239,6 +240,22 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	res, code := evaluatePrePushBuildAt(r, *base, *tip, *budget, *advisory)
+	// Repeat the earliest commit admission decision over immutable base..tip
+	// objects. This protects direct pushes and is the CI-consumed committed-diff seam.
+	if res.BaseSha != "" && res.Ref != "" {
+		if d, err := hooks.ReadRangeDiff(r, res.BaseSha, res.Ref); err == nil {
+			if findings, err := hooks.CheckConceptAdmission(d); err == nil && len(findings) > 0 {
+				for _, f := range findings {
+					fmt.Fprintf(stderr, "CONCEPT_ADMISSION %s:%d: %s\n", f.File, f.Line, f.Detail)
+				}
+				if code == 0 {
+					code = 1
+				}
+				res.Verdict = "CONCEPT_ADMISSION"
+				res.Detail = findings[0].Detail
+			}
+		}
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)

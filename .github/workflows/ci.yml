@@ -47,6 +47,13 @@ jobs:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
 
+      # CI-spec impact (#4757): add the committed-diff concept-admission contract.
+      # Consumer migrated: build-vet-test invokes the same Go gate as pre-commit/pre-push.
+      # Cutover is additive and rollback is removal of this step; no check name or schema changes.
+      - name: changed-corpus concept admission
+        if: github.event_name == 'pull_request'
+        run: go run ./cmd/fak concept admission --base "${{ github.event.pull_request.base.sha }}" --tip "${{ github.sha }}" --json
+
       # Build/test cache: setup-go's built-in cache is off (no go.sum to key on), but the
       # GOCACHE — compiled packages AND cached test results — is the biggest CI-time lever
       # on this zero-dep module. `go build ./...` and `go test ./...` otherwise recompile and

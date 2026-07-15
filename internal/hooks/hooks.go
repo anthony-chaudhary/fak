@@ -80,6 +80,7 @@ func PreCommitGates() []Gate {
 		{Name: "BROKEN_LINK", ModeEnv: "FLEET_LINK_GUARD", EscapeEnv: "ALLOW_BAD_LINK", Check: gateBrokenLink},
 		{Name: "FILE_ADMISSION", ModeEnv: "FLEET_FILE_GUARD", EscapeEnv: "ALLOW_STRAY_FILE", Check: gateFileAdmission},
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
+		{Name: "CONCEPT_ADMISSION", ModeEnv: "FLEET_CONCEPT_GUARD", EscapeEnv: "ALLOW_CONCEPT_GAP", Check: gateConceptAdmission},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
 		// BARE_COMMIT_SWEEP is ADVISORY (issue #3615): DefaultMode "warn" so it never reds a shared
@@ -161,6 +162,8 @@ type StagedDiff struct {
 	StagedPaths       []string               // --diff-filter=ACMR name list (touched)
 	AddedPaths        []string               // --diff-filter=A name list (newly added)
 	AddedRenamedPaths []string               // --diff-filter=AR name list (file-admission scope)
+	IndexPaths        []string               // all candidate-index paths (for cross-file semantic gates)
+	Treeish           string                 // ":" for index, or a committed tip for CI range checks
 
 	fileCache map[string]fileEntry // rel path -> cached read
 }
@@ -181,6 +184,7 @@ func readStagedDiffWith(ctx context.Context, run Runner, root string) (*StagedDi
 	d := &StagedDiff{
 		Root:        root,
 		run:         run,
+		Treeish:     ":",
 		ctx:         ctx,
 		AddedByFile: map[string][]AddedLine{},
 		fileCache:   map[string]fileEntry{},
@@ -200,7 +204,45 @@ func readStagedDiffWith(ctx context.Context, run Runner, root string) (*StagedDi
 	d.StagedPaths = nameList(run, ctx, root, "--diff-filter=ACMR")
 	d.AddedPaths = nameList(run, ctx, root, "--diff-filter=A")
 	d.AddedRenamedPaths = nameStatusPaths(run, ctx, root, "--diff-filter=AR")
+	if out, code, err := run(ctx, root, "ls-files"); err == nil && code == 0 {
+		for _, line := range strings.Split(out, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				d.IndexPaths = append(d.IndexPaths, filepath.ToSlash(line))
+			}
+		}
+	}
 
+	return d, nil
+}
+
+// ReadRangeDiff builds the same admission view from a committed base..tip range.
+// CI uses it to repeat the pre-commit decision against immutable objects.
+func ReadRangeDiff(root, base, tip string) (*StagedDiff, error) {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(tip) == "" {
+		return nil, ErrCouldNotRun
+	}
+	d := &StagedDiff{Root: root, run: realRunner, ctx: context.Background(), Treeish: tip + ":", AddedByFile: map[string][]AddedLine{}, fileCache: map[string]fileEntry{}}
+	out, code, err := realRunner(d.ctx, root, "diff", "--unified=0", "--no-color", "--diff-filter=ACMR", base, tip)
+	if err != nil || code != 0 {
+		return nil, ErrCouldNotRun
+	}
+	d.AddedByFile = parseUnifiedAddedLines(out)
+	out, code, err = realRunner(d.ctx, root, "diff", "--name-only", "--diff-filter=ACMR", base, tip)
+	if err == nil && code == 0 {
+		for _, x := range strings.Split(out, "\n") {
+			if x = strings.TrimSpace(x); x != "" {
+				d.StagedPaths = append(d.StagedPaths, filepath.ToSlash(x))
+			}
+		}
+	}
+	out, code, err = realRunner(d.ctx, root, "ls-tree", "-r", "--name-only", tip)
+	if err == nil && code == 0 {
+		for _, x := range strings.Split(out, "\n") {
+			if x = strings.TrimSpace(x); x != "" {
+				d.IndexPaths = append(d.IndexPaths, filepath.ToSlash(x))
+			}
+		}
+	}
 	return d, nil
 }
 
@@ -263,8 +305,19 @@ func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
 	if e, ok := d.fileCache[rel]; ok {
 		return e.data, e.exists
 	}
-	b, err := os.ReadFile(filepath.Join(d.Root, filepath.FromSlash(rel)))
-	e := fileEntry{data: b, exists: err == nil}
+	var b []byte
+	exists := false
+	if d.run != nil {
+		if out, code, err := d.run(d.ctx, d.Root, "show", d.Treeish+filepath.ToSlash(rel)); err == nil && code == 0 {
+			b, exists = []byte(out), true
+		}
+	}
+	if !exists {
+		var err error
+		b, err = os.ReadFile(filepath.Join(d.Root, filepath.FromSlash(rel)))
+		exists = err == nil
+	}
+	e := fileEntry{data: b, exists: exists}
 	d.fileCache[rel] = e
 	return e.data, e.exists
 }
