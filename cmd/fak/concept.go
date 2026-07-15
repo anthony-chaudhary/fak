@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func runConcept(stdout, stderr io.Writer, args []string) int {
@@ -153,6 +154,7 @@ func relFiles(in []string) []string {
 }
 func runGitOutput(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	b, e := cmd.Output()
 	return string(b), e
 }
