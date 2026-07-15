@@ -56,13 +56,15 @@ type dispatchTickOptions struct {
 	// seat default. PinWorkerModel turns on the benchmark gate (a model-accounting run that
 	// pins the account/default model so it measures a KNOWN model, not a silently-switched
 	// one). Both default off, so a normal claude tick stays on the seat default + fallback.
-	WorkerModel     string
-	CapacityReason  string
-	CapacityFrom    string
-	CapacityTargets []modelroute.CapacityTarget
-	RequiredModelB  float64
-	RequiredContext int
-	PinWorkerModel  bool
+	WorkerModel        string
+	CapacityReason     string
+	CapacityFrom       string
+	CapacityTargets    []modelroute.CapacityTarget
+	RequiredModelB     float64
+	RequiredContext    int
+	PinWorkerModel     bool
+	AcceptanceArtifact string
+	AcceptanceOverride string
 	// WorkClassModel is a LOW-precedence worker-model default for the tick's work class:
 	// `fak garden dispatch` (the project-management / repo-maintenance dispatcher) sets it
 	// to fable so routine coordination work runs on the cheap model by default. It sits
@@ -233,6 +235,8 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	requiredModelB := fs.Float64("required-model-b", 0, "minimum faithful model size in billions")
 	requiredContext := fs.Int("required-context", 0, "required context tokens")
 	pinWorkerModel := fs.Bool("pin-worker-model", false, "benchmark gate: pin the claude worker to the account/default model (model-accounting run) instead of the seat default + fallback chain")
+	acceptanceArtifact := fs.String("model-acceptance", "", "require this exact-ID model acceptance artifact before provider launch")
+	acceptanceOverride := fs.String("model-acceptance-override", "", "operator reason to override a model acceptance HOLD (audited)")
 	modelDowngrade := fs.Bool("model-downgrade", false, "Layer-2 in-tick re-dispatch: when the target's last slot exited model-switchable (usage_cap/model_unknown/rate_limit), re-dispatch it on the next downgrade-chain model")
 	focusHold := fs.Bool("focus-hold", false, "focus WIP backpressure (#3223): HOLD (refuse) a spawn that OPENS a new objective while the fleet is at/over the focusscore WIP cap, instead of the default WARN (advise + still spawn); continuation of an already-open objective is never held ($FLEET_DISPATCH_FOCUS_HOLD also enables)")
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off (default: $FLEET_CODEX_LOOP_GATE or loop)")
@@ -316,6 +320,8 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		RequiredModelB:          *requiredModelB,
 		RequiredContext:         *requiredContext,
 		PinWorkerModel:          *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
+		AcceptanceArtifact:      firstString(strings.TrimSpace(*acceptanceArtifact), strings.TrimSpace(os.Getenv("FLEET_MODEL_ACCEPTANCE"))),
+		AcceptanceOverride:      strings.TrimSpace(*acceptanceOverride),
 		ModelDowngrade:          *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
 		FocusHold:               *focusHold || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_FOCUS_HOLD")),
 		CodexLoopGate:           strings.TrimSpace(*codexLoopGate),
@@ -866,6 +872,10 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	launch, launchPreview, guardedPreview, err := prepareDispatchWorkerCommand(root, opts, pick, account, target, promptChars, labels, witnessRecords, payload)
 	if err != nil {
 		return nil, err
+	}
+
+	if !applyDispatchModelAcceptance(opts.AcceptanceArtifact, launch.Model, labels, time.Now().UTC(), opts.AcceptanceOverride, payload) {
+		return finish(payload), nil
 	}
 
 	// Self-modify pre-route (#1397): a GUARDED worker aimed at the trust-critical witness
