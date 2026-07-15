@@ -148,12 +148,13 @@ type Provenance struct {
 
 // KPIs is the five-counter KPI set (unit 77).
 type KPIs struct {
-	ToolCallP50Ns        int64   `json:"tool_call_p50_ns"`
-	ToolCallP99Ns        int64   `json:"tool_call_p99_ns"`
-	VDSOHitRate          float64 `json:"vdso_hit_rate"`
-	PreflightCatchRate   float64 `json:"preflight_catch_rate"`
-	ContextPollutionRate float64 `json:"context_pollution_rate"`
-	TokensPerTask        float64 `json:"tokens_per_task"`
+	ToolCallP50Ns        int64             `json:"tool_call_p50_ns"`
+	ToolCallP99Ns        int64             `json:"tool_call_p99_ns"`
+	VDSOHitRate          float64           `json:"vdso_hit_rate"`
+	PreflightCatchRate   float64           `json:"preflight_catch_rate"`
+	ContextPollutionRate float64           `json:"context_pollution_rate"`
+	TokensPerTask        float64           `json:"tokens_per_task"`
+	NegationTax          NegationTaxReport `json:"negation_tax"`
 }
 
 // Report is the full A/B artifact (report.json).
