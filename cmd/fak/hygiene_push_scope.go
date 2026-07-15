@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 var hygienePushDelta = committedPushPaths
@@ -19,12 +20,16 @@ func scopeHygieneFindingsToPush(root string, findings []hooks.Finding) []hooks.F
 }
 
 func committedPushPaths(root string) ([]string, bool) {
-	mergeBase, err := exec.Command("git", "-C", root, "merge-base", "origin/main", "HEAD").Output()
+	mergeBaseCmd := exec.Command("git", "-C", root, "merge-base", "origin/main", "HEAD")
+	windowgate.ConfigureBackgroundCommand(mergeBaseCmd)
+	mergeBase, err := mergeBaseCmd.Output()
 	if err != nil || strings.TrimSpace(string(mergeBase)) == "" {
 		return nil, false
 	}
 	base := strings.TrimSpace(string(mergeBase))
-	out, err := exec.Command("git", "-C", root, "diff", "--name-only", base+"..HEAD", "--", "internal/").Output()
+	diffCmd := exec.Command("git", "-C", root, "diff", "--name-only", base+"..HEAD", "--", "internal/")
+	windowgate.ConfigureBackgroundCommand(diffCmd)
+	out, err := diffCmd.Output()
 	if err != nil {
 		return nil, false
 	}
