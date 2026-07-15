@@ -49,6 +49,7 @@ type guardWitnessedDoneGit struct{ dir string }
 func (g guardWitnessedDoneGit) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = g.dir
+	configureDispatchHelperCommand(cmd)
 	return cmd.CombinedOutput()
 }
 
@@ -94,6 +95,7 @@ func inspectGuardWitnessedDone(ctx context.Context, transcriptPath, root string,
 	gitWitnessRun := witness.Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = root
+		configureDispatchHelperCommand(cmd)
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			return string(out), 0, nil
