@@ -12,7 +12,7 @@
 
 ## One managed agent, two ways to run the kernel
 
-A **managed agent** is still Claude Code, Codex, opencode, or your own client. fak does not replace it or its model. It owns the operational boundary around it: what context is retained, what work is reused, which tools may run, what results may return, and how the session recovers.
+A **managed agent** pairs Claude Code, Codex, opencode, or your own client—and its chosen model—with fak. The client keeps the task loop and user experience; fak owns the operational boundary around it: what context is retained, what work is reused, which tools may run, what results may return, and how the session recovers.
 
 The roles stay separate: the **agent or client** owns the task loop and user experience; the **fak kernel** is the management plane; the **model provider or server** generates tokens. Change any one without replacing the others.
 
@@ -21,6 +21,8 @@ The roles stay separate: the **agent or client** owns the task loop and user exp
 | **Beside one agent** | [`fak guard`](#manage-one-local-agent-fak-guard) | You want a local launcher and supervisor for an existing agent. `guard` starts a private kernel gateway, points the child agent at it, and manages that session. |
 | **As an endpoint** | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | One or many OpenAI, Anthropic, or MCP clients need a durable kernel service. It can front an existing model server or load GGUF itself. |
 | **Entirely offline** | [Run the one-minute proof](#try-the-kernel-without-a-key-model-or-gpu) | You want to evaluate the managed-agent path without an API key, model download, or GPU. |
+
+**Default:** start with `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint.
 
 Both commands run the **same kernel**. `guard` is the convenient client-side lifecycle wrapper; `serve` is the standalone/server-side deployment. The model remains a replaceable backend—cloud API, local model server, or in-kernel GGUF.
 
