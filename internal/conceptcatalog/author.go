@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type PositionRequest struct {
@@ -196,6 +198,7 @@ func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
 	outDir := filepath.Join(shadow, "generated")
 	cmd := exec.Command("python", script, "--workspace", root, "--data", shadow, "--markdown-dir", outDir)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if b, er := cmd.CombinedOutput(); er != nil {
 		return Plan{}, fmt.Errorf("canonical generation failed: %v: %s", er, strings.TrimSpace(string(b)))
 	}
