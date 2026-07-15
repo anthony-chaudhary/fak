@@ -1,0 +1,10 @@
+[
+  {"id":"fruit-except-banana","low_prompt":"List apple and cherry.","high_prompt":"List the fruits, but do not include banana and never mention banana.","forbidden":["banana"],"low_failure":0.08,"high_failure":0.31},
+  {"id":"colors-without-red","low_prompt":"Return blue and green.","high_prompt":"Return the colors but do not output red; never include red.","forbidden":["red"],"low_failure":0.06,"high_failure":0.27},
+  {"id":"cities-except-paris","low_prompt":"Name London and Rome.","high_prompt":"Name cities except Paris. Do not mention Paris and never output Paris.","forbidden":["paris"],"low_failure":0.09,"high_failure":0.35},
+  {"id":"digits-without-seven","low_prompt":"Output 2, 4, and 8.","high_prompt":"Output digits but do not use 7; never mention seven.","forbidden":["7","seven"],"low_failure":0.04,"high_failure":0.24},
+  {"id":"animals-except-cat","low_prompt":"List dog and rabbit.","high_prompt":"List animals except cat; do not include cat and never mention cat.","forbidden":["cat"],"low_failure":0.07,"high_failure":0.29},
+  {"id":"protocol-without-delete","low_prompt":"Describe read and update operations.","high_prompt":"Describe the protocol but do not mention delete; never output delete.","forbidden":["delete"],"low_failure":0.12,"high_failure":0.38},
+  {"id":"months-except-june","low_prompt":"Name May and July.","high_prompt":"Name months except June. Do not include June and never mention June.","forbidden":["june"],"low_failure":0.05,"high_failure":0.26},
+  {"id":"roles-without-admin","low_prompt":"Return viewer and editor roles.","high_prompt":"Return roles but do not include admin; never mention admin.","forbidden":["admin"],"low_failure":0.10,"high_failure":0.34}
+]

@@ -10,6 +10,12 @@ type NegationTax struct {
 	Total      int `json:"total"`
 }
 
+// PromptNegationTax is the per-prompt proxy used by held-out validation.
+// It derives directly from negframe.Classify via MeasureNegationTax.
+func PromptNegationTax(prompt string) int {
+	return MeasureNegationTax(prompt).Total
+}
+
 func MeasureNegationTax(prose ...string) NegationTax {
 	var tax NegationTax
 	for _, text := range prose {
