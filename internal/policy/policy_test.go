@@ -492,3 +492,18 @@ func TestManifestWithoutRateLimitIsAbsent(t *testing.T) {
 		t.Fatalf("name-level round-trip drifted: err=%v got=%+v", err, got)
 	}
 }
+
+func TestCLIReadOnlyArgRuleCompiles(t *testing.T) {
+	m := Manifest{Version: Version, Posture: "fail_closed", AllowPrefix: []string{"Bash"}, ArgRules: []ArgRule{{Tool: "Bash", Arg: "command", CLIReadOnly: true}}}
+	runtime, err := m.ToRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.Adjudicator.ArgPredicates) != 1 || runtime.Adjudicator.ArgPredicates[0].Kind != adjudicator.ArgCLIReadOnly {
+		t.Fatalf("predicates=%+v", runtime.Adjudicator.ArgPredicates)
+	}
+	m.ArgRules[0].DenyRegex = "push"
+	if _, err := m.ToRuntime(); err == nil {
+		t.Fatal("cli_read_only plus deny_regex must fail exactly-one matcher validation")
+	}
+}

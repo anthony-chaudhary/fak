@@ -21,6 +21,7 @@ package adjudicator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"path"
 	"regexp"
@@ -152,6 +153,8 @@ const (
 	ArgDenyRegex
 	// ArgMaxBytes is a NEGATIVE guard: a string arg longer than N bytes is denied.
 	ArgMaxBytes
+	// ArgCLIReadOnly validates one gh/git invocation against a positive grammar and may attenuate gh search scope qualifiers.
+	ArgCLIReadOnly
 )
 
 // ArgPredicate is the compiled, hot-path form of a policy arg rule (issue #9) —
@@ -484,8 +487,28 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	}
 
 	redactedArgs, redacted := map[string]any(nil), false
+	// CLI grammar attenuation is an argument transform, not a textual advisory.
+	// A valid read-only command with forbidden gh search scope qualifiers is
+	// rewritten before dispatch; a non-read-only form was denied above.
+	for _, pred := range argPreds {
+		if pred.Kind != ArgCLIReadOnly {
+			continue
+		}
+		command, ok := argString(args, pred.Arg)
+		if !ok {
+			continue
+		}
+		rewritten, changed, _ := attenuateCLIGrammar(command)
+		if changed {
+			redactedArgs = cloneArgs(args)
+			redactedArgs[pred.Arg] = rewritten
+			redacted = true
+		}
+	}
 	if pr.runs(cl, rungTransform) && len(p.RedactFields) > 0 && args != nil {
-		redactedArgs, redacted = redact(args, p.RedactFields)
+		if more, did := redact(selectArgs(redactedArgs, args), p.RedactFields); did {
+			redactedArgs, redacted = more, true
+		}
 	}
 
 	// REVERSIBILITY (#2156): before any path that would otherwise dispatch the
@@ -503,7 +526,9 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		if confirmedWithToken {
 			args = argsWithoutConfirmation(args)
 			if redacted {
-				redactedArgs, redacted = redact(args, p.RedactFields)
+				if more, did := redact(selectArgs(redactedArgs, args), p.RedactFields); did {
+					redactedArgs, redacted = more, true
+				}
 			}
 		}
 	}
@@ -811,6 +836,20 @@ func putJSON(ctx context.Context, m map[string]any) (abi.Ref, bool) {
 	return ref, true
 }
 
+func cloneArgs(args map[string]any) map[string]any {
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
+	}
+	return out
+}
+func selectArgs(preferred, fallback map[string]any) map[string]any {
+	if preferred != nil {
+		return preferred
+	}
+	return fallback
+}
+
 func redact(args map[string]any, fields []string) (map[string]any, bool) {
 	changed := false
 	out := make(map[string]any, len(args))
@@ -1099,6 +1138,17 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 					}
 					return argDeny(pr, "deny_regex /"+pr.Re.String()+"/"), true, notes
 				}
+			}
+		case ArgCLIReadOnly:
+			if !present {
+				return argDeny(pr, "cli_read_only"), true, notes
+			}
+			if _, _, grammarErr := attenuateCLIGrammar(val); grammarErr != nil && !errors.Is(grammarErr, ErrCLIGrammarNotApplicable) {
+				if pr.Advisory {
+					note(pr, "cli_read_only")
+					continue
+				}
+				return argDeny(pr, "cli_read_only"), true, notes
 			}
 		case ArgMaxBytes:
 			if present && len(val) > pr.N {

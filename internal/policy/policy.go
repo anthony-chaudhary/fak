@@ -188,12 +188,13 @@ type AuthorizeRule struct {
 // reason (optional) is the closed-vocabulary refusal code cited on a violation;
 // it defaults to POLICY_BLOCK when omitted.
 type ArgRule struct {
-	Tool      string `json:"tool"`
-	Arg       string `json:"arg"`
-	AllowGlob string `json:"allow_glob,omitempty"`
-	DenyRegex string `json:"deny_regex,omitempty"`
-	MaxBytes  int    `json:"max_bytes,omitempty"`
-	Reason    string `json:"reason,omitempty"`
+	Tool        string `json:"tool"`
+	Arg         string `json:"arg"`
+	AllowGlob   string `json:"allow_glob,omitempty"`
+	DenyRegex   string `json:"deny_regex,omitempty"`
+	MaxBytes    int    `json:"max_bytes,omitempty"`
+	CLIReadOnly bool   `json:"cli_read_only,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 	// Fix (optional) is the operator-authored SANCTIONED ALTERNATIVE recommended
 	// in the same breath as the refusal: one imperative line naming what the
 	// caller should do instead (e.g. "hand the exact elevated command to the
@@ -885,8 +886,11 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 		if r.MaxBytes > 0 {
 			matchers++
 		}
+		if r.CLIReadOnly {
+			matchers++
+		}
 		if matchers != 1 {
-			return nil, fmt.Errorf("arg_rules[%d]: set exactly one of allow_glob, deny_regex, max_bytes", i)
+			return nil, fmt.Errorf("arg_rules[%d]: set exactly one of allow_glob, deny_regex, max_bytes, cli_read_only", i)
 		}
 		reason := abi.ReasonPolicyBlock
 		if r.Reason != "" {
@@ -913,6 +917,8 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 		case r.MaxBytes > 0:
 			pred.Kind = adjudicator.ArgMaxBytes
 			pred.N = r.MaxBytes
+		case r.CLIReadOnly:
+			pred.Kind = adjudicator.ArgCLIReadOnly
 		}
 		out = append(out, pred)
 	}
@@ -935,6 +941,8 @@ func describeArgPredicate(p adjudicator.ArgPredicate) string {
 		return fmt.Sprintf("%s.%s deny_regex %s -> %s", p.Tool, p.Arg, re, reason)
 	case adjudicator.ArgMaxBytes:
 		return fmt.Sprintf("%s.%s max_bytes %d -> %s", p.Tool, p.Arg, p.N, reason)
+	case adjudicator.ArgCLIReadOnly:
+		return fmt.Sprintf("%s.%s cli_read_only -> %s", p.Tool, p.Arg, reason)
 	default:
 		return fmt.Sprintf("%s.%s unknown -> %s", p.Tool, p.Arg, reason)
 	}
