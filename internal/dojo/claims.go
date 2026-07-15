@@ -74,7 +74,8 @@ type ClaimRegistry map[claimKey]Claim
 // cache/compaction/resume number here was lifted verbatim from the inline
 // `Claimed:` field it replaced; the pinned-claim tests in cmd/fak/dojo_test.go
 // prove the extraction preserved each value. The dispatch-yield (#4497),
-// provider-turns (#4505), provider-cache (#4504), and provider-toolcall (#4507)
+// provider-turns (#4505), provider-cache (#4504), provider-toolcall (#4507), and
+// cache-read-share (#4498/#4484)
 // KPI cells are SEEDED estimates instead — they live in this central literal
 // (not the additive RegisterClaim seam) because the RSI recalibrate arm's
 // anchored rewriter targets only this file (dojocal.ClaimsRelPath), and those
@@ -114,6 +115,9 @@ var Registry = ClaimRegistry{
 
 	{"provider-toolcall", "tool_call_success_rate"}: claim(0.9,
 		"seed theory (#4507): ~90% of tool calls on an agentic session corpus succeed on the first try (non-errored tool_result / total tool_result); a genuine estimate the RSI loop recalibrates toward the measured rates, and the per-provider spread of the same cell is the cross-provider tool-reliability leaderboard"),
+
+	{"cache-read-share", "billed_cache_read_share"}: claim(0.8,
+		"seed theory (#4498/#4484): ~80% of the billed input-side tokens across the WHOLE multi-provider session corpus (input + cache_read + cache_creation) are served as cache reads — the WITNESSED top-line cache-read fraction folded across ALL providers into one headline number, a genuine estimate the RSI loop recalibrates toward the measured share. Distinct from the per-provider provider-cache/cache_read_share leaderboard (#4504): same billed tokens, aggregated corpus-wide into a single cell instead of split per provider, so it is the one number an operator cites for cache economy — not a double-count of provider-cache but its top-line aggregate"),
 }
 
 // registered is the additive claim seam: the composed home for cells a KPI leaf

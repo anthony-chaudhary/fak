@@ -274,6 +274,12 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range providerCacheEpisodesFromSessions(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the WITNESSED top-line cache-read fraction (#4498/#4484): one overall
+	// episode aggregating billed cache_read across the whole corpus, the single
+	// headline that complements the per-provider provider-cache leaderboard.
+	for _, in := range cacheReadShareEpisodeFromSessions(sessionCorpus) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{
@@ -718,6 +724,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "cache_read_share", Theory: "~80% of the input tokens a provider bills on a warm agentic corpus are served as cache reads (claim 0.8 — a seeded estimate the RSI loop recalibrates toward the measured shares)"},
 			},
 		},
+		{
+			Name:    "cache-read-share",
+			Summary: "the WITNESSED top-line cache-read fraction — billed cache_read as a share of every input-side token across the WHOLE local session corpus, one headline number folded across all providers, complementing the per-provider provider-cache leaderboard (#4498/#4484)",
+			Metrics: []dojoMetricInfo{
+				{Name: "billed_cache_read_share", Theory: "~80% of the billed input-side tokens across the whole multi-provider corpus (input + cache_read + cache_creation) are served as cache reads (claim 0.8 — a seeded estimate the RSI loop recalibrates toward the measured top-line share)"},
+			},
+		},
 	}
 }
 
@@ -735,6 +748,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		dispatchYieldLever{root: root},
 		providerTurnsLever{},
 		providerCacheLever{},
+		cacheReadShareLever{},
 	}
 }
 
@@ -1262,6 +1276,78 @@ func providerCacheEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.S
 		})
 	}
 	return out
+}
+
+// cacheReadShareLever is the WITNESSED top-line cache-read fraction cell
+// (#4498/#4484): ONE overall number — billed cache_read as a share of every
+// input-side token across the whole local multi-provider session corpus — so the
+// dojo carries a single headline cache-economy figure alongside the per-provider
+// provider-cache leaderboard (#4504). Theory is the one registered
+// cache-read-share/billed_cache_read_share claim; reality folds from the same
+// session corpus (and the same provider keying) as the provider-cache cell,
+// aggregated corpus-wide instead of split per provider. The scenario corpus is
+// ignored: the session corpus, not a replay, is the ground truth for billed cache
+// share.
+type cacheReadShareLever struct{}
+
+func (cacheReadShareLever) Name() string { return "cache-read-share" }
+
+func (cacheReadShareLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return cacheReadShareEpisodeFromSessions(loadProviderTurnsSessions()), nil
+}
+
+// cacheReadShareEpisodeFromSessions folds the WITNESSED top-line cache-read
+// fraction (#4498/#4484): ONE overall episode summing billed cache_read over
+// (input + cache_read + cache_creation) across EVERY billed provider row in the
+// local session corpus. Where provider-cache/cache_read_share (#4504) splits the
+// same tokens per provider into a leaderboard, this is their single aggregate —
+// the one number an operator cites for cache economy — scored against the one
+// registered cache-read-share claim the RSI loop recalibrates. Pure, so the fold
+// is unit-testable without a corpus on disk. Same honesty rule as provider-cache:
+// a corpus whose rows carry NO cache fields at all (neither cache_read nor
+// cache_creation ever billed) scores UNMEASURED, never a fabricated 0.0 — that
+// transcript shape cannot tell "billed cold everywhere" apart from "the provider
+// relays no cache-read field" (cache_creation>0 proves the field family is
+// relayed, so a real all-cold corpus still measures 0.0). An empty corpus is one
+// honest UNMEASURED episode.
+func cacheReadShareEpisodeFromSessions(sessions []sessionaudit.Session) []dojo.ScoredInput {
+	pred := dojo.Registry.MustPredict("cache-read-share", "billed_cache_read_share", "fraction")
+	var agg sessionaudit.ModelCounts
+	for _, s := range sessions {
+		if s.Error != "" {
+			continue
+		}
+		for model, pm := range s.PerModel {
+			if providerTurnsKey(model) == "" {
+				continue // harness-synthetic (non-billed) model — no billed tokens to fold
+			}
+			agg.Turns += pm.Turns
+			agg.Input += pm.Input
+			agg.CacheRead += pm.CacheRead
+			agg.CacheCreate += pm.CacheCreate
+		}
+	}
+	if agg.CacheRead == 0 && agg.CacheCreate == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Sample:   int(agg.Turns),
+				Source:   "no cache_read/cache_creation fields across the local session corpus — the top-line cache-read share is UNMEASURED rather than a fabricated 0.0",
+			},
+		}}
+	}
+	total := agg.Input + agg.CacheRead + agg.CacheCreate
+	return []dojo.ScoredInput{{
+		Prediction: pred,
+		Outcome: dojo.Outcome{
+			Realized:   float64(agg.CacheRead) / float64(total),
+			Provenance: dojo.Observed,
+			Measured:   true,
+			Sample:     int(agg.Turns),
+			Source:     "billed cache_read / (input + cache_read + cache_creation) summed across EVERY provider row in the local session corpus — the WITNESSED top-line cache-read fraction (OBSERVED)",
+		},
+	}}
 }
 
 // --- output + durable ledger I/O -------------------------------------------

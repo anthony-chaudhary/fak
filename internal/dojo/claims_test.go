@@ -37,6 +37,10 @@ func TestRegistryPreservesPinnedClaims(t *testing.T) {
 		// provider-toolcall is the cross-provider tool-reliability cell (#4507):
 		// first-try tool-call success rate per provider, also a seeded genuine estimate.
 		{"provider-toolcall", "tool_call_success_rate", 0.9, false, false},
+		// cache-read-share is the WITNESSED top-line cache-read fraction (#4498/#4484):
+		// billed cache_read share folded across ALL providers into one headline number,
+		// a seeded genuine estimate distinct from the per-provider provider-cache cell.
+		{"cache-read-share", "billed_cache_read_share", 0.8, false, false},
 	}
 	if len(Registry) != len(want) {
 		t.Fatalf("registry has %d cells, want %d — a cell was added or dropped without updating the witness", len(Registry), len(want))
@@ -77,10 +81,11 @@ var probeCell = RegisterClaim("kpi-seam-probe", "additive_resolves",
 // additive, not a migration. A duplicate registration panics loud (collision guard).
 func TestRegisterClaimResolvesViaRegistry(t *testing.T) {
 	// The additive registration did not grow the central literal (8 extracted
-	// cells + the seeded dispatch-yield, provider-turns, provider-cache, and
-	// provider-toolcall KPI cells, #4497/#4505/#4504/#4507).
-	if len(Registry) != 12 {
-		t.Fatalf("central Registry literal has %d cells, want 12 — additive registration must not grow it", len(Registry))
+	// cells + the seeded dispatch-yield, provider-turns, provider-cache,
+	// provider-toolcall, and cache-read-share KPI cells,
+	// #4497/#4505/#4504/#4507/#4498).
+	if len(Registry) != 13 {
+		t.Fatalf("central Registry literal has %d cells, want 13 — additive registration must not grow it", len(Registry))
 	}
 	// The registered cell resolves through the composed Lookup.
 	c, ok := Registry.Lookup("kpi-seam-probe", "additive_resolves")
