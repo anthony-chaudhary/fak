@@ -186,6 +186,7 @@ func executeAcceptanceRun(opts acceptanceRunOptions, fixture, mcpPath, model str
 	r.LatencyMS = parsed.latencyMS
 	r.InputTokens = parsed.inputTokens
 	r.CostUSD = parsed.costUSD
+	r.FailureClass, r.FailureDetail = classifyAcceptanceFailure(task, r, cmdErr, parseErr)
 	if cmdErr != nil {
 		return r, raw, errout, cmdErr
 	}
@@ -208,6 +209,8 @@ func directClaudeEnvironment(configDir string) []string {
 	env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
 	return env
 }
+
+var errAcceptanceProvider = errors.New("acceptance provider failure")
 
 type parsedAcceptance struct {
 	actualModel, result, refusal string
@@ -272,7 +275,7 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 				p.actualModel = expectedModel
 			}
 			if e.IsError {
-				return p, errors.New("provider result is error")
+				return p, fmt.Errorf("%w: result event is_error", errAcceptanceProvider)
 			}
 		}
 	}
@@ -298,7 +301,7 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 				p.toolValid = false
 			}
 		}
-		if p.toolCalls == 0 && p.result == task.Expected {
+		if p.toolCalls == 0 && modelaccept.ResultMatches(task, p.result) {
 			p.refusal = task.ExpectedRefusal
 		}
 	}
@@ -396,4 +399,26 @@ func safeName(s string) string {
 		}
 		return '-'
 	}, s)
+}
+
+func classifyAcceptanceFailure(task modelaccept.Task, run modelaccept.Run, cmdErr, parseErr error) (string, string) {
+	if cmdErr != nil {
+		return "provider_infrastructure", cmdErr.Error()
+	}
+	if parseErr != nil {
+		if errors.Is(parseErr, errAcceptanceProvider) {
+			return "provider_infrastructure", parseErr.Error()
+		}
+		return "harness", parseErr.Error()
+	}
+	if task.ExpectedRefusal != "" && run.Refusal != task.ExpectedRefusal {
+		return "policy_refusal", "required policy refusal was not observed"
+	}
+	toolOK := !task.ToolRequired || (run.ToolValid && run.ToolCalls >= task.MinToolCalls)
+	retryOK := !task.RetryRequired || run.RetryCount > 0
+	recoveryOK := !task.RecoveryRequired || run.Recovered
+	if !modelaccept.ResultMatches(task, run.Result) || !toolOK || !retryOK || !recoveryOK {
+		return "capability", "eligible run did not satisfy the declared output and behavior contract"
+	}
+	return "", ""
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,5 +166,28 @@ func TestParseClaudeAcceptanceReadsObservedTopLevelToolUseResultShapes(t *testin
 	}
 	if got.retryCount != 1 || !got.recovered {
 		t.Fatalf("retryCount=%d recovered=%v, want 1/true", got.retryCount, got.recovered)
+	}
+}
+
+func TestClassifyAcceptanceFailureClasses(t *testing.T) {
+	task := modelaccept.Task{Expected: "FAK_ACCEPTANCE_RESULT=OK", ResultMatch: "sentinel_line", ToolRequired: true, MinToolCalls: 1}
+	good := modelaccept.Run{Result: "done\nFAK_ACCEPTANCE_RESULT=OK", ToolValid: true, ToolCalls: 1}
+	if class, detail := classifyAcceptanceFailure(task, good, nil, nil); class != "" || detail != "" {
+		t.Fatalf("good run classified as %q: %s", class, detail)
+	}
+	if class, _ := classifyAcceptanceFailure(task, good, errors.New("provider unavailable"), nil); class != "provider_infrastructure" {
+		t.Fatalf("command failure class = %q", class)
+	}
+	if class, _ := classifyAcceptanceFailure(task, good, nil, errors.New("malformed stream")); class != "harness" {
+		t.Fatalf("parse failure class = %q", class)
+	}
+	bad := good
+	bad.Result = "missing sentinel"
+	if class, _ := classifyAcceptanceFailure(task, bad, nil, nil); class != "capability" {
+		t.Fatalf("output failure class = %q", class)
+	}
+	refusal := modelaccept.Task{Expected: "FAK_ACCEPTANCE_RESULT=REFUSED", ResultMatch: "sentinel_line", ExpectedRefusal: "policy"}
+	if class, _ := classifyAcceptanceFailure(refusal, modelaccept.Run{Result: refusal.Expected}, nil, nil); class != "policy_refusal" {
+		t.Fatalf("refusal failure class = %q", class)
 	}
 }

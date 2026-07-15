@@ -18,10 +18,12 @@ const (
 
 type Task struct {
 	ID               string `json:"id"`
+	Class            string `json:"class,omitempty"`
 	Tier             int    `json:"tier"`
 	Repetitions      int    `json:"repetitions"`
 	Prompt           string `json:"prompt,omitempty"`
 	Expected         string `json:"expected"`
+	ResultMatch      string `json:"result_match,omitempty"`
 	ToolRequired     bool   `json:"tool_required,omitempty"`
 	MinToolCalls     int    `json:"min_tool_calls,omitempty"`
 	ExpectedRefusal  string `json:"expected_refusal,omitempty"`
@@ -39,10 +41,12 @@ type Thresholds struct {
 }
 
 type Corpus struct {
-	ID         string     `json:"id"`
-	DeclaredAt string     `json:"declared_at"`
-	Tasks      []Task     `json:"tasks"`
-	Thresholds Thresholds `json:"thresholds"`
+	ID               string     `json:"id"`
+	DeclaredAt       string     `json:"declared_at"`
+	Tasks            []Task     `json:"tasks"`
+	Thresholds       Thresholds `json:"thresholds"`
+	ReplacementRules string     `json:"replacement_rules,omitempty"`
+	StoppingRule     string     `json:"stopping_rule,omitempty"`
 }
 
 type Run struct {
@@ -61,6 +65,8 @@ type Run struct {
 	InputTokens   int64   `json:"input_tokens"`
 	CostUSD       float64 `json:"cost_usd"`
 	ObservedAt    string  `json:"observed_at"`
+	FailureClass  string  `json:"failure_class,omitempty"`
+	FailureDetail string  `json:"failure_detail,omitempty"`
 }
 
 type ModelRequest struct {
@@ -179,7 +185,7 @@ func Evaluate(in Input) Decision {
 			if r.Recovered {
 				recoveries++
 			}
-			if !r.ProviderError && r.ActualModel == req.Model && r.Result == t.Expected && toolOK && refusalOK && retryOK && recoveryOK {
+			if !r.ProviderError && r.ActualModel == req.Model && ResultMatches(t, r.Result) && toolOK && refusalOK && retryOK && recoveryOK {
 				successes++
 			}
 			lat = append(lat, r.LatencyMS)
@@ -280,9 +286,24 @@ func validate(in Input) []string {
 		declaredModels[model.Model] = true
 	}
 	seen := map[string]bool{}
+	structured := false
+	classes := map[string]bool{}
 	for _, t := range in.Corpus.Tasks {
 		if t.ID == "" || t.Repetitions <= 0 || t.Tier < 0 {
 			r = append(r, "every task needs id, positive repetitions, and non-negative tier")
+		}
+		if t.ResultMatch != "" && t.ResultMatch != "exact" && t.ResultMatch != "sentinel_line" {
+			r = append(r, "task "+t.ID+" has invalid result_match")
+		}
+		if t.ResultMatch == "sentinel_line" {
+			structured = true
+			classes[t.Class] = true
+			if strings.ContainsAny(t.Expected, "\r\n") || strings.TrimSpace(t.Expected) != t.Expected || t.Expected == "" {
+				r = append(r, "task "+t.ID+" sentinel must be one non-empty, unpadded line")
+			}
+			if strings.TrimSpace(t.Class) == "" {
+				r = append(r, "task "+t.ID+" structured campaign class is required")
+			}
 		}
 		if t.MinToolCalls < 0 || (t.MinToolCalls > 0 && !t.ToolRequired) {
 			r = append(r, "task "+t.ID+" has invalid minimum tool calls")
@@ -298,7 +319,22 @@ func validate(in Input) []string {
 		}
 		seen[t.ID] = true
 	}
+	if structured {
+		if strings.TrimSpace(in.Corpus.ReplacementRules) == "" {
+			r = append(r, "structured campaign replacement_rules are required")
+		}
+		if strings.TrimSpace(in.Corpus.StoppingRule) == "" {
+			r = append(r, "structured campaign stopping_rule is required")
+		}
+		delete(classes, "")
+		if len(classes) < 2 {
+			r = append(r, "structured campaign needs at least two task classes")
+		}
+	}
 	for _, run := range in.Runs {
+		if run.FailureClass != "" && run.FailureClass != "capability" && run.FailureClass != "policy_refusal" && run.FailureClass != "provider_infrastructure" && run.FailureClass != "harness" {
+			r = append(r, fmt.Sprintf("run %s/%s/%d has invalid failure class", run.Model, run.Task, run.Repetition))
+		}
 		if run.ToolCalls < 0 || run.RetryCount < 0 {
 			r = append(r, fmt.Sprintf("run %s/%s/%d has negative behavior count", run.Model, run.Task, run.Repetition))
 		}
@@ -334,4 +370,21 @@ func validate(in Input) []string {
 	}
 	sort.Strings(r)
 	return r
+}
+
+// ResultMatches applies the task's predeclared output contract. sentinel_line
+// matches only a complete line after CRLF normalization; it deliberately does
+// not accept an embedded substring or padded line.
+func ResultMatches(task Task, result string) bool {
+	if task.ResultMatch == "sentinel_line" {
+		result = strings.ReplaceAll(result, "\r\n", "\n")
+		result = strings.ReplaceAll(result, "\r", "\n")
+		for _, line := range strings.Split(result, "\n") {
+			if line == task.Expected {
+				return true
+			}
+		}
+		return false
+	}
+	return result == task.Expected
 }

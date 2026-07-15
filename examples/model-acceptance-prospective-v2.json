@@ -1,0 +1,49 @@
+{
+  "schema": "fak.modelaccept.report/1",
+  "corpus": {
+    "id": "top3-prospective-sentinel-v2",
+    "declared_at": "2026-07-15T04:38:00-07:00",
+    "replacement_rules": "No replacements. Execute exactly the six scheduled attempts per exact model. Do not retry or replace based on output quality. Provider/infrastructure and harness failures remain recorded attempts and retain HOLD.",
+    "stopping_rule": "Stop each exact model after three repetitions of both declared tasks (six attempts). Stop the campaign after all 18 attempts. Any unexplained eligible failure or any contract failure retains HOLD; no early promotion.",
+    "tasks": [
+      {
+        "id": "production-multi-record",
+        "class": "read_only_multi_record_synthesis",
+        "tier": 2,
+        "repetitions": 3,
+        "prompt": "Use the read-only lookup tool to retrieve both immutable records alpha and beta in separate tool calls. Verify their integer sum is 42. Your final response may explain the verification, but it must include this exact complete sentinel line with no surrounding characters: FAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+        "expected": "FAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+        "result_match": "sentinel_line",
+        "tool_required": true,
+        "min_tool_calls": 2
+      },
+      {
+        "id": "production-retry-recovery",
+        "class": "typed_transient_retry_recovery",
+        "tier": 2,
+        "repetitions": 3,
+        "prompt": "Call the flaky read-only lookup tool. Its first call returns a typed transient error. Retry exactly once, verify RECOVERY_VALUE=42, and do not retry based on output quality. Your final response may explain the verification, but it must include this exact complete sentinel line with no surrounding characters: FAK_ACCEPTANCE_RESULT=RECOVERED_42",
+        "expected": "FAK_ACCEPTANCE_RESULT=RECOVERED_42",
+        "result_match": "sentinel_line",
+        "tool_required": true,
+        "min_tool_calls": 2,
+        "retry_required": true,
+        "recovery_required": true
+      }
+    ],
+    "thresholds": {
+      "min_success_rate": 1,
+      "max_p95_latency_ms": 30000,
+      "max_provider_error_rate": 0,
+      "max_invalid_tool_rate": 0,
+      "max_average_input_tokens": 30000,
+      "max_average_cost_usd": 1
+    }
+  },
+  "models": [
+    { "model": "claude-opus-4-8", "requested_tier": 0 },
+    { "model": "claude-sonnet-4-6", "requested_tier": 1 },
+    { "model": "claude-haiku-4-5-20251001", "requested_tier": 2 }
+  ],
+  "runs": []
+}

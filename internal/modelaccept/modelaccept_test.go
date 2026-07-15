@@ -195,3 +195,45 @@ func TestAgenticCorpusDeclarationPrecedesObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestResultMatchesSentinelLineOnly(t *testing.T) {
+	task := Task{Expected: "FAK_ACCEPTANCE_RESULT=OK", ResultMatch: "sentinel_line"}
+	for _, result := range []string{
+		"FAK_ACCEPTANCE_RESULT=OK",
+		"verified\nFAK_ACCEPTANCE_RESULT=OK\ndone",
+		"verified\r\nFAK_ACCEPTANCE_RESULT=OK\r\ndone",
+	} {
+		if !ResultMatches(task, result) {
+			t.Fatalf("expected complete sentinel line to match: %q", result)
+		}
+	}
+	for _, result := range []string{
+		"prefix FAK_ACCEPTANCE_RESULT=OK suffix",
+		"FAK_ACCEPTANCE_RESULT=OK ",
+		"FAK_ACCEPTANCE_RESULT=OTHER",
+	} {
+		if ResultMatches(task, result) {
+			t.Fatalf("embedded or padded sentinel must not match: %q", result)
+		}
+	}
+}
+
+func TestEvaluateUsesDeclaredSentinelLine(t *testing.T) {
+	in := validInput()
+	in.Corpus.Tasks[0].ResultMatch = "sentinel_line"
+	in.Corpus.Tasks[0].Class = "primary"
+	in.Corpus.Tasks = append(in.Corpus.Tasks, Task{ID: "second", Class: "secondary", Tier: 99, Repetitions: 1, Expected: "SECOND", ResultMatch: "sentinel_line"})
+	in.Corpus.ReplacementRules = "none"
+	in.Corpus.StoppingRule = "fixed attempts"
+	for _, model := range in.Models {
+		in.Runs = append(in.Runs, Run{Model: model.Model, ActualModel: model.Model, Task: "second", Repetition: 1, Result: "SECOND", ToolValid: true, LatencyMS: 5000, InputTokens: 10000, CostUSD: 0.1, ObservedAt: "2026-07-14T23:01:00-07:00"})
+	}
+	in.Runs[0].Result = "explanation\n" + in.Corpus.Tasks[0].Expected
+	if got := Evaluate(in); got.Verdict != Pass {
+		t.Fatalf("complete sentinel line should pass: %+v", got)
+	}
+	in.Runs[0].Result = "explanation " + in.Corpus.Tasks[0].Expected
+	if got := Evaluate(in); got.Verdict != Hold {
+		t.Fatalf("embedded sentinel must hold: %+v", got)
+	}
+}
