@@ -50,12 +50,17 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request) 
 	var meta struct {
 		Stream bool `json:"stream"`
 	}
-	if err := json.Unmarshal(body, &meta); err != nil || meta.Stream {
-		// Malformed bodies will be rejected by the normal decoder below. Streaming EP
-		// needs a coordinated streaming bridge; do not start follower requests whose
-		// bodies the helper would close before the decode finishes.
+	if err := json.Unmarshal(body, &meta); err != nil {
+		// Malformed bodies will be rejected by the normal decoder below.
 		return func() {}, true
 	}
+	// A streaming request must still fan out: rank-local expert parallelism makes
+	// progress only if every rank runs the same forward pass, and each decode step is
+	// a collective. Skipping the followers for stream:true stranded the front rank on
+	// the first AllReduce — rank 0 pinned at 100% GPU with collapsed residency while
+	// ranks 1-7 sat idle and no SSE byte ever left the socket (#4855). Followers are
+	// mirrored either way; only how the helper drains their response differs.
+	stream := meta.Stream
 	results := make(chan epFanoutResult, len(urls))
 	for _, target := range urls {
 		target := target
@@ -76,7 +81,18 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			defer resp.Body.Close()
-			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			// The follower must run its decode to completion so it reaches every
+			// per-step collective in lockstep with the front rank. For a streaming
+			// follower that means draining the whole SSE stream: closing the body
+			// after a fixed prefix would cancel the follower mid-decode and re-strand
+			// the front rank's collective. Non-streaming responses are already whole,
+			// so a bounded snippet is enough to log a non-2xx follower.
+			var snippet []byte
+			if stream {
+				_, _ = io.Copy(io.Discard, resp.Body)
+			} else {
+				snippet, _ = io.ReadAll(io.LimitReader(resp.Body, 512))
+			}
 			results <- epFanoutResult{target: target, status: resp.StatusCode, body: string(snippet)}
 		}()
 	}
