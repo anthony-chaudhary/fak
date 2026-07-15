@@ -1,6 +1,6 @@
 ---
 title: "The preview-confirm gate on raw gh is an unsatisfiable token loop (but fak issue create is the sanctioned sidestep)"
-description: "Raw model-proposed `gh issue create` via Bash is escalated by design (REQUIRE_WITNESS/ESCALATE); the preview-confirm recovery it advertises ('re-propose byte-identical + add _fak_confirm') never converges — a fresh token issues every attempt. The correct path is the compiled `fak issue create` verb, which sidesteps the classifier the same way `fak commit` sidesteps `git push`. Real, narrower defects in the gate remain."
+description: "Raw model-proposed `gh issue create` via Bash is escalated by design (REQUIRE_WITNESS/ESCALATE); the preview-confirm recovery it advertised ('re-propose byte-identical + add _fak_confirm') never converged — a fresh token issued every attempt. The correct path is the compiled `fak issue create` verb, which sidesteps the classifier the same way `fak commit` sidesteps `git push`. RESOLVED for the description-drift axis in #2777 (`argsForToken` excludes the free-text `description`/`explanation` from the confirm-token hash, so a reworded re-proposal now converges); the `command`-whitespace axis is deferred to a follow-up. See the Resolution (#2777) section below."
 ---
 
 # The preview-confirm loop on raw `gh` — and the sanctioned way around it
