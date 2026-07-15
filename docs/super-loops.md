@@ -179,6 +179,17 @@ runnable as printed. The registered set:
 - **`manage-benchmarks`** — the benchmark-DX scorecard + the `nightrun` collection
   loop + a descend pointer into `fak bench-loop status`, the benchmark-specific
   control surface.
+- **`tend-scoreboards`** — the reporting family (`internal/scoreboard` names it:
+  scoreboard, blockers, bench, cachevalue, capacity, node-usage, backlog, dojo,
+  product, releases, steering — all folded onto one CI/CD report channel). Its
+  **measurable** members are the four outward-facing scorecards whose numbers get
+  posted — **product**, **release-readiness**, **steerability**, **milestone** — each
+  a real control-pane card key walked by no other intent, so the once-only fold still
+  counts each once. The feeds that carry no scorecard (blockers, cachevalue, capacity,
+  node-usage, backlog) are a delivery-liveness question — *are the channels actually
+  receiving the posts?* — surfaced as a `fak slack beat` descend pointer that is shown
+  for entry but never weighed, so an unread pulse can't red a clean walk. Answers "is
+  every scoreboard number healthy, and are the feeds delivering?".
 - **`run-the-night`** — the overnight productivity meta-loop. It walks the three
   dimensions that must move together or a night wastes itself: **issue-drain**
   (descends `drain-issues`), **account-limit utilization**, and **lab/node resource

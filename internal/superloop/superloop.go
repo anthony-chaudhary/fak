@@ -426,6 +426,36 @@ var registry = []Super{
 		},
 	},
 	{
+		// tend-scoreboards is the REPORTING-family intent: the scoreboard/feed surfaces
+		// fak publishes to Slack (internal/scoreboard names the family — scoreboard,
+		// blockers, bench, cachevalue, capacity, node-usage, backlog, dojo, product,
+		// releases, steering — all folded onto one CI/CD report channel). None of the
+		// quality/loop/night intents walk them, so "is every scoreboard number healthy?"
+		// had no worst-first walk. This intent gives it one, honestly: the members that
+		// carry a MEASURABLE debt are the outward-facing scorecards whose numbers get
+		// posted (product, release-readiness, steerability, milestone) — each a real
+		// control-pane card key NOT walked by another intent, so the once-only fold still
+		// counts each scorecard exactly once. The feeds that have no scorecard (blockers,
+		// cachevalue, capacity, node-usage, backlog) are a DELIVERY-liveness question — are
+		// the channels actually receiving posts? — which the Slack-beat surface folds, so
+		// it rides here as a KindSurface descend pointer (surfaced for entry, never weighed
+		// or counted). The intent is SATISFIED when every posted scorecard is at floor; the
+		// descend pointer keeps the feed-liveness check in view without letting an unread
+		// surface red a clean walk.
+		Name:   "tend-scoreboards",
+		Title:  "tend the scoreboard/reporting surfaces",
+		About:  "walk the outward-facing report scorecards fak posts to Slack (product, release, steerability, milestone), surface the feed-delivery liveness, then enter the worst-first report in debt",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 15, TokenCeiling: 100000, MaxWorkers: 1},
+		Members: []Member{
+			{Kind: KindScorecard, Ref: "product", Why: "product-scorecard debt: the #product feed publishes a stale or incomplete product number", Enter: "go run ./cmd/fak product-scorecard --json"},
+			{Kind: KindScorecard, Ref: "release", Why: "release-readiness debt: the release-cadence feed reports an unready release", Enter: "python tools/release_readiness_scorecard.py --json"},
+			{Kind: KindScorecard, Ref: "steer", Why: "steerability debt: the steering-guard feed reports the fleet is hard to steer", Enter: "/steerability-score"},
+			{Kind: KindScorecard, Ref: "milestone", Why: "milestone debt: the milestone feed reports the roadmap climb has stalled", Enter: "/milestone-score"},
+			{Kind: KindSurface, Ref: "fak slack beat", Why: "reporting-feed delivery liveness: are the scoreboard channels actually receiving the posts the feeds send (blockers, cachevalue, capacity, node-usage, backlog have no scorecard, only a delivery pulse)?"},
+		},
+	},
+	{
 		// tend is the ROOT intent — the recursion case made real: a super loop whose
 		// every member is itself a super loop. Walking it descends each registered
 		// intent (the shell walks sub-super-loops inline and folds each sub-report via
@@ -444,6 +474,7 @@ var registry = []Super{
 			{Kind: KindSuperloop, Ref: "improve-loops", Why: "the loops keep everything else tended; a dark loop below starves the rest"},
 			{Kind: KindSuperloop, Ref: "improve-trajectory", Why: "trajectory health: are the steered objectives on-course, or drifting/stalling off their intended curve?"},
 			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
+			{Kind: KindSuperloop, Ref: "tend-scoreboards", Why: "the reporting family: are the scoreboard numbers fak posts to Slack (product, release, steerability, milestone) healthy, and are the feeds delivering?"},
 			{Kind: KindSuperloop, Ref: "run-the-night", Why: "the overnight productivity meta-loop: are issues draining and is every account limit + node actually being used?"},
 		},
 	},

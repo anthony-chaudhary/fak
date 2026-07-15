@@ -966,6 +966,91 @@ func TestRunTheNightWalksThreeDimensions(t *testing.T) {
 	}
 }
 
+// TestTendScoreboardsWalksReportingSurfaces pins the reporting-family intent's shape: the
+// four outward-facing report scorecards fak posts to Slack (product, release, steerability,
+// milestone) as MEASURABLE members, plus the Slack-beat feed-delivery surface as a
+// descend pointer. It also pins the once-only guarantee (none of the four scorecards is
+// walked by another intent, so the root fold counts each once) and that tend descends it.
+func TestTendScoreboardsWalksReportingSurfaces(t *testing.T) {
+	sb, ok := Lookup("tend-scoreboards")
+	if !ok {
+		t.Fatal("tend-scoreboards not registered")
+	}
+	wantCards := map[string]bool{"product": true, "release": true, "steer": true, "milestone": true}
+	gotCards := map[string]Member{}
+	var surfaces int
+	for _, m := range sb.Members {
+		switch m.Kind {
+		case KindScorecard:
+			if strings.TrimSpace(m.Enter) == "" {
+				t.Errorf("report scorecard %q has no Enter hint — its worklist action must be runnable", m.Ref)
+			}
+			gotCards[m.Ref] = m
+		case KindSurface:
+			surfaces++
+			if m.Ref != "fak slack beat" {
+				t.Errorf("tend-scoreboards surface member = %q, want the slack-beat delivery-liveness surface", m.Ref)
+			}
+		default:
+			t.Errorf("tend-scoreboards member %q has unexpected kind %q (want scorecard or surface)", m.Ref, m.Kind)
+		}
+	}
+	for ref := range wantCards {
+		if _, ok := gotCards[ref]; !ok {
+			t.Errorf("tend-scoreboards is missing the %q report scorecard", ref)
+		}
+	}
+	if surfaces != 1 {
+		t.Errorf("tend-scoreboards must carry exactly one feed-delivery surface pointer, got %d", surfaces)
+	}
+
+	// The four report scorecards must not be walked by any OTHER intent — else the root
+	// fold would double-count their debt (the once-only invariant, pinned live here).
+	for _, s := range Registry() {
+		if s.Name == "tend-scoreboards" {
+			continue
+		}
+		for _, m := range s.Members {
+			if m.Kind == KindScorecard && wantCards[m.Ref] {
+				t.Errorf("report scorecard %q is also walked by %q — the root fold would count its debt twice", m.Ref, s.Name)
+			}
+		}
+	}
+
+	// A measured, debt-bearing report scorecard produces its concrete Enter action; the
+	// surface pointer rides along as a descend item but never blocks a clean fold.
+	rep := Walk(sb, []MemberStatus{
+		{Member: gotCards["milestone"], Measured: true, Debt: 7},
+		{Member: gotCards["product"], Measured: true, Debt: 0},
+		{Member: gotCards["release"], Measured: true, Debt: 0},
+		{Member: gotCards["steer"], Measured: true, Debt: 0},
+		{Member: Member{Kind: KindSurface, Ref: "fak slack beat"}, Container: true},
+	})
+	if rep.TotalDebt != 7 {
+		t.Errorf("total debt should fold only the measured scorecards, want 7 got %d", rep.TotalDebt)
+	}
+	if len(rep.Worklist) == 0 || rep.Worklist[0].Member.Ref != "milestone" {
+		t.Fatalf("worst-first should enter the debt-bearing milestone scorecard, got %+v", rep.Worklist)
+	}
+	if !strings.Contains(rep.Worklist[0].Action, "/milestone-score") {
+		t.Errorf("milestone action must carry its Enter hint, got %q", rep.Worklist[0].Action)
+	}
+
+	tend, ok := Lookup("tend")
+	if !ok {
+		t.Fatal("tend not registered")
+	}
+	descends := false
+	for _, m := range tend.Members {
+		if m.Kind == KindSuperloop && m.Ref == "tend-scoreboards" {
+			descends = true
+		}
+	}
+	if !descends {
+		t.Error("tend must descend tend-scoreboards so the root walk sees the reporting surfaces")
+	}
+}
+
 // TestUtilizationActionUsesEnterHint pins the KindUtilization worklist action: a measured,
 // debt-bearing utilization member (idle capacity) gets its Enter hint as the concrete
 // spend-the-capacity command; an unmeasured one gets the read-utilization action (you
