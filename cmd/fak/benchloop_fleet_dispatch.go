@@ -187,6 +187,15 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "parity" && strings.HasPrefix(req.Machine, "gcp-") {
+		// Assemble the committed cross-model cards on each node with outputs isolated
+		// under /tmp; the canonical fleet witness captures the resulting parity summary.
+		run := "go run ./cmd/paritybench -out-json /tmp/fak-parity.json -out-md /tmp/fak-parity.md"
+		if req.Machine == "gcp-g2-l4-32" {
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/paritybench -out-json /tmp/fak-parity.json -out-md /tmp/fak-parity.md"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
+	}
 	if req.Benchmark == "fan-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
 		// Bound the generated fan-out matrix so every scheduled node produces a real,
 		// reproducible topology witness without leaving output files in the source tree.

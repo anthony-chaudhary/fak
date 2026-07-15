@@ -220,6 +220,24 @@ func TestBenchFleetGCPAgentLiveUsesBoundedGatewayRecipe(t *testing.T) {
 	}
 }
 
+func TestBenchFleetGCPParityUsesIsolatedArtifactRecipe(t *testing.T) {
+	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
+		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "parity", Command: "go run ./cmd/paritybench"})
+		if err != nil || state != "running" || name != "gcloud" {
+			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
+		}
+		command := strings.Join(args, " ")
+		for _, want := range []string{"FAK_BENCH_NODE=", "paritybench", "-out-json /tmp/fak-parity.json", "-out-md /tmp/fak-parity.md"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s: command missing %q: %q", machine, want, command)
+			}
+		}
+		if machine == "gcp-g2-l4-32" && !strings.Contains(command, "docker run") {
+			t.Fatalf("COS route must use container: %q", command)
+		}
+	}
+}
+
 func TestBenchFleetGCPFanUsesBoundedTopologyRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
 		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "fan-benchmark", Command: "go run ./cmd/fanbench"})
