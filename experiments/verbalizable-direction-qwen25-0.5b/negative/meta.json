@@ -1,0 +1,102 @@
+{
+  "hidden": 896,
+  "decode_step": 18,
+  "layers": [
+    {
+      "index": 0,
+      "kind": "attention"
+    },
+    {
+      "index": 1,
+      "kind": "attention"
+    },
+    {
+      "index": 2,
+      "kind": "attention"
+    },
+    {
+      "index": 3,
+      "kind": "attention"
+    },
+    {
+      "index": 4,
+      "kind": "attention"
+    },
+    {
+      "index": 5,
+      "kind": "attention"
+    },
+    {
+      "index": 6,
+      "kind": "attention"
+    },
+    {
+      "index": 7,
+      "kind": "attention"
+    },
+    {
+      "index": 8,
+      "kind": "attention"
+    },
+    {
+      "index": 9,
+      "kind": "attention"
+    },
+    {
+      "index": 10,
+      "kind": "attention"
+    },
+    {
+      "index": 11,
+      "kind": "attention"
+    },
+    {
+      "index": 12,
+      "kind": "attention"
+    },
+    {
+      "index": 13,
+      "kind": "attention"
+    },
+    {
+      "index": 14,
+      "kind": "attention"
+    },
+    {
+      "index": 15,
+      "kind": "attention"
+    },
+    {
+      "index": 16,
+      "kind": "attention"
+    },
+    {
+      "index": 17,
+      "kind": "attention"
+    },
+    {
+      "index": 18,
+      "kind": "attention"
+    },
+    {
+      "index": 19,
+      "kind": "attention"
+    },
+    {
+      "index": 20,
+      "kind": "attention"
+    },
+    {
+      "index": 21,
+      "kind": "attention"
+    },
+    {
+      "index": 22,
+      "kind": "attention"
+    },
+    {
+      "index": 23,
+      "kind": "attention"
+    }
+  ]
+}

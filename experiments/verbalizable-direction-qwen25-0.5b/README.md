@@ -1,5 +1,15 @@
 # Kernel-served verbalizable-direction witness
 
-This directory is the public, scrubbed artifact target for #4437. The sanctioned GCP L4 node currently serves `qwen2.5-0.5b-instruct-q8_0.gguf` through the CUDA backend, but its deployed image predates the bidirectional hidden hook. `meta.json` records that state as `not-yet-live`; it is not a model-effect claim.
+This is the captured live witness for #4437. On 2026-07-15, a sanctioned L4 compute node ran the checked-in `fak serve` kernel against `qwen2.5-0.5b-instruct-q8_0.gguf`. The bidirectional hidden hook was exercised through the resident-Q8 CPU forward (the CUDA HAL currently has a separate device-resident loop); host and session identifiers are scrubbed.
 
-After the hook commit is present in the CUDA image, capture matched positive/negative hidden dumps at the same absolute position, derive the normalized diff-of-means `direction.f32`, and run coefficients `-2,-1,0,1,2`. Check in scrubbed per-layer f32 dumps and a JSONL table with verbalized-concept shift and downstream projections. Replace `status` only after those files exist and can be re-read independently.
+## Method
+
+- Concept: positive versus negative instruction framing.
+- Contrastive prompts differ only in the final concept word and have the same 18-token absolute position.
+- `direction.f32` is the unit-normalized layer-8 positive-minus-negative residual.
+- A neutral matched prompt was steered at layer 8, position 18 with coefficients `-2,-1,0,1,2`.
+- Residuals were read at layers 8, 12, 16, 20, and 23. `sweep.json` records decoded text and every projection.
+- The decoded one-word answer stayed `neutral`; the residual projection nevertheless rose strictly with the coefficient at every captured downstream layer. This is an observed broadcast result, not an overclaim of a token flip.
+- A separately launched unarmed serve and the alpha-zero serve produced byte-identical layer-23 dumps (`sha256` in `meta.json`).
+
+`positive/`, `negative/`, and `sweep/` contain little-endian f32 residuals (896 values each). The repository test `TestVerbalizableDirectionLiveArtifact` independently re-reads these bytes, checks the direction against the captured diff-of-means, and proves monotonic broadcast at two downstream layers.

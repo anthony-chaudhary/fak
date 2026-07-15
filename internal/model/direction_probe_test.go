@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"fmt"
 )
 
 func TestVerbalizableDirectionProbe(t *testing.T) {
@@ -70,5 +72,45 @@ func TestDirectionSteerFromEnv(t *testing.T) {
 	got := []float32{1, 1}
 	if !s.Apply(3, 7, got) || !reflect.DeepEqual(got, []float32{2, 0}) {
 		t.Fatalf("steer=%+v got=%v", s, got)
+	}
+}
+
+func TestVerbalizableDirectionLiveArtifact(t *testing.T) {
+	root := filepath.Join("..", "..", "experiments", "verbalizable-direction-qwen25-0.5b")
+	read := func(path string) []float32 {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(b)%4 != 0 {
+			t.Fatalf("%s has %d trailing bytes", path, len(b)%4)
+		}
+		out := make([]float32, len(b)/4)
+		for i := range out {
+			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
+		}
+		return out
+	}
+	d := read(filepath.Join(root, "direction.f32"))
+	positive := read(filepath.Join(root, "positive", "layer_08.f32"))
+	negative := read(filepath.Join(root, "negative", "layer_08.f32"))
+	diff := make([]float32, len(positive))
+	for i := range diff {
+		diff[i] = positive[i] - negative[i]
+	}
+	if cosine := DirectionCosine(d, diff); cosine < .99999 {
+		t.Fatalf("captured direction cosine with diff-of-means=%f", cosine)
+	}
+	for _, layer := range []int{12, 23} {
+		prior := float32(-math.MaxFloat32)
+		for _, label := range []string{"am2", "am1", "a0", "a1", "a2"} {
+			h := read(filepath.Join(root, "sweep", label, fmt.Sprintf("layer_%02d.f32", layer)))
+			projection := DirectionProjection(h, d)
+			if projection <= prior {
+				t.Fatalf("captured layer=%d label=%s projection=%f prior=%f", layer, label, projection, prior)
+			}
+			prior = projection
+		}
 	}
 }

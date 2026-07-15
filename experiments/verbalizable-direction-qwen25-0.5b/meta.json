@@ -1,12 +1,44 @@
 {
-  "schema": "fak.verbalizable_direction.v1",
-  "status": "not-yet-live",
-  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
-  "served_arch": "qwen2",
-  "backend": "cuda",
-  "compute": "sanctioned GCP L4 node",
-  "concept": "positive-versus-negative instruction framing",
-  "required_artifacts": ["positive-layer-*.f32", "negative-layer-*.f32", "direction.f32", "steer-*.jsonl", "meta.json"],
-  "missing_witness": "the deployed fak image predates the bidirectional hidden hook; rebuild the CUDA image from the ship commit, capture contrastive hidden dumps, derive direction.f32, and rerun +/- steering",
-  "ready_command": "FAK_HIDDEN_TAP=/tmp/positive FAK_HIDDEN_TAP_POS=<pos> fak serve --gguf /models/qwen2.5-0.5b-instruct-q8_0.gguf --backend cuda; repeat for negative, derive direction.f32, then set FAK_HIDDEN_STEER, FAK_HIDDEN_STEER_LAYER, FAK_HIDDEN_STEER_POS, and FAK_HIDDEN_STEER_ALPHA"
+  "schema": "fak.verbalizable-direction-witness.v1",
+  "status": "observed-live",
+  "issue": 4437,
+  "architecture": "Qwen2.5-0.5B-Instruct GGUF Q8_0",
+  "kernel_backend": "cpu-ref on sanctioned L4 node",
+  "hook_image_commit": "5a02396cd97eb7715c4dfecb7a76ab8512f531bc plus optimized-Q8 hook fix in this completion",
+  "concept": "positive versus negative instruction framing",
+  "positive_prompt": "Classify this framing with one word: positive.",
+  "negative_prompt": "Classify this framing with one word: negative.",
+  "steering_prompt": "Classify this framing with one word: neutral.",
+  "absolute_position": 18,
+  "direction_layer": 8,
+  "steering_layer": 8,
+  "observed_layers": [
+    8,
+    12,
+    16,
+    20,
+    23
+  ],
+  "coefficients": [
+    -2,
+    -1,
+    0,
+    1,
+    2
+  ],
+  "hidden_width": 896,
+  "direction_norm": 1.0,
+  "baseline_unarmed_equals_alpha_zero_layer23_sha256": "8a6b410085da096725acaa9ca04c4687845c097ba70cdc832006975a2a7de6e5",
+  "responses": {
+    "positive": "Positive",
+    "negative": "Critical",
+    "sweep": {
+      "-2": "neutral",
+      "-1": "neutral",
+      "0": "neutral",
+      "1": "neutral",
+      "2": "neutral"
+    }
+  },
+  "provenance": "Captured 2026-07-15 from fak serve using the checked-in in-kernel Qwen model path; host/session identifiers scrubbed."
 }

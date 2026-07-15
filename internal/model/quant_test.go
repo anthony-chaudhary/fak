@@ -3,6 +3,10 @@ package model
 import (
 	"math"
 	"testing"
+
+	"fmt"
+	"path/filepath"
+	"reflect"
 )
 
 // quant_test.go — the correctness gate for the Q8_0 mode. This is DELIBERATELY NOT the
@@ -335,5 +339,43 @@ func TestQuantTeacherForcedAgreement(t *testing.T) {
 	// reference per-step. A bug (wrong block math, overflow, mis-scaled head) would tank it.
 	if rate < 0.85 {
 		t.Errorf("Q8 teacher-forced agreement %.1f%% < 85%% — quantization not tracking the reference", 100*rate)
+	}
+}
+
+func TestQ8FastDecodeCarriesBidirectionalHiddenHook(t *testing.T) {
+	cfg := llamaArchConfig()
+	cfg.NumLayers = 2
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	if !q8FastDecodeSessionOK(&Session{}, cfg) {
+		t.Fatal("fixture must run the optimized resident-Q8 loop")
+	}
+
+	const pos = 0
+	baseline := m.NewSession()
+	baseline.Quant = true
+	base := baseline.tokenHiddenQ(3, pos)
+
+	dir := make([]float32, cfg.HiddenSize)
+	dir[0] = 1
+	tapped := m.NewSession()
+	tapped.Quant = true
+	tapped.tap = &hiddenTap{
+		dir:   t.TempDir(),
+		pos:   pos,
+		steer: DirectionSteer{Layer: 0, Position: pos, Alpha: 1, Direction: dir},
+	}
+	got := tapped.tokenHiddenQ(3, pos)
+	if tapped.tap.err != nil {
+		t.Fatalf("tap write: %v", tapped.tap.err)
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		v := readTapF32(t, filepath.Join(tapped.tap.dir, fmt.Sprintf("layer_%02d.f32", l)))
+		if len(v) != cfg.HiddenSize {
+			t.Fatalf("layer %d dump width=%d want=%d", l, len(v), cfg.HiddenSize)
+		}
+	}
+	if reflect.DeepEqual(got, base) {
+		t.Fatal("armed optimized-Q8 steer did not change the forward")
 	}
 }

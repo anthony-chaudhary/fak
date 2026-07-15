@@ -333,8 +333,18 @@ func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 			x[i] += down[i]
 		}
 		s.phaseEnd("q8_mlp", tMLP)
+		// The optimized resident-Q8 loop bypasses blockStep, so carry the same
+		// default-off bidirectional residual hook explicitly at its layer boundary.
+		// This is outside every timed phase and costs only a nil branch when unarmed.
+		if tap != nil {
+			tap.applySteer(l, pos, x)
+			tap.dumpLayer(l, layerKindLabel(cfg, l), x)
+		}
 	}
 	s.Cache.pos = append(s.Cache.pos, pos)
+	if tap != nil {
+		tap.writeMeta(cfg, H, pos)
+	}
 	xnorm := grow(db.Xnorm, H)
 	db.Xnorm = xnorm
 	rmsnormInto(xnorm, x, m.tensor("model.norm.weight"), eps)
