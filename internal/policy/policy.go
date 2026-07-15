@@ -357,10 +357,12 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		SelfModifyGlobs: cloneSlice(m.SelfModifyGlobs),
 		RedactFields:    cloneSlice(m.RedactFields),
 	}
-	for _, tool := range m.Complain {
-		if tool = strings.TrimSpace(tool); tool != "" {
-			p.Complain[tool] = true
+	for i, raw := range m.Complain {
+		tool := strings.TrimSpace(raw)
+		if tool == "" {
+			return Runtime{}, fmt.Errorf("complain[%d]: tool name must not be blank", i)
 		}
+		p.Complain[tool] = true
 	}
 	if len(p.Complain) == 0 {
 		p.Complain = nil

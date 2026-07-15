@@ -76,6 +76,24 @@ diffable on its own. For a permanent, reviewed change to a deployed floor, fold 
 the `allow` list of a `--policy` manifest instead (below); the overlay is the fast,
 out-of-band path for the interactive `fak guard` operator.
 
+### Logged trials for default-deny false positives
+
+A policy manifest may name tools in `complain` to admit and log their
+**DEFAULT_DENY only** as a trial:
+
+```json
+{
+  "posture": "fail_closed",
+  "complain": ["candidate_read_tool"]
+}
+```
+
+Tool names must be non-blank. This is not a general bypass: explicit `deny`,
+self-modification, argument-rule, and every other hard-refusal rung still run
+before the default-deny trial. Omit `complain` (or use an empty list) for the
+unchanged enforcing behavior. Promote a proven-safe tool into `allow`; do not
+leave a trial open indefinitely.
+
 ---
 
 ## Worked example 1 — a coding agent
