@@ -452,7 +452,13 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	// excerpt is orientation, the handle is the recovery edge that pages the whole task back in.
 	tombstone, taskBytes := originatingTaskExcerptAndBytes(elems, pfxEnd+1, keepStart)
 	restoreID := ""
-	if len(taskBytes) > 0 {
+	if priorExcerpt, priorID, ok := existingOriginatingTaskTombstone(elems, pfxEnd+1, keepStart); ok {
+		// Re-compaction must carry the original task handle forward rather than minting a
+		// digest for the synthetic compaction stub. The original bytes already live in
+		// the gateway restore stash; preserving their handle keeps them addressable at
+		// arbitrary depth without duplicating those bytes in every CompactOutcome.
+		tombstone, restoreID, taskBytes = priorExcerpt, priorID, nil
+	} else if len(taskBytes) > 0 {
 		restoreID = originatingTaskDigestID(taskBytes)
 	}
 
@@ -1190,6 +1196,49 @@ func compactStubBytes(stubRole string, dropped int, tombstone, restoreID string)
 func originatingTaskDigest(elems []json.RawMessage, dropStart, keepStart int) string {
 	excerpt, _ := originatingTaskExcerptAndBytes(elems, dropStart, keepStart)
 	return excerpt
+}
+
+// existingOriginatingTaskTombstone finds a restore handle already carried by a
+// synthetic compaction stub in the span about to be dropped. Re-compaction treats
+// that handle as the originating-task identity instead of tombstoning the stub.
+func existingOriginatingTaskTombstone(elems []json.RawMessage, dropStart, keepStart int) (excerpt, id string, ok bool) {
+	if dropStart < 0 {
+		dropStart = 0
+	}
+	if keepStart > len(elems) {
+		keepStart = len(elems)
+	}
+	for i := dropStart; i < keepStart; i++ {
+		text, textOK := elementTextContent(elems[i])
+		if !textOK || !strings.Contains(text, compactStubPrefix) {
+			continue
+		}
+		tombstoneAt := strings.Index(text, compactTombstonePrefix)
+		if tombstoneAt < 0 {
+			continue
+		}
+		rest := text[tombstoneAt+len(compactTombstonePrefix):]
+		if !strings.HasPrefix(rest, compactRestoreIDField) {
+			continue
+		}
+		rest = rest[len(compactRestoreIDField):]
+		space := strings.IndexByte(rest, ' ')
+		if space <= 0 {
+			continue
+		}
+		id = rest[:space]
+		if len(id) != 64 || strings.Trim(id, "0123456789abcdef") != "" {
+			continue
+		}
+		quoted := strings.TrimSpace(rest[space+1:])
+		if decoded, err := strconv.Unquote(quoted); err == nil {
+			excerpt = decoded
+		} else {
+			excerpt = quoted
+		}
+		return excerpt, id, true
+	}
+	return "", "", false
 }
 
 // originatingTaskExcerptAndBytes is originatingTaskDigest that ALSO returns the FULL raw bytes of the
