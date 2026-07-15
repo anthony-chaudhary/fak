@@ -139,9 +139,19 @@ func writeW3Fixture(t *testing.T, data []byte) string {
 	return path
 }
 
-func TestLoadW3MLPDefaultOffFallsBackToQ8(t *testing.T) {
-	t.Setenv("FAK_W3_MLP", "0")
-	data, _ := w3MLPGGUFFixture(t, w3FixtureOptions{mlpType: TensorIQ3_XXS, attentionType: TensorQ4_K})
+func TestLoadW3MLPDefaultOffPreservesResidentIQ3(t *testing.T) {
+	oldW3, hadW3 := os.LookupEnv("FAK_W3_MLP")
+	if err := os.Unsetenv("FAK_W3_MLP"); err != nil {
+		t.Fatalf("unset FAK_W3_MLP: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadW3 {
+			_ = os.Setenv("FAK_W3_MLP", oldW3)
+			return
+		}
+		_ = os.Unsetenv("FAK_W3_MLP")
+	})
+	data, expectedRaw := w3MLPGGUFFixture(t, w3FixtureOptions{mlpType: TensorIQ3_XXS, attentionType: TensorQ4_K})
 	m, err := LoadModelQ4K(writeW3Fixture(t, data))
 	if err != nil {
 		t.Fatalf("LoadModelQ4K: %v", err)
@@ -149,12 +159,14 @@ func TestLoadW3MLPDefaultOffFallsBackToQ8(t *testing.T) {
 	if got := m.ResidentW3MLPCount(); got != 0 {
 		t.Fatalf("ResidentW3MLPCount()=%d with default-off flag, want 0", got)
 	}
-	for layer := 0; layer < 4; layer++ {
-		for _, projection := range []string{"gate", "up", "down"} {
-			name := w3CanonicalName(layer, projection)
-			if !m.HasQ8(name) || m.HasKQuant(name) {
-				t.Errorf("%s route: q8=%v kquant=%v, want q8 only", name, m.HasQ8(name), m.HasKQuant(name))
-			}
+	for name, wantRaw := range expectedRaw {
+		if m.HasQ8(name) || !m.HasKQuant(name) || m.HasResidentW3MLP(name) {
+			t.Errorf("%s route: q8=%v kquant=%v w3=%v, want untagged resident IQ3", name, m.HasQ8(name), m.HasKQuant(name), m.HasResidentW3MLP(name))
+			continue
+		}
+		gotRaw, ok := m.KQuantRaw(name)
+		if !ok || !bytes.Equal(gotRaw, wantRaw) {
+			t.Errorf("%s raw IQ3 payload changed during default-off load", name)
 		}
 	}
 	if !m.HasQ8("model.layers.3.self_attn.q_proj.weight") {

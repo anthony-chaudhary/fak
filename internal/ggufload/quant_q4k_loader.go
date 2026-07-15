@@ -325,7 +325,6 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// on the host under --cpu-offload-experts, stay raw-resident in kqw.
 		if _, _, residentable := residentExpertBlockGeometry(info.Type); residentable &&
 			info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
-			!w3Eligible &&
 			model.ResidentKQuantEligible(cfg, canon) {
 			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 			tw.acctResident = true
