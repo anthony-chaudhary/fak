@@ -98,6 +98,12 @@ tools/_walltime.*
 /cp_scratch*.json
 /after.json
 /_dloop_*.json
+# router_p0p1.json and future priority-band router dumps (the issue-lane router's
+# `fleet-issue-lane-router/1` verdict report, a generated routing snapshot). The
+# router_ready/router_tmp dumps are already caught by /*_ready.json and /*_tmp.json
+# above; this generalizes the family so a p0p1/p2-band dump can't slip through.
+# Root-scoped; no tracked router_*.json exists.
+/router_*.json
 # Root-level stderr redirect dumps (`fak ... 2> route.err.txt`) — per-session
 # throwaway, often empty. Scoped to the root so a tracked `*.err.txt` fixture in a
 # package (e.g. experiments/agent-live/*.err.txt) is never hidden.
@@ -275,6 +281,11 @@ experiments/dgx/
 # superrepo nests the module under fak/, while this public checkout is root-hoisted.
 fak/experiments/benchmark/runs/by-machine/dgx*/
 experiments/benchmark/runs/by-machine/dgx*/
+# Atomic-write temp sibling of the tracked experiments/benchmark/catalog.json: the
+# catalog writer renders to catalog.tmp then renames over catalog.json, and a crashed
+# or racing write leaves the .tmp behind. Regenerable, never source. Scoped to the dir
+# so a real tracked *.tmp elsewhere is untouched (none exist under benchmark today).
+/experiments/benchmark/*.tmp
 # `fak nightrun --apply` captures each task's raw stdout under experiments/nightrun/<box>/.
 # Those per-box dirs are LOCAL evidence only: regenerable, low-signal (mostly failure logs),
 # and one carries a raw os.Hostname() box dir (pre-#970) that must never reach the public tree.
@@ -305,6 +316,13 @@ docs/nightrun/stepadvice-*.json
 # defense-in-depth so a future stray CWD-relative write can never be re-added. `docs/`
 # under cmd/fak is never a legit tracked artifact (docs/ is a repo-root concept).
 cmd/fak/docs/
+# Same CWD-relative-writer bug class as cmd/fak/docs/ above: a bench/catalog writer run
+# with cwd=cmd/fak (e.g. `go test ./cmd/fak`) forks the repo-root experiments/ tree
+# UNDER cmd/fak, leaving an empty experiments/benchmark/runs/by-machine/ shadow that
+# perpetually dirties `git status`. experiments/ is a repo-root concept — never a legit
+# tracked artifact under cmd/fak — so ignore it as defense-in-depth against a stray
+# CWD-relative write, exactly as with cmd/fak/docs/.
+cmd/fak/experiments/
 # DGX Slack control-bridge source is PRIVATE-ONLY. Its home is the private repo
 # fak-private (tools/dgxbridge/); fleet is the sunset archive. tools/check_committed_files.py
 # already REFUSES any cmd|internal/*dgx*/ path at commit (this is exactly how cmd/dgxbridge +
@@ -711,3 +729,10 @@ docs/dispatch-status.md
 # TestTrackedTreeHasNoPopups would otherwise scan the mirrored copy and double-count every
 # finding. Node-local; never source.
 /.head_build_check/
+
+# `.probe/` — guard/serve reconnaissance scratch tree: probe .go spikes (guard_probe.go,
+# serve_head.go, guard_*_recon.go) parked in a dot-dir so `go build`/`go test` skip them,
+# plus overlay JSONs (overlay.json, ov_build.json, ov_test.json) from an `-overlay` probe.
+# Node-local, regenerable, never source — the same class as /.tmp_overlay/ and
+# /.head_build_check/ above.
+/.probe/
