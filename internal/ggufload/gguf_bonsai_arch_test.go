@@ -1,6 +1,10 @@
 package ggufload
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
 
 // Bonsai / Qwen3.6-27B arch recognition (epic #4867, child #4869).
 //
@@ -123,5 +127,27 @@ func TestBonsaiConfigRecognizedRegardlessOfSpelling(t *testing.T) {
 		if !cfg.IsQwen35Hybrid() {
 			t.Errorf("arch %q: IsQwen35Hybrid = false, want true (layer_types=%v)", arch, cfg.LayerTypes)
 		}
+	}
+}
+
+// TestBonsaiConfigClassifiesToRecognizedGDNForward binds the #4869 second half — "the forward
+// path is classified supported" — end to end: a Bonsai GGUF's derived Config must reach the
+// wired qwen35 Gated-DeltaNet forward (ForwardQwen35GDN), NOT the #934 UnsupportedArchError
+// the empty-layer_types state would raise. This is the recognition→dispatch chain a serve/bench
+// caller asserts before decoding a token, proven here from the raw "bonsai." metadata through
+// canonicalGGUFArch to model.ClassifyForwardPath in one witness.
+func TestBonsaiConfigClassifiesToRecognizedGDNForward(t *testing.T) {
+	f := &File{Metadata: synthBonsaiMeta("bonsai")}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	got, err := model.ClassifyForwardPath(cfg, nil)
+	if err != nil {
+		t.Fatalf("a recognized Bonsai hybrid must classify, got refusal: %v", err)
+	}
+	if got != model.ForwardQwen35GDN {
+		t.Fatalf("ClassifyForwardPath = %q, want %q (recognized qwen35 GDN, not the #934 refusal)",
+			got, model.ForwardQwen35GDN)
 	}
 }
