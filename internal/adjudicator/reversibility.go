@@ -1055,16 +1055,51 @@ func isCommandBearingKey(k string) bool {
 }
 
 // normalizeCommandForToken collapses cosmetic whitespace in a command for the
-// confirm-token hash: leading/trailing whitespace is trimmed and every run of
-// UNQUOTED whitespace between tokens becomes a single space, while whitespace
-// INSIDE a quoted span is preserved byte-for-byte. Collapsing only unquoted runs
-// is semantically faithful — the shell already word-splits on unquoted
-// whitespace, so `rm  foo` and `rm foo` are the same action — and cannot let two
-// different commands collide, because quoted content (the only whitespace the
-// shell keeps) is left untouched. This is why the fix does not weaken the token's
-// binding while still letting a reflowed re-proposal converge (#2777).
+// confirm-token hash: line-continuation reflows are unwrapped, leading/trailing
+// whitespace is trimmed, and every run of UNQUOTED spaces/tabs between tokens
+// becomes a single space, while whitespace INSIDE a quoted span is preserved
+// byte-for-byte. Collapsing only unquoted runs is semantically faithful — the
+// shell already word-splits on unquoted spacing, so `rm  foo` and `rm foo` are
+// the same action — and cannot let two different commands collide, because quoted
+// content (the only whitespace the shell keeps) is left untouched. This is why
+// the fix does not weaken the token's binding while still letting a reflowed
+// re-proposal converge (#2777).
 func normalizeCommandForToken(cmd string) string {
-	return strings.Join(quoteAwareFields(cmd), " ")
+	return strings.Join(quoteAwareFields(foldLineContinuations(cmd)), " ")
+}
+
+// foldLineContinuations deletes shell line-continuation sequences — a backslash
+// immediately followed by a newline (LF or CRLF) OUTSIDE a quoted span — exactly
+// as the shell does when it joins the wrapped lines, so a long command re-proposed
+// wrapped across lines normalizes to its unwrapped form for the confirm token. A
+// backslash-newline INSIDE quotes is literal content and is left intact, and a
+// BARE unquoted newline — a command SEPARATOR, not whitespace — is never touched
+// (folding it would merge two commands into one and could transplant a confirm
+// across distinct actions). Other backslash escapes pass through unchanged, matching
+// quoteAwareFields, which reads this view next.
+func foldLineContinuations(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch {
+		case c == '\'' || c == '"':
+			dollar := c == '\'' && i > 0 && s[i-1] == '$'
+			end := quotedSpanEnd(s, i, dollar)
+			b.WriteString(s[i:end])
+			i = end
+		case c == '\\' && i+1 < len(s) && s[i+1] == '\n':
+			i += 2
+		case c == '\\' && i+2 < len(s) && s[i+1] == '\r' && s[i+2] == '\n':
+			i += 3
+		case c == '\\' && i+1 < len(s):
+			b.WriteString(s[i : i+2])
+			i += 2
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return b.String()
 }
 
 // isIncidentalTokenKey reports whether an argument is a pure human-readable

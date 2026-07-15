@@ -620,6 +620,32 @@ func TestReversibilityConfirmTokenIgnoresCommandWhitespaceDrift(t *testing.T) {
 	}
 }
 
+// TestReversibilityConfirmTokenIgnoresLineContinuationReflow covers the wrapped
+// re-proposal the issue names alongside re-spacing (#2777): a long command the
+// model re-emits across lines with a backslash-newline continuation is the SAME
+// action the shell joins back into one line, so it must hash to the same confirm
+// token. A bare unquoted newline is a command SEPARATOR, not a continuation, so it
+// stays significant — folding it would merge two commands and could transplant a
+// confirm across distinct actions.
+func TestReversibilityConfirmTokenIgnoresLineContinuationReflow(t *testing.T) {
+	flat := map[string]any{"command": "terraform destroy -auto-approve -target=aws_s3_bucket.logs"}
+	wrapped := map[string]any{"command": "terraform destroy \\\n  -auto-approve \\\n  -target=aws_s3_bucket.logs"}
+	if ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", flat) !=
+		ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", wrapped) {
+		t.Fatalf("confirm token rotated on a backslash-newline line-continuation reflow — #2777 not fixed")
+	}
+
+	// A BARE unquoted newline separates two commands and must keep the token
+	// distinct from the single-command form — the continuation fold cannot merge
+	// them.
+	twoCmds := map[string]any{"command": "rm -rf a\nrm -rf b"}
+	oneCmd := map[string]any{"command": "rm -rf a rm -rf b"}
+	if ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", twoCmds) ==
+		ReversibilityConfirmToken(ReversibilityIrreversible, "Bash", oneCmd) {
+		t.Fatalf("confirm token folded a bare newline separator into a space — binding weakened")
+	}
+}
+
 // TestAdjudicateReversibilityTokenStableAcrossDescriptionDrift drives the FULL
 // adjudicate path (rung ordering -> wouldAdmit -> ClassifyReversibility ->
 // reversibilityGateVerdict -> Meta["confirm_token"]) for an outward-facing git push
