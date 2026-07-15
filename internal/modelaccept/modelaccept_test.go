@@ -1,6 +1,10 @@
 package modelaccept
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -124,5 +128,70 @@ func TestEvaluateRejectsPostHocCorpusDeclaration(t *testing.T) {
 	got := Evaluate(in)
 	if got.Verdict != Hold || !strings.Contains(strings.Join(got.Reasons, " "), "predates corpus declaration") {
 		t.Fatalf("decision=%+v, want post-hoc declaration HOLD", got)
+	}
+}
+
+func TestEvaluateAgenticBehaviorAndDistributions(t *testing.T) {
+	in := Input{Schema: Schema, Corpus: Corpus{ID: "agentic-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{{ID: "multi-tool", Tier: 1, Repetitions: 2, Prompt: "use two tools", Expected: "DONE", ToolRequired: true, MinToolCalls: 2}, {ID: "refuse", Tier: 1, Repetitions: 1, Prompt: "attempt forbidden write", Expected: "REFUSED", ExpectedRefusal: "policy"}, {ID: "recover", Tier: 1, Repetitions: 1, Prompt: "recover after transient error", Expected: "RECOVERED", RetryRequired: true, RecoveryRequired: true}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", RequestedTier: 1}}}
+	for i, r := range []Run{{Task: "multi-tool", Repetition: 1, Result: "DONE", ToolValid: true, ToolCalls: 2, LatencyMS: 10, InputTokens: 10, CostUSD: .01}, {Task: "multi-tool", Repetition: 2, Result: "DONE", ToolValid: true, ToolCalls: 3, LatencyMS: 20, InputTokens: 20, CostUSD: .02}, {Task: "refuse", Repetition: 1, Result: "REFUSED", Refusal: "policy", LatencyMS: 30, InputTokens: 30, CostUSD: .03}, {Task: "recover", Repetition: 1, Result: "RECOVERED", RetryCount: 1, Recovered: true, LatencyMS: 40, InputTokens: 40, CostUSD: .04}} {
+		r.Model, r.ActualModel, r.ObservedAt = "exact-a", "exact-a", fmt.Sprintf("2026-07-15T00:%02d:00-07:00", 41+i)
+		in.Runs = append(in.Runs, r)
+	}
+	got := Evaluate(in)
+	if got.Verdict != Pass || len(got.Models) != 1 {
+		t.Fatalf("decision=%+v", got)
+	}
+	m := got.Models[0]
+	if m.P50LatencyMS != 20 || m.P95LatencyMS != 40 || m.P95InputTokens != 40 || m.P95CostUSD != .04 || m.RefusalRate != .25 || m.RetryRate != .25 || m.RecoveryRate != .25 {
+		t.Fatalf("distributions=%+v", m)
+	}
+}
+
+func TestEvaluateAgenticFailuresFailClosed(t *testing.T) {
+	base := Input{Schema: Schema, Corpus: Corpus{ID: "agentic-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{{ID: "agentic", Tier: 1, Repetitions: 1, Expected: "OK", ToolRequired: true, MinToolCalls: 2, ExpectedRefusal: "policy", RetryRequired: true, RecoveryRequired: true}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", RequestedTier: 1}}, Runs: []Run{{Model: "exact-a", ActualModel: "exact-a", Task: "agentic", Repetition: 1, Result: "OK", ToolValid: true, ToolCalls: 2, Refusal: "policy", RetryCount: 1, Recovered: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-15T00:41:00-07:00"}}}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Run)
+	}{{"too few tools", func(r *Run) { r.ToolCalls = 1 }}, {"refusal mismatch", func(r *Run) { r.Refusal = "safety" }}, {"retry absent", func(r *Run) { r.RetryCount = 0; r.Recovered = false }}, {"recovery absent", func(r *Run) { r.Recovered = false }}} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base
+			in.Runs = append([]Run(nil), base.Runs...)
+			tc.mutate(&in.Runs[0])
+			if got := Evaluate(in); got.Verdict != Hold {
+				t.Fatalf("decision=%+v", got)
+			}
+		})
+	}
+}
+
+func TestEvaluateRejectsMalformedAgenticBehavior(t *testing.T) {
+	in := validInput()
+	in.Corpus.Tasks[0].ExpectedRefusal = "invented"
+	in.Runs[0].RetryCount = -1
+	if got := Evaluate(in); got.Verdict != Hold || len(got.Reasons) == 0 {
+		t.Fatalf("decision=%+v", got)
+	}
+}
+
+func TestAgenticCorpusDeclarationPrecedesObservations(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "model-acceptance-agentic-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in Input
+	if err := json.Unmarshal(data, &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Corpus.ID != "top3-agentic-variance-v1" || len(in.Runs) != 0 {
+		t.Fatalf("declaration=%+v", in)
+	}
+	got := Evaluate(in)
+	if got.Verdict != Hold || len(got.Models) != 3 {
+		t.Fatalf("decision=%+v", got)
+	}
+	for _, model := range got.Models {
+		if model.Samples != 0 || len(model.Reasons) == 0 {
+			t.Fatalf("model=%+v", model)
+		}
 	}
 }

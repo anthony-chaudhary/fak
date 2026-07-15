@@ -17,11 +17,16 @@ const (
 )
 
 type Task struct {
-	ID           string `json:"id"`
-	Tier         int    `json:"tier"`
-	Repetitions  int    `json:"repetitions"`
-	Expected     string `json:"expected"`
-	ToolRequired bool   `json:"tool_required,omitempty"`
+	ID               string `json:"id"`
+	Tier             int    `json:"tier"`
+	Repetitions      int    `json:"repetitions"`
+	Prompt           string `json:"prompt,omitempty"`
+	Expected         string `json:"expected"`
+	ToolRequired     bool   `json:"tool_required,omitempty"`
+	MinToolCalls     int    `json:"min_tool_calls,omitempty"`
+	ExpectedRefusal  string `json:"expected_refusal,omitempty"`
+	RetryRequired    bool   `json:"retry_required,omitempty"`
+	RecoveryRequired bool   `json:"recovery_required,omitempty"`
 }
 
 type Thresholds struct {
@@ -48,6 +53,10 @@ type Run struct {
 	Result        string  `json:"result"`
 	ProviderError bool    `json:"provider_error"`
 	ToolValid     bool    `json:"tool_valid"`
+	ToolCalls     int     `json:"tool_calls,omitempty"`
+	Refusal       string  `json:"refusal,omitempty"`
+	RetryCount    int     `json:"retry_count,omitempty"`
+	Recovered     bool    `json:"recovered,omitempty"`
 	LatencyMS     int64   `json:"latency_ms"`
 	InputTokens   int64   `json:"input_tokens"`
 	CostUSD       float64 `json:"cost_usd"`
@@ -74,7 +83,13 @@ type ModelDecision struct {
 	SuccessRate        float64  `json:"success_rate"`
 	ProviderErrorRate  float64  `json:"provider_error_rate"`
 	InvalidToolRate    float64  `json:"invalid_tool_rate"`
+	P50LatencyMS       int64    `json:"p50_latency_ms"`
 	P95LatencyMS       int64    `json:"p95_latency_ms"`
+	P95InputTokens     int64    `json:"p95_input_tokens"`
+	P95CostUSD         float64  `json:"p95_cost_usd"`
+	RefusalRate        float64  `json:"refusal_rate"`
+	RetryRate          float64  `json:"retry_rate"`
+	RecoveryRate       float64  `json:"recovery_rate"`
 	AverageInputTokens float64  `json:"average_input_tokens"`
 	AverageCostUSD     float64  `json:"average_cost_usd"`
 	Reasons            []string `json:"reasons"`
@@ -116,9 +131,11 @@ func Evaluate(in Input) Decision {
 		}
 		seen := map[string]bool{}
 		successes, providerErrors, invalidTools := 0, 0, 0
-		var lat []int64
+		var lat, tokenSamples []int64
+		var costSamples []float64
 		var tokens int64
 		var cost float64
+		refusals, retries, recoveries := 0, 0, 0
 		for _, r := range rr {
 			key := fmt.Sprintf("%s/%d", r.Task, r.Repetition)
 			if seen[key] {
@@ -136,13 +153,38 @@ func Evaluate(in Input) Decision {
 			if r.ProviderError {
 				providerErrors++
 			}
-			if t.ToolRequired && !r.ToolValid {
+			toolOK := !t.ToolRequired || (r.ToolValid && (t.MinToolCalls == 0 || r.ToolCalls >= t.MinToolCalls))
+			if !toolOK {
 				invalidTools++
+				d.Reasons = append(d.Reasons, "tool behavior mismatch: "+key)
 			}
-			if !r.ProviderError && r.ActualModel == req.Model && r.Result == t.Expected && (!t.ToolRequired || r.ToolValid) {
+			refusalOK := r.Refusal == t.ExpectedRefusal
+			if !refusalOK {
+				d.Reasons = append(d.Reasons, "refusal mismatch: "+key)
+			}
+			retryOK := !t.RetryRequired || r.RetryCount > 0
+			if !retryOK {
+				d.Reasons = append(d.Reasons, "required retry missing: "+key)
+			}
+			recoveryOK := !t.RecoveryRequired || (r.RetryCount > 0 && r.Recovered)
+			if !recoveryOK {
+				d.Reasons = append(d.Reasons, "required recovery missing: "+key)
+			}
+			if r.Refusal != "" {
+				refusals++
+			}
+			if r.RetryCount > 0 {
+				retries++
+			}
+			if r.Recovered {
+				recoveries++
+			}
+			if !r.ProviderError && r.ActualModel == req.Model && r.Result == t.Expected && toolOK && refusalOK && retryOK && recoveryOK {
 				successes++
 			}
 			lat = append(lat, r.LatencyMS)
+			tokenSamples = append(tokenSamples, r.InputTokens)
+			costSamples = append(costSamples, r.CostUSD)
 			tokens += r.InputTokens
 			cost += r.CostUSD
 		}
@@ -161,10 +203,18 @@ func Evaluate(in Input) Decision {
 			d.SuccessRate = float64(successes) / n
 			d.ProviderErrorRate = float64(providerErrors) / n
 			d.InvalidToolRate = float64(invalidTools) / n
+			d.RefusalRate = float64(refusals) / n
+			d.RetryRate = float64(retries) / n
+			d.RecoveryRate = float64(recoveries) / n
 			d.AverageInputTokens = float64(tokens) / n
 			d.AverageCostUSD = cost / n
 			sort.Slice(lat, func(i, j int) bool { return lat[i] < lat[j] })
+			sort.Slice(tokenSamples, func(i, j int) bool { return tokenSamples[i] < tokenSamples[j] })
+			sort.Float64s(costSamples)
+			d.P50LatencyMS = lat[(50*len(lat)-1)/100]
 			d.P95LatencyMS = lat[(95*len(lat)-1)/100]
+			d.P95InputTokens = tokenSamples[(95*len(tokenSamples)-1)/100]
+			d.P95CostUSD = costSamples[(95*len(costSamples)-1)/100]
 		}
 		th := in.Corpus.Thresholds
 		if len(rr) != expectedSamples {
@@ -234,12 +284,30 @@ func validate(in Input) []string {
 		if t.ID == "" || t.Repetitions <= 0 || t.Tier < 0 {
 			r = append(r, "every task needs id, positive repetitions, and non-negative tier")
 		}
+		if t.MinToolCalls < 0 || (t.MinToolCalls > 0 && !t.ToolRequired) {
+			r = append(r, "task "+t.ID+" has invalid minimum tool calls")
+		}
+		if t.ExpectedRefusal != "" && t.ExpectedRefusal != "policy" && t.ExpectedRefusal != "safety" {
+			r = append(r, "task "+t.ID+" has invalid expected refusal")
+		}
+		if t.RecoveryRequired && !t.RetryRequired {
+			r = append(r, "task "+t.ID+" requires recovery without retry")
+		}
 		if seen[t.ID] {
 			r = append(r, "duplicate task: "+t.ID)
 		}
 		seen[t.ID] = true
 	}
 	for _, run := range in.Runs {
+		if run.ToolCalls < 0 || run.RetryCount < 0 {
+			r = append(r, fmt.Sprintf("run %s/%s/%d has negative behavior count", run.Model, run.Task, run.Repetition))
+		}
+		if run.Refusal != "" && run.Refusal != "policy" && run.Refusal != "safety" {
+			r = append(r, fmt.Sprintf("run %s/%s/%d has invalid refusal class", run.Model, run.Task, run.Repetition))
+		}
+		if run.Recovered && run.RetryCount == 0 {
+			r = append(r, fmt.Sprintf("run %s/%s/%d recovered without retry", run.Model, run.Task, run.Repetition))
+		}
 		if !declaredModels[run.Model] {
 			r = append(r, "run uses undeclared model: "+run.Model)
 		}
