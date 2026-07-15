@@ -12,6 +12,17 @@ const (
 	LivelockSchema           = "guardrsi.livelock/1"
 	LivelockEvent            = "LIVELOCK_DETECTED"
 	DefaultLivelockThreshold = 3
+	// RefusalCheckpointSchema versions the typed recovery checkpoint nested in a
+	// livelock envelope. It is deliberately additive to LivelockSchema: existing
+	// callers still receive the advisory/fuse fields, while recovery-aware callers
+	// can keep the goal active instead of rendering another denial-only final turn.
+	RefusalCheckpointSchema = "guardrsi.refusal-checkpoint/1"
+	RefusalCheckpointEvent  = "REFUSAL_RECOVERY_CHECKPOINT"
+	// DefaultSemanticRefusalCheckpoint is the hard UX bound for semantically
+	// equivalent SELF_MODIFY refusals. The security decision remains DENY, but by
+	// the fourth refusal the caller receives a typed recoverable pause rather than
+	// needing to infer recovery from another varied shell command.
+	DefaultSemanticRefusalCheckpoint = 4
 	// DefaultLivelockFuseFactor multiplies the advisory threshold to get the fuse
 	// count. The advisory note fires at `threshold` and repeats for the next few
 	// identical outcomes; if the run keeps going and reaches threshold*factor, the
@@ -33,6 +44,17 @@ const (
 	DefaultLivelockAbortFactor = 3
 )
 
+// RefusalCheckpointOutcome is the closed outcome vocabulary for a repeated
+// semantic refusal checkpoint.
+type RefusalCheckpointOutcome string
+
+const (
+	// RefusalPausedRecoverable means the refused effect remains prohibited, the
+	// active goal should be preserved, and the caller must choose a sanctioned
+	// actuator or escalate with a witness rather than retrying command mutations.
+	RefusalPausedRecoverable RefusalCheckpointOutcome = "paused_recoverable"
+)
+
 // LivelockObservation is one repeated tool-call outcome, identified without carrying
 // raw arguments. TraceID scopes the consecutive run to one agent session.
 type LivelockObservation struct {
@@ -42,6 +64,30 @@ type LivelockObservation struct {
 	Verdict     string
 	Reason      string
 	Disposition string
+	// SemanticIdentity is an optional stable, content-free fingerprint of the
+	// guarded target and intended effect. Supplying it lets the detector recognize
+	// the same refusal across different tools and argument strings without exposing
+	// either value. SELF_MODIFY observations without one use the conservative
+	// (reason, tool) fallback so today's gateway catches command-mutation loops;
+	// callers that know target/effect boundaries should always supply the sharper
+	// identity so genuinely different routes remain distinct.
+	SemanticIdentity string
+}
+
+// RefusalCheckpoint is the typed same-turn recovery contract emitted on the
+// fourth semantically equivalent SELF_MODIFY refusal. Confirmable is false for
+// SELF_MODIFY: replaying or confirming the same bytes never overrides the floor.
+// GoalAction instructs the harness to retain the active objective while paused.
+type RefusalCheckpoint struct {
+	Schema           string                   `json:"schema"`
+	Event            string                   `json:"event"`
+	Outcome          RefusalCheckpointOutcome `json:"outcome"`
+	Reason           string                   `json:"reason"`
+	SemanticIdentity string                   `json:"semantic_identity"`
+	RepeatCount      int                      `json:"repeat_count"`
+	Confirmable      bool                     `json:"confirmable"`
+	GoalAction       string                   `json:"goal_action"`
+	NextAction       string                   `json:"next_action"`
 }
 
 // LivelockEnvelope is the structured nudge returned once an identical tool call
@@ -58,6 +104,14 @@ type LivelockEnvelope struct {
 	Disposition     string `json:"disposition,omitempty"`
 	RepeatCount     int    `json:"repeat_count"`
 	SuggestedChange string `json:"suggested_change"`
+	// IdentityKind is set for semantic refusal folding; an omitted value retains
+	// the original exact-call wire shape. SemanticIdentity is always content-free.
+	IdentityKind     string `json:"identity_kind,omitempty"`
+	SemanticIdentity string `json:"semantic_identity,omitempty"`
+	// Checkpoint is present from the fourth equivalent SELF_MODIFY refusal onward.
+	// It does not weaken the DENY; it changes the control response from another
+	// terminal-looking denial into an explicit recoverable pause contract.
+	Checkpoint *RefusalCheckpoint `json:"checkpoint,omitempty"`
 	// Fuse is true once the consecutive run reaches the fuse count (>= advisory
 	// threshold). It tells the caller the loop must be broken now — an admitted call
 	// carrying Fuse should be converted into a hard refusal rather than admitted
@@ -202,7 +256,8 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 	obs.Verdict = strings.ToUpper(strings.TrimSpace(obs.Verdict))
 	obs.Reason = strings.TrimSpace(obs.Reason)
 	obs.Disposition = strings.TrimSpace(obs.Disposition)
-	key := livelockKey(obs)
+	obs.SemanticIdentity = strings.TrimSpace(obs.SemanticIdentity)
+	key, semanticIdentity := livelockKey(obs)
 	run := d.byTrace[obs.TraceID]
 	if run.key == key {
 		// Saturate at the terminal abort rung. Once the structural loop-break is
@@ -216,28 +271,77 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 		run = livelockRun{key: key, count: 1, last: obs}
 	}
 	d.byTrace[obs.TraceID] = run
-	if run.count < d.threshold {
+	checkpoint := semanticRefusalCheckpoint(obs, semanticIdentity, run.count)
+	if run.count < d.threshold && checkpoint == nil {
 		return LivelockEnvelope{}, false
 	}
+	identityKind := ""
+	if semanticIdentity != "" {
+		identityKind = "semantic_refusal"
+	}
 	return LivelockEnvelope{
-		Schema:          LivelockSchema,
-		Event:           LivelockEvent,
-		TraceID:         obs.TraceID,
-		Tool:            obs.Tool,
-		ArgsDigest:      obs.ArgsDigest,
-		FailureHash:     failureHash(key),
-		Verdict:         obs.Verdict,
-		Reason:          obs.Reason,
-		Disposition:     obs.Disposition,
-		RepeatCount:     run.count,
-		SuggestedChange: suggestedLivelockChange(obs),
-		Fuse:            d.fuse > 0 && run.count >= d.fuse,
-		Escalate:        d.abort > 0 && run.count >= d.abort,
+		Schema:           LivelockSchema,
+		Event:            LivelockEvent,
+		TraceID:          obs.TraceID,
+		Tool:             obs.Tool,
+		ArgsDigest:       obs.ArgsDigest,
+		FailureHash:      failureHash(key),
+		Verdict:          obs.Verdict,
+		Reason:           obs.Reason,
+		Disposition:      obs.Disposition,
+		RepeatCount:      run.count,
+		SuggestedChange:  suggestedLivelockChange(obs, checkpoint != nil),
+		IdentityKind:     identityKind,
+		SemanticIdentity: semanticIdentity,
+		Checkpoint:       checkpoint,
+		Fuse:             d.fuse > 0 && run.count >= d.fuse,
+		Escalate:         d.abort > 0 && run.count >= d.abort,
 	}, true
 }
 
-func livelockKey(obs LivelockObservation) string {
-	return obs.Tool + "\x00" + obs.ArgsDigest + "\x00" + obs.Verdict + "\x00" + obs.Reason + "\x00" + obs.Disposition
+func livelockKey(obs LivelockObservation) (key, semanticIdentity string) {
+	if isRefusalObservation(obs) {
+		source := strings.TrimSpace(obs.SemanticIdentity)
+		if source == "" && strings.EqualFold(obs.Reason, "SELF_MODIFY") {
+			// The gateway currently has only the reason/tool projection at this seam:
+			// arguments are content-free digests, so the guarded target cannot be
+			// recovered here. Grouping SELF_MODIFY by (reason, tool) is a conservative
+			// fallback that catches command mutation without weakening the deny. A
+			// caller-provided SemanticIdentity replaces it when target/effect are known.
+			source = "fallback\x00" + strings.ToUpper(obs.Reason) + "\x00" + strings.ToLower(obs.Tool)
+		}
+		if source != "" {
+			semanticIdentity = failureHash("semantic-refusal\x00" + source)
+			return "semantic-refusal\x00" + semanticIdentity + "\x00" + obs.Verdict + "\x00" + strings.ToUpper(obs.Reason), semanticIdentity
+		}
+	}
+	return obs.Tool + "\x00" + obs.ArgsDigest + "\x00" + obs.Verdict + "\x00" + obs.Reason + "\x00" + obs.Disposition, ""
+}
+
+func isRefusalObservation(obs LivelockObservation) bool {
+	switch strings.ToUpper(strings.TrimSpace(obs.Verdict)) {
+	case "DENY", "QUARANTINE":
+		return true
+	default:
+		return false
+	}
+}
+
+func semanticRefusalCheckpoint(obs LivelockObservation, identity string, count int) *RefusalCheckpoint {
+	if identity == "" || !strings.EqualFold(obs.Reason, "SELF_MODIFY") || count < DefaultSemanticRefusalCheckpoint {
+		return nil
+	}
+	return &RefusalCheckpoint{
+		Schema:           RefusalCheckpointSchema,
+		Event:            RefusalCheckpointEvent,
+		Outcome:          RefusalPausedRecoverable,
+		Reason:           "SELF_MODIFY",
+		SemanticIdentity: identity,
+		RepeatCount:      count,
+		Confirmable:      false,
+		GoalAction:       "preserve_active",
+		NextAction:       "select a sanctioned actuator, or escalate with a witness",
+	}
 }
 
 func failureHash(key string) string {
@@ -245,7 +349,10 @@ func failureHash(key string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func suggestedLivelockChange(obs LivelockObservation) string {
+func suggestedLivelockChange(obs LivelockObservation, checkpoint bool) string {
+	if checkpoint {
+		return string(RefusalPausedRecoverable)
+	}
 	switch strings.ToUpper(obs.Disposition) {
 	case "WAIT":
 		return "change_approach_wait_or_fetch_merge_before_retry"

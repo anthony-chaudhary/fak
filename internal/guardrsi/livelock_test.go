@@ -37,6 +37,86 @@ func TestLivelockDetectorFiresOnThirdIdenticalFailure(t *testing.T) {
 	}
 }
 
+func TestLivelockDetectorCheckpointsVariedSelfModifyByFourthRefusal(t *testing.T) {
+	d := NewLivelockDetector(DefaultLivelockThreshold)
+	digests := []string{
+		ArgsDigest(`{"command":"python bridge_helper.py --publish"}`),
+		ArgsDigest(`{"command":"pwsh -File bridge-helper.ps1 -Publish"}`),
+		ArgsDigest(`{"command":"go run ./scratch/bridge_helper.go publish"}`),
+		ArgsDigest(`{"command":"cmd /c bridge-helper.cmd publish"}`),
+	}
+	var last LivelockEnvelope
+	for i, digest := range digests {
+		env, ok := d.ObserveFailure(LivelockObservation{
+			TraceID:     "session-4986",
+			Tool:        "shell_command",
+			ArgsDigest:  digest,
+			Verdict:     "DENY",
+			Reason:      "SELF_MODIFY",
+			Disposition: "ESCALATE",
+		})
+		switch i {
+		case 0, 1:
+			if ok {
+				t.Fatalf("refusal %d checkpointed early: %+v", i+1, env)
+			}
+		case 2:
+			if !ok || env.Checkpoint != nil {
+				t.Fatalf("third refusal = %+v ok=%v, want advisory without checkpoint", env, ok)
+			}
+		case 3:
+			if !ok {
+				t.Fatal("fourth semantically equivalent SELF_MODIFY refusal did not produce a recoverable checkpoint")
+			}
+			last = env
+		}
+	}
+	if last.RepeatCount != 4 || last.Verdict != "DENY" || last.Reason != "SELF_MODIFY" {
+		t.Fatalf("fourth refusal envelope = %+v, want repeat=4 while preserving DENY/SELF_MODIFY", last)
+	}
+	if last.IdentityKind != "semantic_refusal" || last.SemanticIdentity == "" {
+		t.Fatalf("fourth refusal identity = %q/%q, want a content-free semantic identity", last.IdentityKind, last.SemanticIdentity)
+	}
+	checkpoint := last.Checkpoint
+	if checkpoint == nil {
+		t.Fatal("fourth refusal did not carry the typed checkpoint")
+	}
+	if checkpoint.Schema != RefusalCheckpointSchema || checkpoint.Event != RefusalCheckpointEvent ||
+		checkpoint.Outcome != RefusalPausedRecoverable || checkpoint.Reason != "SELF_MODIFY" ||
+		checkpoint.SemanticIdentity != last.SemanticIdentity || checkpoint.RepeatCount != 4 ||
+		checkpoint.Confirmable || checkpoint.GoalAction != "preserve_active" ||
+		checkpoint.NextAction != "select a sanctioned actuator, or escalate with a witness" {
+		t.Fatalf("checkpoint = %+v, want a non-confirmable paused_recoverable contract preserving the active goal", checkpoint)
+	}
+	if last.Escalate {
+		t.Fatal("fourth refusal must pause recoverably, not arm terminal escalation")
+	}
+	if last.SuggestedChange != string(RefusalPausedRecoverable) {
+		t.Fatalf("fourth refusal approach = %q, want a typed recoverable checkpoint", last.SuggestedChange)
+	}
+}
+
+func TestLivelockDetectorKeepsDeclaredSemanticRefusalRoutesDistinct(t *testing.T) {
+	d := NewLivelockDetector(DefaultLivelockThreshold)
+	routeA := failureHash("target-a/effect-publish")
+	routeB := failureHash("target-b/effect-configure")
+	identities := []string{routeA, routeA, routeB, routeB}
+	for i, identity := range identities {
+		env, _ := d.ObserveFailure(LivelockObservation{
+			TraceID:          "session-distinct-routes",
+			Tool:             "shell_command",
+			ArgsDigest:       ArgsDigest(identity),
+			Verdict:          "DENY",
+			Reason:           "SELF_MODIFY",
+			Disposition:      "ESCALATE",
+			SemanticIdentity: identity,
+		})
+		if env.Checkpoint != nil {
+			t.Fatalf("observation %d conflated distinct target/effect routes: %+v", i+1, env)
+		}
+	}
+}
+
 func TestLivelockDetectorFiresOnThirdIdenticalAllowedCall(t *testing.T) {
 	d := NewLivelockDetector(3)
 	obs := LivelockObservation{
