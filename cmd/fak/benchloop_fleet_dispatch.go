@@ -187,6 +187,16 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "fan-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+		// Bound the generated fan-out matrix so every scheduled node produces a real,
+		// reproducible topology witness without leaving output files in the source tree.
+		run := "go run ./cmd/fanbench -agents 1,4 -sub-turns 1 -trials 1 -prefixes smoke -out /tmp/fak-fanbench.json -csv /tmp/fak-fanbench.csv"
+		if req.Machine == "gcp-g2-l4-32" {
+			// Container-Optimized OS mounts the persistent home filesystem noexec.
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/fanbench -agents 1,4 -sub-turns 1 -trials 1 -prefixes smoke -out /tmp/fak-fanbench.json -csv /tmp/fak-fanbench.csv"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
+	}
 	if req.Benchmark == "concept-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
 		// The concept replay is intentionally bounded and deterministic. Run it on each
 		// provisioned node to fill the topology cell with node-authored lineage rather

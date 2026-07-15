@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-a3-high-h100-1g-bench-fleet-a0159f7418d9b012-20260715T014839Z",
+  "machine_id": "gcp-a3-high-h100-1g",
+  "timestamp": "20260715T014839Z",
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "rev": "unknown"
+  },
+  "harness": {
+    "name": "fak-bench-fleet",
+    "version": "1"
+  },
+  "model": {
+    "name": "",
+    "precision": "n/a"
+  },
+  "config": {
+    "benchmark": "fan-benchmark",
+    "request_id": "a0159f7418d9b012",
+    "route": "gcp:ssh/fak-qwen-serve"
+  },
+  "tags": [
+    "bench-fleet",
+    "gpu",
+    "fan-benchmark"
+  ],
+  "artifacts": {
+    "witness": "witness.json"
+  }
+}
