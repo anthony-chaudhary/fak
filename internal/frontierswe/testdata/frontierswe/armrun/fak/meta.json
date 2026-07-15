@@ -1,0 +1,13 @@
+{
+  "schema": "fak.frontierswe.run.v1",
+  "task": "git-to-zig",
+  "agent": "claude-code",
+  "model": "test-model",
+  "agent_budget_sec": 3600,
+  "agent_budget_hours": 1.0,
+  "trials": 1,
+  "turns": 10,
+  "elapsed_sec": 250,
+  "mocked": false,
+  "preds_only": false
+}

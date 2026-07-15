@@ -1,0 +1,14 @@
+{
+  "schema": "fak.frontierswe.tts-trace.v1",
+  "turns": 10,
+  "total_wall_sec": 250,
+  "agent_budget_sec": 3600,
+  "points": [],
+  "cache_series": {
+    "schema": "fak.frontierswe.cache-witness.v1",
+    "points": [],
+    "realized_reuse_rate": 0.90,
+    "final_prompt_tokens": 100000,
+    "final_reused_tokens": 90000
+  }
+}

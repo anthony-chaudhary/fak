@@ -1,0 +1,14 @@
+{
+  "schema": "fak.frontierswe.eval.v1",
+  "task": "git-to-zig",
+  "gate_class": "implementation",
+  "available": true,
+  "source": "existing-reward",
+  "correctness": 1.0,
+  "leaderboard_score": 1.0,
+  "reward_path": "reward.json",
+  "docker_present": false,
+  "integrity_ok": true,
+  "verifier_timeout_sec": 3600,
+  "remote_command": ""
+}
