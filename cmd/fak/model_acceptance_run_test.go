@@ -45,7 +45,7 @@ func TestParseClaudeAcceptanceFailsClosed(t *testing.T) {
 		model string
 	}{
 		{"wrong model", streamFixture("exact-b", "OK", nil, nil), "exact-a"},
-		{"multiple usage ids", []byte(`{"type":"result","result":"OK","modelUsage":{"a":{},"b":{}}}` + "\n"), "a"},
+		{"missing requested usage", []byte(`{"type":"result","result":"OK","modelUsage":{"b":{}}}` + "\n"), "a"},
 		{"missing result", []byte(`{"type":"assistant","message":{"model":"a","content":[]}}` + "\n"), "a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

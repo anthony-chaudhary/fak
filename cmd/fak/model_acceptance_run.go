@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -235,6 +234,9 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 		}
 		if e.Type == "assistant" {
 			if e.Message.Model != "" {
+				if e.Message.Model != expectedModel {
+					return p, fmt.Errorf("assistant model %q != requested %q", e.Message.Model, expectedModel)
+				}
 				if p.actualModel != "" && p.actualModel != e.Message.Model {
 					return p, errors.New("multiple actual model IDs")
 				}
@@ -259,19 +261,11 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 			p.latencyMS = e.DurationMS
 			p.inputTokens = e.Usage.InputTokens
 			p.costUSD = e.TotalCostUSD
-			keys := make([]string, 0, len(e.ModelUsage))
-			for k := range e.ModelUsage {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			if len(keys) != 1 {
-				return p, fmt.Errorf("modelUsage has %d exact IDs", len(keys))
+			if _, ok := e.ModelUsage[expectedModel]; !ok {
+				return p, fmt.Errorf("modelUsage missing requested model %q", expectedModel)
 			}
 			if p.actualModel == "" {
-				p.actualModel = keys[0]
-			}
-			if keys[0] != p.actualModel {
-				return p, errors.New("assistant and usage model IDs differ")
+				p.actualModel = expectedModel
 			}
 			if e.IsError {
 				return p, errors.New("provider result is error")
