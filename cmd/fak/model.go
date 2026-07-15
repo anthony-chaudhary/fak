@@ -12,15 +12,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <load|pull|ls|canary-gate> ...\n" +
+const modelUsage = "usage: fak model <load|pull|ls|canary-gate|acceptance-gate> ...\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
-	"  fak model canary-gate  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n"
+	"  fak model canary-gate     fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
+	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n"
 
 // cmdModel handles `fak model <subcommand>`: load (resolve a ref to a cached path),
 // pull (download by alias/hf:// into the cache), ls (list the alias registry +
-// local-cache status), and canary-gate (make an exact-model rollout decision).
+// local-cache status), canary-gate (make an exact-model rollout decision), and
+// acceptance-gate (evaluate exact-model capability evidence).
 // pull/ls give fak the Ollama-style run-by-name surface;
 // top-level `fak pull` / `fak ls` are thin aliases for the latter two.
 func cmdModel(args []string) {
@@ -37,6 +39,8 @@ func cmdModel(args []string) {
 		cmdModelLs(args[1:])
 	case "canary-gate":
 		os.Exit(runModelCanaryGate(os.Stdout, os.Stderr, args[1:]))
+	case "acceptance-gate":
+		os.Exit(runModelAcceptanceGate(os.Stdout, os.Stderr, args[1:]))
 	case "-h", "--help", "help":
 		fmt.Fprint(os.Stderr, modelUsage)
 	default:

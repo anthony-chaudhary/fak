@@ -1,0 +1,403 @@
+{
+  "schema": "fak.modelaccept.report/1",
+  "corpus": {
+    "id": "top3-exact-model-acceptance-v1",
+    "declared_at": "2026-07-14T22:55:00-07:00",
+    "tasks": [
+      {
+        "id": "exact",
+        "repetitions": 3,
+        "expected": "ACCEPT_OK",
+        "tier": 2
+      },
+      {
+        "id": "json",
+        "repetitions": 3,
+        "expected": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+        "tier": 1
+      },
+      {
+        "id": "tool",
+        "repetitions": 3,
+        "expected": "TOOL_OK",
+        "tool_required": true,
+        "tier": 0
+      }
+    ],
+    "thresholds": {
+      "min_success_rate": 1,
+      "max_p95_latency_ms": 10000,
+      "max_provider_error_rate": 0,
+      "max_invalid_tool_rate": 0,
+      "max_average_input_tokens": 30000,
+      "max_average_cost_usd": 1
+    }
+  },
+  "models": [
+    {
+      "model": "claude-opus-4-8",
+      "requested_tier": 0
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "requested_tier": 1
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "requested_tier": 2
+    }
+  ],
+  "runs": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "exact",
+      "repetition": 1,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1111,
+      "input_tokens": 6535,
+      "cost_usd": 0.00657,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "exact",
+      "repetition": 2,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1703,
+      "input_tokens": 6535,
+      "cost_usd": 0.007184,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "exact",
+      "repetition": 3,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1111,
+      "input_tokens": 6535,
+      "cost_usd": 0.00657,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "json",
+      "repetition": 1,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1993,
+      "input_tokens": 6553,
+      "cost_usd": 0.006658,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "json",
+      "repetition": 2,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 4198,
+      "input_tokens": 6553,
+      "cost_usd": 0.0073349999999999995,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "json",
+      "repetition": 3,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1367,
+      "input_tokens": 6553,
+      "cost_usd": 0.006658,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "tool",
+      "repetition": 1,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 6032,
+      "input_tokens": 18289,
+      "cost_usd": 0.019089000000000002,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "tool",
+      "repetition": 2,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 6064,
+      "input_tokens": 18289,
+      "cost_usd": 0.019149,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "actual_model": "claude-haiku-4-5-20251001",
+      "task": "tool",
+      "repetition": 3,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 5760,
+      "input_tokens": 18290,
+      "cost_usd": 0.019105,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "exact",
+      "repetition": 1,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1117,
+      "input_tokens": 6528,
+      "cost_usd": 0.032815000000000004,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "exact",
+      "repetition": 2,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1983,
+      "input_tokens": 6528,
+      "cost_usd": 0.032815000000000004,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "exact",
+      "repetition": 3,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1790,
+      "input_tokens": 6528,
+      "cost_usd": 0.032815000000000004,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "json",
+      "repetition": 1,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1744,
+      "input_tokens": 6546,
+      "cost_usd": 0.03651499999999999,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "json",
+      "repetition": 2,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 5105,
+      "input_tokens": 6546,
+      "cost_usd": 0.036614999999999995,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "json",
+      "repetition": 3,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1382,
+      "input_tokens": 6546,
+      "cost_usd": 0.03325499999999999,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "tool",
+      "repetition": 1,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 5847,
+      "input_tokens": 14496,
+      "cost_usd": 0.07673,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "tool",
+      "repetition": 2,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 5761,
+      "input_tokens": 14496,
+      "cost_usd": 0.07643,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "actual_model": "claude-opus-4-8",
+      "task": "tool",
+      "repetition": 3,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 6181,
+      "input_tokens": 14496,
+      "cost_usd": 0.07643,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "exact",
+      "repetition": 1,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1339,
+      "input_tokens": 6535,
+      "cost_usd": 0.019710000000000002,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "exact",
+      "repetition": 2,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1558,
+      "input_tokens": 6535,
+      "cost_usd": 0.019710000000000002,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "exact",
+      "repetition": 3,
+      "result": "ACCEPT_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 956,
+      "input_tokens": 6535,
+      "cost_usd": 0.019710000000000002,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "json",
+      "repetition": 1,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1354,
+      "input_tokens": 6553,
+      "cost_usd": 0.019974,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "json",
+      "repetition": 2,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 4898,
+      "input_tokens": 6553,
+      "cost_usd": 0.021914999999999997,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "json",
+      "repetition": 3,
+      "result": "{\"status\":\"ok\",\"items\":[1,2,3],\"sum\":6}",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 1531,
+      "input_tokens": 6553,
+      "cost_usd": 0.019974,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "tool",
+      "repetition": 1,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 5436,
+      "input_tokens": 18293,
+      "cost_usd": 0.057549,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "tool",
+      "repetition": 2,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 6990,
+      "input_tokens": 18293,
+      "cost_usd": 0.05727900000000001,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "actual_model": "claude-sonnet-4-6",
+      "task": "tool",
+      "repetition": 3,
+      "result": "TOOL_OK",
+      "provider_error": false,
+      "tool_valid": true,
+      "latency_ms": 7638,
+      "input_tokens": 18297,
+      "cost_usd": 0.057351000000000006,
+      "observed_at": "2026-07-14T23:00:00-07:00"
+    }
+  ]
+}
