@@ -108,6 +108,16 @@ run. **fak is the virtual filesystem, not the virtual machine.** (The same fusio
 already owns — a capability floor *and* KV/prefix reuse at one in-process hop — is why
 the T1 mount view and the T5 substrate are one boundary, not two pieces of infra.)
 
+The **T0-vs-T1 proof** for that claim is a reproducible witness:
+[`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/)
+runs `fak` inside a container/microVM standing in for a T0 sandbox and captures fak
+adjudicating FS syscalls on a disk *it did not provision* — an out-of-scope write refused
+(`T1 · SELF_MODIFY`), a poisoned read quarantined (`T2 · TRUST_VIOLATION`), and the exit
+ledger of FS decisions, while the sandbox's own disk stays readable and writable. It is
+the filesystem twin of the network-egress witness
+([`examples/remote-vm-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/remote-vm-guard/)):
+together they show one capability floor riding into any T0, over two syscall families.
+
 ## Prior art (fak invents none of this)
 
 Per the project's honesty discipline
@@ -140,7 +150,10 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
   (`SELF_MODIFY`); `internal/egressfloor` refuses the SSRF/cloud-metadata class. *Gap:* a
   first-class, policy-configurable **mount view** (what tree exists to the agent at all),
   not just per-op deny rules — tracked as child work off this spine and adjacent to
-  [#2358](https://github.com/anthony-chaudhary/fak/issues/2358).
+  [#2358](https://github.com/anthony-chaudhary/fak/issues/2358). The shipped T1/T2 floor
+  running *inside a sandbox fak did not provision* is witnessed end-to-end in
+  [`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/)
+  (the T0-vs-T1 proof).
 - **T2** — the tool vDSO answers repeated read-only calls locally (`internal/vdso`);
   result-side admission quarantines poisoned reads (`/v1/fak/admit`). *Gap:* one
   adjudicated read syscall that spans **local tree query and remote-document retrieval**
@@ -171,3 +184,4 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
 - [The four layers of agent memory](../MEMORY-LAYERS-EXPLAINER.md) — the T5 placement map.
 - [Addressable KV cache](./addressable-kv-cache.md) — the T5 forgetting witness.
 - [Cloud / VM / remote-agent landscape](../notes/RESEARCH-cloud-vm-remote-agent-landscape-2026-06-23.md) — why fak is the boundary, not the box.
+- [`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/) — the VM-vs-boundary witness: the T0-vs-T1 proof that fak gates FS syscalls inside a sandbox it did not provision (filesystem twin of [`examples/remote-vm-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/remote-vm-guard/)).
