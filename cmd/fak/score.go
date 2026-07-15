@@ -55,6 +55,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"support-maturity":    cmdSupportMaturityScorecard,
 	"token-defaults":      cmdTokenDefaultsScorecard,
 	"ui-quality":          cmdUIQualityScore,
+	"verifier-exposure":   cmdVerifierExposureScore,
 }
 
 // cmdScore routes `fak score <name> [args...]` to the grouped meta-scorecard handler. With no

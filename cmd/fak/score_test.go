@@ -38,6 +38,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"support-maturity",
 		"token-defaults",
 		"ui-quality",
+		"verifier-exposure",
 	}
 	got := make([]string, 0, len(scoreRoutes))
 	for name, route := range scoreRoutes {
