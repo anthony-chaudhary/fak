@@ -48,6 +48,7 @@ package radixkv
 
 import (
 	"math"
+	"slices"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -260,10 +261,7 @@ func (t *Tree) walk(start *node, tokens []int) (n *node, nlen int, pc *node, oi 
 		if ch == nil {
 			return n, i, nil, 0
 		}
-		j := 0
-		for j < len(ch.key) && i+j < len(tokens) && tokens[i+j] == ch.key[j] {
-			j++
-		}
+		j := commonRunLen(ch.key, tokens[i:])
 		if j == len(ch.key) {
 			n, i = ch, i+j // whole edge consumed; descend
 			continue
@@ -271,6 +269,54 @@ func (t *Tree) walk(start *node, tokens []int) (n *node, nlen int, pc *node, oi 
 		return n, i, ch, j // partial edge match: boundary is mid-edge ch
 	}
 	return n, i, nil, 0
+}
+
+// commonRunLen returns the length of the longest common prefix of key and toks —
+// exactly the j the token-by-token reference loop
+//
+//	j := 0
+//	for j < len(key) && j < len(toks) && toks[j] == key[j] { j++ }
+//
+// would compute, but found by galloping in doubling windows to bracket the first
+// divergence and then binary-searching the single straddling window (borrowing
+// SGLang's RadixKey.match, issue #3891). A long shared edge run — the ~2000-token
+// identical system-prompt prefix fak targets — is confirmed by O(log n) slices.Equal
+// windows instead of one bounds-checked element compare per token; the matched length
+// is byte-identical, so walk's behavior does not change. Element-comparison work stays
+// O(matched): the gallop windows sum to ~2·matched, and because each binary-search
+// step confirms and discards a geometrically shrinking half, that phase is O(window)
+// too — no divergent-case regression, only fewer, wider comparisons.
+func commonRunLen(key, toks []int) int {
+	n := len(key)
+	if len(toks) < n {
+		n = len(toks)
+	}
+	lo, step := 0, 1
+	for lo < n {
+		hi := lo + step
+		if hi > n {
+			hi = n
+		}
+		if !slices.Equal(key[lo:hi], toks[lo:hi]) {
+			// The first mismatch is inside [lo, hi). Binary-search it, keeping the
+			// invariant that key[:lo] already matches toks[:lo]: each step compares
+			// the low half [l, mid] and, on equality, advances l past it — so the
+			// mismatch index is pinned in O(log(hi-lo)) compares totaling O(hi-lo).
+			l, h := lo, hi
+			for l < h {
+				mid := int(uint(l+h) >> 1)
+				if slices.Equal(key[l:mid+1], toks[l:mid+1]) {
+					l = mid + 1
+				} else {
+					h = mid
+				}
+			}
+			return l
+		}
+		lo = hi
+		step *= 2
+	}
+	return n
 }
 
 // boundaryFor walks the longest cached prefix of tokens and, when the match lands mid-edge
