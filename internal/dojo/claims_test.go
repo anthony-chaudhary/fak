@@ -44,6 +44,9 @@ func TestRegistryPreservesPinnedClaims(t *testing.T) {
 		// provider-cost is the cross-provider economics cell (#4488): billed USD per
 		// completed issue per provider, also a seeded genuine estimate (not a floor).
 		{"provider-cost", "cost_per_completed_issue", 3.0, false, false},
+		// provider-tokens is the cross-provider tokens-to-close cell (#4503): total
+		// billed tokens per completed issue per provider, also a seeded genuine estimate.
+		{"provider-tokens", "tokens_per_completed_issue", 1000000.0, false, false},
 	}
 	if len(Registry) != len(want) {
 		t.Fatalf("registry has %d cells, want %d — a cell was added or dropped without updating the witness", len(Registry), len(want))
@@ -86,9 +89,10 @@ func TestRegisterClaimResolvesViaRegistry(t *testing.T) {
 	// The additive registration did not grow the central literal (8 extracted
 	// cells + the seeded dispatch-yield, provider-turns, provider-cache,
 	// provider-toolcall, cache-read-share, and provider-cost KPI cells,
-	// #4497/#4505/#4504/#4507/#4498/#4488).
-	if len(Registry) != 14 {
-		t.Fatalf("central Registry literal has %d cells, want 14 — additive registration must not grow it", len(Registry))
+	// plus provider-tokens (#4503).
+	// #4497/#4505/#4504/#4507/#4498/#4488/#4503).
+	if len(Registry) != 15 {
+		t.Fatalf("central Registry literal has %d cells, want 15 — additive registration must not grow it", len(Registry))
 	}
 	// The registered cell resolves through the composed Lookup.
 	c, ok := Registry.Lookup("kpi-seam-probe", "additive_resolves")

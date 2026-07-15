@@ -107,8 +107,8 @@ func TestRunDojoLiveFoldsScoredRows(t *testing.T) {
 	if got.Live.Found != 1 || got.Live.Scorable != 1 {
 		t.Fatalf("live corpus found/scorable = %d/%d, want 1/1", got.Live.Found, got.Live.Scorable)
 	}
-	if got.Report.Measured != 2 || got.Report.Unmeasured != 4 {
-		t.Fatalf("live report measured/unmeasured = %d/%d, want 2/4 (scored live row + dispatch-yield measured; provider-turns, provider-cache, cache-read-share, and provider-cost each honestly unmeasured on the empty session corpus)", got.Report.Measured, got.Report.Unmeasured)
+	if got.Report.Measured != 2 || got.Report.Unmeasured != 5 {
+		t.Fatalf("live report measured/unmeasured = %d/%d, want 2/5 (scored live row + dispatch-yield measured; provider-turns, provider-cache, cache-read-share, provider-cost, and provider-tokens each honestly unmeasured on the empty session corpus)", got.Report.Measured, got.Report.Unmeasured)
 	}
 	var yield *dojo.Episode
 	for i := range got.Report.Episodes {

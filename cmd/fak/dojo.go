@@ -288,6 +288,14 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 	for _, in := range providerCostEpisodesFromSessions(sessionCorpus) {
 		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
 	}
+	// And the cross-provider tokens-to-close cell (#4503): one episode per provider
+	// of TOTAL billed tokens (input + output + cache_read + cache_creation) per
+	// completed session — where every provider fak routes to sits on total token
+	// spend to close, UNMEASURED for a provider with no billed tokens rather than a
+	// fabricated 0.
+	for _, in := range providerTokensEpisodesFromSessions(sessionCorpus) {
+		episodes = append(episodes, dojo.Score("session-corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
 	dojo.SortEpisodes(episodes)
 	now := time.Now().UTC()
 	report := dojo.Fold(episodes, dojo.FoldOpts{
@@ -746,6 +754,13 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "cost_per_completed_issue", Theory: "a provider spends about three billed US dollars per completed issue, the mean billed USD per completed session (claim 3.0 — a seeded estimate the RSI loop recalibrates toward the measured per-provider means)"},
 			},
 		},
+		{
+			Name:    "provider-tokens",
+			Summary: "total billed tokens per completed issue per provider (claude/gpt/gemini/deepseek/glm/kimi), folded from the local multi-provider session corpus — the cross-provider tokens-to-close leaderboard cell, one episode per provider against the one registered claim; a provider with no billed tokens is UNMEASURED, never a fabricated 0 (#4503)",
+			Metrics: []dojoMetricInfo{
+				{Name: "tokens_per_completed_issue", Theory: "a provider bills about one million total tokens (input + output + cache_read + cache_creation) per completed issue, the mean total billed tokens per completed session (claim 1000000 — a seeded estimate the RSI loop recalibrates toward the measured per-provider means)"},
+			},
+		},
 	}
 }
 
@@ -765,6 +780,7 @@ func allDojoLevers(root string, ttl resume.CacheTTL, maxFiles int) []dojo.Lever 
 		providerCacheLever{},
 		cacheReadShareLever{},
 		providerCostLever{},
+		providerTokensLever{},
 	}
 }
 
@@ -1472,6 +1488,118 @@ func providerCostEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.Sc
 				Measured:   true,
 				Sample:     a.count,
 				Source:     "provider " + p + ": billed USD (sessionaudit per-model price table) per completed session over the local multi-provider corpus (OBSERVED)",
+			},
+		})
+	}
+	return out
+}
+
+// --- the provider-tokens lever ------------------------------------------------
+
+// providerTokensLever is the cross-provider tokens-to-close cell (#4503): the
+// TOTAL billed tokens a provider spends per completed issue
+// (tokens_per_completed_issue), PER PROVIDER, so the dojo can state where fak
+// sits versus other providers on total token spend to close instead of
+// calibrating only fak-internal levers. Theory is the one registered
+// provider-tokens/tokens_per_completed_issue claim; reality folds from the same
+// local multi-provider session corpus (and the same provider keying) as the
+// provider-turns, provider-cache, and provider-cost leaderboard cells, one
+// episode per provider. The scenario corpus is ignored: the session corpus, not
+// a replay, is the ground truth for billed tokens.
+type providerTokensLever struct{}
+
+func (providerTokensLever) Name() string { return "provider-tokens" }
+
+func (providerTokensLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error) {
+	return providerTokensEpisodesFromSessions(loadProviderTurnsSessions()), nil
+}
+
+// providerTokensEpisodesFromSessions adapts the session corpus into the dojo's
+// (prediction, outcome) pairs for provider-tokens/tokens_per_completed_issue —
+// one episode per provider, every episode scored against the SAME registered
+// claim so the recalibrate arm still rewrites exactly one literal while the
+// report renders the per-provider spread. It is pure so the fold is
+// unit-testable without a corpus on disk. A completed session = a readable
+// session (Error=="") with at least one assistant turn, keyed to its dominant
+// billed provider — the same completed-task unit provider-turns (#4505) and
+// provider-cost (#4488) fold, used here as the corpus proxy for a verified
+// close. A provider's tokens_per_completed_issue is its TOTAL billed tokens
+// (input + output + cache_read + cache_creation) summed over ITS OWN billed
+// models across its completed sessions, divided by that provider's
+// completed-session count (the mean); counting only the provider's own models
+// keeps a stray cross-provider turn from contaminating a provider's total. A
+// provider whose completed sessions carry NO billed tokens at all scores
+// UNMEASURED, never a fabricated 0 tokens per issue: an empty corpus row is not
+// the same as a genuinely token-free close (#4490's honesty rule). A corpus with
+// no completed session at all yields one honest UNMEASURED episode.
+func providerTokensEpisodesFromSessions(sessions []sessionaudit.Session) []dojo.ScoredInput {
+	pred := dojo.Registry.MustPredict("provider-tokens", "tokens_per_completed_issue", "tokens")
+	type acc struct {
+		count  int
+		tokens int64
+	}
+	sums := map[string]*acc{}
+	for _, s := range sessions {
+		if s.Error != "" || s.AssistantTurns == 0 {
+			continue
+		}
+		provider := providerTurnsDominantProvider(s)
+		if provider == "" {
+			continue // only harness-synthetic turns — no billed provider to key by
+		}
+		// Count only the dominant provider's OWN models, so a stray cross-provider
+		// turn never contaminates this provider's token total.
+		var tokens int64
+		for model, pm := range s.PerModel {
+			if providerTurnsKey(model) != provider {
+				continue
+			}
+			tokens += pm.Input + pm.Output + pm.CacheRead + pm.CacheCreate
+		}
+		a := sums[provider]
+		if a == nil {
+			a = &acc{}
+			sums[provider] = a
+		}
+		a.count++
+		a.tokens += tokens
+	}
+	if len(sums) == 0 {
+		return []dojo.ScoredInput{{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Measured: false,
+				Source:   "no completed sessions in the local session corpus — nothing to fold a per-provider total tokens per completed issue from",
+			},
+		}}
+	}
+	providers := make([]string, 0, len(sums))
+	for p := range sums {
+		providers = append(providers, p)
+	}
+	sort.Strings(providers)
+	out := make([]dojo.ScoredInput, 0, len(providers))
+	for _, p := range providers {
+		a := sums[p]
+		if a.tokens == 0 {
+			out = append(out, dojo.ScoredInput{
+				Prediction: pred,
+				Outcome: dojo.Outcome{
+					Measured: false,
+					Sample:   a.count,
+					Source:   "provider " + p + ": completed sessions but no billed tokens — the corpus rows carry no token counts for this provider's models, so tokens per completed issue is UNMEASURED rather than a fabricated 0",
+				},
+			})
+			continue
+		}
+		out = append(out, dojo.ScoredInput{
+			Prediction: pred,
+			Outcome: dojo.Outcome{
+				Realized:   float64(a.tokens) / float64(a.count),
+				Provenance: dojo.Observed,
+				Measured:   true,
+				Sample:     a.count,
+				Source:     "provider " + p + ": total billed tokens (input + output + cache_read + cache_creation) per completed session over the local multi-provider corpus (OBSERVED)",
 			},
 		})
 	}
