@@ -1062,5 +1062,67 @@ class RequiredCapsTest(unittest.TestCase):
         self.assertEqual(r2["required_caps"], [])
 
 
+class PhantomTreeRegionFidelityTest(unittest.TestCase):
+    """#4320 — the cmd-lane collision bottleneck, reproduced at the router layer.
+
+    A cmd/fak subsystem issue (`fix(<scope>): ...` whose only concrete work site is
+    `cmd/fak/<scope>_*.go`) routes by scope token to a lane that is NOT declared in
+    dos.toml [lanes.trees]. The dispatcher's `lane_tree()` fallback then fabricates
+    `internal/<scope>/**` (tools/issue_resolve_dispatch.py:3247) as the acquired
+    lease region — a phantom tree that does not cover the real cmd/fak work site. So
+    the arbiter (dispatchorder.TreesOverlap) sees two such workers as disjoint and
+    admits both; the working-tree DIRTY_PATH guard is the only backstop that fires
+    (ledger: 9/9 refused events naming a cmd/fak/* path are DIRTY_PATH_COLLISION).
+
+    See docs/dispatch/cmd-lane-split-plan.md. Two converging in-repo defects:
+      (1) _PATH_RE / named_repo_paths do not extract a BARE `cmd/fak/...` path (only
+          the `fak/cmd/...` doc-link form), so the router cannot path-confirm `cmd`
+          and falls through to scope routing;
+      (2) lane_tree()'s fallback fabricates internal/<scope>/** for the undeclared
+          scope lane, a region disjoint from the real cmd/fak file.
+    """
+
+    # dispatch is intentionally ABSENT from TREES — mirrors reality: no `dispatch`
+    # lane is declared in dos.toml, so lane_tree() hits its internal/<lane>/** fallback.
+    LANES = ["cmd", "dispatch", "docs", "gateway"]
+    TREES = {"cmd": ["cmd/**"], "docs": ["docs/**"], "gateway": ["internal/gateway/**"]}
+    # Faithful inline of tools/issue_resolve_dispatch.py:3227-3247 lane_tree():
+    #   declared tree if any, else the phantom internal/<lane>/** fallback.
+    ISSUE = issue(4347, "fix(dispatch): retune preflight cap",
+                  body="The regression is in cmd/fak/dispatch_tick_preflight.go — "
+                       "retune the preflight cap.")
+    NAMED = "cmd/fak/dispatch_tick_preflight.go"
+
+    def _lane_tree(self, lane):
+        return self.TREES.get(lane) or ["internal/%s/**" % lane]
+
+    def test_current_behavior_routes_to_phantom_region(self):
+        # Characterization (PASSES today): documents the buggy state so the red test
+        # below is provably reproducing the real gap, not a fixture artifact.
+        r = m.route_issue(self.ISSUE, self.LANES, self.TREES)
+        self.assertEqual(r["lane"], "dispatch")            # scope token wins
+        self.assertEqual(r["confidence"], "exact-scope")
+        self.assertEqual(m.named_repo_paths(self.ISSUE["body"]), [])  # defect (1)
+        self.assertEqual(self._lane_tree("dispatch"), ["internal/dispatch/**"])  # defect (2)
+        # The phantom region does NOT cover the named cmd/fak work site; `cmd` would.
+        self.assertEqual(m.path_matches_lane(self.NAMED, {"dispatch": ["internal/dispatch/**"]}), [])
+        self.assertEqual(m.path_matches_lane(self.NAMED, {"cmd": ["cmd/**"]}), ["cmd"])
+
+    @unittest.expectedFailure  # remove when #4320 (Option C: lane_tree fallback) lands
+    def test_lease_region_covers_named_cmdfak_file(self):
+        # THE #4320 invariant: an issue whose only concrete work site is a
+        # cmd/fak/<scope> file must acquire a lease REGION that covers that file, so
+        # the arbiter can serialize the real collision instead of leaning on the
+        # dirty-path backstop. RED today (region is the phantom internal/dispatch/**);
+        # GREEN once lane_tree()'s fallback emits cmd/fak/<scope>_*.go for cmd-scoped
+        # scope lanes. When this stops being an expected failure, delete the marker.
+        r = m.route_issue(self.ISSUE, self.LANES, self.TREES)
+        region = self._lane_tree(r["lane"])
+        self.assertEqual(
+            m.path_matches_lane(self.NAMED, {r["lane"]: region}), [r["lane"]],
+            "lane %r region %r does not cover the named cmd/fak file %r"
+            % (r["lane"], region, self.NAMED))
+
+
 if __name__ == "__main__":
     unittest.main()
