@@ -20,6 +20,10 @@ type V4ExpertStats struct {
 	ResidentBytes   int64 `json:"resident_bytes"`
 	PeakResident    int64 `json:"peak_resident_bytes"`
 	RingBudget      int64 `json:"ring_budget_bytes"`
+	WorldSize       int   `json:"world_size"`
+	Rank            int   `json:"rank"`
+	LocalSelected   int64 `json:"local_selected"`
+	RemoteSelected  int64 `json:"remote_selected"`
 }
 
 // CacheAccesses returns the staged tensor cache-access denominator.
@@ -56,5 +60,9 @@ func (s *Session) V4ExpertStats() V4ExpertStats {
 		ResidentBytes:   raw.ResidentBytes,
 		PeakResident:    raw.PeakResident,
 		RingBudget:      raw.RingBudget,
+		WorldSize:       raw.WorldSize,
+		Rank:            raw.Rank,
+		LocalSelected:   raw.LocalSelected,
+		RemoteSelected:  raw.RemoteSelected,
 	}
 }

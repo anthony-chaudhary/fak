@@ -23,15 +23,20 @@ type v4ExpertRuntimeStats struct {
 	ResidentBytes   int64
 	PeakResident    int64
 	RingBudget      int64
+	WorldSize       int
+	Rank            int
+	LocalSelected   int64
+	RemoteSelected  int64
 }
 
 type v4ExpertRuntime struct {
-	cfg     Config
-	experts *v4ShardedExpertSource
-	hashes  *v4HashRouterSource
-	ring    *pagedRing
-	closed  bool
-	stats   v4ExpertRuntimeStats
+	cfg       Config
+	experts   *v4ShardedExpertSource
+	hashes    *v4HashRouterSource
+	ring      *pagedRing
+	closed    bool
+	stats     v4ExpertRuntimeStats
+	placement V4ExpertPlacement
 }
 
 func newV4ExpertRuntime(dir string, cfg Config, be compute.Backend, ringByteCap int64, maxOpen int) (*v4ExpertRuntime, error) {
@@ -40,6 +45,10 @@ func newV4ExpertRuntime(dir string, cfg Config, be compute.Backend, ringByteCap 
 	}
 	if be == nil || ringByteCap <= 0 || maxOpen <= 0 {
 		return nil, fmt.Errorf("%w: nil backend or invalid ring/open cap", ErrV4ExpertRuntime)
+	}
+	placement, err := v4ExpertPlacementFromEnv(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("%w: placement: %v", ErrV4ExpertRuntime, err)
 	}
 	experts, err := newV4ShardedExpertSource(dir, maxOpen)
 	if err != nil {
@@ -52,8 +61,9 @@ func newV4ExpertRuntime(dir string, cfg Config, be compute.Backend, ringByteCap 
 	}
 	return &v4ExpertRuntime{
 		cfg: cfg, experts: experts, hashes: hashes,
-		ring:  newPagedRing(be, ringByteCap),
-		stats: v4ExpertRuntimeStats{RingBudget: ringByteCap},
+		ring:      newPagedRing(be, ringByteCap),
+		stats:     v4ExpertRuntimeStats{RingBudget: ringByteCap, WorldSize: placement.WorldSize, Rank: placement.Rank},
+		placement: placement,
 	}, nil
 }
 
@@ -119,6 +129,16 @@ func (r *v4ExpertRuntime) forwardHash(layer, tokenID int, logits []float32, x co
 }
 
 func (r *v4ExpertRuntime) forwardSelected(layer int, picks []routePick, x compute.Tensor) ([]float32, error) {
+	dispatch, err := r.placement.Dispatch(picks)
+	if err != nil {
+		return nil, fmt.Errorf("%w: dispatch: %v", ErrV4ExpertRuntime, err)
+	}
+	local := len(dispatch[r.placement.Rank])
+	r.stats.LocalSelected += int64(local)
+	r.stats.RemoteSelected += int64(len(picks) - local)
+	if r.placement.WorldSize > 1 && local != len(picks) {
+		return nil, fmt.Errorf("%w: placement rank %d/%d selected %d remote experts; transport is not configured", ErrV4ExpertRuntime, r.placement.Rank, r.placement.WorldSize, len(picks)-local)
+	}
 	selected := make([]int, len(picks))
 	routes := make([]v4RoutedExpert, len(picks))
 	for i, pick := range picks {
