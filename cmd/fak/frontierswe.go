@@ -107,16 +107,17 @@ usage:
         against a mocked environment and the exact remote command is printed.
 
   fak frontierswe eval --task NAME [--tasks DIR] [--submission DIR]
-                       [--reward FILE] [--out DIR] [--anti-cheat] [--ssim T]
-                       [--json]
+                       [--reward FILE] [--out DIR] [--run-verifier]
+                       [--anti-cheat] [--ssim T] [--json]
         Grade a trial's submission into the leaderboard number (the analogue of
         `+"`fak swebench eval`"+`). Given a verifier reward.json (from a prior run
         or --reward, default <submission>/reward.json) it runs the C3 scorer into
         correctness, speedup, and the gated leaderboard score — RUNNABLE NOW, no
         Docker — capturing the raw reward.json + verifier logs under --out for
-        traceability. Absent a reward.json it stands the verifier up where this
-        host is capable, and otherwise prints an honest GATED result with the exact
-        remote command — never a fabricated score.
+        traceability. Absent a reward.json, --run-verifier stands the verifier up
+        where this host is capable (a heavyweight docker job, so never a silent
+        side effect) and scores what it produces; otherwise eval prints an honest
+        GATED result with the exact remote command — never a fabricated score.
 
   fak frontierswe compare (--raw FILE --fak FILE | --raw-run DIR --fak-run DIR)
                           [--task NAME] [--tolerance T] [--out DIR] [--md FILE]

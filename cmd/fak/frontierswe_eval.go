@@ -15,9 +15,10 @@ import (
 // via the C3 scorer. Given a verifier reward.json (from a prior run or handed in) it
 // scores it offline — RUNNABLE NOW, no Docker — into the correctness, speedup, and
 // gated leaderboard score, capturing the raw reward.json + a verifier logs dir for
-// traceability. Absent a reward.json it stands the verifier up where this host is
-// capable, and otherwise prints an honest GATED result with the exact remote command
-// — never a fabricated score.
+// traceability. Absent a reward.json, --run-verifier consents to standing the
+// verifier up here where this host is capable (never as a silent side effect of a
+// grade call); otherwise it prints an honest GATED result with the exact remote
+// command — never a fabricated score.
 func runFrontiersweEval(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("frontierswe eval", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -26,6 +27,7 @@ func runFrontiersweEval(stdout, stderr io.Writer, argv []string) int {
 	submission := fs.String("submission", "", "the submission tree to grade (the target the verifier reads)")
 	reward := fs.String("reward", "", "explicit reward.json to score (default: <submission>/reward.json)")
 	out := fs.String("out", "", "directory to capture the raw reward.json + verifier logs into (optional)")
+	runVerifier := fs.Bool("run-verifier", false, "with no reward.json, stand the verifier up HERE when this host is Docker-capable (a job of up to the [verifier] timeout_sec budget) and score what it produces; an incapable host still gates honestly")
 	anticheat := fs.Bool("anti-cheat", false, "the trial was flagged in scoring/anticheat.json (the gated leaderboard score is forced to 0)")
 	ssim := fs.Float64("ssim", 0, "revideo-perf-opt SSIM gate threshold (0 => the library default 0.99)")
 	asJSON := fs.Bool("json", false, "emit only the eval JSON on stdout (no human summary on stderr)")
@@ -56,6 +58,7 @@ func runFrontiersweEval(stdout, stderr io.Writer, argv []string) int {
 		SubmissionDir:    *submission,
 		RewardPath:       *reward,
 		OutDir:           *out,
+		RunVerifier:      *runVerifier,
 		AntiCheatFlagged: *anticheat,
 		SSIMThreshold:    *ssim,
 	})
@@ -112,4 +115,5 @@ func printFrontiersweEvalSummary(w io.Writer, r frontierswe.EvalResult) {
 	fmt.Fprintf(w, "no reward.json to score; produce one on a Docker/Modal box (%ds verifier budget) with:\n  %s\n",
 		r.VerifierTimeoutSec, r.RemoteCommand)
 	fmt.Fprintf(w, "then re-run:  fak frontierswe eval --task %s --reward <logs/verifier/reward.json>\n", r.Task)
+	fmt.Fprintf(w, "(on a Docker-capable box, --run-verifier stands it up and scores in one call)\n")
 }
