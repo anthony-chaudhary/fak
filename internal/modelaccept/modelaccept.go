@@ -216,6 +216,19 @@ func validate(in Input) []string {
 	if declaredErr != nil {
 		r = append(r, "corpus declared_at must be RFC3339")
 	}
+	declaredModels := map[string]bool{}
+	for _, model := range in.Models {
+		if strings.TrimSpace(model.Model) == "" {
+			r = append(r, "every model needs an exact non-empty id")
+		}
+		if model.RequestedTier < 0 {
+			r = append(r, "every model needs a non-negative requested tier")
+		}
+		if declaredModels[model.Model] {
+			r = append(r, "duplicate model: "+model.Model)
+		}
+		declaredModels[model.Model] = true
+	}
 	seen := map[string]bool{}
 	for _, t := range in.Corpus.Tasks {
 		if t.ID == "" || t.Repetitions <= 0 || t.Tier < 0 {
@@ -227,6 +240,9 @@ func validate(in Input) []string {
 		seen[t.ID] = true
 	}
 	for _, run := range in.Runs {
+		if !declaredModels[run.Model] {
+			r = append(r, "run uses undeclared model: "+run.Model)
+		}
 		if !seen[run.Task] {
 			r = append(r, "unknown run task: "+run.Task)
 		}
