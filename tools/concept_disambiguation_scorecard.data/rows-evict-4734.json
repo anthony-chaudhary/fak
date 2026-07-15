@@ -1,0 +1,62 @@
+{
+  "rows": [
+    {
+      "id": "evict-evictprefix",
+      "canonical": "EvictPrefix (radixkv token-path eviction)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "EvictPrefix (internal/radixkv/radixkv.go) is verdict-driven eviction by TOKEN PATH: it walks the longest cached prefix of the given token sequence and evicts the deepest cached node on that path (its whole subtree), returning tokens freed. It is the EvictNode seam for a caller that holds the poisoned token sequence rather than a *node handle - exactly the in-kernel planner, which caches by token path and (because radixkv's node type is unexported) keeps no node references to feed EvictNode directly. EvictPrefixNS scopes the same walk to a namespace (#3889).",
+      "distinction": "It takes a TOKEN PATH (not a node handle) to find the cached branch to drop, distinct from EvictNode which accepts a NAMED *node pointer directly, and from EvictColdest which drops the coldest-by-attention-EMA spans under memory pressure (not a verdict-driven quarantine of a specific poisoned prefix).",
+      "distinct_from": [
+        "EvictNode (radixkv policy)",
+        "EvictColdest (kvmmu)"
+      ],
+      "aliases": ["EvictPrefix", "EvictPrefixNS"],
+      "grounding": "EvictPrefix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictioncostaware",
+      "canonical": "EvictionCostAware (radixkv production policy)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "radixkv.EvictionCostAware (internal/radixkv/radixkv.go) is the EvictionPolicy enum constant that selects cost-aware victim selection in the PRODUCTION radix prefix-cache tree: victimLeaf dispatches to costAwareLeaf (cheapest-to-lose per compute.KVEvictionCost, LRU tie-break) instead of pure-LRU lruLeaf. Opt-in via NewWithEvictionPolicy while the #2666 production wiring lands.",
+      "distinction": "It is the PRODUCTION tree's policy enum (radixkv.EvictionPolicy), selecting costAwareLeaf inside the live victimLeaf dispatch, NOT compute.KVEvictCostAware which is the offline ReplayKVCache simulator's KVEvictPolicy label that only runs in benchmarks.",
+      "distinct_from": [
+        "evict-kvevictcostaware",
+        "evict-evicttobudget"
+      ],
+      "aliases": ["EvictionCostAware"],
+      "grounding": "EvictionCostAware",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictlocked",
+      "canonical": "evictLocked (blob/content-store eviction)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "evictLocked (internal/blob/store.go and internal/blobfs/store.go) drops unpinned content-addressed digests/blobs oldest-first (LRU) until the resident footprint is back within maxBytes, called under the owner's lock (the Locked suffix is the Go concurrency convention). Pinned digests are never in the LRU order, so they are never evicted; if only pinned digests remain, the loop stops (it bounds the leak, not the live working set).",
+      "distinction": "It is BLOB/CONTENT-STORE eviction (disk/memory footprint management for content-addressed digests), a fourth eviction plane, NOT KV-cache tensor eviction (EvictColdest/EvictNode), NOT playbook span pruning (logical token-budget pruning), and NOT session-pool model eviction.",
+      "distinct_from": [
+        "evict-kvcache",
+        "evict-session",
+        "evict-playbook"
+      ],
+      "aliases": ["evictLocked"],
+      "grounding": "evictLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

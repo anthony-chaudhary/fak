@@ -136,9 +136,10 @@
       "id": "evict",
       "name": "Eviction family",
       "roots": ["evict", "evicted", "eviction"],
-      "ignore": ["evictable", "evictSupported", "eviction", "evicts", "evicting"],
+      "ignore": ["evictable", "evictSupported", "eviction", "evicts", "evicting",
+                 "EvictionsPerHit", "noteEviction", "recordEvictChoice"],
       "min_files": 3,
-      "note": "Three disjoint eviction planes: physical KV tensor span removal, logical playbook pruning under token budget, and model instance LRU eviction from a session pool."
+      "note": "Four disjoint eviction planes: physical KV tensor span removal, logical playbook pruning under token budget, model instance LRU eviction from a session pool, and content-addressed blob eviction (evictLocked) for disk/memory footprint management. Ignored incidental helpers: EvictionsPerHit (a derived benchmark ratio of evictions to hit-tokens in ReplayKVCache/expert-residency reporting, not an eviction concept), noteEviction (the thrash-detector recording helper #3393 that stamps each budget-pressure victim into a side-map, not an eviction mechanism), and recordEvictChoice (a diagnostics helper that stores the last eviction's policy/candidates/locked/victim stats, not an eviction mechanism)."
     },
     {
       "id": "decision",
