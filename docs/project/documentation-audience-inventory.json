@@ -1,0 +1,56 @@
+{
+  "schema": "fak.docs.audience-inventory.v1",
+  "title": "Documentation audience inventory",
+  "summary": "Machine-readable map of maintained fak documentation pages, each classified by primary audience, lifecycle, generation, and authoritative owner, per the documentation audience architecture.",
+  "primary_audience": "contributor",
+  "owner": "documentation",
+  "lifecycle": "current",
+  "generation": "gen/now",
+  "authority": {
+    "spine": "docs/project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md",
+    "spine_commit": "0e35e9e",
+    "epic": "https://github.com/anthony-chaudhary/fak/issues/4882",
+    "issue": "https://github.com/anthony-chaudhary/fak/issues/4933"
+  },
+  "audiences": {
+    "public-front-door": "States the product, its primary outcomes, the proof, and the next action.",
+    "external-builder": "Task-organized install, quickstarts, integration guides, deployment choices, examples, and troubleshooting.",
+    "operator": "Production operation, policy, observability, upgrades, recovery, performance evidence, and support boundaries.",
+    "contributor": "Architecture, development workflow, tests, invariants, generated artifacts, and current implementation contracts.",
+    "research-and-history": "Design rationale, experiments, dated notes, superseded generations, and decision records."
+  },
+  "lifecycle_states": ["current", "versioned", "research", "archived"],
+  "owners": {
+    "documentation": "The documentation program owns the page content and its audience classification.",
+    "maintainers": "Repository maintainers own the contributor contract and workspace rules.",
+    "security": "The security policy owner owns vulnerability handling."
+  },
+  "vocabulary_note": "audiences and lifecycle_states are the controlled vocabulary from the spine; a value may be listed without a current page using it (for example lifecycle 'versioned').",
+  "next_action": "Confirm every inventoried path still exists, then wire the next unlinked external-builder or operator route into a front-door page. Link-integrity check: python -c \"import json,os;d=json.load(open('docs/project/documentation-audience-inventory.json'));m=[p['path'] for p in d['pages'] if not os.path.exists(p['path'])];print('OK' if not m else 'MISSING '+str(m))\"",
+  "witness": {
+    "structured_read_back": "The file parses as JSON and every pages[].path resolves in the working tree (run next_action).",
+    "front_door_links": "pages[].front_door_linked reflects a literal grep of README.md, START-HERE.md, and llms.txt captured 2026-07-15.",
+    "independent_read_back": "An independent reader restated this page's job, applicable choice, and next action for issue #4933."
+  },
+  "pages": [
+    { "path": "README.md", "audience": "public-front-door", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": true, "role": "States what fak is, its primary outcomes, the shortest proof, and the next action." },
+    { "path": "START-HERE.md", "audience": "public-front-door", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": true, "role": "Orients a new reader and routes each goal to its shortest path." },
+    { "path": "llms.txt", "audience": "contributor", "lifecycle": "current", "generation": "gen/now", "owner": "maintainers", "front_door_linked": true, "role": "Machine-oriented map of the documentation set for agents and tools." },
+    { "path": "AGENTS.md", "audience": "contributor", "lifecycle": "current", "generation": "gen/now", "owner": "maintainers", "front_door_linked": true, "role": "Workspace-wide build, test, run, repo-map, and contribution rules for agents." },
+    { "path": "CLAUDE.md", "audience": "contributor", "lifecycle": "current", "generation": "gen/now", "owner": "maintainers", "front_door_linked": false, "role": "Repo-local trunk, commit, and ship rules layered on AGENTS.md." },
+    { "path": "CONTRIBUTING.md", "audience": "contributor", "lifecycle": "current", "generation": "gen/now", "owner": "maintainers", "front_door_linked": true, "role": "The contributor contract: how to propose and land changes." },
+    { "path": "docs/project/DOCUMENTATION-AUDIENCE-ARCHITECTURE-2026-07-15.md", "audience": "contributor", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Seed plan and authority for the documentation audience architecture program." },
+    { "path": "docs/project/documentation-audience-inventory.json", "audience": "contributor", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "This inventory: the machine-readable map of documentation roles and authority." },
+    { "path": "docs/integrations/README.md", "audience": "external-builder", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Landing page for integrating fak with external agent harnesses and tools." },
+    { "path": "docs/supported/clouds.md", "audience": "external-builder", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Supported cloud and deployment targets with selection criteria." },
+    { "path": "docs/run-the-demos.md", "audience": "external-builder", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Runnable demo walkthroughs for exercising fak end to end." },
+    { "path": "docs/FAQ.md", "audience": "external-builder", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Task-oriented answers to common setup and usage questions." },
+    { "path": "docs/PRODUCT-STATUS.md", "audience": "operator", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Current product maturity and support boundaries by capability." },
+    { "path": "docs/ROLLBACK.md", "audience": "operator", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Recovery and rollback procedure for a bad upgrade or release." },
+    { "path": "docs/HARDWARE-MATRIX.md", "audience": "operator", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Supported hardware and backend evidence matrix." },
+    { "path": "SECURITY.md", "audience": "operator", "lifecycle": "current", "generation": "gen/now", "owner": "security", "front_door_linked": true, "role": "Security policy and coordinated vulnerability reporting." },
+    { "path": "docs/vendor/neo-cloud-reference-architecture.md", "audience": "operator", "lifecycle": "current", "generation": "gen/now", "owner": "documentation", "front_door_linked": false, "role": "Reference architecture for a production vendor-cloud deployment." },
+    { "path": "docs/notes", "kind": "directory", "count": 400, "audience": "research-and-history", "lifecycle": "research", "generation": "historical", "owner": "documentation", "front_door_linked": false, "role": "Dated implementation and research notes kept discoverable but out of front-door sequences." },
+    { "path": "docs/project/history.jsonl", "kind": "ledger", "audience": "research-and-history", "lifecycle": "archived", "generation": "historical", "owner": "documentation", "front_door_linked": false, "role": "Append-only event history for the documentation project." }
+  ]
+}
