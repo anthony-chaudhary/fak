@@ -1,8 +1,9 @@
 package modelroute
 
 import (
+	"errors"
 	"fmt"
-	"regexp"
+	"os/exec"
 	"sort"
 	"strings"
 )
@@ -44,9 +45,10 @@ func (c AccidentalFailureClass) Valid() bool {
 // The regexp is applied to the bounded issue bundle and Expected is the result
 // required for the fixture's declared clean/corrupt label.
 type AccidentalWitness struct {
-	Command  string `json:"command"`
-	Pattern  string `json:"pattern"`
-	Expected bool   `json:"expected"`
+	Command string `json:"command"`
+	Program string `json:"program"`
+	Args    string `json:"args"`
+	Input   string `json:"input"`
 }
 
 // AccidentalCorpusFixture is one member of a clean/corrupt pair.
@@ -89,15 +91,26 @@ func (f AccidentalCorpusFixture) Bundle() (IssueAuditBundle, error) {
 }
 
 func runAccidentalWitness(f AccidentalCorpusFixture) (bool, error) {
-	bundle, err := f.Bundle()
+	cmd := exec.Command(f.Witness.Program, witnessProgramArgs(f.Witness.Program, f.Witness.Args)...)
+	cmd.Stdin = strings.NewReader(f.Witness.Input)
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
 	if err != nil {
-		return false, err
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, fmt.Errorf("%s witness execution: %w", f.ID, err)
+		}
+		exitCode = exitErr.ExitCode()
 	}
-	re, err := regexp.Compile(f.Witness.Pattern)
-	if err != nil {
-		return false, fmt.Errorf("%s witness regexp: %w", f.ID, err)
+	outcome := strings.TrimSpace(string(out))
+	switch {
+	case exitCode == 0 && outcome == "PASS":
+		return false, nil
+	case exitCode != 0 && outcome == "FAIL":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s witness produced exit=%d output=%q, want PASS/0 or FAIL/nonzero", f.ID, exitCode, outcome)
 	}
-	return re.MatchString(accidentalWitnessSurface(bundle)), nil
 }
 
 func accidentalWitnessSurface(b IssueAuditBundle) string {
@@ -146,11 +159,8 @@ func SelfCheckAccidentalCorpus(fixtures []AccidentalCorpusFixture) error {
 		if err != nil {
 			return err
 		}
-		if f.Witness.Expected != f.Corrupt {
-			return fmt.Errorf("accidental corpus %s label/witness contract diverged", f.ID)
-		}
-		if got != f.Witness.Expected {
-			return fmt.Errorf("accidental corpus %s witness %q = %t, want %t", f.ID, f.Witness.Command, got, f.Witness.Expected)
+		if got != f.Corrupt {
+			return fmt.Errorf("accidental corpus %s witness %q corrupt=%t, label=%t", f.ID, f.Witness.Command, got, f.Corrupt)
 		}
 		if pairs[f.Pair] == nil {
 			pairs[f.Pair] = map[bool]bool{}
@@ -192,4 +202,11 @@ func BuildAccidentalCorpusManifest(fixtures []AccidentalCorpusFixture) (Accident
 	manifest.Pairs = len(pairs)
 	sort.Slice(manifest.Rows, func(i, j int) bool { return manifest.Rows[i].ID < manifest.Rows[j].ID })
 	return manifest, nil
+}
+
+func witnessProgramArgs(program, script string) []string {
+	if strings.EqualFold(program, "powershell") {
+		return []string{"-NoProfile", "-NonInteractive", "-Command", script}
+	}
+	return []string{"-c", script}
 }

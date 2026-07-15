@@ -37,7 +37,7 @@ func TestAccidentalCorpusPairsHaveDeterministicGroundTruth(t *testing.T) {
 func TestAccidentalCorpusLabelFlipBreaksSelfCheck(t *testing.T) {
 	fixtures := AccidentalCorpus()
 	fixtures[0].Corrupt = !fixtures[0].Corrupt
-	if err := SelfCheckAccidentalCorpus(fixtures); err == nil || !strings.Contains(err.Error(), "label/witness contract diverged") {
+	if err := SelfCheckAccidentalCorpus(fixtures); err == nil || !strings.Contains(err.Error(), "label=false") {
 		t.Fatalf("flipped label selfcheck = %v, want label/witness failure", err)
 	}
 }
