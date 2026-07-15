@@ -41,11 +41,12 @@ func TestEquivalentHarnessQuestionsNormalizeAndTriageIdentically(t *testing.T) {
 
 func TestPlanGatesNormalizeToPlanApproval(t *testing.T) {
 	tests := []struct {
-		name string
-		gate NativeGate
+		name      string
+		gate      NativeGate
+		wantSteps int
 	}{
-		{"claude", NativeGate{HarnessCommand: "claude-code", Tool: "ExitPlanMode", Payload: []byte(`{"plan":"inspect then edit"}`)}},
-		{"codex", NativeGate{HarnessCommand: "codex", Tool: "update_plan", Payload: []byte(`{"explanation":"safe sequence","plan":[{"step":"inspect","status":"pending"},{"step":"edit","status":"pending"}]}`)}},
+		{"claude", NativeGate{HarnessCommand: "claude-code", Tool: "ExitPlanMode", Payload: []byte(`{"plan":"inspect then edit","file_tree":["internal/x/**"],"steps":[{"text":"inspect","tool":"Read","args":{"path":"x"}}],"done_criterion":"dos verify plan phase"}`)}, 1},
+		{"codex", NativeGate{HarnessCommand: "codex", Tool: "update_plan", Payload: []byte(`{"explanation":"safe sequence","file_tree":["internal/x/**"],"done_criterion":"dos verify plan phase","plan":[{"step":"inspect","status":"pending","tool":"Read","args":{"path":"x"}},{"step":"edit","status":"pending"}]}`)}, 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,7 +54,7 @@ func TestPlanGatesNormalizeToPlanApproval(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Kind != PlanApproval || got.Provenance.NativeTool != tc.gate.Tool || got.Detail == "" {
+			if got.Kind != PlanApproval || got.Provenance.NativeTool != tc.gate.Tool || got.Detail == "" || got.Plan == nil || len(got.Plan.FileTree) != 1 || len(got.Plan.Steps) != tc.wantSteps || got.Plan.DoneCriterion == "" {
 				t.Fatalf("got %+v", got)
 			}
 		})

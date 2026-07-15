@@ -50,7 +50,23 @@ type OperatorQuestion struct {
 	Question   string     `json:"question"`
 	Detail     string     `json:"detail,omitempty"`
 	Options    []Option   `json:"options,omitempty"`
+	Plan       *Plan      `json:"plan,omitempty"`
 	Provenance Provenance `json:"provenance"`
+}
+
+// Plan is the normalized content adjudicated before plan-mode exit.
+type Plan struct {
+	FileTree      []string   `json:"file_tree,omitempty"`
+	Steps         []PlanStep `json:"steps"`
+	DoneCriterion string     `json:"done_criterion,omitempty"`
+}
+
+// PlanStep carries a structural tool/args effect plus its independent witness.
+type PlanStep struct {
+	Text    string         `json:"text"`
+	Tool    string         `json:"tool,omitempty"`
+	Args    map[string]any `json:"args,omitempty"`
+	Witness string         `json:"witness,omitempty"`
 }
 
 // NativeGate carries one harness-native operator gate payload.
@@ -137,12 +153,19 @@ func projectClaude(_ harnessprofile.HarnessProfile, tool string, payload []byte)
 		return q, nil
 	case "ExitPlanMode":
 		var wire struct {
-			Plan string `json:"plan"`
+			Plan          string     `json:"plan"`
+			FileTree      []string   `json:"file_tree,omitempty"`
+			Steps         []PlanStep `json:"steps,omitempty"`
+			DoneCriterion string     `json:"done_criterion,omitempty"`
 		}
 		if err := strictDecode(payload, &wire); err != nil {
 			return OperatorQuestion{}, fmt.Errorf("Claude ExitPlanMode: %w", err)
 		}
-		return OperatorQuestion{Kind: PlanApproval, Question: "Approve this plan?", Detail: wire.Plan}, nil
+		steps := wire.Steps
+		if len(steps) == 0 && strings.TrimSpace(wire.Plan) != "" {
+			steps = []PlanStep{{Text: wire.Plan}}
+		}
+		return OperatorQuestion{Kind: PlanApproval, Question: "Approve this plan?", Detail: wire.Plan, Plan: &Plan{FileTree: wire.FileTree, Steps: steps, DoneCriterion: wire.DoneCriterion}}, nil
 	default:
 		return OperatorQuestion{}, fmt.Errorf("Claude tool %q is not an operator-question gate", tool)
 	}
@@ -177,20 +200,27 @@ func projectCodex(_ harnessprofile.HarnessProfile, tool string, payload []byte) 
 		var wire struct {
 			Explanation string `json:"explanation"`
 			Plan        []struct {
-				Step   string `json:"step"`
-				Status string `json:"status"`
+				Step    string         `json:"step"`
+				Status  string         `json:"status"`
+				Tool    string         `json:"tool,omitempty"`
+				Args    map[string]any `json:"args,omitempty"`
+				Witness string         `json:"witness,omitempty"`
 			} `json:"plan"`
+			FileTree      []string `json:"file_tree,omitempty"`
+			DoneCriterion string   `json:"done_criterion,omitempty"`
 		}
 		if err := strictDecode(payload, &wire); err != nil {
 			return OperatorQuestion{}, fmt.Errorf("Codex update_plan: %w", err)
 		}
-		steps := make([]string, 0, len(wire.Plan))
+		stepText := make([]string, 0, len(wire.Plan))
+		steps := make([]PlanStep, 0, len(wire.Plan))
 		for _, step := range wire.Plan {
-			if s := strings.TrimSpace(step.Step); s != "" {
-				steps = append(steps, s)
+			if text := strings.TrimSpace(step.Step); text != "" {
+				stepText = append(stepText, text)
+				steps = append(steps, PlanStep{Text: text, Tool: step.Tool, Args: step.Args, Witness: step.Witness})
 			}
 		}
-		return OperatorQuestion{Kind: PlanApproval, Question: "Approve this plan?", Detail: strings.Join(steps, "\n")}, nil
+		return OperatorQuestion{Kind: PlanApproval, Question: "Approve this plan?", Detail: strings.Join(stepText, "\n"), Plan: &Plan{FileTree: wire.FileTree, Steps: steps, DoneCriterion: wire.DoneCriterion}}, nil
 	default:
 		return OperatorQuestion{}, fmt.Errorf("Codex tool %q is not an operator-question gate", tool)
 	}

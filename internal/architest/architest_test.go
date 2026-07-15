@@ -447,6 +447,7 @@ var tier = map[string]int{
 	"guardcompile":          3,
 	"operatorquestion": 2,
 	"operatorresolve": 3,
+	"planresolve": 3,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
