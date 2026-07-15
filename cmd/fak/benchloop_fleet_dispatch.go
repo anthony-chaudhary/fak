@@ -187,6 +187,16 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "concept-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+		// The concept replay is intentionally bounded and deterministic. Run it on each
+		// provisioned node to fill the topology cell with node-authored lineage rather
+		// than accepting the control point's local replay as a remote witness.
+		if req.Machine == "gcp-g2-l4-32" {
+			// Container-Optimized OS mounts the persistent home filesystem noexec.
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/conceptbench -replay cmd/conceptbench/testdata/replay"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/conceptbench -replay cmd/conceptbench/testdata/replay"
+	}
 	if req.Benchmark == "agent-live" && strings.HasPrefix(req.Machine, "gcp-") {
 		// Replace the planner's <task> placeholder with the real bounded agent workload.
 		// The node reads its mode-0600 gateway credential locally; no secret enters argv
