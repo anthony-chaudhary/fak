@@ -408,6 +408,29 @@ func guardAllowBlockedTools(rows []journal.Row) []guardAllowBlockedTool {
 	return out
 }
 
+func guardAllowPrunedTools(rows []journal.Row) []guardAllowBlockedTool {
+	counts := map[string]int{}
+	for _, r := range rows {
+		if r.Kind != journal.KindToolDefinitionPruned {
+			continue
+		}
+		if name := strings.TrimSpace(r.Tool); name != "" {
+			counts[name]++
+		}
+	}
+	out := make([]guardAllowBlockedTool, 0, len(counts))
+	for name, count := range counts {
+		out = append(out, guardAllowBlockedTool{name: name, count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].count != out[j].count {
+			return out[i].count > out[j].count
+		}
+		return out[i].name < out[j].name
+	})
+	return out
+}
+
 // runGuardAllowFromJournal reads a guard audit journal, lists the DEFAULT_DENY'd tools,
 // and either prints the exact allow command (default) or, with addAll, records them all
 // in the overlay. It fails soft on a missing/empty journal (no blocks to report), the
@@ -423,15 +446,32 @@ func runGuardAllowFromJournal(stdout, stderr io.Writer, overlayPath string, ov *
 		return 1
 	}
 	blocked := guardAllowBlockedTools(rows)
-	if len(blocked) == 0 {
-		fmt.Fprintf(stdout, "fak guard allow: no DEFAULT_DENY blocks found in %s — nothing to allow.\n", jp)
+	pruned := guardAllowPrunedTools(rows)
+	if len(blocked) == 0 && len(pruned) == 0 {
+		fmt.Fprintf(stdout, "fak guard allow: no DEFAULT_DENY blocks or pruned tool definitions found in %s — nothing to allow.\n", jp)
 		return 0
 	}
-	fmt.Fprintf(stdout, "Blocked (DEFAULT_DENY) tool(s) in %s:\n", jp)
-	names := make([]string, 0, len(blocked))
-	for _, t := range blocked {
-		fmt.Fprintf(stdout, "  %-28s x%d\n", t.name, t.count)
-		names = append(names, t.name)
+	names := make([]string, 0, len(blocked)+len(pruned))
+	seen := map[string]bool{}
+	if len(blocked) > 0 {
+		fmt.Fprintf(stdout, "Blocked (DEFAULT_DENY) tool(s) in %s:\n", jp)
+		for _, tool := range blocked {
+			fmt.Fprintf(stdout, "  %-28s x%d\n", tool.name, tool.count)
+			if !seen[tool.name] {
+				seen[tool.name] = true
+				names = append(names, tool.name)
+			}
+		}
+	}
+	if len(pruned) > 0 {
+		fmt.Fprintln(stdout, "Never advertised (the floor pruned these definitions):")
+		for _, tool := range pruned {
+			fmt.Fprintf(stdout, "  %-28s x%d   fak guard allow %s\n", tool.name, tool.count, shellQuote(tool.name))
+			if !seen[tool.name] {
+				seen[tool.name] = true
+				names = append(names, tool.name)
+			}
+		}
 	}
 	if addAll {
 		ov.Allow = append(ov.Allow, names...)

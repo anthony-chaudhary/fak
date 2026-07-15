@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
 func TestPrunedToolProposalWitnessLogsOncePerTrace(t *testing.T) {
@@ -56,5 +57,31 @@ func TestPrunedToolProposalMetricRenders(t *testing.T) {
 	out := b.String()
 	if !strings.Contains(out, "fak_gateway_inbound_tools_pruned_then_proposed_total 2") {
 		t.Fatalf("metrics missing pruned-then-proposed count:\n%s", out)
+	}
+}
+
+func TestPrunedToolDefinitionsJournalOncePerTraceAndName(t *testing.T) {
+	j := journal.OpenMemory()
+	prev := activeJournal
+	activeJournal = func() *journal.Journal { return j }
+	t.Cleanup(func() { activeJournal = prev })
+
+	srv := newTestServer(t)
+	srv.recordInboundPrunedToolDefinitions("trace-a", []string{"customer_lookup", "customer_lookup", "other_tool"})
+	srv.recordInboundPrunedToolDefinitions("trace-a", []string{"customer_lookup"})
+
+	rows := j.Recent(10)
+	if len(rows) != 2 {
+		t.Fatalf("journal rows=%d want 2: %+v", len(rows), rows)
+	}
+	got := map[string]bool{}
+	for _, row := range rows {
+		if row.Kind != journal.KindToolDefinitionPruned || row.TraceID != "trace-a" || row.Verdict != "ADVISORY" {
+			t.Fatalf("row=%+v", row)
+		}
+		got[row.Tool] = true
+	}
+	if !got["customer_lookup"] || !got["other_tool"] {
+		t.Fatalf("journaled tools=%v", got)
 	}
 }

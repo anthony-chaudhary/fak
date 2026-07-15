@@ -249,3 +249,64 @@ func writeGuardAllowTestJournal(t *testing.T, path string, rows ...journal.Row) 
 		t.Fatalf("write journal: %v", err)
 	}
 }
+
+func TestGuardAllowFromJournalListsPrunedDefinitionsWithoutDeny(t *testing.T) {
+	jp := filepath.Join(t.TempDir(), "audit.jsonl")
+	j, err := journal.Open(jp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.AppendToolDefinitionPruned("trace-1", "customer_lookup")
+	j.AppendToolDefinitionPruned("trace-2", "customer_lookup")
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	overlayPath := filepath.Join(t.TempDir(), "allow.json")
+	ov := guardAllowOverlay{}
+	if code := runGuardAllowFromJournal(&out, &errb, overlayPath, &ov, jp, false); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "Never advertised") || !strings.Contains(out.String(), "fak guard allow customer_lookup") || strings.Contains(out.String(), "nothing to allow") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestGuardAllowFromJournalAddAllIncludesBlockedAndPruned(t *testing.T) {
+	jp := filepath.Join(t.TempDir(), "audit.jsonl")
+	rows := []journal.Row{
+		{Kind: "DENY", Verdict: "DENY", Reason: "DEFAULT_DENY", Tool: "called_tool"},
+		{Kind: journal.KindToolDefinitionPruned, Verdict: "ADVISORY", Reason: "DEFAULT_DENY", Tool: "never_advertised", TraceID: "trace-1"},
+	}
+	var data strings.Builder
+	for _, row := range rows {
+		b, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data.Write(b)
+		data.WriteByte('\n')
+	}
+	if err := os.WriteFile(jp, []byte(data.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	overlayPath := filepath.Join(t.TempDir(), "allow.json")
+	ov := guardAllowOverlay{}
+	if code := runGuardAllowFromJournal(&out, &errb, overlayPath, &ov, jp, true); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	got, err := loadGuardAllowOverlay(overlayPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"called_tool": true, "never_advertised": true}
+	for _, name := range got.Allow {
+		delete(want, name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("overlay allow=%v missing=%v", got.Allow, want)
+	}
+}

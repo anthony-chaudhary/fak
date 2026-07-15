@@ -1,6 +1,8 @@
 package gateway
 
-import "strings"
+import (
+	"strings"
+)
 
 // recordInboundPrunedToolDefinitions records the concrete tool names pruned from one
 // served trace's advertised tools[]. It is observability-only: call-time adjudication still
@@ -11,7 +13,6 @@ func (s *Server) recordInboundPrunedToolDefinitions(trace string, names []string
 		return
 	}
 	s.prunedToolDefsMu.Lock()
-	defer s.prunedToolDefsMu.Unlock()
 	if s.prunedToolDefs == nil {
 		s.prunedToolDefs = map[string]map[string]struct{}{}
 	}
@@ -29,10 +30,22 @@ func (s *Server) recordInboundPrunedToolDefinitions(trace string, names []string
 		set = map[string]struct{}{}
 		s.prunedToolDefs[trace] = set
 	}
+	fresh := make([]string, 0, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
-		if name != "" {
-			set[name] = struct{}{}
+		if name == "" {
+			continue
+		}
+		if _, already := set[name]; already {
+			continue
+		}
+		set[name] = struct{}{}
+		fresh = append(fresh, name)
+	}
+	s.prunedToolDefsMu.Unlock()
+	for _, name := range fresh {
+		if j := activeJournal(); j != nil {
+			j.AppendToolDefinitionPruned(trace, name)
 		}
 	}
 }
