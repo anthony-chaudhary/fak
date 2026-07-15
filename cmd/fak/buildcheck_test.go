@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -341,5 +342,44 @@ func TestRunBuildCheckLiveCrossCheckAlsoFails(t *testing.T) {
 	}
 	if !strings.Contains(rep.Reason, "undefined: Real") {
 		t.Errorf("reason %q should carry the real go failure tail", rep.Reason)
+	}
+}
+
+func TestLoadBearingUntrackedFilesKeepsImportedPackageClosure(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.test/repo\n\ngo 1.26\n")
+	write("cmd/app/main.go", "package main\nimport _ \"example.test/repo/internal/newpkg\"\nfunc main() {}\n")
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", "go.mod", "cmd/app/main.go")
+	write("internal/newpkg/new.go", "package newpkg\nimport _ \"example.test/repo/internal/nested\"\n")
+	write("internal/newpkg/sibling.go", "package newpkg\n")
+	write("internal/nested/nested.go", "package nested\n")
+	write("internal/orphan/orphan.go", "package orphan\n")
+	untracked := []string{"internal/newpkg/new.go", "internal/newpkg/sibling.go", "internal/nested/nested.go", "internal/orphan/orphan.go"}
+	got, err := loadBearingUntrackedFiles(root, untracked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"internal/nested/nested.go", "internal/newpkg/new.go", "internal/newpkg/sibling.go"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("load-bearing files = %#v, want %#v", got, want)
 	}
 }

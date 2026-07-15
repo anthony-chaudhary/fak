@@ -44,16 +44,20 @@ package main
 // authoritative gate -- this is the fast, collision-free inner-loop compile check.
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,6 +69,7 @@ func cmdBuildCheck(argv []string) { os.Exit(runBuildCheck(os.Stdout, os.Stderr, 
 var (
 	buildCheckUntracked    = untrackedFiles
 	buildCheckModifiedDirs = trackedModifiedDirs
+	buildCheckLoadBearing  = loadBearingUntrackedFiles
 	buildCheckRun          = runGoBuildCheck
 	buildCheckNow          = time.Now
 )
@@ -318,6 +323,95 @@ func selectMaskedFiles(untracked []string, mine []string, modifiedDirs map[strin
 	sort.Strings(kept)
 	sort.Strings(staleMine)
 	return masked, kept, staleMine
+}
+
+// loadBearingUntrackedFiles returns untracked Go files in local packages reachable
+// from tracked Go source. Those packages are dependencies of the tree under test, not
+// sibling poison, so the isolation overlay must retain their complete package contents.
+func loadBearingUntrackedFiles(root string, untracked []string) ([]string, error) {
+	modulePath, err := readModulePath(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return nil, err
+	}
+	untrackedByDir := map[string][]string{}
+	for _, name := range untracked {
+		name = filepath.ToSlash(filepath.Clean(name))
+		if strings.HasSuffix(name, ".go") {
+			dir := path.Dir(name)
+			untrackedByDir[dir] = append(untrackedByDir[dir], name)
+		}
+	}
+	if len(untrackedByDir) == 0 {
+		return nil, nil
+	}
+	cmd := exec.Command("git", "ls-files", "--", "*.go")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	queue := localImportDirs(root, modulePath, strings.Fields(string(out)))
+	seen := map[string]bool{}
+	var kept []string
+	for len(queue) > 0 {
+		dir := path.Clean(queue[0])
+		queue = queue[1:]
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		files := untrackedByDir[dir]
+		if len(files) == 0 {
+			continue
+		}
+		kept = append(kept, files...)
+		queue = append(queue, localImportDirs(root, modulePath, files)...)
+	}
+	sort.Strings(kept)
+	return kept, nil
+}
+
+func readModulePath(goMod string) (string, error) {
+	f, err := os.Open(goMod)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		fields := strings.Fields(s.Text())
+		if len(fields) == 2 && fields[0] == "module" {
+			return strings.TrimSpace(fields[1]), nil
+		}
+	}
+	if err := s.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("module directive not found in %s", goMod)
+}
+
+func localImportDirs(root, modulePath string, files []string) []string {
+	prefix := strings.TrimSuffix(modulePath, "/") + "/"
+	seen := map[string]bool{}
+	var dirs []string
+	for _, name := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, filepath.FromSlash(name)), nil, parser.ImportsOnly)
+		if err != nil {
+			continue // the compiler will report malformed source; this fold only preserves dependencies
+		}
+		for _, spec := range parsed.Imports {
+			importPath, err := strconv.Unquote(spec.Path.Value)
+			if err != nil || !strings.HasPrefix(importPath, prefix) {
+				continue
+			}
+			dir := path.Clean(strings.TrimPrefix(importPath, prefix))
+			if dir != "." && !seen[dir] {
+				seen[dir] = true
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	return dirs
 }
 
 // buildOverlay maps each masked repo-relative file to an EMPTY backing path (absolute,

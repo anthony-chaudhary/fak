@@ -16,10 +16,13 @@ import (
 // exercised hermetically without git or spawning go.
 func withGoShimSeams(t *testing.T, untracked []string, modifiedDirs map[string]bool, runFn func(root string, args []string, stdout, stderr io.Writer) (int, error)) {
 	t.Helper()
-	origU, origM, origR := buildCheckUntracked, buildCheckModifiedDirs, goShimRun
-	t.Cleanup(func() { buildCheckUntracked, buildCheckModifiedDirs, goShimRun = origU, origM, origR })
+	origU, origM, origL, origR := buildCheckUntracked, buildCheckModifiedDirs, buildCheckLoadBearing, goShimRun
+	t.Cleanup(func() {
+		buildCheckUntracked, buildCheckModifiedDirs, buildCheckLoadBearing, goShimRun = origU, origM, origL, origR
+	})
 	buildCheckUntracked = func(string) ([]string, error) { return untracked, nil }
 	buildCheckModifiedDirs = func(string) (map[string]bool, error) { return modifiedDirs, nil }
+	buildCheckLoadBearing = func(string, []string) ([]string, error) { return nil, nil }
 	goShimRun = runFn
 }
 
@@ -69,6 +72,23 @@ func TestGoShimArgsNoOverlayIsVerbatim(t *testing.T) {
 // TestGoShimOverlayEqualsBuildcheckSelection is the DoD anti-fork assertion: for the same
 // tree state the shim masks the IDENTICAL file set as fak buildcheck, because both call the
 // shared selectMaskedFiles fold — and the overlay bytes it writes equal buildOverlay's.
+func TestGoShimOverlayKeepsLoadBearingUntrackedPackage(t *testing.T) {
+	untracked := []string{"internal/loadbearing/load.go", "internal/orphan/orphan.go"}
+	withGoShimSeams(t, untracked, nil, nil)
+	buildCheckLoadBearing = func(string, []string) ([]string, error) {
+		return []string{"internal/loadbearing/load.go"}, nil
+	}
+	var errb bytes.Buffer
+	masked, _, code := goShimOverlay("/repo", nil, t.TempDir(), &errb)
+	if code != 0 {
+		t.Fatalf("goShimOverlay code = %d, stderr=%s", code, errb.String())
+	}
+	want := []string{"internal/orphan/orphan.go"}
+	if !reflect.DeepEqual(masked, want) {
+		t.Fatalf("masked = %v, want only orphan %v", masked, want)
+	}
+}
+
 func TestGoShimOverlayEqualsBuildcheckSelection(t *testing.T) {
 	untracked := []string{"cmd/fak/peer_wip.go", "internal/x/new.go", "cmd/fak/mine.go"}
 	modifiedDirs := map[string]bool{"internal/x": true} // internal/x has an in-flight edit -> its untracked sibling is KEPT

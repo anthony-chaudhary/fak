@@ -152,6 +152,12 @@ func goShimOverlay(root string, mine []string, scratch string, stderr io.Writer)
 		fmt.Fprintf(stderr, "fak go: cannot read in-flight edits (%v); masking all untracked siblings\n", merr)
 		modifiedDirs = nil
 	}
+	loadBearing, lerr := buildCheckLoadBearing(root, untracked)
+	if lerr != nil {
+		fmt.Fprintf(stderr, "fak go: inspect local import closure: %v\n", lerr)
+		return nil, "", 1
+	}
+	mine = append(mine, loadBearing...)
 	masked, _, staleMine := selectMaskedFiles(untracked, mine, modifiedDirs)
 	for _, m := range staleMine {
 		fmt.Fprintf(stderr, "fak go: --mine %s is not an untracked file; ignoring (it is already in the build)\n", m)
