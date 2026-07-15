@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "workstation-a-bench-fleet-87432b95a1e5e5eb-20260715T002953Z",
+  "machine_id": "workstation-a",
+  "timestamp": "20260715T002953Z",
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "rev": "unknown"
+  },
+  "harness": {
+    "name": "fak-bench-fleet",
+    "version": "1"
+  },
+  "model": {
+    "name": "",
+    "precision": "n/a"
+  },
+  "config": {
+    "benchmark": "session-benchmark",
+    "request_id": "87432b95a1e5e5eb",
+    "route": "local-control"
+  },
+  "tags": [
+    "bench-fleet",
+    "control",
+    "session-benchmark"
+  ],
+  "artifacts": {
+    "witness": "witness.json"
+  }
+}
