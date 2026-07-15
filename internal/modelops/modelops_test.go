@@ -15,8 +15,9 @@ const (
 
 func topThreeInput(candidate string, requiredTier int) Input {
 	policy := func(model string, tier int, fallbacks ...string) Policy {
-		return Policy{Model: model, CapabilityTier: tier, Fallbacks: fallbacks, MinSamples: 20,
-			MinSuccessRate: .95, MaxProviderErrorRate: .02, MaxInvalidToolRate: .01,
+		return Policy{Model: model, CapabilityTier: tier, Fallbacks: fallbacks,
+			Alert:      AlertContract{Owner: "modelops-oncall", Route: "model-provider-incidents", AckSLAMinutes: 10, Runbook: "docs/model-production-readiness-inventory.md"},
+			MinSamples: 20, MinSuccessRate: .95, MaxProviderErrorRate: .02, MaxInvalidToolRate: .01,
 			MaxP95LatencyMS: 5000, MaxThrottleRate: .03, MaxFallbackRate: .05}
 	}
 	healthy := func(model string) Observation {
@@ -145,5 +146,50 @@ func TestEvaluateHoldsOnConflictingOutcomeReplay(t *testing.T) {
 	got := Evaluate(in)
 	if got.Action != Hold || !slices.Contains(got.Reasons, "conflicting outcome invocation_id: run-001") {
 		t.Fatalf("decision = %+v, want fail-closed conflicting replay", got)
+	}
+}
+
+func TestEvaluateCarriesSelectedFallbackAlertContract(t *testing.T) {
+	in := topThreeInput("claude-opus-4-8", 1)
+	in.Observations[0].SuccessRate = 0.5
+	want := AlertContract{Owner: "sonnet-owner", Route: "sonnet-alerts", AckSLAMinutes: 5, Runbook: "runbooks/sonnet.md"}
+	in.Policies[1].Alert = want
+	got := Evaluate(in)
+	if got.Action != Rollback || got.Selected != "claude-sonnet-4-6" {
+		t.Fatalf("decision = %#v", got)
+	}
+	if got.Alert != want {
+		t.Fatalf("alert = %#v, want %#v", got.Alert, want)
+	}
+}
+
+func TestEvaluateRejectsMissingAlertContract(t *testing.T) {
+	in := topThreeInput("claude-opus-4-8", 1)
+	in.Policies[0].Alert = AlertContract{}
+	got := Evaluate(in)
+	if got.Action != Hold || !strings.Contains(strings.Join(got.Reasons, " "), "alert owner is required") {
+		t.Fatalf("decision = %#v", got)
+	}
+}
+
+func TestEvaluateRejectsMalformedAlertContract(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*AlertContract)
+		want string
+	}{
+		{name: "route", edit: func(a *AlertContract) { a.Route = "" }, want: "route is required"},
+		{name: "ack sla", edit: func(a *AlertContract) { a.AckSLAMinutes = 0 }, want: "ack_sla_minutes must be positive"},
+		{name: "runbook", edit: func(a *AlertContract) { a.Runbook = "" }, want: "runbook is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := topThreeInput("claude-opus-4-8", 1)
+			tt.edit(&in.Policies[0].Alert)
+			got := Evaluate(in)
+			if got.Action != Hold || !strings.Contains(strings.Join(got.Reasons, " "), tt.want) {
+				t.Fatalf("decision = %#v", got)
+			}
+		})
 	}
 }

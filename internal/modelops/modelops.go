@@ -18,17 +18,25 @@ const (
 
 // Policy is declared before a canary runs. Lower tier numbers are more capable:
 // tier 0 may serve every workload, while tier 2 may serve only tier-2 work.
+type AlertContract struct {
+	Owner         string `json:"owner"`
+	Route         string `json:"route"`
+	AckSLAMinutes int    `json:"ack_sla_minutes"`
+	Runbook       string `json:"runbook"`
+}
+
 type Policy struct {
-	Model                string   `json:"model"`
-	CapabilityTier       int      `json:"capability_tier"`
-	Fallbacks            []string `json:"fallbacks,omitempty"`
-	MinSamples           int      `json:"min_samples"`
-	MinSuccessRate       float64  `json:"min_success_rate"`
-	MaxProviderErrorRate float64  `json:"max_provider_error_rate"`
-	MaxInvalidToolRate   float64  `json:"max_invalid_tool_rate"`
-	MaxP95LatencyMS      int64    `json:"max_p95_latency_ms"`
-	MaxThrottleRate      float64  `json:"max_throttle_rate"`
-	MaxFallbackRate      float64  `json:"max_fallback_rate"`
+	Model                string        `json:"model"`
+	CapabilityTier       int           `json:"capability_tier"`
+	Fallbacks            []string      `json:"fallbacks,omitempty"`
+	Alert                AlertContract `json:"alert"`
+	MinSamples           int           `json:"min_samples"`
+	MinSuccessRate       float64       `json:"min_success_rate"`
+	MaxProviderErrorRate float64       `json:"max_provider_error_rate"`
+	MaxInvalidToolRate   float64       `json:"max_invalid_tool_rate"`
+	MaxP95LatencyMS      int64         `json:"max_p95_latency_ms"`
+	MaxThrottleRate      float64       `json:"max_throttle_rate"`
+	MaxFallbackRate      float64       `json:"max_fallback_rate"`
 }
 
 type Observation struct {
@@ -72,6 +80,7 @@ type Decision struct {
 	RequiredTier  int            `json:"required_tier"`
 	Reasons       []string       `json:"reasons"`
 	OutcomeCounts []OutcomeCount `json:"outcome_counts,omitempty"`
+	Alert         AlertContract  `json:"alert"`
 }
 
 func Evaluate(in Input) Decision {
@@ -88,6 +97,9 @@ func Evaluate(in Input) Decision {
 		return out
 	}
 	candidate, ok := policies[in.Candidate]
+	if ok {
+		out.Alert = candidate.Alert
+	}
 	if !ok {
 		out.Reasons = []string{"candidate policy is missing"}
 		return out
@@ -121,6 +133,7 @@ func Evaluate(in Input) Decision {
 		}
 		out.Action = Rollback
 		out.Selected = name
+		out.Alert = fallback.Alert
 		out.Reasons = append(out.Reasons, "selected first healthy capability-safe fallback")
 		return out
 	}
@@ -154,6 +167,9 @@ func index(in Input) (map[string]Policy, map[string]Observation, []string) {
 		}
 		if p.MaxP95LatencyMS <= 0 {
 			reasons = append(reasons, "policy "+p.Model+": max_p95_latency_ms must be positive")
+		}
+		if err := validateAlert(p.Alert); err != nil {
+			reasons = append(reasons, "policy "+p.Model+": alert "+err.Error())
 		}
 		for name, rate := range map[string]float64{
 			"min_success_rate": p.MinSuccessRate, "max_provider_error_rate": p.MaxProviderErrorRate,
@@ -241,6 +257,22 @@ func FoldOutcomes(outcomes []InvocationOutcome) ([]OutcomeCount, []string) {
 	}
 	sort.Strings(reasons)
 	return counts, reasons
+}
+
+func validateAlert(a AlertContract) error {
+	if strings.TrimSpace(a.Owner) == "" {
+		return fmt.Errorf("owner is required")
+	}
+	if strings.TrimSpace(a.Route) == "" {
+		return fmt.Errorf("route is required")
+	}
+	if a.AckSLAMinutes <= 0 {
+		return fmt.Errorf("ack_sla_minutes must be positive")
+	}
+	if strings.TrimSpace(a.Runbook) == "" {
+		return fmt.Errorf("runbook is required")
+	}
+	return nil
 }
 
 func validRate(v float64) bool { return v >= 0 && v <= 1 }
