@@ -374,6 +374,9 @@ func main() {
 		// Operator-facing: fold the typed Stop-hook decision ledger into a tally (clean
 		// stops, bounded stand-downs, and the fail-open stops that are otherwise invisible).
 		cmdGuardStops(os.Args[2:])
+	case "guard-stops-slack":
+		// Durable update-in-place scoreboard feeder for the Stop decision ledger.
+		cmdGuardStopsSlack(os.Args[2:])
 	case "trunk-red":
 		// Operator-facing: fold the pre-existing trunk-red witness ledger into the distinct
 		// shared breaks the build gates admitted over (a peer's red, not yours) — worst (most
