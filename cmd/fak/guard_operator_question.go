@@ -29,9 +29,10 @@ var guardOperatorQuestionClarifyResolver = operatorresolve.Resolver{
 	Oracles: []operatorresolve.Oracle{operatorresolve.GitIsolationOracle{Runner: commandReadOnlyRunner{}}},
 }
 
-// plan Stop-hook actuation stays fail-to-residue until install-time DOS/git oracles are
-// supplied. The pure plan resolver and all of its acceptance cases are already shipped.
-var guardOperatorQuestionPlanResolver func(context.Context, operatorquestion.OperatorQuestion) (planresolve.Verdict, error)
+// guardOperatorQuestionPlanResolver is installed in production, not only tests. The
+// concrete oracle set lives beside the guard so PLAN_APPROVAL cannot silently fall back
+// to PLAN_ORACLES_UNAVAILABLE in a real session.
+var guardOperatorQuestionPlanResolver = resolveGuardOperatorQuestionPlan
 
 func runGuardOperatorQuestionGate(stderr io.Writer, rawMode, transcriptPath string) (int, guardStopDisposition, string, bool) {
 	mode, err := normalizeGuardOperatorDirectedMode(rawMode)
@@ -79,7 +80,7 @@ func adjudicateOperatorQuestion(q operatorquestion.OperatorQuestion) (guardStopD
 		}
 		v, err := guardOperatorQuestionPlanResolver(context.Background(), q)
 		if err != nil {
-			return stopDispOperatorQuestionBlocked, "PLAN_ORACLE_ERROR", err.Error()
+			return stopDispOperatorQuestionEscalate, "PLAN_ORACLE_ERROR", err.Error()
 		}
 		switch v.Disposition {
 		case planresolve.AutoApprove:
