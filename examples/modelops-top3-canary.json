@@ -1,0 +1,14 @@
+{
+  "required_tier": 1,
+  "candidate": "claude-opus-4-8",
+  "policies": [
+    {"model":"claude-opus-4-8","capability_tier":0,"fallbacks":["claude-sonnet-4-6"],"min_samples":20,"min_success_rate":0.95,"max_provider_error_rate":0.02,"max_invalid_tool_rate":0.01,"max_p95_latency_ms":5000,"max_throttle_rate":0.03,"max_fallback_rate":0.05},
+    {"model":"claude-sonnet-4-6","capability_tier":1,"fallbacks":["claude-haiku-4-5-20251001"],"min_samples":20,"min_success_rate":0.95,"max_provider_error_rate":0.02,"max_invalid_tool_rate":0.01,"max_p95_latency_ms":5000,"max_throttle_rate":0.03,"max_fallback_rate":0.05},
+    {"model":"claude-haiku-4-5-20251001","capability_tier":2,"min_samples":20,"min_success_rate":0.95,"max_provider_error_rate":0.02,"max_invalid_tool_rate":0.01,"max_p95_latency_ms":5000,"max_throttle_rate":0.03,"max_fallback_rate":0.05}
+  ],
+  "observations": [
+    {"model":"claude-opus-4-8","samples":30,"success_rate":0.50,"provider_error_rate":0.01,"invalid_tool_rate":0,"p95_latency_ms":4000,"throttle_rate":0.01,"fallback_rate":0.02},
+    {"model":"claude-sonnet-4-6","samples":30,"success_rate":0.98,"provider_error_rate":0.01,"invalid_tool_rate":0,"p95_latency_ms":4000,"throttle_rate":0.01,"fallback_rate":0.02},
+    {"model":"claude-haiku-4-5-20251001","samples":30,"success_rate":0.98,"provider_error_rate":0.01,"invalid_tool_rate":0,"p95_latency_ms":4000,"throttle_rate":0.01,"fallback_rate":0.02}
+  ]
+}
