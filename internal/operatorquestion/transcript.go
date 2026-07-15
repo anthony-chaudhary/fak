@@ -36,18 +36,32 @@ func LastFromTranscript(path, harnessCommand string) (q OperatorQuestion, found 
 	return q, found, nil
 }
 
-// LastFromTranscriptAny tries the registered first-class harness projections and returns
-// the last recognized gate. A transcript belongs to one harness in practice; this helper
-// lets Stop-hook consumers remain harness-agnostic when the hook payload names only a path.
-func LastFromTranscriptAny(path string) (OperatorQuestion, bool, error) {
-	for _, harness := range []string{"claude", "codex"} {
-		q, found, err := LastFromTranscript(path, harness)
-		if err != nil {
-			return OperatorQuestion{}, false, err
+// LastFromTranscriptAny scans once in transcript order and retains the last gate
+// recognized by any first-class harness projection.
+func LastFromTranscriptAny(path string) (q OperatorQuestion, found bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return OperatorQuestion{}, false, err
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	for {
+		var record transcript.Record
+		if err := dec.Decode(&record); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return OperatorQuestion{}, false, fmt.Errorf("operatorquestion transcript: %w", err)
 		}
-		if found {
-			return q, true, nil
+		for _, use := range record.ToolUses() {
+			for _, harness := range []string{"claude", "codex"} {
+				candidate, normalizeErr := Normalize(NativeGate{HarnessCommand: harness, Tool: use.Name, Payload: use.Input})
+				if normalizeErr == nil {
+					q, found = candidate, true
+					break
+				}
+			}
 		}
 	}
-	return OperatorQuestion{}, false, nil
+	return q, found, nil
 }

@@ -102,3 +102,29 @@ func TestLastFromTranscriptNormalizesCodexGate(t *testing.T) {
 		t.Fatalf("found=%v got=%+v", found, got)
 	}
 }
+
+func TestLastFromTranscriptAnyPreservesCrossHarnessOrder(t *testing.T) {
+	claude := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"header":"Old","multiSelect":false,"question":"Claude old?","options":[]}]}}]}}`
+	codex := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"functions.request_user_input","input":{"questions":[{"id":"new","header":"New","question":"Codex new?","options":[]}]}}]}}`
+	invalid := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"UnknownGate","input":{"bad":true}}]}}`
+	for _, tc := range []struct {
+		name, content, wantHarness, wantQuestion string
+	}{
+		{"codex last", claude + "\n" + invalid + "\n" + codex + "\n", "codex", "Codex new?"},
+		{"claude last", codex + "\n" + invalid + "\n" + claude + "\n", "claude", "Claude old?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mixed.jsonl")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, found, err := LastFromTranscriptAny(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !found || got.Harness != tc.wantHarness || got.Question != tc.wantQuestion {
+				t.Fatalf("found=%v got=%+v", found, got)
+			}
+		})
+	}
+}
