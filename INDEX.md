@@ -204,6 +204,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Session 019f6745 failure audit — executive-reporting recovery loop (2026-07-15)](docs/notes/SESSION-019F6745-FAILURE-AUDIT-2026-07-15.md) -- auto-indexed dated note.
 - [Mac many-agent model selection](docs/notes/MAC-MANYAGENT-MODEL-SELECTION-2026-07-13.md) — the cache-economics-first rubric and code-verified candidate matrix for #3809/#3810; provisionally selects Qwen2.5-7B Q8 and names the capacity, Metal smoke, cache A/B, and long-horizon witnesses still required.
 Dated working notes: research, audits, and run logs. Kept for the record, not the
 front page.
