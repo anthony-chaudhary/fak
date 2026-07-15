@@ -27,11 +27,26 @@ type graphBackend interface {
 // point is the adoption gate for proving a backend can execute the model loop without
 // touching the direct []float32 implementation.
 func (m *Model) NewBackendSession(be compute.Backend) *Session {
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// NewBackendSessionChecked is the fail-closed constructor for a compute-HAL
+// session. It returns a typed architecture/backend refusal before any weight
+// upload or generic operator runs. NewBackendSession preserves the established
+// panic-on-invalid-construction API by wrapping this checked entry point.
+func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 	if be == nil {
 		be = compute.Default()
 	}
 	if be == nil {
 		panic("model: no compute backend registered")
+	}
+	if err := m.ValidateBackendForwardPath(be); err != nil {
+		return nil, err
 	}
 	kv := newHALKVStore(be, m.Cfg)
 	if kv == nil {
@@ -42,7 +57,7 @@ func (m *Model) NewBackendSession(be compute.Backend) *Session {
 	if gr, ok := be.(interface{ GraphReset() }); ok {
 		gr.GraphReset()
 	}
-	return &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor)}
+	return &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor)}, nil
 }
 
 // Close releases device-resident HAL state owned by this session. Legacy sessions have
