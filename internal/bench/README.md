@@ -74,6 +74,27 @@ stressor methods (VM, cache, I/O, NUMA, thermal), `--cpu-method` micro-kernels, 
 matched cross-fleet numbers against an external baseline. This arm is intentionally
 two stressors (hash + page-touch): the always-available floor, not the ceiling.
 
+## Witnessed run (CPU server → #4367)
+
+The bounded arm was run on **CPU server** (256 CPU, ~1 TiB RAM, Go 1.26.1) via the recipe
+above and the self-verifying artifact was attached to
+[#4367](https://github.com/anthony-chaudhary/fak/issues/4367#issuecomment-4981247822).
+The run was **not** refused — the load gate was live (`checked:true`, 0.03/CPU) and
+the temperature gate degraded to an honest `checked:false` (no `/sys/class/thermal`
+zone exposed), exactly as designed. Recorded highlights:
+
+- CPU: 256 workers, 505,513 SHA-256 ops in 2.001 s = **252,591 hashes/s**; latency
+  p50 945 µs / p99 1.455 ms.
+- Memory: 64 MiB / 256 MiB / 1 GiB slabs all page-touched (none skipped), up to
+  ~252 GB/s; host load1 moved 7.79 → 28.07 (real synthetic load applied).
+- Artifact digest (canonical report, `digest` cleared):
+  `5630e5ffd7fa49ce7f4d87f4785c0a9855f855aabb6e8fcf4020e8c36a481fcd`; file SHA-256
+  `1fa3831d4a1d04ad2197a77240e7968d1a782875ec0155b8a9abfd459fd0de43` (4345 bytes).
+
+This distinguishes the native-Go arm from the earlier Python-threaded (GIL-bound)
+and OpenSSL `speed` witnesses on #4371 — those measured different things; this is the
+dependency-free `cpumemstress` tool itself.
+
 ## Lane gate
 
 ```sh
