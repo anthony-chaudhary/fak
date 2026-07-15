@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guardvars"
+	"github.com/anthony-chaudhary/fak/internal/negframe"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 	"golang.org/x/term"
@@ -297,10 +298,21 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	frame := fs.Bool("frame", true, "with --from-fixture: render ONE static frame and exit (no watch loop, no cursor control). The only mode --from-fixture supports today; kept as an explicit flag so a future replay mode can turn it off.")
 	width := fs.Int("width", 0, "with --from-fixture: render at this fixed pane width in cells (0 = the overlay's roomy default). A fixed width makes the captured frame byte-deterministic across terminals.")
 	height := fs.Int("height", 0, "with --from-fixture: render at this fixed pane height in rows (0 = roomy — the body renders in full). A fixed height crops/fits the frame exactly as a live pane of that size would.")
+	negationTax := fs.Bool("negation-tax", false, "render the negation-tax debt + top offending steer strings from the source corpus and exit (offline; no gateway needed)")
+	negationTaxTop := fs.Int("negation-tax-top", 5, "with --negation-tax: maximum offenders to render")
 	startup := fs.Bool("startup", false, "print the guarded session's FULL startup report (the banner + hook/MCP/auth notes) and exit. This is the on-demand door to the detail an attended `fak guard -- claude` launch keeps compact: the guard records the full text on its gateway at boot, and this reads it back any time during the session (startup_report on /debug/vars). Relaunching with `fak guard --banner=full` streams it at boot instead.")
 	color := fs.String("color", "auto", "colorize the info overlay on a TTY: auto (TTY && NO_COLOR unset), always (force on unless NO_COLOR), or never")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if *negationTax {
+		if *negationTaxTop < 0 {
+			fmt.Fprintln(stderr, "fak info: --negation-tax-top must be non-negative")
+			return 2
+		}
+		pane := scorecardpane.BuildNegframePane(negframe.AllFindings(".", nil), *negationTaxTop)
+		fmt.Fprintln(stdout, scorecardpane.RenderNegframePane(pane))
+		return 0
 	}
 	if *prefixTranscript != "" {
 		return runInfoPrefixTranscript(stdout, stderr, *prefixTranscript, *asJSON)
