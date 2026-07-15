@@ -68,6 +68,14 @@ type ToolCallOutcome struct {
 	Reason      abi.ReasonCode
 	Disposition ToolCallDisposition
 	Progress    bool
+	// Target and IntendedEffect are the optional semantic identity of a refused
+	// call. They deliberately exclude command bytes: retries that mutate shell
+	// syntax while still reaching for the same guarded target/effect remain the
+	// same refusal for session-envelope accounting. Empty fields preserve the
+	// historical tool/reason/disposition identity used by callers that do not yet
+	// report semantic coordinates.
+	Target         string
+	IntendedEffect string
 }
 
 // ReasonToken renders the per-tool refusal reason. An allowed/repaired call with
