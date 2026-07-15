@@ -295,7 +295,6 @@ var tier = map[string]int{
 	"guardrsi":         1, // pure guard RSI journal fold + scorecard: reads guard-audit bytes, computes deterministic verdict quality, and validates keep/revert iterations; stdlib-only, off the hot path.
 	"repoguard":        1, // pure repo-containment classifier: resolves write/delete targets against a workspace root and emits OUT_OF_TREE_WRITE; stdlib-only, shared by the hook binary and loop driver.
 	"egressfloor":      1, // pure network-egress destination classifier (cloud-metadata SSRF floor): names a tool call reaching the cloud-instance metadata / link-local family (169.254.169.254, metadata.google.internal, fd00:ec2::254, ...). Imports only abi(0)+net+net/url; the adjudicator's egress rung folds it on the live path.
-	"egresslist":       1, // pure adblock/hosts-style egress filter compiler + matcher (operator/community allow-block lists): compiles ||host^ / @@ exceptions / 0.0.0.0-host rules into an allow/block decision with subdomain matching, plus an embedded bundled-list registry. Imports only stdlib (strings/embed/io-fs/sort); the adjudicator's egress rung folds it above egressfloor.
 	"hooks":            1, // commit-boundary gates run in ONE process: the Go port of the tools/check_*.py git-hook checkers (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/INDEX_SYNC/PROVENANCE_LABEL + commit-msg), folding one staged-diff read. stdlib-only, imports nothing internal, off the hot path.
 	"workflow":         1, // pure DAG/map-reduce/fan-out orchestration core (#245, D-005): JSON-DSL compiler + topo-validated executor + retry/fail-fast fault tolerance; stdlib-only, imports nothing internal, off the hot path.
 	"l3region":         1, // L3 disaggregated-cache child B Stage-1 seam (#77, epic #504): an abi.RegionBackend over a fake in-memory page-keyed L3 store â€” a Ref.Digest resolves to a page-key set (mget/mset), region round-trips bit-exact + verify-don't-trust. Imports only abi+stdlib; NOT registered (library leaf), off the hot path.
@@ -481,7 +480,7 @@ var pureRoot = map[string]bool{
 	"codexmemory": true, "commitintent": true, "commitissuelink": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deepseekbench": true,
 	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "deploymanifest": true, "devexmeter": true,
-	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
+	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
 	"frontierswe": true, "fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
