@@ -28,7 +28,7 @@
       "canonical": "posture enum value (per-subsystem stance)",
       "family": "policy-capability",
       "kind": "config",
-      "definition": "These are named stance constants on different subsystems' Posture enums: resume's PostureCold/PostureWarm/PostureUnknown classify whether a session's provider prefix is still cache-warm, compactcohere's PostureBlock is the PreCompact-hook stance that exits 2 to block harness auto-compaction, and adjudicator's PostureFailClosed is the default-deny tool-admission stance.",
+      "definition": "These are named stance constants on different subsystems' Posture enums: resume's PostureCold/PostureWarm/PostureUnknown classify whether a session's provider prefix is still cache-warm, compactcohere's PostureBlock is the PreCompact-hook stance that exits 2 to block harness auto-compaction, and adjudicator's PostureFailClosed (default-deny) and PostureAdmitAndLog (admit low-risk reads with forensic metadata) are the two tool-admission stances.",
       "distinction": "Each is a single concrete enum VALUE on its subsystem's stance type, NOT the general tool-admission posture concept that selects fail-closed vs admit-and-log behavior.",
       "distinct_from": [
         "posture (tool admission)",
@@ -38,7 +38,8 @@
         "posturewarm",
         "postureunknown",
         "postureblock",
-        "posturefailclosed"
+        "posturefailclosed",
+        "postureadmitandlog"
       ],
       "grounding": "posturecold",
       "grounding_kind": "symbol",
