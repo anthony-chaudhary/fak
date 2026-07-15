@@ -660,6 +660,44 @@ func TestAdjudicateReversibilityTokenStableAcrossDescriptionDrift(t *testing.T) 
 	}
 }
 
+// TestAdjudicateReversibilityTokenStableAcrossCommandWhitespaceDrift is the
+// whitespace sibling of the description-drift runtime guard above (#2777). It
+// drives the FULL adjudicate path for an outward-facing git push whose COMMAND is
+// reflowed with cosmetic extra spaces between the refusal and the re-proposal. The
+// pure-function TestReversibilityConfirmTokenIgnoresCommandWhitespaceDrift cannot
+// catch a regression where a rung reorder or envelope change folds the verbatim
+// command back into the gated arg map ahead of normalization; this asserts the
+// gate-surfaced token is identical across the drift and that echoing the first
+// token under the reflowed command CONFIRMS instead of drawing a fresh refusal.
+func TestAdjudicateReversibilityTokenStableAcrossCommandWhitespaceDrift(t *testing.T) {
+	a := New(Policy{Allow: map[string]bool{"Bash": true}})
+	ctx := context.Background()
+
+	v1 := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"git push origin main"}`))
+	if v1.Kind != abi.VerdictRequireWitness {
+		t.Fatalf("git push not gated: got %v/%s, want REQUIRE_WITNESS", v1.Kind, abi.ReasonName(v1.Reason))
+	}
+	tok1 := v1.Meta["confirm_token"]
+	if tok1 == "" {
+		t.Fatalf("gate verdict carried no confirm_token: %+v", v1.Meta)
+	}
+
+	v2 := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"git   push    origin main"}`))
+	if v2.Kind != abi.VerdictRequireWitness {
+		t.Fatalf("reflowed re-proposal not gated: got %v/%s", v2.Kind, abi.ReasonName(v2.Reason))
+	}
+	if tok1 != v2.Meta["confirm_token"] {
+		t.Fatalf("confirm token rotated on command whitespace drift through the live adjudicate path: %q != %q", tok1, v2.Meta["confirm_token"])
+	}
+
+	// Echo the FIRST token under the REFLOWED command — the advertised recovery
+	// must converge to a confirmed dispatch, not a fresh refusal.
+	confirmed := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"git   push    origin main","`+ReversibilityConfirmArg+`":"`+tok1+`"}`))
+	if confirmed.Kind == abi.VerdictRequireWitness {
+		t.Fatalf("echoed token under a reflowed command did not confirm — the live loop is not fixed: %+v", confirmed)
+	}
+}
+
 func TestReversibilityPreviewRedactsSecrets(t *testing.T) {
 	env := ClassifyReversibility("Bash", map[string]any{
 		"command": "curl -X POST https://example.invalid -d api_key=secret123",
