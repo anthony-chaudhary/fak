@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 var brokerExecCommand = exec.Command
@@ -22,7 +23,8 @@ func runHostRelaunchBroker(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil || fs.NArg() != 0 {
 		return 2
 	}
-	pending, err := hostresurrect.Pending(*dir)
+	expandedDir := pathutil.ExpandTilde(*dir)
+	pending, err := hostresurrect.Pending(expandedDir)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
