@@ -526,9 +526,26 @@ func shortSHA(sha string) string {
 	return sha
 }
 
+// truncate mirrors the Python auditor's title[:80] (issue_closure_audit.py),
+// which slices by Unicode code point — so it cuts to the first n RUNES, not n
+// bytes. A byte slice (s[:n]) both diverges from that parity target on any
+// multibyte title and, worse, can split a multibyte rune (e.g. the em-dash "—",
+// 3 bytes, common in fak issue titles) into invalid UTF-8 in the emitted JSON.
+// truncate mirrors the Python auditor's title[:80] (issue_closure_audit.py),
+// which slices by Unicode code point — so it cuts to the first n RUNES, not n
+// bytes. A byte slice (s[:n]) both diverges from that parity target on any
+// multibyte title and, worse, can split a multibyte rune (e.g. the em-dash "—",
+// 3 bytes, common in fak issue titles) into invalid UTF-8 in the emitted JSON.
 func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	if n < 0 {
+		n = 0
+	}
+	runes := 0
+	for bytePos := range s {
+		if runes == n {
+			return s[:bytePos]
+		}
+		runes++
 	}
 	return s
 }

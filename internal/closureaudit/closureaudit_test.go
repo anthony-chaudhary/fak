@@ -2,7 +2,9 @@ package closureaudit
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestClassifyRefs(t *testing.T) {
@@ -93,6 +95,27 @@ func TestGradeBuckets(t *testing.T) {
 				t.Fatalf("Grade bucket = %s, want %s", g.Bucket, tc.want)
 			}
 		})
+	}
+}
+
+// TestGradeTitleTruncatesByRuneNotByte pins the title truncation to the Python
+// auditor's title[:80] (issue_closure_audit.py:424), which slices by Unicode
+// code point. A byte slice would cut the 80-byte boundary through the 3-byte
+// em-dash "—" that fak issue titles routinely use, emitting invalid UTF-8 into
+// the fleet-issue-closure-audit/1 payload and diverging from the Python parity
+// target. The title below is 82 runes / 88 bytes, so byte-truncation at 80 lands
+// mid-em-dash.
+func TestGradeTitleTruncatesByRuneNotByte(t *testing.T) {
+	title := strings.Repeat("a", 79) + "———" // 79 ASCII + three 3-byte em-dashes
+	g := Grade(Issue{Number: 1, State: "OPEN", Title: title}, nil, nil)
+
+	if !utf8.ValidString(g.Title) {
+		t.Fatalf("Grade title is not valid UTF-8: %q — byte truncation split a multibyte rune", g.Title)
+	}
+	want := string([]rune(title)[:80]) // the Python title[:80] code-point semantics
+	if g.Title != want {
+		t.Fatalf("Grade title = %q (%d bytes), want first-80-runes %q (%d bytes)",
+			g.Title, len(g.Title), want, len(want))
 	}
 }
 
