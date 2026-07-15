@@ -149,7 +149,7 @@ func compactWithGoalPin(raw []byte, elems []json.RawMessage, spans []elementSpan
 		}
 		shedTokens += len(elems[i]) / 4
 	}
-	if shedTokens -= compactStubTokenCost(dropped, "", ""); shedTokens < 0 {
+	if shedTokens -= compactStubTokenCost(dropped, "", "", "", ""); shedTokens < 0 {
 		shedTokens = 0
 	}
 	// Head-anchored economics gate — identical to CompactAnthropicHistoryWithOptions.
@@ -194,7 +194,7 @@ func spliceCompactedWithGoal(raw []byte, spans []elementSpan, pfxEnd, keepStart,
 	// Empty tombstone AND restore id: the goal pin already preserves the standing task verbatim, so
 	// the stub here stays the bare count sentinel (byte-identical to the pre-tombstone goal path) and
 	// mints no restore handle.
-	stubBytes, err := compactStubBytes(stubRole, dropped, "", "")
+	stubBytes, err := compactStubBytes(stubRole, dropped, "", "", "", "")
 	if err != nil {
 		return nil, false
 	}

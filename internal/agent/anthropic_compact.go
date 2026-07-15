@@ -154,6 +154,12 @@ type CompactOutcome struct {
 	RestoreID      string
 	RestoreExcerpt string
 	RestoreBytes   []byte
+
+	PositiveResidue        string
+	ResidueRestoreID       string
+	ResidueRestoreBytes    []byte
+	ResidueBytesDropped    int
+	PositiveAssertionsKept int
 }
 
 // CompactAnchor selects where the protected (verbatim-copied) prefix ends.
@@ -205,6 +211,9 @@ type CompactOptions struct {
 	// session horizon — the exact cold case #1407 says the lever was built for. Never set this
 	// from a guess: a false cold claim converts a warm cache read into a cold re-write.
 	ColdCache bool
+
+	// PositiveResidue opts into conservative positive-state extraction. It is off by default.
+	PositiveResidue bool
 	// MinHorizonMargin is the fed-back fire/bail threshold (#2817): the EXTRA predicted headroom,
 	// in future turns, the head-anchored burst must clear OVER its break-even before firing. The
 	// gate fires iff remainingTurns >= breakEven + MinHorizonMargin, so a positive margin bails the
@@ -461,6 +470,10 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	} else if len(taskBytes) > 0 {
 		restoreID = originatingTaskDigestID(taskBytes)
 	}
+	positiveResidue := positiveResidueResult{}
+	if opts.PositiveResidue {
+		positiveResidue = extractPositiveResidue(elems[pfxEnd+1 : keepStart])
+	}
 
 	// shedTokens: the estimated tokens removed from the outbound body — the sum over the dropped
 	// MIDDLE [pfxEnd+1, keepStart), minus the stub's own ~cost. Same ~4-chars/token currency as
@@ -470,7 +483,7 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	for i := pfxEnd + 1; i < keepStart; i++ {
 		shedTokens += len(elems[i]) / 4
 	}
-	if shedTokens -= compactStubTokenCost(dropped, tombstone, restoreID); shedTokens < 0 {
+	if shedTokens -= compactStubTokenCost(dropped, tombstone, restoreID, positiveResidue.Text, positiveResidue.RestoreID); shedTokens < 0 {
 		shedTokens = 0
 	}
 
@@ -505,7 +518,7 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
-	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole, tombstone, restoreID)
+	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole, tombstone, restoreID, positiveResidue.Text, positiveResidue.RestoreID)
 	// 5. Prove it: the spliced body must still decode AND keep the protected prefix bytes
 	//    intact, or we ship identity rather than a broken/cache-busting body.
 	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
@@ -514,6 +527,9 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	return out, CompactOutcome{
 		Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens,
 		RestoreID: restoreID, RestoreExcerpt: tombstone, RestoreBytes: taskBytes,
+		PositiveResidue: positiveResidue.Text, ResidueRestoreID: positiveResidue.RestoreID,
+		ResidueRestoreBytes: positiveResidue.RestoreBytes, ResidueBytesDropped: positiveResidue.DroppedBytes,
+		PositiveAssertionsKept: positiveResidue.AssertionsKept,
 	}
 }
 
@@ -1145,9 +1161,9 @@ func messageRole(el json.RawMessage) string {
 // drift from the bytes actually emitted. An empty tombstone yields the exact pre-tombstone text (the
 // byte-identical default); an empty restoreID (a bare byte-level caller with no CAS to back the
 // handle) yields the excerpt-only tombstone line.
-func compactStubContent(dropped int, tombstone, restoreID string) string {
+func compactStubContent(dropped int, tombstone, restoreID, positiveResidue, residueRestoreID string) string {
 	base := fmt.Sprintf("%s%d earlier turn(s) to stay within the context budget; their detail is omitted from this request.", compactStubPrefix, dropped)
-	if tombstone == "" {
+	if tombstone == "" && positiveResidue == "" {
 		return base
 	}
 	// The tombstone line: the orientation excerpt, plus — when the compaction path can back a
@@ -1155,18 +1171,28 @@ func compactStubContent(dropped int, tombstone, restoreID string) string {
 	// fak_context_restore to page the full task back in. The id rides INSIDE the tombstone line
 	// (before the excerpt) so a resuming model reads "what + how to recover" in one place and the
 	// stub stays a single low-volume, cache-untouched addition.
-	line := compactTombstonePrefix
-	if restoreID != "" {
-		line += compactRestoreIDField + restoreID + " "
+	if tombstone != "" {
+		line := compactTombstonePrefix
+		if restoreID != "" {
+			line += compactRestoreIDField + restoreID + " "
+		}
+		base += "\n" + line + strconv.Quote(tombstone)
 	}
-	return base + "\n" + line + strconv.Quote(tombstone)
+	if positiveResidue != "" {
+		line := "[fak] positive residual state: "
+		if residueRestoreID != "" {
+			line += "residue_id=" + residueRestoreID + " "
+		}
+		base += "\n" + line + positiveResidue
+	}
+	return base
 }
 
 // compactStubTokenCost estimates the synthetic stub message's own ~token cost (the same
 // ~4-chars/token basis the budget uses), so the reported shed is NET of the message we add
 // back. tombstone must be the SAME excerpt passed to the stub, so the estimate tracks the bytes.
-func compactStubTokenCost(dropped int, tombstone, restoreID string) int {
-	stub := compactStubContent(dropped, tombstone, restoreID)
+func compactStubTokenCost(dropped int, tombstone, restoreID, positiveResidue, residueRestoreID string) int {
+	stub := compactStubContent(dropped, tombstone, restoreID, positiveResidue, residueRestoreID)
 	return (len(stub) + len(`{"role":"assistant","content":""}`)) / 4
 }
 
@@ -1175,13 +1201,13 @@ func compactStubTokenCost(dropped int, tombstone, restoreID string) int {
 // (spliceCompactedWithGoal) so both emit a byte-identical stub for the same (role, count,
 // tombstone). tombstone is the bounded originating-task excerpt (empty on the goal path, where the
 // pin already preserves the task verbatim). An out-of-range stubRole falls back to "user".
-func compactStubBytes(stubRole string, dropped int, tombstone, restoreID string) ([]byte, error) {
+func compactStubBytes(stubRole string, dropped int, tombstone, restoreID, positiveResidue, residueRestoreID string) ([]byte, error) {
 	if stubRole != "user" && stubRole != "assistant" {
 		stubRole = "user"
 	}
 	return json.Marshal(map[string]any{
 		"role":    stubRole,
-		"content": compactStubContent(dropped, tombstone, restoreID),
+		"content": compactStubContent(dropped, tombstone, restoreID, positiveResidue, residueRestoreID),
 	})
 }
 
@@ -1292,8 +1318,8 @@ func truncateRunes(s string, limit int) string {
 // then the verbatim tail from the array close onward. It never re-serializes a protected or
 // kept element, so their bytes (and thus the cached prefix) are preserved exactly. ok is
 // false if the stub cannot be marshalled (it never realistically fails).
-func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, dropped int, stubRole, tombstone, restoreID string) ([]byte, bool) {
-	stubBytes, err := compactStubBytes(stubRole, dropped, tombstone, restoreID)
+func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, dropped int, stubRole, tombstone, restoreID, positiveResidue, residueRestoreID string) ([]byte, bool) {
+	stubBytes, err := compactStubBytes(stubRole, dropped, tombstone, restoreID, positiveResidue, residueRestoreID)
 	if err != nil {
 		return nil, false
 	}
