@@ -43,16 +43,19 @@ static std::unordered_map<size_t, std::vector<void *>> g_pool; // free buffers, 
 static std::unordered_map<void *, size_t> g_live;              // live ptr -> its byte size
 static std::unordered_map<void *, size_t> g_managed_live;      // live cudaMallocManaged ptr -> byte size
 
-// host-transfer witness (#482): cumulative device->host bytes. Every d2h copy adds to it — the
-// Read fence (fcuda_d2h) adds the vector bytes, the single token-id copy in fcuda_argmax_f32
-// adds sizeof(int) — so the Go-side async test can prove a greedy step pulls only the argmax id
-// host-ward, not the full logits vector. Monotonic; the test resets it around each step.
+// Host-transfer witnesses (#482/#4738): cumulative bytes in each direction. Every successful
+// h2d/d2h copy adds to its own counter so a whole-operation test can prove zero traffic in both
+// directions after initial upload. Monotonic; tests reset them around each measured step.
 static size_t g_host_bytes = 0;
+static size_t g_h2d_bytes = 0;
 
-// Whole-operation Qwen3.5/3.6 GDN witness (#4725). This counts successful
-// enqueues, not individual component kernels; the Go fixture reads it together
-// with g_host_bytes to prove one real recurrent operation ran without D2H staging.
+// Whole-operation Qwen3.5/3.6 GDN witness (#4725/#4738). This counts confirmed
+// completed operations, not enqueues; the Go fixture reads it together with both
+// transfer counters to prove one real recurrent operation ran without host staging.
 static size_t g_qwen35_gdn_operations = 0;
+// One-shot deterministic failure injection used only through the unexported Go test helper.
+// Stages 2..6 model a launch check failure; stage 7 models final async execution failure.
+static int g_qwen35_gdn_test_fault_stage = 0;
 
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
@@ -205,8 +208,16 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
     }
   }
 }
-extern "C" void fcuda_h2d(void *d, const void *h, size_t n) { CK(cudaMemcpy(d, h, n, cudaMemcpyHostToDevice)); }
-extern "C" void fcuda_d2h(void *h, const void *d, size_t n) { CK(cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost)); g_host_bytes += n; }
+extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
+  cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
+  if (e == cudaSuccess) g_h2d_bytes += n;
+  else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+}
+extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
+  cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
+  if (e == cudaSuccess) g_host_bytes += n;
+  else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+}
 // Device-to-device copies stay on the default stream but are ASYNC w.r.t. the host: a
 // synchronous cudaMemcpy fences the whole device, and RoPE + every KV append issues one,
 // so a 30-layer decode paid ~150 full device syncs per token (catastrophic on WSL, where a
@@ -245,13 +256,16 @@ extern "C" void fcuda_free_on(int device, void *d) {
 
 extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
   if (fcuda_set_device(device) != 0) return;
-  CK(cudaMemcpy(d, h, n, cudaMemcpyHostToDevice));
+  cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
+  if (e == cudaSuccess) g_h2d_bytes += n;
+  else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
 }
 
 extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
   if (fcuda_set_device(device) != 0) return;
-  CK(cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost));
-  g_host_bytes += n;
+  cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
+  if (e == cudaSuccess) g_host_bytes += n;
+  else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
 }
 
 extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
@@ -259,9 +273,11 @@ extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
   CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream));
 }
 
-// async host-transfer witness accessors (#482): see g_host_bytes above.
+// host-transfer witness accessors (#482/#4738): see g_host_bytes/g_h2d_bytes above.
 extern "C" size_t fcuda_hostxfer_bytes(void) { return g_host_bytes; }
 extern "C" void fcuda_hostxfer_reset(void) { g_host_bytes = 0; }
+extern "C" size_t fcuda_h2dxfer_bytes(void) { return g_h2d_bytes; }
+extern "C" void fcuda_h2dxfer_reset(void) { g_h2d_bytes = 0; }
 
 // ---- Qwen3.5/3.6 whole-operation Gated-DeltaNet decode (#4725) -----------------
 
@@ -324,9 +340,13 @@ __global__ void k_qwen35_gdn_conv_state(
   for (int j = 0; j < K - 1; j++) acc += cw[j] * convState[(size_t)j * convDim + c];
   acc += cw[K - 1] * mixed[c];
   convOut[c] = qwen35_gdn_silu(acc);
-  for (int j = 0; j < K - 2; j++)
-    convState[(size_t)j * convDim + c] = convState[(size_t)(j + 1) * convDim + c];
-  convState[(size_t)(K - 2) * convDim + c] = mixed[c];
+  // K==1 is a CPU-valid pointwise causal convolution with no history state.
+  // Do not form K-2 or touch the zero-capacity convState allocation in that case.
+  if (K > 1) {
+    for (int j = 0; j < K - 2; j++)
+      convState[(size_t)j * convDim + c] = convState[(size_t)(j + 1) * convDim + c];
+    convState[(size_t)(K - 2) * convDim + c] = mixed[c];
+  }
 }
 
 // Normalize each distinct q/k head once. q is additionally scaled by 1/sqrt(kHd),
@@ -438,10 +458,30 @@ static int qwen35_gdn_threads(int n) {
 }
 
 static int qwen35_gdn_launch_status(int stage) {
-  cudaError_t e = cudaPeekAtLastError();
+  // cudaGetLastError (not Peek) consumes this launch's status so a stale sticky
+  // value cannot be mistaken for a later stage. The deterministic test seam
+  // substitutes a launch error without poisoning the CUDA context.
+  cudaError_t e = cudaGetLastError();
+  if (g_qwen35_gdn_test_fault_stage == stage) {
+    g_qwen35_gdn_test_fault_stage = 0;
+    e = cudaErrorInvalidConfiguration;
+  }
   if (e == cudaSuccess) return 0;
   fprintf(stderr, "fak-cuda: Qwen3.5 GDN stage %d launch failed: %s\n", stage, cudaGetErrorString(e));
   return stage * 10000 + (int)e;
+}
+
+static int qwen35_gdn_drain_after_error(int status) {
+  // A later stage can fail to launch after earlier stages were enqueued. Drain
+  // those stages before returning so Go can safely invalidate/free their buffers.
+  cudaError_t e = cudaStreamSynchronize(g_stream);
+  if (e == cudaSuccess) return status;
+  fprintf(stderr, "fak-cuda: Qwen3.5 GDN drain after launch failure also failed: %s\n", cudaGetErrorString(e));
+  return 70000 + (int)e;
+}
+
+extern "C" void fcuda_qwen35_gdn_test_fault(int stage) {
+  g_qwen35_gdn_test_fault_stage = stage;
 }
 
 extern "C" int fcuda_qwen35_gdn_decode_f32(
@@ -456,7 +496,7 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   if (!dX || !dInQKV || !dInZ || !dInB || !dInA || !dConvW || !dALog ||
       !dDtBias || !dNorm || !dOutW || !dConvState || !dRecurrentState || !dOut ||
       !dMixed || !dZ || !dB || !dA || !dConvOut || !dQNorm || !dKNorm || !dCore ||
-      hidden <= 0 || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 || convKernel < 2 ||
+      hidden <= 0 || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 || convKernel < 1 ||
       nV % nK != 0 || kHd > 1024 || vHd > 1024 || !(rmsEps > 0.0f) || !isfinite(rmsEps))
     return -1;
   long long keyDim64 = (long long)nK * kHd;
@@ -468,36 +508,51 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   int valueDim = (int)valueDim64;
   int convDim = (int)convDim64;
 
-  int prior = qwen35_gdn_launch_status(1);
-  if (prior != 0) return prior;
+  // Clear and surface stale launch state before adding any new work. If the
+  // prior stream is still busy, synchronize it before returning the refusal.
+  cudaError_t stale = cudaGetLastError();
+  if (stale != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN preflight found stale CUDA status: %s\n", cudaGetErrorString(stale));
+    return qwen35_gdn_drain_after_error(10000 + (int)stale);
+  }
   k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
       dX, dInQKV, dInZ, dInB, dInA, dMixed, dZ, dB, dA,
       hidden, convDim, valueDim, nV);
   int status = qwen35_gdn_launch_status(2);
-  if (status != 0) return status;
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
 
-  k_qwen35_gdn_conv_state<<<(convDim + 255) / 256, 256, 0, g_stream>>>(
+  unsigned int convBlocks = (unsigned int)(((unsigned long long)convDim + 255ULL) / 256ULL);
+  k_qwen35_gdn_conv_state<<<convBlocks, 256, 0, g_stream>>>(
       dMixed, dConvW, dConvState, dConvOut, convDim, convKernel);
   status = qwen35_gdn_launch_status(3);
-  if (status != 0) return status;
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   int qThreads = qwen35_gdn_threads(kHd);
   k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
       dConvOut, dQNorm, dKNorm, nK, kHd);
   status = qwen35_gdn_launch_status(4);
-  if (status != 0) return status;
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   int vThreads = qwen35_gdn_threads(vHd);
   k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
       dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
       dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps);
   status = qwen35_gdn_launch_status(5);
-  if (status != 0) return status;
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(dOutW, dCore, dOut, hidden, valueDim);
   status = qwen35_gdn_launch_status(6);
-  if (status != 0) return status;
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
 
+  cudaError_t completed = cudaStreamSynchronize(g_stream);
+  if (g_qwen35_gdn_test_fault_stage == 7) {
+    g_qwen35_gdn_test_fault_stage = 0;
+    completed = cudaErrorLaunchFailure;
+  }
+  if (completed != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN asynchronous execution failed: %s\n", cudaGetErrorString(completed));
+    return 70000 + (int)completed;
+  }
   g_qwen35_gdn_operations++;
   return 0;
 }

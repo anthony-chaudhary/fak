@@ -31,7 +31,6 @@ import "C"
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -135,6 +134,7 @@ var cudaDev *cudaBackend
 type cudaBuf struct {
 	ptr     unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
 	n       int            // bytes at ptr
+	class   MemoryClass    // allocation purpose retained for strict mutable-state validation
 	device  int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
 	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
 	hostDt  Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
@@ -142,6 +142,10 @@ type cudaBuf struct {
 	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
 	bornGen uint64         // fence generation in which this async buffer was enqueued
 	managed bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
+	// invalid is set when an in-place Qwen GDN operation reports a launch or
+	// asynchronous execution failure. Such a buffer may be freed, but never read
+	// or submitted again as a usable state/output.
+	invalid uint32
 	// budgetedWeightBytes/managedWeight account only explicit resident WEIGHT buffers (F16/Q8/Q4K
 	// uploads). Generic F32 Upload is also used for per-token inputs, so it stays outside this budget.
 	budgetedWeightBytes int64
@@ -166,6 +170,9 @@ func (b *cudaBuf) residentBytes() int { return b.n + b.scalesN }
 // device-resident mid-step (#482) — it never gates device execution, which is stream-ordered.
 func (b *cudaBuf) Ready() bool {
 	if b == nil {
+		return false
+	}
+	if atomic.LoadUint32(&b.invalid) != 0 {
 		return false
 	}
 	if b.be == nil {
@@ -400,9 +407,22 @@ func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *c
 			// recover it into an actionable error instead of crashing the serving goroutine.
 			panic(&DeviceAllocError{Bytes: nbytes, Site: site, Class: class})
 		}
-		return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
+		return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class, managed: true}
 	}
-	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes}
+	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class}
+}
+
+// dallocDeviceOnlyClass is the strict allocator used by the whole-operation
+// GDN path. General CUDA operations may fall back to managed memory after a
+// device allocation miss; this path must instead return a typed refusal because
+// UVM migration would invalidate its device-residency/zero-transfer contract.
+// Caller holds cudaMu.
+func (c *cudaBackend) dallocDeviceOnlyClass(nbytes int, class MemoryClass, site string) (*cudaBuf, error) {
+	p := C.fcuda_malloc(C.size_t(nbytes))
+	if p == nil {
+		return nil, &Qwen35GDNAllocationError{Operand: site, Bytes: nbytes}
+	}
+	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class}, nil
 }
 
 // dallocManagedClass allocates directly from cudaMallocManaged. Used by the residency-budget
@@ -412,7 +432,7 @@ func (c *cudaBackend) dallocManagedClass(nbytes int, class MemoryClass, site str
 	if p == nil {
 		panic(&DeviceAllocError{Bytes: nbytes, Site: site, Class: class})
 	}
-	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
+	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class, managed: true}
 }
 
 // dallocWeight places an explicit weight buffer device-local while under the residency budget,
@@ -447,7 +467,10 @@ func (c *cudaBackend) dev(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 	for _, d := range shape {
 		n *= d
 	}
-	buf := c.dalloc(n * dt.Bytes())
+	// dev is currently used only by the ordinary F32 weight-upload path.
+	// Preserve that allocation class on cudaBuf so strict consumers do not have
+	// to infer mutability/lifetime from shape or cache membership.
+	buf := c.dallocClass(n*dt.Bytes(), MemoryWeights, "f32-weight")
 	return makeTensor(c, dt, RowMajor, append([]int(nil), shape...), nil, buf), buf
 }
 
@@ -467,6 +490,25 @@ func (c *cudaBackend) devTr(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 	b.bornGen = atomic.LoadUint64(&c.fenceGen)
 	c.transient = append(c.transient, b)
 	return t, b
+}
+
+// devTrDeviceOnly is the strict GDN scratch/output counterpart of devTr. It
+// performs checked byte arithmetic and never substitutes cudaMallocManaged.
+// Caller holds cudaMu.
+func (c *cudaBackend) devTrDeviceOnly(shape []int, dt Dtype, site string) (Tensor, *cudaBuf, error) {
+	nbytes, ok := qwen35GDNShapeBytes(shape, dt.Bytes())
+	if !ok {
+		return Tensor{}, nil, &Qwen35GDNGeometryError{Operand: site, Reason: "shape byte size overflows host allocation capacity"}
+	}
+	b, err := c.dallocDeviceOnlyClass(nbytes, MemoryScratchpad, site)
+	if err != nil {
+		return Tensor{}, nil, err
+	}
+	t := makeTensor(c, dt, RowMajor, append([]int(nil), shape...), nil, b)
+	b.be = c
+	b.bornGen = atomic.LoadUint64(&c.fenceGen)
+	c.transient = append(c.transient, b)
+	return t, b, nil
 }
 
 // devF16 is dev() for an F16-resident weight: an out*in*2-byte VRAM buffer carrying the
@@ -761,6 +803,9 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 		return hb.f32 // host-resident: nothing crosses the bus and no device work is fenced
 	}
 	db := t.buf.(*cudaBuf)
+	if atomic.LoadUint32(&db.invalid) != 0 {
+		panic(&Qwen35GDNInvalidStateError{Operand: "buffer"})
+	}
 	out := make([]float32, t.Numel())
 	if len(out) > 0 {
 		if db.device != 0 {
@@ -811,11 +856,23 @@ func (c *cudaBackend) Free(t Tensor) {
 
 // ---- primitives -----------------------------------------------------------------
 
-func (c *cudaBackend) cf(t Tensor) *C.float { return (*C.float)(t.buf.(*cudaBuf).ptr) }
+func (c *cudaBackend) cf(t Tensor) *C.float {
+	b := t.buf.(*cudaBuf)
+	if atomic.LoadUint32(&b.invalid) != 0 {
+		panic(&Qwen35GDNInvalidStateError{Operand: "buffer"})
+	}
+	return (*C.float)(b.ptr)
+}
 
 // cptr is the raw device pointer (void*), for dtypes whose element type is not *C.float — the
 // F16 weight buffer (__half) the HGEMM path reads.
-func (c *cudaBackend) cptr(t Tensor) unsafe.Pointer { return t.buf.(*cudaBuf).ptr }
+func (c *cudaBackend) cptr(t Tensor) unsafe.Pointer {
+	b := t.buf.(*cudaBuf)
+	if atomic.LoadUint32(&b.invalid) != 0 {
+		panic(&Qwen35GDNInvalidStateError{Operand: "buffer"})
+	}
+	return b.ptr
+}
 
 // colMajorFlag reports w's HGEMM layout selector: 1 when the weight was transpose-repacked to
 // column-major at H2D (op_N), 0 for the row-major SGEMM recipe (op_T).
@@ -1067,9 +1124,32 @@ func (c *cudaBackend) Argmax(logits Tensor) int {
 // adds the vector's bytes, while fcuda_argmax_f32 adds only sizeof(int). So over an Argmax-only
 // decode step it reads the size of one token id, whereas a full-logits Read reads vocab*4 —
 // the seam the witness test reads to prove only the argmax id crosses the bus per token.
-// ResetHostXfer zeroes it. These are used only by the -tags cuda witness/benchmarks.
-func (c *cudaBackend) HostXferBytes() uint64 { return uint64(C.fcuda_hostxfer_bytes()) }
-func (c *cudaBackend) ResetHostXfer()        { C.fcuda_hostxfer_reset() }
+// ResetHostXfer zeroes it. H2DXferBytes/ResetH2DXfer are the independent
+// host->device half of the same witness. Access and reset are serialized with
+// device work so a measured interval cannot race an upload or proof read.
+func (c *cudaBackend) HostXferBytes() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_hostxfer_bytes())
+}
+
+func (c *cudaBackend) ResetHostXfer() {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_hostxfer_reset()
+}
+
+func (c *cudaBackend) H2DXferBytes() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_h2dxfer_bytes())
+}
+
+func (c *cudaBackend) ResetH2DXfer() {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_h2dxfer_reset()
+}
 
 // ---- Qwen3.5/3.6 Gated-DeltaNet whole-operation decode (#4725) -----------------
 
@@ -1078,10 +1158,11 @@ func (c *cudaBackend) ResetHostXfer()        { C.fcuda_hostxfer_reset() }
 // returns the cycle-free constant declared beside the typed refusals.
 func (c *cudaBackend) Qwen35GDNPath() string { return Qwen35GDNCUDAPath }
 
-// Qwen35GDNOperationCount reports successful whole GDN operations enqueued since
-// the last reset. It is a device-path witness, not a performance estimate: the
-// deterministic CUDA fixture pairs it with HostXferBytes to prove the measured
-// call ran and did not stage an intermediate through the host.
+// Qwen35GDNOperationCount reports successful whole GDN operations completed since
+// the last reset. The C ABI increments only after cudaStreamSynchronize confirms
+// every stage executed successfully. It is a device-path witness, not a
+// performance estimate: the deterministic CUDA fixture pairs it with both H2D
+// and D2H counters to prove the measured call ran wholly on device.
 func (c *cudaBackend) Qwen35GDNOperationCount() uint64 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -1092,6 +1173,16 @@ func (c *cudaBackend) ResetQwen35GDNOperationCount() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	C.fcuda_qwen35_gdn_operations_reset()
+}
+
+// qwen35GDNInjectFaultForTest arms a one-shot deterministic C-side failure at a
+// launch stage (2..6) or at final synchronization (7). It is intentionally
+// unexported: only package-local -tags cuda tests can exercise the fail-closed
+// path, while the production Go API exposes no fault knob.
+func qwen35GDNInjectFaultForTest(stage int) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_qwen35_gdn_test_fault(C.int(stage))
 }
 
 // Qwen35GDNDecode executes one complete recurrent linear-attention token mixer:
@@ -1132,26 +1223,43 @@ func (c *cudaBackend) Qwen35GDNDecode(
 		{"norm", norm}, {"out_proj", outProj},
 		{"conv_state", convState}, {"recurrent_state", recurrentState},
 	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
 	for _, operand := range operands {
 		if err := c.validateQwen35GDNTensor(operand.name, operand.t); err != nil {
 			return Tensor{}, Tensor{}, Tensor{}, err
 		}
 	}
+	if err := c.validateQwen35GDNStateOperands(operands, convState, recurrentState); err != nil {
+		return Tensor{}, Tensor{}, Tensor{}, err
+	}
 
-	cudaMu.Lock()
-	defer cudaMu.Unlock()
-
-	// All scratch is device-resident and lives until the token-boundary Recycle,
-	// so the single CUDA stream can consume every intermediate asynchronously.
-	mixed, _ := c.devTr([]int{convDim}, F32)
-	z, _ := c.devTr([]int{valueDim}, F32)
-	b, _ := c.devTr([]int{numValueHeads}, F32)
-	a, _ := c.devTr([]int{numValueHeads}, F32)
-	convOut, _ := c.devTr([]int{convDim}, F32)
-	qNorm, _ := c.devTr([]int{keyDim}, F32)
-	kNorm, _ := c.devTr([]int{keyDim}, F32)
-	core, _ := c.devTr([]int{valueDim}, F32)
-	output, _ = c.devTr([]int{hidden}, F32)
+	// All scratch/output must be cudaMalloc-backed device memory. The general
+	// allocator's managed-memory fallback is deliberately not available here.
+	type strictAllocation struct {
+		name  string
+		shape []int
+	}
+	allocations := []strictAllocation{
+		{"mixed", []int{convDim}}, {"z", []int{valueDim}},
+		{"b", []int{numValueHeads}}, {"a", []int{numValueHeads}},
+		{"conv_out", []int{convDim}}, {"q_norm", []int{keyDim}},
+		{"k_norm", []int{keyDim}}, {"core", []int{valueDim}},
+		{"output", []int{hidden}},
+	}
+	strictTensors := make([]Tensor, 0, len(allocations))
+	strictBuffers := make([]*cudaBuf, 0, len(allocations))
+	for _, allocation := range allocations {
+		tensor, buffer, allocErr := c.devTrDeviceOnly(allocation.shape, F32, "qwen35-gdn-"+allocation.name)
+		if allocErr != nil {
+			return Tensor{}, Tensor{}, Tensor{}, allocErr
+		}
+		strictTensors = append(strictTensors, tensor)
+		strictBuffers = append(strictBuffers, buffer)
+	}
+	mixed, z, b, a := strictTensors[0], strictTensors[1], strictTensors[2], strictTensors[3]
+	convOut, qNorm, kNorm, core := strictTensors[4], strictTensors[5], strictTensors[6], strictTensors[7]
+	output = strictTensors[8]
 
 	status := int(C.fcuda_qwen35_gdn_decode_f32(
 		c.cf(normalizedInput),
@@ -1165,11 +1273,23 @@ func (c *cudaBackend) Qwen35GDNDecode(
 		C.float(rmsNormEpsilon),
 	))
 	if status != 0 {
+		// The ABI drains the stream before returning any launch error and fences
+		// once at the end to surface asynchronous execution errors. A failed
+		// in-place update may therefore be partial: invalidate both mutable states
+		// plus all outputs/scratch so no caller can observe or reuse them as valid.
+		for _, buffer := range strictBuffers {
+			atomic.StoreUint32(&buffer.invalid, 1)
+		}
+		atomic.StoreUint32(&convState.buf.(*cudaBuf).invalid, 1)
+		atomic.StoreUint32(&recurrentState.buf.(*cudaBuf).invalid, 1)
 		return Tensor{}, Tensor{}, Tensor{}, &Qwen35GDNKernelError{
 			Stage: qwen35GDNKernelStage(status),
 			Code:  status,
 		}
 	}
+	// fcuda_qwen35_gdn_decode_f32 synchronized g_stream successfully. Record the
+	// host fence so this output and any earlier stream-ordered outputs become Ready.
+	atomic.AddUint64(&c.fenceGen, 1)
 	return output, convState, recurrentState, nil
 }
 
@@ -1187,110 +1307,56 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 	if !ok || buf == nil || buf.ptr == nil {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor has no live CUDA allocation (Upload is required before the operation)"}
 	}
+	if atomic.LoadUint32(&buf.invalid) != 0 {
+		return &Qwen35GDNInvalidStateError{Operand: name}
+	}
 	if buf.device != 0 {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is resident on a non-default CUDA device"}
+	}
+	if buf.managed {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "managed memory is forbidden; strict whole-operation operands must be device-only"}
+	}
+	required, ok := qwen35GDNShapeBytes(t.Shape, F32.Bytes())
+	if !ok {
+		return &Qwen35GDNGeometryError{Operand: name, Reason: "shape byte size overflows host allocation capacity"}
+	}
+	if buf.n < required {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: fmt.Sprintf("CUDA allocation capacity is %d bytes, shape requires %d", buf.n, required)}
 	}
 	return nil
 }
 
-func validateQwen35GDNGeometry(
-	normalizedInput,
-	inProjQKV, inProjZ, inProjB, inProjA,
-	conv1D, aLog, dtBias, norm, outProj,
-	convState, recurrentState Tensor,
-	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
-	rmsNormEpsilon float32,
-) (hidden, keyDim, valueDim, convDim int, err error) {
-	if len(normalizedInput.Shape) != 1 || normalizedInput.Shape[0] <= 0 {
-		return 0, 0, 0, 0, qwen35GDNShapeError("normalized_input", normalizedInput.Shape, "[hidden], hidden > 0")
+func (c *cudaBackend) validateQwen35GDNStateOperands(operands []struct {
+	name string
+	t    Tensor
+}, convState, recurrentState Tensor) error {
+	convBuf := convState.buf.(*cudaBuf)
+	recurrentBuf := recurrentState.buf.(*cudaBuf)
+	states := []struct {
+		name   string
+		buffer *cudaBuf
+	}{
+		{"conv_state", convBuf},
+		{"recurrent_state", recurrentBuf},
 	}
-	hidden = normalizedInput.Shape[0]
-	if numKeyHeads <= 0 || numValueHeads <= 0 || keyHeadDim <= 0 || valueHeadDim <= 0 || convKernel < 2 {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "head counts/dimensions must be positive and conv_kernel must be >= 2"}
-	}
-	if numValueHeads%numKeyHeads != 0 {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "num_value_heads must be divisible by num_key_heads"}
-	}
-	if keyHeadDim > 1024 || valueHeadDim > 1024 {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "key/value head dimensions must fit one CUDA block (<= 1024)"}
-	}
-	if !(rmsNormEpsilon > 0) || math.IsInf(float64(rmsNormEpsilon), 0) {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "rms_norm_epsilon", Reason: "epsilon must be finite and > 0"}
-	}
-	const maxCInt = int64(1<<31 - 1)
-	for _, d := range []int{hidden, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel} {
-		if int64(d) > maxCInt {
-			return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "a scalar dimension overflows the CUDA int ABI"}
-		}
-	}
-	if int64(numKeyHeads) > maxCInt/int64(keyHeadDim) || int64(numValueHeads) > maxCInt/int64(valueHeadDim) {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "derived dimensions overflow the CUDA int ABI"}
-	}
-	key64 := int64(numKeyHeads) * int64(keyHeadDim)
-	value64 := int64(numValueHeads) * int64(valueHeadDim)
-	if key64 > (maxCInt-value64)/2 {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "derived dimensions overflow the CUDA int ABI"}
-	}
-	conv64 := 2*key64 + value64
-	if int64(convKernel) > maxCInt/conv64 || int64(convKernel-1) > maxCInt/conv64 ||
-		int64(hidden) > maxCInt/conv64 || int64(hidden) > maxCInt/value64 ||
-		int64(hidden) > maxCInt/int64(numValueHeads) ||
-		int64(numValueHeads) > maxCInt/int64(keyHeadDim) ||
-		int64(numValueHeads)*int64(keyHeadDim) > maxCInt/int64(valueHeadDim) {
-		return 0, 0, 0, 0, &Qwen35GDNGeometryError{Operand: "geometry", Reason: "weight/state element count overflows the CUDA int ABI"}
-	}
-	keyDim, valueDim, convDim = int(key64), int(value64), int(conv64)
-
-	require := func(name string, t Tensor, shapes ...[]int) error {
-		for _, shape := range shapes {
-			if qwen35GDNSameShape(t.Shape, shape) {
-				return nil
+	for _, state := range states {
+		if state.buffer.class != MemoryKVCache {
+			return &Qwen35GDNResidencyError{
+				Operand: state.name,
+				Reason:  fmt.Sprintf("mutable state allocation class is %q, want %q for durable in-place state", state.buffer.class, MemoryKVCache),
 			}
 		}
-		want := ""
-		for i, shape := range shapes {
-			if i > 0 {
-				want += " or "
-			}
-			want += fmt.Sprint(shape)
-		}
-		return qwen35GDNShapeError(name, t.Shape, want)
 	}
-	checks := []error{
-		require("in_proj_qkv", inProjQKV, []int{convDim, hidden}),
-		require("in_proj_z", inProjZ, []int{valueDim, hidden}),
-		require("in_proj_b", inProjB, []int{numValueHeads, hidden}),
-		require("in_proj_a", inProjA, []int{numValueHeads, hidden}),
-		require("conv1d", conv1D, []int{convDim, convKernel}, []int{convDim, 1, convKernel}, []int{convDim * convKernel}),
-		require("A_log", aLog, []int{numValueHeads}),
-		require("dt_bias", dtBias, []int{numValueHeads}),
-		require("norm", norm, []int{valueHeadDim}),
-		require("out_proj", outProj, []int{hidden, valueDim}),
-		require("conv_state", convState, []int{convKernel - 1, convDim}),
-		require("recurrent_state", recurrentState, []int{numValueHeads, keyHeadDim, valueHeadDim}),
+	if convBuf.ptr == recurrentBuf.ptr {
+		return &Qwen35GDNResidencyError{Operand: "state", Reason: "conv_state and recurrent_state alias the same CUDA allocation"}
 	}
-	for _, check := range checks {
-		if check != nil {
-			return 0, 0, 0, 0, check
+	for _, operand := range operands[:len(operands)-2] {
+		readOnly := operand.t.buf.(*cudaBuf)
+		if readOnly.ptr == convBuf.ptr || readOnly.ptr == recurrentBuf.ptr {
+			return &Qwen35GDNResidencyError{Operand: operand.name, Reason: "read-only operand aliases mutable GDN state"}
 		}
 	}
-	return hidden, keyDim, valueDim, convDim, nil
-}
-
-func qwen35GDNSameShape(got, want []int) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func qwen35GDNShapeError(name string, got []int, want string) error {
-	return &Qwen35GDNGeometryError{Operand: name, Got: append([]int(nil), got...), Want: want}
+	return nil
 }
 
 func qwen35GDNKernelStage(status int) string {
@@ -1310,6 +1376,8 @@ func qwen35GDNKernelStage(status int) string {
 		return "recurrent-gated-norm"
 	case 6:
 		return "output-projection"
+	case 7:
+		return "stream-synchronize"
 	default:
 		return "unknown"
 	}
@@ -1481,7 +1549,7 @@ func (k *cudaKV) Pos() []int { return append([]int(nil), k.pos...) }
 func (k *cudaKV) KeysView(layer int) Tensor {
 	w := k.stride()
 	n := k.K[layer].len / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4})
+	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4, class: MemoryKVCache})
 }
 
 // ValuesView returns a device handle onto the layer's cached values as a flat [pos, nKV*hd]
@@ -1489,7 +1557,7 @@ func (k *cudaKV) KeysView(layer int) Tensor {
 func (k *cudaKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := k.V[layer].len / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4})
+	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4, class: MemoryKVCache})
 }
 
 // Evict compacts the cache ON-GPU — no host round-trip (#479). For every layer it shifts

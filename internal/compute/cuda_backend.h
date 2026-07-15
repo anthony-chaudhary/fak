@@ -48,13 +48,16 @@ void fcuda_h2d_on(int device, void *d, const void *h, size_t bytes);
 void fcuda_d2h_on(int device, void *h, const void *d, size_t bytes);
 void fcuda_d2d_on(int device, void *dst, const void *src, size_t bytes);
 
-/* async host-transfer witness (#482): cumulative bytes copied device->host since the last
- * reset. The two host fences are the only d2h transfers and both add to it — fcuda_d2h (a
- * full Read) adds the vector bytes, fcuda_argmax_f32 adds only sizeof(int) — so an Argmax-only
- * decode step reads sizeof(int) here while a full-logits Read reads vocab*4. That is the
- * witness that greedy decode pulls only the token id across the bus, never the logits vector. */
+/* Host-transfer witnesses (#482/#4738): independent cumulative byte counts in each
+ * direction. The two host fences are the only d2h transfers and both add to the D2H
+ * counter — fcuda_d2h (a full Read) adds vector bytes, fcuda_argmax_f32 adds only
+ * sizeof(int). Every successful fcuda_h2d/fcuda_h2d_on copy adds to H2D. Separate
+ * reset/accessors let a whole-operation fixture prove neither direction moved inside
+ * its measured interval. */
 size_t fcuda_hostxfer_bytes(void);
 void fcuda_hostxfer_reset(void);
+size_t fcuda_h2dxfer_bytes(void);
+void fcuda_h2dxfer_reset(void);
 
 /* Qwen3.5/3.6 Gated-DeltaNet decode, one complete recurrent token-mixer operation.
  * Every pointer is already resident f32 device memory. The operation launches, in order:
@@ -63,8 +66,12 @@ void fcuda_hostxfer_reset(void);
  * fused with gated RMSNorm, and the output GEMV. conv_state [(K-1),convDim] and
  * recurrent_state [nV,kHd,vHd] are updated in place; out [hidden] remains resident.
  * Scratch buffers are caller-owned device allocations. No host pointer/copy or generic
- * attention primitive occurs inside this ABI. Returns 0 after all stages enqueue, or a
- * stage-coded non-zero CUDA launch error; invalid ABI arguments return -1. */
+ * attention primitive occurs inside this ABI. The function clears stale launch status,
+ * checks every launch, drains already-enqueued work before returning an early error,
+ * and finally synchronizes g_stream so asynchronous execution faults propagate. Returns
+ * 0 only after confirmed completion; invalid ABI arguments return -1 and stage-coded
+ * CUDA launch/execution errors are non-zero. Any non-zero result invalidates dOut and
+ * both in-place state buffers at the Go boundary. */
 int fcuda_qwen35_gdn_decode_f32(
     const float *dX,
     const float *dInQKV, const float *dInZ, const float *dInB, const float *dInA,
@@ -76,9 +83,14 @@ int fcuda_qwen35_gdn_decode_f32(
     int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
 
 /* Whole-operation execution witness. The counter increments once only after every GDN
- * stage above has enqueued without an immediate CUDA launch error. */
+ * stage above has completed and final stream synchronization succeeds. */
 size_t fcuda_qwen35_gdn_operations(void);
 void fcuda_qwen35_gdn_operations_reset(void);
+
+/* One-shot deterministic fault seam for package-local -tags cuda tests. stage 2..6
+ * simulates that launch check failing (after draining queued work); stage 7 simulates
+ * final asynchronous execution failure. Production Go APIs do not expose this knob. */
+void fcuda_qwen35_gdn_test_fault(int stage);
 
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
 void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P);

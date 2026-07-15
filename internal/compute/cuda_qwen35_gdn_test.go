@@ -1,337 +1,389 @@
 //go:build cuda
 
-package compute_test
+package compute
 
 import (
 	"errors"
 	"math"
 	"os"
+	"strings"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/compute"
-	"github.com/anthony-chaudhary/fak/internal/model"
+	"unsafe"
 )
 
-// Set FAK_CUDA_GDN_REQUIRED=1 on a hardware acceptance node. In that mode a
-// missing device/backend is a hard failure rather than a skip, so a skipped run
-// can never be mistaken for #4725 closure evidence.
+// Set FAK_CUDA_GDN_REQUIRED=1 on a hardware acceptance node. In required mode
+// absence of the exact CUDA backend is a hard failure, never a skip or cpu-ref
+// substitution.
 const cudaGDNRequiredEnv = "FAK_CUDA_GDN_REQUIRED"
 
-type cudaGDNWitnessBackend interface {
-	compute.Backend
-	model.Qwen35GDNBackend
-	HostXferBytes() uint64
-	ResetHostXfer()
-	Qwen35GDNOperationCount() uint64
-	ResetQwen35GDNOperationCount()
-	Recycle()
-}
-
-func cudaGDNBackend(t *testing.T) cudaGDNWitnessBackend {
+func cudaGDNBackend(t *testing.T) *cudaBackend {
 	t.Helper()
-	be := compute.Pick("cuda")
-	if be == nil {
+	be, ok := Lookup("cuda")
+	if !ok || be == nil || be.Name() != "cuda" {
 		if os.Getenv(cudaGDNRequiredEnv) == "1" {
-			t.Fatalf("%s=1: real CUDA GDN fixture required, but backend cuda is not registered", cudaGDNRequiredEnv)
+			t.Fatalf("%s=1: real CUDA GDN fixture required, but exact backend cuda is not registered", cudaGDNRequiredEnv)
 		}
-		t.Skip("cuda backend not registered (set FAK_CUDA_GDN_REQUIRED=1 on the acceptance node to fail rather than skip)")
+		t.Skip("exact cuda backend not registered (set FAK_CUDA_GDN_REQUIRED=1 on an acceptance node to fail rather than skip)")
 	}
-	gdn, ok := be.(cudaGDNWitnessBackend)
+	cuda, ok := be.(*cudaBackend)
 	if !ok {
-		t.Fatalf("registered cuda backend %T does not structurally implement model.Qwen35GDNBackend plus witness counters", be)
+		t.Fatalf("registered cuda backend has unexpected concrete type %T", be)
 	}
-	return gdn
+	return cuda
 }
 
-type gdnFixtureGeometry struct {
+type cudaGDNGeometry struct {
 	hidden, nK, nV, kHd, vHd, kernel int
 	eps                              float32
 }
 
-func (g gdnFixtureGeometry) keyDim() int   { return g.nK * g.kHd }
-func (g gdnFixtureGeometry) valueDim() int { return g.nV * g.vHd }
-func (g gdnFixtureGeometry) convDim() int  { return 2*g.keyDim() + g.valueDim() }
+func (g cudaGDNGeometry) keyDim() int   { return g.nK * g.kHd }
+func (g cudaGDNGeometry) valueDim() int { return g.nV * g.vHd }
+func (g cudaGDNGeometry) convDim() int  { return 2*g.keyDim() + g.valueDim() }
 
-type gdnFixtureData struct {
-	x, inQKV, inZ, inB, inA         []float32
-	convW, aLog, dtBias, norm       []float32
-	outW, convState, recurrentState []float32
+type cudaGDNOperands struct {
+	x, inQKV, inZ, inB, inA         Tensor
+	convW, aLog, dtBias, norm       Tensor
+	outW, convState, recurrentState Tensor
 }
 
-type gdnLCG uint64
+type cudaGDNLCG uint64
 
-func (r *gdnLCG) next(scale float32) float32 {
-	*r = *r*6364136223846793005 + 1442695040888963407
-	v := float32(uint32(*r>>32))/float32(uint64(1)<<32) - 0.5
-	return v * scale
-}
-
-func gdnVector(r *gdnLCG, n int, scale float32) []float32 {
+func (r *cudaGDNLCG) vector(n int, scale float32) []float32 {
 	out := make([]float32, n)
 	for i := range out {
-		out[i] = r.next(scale)
+		*r = *r*6364136223846793005 + 1442695040888963407
+		out[i] = (float32(uint32(*r>>32))/float32(uint64(1)<<32) - 0.5) * scale
 	}
 	return out
 }
 
-func newGDNFixtureData(g gdnFixtureGeometry) *gdnFixtureData {
-	r := gdnLCG(0x4725c0da)
-	d := &gdnFixtureData{
-		x:              gdnVector(&r, g.hidden, 1.0),
-		inQKV:          gdnVector(&r, g.convDim()*g.hidden, 0.24),
-		inZ:            gdnVector(&r, g.valueDim()*g.hidden, 0.20),
-		inB:            gdnVector(&r, g.nV*g.hidden, 0.16),
-		inA:            gdnVector(&r, g.nV*g.hidden, 0.12),
-		convW:          gdnVector(&r, g.convDim()*g.kernel, 0.35),
-		aLog:           gdnVector(&r, g.nV, 0.8),
-		dtBias:         gdnVector(&r, g.nV, 0.6),
-		norm:           gdnVector(&r, g.vHd, 0.16),
-		outW:           gdnVector(&r, g.hidden*g.valueDim(), 0.22),
-		convState:      gdnVector(&r, (g.kernel-1)*g.convDim(), 0.18),
-		recurrentState: gdnVector(&r, g.nV*g.kHd*g.vHd, 0.10),
-	}
-	for i := range d.norm {
-		d.norm[i] += 1
-	}
-	for i := range d.aLog {
-		d.aLog[i] -= 0.7 // realistic positive A=exp(A_log), with a stable sub-unit decay.
-	}
-	return d
-}
-
-func gdnMatVec(w, x []float32, out, in int) []float32 {
-	y := make([]float32, out)
-	for o := 0; o < out; o++ {
-		var sum float32
-		for i := 0; i < in; i++ {
-			sum += w[o*in+i] * x[i]
-		}
-		y[o] = sum
-	}
-	return y
-}
-
-func gdnSilu(x float32) float32 { return x / (1 + float32(math.Exp(float64(-x)))) }
-
-func gdnSoftplus(x float32) float32 {
-	if x > 20 {
-		return x
-	}
-	return float32(math.Log1p(math.Exp(float64(x))))
-}
-
-func gdnL2(dst, src []float32, scale float32) {
-	var ss float32
-	for _, v := range src {
-		ss += v * v
-	}
-	inv := float32(1 / math.Sqrt(float64(ss)+1e-6))
-	for i, v := range src {
-		dst[i] = v * inv * scale
-	}
-}
-
-// referenceGDNDecode is intentionally independent of compute's CUDA implementation
-// and of model.linearAttnStep. It directly spells out the documented CPU recurrence
-// over host slices, including the pre-update decay and post-update readout order.
-func referenceGDNDecode(g gdnFixtureGeometry, d *gdnFixtureData) (out, nextConv, nextRecurrent []float32) {
-	keyDim, valueDim, convDim := g.keyDim(), g.valueDim(), g.convDim()
-	mixed := gdnMatVec(d.inQKV, d.x, convDim, g.hidden)
-	z := gdnMatVec(d.inZ, d.x, valueDim, g.hidden)
-	b := gdnMatVec(d.inB, d.x, g.nV, g.hidden)
-	a := gdnMatVec(d.inA, d.x, g.nV, g.hidden)
-	nextConv = append([]float32(nil), d.convState...)
-	convOut := make([]float32, convDim)
-	for c := 0; c < convDim; c++ {
-		var acc float32
-		for j := 0; j < g.kernel-1; j++ {
-			acc += d.convW[c*g.kernel+j] * nextConv[j*convDim+c]
-		}
-		acc += d.convW[c*g.kernel+g.kernel-1] * mixed[c]
-		convOut[c] = gdnSilu(acc)
-	}
-	for j := 0; j < g.kernel-2; j++ {
-		copy(nextConv[j*convDim:(j+1)*convDim], nextConv[(j+1)*convDim:(j+2)*convDim])
-	}
-	copy(nextConv[(g.kernel-2)*convDim:], mixed)
-
-	qNorm, kNorm := make([]float32, keyDim), make([]float32, keyDim)
-	qScale := float32(1 / math.Sqrt(float64(g.kHd)))
-	for h := 0; h < g.nK; h++ {
-		lo, hi := h*g.kHd, (h+1)*g.kHd
-		gdnL2(qNorm[lo:hi], convOut[lo:hi], qScale)
-		gdnL2(kNorm[lo:hi], convOut[keyDim+lo:keyDim+hi], 1)
-	}
-
-	nextRecurrent = append([]float32(nil), d.recurrentState...)
-	core := make([]float32, valueDim)
-	repeat := g.nV / g.nK
-	for h := 0; h < g.nV; h++ {
-		kh := h / repeat
-		beta := float32(1 / (1 + math.Exp(float64(-b[h]))))
-		aa := float32(math.Exp(float64(d.aLog[h])))
-		dt := gdnSoftplus(a[h] + d.dtBias[h])
-		decay := float32(math.Exp(float64(-aa * dt)))
-		for stateIndex := h * g.kHd * g.vHd; stateIndex < (h+1)*g.kHd*g.vHd; stateIndex++ {
-			nextRecurrent[stateIndex] *= decay
-		}
-		for vd := 0; vd < g.vHd; vd++ {
-			var kvmem float32
-			for i := 0; i < g.kHd; i++ {
-				stateIndex := (h*g.kHd+i)*g.vHd + vd
-				kvmem += nextRecurrent[stateIndex] * kNorm[kh*g.kHd+i]
-			}
-			v := convOut[2*keyDim+h*g.vHd+vd]
-			delta := (v - kvmem) * beta
-			var readout float32
-			for i := 0; i < g.kHd; i++ {
-				stateIndex := (h*g.kHd+i)*g.vHd + vd
-				nextRecurrent[stateIndex] += kNorm[kh*g.kHd+i] * delta
-				readout += nextRecurrent[stateIndex] * qNorm[kh*g.kHd+i]
-			}
-			core[h*g.vHd+vd] = readout
-		}
-		var ss float32
-		for vd := 0; vd < g.vHd; vd++ {
-			v := core[h*g.vHd+vd]
-			ss += v * v
-		}
-		inv := float32(1 / math.Sqrt(float64(ss)/float64(g.vHd)+float64(g.eps)))
-		for vd := 0; vd < g.vHd; vd++ {
-			i := h*g.vHd + vd
-			core[i] = d.norm[vd] * (core[i] * inv) * gdnSilu(z[i])
-		}
-	}
-	return gdnMatVec(d.outW, core, g.hidden, valueDim), nextConv, nextRecurrent
-}
-
-func gdnCosine(a, b []float32) float64 {
-	var ab, aa, bb float64
-	for i := range a {
-		x, y := float64(a[i]), float64(b[i])
-		ab += x * y
-		aa += x * x
-		bb += y * y
-	}
-	if aa == 0 || bb == 0 {
-		return 0
-	}
-	return ab / math.Sqrt(aa*bb)
-}
-
-func gdnMaxAbs(a, b []float32) float64 {
-	var max float64
-	for i := range a {
-		if d := math.Abs(float64(a[i] - b[i])); d > max {
-			max = d
-		}
-	}
-	return max
-}
-
-func uploadGDN(t *testing.T, be compute.Backend, shape []int, data []float32) compute.Tensor {
+func uploadCUDAGDN(t *testing.T, be *cudaBackend, shape []int, data []float32, class MemoryClass, site string) Tensor {
 	t.Helper()
-	resident := be.Upload(compute.NewF32(compute.Default(), shape, data), compute.F32)
-	t.Cleanup(func() { be.Free(resident) })
-	if _, host := be.Host(resident); host {
-		t.Fatalf("uploaded tensor %v is host-addressable; expected CUDA residency", shape)
+	host := NewF32(Default(), shape, data)
+	var resident Tensor
+	if class == MemoryWeights {
+		resident = be.Upload(host, F32)
+	} else {
+		resident = be.UploadClass(host, F32, class, site)
 	}
+	t.Cleanup(func() { be.Free(resident) })
 	return resident
 }
 
-func TestCUDAQwen35GDNWholeOperationMatchesIndependentReference(t *testing.T) {
-	be := cudaGDNBackend(t)
-	t.Cleanup(be.Recycle)
-	if model.Qwen35GDNCUDAPath != compute.Qwen35GDNCUDAPath {
-		t.Fatalf("model/compute Qwen35 GDN path constants diverged: model=%q compute=%q", model.Qwen35GDNCUDAPath, compute.Qwen35GDNCUDAPath)
-	}
-	if got := be.Qwen35GDNPath(); got != model.Qwen35GDNCUDAPath {
-		t.Fatalf("Qwen35GDNPath = %q, want %q", got, model.Qwen35GDNCUDAPath)
-	}
-
-	g := gdnFixtureGeometry{hidden: 16, nK: 2, nV: 4, kHd: 4, vHd: 4, kernel: 3, eps: 1e-5}
-	d := newGDNFixtureData(g)
-	wantOut, wantConv, wantRecurrent := referenceGDNDecode(g, d)
-
-	x := uploadGDN(t, be, []int{g.hidden}, d.x)
-	inQKV := uploadGDN(t, be, []int{g.convDim(), g.hidden}, d.inQKV)
-	inZ := uploadGDN(t, be, []int{g.valueDim(), g.hidden}, d.inZ)
-	inB := uploadGDN(t, be, []int{g.nV, g.hidden}, d.inB)
-	inA := uploadGDN(t, be, []int{g.nV, g.hidden}, d.inA)
-	convW := uploadGDN(t, be, []int{g.convDim(), 1, g.kernel}, d.convW)
-	aLog := uploadGDN(t, be, []int{g.nV}, d.aLog)
-	dtBias := uploadGDN(t, be, []int{g.nV}, d.dtBias)
-	norm := uploadGDN(t, be, []int{g.vHd}, d.norm)
-	outW := uploadGDN(t, be, []int{g.hidden, g.valueDim()}, d.outW)
-	convState := uploadGDN(t, be, []int{g.kernel - 1, g.convDim()}, d.convState)
-	recurrentState := uploadGDN(t, be, []int{g.nV, g.kHd, g.vHd}, d.recurrentState)
-
-	be.ResetHostXfer()
-	be.ResetQwen35GDNOperationCount()
-	xferBefore := be.HostXferBytes()
-	opsBefore := be.Qwen35GDNOperationCount()
-	gotDev, nextConvDev, nextRecurrentDev, err := be.Qwen35GDNDecode(
-		x, inQKV, inZ, inB, inA, convW, aLog, dtBias, norm, outW,
-		convState, recurrentState,
-		g.nK, g.nV, g.kHd, g.vHd, g.kernel, g.eps,
-	)
-	if err != nil {
-		t.Fatalf("Qwen35GDNDecode real CUDA operation: %v", err)
-	}
-	if got := be.Qwen35GDNOperationCount() - opsBefore; got != 1 {
-		t.Fatalf("whole-operation counter delta = %d, want 1", got)
-	}
-	xferInside := be.HostXferBytes() - xferBefore
-	if xferInside != 0 {
-		t.Fatalf("device->host bytes inside measured GDN operation = %d, want 0", xferInside)
-	}
-	for name, tensor := range map[string]compute.Tensor{
-		"output": gotDev, "next_conv_state": nextConvDev, "next_recurrent_state": nextRecurrentDev,
-	} {
-		if _, host := be.Host(tensor); host {
-			t.Fatalf("%s became host-addressable inside the whole operation", name)
+func newCUDAGDNOperands(t *testing.T, be *cudaBackend, g cudaGDNGeometry) cudaGDNOperands {
+	t.Helper()
+	rng := cudaGDNLCG(0x4738c0da)
+	weight := func(shape []int, scale float32, site string) Tensor {
+		n := 1
+		for _, dimension := range shape {
+			n *= dimension
 		}
+		return uploadCUDAGDN(t, be, shape, rng.vector(n, scale), MemoryWeights, site)
 	}
-
-	gotOut := be.Read(gotDev)
-	gotConv := be.Read(nextConvDev)
-	gotRecurrent := be.Read(nextRecurrentDev)
-	if len(gotOut) != len(wantOut) || len(gotConv) != len(wantConv) || len(gotRecurrent) != len(wantRecurrent) {
-		t.Fatalf("result lengths out/conv/recurrent = %d/%d/%d, want %d/%d/%d",
-			len(gotOut), len(gotConv), len(gotRecurrent), len(wantOut), len(wantConv), len(wantRecurrent))
+	state := func(shape []int, site string) Tensor {
+		n := 1
+		for _, dimension := range shape {
+			n *= dimension
+		}
+		return uploadCUDAGDN(t, be, shape, make([]float32, n), MemoryKVCache, site)
 	}
-	cosine := gdnCosine(wantOut, gotOut)
-	if cosine < model.Qwen35GDNParityCosineMin {
-		t.Fatalf("real CUDA whole-operation cosine %.9f < %.3f (max_abs=%.3e)", cosine, model.Qwen35GDNParityCosineMin, gdnMaxAbs(wantOut, gotOut))
+	x := uploadCUDAGDN(t, be, []int{g.hidden}, rng.vector(g.hidden, 0.5), MemoryActivation, "qwen35-gdn-input")
+	normData := rng.vector(g.vHd, 0.1)
+	for i := range normData {
+		normData[i] += 1
 	}
-	stateCosine := gdnCosine(append(append([]float32(nil), wantConv...), wantRecurrent...), append(append([]float32(nil), gotConv...), gotRecurrent...))
-	if stateCosine < model.Qwen35GDNParityCosineMin {
-		t.Fatalf("updated device-state cosine %.9f < %.3f", stateCosine, model.Qwen35GDNParityCosineMin)
+	aLogData := rng.vector(g.nV, 0.2)
+	for i := range aLogData {
+		aLogData[i] -= 0.6
 	}
-	maxAbs := math.Max(gdnMaxAbs(wantOut, gotOut), math.Max(gdnMaxAbs(wantConv, gotConv), gdnMaxAbs(wantRecurrent, gotRecurrent)))
-	wantReadBytes := uint64(len(gotOut)+len(gotConv)+len(gotRecurrent)) * 4
-	readBytes := be.HostXferBytes() - xferBefore
-	if readBytes != wantReadBytes {
-		t.Fatalf("post-operation proof reads transferred %d bytes, want %d", readBytes, wantReadBytes)
+	return cudaGDNOperands{
+		x:              x,
+		inQKV:          weight([]int{g.convDim(), g.hidden}, 0.2, "in-qkv"),
+		inZ:            weight([]int{g.valueDim(), g.hidden}, 0.2, "in-z"),
+		inB:            weight([]int{g.nV, g.hidden}, 0.2, "in-b"),
+		inA:            weight([]int{g.nV, g.hidden}, 0.2, "in-a"),
+		convW:          weight([]int{g.convDim(), 1, g.kernel}, 0.3, "conv"),
+		aLog:           uploadCUDAGDN(t, be, []int{g.nV}, aLogData, MemoryWeights, "a-log"),
+		dtBias:         weight([]int{g.nV}, 0.2, "dt-bias"),
+		norm:           uploadCUDAGDN(t, be, []int{g.vHd}, normData, MemoryWeights, "norm"),
+		outW:           weight([]int{g.hidden, g.valueDim()}, 0.2, "out"),
+		convState:      state([]int{g.kernel - 1, g.convDim()}, "qwen35-gdn-conv-state"),
+		recurrentState: state([]int{g.nV, g.kHd, g.vHd}, "qwen35-gdn-recurrent-state"),
 	}
-	t.Logf("Qwen3.5/3.6 GDN CUDA whole operation: path=%s cosine=%.9f state_cosine=%.9f max_abs=%.3e operations=%d d2h_inside=%d d2h_proof_reads=%d",
-		be.Qwen35GDNPath(), cosine, stateCosine, maxAbs, be.Qwen35GDNOperationCount()-opsBefore, xferInside, readBytes)
 }
 
-func TestCUDAQwen35GDNInvalidGeometryFailsClosed(t *testing.T) {
-	be := cudaGDNBackend(t)
-	be.ResetQwen35GDNOperationCount()
-	_, _, _, err := be.Qwen35GDNDecode(
-		compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, compute.Tensor{},
-		compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, compute.Tensor{},
-		compute.Tensor{}, compute.Tensor{},
-		2, 3, 4, 4, 3, 1e-5,
+func (o cudaGDNOperands) decode(be *cudaBackend, g cudaGDNGeometry) (Tensor, Tensor, Tensor, error) {
+	return be.Qwen35GDNDecode(
+		o.x, o.inQKV, o.inZ, o.inB, o.inA, o.convW, o.aLog, o.dtBias, o.norm, o.outW,
+		o.convState, o.recurrentState,
+		g.nK, g.nV, g.kHd, g.vHd, g.kernel, g.eps,
 	)
-	var geometry *compute.Qwen35GDNGeometryError
-	if !errors.As(err, &geometry) {
-		t.Fatalf("invalid head grouping error = %T %v, want *compute.Qwen35GDNGeometryError", err, err)
+}
+
+func requireFiniteNonzeroCUDA(t *testing.T, name string, values []float32) {
+	t.Helper()
+	var norm float64
+	for i, value := range values {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("%s[%d] is non-finite: %v", name, i, value)
+		}
+		norm += float64(value) * float64(value)
+	}
+	if norm == 0 {
+		t.Fatalf("%s has degenerate zero norm", name)
+	}
+}
+
+func TestCUDAQwen35GDNKernelOneCompletesInPlaceDeviceOnly(t *testing.T) {
+	be := cudaGDNBackend(t)
+	t.Cleanup(be.Recycle)
+	g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 1, eps: 1e-5}
+	o := newCUDAGDNOperands(t, be, g)
+	convIdentity, recurrentIdentity := o.convState.Buf(), o.recurrentState.Buf()
+
+	be.ResetHostXfer()
+	be.ResetH2DXfer()
+	be.ResetQwen35GDNOperationCount()
+	out, nextConv, nextRecurrent, err := o.decode(be, g)
+	if err != nil {
+		t.Fatalf("K=1 CUDA GDN decode: %v", err)
+	}
+	if got := be.Qwen35GDNOperationCount(); got != 1 {
+		t.Fatalf("completed operation count = %d, want 1", got)
+	}
+	if got := be.H2DXferBytes(); got != 0 {
+		t.Fatalf("H2D bytes inside K=1 operation = %d, want 0", got)
+	}
+	if got := be.HostXferBytes(); got != 0 {
+		t.Fatalf("D2H bytes inside K=1 operation = %d, want 0", got)
+	}
+	if nextConv.Buf() != convIdentity || nextRecurrent.Buf() != recurrentIdentity {
+		t.Fatal("K=1 mutable state did not preserve in-place buffer identity")
+	}
+	if !out.Ready() {
+		t.Fatal("synchronized whole-operation output is not Ready")
+	}
+	if outputBuf := out.buf.(*cudaBuf); outputBuf.managed || outputBuf.class != MemoryScratchpad {
+		t.Fatalf("strict output allocation managed=%v class=%q, want device-only scratchpad", outputBuf.managed, outputBuf.class)
+	}
+	gotOut := be.Read(out)
+	recurrent := be.Read(nextRecurrent)
+	recycledConv, recycledRecurrent := nextConv.Buf(), nextRecurrent.Buf()
+	be.Recycle()
+	if nextConv.Buf() != recycledConv || nextRecurrent.Buf() != recycledRecurrent || !nextConv.Ready() || !nextRecurrent.Ready() {
+		t.Fatal("MemoryKVCache state identity/readiness did not survive Recycle")
+	}
+	if got := be.Read(nextConv); len(got) != 0 {
+		t.Fatalf("K=1 conv state length = %d, want 0", len(got))
+	}
+	requireFiniteNonzeroCUDA(t, "K=1 output", gotOut)
+	requireFiniteNonzeroCUDA(t, "K=1 recurrent state", recurrent)
+}
+
+func TestCUDAQwen35GDNLaunchAndAsyncFailuresInvalidateState(t *testing.T) {
+	for _, tc := range []struct {
+		name, stageName string
+		stage           int
+	}{
+		{name: "launch", stage: 3, stageName: "causal-conv-state"},
+		{name: "async", stage: 7, stageName: "stream-synchronize"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be := cudaGDNBackend(t)
+			t.Cleanup(be.Recycle)
+			t.Cleanup(func() { qwen35GDNInjectFaultForTest(0) })
+			g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 3, eps: 1e-5}
+			o := newCUDAGDNOperands(t, be, g)
+			be.ResetQwen35GDNOperationCount()
+			qwen35GDNInjectFaultForTest(tc.stage)
+			out, nextConv, nextRecurrent, err := o.decode(be, g)
+			var kernel *Qwen35GDNKernelError
+			if !errors.As(err, &kernel) || kernel.Stage != tc.stageName {
+				t.Fatalf("fault stage %d error = %T %v, want stage %q", tc.stage, err, err, tc.stageName)
+			}
+			if out.Backend() != nil || nextConv.Backend() != nil || nextRecurrent.Backend() != nil {
+				t.Fatal("failed operation returned usable output/state tensors")
+			}
+			if got := be.Qwen35GDNOperationCount(); got != 0 {
+				t.Fatalf("failed operation count = %d, want 0", got)
+			}
+			if o.convState.Ready() || o.recurrentState.Ready() {
+				t.Fatal("failed in-place state still reports Ready")
+			}
+			for name, state := range map[string]Tensor{"conv_state": o.convState, "recurrent_state": o.recurrentState} {
+				func() {
+					defer func() {
+						recovered := recover()
+						var invalid *Qwen35GDNInvalidStateError
+						if !errors.As(asErrorCompute(recovered), &invalid) {
+							t.Fatalf("Read(%s) panic = %T %v, want *Qwen35GDNInvalidStateError", name, recovered, recovered)
+						}
+					}()
+					_ = be.Read(state)
+				}()
+			}
+		})
+	}
+}
+
+func TestCUDAQwen35GDNManagedOperandRefusesBeforeMutation(t *testing.T) {
+	be := cudaGDNBackend(t)
+	t.Cleanup(be.Recycle)
+	g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 3, eps: 1e-5}
+	o := newCUDAGDNOperands(t, be, g)
+	beforeConv := append([]float32(nil), be.Read(o.convState)...)
+	beforeRecurrent := append([]float32(nil), be.Read(o.recurrentState)...)
+
+	cudaMu.Lock()
+	managedBuf := be.dallocManagedClass(g.hidden*F32.Bytes(), MemoryActivation, "qwen35-gdn-forced-managed-test")
+	cudaMu.Unlock()
+	managedInput := makeTensor(be, F32, RowMajor, []int{g.hidden}, nil, managedBuf)
+	t.Cleanup(func() { be.Free(managedInput) })
+	o.x = managedInput
+
+	be.ResetHostXfer()
+	be.ResetH2DXfer()
+	be.ResetQwen35GDNOperationCount()
+	_, _, _, err := o.decode(be, g)
+	var residency *Qwen35GDNResidencyError
+	if !errors.As(err, &residency) || residency.Operand != "normalized_input" || !strings.Contains(err.Error(), "managed memory") {
+		t.Fatalf("managed refusal = %T %v", err, err)
 	}
 	if got := be.Qwen35GDNOperationCount(); got != 0 {
-		t.Fatalf("invalid geometry launched %d GDN operations, want 0", got)
+		t.Fatalf("managed refusal operation count = %d, want 0", got)
 	}
+	if got := be.H2DXferBytes(); got != 0 {
+		t.Fatalf("managed refusal H2D delta = %d, want 0", got)
+	}
+	if got := be.HostXferBytes(); got != 0 {
+		t.Fatalf("managed refusal D2H delta = %d, want 0", got)
+	}
+	afterConv := be.Read(o.convState)
+	afterRecurrent := be.Read(o.recurrentState)
+	if !equalF32Bits(beforeConv, afterConv) || !equalF32Bits(beforeRecurrent, afterRecurrent) {
+		t.Fatal("managed refusal mutated durable GDN state")
+	}
+}
+
+func TestCUDAQwen35GDNWrongStateClassRefusesWithoutOperation(t *testing.T) {
+	for _, class := range []MemoryClass{MemoryWeights, MemoryScratchpad} {
+		t.Run(string(class), func(t *testing.T) {
+			be := cudaGDNBackend(t)
+			t.Cleanup(be.Recycle)
+			g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 3, eps: 1e-5}
+			o := newCUDAGDNOperands(t, be, g)
+			beforeConv := append([]float32(nil), be.Read(o.convState)...)
+			stateBuf := o.convState.buf.(*cudaBuf)
+			stateBuf.class = class
+
+			be.ResetHostXfer()
+			be.ResetH2DXfer()
+			be.ResetQwen35GDNOperationCount()
+			_, _, _, err := o.decode(be, g)
+			var residency *Qwen35GDNResidencyError
+			if !errors.As(err, &residency) || residency.Operand != "conv_state" || !strings.Contains(err.Error(), "kv_cache") {
+				t.Fatalf("state class %q refusal = %T %v", class, err, err)
+			}
+			if got := be.Qwen35GDNOperationCount(); got != 0 {
+				t.Fatalf("state class %q operation count = %d, want 0", class, got)
+			}
+			if got := be.H2DXferBytes(); got != 0 {
+				t.Fatalf("state class %q H2D delta = %d, want 0", class, got)
+			}
+			if got := be.HostXferBytes(); got != 0 {
+				t.Fatalf("state class %q D2H delta = %d, want 0", class, got)
+			}
+			stateBuf.class = MemoryKVCache
+			if afterConv := be.Read(o.convState); !equalF32Bits(beforeConv, afterConv) {
+				t.Fatalf("state class %q refusal mutated convolution state", class)
+			}
+		})
+	}
+}
+
+func TestCUDAQwen35GDNTensorMetadataRefusals(t *testing.T) {
+	be := &cudaBackend{name: "cuda"}
+	storage := make([]byte, 12)
+	shapes := qwen35GDNGeometryTensors(8, 1, 2, 2, 2, 3)
+	tensors := make([]Tensor, len(shapes))
+	for i := range shapes {
+		nbytes, ok := qwen35GDNShapeBytes(shapes[i].Shape, F32.Bytes())
+		if !ok {
+			t.Fatalf("fixture shape %v overflowed", shapes[i].Shape)
+		}
+		class := MemoryWeights
+		if i == 0 {
+			class = MemoryActivation
+		}
+		if i >= 10 {
+			class = MemoryKVCache
+		}
+		tensors[i] = makeTensor(be, F32, RowMajor, shapes[i].Shape, nil, &cudaBuf{
+			ptr: unsafe.Pointer(&storage[i]), n: nbytes, class: class,
+		})
+	}
+
+	t.Run("capacity", func(t *testing.T) {
+		buf := tensors[0].buf.(*cudaBuf)
+		buf.n--
+		err := be.validateQwen35GDNTensor("normalized_input", tensors[0])
+		var residency *Qwen35GDNResidencyError
+		if !errors.As(err, &residency) || !strings.Contains(err.Error(), "shape requires") {
+			t.Fatalf("undersized allocation error = %T %v", err, err)
+		}
+		buf.n++
+	})
+
+	operands := []struct {
+		name string
+		t    Tensor
+	}{
+		{"normalized_input", tensors[0]}, {"in_proj_qkv", tensors[1]},
+		{"in_proj_z", tensors[2]}, {"in_proj_b", tensors[3]}, {"in_proj_a", tensors[4]},
+		{"conv1d", tensors[5]}, {"A_log", tensors[6]}, {"dt_bias", tensors[7]},
+		{"norm", tensors[8]}, {"out_proj", tensors[9]},
+		{"conv_state", tensors[10]}, {"recurrent_state", tensors[11]},
+	}
+	t.Run("state-class", func(t *testing.T) {
+		buf := tensors[10].buf.(*cudaBuf)
+		for _, class := range []MemoryClass{MemoryWeights, MemoryScratchpad} {
+			buf.class = class
+			err := be.validateQwen35GDNStateOperands(operands, tensors[10], tensors[11])
+			var residency *Qwen35GDNResidencyError
+			if !errors.As(err, &residency) || !strings.Contains(err.Error(), "kv_cache") {
+				t.Fatalf("state class %q error = %T %v", class, err, err)
+			}
+		}
+		buf.class = MemoryKVCache
+	})
+
+	t.Run("state-readonly-alias", func(t *testing.T) {
+		state := tensors[10].buf.(*cudaBuf)
+		old := state.ptr
+		state.ptr = tensors[0].buf.(*cudaBuf).ptr
+		err := be.validateQwen35GDNStateOperands(operands, tensors[10], tensors[11])
+		var residency *Qwen35GDNResidencyError
+		if !errors.As(err, &residency) || !strings.Contains(err.Error(), "aliases mutable GDN state") {
+			t.Fatalf("state/read-only alias error = %T %v", err, err)
+		}
+		state.ptr = old
+	})
+}
+
+func equalF32Bits(a, b []float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if math.Float32bits(a[i]) != math.Float32bits(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func asErrorCompute(value any) error {
+	err, _ := value.(error)
+	return err
 }
