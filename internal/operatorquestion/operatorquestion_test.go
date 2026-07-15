@@ -87,3 +87,18 @@ func TestLastFromTranscriptNormalizesLastOperatorGate(t *testing.T) {
 		t.Fatalf("found=%v got=%+v", found, got)
 	}
 }
+
+func TestLastFromTranscriptNormalizesCodexGate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"functions.request_user_input","input":{"questions":[{"id":"choice","header":"Choice","question":"Which isolation?","options":[{"label":"Explicit paths","description":"owned files"},{"label":"Wait","description":"peer completion"}]}]}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := LastFromTranscript(path, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || got.Harness != "codex" || got.Kind != ChooseApproach || got.Question != "Which isolation?" || len(got.Options) != 2 {
+		t.Fatalf("found=%v got=%+v", found, got)
+	}
+}

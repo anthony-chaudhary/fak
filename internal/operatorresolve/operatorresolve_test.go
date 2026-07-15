@@ -126,3 +126,36 @@ func TestGitIsolationOracleRunsOnlyReadOnlyGitCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeAndCodexQuestionsShareOneResolverPath(t *testing.T) {
+	payloads := []operatorquestion.NativeGate{
+		{HarnessCommand: "claude", Tool: "AskUserQuestion", Payload: []byte(`{"questions":[{"header":"Isolation","multiSelect":false,"question":"How should I isolate this commit?","options":[{"label":"Commit explicit owned paths","description":"owned files only"},{"label":"Wait","description":"wait for peers"}]}]}`)},
+		{HarnessCommand: "codex", Tool: "functions.request_user_input", Payload: []byte(`{"questions":[{"id":"isolation","header":"Isolation","question":"How should I isolate this commit?","options":[{"label":"Commit explicit owned paths","description":"owned files only"},{"label":"Wait","description":"wait for peers"}]}]}`)},
+	}
+	oracleCalls := 0
+	resolver := Resolver{Oracles: []Oracle{OracleFunc{OracleName: "git-readonly", InspectFn: func(_ context.Context, _ operatorquestion.OperatorQuestion, option operatorquestion.Option) (Evidence, bool, error) {
+		oracleCalls++
+		if strings.Contains(option.Label, "explicit owned paths") {
+			return Evidence{Claim: "path-scoped commit preserves peer dirt", Score: 10}, true, nil
+		}
+		return Evidence{Claim: "no isolation gain", Score: 0}, true, nil
+	}}}}
+	var decisions []Verdict
+	for _, gate := range payloads {
+		q, err := operatorquestion.Normalize(gate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := resolver.Resolve(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decisions = append(decisions, got)
+	}
+	if decisions[0].Disposition != choicetriage.TakeObvious || decisions[0].Action != decisions[1].Action || decisions[0].Reason != decisions[1].Reason {
+		t.Fatalf("shared resolver drift: claude=%+v codex=%+v", decisions[0], decisions[1])
+	}
+	if oracleCalls != 4 {
+		t.Fatalf("shared oracle calls=%d want 4", oracleCalls)
+	}
+}
