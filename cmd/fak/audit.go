@@ -45,6 +45,8 @@ func cmdAudit(args []string) {
 		cmdAuditVerify(args[1:])
 	case "export":
 		cmdAuditExport(args[1:])
+	case "dataset":
+		cmdAuditDataset(args[1:])
 	case "diagnose":
 		cmdAuditDiagnose(args[1:])
 	case "replay":
@@ -65,6 +67,7 @@ func cmdAudit(args []string) {
 func auditUsage() {
 	fmt.Fprintln(os.Stderr, "usage: fak audit verify <journal.jsonl>   (validate the tamper-evident hash chain; exit 1 if edited)")
 	fmt.Fprintln(os.Stderr, "       fak audit export <journal.jsonl>   (re-emit the journal as JSONL on stdout)")
+	fmt.Fprintln(os.Stderr, "       fak audit dataset <journal.jsonl>  (emit fak-decision-outcome/1 JSONL, one row per adjudicated call)")
 	fmt.Fprintln(os.Stderr, "       fak audit diagnose [<journal.jsonl>] (tell concurrent-writer interleave apart from real tampering)")
 	fmt.Fprintln(os.Stderr, "       fak audit replay [--json] <journal.jsonl> (re-drive recorded decisions; assert every identical call replayed to one verdict)")
 	fmt.Fprintln(os.Stderr, "       fak audit rsl <rsl.jsonl>          (replay a git Reference State Log; exit 1 on a tampered chain or non-fast-forward gap)")
