@@ -1,39 +1,23 @@
 package model
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
-var (
-	// ErrV4ExpertQuantMetadata identifies a routed-expert weight/scale pair that
-	// does not match the immutable DeepSeek-V4-Pro safetensors contract.
-	ErrV4ExpertQuantMetadata = errors.New("model: invalid V4 expert quant metadata")
-	// ErrV4ExpertQuantUnsupported identifies a valid pinned artifact pair whose
-	// arithmetic semantics have not yet been grounded by an authoritative oracle.
-	ErrV4ExpertQuantUnsupported = errors.New("model: unsupported V4 expert quant format")
-)
+// ErrV4ExpertQuantMetadata identifies a routed-expert weight/scale pair that
+// does not match the immutable DeepSeek-V4-Pro safetensors contract.
+var ErrV4ExpertQuantMetadata = errors.New("model: invalid V4 expert quant metadata")
 
-// V4ExpertQuantUnsupportedError records the semantic facts that immutable
-// safetensors metadata cannot establish. Keeping these fields explicit prevents
-// an I8/F8_E8M0 payload from silently taking the unrelated GPT-OSS MXFP4 path.
-type V4ExpertQuantUnsupportedError struct {
-	WeightName       string
-	MissingSemantics []string
-}
-
-func (e *V4ExpertQuantUnsupportedError) Error() string {
-	return fmt.Sprintf("%v for %s: missing authoritative %s", ErrV4ExpertQuantUnsupported, e.WeightName, strings.Join(e.MissingSemantics, ", "))
-}
-
-func (e *V4ExpertQuantUnsupportedError) Unwrap() error { return ErrV4ExpertQuantUnsupported }
-
-var v4ExpertQuantMissingSemantics = []string{
-	"nibble order",
-	"FP4 value mapping",
-	"F8_E8M0 special-value behavior",
-	"scale application rule",
+// v4ExpertE2M1Values is the OCP MX E2M1 finite value table indexed by
+// one unpacked nibble. PyTorch float4_e2m1fn_x2 stores val0 in the low
+// nibble and val1 in the high nibble.
+var v4ExpertE2M1Values = [16]float32{
+	0, 0.5, 1, 1.5, 2, 3, 4, 6,
+	float32(math.Copysign(0, -1)), -0.5, -1, -1.5, -2, -3, -4, -6,
 }
 
 type v4ExpertQuantSpec struct {
@@ -49,14 +33,12 @@ var v4ExpertQuantSpecs = map[string]v4ExpertQuantSpec{
 	"w3": {weightRows: 3072, weightCols: 3584, scaleRows: 3072, scaleCols: 224},
 }
 
-// decodeV4ExpertQuant admits only the exact routed-expert format observed in
+// decodeV4ExpertQuant decodes the exact routed-expert format observed in
 // deepseek-ai/DeepSeek-V4-Pro@b5968e9190ef611bbf34a7229255be88a0e937c1.
-//
-// The pinned headers establish identity, layout, and byte counts, but not the
-// four arithmetic semantics named by V4ExpertQuantUnsupportedError. Therefore
-// a metadata-valid pair deliberately returns a typed refusal and no output.
-// An authoritative independent oracle can replace that final refusal without
-// weakening this admission boundary.
+// The pinned inference code views each byte as torch.float4_e2m1fn_x2 and
+// applies one F8_E8M0 scale per 32 unpacked K values. PyTorch's OCP type
+// definition establishes low-nibble val0/high-nibble val1 ordering. The
+// destination is allocated only after all metadata and scale bytes validate.
 func decodeV4ExpertQuant(weightName, scaleName string, weightEntry, scaleEntry stEntry, weights, scales []byte) ([]byte, []int, error) {
 	stem, projection, err := parseV4ExpertQuantWeightName(weightName)
 	if err != nil {
@@ -98,8 +80,34 @@ func decodeV4ExpertQuant(weightName, scaleName string, weightEntry, scaleEntry s
 		return nil, nil, v4QuantMetadataf("%s has %d bytes, want %d", scaleName, len(scales), scaleBytes)
 	}
 
-	missing := append([]string(nil), v4ExpertQuantMissingSemantics...)
-	return nil, nil, &V4ExpertQuantUnsupportedError{WeightName: weightName, MissingSemantics: missing}
+	for i, scale := range scales {
+		if scale == 0xff {
+			return nil, nil, v4QuantMetadataf("%s scale byte %d is F8_E8M0 NaN", scaleName, i)
+		}
+	}
+
+	unpackedCols, ok := checkedShapeProduct(spec.weightCols, 2)
+	if !ok {
+		return nil, nil, v4QuantMetadataf("%s unpacked shape overflows", weightName)
+	}
+	outElems, ok := checkedShapeProduct(spec.weightRows, unpackedCols)
+	if !ok || outElems > int(^uint(0)>>1)/4 {
+		return nil, nil, v4QuantMetadataf("%s decoded byte count overflows", weightName)
+	}
+	out := make([]byte, outElems*4)
+	for row := 0; row < spec.weightRows; row++ {
+		packedRow := weights[row*spec.weightCols : (row+1)*spec.weightCols]
+		scaleRow := scales[row*spec.scaleCols : (row+1)*spec.scaleCols]
+		for packedCol, packed := range packedRow {
+			exp := int(scaleRow[packedCol/16]) - 127
+			base := (row*unpackedCols + packedCol*2) * 4
+			lo := float32(math.Ldexp(float64(v4ExpertE2M1Values[packed&0x0f]), exp))
+			hi := float32(math.Ldexp(float64(v4ExpertE2M1Values[packed>>4]), exp))
+			binary.LittleEndian.PutUint32(out[base:], math.Float32bits(lo))
+			binary.LittleEndian.PutUint32(out[base+4:], math.Float32bits(hi))
+		}
+	}
+	return out, []int{spec.weightRows, unpackedCols}, nil
 }
 
 func parseV4ExpertQuantWeightName(name string) (stem, projection string, err error) {
