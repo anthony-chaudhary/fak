@@ -26,6 +26,15 @@ It holds NO token and NO channel id in source — only HOW to read the key an op
 set, never WHICH value (the same contract as ``internal/slackenv``). Importers call
 ``send(...)``; the watchdogs gate it behind their own ``--slack`` opt-in so a tick
 never posts unless the operator asked it to.
+
+Operator-channel role guard (#4652): the production operator channel carries ONE roll-up
+heartbeat per tick, but scheduler-test and scout-loop verification ticks resolve the same
+FAK_DISPATCH_CHANNEL and were turning it into a per-run event log. A non-operator loop
+declares its role via the ``FAK_SLACK_ROLE`` env stamp (set once by its launcher — e.g.
+``FAK_SLACK_ROLE=scout``) or the ``--role`` / ``role=`` argument; every ``send`` in that
+process then reads it, and a role in ``NON_OPERATOR_ROLES`` that resolves the production
+operator channel is REFUSED (skipped, never posted). Undeclared/operator traffic and the
+fake-transport unit tests are unaffected, so the real roll-up keeps posting.
 """
 from __future__ import annotations
 
@@ -56,6 +65,64 @@ DEFAULT_API_BASE = "https://slack.com/api/"
 DISPATCH_TOKEN_KEY = "FAK_DISPATCH_TOKEN"
 DISPATCH_CHANNEL_KEY = "FAK_DISPATCH_CHANNEL"
 SCOREBOARD_TOKEN_KEY = "FAK_SCOREBOARD_TOKEN"  # the shared workspace bot token
+
+# ----- operator-channel role guard (#4652) -----------------------------------
+# The production operator channel (FAK_DISPATCH_CHANNEL) carries ONE roll-up heartbeat
+# per tick. A dogfood sample found 35 of 37 per-run posts there were scheduler-test or
+# scout-loop verification traffic, turning the operator roll-up into a per-run event log.
+# A loop declares its role via the ``role=`` kwarg or, once per process, the FAK_SLACK_ROLE
+# env stamp its launcher sets — every send() in that process then reads it. A role in
+# NON_OPERATOR_ROLES that resolves the production operator channel is REFUSED (skipped,
+# never posted); undeclared/operator traffic is unaffected, so the real roll-up and the
+# fake-transport unit tests keep working. This gates only WHICH channel a role may reach —
+# it invents no transport and reads no secret.
+ROLE_ENV_KEY = "FAK_SLACK_ROLE"
+NON_OPERATOR_ROLES = frozenset({
+    "test", "scheduler-test", "scheduler_test", "schedulertest",
+    "scout", "scout-loop", "scout_loop", "ideascout",
+    "verification", "verify", "canary", "smoke", "dev", "sandbox",
+})
+
+
+def _effective_role(explicit: str = "", *, transport: "Transport | None" = None,
+                    env: "dict[str, str] | None" = None) -> str:
+    """The role this post carries: the explicit ``role=`` kwarg, else the FAK_SLACK_ROLE
+    env stamp, normalized lower-case (#4652).
+
+    With no role declared, a LIVE post (``transport is None`` — the real urllib path)
+    issued from inside a unit/pytest harness is classified ``test``: a test process must
+    never reach the operator channel even if a fixture left FAK_DISPATCH_CHANNEL set. A
+    fake-transport unit test (``transport`` injected) is exempt — it exercises resolution,
+    not real operator traffic — so the existing suite is unaffected."""
+    e = os.environ if env is None else env
+    role = (explicit or e.get(ROLE_ENV_KEY, "") or "").strip().lower()
+    if role:
+        return role
+    if transport is None and ("pytest" in sys.modules or "unittest" in sys.modules):
+        return "test"
+    return ""
+
+
+def operator_channel_block(target: str, role: str, *,
+                           start: "Path | None" = None) -> str:
+    """A non-empty refusal reason when a non-operator ROLE would post to the production
+    operator channel; '' when the post is allowed (#4652).
+
+    The production operator channel is whatever FAK_DISPATCH_CHANNEL resolves to (env then
+    file — the one roll-up heartbeat channel). A role in NON_OPERATOR_ROLES that targets
+    that exact channel is refused — including a scout/test loop that passes the channel
+    explicitly — so verification traffic can never turn the operator roll-up into a
+    per-run event log. Cheap for the common case: an operator/undeclared role returns
+    before resolving anything."""
+    if not target or role not in NON_OPERATOR_ROLES:
+        return ""
+    prod, _ = resolve_channel("", DISPATCH_CHANNEL_KEY, "", start=start)
+    if prod and target == prod:
+        return (f"role '{role}' is verification traffic and may not post to the "
+                f"production operator channel {prod} (#4652); route it to an audit "
+                f"channel (a different --channel) or leave the operator roll-up "
+                f"undeclared")
+    return ""
 
 
 # ----- resolution (the Python sibling of internal/slackenv) ------------------
@@ -328,6 +395,7 @@ def send(
     transport: Transport | None = None,
     start: Path | None = None,
     include_signal_noise: bool = True,
+    role: str = "",
 ) -> dict[str, Any]:
     """Resolve token + channel like the Go ``dispatch`` surface and post ``text``.
 
@@ -344,6 +412,7 @@ def send(
     """
     tok, tok_src = resolve_token(token_key, token_fallback, start=start)
     chan, chan_src = resolve_channel(channel, channel_key, default_channel, start=start)
+    eff_role = _effective_role(role, transport=transport)
     body = wrap_code(text) if code else text
     sn = signal_noise_score(body)
     if include_signal_noise:
@@ -361,10 +430,21 @@ def send(
         "error": None,
         "skipped": None,
         "signal_noise": sn,
+        "role": eff_role,
+        "blocked": None,
     }
 
     if not chan:
         base["skipped"] = "no channel resolved (set --channel or " + channel_key + ")"
+        return base
+    # The operator-channel role guard (#4652) refuses a non-operator role BEFORE the
+    # token/dry-run checks: a scheduler-test/scout post to the production operator channel
+    # is a policy refusal regardless of whether a token is set, and a --dry-run must
+    # REPORT the refusal so a misconfigured tick is visible before it ever goes live.
+    guard = operator_channel_block(chan, eff_role, start=start)
+    if guard:
+        base["skipped"] = guard
+        base["blocked"] = True
         return base
     if not tok:
         base["skipped"] = ("no bot token resolved (set " + token_key + " or "
@@ -391,6 +471,11 @@ def _render(result: dict[str, Any]) -> str:
     if result.get("posted"):
         return f"slack_post: posted to {result['channel']} (ts={result.get('ts')})"
     sn = result.get("signal_noise") or {}
+    # A policy refusal outranks the dry-run report: a blocked dry-run must read REFUSED,
+    # never "would post to <the operator channel>", so the misconfiguration is visible
+    # (#4652).
+    if result.get("blocked"):
+        return f"slack_post: REFUSED — {result['skipped']}"
     if result.get("dry_run"):
         return (f"slack_post (dry-run): would post to "
                 f"{result['channel'] or '(unset)'} [{result['channel_source']}]; "
@@ -415,6 +500,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="env/file key for this surface's channel id")
     ap.add_argument("--default-channel", default="",
                     help="built-in channel default when nothing else resolves")
+    ap.add_argument("--role", default="",
+                    help="caller role (e.g. scout, scheduler-test); a non-operator role "
+                         "may not post to the production operator channel (#4652). "
+                         "Falls back to $" + ROLE_ENV_KEY)
     ap.add_argument("--code", action="store_true",
                     help="wrap the text in a ``` block (keeps box-drawn cards aligned)")
     ap.add_argument("--api-base", default="",
@@ -446,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
         code=args.code,
         dry_run=args.dry_run,
         api_base=args.api_base,
+        role=args.role,
     )
     if args.json:
         print(json.dumps(result, indent=2))

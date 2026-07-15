@@ -52,7 +52,7 @@ class _EnvGuard:
     """Clear the Slack keys so a stray operator env never leaks into a test."""
 
     KEYS = ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN",
-            "FAK_SCOREBOARD_CHANNEL")
+            "FAK_SCOREBOARD_CHANNEL", "FAK_SLACK_ROLE")
 
     def __enter__(self):
         self._saved = {k: os.environ.pop(k, None) for k in self.KEYS}
@@ -251,6 +251,136 @@ class RedactTests(unittest.TestCase):
         self.assertEqual(sp.redact_token("xoxb-secret-tail"), "****tail")
         self.assertEqual(sp.redact_token(""), "(unset)")
         self.assertEqual(sp.redact_token("ab"), "****")
+
+
+class OperatorChannelGuardTests(unittest.TestCase):
+    """#4652: scheduler-test/scout/test verification traffic cannot post to the production
+    operator channel (FAK_DISPATCH_CHANNEL). A loop declares its role via the role= kwarg
+    or the FAK_SLACK_ROLE env stamp; a role in NON_OPERATOR_ROLES that resolves the
+    operator channel is REFUSED before any post. Undeclared/operator traffic and the
+    fake-transport unit tests are unaffected."""
+
+    # ----- _effective_role -----
+    def test_effective_role_explicit_beats_env_and_lowercases(self):
+        with _EnvGuard():
+            os.environ["FAK_SLACK_ROLE"] = "operator"
+            self.assertEqual(sp._effective_role("SCOUT", transport=lambda *a: None), "scout")
+
+    def test_effective_role_reads_env_stamp(self):
+        with _EnvGuard():
+            os.environ["FAK_SLACK_ROLE"] = "Scheduler-Test"
+            self.assertEqual(sp._effective_role("", transport=lambda *a: None),
+                             "scheduler-test")
+
+    def test_effective_role_auto_test_only_on_live_transport(self):
+        # under this unittest run: undeclared + a real (None) transport => "test"; but a
+        # fake transport (the whole existing suite) stays undeclared so nothing is blocked.
+        with _EnvGuard():
+            self.assertEqual(sp._effective_role("", transport=None), "test")
+            self.assertEqual(sp._effective_role("", transport=lambda *a: None), "")
+
+    # ----- operator_channel_block (pure) -----
+    def test_block_reason_for_non_operator_role_on_prod_channel(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_DISPATCH_CHANNEL=C0PROD"])
+            reason = sp.operator_channel_block("C0PROD", "scout", start=root)
+            self.assertIn("may not post to the production operator channel C0PROD", reason)
+            self.assertIn("#4652", reason)
+
+    def test_no_block_for_operator_or_undeclared_role(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_DISPATCH_CHANNEL=C0PROD"])
+            self.assertEqual(sp.operator_channel_block("C0PROD", "operator", start=root), "")
+            self.assertEqual(sp.operator_channel_block("C0PROD", "", start=root), "")
+
+    def test_no_block_for_non_operator_role_on_a_different_channel(self):
+        # an audit channel (any channel that is not the operator channel) is fine.
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_DISPATCH_CHANNEL=C0PROD"])
+            self.assertEqual(sp.operator_channel_block("C0AUDIT", "scout", start=root), "")
+
+    def test_no_block_when_prod_channel_unresolved(self):
+        # fail-safe: with no operator channel identifiable, we cannot claim a collision,
+        # so we do not block an arbitrary channel.
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            self.assertEqual(sp.operator_channel_block("C0ANY", "scout", start=Path(d)), "")
+
+    # ----- send() integration -----
+    def test_send_refuses_scout_role_to_prod_channel_via_kwarg(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t",
+                                        "FAK_DISPATCH_CHANNEL=C0PROD"])
+            rec = _Recorder()
+            res = sp.send("per-run dispatch result", transport=rec, start=root, role="scout")
+            self.assertFalse(res["posted"])
+            self.assertTrue(res["blocked"])
+            self.assertEqual(res["role"], "scout")
+            self.assertIn("C0PROD", res["skipped"])
+            self.assertEqual(rec.calls, [])  # never reached the transport
+
+    def test_send_refuses_via_env_role_stamp(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t",
+                                        "FAK_DISPATCH_CHANNEL=C0PROD"])
+            os.environ["FAK_SLACK_ROLE"] = "scheduler-test"
+            rec = _Recorder()
+            res = sp.send("scheduler self-check", transport=rec, start=root)
+            self.assertTrue(res["blocked"])
+            self.assertEqual(res["role"], "scheduler-test")
+            self.assertEqual(rec.calls, [])
+
+    def test_send_allows_scout_role_to_a_separate_audit_channel(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t",
+                                        "FAK_DISPATCH_CHANNEL=C0PROD"])
+            rec = _Recorder(reply={"ok": True, "ts": "9.9", "channel": "C0AUDIT"})
+            res = sp.send("scout note", channel="C0AUDIT", transport=rec, start=root,
+                          role="scout")
+            self.assertTrue(res["posted"])
+            self.assertIsNone(res["blocked"])
+            self.assertEqual(len(rec.calls), 1)
+
+    def test_send_allows_undeclared_role_to_prod_channel(self):
+        # the real operator roll-up is undeclared (or role=operator) => unaffected.
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t",
+                                        "FAK_DISPATCH_CHANNEL=C0PROD"])
+            rec = _Recorder(reply={"ok": True, "ts": "1.1", "channel": "C0PROD"})
+            res = sp.send("fleet roll-up", transport=rec, start=root)  # no role
+            self.assertTrue(res["posted"])
+            self.assertIsNone(res["blocked"])
+
+    def test_dry_run_reports_the_refusal_so_a_misconfig_is_visible(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t",
+                                        "FAK_DISPATCH_CHANNEL=C0PROD"])
+            rec = _Recorder()
+            res = sp.send("x", dry_run=True, transport=rec, start=root, role="scout")
+            self.assertTrue(res["blocked"])
+            self.assertFalse(res["posted"])
+            self.assertEqual(rec.calls, [])
+            self.assertEqual(sp._render(res), f"slack_post: REFUSED — {res['skipped']}")
+
+    def test_auto_test_backstop_blocks_a_live_send_from_a_harness(self):
+        # a test harness that issues a LIVE (transport=None) post to the resolved operator
+        # channel is auto-classified "test" and refused BEFORE any network call — proving
+        # the backstop needs no explicit role. (The block returns before urllib is used.)
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t",
+                                        "FAK_DISPATCH_CHANNEL=C0PROD"])
+            res = sp.send("stray live post", start=root)  # transport=None, no role
+            self.assertTrue(res["blocked"])
+            self.assertEqual(res["role"], "test")
 
 
 if __name__ == "__main__":
