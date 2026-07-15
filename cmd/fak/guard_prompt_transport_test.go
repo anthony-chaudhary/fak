@@ -9,7 +9,7 @@ import (
 
 func TestGuardPromptStdinTransportMovesLargeWindowsClaudePrompt(t *testing.T) {
 	prompt := "unicode lambda\r\n" + strings.Repeat("p", 40<<10)
-	in := []string{`C:\Temp\claude.exe`, "-p", prompt, "--model", "claude-opus-4-8", "--verbose"}
+	in := []string{"claude.exe", "-p", prompt, "--model", "claude-opus-4-8", "--verbose"}
 	got, stdin, moved := guardPromptStdinTransportForOS(in, "windows")
 	if !moved {
 		t.Fatal("large Windows Claude prompt remained on argv")
