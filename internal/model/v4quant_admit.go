@@ -149,14 +149,14 @@ func classifyV4Tensor(name string) (V4TensorClass, bool) {
 		return V4ClassIndexerQK, true
 
 	// Routed MoE experts (FP4) — checked before shared_experts and dense FFN.
-	case strings.Contains(name, ".mlp.experts."):
+	case strings.Contains(name, ".mlp.experts."), strings.Contains(name, ".ffn.experts."):
 		return V4ClassRoutedExpert, true
-	case strings.Contains(name, ".mlp.shared_experts."):
+	case strings.Contains(name, ".mlp.shared_experts."), strings.Contains(name, ".ffn.shared_experts."):
 		return V4ClassSharedExpert, true
 
 	// MoE router / gate weight (FP8). The e_score_correction_bias is a small f32
 	// vector handled by the norm/keep bucket below, not here.
-	case strings.HasSuffix(name, ".mlp.gate.weight"):
+	case strings.HasSuffix(name, ".mlp.gate.weight"), strings.HasSuffix(name, ".ffn.gate.weight"):
 		return V4ClassRouter, true
 
 	// Dense-layer FFN (the first n_dense_layers) — non-expert gate/up/down (FP8).

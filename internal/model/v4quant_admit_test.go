@@ -195,6 +195,32 @@ func TestV4AdmitConsistentWithQuantGate(t *testing.T) {
 
 // TestClassifyV4Tensor is a compact table over the canonical names, so a rename in the
 // loader that breaks a class assignment fails here with a precise message.
+func TestClassifyV4TensorOfficialFFNNamespace(t *testing.T) {
+	tests := []struct {
+		name  string
+		class V4TensorClass
+		ok    bool
+	}{
+		{"model.layers.0.ffn.experts.0.w1.weight", V4ClassRoutedExpert, true},
+		{"model.layers.60.ffn.shared_experts.w1.weight", V4ClassSharedExpert, true},
+		{"model.layers.1.ffn.gate.weight", V4ClassRouter, true},
+		// Exact dotted components are required; broad "experts" or gate matching
+		// would silently admit unknown pinned-checkpoint tensors.
+		{"model.layers.0.ffn.expert.0.w1.weight", "", false},
+		{"model.layers.0.ffn.experts", "", false},
+		{"model.layers.0.ffn.gate.weight.extra", "", false},
+		{"model.layers.0.notffn.experts.0.w1.weight", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := classifyV4Tensor(tc.name)
+			if ok != tc.ok || got != tc.class {
+				t.Fatalf("classifyV4Tensor(%q) = (%q, %v), want (%q, %v)", tc.name, got, ok, tc.class, tc.ok)
+			}
+		})
+	}
+}
+
 func TestClassifyV4Tensor(t *testing.T) {
 	cases := []struct {
 		name  string
