@@ -5,6 +5,10 @@ description: "Integration index for fak — the agent kernel. Any agent or frame
 
 # Run your agent through fak
 
+**Reader:** a builder choosing an integration by client, wire, and support status.
+**Lifecycle:** current · **Generation:** wire compatibility is release-independent; the `fak guard` subscription default and live token streaming on the OpenAI wire track the current build.
+**Authority:** [what fak supports](../supported/README.md) · [compatibility matrix](compatibility-matrix.md). **Proof:** `python3 examples/wire-proof/verify.py` (60s; no key, model, or GPU).
+
 You don't rewrite your agent to adopt `fak`. You point it at `fak serve` — one kernel in
 front of the agent you already run — and the same loop comes out **cheaper and
 longer-running**: the shared setup (system prompt, tools, KV cache) is computed once and
@@ -68,29 +72,34 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 
 ## Which agent do you run?
 
-| You run… | Guide |
-|---|---|
-| **Claude Code** / the Anthropic API or SDK | [`claude.md`](claude.md) |
-| **Cursor** (IDE — MCP *or* OpenAI proxy) | [`cursor.md`](cursor.md) |
-| **OpenAI Codex** / the OpenAI API or SDK | [`openai-codex.md`](openai-codex.md) |
-| **VS Code + GitHub Copilot** (IDE — OpenAI/Anthropic proxy) | [`vscode.md`](vscode.md) |
-| **Zed** (AI-native editor — OpenAI/Anthropic/MCP) | [`zed.md`](zed.md) |
-| **JetBrains IDEs** (IntelliJ/PyCharm/WebStorm/… — OpenAI/Anthropic) | [`jetbrains.md`](jetbrains.md) |
-| **Aider** (CLI pair-programmer, OpenAI wire) | [`aider.md`](aider.md) |
-| **Hermes Agent** (NousResearch self-hosted agent, OpenAI wire) | [`hermes.md`](hermes.md) |
-| **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](cline.md) |
-| **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |
-| **Roo Code** (VS Code — OpenAI-Compatible provider *or* MCP) | [`roo-code.md`](roo-code.md) |
-| **Windsurf** (Cascade agent — OpenAI-compatible proxy) | [`windsurf.md`](windsurf.md) |
-| **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
+Pick by **client**, the **wire** it speaks, and its **support** status. Support has three
+values: **`fak guard`** is a one-command launcher (starts the gateway in-process and injects
+the base URL into the child only); **guide** is a dedicated walkthrough you wire by base URL
+or MCP; a tool not listed here uses the [universal recipe](#dont-see-your-framework-the-universal-recipe)
+and is graded, sourced, in the [compatibility matrix](compatibility-matrix.md). **Default:**
+if a row offers `fak guard`, that is the shortest path.
+
+| You run… | Wire | Support | Guide |
+|---|---|---|---|
+| **Claude Code** / the Anthropic API or SDK | Anthropic Messages | `fak guard` + guide | [`claude.md`](claude.md) |
+| **OpenAI Codex** / the OpenAI API or SDK | OpenAI Chat Completions | `fak guard` + guide | [`openai-codex.md`](openai-codex.md) |
+| **Hermes Agent** (NousResearch self-hosted agent) | OpenAI Chat Completions | `fak guard` + guide | [`hermes.md`](hermes.md) |
+| **Cursor** (IDE) | MCP *or* OpenAI proxy | guide | [`cursor.md`](cursor.md) |
+| **VS Code + GitHub Copilot** (IDE) | OpenAI/Anthropic proxy | guide | [`vscode.md`](vscode.md) |
+| **Zed** (AI-native editor) | OpenAI/Anthropic/MCP | guide | [`zed.md`](zed.md) |
+| **JetBrains IDEs** (IntelliJ/PyCharm/WebStorm/…) | OpenAI/Anthropic | guide | [`jetbrains.md`](jetbrains.md) |
+| **Aider** (CLI pair-programmer) | OpenAI wire | guide | [`aider.md`](aider.md) |
+| **Cline** (VS Code) | OpenAI-Compatible provider | guide | [`cline.md`](cline.md) |
+| **Continue** (VS Code) | OpenAI (`config.yaml` `apiBase`) | guide | [`continue.md`](continue.md) |
+| **Roo Code** (VS Code) | OpenAI-Compatible *or* MCP | guide | [`roo-code.md`](roo-code.md) |
+| **Windsurf** (Cascade agent) | OpenAI-compatible proxy | guide | [`windsurf.md`](windsurf.md) |
+| **Any MCP client** | MCP | one-paste `.mcp.json` | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
 
 **On a Claude Pro/Max subscription?** [`fable5-more-usage-for-free.md`](fable5-more-usage-for-free.md)
 is the honest, dogfood-witnessed case for how `fak guard -- claude` stretches the seat you
 already pay for — the pure-fak, native-cache-excluded slice (context shedding + KV-prefix
 reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable 5 fallover),
 with every number labeled by provenance and the shed-per-fire double-count fence carried in full.
-
-**All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
 
 **Adopting from outside the repo?** The [adopter playbook](adopter-playbook.md) is the
 end-to-end, bare-serve production checklist — prerequisites → `policy.json` → auth-key
