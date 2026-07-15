@@ -32,7 +32,7 @@ it can accept the review, compatibility, and release burden of trusted code.
 
 ## Custom and agent-authored linters
 
-Use an **agent hook** by default. The linter is a separate command, receives the host's
+Use an **agent hook** by default. The concrete wire contract and conformance fixture are documented in [Custom linter subprocess ABI](integrations/custom-linters.md). The linter is a separate command, receives the host's
 versioned hook payload, and returns a structured decision. The host owns deadlines,
 output bounds, capability policy, logging, and fail-open/fail-closed behavior. A linter
 that protects a security invariant must fail closed; advisory style or telemetry checks
