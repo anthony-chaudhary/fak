@@ -4,7 +4,9 @@
 
 # fak — the Fused Agent Kernel
 
-**fak turns a tool-using agent into a managed agent.** The agent keeps its interface and model, while a fak kernel manages its model traffic, context lifetime, cache reuse, capabilities, and recovery.
+**fak turns a tool-using agent into a managed agent.**
+
+The agent keeps its interface and model, while a fak kernel manages its model traffic, context lifetime, cache reuse, capabilities, and recovery.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
@@ -42,7 +44,7 @@ For architecture, current evidence, and development workflow, start at [START-HE
 
 ## What the managed agent gains
 
-- **Less repeated work.** fak keeps shared prompt prefixes stable, sheds stale history before it is sent again, and reuses KV directly when it owns inference: **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on larger models).
+- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system—on by default, and without changing the model's output: it keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses KV directly when it owns inference. **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on larger models).
 - **Long runs keep moving.** Sessions compact their own history (up to **~107K tokens** per trim) and can resume after a crash instead of dying at the context limit.
 - **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop.
 - **Composable or standalone.** Use either capability, combine both, proxy an existing server, or run GGUF locally.
@@ -58,7 +60,7 @@ Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims 
 Start with the agent you already run—no rewrite, config file, API key, or second terminal:
 
 ```bash
-fak guard -- claude                                  # keep a Claude Pro/Max subscription
+fak guard -- claude                                  # keep a Claude Pro/Max subscription — no API key
 fak guard --provider openai -- codex                 # provider is normally auto-detected
 fak guard --policy examples/dev-agent-policy.json -- opencode
 ```
@@ -95,8 +97,8 @@ Read: [server quickstart](docs/fak/server-quickstart.md) · [serving architectur
 ## Try the kernel without a key, model, or GPU
 
 ```bash
-fak routebench                                    # COST / LATENCY / QUALITY vs a one-model baseline
-fak preflight --tool refund_payment --args "{}"   # DENY (DEFAULT_DENY): outside the capability floor
+fak routebench                                    # -> COST / LATENCY / QUALITY vs a one-model baseline
+fak preflight --tool refund_payment --args "{}"   # -> DENY (DEFAULT_DENY): outside the capability floor
 fak agent --offline                               # deterministic end-to-end agent demo
 ```
 
