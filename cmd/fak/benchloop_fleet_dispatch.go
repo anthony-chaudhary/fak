@@ -187,6 +187,16 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "agent-live" && strings.HasPrefix(req.Machine, "gcp-") {
+		// Replace the planner's <task> placeholder with the real bounded agent workload.
+		// The node reads its mode-0600 gateway credential locally; no secret enters argv
+		// or the canonical witness captured by the control point.
+		run := "export FAK_GROQ_API_KEY=$(cat $HOME/.config/fak/groq.key); go run ./cmd/fak agent -provider openai -base-url https://api.groq.com/openai/v1 -api-key-env FAK_GROQ_API_KEY -model qwen/qwen3.6-27b -max-turns 10"
+		if req.Machine == "gcp-g2-l4-32" {
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -e FAK_GROQ_API_KEY=$(cat $HOME/.config/fak/groq.key) -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/fak agent -provider openai -base-url https://api.groq.com/openai/v1 -api-key-env FAK_GROQ_API_KEY -model qwen/qwen3.6-27b -max-turns 10"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
+	}
 	if req.Benchmark == "qwen36" && strings.HasPrefix(req.Machine, "gcp-") {
 		// The planner explicitly asks for Qwen3.6 through a gateway. Each compute node
 		// launches and witnesses its own request; the provisioned credential stays in a

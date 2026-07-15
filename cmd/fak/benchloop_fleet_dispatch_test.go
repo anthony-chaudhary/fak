@@ -202,6 +202,24 @@ func TestBenchFleetQwen36UsesProvisionedGatewayRecipe(t *testing.T) {
 	}
 }
 
+func TestBenchFleetGCPAgentLiveUsesBoundedGatewayRecipe(t *testing.T) {
+	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
+		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "agent-live", Command: "go run ./cmd/fak agent --task <task>"})
+		if err != nil || state != "running" || name != "gcloud" {
+			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
+		}
+		command := strings.Join(args, " ")
+		for _, want := range []string{"FAK_BENCH_NODE=", "fak agent", "qwen/qwen3.6-27b", "api.groq.com/openai/v1", "-max-turns 10", ".config/fak/groq.key"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s: command missing %q: %q", machine, want, command)
+			}
+		}
+		if strings.Contains(command, "<task>") {
+			t.Fatalf("%s: planner placeholder leaked into command: %q", machine, command)
+		}
+	}
+}
+
 func TestBenchFleetGCPRadixUsesProvisionedRealModelRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
 		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "radix-benchmark", Command: "go run ./cmd/radixbench"})
