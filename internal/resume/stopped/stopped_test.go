@@ -507,3 +507,31 @@ func TestDecideDoneWithLiveSiblingKeepsCause(t *testing.T) {
 		t.Fatalf("mid-turn duplicate should be flagged DupOfLive with its cause preserved; skip=%+v", d.Skip)
 	}
 }
+
+func TestReplaySafetyDefersNonTransferableState(t *testing.T) {
+	rows := []Row{
+		{Disp: DispStoppedQuiet, Account: "a1", AgeMin: 1, Session: "guided", SizeKB: 1, NonTransferableState: []string{"guided_decoding"}},
+		{Disp: DispStoppedQuiet, Account: "a1", AgeMin: 2, Session: "plain", SizeKB: 1},
+	}
+	d := Decide(rows, func(string) bool { return false })
+	var blocked *Row
+	for i := range d.Defer {
+		if d.Defer[i].Session == "guided" {
+			blocked = &d.Defer[i]
+		}
+	}
+	if blocked == nil {
+		t.Fatalf("non-transferable row not deferred: %+v", d)
+	}
+	if !strings.Contains(blocked.BlockedBy, "non-transferable state") || !strings.Contains(blocked.BlockedBy, "guided_decoding") || !strings.Contains(blocked.BlockedBy, "clean continuation") {
+		t.Fatalf("blocked_by = %q", blocked.BlockedBy)
+	}
+	for _, r := range d.Resume {
+		if r.Session == "guided" {
+			t.Fatal("non-transferable row also resumed")
+		}
+	}
+	if len(d.Resume) != 1 || d.Resume[0].Session != "plain" {
+		t.Fatalf("safe row did not resume: %+v", d.Resume)
+	}
+}
