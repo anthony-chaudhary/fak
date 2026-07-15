@@ -351,6 +351,8 @@ func main() {
 		cmdServeWiring(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
+	case "goal-park":
+		cmdGoalPark(os.Args[2:])
 	case "info":
 		// The live fak-info overlay: poll a fak guard/serve gateway's /debug/vars and print
 		// one compact line per tick (cache economy + floor safety + liveness). This is the 20%

@@ -272,9 +272,14 @@ func buildPayload(lane, backend, workspace string, dryRun bool, result *launchRe
 		DryRun:    dryRun,
 		Command:   command,
 		Env: map[string]string{
-			"DISPATCH_WORKSPACE": workspace,
-			"DISPATCH_LANE":      lane,
-			"DISPATCH_BACKEND":   backend,
+			"DISPATCH_WORKSPACE":           workspace,
+			"DISPATCH_LANE":                lane,
+			"DISPATCH_BACKEND":             backend,
+			"DISPATCH_GOAL":                envOr("DISPATCH_GOAL", lane),
+			"DISPATCH_ACCOUNT":             os.Getenv("DISPATCH_ACCOUNT"),
+			"DISPATCH_POOL":                os.Getenv("DISPATCH_POOL"),
+			"DISPATCH_LEASE":               os.Getenv("DISPATCH_LEASE"),
+			"DISPATCH_WITNESS_REQUIREMENT": os.Getenv("DISPATCH_WITNESS_REQUIREMENT"),
 		},
 		Result:                   result,
 		Error:                    errMsg,
@@ -314,4 +319,11 @@ func workerModelFromCommand(command []string) string {
 		}
 	}
 	return ""
+}
+
+func envOr(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }

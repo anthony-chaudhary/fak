@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/fleetspine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/goalpark"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
@@ -961,6 +963,33 @@ func cmdGuard(argv []string) {
 	gatewayModel := guardCodexGatewayModel(command, *model, up)
 
 	wireErrors := &guardWireErrorGauge{}
+	parkStore := goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}
+	parkGoal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
+	if parkGoal == "" {
+		parkGoal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
+	}
+	parkTemplate := goalpark.Record{
+		Goal: parkGoal, Lane: os.Getenv("DISPATCH_LANE"), Account: os.Getenv("DISPATCH_ACCOUNT"),
+		Pool: os.Getenv("DISPATCH_POOL"), Lease: os.Getenv("DISPATCH_LEASE"),
+		Witness: os.Getenv("DISPATCH_WITNESS_REQUIREMENT"), Command: append([]string(nil), command...),
+	}
+	longRetryParked := false
+	observeUpstreamResponse := func(status int, header http.Header) {
+		if parkGoal == "" || longRetryParked {
+			return
+		}
+		parked, parkErr := parkStore.RecordLongRetry(status, header, time.Now(), parkTemplate)
+		if parkErr != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: long Retry-After park failed open: %v\n", parkErr)
+			return
+		}
+		if parked {
+			longRetryParked = true
+			if rec, loadErr := parkStore.Load(parkGoal); loadErr == nil {
+				fmt.Fprintf(os.Stderr, "fak guard: PARKED goal=%q parked_until=%d reason=%s account=%q pool=%q next=%q\n", rec.Goal, rec.ParkedUntil, rec.Reason, rec.Account, rec.Pool, rec.NextAction)
+			}
+		}
+	}
 
 	srv, err := gateway.New(gateway.Config{
 		EngineID: "inkernel",
@@ -975,6 +1004,7 @@ func cmdGuard(argv []string) {
 		// beyond loopback keeps the no-leak default, matching fak serve.
 		ExposeUpstreamErrorDetail:      guardLoopbackOnly(ln.Addr().String()),
 		UpstreamBadRequestNotify:       guardUpstreamBadRequestAuditNotify(auditJournal, guardTraceID),
+		UpstreamResponseObserver:       observeUpstreamResponse,
 		UpstreamTransportErrorObserver: func(err error) { wireErrors.Observe(time.Now(), err) },
 		// Re-resolve the pinned subscription OAuth token per request so a long session
 		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every

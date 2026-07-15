@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/goalpark"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -1312,6 +1313,18 @@ func guardWriteLaunchFailReport(w io.Writer, report string, enabled bool) {
 // dumpStartupOnLaunchFail spills the full startup report to stderr if the child never starts
 // (guardChildIsLaunchFailure) — set by the caller for every banner mode except --banner=full,
 // which already streamed it at boot.
+func guardGoalParked() (goalpark.Record, bool) {
+	goal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
+	if goal == "" {
+		goal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
+	}
+	if goal == "" {
+		return goalpark.Record{}, false
+	}
+	rec, err := (goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}).Load(goal)
+	return rec, err == nil && rec.ClaimedAt == 0 && rec.ParkedUntil > time.Now().Unix()
+}
+
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
 	// The startup renderer created the card and queued its control replies. Bind its
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
@@ -1340,6 +1353,10 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		runErr := windowgate.RunInNewJob(child)
+		if rec, parked := guardGoalParked(); parked {
+			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
+			break
+		}
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
 			continue
@@ -1487,6 +1504,11 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		switch event.Kind {
 		case guardChildCompleted:
 			runErr := event.RunErr
+			if rec, parked := guardGoalParked(); parked {
+				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
+				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 				command = next
 				continue
@@ -1526,6 +1548,15 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case guardChildRestart:
+			if rec, parked := guardGoalParked(); parked {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s\n", rec.ParkedUntil, rec.Reason)
+				}
+				stopGuardChild(child, wait, 2*time.Second)
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			ev := event.Restart
 			// #4609: advance or reset the no-progress counter by whether HEAD moved since the
 			// last progress checkpoint. A restart that landed a commit (HEAD advanced) resets both
