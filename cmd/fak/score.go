@@ -45,6 +45,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"loop":                cmdLoopScore,
 	"loop-index":          cmdLoopIndexScorecard,
 	"milestone":           cmdMilestoneScorecard,
+	"negation-tax":        cmdNegationTaxScore,
 	"negframe":            cmdNegframeScore,
 	"product":             func(argv []string) { os.Exit(runProductScorecard(os.Stdout, os.Stderr, argv)) },
 	"propagation":         cmdPropagationScorecard,
