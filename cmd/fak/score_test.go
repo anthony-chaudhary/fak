@@ -14,6 +14,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"brittleness",
 		"cache-health",
 		"catchup",
+		"code-quality",
 		"conflation",
 		"concept-usage",
 		"default-value",

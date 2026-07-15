@@ -19,7 +19,7 @@ func DeclaredInventory() []Gate {
 		{Name: "safecommit", Kind: Deterministic, Sources: []string{"internal/safecommit/safecommit.go", "internal/safecommit/checkerpin.go"}, SignalProbes: []SignalProbe{{Path: "internal/safecommit/safecommit.go", Contains: "GuardCheckerPin(opts.Dir, opts.CheckerBaseline)"}}, CheckerBytesPinned: true, SchemaPinned: true},
 		{Name: "antipattern", Kind: Deterministic, Sources: []string{"internal/antipattern/antipattern.go", "internal/safecommit/checkerpin.go"}, SignalProbes: []SignalProbe{{Path: "cmd/fak/antipatternscore.go", Contains: "PinCheckers"}}, CheckerBytesPinned: true, SchemaPinned: true},
 		{Name: "ship-integrity", Kind: Deterministic, Sources: []string{"internal/shipgate/shipgate.go"}, SchemaPinned: true, IndependentlyRemeasured: true},
-		{Name: "kpi-tests", Kind: Deterministic, Sources: []string{"tools/code_quality_scorecard.py", "tools/code_quality_scorecard_test.py"}, SignalProbes: []SignalProbe{{Path: "tools/code_quality_scorecard.py", Contains: "def kpi_tests("}}, SchemaPinned: true},
+		{Name: "kpi-tests", Kind: Deterministic, Sources: []string{"tools/code_quality_scorecard.py", "tools/code_quality_scorecard_test.py", "cmd/fak/codequalityscore.go"}, SignalProbes: []SignalProbe{{Path: "tools/code_quality_scorecard.py", Contains: "def kpi_tests("}, {Path: "cmd/fak/codequalityscore.go", Contains: "GuardCheckerPin(root, baseline)"}}, CheckerBytesPinned: true, SchemaPinned: true},
 	}
 }
 

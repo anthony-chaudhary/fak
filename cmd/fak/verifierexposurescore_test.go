@@ -20,7 +20,7 @@ func TestVerifierExposureScoreJSON(t *testing.T) {
 	if got.Schema != verifierexposure.Schema || got.GateCount < 6 || len(got.Worklist) != got.GateCount {
 		t.Fatalf("report=%+v", got)
 	}
-	if got.Worklist[0].Exposure < verifierexposure.DebtThreshold {
-		t.Fatalf("worst gate exposure=%.2f, want debt", got.Worklist[0].Exposure)
+	if got.VerifierExposureDebt != 0 {
+		t.Fatalf("verifier exposure debt=%d, want zero; worklist=%+v", got.VerifierExposureDebt, got.Worklist)
 	}
 }
