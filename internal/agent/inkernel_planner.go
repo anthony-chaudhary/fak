@@ -718,8 +718,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if q8fused {
 		q8fusedMark = "+fused"
 	}
-	log.Printf("inkernel_chat model=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
-		p.modelID, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+	p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
 	// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
 	// /metrics, not just this log line — the live measurement of the frozen-trajectory
 	// cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md). #3390: BOTH halves —
@@ -764,6 +763,34 @@ const inKernelRequestDeviceHeadroom = 0.15
 const inKernelRequestPressureTrimMarginRatio = 0.10
 const inKernelRequestPressureTrimMinMarginBytes = 64 << 20
 
+func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
+	backend, forwardPath := p.executionIdentity()
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
+		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS)
+}
+
+// executionIdentity makes the request log say which compute path actually produced
+// the token. q8dec remains useful CPU implementation metadata, but it must not be
+// mistaken for a fallback when a device-backed Qwen3.6 session is selected.
+func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
+	backend, forwardPath = "cpu-ref", "cpu/reference"
+	if p == nil {
+		return backend, forwardPath
+	}
+	if p.backend != nil {
+		backend, forwardPath = p.backend.Name(), "device/generic"
+	}
+	if p.m != nil && p.m.Cfg.IsQwen35Hybrid() {
+		if p.backend != nil {
+			// Model.NewBackendSession has already validated the structural GDN
+			// contract before this request can complete. Name its stable path here.
+			forwardPath = model.Qwen35GDNCUDAPath
+		} else {
+			forwardPath = "cpu/qwen35-gdn-reference"
+		}
+	}
+	return backend, forwardPath
+}
 func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error {
 	if p == nil || p.backend == nil || p.m == nil {
 		return nil
