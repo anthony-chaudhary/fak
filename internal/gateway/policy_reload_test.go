@@ -15,7 +15,7 @@ func TestPolicyReloadRouteInvokesConfiguredReloader(t *testing.T) {
 	calls := 0
 	srv.reloadPolicy = func(context.Context) (PolicyReloadResponse, error) {
 		calls++
-		return PolicyReloadResponse{Reloaded: true, Source: "floor.json", Summary: "posture: fail_closed"}, nil
+		return PolicyReloadResponse{Reloaded: true, Source: "floor.json", Summary: "posture: fail_closed", EffectiveDigest: "sha256:effective"}, nil
 	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -32,7 +32,7 @@ func TestPolicyReloadRouteInvokesConfiguredReloader(t *testing.T) {
 	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if calls != 1 || !resp.Reloaded || resp.Source != "floor.json" {
+	if calls != 1 || !resp.Reloaded || resp.Source != "floor.json" || resp.EffectiveDigest != "sha256:effective" {
 		t.Fatalf("calls=%d response=%+v, want one reload with source", calls, resp)
 	}
 }

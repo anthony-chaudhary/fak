@@ -1086,7 +1086,11 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 			fmt.Fprintln(os.Stderr, "fak policy reload warning:", overlayWarning)
 			summary += "\n" + overlayWarning
 		}
-		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary}, nil
+		policyBytes, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return gateway.PolicyReloadResponse{}, readErr
+		}
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary, EffectiveDigest: guardCurrentEffectivePolicyDigest(policyBytes)}, nil
 	}
 }
 
@@ -1111,7 +1115,7 @@ func guardPolicyReloader(policyPath string) gateway.PolicyReloadFunc {
 			fmt.Fprintln(os.Stderr, "fak guard reload warning:", overlayWarning)
 			summary += "\n" + overlayWarning
 		}
-		return gateway.PolicyReloadResponse{Reloaded: true, Source: "built-in guard floor + operator allow overlay", Summary: summary}, nil
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: "built-in guard floor + operator allow overlay", Summary: summary, EffectiveDigest: guardCurrentEffectivePolicyDigest(guardDefaultPolicyJSON)}, nil
 	}
 }
 

@@ -748,9 +748,10 @@ type PolicyReloadFunc func(context.Context) (PolicyReloadResponse, error)
 
 // PolicyReloadResponse is the wire result of POST /v1/fak/policy/reload.
 type PolicyReloadResponse struct {
-	Reloaded bool   `json:"reloaded"`
-	Source   string `json:"source,omitempty"`
-	Summary  string `json:"summary,omitempty"`
+	Reloaded        bool   `json:"reloaded"`
+	Source          string `json:"source,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	EffectiveDigest string `json:"effective_digest,omitempty"`
 }
 
 // RouteReloadResponse is the wire result of POST /v1/fak/route/reload — the outcome

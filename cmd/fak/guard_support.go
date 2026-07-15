@@ -505,6 +505,40 @@ func guardPolicyDigest(policyBytes []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// guardEffectivePolicyDigest identifies the floor actually enforced by guard. An
+// empty allow overlay deliberately retains the historical base-manifest digest so
+// existing attestations remain stable. A non-empty overlay is normalized and folded
+// into a domain-separated digest, making two guards with the same base manifest but
+// different operator grants distinguishable.
+func guardEffectivePolicyDigest(policyBytes []byte, ov guardAllowOverlay) string {
+	ov.Allow = guardAllowNormalize(ov.Allow)
+	ov.AllowPrefix = guardAllowNormalize(ov.AllowPrefix)
+	if len(ov.Allow) == 0 && len(ov.AllowPrefix) == 0 {
+		return guardPolicyDigest(policyBytes)
+	}
+	ov.Version = guardAllowOverlayVersion
+	overlayBytes, err := json.Marshal(ov)
+	if err != nil {
+		panic(fmt.Sprintf("marshal normalized guard allow overlay: %v", err))
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte("fak.guard.effective-policy/v1\x00"))
+	_, _ = h.Write(policyBytes)
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(overlayBytes)
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func guardCurrentEffectivePolicyDigest(policyBytes []byte) string {
+	ov, err := loadGuardAllowOverlay(guardAllowOverlayPath())
+	if err != nil {
+		// Reload tolerates a malformed out-of-band overlay and enforces the base
+		// floor, so its attestation must identify that same effective runtime.
+		ov = guardAllowOverlay{Version: guardAllowOverlayVersion}
+	}
+	return guardEffectivePolicyDigest(policyBytes, ov)
+}
+
 func guardAuditPathHash(root string) string {
 	abs, err := filepath.Abs(root)
 	if err == nil {
