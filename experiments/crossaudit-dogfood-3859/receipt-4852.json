@@ -1,0 +1,275 @@
+{
+  "receipt": {
+    "schema": "fak-crossaudit-receipt/v2",
+    "audit_key": "audit:v2:5734a60ce2f9ce212e534a0333f144ef9db346c693229608110c2e68b5db06b8",
+    "subject": {
+      "issue_number": 4852,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/4852",
+      "issue_state": "CLOSED",
+      "title": "fix(guard): move large Claude print prompts off Windows argv",
+      "commit_sha": "e08673c861aa31df774ac0befa518d9a3c111a47",
+      "diff_sha256": "sha256:22a01f616a10ef86b236f42e15113ec6efc59155c5b9ead1d033e657f87a1be5",
+      "digest": "sha256:fafce3f02b86d82b8392ba6218e5ca4e50ed0495ec570ea6032fd515c5f13378"
+    },
+    "author": {
+      "harness": "claude-cli",
+      "provider": "anthropic",
+      "family": "claude",
+      "model": "opus",
+      "weights_revision": "claude-opus-4-8-service-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "high",
+      "provenance_source": "issue-4844-operator-comment",
+      "driver": "claude"
+    },
+    "auditor": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "provenance_source": "codex-cli-readback",
+      "driver": "codex"
+    },
+    "independence": {
+      "admitted": true,
+      "verdict": "ADMIT",
+      "rule": "audit-independence/v1",
+      "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+      "reason": "ADMIT_INDEPENDENT"
+    },
+    "policy_version": "audit-independence/v1",
+    "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:44e4a5cfc229aef3b64790a141e0f73342e92220eacc84ea0631a78c46fda88e",
+    "verdict": "PASS",
+    "severity": "NONE",
+    "reason": "The closing patch moves Windows Claude -p/--print prompts of at least 7 KiB from argv to stdin before broker admission, preserves prompt bytes and remaining arguments, and leaves small, non-Claude, and non-Windows launches unchanged. Added regression tests exercise a 40 KiB prompt and exact stdin bytes; the closure evidence also records CI, DOS commit audit, and a successful live Windows canary.",
+    "evidence_refs": [
+      {
+        "kind": "git-commit",
+        "ref": "e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "test-path",
+        "ref": "cmd/fak/guard_prompt_transport_test.go"
+      },
+      {
+        "kind": "github-check-runs",
+        "ref": "anthony-chaudhary/fak@e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "dos-commit-audit",
+        "ref": "commit:e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "github-closure",
+        "ref": "author-manifest:e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "auditor",
+        "ref": "closing-patch-0001"
+      },
+      {
+        "kind": "auditor",
+        "ref": "cmd/fak/guard_prompt_transport_test.go"
+      },
+      {
+        "kind": "auditor",
+        "ref": "anthony-chaudhary/fak@e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "auditor",
+        "ref": "commit:e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "auditor",
+        "ref": "comment-0001-ic_kwdotbla088aaaabknv3bw"
+      },
+      {
+        "kind": "issue",
+        "ref": "https://github.com/anthony-chaudhary/fak/issues/4852"
+      },
+      {
+        "kind": "commit",
+        "ref": "e08673c861aa31df774ac0befa518d9a3c111a47"
+      },
+      {
+        "kind": "diff",
+        "ref": "e08673c861aa31df774ac0befa518d9a3c111a47",
+        "sha256": "sha256:22a01f616a10ef86b236f42e15113ec6efc59155c5b9ead1d033e657f87a1be5"
+      },
+      {
+        "kind": "audit-bundle",
+        "ref": "fak-issue-audit-bundle/v1",
+        "sha256": "sha256:fafce3f02b86d82b8392ba6218e5ca4e50ed0495ec570ea6032fd515c5f13378"
+      }
+    ],
+    "identity_digest": "sha256:e8657a3981f2f83e730d689ebde5b9c810c750800162ed900ec855488f4838af",
+    "evidence_digest": "sha256:73b43ab4897eda0caf4978c20c92582073b436d637005da3e8f9c0554d318aa9",
+    "timing": {
+      "started_at_unix_nano": 1784120235101917300,
+      "completed_at_unix_nano": 1784120284082323200,
+      "duration_nanos": 48980405900
+    },
+    "usage": {
+      "measured": false,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_micros_usd": 0,
+      "currency": "USD",
+      "basis": "unreported"
+    },
+    "receipt_digest": "sha256:4946ec177baf48e96d167f0e856c5d3ce2793608296a27ac05beadda84babeed"
+  },
+  "ledger": {
+    "row": {
+      "schema": "fak-crossaudit-ledger-row/v1",
+      "seq": 3,
+      "appended_at_unix_nano": 1784120284085512700,
+      "audit_key": "audit:v2:5734a60ce2f9ce212e534a0333f144ef9db346c693229608110c2e68b5db06b8",
+      "receipt": {
+        "schema": "fak-crossaudit-receipt/v2",
+        "audit_key": "audit:v2:5734a60ce2f9ce212e534a0333f144ef9db346c693229608110c2e68b5db06b8",
+        "subject": {
+          "issue_number": 4852,
+          "issue_url": "https://github.com/anthony-chaudhary/fak/issues/4852",
+          "issue_state": "CLOSED",
+          "title": "fix(guard): move large Claude print prompts off Windows argv",
+          "commit_sha": "e08673c861aa31df774ac0befa518d9a3c111a47",
+          "diff_sha256": "sha256:22a01f616a10ef86b236f42e15113ec6efc59155c5b9ead1d033e657f87a1be5",
+          "digest": "sha256:fafce3f02b86d82b8392ba6218e5ca4e50ed0495ec570ea6032fd515c5f13378"
+        },
+        "author": {
+          "harness": "claude-cli",
+          "provider": "anthropic",
+          "family": "claude",
+          "model": "opus",
+          "weights_revision": "claude-opus-4-8-service-2026-07-15",
+          "account_class": "cli-auth",
+          "endpoint_class": "hosted-cli",
+          "reasoning_posture": "high",
+          "provenance_source": "issue-4844-operator-comment",
+          "driver": "claude"
+        },
+        "auditor": {
+          "harness": "codex-cli",
+          "provider": "openai",
+          "family": "gpt",
+          "model": "gpt-5.6-sol",
+          "weights_revision": "service-revision-unreported-2026-07-15",
+          "account_class": "cli-auth",
+          "endpoint_class": "hosted-cli",
+          "reasoning_posture": "xhigh",
+          "provenance_source": "codex-cli-readback",
+          "driver": "codex"
+        },
+        "independence": {
+          "admitted": true,
+          "verdict": "ADMIT",
+          "rule": "audit-independence/v1",
+          "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+          "reason": "ADMIT_INDEPENDENT"
+        },
+        "policy_version": "audit-independence/v1",
+        "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+        "prompt_version": "issue-resolution-audit/v2",
+        "prompt_digest": "sha256:44e4a5cfc229aef3b64790a141e0f73342e92220eacc84ea0631a78c46fda88e",
+        "verdict": "PASS",
+        "severity": "NONE",
+        "reason": "The closing patch moves Windows Claude -p/--print prompts of at least 7 KiB from argv to stdin before broker admission, preserves prompt bytes and remaining arguments, and leaves small, non-Claude, and non-Windows launches unchanged. Added regression tests exercise a 40 KiB prompt and exact stdin bytes; the closure evidence also records CI, DOS commit audit, and a successful live Windows canary.",
+        "evidence_refs": [
+          {
+            "kind": "git-commit",
+            "ref": "e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "test-path",
+            "ref": "cmd/fak/guard_prompt_transport_test.go"
+          },
+          {
+            "kind": "github-check-runs",
+            "ref": "anthony-chaudhary/fak@e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "dos-commit-audit",
+            "ref": "commit:e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "github-closure",
+            "ref": "author-manifest:e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "auditor",
+            "ref": "closing-patch-0001"
+          },
+          {
+            "kind": "auditor",
+            "ref": "cmd/fak/guard_prompt_transport_test.go"
+          },
+          {
+            "kind": "auditor",
+            "ref": "anthony-chaudhary/fak@e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "auditor",
+            "ref": "commit:e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "auditor",
+            "ref": "comment-0001-ic_kwdotbla088aaaabknv3bw"
+          },
+          {
+            "kind": "issue",
+            "ref": "https://github.com/anthony-chaudhary/fak/issues/4852"
+          },
+          {
+            "kind": "commit",
+            "ref": "e08673c861aa31df774ac0befa518d9a3c111a47"
+          },
+          {
+            "kind": "diff",
+            "ref": "e08673c861aa31df774ac0befa518d9a3c111a47",
+            "sha256": "sha256:22a01f616a10ef86b236f42e15113ec6efc59155c5b9ead1d033e657f87a1be5"
+          },
+          {
+            "kind": "audit-bundle",
+            "ref": "fak-issue-audit-bundle/v1",
+            "sha256": "sha256:fafce3f02b86d82b8392ba6218e5ca4e50ed0495ec570ea6032fd515c5f13378"
+          }
+        ],
+        "identity_digest": "sha256:e8657a3981f2f83e730d689ebde5b9c810c750800162ed900ec855488f4838af",
+        "evidence_digest": "sha256:73b43ab4897eda0caf4978c20c92582073b436d637005da3e8f9c0554d318aa9",
+        "timing": {
+          "started_at_unix_nano": 1784120235101917300,
+          "completed_at_unix_nano": 1784120284082323200,
+          "duration_nanos": 48980405900
+        },
+        "usage": {
+          "measured": false,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "cost_micros_usd": 0,
+          "currency": "USD",
+          "basis": "unreported"
+        },
+        "receipt_digest": "sha256:4946ec177baf48e96d167f0e856c5d3ce2793608296a27ac05beadda84babeed"
+      },
+      "prev_hash": "sha256:97c382379135603c61c255ea48cfc5415115b56996a3f5e117326e2c3967204d",
+      "hash": "sha256:3b2ad512a96a9d48910264eb82cad0eac208526dcf5dd577a65a31cff77761c5"
+    },
+    "appended": true,
+    "duplicate": false,
+    "cursor": {
+      "schema": "fak-crossaudit-ledger-cursor/v1",
+      "rows": 3,
+      "head_hash": "sha256:3b2ad512a96a9d48910264eb82cad0eac208526dcf5dd577a65a31cff77761c5"
+    }
+  }
+}

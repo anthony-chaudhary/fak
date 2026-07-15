@@ -1,0 +1,161 @@
+{
+  "schema": "fak.crossaudit.scorecard.v1",
+  "ok": false,
+  "verdict": "ACTION",
+  "grade": "F",
+  "finding": "audit loop NOT green: dark-loop,coverage-incomplete,open-findings (audited 3/5, dark_loop=true)",
+  "reason": "background audit loop is not running; 1 auditor provider(s) unavailable",
+  "next_action": "restore the audit loop: bring the auditor provider back, restart the loop, or clear dead letters — an unobserved loop is a security-theater claim",
+  "debts": [
+    "dark-loop",
+    "coverage-incomplete",
+    "open-findings"
+  ],
+  "alarms": [
+    "background audit loop is not running",
+    "1 auditor provider(s) unavailable"
+  ],
+  "coverage": {
+    "eligible": 5,
+    "records": 3,
+    "attempted": 3,
+    "audited": 3,
+    "pending": 2,
+    "missing": 2,
+    "unavailable_only": 0,
+    "audited_rate": 0.6,
+    "attempted_rate": 0.6,
+    "rate_basis": "audited (completed) / eligible; UNAVAILABLE and REFUSED are not audited"
+  },
+  "independence": {
+    "total": 3,
+    "admitted": 3,
+    "refused": 0,
+    "unknown": 0,
+    "admitted_rate": 1,
+    "rate_basis": "admitted / all records; refused and unknown shown separately"
+  },
+  "quality": {
+    "verdicts": [
+      {
+        "name": "INCONCLUSIVE",
+        "count": 1
+      },
+      {
+        "name": "PASS",
+        "count": 1
+      },
+      {
+        "name": "REFUTE",
+        "count": 1
+      }
+    ],
+    "severities": [
+      {
+        "name": "UNKNOWN",
+        "count": 1
+      }
+    ],
+    "completed": 3,
+    "passes": 1,
+    "findings": 1,
+    "pass_rate": 0.333,
+    "pass_rate_basis": "PASS / completed audits — an independence-checked no-refutation rate, NOT a correctness rate",
+    "per_class_yield": [
+      {
+        "class": "accidental-corpus",
+        "completed": 1,
+        "refutes": 1,
+        "yield_rate": 1
+      },
+      {
+        "class": "calibration",
+        "completed": 1,
+        "refutes": 0,
+        "yield_rate": 0
+      },
+      {
+        "class": "guard-transport",
+        "completed": 1,
+        "refutes": 0,
+        "yield_rate": 0
+      }
+    ]
+  },
+  "model_mix": {
+    "authors": [
+      {
+        "name": "gpt-5.6-sol",
+        "count": 2
+      },
+      {
+        "name": "opus",
+        "count": 1
+      }
+    ],
+    "auditors": [
+      {
+        "name": "opus",
+        "count": 2
+      },
+      {
+        "name": "gpt-5.6-sol",
+        "count": 1
+      }
+    ],
+    "calibrations": [
+      {
+        "name": "audit-independence/v1",
+        "count": 3
+      }
+    ]
+  },
+  "economics": {
+    "records": 3,
+    "token_sample_count": 2,
+    "input_tokens": 64107,
+    "output_tokens": 809,
+    "total_tokens": 64916,
+    "cost_sample_count": 0,
+    "cost_micros_usd": 0,
+    "cost_basis_counts": [
+      {
+        "name": "unreported",
+        "count": 2
+      }
+    ],
+    "latency_sample_count": 3,
+    "total_duration_nanos": 103862059000,
+    "avg_duration_nanos": 34620686333
+  },
+  "health": {
+    "loop_present": true,
+    "loop_running": false,
+    "last_tick_age_nanos": 0,
+    "stale": false,
+    "pending_issues": 2,
+    "inflight_issues": 0,
+    "retries": 0,
+    "dead_letters": 0,
+    "providers": [
+      {
+        "name": "anthropic",
+        "available": true
+      },
+      {
+        "name": "openai",
+        "available": true
+      },
+      {
+        "name": "local",
+        "available": false
+      }
+    ],
+    "unavailable_providers": 1,
+    "unavailable_audits": 0,
+    "newest_record_age_nanos": 0,
+    "oldest_record_age_nanos": 0,
+    "freshness_sample_count": 0,
+    "dark_loop": true
+  }
+}

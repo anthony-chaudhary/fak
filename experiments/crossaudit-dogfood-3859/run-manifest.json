@@ -1,0 +1,13 @@
+{
+  "schema":"fak-crossaudit-dogfood-run/v1",
+  "max_subjects":8,
+  "max_provider_cost_micros_usd":3000000,
+  "sample_rule":"recent closed security/trust and model-runtime leaves, fixed before audit outcomes",
+  "subjects":[
+    {"issue":3853,"class":"accidental-corpus","author_class":"gpt-codex","auditor":"claude-high","ground_truth":"git/dos/test readback"},
+    {"issue":3854,"class":"calibration","author_class":"gpt-codex","auditor":"claude-high","ground_truth":"report hash + ci-preflight"},
+    {"issue":4852,"class":"guard-transport","author_class":"claude","auditor":"gpt-xhigh","ground_truth":"live canary + tests + ancestry"},
+    {"issue":4853,"class":"model-runtime","author_class":"unknown","auditor":"diverse quorum","status":"not-yet","reason":"author provenance unresolved and quorum runner not exposed by single-audit CLI"},
+    {"issue":0,"class":"local-open-weight","author_class":"local","auditor":"hosted reciprocal","status":"not-yet","reason":"no authenticated sanctioned-node bridge active in this session"}
+  ]
+}

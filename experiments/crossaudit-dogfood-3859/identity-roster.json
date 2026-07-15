@@ -1,0 +1,7 @@
+{
+  "schema": "fak-audit-identity-roster/v1",
+  "aliases": [
+    {"alias":"gpt-5.6-sol","canonical_model":"gpt-5.6-sol","provider":"openai","family":"gpt","weights_revision":"service-revision-unreported-2026-07-15","provenance_source":"codex-cli-readback"},
+    {"alias":"opus","canonical_model":"opus","provider":"anthropic","family":"claude","weights_revision":"claude-opus-4-8-service-2026-07-15","provenance_source":"claude-cli-readback"}
+  ]
+}

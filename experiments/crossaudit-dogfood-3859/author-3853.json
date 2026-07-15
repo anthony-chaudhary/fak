@@ -1,0 +1,6 @@
+{
+  "schema":"fak-crossaudit-author/v1",
+  "author":{"harness":"codex-cli","provider":"openai","family":"gpt","model":"gpt-5.6-sol","weights_revision":"service-revision-unreported-2026-07-15","account_class":"cli-auth","endpoint_class":"hosted-cli","reasoning_posture":"xhigh","provenance_source":"operator-session-record","driver":"codex"},
+  "source_evidence":[{"kind":"git-commit","ref":"a34dda0dc603d124bf66a9fe858c683ec3ae3129"}],
+  "commit_range":"a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+}

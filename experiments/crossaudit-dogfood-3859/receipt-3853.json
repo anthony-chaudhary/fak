@@ -1,0 +1,291 @@
+{
+  "receipt": {
+    "schema": "fak-crossaudit-receipt/v2",
+    "audit_key": "audit:v2:cf8355c5f01ea13af741f31e9900acdddd5d2934599289c2bb7df3fc1f4d7804",
+    "subject": {
+      "issue_number": 3853,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/3853",
+      "issue_state": "CLOSED",
+      "title": "test(crossaudit): accidental silent-corruption corpus - incomplete fixes, regressions, stale contracts, races, and build poison",
+      "commit_sha": "a34dda0dc603d124bf66a9fe858c683ec3ae3129",
+      "diff_sha256": "sha256:c1f71b02607f7eb563abc597673daa980dbdd10fed05353e99462b12189dc42e",
+      "digest": "sha256:dd8d03c472fa051dde9d20ac7b7bc4a5b87feb05b8a9066fa9c6f953847b849e"
+    },
+    "author": {
+      "harness": "codex-cli",
+      "provider": "openai",
+      "family": "gpt",
+      "model": "gpt-5.6-sol",
+      "weights_revision": "service-revision-unreported-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "xhigh",
+      "provenance_source": "operator-session-record",
+      "driver": "codex"
+    },
+    "auditor": {
+      "harness": "claude-cli",
+      "provider": "anthropic",
+      "family": "claude",
+      "model": "opus",
+      "weights_revision": "claude-opus-4-8-service-2026-07-15",
+      "account_class": "cli-auth",
+      "endpoint_class": "hosted-cli",
+      "reasoning_posture": "high",
+      "provenance_source": "claude-cli-readback",
+      "driver": "claude"
+    },
+    "independence": {
+      "admitted": true,
+      "verdict": "ADMIT",
+      "rule": "audit-independence/v1",
+      "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+      "reason": "ADMIT_INDEPENDENT"
+    },
+    "policy_version": "audit-independence/v1",
+    "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+    "prompt_version": "issue-resolution-audit/v2",
+    "prompt_digest": "sha256:a302f8e820175d2c6b758e5e1e7be8a07b8c09346e0f74d35043611144346bfd",
+    "verdict": "REFUTE",
+    "severity": "UNKNOWN",
+    "reason": "The corpus does not execute or independently derive the claimed external witnesses. buildAccidentalFixture chooses PASS/FAIL directly from the corrupt label and embeds that value in an evidence-ref string; runAccidentalWitness then only regex-matches that same string. The label-flip test therefore proves internal consistency with a label-derived marker, not that corrupt fixtures fail and clean fixtures pass an external behavioral witness. The bundle also supplies test and CI references but no test output or check-run result establishing the acceptance gate.",
+    "evidence_refs": [
+      {
+        "kind": "git-commit",
+        "ref": "a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+      },
+      {
+        "kind": "test-path",
+        "ref": "internal/modelroute/crossaudit_accidental_corpus_test.go"
+      },
+      {
+        "kind": "github-check-runs",
+        "ref": "anthony-chaudhary/fak@a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+      },
+      {
+        "kind": "dos-commit-audit",
+        "ref": "commit:a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+      },
+      {
+        "kind": "github-closure",
+        "ref": "author-manifest:a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+      },
+      {
+        "kind": "auditor",
+        "ref": "closing-patch-0001:buildAccidentalFixture"
+      },
+      {
+        "kind": "auditor",
+        "ref": "closing-patch-0001:runAccidentalWitness"
+      },
+      {
+        "kind": "auditor",
+        "ref": "closing-patch-0001:TestAccidentalCorpusLabelFlipBreaksSelfCheck"
+      },
+      {
+        "kind": "auditor",
+        "ref": "contract-done-condition"
+      },
+      {
+        "kind": "auditor",
+        "ref": "contract-acceptance-gate"
+      },
+      {
+        "kind": "auditor",
+        "ref": "internal/modelroute/crossaudit_accidental_corpus_test.go"
+      },
+      {
+        "kind": "auditor",
+        "ref": "anthony-chaudhary/fak@a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+      },
+      {
+        "kind": "issue",
+        "ref": "https://github.com/anthony-chaudhary/fak/issues/3853"
+      },
+      {
+        "kind": "commit",
+        "ref": "a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+      },
+      {
+        "kind": "diff",
+        "ref": "a34dda0dc603d124bf66a9fe858c683ec3ae3129",
+        "sha256": "sha256:c1f71b02607f7eb563abc597673daa980dbdd10fed05353e99462b12189dc42e"
+      },
+      {
+        "kind": "audit-bundle",
+        "ref": "fak-issue-audit-bundle/v1",
+        "sha256": "sha256:dd8d03c472fa051dde9d20ac7b7bc4a5b87feb05b8a9066fa9c6f953847b849e"
+      }
+    ],
+    "identity_digest": "sha256:a8acedb38785c408164a52e824036d105ffe7a8da9dd44ce1b4e482817223c9a",
+    "evidence_digest": "sha256:4f54faea878086f77bd7d93491e4d5bd40d603c2915f4db50cc4521689062bd1",
+    "timing": {
+      "started_at_unix_nano": 1784120113406471400,
+      "completed_at_unix_nano": 1784120149207623200,
+      "duration_nanos": 35801151800
+    },
+    "usage": {
+      "measured": true,
+      "input_tokens": 28969,
+      "output_tokens": 396,
+      "total_tokens": 29365,
+      "cost_micros_usd": 0,
+      "currency": "USD",
+      "basis": "unreported"
+    },
+    "receipt_digest": "sha256:19bbf160dfa1af6991144c56668d6800bd84e9197c6d41523ba9b5746108e442"
+  },
+  "ledger": {
+    "row": {
+      "schema": "fak-crossaudit-ledger-row/v1",
+      "seq": 1,
+      "appended_at_unix_nano": 1784120149208902600,
+      "audit_key": "audit:v2:cf8355c5f01ea13af741f31e9900acdddd5d2934599289c2bb7df3fc1f4d7804",
+      "receipt": {
+        "schema": "fak-crossaudit-receipt/v2",
+        "audit_key": "audit:v2:cf8355c5f01ea13af741f31e9900acdddd5d2934599289c2bb7df3fc1f4d7804",
+        "subject": {
+          "issue_number": 3853,
+          "issue_url": "https://github.com/anthony-chaudhary/fak/issues/3853",
+          "issue_state": "CLOSED",
+          "title": "test(crossaudit): accidental silent-corruption corpus - incomplete fixes, regressions, stale contracts, races, and build poison",
+          "commit_sha": "a34dda0dc603d124bf66a9fe858c683ec3ae3129",
+          "diff_sha256": "sha256:c1f71b02607f7eb563abc597673daa980dbdd10fed05353e99462b12189dc42e",
+          "digest": "sha256:dd8d03c472fa051dde9d20ac7b7bc4a5b87feb05b8a9066fa9c6f953847b849e"
+        },
+        "author": {
+          "harness": "codex-cli",
+          "provider": "openai",
+          "family": "gpt",
+          "model": "gpt-5.6-sol",
+          "weights_revision": "service-revision-unreported-2026-07-15",
+          "account_class": "cli-auth",
+          "endpoint_class": "hosted-cli",
+          "reasoning_posture": "xhigh",
+          "provenance_source": "operator-session-record",
+          "driver": "codex"
+        },
+        "auditor": {
+          "harness": "claude-cli",
+          "provider": "anthropic",
+          "family": "claude",
+          "model": "opus",
+          "weights_revision": "claude-opus-4-8-service-2026-07-15",
+          "account_class": "cli-auth",
+          "endpoint_class": "hosted-cli",
+          "reasoning_posture": "high",
+          "provenance_source": "claude-cli-readback",
+          "driver": "claude"
+        },
+        "independence": {
+          "admitted": true,
+          "verdict": "ADMIT",
+          "rule": "audit-independence/v1",
+          "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+          "reason": "ADMIT_INDEPENDENT"
+        },
+        "policy_version": "audit-independence/v1",
+        "policy_digest": "sha256:f910e134bf6f398f0196dae36cc487bcc628e580fb4ad65632aeebc69f009187",
+        "prompt_version": "issue-resolution-audit/v2",
+        "prompt_digest": "sha256:a302f8e820175d2c6b758e5e1e7be8a07b8c09346e0f74d35043611144346bfd",
+        "verdict": "REFUTE",
+        "severity": "UNKNOWN",
+        "reason": "The corpus does not execute or independently derive the claimed external witnesses. buildAccidentalFixture chooses PASS/FAIL directly from the corrupt label and embeds that value in an evidence-ref string; runAccidentalWitness then only regex-matches that same string. The label-flip test therefore proves internal consistency with a label-derived marker, not that corrupt fixtures fail and clean fixtures pass an external behavioral witness. The bundle also supplies test and CI references but no test output or check-run result establishing the acceptance gate.",
+        "evidence_refs": [
+          {
+            "kind": "git-commit",
+            "ref": "a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+          },
+          {
+            "kind": "test-path",
+            "ref": "internal/modelroute/crossaudit_accidental_corpus_test.go"
+          },
+          {
+            "kind": "github-check-runs",
+            "ref": "anthony-chaudhary/fak@a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+          },
+          {
+            "kind": "dos-commit-audit",
+            "ref": "commit:a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+          },
+          {
+            "kind": "github-closure",
+            "ref": "author-manifest:a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+          },
+          {
+            "kind": "auditor",
+            "ref": "closing-patch-0001:buildAccidentalFixture"
+          },
+          {
+            "kind": "auditor",
+            "ref": "closing-patch-0001:runAccidentalWitness"
+          },
+          {
+            "kind": "auditor",
+            "ref": "closing-patch-0001:TestAccidentalCorpusLabelFlipBreaksSelfCheck"
+          },
+          {
+            "kind": "auditor",
+            "ref": "contract-done-condition"
+          },
+          {
+            "kind": "auditor",
+            "ref": "contract-acceptance-gate"
+          },
+          {
+            "kind": "auditor",
+            "ref": "internal/modelroute/crossaudit_accidental_corpus_test.go"
+          },
+          {
+            "kind": "auditor",
+            "ref": "anthony-chaudhary/fak@a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+          },
+          {
+            "kind": "issue",
+            "ref": "https://github.com/anthony-chaudhary/fak/issues/3853"
+          },
+          {
+            "kind": "commit",
+            "ref": "a34dda0dc603d124bf66a9fe858c683ec3ae3129"
+          },
+          {
+            "kind": "diff",
+            "ref": "a34dda0dc603d124bf66a9fe858c683ec3ae3129",
+            "sha256": "sha256:c1f71b02607f7eb563abc597673daa980dbdd10fed05353e99462b12189dc42e"
+          },
+          {
+            "kind": "audit-bundle",
+            "ref": "fak-issue-audit-bundle/v1",
+            "sha256": "sha256:dd8d03c472fa051dde9d20ac7b7bc4a5b87feb05b8a9066fa9c6f953847b849e"
+          }
+        ],
+        "identity_digest": "sha256:a8acedb38785c408164a52e824036d105ffe7a8da9dd44ce1b4e482817223c9a",
+        "evidence_digest": "sha256:4f54faea878086f77bd7d93491e4d5bd40d603c2915f4db50cc4521689062bd1",
+        "timing": {
+          "started_at_unix_nano": 1784120113406471400,
+          "completed_at_unix_nano": 1784120149207623200,
+          "duration_nanos": 35801151800
+        },
+        "usage": {
+          "measured": true,
+          "input_tokens": 28969,
+          "output_tokens": 396,
+          "total_tokens": 29365,
+          "cost_micros_usd": 0,
+          "currency": "USD",
+          "basis": "unreported"
+        },
+        "receipt_digest": "sha256:19bbf160dfa1af6991144c56668d6800bd84e9197c6d41523ba9b5746108e442"
+      },
+      "prev_hash": "",
+      "hash": "sha256:f4f1a33914b83a042223f03070496cdcfa048316be503537a4e58fc5f4bfcbf0"
+    },
+    "appended": true,
+    "duplicate": false,
+    "cursor": {
+      "schema": "fak-crossaudit-ledger-cursor/v1",
+      "rows": 1,
+      "head_hash": "sha256:f4f1a33914b83a042223f03070496cdcfa048316be503537a4e58fc5f4bfcbf0"
+    }
+  }
+}

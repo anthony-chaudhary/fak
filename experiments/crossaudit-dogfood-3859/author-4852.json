@@ -1,0 +1,6 @@
+{
+  "schema":"fak-crossaudit-author/v1",
+  "author":{"harness":"claude-cli","provider":"anthropic","family":"claude","model":"opus","weights_revision":"claude-opus-4-8-service-2026-07-15","account_class":"cli-auth","endpoint_class":"hosted-cli","reasoning_posture":"high","provenance_source":"issue-4844-operator-comment","driver":"claude"},
+  "source_evidence":[{"kind":"git-commit","ref":"e08673c861aa31df774ac0befa518d9a3c111a47"}],
+  "commit_range":"e08673c861aa31df774ac0befa518d9a3c111a47"
+}
