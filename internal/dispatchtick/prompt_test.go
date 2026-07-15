@@ -174,6 +174,76 @@ func TestIssuePromptGenerationGuidanceDefaultsUnclassified(t *testing.T) {
 	}
 }
 
+func TestIssuePromptRendersOriginQualityChecks(t *testing.T) {
+	// #1987 acceptance: the rendered packet for a QA-dogfood issue names the per-lane
+	// origin-quality checks (each with its command, expected artifact, and refusal
+	// mode), plus the at-origin score-control line the #1961 spine's done condition
+	// requires. This is the Go parity of tools/issue_worker_prompt.py's
+	// _origin_quality_checks, on the live internal/dispatchtick render path.
+	in := sampleIssuePrompt()
+	in.Lane = "gateway"
+	in.Body = "<!-- fak-qa-dogfood-spine:QD-027 -->\nThe root control belongs at the packet origin."
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"origin-quality checks (run these where the work is created, BEFORE final handoff - the at-origin QA-dogfood rule, #1961):",
+		"- lane gate (gateway): command `go test ./internal/gateway -count=1` + `go vet ./internal/gateway`",
+		"expected artifact: a green package test + clean vet",
+		"refusal mode: an upward/cross-tier import reds architest (`ARCH_LAYER_VIOLATION`)",
+		"- full gate (every lane): command `make ci`",
+		"- at-origin score control (QA-dogfood spine):",
+		"record the result in your final report BEFORE handoff",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing origin-quality check %q:\n%s", want, p)
+		}
+	}
+	// Steering precedes data: the origin checks render before the raw issue body.
+	if strings.Index(p, "origin-quality checks") > strings.Index(p, "issue body (verbatim") {
+		t.Fatalf("origin-quality checks should render before the raw issue body:\n%s", p)
+	}
+}
+
+func TestIssuePromptOriginChecksVaryByLaneAndDogfood(t *testing.T) {
+	// The check SET is per-lane (not one global list), and the at-origin score-control
+	// line is gated on QA-dogfood-spine membership. A plain (non-dogfood) issue carries
+	// the lane + full gate but NOT the score-control line; the score control is also
+	// reachable via the track/E-testing-quality label, not only the body marker.
+	cases := []struct {
+		lane      string
+		wantGate  string
+		wantRefus string
+	}{
+		{"tools", "command `python tools/<touched>_test.py`", "`REASON_NEW_PYTHON_TOOL`"},
+		{"docs", "command `make claims-lint`", "[SHIPPED]/[SIMULATED]/[STUB]"},
+		{"abi", "command `go test ./internal/abi -count=1`", "`CORE_SELF_MODIFY`"},
+		{"cmd", "command `go test ./cmd/fak -count=1`", "`ARCH_LAYER_VIOLATION`"},
+	}
+	for _, tc := range cases {
+		in := sampleIssuePrompt()
+		in.Lane = tc.lane
+		in.Body = "A plain issue, no dogfood marker."
+		in.Labels = []string{"enhancement"}
+		p := RenderIssuePrompt(in)
+		if !strings.Contains(p, "- lane gate ("+tc.lane+"): "+tc.wantGate) {
+			t.Fatalf("lane %q: missing its own gate line %q:\n%s", tc.lane, tc.wantGate, p)
+		}
+		if !strings.Contains(p, tc.wantRefus) {
+			t.Fatalf("lane %q: missing its refusal mode %q:\n%s", tc.lane, tc.wantRefus, p)
+		}
+		if strings.Contains(p, "at-origin score control (QA-dogfood spine)") {
+			t.Fatalf("lane %q: plain (non-dogfood) issue must NOT carry the at-origin score control:\n%s", tc.lane, p)
+		}
+	}
+	// The track label alone (no body marker) is enough to arm the at-origin score control.
+	in := sampleIssuePrompt()
+	in.Body = "No marker in this body."
+	in.Labels = []string{"enhancement", "track/E-testing-quality"}
+	p := RenderIssuePrompt(in)
+	if !strings.Contains(p, "at-origin score control (QA-dogfood spine)") {
+		t.Fatalf("track/E-testing-quality label should arm the at-origin score control:\n%s", p)
+	}
+}
+
 func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
 	in := sampleIssuePrompt()
 	in.Body = strings.Join([]string{
