@@ -4,80 +4,91 @@
 
 # fak — the Fused Agent Kernel
 
-**Same agent, smaller bill. Wrap Claude Code, Codex, or Cursor in one command — cheaper, self-resuming, and checked on every tool call.**
+**Reuse the expensive setup. Keep long agent runs alive. Check every tool call. Run it around an agent you already use, or serve models through it as a standalone gateway.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
 <!-- readme-verified: 2026-07-15 vs VERSION 0.41.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
-fak is one small program you run in front of the agent you already use. Your model, IDE, and keys don't change.
+`fak` is one Go binary with two first-class entry points:
 
-```bash
-fak guard -- claude   # run it in front of your agent: your Pro/Max plan, no API key, every tool call gets a verdict
+| Bring your agent | Bring your client or model |
+|---|---|
+| **`fak guard`** wraps Claude Code, Codex, opencode, or another agent. Keep its normal interface and model; add cache coordination, self-resuming sessions, and a verdict before every tool call. | **`fak serve`** exposes OpenAI, Anthropic, and MCP interfaces. Put it before Ollama, vLLM, SGLang, llama.cpp, or a cloud API—or load GGUF weights directly and let fak stand on its own. |
+| `fak guard -- claude` | `fak serve --base-url http://localhost:11434/v1 --model qwen2.5:1.5b` |
+
+**Pick a path:** [wrap an agent](#wrap-an-agent-fak-guard) · [serve a model or API](#serve-a-model-or-api-fak-serve) · [15-minute tutorial](docs/fak/tutorial.md) · [install](#install)
+
+```mermaid
+flowchart LR
+    A[Existing agent] -->|fak guard| K[fak kernel]
+    C[OpenAI / Anthropic / MCP client] -->|fak serve| K
+    K --> R[cache reuse + context lifetime]
+    K --> P[tool-call policy]
+    K --> U[cloud, local server, or in-kernel GGUF]
 ```
 
-**Pick your path:** [wrap your agent](#start-in-one-command) · [run it at the level you need](#run-it-at-the-level-you-need) · [15-min tutorial — no key, no GPU](docs/fak/tutorial.md) · [see it on video](visuals/hero-video.mp4) · [install](#install)
+## Why run a kernel between agents and tools?
 
-## Why people run it
+- **Less repeated work.** fak keeps shared prompt prefixes stable, sheds stale history before it is sent again, and reuses KV directly when it owns inference: **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on larger models).
+- **Long runs keep moving.** Sessions compact their own history (up to **~107K tokens** per trim) and can resume after a crash instead of dying at the context limit.
+- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS against a reviewable capability floor—**362 ns** in process, with no policy model or network hop.
+- **Composable or standalone.** Use either capability, combine both, proxy an existing server, or run GGUF locally.
 
-- 💸 **Pay less for the same run** — **~4.1× less work than a tuned warm-cache stack** (up to **6.95×** on bigger models). Every agent shares one cached setup instead of rebuilding it each turn, on top of your provider's cache discount.
-- 🛟 **Sessions that don't die.** Long runs trim their own history (**~107K tokens** per trim at the high end) and restart themselves after a crash — you never babysit the context window.
-- 🔒 **You stay in control.** Every tool call gets an ALLOW / DENY verdict against a reviewable allow-list before it runs: **362 ns**, in-process, no model in the loop, no network hop.
-- 🔌 **Nothing to rewrite.** Drop it in front of Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Your model, IDE, and keys stay exactly as they are.
-
-Every number here traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag — `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`.
-
-## Same agent, a fraction of the bill
+Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims ledger](CLAIMS.md).
 
 <p align="center">
-  <img src="visuals/75-token-savings-frontdoor.svg" alt="Token-economics card measured over 495 real fak guard sessions: 74.8% of API cost avoided versus a no-cache, no-compaction counterfactual priced at list (OBSERVED). The saving is shown as two independent tracks, side by side and never blended into one number — the provider's own prompt-cache rebate ($3,264 avoided, OBSERVED) and fak's compaction-shed ($3,404 avoided, WITNESSED, 686M context tokens shed). fak_share = 42.4% of the saving is fak-authored. SOTA companions: 4.1x less work than a tuned warm-cache stack, and an 86.7% KV-cache hit rate = 100% of optimal." width="900">
+  <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token-economics summary for real fak guard sessions, separating provider prompt-cache rebates from fak-authored compaction savings and comparing fak with a tuned warm-cache baseline." width="900">
 </p>
 
-The savings aren't "fak randomly drops turns." fak's core job is to make several **caching layers work together safely** instead of fighting each other, all on by default: it keeps the cached prompt prefix **byte-identical** so the provider's prompt-cache discount never busts, sheds stale mid-session history before you pay to re-send it, and — when fak runs the model itself — owns the KV cache directly for exact prefix reuse. One coordinated system, and it never changes your model's answers. Across **495 real guarded sessions** that added up to **74.8%** of the API cost avoided (OBSERVED, versus a no-cache / no-compaction counterfactual priced at list); the card keeps each source's saving side by side, never blended — the provider's own rebate and fak's own compaction-shed (686M context tokens dropped). Against the *best already-shipped* alternative, a **tuned warm-cache stack**, the reuse win is **~4.1×**.
+## Wrap an agent: `fak guard`
 
-Every dollar traces to `fak cachevalue report` and its WITNESSED / OBSERVED ledgers; the reuse multipliers trace to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Plain-English tour of the defaults: [what "managed cache" is](docs/explainers/what-is-managed-cache.md).
-
-## Start in one command
-
-Wrap the agent you already run — no rewrite, no config file, no second terminal:
+Start with the agent you already run—no rewrite, config file, API key, or second terminal:
 
 ```bash
-fak guard -- claude                                   # your Claude Code on your Pro/Max plan — no API key needed
-fak guard --api-key-env ANTHROPIC_API_KEY -- claude   # bill the Anthropic API instead
-fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # any OpenAI-compatible agent
+fak guard -- claude                                  # keep a Claude Pro/Max subscription
+fak guard --provider openai -- codex                 # provider is normally auto-detected
+fak guard --policy examples/dev-agent-policy.json -- opencode
 ```
 
-Your credential passes through untouched; every tool call on that boundary gets a verdict, and on exit you get a savings-and-decisions summary. Proof a real `/v1/messages` turn crossed the gateway: [docs/integrations/claude.md](docs/integrations/claude.md).
+Your model wire and credentials pass through unchanged. API billing is opt-in with `--api-key-env`; a local model with `--gguf` or `--local`. On exit, fak reports savings and decisions.
 
-**Try it now — no key, no GPU** (install is one line, [below](#install)):
+Read: [Claude Code walkthrough](docs/integrations/claude.md) · [Codex](docs/integrations/openai-codex.md) · [Cursor](docs/integrations/cursor.md) · [all supported hosts](docs/supported/README.md) · [policy guide](POLICY.md)
+
+## Serve a model or API: `fak serve`
+
+Use fak as a shared OpenAI, Anthropic, or MCP endpoint, with reuse, compaction, routing, observability, authentication, and policy in one place.
+
+**Front an existing local or remote model server:**
 
 ```bash
-fak routebench                                    # -> COST / LATENCY / QUALITY vs a one-model baseline
-fak preflight --tool refund_payment --args "{}"   # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
+fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 \
+  --model qwen2.5:1.5b \
+  --policy examples/dev-agent-policy.json
 ```
 
-## Run it at the level you need
+**Or stand alone with GGUF weights—no separate model server:**
 
-fak isn't only a wrapper. The same kernel scales up — from a drop-in in front of your agent, to running a model itself, to an always-on service that comes up on its own — carrying the same policy floor and cache coordination at every level.
+```bash
+fak serve --addr 127.0.0.1:8080 \
+  --gguf /path/to/model.gguf \
+  --model my-local-model
+```
 
-| Level | Run | What you get |
-|---|---|---|
-| **Wrap your agent** *(start here)* | `fak guard -- claude` | your Pro/Max plan, no API key, a verdict on every tool call |
-| **A local model in the kernel** | `fak guard --gguf qwen2.5:7b -- claude` | **~120 tok/s** on a single RTX 4070, no key, no network — a quality ramp, not a frontier coder |
-| **An always-on service** | `fak node` installs `fak serve` as a system service | the kernel comes up on its own; any OpenAI/Anthropic client or MCP host points at it |
-| **Codex / Cursor / MCP hosts** | keep your normal model wire; ask the kernel for verdicts over MCP | the policy floor without touching your agent |
+Point OpenAI clients at `http://127.0.0.1:8080/v1` and Anthropic clients at the bare host. Use `--stdio` for MCP or `fak node install` for an always-on service. Your inference backend stays in place; fak owns cross-request reuse and the agent/tool boundary.
 
-Tested live with Claude Code, opencode, and Codex; 41 of 47 surveyed harnesses connect with a single base-URL change. Deep links: [local head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md) · [node setup](docs/fak/node-setup.md) · [the serving side](docs/serving/README.md) · [Codex](docs/integrations/openai-codex.md) · [Cursor](docs/integrations/cursor.md) · [the catalogue](docs/supported/README.md).
+Read: [server quickstart](docs/fak/server-quickstart.md) · [serving architecture and engines](docs/serving/README.md) · [configuration](docs/fak/server-config.md) · [API reference](docs/fak/api-reference.md) · [deployment](docs/fak/deployment-guide.md)
 
-## Every tool call gets a verdict
+## Try the kernel without a key, model, or GPU
 
-The speed seam doubles as a safety floor at no extra cost. A tool call crosses the kernel before it runs and comes back ALLOW, DENY, TRANSFORM, or REQUIRE_WITNESS — logged with a fixed reason code you can test against (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Untrusted result bytes are quarantined before they can become the model's next instruction. The floor is a JSON file you copy, trim, and test — no model in the loop; starter floors ship for coding, support, DevOps, trading, and clinical/PHI. Point at one with `fak guard --policy examples/<file>`. More: [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) · [the tool call is a syscall](docs/explainers/tool-call-is-a-syscall.md).
+```bash
+fak routebench                                    # COST / LATENCY / QUALITY vs a one-model baseline
+fak preflight --tool refund_payment --args "{}"   # DENY (DEFAULT_DENY): outside the capability floor
+fak agent --offline                               # deterministic end-to-end agent demo
+```
 
-<p align="center">
-  <img src="visuals/74-session-effectiveness.svg" alt="One fak guard session, replayed from its decision journal: 1,720 hash-chained tool-call decisions over a 7h 11m unattended run — 99.77% allowed to proceed, the 4 dangerous calls blocked (an off-policy git action at the git gate, three tainted-data sinks at the IFC gate), zero hash-chain breaks, across 22 distinct tools. A timeline shows verdicts kept pace across the whole run; a work-mix bar breaks the calls into explore/execute/author/mcp/orchestrate/schedule." width="900">
-</p>
-
-One real `fak guard` run, replayed from its hash-chained decision journal: an agent worked **7 hours unattended** while the kernel put a verdict on **every one of 1,720 tool calls** — waving the work through, blocking only the four that were dangerous, and chaining every decision into a record that can't be edited after the fact. Nothing about it is special; it's the default shape of any agent behind the gate. Every number recomputes from the journal into a checkable [stats sidecar](visuals/74-session-effectiveness.stats.json); the per-verdict cost traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
+The policy floor is JSON, not a second model. Copy a manifest from [`examples/`](examples/), trim it, and test it before a model runs. [How the boundary works](docs/explainers/tool-call-is-a-syscall.md).
 
 ## Install
 
@@ -85,35 +96,14 @@ One real `fak guard` run, replayed from its hash-chained decision journal: an ag
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
-Go 1.26+ is required (as of 2026-07-15; source: [`go.mod`](go.mod)); no external Go dependencies, no `go.sum`. From a clone: `go build -o fak ./cmd/fak`. Prebuilt archives and containers: [INSTALL.md](INSTALL.md). Build/test/ship: [CONTRIBUTING.md](CONTRIBUTING.md).
+Go 1.26+; no external Go dependencies. Source builds, archives, and containers: [INSTALL.md](INSTALL.md).
 
-## The honest fence
+## Where to go next
 
-For raw token throughput, reach for vLLM or SGLang — fak is the agent kernel around them, not a replacement. Prompt-injection classifiers help, but tool authority comes from your policy file, not the model. Keep irreversible or data-exfiltrating tools off the allow-list. Full list: [what fak is not](docs/explainers/what-fak-is-not.md).
+- **Use it:** [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md)
+- **Operate it:** [serving](docs/serving/README.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
+- **Understand it:** [managed cache](docs/explainers/what-is-managed-cache.md) · [agent integration architecture](docs/fak/agent-integration-architecture.md) · [concepts and story](docs/concepts-and-story.md)
+- **Verify it:** [benchmarks](BENCHMARK-AUTHORITY.md) · [claims ledger](CLAIMS.md) · [reproduction packet](docs/repro-packet.md)
+- **Build it:** [contributing](CONTRIBUTING.md) · [security](SECURITY.md) · [full documentation index](docs/index.md)
 
-## Docs
-
-Going deeper starts at the [front-page overflow](docs/README-legacy.md) — why now, the per-domain use-case catalogue, model routing, vCache, Slack sessions, and everything moved off this page.
-
-| If you want... | Read |
-|---|---|
-| Guided first session (15 min) · absolute-beginner start | [docs/fak/tutorial.md](docs/fak/tutorial.md) · [START-HERE.md](START-HERE.md) |
-| Which do I run — gateway, agent runtime, or client? | [docs/explainers/runtime-vs-client.md](docs/explainers/runtime-vs-client.md) |
-| The serving side — run a model behind the gateway, ride vLLM/SGLang, scale out KV | [docs/serving/README.md](docs/serving/README.md) |
-| Install + the four usage tiers | [GETTING-STARTED.md](GETTING-STARTED.md) · [LEARNING-PATH.md](LEARNING-PATH.md) |
-| Long sessions / cache · you never manage context | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) · [docs/explainers/you-never-manage-the-context-window.md](docs/explainers/you-never-manage-the-context-window.md) |
-| What "managed cache" is, in plain English | [docs/explainers/what-is-managed-cache.md](docs/explainers/what-is-managed-cache.md) |
-| Capability floor (policy) · security model | [POLICY.md](POLICY.md) · [docs/fak/security.md](docs/fak/security.md) |
-| CLI verbs · supported models / engines / harnesses | [docs/cli-reference.md](docs/cli-reference.md) · [docs/supported/README.md](docs/supported/README.md) |
-| Every feature, by subsystem, with honest status (shipped / simulated / stub) | [docs/supported/features.md](docs/supported/features.md) |
-| Benchmark authority · gallery · honesty ledger | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) · [BENCHMARK-GALLERY.md](BENCHMARK-GALLERY.md) · [CLAIMS.md](CLAIMS.md) |
-| Machine-readable map | [llms.txt](llms.txt) |
-
----
-
-<p align="center">
-  <strong>When in doubt, <code>fak</code> it out.</strong><br>
-  <sub><em>Once you go fak, you never go back · Give a fak — ship on trunk · Don't take our word for it, take a fak's</em></sub>
-</p>
-
-License: [Apache-2.0](LICENSE).
+Apache-2.0. Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
