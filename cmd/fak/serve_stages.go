@@ -202,6 +202,12 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 // group and wires the rank-local forward; the dialed group lands on rt.epGroup and
 // is closed by cmdServe's deferred closeEPGroup.
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
+	// This header-only forward gate precedes expert-shard derivation and
+	// loadServeInKernelModel, which owns memory planning and tensor payload reads.
+	pf, err := preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)
+	must(err)
+	writeServeBackendForwardPreflight(os.Stderr, pf)
+
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
 	// (potentially multi-second) load is measured as part of time-to-ready and its
 	// phase breakdown is on /metrics, rather than a lazy cost paid on first request.
