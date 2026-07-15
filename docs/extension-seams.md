@@ -96,3 +96,7 @@ A new extension point is incomplete until it declares:
 
 If those fields cannot be stated, the code is not yet an extension contract; it is an ad
 hoc callback.
+
+## Common descriptor and local proof
+
+The discovery envelope is `fak-extension-descriptor/1` in `internal/market`; see [`docs/integrations/extension-descriptors.md`](integrations/extension-descriptors.md). Its adapters cover ABI engines, compute backends, TUI panes, quality checks, and trajectory scorers. Enumeration is inert. Artifact and witness digests become evidence only after local re-verification; executable registrants remain `trusted-compiled`.
