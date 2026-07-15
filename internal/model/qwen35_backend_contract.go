@@ -7,20 +7,13 @@ import (
 )
 
 // Qwen35GDNCUDAPath is the production path identity reserved for a Qwen3.5/3.6
-// Gated-DeltaNet/SSM token mixer implemented by the CUDA compute backend. Merely
-// returning this string is not readiness: NewBackendSessionChecked continues to
-// refuse the path until the model HAL actually invokes Qwen35GDNDecode.
+// Gated-DeltaNet/SSM token mixer implemented by the CUDA compute backend.
 const Qwen35GDNCUDAPath = "cuda/qwen35-gdn-ssm-decode-v1"
 
-// Qwen35GDNParityCosineMin is the explicit acceptance floor for the future
-// deterministic CUDA fixture against the existing f32 CPU/reference semantics.
-// It records a requirement, not a witnessed CUDA pass.
+// Qwen35GDNParityCosineMin is the deterministic device/reference acceptance floor.
 const Qwen35GDNParityCosineMin = 0.999
 
-// Qwen35GDNBackend is the intended whole-operation CUDA/HAL seam for the hybrid
-// token mixer. No production backend implements it yet; the contract exists so a
-// future CUDA leaf has a concrete operation to implement and parity-test rather
-// than advertising a marker while falling through to generic QKV or host code.
+// Qwen35GDNBackend is the whole-operation CUDA/HAL seam for the hybrid token mixer.
 // The signature uses only compute-owned and built-in types, so a compute backend
 // can implement it structurally without importing model and creating a cycle.
 type Qwen35GDNBackend interface {
@@ -33,6 +26,10 @@ type Qwen35GDNBackend interface {
 		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
 		rmsNormEpsilon float32,
 	) (output, nextConvState, nextRecurrentState compute.Tensor, err error)
+}
+
+type qwen35GDNPathMarker interface {
+	Qwen35GDNPath() string
 }
 
 // UnsupportedBackendForwardError is the fail-closed verdict returned when a
@@ -54,21 +51,26 @@ func (e *UnsupportedBackendForwardError) Error() string {
 	)
 }
 
-// ValidateBackendForwardPath checks the architecture/backend pair before a HAL
-// session is constructed. A nil backend means the caller selected no HAL (the
-// legacy NewSession CPU/reference path) and remains valid; NewBackendSessionChecked
-// resolves its nil argument to compute.Default before calling this method. A
-// recognized qwen35-family hybrid with any compute backend fails closed today:
-// CUDA has no Qwen35GDNBackend implementation, and the model HAL has no branch that
-// invokes the operation even if a marker-only test double claims it. The latter
-// check is intentional; capability advertisement alone must never turn into readiness.
-func (m *Model) ValidateBackendForwardPath(be compute.Backend) error {
-	if m == nil || be == nil || !m.Cfg.IsQwen35Hybrid() {
+// ValidateBackendForwardConfig checks an architecture/backend pair without requiring a
+// constructed or weight-loaded Model. Serve header preflight can therefore refuse a
+// missing, marker-only, or wrong-path hybrid backend before it allocates model storage.
+// A nil backend still means the caller selected the legacy CPU/reference path; that path
+// remains admitted and never enters the compute HAL.
+func ValidateBackendForwardConfig(cfg Config, be compute.Backend) error {
+	if be == nil || !cfg.IsQwen35Hybrid() {
 		return nil
 	}
-	reason := "backend does not implement model.Qwen35GDNBackend"
-	if gdn, ok := be.(Qwen35GDNBackend); ok {
-		reason = fmt.Sprintf("backend advertises Qwen35GDNBackend path %q, but the model HAL does not yet dispatch linear-attention layers through Qwen35GDNDecode", gdn.Qwen35GDNPath())
+	gdn, ok := be.(Qwen35GDNBackend)
+	if ok && gdn.Qwen35GDNPath() == Qwen35GDNCUDAPath {
+		return nil
+	}
+	reason := "backend does not structurally implement model.Qwen35GDNBackend"
+	if marker, marked := be.(qwen35GDNPathMarker); marked {
+		if !ok {
+			reason = fmt.Sprintf("backend advertises marker path %q but does not structurally implement model.Qwen35GDNBackend", marker.Qwen35GDNPath())
+		} else {
+			reason = fmt.Sprintf("backend implements model.Qwen35GDNBackend with wrong path %q", marker.Qwen35GDNPath())
+		}
 	}
 	return &UnsupportedBackendForwardError{
 		Backend:         be.Name(),
@@ -77,4 +79,14 @@ func (m *Model) ValidateBackendForwardPath(be compute.Backend) error {
 		ParityCosineMin: Qwen35GDNParityCosineMin,
 		Reason:          reason,
 	}
+}
+
+// ValidateBackendForwardPath is the Model-bound twin retained for callers that already
+// constructed a Model. All admission logic lives in ValidateBackendForwardConfig so the
+// pre-load and session-construction decisions cannot drift.
+func (m *Model) ValidateBackendForwardPath(be compute.Backend) error {
+	if m == nil {
+		return nil
+	}
+	return ValidateBackendForwardConfig(m.Cfg, be)
 }

@@ -57,7 +57,13 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 	if gr, ok := be.(interface{ GraphReset() }); ok {
 		gr.GraphReset()
 	}
-	return &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor)}, nil
+	s := &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor)}
+	if m.Cfg.IsQwen35Hybrid() {
+		// ValidateBackendForwardPath already proved this exact structural capability and
+		// path identity before KV or weight allocation.
+		s.initQwen35HALState(be.(Qwen35GDNBackend))
+	}
+	return s, nil
 }
 
 // Close releases device-resident HAL state owned by this session. Legacy sessions have
@@ -66,9 +72,14 @@ func (s *Session) Close() {
 	if s == nil || s.Backend == nil {
 		return
 	}
+	if s.halClosed {
+		return
+	}
+	s.halClosed = true
 	if b, ok := s.Backend.(batchBackend); ok {
 		b.FlushBatch()
 	}
+	s.closeQwen35HALState()
 	if s.halW != nil {
 		for name, t := range s.halW {
 			s.Backend.Free(t)
@@ -322,6 +333,7 @@ const (
 // backend it is held to that backend's argmax/cosine gate, never the exact rungs. The output
 // mode lets prompt ingestion skip discarded logits and greedy decode use a device argmax.
 func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tensor, int) {
+	s.ensureOpenBackendSession()
 	be := s.Backend
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -376,6 +388,10 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// step is left uncaptured: its topology differs from the decode graph, and it never warms
 	// the logits path, so it must not be the step that instantiates the reused exec.
 	gr, canGraph := be.(graphBackend)
+	// The current CUDA GDN whole operation synchronizes before success, and the retained
+	// full-attention correctness bridge performs bounded host readback for partial RoPE /
+	// output gating. Neither is legal inside a reusable graph capture.
+	canGraph = canGraph && !cfg.IsQwen35Hybrid()
 	capturing := false
 	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()
@@ -413,50 +429,58 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		p := func(str string) string { return layerName(l, str) }
-		var q, kRaw, v compute.Tensor
-		inputNorm := s.weightHAL(p("input_layernorm.weight"))
-		if fused, ok := be.(rmsNormMatMul3Backend); ok && !cfg.AttentionBias {
-			q, kRaw, v = fused.RMSNormMatMul3(
-				s.matWeightHAL(p("self_attn.q_proj.weight")),
-				s.matWeightHAL(p("self_attn.k_proj.weight")),
-				s.matWeightHAL(p("self_attn.v_proj.weight")),
-				x,
-				inputNorm,
-				eps,
-			)
+		if cfg.IsQwen35Hybrid() {
+			if cfg.isLinearAttnLayer(l) {
+				s.qwen35LinearHAL(l, x, eps)
+			} else {
+				s.qwen35FullAttentionHAL(l, pos, x, eps, scale, grp)
+			}
 		} else {
-			xn := be.RMSNorm(x, inputNorm, eps)
-			if fused, ok := be.(matMul3Backend); ok && !cfg.AttentionBias {
-				q, kRaw, v = fused.MatMul3(
+			var q, kRaw, v compute.Tensor
+			inputNorm := s.normWeightHAL(p("input_layernorm.weight"))
+			if fused, ok := be.(rmsNormMatMul3Backend); ok && !cfg.AttentionBias {
+				q, kRaw, v = fused.RMSNormMatMul3(
 					s.matWeightHAL(p("self_attn.q_proj.weight")),
 					s.matWeightHAL(p("self_attn.k_proj.weight")),
 					s.matWeightHAL(p("self_attn.v_proj.weight")),
-					xn,
+					x,
+					inputNorm,
+					eps,
 				)
 			} else {
-				q = be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
-				kRaw = be.MatMul(s.matWeightHAL(p("self_attn.k_proj.weight")), xn)
-				v = be.MatMul(s.matWeightHAL(p("self_attn.v_proj.weight")), xn)
+				xn := be.RMSNorm(x, inputNorm, eps)
+				if fused, ok := be.(matMul3Backend); ok && !cfg.AttentionBias {
+					q, kRaw, v = fused.MatMul3(
+						s.matWeightHAL(p("self_attn.q_proj.weight")),
+						s.matWeightHAL(p("self_attn.k_proj.weight")),
+						s.matWeightHAL(p("self_attn.v_proj.weight")),
+						xn,
+					)
+				} else {
+					q = be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+					kRaw = be.MatMul(s.matWeightHAL(p("self_attn.k_proj.weight")), xn)
+					v = be.MatMul(s.matWeightHAL(p("self_attn.v_proj.weight")), xn)
+				}
 			}
-		}
-		if cfg.AttentionBias {
-			be.AddBias(q, s.weightHAL(p("self_attn.q_proj.bias")))
-			be.AddBias(kRaw, s.weightHAL(p("self_attn.k_proj.bias")))
-			be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))
-		}
-		q = rope(q, pos, nH, hd, cfg.RopeTheta)
-		if appender, ok := s.halKV.(kvRoPEAppender); ok {
-			appender.AppendKVRoPE(l, kRaw, v, pos, nKV, hd, cfg.RopeTheta)
-		} else {
-			k := be.RoPE(kRaw, pos, nKV, hd, cfg.RopeTheta)
-			s.halKV.AppendKV(l, kRaw, k, v, pos)
-		}
+			if cfg.AttentionBias {
+				be.AddBias(q, s.weightHAL(p("self_attn.q_proj.bias")))
+				be.AddBias(kRaw, s.weightHAL(p("self_attn.k_proj.bias")))
+				be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))
+			}
+			q = rope(q, pos, nH, hd, cfg.RopeTheta)
+			if appender, ok := s.halKV.(kvRoPEAppender); ok {
+				appender.AppendKVRoPE(l, kRaw, v, pos, nKV, hd, cfg.RopeTheta)
+			} else {
+				k := be.RoPE(kRaw, pos, nKV, hd, cfg.RopeTheta)
+				s.halKV.AppendKV(l, kRaw, k, v, pos)
+			}
 
-		attnOut := be.Attention(q, s.halKV, l, true, grp, scale)
-		addMatMul(x, s.matWeightHAL(p("self_attn.o_proj.weight")), attnOut)
+			attnOut := be.Attention(q, s.halKV, l, true, grp, scale)
+			addMatMul(x, s.matWeightHAL(p("self_attn.o_proj.weight")), attnOut)
+		}
 
 		var g, u compute.Tensor
-		postAttnNorm := s.weightHAL(p("post_attention_layernorm.weight"))
+		postAttnNorm := s.normWeightHAL(p("post_attention_layernorm.weight"))
 		if fused, ok := be.(rmsNormMatMul2Backend); ok {
 			g, u = fused.RMSNormMatMul2(
 				s.matWeightHAL(p("mlp.gate_proj.weight")),
@@ -506,7 +530,7 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 		finishGraph()
 		return compute.Tensor{}, 0
 	}
-	finalNorm := s.weightHAL("model.norm.weight")
+	finalNorm := s.normWeightHAL("model.norm.weight")
 	if mode == halArgmax {
 		if fused, ok := be.(rmsNormMatMulArgmaxBackend); ok && !capturing && !useQ8Weights {
 			next := fused.RMSNormMatMulArgmax(s.lmHeadHAL(), x, finalNorm, eps)
@@ -575,6 +599,7 @@ func (s *Session) recycleHALToken() {
 }
 
 func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
+	s.ensureOpenBackendSession()
 	if len(ids) == 0 {
 		return nil
 	}

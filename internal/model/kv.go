@@ -47,6 +47,15 @@ type Session struct {
 	// noLogits prefill step never touches the logits path, so counting steps (the old
 	// halStep>=2 gate) did not guarantee it was warm; this flag does.
 	halLogitsWarm bool
+	// qwen35HAL owns the backend-resident convolution/recurrent state for every
+	// Qwen3.5/3.6 linear-attention layer. It is separate from Cache.linear, which is
+	// the legacy CPU/reference object's state and is never consulted by a HAL session.
+	qwen35HAL *qwen35HALState
+	// halClosed makes Close idempotent and prevents an operation failure from falling
+	// through to the legacy CPU path on a later request. halFailure is the witnessed
+	// backend error re-raised by any attempted reuse of that failed session.
+	halClosed  bool
+	halFailure error
 
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
 	glmDsaHeadNameLogged bool
@@ -737,6 +746,7 @@ func (s *Session) Step(id int) []float32 {
 		return s.head(s.tokenHiddenMiniMax(id, s.Cache.Len()))
 	}
 	if s.Backend != nil {
+		s.ensureOpenBackendSession()
 		return s.token(id, s.halKV.Len())
 	}
 	if s.PrecisionPolicy != nil {

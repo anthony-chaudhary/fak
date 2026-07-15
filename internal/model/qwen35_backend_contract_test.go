@@ -9,10 +9,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// refusingQwen35CUDA wraps the real cpu-ref Backend surface but identifies as
-// CUDA and records the generic ops that would constitute the forbidden fallback.
-// The production Model is real; this wrapper exists only to prove the checked
-// constructor refuses before any generic QKV/attention operator can execute.
 type refusingQwen35CUDA struct {
 	compute.Backend
 	matmuls   int
@@ -31,12 +27,98 @@ func (b *refusingQwen35CUDA) Attention(q compute.Tensor, kv compute.KVStore, lay
 	return b.Backend.Attention(q, kv, layer, causal, grp, scale)
 }
 
-// claimedQwen35CUDA proves that a capability marker alone cannot bypass the
-// refusal while the model HAL has no Qwen35GDNDecode dispatch branch.
-type claimedQwen35CUDA struct{ *refusingQwen35CUDA }
+type markerOnlyQwen35CUDA struct{ *refusingQwen35CUDA }
 
-func (*claimedQwen35CUDA) Qwen35GDNPath() string { return Qwen35GDNCUDAPath }
-func (*claimedQwen35CUDA) Qwen35GDNDecode(
+func (*markerOnlyQwen35CUDA) Qwen35GDNPath() string { return Qwen35GDNCUDAPath }
+
+var errInjectedQwen35GDN = errors.New("injected Qwen35 GDN operation failure")
+
+// recordingQwen35Backend is a model-dispatch witness, not a second GDN oracle. Its
+// Qwen35GDNDecode implementation delegates the normalized input to the existing
+// Session.linearAttnStep CPU/reference object, while the outer HAL remains the production
+// implementation under test. Calls made by the operation use the embedded backend directly,
+// so wrapper Read/Host counters expose only forbidden model-side fallback.
+type recordingQwen35Backend struct {
+	compute.Backend
+	model           *Model
+	reference       *Session
+	linearLayers    []int
+	gdnCalls        int
+	attentionCalls  int
+	attentionLayers []int
+	hostCalls       int
+	readCalls       int
+	matmulSites     []string
+	classes         []compute.MemoryClass
+	sites           []string
+	tensorSites     map[compute.Buffer]string
+	freeCalls       map[compute.Buffer]int
+	stateIdentity   map[int][2]compute.Buffer
+	stateTicks      map[compute.Buffer]float32
+	stateContinuous bool
+	badRoute        string
+	failAt          int
+}
+
+func newRecordingQwen35Backend(m *Model) *recordingQwen35Backend {
+	b := &recordingQwen35Backend{
+		Backend:         compute.Default(),
+		model:           m,
+		reference:       m.NewSession(),
+		tensorSites:     make(map[compute.Buffer]string),
+		freeCalls:       make(map[compute.Buffer]int),
+		stateIdentity:   make(map[int][2]compute.Buffer),
+		stateTicks:      make(map[compute.Buffer]float32),
+		stateContinuous: true,
+	}
+	for l := 0; l < m.Cfg.NumLayers; l++ {
+		if m.Cfg.isLinearAttnLayer(l) {
+			b.linearLayers = append(b.linearLayers, l)
+		}
+	}
+	return b
+}
+
+func (b *recordingQwen35Backend) Name() string                    { return "recording-cuda" }
+func (b *recordingQwen35Backend) Tier() string                    { return "recording" }
+func (b *recordingQwen35Backend) Class() compute.CorrectnessClass { return compute.Approx }
+func (*recordingQwen35Backend) Qwen35GDNPath() string             { return Qwen35GDNCUDAPath }
+
+func (b *recordingQwen35Backend) UploadClass(t compute.Tensor, as compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	out := b.Backend.Upload(t, as)
+	b.classes = append(b.classes, class)
+	b.sites = append(b.sites, site)
+	b.tensorSites[out.Buf()] = site
+	return out
+}
+
+func (b *recordingQwen35Backend) Host(t compute.Tensor) ([]float32, bool) {
+	b.hostCalls++
+	return b.Backend.Host(t)
+}
+
+func (b *recordingQwen35Backend) Read(t compute.Tensor) []float32 {
+	b.readCalls++
+	return b.Backend.Read(t)
+}
+
+func (b *recordingQwen35Backend) Free(t compute.Tensor) {
+	b.freeCalls[t.Buf()]++
+	b.Backend.Free(t)
+}
+
+func (b *recordingQwen35Backend) MatMul(w, x compute.Tensor) compute.Tensor {
+	b.matmulSites = append(b.matmulSites, b.tensorSites[w.Buf()])
+	return b.Backend.MatMul(w, x)
+}
+
+func (b *recordingQwen35Backend) Attention(q compute.Tensor, kv compute.KVStore, layer int, causal bool, grp int, scale float32) compute.Tensor {
+	b.attentionCalls++
+	b.attentionLayers = append(b.attentionLayers, layer)
+	return b.Backend.Attention(q, kv, layer, causal, grp, scale)
+}
+
+func (b *recordingQwen35Backend) Qwen35GDNDecode(
 	normalizedInput,
 	inProjQKV, inProjZ, inProjB, inProjA,
 	conv1D, aLog, dtBias, norm, outProj,
@@ -44,90 +126,301 @@ func (*claimedQwen35CUDA) Qwen35GDNDecode(
 	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
 	rmsNormEpsilon float32,
 ) (output, nextConvState, nextRecurrentState compute.Tensor, err error) {
-	panic("must remain unreachable until the model HAL dispatch is wired")
+	b.gdnCalls++
+	if b.failAt > 0 && b.gdnCalls == b.failAt {
+		return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, errInjectedQwen35GDN
+	}
+	if len(b.linearLayers) == 0 {
+		return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, errors.New("recording backend has no linear layers")
+	}
+	layer := b.linearLayers[(b.gdnCalls-1)%len(b.linearLayers)]
+	wantSite := layerName(layer, "linear_attn.in_proj_qkv.weight")
+	if got := b.tensorSites[inProjQKV.Buf()]; got != "hal-weight "+wantSite {
+		b.badRoute = "layer " + itoa(layer) + " received " + got
+	}
+	identity := [2]compute.Buffer{convState.Buf(), recurrentState.Buf()}
+	if prior, ok := b.stateIdentity[layer]; ok && prior != identity {
+		b.stateContinuous = false
+	} else {
+		b.stateIdentity[layer] = identity
+	}
+	// Mutate a marker in each backend-owned state buffer and verify the next call sees it.
+	// These reads deliberately bypass b.Read: they are the test backend's operation body,
+	// not model-side state readback.
+	for _, state := range []compute.Tensor{convState, recurrentState} {
+		data := b.Backend.Read(state)
+		if len(data) == 0 {
+			continue
+		}
+		if data[0] != b.stateTicks[state.Buf()] {
+			b.stateContinuous = false
+		}
+		data[0]++
+		b.stateTicks[state.Buf()] = data[0]
+	}
+	xn := append([]float32(nil), b.Backend.Read(normalizedInput)...)
+	out := b.reference.linearAttnStep(layer, xn, residentKernel{b.model})
+	return compute.NewF32(b.Backend, []int{b.model.Cfg.HiddenSize}, out), convState, recurrentState, nil
 }
 
-func TestQwen35CUDAGDNFixtureFailsClosedBeforeFallback(t *testing.T) {
-	m := NewSynthetic(qwen35HybridTestCfg())
-	prompt := []int{3, 7, 11, 5, 17, 19, 23}
+type wrongPathQwen35Backend struct{ *recordingQwen35Backend }
 
-	// Deterministic CPU/reference fixture: the real Qwen35 GDN/SSM object and
-	// persistent-state path must reproduce exactly before it can serve as the
-	// future CUDA parity oracle. State is exercised by a split prefill+decode.
+func (*wrongPathQwen35Backend) Qwen35GDNPath() string { return "cuda/qwen35-gdn-wrong-v0" }
+
+func TestValidateBackendForwardConfigQwen35ExactPathAdmission(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	m := NewSynthetic(cfg)
+	missing := &refusingQwen35CUDA{Backend: compute.Default()}
+	marker := &markerOnlyQwen35CUDA{refusingQwen35CUDA: &refusingQwen35CUDA{Backend: compute.Default()}}
+	exact := newRecordingQwen35Backend(m)
+	wrong := &wrongPathQwen35Backend{recordingQwen35Backend: newRecordingQwen35Backend(m)}
+
+	for name, be := range map[string]compute.Backend{"missing": missing, "marker-only": marker, "wrong-path": wrong} {
+		t.Run(name, func(t *testing.T) {
+			err := ValidateBackendForwardConfig(cfg, be)
+			var unsupported *UnsupportedBackendForwardError
+			if !errors.As(err, &unsupported) {
+				t.Fatalf("error=%T %v, want *UnsupportedBackendForwardError", err, err)
+			}
+			if unsupported.Forward != ForwardQwen35GDN || unsupported.IntendedPath != Qwen35GDNCUDAPath {
+				t.Fatalf("wrong refusal identity: %#v", unsupported)
+			}
+			for _, text := range []string{Qwen35GDNCUDAPath, "generic QKV/CPU fallback", "0.999"} {
+				if !strings.Contains(err.Error(), text) {
+					t.Errorf("refusal missing %q: %v", text, err)
+				}
+			}
+		})
+	}
+	if err := ValidateBackendForwardConfig(cfg, exact); err != nil {
+		t.Fatalf("exact structural backend refused: %v", err)
+	}
+	if err := ValidateBackendForwardConfig(cfg, nil); err != nil {
+		t.Fatalf("legacy CPU/reference selection refused: %v", err)
+	}
+	plain := cfg
+	plain.LayerTypes = nil
+	if err := ValidateBackendForwardConfig(plain, missing); err != nil {
+		t.Fatalf("non-hybrid backend admission changed: %v", err)
+	}
+	if got := m.NewSession().Prefill([]int{3, 7}); len(got) != cfg.VocabSize {
+		t.Fatalf("legacy CPU/reference path logits=%d, want %d", len(got), cfg.VocabSize)
+	}
+}
+
+func TestQwen35BackendConstructorRefusesBeforeAnyFallbackOrStateUpload(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	for name, be := range map[string]compute.Backend{
+		"missing":     &refusingQwen35CUDA{Backend: compute.Default()},
+		"marker-only": &markerOnlyQwen35CUDA{refusingQwen35CUDA: &refusingQwen35CUDA{Backend: compute.Default()}},
+		"wrong-path":  &wrongPathQwen35Backend{recordingQwen35Backend: newRecordingQwen35Backend(m)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, err := m.NewBackendSessionChecked(be)
+			if s != nil {
+				t.Fatalf("refused backend returned session %#v", s)
+			}
+			var unsupported *UnsupportedBackendForwardError
+			if !errors.As(err, &unsupported) {
+				t.Fatalf("error=%T %v, want typed refusal", err, err)
+			}
+			switch got := be.(type) {
+			case *refusingQwen35CUDA:
+				if got.matmuls != 0 || got.attention != 0 {
+					t.Fatalf("refusal executed fallback: matmul=%d attention=%d", got.matmuls, got.attention)
+				}
+			case *markerOnlyQwen35CUDA:
+				if got.matmuls != 0 || got.attention != 0 {
+					t.Fatalf("refusal executed fallback: matmul=%d attention=%d", got.matmuls, got.attention)
+				}
+			case *wrongPathQwen35Backend:
+				if len(got.classes) != 0 || got.gdnCalls != 0 {
+					t.Fatalf("wrong path allocated state or ran operation: classes=%v calls=%d", got.classes, got.gdnCalls)
+				}
+			}
+		})
+	}
+}
+
+func TestQwen35HybridHALFullLogitParityDispatchAndStateLifecycle(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	cfg.PartialRotaryFactor = 0.25
+	cfg.RopeTheta = 10_000_000
+	m := NewSynthetic(cfg)
+	be := newRecordingQwen35Backend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+
+	var stateBuffers []compute.Buffer
+	for l, state := range s.qwen35HAL.layers {
+		if !cfg.isLinearAttnLayer(l) {
+			continue
+		}
+		stateBuffers = append(stateBuffers, state.conv.Buf(), state.recurrent.Buf())
+		for _, site := range []string{"qwen35-gdn-conv-state layer " + itoa(l), "qwen35-gdn-recurrent-state layer " + itoa(l)} {
+			if !recordedClassSite(be, compute.MemoryKVCache, site) {
+				t.Fatalf("missing persistent KV-cache allocation %q; classes=%v sites=%v", site, be.classes, be.sites)
+			}
+		}
+	}
+
+	prompt := []int{3, 7, 11, 5, 17, 19, 23}
 	want := m.NewSession().Prefill(prompt)
-	reference := m.NewSession()
-	reference.Prefill(prompt[:4])
+	s.Prefill(prompt[:4])
 	var got []float32
 	for _, id := range prompt[4:] {
-		got = reference.Step(id)
+		got = s.Step(id)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("CPU/reference fixture logits=%d, want %d", len(got), len(want))
-	}
-	var dot, nw, ng float64
-	for i := range want {
-		if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
-			t.Fatalf("CPU/reference fixture is not deterministic at logit %d: got=%v want=%v", i, got[i], want[i])
-		}
-		dot += float64(got[i]) * float64(want[i])
-		nw += float64(want[i]) * float64(want[i])
-		ng += float64(got[i]) * float64(got[i])
-	}
-	if nw == 0 || ng == 0 {
-		t.Fatalf("CPU/reference fixture has zero-norm logits: want=%g got=%g", nw, ng)
-	}
-	cosine := dot / (math.Sqrt(nw) * math.Sqrt(ng))
+	cosine := cosineF32(t, want, got)
 	if cosine < Qwen35GDNParityCosineMin {
-		t.Fatalf("CPU/reference fixture cosine %.9f < explicit CUDA acceptance floor %.3f", cosine, Qwen35GDNParityCosineMin)
+		t.Fatalf("full-logit cosine %.9f < %.3f", cosine, Qwen35GDNParityCosineMin)
+	}
+	if argmaxF32(got) != argmaxF32(want) {
+		t.Fatalf("greedy argmax=%d, want %d (cosine %.9f)", argmaxF32(got), argmaxF32(want), cosine)
 	}
 
-	be := &refusingQwen35CUDA{Backend: compute.Default()}
-	s, err := m.NewBackendSessionChecked(be)
-	if s != nil {
-		t.Fatalf("missing CUDA GDN path returned a session: %#v", s)
-	}
-	var unsupported *UnsupportedBackendForwardError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("checked constructor error=%T (%v), want *UnsupportedBackendForwardError", err, err)
-	}
-	if unsupported.Backend != "cuda" || unsupported.Forward != ForwardQwen35GDN ||
-		unsupported.IntendedPath != Qwen35GDNCUDAPath || unsupported.ParityCosineMin != Qwen35GDNParityCosineMin {
-		t.Fatalf("wrong refusal identity: %#v", unsupported)
-	}
-	for _, wantText := range []string{"qwen35-gdn", Qwen35GDNCUDAPath, "generic QKV/CPU fallback", "0.999", "#4714"} {
-		if !strings.Contains(err.Error(), wantText) {
-			t.Errorf("refusal missing %q:\n%s", wantText, err)
+	tokens, linearLayers, fullLayers := len(prompt), 0, 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.isLinearAttnLayer(l) {
+			linearLayers++
+		} else {
+			fullLayers++
 		}
 	}
-	if be.matmuls != 0 || be.attention != 0 {
-		t.Fatalf("refused construction executed fallback ops: matmul=%d attention=%d", be.matmuls, be.attention)
+	if wantCalls := tokens * linearLayers; be.gdnCalls != wantCalls {
+		t.Fatalf("GDN operations=%d, want every token x linear layer = %d", be.gdnCalls, wantCalls)
+	}
+	if wantCalls := tokens * fullLayers; be.attentionCalls != wantCalls {
+		t.Fatalf("generic Attention calls=%d, want full layers only=%d", be.attentionCalls, wantCalls)
+	}
+	for _, layer := range be.attentionLayers {
+		if layer != 0 { // hybrid full layers are compacted into the backend KV plane.
+			t.Fatalf("full-attention KV layer=%d, want compact backend layer 0", layer)
+		}
+	}
+	if !be.stateContinuous || be.badRoute != "" {
+		t.Fatalf("persistent state/operation routing failed: continuous=%v bad_route=%q", be.stateContinuous, be.badRoute)
+	}
+	if s.halKV.Len() != tokens {
+		t.Fatalf("hybrid backend KV length=%d, want %d", s.halKV.Len(), tokens)
+	}
+	for _, site := range be.matmulSites {
+		for l := 0; l < cfg.NumLayers; l++ {
+			if cfg.isLinearAttnLayer(l) && strings.Contains(site, layerName(l, "self_attn.q_proj")) {
+				t.Fatalf("linear layer %d fell through q_proj via %q", l, site)
+			}
+		}
+	}
+	if be.hostCalls != 0 {
+		t.Fatalf("model called Backend.Host %d times", be.hostCalls)
+	}
+	// Per full layer/token: q+k partial-RoPE reads plus gate+attention reads. Only the
+	// split Prefill result and three Step results add final-logit reads. Any state or
+	// linear fallback read makes this exact count fail.
+	wantReads := tokens*fullLayers*4 + 1 + len(prompt[4:])
+	if be.readCalls != wantReads {
+		t.Fatalf("backend Read calls=%d, want %d (full-attention bridge + returned logits only)", be.readCalls, wantReads)
 	}
 
-	// Even a backend test double that advertises the intended operation and path
-	// stays refused until the production model dispatcher actually invokes it.
-	claimed := &claimedQwen35CUDA{refusingQwen35CUDA: &refusingQwen35CUDA{Backend: compute.Default()}}
-	if _, err := m.NewBackendSessionChecked(claimed); err == nil || !strings.Contains(err.Error(), "does not yet dispatch") {
-		t.Fatalf("marker-only GDN backend must remain refused, got %v", err)
+	s.Close()
+	if s.qwen35HAL != nil || !s.halClosed {
+		t.Fatalf("Close did not clear backend GDN state: state=%#v closed=%v", s.qwen35HAL, s.halClosed)
 	}
-	if claimed.matmuls != 0 || claimed.attention != 0 {
-		t.Fatalf("marker-only backend executed fallback ops: matmul=%d attention=%d", claimed.matmuls, claimed.attention)
+	for _, buffer := range stateBuffers {
+		if be.freeCalls[buffer] != 1 {
+			t.Fatalf("persistent state %p freed %d times, want once", buffer, be.freeCalls[buffer])
+		}
+	}
+	freeBefore := totalFreeCalls(be)
+	s.Close()
+	if totalFreeCalls(be) != freeBefore {
+		t.Fatal("Session.Close is not idempotent")
 	}
 }
 
-func TestQwen35CUDAGDNUncheckedConstructorPanicsWithTypedRefusal(t *testing.T) {
+func TestQwen35GDNOperationErrorClosesSessionWithoutRetry(t *testing.T) {
 	m := NewSynthetic(qwen35HybridTestCfg())
-	be := &refusingQwen35CUDA{Backend: compute.Default()}
-	defer func() {
-		r := recover()
-		var unsupported *UnsupportedBackendForwardError
-		if !errors.As(asError(r), &unsupported) {
-			t.Fatalf("NewBackendSession panic=%T (%v), want *UnsupportedBackendForwardError", r, r)
+	be := newRecordingQwen35Backend(m)
+	be.failAt = 2
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+	var stateBuffers []compute.Buffer
+	for l, state := range s.qwen35HAL.layers {
+		if m.Cfg.isLinearAttnLayer(l) {
+			stateBuffers = append(stateBuffers, state.conv.Buf(), state.recurrent.Buf())
 		}
-		if be.matmuls != 0 || be.attention != 0 {
-			t.Fatalf("panic path executed fallback ops: matmul=%d attention=%d", be.matmuls, be.attention)
+	}
+
+	panicErr := recoverError(func() { _ = s.Prefill([]int{3}) })
+	var operation *BackendForwardOperationError
+	if !errors.As(panicErr, &operation) || !errors.Is(panicErr, errInjectedQwen35GDN) {
+		t.Fatalf("operation panic=%T %v, want wrapped injected error", panicErr, panicErr)
+	}
+	if !strings.Contains(operation.Error(), "session closed, no CPU retry") || operation.Layer != 1 {
+		t.Fatalf("wrong fail-closed verdict: %#v (%v)", operation, operation)
+	}
+	if !s.halClosed || s.qwen35HAL != nil || be.gdnCalls != 2 || be.attentionCalls != 0 {
+		t.Fatalf("failure lifecycle: closed=%v state=%#v gdn=%d attention=%d", s.halClosed, s.qwen35HAL, be.gdnCalls, be.attentionCalls)
+	}
+	for _, buffer := range stateBuffers {
+		if be.freeCalls[buffer] != 1 {
+			t.Fatalf("failed session state %p freed %d times, want once", buffer, be.freeCalls[buffer])
+		}
+	}
+	for _, site := range be.matmulSites {
+		if strings.Contains(site, "self_attn.q_proj") {
+			t.Fatalf("failed linear path retried through generic q_proj: %q", site)
+		}
+	}
+	calls := be.gdnCalls
+	reuseErr := recoverError(func() { _ = s.Step(7) })
+	if !errors.Is(reuseErr, errInjectedQwen35GDN) || be.gdnCalls != calls {
+		t.Fatalf("failed session reuse=%v calls=%d, want same failure and no retry", reuseErr, be.gdnCalls)
+	}
+}
+
+func recordedClassSite(be *recordingQwen35Backend, class compute.MemoryClass, site string) bool {
+	for i := range be.classes {
+		if be.classes[i] == class && be.sites[i] == site {
+			return true
+		}
+	}
+	return false
+}
+
+func cosineF32(t *testing.T, a, b []float32) float64 {
+	t.Helper()
+	if len(a) != len(b) {
+		t.Fatalf("logit lengths=%d/%d", len(a), len(b))
+	}
+	var dot, aa, bb float64
+	for i := range a {
+		x, y := float64(a[i]), float64(b[i])
+		if math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) {
+			t.Fatalf("non-finite logits at %d: %v/%v", i, a[i], b[i])
+		}
+		dot += x * y
+		aa += x * x
+		bb += y * y
+	}
+	if aa == 0 || bb == 0 {
+		t.Fatalf("zero-norm logits: %g/%g", aa, bb)
+	}
+	return dot / math.Sqrt(aa*bb)
+}
+
+func recoverError(fn func()) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = asError(recovered)
 		}
 	}()
-	_ = m.NewBackendSession(be)
+	fn()
+	return nil
 }
 
 func asError(v any) error {
@@ -135,4 +428,12 @@ func asError(v any) error {
 		return err
 	}
 	return nil
+}
+
+func totalFreeCalls(be *recordingQwen35Backend) int {
+	total := 0
+	for _, calls := range be.freeCalls {
+		total += calls
+	}
+	return total
 }
