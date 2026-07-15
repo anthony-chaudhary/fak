@@ -17,9 +17,9 @@ func DeclaredInventory() []Gate {
 		{Name: "trajctl-judge", Kind: LLMJudge, Sources: []string{"internal/trajctl/judgeclient.go", "internal/trajctl/rubric.go"}, SignalProbes: []SignalProbe{{Path: "internal/trajctl/judgeclient.go", Contains: "Temperature: 0"}}, CheckerBytesPinned: true, SchemaPinned: true, TemperatureZero: true},
 		{Name: "policy-smart-approval", Kind: Deterministic, Sources: []string{"internal/egressfloor/approval.go"}, SignalProbes: []SignalProbe{{Path: "internal/egressfloor/approval.go", Contains: "AdjudicateApproval"}}, SchemaPinned: true, IndependentlyRemeasured: true},
 		{Name: "safecommit", Kind: Deterministic, Sources: []string{"internal/safecommit/safecommit.go", "internal/safecommit/checkerpin.go"}, SignalProbes: []SignalProbe{{Path: "internal/safecommit/safecommit.go", Contains: "GuardCheckerPin(opts.Dir, opts.CheckerBaseline)"}}, CheckerBytesPinned: true, SchemaPinned: true},
-		{Name: "antipattern", Kind: Deterministic, Sources: []string{"internal/antipattern/antipattern.go"}, SignalProbes: []SignalProbe{{Path: "internal/antipattern/antipattern.go", Contains: "fak-antipattern-scorecard/1"}}, SchemaPinned: true},
+		{Name: "antipattern", Kind: Deterministic, Sources: []string{"internal/antipattern/antipattern.go", "internal/safecommit/checkerpin.go"}, SignalProbes: []SignalProbe{{Path: "cmd/fak/antipatternscore.go", Contains: "PinCheckers"}}, CheckerBytesPinned: true, SchemaPinned: true},
 		{Name: "ship-integrity", Kind: Deterministic, Sources: []string{"internal/shipgate/shipgate.go"}, SchemaPinned: true, IndependentlyRemeasured: true},
-		{Name: "kpi-tests", Kind: SelfReport, Sources: []string{"internal/antipattern/checker_games_test.go"}, CheckerBytesPinned: false},
+		{Name: "kpi-tests", Kind: Deterministic, Sources: []string{"tools/code_quality_scorecard.py", "tools/code_quality_scorecard_test.py"}, SignalProbes: []SignalProbe{{Path: "tools/code_quality_scorecard.py", Contains: "def kpi_tests("}}, SchemaPinned: true},
 	}
 }
 
@@ -59,3 +59,4 @@ func Markdown(r Report) string {
 	fmt.Fprintln(&b, "\nExposure is a declared-signal heuristic, not an empirical exploit probability. Higher is hardened first; missing inventory sources fail the grade closed.")
 	return b.String()
 }
+

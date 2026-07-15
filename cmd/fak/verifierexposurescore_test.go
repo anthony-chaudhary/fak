@@ -20,7 +20,7 @@ func TestVerifierExposureScoreJSON(t *testing.T) {
 	if got.Schema != verifierexposure.Schema || got.GateCount < 6 || len(got.Worklist) != got.GateCount {
 		t.Fatalf("report=%+v", got)
 	}
-	if got.Worklist[0].Name != "kpi-tests" {
-		t.Fatalf("worst gate=%q, want kpi-tests", got.Worklist[0].Name)
+	if got.Worklist[0].Exposure < verifierexposure.DebtThreshold {
+		t.Fatalf("worst gate exposure=%.2f, want debt", got.Worklist[0].Exposure)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/antipattern"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -57,6 +58,14 @@ func runAntipatternScorecard(stdout, stderr io.Writer, argv []string) int {
 	if root == "" {
 		root = repoRoot()
 	}
+	checkerBaseline, err := safecommit.PinCheckers(root, []string{
+		"internal/antipattern/antipattern.go",
+		"internal/antipattern/detect.go",
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak antipattern-scorecard: pin checkers: %v\n", err)
+		return 1
+	}
 
 	// The recent-commit window feeds the post-hoc repetition detector. A git failure (not a
 	// repo, git absent) is not fatal: the card just carries no REDUNDANT_REWORK findings and
@@ -72,6 +81,10 @@ func runAntipatternScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	payload := antipattern.Build(root, commits)
+	if reason, refused := safecommit.GuardCheckerPin(root, checkerBaseline); refused {
+		fmt.Fprintf(stderr, "fak antipattern-scorecard: %s: checker bytes drifted during grade\n", reason)
+		return 1
+	}
 
 	return emitScorecard(stdout, stderr, "fak antipattern-scorecard", antipattern.DebtKey, payload,
 		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
