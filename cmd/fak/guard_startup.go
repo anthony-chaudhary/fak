@@ -250,7 +250,7 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if strings.TrimSpace(os.Getenv("FAK_GUARD_SCRATCHPAD_ROOTS")) == "" {
 		_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", filepath.Join(os.TempDir(), "claude"))
 	}
-	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay)
+	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay, denyOverlay)
 	rt = protectGuardPolicyConfig(rt, overlayPath, denyPath, policyPath)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)

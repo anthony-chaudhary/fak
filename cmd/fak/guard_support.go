@@ -510,19 +510,24 @@ func guardPolicyDigest(policyBytes []byte) string {
 // existing attestations remain stable. A non-empty overlay is normalized and folded
 // into a domain-separated digest, making two guards with the same base manifest but
 // different operator grants distinguishable.
-func guardEffectivePolicyDigest(policyBytes []byte, ov guardAllowOverlay) string {
-	ov.Allow = guardAllowNormalize(ov.Allow)
-	ov.AllowPrefix = guardAllowNormalize(ov.AllowPrefix)
-	if len(ov.Allow) == 0 && len(ov.AllowPrefix) == 0 {
+func guardEffectivePolicyDigest(policyBytes []byte, allow guardAllowOverlay, deny guardDenyOverlay) string {
+	allow.Allow = guardAllowNormalize(allow.Allow)
+	allow.AllowPrefix = guardAllowNormalize(allow.AllowPrefix)
+	deny.Deny = guardAllowNormalize(deny.Deny)
+	if len(allow.Allow) == 0 && len(allow.AllowPrefix) == 0 && len(deny.Deny) == 0 {
 		return guardPolicyDigest(policyBytes)
 	}
-	ov.Version = guardAllowOverlayVersion
-	overlayBytes, err := json.Marshal(ov)
+	allow.Version = guardAllowOverlayVersion
+	deny.Version = guardDenyOverlayVersion
+	overlayBytes, err := json.Marshal(struct {
+		Allow guardAllowOverlay `json:"allow"`
+		Deny  guardDenyOverlay  `json:"deny"`
+	}{Allow: allow, Deny: deny})
 	if err != nil {
-		panic(fmt.Sprintf("marshal normalized guard allow overlay: %v", err))
+		panic(fmt.Sprintf("marshal normalized guard overlays: %v", err))
 	}
 	h := sha256.New()
-	_, _ = h.Write([]byte("fak.guard.effective-policy/v1\x00"))
+	_, _ = h.Write([]byte("fak.guard.effective-policy/v2\x00"))
 	_, _ = h.Write(policyBytes)
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write(overlayBytes)
@@ -530,13 +535,15 @@ func guardEffectivePolicyDigest(policyBytes []byte, ov guardAllowOverlay) string
 }
 
 func guardCurrentEffectivePolicyDigest(policyBytes []byte) string {
-	ov, err := loadGuardAllowOverlay(guardAllowOverlayPath())
+	allow, err := loadGuardAllowOverlay(guardAllowOverlayPath())
 	if err != nil {
-		// Reload tolerates a malformed out-of-band overlay and enforces the base
-		// floor, so its attestation must identify that same effective runtime.
-		ov = guardAllowOverlay{Version: guardAllowOverlayVersion}
+		allow = guardAllowOverlay{Version: guardAllowOverlayVersion}
 	}
-	return guardEffectivePolicyDigest(policyBytes, ov)
+	deny, err := loadGuardDenyOverlay(guardDenyOverlayPath())
+	if err != nil {
+		deny = guardDenyOverlay{Version: guardDenyOverlayVersion}
+	}
+	return guardEffectivePolicyDigest(policyBytes, allow, deny)
 }
 
 func guardAuditPathHash(root string) string {
