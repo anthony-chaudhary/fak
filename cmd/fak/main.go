@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
@@ -1018,6 +1019,9 @@ func jsonIndent(v any) []byte {
 // adjudicator before the kernel runs. Empty path = keep the built-in
 // DefaultPolicy. A bad manifest is fatal: a misconfigured floor must fail loudly
 // at startup, never silently fall back to a more permissive default.
+// policyReloadMu serializes the complete multi-singleton floor swap.
+var policyReloadMu sync.Mutex
+
 func applyPolicy(path string) {
 	if path == "" {
 		return
@@ -1028,6 +1032,8 @@ func applyPolicy(path string) {
 }
 
 func reloadPolicy(path string) (policy.Runtime, string, error) {
+	policyReloadMu.Lock()
+	defer policyReloadMu.Unlock()
 	if path == "" {
 		return policy.Runtime{}, "", errors.New("policy reload requires --policy FILE")
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -317,5 +318,69 @@ func TestResolveRequiredKeyFailsClosed(t *testing.T) {
 				t.Fatalf("key = %q, want %q", key, tc.wantKey)
 			}
 		})
+	}
+}
+
+func TestReloadPolicySerializesCompositeRuntimeSwap(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "one.json")
+	p2 := filepath.Join(dir, "two.json")
+	if err := os.WriteFile(p1, []byte(`{"posture":"fail_closed","allow":["one"],"rate_limit":{"key":"global","max_calls":11}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p2, []byte(`{"posture":"fail_closed","allow":["two"],"rate_limit":{"key":"global","max_calls":22}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exercise the real concurrent entry point repeatedly. The mutex contract is
+	// that each call's load+four swaps is one critical section; -race witnesses
+	// both calls can run concurrently without a torn singleton combination.
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	for _, path := range []string{p1, p2} {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			<-start
+			_, _, err := reloadPolicy(path)
+			errCh <- err
+		}(path)
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A final reload gives a deterministic winner and proves all observable
+	// subsystems reflect that same runtime after concurrent pressure.
+	rt, _, err := reloadPolicy(p2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		tool  string
+		allow bool
+	}{{"two", true}, {"one", false}} {
+		v := adjudicator.Default.Adjudicate(context.Background(), &abi.ToolCall{Tool: tc.tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}})
+		if (v.Kind == abi.VerdictAllow) != tc.allow {
+			t.Fatalf("tool %s verdict=%+v", tc.tool, v)
+		}
+	}
+	if rt.RateLimit == nil || rt.RateLimit.MaxCalls != 22 {
+		t.Fatalf("runtime=%+v", rt.RateLimit)
+	}
+	call := &abi.ToolCall{Tool: "two", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
+	for i := 0; i < 22; i++ {
+		if v := ratelimit.Default.Adjudicate(context.Background(), call); v.Kind == abi.VerdictDeny {
+			t.Fatalf("denied at %d: %+v", i, v)
+		}
+	}
+	if v := ratelimit.Default.Adjudicate(context.Background(), call); v.Kind != abi.VerdictDeny {
+		t.Fatalf("rate limiter not from winning runtime: %+v", v)
 	}
 }
