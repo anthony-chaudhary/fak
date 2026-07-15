@@ -374,6 +374,64 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "FETCH_ERROR")
 
 
+class UnroutedScopeClusterTest(unittest.TestCase):
+    """A flat UNROUTED count is not actionable; the operator next-action needs to
+    know WHICH scope families are rotting and how big each is (a real
+    `internal/<scope>/` leaf with no declared lane, or an ambiguous scope). The
+    clusterer buckets the truly-unrouted rows by the same scope key routing uses."""
+
+    def _payload(self, routes, **kw):
+        return m.build_payload(workspace="C:/work/fleet", routes=routes, trees=TREES, **kw)
+
+    def test_clusters_unrouted_by_scope_count_desc(self):
+        routes = [
+            route(issue(1, "feat(negframe): a")),   # no negframe lane/alias -> unrouted
+            route(issue(2, "feat(negframe): b")),
+            route(issue(3, "feat(quality): c")),
+            route(issue(4, "fix(gateway): routed")),  # routed, must be excluded
+        ]
+        clusters = m.unrouted_scope_clusters(routes)
+        self.assertEqual(clusters[0], {"scope": "negframe", "count": 2, "issues": [2, 1]})
+        self.assertEqual(clusters[1], {"scope": "quality", "count": 1, "issues": [3]})
+        self.assertNotIn("gateway", [c["scope"] for c in clusters])
+
+    def test_bare_prefix_and_no_scope_bucket(self):
+        routes = [
+            route(issue(5, "harness-res: wire the ledger")),  # bare prefix scope
+            route(issue(6, "Merge remaining branches after integration")),  # no scope
+        ]
+        by = {c["scope"]: c for c in m.unrouted_scope_clusters(routes)}
+        self.assertIn("harness-res", by)
+        self.assertIn("(no-scope)", by)
+
+    def test_held_exclusive_rows_excluded(self):
+        # An exclusive/human-blocked hold carries a blocked_lane and is a DIFFERENT
+        # triage surface (the exclusive-lane render) — it must not pollute the
+        # scope-cluster worklist of "add a lane/alias to drain these".
+        routes = [route(issue(7, "abi: hoist the public ABI surface"))]  # held on abi
+        self.assertEqual(m.unrouted_scope_clusters(routes), [])
+
+    def test_payload_carries_unrouted_scopes(self):
+        routes = [route(issue(1, "feat(negframe): a")),
+                  route(issue(2, "fix(gateway): routed"))]
+        p = self._payload(routes)
+        self.assertEqual(p["unrouted_scopes"],
+                         [{"scope": "negframe", "count": 1, "issues": [1]}])
+
+    def test_render_shows_scope_clusters(self):
+        routes = [route(issue(11, "feat(negframe): a")),
+                  route(issue(12, "feat(negframe): b"))]
+        text = m.render(self._payload(routes))
+        self.assertIn("UNROUTED by scope", text)
+        self.assertIn("negframe", text)
+
+    def test_render_md_shows_scope_cluster_table(self):
+        routes = [route(issue(11, "feat(quality): a"))]
+        md = m.render_md(self._payload(routes), date="2026-07-14")
+        self.assertIn("## UNROUTED by scope", md)
+        self.assertIn("| `quality` | 1 | #11 |", md)
+
+
 class ConfigOverrideTest(unittest.TestCase):
     def test_scope_alias_override(self):
         # Custom alias: 'frobnicate' -> gateway.

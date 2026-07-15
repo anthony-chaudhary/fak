@@ -988,9 +988,39 @@ def build_payload(
             for cls in WORK_CLASSES
         },
         "lanes": dict(sorted(lanes.items(), key=lambda kv: (-kv[1]["count"], kv[0]))),
+        "unrouted_scopes": unrouted_scope_clusters(routes),
         "issues": sorted(routes, key=_route_sort_key),
         "skipped_human_blocked": sorted(skipped, key=lambda s: -int(s.get("number") or 0)),
     }
+
+
+def unrouted_scope_clusters(routes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Bucket the truly-UNROUTED issues by their scope token, most-common first.
+
+    A flat "269 UNROUTED" is not actionable; the OPERATOR next-action ("add
+    scopes/labels or extend SCOPE_ALIAS") needs to know WHICH scope families are
+    rotting and how big each is. This clusters the unrouted rows (lane is None AND
+    not an exclusive/human-blocked hold — those carry a `blocked_lane` and are a
+    different triage) by the same `type(scope):` / bare-`prefix:` key the router
+    routes by, so a recurring family (e.g. a real `internal/<scope>/` leaf that has
+    no declared dos.toml lane yet, or a genuinely-ambiguous scope) surfaces as one
+    named bucket instead of scattered singletons. Scopeless rows fold into a single
+    `(no-scope)` bucket. Pure + deterministic: sorted by count desc, then scope asc.
+
+    Each bucket is {scope, count, issues:[numbers desc]}. Held (blocked_lane) rows
+    are excluded — they are surfaced by the existing exclusive-lane render path."""
+    clusters: dict[str, list[int]] = {}
+    for r in routes:
+        if r.get("lane") is not None or r.get("blocked_lane"):
+            continue
+        scope = _scope_token(str(r.get("title") or "")) or "(no-scope)"
+        clusters.setdefault(scope, []).append(int(r.get("number") or 0))
+    out = [
+        {"scope": scope, "count": len(nums), "issues": sorted(nums, reverse=True)}
+        for scope, nums in clusters.items()
+    ]
+    out.sort(key=lambda c: (-c["count"], c["scope"]))
+    return out
 
 
 def _route_sort_key(r: dict[str, Any]) -> tuple[int, int, int]:
@@ -1148,6 +1178,12 @@ def render(payload: dict[str, Any]) -> str:
             action = f" -> {r['unblock_action']}" if r.get("unblock_action") else ""
             policy = f" [{r.get('blocked_policy')}:{r.get('blocked_lane')}]" if r.get("blocked_lane") else ""
             lines.append(f"    #{r['number']:<5} {r['unrouted_reason']}{policy}: {r['title']}{action}")
+    clusters = payload.get("unrouted_scopes") or []
+    if clusters:
+        lines.append("  UNROUTED by scope (add a lane/alias to drain a whole family):")
+        for cl in clusters[:12]:
+            nums = ",".join(f"#{n}" for n in cl["issues"][:6])
+            lines.append(f"    {cl['scope']:<20} {cl['count']:>3}  {nums}")
     return "\n".join(lines)
 
 
@@ -1187,6 +1223,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| #{r['number']} | {r['unrouted_reason']} | "
                        f"{blocked or '—'} | {r.get('unblock_action') or '—'} | "
                        f"{r['title']} |")
+    clusters = payload.get("unrouted_scopes") or []
+    if clusters:
+        out += ["", "## UNROUTED by scope (drain a whole family with one lane/alias)", "",
+                "| scope | count | issues |", "|---|---|---|"]
+        for cl in clusters:
+            nums = ", ".join("#" + str(n) for n in cl["issues"])
+            out.append(f"| `{cl['scope']}` | {cl['count']} | {nums} |")
     return "\n".join(out) + "\n"
 
 
