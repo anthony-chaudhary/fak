@@ -432,18 +432,18 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	if metricsURL == "" {
 		metricsURL = guardPreCompactMetricsURLFromBase(os.Getenv("ANTHROPIC_BASE_URL"))
 	}
-	if metricsURL == "" {
-		rec.Disposition = string(stopDispFailOpenNoMetricsURL)
-		fmt.Fprintln(stderr, "fak guard Stop: allowing stop; no metrics URL configured")
-		return 0
-	}
-	signals, err := fetchGuardStopHookSignals(context.Background(), metricsURL, *timeout)
+	signals, source, err := fetchGuardStopHookSignalsPreferred(context.Background(), metricsURL, *timeout)
 	if err != nil {
-		rec.Disposition = string(stopDispFailOpenGaugeUnavailable)
+		if metricsURL == "" {
+			rec.Disposition = string(stopDispFailOpenNoMetricsURL)
+		} else {
+			rec.Disposition = string(stopDispFailOpenGaugeUnavailable)
+		}
 		rec.Note = err.Error()
-		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; deny-all gauge unavailable: %v\n", err)
+		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; lifecycle signals unavailable: %v\n", err)
 		return 0
 	}
+	rec.Note = "signals=" + source
 	rec.DenyAllConsecutive = signals.DenyAllConsecutive
 	rec.DenyAllSameConsecutive = signals.DenyAllSameConsecutive
 	rec.ToolFeedbackConsecutive = signals.ToolFeedbackConsecutive
@@ -1111,6 +1111,34 @@ type guardStopHookSignals struct {
 	FakVerbCallsSeen bool
 }
 
+func fetchGuardStopHookSignalsPreferred(ctx context.Context, metricsURL string, timeout time.Duration) (guardStopHookSignals, string, error) {
+	socketPath := strings.TrimSpace(os.Getenv(guardLifecycleSocketEnv))
+	token := strings.TrimSpace(os.Getenv(guardLifecycleTokenEnv))
+	if socketPath != "" || token != "" {
+		if socketPath == "" || token == "" {
+			return guardStopHookSignals{}, "ipc", errors.New("in-process lifecycle IPC environment incomplete")
+		}
+		in, err := fetchGuardLifecycleSignals(socketPath, token, timeout)
+		if err != nil {
+			// A supervisor-provisioned IPC endpoint is authoritative. Do not silently
+			// degrade an enforce gate to a socket-shaped HTTP fail-open window.
+			return guardStopHookSignals{}, "ipc", fmt.Errorf("in-process lifecycle IPC: %w", err)
+		}
+		return guardStopHookSignals{
+			DenyAllConsecutive:         in.DenyAllConsecutive,
+			DenyAllSameConsecutive:     in.DenyAllSameConsecutive,
+			DenyAllSameConsecutiveSeen: in.DenyAllSameConsecutiveSeen,
+			ToolFeedbackConsecutive:    in.ToolFeedbackConsecutive,
+			FakVerbCalls:               in.FakVerbCalls,
+			FakVerbCallsSeen:           in.FakVerbCallsSeen,
+		}, "ipc", nil
+	}
+	if strings.TrimSpace(metricsURL) == "" {
+		return guardStopHookSignals{}, "", errors.New("no lifecycle IPC or metrics URL configured")
+	}
+	out, err := fetchGuardStopHookSignals(ctx, metricsURL, timeout)
+	return out, "http", err
+}
 func fetchGuardStopHookSignals(ctx context.Context, metricsURL string, timeout time.Duration) (guardStopHookSignals, error) {
 	if timeout <= 0 {
 		timeout = 500 * time.Millisecond

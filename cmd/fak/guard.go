@@ -1334,6 +1334,13 @@ func cmdGuard(argv []string) {
 	//    never the parent shell, never settings.json. A `claude` in another terminal is
 	//    untouched.
 	injected := guardInjectedEnv(up, *envName, gwURL)
+	lifecycleIPC, lifecycleErr := startGuardLifecycleServer(srv)
+	if lifecycleErr == nil {
+		defer lifecycleIPC.Close()
+		injected = append(injected, lifecycleIPC.Env()...)
+	} else {
+		fmt.Fprintf(os.Stderr, "fak guard: lifecycle IPC unavailable; external hooks will use /metrics fallback: %v\n", lifecycleErr)
+	}
 	var preCompactInstall guardPreCompactInstall
 	var preCompactEnv [][2]string
 	installersStarted := time.Now()

@@ -112,20 +112,12 @@ func runGuardPreCompactDecision(stdout, stderr io.Writer, argv []string) int {
 	if metricsURL == "" {
 		metricsURL = guardPreCompactMetricsURLFromBase(os.Getenv("ANTHROPIC_BASE_URL"))
 	}
-	if metricsURL == "" {
-		fmt.Fprintln(stderr, "fak guard PreCompact: allowing Claude auto-compaction; no metrics URL configured")
-		return 0
-	}
-	metrics, err := fetchGuardPreCompactMetrics(context.Background(), metricsURL, *timeout)
+	signals, source, err := fetchGuardPreCompactSignalsPreferred(context.Background(), metricsURL, *timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard PreCompact: allowing Claude auto-compaction; posture unavailable: %v\n", err)
 		return 0
 	}
-	posture, err := parseGuardPreCompactMetricsPosture(metrics)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak guard PreCompact: allowing Claude auto-compaction; posture unavailable: %v\n", err)
-		return 0
-	}
+	posture := signals.posture
 	exitCode := compactcohere.PreCompactExitCode(posture)
 	if mode == guardPreCompactModeShadow {
 		action := "allow"
@@ -133,10 +125,53 @@ func runGuardPreCompactDecision(stdout, stderr io.Writer, argv []string) int {
 			action = "block"
 		}
 		fmt.Fprintf(stderr, "fak guard PreCompact: shadow would %s Claude auto-compaction (posture=%s exit=%d)\n", action, posture, exitCode)
-		surfaceGuardPreCompactRelayShadow(stderr, metrics)
+		surfaceGuardPreCompactRelayShadowSignal(stderr, signals.relayArmed, signals.relayPresent)
+		fmt.Fprintf(stderr, "fak guard PreCompact: signals=%s\n", source)
 		return 0
 	}
 	return exitCode
+}
+
+type guardPreCompactSignals struct {
+	posture      compactcohere.Posture
+	relayArmed   bool
+	relayPresent bool
+}
+
+func fetchGuardPreCompactSignalsPreferred(ctx context.Context, metricsURL string, timeout time.Duration) (guardPreCompactSignals, string, error) {
+	socketPath := strings.TrimSpace(os.Getenv(guardLifecycleSocketEnv))
+	token := strings.TrimSpace(os.Getenv(guardLifecycleTokenEnv))
+	if socketPath != "" || token != "" {
+		if socketPath == "" || token == "" {
+			return guardPreCompactSignals{}, "ipc", errors.New("lifecycle IPC environment incomplete")
+		}
+		snapshot, err := fetchGuardLifecycleSignals(socketPath, token, timeout)
+		if err != nil {
+			return guardPreCompactSignals{}, "ipc", fmt.Errorf("lifecycle IPC: %w", err)
+		}
+		posture := compactcohere.Posture(snapshot.HarnessPosture)
+		if posture != compactcohere.PostureAllow && posture != compactcohere.PostureBlock {
+			return guardPreCompactSignals{}, "ipc", fmt.Errorf("lifecycle IPC: invalid harness posture %q", snapshot.HarnessPosture)
+		}
+		return guardPreCompactSignals{
+			posture:      posture,
+			relayArmed:   snapshot.RelayWouldRotate,
+			relayPresent: snapshot.RelayWouldRotateSeen,
+		}, "ipc", nil
+	}
+	if metricsURL == "" {
+		return guardPreCompactSignals{}, "http", errors.New("no metrics URL configured")
+	}
+	metrics, err := fetchGuardPreCompactMetrics(ctx, metricsURL, timeout)
+	if err != nil {
+		return guardPreCompactSignals{}, "http", err
+	}
+	posture, err := parseGuardPreCompactMetricsPosture(metrics)
+	if err != nil {
+		return guardPreCompactSignals{}, "http", err
+	}
+	relayArmed, relayPresent := parseGuardPreCompactRelayArmed(metrics)
+	return guardPreCompactSignals{posture: posture, relayArmed: relayArmed, relayPresent: relayPresent}, "http", nil
 }
 
 // surfaceGuardPreCompactRelayShadow routes the relay would-rotate signal (#1869)
@@ -149,6 +184,10 @@ func runGuardPreCompactDecision(stdout, stderr io.Writer, argv []string) int {
 // byte-identical for non-relay sessions.
 func surfaceGuardPreCompactRelayShadow(stderr io.Writer, metrics string) {
 	armed, present := parseGuardPreCompactRelayArmed(metrics)
+	surfaceGuardPreCompactRelayShadowSignal(stderr, armed, present)
+}
+
+func surfaceGuardPreCompactRelayShadowSignal(stderr io.Writer, armed, present bool) {
 	if !present {
 		return
 	}
