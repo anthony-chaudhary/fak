@@ -94,7 +94,8 @@ type Result struct {
 	// DroppedOutOfLane is the number of changed worktree paths outside the
 	// caller-declared lease tree. Path-scoped land commits omit those paths;
 	// surfacing the count makes that otherwise-silent loss observable (#4599).
-	DroppedOutOfLane int `json:"dropped_out_of_lane,omitempty"`
+	DroppedOutOfLane int                      `json:"dropped_out_of_lane,omitempty"`
+	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
 }
 
 // VerifyHook is a build/adjudication witness run IN the isolated worktree before
@@ -427,7 +428,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
 	// safe isolated form here).
 	if isolatedLandEnabled() && len(paths) > 0 {
-		if res, handled := landIsolated(root, diff, msgFile, paths, git, isolatedGitEnv); handled {
+		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv); handled {
 			res.DroppedOutOfLane = droppedOutOfLane
 			return res
 		}
@@ -538,7 +539,7 @@ func writePatch(diff string) (string, func(), error) {
 // happy path, never regress the baseline. On success the shared working tree is synced
 // for `paths` (git checkout <new> -- paths) so trunk builders see the landed change,
 // matching the baseline post-state; a sync hiccup is reported but does NOT unland.
-func landIsolated(root, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner) (Result, bool) {
+func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner) (Result, bool) {
 	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
@@ -591,6 +592,14 @@ func landIsolated(root, diff, msgFile string, paths []string, git GitRunner, gen
 	if rc != 0 || treeSHA == "" {
 		return Result{}, false
 	}
+	var disambiguation *DisambiguationWitnesses
+	if disambiguationRelevant(paths) {
+		var valid bool
+		disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
+		if !valid {
+			return Result{OK: false, Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}, true
+		}
+	}
 	ctMsg, cleanupMsg, err := composeSignedMsg(msgFile, nm, em)
 	if err != nil {
 		return Result{}, false
@@ -616,7 +625,7 @@ func landIsolated(root, diff, msgFile string, paths []string, git GitRunner, gen
 	}
 	return Result{OK: true, Applied: true, Committed: true,
 		Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
-		Detail: detail}, true
+		Detail: detail, Disambiguation: disambiguation}, true
 }
 
 // composeSignedMsg writes msgFile's content to a new temp file with a Signed-off-by

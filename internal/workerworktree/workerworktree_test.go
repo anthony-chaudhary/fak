@@ -354,11 +354,17 @@ func TestLandBaseSHAIsTheDiffRefNotHead(t *testing.T) {
 		t.Fatalf("land should commit: %+v", res)
 	}
 	diffs := g.callsWithPrefix("diff")
-	if len(diffs) != 1 {
-		t.Fatalf("want one diff call, got %v", g.calls)
+	var contentDiffs [][]string
+	for _, call := range diffs {
+		if !contains(call, "--name-only") {
+			contentDiffs = append(contentDiffs, call)
+		}
 	}
-	if !contains(diffs[0], "feedface") || contains(diffs[0], "HEAD") {
-		t.Fatalf("diff base must be the pinned sha, not HEAD: %v", diffs[0])
+	if len(contentDiffs) != 1 {
+		t.Fatalf("want one content diff call, got %v", g.calls)
+	}
+	if !contains(contentDiffs[0], "feedface") || contains(contentDiffs[0], "HEAD") {
+		t.Fatalf("diff base must be the pinned sha, not HEAD: %v", contentDiffs[0])
 	}
 }
 
@@ -513,7 +519,7 @@ func isolatedHappyFake() *fakeGit {
 func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 	g := isolatedHappyFake()
 	msg := writeMsg(t, "feat(x): do the thing (fak x)")
-	res, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, g.run, g.runEnv)
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, g.run, g.runEnv)
 	if !handled || !res.OK || !res.Committed || !res.Applied {
 		t.Fatalf("isolated land should succeed and be handled: handled=%v res=%+v", handled, res)
 	}
@@ -550,7 +556,7 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 
 func TestLandIsolatedApplyConflictFallsBackNotCommits(t *testing.T) {
 	g := isolatedHappyFake().reply("apply", 1, "error: patch does not apply")
-	res, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
 	if handled {
 		t.Fatalf("an apply conflict must fall back (handled=false), got %+v", res)
 	}
@@ -562,7 +568,7 @@ func TestLandIsolatedApplyConflictFallsBackNotCommits(t *testing.T) {
 func TestLandIsolatedLostCASFallsBackWithoutSyncingWorktree(t *testing.T) {
 	// A peer commit lands in the gap → update-ref old-value mismatch.
 	g := isolatedHappyFake().reply("update-ref", 1, "fatal: update_ref failed: ref moved")
-	res, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
 	if handled {
 		t.Fatalf("a lost CAS must fall back to baseline, got %+v", res)
 	}
@@ -573,7 +579,7 @@ func TestLandIsolatedLostCASFallsBackWithoutSyncingWorktree(t *testing.T) {
 
 func TestLandIsolatedDetachedHeadFallsBackImmediately(t *testing.T) {
 	g := isolatedHappyFake().reply("symbolic-ref", 1, "") // detached HEAD
-	_, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	_, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
 	if handled {
 		t.Fatalf("detached HEAD has no branch ref to CAS — must fall back")
 	}
@@ -584,7 +590,7 @@ func TestLandIsolatedDetachedHeadFallsBackImmediately(t *testing.T) {
 
 func TestLandIsolatedMissingIdentityFallsBack(t *testing.T) {
 	g := isolatedHappyFake().reply("config", 0, "") // no user.name/email → can't honor -s
-	_, handled := landIsolated("/trunk", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	_, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
 	if handled {
 		t.Fatalf("unresolved signoff identity must fall back to baseline")
 	}
