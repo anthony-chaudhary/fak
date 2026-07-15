@@ -68,7 +68,7 @@ type VictimStrategy interface {
 // the argmin reduces to the oldest lastUsed — byte-identical to the historical lruLeaf.
 type lruStrategy struct{}
 
-func (lruStrategy) Name() string             { return "lru" }
+func (lruStrategy) Name() string               { return "lru" }
 func (lruStrategy) Priority(n *node) victimKey { return victimKey{age: n.lastUsed} }
 
 // costAwareStrategy evicts the cheapest-to-lose leaf per compute.KVEvictionCost (#2239):
