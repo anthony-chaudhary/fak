@@ -20,7 +20,8 @@
 // extends them without anyone remembering.
 //
 // It is a TREE-READING scorecard (no data dir): the family roster is cross-checked
-// against the real tree (each member's cmd shell + package must exist), and every
+// against the real tree (each member's cmd shell must resolve; whether its pure core
+// lives in an internal/ package is itself a probed convention, pkg_split), and every
 // convention is probed from the SOURCE (does this package import pkg/scorecard, does
 // this shell define a `--compare` flag), so a defect is retired only by doing the
 // real extension -- never by editing a JSON file. The fold/grade/markdown machinery
@@ -53,13 +54,16 @@ const DebtKey = "propagation_debt"
 // convention (an explicit documented standard) is HARD for every laggard regardless of count.
 const QuorumFraction = 0.5
 
-// Member is one scorecard in the family: an operator-facing `fak <Verb>` whose pure logic lives
-// in PkgDir and whose CLI shell is CmdFile. The row is cross-checked against the tree (CmdFile +
-// PkgDir must exist), so the roster cannot claim a member that isn't there.
+// Member is one scorecard in the family: an operator-facing `fak <Verb>` whose CLI shell is
+// CmdFile and whose pure core SHOULD live in PkgDir. Existence keys on the CmdFile shell (a
+// rostered member is a real dispatch verb); whether PkgDir exists is the pkg_split convention,
+// not an existence requirement, so a card whose logic is still inline in cmd/fak (no pure-core
+// package) is a real member that reads as a pkg_split laggard rather than a roster-integrity
+// defect. PkgDir is the package where that core lives or belongs.
 type Member struct {
 	Verb    string // the dispatch verb, e.g. "conflation-scorecard"
 	CmdFile string // repo-relative cmd shell, e.g. "cmd/fak/conflationscore.go"
-	PkgDir  string // repo-relative internal package dir, e.g. "internal/conflationscore"
+	PkgDir  string // repo-relative internal package dir (where the pure core lives or belongs)
 	DebtKey string // the corpus debt integer (for output + control-pane match)
 }
 
@@ -77,6 +81,19 @@ var Family = []Member{
 	{Verb: "ui-quality-scorecard", CmdFile: "cmd/fak/uiqualityscore.go", PkgDir: "internal/uiquality", DebtKey: "ui_quality_debt"},
 	{Verb: "propagation-scorecard", CmdFile: "cmd/fak/propagationscore.go", PkgDir: "internal/propagationscore", DebtKey: DebtKey},
 	{Verb: "unwired-scorecard", CmdFile: "cmd/fak/unwiredscore.go", PkgDir: "internal/unwiredscore", DebtKey: "unwired_debt"},
+	// Extended roster (#1516): the remaining self-measurement scorecards in the dispatch table,
+	// added so roster_complete reaches 100% and their convention adoption is measured too.
+	// skill-effectiveness-scorecard has no pure-core package (its logic is inline in cmd/fak) --
+	// it rides in as a real member because its cmd shell resolves, and reads as a pkg_split
+	// laggard, the gap the pkg_split convention exists to name.
+	{Verb: "milestone-scorecard", CmdFile: "cmd/fak/milestonescorecard.go", PkgDir: "internal/milestonereport", DebtKey: "roadmap_debt"},
+	{Verb: "repo-hygiene-scorecard", CmdFile: "cmd/fak/scorecardpane.go", PkgDir: "internal/scorecardpane", DebtKey: "hygiene_debt"},
+	{Verb: "sota-coverage-scorecard", CmdFile: "cmd/fak/sota_coverage_scorecard.go", PkgDir: "internal/sotacoverage", DebtKey: "sota_debt"},
+	{Verb: "checkpoint-scorecard", CmdFile: "cmd/fak/checkpointscore.go", PkgDir: "internal/checkpointscore", DebtKey: "checkpoint_debt"},
+	{Verb: "antipattern-scorecard", CmdFile: "cmd/fak/antipatternscore.go", PkgDir: "internal/antipattern", DebtKey: "antipattern_debt"},
+	{Verb: "mlp-score", CmdFile: "cmd/fak/mlpscore.go", PkgDir: "internal/mlpscore", DebtKey: "mlp_debt"},
+	{Verb: "product-scorecard", CmdFile: "cmd/fak/productscorecard.go", PkgDir: "internal/productscorecard", DebtKey: "coverage_debt"},
+	{Verb: "skill-effectiveness-scorecard", CmdFile: "cmd/fak/skill_effectiveness.go", PkgDir: "internal/skilleffectiveness", DebtKey: "skill_debt"},
 }
 
 // Convention is one "scoring concept" that, once improved in one card, SHOULD fan out to the
@@ -124,6 +141,11 @@ var Conventions = []Convention{
 		Label: "be registered in the scorecard control-pane ratchet so its debt folds into the portfolio",
 		Group: "rollup",
 	},
+	{
+		Key: "pkg_split", Short: "the pure-core-in-internal/ split",
+		Label: "keep its pure core in an internal/<name> package behind a thin cmd/fak shell (a testable, reusable core) instead of inlining the scoring logic in the command",
+		Group: "reuse",
+	},
 }
 
 // Probe is one member's measured convention adoption, plus whether its files exist on the tree.
@@ -163,10 +185,17 @@ func ProbeMembers(root string, family []Member) []Probe {
 			"kernel":      pkgImportsKernel(pkgAbs),
 			"test":        pkgHasTest(pkgAbs),
 			"controlpane": controlPaneMentions(controlPane, m),
+			// pkg_split: the pure core lives in an internal/ package (thin cmd/fak shell over a
+			// testable core), probed from the tree. A card whose logic is still inline in cmd/fak
+			// has no such package and reads as a laggard here.
+			"pkg_split": dirExists(pkgAbs),
 		}
 		probes = append(probes, Probe{
-			Member:  m,
-			Exists:  cmdText != "" && dirExists(pkgAbs),
+			Member: m,
+			// Existence keys on the cmd shell: a rostered member is a real dispatch verb. Whether
+			// its pure core lives in an internal/ package is the pkg_split convention above, not an
+			// existence requirement -- so an inline-in-cmd card is a real member, not a roster defect.
+			Exists:  cmdText != "",
 			Adopted: ad,
 		})
 	}
@@ -223,10 +252,12 @@ func declaredNote(c Convention) string {
 	return ""
 }
 
-// kpiMemberIntegrity (HARD, roster): every rostered member's cmd shell + package must exist. A
-// missing one means the roster drifted from the tree (a card renamed/moved) -- the one defect
+// kpiMemberIntegrity (HARD, roster): every rostered member's cmd shell must resolve. A missing
+// one means the roster drifted from the tree (a card verb renamed/removed) -- the one defect
 // that would silently corrupt every adoption rate, so it earns HARD debt. It is the live-floor
-// the smoke test pins (zero on a fresh roster).
+// the smoke test pins (zero on a fresh roster). Whether the pure core lives in an internal/
+// package is the pkg_split convention, not an integrity requirement -- so a card whose logic is
+// still inline in cmd/fak is a real member that reads as a pkg_split laggard, never a defect here.
 func kpiMemberIntegrity(probes []Probe) scorecard.KPI {
 	present := 0
 	var defects []string
@@ -235,8 +266,8 @@ func kpiMemberIntegrity(probes []Probe) scorecard.KPI {
 			present++
 			continue
 		}
-		defects = append(defects, fmt.Sprintf("rostered family member fak %s is missing its files (%s / %s) -- the roster drifted from the tree; fix Family",
-			p.Member.Verb, p.Member.CmdFile, p.Member.PkgDir))
+		defects = append(defects, fmt.Sprintf("rostered family member fak %s is missing its cmd shell (%s) -- the roster drifted from the tree; fix Family",
+			p.Member.Verb, p.Member.CmdFile))
 	}
 	score := 100.0
 	if len(probes) > 0 {
@@ -244,7 +275,7 @@ func kpiMemberIntegrity(probes []Probe) scorecard.KPI {
 	}
 	return scorecard.KPI{
 		Key: "member_integrity", Group: "roster", Score: score,
-		Detail:  fmt.Sprintf("%d/%d rostered members resolve to a real cmd shell + package", present, len(probes)),
+		Detail:  fmt.Sprintf("%d/%d rostered members resolve to a real cmd shell", present, len(probes)),
 		Defects: defects,
 	}
 }

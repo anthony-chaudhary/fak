@@ -258,6 +258,84 @@ func TestLiveTreeIsDeterministicAndDetectsDrift(t *testing.T) {
 	}
 }
 
+// The extended roster (#1516) must leave the live tree with roster_complete at 100 (every
+// dispatch scorecard verb rostered) and zero member_integrity defects -- the issue's Done
+// condition. Pinning roster_complete==100 turns a newly-added-but-unrostered scorecard verb into
+// a red suite instead of a silent SOFT nudge.
+func TestExtendedRosterIsComplete(t *testing.T) {
+	root := repoRootForTest(t)
+	a := Build(root)
+	sawRoster, sawIntegrity := false, false
+	for _, k := range a.KPIs {
+		switch k.Key {
+		case "member_integrity":
+			sawIntegrity = true
+			if len(k.Defects) != 0 {
+				t.Fatalf("member_integrity must carry zero defects, got: %v", k.Defects)
+			}
+		case "roster_complete":
+			sawRoster = true
+			if k.Score != 100 {
+				t.Fatalf("roster_complete = %.1f, want 100 (unrostered scorecard verbs: %v)", k.Score, k.Soft)
+			}
+		}
+	}
+	if !sawRoster || !sawIntegrity {
+		t.Fatalf("missing roster KPIs (roster_complete=%v member_integrity=%v)", sawRoster, sawIntegrity)
+	}
+}
+
+// The pkg_split convention (#1516) names the "pure core lives in internal/<name>, thin shell in
+// cmd/fak" split. A card whose logic is inline in cmd/fak (no internal package) is still a real
+// member -- its cmd shell resolves -- that reads as a pkg_split laggard, the gap the convention
+// exists to catch. Existence keys on the shell, so an inline card is never a roster-integrity
+// defect.
+func TestPkgSplitCatchesInlineCard(t *testing.T) {
+	root := t.TempDir()
+	// A card with a pure core in internal/.
+	mustWrite(t, root, "cmd/fak/splitcard.go", `package main`)
+	mustWrite(t, root, "internal/splitcard/splitcard.go", `package splitcard`)
+	// A card whose scoring logic is inline in cmd/fak -- no internal package.
+	mustWrite(t, root, "cmd/fak/inlinecard.go", `package main`)
+
+	family := []Member{
+		{Verb: "split-card", CmdFile: "cmd/fak/splitcard.go", PkgDir: "internal/splitcard"},
+		{Verb: "inline-card", CmdFile: "cmd/fak/inlinecard.go", PkgDir: "internal/inlinecard"},
+	}
+	probes := ProbeMembers(root, family)
+	if !probes[0].Exists || !probes[0].Adopted["pkg_split"] {
+		t.Fatalf("split-card should exist with a pure core: %+v", probes[0])
+	}
+	if !probes[1].Exists {
+		t.Fatalf("inline-card cmd shell resolves, so it must be a real member (Exists=true)")
+	}
+	if probes[1].Adopted["pkg_split"] {
+		t.Fatalf("inline-card has no internal package -- it must read as a pkg_split laggard")
+	}
+}
+
+// skill-effectiveness-scorecard is the live embodiment of the pkg_split gap: rostered, its cmd
+// shell resolves, but it has no pure-core internal/ package yet.
+func TestSkillEffectivenessIsRosteredPkgSplitLaggard(t *testing.T) {
+	root := repoRootForTest(t)
+	probes := ProbeMembers(root, Family)
+	var found *Probe
+	for i := range probes {
+		if probes[i].Member.Verb == "skill-effectiveness-scorecard" {
+			found = &probes[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("skill-effectiveness-scorecard must be rostered (#1516)")
+	}
+	if !found.Exists {
+		t.Fatalf("skill-effectiveness-scorecard cmd shell must resolve: %+v", found.Member)
+	}
+	if found.Adopted["pkg_split"] {
+		t.Fatal("skill-effectiveness-scorecard has no pure-core package -- must read as a pkg_split laggard")
+	}
+}
+
 func mustWrite(t *testing.T, root, rel, content string) {
 	t.Helper()
 	p := filepath.Join(root, filepath.FromSlash(rel))
