@@ -30,7 +30,7 @@ func newV4ExpertQuantStager(source *v4ExpertSource, ring *pagedRing, plan v4Expe
 		return nil, err
 	}
 	stager.decode = func(weight v4ExpertTensor) (compute.Tensor, error) {
-		scaleName := strings.TrimSuffix(weight.Name, ".weight") + ".weight_scale"
+		scaleName := strings.TrimSuffix(weight.Name, ".weight") + ".scale"
 		if _, selected := stager.selected[scaleName]; !selected {
 			return compute.Tensor{}, fmt.Errorf("%w: scale %s not selected", ErrV4ExpertCompose, scaleName)
 		}
@@ -42,6 +42,42 @@ func newV4ExpertQuantStager(source *v4ExpertSource, ring *pagedRing, plan v4Expe
 		stager.stats.SourceBytes += int64(len(scale.Bytes))
 		weightEntry, weightOK := source.entries[weight.Name]
 		scaleEntry, scaleOK := source.entries[scaleName]
+		if !weightOK || !scaleOK {
+			return compute.Tensor{}, fmt.Errorf("%w: missing quant metadata for %s", ErrV4ExpertCompose, weight.Name)
+		}
+		decoded, shape, err := decodeV4ExpertQuant(weight.Name, scaleName, weightEntry, scaleEntry, weight.Bytes, scale.Bytes)
+		if err != nil {
+			return compute.Tensor{}, err
+		}
+		values := make([]float32, len(decoded)/4)
+		for i := range values {
+			values[i] = math.Float32frombits(binary.LittleEndian.Uint32(decoded[i*4:]))
+		}
+		return compute.NewF32(ring.be, shape, values), nil
+	}
+	return stager, nil
+}
+
+func newV4ShardedExpertQuantStager(source *v4ShardedExpertSource, ring *pagedRing, plan v4ExpertBatchPlan) (*v4ExpertStager, error) {
+	stager, err := newV4ShardedExpertStager(source, ring, plan, compute.F32, func(v4ExpertTensor) (compute.Tensor, error) {
+		return compute.Tensor{}, fmt.Errorf("%w: quant decoder not initialized", ErrV4ExpertCompose)
+	})
+	if err != nil {
+		return nil, err
+	}
+	stager.decode = func(weight v4ExpertTensor) (compute.Tensor, error) {
+		scaleName := strings.TrimSuffix(weight.Name, ".weight") + ".scale"
+		if _, selected := stager.selected[scaleName]; !selected {
+			return compute.Tensor{}, fmt.Errorf("%w: scale %s not selected", ErrV4ExpertCompose, scaleName)
+		}
+		scale, err := source.read(scaleName)
+		if err != nil {
+			return compute.Tensor{}, err
+		}
+		stager.stats.SourceReads++
+		stager.stats.SourceBytes += int64(len(scale.Bytes))
+		weightEntry, weightOK := source.entry(weight.Name)
+		scaleEntry, scaleOK := source.entry(scaleName)
 		if !weightOK || !scaleOK {
 			return compute.Tensor{}, fmt.Errorf("%w: missing quant metadata for %s", ErrV4ExpertCompose, weight.Name)
 		}
