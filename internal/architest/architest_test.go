@@ -454,6 +454,7 @@ var tier = map[string]int{
 	"planresolve":           3,
 	"modelops":              3,
 	"modelaccept":           3,
+	"executionroute": 3,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
