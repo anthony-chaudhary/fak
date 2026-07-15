@@ -1,0 +1,79 @@
+package main
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+)
+
+func TestGuardAllowWatcherLiveAddRemoveAndMalformedLastGood(t *testing.T) {
+	dir := t.TempDir()
+	allowPath := filepath.Join(dir, "allow.json")
+	t.Setenv(guardAllowOverlayEnv, allowPath)
+	t.Setenv(guardDenyOverlayEnv, filepath.Join(dir, "deny.json"))
+	reload := guardPolicyReloader("")
+	if _, err := reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	w := newGuardAllowWatcher(time.Millisecond, reload, nil)
+	const tool = "live_overlay_probe"
+	verdict := func() abi.VerdictKind {
+		return adjudicator.Default.Adjudicate(context.Background(), guardToolCall(t, tool, map[string]any{})).Kind
+	}
+	if got := verdict(); got == abi.VerdictAllow {
+		t.Fatalf("precondition verdict = %v, want denied", got)
+	}
+
+	if err := saveGuardAllowOverlay(allowPath, guardAllowOverlay{Allow: []string{tool}}); err != nil {
+		t.Fatal(err)
+	}
+	if e := w.Reload(context.Background()); !e.Reloaded || e.Rejected {
+		t.Fatalf("add reload = %+v", e)
+	}
+	if got := verdict(); got != abi.VerdictAllow {
+		t.Fatalf("after add = %v, want ALLOW", got)
+	}
+
+	if err := os.WriteFile(allowPath, []byte(`{"version":"wrong","allow":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if e := w.Reload(context.Background()); !e.Rejected || e.Reloaded {
+		t.Fatalf("malformed reload = %+v", e)
+	}
+	if got := verdict(); got != abi.VerdictAllow {
+		t.Fatalf("malformed edit lost last-good allow: %v", got)
+	}
+
+	if err := saveGuardAllowOverlay(allowPath, guardAllowOverlay{}); err != nil {
+		t.Fatal(err)
+	}
+	if e := w.Reload(context.Background()); !e.Reloaded || e.Rejected {
+		t.Fatalf("remove reload = %+v", e)
+	}
+	if got := verdict(); got == abi.VerdictAllow {
+		t.Fatalf("after remove = %v, want denied", got)
+	}
+}
+
+func TestGuardAllowWatcherRunStopsWithContext(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(guardAllowOverlayEnv, filepath.Join(dir, "allow.json"))
+	ctx, cancel := context.WithCancel(context.Background())
+	w := newGuardAllowWatcher(time.Millisecond, guardPolicyReloader(""), nil)
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("Run error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not stop with guard context")
+	}
+}

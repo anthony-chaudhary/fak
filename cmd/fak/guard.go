@@ -1079,6 +1079,7 @@ func cmdGuard(argv []string) {
 	//    process in the group, so the child receives and handles its own either way.
 	signal.Ignore(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
+	startGuardAllowWatcher(ctx, guardPolicyReloader(*policyPath), *quiet)
 	fleetLogf := fleetspine.Logf(nil)
 	if !*quiet {
 		fleetLogf = func(format string, args ...any) {
