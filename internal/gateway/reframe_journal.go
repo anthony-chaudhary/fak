@@ -25,7 +25,7 @@ func journalReframePass(path, traceID, arm, text string, now time.Time) string {
 	return result.Text
 }
 
-func journalReframeFragments(path, traceID, arm string, fragments []negframe.Fragment, now time.Time) string {
+func journalReframeFragments(path, traceID, site, arm string, fragments []negframe.Fragment, now time.Time) string {
 	var out strings.Builder
 	result := negframe.ReframeResult{}
 	for _, fragment := range fragments {
@@ -44,7 +44,7 @@ func journalReframeFragments(path, traceID, arm string, fragments []negframe.Fra
 	}
 	result.Text = out.String()
 	if path != "" {
-		_ = negframe.AppendReframeJournal(path, negframe.NewReframeJournalRow(traceID, arm, result, now), negframe.DefaultJournalMaxRows)
+		_ = negframe.AppendReframeJournal(path, negframe.NewReframeJournalSiteRow(traceID, site, arm, result, now), negframe.DefaultJournalMaxRows)
 	}
 	return result.Text
 }

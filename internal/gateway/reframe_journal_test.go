@@ -42,11 +42,11 @@ func TestReframeJournalGatewayTreatmentAndControl(t *testing.T) {
 func TestReframeJournalFragmentsPreserveOpaqueAndArm(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "j.jsonl")
 	fragments := []negframe.Fragment{negframe.Fak("Do not forget to recover: "), negframe.Opaque("Do not mutate USER")}
-	got := journalReframeFragments(path, "t", "treatment", fragments, time.UnixMilli(3))
+	got := journalReframeFragments(path, "t", "gateway.test", "treatment", fragments, time.UnixMilli(3))
 	if got != "remember to recover: Do not mutate USER" {
 		t.Fatalf("treatment=%q", got)
 	}
-	got = journalReframeFragments(path, "c", "control", fragments, time.UnixMilli(4))
+	got = journalReframeFragments(path, "c", "gateway.test", "control", fragments, time.UnixMilli(4))
 	if got != "Do not forget to recover: Do not mutate USER" {
 		t.Fatalf("control=%q", got)
 	}
