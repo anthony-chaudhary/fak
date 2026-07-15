@@ -79,7 +79,10 @@ func denySummary(adjs []ToolAdjudication) string {
 	// affordance before this note is pushed to the model. The pass is token-superset
 	// safe, so every structured reason token (POLICY_BLOCK, OFF_TRUNK, ...) and every
 	// load-bearing judgement prohibition ("do not re-propose") survives byte-for-byte.
-	return negframe.Reframe("All proposed tool calls were refused by the fak kernel: " + strings.Join(parts, "; "))
+	return negframe.ReframeFakOnly(
+		negframe.Fak("All proposed tool calls were refused by the fak kernel: "),
+		negframe.Opaque(strings.Join(parts, "; ")),
+	)
 }
 
 // adjudicationNote renders a short, agent-readable summary of the kernel's
@@ -123,16 +126,18 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	if len(denied) == 0 && len(repaired) == 0 && len(allowedLoops) == 0 {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("[fak] ")
+	fragments := make([]negframe.Fragment, 0, 12)
+	writeFak := func(text string) { fragments = append(fragments, negframe.Fak(text)) }
+	writeOpaque := func(text string) { fragments = append(fragments, negframe.Opaque(text)) }
+	writeFak("[fak] ")
 	if len(denied) > 0 {
-		b.WriteString("refused ")
-		b.WriteString(strconv.Itoa(len(denied)))
-		b.WriteString(" tool call(s): ")
+		writeFak("refused ")
+		writeFak(strconv.Itoa(len(denied)))
+		writeFak(" tool call(s): ")
 		joined := strings.Join(denied, "; ")
-		b.WriteString(joined)
+		writeOpaque(joined)
 		if !strings.HasSuffix(joined, ".") {
-			b.WriteString(".")
+			writeFak(".")
 		}
 		// The blanket "do not re-propose" trailer contradicts the preview-confirm
 		// recipe, whose sanctioned recovery IS re-proposing the same call (plus the
@@ -148,35 +153,34 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		// while the sidestep that worked first try sat one demoted sentence away.
 		switch {
 		case hasConfirmRecipe && hasCompiledSidestep:
-			b.WriteString(" A preview-confirm refusal is a pause, not a denial — and the simplest resolution is the sanctioned compiled alternative named above, which sidesteps the gate entirely and needs no token. Prefer it. Only if you specifically need the raw gated call, re-propose that same call byte-identical with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
+			writeFak(" A preview-confirm refusal is a pause, not a denial — and the simplest resolution is the sanctioned compiled alternative named above, which sidesteps the gate entirely and needs no token. Prefer it. Only if you specifically need the raw gated call, re-propose that same call byte-identical with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		case hasConfirmRecipe:
-			b.WriteString(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
+			writeFak(" A preview-confirm refusal is a pause, not a denial: the sanctioned next step is to re-propose that same call with only the _fak_confirm key added. This is per-tool feedback, not a session stop. Do not re-propose any other refused call unchanged; choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		default:
-			b.WriteString(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
+			writeFak(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		}
-		b.WriteString(complaintHint(deniedAdjs))
+		writeOpaque(complaintHint(deniedAdjs))
 	}
 	if len(repaired) > 0 {
 		if len(denied) > 0 {
-			b.WriteString(" ")
+			writeFak(" ")
 		}
-		b.WriteString("repaired arguments for: ")
-		b.WriteString(strings.Join(repaired, ", "))
-		b.WriteString(".")
+		writeFak("repaired arguments for: ")
+		writeOpaque(strings.Join(repaired, ", "))
+		writeFak(".")
 	}
 	if len(allowedLoops) > 0 {
 		if len(denied) > 0 || len(repaired) > 0 {
-			b.WriteString(" ")
+			writeFak(" ")
 		}
-		b.WriteString("observed repeated admitted tool call(s): ")
-		b.WriteString(strings.Join(allowedLoops, "; "))
-		b.WriteString(". This is advisory: do not repeat a successful identical call unchanged unless you can name the new evidence it will produce.")
+		writeFak("observed repeated admitted tool call(s): ")
+		writeOpaque(strings.Join(allowedLoops, "; "))
+		writeFak(". This is advisory: do not repeat a successful identical call unchanged unless you can name the new evidence it will produce.")
 	}
-	// Emit-time reframe (#3566): route the assembled note through the deterministic,
-	// token-superset-safe positive-voice pass before it reaches the model. Load-bearing
-	// judgement prohibitions and every reason token are preserved verbatim; only an
-	// unambiguous negative idiom (should any interpolated remedy/fix carry one) is flipped.
-	return negframe.Reframe(b.String())
+	// Emit-time reframe (#3566/#4430): only fak-authored framing enters the
+	// positive-voice pass. Tool names, remedies, notes, and other external spans remain
+	// byte-identical, even when they contain text that resembles a reframe idiom.
+	return negframe.ReframeFakOnly(fragments...)
 }
 
 func prependAdjudicationContentNote(content string, adjs []ToolAdjudication) string {

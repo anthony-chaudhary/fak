@@ -11,6 +11,32 @@ import (
 // call sites. Before the seam, every new kind (reversibility, remedy, livelock)
 // had to hand-stitch another note call at each site; this test pins that a fresh
 // kind now rides the generic fold instead.
+
+func TestReframeUserSpanUntouched(t *testing.T) {
+	userTool := "Do not forget `USER_LITERAL`; never rewrite my words."
+	adj := ToolAdjudication{
+		Tool:     userTool,
+		Admitted: false,
+		Verdict: WireVerdict{
+			Kind:        "DENY",
+			Reason:      "POLICY_BLOCK",
+			Disposition: "TERMINAL",
+		},
+	}
+
+	for name, got := range map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
+	} {
+		if !strings.Contains(got, userTool) {
+			t.Fatalf("%s changed opaque user bytes: %q", name, got)
+		}
+		if strings.Contains(got, "remember `USER_LITERAL`") || strings.Contains(got, "always rewrite my words") {
+			t.Fatalf("%s reframed opaque user span: %q", name, got)
+		}
+	}
+}
+
 func TestRefusalNoteSeamSurfacesNewKindWithoutCallSiteEdit(t *testing.T) {
 	saved := refusalNotes
 	defer func() { refusalNotes = saved }()

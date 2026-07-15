@@ -357,34 +357,30 @@ func guardRecoveryPrompt(items []guardRefusalCarry) string {
 	if len(items) == 0 {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("[fak] resume recovery: the previous guarded run recorded capability-floor refusal(s). ")
-	b.WriteString("Treat this resumed turn as recovery/debugging and revise the call from evidence. ")
-	b.WriteString("Clear the blocker or choose an allowed alternative, then continue with a revised call. ")
-	b.WriteString("Prior refusal(s):")
+	fragments := []negframe.Fragment{
+		negframe.Fak("[fak] resume recovery: the previous guarded run recorded capability-floor refusal(s). Treat this resumed turn as recovery/debugging and revise the call from evidence. Clear the blocker or choose an allowed alternative, then continue with a revised call. Prior refusal(s):"),
+	}
 	wrote := false
 	for _, item := range items {
 		if strings.TrimSpace(item.Reason) == "" {
 			continue
 		}
+		separator := " "
 		if wrote {
-			b.WriteString(";")
+			separator = "; "
 		}
-		fmt.Fprintf(&b, " %s x%d", item.Reason, item.Count)
+		fragments = append(fragments, negframe.Fak(fmt.Sprintf("%s%s x%d", separator, item.Reason, item.Count)))
 		if fix := strings.TrimSpace(item.Fix); fix != "" {
-			fmt.Fprintf(&b, " (fix: %s)", fix)
+			// Reason fixes can be operator-authored; retain them byte-identically.
+			fragments = append(fragments, negframe.Fak(" (fix: "), negframe.Opaque(fix), negframe.Fak(")"))
 		}
 		wrote = true
 	}
 	if !wrote {
 		return ""
 	}
-	b.WriteString(". Keep fak guard wrapped after the blocker is cleared.")
-	// Emit-time reframe (#3566): this prompt interpolates per-reason `fix:` prose from the
-	// reason docs, which can itself carry an unambiguous negative idiom ("do not forget to
-	// stamp"). Route the assembled prompt through the token-superset-safe positive-voice pass
-	// so the recovery note leads with the affordance while every reason token stays intact.
-	return negframe.Reframe(b.String())
+	fragments = append(fragments, negframe.Fak(". Keep fak guard wrapped after the blocker is cleared."))
+	return negframe.ReframeFakOnly(fragments...)
 }
 
 var guardReasonHeaderRE = regexp.MustCompile(`^\[reasons\.([A-Z0-9_]+)\]`)

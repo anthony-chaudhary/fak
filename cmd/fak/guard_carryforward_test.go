@@ -84,20 +84,16 @@ func TestGuardRecoveryPromptNamesPriorRefusals(t *testing.T) {
 	}
 }
 
-// The emit-time reframe (#3566) flips an unambiguous negative idiom carried by an interpolated
-// per-reason fix ("do not forget to stamp the commit") to lead with the affordance, while the
-// structured reason token (OFF_TRUNK) survives the pass byte-for-byte.
-func TestGuardRecoveryPromptReframesFix(t *testing.T) {
+// Operator-authored reason fixes are opaque: surrounding fak prose may reframe,
+// while the fix and reason token survive byte-for-byte.
+func TestGuardRecoveryPromptPreservesOpaqueFix(t *testing.T) {
 	got := guardRecoveryPrompt([]guardRefusalCarry{{
 		Reason: "OFF_TRUNK",
 		Count:  1,
 		Fix:    "do not forget to stamp the commit",
 	}})
-	if !strings.Contains(got, "remember to stamp the commit") {
-		t.Fatalf("recovery prompt did not reframe the fix idiom:\n%s", got)
-	}
-	if strings.Contains(got, "do not forget to stamp") {
-		t.Fatalf("recovery prompt left the fix idiom unreframed:\n%s", got)
+	if !strings.Contains(got, "do not forget to stamp the commit") {
+		t.Fatalf("recovery prompt changed opaque fix bytes:\n%s", got)
 	}
 	if !strings.Contains(got, "OFF_TRUNK") {
 		t.Fatalf("recovery prompt dropped the reason token OFF_TRUNK:\n%s", got)

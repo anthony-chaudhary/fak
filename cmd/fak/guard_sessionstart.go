@@ -88,7 +88,7 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 	// with the affordance. sessionsteer stays stdlib-only (tier 1) — the reframe lives here, at the
 	// emit boundary, not inside the pure decision core. Idempotent, so a source string already in
 	// positive voice is returned unchanged.
-	additionalContext = negframe.Reframe(additionalContext)
+	additionalContext = negframe.ReframeFakOnly(negframe.Fak(additionalContext))
 	// Claude Code injects a SessionStart hook's hookSpecificOutput.additionalContext into the
 	// first turn's context. Emit the envelope; a marshal failure is a silent no-op (fail open).
 	envelope := map[string]any{
