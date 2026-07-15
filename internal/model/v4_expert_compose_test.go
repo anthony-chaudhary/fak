@@ -57,7 +57,7 @@ func TestComposeV4RoutedExpertsMatchesIndependentResidentOracle(t *testing.T) {
 	x := be.Upload(compute.NewF32(be, []int{2}, xHost), compute.F32)
 	defer be.Free(x)
 	routes := []v4RoutedExpert{{Expert: 2, Weight: 0.7}, {Expert: 5, Weight: 0.3}}
-	got, err := composeV4RoutedExperts(layer, routes, x, stager)
+	got, err := composeV4RoutedExperts(layer, routes, x, 0, stager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +79,95 @@ func TestComposeV4RoutedExpertsMatchesIndependentResidentOracle(t *testing.T) {
 	}
 	if ring.used() > ring.budget() {
 		t.Fatalf("ring used=%d exceeds budget=%d", ring.used(), ring.budget())
+	}
+}
+
+func TestComposeV4RoutedExpertsAppliesOfficialAsymmetricSwiGLULimit(t *testing.T) {
+	const (
+		layer = 3
+		limit = float32(10)
+	)
+	// Identity w1/w3 expose every clamp branch directly. w2 sums pairs so all
+	// four dimensions affect the observed output: gate below/above the limit and
+	// up below/above each symmetric bound.
+	tensors := map[string]tinySTTensor{
+		v4ComposeTensorName(layer, 0, "w1"): {dtype: "F32", shape: []int{4, 4}, data: f32TestBytes([]float32{
+			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+		})},
+		v4ComposeTensorName(layer, 0, "w2"): {dtype: "F32", shape: []int{4, 4}, data: f32TestBytes([]float32{
+			1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1,
+		})},
+		v4ComposeTensorName(layer, 0, "w3"): {dtype: "F32", shape: []int{4, 4}, data: f32TestBytes([]float32{
+			0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0,
+		})},
+	}
+	source, reads := newV4ComposeFixtureSource(t, tensors)
+	plan, err := source.planV4ExpertBatch(layer, []int{0}, 3*64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := compute.Default()
+	decode := func(tensor v4ExpertTensor) (compute.Tensor, error) {
+		values := make([]float32, len(tensor.Bytes)/4)
+		for i := range values {
+			values[i] = math.Float32frombits(binary.LittleEndian.Uint32(tensor.Bytes[4*i:]))
+		}
+		return compute.NewF32(be, tensor.Shape, values), nil
+	}
+	stager, err := newV4ExpertStager(source, newPagedRing(be, 3*64), plan, compute.F32, decode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []float32{-20, 20, 30, -30}
+	x := be.Upload(compute.NewF32(be, []int{4}, input), compute.F32)
+	defer be.Free(x)
+	got, err := composeV4RoutedExperts(layer, []v4RoutedExpert{{0, 1}}, x, limit, stager)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gate := append([]float32(nil), input...)
+	up := []float32{input[2], input[3], input[0], input[1]}
+	middle := make([]float32, len(gate))
+	for i := range middle {
+		g := gate[i]
+		if g > limit {
+			g = limit
+		}
+		u := up[i]
+		if u < -limit {
+			u = -limit
+		}
+		if u > limit {
+			u = limit
+		}
+		middle[i] = float32(float64(g)/(1+math.Exp(-float64(g)))) * u
+	}
+	w2 := tensors[v4ComposeTensorName(layer, 0, "w2")].data
+	_ = w2 // matrix values are intentionally restated for an independent oracle.
+	want := scalarMatVec([]float32{1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1}, 4, 4, middle)
+	for i := range want {
+		if delta := math.Abs(float64(got[i] - want[i])); delta > 1e-5 {
+			t.Fatalf("limited output[%d]=%.9g want %.9g delta %.3g", i, got[i], want[i], delta)
+		}
+	}
+	// Symmetrically clamping the negative gate would produce a materially
+	// different first component; this assertion specifically witnesses the
+	// official upper-only gate clamp.
+	symmetricGate := float32(-float64(limit) / (1 + math.Exp(float64(limit))))
+	symmetricFirst := symmetricGate*(-limit) + v4SiLU(limit)*(-limit)
+	if math.Abs(float64(got[0]-symmetricFirst)) < 1e-3 {
+		t.Fatalf("output accidentally matches symmetric gate clamp: got=%g symmetric=%g", got[0], symmetricFirst)
+	}
+
+	readsBefore, usedBefore := reads.tensorReads, stager.ring.used()
+	for _, bad := range []float32{-1, float32(math.NaN()), float32(math.Inf(1))} {
+		if _, err := composeV4RoutedExperts(layer, []v4RoutedExpert{{0, 1}}, x, bad, stager); !errors.Is(err, ErrV4ExpertCompose) {
+			t.Fatalf("limit %v error=%v, want ErrV4ExpertCompose", bad, err)
+		}
+	}
+	if reads.tensorReads != readsBefore || stager.ring.used() != usedBefore {
+		t.Fatalf("invalid limits mutated source/ring: reads %d->%d used %d->%d", readsBefore, reads.tensorReads, usedBefore, stager.ring.used())
 	}
 }
 
@@ -118,7 +207,7 @@ func TestComposeV4RoutedExpertsRejectsInvalidInputs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := composeV4RoutedExperts(tc.layer, tc.routes, tc.x, stager); !errors.Is(err, ErrV4ExpertCompose) {
+			if _, err := composeV4RoutedExperts(tc.layer, tc.routes, tc.x, 0, stager); !errors.Is(err, ErrV4ExpertCompose) {
 				t.Fatalf("error=%v, want ErrV4ExpertCompose", err)
 			}
 		})
@@ -147,7 +236,7 @@ func TestComposeV4RoutedExpertsRejectsInvalidInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := composeV4RoutedExperts(layer, []v4RoutedExpert{{0, 0.5}, {1, 0.5}}, x, badStager); !errors.Is(err, ErrV4ExpertCompose) {
+	if _, err := composeV4RoutedExperts(layer, []v4RoutedExpert{{0, 0.5}, {1, 0.5}}, x, 0, badStager); !errors.Is(err, ErrV4ExpertCompose) {
 		t.Fatalf("dimension error=%v, want ErrV4ExpertCompose", err)
 	}
 	if badReads.tensorReads != 0 || badRing.used() != 0 {

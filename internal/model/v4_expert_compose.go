@@ -66,12 +66,15 @@ func newV4ExpertQuantStager(source *v4ExpertSource, ring *pagedRing, plan v4Expe
 //
 // Results are accumulated in router order. Floating-point accumulation order is
 // therefore explicit and reproducible rather than dependent on map iteration.
-func composeV4RoutedExperts(layer int, selected []v4RoutedExpert, x compute.Tensor, stager *v4ExpertStager) ([]float32, error) {
+func composeV4RoutedExperts(layer int, selected []v4RoutedExpert, x compute.Tensor, swigluLimit float32, stager *v4ExpertStager) ([]float32, error) {
 	if layer < 0 || len(selected) == 0 || stager == nil || stager.ring == nil {
 		return nil, fmt.Errorf("%w: layer=%d selected=%d or nil stager", ErrV4ExpertCompose, layer, len(selected))
 	}
 	if len(x.Shape) != 1 || x.Shape[0] <= 0 {
 		return nil, fmt.Errorf("%w: input shape %v is not a non-empty vector", ErrV4ExpertCompose, x.Shape)
+	}
+	if swigluLimit < 0 || math.IsNaN(float64(swigluLimit)) || math.IsInf(float64(swigluLimit), 0) {
+		return nil, fmt.Errorf("%w: swiglu limit=%v", ErrV4ExpertCompose, swigluLimit)
 	}
 	groups := make(map[int]v4ExpertProjectionNames, len(stager.selected))
 	for _, group := range stagerPlanGroups(stager) {
@@ -123,7 +126,15 @@ func composeV4RoutedExperts(layer int, selected []v4RoutedExpert, x compute.Tens
 		}
 		activated := make([]float32, len(gate))
 		for i := range gate {
-			activated[i] = route.Weight * v4SiLU(gate[i]) * up[i]
+			gateValue, upValue := gate[i], up[i]
+			if swigluLimit > 0 {
+				// Pinned Expert.forward clamps the gate only from above, but the
+				// up projection symmetrically. Keeping the asymmetry is observable
+				// for large negative gate values and is required for parity.
+				gateValue = min(gateValue, swigluLimit)
+				upValue = max(-swigluLimit, min(upValue, swigluLimit))
+			}
+			activated[i] = route.Weight * v4SiLU(gateValue) * upValue
 		}
 		activation := stager.ring.be.Upload(compute.NewF32(stager.ring.be, []int{len(activated)}, activated), compute.F32)
 		projected, err := stager.matMul(names.w2, activation)
