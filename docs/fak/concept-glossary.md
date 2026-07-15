@@ -682,6 +682,35 @@ Two discovered tokens are NOT concepts and are ignored by the family's `ignore` 
 - **posture** vs **secret posture** - the default-deny behavior on the call-admit path
   vs the behavior when a RESULT bears a credential. Orthogonal knobs.
 
+- **AdjudicateMemoryWrite (memq)** vs **adjudicator** - the deny-by-structure rule set
+  that judges a durable MEMORY WRITE (a memq cell body) by structure alone, vs the
+  pre-call reference monitor that folds a tool-CALL decision chain under the loaded
+  capability policy. Memory-write admission vs tool-call admission; AdmissionVerdict vs
+  abi.Verdict.
+
+- **ContainmentPolicy (toolprocgate)** vs **Policy (loaded)** - the runtime-enforcement
+  knobs that bound the blast radius of a console/terminal crash (per-surface agent cap,
+  surface quarantine, fleet breaker) folded into a spawn-admission ContainmentVerdict, vs
+  the adjudicator's tool-call decision table. Crash-blast-radius spawn gate vs tool-call
+  authorization.
+
+- **AuditIndependencePolicy (modelroute)** vs **Policy (loaded)** - the versioned
+  admission policy that decides whether an AUDITOR may audit an AUTHOR (required identity
+  axes + diversity knobs), vs the adjudicator's tool-call decision table.
+  Audit-independence admission vs tool-call authorization; AuditIndependenceDecision vs
+  abi.Verdict.
+
+- **POLICY_MALFORMED (resume)** vs **POLICY_BLOCK (adjudicator)** - the closed refusal a
+  PRESENT-but-unparseable resume source-governor policy FILE earns, vs the adjudicator's
+  explicit deny-rule match on a tool call. A malformed-policy-file rail vs a tool-deny
+  rule; both carry 'policy' but in different domains (resume source governor vs
+  tool-call adjudicator).
+
+- **preflight_focus (dispatchtick)** vs **preflight ladder** - the dispatch spawn-admission
+  WIP-breadth backpressure term (folds measured fleet breadth vs the pinned WIP cap, emits
+  FOCUS_WIP_SATURATED) that throttles opening a NEW objective, vs the per-call
+  well-formedness schema rungs. Dispatch spawn WIP gate vs per-call schema preflight.
+
 ---
 
 ## The context-management family

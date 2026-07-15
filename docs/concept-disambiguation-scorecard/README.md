@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **97.5/100** (grade A) = 9.8/10 |
-| **Coverage** | **96.2%** (1879/1953 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **74** (clarity 0 + coverage 74) |
-| Crystal-clear concepts | 224 of 1649 positioned |
+| **Score** | **98.1/100** (grade A) = 9.8/10 |
+| **Coverage** | **97.0%** (1895/1954 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **59** (clarity 0 + coverage 59) |
+| Crystal-clear concepts | 230 of 1666 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,11 +24,11 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1649 concepts - score 97.5/100 (grade A) - disambiguation-debt 74
+concept-disambiguation chart - 1666 concepts - score 98.1/100 (grade A) - disambiguation-debt 59
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####........................ 224
-  o defined       ############################ 1425
+  * crystal       ####........................ 230
+  o defined       ############################ 1436
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -46,7 +46,7 @@ clarity mix by family (each cell = one concept):
   layout           ***oooooooo        (11 concept(s); 3 crystal)
   loop             **************oooooooooooooooooooooo (36 concept(s); 14 crystal)
   plan             ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 15 crystal)
-  policy-capability ******oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (84 concept(s); 6 crystal)
+  policy-capability ***********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (100 concept(s); 11 crystal)
   pool             **ooooooooooooooooooooooooooooo (31 concept(s); 2 crystal)
   render-materialize ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (140 concept(s); 3 crystal)
   score-debt       ***oooooooooooooooooooooooooooooooooooooooooooooooooo (53 concept(s); 3 crystal)
@@ -54,11 +54,10 @@ clarity mix by family (each cell = one concept):
   support-maturity *****oooooooooooooooo (21 concept(s); 5 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (109 concept(s); 32 crystal)
+  witness-proof    *********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 33 crystal)
 
 coverage by family (positioned / discovered):
-  policy-capability ########################.... 99/114
-  gateway-engine   ##########################.. 151/162
+  gateway-engine   ##########################.. 152/162
   score-debt       ########################.... 68/78
   attention        #########################... 61/68
   decision         ########################.... 35/41
@@ -73,13 +72,14 @@ coverage by family (positioned / discovered):
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   plan             ############################ 286/286
+  policy-capability ############################ 115/115
   render-materialize ############################ 162/162
   session-runtime  ############################ 170/170
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 124/124
 
-namespace coverage  [###############################.] 96.2%  (1879/1953 confusable tokens positioned)
+namespace coverage  [###############################.] 97.0%  (1895/1954 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -245,6 +245,11 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | plan | **Plan (planner)** - Planner's chosen resident view: selected set, elided set, and accounting |
 | * | crystal | symbol | plan | **Plan (memq)** - Static pre-execution Explain output: pipeline steps, effects, and mutations |
 | * | crystal | symbol | plan | **Candidate** - Scored span the planner may keep resident with cost, benefit, and density metrics |
+| * | crystal | symbol | policy-capability | **AdjudicateMemoryWrite (memq)** - memq.AdjudicateMemoryWrite is the deny-by-structure rule set (#2912) that judges a candidate durable memory write by structure alone - size, transient-error phrasing, negative tool-claim, one-off narrative - and returns an AdmissionVerdict whose Reason is from a closed vocabulary, with no model call, clock, or I/O. |
+| * | crystal | config | policy-capability | **ContainmentPolicy (toolprocgate)** - toolprocgate.ContainmentPolicy bounds the blast radius of a console/terminal crash - the per-surface live-agent cap, the surface-quarantine fault threshold, and the fleet-breaker storm thresholds - that DecideContainment folds into a closed containment verdict (ADMIT / REFUSE_COLOCATION / QUARANTINE_SURFACE / BREAKER_OPEN) for a proposed spawn. |
+| * | crystal | config | policy-capability | **AuditIndependencePolicy (modelroute)** - modelroute.AuditIndependencePolicy is the versioned admission policy EvaluateAuditIndependence folds to decide whether an AUDITOR may audit an AUTHOR - its required identity axes, family/provider/harness/endpoint/account diversity knobs, and alias roster - returning a closed ADMIT/REFUSE/UNKNOWN verdict with a closed reason vocabulary. |
+| * | crystal | symbol | policy-capability | **ReasonPolicyMalformed (resume)** - resume.ReasonPolicyMalformed ('POLICY_MALFORMED') is the closed-vocabulary refusal a PRESENT-but-unparseable resume source-governor policy file earns (#2173) - a missing policy stays permissive, but a malformed one refuses so a typo does not silently drop the rail. |
+| * | crystal | subsystem | policy-capability | **preflight_focus (dispatchtick)** - dispatchtick's preflight_focus.go is the focus WIP-breadth backpressure term: it folds the MEASURED fleet breadth (active trajectory-control objectives vs the pinned WIP cap, re-derived by internal/focusscore) into the spawn decision so a fleet at/over its work-in-progress ceiling WARNS or HOLDS opening a NEW objective while never throttling a continuation. |
 | * | crystal | concept | policy-capability | **capability floor** - The deployable, declarative authorization layer that defines exactly which tools an agent may call by name, loaded as a JSON manifest at runtime. |
 | * | crystal | config | policy-capability | **policy manifest** - The versioned JSON structure an operator edits to configure the capability floor, mapping 1:1 to adjudicator.Policy with deny reasons validated against the closed vocabulary. |
 | * | crystal | subsystem | policy-capability | **adjudicator** - The in-process DOS reference monitor: the rung that folds a decision chain to prove a tool call allowed, denied, or deferred under the loaded policy. |
@@ -317,6 +322,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | witness-proof | **WitnessGradeStrong (strong witness grade value)** - issuecontract.WitnessGradeStrong (const strong) is the strongest of four WitnessGrade values, meaning the done-condition witness names an independent oracle (go test, make ci, fak, dos, git show, a fixture, a render, an exit code, a ledger, etc.) that can corroborate the claimed effect. |
 | * | crystal | symbol | witness-proof | **WitnessName (deletioncert vDSO witness field)** - deletioncert.WitnessName (JSON witness_name) is the string field on a deletion certificate naming the vDSO world-state witness under which the evicted entries were admitted (empty if none), pinning the eviction receipt to the integrity epoch it occurred under. |
 | * | crystal | symbol | witness-proof | **WitnessDir (on-disk witness-artifact directory)** - WitnessDir is the on-disk directory constant where witness artifacts are stored, declared independently in multiple packages: mlpscore.WitnessDir (docs/mlp/witnesses) for MLP witness manifests, qwen36parity.WitnessDir (experiments/agent-live) for Mac parity witnesses, and benchloop fleet dispatch's witnessDir for bench-fleet witness JSON. |
+| * | crystal | symbol | witness-proof | **WitnessSameTasks (fairness fence)** - benchcatalog.WitnessSameTasks is the fairness fence for any two-arm (raw vs fak) benchmark ablation: a pure function that takes the task ids each arm RECORDED consuming and reports whether they match in order, so the delta is attributable to fak BECAUSE both arms ran the same problems (empty is a mismatch, never a silent pass; order matters, so a reordered slice is drift the fence catches). |
 | * | crystal | symbol | witness-proof | **World-state witness** - An external reference (commit hash, blob digest, etag, lease epoch) a cache entry is admitted under, so the entry can be refuted when that external state changes. |
 | * | crystal | symbol | witness-proof | **Claim** - A worker or agent's assertion that it completed an effect (shipped a phase, created a file, ran a test), awaiting corroboration against independent evidence. |
 | * | crystal | symbol | witness-proof | **WitnessResolver** - The component that corroborates claims against independent evidence sources (git history, filesystem, HTTP APIs) and returns Confirmed, Refuted, or Abstain. |
@@ -1248,6 +1254,17 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | doc-term | policy-capability | **adjudicat (adjudication stem token)** - adjudicat is the normalized stem the scorecard sees across adjudicate/adjudicated/adjudication wording in guard, policy, and scorecard text. |
 | o | defined | symbol | policy-capability | **CapabilityEnvelope (toolproc spawn capability set)** - CapabilityEnvelope is the structured set of capabilities attached to a toolproc/guard child spawn attempt before the broker admits or denies it. |
 | o | defined | symbol | policy-capability | **PreflightVerdict (dispatch sweep admission result)** - PreflightVerdict is the dispatch sweep/status field that records the policy preflight result attached to a dispatch trial or candidate card. |
+| o | defined | symbol | policy-capability | **DefaultContainmentPolicy (toolprocgate)** - toolprocgate.DefaultContainmentPolicy returns the wired ContainmentPolicy defaults - at most 3 agents per surface, a surface that faults twice in 5 minutes is quarantined, and 5+ faults across 3+ sessions in 5 minutes opens the fleet breaker. |
+| o | defined | symbol | policy-capability | **DefaultAuditIndependencePolicy (modelroute)** - modelroute.DefaultAuditIndependencePolicy returns the baseline AuditIndependencePolicy - all nine identity axes required, family diversity required, roster resolution required, default risk - used when no high-risk override applies. |
+| o | defined | symbol | policy-capability | **IndependencePolicy (crossaudit field)** - CrossAuditRequest.IndependencePolicy is the JSON field ('independence_policy') that carries the AuditIndependencePolicy a cross-audit request wants EvaluateAuditIndependence to fold, normalized before use. |
+| o | defined | config | policy-capability | **ReasoningPosture (modelroute)** - AuditIdentity.ReasoningPosture is the model-routing identity field ('reasoning_posture') naming a model's reasoning effort level (e.g. 'high', 'xhigh') - one of the nine audit-independence axes and the axis audit_route compares against a plan's RequiredEffort. |
+| o | defined | symbol | policy-capability | **BuildCapacityPreflight (fleetaccounts)** - fleetaccounts.BuildCapacityPreflight folds annotated account rows into the proactive seat ceiling (CapacityPreflight) - filtering by product, counting routable workers, summing per-account session caps, and surfacing stale credentials - so a dispatch or fleet verb knows whether N seats exist before launching. |
+| o | defined | symbol | policy-capability | **dispatchPreflightKernel (cmd)** - cmd/fak dispatchPreflightKernel is the cached (30s TTL) probe that shells to 'dos loop --json' and folds the result into a dispatchtick.KernelCheck (Alive/Target/Verdict) - the DOS-kernel liveness term the dispatch preflight feeds to EvaluatePreflight so a dead dos loop throttles spawning. |
+| o | defined | config | policy-capability | **memPolicy (compute)** - compute.memPolicy is the cached process-lifetime NUMA memory confinement (the MPOL_BIND/cpuset restriction set before exec by numactl --membind) - label, allowed node list, and constrained bit - detected once and cached because the policy cannot change under the process, unlike the free memory that moves. |
+| o | defined | symbol | policy-capability | **policyFreeBytes (compute)** - compute.policyFreeBytes sums the current MemFree across a memPolicy's allowed NUMA nodes from sysfs - the headroom number an allocation must fit under when the process is NUMA-confined (not HostAvail), re-read every call because free memory moves. |
+| o | defined | symbol | policy-capability | **readMemPolicy (compute)** - compute.readMemPolicy detects the process's strict NUMA confinement from /proc/self/numa_maps (MPOL_BIND via numactl --membind) and the cpuset/cgroup mems restriction, returning the memPolicy cached once for the process lifetime. |
+| o | defined | metric | policy-capability | **PostureAdoptionPct (cachevaluereport)** - cachevaluereport.PostureAdoptionPct ('posture_adoption_pct') is the 0..100 percentage of exit sessions this week that ran under an ACTIVE managed-cache posture - the cache-value weekly digest's adoption measure, nil when no sessions exited. |
+| o | defined | config | policy-capability | **workerModelPolicy (cmd)** - cmd/fak workerModelPolicy is the resolved launch decision for one dispatch worker: the Model to pin (empty => seat default + fallback chain), the ordered downgrade Chain a Layer-2 model switch tries, the Source that decided it, and the tier-profile Effort/Ultracode knobs carried into WorkerLaunch. |
 | o | defined | symbol | policy-capability | **RegisterCapability (abi)** - abi.RegisterCapability is the registry writer that adds a negotiable feature token to the kernel's process-global Supported() capability set, called from a driver's init(). |
 | o | defined | symbol | policy-capability | **RegisterAdjudicator (abi)** - abi.RegisterAdjudicator inserts a PDP/PEP adjudicator link into the kernel's pre-call decision chain at a numeric rank (lower rank runs first) and rebuilds the registry snapshot. |
 | o | defined | symbol | policy-capability | **WithAdjudicators (kernel)** - kernel.WithAdjudicators constructs a kernel that folds an EXPLICIT caller-supplied adjudicator chain instead of the process-global registry, so K replay arms each carry their own monitor without colliding. |
@@ -1753,7 +1770,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 33 top-level abstraction(s), 42 head(s) total, max depth 3 (123 concepts in the forest)
+concept-disambiguation roll-up: 36 top-level abstraction(s), 46 head(s) total, max depth 3 (132 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
@@ -1771,11 +1788,14 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
   !o defined     crystal         3    0  **o                  policy-capability / capability floor
   !o defined     crystal         3    0  **o                  gateway-engine / engine
    o defined     defined         3    0  ooo                  policy-capability / adjudicationOutcomeSignal (gateway)
+  !o defined     crystal         3    0  *oo                  policy-capability / AuditIndependencePolicy (modelroute)
+   o defined     defined         3    0  ooo                  policy-capability / memPolicy (compute)
   !o defined     crystal         3    0  *oo                  context-ctx / recall (session core dump)
    o defined     defined         2    0  oo                   attention / Attended (span field)
    o defined     defined         2    0  oo                   attention / AttentionIndex
    o defined     defined         2    0  oo                   context-ctx / ContextChangeRequest
   !o defined     crystal         2    0  *o                   loop / fak loop (loopmgr ledger + governor)
+  !o defined     crystal         2    0  *o                   policy-capability / ContainmentPolicy (toolprocgate)
   !o defined     crystal         2    0  *o                   cache / vCache
   !o defined     crystal         2    0  *o                   witness-proof / WitnessResolver
    o defined     defined         2    0  oo                   context-ctx / compaction_ab (ablate A/B arm)
@@ -1788,24 +1808,26 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         4    0  ****                 cache / managed cache
    * crystal     crystal         4    0  ****                 cache / Prompt cache
    * crystal     crystal         3    0  ***                  guard-gate / guard (fak guard kernel)
+   * crystal     crystal         3    0  ***                  policy-capability / abi.Verdict
    * crystal     crystal         2    0  **                   context-ctx / compaction
    * crystal     crystal         2    0  **                   guard-gate / gitgate (adjudicator)
    * crystal     crystal         2    0  **                   cache / Hardware-aware cache
-   * crystal     crystal         2    0  **                   policy-capability / abi.Verdict
 
-abstraction overclaims (16) - head reads clearer than its subtree supports:
-  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: bench-dx-scorecard = defined)
+abstraction overclaims (18) - head reads clearer than its subtree supports:
+  ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: concept-disambiguation-scorecard = defined)
   ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-usage = defined)
-  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: hygiene-debt = defined)
-  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewshed = defined)
-  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-defaultbinarydoctorcandidates = defined)
+  ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: budget = defined)
+  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: scorecardpane-native-fold = defined)
+  ! ctxviewplanner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-context-ctx-ctxviewevents = defined)
+  ! plan-planner: abstraction declares 'crystal' but rolls up to 'defined' (weakest: x-plan-reviewcandidate = defined)
   ! result-admitter: abstraction declares 'crystal' but rolls up to 'defined' (weakest: secretgate = defined)
-  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: kvlayout = defined)
+  ! kv-cache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: mla-config = defined)
   ! capability-floor: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! engine: abstraction declares 'crystal' but rolls up to 'defined' (weakest: modelengine = defined)
-  ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: recallproof = defined)
+  ! policy-capability-audit-independence-policy: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-capability-independence-policy-field = defined)
+  ! recall: abstraction declares 'crystal' but rolls up to 'defined' (weakest: prove-recall = defined)
   ! loopmgr: abstraction declares 'crystal' but rolls up to 'defined' (weakest: default-loop-policy = defined)
+  ! policy-capability-containment-policy: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-capability-default-containment-policy = defined)
   ! policy-manifest: abstraction declares 'crystal' but rolls up to 'defined' (weakest: policy-loaded = defined)
   ! turn: abstraction declares 'crystal' but rolls up to 'defined' (weakest: session-turn = defined)
   ! vcache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: vblock = defined)
@@ -1816,47 +1838,50 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
-| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | bench-dx-scorecard = defined |
+| o! | **scorecard** (`scorecard`) | defined | crystal | 14 | 0 | concept-disambiguation-scorecard = defined |
 | o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | secretgate = defined |
-| o! | **Session** (`session`) | defined | crystal | 10 | 0 | session-usage = defined |
-| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | hygiene-debt = defined |
-| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewshed = defined |
-| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-defaultbinarydoctorcandidates = defined |
-| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | kvlayout = defined |
+| o! | **Session** (`session`) | defined | crystal | 10 | 0 | budget = defined |
+| o! | **scorecard control pane** (`control-pane`) | defined | crystal | 6 | 0 | scorecardpane-native-fold = defined |
+| o! | **CtxViewPlanner** (`ctxviewplanner`) | defined | crystal | 6 | 0 | x-context-ctx-ctxviewevents = defined |
+| o! | **Plan (planner)** (`plan-planner`) | defined | crystal | 6 | 0 | x-plan-reviewcandidate = defined |
+| o! | **KV cache** (`kv-cache`) | defined | crystal | 4 | 0 | mla-config = defined |
 | o | **CtxExpense (expense verdict)** (`x-context-ctx-ctxexpense`) | defined | defined | 4 | 0 | x-context-ctx-ctxexpensenoteonce = defined |
-| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | attention-accumulator = defined |
+| o | **AttentionAccumulator** (`attention-accumulator`) | defined | defined | 3 | 0 | span-attention = defined |
 | o! | **capability floor** (`capability-floor`) | defined | crystal | 3 | 0 | policy-loaded = defined |
 | o! | **engine** (`engine`) | defined | crystal | 3 | 0 | modelengine = defined |
 | o | **adjudicationOutcomeSignal (gateway)** (`policy-capability-adjoutcome-signal`) | defined | defined | 3 | 0 | policy-capability-adjoutcome-toolfeedback = defined |
-| o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | recallproof = defined |
+| o! | **AuditIndependencePolicy (modelroute)** (`policy-capability-audit-independence-policy`) | defined | crystal | 3 | 0 | policy-capability-independence-policy-field = defined |
+| o | **memPolicy (compute)** (`policy-capability-mempolicy`) | defined | defined | 3 | 0 | policy-capability-read-mempolicy = defined |
+| o! | **recall (session core dump)** (`recall`) | defined | crystal | 3 | 0 | prove-recall = defined |
 | o | **Attended (span field)** (`attended`) | defined | defined | 2 | 0 | attended = defined |
-| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index = defined |
+| o | **AttentionIndex** (`attention-index`) | defined | defined | 2 | 0 | attention-index-request = defined |
 | o | **ContextChangeRequest** (`contextchangerequest`) | defined | defined | 2 | 0 | contextchangerequest = defined |
 | o! | **fak loop (loopmgr ledger + governor)** (`loopmgr`) | defined | crystal | 2 | 0 | default-loop-policy = defined |
+| o! | **ContainmentPolicy (toolprocgate)** (`policy-capability-containment-policy`) | defined | crystal | 2 | 0 | policy-capability-default-containment-policy = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 2 | 0 | vblock = defined |
 | o! | **WitnessResolver** (`witness-resolver`) | defined | crystal | 2 | 0 | witness-outcome = defined |
 | o | **compaction_ab (ablate A/B arm)** (`x-context-ctx-compactionab`) | defined | defined | 2 | 0 | x-context-ctx-compactiononvsoff = defined |
 | o | **CompactionReport (usage-ledger fold)** (`x-context-ctx-compactionreport`) | defined | defined | 2 | 0 | x-context-ctx-compactionreport = defined |
-| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-ctxknobs = defined |
-| o | **CtxStore (recall's ctxplan.Store adapter)** (`x-context-ctx-ctxstore`) | defined | defined | 2 | 0 | x-context-ctx-ctxstore = defined |
+| o | **ctxknobs (manual-overlay counter)** (`x-context-ctx-ctxknobs`) | defined | defined | 2 | 0 | x-context-ctx-iscontextflagname = defined |
+| o | **CtxStore (recall's ctxplan.Store adapter)** (`x-context-ctx-ctxstore`) | defined | defined | 2 | 0 | x-context-ctx-newctxstore = defined |
 | o | **CtxValueReport** (`x-context-ctx-ctxvaluereport`) | defined | defined | 2 | 0 | x-context-ctx-ctxvaluesnapshot = defined |
 | o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-placeanthropiccachebreakpointwithoutcome = defined |
-| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-regime-gate = crystal |
+| * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-witness-rung = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | fak-ablate-ttl-1h = crystal |
 | * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-creation-tokens = crystal |
 | * | **guard (fak guard kernel)** (`guard-kernel`) | crystal | crystal | 3 | 0 | hwgate = crystal |
-| * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
-| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
-| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | kv-transfer = crystal |
-| * | **abi.Verdict** (`verdict`) | crystal | crystal | 2 | 0 | reason-code = crystal |
+| * | **abi.Verdict** (`verdict`) | crystal | crystal | 3 | 0 | reason-code = crystal |
+| * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compactionview = crystal |
+| * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | sweepguard = crystal |
+| * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
 
 ## Per-KPI (disambiguation-debt = clarity of the rows that exist)
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 21 kind/grounding mismatch |
-| honesty | `hierarchy_soft` | 70 | 0 | 24 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 1649 rows well-formed |
+| honesty | `hierarchy_soft` | 70 | 0 | 26 hierarchy issue(s) |
+| well-formed | `well_formed` | 100 | 0 | all 1666 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -1868,8 +1893,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| policy-capability | 99 | 114 | 15 |
-| gateway-engine | 151 | 162 | 11 |
+| gateway-engine | 152 | 162 | 10 |
 | score-debt | 68 | 78 | 10 |
 | attention | 61 | 68 | 7 |
 | decision | 35 | 41 | 6 |
@@ -1884,6 +1908,7 @@ abstraction overclaims (16) - head reads clearer than its subtree supports:
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | plan | 286 | 286 | 0 |
+| policy-capability | 115 | 115 | 0 |
 | render-materialize | 162 | 162 | 0 |
 | session-runtime | 170 | 170 | 0 |
 | trajectory-control | 0 | 0 | 0 |
