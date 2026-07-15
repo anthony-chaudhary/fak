@@ -83,8 +83,13 @@ deliberately **not** the full T1 story yet:
   ([#2577](https://github.com/anthony-chaudhary/fak/issues/2577)); today the shipped floor
   refuses out-of-scope **writes** (SELF_MODIFY), which this witness shows.
 - The single **unified read syscall** spanning local tree query *and* remote-document
-  retrieval under one trust gate is [#2578](https://github.com/anthony-chaudhary/fak/issues/2578);
-  today the T2 quarantine is witnessed through the result-admitter (`fak demo`).
+  retrieval under one trust gate ([#2578](https://github.com/anthony-chaudhary/fak/issues/2578))
+  is now witnessed directly: the *same* result-admit floor quarantines a poisoned **remote**
+  document and a poisoned **local** file, and the vDSO counts a repeated local query as a
+  cache-hit — pinned offline by
+  [`internal/vdso/t2_read_seam_witness_test.go`](../../internal/vdso/t2_read_seam_witness_test.go).
+  This `fak demo` run shows the T2 quarantine through the result-admitter; the seam test
+  proves it is backend-agnostic (local *and* remote, one floor, one cache).
 
 **Promotion evidence** (what moves this from `gen/next` toward `now`): #2577 landing a
 mount-view refusal turns witness (a) into a read-side out-of-view `Read → DENY`, and #2578

@@ -154,10 +154,19 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
   running *inside a sandbox fak did not provision* is witnessed end-to-end in
   [`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/)
   (the T0-vs-T1 proof).
-- **T2** — the tool vDSO answers repeated read-only calls locally (`internal/vdso`);
-  result-side admission quarantines poisoned reads (`/v1/fak/admit`). *Gap:* one
-  adjudicated read syscall that spans **local tree query and remote-document retrieval**
-  with the same trust gate and cache.
+- **T2** — one adjudicated read syscall already spans **local tree query and
+  remote-document retrieval** under the *same* trust gate and the *same* cache, because
+  the read boundary keys on the returned *bytes*, not on the backend. The result-admit
+  floor (`internal/ctxmmu`, the rung behind `/v1/fak/admit`) quarantines a poisoned
+  **remote** document (`QUARANTINE`/`TRUST_VIOLATION`) with the *identical* floor that
+  catches a poisoned local file, and the tool vDSO (`internal/vdso`) serves and *counts*
+  a repeated read-only local query as a cache-hit. Both halves are pinned offline by
+  [`internal/vdso/t2_read_seam_witness_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/vdso/t2_read_seam_witness_test.go)
+  ([#2578](https://github.com/anthony-chaudhary/fak/issues/2578)). *Honest fence:* this is
+  the **boundary over retrieval, not better recall** — fak still has no embedder/vector
+  search ([agent-memory integration](../integrations/agent-memory.md)); a T4 engineer may
+  select a vector store *as* a T2 backend, but the seam gates and caches whatever backend
+  answers, it does not improve the ranking.
 - **T3** — scratchpad is real but ungoverned; leasing/GC/checkpoint-inclusion is proposed
   in [#2420](https://github.com/anthony-chaudhary/fak/issues/2420),
   [#2344](https://github.com/anthony-chaudhary/fak/issues/2344),
