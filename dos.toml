@@ -347,6 +347,7 @@ autopick = [
   "slackoutbox",
   "resume", # internal/resume leaf (the crash-resume decision kernel), see [lanes].concurrent note
   "logvault", # #2449: internal/logvault leaf (central log-vault capture/verify), see [lanes].concurrent note
+  "guardaudit", # #3293: mirror-gated guard-audit retention planner, see [lanes].concurrent note
   "trajctl",
   "waiting",
   "tuiplugin",
@@ -545,6 +546,7 @@ slackwire = ["internal/slackwire/**"]
 slackoutbox = ["internal/slackoutbox/**"]
 resume = ["internal/resume/**"] # crash-resume decision kernel; cmd/fak resume_*.go shims stay in the `cmd` lane
 logvault = ["internal/logvault/**"] # #2449: internal/logvault leaf (central log-vault capture/verify); cmd/fak/logvault.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
+guardaudit = ["internal/guardaudit/**"] # #3293: mirror-gated guard-audit retention planner; cmd shims stay in their owning cmd lanes
 trajctl = ["internal/trajctl/**"]
 waiting = ["internal/waiting/**"]
 tuiplugin = ["internal/tuiplugin/**"]
