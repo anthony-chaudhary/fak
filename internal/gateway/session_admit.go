@@ -30,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
+	"github.com/anthony-chaudhary/fak/internal/sessionledger"
 )
 
 const (
@@ -52,8 +53,19 @@ type servedSessionTurn struct {
 // historical request path unchanged.
 func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (servedSessionTurn, bool, bool) {
 	turn := servedSessionTurn{traceID: trace}
+	appendSessionLedger(trace, "turn_begin", nil)
 	if trace == "" {
 		return turn, true, false
+	}
+	// Control-plane SPEND CAP (#3273): if a scope this trace belongs to (session / agent
+	// / team / tenant) has crossed its versioned budget, the kernel refuses the turn here
+	// — before the model is consulted — carrying the closed reason and the pause/kill run
+	// state. BUDGET_SPEND_EXCEEDED is NOT a reset reason (isBudgetResetReason), so the
+	// caller falls through to writeSessionRefusal (a hard 409 stop), never the human-like
+	// continue the context/token drains take. No-op when no governor is attached.
+	if brk := s.spendBreach(trace); brk != nil {
+		turn.state = SessionState{TraceID: trace, Run: spendBreachRunToken(brk.Action), Reason: brk.Reason}
+		return turn, false, false
 	}
 	if s.decideSession != nil {
 		v := s.decideSession(ctx, trace)
@@ -227,6 +239,12 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 	if turnDur > 0 {
 		su.DurationNanos = int64(turnDur)
 	}
+	// Fold this turn's provider usage into the control-plane spend cap (#3273) FIRST and
+	// independently of the session-control table: the spend governor works on any served
+	// path (serve/guard-as-client), whether or not the operator wired the DRIVE-state
+	// DebitSession hook. A breach fires its counter + webhook here; the NEXT turn's
+	// beginServedSessionTurn refuses on the accumulated total. No-op when unattached.
+	s.chargeSpend(turn.traceID, usage)
 	if s.debitSession == nil || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0 && su.DurationNanos <= 0) {
 		return
 	}
@@ -325,4 +343,97 @@ type SessionResetDirective struct {
 	CacheAffinity SessionCacheAffinity `json:"cache_affinity,omitempty,omitzero"`
 	Required      []string             `json:"required_actions,omitempty"`
 	Note          string               `json:"note,omitempty"`
+}
+
+func appendSessionLedger(trace, kind string, content []byte) {
+	if trace == "" {
+		return
+	}
+	l, err := sessionledger.OpenDefault()
+	if err != nil {
+		return
+	}
+	if len(content) == 0 {
+		content = []byte("{}")
+	}
+	_, _ = l.Append(trace, kind, content)
+}
+
+func (t servedSessionTurn) complete() { appendSessionLedger(t.traceID, "turn_complete", nil) }
+
+// SetSpendGovernor wires the control-plane spend cap (#3273) onto the Server. scopeOf maps
+// a request trace to its scope hierarchy (tenant/team/agent/session); a nil resolver
+// defaults to session-only (Session=trace), the shape a single-tenant serve needs. A nil
+// governor detaches it (the request path goes byte-for-byte historical). Guarded by
+// admissionMu alongside SetTokenRateGate. A nil receiver is a no-op.
+func (s *Server) SetSpendGovernor(g *SpendGovernor, scopeOf func(trace string) ScopeKey) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	s.spendGovernor = g
+	s.spendScopeOf = scopeOf
+	s.admissionMu.Unlock()
+}
+
+// spendScopeFor resolves the governor and the scope key for a trace under the configured
+// resolver. Returns a nil governor when none is attached or the trace is empty (the
+// fail-open, historical path).
+func (s *Server) spendScopeFor(trace string) (*SpendGovernor, ScopeKey) {
+	s.admissionMu.RLock()
+	g := s.spendGovernor
+	resolve := s.spendScopeOf
+	s.admissionMu.RUnlock()
+	if g == nil || trace == "" {
+		return nil, ScopeKey{}
+	}
+	if resolve != nil {
+		return g, resolve(trace)
+	}
+	return g, ScopeKey{Session: trace}
+}
+
+// spendBreach reports the spend-cap breach (if any) that must refuse this trace's next
+// served turn — a pure read of the accumulated per-scope totals. nil ⇒ admit.
+func (s *Server) spendBreach(trace string) *SpendBreach {
+	g, key := s.spendScopeFor(trace)
+	if g == nil {
+		return nil
+	}
+	return g.Evaluate(key)
+}
+
+// chargeSpend folds one served turn's provider usage into the spend cap for every scope
+// the trace belongs to. No-op when no governor is attached.
+func (s *Server) chargeSpend(trace string, usage agent.Usage) {
+	g, key := s.spendScopeFor(trace)
+	if g == nil {
+		return
+	}
+	g.Charge(key, spendCostFromUsage(usage))
+}
+
+// spendCostFromUsage folds a completion's provider-reported usage into the spend
+// increment, using the provider-neutral split (UncachedPromptTokens + CachedPromptTokens
+// == the full resident prompt on every provider) so a cache-heavy turn is not double- or
+// under-counted, plus the completion and cache-write axes. The dollar axis is left 0 (the
+// token cap is the axis this increment charges; per-model USD pricing is a follow-on).
+func spendCostFromUsage(u agent.Usage) SpendCost {
+	return SpendCost{
+		InputTokens:      int64(u.UncachedPromptTokens()),
+		OutputTokens:     int64(u.CompletionTokens),
+		CacheReadTokens:  int64(u.CachedPromptTokens()),
+		CacheWriteTokens: int64(u.CacheCreationInputTokens),
+	}
+}
+
+// spendBreachRunToken maps a breach action onto the session DRIVE run-state token the
+// refusal carries: kill is terminal (stopped), pause drains and is operator-resumable
+// (paused). Sourced from internal/lifecycle so the vocabulary can never drift from the
+// session-admit gate that reads the same tokens.
+func spendBreachRunToken(a SpendAction) string {
+	if a == SpendActionKill {
+		return lifecycle.TokenStopped
+	}
+	return lifecycle.TokenPaused
 }

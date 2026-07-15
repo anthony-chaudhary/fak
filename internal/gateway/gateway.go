@@ -1624,6 +1624,17 @@ type Server struct {
 	// SetTokenRateGate. Guarded by admissionMu alongside admissionCtl.
 	tokenRateGate *TokenRateGate
 
+	// spendGovernor is the optional control-plane SPEND CAP (#3273, epic #3256):
+	// per-scope (tenant/team/agent/session) token/dollar budgets folded from the usage
+	// the gateway already accumulates and evaluated at the served boundary, so a scope
+	// that crosses its budget is hard-paused/killed by the kernel — not by asking the
+	// model. spendScopeOf resolves a request trace to its scope hierarchy; nil ⇒
+	// session-only (Session=trace). A nil governor (the default) leaves the request path
+	// byte-for-byte historical. Guarded by admissionMu alongside tokenRateGate; see
+	// spend_governor.go and the served-boundary wiring in session_admit.go.
+	spendGovernor *SpendGovernor
+	spendScopeOf  func(trace string) ScopeKey
+
 	// preemptionMetrics is the optional native-serving KV preemption / swap / recompute
 	// metric writer (#31). nil leaves fak_sched_preempt_* absent; a host attaches the live
 	// native scheduler only after a positive paged-KV block budget arms preemption.

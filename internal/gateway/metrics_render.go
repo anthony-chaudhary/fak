@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -96,6 +97,29 @@ func (s *Server) writeSessionMetrics(b *strings.Builder) {
 			continue
 		}
 		fmt.Fprintf(b, "fak_sessions{state=\"%s\"} %d\n", promQuote(state), n)
+	}
+}
+
+// writeSpendGovernorMetrics renders the control-plane SPEND-CAP breach counter (#3273):
+// each time a scope (tenant/team/agent/session) crossed its versioned budget and the
+// kernel hard-paused/killed it, keyed by scope and action. A nil governor (the default
+// serve path) suppresses the family entirely; once attached it declares HELP/TYPE and
+// emits a row per (scope, action) that has fired, so the panel stays quiet until a real
+// breach and never fabricates a phantom zero.
+func (s *Server) writeSpendGovernorMetrics(b *strings.Builder) {
+	s.admissionMu.RLock()
+	g := s.spendGovernor
+	s.admissionMu.RUnlock()
+	if g == nil {
+		return
+	}
+	rows := g.Snapshot()
+	writeHelpType(b, "fak_gateway_spend_breaches_total",
+		"Control-plane spend-cap breaches (#3273): each time a scope's cumulative provider spend crossed its versioned budget and the kernel hard-paused/killed the session, by scope (tenant/team/agent/session) and action (pause/kill). Absent until a governor is attached; a scope/action row appears only once it has fired.",
+		"counter")
+	for _, row := range rows {
+		fmt.Fprintf(b, "fak_gateway_spend_breaches_total{scope=\"%s\",action=\"%s\"} %d\n",
+			promQuote(string(row.Scope)), promQuote(string(row.Action)), row.Count)
 	}
 }
 
@@ -236,7 +260,8 @@ func (s *Server) renderMetrics() string {
 	m.writeResetShadowMetrics(&b)
 	m.writeCacheBreakMetrics(&b) // #2916: per-session cache-break events + cold-rebuild token cost, by closed cause
 	m.writeDenyAllMetrics(&b)
-	s.writeSessionMetrics(&b) // #1204: live session count by DRIVE run-state token
+	s.writeSessionMetrics(&b)       // #1204: live session count by DRIVE run-state token
+	s.writeSpendGovernorMetrics(&b) // #3273: control-plane spend-cap breaches by scope + action
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
 	m.writeRoutingMetrics(&b)            // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
 	outputNegframeAudit.writeMetrics(&b) // #3567: negative-framing spans in model OUTPUT prose (sampled shadow, observe-only)
@@ -925,6 +950,19 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 		decodeTPS = float64(snap.measuredComplTok) / snap.measuredDecodeSecs
 	}
 	fmt.Fprintf(b, "fak_gateway_inference_decode_tokens_per_second %s\n", promFloat(decodeTPS))
+
+	// #3176 Q1/Q2 on /metrics: the decode tok/s gauge above reports HOW FAST decode runs,
+	// but not WHY. These two host-static facts answer the issue's other two levers on the
+	// SAME surface an operator scrapes ("measurable without wall-clock guessing"), so a slow
+	// decode_tokens_per_second can be read next to whether the Q8 SIMD lane actually fired
+	// and how many decode streams dispatch — without grepping the server's inkernel_chat log
+	// line. Both resolve once at model-package init (CPUID/XGETBV tier + the many-core worker
+	// cap of 40e0afd), so they are constant across scrapes, like fak_gateway_build_info.
+	q8Kernel, q8Fused := model.Q8DecodeKernel()
+	writeHelpType(b, "fak_gateway_inference_q8_decode_kernel_info", "Static Q8_0 decode inner-kernel tier resolved for this host (#3176 Q1). kernel is avx512/avx2/scalar on amd64, neon-amort/neon/scalar on arm64, scalar on a no-SIMD build; fused=true only where the fused fast decode GEMV (qMatRowsRangeFast) is the active path (amd64 + AVX-512). Value is always 1 — read the labels. Answers 'is the SIMD decode lane engaged, or did it fall back to the reference path?' at the /metrics surface.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_inference_q8_decode_kernel_info{kernel=\"%s\",fused=\"%t\"} 1\n", promQuote(q8Kernel), q8Fused)
+	writeHelpType(b, "fak_gateway_inference_q8_decode_workers", "Effective Q8 batch-1 decode-worker count (#3176 Q2): the parallel decode streams the in-kernel GEMV dispatches after the many-core cap (40e0afd). On a 256-thread box the default budget reads a modest capped value here — not 256 (the oversubscription collapse) nor 1 (single-thread) — so an operator can SEE decode parallelizes across a sane stream count. Reflects FAK_WORKERS/FAK_BUDGET/-budget when set.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_inference_q8_decode_workers %d\n", model.Q8DecodeWorkers())
 
 	// Latency DISTRIBUTIONS — the P50/P95/P99 tail the cumulative-mean rates above
 	// structurally hide. Each is empty (count 0) until the first qualifying turn, so an
