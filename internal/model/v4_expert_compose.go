@@ -104,7 +104,7 @@ func composeV4RoutedExperts(layer int, selected []v4RoutedExpert, x compute.Tens
 		if !ok {
 			return nil, fmt.Errorf("%w: layer %d expert %d not selected by plan", ErrV4ExpertCompose, layer, route.Expert)
 		}
-		if err := validateV4CompositionShapes(names, stager.source.entries, x.Shape[0]); err != nil {
+		if err := validateV4CompositionSourceShapes(names, stager.source, x.Shape[0]); err != nil {
 			return nil, fmt.Errorf("%w: expert %d: %v", ErrV4ExpertCompose, route.Expert, err)
 		}
 		orderedNames[i] = names
@@ -240,4 +240,16 @@ func validateV4CompositionShapes(names v4ExpertProjectionNames, entries map[stri
 
 func v4SiLU(x float32) float32 {
 	return float32(float64(x) / (1 + math.Exp(-float64(x))))
+}
+
+func validateV4CompositionSourceShapes(names v4ExpertProjectionNames, source v4ExpertTensorSource, input int) error {
+	entries := make(map[string]stEntry, 3)
+	for _, name := range []string{names.w1, names.w2, names.w3} {
+		entry, ok := source.entry(name)
+		if !ok {
+			return fmt.Errorf("missing tensor %s", name)
+		}
+		entries[name] = entry
+	}
+	return validateV4CompositionShapes(names, entries, input)
 }

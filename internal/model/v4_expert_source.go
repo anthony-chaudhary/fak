@@ -119,3 +119,8 @@ func validateV4ExpertIdentity(name string) error {
 	}
 	return nil
 }
+
+func (s *v4ExpertSource) entry(name string) (stEntry, bool) {
+	e, ok := s.entries[name]
+	return e, ok
+}
