@@ -202,6 +202,24 @@ func TestBenchFleetQwen36UsesProvisionedGatewayRecipe(t *testing.T) {
 	}
 }
 
+func TestBenchFleetGCPRadixUsesProvisionedRealModelRecipe(t *testing.T) {
+	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
+		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "radix-benchmark", Command: "go run ./cmd/radixbench"})
+		if err != nil || state != "running" || name != "gcloud" {
+			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
+		}
+		command := strings.Join(args, " ")
+		for _, want := range []string{"FAK_BENCH_NODE=", "radixbench", "smollm2-135m", "-lean", "-quant", "-reps 1", "-only few-shot"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s: command missing %q: %q", machine, want, command)
+			}
+		}
+		if machine == "gcp-g2-l4-32" && !strings.Contains(command, "docker run") {
+			t.Fatalf("COS route must use container: %q", command)
+		}
+	}
+}
+
 func TestBenchFleetWorkstationSessionUsesBoundedRecipe(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("workstation route is Windows-only")

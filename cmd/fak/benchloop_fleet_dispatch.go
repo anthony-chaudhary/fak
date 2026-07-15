@@ -198,6 +198,13 @@ func benchFleetRemoteCommand(req benchFleetRequest) string {
 			"https://api.groq.com/openai/v1/chat/completions && echo && " +
 			"python3 -c 'import json; d=json.load(open(\"/tmp/fak-qwen36-response.json\")); assert d.get(\"model\")==\"qwen/qwen3.6-27b\"; print(\"FAK_BENCH_MODEL=\"+d[\"model\"]); print(\"FAK_BENCH_COMPLETION_TOKENS=\"+str(d.get(\"usage\",{}).get(\"completion_tokens\",0)))'"
 	}
+	if req.Benchmark == "radix-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+		if req.Machine == "gcp-g2-l4-32" {
+			// COS home is noexec, so run the provisioned source and real weights in Go's container.
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -v $HOME/models/smollm2-135m:/models/smollm2-135m -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/radixbench -hf /models/smollm2-135m -lean -quant -reps 1 -only few-shot"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/radixbench -hf ~/models/smollm2-135m -lean -quant -reps 1 -only few-shot"
+	}
 	if req.Benchmark == "model-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
 		if req.Machine == "gcp-g2-l4-32" {
 			// Container-Optimized OS mounts the persistent home filesystem noexec.
