@@ -1,6 +1,9 @@
 package vcachewarm
 
-import "math"
+import (
+	"math"
+	"sync/atomic"
+)
 
 // Provider names the provider surface whose cache semantics are being planned.
 // The known constants cover the M3 rules; other string values are treated as an
@@ -267,20 +270,24 @@ const (
 )
 
 // FanoutGate releases dependents only after the first streamed content delta.
+// It is safe for concurrent use (#1493): the first request's stream reader
+// feeds Observe while racing sibling senders poll Released, so the
+// send-one-then-fan barrier holds across goroutines — an HTTP status or
+// message_start alone never opens it, only the first streamed content delta.
 type FanoutGate struct {
-	released bool
+	released atomic.Bool
 }
 
 // Observe records one stream event and reports whether dependents may run.
 func (g *FanoutGate) Observe(kind StreamEventKind) bool {
 	if kind == StreamEventContentDelta {
-		g.released = true
+		g.released.Store(true)
 	}
-	return g.released
+	return g.released.Load()
 }
 
 // Released reports whether the barrier has opened.
-func (g FanoutGate) Released() bool { return g.released }
+func (g *FanoutGate) Released() bool { return g.released.Load() }
 
 // CacheReadback is one later real request's provider-cache telemetry.
 type CacheReadback struct {

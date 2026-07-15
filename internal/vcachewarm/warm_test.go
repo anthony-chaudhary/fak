@@ -1,6 +1,12 @@
 package vcachewarm
 
-import "testing"
+import (
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 func fp(id string) PrefixFingerprint {
 	return PrefixFingerprint{
@@ -158,6 +164,54 @@ func TestFanoutGateReleasesOnlyOnContentDelta(t *testing.T) {
 	}
 	if !gate.Released() {
 		t.Fatal("Released returned false after content delta")
+	}
+}
+
+// TestFanoutGateHoldsRacingSiblingsUntilFirstContentDelta is the #1493 QA-box-3
+// race witness at the barrier itself: sibling goroutines race the first
+// request's stream reader — Observe and Released run concurrently, so the test
+// is meaningful under -race — and nobody fans on the HTTP status or
+// message_start; the whole fan releases only on the first streamed content
+// delta.
+func TestFanoutGateHoldsRacingSiblingsUntilFirstContentDelta(t *testing.T) {
+	var gate FanoutGate
+	const siblings = 8
+	var fanned atomic.Int32
+	var wg sync.WaitGroup
+	deadline := time.Now().Add(5 * time.Second)
+	for i := 0; i < siblings; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				if gate.Released() {
+					fanned.Add(1)
+					return
+				}
+				runtime.Gosched()
+			}
+		}()
+	}
+
+	// The first request's stream: HTTP 200 and message_start arrive first. The
+	// barrier must hold — a 200 proves nothing about the provider having begun
+	// to process (and cache) the prefix.
+	for _, event := range []StreamEventKind{StreamEventHTTPStatus, StreamEventMessageStart} {
+		if gate.Observe(event) {
+			t.Fatalf("gate released on %q before content delta", event)
+		}
+	}
+	time.Sleep(20 * time.Millisecond) // give a broken barrier the chance to leak a sibling
+	if n := fanned.Load(); n != 0 {
+		t.Fatalf("%d sibling(s) fanned before the first streamed content delta", n)
+	}
+
+	if !gate.Observe(StreamEventContentDelta) {
+		t.Fatal("gate did not release on first content delta")
+	}
+	wg.Wait()
+	if n := fanned.Load(); n != siblings {
+		t.Fatalf("fanned = %d, want all %d siblings released after first content delta", n, siblings)
 	}
 }
 
