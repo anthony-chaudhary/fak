@@ -79,6 +79,23 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Private implementation helper for the existing guard child spawn gate; not a new operator-facing gate concept.",
+          "token": "guardWindowsArgvPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private byte-count helper used only by the existing guard spawn gate and its regression witness.",
+          "token": "guardWindowsCommandLineUnits"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Windows quoting implementation detail used by the existing guard spawn gate.",
+          "token": "guardWindowsQuotedArgUnits"
+        }
+      ],
       "exclude": [
         "gateway",
         "aggregat",
@@ -91,36 +108,39 @@
       ],
       "id": "guard-gate",
       "ignore": [
+        "fleetbarecommitguard",
         "gated",
-        "gates",
-        "guarded",
-        "guards",
-        "gating",
-        "ungated",
-        "unguarded",
-        "guarding",
-        "guardrails",
-        "gatew",
-        "guardsessiontempdir",
         "gateresult",
-        "guardoperatordirectedeffectivemode",
+        "gates",
+        "gatew",
+        "gating",
+        "guardWindowsArgvPreflight",
+        "guardWindowsCommandLineUnits",
+        "guardWindowsQuotedArgUnits",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
         "guarddefaultaccountsregistrypath",
+        "guarded",
+        "guarding",
+        "guardoperatordirectedeffectivemode",
+        "guardrails",
+        "guards",
+        "guardsessiontempdir",
         "guardskewbuildwarning",
         "guardstartup",
+        "guardstophookoutputstyleenvmode",
+        "guardstopsledgerresolved",
+        "guardstoptranscript",
         "guardtaskhandoffeffectivemode",
         "guardtrajectorywarningline",
+        "guardwireretryhop",
         "installguardmcpregistration",
         "newguardlaunchnonce",
+        "readguardstopsledger",
         "readguardstoptranscript",
         "summarizeguardstops",
-        "fleetbarecommitguard",
-        "guardstoptranscript",
-        "guardstophookoutputstyleenvmode",
-        "guardwireretryhop",
-        "guardstopsledgerresolved",
-        "readguardstopsledger"
+        "ungated",
+        "unguarded"
       ],
       "min_files": 3,
       "name": "Guard / gate family",
@@ -211,19 +231,27 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Mechanical platform-limit validation inside the existing spawn capability; it introduces no capability or policy surface.",
+          "token": "guardWindowsArgvPreflight"
+        }
+      ],
       "id": "policy-capability",
       "ignore": [
-        "policies",
-        "adjudicators",
-        "capabilities",
-        "postures",
-        "adjudication",
         "adjudicate",
         "adjudicated",
         "adjudicates",
-        "policyblocks",
+        "adjudication",
+        "adjudicators",
+        "capabilities",
+        "guardWindowsArgvPreflight",
         "numareplicapolicyunsupported",
-        "policylabel"
+        "policies",
+        "policyblocks",
+        "policylabel",
+        "postures"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",

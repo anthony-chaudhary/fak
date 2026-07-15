@@ -2638,3 +2638,46 @@ func TestFormatJournalSummaryReportsStopGateHolds(t *testing.T) {
 		t.Fatalf("summary missing hold count:\n%s", got)
 	}
 }
+
+func TestGuardWindowsArgvPreflightRejectsBeforeLauncher(t *testing.T) {
+	oldOS := guardPromptTransportOS
+	guardPromptTransportOS = "windows"
+	t.Cleanup(func() { guardPromptTransportOS = oldOS })
+
+	broker := toolprocgate.NewSpawnBroker()
+	called := false
+	launcher := func(toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+		called = true
+		return exec.Command("unused"), nil
+	}
+	oversized := strings.Repeat("x", guardWindowsCommandLineLimit)
+	meta := guardChildSpawnMetadata{
+		AgentRunID:   "agent-run-argv-limit",
+		ToolCallID:   "guard-child:argv-limit",
+		PolicyDigest: "sha256:policy",
+		Backend:      "anthropic",
+		Envelope:     toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}},
+	}
+	_, child, err := launchGuardChildWithBroker([]string{"agent", "--inline", oversized}, nil, false, meta, broker, launcher)
+	if err == nil {
+		t.Fatalf("oversized Windows argv reached launcher: child=%v", child)
+	}
+	if called {
+		t.Fatal("argv preflight must reject before launcher")
+	}
+	msg := err.Error()
+	for _, want := range []string{"Windows command-line ceiling", "arg[2]", fmt.Sprintf("%d bytes", len(oversized))} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("diagnostic %q missing %q", msg, want)
+		}
+	}
+}
+
+func TestGuardWindowsArgvPreflightAllowsNonWindowsAndSmallWindows(t *testing.T) {
+	if err := guardWindowsArgvPreflight([]string{"agent", strings.Repeat("x", guardWindowsCommandLineLimit)}, "linux"); err != nil {
+		t.Fatalf("non-Windows argv was gated: %v", err)
+	}
+	if err := guardWindowsArgvPreflight([]string{"agent", "--mode", "ok"}, "windows"); err != nil {
+		t.Fatalf("small Windows argv was gated: %v", err)
+	}
+}

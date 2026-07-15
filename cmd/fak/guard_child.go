@@ -812,6 +812,9 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	if err != nil {
 		return toolprocgate.SpawnGrant{}, nil, err
 	}
+	if err := guardWindowsArgvPreflight(grant.Argv, guardPromptTransportOS); err != nil {
+		return toolprocgate.SpawnGrant{}, nil, err
+	}
 	if launcher == nil {
 		launcher = guardExecLauncher
 	}
