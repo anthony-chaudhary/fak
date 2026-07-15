@@ -47,6 +47,12 @@ func sampleAcceptanceManifest(t *testing.T) acceptanceManifest {
 	return m
 }
 
+func TestAcceptancePinsWitnessedCampaignArtifact(t *testing.T) {
+	got := expectedAcceptanceModel()
+	if got.SizeBytes != 16547398784 || got.SHA256 != "sha256:33625d8dc3a5dd8d88c324d47db58561b11f7072816287078bfe58b4c55782f9" {
+		t.Fatalf("campaign identity drift: bytes=%d sha=%s", got.SizeBytes, got.SHA256)
+	}
+}
 func TestAcceptanceManifestDeterministicRoundTrip(t *testing.T) {
 	m1 := sampleAcceptanceManifest(t)
 	m2 := sampleAcceptanceManifest(t)
