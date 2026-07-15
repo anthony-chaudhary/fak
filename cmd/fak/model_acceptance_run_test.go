@@ -150,3 +150,20 @@ func TestParseClaudeAcceptanceReadsTopLevelToolUseResults(t *testing.T) {
 		t.Fatalf("retryCount=%d recovered=%v, want 1/true", got.retryCount, got.recovered)
 	}
 }
+
+func TestParseClaudeAcceptanceReadsObservedTopLevelToolUseResultShapes(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"tool_use","name":"mcp__acceptance__flaky_lookup"}]}}`,
+		`{"type":"user","message":{"content":[]},"tool_use_result":"Error: TRANSIENT_RETRYABLE: retry this read once"}`,
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"tool_use","name":"mcp__acceptance__flaky_lookup"}]}}`,
+		`{"type":"user","message":{"content":[]},"tool_use_result":[{"type":"text","text":"RECOVERY_VALUE=42"}]}`,
+		`{"type":"result","result":"RECOVERED","modelUsage":{"claude-opus-4-8":{}},"usage":{"input_tokens":3}}`,
+	}, "\n"))
+	got, err := parseClaudeAcceptance(raw, "claude-opus-4-8", modelaccept.Task{Expected: "RECOVERED", RetryRequired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.retryCount != 1 || !got.recovered {
+		t.Fatalf("retryCount=%d recovered=%v, want 1/true", got.retryCount, got.recovered)
+	}
+}

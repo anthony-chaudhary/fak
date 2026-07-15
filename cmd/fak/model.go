@@ -12,13 +12,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <load|pull|ls|canary-gate|acceptance-gate|acceptance-run|readiness-inventory> ...\n" +
+const modelUsage = "usage: fak model <load|pull|ls|canary-gate|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
 	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
 	"  fak model acceptance-run execute a predeclared exact-model campaign\n" +
+	"  fak model acceptance-refold replay immutable raw streams with the current parser\n" +
 	"  fak model readiness-inventory join exact-ID acceptance provenance into readiness rows\n"
 
 // cmdModel handles `fak model <subcommand>`: load (resolve a ref to a cached path),
@@ -45,6 +46,8 @@ func cmdModel(args []string) {
 		os.Exit(runModelAcceptanceGate(os.Stdout, os.Stderr, args[1:]))
 	case "acceptance-run":
 		os.Exit(runModelAcceptanceRun(os.Stdout, os.Stderr, args[1:]))
+	case "acceptance-refold":
+		os.Exit(runModelAcceptanceRefold(os.Stdout, os.Stderr, args[1:]))
 	case "acceptance-fixture":
 		os.Exit(runModelAcceptanceFixture(os.Stdin, os.Stdout, os.Stderr))
 	case "readiness-inventory":

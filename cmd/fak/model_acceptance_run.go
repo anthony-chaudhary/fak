@@ -45,10 +45,7 @@ type claudeStreamEvent struct {
 			IsError          bool   `json:"is_error"`
 		} `json:"content"`
 	} `json:"message"`
-	ToolUseResult *struct {
-		IsError bool   `json:"isError"`
-		Content string `json:"content"`
-	} `json:"tool_use_result"`
+	ToolUseResult json.RawMessage `json:"tool_use_result"`
 	claudeAcceptanceResult
 }
 
@@ -254,8 +251,12 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 					toolErrors = append(toolErrors, c.IsError)
 				}
 			}
-			if e.ToolUseResult != nil && len(e.Message.Content) == 0 {
-				toolErrors = append(toolErrors, e.ToolUseResult.IsError)
+			if len(e.ToolUseResult) != 0 && len(e.Message.Content) == 0 {
+				isError, err := acceptanceToolResultError(e.ToolUseResult)
+				if err != nil {
+					return p, err
+				}
+				toolErrors = append(toolErrors, isError)
 			}
 		}
 		if e.Type == "result" {
@@ -312,6 +313,36 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 		p.recovered = flaky >= 2 && len(toolErrors) >= 2 && toolErrors[0] && !toolErrors[len(toolErrors)-1]
 	}
 	return p, nil
+}
+
+func acceptanceToolResultError(raw json.RawMessage) (bool, error) {
+	var object struct {
+		IsError bool `json:"isError"`
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, errors.New("empty tool_use_result")
+	}
+	switch raw[0] {
+	case '{':
+		if err := json.Unmarshal(raw, &object); err != nil {
+			return false, fmt.Errorf("invalid object tool_use_result: %w", err)
+		}
+		return object.IsError, nil
+	case '[':
+		var values []any
+		if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 {
+			return false, errors.New("invalid array tool_use_result")
+		}
+		return false, nil
+	case '"':
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return false, fmt.Errorf("invalid string tool_use_result: %w", err)
+		}
+		return strings.HasPrefix(strings.TrimSpace(text), "Error:"), nil
+	default:
+		return false, errors.New("unsupported tool_use_result shape")
+	}
 }
 
 func decodeAcceptanceInput(path string) (modelaccept.Input, error) {
