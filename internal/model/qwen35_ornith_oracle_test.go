@@ -2,6 +2,7 @@ package model
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -51,10 +52,50 @@ const ornithOracleExportHint = "from fak/: python internal/model/make_qwen35_tin
 // clean t.Skip when no weights are exported) is left to loadFixtureDir/resolveOracleDir so
 // this test shares the exact skip-guard idiom of every other oracle-gated test here.
 func ornithFixtureDir() string {
-	if dir := os.Getenv(ornithOracleDirEnv); dir != "" {
-		return dir
+	return ornithFixtureDirFrom(os.Getenv(ornithOracleDirEnv), ornithOracleDir)
+}
+
+func ornithFixtureDirFrom(override, defaultDir string) string {
+	if override != "" {
+		return override
 	}
-	return ornithOracleDir
+	return defaultDir
+}
+
+func TestOrnithFixtureDirResolution(t *testing.T) {
+	t.Run("absent override uses missing default", func(t *testing.T) {
+		defaultDir := filepath.Join(t.TempDir(), "missing")
+		got := ornithFixtureDirFrom("", defaultDir)
+		if got != defaultDir {
+			t.Fatalf("ornithFixtureDirFrom() = %q, want default %q", got, defaultDir)
+		}
+		if resolved, ok := resolveOracleDir(got); ok {
+			t.Fatalf("resolveOracleDir(%q) = %q, true; want absent fixture", got, resolved)
+		}
+	})
+
+	t.Run("override wins", func(t *testing.T) {
+		override := filepath.Join(t.TempDir(), "override")
+		t.Setenv(ornithOracleDirEnv, override)
+		if got := ornithFixtureDir(); got != override {
+			t.Fatalf("ornithFixtureDir() = %q, want override %q", got, override)
+		}
+	})
+
+	t.Run("present default fixture resolves", func(t *testing.T) {
+		defaultDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(defaultDir, "weights.f32"), nil, 0o600); err != nil {
+			t.Fatalf("write fixture marker: %v", err)
+		}
+		got := ornithFixtureDirFrom("", defaultDir)
+		resolved, ok := resolveOracleDir(got)
+		if !ok {
+			t.Fatalf("resolveOracleDir(%q) did not find present fixture", got)
+		}
+		if resolved != defaultDir {
+			t.Fatalf("resolveOracleDir(%q) = %q, want %q", got, resolved, defaultDir)
+		}
+	})
 }
 
 // TestOptionalOrnithOracleForwardMatchesHF is the per-size Ornith HF-oracle parity witness.
