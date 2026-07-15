@@ -170,6 +170,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 ## Security
 
 - [Policy / permissions](POLICY.md): how to author, dump, and review an allow-list.
+- [Independent cross-model audit runbook](docs/crossaudit-operator-runbook.md): configure reciprocal Claude/GPT/local issue audits, dry-run bounded evidence, verify receipts, recover typed loop failures, and preserve the public/private boundary.
 - [Security policy](SECURITY.md): how to report a vulnerability.
 
 ## Performance & benchmarks
