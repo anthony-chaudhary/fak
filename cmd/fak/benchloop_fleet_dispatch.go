@@ -187,6 +187,15 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
+	if req.Benchmark == "session-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
+		// Use the same bounded synthetic session workload on every node so the fleet
+		// compares the real session execution path without an unbounded model load.
+		run := "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json"
+		if req.Machine == "gcp-g2-l4-32" {
+			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json"
+		}
+		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
+	}
 	if req.Benchmark == "parity" && strings.HasPrefix(req.Machine, "gcp-") {
 		// Assemble the committed cross-model cards on each node with outputs isolated
 		// under /tmp; the canonical fleet witness captures the resulting parity summary.

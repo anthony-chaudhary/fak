@@ -1,0 +1,24 @@
+{
+  "schema": "fak.bench-fleet.witness.v1",
+  "request_id": "ab1057bf628baa3e",
+  "machine": "gcp-a3-high-h100-1g",
+  "benchmark": "session-benchmark",
+  "precision": "n/a",
+  "state": "succeeded",
+  "route": "gcp:ssh/fak-qwen-serve",
+  "command": [
+    "gcloud",
+    "compute",
+    "ssh",
+    "fak-qwen-serve",
+    "--zone",
+    "us-central1-f",
+    "--quiet",
+    "--command",
+    "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak \u0026\u0026 export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json"
+  ],
+  "started_at": "2026-07-15T02:07:45Z",
+  "finished_at": "2026-07-15T02:07:58Z",
+  "exit_code": 0,
+  "output": "FAK_BENCH_NODE=fak-qwen-serve\nmeasuring prefill cost at lengths [256 752 1248 1744 2048 2240] ...\n  prefill(256) = 31 ms (8335.4 tok/s)\n  prefill(752) = 132 ms (5710.7 tok/s)\n  prefill(1248) = 260 ms (4795.4 tok/s)\n  prefill(1744) = 440 ms (3960.5 tok/s)\n  prefill(2048) = 577 ms (3549.5 tok/s)\n  prefill(2240) = 678 ms (3305.1 tok/s)\ncell T=2 C=2 P=2048: running arms B,C live (best of 1) ...\n  C_fak 0.9s  B_warmKV 1.8s  A_nocache 3.0s (pf 2455[anchor 1.02] + dc 593) | HEADLINE fak vs WARM per-agent KV 2.12×  (turn-tax 1.7×) | no-cache ref 3.5× | exact prefill-tok B/C 1.9× (warmKV)  A/C 3.9× (no-cache ref)\nvalidate: arm A FULLY LIVE at P=256 T=8 C=3 D=16 R=32 (best of 1) ...\n  arm-A prefill: live 1497 ms | computed raw 1558 (raw/live 1.04) | anchor 0.97 → anchored 1517 (anchored/live 1.01); decode A/B 1.02\nwrote /tmp/fak-sessionbench.json\n"
+}
