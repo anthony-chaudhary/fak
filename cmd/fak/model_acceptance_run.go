@@ -254,6 +254,9 @@ func parseClaudeAcceptance(raw []byte, expectedModel string, task modelaccept.Ta
 					toolErrors = append(toolErrors, c.IsError)
 				}
 			}
+			if e.ToolUseResult != nil && len(e.Message.Content) == 0 {
+				toolErrors = append(toolErrors, e.ToolUseResult.IsError)
+			}
 		}
 		if e.Type == "result" {
 			resultSeen = true
