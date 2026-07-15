@@ -1,6 +1,11 @@
 package negframe
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // TestReframeMechanical checks that each unambiguous negative idiom is flipped to the positive
 // inverse its lexicon rule declares, while surrounding prose is left byte-for-byte intact.
@@ -145,4 +150,50 @@ func TestReframeLineRefusesPolarityFlip(t *testing.T) {
 	if polarityPreserved(before, candidate) {
 		t.Fatal("polarity gate admitted a permissive rewrite")
 	}
+}
+
+func TestReframeCorpusIdempotentFailSafe(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	targets := ResolveTargets(root)
+	if len(targets) == 0 {
+		t.Skip("reframe corpus absent in partial checkout")
+	}
+	files := 0
+	fallbackLines := 0
+	for _, target := range targets {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(target)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Errorf("read %s: %v", target, err)
+			continue
+		}
+		files++
+		input := string(data)
+		once := Reframe(input)
+		if twice := Reframe(once); twice != once {
+			t.Errorf("reframe not idempotent: %s", target)
+		}
+		for lineNo, line := range strings.Split(input, "\n") {
+			pass := ReframePass(line)
+			if pass.VerbatimFallback == 0 {
+				continue
+			}
+			fallbackLines++
+			if pass.Text != line {
+				t.Errorf("%s:%d fallback changed bytes:\n got %q\nwant %q", target, lineNo+1, pass.Text, line)
+			}
+			if !tokenSuperset(mustKeepSet(line), mustKeepSet(pass.Text)) {
+				t.Errorf("%s:%d fallback dropped must-keep token", target, lineNo+1)
+			}
+			if !polarityPreserved(line, pass.Text) {
+				t.Errorf("%s:%d fallback softened prohibition", target, lineNo+1)
+			}
+		}
+	}
+	if files == 0 {
+		t.Skip("reframe corpus files absent in partial checkout")
+	}
+	t.Logf("checked %d corpus files (%d fallback lines)", files, fallbackLines)
 }
