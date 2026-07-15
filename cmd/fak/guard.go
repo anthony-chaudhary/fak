@@ -30,6 +30,7 @@ import (
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -1517,7 +1518,7 @@ func cmdGuard(argv []string) {
 	// durable policy/budget/Stop-ledger paths that already exist before launch.
 	policyEvidence := writeGuardPolicyOriginEvidence(guardTraceID, *policyPath)
 	budgetEvidence := writeGuardBudgetEnvelopeEvidence(guardTraceID, contextBudgetLimit, maxDurationLimit.String())
-	registerGuardChildOriginTask(guardTraceID, command[0], policyEvidence, "", budgetEvidence, stopHookInstall.StopsLedger)
+	registerGuardChildOriginTask(guardTraceID, command[0], policyEvidence, resume.IdentityLedgerPath(resolveSweepRegDir("")), budgetEvidence, stopHookInstall.StopsLedger)
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	rotationRuntime := guardRotationRuntimeFor(command, resolvedRotateMode)
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)

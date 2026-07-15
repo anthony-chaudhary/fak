@@ -53,6 +53,14 @@ func guardChildOriginEvidence(policyPath, transcriptPath, budgetEnvelope, stopsL
 		if abs, err := filepath.Abs(path); err == nil {
 			path = abs
 		}
+		// Origin evidence is a durable location contract. Create an empty evidence
+		// file when the producer has not appended its first row yet, so PathWitness
+		// verifies the location rather than marking a valid pre-launch task refused.
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, nil, 0o600) != nil {
+				continue
+			}
+		}
 		refs = append(refs, taskmgr.EvidenceRef{
 			Kind: taskmgr.PathRefKind,
 			Ref:  path,

@@ -25,7 +25,10 @@ func TestTaskGuardOriginAppearsWithEvidenceAndWitness(t *testing.T) {
 		filepath.Join(dir, "budget.json"),
 		filepath.Join(dir, "stops.jsonl"),
 	}
-	for _, path := range paths {
+	for i, path := range paths {
+		if i == 1 {
+			continue // transcript/identity evidence location is created at origin before its first row
+		}
 		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -67,6 +70,9 @@ func TestTaskGuardOriginAppearsWithEvidenceAndWitness(t *testing.T) {
 		if !found {
 			t.Errorf("missing %s evidence: %+v", label, guard.EvidenceRefs)
 		}
+	}
+	if _, err := os.Stat(paths[1]); err != nil {
+		t.Fatalf("transcript evidence location not materialized: %v", err)
 	}
 	if guard.Witness == nil || guard.Witness.VerifiedState != taskmgr.VerifiedDone || !strings.Contains(guard.Witness.Detail, "verified") {
 		t.Fatalf("initial origin witness not confirmed: %+v", guard.Witness)
