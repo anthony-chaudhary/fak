@@ -353,6 +353,53 @@ func TestCUDAQwen35GDNWrongStateClassRefusesWithoutOperation(t *testing.T) {
 	}
 }
 
+func TestCUDAQwen35GDNQ8ProjectionMetadata(t *testing.T) {
+	be := &cudaBackend{name: "cuda"}
+	codes := make([]byte, 64)
+	scales := make([]float32, 2)
+	tensor := makeTensor(be, Q8_0, RowMajor, []int{2, 32}, &QuantSpec{
+		Block: 32, Axis: 2, Bits: 8, Symmetric: true,
+	}, &cudaBuf{
+		ptr: unsafe.Pointer(&codes[0]), n: len(codes), class: MemoryWeights,
+		scales: unsafe.Pointer(&scales[0]), scalesN: len(scales) * 4,
+	})
+
+	if err := be.validateQwen35GDNTensor("in_proj_qkv", tensor); err != nil {
+		t.Fatalf("valid resident Q8 projection refused: %v", err)
+	}
+
+	t.Run("missing-scales", func(t *testing.T) {
+		buf := tensor.buf.(*cudaBuf)
+		old := buf.scales
+		buf.scales = nil
+		err := be.validateQwen35GDNTensor("in_proj_qkv", tensor)
+		buf.scales = old
+		var residency *Qwen35GDNResidencyError
+		if !errors.As(err, &residency) || !strings.Contains(err.Error(), "missing resident block-32 scales") {
+			t.Fatalf("missing scales error = %T %v", err, err)
+		}
+	})
+
+	t.Run("wrong-block", func(t *testing.T) {
+		old := tensor.Quant.Block
+		tensor.Quant.Block = 16
+		err := be.validateQwen35GDNTensor("in_proj_qkv", tensor)
+		tensor.Quant.Block = old
+		var residency *Qwen35GDNResidencyError
+		if !errors.As(err, &residency) || !strings.Contains(err.Error(), "missing resident block-32 scales") {
+			t.Fatalf("wrong block error = %T %v", err, err)
+		}
+	})
+
+	t.Run("non-matrix", func(t *testing.T) {
+		err := be.validateQwen35GDNTensor("conv1d", tensor)
+		var residency *Qwen35GDNResidencyError
+		if !errors.As(err, &residency) || !strings.Contains(err.Error(), "dtype q8_0 is unsupported") {
+			t.Fatalf("non-matrix Q8 error = %T %v", err, err)
+		}
+	})
+}
+
 func TestCUDAQwen35GDNTensorMetadataRefusals(t *testing.T) {
 	be := &cudaBackend{name: "cuda"}
 	storage := make([]byte, 12)

@@ -35,8 +35,9 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 	if t.Backend() != c {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is not owned by this CUDA backend"}
 	}
-	if t.Dtype != F32 {
-		return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; whole-operation kernel requires resident f32"}
+	matrix := name == "in_proj_qkv" || name == "in_proj_z" || name == "in_proj_b" || name == "in_proj_a" || name == "out_proj"
+	if t.Dtype != F32 && !(matrix && t.Dtype == Q8_0) {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; whole-operation kernel requires resident f32 or q8_0 projection weights"}
 	}
 	if t.Layout != RowMajor {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "layout is not row-major"}
@@ -54,12 +55,16 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 	if buf.managed {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "managed memory is forbidden; strict whole-operation operands must be device-only"}
 	}
-	required, ok := qwen35GDNShapeBytes(t.Shape, F32.Bytes())
+	elemBytes := t.Dtype.Bytes()
+	required, ok := qwen35GDNShapeBytes(t.Shape, elemBytes)
 	if !ok {
 		return &Qwen35GDNGeometryError{Operand: name, Reason: "shape byte size overflows host allocation capacity"}
 	}
 	if buf.n < required {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: fmt.Sprintf("CUDA allocation capacity is %d bytes, shape requires %d", buf.n, required)}
+	}
+	if t.Dtype == Q8_0 && (t.Quant == nil || t.Quant.Block != 32 || buf.scales == nil) {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "q8_0 projection is missing resident block-32 scales"}
 	}
 	return nil
 }
