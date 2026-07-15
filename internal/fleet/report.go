@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -152,6 +153,42 @@ func ReadReports(dir string, ro Roster) []Report {
 		out[i] = readOneReport(dir, b)
 	}
 	return out
+}
+
+// OrphanReports lists report files in dir whose key resolves to NO roster box — a
+// producer wrote <key>.json under a name no box.Ref() matches. ReadReports only ever
+// opens roster-keyed paths, so such a file is SILENTLY invisible to the fold: the box
+// it was meant for reads `unknown` and the file itself is never mentioned. That gap is
+// the difference between an operator seeing "0/N reachable, all down — recover the
+// bridge" and seeing "the producer is writing under non-roster keys (a real host label
+// vs the box's generic roster id)". Surfacing them turns a misleading outage into an
+// actionable key-mismatch.
+//
+// Returns the sorted keys (basename without the .json suffix). A missing or unreadable
+// reports dir yields no orphans and no error — that is the honest "no live reports yet"
+// state the status command already degrades for. Only *.json files are considered, so
+// a sidecar (targets, readiness) or subdir is not miscounted.
+func OrphanReports(dir string, ro Roster) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	known := make(map[string]struct{}, len(ro.Boxes))
+	for _, b := range ro.Boxes {
+		known[b.Ref()] = struct{}{}
+	}
+	var orphans []string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		key := strings.TrimSuffix(e.Name(), ".json")
+		if _, ok := known[key]; !ok {
+			orphans = append(orphans, key)
+		}
+	}
+	sort.Strings(orphans)
+	return orphans
 }
 
 func readOneReport(dir string, b Box) Report {

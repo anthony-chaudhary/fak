@@ -227,6 +227,72 @@ func TestReadReportsFileTransport(t *testing.T) {
 	}
 }
 
+// TestOrphanReports is the misfiled-producer witness: report files whose key matches
+// no roster box are the difference between a false "everything down" and an actionable
+// key-mismatch. This is the real-world shape — a producer writes a report under a box's
+// non-roster name (its real hardware label) while the generic roster names the box
+// something else — so the fold reads the roster box `unknown` and the misfiled file is
+// silently dropped unless OrphanReports names it. Keys here are GENERIC on purpose (the
+// public/private boundary keeps real host labels out of the committed tree).
+func TestOrphanReports(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"state":"live"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("da-cpu.json")  // matches roster id -> NOT an orphan
+	write("stray-1.json") // producer used a non-roster key -> orphan
+	write("stray-2.json") // orphan
+	write("stray-3.json") // orphan
+	write("targets.json") // a .json sidecar with no matching box is still an orphan by key
+	write("notes.txt")    // non-json -> ignored
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ro := Roster{Boxes: []Box{{ID: "da-cpu"}, {ID: "box-a"}, {ID: "box-b"}}}
+	got := OrphanReports(dir, ro)
+	want := []string{"stray-1", "stray-2", "stray-3", "targets"} // sorted, da-cpu excluded, notes.txt/sub/ ignored
+	if len(got) != len(want) {
+		t.Fatalf("orphans = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("orphans = %v, want %v", got, want)
+		}
+	}
+
+	// An Endpoint remaps the expected key: a box with Endpoint "stray-1" claims
+	// stray-1.json, so it is no longer an orphan — the roster, not the id, owns the key.
+	ro2 := Roster{Boxes: []Box{{ID: "da-cpu"}, {ID: "box-a", Endpoint: "stray-1"}}}
+	got2 := OrphanReports(dir, ro2)
+	for _, o := range got2 {
+		if o == "stray-1" {
+			t.Fatalf("stray-1 is claimed by box-a's endpoint; must not be an orphan: %v", got2)
+		}
+	}
+
+	// A missing reports dir is the honest "no reports yet" state, not an error: no orphans.
+	if o := OrphanReports(filepath.Join(dir, "does-not-exist"), ro); o != nil {
+		t.Fatalf("missing dir should yield no orphans, got %v", o)
+	}
+}
+
+// TestRenderSurfacesOrphans: the render must name orphan files so an operator reading
+// "0/N reachable" learns the reports exist under unresolved keys, not that the fleet is
+// dead. A snapshot with no orphans prints no ORPHANS line.
+func TestRenderSurfacesOrphans(t *testing.T) {
+	snap := Snapshot{Total: 1, Reachable: 0, Orphans: []string{"stray-1", "stray-2"}}
+	out := Render(snap, false, 72)
+	if !strings.Contains(out, "ORPHANS") || !strings.Contains(out, "stray-1") || !strings.Contains(out, "stray-2") {
+		t.Fatalf("render must surface orphan report keys, got:\n%s", out)
+	}
+	if strings.Contains(Render(Snapshot{Total: 1}, false, 72), "ORPHANS") {
+		t.Fatal("a snapshot with no orphans must not print an ORPHANS line")
+	}
+}
+
 // TestWriteReportRoundTrip is the producer witness: WriteReport writes a report the
 // reader accepts as reachable, with the schema forced and age re-stamped, and refuses
 // an unsafe id (path traversal) and an unknown state.

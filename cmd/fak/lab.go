@@ -167,6 +167,7 @@ func labStatus(stdout, stderr io.Writer, argv []string) int {
 	if !ok {
 		return 2
 	}
+	fullRoster := ro // keep the unfiltered roster for orphan detection (below)
 	ro = labSelect(ro, *group, *class)
 	if (*group != "" || *class != "") && len(ro.Boxes) == 0 {
 		fmt.Fprintln(stderr, "fak lab: no boxes match the --group/--class filter")
@@ -188,6 +189,11 @@ func labStatus(stdout, stderr io.Writer, argv []string) int {
 		reps = fleet.ReadReports(dir, ro)
 	}
 	snap := fleet.Fold(ro, reps, fleet.FoldOpts{StaleSec: *staleMin * 60})
+	// Surface report files that bind to no roster box (a producer writing under
+	// non-roster keys) so a real "0/N reachable" is not mistaken for a dead fleet when
+	// reports are in fact present, just misfiled. Detect against the FULL roster so a
+	// --group/--class filter does not flag a filtered-out box's report as an orphan.
+	snap.Orphans = fleet.OrphanReports(dir, fullRoster)
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, snap); err != nil {

@@ -68,6 +68,14 @@ func Render(snap Snapshot, all bool, width int) string {
 			inf.Useful, snap.Total, inf.Reported, inf.Ready, inf.Degraded, inf.Warming, inf.Blocked, inf.Unknown)
 	}
 
+	// ORPHANS: report files present in the dir that match no roster box. Rendered as
+	// its own line (not an ATTENTION item — attentionOf runs inside pure Fold, which
+	// has no dir) so an operator staring at "0/N reachable" learns the reports EXIST,
+	// just under keys the roster does not resolve, rather than reading a false outage.
+	if len(snap.Orphans) > 0 {
+		fmt.Fprintf(&b, "ORPHANS    %d report file(s) match no roster box: %s\n", len(snap.Orphans), previewList(snap.Orphans, 6))
+	}
+
 	b.WriteString("\nATTENTION\n")
 	for _, it := range snap.Attention {
 		fmt.Fprintf(&b, "  [%s] %s\n", strings.ToUpper(it.Level), it.Title)

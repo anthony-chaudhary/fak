@@ -78,6 +78,12 @@ type Snapshot struct {
 	Inference *InferenceSummary `json:"inference,omitempty"`
 	Attention []Item            `json:"attention"`
 	Rows      []BoxRow          `json:"rows"`
+	// Orphans are report files in the reports dir that bind to NO roster box (a
+	// producer wrote them under a non-roster key). READER-populated, like Report.Err:
+	// pure Fold never sets this — it has no dir — the status command fills it from
+	// OrphanReports so the render and the JSON both surface files the fold would
+	// otherwise drop silently. Empty (omitted) when every report file matches a box.
+	Orphans []string `json:"orphans,omitempty"`
 }
 
 // InferenceSummary is the fleet-level serving-usefulness fold. Reported is the
