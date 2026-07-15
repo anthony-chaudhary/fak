@@ -56,6 +56,32 @@ func TestParseClaudeAcceptanceFailsClosed(t *testing.T) {
 	}
 }
 
+func TestParseClaudeAcceptanceAllowsAccountedHelperModel(t *testing.T) {
+	const model = "claude-opus-4-8"
+	lines := []string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"IMPLEMENTED"}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"duration_ms":10,"total_cost_usd":0.02,"result":"IMPLEMENTED","usage":{"input_tokens":4},"modelUsage":{"claude-opus-4-8":{},"claude-haiku-4-5-20251001":{}}}`,
+	}
+	got, err := parseClaudeAcceptance([]byte(strings.Join(lines, "\n")), model, modelaccept.Task{Expected: "IMPLEMENTED"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.actualModel != model || got.result != "IMPLEMENTED" {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestParseClaudeAcceptanceRejectsMissingRequestedUsage(t *testing.T) {
+	const model = "claude-opus-4-8"
+	lines := []string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"IMPLEMENTED","modelUsage":{"claude-haiku-4-5-20251001":{}}}`,
+	}
+	if _, err := parseClaudeAcceptance([]byte(strings.Join(lines, "\n")), model, modelaccept.Task{Expected: "IMPLEMENTED"}); err == nil || !strings.Contains(err.Error(), "missing requested model") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestRunModelAcceptanceFixture(t *testing.T) {
 	input := strings.Join([]string{`{"jsonrpc":"2.0","id":1,"method":"initialize"}`, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"flaky_lookup","arguments":{}}}`, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"flaky_lookup","arguments":{}}}`}, "\n")
 	var out, errout bytes.Buffer
