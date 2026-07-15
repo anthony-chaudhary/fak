@@ -158,6 +158,28 @@ func TestNormalizeAdvice(t *testing.T) {
 	}
 }
 
+func TestStepAdviceAffordance(t *testing.T) {
+	cases := []struct{ token, want string }{
+		{"any", "Keep going with full headroom (8.0k tokens available)."},
+		{"bounded", "Wrap the current sub-task, land its durable state, then continue with one bounded step."},
+		{"checkpoint", "Checkpoint durable state now, then proceed from that checkpoint."},
+		{"rebuild", "Rebuild context from the checkpoint, then take the next step."},
+		{"", "Keep going with full headroom (8.0k tokens available)."},
+		{"future-token", "Keep going with full headroom (8.0k tokens available)."},
+	}
+	for _, tc := range cases {
+		got := StepAdviceAffordance(tc.token, 8000)
+		if got != tc.want {
+			t.Errorf("%q => %q, want %q", tc.token, got, tc.want)
+		}
+		for _, forbidden := range []string{"don't", "can't", "avoid"} {
+			if strings.Contains(strings.ToLower(got), forbidden) {
+				t.Errorf("%q contains %q: %q", tc.token, forbidden, got)
+			}
+		}
+	}
+}
+
 func TestManagedRuleAffordanceFirst(t *testing.T) {
 	rule := SessionStartRule(Steer(SteerInput{Headless: true, DurableStore: true}))
 	if !strings.HasPrefix(rule, "Keep working while checkable work remains; managed context is ON.") {

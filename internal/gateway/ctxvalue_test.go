@@ -6,8 +6,10 @@ package gateway
 // /v1/fak/ctxvalue over the live wire and the fak_context_value MCP tool.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,39 @@ import (
 // TestAdviseCtxStepRungs walks the closed decision ladder: every step class is
 // reachable, each from the rung that owns it, and the fail-closed rungs answer
 // unknown instead of guessing.
+
+func TestStepAdviceTokenStableWithAffordance(t *testing.T) {
+	cases := []struct {
+		name  string
+		state ctxValueState
+		want  StepClass
+	}{
+		{"any", ctxValueState{Turns: 5, Resident: 100, Budget: 1000}, StepClassAny},
+		{"bounded", ctxValueState{Turns: 5, Resident: 600, Budget: 1000}, StepClassBounded},
+		{"checkpoint", ctxValueState{Turns: 5, Resident: 900, Budget: 1000}, StepClassCheckpoint},
+		{"rebuild", ctxValueState{Turns: 5, ContextEvents: 1, LastTurnEvent: true}, StepClassRebuild},
+		{"unknown", ctxValueState{}, StepClassUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := adviseCtxStep(tc.state)
+			if got.StepClass != tc.want {
+				t.Fatalf("step_class=%q want %q", got.StepClass, tc.want)
+			}
+			if got.Affordance == "" {
+				t.Fatalf("affordance empty: %+v", got)
+			}
+			b, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(b), `"step_class":"`+string(tc.want)+`"`) || !strings.Contains(string(b), `"affordance":`) {
+				t.Fatalf("payload lost token or affordance: %s", b)
+			}
+		})
+	}
+}
+
 func TestAdviseCtxStepRungs(t *testing.T) {
 	cases := []struct {
 		name  string

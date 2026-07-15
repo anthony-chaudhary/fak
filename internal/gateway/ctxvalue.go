@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/negframe"
+	"github.com/anthony-chaudhary/fak/internal/sessionsteer"
 )
 
 // ctxvalue.go — the managed-context arm of the guard's value API: one rolling,
@@ -210,6 +213,7 @@ type CtxValueSession struct {
 // deciding numbers, so the agent can weigh it rather than obey it.
 type CtxStepAdvice struct {
 	StepClass  StepClass `json:"step_class"`
+	Affordance string    `json:"affordance"`
 	Basis      string    `json:"basis"` // token_headroom | event_cadence | context_event | none
 	Reason     string    `json:"reason"`
 	Provenance string    `json:"provenance"` // DECISION
@@ -351,6 +355,11 @@ func adviseCtxStep(st ctxValueState) CtxStepAdvice {
 		a.StepClass, a.Basis = StepClassUnknown, "none"
 		a.Reason = "no resident budget configured and no context event observed; the window edge is not visible from the guard"
 	}
+	headroom := int64(0)
+	if st.Budget > st.Resident {
+		headroom = int64(st.Budget - st.Resident)
+	}
+	a.Affordance = negframe.Reframe(sessionsteer.StepAdviceAffordance(string(a.StepClass), headroom))
 	return a
 }
 

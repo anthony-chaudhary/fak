@@ -19,7 +19,10 @@
 // callers map gateway.StepClass -> Advice by its string value.
 package sessionsteer
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Advice is the string mirror of gateway.StepClass — the closed step-advice vocabulary the
 // context-value reporter emits. Kept as a local type so this core stays dependency-free.
@@ -49,6 +52,33 @@ func NormalizeAdvice(s string) Advice {
 	default:
 		return AdviceUnknown
 	}
+}
+
+// StepAdviceAffordance renders the action carried by a stable step_advice token.
+// Unknown and absent inputs use the any framing so a presentation-only field stays
+// useful without changing the machine token or inventing a constraint.
+func StepAdviceAffordance(raw string, headroomTokens int64) string {
+	a := NormalizeAdvice(raw)
+	switch a {
+	case AdviceBounded:
+		return "Wrap the current sub-task, land its durable state, then continue with one bounded step."
+	case AdviceCheckpoint:
+		return "Checkpoint durable state now, then proceed from that checkpoint."
+	case AdviceRebuild:
+		return "Rebuild context from the checkpoint, then take the next step."
+	default:
+		if headroomTokens > 0 {
+			return "Keep going with full headroom (" + humanHeadroom(headroomTokens) + " tokens available)."
+		}
+		return "Keep going with full headroom."
+	}
+}
+
+func humanHeadroom(n int64) string {
+	if n < 1000 {
+		return strconv.FormatInt(n, 10)
+	}
+	return strconv.FormatFloat(float64(n)/1000, 'f', 1, 64) + "k"
 }
 
 // AdmitClass is the admission decision — whether a session is admitted onto the managed
