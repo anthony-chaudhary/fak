@@ -41,7 +41,11 @@ package leaseref
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // syncRefspec is the one refspec sync ever uses, on both the push and the fetch side:
@@ -91,6 +95,9 @@ func (s *Store) Sync(ctx context.Context, remote string, doPush, doFetch bool) (
 		return SyncResult{}, fmt.Errorf("leaseref: sync with neither push nor fetch does nothing — enable at least one direction")
 	}
 	res := SyncResult{Remote: remote, Refspec: syncRefspec}
+	if _, err := s.QuarantineMalformedLockRefs(ctx, time.Now()); err != nil {
+		return res, err
+	}
 	if doPush {
 		// Stop here: force-fetching over unpublished local state would regress the
 		// very leases this clone just wrote (the ordering rationale in the file doc).
@@ -123,4 +130,103 @@ func (s *Store) runSyncDirection(ctx context.Context, verb, remote, extra string
 		return fmt.Errorf("leaseref: %s %s %s exited %d%s", verb, remote, syncRefspec, code, extra)
 	}
 	return nil
+}
+
+// QuarantineMalformedLockRefs moves malformed loose files out of refs/fak/locks
+// before a push or fetch asks git to enumerate the ref database. A torn loose ref
+// (notably an all-NUL object id) makes otherwise-unrelated fetches fail before git
+// can repair anything. Valid refs and transient *.lock files are never moved.
+func (s *Store) QuarantineMalformedLockRefs(ctx context.Context, now time.Time) ([]string, error) {
+	out, code, err := s.run(ctx, s.dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return nil, fmt.Errorf("leaseref: git not executable: %w", err)
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("leaseref: rev-parse --git-common-dir exited %d", code)
+	}
+	common := strings.TrimSpace(out)
+	if common == "" {
+		// Injected runners used by the pure argv tests predate this filesystem
+		// maintenance seam. Real git always returns a path here.
+		return nil, nil
+	}
+	return QuarantineMalformedLockRefsInDir(
+		filepath.Join(common, "refs", "fak", "locks"),
+		filepath.Join(common, "fak", "quarantine", "malformed-lock-refs", now.UTC().Format("20060102T150405.000000000Z")),
+	)
+}
+
+// QuarantineMalformedLockRefsInDir is the bounded filesystem core. It examines
+// regular loose-ref files only, validates their trimmed content as a SHA-1 or
+// SHA-256 object ID, and atomically renames malformed entries into quarantine.
+func QuarantineMalformedLockRefsInDir(refDir, quarantineDir string) ([]string, error) {
+	var moved []string
+	err := filepath.WalkDir(refDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if d.IsDir() || strings.HasSuffix(d.Name(), lockSuffix) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if validObjectID(strings.TrimSpace(string(b))) {
+			return nil
+		}
+		rel, err := filepath.Rel(refDir, path)
+		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("leaseref: malformed ref escaped lock namespace: %s", path)
+		}
+		dst := filepath.Join(quarantineDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		if err := os.Rename(path, dst); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("leaseref: quarantine malformed ref %s: %w", filepath.ToSlash(rel), err)
+		}
+		moved = append(moved, filepath.ToSlash(rel))
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return moved, nil
+	}
+	return moved, err
+}
+
+func validObjectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	nonzero := false
+	for i := range len(s) {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+		if c != '0' {
+			nonzero = true
+		}
+	}
+	return nonzero
 }

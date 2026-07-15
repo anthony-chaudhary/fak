@@ -428,8 +428,8 @@ func (s *Store) writeBlob(ctx context.Context, blob []byte) (string, error) {
 		return "", fmt.Errorf("leaseref: hash-object exited %d", code)
 	}
 	sha := strings.TrimSpace(out)
-	if sha == "" {
-		return "", fmt.Errorf("leaseref: hash-object produced no object id")
+	if !validObjectID(sha) {
+		return "", fmt.Errorf("leaseref: hash-object produced invalid object id %q", sha)
 	}
 	return sha, nil
 }

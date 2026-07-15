@@ -8,6 +8,9 @@ package leaseref
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -21,6 +24,9 @@ type syncRec struct {
 }
 
 func (r *syncRec) run(ctx context.Context, dir string, args ...string) (string, int, error) {
+	if len(args) > 1 && args[0] == "rev-parse" && args[1] == "--path-format=absolute" {
+		return "", 0, nil
+	}
 	r.calls = append(r.calls, args)
 	if r.err != nil {
 		return "", -1, r.err
@@ -145,5 +151,95 @@ func TestSyncRefusesUnsafeRemoteAndNoDirection(t *testing.T) {
 	}
 	if len(rec.calls) != 0 {
 		t.Fatalf("no-direction sync must not invoke git, got %v", rec.calls)
+	}
+}
+
+func TestSyncQuarantinesMalformedLooseRefAndFetches(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	local := filepath.Join(root, "local")
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(root, "init", "--bare", remote)
+	runGit(root, "clone", remote, local)
+	runGit(local, "-c", "user.name=fak-test", "-c", "user.email=fak-test@example.invalid", "commit", "--allow-empty", "-m", "seed")
+	runGit(local, "push", "origin", "HEAD:main")
+
+	validBlob := filepath.Join(root, "valid.json")
+	if err := os.WriteFile(validBlob, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	validOID := runGit(local, "hash-object", "-w", validBlob)
+	runGit(local, "update-ref", refPrefix+"valid", validOID)
+	common := runGit(local, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	badPath := filepath.Join(common, "refs", "fak", "locks", "session-bad")
+	if err := os.MkdirAll(filepath.Dir(badPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badPath, make([]byte, 41), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "fetch", "origin", "main")
+	cmd.Dir = local
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("raw fetch unexpectedly accepted malformed ref: %s", out)
+	}
+	got, err := NewInDir(local).Sync(ctx, "origin", false, true)
+	if err != nil {
+		t.Fatalf("Sync recovery: %v", err)
+	}
+	if !got.Fetched {
+		t.Fatalf("Fetched=false: %+v", got)
+	}
+	if _, err := os.Stat(badPath); !os.IsNotExist(err) {
+		t.Fatalf("malformed ref still present: %v", err)
+	}
+	if gotOID := runGit(local, "rev-parse", refPrefix+"valid"); gotOID != validOID {
+		t.Fatalf("valid ref changed: got %s want %s", gotOID, validOID)
+	}
+	matches, err := filepath.Glob(filepath.Join(common, "fak", "quarantine", "malformed-lock-refs", "*", "session-bad"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("quarantine matches=%v err=%v", matches, err)
+	}
+}
+
+func TestQuarantineMalformedLockRefsInDirBoundsAndPreservesValid(t *testing.T) {
+	refs := t.TempDir()
+	quarantine := filepath.Join(t.TempDir(), "q")
+	valid := strings.Repeat("a", 40) + "\n"
+	for name, body := range map[string]string{"valid": valid, "allzero": strings.Repeat("0", 40) + "\n", "badnul": string(make([]byte, 41)), "short": "deadbeef\n", "active.lock": "busy"} {
+		if err := os.WriteFile(filepath.Join(refs, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved, err := QuarantineMalformedLockRefsInDir(refs, quarantine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(moved, ",") != "allzero,badnul,short" {
+		t.Fatalf("moved=%v", moved)
+	}
+	for _, name := range []string{"valid", "active.lock"} {
+		if _, err := os.Stat(filepath.Join(refs, name)); err != nil {
+			t.Fatalf("%s not preserved: %v", name, err)
+		}
+	}
+	for _, name := range moved {
+		if _, err := os.Stat(filepath.Join(quarantine, name)); err != nil {
+			t.Fatalf("%s not quarantined: %v", name, err)
+		}
 	}
 }

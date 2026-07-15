@@ -124,7 +124,7 @@ func isAllZeros(s string) bool {
 }
 
 // synthID renders a small int as a stable synthetic object id for the fake object store.
-func synthID(n int) string { return "obj" + itoa(n) }
+func synthID(n int) string { return strings.Repeat("0", 39-len(itoa(n))) + "1" + itoa(n) }
 
 func itoa(n int) string {
 	if n == 0 {
@@ -426,5 +426,25 @@ func TestRecordJSONShape(t *testing.T) {
 	want := `{"id":"x","tree_globs":["a"],"holder":"h","acquired_unix":1,"ttl_seconds":2}`
 	if string(b) != want {
 		t.Fatalf("record JSON = %s, want %s", b, want)
+	}
+}
+
+func TestAcquireRejectsInvalidHashObjectIDBeforeUpdateRef(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) (string, int, error) {
+		calls = append(calls, append([]string(nil), args...))
+		if args[0] == "hash-object" {
+			return string(make([]byte, 41)), 0, nil
+		}
+		return "", 0, nil
+	}
+	_, err := NewWithRunner(run, "").Acquire(context.Background(), Record{ID: "writer-invalid-oid", Holder: "test"})
+	if err == nil || !strings.Contains(err.Error(), "invalid object id") {
+		t.Fatalf("Acquire error = %v, want invalid object id", err)
+	}
+	for _, call := range calls {
+		if call[0] == "update-ref" {
+			t.Fatalf("invalid oid reached update-ref: %v", call)
+		}
 	}
 }
