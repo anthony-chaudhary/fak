@@ -17,8 +17,12 @@ import (
 // untagged manifest defaults to the current policy version, so it still counts.
 func isPolicyManifest(b []byte) bool {
 	var probe struct {
-		Version string `json:"version"`
-		Schema  string `json:"schema"`
+		Version      string          `json:"version"`
+		Schema       string          `json:"schema"`
+		RequiredTier *int            `json:"required_tier"`
+		Candidate    string          `json:"candidate"`
+		Policies     json.RawMessage `json:"policies"`
+		Observations json.RawMessage `json:"observations"`
 	}
 	if err := json.Unmarshal(b, &probe); err != nil {
 		return true // not parseable as JSON-with-version: let ParseRuntime report it
@@ -26,6 +30,12 @@ func isPolicyManifest(b []byte) bool {
 	if probe.Schema != "" {
 		// A top-level "schema" key is a different family's self-tag (e.g.
 		// fak.resume-source-policy.v1) — policy manifests tag with "version".
+		return false
+	}
+	// The modelops canary input predates an explicit schema tag. Its structural
+	// discriminator keeps that sibling example out of the policy parser while
+	// preserving fail-closed parsing for ordinary unversioned policy manifests.
+	if probe.RequiredTier != nil && probe.Candidate != "" && len(probe.Policies) != 0 && len(probe.Observations) != 0 {
 		return false
 	}
 	return probe.Version == "" || strings.HasPrefix(probe.Version, "fak-policy/")
