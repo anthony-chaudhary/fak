@@ -70,7 +70,7 @@ func TestGuardRecoveryPromptNamesPriorRefusals(t *testing.T) {
 	for _, want := range []string{
 		"[fak] resume recovery",
 		"recovery/debugging",
-		"Do not re-propose the same refused call unchanged",
+		"Clear the blocker or choose an allowed alternative",
 		"OFF_TRUNK x2",
 		"commit directly to main",
 		"Keep fak guard wrapped",
@@ -101,5 +101,20 @@ func TestGuardRecoveryPromptReframesFix(t *testing.T) {
 	}
 	if !strings.Contains(got, "OFF_TRUNK") {
 		t.Fatalf("recovery prompt dropped the reason token OFF_TRUNK:\n%s", got)
+	}
+}
+
+func TestGuardRecoveryPromptLeadsWithRecoveryAffordance(t *testing.T) {
+	got := guardRecoveryPrompt([]guardRefusalCarry{{Reason: "EGRESS_BLOCK", Count: 1}})
+	if !strings.Contains(got, "Clear the blocker or choose an allowed alternative") {
+		t.Fatalf("recovery affordance absent: %q", got)
+	}
+	for _, negative := range []string{"Do not re-propose", "blind retry"} {
+		if strings.Contains(got, negative) {
+			t.Fatalf("recovery prompt retains negation-first instruction %q: %q", negative, got)
+		}
+	}
+	if strings.Count(got, "EGRESS_BLOCK") != 1 {
+		t.Fatalf("reason token not byte-stable exactly once: %q", got)
 	}
 }

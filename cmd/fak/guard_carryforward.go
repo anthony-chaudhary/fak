@@ -359,8 +359,8 @@ func guardRecoveryPrompt(items []guardRefusalCarry) string {
 	}
 	var b strings.Builder
 	b.WriteString("[fak] resume recovery: the previous guarded run recorded capability-floor refusal(s). ")
-	b.WriteString("Treat this resumed turn as recovery/debugging, not a blind retry. ")
-	b.WriteString("Do not re-propose the same refused call unchanged; clear the blocker or choose an allowed alternative before continuing. ")
+	b.WriteString("Treat this resumed turn as recovery/debugging and revise the call from evidence. ")
+	b.WriteString("Clear the blocker or choose an allowed alternative, then continue with a revised call. ")
 	b.WriteString("Prior refusal(s):")
 	wrote := false
 	for _, item := range items {
