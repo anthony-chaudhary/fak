@@ -118,11 +118,14 @@
       "roots": ["support", "coverage", "correctness", "parity", "maturity"],
       "ignore": ["supported", "unsupported", "supports", "supporting", "errmmapunsupported",
                  "errstreamingunsupported", "streamingsupported", "recurrentevictunsupportederror",
-                 "sourcecoverage", "targetcoverage", "correctnessclass", "correctnessdependson",
-                 "paritybench", "parityreport", "supportmaturityscore", "supportmaturitydebt",
+                 "numareplicapolicyunsupported",
+                 "sourcecoverage", "targetcoverage", "coveragediscipline", "coveragebaseline", "topncoverage",
+                 "correctnessclass", "correctnessdependson",
+                 "paritybench", "parityreport", "scoreparity", "defaultscoreparitytol",
+                 "supportmaturityscore", "supportmaturitydebt",
                  "immaturity"],
       "min_files": 3,
-      "note": "The support-maturity ladder vocabulary: support says a path exists, coverage says how much of the declared/discovered space is exercised or positioned, correctness says the behavior is right, parity compares to a named peer/baseline, and maturity summarizes production readiness."
+      "note": "The support-maturity ladder vocabulary: support says a path exists, coverage says how much of the declared/discovered space is exercised or positioned, correctness says the behavior is right, parity compares to a named peer/baseline, and maturity summarizes production readiness. Ignored incidental helpers and false friends: the support inflections (supported, unsupported, supports, supporting); platform/feature-availability 'unsupported' tokens where 'unsupported' means the host OS lacks a feature, not that a capability path is absent (errmmapunsupported, errstreamingunsupported, streamingsupported, recurrentevictunsupportederror, numareplicapolicyunsupported - the NUMA-replica iota zero value returned on a host with no NUMA topology); coverage helpers where 'coverage' is the test/statement concept applied as a function or data holder, not a distinct concept (sourcecoverage, targetcoverage - benchmark source/target coverage fields; coveragediscipline - the CoverageDiscipline KPI function measuring the statement-coverage + race ratchet; coveragebaseline - the CoverageBaseline pure-data struct holding the ratchet floor/per-package/epsilon; topncoverage - the TopNCoverage concentration-curve field, a cumulative-weight-share distribution metric over vCache anchors, not the support-maturity coverage concept); correctness helpers (correctnessclass, correctnessdependson); parity-application helpers where 'parity' is the comparative concept applied to a named benchmark, not a new concept (paritybench, parityreport, scoreparity - the scoreParityFailures helper listing which FrontierSWE score buckets raw vs fak differ on, defaultscoreparitytol - the 1e-9 numeric tolerance constant for the comparison); support-maturity score/debt aggregates (supportmaturityscore, supportmaturitydebt); and the immaturity inflection."
     },
     {
       "id": "cross-cluster",
