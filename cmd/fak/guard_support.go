@@ -15,6 +15,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/fleetreap"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
@@ -471,6 +473,33 @@ func guardAuditDir(root string) string {
 	return filepath.Join(root, ".dispatch-runs", "guard-audit")
 }
 
+const (
+	guardAuditRetentionAge   = 14 * 24 * time.Hour
+	guardAuditRetentionCount = 512
+)
+
+func reapGuardAuditJournals(root string, now time.Time) (fleetreap.Result, error) {
+	return fleetreap.ReapByAgeCount(guardAuditDir(root), "*.jsonl", guardAuditRetentionAge, guardAuditRetentionCount, now)
+}
+
+func measureGuardAuditJournals(root string, now time.Time) (fleetreap.Footprint, error) {
+	return fleetreap.MeasureFootprint(guardAuditDir(root), "*.jsonl", now)
+}
+
+func installGuardAuditFootprintProvider(root string) {
+	gateway.SetGuardAuditFootprintProvider(func() gateway.GuardAuditFootprint {
+		foot, err := measureGuardAuditJournals(root, time.Now())
+		if err != nil {
+			return gateway.GuardAuditFootprint{}
+		}
+		var oldest int64
+		if !foot.Oldest.IsZero() {
+			oldest = foot.Oldest.Unix()
+		}
+		return gateway.GuardAuditFootprint{Files: foot.Files, Bytes: foot.Bytes, OldestUnix: oldest}
+	})
+}
+
 func guardPolicyDigest(policyBytes []byte) string {
 	sum := sha256.Sum256(policyBytes)
 	return "sha256:" + hex.EncodeToString(sum[:])
@@ -545,6 +574,11 @@ func guardEnableAudit(auditPath string, noAudit bool) (label string, active *jou
 		return "active  (durable, hash-chained; from FAK_AUDIT_JOURNAL)", j
 	}
 	path, optedOut, isDefault := guardAuditPlan(auditPath, noAudit, false)
+	auditRoot := findRepoRoot(".")
+	installGuardAuditFootprintProvider(auditRoot)
+	if _, err := reapGuardAuditJournals(auditRoot, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: audit retention unavailable: %v (continuing without reaping)\n", err)
+	}
 	if path == "" {
 		if optedOut {
 			return "off  (default-on; disabled by --no-audit / --audit off)", nil

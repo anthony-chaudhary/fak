@@ -140,6 +140,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/healthz", s.handleHealth},
 		{"/metrics", s.handleMetrics},
 		{"/debug/vars", s.handleDebugVars},
+		{"/debug/guard-audit", handleGuardAuditDebug},
 	}
 }
 
