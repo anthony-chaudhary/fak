@@ -240,21 +240,10 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	for {
-		if rc := serviceTick(stdout, stderr); rc != 0 {
-			return rc
-		}
-		if *once {
-			return 0
-		}
-		timer := time.NewTimer(*interval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return 0
-		case <-timer.C:
-		}
+	if *once {
+		return serviceTick(stdout, stderr)
 	}
+	return runServiceLoopContext(ctx, stdout, stderr, *interval)
 }
 func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak service install|status|uninstall|run [--dry-run] [--json]")

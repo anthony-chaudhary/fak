@@ -102,7 +102,25 @@ func q8DecodeWorkers() int {
 // Q8DecodeWorkerBudget() for the full "engaged and parallel?" picture.
 func Q8DecodeKernel() (kernel string, fused bool) { return q8DecodeKernel() }
 
-func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) {
+// decodeWorkersFor is the shared batch-1 decode worker-budget cap for the Q8 and Q4_K decode
+// GEMVs. It clamps to >=1, lets an explicit FAK_WORKERS/FAK_BUDGET source bypass the cap, and
+// otherwise applies two host caps parameterized by (amd64Div, amd64Max) and a `label` prefix so
+// the two decode paths share ONE body (the only real difference is the amd64 divisor/ceiling):
+//   - Apple Silicon (darwin/arm64, workers>=8): half-cap to <=6 (shared batch-1 pathology).
+//   - Many-core amd64 (workers>=64): cap to workers/amd64Div, held in [8, amd64Max].
+//
+// The many-core amd64 cap exists because those servers (esp. multi-socket / NUMA) hit the same
+// batch-1 decode pathology as Apple Silicon, amplified. A decode GEMV is memory-bound (see
+// qMatRows: "decode is memory-bound … spreading rows taps aggregate bandwidth"), and the q/k/v
+// and gate/up projections are small (k/v are 256 rows) and "parallelize poorly split 12 ways"
+// (quant_gemv_many.go). Splitting them across ~all cores on a 256-thread box hands each worker a
+// trivial slice while the parFor barrier — a shared cursor + busy-wait across cores, worse across
+// NUMA — dominates, collapsing decode to a fraction of a token/s (#3176). Capping to a modest
+// stream count still saturates multi-channel server memory bandwidth without the all-core sync
+// collapse. The exact optimum is host-specific, so an operator tunes it with FAK_WORKERS/FAK_BUDGET
+// (which set a non-default source and return above); only the genuinely many-core regime (>=64) is
+// capped, so desktop/small-server amd64 is byte-for-byte unchanged.
+func decodeWorkersFor(workers int, source, goos, goarch, label string, amd64Div, amd64Max int) (int, string) {
 	if workers < 1 {
 		workers = 1
 	}
@@ -117,31 +135,24 @@ func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) 
 		if w < 1 {
 			w = 1
 		}
-		return w, defaultWorkerBudgetSource + "; q8_decode=darwin/arm64-half-cap"
+		return w, defaultWorkerBudgetSource + "; " + label + "_decode=darwin/arm64-half-cap"
 	}
-	// Many-core amd64 (esp. multi-socket / NUMA servers) hits the same batch-1 decode
-	// pathology as Apple Silicon, amplified. A decode GEMV is memory-bound (see qMatRows:
-	// "decode is memory-bound … spreading rows taps aggregate bandwidth"), and the q/k/v and
-	// gate/up projections are small (k/v are 256 rows) and "parallelize poorly split 12 ways"
-	// (quant_gemv_many.go). Splitting them across ~all cores on a 256-thread box hands each
-	// worker a trivial slice while the parFor barrier — a shared cursor + busy-wait across
-	// cores, worse across NUMA — dominates, collapsing decode to a fraction of a token/s (#3176).
-	// Cap to a modest stream count that still saturates multi-channel server memory bandwidth
-	// without the all-core sync collapse. The exact optimum is host-specific, so an operator
-	// tunes it with FAK_WORKERS/FAK_BUDGET (which set a non-default source and return above);
-	// only the genuinely many-core regime (>=64) is capped, so desktop/small-server amd64 is
-	// byte-for-byte unchanged.
 	if goarch == "amd64" && workers >= 64 {
-		w := workers / 8
-		if w > 16 {
-			w = 16
+		w := workers / amd64Div
+		if w > amd64Max {
+			w = amd64Max
 		}
 		if w < 8 {
 			w = 8
 		}
-		return w, defaultWorkerBudgetSource + "; q8_decode=amd64-manycore-cap"
+		return w, defaultWorkerBudgetSource + "; " + label + "_decode=amd64-manycore-cap"
 	}
 	return workers, source
+}
+
+// q8DecodeWorkersFor caps the Q8 batch-1 decode budget: many-core amd64 to workers/8 (<=16).
+func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) {
+	return decodeWorkersFor(workers, source, goos, goarch, "q8", 8, 16)
 }
 
 // Q4KDecodeWorkers reports the worker count for resident-Q4_K batch-1 decode GEMVs
@@ -169,37 +180,12 @@ func Q4KDecodeWorkerBudget() string {
 	return source
 }
 
+// q4kDecodeWorkersFor caps the Q4_K batch-1 decode budget: many-core amd64 to workers/4 (<=64),
+// the witnessed int8 Q4_K knee (see Q4KDecodeWorkers). Q4_K streams roughly half the bytes/token
+// of Q8, so it tolerates ~4x the workers before the parFor barrier dominates — hence /4 (<=64) vs
+// Q8's /8 (<=16). Apple Silicon reuses the shared half-cap.
 func q4kDecodeWorkersFor(workers int, source, goos, goarch string) (int, string) {
-	if workers < 1 {
-		workers = 1
-	}
-	if source != defaultWorkerBudgetSource {
-		return workers, source // explicit FAK_WORKERS/FAK_BUDGET/-budget wins, cap bypassed
-	}
-	// Apple Silicon: reuse the Q8 half-cap (same shared-memory batch-1 pathology).
-	if goos == "darwin" && goarch == "arm64" && workers >= 8 {
-		w := (workers + 1) / 2
-		if w > 6 {
-			w = 6
-		}
-		if w < 1 {
-			w = 1
-		}
-		return w, defaultWorkerBudgetSource + "; q4k_decode=darwin/arm64-half-cap"
-	}
-	// Many-core amd64: cap to workers/4 (<=64), the witnessed int8 Q4_K knee. Only the
-	// genuinely many-core regime (>=64) is capped, so desktop/small-server amd64 is unchanged.
-	if goarch == "amd64" && workers >= 64 {
-		w := workers / 4
-		if w > 64 {
-			w = 64
-		}
-		if w < 8 {
-			w = 8
-		}
-		return w, defaultWorkerBudgetSource + "; q4k_decode=amd64-manycore-cap"
-	}
-	return workers, source
+	return decodeWorkersFor(workers, source, goos, goarch, "q4k", 4, 64)
 }
 
 // budgetToWorkers maps a raw fraction-or-percent number + machine width to a worker

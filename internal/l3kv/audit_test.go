@@ -225,10 +225,28 @@ func TestNilRecorderDefaultsToNop(t *testing.T) {
 }
 
 // TestAuditKVIsInterfaceIdentical proves an *AuditKV is a drop-in abi.KVBackend and
-// composes over another abi.KVBackend (e.g. an l3kv-wrapped one) transparently.
+// composes UNDER another abi.KVBackend (the durable l3kv backend) transparently: an
+// operation on the outer l3kv wrapper must reach the inner KV (correct return value)
+// AND still be audited by the middle AuditKV's recorder.
 func TestAuditKVIsInterfaceIdentical(t *testing.T) {
-	var kv abi.KVBackend = NewAuditKV(newRecordingKV(), NewMemRecorder())
-	// Wrapping an AuditKV in the durable l3kv backend (itself an abi.KVBackend)
-	// must type-check — the decorator is interface-identical at both seams.
-	_ = New(kv, newMemStore())
+	inner := newRecordingKV()
+	inner.lenRet = 7
+	rec := NewMemRecorder()
+	var kv abi.KVBackend = NewAuditKV(inner, rec)
+	// Wrapping an AuditKV in the durable l3kv backend (itself an abi.KVBackend) must
+	// type-check — the decorator is interface-identical at both seams.
+	outer := New(kv, newMemStore())
+	// ...and stay functionally transparent through the l3kv wrapper: Len() must forward
+	// all the way down to the inner recordingKV's value, not be intercepted by a layer.
+	if got := outer.Len(); got != 7 {
+		t.Fatalf("Len through l3kv(AuditKV(recordingKV)) = %d, want 7", got)
+	}
+	// ...and the middle AuditKV must still SEE the op through the outer wrapper: exactly
+	// one Len forwarded to the inner KV, and exactly one entry recorded by the auditor.
+	if inner.calls[OpLen] != 1 {
+		t.Fatalf("inner recordingKV Len calls = %d, want 1", inner.calls[OpLen])
+	}
+	if n := rec.Len(); n != 1 {
+		t.Fatalf("audit recorder entries = %d, want 1", n)
+	}
 }

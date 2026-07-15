@@ -17,7 +17,6 @@ package cvregress
 // tier can afford more. Assign the tier on the PowerSpec.
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -235,10 +234,6 @@ func StochasticVerdict(rep PowerReport, regressed bool) (verdict string, ok, con
 	}
 	return "OK", true, true
 }
-
-// errMalformedSpec is returned nowhere directly but documents the sentinel class Validate
-// produces; kept for callers that want errors.Is-style classification in future.
-var errMalformedSpec = errors.New("cvregress: malformed power spec")
 
 // normInvCDF is the inverse standard-normal CDF (the quantile function Phi^-1(p)) via Acklam's
 // rational approximation — relative error below 1.15e-9 across 0<p<1, pure and deterministic, so

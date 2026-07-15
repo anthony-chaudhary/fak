@@ -32,8 +32,6 @@ import (
 // via --json) supplies an ACCURATE subject per lane through `--apply --lane L -m "..."`. That
 // keeps the tool from ever authoring an unwitnessed claim about work it did not do.
 
-func cmdSweep(argv []string) { os.Exit(runSweep(os.Stdout, os.Stderr, argv)) }
-
 // runSweep is the `fak sweep` shim. Default: enumerate the dirty tree, group it by lane, and
 // REPORT the plan (text, or --json for a loop). With --clean-junk it removes only freshly
 // classified junk files. With --apply --lane L -m S it commits exactly lane L's dirty paths

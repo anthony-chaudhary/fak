@@ -613,17 +613,12 @@ func dispatchWaveBuildPrice(requested, granted int, cands []dispatchorder.Candid
 	}
 }
 
-// dispatchWaveSkipIssues unions the caller's excluded-issue set with the poison-issue cap: an
+// dispatchWaveSkipIssuesFrom unions the caller's excluded-issue set with the poison-issue cap: an
 // OPEN issue that has burned dispatchAttemptBudget() workers without shipping is held out of the
-// wave. The time cooldown only pauses it ~2h, so without this it re-enters the pool and wastes a
-// worker every window forever. When the attempt budget yields no exhausted issues the result
-// stays == excludedIssues, so the pre-existing behavior is byte-identical.
-func dispatchWaveSkipIssues(runsDir string, excludedIssues map[int]bool) map[int]bool {
-	return dispatchWaveSkipIssuesFrom(scanRunsSnapshot(runsDir, time.Now()), excludedIssues)
-}
-
-// dispatchWaveSkipIssuesFrom is dispatchWaveSkipIssues over an already-captured snapshot, so
-// the wave pricer computes the skip set from the same one scan that fed its live/cooldown views.
+// wave (the time cooldown only pauses it ~2h, so without this it re-enters the pool and wastes a
+// worker every window forever). It reads an already-captured snapshot so the wave pricer computes
+// the skip set from the same one scan that fed its live/cooldown views. When the attempt budget
+// yields no exhausted issues the result stays == excludedIssues, so behavior is byte-identical.
 func dispatchWaveSkipIssuesFrom(snap *runsSnapshot, excludedIssues map[int]bool) map[int]bool {
 	skipIssues := excludedIssues
 	if exhausted := snap.attemptExhausted(dispatchAttemptBudget()); len(exhausted) > 0 {

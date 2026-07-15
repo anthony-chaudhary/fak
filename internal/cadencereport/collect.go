@@ -256,20 +256,6 @@ func workFromGit(root string, windowDays int, audit shipAuditFunc) Work {
 	return w
 }
 
-// gitShipSubjects is retained as the pure-subject compatibility helper for its grammar
-// tests. Delivery credit no longer uses it; WorkFromGit needs SHA + publication + audit.
-func gitShipSubjects(root, since string) ([]string, string) {
-	commits, err := gitShipCommits(root, since, "HEAD")
-	if err != "" {
-		return nil, err
-	}
-	subjects := make([]string, len(commits))
-	for i, commit := range commits {
-		subjects[i] = commit.Subject
-	}
-	return subjects, ""
-}
-
 func gitShipCommits(root, since, ref string) ([]shipCommit, string) {
 	cmd := exec.Command("git", "log", "--no-merges", "--since="+since, "--format=%H%x09%s", ref)
 	windowgate.ConfigureBackgroundCommand(cmd)

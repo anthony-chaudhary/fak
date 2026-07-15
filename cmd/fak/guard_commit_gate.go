@@ -36,10 +36,6 @@ type guardCommitCandidate struct {
 	Paths   []string
 }
 
-type guardCommitGateRunner interface {
-	Run(context.Context, string, ...string) ([]byte, error)
-}
-
 type guardCommitGitRunner struct{ dir string }
 
 func (g guardCommitGitRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {

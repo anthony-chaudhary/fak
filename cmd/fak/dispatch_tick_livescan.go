@@ -137,21 +137,10 @@ const dispatchResolveLogStubFloorBytes = 512
 // helper does.
 var dispatchNoopBannerRE = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
 
-// dispatchLogIsBannerNoop reports whether a worker log is a terminal banner no-op: it
-// is at/under the stub floor AND carries only the opencode/glm startup banner. Used to
-// reap a lane held by a dead no-op worker whose recycled pid still passes the liveness
-// gate (#1398). FAIL-CLOSED to false on any stat/read error or an over-floor log so a
-// log we cannot classify -- or one with real streamed work -- is never falsely reaped.
-func dispatchLogIsBannerNoop(path string) bool {
-	st, err := fsStat(path)
-	if err != nil {
-		return false
-	}
-	return classifyBannerNoop(st, path)
-}
-
-// classifyBannerNoop is the size-gate + banner-match core of dispatchLogIsBannerNoop,
-// split out so the snapshot scan can classify a log off the single stat it already took
+// classifyBannerNoop reports whether a worker log is a terminal banner no-op: it is
+// at/under the stub floor AND carries only the opencode/glm startup banner. Used to reap
+// a lane held by a dead no-op worker whose recycled pid still passes the liveness gate
+// (#1398). The snapshot scan classifies a log off the single stat it already took
 // (dispatch_tick_snapshot.go) instead of re-statting. An over-floor log is never a no-op;
 // a read error fails closed to false so an unclassifiable log is never falsely reaped.
 func classifyBannerNoop(st os.FileInfo, path string) bool {
@@ -163,10 +152,6 @@ func classifyBannerNoop(st os.FileInfo, path string) bool {
 		return false
 	}
 	return dispatchNoopBannerRE.Match(b)
-}
-
-func recentlyAttemptedIssues(runsDir string, cooldownMin int) map[int]bool {
-	return recentlyAttemptedIssuesAt(runsDir, cooldownMin, time.Now())
 }
 
 func recentlyAttemptedIssuesAt(runsDir string, cooldownMin int, now time.Time) map[int]bool {
@@ -218,10 +203,6 @@ type dispatchCooldownRow struct {
 	CooldownRemainingSeconds int
 	NextEligibleUnix         int64
 	Cooling                  bool
-}
-
-func cooldownIssueRows(runsDir string, cooldownMin int) []map[string]any {
-	return scanRunsSnapshot(runsDir, time.Now()).cooldownRowMaps(cooldownMin)
 }
 
 func cooldownIssueRowsAt(runsDir string, cooldownMin int, now time.Time) []dispatchCooldownRow {

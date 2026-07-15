@@ -23,8 +23,6 @@ const (
 	syncExitInternal = 4
 )
 
-func cmdSync(argv []string) { os.Exit(runSync(os.Stdout, os.Stderr, argv)) }
-
 var syncAheadAudit = defaultSyncAheadAudit
 var syncWorktree = defaultSyncWorktree
 var (

@@ -782,11 +782,11 @@ func rotateDispatchProgressIfDue(path string, maxBytes int64) error {
 		return nil
 	}
 	fi, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
 	if err != nil {
-		return err
+		// Best-effort, matching the append's original inline rotate: a stat hiccup
+		// (missing file or any transient error) skips rotation and still lets the
+		// record be written — rotation must never fail the progress append.
+		return nil
 	}
 	if fi.Size() < maxBytes {
 		return nil
@@ -805,13 +805,8 @@ func dispatchProgressAppend(logPath string, rec map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return err
 	}
-	if dispatchProgressRotateBytes > 0 {
-		if fi, err := os.Stat(logPath); err == nil && fi.Size() >= dispatchProgressRotateBytes {
-			_ = os.Remove(logPath + ".1")
-			if err := os.Rename(logPath, logPath+".1"); err != nil {
-				return err
-			}
-		}
+	if err := rotateDispatchProgressIfDue(logPath, dispatchProgressRotateBytes); err != nil {
+		return err
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
