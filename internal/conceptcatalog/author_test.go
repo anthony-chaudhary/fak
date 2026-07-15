@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -127,4 +128,140 @@ func TestApplyWritesEveryDestination(t *testing.T) {
 	if string(got) != "new" || string(got2) != "second" {
 		t.Fatalf("atomic write mismatch: %q %q", got, got2)
 	}
+}
+
+func scorecardE2EFixture(t *testing.T, gap string) (Catalog, string) {
+	t.Helper()
+	root := t.TempDir()
+	data := filepath.Join(root, DataRel)
+	if err := os.MkdirAll(data, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metaDoc := map[string]any{"schema": "fak-concept-disambiguation-scorecard/1", "glossary": "docs/glossary.md", "families": []map[string]any{{"id": "cache", "name": "Cache", "roots": []string{"cache"}, "ignore": []string{"cache"}, "min_files": 1}}}
+	mb, _ := json.MarshalIndent(metaDoc, "", "  ")
+	if err := os.WriteFile(filepath.Join(data, "_meta.json"), append(mb, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rows := good().Rows
+	for i := range rows {
+		rows[i].GlossaryAnchor = "docs/glossary.md"
+		rows[i].Verdict = "crystal"
+		rows[i].Aliases = []string{}
+		rows[i].Gaps = []string{}
+	}
+	rb, _ := json.MarshalIndent(map[string]any{"rows": rows}, "", "  ")
+	if err := os.WriteFile(filepath.Join(data, "rows-cache.json"), append(rb, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "fixture"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	prod := "package fixture\nconst CacheA=1\nconst CacheB=2\nconst " + gap + "=3\n"
+	if err := os.WriteFile(filepath.Join(root, "internal", "fixture", "fixture.go"), []byte(prod), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "glossary.md"), []byte("# Glossary\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tools"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join("..", "..", "tools", "concept_disambiguation_scorecard.py")
+	py, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), py, 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, root
+}
+
+func scorecardRun(t *testing.T, root string, args ...string) (string, error) {
+	t.Helper()
+	base := []string{filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), "--workspace", root, "--data", filepath.Join(root, DataRel)}
+	cmd := exec.Command("python", append(base, args...)...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func TestAuthoringModesCloseOneGapWithCriticalCleanAndFreshDocs(t *testing.T) {
+	t.Run("position", func(t *testing.T) {
+		c, root := scorecardE2EFixture(t, "CacheGap")
+		if out, err := scorecardRun(t, root, "--gaps"); err == nil || !strings.Contains(strings.ToLower(out), "cachegap") {
+			t.Fatalf("want one pre-authoring gap, err=%v out=%s", err, out)
+		}
+		req := PositionRequest{ID: "cache-gap", Canonical: "Cache Gap", Family: "cache", Definition: "the fixture gap cache", Distinction: "a third cache rather than cache a", Kind: "symbol", Grounding: "CacheGap", GroundingKind: "symbol", Glossary: "docs/glossary.md", DistinctFrom: []string{"cache-a"}}
+		plan, err := PlanPosition(c, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, _ := os.ReadFile(filepath.Join(c.Dir, "rows-cache-authored.json"))
+		if len(before) != 0 {
+			t.Fatal("dry-run unexpectedly wrote row")
+		}
+		if err := Apply(plan); err != nil {
+			t.Fatal(err)
+		}
+		if out, _ := scorecardRun(t, root, "--critical"); !strings.Contains(out, "no critical rows") {
+			t.Fatalf("critical not clean: %s", out)
+		}
+		if out, err := scorecardRun(t, root, "--gaps"); err != nil || strings.Contains(strings.ToLower(out), "cachegap") {
+			t.Fatalf("position did not take gap to zero: %v %s", err, out)
+		}
+		want, err := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		regen := filepath.Join(root, "regen")
+		if out, err := scorecardRun(t, root, "--markdown-dir", regen); err != nil {
+			t.Fatalf("regen: %v %s", err, out)
+		}
+		got, _ := os.ReadFile(filepath.Join(regen, "README.md"))
+		if !bytes.Equal(want, got) {
+			t.Fatal("generated README is stale")
+		}
+	})
+	t.Run("classify", func(t *testing.T) {
+		c, root := scorecardE2EFixture(t, "CacheNoise")
+		if out, err := scorecardRun(t, root, "--gaps"); err == nil || !strings.Contains(strings.ToLower(out), "cachenoise") {
+			t.Fatalf("want one pre-classification gap, err=%v out=%s", err, out)
+		}
+		plan, err := PlanClassify(c, ClassifyRequest{Family: "cache", Token: "CacheNoise", Category: "incidental", Reason: "fixture-only incidental name"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		metaBefore, _ := os.ReadFile(filepath.Join(c.Dir, "_meta.json"))
+		if bytes.Contains(metaBefore, []byte("CacheNoise")) {
+			t.Fatal("dry-run changed metadata")
+		}
+		if err := Apply(plan); err != nil {
+			t.Fatal(err)
+		}
+		if out, _ := scorecardRun(t, root, "--critical"); !strings.Contains(out, "no critical rows") {
+			t.Fatalf("critical not clean: %s", out)
+		}
+		if out, err := scorecardRun(t, root, "--gaps"); err != nil || strings.Contains(strings.ToLower(out), "cachenoise") {
+			t.Fatalf("classification did not take gap to zero: %v %s", err, out)
+		}
+		want, err := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		regen := filepath.Join(root, "regen")
+		if out, err := scorecardRun(t, root, "--markdown-dir", regen); err != nil {
+			t.Fatalf("regen: %v %s", err, out)
+		}
+		got, _ := os.ReadFile(filepath.Join(regen, "README.md"))
+		if !bytes.Equal(want, got) {
+			t.Fatal("generated README is stale")
+		}
+	})
 }

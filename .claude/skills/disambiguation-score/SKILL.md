@@ -59,19 +59,22 @@ data, only by disambiguating the real concept.
 2. **Retire disambiguation-debt worst-first** - fix the heaviest KPI by changing
    REALITY: rename a true canonical collision, write a missing definition, draw the
    `distinction` + point `distinct_from` at a real sibling id, replace a fabricated
-   grounding with a real token. Then close coverage (`--gaps`): add a row for the worst
-   family's unpositioned tokens, writing the distinction into
-   `docs/fak/concept-glossary.md` to earn a `crystal` verdict.
+   grounding with a real token. Close a real coverage gap atomically with `fak concept
+   position --id ID --canonical NAME --family FAMILY --definition TEXT --distinction
+   TEXT --kind KIND --grounding TOKEN --grounding-kind KIND --glossary
+   docs/fak/concept-glossary.md --distinct-from SIBLING_ID`; classify a genuine
+   incidental/false-positive discovery with `fak concept classify --family FAMILY
+   --token TOKEN --category CATEGORY --reason TEXT`. Preview either mutation with
+   `--dry-run --json`. Never hand-edit a row, family classification, glossary anchor,
+   and generated README as separate operations.
 3. **Weigh the SOFT signals** - fix the cheap real ones (kind/grounding, a dangling
    parent); do not chase them to zero.
 4. **Re-measure + prove** - `--compare` prints the debt delta; the positioned rows must
    stay clean (0 clarity-debt) while coverage rises.
-5. **Commit only the scorecard lane, by explicit path** -
-   `git commit -s -- tools/concept_disambiguation_scorecard.py
-   tools/concept_disambiguation_scorecard_test.py tools/concept_disambiguation_scorecard.data/
-   docs/fak/concept-glossary.md docs/concept-disambiguation-scorecard/
-   tools/scorecard_control_pane.py tools/scorecard_baseline.json`. Never `git add -A`.
-   End the subject with the `(fak <leaf>)` trailer.
+5. **Commit exactly the files reported by the authoring verb** - verify with `--critical`
+   and regenerate/check the scorecard baseline when the measured metric changes. Use
+   `fak commit --preview` followed by `fak commit --path` for each reported path; never
+   `git add -A`. End the subject with the `(fak <leaf>)` trailer.
 
 ## The anti-gaming rule (specific to this surface)
 

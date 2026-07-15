@@ -52,18 +52,21 @@ The work splits three ways, worst-first:
    universe counts concepts, not grammar. Adding an inflection to `ignore` is honest precision,
    NOT gaming - it removes a non-concept from the universe; dropping a real concept's root to
    hide it IS gaming.
-3. **Add grounded + anchored rows** - for each distinct concept: a real `grounding` token
-   (verify it appears in the production corpus, STRICT identity), a `definition`, a
-   `distinction`, a `distinct_from` that resolves to a real catalog id. To earn a `crystal`
-   verdict, write the distinction into `docs/fak/concept-glossary.md` and point
-   `glossary_anchor` at it; otherwise leave the anchor empty for a `defined` verdict.
+3. **Position or classify atomically** - for each distinct concept, invoke `fak concept
+   position --id ID --canonical NAME --family FAMILY --definition TEXT --distinction TEXT
+   --kind KIND --grounding TOKEN --grounding-kind KIND --glossary
+   docs/fak/concept-glossary.md --distinct-from SIBLING_ID`. The verb verifies STRICT
+   production-corpus identity, validates sibling IDs, appends the row without broad JSON
+   churn, writes the glossary anchor, and regenerates the snapshot as one mutation. For a
+   genuine non-concept use `fak concept classify --family FAMILY --token TOKEN --category
+   incidental|false-positive|test-only|build-tag-only --reason TEXT`; it refuses to hide a
+   positioned grounding. Run either with `--dry-run --json` first and use its exact file list.
 4. **Re-measure + prove** - `--compare baseline.json` shows coverage up and clarity-debt
    still 0; regenerate the doc folder.
-5. **Re-pin + commit the lane by explicit path** - update `tools/scorecard_baseline.json`
-   (the `disambiguation` metric drops as coverage rises), then
-   `git commit -s -- tools/concept_disambiguation_scorecard.data/ docs/fak/concept-glossary.md
-   docs/concept-disambiguation-scorecard/ tools/scorecard_baseline.json`. Never `git add -A`.
-   End the subject with `(fak concept-disambiguation)`.
+5. **Re-pin + commit exactly the planned files** - update
+   `tools/scorecard_baseline.json` when the `disambiguation` metric changes, then use
+   `fak commit --preview` and `fak commit --path` for every path emitted by the authoring
+   verb. Never `git add -A`. End the subject with `(fak concept-disambiguation)`.
 
 ## TICKET mode (turn the backlog into tracked work)
 

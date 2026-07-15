@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -73,7 +74,7 @@ func PlanPosition(c Catalog, req PositionRequest) (Plan, error) {
 			return Plan{}, fmt.Errorf("distinct_from %q is not an existing row ID", ref)
 		}
 	}
-	row := Row{ID: req.ID, Canonical: req.Canonical, Family: req.Family, Kind: req.Kind, Definition: req.Definition, Distinction: req.Distinction, DistinctFrom: req.DistinctFrom, Aliases: req.Aliases, Grounding: req.Grounding, GroundingKind: req.GroundingKind, GlossaryAnchor: req.Glossary, Verdict: "crystal", Gaps: []string{}}
+	row := Row{ID: req.ID, Canonical: req.Canonical, Family: req.Family, Kind: req.Kind, Definition: req.Definition, Distinction: req.Distinction, DistinctFrom: req.DistinctFrom, Aliases: append([]string{}, req.Aliases...), Grounding: req.Grounding, GroundingKind: req.GroundingKind, GlossaryAnchor: req.Glossary, Verdict: "crystal", Gaps: []string{}}
 	rowFile := req.RowFile
 	if rowFile == "" {
 		rowFile = "rows-" + norm(req.Family) + "-authored.json"
@@ -179,6 +180,7 @@ func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
 	for _, ch := range plan.Changes {
 		proposed[filepath.Clean(ch.Path)] = ch.Content
 	}
+	written := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -188,25 +190,43 @@ func AddGeneratedArtifacts(c Catalog, plan Plan) (Plan, error) {
 		if er != nil {
 			return Plan{}, er
 		}
-		if v, ok := proposed[filepath.Clean(src)]; ok {
+		clean := filepath.Clean(src)
+		if v, ok := proposed[clean]; ok {
 			b = v
 		}
+		written[clean] = true
 		if er = os.WriteFile(filepath.Join(shadow, e.Name()), b, 0600); er != nil {
 			return Plan{}, er
+		}
+	}
+	// A position commonly creates rows-<family>-authored.json. Materialize
+	// planned new data files as well as replacements before generation.
+	for src, b := range proposed {
+		if written[src] || filepath.Dir(src) != filepath.Clean(c.Dir) {
+			continue
+		}
+		if writeErr := os.WriteFile(filepath.Join(shadow, filepath.Base(src)), b, 0600); writeErr != nil {
+			return Plan{}, writeErr
 		}
 	}
 	outDir := filepath.Join(shadow, "generated")
 	cmd := exec.Command("python", script, "--workspace", root, "--data", shadow, "--markdown-dir", outDir)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
-	if b, er := cmd.CombinedOutput(); er != nil {
-		return Plan{}, fmt.Errorf("canonical generation failed: %v: %s", er, strings.TrimSpace(string(b)))
+	b, er := cmd.CombinedOutput()
+	if er != nil {
+		// The scorecard exits 1 for an honestly generated ACTION snapshot (for
+		// example, unrelated families still carry coverage debt). Exit 2 and
+		// missing output are generator failures; exit 1 is valid content.
+		var exitErr *exec.ExitError
+		if !errors.As(er, &exitErr) || exitErr.ExitCode() != 1 {
+			return Plan{}, fmt.Errorf("canonical generation failed: %v: %s", er, strings.TrimSpace(string(b)))
+		}
 	}
 	readme, err := os.ReadFile(filepath.Join(outDir, "README.md"))
 	if err != nil {
 		return Plan{}, err
 	}
-	readme = append(bytes.TrimRight(readme, "\r\n"), '\n')
 	dst := filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md")
 	plan.Changes = append(plan.Changes, Change{Path: dst, Content: readme})
 	plan.Files = append(plan.Files, filepath.ToSlash(dst))
