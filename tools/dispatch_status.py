@@ -1125,39 +1125,71 @@ def read_leaseref_records_and_sessions(root: Path) -> tuple[list[dict[str, Any]]
     if proc.returncode != 0:
         return [], {}, (proc.stderr or proc.stdout or "git for-each-ref failed").strip()[-500:]
 
+    refs = [line.strip() for line in (proc.stdout or "").splitlines()
+            if line.strip().startswith(_LEASEREF_PREFIX)]
+
     records: list[dict[str, Any]] = []
     sessions: dict[str, dict[str, Any]] = {}
     skipped = 0
-    for ref in (proc.stdout or "").splitlines():
-        ref = ref.strip()
-        if not ref.startswith(_LEASEREF_PREFIX):
-            continue
-        name = ref[len(_LEASEREF_PREFIX):]
+
+    if refs:
+        # Resolve every lease ref's blob in ONE `git cat-file --batch` process
+        # rather than one `git cat-file blob <ref>` spawn per ref. A busy host
+        # accumulates thousands of refs/fak/locks/* refs (~8k observed); the
+        # per-ref-spawn form never returns inside the FleetDispatchStatusDoc
+        # 10-min task limit, so --fast broke its "pure-local, sub-5s" contract
+        # and the status doc silently went stale. The batch stream emits one
+        # record per input ref, in order, so we zip results back positionally.
         try:
-            blob = subprocess.run(
-                ["git", "cat-file", "blob", ref],
-                cwd=root, capture_output=True, text=True, timeout=10,
+            batch = subprocess.run(
+                ["git", "cat-file", "--batch"],
+                cwd=root, input="\n".join(refs).encode(),
+                capture_output=True, timeout=60,
                 creationflags=_win_creationflags())
-        except (OSError, subprocess.TimeoutExpired):
-            skipped += 1
-            continue
-        if blob.returncode != 0:
-            skipped += 1
-            continue
-        try:
-            rec = json.loads(blob.stdout or "{}")
-        except ValueError:
-            skipped += 1
-            continue
-        if isinstance(rec, dict):
-            if name.startswith("session-"):
-                rec.setdefault("id", name[len("session-"):])
-                sessions[str(rec.get("id") or name[len("session-"):])] = rec
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return [], {}, str(exc)
+        data = batch.stdout or b""
+        i, n = 0, len(data)
+        for ref in refs:
+            name = ref[len(_LEASEREF_PREFIX):]
+            if i >= n:
+                skipped += 1
+                continue
+            nl = data.find(b"\n", i)
+            if nl < 0:
+                skipped += 1
+                break
+            header = data[i:nl].decode("utf-8", "replace").split(" ")
+            i = nl + 1
+            if len(header) != 3:
+                # "<ref> missing" / "<ref> ambiguous" — no payload follows.
+                skipped += 1
+                continue
+            try:
+                size = int(header[2])
+            except ValueError:
+                skipped += 1
+                continue
+            content = data[i:i + size]
+            i += size + 1  # always consume payload + trailing newline
+            if header[1] != "blob":
+                skipped += 1
+                continue
+            try:
+                rec = json.loads(content.decode("utf-8", "replace") or "{}")
+            except ValueError:
+                skipped += 1
+                continue
+            if isinstance(rec, dict):
+                if name.startswith("session-"):
+                    rec.setdefault("id", name[len("session-"):])
+                    sessions[str(rec.get("id") or name[len("session-"):])] = rec
+                else:
+                    rec.setdefault("id", name)
+                    records.append(rec)
             else:
-                rec.setdefault("id", name)
-                records.append(rec)
-        else:
-            skipped += 1
+                skipped += 1
+
     if skipped:
         for rec in records:
             rec.setdefault("_skipped_records", skipped)
