@@ -15,9 +15,10 @@ func refRunLen(key, toks []int) int {
 	return j
 }
 
-// TestCommonRunLenMatchesReference is the no-behavior-change witness for #3891:
-// the gallop-then-binary-search commonRunLen must return the SAME matched length
-// as the token-by-token reference on every input, so walk is byte-identical.
+// TestCommonRunLenMatchesReference is the correctness witness for #3891: the
+// gallop-then-binary-search gallopRunLen returns the SAME matched length as the
+// token-by-token reference on every input. It proves the borrow was RETIRED on
+// perf grounds (BenchmarkCommonRunLen), not because it was wrong.
 func TestCommonRunLenMatchesReference(t *testing.T) {
 	// Exhaustive small cases over a tiny alphabet so many prefixes collide and
 	// diverge at every possible position (0..len), plus length mismatches.
@@ -34,8 +35,8 @@ func TestCommonRunLenMatchesReference(t *testing.T) {
 					for b := 0; b < tokLen; b++ {
 						toks[b] = (tmask >> b) & 1
 					}
-					if got, want := commonRunLen(key, toks), refRunLen(key, toks); got != want {
-						t.Fatalf("commonRunLen(%v,%v)=%d, ref=%d", key, toks, got, want)
+					if got, want := gallopRunLen(key, toks), refRunLen(key, toks); got != want {
+						t.Fatalf("gallopRunLen(%v,%v)=%d, ref=%d", key, toks, got, want)
 					}
 				}
 			}
@@ -61,8 +62,8 @@ func TestCommonRunLenMatchesReference(t *testing.T) {
 				toks[i] = rng.Intn(alpha)
 			}
 		}
-		if got, want := commonRunLen(key, toks), refRunLen(key, toks); got != want {
-			t.Fatalf("iter %d: commonRunLen=%d ref=%d\nkey=%v\ntoks=%v", iter, got, want, key, toks)
+		if got, want := gallopRunLen(key, toks), refRunLen(key, toks); got != want {
+			t.Fatalf("iter %d: gallopRunLen=%d ref=%d\nkey=%v\ntoks=%v", iter, got, want, key, toks)
 		}
 	}
 
@@ -73,10 +74,10 @@ func TestCommonRunLenMatchesReference(t *testing.T) {
 		long[i] = i % 131
 	}
 	cp := append([]int(nil), long...)
-	if got := commonRunLen(long, cp); got != len(long) {
-		t.Fatalf("full-run commonRunLen=%d, want %d", got, len(long))
+	if got := gallopRunLen(long, cp); got != len(long) {
+		t.Fatalf("full-run gallopRunLen=%d, want %d", got, len(long))
 	}
-	if got := commonRunLen(long, cp[:1000]); got != 1000 {
-		t.Fatalf("truncated-run commonRunLen=%d, want 1000", got)
+	if got := gallopRunLen(long, cp[:1000]); got != 1000 {
+		t.Fatalf("truncated-run gallopRunLen=%d, want 1000", got)
 	}
 }
