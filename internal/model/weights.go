@@ -202,6 +202,9 @@ type Model struct {
 	// experts. nil unless such experts loaded; the f32/Q8/Q4_K paths never read it.
 	kqw map[string]*kQuantTensor
 
+	// q2w holds the optional resident ternary Q2_0 copy of matmul weights, fed the raw
+	// GGUF group-128 blocks straight from the loader and consumed by q2MatRows.
+	q2w map[string]*q2Tensor
 	// awqw holds the optional resident AWQ (Activation-aware Weight Quantization) 4-bit
 	// copy of the matmul weights, populated by LoadAWQ straight from an AutoAWQ
 	// safetensors export and consumed only by the opt-in AWQ path (awq.go). nil unless
