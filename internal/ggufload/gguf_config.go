@@ -185,8 +185,9 @@ func (f *File) Config() (model.Config, error) {
 	if ropeDim > 0 && ropeDim < headDim {
 		cfg.PartialRotaryFactor = float64(ropeDim) / float64(headDim)
 	}
-	if arch == "qwen35" || arch == "qwen35moe" {
-		// The qwen35 family (Qwen3.5/3.6) can ship trailing NextN/MTP draft blocks that
+	if canonArch := canonicalGGUFArch(arch); canonArch == "qwen35" || canonArch == "qwen35moe" {
+		// The qwen35 family (Qwen3.5/3.6, incl. the Bonsai-27B ternary repack normalized
+		// onto "qwen35" by canonicalGGUFArch) can ship trailing NextN/MTP draft blocks that
 		// block_count INCLUDES (witnessed: Qwen3.6-27B Q4_K_M declares block_count=65 +
 		// nextn_predict_layers=1, with only blk.64.nextn.* glue tensors at the tail). The
 		// text forward never runs them and the loader drops their tensors, so exclude
@@ -257,12 +258,23 @@ func (f *File) Config() (model.Config, error) {
 // glm_moe_dsa — while its MLA+MoE layout reuses the glm forward via archUsesMLAMoELayout /
 // Config.usesMLAMoELayout. Sibling community spellings (deepseek-v2/-v3, deepseek3) normalize
 // to "deepseek2"; the dense DeepSeek-V1 "deepseek" (no MLA) is deliberately NOT normalized.
+//
+// prism-ml Ternary-Bonsai-27B (epic #4867) is Qwen3.6-27B with the architecture UNCHANGED —
+// the same Gated-DeltaNet/SSM hybrid the qwen35 family drives (arch_support.go). Only its
+// weights are re-quantized to ternary (Q2_0). The mainline Qwen3.6-27B GGUF already declares
+// general.architecture = "qwen35" (gguf_qwen35_nextn_test.go), but the PrismML repack may
+// brand its own arch string; normalize the documented Bonsai/Qwen3.6 spellings onto "qwen35"
+// so the hybrid config block (LayerTypes/ssm axes) and the recognized-hybrid forward path
+// fire instead of the #934 empty-layer_types refusal. The metadata-key PREFIX stays the file's
+// own spelling (only ModelType and the hybrid gate normalize), exactly as for glm-dsa above.
 func canonicalGGUFArch(arch string) string {
 	switch arch {
 	case "glm-dsa":
 		return "glm_moe_dsa"
 	case "deepseek-v2", "deepseek-v3", "deepseek3", "deepseekv2", "deepseekv3":
 		return "deepseek2"
+	case "bonsai", "ternary-bonsai", "qwen3.6", "qwen36":
+		return "qwen35"
 	}
 	return arch
 }
