@@ -59,4 +59,3 @@ func Markdown(r Report) string {
 	fmt.Fprintln(&b, "\nExposure is a declared-signal heuristic, not an empirical exploit probability. Higher is hardened first; missing inventory sources fail the grade closed.")
 	return b.String()
 }
-
