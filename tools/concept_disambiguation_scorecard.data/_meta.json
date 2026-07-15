@@ -82,9 +82,9 @@
       "id": "gateway-engine",
       "name": "Gateway / engine family",
       "roots": ["gateway", "engine", "vdso", "kernel"],
-      "ignore": ["engineering", "engineer", "gateways", "kernels", "kernel32"],
+      "ignore": ["engineering", "engineer", "engineered", "engineers", "gateways", "kernels", "kernel32", "kernelwiki"],
       "min_files": 3,
-      "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass)."
+      "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass). Ignored false friends: engineered/engineers (the English adjective/verb in prose comments, not the engine dispatch seam), kernelwiki (the external mit-han-lab/KernelWiki project name referenced in study notes, where 'kernel' means GPU compute kernels, not the fak coordinator)."
     },
     {
       "id": "policy-capability",
