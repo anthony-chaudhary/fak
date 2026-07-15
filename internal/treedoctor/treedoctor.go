@@ -118,6 +118,7 @@ type WorktreeState struct {
 	Merged   bool   `json:"merged"`              // HEAD is an ancestor of Trunk (commits already on the trunk)
 	Live     bool   `json:"live"`                // touched within LiveWindow — an active session, keep
 	DirtyN   int    `json:"dirty_n"`             // count of uncommitted entries (informational)
+	Archive  bool   `json:"archive,omitempty"`   // dirty worker content must be archived before removal
 	Prunable bool   `json:"prunable"`            // safe to remove: (Merged || IsWorker) && !Live && !IsMain
 	Keep     string `json:"keep,omitempty"`
 }
@@ -243,6 +244,13 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 		if w.IsWorker {
 			kind = "orphan worker worktree"
 		}
+		if w.Archive {
+			// This lightweight Go sweep has no archive writer. Preserve dirty crashed-
+			// worker output and direct automation to the archive-capable doctor instead
+			// of silently destroying it with `git worktree remove --force`.
+			actions = append(actions, "archive required before pruning "+kind+" "+w.Path)
+			continue
+		}
 		if apply {
 			if _, _, err := run(ctx, opts.RepoRoot, "worktree", "remove", "--force", w.Path); err == nil {
 				actions = append(actions, "pruned "+kind+" "+w.Path)
@@ -335,13 +343,10 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 			// worktree is kept exactly like any other live tree.
 			s.Keep = "live (touched within window)"
 		case s.IsWorker:
-			// A fak-worker-wt-* worktree is throwaway editing space: its only durable
-			// output already landed on the trunk via land_worktree_diff. An orphan
-			// (worker crashed, or the host died mid-wave) leaks its tree + in-worktree
-			// GOCACHE with no scheduled reclaimer — and if the worker committed
-			// in-worktree before dying its HEAD is NOT an ancestor of the trunk, so the
-			// merged-only rule below would keep it forever. Reap it regardless of merge
-			// status; isWorkerWorktree is the load-bearing guardrail.
+			// A fak-worker-wt-* worktree is throwaway editing space, but a crashed
+			// worker can leave its only useful diff here. Mark dirty trees for an
+			// archive-before-remove action; the CLI refuses to remove them otherwise.
+			s.Archive = s.DirtyN > 0
 			s.Prunable = true
 		case !s.Merged:
 			s.Keep = "not merged into " + trunk

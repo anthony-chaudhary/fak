@@ -95,6 +95,39 @@ func TestDiagnoseClassifiesWorktrees(t *testing.T) {
 	}
 }
 
+func TestSweepPreservesDirtyOrphanWorkerUntilArchived(t *testing.T) {
+	main := t.TempDir()
+	now := time.Now()
+	worker := filepath.Join(t.TempDir(), "fak-worker-wt-tools-dirty")
+	file := filepath.Join(worker, "unfinished.go")
+	if err := os.MkdirAll(worker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("package unfinished\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeAt(t, file, now.Add(-time.Hour))
+	git := &fakeGit{
+		listOut:  listPorcelain([2]string{main, "aaa"}, [2]string{worker, "bbb"}),
+		ancestor: map[string]bool{worker: false},
+		dirty:    map[string]string{worker: "?? unfinished.go\n"},
+	}
+
+	rep, actions := Sweep(context.Background(), git.run, Options{RepoRoot: main, Now: now}, true)
+
+	if len(rep.Worktrees) != 2 || !rep.Worktrees[1].Archive {
+		t.Fatalf("dirty worker must require archive: %+v", rep.Worktrees)
+	}
+	if got := strings.Join(actions, "\n"); !strings.Contains(got, "archive required before pruning") {
+		t.Fatalf("missing archive-required action: %v", actions)
+	}
+	for _, call := range git.calls {
+		if len(call) >= 3 && call[1] == "worktree" && call[2] == "remove" {
+			t.Fatalf("dirty worker was removed without archive: %v", call)
+		}
+	}
+}
+
 // TestSweepWorkerWorktree is the #3179 witness: an orphaned fak-worker-wt-* worktree
 // (worker crashed / host died mid-wave, so its in-worktree commit left HEAD OFF the trunk)
 // is reaped by the sweep even though it is NOT merged, while a live marker worktree and a

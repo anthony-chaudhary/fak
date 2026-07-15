@@ -75,7 +75,14 @@ New-Item -ItemType Directory -Force $LogDir | Out-Null
 # Branch deletion (git branch -d) is opt-in via -PruneBranches so a fresh install never
 # purges merged local branches by surprise.
 $dargs = @("`"$Doctor`"", '--repo', "`"$Repo`"", '--fetch')
-if (-not $ReportOnly) { $dargs += @('--prune', '--sweep-disposable') }
+if (-not $ReportOnly) {
+  $dargs += @('--prune', '--sweep-disposable')
+  # The durable worker-worktree root sits outside TEMP. Include it explicitly so
+  # crashed headless workers are archived and reaped by the scheduled janitor;
+  # --fresh-minutes still protects live sessions.
+  $workerRoot = Join-Path $env:LOCALAPPDATA 'Fleet\worker-worktrees'
+  $dargs += @('--disposable-root', "`"$workerRoot`"")
+}
 if ($PruneBranches -and -not $ReportOnly) { $dargs += '--prune-branches' }
 foreach ($b in $AllowBranch) { if ($b) { $dargs += @('--allow-branch', $b) } }
 $dargStr = $dargs -join ' '
