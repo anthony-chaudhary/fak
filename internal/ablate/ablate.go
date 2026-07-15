@@ -87,60 +87,16 @@ const (
 	FeatureUncachedTrim   = "uncached_trim"
 )
 
-// envFeatureVars is the CLOSED token -> FAK_* mapping for the env-gated features.
-// BuildSweep consults it to turn a sweep token into the env var a child arm carries,
-// and Descriptor reads it back so a report names the knob honestly. A new env feature
-// is one row here (and, if it wants its own assertion, a counter the child surfaces).
-var envFeatureVars = map[string]string{
-	FeatureNormgate:    "FAK_NORMGATE",
-	FeatureRadix:       "FAK_INKERNEL_RADIX",
-	FeatureCompressor:  "FAK_COMPRESSOR",
-	FeatureIFC:         "FAK_IFC",
-	FeatureGitgate:     "FAK_GITGATE",
-	FeatureCtxplanSeam: "FAK_CTXPLAN_SEAM",
-	FeatureWireScreen:  "FAK_WIRE_SCREEN",
-	FeatureWireRedact:  "FAK_WIRE_REDACT",
-	FeatureToonWire:    "FAK_TOON_WIRE",
-
-	FeatureBreakpointPlan: "FAK_ABLATE_BP_PLAN",
-	FeatureTTL1H:          "FAK_ABLATE_TTL_1H",
-	FeaturePrefixGuard:    "FAK_ABLATE_PREFIX_GUARD",
-	FeatureUncachedTrim:   "FAK_ABLATE_UNCACHED_TRIM",
-}
-
-// KnownFeatures is the CLOSED set of features the harness can sweep. FeatureVDSO is the
-// runtime-settable knob rung 1 flips in-process; the rest are env-gated (read at process
-// start) and sweepable only through the rung-2 subprocess re-exec path. A token not in
-// this set fails loud in BuildSweep, so `--sweep typo` never silently measures nothing.
-var KnownFeatures = func() []string {
-	out := []string{FeatureVDSO}
-	for f := range envFeatureVars {
-		out = append(out, f)
-	}
-	sort.Strings(out)
-	return out
-}()
-
-// envFeature reports whether f is one of the env-gated (process-start) features —
-// the ones that need the subprocess re-exec path, not a runtime setter.
+// envFeature reports whether a registered concept uses the subprocess env rung.
 func envFeature(f string) bool {
-	_, ok := envFeatureVars[f]
-	return ok
+	c, ok := registeredConcept(f)
+	return ok && c.EnvVar != ""
 }
 
-// EnvGated is the exported form of envFeature: it reports whether a sweep token names an
-// env-gated (process-start) feature. A CLI caller consults it to decide whether a sweep
-// must take the rung-2 subprocess path (any env-gated feature present) or can flip the one
-// runtime knob in-process (a vdso-only sweep). Kept a thin surface so the closed
-// envFeatureVars map stays the single source of truth.
-func EnvGated(feature string) bool { return envFeature(feature) }
-
-// knownFeature reports whether f is a feature the harness can sweep (runtime or env).
-func knownFeature(f string) bool {
-	if f == FeatureVDSO {
-		return true
-	}
-	return envFeature(f)
+// runtimeFeature reports whether a registered concept uses an in-process setter.
+func runtimeFeature(f string) bool {
+	c, ok := registeredConcept(f)
+	return ok && c.Runtime != nil
 }
 
 // FeatureConfig is the set of kernel knobs ONE arm runs under, plus the arm's name.
@@ -151,9 +107,10 @@ func knownFeature(f string) bool {
 // honor them (they are read at process start), so it ignores them — they only bite
 // across the subprocess boundary. Descriptor reports the union it actually applied.
 type FeatureConfig struct {
-	Name        string            // the arm id (unique within a sweep)
-	VDSO        bool              // kernel.SetVDSO — the vDSO fast path on/off
-	EnvFeatures map[string]string `json:"env_features,omitempty"` // sweep-token -> on|off, env-gated
+	Name            string            // the arm id (unique within a sweep)
+	VDSO            bool              // kernel.SetVDSO — the vDSO fast path on/off
+	EnvFeatures     map[string]string `json:"env_features,omitempty"`     // sweep-token -> on|off, env-gated
+	RuntimeFeatures map[string]string `json:"runtime_features,omitempty"` // sweep-token -> on|off, in-process
 }
 
 // apply flips feature f on this config. Unknown features are rejected by the caller
@@ -161,8 +118,14 @@ type FeatureConfig struct {
 // lands on its field; an env-gated feature lands in EnvFeatures, where the subprocess
 // runner reads it to build the child env (the in-process runner cannot honor it).
 func (c *FeatureConfig) apply(f string, on bool) {
-	if f == FeatureVDSO {
-		c.VDSO = on
+	if runtimeFeature(f) {
+		if c.RuntimeFeatures == nil {
+			c.RuntimeFeatures = map[string]string{}
+		}
+		c.RuntimeFeatures[f] = onOff(on)
+		if f == FeatureVDSO {
+			c.VDSO = on
+		}
 		return
 	}
 	if envFeature(f) {
@@ -177,7 +140,15 @@ func (c *FeatureConfig) apply(f string, on bool) {
 // ONLY the knobs this config actually carries — the vDSO field plus every env-gated
 // toggle in EnvFeatures — so the artifact never overclaims an ablation it did not set.
 func (c FeatureConfig) Descriptor() map[string]string {
-	d := map[string]string{FeatureVDSO: onOff(c.VDSO)}
+	d := map[string]string{}
+	for f, v := range c.RuntimeFeatures {
+		d[f] = v
+	}
+	if _, ok := d[FeatureVDSO]; !ok {
+		if _, registered := registeredConcept(FeatureVDSO); registered {
+			d[FeatureVDSO] = onOff(c.VDSO)
+		}
+	}
 	for f, v := range c.EnvFeatures {
 		d[f] = v
 	}
@@ -200,7 +171,10 @@ func (c FeatureConfig) childEnv() []string {
 		if c.EnvFeatures[f] == "on" {
 			v = "1"
 		}
-		out = append(out, envFeatureVars[f]+"="+v)
+		concept, ok := registeredConcept(f)
+		if ok && concept.EnvVar != "" {
+			out = append(out, concept.EnvVar+"="+v)
+		}
 	}
 	return out
 }
@@ -220,14 +194,19 @@ func onOff(b bool) string {
 // variance) populate in the live + cross-agent rungs; this rung leaves them on Arm's
 // counters and the embedded metrics.
 type AblationRun struct {
-	ArmID            string                   `json:"arm_id"`
-	Features         map[string]string        `json:"features"`
-	WorkloadHash     string                   `json:"workload_hash"`
-	WallSeconds      float64                  `json:"wall_seconds"`
-	Arm              metrics.Arm              `json:"arm"`
-	MechanismSavings gateway.MechanismSavings `json:"mechanism_savings"`
-	PrefixIntegrity  PrefixIntegrity          `json:"prefix_integrity"`
-	CacheEffects     []CacheEffect            `json:"cache_effects,omitempty"`
+	ArmID                  string                   `json:"arm_id"`
+	Features               map[string]string        `json:"features"`
+	WorkloadHash           string                   `json:"workload_hash"`
+	WallSeconds            float64                  `json:"wall_seconds"`
+	Arm                    metrics.Arm              `json:"arm"`
+	MechanismSavings       gateway.MechanismSavings `json:"mechanism_savings"`
+	PrefixIntegrity        PrefixIntegrity          `json:"prefix_integrity"`
+	CacheEffects           []CacheEffect            `json:"cache_effects,omitempty"`
+	TokenDelta             int64                    `json:"token_delta"`
+	ProviderTokenDelta     float64                  `json:"provider_token_delta"`
+	FakTokenDelta          float64                  `json:"fak_token_delta"`
+	Correctness            GateResult               `json:"correctness"`
+	ChildAOwnServeEstimate *float64                 `json:"child_a_own_serve_dollars,omitempty"`
 }
 
 // PrefixIntegrity is the per-arm cache-burst witness for wire-side cache levers. The
@@ -312,6 +291,34 @@ func (r *Report) ArmByID(id string) *AblationRun {
 // from a fixed pair to a slice): it refuses the report unless every arm ran the trace
 // the report binds. A mismatch means an arm replayed different work, so the deltas
 // would not be apples-to-apples — fail closed, never a best-effort partial.
+func (r *Report) annotateConceptRows() {
+	base := r.ArmByID(r.Baseline)
+	for i := range r.Runs {
+		run := &r.Runs[i]
+		if base != nil {
+			run.TokenDelta = (run.Arm.InTokens + run.Arm.OutTokens) - (base.Arm.InTokens + base.Arm.OutTokens)
+		}
+		run.ProviderTokenDelta = run.ProviderTokenEquiv()
+		run.FakTokenDelta = run.FakTokenEquiv()
+		run.Correctness = GateResult{Verdict: "not-applicable"}
+		for token, value := range run.Features {
+			if value != "on" {
+				continue
+			}
+			concept, ok := registeredConcept(token)
+			if !ok {
+				continue
+			}
+			if concept.Correctness != nil {
+				run.Correctness = concept.Correctness()
+			}
+			if concept.ChildAOwnServeEstimate != nil {
+				run.ChildAOwnServeEstimate = concept.ChildAOwnServeEstimate()
+			}
+		}
+	}
+}
+
 func (r *Report) Validate() error {
 	if len(r.Runs) == 0 {
 		return errors.New("ablate: report has no arms")
@@ -386,7 +393,7 @@ func BuildSweep(features []string) ([]FeatureConfig, error) {
 		}
 		if !knownFeature(f) {
 			return nil, fmt.Errorf("ablate: unknown runtime feature %q (this rung can sweep: %s; env-gated features are a subprocess rung)",
-				f, strings.Join(KnownFeatures, ", "))
+				f, strings.Join(KnownFeatures(), ", "))
 		}
 		if !seen[f] {
 			seen[f] = true
@@ -394,7 +401,7 @@ func BuildSweep(features []string) ([]FeatureConfig, error) {
 		}
 	}
 	if len(feats) == 0 {
-		return nil, errors.New("ablate: no features to sweep (try --sweep " + strings.Join(KnownFeatures, ",") + ")")
+		return nil, errors.New("ablate: no features to sweep (try --sweep " + strings.Join(KnownFeatures(), ",") + ")")
 	}
 
 	// allOff explicitly pins every swept feature OFF — for env-gated features that
@@ -485,7 +492,24 @@ func featuresInConfigs(configs []FeatureConfig) []string {
 // the resulting metrics.Arm into an AblationRun. The vDSO knob is applied via
 // bench.RunArm (kernel.SetVDSO); when a second runtime knob lands, this is where the
 // per-arm kernel construction moves off RunArm to apply the wider config.
+func applyRuntimeConcepts(c FeatureConfig) func() {
+	for token, value := range c.RuntimeFeatures {
+		if concept, ok := registeredConcept(token); ok && concept.Runtime != nil {
+			concept.Runtime(value == "on")
+		}
+	}
+	return func() {
+		for token := range c.RuntimeFeatures {
+			if concept, ok := registeredConcept(token); ok && concept.Runtime != nil {
+				concept.Runtime(false)
+			}
+		}
+	}
+}
+
 func runArm(ctx context.Context, t *bench.Trace, engineID string, c FeatureConfig) (AblationRun, error) {
+	resetRuntime := applyRuntimeConcepts(c)
+	defer resetRuntime()
 	t0 := time.Now()
 	arm, err := bench.RunArm(ctx, t, engineID, c.VDSO, c.Name)
 	if err != nil {
@@ -745,6 +769,7 @@ func Sweep(ctx context.Context, t *bench.Trace, engineID, engineModel string, co
 		}
 		rep.Runs = append(rep.Runs, run)
 	}
+	rep.annotateConceptRows()
 	if err := rep.Validate(); err != nil {
 		return nil, err
 	}

@@ -2497,7 +2497,7 @@ func cacheAblationFeatures() []string {
 		"vdso":          true,
 	}
 	var out []string
-	for _, feature := range ablate.KnownFeatures {
+	for _, feature := range ablate.KnownFeatures() {
 		if cacheFeatures[feature] {
 			out = append(out, feature)
 		}

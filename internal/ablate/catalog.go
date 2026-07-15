@@ -136,8 +136,10 @@ func FeatureCatalog() []FeatureCard {
 	for _, c := range featureCards {
 		// Seed the EnvVar from the closed map so the card and the actual child env can never
 		// disagree (init already asserts equality; this keeps the exported view canonical).
-		c.EnvVar = envFeatureVars[c.Token]
-		c.RuntimeSettable = c.Token == FeatureVDSO
+		if concept, ok := registeredConcept(c.Token); ok {
+			c.EnvVar = concept.EnvVar
+			c.RuntimeSettable = concept.Runtime != nil
+		}
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Token < out[j].Token })

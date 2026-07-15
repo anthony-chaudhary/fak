@@ -66,7 +66,7 @@ func runTUIAblate(stdout, stderr io.Writer, argv []string) int {
 	report := fs.String("report", "", "render a saved AblationReport JSON (a `fak ablate --out` artifact) instead of running a sweep")
 	suite := fs.String("suite", "tau2-smoke", "trace suite for the in-process sweep (when --report is not given)")
 	tracePath := fs.String("trace", "", "explicit trace path for the sweep (overrides --suite)")
-	sweep := fs.String("sweep", "vdso", "comma list of features to sweep (known: "+strings.Join(ablate.KnownFeatures, ",")+"); env-gated arms re-exec, so keep the interactive default light")
+	sweep := fs.String("sweep", "vdso", "comma list of features to sweep (known: "+strings.Join(ablate.KnownFeatures(), ",")+"); env-gated arms re-exec, so keep the interactive default light")
 	baseline := fs.String("baseline", "all-off", "arm id used as the delta reference")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	colorMode := fs.String("color", "auto", "colorize human output: auto, always, or never (NO_COLOR disables color)")
@@ -146,7 +146,7 @@ func loadAblateReport(path string) (*ablate.Report, error) {
 // arms so the caller can surface each subprocess hole rather than silently gapping.
 func sweepAblate(features []string, tracePath, suite, baseline string) (*ablate.Report, []ablate.DroppedArm, error) {
 	if len(features) == 0 {
-		return nil, nil, errors.New("no features to sweep (try --sweep " + strings.Join(ablate.KnownFeatures, ",") + ")")
+		return nil, nil, errors.New("no features to sweep (try --sweep " + strings.Join(ablate.KnownFeatures(), ",") + ")")
 	}
 	configs, err := ablate.BuildSweep(features)
 	if err != nil {

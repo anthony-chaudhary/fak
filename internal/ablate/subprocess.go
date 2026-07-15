@@ -161,6 +161,7 @@ func SweepViaSubprocess(ctx context.Context, bin string, t *bench.Trace, engineI
 	if baseline != "" && rep.ArmByID(baseline) == nil {
 		return nil, dropped, fmt.Errorf("ablate: baseline arm %q did not run (dropped or absent)", baseline)
 	}
+	rep.annotateConceptRows()
 	if err := rep.Validate(); err != nil {
 		return nil, dropped, err
 	}

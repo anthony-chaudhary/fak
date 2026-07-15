@@ -13,18 +13,18 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **99.4/100** (grade A) = 9.9/10 |
-| **Coverage** | **99.1%** (1943/1961 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **18** (clarity 0 + coverage 18) |
+| **Score** | **98.2/100** (grade A) = 9.8/10 |
+| **Coverage** | **97.2%** (1944/2001 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **57** (clarity 0 + coverage 57) |
 | Crystal-clear concepts | 242 of 1711 positioned |
-| As of | 2026-06-29 (fak v0.34.0) |
+| As of |  (fak ) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1711 concepts - score 99.4/100 (grade A) - disambiguation-debt 18
+concept-disambiguation chart - 1711 concepts - score 98.2/100 (grade A) - disambiguation-debt 57
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 242
@@ -57,29 +57,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    *********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 33 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ###########################. 291/298
-  plan             ############################ 286/288
-  policy-capability ############################ 117/119
-  score-debt       ###########################. 77/79
-  session-runtime  ############################ 173/175
+  guard-gate       ##########################.. 290/310
+  plan             ###########################. 286/294
+  policy-capability ###########################. 117/122
+  score-debt       ##########################.. 78/83
+  evict            ##########################.. 40/43
+  session-runtime  ############################ 173/176
+  support-maturity #########################... 29/32
+  attention        ###########################. 68/70
+  cache            ############################ 222/224
+  gateway-engine   ############################ 159/161
+  render-materialize ############################ 162/164
+  witness-proof    ############################ 124/126
   decision         ###########################. 38/39
   loop             ############################ 57/58
-  render-materialize ############################ 162/163
-  attention        ############################ 68/68
-  cache            ############################ 222/222
-  context-ctx      ############################ 174/174
+  pool             ###########################. 35/36
+  context-ctx      ############################ 175/175
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
-  evict            ############################ 39/39
-  gateway-engine   ############################ 159/159
   layout           ############################ 12/12
-  pool             ############################ 35/35
-  support-maturity ############################ 29/29
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 124/124
 
-namespace coverage  [################################] 99.1%  (1943/1961 confusable tokens positioned)
+namespace coverage  [###############################.] 97.2%  (1944/2001 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1938,25 +1938,25 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 291 | 298 | 7 |
-| plan | 286 | 288 | 2 |
-| policy-capability | 117 | 119 | 2 |
-| score-debt | 77 | 79 | 2 |
-| session-runtime | 173 | 175 | 2 |
+| guard-gate | 290 | 310 | 20 |
+| plan | 286 | 294 | 8 |
+| policy-capability | 117 | 122 | 5 |
+| score-debt | 78 | 83 | 5 |
+| evict | 40 | 43 | 3 |
+| session-runtime | 173 | 176 | 3 |
+| support-maturity | 29 | 32 | 3 |
+| attention | 68 | 70 | 2 |
+| cache | 222 | 224 | 2 |
+| gateway-engine | 159 | 161 | 2 |
+| render-materialize | 162 | 164 | 2 |
+| witness-proof | 124 | 126 | 2 |
 | decision | 38 | 39 | 1 |
 | loop | 57 | 58 | 1 |
-| render-materialize | 162 | 163 | 1 |
-| attention | 68 | 68 | 0 |
-| cache | 222 | 222 | 0 |
-| context-ctx | 174 | 174 | 0 |
+| pool | 35 | 36 | 1 |
+| context-ctx | 175 | 175 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| evict | 39 | 39 | 0 |
-| gateway-engine | 159 | 159 | 0 |
 | layout | 12 | 12 | 0 |
-| pool | 35 | 35 | 0 |
-| support-maturity | 29 | 29 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 124 | 124 | 0 |
 

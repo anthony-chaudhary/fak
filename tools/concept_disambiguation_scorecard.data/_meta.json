@@ -1,234 +1,558 @@
 {
   "schema": "fak-concept-disambiguation-scorecard.data/1",
-  "meta": {
-    "as_of": "2026-06-29",
-    "fak_version": "v0.34.0",
-    "title": "fak concept-disambiguation scorecard - crystal clarity across similar-sounding names",
-    "_doc": "Each row is one DISTINCT confusable fak concept, scored on whether it is crystal-clear: one canonical name, a written definition, an explicit line drawn against its siblings, and that line anchored in a doc that exists. The scorecard DISCOVERS the confusable universe from the tree (per family, a token counts only when it spans >= min_files production files, or is a package/dir name, or a doc heading) so coverage cannot be gamed by editing data. The grounding token must appear in the production corpus; the glossary anchor must exist. Regenerate the doc: python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard"
-  },
+  "glossary": "",
   "families": [
     {
       "id": "cache",
-      "name": "Cache family",
-      "roots": ["cache"],
-      "ignore": ["cached", "caches", "cacheable", "cacheless", "uncached", "caching",
-                 "cachedir", "cachelen", "cachettl", "flushcache", "defaultcachesize",
-                 "cachecreation", "cacheentry", "cacheevent", "cachedecay", "cachestream", "cacherevoke",
-                 "usercachedir", "pycache",
-                 "cachecreatetok", "cachecreatetokens", "cachecreationtokensupgraded", "cachedhits",
-                 "cachedtok", "cachehitfrac", "cachereadmarginal", "cachereads", "cachetokens",
-                 "compactcachereads", "compactlastcacherd", "infercachecreationtokens", "infercachedhits",
-                 "infercachedtokens", "lastcacherd", "fakcachevalueinputpermtokusd", "prefixcachehits",
-                 "prefixcachequeries", "promptcachehittokens", "promptcachemisstokens", "cachettlupgraded",
-                 "observecachettlupgrade", "maybeupgradeanthropiccachettl1h", "cachereadmult",
-                 "cachewritemult",                   "cacherow", "defaultcacheandresidency",
-                  "cachemech", "applyinfocachemechclick", "cachebreakevents", "droppedcachedtokens"],
+      "ignore": [
+        "cached",
+        "caches",
+        "cacheable",
+        "cacheless",
+        "uncached",
+        "caching",
+        "cachedir",
+        "cachelen",
+        "cachettl",
+        "flushcache",
+        "defaultcachesize",
+        "cachecreation",
+        "cacheentry",
+        "cacheevent",
+        "cachedecay",
+        "cachestream",
+        "cacherevoke",
+        "usercachedir",
+        "pycache",
+        "cachecreatetok",
+        "cachecreatetokens",
+        "cachecreationtokensupgraded",
+        "cachedhits",
+        "cachedtok",
+        "cachehitfrac",
+        "cachereadmarginal",
+        "cachereads",
+        "cachetokens",
+        "compactcachereads",
+        "compactlastcacherd",
+        "infercachecreationtokens",
+        "infercachedhits",
+        "infercachedtokens",
+        "lastcacherd",
+        "fakcachevalueinputpermtokusd",
+        "prefixcachehits",
+        "prefixcachequeries",
+        "promptcachehittokens",
+        "promptcachemisstokens",
+        "cachettlupgraded",
+        "observecachettlupgrade",
+        "maybeupgradeanthropiccachettl1h",
+        "cachereadmult",
+        "cachewritemult",
+        "cacherow",
+        "defaultcacheandresidency",
+        "cachemech",
+        "applyinfocachemechclick",
+        "cachebreakevents",
+        "droppedcachedtokens"
+      ],
       "min_files": 3,
-      "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta)."
+      "name": "Cache family",
+      "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta).",
+      "roots": [
+        "cache"
+      ]
     },
     {
       "id": "attention",
-      "name": "Attention family",
-      "roots": ["attention", "attn"],
-      "ignore": ["attentions", "attentive", "tattn"],
+      "ignore": [
+        "attentions",
+        "attentive",
+        "tattn"
+      ],
       "min_files": 3,
-      "note": "Attention compute vs the attention-witness accumulation (Attended/EMA/Cumulative) vs the DSA AttentionIndex metadata."
+      "name": "Attention family",
+      "note": "Attention compute vs the attention-witness accumulation (Attended/EMA/Cumulative) vs the DSA AttentionIndex metadata.",
+      "roots": [
+        "attention",
+        "attn"
+      ]
     },
     {
+      "exclude": [
+        "gateway",
+        "aggregat",
+        "delegat",
+        "propagat",
+        "navigat",
+        "investigat",
+        "negat",
+        "mitigat"
+      ],
       "id": "guard-gate",
-      "name": "Guard / gate family",
-      "roots": ["guard", "gate"],
-      "exclude": ["gateway", "aggregat", "delegat", "propagat", "navigat", "investigat",
-                  "negat", "mitigat"],
-      "ignore": ["gated", "gates", "guarded", "guards", "gating", "ungated",
-                 "unguarded", "guarding", "guardrails", "gatew",
-                 "guardsessiontempdir", "gateresult",
-                 "guardoperatordirectedeffectivemode", "guardbudgetrestartevent",
-                 "guardbuildskewassessment", "guarddefaultaccountsregistrypath",
-                 "guardskewbuildwarning", "guardstartup",
-                 "guardtaskhandoffeffectivemode", "guardtrajectorywarningline",
-                 "installguardmcpregistration", "newguardlaunchnonce",
-                 "readguardstoptranscript", "summarizeguardstops",
-                 "fleetbarecommitguard",
-                 "guardstoptranscript",
-                 "guardstophookoutputstyleenvmode", "guardwireretryhop",
-                 "guardstopsledgerresolved", "readguardstopsledger"],
+      "ignore": [
+        "gated",
+        "gates",
+        "guarded",
+        "guards",
+        "gating",
+        "ungated",
+        "unguarded",
+        "guarding",
+        "guardrails",
+        "gatew",
+        "guardsessiontempdir",
+        "gateresult",
+        "guardoperatordirectedeffectivemode",
+        "guardbudgetrestartevent",
+        "guardbuildskewassessment",
+        "guarddefaultaccountsregistrypath",
+        "guardskewbuildwarning",
+        "guardstartup",
+        "guardtaskhandoffeffectivemode",
+        "guardtrajectorywarningline",
+        "installguardmcpregistration",
+        "newguardlaunchnonce",
+        "readguardstoptranscript",
+        "summarizeguardstops",
+        "fleetbarecommitguard",
+        "guardstoptranscript",
+        "guardstophookoutputstyleenvmode",
+        "guardwireretryhop",
+        "guardstopsledgerresolved",
+        "readguardstopsledger"
+      ],
       "min_files": 3,
-      "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates. Ignored incidental helpers and false friends: the guard/gate inflections (gated/gates/guarded/guards/gating/ungated/unguarded/guarding/guardrails), guard-hook helper functions that belong to the guard operator verb not a distinct concept (guardsessiontempdir, gateresult, guardoperatordirectedeffectivemode, guardbudgetrestartevent, guardbuildskewassessment, guarddefaultaccountsregistrypath, guardskewbuildwarning, guardstartup, guardtaskhandoffeffectivemode, guardtrajectorywarningline, installguardmcpregistration, newguardlaunchnonce, readguardstoptranscript, summarizeguardstops, fleetbarecommitguard, guardstoptranscript, guardstophookoutputstyleenvmode, guardwireretryhop), and the guard-stops-ledger helpers added by the Stop-health Slack card (#4345): guardstopsledgerresolved (guardStopsLedgerResolved resolves the ledger file PATH the `fak guard-stops` reader uses) and readguardstopsledger (readGuardStopsLedger reads that ledger file - a missing file is a valid empty view); both are the `fak guard-stops` operator verb's file plumbing, not a distinct guard/gate decision concept."
+      "name": "Guard / gate family",
+      "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates. Ignored incidental helpers and false friends: the guard/gate inflections (gated/gates/guarded/guards/gating/ungated/unguarded/guarding/guardrails), guard-hook helper functions that belong to the guard operator verb not a distinct concept (guardsessiontempdir, gateresult, guardoperatordirectedeffectivemode, guardbudgetrestartevent, guardbuildskewassessment, guarddefaultaccountsregistrypath, guardskewbuildwarning, guardstartup, guardtaskhandoffeffectivemode, guardtrajectorywarningline, installguardmcpregistration, newguardlaunchnonce, readguardstoptranscript, summarizeguardstops, fleetbarecommitguard, guardstoptranscript, guardstophookoutputstyleenvmode, guardwireretryhop), and the guard-stops-ledger helpers added by the Stop-health Slack card (#4345): guardstopsledgerresolved (guardStopsLedgerResolved resolves the ledger file PATH the `fak guard-stops` reader uses) and readguardstopsledger (readGuardStopsLedger reads that ledger file - a missing file is a valid empty view); both are the `fak guard-stops` operator verb's file plumbing, not a distinct guard/gate decision concept.",
+      "roots": [
+        "guard",
+        "gate"
+      ]
     },
     {
       "id": "session-runtime",
-      "name": "Session / scheduling family",
-      "roots": ["session", "slot", "scheduler"],
-      "ignore": ["sessions", "scheduling", "scheduled", "schedulers", "slots",
-                 "sessionids", "slotting", "guardsessiontempdir",
-                 "defaultclaudesessionsperaccount", "confusedsessions",
-                 "sessionsaudited", "topsessions", "totalslots",
-                 "tuisessionrow", "runtuisessions", "interactivesession",
-                 "requireminimaxsession", "restartfreshsession"],
+      "ignore": [
+        "sessions",
+        "scheduling",
+        "scheduled",
+        "schedulers",
+        "slots",
+        "sessionids",
+        "slotting",
+        "guardsessiontempdir",
+        "defaultclaudesessionsperaccount",
+        "confusedsessions",
+        "sessionsaudited",
+        "topsessions",
+        "totalslots",
+        "tuisessionrow",
+        "runtuisessions",
+        "interactivesession",
+        "requireminimaxsession",
+        "restartfreshsession"
+      ],
       "min_files": 3,
-      "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner). Ignored tokens: plurals/inflections (sessionids, slotting), a guard-hook helper that belongs to the guard-gate family (guardsessiontempdir), a model-package method whose Session is the inference type not the drive record (requireminimaxsession), session-audit count fields (confusedsessions, sessionsaudited, topsessions), a total-slots metric also used by GPU compute (totalslots), TUI rendering/verb types (tuisessionrow, runtuisessions), a stale empty dir (interactivesession), an action string literal (restartfreshsession), and a capacity default const already covered by AccountSessionCap (defaultclaudesessionsperaccount)."
+      "name": "Session / scheduling family",
+      "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner). Ignored tokens: plurals/inflections (sessionids, slotting), a guard-hook helper that belongs to the guard-gate family (guardsessiontempdir), a model-package method whose Session is the inference type not the drive record (requireminimaxsession), session-audit count fields (confusedsessions, sessionsaudited, topsessions), a total-slots metric also used by GPU compute (totalslots), TUI rendering/verb types (tuisessionrow, runtuisessions), a stale empty dir (interactivesession), an action string literal (restartfreshsession), and a capacity default const already covered by AccountSessionCap (defaultclaudesessionsperaccount).",
+      "roots": [
+        "session",
+        "slot",
+        "scheduler"
+      ]
     },
     {
       "id": "witness-proof",
-      "name": "Witness / evidence family",
-      "roots": ["witness", "refut", "revoc", "trustepoch"],
-      "ignore": ["witnessing", "witnessable", "witnessed", "witnesses", "refuted", "refutes", "revocations", "refutations",
-                 "refutil", "nwitness", "witnesssametaskids", "withdefaultoriginwitnesses"],
+      "ignore": [
+        "witnessing",
+        "witnessable",
+        "witnessed",
+        "witnesses",
+        "refuted",
+        "refutes",
+        "revocations",
+        "refutations",
+        "refutil",
+        "nwitness",
+        "witnesssametaskids",
+        "withdefaultoriginwitnesses"
+      ],
       "min_files": 3,
-      "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims. Ignored false friends: refutil (internal/refutil is 'ref util' - reference-utility helpers, not 'refute'), nwitness (a scanner artifact of \\nWitness / \\nwitness in Go string literals where the newline escape's n concatenates with Witness in the identifier regex), witnesssametaskids (a non-existent variant of WitnessSameTasks - the function witnesses same task ids but no identifier WitnessSameTaskIDs exists in the tree; witnesssametasks itself is positioned as its own row), and withdefaultoriginwitnesses (taskmgr.WithDefaultOriginWitnesses in internal/taskmgr is the Option constructor that installs the built-in ORIGIN witnesses for the task-manager ref registry - a task-handoff provenance helper where 'witness' means a registered origin/path-existence check for a task handoff, not the cache-coherence or claim-corroboration witness this family disambiguates)."
+      "name": "Witness / evidence family",
+      "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims. Ignored false friends: refutil (internal/refutil is 'ref util' - reference-utility helpers, not 'refute'), nwitness (a scanner artifact of \\nWitness / \\nwitness in Go string literals where the newline escape's n concatenates with Witness in the identifier regex), witnesssametaskids (a non-existent variant of WitnessSameTasks - the function witnesses same task ids but no identifier WitnessSameTaskIDs exists in the tree; witnesssametasks itself is positioned as its own row), and withdefaultoriginwitnesses (taskmgr.WithDefaultOriginWitnesses in internal/taskmgr is the Option constructor that installs the built-in ORIGIN witnesses for the task-manager ref registry - a task-handoff provenance helper where 'witness' means a registered origin/path-existence check for a task handoff, not the cache-coherence or claim-corroboration witness this family disambiguates).",
+      "roots": [
+        "witness",
+        "refut",
+        "revoc",
+        "trustepoch"
+      ]
     },
     {
       "id": "gateway-engine",
-      "name": "Gateway / engine family",
-      "roots": ["gateway", "engine", "vdso", "kernel"],
-      "ignore": ["engineering", "engineer", "engineered", "engineers", "gateways", "kernels", "kernel32", "kernelwiki", "convkernel"],
+      "ignore": [
+        "engineering",
+        "engineer",
+        "engineered",
+        "engineers",
+        "gateways",
+        "kernels",
+        "kernel32",
+        "kernelwiki",
+        "convkernel"
+      ],
       "min_files": 3,
-      "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass). Ignored false friends: engineered/engineers (the English adjective/verb in prose comments, not the engine dispatch seam), kernelwiki (the external mit-han-lab/KernelWiki project name referenced in study notes, where 'kernel' means GPU compute kernels, not the fak coordinator), and convkernel (convKernel int in internal/compute qwen35 GDN - the 1D convolution kernel SIZE parameter for qwen3.5's depthwise conv, a signal-processing/GPU term where 'kernel' means the conv1d weight span, not the fak coordinator kernel)."
+      "name": "Gateway / engine family",
+      "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass). Ignored false friends: engineered/engineers (the English adjective/verb in prose comments, not the engine dispatch seam), kernelwiki (the external mit-han-lab/KernelWiki project name referenced in study notes, where 'kernel' means GPU compute kernels, not the fak coordinator), and convkernel (convKernel int in internal/compute qwen35 GDN - the 1D convolution kernel SIZE parameter for qwen3.5's depthwise conv, a signal-processing/GPU term where 'kernel' means the conv1d weight span, not the fak coordinator kernel).",
+      "roots": [
+        "gateway",
+        "engine",
+        "vdso",
+        "kernel"
+      ]
     },
     {
       "id": "policy-capability",
-      "name": "Policy / authorization family",
-      "roots": ["policy", "capability", "posture", "adjudicat", "preflight"],
-      "ignore": ["policies", "adjudicators", "capabilities", "postures", "adjudication", "adjudicate", "adjudicated", "adjudicates", "policyblocks",
-                 "numareplicapolicyunsupported", "policylabel"],
+      "ignore": [
+        "policies",
+        "adjudicators",
+        "capabilities",
+        "postures",
+        "adjudication",
+        "adjudicate",
+        "adjudicated",
+        "adjudicates",
+        "policyblocks",
+        "numareplicapolicyunsupported",
+        "policylabel"
+      ],
       "min_files": 3,
-      "note": "Capability floor (intent) vs policy manifest (on-disk JSON) vs loaded Policy (compiled table) vs the adjudicator (enforcer) vs verdict/reason-code (its output). Ignored false friends: numareplicapolicyunsupported (numaReplicaPolicy iota zero value returned on a host with no NUMA topology in internal/compute - a NUMA-replica placement constant, not the authorization/capability Policy; already ignored in the support-maturity family where 'unsupported' is the host-availability sense) and policylabel (numaStatus.PolicyLabel / mempolicy.PolicyLabel string in internal/compute - the raw NUMA memory-policy token e.g. 'bind:0', a NUMA mempolicy field, not the authorization Policy manifest)."
+      "name": "Policy / authorization family",
+      "note": "Capability floor (intent) vs policy manifest (on-disk JSON) vs loaded Policy (compiled table) vs the adjudicator (enforcer) vs verdict/reason-code (its output). Ignored false friends: numareplicapolicyunsupported (numaReplicaPolicy iota zero value returned on a host with no NUMA topology in internal/compute - a NUMA-replica placement constant, not the authorization/capability Policy; already ignored in the support-maturity family where 'unsupported' is the host-availability sense) and policylabel (numaStatus.PolicyLabel / mempolicy.PolicyLabel string in internal/compute - the raw NUMA memory-policy token e.g. 'bind:0', a NUMA mempolicy field, not the authorization Policy manifest).",
+      "roots": [
+        "policy",
+        "capability",
+        "posture",
+        "adjudicat",
+        "preflight"
+      ]
     },
     {
       "id": "context-ctx",
-      "name": "Context-management family",
-      "roots": ["ctx", "context", "recall", "compaction"],
-      "ignore": ["contexts", "recalling", "recalled",
-                 "context", "ctx", "cctx", "compactions", "recalls",
-                 "ctxsleep"],
+      "ignore": [
+        "contexts",
+        "recalling",
+        "recalled",
+        "context",
+        "ctx",
+        "cctx",
+        "compactions",
+        "recalls",
+        "ctxsleep"
+      ],
       "min_files": 3,
-      "note": "context-MMU (gates result bytes) vs KV-MMU (evicts K/V spans) vs recall (the persisted core dump) vs compaction (provider prefix reuse) vs the ctx* planners. Ignored: ctxsleep is a Go context.Context sleep helper in slackwire/slackoutbox (429-retry pacing) - a false friend where 'ctx' means Go's context, not LLM context."
+      "name": "Context-management family",
+      "note": "context-MMU (gates result bytes) vs KV-MMU (evicts K/V spans) vs recall (the persisted core dump) vs compaction (provider prefix reuse) vs the ctx* planners. Ignored: ctxsleep is a Go context.Context sleep helper in slackwire/slackoutbox (429-retry pacing) - a false friend where 'ctx' means Go's context, not LLM context.",
+      "roots": [
+        "ctx",
+        "context",
+        "recall",
+        "compaction"
+      ]
     },
     {
       "id": "score-debt",
-      "name": "Scorecard / debt family",
-      "roots": ["scorecard", "debt"],
-      "ignore": ["scorecards", "scorecardPath"],
+      "ignore": [
+        "scorecards",
+        "scorecardPath"
+      ],
       "min_files": 3,
-      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans >= min_files only because the path is threaded through BuildPlan/IssueBody."
+      "name": "Scorecard / debt family",
+      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans \u003e= min_files only because the path is threaded through BuildPlan/IssueBody.",
+      "roots": [
+        "scorecard",
+        "debt"
+      ]
     },
     {
       "id": "support-maturity",
-      "name": "Support / coverage / correctness / parity / maturity family",
-      "roots": ["support", "coverage", "correctness", "parity", "maturity"],
-      "ignore": ["supported", "unsupported", "supports", "supporting", "errmmapunsupported",
-                 "errstreamingunsupported", "streamingsupported", "recurrentevictunsupportederror",
-                 "numareplicapolicyunsupported",
-                 "sourcecoverage", "targetcoverage", "coveragediscipline", "coveragebaseline", "topncoverage",
-                 "correctnessclass", "correctnessdependson",
-                 "paritybench", "parityreport", "scoreparity", "defaultscoreparitytol",
-                 "supportmaturityscore", "supportmaturitydebt",
-                 "immaturity"],
+      "ignore": [
+        "supported",
+        "unsupported",
+        "supports",
+        "supporting",
+        "errmmapunsupported",
+        "errstreamingunsupported",
+        "streamingsupported",
+        "recurrentevictunsupportederror",
+        "numareplicapolicyunsupported",
+        "sourcecoverage",
+        "targetcoverage",
+        "coveragediscipline",
+        "coveragebaseline",
+        "topncoverage",
+        "correctnessclass",
+        "correctnessdependson",
+        "paritybench",
+        "parityreport",
+        "scoreparity",
+        "defaultscoreparitytol",
+        "supportmaturityscore",
+        "supportmaturitydebt",
+        "immaturity"
+      ],
       "min_files": 3,
-      "note": "The support-maturity ladder vocabulary: support says a path exists, coverage says how much of the declared/discovered space is exercised or positioned, correctness says the behavior is right, parity compares to a named peer/baseline, and maturity summarizes production readiness. Ignored incidental helpers and false friends: the support inflections (supported, unsupported, supports, supporting); platform/feature-availability 'unsupported' tokens where 'unsupported' means the host OS lacks a feature, not that a capability path is absent (errmmapunsupported, errstreamingunsupported, streamingsupported, recurrentevictunsupportederror, numareplicapolicyunsupported - the NUMA-replica iota zero value returned on a host with no NUMA topology); coverage helpers where 'coverage' is the test/statement concept applied as a function or data holder, not a distinct concept (sourcecoverage, targetcoverage - benchmark source/target coverage fields; coveragediscipline - the CoverageDiscipline KPI function measuring the statement-coverage + race ratchet; coveragebaseline - the CoverageBaseline pure-data struct holding the ratchet floor/per-package/epsilon; topncoverage - the TopNCoverage concentration-curve field, a cumulative-weight-share distribution metric over vCache anchors, not the support-maturity coverage concept); correctness helpers (correctnessclass, correctnessdependson); parity-application helpers where 'parity' is the comparative concept applied to a named benchmark, not a new concept (paritybench, parityreport, scoreparity - the scoreParityFailures helper listing which FrontierSWE score buckets raw vs fak differ on, defaultscoreparitytol - the 1e-9 numeric tolerance constant for the comparison); support-maturity score/debt aggregates (supportmaturityscore, supportmaturitydebt); and the immaturity inflection."
+      "name": "Support / coverage / correctness / parity / maturity family",
+      "note": "The support-maturity ladder vocabulary: support says a path exists, coverage says how much of the declared/discovered space is exercised or positioned, correctness says the behavior is right, parity compares to a named peer/baseline, and maturity summarizes production readiness. Ignored incidental helpers and false friends: the support inflections (supported, unsupported, supports, supporting); platform/feature-availability 'unsupported' tokens where 'unsupported' means the host OS lacks a feature, not that a capability path is absent (errmmapunsupported, errstreamingunsupported, streamingsupported, recurrentevictunsupportederror, numareplicapolicyunsupported - the NUMA-replica iota zero value returned on a host with no NUMA topology); coverage helpers where 'coverage' is the test/statement concept applied as a function or data holder, not a distinct concept (sourcecoverage, targetcoverage - benchmark source/target coverage fields; coveragediscipline - the CoverageDiscipline KPI function measuring the statement-coverage + race ratchet; coveragebaseline - the CoverageBaseline pure-data struct holding the ratchet floor/per-package/epsilon; topncoverage - the TopNCoverage concentration-curve field, a cumulative-weight-share distribution metric over vCache anchors, not the support-maturity coverage concept); correctness helpers (correctnessclass, correctnessdependson); parity-application helpers where 'parity' is the comparative concept applied to a named benchmark, not a new concept (paritybench, parityreport, scoreparity - the scoreParityFailures helper listing which FrontierSWE score buckets raw vs fak differ on, defaultscoreparitytol - the 1e-9 numeric tolerance constant for the comparison); support-maturity score/debt aggregates (supportmaturityscore, supportmaturitydebt); and the immaturity inflection.",
+      "roots": [
+        "support",
+        "coverage",
+        "correctness",
+        "parity",
+        "maturity"
+      ]
     },
     {
       "id": "cross-cluster",
-      "name": "Cross-cluster canonical collisions",
-      "roots": [],
       "ignore": [],
       "min_files": 99,
-      "note": "Curated registry of same-token, two-meaning collisions across UNRELATED packages (Manifest, Verdict, Backend, Observer, Index, Store, Refusal). Each is positioned as TWO distinct rows that draw the line against each other and anchor it in the glossary. roots is empty BY DESIGN: these tokens (manifest/verdict/backend/observer/index/store/refusal) over-match hundreds of unrelated identifiers in their own packages, so this family is hand-curated, never discovered - a discovering root would flood coverage with non-confusable tokens (verdictAllow, indexByte, storeInt32)."
+      "name": "Cross-cluster canonical collisions",
+      "note": "Curated registry of same-token, two-meaning collisions across UNRELATED packages (Manifest, Verdict, Backend, Observer, Index, Store, Refusal). Each is positioned as TWO distinct rows that draw the line against each other and anchor it in the glossary. roots is empty BY DESIGN: these tokens (manifest/verdict/backend/observer/index/store/refusal) over-match hundreds of unrelated identifiers in their own packages, so this family is hand-curated, never discovered - a discovering root would flood coverage with non-confusable tokens (verdictAllow, indexByte, storeInt32).",
+      "roots": []
     },
     {
       "id": "evict",
-      "name": "Eviction family",
-      "roots": ["evict", "evicted", "eviction"],
-      "ignore": ["evictable", "evictSupported", "eviction", "evicts", "evicting",
-                 "EvictionsPerHit", "noteEviction", "recordEvictChoice"],
+      "ignore": [
+        "evictable",
+        "evictSupported",
+        "eviction",
+        "evicts",
+        "evicting",
+        "EvictionsPerHit",
+        "noteEviction",
+        "recordEvictChoice"
+      ],
       "min_files": 3,
-      "note": "Four disjoint eviction planes: physical KV tensor span removal, logical playbook pruning under token budget, model instance LRU eviction from a session pool, and content-addressed blob eviction (evictLocked) for disk/memory footprint management. Ignored incidental helpers: EvictionsPerHit (a derived benchmark ratio of evictions to hit-tokens in ReplayKVCache/expert-residency reporting, not an eviction concept), noteEviction (the thrash-detector recording helper #3393 that stamps each budget-pressure victim into a side-map, not an eviction mechanism), and recordEvictChoice (a diagnostics helper that stores the last eviction's policy/candidates/locked/victim stats, not an eviction mechanism)."
+      "name": "Eviction family",
+      "note": "Four disjoint eviction planes: physical KV tensor span removal, logical playbook pruning under token budget, model instance LRU eviction from a session pool, and content-addressed blob eviction (evictLocked) for disk/memory footprint management. Ignored incidental helpers: EvictionsPerHit (a derived benchmark ratio of evictions to hit-tokens in ReplayKVCache/expert-residency reporting, not an eviction concept), noteEviction (the thrash-detector recording helper #3393 that stamps each budget-pressure victim into a side-map, not an eviction mechanism), and recordEvictChoice (a diagnostics helper that stores the last eviction's policy/candidates/locked/victim stats, not an eviction mechanism).",
+      "roots": [
+        "evict",
+        "evicted",
+        "eviction"
+      ]
     },
     {
       "id": "decision",
-      "name": "Decision family",
-      "roots": ["decision"],
-      "ignore": ["gooddecisionratio", "appendsteerdecisions", "kinddecisionsabout"],
+      "ignore": [
+        "gooddecisionratio",
+        "appendsteerdecisions",
+        "kinddecisionsabout"
+      ],
       "min_files": 3,
-      "note": "Decision structs across disjoint subsystems: witness adjudication verdict, kernel tool-call explanation trace, scheduler loop admission advisory, shared-task execution state, cachemeta placement, gateway reset, vCache governor, trajctl steer, gardenbundle walk, toolprocgate containment, and dispatch calibration. Ignored incidental helpers: gooddecisionratio (a metric field scoring expert-residency keep/evict decision quality, not a decision concept), appendsteerdecisions (the writer function that persists SteerDecision records to the trajctl ledger, not a decision itself), and kinddecisionsabout (a sessionread query Kind enum filtering assistant decision turns in a transcript, not a fak decision concept)."
+      "name": "Decision family",
+      "note": "Decision structs across disjoint subsystems: witness adjudication verdict, kernel tool-call explanation trace, scheduler loop admission advisory, shared-task execution state, cachemeta placement, gateway reset, vCache governor, trajctl steer, gardenbundle walk, toolprocgate containment, and dispatch calibration. Ignored incidental helpers: gooddecisionratio (a metric field scoring expert-residency keep/evict decision quality, not a decision concept), appendsteerdecisions (the writer function that persists SteerDecision records to the trajctl ledger, not a decision itself), and kinddecisionsabout (a sessionread query Kind enum filtering assistant decision turns in a transcript, not a fak decision concept).",
+      "roots": [
+        "decision"
+      ]
     },
     {
       "id": "render-materialize",
+      "ignore": [
+        "rendered",
+        "rendering",
+        "renders",
+        "materializes",
+        "materialized",
+        "materializers",
+        "rendertuioverviewsavingshero",
+        "rendertuisessioncontrollegend",
+        "indexrenderhits",
+        "metricsrender",
+        "priorwtrendercrash",
+        "tuioverviewsavingsrender"
+      ],
+      "min_files": 2,
       "name": "Render / materialize family",
-      "roots": ["render", "RenderPlan", "RenderItem", "Rendered", "materialize"],
-      "ignore": ["rendered", "rendering", "renders", "materializes", "materialized", "materializers",
-                 "rendertuioverviewsavingshero", "rendertuisessioncontrollegend",
-                 "indexrenderhits", "metricsrender", "priorwtrendercrash", "tuioverviewsavingsrender"],
-      "min_files": 2,
-      "note": "Three disjoint render/materialize concepts: prompt-assembly layout (RenderPlan), memq cell materialization (RenderItem), and ctxplan span paging (Rendered). Ignored tokens: TUI sub-renderer helpers already covered by the renderTUI* family (rendertuioverviewsavingshero, rendertuisessioncontrollegend), a generic table-rendering callback in fak index (indexrenderhits), filename references in comments (metricsrender from metrics_render.go, tuioverviewsavingsrender from tui_overview_savings_render.go), and a terminal-risk diagnostic field whose 'render' means Windows Terminal GPU rendering crash not a fak render function (priorwtrendercrash)."
+      "note": "Three disjoint render/materialize concepts: prompt-assembly layout (RenderPlan), memq cell materialization (RenderItem), and ctxplan span paging (Rendered). Ignored tokens: TUI sub-renderer helpers already covered by the renderTUI* family (rendertuioverviewsavingshero, rendertuisessioncontrollegend), a generic table-rendering callback in fak index (indexrenderhits), filename references in comments (metricsrender from metrics_render.go, tuioverviewsavingsrender from tui_overview_savings_render.go), and a terminal-risk diagnostic field whose 'render' means Windows Terminal GPU rendering crash not a fak render function (priorwtrendercrash).",
+      "roots": [
+        "render",
+        "RenderPlan",
+        "RenderItem",
+        "Rendered",
+        "materialize"
+      ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "planErr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "runAblatePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "SweepPlanMain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "SweepPlanPairwise"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "SweepPlanGreedy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "BuildSweepPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ablation sweep implementation identifier; not a distinct planning-domain concept.",
+          "token": "buildMainPlan"
+        }
+      ],
+      "exclude": [
+        "plane",
+        "plank",
+        "explanat"
+      ],
       "id": "plan",
-      "name": "Plan family",
-      "roots": ["plan", "Plan", "Candidate"],
-      "exclude": ["plane", "plank", "explanat"],
-      "ignore": ["planner", "plans", "planning", "Candidates", "candidates",
-                 "planned", "notplanned", "planted", "planners",
-                 "plannedcumtok", "plannedcumtokens",
-                 "planting", "fitandplanserveggufexpertparallelpathondevice",
-                 "plants", "nplan", "plano", "candidatemean",
-                 "planresolve", "planapproval"],
+      "ignore": [
+        "BuildSweepPlan",
+        "Candidates",
+        "SweepPlanGreedy",
+        "SweepPlanMain",
+        "SweepPlanPairwise",
+        "buildMainPlan",
+        "candidatemean",
+        "candidates",
+        "fitandplanserveggufexpertparallelpathondevice",
+        "notplanned",
+        "nplan",
+        "planErr",
+        "planapproval",
+        "planned",
+        "plannedcumtok",
+        "plannedcumtokens",
+        "planner",
+        "planners",
+        "planning",
+        "plano",
+        "planresolve",
+        "plans",
+        "planted",
+        "planting",
+        "plants",
+        "runAblatePlan"
+      ],
       "min_files": 2,
-      "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner. Ignored false friends: planresolve (internal/planresolve + planresolve.Verdict is the OPERATOR-QUESTION plan-approval resolver - the guard/operator flow that resolves an operatorquestion of kind PlanApproval, not an execution Plan data type) and planapproval (operatorquestion.PlanApproval, the Kind enum value for an operator plan-approval question - same operator flow, not an execution Plan type). The family disambiguates Plan TYPES; the operator-approval resolver and its Kind are a different sense of 'plan'."
+      "name": "Plan family",
+      "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner. Ignored false friends: planresolve (internal/planresolve + planresolve.Verdict is the OPERATOR-QUESTION plan-approval resolver - the guard/operator flow that resolves an operatorquestion of kind PlanApproval, not an execution Plan data type) and planapproval (operatorquestion.PlanApproval, the Kind enum value for an operator plan-approval question - same operator flow, not an execution Plan type). The family disambiguates Plan TYPES; the operator-approval resolver and its Kind are a different sense of 'plan'.",
+      "roots": [
+        "plan",
+        "Plan",
+        "Candidate"
+      ]
     },
     {
+      "exclude": [
+        "spool"
+      ],
       "id": "pool",
-      "name": "Pool family",
-      "roots": ["pool", "Pool", "PoolProfile"],
-      "exclude": ["spool"],
-      "ignore": ["kvpoolbytes", "poolspanscores"],
+      "ignore": [
+        "kvpoolbytes",
+        "poolspanscores"
+      ],
       "min_files": 2,
-      "note": "Two disjoint pool concepts: session bounded-LRU container vs cachemeta pooling character profile describing a tier's host/coherence/share properties. Ignored false friends: kvpoolbytes (macfit.KVPoolBytes in internal/macfit is a host-fit CAPACITY-sizing field - bytes of KV pool the Mac can hold, a hardware-fit metric, not a pool container/profile concept) and poolspanscores (memq/spanpool.poolSpanScores is the neighborhood-POOLING pass behind RankRelevanceSpan (#4014) - where 'pool' is the VERB of pooling neighboring relevance spans for ranking, not a pool container)."
+      "name": "Pool family",
+      "note": "Two disjoint pool concepts: session bounded-LRU container vs cachemeta pooling character profile describing a tier's host/coherence/share properties. Ignored false friends: kvpoolbytes (macfit.KVPoolBytes in internal/macfit is a host-fit CAPACITY-sizing field - bytes of KV pool the Mac can hold, a hardware-fit metric, not a pool container/profile concept) and poolspanscores (memq/spanpool.poolSpanScores is the neighborhood-POOLING pass behind RankRelevanceSpan (#4014) - where 'pool' is the VERB of pooling neighboring relevance spans for ranking, not a pool container).",
+      "roots": [
+        "pool",
+        "Pool",
+        "PoolProfile"
+      ]
     },
     {
       "id": "layout",
-      "name": "Layout family",
-      "roots": ["layout", "Layout", "kvLayout"],
-      "ignore": ["layouts", "defaultlayout", "usesmlamoelayout", "archusesmlamoelayout"],
+      "ignore": [
+        "layouts",
+        "defaultlayout",
+        "usesmlamoelayout",
+        "archusesmlamoelayout"
+      ],
       "min_files": 2,
-      "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout). Ignored false friends / constructors: defaultlayout (DefaultLayout() in internal/ctxplan/layout.go is the seed four-area profile CONSTRUCTOR of Layout (ctxplan), already positioned as layout-ctxplan - not a distinct layout concept), and usesmlamoelayout / archusesmlamoelayout (Config.usesMLAMoELayout / archUsesMLAMoELayout in internal/model + internal/ggufload are model-architecture PREDICATES reporting whether a GGUF model shares the MLA-latent-attention + MoE tensor architecture - a model-loading concern where 'layout' means the model's MLA+MoE arrangement, not the KV-cache layout variant the family disambiguates; the cache-variant interface it selects is already positioned as the MLA KV layout seam)."
+      "name": "Layout family",
+      "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout). Ignored false friends / constructors: defaultlayout (DefaultLayout() in internal/ctxplan/layout.go is the seed four-area profile CONSTRUCTOR of Layout (ctxplan), already positioned as layout-ctxplan - not a distinct layout concept), and usesmlamoelayout / archusesmlamoelayout (Config.usesMLAMoELayout / archUsesMLAMoELayout in internal/model + internal/ggufload are model-architecture PREDICATES reporting whether a GGUF model shares the MLA-latent-attention + MoE tensor architecture - a model-loading concern where 'layout' means the model's MLA+MoE arrangement, not the KV-cache layout variant the family disambiguates; the cache-variant interface it selects is already positioned as the MLA KV layout seam).",
+      "roots": [
+        "layout",
+        "Layout",
+        "kvLayout"
+      ]
     },
     {
       "id": "loop",
-      "name": "Loop family",
-      "roots": ["loop"],
-      "ignore": ["loops", "looping", "looped", "loopid", "loopstate", "loopsnapshot",
-                 "loopsnapshotforid", "recordloop", "runloop", "loopconsumes", "faklooprunid",
-                 "q8prefillneedstokenloop", "appendlooprunevent", "buildtuiloopreport",
-                 "defaultloopregistry", "loopdoneunwitnessed", "noloopledger", "loopindexdebt",
-                 "tuiloopreport", "fakbgloopup", "defaultloopledger", "fakloopledger"],
+      "ignore": [
+        "loops",
+        "looping",
+        "looped",
+        "loopid",
+        "loopstate",
+        "loopsnapshot",
+        "loopsnapshotforid",
+        "recordloop",
+        "runloop",
+        "loopconsumes",
+        "faklooprunid",
+        "q8prefillneedstokenloop",
+        "appendlooprunevent",
+        "buildtuiloopreport",
+        "defaultloopregistry",
+        "loopdoneunwitnessed",
+        "noloopledger",
+        "loopindexdebt",
+        "tuiloopreport",
+        "fakbgloopup",
+        "defaultloopledger",
+        "fakloopledger"
+      ],
       "min_files": 3,
-      "note": "The most overloaded word in the repo: a read-only intent walker (fak superloop) vs a bulk wave launcher (/super-loop) vs a ledger+governor (fak loop) vs a per-turn exit gate (loopgate) vs the benchmark surface (bench-loop) vs the stage-coverage scorecard (loop-index) vs the cross-ledger health fold (loopfleet) vs the process babysitter (bgloop) - plus network loopback, a different domain the root swallows."
+      "name": "Loop family",
+      "note": "The most overloaded word in the repo: a read-only intent walker (fak superloop) vs a bulk wave launcher (/super-loop) vs a ledger+governor (fak loop) vs a per-turn exit gate (loopgate) vs the benchmark surface (bench-loop) vs the stage-coverage scorecard (loop-index) vs the cross-ledger health fold (loopfleet) vs the process babysitter (bgloop) - plus network loopback, a different domain the root swallows.",
+      "roots": [
+        "loop"
+      ]
     },
     {
       "id": "vfs",
-      "name": "Agent virtual-filesystem tier family",
-      "roots": [],
       "ignore": [],
       "min_files": 99,
-      "note": "The six-tier agent-VFS ladder (T0-T5) from docs/explainers/agent-virtual-filesystem.md: the host/VM store the process rides into (T0) vs the mount view fak presents over it (T1) vs the adjudicated read/query surface (T2) vs the expire-by-default scratchpad (T3) vs promoted durable memory (T4) vs the physical KV-cache substrate (T5). roots is empty BY DESIGN: these tiers are a curated conceptual ladder, not a single overloaded token - each is grounded in a distinct fak package/symbol (toolsandbox, pathscope, readengine, scratchpad, memq, kvmmu), and no shared root word spans them, so discovery would find nothing to score. Each tier draws its line against the adjacent tier it is most confused with (truth-duration separates T3 from T4; having-access separates T1 from T2; address-vs-governance separates T5 from T4)."
+      "name": "Agent virtual-filesystem tier family",
+      "note": "The six-tier agent-VFS ladder (T0-T5) from docs/explainers/agent-virtual-filesystem.md: the host/VM store the process rides into (T0) vs the mount view fak presents over it (T1) vs the adjudicated read/query surface (T2) vs the expire-by-default scratchpad (T3) vs promoted durable memory (T4) vs the physical KV-cache substrate (T5). roots is empty BY DESIGN: these tiers are a curated conceptual ladder, not a single overloaded token - each is grounded in a distinct fak package/symbol (toolsandbox, pathscope, readengine, scratchpad, memq, kvmmu), and no shared root word spans them, so discovery would find nothing to score. Each tier draws its line against the adjacent tier it is most confused with (truth-duration separates T3 from T4; having-access separates T1 from T2; address-vs-governance separates T5 from T4).",
+      "roots": []
     },
     {
       "id": "trajectory-control",
-      "name": "Trajectory-control family",
-      "roots": [],
       "ignore": [],
       "min_files": 99,
-      "note": "The trajectory-control (trajctl) vocabulary from epic #2533 (docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md + docs/observability/trajectory-control.md): the LIVE forward-progress control plane over declared objectives, positioned against five near-siblings it is systematically confused with - fak traj (the RETROSPECTIVE corpus toolkit; trajhook scores a past turn's notability, trajctl scores a live objective's progress), the scorecard family (repo-surface debt, not runs), score-signal (the CI-regression feeder), fak signal steer (one actuator rung trajctl uses), and loopdrive's GOAL.md witness (the binary done-bit trajctl stretches into a curve). roots is empty BY DESIGN, same as vfs: a 'trajctl'/'trajectory' discovery root would swallow the internal/trajectory corpus toolkit's tokens (the very sibling this family disambiguates against) and flood coverage with non-confusable identifiers; each concept is instead grounded in a distinct shipped symbol (trajctl, ScoreRow, witnessStrength, SignalHealthy, SignalDetourOverrun)."
+      "name": "Trajectory-control family",
+      "note": "The trajectory-control (trajctl) vocabulary from epic #2533 (docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md + docs/observability/trajectory-control.md): the LIVE forward-progress control plane over declared objectives, positioned against five near-siblings it is systematically confused with - fak traj (the RETROSPECTIVE corpus toolkit; trajhook scores a past turn's notability, trajctl scores a live objective's progress), the scorecard family (repo-surface debt, not runs), score-signal (the CI-regression feeder), fak signal steer (one actuator rung trajctl uses), and loopdrive's GOAL.md witness (the binary done-bit trajctl stretches into a curve). roots is empty BY DESIGN, same as vfs: a 'trajctl'/'trajectory' discovery root would swallow the internal/trajectory corpus toolkit's tokens (the very sibling this family disambiguates against) and flood coverage with non-confusable identifiers; each concept is instead grounded in a distinct shipped symbol (trajctl, ScoreRow, witnessStrength, SignalHealthy, SignalDetourOverrun).",
+      "roots": []
     },
     {
       "id": "dev-tier",
-      "name": "Dev-tier / operator-surface family",
-      "roots": [],
       "ignore": [],
       "min_files": 99,
-      "note": "The dev-tier / operator-surface vocabulary from epic #2228 (C6, #2235): the operator-heaviness meter now partitions the flat top-level verb surface into frontdoor_verbs + dev_verbs by construction (the continuity witness), classified from the live dispatch switch via internal/devindex. These are the names for that split and its near-siblings under the shared 'dev' root - a frontdoor verb (the product surface, TierFrontdoor) vs a dev verb (the fak dev tooling tier, TierDev) vs the 'fak dev' CLI namespace that gates them vs the dev-ex GitHub routing label vs devindex the catalog that assigns the tier. roots is empty BY DESIGN, same as vfs and trajectory-control: a 'dev' discovery root would swallow hundreds of unrelated identifiers (development, devsession, devbenefit ...) and flood coverage with non-confusable tokens; each concept is instead grounded in a distinct shipped symbol (TierFrontdoor, TierDev, resolveDevVerb, devindex). The honesty fence: a dev verb stays MEASURED in dev_verbs even after its bare spelling is gated behind 'fak dev' - hidden from the front door, not from the meter."
+      "name": "Dev-tier / operator-surface family",
+      "note": "The dev-tier / operator-surface vocabulary from epic #2228 (C6, #2235): the operator-heaviness meter now partitions the flat top-level verb surface into frontdoor_verbs + dev_verbs by construction (the continuity witness), classified from the live dispatch switch via internal/devindex. These are the names for that split and its near-siblings under the shared 'dev' root - a frontdoor verb (the product surface, TierFrontdoor) vs a dev verb (the fak dev tooling tier, TierDev) vs the 'fak dev' CLI namespace that gates them vs the dev-ex GitHub routing label vs devindex the catalog that assigns the tier. roots is empty BY DESIGN, same as vfs and trajectory-control: a 'dev' discovery root would swallow hundreds of unrelated identifiers (development, devsession, devbenefit ...) and flood coverage with non-confusable tokens; each concept is instead grounded in a distinct shipped symbol (TierFrontdoor, TierDev, resolveDevVerb, devindex). The honesty fence: a dev verb stays MEASURED in dev_verbs even after its bare spelling is gated behind 'fak dev' - hidden from the front door, not from the meter.",
+      "roots": []
     }
   ]
 }

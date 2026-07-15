@@ -47,11 +47,15 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	suite := fs.String("suite", "tau2-smoke", "trace suite under testdata/tau2")
 	tracePath := fs.String("trace", "", "explicit trace path (overrides --suite)")
 	fromSession := fs.String("from-session", "", "captured fak guard replay fixture to replay as a session-backed cassette")
-	sweep := fs.String("sweep", "vdso", "comma list of runtime features to sweep (known: "+strings.Join(ablate.KnownFeatures, ",")+")")
+	sweep := fs.String("sweep", "vdso", "comma list of runtime features to sweep (known: "+strings.Join(ablate.KnownFeatures(), ",")+")")
 	baseline := fs.String("baseline", "all-off", "arm id used as the delta reference in the table")
+	sweepPlan := fs.String("sweep-plan", "", "bounded planner: main or pairwise")
+	top := fs.Int("top", 0, "top-K main-effect movers used by --sweep-plan pairwise")
 	out := fs.String("out", "", "write the AblationReport JSON to this path")
 	asJSON := fs.Bool("json", false, "emit the AblationReport JSON to stdout (no table)")
 	list := fs.Bool("list", false, "print the sweepable cache-lever catalog (owner/plane/fidelity/env) and exit; with --json emit the FeatureCard array + presets")
+	var rungs rungsFlag
+	fs.Var(&rungs, "rungs", "rung-attribution mode: per-rung lever-flip over a turnbench trace (bare --rungs = full sweep; --rungs=grammar,ifc-sink for a subset)")
 	report := fs.String("report", "", "load a saved AblationReport JSON (e.g. from experiments/ablate/) and re-render its table/deltas — no trace, engine, or replay")
 	engineIDFlag := fs.String("engine", "mock", "engine id (the offline mock by default)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
@@ -93,6 +97,15 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		return emitAblation(stdout, stderr, rep, *out, *asJSON)
 	}
 
+	// --rungs is the RUNG axis (issue #3972): rather than sweep cache levers, ablate the
+	// adjudicator chain one rung at a time over a turnbench trace (turnbench.RunLeverFlip).
+	// It replaces the whole --sweep path (a rung is a chain adjudicator, not an
+	// ablate.KnownFeatures cache lever) and short-circuits before any BuildSweep, exactly
+	// like --list / --report.
+	if rungs.set {
+		return runAblateRungs(stdout, stderr, fs, &rungs, *tracePath, *suite, *out, *asJSON)
+	}
+
 	features := splitCommaList(*sweep)
 
 	engineID := *engineIDFlag
@@ -125,9 +138,33 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	// BuildSweep validates the sweep spec (an unknown token fails loud → usage exit 2) and
-	// builds the arm matrix shared by both rungs.
-	configs, err := ablate.BuildSweep(features)
+	// Build the legacy full lattice or a bounded registry-driven plan. Pairwise first
+	// measures main effects, then runs only interactions among the measured top-K movers.
+	var configs []ablate.FeatureConfig
+	var err error
+	if *sweepPlan == "" {
+		configs, err = ablate.BuildSweep(features)
+	} else if *sweepPlan == ablate.SweepPlanMain {
+		configs, err = ablate.BuildSweepPlan(*sweepPlan, *top, nil)
+		features = ablate.KnownFeatures()
+		*baseline = "all-off"
+	} else if *sweepPlan == ablate.SweepPlanPairwise {
+		mainConfigs, planErr := ablate.BuildSweepPlan(ablate.SweepPlanMain, *top, nil)
+		if planErr != nil {
+			err = planErr
+		} else {
+			mainReport, runErr := runAblatePlan(t, engineID, engineModel, mainConfigs, "all-off")
+			if runErr != nil {
+				err = runErr
+			} else {
+				configs, err = ablate.BuildSweepPlan(*sweepPlan, *top, ablate.RankMainEffects(mainReport))
+			}
+		}
+		features = ablate.KnownFeatures()
+		*baseline = "all-off"
+	} else {
+		configs, err = ablate.BuildSweepPlan(*sweepPlan, *top, nil)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 2
@@ -171,6 +208,18 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return emitAblation(stdout, stderr, rep, *out, *asJSON)
+}
+
+func runAblatePlan(t *bench.Trace, engineID, engineModel string, configs []ablate.FeatureConfig, baseline string) (*ablate.Report, error) {
+	if anyEnvGated(ablate.KnownFeatures()) {
+		bin, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		rep, _, err := ablate.SweepViaSubprocess(ctx(), bin, t, engineID, engineModel, configs, baseline, ablateArmRunner)
+		return rep, err
+	}
+	return ablate.Sweep(ctx(), t, engineID, engineModel, configs, baseline)
 }
 
 // anyEnvGated reports whether the sweep contains a feature the kernel reads at process

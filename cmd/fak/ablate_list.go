@@ -20,11 +20,14 @@ func printAblateCatalog(w io.Writer, asJSON bool) {
 	cards := ablate.FeatureCatalog()
 	presets := ablateCatalogPresets()
 
+	rungs := ablateRungCatalog()
+
 	if asJSON {
 		payload := struct {
 			Catalog []ablate.FeatureCard `json:"catalog"`
 			Presets map[string][]string  `json:"presets"`
-		}{Catalog: cards, Presets: presets}
+			Rungs   []string             `json:"rungs"`
+		}{Catalog: cards, Presets: presets, Rungs: rungs}
 		b, _ := json.MarshalIndent(payload, "", "  ")
 		_, _ = w.Write(b)
 		_, _ = io.WriteString(w, "\n")
@@ -59,6 +62,14 @@ func printAblateCatalog(w io.Writer, asJSON bool) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "rung 1 = flipped in-process (runtime-settable); rung 2 = re-exec'd in a child with FAK_* set.")
 	fmt.Fprintln(w, "sweep e.g.: fak ablate --sweep vdso   |   --sweep @wire-cache   |   --sweep radix,compressor")
+
+	// The adjudicator-rung axis is a DIFFERENT sweep (over a turnbench trace, not a cache
+	// arm): `--rungs` masks one PDP/PEP link at a time. List those names here so an operator
+	// discovers them without reading Go — distinct from the cache "rung 1/2" column above.
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "adjudicator rungs (a DIFFERENT axis — flip one PDP/PEP link over a turnbench trace, %d levers):\n", len(rungs))
+	fmt.Fprintf(w, "  %s\n", strings.Join(rungs, ", "))
+	fmt.Fprintln(w, "rung sweep e.g.: fak ablate --rungs --trace FILE   |   --rungs=grammar,ifc-sink --trace FILE")
 }
 
 // ablateCatalogPresets returns the preset name -> sorted token expansion map, the same

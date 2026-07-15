@@ -17,7 +17,7 @@ func TestFeatureCatalogCoversEveryCacheLever(t *testing.T) {
 	for _, c := range FeatureCatalog() {
 		carded[c.Token] = true
 	}
-	for _, f := range KnownFeatures {
+	for _, f := range KnownFeatures() {
 		_, produces := cacheEffectForFeature(f, true, metrics.Arm{}, FeatureConfig{}, "inkernel")
 		if produces != carded[f] {
 			t.Fatalf("feature %q: produces cache effect=%v but carded=%v (catalog and cacheEffectForFeature disagree)", f, produces, carded[f])
