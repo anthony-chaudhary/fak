@@ -17,34 +17,46 @@ import (
 // in code — C11 score-parity first, then the C14 time-to-solution ratio, and only
 // from solved trials under a passing gate. The verdict carries its own provenance
 // (MEASURED_WIN vs PROJECTED_WIN) so a mocked run's projected floor can never be
-// quoted as a measured win. RUNNABLE NOW over committed arm fixtures; the same verb
-// consumes the real `run`+`eval` arm artifacts the moment a witnessed run lands.
+// quoted as a measured win.
+//
+// Each arm is given in one of two forms: --raw/--fak FILE, a graded-trials JSON
+// (committed fixtures, RUNNABLE NOW), or --raw-run/--fak-run DIR, a run DIRECTORY
+// carrying the pinned run+eval artifact contract (frontierswe.LoadArmRun): meta.json
+// (the fak.frontierswe.run.v1 identity + mocked provenance), tts-trace.json (the C14
+// per-turn trace + C8 reuse series), and eval.json — the fak.frontierswe.eval.v1
+// grade whose leaderboard_score field carries the C3 score (`fak frontierswe eval
+// --out DIR` persists it, #1719).
 func runFrontiersweCompare(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("frontierswe compare", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	rawPath := fs.String("raw", "", "the raw arm's graded-trials JSON (the harness run without fak) — required")
-	fakPath := fs.String("fak", "", "the fak arm's graded-trials JSON (the same harness routed through fak) — required")
+	rawPath := fs.String("raw", "", "the raw arm's graded-trials JSON (the harness run without fak)")
+	fakPath := fs.String("fak", "", "the fak arm's graded-trials JSON (the same harness routed through fak)")
+	rawRun := fs.String("raw-run", "", "the raw arm's run DIRECTORY (the pinned run+eval artifact contract: "+frontierswe.ArmMetaFile+" + "+frontierswe.ArmTraceFile+" + "+frontierswe.ArmEvalFile+")")
+	fakRun := fs.String("fak-run", "", "the fak arm's run DIRECTORY (same contract as --raw-run)")
 	taskName := fs.String("task", "", "task name for the report header (default: inferred from the first trial)")
 	tolerance := fs.Float64("tolerance", 0, "score-parity tolerance (0 => the library default)")
 	out := fs.String("out", "", "directory to capture compare.json + compare.md into (optional)")
+	mdPath := fs.String("md", "", "write the raw-vs-fak markdown table to this FILE (optional; independent of --out)")
 	asJSON := fs.Bool("json", false, "emit only the compare JSON on stdout (no human summary on stderr)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 
-	if *rawPath == "" || *fakPath == "" {
-		fmt.Fprintln(stderr, "fak frontierswe compare: --raw and --fak graded-trials JSON are both required")
-		return 2
+	if code := checkFrontiersweArmFlags(stderr, "raw", *rawPath, *rawRun); code != 0 {
+		return code
+	}
+	if code := checkFrontiersweArmFlags(stderr, "fak", *fakPath, *fakRun); code != 0 {
+		return code
 	}
 
-	raw, err := loadFrontiersweArm(*rawPath)
+	raw, err := loadFrontiersweCompareArm(*rawPath, *rawRun)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak frontierswe compare: --raw: %v\n", err)
+		fmt.Fprintf(stderr, "fak frontierswe compare: raw arm: %v\n", err)
 		return 1
 	}
-	fak, err := loadFrontiersweArm(*fakPath)
+	fak, err := loadFrontiersweCompareArm(*fakPath, *fakRun)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak frontierswe compare: --fak: %v\n", err)
+		fmt.Fprintf(stderr, "fak frontierswe compare: fak arm: %v\n", err)
 		return 1
 	}
 
@@ -68,6 +80,12 @@ func runFrontiersweCompare(stdout, stderr io.Writer, argv []string) int {
 	if *out != "" {
 		if err := writeFrontiersweCompareOut(*out, jb, rep); err != nil {
 			fmt.Fprintf(stderr, "fak frontierswe compare: --out: %v\n", err)
+			return 1
+		}
+	}
+	if *mdPath != "" {
+		if err := os.WriteFile(*mdPath, []byte(frontierswe.RenderCompareMarkdown(rep)), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak frontierswe compare: --md: %v\n", err)
 			return 1
 		}
 	}
@@ -103,6 +121,30 @@ func loadFrontiersweArm(path string) ([]frontierswe.GradedTrial, error) {
 		return nil, fmt.Errorf("not a graded-trials JSON (object with \"trials\" or a bare array): %w", err)
 	}
 	return arr, nil
+}
+
+// checkFrontiersweArmFlags enforces exactly-one-of --<arm> FILE / --<arm>-run DIR:
+// an arm with neither source is a usage error, and both at once is ambiguous.
+func checkFrontiersweArmFlags(stderr io.Writer, arm, file, runDir string) int {
+	switch {
+	case file == "" && runDir == "":
+		fmt.Fprintf(stderr, "fak frontierswe compare: the %s arm is required: --%s FILE (graded-trials JSON) or --%s-run DIR (the run+eval artifact directory)\n", arm, arm, arm)
+		return 2
+	case file != "" && runDir != "":
+		fmt.Fprintf(stderr, "fak frontierswe compare: give --%s or --%s-run, not both\n", arm, arm)
+		return 2
+	}
+	return 0
+}
+
+// loadFrontiersweCompareArm resolves one arm from whichever source was given: a
+// graded-trials JSON file, or a run directory carrying the pinned artifact contract
+// (frontierswe.LoadArmRun). Exactly one is set by the time this is called.
+func loadFrontiersweCompareArm(file, runDir string) ([]frontierswe.GradedTrial, error) {
+	if runDir != "" {
+		return frontierswe.LoadArmRun(runDir)
+	}
+	return loadFrontiersweArm(file)
 }
 
 // inferFrontiersweTask picks a report task name from the first trial carrying one.

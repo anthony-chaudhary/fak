@@ -118,10 +118,17 @@ usage:
         host is capable, and otherwise prints an honest GATED result with the exact
         remote command — never a fabricated score.
 
-  fak frontierswe compare --raw FILE --fak FILE [--task NAME] [--tolerance T]
-                          [--out DIR] [--json]
-        Fold a raw arm and a fak arm (each a graded-trials JSON: {"trials":[...]} or
-        a bare array of {score,trace,mocked}) into the governed raw-vs-fak table. It
+  fak frontierswe compare (--raw FILE --fak FILE | --raw-run DIR --fak-run DIR)
+                          [--task NAME] [--tolerance T] [--out DIR] [--md FILE]
+                          [--json]
+        Fold a raw arm and a fak arm into the governed raw-vs-fak table. Each arm is
+        either a graded-trials JSON file (--raw/--fak: {"trials":[...]} or a bare
+        array of {score,trace,mocked}) or a run DIRECTORY (--raw-run/--fak-run)
+        carrying the pinned run+eval artifact contract: meta.json (run identity +
+        mocked provenance), tts-trace.json (the C14 per-turn trace + C8 reuse
+        series), and eval.json — the fak.frontierswe.eval.v1 grade whose
+        leaderboard_score field carries the C3 score. --out captures compare.json +
+        compare.md; --md writes the markdown table to one named file. It
         enforces the runbook order in code: the C11 score-parity gate FIRST (fak must
         not regress raw's score distribution), then the C14 time-to-solution ratio
         T_fak/T_raw, and only from SOLVED trials under a passing gate. The verdict
