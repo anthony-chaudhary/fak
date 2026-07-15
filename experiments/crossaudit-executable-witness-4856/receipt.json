@@ -1,0 +1,27 @@
+{
+  "schema": "fak-crossaudit-executable-witness/v1",
+  "issue": 4856,
+  "tested_commit": "8e4549a0db61063b7af5c27ff04d05ecc93234ec",
+  "captured_at": "2026-07-15T13:54:34.5433768Z",
+  "environment": {
+    "go": "go version go1.26.5 windows/amd64",
+    "os": "windows/amd64",
+    "source": "git archive of tested_commit"
+  },
+  "records": [
+    {
+      "name": "fixture-command",
+      "command": "go test ./cmd/crossauditfixture -count=1 -v",
+      "exit_code": 0,
+      "output": "=== RUN   TestFixtureCommandPassesMatchingCandidateAndFailsMismatch\n=== RUN   TestFixtureCommandPassesMatchingCandidateAndFailsMismatch/clean\n=== RUN   TestFixtureCommandPassesMatchingCandidateAndFailsMismatch/corrupt\n--- PASS: TestFixtureCommandPassesMatchingCandidateAndFailsMismatch (0.67s)\n    --- PASS: TestFixtureCommandPassesMatchingCandidateAndFailsMismatch/clean (0.09s)\n    --- PASS: TestFixtureCommandPassesMatchingCandidateAndFailsMismatch/corrupt (0.01s)\nPASS\nok  \tgithub.com/anthony-chaudhary/fak/cmd/crossauditfixture\t0.830s\n",
+      "output_sha256": "sha256:0a5f2079cd1f6f0ebe29aaf0d0e82853d2cf3f1275f02316d35ca653c646b2bf"
+    },
+    {
+      "name": "corpus-selfcheck",
+      "command": "go test ./internal/modelroute -run TestAccidentalCorpus -count=1 -v",
+      "exit_code": 0,
+      "output": "=== RUN   TestAccidentalCorpusPairsHaveDeterministicGroundTruth\n--- PASS: TestAccidentalCorpusPairsHaveDeterministicGroundTruth (1.28s)\n=== RUN   TestAccidentalCorpusLabelFlipBreaksSelfCheck\n--- PASS: TestAccidentalCorpusLabelFlipBreaksSelfCheck (0.52s)\n=== RUN   TestAccidentalCorpusCoversRequestedFailureClasses\n--- PASS: TestAccidentalCorpusCoversRequestedFailureClasses (0.00s)\nPASS\nok  \tgithub.com/anthony-chaudhary/fak/internal/modelroute\t2.096s\n",
+      "output_sha256": "sha256:fc0462fe0c8b66eb26b8bceb7ff86d9d8300c931d603a4fc1b8d555c8ddd5139"
+    }
+  ]
+}
