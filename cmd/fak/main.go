@@ -158,6 +158,8 @@ func main() {
 		cmdRecall(os.Args[2:])
 	case "recover":
 		cmdRecover(os.Args[2:])
+	case "concept":
+		os.Exit(runConcept(os.Stdout, os.Stderr, os.Args[2:]))
 	case "rename-concept":
 		cmdRenameConcept(os.Args[2:])
 	case "session":
