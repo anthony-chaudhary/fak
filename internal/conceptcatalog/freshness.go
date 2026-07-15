@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -88,6 +90,7 @@ func CheckGitTree(root, treeish string) (FreshnessResult, error) {
 	defer os.RemoveAll(tmp)
 	cmd := exec.Command("git", "archive", "--format=tar", treeish)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	raw, err := cmd.Output()
 	if err != nil {
 		return FreshnessResult{}, fmt.Errorf("git archive %s: %w", treeish, err)
@@ -142,6 +145,7 @@ func generate(root, out string) error {
 	}
 	cmd := exec.Command(python, script, "--workspace", root, "--markdown-dir", out)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
@@ -186,6 +190,7 @@ func CheckInvariant(root string) (InvariantResult, error) {
 	}
 	cmd := exec.Command(python, script, "--workspace", root, "--json")
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, runErr := cmd.Output()
 	if runErr != nil {
 		if _, ok := runErr.(*exec.ExitError); !ok {
@@ -229,6 +234,7 @@ func CheckInvariant(root string) (InvariantResult, error) {
 func git(root string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	b, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(b)))

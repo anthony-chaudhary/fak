@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // DisambiguationWitness is one independently materialized view used by land.
@@ -76,6 +76,7 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	defer os.RemoveAll(tmp)
 	cmd := exec.Command("git", "archive", "--format=tar", tree)
 	cmd.Dir = repo
+	windowgate.ConfigureBackgroundCommand(cmd)
 	archive, err := cmd.Output()
 	if err != nil {
 		w.Detail = err.Error()
@@ -89,9 +90,7 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	out := filepath.Join(tmp, "tree")
 	_ = os.MkdirAll(out, 0755)
 	tar := exec.Command("tar", "-xf", tarPath, "-C", out)
-	if runtime.GOOS == "windows" {
-		tar.SysProcAttr = nil
-	}
+	windowgate.ConfigureBackgroundCommand(tar)
 	if b, err := tar.CombinedOutput(); err != nil {
 		w.Detail = fmt.Sprintf("extract candidate tree: %v: %s", err, b)
 		return w

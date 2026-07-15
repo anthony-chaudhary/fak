@@ -72,6 +72,7 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 	case "generate":
 		cmd := exec.Command("python", filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), "--workspace", root, "--markdown-dir", filepath.Join(root, "docs", "concept-disambiguation-scorecard"))
 		cmd.Dir = root
+		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		cmd.Env = os.Environ()
