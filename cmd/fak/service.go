@@ -27,6 +27,9 @@ type serviceResult struct {
 	Path       string `json:"path,omitempty"`
 	Active     bool   `json:"active,omitempty"`
 	Executable string `json:"executable,omitempty"`
+	PIDBefore  uint32 `json:"pid_before,omitempty"`
+	PIDAfter   uint32 `json:"pid_after,omitempty"`
+	StateKept  bool   `json:"state_kept,omitempty"`
 }
 
 var serviceCommand = exec.Command

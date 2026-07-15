@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -118,6 +119,9 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 	state := windowsServiceStateDir()
 	result := serviceResult{Manager: "windows-scm", Unit: windowsGuardServiceName, Path: exe}
 	if dry {
+		if action == "witness" {
+			result.StateKept = true
+		}
 		return result, 0
 	}
 	m, err := mgr.Connect()
@@ -177,6 +181,52 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 			return result, 1
 		}
 		result.Active = st.State == svc.Running
+	case "witness":
+		s, err := m.OpenService(windowsGuardServiceName)
+		if err != nil {
+			return result, 3
+		}
+		defer s.Close()
+		st, err := s.Query()
+		if err != nil || st.State != svc.Running || st.ProcessId == 0 {
+			fmt.Fprintln(stderr, "service is not running")
+			return result, 1
+		}
+		result.PIDBefore = st.ProcessId
+		marker := filepath.Join(state, "scm-witness-state.txt")
+		markerValue := strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.WriteFile(marker, []byte(markerValue), 0o600); err != nil {
+			fmt.Fprintln(stderr, "write witness state:", err)
+			return result, 1
+		}
+		process, err := os.FindProcess(int(st.ProcessId))
+		if err != nil {
+			fmt.Fprintln(stderr, "open service process:", err)
+			return result, 1
+		}
+		if err := process.Kill(); err != nil {
+			fmt.Fprintln(stderr, "kill service process:", err)
+			return result, 1
+		}
+		deadline := time.Now().Add(45 * time.Second)
+		for time.Now().Before(deadline) {
+			time.Sleep(500 * time.Millisecond)
+			st, err = s.Query()
+			if err == nil && st.State == svc.Running && st.ProcessId != 0 && st.ProcessId != result.PIDBefore {
+				result.PIDAfter = st.ProcessId
+				break
+			}
+		}
+		if result.PIDAfter == 0 {
+			fmt.Fprintln(stderr, "SCM did not replace the killed service process within 45s")
+			return result, 1
+		}
+		retained, err := os.ReadFile(marker)
+		if err != nil || string(retained) != markerValue {
+			fmt.Fprintln(stderr, "machine state was not retained across SCM restart")
+			return result, 1
+		}
+		result.StateKept = true
 	case "uninstall":
 		s, err := m.OpenService(windowsGuardServiceName)
 		if err != nil {

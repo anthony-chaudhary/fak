@@ -42,3 +42,10 @@ func TestWindowsServiceDryRunNamesLeastPrivilegeSCMUnit(t *testing.T) {
 		t.Fatalf("r=%+v rc=%d", r, rc)
 	}
 }
+
+func TestWindowsServiceWitnessDryRunIsNonDestructive(t *testing.T) {
+	r, rc := windowsServiceAction("witness", io.Discard, io.Discard, true)
+	if rc != 0 || r.Manager != "windows-scm" || r.Unit != windowsGuardServiceName || !r.StateKept || r.PIDBefore != 0 || r.PIDAfter != 0 {
+		t.Fatalf("r=%+v rc=%d", r, rc)
+	}
+}
