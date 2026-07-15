@@ -64,3 +64,32 @@ func TestScopedPrefixAdmissionFailsClosed(t *testing.T) {
 		t.Fatalf("absent promotion err=%v", err)
 	}
 }
+
+func TestScopedSnapshotLookupChoosesLongestCompleteSnapshotAcrossScopes(t *testing.T) {
+	cache := NewScoped(0)
+	owner := CacheIdentity{Tenant: "tenant-a", Agent: "worker-1"}
+	cfg := model.Config{NumLayers: 1, NumKVHeads: 1, HeadDim: 1}
+	tenantSnapshot := &model.PrefixSnapshot{Cache: model.NewKVCache(cfg)}
+	if err := cache.AdmitPrivateSnapshot(owner, []int{1, 2}, tenantSnapshot, []float32{7}); err != nil {
+		t.Fatal(err)
+	}
+	// This longer agent-private radix match has no complete device snapshot. It must
+	// not mask the shorter tenant snapshot that is still visible to the same owner.
+	if err := cache.Admit(ScopeAgent, owner, []int{1, 2, 3}, model.NewKVCache(cfg), nil); err != nil {
+		t.Fatal(err)
+	}
+	got, logits, matched, scope, err := cache.LookupSnapshot(owner, []int{1, 2, 3, 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("longer snapshot-less agent path masked tenant device snapshot")
+	}
+	defer got.Close()
+	if matched != 2 || scope != ScopeTenant {
+		t.Fatalf("matched=%d scope=%d want matched=2 scope=%d", matched, scope, ScopeTenant)
+	}
+	if !reflect.DeepEqual(logits, []float32{7}) {
+		t.Fatalf("logits=%v want [7]", logits)
+	}
+}

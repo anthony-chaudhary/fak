@@ -137,20 +137,27 @@ func (s *ScopedTree) LookupSnapshot(owner CacheIdentity, tokens []int) (*model.P
 		if err != nil {
 			continue
 		}
-		n, matched := s.tree.LookupNS(ns, tokens)
-		if n != nil && matched > bestMatched {
-			best, bestMatched, bestScope = n, matched, scope
+		n, _ := s.tree.LookupNS(ns, tokens)
+		for candidate := n; candidate != nil; candidate = candidate.parent {
+			if candidate.snapshot == nil {
+				continue
+			}
+			// Compare complete snapshots, not raw radix matches. A longer path in one
+			// scope may contain only host KV and must not mask a reusable device
+			// snapshot in another visible scope. Strictly-greater preserves the
+			// agent, tenant, fleet tie priority established by checks.
+			if candidate.plen > bestMatched {
+				best, bestMatched, bestScope = candidate, candidate.plen, scope
+			}
+			break
 		}
 		if n != nil {
 			s.tree.Done(n)
 		}
 	}
-	for candidate := best; candidate != nil; candidate = candidate.parent {
-		if candidate.snapshot == nil {
-			continue
-		}
-		snap, err := candidate.snapshot.Clone()
-		return snap, candidate.Logits(), candidate.plen, bestScope, err
+	if best != nil {
+		snap, err := best.snapshot.Clone()
+		return snap, best.Logits(), bestMatched, bestScope, err
 	}
 	return nil, nil, 0, bestScope, nil
 }
