@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -13,31 +14,17 @@ import (
 // no-op, and the recorded continuity verdict must read handback=seed-prompt.
 
 func TestGuardSeedPromptInjectReachesChildArgv(t *testing.T) {
-	cmd := []string{"claude", "-p"}
-	got, handback, injected := guardSeedPromptRelaunchCommand(cmd, "claude", "resume the triage task", nil)
-	if !injected {
-		t.Fatalf("recognized agent with a seed must inject, got injected=false")
+	got, handback, injected := guardSeedPromptRelaunchCommand([]string{"claude", "-p"}, "claude", "resume the triage task", nil)
+	if !injected || handback != guardRestartHandbackSeedPrompt {
+		t.Fatalf("injected=%v handback=%q", injected, handback)
 	}
-	if handback != guardRestartHandbackSeedPrompt {
-		t.Fatalf("handback = %q, want %q", handback, guardRestartHandbackSeedPrompt)
+	flag := seedPromptArgIndex(got, "--append-system-prompt-file")
+	if flag < 0 || flag+1 >= len(got) {
+		t.Fatalf("seed file flag missing: %v", got)
 	}
-	joined := strings.Join(got, " ")
-	if !strings.Contains(joined, "--append-system-prompt resume the triage task") {
-		t.Fatalf("seed did not reach the child argv via the prompt entrypoint: %v", got)
-	}
-	// The prompt flag must be immediately followed by the seed value (argv adjacency).
-	found := false
-	for i := 0; i+1 < len(got); i++ {
-		if got[i] == "--append-system-prompt" && got[i+1] == "resume the triage task" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("--append-system-prompt must be followed by the seed value, got %v", got)
-	}
-	// The input command must not be mutated in place.
-	if strings.Join(cmd, " ") != "claude -p" {
-		t.Fatalf("input command was mutated: %v", cmd)
+	raw, err := os.ReadFile(got[flag+1])
+	if err != nil || string(raw) != "resume the triage task" {
+		t.Fatalf("seed file=%q err=%v argv=%v", raw, err, got)
 	}
 }
 
@@ -79,13 +66,15 @@ func TestGuardSeedPromptInjectNoTruncationLogWhenFits(t *testing.T) {
 	var log strings.Builder
 	got, _, injected := guardSeedPromptRelaunchCommand([]string{"claude", "-p"}, "claude", "short seed", &log)
 	if !injected {
-		t.Fatalf("expected injection")
+		t.Fatal("short seed should inject")
 	}
-	if got[len(got)-1] != "short seed" {
-		t.Fatalf("an in-budget seed must pass through untouched, got %q", got[len(got)-1])
+	flag := seedPromptArgIndex(got, "--append-system-prompt-file")
+	raw, err := os.ReadFile(got[flag+1])
+	if err != nil || string(raw) != "short seed" {
+		t.Fatalf("seed file=%q err=%v", raw, err)
 	}
-	if strings.Contains(log.String(), "dropped") {
-		t.Fatalf("no truncation should be logged for an in-budget seed, got %q", log.String())
+	if log.Len() != 0 {
+		t.Fatalf("in-budget seed logged truncation: %q", log.String())
 	}
 }
 
@@ -114,21 +103,15 @@ func TestGuardSeedPromptInjectEmptySeedNoOp(t *testing.T) {
 }
 
 func TestGuardSeedPromptInjectIdempotent(t *testing.T) {
-	// A second restart in the same session must not stack a second flag; it replaces the prior
-	// seed value with the fresher one.
 	once, _, _ := guardSeedPromptRelaunchCommand([]string{"claude", "-p"}, "claude", "first seed", nil)
 	twice, _, _ := guardSeedPromptRelaunchCommand(once, "claude", "second seed", nil)
-	n := 0
-	for _, a := range twice {
-		if a == "--append-system-prompt" {
-			n++
-		}
+	if n := seedPromptArgCount(twice, "--append-system-prompt-file"); n != 1 {
+		t.Fatalf("file flag count=%d argv=%v", n, twice)
 	}
-	if n != 1 {
-		t.Fatalf("--append-system-prompt must appear exactly once across repeated restarts, got %d in %v", n, twice)
-	}
-	if twice[len(twice)-1] != "second seed" {
-		t.Fatalf("the fresher seed must replace the prior value, got %q", twice[len(twice)-1])
+	flag := seedPromptArgIndex(twice, "--append-system-prompt-file")
+	raw, err := os.ReadFile(twice[flag+1])
+	if err != nil || string(raw) != "second seed" {
+		t.Fatalf("second seed=%q err=%v", raw, err)
 	}
 }
 

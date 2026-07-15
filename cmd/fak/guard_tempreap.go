@@ -51,6 +51,7 @@ var guardTempDirHooks = map[string]bool{
 	"mcp":          true,
 	"pi":           true,
 	"precompact":   true,
+	"seedprompt":   true,
 	"sessionstart": true,
 	"stophook":     true,
 	"toolproc":     true,

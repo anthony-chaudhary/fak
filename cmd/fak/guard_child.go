@@ -1121,6 +1121,18 @@ func guardBoundSeedPrompt(seed string, tokenBudget int) (bounded string, dropped
 // unread) or an empty seed. Idempotent across repeated restarts: a prior injected seed VALUE is
 // replaced with the fresher one rather than stacking a second flag. The input command is never
 // mutated in place.
+func writeGuardSeedPromptFile(seed string) (string, error) {
+	dir, err := guardSessionTempDir("seedprompt")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "restart-seed.txt")
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func guardSeedPromptRelaunchCommand(command []string, agentName, seedText string, log io.Writer) (out []string, handback string, injected bool) {
 	seed := strings.TrimSpace(seedText)
 	flag, ok := guardSeedPromptFlagForAgent(agentName)
@@ -1134,8 +1146,24 @@ func guardSeedPromptRelaunchCommand(command []string, agentName, seedText string
 	}
 	out = make([]string, len(command), len(command)+2)
 	copy(out, command)
-	// A prior restart in the same session may already carry an injected seed flag; replace its
-	// value with the fresher seed rather than appending a second --append-system-prompt.
+	if guardAgentBaseName(agentName) == "claude" {
+		path, err := writeGuardSeedPromptFile(bounded)
+		if err != nil {
+			if log != nil {
+				fmt.Fprintf(log, "fak guard: restart seed prompt file write failed: %v; seed JSON remains available for recovery\n", err)
+			}
+			return command, "", false
+		}
+		fileFlag := flag + "-file"
+		for i := 1; i+1 < len(out); i++ {
+			if out[i] == flag || out[i] == fileFlag {
+				out[i], out[i+1] = fileFlag, path
+				return out, guardRestartHandbackSeedPrompt, true
+			}
+		}
+		out = append(out, fileFlag, path)
+		return out, guardRestartHandbackSeedPrompt, true
+	}
 	for i := 1; i+1 < len(out); i++ {
 		if out[i] == flag {
 			out[i+1] = bounded
