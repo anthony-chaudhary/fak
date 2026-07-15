@@ -165,6 +165,8 @@ type Config struct {
 	NGroup              int     `json:"n_group,omitempty"`
 	TopKGroup           int     `json:"topk_group,omitempty"`
 	RoutedScalingFactor float64 `json:"routed_scaling_factor,omitempty"`
+	ScoringFunc         string  `json:"scoring_func,omitempty"`
+	TopKMethod          string  `json:"topk_method,omitempty"`
 
 	// Multi-Token-Prediction (MTP) self-speculation head depth. The MoE families that
 	// ship a speculative-decoding head declare its depth here: GLM-5.2 (glm_moe_dsa) and
@@ -243,6 +245,7 @@ type Config struct {
 	// expert's FFN width (defaults to IntermediateSize when zero).
 	SwigluAlpha            float64 `json:"swiglu_alpha,omitempty"`
 	SwigluLimit            float64 `json:"swiglu_limit,omitempty"`
+	ExpertDtype            string  `json:"expert_dtype,omitempty"`
 	SharedIntermediateSize int     `json:"shared_intermediate_size,omitempty"`
 
 	// DenseIntermediateSize is the FFN width of MiniMax-M3's first-k DENSE layers
@@ -389,6 +392,7 @@ type configJSONHints struct {
 	// fill the canonical fields only when the canonical key is absent, so num_local_experts
 	// families (Mixtral etc.) stay untouched.
 	NumExpertsAlt               *int   `json:"num_experts"`
+	NumRoutedExpertsAlt         *int   `json:"n_routed_experts"`
 	SharedExpertIntermediateAlt *int   `json:"shared_expert_intermediate_size"`
 	Alibi                       *bool  `json:"alibi"`
 	SlidingWindow               *int   `json:"sliding_window"`
@@ -560,6 +564,9 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	// unaffected (their alt pointers stay nil).
 	if c.NumExperts == 0 && h.NumExpertsAlt != nil && *h.NumExpertsAlt > 0 {
 		c.NumExperts = *h.NumExpertsAlt
+	}
+	if c.NumExperts == 0 && h.NumRoutedExpertsAlt != nil && *h.NumRoutedExpertsAlt > 0 {
+		c.NumExperts = *h.NumRoutedExpertsAlt
 	}
 	if c.SharedIntermediateSize == 0 && h.SharedExpertIntermediateAlt != nil && *h.SharedExpertIntermediateAlt > 0 {
 		c.SharedIntermediateSize = *h.SharedExpertIntermediateAlt
