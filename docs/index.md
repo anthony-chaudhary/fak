@@ -236,6 +236,7 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 | **How shared state is split** | [Shared state ladder](shared-state-ladder.md) |
 | **A collaborative task state contract** | [Shared task record contract](shared-task-record-contract.md) |
 | **When managed context should append or reconstruct the task** | [Query, not chat](query-not-chat.md) — originating-task pin and checkable reseed-versus-append rule |
+| **How to construct model-visible directives** | [Positive-state construction](positive-state-construction.md) — broadcast the target state instead of a negation operand |
 | **How every new unit of work is scoped and shipped** (spine-first, then fan out the backlog with `fak issue fanout`) | [Spine-first + fan-out defaults](spine-first-defaults.md) |
 | **How agents discover fak features and memory tools** | [Self-feature query spine](notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
