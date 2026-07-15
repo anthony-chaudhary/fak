@@ -1419,7 +1419,16 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	defer budgetTicker.Stop()
 	stopLoginHijackWatch := guardStartLoginHijackWatch(credPath, os.Stderr)
 	defer stopLoginHijackWatch()
+	relaunchFiles, err := captureGuardRelaunchFiles(command)
+	if err != nil {
+		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		return
+	}
 	for {
+		if err := relaunchFiles.ensure(); err != nil {
+			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
 		if err != nil {
