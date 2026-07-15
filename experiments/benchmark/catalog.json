@@ -16,7 +16,7 @@
         "workstation-a-parity-reference-front-20260618",
         "workstation-a-turn-tax-turntax-happy-20260618",
         "node-agent-live-production-workload-20260618",
-        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
+        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
         "workstation-a-fanbench-research-goal-20260618",
         "workstation-a-fanout-csv-fanbench-resear-20260618",
         "workstation-a-radixbench-smollm2-135m-20260618",
@@ -155,8 +155,8 @@
         "workstation-a-fanbench-research-goal-20260618",
         "workstation-a-fanbench-research-goal-20260619"
       ],
-      "synthetic-llama (64h/4L/8q-2kv, vocab 256) \u2014 WIRING witness; numerics proven by internal/model oracle": [
-        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618"
+      "synthetic-llama (64h/4L/8q-2kv, vocab 256) — WIRING witness; numerics proven by internal/model oracle": [
+        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618"
       ],
       "unknown": [
         "workstation-a-unknown-unknown-20260617"
@@ -210,7 +210,7 @@
         "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
       ],
       "q8": [
-        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
+        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
         "workstation-a-radixbench-smollm2-135m-20260618",
         "workstation-a-smollm2-135m-q8-batch-20260618T145635Z"
       ],
@@ -238,7 +238,7 @@
       ]
     }
   },
-  "last_updated": "2026-07-14T23:45:29Z",
+  "last_updated": "2026-07-15T00:03:03Z",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -304,7 +304,7 @@
       "last_run": "20260715T061239Z",
       "os": "GCP Deep Learning VM (CUDA)",
       "role": "bench-node",
-      "runs": 2
+      "runs": 4
     },
     "node-macos-a": {
       "arch": "arm64",
@@ -1352,6 +1352,34 @@
         "model-benchmark"
       ],
       "timestamp": "20260714T234529Z"
+    },
+    {
+      "machine_id": "gcp-g2-l4-32",
+      "model": "SmolLM2-135M-Instruct",
+      "path": "experiments/benchmark/runs/by-machine/gcp-g2-l4-32/20260714T235827Z-bench-fleet-c4f937d74bdff3a1",
+      "precision": "q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260714T235827Z",
+      "tags": [
+        "bench-fleet",
+        "gpu",
+        "model-benchmark"
+      ],
+      "timestamp": "20260714T235827Z"
+    },
+    {
+      "machine_id": "gcp-g2-l4-32",
+      "model": "SmolLM2-135M-Instruct",
+      "path": "experiments/benchmark/runs/by-machine/gcp-g2-l4-32/20260715T000303Z-bench-fleet-c4f937d74bdff3a1",
+      "precision": "q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260715T000303Z",
+      "tags": [
+        "bench-fleet",
+        "gpu",
+        "model-benchmark"
+      ],
+      "timestamp": "20260715T000303Z"
     }
   ],
   "version": "1.0",
