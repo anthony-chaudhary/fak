@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/reachdelta"
 )
 
 // dogfoodManifestPolicy loads and parses the shipped dogfood policy the fak-dogfood
@@ -29,6 +30,23 @@ func dogfoodManifestPolicy(t *testing.T) adjudicator.Policy {
 	return p
 }
 
+// TestDogfoodManifestDoesNotWidenReach locks the shipped manifest against a
+// pinned, reviewed floor. Unlike a verdict-only matrix, reachdelta names every
+// structural widening category and path so a policy edit cannot silently expand
+// a surface the examples do not happen to exercise.
+func TestDogfoodManifestDoesNotWidenReach(t *testing.T) {
+	baselineJSON, err := os.ReadFile("testdata/dogfood-policy-reach-baseline.json")
+	if err != nil {
+		t.Fatalf("read reach baseline: %v", err)
+	}
+	baseline, err := policy.Parse(baselineJSON)
+	if err != nil {
+		t.Fatalf("parse reach baseline: %v", err)
+	}
+	if findings := reachdelta.Delta(baseline, dogfoodManifestPolicy(t)); len(findings) != 0 {
+		t.Fatalf("dogfood policy widened reviewed reach: %+v", findings)
+	}
+}
 func dogfoodManifestCall(tool, jsonArgs string) *abi.ToolCall {
 	return &abi.ToolCall{
 		Tool: tool,
