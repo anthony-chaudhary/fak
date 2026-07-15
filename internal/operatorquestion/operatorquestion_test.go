@@ -1,6 +1,8 @@
 package operatorquestion
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -67,5 +69,21 @@ func TestNormalizeRejectsUnknownFieldsAndHarnesses(t *testing.T) {
 	}
 	if _, err := Normalize(NativeGate{HarnessCommand: "mystery-agent", Tool: "ask", Payload: []byte(`{}`)}); err == nil {
 		t.Fatal("unknown harness was accepted")
+	}
+}
+
+func TestLastFromTranscriptNormalizesLastOperatorGate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which isolation?","options":[{"label":"Explicit paths","description":"owned files"},{"label":"Wait","description":"peer completion"}]}]}}]}}` + "\n" +
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"path":"README.md"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := LastFromTranscript(path, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || got.Kind != ChooseApproach || got.Question != "Which isolation?" || len(got.Options) != 2 {
+		t.Fatalf("found=%v got=%+v", found, got)
 	}
 }

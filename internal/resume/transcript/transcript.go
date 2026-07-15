@@ -46,6 +46,7 @@ type block struct {
 	Type    string          `json:"type"`
 	Text    string          `json:"text"`
 	Name    string          `json:"name"`
+	Input   json.RawMessage `json:"input"`
 	Content json.RawMessage `json:"content"`
 }
 
@@ -127,6 +128,39 @@ func (r Record) LastToolUseName() string {
 		}
 	}
 	return ""
+}
+
+// ToolUse is one native harness tool request, including its raw JSON input. The input
+// stays raw so each typed adapter owns its own strict schema rather than transcript
+// silently dropping fields it does not understand.
+type ToolUse struct {
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// ToolUses returns tool_use blocks in transcript order. Returned input bytes are copied,
+// so callers may retain them independently of the decoded record.
+func (r Record) ToolUses() []ToolUse {
+	if r.Message == nil {
+		return nil
+	}
+	var out []ToolUse
+	for _, b := range contentBlocks(r.Message.Content) {
+		if b.Type != "tool_use" || strings.TrimSpace(b.Name) == "" {
+			continue
+		}
+		out = append(out, ToolUse{Name: b.Name, Input: append(json.RawMessage(nil), b.Input...)})
+	}
+	return out
+}
+
+// LastToolUse returns the last native tool request and its input.
+func (r Record) LastToolUse() (ToolUse, bool) {
+	uses := r.ToolUses()
+	if len(uses) == 0 {
+		return ToolUse{}, false
+	}
+	return uses[len(uses)-1], true
 }
 
 // HasToolResult reports whether the record's content carries a tool_result block —

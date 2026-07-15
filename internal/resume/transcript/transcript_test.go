@@ -596,3 +596,50 @@ func TestParseTime(t *testing.T) {
 		}
 	})
 }
+
+func TestRecordToolUsesPreservesNativeInput(t *testing.T) {
+	rec := transcript.Record{Message: &transcript.Message{Role: "assistant", Content: json.RawMessage(`[
+		{"type":"text","text":"I need one decision"},
+		{"type":"tool_use","name":"Read","input":{"path":"README.md"}},
+		{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which isolation?","options":[{"label":"Explicit paths","description":"Commit owned files"},{"label":"Wait","description":"Wait for peers"}]}]}}
+	]`)}}
+	uses := rec.ToolUses()
+	if len(uses) != 2 || uses[0].Name != "Read" || uses[1].Name != "AskUserQuestion" {
+		t.Fatalf("uses=%+v", uses)
+	}
+	var input struct {
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(uses[1].Input, &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Questions) != 1 || input.Questions[0].Question != "Which isolation?" || len(input.Questions[0].Options) != 2 {
+		t.Fatalf("input=%+v", input)
+	}
+	last, ok := rec.LastToolUse()
+	if !ok || last.Name != uses[1].Name || string(last.Input) != string(uses[1].Input) {
+		t.Fatalf("last=%+v ok=%v", last, ok)
+	}
+	uses[1].Input[0] = 'X'
+	lastAgain, _ := rec.LastToolUse()
+	if len(lastAgain.Input) == 0 || lastAgain.Input[0] != '{' {
+		t.Fatal("ToolUses returned aliased input bytes")
+	}
+}
+
+func TestRecordToolUsesIgnoresMalformedAndNonToolBlocks(t *testing.T) {
+	rec := transcript.Record{Message: &transcript.Message{Content: json.RawMessage(`[
+		{"type":"tool_use","name":"","input":{"ignored":true}},
+		{"type":"tool_result","name":"AskUserQuestion","content":"not an input"},
+		{"type":"tool_use","name":"ExitPlanMode","input":{"plan":"inspect"}}
+	]`)}}
+	uses := rec.ToolUses()
+	if len(uses) != 1 || uses[0].Name != "ExitPlanMode" {
+		t.Fatalf("uses=%+v", uses)
+	}
+}
