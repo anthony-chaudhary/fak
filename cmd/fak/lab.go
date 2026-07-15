@@ -335,6 +335,7 @@ func labReadiness(stdout, stderr io.Writer, argv []string) int {
 			reps = fleet.ReadReports(dir, ro)
 		}
 		snap := fleet.Fold(ro, reps, fleet.FoldOpts{})
+		snap.Orphans = fleet.OrphanReports(dir, ro) // name a key-mismatch instead of "no reports"
 		rec = labReadinessFromSnapshot(*machineClass, snap, time.Now())
 		if probs := rec.Validate(); len(probs) > 0 {
 			fmt.Fprintf(stderr, "fak lab readiness: invalid record: %s\n", strings.Join(probs, "; "))
@@ -442,6 +443,12 @@ func labReadinessFromSnapshot(machineClass string, snap fleet.Snapshot, now time
 		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "publish-inference-report", "no-useful-lab-report", now)
 	}
 	if snap.Reachable == 0 {
+		// Reports may be PRESENT yet bind to no box (a producer writing under non-roster
+		// keys): that reads as reachable==0 too, but the honest remedy is to reconcile the
+		// report keys with the roster, NOT "publish a report" (there already is one).
+		if len(snap.Orphans) > 0 {
+			return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "reconcile-report-keys-with-roster", "reports-under-non-roster-keys", now)
+		}
 		return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "publish-lab-readiness", "no-fresh-lab-report", now)
 	}
 	return fleet.NewLabReadiness(machineClass, linkstate.Waiting, linkstate.DetailIndeterminate, "publish-inference-report", "no-useful-lab-report", now)

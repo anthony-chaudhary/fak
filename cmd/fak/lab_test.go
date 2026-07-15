@@ -431,3 +431,27 @@ func TestLabReadinessFromSnapshotIgnoresStaleUsefulInference(t *testing.T) {
 		t.Fatalf("evidence = %q, want no-useful-lab-report", rec.Evidence)
 	}
 }
+
+// TestLabReadinessFromSnapshotNamesKeyMismatch: when nothing is reachable BUT report
+// files are present under non-roster keys (Snapshot.Orphans), the derived next_action
+// must name the key-mismatch, not tell the operator to "publish a report" that already
+// exists. Still WAITING / admit_dispatch:false — the gate stays honest, only the remedy
+// changes. This is the readiness twin of the ORPHANS line on `fak lab status`.
+func TestLabReadinessFromSnapshotNamesKeyMismatch(t *testing.T) {
+	rec := labReadinessFromSnapshot("gpu-server", fleet.Snapshot{
+		Reachable: 0,
+		Orphans:   []string{"stray-1", "stray-2"},
+	}, time.Now())
+	if rec.AdmitDispatch || rec.Phase == linkstate.Clear {
+		t.Fatalf("no reachable box must fail closed, got %+v", rec)
+	}
+	if rec.NextAction != "reconcile-report-keys-with-roster" || rec.Evidence != "reports-under-non-roster-keys" {
+		t.Fatalf("orphans-present derivation = (%q,%q), want (reconcile-report-keys-with-roster, reports-under-non-roster-keys)", rec.NextAction, rec.Evidence)
+	}
+
+	// No orphans and nothing reachable -> the original "publish-lab-readiness" remedy.
+	bare := labReadinessFromSnapshot("gpu-server", fleet.Snapshot{Reachable: 0}, time.Now())
+	if bare.NextAction != "publish-lab-readiness" || bare.Evidence != "no-fresh-lab-report" {
+		t.Fatalf("no-orphan derivation = (%q,%q), want (publish-lab-readiness, no-fresh-lab-report)", bare.NextAction, bare.Evidence)
+	}
+}
