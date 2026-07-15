@@ -30,6 +30,7 @@ package compute
 import "C"
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
