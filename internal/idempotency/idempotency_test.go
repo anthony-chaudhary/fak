@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -157,5 +159,92 @@ func TestKeyIsStableAndSeparated(t *testing.T) {
 	}
 	if Key("ab", "c") == Key("a", "bc") {
 		t.Error("op/token boundary must be separated")
+	}
+}
+
+// TestConcurrentApplyRunsOnce is the cross-process concurrency witness: two stores
+// that BOTH opened before either applied — each holding an empty open-time snapshot,
+// which is exactly the race — collapse a concurrent same-key Do to ONE apply. The
+// loser blocks on the ledger lock, re-reads under it, finds the winner's fresh
+// record, and replays it.
+//
+// This is the dgx-bridge double-dispatch shape: two workers pick up the same nonce
+// and would both run the expensive op because neither has recorded yet. It is
+// distinct from TestRetryAfterHangReplaysWithoutDuplicate, which covers the
+// SEQUENTIAL reopen (a fresh Open re-reads the ledger and so never missed).
+//
+// Two *Store values in one process are a faithful stand-in for two processes here:
+// each opens its own lock fd, and flock contends across separate open file
+// descriptions on both unix and Windows. Their in-process sync.Mutexes are distinct,
+// so only the file lock can serialize them.
+func TestConcurrentApplyRunsOnce(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+
+	// Both stores open BEFORE either applies: neither's snapshot has the record.
+	store1, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open store1: %v", err)
+	}
+	store2, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open store2: %v", err)
+	}
+
+	var calls int32
+	started := make(chan struct{}) // closed once the winner is inside apply
+	release := make(chan struct{}) // closes to let the winner finish
+	var once sync.Once
+	apply := func() (string, error) {
+		atomic.AddInt32(&calls, 1)
+		once.Do(func() { close(started) })
+		<-release
+		return "created issue #1", nil
+	}
+
+	key := Key("issue-create", "concurrent-dispatch")
+	type outcome struct {
+		res      string
+		replayed bool
+		err      error
+	}
+	results := make(chan outcome, 2)
+	do := func(s *Store) {
+		res, replayed, err := s.Do(key, "issue-create", apply)
+		results <- outcome{res, replayed, err}
+	}
+
+	go do(store1)
+	<-started // store1 now holds the lock, parked inside apply
+
+	go do(store2) // must block acquiring the ledger lock, NOT apply
+	// Give the loser time to reach the lock and poll it, so releasing the winner
+	// genuinely exercises the blocked path rather than a lucky ordering.
+	time.Sleep(10 * lockPoll)
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("apply ran %d times while the lock was held; the second Do must block, not apply", got)
+	}
+	close(release)
+
+	var applied, replayed int
+	for i := 0; i < 2; i++ {
+		got := <-results
+		if got.err != nil {
+			t.Fatalf("Do: %v", got.err)
+		}
+		if got.res != "created issue #1" {
+			t.Errorf("Do returned %q, want the single applied result", got.res)
+		}
+		if got.replayed {
+			replayed++
+		} else {
+			applied++
+		}
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("op double-applied: apply ran %d times, want exactly 1", got)
+	}
+	if applied != 1 || replayed != 1 {
+		t.Errorf("got %d applied / %d replayed, want exactly 1 each", applied, replayed)
 	}
 }
