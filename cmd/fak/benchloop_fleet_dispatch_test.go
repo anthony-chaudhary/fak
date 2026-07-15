@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -66,18 +65,74 @@ func TestBenchFleetRouteUsesConfiguredMacSession(t *testing.T) {
 	}
 }
 
-func TestBenchFleetRouteRunsWorkstationLocally(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows control route")
-	}
-	name, args, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a", Command: "go run ./cmd/livecodebench --check --json"})
-	if err != nil || name != "powershell.exe" || route != "local-control" || state != "running" {
-		t.Fatalf("name=%q args=%q route=%q state=%q err=%v", name, args, route, state, err)
-	}
-	if got := strings.Join(args, " "); !strings.Contains(got, "FAK_BENCH_NODE") || !strings.Contains(got, "livecodebench") {
-		t.Fatalf("args=%q", args)
+func TestBenchFleetRouteLeavesUnconfiguredWorkstationWaiting(t *testing.T) {
+	t.Setenv("FAK_BENCH_WORKSTATION_HOST", "")
+	t.Setenv("FAK_BENCH_WORKSTATION_USER", "")
+	t.Setenv("FAK_BENCH_WORKSTATION_IDENTITY_FILE", "")
+	_, _, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a"})
+	if err == nil || route != "workstation:ssh" || state != "waiting_session" {
+		t.Fatalf("route=%q state=%q err=%v", route, state, err)
 	}
 }
+
+func TestBenchFleetRouteUsesConfiguredWorkstationWSL(t *testing.T) {
+	t.Setenv("FAK_BENCH_WORKSTATION_HOST", "workstation-node")
+	t.Setenv("FAK_BENCH_WORKSTATION_USER", "runner")
+	t.Setenv("FAK_BENCH_WORKSTATION_IDENTITY_FILE", `C:\keys\workstation`)
+	t.Setenv("FAK_BENCH_WORKSTATION_DISTRO", "Ubuntu")
+	name, args, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{ID: "abc", Machine: "workstation-a", Benchmark: "gpu-benchmark", Command: "generic"})
+	if err != nil || name != "ssh" || route != "workstation:ssh/workstation-node" || state != "running" {
+		t.Fatalf("name=%q args=%q route=%q state=%q err=%v", name, args, route, state, err)
+	}
+	got := strings.Join(args, " ")
+	for _, want := range []string{"BatchMode=yes", `C:\keys\workstation`, "runner@workstation-node", "wsl.exe", "FromBase64String"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("args=%q missing %q", args, want)
+		}
+	}
+}
+
+func TestBenchFleetWorkstationGPURecipeUsesRealRemoteCUDA(t *testing.T) {
+	got := benchFleetWorkstationScript(benchFleetRequest{Machine: "workstation-a", Benchmark: "gpu-benchmark", Command: "generic"})
+	for _, want := range []string{"FAK_BENCH_NODE=", "FAK_BENCH_GPU=", "nvidia-smi", "reset --hard origin/main", "FAK_CUDA_ARCH=sm_89", "run_485_acceptance_on_gpu.sh"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("script missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "generic") {
+		t.Fatalf("planner hint leaked into GPU recipe: %s", got)
+	}
+}
+
+func TestBenchFleetWorkstationConnectionFailureWaitsForSession(t *testing.T) {
+	dir := t.TempDir()
+	q := filepath.Join(dir, "requests")
+	if err := os.MkdirAll(q, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_BENCH_WORKSTATION_HOST", "workstation-node")
+	t.Setenv("FAK_BENCH_WORKSTATION_USER", "runner")
+	t.Setenv("FAK_BENCH_WORKSTATION_IDENTITY_FILE", `C:\keys\workstation`)
+	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "offline", Machine: "workstation-a", Benchmark: "gpu-benchmark", Command: "generic", State: "queued"}
+	if err := writeBenchFleetRequest(filepath.Join(q, "offline.json"), req); err != nil {
+		t.Fatal(err)
+	}
+	fake := func(string, ...string) ([]byte, int, error) {
+		return []byte("ssh: connect to host workstation-node port 22: Connection timed out"), 255, errors.New("exit 255")
+	}
+	var out, errOut bytes.Buffer
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	got, err := readBenchFleetRequest(filepath.Join(q, "offline.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "waiting_session" {
+		t.Fatalf("state=%s", got.State)
+	}
+}
+
 func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) {
 	dir := t.TempDir()
 	q := filepath.Join(dir, "requests")
@@ -347,14 +402,7 @@ func TestBenchFleetGCPRadixUsesProvisionedRealModelRecipe(t *testing.T) {
 }
 
 func TestBenchFleetWorkstationSessionUsesBoundedRecipe(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("workstation route is Windows-only")
-	}
-	_, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a", Benchmark: "session-benchmark", Command: "go run ./cmd/sessionbench"})
-	if err != nil || state != "running" {
-		t.Fatalf("state=%q err=%v", state, err)
-	}
-	command := strings.Join(args, " ")
+	command := benchFleetWorkstationScript(benchFleetRequest{Machine: "workstation-a", Benchmark: "session-benchmark", Command: "go run ./cmd/sessionbench"})
 	for _, want := range []string{"sessionbench", "-synthetic tiny", "-agents 2", "-turns 2", "FAK_BENCH_NODE="} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("command %q missing %q", command, want)
@@ -363,14 +411,7 @@ func TestBenchFleetWorkstationSessionUsesBoundedRecipe(t *testing.T) {
 }
 
 func TestBenchFleetWorkstationModelUsesProvisionedSnapshot(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("workstation route is Windows-only")
-	}
-	_, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "workstation-a", Benchmark: "model-benchmark", Command: "go run ./cmd/modelbench -quant"})
-	if err != nil || state != "running" {
-		t.Fatalf("state=%q err=%v", state, err)
-	}
-	command := strings.Join(args, " ")
+	command := benchFleetWorkstationScript(benchFleetRequest{Machine: "workstation-a", Benchmark: "model-benchmark", Command: "go run ./cmd/modelbench -quant"})
 	for _, want := range []string{"modelbench", "-hf internal/model/.cache/smollm2-135m", "-decode-steps 4", "FAK_BENCH_NODE="} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("command %q missing %q", command, want)

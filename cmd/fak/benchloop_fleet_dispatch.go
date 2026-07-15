@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -158,8 +159,10 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 		lowerOutput := strings.ToLower(w.Output)
 		if w.Route == "dgxbridge" && (strings.Contains(lowerOutput, "no slack channel") || strings.Contains(lowerOutput, "missing")) {
 			w.State = "waiting_credentials"
-		} else if strings.HasPrefix(w.Route, "mac:") && (strings.Contains(lowerOutput, "timed out") || strings.Contains(lowerOutput, "timeout") || strings.Contains(lowerOutput, "502 bad gateway") || strings.Contains(lowerOutput, "failed to respond") || strings.Contains(lowerOutput, "connection closed")) {
+		} else if (strings.HasPrefix(w.Route, "mac:") || strings.HasPrefix(w.Route, "workstation:")) && benchFleetSessionUnavailable(lowerOutput) {
 			w.State = "waiting_session"
+		} else if strings.HasPrefix(w.Route, "workstation:") && (strings.Contains(lowerOutput, "command not found") || strings.Contains(lowerOutput, "no such file or directory") || strings.Contains(lowerOutput, "cannot find the path")) {
+			w.State = "waiting_provision"
 		} else if strings.HasPrefix(w.Route, "gcp:") && (strings.Contains(lowerOutput, "no such file or directory") || strings.Contains(lowerOutput, "command not found") || strings.Contains(lowerOutput, "need -hf")) {
 			w.State = "waiting_provision"
 		} else {
@@ -174,6 +177,15 @@ func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleet
 	}
 	w.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 	return w
+}
+
+func benchFleetSessionUnavailable(output string) bool {
+	for _, marker := range []string{"timed out", "timeout", "502 bad gateway", "failed to respond", "connection closed", "connection refused", "permission denied", "host key verification failed", "no route to host"} {
+		if strings.Contains(output, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasBenchNodeWitness(output string) bool {
@@ -310,21 +322,22 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 		}
 		return bridge, []string{"run", remote}, "dgxbridge", "running", nil
 	case "workstation-a":
-		if runtime.GOOS != "windows" {
-			return "", nil, "local-control", "waiting_session", errors.New("workstation runner is only available on its Windows control node")
+		cfg := benchFleetRoutes(root)
+		if cfg.WorkstationHost == "" || cfg.WorkstationUser == "" || cfg.WorkstationIdentityFile == "" {
+			return "", nil, "workstation:ssh", "waiting_session", errors.New("workstation SSH session is not configured")
 		}
-		requestCommand := req.Command
-		switch req.Benchmark {
-		case "session-benchmark":
-			// Keep the recurring control-node witness bounded and weight-independent.
-			// The synthetic tiny shape drives all three real session-cache arms.
-			requestCommand = "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -prefix 64 -result 16 -decode 4 -reps 1 -val-scale 32,2,1,4,8"
-		case "model-benchmark":
-			// The planner hint omits the Hugging Face snapshot needed by modelbench.
-			requestCommand = "go run ./cmd/modelbench -hf internal/model/.cache/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
+		distro := cfg.WorkstationDistro
+		if distro == "" {
+			distro = "Ubuntu"
 		}
-		command := "Write-Output ('FAK_BENCH_NODE=' + $env:COMPUTERNAME); Set-Location -LiteralPath '" + strings.ReplaceAll(root, "'", "''") + "'; " + requestCommand
-		return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", command}, "local-control", "running", nil
+		script := benchFleetWorkstationScript(req)
+		encoded := base64.StdEncoding.EncodeToString([]byte(script))
+		remotePS := "$ErrorActionPreference='Stop'; $p=Join-Path $env:TEMP 'fak-bench-" + req.ID + ".sh'; " +
+			"[IO.File]::WriteAllBytes($p,[Convert]::FromBase64String('" + encoded + "')); " +
+			"$wp=('/mnt/'+$p.Substring(0,1).ToLower()+$p.Substring(2).Replace('\\','/')); try { " +
+			"& wsl.exe -d '" + strings.ReplaceAll(distro, "'", "''") + "' -- bash $wp; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } finally { Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue }"
+		destination := cfg.WorkstationUser + "@" + cfg.WorkstationHost
+		return "ssh", []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-i", cfg.WorkstationIdentityFile, destination, "powershell.exe -NoProfile -NonInteractive -Command \"" + strings.ReplaceAll(remotePS, "\"", "\\\"") + "\""}, "workstation:ssh/" + cfg.WorkstationHost, "running", nil
 	case "node-macos-a":
 		host := benchFleetMacHost(root)
 		if host == "" {
@@ -337,22 +350,59 @@ func benchFleetRoute(root string, req benchFleetRequest) (string, []string, stri
 }
 
 type benchFleetRouteConfig struct {
-	MacHost string `json:"mac_host"`
+	MacHost                 string `json:"mac_host"`
+	WorkstationHost         string `json:"workstation_host"`
+	WorkstationUser         string `json:"workstation_user"`
+	WorkstationIdentityFile string `json:"workstation_identity_file"`
+	WorkstationDistro       string `json:"workstation_distro"`
 }
 
-func benchFleetMacHost(root string) string {
-	if host := strings.TrimSpace(os.Getenv("FAK_BENCH_MAC_HOST")); host != "" {
-		return host
-	}
-	b, err := os.ReadFile(filepath.Join(root, ".fak", "bench-fleet", "routes.json"))
-	if err != nil {
-		return ""
-	}
+func benchFleetRoutes(root string) benchFleetRouteConfig {
 	var cfg benchFleetRouteConfig
-	if json.Unmarshal(b, &cfg) != nil {
-		return ""
+	b, err := os.ReadFile(filepath.Join(root, ".fak", "bench-fleet", "routes.json"))
+	if err == nil {
+		_ = json.Unmarshal(b, &cfg)
 	}
-	return strings.TrimSpace(cfg.MacHost)
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_MAC_HOST")); value != "" {
+		cfg.MacHost = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_WORKSTATION_HOST")); value != "" {
+		cfg.WorkstationHost = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_WORKSTATION_USER")); value != "" {
+		cfg.WorkstationUser = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_WORKSTATION_IDENTITY_FILE")); value != "" {
+		cfg.WorkstationIdentityFile = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FAK_BENCH_WORKSTATION_DISTRO")); value != "" {
+		cfg.WorkstationDistro = value
+	}
+	return cfg
+}
+
+func benchFleetMacHost(root string) string { return strings.TrimSpace(benchFleetRoutes(root).MacHost) }
+
+func benchFleetWorkstationScript(req benchFleetRequest) string {
+	command := req.Command
+	switch req.Benchmark {
+	case "gpu-benchmark":
+		// This weight-independent acceptance run executes real sm_89 CUDA kernels and
+		// emits correctness, VRAM, and timing witnesses on the registered laptop GPU.
+		command = "CUDA_HOME=$HOME/cudaenv FAK_CUDA_ARCH=sm_89 bash tools/run_485_acceptance_on_gpu.sh"
+	case "session-benchmark":
+		command = "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -prefix 64 -result 16 -decode 4 -reps 1 -val-scale 32,2,1,4,8"
+	case "model-benchmark":
+		command = "go run ./cmd/modelbench -hf internal/model/.cache/smollm2-135m -quant -decode-steps 4 -decode-reps 1 -prefill-reps 1"
+	}
+	return "set -euo pipefail\n" +
+		"printf 'FAK_BENCH_NODE='; hostname\n" +
+		"printf 'FAK_BENCH_GPU='; nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p'\n" +
+		"export PATH=/usr/local/go/bin:$HOME/cudaenv/bin:$PATH\n" +
+		"if [ ! -d $HOME/fak/.git ]; then git clone --depth 1 https://github.com/anthony-chaudhary/fak $HOME/fak; fi\n" +
+		"git -C $HOME/fak fetch --depth 1 origin main\n" +
+		"git -C $HOME/fak reset --hard origin/main\n" +
+		"cd $HOME/fak\n" + command + "\n"
 }
 
 type benchFleetRunManifest struct {
