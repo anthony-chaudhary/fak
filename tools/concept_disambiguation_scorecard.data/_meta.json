@@ -54,13 +54,27 @@
         "cachemech",
         "applyinfocachemechclick",
         "cachebreakevents",
-        "droppedcachedtokens"
+        "droppedcachedtokens",
+        "cachevalue_test",
+        "cache_trace_test"
       ],
       "min_files": 3,
       "name": "Cache family",
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta).",
       "roots": [
         "cache"
+      ],
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Test filename in the generated boundary-lint baseline, not a cache taxonomy concept.",
+          "token": "cachevalue_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test filename in the generated boundary-lint baseline, not a cache taxonomy concept.",
+          "token": "cache_trace_test"
+        }
       ]
     },
     {
@@ -194,7 +208,8 @@
         "runtuisessions",
         "interactivesession",
         "requireminimaxsession",
-        "restartfreshsession"
+        "restartfreshsession",
+        "dispatchsessionsaudittest"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -203,6 +218,13 @@
         "session",
         "slot",
         "scheduler"
+      ],
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "File-path identifier in the generated boundary-lint baseline, not a runtime session concept.",
+          "token": "dispatchsessionsaudittest"
+        }
       ]
     },
     {
@@ -581,13 +603,21 @@
         "tuiloopreport",
         "fakbgloopup",
         "defaultloopledger",
-        "fakloopledger"
+        "fakloopledger",
+        "doomloop_test"
       ],
       "min_files": 3,
       "name": "Loop family",
       "note": "The most overloaded word in the repo: a read-only intent walker (fak superloop) vs a bulk wave launcher (/super-loop) vs a ledger+governor (fak loop) vs a per-turn exit gate (loopgate) vs the benchmark surface (bench-loop) vs the stage-coverage scorecard (loop-index) vs the cross-ledger health fold (loopfleet) vs the process babysitter (bgloop) - plus network loopback, a different domain the root swallows.",
       "roots": [
         "loop"
+      ],
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Test filename in the generated boundary-lint baseline, not a loop taxonomy concept.",
+          "token": "doomloop_test"
+        }
       ]
     },
     {
