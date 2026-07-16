@@ -78,9 +78,12 @@ const (
 	// tier still ran.
 	MaintReasonLocked MaintReason = "LOCKED"
 	// MaintReasonPostureDrift: the shared safe-maintenance posture has drifted
-	// (gc.auto != 0 or maintenance.auto is not an explicit false) — an unsupervised
-	// auto-gc could prune-race. The grace tier REFUSES and the drift is surfaced as an
-	// incident for an operator to repair the shared config.
+	// (gc.auto != 0, maintenance.auto is not an explicit false, or core.fsmonitor is
+	// enabled without a watching builtin daemon) — an unsupervised auto-gc could
+	// prune-race, or a "true but dead" fsmonitor makes every cold git op pay a
+	// dead-IPC handshake and fall back to a full working-tree scan (#4603). The grace
+	// tier REFUSES and the drift is surfaced as an incident for an operator to repair
+	// the shared config.
 	MaintReasonPostureDrift MaintReason = "POSTURE_DRIFT"
 )
 
@@ -111,14 +114,31 @@ var maintLockNames = []string{
 	filepath.Join("objects", "pack", "multi-pack-index.lock"),
 }
 
-// Posture is the read of the two shared-config knobs that keep automatic,
-// unsupervised maintenance (which CAN prune) from ever firing on the hot clone.
+// Posture is the read of the shared-config knobs that keep the hot clone in its
+// intended safe state: the two that keep automatic, unsupervised maintenance (which
+// CAN prune) from ever firing, plus core.fsmonitor, whose "true but dead daemon" drift
+// (#4603) silently stalls every cold git op behind a dead-IPC handshake and a full
+// working-tree scan.
 type Posture struct {
 	GCAuto          string `json:"gc_auto"`          // configured gc.auto ("" = unset → git default 6700, unsafe)
 	MaintenanceAuto string `json:"maintenance_auto"` // configured maintenance.auto ("" = unset → git default true, unsafe)
-	Safe            bool   `json:"safe"`             // gc.auto == 0 AND maintenance.auto is an explicit git-false
-	Drift           string `json:"drift,omitempty"`  // human reason when !Safe
+	Fsmonitor       string `json:"fsmonitor"`        // configured core.fsmonitor ("" = unset → off, which is safe)
+	// FsmonitorDaemon is the builtin-daemon health probe, populated only when
+	// core.fsmonitor selects the builtin daemon (a git-true value): "watching" (healthy),
+	// "not-watching" (config says true but no daemon is up — the #4603 stall), or
+	// "unknown" (the status probe itself could not run). Empty when fsmonitor is off or a
+	// hook-program path (neither has a builtin daemon to probe).
+	FsmonitorDaemon string `json:"fsmonitor_daemon,omitempty"`
+	Safe            bool   `json:"safe"`            // gc.auto == 0 AND maintenance.auto explicit git-false AND fsmonitor off-or-watching
+	Drift           string `json:"drift,omitempty"` // human reason when !Safe
 }
+
+// fsmonitor builtin-daemon health classes, from `git fsmonitor--daemon status`.
+const (
+	fsmonitorWatching    = "watching"
+	fsmonitorNotWatching = "not-watching"
+	fsmonitorUnknown     = "unknown"
+)
 
 // CountObjects is the parsed `git count-objects -vH` snapshot for the before/after
 // witness. Raw is the verbatim text printed to the operator; the parsed fields let a
@@ -151,11 +171,28 @@ type MaintResult struct {
 	Steps        []MaintStep  `json:"steps"`
 	Before       CountObjects `json:"before"`
 	After        CountObjects `json:"after"`
+	// LooseBacklogHigh is set from the PRE-run count: true when the loose-object backlog
+	// is at/above LooseBacklogThreshold. A read-only high-water witness — it mutates
+	// nothing and gates no tier — so an operator/caller can SEE the invisible backlog
+	// before any auto-trigger is wired. See #4602 Phase 0.
+	LooseBacklogHigh bool `json:"loose_backlog_high"`
 }
 
 // LooseDelta reports how many loose objects the run folded away (before − after). A
 // positive value with nothing pruned is the "consolidated, never deleted" witness.
 func (r MaintResult) LooseDelta() int { return r.Before.Count - r.After.Count }
+
+// LooseBacklogThreshold is the loose-object count at/above which the object DB is
+// considered to carry a high backlog worth folding. It is a read-only witness bound
+// only to the operator surface (#4602 Phase 0); by itself it gates no maintenance tier.
+const LooseBacklogThreshold = 10_000
+
+// LooseBacklogHigh reports whether a count-objects snapshot shows a loose-object
+// backlog at/above LooseBacklogThreshold. Fail-closed: an unavailable count (git error)
+// is never reported as high.
+func LooseBacklogHigh(co CountObjects) bool {
+	return co.Available && co.Count >= LooseBacklogThreshold
+}
 
 // RunMaint executes the safe object-DB consolidation. The ALWAYS-SAFE tier
 // (multi-pack-index write, commit-graph write --reachable) runs unconditionally — it
@@ -200,6 +237,7 @@ func RunMaint(ctx context.Context, run MaintRunner, opts MaintOptions) MaintResu
 	}
 
 	res.After = countObjects(ctx, run, opts.RepoRoot)
+	res.LooseBacklogHigh = LooseBacklogHigh(res.Before)
 	return res
 }
 
@@ -238,6 +276,7 @@ func readPosture(ctx context.Context, run MaintRunner, dir string) Posture {
 	p := Posture{
 		GCAuto:          configGet(ctx, run, dir, "gc.auto"),
 		MaintenanceAuto: configGet(ctx, run, dir, "maintenance.auto"),
+		Fsmonitor:       configGet(ctx, run, dir, "core.fsmonitor"),
 	}
 	var drift []string
 	if strings.TrimSpace(p.GCAuto) != "0" {
@@ -246,9 +285,57 @@ func readPosture(ctx context.Context, run MaintRunner, dir string) Posture {
 	if !isGitFalse(p.MaintenanceAuto) {
 		drift = append(drift, fmt.Sprintf("maintenance.auto=%s (want false)", displayConfig(p.MaintenanceAuto)))
 	}
+	// core.fsmonitor: only a git-TRUE value selects the builtin daemon, which is the sole
+	// form with a dead-IPC failure mode (#4603). OFF (false/unset) needs no daemon and is
+	// safe; a hook-program PATH runs no builtin daemon, so there is nothing to probe and
+	// no dead handshake to pay. When the builtin daemon IS selected, the safe state is that
+	// it is AFFIRMATIVELY watching this tree — "true but dead" (not-watching) and an
+	// unprobeable daemon (unknown) both fail the assert, because a cold git op would then
+	// pay the dead-IPC handshake and fall back to a full working-tree scan.
+	if isGitTrue(p.Fsmonitor) {
+		p.FsmonitorDaemon = fsmonitorDaemonHealth(ctx, run, dir)
+		if p.FsmonitorDaemon != fsmonitorWatching {
+			drift = append(drift, fmt.Sprintf("core.fsmonitor=%s but builtin daemon is %s (want a watching daemon, or unset core.fsmonitor)",
+				p.Fsmonitor, p.FsmonitorDaemon))
+		}
+	}
 	p.Safe = len(drift) == 0
 	p.Drift = strings.Join(drift, "; ")
 	return p
+}
+
+// fsmonitorDaemonHealth probes `git fsmonitor--daemon status` and classifies the builtin
+// daemon: fsmonitorWatching (healthy — the daemon is watching this tree), fsmonitorNotWatching
+// (config says true but no daemon is up — the #4603 cold-op stall), or fsmonitorUnknown (the
+// probe itself could not run). It classifies by the message TEXT rather than the exit code so
+// it is robust across git versions (a not-watching status exits non-zero on some builds); the
+// "not watching" case is checked first because its message contains "watching" as a substring.
+func fsmonitorDaemonHealth(ctx context.Context, run MaintRunner, dir string) string {
+	out, _, err := run(ctx, dir, "fsmonitor--daemon", "status")
+	if err != nil {
+		return fsmonitorUnknown // git could not be executed at all
+	}
+	low := strings.ToLower(out)
+	switch {
+	case strings.Contains(low, "not watching"):
+		return fsmonitorNotWatching
+	case strings.Contains(low, "watching"):
+		return fsmonitorWatching
+	default:
+		return fsmonitorUnknown
+	}
+}
+
+// isGitTrue reports whether a git config value is a boolean TRUE in the forms git's own
+// config parser accepts. core.fsmonitor set to one of these selects the builtin fsmonitor
+// daemon; any other non-false value is a hook-program path, and false/unset is off. Mirrors
+// isGitFalse (gitgate.go).
+func isGitTrue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "yes", "on", "1":
+		return true
+	}
+	return false
 }
 
 // configGet returns the trimmed value of a git config key, or "" when the key is unset

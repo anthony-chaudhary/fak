@@ -22,6 +22,10 @@ type fakeMaint struct {
 	packs   int
 	calls   [][]string
 	onGrace func(args []string)
+	// fsmon is the text `git fsmonitor--daemon status` returns (classified by readPosture);
+	// fsmonErr models git being unable to run the probe at all (→ unknown).
+	fsmon    string
+	fsmonErr bool
 }
 
 func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, int, error) {
@@ -47,6 +51,16 @@ func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, 
 			f.loose = 10
 		}
 		return "", 0, nil
+	case len(args) >= 2 && args[0] == "fsmonitor--daemon" && args[1] == "status":
+		if f.fsmonErr {
+			return "", 1, fmt.Errorf("fsmonitor--daemon status: could not run")
+		}
+		// A not-watching status exits non-zero on git; readPosture classifies by text.
+		code := 0
+		if strings.Contains(strings.ToLower(f.fsmon), "not watching") {
+			code = 1
+		}
+		return f.fsmon, code, nil
 	}
 	return "", 0, nil
 }
@@ -314,4 +328,136 @@ func containsStr(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestLooseBacklogHighPredicate: the pure #4602 high-water predicate — fail-closed on an
+// unavailable count, and the threshold is an inclusive floor.
+func TestLooseBacklogHighPredicate(t *testing.T) {
+	cases := []struct {
+		name string
+		co   CountObjects
+		want bool
+	}{
+		{"unavailable-never-high", CountObjects{Available: false, Count: 1_000_000}, false},
+		{"below-threshold", CountObjects{Available: true, Count: LooseBacklogThreshold - 1}, false},
+		{"at-threshold", CountObjects{Available: true, Count: LooseBacklogThreshold}, true},
+		{"above-threshold", CountObjects{Available: true, Count: LooseBacklogThreshold + 5}, true},
+	}
+	for _, tc := range cases {
+		if got := LooseBacklogHigh(tc.co); got != tc.want {
+			t.Errorf("%s: LooseBacklogHigh(count=%d,avail=%v)=%v want %v", tc.name, tc.co.Count, tc.co.Available, got, tc.want)
+		}
+	}
+}
+
+// TestRunMaintLooseBacklogHighFromPreRunCount: RunMaint sets LooseBacklogHigh from the
+// PRE-run count (the invisible backlog the operator needs to see), even though the grace
+// tier then folds those loose objects away. A small backlog leaves the flag false.
+func TestRunMaintLooseBacklogHighFromPreRunCount(t *testing.T) {
+	gitDir := scratchGit(t)
+
+	high := &fakeMaint{posture: safePosture(), loose: LooseBacklogThreshold + 2_000, inPack: 500, packs: 11}
+	res := RunMaint(context.Background(), high.run, MaintOptions{RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true})
+	if !res.LooseBacklogHigh {
+		t.Fatalf("a %d-loose pre-run backlog should set LooseBacklogHigh (before.Count=%d)", LooseBacklogThreshold+2_000, res.Before.Count)
+	}
+	if res.After.Count >= res.Before.Count {
+		t.Fatalf("sanity: grace tier should still fold loose objects: before=%d after=%d", res.Before.Count, res.After.Count)
+	}
+
+	low := &fakeMaint{posture: safePosture(), loose: 100, inPack: 500, packs: 11}
+	res2 := RunMaint(context.Background(), low.run, MaintOptions{RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true})
+	if res2.LooseBacklogHigh {
+		t.Fatalf("a 100-loose backlog must not set LooseBacklogHigh (before.Count=%d)", res2.Before.Count)
+	}
+}
+
+// TestReadPostureFsmonitorHealth is the #4603 failure-class witness: core.fsmonitor=true
+// with a DEAD builtin daemon ("not watching") must read as posture DRIFT — the cold-git-op
+// stall the safe-posture check previously ignored — while fsmonitor OFF or an affirmatively
+// watching daemon stays safe. It also pins that the daemon is probed ONLY when a git-true
+// value selects the builtin (a hook-program PATH and the off/unset cases run no probe).
+func TestReadPostureFsmonitorHealth(t *testing.T) {
+	base := func() map[string]string { return map[string]string{"gc.auto": "0", "maintenance.auto": "false"} }
+	cases := []struct {
+		name        string
+		fsmonitor   string // "" = key unset
+		fsmon       string // `git fsmonitor--daemon status` text
+		fsmonErr    bool   // git could not run the probe at all
+		wantSafe    bool
+		wantDaemon  string
+		wantProbed  bool
+		driftNeedle string // substring required in Drift when !wantSafe
+	}{
+		{"unset-is-off-safe", "", "", false, true, "", false, ""},
+		{"explicit-false-safe", "false", "", false, true, "", false, ""},
+		{"true-watching-safe", "true", "fsmonitor-daemon is watching '/x'", false, true, fsmonitorWatching, true, ""},
+		{"true-dead-daemon-drift", "true", "fsmonitor-daemon is not watching '/x'", false, false, fsmonitorNotWatching, true, "not-watching"},
+		{"true-unprobeable-unknown-drift", "true", "", true, false, fsmonitorUnknown, true, "unknown"},
+		{"hook-program-path-safe", "/usr/local/bin/my-fsmonitor-hook", "", false, true, "", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			posture := base()
+			if tc.fsmonitor != "" {
+				posture["core.fsmonitor"] = tc.fsmonitor
+			}
+			f := &fakeMaint{posture: posture, fsmon: tc.fsmon, fsmonErr: tc.fsmonErr}
+			p := readPosture(context.Background(), f.run, t.TempDir())
+			if p.Safe != tc.wantSafe {
+				t.Fatalf("Safe=%v want %v (drift=%q, daemon=%q)", p.Safe, tc.wantSafe, p.Drift, p.FsmonitorDaemon)
+			}
+			if p.FsmonitorDaemon != tc.wantDaemon {
+				t.Fatalf("FsmonitorDaemon=%q want %q", p.FsmonitorDaemon, tc.wantDaemon)
+			}
+			probed := false
+			for _, c := range f.calls {
+				if len(c) >= 3 && c[1] == "fsmonitor--daemon" && c[2] == "status" {
+					probed = true
+				}
+			}
+			if probed != tc.wantProbed {
+				t.Fatalf("daemon probed=%v want %v (fsmonitor=%q)", probed, tc.wantProbed, tc.fsmonitor)
+			}
+			if !tc.wantSafe && tc.driftNeedle != "" && !strings.Contains(p.Drift, tc.driftNeedle) {
+				t.Fatalf("drift %q should mention %q", p.Drift, tc.driftNeedle)
+			}
+		})
+	}
+}
+
+// TestRunMaintFsmonitorDeadDaemonRefusesGrace is the end-to-end #4603 proof: a hot clone
+// with core.fsmonitor=true but a DEAD daemon refuses the grace tier with POSTURE_DRIFT and
+// raises an incident (the operator must start the daemon or unset the key), while the
+// add-only always-safe tier still runs and nothing is folded.
+func TestRunMaintFsmonitorDeadDaemonRefusesGrace(t *testing.T) {
+	gitDir := scratchGit(t)
+	posture := safePosture()
+	posture["core.fsmonitor"] = "true"
+	f := &fakeMaint{posture: posture, loose: 100, inPack: 500, packs: 11,
+		fsmon: "fsmonitor-daemon is not watching 'C:/work/fak'"}
+	res := RunMaint(context.Background(), f.run, MaintOptions{RepoRoot: filepath.Dir(gitDir), GitCommonDir: gitDir, Apply: true})
+
+	if res.Posture.Safe {
+		t.Fatalf("fsmonitor=true with a dead daemon must read unsafe: %+v", res.Posture)
+	}
+	if res.Posture.FsmonitorDaemon != fsmonitorNotWatching {
+		t.Fatalf("daemon health=%q want %q", res.Posture.FsmonitorDaemon, fsmonitorNotWatching)
+	}
+	if res.GraceRefused != MaintReasonPostureDrift {
+		t.Fatalf("dead-daemon drift should refuse grace with POSTURE_DRIFT, got %q", res.GraceRefused)
+	}
+	if !res.Incident {
+		t.Fatalf("dead-daemon drift must be surfaced as an incident")
+	}
+	muts := mutatingCalls(f.calls)
+	if !containsStr(muts, "multi-pack-index write") {
+		t.Fatalf("always-safe tier must still run under fsmonitor drift; got %v", muts)
+	}
+	if containsStr(muts, "maintenance run --task=loose-objects") {
+		t.Fatalf("grace step must NOT run under fsmonitor drift; got %v", muts)
+	}
+	if res.LooseDelta() != 0 {
+		t.Fatalf("nothing should be folded under posture drift: delta=%d", res.LooseDelta())
+	}
 }
