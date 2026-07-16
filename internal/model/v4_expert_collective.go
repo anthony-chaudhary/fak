@@ -24,6 +24,20 @@ func newV4CollectiveExpertTransport(be compute.Backend, placement V4ExpertPlacem
 	return &v4CollectiveExpertTransport{backend: be, placement: placement}, nil
 }
 
+// uploadRank places rank r's partial on rank r's device when the backend exposes the
+// optional compute.RankUploader seam, exactly as BackendCollective.uploadRankF32 does.
+// This is not cosmetic: a real device collective validates that parts[r] is RESIDENT on
+// device r (the CUDA AllReduceSum rejects "rank r tensor is resident on device 0, want
+// device r"), so the generic device-0 Upload cannot drive a multi-GPU reduction. On
+// cpu-ref — which has no RankUploader — Upload is the identity and this is unchanged.
+func (t *v4CollectiveExpertTransport) uploadRank(rank int, data []float32) (compute.Tensor, error) {
+	host := compute.NewF32(t.backend, []int{len(data)}, data)
+	if up, ok := t.backend.(compute.RankUploader); ok {
+		return up.UploadRank(host, compute.F32, rank)
+	}
+	return t.backend.Upload(host, compute.F32), nil
+}
+
 func (t *v4CollectiveExpertTransport) Forward(dispatch map[int][]V4ExpertDispatch, evaluate func([]routePick) ([]float32, error)) ([]float32, int, error) {
 	if t == nil || t.backend == nil {
 		return nil, 0, fmt.Errorf("%w: nil collective transport", ErrV4ExpertPlacement)
@@ -60,7 +74,11 @@ func (t *v4CollectiveExpertTransport) Forward(dispatch map[int][]V4ExpertDispatc
 		} else if len(partial) != width {
 			return nil, 0, fmt.Errorf("%w: rank %d partial width %d, want %d", ErrV4ExpertPlacement, rank, len(partial), width)
 		}
-		parts[rank] = t.backend.Upload(compute.NewF32(t.backend, []int{len(partial)}, partial), compute.F32)
+		up, err := t.uploadRank(rank, partial)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%w: rank %d upload: %v", ErrV4ExpertPlacement, rank, err)
+		}
+		parts[rank] = up
 		allocated[rank] = true
 		active++
 	}
@@ -71,7 +89,11 @@ func (t *v4CollectiveExpertTransport) Forward(dispatch map[int][]V4ExpertDispatc
 		if allocated[rank] {
 			continue
 		}
-		parts[rank] = t.backend.Upload(compute.NewF32(t.backend, []int{width}, make([]float32, width)), compute.F32)
+		up, err := t.uploadRank(rank, make([]float32, width))
+		if err != nil {
+			return nil, 0, fmt.Errorf("%w: rank %d zero-fill upload: %v", ErrV4ExpertPlacement, rank, err)
+		}
+		parts[rank] = up
 		allocated[rank] = true
 	}
 	collective, ok := t.backend.(compute.CollectiveBackend)
