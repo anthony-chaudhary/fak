@@ -106,6 +106,11 @@ type Unit struct {
 	Mentions []string       `json:"mentions,omitempty"`
 	Files    []string       `json:"files"`
 	Band     Band           `json:"band"`
+	// Curve, when set, is the bound trajctl objective's progress signal carried
+	// onto this unit (see curve.go). It is ORTHOGONAL to Band: Band says "was each
+	// claim confirmed", Curve says "is the objective progressing". A unit with no
+	// bound objective leaves this nil — the common case, and not a warning.
+	Curve *Curve `json:"curve,omitempty"`
 }
 
 // BandFor maps one witness verdict to the band it implies.
