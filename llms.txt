@@ -21,6 +21,7 @@
 - Configuration: [`docs/fak/server-config.md`](docs/fak/server-config.md)
 - API: [`docs/fak/api-reference.md`](docs/fak/api-reference.md)
 - Deployment: [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md)
+- Release readiness, guarded cut/publish, verification, and rollback: [`fak release`](cmd/fak/release.go) and [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md)
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Scoped benchmark results, tuned baselines, artifacts, and reproduce routes: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
 - Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
@@ -44,6 +45,7 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 | Modify code or docs | [`AGENTS.md`](AGENTS.md) | The owning package tests and [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Integrate a client or managed runtime | [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md) | [`docs/integrations/`](docs/integrations/) and the selected mode's quickstart and API/config authority |
 | Deploy or operate | [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md) | [`docs/fak/server-config.md`](docs/fak/server-config.md) and [`docs/fak/api-reference.md`](docs/fak/api-reference.md) |
+| Assess readiness or cut a release | [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md) | Run `fak release readiness --json`, then use the skill's guarded ship and verification path |
 | Assess a claim | [`CLAIMS.md`](CLAIMS.md) | [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) and the cited witness |
 | Research design history | [`docs/notes/`](docs/notes/) | Current code, tests, and architecture before relying on an older decision |
 
