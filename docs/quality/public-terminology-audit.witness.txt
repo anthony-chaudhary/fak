@@ -1,0 +1,17 @@
+schema: fak-public-terminology-audit/1
+route: docs/quality/public-terminology-audit.md
+source_binding: pre-publication candidate based on 30462171db86869c3632a59868a9b2b3f188f15a; exact route bytes bound by content_sha256; issue #4947 records publication commit
+content_sha256: 7787d1096026301262527e8cef99d91d48e99ca54851f7ac2d8418834f57d077
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: assign one stable public term per concept across front-door routes while preserving exact interfaces, history, scope, and evidence
+read_back:
+  verdict: pass
+  audience: Documentation writers and reviewers aligning reader-facing entry points.
+  page_job: Normalize public terminology for front-door documentation routes while preserving exact interfaces, quotations, historical evidence, and scope boundaries.
+  default_choice: Use the table’s preferred public term by default; keep exact commands, fields, identifiers, quoted text, and historical labels only where fidelity requires them.
+  deterministic_cases: product versus run path versus gateway compatibility; managed agent; tool call versus tool_call; preflight; policy manifest; adjudication versus DENY; current versus gen/now
+  evidence_stops: untagged capability claims; detached benchmark numbers; conflicting current authorities
+  exception_assessment: Exceptions are explicit and scoped: exact interfaces, quoted evidence, and historical routes stay faithful; lifecycle terms are kept separate from support; ambiguous phrases either rewrite deterministically or stop for evidence.
+  authority_assessment: Authority is bounded to the owning table rows and linked sources; the candidate does not let lifecycle or generation labels become product support claims, and it avoids turning compatibility or benchmarks into broader promises.
+  next_action: Audit one front-door route against the table, replace conflicting public labels, and run the completion check.
+ambiguities: []
