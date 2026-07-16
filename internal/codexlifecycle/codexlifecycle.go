@@ -148,9 +148,9 @@ func (r Report) CountByOutcome() map[Outcome]int {
 // Events must be in rollout order (append-only files already are).
 func Fold(events []Event, fresh bool) Report {
 	rep := Report{Tasks: []Task{}}
-	idx := map[string]int{}          // turn_id -> index into rep.Tasks
-	terminated := map[string]bool{}  // turn_id -> already carries a terminal
-	active := -1                     // index of the open task, or -1
+	idx := map[string]int{}         // turn_id -> index into rep.Tasks
+	terminated := map[string]bool{} // turn_id -> already carries a terminal
+	active := -1                    // index of the open task, or -1
 
 	for _, ev := range events {
 		switch ev.Kind {
