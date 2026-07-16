@@ -170,7 +170,7 @@ func TestRetained4273FixtureRequired(t *testing.T) {
 
 func TestRequiredBucketsMatrixShape(t *testing.T) {
 	bs := RequiredBuckets()
-	if len(bs) != 6 {
+	if len(bs) != 6 { //boundarylint:ignore CHANGE_DETECTOR_TEST — closed fixture/contract cardinality
 		t.Fatalf("want 6 buckets (3 lengths x 2 profiles), got %d", len(bs))
 	}
 	seen := map[string]bool{}
