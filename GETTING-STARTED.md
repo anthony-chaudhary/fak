@@ -1,58 +1,35 @@
 # Getting started with fak
 
-This is the install-and-run front door. The dense pitch is in [`README.md`](README.md).
-This page gets you from a clean checkout to a running kernel, and to serving a model
-behind it, with copy-pasteable commands that were run on a clean build before being
-written down.
+**Audience:** new builders choosing an install, proof, or production onboarding path.
 
-> **Never run `fak` before?** Take the [guided first session](docs/fak/tutorial.md)
-> instead (~15 min): every command with its real captured output, offline for the first
-> two parts, no key and no GPU. This page is the install reference and the tier map;
-> the tutorial is the hand-held walkthrough.
+Choose one path by the result you need. Each path names its prerequisite and first
+checkable result; the default is **Install → Prove offline** before production setup.
 
-`fak` is **one Go binary**: a single static artifact with zero external dependencies (no
-Python, no CUDA toolchain, no `go.sum`). That one binary *is* the whole serving surface:
-the gateway, the KV-cache and routing engine, and the token-savers — plus, on the same
-seam, the policy gate, result quarantine, and audit/metrics — in a single process. There are four things you can do with it, in rising order of
-setup cost, and **nothing new gets installed between them**:
-
-| Tier | What you get | Setup | Downloads |
+| Path | Choose it when | Prerequisite | Start and check |
 |---|---|---|---|
-| **0 — Try the kernel** | Run/measure the adjudication boundary offline | `go build` | none |
-| **1 — Front a real model** | Put the kernel in front of a model you serve elsewhere (Ollama / vLLM / llama.cpp / a cloud provider) | + a running OpenAI-compatible server | a chat model |
-| **1b — Local model in one command** | Run a local GGUF model in-kernel with your existing agent — no key, no network, no second terminal | `fak guard --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (cached) |
-| **2 — The fused in-kernel model** | The pure-Go SmolLM2 forward pass the kernel owns | + (real weights) Python export | ~135M params |
-| **2b — Expert: Qwen3.6 in-kernel** | Run Qwen3.6-27B through fak's own GGUF->Q8 Gated-DeltaNet path | local GGUF (tokenizer optional — embedded by default) | ~15 GB GGUF, ~26 GB RSS |
+| **Install** | You need the `fak` binary on this machine. | Go 1.26+ with `GOTOOLCHAIN=auto`, or a released artifact. | [Get the binary](#1-get-the-binary), then run `fak version`. |
+| **Prove offline** *(default after install)* | You want to verify the managed-agent and policy boundary without a key, model, or GPU. | An installed `fak` binary; no model download. | [Run Tier 0](#2-tier-0--try-the-kernel-zero-downloads-2-min), then confirm the task completes while poisoned and destructive actions are blocked. |
+| **Run in production** | You are connecting a real agent or client to a durable model path. | An installed binary plus the credentials, model server, or GGUF required by your selected backend. | Use `fak guard` for one existing agent or [configure `fak serve`](#3-tier-1--put-fak-in-front-of-a-real-model-the-practical-serving-path) for a shared endpoint; verify the documented health request before adding clients. |
 
-If you just want to **serve a useful model with fak in front of it**, you want **Tier 1**.
-Tier 2's in-kernel model is a *reference forward pass* proven bit-for-bit against
-HuggingFace, not a chat-quality serving engine (see the honest caveat in §4).
+**Next action:** choose the one row matching your result, verify its prerequisite, and
+run that row's linked first check. If this is your first installation, use the default
+**Install → Prove offline** sequence.
 
-Every tier above runs the **gateway runtime** (`fak serve`) in front of a model, with your
-agent as its client. If it isn't yet clear whether you're standing up a *runtime* or wiring
-up a *client* — or how `fak serve` relates to `fak guard` — read [Which do I run — gateway,
-agent runtime, or client?](docs/explainers/runtime-vs-client.md): it names `fak serve` (the
-gateway runtime), `fak serve --native` (the agent application runtime that owns the loop),
-and `fak guard` (which makes a harness you already run a governed client).
+## Route context
 
-> **Prefer not to install anything?** Run these tiers in a hosted cloud notebook: a free
-> Colab/Kaggle T4 for Tiers 0–1, a neocloud GPU for Tier 2. See
-> [`notebooks/`](notebooks/README.md).
+- **Mode:** offline proof uses a deterministic planner; production uses `fak guard` or
+  `fak serve` with a real backend. Offline success does not claim live-model quality or latency.
+- **Generation:** this is the current `gen/now` builder route. Versioned and research
+  procedures remain in their linked benchmark or notes pages rather than defining this path.
+- **Lifecycle:** commands here target the current release and repository tip; release-artifact
+  verification is documented in [Get the binary](#1-get-the-binary).
+- **Support boundary:** backend, accelerator, credential, and operating-system prerequisites
+  vary by production choice. The selected section is authoritative for those requirements;
+  unsupported or unavailable prerequisites are not silently replaced by the offline proof.
 
-> **Operator's local-testing default (2026-06-19).** When testing fak *locally*,
-> default to **Tier 2, the fused in-kernel model with real weights** (`fak serve
-> --gguf …`), rather than the Tier 1 proxy or the synthetic checkpoint. fak's thesis
-> is that the model runs inside the kernel address space, and local testing should
-> exercise that path. The code already agrees: `--engine` defaults to `inkernel`
-> rather than the offline mock.
-
-> Reach for **Tier 1** only when you already have a model
-> server you want to put fak in front of. Reach for the **synthetic
-> checkpoint** (`fak serve --engine inkernel` with no `--gguf` / `FAK_MODEL_DIR`)
-> only for explicit wire/API / dispatch-path testing where the model output is
-> irrelevant. The biggest model currently exercisable on the in-kernel path on a
-> 36 GB M3 Pro is `Qwen3.6-27B.q4_k_m` (≈15 GB GGUF, ≈26 GB RSS with KV); see §4c.
-
+The [guided first session](docs/fak/tutorial.md) expands the default path with captured
+output. [`README.md`](README.md) is the concise product and mode front door; this page is
+the builder's install-and-run reference.
 ---
 
 ## 0. Prerequisites
@@ -136,30 +113,32 @@ Everything here is offline and deterministic. Run from inside `fak/` (the comman
 find `testdata/` relative to the working directory, and write their report files,
 such as `report.json` and `agent-report.json`, into the current directory).
 
-**Replay a tool-call trace through the kernel:**
+**Run the default offline proof:**
+
+```bash
+./fak agent --offline
+```
+
+The proof passes when `task completed (booked)` is `YES` in both arms while
+`poisoned result blocked` and `destructive op prevented` are both `YES` for fak.
+This deterministic planner exercises the managed-agent and policy boundary; it does
+not measure live-model quality or latency.
+
+For trace replay, adjudication latency, and individual capability-floor checks, continue
+with the optional diagnostics below or use the full [reproduction packet](docs/repro-packet.md).
+
+**Optional trace replay:**
 
 ```bash
 ./fak run --trace testdata/tau2/tau2-smoke.json
 ```
 
-What you'll see: a per-call verdict table (each line shows the tool, its `verdict`, who decided it, and the `status`), capped by a one-line `summary:` of submit/hit/deny/transform/quarantine counts — like this:
+A successful replay ends with a `summary:` of submit, local-hit, engine-call, and verdict counts.
 
-```
-[ 0] get_user_details             verdict=ALLOW     by=monitor   status=OK
-[ 1] get_reservation_details      verdict=ALLOW     by=monitor   status=OK
-[ 2] get_reservation_details      verdict=ALLOW     by=vdso      status=OK
-...
-summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines=0
-```
-
-`by=vdso` is a call served from the local tool fast-path (no engine call); `by=monitor`
-went through to the engine.
-
-**The headline cost gate and the injection A/B:**
+**Optional adjudication latency check:**
 
 ```bash
-./fak bench  --suite tau2-smoke      # in-process adjudication p50 vs spawned-hook p50
-./fak agent  --offline               # the prompt-injection A/B on the deterministic planner
+./fak bench --suite tau2-smoke
 ```
 
 **See the capability floor refuse a call (structural, model-independent):**

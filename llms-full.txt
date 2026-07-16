@@ -811,7 +811,7 @@ changes.
 
 - [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) — what fak is and why, in one read.
 - [START-HERE](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) — run a local model behind the gate in ten minutes.
-- [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) — install the single binary, point your agent at it.
+- [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
 - [AGENTS](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — orientation for coding agents (build, test, the hard rules).
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) — the published documentation landing page.

@@ -17,7 +17,7 @@ changes.
 
 - [README](README.md) — what fak is and why, in one read.
 - [START-HERE](START-HERE.md) — run a local model behind the gate in ten minutes.
-- [Getting started](GETTING-STARTED.md) — install the single binary, point your agent at it.
+- [Getting started](GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
 - [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules).
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](docs/index.md) — the published documentation landing page.
