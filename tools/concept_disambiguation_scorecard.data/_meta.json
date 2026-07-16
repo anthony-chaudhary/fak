@@ -104,6 +104,11 @@
           "category": "incidental",
           "reason": "prose phrase describing a validation gate test, not a named guard-gate concept",
           "token": "gate_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench grader sub-check tag for the #2736 injected-verdict scenario; names a graded model failure (routing around a DENY), not a new operator-facing guard gate",
+          "token": "guard_bypass"
         }
       ],
       "exclude": [
@@ -129,6 +134,7 @@
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
+        "guard_bypass",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
         "guarddefaultaccountsregistrypath",
