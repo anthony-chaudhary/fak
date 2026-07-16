@@ -1,0 +1,78 @@
+# Metal ternary Q2_0 parity witness (issue #4873, epic #4867 / Ternary-Bonsai-27B).
+#
+# Why this exists. #4873's done condition is "Metal Q2_0 GEMV/GEMVBatch runs on Apple Silicon and
+# matches CPU-ref ternary GEMM within tolerance". That needs a real Metal device, and no node in
+# docs/fleet-compute-nodes.md is Apple Silicon -- but the GitHub macos-latest runner IS (M-series,
+# arm64, ships a Metal device for compute, same runner metal-decode-bench.yml already uses). So the
+# device half of the witness is reachable in CI with no bench laptop and no hardware purchase.
+#
+# Manual-only (workflow_dispatch) so it never runs on push/PR: like metal-decode-bench.yml it is a
+# WITNESS, not a required gate, and it must not red a peer's PR when a runner has no device.
+#
+# The failure mode this guards. internal/metalgemm's Metal files are constrained on
+# `darwin && arm64 && cgo` (NOT a `-tags metal` -- that tag is a no-op for this package), and the
+# Q2_0 parity tests t.Skip() when Available() is false. A skipped test still exits 0, so a green job
+# would otherwise "prove" nothing. The assert step below therefore fails unless the parity tests
+# actually PASSed, and fails loudly if they SKIPped.
+name: metal-q2-parity
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: macos-latest # Apple Silicon (M-series), has a Metal device for compute
+    env:
+      GOTOOLCHAIN: auto
+      CGO_ENABLED: "1" # the Metal backend is cgo; with it off the whole package degrades to the stub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Prove a Metal device is actually present on the runner (compute does not need a display).
+      - name: metal device probe
+        run: |
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -iE 'Metal|Chipset|Vendor' | head || true
+          sysctl -n machdep.cpu.brand_string 2>/dev/null || true
+          go env GOOS GOARCH CGO_ENABLED
+
+      # The Metal-gated half must compile here (cgo + the Metal framework the runner ships).
+      - name: build internal/metalgemm
+        run: go build ./internal/metalgemm/
+
+      # The witness: run the ternary Q2_0 parity tests against the real device and keep the log.
+      - name: parity - Metal Q2_0 GEMV/GEMVBatch == CPU-ref ternary GEMM
+        run: go test ./internal/metalgemm -run Q2_0 -count=1 -v 2>&1 | tee /tmp/q2_0.log
+
+      # A SKIP exits 0, so a green step above is NOT proof on its own. Fail unless the device
+      # parity tests really ran. This is the whole point of the workflow.
+      - name: assert the parity tests RAN (a skip is not a witness)
+        run: |
+          set -eu
+          if grep -qE '^\s*--- SKIP: TestMetalQ2_0' /tmp/q2_0.log; then
+            echo "::error::Q2_0 parity SKIPPED — no Metal device on this runner. Not a witness."
+            grep -E '^\s*--- SKIP: TestMetalQ2_0' /tmp/q2_0.log
+            exit 1
+          fi
+          for t in TestMetalQ2_0GemvMatchesCPU TestMetalQ2_0GemvBatchMatchesCPU TestMetalQ2_0GemvGroupMatchesCPU; do
+            if ! grep -qE "^\s*--- PASS: ${t}\b" /tmp/q2_0.log; then
+              echo "::error::${t} did not report PASS — the Q2_0 device witness is not satisfied."
+              exit 1
+            fi
+            echo "witnessed on device: ${t} PASS"
+          done
+          echo "Metal ternary Q2_0 GEMV/GEMVBatch matches CPU-ref on Apple Silicon (issue #4873)."
+
+      - name: upload the witness log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-q2-parity-log
+          path: /tmp/q2_0.log
+          if-no-files-found: warn
