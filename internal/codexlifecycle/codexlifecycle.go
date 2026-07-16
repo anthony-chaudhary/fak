@@ -246,7 +246,19 @@ func Fold(events []Event, fresh bool) Report {
 // malformed line is skipped rather than failing the whole read — the truncated tail
 // is exactly the process-death evidence this package must survive to classify.
 func ParseRollout(r io.Reader) ([]Event, error) {
+	_, events, err := ReadRollout(r)
+	return events, err
+}
+
+// ReadRollout reads a rollout stream and returns both its identifying Meta and its
+// lifecycle events. Only the FIRST session_meta record identifies the file: a
+// subagent rollout carries the PARENT's metadata in its inherited context further
+// down, so a last-wins read would relabel every child as its parent.
+func ReadRollout(r io.Reader) (Meta, []Event, error) {
+	var meta Meta
 	var out []Event
+	haveMeta := false
+
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 256*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -258,28 +270,56 @@ func ParseRollout(r io.Reader) ([]Event, error) {
 			Timestamp string `json:"timestamp"`
 			Type      string `json:"type"`
 			Payload   struct {
-				Type       string `json:"type"`
-				TurnID     string `json:"turn_id"`
-				Reason     string `json:"reason"`
-				DurationMS int64  `json:"duration_ms"`
+				Type          string `json:"type"`
+				TurnID        string `json:"turn_id"`
+				Reason        string `json:"reason"`
+				DurationMS    int64  `json:"duration_ms"`
+				ID            string `json:"id"`
+				AltID         string `json:"session_id"`
+				ModelProvider string `json:"model_provider"`
+				CLIVersion    string `json:"cli_version"`
+				CWD           string `json:"cwd"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal([]byte(line), &rec) != nil || rec.Type != "event_msg" {
+		if json.Unmarshal([]byte(line), &rec) != nil {
 			continue
 		}
-		switch rec.Payload.Type {
-		case KindStarted, KindComplete, KindAborted:
-			out = append(out, Event{
-				Kind:       rec.Payload.Type,
-				TurnID:     strings.TrimSpace(rec.Payload.TurnID),
-				Timestamp:  rec.Timestamp,
-				Reason:     rec.Payload.Reason,
-				DurationMS: rec.Payload.DurationMS,
-			})
+		switch rec.Type {
+		case "session_meta":
+			if haveMeta {
+				continue
+			}
+			haveMeta = true
+			meta = Meta{
+				RolloutID:  firstNonEmpty(rec.Payload.ID, rec.Payload.AltID),
+				Provider:   strings.TrimSpace(rec.Payload.ModelProvider),
+				CLIVersion: strings.TrimSpace(rec.Payload.CLIVersion),
+				CWD:        strings.TrimSpace(rec.Payload.CWD),
+			}
+		case "event_msg":
+			switch rec.Payload.Type {
+			case KindStarted, KindComplete, KindAborted:
+				out = append(out, Event{
+					Kind:       rec.Payload.Type,
+					TurnID:     strings.TrimSpace(rec.Payload.TurnID),
+					Timestamp:  rec.Timestamp,
+					Reason:     rec.Payload.Reason,
+					DurationMS: rec.Payload.DurationMS,
+				})
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return out, err
+		return meta, out, err
 	}
-	return out, nil
+	return meta, out, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }
