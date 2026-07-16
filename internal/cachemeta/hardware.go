@@ -37,6 +37,23 @@ const (
 	// pay: a span demoted to CXL stays reusable WITHOUT recompute, and (with a
 	// coherent CXL.mem region) can be shared zero-copy across hosts in a pod.
 	TierCXL ResidencyTier = "cxl"
+
+	// TierRemoteDRAM is a peer node's idle DRAM lent as a PAGING tier over RDMA
+	// (Infiniswap / far-memory, #4306): a memory-starved box pages a cold-but-expensive
+	// KV span into a neighbor's spare RAM by one-sided RDMA instead of spilling it to
+	// local SSD, because a random RDMA page-in (~2 µs) is an order of magnitude faster
+	// than an NVMe random read (~10 µs). It turns "this box does not have enough RAM for
+	// the KV pool" into "borrow the rack's spare RAM." It is OFF-BOX and NON-coherent:
+	// the span is paged back on access (like disk), so it is a SPILL target, not a
+	// demote-in-place tier — but it sits ABOVE local disk in the paging order
+	// (HBM > DRAM > NUMA-far > CXL > remote-DRAM > disk > object-store). The bytes move
+	// zero-copy by the NIC's DMA engine (ShareRDMA); the lender's RAM is borrowed under a
+	// lease and reclaimed fail-closed when the lender needs it back (nixl_lease.go models
+	// the lease/reclaim seam). Like the local far tiers it is prove-it-or-drop-it: it
+	// enters the ladder ONLY when a peer has registered a lendable region
+	// (CapacityProbe.RemoteDRAMPresent), never by default — a paging target that is not
+	// actually on offer would strand every span spilled to it.
+	TierRemoteDRAM ResidencyTier = "remote_dram"
 )
 
 // ShareKind names HOW a payload can be handed to another consumer (another session,
@@ -124,6 +141,11 @@ func (p TierProfile) AttendableInPlace() bool { return p.ByteAddressable && p.Co
 // HBM -> DRAM -> NUMA-far -> CXL -> Disk -> Remote. The values are order-of-magnitude
 // stand-ins (see TierProfile); the point is the SHAPE — each step is colder, larger,
 // and (past CXL) no longer attendable in place.
+//
+// The peer-DRAM-over-RDMA paging rung (TierRemoteDRAM, #4306) is deliberately NOT in
+// this map: unlike the local tiers it exists ONLY when a peer registers a lendable
+// region, so ProbedTierProfiles adds it prove-it-or-drop-it (its representative physics
+// live in remoteDRAMProfile).
 func DefaultTierProfiles() map[ResidencyTier]TierProfile {
 	return map[ResidencyTier]TierProfile{
 		TierHBM: {
@@ -159,6 +181,26 @@ func DefaultTierProfiles() map[ResidencyTier]TierProfile {
 	}
 }
 
+// remoteDRAMProfile is the representative physical profile of the peer-DRAM-over-RDMA
+// paging rung (TierRemoteDRAM, #4306). Latency and bandwidth are order-of-magnitude
+// stand-ins (see TierProfile) for a one-sided RDMA page-in over a 100 Gb NIC: a ~2 µs
+// random read-to-first-byte — an order of magnitude under the ~10 µs of an NVMe random
+// read (TierDisk), the whole point of paging to borrowed RAM instead of local SSD — at
+// line-rate streaming bandwidth (above disk, below local coherent memory). The region
+// is byte-TRANSFERABLE but NOT coherent, so a span here is paged back before use (a
+// SPILL target, never attended in place), and NOT persistent (peer RAM is volatile and
+// reclaimable). CapacityBytes is 0 (borrowed/unbounded) until a probe sizes the lent
+// region. Kept out of DefaultTierProfiles because, unlike the local far tiers, a
+// remote-DRAM rung exists only when a peer lender is registered — ProbedTierProfiles
+// adds it prove-it-or-drop-it, sizing this profile from CapacityProbe.RemoteDRAMBytes.
+func remoteDRAMProfile() TierProfile {
+	return TierProfile{
+		Tier: TierRemoteDRAM, ReadLatencyNanos: 2_000, BandwidthMBPerSec: 12_000,
+		CapacityBytes: 0, ByteAddressable: false, Coherent: false,
+		Persistent: false, Share: ShareRDMA,
+	}
+}
+
 // CapacityProbe carries the live per-tier capacity readings ProbedTierProfiles needs to
 // turn DefaultTierProfiles' representative stand-ins into the ladder THIS box can prove.
 // It is plain data, so ProbedTierProfiles stays pure and witnessable with no GPU and no
@@ -191,6 +233,16 @@ type CapacityProbe struct {
 	// memory-only NUMA nodes) the same prove-it-or-drop-it way.
 	CXLBytes   int64
 	CXLPresent bool
+	// RemoteDRAMBytes / RemoteDRAMPresent size the peer-DRAM-over-RDMA paging rung
+	// (TierRemoteDRAM, #4306) the same prove-it-or-drop-it way as the far tiers: the rung
+	// enters the ladder ONLY when a peer has registered a lendable region (Present with
+	// positive bytes). Unlike DRAM/Disk there is no always-present default — absent a
+	// registered lender the box has no remote-DRAM rung and a starved span spills to
+	// local disk, not to memory that is not on offer. The registering caller lives ABOVE
+	// cachemeta (a peer-memory transport / NIXL adapter), so the policy plane never
+	// imports the RDMA fabric HAL.
+	RemoteDRAMBytes   int64
+	RemoteDRAMPresent bool
 }
 
 // ProbedTierProfiles turns the representative DefaultTierProfiles ladder into the one THIS
@@ -200,9 +252,10 @@ type CapacityProbe struct {
 // span on device memory that is not there. The far-memory tiers — NUMA-far and CXL —
 // follow the same prove-it-or-drop-it rule via the far-memory probe (#1470): they enter
 // the ladder exactly when the probe confirmed them (Present with positive bytes) and stay
-// out otherwise. Only the off-box Remote pool still has no local probe and is always left
-// OUT; an operator who has provisioned one re-adds it the same way they override any other
-// profile. Only CapacityBytes is taken from the probe — latency, bandwidth, and
+// out otherwise. The peer-DRAM-over-RDMA rung (#4306) follows the same rule, gated on a
+// registered lender (RemoteDRAMPresent). Only the off-box Remote (object-store) pool still
+// has no local probe and is always left OUT; an operator who has provisioned one re-adds it
+// the same way they override any other profile. Only CapacityBytes is taken from the probe — latency, bandwidth, and
 // addressability stay at their representative values, because the probe sizes the ladder,
 // it does not re-measure the physics. The returned map is independent of
 // DefaultTierProfiles' (callers may mutate it).
@@ -245,13 +298,29 @@ func ProbedTierProfiles(p CapacityProbe) map[ResidencyTier]TierProfile {
 		out[TierCXL] = cxl
 	}
 
+	// The peer-DRAM-over-RDMA paging rung (#4306) is in the ladder only when a peer
+	// registered a lendable region (RemoteDRAMPresent with positive bytes) — same
+	// prove-it-or-drop-it rule as the far tiers, and for the same reason: a paging target
+	// that is not actually on offer would strand every span spilled to it. Its physics
+	// come from remoteDRAMProfile (not DefaultTierProfiles); the probe sizes the lent
+	// region, it does not re-measure the physics.
+	if p.RemoteDRAMPresent && p.RemoteDRAMBytes > 0 {
+		rdma := remoteDRAMProfile()
+		rdma.CapacityBytes = p.RemoteDRAMBytes
+		out[TierRemoteDRAM] = rdma
+	}
+
 	return out
 }
 
 // localTierLadder is the demote/promote order of the LOCAL memory hierarchy, hottest
-// to coldest. Off-box (Remote/Provider) and the synthetic Recompute sentinel are not
-// part of the in-box relocation ladder; demotion past Disk means Recompute (drop the
-// resident copy and re-prefill on demand).
+// to coldest. Off-box tiers (Remote/Provider, and the peer-DRAM-over-RDMA paging rung
+// TierRemoteDRAM, #4306) and the synthetic Recompute sentinel are not part of the
+// IN-BOX ladder: remote-DRAM is a colder-than-CXL SPILL target reached by demotion
+// (NextColderTier threads it in) and re-entered by page-in on access, never a local
+// promote tier — so it stays out of localTierLadder / IsLocalTier while remaining a
+// first-class relocation target. Demotion past Disk means Recompute (drop the resident
+// copy and re-prefill on demand).
 var localTierLadder = []ResidencyTier{TierHBM, TierDRAM, TierNUMAFar, TierCXL, TierDisk}
 
 // TierRank orders tiers from hottest (0) to coldest by access cost, so a policy can
@@ -267,24 +336,29 @@ func TierRank(t ResidencyTier) int {
 		return 2
 	case TierCXL:
 		return 3
-	case TierDisk:
+	case TierRemoteDRAM:
 		return 4
-	case TierRemote:
+	case TierDisk:
 		return 5
-	case TierProvider:
+	case TierRemote:
 		return 6
-	case TierRecompute:
+	case TierProvider:
 		return 7
-	default:
+	case TierRecompute:
 		return 8
+	default:
+		return 9
 	}
 }
 
-// NextColderTier returns the next tier down the local relocation ladder
-// (HBM->DRAM->NUMA-far->CXL->Disk->Recompute). Past Disk the only "colder" option is
-// to stop holding the bytes and recompute later, so it returns TierRecompute. For an
-// off-ladder tier (Remote/Provider/Recompute/Unknown) there is no local colder tier,
-// so it returns TierUnknown.
+// NextColderTier returns the next tier down the relocation/paging ladder
+// (HBM->DRAM->NUMA-far->CXL->remote-DRAM->Disk->Recompute). The peer-DRAM-over-RDMA rung
+// (#4306) threads between CXL and Disk, so a pager that walks this ladder reaches
+// borrowed peer RAM before it spills to local SSD (it is only actually chosen when a
+// lender is profiled — coldestColderWithRoom skips a rung the box does not have). Past
+// Disk the only "colder" option is to stop holding the bytes and recompute later, so it
+// returns TierRecompute. For an off-ladder tier (Remote/Provider/Recompute/Unknown)
+// there is no colder relocation tier, so it returns TierUnknown.
 func NextColderTier(t ResidencyTier) ResidencyTier {
 	switch t {
 	case TierHBM:
@@ -294,6 +368,8 @@ func NextColderTier(t ResidencyTier) ResidencyTier {
 	case TierNUMAFar:
 		return TierCXL
 	case TierCXL:
+		return TierRemoteDRAM
+	case TierRemoteDRAM:
 		return TierDisk
 	case TierDisk:
 		return TierRecompute

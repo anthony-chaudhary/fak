@@ -30,7 +30,8 @@ func TestNextColderWarmer(t *testing.T) {
 		{TierHBM, TierDRAM},
 		{TierDRAM, TierNUMAFar},
 		{TierNUMAFar, TierCXL},
-		{TierCXL, TierDisk},
+		{TierCXL, TierRemoteDRAM}, // the peer-DRAM-over-RDMA paging rung threads in (#4306)
+		{TierRemoteDRAM, TierDisk},
 		{TierDisk, TierRecompute},
 		{TierRemote, TierUnknown},
 	}
