@@ -107,9 +107,12 @@ func Open(root string) clonescan.WindowCache {
 	return c
 }
 
-// commonDir resolves the git common dir for root (absolute), or ok=false. The common
-// dir is shared across worktrees of the same clone, so the cache is fleet-shared.
-func commonDir(root string) (string, bool) {
+// commonDirCmd builds the `git rev-parse --git-common-dir` probe for root with its
+// console window suppressed. Split out from commonDir so a regression test can assert
+// the suppression (#5129) without spawning git: an unsuppressed spawn here flashes a
+// window under background automation and trips the pre-push DESKTOP_POPUP_REGRESSION
+// guard, stalling every worker's push.
+func commonDirCmd(root string) *exec.Cmd {
 	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
 	if strings.TrimSpace(root) != "" {
 		cmd.Dir = root
@@ -117,6 +120,13 @@ func commonDir(root string) (string, bool) {
 	// Suppress the console window: this resolve runs inside the commit hook and under
 	// background automation, where a windowless parent would otherwise flash a child.
 	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd
+}
+
+// commonDir resolves the git common dir for root (absolute), or ok=false. The common
+// dir is shared across worktrees of the same clone, so the cache is fleet-shared.
+func commonDir(root string) (string, bool) {
+	cmd := commonDirCmd(root)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
