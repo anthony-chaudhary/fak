@@ -1,8 +1,34 @@
 # Netra Fused Agent Kernel (`fak`) — Security Policy
 
-`fak` is a security tool: it puts a permission gate and a result-quarantine on the
-same call path as every tool call, so an agent's effects pass *through* a kernel the
-model doesn't control. We take reports against that boundary seriously.
+**Audience:** security evaluators and operators checking what the current `fak` capability boundary guarantees, how policy configures it, and what evidence demonstrates it.
+
+`fak` puts policy adjudication and result quarantine on the tool-call path. The current security floor is **structural enforcement**, not successful prompt-injection detection: an active policy limits which tools can run, managed-agent quarantine holds classified results out of model context, and gateway/adjudication errors fail closed.
+
+## Current capability floor
+
+| Boundary | Current guarantee | Configuration | Evidence |
+|---|---|---|---|
+| **Capability floor** | A tool absent from the active policy's allow-list is denied before execution. | Select and review a policy manifest; [`examples/customer-support-readonly-policy.json`](examples/customer-support-readonly-policy.json) is the read-only evaluation example. | The deterministic `fak preflight` check below exercises one denied and one allowed tool without a model. |
+| **Containment / quarantine** | In `fak agent`, a result classified as secret-shaped, prompt injection, or poison is held out of model context and replaced by a stub pointer; page-in requires an explicit witness clear. | This shipped gate is automatic on the managed-agent path; its current trigger and page-in contract are itemized in [`CLAIMS.md`](CLAIMS.md). | Run the offline managed-agent proof in the [reproduction packet](docs/repro-packet.md); do not generalize it to unmanaged clients or every backend. |
+| **Gateway / adjudication** | Tool calls routed through `fak agent` or the documented `fak` gateway cross the in-process gate; crash, timeout, and malformed-input failures deny rather than execute. | Start from [`GETTING-STARTED.md`](GETTING-STARTED.md), select its production row, and keep the client on the documented path for that backend with the intended policy. An integration that bypasses `fak` is outside this guarantee. | The [reproduction packet](docs/repro-packet.md) and repository tests are the public proof routes; a call that bypasses an advertised managed path is in scope below. |
+
+**Default evaluation route:** check the capability floor first. It is model-independent and separates policy enforcement from detector quality.
+
+**Next action — run this check:**
+
+```bash
+fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"  # DENY (POLICY_BLOCK)
+fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"       # ALLOW
+```
+
+Pass means the first call reports `DENY (POLICY_BLOCK)` and the second reports `ALLOW`. This proves the selected manifest's structural deny/allow path; it does not prove live-model quality, every integration, or every policy.
+
+**Route context:**
+
+- **Mode:** the check above is deterministic preflight mode with no model, key, or GPU. Containment evidence is scoped to `fak agent --offline`; production coverage is the documented `fak agent` or gateway path selected from [`GETTING-STARTED.md`](GETTING-STARTED.md), not an arbitrary integration or unmanaged client.
+- **Generation:** this page documents the current `gen/now` floor. Future security work is not a current guarantee unless [`CLAIMS.md`](CLAIMS.md) marks it `[SHIPPED]`.
+- **Lifecycle:** `fak` is pre-1.0 with a rolling latest release; the supported line is defined under [Supported versions](#supported-versions).
+- **Support boundary:** capability-floor, containment, gateway/adjudication, and policy/signature bypasses are security reports. Detector evasion, permissive policy authoring, and model quality are scoped separately below.
 
 ## Reporting a vulnerability
 

@@ -19,6 +19,7 @@ changes.
 - [START-HERE](START-HERE.md) — run a local model behind the gate in ten minutes.
 - [Getting started](GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
 - [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules).
+- [Security policy](SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](docs/index.md) — the published documentation landing page.
 - [Innovations index](docs/INNOVATIONS-INDEX.md) — the durable catalog of fak's innovations, concepts, and learnings: what each is, the general primitive it embodies, where it lives, whether it's shipped, and whether it's been generalized for reuse. The innovations counterpart to this repo map and the [llms.txt](llms.txt) doc map.

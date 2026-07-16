@@ -21,7 +21,7 @@
 - Deployment: [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md)
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Benchmark authority and baselines: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
-- Security and threat model: [`SECURITY.md`](SECURITY.md)
+- Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
 
 ## Source authorities
 

@@ -27,7 +27,7 @@
 - Deployment: [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md)
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Benchmark authority and baselines: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
-- Security and threat model: [`SECURITY.md`](SECURITY.md)
+- Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
 
 ## Source authorities
 
@@ -813,6 +813,7 @@ changes.
 - [START-HERE](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) — run a local model behind the gate in ten minutes.
 - [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) — choose install, deterministic proof, or production setup with prerequisites and a first check.
 - [AGENTS](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — orientation for coding agents (build, test, the hard rules).
+- [Security policy](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) — the published documentation landing page.
 - [Innovations index](https://github.com/anthony-chaudhary/fak/blob/main/docs/INNOVATIONS-INDEX.md) — the durable catalog of fak's innovations, concepts, and learnings: what each is, the general primitive it embodies, where it lives, whether it's shipped, and whether it's been generalized for reuse. The innovations counterpart to this repo map and the [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) doc map.
@@ -5331,9 +5332,35 @@ No claim exists without a traceable source.
 
 # Netra Fused Agent Kernel (`fak`) — Security Policy
 
-`fak` is a security tool: it puts a permission gate and a result-quarantine on the
-same call path as every tool call, so an agent's effects pass *through* a kernel the
-model doesn't control. We take reports against that boundary seriously.
+**Audience:** security evaluators and operators checking what the current `fak` capability boundary guarantees, how policy configures it, and what evidence demonstrates it.
+
+`fak` puts policy adjudication and result quarantine on the tool-call path. The current security floor is **structural enforcement**, not successful prompt-injection detection: an active policy limits which tools can run, managed-agent quarantine holds classified results out of model context, and gateway/adjudication errors fail closed.
+
+## Current capability floor
+
+| Boundary | Current guarantee | Configuration | Evidence |
+|---|---|---|---|
+| **Capability floor** | A tool absent from the active policy's allow-list is denied before execution. | Select and review a policy manifest; [`examples/customer-support-readonly-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/customer-support-readonly-policy.json) is the read-only evaluation example. | The deterministic `fak preflight` check below exercises one denied and one allowed tool without a model. |
+| **Containment / quarantine** | In `fak agent`, a result classified as secret-shaped, prompt injection, or poison is held out of model context and replaced by a stub pointer; page-in requires an explicit witness clear. | This shipped gate is automatic on the managed-agent path; its current trigger and page-in contract are itemized in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). | Run the offline managed-agent proof in the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md); do not generalize it to unmanaged clients or every backend. |
+| **Gateway / adjudication** | Tool calls routed through `fak agent` or the documented `fak` gateway cross the in-process gate; crash, timeout, and malformed-input failures deny rather than execute. | Start from [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), select its production row, and keep the client on the documented path for that backend with the intended policy. An integration that bypasses `fak` is outside this guarantee. | The [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md) and repository tests are the public proof routes; a call that bypasses an advertised managed path is in scope below. |
+
+**Default evaluation route:** check the capability floor first. It is model-independent and separates policy enforcement from detector quality.
+
+**Next action — run this check:**
+
+```bash
+fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"  # DENY (POLICY_BLOCK)
+fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"       # ALLOW
+```
+
+Pass means the first call reports `DENY (POLICY_BLOCK)` and the second reports `ALLOW`. This proves the selected manifest's structural deny/allow path; it does not prove live-model quality, every integration, or every policy.
+
+**Route context:**
+
+- **Mode:** the check above is deterministic preflight mode with no model, key, or GPU. Containment evidence is scoped to `fak agent --offline`; production coverage is the documented `fak agent` or gateway path selected from [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), not an arbitrary integration or unmanaged client.
+- **Generation:** this page documents the current `gen/now` floor. Future security work is not a current guarantee unless [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) marks it `[SHIPPED]`.
+- **Lifecycle:** `fak` is pre-1.0 with a rolling latest release; the supported line is defined under [Supported versions](#supported-versions).
+- **Support boundary:** capability-floor, containment, gateway/adjudication, and policy/signature bypasses are security reports. Detector evasion, permissive policy authoring, and model quality are scoped separately below.
 
 ## Reporting a vulnerability
 
