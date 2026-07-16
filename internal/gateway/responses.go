@@ -129,12 +129,69 @@ type responsesContentPart struct {
 	Text string `json:"text"`
 }
 
-// responsesUsage is the Responses-shaped token accounting (input/output/total),
-// projected from the gateway's internal agent.Usage.
+// responsesUsage is the Responses-shaped token accounting projected from the gateway's
+// internal agent.Usage. Alongside the input/output/total triple it forwards
+// input_tokens_details.cached_tokens so a Codex client records the UPSTREAM provider's
+// real prompt-cache reuse instead of the counter being silently dropped to zero (#4776).
+// Fields the inbound Responses adapter never parses are DELIBERATELY unforwarded and
+// documented at responsesUsageFrom, not silently synthesized here.
 type responsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int                          `json:"input_tokens"`
+	OutputTokens       int                          `json:"output_tokens"`
+	TotalTokens        int                          `json:"total_tokens"`
+	InputTokensDetails *responsesInputTokensDetails `json:"input_tokens_details,omitempty"`
+}
+
+// responsesInputTokensDetails is the Responses `usage.input_tokens_details` subobject.
+// cached_tokens is the number of input tokens the UPSTREAM provider served from its own
+// prompt cache — PROVIDER cache-reuse provenance relayed verbatim from the upstream
+// Responses `usage.input_tokens_details.cached_tokens` (which the outbound Responses
+// adapter parsed into agent.Usage.PromptTokensDetails). It is deliberately NOT fak's own
+// vDSO/served-inline reuse: a fak-served hit is a separate axis and is never relabeled as
+// cached_tokens (#4776). cached_tokens carries NO omitempty so a WITNESSED zero (the
+// provider reported a counter whose value is 0) renders `"cached_tokens":0`, distinct from
+// an OMITTED detail — responsesUsageFrom drops the whole subobject when the provider
+// supplied no counter, so a consumer reads "unknown", never a fabricated measured zero.
+type responsesInputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// responsesUsageFrom projects the gateway's internal agent.Usage onto the client-facing
+// Responses usage shape. It forwards input/output/total verbatim and — the #4776 fix —
+// preserves input_tokens_details.cached_tokens when (and only when) the upstream provider
+// actually supplied that counter.
+//
+// Omitted-vs-witnessed-zero is carried through the pointer. agent.Usage holds the
+// provider's Responses input_tokens_details in PromptTokensDetails (the outbound Responses
+// adapter folds input_tokens_details there, falling back to prompt_tokens_details). A nil
+// pointer means the provider reported no cache counter — a local/in-kernel turn, or an
+// upstream that omitted the field — so the whole input_tokens_details subobject is dropped.
+// A non-nil pointer (including CachedTokens==0, a witnessed zero) is forwarded so the zero
+// stays distinguishable from silence.
+//
+// Provenance stays clean: only the provider-relayed counter is forwarded here; fak's own
+// vDSO/served-inline reuse is never relabeled as cached_tokens.
+//
+// Deliberately unforwarded: the Responses `usage.output_tokens_details.reasoning_tokens`
+// subobject is NOT projected because the inbound Responses adapter
+// (internal/agent/adapters.go) does not parse it into agent.Usage.CompletionTokensDetails
+// on this route — there is no counter to carry, and emitting the field would fabricate one.
+// If that adapter starts parsing reasoning tokens, forward them here rather than dropping.
+func responsesUsageFrom(u agent.Usage) responsesUsage {
+	ru := responsesUsage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+		TotalTokens:  u.TotalTokens,
+	}
+	// PromptTokensDetails is where the outbound Responses adapter lands the wire's
+	// input_tokens_details; InputTokensDetails is the same-shaped fallback. Nil in both
+	// means "no provider counter" — leave input_tokens_details omitted.
+	if d := u.PromptTokensDetails; d != nil {
+		ru.InputTokensDetails = &responsesInputTokensDetails{CachedTokens: d.CachedTokens}
+	} else if d := u.InputTokensDetails; d != nil {
+		ru.InputTokensDetails = &responsesInputTokensDetails{CachedTokens: d.CachedTokens}
+	}
+	return ru
 }
 
 // handleResponses serves POST /v1/responses. Its spine is handleChatCompletions
@@ -173,6 +230,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 	reqTrace := s.useHTTPTrace(w, r, "")
 	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	defer sessionTurn.complete()
 	if canceled {
 		return
 	}
@@ -307,11 +365,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		Status:     responsesStatusFor(comp.FinishReason),
 		Output:     responsesOutputFromAssistant(asst),
 		OutputText: asst.Content,
-		Usage: responsesUsage{
-			InputTokens:  comp.Usage.PromptTokens,
-			OutputTokens: comp.Usage.CompletionTokens,
-			TotalTokens:  comp.Usage.TotalTokens,
-		},
+		Usage:      responsesUsageFrom(comp.Usage),
 	}
 	if comp.FinishReason == "length" {
 		resp.IncompleteDetails = &responsesIncomplete{Reason: "max_output_tokens"}
