@@ -13,7 +13,7 @@ This page is the human route map for **fak**. Choose the job you have now; each 
 | Add fak beside one agent | [`fak guard` quickstart](README.md#manage-one-local-agent-fak-guard) | Launch the agent you already use through `fak guard`. |
 | Run a shared or durable endpoint | [Server quickstart](docs/fak/server-quickstart.md) | Start `fak serve`, then call its health and model endpoints. |
 | Integrate a client or agent | [Integration guides](docs/integrations/) | Select the guide for your client and follow its smallest working path. |
-| Operate or deploy fak | [Deployment guide](docs/fak/deployment-guide.md) | Choose the topology and health checks for your environment. |
+| Operate or deploy fak | [Deployment chooser](docs/deployment.md) | Choose local, fleet, cloud, or air-gapped operation by requirements, then follow its health check. |
 | Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | Read the repository workflow, then choose a scoped issue. |
 | Find documentation by job or lifecycle | [Documentation index](INDEX.md) | Choose an evaluator, builder, operator, contributor, or research route before entering the detailed map. |
 
