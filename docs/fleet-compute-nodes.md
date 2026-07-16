@@ -1,74 +1,90 @@
-# The sanctioned compute nodes — the local machine is the control point, not the compute boundary
+---
+title: "Choose sanctioned compute for hardware-gated work"
+description: "Operator route for selecting local proof, cloud GPU, private lab GPU, DC/CPU, or nightly evidence collection by workload and witness requirement."
+---
 
-This is the in-repo SSOT for **where hardware-gated work runs**. The workstation an agent
-runs on (a Windows laptop, in the reference fleet) is the **control point**: it plans,
-dispatches, and ledgers. It is **not** the compute boundary. When a task needs something the
-local box lacks — a CUDA/GPU device, a specific accelerator arch, DC-network reach, or heavy
-CPU — the sanctioned move is to **dispatch the work to a fleet node that has it**, then report
-the real result.
+# Choose sanctioned compute for hardware-gated work
 
-**The anti-pattern this page kills:** ending a turn with *"not yet — no GPU on this host"* (or
-any *"blocked for lack of local hardware"*) as a terminal answer. That treats the laptop as the
-boundary. It never is. There is always a route: a fleet node, or — if the credential/bridge
-session for that node is missing — a ready-to-run command sequence handed to the operator. Both
-count as "used the lab." Only `no local hardware` does not.
+**Audience:** operators deciding where a fak task must run to produce valid hardware or
+network evidence. The workstation is the **control point** for planning, dispatch, and
+ledgering; the selected node is the **compute boundary** for the workload and witness.
 
-> The complement, so the two never blur: the **kernel's own** 60-second proof needs no GPU, no
-> key, no model (see [`AGENTS.md`](../AGENTS.md#the-60-second-proof-no-key-no-model-no-gpu--verified)).
-> This page is about the *other* case — a task that **genuinely** needs a device (a live CUDA
-> serve, a device-GEMM witness). That task is dispatched, never abandoned.
+**Current default:** use the local 60-second proof when the claim is about the kernel gate
+and does not require a device. **Next action:** match the required evidence to one row
+below and run that row's preflight before dispatching the workload.
 
-## The nodes (route "no local X" here)
+## Choose by workload and evidence
 
-| Need | Node | How to reach it |
-| --- | --- | --- |
-| Live CUDA serve / GPU burst | **GCP** `fak-realmodel` (g2-standard-8, **NVIDIA L4 sm_89**); spot A100/H100 for bigger runs | `python tools/gcp_gpu_probe.py --all-tiers` (read-only quota probe) · `python tools/gcp_bench.py --dry-run` (prints every gcloud command offline) · `GCP_PROJECT=<id> ./scripts/gcp-qwen-serve.sh --apply` (stand up an in-kernel CUDA serve) |
-| Device-GEMM / kernel witness (**8-GPU datacenter server sm_80**) | the on-prem **GPU server** — no inbound SSH; reached only via the private Slack control bridge (its hostname lives in local fleet memory, not the repo) | `go build -o dgxbridge ./cmd/dgxbridge && ./dgxbridge doctor` → `run` / `bg` / `wait` / `pull`; needs a live operator Slack session |
-| DC network + tokens (Confluence, CPU bench) | **CPU server** (AVX2 EPYC-7742, CPU-only) | operator `dgxbridge` session; the laptop can't reach the DC, `da33` can |
-| Nightly device-witness ledger | **nightrun** pipeline | dispatch device-witness tasks → `docs/nightrun/collected.jsonl` (produced on GPU hardware, not the laptop) |
+| Required evidence | Sanctioned target | Current support boundary | Preflight and next action |
+|---|---|---|---|
+| **Kernel policy and offline behavior; no device claim** | Local control point | The canonical proof needs no key, model, or GPU. It proves the policy and offline agent path, not CUDA, accelerator throughput, or a datacenter network. | Run the [60-second offline proof](repro-packet.md#the-60-second-offline-proof). Stop here only when its evidence matches the claim. |
+| **Live CUDA serve or an operator-controlled cloud GPU burst** | GCP GPU node | The public cloud route supports quota discovery, a dry-run command preview, and bounded instance creation. Availability, quota, accelerator shape, region, and price remain observations from the selected project at dispatch time. | Run `python tools/gcp_gpu_probe.py --all-tiers`. A candidate is eligible only when the probe reports quota for its accelerator/region and does not report an auth or API blocker. Then run `python tools/gcp_bench.py --dry-run` and use its printed command, or run `GCP_PROJECT=<id> ./scripts/gcp-qwen-serve.sh --apply`. A create failure is a failed availability check, not a witness. |
+| **Device-GEMM, kernel, or multi-GPU witness on private lab hardware** | Private lab GPU server | Access, node identity, commands, credentials, and transcripts are private. The public repo may receive only a scrubbed result and its scoped hardware witness. | Open the [private control-channel route](private-comms-channel.md) and follow its authorized private runbook; return the scrubbed witness through the [lab development loop](fak/lab-dev-loop.md). |
+| **Datacenter-network access or heavy CPU evidence** | Private lab CPU/DC target | The target is CPU-only for accelerator claims. Network reach, credentials, node selection, and transcripts remain private operator data. | Use the same [private control-channel route](private-comms-channel.md), select the CPU/DC workload in its maintained node map, and return only scrubbed evidence. |
+| **Recurring device evidence rather than an interactive result** | Nightrun device-witness pipeline | The pipeline collects scheduled hardware evidence. Its runbook chooses the configured cloud or private worker; that physical target retains its own access boundary. The public ledger proves only the task, build, scrubbed machine class, and scope recorded in each row, not live capacity. | Follow the [nightrun runbook](nightrun/README.md) and verify the resulting row in `docs/nightrun/collected.jsonl`; use that row, rather than the worker's location, as the public readback. |
 
-**Capacity reality (as of the 2026-07 lab-resource sweep):** the reference project's GPU quota
-is **H100-in-us-central1 only** (A100/L4/T4 report NO_QUOTA); on-demand `a3-highgpu-1g` can
-STOCKOUT across all zones (surfaced as a bare "Internal error"), while `--spot` draws from a
-separate, larger, ~3× cheaper pool and has succeeded where on-demand failed. So for a GPU
-witness: try `--spot` early, and note that failed `create`s don't bill. `gcp_bench` pins
-`--max-run-duration=7200s ...action=DELETE` so a box can't run away.
+The evidence requirement selects the target. “GPU” alone is insufficient: a live serving
+check, a single-device kernel witness, a multi-GPU result, and a recurring nightly ledger
+are different jobs. When both a public-cloud and private-lab target meet the same device requirement, choose
+public cloud for a self-service single-node run when its probe reports eligibility; choose
+private lab for multi-GPU, device-specific lab hardware, DC reach, or a witness whose
+maintained runbook is private. If neither condition decides the target, use nightrun for a
+recurring job and ask the authorized lab operator to select the maintained interactive
+route for a one-off job.
 
-**Credential-missing is still not a wall.** If the creds/bridge session for the right node are
-absent (no GCP creds on the control box by default; `dgxbridge` needs a live operator Slack
-session), produce the **exact ready-to-run command sequence** and hand it to the operator. That
-is "used the lab," never "blocked by local hardware."
+## Public choice versus private control
 
-**A device witness runs ON the GPU node.** `FAK_CUDA_ARCH=sm_89 bash tools/cuda_acceptance.sh`
-(or `make cuda-accept`) honestly SKIPs (exit 3) on a non-GPU host — an honest skip, never a
-false green. The green comes from the node that can actually witness it.
+This page is the public **selection route**. It names workload classes, public preflights,
+and the evidence that must come back. It does not carry the private node map, bridge
+commands, credentials, channel identifiers, recovery steps, or raw transcripts. Those
+belong to the authorized companion runbook reached through
+[the private-control public stub](private-comms-channel.md).
 
-> **"Node" = fleet compute node, not Node.js.** There is no Node.js project in-repo (no
-> `package.json`); the non-Go runtime is Python (`tools/`), frozen by `internal/pythongate`.
+A missing credential or bridge session changes the next actor, not the compute
+requirement. An unauthorized reader can select the workload class but cannot verify a
+private target's identity or availability; that is an intentional support boundary, not a
+publicly reproducible check. Hand the authorized operator the selected row and public
+preflight; the operator completes and records private discovery in the private runbook.
+Do not reconstruct private commands from dated public notes, and do not report local
+hardware absence as the result of a task whose claim requires remote hardware.
 
-## How this is enforced
+## Witness contract
 
-The doctrine is not honor-system — a guard hook catches the regression and redirects to this page.
+A hardware claim is supported only by a run on a target that provides the required device
+or network boundary. For CUDA acceptance, for example,
+`FAK_CUDA_ARCH=<matching-arch> bash tools/cuda_acceptance.sh` (or `make cuda-accept`)
+must execute on the selected GPU node. Its exit 3 on a non-GPU host is an honest skip,
+not a passing device witness.
 
-- **`fak hwgate-lint`** — scans an agent's final output for the "no local GPU/hardware" stop
-  pattern and types each hit to a class (`NO_LOCAL_GPU`, `NO_LOCAL_RUNTIME`, `LOCAL_BOUNDARY`),
-  each carrying the fixed redirect to a sanctioned node. A turn that already names a sanctioned
-  route is suppressed (the fleet was used). Run it directly, or drive the fixtures with
-  `fak hwgate-lint --selfcheck`. It is the hardware-gate dual of `fak headless-lint`.
-- **The Stop-hook gate.** When `fak guard` installs the Claude Code Stop hook, a headless child
-  whose final turn declares a local-hardware blocker as terminal is caught by the
-  `--hardware-gate` rung. On `enforce` the stop is **blocked** (exit 2) and the sanctioned-node
-  redirect is fed back so the agent dispatches instead of stopping; `warn` (the shipped default)
-  and `shadow` observe only, so the pattern can soak before promotion. The gate runs **before**
-  the operator-directed gate: a "no GPU here — want me to try elsewhere?" turn is the more
-  specific misroute and takes the fixed hardware remedy, not the generic "act on your own
-  question" nudge.
-- **The tally.** `fak guard-stops` rolls up how many stops ended by declaring a local-hardware
-  blocker as terminal (vs redirected), so the soak → promote decision reads straight off the
-  ledger.
+Every returned result should identify the tested commit or module revision, workload,
+machine class and accelerator architecture where applicable, command or runbook step,
+result, and artifact location. Scrub private identifiers before committing public
+evidence. The [GPU-server private boundary](gpu-server-private-boundary.md) is authoritative
+for what may cross repositories.
 
-## Related
+## Mode, generation, support, and lifecycle
 
-- [`cmd/dgxbridge`](../cmd/dgxbridge) — the Slack control bridge to the on-prem GPU server.
-- [`docs/nightrun/`](nightrun/) — the nightly device-witness ledger the GPU nodes feed.
-- [`AGENTS.md`](../AGENTS.md) — the agent doctrine that points here.
+| Context | Current contract |
+|---|---|
+| Mode | Public selection and evidence routing. Private control is a separate authorized mode; model-serving traffic is separate from both. |
+| Generation | This is the current (`gen/now`) selection route. Linked runbooks own executable commands and supersede dated notes. |
+| Support | Public cloud tools are supported to the behavior their current preflight reports. Private targets are supported only for authorized operators through the private runbook. Nightrun support is scoped to recorded ledger rows. |
+| Lifecycle | The maintainer of this public table records selection status here; the maintainer of each linked runbook records executable details there. Add or promote a row only with a working preflight plus a returned witness. Mark the row held when access or capacity cannot be established. Remove or replace it when its maintained runbook names a successor. |
+
+Capacity is checked at dispatch time; a dated quota or stockout observation is not a
+permanent support promise. If a preflight finds no eligible cloud target, preserve its
+output and choose another row that can produce the same required evidence, or hand the
+exact public preflight and selected requirement to the authorized operator.
+
+## Enforcement and related routes
+
+`fak hwgate-lint` detects a final answer that treats missing local hardware as terminal
+and redirects it to this selection route. `fak guard` can enforce the same rule at Stop,
+and `fak guard-stops` reports the resulting redirects. These gates select a route; they do
+not fabricate a hardware witness.
+
+- [Private control channel](private-comms-channel.md) — authorized discovery and readback.
+- [Lab development loop](fak/lab-dev-loop.md) — return scrubbed hardware evidence.
+- [Nightrun](nightrun/README.md) — schedule and read recurring evidence.
+- [Backend selection](supported/backends.md) — choose model execution separately from the
+  node that hosts it.
