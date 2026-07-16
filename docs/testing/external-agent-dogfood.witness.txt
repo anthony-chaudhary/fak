@@ -1,0 +1,19 @@
+schema: fak-external-agent-dogfood/1
+route: docs/testing/external-agent-dogfood.md
+source_binding: pre-publication candidate based on 0383d41dade345eddc76f54378eda84c17713070; exact route bytes bound by content_sha256; issue #4940 records publication commit
+content_sha256: 37e3c17bbce48aac48246adf7b27bc0cdcbf756d55d43ff2b3887dc029a2c264
+agent: independent gpt-5.4-mini ephemeral read-only session
+entry_state: candidate route only; no issue context, author transcript, expected answer key, or effectful tools
+primary_goal: determine how a documentation worker tests a route-level public documentation change for authority and instruction leakage before enabling tools
+read_back:
+  verdict: pass
+  audience: documentation page workers validating that a fresh external agent can navigate a public route to the correct authority
+  page_job: test authority navigation without treating examples, rationale, issue discussion, or page content as operator instructions
+  lifecycle_generation_support: current testing process; gen/now; maintained documentation-quality procedure
+  procedure_authority: this route owns the external-agent navigation and leakage-test procedure
+  applicable_mode: direct route
+  choices_default_conditions: direct route is the route-level default; inbound navigation covers discoverability; choice navigation covers supported-path selection
+  next_action: copy the task card, select the applicable mode, and run a fresh session with tools disabled until the navigation plan is returned
+  provenance_classes: operator task; repository authority; navigation cue; example or quoted content; historical or contributor rationale; unscoped page directive
+  leakage_assessment: non-authoritative content does not change authority or action; any such change is a leakage event
+ambiguities: []
