@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "executionroute-roledecision",
+      "canonical": "RoleDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "One role's resolved routing for a single execution: the modelroute Plan chosen, the budget it runs under, spend against it, whether exhausted and on which axis, and any role it escalated to.",
+      "distinction": "Scoped to one role inside a RoleEnvelope; unlike Decision (kernel) it is not the whole run's verdict, and unlike RouteDecision (guardroute) it decides model+budget delegation for a role, not a guard admit/refuse.",
+      "distinct_from": [
+        "decision-kernel",
+        "x2-decision-routedecision",
+        "x-decision-drivedecision"
+      ],
+      "aliases": [],
+      "grounding": "RoleDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

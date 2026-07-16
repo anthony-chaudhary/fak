@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "executionroute-roleplan",
+      "canonical": "RolePlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Binds one execution Role to its own modelroute Subject (independent model constraints), an independent per-axis Budget, an escalation target, and a result fold.",
+      "distinction": "One role's routing-plus-budget contract; unlike RolePlanSet it is a single member of the set, and unlike modelroute.Plan it carries the role, its budget, and its escalation target rather than only the chosen model policy.",
+      "distinct_from": [
+        "x-cov-plan-planstep",
+        "drive-plan-planmeta"
+      ],
+      "aliases": [],
+      "grounding": "RolePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "executionroute-roleplanset",
+      "canonical": "RolePlanSet",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The declared multi-role execution plan: an ordered list of RolePlans plus a top-level fold that composes the roles' results into the final answer.",
+      "distinction": "The whole declared set; unlike RolePlan it is the ordered collection (not one member), and unlike RoleEnvelope it is the pre-execution declaration, not the resolved post-budget decisions.",
+      "distinct_from": [
+        "executionroute-roleplan",
+        "x-cov-plan-planstep"
+      ],
+      "aliases": [],
+      "grounding": "RolePlanSet",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

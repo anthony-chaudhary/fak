@@ -61,11 +61,14 @@ type SessionDecision struct {
 }
 
 // Decision is the execution envelope. Keeping the three decisions visible avoids
-// flattening distinct choices into an overloaded model id.
+// flattening distinct choices into an overloaded model id. Roles, when present,
+// records the inspectable sub-model delegation plan (scout / worker / judge /
+// primary) resolved for this execution; it is nil when no role plan was routed.
 type Decision struct {
 	Harness HarnessDecision     `json:"harness"`
 	Model   modelroute.Decision `json:"model"`
 	Session SessionDecision     `json:"session"`
+	Roles   *RoleEnvelope       `json:"roles,omitempty"`
 }
 
 // Route composes harness selection, the existing model-routing oracle, and session
