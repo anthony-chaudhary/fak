@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcatalog"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/benchruns"
 	"github.com/anthony-chaudhary/fak/internal/nightrun"
 )
@@ -24,6 +25,7 @@ type Options struct {
 type Parts struct {
 	Root        string
 	Now         time.Time
+	Commit      string // git HEAD the run under test would be built at (lineage reuse key, #4600)
 	Benchmarks  []benchcatalog.Bench
 	Catalog     benchruns.Catalog
 	CatalogErr  error
@@ -45,6 +47,7 @@ type Report struct {
 	Ledger      LedgerStatus    `json:"ledger"`
 	Local       LocalStatus     `json:"local"`
 	Authority   AuthorityStatus `json:"authority"`
+	Reuse       ReuseVerdict    `json:"reuse"`
 	NextAction  Action          `json:"next_action"`
 	Walk        []Surface       `json:"walk"`
 }
@@ -155,6 +158,7 @@ func Load(opts Options) Report {
 	return StatusFromParts(Parts{
 		Root:        root,
 		Now:         now,
+		Commit:      benchcli.Stamp().GitCommit,
 		Benchmarks:  benchcatalog.All(),
 		Catalog:     catalog,
 		CatalogErr:  catalogErr,
@@ -195,8 +199,34 @@ func StatusFromParts(p Parts) Report {
 		Walk: Walk(),
 	}
 	r.Local = localStatus(p.Caps, p.Tasks, p.Ledger, now, p.TaskErr)
+	r.Reuse = evalReuse(p, r)
 	r.NextAction = chooseAction(r)
 	return r
+}
+
+// evalReuse decides whether the next local benchmark run is redundant because a prior
+// catalog run already covers this box at the current commit (#4600). It is a no-op
+// (no reuse) unless there is a concrete next auto-runnable local datum to skip, a
+// current commit lineage, and a known machine — and it honors the NoReuseEnv
+// force-rerun escape hatch. Machine/model/precision beyond (commit × box) are left as
+// wildcards here: per-task config narrowing is a follow-up (see reuse.go).
+func evalReuse(p Parts, r Report) ReuseVerdict {
+	if r.Catalog.Error != "" || r.Local.Error != "" {
+		return ReuseVerdict{}
+	}
+	if !r.Local.HasNext || r.Local.Next == nil || r.Local.Next.Manual {
+		return ReuseVerdict{}
+	}
+	if !reuseEnabled(os.Getenv(NoReuseEnv)) {
+		return ReuseVerdict{Reason: "reuse disabled via " + NoReuseEnv}
+	}
+	if strings.TrimSpace(p.Commit) == "" || p.Commit == "unknown" {
+		return ReuseVerdict{Reason: "no current commit lineage; must run"}
+	}
+	if strings.TrimSpace(p.Caps.Box) == "" {
+		return ReuseVerdict{Reason: "unknown machine; cannot confirm lineage reuse"}
+	}
+	return LineageReuse(p.Catalog.Runs, LineageKey{Commit: p.Commit, Machine: p.Caps.Box})
 }
 
 func Walk() []Surface {
@@ -367,6 +397,13 @@ func chooseAction(r Report) Action {
 				Detail:  fmt.Sprintf("%s is an operator recipe; run it by hand, then record/fold the observed result", r.Local.Next.ID),
 			}
 		}
+		if r.Reuse.Reuse {
+			return Action{
+				Kind:    "reuse_run",
+				Command: "fak bench-runs show " + r.Reuse.RunID,
+				Detail:  fmt.Sprintf("skip %s: %s (force a re-run with %s=1)", r.Local.Next.ID, r.Reuse.Reason, NoReuseEnv),
+			}
+		}
 		return Action{
 			Kind:    "collect_local",
 			Command: "fak bench-loop run --apply",
@@ -435,8 +472,11 @@ func RenderStatus(r Report) string {
 	if r.Local.Error != "" {
 		fmt.Fprintf(&b, "local-error: %s\n", r.Local.Error)
 	}
-	fmt.Fprintf(&b, "authority: last-updated=%s; newer-collected=%d\n\n", blank(r.Authority.Date), r.Authority.NewerThan)
-	fmt.Fprintf(&b, "next action: %s\n", r.NextAction.Kind)
+	fmt.Fprintf(&b, "authority: last-updated=%s; newer-collected=%d\n", blank(r.Authority.Date), r.Authority.NewerThan)
+	if r.Reuse.Reuse {
+		fmt.Fprintf(&b, "reuse: prior run %s covers commit %s (skip re-run)\n", blank(r.Reuse.RunID), shortCommit(r.Reuse.Commit))
+	}
+	fmt.Fprintf(&b, "\nnext action: %s\n", r.NextAction.Kind)
 	fmt.Fprintf(&b, "  command: %s\n", r.NextAction.Command)
 	fmt.Fprintf(&b, "  detail : %s\n", r.NextAction.Detail)
 	if r.Local.Next != nil {
