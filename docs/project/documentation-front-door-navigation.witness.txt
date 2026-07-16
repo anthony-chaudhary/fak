@@ -1,0 +1,23 @@
+schema: fak-documentation-front-door-navigation-witness/1
+routes: START-HERE.md; docs/project/documentation-audience-inventory.json
+source_binding: pre-publication candidate based on bfcd06fc080bb32e235a3f3de5f4f5809b452a3f; exact route bytes bound by start_here_sha256 and inventory_sha256; issue #4976 records publication commit
+start_here_sha256: b97f60c49cc8e023358564a16b7c6c5e96910920b9d67801e41e9598512d26a1
+inventory_sha256: 3b4a1dae0f758032066f560cc22173b24ce2ab1ff629e086b5986ad3227260bf
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: reach each maintained external-builder and operator route from the public front door without guessing
+mechanical_read_back:
+  links_resolved: 8/8
+  inventory_records_exact: 8/8
+  front_door_linked_true: 8/8
+  external_builder_routes: docs/integrations/README.md; docs/supported/clouds.md; docs/run-the-demos.md; docs/FAQ.md
+  operator_routes: docs/PRODUCT-STATUS.md; docs/ROLLBACK.md; docs/HARDWARE-MATRIX.md; docs/vendor/neo-cloud-reference-architecture.md
+reader_read_back:
+  verdict: pass
+  audience: public-front-door
+  page_job: Route eight maintained pages from START-HERE, grouped into external-builder and operator tasks, each with one next action
+  default_choice: Choose the row matching the reader's job under Builder routes or Operator routes
+  tested_jobs: connect an agent; choose a cloud target; find a runnable demo; answer a setup question; inspect product maturity; perform rollback; inspect hardware evidence; open the vendor-cloud reference architecture
+  reachability_assessment: All eight target pages are reachable under the correct audience section, and each route has a single unambiguous task-oriented next action.
+  inventory_assessment: Every target has one matching inventory record with the expected audience and front_door_linked true.
+  next_action: No further navigation action is required for these eight routes.
+ambiguities: []

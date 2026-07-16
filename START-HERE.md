@@ -17,6 +17,28 @@ This page is the human route map for **fak**. Choose the job you have now; each 
 | Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | Read the repository workflow, then choose a scoped issue. |
 | Find documentation by job or lifecycle | [Documentation index](INDEX.md) | Choose an evaluator, builder, operator, contributor, or research route before entering the detailed map. |
 
+## Builder routes
+
+Choose the route that matches the next builder decision; each destination owns its prerequisites and support boundary.
+
+| You want to… | Current route | Next action |
+|---|---|---|
+| Connect an agent, client, or protocol | [Integration path chooser](docs/integrations/README.md) | Select the row for the agent you run and follow its smallest supported path. |
+| Choose a cloud or deployment target | [Supported clouds](docs/supported/clouds.md) | Match the target to its stated support and evidence before deploying. |
+| Exercise a runnable outcome | [Demo chooser](docs/run-the-demos.md) | Pick a demo by outcome, time, hardware, and proof, then run its self-check. |
+| Resolve a setup or usage question | [FAQ](docs/FAQ.md) | Choose the task question and follow its linked authority. |
+
+## Operator routes
+
+Use these routes after choosing to operate or deploy fak; they expose current boundaries, recovery, hardware evidence, and one production architecture.
+
+| You want to… | Current route | Next action |
+|---|---|---|
+| Check current maturity and boundaries | [Product status](docs/PRODUCT-STATUS.md) | Verify the capability state and evidence before relying on it. |
+| Recover from a bad upgrade or release | [Rollback procedure](docs/ROLLBACK.md) | Select the affected deployment and follow the bounded recovery sequence. |
+| Match a workload to supported hardware | [Hardware matrix](docs/HARDWARE-MATRIX.md) | Choose the backend whose evidence satisfies the workload requirement. |
+| Review a production vendor-cloud shape | [Neo Cloud reference architecture](docs/vendor/neo-cloud-reference-architecture.md) | Compare its assumptions with the target environment before adopting it. |
+
 ## Current product paths
 
 The routes above describe the current generation of fak unless a page marks itself historical, experimental, simulated, or superseded.
