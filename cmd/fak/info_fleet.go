@@ -65,6 +65,10 @@ var fleetMetricProvenance = map[string]fleetMetricSource{
 	"Action":            fleetSourcePoll,
 	"Sessions":          fleetSourcePoll,
 	"AuthBlocked":       fleetSourcePoll,
+	"HealthySeats":      fleetSourcePoll,
+	"SeatCapacity":      fleetSourcePoll,
+	"ThrottledSeats":    fleetSourcePoll,
+	"ResumeBacklog":     fleetSourcePoll,
 	"VersionMismatches": fleetSourcePoll,
 }
 
