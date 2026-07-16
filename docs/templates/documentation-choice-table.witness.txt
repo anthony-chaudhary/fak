@@ -1,0 +1,18 @@
+schema: fak-documentation-choice-table/1
+route: docs/templates/documentation-choice-table.md
+source_binding: pre-publication candidate based on fb6d6ae69593172666b9fc18676489464dd07ad7; exact route bytes bound by content_sha256; issue #4944 records publication commit
+content_sha256: fa346323c2c82f5e68a9cdce9c2596abb32a5b52cb9147562dbb249b3021ad9a
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: fill a two-mode table where structured capture is the prose-only default and image capture applies to placement or wrapping claims
+read_back:
+  verdict: pass
+  audience: documentation writers presenting two or more valid public modes or paths
+  page_job: present criteria, choices, outcomes, limits, proof, default, change conditions, and a next action consistently
+  lifecycle_generation_support: current writing template; gen/now; maintained for public documentation
+  applicable_shape: two modes with one default
+  selected_default: structured capture for prose-only changes
+  change_condition: choose image capture when visual placement, wrapping, or rendered layout affects the claim
+  required_row_fields: observable condition; one choice; outcome; scoped limit or change condition; proof
+  next_action: copy the ready-to-fill block, replace every placeholder, and run the completion check; the filled example proceeds by saving the selected artifact
+  publication_gate: all checks pass and an independent reader selects the expected row without guessing
+ambiguities: []
