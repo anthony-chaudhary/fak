@@ -1,19 +1,65 @@
-# Contributing to fak / fleet
+# Contributing to fak
 
-Thanks for contributing. **Autonomous coding agents are first-class contributors here**
-— the same rules below bind a human, a Claude Code session, and a Codex/Cursor/Aider
-run alike, because they're enforced *below* the agent layer by git hooks and the DOS
-trust kernel, not by trust. This file is the durable contract for everyone — human and
-agent alike.
+> **Primary audience:** people preparing and shipping a code or documentation change to
+> this repository. Autonomous coding agents follow the same contributor contract because
+> the repository gates enforce it below the agent layer.
 
-New here and want a small first PR? The [good first popularization tasks](docs/adoption/good-first-tasks.md)
-board lists doc-sized wins, each naming the exact file to edit and how hard it is.
+This is the maintained contributor route: establish a working checkout, choose the
+work route for the change, run the matching checks, and land only a fully gated,
+explicitly scoped change on `main`. The sections are sequential: complete the single
+next action below first, then continue to route selection and setup. Product evaluation
+starts at [`README.md`](README.md);
+production operation starts at [`docs/operator/`](docs/operator/).
 
-This file is short on purpose; the deep public guides are `fak/ARCHITECTURE.md` (the
-extension model and the layered-DAG tier gates, enforced by `internal/architest`) and
-**`fak/EXTENDING.md`** — the golden path if you're a researcher or team who wants to
-build an *optimization for a subsystem* (a faster kernel, a new cache backend, a smarter
-admission rung) on fak without forking the core.
+**Next action:** from the repository root, run `go version` and confirm Go 1.26 or newer
+(the `go.mod` toolchain directive can fetch the required toolchain automatically).
+
+## Choose the route for your change
+
+| Change | Start here | Proof before landing |
+|---|---|---|
+| Existing Go package or CLI behavior | The owning package under `internal/` or `cmd/fak/` | A behavior test that fails before the fix and passes after it |
+| New subsystem capability | [`EXTENDING.md`](EXTENDING.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md) | A leaf implementation, architecture gate, correctness witness, and measured gain where performance is claimed |
+| Documentation | The audience route in [`INDEX.md`](INDEX.md) | Every changed local link resolves, and an independent reader correctly restates the audience, page job, choices, and next action with no ambiguity; visual defects also require a captured render |
+| CI/CD contract | [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md) | All consumers migrated together and `fak ci-preflight` on the committed tip |
+
+New here and want a bounded first change? Choose an open
+[`good first issue`](https://github.com/anthony-chaudhary/fak/labels/good%20first%20issue)
+or a doc-sized item from the
+[good-first popularization board](docs/adoption/good-first-tasks.md). Do not invent work
+from an old planning note when a current issue or authority disagrees.
+
+## Set up and verify the checkout
+
+1. Work from the repository root on `main`; this repository does not use contributor
+   feature branches. Install the repository hooks with
+   `python tools/install_trunk_guard.py` if `git config --get core.hooksPath` does not
+   report `tools/githooks`.
+2. Compile without writing an in-tree binary: `fak buildcheck --vet`. If no usable `fak`
+   binary exists yet, use a unique temporary output (`go build -o <temp-path> ./cmd/fak`),
+   then use that binary for subsequent checks.
+3. Run the proof matched to the change. `make test-fast` is the optional short feedback
+   gate; **`make ci` is the required pre-commit green gate** for build, vet, tests, and
+   claims lint. On native Windows, run
+   tests through `./test.ps1` under WSL because host application control blocks newly
+   compiled test executables. Build and vet remain native-safe.
+4. After the explicit-path commit and before push, run `fak ci-preflight` as the
+   **required committed-tip gate** in a clean temporary checkout, independent of the
+   peer-dirty working tree. Thus "green" means both gates in order: `make ci` before the
+   commit and `fak ci-preflight` after it.
+
+Build-profile details and platform commands live in
+[`docs/dev-tooling.md`](docs/dev-tooling.md). `AGENTS.md` is the machine-oriented authority
+for shared-tree recovery, proof capture, and guarded commit mechanics.
+
+## Route context
+
+| Dimension | Current contract |
+|---|---|
+| Mode | Source contribution in the shared `main` checkout; installed-binary operation belongs to the operator route. |
+| Generation | This page is the current `gen/now` contributor front door. Historical release notes and planning records do not override it. |
+| Lifecycle | Choose an issue → implement one coherent change → capture matched proof → run the full gate → commit explicit paths → push `main`. |
+| Support | Contributor setup, architecture choice, tests, commit rules, and issue reporting are covered here; product use and production recovery are routed elsewhere. |
 
 ## Licensing — read this before your first PR
 
@@ -53,10 +99,9 @@ kernel), in addition to the CLA grant to Netra.
 
 ## Development workflow
 
-- **Check you're set up first** — `python tools/extend_preflight.py` verifies the git
-  guards, the stay-on-trunk state, the ship-stamp convention, and the extension gate
-  entry points in one read-only command, then prints the golden path. Building an
-  optimization for a subsystem? Start with [`fak/EXTENDING.md`](EXTENDING.md).
+- **Start from the setup route above.** For a subsystem optimization, continue through
+  [`EXTENDING.md`](EXTENDING.md); for an existing package, run its focused tests before
+  the repository-wide gate.
 - **Touching docs? Keep the scorecard honest.** `python tools/docs_scorecard.py --scope
   reachable` grades every reader-reachable doc on five KPIs (freshness, link integrity,
   structure, readability, evidence) and counts *doc-debt* — the concrete defects a cold
@@ -82,7 +127,7 @@ kernel), in addition to the CLA grant to Netra.
 - **Tests run through WSL, not native Windows** — `.\fak\test.ps1` (whole suite) or
   `.\fak\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
-  [`fak/GETTING-STARTED.md`](GETTING-STARTED.md) for why. **Never commit a red tree.**
+  [`GETTING-STARTED.md`](GETTING-STARTED.md) for why. **Never commit a red tree.**
 - **Add a feature as a leaf, not a core edit** — `fak new-leaf <name> --tier
   <tier> [--register]` stamps a conforming skeleton and wires the layering/registration.
   The frozen ABI (`internal/abi`) is additive-only and human-owned; everything else
