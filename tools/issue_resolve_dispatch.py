@@ -3569,6 +3569,10 @@ _MISSING_API_KEY_RE = re.compile(
 _PREVIEW_CONFIRM_FEEDBACK_RE = re.compile(
     r"(REQUIRE_WITNESS\s*/\s*ESCALATE|preview-confirm|_fak_confirm)",
     re.IGNORECASE)
+# Guard writes resource/audit summaries after its managed-context terminal. The live
+# epilogue can exceed the generic 4 KiB quota-banner tail, so give this precise typed
+# signature a larger still-bounded window without broadening every classifier.
+_RESTART_EXHAUSTED_TAIL_BYTES = 16 * 1024
 _RESTART_EXHAUSTED_RE = re.compile(
     r"managed-context status (?P<status>restart_exhausted|reset_limit) "
     r"(?:limit=(?P<limit>\d+) )?(?:count=(?P<count>\d+) )?"
@@ -3577,7 +3581,7 @@ _RESTART_EXHAUSTED_RE = re.compile(
 
 def classify_restart_exhaustion(log: Path) -> dict | None:
     """Extract the typed guard terminal from the resolver process log."""
-    tail = _log_tail_text(log)
+    tail = _log_tail_text(log, nbytes=_RESTART_EXHAUSTED_TAIL_BYTES)
     matches = list(_RESTART_EXHAUSTED_RE.finditer(tail))
     if not matches:
         return None
@@ -3601,9 +3605,10 @@ def classify_no_commit_reason(log: Path) -> str:
             return NO_COMMIT_MISSING_LOG
     except OSError:
         return NO_COMMIT_MISSING_LOG
-    tail = _log_tail_text(log)
-    if _RESTART_EXHAUSTED_RE.search(tail):
+    restart = classify_restart_exhaustion(log)
+    if restart is not None:
         return NO_COMMIT_RESTART_EXHAUSTED
+    tail = _log_tail_text(log)
     if "SELF_MODIFY" in tail:
         return NO_COMMIT_SELF_MODIFY
     if "POLICY_BLOCK" in tail:

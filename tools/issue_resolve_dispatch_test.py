@@ -4824,6 +4824,20 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         self.assertEqual(mod.classify_restart_exhaustion(p)["restart_count"], 16)
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_RESTART_EXHAUSTED)
 
+    def test_live_reset_limit_survives_long_guard_epilogue(self) -> None:
+        mod = load()
+        p = self._write(
+            "fak guard: managed-context status reset_limit limit=16 "
+            "reason=BUDGET_CONTEXT_EXHAUSTED continuity=degraded\n"
+            + ("resource and audit summary padding\n" * 190)
+            + "fak guard: claude exited abnormally (code 1).\n")
+        # The live #2788 guard epilogue put the typed terminal more than 4 KiB
+        # before EOF. The precise restart scan is larger but remains bounded.
+        self.assertGreater(p.stat().st_size, mod._CAP_TAIL_BYTES)
+        self.assertEqual(mod.classify_restart_exhaustion(p)["restart_count"], 16)
+        self.assertEqual(mod.classify_no_commit_reason(p),
+                         mod.NO_COMMIT_RESTART_EXHAUSTED)
+
     def test_unknown_when_no_signature(self) -> None:
         mod = load()
         p = self._write("the worker ran a few turns and then exited cleanly\n")
