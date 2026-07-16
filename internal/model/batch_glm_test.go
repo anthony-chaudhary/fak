@@ -28,6 +28,11 @@ func TestGLMMoeBatchedDecodeMatchesSerial(t *testing.T) {
 		ModelType: "glm_moe", Architectures: []string{"GlmMoeForCausalLM"},
 	}
 	m := NewSyntheticMoE(cfg)
+	// Synthetic experts are float-backed, so this also witnesses the host fallback
+	// when no resident Q4_K gate/up tensors are available.
+	if len(m.q4kw) != 0 || len(m.kqw) != 0 {
+		t.Fatalf("synthetic GLM unexpectedly has quantized expert weights")
+	}
 	if !m.Cfg.IsMoE() {
 		t.Fatalf("synthetic GLM config is not MoE; the MoE serial-fallback path is not exercised")
 	}

@@ -248,7 +248,8 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		// fused-dispatch the dense FFN already uses via mulGroup), and every other kernel falls back
 		// to the identical two separate muls. Bit-for-bit equal to the prior gate-then-up calls.
 		gu := mulGroup(mat, []string{gn, un}, xn, []int{I, I}, H)
-		g, u := gu[0], gu[1]
+		var u []float32
+		g, u = gu[0], gu[1]
 		m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
 		m.addBiasIfPresent(u, expertName(layer, expert, "up_proj.bias"))
 		for i := 0; i < I; i++ {
