@@ -1345,7 +1345,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
-	crashProgressHead := sessionStartSHA()
+	var crashProgressHead string
 	crashNoProgress := 0
 	crashNoProgressLimit := guardCrashNoProgressLimit(crashLimit)
 	wireRetries := 0
@@ -1453,13 +1453,13 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// which disables the reap — as does noProgressLimit == 0.
 	noProgressRestarts := 0
 	noProgressLimit := guardNoProgressRestartLimit()
-	progressHead := sessionStartSHA()
+	var progressHead string
 	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
 	crashLimit := guardCrashRestartLimit()
-	crashProgressHead := sessionStartSHA()
+	var crashProgressHead string
 	crashNoProgress := 0
 	crashNoProgressLimit := guardCrashNoProgressLimit(crashLimit)
 	wireRetries := 0

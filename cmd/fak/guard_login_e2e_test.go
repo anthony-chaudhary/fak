@@ -208,6 +208,9 @@ func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 	child := writeGuardE2ENoopChild(t, false)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
 	env := guardE2EGitEnv(binDir, logPath, registryPath)
+	// Keep default-on crash recovery enabled: progress probes belong at an actual restart,
+	// not on the successful child-launch critical path.
+	env[guardCrashRestartLimitEnv] = "3"
 
 	code, out, timedOut := runGuardE2E(t,
 		"--provider openai --base-url http://127.0.0.1:9 --quiet --no-audit -- "+child,
