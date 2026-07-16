@@ -27,12 +27,12 @@ func roundTrip(t *testing.T, d SessionDescriptor) SessionDescriptor {
 
 func claudeSession() SessionDescriptor {
 	return SessionDescriptor{
-		Version:       DescriptorVersion,
-		ID:            "session-7",
-		Harness:       "claude",
-		Wire:          harnessprofile.WireAnthropic,
-		ModelFamily:   "claude",
-		ToolProtocol:  "anthropic-tools",
+		Version:          DescriptorVersion,
+		ID:               "session-7",
+		Harness:          "claude",
+		Wire:             harnessprofile.WireAnthropic,
+		ModelFamily:      "claude",
+		ToolProtocol:     "anthropic-tools",
 		TranscriptFormat: "anthropic-messages",
 	}
 }
@@ -119,11 +119,11 @@ func TestRouteCompatRefusesForkWhenRequiredStateCannotTranslate(t *testing.T) {
 	source.RequiredState = []StateKind{StateMessages, StateThinking}
 	// A genuinely foreign envelope: different family, wire, protocol, and format.
 	target := SessionDescriptor{
-		Version:       DescriptorVersion,
-		Harness:       "codex",
-		Wire:          harnessprofile.WireOpenAIResponses,
-		ModelFamily:   "gpt",
-		ToolProtocol:  "openai-functions",
+		Version:          DescriptorVersion,
+		Harness:          "codex",
+		Wire:             harnessprofile.WireOpenAIResponses,
+		ModelFamily:      "gpt",
+		ToolProtocol:     "openai-functions",
 		TranscriptFormat: "openai-responses",
 	}
 
@@ -162,11 +162,11 @@ func TestRouteCompatDropsUnrequiredStateWithoutRefusing(t *testing.T) {
 	source := claudeSession()
 	source.RequiredState = []StateKind{StateSystemPrompt}
 	target := SessionDescriptor{
-		Version:       DescriptorVersion,
-		Harness:       "codex",
-		Wire:          harnessprofile.WireOpenAIResponses,
-		ModelFamily:   "gpt",
-		ToolProtocol:  "anthropic-tools",
+		Version:          DescriptorVersion,
+		Harness:          "codex",
+		Wire:             harnessprofile.WireOpenAIResponses,
+		ModelFamily:      "gpt",
+		ToolProtocol:     "anthropic-tools",
 		TranscriptFormat: "anthropic-messages",
 	}
 
@@ -231,11 +231,11 @@ func TestRouteRefusesAssertedPortableForkAcrossIncompatibleEnvelopes(t *testing.
 	source := claudeSession()
 	source.RequiredState = []StateKind{StateThinking}
 	target := SessionDescriptor{
-		Version:       DescriptorVersion,
-		Harness:       "codex",
-		Wire:          harnessprofile.WireOpenAIResponses,
-		ModelFamily:   "gpt",
-		ToolProtocol:  "openai-functions",
+		Version:          DescriptorVersion,
+		Harness:          "codex",
+		Wire:             harnessprofile.WireOpenAIResponses,
+		ModelFamily:      "gpt",
+		ToolProtocol:     "openai-functions",
 		TranscriptFormat: "openai-responses",
 	}
 
@@ -276,11 +276,11 @@ func TestDescriptorRefusesTheForkTheBooleansCannotSee(t *testing.T) {
 	source := claudeSession()
 	source.RequiredState = []StateKind{StateThinking}
 	target := SessionDescriptor{
-		Version:       DescriptorVersion,
-		Harness:       "codex",
-		Wire:          harnessprofile.WireOpenAIResponses,
-		ModelFamily:   "gpt",
-		ToolProtocol:  "openai-functions",
+		Version:          DescriptorVersion,
+		Harness:          "codex",
+		Wire:             harnessprofile.WireOpenAIResponses,
+		ModelFamily:      "gpt",
+		ToolProtocol:     "openai-functions",
 		TranscriptFormat: "openai-responses",
 	}
 	subject := SessionSubject{ID: "session-7", Portable: true}

@@ -103,10 +103,10 @@ type SessionDescriptor struct {
 	// existing session — it is the shape a session would be moved INTO).
 	ID string `json:"id,omitempty"`
 
-	Harness       string              `json:"harness,omitempty"`
-	Wire          harnessprofile.Wire `json:"wire,omitempty"`
-	ModelFamily   string              `json:"model_family,omitempty"`
-	ToolProtocol  string              `json:"tool_protocol,omitempty"`
+	Harness          string              `json:"harness,omitempty"`
+	Wire             harnessprofile.Wire `json:"wire,omitempty"`
+	ModelFamily      string              `json:"model_family,omitempty"`
+	ToolProtocol     string              `json:"tool_protocol,omitempty"`
 	TranscriptFormat string              `json:"transcript_format,omitempty"`
 
 	// RequiredState names the state that MUST survive the move for it to be worth

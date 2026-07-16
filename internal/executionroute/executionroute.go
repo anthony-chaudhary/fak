@@ -70,10 +70,10 @@ type HarnessDecision struct {
 // derived from; it is nil when the caller supplied no descriptor pair and the
 // boolean fallback decided.
 type SessionDecision struct {
-	Action SessionAction   `json:"action"`
-	ID     string          `json:"id,omitempty"`
+	Action SessionAction `json:"action"`
+	ID     string        `json:"id,omitempty"`
 	Compat *CompatResult `json:"compat,omitempty"`
-	Reason string          `json:"reason"`
+	Reason string        `json:"reason"`
 }
 
 // Decision is the execution envelope. Keeping the three decisions visible avoids
