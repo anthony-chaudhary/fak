@@ -138,3 +138,34 @@ func TestPagerPrefersRemoteDRAMOverDisk(t *testing.T) {
 		t.Fatalf("with no lender, the span must spill to local disk, got %s -> %s (%s)", d.Action, d.ToTier, d.Reason)
 	}
 }
+
+// TestModelRemoteDRAMPageInAdvantage is the deterministic MODELED witness for the two
+// quantities #4306's Witness names: random KV page-in latency (remote-DRAM-over-RDMA vs
+// local-NVMe) and effective KV-pool size gained. It is hardware-free (representative
+// profiles); the raw 2-node RDMA confirmation is MEASURED and tracked in #5066.
+func TestModelRemoteDRAMPageInAdvantage(t *testing.T) {
+	const page = 256 << 10 // a 256 KiB KV page
+	adv := ModelRemoteDRAMPageInAdvantage(page, CapacityProbe{RemoteDRAMPresent: true, RemoteDRAMBytes: 200 << 30})
+	if adv.Provenance != "MODELED" {
+		t.Fatalf("provenance = %q, want MODELED (a modeled advantage is never reported as measured)", adv.Provenance)
+	}
+	// Paging to borrowed peer RAM beats paging from local NVMe.
+	if adv.RemoteDRAMPageInNanos >= adv.LocalDiskPageInNanos {
+		t.Fatalf("remote-DRAM page-in %dns must beat local disk %dns", adv.RemoteDRAMPageInNanos, adv.LocalDiskPageInNanos)
+	}
+	if adv.SpeedupX <= 1 {
+		t.Fatalf("remote-DRAM must be faster than disk; modeled speedup = %.3fx", adv.SpeedupX)
+	}
+	// A registered lender adds exactly its lent region to the KV pool.
+	if adv.BorrowedBytesGained != 200<<30 {
+		t.Fatalf("effective KV capacity gained = %d, want the lent 200 GiB", adv.BorrowedBytesGained)
+	}
+	// Fail-closed: no registered lender gains no borrowed capacity (the latency model still holds).
+	none := ModelRemoteDRAMPageInAdvantage(page, CapacityProbe{})
+	if none.BorrowedBytesGained != 0 {
+		t.Fatalf("no lender must gain no borrowed capacity, got %d", none.BorrowedBytesGained)
+	}
+	if none.SpeedupX <= 1 {
+		t.Fatalf("the page-in latency advantage is independent of the lender probe; got %.3fx", none.SpeedupX)
+	}
+}
