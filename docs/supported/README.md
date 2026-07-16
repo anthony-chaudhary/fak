@@ -58,6 +58,7 @@ status follows the witnessed [claims ledger](https://github.com/anthony-chaudhar
 | [APIs, wires & MCP](apis-and-protocols.md) | OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini, xAI; MCP over stdio and HTTP; the fak-native endpoints; and the honest interop stance on A2A, AG-UI, ACP, ANP. |
 | [Agent harnesses & frameworks](agent-harnesses.md) | Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo, Goose, Zed, and frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, and the Vercel AI SDK. |
 | [Serving engines](engines.md) | The token engines fak fronts — Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio — and the in-kernel reference engine. |
+| [Backend selection](backends.md) | The operator decision route for remote model servers, the local CPU reference path, external GPU engines, and in-kernel CUDA or Vulkan backends. |
 | [Silicon backends](silicon-backends.md) | The vendor-neutral backend path for accelerator teams: `compute.Backend`, `Caps`, correctness classes, backend conformance vocabulary, and non-reference gates. |
 
 ## Related references (the sourced detail behind these pages)
