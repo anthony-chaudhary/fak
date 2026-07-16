@@ -48,6 +48,21 @@
           "category": "incidental",
           "reason": "concrete injected memoization interface for clonescan tokenization (#4330); local mechanism, not a disambiguable cache concept",
           "token": "WindowCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "filename of the cmd-lane backtest harness for the existing CacheBurstPaysBack gate; not a new concept (#2812)",
+          "token": "cachevalue_firebacktest"
+        },
+        {
+          "category": "incidental",
+          "reason": "lane-local confusion-matrix result of backtesting the existing CacheBurstPaysBack gate; measures it, adds no new concept (#2812)",
+          "token": "cacheBurstBacktest"
+        },
+        {
+          "category": "incidental",
+          "reason": "the backtest fold over the existing CacheBurstPaysBack predicate; measurement of an existing concept (#2812)",
+          "token": "backtestCacheBurstPaysBack"
         }
       ],
       "id": "cache",
@@ -57,6 +72,8 @@
         "TokenCacheDir",
         "WindowCache",
         "applyinfocachemechclick",
+        "backtestCacheBurstPaysBack",
+        "cacheBurstBacktest",
         "cache_trace_test",
         "cacheable",
         "cachebreakevents",
@@ -85,6 +102,7 @@
         "cachetokens",
         "cachettl",
         "cachettlupgraded",
+        "cachevalue_firebacktest",
         "cachevalue_test",
         "cachewritemult",
         "caching",
