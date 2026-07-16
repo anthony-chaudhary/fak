@@ -18,6 +18,12 @@ const fallback = "dev"
 // was built with instead of inheriting a parent checkout's marker.
 var BuildVersion string
 
+// BuildCommit may be set by source-install builds when the Go toolchain cannot derive
+// vcs.revision itself (notably from a linked/detached git worktree on Windows). It is the
+// full, clean commit SHA selected by the installer and is build provenance, not a friendly
+// application version.
+var BuildCommit string
+
 // Current returns the best available application version.
 func Current() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_APP_VERSION")); v != "" {

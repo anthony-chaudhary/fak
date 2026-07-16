@@ -84,7 +84,16 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	//    repo, shipping a binary that cannot attest which commit it is (#3350, epic #2218 gap
 	//    G2). With =true the build FAILS instead of emitting an unstamped binary.
 	buildArgs := []string{"build", "-buildvcs=true"}
-	if ld := versionLDFlags(opts.RepoRoot); ld != "" {
+	commit := ""
+	if out, ok := run(ctx, opts.RepoRoot, "git", "status", "--porcelain"); ok && strings.TrimSpace(out) == "" {
+		if out, ok := run(ctx, opts.RepoRoot, "git", "rev-parse", "HEAD"); ok {
+			candidate := strings.TrimSpace(out)
+			if validCommit(candidate) {
+				commit = candidate
+			}
+		}
+	}
+	if ld := versionLDFlags(opts.RepoRoot, commit); ld != "" {
 		buildArgs = append(buildArgs, "-ldflags", ld)
 	}
 	buildArgs = append(buildArgs, "-o", tmp, "./cmd/fak")
@@ -161,16 +170,29 @@ func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (
 // parent checkout's marker" — self-update simply never set it. Baking it here (the same
 // -X the release-artifacts workflow uses) pins the installed binary's version to the commit
 // it was built from, independent of wherever a guard is later launched.
-func versionLDFlags(repoRoot string) string {
-	b, err := os.ReadFile(filepath.Join(repoRoot, "VERSION"))
-	if err != nil {
-		return ""
+func versionLDFlags(repoRoot, commit string) string {
+	var flags []string
+	if b, err := os.ReadFile(filepath.Join(repoRoot, "VERSION")); err == nil {
+		if v := strings.TrimSpace(string(b)); v != "" {
+			flags = append(flags, "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion="+v)
+		}
 	}
-	v := strings.TrimSpace(string(b))
-	if v == "" {
-		return ""
+	if validCommit(commit) {
+		flags = append(flags, "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit="+commit)
 	}
-	return "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=" + v
+	return strings.Join(flags, " ")
+}
+
+func validCommit(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // versionOutputStamped reports whether `fak version` output carries a REAL VCS stamp: a

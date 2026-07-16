@@ -114,3 +114,26 @@ func TestBuildIdentityAlwaysHasRuntime(t *testing.T) {
 		t.Errorf("OS/Arch empty (%q/%q), want the runtime GOOS/GOARCH", id.OS, id.Arch)
 	}
 }
+
+func TestBuildIdentityUsesInjectedCommitWhenGoVCSStampMissing(t *testing.T) {
+	old := appversion.BuildCommit
+	appversion.BuildCommit = "0123456789abcdef0123456789abcdef01234567"
+	t.Cleanup(func() { appversion.BuildCommit = old })
+
+	id := buildIdentity(&debug.BuildInfo{})
+	if !id.Stamped || id.Commit != appversion.BuildCommit || id.CommitShort != "0123456789ab" {
+		t.Fatalf("injected commit identity = %+v, want stamped %s", id, appversion.BuildCommit)
+	}
+}
+
+func TestBuildIdentityPrefersGoVCSStampOverInjectedCommit(t *testing.T) {
+	old := appversion.BuildCommit
+	appversion.BuildCommit = "0123456789abcdef0123456789abcdef01234567"
+	t.Cleanup(func() { appversion.BuildCommit = old })
+
+	const vcs = "abcdef0123456789abcdef0123456789abcdef01"
+	id := buildIdentity(&debug.BuildInfo{Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: vcs}}})
+	if id.Commit != vcs {
+		t.Fatalf("Commit = %q, want Go vcs.revision %q to win over injected fallback", id.Commit, vcs)
+	}
+}

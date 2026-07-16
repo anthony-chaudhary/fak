@@ -18,8 +18,14 @@ type scriptRunner struct {
 func (s *scriptRunner) run(_ context.Context, _, name string, args ...string) (string, bool) {
 	joined := name + " " + strings.Join(args, " ")
 	s.ran = append(s.ran, append([]string{name}, args...))
-	if s.failOn != "" && strings.Contains(joined, s.failOn) {
+	if s.failOn != "" && strings.Contains(joined, s.failOn) && !(s.failOn == "version" && name == "go") {
 		return "boom: " + s.failOn, false
+	}
+	if name == "git" && len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+		return "", true
+	}
+	if name == "git" && len(args) == 2 && args[0] == "rev-parse" && args[1] == "HEAD" {
+		return "0123456789abcdef0123456789abcdef01234567\n", true
 	}
 	// The smoke stage runs `<tmp> version`; a real freshly-built candidate reports a VCS
 	// stamp, which the fail-closed provenance gate (#3350) now requires before the swap.
@@ -42,8 +48,8 @@ func TestInstallHappyPathSwapsOnAllGreen(t *testing.T) {
 		t.Fatalf("swap target = %q, want /bin/fak", swapped)
 	}
 	// Ladder must have run build, vet, smoke (the tmp binary), then swapped.
-	if len(r.ran) != 3 {
-		t.Fatalf("ran %d commands, want 3 (build/vet/smoke); got %v", len(r.ran), r.ran)
+	if len(r.ran) != 5 {
+		t.Fatalf("ran %d commands, want 5 (cleanliness/revision/build/vet/smoke); got %v", len(r.ran), r.ran)
 	}
 }
 
@@ -53,9 +59,9 @@ func TestInstallStopsAtFailingGateAndDoesNotSwap(t *testing.T) {
 		stage  Stage
 		nRan   int // commands attempted before the stop
 	}{
-		{"build", StageBuild, 1},
-		{"vet", StageVet, 2},
-		{"version", StageSmoke, 3}, // the smoke command is `<tmp> version`
+		{"build", StageBuild, 3},
+		{"vet", StageVet, 4},
+		{"version", StageSmoke, 5}, // the smoke command is `<tmp> version`
 	} {
 		t.Run(string(c.stage), func(t *testing.T) {
 			r := &scriptRunner{failOn: c.failOn}
@@ -109,6 +115,12 @@ type recordTmp struct{ buildOut string }
 func (r *recordTmp) run(_ context.Context, _, name string, args ...string) (string, bool) {
 	// Find the `-o <path>` pair wherever it sits — the build now leads with -buildvcs=true
 	// (and may carry -ldflags), so -o is no longer at a fixed index.
+	if name == "git" && len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+		return "", true
+	}
+	if name == "git" && len(args) == 2 && args[0] == "rev-parse" && args[1] == "HEAD" {
+		return "0123456789abcdef0123456789abcdef01234567\n", true
+	}
 	if name == "go" && len(args) > 0 && args[0] == "build" {
 		for i := 0; i+1 < len(args); i++ {
 			if args[i] == "-o" {
@@ -128,6 +140,12 @@ func (r *recordTmp) run(_ context.Context, _, name string, args ...string) (stri
 type recordBuild struct{ buildArgs []string }
 
 func (r *recordBuild) run(_ context.Context, _, name string, args ...string) (string, bool) {
+	if name == "git" && len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+		return "", true
+	}
+	if name == "git" && len(args) == 2 && args[0] == "rev-parse" && args[1] == "HEAD" {
+		return "0123456789abcdef0123456789abcdef01234567\n", true
+	}
 	if name == "go" && len(args) > 0 && args[0] == "build" {
 		r.buildArgs = append([]string{}, args...)
 	}
@@ -160,14 +178,16 @@ func TestInstallBakesVersionLdflagsWhenVersionFilePresent(t *testing.T) {
 	}
 }
 
-func TestInstallOmitsLdflagsWhenNoVersionFile(t *testing.T) {
+func TestInstallStillBakesCommitWhenNoVersionFile(t *testing.T) {
 	repo := t.TempDir() // deliberately no VERSION file
 	r := &recordBuild{}
 	swap := func(src, dst string) error { return nil }
 
 	Install(context.Background(), r.run, swap, Options{RepoRoot: repo, Target: filepath.Join(repo, "fak")})
-	if strings.Contains(strings.Join(r.buildArgs, " "), "-ldflags") {
-		t.Fatalf("build args = %v, want NO -ldflags when the tree has no VERSION (behavior unchanged from before)", r.buildArgs)
+	joined := strings.Join(r.buildArgs, " ")
+	const want = "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit=0123456789abcdef0123456789abcdef01234567"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("build args = %v, want injected commit provenance %q even without VERSION", r.buildArgs, want)
 	}
 }
 

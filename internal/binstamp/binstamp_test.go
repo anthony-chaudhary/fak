@@ -3,6 +3,8 @@ package binstamp
 import (
 	"runtime/debug"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 func TestStampFromBuildInfo(t *testing.T) {
@@ -101,5 +103,18 @@ func TestRevisionsMatch(t *testing.T) {
 	}
 	if revisionsMatch("1234567", "abcdef1234567890") {
 		t.Fatal("non-prefix must not match")
+	}
+}
+
+func TestSelfUsesInjectedCommitWhenGoVCSStampMissing(t *testing.T) {
+	old := appversion.BuildCommit
+	appversion.BuildCommit = "0123456789abcdef0123456789abcdef01234567"
+	t.Cleanup(func() { appversion.BuildCommit = old })
+
+	// Self reads this test binary's normal build info. Go test binaries generally carry no
+	// vcs.revision here, so the injected installer provenance must remain observable.
+	got := Self()
+	if !got.HasVCS || got.Revision != appversion.BuildCommit || got.Dirty {
+		t.Fatalf("Self() = %+v, want clean injected commit %s", got, appversion.BuildCommit)
 	}
 }

@@ -18,6 +18,8 @@ package binstamp
 import (
 	"runtime/debug"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // Stamp is the build provenance read out of a binary (or the running process).
@@ -54,7 +56,13 @@ func (f Freshness) String() string {
 // Self reads the build stamp embedded in the currently-running process.
 func Self() Stamp {
 	bi, _ := debug.ReadBuildInfo()
-	return stampFrom(bi)
+	stamp := stampFrom(bi)
+	if !stamp.HasVCS {
+		if rev := strings.TrimSpace(appversion.BuildCommit); rev != "" {
+			stamp = Stamp{Revision: rev, HasVCS: true}
+		}
+	}
+	return stamp
 }
 
 // stampFrom extracts the stamp from a (possibly nil) BuildInfo. Split out so tests can

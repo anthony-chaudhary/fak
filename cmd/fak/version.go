@@ -164,6 +164,9 @@ func buildProvenanceLine(bi *debug.BuildInfo) string {
 			dirty = s.Value == "true"
 		}
 	}
+	if rev == "" {
+		rev = strings.TrimSpace(appversion.BuildCommit)
+	}
 	if rev != "" {
 		short := rev
 		if len(short) > 12 {
@@ -232,6 +235,9 @@ func buildIdentity(bi *debug.BuildInfo) binaryIdentity {
 		case "vcs.time":
 			id.CommitTime = s.Value
 		}
+	}
+	if id.Commit == "" {
+		id.Commit = strings.TrimSpace(appversion.BuildCommit)
 	}
 	if id.Commit != "" {
 		id.Stamped = true
