@@ -87,8 +87,8 @@ type accountsCmd struct {
 	rmRehome, rmReason, rehomeAddr, rehomeKey *string
 	rmArchive                                 *bool
 
-	roleFlag, launchCommand, launchModel, launchFallbackModel, launchManagedCache, afterSeat, cooldownClear *string
-	launchGuard, launchSkipPerms, launchUltracode, rotateFlag, noHeadroom                                   *bool
+	roleFlag, launchCommand, launchModel, launchFallbackModel, launchManagedCache, launchUltracode, afterSeat, cooldownClear *string
+	launchGuard, launchSkipPerms, rotateFlag, noHeadroom                                                                     *bool
 
 	backupAt, backupFile *string
 	backupKeep           *int
@@ -143,7 +143,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
-	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
+	launchUltracode := fs.String("ultracode", "auto", "(launch) ultracode posture auto|on|off (default auto): run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) via --settings '{\"ultracode\":true}'. auto turns it on only for rigor-class work, so a bare/unclassified launch stays off (ultracode is the slowest posture and is pure overhead on grind work); on forces it, off disables it. true/false are accepted as on/off aliases. Claude-only; ignored for other agents")
 	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 4.8 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
 	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Opus 4.8 startup is unavailable — an unknown/invalid model OR a usage/rate limit (e.g. an Opus weekly cap -> Fable); empty disables. Default: Fable 5 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
 	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else on — best-effort managed cache everywhere). on forces the stable-prefix 1h-TTL cache upgrade regardless of billing; explicit auto restores guard's billing-gated default (PASSIVE on a subscription-OAuth seat unless $"+fleetGuardAPIKeyEnvEnv+" makes it ACTIVE); off is the express opt-out for a seat where on self-blocks")
@@ -492,22 +492,22 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			seat = strings.TrimSpace(rest[0])
 		}
 		return runAccountsLaunch(stdout, stderr, launchParams{
-			name:          seat,
-			command:       *launchCommand,
-			rotate:        *rotateFlag,
-			after:         strings.TrimSpace(*afterSeat),
-			useHeadroom:   !*noHeadroom,
-			useGuard:      *launchGuard,
-			skipPerms:     *launchSkipPerms,
-			ultracode:     *launchUltracode,
-			model:         strings.TrimSpace(*launchModel),
-			modelExplicit: flagSet(fs, "model"),
-			fallbackModel: strings.TrimSpace(*launchFallbackModel),
-			managedCache:  strings.TrimSpace(*launchManagedCache),
-			dryRun:        *dryRun,
-			passthrough:   fs.Args(),
-			registryPath:  *registryPath,
-			homeDir:       *homeDir,
+			name:             seat,
+			command:          *launchCommand,
+			rotate:           *rotateFlag,
+			after:            strings.TrimSpace(*afterSeat),
+			useHeadroom:      !*noHeadroom,
+			useGuard:         *launchGuard,
+			skipPerms:        *launchSkipPerms,
+			ultracodePosture: strings.TrimSpace(*launchUltracode),
+			model:            strings.TrimSpace(*launchModel),
+			modelExplicit:    flagSet(fs, "model"),
+			fallbackModel:    strings.TrimSpace(*launchFallbackModel),
+			managedCache:     strings.TrimSpace(*launchManagedCache),
+			dryRun:           *dryRun,
+			passthrough:      fs.Args(),
+			registryPath:     *registryPath,
+			homeDir:          *homeDir,
 		})
 
 	case "sync":

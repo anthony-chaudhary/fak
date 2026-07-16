@@ -57,6 +57,64 @@ type launchOpts struct {
 // only emits it for Claude, since --settings is Claude-specific.
 const ultracodeSettingsArg = `{"ultracode":true}`
 
+// ultracodeWorkKind is the coarse work class `--ultracode=auto` routes on. It is deliberately a
+// small launcher-local vocabulary rather than the fleet dispatch tier table (the
+// FLEET_TIER_LAUNCH tier→profile resolver), so the account-switcher launcher stays
+// self-contained and the two seams can evolve independently.
+type ultracodeWorkKind int
+
+const (
+	// ultracodeKindUnknown is an untagged launch — the interactive `fak accounts launch` case,
+	// which carries no work class at all.
+	ultracodeKindUnknown ultracodeWorkKind = iota
+	// ultracodeKindRigor is work whose output must be VERIFIED before it is relayed: design,
+	// audit, security, benchmark-claims. Ultracode's fan-out and self-verification pay for
+	// themselves here.
+	ultracodeKindRigor
+	// ultracodeKindGrind is mechanical work: hygiene sweeps, doc sync, high-tool-count autonomous
+	// loops. Ultracode is pure wall-clock overhead here.
+	ultracodeKindGrind
+)
+
+// resolveUltracodePosture folds the --ultracode knob and the work class into the single boolean
+// buildLaunchArgv needs: whether to emit --settings '{"ultracode":true}'. This is the
+// posture→ultracode table (#5016) that replaced a blanket default-on bool:
+//
+//	posture  work kind  ultracode  why
+//	-------  ---------  ---------  -------------------------------------------------------
+//	on       (any)      ON         operator forced it; an explicit posture always wins
+//	off      (any)      OFF        operator disabled it; an explicit posture always wins
+//	auto     rigor      ON         verified-before-relayed work earns the orchestration tax
+//	auto     grind      OFF        mechanical work never recovers the wall-clock cost
+//	auto     unknown    OFF        conservative: unclassifiable work probably needs no rigor
+//
+// `auto` is the default. The interactive launcher has no work class to hand in, so a bare
+// `fak accounts launch` resolves auto→unknown→OFF: lean and fast by default, with --ultracode=on
+// as the operator's explicit opt-in. `true`/`false` stay accepted as on/off aliases so a script
+// written against the old bool flag keeps working. An unrecognized posture is a loud error rather
+// than a silent default — the same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
+func resolveUltracodePosture(posture string, kind ultracodeWorkKind) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(posture)) {
+	case "on", "true":
+		return true, nil
+	case "off", "false":
+		return false, nil
+	case "", "auto":
+		return kind == ultracodeKindRigor, nil
+	default:
+		return false, fmt.Errorf("invalid --ultracode %q: want auto|on|off", posture)
+	}
+}
+
+// ultracodePostureWord normalizes a posture for the launch plan readout, so an empty knob still
+// reads as the `auto` it resolves to.
+func ultracodePostureWord(posture string) string {
+	if p := strings.ToLower(strings.TrimSpace(posture)); p != "" {
+		return p
+	}
+	return "auto"
+}
+
 // defaultLaunchModel is the Opus 4.8 model id an account-switched Claude launch pins by
 // default. The switcher passes it explicitly via --model so every seat a launch lands on
 // starts on the same model regardless of that seat's OWN saved default. `--model ""` opts
@@ -157,20 +215,20 @@ type launchParams struct {
 	// rotate launches the NEXT account in the rotation instead of the active/named seat —
 	// the round-robin that lets an operator hop off a walled account onto a fresh bucket.
 	// after is the anchor it rotates OFF of (empty => the named seat, else the active seat).
-	rotate        bool
-	after         string
-	useHeadroom   bool   // default true — order the rotation by the live runtime headroom signal
-	useGuard      bool   // default true
-	skipPerms     bool   // default true
-	ultracode     bool   // default true — put Claude in ultracode (workflow) mode via --settings
-	model         string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
-	modelExplicit bool
-	fallbackModel string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
-	managedCache  string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else on — best-effort; explicit "auto" restores guard's billing-gated auto)
-	dryRun        bool   // print the plan, do not exec
-	passthrough   []string
-	registryPath  string
-	homeDir       string
+	rotate           bool
+	after            string
+	useHeadroom      bool   // default true — order the rotation by the live runtime headroom signal
+	useGuard         bool   // default true
+	skipPerms        bool   // default true
+	ultracodePosture string // ultracode posture: auto|on|off (default auto — resolved by resolveUltracodePosture)
+	model            string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
+	modelExplicit    bool
+	fallbackModel    string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
+	managedCache     string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else on — best-effort; explicit "auto" restores guard's billing-gated auto)
+	dryRun           bool   // print the plan, do not exec
+	passthrough      []string
+	registryPath     string
+	homeDir          string
 }
 
 // launchRunResult is the exec seam result. Stderr carries a bounded tail only, so the
@@ -297,12 +355,21 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", mcErr)
 		return 2
 	}
+	// Ultracode posture (#5016): auto|on|off, default auto. The interactive launcher carries no
+	// work class, so `auto` resolves through ultracodeKindUnknown to the conservative OFF and an
+	// operator opts in explicitly with --ultracode=on. Fail loud on a bad posture, exactly as the
+	// managed-cache mode does above.
+	ultracodeOn, ucErr := resolveUltracodePosture(p.ultracodePosture, ultracodeKindUnknown)
+	if ucErr != nil {
+		fmt.Fprintf(stderr, "fak accounts launch: %v\n", ucErr)
+		return 2
+	}
 	guardCacheArgs := guardCachePostureArgs(mcMode, os.Getenv(fleetGuardAPIKeyEnvEnv))
 	argv := buildLaunchArgv(fakBin, launchOpts{
 		command:         command,
 		useGuard:        p.useGuard,
 		skipPermissions: p.skipPerms,
-		ultracode:       p.ultracode,
+		ultracode:       ultracodeOn,
 		model:           p.model,
 		guardCacheArgs:  guardCacheArgs,
 		passthrough:     p.passthrough,
@@ -310,7 +377,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
 	grant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), argv, envMap(env), home.Dir))
 
-	printAccountsLaunchPlan(stderr, p, command, home, id, grant, mcMode)
+	printAccountsLaunchPlan(stderr, p, command, home, id, grant, mcMode, ultracodeOn)
 	printAccountFixSummary(stderr, fixes, "account fixes")
 
 	if !grant.Allow {
@@ -345,7 +412,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				command:         command,
 				useGuard:        p.useGuard,
 				skipPermissions: p.skipPerms,
-				ultracode:       p.ultracode,
+				ultracode:       ultracodeOn,
 				model:           fallback,
 				guardCacheArgs:  guardCacheArgs,
 				passthrough:     p.passthrough,
@@ -383,7 +450,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 // seat, identity, login, the guard/permissions/ultracode/model posture (Claude-only words gated
 // off for other agents), the managed-cache word, and the broker-sanitized command + agent_run
 // provenance. Pure output — extracted from runAccountsLaunch verbatim.
-func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, home accounts.Home, id accounts.Identity, grant launchBrokerGrant, mcMode string) {
+func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, home accounts.Home, id accounts.Identity, grant launchBrokerGrant, mcMode string, ultracodeOn bool) {
 	guardWord := "off (--guard=false; launching the agent directly, no kernel/cache hop)"
 	if p.useGuard {
 		guardWord = "on (fak guard — kernel adjudicates every tool call; prompt-cache/compaction vCache layer on)"
@@ -402,11 +469,14 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
 	}
 	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
-	ultracodeWord := "off (--ultracode=false)"
-	if p.ultracode {
+	// Name the posture that produced the verdict, not just the verdict: under the default `auto`
+	// the operator should be able to see WHY ultracode is on or off for this launch (#5016).
+	posture := ultracodePostureWord(p.ultracodePosture)
+	ultracodeWord := fmt.Sprintf("off (--ultracode=%s)", posture)
+	if ultracodeOn {
 		switch guardAgentBaseName(command) {
 		case "claude", "claude-code":
-			ultracodeWord = `on (--settings '{"ultracode":true}' — xhigh reasoning + workflow orchestration)`
+			ultracodeWord = fmt.Sprintf(`on (--ultracode=%s; --settings '{"ultracode":true}' — xhigh reasoning + workflow orchestration)`, posture)
 		default:
 			ultracodeWord = fmt.Sprintf("n/a (%s is not Claude; --settings not applied)", command)
 		}

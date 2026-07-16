@@ -284,7 +284,9 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 	if !strings.Contains(joined, "guard --managed-cache on --") {
 		t.Fatalf("argv missing on-by-default managed-cache posture before --: %#v", gotArgv)
 	}
-	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel + " --settings " + ultracodeSettingsArg + " --resume xyz"
+	// The default posture is --ultracode=auto, which an unclassified launch resolves to OFF
+	// (#5016), so a bare launch carries no ultracode --settings.
+	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel + " --resume xyz"
 	if !strings.HasSuffix(joined, wantTail) {
 		t.Fatalf("argv tail wrong: %q", joined)
 	}
@@ -396,8 +398,11 @@ func TestRunAccountsLaunchFallsBackToFableWhenDefaultOpusUnavailable(t *testing.
 	}
 	t.Cleanup(func() { accountsLaunchRun = orig })
 
+	// --ultracode=on is explicit here: the point of this test is that the posture RIDES the
+	// fallback hop, and the default (auto -> off for an unclassified launch, #5016) would emit no
+	// --settings to check.
 	var out, errb bytes.Buffer
-	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--ultracode=on", "--registry", regPath, "--home", home})
 	if rc != 0 {
 		t.Fatalf("launch fallback rc=%d stderr=%s", rc, errb.String())
 	}
@@ -749,9 +754,126 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("launch --guard=false rc=%d stderr=%s", rc, errb.String())
 	}
-	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", ultracodeSettingsArg}
+	// Default --ultracode=auto + an unclassified launch => no ultracode --settings (#5016).
+	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("direct launch argv = %#v, want %#v", gotArgv, want)
+	}
+}
+
+// TestResolveUltracodePosture pins the posture x work-class table #5016 documents: an explicit
+// on/off always wins, and `auto` earns ultracode ONLY for rigor-class work — grind and the
+// unclassified/interactive case stay OFF for latency.
+func TestResolveUltracodePosture(t *testing.T) {
+	cases := []struct {
+		posture string
+		kind    ultracodeWorkKind
+		want    bool
+		wantErr bool
+	}{
+		// auto routes per work class.
+		{"auto", ultracodeKindRigor, true, false},
+		{"auto", ultracodeKindGrind, false, false},
+		{"auto", ultracodeKindUnknown, false, false},
+		{"", ultracodeKindRigor, true, false}, // empty normalizes to auto
+		{"", ultracodeKindUnknown, false, false},
+		// An explicit posture wins over the work class in BOTH directions.
+		{"on", ultracodeKindUnknown, true, false},
+		{"on", ultracodeKindGrind, true, false},
+		{"off", ultracodeKindRigor, false, false},
+		// Case and surrounding space are normalized.
+		{"OFF", ultracodeKindRigor, false, false},
+		{"  on  ", ultracodeKindGrind, true, false},
+		{"Auto", ultracodeKindRigor, true, false},
+		// The old bool flag's values stay accepted as aliases, so an existing
+		// `--ultracode=false` script keeps working.
+		{"true", ultracodeKindUnknown, true, false},
+		{"false", ultracodeKindRigor, false, false},
+		// A typo fails loud rather than silently picking a posture.
+		{"maybe", ultracodeKindRigor, false, true},
+		{"1", ultracodeKindRigor, false, true},
+	}
+	for _, tc := range cases {
+		got, err := resolveUltracodePosture(tc.posture, tc.kind)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("resolveUltracodePosture(%q, %v) err = %v, wantErr = %v", tc.posture, tc.kind, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("resolveUltracodePosture(%q, %v) = %v, want %v", tc.posture, tc.kind, got, tc.want)
+		}
+	}
+}
+
+// TestRunAccountsLaunchUltracodePosture pins #5016: --ultracode is a three-value posture
+// auto|on|off (default auto), and the ultracode --settings arg is emitted ONLY when the posture
+// resolves ON. A bare launch carries no work class, so auto resolves to the conservative OFF —
+// replacing the blanket default-on that made every seat pay the orchestration tax.
+func TestRunAccountsLaunchUltracodePosture(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantArg bool
+	}{
+		{"default (auto) + unclassified launch omits ultracode", nil, false},
+		{"explicit auto + unclassified launch omits ultracode", []string{"--ultracode=auto"}, false},
+		{"explicit on forces ultracode", []string{"--ultracode=on"}, true},
+		{"explicit off omits ultracode", []string{"--ultracode=off"}, false},
+		{"legacy bool true still forces ultracode", []string{"--ultracode=true"}, true},
+		{"legacy bool false still omits ultracode", []string{"--ultracode=false"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			regPath, _ := launchRegistry(t, home)
+
+			var gotArgv []string
+			orig := accountsLaunchRun
+			accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+				gotArgv = argv
+				return launchRunResult{Code: 0}
+			}
+			t.Cleanup(func() { accountsLaunchRun = orig })
+
+			args := append([]string{"launch", "--name", "gem8-seat"}, tc.args...)
+			args = append(args, "--registry", regPath, "--home", home)
+
+			var out, errb bytes.Buffer
+			if rc := runAccounts(&out, &errb, args); rc != 0 {
+				t.Fatalf("launch rc=%d stderr=%s", rc, errb.String())
+			}
+			joined := strings.Join(gotArgv, " ")
+			if got := strings.Contains(joined, ultracodeSettingsArg); got != tc.wantArg {
+				t.Fatalf("ultracode --settings present = %v, want %v\nargv: %s", got, tc.wantArg, joined)
+			}
+		})
+	}
+}
+
+// TestRunAccountsLaunchRejectsInvalidUltracodePosture: a typo must fail loud rather than silently
+// picking a posture — the same fail-on-bad-mode discipline the managed-cache knob uses.
+func TestRunAccountsLaunchRejectsInvalidUltracodePosture(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	launched := false
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, _, _ []string) launchRunResult {
+		launched = true
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"launch", "--name", "gem8-seat", "--ultracode", "sometimes",
+		"--registry", regPath, "--home", home,
+	})
+	if rc == 0 {
+		t.Fatalf("invalid --ultracode should not succeed; stderr=%s", errb.String())
+	}
+	if launched {
+		t.Fatal("invalid --ultracode must not launch the agent")
 	}
 }
 
