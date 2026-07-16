@@ -153,12 +153,12 @@ type ReservationResult struct {
 	// Admissible is true only when EVERY bar clears. #4788 must gate its transfer on it.
 	Admissible bool `json:"admissible"`
 
-	ArtifactBytes  int64 `json:"artifact_bytes"`
-	HeadroomBytes  int64 `json:"headroom_bytes"`
-	RequiredHBM    int64 `json:"required_usable_hbm_bytes"`
-	ActualHBM   int64 `json:"actual_usable_hbm_bytes"`
-	RequiredStore  int64 `json:"required_staging_storage_bytes"`
-	ActualStore int64 `json:"actual_staging_storage_bytes"`
+	ArtifactBytes int64 `json:"artifact_bytes"`
+	HeadroomBytes int64 `json:"headroom_bytes"`
+	RequiredHBM   int64 `json:"required_usable_hbm_bytes"`
+	ActualHBM     int64 `json:"actual_usable_hbm_bytes"`
+	RequiredStore int64 `json:"required_staging_storage_bytes"`
+	ActualStore   int64 `json:"actual_staging_storage_bytes"`
 
 	// Missing enumerates EVERY unmet bar, not just the binding one, so an operator sees
 	// the whole gap in one read instead of discovering it one refusal at a time. Verdict
@@ -194,14 +194,14 @@ func shortfall(have, need int64) int64 {
 // Every unmet bar lands in Missing; Verdict reports the first.
 func AdmitPlacement(e ReservationEnvelope) ReservationResult {
 	r := ReservationResult{
-		Schema:         PlacementReservationSchema,
-		Envelope:       e.Name,
-		ArtifactBytes:  ArtifactBytes,
-		HeadroomBytes:  RequiredHeadroomBytes,
-		RequiredHBM:    RequiredUsableHBMBytes,
-		ActualHBM:   e.UsableHBMBytes,
-		RequiredStore:  RequiredStagingStorageBytes,
-		ActualStore: e.StagingStorageBytes,
+		Schema:        PlacementReservationSchema,
+		Envelope:      e.Name,
+		ArtifactBytes: ArtifactBytes,
+		HeadroomBytes: RequiredHeadroomBytes,
+		RequiredHBM:   RequiredUsableHBMBytes,
+		ActualHBM:     e.UsableHBMBytes,
+		RequiredStore: RequiredStagingStorageBytes,
+		ActualStore:   e.StagingStorageBytes,
 		AbortThreshold: fmt.Sprintf(
 			"abort staging if usable HBM drops below %d bytes, staging storage below %d bytes, "+
 				"a peer allocation appears on a reserved rank, or the collective witness regresses",
@@ -236,7 +236,7 @@ func AdmitPlacement(e ReservationEnvelope) ReservationResult {
 		r.Missing = append(r.Missing, MissingResource{
 			Verdict: ReservationInsufficientStorage,
 			Have:    e.StagingStorageBytes, Need: RequiredStagingStorageBytes, Unit: "bytes", Shortfall: s,
-			Why:     "staging storage reachable from the reserved set cannot hold the artifact",
+			Why: "staging storage reachable from the reserved set cannot hold the artifact",
 			NextOperator: "point staging at a filesystem with the required free space, or approve " +
 				"a streaming placement that never materializes the whole artifact",
 		})
