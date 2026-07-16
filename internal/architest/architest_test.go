@@ -459,6 +459,7 @@ var tier = map[string]int{
 	"modelaccept":           3,
 	"executionroute":        3,
 	"market":                3,
+	"steerpr":               1, // #5015: pure fold of stamped trunk commits into operator-legible PR units + attention bands; the band is a VIEW over dispatchtick's witness verdicts (supplied by the caller), which is what keeps this leaf stdlib-only and off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -498,7 +499,7 @@ var pureRoot = map[string]bool{
 	"quality": true, "qwen36parity": true, "randhex": true, "releasestale": true, "renameconcept": true, "repoguard": true, "resumemetrics": true,
 	"rsl": true, "savingsvector": true, "seatpark": true, "sensecheck": true, "sessionaudit": true, "sessiondesc": true,
 	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "signals": true, "simhash": true, "slackenv": true,
-	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "stepbaton": true, "stopfailure": true,
+	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "steerpr": true, "stepbaton": true, "stopfailure": true,
 	"strmatch": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
 	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
 	"wipattr": true, "wiprecon": true, "wipref": true, "workerenvelope": true, "workflow": true, "workflowlint": true,

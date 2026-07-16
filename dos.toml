@@ -195,6 +195,7 @@ concurrent = [
   "commitrollup",
   "commitlane",
   "operatorbrief",
+  "steerpr", # #5015: internal/steerpr leaf (the operator-steerability PR overlay); cmd/fak steer shims stay in the `cmd` lane to keep leaf trees pairwise-disjoint
   "safesync",
   "branchrole",
   "apihostprobe",
@@ -325,6 +326,7 @@ autopick = [
   "commitrollup",
   "commitlane",
   "operatorbrief",
+  "steerpr",
   "safesync",
   "branchrole",
   "apihostprobe",
@@ -526,6 +528,7 @@ commitintent = ["internal/commitintent/**"]
 commitrollup = ["internal/commitrollup/**"]
 commitlane = ["internal/commitlane/**"]
 operatorbrief = ["internal/operatorbrief/**"]
+steerpr = ["internal/steerpr/**"] # #5015: operator-steerability PR overlay (cmd/fak steer shims stay in the `cmd` lane to keep leaf trees pairwise-disjoint)
 safesync = ["internal/safesync/**"]
 branchrole = ["internal/branchrole/**"]
 apihostprobe = ["internal/apihostprobe/**"]

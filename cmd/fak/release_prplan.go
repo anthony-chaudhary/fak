@@ -13,11 +13,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/steerpr"
 )
 
 const releasePRPlanSchema = "fak.release.prplan.v1"
@@ -25,31 +24,14 @@ const releasePRPlanSchema = "fak.release.prplan.v1"
 // releasePRPlanGit is the one git seam; tests override it.
 var releasePRPlanGit = releaseStatusGitOutput
 
-var (
-	prPlanLeafRE  = regexp.MustCompile(`\(fak ([a-z0-9][a-z0-9-]*)\)\s*$`)
-	prPlanTypeRE  = regexp.MustCompile(`^([a-z]+)[(!:]`)
-	prPlanIssueRE = regexp.MustCompile(`#(\d+)\b`)
+// The promotion plan's commit/unit vocabulary is the shared overlay fold's
+// (internal/steerpr), kept under the release-time names these call sites read
+// by. Aliases rather than wrapper structs: the two names denote ONE type, so a
+// caller written against either compiles and no conversion can drift.
+type (
+	prPlanCommit = steerpr.Commit
+	prPlanUnit   = steerpr.Unit
 )
-
-type prPlanCommit struct {
-	SHA      string   `json:"sha"`
-	Subject  string   `json:"subject"`
-	Leaf     string   `json:"leaf,omitempty"`
-	Type     string   `json:"type,omitempty"`
-	Resolves []string `json:"resolves,omitempty"` // #N bound in the subject (closure-grade)
-	Mentions []string `json:"mentions,omitempty"` // #N only in the body (safe mention)
-	Files    []string `json:"files,omitempty"`
-}
-
-type prPlanUnit struct {
-	Leaf     string         `json:"leaf"`
-	Title    string         `json:"title"`
-	Commits  []prPlanCommit `json:"commits"`
-	Types    map[string]int `json:"types"`
-	Resolves []string       `json:"resolves,omitempty"`
-	Mentions []string       `json:"mentions,omitempty"`
-	Files    []string       `json:"files"`
-}
 
 type prPlanOptions struct {
 	AsJSON   bool
@@ -167,164 +149,24 @@ func prPlanRevParse(root, ref string) string {
 }
 
 // parsePRPlanLog parses `git log --no-merges --name-only
-// --format=%x1e%H%x1f%s%x1f%b%x1f` output: records split on \x1e, fields on
-// \x1f, with the touched-file list trailing the final field separator.
-func parsePRPlanLog(raw string) []prPlanCommit {
-	var commits []prPlanCommit
-	for _, record := range strings.Split(raw, "\x1e") {
-		if strings.TrimSpace(record) == "" {
-			continue
-		}
-		fields := strings.SplitN(record, "\x1f", 4)
-		if len(fields) < 4 {
-			continue
-		}
-		sha := strings.TrimSpace(fields[0])
-		subject := strings.TrimSpace(fields[1])
-		body := fields[2]
-		if sha == "" || subject == "" {
-			continue
-		}
-		var files []string
-		for _, line := range strings.Split(fields[3], "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				files = append(files, line)
-			}
-		}
-		leaf := ""
-		if m := prPlanLeafRE.FindStringSubmatch(subject); m != nil {
-			leaf = m[1]
-		}
-		typ := ""
-		if m := prPlanTypeRE.FindStringSubmatch(subject); m != nil {
-			typ = m[1]
-		}
-		resolves := prPlanIssues(subject, nil)
-		mentions := prPlanIssues(body, resolves)
-		commits = append(commits, prPlanCommit{
-			SHA: sha, Subject: subject, Leaf: leaf, Type: typ,
-			Resolves: resolves, Mentions: mentions, Files: files,
-		})
-	}
-	return commits
-}
+// --format=%x1e%H%x1f%s%x1f%b%x1f` output into the shared overlay fold's
+// commits. The promotion range and the continuous operator view read the same
+// git format, so they parse it through the same code.
+func parsePRPlanLog(raw string) []prPlanCommit { return steerpr.ParseLog(raw) }
 
-// prPlanIssues extracts deduplicated #N refs from text, excluding any already
-// present in exclude (subject-bound refs outrank body mentions).
-func prPlanIssues(text string, exclude []string) []string {
-	seen := map[string]bool{}
-	for _, ref := range exclude {
-		seen[ref] = true
-	}
-	var out []string
-	for _, m := range prPlanIssueRE.FindAllStringSubmatch(text, -1) {
-		ref := "#" + m[1]
-		if !seen[ref] {
-			seen[ref] = true
-			out = append(out, ref)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// foldPRPlanUnits groups commits into one PR unit per (fak <leaf>) lane.
-// Commits without a stamp are returned separately: they are the legibility
-// debt --check gates on. Units are ordered biggest-first, then by leaf; the
-// commits inside each unit read oldest-first, the way a PR body should.
+// foldPRPlanUnits groups commits into one PR unit per (fak <leaf>) lane through
+// the shared overlay fold. Commits without a stamp are returned separately:
+// they are the legibility debt --check gates on. Units are ordered
+// biggest-first, then by leaf; the commits inside each unit read oldest-first,
+// the way a PR body should.
+//
+// The fold also bands each unit by where operator attention is owed. The
+// promotion plan supplies no witness verdicts, so every unit here bands
+// UNVERIFIABLE ("not yet graded") — honest, and inert for this caller, which
+// renders the plan and never reads the band. The continuous operator view is
+// the caller that supplies verdicts and reads them.
 func foldPRPlanUnits(commits []prPlanCommit) ([]prPlanUnit, []prPlanCommit) {
-	byLeaf := map[string]*prPlanUnit{}
-	var unstamped []prPlanCommit
-	for _, c := range commits {
-		if c.Leaf == "" {
-			unstamped = append(unstamped, c)
-			continue
-		}
-		unit, ok := byLeaf[c.Leaf]
-		if !ok {
-			unit = &prPlanUnit{Leaf: c.Leaf, Types: map[string]int{}}
-			byLeaf[c.Leaf] = unit
-		}
-		unit.Commits = append(unit.Commits, c)
-		if c.Type != "" {
-			unit.Types[c.Type]++
-		}
-		unit.Resolves = prPlanMergeRefs(unit.Resolves, c.Resolves)
-		unit.Mentions = prPlanMergeRefs(unit.Mentions, c.Mentions)
-		unit.Files = prPlanMergeRefs(unit.Files, c.Files)
-	}
-	units := make([]prPlanUnit, 0, len(byLeaf))
-	for _, unit := range byLeaf {
-		// git log yields newest-first; a PR body reads oldest-first.
-		for i, j := 0, len(unit.Commits)-1; i < j; i, j = i+1, j-1 {
-			unit.Commits[i], unit.Commits[j] = unit.Commits[j], unit.Commits[i]
-		}
-		// A body mention that some commit subject-binds is already a closure.
-		unit.Mentions = prPlanSubtractRefs(unit.Mentions, unit.Resolves)
-		unit.Title = prPlanUnitTitle(*unit)
-		units = append(units, *unit)
-	}
-	sort.Slice(units, func(i, j int) bool {
-		if len(units[i].Commits) != len(units[j].Commits) {
-			return len(units[i].Commits) > len(units[j].Commits)
-		}
-		return units[i].Leaf < units[j].Leaf
-	})
-	return units, unstamped
-}
-
-func prPlanMergeRefs(have, add []string) []string {
-	seen := map[string]bool{}
-	for _, v := range have {
-		seen[v] = true
-	}
-	for _, v := range add {
-		if !seen[v] {
-			seen[v] = true
-			have = append(have, v)
-		}
-	}
-	sort.Strings(have)
-	return have
-}
-
-func prPlanSubtractRefs(from, drop []string) []string {
-	gone := map[string]bool{}
-	for _, v := range drop {
-		gone[v] = true
-	}
-	var out []string
-	for _, v := range from {
-		if !gone[v] {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func prPlanUnitTitle(unit prPlanUnit) string {
-	if len(unit.Commits) == 1 {
-		return unit.Commits[0].Subject
-	}
-	types := make([]string, 0, len(unit.Types))
-	for t := range unit.Types {
-		types = append(types, t)
-	}
-	sort.Slice(types, func(i, j int) bool {
-		if unit.Types[types[i]] != unit.Types[types[j]] {
-			return unit.Types[types[i]] > unit.Types[types[j]]
-		}
-		return types[i] < types[j]
-	})
-	parts := make([]string, 0, len(types))
-	for _, t := range types {
-		parts = append(parts, fmt.Sprintf("%s %d", t, unit.Types[t]))
-	}
-	detail := strings.Join(parts, ", ")
-	if detail == "" {
-		detail = "mixed"
-	}
-	return fmt.Sprintf("%s: %d commits (%s)", unit.Leaf, len(unit.Commits), detail)
+	return steerpr.FoldUnits(commits)
 }
 
 func renderPRPlanMarkdown(plan map[string]any, maxFiles int) string {
