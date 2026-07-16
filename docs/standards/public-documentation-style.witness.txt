@@ -1,0 +1,17 @@
+schema: fak-public-documentation-style/1
+route: docs/standards/public-documentation-style.md
+source_binding: pre-publication candidate based on bc24939d99e597fe9bb50e6ad9f169fa291524b4; exact route bytes bound by content_sha256; issue #4943 records publication commit
+content_sha256: 82927e465a9590b50e5010a1b9f11efe57ce87002323c08e9239297374604d55
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: rewrite and review one public reader-facing block without losing factual scope
+read_back:
+  verdict: pass
+  audience: writers and reviewers changing a public documentation route
+  page_job: set public prose shape around current behavior, explicit choice/default, adjacent scope, proof, and action
+  lifecycle_generation_support: current writing standard; gen/now; maintained for public documentation
+  authority: prose-shape authority only; behavior, support, and performance retain named authority and evidence routes
+  five_step_edit: name audience/job; lead affirmatively; expose choice/default/change condition; bind scope/proof; end with action
+  applicable_depth: task-completion facts on the public route by default; boundaries deeper; implementation and history on contributor routes
+  next_action: rewrite one block with the five-step edit, then run the mechanical review
+  publication_gate: one repair blocks publication; independent read-back must retain audience, job, choice, scope, and action
+ambiguities: []
