@@ -106,6 +106,7 @@ type EmitOptions struct {
 	Labels             []string // extra labels for created GitHub issues
 	Evidence           string   // default evidence path for synthesized issues
 	Limit              int      // existing-issue scan limit for the GitHub sink (0 = 300)
+	ParentIssue        int
 	ParentBaseline     float64
 	CompletionStandard string
 	TargetEnvelope     string
@@ -352,13 +353,16 @@ func (s GitHubSink) Emit(findings []Finding, opt EmitOptions) (Report, error) {
 		dedupeCap = opt.Cap
 	}
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{
-		Live:           opt.Live,
-		DedupeChecked:  opt.Live,
-		DedupeCap:      dedupeCap,
-		ParentBaseline: opt.ParentBaseline, CompletionStandard: opt.CompletionStandard, TargetEnvelope: opt.TargetEnvelope, WitnessedEnvelope: opt.WitnessedEnvelope,
+		Live:          opt.Live,
+		DedupeChecked: opt.Live,
+		DedupeCap:     dedupeCap,
+		ParentIssue:   opt.ParentIssue, ParentBaseline: opt.ParentBaseline, CompletionStandard: opt.CompletionStandard, TargetEnvelope: opt.TargetEnvelope, WitnessedEnvelope: opt.WitnessedEnvelope,
 	})
 	rep.Planned = len(plan)
 	rep.Skipped = len(skipped)
+	for _, sk := range skipped {
+		rep.Rows = append(rep.Rows, Row{Key: sk.Key, Action: "skip", OK: false, Detail: sk.Reason})
+	}
 	for _, p := range plan {
 		rep.Rows = append(rep.Rows, Row{Key: p.Key, Action: p.Action, OK: true})
 	}

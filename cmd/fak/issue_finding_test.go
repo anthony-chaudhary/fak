@@ -47,9 +47,9 @@ func TestIssueFindingDryRunCandidatesAreDispatchable(t *testing.T) {
 		gh:          failIfCalledGH(t),
 	}
 	var stdout, stderr bytes.Buffer
-	code := runIssueFindingWith(&stdout, &stderr, []string{"--json"}, deps)
+	code := runIssueFindingWith(&stdout, &stderr, []string{"--parent-baseline-points", "8", "--target-envelope", "- re-audit pass rate: = 100 percent", "--witnessed-envelope", "- re-audit pass rate: = 100 percent", "--json"}, deps)
 	if code != 0 {
-		t.Fatalf("dry-run exit=%d stderr=%s", code, stderr.String())
+		t.Fatalf("dry-run exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var result issueFindingResult
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
@@ -85,8 +85,8 @@ func TestIssueFindingPlanAdmittedByIssueContract(t *testing.T) {
 		receiptsSet: true,
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runIssueFindingWith(&stdout, &stderr, []string{"--json", "--dedupe-cap", "50"}, deps); code != 0 {
-		t.Fatalf("dry-run exit=%d stderr=%s", code, stderr.String())
+	if code := runIssueFindingWith(&stdout, &stderr, []string{"--parent-baseline-points", "8", "--target-envelope", "- re-audit pass rate: = 100 percent", "--witnessed-envelope", "- re-audit pass rate: = 100 percent", "--json", "--dedupe-cap", "50"}, deps); code != 0 {
+		t.Fatalf("dry-run exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.json")
@@ -143,7 +143,7 @@ func TestIssueFindingLiveAppliesBoundedCreate(t *testing.T) {
 		gh:          runner,
 	}
 	var stdout, stderr bytes.Buffer
-	code := runIssueFindingWith(&stdout, &stderr, []string{"--json", "--live", "--dedupe-cap", "25", "--max-apply", "5"}, deps)
+	code := runIssueFindingWith(&stdout, &stderr, []string{"--parent-baseline-points", "8", "--target-envelope", "- re-audit pass rate: = 100 percent", "--witnessed-envelope", "- re-audit pass rate: = 100 percent", "--json", "--live", "--dedupe-cap", "25", "--max-apply", "5"}, deps)
 	if code != 0 {
 		t.Fatalf("armed live exit=%d stderr=%s", code, stderr.String())
 	}
@@ -171,7 +171,7 @@ func TestIssueFindingBlastRadiusRefusal(t *testing.T) {
 		gh:          failIfCalledGH(t), // cap exceeded -> refuse before any gh call
 	}
 	var stdout, stderr bytes.Buffer
-	code := runIssueFindingWith(&stdout, &stderr, []string{"--json", "--live", "--dedupe-cap", "10", "--max-apply", "2"}, deps)
+	code := runIssueFindingWith(&stdout, &stderr, []string{"--parent-baseline-points", "8", "--target-envelope", "- re-audit pass rate: = 100 percent", "--witnessed-envelope", "- re-audit pass rate: = 100 percent", "--json", "--live", "--dedupe-cap", "10", "--max-apply", "2"}, deps)
 	if code != 2 {
 		t.Fatalf("blast-radius over cap: want exit 2, got %d (stderr=%s)", code, stderr.String())
 	}
@@ -191,9 +191,9 @@ func TestIssueFindingInconclusiveEscalatesNoCandidate(t *testing.T) {
 		gh:          failIfCalledGH(t),
 	}
 	var stdout, stderr bytes.Buffer
-	code := runIssueFindingWith(&stdout, &stderr, []string{"--json"}, deps)
+	code := runIssueFindingWith(&stdout, &stderr, []string{"--parent-baseline-points", "8", "--target-envelope", "- re-audit pass rate: = 100 percent", "--witnessed-envelope", "- re-audit pass rate: = 100 percent", "--json"}, deps)
 	if code != 0 {
-		t.Fatalf("dry-run exit=%d stderr=%s", code, stderr.String())
+		t.Fatalf("dry-run exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var result issueFindingResult
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
@@ -243,7 +243,7 @@ func TestIssueFindingFromIssuesReopenAndDedupe(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runIssueFindingWith(&stdout, &stderr, []string{"--json", "--from-issues", issuesPath}, deps)
 	if code != 0 {
-		t.Fatalf("dry-run exit=%d stderr=%s", code, stderr.String())
+		t.Fatalf("dry-run exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var result issueFindingResult
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
@@ -276,8 +276,8 @@ func TestIssueFindingNewEvidenceSameSubjectYieldsSingleCandidate(t *testing.T) {
 		gh:          failIfCalledGH(t),
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runIssueFindingWith(&stdout, &stderr, []string{"--json"}, deps); code != 0 {
-		t.Fatalf("dry-run exit=%d stderr=%s", code, stderr.String())
+	if code := runIssueFindingWith(&stdout, &stderr, []string{"--parent-baseline-points", "8", "--target-envelope", "- re-audit pass rate: = 100 percent", "--witnessed-envelope", "- re-audit pass rate: = 100 percent", "--json"}, deps); code != 0 {
+		t.Fatalf("dry-run exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var result issueFindingResult
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {

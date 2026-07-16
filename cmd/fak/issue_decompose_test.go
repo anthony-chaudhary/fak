@@ -171,7 +171,7 @@ func TestDecomposeLiveFromPlanFilesChildrenAndLinksParent(t *testing.T) {
 	rr := &decomposeGHRunner{}
 	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
 
-	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--from-plan", planPath, "--json"}, issues, rr.run)
+	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--from-plan", planPath, "--json"}, issues, rr.run)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -222,7 +222,7 @@ func TestDecomposeMaxCreateFuseRefusesBeforeGH(t *testing.T) {
 	rr := &decomposeGHRunner{}
 	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
 
-	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--from-plan", planPath, "--max-create", "2"}, issues, rr.run)
+	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--from-plan", planPath, "--max-create", "2"}, issues, rr.run)
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (fuse tripped)", code)
 	}
@@ -241,7 +241,7 @@ func TestDecomposeLiveScaffoldNeedsAllowStubs(t *testing.T) {
 
 	// --live without --from-plan and without --allow-stubs: scaffolds are not
 	// filed; run succeeds but touches no gh and warns.
-	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--json"}, issues, rr.run)
+	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--json"}, issues, rr.run)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -260,7 +260,7 @@ func TestDecomposeLiveScaffoldNeedsAllowStubs(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	rr2 := &decomposeGHRunner{}
-	code = runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--allow-stubs", "--json"}, issues, rr2.run)
+	code = runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--allow-stubs", "--json"}, issues, rr2.run)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -285,7 +285,7 @@ func TestDecomposeChildCreateFailureSkipsParentLink(t *testing.T) {
 	rr := &decomposeGHRunner{failOnce: true}
 	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
 
-	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--from-plan", planPath, "--json"}, issues, rr.run)
+	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--from-plan", planPath, "--json"}, issues, rr.run)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (a child create failed)", code)
 	}

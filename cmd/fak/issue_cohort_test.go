@@ -13,20 +13,26 @@ import (
 
 func cohortTestCandidate(key string, paths []string) issuecontract.Candidate {
 	return issuecontract.Candidate{
-		Schema:         issuecontract.Schema,
-		Key:            key,
-		Title:          "leaf " + key,
-		ParentRef:      "epic #1",
-		CurrentState:   "not yet done",
-		WhyNow:         "unblocks the next leaf",
-		WorkingSpine:   "make the working path more true",
-		InScope:        "one file",
-		OutOfScope:     "everything else",
-		DoneCondition:  "the file changes",
-		Witness:        "go test ./... passes",
-		AcceptanceGate: "make ci",
-		ClosureBinding: "commit cites #1 and (fak leaf)",
-		Paths:          paths,
+		Schema:             issuecontract.Schema,
+		Key:                key,
+		Title:              "leaf " + key,
+		ParentRef:          "epic #1",
+		CurrentState:       "not yet done",
+		WhyNow:             "unblocks the next leaf",
+		WorkingSpine:       "make the working path more true",
+		InScope:            "one file",
+		OutOfScope:         "everything else",
+		DoneCondition:      "the file changes",
+		Witness:            "go test ./... passes",
+		AcceptanceGate:     "make ci",
+		ClosureBinding:     "commit cites #1 and (fak leaf)",
+		Paths:              paths,
+		ExpectedSteps:      3,
+		WorkEstimate:       "Estimate: 3 points",
+		ScopeContribution:  "Contribution: 3/13 points",
+		CompletionStandard: "production",
+		TargetEnvelope:     "- acceptance pass rate: = 100 percent",
+		WitnessedEnvelope:  "- acceptance pass rate: = 100 percent",
 	}
 }
 
@@ -121,7 +127,10 @@ func TestRunIssueCohortFromIssues(t *testing.T) {
 			"## Done condition\n\nit changes\n\n## Witness\n\ngo test passes\n\n" +
 			"## Parent context\n\nepic #1\n\n## Why this is next\n\nunblocks\n\n" +
 			"## Working spine\n\nmake it true\n\n## Acceptance gate\n\nmake ci\n\n" +
-			"## Closure binding\n\ncites #1 (fak leaf)\n\n## Likely files\n\n" + paths + "\n"
+			"## Closure binding\n\ncites #1 (fak leaf)\n\n" +
+			"## Work estimate\n\nEstimate: 3 points\n\n## Overall completion contribution\n\nParent scope baseline: #1, 13 points. Contribution: 3/13 points.\n\n" +
+			"## Completion standard\n\nproduction\n\n## Target operating envelope\n\n- acceptance pass rate: = 100 percent\n\n" +
+			"## Witnessed operating envelope\n\n- acceptance pass rate: = 100 percent\n\n## Likely files\n\n" + paths + "\n"
 	}
 	issues := []issuecontract.IssueDraft{
 		{Number: 10, Title: "leaf ten", Body: body("- `internal/foo/**`")},

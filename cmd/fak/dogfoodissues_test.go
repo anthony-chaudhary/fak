@@ -54,7 +54,7 @@ func TestDogfoodIssuesDryRunSkipsUnscopedAggregateRows(t *testing.T) {
 	if len(got.Skipped) != 1 || got.Skipped[0].Key != "recent-feature-dogfood/code-slop-scorecard/code_slop" {
 		t.Fatalf("skipped = %+v, want code-slop aggregate row", got.Skipped)
 	}
-	if got.Skipped[0].Reason != "ISSUE_SCOPE_INCOMPLETE,ISSUE_UNROUTED" {
+	if got.Skipped[0].Reason != "ISSUE_PROJECT_WORK_MISSING,ISSUE_SCOPE_INCOMPLETE,ISSUE_UNROUTED" {
 		t.Fatalf("skip reason = %q", got.Skipped[0].Reason)
 	}
 }

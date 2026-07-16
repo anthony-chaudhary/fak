@@ -418,6 +418,9 @@ type findingProjectWork struct {
 
 func buildFindingCandidateWithProjectWork(item modelroute.FindingPlanItem, lane string, cap int, a findingProjectWork) (issuecontract.Candidate, error) {
 	c := buildFindingCandidate(item, lane, cap)
+	if item.AuditedIssue > 0 {
+		c.ParentRef = fmt.Sprintf("#%d", item.AuditedIssue)
+	}
 	points := float64(c.ExpectedSteps)
 	c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
 	c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, a.Baseline)

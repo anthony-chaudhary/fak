@@ -191,7 +191,7 @@ func TestGitHubSinkDryRunPlansRichAndSkipsBare(t *testing.T) {
 	rep, err := sink.Emit(FromActionItems([]dogfoodissues.ActionItem{
 		richItem("checkpoint-debt/a", "checkpoint: x does not persist resumable WIP state"),
 		richItem("checkpoint-debt/b", "checkpoint: y does not persist resumable WIP state"),
-	}), EmitOptions{Live: false})
+	}), EmitOptions{Live: false, ParentIssue: 36, ParentBaseline: 8, CompletionStandard: "production", TargetEnvelope: "- re-audit pass rate: = 100 percent", WitnessedEnvelope: "- re-audit pass rate: = 100 percent"})
 	if err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
