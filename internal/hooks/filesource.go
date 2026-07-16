@@ -229,7 +229,7 @@ func opsArtifactReason(fp fileProbe, p string) string {
 }
 
 func opsMarkerFile(fp fileProbe, p string) bool {
-	if p == "AGENTS.md" {
+	if p == "AGENTS.md" || p == "llms-full.txt" {
 		return false
 	}
 	ext := strings.ToLower(path.Ext(p))

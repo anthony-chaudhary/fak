@@ -52,6 +52,7 @@ func TestFileAdmission_OpsArtifact(t *testing.T) {
 		{"scratch.txt", "fak:operator-private here", true, "marker in txt"},
 		{"a.yaml", "fak:operator-private", true, "marker in yaml"},
 		{"b.txt", "FAK:OPERATOR-PRIVATE", true, "marker is case-insensitive"},
+		{"llms-full.txt", "fak:operator-private quoted from generated authorities", false, "generated authority corpus may quote marker"},
 		// A binary (non-text-ext) with the token in its bytes is NOT marker-scanned.
 		{"assets/data.png", "fak:operator-private", false, "binary not scanned for marker"},
 	}
