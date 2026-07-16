@@ -14,8 +14,8 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 | Metric | Value |
 |---|---|
 | **Score** | **98.1/100** (grade A) = 9.8/10 |
-| **Coverage** | **97.1%** (1944/2002 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **58** (clarity 0 + coverage 58) |
+| **Coverage** | **97.1%** (1944/2003 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **59** (clarity 0 + coverage 59) |
 | Crystal-clear concepts | 242 of 1711 positioned |
 | As of |  (fak ) |
 
@@ -24,7 +24,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1711 concepts - score 98.1/100 (grade A) - disambiguation-debt 58
+concept-disambiguation chart - 1711 concepts - score 98.1/100 (grade A) - disambiguation-debt 59
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 242
@@ -64,11 +64,11 @@ coverage by family (positioned / discovered):
   evict            ##########################.. 40/43
   session-runtime  ############################ 173/176
   support-maturity #########################... 29/32
+  witness-proof    ###########################. 124/127
   attention        ###########################. 68/70
   cache            ############################ 222/224
   gateway-engine   ############################ 159/161
   render-materialize ############################ 162/164
-  witness-proof    ############################ 124/126
   decision         ###########################. 38/39
   loop             ############################ 57/58
   pool             ###########################. 35/36
@@ -79,7 +79,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.1%  (1944/2002 confusable tokens positioned)
+namespace coverage  [###############################.] 97.1%  (1944/2003 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1945,11 +1945,11 @@ abstraction overclaims (18) - head reads clearer than its subtree supports:
 | evict | 40 | 43 | 3 |
 | session-runtime | 173 | 176 | 3 |
 | support-maturity | 29 | 32 | 3 |
+| witness-proof | 124 | 127 | 3 |
 | attention | 68 | 70 | 2 |
 | cache | 222 | 224 | 2 |
 | gateway-engine | 159 | 161 | 2 |
 | render-materialize | 162 | 164 | 2 |
-| witness-proof | 124 | 126 | 2 |
 | decision | 38 | 39 | 1 |
 | loop | 57 | 58 | 1 |
 | pool | 35 | 36 | 1 |
