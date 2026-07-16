@@ -136,6 +136,7 @@ var verbManifest = []Verb{
 	{Name: "dispatch-aging", Synopsis: "anti-starvation dispatch order: effective weight = base priority + aging boost + hard starve deadline", Lane: "cmd"},
 	{Name: "dispatch-conservation", Synopsis: "worker-unit conservation ledger: units_spent = accounted + leaked, so an ungraded death is a LEAK not silence", Lane: "cmd"},
 	{Name: "dispatchlat", Synopsis: "dispatch-tick timing percentiles: fold tick_total phase latencies into p50/p90/p99 from the loop ledger", Lane: "cmd"},
+	{Name: "execution-route", Synopsis: "compose harness, model, tool-policy, and context-continuity choices into one inspectable execution decision", Lane: "cmd"},
 	{Name: "doctor", Synopsis: "operator diagnostic: run the answer-shape witness + the real kernel admit verdict and recommend", Lane: "cmd"},
 	{Name: "done", Synopsis: "pre-claim self-check: tests, claims-lint, and loopgate/DOS witness in one GREEN/RED verdict", Lane: "cmd"},
 	{Name: "dogfood-issues", Synopsis: "file dogfood issues from observed agent-experience defects", Lane: "cmd"},

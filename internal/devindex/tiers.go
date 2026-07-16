@@ -150,6 +150,7 @@ var verbTiers = map[string]VerbTier{
 	"dispatch-aging":                TierDev,
 	"dispatch-conservation":         TierDev,
 	"dispatchlat":                   TierDev,
+	"execution-route":               TierDev,
 	"dogfood-issues":                TierDev,
 	"dogfood-score":                 TierDev,
 	"dojo":                          TierDev,
