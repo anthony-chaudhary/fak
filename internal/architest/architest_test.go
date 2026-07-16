@@ -478,7 +478,7 @@ var tier = map[string]int{
 var pureRoot = map[string]bool{
 	"accountobs": true, "accountprobe": true, "affectedtests": true, "agentsindex": true, "ailuminate": true,
 	"answershape": true, "apihostprobe": true, "appversion": true, "astquery": true, "auditreason": true, "benchauthority": true,
-	"benchckpt": true, "benchids": true, "benchruns": true, "bgloop": true, "binstamp": true,
+	"benchckpt": true, "benchids": true, "benchruns": true, "bgloop": true,
 	"blob": true, "boundarylint": true, "brittleness": true, "buildwitness": true, "cacheobs": true, "cacheprice": true,
 	"callavoid": true, "canon": true, "chatops": true, "chatopsdetach": true, "claimcheck": true,
 	"clonescan": true, "closureaudit": true, "closurerate": true, "cmdutil": true, "codegraph": true, "codelint": true,
@@ -488,7 +488,7 @@ var pureRoot = map[string]bool{
 	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
-	"frontierswe": true, "fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
+	"fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,
 	"guardsessions": true, "guardvars": true, "guideddecode": true, "harnessprofile": true, "harnessres": true, "horizonrecovery": true, "hwgatelint": true,
 	"intlist": true, "issuesmallness": true, "jsonlledger": true, "knownbad": true, "knownenv": true,
 	"l3region": true, "leakcheck": true, "lifecycle": true, "linkstate": true, "livecodebench": true,
@@ -502,7 +502,7 @@ var pureRoot = map[string]bool{
 	"sessionread": true, "sessionsignals": true, "sessionsteer": true, "signals": true, "simhash": true, "slackenv": true,
 	"slackmeta": true, "slackwire": true, "sotamatrix": true, "stallscan": true, "steerpr": true, "stepbaton": true, "stopfailure": true,
 	"strmatch": true, "taskdecision": true, "taskidentity": true, "testroute": true, "timeoutphase": true,
-	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "trigram": true, "tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
+	"tokenizer": true, "toolcoverage": true, "toon": true, "trajquery": true, "tuiplugin": true, "turnkind": true, "uiquality": true, "unwitnessedclaim": true, "urllint": true, "vllmcompile": true,
 	"wipattr": true, "wiprecon": true, "wipref": true, "workerenvelope": true, "workflow": true, "workflowlint": true,
 	"worklog": true, "worktreewitness": true, "worktype": true, "xprobe": true,
 }
