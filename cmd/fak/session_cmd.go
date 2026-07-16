@@ -19,6 +19,7 @@ package main
 //	fak session context <id>                # read the managed-context value report
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
 //	fak session audit [summary|actions|discover|audit|deep] ...  # offline transcript audit alias
+//	fak session compact-audit [--since D] [--json]  # offline Codex-rollout compaction health (#4763)
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
 // All write verbs accept --if-rev N: the optimistic-concurrency guard, so a stale
@@ -107,6 +108,11 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	}
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
+	}
+	// compact-audit (#4763) mines native Codex rollout JSONL for compaction health —
+	// offline, streaming, no gateway — so it dispatches with the other offline verbs.
+	if verb == "compact-audit" {
+		return runSessionCompactAudit(stdout, stderr, args)
 	}
 	// subscribe (#2767) is the re-attach drain of one session's event stream; it
 	// carries its own cursor flag surface, so it dispatches ahead of the shared
@@ -839,6 +845,10 @@ func sessionUsage(w io.Writer) {
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
   fak session audit [summary|actions|discover|audit|deep] [--days N] [--json] [--fail-on high]
                                                offline recent transcript audit; defaults to summary --here
+  fak session compact-audit [--root DIR] [--since D] [--cwd S] [--json] [--scrub] [--top N]
+                                               offline compaction health from native Codex rollouts:
+                                               did compaction fire, hold, and cut resident context?
+                                               (append-only bytes / cumulative tokens are NOT the signal)
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
                                                (survived/summarized/expired/must-requery)

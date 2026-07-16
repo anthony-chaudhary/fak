@@ -1,0 +1,9 @@
+{"timestamp":"2026-06-18T03:10:00.000Z","type":"session_meta","payload":{"id":"019ed900-0000-7000-8000-00000000dupe","timestamp":"2026-06-18T03:09:00.000Z","cwd":"C:\\work\\fak","originator":"codex-tui","cli_version":"0.140.0"}}
+{"timestamp":"2026-06-18T03:10:00.100Z","type":"turn_context","payload":{"turn_id":"t1","cwd":"C:\\work\\fak","model":"gpt-5.5"}}
+{"timestamp":"2026-06-18T03:10:01.000Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-06-18T03:10:30.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":240000,"output_tokens":500,"total_tokens":240500},"last_token_usage":{"input_tokens":240000,"output_tokens":500,"total_tokens":240500},"model_context_window":258400}}}
+{"timestamp":"2026-06-18T03:10:35.642Z","type":"compacted","payload":{"message":"","replacement_history":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"SENTINEL_PROMPT_BODY_MUST_NOT_LEAK"}]}]}}
+{"timestamp":"2026-06-18T03:10:35.900Z","type":"compacted","payload":{"message":"","replacement_history":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"SENTINEL_PROMPT_BODY_MUST_NOT_LEAK"}]}]}}
+{"timestamp":"2026-06-18T03:10:35.905Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":240000,"output_tokens":500,"total_tokens":240500},"last_token_usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"model_context_window":258400}}}
+{"timestamp":"2026-06-18T03:10:35.910Z","type":"event_msg","payload":{"type":"context_compacted"}}
+{"timestamp":"2026-06-18T03:10:40.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":265000,"output_tokens":600,"total_tokens":265600},"last_token_usage":{"input_tokens":25000,"output_tokens":100,"total_tokens":25100},"model_context_window":258400}}}
