@@ -3553,6 +3553,7 @@ NO_COMMIT_OFF_TRUNK = "off_trunk"
 NO_COMMIT_BANNER_NOOP = "banner_noop"
 NO_COMMIT_PREVIEW_CONFIRM = "preview_confirm_feedback"
 NO_COMMIT_MISSING_LOG = "missing_log_artifact"
+NO_COMMIT_RESTART_EXHAUSTED = "restart_exhausted"
 NO_COMMIT_UNKNOWN = "unknown"
 
 # An opencode/glm worker that prints only its startup banner ("> build · glm-…") and
@@ -3568,6 +3569,23 @@ _MISSING_API_KEY_RE = re.compile(
 _PREVIEW_CONFIRM_FEEDBACK_RE = re.compile(
     r"(REQUIRE_WITNESS\s*/\s*ESCALATE|preview-confirm|_fak_confirm)",
     re.IGNORECASE)
+_RESTART_EXHAUSTED_RE = re.compile(
+    r"managed-context status (?P<status>restart_exhausted|reset_limit) "
+    r"(?:limit=(?P<limit>\d+) )?(?:count=(?P<count>\d+) )?"
+    r"(?:reason|dominant_cause)=(?P<cause>[^\s]+)", re.IGNORECASE)
+
+
+def classify_restart_exhaustion(log: Path) -> dict | None:
+    """Extract the typed guard terminal from the resolver process log."""
+    tail = _log_tail_text(log)
+    matches = list(_RESTART_EXHAUSTED_RE.finditer(tail))
+    if not matches:
+        return None
+    match = matches[-1]
+    count = match.group("count") or match.group("limit")
+    return {"reason": NO_COMMIT_RESTART_EXHAUSTED,
+            "restart_count": int(count) if count else None,
+            "dominant_cause": match.group("cause")}
 
 
 def classify_no_commit_reason(log: Path) -> str:
@@ -3584,6 +3602,8 @@ def classify_no_commit_reason(log: Path) -> str:
     except OSError:
         return NO_COMMIT_MISSING_LOG
     tail = _log_tail_text(log)
+    if _RESTART_EXHAUSTED_RE.search(tail):
+        return NO_COMMIT_RESTART_EXHAUSTED
     if "SELF_MODIFY" in tail:
         return NO_COMMIT_SELF_MODIFY
     if "POLICY_BLOCK" in tail:
@@ -4036,6 +4056,9 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
             rec = {"issue": issue, "log": log.name, "sha": None,
                    "claim": CLAIM_NO_COMMIT, "verdict": None, "witness": None,
                    "reason": classify_no_commit_reason(log)}
+            exhaustion = classify_restart_exhaustion(log)
+            if exhaustion:
+                rec.update(exhaustion)
         else:
             w = audit_commit_witness(root, sha, runner=audit_runner)
             rec = {"issue": issue, "log": log.name, "sha": sha,

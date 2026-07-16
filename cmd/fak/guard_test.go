@@ -912,6 +912,27 @@ func TestGuardNoProgressRestartLimitEnv(t *testing.T) {
 
 // TestGuardNoProgressReapStatus pins the reap banner shape: the managed-context-status prefix an
 // operator greps, the depth that tripped, the defaulted reason, the originating trace, and the knob.
+func TestGuardEquivalentRestartsBoundIdenticalCauseAndAllowProgress(t *testing.T) {
+	var state guardEquivalentRestarts
+	for i := 1; i <= guardEquivalentRestartLimit; i++ {
+		state = state.step("BUDGET_CONTEXT_EXHAUSTED")
+		if state.count != i {
+			t.Fatalf("equivalent restart %d: count=%d", i, state.count)
+		}
+	}
+	line := guardEquivalentRestartStatus(state, guardBudgetRestartEvent{FromTraceID: "trace-3"})
+	for _, want := range []string{"restart_exhausted", "count=3", "dominant_cause=BUDGET_CONTEXT_EXHAUSTED"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("status missing %q: %s", want, line)
+		}
+	}
+
+	state = state.step("POLICY_BLOCK")
+	if state.count != 1 || state.cause != "POLICY_BLOCK" {
+		t.Fatalf("changing cause must reset equivalence run: %+v", state)
+	}
+}
+
 func TestGuardNoProgressReapStatus(t *testing.T) {
 	line := guardNoProgressReapStatus(6, guardBudgetRestartEvent{FromTraceID: "stuck-worker"})
 	for _, want := range []string{

@@ -4806,6 +4806,24 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         p = self._write(big)
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
 
+    def test_restart_exhausted_is_typed_with_count_and_cause(self) -> None:
+        mod = load()
+        p = self._write("")
+        p.write_text("fak guard: managed-context status restart_exhausted count=3 "
+                     "dominant_cause=BUDGET_CONTEXT_EXHAUSTED from_trace=t\n", encoding="utf-8")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_RESTART_EXHAUSTED)
+        self.assertEqual(mod.classify_restart_exhaustion(p), {
+            "reason": mod.NO_COMMIT_RESTART_EXHAUSTED, "restart_count": 3,
+            "dominant_cause": "BUDGET_CONTEXT_EXHAUSTED"})
+
+    def test_live_reset_limit_corpus_is_typed(self) -> None:
+        mod = load()
+        p = self._write("")
+        p.write_text("fak guard: managed-context status reset_limit limit=16 "
+                     "reason=BUDGET_CONTEXT_EXHAUSTED continuity=degraded\n", encoding="utf-8")
+        self.assertEqual(mod.classify_restart_exhaustion(p)["restart_count"], 16)
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_RESTART_EXHAUSTED)
+
     def test_unknown_when_no_signature(self) -> None:
         mod = load()
         p = self._write("the worker ran a few turns and then exited cleanly\n")

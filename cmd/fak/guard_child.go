@@ -1222,7 +1222,12 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 // healthy-worker bound. This reap is a strictly earlier, progress-aware trip on top of it, NOT a
 // replacement, which is why the raw cap value is deliberately left unchanged (see #4609: lowering it
 // to 6 would reap a healthy committing worker at ~40% of its runway).
-const guardNoProgressRestartLimitDefault = 6
+const (
+	guardNoProgressRestartLimitDefault = 6
+	// Equivalent budget denials are a stronger stall signal than an unchanged git HEAD:
+	// stop the third identical cycle while leaving changing causes their full runway.
+	guardEquivalentRestartLimit = 3
+)
 
 // guardNoProgressRestartLimit resolves the no-progress reap threshold from the environment, falling
 // back to guardNoProgressRestartLimitDefault. A value of 0 (or a negative/garbage override) disables
@@ -1243,6 +1248,29 @@ func guardNoProgressRestartLimit() int {
 // counter. An empty cur (git offered no signal at this restart) leaves BOTH untouched, so a transient
 // read miss neither trips nor resets the reap. Pure, so the reset/increment discipline is unit-tested
 // without standing up the supervision loop.
+type guardEquivalentRestarts struct {
+	cause string
+	count int
+}
+
+func (s guardEquivalentRestarts) step(reason string) guardEquivalentRestarts {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "BUDGET_CONTEXT_EXHAUSTED"
+	}
+	if reason != s.cause {
+		return guardEquivalentRestarts{cause: reason, count: 1}
+	}
+	s.count++
+	return s
+}
+
+func guardEquivalentRestartStatus(s guardEquivalentRestarts, ev guardBudgetRestartEvent) string {
+	return fmt.Sprintf("fak guard: managed-context status restart_exhausted count=%d dominant_cause=%s from_trace=%s next_action=%q",
+		s.count, s.cause, strings.TrimSpace(ev.FromTraceID),
+		"equivalent guard restart cycle repeated; escalate the dominant cause instead of retrying")
+}
+
 func guardNoProgressStep(prevHead, cur string, counter int) (string, int) {
 	if strings.TrimSpace(cur) == "" {
 		return prevHead, counter
@@ -1453,6 +1481,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// which disables the reap — as does noProgressLimit == 0.
 	noProgressRestarts := 0
 	noProgressLimit := guardNoProgressRestartLimit()
+	equivalentRestarts := guardEquivalentRestarts{}
 	var progressHead string
 	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
@@ -1567,6 +1596,15 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				return
 			}
 			ev := event.Restart
+			equivalentRestarts = equivalentRestarts.step(ev.Reason)
+			if equivalentRestarts.count >= guardEquivalentRestartLimit {
+				if restarter.stderr != nil {
+					fmt.Fprintln(restarter.stderr, guardEquivalentRestartStatus(equivalentRestarts, ev))
+				}
+				runErr := <-wait
+				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			// #4609: advance or reset the no-progress counter by whether HEAD moved since the
 			// last progress checkpoint. A restart that landed a commit (HEAD advanced) resets both
 			// the counter and the checkpoint — a committing worker earns back its full runway; one
