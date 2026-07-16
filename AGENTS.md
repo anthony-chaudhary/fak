@@ -191,6 +191,28 @@ follow-up named in prose but left unfiled is silently-deferred work: it becomes 
 issue or it does not leave the run. This binds headless workers, in-session loops, and
 interactive turns alike; if there is genuinely nothing left, say so plainly.
 
+**Promote scratch up the tooling ladder — a working artifact must not die with the
+session.** The rungs are **scratchpad → committed tool → first-class verb → captured
+knowledge**, and the failure mode is stopping one rung too low. A throwaway script that
+*worked* is a deliverable, not a probe: left on rung 1 it evaporates with the session, and
+the next agent re-derives it and re-hits the same traps. Promote **by default, without
+being asked**, when any of these holds — it succeeded at a real task (not merely probed),
+it would plausibly be re-run (same question next cycle, same environment next quarter), it
+encodes a non-obvious operational fact the ecosystem already got wrong once, or its design
+beats the committed equivalent. Rung 1 is correct *only* for a true one-off: a diagnostic
+probe, a throwaway data pull, or logic a committed tool already covers. Two fences bind the
+climb **here**: a promotion lands as a **Go leaf + a `fak` verb**, never a new `tools/*.py`
+(the `internal/pythongate` ratchet reds the trunk — see "New tooling is Go, not Python"),
+and a rung-4 operational fact goes where the next agent *looks* — a dated
+[`docs/notes/`](docs/notes/) note or the leaf's doc — not buried in a script's control
+flow. The asymmetry is the whole argument: over-promoting costs a short tool and a test,
+while under-promoting costs the next agent the entire re-derivation. The harness session
+scratchpad is lossy by construction — it is keyed by session-uuid and strands on resume
+([`docs/notes/CONCEPT-HARNESS-SESSION-SCRATCHPAD-2026-07-02.md`](docs/notes/CONCEPT-HARNESS-SESSION-SCRATCHPAD-2026-07-02.md)),
+so "I'll promote it later" is not a plan. (This is the *tooling* ladder — an artifact's
+route out of scratch. It is not `internal/maturity`'s capability-lifecycle ladder, which
+scores a declared leaf's rung; see [`fak maturity`](docs/cli-reference.md).)
+
 **Close operator-facing turns with scannable bullets, verdict first; make the last line a bullet carrying the next checkable step.** This binds the summaries and handoffs an operator reads — headless workers, in-session loops, and interactive turns alike; tool-call arguments, commit subjects, and PR bodies keep their own conventions. One claim per line, evidence and paths inline. A short single-line closer ("nothing left; pushed abc123") already ends clean, so the "genuinely nothing left, say so plainly" escape above still holds.
 
 ## Version everything: cite `module@rev`, not just a bare SHA
