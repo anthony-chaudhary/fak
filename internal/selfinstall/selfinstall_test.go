@@ -48,7 +48,7 @@ func TestInstallHappyPathSwapsOnAllGreen(t *testing.T) {
 		t.Fatalf("swap target = %q, want /bin/fak", swapped)
 	}
 	// Ladder must have run build, vet, smoke (the tmp binary), then swapped.
-	if len(r.ran) != 5 {
+	if len(r.ran) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST — closed fixture/contract cardinality
 		t.Fatalf("ran %d commands, want 5 (cleanliness/revision/build/vet/smoke); got %v", len(r.ran), r.ran)
 	}
 }
