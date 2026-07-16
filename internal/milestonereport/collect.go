@@ -38,6 +38,7 @@ var TrackedEpics = []EpicSpec{
 	{Number: 1354, Title: "release at agentic speed", Generation: "now"},
 	{Number: 1860, Title: "perpetual sessions (bounded-context relays)", Generation: "next"},
 	{Number: 3256, Title: "all-in-one agent runtime (MLP)", Generation: "now"},
+	{Number: 5015, Title: "operator steerability PRs", Generation: "now", Label: "operator-steerability"},
 }
 
 // Collect measures both dimensions. The maturity climb is pure (covmatrix.Grid() is
