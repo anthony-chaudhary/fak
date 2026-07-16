@@ -1,0 +1,18 @@
+schema: fak-documentation-metadata/1
+route: docs/templates/documentation-metadata.md
+source_binding: pre-publication candidate based on 1b124ab7f2e57fb454374e521e44407c4ffb9792; exact route bytes bound by content_sha256; issue #4945 records publication commit
+content_sha256: 54ac3dc256a59f789d276dfcc44a429b6cc536a974f659ab4bf8bc7753162fef
+reader: independent gpt-5.4-mini ephemeral read-only session
+reader_goal: label authority and applicability for current, preview, and historical documentation routes without a verbose preamble
+read_back:
+  verdict: pass
+  audience: public documentation writers and reviewers who label who a page serves and when its guidance applies
+  page_job: choose the smallest metadata block that identifies audience, applicability, authority, and next action, fill it from owning sources, and run the completion check
+  patterns: compact current route; choice-specific applicability; preview, historical, or archived route
+  field_semantics: audience names one reader and task; lifecycle uses the defined page state; generation names an exact stream; support comes from its owning authority; authority separates owned and delegated facts; applicability is global only when shared; next action is one observable act
+  current_example: current, gen/now, maintained metadata route with authority limited to metadata presentation and one copy-and-fill action
+  preview_example: preview, gen/now route scoped to a named entry condition and support authority, with a stable current route
+  historical_example: historical release v1 record with preserved evidence scope, a gen/now successor, and no current-guidance authority
+  authority_assessment: the template owns metadata presentation and bounded records; linked routes retain product, support, behavior, and evidence authority
+  next_action: choose the applicable pattern, replace every placeholder with authority-backed facts, and run the completion check
+ambiguities: []
