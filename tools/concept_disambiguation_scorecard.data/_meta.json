@@ -23,10 +23,39 @@
           "category": "incidental",
           "reason": "entry-count accessor exposing the schema memo cache footprint for observability/tests; not a governed concept",
           "token": "normalizedSchemaCacheLen"
+        },
+        {
+          "category": "incidental",
+          "reason": "env var: escape hatch flag for the clonescan token-window cache (#4330); concrete flag name, not a distinct cache concept",
+          "token": "FAK_TOKEN_CACHE"
+        },
+        {
+          "category": "incidental",
+          "reason": "env var: byte-budget knob for the token-window cache (#4330); concrete flag name",
+          "token": "FAK_TOKEN_CACHE_MAX_BYTES"
+        },
+        {
+          "category": "incidental",
+          "reason": "path helper naming \u003cgit-common-dir\u003e/fak/token-cache (#4330); concrete dir name, cf. cachedir/usercachedir",
+          "token": "TokenCacheDir"
+        },
+        {
+          "category": "incidental",
+          "reason": "package name for the clonescan token-window cache backing store (#4330); container, not a concept",
+          "token": "tokencache"
+        },
+        {
+          "category": "incidental",
+          "reason": "concrete injected memoization interface for clonescan tokenization (#4330); local mechanism, not a disambiguable cache concept",
+          "token": "WindowCache"
         }
       ],
       "id": "cache",
       "ignore": [
+        "FAK_TOKEN_CACHE",
+        "FAK_TOKEN_CACHE_MAX_BYTES",
+        "TokenCacheDir",
+        "WindowCache",
         "applyinfocachemechclick",
         "cache_trace_test",
         "cacheable",
@@ -79,6 +108,7 @@
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
+        "tokencache",
         "uncached",
         "usercachedir"
       ],
