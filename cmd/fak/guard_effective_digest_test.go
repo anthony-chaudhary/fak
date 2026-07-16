@@ -58,6 +58,7 @@ func TestLoadGuardCapabilityFloorAttestsEffectiveOverlay(t *testing.T) {
 }
 
 func TestGuardPolicyReloaderReportsEffectiveDigest(t *testing.T) {
+	t.Setenv(policyReloadWidenConfirmEnv, "1")
 	dir := t.TempDir()
 	overlayPath := filepath.Join(dir, "allow.json")
 	t.Setenv(guardAllowOverlayEnv, overlayPath)
