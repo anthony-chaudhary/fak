@@ -456,6 +456,52 @@ var registry = []Super{
 		},
 	},
 	{
+		// tend-reporting is the FEEDER-LIVENESS intent, and the sibling of tend-scoreboards
+		// (issue #4863). The two split the reporting family along the only line that matters
+		// operationally: tend-scoreboards asks "is the posted NUMBER healthy?" (scorecard
+		// debt); tend-reporting asks "is the FEEDER that posts it still alive?" (loop
+		// liveness). A feed can go dark for a week with every scorecard at floor, so the
+		// number-walk cannot answer the liveness question — before this intent, nothing
+		// entered the worst-first feeder to bring it back up; `fak slack beat` (the surface
+		// pointer tend-scoreboards carries) only pulses DELIVERY, and is never weighed.
+		//
+		// The members are the feeders that fold onto the ONE CI/CD report channel
+		// (scoreboard.CICDReportChannel) — the family the `fak slack check`/`fak slack walk`
+		// registry names. They are KindLoop (a feeder IS a ledgered post cadence), so each
+		// carries liveness debt and NO scorecard: the once-only fold is untouched (this
+		// intent double-counts nothing at the root). Each ref is `report:<surface>` — the
+		// FEED, deliberately distinct from any same-named underlying loop ("dojo" the gym
+		// loop under improve-loops is not "report:dojo" the rollup feed), so two intents can
+		// never fold one ref's debt twice. Every ref is WorkNeutral by classifyWork (a report
+		// cadence is neither gardening nor backlog-drain), which is the correct benign class
+		// for an idle report feed.
+		//
+		// Each Enter is the ONE uniformly-runnable revival verb — `fak slack refresh
+		// --surface <name>` (cmd/fak/slack_refresh.go) — rather than each feeder's raw post
+		// command: the raw commands are not uniformly runnable as printed (blockers/backlog
+		// need a GitHub payload, scoreboard needs a KPI), and a FrontRunnable Enter promises
+		// a headless drive can execute it. The refresh verb keeps that promise for every row.
+		//
+		// TODO(#4865): swap this inline roster for the canonical roster source once it lands;
+		// until then this list is the hand-kept mirror of the CICDReportChannel family, and
+		// TestTendReportingMirrorsTheReportChannelFamily pins it against drift.
+		Name:   "tend-reporting",
+		Title:  "tend the reporting-family feeders (are they still posting?)",
+		About:  "walk the Slack feeders that fold onto the one CI/CD report channel by LIVENESS — darkest/most-overdue first — and enter the worst feeder to revive it; folds only when every feeder is confirmed up",
+		Floor:  0,
+		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 15, TokenCeiling: 80000, MaxWorkers: 1},
+		Members: []Member{
+			{Kind: KindLoop, Ref: "report:product", Why: "the product feed: dark means product direction / persona findings stopped reaching the report channel", Enter: "fak slack refresh --surface product"},
+			{Kind: KindLoop, Ref: "report:blockers", Why: "the blockers feed: dark means a fleet blocker can stand unpaged — the feed an operator trusts to interrupt them", Enter: "fak slack refresh --surface blockers"},
+			{Kind: KindLoop, Ref: "report:cachevalue", Why: "the cache-value P&L feed: dark means the witnessed kernel-reuse trend stops being published", Enter: "fak slack refresh --surface cachevalue"},
+			{Kind: KindLoop, Ref: "report:bench", Why: "the bench feed: dark means benchmark rollups / run-requests stop reaching the bench nodes", Enter: "fak slack refresh --surface bench"},
+			{Kind: KindLoop, Ref: "report:dojo", Why: "the dojo rollup feed: dark means calibration trends stop being posted (distinct from the dojo gym loop itself)", Enter: "fak slack refresh --surface dojo"},
+			{Kind: KindLoop, Ref: "report:backlog", Why: "the backlog feed: dark means the issue-triage + bottleneck digest stops surfacing", Enter: "fak slack refresh --surface backlog"},
+			{Kind: KindLoop, Ref: "report:node-usage", Why: "the node-usage feed: dark means compute-node usage snapshots stop, and idle silicon goes unnoticed", Enter: "fak slack refresh --surface node-usage"},
+			{Kind: KindLoop, Ref: "report:steering", Why: "the steering feed: dark means the steering-guard surface stops reporting how steerable the fleet is", Enter: "fak slack refresh --surface steering"},
+		},
+	},
+	{
 		// tend is the ROOT intent — the recursion case made real: a super loop whose
 		// every member is itself a super loop. Walking it descends each registered
 		// intent (the shell walks sub-super-loops inline and folds each sub-report via
@@ -475,6 +521,7 @@ var registry = []Super{
 			{Kind: KindSuperloop, Ref: "improve-trajectory", Why: "trajectory health: are the steered objectives on-course, or drifting/stalling off their intended curve?"},
 			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
 			{Kind: KindSuperloop, Ref: "tend-scoreboards", Why: "the reporting family: are the scoreboard numbers fak posts to Slack (product, release, steerability, milestone) healthy, and are the feeds delivering?"},
+			{Kind: KindSuperloop, Ref: "tend-reporting", Why: "the other half of the reporting family: are the FEEDERS that post those numbers still alive, or has one gone dark unnoticed?"},
 			{Kind: KindSuperloop, Ref: "run-the-night", Why: "the overnight productivity meta-loop: are issues draining and is every account limit + node actually being used?"},
 		},
 	},
