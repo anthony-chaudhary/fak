@@ -2,7 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/leakcheck"
 )
 
 // TestSchemaNormCacheWitnessOpenAI proves the #796 OpenAI memo is sound: a cache hit
@@ -87,5 +90,67 @@ func TestSchemaNormCacheWitnessGemini(t *testing.T) {
 	}
 	if string(got2) == string(oaWant) {
 		t.Fatal("gemini hit served the OpenAI normalization — provider not in the key")
+	}
+}
+
+// TestNormalizedSchemaCacheBounded is the #3297 regression proof: the gateway keys this
+// cache on sha256(raw pre-normalization bytes), so a gateway fronting heterogeneous
+// clients mints a fresh permanent key per distinct schema. Drive many distinct keys
+// through the cache and assert the retained-entry count never exceeds the cap — a return
+// to the pre-fix unbounded sync.Map would fail here.
+func TestNormalizedSchemaCacheBounded(t *testing.T) {
+	const cap = 16
+	c := &normalizedSchemaLRU{cap: cap}
+	step := func(i int) {
+		raw := json.RawMessage(fmt.Sprintf(`{"type":"object","id":%d}`, i))
+		c.store(normalizedSchemaKey(schemaCacheKeyOpenAI, true, raw), []byte(`{}`))
+	}
+	leakcheck.BoundedSize(t, 1000, cap, step, c.len)
+}
+
+// TestNormalizedSchemaCacheLenObservable proves the global cache's footprint is visible
+// through the public store path (#3297 DoD: a count metric so growth is observable) and
+// stays within the shipped cap.
+func TestNormalizedSchemaCacheLenObservable(t *testing.T) {
+	before := normalizedSchemaCacheLen()
+	for i := 0; i < 50; i++ {
+		raw := json.RawMessage(fmt.Sprintf(`{"type":"object","obs":%d}`, i))
+		storeNormalizedSchema(schemaCacheKeyOpenAI, true, raw, json.RawMessage(`{}`))
+	}
+	after := normalizedSchemaCacheLen()
+	if after <= before {
+		t.Fatalf("cache len did not grow through the public store path: before=%d after=%d", before, after)
+	}
+	if after > normalizedSchemaCacheCap {
+		t.Fatalf("global cache len %d exceeds cap %d", after, normalizedSchemaCacheCap)
+	}
+}
+
+// TestNormalizedSchemaCacheEvictsLRU proves eviction is least-recently-used, not arbitrary:
+// after overflowing the cap, a key touched between inserts survives while an untouched
+// older key is dropped.
+func TestNormalizedSchemaCacheEvictsLRU(t *testing.T) {
+	const cap = 4
+	c := &normalizedSchemaLRU{cap: cap}
+	key := func(i int) normalizedSchemaCacheKey {
+		return normalizedSchemaKey(schemaCacheKeyOpenAI, true, json.RawMessage(fmt.Sprintf(`{"id":%d}`, i)))
+	}
+	for i := 0; i < cap; i++ {
+		c.store(key(i), []byte(`{}`))
+	}
+	// Touch key(0) so it becomes most-recently-used, then insert a fresh key: the LRU
+	// victim must be key(1) (the oldest untouched), not key(0).
+	if _, ok := c.load(key(0)); !ok {
+		t.Fatal("key(0) should still be resident before overflow")
+	}
+	c.store(key(cap), []byte(`{}`)) // forces one eviction
+	if _, ok := c.load(key(0)); !ok {
+		t.Fatal("recently-touched key(0) was wrongly evicted")
+	}
+	if _, ok := c.load(key(1)); ok {
+		t.Fatal("least-recently-used key(1) should have been evicted")
+	}
+	if got := c.len(); got != cap {
+		t.Fatalf("len=%d after overflow, want cap=%d", got, cap)
 	}
 }
