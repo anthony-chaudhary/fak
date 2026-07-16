@@ -321,6 +321,7 @@ var tier = map[string]int{
 	"dispatchcache":    1, // pure stdlib-only TTL/content-hash cache for routed dispatch payloads.
 	"dispatchtick":     1, // pure issue-resolution dispatch tick contract: backend argv, guard wrap, wave/account sidecars + the tier-aware account chooser (#3042); imports modelroute(1) for the WorkTier vocabulary, else stdlib-only, off the hot path.
 	"dispatchsweep":    1, // pure queue-drain loop core for `fak dispatch sweep`: find next issue -> spawn one worker -> repeat, until a tick refuses or the best-effort agent ceiling is hit; tick+settle are injected and the cmd/fak shell runs the Go tick evaluator. stdlib-only, imports nothing internal, off the hot path.
+	"steerpr":          1, // operator-steerability PR overlay (#5015/#5020): folds continuous-merge trunk commits into PR-sized units per (fak <leaf>) stamp and bands each unit CLEARED/RESIDUAL/UNVERIFIABLE by its worst member, so operator attention concentrates where an oracle could not confirm the claim. Read-mostly: it gates nothing. Witness verdicts are SUPPLIED by the caller (from dispatchtick's rungs) rather than imported, so the band stays a view over the existing oracle and this leaf stays stdlib-only, imports nothing internal, off the hot path.
 	"issuesmallness":   1, // pure issue-template smallness lint: one deliverable + one witness classifier and dry-run report fold; stdlib-only, off the hot path.
 	"procguard":        1, // native port of tools/proc_resource_guard.py's operator/control-pane modes (#1412): the runaway-process guard's richer surface — sustained per-core CPU-pin dimension, orphaned-helper/idle-shell sprawl reaping, cross-tick streak ledger, opt-in --enact reaper, and the "fleet-proc-resource-guard/1" JSON contract. Reuses dispatchtick(1)'s resource-level classifier for the thread/handle/ws core; imports dispatchtick(1)+stdlib, off the hot path.
 	"fleetmon":         1, // headless-worker fleet monitor/janitor/fold/replace (#1856-#1859): pure evidence-derived worker classification, stale-child-command detection, witnessed run-ledger fold, and stuck-worker replacement. Reuses procguard(1)'s process forest + tree-kill; imports procguard(1)+stdlib, off the hot path.
@@ -1177,9 +1178,10 @@ var interpreterSuffix = []string{".py", ".sh", ".bash", ".ps1", ".rb", ".pl", ".
 // chokepoint as regOffList. Each entry is a deliberate, reviewed decision, not a
 // silent pass.
 var interpreterExecAllow = map[string]string{
-	"witness":   "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
-	"procguard": "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
-	"accounts":  "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
+	"witness":    "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
+	"procguard":  "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
+	"accounts":   "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
+	"modelroute": "cross-audit corpus self-check executes a structured, declaration-matched witness argv (normally the compiled crossauditfixture binary); the dynamic path is test/CLI calibration evidence, not a script interpreter dependency of tool-call adjudication",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
