@@ -36,7 +36,7 @@ func TestIngestRolloutNormalizesAndFeedsClassifier(t *testing.T) {
 
 	// Five tool calls (c1..c5); the session_meta, the output rows, and the torn
 	// line are not calls.
-	if len(recs) != 5 {
+	if len(recs) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST — closed fixture/contract cardinality
 		t.Fatalf("want 5 ingested calls, got %d: %+v", len(recs), recs)
 	}
 
