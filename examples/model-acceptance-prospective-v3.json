@@ -2,7 +2,7 @@
   "schema": "fak.modelaccept.report/1",
   "corpus": {
     "id": "top3-prospective-sentinel-v3",
-    "declared_at": "2026-07-16T14:25:00-07:00",
+    "declared_at": "2026-07-16T10:30:00-07:00",
     "replacement_rules": "No replacements. Execute exactly the six scheduled attempts per exact model. Do not retry or replace based on output quality. Provider/infrastructure and harness failures remain recorded attempts and retain HOLD. This declaration does not replace the v2 attempts recorded in commit 8c5edc9c3249; it is a fresh post-reset campaign.",
     "stopping_rule": "Stop each exact model after three repetitions of both declared tasks (six attempts). Stop the campaign after all 18 attempts. Any unexplained eligible failure or any contract failure retains HOLD; no early promotion.",
     "tasks": [

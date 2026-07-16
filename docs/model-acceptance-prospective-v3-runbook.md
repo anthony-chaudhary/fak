@@ -26,7 +26,7 @@ authenticated campaign attaches real streams. The in-lane gate
 
 - File: `examples/model-acceptance-prospective-v3.json`
 - Corpus ID: `top3-prospective-sentinel-v3`
-- Declaration SHA-256: `0e6404b25db0610f2d309092d04bc2635a7b2f9c840551e45a0f8262c70dd967`
+- Declaration SHA-256: `a4db44ffe6064c11f7578190868cef9217bc1fd9a5f9b2c258f54df57cade7fa`
 - Exact IDs: `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`
 - Two production-shaped task classes per model (read-only multi-record synthesis;
   typed transient retry recovery), three repetitions each — 18 fixed attempts.
