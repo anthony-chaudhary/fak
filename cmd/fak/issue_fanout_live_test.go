@@ -30,7 +30,7 @@ func TestIssueFanoutLiveFilesUnseenAndRerunFilesZero(t *testing.T) {
 	}
 	argv := []string{
 		"--title", "fanout live test", "--leaf", "fanoutlivetest", "--spine", "deadbeef",
-		"--areas", "qa", "--live", "--existing-json", fixture,
+		"--areas", "qa", "--parent-issue", "36", "--parent-baseline-points", "100", "--target-envelope", "- concurrent users: 10 users\n- sustained duration: 60 minutes", "--witnessed-envelope", "- concurrent users: 10 users\n- sustained duration: 60 minutes", "--live", "--existing-json", fixture,
 	}
 	var out, errOut bytes.Buffer
 	if code := runIssueFanoutWith(&out, &errOut, argv, gh); code != 0 {
@@ -63,7 +63,7 @@ func TestIssueFanoutLiveGhFailureExitsOne(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := runIssueFanoutWith(&out, &errOut, []string{
 		"--title", "t", "--leaf", "fanoutlivetest", "--spine", "s",
-		"--areas", "qa", "--live", "--existing-json", fixture,
+		"--areas", "qa", "--parent-issue", "36", "--parent-baseline-points", "100", "--target-envelope", "- concurrent users: 10 users\n- sustained duration: 60 minutes", "--witnessed-envelope", "- concurrent users: 10 users\n- sustained duration: 60 minutes", "--live", "--existing-json", fixture,
 	}, gh)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 on gh failure\n%s", code, out.String())

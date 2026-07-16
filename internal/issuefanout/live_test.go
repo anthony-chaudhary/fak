@@ -9,10 +9,14 @@ import (
 func liveTestPlan(t *testing.T) Plan {
 	t.Helper()
 	plan, err := Build(Input{
-		Title:    "fanout live test",
-		Leaf:     "fanoutlivetest",
-		SpineRef: "deadbeef",
-		Areas:    []string{"qa"},
+		Title:             "fanout live test",
+		Leaf:              "fanoutlivetest",
+		SpineRef:          "deadbeef",
+		ParentIssue:       36,
+		ParentBaseline:    100,
+		TargetEnvelope:    "- concurrent users: 10 users\n- sustained duration: 60 minutes",
+		WitnessedEnvelope: "- concurrent users: 10 users\n- sustained duration: 60 minutes",
+		Areas:             []string{"qa"},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

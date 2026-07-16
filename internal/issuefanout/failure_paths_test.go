@@ -63,6 +63,19 @@ var refusalContract = []struct {
 		want:   []string{"fails the issue contract", "fix the input field it names"},
 	},
 	{
+		site: "live filing without parent accounting",
+		drive: func(t *testing.T) error {
+			plan, err := Build(spineInput())
+			if err != nil {
+				t.Fatalf("Build(spineInput()): %v", err)
+			}
+			plan.Input.ParentIssue = 0
+			plan.Input.ParentBaseline = 0
+			_, err = FileLive(plan, nil, LiveOptions{Runner: func([]string) (string, string, bool) { return "", "", true }})
+			return err
+		},
+		want: []string{"requires --parent-issue", "--parent-baseline-points"},
+	}, {
 		site: "live filing without a runner",
 		drive: func(t *testing.T) error {
 			plan, err := Build(spineInput())
