@@ -255,6 +255,7 @@ concurrent = [
   "modelaccept",
   "executionroute",
   "market",
+  "clonescan", # #5059: internal/clonescan leaf (the #4325/#4330 dup-cache tokenizer) declared so clonescan-scoped issues route to a runnable `go test ./internal/clonescan` gate, not the phantom ci/internal/ci lane; cmd/fak/dup.go + internal/hooks shims stay in their own lanes to keep leaf trees pairwise-disjoint.
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -375,6 +376,7 @@ autopick = [
   "modelaccept",
   "executionroute",
   "market",
+  "clonescan", # #5059: internal/clonescan leaf -- see [lanes].concurrent note.
   # new-leaf:lane
 ]
 
@@ -578,6 +580,7 @@ modelops = ["internal/modelops/**"]
 modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
 market = ["internal/market/**"]
+clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
