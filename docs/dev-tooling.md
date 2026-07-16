@@ -3,34 +3,78 @@ title: "Developer Tooling — debug, profile, and test fak"
 description: "The hands-on developer-tooling guide for fak: build and run, the test runner (make + WSL), debugging with fak debug and fak doctor, profiling and benchmarking, and the commit-and-ship dev loop."
 ---
 
-# Developer tooling: debug, profile, test
+# Developer tooling by task and platform
 
-This is the hands-on guide to the CLI tools you use while *working on* fak —
-debugging, profiling, and testing — plus the dev loop they sit inside. It is the
-practitioner companion to the navigational [Work map](WORK-MAP.md) (which routes a
-task to the right front door) and the verb-by-verb [CLI reference](cli-reference.md)
-(which lists every `fak` verb). Read [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) first for the build
-commands and the hard rules; this page is the "now I'm in the loop, what do I run?"
-layer. For the ranked improvement program behind this loop, see the
+> **Primary audience:** contributors who already have a fak checkout and need to choose
+> the correct build, test, debug, profile, or committed-tip witness for one development
+> question. Start with [`CONTRIBUTING.md`](../CONTRIBUTING.md) for initial setup and the
+> repository landing contract.
+
+This page maps a question to one command family, then explains each family in depth.
+The [Work map](WORK-MAP.md) chooses a project front door; the
+[CLI reference](cli-reference.md) lists every `fak` verb. `AGENTS.md` remains the
+machine-oriented authority for shared-tree safety and recovery.
+
+**Next action:** from the repository root, run `fak test --list` to inventory the
+host-aware test and non-test witness tiers without executing them. This is a one-time
+discovery step, not a proof and not a command that every later task must repeat; after it
+returns, choose the task-specific witness in the table below.
+
+## Choose the witness for the question
+
+| Question | Start with | What a pass proves |
+|---|---|---|
+| Does my working-tree change compile without peers' untracked Go files or an in-tree binary affecting the answer? | `fak buildcheck --vet` | Inner-loop compile feedback: the isolated overlay compiles and vets the requested packages. It is not the pre-commit or committed-tip gate. |
+| Which changed packages and importers need focused tests? | `fak test affected --list` | Task-specific planning after the global tier inventory: it prints the bounded changed-package set; run `fak test affected` to execute that set for behavior proof. |
+| Does the fast repository smoke gate pass? | `make test-fast` | Build, vet, and short tests pass; weight-backed witnesses remain outside this tier. |
+| Is the complete pre-commit tree green? | `make ci` | Build, formatting, vet, full tests, claims lint, and repository gates pass in the supported test environment. |
+| Is the committed tip clean and buildable despite a peer-dirty checkout? | `fak ci-preflight` | An archived checkout of `HEAD` is gofmt-clean and builds. **This post-commit proof never replaces the full pre-commit test gate.** |
+| Why did a tool call fail or a completed session behave unexpectedly? | [`fak debug`](#fak-debug--the-context-debugger), [`fak doctor`](#fak-doctor--the-answer-shape-diagnostic), or the [denial guide](#debugging-a-denied-tool-call) | The selected diagnostic reports its scoped finding; it is not a repository green bar. |
+| Is a performance change net-true? | The [benchmark verbs](#the-benchmark-verbs) and the repository's benchmark authority | Execute a matched baseline and candidate to produce the task proof; then run the normal repository gates separately. Listing a benchmark command or passing CI is not performance evidence. |
+
+`fak debug`, `fak profile`, and `fak test` are shipped CLI surfaces. `fak profile` and
+`fak test` are host-aware wrappers over the Go toolchain and repository gates. `fak
+`test --list` only discovers all runner tiers; `fak test -n <tier>` dry-runs one
+resolved tier; `fak test <tier-or-package>` executes one. `fak test affected --list`
+performs a different, task-specific discovery: changed packages and their importers.
+`make ci` is the authoritative pre-commit green bar.
+
+## Choose the platform path
+
+| Platform | Build and vet | Test execution | Required full gate |
+|---|---|---|---|
+| Linux or macOS | Native Go toolchain and `fak buildcheck` | Native `fak test` / `make test*` | `make ci` |
+| This native Windows control host | Native Go build, vet, run, and `fak buildcheck` | Prefer host-aware `fak test <tier-or-package>`; it routes to WSL. Use `./test.ps1 [package]` as the direct WSL suite entry. Do not run native `go test`. | Run `./test.ps1` for the full test suite plus the native non-test gates named by the change; CI is the complete `make ci` witness. Then run `fak ci-preflight` for committed `HEAD`. |
+| CI or a sanctioned compute node | Use the runner's declared toolchain | Use the checked-in gate or workload command | The workflow or node witness named by the task; do not substitute local hardware absence for that witness |
+
+## Route context
+
+| Dimension | Current contract |
+|---|---|
+| Mode | Where the commands apply: source development in a repository checkout; installed-binary operation belongs to the operator route. |
+| Generation | Which guidance is current: this `gen/now` task-and-platform route. Historical notes and scorecards do not override current commands. |
+| Lifecycle | When each gate applies: choose the question → run the narrow witness for feedback → run `make ci` before commit to test the complete working-tree change → run `fak ci-preflight` after commit to prove archived `HEAD` without peer WIP → push. |
+| Support | Build, test, debug, profile, and ship-loop selection are covered. Product use starts at [`README.md`](../README.md), deployment recovery at [`docs/operator/`](operator/), and research hypotheses at the [research-agent playbook](playbooks/research-agent.md). |
+
+For the ranked improvement program behind these tools, see the
 [testing/linting infrastructure scorecard](TESTING-LINTING-INFRA-SCORECARD.md).
-
-> **Honest scope.** `fak debug`, `fak profile`, and `fak test` all ship as CLI
-> surfaces. `fak profile` and `fak test` are host-aware convenience wrappers over
-> the Go toolchain and the repo's existing gates; the authoritative green bar is
-> still `make ci`.
 
 ## Build and run
 
 The Go module is the repository root, so every `go` command runs from the clone root.
+Choose the command by intent:
 
 ```bash
-go build -o fak ./cmd/fak     # -> ./fak  (fak.exe on Windows); ~30-60s cold, instant warm
-./fak --help                  # every verb
-./fak doctor --help           # the read-only diagnostic (below)
+fak buildcheck --vet                  # compile/vet check; no in-tree binary
+make build                            # produce a debuggable ./fak for local use
+./fak --help                          # every verb on the produced binary
+./fak doctor --help                   # the read-only diagnostic described below
 ```
 
-The 60-second, no-key/no-model/no-GPU proof is the canonical first run — see
-[`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) and the full [repro packet](repro-packet.md).
+A raw `go build -o fak ./cmd/fak` deliberately produces the runnable in-tree binary; it
+is not a collision-safe verification command on the shared Windows trunk. The 60-second,
+no-key/no-model/no-GPU proof uses that produced binary — see `AGENTS.md` and the full
+[repro packet](repro-packet.md).
 
 ### Build profiles
 
