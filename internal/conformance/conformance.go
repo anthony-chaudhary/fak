@@ -149,10 +149,10 @@ type verdictCase struct {
 // set is ALLOWED, destructive shell commands are DENIED by argument value, kernel/secret
 // paths are write-protected (SELF_MODIFY), and an unnamed tool fails closed (DEFAULT_DENY).
 var verdictMatrix = []verdictCase{
-	// Allowed: the everyday Claude Code tool set.
+	// Everyday Claude Code tool set: read-only commands pass; mutating CLI commands fail closed.
 	{"bash ls", "Bash", `{"command":"ls -la"}`, abi.VerdictAllow, abi.ReasonNone},
 	{"bash cat", "Bash", `{"command":"cat README.md"}`, abi.VerdictAllow, abi.ReasonNone},
-	{"bash git commit", "Bash", `{"command":"git commit -m wip"}`, abi.VerdictAllow, abi.ReasonNone},
+	{"bash git commit", "Bash", `{"command":"git commit -m wip"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
 	{"read", "Read", `{"file_path":"README.md"}`, abi.VerdictAllow, abi.ReasonNone},
 	{"edit normal file", "Edit", `{"file_path":"fak/README.md"}`, abi.VerdictAllow, abi.ReasonNone},
 
