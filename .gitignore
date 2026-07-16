@@ -149,6 +149,19 @@ dos.runs/
 /out*.json
 /err*.log
 
+# Git's own 3-way-merge scratch copies (`git merge-file` / a rename-conflict checkout drops
+# `.merge_file_XXXXXX` in the working tree). Always throwaway, never a build input. Root-scoped.
+/.merge_file_*
+
+# One-off session runner scripts a dispatch/report loop writes to the repo root
+# (`.run-<seed>.sh`, an `exec bash scripts/...` wrapper pointed at /tmp state). Per-session
+# throwaway — same family as the *.run.log spills above.
+/.run-*.sh
+
+# gh-issue-list JSON dumps a triage query redirects to the repo root (`gh issue list --json ... > perf.json`).
+# Root-scoped so a tracked perf.json fixture in a package is never hidden.
+/perf.json
+
 # Throwaway temp generator / run dirs at the repo root: tmpgenfeeds/ (a one-off `package main`
 # feed generator), fleet-runs/ (nightrun poll/watch logs), workfak/ (a nested dispatch scratch
 # copy). Distinctive-prefix globs — no tracked dir matches (a bare /tmp*/ could catch a future
