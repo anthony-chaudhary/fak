@@ -99,6 +99,11 @@
           "category": "incidental",
           "reason": "private parser helper that locates the Claude executable inside a direct or guard-fronted argv; not a new operator-facing guard concept",
           "token": "guardClaudeCommandIndex"
+        },
+        {
+          "category": "incidental",
+          "reason": "prose phrase describing a validation gate test, not a named guard-gate concept",
+          "token": "gate_test"
         }
       ],
       "exclude": [
@@ -114,6 +119,7 @@
       "id": "guard-gate",
       "ignore": [
         "fleetbarecommitguard",
+        "gate_test",
         "gated",
         "gateresult",
         "gates",
@@ -389,19 +395,27 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "private CLI output formatter for the validate verb, not a render/materialization subsystem concept",
+          "token": "renderValidate"
+        }
+      ],
       "id": "render-materialize",
       "ignore": [
+        "indexrenderhits",
+        "materialized",
+        "materializers",
+        "materializes",
+        "metricsrender",
+        "priorwtrendercrash",
+        "renderValidate",
         "rendered",
         "rendering",
         "renders",
-        "materializes",
-        "materialized",
-        "materializers",
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
-        "indexrenderhits",
-        "metricsrender",
-        "priorwtrendercrash",
         "tuioverviewsavingsrender"
       ],
       "min_files": 2,

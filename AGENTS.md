@@ -55,10 +55,14 @@ red, and a peer's uncommitted fix can mask a real one. Name the question, run th
 | Your question | Run |
 |---|---|
 | Is the **committed trunk** buildable + gofmt-clean? *(what CI gates — what "clean **git** build" means)* | `fak ci-preflight` |
+| Does the committed tip plus **only my explicit uncommitted paths** pass full build/vet and affected tests? | `fak validate --mine <path> [--mine <path>...]` |
 | Does **my change** compile, ignoring peers' broken untracked WIP? | `fak buildcheck [--vet]` |
 | Does the **literal working tree** compile — *my own* untracked WIP included? | `fak buildcheck --isolate=false --vet` |
 | Will my **push** red another worker's build graph? | `fak hooks pre-push` |
 
+`fak validate` archives the committed tip, overlays only repeatable explicit `--mine` paths, then runs
+full `go build ./...`, `go vet ./...`, and dependency-aware affected tests; it never infers ownership
+from the shared dirty tree.
 `fak ci-preflight` archives the tip to a throwaway checkout (immune to the dirty tree;
 `--skip-build` = gofmt-only fast path). `fak buildcheck` discards output to the null device
 and, by default, `-overlay`s away untracked siblings so a peer's WIP can't red your compile —
@@ -68,7 +72,7 @@ re-checked against the live tree and reported OK before it reaches you; `--isola
 the live tree as-is, which is the one that catches *your own* broken untracked `_test.go`. None
 of the three writes an in-tree binary. `make test-fast` / `make ci` remain the local full-suite
 gates. **When you report "the build is clean" from a raw `go build`/`go vet` in this working
-tree, say which of the four questions you mean** — they give different answers here.
+tree, say which question you mean** — they give different answers here.
 
 Or install the released binary directly — the module is at the repo root, so this resolves:
 
