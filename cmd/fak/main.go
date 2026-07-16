@@ -211,6 +211,8 @@ func main() {
 		cmdSchedScan(os.Args[2:])
 	case "growthgate":
 		cmdGrowthgate(os.Args[2:])
+	case "egresslist":
+		cmdEgresslist(os.Args[2:])
 	case "test":
 		cmdTest(os.Args[2:])
 	case "done":

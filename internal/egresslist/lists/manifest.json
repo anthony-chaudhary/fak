@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "lists": [
+    {
+      "name": "sample-malware",
+      "url": "",
+      "format": "mixed",
+      "sha256": "1913f260c98ab44e199339ff3d392c7195a9a1011e9fff39a49a5ab493e7e293",
+      "rules": 5,
+      "last_refreshed": "",
+      "description": "Hand-authored placeholder proving the block_lists ingestion pipeline end-to-end. Not a real threat feed and NOT refreshable: it records no upstream URL, so `fak egresslist refresh` reports it skipped rather than inventing a provenance. The real community feeds (StevenBlack hosts, EasyPrivacy, URLhaus) arrive with the ingestion issue and land here with a real url + last_refreshed."
+    }
+  ]
+}
