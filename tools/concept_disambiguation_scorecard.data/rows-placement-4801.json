@@ -1,0 +1,136 @@
+{
+  "rows": [
+    {
+      "id": "placement4801collectivewitnessed",
+      "canonical": "CollectiveWitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Input field on the #4801 ReservationEnvelope recording that a real NCCL collective smoke test passed across the exact reserved GPU ranks, before any artifact transfer begins.",
+      "distinction": "It is an INPUT carrying independent hardware evidence, never a value the placement gate derives; progresswitnessed tracks loop progress in software, whereas this records a collective result on reserved accelerator ranks.",
+      "distinct_from": [
+        "covg-witness-proof-progresswitnessed"
+      ],
+      "aliases": [],
+      "grounding": "CollectiveWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "placement4801reservationcollectiveunwitnessed",
+      "canonical": "ReservationCollectiveUnwitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The #4801 typed refusal verdict returned when every resource bar clears but no NCCL collective has been proven across the exact reserved ranks.",
+      "distinction": "It is the VERDICT constant naming the refusal, whereas CollectiveWitnessed is the boolean input the verdict is derived from.",
+      "distinct_from": [
+        "placement4801collectivewitnessed"
+      ],
+      "aliases": [],
+      "grounding": "ReservationCollectiveUnwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "placement4801collectivewitnessmissing",
+      "canonical": "COLLECTIVE_WITNESS_MISSING",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The wire/JSON string value of the #4801 ReservationCollectiveUnwitnessed verdict, consumed by #4788 to gate the artifact transfer.",
+      "distinction": "It is the serialized token a consumer switches on; ReservationCollectiveUnwitnessed is the Go identifier that carries it.",
+      "distinct_from": [
+        "placement4801reservationcollectiveunwitnessed"
+      ],
+      "aliases": [],
+      "grounding": "COLLECTIVE_WITNESS_MISSING",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "placement4801insufficientnonevictinghbm",
+      "canonical": "INSUFFICIENT_NONEVICTING_HBM",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "The #4801 typed refusal verdict returned when accelerator memory reachable WITHOUT evicting any peer workload is below the artifact size plus runtime headroom.",
+      "distinction": "It describes capacity bounded by a no-eviction constraint, so it is refused rather than solved by eviction; the evict family's other terms name mechanisms that DO evict, whereas this names a bar measured precisely by declining to.",
+      "distinct_from": [
+        "evict-evictor"
+      ],
+      "aliases": [],
+      "grounding": "INSUFFICIENT_NONEVICTING_HBM",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "placement4801witnessedreservationenvelope",
+      "canonical": "witnessedReservationEnvelope",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Unexported constructor returning the #4801 candidate reservation exactly as directly witnessed: the non-evicting reach read back from the lab GPU nodes, scrubbed to a node-class label.",
+      "distinction": "It supplies the MEASURED envelope that AdmitPlacement judges; CollectiveWitnessed is one boolean input inside that envelope, whereas this is the whole witnessed capacity record.",
+      "distinct_from": [
+        "placement4801collectivewitnessed"
+      ],
+      "aliases": [],
+      "grounding": "witnessedReservationEnvelope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "placement4801witnessedplacement",
+      "canonical": "WitnessedPlacement",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Exported accessor returning the current #4801 typed placement verdict, derived by AdmitPlacement from the witnessed envelope; the artifact #4788 gates its transfer on.",
+      "distinction": "It returns the derived VERDICT, whereas witnessedReservationEnvelope returns the raw witnessed capacity input it is derived from.",
+      "distinct_from": [
+        "placement4801witnessedreservationenvelope"
+      ],
+      "aliases": [],
+      "grounding": "WitnessedPlacement",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "placement4801nonevicting",
+      "canonical": "non-evicting (placement constraint)",
+      "family": "evict",
+      "kind": "doc-term",
+      "definition": "The #4801 placement constraint that accelerator capacity may only be counted when it is reachable WITHOUT displacing any peer workload, making eviction unavailable as a way to close a shortfall.",
+      "distinction": "It is a prohibition on eviction bounding a capacity read, not an eviction mechanism; the evict family's other terms name components that perform eviction, whereas this names the constraint that forbids it.",
+      "distinct_from": [
+        "evict-evictor"
+      ],
+      "aliases": [],
+      "grounding": "nonevicting",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
