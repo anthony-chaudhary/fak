@@ -3,6 +3,18 @@
   "glossary": "",
   "families": [
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Test filename in the generated boundary-lint baseline, not a cache taxonomy concept.",
+          "token": "cachevalue_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test filename in the generated boundary-lint baseline, not a cache taxonomy concept.",
+          "token": "cache_trace_test"
+        }
+      ],
       "id": "cache",
       "ignore": [
         "cached",
@@ -63,18 +75,6 @@
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta).",
       "roots": [
         "cache"
-      ],
-      "classifications": [
-        {
-          "category": "incidental",
-          "reason": "Test filename in the generated boundary-lint baseline, not a cache taxonomy concept.",
-          "token": "cachevalue_test"
-        },
-        {
-          "category": "incidental",
-          "reason": "Test filename in the generated boundary-lint baseline, not a cache taxonomy concept.",
-          "token": "cache_trace_test"
-        }
       ]
     },
     {
@@ -189,6 +189,13 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "File-path identifier in the generated boundary-lint baseline, not a runtime session concept.",
+          "token": "dispatchsessionsaudittest"
+        }
+      ],
       "id": "session-runtime",
       "ignore": [
         "sessions",
@@ -218,30 +225,73 @@
         "session",
         "slot",
         "scheduler"
-      ],
-      "classifications": [
-        {
-          "category": "incidental",
-          "reason": "File-path identifier in the generated boundary-lint baseline, not a runtime session concept.",
-          "token": "dispatchsessionsaudittest"
-        }
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty-scenario per-model metric field counting CLAIM_UNWITNESSED episodes, not a new witness-proof concept",
+          "token": "ClaimUnwitnessedCount"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "token": "done_not_witnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "token": "wrong_missing_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "token": "HonestyClaimUnwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "token": "HonestyDoneNotWitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "token": "HonestyWrongWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty grader evidence-string key (the witness the model named vs the task wants), not a new witness-proof concept",
+          "token": "named_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "conceptbench #2738 honesty grader evidence-string key (the witness the model named vs the task wants), not a new witness-proof concept",
+          "token": "want_witness"
+        }
+      ],
       "id": "witness-proof",
       "ignore": [
-        "witnessing",
+        "ClaimUnwitnessedCount",
+        "HonestyClaimUnwitnessed",
+        "HonestyDoneNotWitnessed",
+        "HonestyWrongWitness",
+        "done_not_witnessed",
+        "named_witness",
+        "nwitness",
+        "refutations",
+        "refuted",
+        "refutes",
+        "refutil",
+        "revocations",
+        "want_witness",
+        "withdefaultoriginwitnesses",
         "witnessable",
         "witnessed",
         "witnesses",
-        "refuted",
-        "refutes",
-        "revocations",
-        "refutations",
-        "refutil",
-        "nwitness",
+        "witnessing",
         "witnesssametaskids",
-        "withdefaultoriginwitnesses"
+        "wrong_missing_witness"
       ],
       "min_files": 3,
       "name": "Witness / evidence family",
@@ -341,13 +391,20 @@
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",
-      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans >= min_files only because the path is threaded through BuildPlan/IssueBody.",
+      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans \u003e= min_files only because the path is threaded through BuildPlan/IssueBody.",
       "roots": [
         "scorecard",
         "debt"
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Backend-private capability probe for issue 4843; not a public concept",
+          "token": "SupportsRoutedExpertKQuant"
+        }
+      ],
       "id": "support-maturity",
       "ignore": [
         "supported",
@@ -384,13 +441,6 @@
         "correctness",
         "parity",
         "maturity"
-      ],
-      "classifications": [
-        {
-          "category": "incidental",
-          "reason": "Backend-private capability probe for issue 4843; not a public concept",
-          "token": "SupportsRoutedExpertKQuant"
-        }
       ]
     },
     {
@@ -588,6 +638,13 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Test filename in the generated boundary-lint baseline, not a loop taxonomy concept.",
+          "token": "doomloop_test"
+        }
+      ],
       "id": "loop",
       "ignore": [
         "loops",
@@ -619,13 +676,6 @@
       "note": "The most overloaded word in the repo: a read-only intent walker (fak superloop) vs a bulk wave launcher (/super-loop) vs a ledger+governor (fak loop) vs a per-turn exit gate (loopgate) vs the benchmark surface (bench-loop) vs the stage-coverage scorecard (loop-index) vs the cross-ledger health fold (loopfleet) vs the process babysitter (bgloop) - plus network loopback, a different domain the root swallows.",
       "roots": [
         "loop"
-      ],
-      "classifications": [
-        {
-          "category": "incidental",
-          "reason": "Test filename in the generated boundary-lint baseline, not a loop taxonomy concept.",
-          "token": "doomloop_test"
-        }
       ]
     },
     {
