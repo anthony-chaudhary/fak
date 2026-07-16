@@ -120,7 +120,7 @@ func TestFoldUnitsPartitionIsTotalAndDisjoint(t *testing.T) {
 	}, "")
 
 	commits := ParseLog(raw)
-	if len(commits) != 5 {
+	if len(commits) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST — closed fixture/contract cardinality
 		t.Fatalf("ParseLog() = %d commits, want 5", len(commits))
 	}
 
