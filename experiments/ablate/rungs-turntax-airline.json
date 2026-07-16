@@ -1,0 +1,245 @@
+{
+  "provenance": {
+    "app_version": "0.41.0",
+    "command": "turnbench.RunLeverFlip",
+    "slice_id": "turntax-airline",
+    "workload_hash": "71c788f2c57aeb10",
+    "go_version": "go1.26.5",
+    "os": "windows",
+    "generated_by": "fak/internal/turnbench (lever-flip causal attribution)"
+  },
+  "calls": 14,
+  "baseline_counters": {
+    "submits": 14,
+    "vdso_hits": 7,
+    "engine_calls": 6,
+    "denies": 1,
+    "transforms": 2,
+    "quarantines": 1
+  },
+  "levers": [
+    {
+      "lever": "grammar",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 0,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": -2,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": true,
+      "witness": "removing rung \"grammar\" shifts outcomes by transforms -2, vdso_hits +0, quarantines +0, denies +0, engine_calls +0"
+    },
+    {
+      "lever": "ratelimit",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"ratelimit\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "preflight",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"preflight\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "engine-residency",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"engine-residency\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "plancfi",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"plancfi\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "ifc-sink",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"ifc-sink\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "gitgate",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"gitgate\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "shipgate",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 7,
+        "engine_calls": 6,
+        "denies": 1,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": 0,
+        "quarantines": 0,
+        "denies": 0,
+        "engine_calls": 0
+      },
+      "changed_outcome": false,
+      "witness": "removing \"shipgate\" changed NO outcome counter on this trace (no causal effect here — e.g. a redundantly-covered verdict)"
+    },
+    {
+      "lever": "monitor",
+      "realization": "chain-mask",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 4,
+        "engine_calls": 2,
+        "denies": 8,
+        "transforms": 2,
+        "quarantines": 0
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": -3,
+        "quarantines": -1,
+        "denies": 7,
+        "engine_calls": -4
+      },
+      "changed_outcome": true,
+      "witness": "removing rung \"monitor\" shifts outcomes by transforms +0, vdso_hits -3, quarantines -1, denies +7, engine_calls -4"
+    },
+    {
+      "lever": "vdso",
+      "realization": "vdso-off",
+      "present": true,
+      "masked_counters": {
+        "submits": 14,
+        "vdso_hits": 0,
+        "engine_calls": 11,
+        "denies": 3,
+        "transforms": 2,
+        "quarantines": 1
+      },
+      "delta": {
+        "transforms": 0,
+        "vdso_hits": -7,
+        "quarantines": 0,
+        "denies": 2,
+        "engine_calls": 5
+      },
+      "changed_outcome": true,
+      "witness": "vDSO OFF − ON: vdso_hits delta -7 (all 7 baseline local serves fall through to the engine; engine_calls delta +5) — the SAME path swap turn-tax's vdso-off arm proves"
+    }
+  ],
+  "levers_replayed": 10,
+  "attribution_per_run": 10,
+  "cheapness_note": "10 causal ablations off ONE recorded trace (L model-free replays, O(levers)); composed with K policies it is L×K replays per recording — a MEASURED 10–300× attribution-coverage multiple, NOT 10^9× (the avoided model run is counted once by the policy-replay spine; the lever-flip rides that same avoided run)."
+}
