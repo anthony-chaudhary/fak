@@ -1,106 +1,62 @@
 ---
-title: "Private comms channel (public stub)"
-description: "A public stub that names fak's private control bridge to the lab GPU servers and shows how to reach it, without leaking any host, channel, or token."
+title: "Private control channel"
+description: "The public route for authorized operators who need the private control bridge to fak's lab GPU servers."
 ---
 
-# Private comms channel (stub -> `fak-private`)
+# Reach the private control channel
 
-**This is a stub.** It names the private comms channel and tells you how to reach it.
-None of the live plumbing lives here — it is all in the **`fak-private`** companion repo.
-This file exists so the channel is *findable from the public tree* without ever leaking
-a host, a channel id, or a token into public history.
+**Audience:** an authorized fak operator who needs to run or read back work on a lab GPU
+server. Public readers can use this page to understand the boundary; the credentials,
+node map, commands, and transcript remain in the private companion repository.
 
-## What the channel is
+**Next action:** after updating your authorized `fak-private` checkout through its normal
+`main`-branch workflow, open `../fak-private/tools/dgxbridge/README.md` from the `fak`
+clone root and follow its discovery and readback procedure. Access to that private repository
+is the authorization check. If the sibling or your access is absent, stop and ask a fak lab
+maintainer for access; do not reconstruct the route from public notes.
 
-The private comms channel is the **control bridge** to the lab GPU servers. It is driven
-by private client code: you post a command, a session on the GPU server runs it, and you
-read the result back from the private transcript. It is the operator's out-of-band control
-and comms plane for the hardware-gated work (real-kernel-on-GPU witnesses, throughput
-runs) that cannot happen on the dev box.
+## What this route controls
 
-It is **private on purpose.** The connection subsystem speaks a private lab protocol and
-carries lab identifiers, so the source is scrubbed from this public repo and the commit
-gate refuses it (see [the boundary doc](gpu-server-private-boundary.md)). Public `fak` keeps only
-*scrubbed* evidence (generic "GPU server" language); the live channel stays private.
+The channel is fak's private, out-of-band control bridge to the lab GPU servers. An
+authorized operator submits a command through the bridge, a persistent server session runs
+it, and the operator reads the result from the private transcript. Use it for hardware-gated
+work such as real GPU-kernel witnesses and throughput runs.
 
-## Where it lives
+This public page is a **route, not an operating runbook**. The current commands, session
+selection rules, node map, credentials, and recovery procedure are maintained together in
+the private README named above. Following that runbook is the supported choice; copying an
+old command from a public note is not.
 
-| Thing | Location |
+## Current boundary and support
+
+| Context | Current contract |
 |---|---|
-| The bridge client (source of truth) | private repo bridge docs |
-| The companion repo | `fak-private`, normally checked out next to this clone as `../fak-private` |
-| Host / channel id / token | **never in public** — they resolve from a gitignored local env file in the private repo |
+| Mode | Private operator control; it is separate from the public `fak serve` data path. |
+| Generation | Current public `fak` plus the updated `main` version of the adjacent authorized `fak-private` checkout. The private README, not this stub or a dated public note, is the command authority. |
+| Lifecycle | Active lab-operator route. Public notes and benchmark records are evidence or history, not bridge instructions. |
+| Support | Maintained for authorized lab operators. A public-only checkout intentionally provides no live access. |
 
-## How to reach it (when `../fak-private` is available)
+The public repository may contain scrubbed outcomes in generic “GPU server” language. It
+must not contain a host, endpoint, channel identifier, token, account identifier, raw
+transcript, or staged private bridge source. The commit-time admission and public-leak gates
+enforce that boundary; see the
+[GPU-server private boundary](gpu-server-private-boundary.md) for ownership and gate details.
 
-1. Confirm the private repo is checked out alongside this one (`../fak-private`). If it is
-   not, you cannot reach the channel from here — that is the intended boundary.
-2. Read the private bridge README. It is the operating runbook: the
-   discovery/readback grammar, the persistent-vs-`default` session rule, and the exact
-   build + run commands (with the host/channel/token that must stay private).
-3. The bridge builds **inside this `fak` Go module** from the private snapshot: stage the
-   private bridge command and support package, build a throwaway bridge binary, run it to
-   enumerate the live sessions, then **remove the staged private bridge files**. The public
-   scrub must stay intact, so never commit them. The commit gate refuses the private bridge
-   path class as a backstop.
+## Public readback
 
-## Operating recipe (the part that bites — read this)
+When lab capacity is being considered for dev-worker dispatch, follow the scrub and schema
+rules in [`fleet.md`](fleet.md), then derive the public `fak.lab_readiness/v1` record with
+`fak lab readiness --from-reports --write-default --json`. Only
+`READY_FOR_DEV_WORK` admits lab-backed dispatch. The other public-safe outcomes—
+`WAIT_PRIVATE_RECOVERY`, `GATEWAY_UNREACHABLE`, `AUTH_OR_CHANNEL_BLOCKED`, and
+`INDETERMINATE`—hold dispatch while an authorized operator follows the private recovery
+runbook.
 
-Once the bridge is built from the private snapshot, these are the rules that
-separate "it works" from "I wrongly concluded the bridge is dead." They carry **no private
-values** — the host/channel/token resolve from the gitignored env file in `fak-private`.
+## Related routes
 
-**The bridge is usually LIVE but SLOW.** It is a private round-trip through a hub transcript,
-not SSH. A short probe is the single biggest trap: a status probe with the default
-`-probe-wait` (or a sub-minute `-timeout`) routinely returns `STALE (no control reply within
-timeout)` / "an operator must restart the bridge" when the shell is **actually fine**. That is
-a **false negative**, not a dead bridge.
-
-The recipe that works — probe patiently, run a real command, and do it in the background so a
-2-minute foreground cap can't truncate the round-trip into a false negative:
-
-```sh
-# Confirm a live session and pick it with one cheap real command.
-<private-bridge> -probe -probe-wait 90s -settle 12s -timeout 5m run 'echo BRIDGE_OK'
-```
-
-- **Patient flags:** `-probe-wait 90s -settle 12s -timeout 5m`. The default 15s probe-wait is
-  too short for a busy box.
-- **Run it backgrounded** (your harness's background mode) so the slow round-trip completes
-  off the foreground clock.
-- **Prefer a real command over a bare `status`** — `run 'echo … $(hostname)'` both proves
-  liveness and prints which session it picked.
-- **Multi-line output** from a single `run` can lose the async transcript tail. For anything
-  beyond a line or two, wrap the output in a **nonce sentinel** (`echo NONCE_X; …; echo
-  NONCE_END_X`) and read between the sentinels, or use the private helper's background/poll
-  mode for a long job that writes to the private scratch area.
-- **Per-box channel** is selected with `-channel <id>` (the ids live in `fak-private`'s
-  node→channel map); omitting it uses the default control channel.
-
-If `-probe` genuinely finds only STALE banners after a patient wait, *then* an operator must
-(re)start the remote control shell — a bare `default` login shell exits before delayed stdin,
-so the box needs a persistent/tmux control session.
-
-## Public readiness output
-
-Agents in the public repo should not consume raw bridge transcripts. When lab machines are
-being considered as dev-worker capacity, fold the private readback into the public
-`fak.lab_readiness/v1` record documented in [`fleet.md`](fleet.md). The only public statuses
-are:
-
-- `READY_FOR_DEV_WORK`
-- `WAIT_PRIVATE_RECOVERY`
-- `GATEWAY_UNREACHABLE`
-- `AUTH_OR_CHANNEL_BLOCKED`
-- `INDETERMINATE`
-
-Only `READY_FOR_DEV_WORK` admits lab-backed dispatch. Every other value is a public-safe
-hold: continue local work, keep existing watchers alive when appropriate, and recover the
-machine through `fak-private`. Never paste a host, endpoint, channel id, token, account id,
-raw transcript, or private path into a public issue, commit, or artifact.
-
-## See also
-
-- [GPU-server private boundary](gpu-server-private-boundary.md) — the source of truth for *what is
-  public vs private* and which gates enforce it.
-- [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — the agent entry point links here from the repo-layout map.
+- [Fleet compute nodes](fleet-compute-nodes.md) — choose the sanctioned compute target for a
+  hardware-gated task.
+- [GPU-server private boundary](gpu-server-private-boundary.md) — decide what may cross from
+  private control into public evidence.
+- [Lab development loop](fak/lab-dev-loop.md) — return a scrubbed hardware witness to the
+  public development workflow.
