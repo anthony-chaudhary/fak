@@ -140,11 +140,65 @@ func ResolveProductChannel() string {
 	return ResolveCICDReportChannel()
 }
 
+// Feeder is one member of the CI/CD reporting family — a Slack status surface that
+// publishes a number or card on a cadence and folds onto the shared CICDReportChannel
+// sink. The family was declared exactly once before this — as PROSE in the
+// CICDReportChannel doc comment — with no machine-readable roster, so the scoreboard
+// notifier, the super-loop walker (#4863), and the liveness read (#4864) each risked
+// re-hardcoding the list and silently drifting: a feeder wired into one but not another
+// goes invisible to the operator, the exact silent-gap class this epic (#4862) kills.
+// [ReportingFamily] promotes it to one exported ordered roster all three consume.
+type Feeder struct {
+	// Name is the canonical feeder name (the surface's slug — matches its leaf and its
+	// #channel), rendered in the operator's timeline. The roster order is the family's.
+	Name string
+	// ChannelEnv is this surface's dedicated FAK_<SURFACE>_CHANNEL override key. It
+	// resolves first; on a miss the surface folds onto [ResolveCICDReportChannel] — the
+	// shared sink — so the family moves together while any one surface can peel off.
+	ChannelEnv string
+	// PostCommand is the fak verb that generates and posts this surface's card — the
+	// walk's `Enter` hint for refreshing it. The three feeders whose payload is computed
+	// by their cadence workflow (capacity, backlog, releases) post through the generic
+	// `fak scoreboard post`; the rest have a dedicated verb.
+	PostCommand string
+}
+
+// reportingFamily is the canonical ordered roster — the ONE place the CI/CD reporting
+// family is enumerated. Order is the family's declaration order (scoreboard first).
+// Add or remove a feeder HERE and every consumer (notifier, walker, liveness read)
+// follows; there is deliberately no second hardcoded list to keep in sync.
+var reportingFamily = []Feeder{
+	{Name: "scoreboard", ChannelEnv: "FAK_SCOREBOARD_CHANNEL", PostCommand: "fak scoreboard post"},
+	{Name: "blockers", ChannelEnv: "FAK_BLOCKERS_CHANNEL", PostCommand: "fak blockers feed"},
+	{Name: "bench", ChannelEnv: "FAK_BENCH_CHANNEL", PostCommand: "fak bench post"},
+	{Name: "cachevalue", ChannelEnv: "FAK_CACHEVALUE_CHANNEL", PostCommand: "fak cachevalue feed"},
+	{Name: "capacity", ChannelEnv: "FAK_CAPACITY_CHANNEL", PostCommand: "fak scoreboard post"},
+	{Name: "node-usage", ChannelEnv: "FAK_NODE_USAGE_CHANNEL", PostCommand: "fak nodeusage post"},
+	{Name: "backlog", ChannelEnv: "FAK_BACKLOG_CHANNEL", PostCommand: "fak scoreboard post"},
+	{Name: "dojo", ChannelEnv: "FAK_DOJO_CHANNEL", PostCommand: "fak dojo post"},
+	{Name: "product", ChannelEnv: "FAK_PRODUCT_CHANNEL", PostCommand: "fak product post"},
+	{Name: "releases", ChannelEnv: "FAK_RELEASES_CHANNEL", PostCommand: "fak scoreboard post"},
+	{Name: "steering", ChannelEnv: "FAK_STEERING_CHANNEL", PostCommand: "fak steering report"},
+}
+
+// ReportingFamily returns a copy of the canonical ordered reporting-family roster — the
+// single source of truth for "which surfaces make up the CI/CD reporting family". The
+// notifier, the super-loop walker (#4863), and the liveness read (#4864) all enumerate
+// the family through this one accessor instead of re-hardcoding it, so a feeder can
+// never live in one consumer and be invisible to another. Returning a copy keeps the
+// roster immutable to callers.
+func ReportingFamily() []Feeder {
+	out := make([]Feeder, len(reportingFamily))
+	copy(out, reportingFamily)
+	return out
+}
+
 // CICDReportChannel is the single Slack sink every CI/CD reporting feeder publishes to
 // by default — the fleet's "put all CI/CD reporting in one channel" decision made
-// concrete. The reporting family (scoreboard, blockers, bench, cachevalue, capacity,
-// node-usage, backlog, dojo, product, releases, steering) folds status / debt / issue /
-// blocker / release reporting here, so an operator watches one timeline instead of a dozen near-silent
+// concrete. The reporting family — enumerated ONCE as [ReportingFamily], the canonical
+// roster; do NOT re-list its members here or the lists drift (#4865) — folds status /
+// debt / issue / blocker / release reporting here, so an operator watches one timeline
+// instead of a dozen near-silent
 // rooms. It is a PUBLIC, non-secret channel id in the scoreboard Slack workspace (team
 // T0BDEJF1HGB): the id grants nothing without the bot token, exactly like every other
 // public ChannelDefault. A surface still overrides it with its own dedicated
