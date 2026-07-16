@@ -196,6 +196,48 @@ func TestAgenticCorpusDeclarationPrecedesObservations(t *testing.T) {
 	}
 }
 
+func TestProspectiveV3DeclarationPrecedesObservations(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "model-acceptance-prospective-v3.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in Input
+	if err := json.Unmarshal(data, &in); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-observation discipline: a committed declaration fixes prompts, exact
+	// IDs, tiers, repetitions, sentinel grammar, thresholds, replacement and
+	// stopping rules BEFORE any provider output. It must carry zero runs so a
+	// fresh post-reset campaign cannot silently reuse retrospective evidence.
+	if in.Corpus.ID != "top3-prospective-sentinel-v3" || len(in.Runs) != 0 {
+		t.Fatalf("declaration=%+v", in)
+	}
+	if strings.TrimSpace(in.Corpus.ReplacementRules) == "" || strings.TrimSpace(in.Corpus.StoppingRule) == "" {
+		t.Fatalf("structured campaign missing replacement/stopping rule: %+v", in.Corpus)
+	}
+	classes := map[string]bool{}
+	for _, task := range in.Corpus.Tasks {
+		if task.ResultMatch != "sentinel_line" {
+			t.Fatalf("task %s is not a structured sentinel task", task.ID)
+		}
+		classes[task.Class] = true
+	}
+	if len(classes) < 2 {
+		t.Fatalf("declaration needs >=2 production-shaped task classes, got %d", len(classes))
+	}
+	// With no runs the fold must fail closed to HOLD for every exact model with
+	// zero samples: a declaration is never itself capability evidence.
+	got := Evaluate(in)
+	if got.Verdict != Hold || len(got.Models) != 3 {
+		t.Fatalf("decision=%+v", got)
+	}
+	for _, model := range got.Models {
+		if model.Samples != 0 || len(model.Reasons) == 0 {
+			t.Fatalf("model=%+v", model)
+		}
+	}
+}
+
 func TestResultMatchesSentinelLineOnly(t *testing.T) {
 	task := Task{Expected: "FAK_ACCEPTANCE_RESULT=OK", ResultMatch: "sentinel_line"}
 	for _, result := range []string{
