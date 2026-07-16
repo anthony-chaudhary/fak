@@ -306,18 +306,12 @@ func (s *Store) ReapIntents(ctx context.Context, now time.Time) (reaped []string
 	if lerr != nil {
 		return nil, lerr
 	}
-	var errs []string
-	for _, key := range expired {
-		if rerr := s.deleteRef(ctx, refPrefix+intentPrefix+key); rerr != nil {
-			errs = append(errs, fmt.Sprintf("reap intent %s: %v", key, rerr))
-			continue
-		}
-		reaped = append(reaped, key)
-	}
-	if len(errs) > 0 {
-		return reaped, fmt.Errorf("leaseref: %s", strings.Join(errs, "; "))
-	}
-	return reaped, nil
+	// Same batched-delete-with-per-ref-fallback path as Reap/ReapSessions: one
+	// `git update-ref --stdin` transaction for the whole expired set instead of one
+	// spawn per key. refOf and the fallback deleter both address refs/fak/locks/intent-<key>.
+	refOf := func(key string) string { return refPrefix + intentPrefix + key }
+	return s.reapRefs(ctx, expired, "reap intent", refOf,
+		func(ctx context.Context, key string) error { return s.deleteRef(ctx, refOf(key)) })
 }
 
 // readIntentRef reads the blob an intent ref points at and unmarshals the record. The

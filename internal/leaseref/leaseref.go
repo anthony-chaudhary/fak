@@ -70,6 +70,15 @@ const refPrefix = "refs/fak/locks/"
 // via code, not err. Injectable so tests drive the algorithm with canned evidence.
 type Runner func(ctx context.Context, dir string, args ...string) (stdout string, code int, err error)
 
+// StdinRunner is a Runner that ALSO feeds stdin to git — the seam the BATCHED delete
+// needs, since `git update-ref --stdin` reads its command list from stdin and the plain
+// Runner carries none (the same reason writeBlob routes a blob through a temp file). The
+// (stdout, code, err) contract is identical to Runner: err is non-nil ONLY when git could
+// not be EXECUTED. It is OPTIONAL — a Store built with NewWithRunner leaves it nil and the
+// batched reaper degrades to the proven per-ref delete loop, so no caller is forced to
+// wire a second seam.
+type StdinRunner func(ctx context.Context, dir, stdin string, args ...string) (stdout string, code int, err error)
+
 // Record is one lease persisted under refs/fak/locks/<id>. It carries the same shape
 // safecommit and gitgate.CheckCollectiveCommit already reason about — the leased tree
 // globs, the holder identity, the acquisition time, and a TTL — just serialized to a
@@ -148,21 +157,35 @@ func (r Record) LastActive() dormancy.Stamp {
 // repo to operate in ("" = git's own discovery from the process cwd).
 type Store struct {
 	run Runner
-	dir string
+	// runStdin is the OPTIONAL stdin-carrying seam the batched `git update-ref --stdin`
+	// delete rides (reap.go). nil on a Store built with NewWithRunner, in which case the
+	// reaper falls back to the per-ref delete loop — same result, one process spawn per
+	// ref instead of one for the whole backlog. New/NewInDir wire the real gitStdinRunner.
+	runStdin StdinRunner
+	dir      string
 }
 
 // New is the real-git lease store (git discovers the repo from the process cwd).
-func New() *Store { return &Store{run: gitRunner} }
+func New() *Store { return &Store{run: gitRunner, runStdin: gitStdinRunner} }
 
 // NewInDir is the real-git lease store operating in dir — the repo whose
 // refs/fak/locks/* namespace it reads and writes. dir == "" is identical to New()
 // (git discovers the repo from the process cwd). The CLI surface uses this to honor
 // a --dir flag without exposing the unexported real-git runner.
-func NewInDir(dir string) *Store { return &Store{run: gitRunner, dir: dir} }
+func NewInDir(dir string) *Store { return &Store{run: gitRunner, runStdin: gitStdinRunner, dir: dir} }
 
 // NewWithRunner injects a Runner + dir — the SAME seam as the production path, so a
-// test exercises the whole acquire/read/reap algorithm with no real git.
+// test exercises the whole acquire/read/reap algorithm with no real git. The batched
+// delete's stdin seam is left nil, so the reaper uses the per-ref delete fallback; a
+// test that drives the batched path uses NewWithStdinRunner instead.
 func NewWithRunner(r Runner, dir string) *Store { return &Store{run: r, dir: dir} }
+
+// NewWithStdinRunner injects BOTH the plain Runner and the stdin-carrying StdinRunner, so
+// a test drives the BATCHED delete path (git update-ref --stdin) with no real git — the
+// same shape NewWithRunner gives the single-ref path.
+func NewWithStdinRunner(r Runner, sr StdinRunner, dir string) *Store {
+	return &Store{run: r, runStdin: sr, dir: dir}
+}
 
 // validID rejects an id that cannot be a single ref-path segment under refs/fak/locks/.
 // It must be non-empty, carry no path separator (so it stays ONE segment, never escaping

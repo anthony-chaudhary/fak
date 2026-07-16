@@ -109,6 +109,48 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 	return "", 0, nil
 }
 
+// runStdin models `git update-ref --stdin`: it records the argv (so a test can prove the
+// BATCHED path issued exactly one process, not one spawn per ref) and applies each
+// `delete <ref>` command from stdin idempotently — a missing ref is a no-op that never
+// aborts the transaction, matching the real-git no-<oldvalue> delete this package relies on.
+func (f *fakeGit) runStdin(ctx context.Context, dir, stdin string, args ...string) (string, int, error) {
+	f.calls = append(f.calls, args)
+	if len(args) >= 2 && args[0] == "update-ref" && args[1] == "--stdin" {
+		for _, line := range strings.Split(strings.TrimSpace(stdin), "\n") {
+			fields := strings.Fields(strings.TrimSpace(line))
+			if len(fields) == 2 && fields[0] == "delete" {
+				delete(f.refs, fields[1]) // idempotent: deleting an absent ref is a no-op
+			}
+		}
+		return "", 0, nil
+	}
+	return "", 0, nil
+}
+
+// stdinDeleteCalls counts the `git update-ref --stdin` (batched) invocations recorded on
+// the fake, the witness that the reaper drained the backlog in ONE process spawn.
+func (f *fakeGit) stdinDeleteCalls() int {
+	n := 0
+	for _, c := range f.calls {
+		if len(c) >= 2 && c[0] == "update-ref" && c[1] == "--stdin" {
+			n++
+		}
+	}
+	return n
+}
+
+// perRefDeleteCalls counts the serial `git update-ref -d <ref>` spawns — the per-ref cost
+// #4990 root cause #2 removes. Zero of these after a batched reap is the fix's witness.
+func (f *fakeGit) perRefDeleteCalls() int {
+	n := 0
+	for _, c := range f.calls {
+		if len(c) >= 2 && c[0] == "update-ref" && c[1] == "-d" {
+			n++
+		}
+	}
+	return n
+}
+
 // isAllZeros reports whether s is a non-empty all-zeros object id — git's update-ref
 // "must not exist" CAS sentinel. Used by the fake's update-ref to model the create CAS.
 func isAllZeros(s string) bool {
