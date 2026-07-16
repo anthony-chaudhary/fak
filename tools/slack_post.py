@@ -260,18 +260,20 @@ def post(
     token: str,
     api_base: str = DEFAULT_API_BASE,
     thread_ts: str | None = None,
+    update_ts: str | None = None,
     timeout: float = 30.0,
     transport: Transport | None = None,
 ) -> dict[str, Any]:
-    """POST one chat.postMessage. Pure given an injected ``transport``; never raises —
-    a transport/Slack failure IS the answer the caller wants to log. Returns
-    {ok, channel, ts?, error?}."""
+    """POST one Slack message, or update ``update_ts`` in place. Pure given an
+    injected ``transport``; never raises. Returns {ok, channel, ts?, error?}."""
     base = (api_base or DEFAULT_API_BASE)
     if not base.endswith("/"):
         base += "/"
-    url = base + "chat.postMessage"
+    url = base + ("chat.update" if update_ts else "chat.postMessage")
     payload: dict[str, Any] = {"channel": channel, "text": text}
-    if thread_ts:
+    if update_ts:
+        payload["ts"] = update_ts
+    elif thread_ts:
         payload["thread_ts"] = thread_ts
     body = json.dumps(payload).encode("utf-8")
     headers = {
@@ -391,6 +393,7 @@ def send(
     dry_run: bool = False,
     api_base: str = "",
     thread_ts: str | None = None,
+    update_ts: str | None = None,
     timeout: float = 30.0,
     transport: Transport | None = None,
     start: Path | None = None,
@@ -402,8 +405,8 @@ def send(
     This is the importer entry point (dispatch_status / fleet_top / the watchdogs call
     it). It NEVER raises and always returns a typed verdict an operator can log:
 
-        {schema, posted, dry_run, channel, channel_source, token_set, token_source,
-         ts?, error?, skipped?}
+        {schema, posted, updated, dry_run, channel, channel_source, token_set,
+         token_source, ts?, error?, skipped?}
 
     ``skipped`` is set (and ``posted`` False) when a precondition is missing — no channel
     resolved or no token resolved — so a misconfigured tick degrades to a clear "did
@@ -421,6 +424,7 @@ def send(
     base = {
         "schema": SCHEMA,
         "posted": False,
+        "updated": False,
         "dry_run": dry_run,
         "channel": chan,
         "channel_source": chan_src,
@@ -455,9 +459,11 @@ def send(
         return base
 
     result = post(body, channel=chan, token=tok, api_base=(api_base or DEFAULT_API_BASE),
-                  thread_ts=thread_ts, timeout=timeout, transport=transport)
+                  thread_ts=thread_ts, update_ts=update_ts, timeout=timeout,
+                  transport=transport)
     base["posted"] = bool(result.get("ok"))
-    base["ts"] = result.get("ts")
+    base["updated"] = bool(result.get("ok") and update_ts)
+    base["ts"] = result.get("ts") or (update_ts if result.get("ok") else None)
     if not result.get("ok"):
         base["error"] = result.get("error")
     if result.get("channel"):

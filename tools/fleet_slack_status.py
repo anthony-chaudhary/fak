@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -898,24 +900,75 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     return "\n".join(line for line in lines if line)
 
 
+def _status_state_path(root: Path) -> Path:
+    return root / ".git" / "fak" / "fleet-slack-status.json"
+
+
+def _read_status_state(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_status_state(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temp.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+    temp.replace(path)
+
+
 def post_rollup(dispatch_payload: dict[str, Any] | None,
                 fleet_snap: dict[str, Any] | None, *,
                 channel: str = "", dry_run: bool = False,
-                transport: Any | None = None) -> dict[str, Any]:
+                transport: Any | None = None, state_path: Path | None = None,
+                now: float | None = None, max_silence_s: float = 12 * 60 * 60) -> dict[str, Any]:
+    """Keep one durable fleet-status message instead of appending a new card each tick.
+
+    Identical bodies make no Slack call. Changed bodies update the prior message in place;
+    a bounded 12-hour refresh retains a transport/liveness witness without channel churn.
+    """
     try:
         import slack_post  # sibling module in tools/
     except Exception as exc:  # noqa: BLE001
         return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
-    return slack_post.send(rollup_text(dispatch_payload, fleet_snap), channel=channel,
-                           dry_run=dry_run, transport=transport,
-                           include_signal_noise=False)
+    text = rollup_text(dispatch_payload, fleet_snap)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    state = _read_status_state(state_path) if state_path else {}
+    stamp = dt.datetime.now(dt.timezone.utc).timestamp() if now is None else now
+    prior_ts = str(state.get("ts") or "")
+    prior_channel = str(state.get("channel") or "")
+    unchanged = state.get("sha256") == digest
+    fresh = stamp - float(state.get("sent_at") or 0) < max_silence_s
+    if unchanged and fresh and prior_ts and not dry_run:
+        return {"schema": "fak-slack-post/1", "posted": False, "updated": False,
+                "dry_run": dry_run, "channel": prior_channel, "ts": prior_ts,
+                "error": None, "skipped": "unchanged", "content_sha256": digest}
+
+    verdict = slack_post.send(text, channel=channel, dry_run=dry_run, transport=transport,
+                              update_ts=prior_ts or None, include_signal_noise=False)
+    # A human may delete the status card or Slack may age it out. Recreate exactly one
+    # top-level message only when the stored update target is gone. Other failures remain
+    # failures: retrying them as posts could duplicate a still-valid status card.
+    if prior_ts and not dry_run and not verdict.get("posted") and str(verdict.get("error")) in {
+            "message_not_found", "channel_not_found"}:
+        verdict = slack_post.send(text, channel=channel, dry_run=False, transport=transport,
+                                  include_signal_noise=False)
+        verdict["recreated"] = True
+    verdict["content_sha256"] = digest
+    if verdict.get("posted") and not dry_run and state_path:
+        _write_status_state(state_path, {"schema": "fleet-slack-status-state/1",
+            "channel": verdict.get("channel") or prior_channel,
+            "ts": verdict.get("ts") or prior_ts, "sha256": digest, "sent_at": stamp})
+    return verdict
 
 
 def run(root: Path, *, channel: str = "", dry_run: bool = False, fast: bool = False,
         window_h: float = 10.0, do_dispatch: bool = True,
         do_fleet: bool = True, separate: bool = False,
         history_path: str | None = None, trend_window: int = 24,
-        transport: Any | None = None) -> dict[str, Any]:
+        transport: Any | None = None, state_path: Path | None = None) -> dict[str, Any]:
     """Post one fleet roll-up by default. ``separate`` keeps the legacy two-message
     mode for operators who explicitly want separate cards."""
     out: dict[str, Any] = {"schema": "fleet-slack-status/1", "workspace": str(root),
@@ -949,9 +1002,11 @@ def run(root: Path, *, channel: str = "", dry_run: bool = False, fast: bool = Fa
         if isinstance(fs, dict) else None
     )
     out["rollup"] = post_rollup(dp, fs, channel=channel, dry_run=dry_run,
-                                transport=transport)
+                                transport=transport,
+                                state_path=state_path or _status_state_path(root))
     out["ok"] = bool((out["rollup"] or {}).get("posted")
-                     or (out["rollup"] or {}).get("dry_run"))
+                     or (out["rollup"] or {}).get("dry_run")
+                     or (out["rollup"] or {}).get("skipped") == "unchanged")
     return out
 
 

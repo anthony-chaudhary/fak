@@ -8,8 +8,12 @@ network — only the fold (which posts ran, and the combined ok verdict) is pinn
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -477,6 +481,64 @@ class PostRollupTest(unittest.TestCase):
         self.assertIn("agent sessions:", text)
         self.assertNotIn("*dispatch scheduler:*", text)
         self.assertNotIn("*agent session health", text)
+
+
+class StatusTrafficTest(unittest.TestCase):
+    def _payloads(self):
+        return ({"verdict": "READY_TO_GROW", "ok": True},
+                {"sessions": {"total": 4}, "system": {"verdict": "HEALTHY"}})
+
+    def test_first_post_then_changed_update_then_unchanged_suppression(self):
+        dispatch, fleet = self._payloads()
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append((url, json.loads(body)))
+            return 200, json.dumps({"ok": True, "channel": "C1", "ts": "42.7"})
+
+        status = load()
+        status.rollup_text = lambda d, f: f"status: {d['verdict']}"
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+                os.environ, {"FAK_DISPATCH_TOKEN": "xoxb-test",
+                             "FAK_DISPATCH_CHANNEL": "C1"}, clear=True):
+            state = Path(td) / "status.json"
+            first = status.post_rollup(dispatch, fleet, transport=transport,
+                                       state_path=state, now=1000)
+            dispatch["verdict"] = "NEEDS_YOU"
+            changed = status.post_rollup(dispatch, fleet, transport=transport,
+                                         state_path=state, now=1100)
+            unchanged = status.post_rollup(dispatch, fleet, transport=transport,
+                                           state_path=state, now=1200)
+
+        self.assertTrue(first["posted"])
+        self.assertFalse(first["updated"])
+        self.assertTrue(calls[0][0].endswith("/chat.postMessage"))
+        self.assertTrue(changed["posted"])
+        self.assertTrue(changed["updated"])
+        self.assertTrue(calls[1][0].endswith("/chat.update"))
+        self.assertEqual("42.7", calls[1][1]["ts"])
+        self.assertEqual("unchanged", unchanged["skipped"])
+        self.assertEqual(2, len(calls), "unchanged tick must make zero Slack API calls")
+
+    def test_max_silence_refreshes_by_update_not_new_message(self):
+        dispatch, fleet = self._payloads()
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append(url)
+            return 200, json.dumps({"ok": True, "channel": "C1", "ts": "42.7"})
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
+                os.environ, {"FAK_DISPATCH_TOKEN": "xoxb-test",
+                             "FAK_DISPATCH_CHANNEL": "C1"}, clear=True):
+            state = Path(td) / "status.json"
+            load().post_rollup(dispatch, fleet, transport=transport, state_path=state, now=0)
+            refreshed = load().post_rollup(dispatch, fleet, transport=transport,
+                                        state_path=state, now=13 * 60 * 60)
+
+        self.assertTrue(refreshed["updated"])
+        self.assertTrue(calls[-1].endswith("/chat.update"))
+        self.assertEqual(2, len(calls))
 
 
 class ClassifySignalNoiseTest(unittest.TestCase):

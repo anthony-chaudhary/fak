@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -136,6 +137,23 @@ class SendTests(unittest.TestCase):
             self.assertIn("dispatch is green", call["body"]["text"])
             self.assertIn("S/N self-score", call["body"]["text"])
             self.assertIn("signal_noise", res)
+
+    def test_send_update_uses_chat_update_without_new_top_level_message(self):
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append({"url": url, "body": json.loads(body)})
+            return 200, json.dumps({"ok": True, "channel": "C1", "ts": "123.4"})
+
+        with patch.dict(os.environ, {"FAK_DISPATCH_TOKEN": "xoxb-test",
+                                     "FAK_DISPATCH_CHANNEL": "C1"}, clear=True):
+            result = load().send("new state", update_ts="123.4", transport=transport)
+
+        self.assertTrue(result["posted"])
+        self.assertTrue(result["updated"])
+        self.assertEqual(1, len(calls))
+        self.assertTrue(calls[0]["url"].endswith("/chat.update"))
+        self.assertEqual("123.4", calls[0]["body"]["ts"])
 
     def test_code_wraps_in_fence(self):
         import tempfile
