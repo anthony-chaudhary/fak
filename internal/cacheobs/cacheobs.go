@@ -29,6 +29,16 @@
 //     share SELF-INFLICTED by admission evicting a still-warm entry is booked separately
 //     from genuine cold/capacity misses, so eviction pressure cannot masquerade as low
 //     cache value.
+//   - the eligibility-filtered denominator (#3391): eligible prompt tokens exclude each
+//     turn's always-uncacheable share (the cold first prefill into an empty cache, or a
+//     tap with prefix reuse disabled), so reused/eligible judges the cache only on tokens
+//     it could possibly have served — the raw prompt denominator counts the unavoidable
+//     cold head against the cache and unfairly depresses the hit-rate.
+//
+// ObserveLabeled (labeled.go) additionally attributes a turn to its (model, tenant)
+// series (#3391) so a shared gateway can tell WHOSE traffic earns the reuse. Label rows
+// book the SAME clamped per-turn values as the globals, so summing any column across
+// LabeledSnapshot rows always reconciles exactly with the global Stats counter.
 package cacheobs
 
 import (
@@ -69,6 +79,18 @@ type Observer struct {
 	// the prefix index at lookup time, whether or not eviction/admission then let them
 	// be served. Always >= reusedTokens (a served token was necessarily matched).
 	cacheableTokens uint64
+	// eligibleTokens is the eligibility-filtered denominator (#3391): prompt tokens that
+	// COULD have been served from the cached KV prefix — the prompt total minus each
+	// turn's always-uncacheable share (the cold first prefill into an empty cache, or a
+	// tap with prefix reuse disabled). reused <= cacheable <= eligible <= prompt by
+	// construction, so reused/eligible is the fair hit-rate the raw denominator depresses.
+	// Legacy taps carry no eligibility witness and book their whole prompt as eligible,
+	// degrading the filtered ratio to the raw one — never inflating it.
+	eligibleTokens uint64
+	// byLabel keys the #3391 per-(model, tenant) breakdown (labeled.go). Rows book the
+	// same clamped per-turn values as the globals above, so cross-label sums always
+	// reconcile; taps without labels land on the ("unknown","unknown") row.
+	byLabel map[Labels]*labelTotals
 	// preemptedReuseLostTokens / coldMissTokens split every turn's missed prompt tokens
 	// (promptTokens - reusedTokens) by cause (#3895, vLLM's preempted_* counter split):
 	// preempted is the SELF-INFLICTED share — admission evicted a still-warm entry and
@@ -112,9 +134,12 @@ func (o *Observer) Observe(promptTokens, reusedPrefixTokens int) {
 // admission loss. Regime buckets and the histogram stay keyed on the REALIZED ratio —
 // the split adds the lookup rate beside them, it does not redefine them. With no
 // eviction witness the turn's missed tokens are attributed to the cold bucket (#3895):
-// a tap that KNOWS the miss was self-inflicted uses ObservePreempted instead.
+// a tap that KNOWS the miss was self-inflicted uses ObservePreempted instead. With no
+// eligibility witness the whole prompt books as eligible (#3391) — the filtered ratio
+// degrades to the raw one; a tap that knows the turn's uncacheable share uses
+// ObserveLabeled instead.
 func (o *Observer) ObserveSplit(promptTokens, cacheablePrefixTokens, reusedPrefixTokens int) {
-	o.observeAttributed(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, 0)
+	o.observeAttributed(Labels{}, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, 0, promptTokens)
 }
 
 // ObservePreempted records one served in-kernel turn exactly like ObserveSplit and
@@ -131,13 +156,22 @@ func (o *Observer) ObserveSplit(promptTokens, cacheablePrefixTokens, reusedPrefi
 // CacheabilityRatio/ReuseRatio aggregates accumulate exactly as ObserveSplit — the
 // attribution splits the miss, it never changes the aggregate's meaning.
 func (o *Observer) ObservePreempted(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens int) {
-	o.observeAttributed(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens)
+	o.observeAttributed(Labels{}, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens, promptTokens)
 }
 
 // observeAttributed is the shared accumulation core behind Observe / ObserveSplit /
-// ObservePreempted: the #3390 lookup-vs-realized clamps and counters, plus the #3895
-// miss-cause attribution (preempted vs cold) of the turn's un-reused prompt tokens.
-func (o *Observer) observeAttributed(promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens int) {
+// ObservePreempted / ObserveLabeled: the #3390 lookup-vs-realized clamps and counters,
+// the #3895 miss-cause attribution (preempted vs cold) of the turn's un-reused prompt
+// tokens, and the #3391 eligibility denominator plus (model, tenant) series row. Taps
+// with no eligibility witness pass eligiblePromptTokens == promptTokens, degrading the
+// filtered ratio to the raw one (an over-counted denominator can only UNDER-state the
+// filtered hit-rate, never inflate it). eligiblePromptTokens is clamped into
+// [cacheablePrefixTokens, promptTokens] AFTER the #3390 clamps: a token that matched the
+// index at lookup was demonstrably cacheable, hence eligible — so even a stale witness
+// (e.g. a prewarmed tree serving a "first" prefill) can never push reused/eligible
+// above 1. The label row books the SAME clamped values as the globals, so cross-label
+// sums always reconcile (the never-desync invariant).
+func (o *Observer) observeAttributed(labels Labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens, eligiblePromptTokens int) {
 	if o == nil || promptTokens <= 0 {
 		return
 	}
@@ -153,6 +187,12 @@ func (o *Observer) observeAttributed(promptTokens, cacheablePrefixTokens, reused
 	if cacheablePrefixTokens > promptTokens {
 		cacheablePrefixTokens = promptTokens
 	}
+	if eligiblePromptTokens < cacheablePrefixTokens {
+		eligiblePromptTokens = cacheablePrefixTokens
+	}
+	if eligiblePromptTokens > promptTokens {
+		eligiblePromptTokens = promptTokens
+	}
 	missTokens := promptTokens - reusedPrefixTokens
 	if preemptedLostTokens < 0 {
 		preemptedLostTokens = 0
@@ -160,14 +200,21 @@ func (o *Observer) observeAttributed(promptTokens, cacheablePrefixTokens, reused
 	if preemptedLostTokens > missTokens {
 		preemptedLostTokens = missTokens
 	}
+	labels = labels.normalized()
 	ratio := float64(reusedPrefixTokens) / float64(promptTokens)
 	o.mu.Lock()
 	o.turns = saturatingAddU64(o.turns, 1)
 	o.promptTokens = saturatingAddU64(o.promptTokens, uint64(promptTokens))
 	o.reusedTokens = saturatingAddU64(o.reusedTokens, uint64(reusedPrefixTokens))
 	o.cacheableTokens = saturatingAddU64(o.cacheableTokens, uint64(cacheablePrefixTokens))
+	o.eligibleTokens = saturatingAddU64(o.eligibleTokens, uint64(eligiblePromptTokens))
 	o.preemptedReuseLostTokens = saturatingAddU64(o.preemptedReuseLostTokens, uint64(preemptedLostTokens))
 	o.coldMissTokens = saturatingAddU64(o.coldMissTokens, uint64(missTokens-preemptedLostTokens))
+	lt := o.labelTotalsLocked(labels)
+	lt.turns = saturatingAddU64(lt.turns, 1)
+	lt.promptTokens = saturatingAddU64(lt.promptTokens, uint64(promptTokens))
+	lt.eligibleTokens = saturatingAddU64(lt.eligibleTokens, uint64(eligiblePromptTokens))
+	lt.reusedTokens = saturatingAddU64(lt.reusedTokens, uint64(reusedPrefixTokens))
 	switch {
 	case ratio >= FrozenFloor:
 		o.frozen = saturatingAddU64(o.frozen, 1)
@@ -208,6 +255,13 @@ type Stats struct {
 	// matched the prefix index at lookup time, before eviction/admission decided what
 	// was servable. Always >= ReusedTokens; equal when every tap lacked lookup info.
 	CacheableTokens uint64
+	// EligibleTokens is the eligibility-filtered denominator (#3391): prompt tokens that
+	// COULD have been served from the cached KV prefix — the prompt total minus each
+	// turn's always-uncacheable share (the cold first prefill into an empty cache, or a
+	// tap with prefix reuse disabled). ReusedTokens <= CacheableTokens <= EligibleTokens
+	// <= PromptTokens by construction; equal to PromptTokens when every tap lacked an
+	// eligibility witness.
+	EligibleTokens uint64
 	// PreemptedReuseLostTokens is the SELF-INFLICTED share of the missed prompt tokens
 	// (#3895, vLLM's preempted_* counter split): tokens a turn had to recompute because
 	// admission evicted a still-warm entry, as witnessed by an ObservePreempted tap.
@@ -232,6 +286,13 @@ type Stats struct {
 	// rate. CacheabilityRatio - ReuseRatio is the token-weighted rate lost to eviction/
 	// admission. 0 when no turns have prompt tokens yet, like ReuseRatio.
 	CacheabilityRatio float64
+	// EligibleReuseRatio is reusedTokens/eligibleTokens — the eligibility-filtered fair
+	// hit-rate (#3391). ReuseRatio counts the always-uncacheable cold head in its
+	// denominator and so under-states the cache's performance on the tokens it could
+	// possibly have served; this ratio excludes that head. Always >= ReuseRatio, and
+	// equal when no tap carried an eligibility witness. 0 when no eligible tokens have
+	// been observed yet (an idle or reuse-disabled process never reports a phantom ratio).
+	EligibleReuseRatio float64
 	// ReuseHistTurns[i] counts turns whose per-turn ratio fell in
 	// (ReuseRatioBuckets[i-1], ReuseRatioBuckets[i]] (per-bucket, non-cumulative).
 	// Every observed turn is counted, so the values sum to Turns.
@@ -316,6 +377,7 @@ func (o *Observer) Snapshot() Stats {
 		PromptTokens:             o.promptTokens,
 		ReusedTokens:             o.reusedTokens,
 		CacheableTokens:          o.cacheableTokens,
+		EligibleTokens:           o.eligibleTokens,
 		PreemptedReuseLostTokens: o.preemptedReuseLostTokens,
 		ColdMissTokens:           o.coldMissTokens,
 		FrozenTurns:              o.frozen,
@@ -326,6 +388,9 @@ func (o *Observer) Snapshot() Stats {
 	if o.promptTokens > 0 {
 		s.ReuseRatio = float64(o.reusedTokens) / float64(o.promptTokens)
 		s.CacheabilityRatio = float64(o.cacheableTokens) / float64(o.promptTokens)
+	}
+	if o.eligibleTokens > 0 {
+		s.EligibleReuseRatio = float64(o.reusedTokens) / float64(o.eligibleTokens)
 	}
 	return s
 }
