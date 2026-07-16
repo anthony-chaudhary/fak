@@ -31,12 +31,24 @@ type HarnessRequirements struct {
 
 // SessionSubject carries only signals needed to choose session lifecycle. The
 // caller owns persistence and compaction; this package chooses, it does not execute.
+//
+// Portability has two channels, and the descriptor channel wins. When both Source
+// and Target descriptors are supplied, eligibility is COMPUTED from them by
+// RouteCompat — a caller can no longer assert Portable over a move whose state
+// could never survive. The Portable / PreserveContinuity booleans remain the
+// fallback for callers that have not yet built a descriptor.
 type SessionSubject struct {
 	ID                 string  `json:"id,omitempty"`
 	PreserveContinuity bool    `json:"preserve_continuity,omitempty"`
 	Portable           bool    `json:"portable,omitempty"`
 	ContextUtilization float64 `json:"context_utilization,omitempty"`
 	CompactAt          float64 `json:"compact_at,omitempty"`
+
+	// Source describes the existing session's own execution envelope; Target
+	// describes the envelope it would move into. Both must be present to compute
+	// eligibility; either alone leaves the boolean fallback in charge.
+	Source *SessionDescriptor `json:"source,omitempty"`
+	Target *SessionDescriptor `json:"target,omitempty"`
 }
 
 // Request is the cross-plane subject routed as one unit.
@@ -54,10 +66,14 @@ type HarnessDecision struct {
 }
 
 // SessionDecision is declarative: downstream session machinery performs Action.
+// Compat, when present, is the field-by-field compatibility record the Action was
+// derived from; it is nil when the caller supplied no descriptor pair and the
+// boolean fallback decided.
 type SessionDecision struct {
-	Action SessionAction `json:"action"`
-	ID     string        `json:"id,omitempty"`
-	Reason string        `json:"reason"`
+	Action SessionAction   `json:"action"`
+	ID     string          `json:"id,omitempty"`
+	Compat *CompatResult `json:"compat,omitempty"`
+	Reason string          `json:"reason"`
 }
 
 // Decision is the execution envelope. Keeping the three decisions visible avoids
@@ -78,10 +94,14 @@ func Route(req Request, profiles []harnessprofile.HarnessProfile, manifest model
 	if err != nil {
 		return Decision{}, err
 	}
+	session, err := routeSession(req.Session)
+	if err != nil {
+		return Decision{}, err
+	}
 	return Decision{
 		Harness: harness,
 		Model:   manifest.Route(req.Model),
-		Session: routeSession(req.Session),
+		Session: session,
 	}, nil
 }
 
@@ -138,22 +158,51 @@ func normalize(s string) string {
 	return s
 }
 
-func routeSession(s SessionSubject) SessionDecision {
+func routeSession(s SessionSubject) (SessionDecision, error) {
 	if s.ID == "" {
-		return SessionDecision{Action: SessionStart, Reason: "no prior session was supplied"}
+		return SessionDecision{Action: SessionStart, Reason: "no prior session was supplied"}, nil
 	}
 	compactAt := s.CompactAt
 	if compactAt <= 0 {
 		compactAt = 0.80
 	}
+	if s.Source != nil && s.Target != nil {
+		return routeByDescriptor(s, compactAt)
+	}
 	if s.PreserveContinuity {
 		if s.ContextUtilization >= compactAt {
-			return SessionDecision{Action: SessionCompactResume, ID: s.ID, Reason: "continuity required and context reached compaction threshold"}
+			return SessionDecision{Action: SessionCompactResume, ID: s.ID, Reason: "continuity required and context reached compaction threshold"}, nil
 		}
-		return SessionDecision{Action: SessionResume, ID: s.ID, Reason: "continuity required and context remains below compaction threshold"}
+		return SessionDecision{Action: SessionResume, ID: s.ID, Reason: "continuity required and context remains below compaction threshold"}, nil
 	}
 	if s.Portable {
-		return SessionDecision{Action: SessionFork, ID: s.ID, Reason: "state is portable and continuity is not required"}
+		return SessionDecision{Action: SessionFork, ID: s.ID, Reason: "state is portable and continuity is not required"}, nil
 	}
-	return SessionDecision{Action: SessionStart, Reason: "prior state is neither required nor portable"}
+	return SessionDecision{Action: SessionStart, Reason: "prior state is neither required nor portable"}, nil
+}
+
+// routeByDescriptor derives the lifecycle from computed compatibility
+// rather than the caller's booleans. Compaction stays orthogonal: it is a property
+// of how full the context is, so it refines an eligible resume into a
+// compact_resume without touching the portability verdict.
+func routeByDescriptor(s SessionSubject, compactAt float64) (SessionDecision, error) {
+	source := *s.Source
+	if source.ID == "" {
+		source.ID = s.ID
+	}
+	compat, err := RouteCompat(source, *s.Target)
+	if err != nil {
+		return SessionDecision{}, err
+	}
+	dec := SessionDecision{Action: compat.Action, ID: compat.ID, Compat: &compat, Reason: compat.Reason}
+	if compat.Refused {
+		// A refused move carries no prior state, so it names no session to reopen.
+		dec.ID = ""
+		return dec, nil
+	}
+	if compat.Action == SessionResume && s.ContextUtilization >= compactAt {
+		dec.Action = SessionCompactResume
+		dec.Reason = compat.Reason + "; context reached the compaction threshold"
+	}
+	return dec, nil
 }
